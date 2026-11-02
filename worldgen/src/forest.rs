@@ -1,6 +1,6 @@
 //! The forest (forest.ts): an autumn forest valley, endless, on the
-//! generator framework. Ported step for step, random numbers drawn in the
-//! same order, so it comes out the same site for site.
+//! generator framework. Ported from forest.ts step for step; its numbers
+//! are moving to integers (docs/generators.md).
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -11,7 +11,7 @@ use crate::generator::{
 };
 use crate::grid::Box3;
 use crate::js::{self, round};
-use crate::noise::{Rng, fbm, hash, smoothstep, value_noise};
+use crate::noise::{Rng, fbm, hash, hash64, smoothstep, stream, unit, value_noise};
 
 /** Metres per lattice unit (UNIT_SIZE in forest.ts). */
 pub const UNIT_SIZE: f64 = 0.125;
@@ -136,7 +136,7 @@ struct Column {
 
 /** The forest's state shared by its layers: what it knows about any column, from the seed alone. */
 struct Forest {
-    seed: f64,
+    seed: u64,
     path_phase: f64,
     spawn: [i64; 3],
     /** Recent ground heights, by a hash of (x, z): x, z, height. */
@@ -144,8 +144,8 @@ struct Forest {
 }
 
 impl Forest {
-    fn s(&self, k: f64) -> f64 {
-        js::int32(self.seed) as f64 + k * 1013904223.0
+    fn s(&self, k: u64) -> u64 {
+        stream(self.seed, k)
     }
 
     /** Path centre line, in metres. */
@@ -155,9 +155,9 @@ impl Forest {
 
     fn ground_metres(&self, xm: f64, zm: f64) -> f64 {
         let from_path = (xm - self.path_x(zm)).abs();
-        let hills = (fbm(self.s(2.0), xm / 45.0, zm / 45.0, 4) - 0.5) * 10.0 + (value_noise(self.s(3.0), xm / 6.0, zm / 6.0) - 0.5) * 0.8;
+        let hills = (fbm(self.s(2), xm / 45.0, zm / 45.0, 4) - 0.5) * 10.0 + (value_noise(self.s(3), xm / 6.0, zm / 6.0) - 0.5) * 0.8;
         let valley = smoothstep(8.0, 42.0, from_path) * 18.0;
-        let far = (fbm(self.s(9.0), xm / 900.0, zm / 900.0, 4) - 0.5) * 50.0;
+        let far = (fbm(self.s(9), xm / 900.0, zm / 900.0, 4) - 0.5) * 50.0;
         let path_dip = (1.0 - smoothstep(1.0, 2.2, from_path)) * 0.3;
         hills + valley + far - path_dip
     }
@@ -180,10 +180,10 @@ impl Forest {
         let zm = z as f64 * UNIT_SIZE;
         let slope = neighbours.map(|n| (n - h).abs()).into_iter().max().expect("four");
         let conifer =
-            smoothstep(0.4, 0.6, fbm(self.s(5.0), xm / 40.0, zm / 40.0, 4)) * 0.75 + smoothstep(6.0, 16.0, h as f64 * UNIT_SIZE) * 0.25;
-        let density = smoothstep(0.3, 0.48, fbm(self.s(6.0), xm / 22.0, zm / 22.0, 4));
-        let on_path = (xm - self.path_x(zm)).abs() < 1.1 + value_noise(self.s(7.0), zm / 3.0, 0.0) * 0.5;
-        let floor = value_noise(self.s(8.0), xm / 2.5, zm / 2.5);
+            smoothstep(0.4, 0.6, fbm(self.s(5), xm / 40.0, zm / 40.0, 4)) * 0.75 + smoothstep(6.0, 16.0, h as f64 * UNIT_SIZE) * 0.25;
+        let density = smoothstep(0.3, 0.48, fbm(self.s(6), xm / 22.0, zm / 22.0, 4));
+        let on_path = (xm - self.path_x(zm)).abs() < 1.1 + value_noise(self.s(7), zm / 3.0, 0.0) * 0.5;
+        let floor = value_noise(self.s(8), xm / 2.5, zm / 2.5);
         let surface = if on_path {
             K::path
         } else if slope >= 3 {
@@ -212,9 +212,9 @@ impl Forest {
     /** A random spot on the ground under the square a cell reaches over (2N wide). */
     fn spot(&self, cell: &Cell, n: i64) -> Point {
         let [cx, _, cz] = cell.centre;
-        let mut pick = Rng::new((hash(self.s(19.0), n as f64, cell.i as f64, cell.k as f64) * 4294967296.0).floor());
-        let x = cx - n + (pick.next() * 2.0 * n as f64).floor() as i64;
-        let z = cz - n + (pick.next() * 2.0 * n as f64).floor() as i64;
+        let mut pick = Rng::new(hash64(self.s(19), n, cell.i, cell.k));
+        let x = cx - n + pick.below(2 * n as u32) as i64;
+        let z = cz - n + pick.below(2 * n as u32) as i64;
         [x as f64, self.ground(x, z) as f64, z as f64]
     }
 
@@ -247,10 +247,10 @@ fn pick_species(mut pick: f64, chances: &[f64; 3]) -> Species {
 }
 
 /** The forest's generator for `seed`, and where the camera starts (forest() in forest.ts). */
-pub fn forest(seed: f64) -> (Generator, [i64; 3]) {
+pub fn forest(seed: u64) -> (Generator, [i64; 3]) {
     let mut f =
         Forest { seed, path_phase: 0.0, spawn: [0; 3], kept: RefCell::new((vec![i64::MIN; 1 << 14], vec![0; 1 << 14], vec![0; 1 << 14])) };
-    f.path_phase = hash(f.s(1.0), 0.0, 0.0, 0.0) * 100.0;
+    f.path_phase = unit(hash(f.s(1), 0, 0, 0)) * 100.0;
     // Start on the path at the near end, at about the height of a tall shrub.
     let spawn_z = vox(-31.0) as i64;
     let spawn_x = round(f.path_x(spawn_z as f64 * UNIT_SIZE) / UNIT_SIZE) as i64;
@@ -288,7 +288,7 @@ pub fn forest(seed: f64) -> (Generator, [i64; 3]) {
     let tree_top = vox(26.0) as i64;
     let below: Rc<[Vec<f64>; 3]> = Rc::new(SPECIES.map(|species| {
         let samples: Vec<Node> =
-            (0..64).map(|i| make_tree(species, 0.0, 0.0, 0.0, &mut Rng::new(f.s(17.0) + i as f64), &|_, _| 0)).collect();
+            (0..64).map(|i| make_tree(species, 0.0, 0.0, 0.0, &mut Rng::new(hash64(f.s(17), i, 0, 0)), &|_, _| 0)).collect();
         let profile = area_profile(&samples, 1);
         let mut sums = vec![0.0; tree_top as usize + 1];
         for h in 0..tree_top as usize {
@@ -335,7 +335,7 @@ pub fn forest(seed: f64) -> (Generator, [i64; 3]) {
                             return Vec::new();
                         }
                         let chances = Forest::species_chances(&c);
-                        let kind = k(foliage(pick_species(hash(f.s(18.0), x as f64, z as f64, 0.0), &chances)));
+                        let kind = k(foliage(pick_species(unit(hash(f.s(18), x, z, 0)), &chances)));
                         let mut spans = Vec::new();
                         let mut from = 0;
                         while from < tree_top {
@@ -427,21 +427,21 @@ pub fn forest(seed: f64) -> (Generator, [i64; 3]) {
                     while zi < cz + PLANTS / 2 {
                         let c = f.column(xi, zi);
                         let (x, y, z) = (xi as f64, (c.height + 1) as f64, zi as f64);
-                        let r = hash(f.s(15.0), x, z, 0.0);
-                        let random = &mut Rng::new((hash(f.s(16.0), x, z, 0.0) * 4294967296.0).floor());
+                        let r = unit(hash(f.s(15), xi, zi, 0));
+                        let random = &mut Rng::new(hash64(f.s(16), xi, zi, 0));
                         if c.on_path {
                             if r < 0.05 {
                                 shapes.push(cub([x, y, z], [x + 2.0, y + 1.0, z + 1.0], K::stone));
                             }
                         } else if c.surface == K::grass {
                             if r < 0.02 {
-                                let count = 3.0 + (random.next() * 3.0).floor();
+                                let count = 3.0 + random.below(3) as f64;
                                 let kind = if random.next() < 0.3 { K::hay } else { K::tallGrass };
                                 shapes.extend(tuft(x, y, z, count, vox(0.3), kind, random));
                             } else if r < 0.0275 {
                                 shapes.extend(flower(x, y, z, random));
                             } else if r < 0.2 {
-                                let count = 1.0 + (random.next() * 2.0).floor();
+                                let count = 1.0 + random.below(2) as f64;
                                 shapes.extend(tuft(x, y, z, count, vox(0.12), K::grass, random));
                             }
                         } else if c.surface != K::stone && c.surface != K::mossyStone {
@@ -472,7 +472,7 @@ pub fn forest(seed: f64) -> (Generator, [i64; 3]) {
     let spawn = f.spawn;
     let generator = Generator {
         kinds: KINDS,
-        seed: f.s(4.0),
+        seed: f.s(4),
         layers: vec![
             Layer::Field(terrain),
             Layer::Population(trees),
@@ -546,7 +546,7 @@ fn direction(random: &mut Rng) -> Point {
 /** A cluster of leaves around `centre`: sprays of leaves on twigs at level 0, further the ball they fill. */
 #[allow(clippy::too_many_arguments)]
 fn leaf_cluster(name: String, centre: Point, radius: f64, kind: K, fill: f64, random: &mut Rng, droop: f64, turning: K) -> Child {
-    let seed = (random.next() * 4294967296.0).floor();
+    let seed = random.next_u64();
     let sprays = Shapes::lazy(seed, move |random| {
         let spray = vox(0.45).min(radius * 0.4);
         let count = 4f64.max(round(0.95 * js::pow(radius / spray, 2.0)));
@@ -575,7 +575,7 @@ fn leaf_cluster(name: String, centre: Point, radius: f64, kind: K, fill: f64, ra
 
 /** A child of a thing within `bounds`, drawn only at level 0, its shapes made only then. */
 fn fine_child(name: &str, bounds: Box3, random: &mut Rng, make: impl Fn(&mut Rng) -> Vec<Shape> + 'static) -> Child {
-    let seed = (random.next() * 4294967296.0).floor();
+    let seed = random.next_u64();
     Child {
         name: name.into(),
         size: FINE as i64,
@@ -612,13 +612,13 @@ fn bark(x: f64, z: f64, width: f64, from: f64, to: f64, style: BarkStyle, kind: 
         if style == BarkStyle::Furrows {
             let mut n = 1f64.max(round(width / 3.0));
             while n > 0.0 {
-                let mut u = start(f) + (random.next() * (width - 1.0)).floor();
+                let mut u = start(f) + random.below(width as u32 - 1) as f64;
                 let mut y = from;
                 while y < to {
                     let length = vox(0.4 + random.next() * 1.2);
                     shapes.push(mark(f, u, 2.0, y, (y + length).min(to)));
                     y += length + (random.next() * vox(0.3)).floor();
-                    u = start(f).max((start(f) + width - 2.0).min(u + (random.next() * 3.0).floor() - 1.0));
+                    u = start(f).max((start(f) + width - 2.0).min(u + random.below(3) as f64 - 1.0));
                 }
                 n -= 1.0;
             }
@@ -626,8 +626,8 @@ fn bark(x: f64, z: f64, width: f64, from: f64, to: f64, style: BarkStyle, kind: 
             let mut y = from;
             while y < to {
                 if random.next() < 0.5 {
-                    let u = start(f) + (random.next() * (width - 1.0)).floor();
-                    let length = 2.0 + (random.next() * 2.0).floor();
+                    let u = start(f) + random.below(width as u32 - 1) as f64;
+                    let length = 2.0 + random.below(2) as f64;
                     shapes.push(mark(f, u, length, y, y + 1.0));
                 }
                 y += vox(0.25);
@@ -639,7 +639,7 @@ fn bark(x: f64, z: f64, width: f64, from: f64, to: f64, style: BarkStyle, kind: 
 
 /** Roots spreading from a trunk's foot around (x, z) into the ground, `half` its half-width. */
 fn roots(x: f64, ground: f64, z: f64, half: f64, kind: K, random: &mut Rng, ground_at: GroundAt) -> Vec<Shape> {
-    let count = 4.0 + (random.next() * 3.0).floor();
+    let count = 4.0 + random.below(3) as f64;
     (0..count as usize)
         .map(|i| {
             let angle = (i as f64 / count) * PI * 2.0 + random.next() * 0.6;
@@ -672,7 +672,7 @@ fn spruce_tree(x: f64, ground: f64, z: f64, random: &mut Rng, ground_at: GroundA
     };
     let (from, to) = (base - 0.5, crown_top + 0.5);
     let density = move |distance: f64, py: f64| 0.95 - 0.35 * js::pow(distance / r(py), 3.0);
-    let spokes = 6.0 + (random.next() * 3.0).floor();
+    let spokes = 6.0 + random.below(3) as f64;
     let sector = (2.0 * PI) / spokes;
     let twist = random.next() * sector;
     let half_width = |distance: f64| vox(0.15) + 0.07 * distance;
@@ -745,7 +745,7 @@ fn birch_tree(x: f64, ground: f64, z: f64, random: &mut Rng) -> Node {
     let cy = (crown_bottom + crown_top) / 2.0;
     let ry = (crown_top - crown_bottom) / 2.0;
     let rx = vox(2.0 + random.next() * 1.2);
-    let count = 12.0 + (random.next() * 6.0).floor();
+    let count = 12.0 + random.below(6) as f64;
     let mid = (width - 1.0) / 2.0;
     let (mut branches, mut clusters) = (Vec::new(), Vec::new());
     for i in 0..count as usize {
@@ -788,7 +788,7 @@ fn oak_tree(x: f64, ground: f64, z: f64, random: &mut Rng, ground_at: GroundAt) 
     let cx = x + (width - 1.0) / 2.0;
     let cz = z + (width - 1.0) / 2.0;
     shapes.extend(roots(cx, ground, cz, width / 2.0, K::bark, random, ground_at));
-    let branches = 4.0 + (random.next() * 3.0).floor();
+    let branches = 4.0 + random.below(3) as f64;
     let mut ends: Vec<Point> = vec![[cx, ground + height - vox(2.0), cz]];
     let mut hidden = Vec::new();
     for i in 0..branches as usize {
@@ -822,8 +822,8 @@ fn oak_tree(x: f64, ground: f64, z: f64, random: &mut Rng, ground_at: GroundAt) 
 fn tuft(x: f64, y: f64, z: f64, count: f64, tall: f64, kind: K, random: &mut Rng) -> Vec<Shape> {
     (0..count as usize)
         .map(|_| {
-            let dx = (random.next() * 3.0).floor() - 1.0;
-            let dz = (random.next() * 3.0).floor() - 1.0;
+            let dx = random.below(3) as f64 - 1.0;
+            let dz = random.below(3) as f64 - 1.0;
             let blade = 1f64.max(round(tall * (0.6 + random.next() * 0.6)));
             cub([x + dx, y, z + dz], [x + dx + 2.0, y + blade, z + dz + 1.0], kind)
         })
@@ -834,8 +834,8 @@ const FLOWERS: [K; 4] = [K::flowerYellow, K::flowerViolet, K::flowerWhite, K::fl
 
 /** A flower: a stem and a head two sites wide. */
 fn flower(x: f64, y: f64, z: f64, random: &mut Rng) -> Vec<Shape> {
-    let stem = 2.0 + (random.next() * 2.0).floor();
-    let colour = FLOWERS[(random.next() * FLOWERS.len() as f64).floor() as usize];
+    let stem = 2.0 + random.below(2) as f64;
+    let colour = FLOWERS[random.below(FLOWERS.len() as u32) as usize];
     vec![
         cub([x, y, z], [x + 2.0, y + stem, z + 1.0], K::tallGrass),
         cub([x - 1.0, y + stem, z - 1.0], [x + 1.0, y + stem + 1.0, z + 1.0], colour),
@@ -844,7 +844,7 @@ fn flower(x: f64, y: f64, z: f64, random: &mut Rng) -> Vec<Shape> {
 
 /** A fern or bracken clump about a metre across. */
 fn fern(x: f64, y: f64, z: f64, kind: K, random: &mut Rng) -> Vec<Shape> {
-    let fronds = 5.0 + (random.next() * 4.0).floor();
+    let fronds = 5.0 + random.below(4) as f64;
     let mut shapes = Vec::new();
     for i in 0..fronds as usize {
         let angle = (i as f64 / fronds) * PI * 2.0 + random.next() * 0.5;
@@ -863,7 +863,7 @@ fn bush(x: f64, y: f64, z: f64, random: &mut Rng) -> Vec<Shape> {
     let radius = vox(0.5 + random.next() * 0.5);
     let mut shapes = vec![ball([x, y, z], radius, k(K::bush), Fill::Const(0.8), Op::Fill)];
     if random.next() < 0.5 {
-        let mut n = 4.0 + (random.next() * 6.0).floor();
+        let mut n = 4.0 + random.below(6) as f64;
         while n > 0.0 {
             let [dx, dy, dz] = direction(random);
             let (px, py, pz) = (round(x + dx * radius * 0.9), round(y + dy.abs() * radius * 0.9), round(z + dz * radius * 0.9));
@@ -879,11 +879,11 @@ fn bush(x: f64, y: f64, z: f64, random: &mut Rng) -> Vec<Shape> {
 /** One to three mushrooms: fly agarics (white-spotted red caps) or boletes. */
 fn mushrooms(x: f64, y: f64, z: f64, kind: K, random: &mut Rng) -> Vec<Shape> {
     let mut shapes = Vec::new();
-    let mut n = 1.0 + (random.next() * 3.0).floor();
+    let mut n = 1.0 + random.below(3) as f64;
     while n > 0.0 {
-        let mx = x + (random.next() * 5.0).floor() - 2.0;
-        let mz = z + (random.next() * 5.0).floor() - 2.0;
-        let stem = 1.0 + (random.next() * 2.0).floor();
+        let mx = x + random.below(5) as f64 - 2.0;
+        let mz = z + random.below(5) as f64 - 2.0;
+        let stem = 1.0 + random.below(2) as f64;
         let cap = [mx + 0.5, y + stem, mz];
         let rx = 1.4 + random.next() * 0.4;
         let radii = [rx, 1.0, 1.4 + random.next() * 0.4];

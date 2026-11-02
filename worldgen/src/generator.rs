@@ -1,14 +1,13 @@
 //! World generators (generator.ts): a world is fields and populations of
 //! things made of shapes; the framework draws any box of it alone, at any
-//! level of detail. See docs/generators.md. Numbers follow the TS step for
-//! step (js.rs), so a world comes out the same site for site.
+//! level of detail. See docs/generators.md.
 
 use std::cell::OnceCell;
 use std::rc::Rc;
 
 use crate::grid::{Box3, VoxelGrid};
 use crate::js;
-use crate::noise::{Rng, hash};
+use crate::noise::{Rng, hash, hash_text, hash64, unit};
 
 /** A material kind: its index in Generator::kinds. */
 pub type Kind = u8;
@@ -99,7 +98,7 @@ pub struct Child {
  */
 pub enum Shapes {
     Now(Vec<Shape>),
-    Lazy { seed: f64, make: Box<MakeShapes>, made: OnceCell<Vec<Shape>> },
+    Lazy { seed: u64, make: Box<MakeShapes>, made: OnceCell<Vec<Shape>> },
 }
 
 type ChildrenReaching = dyn Fn(&Box3) -> Vec<Child>;
@@ -110,7 +109,7 @@ type Anchor = dyn Fn(&Cell) -> Option<Point>;
 type Make = dyn Fn(Point, &Cell) -> Option<Node>;
 
 impl Shapes {
-    pub fn lazy(seed: f64, make: impl Fn(&mut Rng) -> Vec<Shape> + 'static) -> Shapes {
+    pub fn lazy(seed: u64, make: impl Fn(&mut Rng) -> Vec<Shape> + 'static) -> Shapes {
         Shapes::Lazy { seed, make: Box::new(make), made: OnceCell::new() }
     }
 
@@ -158,17 +157,13 @@ pub struct Cell<'a> {
     pub k: i64,
     pub centre: [i64; 3],
     population: &'a str,
-    seed: f64,
+    seed: u64,
 }
 
 impl Cell<'_> {
     /** A random sequence that depends on the cell and `stream` only. */
     pub fn random(&self, stream: &str) -> Rng {
-        Rng::new(
-            (hash(hash_text(&format!("{}:{stream}", self.population), self.seed) as f64, self.i as f64, self.j as f64, self.k as f64)
-                * 4294967296.0)
-                .floor(),
-        )
+        Rng::new(hash64(hash_text(&format!("{}:{stream}", self.population), self.seed), self.i, self.j, self.k))
     }
 }
 
@@ -198,7 +193,7 @@ pub struct KindDef {
 
 pub struct Generator {
     pub kinds: &'static [KindDef],
-    pub seed: f64,
+    pub seed: u64,
     pub layers: Vec<Layer>,
 }
 
@@ -372,11 +367,10 @@ impl Shape {
  * Draws a shape at sites `s` apart, by how many of its sizes are under s
  * (drawShape in generator.ts).
  */
-fn draw_shape(shape: &Shape, seed: f64, si: i64, clip: &Box3, put: &mut dyn FnMut(i64, i64, i64)) {
+fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &mut dyn FnMut(i64, i64, i64)) {
     let s = si as f64;
     let small = shape.extents.iter().filter(|e| **e < s).count();
-    let kept =
-        |x: i64, y: i64, z: i64, chance: f64| chance >= 1.0 || hash(seed, (x * si) as f64, (y * si) as f64, (z * si) as f64) < chance;
+    let kept = |x: i64, y: i64, z: i64, chance: f64| chance >= 1.0 || unit(hash(seed, x * si, y * si, z * si)) < chance;
     if small == 3 {
         let [x, y, z] = nearest_site(shape.centre.map(|v| v / s));
         if clip.holds([x, y, z]) && kept(x, y, z, shape.area / (VOXEL_AREA * s * s)) {
@@ -446,11 +440,11 @@ pub struct Material {
 struct Palette {
     materials: Vec<Material>,
     shades: Vec<Vec<u8>>,
-    seed: f64,
+    seed: u64,
 }
 
 impl Palette {
-    fn new(kinds: &[KindDef], seed: f64) -> Palette {
+    fn new(kinds: &[KindDef], seed: u64) -> Palette {
         let mut materials = vec![Material { color: "", material_type: 0 }];
         let shades = kinds
             .iter()
@@ -469,7 +463,7 @@ impl Palette {
 
     fn shade(&self, kind: Kind, x: i64, y: i64, z: i64) -> u8 {
         let shades = &self.shades[kind as usize];
-        shades[(hash(self.seed, x as f64, y as f64, z as f64) * shades.len() as f64).floor() as usize]
+        shades[((hash(self.seed, x, y, z) as u64 * shades.len() as u64) >> 32) as usize]
     }
 }
 
@@ -500,7 +494,7 @@ pub fn generate(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
             Draw::Field(field) => draw_field(field, generator.seed, s, &clip, &mut put),
             Draw::Shapes(shapes, far) => {
                 for (i, shape) in shapes.iter().enumerate() {
-                    let seed = hash_text(&format!("{}#{}{i}", drawable.key, if far { "far" } else { "" }), generator.seed) as f64;
+                    let seed = hash_text(&format!("{}#{}{i}", drawable.key, if far { "far" } else { "" }), generator.seed);
                     draw_shape(shape, seed, s, &clip, &mut |x, y, z| put(shape.kind, shape.op, x, y, z));
                 }
             }
@@ -606,11 +600,11 @@ fn drawables_in<'a>(generator: &'a Generator, clip: &Box3, s: i64) -> Vec<Drawab
 }
 
 /** Draws a field into `clip`; a medium keeps a site with the chance a ray crossing it is stopped. */
-fn draw_field(field: &Field, seed: f64, s: i64, clip: &Box3, put: &mut dyn FnMut(Kind, Op, i64, i64, i64)) {
+fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut dyn FnMut(Kind, Op, i64, i64, i64)) {
     let op = field.op;
-    let field_seed = hash_text(field.name, seed) as f64;
+    let field_seed = hash_text(field.name, seed);
     let kept = |x: i64, y: i64, z: i64, extinction: Option<f64>| {
-        extinction.is_none_or(|e| hash(field_seed, (x * s) as f64, (y * s) as f64, (z * s) as f64) < 1.0 - js::exp(-e * CHORD * s as f64))
+        extinction.is_none_or(|e| unit(hash(field_seed, x * s, y * s, z * s)) < 1.0 - js::exp(-e * CHORD * s as f64))
     };
     match &field.values {
         FieldValues::At(at) => {
@@ -714,13 +708,4 @@ pub fn bounds_of_shapes<'a>(boxes: impl IntoIterator<Item = &'a Box3>) -> Box3 {
         }
     }
     b
-}
-
-/** A seed from a text and a seed. */
-pub fn hash_text(text: &str, seed: f64) -> i32 {
-    let mut h = js::int32(seed);
-    for c in text.encode_utf16() {
-        h = (h ^ c as i32).wrapping_mul(16777619);
-    }
-    h
 }

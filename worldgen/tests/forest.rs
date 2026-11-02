@@ -7,7 +7,7 @@ use worldgen::generator::{generate, materials_of};
 use worldgen::grid::{Box3, VoxelGrid, is_site};
 
 /** 48 m × 80 m ahead of the spawn point, all heights, and the spawn point. */
-fn generated(seed: f64) -> (VoxelGrid, Vec<u8>, [i64; 3]) {
+fn generated(seed: u64) -> (VoxelGrid, Vec<u8>, [i64; 3]) {
     let (generator, spawn) = forest(seed);
     let (min_y, max_y) = heights(0);
     let unit = |metres: f64| (metres / UNIT_SIZE) as i64;
@@ -40,11 +40,11 @@ fn voxels(grid: &VoxelGrid, types: &[u8]) -> Vec<(i64, i64, i64, u8)> {
 
 #[test]
 fn forest_is_deterministic_has_ground_trees_and_a_clear_spawn() {
-    let (grid, types, spawn) = generated(42.0);
+    let (grid, types, spawn) = generated(42);
     let all = voxels(&grid, &types);
 
     // Deterministic for a seed.
-    let (again, _, again_spawn) = generated(42.0);
+    let (again, _, again_spawn) = generated(42);
     assert_eq!(again_spawn, spawn);
     assert!(again.cells == grid.cells && again.bricks == grid.bricks);
 

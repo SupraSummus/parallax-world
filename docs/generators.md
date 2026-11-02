@@ -115,11 +115,12 @@ and fields from position alone.
 
 Add a new world to that list with a region that has a bit of everything in it.
 
-`worldgen/` is the framework and the forest in Rust, for the native frontend,
-ported step for step (random numbers drawn in the same order, JS's numbers in `js.rs`).
-Change both together:
-`parallax-native <dump> --check-grids` generates a view's grids with it
-and compares them site by site with the TS forest's, dumped by `native/dump.test.ts`.
+`worldgen/` is the framework and the forest in Rust, for the native frontend.
+It began as a port of the TS ones and now goes its own way,
+towards integers wherever they decide something
+(hashes and random numbers first, in `noise.rs`),
+so a world is the same on every machine and does not repeat far from the origin.
+The web is to move onto it; until then the two forests differ.
 
 ## Open problems
 

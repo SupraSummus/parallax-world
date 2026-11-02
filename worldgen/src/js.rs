@@ -1,25 +1,8 @@
-//! Numbers as the TS generators compute them in V8, so that a world comes
-//! out the same, site for site: JS's integer conversions, rounding, and
+//! Numbers as the TS generators compute them in V8, left from the port and
+//! going as the generators move to integers: rounding, and
 //! the math functions V8 uses where Rust's differ in the last bit.
 //! `pow` is the C library's in both; atan2 and exp are fdlibm's (libm);
 //! V8's sin and cos are its own, within an ulp of libm's.
-
-/** ToInt32: `x | 0`. */
-pub fn int32(x: f64) -> i32 {
-    // Truncated to i64 exactly, then wrapped: the hashes' hot path.
-    if x.abs() < 9.0e18 {
-        return x as i64 as i32;
-    }
-    if !x.is_finite() {
-        return 0;
-    }
-    x.trunc().rem_euclid(4294967296.0) as u32 as i32
-}
-
-/** ToUint32: `x >>> 0`. */
-pub fn uint32(x: f64) -> u32 {
-    int32(x) as u32
-}
 
 /** Math.round: to the nearest integer, halves up. */
 pub fn round(x: f64) -> f64 {
@@ -83,11 +66,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn conversions_wrap_like_js() {
-        assert_eq!(int32(4294967296.0 + 5.0), 5);
-        assert_eq!(int32(-1.5), -1);
-        assert_eq!(int32(2147483648.0), -2147483648);
-        assert_eq!(uint32(-1.0), 4294967295);
+    fn rounds_like_js() {
         assert_eq!(round(-2.5), -2.0);
         assert_eq!(round(2.5), 3.0);
         assert_eq!(hypot(&[3.0, 4.0]), 5.0);

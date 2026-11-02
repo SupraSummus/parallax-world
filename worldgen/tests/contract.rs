@@ -51,7 +51,7 @@ fn spans(name: &'static str, from: i64, to: i64, kind: u8) -> Layer {
 fn fog() -> Generator {
     Generator {
         kinds: KINDS,
-        seed: 1.0,
+        seed: 1,
         layers: vec![single(|_, _| Some(Node::of(vec![ball([64.0; 3], 56.0, FOG, Fill::Const(0.3), Op::Fill)])), 64)],
     }
 }
@@ -68,7 +68,7 @@ fn caves() -> Generator {
             if v > 1.4 { Some((ROCK, None)) } else { None }
         })),
     };
-    Generator { kinds: KINDS, seed: 2.0, layers: vec![spans("rock", -1000, 1000, ROCK), Layer::Field(tunnels)] }
+    Generator { kinds: KINDS, seed: 2, layers: vec![spans("rock", -1000, 1000, ROCK), Layer::Field(tunnels)] }
 }
 
 /** Houses on a grass plain: thin walls with a door carved through, rooms of tables inside. */
@@ -114,7 +114,7 @@ fn village() -> Generator {
         }),
         far: None,
     };
-    Generator { kinds: KINDS, seed: 3.0, layers: vec![spans("ground", -64, 0, GRASS), Layer::Population(houses)] }
+    Generator { kinds: KINDS, seed: 3, layers: vec![spans("ground", -64, 0, GRASS), Layer::Population(houses)] }
 }
 
 fn b(min_x: i64, min_y: i64, min_z: i64, max_x: i64, max_y: i64, max_z: i64) -> Box3 {
@@ -177,7 +177,7 @@ fn first_hits(grid: &VoxelGrid, types: &[u8], level: u32, rays: &[Ray], region: 
 
 /** Rays from random points of `region`, in random directions, seeded so failures reproduce. */
 fn random_rays(r: &Box3, count: usize) -> Vec<Ray> {
-    let mut random = Rng::new(11.0);
+    let mut random = Rng::new(11);
     (0..count)
         .map(|_| {
             let mut origin = [0.0; 3];
@@ -202,7 +202,7 @@ fn whole_equals_parts(generator: &Generator, region: &Box3, level: u32) {
     let grid = generate(generator, &whole, level);
     assert!(grid.cells.iter().any(|id| *id != 0), "level {level} is empty");
     // Eight parts, split at random points (seeded, so failures reproduce).
-    let mut random = Rng::new(7.0);
+    let mut random = Rng::new(7);
     let mut split = |axis: usize, even: bool| {
         let (lo, hi) = (whole.min[axis] as f64, whole.max[axis] as f64);
         let at = lo + (hi - lo) * (0.2 + 0.6 * random.next());
@@ -281,7 +281,7 @@ fn check(generator: Generator, region: Box3, levels: u32) {
 #[test]
 fn forest_keeps_the_contract() {
     // Near the spawn point: path, trees, undergrowth, from under the ground to above the crowns.
-    check(forest(42.0).0, b(-128, -64, -384, 128, 384, -128), 6);
+    check(forest(42).0, b(-128, -64, -384, 128, 384, -128), 6);
 }
 
 #[test]
@@ -304,7 +304,7 @@ fn near() -> Box3 {
 }
 
 fn world(layer: Layer) -> Generator {
-    Generator { kinds: KINDS, seed: 1.0, layers: vec![layer] }
+    Generator { kinds: KINDS, seed: 1, layers: vec![layer] }
 }
 
 #[test]

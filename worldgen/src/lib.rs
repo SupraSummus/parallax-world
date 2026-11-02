@@ -1,6 +1,6 @@
 //! World generation in Rust: the generator framework (generator.ts) and
-//! the forest (forest.ts), ported step for step so that a world comes out
-//! the same site for site, into grids the baker reads.
+//! the forest (forest.ts), into grids the baker reads. Ported from the TS
+//! step for step, now moving to integers (docs/generators.md).
 
 pub mod forest;
 pub mod generator;

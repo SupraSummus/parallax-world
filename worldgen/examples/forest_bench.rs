@@ -1,4 +1,4 @@
-//! Times generating forest tiles on one thread: parallax-native --check-grids without the dump.
+//! Times generating forest tiles on one thread.
 use std::time::Instant;
 use worldgen::forest::{forest, heights};
 use worldgen::generator::generate;
@@ -6,7 +6,7 @@ use worldgen::grid::Box3;
 
 fn main() {
     let start = Instant::now();
-    let (generator, spawn) = forest(12345.0);
+    let (generator, spawn) = forest(12345);
     println!("forest() in {:.1} ms", start.elapsed().as_secs_f64() * 1000.0);
     for level in [0u32, 4] {
         let s = 1i64 << level;

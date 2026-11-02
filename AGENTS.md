@@ -67,16 +67,16 @@ bake/                        # Chunk baker and coverage in Rust, compiled to Web
     ├── splats.rs            # Which voxels a chunk shows, as hexagons on its centre plane; gap filling
     ├── fill.rs              # Splats filled into a mask, solid blocks (for coverage)
     └── coverage.rs          # Which screen cells nearer layers cover, on the main thread; its WebAssembly exports
-worldgen/                    # generator.ts, noise.ts and forest.ts ported to Rust, site for site; into the baker's grids
+worldgen/                    # generator.ts and forest.ts in Rust, moving to integers; into the baker's grids
 └── src/
-    ├── js.rs                # JS number semantics: int32, Math.round, the math functions as V8 computes them
-    ├── noise.rs, grid.rs    # noise.ts; voxel-grid.ts's bricks
+    ├── js.rs                # Math.round and the math functions as V8 computes them, left from the port
+    ├── noise.rs, grid.rs    # Integer hashes, random numbers, fixed-point noise; voxel-grid.ts's bricks
     ├── generator.rs         # The framework: shapes, nodes, fields, populations, drawing any box at any level
     └── forest.rs            # The forest
 native/                      # Spike of a native frontend (eframe + wgpu), linking bake/; see src/main.rs
 ├── dump.test.ts             # Dumps a view from the TS renderer for it (only with DUMP set)
 └── src/
-    ├── main.rs              # Bakes the dumped chunks on every core, the window and camera; --check-grids against worldgen
+    ├── main.rs              # Bakes the dumped chunks (or worldgen's, --generate) on every core, the window and camera
     ├── dump.rs              # Reads the dump
     ├── view.rs              # viewBasis and face coordinates (view.ts)
     ├── compositor.rs        # compositor.ts with wgpu: all splats in one instanced draw

@@ -113,18 +113,6 @@ impl VoxelGrid {
     }
 }
 
-/** Material id of a site of the baker's grid, as VoxelGrid.get. */
-pub fn site_of(grid: &Grid, x: i64, y: i64, z: i64) -> u8 {
-    let [i, j, k] = [x - grid.min[0] as i64, y - grid.min[1] as i64, z - grid.min[2] as i64];
-    let n = grid.n.map(|v| v as i64);
-    if i < 0 || i >= n[0] || j < 0 || j >= n[1] || k < 0 || k >= n[2] || !is_site(x, y, z) {
-        return 0;
-    }
-    let (bx, by) = ((n[0] + BRICK - 1) / BRICK, (n[1] + BRICK - 1) / BRICK);
-    let at = grid.bricks[(((k >> 3) * by + (j >> 3)) * bx + (i >> 3)) as usize];
-    if at < 0 { 0 } else { grid.cells[at as usize * BRICK_SITES + ((((k & 7) * BRICK + (j & 7)) * BRICK + (i & 7)) >> 1) as usize] }
-}
-
 impl VoxelGrid {
     /**
      * The grid of `b`, its bricks taken from `parts`: each a whole number of
