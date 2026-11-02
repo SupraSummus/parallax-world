@@ -56,16 +56,17 @@ export interface SliceId {
   cutoff: number
 }
 
-/** Slabs of up to 4096 layers: from about 7.6 km on in the forest at 1280×800, slices grow no thicker. */
+/** Slabs of up to 4096 layers: from about 8 km on in the forest at 1280×800, slices grow no thicker. */
 export const MAX_LEVEL = 12
 
 /**
  * Above level ATOM_SHIFT a slab is 2^ATOM_SHIFT layers of cells, not of
  * voxels. A slice is about 1/detail of its distance thick, so its atoms
- * stay 1.4 to 2.7 pixels across with the defaults (docs/architecture.md,
+ * stay 5.6 to 11 pixels across with the defaults; each step up halves
+ * that, and quadruples the bytes of level 0's grid (docs/architecture.md,
  * section 1).
  */
-const ATOM_SHIFT = 6
+const ATOM_SHIFT = 4
 
 /**
  * The level of the cells (cells.ts) a slice of `level` is made of, and so
@@ -218,7 +219,7 @@ export function cellMargin(level: number): { columns: number; rows: number } {
   return { columns: n * Math.ceil(((1 + REACH) * half + 1.5) / LAYER), rows: n * Math.ceil((LAYER + REACH) * half + 1.5) }
 }
 
-/** r: the largest N / thickness, the eye's spacing over its slices' thickness (64/65, from level ATOM_SHIFT on). */
+/** r: the largest N / thickness, the eye's spacing over its slices' thickness (16/17, from level ATOM_SHIFT on). */
 const EYE_RATIO = Math.max(...Array.from({ length: MAX_LEVEL + 1 }, (_, level) => spacing(level) / thickness(level)))
 
 /**

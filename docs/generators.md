@@ -126,4 +126,3 @@ Add a new world to that list with a region that has a bit of everything in it.
   vertical trunks seen from above and from the side cannot both be right.
 - **Layers can't see each other.** "No tree on a boulder"
   needs a layer to ask another for its things in an area.
-- **The renderer only reads level 0.**

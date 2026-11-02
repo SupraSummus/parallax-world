@@ -179,6 +179,24 @@ export class VoxelGrid {
     return voxels
   }
 
+  /**
+   * The grid of `parts` one after the other along z: of one box but for z,
+   * each but the last a whole number of bricks deep, nearest z first.
+   */
+  static stack(parts: readonly VoxelData[]): VoxelGrid {
+    const [first, last] = [parts[0], parts[parts.length - 1]]
+    const grid = new VoxelGrid({ minX: first.minX, minY: first.minY, minZ: first.minZ, maxX: first.minX + first.nx, maxY: first.minY + first.ny, maxZ: last.minZ + last.nz }, first.materials)
+    const cells = parts.map(usedCells)
+    grid.cells = new Uint8Array(cells.reduce((sum, c) => sum + c.length, 0))
+    parts.forEach(({ minZ, bricks }, k) => {
+      const offset = ((minZ - first.minZ) / BRICK) * grid.bx * grid.by
+      for (let b = 0; b < bricks.length; b++) if (bricks[b] >= 0) grid.bricks[offset + b] = bricks[b] + grid.used
+      grid.cells.set(cells[k], grid.used * BRICK_SITES)
+      grid.used += cells[k].length / BRICK_SITES
+    })
+    return grid
+  }
+
   /** The smallest grid holding `voxels`, which must be sites; where two share a site, the later one wins. */
   static fromVoxels(voxels: readonly Voxel[]): VoxelGrid {
     const box = voxels.length === 0
@@ -212,11 +230,16 @@ export class VoxelGrid {
   }
 }
 
+/** The sites of a grid's bricks in use, without the room `cells` has for more. */
+export function usedCells({ bricks, cells }: VoxelData): Uint8Array {
+  return cells.subarray(0, bricks.reduce((n, at) => Math.max(n, at + 1), 0) * BRICK_SITES)
+}
+
 /**
  * Calls `visit` with the corner (x, y, z) of each brick of `grid` with
  * voxels (its first site is x or x + 1) and where its sites start in `cells`.
  */
-export function forEachBrick({ minX, minY, minZ, nx, ny, bricks }: VoxelData, visit: (x: number, y: number, z: number, at: number) => void) {
+function forEachBrick({ minX, minY, minZ, nx, ny, bricks }: VoxelData, visit: (x: number, y: number, z: number, at: number) => void) {
   const [bx, by] = [Math.ceil(nx / BRICK), Math.ceil(ny / BRICK)]
   for (let b = 0; b < bricks.length; b++) {
     if (bricks[b] < 0) continue
@@ -317,6 +340,9 @@ interface Table {
   high: Int16Array
 }
 
+/** A LayerIndex's fields. */
+export type LayerIndexData = Pick<LayerIndex, 'keys' | 'tables'>
+
 /**
  * Where a grid's voxels are along each face's layers (in a face's lattice
  * coordinates (a, b, c), see Face in view.ts): for each layer c and block
@@ -325,8 +351,8 @@ interface Table {
  * how high their content reaches, without walking or baking them.
  */
 export class LayerIndex {
-  private keys: string[]
-  private tables: Table[]
+  readonly keys: string[]
+  readonly tables: Table[]
 
   constructor(grid: VoxelData, lattices: readonly Lattice[]) {
     const { minX, minY, minZ, nx, ny, nz, cells } = grid
@@ -379,6 +405,11 @@ export class LayerIndex {
     forEachBrick(grid, visit)
     this.tables = shapes.map((shape, k) => ({ ...shape, low: low.subarray(lowAt[k], lowAt[k + 1]), high: high.subarray(lowAt[k], lowAt[k + 1]) }))
     this.keys = shapes.map(s => LayerIndex.key(s.lattice.forward))
+  }
+
+  /** A LayerIndex of its fields, as posted to or from a worker (a class's methods do not survive posting). */
+  static from({ keys, tables }: LayerIndexData): LayerIndex {
+    return Object.assign(Object.create(LayerIndex.prototype) as LayerIndex, { keys, tables })
   }
 
   /** Whether a face's forward is the opposite of one with its first non-zero component positive. */

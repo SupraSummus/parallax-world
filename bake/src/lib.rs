@@ -79,8 +79,10 @@ type SurfaceKey = (usize, usize, i32, i32, u64, i32, i32);
 
 /** One world's grids, palettes and lattices, and the buffers reused across bakes. */
 pub struct Baker {
-    /** By level: grid ℓ has the sites of 2^ℓ·FCC, in its own units. They share materials. */
+    /** By level: grid ℓ has the sites of 2^ℓ·FCC, in its own units, once set. They share materials. */
     grids: Vec<Grid>,
+    /** The level set last. */
+    last: usize,
     geometry: Geometry,
     lattices: [Lattice; VIEW_FACES],
     /** Per view face: material · FACE_KINDS + kind → RGBA. */
@@ -99,9 +101,10 @@ pub struct Baker {
 }
 
 impl Baker {
-    pub fn new(grids: Vec<Grid>, geometry: Geometry, lattices: [Lattice; VIEW_FACES], palettes: Vec<u32>) -> Baker {
+    pub fn new(geometry: Geometry, lattices: [Lattice; VIEW_FACES], palettes: Vec<u32>) -> Baker {
         Baker {
-            grids,
+            grids: Vec::new(),
+            last: 0,
             geometry,
             lattices,
             palettes,
@@ -116,6 +119,26 @@ impl Baker {
         }
     }
 
+    /** Sets the grid of `level`; levels without one so far read as empty. */
+    pub fn set_grid(&mut self, level: usize, grid: Grid) -> &mut Grid {
+        self.reach(level);
+        self.surfaces.retain(|key, _| key.1 != level);
+        self.last = level;
+        self.grids[level] = grid;
+        &mut self.grids[level]
+    }
+
+    /** Empty grids up to `level`, if it has none. */
+    fn reach(&mut self, level: usize) {
+        while self.grids.len() <= level {
+            self.grids.push(Grid::new([0; 3], [0; 3], 0));
+        }
+    }
+
+    fn last_grid(&mut self) -> Option<&mut Grid> {
+        self.grids.get_mut(self.last)
+    }
+
     /**
      * Fills self.faces with the faces of a chunk (see chunk_faces) of a
      * slice as grid `level` sees it (in_grid), from its cell's surface,
@@ -124,6 +147,7 @@ impl Baker {
     #[allow(clippy::too_many_arguments)]
     fn chunk_faces(&mut self, face: usize, level: usize, slice: &Slice, i: i32, j: i32, eye: [i32; 3], fill: bool) {
         self.uses += 1;
+        self.reach(level);
         let key = (face, level, slice.level, slice.layer, slice.cutoff.to_bits(), i, j);
         if !self.surfaces.contains_key(&key) {
             if self.surfaces.len() >= MAX_SURFACES {
@@ -181,7 +205,7 @@ impl Baker {
 /** A world being handed over, then baking it. */
 enum State {
     None,
-    Loading { grids: Vec<Grid>, geometry: Vec<f64>, lattices: Vec<i32>, palettes: Vec<u32> },
+    Loading { geometry: Vec<f64>, lattices: Vec<i32>, palettes: Vec<u32> },
     Ready(Box<Baker>),
 }
 
@@ -195,7 +219,6 @@ thread_local! {
 pub extern "C" fn world_start(materials: usize) {
     STATE.with_borrow_mut(|state| {
         *state = State::Loading {
-            grids: Vec::new(),
             geometry: vec![0.0; FACE_KINDS * GEOMETRY],
             lattices: vec![0; VIEW_FACES * LATTICE],
             palettes: vec![0; VIEW_FACES * materials * FACE_KINDS],
@@ -204,26 +227,24 @@ pub extern "C" fn world_start(materials: usize) {
 }
 
 /**
- * Adds the loading world's grid of the next level, of the box given and
- * `used` bricks of sites; returns where to write its bricks (i32), then
- * its sites at world_cells().
+ * Sets the ready world's grid of `level`, of the box given and `used`
+ * bricks of sites; returns where to write its bricks (i32), then its sites
+ * at world_cells(). Chunks of a level are baked only once it has a grid.
  */
 #[unsafe(no_mangle)]
-pub extern "C" fn world_grid(min_x: i32, min_y: i32, min_z: i32, nx: i32, ny: i32, nz: i32, used: usize) -> *mut u8 {
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn world_grid(level: usize, min_x: i32, min_y: i32, min_z: i32, nx: i32, ny: i32, nz: i32, used: usize) -> *mut u8 {
     STATE.with_borrow_mut(|state| match state {
-        State::Loading { grids, .. } => {
-            grids.push(Grid::new([min_x, min_y, min_z], [nx, ny, nz], used));
-            grids.last_mut().expect("just pushed").bricks.as_mut_ptr() as *mut u8
-        }
+        State::Ready(baker) => baker.set_grid(level, Grid::new([min_x, min_y, min_z], [nx, ny, nz], used)).bricks.as_mut_ptr() as *mut u8,
         _ => std::ptr::null_mut(),
     })
 }
 
-/** Where to write the sites of the grid world_grid added last. */
+/** Where to write the sites of the grid world_grid set last. */
 #[unsafe(no_mangle)]
 pub extern "C" fn world_cells() -> *mut u8 {
     STATE.with_borrow_mut(|state| match state {
-        State::Loading { grids, .. } => grids.last_mut().map_or(std::ptr::null_mut(), |g| g.cells.as_mut_ptr()),
+        State::Ready(baker) => baker.last_grid().map_or(std::ptr::null_mut(), |g| g.cells.as_mut_ptr()),
         _ => std::ptr::null_mut(),
     })
 }
@@ -245,12 +266,12 @@ pub extern "C" fn world_table(table: u32) -> *mut u8 {
 #[unsafe(no_mangle)]
 pub extern "C" fn world_ready() {
     STATE.with_borrow_mut(|state| {
-        if let State::Loading { grids, geometry, lattices, palettes } = std::mem::replace(state, State::None) {
+        if let State::Loading { geometry, lattices, palettes } = std::mem::replace(state, State::None) {
             let lattices = std::array::from_fn(|f| {
                 let l = &lattices[f * LATTICE..(f + 1) * LATTICE];
                 Lattice { r: [l[0], l[1], l[2]], u: [l[3], l[4], l[5]], f: [l[6], l[7], l[8]] }
             });
-            *state = State::Ready(Box::new(Baker::new(grids, Geometry::from_table(&geometry), lattices, palettes)));
+            *state = State::Ready(Box::new(Baker::new(Geometry::from_table(&geometry), lattices, palettes)));
         }
     })
 }

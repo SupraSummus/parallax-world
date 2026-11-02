@@ -1,4 +1,4 @@
-import type { World } from '@/lib/world'
+import type { Vec3, World } from '@/lib/world'
 import { faceShade } from '@/lib/bake'
 import { VOXEL_FACES } from '@/lib/fcc'
 
@@ -20,15 +20,18 @@ const FACES = VOXEL_FACES.map(({ normal: [a, b, c], corners }) => ({
 }))
 
 /**
- * Builds a triangle mesh of every voxel face not covered by a neighbour.
+ * Builds a triangle mesh of every voxel face not covered by a neighbour,
+ * of the voxels of the world's level 0 within `reach` of `around` in x and z
+ * (all of them by default).
  * Voxel (x, y, z) is the rhombic dodecahedron around site (x, y, z)
  * (see fcc.ts), as in the parallax renderer.
  */
-export function buildVoxelMesh(world: World): VoxelMesh {
+export function buildVoxelMesh(world: World, around: Vec3 = { x: 0, y: 0, z: 0 }, reach = Infinity): VoxelMesh {
   const grid = world.grid
   // Each face not covered by a neighbour: f(x, y, z, id, face index).
   const eachFace = (f: (x: number, y: number, z: number, id: number, face: number) => void) => {
     grid.forEach((x, y, z, id) => {
+      if (Math.abs(x - around.x) > reach || Math.abs(z - around.z) > reach) return
       FACES.forEach(({ normal: [a, b, c] }, k) => {
         if (grid.get(x + a, y + b, z + c) === 0) f(x, y, z, id, k)
       })
