@@ -124,3 +124,37 @@ pub fn site_of(grid: &Grid, x: i64, y: i64, z: i64) -> u8 {
     let at = grid.bricks[(((k >> 3) * by + (j >> 3)) * bx + (i >> 3)) as usize];
     if at < 0 { 0 } else { grid.cells[at as usize * BRICK_SITES + ((((k & 7) * BRICK + (j & 7)) * BRICK + (i & 7)) >> 1) as usize] }
 }
+
+impl VoxelGrid {
+    /**
+     * The grid of `b`, its bricks taken from `parts`: each a whole number of
+     * bricks from the box's corner, no two with voxels in one brick of it
+     * (VoxelGrid.compose in voxel-grid.ts). The rest of the box is empty.
+     */
+    pub fn compose(b: &Box3, parts: &[VoxelGrid]) -> VoxelGrid {
+        let mut grid = VoxelGrid::new(b);
+        let bz = (grid.n[2] + BRICK - 1) / BRICK;
+        for part in parts {
+            let offset: [i64; 3] = std::array::from_fn(|i| {
+                assert_eq!((part.min[i] - grid.min[i]) % BRICK, 0, "a part is not a whole number of bricks from the box");
+                (part.min[i] - grid.min[i]) / BRICK
+            });
+            let pz = (part.n[2] + BRICK - 1) / BRICK;
+            for k in 0..pz {
+                for j in 0..part.by {
+                    for i in 0..part.bx {
+                        let at = part.bricks[((k * part.by + j) * part.bx + i) as usize];
+                        let [gi, gj, gk] = [i + offset[0], j + offset[1], k + offset[2]];
+                        if at < 0 || gi < 0 || gj < 0 || gk < 0 || gi >= grid.bx || gj >= grid.by || gk >= bz {
+                            continue;
+                        }
+                        grid.bricks[((gk * grid.by + gj) * grid.bx + gi) as usize] = (grid.cells.len() / BRICK_SITES) as i32;
+                        let from = at as usize * BRICK_SITES;
+                        grid.cells.extend_from_slice(&part.cells[from..from + BRICK_SITES]);
+                    }
+                }
+            }
+        }
+        grid
+    }
+}
