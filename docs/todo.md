@@ -18,6 +18,14 @@ Numbers are for the forest at 1280×800 (`docs/architecture.md`).
   Over 95 % of opaque baked pixels are covered by nearer slices.
   The eye's cell bounds where the camera can see from,
   so content hidden from the whole cell need not be baked.
+- **Flying, the main thread can't keep up with the workers.**
+  Flying up (a trace in a desktop browser),
+  workers bake about 4,000 chunks a second
+  and the main thread is busy 97 % of the time, at 10–13 frames a second.
+  Renders take 30–90 ms, longer the more new chunks they take:
+  uploading textures, handing chunks to `Coverage` (`coverage_add`),
+  and covering with them (`coverage_cover`).
+  Turning, `coverage_cover` and `coverage_face` take most of a render.
 - **One browser check for agents.**
   Agent sessions spend about a third of their command time
   in one-off Playwright scripts:

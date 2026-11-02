@@ -196,7 +196,7 @@ export interface BakeResult {
 export function bakeHandler(
   post: (result: BakeResult, transfer: Transferable[]) => void,
   schedule: (step: () => void) => void,
-  budget = 0,
+  budget: number,
 ): (message: BakeMessage) => void {
   let baker: ChunkBaker | null = null
   let generation = 0

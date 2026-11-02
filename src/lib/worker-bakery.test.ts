@@ -17,7 +17,7 @@ class FakeWorker implements BakeWorker {
   private handle = bakeHandler(result => {
     this.baked.push(...result.baked.map(({ request }) => request))
     queueMicrotask(() => { this.onmessage?.({ data: result } as MessageEvent<BakeResult>) })
-  }, queueMicrotask)
+  }, queueMicrotask, 0)
 
   postMessage(message: BakeMessage) {
     queueMicrotask(() => { this.handle(message) })
@@ -152,9 +152,9 @@ describe('WorkerBakery', () => {
   })
 
   it('bakes from the latest list, a chunk again only once the main thread took it', () => {
-    const baked: [number, number][] = []
+    const posts: [number, number][] = []
     const steps: (() => void)[] = []
-    const handle = bakeHandler(({ seq, baked: [{ request }] }) => baked.push([seq, request.i]), step => steps.push(step))
+    const handle = bakeHandler(({ seq, baked: [{ request }] }) => posts.push([seq, request.i]), step => steps.push(step), 0)
     const want = (received: number, ...cells: number[]) => {
       handle({ type: 'want', requests: encodeRequests(cells.map(at)), received })
     }
@@ -165,11 +165,11 @@ describe('WorkerBakery', () => {
     // Replaces what is left; 0 is on its way, so not baked again.
     want(0, 0, 3)
     run()
-    expect(baked).toEqual([[1, 0], [2, 3]])
+    expect(posts).toEqual([[1, 0], [2, 3]])
     // Taken, and listed again (evicted): baked again.
     want(2, 0)
     run()
-    expect(baked).toEqual([[1, 0], [2, 3], [3, 0]])
+    expect(posts).toEqual([[1, 0], [2, 3], [3, 0]])
   })
 
   it('posts the chunks a step bakes within its budget at once', () => {
