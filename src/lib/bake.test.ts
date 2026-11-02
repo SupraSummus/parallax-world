@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { shadedPalette, faceShade, FACE_SHADE } from './bake'
-import { ChunkBaker, FACE } from './chunk-baker'
+import { ChunkBaker, SPLAT } from './chunk-baker'
 import { VOXEL_FACES } from './fcc'
 import { sliceCentre, holds, atomLevel, atomSpacing } from './slice-selection'
 import { FACES, LAYER, toLocal, type Face } from './view'
@@ -38,42 +38,40 @@ describe('shadedPalette', () => {
 })
 
 /**
- * The colour (an index into shadedPalette) that the first voxel of a slice,
- * `size` times the lattice's, hit by the ray from `eye` through
- * (px, py, centre) shows: the face it
- * enters through. All in face coordinates. Null if it hits nothing, or if
- * rays a hair apart disagree (an edge passes there).
+ * The first voxel of a slice, `size` times the lattice's, hit by the ray
+ * from `eye` through (px, py, centre): its index in `sites`, -1 if none.
+ * All in face coordinates. Null if rays a hair apart disagree (an edge
+ * passes there).
  */
-function rayCast(sites: (Vec3 & { id: number })[], size: number, centre: number, px: number, py: number, eye: Vec3): number | null {
+function rayCast(sites: Vec3[], size: number, centre: number, px: number, py: number, eye: Vec3): number | null {
   // Kinds' normals in face coordinates, the same on every face.
   const normals = VOXEL_FACES.map(({ normal: [x, y, z] }) => toLocal(FACES[0], { x, y, z }))
   const one = (ox: number, oy: number) => {
     // Along (tanX, tanY, 1) from the plane, both ways.
     const [tanX, tanY] = [(ox - eye.x) / (centre - eye.z), (oy - eye.y) / (centre - eye.z)]
-    let best = { t: Infinity, colour: -1 }
-    for (const v of sites) {
+    let best = { t: Infinity, site: -1 }
+    sites.forEach((v, index) => {
       let enter = -Infinity
       let exit = Infinity
-      let through = -1
       // Inside the voxel: n · (p − site) ≤ size for every face normal n.
-      normals.forEach(({ x: a, y: b, z: c }, k) => {
+      normals.forEach(({ x: a, y: b, z: c }) => {
         const nd = a * tanX + b * tanY + c
         const no = a * (ox - v.x) + b * (oy - v.y) + c * (centre - v.z)
         if (Math.abs(nd) < 1e-12) {
           if (no > size) enter = Infinity
         } else if (nd < 0) {
           const t = (size - no) / nd
-          if (t > enter) [enter, through] = [t, k]
+          enter = Math.max(enter, t)
         } else {
           exit = Math.min(exit, (size - no) / nd)
         }
       })
-      if (enter < exit && enter < best.t) best = { t: enter, colour: v.id * VOXEL_FACES.length + through }
-    }
-    return best.colour
+      if (enter < exit && enter < best.t) best = { t: enter, site: index }
+    })
+    return best.site
   }
-  const colours = [[0, 0], [0.01, 0.003], [-0.004, 0.01], [0.007, -0.009], [-0.01, -0.005]].map(([dx, dy]) => one(px + dx, py + dy))
-  return colours.every(c => c === colours[0]) ? colours[0] : null
+  const hits = [[0, 0], [0.01, 0.003], [-0.004, 0.01], [0.007, -0.009], [-0.01, -0.005]].map(([dx, dy]) => one(px + dx, py + dy))
+  return hits.every(c => c === hits[0]) ? hits[0] : null
 }
 
 describe('ChunkBaker', () => {
@@ -95,10 +93,8 @@ describe('ChunkBaker', () => {
     }
   }
   const grid = VoxelGrid.fromVoxels(voxels)
-  const ids = new Map(grid.materials.map((m, id) => [m.color, id]))
   const levels = levelsOf(grid)
   const baker = new ChunkBaker(grid.materials, levels)
-  const palette = shadedPalette(grid.materials, face.lattice)
 
   // Slices with sites above the blob's bottom show cut faces; the blob is
   // within one slab of level 3, of level 4, and of level 5, made of the
@@ -107,57 +103,83 @@ describe('ChunkBaker', () => {
   it.each([
     [0, 0, Infinity, [0, 0, -12]], [0, 3, Infinity, [8, -4, -8]], [1, 1, Infinity, [-16, 0, -10]], [1, 2, Infinity, [4, 8, -6]],
     [2, 1, Infinity, [8, 4, -8]], [3, 0, 4, [8, 6, -14]], [4, 0, Infinity, [-8, -6, -20]], [5, 0, Infinity, [-8, -4, -20]], [5, 0, 8, [8, 4, -16]], [0, 5, Infinity, [0, -8, -4]],
-  ] as const)('paints what a ray from the eye hits first (level %s, layer %s, cutoff %s, eye %j)', (level, layer, cutoff, eye) => {
+  ] as const)('paints every voxel a ray from the eye hits first, far to near, at its site (level %s, layer %s, cutoff %s, eye %j)', (level, layer, cutoff, eye) => {
     const slice = { level, layer, cutoff }
     const centre = sliceCentre(slice)
     // The voxels of the grid it reads, N times the lattice's.
     const n = atomSpacing(level)
-    const sites = levels[atomLevel(level)].toVoxels().map(v => ({ ...v, ...toLattice(face, { x: n * v.x, y: n * v.y, z: n * v.z }) }))
+    const voxels = levels[atomLevel(level)].toVoxels().map(v => toLattice(face, { x: n * v.x, y: n * v.y, z: n * v.z }))
       .filter(v => holds(slice, [v.a, v.b, v.c]))
-      .map(v => ({ x: v.a * LAYER, y: v.b, z: v.c * LAYER, id: ids.get(v.color) ?? 0 }))
+    const sites = voxels.map(v => ({ x: v.a * LAYER, y: v.b, z: v.c * LAYER }))
     expect(sites.length).toBeGreaterThan(20)
-    const { width, height, pixels, originX, originY, scale } = baker.bake({ face: face.name, ...slice, i: 0, j: 0, eye, fill: false })
+    const chunk = baker.bake({ face: face.name, ...slice, i: 0, j: 0, eye, fill: false })
+    const { splats, painted, originX, originY, extentWidth, extentHeight } = chunk
     const from = { x: eye[0] * LAYER, y: eye[1], z: eye[2] * LAYER }
+    const distance = (v: { a: number; b: number; c: number }) => (v.a - eye[0]) ** 2 + 2 * (v.b - eye[1]) ** 2 + (v.c - eye[2]) ** 2
 
-    let compared = 0
-    const wrong: string[] = []
-    // About 1000 samples: ray casting is slow.
-    for (let row = 0; row < height; row += height / 24) {
-      for (let col = 0; col < width; col += width / 36) {
-        const [i, j] = [Math.floor(col), Math.floor(row)]
-        const px = originX + (i + 0.5) / scale
-        const py = originY - (j + 0.5) / scale
-        const expected = rayCast(sites, n, centre, px, py, from)
-        if (expected === null) continue
-        compared++
-        const colour = expected < 0 ? 0 : palette[expected]
-        if (pixels[j * width + i] !== colour) wrong.push(`(${String(px)}, ${String(py)}): ${String(pixels[j * width + i])} ≠ ${String(colour)}`)
+    // Each splat: centred where the line from the eye through its site meets the plane.
+    const lattice = baker.sites(splats.length / SPLAT)
+    const splatted = new Set<string>()
+    for (let k = 0; k < painted; k++) {
+      const [a, b, c] = lattice.subarray(3 * k, 3 * k + 3)
+      splatted.add([a, b, c].join())
+      const t = (centre - from.z) / (c * LAYER - from.z)
+      expect(originX + splats[k * SPLAT]).toBeCloseTo(from.x + (a * LAYER - from.x) * t, 3)
+      expect(originY + splats[k * SPLAT + 1]).toBeCloseTo(from.y + (b - from.y) * t, 3)
+      expect(splats[k * SPLAT + 2]).toBeCloseTo(n * t * LAYER, 3)
+      expect(splats[k * SPLAT + 3]).toBeCloseTo(n * t, 3)
+      if (k > 0) {
+        const [pa, pb, pc] = lattice.subarray(3 * k - 3, 3 * k)
+        expect(distance({ a, b, c })).toBeLessThanOrEqual(distance({ a: pa, b: pb, c: pc }))
       }
     }
-    expect(compared).toBeGreaterThan(300)
-    expect(wrong).toEqual([])
+
+    let compared = 0
+    const missing: string[] = []
+    // About 1000 samples: ray casting is slow.
+    for (let row = 0.5; row < 24; row++) {
+      for (let col = 0.5; col < 36; col++) {
+        const px = originX + (col / 36) * extentWidth
+        const py = originY - (row / 24) * extentHeight
+        const hit = rayCast(sites, n, centre, px, py, from)
+        if (hit === null || hit < 0) continue
+        compared++
+        const { a, b, c } = voxels[hit]
+        // Unless its splat misses what the chunk draws (its outline in perspective may reach further).
+        const t = (centre - from.z) / (c * LAYER - from.z)
+        const [x, y, w, h] = [from.x + (a * LAYER - from.x) * t, from.y + (b - from.y) * t, n * t * LAYER, n * t]
+        if (x + w <= originX || x - w >= originX + extentWidth || y + h <= originY - extentHeight || y - h >= originY) continue
+        if (!splatted.has([a, b, c].join())) missing.push([a, b, c].join())
+      }
+    }
+    expect(compared).toBeGreaterThan(200)
+    expect(missing).toEqual([])
   }, 30_000)
 
-  it('grows only the open faces of voxels going on into another slice', () => {
+  it('grows only voxels with an open face going on into another slice, past their painted splat', () => {
     // A floor two units thick through layers 0 to 7, seen from straight
     // ahead, level with it, so its sides facing up show only grown.
     const floor = VoxelGrid.fromVoxels(voxels.filter(v => v.b >= 0 && v.b < 2))
     const slice = { level: 1, layer: 1, cutoff: Infinity }
-    const data = new ChunkBaker(floor.materials, [floor]).faces({ face: face.name, ...slice, i: 0, j: 0, eye: [0, 0, -20], fill: true })
+    const floorBaker = new ChunkBaker(floor.materials, [floor])
+    const chunk = floorBaker.bake({ face: face.name, ...slice, i: 0, j: 0, eye: [0, 0, -20], fill: true })
+    const count = chunk.splats.length / SPLAT
+    const sites = floorBaker.sites(count)
     const filled = (a: number, b: number, c: number) => {
       const p = toWorld(face, a, b, c)
       return floor.get(p.x, p.y, p.z) !== 0
     }
-    const grown = Array.from({ length: data.length / FACE }, (_, f) => f * FACE)
-      .filter(o => data.subarray(o + 10, o + 14).some(g => g > 0))
-      .map(o => {
-        const [a, b, c] = data.subarray(o + 14, o + 17)
-        const { a: da, b: db, c: dc } = kindOffsets[data[o + 8] % VOXEL_FACES.length]
-        const crossing = kindOffsets.some(k => filled(a + k.a, b + k.b, c + k.c) && !holds(slice, [a + k.a, b + k.b, c + k.c]))
-        return { open: !filled(a + da, b + db, c + dc), crossing, reached: data[o + 9] }
-      })
+    const key = (k: number) => sites.subarray(3 * k, 3 * k + 3).join()
+    const height = (k: number) => chunk.splats[k * SPLAT + 3]
+    const painted = new Map(Array.from({ length: chunk.painted }, (_, k) => [key(k), height(k)]))
+    const grown = Array.from({ length: count - chunk.painted }, (_, g) => chunk.painted + g).map(k => {
+      const [a, b, c] = sites.subarray(3 * k, 3 * k + 3)
+      const open = kindOffsets.some(o => !filled(a + o.a, b + o.b, c + o.c))
+      const crossing = kindOffsets.some(o => filled(a + o.a, b + o.b, c + o.c) && !holds(slice, [a + o.a, b + o.b, c + o.c]))
+      return { open, crossing, larger: height(k) > (painted.get(key(k)) ?? 0) }
+    })
     expect(grown.length).toBeGreaterThan(0)
     expect(grown.every(({ open, crossing }) => open && crossing)).toBe(true)
-    expect(grown.some(({ reached }) => reached === 0)).toBe(true)
+    expect(grown.every(({ larger }) => larger)).toBe(true)
   })
 })

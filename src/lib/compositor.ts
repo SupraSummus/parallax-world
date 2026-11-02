@@ -1,3 +1,4 @@
+import { SPLAT } from './chunk-baker'
 import type { Chunk, Frame } from './renderer'
 import { faceBasis, viewBasis, type Basis, type Face } from './view'
 
@@ -12,28 +13,34 @@ const SKY_TOP_TANGENT = 0.625
 const SEAM_COLOR = '#ff2fd0'
 const SEAM_WIDTH = 1.5
 
-// One rectangle per chunk on its layer's plane, projected like
-// projector() in view.ts; `view` has the camera's axes as columns, in the
-// layer's face coordinates (the world's for the sky). The corners come
-// from gl_VertexID, so there are no vertex buffers. The sky and the seams
-// cover the screen.
+// Each splat is a rectangle around its hexagon on its layer's plane, from
+// gl_VertexID, one instance per splat; projected like projector() in
+// view.ts, `view` having the camera's axes as columns, in the layer's face
+// coordinates (the world's for the sky). `origin` is the chunk's top-left
+// corner, camera-relative. The sky and the seams cover the screen.
 const VERTEX_SHADER = `#version 300 es
 uniform vec2 viewport;
 uniform float focal;
 uniform mat3 view;
-uniform vec4 rect; // x, y of the top-left corner, width, height (camera-relative)
+uniform vec2 origin;
 uniform float distance;
 uniform float depth;
 uniform bool sky;
 uniform bool seams;
-out vec2 uv;
+in vec4 splat; // centre x, y relative to origin, width, height
+in vec4 paint;
+out vec2 corner; // in the rectangle, from -1 to 1
+flat out float slant; // the hexagon is |corner.x| · slant + |corner.y| ≤ 1
+flat out vec3 colour;
 void main() {
-  uv = vec2(gl_VertexID & 1, gl_VertexID >> 1);
+  corner = vec2(gl_VertexID & 1, gl_VertexID >> 1) * 2.0 - 1.0;
   if (sky || seams) {
-    gl_Position = vec4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, depth, 1.0);
+    gl_Position = vec4(corner, depth, 1.0);
     return;
   }
-  vec3 p = transpose(view) * vec3(rect.x + uv.x * rect.z, rect.y - uv.y * rect.w, distance);
+  slant = splat.z / (sqrt(2.0) * splat.w);
+  colour = paint.rgb;
+  vec3 p = transpose(view) * vec3(origin + splat.xy + corner * splat.zw, distance);
   // Homogeneous, so the GPU clips what is behind the camera and interpolates in perspective.
   gl_Position = vec4(p.xy * focal / (viewport / 2.0), depth * p.z, p.z);
 }`
@@ -41,8 +48,10 @@ void main() {
 // `ray` is the pixel's direction in face coordinates, the same for every
 // layer of a face. A face draws only its own rays (inFace in view.ts), so
 // the faces tile the screen; they overlap by a hair, so rounding never
-// leaves a seam pixel to neither. Chunk pixels are opaque or empty, so
-// nothing is blended: empty pixels are discarded and the depth test hides
+// leaves a seam pixel to neither. A chunk draws only within `clip`, its
+// part of the plane (camera-relative left, top, right, bottom), decided by
+// the pixel's ray, so neighbouring chunks share no pixel and leave none
+// out. Splats are opaque: nothing is blended, and the depth test hides
 // what nearer layers cover. The sky is one more rectangle, behind every layer.
 // Seams, if shown, are drawn last, over everything, with `view` in world
 // coordinates. A ray's face is the neighbour direction (±1, ±1, 0) along its
@@ -54,7 +63,8 @@ uniform vec2 viewport;
 uniform vec2 resolution; // the canvas in device pixels
 uniform float focal;
 uniform mat3 view;
-uniform sampler2D image;
+uniform float distance;
+uniform vec4 clip;
 uniform vec3 skyTop;
 uniform vec3 horizon;
 uniform float fog;
@@ -62,7 +72,9 @@ uniform bool sky;
 uniform bool seams;
 uniform vec3 seamColor;
 uniform float seamWidth; // device pixels
-in vec2 uv;
+in vec2 corner;
+flat in float slant;
+flat in vec3 colour;
 out vec4 color;
 void main() {
   vec3 ray = view * vec3((gl_FragCoord.xy / resolution - 0.5) * viewport / focal, 1.0);
@@ -80,30 +92,35 @@ void main() {
     float elevation = ray.y / length(ray.xz);
     rgb = mix(horizon, skyTop, clamp(elevation / ${String(SKY_TOP_TANGENT)}, 0.0, 1.0));
   } else {
+    if (abs(corner.x) * slant + abs(corner.y) >= 1.0) discard;
     if (abs(ray.x) + sqrt(2.0) * abs(ray.y) > ray.z * 1.001) discard;
-    vec4 texel = texture(image, uv);
-    // Smoothing a minified chunk blends in its empty pixels; keep only the mostly opaque.
-    if (texel.a < 0.5) discard;
-    rgb = texel.rgb / texel.a;
+    vec2 p = ray.xy / ray.z * distance;
+    if (p.x < clip.x || p.x >= clip.z || p.y > clip.y || p.y <= clip.w) discard;
+    rgb = colour;
   }
   color = vec4(mix(rgb, horizon, fog), 1.0);
 }`
 
 const rgb = (hex: string) => [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255) as [number, number, number]
 
-const UNIFORMS = ['viewport', 'resolution', 'focal', 'view', 'rect', 'distance', 'depth', 'skyTop', 'horizon', 'fog', 'sky', 'seams', 'seamColor', 'seamWidth'] as const
+const UNIFORMS = ['viewport', 'resolution', 'focal', 'view', 'origin', 'clip', 'distance', 'depth', 'skyTop', 'horizon', 'fog', 'sky', 'seams', 'seamColor', 'seamWidth'] as const
 type Uniform = (typeof UNIFORMS)[number]
+
+/** Attribute locations of a splat's numbers (see SPLAT). */
+const SPLAT_AT = 0
+const PAINT_AT = 1
 
 /**
  * Draws Frames with WebGL 2 onto one canvas, near to far with a depth test,
- * so what nearer layers cover is rejected rather than blended. A chunk is
- * uploaded as a texture when it comes into view and dropped when it leaves.
+ * so what nearer layers cover is rejected rather than blended. A chunk's
+ * splats are uploaded as a buffer when it comes into view and dropped when
+ * it leaves.
  */
 export class Compositor {
   private canvas: HTMLCanvasElement
   private gl: WebGL2RenderingContext
   private uniforms = {} as Record<Uniform, WebGLUniformLocation | null>
-  private textures = new Map<Chunk, WebGLTexture>()
+  private buffers = new Map<Chunk, WebGLBuffer>()
   private frame: Frame | null = null
   private showSeams = false
 
@@ -118,7 +135,7 @@ export class Compositor {
     // over when it comes back.
     canvas.addEventListener('webglcontextlost', e => {
       e.preventDefault()
-      this.textures.clear()
+      this.buffers.clear()
     })
     canvas.addEventListener('webglcontextrestored', () => {
       this.setup()
@@ -158,9 +175,14 @@ export class Compositor {
 
     // Layer i at depth z(i), strictly inside (-1, 1) so rounding never clips
     // it; the sky behind all of them, still in front of the cleared depth.
+    // Within a chunk, a later splat covers an earlier one at the same depth
+    // (LEQUAL), so they are painted in order. Grown splats are drawn at
+    // z(i + ½): only where no splat of the layer is, and over farther layers.
     const z = (i: number) => (2 * i + 1) / (frame.layers.length + 2) - 1
     const drawn = new Set<Chunk>()
     gl.uniform1i(u.sky, 0)
+    gl.enableVertexAttribArray(SPLAT_AT)
+    gl.enableVertexAttribArray(PAINT_AT)
     let face: Face | null = null
     frame.layers.forEach((layer, i) => {
       if (layer.face !== face) {
@@ -168,16 +190,26 @@ export class Compositor {
         setView(faceBasis(face, frame.orientation))
       }
       const { distance, placements, fog } = layer
-      gl.uniform1f(u.depth, z(i))
       gl.uniform1f(u.distance, distance)
       gl.uniform1f(u.fog, fog)
       for (const { chunk, x, y } of placements) {
-        gl.bindTexture(gl.TEXTURE_2D, this.texture(chunk))
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer(chunk))
         drawn.add(chunk)
-        gl.uniform4f(u.rect, x, y, chunk.width / chunk.scale, chunk.height / chunk.scale)
-        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4)
+        gl.uniform2f(u.origin, x, y)
+        gl.uniform4f(u.clip, x, y, x + chunk.extentWidth, y - chunk.extentHeight)
+        const count = chunk.splats.length / SPLAT
+        for (const [first, n, depth] of [[0, chunk.painted, z(i)], [chunk.painted, count - chunk.painted, z(i + 0.5)]]) {
+          if (n === 0) continue
+          const offset = first * SPLAT * 4
+          gl.vertexAttribPointer(SPLAT_AT, 4, gl.FLOAT, false, SPLAT * 4, offset)
+          gl.vertexAttribPointer(PAINT_AT, 4, gl.UNSIGNED_BYTE, true, SPLAT * 4, offset + 16)
+          gl.uniform1f(u.depth, depth)
+          gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, n)
+        }
       }
     })
+    gl.disableVertexAttribArray(SPLAT_AT)
+    gl.disableVertexAttribArray(PAINT_AT)
     gl.uniform1i(u.sky, 1)
     setView(viewBasis(frame.orientation))
     gl.uniform1f(u.depth, z(frame.layers.length))
@@ -195,10 +227,10 @@ export class Compositor {
       gl.uniform1i(u.seams, 0)
     }
 
-    for (const [chunk, texture] of this.textures) {
+    for (const [chunk, buffer] of this.buffers) {
       if (drawn.has(chunk)) continue
-      gl.deleteTexture(texture)
-      this.textures.delete(chunk)
+      gl.deleteBuffer(buffer)
+      this.buffers.delete(chunk)
     }
   }
 
@@ -212,6 +244,8 @@ export class Compositor {
       gl.compileShader(shader)
       gl.attachShader(program, shader)
     }
+    gl.bindAttribLocation(program, SPLAT_AT, 'splat')
+    gl.bindAttribLocation(program, PAINT_AT, 'paint')
     gl.linkProgram(program)
     if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program) ?? 'WebGL link failed')
     gl.useProgram(program)
@@ -223,23 +257,18 @@ export class Compositor {
     gl.uniform3f(this.uniforms.seamColor, ...rgb(SEAM_COLOR))
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
     gl.enable(gl.DEPTH_TEST)
-    gl.depthFunc(gl.LESS)
+    gl.depthFunc(gl.LEQUAL)
+    for (const at of [SPLAT_AT, PAINT_AT]) gl.vertexAttribDivisor(at, 1)
   }
 
-  private texture(chunk: Chunk): WebGLTexture {
-    let texture = this.textures.get(chunk)
-    if (texture) return texture
+  private buffer(chunk: Chunk): WebGLBuffer {
+    let buffer = this.buffers.get(chunk)
+    if (buffer) return buffer
     const { gl } = this
-    texture = gl.createTexture()
-    gl.bindTexture(gl.TEXTURE_2D, texture)
-    const pixels = new Uint8Array(chunk.pixels.buffer, chunk.pixels.byteOffset, chunk.pixels.byteLength)
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, chunk.width, chunk.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, pixels)
-    // Crisp voxel edges when magnified, smooth when minified.
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
-    this.textures.set(chunk, texture)
-    return texture
+    buffer = gl.createBuffer()
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer)
+    gl.bufferData(gl.ARRAY_BUFFER, chunk.splats, gl.STATIC_DRAW)
+    this.buffers.set(chunk, buffer)
+    return buffer
   }
 }

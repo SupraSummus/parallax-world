@@ -1,4 +1,4 @@
-import { encodeRequests, type BakeMessage, type BakeResult, type ChunkImage, type ChunkRequest } from './chunk-baker'
+import { encodeRequests, type BakeMessage, type BakeResult, type ChunkSplats, type ChunkRequest } from './chunk-baker'
 import type { Bakery } from './renderer'
 import type { LayerIndexData, Material, VoxelData } from './voxel-grid'
 import type { GridPart, WorldType } from './world'
@@ -40,7 +40,7 @@ const equal = (a: Float64Array, b: Float64Array) => a.length === b.length && a.e
 export class WorkerBakery implements Bakery {
   private workers: Entry[]
   private generation = 0
-  private deliver: (request: ChunkRequest, image: ChunkImage) => void = () => undefined
+  private deliver: (request: ChunkRequest, chunk: ChunkSplats) => void = () => undefined
   private generated: (part: GridPart, grid: VoxelData, index: LayerIndexData) => void = () => undefined
 
   constructor(workers: BakeWorker[]) {
@@ -51,7 +51,7 @@ export class WorkerBakery implements Bakery {
     })
   }
 
-  connect(deliver: (request: ChunkRequest, image: ChunkImage) => void, generated: (part: GridPart, grid: VoxelData, index: LayerIndexData) => void = () => undefined) {
+  connect(deliver: (request: ChunkRequest, chunk: ChunkSplats) => void, generated: (part: GridPart, grid: VoxelData, index: LayerIndexData) => void = () => undefined) {
     this.deliver = deliver
     this.generated = generated
   }
@@ -104,7 +104,7 @@ export class WorkerBakery implements Bakery {
       return
     }
     entry.received = result.seq
-    if (current) for (const { request, image } of result.baked) this.deliver(request, image)
+    if (current) for (const { request, chunk } of result.baked) this.deliver(request, chunk)
   }
 }
 

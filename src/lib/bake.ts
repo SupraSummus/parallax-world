@@ -19,13 +19,10 @@ const placed = ([a, b, c]: number[]) => [a * LAYER, b, c * LAYER]
 
 /**
  * The voxel's faces in a face's lattice coordinates (any face's: they see
- * the same lattice), 18 numbers per kind: the offset (a, b, c) of the
- * neighbour across it, its normal, and its four corners, those two in
- * face coordinates.
+ * the same lattice), 6 numbers per kind: the offset (a, b, c) of the
+ * neighbour across it, and its normal in face coordinates.
  */
-export const VOXEL_GEOMETRY = Float64Array.from(VOXEL_FACES.flatMap(({ normal, corners }) => [
-  ...latticeOf(normal), ...placed(latticeOf(normal)), ...corners.flatMap(c => placed(latticeOf(c))),
-]))
+export const VOXEL_GEOMETRY = Float64Array.from(VOXEL_FACES.flatMap(({ normal }) => [...latticeOf(normal), ...placed(latticeOf(normal))]))
 
 /** Brightness of a face by the axis it faces along, shared with the reference viewer. @internal */
 export const FACE_SHADE = { front: 0.9, back: 0.65, left: 0.7, right: 0.8, bottom: 0.55, top: 1 }

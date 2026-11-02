@@ -11,21 +11,27 @@ Numbers are for the forest at 1280×800, as measured when written.
   (N = 2^(k−1)) would cut both: detail ∝ √N,
   chunks in view ∝ detail³ and rebakes per unit moved ∝ chunks / N,
   so ∝ √N, with eyes between voxel sites.
-- **Chunks are magnified on screen.**
-  `render_scale` bakes ⌊40 / t⌋ pixels per unit of a slice t thick,
+- **Coverage masks are coarser than the screen.**
+  `mask_scale` marks ⌊40 / t⌋ pixels per unit of a slice t thick,
   but at a level's nearest slices a unit is focal / (t · detail · LAYER)
-  pixels on screen, about 95 / t at 90° on 1280 px with the default leak,
-  so chunks are upscaled up to about 3×
-  (more where `RENDER_SCALE` caps them, half that at a level's far end).
-  Slices ignore the field of view, and so does baking:
-  zoomed in, chunks are upscaled more.
-  `render_scale` could follow the focal length and detail,
+  pixels on screen, about 95 / t at 90° on 1280 px with the default leak.
+  A mask pixel counts as drawn when its centre is in a splat,
+  so a gap between splats narrower than a mask pixel can count as covered,
+  and what is behind it is skipped.
+  The mask could follow the focal length and detail,
   keyed in the chunk like `fill`, leaving the slices as they are.
+- **Every splat in view is drawn every frame.**
+  The forest has millions in view;
+  headless Chromium's software WebGL takes over a second per frame,
+  and real GPUs are not measured yet.
+  Splats a chunk's nearer ones hide from the whole eye's cell
+  need not be in it.
 - **Bricks on the edge of a face's rhombus are baked whole.**
   Near where a level starts, about 19 bricks meet the rhombus,
   and most of them cross its edge or the screen's.
-- **Most baked pixels are hidden.**
-  Over 95 % of opaque baked pixels are covered by nearer slices.
+- **Most baked splats are hidden.**
+  When chunks were bitmaps,
+  over 95 % of opaque baked pixels were covered by nearer slices.
   The eye's cell bounds where the camera can see from,
   so content hidden from the whole cell need not be baked.
 - **Flying, the main thread can't keep up with the workers.**
@@ -33,7 +39,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   workers bake about 4,000 chunks a second
   and the main thread is busy 97 % of the time, at 10–13 frames a second.
   Renders take 30–90 ms, longer the more new chunks they take:
-  uploading textures, handing chunks to `Coverage` (`coverage_add`),
+  uploading textures (now splats), handing chunks to `Coverage` (`coverage_add`),
   and covering with them (`coverage_cover`).
 - **Turning, finding covered chunks is slow.**
   About 11 ms of a render (forest, 1920×1080, Node),
@@ -74,7 +80,10 @@ Numbers are for the forest at 1280×800, as measured when written.
   four or more faces are in view at once, each with its own near slices.
 - Find covered chunks more exactly: many chunks drawn show no pixel.
 - Measure the WebGL compositor on real GPUs (headless Chromium only has a
-  software one); if draw calls matter, pack chunks into a texture atlas.
+  software one); if draw calls matter, pack chunks' splats into one buffer.
+- Project splats from the eye in the vertex shader instead of in the baker:
+  a chunk's splats would no longer depend on the eye, only its mask would,
+  so moving would rebake masks, not splats.
 - Paint cut cross-sections with the colour of the surface above them: a 2D
   prototype allowed slices twice as thick at the same leak.
 - Fill gaps in screen space (only pixels no layer covers) instead of

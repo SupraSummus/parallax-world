@@ -2,10 +2,11 @@ import { describe, it, expect } from 'vitest'
 import { ParallaxRenderer, type Frame } from './renderer'
 import { World } from './world'
 import { projector } from './view'
+import { rasterise } from './picture.test-helper'
 
 /**
  * Behavioral regression tests for previously fixed rendering bugs. They check
- * observable output only: the pixels of the chunks in a frame, where the
+ * observable output only: what the chunks in a frame draw, where the
  * frame puts them, and the per-render stats.
  */
 
@@ -19,16 +20,17 @@ function makeWorldWithVoxels(voxels: World['voxels']): World {
   return custom
 }
 
-/** Screen positions (CSS pixels) of the centres of all drawn chunk pixels. */
+/** Screen positions (CSS pixels) of the centres of all drawn pixels of the chunks' rasters (see rasterise). */
 function drawnPixels(frame: Frame): { x: number; y: number }[] {
   return frame.layers.flatMap(({ face, distance, placements }) => placements.flatMap(({ chunk, x, y }) => {
     const points: { x: number; y: number }[] = []
     const project = projector(frame, face)
-    chunk.pixels.forEach((pixel, i) => {
+    const { width, scale } = chunk.mask
+    rasterise(chunk).forEach((pixel, i) => {
       if (pixel === 0) return
       const point = project({
-        x: x + ((i % chunk.width) + 0.5) / chunk.scale,
-        y: y - (Math.floor(i / chunk.width) + 0.5) / chunk.scale,
+        x: x + ((i % width) + 0.5) / scale,
+        y: y - (Math.floor(i / width) + 0.5) / scale,
         z: distance,
       })
       if (point) points.push(point)
@@ -40,7 +42,7 @@ function drawnPixels(frame: Frame): { x: number; y: number }[] {
 /**
  * Screen pixels in columns [fromX, toX) that nothing covers, between covered
  * ones, compositing the layers of the face `along` as the compositor does
- * (nearest chunk pixel). The view must look straight along that face.
+ * (nearest pixel of a chunk's raster). The view must look straight along that face.
  */
 function gapPixels(frame: Frame, along: string, fromX: number, toX: number): number {
   const { width, height, focal } = frame
@@ -49,15 +51,17 @@ function gapPixels(frame: Frame, along: string, fromX: number, toX: number): num
     for (const { chunk, x, y } of placements) {
       const corner = projector(frame, face)({ x, y, z: distance })
       if (!corner) continue
-      // Screen pixels per chunk pixel.
-      const scale = focal / distance / chunk.scale
+      const pixels = rasterise(chunk)
+      const mask = chunk.mask
+      // Screen pixels per raster pixel.
+      const scale = focal / distance / mask.scale
       const left = Math.max(0, Math.ceil(corner.x - 0.5))
-      const right = Math.min(width, corner.x + chunk.width * scale - 0.5)
-      for (let row = Math.max(0, Math.ceil(corner.y - 0.5)); row < Math.min(height, corner.y + chunk.height * scale - 0.5); row++) {
+      const right = Math.min(width, corner.x + mask.width * scale - 0.5)
+      for (let row = Math.max(0, Math.ceil(corner.y - 0.5)); row < Math.min(height, corner.y + mask.height * scale - 0.5); row++) {
         const v = Math.floor((row + 0.5 - corner.y) / scale)
         for (let column = left; column < right; column++) {
           const u = Math.floor((column + 0.5 - corner.x) / scale)
-          if (chunk.pixels[v * chunk.width + u] !== 0) covered[row * width + column] = 1
+          if (pixels[v * mask.width + u] !== 0) covered[row * width + column] = 1
         }
       }
     }

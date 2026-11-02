@@ -1,5 +1,5 @@
 /**
- * Baking whole chunks: from a chunk request to its pixels, by the baker in
+ * Baking whole chunks: from a chunk request to its splats, by the baker in
  * bake/ (Rust, compiled to WebAssembly and inlined here). Used by the
  * renderer directly (without workers) and inside bake workers, through the
  * message protocol below. No DOM.
@@ -28,26 +28,45 @@ export interface ChunkRequest extends SliceId {
   grid: number
 }
 
-/** A baked chunk's pixels, cropped to what is drawn. */
-export interface ChunkImage {
-  /** Size in pixels; see originX/originY. */
-  width: number
-  height: number
-  /** RGBA, rows top to bottom; transparent where nothing is drawn. */
-  pixels: Uint32Array
+/** Numbers per splat in ChunkSplats.splats. */
+export const SPLAT = 5
+
+/**
+ * A baked chunk: its visible voxels, each a hexagon of one colour (a
+ * splat) on its slice's centre plane (see chunk_splats and Splat in
+ * bake/src/splats.rs), clipped to its cell.
+ */
+export interface ChunkSplats {
   /**
-   * A byte per block of 4 × 4 pixels, in rows: whether all its pixels are
-   * drawn, and whether some are (solid_blocks in bake/src/fill.rs), for
-   * finding what the chunk hides and whether it is hidden (occlusion.ts).
+   * SPLAT numbers each: x, y of its centre relative to (originX, originY),
+   * its width and height (the points (x + u, y + v) with |u| ≤ width and
+   * |u| / √2 + |v| ≤ height), in world units, then its colour, opaque RGBA bytes
+   * (little-endian, as in ImageData) as the float's bits. First the
+   * `painted` ones, far to near, then the grown ones, far to near, drawn
+   * only where the chunk paints nothing.
    */
-  blocks: Uint8Array
-  /** x, y of the top-left pixel's corner, in face coordinates. */
+  splats: Float32Array
+  painted: number
+  /** x, y of the top-left corner of what is drawn, in face coordinates, and its size in world units. */
   originX: number
   originY: number
-  /** Pixels per world unit (render_scale in bake/src/lib.rs). */
+  extentWidth: number
+  extentHeight: number
+  mask: Mask
+}
+
+/**
+ * What a chunk draws, width × height pixels from its top-left corner at
+ * `scale` pixels per world unit: a byte per block of 4 × 4 pixels, in
+ * rows, whether all its pixels are drawn, and whether some are
+ * (solid_blocks in bake/src/fill.rs), for finding what the chunk hides
+ * and whether it is hidden (occlusion.ts).
+ */
+interface Mask {
+  blocks: Uint8Array
+  width: number
+  height: number
   scale: number
-  /** Number of voxel faces drawn. */
-  facesDrawn: number
 }
 
 /** The baker's exports (bake/src/lib.rs). */
@@ -59,19 +78,9 @@ interface Baker {
   world_table: (table: number) => number
   world_ready: () => void
   bake: Call
-  faces: Call
+  sites: () => number
 }
 type Call = (face: number, level: number, layer: number, cutoff: number, i: number, j: number, eyeA: number, eyeB: number, eyeC: number, fill: number) => number
-
-/**
- * Numbers per face in ChunkBaker.faces: its four corners on the
- * centre plane (x0, y0, …, x3, y3), its colour (an index into
- * shadedPalette), 1 if a ray from the eye reaches it, its
- * growth (left, bottom, right, top) and its voxel's site (a, b, c). See
- * bake/src/faces.rs.
- * @internal
- */
-export const FACE = 17
 
 // Compiled on first use, once per thread, synchronously
 // (browsers allow that for a module this small even on the main thread).
@@ -120,42 +129,39 @@ export class ChunkBaker {
   }
 
   /**
-   * Rasterises one chunk: the slice seen from its eye, projected onto its
-   * centre plane (docs/architecture.md, section 3), clipped to the chunk's
-   * cell and cropped to what is drawn there. A chunk no face reaches has no
-   * pixels.
+   * Bakes one chunk: the voxels of its slice a ray from its eye reaches,
+   * as splats projected onto its centre plane
+   * (docs/architecture.md, section 3), those that reach into its cell.
+   * A chunk with no splats draws nothing.
    */
-  bake(request: Omit<ChunkRequest, 'grid'>): ChunkImage {
+  bake(request: Omit<ChunkRequest, 'grid'>): ChunkSplats {
     const { memory } = this.baker
-    const result = this.call(this.baker.bake, request, 9)
-    const [width, height, originX, originY, scale, facesDrawn, pixels, blocks, blockCount] = result
+    const [width, height, originX, originY, extentWidth, extentHeight, scale, painted, grown, splats, blocks, blockCount] = this.call(request)
     return {
-      width,
-      height,
       // Copied out: the baker reuses its buffers.
-      pixels: new Uint32Array(memory.buffer, pixels, width * height).slice(),
-      blocks: new Uint8Array(memory.buffer, blocks, blockCount).slice(),
+      splats: new Float32Array(memory.buffer, splats, (painted + grown) * SPLAT).slice(),
+      painted,
       originX,
       originY,
-      scale,
-      facesDrawn,
+      extentWidth,
+      extentHeight,
+      mask: { blocks: new Uint8Array(memory.buffer, blocks, blockCount).slice(), width, height, scale },
     }
   }
 
-  /** The faces of a chunk before filling, FACE numbers each, far to near. @internal */
-  faces(request: Omit<ChunkRequest, 'grid'>): Float64Array {
-    const [count, at] = this.call(this.baker.faces, request, 2)
-    return new Float64Array(this.baker.memory.buffer, at, count * FACE).slice()
+  /** The sites (a, b, c in the face's lattice coordinates) of the splats of the chunk baked last, in their order. @internal */
+  sites(count: number): Int32Array {
+    return new Int32Array(this.baker.memory.buffer, this.baker.sites(), count * 3).slice()
   }
 
-  /** Calls `bake` or `faces` and returns the first `length` numbers of its result. */
-  private call(baker: Call, { face, level, layer, cutoff, i, j, eye, fill }: Omit<ChunkRequest, 'grid'>, length: number): Float64Array {
+  /** Calls `bake` and returns its result's numbers. */
+  private call({ face, level, layer, cutoff, i, j, eye, fill }: Omit<ChunkRequest, 'grid'>): Float64Array {
     const index = faceIndex.get(face)
     if (index === undefined) throw new Error(`no face ${face}`)
     // Before reading memory.buffer: the call may grow (and so replace) it.
-    const at = baker(index, level, layer, cutoff, i, j, ...eye, fill ? 1 : 0)
+    const at = this.baker.bake(index, level, layer, cutoff, i, j, ...eye, fill ? 1 : 0)
     if (at === 0) throw new Error('the baker has no world')
-    return new Float64Array(this.baker.memory.buffer, at, length)
+    return new Float64Array(this.baker.memory.buffer, at, 12)
   }
 }
 
@@ -201,7 +207,7 @@ export type BakeMessage =
  * messages of chunks; or a generated part of a grid.
  */
 export type BakeResult =
-  | { type: 'chunks'; generation: number; seq: number; baked: { request: ChunkRequest; image: ChunkImage }[] }
+  | { type: 'chunks'; generation: number; seq: number; baked: { request: ChunkRequest; chunk: ChunkSplats }[] }
   | { type: 'part'; generation: number; part: GridPart; grid: VoxelData; index: LayerIndexData }
 
 /**
@@ -234,15 +240,15 @@ export function bakeHandler(
   const remaining = () => next < queue.length / REQUEST
   const bake = () => {
     const start = performance.now()
-    const baked: { request: ChunkRequest; image: ChunkImage }[] = []
+    const baked: { request: ChunkRequest; chunk: ChunkSplats }[] = []
     while (baker && remaining() && (baked.length === 0 || performance.now() - start < budget)) {
       const request = decodeRequest(queue, next++)
       const key = requestKey(request)
       if (posted.has(key)) continue
-      baked.push({ request, image: baker.bake(request) })
+      baked.push({ request, chunk: baker.bake(request) })
       posted.set(key, seq + 1)
     }
-    if (baked.length > 0) post({ type: 'chunks', generation, seq: ++seq, baked }, baked.flatMap(({ image }) => [image.pixels.buffer, image.blocks.buffer]))
+    if (baked.length > 0) post({ type: 'chunks', generation, seq: ++seq, baked }, baked.flatMap(({ chunk }) => [chunk.splats.buffer, chunk.mask.blocks.buffer]))
   }
   const generate = () => {
     if (!jobs) return

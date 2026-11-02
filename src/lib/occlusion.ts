@@ -83,7 +83,7 @@ export class Coverage {
     let handle = this.handles.get(chunk)
     if (handle === undefined) this.handles.set(chunk, handle = ++this.count)
     if (wasm.coverage_use(handle)) return handle
-    const { width, height, scale, blocks } = chunk
+    const { width, height, scale, blocks } = chunk.mask
     // Read memory.buffer after the call: it may grow (and so replace) it.
     const at = wasm.coverage_blocks(blocks.length)
     new Uint8Array(wasm.memory.buffer, at >>> 0, blocks.length).set(blocks)
