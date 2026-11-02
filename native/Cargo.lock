@@ -1714,6 +1714,7 @@ dependencies = [
  "bytemuck",
  "eframe",
  "rayon",
+ "worldgen",
 ]
 
 [[package]]
@@ -3167,6 +3168,14 @@ dependencies = [
  "wayland-client",
  "wayland-protocols",
  "wayland-protocols-wlr",
+]
+
+[[package]]
+name = "worldgen"
+version = "0.0.0"
+dependencies = [
+ "bake",
+ "libm",
 ]
 
 [[package]]

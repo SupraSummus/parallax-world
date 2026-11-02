@@ -9,6 +9,7 @@ bake = { path = "../bake" }
 bytemuck = { version = "1.25", features = ["derive"] }
 eframe = { version = "0.37", default-features = false, features = ["wgpu", "wayland", "x11", "default_fonts"] }
 rayon = "1.12"
+worldgen = { path = "../worldgen" }
 
 [profile.release]
 debug = 0

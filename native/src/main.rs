@@ -3,7 +3,7 @@
 //! draws them with wgpu in an egui window. The camera turns and moves over
 //! the chunks baked at the start (no rebaking yet).
 //!
-//! parallax-native <dump> [--threads N] [--bench]
+//! parallax-native <dump> [--threads N] [--bench | --check-grids [--seed S]]
 
 mod compositor;
 mod dump;
@@ -19,6 +19,7 @@ use rayon::prelude::*;
 use compositor::{Compositor, GpuChunk, GpuSplat, View};
 use dump::Dump;
 use view::{focal_length, to_local, view_basis};
+use worldgen::grid::{Box3, site_of};
 
 /** A baked chunk: its numbers as ChunkSplats has them. */
 struct Baked {
@@ -58,6 +59,67 @@ fn bake_all(dump: &Dump) -> Vec<Baked> {
         )
         .filter(|b| !b.numbers.is_empty())
         .collect()
+}
+
+/**
+ * Generates the box of each of the dump's grids with worldgen, tile by tile
+ * on the rayon pool, and compares it site by site with the dump's: the TS
+ * forest is the oracle for the port.
+ */
+fn check_grids(dump: &Dump, seed: f64) {
+    const TILE: i64 = 128;
+    for (level, grid) in dump.grids.iter().enumerate() {
+        let Some(grid) = grid else { continue };
+        let [x0, y0, z0] = grid.min.map(i64::from);
+        let [nx, ny, nz] = grid.n.map(i64::from);
+        let tiles: Vec<(i64, i64)> = (x0.div_euclid(TILE)..=(x0 + nx - 1).div_euclid(TILE))
+            .flat_map(|i| (z0.div_euclid(TILE)..=(z0 + nz - 1).div_euclid(TILE)).map(move |k| (i, k)))
+            .collect();
+        let start = Instant::now();
+        let (sites, mismatches, first) = tiles
+            .par_iter()
+            .map_init(
+                || worldgen::forest::forest(seed).0,
+                |generator, &(i, k)| {
+                    let (min_x, max_x) = ((i * TILE).max(x0), ((i + 1) * TILE).min(x0 + nx));
+                    let (min_z, max_z) = ((k * TILE).max(z0), ((k + 1) * TILE).min(z0 + nz));
+                    let b = Box3 {
+                        min_x: min_x as f64,
+                        min_y: y0 as f64,
+                        min_z: min_z as f64,
+                        max_x: max_x as f64,
+                        max_y: (y0 + ny) as f64,
+                        max_z: max_z as f64,
+                    };
+                    let ours = worldgen::generator::generate(generator, &b, level as u32);
+                    let (mut sites, mut mismatches, mut first) = (0usize, 0usize, None);
+                    for z in min_z..max_z {
+                        for y in y0..y0 + ny {
+                            let mut x = min_x + ((min_x + y + z) & 1);
+                            while x < max_x {
+                                let (theirs, mine) = (site_of(grid, x, y, z), ours.get(x, y, z));
+                                if theirs != 0 || mine != 0 {
+                                    sites += 1;
+                                }
+                                if theirs != mine {
+                                    mismatches += 1;
+                                    first.get_or_insert((x, y, z, theirs, mine));
+                                }
+                                x += 2;
+                            }
+                        }
+                    }
+                    (sites, mismatches, first)
+                },
+            )
+            .reduce(|| (0, 0, None), |a, b| (a.0 + b.0, a.1 + b.1, a.2.or(b.2)));
+        println!(
+            "level {level}: {} tiles in {:.2} s, {sites} voxels, {mismatches} differ{}",
+            tiles.len(),
+            start.elapsed().as_secs_f64(),
+            first.map_or(String::new(), |(x, y, z, t, m)| format!(", first at ({x}, {y}, {z}): TS {t}, Rust {m}"))
+        );
+    }
 }
 
 fn timed_bake(dump: &Dump, threads: usize) -> (Vec<Baked>, f64) {
@@ -182,6 +244,14 @@ fn main() -> eframe::Result {
     let dump = dump::read(&std::fs::read(path).expect("dump"));
     let grid_bytes: usize = dump.grids.iter().flatten().map(|g| g.cells.len() + g.bricks.len() * 4).sum();
     println!("read {} requests, {} MB of grids in {:.2} s", dump.requests.len(), grid_bytes >> 20, start.elapsed().as_secs_f64());
+
+    if args.iter().any(|a| a == "--check-grids") {
+        let seed = args.iter().position(|a| a == "--seed").map_or(12345.0, |i| args[i + 1].parse().expect("seed"));
+        let start = Instant::now();
+        rayon::ThreadPoolBuilder::new().num_threads(threads).build().expect("thread pool").install(|| check_grids(&dump, seed));
+        println!("all levels in {:.2} s on {threads} threads", start.elapsed().as_secs_f64());
+        return Ok(());
+    }
 
     if args.iter().any(|a| a == "--bench") {
         let mut counts: Vec<usize> = [1, 2, 4, threads].into_iter().filter(|t| *t <= threads).collect();

@@ -12,3 +12,4 @@ coverage
 .idea
 .DS_Store
 native/target
+worldgen/target
