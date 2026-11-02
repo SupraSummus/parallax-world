@@ -67,6 +67,14 @@ bake/                        # Chunk baker and coverage in Rust, compiled to Web
     ├── splats.rs            # Which voxels a chunk shows, as hexagons on its centre plane; gap filling
     ├── fill.rs              # Splats filled into a mask, solid blocks (for coverage)
     └── coverage.rs          # Which screen cells nearer layers cover, on the main thread; its WebAssembly exports
+native/                      # Spike of a native frontend (eframe + wgpu), linking bake/; see src/main.rs
+├── dump.test.ts             # Dumps a view from the TS renderer for it (only with DUMP set)
+└── src/
+    ├── main.rs              # Bakes the dumped chunks on every core, the window and camera
+    ├── dump.rs              # Reads the dump
+    ├── view.rs              # viewBasis and face coordinates (view.ts)
+    ├── compositor.rs        # compositor.ts with wgpu: all splats in one instanced draw
+    └── compositor.wgsl
 ```
 
 ## Workflow

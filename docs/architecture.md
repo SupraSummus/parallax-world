@@ -339,6 +339,8 @@ Then each chunk is one call,
 and its splats are copied out of the WebAssembly memory.
 A chunk's voxels are those of its cell and a margin around it
 (`cell_surface`, cached per cell, so other eyes reuse it).
+The native spike (`native/`) links the baker instead,
+a baker per thread sharing one copy of the grids (`share_grid`).
 
 Each chunk is clipped to its cell: splats that miss it are dropped,
 and `originX`/`originY` and its extent record where on the centre plane

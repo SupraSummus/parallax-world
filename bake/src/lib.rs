@@ -18,13 +18,18 @@ mod world;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use cells::Cells;
 use fill::{fill_mask, solid_blocks};
 use slicing::{LAYER, atom_level, chunk_cell, spacing, thickness};
 use splats::{Splats, chunk_splats};
-use surface::{Slice, Voxel, cell_surface};
-use world::{FACE_KINDS, GEOMETRY, Geometry, Grid, LATTICE, Lattice, Reader, VIEW_FACES};
+use surface::{Voxel, cell_surface};
+use world::{FACE_KINDS, GEOMETRY, LATTICE, Reader};
+
+// For native frontends, which link the baker instead of loading its WebAssembly.
+pub use surface::Slice;
+pub use world::{Geometry, Grid, Lattice, VIEW_FACES};
 
 /**
  * Mask pixels per unit of its grid for a slice of `level` as the grid
@@ -76,8 +81,11 @@ type SurfaceKey = (usize, usize, i32, i32, u64, i32, i32);
 
 /** One world's grids, palettes and lattices, and the buffers reused across bakes. */
 pub struct Baker {
-    /** By level: grid ℓ has the sites of 2^ℓ·FCC, in its own units, once set. They share materials. */
-    grids: Vec<Grid>,
+    /**
+     * By level: grid ℓ has the sites of 2^ℓ·FCC, in its own units, once set. They share materials.
+     * Shared: native threads bake from one copy.
+     */
+    grids: Vec<Arc<Grid>>,
     /** The level set last. */
     last: usize,
     geometry: Geometry,
@@ -124,19 +132,27 @@ impl Baker {
         self.reach(level);
         self.surfaces.retain(|key, _| key.1 != level);
         self.last = level;
+        self.grids[level] = Arc::new(grid);
+        Arc::get_mut(&mut self.grids[level]).expect("just set")
+    }
+
+    /** Sets the grid of `level` to one other bakers may share. */
+    pub fn share_grid(&mut self, level: usize, grid: Arc<Grid>) {
+        self.reach(level);
+        self.surfaces.retain(|key, _| key.1 != level);
+        self.last = level;
         self.grids[level] = grid;
-        &mut self.grids[level]
     }
 
     /** Empty grids up to `level`, if it has none. */
     fn reach(&mut self, level: usize) {
         while self.grids.len() <= level {
-            self.grids.push(Grid::new([0; 3], [0; 3], 0));
+            self.grids.push(Arc::new(Grid::new([0; 3], [0; 3], 0)));
         }
     }
 
     fn last_grid(&mut self) -> Option<&mut Grid> {
-        self.grids.get_mut(self.last)
+        self.grids.get_mut(self.last).and_then(Arc::get_mut)
     }
 
     /**
