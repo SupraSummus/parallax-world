@@ -20,15 +20,14 @@ const worldType: WorldType = WORLD_TYPES.find(t => t.value === worldParam)?.valu
 
 const started = performance.now()
 const world = new World(seed, worldType)
-const mesh = buildVoxelMesh(world)
-let voxelCount = 0
-world.grid.forEach(() => { voxelCount++ })
-const buildTime = performance.now() - started
-
 const [cx, cy, cz] = (params.get('camera') ?? '').split(',').map(Number)
 const parallaxCamera: Vec3 = Number.isFinite(cx) && Number.isFinite(cy) && Number.isFinite(cz)
   ? { x: cx, y: cy, z: cz }
   : world.spawn
+// The voxels within REACH units in x and z: the forest's level 0, ±96 m, would take gigabytes of buffers.
+const REACH = 240
+const mesh = buildVoxelMesh(world, parallaxCamera, REACH)
+const buildTime = performance.now() - started
 const [yaw = 0, pitch = 0] = (params.get('look') ?? '').split(',').map(Number).map(a => (Number.isFinite(a) ? a : 0))
 
 const geometry = new THREE.BufferGeometry()
@@ -77,7 +76,7 @@ function resize() {
 const info = document.getElementById('info')
 if (info) {
   info.textContent =
-    `${worldType} · seed ${String(seed)} · ${voxelCount.toLocaleString()} voxels · ` +
+    `${worldType} · seed ${String(seed)} · ±${String(REACH)} units around the camera · ` +
     `${mesh.faceCount.toLocaleString()} faces · built in ${buildTime.toFixed(0)} ms`
 }
 document.getElementById('reset')?.addEventListener('click', toParallaxView)

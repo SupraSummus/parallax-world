@@ -5,15 +5,7 @@ import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import App from './App'
 
 // These tests cover the UI; a few voxels render much faster than the full forest.
-vi.mock('./lib/forest', async () => {
-  const { VoxelGrid } = await import('./lib/voxel-grid')
-  return {
-    generateForest: () => ({
-      grid: VoxelGrid.fromVoxels(Array.from({ length: 50 }, (_, i) => ({ x: 2 * (i % 5), y: 0, z: 2 * i, color: '#4f7a2a', type: 1 }))),
-      spawn: { x: 0, y: 6, z: -4 },
-    }),
-  }
-})
+vi.mock('./lib/forest', async () => ({ forest: (await import('./lib/small-forest.test-helper')).smallForest }))
 
 const cameraPosition = () =>
   (screen.getByText('Position').nextElementSibling?.textContent ?? '').split(',').map(Number)

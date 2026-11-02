@@ -6,22 +6,26 @@ import { World } from './world'
 const { grid, voxels } = new World(7, 'hills_with_trees')
 
 describe('VoxelGrid', () => {
-  it('stores the sites of its box, one per pair of x, and nothing else', () => {
-    const box = new VoxelGrid({ minX: -3, minY: 0, minZ: 0, maxX: 4, maxY: 3, maxZ: 2 }, [])
+  it('stores the sites of its box, in bricks of those it has voxels in, and nothing else', () => {
+    const grid = new VoxelGrid({ minX: -3, minY: 0, minZ: 0, maxX: 20, maxY: 3, maxZ: 2 }, [])
     // Widened to start and end on an even x.
-    expect([box.minX, box.nx]).toEqual([-4, 8])
-    const indices = new Set<number>()
-    for (let z = 0; z < 2; z++) {
-      for (let y = 0; y < 3; y++) {
-        for (let x = -4; x < 4; x++) {
-          const i = box.index(x, y, z)
-          expect(i >= 0).toBe(isSite(x, y, z))
-          if (i >= 0) indices.add(i)
-        }
+    expect([grid.minX, grid.nx]).toEqual([-4, 24])
+    const sites: [number, number, number][] = []
+    for (let z = -1; z < 3; z++) {
+      for (let y = -1; y < 4; y++) {
+        for (let x = -5; x < 21; x++) sites.push([x, y, z])
       }
     }
-    expect(indices.size).toBe(box.cells.length)
-    expect(Math.max(...indices)).toBe(box.cells.length - 1)
+    sites.forEach(([x, y, z], n) => { grid.set(x, y, z, 1 + (n % 200)) })
+    sites.forEach(([x, y, z], n) => {
+      const inside = x >= -4 && x < 20 && y >= 0 && y < 3 && z >= 0 && z < 2 && isSite(x, y, z)
+      expect(grid.get(x, y, z)).toBe(inside ? 1 + (n % 200) : 0)
+    })
+    // Three bricks along x, all with voxels; clearing one site keeps its brick.
+    expect([...grid.bricks]).toEqual([0, 1, 2])
+    grid.set(0, 0, 0, 0)
+    expect(grid.get(0, 0, 0)).toBe(0)
+    expect(new VoxelGrid({ minX: 0, minY: 0, minZ: 0, maxX: 64, maxY: 64, maxZ: 64 }, []).bricks.every(b => b === -1)).toBe(true)
   })
 
   it('round-trips voxels, and refuses points that are not sites', () => {
@@ -74,7 +78,7 @@ describe('coarsen', () => {
     const grid = new VoxelGrid({ minX: -16, minY: -16, minZ: -16, maxX: 16, maxY: 16, maxZ: 16 }, [{ color: '#000000', type: 0 }, RED, BLUE])
     for (let z = -16; z < 16; z++) {
       for (let y = -16; y < 16; y++) {
-        for (let x = -16; x < 16; x++) if (isSite(x, y, z)) grid.cells[grid.index(x, y, z)] = fill(x, y, z)
+        for (let x = -16; x < 16; x++) grid.set(x, y, z, fill(x, y, z))
       }
     }
     return grid
@@ -101,7 +105,7 @@ describe('coarsen', () => {
   })
 
   it('drops a lone voxel, and takes the material most of a cell has', () => {
-    expect(coarsen(made((x, y, z) => (x === 0 && y === 0 && z === 0 ? 1 : 0))).cells.every(id => id === 0)).toBe(true)
+    expect(coarsen(made((x, y, z) => (x === 0 && y === 0 && z === 0 ? 1 : 0))).toVoxels()).toEqual([])
     // Red below y = 0, blue above: the coarse site at the origin holds more red (its own site and the layer below).
     const coarse = coarsen(made((_, y) => (y <= 0 ? 1 : 2)))
     expect(coarse.get(0, 0, 0)).toBe(1)

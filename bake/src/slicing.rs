@@ -12,7 +12,7 @@ pub fn spacing(level: i32) -> i32 {
 }
 
 /** See ATOM_SHIFT in slice-selection.ts. */
-const ATOM_SHIFT: i32 = 6;
+const ATOM_SHIFT: i32 = 4;
 
 /** See atomLevel: the level of the grid a slice of `level` reads. */
 pub fn atom_level(level: i32) -> i32 {

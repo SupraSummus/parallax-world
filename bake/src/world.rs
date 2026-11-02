@@ -44,11 +44,26 @@ pub struct Lattice {
     pub f: [i32; 3],
 }
 
-/** Dense sites of a box, z-major, then y, then every other x (see VoxelGrid). */
+/** Bricks of the sites of a box (see VoxelGrid in voxel-grid.ts). */
+pub const BRICK: i32 = 8;
+const BRICK_SITES: usize = (BRICK * BRICK * BRICK / 2) as usize;
+
+/** The sites of a box in bricks, BRICK units wide (see VoxelGrid). */
 pub struct Grid {
     pub min: [i32; 3],
     pub n: [i32; 3],
+    /** Per brick, z-major, then y, then x: where its sites start in `cells`, in BRICK_SITES; −1 if empty. */
+    pub bricks: Vec<i32>,
+    /** Each brick's sites, z-major, then y, then every other x. */
     pub cells: Vec<u8>,
+}
+
+impl Grid {
+    /** A grid of the box with `used` bricks of sites; `bricks` and `cells` to be written. */
+    pub fn new(min: [i32; 3], n: [i32; 3], used: usize) -> Grid {
+        let count = n.map(|v| (v.max(0) + BRICK - 1) / BRICK);
+        Grid { min, n, bricks: vec![-1; (count[0] * count[1] * count[2]) as usize], cells: vec![0; used * BRICK_SITES] }
+    }
 }
 
 /** The grid read in a face's lattice coordinates (a, b, c) (see Face in view.ts). */
@@ -92,6 +107,11 @@ impl<'a> Reader<'a> {
         if x < 0 || x >= g.n[0] || y < 0 || y >= g.n[1] || z < 0 || z >= g.n[2] {
             return 0;
         }
-        g.cells[((z * g.n[1] + y) * (g.n[0] / 2) + (x >> 1)) as usize]
+        let bricks = [(g.n[0] + BRICK - 1) / BRICK, (g.n[1] + BRICK - 1) / BRICK];
+        let at = g.bricks[(((z >> 3) * bricks[1] + (y >> 3)) * bricks[0] + (x >> 3)) as usize];
+        if at < 0 {
+            return 0;
+        }
+        g.cells[at as usize * BRICK_SITES + ((((z & 7) * BRICK + (y & 7)) * BRICK + (x & 7)) >> 1) as usize]
     }
 }

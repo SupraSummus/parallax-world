@@ -240,12 +240,15 @@ export function lathe<K extends string>(p: Point, q: Point, radius: (t: number) 
     extents: [length, 2 * widest, 2 * widest],
     area: effectiveArea(area, (4 * volume) / area, fill, centre),
     contains(x, y, z, min) {
-      const v = [x - p[0], y - p[1], z - p[2]]
-      const t = (v[0] * d[0] + v[1] * d[1] + v[2] * d[2]) / length2
+      const [vx, vy, vz] = [x - p[0], y - p[1], z - p[2]]
+      const t = (vx * d[0] + vy * d[1] + vz * d[2]) / length2
       const reach = (length * Math.max(0, min - length)) / 2 / length2
       if (t < -reach || t > 1 + reach) return false
       const c = Math.max(0, Math.min(1, t))
-      return (v[0] - c * d[0]) ** 2 + (v[1] - c * d[1]) ** 2 + (v[2] - c * d[2]) ** 2 <= Math.max(radius(c), min / 2) ** 2
+      const away = (vx - c * d[0]) ** 2 + (vy - c * d[1]) ** 2 + (vz - c * d[2]) ** 2
+      // Past the widest disc, without asking for the radius.
+      const limit = Math.max(widest, min / 2) ** 2
+      return away <= limit && away <= Math.max(radius(c), min / 2) ** 2
     },
   }
 }
@@ -320,6 +323,11 @@ function drawShape<K extends string>(shape: Shape<K>, seed: number, s: number, c
 
 type Putter<K extends string> = (kind: K, op: Op) => (x: number, y: number, z: number) => void
 
+/** The materials of the grids `generate` makes: ids are the same in all of them. */
+export function materialsOf<K extends string>(generator: Generator<K>): Material[] {
+  return new Palette(generator.kinds, generator.seed).materials
+}
+
 /**
  * The voxels of `box` at `level`: sites 2^level apart, site (x, y, z) at
  * 2^level · (x, y, z) in lattice units, the box in the level's units. The
@@ -330,19 +338,16 @@ export function generate<K extends string>(generator: Generator<K>, box: Box, le
   const palette = new Palette(generator.kinds, generator.seed)
   const grid = new VoxelGrid(box, palette.materials)
   const clip: Box = { minX: grid.minX, minY: grid.minY, minZ: grid.minZ, maxX: grid.minX + grid.nx, maxY: grid.minY + grid.ny, maxZ: grid.minZ + grid.nz }
-  const { cells } = grid
-  const putters = new Map<string, (x: number, y: number, z: number) => void>()
+  const putters: Record<Op, Map<K, (x: number, y: number, z: number) => void>> = { fill: new Map(), paint: new Map(), carve: new Map() }
   const putter: Putter<K> = (kind, op) => {
-    const key = `${kind} ${op}`
-    let put = putters.get(key)
+    let put = putters[op].get(kind)
     if (!put) {
       const shade = palette.shade(kind)
       put = (x, y, z) => {
-        const i = grid.index(x, y, z)
-        if (i < 0 || (op === 'fill' && cells[i] !== 0)) return
-        cells[i] = op === 'carve' ? 0 : shade(x * s, y * s, z * s)
+        if (op === 'fill' && grid.get(x, y, z) !== 0) return
+        grid.set(x, y, z, op === 'carve' ? 0 : shade(x * s, y * s, z * s))
       }
-      putters.set(key, put)
+      putters[op].set(kind, put)
     }
     return put
   }
@@ -400,7 +405,7 @@ function drawablesIn<K extends string>({ layers, seed }: Generator<K>, clip: Box
           const at: Cell = { i, j, k, centre, random: stream => rng(Math.floor(hash(hashText(`${name}:${stream}`, seed), i, j, k) * 4294967296)) }
           const anchor = layer.anchor(at)
           if (!anchor) continue
-          const [oi, oj, ok] = nearestSite(anchor.map(v => v / n))
+          const [oi, oj, ok] = nearestSite([anchor[0] / n, anchor[1] / n, anchor[2] / n])
           if (oi !== i || oj !== j || ok !== k) continue
           const node = layer.make(anchor, at)
           if (!node) continue
@@ -499,13 +504,14 @@ const EVERYWHERE: Box = { minX: -Infinity, minY: -Infinity, minZ: -Infinity, max
 
 /** The site nearest to a point: the one whose voxel holds it (one, also on a boundary). */
 function nearestSite(p: readonly number[]): [number, number, number] {
-  const r = p.map(Math.round)
+  const r: [number, number, number] = [Math.round(p[0]), Math.round(p[1]), Math.round(p[2])]
   if ((r[0] + r[1] + r[2]) & 1) {
-    const errors = p.map((v, i) => Math.abs(v - r[i]))
-    const i = errors.indexOf(Math.max(...errors))
+    // Round the coordinate furthest from its integer the other way.
+    const [e0, e1, e2] = [Math.abs(p[0] - r[0]), Math.abs(p[1] - r[1]), Math.abs(p[2] - r[2])]
+    const i = e0 >= e1 && e0 >= e2 ? 0 : e1 >= e2 ? 1 : 2
     r[i] += p[i] > r[i] ? 1 : -1
   }
-  return [r[0], r[1], r[2]]
+  return r
 }
 
 function boundsOf<K extends string>(node: Node<K>): Box {
