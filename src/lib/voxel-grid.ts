@@ -1,7 +1,8 @@
 /**
- * Dense voxel storage on the face-centred cubic (FCC) lattice: one material
- * id per site of a box (0 = empty). Sites are the integer points with
- * x + y + z even; each is the centre of a rhombic dodecahedron (fcc.ts).
+ * Voxel storage on the face-centred cubic (FCC) lattice: one material id
+ * per site of a box (0 = empty), in bricks, only the bricks with voxels
+ * stored. Sites are the integer points with x + y + z even; each is the
+ * centre of a rhombic dodecahedron (fcc.ts).
  * Plain typed arrays and integer ids, the same layout in TS or Rust/WASM.
  */
 
@@ -22,7 +23,7 @@ export interface Material {
 }
 
 /** A grid's fields without its methods: what a worker receives from postMessage. */
-export type VoxelData = Pick<VoxelGrid, 'minX' | 'minY' | 'minZ' | 'nx' | 'ny' | 'nz' | 'cells' | 'materials'>
+export type VoxelData = Pick<VoxelGrid, 'minX' | 'minY' | 'minZ' | 'nx' | 'ny' | 'nz' | 'bricks' | 'cells' | 'materials'>
 
 /** Half-open integer box: x in [minX, maxX), y and z likewise. */
 interface Box {
@@ -37,14 +38,23 @@ interface Box {
 /** Material ids are bytes. */
 const MAX_MATERIALS = 256
 
+/**
+ * Bricks are BRICK lattice units wide along each axis, BRICK_SITES sites.
+ * In the forest about a fifth of them hold voxels (the ground, the trees),
+ * so the grid takes about a fifth of the bytes it would densely.
+ */
+export const BRICK = 8
+export const BRICK_SITES = BRICK ** 3 / 2
+
 /** Whether (x, y, z) is a site of the lattice. */
 export const isSite = (x: number, y: number, z: number) => ((x + y + z) & 1) === 0
 
 /**
- * Sites are laid out z-major, then y, then x. A row (y, z) holds every
- * other x: those with x + y + z even. minX and nx are even, so site
- * (x, y, z) is cells[((z - minZ) · ny + (y - minY)) · nx / 2 + (x - minX) / 2],
- * rounded down.
+ * The box is cut into bricks BRICK units wide, from (minX, minY, minZ),
+ * laid out z-major, then y, then x. A brick with voxels has BRICK_SITES
+ * bytes of `cells`, its sites z-major, then y, then x, a row (y, z)
+ * holding every other x: those with x + y + z even. minX and nx are even,
+ * so x − minX and its row's other sites share x div 2.
  */
 export class VoxelGrid {
   readonly minX: number
@@ -53,10 +63,17 @@ export class VoxelGrid {
   readonly nx: number
   readonly ny: number
   readonly nz: number
-  /** Material id per site; 0 is empty. */
-  readonly cells: Uint8Array
+  /** Per brick, where its sites start in `cells`, in BRICK_SITES; −1 if it is empty. */
+  readonly bricks: Int32Array
+  /** Material id per site of the bricks with voxels (0 is empty), and room for more bricks. */
+  cells: Uint8Array
   /** Material of each id; entry 0 (empty) is unused. */
   readonly materials: readonly Material[]
+  // Bricks along x and y.
+  private readonly bx: number
+  private readonly by: number
+  // Bricks in `cells`.
+  private used = 0
 
   /** A grid of the sites in `box`, widened by one in x if needed to start and end on an even x. */
   constructor(box: Box, materials: readonly Material[]) {
@@ -67,23 +84,45 @@ export class VoxelGrid {
     this.nx = Math.max(0, Math.ceil(box.maxX / 2) * 2 - this.minX)
     this.ny = Math.max(0, box.maxY - box.minY)
     this.nz = Math.max(0, box.maxZ - box.minZ)
-    this.cells = new Uint8Array((this.nx / 2) * this.ny * this.nz)
+    this.bx = Math.ceil(this.nx / BRICK)
+    this.by = Math.ceil(this.ny / BRICK)
+    this.bricks = new Int32Array(this.bx * this.by * Math.ceil(this.nz / BRICK)).fill(-1)
+    this.cells = new Uint8Array(0)
     this.materials = materials
   }
 
-  /** Index of site (x, y, z) in `cells`, or -1 outside the box or if it is not a site. */
-  index(x: number, y: number, z: number): number {
+  /** Where site (x, y, z) is in `cells`: −1 outside the box or if it is not a site, −2 − its brick's index if that is empty. */
+  private slot(x: number, y: number, z: number): number {
     const i = x - this.minX
     const j = y - this.minY
     const k = z - this.minZ
     if (i < 0 || i >= this.nx || j < 0 || j >= this.ny || k < 0 || k >= this.nz || !isSite(x, y, z)) return -1
-    return (k * this.ny + j) * (this.nx / 2) + (i >> 1)
+    const brick = ((k >> 3) * this.by + (j >> 3)) * this.bx + (i >> 3)
+    const at = this.bricks[brick]
+    return at < 0 ? -2 - brick : at * BRICK_SITES + ((((k & 7) * BRICK + (j & 7)) * BRICK + (i & 7)) >> 1)
   }
 
   /** Material id at (x, y, z); 0 if empty, outside the box or not a site. */
   get(x: number, y: number, z: number): number {
-    const i = this.index(x, y, z)
+    const i = this.slot(x, y, z)
     return i < 0 ? 0 : this.cells[i]
+  }
+
+  /** Sets site (x, y, z) to material `id` (0 clears); outside the box or off the sites, nothing. */
+  set(x: number, y: number, z: number, id: number) {
+    let i = this.slot(x, y, z)
+    if (i === -1 || (i < 0 && id === 0)) return
+    if (i < 0) {
+      const brick = -2 - i
+      if (this.used * BRICK_SITES === this.cells.length) {
+        const grown = new Uint8Array(Math.max(16, Math.ceil(this.used * 1.25)) * BRICK_SITES)
+        grown.set(this.cells)
+        this.cells = grown
+      }
+      this.bricks[brick] = this.used++
+      i = this.slot(x, y, z)
+    }
+    this.cells[i] = id
   }
 
   /** Fills the sites in the box [x0, x1) × [y0, y1) × [z0, z1) with material `id` (0 clears), clipped to the grid. */
@@ -91,20 +130,40 @@ export class VoxelGrid {
     const [fromX, toX] = [Math.max(x0, this.minX), Math.min(x1, this.minX + this.nx)]
     for (let z = Math.max(z0, this.minZ); z < Math.min(z1, this.minZ + this.nz); z++) {
       for (let y = Math.max(y0, this.minY); y < Math.min(y1, this.minY + this.ny); y++) {
-        const row = ((z - this.minZ) * this.ny + (y - this.minY)) * (this.nx / 2)
-        for (let x = fromX + ((fromX + y + z) & 1); x < toX; x += 2) this.cells[row + ((x - this.minX) >> 1)] = id
+        for (let x = fromX + ((fromX + y + z) & 1); x < toX; x += 2) this.set(x, y, z, id)
       }
     }
   }
 
+  /** Whether any brick meeting the box [x0, x1) × [y0, y1) × [z0, z1) holds voxels. */
+  mayHold(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number): boolean {
+    const range = (lo: number, hi: number, min: number, n: number) =>
+      [Math.max(0, Math.floor((lo - min) / BRICK)), Math.min(Math.ceil(n / BRICK), Math.ceil((hi - min) / BRICK))]
+    const [i0, i1] = range(x0, x1, this.minX, this.nx)
+    const [j0, j1] = range(y0, y1, this.minY, this.ny)
+    const [k0, k1] = range(z0, z1, this.minZ, this.nz)
+    for (let k = k0; k < k1; k++) {
+      for (let j = j0; j < j1; j++) {
+        for (let i = i0; i < i1; i++) if (this.bricks[(k * this.by + j) * this.bx + i] >= 0) return true
+      }
+    }
+    return false
+  }
+
   /** Calls `visit` with every voxel's position and material id, ordered by z, then y, then x. */
   forEach(visit: (x: number, y: number, z: number, id: number) => void) {
-    const { minX, minY, minZ, nx, ny, nz, cells } = this
-    let i = 0
+    const { minX, minY, minZ, nx, ny, nz } = this
     for (let z = minZ; z < minZ + nz; z++) {
       for (let y = minY; y < minY + ny; y++) {
-        for (let x = minX + ((minX + y + z) & 1); x < minX + nx; x += 2, i++) {
-          if (cells[i] !== 0) visit(x, y, z, cells[i])
+        for (let x = minX + ((minX + y + z) & 1); x < minX + nx; x += 2) {
+          const i = this.slot(x, y, z)
+          if (i < 0) {
+            // An empty brick: on to the next one's first site.
+            const next = minX + ((x - minX) | (BRICK - 1)) + 1
+            x = next + ((next + y + z) & 1) - 2
+            continue
+          }
+          if (this.cells[i] !== 0) visit(x, y, z, this.cells[i])
         }
       }
     }
@@ -148,8 +207,20 @@ export class VoxelGrid {
     }
     const voxelIds = voxels.map(idOf)
     const grid = new VoxelGrid(box, materials)
-    voxels.forEach(({ x, y, z }, n) => { grid.cells[grid.index(x, y, z)] = voxelIds[n] })
+    voxels.forEach(({ x, y, z }, n) => { grid.set(x, y, z, voxelIds[n]) })
     return grid
+  }
+}
+
+/**
+ * Calls `visit` with the corner (x, y, z) of each brick of `grid` with
+ * voxels (its first site is x or x + 1) and where its sites start in `cells`.
+ */
+export function forEachBrick({ minX, minY, minZ, nx, ny, bricks }: VoxelData, visit: (x: number, y: number, z: number, at: number) => void) {
+  const [bx, by] = [Math.ceil(nx / BRICK), Math.ceil(ny / BRICK)]
+  for (let b = 0; b < bricks.length; b++) {
+    if (bricks[b] < 0) continue
+    visit(minX + (b % bx) * BRICK, minY + (Math.floor(b / bx) % by) * BRICK, minZ + Math.floor(b / (bx * by)) * BRICK, bricks[b] * BRICK_SITES)
   }
 }
 
@@ -164,6 +235,8 @@ const COARSE_CELL: readonly (readonly [number, number, number, number])[] = [
   ...[-1, 1].flatMap(s => [-1, 1].flatMap(t => [[s, t, 0, 3], [s, 0, t, 3], [0, s, t, 3]] as const)),
   ...[-2, 2].flatMap(s => [[s, 0, 0, 1], [0, s, 0, 1], [0, 0, s, 1]] as const),
 ]
+
+const PARTS = Int8Array.from(COARSE_CELL.flat())
 
 /**
  * How much of a cell (of 48, COARSE_CELL's weights) must be full for its
@@ -182,44 +255,41 @@ const COARSE_FULL = 12
  * material most of it has; ties go to the lower id. With the same materials.
  */
 export function coarsen(grid: VoxelGrid): VoxelGrid {
-  const { minX, minY, minZ, nx, ny, nz, cells } = grid
+  const { minX, minY, minZ, nx, ny, nz } = grid
   // The coarse sites whose cells meet the box.
   const coarse = new VoxelGrid({
     minX: Math.floor((minX - 2) / 2), minY: Math.floor((minY - 2) / 2), minZ: Math.floor((minZ - 2) / 2),
     maxX: Math.ceil((minX + nx + 1) / 2), maxY: Math.ceil((minY + ny + 1) / 2), maxZ: Math.ceil((minZ + nz + 1) / 2),
   }, grid.materials)
-  // Where each part of a cell is in `cells`, from its centre 2S (x of 2S
-  // is even, as is minX, so x + dx is at index (x − minX) / 2 + (dx >> 1)).
-  const row = nx / 2
-  const deltas = Int32Array.from(COARSE_CELL, ([dx, dy, dz]) => (dz * ny + dy) * row + (dx >> 1))
-  const parts = Uint8Array.from(COARSE_CELL, ([, , , w]) => w)
   const weights = new Uint8Array(grid.materials.length)
   const ids: number[] = []
-  let i = 0
-  for (let z = coarse.minZ; z < coarse.minZ + coarse.nz; z++) {
-    for (let y = coarse.minY; y < coarse.minY + coarse.ny; y++) {
-      for (let x = coarse.minX + ((coarse.minX + y + z) & 1); x < coarse.minX + coarse.nx; x += 2, i++) {
-        const fx = 2 * x
-        const fy = 2 * y
-        const fz = 2 * z
-        // Whole cells inside the box are read directly, the rest site by site.
-        const inside = fx - 2 >= minX && fx + 2 < minX + nx && fy - 2 >= minY && fy + 2 < minY + ny && fz - 2 >= minZ && fz + 2 < minZ + nz
-        const centre = inside ? ((fz - minZ) * ny + (fy - minY)) * row + ((fx - minX) >> 1) : 0
-        let full = 0
-        for (let k = 0; k < 19; k++) {
-          const id = inside ? cells[centre + deltas[k]] : grid.get(fx + COARSE_CELL[k][0], fy + COARSE_CELL[k][1], fz + COARSE_CELL[k][2])
-          if (id === 0) continue
-          if (weights[id] === 0) ids.push(id)
-          weights[id] += parts[k]
-          full += parts[k]
+  const [endX, endY, endZ] = [coarse.minX + coarse.nx, coarse.minY + coarse.ny, coarse.minZ + coarse.nz]
+  // Brick by coarse brick, skipping those whose cells meet no fine voxels.
+  for (let bz = coarse.minZ; bz < endZ; bz += BRICK) {
+    for (let by = coarse.minY; by < endY; by += BRICK) {
+      for (let bx = coarse.minX; bx < endX; bx += BRICK) {
+        if (!grid.mayHold(2 * bx - 2, 2 * by - 2, 2 * bz - 2, 2 * (bx + BRICK) + 2, 2 * (by + BRICK) + 2, 2 * (bz + BRICK) + 2)) continue
+        for (let z = bz; z < Math.min(bz + BRICK, endZ); z++) {
+          for (let y = by; y < Math.min(by + BRICK, endY); y++) {
+            for (let x = bx + ((bx + y + z) & 1); x < Math.min(bx + BRICK, endX); x += 2) {
+              let full = 0
+              for (let k = 0; k < PARTS.length; k += 4) {
+                const id = grid.get(2 * x + PARTS[k], 2 * y + PARTS[k + 1], 2 * z + PARTS[k + 2])
+                if (id === 0) continue
+                if (weights[id] === 0) ids.push(id)
+                weights[id] += PARTS[k + 3]
+                full += PARTS[k + 3]
+              }
+              if (full >= COARSE_FULL) {
+                let best = 0
+                for (const id of ids) if (weights[id] > weights[best] || (weights[id] === weights[best] && id < best)) best = id
+                coarse.set(x, y, z, best)
+              }
+              for (const id of ids) weights[id] = 0
+              ids.length = 0
+            }
+          }
         }
-        if (full >= COARSE_FULL) {
-          let best = 0
-          for (const id of ids) if (weights[id] > weights[best] || (weights[id] === weights[best] && id < best)) best = id
-          coarse.cells[i] = best
-        }
-        for (const id of ids) weights[id] = 0
-        ids.length = 0
       }
     }
   }
@@ -258,7 +328,8 @@ export class LayerIndex {
   private keys: string[]
   private tables: Table[]
 
-  constructor({ minX, minY, minZ, nx, ny, nz, cells }: VoxelData, lattices: readonly Lattice[]) {
+  constructor(grid: VoxelData, lattices: readonly Lattice[]) {
+    const { minX, minY, minZ, nx, ny, nz, cells } = grid
     // Bounds of v · p over the grid's box.
     const along = (v: Vec3) => {
       const ends = [0, 1].flatMap(i => [0, 1].flatMap(j => [0, 1].map(k =>
@@ -284,27 +355,28 @@ export class LayerIndex {
     const offsets = Int32Array.from(shapes.flatMap(s => [s.aMin, 0, s.cMin]))
     // a, b and c of the row's first site, per table.
     const row = new Int32Array(3 * n)
-    let i = 0
-    for (let z = minZ; z < minZ + nz; z++) {
-      for (let y = minY; y < minY + ny; y++) {
-        const x0 = minX + ((minX + y + z) & 1)
-        for (let m = 0; m < 3 * n; m++) row[m] = vectors[3 * m] * x0 + vectors[3 * m + 1] * y + vectors[3 * m + 2] * z - offsets[m]
-        for (let x = x0; x < minX + nx; x += 2, i++) {
-          if (cells[i] === 0) continue
-          const dx = x - x0
-          for (let k = 0; k < n; k++) {
-            const v = 9 * k
-            const a = row[3 * k] + vectors[v] * dx
-            const b = row[3 * k + 1] + vectors[v + 3] * dx
-            const c = row[3 * k + 2] + vectors[v + 6] * dx
-            // a ≥ 0 here, and EXTENT_BLOCK is 8.
-            const at = lowAt[k] + c * blocks[k] + (a >> 3)
-            if (b < low[at]) low[at] = b
-            if (b > high[at]) high[at] = b
+    const visit = (x0: number, y0: number, z0: number, at: number) => {
+      for (let z = z0; z < z0 + BRICK; z++) {
+        for (let y = y0; y < y0 + BRICK; y++) {
+          const x1 = x0 + ((x0 + y + z) & 1)
+          for (let m = 0; m < 3 * n; m++) row[m] = vectors[3 * m] * x1 + vectors[3 * m + 1] * y + vectors[3 * m + 2] * z - offsets[m]
+          for (let dx = 0; dx < BRICK; dx += 2, at++) {
+            if (cells[at] === 0) continue
+            for (let k = 0; k < n; k++) {
+              const v = 9 * k
+              const a = row[3 * k] + vectors[v] * dx
+              const b = row[3 * k + 1] + vectors[v + 3] * dx
+              const c = row[3 * k + 2] + vectors[v + 6] * dx
+              // a ≥ 0 here, and EXTENT_BLOCK is 8.
+              const i = lowAt[k] + c * blocks[k] + (a >> 3)
+              if (b < low[i]) low[i] = b
+              if (b > high[i]) high[i] = b
+            }
           }
         }
       }
     }
+    forEachBrick(grid, visit)
     this.tables = shapes.map((shape, k) => ({ ...shape, low: low.subarray(lowAt[k], lowAt[k + 1]), high: high.subarray(lowAt[k], lowAt[k + 1]) }))
     this.keys = shapes.map(s => LayerIndex.key(s.lattice.forward))
   }

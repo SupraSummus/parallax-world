@@ -543,13 +543,15 @@ x = q + w, y = q + v, z = v + w.
 So walls and floors along the axes look alike in every direction,
 and the 12 faces of section 4 map sites to sites.
 
-**Storage** (`voxel-grid.ts`). A world is a dense voxel grid per level of
+**Storage** (`voxel-grid.ts`). A world is a voxel grid per level of
 detail (section 1) plus a spawn point: one material id byte per site of a
 box, 0 for empty; the coarser grids add a seventh to the finest.
-Sites are z-major, and a row (y, z) holds every other x,
-so a slice is one contiguous range.
+The box is cut into bricks 8 units wide, 256 sites,
+and only bricks with voxels are stored:
+a fifth of them in the forest and a sixth in the city,
+so ~8 MB each instead of 35 and 50.
 A worker reads its copy of the grid for every face (`Reader` in `bake/`),
-without turned copies (forest: ~35 MB, city: ~50 MB).
+without turned copies.
 A list of voxel objects is built only on request (tests).
 Renderer distances are in world units: render distance 40–800, default 400.
 
