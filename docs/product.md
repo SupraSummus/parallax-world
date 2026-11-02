@@ -106,8 +106,13 @@ waits for them; meanwhile a cell shows an older bake, or nothing.
   Baking finer than the screen shows is part of it:
   slices of size 4 and 8 get 2–3× the pixels they cover on screen.
 - Port the toy worlds to the forest's metric scale, or drop them.
-- Find covered chunks faster: it still adds ~17 ms to a render with 12 faces,
-  mostly testing sub-blocks one by one in `cover` (`bake/src/coverage.rs`).
+- Find covered chunks faster: it still adds ~11 ms to a render while turning
+  (forest, 1920×1080, Node),
+  mostly testing sub-blocks one by one in `cover` (`bake/src/coverage.rs`):
+  about 270,000 tests a frame, three in four failing,
+  as the forest covers the screen in fine pieces.
+  Testing quarters of a cell first would not help (two in three are mixed),
+  nor would clipping without allocating in `shape`.
 - Find covered chunks more exactly: half of the chunks drawn show no pixel.
 - Build `LayerIndex` off the main thread or in Rust: ~0.4 s at start on the forest.
 - Measure the WebGL compositor on real GPUs (headless Chromium only has a

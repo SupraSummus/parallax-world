@@ -252,21 +252,19 @@ impl Chunk {
     }
 
     /**
-     * Whether the blocks under the rectangle [l, r] × [b, t] of the plane,
-     * the chunk's top-left corner at (x, y), with a pixel around (minified,
-     * the texture is smoothed over neighbours), are all solid (`all`), or
-     * some are.
+     * The numbers of solid blocks, and of all blocks, under the rectangle
+     * [l, r] × [b, t] of the plane, the chunk's top-left corner at (x, y),
+     * with a pixel around (minified, the texture is smoothed over
+     * neighbours). A smaller rectangle has fewer blocks under it.
      */
-    #[allow(clippy::too_many_arguments)]
-    fn test(&self, x: f64, y: f64, l: f64, r: f64, b: f64, t: f64, all: bool) -> bool {
+    fn under(&self, x: f64, y: f64, l: f64, r: f64, b: f64, t: f64) -> (usize, usize) {
         let Chunk { width, height, scale, .. } = *self;
         let block = BLOCK as f64;
         let x1 = ((width as f64).min(((r - x) * scale).ceil() + 1.0) / block).ceil() as usize;
         let y1 = ((height as f64).min(((y - b) * scale).ceil() + 1.0) / block).ceil() as usize;
         let x0 = ((((l - x) * scale).floor() - 1.0).max(0.0) as usize / BLOCK).min(x1);
         let y0 = ((((y - t) * scale).floor() - 1.0).max(0.0) as usize / BLOCK).min(y1);
-        let solid = self.solid_in(x0, x1, y0, y1);
-        if all { solid == (x1 - x0) * (y1 - y0) } else { solid > 0 }
+        (self.solid_in(x0, x1, y0, y1), (x1 - x0) * (y1 - y0))
     }
 
     /** The number of solid blocks in [x0, x1) × [y0, y1), x0 ≤ x1 and y0 ≤ y1. */
@@ -427,10 +425,18 @@ impl Coverage {
             *b = if o[0] & o[1] & o[2] & o[3] != 0 { FULL } else { 0 };
         }
         // Tangents of the rays through those cells' sub-block corners, and the sides each is outside of.
+        // Only within the span [from, to) of the cells looked into in their rows ([cols, 0) if none).
+        let spans: Vec<[usize; 2]> = bits
+            .chunks(cols)
+            .map(|row| {
+                [row.iter().position(|&b| b != FULL).unwrap_or(cols), row.iter().rposition(|&b| b != FULL).map_or(0, |last| last + 1)]
+            })
+            .collect();
         let corners = sub_cols + 1;
         for sj in 0..=sub_rows {
             let (j0, j1) = (sj.saturating_sub(1) >> SHIFT, (sj >> SHIFT).min(rows - 1));
-            for si in 0..=sub_cols {
+            let (from, to) = (spans[j0][0].min(spans[j1][0]), spans[j0][1].max(spans[j1][1]));
+            for si in from * SUBS..=to * SUBS {
                 let (i0, i1) = (si.saturating_sub(1) >> SHIFT, (si >> SHIFT).min(cols - 1));
                 if [j0 * cols + i0, j0 * cols + i1, j1 * cols + i0, j1 * cols + i1].iter().all(|&c| bits[c] == FULL) {
                     continue;
@@ -569,7 +575,11 @@ impl Coverage {
             return;
         }
         let Some(b) = look.screen_box(left, right, bottom, top, distance) else { return };
-        let test = |l, r, b, t, all| chunk.test(x, y, l, r, b, t, all);
+        let under = |l, r, b, t| chunk.under(x, y, l, r, b, t);
+        let all_solid = |l, r, b, t| {
+            let (solid, all) = under(l, r, b, t);
+            solid == all
+        };
         let [si0, si1, sj0, sj1] = sub_blocks(&b, 0.0, sub_cols, sub_rows);
         for j in sj0 >> SHIFT..=sj1 >> SHIFT {
             let sj_from = sj0.max(j * SUBS);
@@ -580,17 +590,22 @@ impl Coverage {
                 'cell: {
                     let c = n - j;
                     let i = c - j * cols;
-                    // A cell (wholly in the face) this chunk alone covers is covered at once,
-                    // and its sub-blocks are not looked at if the chunk has no solid block under it.
+                    // For a cell wholly in the face, the blocks under its part of the rectangle:
+                    // if none is solid, its sub-blocks are not looked at; if all are, they
+                    // are not tested one by one, and if the rectangle holds the cell, it is
+                    // covered at once.
                     let [cl, cr, cb, ct] = cell_tangents[c].map(|v| v * distance);
+                    let mut solid = false;
                     if !cl.is_nan() {
-                        if cl >= left && cr <= right && cb >= bottom && ct <= top && test(cl, cr, cb, ct, true) {
+                        let (some, all) = under(cl.max(left), cr.min(right), cb.max(bottom), ct.min(top));
+                        if some == 0 {
+                            break 'cell;
+                        }
+                        solid = some == all;
+                        if solid && cl >= left && cr <= right && cb >= bottom && ct <= top {
                             bits[c] = FULL;
                             covered[c] = true;
                             open[n] = n + 1;
-                            break 'cell;
-                        }
-                        if !test(cl.max(left), cr.min(right), cb.max(bottom), ct.min(top), false) {
                             break 'cell;
                         }
                     }
@@ -605,7 +620,7 @@ impl Coverage {
                         // The sub-block's part of the plane is within this rectangle.
                         let [l, r, b, t] = tangents[s].map(|v| v * distance);
                         let (l, r, b, t) = (l.max(left), r.min(right), b.max(bottom), t.min(top));
-                        if l >= r || b >= t || !test(l, r, b, t, true) {
+                        if l >= r || b >= t || !(solid || all_solid(l, r, b, t)) {
                             continue;
                         }
                         if area[s] == 0.0 {
