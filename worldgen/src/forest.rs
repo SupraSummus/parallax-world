@@ -11,12 +11,16 @@ use crate::generator::{
 };
 use crate::grid::Box3;
 use crate::js::{self, round};
-use crate::noise::{Rng, fbm, hash, hash64, smoothstep, stream, unit, value_noise};
+use crate::noise::{Fixed, ONE, Rng, fbm, fixed, fraction, hash, hash64, smoothstep, stream, unit, value_noise};
 
 /** Metres per lattice unit (UNIT_SIZE in forest.ts). */
 pub const UNIT_SIZE: f64 = 0.125;
 fn vox(metres: f64) -> f64 {
     round(metres / UNIT_SIZE)
+}
+/** Metres in units, fixed point. */
+const fn metres(metres: f64) -> Fixed {
+    fixed(metres / UNIT_SIZE)
 }
 const BRANCH_RADIUS: f64 = 1.2;
 fn log_radius() -> f64 {
@@ -129,8 +133,9 @@ fn foliage(species: Species) -> K {
 struct Column {
     height: i64,
     surface: K,
-    conifer: f64,
-    density: f64,
+    /** How much the trees around are conifers, and how dense they are: fractions of ONE. */
+    conifer: Fixed,
+    density: Fixed,
     on_path: bool,
 }
 
@@ -148,17 +153,25 @@ impl Forest {
         stream(self.seed, k)
     }
 
-    /** Path centre line, in metres. */
-    fn path_x(&self, zm: f64) -> f64 {
-        9.0 * js::sin(zm / 31.0 + self.path_phase) + 5.0 * js::sin(zm / 13.0 + self.path_phase * 2.0)
+    /** Path centre line at z, in units, fixed point. */
+    fn path_x(&self, z: i64) -> Fixed {
+        let zm = z as f64 * UNIT_SIZE;
+        fixed((9.0 * js::sin(zm / 31.0 + self.path_phase) + 5.0 * js::sin(zm / 13.0 + self.path_phase * 2.0)) / UNIT_SIZE)
     }
 
-    fn ground_metres(&self, xm: f64, zm: f64) -> f64 {
-        let from_path = (xm - self.path_x(zm)).abs();
-        let hills = (fbm(self.s(2), xm / 45.0, zm / 45.0, 4) - 0.5) * 10.0 + (value_noise(self.s(3), xm / 6.0, zm / 6.0) - 0.5) * 0.8;
-        let valley = smoothstep(8.0, 42.0, from_path) * 18.0;
-        let far = (fbm(self.s(9), xm / 900.0, zm / 900.0, 4) - 0.5) * 50.0;
-        let path_dip = (1.0 - smoothstep(1.0, 2.2, from_path)) * 0.3;
+    /** How far column (x, z) is from the path's centre line, in units, fixed point. */
+    fn path_distance(&self, x: i64, z: i64) -> Fixed {
+        (x * ONE - self.path_x(z)).abs()
+    }
+
+    /** Ground height in units, fixed point; noise periods in units too. */
+    fn ground_fixed(&self, x: i64, z: i64) -> Fixed {
+        let from_path = self.path_distance(x, z);
+        let hills = (fbm(self.s(2), x, z, 360, 4) - ONE / 2) * metres(10.0) / ONE
+            + (value_noise(self.s(3), x, z, 48) - ONE / 2) * metres(0.8) / ONE;
+        let valley = smoothstep(metres(8.0), metres(42.0), from_path) * metres(18.0) / ONE;
+        let far = (fbm(self.s(9), x, z, 7200, 4) - ONE / 2) * metres(50.0) / ONE;
+        let path_dip = (ONE - smoothstep(metres(1.0), metres(2.2), from_path)) * metres(0.3) / ONE;
         hills + valley + far - path_dip
     }
 
@@ -169,30 +182,28 @@ impl Forest {
         if kept.0[key] != x || kept.1[key] != z {
             kept.0[key] = x;
             kept.1[key] = z;
-            kept.2[key] = vox(self.ground_metres(x as f64 * UNIT_SIZE, z as f64 * UNIT_SIZE)) as i64;
+            kept.2[key] = (self.ground_fixed(x, z) + ONE / 2) >> 16;
         }
         kept.2[key]
     }
 
     /** Column (x, z), given the ground's height there and at its four neighbours. */
     fn column_of(&self, x: i64, z: i64, h: i64, neighbours: [i64; 4]) -> Column {
-        let xm = x as f64 * UNIT_SIZE;
-        let zm = z as f64 * UNIT_SIZE;
         let slope = neighbours.map(|n| (n - h).abs()).into_iter().max().expect("four");
         let conifer =
-            smoothstep(0.4, 0.6, fbm(self.s(5), xm / 40.0, zm / 40.0, 4)) * 0.75 + smoothstep(6.0, 16.0, h as f64 * UNIT_SIZE) * 0.25;
-        let density = smoothstep(0.3, 0.48, fbm(self.s(6), xm / 22.0, zm / 22.0, 4));
-        let on_path = (xm - self.path_x(zm)).abs() < 1.1 + value_noise(self.s(7), zm / 3.0, 0.0) * 0.5;
-        let floor = value_noise(self.s(8), xm / 2.5, zm / 2.5);
+            smoothstep(fixed(0.4), fixed(0.6), fbm(self.s(5), x, z, 320, 4)) * 3 / 4 + smoothstep(metres(6.0), metres(16.0), h * ONE) / 4;
+        let density = smoothstep(fixed(0.3), fixed(0.48), fbm(self.s(6), x, z, 176, 4));
+        let on_path = self.path_distance(x, z) < metres(1.1) + value_noise(self.s(7), z, 0, 24) * metres(0.5) / ONE;
+        let floor = value_noise(self.s(8), x, z, 20);
         let surface = if on_path {
             K::path
         } else if slope >= 3 {
-            if floor < 0.5 { K::stone } else { K::mossyStone }
-        } else if density < 0.2 {
-            if floor < 0.75 { K::grass } else { K::moss }
-        } else if conifer > 0.5 {
-            if floor < 0.55 { K::needles } else { K::moss }
-        } else if floor < 0.6 {
+            if floor < fixed(0.5) { K::stone } else { K::mossyStone }
+        } else if density < fixed(0.2) {
+            if floor < fixed(0.75) { K::grass } else { K::moss }
+        } else if conifer > fixed(0.5) {
+            if floor < fixed(0.55) { K::needles } else { K::moss }
+        } else if floor < fixed(0.6) {
             K::litter
         } else {
             K::moss
@@ -218,28 +229,31 @@ impl Forest {
         [x as f64, self.ground(x, z) as f64, z as f64]
     }
 
-    /** The chance a cell of trees around column (x, z) has one. */
-    fn tree_chance(&self, x: i64, z: i64, c: &Column) -> f64 {
-        if c.surface == K::stone || (x as f64 * UNIT_SIZE - self.path_x(z as f64 * UNIT_SIZE)).abs() < 2.8 {
-            return 0.0;
+    /** The chance a cell of trees around column (x, z) has one, a fraction of ONE. */
+    fn tree_chance(&self, x: i64, z: i64, c: &Column) -> Fixed {
+        if c.surface == K::stone || self.path_distance(x, z) < metres(2.8) {
+            return 0;
         }
         // Keep the view from the spawn point clear of low branches.
-        if js::hypot(&[(x - self.spawn[0]) as f64, (z - self.spawn[2]) as f64]) < vox(7.0) {
-            return 0.0;
+        let (dx, dz) = (x - self.spawn[0], z - self.spawn[2]);
+        if dx * dx + dz * dz < (vox(7.0) as i64).pow(2) {
+            return 0;
         }
-        0.15 + c.density * 0.75
+        fixed(0.15) + c.density * 3 / 4
     }
 
-    fn species_chances(c: &Column) -> [f64; 3] {
-        [c.conifer, (1.0 - c.conifer) * 0.45, (1.0 - c.conifer) * 0.55]
+    /** The share of each species, fractions of ONE that add up to it. */
+    fn species_chances(c: &Column) -> [Fixed; 3] {
+        let broad = ONE - c.conifer;
+        [c.conifer, broad * 45 / 100, broad - broad * 45 / 100]
     }
 }
 
-/** SPECIES.find(sp => (pick -= chances[sp]) < 0) ?? 'oak' */
-fn pick_species(mut pick: f64, chances: &[f64; 3]) -> Species {
+/** The species `pick` (a fraction of ONE) falls on, the chances laid end to end. */
+fn pick_species(mut pick: Fixed, chances: &[Fixed; 3]) -> Species {
     for (i, species) in SPECIES.iter().enumerate() {
         pick -= chances[i];
-        if pick < 0.0 {
+        if pick < 0 {
             return *species;
         }
     }
@@ -253,7 +267,7 @@ pub fn forest(seed: u64) -> (Generator, [i64; 3]) {
     f.path_phase = unit(hash(f.s(1), 0, 0, 0)) * 100.0;
     // Start on the path at the near end, at about the height of a tall shrub.
     let spawn_z = vox(-31.0) as i64;
-    let spawn_x = round(f.path_x(spawn_z as f64 * UNIT_SIZE) / UNIT_SIZE) as i64;
+    let spawn_x = (f.path_x(spawn_z) + ONE / 2) >> 16;
     let spawn_y = f.ground(spawn_x, spawn_z) + vox(3.0) as i64;
     f.spawn = [spawn_x, spawn_y + ((spawn_x + spawn_y + spawn_z) & 1), spawn_z];
     let f = Rc::new(f);
@@ -312,10 +326,10 @@ pub fn forest(seed: u64) -> (Generator, [i64; 3]) {
                 let mut random = cell.random("tree");
                 let (xi, zi) = (x as i64, z as i64);
                 let c = f.column(xi, zi);
-                if random.next() > f.tree_chance(xi, zi, &c) {
+                if !random.chance(f.tree_chance(xi, zi, &c)) {
                     return None;
                 }
-                let species = pick_species(random.next(), &Forest::species_chances(&c));
+                let species = pick_species(fraction(random.next_u32()), &Forest::species_chances(&c));
                 Some(make_tree(species, x, y, z, &mut random, &|x, z| f.ground(x, z)))
             })
         },
@@ -330,17 +344,19 @@ pub fn forest(seed: u64) -> (Generator, [i64; 3]) {
                     axis: 1,
                     spans: Box::new(move |x, z, spacing| {
                         let c = f.column(x, z);
-                        let per_area = f.tree_chance(x, z, &c) / ((2 * tree_cell) * (2 * tree_cell)) as f64;
+                        let per_area = f.tree_chance(x, z, &c) as f64 / ONE as f64 / ((2 * tree_cell) * (2 * tree_cell)) as f64;
                         if per_area == 0.0 {
                             return Vec::new();
                         }
                         let chances = Forest::species_chances(&c);
-                        let kind = k(foliage(pick_species(unit(hash(f.s(18), x, z, 0)), &chances)));
+                        let kind = k(foliage(pick_species(fraction(hash(f.s(18), x, z, 0)), &chances)));
                         let mut spans = Vec::new();
                         let mut from = 0;
                         while from < tree_top {
                             let to = (from + spacing).min(tree_top);
-                            let area = (0..3).fold(0.0, |sum, sp| sum + chances[sp] * (below[sp][to as usize] - below[sp][from as usize]));
+                            let area = (0..3).fold(0.0, |sum, sp| {
+                                sum + chances[sp] as f64 / ONE as f64 * (below[sp][to as usize] - below[sp][from as usize])
+                            });
                             if area > 0.0 {
                                 spans.push(Span {
                                     from: c.height + from,
@@ -372,7 +388,7 @@ pub fn forest(seed: u64) -> (Generator, [i64; 3]) {
         },
         make: Box::new(|[x, y, z], cell| {
             let mut random = cell.random("boulder");
-            if random.next() < 0.15 { Some(Node::of(boulder(x, y, z, &mut random))) } else { None }
+            if random.chance(fixed(0.15)) { Some(Node::of(boulder(x, y, z, &mut random))) } else { None }
         }),
         far: None,
     };
@@ -390,7 +406,7 @@ pub fn forest(seed: u64) -> (Generator, [i64; 3]) {
             let f = f.clone();
             Box::new(move |[x, _, z], cell| {
                 let mut random = cell.random("log");
-                if random.next() < 0.077 && !f.column(x as i64, z as i64).on_path {
+                if random.chance(fixed(0.077)) && !f.column(x as i64, z as i64).on_path {
                     Some(Node::of(fallen_log(x, z, &|x, z| f.ground(x, z), &mut random)))
                 } else {
                     None
@@ -427,35 +443,35 @@ pub fn forest(seed: u64) -> (Generator, [i64; 3]) {
                     while zi < cz + PLANTS / 2 {
                         let c = f.column(xi, zi);
                         let (x, y, z) = (xi as f64, (c.height + 1) as f64, zi as f64);
-                        let r = unit(hash(f.s(15), xi, zi, 0));
+                        let r = fraction(hash(f.s(15), xi, zi, 0));
                         let random = &mut Rng::new(hash64(f.s(16), xi, zi, 0));
                         if c.on_path {
-                            if r < 0.05 {
+                            if r < fixed(0.05) {
                                 shapes.push(cub([x, y, z], [x + 2.0, y + 1.0, z + 1.0], K::stone));
                             }
                         } else if c.surface == K::grass {
-                            if r < 0.02 {
+                            if r < fixed(0.02) {
                                 let count = 3.0 + random.below(3) as f64;
-                                let kind = if random.next() < 0.3 { K::hay } else { K::tallGrass };
+                                let kind = if random.chance(fixed(0.3)) { K::hay } else { K::tallGrass };
                                 shapes.extend(tuft(x, y, z, count, vox(0.3), kind, random));
-                            } else if r < 0.0275 {
+                            } else if r < fixed(0.0275) {
                                 shapes.extend(flower(x, y, z, random));
-                            } else if r < 0.2 {
+                            } else if r < fixed(0.2) {
                                 let count = 1.0 + random.below(2) as f64;
                                 shapes.extend(tuft(x, y, z, count, vox(0.12), K::grass, random));
                             }
                         } else if c.surface != K::stone && c.surface != K::mossyStone {
-                            if r < 0.00625 {
-                                shapes.extend(fern(x, y, z, if c.conifer > 0.5 { K::fern } else { K::bracken }, random));
-                            } else if r < 0.008 {
+                            if r < fixed(0.00625) {
+                                shapes.extend(fern(x, y, z, if c.conifer > ONE / 2 { K::fern } else { K::bracken }, random));
+                            } else if r < fixed(0.008) {
                                 shapes.extend(bush(x, y, z, random));
-                            } else if r < 0.0085 {
+                            } else if r < fixed(0.0085) {
                                 shapes.extend(flower(x, y, z, random));
-                            } else if r < 0.011 && c.density > 0.3 {
-                                shapes.extend(mushrooms(x, y, z, if c.conifer > 0.5 { K::amanita } else { K::bolete }, random));
-                            } else if c.surface == K::needles && r < 0.04 {
+                            } else if r < fixed(0.011) && c.density > fixed(0.3) {
+                                shapes.extend(mushrooms(x, y, z, if c.conifer > ONE / 2 { K::amanita } else { K::bolete }, random));
+                            } else if c.surface == K::needles && r < fixed(0.04) {
                                 shapes.push(cub([x, y, z], [x + 2.0, y + 2.0, z + 1.0], K::cone));
-                            } else if c.surface == K::litter && r < 0.4 {
+                            } else if c.surface == K::litter && r < fixed(0.4) {
                                 shapes.push(cub_op([x - 1.0, y - 1.0, z - 1.0], [x + 1.0, y, z + 1.0], K::fallenLeaf, Op::Paint));
                             }
                         }
@@ -558,7 +574,7 @@ fn leaf_cluster(name: String, centre: Point, radius: f64, kind: K, fill: f64, ra
             let d = [dx / length, (dy - droop) / length, dz / length];
             let tip = radius - spray;
             twigs.push(capsule(at(d, radius * 0.1), at(d, tip - spray / 2.0), FINE, k(K::twig), SOLID, Op::Fill));
-            let leaf = if random.next() < 0.25 { turning } else { kind };
+            let leaf = if random.chance(fixed(0.25)) { turning } else { kind };
             leaves.push(capsule(at(d, radius * 0.3), at(d, tip), spray, k(leaf), Fill::Const(0.75), Op::Fill));
         }
         twigs.push(ball(centre, radius * 0.55, k(kind), Fill::Const(fill), Op::Fill));
@@ -625,7 +641,7 @@ fn bark(x: f64, z: f64, width: f64, from: f64, to: f64, style: BarkStyle, kind: 
         } else {
             let mut y = from;
             while y < to {
-                if random.next() < 0.5 {
+                if random.chance(fixed(0.5)) {
                     let u = start(f) + random.below(width as u32 - 1) as f64;
                     let length = 2.0 + random.below(2) as f64;
                     shapes.push(mark(f, u, length, y, y + 1.0));
@@ -717,27 +733,27 @@ fn birch_tree(x: f64, ground: f64, z: f64, random: &mut Rng) -> Node {
     let mut y = ground - 1.0;
     while y <= ground + height + 1.0 {
         let end = y == ground + height + 1.0;
-        if end || ((y - ground) % vox(3.0) == 0.0 && y - ground > vox(4.0) && random.next() < 0.35) {
+        if end || ((y - ground) % vox(3.0) == 0.0 && y - ground > vox(4.0) && random.chance(fixed(0.35))) {
             shapes.push(cub_op([tx, from, tz], [tx + width, y, tz + width], K::birchBark, Op::Paint));
             segments.push([tx, tz, from.max(ground), y]);
             if end {
                 break;
             }
-            if random.next() < 0.5 {
-                tx += if random.next() < 0.5 { -1.0 } else { 1.0 };
+            if random.chance(fixed(0.5)) {
+                tx += if random.chance(fixed(0.5)) { -1.0 } else { 1.0 };
             } else {
-                tz += if random.next() < 0.5 { -1.0 } else { 1.0 };
+                tz += if random.chance(fixed(0.5)) { -1.0 } else { 1.0 };
             }
             from = y;
         }
         // Black marks in bands half a metre tall.
-        if (y - ground) % vox(0.5) == 0.0 && random.next() < 0.18 {
+        if (y - ground) % vox(0.5) == 0.0 && random.chance(fixed(0.18)) {
             marks.push(cub_op([tx, y, tz], [tx + width, y + vox(0.5), tz + width], K::birchMark, Op::Paint));
         }
         y += 1.0;
     }
     shapes.extend(marks);
-    let foliage = if random.next() < 0.65 { K::birchGold } else { K::birchGreen };
+    let foliage = if random.chance(fixed(0.65)) { K::birchGold } else { K::birchGreen };
     let turning = if foliage == K::birchGold { K::birchGreen } else { K::birchGold };
     let crown_bottom = ground + height * 0.45;
     let bole = cub_op([x, ground - 1.0, z], [x + width, crown_bottom, z + width], K::birchBark, Op::Paint);
@@ -862,7 +878,7 @@ fn fern(x: f64, y: f64, z: f64, kind: K, random: &mut Rng) -> Vec<Shape> {
 fn bush(x: f64, y: f64, z: f64, random: &mut Rng) -> Vec<Shape> {
     let radius = vox(0.5 + random.next() * 0.5);
     let mut shapes = vec![ball([x, y, z], radius, k(K::bush), Fill::Const(0.8), Op::Fill)];
-    if random.next() < 0.5 {
+    if random.chance(fixed(0.5)) {
         let mut n = 4.0 + random.below(6) as f64;
         while n > 0.0 {
             let [dx, dy, dz] = direction(random);
@@ -937,7 +953,7 @@ fn fallen_log(x: f64, z: f64, ground: GroundAt, random: &mut Rng) -> Vec<Shape> 
     while i <= length {
         let px = round(x + dx * i);
         let pz = round(z + dz * i);
-        if random.next() < 0.5 {
+        if random.chance(fixed(0.5)) {
             shapes.push(ball([px, at(px, pz) + lift * 2.0 + vox(0.25), pz], vox(0.3), k(K::moss), SOLID, Op::Fill));
         }
         i += vox(0.5);

@@ -3,6 +3,11 @@
 Known problems, measured or derived, then open ideas.
 Numbers are for the forest at 1280×800, as measured when written.
 
+- **worldgen still decides some things with floats.**
+  Shapes, their containment tests, areas and fills are f64,
+  and so is the forest's geometry (sin, cos, pow, exp, atan2, hypot, from `js.rs`).
+  They should go to fixed point like the noise,
+  the forest building each thing relative to its anchor.
 - **Moving rebakes whole levels.**
   A level is baked again when the camera leaves its eye's cell,
   so walking rebakes 1.3–1.8× the chunks that one direction per chunk did,

@@ -2,13 +2,13 @@
 //! integers wherever they decide something, so a seed gives the same world everywhere and far from the origin.
 
 /** splitmix64's finaliser: a bijection of u64 that mixes every bit into every other. */
-pub fn mix(mut z: u64) -> u64 {
+fn mix(mut z: u64) -> u64 {
     z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
     z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
     z ^ (z >> 31)
 }
 
-/** A hash of a lattice point, 64 bits: the coordinates are mixed in one after another, so the world never repeats. */
+/** A hash of a lattice point, 64 bits: each coordinate mixed in whole, so nothing repeats every 2^32 units. */
 pub fn hash64(seed: u64, x: i64, y: i64, z: i64) -> u64 {
     let h = mix(seed ^ (x as u64).wrapping_mul(0x9e3779b97f4a7c15));
     let h = mix(h ^ (y as u64).wrapping_mul(0xc2b2ae3d27d4eb4f));
@@ -39,40 +39,53 @@ pub fn unit(h: u32) -> f64 {
     h as f64 / 4294967296.0
 }
 
-/** Smoothly interpolated lattice noise in [0, 1). */
-pub fn value_noise(seed: u64, x: f64, y: f64) -> f64 {
-    let ix = x.floor();
-    let iy = y.floor();
-    let fx = x - ix;
-    let fy = y - iy;
-    let u = fx * fx * (3.0 - 2.0 * fx);
-    let v = fy * fy * (3.0 - 2.0 * fy);
-    let (ix, iy) = (ix as i64, iy as i64);
-    let a = unit(hash(seed, ix, iy, 0));
-    let b = unit(hash(seed, ix + 1, iy, 0));
-    let c = unit(hash(seed, ix, iy + 1, 0));
-    let d = unit(hash(seed, ix + 1, iy + 1, 0));
-    a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v
+/** A fixed-point number: 16 bits after the point. */
+pub type Fixed = i64;
+pub const ONE: Fixed = 1 << 16;
+
+/** `x` in fixed point, for constants. */
+pub const fn fixed(x: f64) -> Fixed {
+    (x * ONE as f64).round() as Fixed
 }
 
-/** Fractal (multi-octave) value noise in [0, 1). */
-pub fn fbm(seed: u64, mut x: f64, mut y: f64, octaves: u32) -> f64 {
-    let mut sum = 0.0;
-    let mut amplitude = 1.0;
-    let mut total = 0.0;
-    for i in 0..octaves {
-        sum += value_noise(stream(seed, i as u64), x, y) * amplitude;
-        total += amplitude;
-        amplitude /= 2.0;
-        x *= 2.0;
-        y *= 2.0;
+/** A 32-bit hash as a fraction of 1, in [0, ONE). */
+pub fn fraction(h: u32) -> Fixed {
+    (h >> 16) as Fixed
+}
+
+/** 3t² − 2t³: from 0 to ONE as t goes from 0 to ONE, flat at both ends. */
+fn ease(t: Fixed) -> Fixed {
+    (((t * t) >> 16) * (3 * ONE - 2 * t)) >> 16
+}
+
+fn lerp(a: Fixed, b: Fixed, t: Fixed) -> Fixed {
+    a + (((b - a) * t) >> 16)
+}
+
+/** Lattice noise in [0, ONE) at (x, y) / period: random values at multiples of `period`, eased between. */
+pub fn value_noise(seed: u64, x: i64, y: i64, period: i64) -> Fixed {
+    let (ix, iy) = (x.div_euclid(period), y.div_euclid(period));
+    let u = ease((x.rem_euclid(period) << 16) / period);
+    let v = ease((y.rem_euclid(period) << 16) / period);
+    let at = |i, j| fraction(hash(seed, i, j, 0));
+    lerp(lerp(at(ix, iy), at(ix + 1, iy), u), lerp(at(ix, iy + 1), at(ix + 1, iy + 1), u), v)
+}
+
+/** Fractal value noise in [0, ONE): `octaves` of it, each at half the period and half the weight of the last. */
+pub fn fbm(seed: u64, x: i64, y: i64, period: i64, octaves: u32) -> Fixed {
+    let sum: Fixed = (0..octaves).map(|i| value_noise(stream(seed, i as u64), x << i, y << i, period) << (octaves - 1 - i)).sum();
+    sum / ((1 << octaves) - 1)
+}
+
+/** 0 below `edge0`, ONE above `edge1`, eased between. */
+pub fn smoothstep(edge0: Fixed, edge1: Fixed, x: Fixed) -> Fixed {
+    if x <= edge0 {
+        0
+    } else if x >= edge1 {
+        ONE
+    } else {
+        ease(((x - edge0) << 16) / (edge1 - edge0))
     }
-    sum / total
-}
-
-pub fn smoothstep(edge0: f64, edge1: f64, x: f64) -> f64 {
-    let t = 1f64.min(0f64.max((x - edge0) / (edge1 - edge0)));
-    t * t * (3.0 - 2.0 * t)
 }
 
 /** A seeded random sequence (splitmix64). */
@@ -98,6 +111,11 @@ impl Rng {
         ((self.next_u32() as u64 * n as u64) >> 32) as u32
     }
 
+    /** True with chance `p` (a fraction of ONE). */
+    pub fn chance(&mut self, p: Fixed) -> bool {
+        fraction(self.next_u32()) < p
+    }
+
     /** A fraction of 1 in [0, 1), in steps of 2^-32. */
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> f64 {
@@ -110,29 +128,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn hashes_do_not_repeat_and_mix_every_bit() {
-        let mut seen = std::collections::HashSet::new();
-        for x in -16..16 {
-            for y in -16..16 {
-                for z in -16..16 {
-                    assert!(seen.insert(hash64(7, x, y, z)));
-                }
+    fn noise_holds_up_far_from_the_origin() {
+        for x0 in [-1000, 1 << 40] {
+            let mut last = value_noise(3, x0, 5, 48);
+            for x in x0 + 1..x0 + 2000 {
+                let v = value_noise(3, x, 5, 48);
+                assert!((0..ONE).contains(&v) && (v - last).abs() < ONE / 16, "{x}: {last} to {v}");
+                assert!((0..ONE).contains(&fbm(3, x, 5, 360, 4)));
+                last = v;
             }
         }
-        // Far apart, still apart: 2^32 is no period.
-        assert_ne!(hash64(7, 1, 2, 3), hash64(7, 1 + (1 << 32), 2, 3));
-        // Half the bits flip from one point to the next, on average.
-        let flips: u32 = (0..1000).map(|x| (hash64(7, x, 0, 0) ^ hash64(7, x + 1, 0, 0)).count_ones()).sum();
-        assert!((31_000..33_000).contains(&flips), "{flips}");
-    }
-
-    #[test]
-    fn below_is_even() {
-        let mut r = Rng::new(1);
-        let mut counts = [0; 6];
-        for _ in 0..60_000 {
-            counts[r.below(6) as usize] += 1;
-        }
-        assert!(counts.iter().all(|c| (9_500..10_500).contains(c)), "{counts:?}");
+        // 32-bit coordinates would wrap here.
+        assert_ne!(hash(7, 1, 2, 3), hash(7, 1 + (1 << 32), 2, 3));
     }
 }

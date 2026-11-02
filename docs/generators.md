@@ -116,10 +116,9 @@ and fields from position alone.
 Add a new world to that list with a region that has a bit of everything in it.
 
 `worldgen/` is the framework and the forest in Rust, for the native frontend.
-It began as a port of the TS ones and now goes its own way,
-towards integers wherever they decide something
-(hashes and random numbers first, in `noise.rs`),
-so a world is the same on every machine and does not repeat far from the origin.
+It began as a port of the TS ones and now goes its own way:
+integers and fixed point (`noise.rs`) wherever they decide something,
+so a world is the same on every machine and as fine far from the origin.
 The web is to move onto it; until then the two forests differ.
 
 ## Open problems
