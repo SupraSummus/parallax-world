@@ -66,6 +66,10 @@ Numbers are for the forest at 1280×800, as measured when written.
   mostly the ground's noise, which the terrain and the canopy
   compute about 14 times per column (with its neighbours, for slopes);
   at levels 0 and 1 also the undergrowth's many small shapes.
+- **The reference viewer freezes for over a minute on the forest**:
+  it generates all its levels on the main thread,
+  then holds about 25 million faces, over 2 GB.
+  Generating in the bake workers would unfreeze it.
 
 ## Ideas
 

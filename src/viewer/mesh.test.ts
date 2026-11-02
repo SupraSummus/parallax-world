@@ -41,4 +41,21 @@ describe('buildVoxelMesh', () => {
       expect(normal.reduce((sum, n, k) => sum + n * centroid[k], 0)).toBeGreaterThan(0)
     }
   })
+
+  it('draws level 1 in a ring around level 0, twice as wide, its voxels twice as large', () => {
+    const sites: [number, number, number][] = []
+    for (let x = -24; x <= 24; x++) {
+      for (let z = -24; z <= 24; z++) {
+        for (let y = 0; y < 4; y++) if ((x + y + z) % 2 === 0) sites.push([x, y, z])
+      }
+    }
+    const reaches = (level: number) => {
+      const { positions } = buildVoxelMesh(worldOf(sites), { x: 0, y: 0, z: 0 }, 6, level)
+      return Array.from({ length: positions.length / 3 }, (_, v) => Math.max(Math.abs(positions[v * 3]), Math.abs(positions[v * 3 + 2])))
+    }
+    // Level 0's voxels at up to 6 reach 1 further; level 1's, at 8 to 12, 2.
+    expect(Math.max(...reaches(0))).toBe(6 + 1)
+    expect(Math.min(...reaches(1))).toBe(8 - 2)
+    expect(Math.max(...reaches(1))).toBe(12 + 2)
+  })
 })

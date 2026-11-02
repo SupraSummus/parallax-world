@@ -9,6 +9,7 @@ import { World, WORLD_TYPES, type Vec3, type WorldType } from '@/lib/world'
 import { DEFAULT_FOV, DEFAULT_RENDER_DISTANCE, FOG_PER_RENDER_DISTANCE } from '@/lib/renderer'
 import { SKY_HORIZON, SKY_TOP } from '@/lib/compositor'
 import { focalLength, viewBasis } from '@/lib/view'
+import { GRID_LEVELS } from '@/lib/slice-selection'
 import { buildVoxelMesh } from './mesh'
 
 const params = new URLSearchParams(location.search)
@@ -24,19 +25,26 @@ const [cx, cy, cz] = (params.get('camera') ?? '').split(',').map(Number)
 const parallaxCamera: Vec3 = Number.isFinite(cx) && Number.isFinite(cy) && Number.isFinite(cz)
   ? { x: cx, y: cy, z: cz }
   : world.spawn
-// The voxels within REACH units in x and z: all of the forest's level 0 would take gigabytes of buffers.
+// Level 0 within REACH units in x and z (all of the forest's would take gigabytes of buffers),
+// then coarser levels in rings (buildVoxelMesh) to the render distance,
+// each its own mesh: all in one would be over WebGL's buffer size limit.
 const REACH = 240
-const mesh = buildVoxelMesh(world, parallaxCamera, REACH)
+const levels = Math.min(GRID_LEVELS, 1 + Math.max(0, Math.ceil(Math.log2(renderDistance / REACH))))
+const scene = new THREE.Scene()
+const material = new THREE.MeshBasicMaterial({ vertexColors: true })
+let faceCount = 0
+for (let level = 0; level < levels; level++) {
+  const mesh = buildVoxelMesh(world, parallaxCamera, REACH, level)
+  const geometry = new THREE.BufferGeometry()
+  geometry.setAttribute('position', new THREE.BufferAttribute(mesh.positions, 3))
+  geometry.setAttribute('color', new THREE.BufferAttribute(mesh.colors, 3, true))
+  geometry.setIndex(new THREE.BufferAttribute(mesh.indices, 1))
+  scene.add(new THREE.Mesh(geometry, material))
+  faceCount += mesh.faceCount
+}
 const buildTime = performance.now() - started
 const [yaw = 0, pitch = 0] = (params.get('look') ?? '').split(',').map(Number).map(a => (Number.isFinite(a) ? a : 0))
 
-const geometry = new THREE.BufferGeometry()
-geometry.setAttribute('position', new THREE.BufferAttribute(mesh.positions, 3))
-geometry.setAttribute('color', new THREE.BufferAttribute(mesh.colors, 3, true))
-geometry.setIndex(new THREE.BufferAttribute(mesh.indices, 1))
-
-const scene = new THREE.Scene()
-scene.add(new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ vertexColors: true })))
 // Linear stand-in for the slice renderer's exponential fog.
 const fog = new THREE.Fog(SKY_HORIZON, 0, renderDistance * FOG_PER_RENDER_DISTANCE * 2.5)
 scene.fog = fog
@@ -47,7 +55,7 @@ renderer.outputColorSpace = THREE.LinearSRGBColorSpace // colours are already sR
 document.body.append(renderer.domElement)
 document.body.style.background = `linear-gradient(${SKY_TOP}, ${SKY_HORIZON} 50%)`
 
-const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 2000)
+const camera = new THREE.PerspectiveCamera(60, 1, 0.1, REACH * 2 ** levels)
 const controls = new OrbitControls(camera, renderer.domElement)
 // Draw only when something changes: the mesh can have millions of faces.
 const draw = () => { renderer.render(scene, camera) }
@@ -76,8 +84,8 @@ function resize() {
 const info = document.getElementById('info')
 if (info) {
   info.textContent =
-    `${worldType} · seed ${String(seed)} · ±${String(REACH)} units around the camera · ` +
-    `${mesh.faceCount.toLocaleString()} faces · built in ${buildTime.toFixed(0)} ms`
+    `${worldType} · seed ${String(seed)} · ${String(levels)} levels to ±${String(REACH * 2 ** (levels - 1))} units around the camera · ` +
+    `${faceCount.toLocaleString()} faces · built in ${buildTime.toFixed(0)} ms`
 }
 document.getElementById('reset')?.addEventListener('click', toParallaxView)
 document.getElementById('fog')?.addEventListener('change', e => {

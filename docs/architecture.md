@@ -558,7 +558,9 @@ the renderer only draws faces that no neighbour covers.
 ## 7. Reference viewer (`src/viewer`)
 
 `viewer.html` rebuilds the world from its seed
-and draws every exposed voxel face, a rhombus, with three.js.
+and draws every exposed voxel face, a rhombus, with three.js:
+level 0 around the camera,
+then each coarser grid in a ring twice as wide, to the render distance.
 World (x, y, z) maps to three.js (x, y, −z),
 so the default camera, looking down −z, looks along world +z.
 The app passes its orientation, field of view and render distance in the URL,
@@ -604,7 +606,8 @@ so from the parallax camera's position both renderers should agree.
   and a world needs more of them than of cubes for the same detail,
   so baking costs more.
 - The world's grids are held by the main thread and by each worker.
-  The reference viewer meshes only part of level 0, around the camera.
+  The reference viewer meshes level 0 only around the camera,
+  the coarser grids in rings beyond.
 - Moving far, a level's grid is generated again where the camera went
   (section 1): until it is in, the far edges of its slices show nothing,
   and moving faster than it generates, the near ones too.
