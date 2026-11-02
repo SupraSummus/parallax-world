@@ -3,9 +3,10 @@
 The world is cut into slices, each a slab between two layers of a
 coarser FCC lattice made of whole cells of a finer one,
 and each slice into chunks, bricks of the lattice seen along its axis;
-each chunk in view is rasterised once, flat, as seen from a lattice site
-near the camera, into a pixel buffer, and WebGL draws the buffers
-on their slices' planes in perspective.
+each chunk in view is baked once, flat, as seen from a lattice site
+near the camera, into a list of its visible voxels,
+each a hexagon of one colour (a splat) on its slice's plane,
+and WebGL draws the splats on their slices' planes in perspective.
 Voxels are rhombic dodecahedra on the face-centred cubic (FCC) lattice
 (section 6).
 Sections 1–3 describe one stack of slices, looking along one of the
@@ -17,10 +18,10 @@ LAYER = 1/√2 apart, and a voxel reaches from the layer before its own to
 the one after, so neighbouring slices interlock.
 
 ```
-World (voxels) ──selectSlices──▶ slices ──chunks in view──▶ cached pixels ──Frame──▶ WebGL ──▶ screen
+World (voxels) ──selectSlices──▶ slices ──chunks in view──▶ cached splats ──Frame──▶ WebGL ──▶ screen
    world.ts      slice-selection.ts, cells.ts                 renderer.ts          compositor.ts
                                                                │      ▲
-                                                 missing chunks▼      │pixels
+                                                 missing chunks▼      │splats
                                                  bake workers (worker-bakery.ts)
 ```
 
@@ -221,7 +222,7 @@ The bound is nearly tight. It cannot be pushed to zero by thinner slices:
 even single layers leak, because the back faces and the inside of the slab
 are flattened.
 
-## 3. Chunks and rasterisation (`renderer.ts`, `chunk-baker.ts`, `bake/`)
+## 3. Chunks and splats (`renderer.ts`, `chunk-baker.ts`, `bake/`)
 
 When a chunk cell is first baked, the voxels of the slice in the cell
 (and a margin around it) with a face that is not covered by a neighbour,
@@ -242,7 +243,7 @@ so rows of bricks are offset by half a brick, like a wall's.
 Brick (i, j) is row j's i-th, 2M·LAYER by M of the slice's centre plane.
 Since a slice's thickness is about its distance / detail,
 every chunk covers about the same part of the screen. Only chunks whose
-cell reaches the screen are rasterised; empty ones are cached too, so
+cell reaches the screen are baked; empty ones are cached too, so
 their cells are not searched again, but not shown.
 
 **Empty cells.** A chunk draws the voxels of its cell and a margin around it
@@ -272,10 +273,23 @@ voxels at least 2N layers past it (`NEAR_DEPTH` for level 0,
 camera's (section 2): rays from the eye through the part of a chunk the
 face shows are within 1 of the face's rays, which bounds the margin a
 cell's surface needs (`cellMargin`).
-Drawn are the open (and cut) faces facing the eye,
-normal · (p − eye) < 0 (`chunk_faces`).
-Shading, by the axes a face's normal leans towards, is shared with the
-reference viewer (`faceShade`).
+
+**Splats.** A chunk is its voxels a ray from the eye may reach:
+those with an open or cut face facing it,
+normal · (p − eye) < 0 (`chunk_splats`).
+Each is painted as one hexagon, the same from every side (`Splat`):
+the voxel's outline seen straight along the face's axis,
+√2 wide and 2 high, its corners the rhombic dodecahedron's,
+centred where the line from the eye through its site meets the centre plane
+and scaled as that point is.
+Seen along the axis, the splats of a surface cover it as its voxels do;
+seen at a slant, a splat stands for all the faces its voxel shows.
+A splat's colour is the mean of its voxel's open faces' shades
+(of its cut faces' where it has none),
+each shaded by the axes its normal leans towards, as in the reference viewer
+(`faceShade`, `voxel_colour`):
+a voxel is shaded by the way its surface faces,
+and looks the same along every face.
 
 **Painting order.** Voxels by their site's distance from the eye,
 farthest first.
@@ -284,15 +298,8 @@ a ray from the eye passing from one into another crosses where their
 sites are equally far, coming from the nearer site's side,
 so along every ray a voxel met first is nearer the eye,
 whatever the ray's direction.
-A voxel's faces facing the eye never overlap.
-`src/lib/bake.test.ts` checks chunks pixel by pixel against rays cast
-from the eye through the slice's voxels.
-
-A face, a rhombus, projects to a convex quadrilateral, filled exactly:
-a pixel is filled when its centre is inside, with half-open edges,
-each evaluated from its upper end,
-so neighbours meet without gaps or overlap (`fill_faces`).
-No antialiasing: a soft 1-pixel edge magnified 20× on screen is a blur.
+`src/lib/bake.test.ts` checks against rays cast from the eye
+that every voxel one meets first is painted.
 
 **Filling gaps.** A slice draws a point at depth z′
 that the camera sees along σ and the eye along τ,
@@ -311,18 +318,15 @@ and makes the slices overlap (the leak of section 2) where it is nearer.
 A gap is |J| − t/D_{k+1}, as the cut of a solid t units thick covers t/D:
 only thin things tear, e.g. a one-layer floor seen from high above.
 So each slice closes its share:
-the open faces of voxels with a neighbour in another slice
-grow towards where they belong, by (σ − τ)·d for the σ that open a gap,
-d the depth of the voxel's tips from the centre plane
+voxels with an open face and a neighbour in another slice
+grow, by |σ − τ|·d for d the depth of the voxel's tips from the centre plane
 (slices interlock, so where they meet is the voxel's own depth, at most s/2)
-(`chunk_faces`; |σ − τ| is at most the eye error of the voxel's depth,
-section 2).
-Faces the eye doesn't face grow too where some camera in the eye's cell
-faces them: normal · (p − eye) < N, the cell's reach towards them.
-A grown face is its quadrilateral swept over the rectangle of its growth,
-a convex polygon of up to 8 corners;
-grown faces are painted nearest first into pixels the chunk left empty
-(`fill_faces`). Cut faces and the inside of slices don't grow.
+(`chunk_splats`; |σ − τ| is at most the eye error of the voxel's depth,
+section 2): each side of its hexagon moves out by that much.
+Voxels the eye doesn't see grow too where some camera in the eye's cell
+faces one of their open faces: normal · (p − eye) < N, the cell's reach towards them.
+Grown splats come after a chunk's painted ones,
+and are drawn only where the chunk paints nothing (section 4).
 "Fill Gaps" turns it off.
 
 **The baker** is Rust (`bake/`), compiled to WebAssembly
@@ -332,22 +336,16 @@ with no files to fetch.
 `ChunkBaker` hands it a world once:
 the grid, the voxel's faces in lattice coordinates and the palettes (`bake.ts`).
 Then each chunk is one call,
-and its pixels are copied out of the WebAssembly memory.
+and its splats are copied out of the WebAssembly memory.
 A chunk's voxels are those of its cell and a margin around it
 (`cell_surface`, cached per cell, so other eyes reuse it).
 
-**Resolution.** A chunk is drawn at `render_scale` pixels per unit of
-the grid it reads (section 1), fewer the thicker its slice,
-as thicker slices lie farther away.
-The nearest slices get `RENDER_SCALE`, so
-magnified rhombi keep their slanted edges. Other settings scale the chunk
-on screen; with the defaults it is magnified (`todo.md`).
-
-Each chunk is cropped to what is drawn; `originX`/`originY` record
-the world position of its top-left corner on the centre plane. The image
-depends on the camera's position only through the eye, so a chunk is
-drawn once when it first comes into view (from its eye) and is never
-redrawn.
+Each chunk is clipped to its cell: splats that miss it are dropped,
+and `originX`/`originY` and its extent record where on the centre plane
+the rest draw. A chunk depends on the camera's position only through
+the eye, so it is baked once when it first comes into view (from its eye)
+and never again.
+Splats have no resolution: the compositor draws them at the screen's.
 
 **Workers.** In the app, a frame never waits for chunks:
 each render lists the missing chunks in view,
@@ -420,9 +418,9 @@ the view (orientation, viewport W × H in CSS pixels,
 `focal = max(W, H) / 2 / tan(fov/2)` in pixels)
 and, face by face, for each slice near to far,
 its distance d (to its centre plane), its chunks and its fog.
-A chunk is a rectangle on the plane z = d in its face's coordinates,
+A chunk draws within a rectangle on the plane z = d in its face's coordinates,
 its top-left corner at (originX − camera.x, originY − camera.y, d)
-relative to the camera, chunk pixels / `render_scale` wide and high.
+relative to the camera, as wide and high as its extent.
 A camera-relative point p goes to (`projector`, and the vertex shader;
 right, up and forward are the camera's axes in the face's coordinates):
 
@@ -451,8 +449,12 @@ and sub-blocks outside the face count as covered.
 A sub-block is covered once one layer's chunks draw all of the face's part of it,
 but different sub-blocks may be covered by different layers:
 leaves, trunks and the ground together close what none of them closes alone.
-Bakers record which blocks of a chunk's pixels are all drawn and which partly (`solid_blocks`);
-the blocks under a sub-block, plus a pixel around for smoothing, must all be drawn.
+Bakers fill a mask of what a chunk draws, its splats' pixels at
+`mask_scale`, about as many per chunk at every level,
+and record which blocks of it are all drawn and which partly (`fill_mask`, `solid_blocks`);
+the blocks under a sub-block, plus a pixel around, must all be drawn.
+The mask is coarser than the screen (`todo.md`):
+a gap between splats narrower than a mask pixel may hide nothing behind it.
 A chunk is handed to `Coverage` when first drawn or tested,
 which keeps its tiles and a table of sums of its all-drawn blocks,
 so testing the blocks under a rectangle takes four reads;
@@ -464,16 +466,25 @@ The rays through each sub-block are kept per face while the camera only moves,
 and turning, found only in the cells the face crosses or holds
 (a face's side is a half-plane of the screen).
 
-The `Compositor` draws a frame onto one opaque WebGL 2 canvas, one
-textured rectangle per chunk, then the sky behind them. Chunk pixels are
-opaque or empty, so it draws near to far with a depth test and discards
-empty pixels: what nearer slices cover is rejected instead of blended
+The `Compositor` draws a frame onto one opaque WebGL 2 canvas:
+per chunk its splats, instanced, each a rectangle cut to its hexagon,
+then the sky behind them.
+Splats are opaque, so it draws near to far with a depth test:
+what nearer slices cover is rejected instead of blended
 (the forest stacks dozens of screens of chunks). Depth is the layer's index,
 not its distance: a face's slices are parallel planes, so every ray
 meets them near to far, and faces share pixels only along seams
-(the first face drawn wins there). A chunk's texture is uploaded
-when it comes into view and deleted when it leaves. Magnified chunks are
-sampled nearest, to keep voxel edges crisp; minified ones smoothly.
+(the first face drawn wins there).
+Within a layer, a chunk draws only on its own part of the plane,
+decided by each pixel's ray, so chunks neither overlap nor leave seams;
+a later splat at the same depth covers an earlier one,
+so a chunk's are painted in order.
+Its grown splats are drawn at depth i + ½:
+behind every splat of layer i, in front of layer i + 1,
+and nearest wins among them, as they are painted far to near.
+A chunk's splats are uploaded when it comes into view
+and deleted when it leaves.
+No antialiasing, so voxel edges stay crisp.
 
 **Fog.** A slice at distance d keeps `exp(−d / F)` of its own colour;
 the rest is the horizon colour, mixed in per pixel.
@@ -490,15 +501,15 @@ distance (or of the last slice, if farther).
 
 Slices are keyed by `face:level:slab:cutoff` and hold their chunks keyed by brick.
 Insertion order of the slice `Map` is the LRU order. Slices and chunks that
-leave the view lose their textures but stay cached so moving back
+leave the view lose their buffers but stay cached so moving back
 reuses them: up to `MAX_CACHED_SLICES` slices, and hidden chunks
-up to `MAX_HIDDEN_CHUNK_PIXELS` (oldest slices' first). Chunks
+up to `MAX_HIDDEN_CHUNK_BYTES` (oldest slices' first). Chunks
 of cells in view are kept even if they draw nothing, or they would be
 baked again on every render.
 
 | Event | Effect |
 |---|---|
-| x/y movement | Chunks still in view reused unless their level's eye changes: a level is baked again when the camera leaves its eye's cell; chunks entering the view rasterised; placements update |
+| x/y movement | Chunks still in view reused unless their level's eye changes: a level is baked again when the camera leaves its eye's cell; chunks entering the view baked; placements update |
 | turning | Slices and chunks reused; chunks entering the view baked |
 | field of view change | Slices and chunks reused; only the compositor's focal length changes |
 | leak tolerance change | Slices still needed are reused |
@@ -508,8 +519,8 @@ baked again on every render.
 | world regeneration | Whole cache cleared |
 
 Per-render stats (`UpdateStats`) report chunks reused vs shown for the
-first time since they were baked, chunks still baking, voxel faces baked
-since the previous render and the pixels of all cached chunks;
+first time since they were baked, chunks still baking, voxels painted in chunks baked
+since the previous render and the bytes of all cached chunks;
 `SessionStats` accumulates them. `renderTime` is main-thread time, which
 excludes baking in workers.
 
@@ -569,11 +580,12 @@ so from the parallax camera's position both renderers should agree.
 - Each slice is drawn at the scale of its centre, as seen from its
   level's eye, so it is only approximately in perspective; section 2
   bounds the error.
-- Faces as seen from the eye: a face nearly parallel to the rays may be
-  missing or slightly too wide.
+- A voxel is painted as its outline along the face's axis, one colour,
+  whatever side it is seen from:
+  seen at a slant, its faces' shapes and shades are lost,
+  and a silhouette is a row of hexagons.
 - A level is baked again all at once when the camera leaves its eye's
   cell (section 3): the near levels every unit or few of movement.
-- Near slices are heavily upscaled from `RENDER_SCALE`.
 - Within `NEAR_DEPTH` of the camera along a face's axis nothing is
   drawn, and near voxels seen at a steep angle are the least accurate.
 - Inside a voxel (the camera has no collisions), the cut faces of the
@@ -598,11 +610,7 @@ so from the parallax camera's position both renderers should agree.
   what fills less than a quarter of a coarse voxel's cell is lost
   (a lone voxel, a thin pole), and solids grow by up to half a coarse
   voxel.
-- Rhombic dodecahedra have jagged outlines: a flat wall or floor is a
-  surface of pyramids, and a silhouette along an axis is a zigzag.
-- A voxel shows up to six faces towards the camera, a cube up to three,
-  and a world needs more of them than of cubes for the same detail,
-  so baking costs more.
+- The compositor draws every splat in view every frame (`todo.md`).
 - The world's grids are held by the main thread and by each worker.
   The reference viewer meshes only part of level 0, around the camera.
 - Moving far, a level's grid is generated again where the camera went

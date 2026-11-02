@@ -87,16 +87,16 @@ async function settle(renderer: ParallaxRenderer): Promise<Frame> {
   }
 }
 
-/** FNV-1a: comparing (and diffing) the pixel arrays themselves is slow. */
-function checksum(pixels: Uint32Array): number {
+/** FNV-1a of the splats' bits: comparing (and diffing) the arrays themselves is slow. */
+function checksum(splats: Float32Array): number {
   let hash = 0x811c9dc5
-  for (const pixel of pixels) hash = Math.imul(hash ^ pixel, 0x01000193)
+  for (const bits of new Uint32Array(splats.buffer, splats.byteOffset, splats.length)) hash = Math.imul(hash ^ bits, 0x01000193)
   return hash >>> 0
 }
 
 /** Each layer's chunks: content and where they go. */
 const shown = (frame: Frame) => frame.layers.map(l => l.placements.map(({ chunk, x, y }) =>
-  ({ i: chunk.i, j: chunk.j, eye: chunk.eye.join(), pixels: checksum(chunk.pixels), x, y })))
+  ({ i: chunk.i, j: chunk.j, eye: chunk.eye.join(), splats: checksum(chunk.splats), x, y })))
 
 /** What baking on the main thread shows. */
 function reference(camera?: Camera, from = world, orientation?: Orientation) {
@@ -212,7 +212,7 @@ describe('WorkerBakery', () => {
     await settle(renderer)
     renderer.setFillGaps(false)
     await settle(renderer)
-    expect(renderer.getStats().lastUpdate?.cachedPixels).toBeGreaterThan(32_000_000)
+    expect(renderer.getStats().lastUpdate?.cachedBytes).toBeGreaterThan(32_000_000)
     // settle()'s last render evicted; did it drop chunks the view wants but does not draw?
     renderer.render()
     expect(pending(renderer)).toBe(0)
@@ -272,11 +272,11 @@ describe('WorkerBakery', () => {
 
   it('drops chunks baked from a replaced world', async () => {
     const request = { face: '+x+z', level: 5, layer: 0, cutoff: Infinity, i: 0, j: 0, eye: [0, 0, 0] as const, fill: false, grid: 0 }
-    expect(new ChunkBaker(world.materials, world.levels).bake(request).facesDrawn).toBeGreaterThan(0)
+    expect(new ChunkBaker(world.materials, world.levels).bake(request).painted).toBeGreaterThan(0)
 
     const bakery = new WorkerBakery([new FakeWorker()])
     const delivered: number[] = []
-    bakery.connect((_, image) => { delivered.push(image.facesDrawn) })
+    bakery.connect((_, chunk) => { delivered.push(chunk.painted) })
     bakery.setWorld(world.materials, world.levels)
     bakery.want([request])
     const empty = VoxelGrid.fromVoxels([])

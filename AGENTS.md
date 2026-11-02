@@ -50,7 +50,7 @@ src/
     ├── chunk-baker.ts       # Bakes whole chunks with bake/ (WebAssembly); the bake worker's message protocol
     ├── worker-bakery.ts     # Pool of bake workers the renderer sends missing chunks to
     ├── bake.worker.ts       # Bake worker entry
-    ├── compositor.ts        # Draws the renderer's frames with WebGL 2
+    ├── compositor.ts        # Draws the renderer's frames with WebGL 2: chunks' splats, instanced
     ├── bake.ts              # Voxel face geometry and shaded palettes handed to the baker
     └── utils.ts             # cn() for class names
 viewer.html                  # Reference 3D viewer page (second Vite entry)
@@ -64,8 +64,8 @@ bake/                        # Chunk baker and coverage in Rust, compiled to Web
     ├── cells.rs             # cells.ts, with a table per level
     ├── slicing.rs           # The parts of slice-selection.ts baking needs
     ├── surface.rs           # A cell's voxels that can show
-    ├── faces.rs             # Which voxel faces a chunk shows, baked onto its centre plane
-    ├── fill.rs              # Faces filled into pixels, gap filling, solid blocks
+    ├── splats.rs            # Which voxels a chunk shows, as hexagons on its centre plane; gap filling
+    ├── fill.rs              # Splats filled into a mask, solid blocks (for coverage)
     └── coverage.rs          # Which screen cells nearer layers cover, on the main thread; its WebAssembly exports
 ```
 

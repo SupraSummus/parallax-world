@@ -23,7 +23,7 @@
  * centre instead of the near face [5], an eye error measured to the cell's
  * face instead of its corner [4], eyes on the next level's lattice [4],
  * detail rounded down [6], projecting through the eye's mirror image in
- * bake/src/faces.rs [8].
+ * bake/src/splats.rs [8].
  *
  * Depths are in face coordinates (view.ts): layers are LAYER apart. A
  * slice is a slab of layers of the voxels of its grid, N = 2^atomLevel
@@ -41,7 +41,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import { selectSlices, leakFreeDetail, eyeOf, eyeError, chunkCell, sliceCentre, thickness, holds, atomLevel, atomSpacing, MAX_LEVEL, type SliceId } from './slice-selection'
-import { ChunkBaker, FACE } from './chunk-baker'
+import { ChunkBaker, SPLAT } from './chunk-baker'
 import { FACES, LAYER, inFace } from './view'
 import { VoxelGrid } from './voxel-grid'
 import { levelsOf } from './world'
@@ -94,7 +94,7 @@ describe('Step 1: a baked, drawn point is off by (σ − τ)·(z − D)', () => 
     }, ({ D, z, x, eye: [e, f] }) => {
       const sigma = x / z
       const tau = (x - e) / (z - f)
-      // Projected from the eye (chunk_faces in bake/src/faces.rs).
+      // Projected from the eye (chunk_splats in bake/src/splats.rs).
       const baked = e + ((x - e) * (D - f)) / (z - f)
       const offWorld = (baked / D - sigma) * D
       return Math.abs(offWorld - (sigma - tau) * (z - D)) < 1e-6
@@ -252,11 +252,10 @@ describe('Step 6: leakFreeDetail closes the loop', () => {
  * depth c, voxels (a, 0, c) with a and c even. The plane cuts each into the
  * square |Δa|, |Δc| ≤ 1 (in lattice units; a and c are both LAYER per
  * unit, so tangents are the same as in face coordinates), and these tile
- * it. Slices, chunks and faces come from the renderer's own functions; the
+ * it. Slices, chunks and splats come from the renderer's own functions; the
  * eyes are the sites of N·FCC in the plane (a, c multiples of 2N), at most
- * N off the camera along each, as step 4 allows. Only the clipping to cells
- * and the compositing are restated here, along the line b = 0 of each
- * chunk. A leak is a run of screen where the renderer shows a voxel that no
+ * N off the camera along each, as step 4 allows. Only the compositing is
+ * restated here, along the line b = 0 of each chunk. A leak is a run of screen where the renderer shows a voxel that no
  * perspective ray reaches, measured in pixels of a SCREEN-pixel screen.
  */
 describe.each([1, 0.5, 0.25])('Step 8: ray-cast leaks with tan(fov / 2) = %s', TAN_HALF_FOV => {
@@ -308,21 +307,6 @@ describe.each([1, 0.5, 0.25])('Step 8: ray-cast leaks with tan(fov / 2) = %s', T
     return new Set(nearest.map(n => n.cell))
   }
 
-  /** Where a convex polygon (x, y pairs) meets the line y = 0: [from, to], or null. */
-  function onAxis(points: ArrayLike<number>): [number, number] | null {
-    let from = Infinity
-    let to = -Infinity
-    for (let i = 0; i < 4; i++) {
-      const [px, py, qx, qy] = [points[2 * i], points[2 * i + 1], points[(2 * i + 2) % 8], points[(2 * i + 3) % 8]]
-      if (py === 0) [from, to] = [Math.min(from, px), Math.max(to, px)]
-      if ((py < 0) !== (qy < 0) && py !== qy) {
-        const x = px + ((qx - px) * -py) / (qy - py)
-        ;[from, to] = [Math.min(from, x), Math.max(to, x)]
-      }
-    }
-    return from < to ? [from, to] : null
-  }
-
   /**
    * What the slices draw of a terrain: the voxels (u, 0, z) of the grid
    * each reads (levelsOf) that it holds, and those grids.
@@ -361,15 +345,17 @@ describe.each([1, 0.5, 0.25])('Step 8: ray-cast leaks with tan(fov / 2) = %s', T
         return [i - 1, i, i + 1]
       }))
       for (const i of chunkCells) {
-        const data = baker.faces({ face: face.name, ...slice, i, j: 0, eye, fill: false })
-        for (let f = 0; f < data.length / FACE; f++) {
-          if (data[f * FACE + 9] === 0) continue
-          const extent = onAxis(data.subarray(f * FACE, f * FACE + 8))
-          if (!extent) continue
-          const voxel = cellAt.get(`${String(n)}:${String(data[f * FACE + 14])},${String(data[f * FACE + 16])}`) ?? -1
-          // Clipped to the chunk's cell, then drawn at the centre plane's distance.
-          const from = Math.max(x + i * w, extent[0])
-          const to = Math.min(x + (i + 1) * w, extent[1])
+        const chunk = baker.bake({ face: face.name, ...slice, i, j: 0, eye, fill: false })
+        const sites = baker.sites(chunk.splats.length / SPLAT)
+        for (let k = 0; k < chunk.painted; k++) {
+          const [sx, sy, sw, sh] = chunk.splats.subarray(k * SPLAT, k * SPLAT + 4)
+          // Where its hexagon meets the line b = 0, clipped to what the chunk draws.
+          const half = Math.min(sw, (sh - Math.abs(chunk.originY + sy)) * Math.SQRT2)
+          if (half <= 0) continue
+          const from = Math.max(chunk.originX, chunk.originX + sx - half)
+          const to = Math.min(chunk.originX + chunk.extentWidth, chunk.originX + sx + half)
+          const voxel = cellAt.get(`${String(n)}:${String(sites[3 * k])},${String(sites[3 * k + 2])}`) ?? -1
+          // Drawn at the centre plane's distance.
           const first = Math.ceil(((from - cu * LAYER) / distance + TAN_HALF_FOV) / step)
           const last = Math.floor(((to - cu * LAYER) / distance + TAN_HALF_FOV) / step)
           for (let k = Math.max(0, first); k <= Math.min(RAYS - 1, last); k++) owner[k] = voxel

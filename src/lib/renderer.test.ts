@@ -56,7 +56,7 @@ describe('ParallaxRenderer', () => {
   /** Screen bounding box of a chunk's projected corners. */
   const screenBox = (chunk: Chunk) => {
     const corners = [[0, 0], [1, 0], [0, 1], [1, 1]].map(([i, j]) =>
-      screenOf(chunk, chunk.originX + (i * chunk.width) / chunk.scale, chunk.originY - (j * chunk.height) / chunk.scale))
+      screenOf(chunk, chunk.originX + i * chunk.extentWidth, chunk.originY - j * chunk.extentHeight))
     const xs = corners.map(c => c.x)
     const ys = corners.map(c => c.y)
     return { left: Math.min(...xs), right: Math.max(...xs), top: Math.min(...ys), bottom: Math.max(...ys) }
@@ -103,16 +103,16 @@ describe('ParallaxRenderer', () => {
         for (const chunk of layer.chunks) {
           const { x, y, width: w, height: h } = chunkCell(layer.slice.level, chunk.i, chunk.j)
           expect(Number.isInteger(chunk.i) && Number.isInteger(chunk.j)).toBe(true)
-          expect(chunk.facesDrawn).toBeGreaterThan(0)
-          // Sizes are rounded up to whole pixels.
-          const slack = 1 / chunk.scale
+          expect(chunk.painted).toBeGreaterThan(0)
           expect(chunk.originX).toBeGreaterThanOrEqual(x - 1e-9)
-          expect(chunk.originX + chunk.width / chunk.scale).toBeLessThanOrEqual(x + w + slack)
-          expect(chunk.originY).toBeLessThanOrEqual(y + h)
-          expect(chunk.originY - chunk.height / chunk.scale).toBeGreaterThanOrEqual(y - slack)
+          expect(chunk.originX + chunk.extentWidth).toBeLessThanOrEqual(x + w + 1e-9)
+          expect(chunk.originY).toBeLessThanOrEqual(y + h + 1e-9)
+          expect(chunk.originY - chunk.extentHeight).toBeGreaterThanOrEqual(y - 1e-9)
+          // Its mask is rounded up to whole pixels.
+          expect(chunk.mask.width).toBe(Math.ceil(chunk.extentWidth * chunk.mask.scale - 1e-9))
         }
       }
-      expect(lastUpdate().voxelsRendered).toBeGreaterThanOrEqual(chunks.reduce((n, c) => n + c.facesDrawn, 0))
+      expect(lastUpdate().voxelsRendered).toBeGreaterThanOrEqual(chunks.reduce((n, c) => n + c.painted, 0))
     })
 
     it("bakes a level's chunks from its eye, and again only once the camera leaves the eye's cell", () => {
@@ -133,14 +133,14 @@ describe('ParallaxRenderer', () => {
       expect(rebaked.every(l => moved.has(`${l.face}:${String(l.slice.level)}`))).toBe(true)
     })
 
-    it('rasterises fewer pixels for farther, thicker slices', () => {
+    it('masks farther, thicker slices more coarsely', () => {
       render()
-      const scales = layers().filter(l => l.face === '+x+z' && l.chunks.length > 0).map(l => l.chunks[0].scale)
+      const scales = layers().filter(l => l.face === '+x+z' && l.chunks.length > 0).map(l => l.chunks[0].mask.scale)
       expect(scales).toEqual([...scales].sort((a, b) => b - a))
       expect(scales[0]).toBeGreaterThan(scales[scales.length - 1])
     })
 
-    it.each([[0, 0], [10, -10]])('only rasterises chunks that are at least partly on screen (yaw %s°, pitch %s°)', (yaw, pitch) => {
+    it.each([[0, 0], [10, -10]])('only bakes chunks that are at least partly on screen (yaw %s°, pitch %s°)', (yaw, pitch) => {
       renderer.setOrientation({ yaw, pitch })
       render()
       const wide = lastUpdate()
@@ -159,7 +159,7 @@ describe('ParallaxRenderer', () => {
       narrow.setMaxLeak(MAX_LEAK)
       narrow.setOrientation({ yaw, pitch })
       narrow.render()
-      expect(narrow.getStats().lastUpdate?.cachedPixels).toBeLessThan(wide.cachedPixels)
+      expect(narrow.getStats().lastUpdate?.cachedBytes).toBeLessThan(wide.cachedBytes)
     })
 
   })
@@ -274,7 +274,7 @@ describe('ParallaxRenderer', () => {
       expect(lastUpdate().chunksReused).toBeGreaterThan(lastUpdate().chunksRegenerated * 4)
     })
 
-    it('rasterises nothing when the camera returns to where it was', () => {
+    it('bakes nothing when the camera returns to where it was', () => {
       render()
       const start = renderer.getCamera()
       const chunks = allChunks()
@@ -287,7 +287,7 @@ describe('ParallaxRenderer', () => {
       expect(allChunks()).toHaveLength(chunks.length)
     })
 
-    it('rasterises nothing when rendering the same camera twice', () => {
+    it('bakes nothing when rendering the same camera twice', () => {
       render()
       render()
       expect(lastUpdate().chunksRegenerated).toBe(0)
@@ -295,7 +295,7 @@ describe('ParallaxRenderer', () => {
       expect(lastUpdate().cacheEfficiency).toBe(100)
     })
 
-    it('keeps the slices when turning, rasterising only chunks that come into view', () => {
+    it('keeps the slices when turning, baking only chunks that come into view', () => {
       const slicesOf = (face: string) => layers().filter(l => l.face === face).map(l => l.slice)
       render()
       const before = new Map(FACES.map(f => [f.name, slicesOf(f.name)]))

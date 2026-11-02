@@ -1,5 +1,5 @@
 import { selectSlices, leakFreeDetail, leakAngle, eyeOf, sliceCentre, chunkCell, chunkCells, cellMargin, matchTilings, sliceKey as sliceName, siteLayers, MAX_LEVEL, GRID_LEVELS, atomLevel, atomSpacing, type SliceId } from './slice-selection'
-import { ChunkBaker, type ChunkImage, type ChunkRequest } from './chunk-baker'
+import { ChunkBaker, type ChunkSplats, type ChunkRequest } from './chunk-baker'
 import { generatePart, World, type GridPart, type Vec3, type WorldType } from './world'
 import { LayerIndex, type LayerIndexData, type Material, type VoxelData } from './voxel-grid'
 import { Coverage } from './occlusion'
@@ -7,14 +7,14 @@ import { FACES, LAYER, faceTangents, inFace, focalLength, onScreen, screenBox, t
 
 export type Camera = Vec3
 
-/** A rasterised, aligned piece of a slice (see chunkCell). */
-export interface Chunk extends ChunkImage {
+/** A baked, aligned piece of a slice (see chunkCell). */
+export interface Chunk extends ChunkSplats {
   /** Its cell (see chunkCell). */
   i: number
   j: number
   /** The eye it is baked from, in perspective, onto the slice's centre plane (see eyeOf). */
   eye: readonly [number, number, number]
-  /** Whether its faces are grown to fill gaps (see chunk_faces in bake/src/faces.rs). */
+  /** Whether its splats are grown to fill gaps (see chunk_splats in bake/src/splats.rs). */
   fill: boolean
   /** Which of its level's grids it is baked from (see ChunkRequest). */
   grid: number
@@ -22,8 +22,8 @@ export interface Chunk extends ChunkImage {
 
 /**
  * A chunk in a frame: x, y of its top-left corner on its layer's plane,
- * relative to the camera, in the face's coordinates. It spans chunk.width /
- * chunk.scale to the right and chunk.height / chunk.scale down.
+ * relative to the camera, in the face's coordinates. It spans
+ * chunk.extentWidth to the right and chunk.extentHeight down.
  */
 export interface Placement {
   chunk: Chunk
@@ -61,12 +61,12 @@ interface UpdateStats {
   chunksPending: number
   /** Cells and chunks in view covered by nearer layers, so not drawn (see Coverage). */
   chunksCovered: number
-  /** Voxel faces drawn into chunks baked since the previous render (including any whose content turned out to be off screen). */
+  /** Voxels painted in chunks baked since the previous render (including any whose content turned out to be off screen). */
   voxelsRendered: number
   /** Percentage of chunks in view served from the cache. */
   cacheEfficiency: number
-  /** Pixels of all cached chunks, in view or not. */
-  cachedPixels: number
+  /** Bytes of all cached chunks, in view or not. */
+  cachedBytes: number
 }
 
 export interface SessionStats {
@@ -104,12 +104,15 @@ export const MAX_RENDER_DISTANCE = 40000
 // back reuses them, up to these caps (a face has about 150 slices, and 12 faces
 // look all around). What is in view is never evicted.
 const MAX_CACHED_SLICES = 2048
-const MAX_HIDDEN_CHUNK_PIXELS = 48_000_000
+const MAX_HIDDEN_CHUNK_BYTES = 32_000_000
 
 // Exponential distance fog towards the horizon colour: at viewing distance d
 // a voxel keeps exp(-d / fogDistance) of its own colour. The fog distance
 // scales with the render distance so the far cut-off stays hazy.
 export const FOG_PER_RENDER_DISTANCE = 0.7
+
+/** What a chunk holds in memory. */
+const bytesOf = (chunk: Chunk) => chunk.splats.byteLength + chunk.mask.blocks.byteLength
 
 function sliceKey(face: string, slice: SliceId): string {
   return `${face}:${sliceName(slice)}`
@@ -123,8 +126,8 @@ interface Slice {
   size: number
   /** Baked chunks by cell (keyed by cellKey). */
   cells: Map<number, CellChunks>
-  /** Pixels of its chunks. */
-  pixels: number
+  /** Bytes of its chunks. */
+  bytes: number
   /** By cellKey: the least and greatest b of the voxels its chunks may draw (see cellMargin), or null if none. */
   extents: Map<number, [number, number] | null>
 }
@@ -199,7 +202,7 @@ function findChunk(cell: CellChunks | undefined, [a, b, c]: readonly number[], f
  */
 export interface Bakery {
   /** Takes the callbacks for baked chunks, and for generated parts of grids with their LayerIndex. */
-  connect(deliver: (request: ChunkRequest, image: ChunkImage) => void, generated: (part: GridPart, grid: VoxelData, index: LayerIndexData) => void): void
+  connect(deliver: (request: ChunkRequest, chunk: ChunkSplats) => void, generated: (part: GridPart, grid: VoxelData, index: LayerIndexData) => void): void
   /**
    * Replaces the world: its materials and its grids so far, by level
    * (World.level); chunks of the previous one are no longer delivered.
@@ -222,7 +225,7 @@ export interface RendererOptions {
 
 /**
  * Renders a World as a stack of flat, cached slices, each split into chunks
- * so that only what is in view is rasterised. render() returns where each
+ * so that only what is in view is baked. render() returns where each
  * chunk goes on screen; drawing it is the compositor's job. See
  * docs/architecture.md for the slicing and caching scheme.
  */
@@ -246,8 +249,8 @@ export class ParallaxRenderer {
   // Chunks of the cells in view in the most recent render, drawn or not:
   // evicted, one would be baked again on the next render.
   private inView = new Set<Chunk>()
-  // Pixels of all cached chunks.
-  private pixels = 0
+  // Bytes of all cached chunks.
+  private bytes = 0
   // Kept across renders for its buffers.
   private coverage: Coverage | null = null
 
@@ -258,8 +261,8 @@ export class ParallaxRenderer {
   private baker: ChunkBaker | null = null
   // Baked but not shown yet: counted as regenerated when first shown.
   private fresh = new WeakSet<Chunk>()
-  // Faces baked since the last render.
-  private facesBaked = 0
+  // Voxels painted in chunks baked since the last render.
+  private voxelsBaked = 0
 
   private stats: SessionStats = {
     totalUpdates: 0,
@@ -275,7 +278,7 @@ export class ParallaxRenderer {
     this.camera = { ...world.spawn }
     this.bakery = bakery ?? null
     this.onBaked = onBaked ?? (() => undefined)
-    this.bakery?.connect((request, image) => { this.receive(request, image) }, (part, grid, index) => { this.receivePart(part, grid, index) })
+    this.bakery?.connect((request, chunk) => { this.receive(request, chunk) }, (part, grid, index) => { this.receivePart(part, grid, index) })
     this.useWorld()
   }
 
@@ -367,8 +370,8 @@ export class ParallaxRenderer {
     this.bakery?.want(pass.missing
       .sort((a, b) => group(a) - group(b) || (a.segmentMisses ?? 0) - (b.segmentMisses ?? 0) || a.distance - b.distance)
       .map(m => m.request))
-    const voxelsRendered = this.facesBaked
-    this.facesBaked = 0
+    const voxelsRendered = this.voxelsBaked
+    this.voxelsBaked = 0
 
     const chunkCount = chunksReused + chunksRegenerated
     const renderTime = performance.now() - startTime
@@ -391,7 +394,7 @@ export class ParallaxRenderer {
       chunksCovered,
       voxelsRendered,
       cacheEfficiency,
-      cachedPixels: this.pixels,
+      cachedBytes: this.bytes,
     }
     return frame
   }
@@ -503,7 +506,7 @@ export class ParallaxRenderer {
           chunk = this.store(request, this.baker.bake(request))
         } else {
           // Not wanted if what stands in is hidden anyway.
-          if (latest && coverage && latest.facesDrawn > 0 && coverage.hidesChunk(latest, latest.originX - camera.x, latest.originY - camera.y, distance)) {
+          if (latest && coverage && latest.painted > 0 && coverage.hidesChunk(latest, latest.originX - camera.x, latest.originY - camera.y, distance)) {
             inView.add(latest)
             result.covered++
             continue
@@ -515,11 +518,11 @@ export class ParallaxRenderer {
         if (!chunk) continue
       }
       inView.add(chunk)
-      if (chunk.facesDrawn === 0) continue
+      if (chunk.splats.length === 0) continue
       // The chunk's content, not just its cell, must reach the screen.
       const contentLeft = chunk.originX - camera.x
       const contentTop = chunk.originY - camera.y
-      const box = boxOf(contentLeft, contentLeft + chunk.width / chunk.scale, contentTop - chunk.height / chunk.scale, contentTop, distance)
+      const box = boxOf(contentLeft, contentLeft + chunk.extentWidth, contentTop - chunk.extentHeight, contentTop, distance)
       if (!onScreen(view, box)) continue
       if (coverage?.hidesChunk(chunk, contentLeft, contentTop, distance)) {
         result.covered++
@@ -569,8 +572,8 @@ export class ParallaxRenderer {
     this.inView.clear()
     this.tilings.clear()
     this.slices.clear()
-    this.pixels = 0
-    this.facesBaked = 0
+    this.bytes = 0
+    this.voxelsBaked = 0
     this.useWorld()
   }
 
@@ -654,7 +657,7 @@ export class ParallaxRenderer {
     this.maxLeak = Math.min(MAX_MAX_LEAK, Math.max(MIN_MAX_LEAK, degrees))
   }
 
-  /** Whether faces are grown to fill the gaps between slices (see chunk_faces in bake/src/faces.rs). */
+  /** Whether splats are grown to fill the gaps between slices (see chunk_splats in bake/src/splats.rs). */
   setFillGaps(fill: boolean) {
     this.fillGaps = fill
   }
@@ -704,7 +707,7 @@ export class ParallaxRenderer {
       depth: start + first,
       size: last - first + 1,
       cells: new Map(),
-      pixels: 0,
+      bytes: 0,
       extents: new Map(),
     }
     this.slices.set(key, slice)
@@ -712,7 +715,7 @@ export class ParallaxRenderer {
   }
 
   /** Caches a baked chunk, unless its slice has been evicted meanwhile. */
-  private store(request: ChunkRequest, image: ChunkImage): Chunk | undefined {
+  private store(request: ChunkRequest, baked: ChunkSplats): Chunk | undefined {
     const { face, level, layer, cutoff, i, j, eye, fill, grid } = request
     const slice = this.slices.get(sliceKey(face, { level, layer, cutoff }))
     if (!slice) return
@@ -720,45 +723,45 @@ export class ParallaxRenderer {
     let cell = slice.cells.get(key)
     if (!cell) slice.cells.set(key, cell = { chunks: [], latest: undefined })
     if (findChunk(cell, eye, fill, grid)) return
-    const chunk: Chunk = { ...image, i, j, eye, fill, grid }
+    const chunk: Chunk = { ...baked, i, j, eye, fill, grid }
     cell.chunks.push(chunk)
     cell.latest = chunk
-    slice.pixels += chunk.width * chunk.height
-    this.pixels += chunk.width * chunk.height
+    slice.bytes += bytesOf(chunk)
+    this.bytes += bytesOf(chunk)
     this.fresh.add(chunk)
-    this.facesBaked += chunk.facesDrawn
+    this.voxelsBaked += chunk.painted
     return chunk
   }
 
-  private receive(request: ChunkRequest, image: ChunkImage) {
-    this.store(request, image)
+  private receive(request: ChunkRequest, chunk: ChunkSplats) {
+    this.store(request, chunk)
     this.onBaked()
   }
 
   /**
    * Drops least-recently-used slices beyond MAX_CACHED_SLICES, then hidden
    * chunks (least recently used slices first) until they fit
-   * MAX_HIDDEN_CHUNK_PIXELS. What is in view is never evicted.
+   * MAX_HIDDEN_CHUNK_BYTES. What is in view is never evicted.
    */
   private evict(inView: Set<Slice>) {
     for (const [key, slice] of this.slices) {
       if (this.slices.size <= MAX_CACHED_SLICES) break
       if (inView.has(slice)) continue
       this.slices.delete(key)
-      this.pixels -= slice.pixels
+      this.bytes -= slice.bytes
     }
-    let hidden = this.pixels
-    for (const chunk of this.inView) hidden -= chunk.width * chunk.height
+    let hidden = this.bytes
+    for (const chunk of this.inView) hidden -= bytesOf(chunk)
     for (const slice of this.slices.values()) {
-      if (hidden <= MAX_HIDDEN_CHUNK_PIXELS) return
+      if (hidden <= MAX_HIDDEN_CHUNK_BYTES) return
       for (const [key, cell] of slice.cells) {
         const kept = cell.chunks.filter(chunk => this.inView.has(chunk))
         for (const chunk of cell.chunks) {
           if (this.inView.has(chunk)) continue
-          const pixels = chunk.width * chunk.height
-          hidden -= pixels
-          slice.pixels -= pixels
-          this.pixels -= pixels
+          const bytes = bytesOf(chunk)
+          hidden -= bytes
+          slice.bytes -= bytes
+          this.bytes -= bytes
         }
         if (kept.length === 0) {
           slice.cells.delete(key)

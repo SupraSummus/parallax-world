@@ -3,8 +3,8 @@
 
 /** Kinds of voxel faces. */
 pub const FACE_KINDS: usize = 12;
-/** f64 per kind in the geometry table: lattice offset (3), normal (3), corners (4 × 3). */
-pub const GEOMETRY: usize = 18;
+/** f64 per kind in the geometry table: lattice offset (3), normal (3). */
+pub const GEOMETRY: usize = 6;
 /** i32 per face in the lattice table: R, U, F (3 each). */
 pub const LATTICE: usize = 9;
 /** Faces of the view (FACES in view.ts). */
@@ -12,25 +12,23 @@ pub const VIEW_FACES: usize = 12;
 
 /**
  * The voxel's faces in a face's lattice coordinates, the same for every
- * face (VOXEL_GEOMETRY in bake.ts): kind k's neighbour offset (a, b, c), its normal and
- * its corners in face coordinates.
+ * face (VOXEL_GEOMETRY in bake.ts): kind k's neighbour offset (a, b, c)
+ * and its normal in face coordinates.
  */
 pub struct Geometry {
     pub offsets: [[i32; 3]; FACE_KINDS],
     pub normals: [[f64; 3]; FACE_KINDS],
-    pub corners: [[f64; 12]; FACE_KINDS],
 }
 
 impl Geometry {
     pub fn from_table(table: &[f64]) -> Geometry {
-        let mut g = Geometry { offsets: [[0; 3]; FACE_KINDS], normals: [[0.0; 3]; FACE_KINDS], corners: [[0.0; 12]; FACE_KINDS] };
+        let mut g = Geometry { offsets: [[0; 3]; FACE_KINDS], normals: [[0.0; 3]; FACE_KINDS] };
         for k in 0..FACE_KINDS {
             let t = &table[k * GEOMETRY..(k + 1) * GEOMETRY];
             for d in 0..3 {
                 g.offsets[k][d] = t[d] as i32;
                 g.normals[k][d] = t[3 + d];
             }
-            g.corners[k].copy_from_slice(&t[6..18]);
         }
         g
     }

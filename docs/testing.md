@@ -20,8 +20,8 @@ pnpm exec vitest run bake       # files matching "bake"
 | `src/lib/cells.test.ts`, `bake/src/cells.rs` | Cells of N·FCC and the baker's table of them |
 | `src/lib/slice-selection.test.ts` | Slices, bricks and eyes; every site in exactly one slice |
 | `src/lib/leak-bound.test.ts` | The occlusion-leak bound, step by step, then end to end against ray-cast perspective |
-| `src/lib/bake.test.ts` | Baked chunks pixel by pixel against rays cast from the eye |
-| `bake/src/fill.rs`, `bake/src/coverage.rs` | Filling faces into pixels; solid blocks and their sums |
+| `src/lib/bake.test.ts` | Baked chunks' splats against rays cast from the eye |
+| `bake/src/fill.rs`, `bake/src/coverage.rs` | Splats filled into a mask; solid blocks and their sums |
 | `src/lib/occlusion.test.ts` | Skipping covered chunks leaves the picture unchanged |
 | `src/lib/view.test.ts` | Camera basis, faces, projection, culling |
 | `src/lib/voxel-grid.test.ts` | Storage on the lattice, `LayerIndex`, coarsening |
@@ -46,7 +46,8 @@ a no-op 2D canvas context
 - Assert observable behaviour (layer contents, frames, stats), not
   private fields. Every test must be able to fail: no `expect(true)` or
   `toBeGreaterThanOrEqual(0)` placeholders.
-- To check what was drawn, read the chunks' pixels and placements, as
+- To check what was drawn, rasterise the chunks (`rasterise` in
+  `picture.test-helper.ts`) and read their placements, as
   `renderer-regressions.test.ts` does.
 - Prefer one invariant test over a grid of inputs to many near-identical
   example tests. For a claim about all inputs, check it on seeded random

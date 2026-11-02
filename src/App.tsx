@@ -459,7 +459,7 @@ function App() {
                     <StatRow label="Chunks Covered">{lastUpdate.chunksCovered}</StatRow>
                     <StatRow label="Cache Efficiency">{lastUpdate.cacheEfficiency.toFixed(1)}%</StatRow>
                     <StatRow label="Voxels Rendered">{lastUpdate.voxelsRendered.toLocaleString()}</StatRow>
-                    <StatRow label="Cached Pixels">{(lastUpdate.cachedPixels / 1e6).toFixed(1)} Mpx</StatRow>
+                    <StatRow label="Cached Chunks">{(lastUpdate.cachedBytes / 1e6).toFixed(1)} MB</StatRow>
                   </div>
                 </>
               )}

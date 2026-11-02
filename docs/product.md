@@ -29,15 +29,19 @@ nearest neighbours (the faces of a rhombic dodecahedron around the
 camera), each cut along the lattice's layers across it.
 Slices grow thicker with viewing distance, and far ones draw the world
 at a coarser level of detail, so far voxels stay a pixel or two across.
-Slices are split into chunks, rasterised only in view and cached
+Slices are split into chunks, baked only in view and cached
 while the camera stays near where they were baked from.
+A chunk is a list of its visible voxels,
+each painted as a hexagon of one colour,
+its outline seen along the slice's axis, the same from every side:
+an impressionist picture of the scene, not its exact faces.
 Slices are thin enough that
 geometry perspective would hide (e.g. stone under the lake's water
 surface) never shows by more than a set angle ("Max Occlusion Leak").
 The field of view only zooms the picture, without re-slicing,
 so zoomed in, the same slices leak more pixels;
 the statistics show the slice detail and how many pixels that is.
-"Fill Gaps" (on by default) grows faces that run from one
+"Fill Gaps" (on by default) grows the hexagons of voxels that run from one
 slice into the next, where nothing else is drawn in their chunk, so thin
 things like a floor seen from above don't show sky between slices.
 "Skip Covered Chunks" (on by default) doesn't draw chunks that nearer
@@ -74,7 +78,7 @@ slice renderer.
 **Statistics panel** – Session totals (updates, average render time, average
 cache efficiency, voxels rendered) and details of the last update (layers,
 slice detail, leak bound in pixels, chunks in view reused vs newly baked, chunks still baking,
-chunks covered, cached chunk pixels). Chunks bake in background workers, so moving never
+chunks covered, cached chunk bytes). Chunks bake in background workers, so moving never
 waits for them; meanwhile a cell shows an older bake, or nothing.
 
 ## Non-goals (for the POC)
