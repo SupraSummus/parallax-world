@@ -356,11 +356,11 @@ function App() {
               onChange={handleRenderDistanceChange}
             />
             <SliderRow
-              label={`Max Occlusion Leak: ${String(maxLeak)} px`}
+              label={`Max Occlusion Leak: ${maxLeak.toFixed(1)}°`}
               value={maxLeak}
               min={MIN_MAX_LEAK}
               max={MAX_MAX_LEAK}
-              step={1}
+              step={0.1}
               onChange={handleMaxLeakChange}
             />
             <label className="flex items-center justify-between text-xs text-muted-foreground">
@@ -446,6 +446,7 @@ function App() {
                     <StatRow label="Render Time">{lastUpdate.renderTime.toFixed(2)}ms</StatRow>
                     <StatRow label="Active Layers">{lastUpdate.layerCount}</StatRow>
                     <StatRow label="Slice Detail">{lastUpdate.detail.toFixed(1)}</StatRow>
+                    <StatRow label="Leak Bound">{lastUpdate.leakPixels.toFixed(1)} px</StatRow>
                     <StatRow label="Chunks in View">{lastUpdate.chunkCount}</StatRow>
                     <StatRow label="Reused / Regenerated">
                       <span className="text-primary">{lastUpdate.chunksReused}</span>

@@ -231,17 +231,17 @@ describe('Step 6: leakFreeDetail closes the loop', () => {
 
   it('keeps the bound within ε for random settings', () => {
     forAll(5000, r => ({ focal: 2 ** r(4, 14), epsilon: r(0.5, 64) }), ({ focal, epsilon }) =>
-      leakBound(focal, leakFreeDetail(focal, epsilon)) <= epsilon + EPSILON)
+      leakBound(focal, leakFreeDetail(epsilon / focal)) <= epsilon + EPSILON)
   })
 
   it('half the detail would break it', () => {
     const focal = 640
-    expect(leakBound(focal, leakFreeDetail(focal, 16) / 2)).toBeGreaterThan(16)
+    expect(leakBound(focal, leakFreeDetail(16 / focal) / 2)).toBeGreaterThan(16)
   })
 
   it('keeps every voxel 2N layers past its eye', () => {
     forAll(300, r => ({ cameraZ: r(-300, 300), focal: 2 ** r(4, 14), epsilon: r(0.5, 64) }), ({ cameraZ, focal, epsilon }) =>
-      selectSlices(cameraZ, NEAR, 1000, leakFreeDetail(focal, epsilon)).every(s =>
+      selectSlices(cameraZ, NEAR, 1000, leakFreeDetail(epsilon / focal)).every(s =>
         nearSide(s) - (cameraZ + 2 ** s.level) >= 2 * 2 ** s.level))
   })
 })
@@ -405,7 +405,7 @@ describe.each([1, 0.5, 0.25])('Step 8: ray-cast leaks with tan(fov / 2) = %s', T
 
   // Camera above the terrain looking over it, like the lake world.
   const scenes = [1, 2, 3, 4].map(seed => ({ cells: terrain(seed), cu: 12 + seed * 7.4, cz: -0.2 - seed * 0.4 }))
-  const detail = leakFreeDetail(focal, MAX_LEAK)
+  const detail = leakFreeDetail(MAX_LEAK / focal)
   // Within the leak bound, give or take one ray. Slices are at least one
   // layer (two spacings) thick, so near the camera (closer than 2 · detail)
   // the bound is 2 units instead, which is more pixels there.
