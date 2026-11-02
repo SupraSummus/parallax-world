@@ -97,8 +97,21 @@ export function forest(seed: number): { generator: Generator<Kind>; spawn: Vec3 
     const pathDip = (1 - smoothstep(1, 2.2, fromPath)) * 0.3
     return hills + valley + ridge - pathDip
   }
+  // Every cell of a column of a population's cells asks for the same
+  // spots (see spot()), so heights are kept a while.
+  const heights = new Map<number, number>()
   /** Ground height in units. */
-  const ground = (x: number, z: number) => vox(groundMetres(x * UNIT_SIZE, z * UNIT_SIZE))
+  const ground = (x: number, z: number) => {
+    // Unique while |z| < 2^21 units (500 km).
+    const key = x * 4194304 + z
+    let h = heights.get(key)
+    if (h === undefined) {
+      if (heights.size >= 1 << 16) heights.clear()
+      h = vox(groundMetres(x * UNIT_SIZE, z * UNIT_SIZE))
+      heights.set(key, h)
+    }
+    return h
+  }
 
   /** Column (x, z), given the ground's height there and at its four neighbours. */
   const columnOf = (x: number, z: number, h: number, neighbours: readonly number[]): Column => {
@@ -129,12 +142,13 @@ export function forest(seed: number): { generator: Generator<Kind>; spawn: Vec3 
 
   /**
    * A random spot on the ground under the square a cell reaches over (2N
-   * wide): every spot on the ground is in one cell, which picks it as often
-   * as any, so things are as even as one per square 2N wide.
+   * wide): every spot on the ground is in one cell, whose column of cells
+   * picks it as often as any, so things are as even as one per square 2N
+   * wide. The cells of a column pick the same spot, one cell owns it.
    */
   const spot = (cell: Cell, n: number): Point => {
     const [cx, , cz] = cell.centre
-    const pick = cell.random('spot')
+    const pick = rng(Math.floor(hash(s(19), n, cell.i, cell.k) * 4294967296))
     const [x, z] = [cx - n + Math.floor(pick() * 2 * n), cz - n + Math.floor(pick() * 2 * n)]
     return [x, ground(x, z), z]
   }
@@ -182,7 +196,9 @@ export function forest(seed: number): { generator: Generator<Kind>; spawn: Vec3 
     order: 1,
     cell: TREE_CELL,
     reach: [vox(9), vox(26), vox(9)],
-    size: vox(8),
+    // One by one, trees cost as much at every level per tree, and a box of
+    // a coarser level holds more of them: from level 3 on, the canopy.
+    size: vox(1),
     anchor: cell => spot(cell, TREE_CELL),
     make([x, y, z], cell) {
       const random = cell.random('tree')
@@ -224,7 +240,7 @@ export function forest(seed: number): { generator: Generator<Kind>; spawn: Vec3 
     order: 2,
     cell: ROCK_CELL,
     reach: vox(3),
-    size: vox(8),
+    size: vox(2),
     anchor: cell => spot(cell, ROCK_CELL),
     make: ([x, y, z], cell) => {
       const random = cell.random('boulder')
@@ -236,7 +252,7 @@ export function forest(seed: number): { generator: Generator<Kind>; spawn: Vec3 
     order: 2,
     cell: ROCK_CELL,
     reach: vox(10),
-    size: vox(8),
+    size: vox(2),
     anchor: cell => spot(cell, ROCK_CELL),
     make: ([x, , z], cell) => {
       const random = cell.random('log')
@@ -255,7 +271,7 @@ export function forest(seed: number): { generator: Generator<Kind>; spawn: Vec3 
     order: 3,
     cell: PLANTS,
     reach: [0, vox(10), 0],
-    size: vox(1),
+    size: 1,
     anchor: ({ centre: [cx, , cz] }) => [cx, ground(cx, cz) + 0.5, cz],
     make(_, { centre: [cx, , cz] }) {
       const shapes: Shape<Kind>[] = []
@@ -339,7 +355,7 @@ function spruceTree(x: number, ground: number, z: number, random: () => number):
   }
   // From half a unit below the lowest whorl to half above the top, so level 0 has a disc of sites at each y.
   const [from, to] = [base - 0.5, crownTop + 0.5]
-  const fill = (px: number, py: number, pz: number) => 0.95 - 0.35 * (Math.hypot(px - cx, pz - cz) / r(py)) ** 3
+  const fill = (px: number, py: number, pz: number) => 0.95 - 0.35 * (Math.sqrt((px - cx) ** 2 + (pz - cz) ** 2) / r(py)) ** 3
   shapes.push(lathe([cx, from, cz], [cx, to, cz], t => r(Math.round(from + t * (to - from))), 'spruce', { fill }))
   return tree(shapes, hidden)
 }

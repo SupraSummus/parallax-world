@@ -115,8 +115,8 @@ Add a new world to that list with a region that has a bit of everything in it.
 ## Open problems
 
 - **Far forms are calibrated from analytic areas.**
-  The forest's canopy (level 6, sites 16 m apart) stops ~0.1 more rays
-  than its trees two levels finer:
+  The forest's canopy (its trees from level 3 on) stops 0.05–0.1 more rays
+  at levels 4 to 6 (sites 4 to 16 m apart) than two levels finer:
   porous, uneven crowns stop fewer rays than their outlines' area says,
   while balls of sites stop ~1.5× more than a ball's area says.
   Far forms should be measured from sample things drawn at level 0:
