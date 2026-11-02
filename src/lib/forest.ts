@@ -1,7 +1,7 @@
 import type { Vec3 } from './world'
 import { isSite } from './voxel-grid'
 import { fbm, hash, rng, smoothstep, valueNoise } from './noise'
-import { areaProfile, ball, box, boundsOfShapes, capsule, ellipsoid, lathe, type Box, type Cell, type Field, type Generator, type Kinds, type Node, type Point, type Population, type Shape } from './generator'
+import { areaProfile, ball, box, boundsOfShapes, capsule, ellipsoid, lathe, type Cell, type Field, type Generator, type Kinds, type Node, type Point, type Population, type Shape } from './generator'
 
 /**
  * Metres per lattice unit: voxels are FCC sites (voxel-grid.ts), nearest
@@ -20,12 +20,11 @@ const BRANCH_RADIUS = 0.3 / UNIT_SIZE
 const HEIGHTS = { minY: vox(-36), maxY: vox(80) }
 
 /**
- * Half the width of the grid of level 0, in units, around the spawn point:
- * where single voxels are drawn, at most √2 times as far as along the face
- * looked through (62 m at 1280 × 800, docs/architecture.md, section 1).
- * The grid of level ℓ is 2^ℓ times as wide.
+ * How far around the camera the grid of level 0 must hold the forest, in
+ * units: where single voxels are drawn (docs/architecture.md, section 1).
+ * The grid of level ℓ reaches 2^ℓ times as far.
  */
-const REACH = vox(96)
+const REACH = vox(88)
 
 // Material kinds; each voxel gets one shade of its kind, picked by position.
 // `type` ids follow world.ts: 1 grass, 2 dirt, 3 stone, 4 wood, 5 leaves, 6 flower.
@@ -84,10 +83,11 @@ const FOLIAGE: Record<Species, Kind> = { spruce: 'spruce', birch: 'birchGold', o
 /**
  * An autumn forest valley: a winding path along the valley floor, wooded
  * slopes rising on both sides. Spruce, birch and oak, with ferns, bushes, boulders and fallen logs, on
- * hills kilometres wide. Endless: `box` gives the part the app generates
- * at each level, around `spawn`, where the camera starts.
+ * hills kilometres wide. Endless: the app generates each level's grid
+ * around the camera, `reach` sites of the level either way
+ * (world.ts), from `spawn`, where the camera starts.
  */
-export function forest(seed: number): { generator: Generator<Kind>; spawn: Vec3; box: (level: number) => Box } {
+export function forest(seed: number): { generator: Generator<Kind>; spawn: Vec3; reach: number; heights: (level: number) => { minY: number; maxY: number } } {
   const s = (k: number) => (seed | 0) + k * 1013904223
   const pathPhase = hash(s(1), 0, 0) * 100
   /** Path centre line, in metres. */
@@ -309,12 +309,8 @@ export function forest(seed: number): { generator: Generator<Kind>; spawn: Vec3;
   return {
     generator: { kinds: KINDS, seed: s(4), layers: [terrain, trees, boulders, logs, plants] },
     spawn,
-    box: level => {
-      const n = 2 ** level
-      // REACH sites of the level either way.
-      const [x, z] = [Math.round(spawn.x / n), Math.round(spawn.z / n)]
-      return { minX: x - REACH, minY: Math.floor(HEIGHTS.minY / n), minZ: z - REACH, maxX: x + REACH, maxY: Math.ceil(HEIGHTS.maxY / n), maxZ: z + REACH }
-    },
+    reach: REACH,
+    heights: level => ({ minY: Math.floor(HEIGHTS.minY / 2 ** level), maxY: Math.ceil(HEIGHTS.maxY / 2 ** level) }),
   }
 }
 

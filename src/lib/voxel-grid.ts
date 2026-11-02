@@ -180,20 +180,36 @@ export class VoxelGrid {
   }
 
   /**
-   * The grid of `parts` one after the other along z: of one box but for z,
-   * each but the last a whole number of bricks deep, nearest z first.
+   * The grid of `box`, its bricks copied from `parts`, grids of the same
+   * materials: each a whole number of bricks from the box's corner, no two
+   * with voxels in one brick of it. The rest of the box is empty.
    */
-  static stack(parts: readonly VoxelData[]): VoxelGrid {
-    const [first, last] = [parts[0], parts[parts.length - 1]]
-    const grid = new VoxelGrid({ minX: first.minX, minY: first.minY, minZ: first.minZ, maxX: first.minX + first.nx, maxY: first.minY + first.ny, maxZ: last.minZ + last.nz }, first.materials)
-    const cells = parts.map(usedCells)
-    grid.cells = new Uint8Array(cells.reduce((sum, c) => sum + c.length, 0))
-    parts.forEach(({ minZ, bricks }, k) => {
-      const offset = ((minZ - first.minZ) / BRICK) * grid.bx * grid.by
-      for (let b = 0; b < bricks.length; b++) if (bricks[b] >= 0) grid.bricks[offset + b] = bricks[b] + grid.used
-      grid.cells.set(cells[k], grid.used * BRICK_SITES)
-      grid.used += cells[k].length / BRICK_SITES
-    })
+  static compose(box: Box, materials: readonly Material[], parts: readonly VoxelData[]): VoxelGrid {
+    const grid = new VoxelGrid(box, materials)
+    const bz = Math.ceil(grid.nz / BRICK)
+    // Calls `visit` with each of a part's bricks with voxels in the box: its index in the grid, and where its sites are in the part.
+    const inBox = ({ minX, minY, minZ, nx, ny, nz, bricks }: VoxelData, visit: (brick: number, at: number) => void) => {
+      const [i0, j0, k0] = [(minX - grid.minX) / BRICK, (minY - grid.minY) / BRICK, (minZ - grid.minZ) / BRICK]
+      if (![i0, j0, k0].every(Number.isInteger)) throw new RangeError('a part is not a whole number of bricks from the box')
+      const [px, py, pz] = [Math.ceil(nx / BRICK), Math.ceil(ny / BRICK), Math.ceil(nz / BRICK)]
+      for (let k = Math.max(0, -k0); k < Math.min(pz, bz - k0); k++) {
+        for (let j = Math.max(0, -j0); j < Math.min(py, grid.by - j0); j++) {
+          for (let i = Math.max(0, -i0); i < Math.min(px, grid.bx - i0); i++) {
+            const at = bricks[(k * py + j) * px + i]
+            if (at >= 0) visit(((k + k0) * grid.by + j + j0) * grid.bx + i + i0, at)
+          }
+        }
+      }
+    }
+    let count = 0
+    for (const part of parts) inBox(part, () => { count++ })
+    grid.cells = new Uint8Array(count * BRICK_SITES)
+    for (const part of parts) {
+      inBox(part, (brick, at) => {
+        grid.bricks[brick] = grid.used
+        grid.cells.set(part.cells.subarray(at * BRICK_SITES, (at + 1) * BRICK_SITES), grid.used++ * BRICK_SITES)
+      })
+    }
     return grid
   }
 

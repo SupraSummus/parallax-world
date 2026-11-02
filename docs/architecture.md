@@ -75,11 +75,15 @@ In that grid's units it is a slice of level k − ℓ of single voxels,
 so the baker bakes it as one and scales the chunk back
 (`in_grid` in `bake/src/lib.rs`).
 The forest is generated at each level (`docs/generators.md`),
-grid ℓ over a box 2^ℓ times as wide around the spawn point:
-±96 m at level 0, ±24 km at level 8.
-The bake workers generate the grids in parts, finest first
-(`World.missingParts`),
-and a level's slices show once its grid is in.
+around the camera, each grid reaching twice as far as the one before.
+A grid is made of tiles fixed in the world:
+when the camera goes far enough from its middle,
+it moves to the camera, and only the tiles it lacks are generated
+(`World.missingParts`).
+A level with no grid yet is no special case: its grid has no tiles.
+The bake workers generate the tiles, finest level first;
+a level's slices show once its grid is in,
+and a moved grid replaces the old one once all its tiles are.
 The other worlds' grids are each the one before it coarsened (`coarsen`):
 a coarse voxel is full if a quarter of its cell is,
 so a floor or wall one voxel thick stays one,
@@ -259,6 +263,9 @@ plane, clipped to the cell.
 A cached chunk is keyed by its cell and its eye, so it stays valid while
 the camera stays in that cell; when the camera leaves it,
 the whole level is baked again (section 5).
+It is keyed by its level's grid too (`World.version`):
+when the grid moves, the level is baked again,
+the old chunks standing in meanwhile.
 The eye is at most N layers ahead of the camera, and slices keep their
 voxels at least 2N layers past it (`NEAR_DEPTH` for level 0,
 `leakFreeDetail` for the rest), so its rays are at most 1 off the
@@ -598,4 +605,6 @@ so from the parallax camera's position both renderers should agree.
   so baking costs more.
 - The world's grids are held by the main thread and by each worker.
   The reference viewer meshes only part of level 0, around the camera.
-- The forest has detail only around the spawn point (section 1, `docs/todo.md`).
+- Moving far, a level's grid is generated again where the camera went
+  (section 1): until it is in, the far edges of its slices show nothing,
+  and moving faster than it generates, the near ones too.

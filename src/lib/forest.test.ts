@@ -6,8 +6,8 @@ import { isSite, type Voxel } from './voxel-grid'
 // 96 m × 160 m ahead of the spawn point, all heights. Generation takes a
 // while; every test only reads the result.
 const generated = (seed: number) => {
-  const { generator, spawn, box } = forest(seed)
-  const { minY, maxY } = box(0)
+  const { generator, spawn, heights } = forest(seed)
+  const { minY, maxY } = heights(0)
   // Grids start on an even x.
   const x = 2 * Math.floor((spawn.x - 48 / UNIT_SIZE) / 2)
   const area = { minX: x, minY, minZ: spawn.z - 1 / UNIT_SIZE, maxX: x + 96 / UNIT_SIZE, maxY, maxZ: spawn.z + 159 / UNIT_SIZE }

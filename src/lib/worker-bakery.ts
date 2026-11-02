@@ -51,13 +51,13 @@ export class WorkerBakery implements Bakery {
     })
   }
 
-  connect(deliver: (request: ChunkRequest, image: ChunkImage) => void) {
+  connect(deliver: (request: ChunkRequest, image: ChunkImage) => void, generated: (part: GridPart, grid: VoxelData, index: LayerIndexData) => void = () => undefined) {
     this.deliver = deliver
+    this.generated = generated
   }
 
   setWorld(materials: readonly Material[], levels: readonly (VoxelData | undefined)[]) {
     this.generation++
-    this.generated = () => undefined
     for (const entry of this.workers) {
       entry.sent = null
       entry.worker.postMessage({ type: 'world', generation: this.generation, materials, levels })
@@ -68,8 +68,7 @@ export class WorkerBakery implements Bakery {
     for (const { worker } of this.workers) worker.postMessage({ type: 'grid', generation: this.generation, level, grid })
   }
 
-  generate(seed: number, worldType: WorldType, parts: GridPart[], done: (part: GridPart, grid: VoxelData, index: LayerIndexData) => void) {
-    this.generated = done
+  generate(seed: number, worldType: WorldType, parts: GridPart[]) {
     const count = this.workers.length
     this.workers.forEach(({ worker }, k) => {
       const share = parts.filter((_, n) => n % count === k)
