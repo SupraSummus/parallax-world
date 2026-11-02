@@ -1,13 +1,15 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { ParallaxRenderer, DEFAULT_RENDER_DISTANCE, type Chunk, type Frame } from './renderer'
 import { World } from './world'
-import { selectSlices, leakFreeDetail, chunkCell, eyeOf } from './slice-selection'
+import { selectSlices, chunkCell, eyeOf } from './slice-selection'
 import { FACES, LAYER, faceTangents, focalLength, projector, toLocal, viewBasis, type Face, type Orientation } from './view'
 import type { Vec3 } from './world'
 
 // A small world with trees: rasterising the forest (~700k voxels)
 // takes seconds per test. The renderer never modifies its world.
 const world = new World(12345, 'hills_with_trees')
+// Degrees: coarser than the default, so fewer chunks to bake.
+const MAX_LEAK = 2.3
 
 const faceNamed = (name: string) => FACES.find(f => f.name === name) as Face
 // Looking along +x+z (yaw 45°), that face's layers are parallel to the
@@ -63,6 +65,7 @@ describe('ParallaxRenderer', () => {
   beforeEach(() => {
     renderer = new ParallaxRenderer(world)
     renderer.resize(800, 600)
+    renderer.setMaxLeak(MAX_LEAK)
   })
 
   describe('camera', () => {
@@ -153,6 +156,7 @@ describe('ParallaxRenderer', () => {
       const narrow = new ParallaxRenderer(world)
       narrow.resize(400, 300)
       narrow.setFov((2 * Math.atan(0.5) * 180) / Math.PI)
+      narrow.setMaxLeak(MAX_LEAK)
       narrow.setOrientation({ yaw, pitch })
       narrow.render()
       expect(narrow.getStats().lastUpdate?.cachedPixels).toBeLessThan(wide.cachedPixels)
@@ -231,7 +235,7 @@ describe('ParallaxRenderer', () => {
     it('keeps world points at their projected position across a resize', () => {
       render()
       const slices = layers().map(l => l.slice)
-      // Same longer side, so the same detail and slices.
+      // The same detail, so the same slices.
       renderer.resize(600, 800)
       render()
       expect(layers().map(l => l.slice)).toEqual(slices)
@@ -319,21 +323,26 @@ describe('ParallaxRenderer', () => {
   })
 
   describe('settings', () => {
-    it('derives detail from the field of view, viewport and leak tolerance', () => {
-      for (const [fov, pixels] of [[90, 16], [90, 4], [10, 16]]) {
-        renderer.setFov(fov)
-        renderer.setMaxLeak(pixels)
-        const tan = Math.tan((fov * Math.PI) / 360)
-        // The longer viewport side is 800 px; a face draws rays up to tangent 1.
-        expect(renderer.getDetail()).toBe(leakFreeDetail(400 / tan, pixels))
-      }
+    it('zooms without re-slicing, so the same slices leak more pixels', () => {
+      render()
+      const slicesOf = (face: string) => layers().filter(l => l.face === face).map(l => l.slice)
+      const wide = { leak: lastUpdate().leakPixels, slices: new Map(FACES.map(f => [f.name, slicesOf(f.name)])) }
+      expect(wide.leak).toBeLessThanOrEqual((MAX_LEAK * Math.PI / 180) * 400)
+      // 4×: tan 45° / tan 14.04°.
+      renderer.setFov((2 * Math.atan(0.25) * 180) / Math.PI)
+      render()
+      expect(lastUpdate().leakPixels).toBeCloseTo(4 * wide.leak)
+      // Fewer faces are in view, each with the same slices.
+      const faces = new Set(layers().map(l => l.face))
+      expect(faces.size).toBeGreaterThan(0)
+      for (const face of faces) expect(slicesOf(face)).toEqual(wide.slices.get(face))
     })
 
     it('uses fewer, thicker slices for a larger tolerance', () => {
-      renderer.setMaxLeak(4)
+      renderer.setMaxLeak(0.3)
       render()
       const strict = lastUpdate()
-      renderer.setMaxLeak(64)
+      renderer.setMaxLeak(6)
       render()
       expect(lastUpdate().detail).toBeLessThan(strict.detail)
       expect(lastUpdate().layerCount).toBeLessThan(strict.layerCount)

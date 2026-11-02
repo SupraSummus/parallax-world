@@ -1,4 +1,4 @@
-import { selectSlices, leakFreeDetail, eyeOf, sliceCentre, chunkCell, chunkCells, cellMargin, matchTilings, sliceKey as sliceName, siteLayers, MAX_LEVEL, atomLevel, atomSpacing, type SliceId } from './slice-selection'
+import { selectSlices, leakFreeDetail, leakAngle, eyeOf, sliceCentre, chunkCell, chunkCells, cellMargin, matchTilings, sliceKey as sliceName, siteLayers, MAX_LEVEL, atomLevel, atomSpacing, type SliceId } from './slice-selection'
 import { ChunkBaker, type ChunkImage, type ChunkRequest } from './chunk-baker'
 import { World, type Vec3, type WorldType } from './world'
 import { LayerIndex, type VoxelData } from './voxel-grid'
@@ -47,6 +47,8 @@ interface UpdateStats {
   renderTime: number
   /** Distance / max slice thickness, from the leak tolerance (see leakFreeDetail). */
   detail: number
+  /** The leak bound in pixels of this view: the compositor's focal length times leakAngle. */
+  leakPixels: number
   layerCount: number
   /** Non-empty chunks in view. */
   chunkCount: number
@@ -79,11 +81,12 @@ export const DEFAULT_FOV = 90
 export const MIN_FOV = 5
 export const MAX_FOV = 120
 
-// How many screen pixels of geometry that perspective would hide may show
-// through the gaps between slices. Larger means thicker slices, fewer layers.
-export const DEFAULT_MAX_LEAK = 16
-export const MIN_MAX_LEAK = 1
-export const MAX_MAX_LEAK = 64
+// How far geometry that perspective would hide may show through the gaps
+// between slices, in degrees: an angle, as slicing knows no field of view.
+// Larger means thicker slices, fewer layers.
+export const DEFAULT_MAX_LEAK = 1.5
+export const MIN_MAX_LEAK = 0.1
+export const MAX_MAX_LEAK = 6
 
 // Visible depth range, relative to the camera: from NEAR_DEPTH to the render
 // distance, in world units (a voxel's neighbours are √2 away, see fcc.ts).
@@ -371,6 +374,7 @@ export class ParallaxRenderer {
     s.lastUpdate = {
       renderTime,
       detail,
+      leakPixels: leakAngle(detail) * view.focal,
       layerCount: frame.layers.length,
       chunkCount,
       chunksReused,
@@ -566,8 +570,7 @@ export class ParallaxRenderer {
 
   /**
    * Sets the field of view in degrees (clamped to [MIN_FOV, MAX_FOV]). It
-   * zooms, and changes the focal length the slicing depends on (see
-   * leakFreeDetail).
+   * only zooms: the slices do not depend on it (see getDetail).
    */
   setFov(fov: number) {
     this.fov = Math.min(MAX_FOV, Math.max(MIN_FOV, fov))
@@ -583,12 +586,12 @@ export class ParallaxRenderer {
   }
 
   /**
-   * Sets how many screen pixels of hidden geometry may show between slices
+   * Sets how far hidden geometry may show between slices, in degrees
    * (clamped to [MIN_MAX_LEAK, MAX_MAX_LEAK]). Slices are keyed by level and
    * layer, so the ones still needed stay cached.
    */
-  setMaxLeak(pixels: number) {
-    this.maxLeak = Math.min(MAX_MAX_LEAK, Math.max(MIN_MAX_LEAK, pixels))
+  setMaxLeak(degrees: number) {
+    this.maxLeak = Math.min(MAX_MAX_LEAK, Math.max(MIN_MAX_LEAK, degrees))
   }
 
   /** Whether faces are grown to fill the gaps between slices (see chunk_faces in bake/src/faces.rs). */
@@ -602,12 +605,11 @@ export class ParallaxRenderer {
   }
 
   /**
-   * Slice detail that keeps occlusion leaks within the tolerance on the
-   * current viewport. It does not depend on where the camera looks, so
-   * turning keeps the slices.
+   * Slice detail for the leak tolerance. It depends on nothing else,
+   * so turning, zooming and resizing keep the slices.
    */
   getDetail(): number {
-    return leakFreeDetail(focalLength(this.fov, this.width, this.height), this.maxLeak)
+    return leakFreeDetail((this.maxLeak * Math.PI) / 180)
   }
 
   private view(): View {

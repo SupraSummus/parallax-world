@@ -188,10 +188,11 @@ describe('WorkerBakery', () => {
   })
 
   it('stops baking once settled, though the cache is past its cap', async () => {
-    // The city at full HD: its chunks with fill gaps on and off pass the cap
+    // The city at full HD, 1° leaks: its chunks with fill gaps on and off pass the cap
     // on hidden chunks, so eviction reaches the slices in view.
     const renderer = new ParallaxRenderer(new World(12345, 'city'), { bakery: new WorkerBakery([new FakeWorker()]) })
     renderer.resize(1920, 1080)
+    renderer.setMaxLeak(1)
     await settle(renderer)
     renderer.setFillGaps(false)
     await settle(renderer)

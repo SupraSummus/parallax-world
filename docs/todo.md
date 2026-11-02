@@ -11,6 +11,13 @@ Numbers are for the forest at 1280×800 (`docs/architecture.md`).
   (N = 2^(k−1)) would cut both: detail ∝ √N,
   chunks in view ∝ detail³ and rebakes per unit moved ∝ chunks / N,
   so ∝ √N, with eyes between voxel sites.
+- **Zooming in magnifies chunks.**
+  Slices ignore the field of view, but so does baking:
+  chunks are baked for 90° on about 1280 px (`render_scale`),
+  and coarse voxels are sized for it (`ATOM_SHIFT`),
+  so at 30° (3.7× zoom) far voxels are 5 to 10 px across and chunks upscaled.
+  `render_scale` could follow the focal length,
+  keyed in the chunk like `fill`, leaving the slices as they are.
 - **Bricks on the edge of a face's rhombus are baked whole.**
   Near where a level starts, about 19 bricks meet the rhombus,
   and most of them cross its edge or the screen's.

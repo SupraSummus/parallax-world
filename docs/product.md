@@ -34,15 +34,18 @@ and beyond that 64 layers of coarser voxels,
 from the world at a coarser level of detail
 (every 2nd, 4th, … site each way, standing for the sites nearest it),
 so slices grow with viewing distance and stay the same shape at every
-scale, and far voxels stay about two pixels across. Each
+scale, and far voxels stay about two pixels across at 90°. Each
 is split into chunks, bricks laid like a wall's, each the shadow of a
 column of cells of a coarser lattice still, rasterised only in view and
 as seen from the site of the slice's lattice nearest the camera (its eye).
 Slices are thin enough that
 geometry perspective would hide (e.g. stone under the lake's water
-surface) never shows by more than a set number of screen pixels ("Max
-Occlusion Leak", 1–64 px, default 16); the derived slice detail is shown in
-the statistics. "Fill Gaps" (on by default) grows faces that run from one
+surface) never shows by more than a set angle ("Max Occlusion Leak",
+0.1–6°, default 1.5°: 17 px at 90° on a 1280 px wide window).
+The field of view only zooms the picture, without re-slicing,
+so zoomed in, the same slices leak more pixels;
+the statistics show the slice detail and how many pixels that is.
+"Fill Gaps" (on by default) grows faces that run from one
 slice into the next, where nothing else is drawn in their chunk, so thin
 things like a floor seen from above don't show sky between slices.
 "Skip Covered Chunks" (on by default) doesn't draw chunks that nearer
@@ -73,7 +76,7 @@ slice renderer.
 
 **Statistics panel** – Session totals (updates, average render time, average
 cache efficiency, voxels rendered) and details of the last update (layers,
-slice detail, chunks in view reused vs newly baked, chunks still baking,
+slice detail, leak bound in pixels, chunks in view reused vs newly baked, chunks still baking,
 chunks covered, cached chunk pixels). Chunks bake in background workers, so moving never
 waits for them; meanwhile a cell shows an older bake, or nothing.
 

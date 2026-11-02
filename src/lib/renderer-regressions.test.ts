@@ -96,6 +96,8 @@ describe('Renderer regressions', () => {
     it('reuses the distant chunks after a 2-unit Z move from the initial camera position', () => {
       const renderer = new ParallaxRenderer(world)
       renderer.resize(800, 600)
+      // Coarser than the default, so that levels from 4 on are in range.
+      renderer.setMaxLeak(2.3)
       renderer.setSkipCovered(false)
       renderer.setCamera({ x: 0, y: 30, z: -60 })
 

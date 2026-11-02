@@ -19,7 +19,7 @@
  * 1. Occlusion (physical). A slice is drawn flat, so a thick slice can show
  *    geometry that true perspective hides. A slice at viewing distance d at
  *    most d / detail thick, with detail = leakFreeDetail(...), never shows
- *    more than `max leak` screen pixels of it. Far voxels are small on
+ *    more than the `max leak` angle of it. Far voxels are small on
  *    screen, so slices grow with distance and covering distance n takes
  *    O(detail · log n) slices.
  *
@@ -223,26 +223,31 @@ const EYE_RATIO = Math.max(...Array.from({ length: MAX_LEVEL + 1 }, (_, level) =
 
 /**
  * Detail (viewing distance / maximum slice thickness) that keeps occlusion
- * leaks at most `maxLeakPixels` on screen, given the focal length in
- * pixels.
+ * leaks at most `maxLeak` radians (maxLeak · focal pixels on screen).
  *
  * A slice t layers thick whose near side is a layers from the camera is
  * at least a − N layers from its eye, so its points are drawn with rays
  * at most e = 2N / (a − N) off (eyeError). A leak is at most e · t layer
- * spacings, e · t · focal / a pixels (docs/architecture.md, section 2).
+ * spacings, e · t / a radians (docs/architecture.md, section 2).
  * With a ≥ t · detail and r = N / t, that is at most
- * 2r · focal / (detail · (detail − r)): ε for
- * detail = (r + √(r² + 8r · focal / ε)) / 2, with r the largest of any
+ * 2r / (detail · (detail − r)) (leakAngle): ε for
+ * detail = (r + √(r² + 8r / ε)) / 2, with r the largest of any
  * level (EYE_RATIO). At least 3r, so that voxels are 2N layers ahead of
  * the eye (EYE_ERROR).
  *
  * Rounded up to a quarter octave (denser slices are always safe), so small
- * changes of the viewport keep the slicing and the cache.
+ * changes of the tolerance keep the slicing and the cache.
  */
-export function leakFreeDetail(focal: number, maxLeakPixels: number): number {
+export function leakFreeDetail(maxLeak: number): number {
   const r = EYE_RATIO
-  const detail = Math.max(3 * r, (r + Math.sqrt(r * r + (8 * r * focal) / maxLeakPixels)) / 2)
+  const detail = Math.max(3 * r, (r + Math.sqrt(r * r + (8 * r) / maxLeak)) / 2)
   return 2 ** (Math.ceil(4 * Math.log2(detail)) / 4)
+}
+
+/** The largest occlusion leak slices of `detail` show, in radians (see leakFreeDetail). */
+export function leakAngle(detail: number): number {
+  const r = EYE_RATIO
+  return (2 * r) / (detail * (detail - r))
 }
 
 /**
