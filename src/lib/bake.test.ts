@@ -97,16 +97,16 @@ describe('ChunkBaker', () => {
   const grid = VoxelGrid.fromVoxels(voxels)
   const ids = new Map(grid.materials.map((m, id) => [m.color, id]))
   const levels = levelsOf(grid)
-  const baker = new ChunkBaker(levels)
+  const baker = new ChunkBaker(grid.materials, levels)
   const palette = shadedPalette(grid.materials, face.lattice)
 
   // Slices with sites above the blob's bottom show cut faces; the blob is
-  // within one slab of level 3, of level 4, and of level 7, made of the
+  // within one slab of level 3, of level 4, and of level 5, made of the
   // voxels of the grid one level coarser (sites of 2·FCC).
   // Eyes (lattice coordinates, sites of the slice's grid) ahead and to the sides.
   it.each([
     [0, 0, Infinity, [0, 0, -12]], [0, 3, Infinity, [8, -4, -8]], [1, 1, Infinity, [-16, 0, -10]], [1, 2, Infinity, [4, 8, -6]],
-    [2, 1, Infinity, [8, 4, -8]], [3, 0, 4, [8, 6, -14]], [4, 0, Infinity, [-8, -6, -20]], [7, 0, Infinity, [-8, -4, -20]], [7, 0, 8, [8, 4, -16]], [0, 5, Infinity, [0, -8, -4]],
+    [2, 1, Infinity, [8, 4, -8]], [3, 0, 4, [8, 6, -14]], [4, 0, Infinity, [-8, -6, -20]], [5, 0, Infinity, [-8, -4, -20]], [5, 0, 8, [8, 4, -16]], [0, 5, Infinity, [0, -8, -4]],
   ] as const)('paints what a ray from the eye hits first (level %s, layer %s, cutoff %s, eye %j)', (level, layer, cutoff, eye) => {
     const slice = { level, layer, cutoff }
     const centre = sliceCentre(slice)
@@ -143,7 +143,7 @@ describe('ChunkBaker', () => {
     // ahead, level with it, so its sides facing up show only grown.
     const floor = VoxelGrid.fromVoxels(voxels.filter(v => v.b >= 0 && v.b < 2))
     const slice = { level: 1, layer: 1, cutoff: Infinity }
-    const data = new ChunkBaker([floor]).faces({ face: face.name, ...slice, i: 0, j: 0, eye: [0, 0, -20], fill: true })
+    const data = new ChunkBaker(floor.materials, [floor]).faces({ face: face.name, ...slice, i: 0, j: 0, eye: [0, 0, -20], fill: true })
     const filled = (a: number, b: number, c: number) => {
       const p = toWorld(face, a, b, c)
       return floor.get(p.x, p.y, p.z) !== 0

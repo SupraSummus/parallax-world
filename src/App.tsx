@@ -109,7 +109,8 @@ function App() {
     if (hasWebGL2) compositorRef.current = new Compositor(canvas)
     // Chunks are baked in workers, leaving a core for this thread; without
     // workers (e.g. jsdom) render() bakes them itself. Each holds a copy of
-    // the world (35–50 MB for the scenes) and its cell surfaces, so at most 8.
+    // the world (~10 MB for the city, ~60 MB for the forest's grids) and its
+    // cell surfaces, so at most 8.
     const bakery = typeof Worker === 'undefined'
       ? undefined
       : startBakeWorkers(Math.max(1, Math.min(8, navigator.hardwareConcurrency - 1)))
@@ -262,9 +263,11 @@ function App() {
     requestRender()
   }
 
+  // The slider moves along log2 of the distance: from metres to kilometres.
   const handleRenderDistanceChange = ([value]: number[]) => {
-    setRenderDistance(value)
-    rendererRef.current?.setRenderDistance(value)
+    const distance = Math.round(2 ** value)
+    setRenderDistance(distance)
+    rendererRef.current?.setRenderDistance(distance)
     requestRender()
   }
 
@@ -349,10 +352,10 @@ function App() {
             />
             <SliderRow
               label={`Render Distance: ${String(renderDistance)}`}
-              value={renderDistance}
-              min={MIN_RENDER_DISTANCE}
-              max={MAX_RENDER_DISTANCE}
-              step={10}
+              value={Math.log2(renderDistance)}
+              min={Math.log2(MIN_RENDER_DISTANCE)}
+              max={Math.log2(MAX_RENDER_DISTANCE)}
+              step={0.1}
               onChange={handleRenderDistanceChange}
             />
             <SliderRow

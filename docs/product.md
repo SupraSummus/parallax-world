@@ -23,8 +23,8 @@ rectangular buildings), only their surfaces are made of rhombi.
 (up to straight up or down). W/S forward/back and A/D left/right along
 where it looks (level), Space/Shift up/down, adjustable move speed, field
 of view
-(5°–120° across the longer screen side) and render distance (40–800
-units; a voxel's neighbours are √2 units away).
+(5°–120° across the longer screen side) and render distance (40–40 000
+units, 10 m to 10 km in the forest; a voxel's neighbours are √2 units away).
 
 **Slicing** – Twelve stacks of slices, one per direction to a voxel's
 nearest neighbours (the faces of a rhombic dodecahedron around the
@@ -53,9 +53,12 @@ stacks meet on screen. See [architecture.md](architecture.md).
 **Worlds** – Procedurally generated, regenerable with a new seed; the camera
 moves to the world's spawn point.
 Generating takes a second or two, with a spinner meanwhile.
-- *Forest* (default): a 96 m × 160 m autumn forest valley, voxels 0.35 m
-  apart: a winding path, spruces, birches and oaks, ferns, bushes, boulders
-  and fallen logs, and a ridge closing the far end. ~2.8M voxels.
+- *Forest* (default): an endless autumn forest valley on hills kilometres
+  wide: a winding path, spruces, birches and oaks, ferns, bushes, boulders
+  and fallen logs.
+  Generated around the spawn point, in the background:
+  voxels 0.35 m apart up to 96 m from it, each level of detail twice as far,
+  to 24 km; with 3 workers the nearest show after ~5 s, the farthest after ~30 s.
 - *City*: a 116 m × 116 m district planned on a 0.25 m grid, four voxels
   (0.18 m apart) per plan cell,
   for checking flat walls, thin frames and openings:

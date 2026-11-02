@@ -59,31 +59,40 @@ So each level is used on its own.
 
 A slice (`SliceId`) of level k is a slab between two layers of 2^k·FCC:
 its atoms with their own site in the 2^k layers from layer · 2^k.
-Its atoms are the cells of 2^ℓ·FCC, ℓ = `atomLevel(k)` = max(0, k − 6):
-up to level 6 single voxels, slabs of 1 to 64 layers of them;
-above, 64 layers of cells of 2, 4, … 64 layers.
+Its atoms are the cells of 2^ℓ·FCC, ℓ = `atomLevel(k)` = max(0, k − 4):
+up to level 4 single voxels, slabs of 1 to 16 layers of them;
+above, 16 layers of cells of 2, 4, … 256 layers.
 Slabs of levels with the same atoms nest: one of level k + 1 is two of level k.
 A slice splits no atom, except where the atoms grow (cutoffs, below):
 there the smaller cells along the boundary are shared by two levels.
 
 **Levels of detail.** A world is a grid per level of detail
-(`World.levels`):
+(`World.level`):
 grid ℓ holds the sites of 2^ℓ·FCC, in its own units,
 each a voxel standing for its cell.
 A slice draws its atoms as the voxels of grid ℓ.
 In that grid's units it is a slice of level k − ℓ of single voxels,
 so the baker bakes it as one and scales the chunk back
 (`in_grid` in `bake/src/lib.rs`).
-Each grid is the one before it coarsened (`coarsen`):
+The forest is generated at each level (`docs/generators.md`),
+grid ℓ over a box 2^ℓ times as wide around the spawn point:
+±96 m at level 0, ±24 km at level 8.
+The bake workers generate the grids in parts, finest first
+(`World.missingParts`),
+and a level's slices show once its grid is in.
+The other worlds' grids are each the one before it coarsened (`coarsen`):
 a coarse voxel is full if a quarter of its cell is,
 so a floor or wall one voxel thick stays one,
 and solids grow by up to half a coarse voxel.
 A slice is about 1/detail of its distance thick
 (section 2, detail ≈ 9.5 by default),
-so from level 6 on, a slab of 64 atoms,
-a voxel is 1.4 to 2.7 pixels across at 1280×800 and 90°.
-Level 7, the first of coarse voxels, begins about 230 m away in the forest:
-up to there level 0's grid must hold the world.
+so from level 4 on, a slab of 16 atoms,
+a voxel is 5.6 to 11 pixels across at 1280×800 and 90°.
+Level 5, the first of coarse voxels, begins about 62 m away in the forest:
+up to there, and √2 times as far to the sides of a face,
+level 0's grid must hold the world.
+Atoms twice as fine on screen would need level 0's grid twice as wide,
+four times the bytes in every worker (`ATOM_SHIFT`, `docs/todo.md`).
 
 Why many layers of atoms and not one:
 cells of neighbouring layers interlock, as voxels do.
@@ -92,7 +101,7 @@ in columns alternating between even and odd layers;
 a slice is drawn flat and the leak bound limits its depth (section 2),
 so slices of single layers of cells would take twice as many.
 In a slab of R layers of cells only its two faces are ragged:
-it is about (R + 1)·N deep for R·N layers, 1.02 times for R = 64.
+it is about (R + 1)·N deep for R·N layers, 1.06 times for R = 16.
 (No other direction does much better:
 along [111] a layer of cells is 1.5 times as deep as layers are apart.)
 
@@ -185,7 +194,7 @@ a site of N·FCC (N = 2^k) whose cell holds the camera:
    |σ − τ| ≤ 2N / d, d the point's depth from the eye in layers (`eyeError`).
 5. In pixels the leak is at most 2N·t·focal / (a·(a − N)),
    and slices are at most a / detail thick.
-6. With r = N / t, at most 64/65 (from level 6 on), that is at most
+6. With r = N / t, at most 16/17 (from level 4 on), that is at most
    2r·focal / (detail·(detail − r)), which `leakFreeDetail` makes ε,
    rounded up to a quarter octave:
 
@@ -545,15 +554,16 @@ and the 12 faces of section 4 map sites to sites.
 
 **Storage** (`voxel-grid.ts`). A world is a voxel grid per level of
 detail (section 1) plus a spawn point: one material id byte per site of a
-box, 0 for empty; the coarser grids add a seventh to the finest.
+box, 0 for empty.
 The box is cut into bricks 8 units wide, 256 sites,
 and only bricks with voxels are stored:
-a fifth of them in the forest and a sixth in the city,
-so ~8 MB each instead of 35 and 50.
-A worker reads its copy of the grid for every face (`Reader` in `bake/`),
+a fifth of them in the forest and a sixth in the city.
+The forest's nine grids take ~69 MB (level 0's 22 MB),
+the city's ~10 MB.
+A worker reads its copy of the grids for every face (`Reader` in `bake/`),
 without turned copies.
 A list of voxel objects is built only on request (tests).
-Renderer distances are in world units: render distance 40–800, default 400.
+Renderer distances are in world units: render distance 40–40 000, default 8000.
 
 **Scenes** describe shapes in metres and fill the sites inside them;
 each world picks its own scale, the renderer assumes none.
@@ -621,6 +631,10 @@ so from the parallax camera's position both renderers should agree.
   surface of pyramids, and a silhouette along an axis is a zigzag.
 - Four voxels per old cube, each showing up to six faces towards the
   camera instead of up to three: a first bake of the toy world in the tests takes
-  ~1.4 s on one thread (0.26 s with cubes). The forest has ~3.1–3.5 M voxels
-  (35 MB) and the city ~3 M (50 MB), held by the main thread and each
-  worker; the reference viewer's mesh has ~10 M faces (~850 MB of buffers).
+  ~1.4 s on one thread (0.26 s with cubes). The forest's grids take ~69 MB
+  and the city's ~10 MB, held by the main thread and each worker;
+  the reference viewer meshes level 0's grid, ~85 bytes of buffers a face
+  (~850 MB for the 10 M faces of a 96 m × 160 m forest).
+- The forest has detail only around the spawn point (section 1):
+  some 30 m away, the nearest slices find nothing at the sides of the view,
+  100 m away nothing near at all (`docs/todo.md`).

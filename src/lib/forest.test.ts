@@ -1,16 +1,26 @@
 import { describe, it, expect } from 'vitest'
-import { generateForest, UNIT_SIZE } from './forest'
+import { forest, UNIT_SIZE } from './forest'
+import { generate } from './generator'
 import { isSite, type Voxel } from './voxel-grid'
 
-// Generation takes a while; every test only reads the result.
-const { grid, spawn } = generateForest(42)
+// 96 m × 160 m ahead of the spawn point, all heights. Generation takes a
+// while; every test only reads the result.
+const generated = (seed: number) => {
+  const { generator, spawn, box } = forest(seed)
+  const { minY, maxY } = box(0)
+  // Grids start on an even x.
+  const x = 2 * Math.floor((spawn.x - 48 / UNIT_SIZE) / 2)
+  const area = { minX: x, minY, minZ: spawn.z - 1 / UNIT_SIZE, maxX: x + 96 / UNIT_SIZE, maxY, maxZ: spawn.z + 159 / UNIT_SIZE }
+  return { grid: generate(generator, area), spawn }
+}
+const { grid, spawn } = generated(42)
 const voxels = grid.toVoxels()
 const key = (x: number, y: number, z: number) => `${String(x)},${String(y)},${String(z)}`
 
-describe('generateForest', () => {
+describe('forest', () => {
   // The 3D viewer rebuilds the app's world from its seed.
   it('is deterministic for a seed', () => {
-    const again = generateForest(42)
+    const again = generated(42)
     expect(again.spawn).toEqual(spawn)
     expect(again.grid.materials).toEqual(grid.materials)
     // toEqual on millions of sites is slow.
@@ -20,10 +30,6 @@ describe('generateForest', () => {
   it('has ground under every column of a 96 m × 160 m area', () => {
     const columns = new Set(voxels.map(v => `${String(v.x)},${String(v.z)}`))
     expect(columns.size).toBe((96 / UNIT_SIZE) * (160 / UNIT_SIZE))
-  })
-
-  it('stays within a voxel budget the slice renderer can handle', () => {
-    expect(voxels.length).toBeLessThan(4_000_000)
   })
 
   it('grows trees between 10 m and 25 m tall', () => {

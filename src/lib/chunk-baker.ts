@@ -8,7 +8,8 @@ import wasm from '../../bake/target/wasm32-unknown-unknown/release/bake.wasm?inl
 import { shadedPalette, VOXEL_GEOMETRY } from './bake'
 import type { SliceId } from './slice-selection'
 import { FACES } from './view'
-import { BRICK_SITES, type VoxelData } from './voxel-grid'
+import { BRICK_SITES, LayerIndex, type LayerIndexData, type Material, type VoxelData } from './voxel-grid'
+import { generatePart, type GridPart, type WorldType } from './world'
 
 /**
  * A chunk to bake: cell (i, j) (see chunkCell) of a slice (see SliceId) of
@@ -50,7 +51,7 @@ export interface ChunkImage {
 interface Baker {
   memory: WebAssembly.Memory
   world_start: (materials: number) => void
-  world_grid: (minX: number, minY: number, minZ: number, nx: number, ny: number, nz: number, used: number) => number
+  world_grid: (level: number, minX: number, minY: number, minZ: number, nx: number, ny: number, nz: number, used: number) => number
   world_cells: () => number
   world_table: (table: number) => number
   world_ready: () => void
@@ -84,32 +85,35 @@ const faceIndex = new Map(FACES.map((face, index) => [face.name, index]))
 /**
  * Bakes chunks of one world: a WebAssembly instance holding a copy of its
  * grids, the palette of each face, and the surfaces of recently baked
- * cells. `levels` are the world's grids by level of detail (World.levels),
- * all of the same materials.
+ * cells. `levels` are the world's grids by level of detail so far
+ * (World.level), all of `materials`; the rest come with addGrid.
  */
 export class ChunkBaker {
   private baker: Baker
 
-  constructor(levels: readonly VoxelData[]) {
-    const { materials } = levels[0]
+  constructor(materials: readonly Material[], levels: readonly (VoxelData | undefined)[]) {
     const baker = bakerInstance() as unknown as Baker
-    // Memory may grow on each call, detaching earlier views of it.
-    const write = <T extends Uint8Array | Int32Array | Uint32Array | Float64Array>(View: new (buffer: ArrayBuffer, offset: number, length: number) => T, offset: number, values: T) => {
-      new View(baker.memory.buffer, offset, values.length).set(values)
-    }
-    baker.world_start(materials.length)
-    for (const { minX, minY, minZ, nx, ny, nz, bricks, cells } of levels) {
-      // Only the bricks in use: `cells` has room for more.
-      const used = bricks.reduce((n, at) => Math.max(n, at + 1), 0)
-      write(Int32Array, baker.world_grid(minX, minY, minZ, nx, ny, nz, used), bricks)
-      write(Uint8Array, baker.world_cells(), cells.subarray(0, used * BRICK_SITES))
-    }
-    write(Float64Array, baker.world_table(0), VOXEL_GEOMETRY)
-    write(Int32Array, baker.world_table(1), Int32Array.from(FACES.flatMap(({ lattice: { right, up, forward } }) => [right, up, forward].flatMap(v => [v.x, v.y, v.z]))))
-    const palettes = FACES.map(face => shadedPalette(materials, face.lattice))
-    palettes.forEach((palette, f) => { write(Uint32Array, baker.world_table(2) + f * palette.byteLength, palette) })
-    baker.world_ready()
     this.baker = baker
+    baker.world_start(materials.length)
+    this.write(Float64Array, baker.world_table(0), VOXEL_GEOMETRY)
+    this.write(Int32Array, baker.world_table(1), Int32Array.from(FACES.flatMap(({ lattice: { right, up, forward } }) => [right, up, forward].flatMap(v => [v.x, v.y, v.z]))))
+    const palettes = FACES.map(face => shadedPalette(materials, face.lattice))
+    palettes.forEach((palette, f) => { this.write(Uint32Array, baker.world_table(2) + f * palette.byteLength, palette) })
+    baker.world_ready()
+    levels.forEach((grid, level) => { if (grid) this.addGrid(level, grid) })
+  }
+
+  /** Sets the grid of `level`; until then, its chunks are empty. */
+  addGrid(level: number, { minX, minY, minZ, nx, ny, nz, bricks, cells }: VoxelData) {
+    // Only the bricks in use: `cells` has room for more.
+    const used = bricks.reduce((n, at) => Math.max(n, at + 1), 0)
+    this.write(Int32Array, this.baker.world_grid(level, minX, minY, minZ, nx, ny, nz, used), bricks)
+    this.write(Uint8Array, this.baker.world_cells(), cells.subarray(0, used * BRICK_SITES))
+  }
+
+  /** Copies `values` into the baker's memory at `offset`. Memory may grow on each call, detaching earlier views of it. */
+  private write<T extends Uint8Array | Int32Array | Uint32Array | Float64Array>(View: new (buffer: ArrayBuffer, offset: number, length: number) => T, offset: number, values: T) {
+    new View(this.baker.memory.buffer, offset, values.length).set(values)
   }
 
   /**
@@ -177,27 +181,29 @@ const requestKey = ({ face, level, layer, cutoff, i, j, eye, fill }: ChunkReques
 
 /**
  * Messages to a bake worker: a new world (numbered by `generation`, which
- * its results echo), or the chunks to bake, most wanted first, replacing
- * the previous list. `received` is the `seq` of the worker's last result
- * the main thread had taken when it listed them.
+ * its results echo) with its grids so far, a grid of it, parts of its
+ * grids to generate (World.missingParts), or the chunks to bake, most
+ * wanted first, replacing the previous list. `received` is the `seq` of
+ * the worker's last result the main thread had taken when it listed them.
  */
 export type BakeMessage =
-  | { type: 'world'; generation: number; levels: VoxelData[] }
+  | { type: 'world'; generation: number; materials: readonly Material[]; levels: readonly (VoxelData | undefined)[] }
+  | { type: 'grid'; generation: number; level: number; grid: VoxelData }
+  | { type: 'generate'; generation: number; seed: number; worldType: WorldType; parts: GridPart[] }
   | { type: 'want'; requests: Float64Array; received: number }
 
-/** A bake worker's result: a baked chunk, `seq` numbering the worker's results. */
-export interface BakeResult {
-  generation: number
-  seq: number
-  request: ChunkRequest
-  image: ChunkImage
-}
+/** A bake worker's result: a baked chunk, `seq` numbering the worker's chunks; or a generated part. */
+export type BakeResult =
+  | { type: 'chunk'; generation: number; seq: number; request: ChunkRequest; image: ChunkImage }
+  | { type: 'part'; generation: number; part: GridPart; grid: VoxelData; index: LayerIndexData }
 
 /**
  * A bake worker's message handler: bakes the latest list one chunk per
  * `schedule`d step, so a new list (handled between steps) replaces the rest
  * of the old one, and posts each chunk at once, handing over its buffers.
  * Chunks posted after the list's `received` are on their way, and skipped.
+ * Parts to generate take steps of their own, as much time as baking while
+ * there are chunks to bake.
  */
 export function bakeHandler(
   post: (result: BakeResult, transfer: Transferable[]) => void,
@@ -210,32 +216,61 @@ export function bakeHandler(
   let seq = 0
   // Chunks posted, by key: the seq they were posted with.
   const posted = new Map<string, number>()
+  let parts: { seed: number; worldType: WorldType; parts: GridPart[] } | null = null
+  // Milliseconds spent baking, less those spent generating.
+  let ahead = 0
   let scheduled = false
   const remaining = () => next < queue.length / REQUEST
-  const step = () => {
-    scheduled = false
+  const bake = () => {
     while (baker && remaining()) {
       const request = decodeRequest(queue, next++)
       const key = requestKey(request)
       if (posted.has(key)) continue
       const image = baker.bake(request)
       posted.set(key, ++seq)
-      post({ generation, seq, request, image }, [image.pixels.buffer, image.blocks.buffer])
-      break
+      post({ type: 'chunk', generation, seq, request, image }, [image.pixels.buffer, image.blocks.buffer])
+      return
     }
+  }
+  const generate = () => {
+    if (!parts) return
+    const part = parts.parts.shift() as GridPart
+    const grid = generatePart(parts.seed, parts.worldType, part)
+    if (parts.parts.length === 0) parts = null
+    // Where its voxels are, so the main thread need not find out.
+    const { keys, tables } = new LayerIndex(grid, FACES.map(f => f.lattice))
+    // Just the fields: a class's methods would not survive posting.
+    const { minX, minY, minZ, nx, ny, nz, bricks, cells, materials } = grid
+    post({ type: 'part', generation, part, grid: { minX, minY, minZ, nx, ny, nz, bricks, cells, materials }, index: { keys, tables } }, [bricks.buffer, cells.buffer, tables[0].low.buffer, tables[0].high.buffer])
+  }
+  const step = () => {
+    scheduled = false
+    const start = performance.now()
+    const baking = !!baker && remaining() && (!parts || ahead <= 0)
+    if (baking) bake()
+    else generate()
+    ahead += (baking ? 1 : -1) * (performance.now() - start)
     wake()
   }
   const wake = () => {
-    if (scheduled || !baker || !remaining()) return
+    if (scheduled || ((!baker || !remaining()) && !parts)) return
     scheduled = true
     schedule(step)
   }
   return message => {
     if (message.type === 'world') {
-      baker = new ChunkBaker(message.levels)
+      baker = new ChunkBaker(message.materials, message.levels)
       generation = message.generation
       queue = new Float64Array(0)
       posted.clear()
+      parts = null
+      ahead = 0
+    } else if (message.type === 'grid') {
+      if (message.generation === generation) baker?.addGrid(message.level, message.grid)
+    } else if (message.type === 'generate') {
+      if (message.generation !== generation) return
+      parts = { seed: message.seed, worldType: message.worldType, parts: [...(parts?.parts ?? []), ...message.parts] }
+      wake()
     } else {
       // Taken by the main thread: listed again, they are wanted again.
       for (const [key, s] of posted) if (s <= message.received) posted.delete(key)

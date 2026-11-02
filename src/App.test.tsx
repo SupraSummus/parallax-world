@@ -5,15 +5,18 @@ import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import App from './App'
 
 // These tests cover the UI; a few voxels render much faster than the full forest.
-vi.mock('./lib/forest', async () => {
-  const { VoxelGrid } = await import('./lib/voxel-grid')
-  return {
-    generateForest: () => ({
-      grid: VoxelGrid.fromVoxels(Array.from({ length: 50 }, (_, i) => ({ x: 2 * (i % 5), y: 0, z: 2 * i, color: '#4f7a2a', type: 1 }))),
-      spawn: { x: 0, y: 6, z: -4 },
-    }),
-  }
-})
+// A strip of ground 10 units wide and 100 long, in a small box at every level.
+vi.mock('./lib/forest', () => ({
+  forest: (seed: number) => ({
+    generator: {
+      kinds: { moss: { type: 1, colors: ['#4f7a2a'] } },
+      seed,
+      layers: [{ name: 'ground', order: 0, axis: 1, spans: (x: number, z: number) => (x >= 0 && x < 10 && z >= 0 && z < 100 ? [{ from: -1, to: 1, kind: 'moss' }] : []) }],
+    },
+    spawn: { x: 0, y: 6, z: -4 },
+    box: () => ({ minX: -16, minY: -4, minZ: -16, maxX: 16, maxY: 4, maxZ: 112 }),
+  }),
+}))
 
 const cameraPosition = () =>
   (screen.getByText('Position').nextElementSibling?.textContent ?? '').split(',').map(Number)

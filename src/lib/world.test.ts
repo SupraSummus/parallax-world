@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { World, WORLD_TYPES } from './world'
+import { forest } from './forest'
+import { generate } from './generator'
+import { GRID_LEVELS } from './slice-selection'
+import { generatePart, World, WORLD_TYPES } from './world'
 
 describe('World', () => {
   // The forest and the city are checked in their own tests; comparing them here is slow.
@@ -43,6 +46,26 @@ describe('World', () => {
       world.voxels.filter(v => v.x === 2 * x && v.z === 2 * z).reduce((top, v) => (v.y > top.y ? v : top))
     expect(surfaceAt(15, 0).type).toBe(8) // water
     expect(surfaceAt(0, 0).type).not.toBe(8)
+  })
+
+  it("puts a generated world's grids together from parts generated alone, in any order", () => {
+    // The coarsest level: the cheapest to generate.
+    const level = GRID_LEVELS - 1
+    const world = new World(7, 'forest')
+    const parts = world.missingParts().filter(p => p.level === level)
+    expect(parts.length).toBeGreaterThan(1)
+    const received = [...parts].reverse().map(part => world.receive(part, generatePart(7, 'forest', part)))
+    expect(world.missingParts().some(p => p.level === level)).toBe(false)
+    const grid = received[received.length - 1]
+    const { generator, box } = forest(7)
+    const whole = generate(generator, box(level), level)
+    let voxels = 0
+    whole.forEach((x, y, z, id) => {
+      voxels++
+      expect(grid?.get(x, y, z)).toBe(id)
+    })
+    grid?.forEach(() => { voxels-- })
+    expect(voxels).toBe(0)
   })
 
 })

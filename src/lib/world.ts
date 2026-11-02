@@ -1,7 +1,8 @@
 import { generateCity } from './city'
-import { generateForest } from './forest'
+import { forest } from './forest'
+import { generate, materialsOf, type Box, type Generator } from './generator'
 import { GRID_LEVELS } from './slice-selection'
-import { coarsen, VoxelGrid, type Material, type Voxel } from './voxel-grid'
+import { BRICK, coarsen, VoxelGrid, type Material, type Voxel, type VoxelData } from './voxel-grid'
 
 export interface Vec3 {
   x: number
@@ -29,10 +30,50 @@ const LEAVES: Material = { color: '#228B22', type: 5 }
 const WATER: Material = { color: '#1E90FF', type: 8 }
 const FLOWER_COLORS = ['#FF6B6B', '#FFE66D', '#4ECDC4', '#C9B1FF']
 
-/** World types with their own generator; the rest are built here. */
-const SCENES: Partial<Record<WorldType, (seed: number) => { grid: VoxelGrid; spawn: Vec3 }>> = {
-  forest: generateForest,
-  city: generateCity,
+/** A world generator.ts generates at each level, in any box: the box of each level's grid, and where the camera starts. */
+interface Generated {
+  generator: Generator<string>
+  spawn: Vec3
+  box: (level: number) => Box
+}
+
+/** World types generated level by level, in parts; the grids of the rest are made whole, then coarsened. */
+const GENERATED: Partial<Record<WorldType, (seed: number) => Generated>> = { forest }
+/** World types with their own scene builder; the rest are built here. */
+const SCENES: Partial<Record<WorldType, (seed: number) => { grid: VoxelGrid; spawn: Vec3 }>> = { city: generateCity }
+
+/** A part of the grid of `level` of a generated world: `part` of PARTS, its box in the level's units. */
+export interface GridPart {
+  level: number
+  part: number
+  box: Box
+}
+
+/** Parts per grid, generated alone (in workers): slabs of its box along z, whole bricks deep but the last. */
+const PARTS = 8
+
+/** The parts of a generated world's grid of `level`. */
+function partsOf({ box }: Generated, level: number): GridPart[] {
+  const whole = box(level)
+  const depth = Math.ceil((whole.maxZ - whole.minZ) / PARTS / BRICK) * BRICK
+  const parts: GridPart[] = []
+  for (let minZ = whole.minZ; minZ < whole.maxZ; minZ += depth) {
+    parts.push({ level, part: parts.length, box: { ...whole, minZ, maxZ: Math.min(minZ + depth, whole.maxZ) } })
+  }
+  return parts
+}
+
+// The last world generatePart made, kept for the next part.
+let lastGenerated: { seed: number; worldType: WorldType; generated: Generated } | null = null
+
+/** The voxels of a part of a generated world's grid (see World.missingParts). */
+export function generatePart(seed: number, worldType: WorldType, { level, box }: GridPart): VoxelGrid {
+  if (lastGenerated?.seed !== seed || lastGenerated.worldType !== worldType) {
+    const make = GENERATED[worldType]
+    if (!make) throw new RangeError(`${worldType} is not generated in parts`)
+    lastGenerated = { seed, worldType, generated: make(seed) }
+  }
+  return generate(lastGenerated.generated.generator, box, level)
 }
 
 /**
@@ -56,16 +97,23 @@ export function levelsOf(grid: VoxelGrid): VoxelGrid[] {
   return levels
 }
 
-/** A procedurally generated voxel world. */
+/**
+ * A procedurally generated voxel world: a grid at each level of detail
+ * the renderer reads. Generated worlds (GENERATED) are generated level by
+ * level, in parts, anywhere (missingParts, receive), or here when asked
+ * for (levels); the rest are made here whole, and coarsened.
+ */
 export class World {
   readonly seed: number
   readonly worldType: WorldType
   /** Where the camera starts. */
   readonly spawn: Readonly<Vec3>
 
-  private store: VoxelGrid
-  // The coarser grids, made from the grid on first use.
-  private coarser: VoxelGrid[] | null = null
+  private readonly source: Generated | undefined
+  // By level; generated worlds' only once generated, the rest's coarsened on first use.
+  private grids: (VoxelGrid | undefined)[] = []
+  // Parts received of grids not whole yet, by level.
+  private received = new Map<number, VoxelData[]>()
   // Voxels as a list, built from the grid on first use.
   private list: Voxel[] | null = null
   // Toy world blocks while generating.
@@ -75,10 +123,15 @@ export class World {
     this.seed = seed
     this.worldType = worldType
 
+    this.source = GENERATED[worldType]?.(seed)
+    if (this.source) {
+      this.spawn = this.source.spawn
+      return
+    }
     const scene = SCENES[worldType]
     if (scene) {
       const { grid, spawn } = scene(seed)
-      this.store = grid
+      this.grids = [grid]
       this.spawn = spawn
       return
     }
@@ -90,30 +143,72 @@ export class World {
         this.generateColumn(x, z)
       }
     }
-    this.store = World.fromBlocks(this.generated)
+    this.grids = [World.fromBlocks(this.generated)]
     this.generated = []
   }
 
-  /** The voxels as stored. */
-  get grid(): VoxelGrid {
-    return this.store
+  /** The materials of every grid's ids. */
+  get materials(): readonly Material[] {
+    return this.source ? materialsOf(this.source.generator) : this.level(0)?.materials ?? []
   }
 
-  /** The grid at each level of detail the renderer reads (see levelsOf). */
+  /**
+   * The grid of `level` of detail, if there is one yet: a generated world's
+   * once generated (receive), the rest's always.
+   */
+  level(level: number): VoxelGrid | undefined {
+    if (!this.source) {
+      for (let l = this.grids.length; l <= level; l++) this.grids.push(coarsen(this.grids[l - 1] as VoxelGrid))
+    }
+    return this.grids[level]
+  }
+
+  /** The grid at each level of detail the renderer reads, generated here if not yet. */
   get levels(): VoxelGrid[] {
-    this.coarser ??= levelsOf(this.store).slice(1)
-    return [this.store, ...this.coarser]
+    return Array.from({ length: GRID_LEVELS }, (_, level) => this.generate(level))
+  }
+
+  /** The voxels as stored at level 0, generated here if not yet. */
+  get grid(): VoxelGrid {
+    return this.generate(0)
+  }
+
+  /** The parts of the grids a generated world has not received, finest level first. */
+  missingParts(): GridPart[] {
+    const { source } = this
+    if (!source) return []
+    return Array.from({ length: GRID_LEVELS }, (_, level) => level).filter(level => !this.grids[level]).flatMap(level => partsOf(source, level))
+  }
+
+  /** Takes a generated part (generatePart); returns its level's grid once it has all the level's parts. */
+  receive({ level }: GridPart, part: VoxelData): VoxelGrid | undefined {
+    if (!this.source || this.grids[level]) return
+    const parts = this.received.get(level) ?? []
+    parts.push(part)
+    this.received.set(level, parts)
+    if (parts.length < partsOf(this.source, level).length) return
+    this.received.delete(level)
+    return (this.grids[level] = VoxelGrid.stack(parts.sort((a, b) => a.minZ - b.minZ)))
+  }
+
+  /** The grid of `level`, generated here if not yet. */
+  private generate(level: number): VoxelGrid {
+    let grid = this.level(level)
+    if (!grid && this.source) {
+      for (const part of partsOf(this.source, level)) grid = this.receive(part, generate(this.source.generator, part.box, level))
+    }
+    return grid as VoxelGrid
   }
 
   /** The voxels as a list, ordered by z, y, x. Assigning replaces the world's contents (tests build worlds this way). */
   get voxels(): Voxel[] {
-    this.list ??= this.store.toVoxels()
+    this.list ??= this.grid.toVoxels()
     return this.list
   }
 
   set voxels(voxels: Voxel[]) {
-    this.store = VoxelGrid.fromVoxels(voxels)
-    this.coarser = null
+    if (this.source) throw new RangeError('a generated world\'s voxels are its generator\'s')
+    this.grids = [VoxelGrid.fromVoxels(voxels)]
     this.list = null
   }
 

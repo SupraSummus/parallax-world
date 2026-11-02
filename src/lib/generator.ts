@@ -323,6 +323,11 @@ function drawShape<K extends string>(shape: Shape<K>, seed: number, s: number, c
 
 type Putter<K extends string> = (kind: K, op: Op) => (x: number, y: number, z: number) => void
 
+/** The materials of the grids `generate` makes: ids are the same in all of them. */
+export function materialsOf<K extends string>(generator: Generator<K>): Material[] {
+  return new Palette(generator.kinds, generator.seed).materials
+}
+
 /**
  * The voxels of `box` at `level`: sites 2^level apart, site (x, y, z) at
  * 2^level · (x, y, z) in lattice units, the box in the level's units. The
@@ -333,17 +338,16 @@ export function generate<K extends string>(generator: Generator<K>, box: Box, le
   const palette = new Palette(generator.kinds, generator.seed)
   const grid = new VoxelGrid(box, palette.materials)
   const clip: Box = { minX: grid.minX, minY: grid.minY, minZ: grid.minZ, maxX: grid.minX + grid.nx, maxY: grid.minY + grid.ny, maxZ: grid.minZ + grid.nz }
-  const putters = new Map<string, (x: number, y: number, z: number) => void>()
+  const putters: Record<Op, Map<K, (x: number, y: number, z: number) => void>> = { fill: new Map(), paint: new Map(), carve: new Map() }
   const putter: Putter<K> = (kind, op) => {
-    const key = `${kind} ${op}`
-    let put = putters.get(key)
+    let put = putters[op].get(kind)
     if (!put) {
       const shade = palette.shade(kind)
       put = (x, y, z) => {
         if (op === 'fill' && grid.get(x, y, z) !== 0) return
         grid.set(x, y, z, op === 'carve' ? 0 : shade(x * s, y * s, z * s))
       }
-      putters.set(key, put)
+      putters[op].set(kind, put)
     }
     return put
   }

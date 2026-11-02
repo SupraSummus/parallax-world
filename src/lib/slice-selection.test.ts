@@ -21,7 +21,7 @@ describe('selectSlices', () => {
   // docs/architecture.md, section 1 (detail 1): level:layer, |cutoff.
   it('matches the documented slicing for camera z=0', () => {
     expect(selectSlices(0, 1, 2000, 1).map(name).join(' ')).toBe(
-      '0:1 0:2 0:3 1:2 1:3 2:2 2:3 3:2 3:3 4:2 4:3 5:2 5:3 6:2 6:3|256 6:4|256 7:2 7:3|512 7:4|512 8:2 8:3|1024 8:4|1024 9:2 9:3')
+      '0:1 0:2 0:3 1:2 1:3 2:2 2:3 3:2 3:3 4:2 4:3|64 4:4|64 5:2 5:3|128 5:4|128 6:2 6:3|256 6:4|256 7:2 7:3|512 7:4|512 8:2 8:3|1024 8:4|1024 9:2 9:3|2048 9:4|2048 10:2')
   })
 
   it('returns nothing for an empty range', () => {
@@ -91,14 +91,14 @@ describe('selectSlices', () => {
 
 // That the bound holds is leak-bound.test.ts; these pin the formula's two cases.
 describe('leakFreeDetail', () => {
-  it('is (r + √(r² + 8r · focal / ε)) / 2, r = 8/9', () => {
-    // 1280 px wide at 90°: focal 640. (8/9 + √(64/81 + 64/9 · 40)) / 2 = 8.9, rounded up to a quarter octave.
+  it('is (r + √(r² + 8r · focal / ε)) / 2, r = 16/17', () => {
+    // 1280 px wide at 90°: focal 640. (16/17 + √(256/289 + 128/17 · 40)) / 2 = 9.2, rounded up to a quarter octave.
     expect(leakFreeDetail(640, 16)).toBe(2 ** 3.25)
   })
 
   it('is at least 3r, so that voxels are 2N layers ahead of their eye', () => {
-    // r = 64/65: (r + √(r² + 8r)) / 2 = 1.98; 3r = 2.95, rounded up.
-    expect(leakFreeDetail(64, 64)).toBe(2 ** 1.75)
+    // r = 16/17: (r + √(r² + 8r)) / 2 = 1.92; 3r = 2.82, rounded up.
+    expect(leakFreeDetail(64, 64)).toBe(2 ** 1.5)
   })
 })
 
@@ -140,12 +140,12 @@ describe('sliceCentre', () => {
   it('is halfway through what the voxels of the slice span', () => {
     // Level 3, slabs of 8 voxel layers: sites in layers 40 to 47, voxels reaching from 39 to 48.
     expect(sliceCentre({ level: 3, layer: 5, cutoff: Infinity })).toBeCloseTo(43.5 * LAYER)
-    // Level 5, sites in layers 32 to 63, voxels reaching from 31 to 64.
-    expect(sliceCentre({ level: 5, layer: 1, cutoff: Infinity })).toBeCloseTo(47.5 * LAYER)
-    // Level 7, slabs of 64 layers of voxels of 2·FCC: their sites in layers 128 to 254, reaching from 126 to 256.
-    expect(sliceCentre({ level: 7, layer: 1, cutoff: Infinity })).toBeCloseTo(191 * LAYER)
-    // Level 8, voxels of 4·FCC in layers 256 to 508, reaching from 252 to 512.
-    expect(sliceCentre({ level: 8, layer: 1, cutoff: Infinity })).toBeCloseTo(382 * LAYER)
+    // Level 4, sites in layers 16 to 31, voxels reaching from 15 to 32.
+    expect(sliceCentre({ level: 4, layer: 1, cutoff: Infinity })).toBeCloseTo(23.5 * LAYER)
+    // Level 5, slabs of 16 layers of voxels of 2·FCC: their sites in layers 32 to 62, reaching from 30 to 64.
+    expect(sliceCentre({ level: 5, layer: 1, cutoff: Infinity })).toBeCloseTo(47 * LAYER)
+    // Level 6, voxels of 4·FCC in layers 64 to 124, reaching from 60 to 128.
+    expect(sliceCentre({ level: 6, layer: 1, cutoff: Infinity })).toBeCloseTo(94 * LAYER)
   })
 })
 

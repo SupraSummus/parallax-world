@@ -1,7 +1,7 @@
 import type { Vec3 } from './world'
-import { isSite, type VoxelGrid } from './voxel-grid'
+import { isSite } from './voxel-grid'
 import { fbm, hash, rng, smoothstep, valueNoise } from './noise'
-import { areaProfile, ball, box, boundsOfShapes, capsule, ellipsoid, generate, lathe, type Box, type Cell, type Field, type Generator, type Kinds, type Node, type Point, type Population, type Shape } from './generator'
+import { areaProfile, ball, box, boundsOfShapes, capsule, ellipsoid, lathe, type Box, type Cell, type Field, type Generator, type Kinds, type Node, type Point, type Population, type Shape } from './generator'
 
 /**
  * Metres per lattice unit: voxels are FCC sites (voxel-grid.ts), nearest
@@ -16,12 +16,16 @@ const vox = (metres: number) => Math.round(metres / UNIT_SIZE)
 /** Radius of branches and fallen logs, in units: thick enough to stay one piece on the lattice. */
 const BRANCH_RADIUS = 0.3 / UNIT_SIZE
 
-/**
- * The part of the (endless) forest the app shows, in units: 96 m wide,
- * 160 m deep, heights from -8 m to 64 m.
- */
-const EXTENT: Box = { minX: vox(-48), minY: vox(-8), minZ: vox(-32), maxX: vox(48), maxY: vox(64), maxZ: vox(128) }
+/** The heights it has anything at, in units: the ground and the trees on it. */
+const HEIGHTS = { minY: vox(-36), maxY: vox(80) }
 
+/**
+ * Half the width of the grid of level 0, in units, around the spawn point:
+ * where single voxels are drawn, at most √2 times as far as along the face
+ * looked through (62 m at 1280 × 800, docs/architecture.md, section 1).
+ * The grid of level ℓ is 2^ℓ times as wide.
+ */
+const REACH = vox(96)
 // Material kinds; each voxel gets one shade of its kind, picked by position.
 // `type` ids follow world.ts: 1 grass, 2 dirt, 3 stone, 4 wood, 5 leaves, 6 flower.
 const KINDS = {
@@ -79,11 +83,11 @@ const FOLIAGE: Record<Species, Kind> = { spruce: 'spruce', birch: 'birchGold', o
 /**
  * An autumn forest valley: a winding path along the valley floor, wooded
  * slopes rising on both sides, and a ridge closing the view at the far end.
- * Spruce, birch and oak, with ferns, bushes, boulders and fallen logs.
- * Endless: the app shows `EXTENT` of it.
- * @internal
+ * Spruce, birch and oak, with ferns, bushes, boulders and fallen logs, on
+ * hills kilometres wide. Endless: `box` gives the part the app generates
+ * at each level, around `spawn`, where the camera starts.
  */
-export function forest(seed: number): { generator: Generator<Kind>; spawn: Vec3 } {
+export function forest(seed: number): { generator: Generator<Kind>; spawn: Vec3; box: (level: number) => Box } {
   const s = (k: number) => (seed | 0) + k * 1013904223
   const pathPhase = hash(s(1), 0, 0) * 100
   /** Path centre line, in metres. */
@@ -93,24 +97,24 @@ export function forest(seed: number): { generator: Generator<Kind>; spawn: Vec3 
     const fromPath = Math.abs(xm - pathX(zm))
     const hills = (fbm(s(2), xm / 45, zm / 45) - 0.5) * 10 + (valueNoise(s(3), xm / 6, zm / 6) - 0.5) * 0.8
     const valley = smoothstep(8, 42, fromPath) * 18
-    const ridge = smoothstep(95, 128, zm) * 22
+    const far = (fbm(s(9), xm / 900, zm / 900) - 0.5) * 50
     const pathDip = (1 - smoothstep(1, 2.2, fromPath)) * 0.3
-    return hills + valley + ridge - pathDip
+    return hills + valley + far - pathDip
   }
   // Every cell of a column of a population's cells asks for the same
-  // spots (see spot()), so heights are kept a while.
-  const heights = new Map<number, number>()
+  // spots (see spot()), so recent heights are kept, by a hash of (x, z).
+  const keptX = new Float64Array(1 << 14).fill(NaN)
+  const keptZ = new Float64Array(1 << 14)
+  const keptHeight = new Int32Array(1 << 14)
   /** Ground height in units. */
   const ground = (x: number, z: number) => {
-    // Unique while |z| < 2^21 units (500 km).
-    const key = x * 4194304 + z
-    let h = heights.get(key)
-    if (h === undefined) {
-      if (heights.size >= 1 << 16) heights.clear()
-      h = vox(groundMetres(x * UNIT_SIZE, z * UNIT_SIZE))
-      heights.set(key, h)
+    const k = (Math.imul(x, 0x9e3779b1) ^ Math.imul(z, 0x85ebca77)) >>> 18
+    if (keptX[k] !== x || keptZ[k] !== z) {
+      keptX[k] = x
+      keptZ[k] = z
+      keptHeight[k] = vox(groundMetres(x * UNIT_SIZE, z * UNIT_SIZE))
     }
-    return h
+    return keptHeight[k]
   }
 
   /** Column (x, z), given the ground's height there and at its four neighbours. */
@@ -134,7 +138,7 @@ export function forest(seed: number): { generator: Generator<Kind>; spawn: Vec3 
     columnOf(x, z, ground(x, z), [ground(x - 1, z), ground(x + 1, z), ground(x, z - 1), ground(x, z + 1)])
 
   // Start on the path at the near end, at about the height of a tall shrub.
-  const spawnZ = EXTENT.minZ + vox(1)
+  const spawnZ = vox(-31)
   const spawnX = Math.round(pathX(spawnZ * UNIT_SIZE) / UNIT_SIZE)
   // On a site, so it is in a voxel's cell, which is empty.
   const spawnY = ground(spawnX, spawnZ) + vox(3)
@@ -187,15 +191,20 @@ export function forest(seed: number): { generator: Generator<Kind>; spawn: Vec3 
 
   // Trees, each in the cell its foot is in: at most one per 4 m × 4 m.
   const TREE_CELL = vox(2)
-  const profiles = Object.fromEntries(SPECIES.map(species => {
+  // Per species, its area below each height up to the trees' reach: the area between two is a difference.
+  const TREE_TOP = vox(26)
+  const below = Object.fromEntries(SPECIES.map(species => {
     const samples = Array.from({ length: 64 }, (_, i) => TREES[species](0, 0, 0, rng(s(17) + i)))
-    return [species, areaProfile(samples, 1)]
-  })) as Record<Species, (height: number) => number>
+    const profile = areaProfile(samples, 1)
+    const sums = new Float64Array(TREE_TOP + 1)
+    for (let h = 0; h < TREE_TOP; h++) sums[h + 1] = sums[h] + profile(h)
+    return [species, sums]
+  })) as Record<Species, Float64Array>
   const trees: Population<Kind> = {
     name: 'trees',
     order: 1,
     cell: TREE_CELL,
-    reach: [vox(9), vox(26), vox(9)],
+    reach: [vox(9), TREE_TOP, vox(9)],
     // One by one, trees cost as much at every level per tree, and a box of
     // a coarser level holds more of them: from level 3 on, the canopy.
     size: vox(1),
@@ -223,9 +232,9 @@ export function forest(seed: number): { generator: Generator<Kind>; spawn: Vec3 
         let pick = hash(s(18), x, z)
         const kind = FOLIAGE[SPECIES.find(sp => (pick -= chances[sp]) < 0) ?? 'oak']
         const spans = []
-        for (let from = 0; from < vox(26); from += spacing) {
-          let area = 0
-          for (let h = from; h < from + spacing; h++) area += SPECIES.reduce((sum, sp) => sum + chances[sp] * profiles[sp](h), 0)
+        for (let from = 0; from < TREE_TOP; from += spacing) {
+          const to = Math.min(from + spacing, TREE_TOP)
+          const area = SPECIES.reduce((sum, sp) => sum + chances[sp] * (below[sp][to] - below[sp][from]), 0)
           if (area > 0) spans.push({ from: c.height + from, to: c.height + from + spacing, kind, extinction: (perArea * area) / spacing / 4 })
         }
         return spans
@@ -300,13 +309,13 @@ export function forest(seed: number): { generator: Generator<Kind>; spawn: Vec3 
   return {
     generator: { kinds: KINDS, seed: s(4), layers: [terrain, trees, boulders, logs, plants] },
     spawn,
+    box: level => {
+      const n = 2 ** level
+      // REACH sites of the level either way.
+      const [x, z] = [Math.round(spawn.x / n), Math.round(spawn.z / n)]
+      return { minX: x - REACH, minY: Math.floor(HEIGHTS.minY / n), minZ: z - REACH, maxX: x + REACH, maxY: Math.ceil(HEIGHTS.maxY / n), maxZ: z + REACH }
+    },
   }
-}
-
-/** The forest's `EXTENT`, and where the camera starts. */
-export function generateForest(seed: number): { grid: VoxelGrid; spawn: Vec3 } {
-  const { generator, spawn } = forest(seed)
-  return { grid: generate(generator, EXTENT), spawn }
 }
 
 // ---------------------------------------------------------------------------

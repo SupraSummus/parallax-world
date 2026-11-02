@@ -15,7 +15,7 @@ class FakeWorker implements BakeWorker {
   onmessage: ((event: MessageEvent<BakeResult>) => void) | null = null
   baked: ChunkRequest[] = []
   private handle = bakeHandler(result => {
-    this.baked.push(result.request)
+    if (result.type === 'chunk') this.baked.push(result.request)
     queueMicrotask(() => { this.onmessage?.({ data: result } as MessageEvent<BakeResult>) })
   }, queueMicrotask)
 
@@ -40,10 +40,10 @@ function workerRenderer(workers = [new FakeWorker(), new FakeWorker()]) {
  * `bake` returns how many it baked, `baked` how many in all.
  */
 function slowRenderer() {
-  const baker = new ChunkBaker(world.levels)
+  const baker = new ChunkBaker(world.materials, world.levels)
   let wanted: ChunkRequest[] = []
   let deliver: Parameters<Bakery['connect']>[0] = () => undefined
-  const renderer = new ParallaxRenderer(world, { bakery: { connect(d) { deliver = d }, setWorld() {}, want(r) { wanted = r } } })
+  const renderer = new ParallaxRenderer(world, { bakery: { connect(d) { deliver = d }, setWorld() {}, addGrid() {}, generate() {}, want(r) { wanted = r } } })
   renderer.resize(800, 600)
   let baked = 0
   const bake = (count = Infinity) => {
@@ -152,12 +152,12 @@ describe('WorkerBakery', () => {
     const at = (i: number) => ({ face: '+x+z', level: 6, layer: 0, cutoff: Infinity, i, j: 0, eye: [0, 0, 0] as const, fill: false })
     const baked: [number, number][] = []
     const steps: (() => void)[] = []
-    const handle = bakeHandler(({ seq, request }) => baked.push([seq, request.i]), step => steps.push(step))
+    const handle = bakeHandler(result => { if (result.type === 'chunk') baked.push([result.seq, result.request.i]) }, step => steps.push(step))
     const want = (received: number, ...cells: number[]) => {
       handle({ type: 'want', requests: encodeRequests(cells.map(at)), received })
     }
     const run = (count = Infinity) => { for (; count > 0 && steps.length > 0; count--) steps.shift()?.() }
-    handle({ type: 'world', generation: 1, levels: world.levels })
+    handle({ type: 'world', generation: 1, materials: world.materials, levels: world.levels })
     want(0, 0, 1, 2)
     run(1)
     // Replaces what is left; 0 is on its way, so not baked again.
@@ -255,14 +255,15 @@ describe('WorkerBakery', () => {
 
   it('drops chunks baked from a replaced world', async () => {
     const request = { face: '+x+z', level: 5, layer: 0, cutoff: Infinity, i: 0, j: 0, eye: [0, 0, 0] as const, fill: false }
-    expect(new ChunkBaker(world.levels).bake(request).facesDrawn).toBeGreaterThan(0)
+    expect(new ChunkBaker(world.materials, world.levels).bake(request).facesDrawn).toBeGreaterThan(0)
 
     const bakery = new WorkerBakery([new FakeWorker()])
     const delivered: number[] = []
     bakery.connect((_, image) => { delivered.push(image.facesDrawn) })
-    bakery.setWorld(world.levels)
+    bakery.setWorld(world.materials, world.levels)
     bakery.want([request])
-    bakery.setWorld(levelsOf(VoxelGrid.fromVoxels([])))
+    const empty = VoxelGrid.fromVoxels([])
+    bakery.setWorld(empty.materials, levelsOf(empty))
     bakery.want([request])
     await tick()
     expect(delivered).toEqual([0])

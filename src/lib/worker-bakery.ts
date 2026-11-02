@@ -1,6 +1,7 @@
 import { encodeRequests, type BakeMessage, type BakeResult, type ChunkImage, type ChunkRequest } from './chunk-baker'
 import type { Bakery } from './renderer'
-import type { VoxelData } from './voxel-grid'
+import type { LayerIndexData, Material, VoxelData } from './voxel-grid'
+import type { GridPart, WorldType } from './world'
 
 /** The part of a Worker a WorkerBakery uses. */
 export interface BakeWorker {
@@ -33,12 +34,14 @@ const equal = (a: Float64Array, b: Float64Array) => a.length === b.length && a.e
  * of the world. Each want() splits the list by cell between the workers,
  * keeping its order, and sends each worker its share, which replaces the
  * previous one; the workers bake their lists without waiting for the main
- * thread (see bakeHandler).
+ * thread (see bakeHandler). They generate the world's grids too, a part
+ * each in turn.
  */
 export class WorkerBakery implements Bakery {
   private workers: Entry[]
   private generation = 0
   private deliver: (request: ChunkRequest, image: ChunkImage) => void = () => undefined
+  private generated: (part: GridPart, grid: VoxelData, index: LayerIndexData) => void = () => undefined
 
   constructor(workers: BakeWorker[]) {
     this.workers = workers.map(worker => {
@@ -52,12 +55,26 @@ export class WorkerBakery implements Bakery {
     this.deliver = deliver
   }
 
-  setWorld(levels: VoxelData[]) {
+  setWorld(materials: readonly Material[], levels: readonly (VoxelData | undefined)[]) {
     this.generation++
+    this.generated = () => undefined
     for (const entry of this.workers) {
       entry.sent = null
-      entry.worker.postMessage({ type: 'world', generation: this.generation, levels })
+      entry.worker.postMessage({ type: 'world', generation: this.generation, materials, levels })
     }
+  }
+
+  addGrid(level: number, grid: VoxelData) {
+    for (const { worker } of this.workers) worker.postMessage({ type: 'grid', generation: this.generation, level, grid })
+  }
+
+  generate(seed: number, worldType: WorldType, parts: GridPart[], done: (part: GridPart, grid: VoxelData, index: LayerIndexData) => void) {
+    this.generated = done
+    const count = this.workers.length
+    this.workers.forEach(({ worker }, k) => {
+      const share = parts.filter((_, n) => n % count === k)
+      if (share.length > 0) worker.postMessage({ type: 'generate', generation: this.generation, seed, worldType, parts: share })
+    })
   }
 
   want(requests: ChunkRequest[]) {
@@ -79,11 +96,16 @@ export class WorkerBakery implements Bakery {
     this.workers = []
   }
 
-  private receive(entry: Entry, { generation, seq, request, image }: BakeResult) {
-    entry.received = seq
+  private receive(entry: Entry, result: BakeResult) {
     // A worker answers in order, so results of an older world arrive before
     // the new world's; they are dropped.
-    if (generation === this.generation) this.deliver(request, image)
+    const current = result.generation === this.generation
+    if (result.type === 'part') {
+      if (current) this.generated(result.part, result.grid, result.index)
+      return
+    }
+    entry.received = result.seq
+    if (current) this.deliver(result.request, result.image)
   }
 }
 
