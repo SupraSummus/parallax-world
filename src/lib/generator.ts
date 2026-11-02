@@ -61,10 +61,7 @@ export interface Node<K extends string> {
   readonly far?: { readonly detail: number; readonly shapes: readonly Shape<K>[] }
 }
 
-/**
- * A node's finer thing.
- * @internal
- */
+/** A node's finer thing. */
 export interface Child<K extends string> extends Node<K> {
   /** Unique among its siblings. */
   readonly name: string
@@ -520,8 +517,8 @@ function boundsOf<K extends string>(node: Node<K>): Box {
   return boundsOfShapes(node.shapes)
 }
 
-/** The box holding the shapes. */
-export function boundsOfShapes<K extends string>(shapes: readonly Shape<K>[]): Box {
+/** The box holding the shapes (or anything with bounds). */
+export function boundsOfShapes(shapes: readonly { readonly bounds: Box }[]): Box {
   const b = { minX: Infinity, minY: Infinity, minZ: Infinity, maxX: -Infinity, maxY: -Infinity, maxZ: -Infinity }
   for (const { bounds: s } of shapes) {
     b.minX = Math.min(b.minX, s.minX)

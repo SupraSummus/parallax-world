@@ -67,8 +67,8 @@ const village: Generator<Kind> = {
 /** Every generator, with a region with a bit of everything in it, and the level up to which it keeps what a camera sees. */
 const GENERATORS: { name: string; generator: Generator<string>; region: Box; levels: number }[] = [
   // Near the spawn point: path, trees, undergrowth, from under the ground to above the crowns.
-  // From level 3 its trees are a medium; at level 6 too dense yet (docs/generators.md).
-  { name: 'forest', generator: forest(42).generator, region: { minX: -64, minY: -32, minZ: -192, maxX: 64, maxY: 192, maxZ: -64 }, levels: 5 },
+  // Twigs, leaves and bark at level 0 only; from level 4 its trees are a medium; at level 7 too dense yet (docs/generators.md).
+  { name: 'forest', generator: forest(42).generator, region: { minX: -128, minY: -64, minZ: -384, maxX: 128, maxY: 384, maxZ: -128 }, levels: 6 },
   { name: 'fog', generator: fog, region: { minX: 32, minY: 32, minZ: 32, maxX: 96, maxY: 96, maxZ: 96 }, levels: 4 },
   { name: 'caves', generator: caves, region: { minX: 0, minY: 0, minZ: 0, maxX: 128, maxY: 128, maxZ: 128 }, levels: 3 },
   { name: 'village', generator: village, region: { minX: -64, minY: -16, minZ: -64, maxX: 64, maxY: 48, maxZ: 64 }, levels: 5 },

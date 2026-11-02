@@ -51,9 +51,12 @@ A spinner shows while a world generates.
 - *Forest* (default): an endless autumn forest valley on hills kilometres
   wide: a winding path, spruces, birches and oaks, ferns, bushes, boulders
   and fallen logs.
+  Its finest voxels, 0.125 m, show what is lost further away:
+  leaves on twigs, bark and roots, blades of grass,
+  berries, mushrooms, cones, pebbles and fallen leaves.
   Generated around the camera in the background, finest first,
   and again where the camera goes:
-  each level of detail reaches twice as far as the one before, to 22 km.
+  each level of detail reaches twice as far as the one before, to 11 km.
 - *City*: a district of a few blocks,
   for checking flat walls, thin frames and openings:
   low buildings whose rooms form a maze of doorways,

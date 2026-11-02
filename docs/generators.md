@@ -64,7 +64,10 @@ how many rays get how far, and what they stop on.
   so a site kept at one level stays kept where coarser levels give it as high a chance.
 - **Nodes** whose parts get smaller than the sites draw their `far` shapes instead
   (from `detail` on): a crown's outline for its leaf clusters,
-  which drawn one by one would stop rays twice where they overlap.
+  which drawn one by one would stop rays twice where they overlap;
+  a cluster's ball for its sprays of leaves on twigs, a site thick at level 0.
+  Give such parts' children `bounds` and make their shapes only once read
+  (`lazily` in `forest.ts`): coarse boxes hold many things drawn only from afar.
   Parts a thing hides, like branches inside a crown, are children with a small `size`:
   drawn on their own, far away they would show.
 - **Populations** make things while sites are at most `size` apart,
@@ -115,8 +118,8 @@ Add a new world to that list with a region that has a bit of everything in it.
 ## Open problems
 
 - **Far forms are calibrated from analytic areas.**
-  The forest's canopy (its trees from level 3 on) stops 0.05–0.1 more rays
-  at levels 4 to 6 (sites 4 to 16 m apart) than two levels finer:
+  The forest's canopy (its trees from level 4 on) stops 0.05–0.1 more rays
+  at levels 5 to 7 (sites 4 to 16 m apart) than two levels finer:
   porous, uneven crowns stop fewer rays than their outlines' area says,
   while balls of sites stop ~1.5× more than a ball's area says.
   Far forms should be measured from sample things drawn at level 0:

@@ -56,7 +56,7 @@ export interface SliceId {
   cutoff: number
 }
 
-/** Slabs of up to 4096 layers: from about 8 km on in the forest at 1280×800, slices grow no thicker. */
+/** Slabs of up to 4096 layers: from about 4 km on in the forest at 1280×800, slices grow no thicker. */
 export const MAX_LEVEL = 12
 
 /**
