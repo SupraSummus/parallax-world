@@ -20,20 +20,29 @@ const FACES = VOXEL_FACES.map(({ normal: [a, b, c], corners }) => ({
 }))
 
 /**
- * Builds a triangle mesh of every voxel face not covered by a neighbour,
- * of the voxels of the world's level 0 around `around` (World.levelAround)
- * within `reach` of it in x and z (all of them by default).
- * Voxel (x, y, z) is the rhombic dodecahedron around site (x, y, z)
- * (see fcc.ts), as in the parallax renderer.
+ * Builds a triangle mesh of the voxels of the world's `level` of detail
+ * (World.levelAround) around `around` (level 0 units), in its ring:
+ * level 0 within `reach` of it in x and z (all of it by default),
+ * each next level in a ring twice as wide, from where the one before ends,
+ * as the parallax renderer draws farther voxels coarser.
+ * Voxel (x, y, z) of level ℓ is the rhombic dodecahedron around site
+ * 2^ℓ · (x, y, z) (see fcc.ts).
+ * A face is drawn unless a neighbour in the ring covers it,
+ * so each ring is closed where it meets the next.
  */
-export function buildVoxelMesh(world: World, around: Vec3 = { x: 0, y: 0, z: 0 }, reach = Infinity): VoxelMesh {
-  const grid = world.levelAround(0, around)
-  // Each face not covered by a neighbour: f(x, y, z, id, face index).
+export function buildVoxelMesh(world: World, around: Vec3 = { x: 0, y: 0, z: 0 }, reach = Infinity, level = 0): VoxelMesh {
+  const grid = world.levelAround(level, around)
+  const scale = 2 ** level
+  const inRing = (x: number, z: number) => {
+    const d = Math.max(Math.abs(x * scale - around.x), Math.abs(z * scale - around.z))
+    return d <= reach * scale && (level === 0 || d > (reach * scale) / 2)
+  }
+  // Each face drawn: f(x, y, z, id, face index).
   const eachFace = (f: (x: number, y: number, z: number, id: number, face: number) => void) => {
     grid.forEach((x, y, z, id) => {
-      if (Math.abs(x - around.x) > reach || Math.abs(z - around.z) > reach) return
+      if (!inRing(x, z)) return
       FACES.forEach(({ normal: [a, b, c] }, k) => {
-        if (grid.get(x + a, y + b, z + c) === 0) f(x, y, z, id, k)
+        if (grid.get(x + a, y + b, z + c) === 0 || !inRing(x + a, z + c)) f(x, y, z, id, k)
       })
     })
   }
@@ -49,9 +58,9 @@ export function buildVoxelMesh(world: World, around: Vec3 = { x: 0, y: 0, z: 0 }
     const { shade, corners } = FACES[f]
     corners.forEach(([cx, cy, cz], k) => {
       const o = (n * 4 + k) * 3
-      positions[o] = x + cx
-      positions[o + 1] = y + cy
-      positions[o + 2] = -z + cz
+      positions[o] = (x + cx) * scale
+      positions[o + 1] = (y + cy) * scale
+      positions[o + 2] = (-z + cz) * scale
       for (let c = 0; c < 3; c++) colors[o + c] = Math.round(rgbs[id][c] * shade)
     })
     const base = n * 4

@@ -71,7 +71,8 @@ A spinner shows while a world generates.
 
 **3D viewer** – "Open in 3D Viewer" renders the same world (same seed) as an
 ordinary triangle mesh of the voxels' rhombic faces with three.js and an orbit camera, starting from the
-parallax camera with the same perspective (field of view) and fog. It is
+parallax camera with the same perspective (field of view) and fog,
+with coarser voxels farther away, to the render distance. It is
 the reference for checking what a scene looks like, independent of the
 slice renderer.
 
