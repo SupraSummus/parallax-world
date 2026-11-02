@@ -383,8 +383,8 @@ The list is split by cell between the workers,
 so a cell's surface is cached in one worker
 (rebaking it from a new eye reuses it).
 Each render's list replaces a worker's previous one;
-the worker bakes it one chunk per task, taking new lists in between,
-and posts each chunk at once,
+the worker bakes it a frame's worth (16 ms) per task, taking new lists in between,
+and posts each batch at once,
 without waiting for the main thread, which may be busy for hundreds of milliseconds.
 Chunks posted but not yet taken when the list was made are skipped (`bakeHandler`).
 Racing ahead, workers also bake far chunks that nearer ones turn out to cover:

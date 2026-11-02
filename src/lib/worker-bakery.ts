@@ -11,7 +11,7 @@ export interface BakeWorker {
 
 interface Entry {
   worker: BakeWorker
-  // The seq of its latest result taken.
+  // The seq of its latest message taken.
   received: number
   // What the latest `want` message sent it.
   sent: { requests: Float64Array; received: number } | null
@@ -79,11 +79,11 @@ export class WorkerBakery implements Bakery {
     this.workers = []
   }
 
-  private receive(entry: Entry, { generation, seq, request, image }: BakeResult) {
+  private receive(entry: Entry, { generation, seq, baked }: BakeResult) {
     entry.received = seq
     // A worker answers in order, so results of an older world arrive before
     // the new world's; they are dropped.
-    if (generation === this.generation) this.deliver(request, image)
+    if (generation === this.generation) for (const { request, image } of baked) this.deliver(request, image)
   }
 }
 

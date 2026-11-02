@@ -179,23 +179,24 @@ export type BakeMessage =
   | { type: 'world'; generation: number; levels: VoxelData[] }
   | { type: 'want'; requests: Float64Array; received: number }
 
-/** A bake worker's result: a baked chunk, `seq` numbering the worker's results. */
+/** A bake worker's message: chunks baked, `seq` numbering the worker's messages. */
 export interface BakeResult {
   generation: number
   seq: number
-  request: ChunkRequest
-  image: ChunkImage
+  baked: { request: ChunkRequest; image: ChunkImage }[]
 }
 
 /**
- * A bake worker's message handler: bakes the latest list one chunk per
- * `schedule`d step, so a new list (handled between steps) replaces the rest
- * of the old one, and posts each chunk at once, handing over its buffers.
+ * A bake worker's message handler: bakes the latest list in `schedule`d
+ * steps, so a new list (handled between steps) replaces the rest of the
+ * old one. A step bakes a chunk, and more until `budget` ms have passed,
+ * and posts them at once, handing over their buffers.
  * Chunks posted after the list's `received` are on their way, and skipped.
  */
 export function bakeHandler(
   post: (result: BakeResult, transfer: Transferable[]) => void,
   schedule: (step: () => void) => void,
+  budget = 0,
 ): (message: BakeMessage) => void {
   let baker: ChunkBaker | null = null
   let generation = 0
@@ -208,15 +209,16 @@ export function bakeHandler(
   const remaining = () => next < queue.length / REQUEST
   const step = () => {
     scheduled = false
-    while (baker && remaining()) {
+    const start = performance.now()
+    const baked: BakeResult['baked'] = []
+    while (baker && remaining() && (baked.length === 0 || performance.now() - start < budget)) {
       const request = decodeRequest(queue, next++)
       const key = requestKey(request)
       if (posted.has(key)) continue
-      const image = baker.bake(request)
-      posted.set(key, ++seq)
-      post({ generation, seq, request, image }, [image.pixels.buffer, image.blocks.buffer])
-      break
+      baked.push({ request, image: baker.bake(request) })
+      posted.set(key, seq + 1)
     }
+    if (baked.length > 0) post({ generation, seq: ++seq, baked }, baked.flatMap(({ image }) => [image.pixels.buffer, image.blocks.buffer]))
     wake()
   }
   const wake = () => {

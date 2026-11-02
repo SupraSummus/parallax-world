@@ -9,5 +9,8 @@ const steps = new MessageChannel()
 const handle = bakeHandler(
   (result, transfer) => { scope.postMessage(result, transfer) },
   step => { steps.port1.onmessage = step; steps.port2.postMessage(null) },
+  // A frame's worth of chunks per message: each message costs the main
+  // thread ~50 µs, and moving, workers bake thousands of chunks a second.
+  16,
 )
 scope.onmessage = (event: MessageEvent<BakeMessage>) => { handle(event.data) }
