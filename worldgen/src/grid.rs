@@ -7,15 +7,29 @@ use bake::Grid;
 pub const BRICK: i64 = 8;
 const BRICK_SITES: usize = (BRICK * BRICK * BRICK / 2) as usize;
 
-/** Half-open box: x in [min_x, max_x), y and z likewise; lattice units, or a level's. */
-#[derive(Clone, Copy, Debug, PartialEq)]
+/** Half-open box of integer points: min ≤ p < max on each axis; lattice units, or a level's. */
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Box3 {
-    pub min_x: f64,
-    pub min_y: f64,
-    pub min_z: f64,
-    pub max_x: f64,
-    pub max_y: f64,
-    pub max_z: f64,
+    pub min: [i64; 3],
+    pub max: [i64; 3],
+}
+
+impl Box3 {
+    pub fn holds(&self, p: [i64; 3]) -> bool {
+        (0..3).all(|i| p[i] >= self.min[i] && p[i] < self.max[i])
+    }
+
+    pub fn overlaps(&self, b: &Box3) -> bool {
+        (0..3).all(|i| self.min[i] < b.max[i] && b.min[i] < self.max[i])
+    }
+
+    pub fn inside(&self, b: &Box3) -> bool {
+        (0..3).all(|i| self.min[i] >= b.min[i] && self.max[i] <= b.max[i])
+    }
+
+    pub fn widen(&self, m: i64) -> Box3 {
+        Box3 { min: self.min.map(|v| v - m), max: self.max.map(|v| v + m) }
+    }
 }
 
 pub fn is_site(x: i64, y: i64, z: i64) -> bool {
@@ -36,13 +50,13 @@ pub struct VoxelGrid {
 impl VoxelGrid {
     /** A grid of the sites in `b`, widened by one in x if needed to start and end on an even x. */
     pub fn new(b: &Box3) -> VoxelGrid {
-        let min_x = (b.min_x / 2.0).floor() as i64 * 2;
-        let nx = 0.max((b.max_x / 2.0).ceil() as i64 * 2 - min_x);
-        let ny = 0.max((b.max_y - b.min_y) as i64);
-        let nz = 0.max((b.max_z - b.min_z) as i64);
+        let min_x = b.min[0].div_euclid(2) * 2;
+        let nx = 0.max((b.max[0] + 1).div_euclid(2) * 2 - min_x);
+        let ny = 0.max(b.max[1] - b.min[1]);
+        let nz = 0.max(b.max[2] - b.min[2]);
         let (bx, by, bz) = ((nx + BRICK - 1) / BRICK, (ny + BRICK - 1) / BRICK, (nz + BRICK - 1) / BRICK);
         VoxelGrid {
-            min: [min_x, b.min_y as i64, b.min_z as i64],
+            min: [min_x, b.min[1], b.min[2]],
             n: [nx, ny, nz],
             bx,
             by,
@@ -53,9 +67,7 @@ impl VoxelGrid {
 
     /** The box of its sites. */
     pub fn clip(&self) -> Box3 {
-        let [x, y, z] = self.min.map(|v| v as f64);
-        let [nx, ny, nz] = self.n.map(|v| v as f64);
-        Box3 { min_x: x, min_y: y, min_z: z, max_x: x + nx, max_y: y + ny, max_z: z + nz }
+        Box3 { min: self.min, max: [0, 1, 2].map(|i| self.min[i] + self.n[i]) }
     }
 
     /** Where site (x, y, z) is in `cells`: Err(brick) if that brick is empty, None outside the box or off the sites. */

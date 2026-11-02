@@ -83,14 +83,7 @@ fn check_grids(dump: &Dump, seed: f64) {
                 |generator, &(i, k)| {
                     let (min_x, max_x) = ((i * TILE).max(x0), ((i + 1) * TILE).min(x0 + nx));
                     let (min_z, max_z) = ((k * TILE).max(z0), ((k + 1) * TILE).min(z0 + nz));
-                    let b = Box3 {
-                        min_x: min_x as f64,
-                        min_y: y0 as f64,
-                        min_z: min_z as f64,
-                        max_x: max_x as f64,
-                        max_y: (y0 + ny) as f64,
-                        max_z: max_z as f64,
-                    };
+                    let b = Box3 { min: [min_x, y0, min_z], max: [max_x, y0 + ny, max_z] };
                     let ours = worldgen::generator::generate(generator, &b, level as u32);
                     let (mut sites, mut mismatches, mut first) = (0usize, 0usize, None);
                     for z in min_z..max_z {

@@ -88,7 +88,8 @@ pub enum Children {
 /** A node's finer thing: drawn while sites are at most `size` apart. */
 pub struct Child {
     pub name: String,
-    pub size: f64,
+    /** In lattice units; ANY_SIZE for any spacing. */
+    pub size: i64,
     pub node: Node,
 }
 
@@ -103,7 +104,8 @@ pub enum Shapes {
 
 type ChildrenReaching = dyn Fn(&Box3) -> Vec<Child>;
 type MakeShapes = dyn Fn(&mut Rng) -> Vec<Shape>;
-type FieldAt = dyn Fn(f64, f64, f64, f64) -> Option<(Kind, Option<f64>)>;
+type FieldAt = dyn Fn(i64, i64, i64, i64) -> Option<(Kind, Option<f64>)>;
+type FieldSpans = dyn Fn(i64, i64, i64) -> Vec<Span>;
 type Anchor = dyn Fn(&Cell) -> Option<Point>;
 type Make = dyn Fn(Point, &Cell) -> Option<Node>;
 
@@ -128,8 +130,8 @@ impl Node {
 
 /** Part of a line of sites: [from, to) along the line, solid, or a medium if it has `extinction`. */
 pub struct Span {
-    pub from: f64,
-    pub to: f64,
+    pub from: i64,
+    pub to: i64,
     pub kind: Kind,
     pub extinction: Option<f64>,
 }
@@ -138,7 +140,7 @@ pub enum FieldValues {
     /** A kind, with a medium's extinction if it is one, at each site; given the level's spacing. */
     At(Box<FieldAt>),
     /** Spans along each line of sites parallel to `axis`, at (u, v) the other two coordinates, in order. */
-    Spans { axis: usize, spans: Box<dyn Fn(f64, f64, f64) -> Vec<Span>> },
+    Spans { axis: usize, spans: Box<FieldSpans> },
 }
 
 /** Something everywhere, given by position alone (Field in generator.ts). */
@@ -151,10 +153,10 @@ pub struct Field {
 
 /** A cell of a population (Cell in generator.ts). */
 pub struct Cell<'a> {
-    pub i: f64,
-    pub j: f64,
-    pub k: f64,
-    pub centre: Point,
+    pub i: i64,
+    pub j: i64,
+    pub k: i64,
+    pub centre: [i64; 3],
     population: &'a str,
     seed: f64,
 }
@@ -163,7 +165,9 @@ impl Cell<'_> {
     /** A random sequence that depends on the cell and `stream` only. */
     pub fn random(&self, stream: &str) -> Rng {
         Rng::new(
-            (hash(hash_text(&format!("{}:{stream}", self.population), self.seed) as f64, self.i, self.j, self.k) * 4294967296.0).floor(),
+            (hash(hash_text(&format!("{}:{stream}", self.population), self.seed) as f64, self.i as f64, self.j as f64, self.k as f64)
+                * 4294967296.0)
+                .floor(),
         )
     }
 }
@@ -172,10 +176,11 @@ impl Cell<'_> {
 pub struct Population {
     pub name: &'static str,
     pub order: f64,
-    pub cell: f64,
+    pub cell: i64,
     /** How far a thing reaches past N from its cell's centre, per axis. */
-    pub reach: [f64; 3],
-    pub size: f64,
+    pub reach: [i64; 3],
+    /** Things are made while sites are at most this far apart (ANY_SIZE: always). */
+    pub size: i64,
     pub anchor: Box<Anchor>,
     pub make: Box<Make>,
     pub far: Option<Field>,
@@ -198,6 +203,8 @@ pub struct Generator {
 }
 
 const DOCS: &str = "docs/generators.md";
+/** A size no spacing exceeds. */
+pub const ANY_SIZE: i64 = i64::MAX;
 /** A voxel's surface area at level 0, and its mean chord (Cauchy: 4 · volume / area). */
 const VOXEL_AREA: f64 = 6.0 * std::f64::consts::SQRT_2;
 const CHORD: f64 = (4.0 * 2.0) / VOXEL_AREA;
@@ -222,12 +229,8 @@ pub fn ellipsoid(centre: Point, radii: Point, kind: Kind, fill: Fill, op: Op) ->
         op,
         centre,
         bounds: Box3 {
-            min_x: (cx - a).ceil(),
-            min_y: (cy - b).ceil(),
-            min_z: (cz - c).ceil(),
-            max_x: (cx + a).floor() + 1.0,
-            max_y: (cy + b).floor() + 1.0,
-            max_z: (cz + c).floor() + 1.0,
+            min: [(cx - a).ceil(), (cy - b).ceil(), (cz - c).ceil()].map(|v| v as i64),
+            max: [(cx + a).floor(), (cy + b).floor(), (cz + c).floor()].map(|v| v as i64 + 1),
         },
         extents: [2.0 * a, 2.0 * b, 2.0 * c],
         area: effective_area(area, ((16.0 / 3.0) * PI * a * b * c) / area, &fill, centre),
@@ -248,13 +251,13 @@ pub fn capsule(p: Point, q: Point, radius: f64, kind: Kind, fill: Fill, op: Op) 
     let area = 2.0 * PI * radius * length + 4.0 * PI * (radius * radius);
     let volume = PI * (radius * radius) * length + (4.0 / 3.0) * PI * js::pow(radius, 3.0);
     let centre = [(p[0] + q[0]) / 2.0, (p[1] + q[1]) / 2.0, (p[2] + q[2]) / 2.0];
-    let lo: [f64; 3] = std::array::from_fn(|i| (p[i].min(q[i]) - radius).ceil());
-    let hi: [f64; 3] = std::array::from_fn(|i| (p[i].max(q[i]) + radius).floor() + 1.0);
+    let lo: [i64; 3] = std::array::from_fn(|i| (p[i].min(q[i]) - radius).ceil() as i64);
+    let hi: [i64; 3] = std::array::from_fn(|i| (p[i].max(q[i]) + radius).floor() as i64 + 1);
     Shape {
         kind,
         op,
         centre,
-        bounds: Box3 { min_x: lo[0], min_y: lo[1], min_z: lo[2], max_x: hi[0], max_y: hi[1], max_z: hi[2] },
+        bounds: Box3 { min: lo, max: hi },
         extents: [length + 2.0 * radius, 2.0 * radius, 2.0 * radius],
         area: effective_area(area, (4.0 * volume) / area, &fill, centre),
         fill,
@@ -290,13 +293,13 @@ pub fn lathe(p: Point, q: Point, radius: impl Fn(f64) -> f64 + 'static, kind: Ki
     let widest = js::max(r.iter().copied());
     let centre = [(p[0] + q[0]) / 2.0, (p[1] + q[1]) / 2.0, (p[2] + q[2]) / 2.0];
     let out = d.map(|v| widest * 0f64.max(1.0 - (v * v) / length2).sqrt());
-    let lo: [f64; 3] = std::array::from_fn(|i| (p[i].min(q[i]) - out[i]).ceil());
-    let hi: [f64; 3] = std::array::from_fn(|i| (p[i].max(q[i]) + out[i]).floor() + 1.0);
+    let lo: [i64; 3] = std::array::from_fn(|i| (p[i].min(q[i]) - out[i]).ceil() as i64);
+    let hi: [i64; 3] = std::array::from_fn(|i| (p[i].max(q[i]) + out[i]).floor() as i64 + 1);
     Shape {
         kind,
         op,
         centre,
-        bounds: Box3 { min_x: lo[0], min_y: lo[1], min_z: lo[2], max_x: hi[0], max_y: hi[1], max_z: hi[2] },
+        bounds: Box3 { min: lo, max: hi },
         extents: [length, 2.0 * widest, 2.0 * widest],
         area: effective_area(area, (4.0 * volume) / area, &fill, centre),
         fill,
@@ -313,14 +316,7 @@ pub fn cuboid(min: Point, max: Point, kind: Kind, fill: Fill, op: Op) -> Shape {
         kind,
         op,
         centre,
-        bounds: Box3 {
-            min_x: min[0].ceil(),
-            min_y: min[1].ceil(),
-            min_z: min[2].ceil(),
-            max_x: max[0].ceil(),
-            max_y: max[1].ceil(),
-            max_z: max[2].ceil(),
-        },
+        bounds: Box3 { min: min.map(|v| v.ceil() as i64), max: max.map(|v| v.ceil() as i64) },
         extents: size,
         area: effective_area(area, (4.0 * size[0] * size[1] * size[2]) / area, &fill, centre),
         fill,
@@ -376,29 +372,31 @@ impl Shape {
  * Draws a shape at sites `s` apart, by how many of its sizes are under s
  * (drawShape in generator.ts).
  */
-fn draw_shape(shape: &Shape, seed: f64, s: f64, clip: &Box3, put: &mut dyn FnMut(i64, i64, i64)) {
+fn draw_shape(shape: &Shape, seed: f64, si: i64, clip: &Box3, put: &mut dyn FnMut(i64, i64, i64)) {
+    let s = si as f64;
     let small = shape.extents.iter().filter(|e| **e < s).count();
-    let kept = |x: i64, y: i64, z: i64, chance: f64| chance >= 1.0 || hash(seed, x as f64 * s, y as f64 * s, z as f64 * s) < chance;
+    let kept =
+        |x: i64, y: i64, z: i64, chance: f64| chance >= 1.0 || hash(seed, (x * si) as f64, (y * si) as f64, (z * si) as f64) < chance;
     if small == 3 {
         let [x, y, z] = nearest_site(shape.centre.map(|v| v / s));
-        if in_box(clip, x, y, z) && kept(x, y, z, shape.area / (VOXEL_AREA * s * s)) {
+        if clip.holds([x, y, z]) && kept(x, y, z, shape.area / (VOXEL_AREA * s * s)) {
             put(x, y, z);
         }
         return;
     }
     let min = [0.0, s, 1.6 * s][small];
     let b = &shape.bounds;
-    let [x0, y0, z0] = [b.min_x, b.min_y, b.min_z].map(|v| ((v - min / 2.0) / s).ceil());
-    let [x1, y1, z1] = [b.max_x, b.max_y, b.max_z].map(|v| ((v - 1.0 + min / 2.0) / s).floor());
+    let [x0, y0, z0] = b.min.map(|v| ((v as f64 - min / 2.0) / s).ceil() as i64);
+    let [x1, y1, z1] = b.max.map(|v| ((v as f64 - 1.0 + min / 2.0) / s).floor() as i64);
     let sites = |within: &Box3, visit: &mut dyn FnMut(i64, i64, i64)| {
-        let (z_from, z_to) = (z0.max(within.min_z) as i64, z1.min(within.max_z - 1.0) as i64);
-        let (y_from, y_to) = (y0.max(within.min_y) as i64, y1.min(within.max_y - 1.0) as i64);
-        let (from, x_to) = (x0.max(within.min_x) as i64, x1.min(within.max_x - 1.0) as i64);
+        let (z_from, z_to) = (z0.max(within.min[2]), z1.min(within.max[2] - 1));
+        let (y_from, y_to) = (y0.max(within.min[1]), y1.min(within.max[1] - 1));
+        let (from, x_to) = (x0.max(within.min[0]), x1.min(within.max[0] - 1));
         for z in z_from..=z_to {
             for y in y_from..=y_to {
                 let mut x = from + ((from + y + z) & 1);
                 while x <= x_to {
-                    if shape.contains(x as f64 * s, y as f64 * s, z as f64 * s, min) {
+                    if shape.contains((x * si) as f64, (y * si) as f64, (z * si) as f64, min) {
                         visit(x, y, z);
                     }
                     x += 2;
@@ -406,7 +404,7 @@ fn draw_shape(shape: &Shape, seed: f64, s: f64, clip: &Box3, put: &mut dyn FnMut
             }
         }
     };
-    let fill = |x: i64, y: i64, z: i64| shape.fill.at(x as f64 * s, y as f64 * s, z as f64 * s);
+    let fill = |x: i64, y: i64, z: i64| shape.fill.at((x * si) as f64, (y * si) as f64, (z * si) as f64);
     match small {
         0 => sites(clip, &mut |x, y, z| {
             if kept(x, y, z, 1.0 - js::pow(1.0 - fill(x, y, z), s)) {
@@ -469,9 +467,9 @@ impl Palette {
         Palette { materials, shades, seed }
     }
 
-    fn shade(&self, kind: Kind, x: f64, y: f64, z: f64) -> u8 {
+    fn shade(&self, kind: Kind, x: i64, y: i64, z: i64) -> u8 {
         let shades = &self.shades[kind as usize];
-        shades[(hash(self.seed, x, y, z) * shades.len() as f64).floor() as usize]
+        shades[(hash(self.seed, x as f64, y as f64, z as f64) * shades.len() as f64).floor() as usize]
     }
 }
 
@@ -486,7 +484,7 @@ pub fn materials_of(generator: &Generator) -> Vec<Material> {
  * grid may reach one site further in x (its rows start and end on an even x).
  */
 pub fn generate(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
-    let s = (1u64 << level) as f64;
+    let s = 1i64 << level;
     let palette = Palette::new(generator.kinds, generator.seed);
     let mut grid = VoxelGrid::new(b);
     let clip = grid.clip();
@@ -494,7 +492,7 @@ pub fn generate(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
         if op == Op::Fill && grid.get(x, y, z) != 0 {
             return;
         }
-        let id = if op == Op::Carve { 0 } else { palette.shade(kind, x as f64 * s, y as f64 * s, z as f64 * s) };
+        let id = if op == Op::Carve { 0 } else { palette.shade(kind, x * s, y * s, z * s) };
         grid.set(x, y, z, id);
     };
     for drawable in drawables_in(generator, &clip, s) {
@@ -524,19 +522,9 @@ struct Drawable<'a> {
 }
 
 /** What draws into `clip` (sites s apart), in drawing order: by layer, then key. */
-fn drawables_in<'a>(generator: &'a Generator, clip: &Box3, s: f64) -> Vec<Drawable<'a>> {
+fn drawables_in<'a>(generator: &'a Generator, clip: &Box3, s: i64) -> Vec<Drawable<'a>> {
     // The lattice units the sites of `clip` cover, with what a shape may grow by at this level.
-    let units = widen(
-        &Box3 {
-            min_x: clip.min_x * s,
-            min_y: clip.min_y * s,
-            min_z: clip.min_z * s,
-            max_x: (clip.max_x - 1.0) * s + 1.0,
-            max_y: (clip.max_y - 1.0) * s + 1.0,
-            max_z: (clip.max_z - 1.0) * s + 1.0,
-        },
-        s,
-    );
+    let units = Box3 { min: clip.min.map(|v| v * s), max: clip.max.map(|v| (v - 1) * s + 1) }.widen(s);
     let mut drawables = Vec::new();
     for layer in &generator.layers {
         let population = match layer {
@@ -552,11 +540,11 @@ fn drawables_in<'a>(generator: &'a Generator, clip: &Box3, s: f64) -> Vec<Drawab
             }
             continue;
         }
-        fn visit<'a>(node: &Node, key: String, bounds: Box3, s: f64, units: &Box3, order: f64, drawables: &mut Vec<Drawable<'a>>) {
-            if !overlaps(&bounds, units) {
+        fn visit<'a>(node: &Node, key: String, bounds: Box3, s: i64, units: &Box3, order: f64, drawables: &mut Vec<Drawable<'a>>) {
+            if !bounds.overlaps(units) {
                 return;
             }
-            let far = node.far.as_ref().filter(|far| s > far.detail);
+            let far = node.far.as_ref().filter(|far| s as f64 > far.detail);
             let shapes = far.map_or_else(|| node.shapes.get(), |far| &far.shapes);
             drawables.push(Drawable { order, key: key.clone(), draw: Draw::Shapes(shapes.to_vec(), far.is_some()) });
             if far.is_some() {
@@ -575,7 +563,7 @@ fn drawables_in<'a>(generator: &'a Generator, clip: &Box3, s: f64) -> Vec<Drawab
             for child in children {
                 assert!(names.insert(&child.name), "{key} has two children named {}; see \"Things\" in {DOCS}", child.name);
                 let child_bounds = bounds_of(&child.node);
-                assert!(inside(&child_bounds, &bounds), "{key}/{} reaches past its parent; see \"Things\" in {DOCS}", child.name);
+                assert!(child_bounds.inside(&bounds), "{key}/{} reaches past its parent; see \"Things\" in {DOCS}", child.name);
                 if s <= child.size {
                     visit(&child.node, format!("{key}/{}", child.name), child_bounds, s, units, order, drawables);
                 }
@@ -584,19 +572,19 @@ fn drawables_in<'a>(generator: &'a Generator, clip: &Box3, s: f64) -> Vec<Drawab
         let n = population.cell;
         let [rx, ry, rz] = population.reach;
         // Cells whose reach meets `units`: centres within N + reach of it.
-        let range = |min: f64, max: f64, reach: f64| (((min - n - reach) / n).ceil() as i64, ((max - 1.0 + n + reach) / n).floor() as i64);
-        let ((i0, i1), (j0, j1), (k0, k1)) =
-            (range(units.min_x, units.max_x, rx), range(units.min_y, units.max_y, ry), range(units.min_z, units.max_z, rz));
+        let range =
+            |axis: usize, reach: i64| (-(-(units.min[axis] - n - reach)).div_euclid(n), (units.max[axis] - 1 + n + reach).div_euclid(n));
+        let ((i0, i1), (j0, j1), (k0, k1)) = (range(0, rx), range(1, ry), range(2, rz));
         for i in i0..=i1 {
             for j in j0..=j1 {
                 let mut k = k0 + ((k0 + i + j) & 1);
                 while k <= k1 {
-                    let (fi, fj, fk) = (i as f64, j as f64, k as f64);
-                    let centre = [fi * n, fj * n, fk * n];
-                    let cell = Cell { i: fi, j: fj, k: fk, centre, population: population.name, seed: generator.seed };
+                    let centre = [i * n, j * n, k * n];
+                    let cell = Cell { i, j, k, centre, population: population.name, seed: generator.seed };
                     k += 2;
                     let Some(anchor) = (population.anchor)(&cell) else { continue };
-                    let [oi, oj, ok] = nearest_site([anchor[0] / n, anchor[1] / n, anchor[2] / n]);
+                    let nf = n as f64;
+                    let [oi, oj, ok] = nearest_site([anchor[0] / nf, anchor[1] / nf, anchor[2] / nf]);
                     if oi != i || oj != j || ok != k - 2 {
                         continue;
                     }
@@ -604,14 +592,10 @@ fn drawables_in<'a>(generator: &'a Generator, clip: &Box3, s: f64) -> Vec<Drawab
                     let key = format!("{} {i},{j},{}", population.name, k - 2);
                     let bounds = bounds_of(&node);
                     let reach = Box3 {
-                        min_x: centre[0] - n - rx,
-                        min_y: centre[1] - n - ry,
-                        min_z: centre[2] - n - rz,
-                        max_x: centre[0] + n + rx,
-                        max_y: centre[1] + n + ry,
-                        max_z: centre[2] + n + rz,
+                        min: [centre[0] - n - rx, centre[1] - n - ry, centre[2] - n - rz],
+                        max: [centre[0] + n + rx, centre[1] + n + ry, centre[2] + n + rz],
                     };
-                    assert!(inside(&bounds, &reach), "{key} reaches past its population's reach; see \"Populations\" in {DOCS}");
+                    assert!(bounds.inside(&reach), "{key} reaches past its population's reach; see \"Populations\" in {DOCS}");
                     visit(&node, key, bounds, s, &units, population.order, &mut drawables);
                 }
             }
@@ -622,19 +606,19 @@ fn drawables_in<'a>(generator: &'a Generator, clip: &Box3, s: f64) -> Vec<Drawab
 }
 
 /** Draws a field into `clip`; a medium keeps a site with the chance a ray crossing it is stopped. */
-fn draw_field(field: &Field, seed: f64, s: f64, clip: &Box3, put: &mut dyn FnMut(Kind, Op, i64, i64, i64)) {
+fn draw_field(field: &Field, seed: f64, s: i64, clip: &Box3, put: &mut dyn FnMut(Kind, Op, i64, i64, i64)) {
     let op = field.op;
     let field_seed = hash_text(field.name, seed) as f64;
     let kept = |x: i64, y: i64, z: i64, extinction: Option<f64>| {
-        extinction.is_none_or(|e| hash(field_seed, x as f64 * s, y as f64 * s, z as f64 * s) < 1.0 - js::exp(-e * CHORD * s))
+        extinction.is_none_or(|e| hash(field_seed, (x * s) as f64, (y * s) as f64, (z * s) as f64) < 1.0 - js::exp(-e * CHORD * s as f64))
     };
     match &field.values {
         FieldValues::At(at) => {
-            for z in clip.min_z as i64..clip.max_z as i64 {
-                for y in clip.min_y as i64..clip.max_y as i64 {
-                    let mut x = clip.min_x as i64 + ((clip.min_x as i64 + y + z) & 1);
-                    while x < clip.max_x as i64 {
-                        if let Some((kind, extinction)) = at(x as f64 * s, y as f64 * s, z as f64 * s, s)
+            for z in clip.min[2]..clip.max[2] {
+                for y in clip.min[1]..clip.max[1] {
+                    let mut x = clip.min[0] + ((clip.min[0] + y + z) & 1);
+                    while x < clip.max[0] {
+                        if let Some((kind, extinction)) = at(x * s, y * s, z * s, s)
                             && kept(x, y, z, extinction)
                         {
                             put(kind, op, x, y, z);
@@ -646,8 +630,7 @@ fn draw_field(field: &Field, seed: f64, s: f64, clip: &Box3, put: &mut dyn FnMut
         }
         FieldValues::Spans { axis, spans } => {
             let axis = *axis;
-            let lo = [clip.min_x, clip.min_y, clip.min_z].map(|v| v as i64);
-            let hi = [clip.max_x, clip.max_y, clip.max_z].map(|v| v as i64);
+            let (lo, hi) = (clip.min, clip.max);
             let others: Vec<usize> = (0..3).filter(|i| *i != axis).collect();
             let (a, b) = (others[0], others[1]);
             let mut site = [0i64; 3];
@@ -655,10 +638,10 @@ fn draw_field(field: &Field, seed: f64, s: f64, clip: &Box3, put: &mut dyn FnMut
                 for v in lo[b]..hi[b] {
                     site[a] = u;
                     site[b] = v;
-                    for span in spans(u as f64 * s, v as f64 * s, s) {
-                        let first = ((span.from / s).ceil() as i64).max(lo[axis]);
+                    for span in spans(u * s, v * s, s) {
+                        let first = (-(-span.from).div_euclid(s)).max(lo[axis]);
                         let mut w = first + ((first + u + v) & 1);
-                        while (w as f64) * s < span.to && w < hi[axis] {
+                        while w * s < span.to && w < hi[axis] {
                             site[axis] = w;
                             if kept(site[0], site[1], site[2], span.extinction) {
                                 put(span.kind, op, site[0], site[1], site[2]);
@@ -676,34 +659,24 @@ fn draw_field(field: &Field, seed: f64, s: f64, clip: &Box3, put: &mut dyn FnMut
  * The mean area per unit length of `nodes` along `axis`, as a function of
  * the coordinate: for a population's far form, from things made at the origin.
  */
-pub fn area_profile(nodes: &[Node], axis: usize) -> impl Fn(f64) -> f64 + use<> {
+pub fn area_profile(nodes: &[Node], axis: usize) -> impl Fn(i64) -> f64 + use<> {
     let mut profile = std::collections::BTreeMap::<i64, f64>::new();
     for node in nodes {
         let shapes = node.far.as_ref().map_or_else(|| node.shapes.get(), |far| &far.shapes);
         for shape in shapes {
-            let lo = [shape.bounds.min_x, shape.bounds.min_y, shape.bounds.min_z][axis];
-            let hi = [shape.bounds.max_x, shape.bounds.max_y, shape.bounds.max_z][axis];
-            let mut at = lo;
-            while at < hi {
-                *profile.entry(at as i64).or_insert(0.0) += shape.area / (hi - lo) / nodes.len() as f64;
-                at += 1.0;
+            let (lo, hi) = (shape.bounds.min[axis], shape.bounds.max[axis]);
+            for at in lo..hi {
+                *profile.entry(at).or_insert(0.0) += shape.area / (hi - lo) as f64 / nodes.len() as f64;
             }
         }
     }
-    move |at: f64| profile.get(&(at.floor() as i64)).copied().unwrap_or(0.0)
+    move |at: i64| profile.get(&at).copied().unwrap_or(0.0)
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 
-const EVERYWHERE: Box3 = Box3 {
-    min_x: f64::NEG_INFINITY,
-    min_y: f64::NEG_INFINITY,
-    min_z: f64::NEG_INFINITY,
-    max_x: f64::INFINITY,
-    max_y: f64::INFINITY,
-    max_z: f64::INFINITY,
-};
+const EVERYWHERE: Box3 = Box3 { min: [i64::MIN / 4; 3], max: [i64::MAX / 4; 3] };
 
 /** The site nearest to a point: the one whose voxel holds it. */
 fn nearest_site(p: [f64; 3]) -> [i64; 3] {
@@ -733,17 +706,12 @@ fn bounds_of(node: &Node) -> Box3 {
 
 /** The box holding the boxes. */
 pub fn bounds_of_shapes<'a>(boxes: impl IntoIterator<Item = &'a Box3>) -> Box3 {
-    let mut b = EVERYWHERE;
-    std::mem::swap(&mut b.min_x, &mut b.max_x);
-    std::mem::swap(&mut b.min_y, &mut b.max_y);
-    std::mem::swap(&mut b.min_z, &mut b.max_z);
+    let mut b = Box3 { min: EVERYWHERE.max, max: EVERYWHERE.min };
     for s in boxes {
-        b.min_x = b.min_x.min(s.min_x);
-        b.min_y = b.min_y.min(s.min_y);
-        b.min_z = b.min_z.min(s.min_z);
-        b.max_x = b.max_x.max(s.max_x);
-        b.max_y = b.max_y.max(s.max_y);
-        b.max_z = b.max_z.max(s.max_z);
+        for i in 0..3 {
+            b.min[i] = b.min[i].min(s.min[i]);
+            b.max[i] = b.max[i].max(s.max[i]);
+        }
     }
     b
 }
@@ -755,21 +723,4 @@ pub fn hash_text(text: &str, seed: f64) -> i32 {
         h = (h ^ c as i32).wrapping_mul(16777619);
     }
     h
-}
-
-fn in_box(b: &Box3, x: i64, y: i64, z: i64) -> bool {
-    let (x, y, z) = (x as f64, y as f64, z as f64);
-    x >= b.min_x && x < b.max_x && y >= b.min_y && y < b.max_y && z >= b.min_z && z < b.max_z
-}
-
-fn overlaps(a: &Box3, b: &Box3) -> bool {
-    a.min_x < b.max_x && b.min_x < a.max_x && a.min_y < b.max_y && b.min_y < a.max_y && a.min_z < b.max_z && b.min_z < a.max_z
-}
-
-fn inside(a: &Box3, b: &Box3) -> bool {
-    a.min_x >= b.min_x && a.min_y >= b.min_y && a.min_z >= b.min_z && a.max_x <= b.max_x && a.max_y <= b.max_y && a.max_z <= b.max_z
-}
-
-fn widen(b: &Box3, m: f64) -> Box3 {
-    Box3 { min_x: b.min_x - m, min_y: b.min_y - m, min_z: b.min_z - m, max_x: b.max_x + m, max_y: b.max_y + m, max_z: b.max_z + m }
 }

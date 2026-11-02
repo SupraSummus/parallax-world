@@ -7,13 +7,13 @@ use worldgen::generator::{generate, materials_of};
 use worldgen::grid::{Box3, VoxelGrid, is_site};
 
 /** 48 m × 80 m ahead of the spawn point, all heights, and the spawn point. */
-fn generated(seed: f64) -> (VoxelGrid, Vec<u8>, [f64; 3]) {
+fn generated(seed: f64) -> (VoxelGrid, Vec<u8>, [i64; 3]) {
     let (generator, spawn) = forest(seed);
     let (min_y, max_y) = heights(0);
+    let unit = |metres: f64| (metres / UNIT_SIZE) as i64;
     // Grids start on an even x.
-    let x = 2.0 * ((spawn[0] - 24.0 / UNIT_SIZE) / 2.0).floor();
-    let area =
-        Box3 { min_x: x, min_y, min_z: spawn[2] - 1.0 / UNIT_SIZE, max_x: x + 48.0 / UNIT_SIZE, max_y, max_z: spawn[2] + 79.0 / UNIT_SIZE };
+    let x = 2 * (spawn[0] - unit(24.0)).div_euclid(2);
+    let area = Box3 { min: [x, min_y, spawn[2] - unit(1.0)], max: [x + unit(48.0), max_y, spawn[2] + unit(79.0)] };
     let types = materials_of(&generator).iter().map(|m| m.material_type).collect();
     (generate(&generator, &area, 0), types, spawn)
 }
@@ -64,7 +64,7 @@ fn forest_is_deterministic_has_ground_trees_and_a_clear_spawn() {
     assert!(tallest > 10.0 && tallest < 25.0, "tallest run of wood {tallest} m");
 
     // The camera starts in open air with a clear view 4 m ahead.
-    let [sx, sy, sz] = spawn.map(|v| v as i64);
+    let [sx, sy, sz] = spawn;
     for dz in 0..(4.0 / UNIT_SIZE) as i64 {
         for dx in -1..=1 {
             for dy in -1..=1 {

@@ -3,11 +3,11 @@
 //! whole; and each level shows what the level two finer shows.
 
 use worldgen::forest::forest;
-use worldgen::generator::{Cell, Fill, Point};
 use worldgen::generator::{
-    Child, Children, Field, FieldValues, Generator, KindDef, Layer, Node, Op, Population, SOLID, Shapes, Span, ball, cuboid, generate,
-    materials_of,
+    ANY_SIZE, Child, Children, Field, FieldValues, Generator, KindDef, Layer, Node, Op, Population, SOLID, Shapes, Span, ball, cuboid,
+    generate, materials_of,
 };
+use worldgen::generator::{Cell, Fill, Point};
 use worldgen::grid::{Box3, VoxelGrid};
 use worldgen::noise::Rng;
 
@@ -25,20 +25,20 @@ const WOOD: u8 = 3;
 const GRASS: u8 = 4;
 
 /** One population of one thing, near the origin: cells reach 1024 + `reach` from their centres. */
-fn single(make: impl Fn(Point, &Cell) -> Option<Node> + 'static, reach: f64) -> Layer {
+fn single(make: impl Fn(Point, &Cell) -> Option<Node> + 'static, reach: i64) -> Layer {
     Layer::Population(Population {
         name: "single",
         order: 1.0,
-        cell: 1024.0,
+        cell: 1024,
         reach: [reach; 3],
-        size: f64::INFINITY,
-        anchor: Box::new(|cell| if cell.i == 0.0 && cell.j == 0.0 && cell.k == 0.0 { Some([64.0, 64.0, 64.0]) } else { None }),
+        size: ANY_SIZE,
+        anchor: Box::new(|cell| if cell.i == 0 && cell.j == 0 && cell.k == 0 { Some([64.0, 64.0, 64.0]) } else { None }),
         make: Box::new(make),
         far: None,
     })
 }
 
-fn spans(name: &'static str, from: f64, to: f64, kind: u8) -> Layer {
+fn spans(name: &'static str, from: i64, to: i64, kind: u8) -> Layer {
     Layer::Field(Field {
         name,
         order: 0.0,
@@ -52,7 +52,7 @@ fn fog() -> Generator {
     Generator {
         kinds: KINDS,
         seed: 1.0,
-        layers: vec![single(|_, _| Some(Node::of(vec![ball([64.0; 3], 56.0, FOG, Fill::Const(0.3), Op::Fill)])), 64.0)],
+        layers: vec![single(|_, _| Some(Node::of(vec![ball([64.0; 3], 56.0, FOG, Fill::Const(0.3), Op::Fill)])), 64)],
     }
 }
 
@@ -63,11 +63,12 @@ fn caves() -> Generator {
         order: 1.0,
         op: Op::Carve,
         values: FieldValues::At(Box::new(|x, y, z, _| {
+            let (x, y, z) = (x as f64, y as f64, z as f64);
             let v = (x / 23.0).sin() + (y / 17.0).sin() + (z / 29.0).sin() + ((x + z) / 31.0).sin();
             if v > 1.4 { Some((ROCK, None)) } else { None }
         })),
     };
-    Generator { kinds: KINDS, seed: 2.0, layers: vec![spans("rock", -1000.0, 1000.0, ROCK), Layer::Field(tunnels)] }
+    Generator { kinds: KINDS, seed: 2.0, layers: vec![spans("rock", -1000, 1000, ROCK), Layer::Field(tunnels)] }
 }
 
 /** Houses on a grass plain: thin walls with a door carved through, rooms of tables inside. */
@@ -75,11 +76,11 @@ fn village() -> Generator {
     let houses = Population {
         name: "houses",
         order: 1.0,
-        cell: 64.0,
-        reach: [0.0; 3],
-        size: f64::INFINITY,
+        cell: 64,
+        reach: [0; 3],
+        size: ANY_SIZE,
         // On the plane y = 0: the cells centred on it, every other one of a square grid.
-        anchor: Box::new(|cell| if cell.j == 0.0 { Some(cell.centre) } else { None }),
+        anchor: Box::new(|cell| if cell.j == 0 { Some(cell.centre.map(|v| v as f64)) } else { None }),
         make: Box::new(|[x, _, z], cell| {
             let (w, d, h) = (16.0 + (cell.random("size").next() * 12.0).floor(), 16.0 + (cell.random("size").next() * 12.0).floor(), 20.0);
             let (x0, z0, x1, z1) = (x - w, z - d, x + w, z + d);
@@ -89,16 +90,16 @@ fn village() -> Generator {
                         let (tx, tz) = (x0 + 6.0 + n as f64 * 6.0, z0 + 6.0);
                         Child {
                             name: format!("table {n}"),
-                            size: 2.0,
+                            size: 2,
                             node: Node::of(vec![cuboid([tx, 0.0, tz], [tx + 4.0, 3.0, tz + 3.0], WOOD, SOLID, Op::Fill)]),
                         }
                     })
-                    .filter(|t| t.node.shapes.get()[0].bounds.min_x < clip.max_x)
+                    .filter(|t| t.node.shapes.get()[0].bounds.min[0] < clip.max[0])
                     .collect()
             };
             let wall = |min: Point, max: Point| cuboid(min, max, WALL, SOLID, Op::Fill);
             Some(Node {
-                bounds: Some(Box3 { min_x: x0, min_y: 0.0, min_z: z0, max_x: x1, max_y: h + 1.0, max_z: z1 }),
+                bounds: Some(b(x0 as i64, 0, z0 as i64, x1 as i64, h as i64 + 1, z1 as i64)),
                 shapes: Shapes::Now(vec![
                     wall([x0, 0.0, z0], [x1, h, z0 + 1.0]),
                     wall([x0, 0.0, z1 - 1.0], [x1, h, z1]),
@@ -113,31 +114,24 @@ fn village() -> Generator {
         }),
         far: None,
     };
-    Generator { kinds: KINDS, seed: 3.0, layers: vec![spans("ground", -64.0, 0.0, GRASS), Layer::Population(houses)] }
+    Generator { kinds: KINDS, seed: 3.0, layers: vec![spans("ground", -64, 0, GRASS), Layer::Population(houses)] }
 }
 
-fn b(min_x: f64, min_y: f64, min_z: f64, max_x: f64, max_y: f64, max_z: f64) -> Box3 {
-    Box3 { min_x, min_y, min_z, max_x, max_y, max_z }
+fn b(min_x: i64, min_y: i64, min_z: i64, max_x: i64, max_y: i64, max_z: i64) -> Box3 {
+    Box3 { min: [min_x, min_y, min_z], max: [max_x, max_y, max_z] }
 }
 
 /** The box of `level`'s sites covering `region` and a margin of two sites. */
 fn box_at(r: &Box3, level: u32) -> Box3 {
-    let s = (1u64 << level) as f64;
-    b(
-        (r.min_x / s).floor() - 2.0,
-        (r.min_y / s).floor() - 2.0,
-        (r.min_z / s).floor() - 2.0,
-        (r.max_x / s).ceil() + 2.0,
-        (r.max_y / s).ceil() + 2.0,
-        (r.max_z / s).ceil() + 2.0,
-    )
+    let s = 1i64 << level;
+    Box3 { min: r.min.map(|v| v.div_euclid(s) - 2), max: r.max.map(|v| -(-v).div_euclid(s) + 2) }
 }
 
 fn sites(b: &Box3) -> impl Iterator<Item = (i64, i64, i64)> + '_ {
-    (b.min_z as i64..b.max_z as i64).flat_map(move |z| {
-        (b.min_y as i64..b.max_y as i64).flat_map(move |y| {
-            let from = b.min_x as i64 + ((b.min_x as i64 + y + z) & 1);
-            (from..b.max_x as i64).step_by(2).map(move |x| (x, y, z))
+    (b.min[2]..b.max[2]).flat_map(move |z| {
+        (b.min[1]..b.max[1]).flat_map(move |y| {
+            let from = b.min[0] + ((b.min[0] + y + z) & 1);
+            (from..b.max[0]).step_by(2).map(move |x| (x, y, z))
         })
     })
 }
@@ -161,14 +155,7 @@ struct Ray {
 /** How far each ray goes before entering a voxel of `grid` (at `level`), and its material type; or till it leaves `region`, type 0. */
 fn first_hits(grid: &VoxelGrid, types: &[u8], level: u32, rays: &[Ray], region: &Box3) -> Vec<(f64, u8)> {
     let s = (1u64 << level) as f64;
-    let inside = |p: [f64; 3]| {
-        p[0] >= region.min_x
-            && p[0] < region.max_x
-            && p[1] >= region.min_y
-            && p[1] < region.max_y
-            && p[2] >= region.min_z
-            && p[2] < region.max_z
-    };
+    let inside = |p: [f64; 3]| (0..3).all(|i| p[i] >= region.min[i] as f64 && p[i] < region.max[i] as f64);
     rays.iter()
         .map(|Ray { origin, direction }| {
             let mut t = 0.0;
@@ -193,11 +180,10 @@ fn random_rays(r: &Box3, count: usize) -> Vec<Ray> {
     let mut random = Rng::new(11.0);
     (0..count)
         .map(|_| {
-            let origin = [
-                r.min_x + random.next() * (r.max_x - r.min_x),
-                r.min_y + random.next() * (r.max_y - r.min_y),
-                r.min_z + random.next() * (r.max_z - r.min_z),
-            ];
+            let mut origin = [0.0; 3];
+            for (i, o) in origin.iter_mut().enumerate() {
+                *o = r.min[i] as f64 + random.next() * (r.max[i] - r.min[i]) as f64;
+            }
             let z = 2.0 * random.next() - 1.0;
             let a = 2.0 * std::f64::consts::PI * random.next();
             Ray { origin, direction: [(1.0 - z * z).sqrt() * a.cos(), (1.0 - z * z).sqrt() * a.sin(), z] }
@@ -217,15 +203,16 @@ fn whole_equals_parts(generator: &Generator, region: &Box3, level: u32) {
     assert!(grid.cells.iter().any(|id| *id != 0), "level {level} is empty");
     // Eight parts, split at random points (seeded, so failures reproduce).
     let mut random = Rng::new(7.0);
-    let mut split = |lo: f64, hi: f64, even: bool| {
+    let mut split = |axis: usize, even: bool| {
+        let (lo, hi) = (whole.min[axis] as f64, whole.max[axis] as f64);
         let at = lo + (hi - lo) * (0.2 + 0.6 * random.next());
-        if even { 2.0 * (at / 2.0 + 0.5).floor() } else { (at + 0.5).floor() }
+        (if even { 2.0 * (at / 2.0 + 0.5).floor() } else { (at + 0.5).floor() }) as i64
     };
-    let (x, y, z) = (split(whole.min_x, whole.max_x, true), split(whole.min_y, whole.max_y, false), split(whole.min_z, whole.max_z, false));
+    let (x, y, z) = (split(0, true), split(1, false), split(2, false));
     let mut parts = Vec::new();
-    for (min_x, max_x) in [(whole.min_x, x), (x, whole.max_x)] {
-        for (min_y, max_y) in [(whole.min_y, y), (y, whole.max_y)] {
-            for (min_z, max_z) in [(whole.min_z, z), (z, whole.max_z)] {
+    for (min_x, max_x) in [(whole.min[0], x), (x, whole.max[0])] {
+        for (min_y, max_y) in [(whole.min[1], y), (y, whole.max[1])] {
+            for (min_z, max_z) in [(whole.min[2], z), (z, whole.max[2])] {
                 parts.push(b(min_x, min_y, min_z, max_x, max_y, max_z));
             }
         }
@@ -239,13 +226,12 @@ fn whole_equals_parts(generator: &Generator, region: &Box3, level: u32) {
 }
 
 fn level_shows_what_finer_shows(generator: &Generator, region: &Box3, level: u32) {
-    let (s, finer) = ((1u64 << level) as f64, level.saturating_sub(2));
+    let (si, finer) = (1i64 << level, level.saturating_sub(2));
+    let s = si as f64;
     let types: Vec<u8> = materials_of(generator).iter().map(|m| m.material_type).collect();
     // At least 16 sites of the level across, around the region's centre.
-    let grow = |lo: f64, hi: f64| 0f64.max(8.0 * s - (hi - lo) / 2.0);
-    let r = region;
-    let (gx, gy, gz) = (grow(r.min_x, r.max_x), grow(r.min_y, r.max_y), grow(r.min_z, r.max_z));
-    let area = b(r.min_x - gx, r.min_y - gy, r.min_z - gz, r.max_x + gx, r.max_y + gy, r.max_z + gz);
+    let grow = |i: usize| 0.max(8 * si - (region.max[i] - region.min[i]) / 2);
+    let area = Box3 { min: [0, 1, 2].map(|i| region.min[i] - grow(i)), max: [0, 1, 2].map(|i| region.max[i] + grow(i)) };
     let reference = generate(generator, &box_at(&area, finer), finer);
     // From where a camera could be: empty sites of the finer level.
     let fs = (1u64 << finer) as f64;
@@ -295,26 +281,26 @@ fn check(generator: Generator, region: Box3, levels: u32) {
 #[test]
 fn forest_keeps_the_contract() {
     // Near the spawn point: path, trees, undergrowth, from under the ground to above the crowns.
-    check(forest(42.0).0, b(-128.0, -64.0, -384.0, 128.0, 384.0, -128.0), 6);
+    check(forest(42.0).0, b(-128, -64, -384, 128, 384, -128), 6);
 }
 
 #[test]
 fn fog_keeps_the_contract() {
-    check(fog(), b(32.0, 32.0, 32.0, 96.0, 96.0, 96.0), 4);
+    check(fog(), b(32, 32, 32, 96, 96, 96), 4);
 }
 
 #[test]
 fn caves_keep_the_contract() {
-    check(caves(), b(0.0, 0.0, 0.0, 128.0, 128.0, 128.0), 3);
+    check(caves(), b(0, 0, 0, 128, 128, 128), 3);
 }
 
 #[test]
 fn village_keeps_the_contract() {
-    check(village(), b(-64.0, -16.0, -64.0, 64.0, 48.0, 64.0), 5);
+    check(village(), b(-64, -16, -64, 64, 48, 64), 5);
 }
 
 fn near() -> Box3 {
-    b(0.0, 0.0, 0.0, 128.0, 128.0, 128.0)
+    b(0, 0, 0, 128, 128, 128)
 }
 
 fn world(layer: Layer) -> Generator {
@@ -324,7 +310,7 @@ fn world(layer: Layer) -> Generator {
 #[test]
 #[should_panic(expected = "reaches past its population's reach")]
 fn refuses_a_thing_reaching_past_its_populations_reach() {
-    generate(&world(single(|_, _| Some(Node::of(vec![ball([64.0; 3], 1200.0, ROCK, SOLID, Op::Fill)])), 64.0)), &near(), 0);
+    generate(&world(single(|_, _| Some(Node::of(vec![ball([64.0; 3], 1200.0, ROCK, SOLID, Op::Fill)])), 64)), &near(), 0);
 }
 
 fn parent(children: fn() -> Vec<Child>) -> Generator {
@@ -332,17 +318,17 @@ fn parent(children: fn() -> Vec<Child>) -> Generator {
         move |_, _| {
             Some(Node {
                 shapes: Shapes::Now(Vec::new()),
-                bounds: Some(b(60.0, 60.0, 60.0, 70.0, 70.0, 70.0)),
+                bounds: Some(b(60, 60, 60, 70, 70, 70)),
                 children: Some(Children::Fixed(children())),
                 far: None,
             })
         },
-        64.0,
+        64,
     ))
 }
 
 fn child(name: &str, radius: f64) -> Child {
-    Child { name: name.into(), size: f64::INFINITY, node: Node::of(vec![ball([64.0; 3], radius, ROCK, SOLID, Op::Fill)]) }
+    Child { name: name.into(), size: ANY_SIZE, node: Node::of(vec![ball([64.0; 3], radius, ROCK, SOLID, Op::Fill)]) }
 }
 
 #[test]
