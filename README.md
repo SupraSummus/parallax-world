@@ -28,6 +28,36 @@ What the design is held to, beyond speed:
 4. **Elegance is a criterion in its own right.**
    Results should be visible, not only measured.
 
+## Key ideas
+
+Fidelity is perceptual, not geometric:
+the engine simplifies what a viewer won't notice
+and bounds, as an angle on screen, how far the rest can be off
+(section 2 of [docs/architecture.md](docs/architecture.md),
+where the sections below are too).
+
+1. **Rhombic dodecahedra on the FCC lattice.**
+   A voxel meets its 12 nearest neighbours face to face, all equally far,
+   and walls and floors along the axes stay flat (section 6).
+2. **One hierarchy of cells for everything.**
+   The cells of N·FCC, N = 1, 2, 4, …,
+   shape slices, chunks, the eyes chunks are baked from,
+   levels of detail, and where generators place things (section 1).
+3. **Slices named by the lattice, composited with parallax.**
+   Slices along 12 directions are named by the lattice, not the camera,
+   so a chunk baked from a lattice site near the camera
+   stays valid while the camera stays in that site's cell (sections 3–5).
+4. **Worlds generated in pieces, at any level of detail.**
+   A world on `generator.ts` (so far the forest)
+   gives the same voxels for any box generated alone, at any level.
+   Levels agree on what a camera sees
+   (how far rays get, what they stop on),
+   not on exact geometry ([docs/generators.md](docs/generators.md)).
+5. **Checked against references.**
+   Tests check the leak bound, painting order and levels of detail
+   against rays cast through the world,
+   and the 3D viewer draws the same world conventionally.
+
 ## Quick start
 
 Chunks are baked by Rust compiled to WebAssembly (`bake/`),
