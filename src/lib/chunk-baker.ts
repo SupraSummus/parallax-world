@@ -15,7 +15,9 @@ import { generatePart, type GridPart, type WorldType } from './world'
  * A chunk to bake: cell (i, j) (see chunkCell) of a slice (see SliceId) of
  * a face (by name, see FACES), seen from `eye` (a site in the face's
  * lattice coordinates, see eyeOf), with faces grown to fill gaps if `fill`
- * (see docs/architecture.md, section 3).
+ * (see docs/architecture.md, section 3), from its level's grid of
+ * World.version `grid`. The baker bakes from the grid it has;
+ * `grid` only tells bakes apart.
  */
 export interface ChunkRequest extends SliceId {
   face: string
@@ -23,6 +25,7 @@ export interface ChunkRequest extends SliceId {
   j: number
   eye: readonly [number, number, number]
   fill: boolean
+  grid: number
 }
 
 /** A baked chunk's pixels, cropped to what is drawn. */
@@ -122,7 +125,7 @@ export class ChunkBaker {
    * cell and cropped to what is drawn there. A chunk no face reaches has no
    * pixels.
    */
-  bake(request: ChunkRequest): ChunkImage {
+  bake(request: Omit<ChunkRequest, 'grid'>): ChunkImage {
     const { memory } = this.baker
     const result = this.call(this.baker.bake, request, 9)
     const [width, height, originX, originY, scale, facesDrawn, pixels, blocks, blockCount] = result
@@ -140,13 +143,13 @@ export class ChunkBaker {
   }
 
   /** The faces of a chunk before filling, FACE numbers each, far to near. @internal */
-  faces(request: ChunkRequest): Float64Array {
+  faces(request: Omit<ChunkRequest, 'grid'>): Float64Array {
     const [count, at] = this.call(this.baker.faces, request, 2)
     return new Float64Array(this.baker.memory.buffer, at, count * FACE).slice()
   }
 
   /** Calls `bake` or `faces` and returns the first `length` numbers of its result. */
-  private call(baker: Call, { face, level, layer, cutoff, i, j, eye, fill }: ChunkRequest, length: number): Float64Array {
+  private call(baker: Call, { face, level, layer, cutoff, i, j, eye, fill }: Omit<ChunkRequest, 'grid'>, length: number): Float64Array {
     const index = faceIndex.get(face)
     if (index === undefined) throw new Error(`no face ${face}`)
     // Before reading memory.buffer: the call may grow (and so replace) it.
@@ -157,32 +160,33 @@ export class ChunkBaker {
 }
 
 /** Numbers per request in a `want` message (see encodeRequests). */
-const REQUEST = 10
+const REQUEST = 11
 
 /** Requests packed into numbers, REQUEST each, to post to a worker cheaply. */
 export function encodeRequests(requests: readonly ChunkRequest[]): Float64Array {
   const packed = new Float64Array(requests.length * REQUEST)
-  requests.forEach(({ face, level, layer, cutoff, i, j, eye, fill }, n) => {
+  requests.forEach(({ face, level, layer, cutoff, i, j, eye, fill, grid }, n) => {
     const index = faceIndex.get(face)
     if (index === undefined) throw new Error(`no face ${face}`)
-    packed.set([index, level, layer, cutoff, i, j, ...eye, fill ? 1 : 0], n * REQUEST)
+    packed.set([index, level, layer, cutoff, i, j, ...eye, fill ? 1 : 0, grid], n * REQUEST)
   })
   return packed
 }
 
 /** The n-th request of encodeRequests' numbers. */
 function decodeRequest(packed: Float64Array, n: number): ChunkRequest {
-  const [face, level, layer, cutoff, i, j, a, b, c, fill] = packed.subarray(n * REQUEST, (n + 1) * REQUEST)
-  return { face: FACES[face].name, level, layer, cutoff, i, j, eye: [a, b, c], fill: fill === 1 }
+  const [face, level, layer, cutoff, i, j, a, b, c, fill, grid] = packed.subarray(n * REQUEST, (n + 1) * REQUEST)
+  return { face: FACES[face].name, level, layer, cutoff, i, j, eye: [a, b, c], fill: fill === 1, grid }
 }
 
 /** A key per chunk request. */
-const requestKey = ({ face, level, layer, cutoff, i, j, eye, fill }: ChunkRequest) => [face, level, layer, cutoff, i, j, ...eye, fill].join()
+const requestKey = ({ face, level, layer, cutoff, i, j, eye, fill, grid }: ChunkRequest) => [face, level, layer, cutoff, i, j, ...eye, fill, grid].join()
 
 /**
  * Messages to a bake worker: a new world (numbered by `generation`, which
- * its results echo) with its grids so far, a grid of it, parts of its
- * grids to generate (World.missingParts), or the chunks to bake, most
+ * its results echo) with its grids so far, a grid of it (new, or
+ * replacing the level's), parts of its grids to generate
+ * (World.missingParts), or the chunks to bake, most
  * wanted first, replacing the previous list. `received` is the `seq` of
  * the worker's last result the main thread had taken when it listed them.
  */
@@ -207,7 +211,8 @@ export type BakeResult =
  * and posts them at once, handing over their buffers.
  * Chunks posted after the list's `received` are on their way, and skipped.
  * Parts to generate take steps of their own, as much time in all as
- * baking while there are chunks to bake.
+ * baking while there are chunks to bake, finest level first: the near
+ * grids, moving with the camera, go before the far ones.
  */
 export function bakeHandler(
   post: (result: BakeResult, transfer: Transferable[]) => void,
@@ -276,7 +281,7 @@ export function bakeHandler(
       if (message.generation === generation) baker?.addGrid(message.level, message.grid)
     } else if (message.type === 'generate') {
       if (message.generation !== generation) return
-      jobs = { seed: message.seed, worldType: message.worldType, parts: [...(jobs?.parts ?? []), ...message.parts] }
+      jobs = { seed: message.seed, worldType: message.worldType, parts: [...(jobs?.parts ?? []), ...message.parts].sort((a, b) => a.level - b.level) }
       wake()
     } else {
       // Taken by the main thread: listed again, they are wanted again.

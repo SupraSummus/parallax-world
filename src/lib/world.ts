@@ -2,7 +2,8 @@ import { generateCity } from './city'
 import { forest } from './forest'
 import { generate, materialsOf, type Box, type Generator } from './generator'
 import { GRID_LEVELS } from './slice-selection'
-import { BRICK, coarsen, VoxelGrid, type Material, type Voxel, type VoxelData } from './voxel-grid'
+import { FACES } from './view'
+import { BRICK, coarsen, LayerIndex, VoxelGrid, type Material, type Voxel, type VoxelData } from './voxel-grid'
 
 export interface Vec3 {
   x: number
@@ -30,11 +31,16 @@ const LEAVES: Material = { color: '#228B22', type: 5 }
 const WATER: Material = { color: '#1E90FF', type: 8 }
 const FLOWER_COLORS = ['#FF6B6B', '#FFE66D', '#4ECDC4', '#C9B1FF']
 
-/** A world generator.ts generates at each level, in any box: the box of each level's grid, and where the camera starts. */
+/**
+ * A world generator.ts generates at each level, in any box: how far
+ * around the camera each level's grid must hold it, in sites of the level;
+ * the y its grid of each level spans; and where the camera starts.
+ */
 interface Generated {
   generator: Generator<string>
   spawn: Vec3
-  box: (level: number) => Box
+  reach: number
+  heights: (level: number) => { minY: number; maxY: number }
 }
 
 /** World types generated level by level, in parts; the grids of the rest are made whole, then coarsened. */
@@ -42,26 +48,39 @@ const GENERATED: Partial<Record<WorldType, (seed: number) => Generated>> = { for
 /** World types with their own scene builder; the rest are built here. */
 const SCENES: Partial<Record<WorldType, (seed: number) => { grid: VoxelGrid; spawn: Vec3 }>> = { city: generateCity }
 
-/** A part of the grid of `level` of a generated world: `part` of PARTS, its box in the level's units. */
+/**
+ * A generated world's grid of each level is made of tiles, generated
+ * alone (in workers): columns TILE sites of the level wide along x and z,
+ * on a tiling fixed in the world, so a grid moved with the camera keeps
+ * the tiles it still has. Tile (i, k) holds x in [i · TILE, (i + 1) · TILE),
+ * z likewise.
+ */
+const TILE = 16 * BRICK
+
+/**
+ * A grid moves when the camera is more than this far from the middle of
+ * its centre tile along x or z (in the level's sites): past the tile's
+ * edge, so that it does not move back and forth there.
+ */
+const RECENTRE = (3 / 4) * TILE
+
+/** A tile of the grid of `level` of a generated world, its box in the level's units. */
 export interface GridPart {
   level: number
-  part: number
+  tile: Tile
   box: Box
 }
 
-/** Parts per grid, generated alone (in workers): slabs of its box along z, whole bricks deep but the last. */
-const PARTS = 8
+type Tile = readonly [number, number]
 
-/** The parts of a generated world's grid of `level`. */
-function partsOf({ box }: Generated, level: number): GridPart[] {
-  const whole = box(level)
-  const depth = Math.ceil((whole.maxZ - whole.minZ) / PARTS / BRICK) * BRICK
-  const parts: GridPart[] = []
-  for (let minZ = whole.minZ; minZ < whole.maxZ; minZ += depth) {
-    parts.push({ level, part: parts.length, box: { ...whole, minZ, maxZ: Math.min(minZ + depth, whole.maxZ) } })
-  }
-  return parts
+/** A grid being generated: its centre tile, the parts it needs, and those received, by tileKey. */
+interface Pending {
+  centre: Tile
+  parts: GridPart[]
+  received: Map<string, { tile: Tile; data: VoxelData; index?: LayerIndex }>
 }
+
+const tileKey = ([i, k]: Tile) => `${String(i)},${String(k)}`
 
 // The last world generatePart made, kept for the next part.
 let lastGenerated: { seed: number; worldType: WorldType; generated: Generated } | null = null
@@ -100,8 +119,9 @@ export function levelsOf(grid: VoxelGrid): VoxelGrid[] {
 /**
  * A procedurally generated voxel world: a grid at each level of detail
  * the renderer reads. Generated worlds (GENERATED) are generated level by
- * level, in parts, anywhere (missingParts, receive), or here when asked
- * for (levels); the rest are made here whole, and coarsened.
+ * level, in tiles, around the camera, anywhere (missingParts, receive),
+ * or here when asked for (levels); the rest are made here whole, and
+ * coarsened.
  */
 export class World {
   readonly seed: number
@@ -112,8 +132,16 @@ export class World {
   private readonly source: Generated | undefined
   // By level; generated worlds' only once generated, the rest's coarsened on first use.
   private grids: (VoxelGrid | undefined)[] = []
-  // Parts received of grids not whole yet, by level.
-  private received = new Map<number, VoxelData[]>()
+  // The tile each generated grid is centred on, by level.
+  private centres: (Tile | undefined)[] = []
+  // By level, how many grids replaced the first.
+  private versions: number[] = []
+  // By level, the LayerIndex of each tile of a generated grid, if the workers made them all.
+  private tileIndices: ({ tile: Tile; index: LayerIndex }[] | undefined)[] = []
+  // By level, the LayerIndex of the grid: one per tile, or one, made here on first use.
+  private indices: (LayerIndex[] | undefined)[] = []
+  // By level, the grid being generated.
+  private pending = new Map<number, Pending>()
   // Voxels as a list, built from the grid on first use.
   private list: Voxel[] | null = null
   // Toy world blocks while generating.
@@ -163,41 +191,131 @@ export class World {
     return this.grids[level]
   }
 
-  /** The grid at each level of detail the renderer reads, generated here if not yet. */
+  /** The grid at each level of detail the renderer reads, generated here (around the spawn point) if not yet. */
   get levels(): VoxelGrid[] {
     return Array.from({ length: GRID_LEVELS }, (_, level) => this.generate(level))
   }
 
-  /** The voxels as stored at level 0, generated here if not yet. */
+  /** The voxels as stored at level 0, generated here (around the spawn point) if not yet. */
   get grid(): VoxelGrid {
     return this.generate(0)
   }
 
-  /** The parts of the grids a generated world has not received, finest level first. */
-  missingParts(): GridPart[] {
+  /**
+   * The parts a generated world's grids need around `camera` (lattice
+   * units), finest level first: of each level with no grid, and of each
+   * whose grid is centred too far from it (RECENTRE), the tiles of a grid
+   * centred on the camera's tile that the level's grid lacks. A level's
+   * new grid is asked for once, and replaces its old one once all its
+   * parts are received.
+   */
+  missingParts(camera: Readonly<Vec3>): GridPart[] {
+    return Array.from({ length: GRID_LEVELS }, (_, level) => this.missingPartsOf(level, camera)).flat()
+  }
+
+  /**
+   * The grid of `level` around `camera`: missingParts' grid of the level,
+   * the parts it misses generated here.
+   */
+  levelAround(level: number, camera: Readonly<Vec3>): VoxelGrid {
     const { source } = this
-    if (!source) return []
-    return Array.from({ length: GRID_LEVELS }, (_, level) => level).filter(level => !this.grids[level]).flatMap(level => partsOf(source, level))
-  }
-
-  /** Takes a generated part (generatePart); returns its level's grid once it has all the level's parts. */
-  receive({ level }: GridPart, part: VoxelData): VoxelGrid | undefined {
-    if (!this.source || this.grids[level]) return
-    const parts = this.received.get(level) ?? []
-    parts.push(part)
-    this.received.set(level, parts)
-    if (parts.length < partsOf(this.source, level).length) return
-    this.received.delete(level)
-    return (this.grids[level] = VoxelGrid.stack(parts.sort((a, b) => a.minZ - b.minZ)))
-  }
-
-  /** The grid of `level`, generated here if not yet. */
-  private generate(level: number): VoxelGrid {
-    let grid = this.level(level)
-    if (!grid && this.source) {
-      for (const part of partsOf(this.source, level)) grid = this.receive(part, generate(this.source.generator, part.box, level))
+    if (!source) return this.level(level) as VoxelGrid
+    this.missingPartsOf(level, camera)
+    const pending = this.pending.get(level)
+    for (const part of pending?.parts ?? []) {
+      if (!pending?.received.has(tileKey(part.tile))) this.receive(part, generate(source.generator, part.box, level))
     }
-    return grid as VoxelGrid
+    return this.level(level) as VoxelGrid
+  }
+
+  /** missingParts of one level. */
+  private missingPartsOf(level: number, camera: Readonly<Vec3>): GridPart[] {
+    if (!this.source || this.pending.has(level)) return []
+    const centre = this.centres[level]
+    const n = 2 ** level
+    const off = (v: number, c: number) => Math.abs(v / n - (c + 0.5) * TILE) > RECENTRE
+    if (centre && !off(camera.x, centre[0]) && !off(camera.z, centre[1])) return []
+    return this.start(level, [Math.floor(camera.x / n / TILE), Math.floor(camera.z / n / TILE)])
+  }
+
+  /**
+   * Takes a generated part (generatePart), with its LayerIndex if made
+   * elsewhere; returns its level's new grid once it has all the grid's
+   * parts: those its old grid has, and these.
+   */
+  receive(part: GridPart, data: VoxelData, index?: LayerIndex): VoxelGrid | undefined {
+    const { level, tile } = part
+    const pending = this.pending.get(level)
+    const key = tileKey(tile)
+    if (!pending?.parts.some(p => tileKey(p.tile) === key)) return
+    pending.received.set(key, { tile, data, index })
+    if (pending.received.size < pending.parts.length) return
+    return this.place(level)
+  }
+
+  /** How many grids replaced the first of `level` (see ChunkRequest). */
+  version(level: number): number {
+    return this.versions[level] ?? 0
+  }
+
+  /** Where each face's layers of the grid of `level` hold voxels, once it has one. */
+  layerIndex(level: number): LayerIndex[] | undefined {
+    const grid = this.level(level)
+    if (grid) this.indices[level] ??= this.tileIndices[level]?.map(t => t.index) ?? [new LayerIndex(grid, FACES.map(f => f.lattice))]
+    return this.indices[level]
+  }
+
+  /** Whether a grid centred on tile `centre` holds tile `tile`. */
+  private holds(centre: Tile | undefined, [i, k]: Tile): boolean {
+    const radius = this.radius()
+    return !!centre && Math.abs(i - centre[0]) <= radius && Math.abs(k - centre[1]) <= radius
+  }
+
+  /** Tiles either way of a grid's centre tile: enough for it to reach the generator's reach around the camera (see RECENTRE). */
+  private radius(): number {
+    return Math.ceil(((this.source?.reach ?? 0) + RECENTRE) / TILE - 0.5)
+  }
+
+  /** Starts a grid of `level` centred on tile `centre`; returns the parts it needs. */
+  private start(level: number, centre: Tile): GridPart[] {
+    const { minY, maxY } = (this.source as Generated).heights(level)
+    const radius = this.radius()
+    const parts: GridPart[] = []
+    for (let k = centre[1] - radius; k <= centre[1] + radius; k++) {
+      for (let i = centre[0] - radius; i <= centre[0] + radius; i++) {
+        const part: GridPart = { level, tile: [i, k], box: { minX: i * TILE, minY, minZ: k * TILE, maxX: (i + 1) * TILE, maxY, maxZ: (k + 1) * TILE } }
+        if (!this.holds(this.centres[level], part.tile)) parts.push(part)
+      }
+    }
+    this.pending.set(level, { centre, parts, received: new Map() })
+    if (parts.length === 0) this.place(level)
+    return parts
+  }
+
+  /** Puts the grid of `level` being generated in place, from its parts and the old grid's. */
+  private place(level: number): VoxelGrid {
+    const { centre, received } = this.pending.get(level) as Pending
+    const { minY, maxY } = (this.source as Generated).heights(level)
+    const [reach, old] = [(this.radius() + 0.5) * TILE, this.grids[level]]
+    const [x, z] = centre.map(c => (c + 0.5) * TILE)
+    const box = { minX: x - reach, minY, minZ: z - reach, maxX: x + reach, maxY, maxZ: z + reach }
+    const parts = [...received.values()]
+    const grid = VoxelGrid.compose(box, this.materials, [...(old ? [old] : []), ...parts.map(p => p.data)])
+    // Each tile's LayerIndex, while the workers made them all.
+    const kept = old ? this.tileIndices[level]?.filter(t => this.holds(centre, t.tile)) : []
+    const fresh = parts.flatMap(({ tile, index }) => (index ? [{ tile, index }] : []))
+    this.tileIndices[level] = kept && fresh.length === parts.length ? [...kept, ...fresh] : undefined
+    this.indices[level] = undefined
+    this.pending.delete(level)
+    if (this.centres[level]) this.versions[level] = this.version(level) + 1
+    this.centres[level] = centre
+    if (level === 0) this.list = null
+    return (this.grids[level] = grid)
+  }
+
+  /** The grid of `level`; if there is none, generated here around the spawn point. */
+  private generate(level: number): VoxelGrid {
+    return this.level(level) ?? this.levelAround(level, this.spawn)
   }
 
   /** The voxels as a list, ordered by z, y, x. Assigning replaces the world's contents (tests build worlds this way). */

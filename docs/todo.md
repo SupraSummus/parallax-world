@@ -48,29 +48,21 @@ Numbers are for the forest at 1280×800, as measured when written.
   each rebuilds, starts a server
   and waits fixed times for the scene to settle.
   A committed script that waits until nothing is left to bake would do.
-- **Detail around the camera, not the spawn point.**
-  The forest's grids are generated once, around the spawn point:
-  level 0's reaches 96 m from it, each coarser twice as far
-  (section 1 of `docs/architecture.md`).
-  Level 0 must hold the world 88 m to a face's sides, 8 m short of its grid:
-  a little further from the spawn point,
-  the nearest slices find nothing at the edges of the view;
-  100 m away, nothing near at all.
-  A grid could be generated again around the camera
-  once it leaves the middle of the grid's box,
-  and the chunks of the levels reading it dropped:
-  level 0's takes ~6 s of one worker, in 8 parts.
+- **Moved grids are posted whole.**
+  When a grid moves with the camera (section 1 of `docs/architecture.md`),
+  the main thread posts all of it to every worker, though they have most of it:
+  at level 0, ~30 MB a worker every 24 m walked.
+  Workers could keep the tiles and put the grid together themselves.
 - **Far voxels 5.6–11 pixels across.**
   With `ATOM_SHIFT` 6 they were 1.4–2.7 pixels,
   but level 0's grid would have to reach 4 times as far (from 230 m on):
-  ~16 times its 22 MB, in each bake worker.
+  ~16 times its 30 MB, in each bake worker.
   Grids shared between the workers would allow it,
   or bricks sent to a worker only once a chunk it bakes needs them.
   (Shared memory needs cross-origin isolation,
   which GitHub Pages can only get through a service worker.)
-- **Generating the forest's grids takes ~44 s of worker time**,
-  ~30 s until all nine are in with 3 workers,
-  4 to 7 s per level whatever its sites' spacing:
+- **Generating the forest's grids takes ~10 s of worker time per level**,
+  whatever its sites' spacing (a moved grid, a seventh of that):
   mostly the ground's noise, which the terrain and the canopy
   compute about 14 times per column (with its neighbours, for slopes).
 

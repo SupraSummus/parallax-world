@@ -51,8 +51,9 @@ A spinner shows while a world generates.
 - *Forest* (default): an endless autumn forest valley on hills kilometres
   wide: a winding path, spruces, birches and oaks, ferns, bushes, boulders
   and fallen logs.
-  Generated around the spawn point in the background, finest first:
-  each level of detail reaches twice as far as the one before, to 24 km.
+  Generated around the camera in the background, finest first,
+  and again where the camera goes:
+  each level of detail reaches twice as far as the one before, to 22 km.
 - *City*: a district of a few blocks,
   for checking flat walls, thin frames and openings:
   low buildings whose rooms form a maze of doorways,

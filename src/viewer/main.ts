@@ -24,7 +24,7 @@ const [cx, cy, cz] = (params.get('camera') ?? '').split(',').map(Number)
 const parallaxCamera: Vec3 = Number.isFinite(cx) && Number.isFinite(cy) && Number.isFinite(cz)
   ? { x: cx, y: cy, z: cz }
   : world.spawn
-// The voxels within REACH units in x and z: the forest's level 0, ±96 m, would take gigabytes of buffers.
+// The voxels within REACH units in x and z: all of the forest's level 0 would take gigabytes of buffers.
 const REACH = 240
 const mesh = buildVoxelMesh(world, parallaxCamera, REACH)
 const buildTime = performance.now() - started
