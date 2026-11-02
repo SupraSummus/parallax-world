@@ -25,11 +25,7 @@ What the design is held to, beyond speed:
    No direction is preferred:
    the world must look the same along each of the 12 directions.
    This outranks nesting (a tree of cells) and ease of implementation.
-4. **Exact over approximate.**
-   Prefer what the geometry gives exactly (shares of ½, ¼, ⅙ of a voxel)
-   to heuristics.
-   A tie-break rule for voxels exactly on a boundary is the accepted minimum.
-5. **Elegance is a criterion in its own right.**
+4. **Elegance is a criterion in its own right.**
    Results should be visible, not only measured.
 
 ## Quick start
