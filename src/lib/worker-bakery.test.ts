@@ -15,9 +15,9 @@ class FakeWorker implements BakeWorker {
   onmessage: ((event: MessageEvent<BakeResult>) => void) | null = null
   baked: ChunkRequest[] = []
   private handle = bakeHandler(result => {
-    this.baked.push(result.request)
+    this.baked.push(...result.baked.map(({ request }) => request))
     queueMicrotask(() => { this.onmessage?.({ data: result } as MessageEvent<BakeResult>) })
-  }, queueMicrotask)
+  }, queueMicrotask, 0)
 
   postMessage(message: BakeMessage) {
     queueMicrotask(() => { this.handle(message) })
@@ -25,6 +25,9 @@ class FakeWorker implements BakeWorker {
 
   terminate() {}
 }
+
+/** A chunk of a far slice, cheap to bake. */
+const at = (i: number): ChunkRequest => ({ face: '+x+z', level: 6, layer: 0, cutoff: Infinity, i, j: 0, eye: [0, 0, 0], fill: false })
 
 const tick = () => new Promise(resolve => setTimeout(resolve))
 
@@ -149,10 +152,9 @@ describe('WorkerBakery', () => {
   })
 
   it('bakes from the latest list, a chunk again only once the main thread took it', () => {
-    const at = (i: number) => ({ face: '+x+z', level: 6, layer: 0, cutoff: Infinity, i, j: 0, eye: [0, 0, 0] as const, fill: false })
-    const baked: [number, number][] = []
+    const posts: [number, number][] = []
     const steps: (() => void)[] = []
-    const handle = bakeHandler(({ seq, request }) => baked.push([seq, request.i]), step => steps.push(step))
+    const handle = bakeHandler(({ seq, baked: [{ request }] }) => posts.push([seq, request.i]), step => steps.push(step), 0)
     const want = (received: number, ...cells: number[]) => {
       handle({ type: 'want', requests: encodeRequests(cells.map(at)), received })
     }
@@ -163,11 +165,21 @@ describe('WorkerBakery', () => {
     // Replaces what is left; 0 is on its way, so not baked again.
     want(0, 0, 3)
     run()
-    expect(baked).toEqual([[1, 0], [2, 3]])
+    expect(posts).toEqual([[1, 0], [2, 3]])
     // Taken, and listed again (evicted): baked again.
     want(2, 0)
     run()
-    expect(baked).toEqual([[1, 0], [2, 3], [3, 0]])
+    expect(posts).toEqual([[1, 0], [2, 3], [3, 0]])
+  })
+
+  it('posts the chunks a step bakes within its budget at once', () => {
+    const posts: number[] = []
+    let step: () => void = () => undefined
+    const handle = bakeHandler(({ baked }) => posts.push(baked.length), s => { step = s }, Infinity)
+    handle({ type: 'world', generation: 1, levels: world.levels })
+    handle({ type: 'want', requests: encodeRequests([0, 1, 2].map(at)), received: 0 })
+    step()
+    expect(posts).toEqual([3])
   })
 
   it('bakes cells that show nothing before rebaking cells an older bake stands in for', async () => {
