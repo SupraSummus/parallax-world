@@ -39,9 +39,9 @@ const RENDER_SCALE: f64 = 10.0;
  * sees it (in_grid): 40 / t, t its thickness
  * (see thickness), between 1 (2 pixels across a voxel) and RENDER_SCALE.
  * Such a slice lies at distance ≥ t · detail · LAYER, where a unit is at
- * most focal / (t · detail · LAYER) screen pixels, about 40 / t with the
- * defaults; finer chunks would not show. Other settings just scale the
- * chunks on screen.
+ * most focal / (t · detail · LAYER) screen pixels: with the default view
+ * and leak more than 40 / t, so chunks are magnified (docs/todo.md).
+ * Other settings just scale the chunks on screen.
  */
 fn render_scale(level: i32) -> f64 {
     (40.0 / thickness(level) as f64).floor().clamp(1.0, RENDER_SCALE)

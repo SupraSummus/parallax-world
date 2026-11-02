@@ -3,7 +3,7 @@
 A proof of concept that renders a 3D voxel world (rhombic dodecahedra on
 the face-centred cubic lattice) as a stack of cached 2D
 depth slices composited with WebGL. Slices get thicker with
-distance, but never so thick that they show more than a few pixels of what
+distance, but never so thick that they show more than a small angle of what
 true perspective would hide; camera movement mostly just moves cached
 images.
 
@@ -50,12 +50,8 @@ Other scripts (`test`, `lint`, `typecheck`, `knip`, `build`) are in
 
 ## Documentation
 
-| Document | Description |
-|----------|-------------|
-| **[AGENTS.md](AGENTS.md)** | Guide for AI agents (start here) |
-| [docs/product.md](docs/product.md) | Product requirements |
-| [docs/architecture.md](docs/architecture.md) | Rendering architecture |
-| [docs/testing.md](docs/testing.md) | Testing guide |
+The documents are in `docs/`;
+[AGENTS.md](AGENTS.md) lists them and when to read each.
 
 ## License
 
