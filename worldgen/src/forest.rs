@@ -6,8 +6,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::generator::{
-    Cell, Child, Far, Field, FieldValues, Fill, Generator, Kind, KindDef, Layer, Node, Op, Point, Population, SOLID, Shape, Shapes, Span,
-    area_profile, ball, bounds_of_shapes, capsule, cuboid, ellipsoid, lathe,
+    Cell, Child, Children, Far, Field, FieldValues, Fill, Generator, Kind, KindDef, Layer, Node, Op, Point, Population, SOLID, Shape,
+    Shapes, Span, area_profile, ball, bounds_of_shapes, capsule, cuboid, ellipsoid, lathe,
 };
 use crate::grid::Box3;
 use crate::js::{self, round};
@@ -530,7 +530,7 @@ fn tree(shapes: Vec<Shape>, hidden: Vec<Shape>, fine: Vec<Child>, crown: Option<
         .map(|c| c.node.bounds.unwrap_or_else(|| bounds_of_shapes(c.node.shapes.get().iter().map(|s| &s.bounds))))
         .collect();
     let bounds = bounds_of_shapes(shapes.iter().map(|s| &s.bounds).chain([&hidden_bounds]).chain(child_bounds.iter()));
-    Node { shapes: Shapes::Now(shapes), bounds: Some(bounds), children: Some(children), far }
+    Node { shapes: Shapes::Now(shapes), bounds: Some(bounds), children: Some(Children::Fixed(children)), far }
 }
 
 /** A vertical trunk, `width` units square, from just below `ground` up to `top`. */

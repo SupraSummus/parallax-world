@@ -70,14 +70,19 @@ pub struct Node {
     pub shapes: Shapes,
     /** Required with children: holds everything the node and its children draw. */
     pub bounds: Option<Box3>,
-    /** The finer things (the forest's do not depend on the box asked for). */
-    pub children: Option<Vec<Child>>,
+    pub children: Option<Children>,
     pub far: Option<Far>,
 }
 
 pub struct Far {
     pub detail: f64,
     pub shapes: Vec<Shape>,
+}
+
+/** A node's finer things: the same for any box, or those reaching the box asked for (lattice units). */
+pub enum Children {
+    Fixed(Vec<Child>),
+    Reaching(Box<ChildrenReaching>),
 }
 
 /** A node's finer thing: drawn while sites are at most `size` apart. */
@@ -96,6 +101,7 @@ pub enum Shapes {
     Lazy { seed: f64, make: Box<MakeShapes>, made: OnceCell<Vec<Shape>> },
 }
 
+type ChildrenReaching = dyn Fn(&Box3) -> Vec<Child>;
 type MakeShapes = dyn Fn(&mut Rng) -> Vec<Shape>;
 type FieldAt = dyn Fn(f64, f64, f64, f64) -> Option<(Kind, Option<f64>)>;
 type Anchor = dyn Fn(&Cell) -> Option<Point>;
@@ -556,8 +562,17 @@ fn drawables_in<'a>(generator: &'a Generator, clip: &Box3, s: f64) -> Vec<Drawab
             if far.is_some() {
                 return;
             }
+            let reaching;
+            let children: &[Child] = match &node.children {
+                None => &[],
+                Some(Children::Fixed(children)) => children,
+                Some(Children::Reaching(children)) => {
+                    reaching = children(units);
+                    &reaching
+                }
+            };
             let mut names = std::collections::HashSet::new();
-            for child in node.children.iter().flatten() {
+            for child in children {
                 assert!(names.insert(&child.name), "{key} has two children named {}; see \"Things\" in {DOCS}", child.name);
                 let child_bounds = bounds_of(&child.node);
                 assert!(inside(&child_bounds, &bounds), "{key}/{} reaches past its parent; see \"Things\" in {DOCS}", child.name);
