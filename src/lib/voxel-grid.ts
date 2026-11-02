@@ -46,7 +46,10 @@ const MAX_MATERIALS = 256
 export const BRICK = 8
 export const BRICK_SITES = BRICK ** 3 / 2
 
-/** Whether (x, y, z) is a site of the lattice. */
+/**
+ * Whether (x, y, z) is a site of the lattice.
+ * @internal
+ */
 export const isSite = (x: number, y: number, z: number) => ((x + y + z) & 1) === 0
 
 /**

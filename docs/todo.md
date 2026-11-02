@@ -51,20 +51,21 @@ Numbers are for the forest at 1280×800, as measured when written.
 - **Moved grids are posted whole.**
   When a grid moves with the camera (section 1 of `docs/architecture.md`),
   the main thread posts all of it to every worker, though they have most of it:
-  at level 0, ~30 MB a worker every 24 m walked.
+  at level 0, ~40 MB a worker every 12 m walked.
   Workers could keep the tiles and put the grid together themselves.
 - **Far voxels 5.6–11 pixels across.**
   With `ATOM_SHIFT` 6 they were 1.4–2.7 pixels,
-  but level 0's grid would have to reach 4 times as far (from 230 m on):
-  ~16 times its 30 MB, in each bake worker.
+  but level 0's grid would have to reach 4 times as far (from 115 m on):
+  ~16 times its 40 MB, in each bake worker.
   Grids shared between the workers would allow it,
   or bricks sent to a worker only once a chunk it bakes needs them.
   (Shared memory needs cross-origin isolation,
   which GitHub Pages can only get through a service worker.)
-- **Generating the forest's grids takes ~10 s of worker time per level**,
-  whatever its sites' spacing (a moved grid, a seventh of that):
+- **Generating the forest's grids takes 7–20 s of worker time per level**,
+  most at levels 0 to 4 (a moved grid, a seventh of that):
   mostly the ground's noise, which the terrain and the canopy
-  compute about 14 times per column (with its neighbours, for slopes).
+  compute about 14 times per column (with its neighbours, for slopes);
+  at levels 0 and 1 also the undergrowth's many small shapes.
 
 ## Ideas
 
@@ -80,3 +81,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   growing faces.
 - Describe the city in metres, like the forest, instead of boxes on its plan.
 - Port the toy worlds to the forest's metric scale, or drop them.
+- Show move speed and render distance in metres:
+  they are lattice units, and the forest's unit is 0.125 m.
+- Show the forest to 22 km again: `MAX_LEVEL` 13, one grid more.

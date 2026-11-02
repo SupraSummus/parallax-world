@@ -3,14 +3,14 @@ import { forest, UNIT_SIZE } from './forest'
 import { generate } from './generator'
 import { isSite, type Voxel } from './voxel-grid'
 
-// 96 m × 160 m ahead of the spawn point, all heights. Generation takes a
+// 48 m × 80 m ahead of the spawn point, all heights. Generation takes a
 // while; every test only reads the result.
 const generated = (seed: number) => {
   const { generator, spawn, heights } = forest(seed)
   const { minY, maxY } = heights(0)
   // Grids start on an even x.
-  const x = 2 * Math.floor((spawn.x - 48 / UNIT_SIZE) / 2)
-  const area = { minX: x, minY, minZ: spawn.z - 1 / UNIT_SIZE, maxX: x + 96 / UNIT_SIZE, maxY, maxZ: spawn.z + 159 / UNIT_SIZE }
+  const x = 2 * Math.floor((spawn.x - 24 / UNIT_SIZE) / 2)
+  const area = { minX: x, minY, minZ: spawn.z - 1 / UNIT_SIZE, maxX: x + 48 / UNIT_SIZE, maxY, maxZ: spawn.z + 79 / UNIT_SIZE }
   return { grid: generate(generator, area), spawn }
 }
 const { grid, spawn } = generated(42)
@@ -27,9 +27,9 @@ describe('forest', () => {
     expect(again.grid.cells.every((id, i) => id === grid.cells[i])).toBe(true)
   })
 
-  it('has ground under every column of a 96 m × 160 m area', () => {
+  it('has ground under every column of a 48 m × 80 m area', () => {
     const columns = new Set(voxels.map(v => `${String(v.x)},${String(v.z)}`))
-    expect(columns.size).toBe((96 / UNIT_SIZE) * (160 / UNIT_SIZE))
+    expect(columns.size).toBe((48 / UNIT_SIZE) * (80 / UNIT_SIZE))
   })
 
   it('grows trees between 10 m and 25 m tall', () => {
