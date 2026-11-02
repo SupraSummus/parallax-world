@@ -330,7 +330,6 @@ export function generate<K extends string>(generator: Generator<K>, box: Box, le
   const palette = new Palette(generator.kinds, generator.seed)
   const grid = new VoxelGrid(box, palette.materials)
   const clip: Box = { minX: grid.minX, minY: grid.minY, minZ: grid.minZ, maxX: grid.minX + grid.nx, maxY: grid.minY + grid.ny, maxZ: grid.minZ + grid.nz }
-  const { cells } = grid
   const putters = new Map<string, (x: number, y: number, z: number) => void>()
   const putter: Putter<K> = (kind, op) => {
     const key = `${kind} ${op}`
@@ -338,9 +337,8 @@ export function generate<K extends string>(generator: Generator<K>, box: Box, le
     if (!put) {
       const shade = palette.shade(kind)
       put = (x, y, z) => {
-        const i = grid.index(x, y, z)
-        if (i < 0 || (op === 'fill' && cells[i] !== 0)) return
-        cells[i] = op === 'carve' ? 0 : shade(x * s, y * s, z * s)
+        if (op === 'fill' && grid.get(x, y, z) !== 0) return
+        grid.set(x, y, z, op === 'carve' ? 0 : shade(x * s, y * s, z * s))
       }
       putters.set(key, put)
     }

@@ -8,7 +8,7 @@ import wasm from '../../bake/target/wasm32-unknown-unknown/release/bake.wasm?inl
 import { shadedPalette, VOXEL_GEOMETRY } from './bake'
 import type { SliceId } from './slice-selection'
 import { FACES } from './view'
-import type { VoxelData } from './voxel-grid'
+import { BRICK_SITES, type VoxelData } from './voxel-grid'
 
 /**
  * A chunk to bake: cell (i, j) (see chunkCell) of a slice (see SliceId) of
@@ -50,7 +50,8 @@ export interface ChunkImage {
 interface Baker {
   memory: WebAssembly.Memory
   world_start: (materials: number) => void
-  world_grid: (minX: number, minY: number, minZ: number, nx: number, ny: number, nz: number) => number
+  world_grid: (minX: number, minY: number, minZ: number, nx: number, ny: number, nz: number, used: number) => number
+  world_cells: () => number
   world_table: (table: number) => number
   world_ready: () => void
   bake: Call
@@ -97,7 +98,12 @@ export class ChunkBaker {
       new View(baker.memory.buffer, offset, values.length).set(values)
     }
     baker.world_start(materials.length)
-    for (const { minX, minY, minZ, nx, ny, nz, cells } of levels) write(Uint8Array, baker.world_grid(minX, minY, minZ, nx, ny, nz), cells)
+    for (const { minX, minY, minZ, nx, ny, nz, bricks, cells } of levels) {
+      // Only the bricks in use: `cells` has room for more.
+      const used = bricks.reduce((n, at) => Math.max(n, at + 1), 0)
+      write(Int32Array, baker.world_grid(minX, minY, minZ, nx, ny, nz, used), bricks)
+      write(Uint8Array, baker.world_cells(), cells.subarray(0, used * BRICK_SITES))
+    }
     write(Float64Array, baker.world_table(0), VOXEL_GEOMETRY)
     write(Int32Array, baker.world_table(1), Int32Array.from(FACES.flatMap(({ lattice: { right, up, forward } }) => [right, up, forward].flatMap(v => [v.x, v.y, v.z]))))
     const palettes = FACES.map(face => shadedPalette(materials, face.lattice))

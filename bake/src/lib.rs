@@ -203,15 +203,27 @@ pub extern "C" fn world_start(materials: usize) {
     })
 }
 
-/** Adds the loading world's grid of the next level, of the box given; returns where to write its sites. */
+/**
+ * Adds the loading world's grid of the next level, of the box given and
+ * `used` bricks of sites; returns where to write its bricks (i32), then
+ * its sites at world_cells().
+ */
 #[unsafe(no_mangle)]
-pub extern "C" fn world_grid(min_x: i32, min_y: i32, min_z: i32, nx: i32, ny: i32, nz: i32) -> *mut u8 {
+pub extern "C" fn world_grid(min_x: i32, min_y: i32, min_z: i32, nx: i32, ny: i32, nz: i32, used: usize) -> *mut u8 {
     STATE.with_borrow_mut(|state| match state {
         State::Loading { grids, .. } => {
-            let cells = (nx / 2 * ny * nz).max(0) as usize;
-            grids.push(Grid { min: [min_x, min_y, min_z], n: [nx, ny, nz], cells: vec![0; cells] });
-            grids.last_mut().expect("just pushed").cells.as_mut_ptr()
+            grids.push(Grid::new([min_x, min_y, min_z], [nx, ny, nz], used));
+            grids.last_mut().expect("just pushed").bricks.as_mut_ptr() as *mut u8
         }
+        _ => std::ptr::null_mut(),
+    })
+}
+
+/** Where to write the sites of the grid world_grid added last. */
+#[unsafe(no_mangle)]
+pub extern "C" fn world_cells() -> *mut u8 {
+    STATE.with_borrow_mut(|state| match state {
+        State::Loading { grids, .. } => grids.last_mut().map_or(std::ptr::null_mut(), |g| g.cells.as_mut_ptr()),
         _ => std::ptr::null_mut(),
     })
 }
