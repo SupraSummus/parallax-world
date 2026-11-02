@@ -80,6 +80,7 @@ native/                      # Spike of a native frontend (eframe + wgpu), linki
     ├── dump.rs              # Reads the dump
     ├── view.rs              # viewBasis and face coordinates (view.ts)
     ├── compositor.rs        # compositor.ts with wgpu: all splats in one instanced draw
+    ├── shot.rs              # --shot: one frame drawn offscreen on the GPU, saved as a PNG, no window
     └── compositor.wgsl
 ```
 

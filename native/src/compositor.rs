@@ -1,6 +1,6 @@
 //! Draws baked chunks with wgpu, as compositor.ts does with WebGL 2, inside
-//! egui's render pass (which has the depth buffer): every splat of the
-//! frame in one instanced draw, then the sky behind them.
+//! egui's render pass (which has the depth buffer) or one of its own for a
+//! shot: every splat of the frame in one instanced draw, then the sky behind them.
 
 use eframe::egui_wgpu::{self, wgpu};
 use wgpu::util::DeviceExt;
@@ -37,8 +37,8 @@ const SKY_HORIZON: [f32; 3] = [0xb9 as f32 / 255.0, 0xd3 as f32 / 255.0, 0xe8 as
 const GLOBALS: usize = 224;
 
 impl Compositor {
-    pub fn new(render_state: &egui_wgpu::RenderState, chunks: &[GpuChunk], splats: &[GpuSplat]) -> Compositor {
-        let device = &render_state.device;
+    /** For a target of `format`, with a Depth32Float depth buffer. */
+    pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat, chunks: &[GpuChunk], splats: &[GpuSplat]) -> Compositor {
         let shader = device.create_shader_module(wgpu::include_wgsl!("compositor.wgsl"));
         let globals = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("globals"),
@@ -106,7 +106,7 @@ impl Compositor {
                     module: &shader,
                     entry_point: Some(fragment),
                     compilation_options: Default::default(),
-                    targets: &[Some(render_state.target_format.into())],
+                    targets: &[Some(format.into())],
                 }),
                 primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleStrip, ..Default::default() },
                 // Within a chunk, a later splat covers an earlier one at the same depth.
@@ -135,6 +135,19 @@ impl Compositor {
             instances,
             count: splats.len() as u32,
         }
+    }
+
+    pub fn write(&self, queue: &wgpu::Queue, view: &View, pixels_per_point: f32) {
+        queue.write_buffer(&self.globals, 0, bytemuck::cast_slice(&view.globals(pixels_per_point)));
+    }
+
+    pub fn draw(&self, pass: &mut wgpu::RenderPass<'_>) {
+        pass.set_bind_group(0, &self.bind_group, &[]);
+        pass.set_pipeline(&self.splats);
+        pass.set_vertex_buffer(0, self.instances.slice(..));
+        pass.draw(0..4, 0..self.count);
+        pass.set_pipeline(&self.sky);
+        pass.draw(0..4, 0..1);
     }
 }
 
@@ -198,18 +211,13 @@ impl egui_wgpu::CallbackTrait for View {
         resources: &mut egui_wgpu::CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
         let compositor: &Compositor = resources.get().expect("compositor");
-        queue.write_buffer(&compositor.globals, 0, bytemuck::cast_slice(&self.globals(screen.pixels_per_point)));
+        compositor.write(queue, self, screen.pixels_per_point);
         Vec::new()
     }
 
     fn paint(&self, _info: egui::PaintCallbackInfo, pass: &mut wgpu::RenderPass<'static>, resources: &egui_wgpu::CallbackResources) {
         let compositor: &Compositor = resources.get().expect("compositor");
-        pass.set_bind_group(0, &compositor.bind_group, &[]);
-        pass.set_pipeline(&compositor.splats);
-        pass.set_vertex_buffer(0, compositor.instances.slice(..));
-        pass.draw(0..4, 0..compositor.count);
-        pass.set_pipeline(&compositor.sky);
-        pass.draw(0..4, 0..1);
+        compositor.draw(pass);
     }
 }
 

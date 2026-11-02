@@ -24,6 +24,9 @@ pub struct Dump {
     pub yaw: f64,
     pub pitch: f64,
     pub fov: f64,
+    /** The view the chunks were picked for, in pixels. */
+    pub width: f64,
+    pub height: f64,
     pub render_distance: f64,
     /** Per face: right, up, forward in world coordinates. */
     pub faces: [[[f64; 3]; 3]; VIEW_FACES],
@@ -62,7 +65,7 @@ pub fn read(bytes: &[u8]) -> Dump {
     assert_eq!(b.u32(), 0x31445850, "not a dump");
     let camera = [b.f64(), b.f64(), b.f64()];
     let (yaw, pitch, fov) = (b.f64(), b.f64(), b.f64());
-    let (_width, _height) = (b.f64(), b.f64());
+    let (width, height) = (b.f64(), b.f64());
     let render_distance = b.f64();
     let faces = std::array::from_fn(|_| std::array::from_fn(|_| [b.f64(), b.f64(), b.f64()]));
     let geometry = b.array(Bytes::f64);
@@ -96,7 +99,7 @@ pub fn read(bytes: &[u8]) -> Dump {
         fill: b.i32() == 1,
         centre: b.f64(),
     });
-    Dump { camera, yaw, pitch, fov, render_distance, faces, geometry, lattices, palettes, grids, requests }
+    Dump { camera, yaw, pitch, fov, width, height, render_distance, faces, geometry, lattices, palettes, grids, requests }
 }
 
 impl Dump {

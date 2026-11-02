@@ -3,13 +3,15 @@
 //! draws them with wgpu in an egui window. The camera turns and moves over
 //! the chunks baked at the start (no rebaking yet).
 //!
-//! parallax-native <dump> [--threads N] [--generate] [--bench] [--seed S]
+//! parallax-native <dump> [--threads N] [--generate] [--bench | --shot out.png | --spin] [--seed S]
 //!
 //! --generate replaces the dump's grids with worldgen's, of the same boxes,
-//! and starts the camera at worldgen's spawn.
+//! and starts the camera at worldgen's spawn. --shot draws the first frame
+//! offscreen, at the dump's size, and saves it without opening a window.
 
 mod compositor;
 mod dump;
+mod shot;
 mod view;
 
 use std::sync::Arc;
@@ -269,6 +271,15 @@ fn main() -> eframe::Result {
         rect: egui::Rect::NOTHING,
     };
     let fov = dump.fov;
+    if let Some(i) = args.iter().position(|a| a == "--shot") {
+        let size = [dump.width as u32, dump.height as u32];
+        let mut view = view;
+        view.rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(size[0] as f32, size[1] as f32));
+        view.focal = focal_length(fov, size[0] as f64, size[1] as f64);
+        shot::save(&view, &chunks, &splats, size, &args[i + 1]);
+        println!("saved {}", args[i + 1]);
+        return Ok(());
+    }
     let spin = args.iter().any(|a| a == "--spin").then(|| (Instant::now(), 0));
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([1580.0, 800.0]),
@@ -287,7 +298,7 @@ fn main() -> eframe::Result {
         options,
         Box::new(move |cc| {
             let render_state = cc.wgpu_render_state.as_ref().expect("wgpu");
-            let compositor = Compositor::new(render_state, &chunks, &splats);
+            let compositor = Compositor::new(&render_state.device, render_state.target_format, &chunks, &splats);
             render_state.renderer.write().callback_resources.insert(compositor);
             Ok(Box::new(App { view, fov, speed: 40.0, stats, frame_ms: 0.0, spin }))
         }),
