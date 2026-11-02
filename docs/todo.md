@@ -1,7 +1,7 @@
 # To do
 
-Measured or derived, not yet done.
-Numbers are for the forest at 1280×800 (`docs/architecture.md`).
+Known problems, measured or derived, then open ideas.
+Numbers are for the forest at 1280×800, as measured when written.
 
 - **Moving rebakes whole levels.**
   A level is baked again when the camera leaves its eye's cell,
@@ -11,12 +11,15 @@ Numbers are for the forest at 1280×800 (`docs/architecture.md`).
   (N = 2^(k−1)) would cut both: detail ∝ √N,
   chunks in view ∝ detail³ and rebakes per unit moved ∝ chunks / N,
   so ∝ √N, with eyes between voxel sites.
-- **Zooming in magnifies chunks.**
-  Slices ignore the field of view, but so does baking:
-  chunks are baked for 90° on about 1280 px (`render_scale`),
-  and coarse voxels are sized for it (`ATOM_SHIFT`),
-  so at 30° (3.7× zoom) far voxels are 5 to 10 px across and chunks upscaled.
-  `render_scale` could follow the focal length,
+- **Chunks are magnified on screen.**
+  `render_scale` bakes 40 / t pixels per unit of a slice t thick,
+  but a unit is up to focal / (t · detail · LAYER) pixels on screen,
+  about 95 / t at 90° on 1280 px with the default leak,
+  so chunks are upscaled up to about 2.4×.
+  Slices ignore the field of view, and so does baking:
+  zoomed in, chunks are upscaled more,
+  and coarse voxels, sized for 90° (`ATOM_SHIFT`), grow on screen.
+  `render_scale` could follow the focal length and detail,
   keyed in the chunk like `fill`, leaving the slices as they are.
 - **Bricks on the edge of a face's rhombus are baked whole.**
   Near where a level starts, about 19 bricks meet the rhombus,
@@ -51,3 +54,22 @@ Numbers are for the forest at 1280×800 (`docs/architecture.md`).
   The forest can generate any box at any level (`generators.md`);
   at levels 4 and 5, a 2 km square takes about a minute (trees one by
   one, each smaller than a voxel), at level 6 under two seconds.
+  Generating on demand, in a worker, would also free the main thread at start.
+
+## Ideas
+
+- Measure the seams between faces against ray-cast perspective.
+- Hold less of the world: every worker has its own copy;
+  a shared buffer or only the voxels with an open face would do.
+- Make the 12 stacks cheaper:
+  four or more faces are in view at once, each with its own near slices.
+- Find covered chunks more exactly: many chunks drawn show no pixel.
+- Build `LayerIndex` off the main thread or in Rust.
+- Measure the WebGL compositor on real GPUs (headless Chromium only has a
+  software one); if draw calls matter, pack chunks into a texture atlas.
+- Paint cut cross-sections with the colour of the surface above them: a 2D
+  prototype allowed slices twice as thick at the same leak.
+- Fill gaps in screen space (only pixels no layer covers) instead of
+  growing faces.
+- Describe the city in metres, like the forest, instead of boxes on its plan.
+- Port the toy worlds to the forest's metric scale, or drop them.

@@ -146,8 +146,8 @@ export interface Rect {
  * their a multiples of 2M in even rows and odd multiples of M in odd ones.
  * The brick around a site reaches M either way in a and M / 2 in b, so
  * the rows of bricks are offset by half a brick, like a wall's, and each
- * is the shadow of one column of cells of M·FCC. In lattice units a brick
- * is 2M across and M high.
+ * has the six neighbours of the hexagon a column of cells of M·FCC casts.
+ * In lattice units a brick is 2M across and M high.
  */
 export function chunkCell(level: number, i: number, j: number): Rect {
   const m = brickSpacing(level)

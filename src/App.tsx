@@ -109,11 +109,11 @@ function App() {
     if (hasWebGL2) compositorRef.current = new Compositor(canvas)
     // Chunks are baked in workers, leaving a core for this thread; without
     // workers (e.g. jsdom) render() bakes them itself. Each holds a copy of
-    // the world (35–50 MB for the scenes) and its cell surfaces, so at most 8.
+    // the world and its cell surfaces, so at most 8.
     const bakery = typeof Worker === 'undefined'
       ? undefined
       : startBakeWorkers(Math.max(1, Math.min(8, navigator.hardwareConcurrency - 1)))
-    // Baked chunks arrive one by one; show them at most once per frame.
+    // Baked chunks arrive in a batch per worker step; show them at most once per frame.
     const onBaked = () => {
       bakedFrameRef.current ??= requestAnimationFrame(() => { renderBehindMessagesRef.current() })
     }

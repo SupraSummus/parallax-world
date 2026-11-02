@@ -78,12 +78,11 @@ Each grid is the one before it coarsened (`coarsen`):
 a coarse voxel is full if a quarter of its cell is,
 so a floor or wall one voxel thick stays one,
 and solids grow by up to half a coarse voxel.
-A slice is about 1/detail of its distance thick
-(section 2, detail ≈ 9.5 by default),
+A slice is about 1/detail of its distance thick (section 2),
 so from level 6 on, a slab of 64 atoms,
-a voxel is 1.4 to 2.7 pixels across at 1280×800 and 90°.
-Level 7, the first of coarse voxels, begins about 230 m away in the forest:
-up to there level 0's grid must hold the world.
+a voxel stays about the same size on screen.
+Up to where level 7, the first of coarse voxels, begins,
+level 0's grid must hold the world.
 
 Why many layers of atoms and not one:
 cells of neighbouring layers interlock, as voxels do.
@@ -125,15 +124,11 @@ Level 0 is always allowed: a voxel can't be cut.
 
 From level 6 on, the next level's atoms are larger,
 and cells of two sizes do not nest:
-a site's cell of one size may lie before `until` while its cell of the
-other lies after, by less than 3N (N the smaller cells' spacing).
-So level k goes on to the slab starting at `until`,
-and its slabs within reach (ending past until − 4N − 2)
-get `until` as their cutoff and hold only the sites
-whose cell one size up begins before it;
-the next level holds the rest.
-Such a level is also at least 3N long,
-so that a site of its first slabs never belongs to an earlier level.
+near `until`, a site's cell of one size may lie before it
+while its cell of the other lies after.
+So the level's slabs near `until` get it as their cutoff
+and hold only the sites whose larger cell begins before it;
+the next level holds the rest (`selectSlices` gives the margins).
 So every site in range is in exactly one slice,
 which `slice-selection.test.ts` checks site by site.
 A level's last slices may have their centre planes up to two layers
@@ -149,7 +144,7 @@ From camera z = 0 with detail 1 (`level:slab`, `|cutoff`):
 
 Covering distance n takes O(detail · log n) slices,
 1 + 1/R times as many as slabs of whole layers would,
-up to `MAX_LEVEL` = 12 (from about 7.6 km in the forest), then O(n).
+up to `MAX_LEVEL`, then O(n).
 Moving the camera along the axis keeps every slice
 but a few where levels change (section 5).
 
@@ -161,13 +156,13 @@ behind them; in slices, the gap between two slices can instead show a
 cross-section of the farther slice. Too-thick slices show what perspective
 hides, e.g. stone under the lake's water surface.
 
-Bound, with ε = the "max occlusion leak" setting (default 1.5°):
+Bound, with ε = the "max occlusion leak" setting:
 **geometry that perspective hides never shows by more than the angle ε**
 (or, closer than 2 · `detail` layers, by more than two layer spacings;
 see below).
 It is an angle because slicing knows neither the field of view nor the viewport.
-The compositor makes it ε · `focal` pixels (`leakPixels`):
-17 at 90° on a 1280 px wide view, 4× that zoomed in 4×.
+The compositor makes it ε · `focal` pixels (`leakPixels`),
+so zoomed in it is more pixels.
 
 **Derivation.** Every step below is stated and checked on random samples,
 plus end to end against ray-cast perspective, in
@@ -209,11 +204,6 @@ A turned view draws a plane larger towards the screen's edges
 (by 1 / cos² of the angle from the screen centre),
 so leaks there can be up to 2× larger in a 90° view.
 
-Slices of one face for range 400, ε = 1/40 (1.4°): detail 9.5 and 78 slices.
-Chunks baked along one direction each, nearest a grid of directions
-spaced by how wide they are, needed detail 26.9 and 170 slices:
-their error grew with the chunk's width, the eye's only with its spacing.
-
 The bound is nearly tight. It cannot be pushed to zero by thinner slices:
 even single layers leak, because the back faces and the inside of the slab
 are flattened.
@@ -236,10 +226,9 @@ Seen along the axis, the sites of M·FCC, M = 8 · 2^k, lie in rows M
 apart, every 2M in a, alternate rows shifted by M:
 the brick around one reaches M either way in a and M/2 in b,
 so rows of bricks are offset by half a brick, like a wall's,
-and each brick is the shadow of one column of cells of M·FCC,
-with six neighbours like the hexagon around its site.
-Brick (i, j) is row j's i-th, 2M·LAYER ≈ 11.3 · 2^k by M = 8 · 2^k
-of the slice's centre plane, at most 16 times its thickness.
+and each brick has the six neighbours of the hexagon
+a column of cells of M·FCC casts, though not its shape.
+Brick (i, j) is row j's i-th, 2M·LAYER by M of the slice's centre plane.
 Since a slice's thickness is about its distance / detail,
 every chunk covers about the same part of the screen. Only chunks whose
 cell reaches the screen are rasterised; empty ones are cached too, so
@@ -250,8 +239,7 @@ their cells are not searched again, but not shown.
 The renderer looks them up in the layers the slice's sites span.
 `LayerIndex` (`voxel-grid.ts`) holds, per face, layer c and block of 8 columns a,
 the least and greatest b of its voxels.
-A cell with no voxels it can draw is never baked
-(on the forest, about 3 in 10 cells in view).
+A cell with no voxels it can draw is never baked.
 For the others, only the part of the cell within reach of those b
 is checked against the screen and coverage (section 4),
 so a treetop's chunk is not held to the sky above it.
@@ -334,15 +322,11 @@ and its pixels are copied out of the WebAssembly memory.
 A chunk's voxels are those of its cell and a margin around it
 (`cell_surface`, cached per cell, so other eyes reuse it).
 
-**Resolution.** A chunk of a slice of thickness t, both in units of the
-grid it reads (section 1), is drawn at `render_scale` pixels per such
-unit: 40 / t, between 1 and 10 (2 to 20 pixels across a voxel).
-Such a slice lies at distance ≥ t · detail
-layers, where a unit is at most focal / (t · detail · LAYER),
-about 34 / t screen pixels at 1280 × 800 and 90°,
-so more pixels would not show there
-(larger views and narrower fields of view magnify chunks, see `todo.md`).
-The nearest slices get 10, so
+**Resolution.** A chunk is drawn at `render_scale` pixels per unit of
+the grid it reads (section 1), fewer the thicker its slice,
+as thicker slices lie farther away
+(with the defaults chunks are still magnified, see `todo.md`).
+The nearest slices get `RENDER_SCALE`, so
 magnified rhombi keep their slanted edges. Other settings scale the chunk
 on screen.
 
@@ -352,16 +336,9 @@ depends on the camera's position only through the eye, so a chunk is
 drawn once when it first comes into view (from its eye) and is never
 redrawn.
 
-On the forest at 1280 × 800, 90°, looking along an axis (yaw 0):
-316 slices of 5 faces, ~530 chunks drawn, ~26 Mpx in view;
-a first render baking all of them takes ~4 s on one thread.
-Looking diagonally (yaw 45°): 393 slices, ~490 chunks, ~20 Mpx, ~2.4 s.
-render() with everything cached takes ~17 ms in Node.
-Chunks baked along one direction each (section 2) took 676 slices,
-~3200 chunks, ~62 Mpx and ~42 ms.
-But moving bakes more:
-walking 8 units forward, ~1.3 to 1.8 times as many chunks,
-as the near levels' eyes, a unit or a few apart, move every few steps.
+Moving bakes chunks again
+as the near levels' eyes, a unit or a few apart, move every few steps
+(`todo.md`).
 
 **Workers.** In the app, a frame never waits for chunks:
 each render lists the missing chunks in view,
@@ -383,17 +360,14 @@ until a segment's new slices have a bake in every cell they show,
 the old ones are drawn instead.
 Moving fast, segments often re-tile again before they are baked;
 finishing those missing fewest chunks first
-shows about twice as many of the chunks baked meanwhile.
+shows more of the chunks baked meanwhile.
 The list is split by cell between the workers,
 so a cell's surface is cached in one worker
 (rebaking it from a new eye reuses it).
-Each render's list replaces a worker's previous one;
-the worker bakes it a frame's worth (16 ms) per task, taking new lists in between,
-and posts each batch at once,
-without waiting for the main thread, which may be busy for hundreds of milliseconds.
-Chunks posted but not yet taken when the list was made are skipped (`bakeHandler`).
-Racing ahead, workers also bake far chunks that nearer ones turn out to cover:
-on the forest, about a third more.
+Each render's list replaces a worker's previous one (`bakeHandler`),
+so workers keep baking without waiting for the main thread,
+which may be busy for hundreds of milliseconds.
+Racing ahead, workers also bake far chunks that nearer ones turn out to cover.
 The app renders in a task queued behind the workers' messages, not in the animation frame:
 while a key is held, the browser puts input and frames before other tasks,
 and baked chunks would wait until it is released.
@@ -457,31 +431,27 @@ if its projected corners' bounding box (`screenBox`) overlaps the viewport.
 **Covered chunks.** Near layers cover most of what is behind them.
 `Coverage` (`bake/src/coverage.rs`, run on the main thread
 in its own instance of the baker's WebAssembly)
-marks which 4 × 4 pixel sub-blocks of the screen
+marks which small square sub-blocks of the screen
 the face's layers drawn so far cover;
-a cell whose box, plus 8 pixels around it, lies on covered sub-blocks
+a cell whose box, plus a margin around it, lies on covered sub-blocks
 is neither drawn nor baked,
 and a baked chunk is not drawn if each of its tiles
-(a sixteenth of it) with something drawn lies on covered sub-blocks.
+with something drawn lies on covered sub-blocks.
 Each pixel shows one face, so coverage starts over for each face,
 and sub-blocks outside the face count as covered.
 A sub-block is covered once one layer's chunks draw all of the face's part of it,
 but different sub-blocks may be covered by different layers:
 leaves, trunks and the ground together close what none of them closes alone.
-Bakers record which 4 × 4 pixel blocks of a chunk are all drawn and which partly (`solid_blocks`);
+Bakers record which blocks of a chunk's pixels are all drawn and which partly (`solid_blocks`);
 the blocks under a sub-block, plus a pixel around for smoothing, must all be drawn.
 A chunk is handed to `Coverage` when first drawn or tested,
 which keeps its tiles and a table of sums of its all-drawn blocks,
 so testing the blocks under a rectangle takes four reads;
-chunks unused for 16 renders are dropped, and handed over again if needed.
+chunks unused for a while are dropped, and handed over again if needed.
 Only chunks already baked cover anything.
 When the camera moves, cells coming out from behind nearer layers
 show nothing until baked, a frame or two.
-On the forest at 1280 × 800 a settled view bakes half the chunks it would without coverage,
-and draws ~3200, of which ~1600 show a pixel.
-Coverage adds ~17 ms to render() in Node,
-most of it in `cover`, testing sub-blocks one by one;
-the rays through each sub-block are kept per face while the camera only moves,
+The rays through each sub-block are kept per face while the camera only moves,
 and turning, found only in the cells the face crosses or holds
 (a face's side is a half-plane of the screen).
 
@@ -489,7 +459,7 @@ The `Compositor` draws a frame onto one opaque WebGL 2 canvas, one
 textured rectangle per chunk, then the sky behind them. Chunk pixels are
 opaque or empty, so it draws near to far with a depth test and discards
 empty pixels: what nearer slices cover is rejected instead of blended
-(the forest stacks ~40 screens of chunks). Depth is the layer's index,
+(the forest stacks dozens of screens of chunks). Depth is the layer's index,
 not its distance: a face's slices are parallel planes, so every ray
 meets them near to far, and faces share pixels only along seams
 (the first face drawn wins there). A chunk's texture is uploaded
@@ -498,12 +468,13 @@ sampled nearest, to keep voxel edges crisp; minified ones smoothly.
 
 **Fog.** A slice at distance d keeps `exp(−d / F)` of its own colour;
 the rest is the horizon colour, mixed in per pixel.
-F is 0.7 × the render distance, so the far cut-off stays hazy.
+F is a fixed share of the render distance (`FOG_PER_RENDER_DISTANCE`),
+so the far cut-off stays hazy.
 d is measured along the face's axis, not the ray:
 fog is the same on both sides of a seam,
 but a little lighter towards a face's corners than true distance would make it.
-The sky fades from the horizon colour at eye level (elevation 0) to blue
-at 32° up, along each pixel's ray, and gets the fog of the render
+The sky fades from the horizon colour at eye level to blue
+higher up, along each pixel's ray, and gets the fog of the render
 distance (or of the last slice, if farther).
 
 ## 5. Caching
@@ -511,8 +482,8 @@ distance (or of the last slice, if farther).
 Slices are keyed by `face:level:slab:cutoff` and hold their chunks keyed by brick.
 Insertion order of the slice `Map` is the LRU order. Slices and chunks that
 leave the view lose their textures but stay cached so moving back
-reuses them: up to `MAX_CACHED_SLICES` = 2048 slices, and hidden chunks
-up to `MAX_HIDDEN_CHUNK_PIXELS` = 48 Mpx (oldest slices' first). Chunks
+reuses them: up to `MAX_CACHED_SLICES` slices, and hidden chunks
+up to `MAX_HIDDEN_CHUNK_PIXELS` (oldest slices' first). Chunks
 of cells in view are kept even if they draw nothing, or they would be
 baked again on every render.
 
@@ -554,14 +525,13 @@ box, 0 for empty; the coarser grids add a seventh to the finest.
 Sites are z-major, and a row (y, z) holds every other x,
 so a slice is one contiguous range.
 A worker reads its copy of the grid for every face (`Reader` in `bake/`),
-without turned copies (forest: ~35 MB, city: ~50 MB).
+without turned copies.
 A list of voxel objects is built only on request (tests).
-Renderer distances are in world units: render distance 40–800, default 400.
+Renderer distances are in world units.
 
 **Scenes** describe shapes in metres and fill the sites inside them;
 each world picks its own scale, the renderer assumes none.
-The forest's `UNIT_SIZE` is 0.25 m per unit (neighbours 0.35 m apart),
-so the default render distance is 100 m and the fog distance 70 m.
+The forest's `UNIT_SIZE` sets its metres per unit.
 The forest is endless and can be generated in any box alone
 ([generators.md](generators.md));
 the app generates one box of it, its extent, into a grid.
@@ -571,8 +541,7 @@ crowns leaf clusters (balls) or a solid of revolution (spruce),
 branches and fallen logs capsules, so thin parts stay one piece on the lattice
 (a single column of sites only touches at corners).
 The city is planned on a 0.25 m grid (`PLAN_CELL_SIZE`):
-each plan cell is a box holding four sites, lattice units of 0.125 m
-(render distance 50 m), so walls stay flat and frames one piece.
+each plan cell is a box holding four sites, so walls stay flat and frames one piece.
 The toy worlds are built of blocks 2 units wide in the same way.
 Columns of ground are filled a few units deep;
 the renderer only draws faces that no neighbour covers.
@@ -604,10 +573,10 @@ so from the parallax camera's position both renderers should agree.
   crossing it can be off by up to the leak bound on each side.
   Looking along a world axis, four faces meet in the middle of the screen.
 - More faces are in view at once than with a cube's six (four or more,
-  against one to three), each with its own near slices: baking the view
-  looking along an axis takes ~2.5× as long (section 3).
-- Gap filling may leave a few pixels:
-  20 of 181 on a one-layer floor seen from above, in one place.
+  against one to three), each with its own near slices,
+  so more is baked.
+- Gap filling may leave a few pixels,
+  e.g. on a one-layer floor seen from above.
 - Slices are slabs of whole cells, drawn in order, but a voxel on a
   cell's boundary is half in the next layer of cells: where it overlaps a
   voxel of the next slice on screen, the nearer slice's one may show
@@ -622,8 +591,8 @@ so from the parallax camera's position both renderers should agree.
   voxel.
 - Rhombic dodecahedra have jagged outlines: a flat wall or floor is a
   surface of pyramids, and a silhouette along an axis is a zigzag.
-- Four voxels per old cube, each showing up to six faces towards the
-  camera instead of up to three: a first bake of the toy world in the tests takes
-  ~1.4 s on one thread (0.26 s with cubes). The forest has ~3.1–3.5 M voxels
-  (35 MB) and the city ~3 M (50 MB), held by the main thread and each
-  worker; the reference viewer's mesh has ~10 M faces (~850 MB of buffers).
+- A voxel shows up to six faces towards the camera, a cube up to three,
+  and a world needs more of them than of cubes for the same detail,
+  so baking costs more.
+- The world is held by the main thread and by each worker.
+  The reference viewer's mesh of every exposed face is large.

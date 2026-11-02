@@ -126,4 +126,6 @@ Add a new world to that list with a region that has a bit of everything in it.
   vertical trunks seen from above and from the side cannot both be right.
 - **Layers can't see each other.** "No tree on a boulder"
   needs a layer to ask another for its things in an area.
-- **The renderer only reads level 0.**
+- **The app doesn't use the coarse levels.**
+  It generates level 0 and coarsens it (`levelsOf`);
+  see "A world larger than its finest grid" in [todo.md](todo.md).

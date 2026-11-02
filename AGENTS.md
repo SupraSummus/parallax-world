@@ -10,7 +10,7 @@ Entry point for AI agents working on this codebase. Read this first.
 | [docs/product.md](docs/product.md) | What the product does and doesn't do | Adding or changing features |
 | [docs/architecture.md](docs/architecture.md) | Slicing, caching and compositing architecture | Touching `src/lib` |
 | [docs/testing.md](docs/testing.md) | Test layout and conventions | Writing tests |
-| [docs/todo.md](docs/todo.md) | Measured or derived improvements not done yet | Looking for what to do next |
+| [docs/todo.md](docs/todo.md) | Planned work: known problems and open ideas | Looking for what to do next |
 | [docs/generators.md](docs/generators.md) | Generating worlds in pieces: layers, things, rules | Writing or changing a world generator |
 
 Each concept has one home:
@@ -97,6 +97,9 @@ at the result in the browser (`pnpm dev`); unit tests can't see pixels.
 2. **Minimal docs.** Prefer code comments for implementation details. Delete
    outdated docs rather than letting them mislead. When changing code, grep
    the docs for mentions and update them.
+   Don't restate what the code says (constants, step-by-step logic):
+   name it and say why.
+   Measured numbers go stale; give one only when the point needs it.
 3. **Architecture changes** update `docs/architecture.md` and the affected
    tests.
 4. **TypeScript strict** (`strictTypeChecked` ESLint rules). Follow existing
