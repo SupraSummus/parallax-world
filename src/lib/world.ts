@@ -251,6 +251,11 @@ export class World {
     return this.place(level)
   }
 
+  /** How many levels' grids are being generated: asked for (missingParts), not all their parts received. */
+  get generating(): number {
+    return this.pending.size
+  }
+
   /** How many grids replaced the first of `level` (see ChunkRequest). */
   version(level: number): number {
     return this.versions[level] ?? 0

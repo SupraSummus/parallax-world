@@ -69,6 +69,10 @@ A spinner shows while a world generates.
 - Hills, mountains, hills with trees, lake with island: small toy
   scenes of blocks without a real-world scale.
 
+**Views in the URL** – The page's query can give the world, its seed,
+the camera, where it looks, the field of view and the render distance,
+as the 3D viewer's does, so a view can be shown again.
+
 **3D viewer** – "Open in 3D Viewer" renders the same world (same seed) as an
 ordinary triangle mesh of the voxels' rhombic faces with three.js and an orbit camera, starting from the
 parallax camera with the same perspective (field of view) and fog,
@@ -78,9 +82,11 @@ slice renderer.
 
 **Statistics panel** – Session totals (updates, average render time, average
 cache efficiency, voxels rendered) and details of the last update (layers,
-slice detail, leak bound in pixels, chunks in view reused vs newly baked, chunks still baking,
-chunks covered, cached chunk bytes). Chunks bake in background workers, so moving never
-waits for them; meanwhile a cell shows an older bake, or nothing.
+slice detail, leak bound in pixels, chunks in view reused vs newly baked,
+chunks still baking, levels of detail still generating,
+chunks covered, cached chunk bytes).
+Chunks bake in background workers, so moving never waits for them;
+meanwhile a cell shows an older bake, or nothing.
 
 ## Non-goals (for the POC)
 

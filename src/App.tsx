@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback, type PointerEvent, type ReactNode } from 'react'
-import { ParallaxRenderer, DEFAULT_FOV, MAX_FOV, MIN_FOV, DEFAULT_RENDER_DISTANCE, MAX_RENDER_DISTANCE, MIN_RENDER_DISTANCE, DEFAULT_MAX_LEAK, MAX_MAX_LEAK, MIN_MAX_LEAK, type Camera, type SessionStats } from '@/lib/renderer'
+import { ParallaxRenderer, DEFAULT_FOV, MAX_FOV, MIN_FOV, DEFAULT_RENDER_DISTANCE, MAX_RENDER_DISTANCE, MIN_RENDER_DISTANCE, DEFAULT_MAX_LEAK, MAX_MAX_LEAK, MIN_MAX_LEAK, parseViewQuery, viewQuery, type Camera, type SessionStats } from '@/lib/renderer'
 import { World, WORLD_TYPES, type WorldType } from '@/lib/world'
 import type { Orientation } from '@/lib/view'
 import { Compositor } from '@/lib/compositor'
@@ -115,7 +115,15 @@ function App() {
     const onBaked = () => {
       bakedFrameRef.current ??= requestAnimationFrame(() => { renderBehindMessagesRef.current() })
     }
-    const renderer = new ParallaxRenderer(new World(Date.now(), 'forest'), { bakery, onBaked })
+    // The view the page's query asks for, if any (as the 3D viewer's).
+    const query = parseViewQuery(location.search)
+    const renderer = new ParallaxRenderer(new World(query.seed ?? Date.now(), query.worldType), { bakery, onBaked, camera: query.camera })
+    if (query.look) renderer.setOrientation(query.look)
+    if (query.fov !== undefined) renderer.setFov(query.fov)
+    if (query.distance !== undefined) renderer.setRenderDistance(query.distance)
+    setWorldType(renderer.getWorld().worldType)
+    setFov(renderer.getFov())
+    setRenderDistance(renderer.getRenderDistance())
     rendererRef.current = renderer
 
     const handleResize = () => {
@@ -241,17 +249,10 @@ function App() {
     const renderer = rendererRef.current
     if (!renderer) return
     const { seed, worldType } = renderer.getWorld()
-    const { x, y, z } = renderer.getCamera()
-    const { yaw, pitch } = renderer.getOrientation()
-    const query = new URLSearchParams({
-      seed: String(seed),
-      world: worldType,
-      camera: [x, y, z].join(','),
-      look: [yaw, pitch].join(','),
-      fov: String(renderer.getFov()),
-      distance: String(renderer.getRenderDistance()),
+    const query = viewQuery({
+      seed, worldType, camera: renderer.getCamera(), look: renderer.getOrientation(), fov: renderer.getFov(), distance: renderer.getRenderDistance(),
     })
-    window.open(`${import.meta.env.BASE_URL}viewer.html?${query.toString()}`, '_blank', 'noopener')
+    window.open(`${import.meta.env.BASE_URL}viewer.html?${query}`, '_blank', 'noopener')
   }
 
   const handleFovChange = ([value]: number[]) => {
@@ -305,7 +306,9 @@ function App() {
         // Keep the drag when it passes over a panel.
         onPointerDown={e => { e.currentTarget.setPointerCapture(e.pointerId) }}
         onPointerMove={handlePointerMove}
-        className="absolute inset-0 h-full w-full touch-none" />
+        className="absolute inset-0 h-full w-full touch-none"
+        // What is left before the view is complete, for scripts (pnpm shot).
+        data-pending={lastUpdate ? lastUpdate.chunksPending + lastUpdate.levelsGenerating : undefined} />
       {!hasWebGL2 && (
         <div className="absolute inset-0 flex items-center justify-center p-4 text-center text-sm text-white">
           Can't draw the scene: this browser has no WebGL 2.
@@ -446,6 +449,7 @@ function App() {
                       <span className="text-destructive">{lastUpdate.chunksRegenerated}</span>
                     </StatRow>
                     <StatRow label="Chunks Baking">{lastUpdate.chunksPending}</StatRow>
+                    <StatRow label="Levels Generating">{lastUpdate.levelsGenerating}</StatRow>
                     <StatRow label="Chunks Covered">{lastUpdate.chunksCovered}</StatRow>
                     <StatRow label="Cache Efficiency">{lastUpdate.cacheEfficiency.toFixed(1)}%</StatRow>
                     <StatRow label="Voxels Rendered">{lastUpdate.voxelsRendered.toLocaleString()}</StatRow>

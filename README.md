@@ -9,6 +9,11 @@ images.
 
 Live demo: <https://suprasummus.github.io/parallax-world/> (deployed from `main`).
 
+[![The forest: a path under autumn birches, maples and spruces](docs/forest.webp)](https://suprasummus.github.io/parallax-world/?seed=12345&camera=-14,40,-200&look=-25,6)
+
+<sub>The forest, seed 12345, drawn by `pnpm shot`;
+the picture links to the same view in the demo.</sub>
+
 ## Design principles
 
 What the design is held to, beyond speed:
@@ -76,7 +81,11 @@ keys or drag to look around.
 "Open in 3D Viewer" shows the same scene with a conventional (three.js)
 renderer and an orbit camera.
 
-Other scripts (`test`, `lint`, `typecheck`, `knip`, `build`) are in
+The page takes a view in its query, as the 3D viewer does:
+`?seed=&world=&camera=x,y,z&look=yaw,pitch&fov=&distance=`
+(camera in lattice units, angles in degrees).
+
+Other scripts (`test`, `lint`, `typecheck`, `knip`, `build`, `shot`) are in
 `package.json`.
 
 ## Documentation

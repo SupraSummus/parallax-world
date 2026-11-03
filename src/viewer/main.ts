@@ -1,30 +1,26 @@
 /**
  * Reference viewer: renders a World as an ordinary triangle mesh with
  * three.js, to check what the scene looks like independently of the slice
- * renderer. Opened from the app with ?seed=&world=&camera=x,y,z&look=yaw,pitch&fov=&distance=.
+ * renderer. Opened from the app with the view in its query (parseViewQuery).
  */
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
-import { World, WORLD_TYPES, type Vec3, type WorldType } from '@/lib/world'
-import { DEFAULT_FOV, DEFAULT_RENDER_DISTANCE, FOG_PER_RENDER_DISTANCE } from '@/lib/renderer'
+import { World, type Vec3, type WorldType } from '@/lib/world'
+import { DEFAULT_FOV, DEFAULT_RENDER_DISTANCE, FOG_PER_RENDER_DISTANCE, parseViewQuery } from '@/lib/renderer'
 import { SKY_HORIZON, SKY_TOP } from '@/lib/compositor'
 import { focalLength, viewBasis } from '@/lib/view'
 import { GRID_LEVELS } from '@/lib/slice-selection'
 import { buildVoxelMesh } from './mesh'
 
-const params = new URLSearchParams(location.search)
-const seed = Number(params.get('seed') ?? 1)
-const fov = Number(params.get('fov') ?? DEFAULT_FOV)
-const renderDistance = Number(params.get('distance') ?? DEFAULT_RENDER_DISTANCE)
-const worldParam = params.get('world')
-const worldType: WorldType = WORLD_TYPES.find(t => t.value === worldParam)?.value ?? 'forest'
+const query = parseViewQuery(location.search)
+const seed = query.seed ?? 1
+const fov = query.fov ?? DEFAULT_FOV
+const renderDistance = query.distance ?? DEFAULT_RENDER_DISTANCE
+const worldType: WorldType = query.worldType ?? 'forest'
 
 const started = performance.now()
 const world = new World(seed, worldType)
-const [cx, cy, cz] = (params.get('camera') ?? '').split(',').map(Number)
-const parallaxCamera: Vec3 = Number.isFinite(cx) && Number.isFinite(cy) && Number.isFinite(cz)
-  ? { x: cx, y: cy, z: cz }
-  : world.spawn
+const parallaxCamera: Vec3 = query.camera ?? world.spawn
 // Level 0 within REACH units in x and z (all of the forest's would take gigabytes of buffers),
 // then coarser levels in rings (buildVoxelMesh) to the render distance,
 // each its own mesh: all in one would be over WebGL's buffer size limit.
@@ -43,7 +39,7 @@ for (let level = 0; level < levels; level++) {
   faceCount += mesh.faceCount
 }
 const buildTime = performance.now() - started
-const [yaw = 0, pitch = 0] = (params.get('look') ?? '').split(',').map(Number).map(a => (Number.isFinite(a) ? a : 0))
+const { yaw, pitch } = query.look ?? { yaw: 0, pitch: 0 }
 
 // Linear stand-in for the slice renderer's exponential fog.
 const fog = new THREE.Fog(SKY_HORIZON, 0, renderDistance * FOG_PER_RENDER_DISTANCE * 2.5)

@@ -53,6 +53,7 @@ src/
     ├── compositor.ts        # Draws the renderer's frames with WebGL 2: chunks' splats, instanced
     └── utils.ts             # cn() for class names
 viewer.html                  # Reference 3D viewer page (second Vite entry)
+scripts/shot.mjs             # pnpm shot: a view in headless Chromium, saved once complete
 src/viewer/
 ├── main.ts                  # three.js scene, orbit camera
 └── mesh.ts                  # World -> triangle mesh of exposed rhombic faces
@@ -110,6 +111,9 @@ run `pnpm check` again only after changing code.
 `pnpm dev`, `pnpm build` and `pnpm test` rebuild its WebAssembly first.
 CI runs the same scripts plus `pnpm build`. For rendering changes, also look
 at the result in the browser (`pnpm dev`); unit tests can't see pixels.
+Without a GPU, `pnpm shot` saves a picture of a view once it is complete
+(`scripts/shot.mjs`);
+with `mesa-vulkan-drivers` installed it draws several times faster.
 
 ## Rules
 
