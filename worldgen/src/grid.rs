@@ -113,36 +113,34 @@ impl VoxelGrid {
     }
 }
 
-impl VoxelGrid {
-    /**
-     * The grid of `b`, its bricks taken from `parts`: each a whole number of
-     * bricks from the box's corner, no two with voxels in one brick of it
-     * (VoxelGrid.compose in voxel-grid.ts). The rest of the box is empty.
-     */
-    pub fn compose(b: &Box3, parts: &[VoxelGrid]) -> VoxelGrid {
-        let mut grid = VoxelGrid::new(b);
-        let bz = (grid.n[2] + BRICK - 1) / BRICK;
-        for part in parts {
-            let offset: [i64; 3] = std::array::from_fn(|i| {
-                assert_eq!((part.min[i] - grid.min[i]) % BRICK, 0, "a part is not a whole number of bricks from the box");
-                (part.min[i] - grid.min[i]) / BRICK
-            });
-            let pz = (part.n[2] + BRICK - 1) / BRICK;
-            for k in 0..pz {
-                for j in 0..part.by {
-                    for i in 0..part.bx {
-                        let at = part.bricks[((k * part.by + j) * part.bx + i) as usize];
-                        let [gi, gj, gk] = [i + offset[0], j + offset[1], k + offset[2]];
-                        if at < 0 || gi < 0 || gj < 0 || gk < 0 || gi >= grid.bx || gj >= grid.by || gk >= bz {
-                            continue;
-                        }
-                        grid.bricks[((gk * grid.by + gj) * grid.bx + gi) as usize] = (grid.cells.len() / BRICK_SITES) as i32;
-                        let from = at as usize * BRICK_SITES;
-                        grid.cells.extend_from_slice(&part.cells[from..from + BRICK_SITES]);
+/**
+ * The grid of `b`, its bricks taken from `parts`: each a whole number of
+ * bricks from the box's corner, no two with voxels in one brick of it
+ * (VoxelGrid.compose in voxel-grid.ts). The rest of the box is empty.
+ */
+pub fn compose(b: &Box3, parts: &[&Grid]) -> Grid {
+    let VoxelGrid { min, n, bx, by, mut bricks, mut cells } = VoxelGrid::new(b);
+    let bz = (n[2] + BRICK - 1) / BRICK;
+    for part in parts {
+        let offset: [i64; 3] = std::array::from_fn(|i| {
+            assert_eq!((part.min[i] as i64 - min[i]) % BRICK, 0, "a part is not a whole number of bricks from the box");
+            (part.min[i] as i64 - min[i]) / BRICK
+        });
+        let [pbx, pby, pbz] = part.n.map(|v| (v as i64 + BRICK - 1) / BRICK);
+        for k in 0..pbz {
+            for j in 0..pby {
+                for i in 0..pbx {
+                    let at = part.bricks[((k * pby + j) * pbx + i) as usize];
+                    let [gi, gj, gk] = [i + offset[0], j + offset[1], k + offset[2]];
+                    if at < 0 || gi < 0 || gj < 0 || gk < 0 || gi >= bx || gj >= by || gk >= bz {
+                        continue;
                     }
+                    bricks[((gk * by + gj) * bx + gi) as usize] = (cells.len() / BRICK_SITES) as i32;
+                    let from = at as usize * BRICK_SITES;
+                    cells.extend_from_slice(&part.cells[from..from + BRICK_SITES]);
                 }
             }
         }
-        grid
     }
+    Grid { min: min.map(|v| v as i32), n: n.map(|v| v as i32), bricks, cells }
 }

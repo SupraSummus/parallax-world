@@ -11,8 +11,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   the forest building each thing relative to its anchor.
   The fixed-point containment tests cost about 15% at level 0.
 - **The native frontend still reads a view dumped by the TS renderer.**
-  It takes the grids, the baker's tables and the starting view from it;
-  world tiles around the camera (`world.ts`) and the tables are to come.
+  It takes the baker's tables and the starting view from it.
   Its renderer has no `matchTilings` yet:
   where slices re-tile as the camera moves along an axis,
   the new ones show nothing until baked.

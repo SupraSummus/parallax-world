@@ -76,8 +76,9 @@ worldgen/                    # generator.ts and forest.ts in Rust, moving to int
 native/                      # Spike of a native frontend (eframe + wgpu), linking bake/; see src/main.rs
 ├── dump.test.ts             # Dumps a view from the TS renderer for it (only with DUMP set)
 └── src/
-    ├── main.rs              # The window and camera; --generate, --shot, --bench, --check-requests against the dump
-    ├── dump.rs              # Reads the dump: grids, the baker's tables, the starting view
+    ├── main.rs              # The window and camera; --shot, --bench, --walk, --check-requests against the dump
+    ├── dump.rs              # Reads the dump: the baker's tables, the starting view, its grids and chunks to check against
+    ├── world.rs             # world.ts for generated worlds: worldgen's tiles around the camera, grids composed off the main thread
     ├── slicing.rs           # slice-selection.ts: slices, chunks, eyes
     ├── view.rs              # view.ts: faces, which rays and screen boxes they draw
     ├── layer_index.rs       # LayerIndex (voxel-grid.ts): where each face's layers hold voxels

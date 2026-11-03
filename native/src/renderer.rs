@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use bake::{Coverage, Slice};
+use bake::{Coverage, Grid, Slice};
 
 use crate::bakery::{Baked, Bakery, Mask, Request};
 use crate::layer_index::LayerIndex;
@@ -35,6 +35,7 @@ pub struct Chunk {
     j: i32,
     eye: [i32; 3],
     fill: bool,
+    grid: u32,
     pub baked: Baked,
 }
 
@@ -74,8 +75,8 @@ struct Cell {
 }
 
 impl Cell {
-    fn find(&self, eye: [i32; 3], fill: bool) -> Option<&Arc<Chunk>> {
-        self.chunks.iter().find(|c| c.eye == eye && c.fill == fill)
+    fn find(&self, eye: [i32; 3], fill: bool, grid: u32) -> Option<&Arc<Chunk>> {
+        self.chunks.iter().find(|c| c.eye == eye && c.fill == fill && c.grid == grid)
     }
 
     fn latest(&self) -> Option<&Arc<Chunk>> {
@@ -102,8 +103,9 @@ fn slice_key(face: usize, s: &Slice) -> SliceKey {
 
 pub struct Renderer {
     faces: Vec<Face>,
-    /** Per grid level, where its voxels are; None while it has no grid. */
+    /** Per grid level, where its voxels are, and how many grids replaced the first; None while it has no grid. */
     indices: Vec<Option<LayerIndex>>,
+    versions: Vec<u32>,
     slices: HashMap<SliceKey, CachedSlice>,
     coverage: Coverage,
     bakery: Bakery,
@@ -138,11 +140,11 @@ fn closest_to_zero(lo: f64, hi: f64) -> f64 {
 }
 
 impl Renderer {
-    pub fn new(faces: Vec<Face>, indices: Vec<Option<LayerIndex>>, bakery: Bakery, render_distance: f64) -> Renderer {
-        assert_eq!(indices.len(), GRID_LEVELS);
+    pub fn new(faces: Vec<Face>, bakery: Bakery, render_distance: f64) -> Renderer {
         Renderer {
             faces,
-            indices,
+            indices: (0..GRID_LEVELS).map(|_| None).collect(),
+            versions: vec![0; GRID_LEVELS],
             slices: HashMap::new(),
             coverage: Coverage::default(),
             bakery,
@@ -153,6 +155,21 @@ impl Renderer {
             fill: true,
             skip_covered: true,
         }
+    }
+
+    /**
+     * Draws a new grid of `level` from now on: chunks baked from the old one
+     * only stand in until baked again from this one.
+     */
+    pub fn set_grid(&mut self, level: usize, grid: Arc<Grid>, index: LayerIndex) {
+        self.indices[level] = Some(index);
+        self.versions[level] += 1;
+        for slice in self.slices.values_mut() {
+            if atom_level(slice.id.level) as usize == level {
+                slice.extents.clear();
+            }
+        }
+        self.bakery.set_grid(level, grid, self.versions[level]);
     }
 
     /** Waits until the bakery delivers a chunk. */
@@ -194,9 +211,10 @@ impl Renderer {
                     CachedSlice { id, depth, size: (last - first + 1) as i64, cells: HashMap::new(), extents: HashMap::new(), used: 0 }
                 });
                 slice.used = self.renders;
-                let index = self.indices[atom_level(id.level) as usize].as_ref();
+                let level = atom_level(id.level) as usize;
+                let grid = (self.indices[level].as_ref(), self.versions[level]);
                 let coverage = self.skip_covered.then_some(&mut self.coverage);
-                let layer = draw_slice(&of, slice, index, coverage, view, self.fill, &mut missing, &mut stats);
+                let layer = draw_slice(&of, slice, grid, coverage, view, self.fill, &mut missing, &mut stats);
                 frame.farthest = frame.farthest.max(layer.distance);
                 if self.skip_covered {
                     for p in &layer.placements {
@@ -231,11 +249,11 @@ impl Renderer {
         for (r, baked) in self.bakery.take() {
             let Some(slice) = self.slices.get_mut(&slice_key(r.face, &r.slice)) else { continue };
             let cell = slice.cells.entry((r.i, r.j)).or_default();
-            if cell.find(r.eye, r.fill).is_some() {
+            if cell.find(r.eye, r.fill, r.grid).is_some() {
                 continue;
             }
             self.next_id += 1;
-            cell.chunks.push(Arc::new(Chunk { id: self.next_id, i: r.i, j: r.j, eye: r.eye, fill: r.fill, baked }));
+            cell.chunks.push(Arc::new(Chunk { id: self.next_id, i: r.i, j: r.j, eye: r.eye, fill: r.fill, grid: r.grid, baked }));
             if cell.chunks.len() > CHUNKS_PER_CELL {
                 cell.chunks.remove(0);
             }
@@ -292,7 +310,7 @@ fn cell_extent(of: &FaceView, slice: &mut CachedSlice, index: &LayerIndex, i: i3
 fn draw_slice(
     of: &FaceView,
     slice: &mut CachedSlice,
-    index: Option<&LayerIndex>,
+    (index, grid): (Option<&LayerIndex>, u32),
     mut coverage: Option<&mut Coverage>,
     view: &View,
     fill: bool,
@@ -328,7 +346,7 @@ fn draw_slice(
             continue;
         }
         let cell = slice.cells.get(&(i, j));
-        let chunk = match cell.and_then(|c| c.find(eye, fill)) {
+        let chunk = match cell.and_then(|c| c.find(eye, fill, grid)) {
             Some(chunk) => chunk.clone(),
             None => {
                 let latest = cell.and_then(Cell::latest).cloned();
@@ -342,7 +360,7 @@ fn draw_slice(
                         continue;
                     }
                 }
-                missing.push((Request { face: of.face, slice: id, i, j, eye, fill }, distance, latest.is_some()));
+                missing.push((Request { face: of.face, slice: id, i, j, eye, fill, grid }, distance, latest.is_some()));
                 let Some(latest) = latest else { continue };
                 latest
             }
