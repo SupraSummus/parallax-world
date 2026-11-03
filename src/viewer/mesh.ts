@@ -1,5 +1,4 @@
 import type { Vec3, World } from '@/lib/world'
-import { faceShade } from '@/lib/bake'
 import { VOXEL_FACES } from '@/lib/fcc'
 
 export interface VoxelMesh {
@@ -9,6 +8,15 @@ export interface VoxelMesh {
   colors: Uint8Array
   indices: Uint32Array
   faceCount: number
+}
+
+/**
+ * Brightness of a face by its outward normal: the axes' shades weighted by
+ * the squared components, as the baker shades (bake/src/tables.rs).
+ */
+function faceShade({ x, y, z }: Vec3): number {
+  const [front, back, left, right, bottom, top] = [0.9, 0.65, 0.7, 0.8, 0.55, 1]
+  return (x * x * (x < 0 ? left : right) + y * y * (y < 0 ? bottom : top) + z * z * (z < 0 ? front : back)) / (x * x + y * y + z * z)
 }
 
 // Each face's corners in three.js space (z negated), counter-clockwise seen

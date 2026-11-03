@@ -18,12 +18,10 @@ Numbers are for the forest at 1280×800, as measured when written.
   Turning, a frame costs its main thread over 10 ms in the forest.
   `native/` is not built in CI.
 - **TS and Rust still say much the same twice.**
-  `bake.ts`'s faces and palettes are `native/src/tables.rs` again,
   `LayerIndex` (`voxel-grid.ts`) is `native/src/layer_index.rs`,
   the tiles around the camera (`world.ts`) are `native/src/world.rs`,
   and slice selection, faces and the renderer are in `native/src` too.
-  The baker could build its own tables from the materials,
-  and workers could index the parts they generate in WebAssembly;
+  Workers could index the parts they generate in WebAssembly;
   the renderer is the large step.
 - **Moving rebakes whole levels.**
   A level is baked again when the camera leaves its eye's cell,

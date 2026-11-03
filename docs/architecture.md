@@ -306,7 +306,7 @@ a ray from the eye passing from one into another crosses where their
 sites are equally far, coming from the nearer site's side,
 so along every ray a voxel met first is nearer the eye,
 whatever the ray's direction.
-`src/lib/bake.test.ts` checks against rays cast from the eye
+`src/lib/chunk-baker.test.ts` checks against rays cast from the eye
 that every voxel one meets first is painted.
 
 **Filling gaps.** A slice draws a point at depth z′
@@ -343,15 +343,15 @@ and inlined into the app (`wasm.ts`), so it compiles synchronously
 in a worker, on the main thread (for coverage, section 4) or in Node,
 with no files to fetch.
 `ChunkBaker` hands it a world once:
-the grid, the voxel's faces in lattice coordinates and the palettes (`bake.ts`).
+the grid, the faces' lattices and the materials' colours;
+it shades them per face itself (`tables.rs`).
 Then each chunk is one call,
 and its splats are copied out of the WebAssembly memory.
 A chunk's voxels are those of its cell and a margin around it
 (`cell_surface`, cached per cell, so other eyes reuse it).
 The native spike (`native/`) links the baker instead,
 a baker per worker thread sharing one copy of the tiles (`share_tiles`),
-and has the renderer, slice selection, coverage
-and the faces and palettes it hands the baker in Rust too.
+and has the renderer, slice selection and coverage in Rust too.
 
 Each chunk is clipped to its cell: splats that miss it are dropped,
 and `originX`/`originY` and its extent record where on the centre plane
@@ -407,7 +407,7 @@ all even or all odd, placed at (a·LAYER, b, c·LAYER);
 layer c is a rectangular grid of sites, √2 by 2 apart,
 and the next layer is the same grid shifted by half a cell.
 The world is read in these coordinates (`Reader` in `bake/`), with faces
-shaded by the way they face in the world (`shadedPalette`).
+shaded by the way they face in the world (`palettes` in `bake/`).
 
 Each face draws the rays closer to its axis than to any other face's
 (`inFace`): |x| + √2·|y| ≤ z, a rhombus of tangents reaching 1

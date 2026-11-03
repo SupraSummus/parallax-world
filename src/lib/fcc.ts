@@ -55,5 +55,5 @@ function voxelFaces(): VoxelFace[] {
   return faces
 }
 
-/** The 12 faces of a voxel. A face's index is its kind in bake.ts. */
+/** The 12 faces of a voxel. */
 export const VOXEL_FACES: readonly VoxelFace[] = voxelFaces()

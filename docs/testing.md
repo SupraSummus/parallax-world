@@ -20,7 +20,7 @@ pnpm exec vitest run bake       # files matching "bake"
 | `src/lib/cells.test.ts`, `bake/src/cells.rs` | Cells of N·FCC and the baker's table of them |
 | `src/lib/slice-selection.test.ts` | Slices, bricks and eyes; every site in exactly one slice |
 | `src/lib/leak-bound.test.ts` | The occlusion-leak bound, step by step, then end to end against ray-cast perspective |
-| `src/lib/bake.test.ts` | Baked chunks' splats against rays cast from the eye |
+| `src/lib/chunk-baker.test.ts` | Baked chunks' splats against rays cast from the eye |
 | `bake/src/fill.rs`, `bake/src/coverage.rs` | Splats filled into a mask; solid blocks and their sums |
 | `src/lib/occlusion.test.ts` | Skipping covered chunks leaves the picture unchanged |
 | `src/lib/view.test.ts` | Camera basis, faces, projection, culling |
