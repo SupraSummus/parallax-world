@@ -10,10 +10,14 @@ Numbers are for the forest at 1280×800, as measured when written.
   They should go to fixed point like the noise,
   the forest building each thing relative to its anchor.
   The fixed-point containment tests cost about 15% at level 0.
-- **The native frontend draws a view dumped by the TS renderer.**
-  It needs world tiles, slice selection, the renderer and coverage in Rust,
-  the camera in fixed point and positions relative to it in f32 for the GPU
-  (the compositor now sends absolute f32 coordinates, which jitter far out).
+- **The native frontend still reads a view dumped by the TS renderer.**
+  It takes the grids, the baker's tables and the starting view from it;
+  world tiles around the camera (`world.ts`) and the tables are to come.
+  Its renderer has no `matchTilings` yet:
+  where slices re-tile as the camera moves along an axis,
+  the new ones show nothing until baked.
+  Its camera is f64, not fixed point (positions reach the GPU relative to it).
+  A frame costs its main thread over 10 ms in the forest.
   `native/` is not built in CI.
 - **Moving rebakes whole levels.**
   A level is baked again when the camera leaves its eye's cell,

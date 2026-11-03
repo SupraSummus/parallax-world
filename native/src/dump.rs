@@ -1,10 +1,10 @@
-//! A view dumped by the spike's TS script: the camera, the faces, the
+//! A view dumped by the spike's TS script: the camera, the
 //! baker's tables and grids as chunk-baker.ts hands them over, and the
 //! chunks the renderer wants.
 
 use std::sync::Arc;
 
-use bake::{Geometry, Grid, Lattice, VIEW_FACES};
+use bake::{Grid, Lattice, VIEW_FACES};
 
 pub struct Request {
     pub face: usize,
@@ -15,8 +15,6 @@ pub struct Request {
     pub j: i32,
     pub eye: [i32; 3],
     pub fill: bool,
-    /** The slice's centre plane, along the face's axis (sliceCentre). */
-    pub centre: f64,
 }
 
 pub struct Dump {
@@ -28,8 +26,7 @@ pub struct Dump {
     pub width: f64,
     pub height: f64,
     pub render_distance: f64,
-    /** Per face: right, up, forward in world coordinates. */
-    pub faces: [[[f64; 3]; 3]; VIEW_FACES],
+    /** VOXEL_GEOMETRY in bake.ts. */
     pub geometry: Vec<f64>,
     pub lattices: [Lattice; VIEW_FACES],
     pub palettes: Vec<u32>,
@@ -67,7 +64,10 @@ pub fn read(bytes: &[u8]) -> Dump {
     let (yaw, pitch, fov) = (b.f64(), b.f64(), b.f64());
     let (width, height) = (b.f64(), b.f64());
     let render_distance = b.f64();
-    let faces = std::array::from_fn(|_| std::array::from_fn(|_| [b.f64(), b.f64(), b.f64()]));
+    // The faces' axes: view.rs makes its own.
+    for _ in 0..VIEW_FACES * 9 {
+        b.f64();
+    }
     let geometry = b.array(Bytes::f64);
     let l = b.array(Bytes::i32);
     let lattices = std::array::from_fn(|f| {
@@ -88,22 +88,20 @@ pub fn read(bytes: &[u8]) -> Dump {
             Some(Arc::new(Grid { min, n, bricks, cells }))
         })
         .collect();
-    let requests = b.array(|b| Request {
-        face: b.u32() as usize,
-        level: b.i32(),
-        layer: b.i32(),
-        cutoff: b.f64(),
-        i: b.i32(),
-        j: b.i32(),
-        eye: [b.i32(), b.i32(), b.i32()],
-        fill: b.i32() == 1,
-        centre: b.f64(),
+    let requests = b.array(|b| {
+        let r = Request {
+            face: b.u32() as usize,
+            level: b.i32(),
+            layer: b.i32(),
+            cutoff: b.f64(),
+            i: b.i32(),
+            j: b.i32(),
+            eye: [b.i32(), b.i32(), b.i32()],
+            fill: b.i32() == 1,
+        };
+        // The slice's centre plane: slicing.rs finds it.
+        b.f64();
+        r
     });
-    Dump { camera, yaw, pitch, fov, width, height, render_distance, faces, geometry, lattices, palettes, grids, requests }
-}
-
-impl Dump {
-    pub fn geometry(&self) -> Geometry {
-        Geometry::from_table(&self.geometry)
-    }
+    Dump { camera, yaw, pitch, fov, width, height, render_distance, geometry, lattices, palettes, grids, requests }
 }

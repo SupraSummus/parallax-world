@@ -76,10 +76,14 @@ worldgen/                    # generator.ts and forest.ts in Rust, moving to int
 native/                      # Spike of a native frontend (eframe + wgpu), linking bake/; see src/main.rs
 ├── dump.test.ts             # Dumps a view from the TS renderer for it (only with DUMP set)
 └── src/
-    ├── main.rs              # Bakes the dumped chunks (or worldgen's, --generate) on every core, the window and camera
-    ├── dump.rs              # Reads the dump
-    ├── view.rs              # viewBasis and face coordinates (view.ts)
-    ├── compositor.rs        # compositor.ts with wgpu: all splats in one instanced draw
+    ├── main.rs              # The window and camera; --generate, --shot, --bench, --check-requests against the dump
+    ├── dump.rs              # Reads the dump: grids, the baker's tables, the starting view
+    ├── slicing.rs           # slice-selection.ts: slices, chunks, eyes
+    ├── view.rs              # view.ts: faces, which rays and screen boxes they draw
+    ├── layer_index.rs       # LayerIndex (voxel-grid.ts): where each face's layers hold voxels
+    ├── renderer.rs          # renderer.ts: chunks in view, cached, stand-ins, coverage (bake's Coverage)
+    ├── bakery.rs            # Worker threads baking chunks, a baker each sharing the grids
+    ├── compositor.rs        # compositor.ts with wgpu: splats uploaded per chunk, placed relative to the camera
     ├── shot.rs              # --shot: one frame drawn offscreen on the GPU, saved as a PNG, no window
     └── compositor.wgsl
 ```

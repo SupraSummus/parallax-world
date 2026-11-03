@@ -28,6 +28,7 @@ use surface::{Voxel, cell_surface};
 use world::{FACE_KINDS, GEOMETRY, LATTICE, Reader};
 
 // For native frontends, which link the baker instead of loading its WebAssembly.
+pub use coverage::Coverage;
 pub use surface::Slice;
 pub use world::{Geometry, Grid, Lattice, VIEW_FACES};
 

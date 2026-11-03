@@ -2,12 +2,13 @@
 
 use eframe::egui_wgpu::wgpu;
 
-use crate::compositor::{Compositor, GpuChunk, GpuSplat, View};
+use crate::compositor::{Compositor, View};
+use crate::renderer::Frame;
 
 /** egui's target format, so a shot looks as the window does. */
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
-pub fn save(view: &View, chunks: &[GpuChunk], splats: &[GpuSplat], [width, height]: [u32; 2], path: &str) {
+pub fn save(frame: &Frame, view: &View, [width, height]: [u32; 2], path: &str) {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())).expect("adapter");
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).expect("device");
@@ -26,8 +27,7 @@ pub fn save(view: &View, chunks: &[GpuChunk], splats: &[GpuSplat], [width, heigh
     };
     let target = texture(FORMAT, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC);
     let depth = texture(wgpu::TextureFormat::Depth32Float, wgpu::TextureUsages::RENDER_ATTACHMENT);
-    let compositor = Compositor::new(&device, FORMAT, chunks, splats);
-    compositor.write(&queue, view, 1.0);
+    let mut compositor = Compositor::new(&device, FORMAT);
 
     // Rows of the copy are padded to 256 bytes.
     let row = (width * 4).div_ceil(256) * 256;
@@ -38,6 +38,7 @@ pub fn save(view: &View, chunks: &[GpuChunk], splats: &[GpuSplat], [width, heigh
         mapped_at_creation: false,
     });
     let mut encoder = device.create_command_encoder(&Default::default());
+    compositor.prepare(&device, &queue, &mut encoder, frame, view);
     {
         let target_view = target.create_view(&Default::default());
         let depth_view = depth.create_view(&Default::default());

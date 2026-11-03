@@ -1,13 +1,10 @@
-// compositor.ts in WGSL, with all chunks of a frame in one draw: each splat
-// instance names its chunk, whose face, plane and clip come from `chunks`,
-// and the camera per face from `globals`, so moving and turning only
-// rewrite `globals`.
+// compositor.ts in WGSL: each splat instance names its chunk's slot in
+// `chunks`, which gives its face, plane and clip relative to the camera.
 
 struct FaceView {
   // Columns: the camera's right, up and forward axes, in the face's coordinates.
   view: mat3x3f,
-  // The camera in the face's coordinates.
-  camera: vec4f,
+  _pad: vec4f,
 }
 
 struct Globals {
@@ -27,9 +24,9 @@ struct Globals {
 }
 
 struct Chunk {
-  origin: vec2f, // top-left corner of what is drawn, face coordinates
+  origin: vec2f, // top-left corner of what is drawn, relative to the camera, face coordinates
   extent: vec2f,
-  centre: f32, // the centre plane along the face's axis
+  distance: f32, // of the centre plane, along the face's axis
   face: u32,
   depth: f32, // the layer's depth in (0, 1)
   _pad: f32,
@@ -61,9 +58,7 @@ fn splat_vertex(@builtin(vertex_index) vertex: u32, @location(0) splat: vec4f, @
   out.slant = splat.z / (sqrt(2.0) * splat.w);
   out.colour = paint.rgb;
   out.chunk = chunk & 0x7fffffffu;
-  let origin = c.origin - face.camera.xy;
-  let distance = c.centre - face.camera.z;
-  let p = transpose(face.view) * vec3f(origin + splat.xy + out.corner * splat.zw, distance);
+  let p = transpose(face.view) * vec3f(c.origin + splat.xy + out.corner * splat.zw, c.distance);
   let depth = c.depth + select(0.0, globals.half_layer, chunk >= 0x80000000u);
   out.position = vec4f(p.xy * globals.focal / (globals.viewport / 2.0), depth * p.z, p.z);
   return out;
@@ -80,14 +75,11 @@ fn splat_fragment(in: Splat) -> @location(0) vec4f {
   if abs(ray.x) + sqrt(2.0) * abs(ray.y) > ray.z * 1.001 {
     discard;
   }
-  let distance = c.centre - face.camera.z;
-  let p = ray.xy / ray.z * distance;
-  let left = c.origin.x - face.camera.x;
-  let top = c.origin.y - face.camera.y;
-  if p.x < left || p.x >= left + c.extent.x || p.y > top || p.y <= top - c.extent.y {
+  let p = ray.xy / ray.z * c.distance;
+  if p.x < c.origin.x || p.x >= c.origin.x + c.extent.x || p.y > c.origin.y || p.y <= c.origin.y - c.extent.y {
     discard;
   }
-  let fog = 1.0 - exp(-distance / globals.fog_distance);
+  let fog = 1.0 - exp(-c.distance / globals.fog_distance);
   return vec4f(mix(in.colour, globals.horizon.rgb, fog), 1.0);
 }
 

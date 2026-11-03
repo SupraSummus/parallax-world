@@ -26,6 +26,7 @@ pub struct Voxel {
  * layers. If `cutoff` is finite, only those whose cell of 2·FCC has its
  * site before layer `cutoff`.
  */
+#[derive(Clone, Copy)]
 pub struct Slice {
     pub level: i32,
     pub layer: i32,
