@@ -5,11 +5,9 @@
 
 use std::rc::Rc;
 
-use crate::forest::{self, K as F, Relief, Species, UNIT_SIZE, make_tree};
-use crate::generator::{
-    ANY_SIZE, Child, Children, Far, Field, FieldValues, Fill, Layer, Node, Op, Population, SOLID, Shape, Shapes, Span, ball, cuboid, gable,
-    lathe,
-};
+use crate::forest::{self, K as F, Relief, Species, m, make_tree};
+use crate::frame::{Frame, Part, U, V, W, back, walls};
+use crate::generator::{ANY_SIZE, Child, Children, Far, Field, FieldValues, Fill, Layer, Node, Op, Population, SOLID, Shape, Shapes, Span};
 use crate::grid::Box3;
 use crate::kinds;
 use crate::noise::{Fixed, ONE, Rng, fixed, hash64, smoothstep, stream};
@@ -43,11 +41,6 @@ kinds! {
     iron: 3, ["#2b2d30"];
     lamp: 6, ["#fff3c4"];
     water: 13, ["#3f7fa8", "#4a8ab2"];
-}
-
-/** Metres in units, rounded. */
-const fn m(metres: f64) -> i64 {
-    (metres / UNIT_SIZE + 0.5) as i64
 }
 
 // The plan of a town, in units: a main street along z, blocks on either side of it in rows, side and cross streets between them.
@@ -287,11 +280,6 @@ pub fn layers(towns: Rc<Towns>, land: Rc<Land>, me: usize, ground: Rc<Plan<i64>>
 // ---------------------------------------------------------------------------
 // Things
 
-/** A cuboid of `kind` from min to max, in units. */
-fn bx(min: [i64; 3], max: [i64; 3], kind: K, op: Op) -> Shape {
-    cuboid(min.map(|v| v as f64), max.map(|v| v as f64), k(kind), SOLID, op)
-}
-
 fn child(name: String, size: i64, node: Node) -> Child {
     Child { name, size, node }
 }
@@ -330,317 +318,261 @@ fn block_bounds(t: &Town, b: &Block) -> Box3 {
     Box3 { min: [b.x0 - m(9.0), t.level - m(3.0), b.z0 - m(9.0)], max: [b.x1 + m(9.0), t.level + m(40.0), b.z1 + m(9.0)] }
 }
 
-/** Where columns w0 to w1 of a block's width are along x, w from its inner edge (towards the main street). */
-fn across(b: &Block, w0: i64, w1: i64) -> (i64, i64) {
-    if b.side > 0 { (b.x0 + w0, b.x0 + w1) } else { (b.x1 - w1, b.x1 - w0) }
+/** A block's own coordinates: u across it from its inner edge (towards the main street), v up from the streets, w along it. */
+fn block_frame(t: &Town, b: &Block) -> Frame {
+    let base = t.level + 1;
+    if b.side > 0 { Frame::new([b.x0, base, b.z0], [U, V, W]) } else { Frame::new([b.x1 - 1, base, b.z0], [back(U), V, W]) }
 }
 
-/** The x of column w of a block's width. */
-fn column(b: &Block, w: i64) -> i64 {
-    across(b, w, w + 1).0
+/** A tree of the forest's, its foot on the streets' level at (u, w) of `frame`. */
+fn tree(t: &Town, frame: &Frame, u: i64, w: i64, oak: bool, random: &mut Rng) -> Node {
+    let [x, y, z] = frame.site([u, -1, w]);
+    let level = t.level;
+    make_tree(if oak { Species::Oak } else { Species::Birch }, x as f64, y as f64, z as f64, &mut Rng::new(random.next_u64()), &|_, _| {
+        level
+    })
 }
 
 fn block(t: &Town, b: &Block, bounds: Box3) -> Node {
     let mut random = Rng::new(hash64(t.seed, b.side, b.c, b.r));
+    let frame = block_frame(t, b);
     let mut children = Vec::new();
-    let base = t.level + 1;
+    let node =
+        |children| Node { shapes: Shapes::Now(Vec::new()), bounds: Some(bounds), children: Some(Children::Fixed(children)), far: None };
     if b.r == t.square_row() && b.c == 0 {
         if b.side > 0 {
-            children.push(child("church".into(), ANY_SIZE, church(t, b)));
+            let mut shapes = Vec::new();
+            church(&mut Part::new(frame.then(Frame::at([m(4.0), 0, BLOCK_D / 2 - m(6.0)])), &mut shapes));
+            children.push(child("church".into(), ANY_SIZE, thing(shapes)));
         } else {
             // Trees at the square's corners, the forest's own.
-            for (i, (w, g)) in
+            for (i, (u, w)) in
                 [(m(6.0), m(6.0)), (m(6.0), BLOCK_D - m(6.0)), (BLOCK_W - m(8.0), m(6.0)), (BLOCK_W - m(8.0), BLOCK_D - m(6.0))]
                     .into_iter()
                     .enumerate()
             {
-                let x = column(b, w);
-                let species = if random.chance(ONE / 2) { Species::Oak } else { Species::Birch };
-                let mut grow = Rng::new(random.next_u64());
-                let level = t.level;
-                children.push(child(
-                    format!("tree {i}"),
-                    ANY_SIZE,
-                    make_tree(species, x as f64, level as f64, (b.z0 + g) as f64, &mut grow, &|_, _| level),
-                ));
+                let oak = random.chance(ONE / 2);
+                children.push(child(format!("tree {i}"), ANY_SIZE, tree(t, &frame, u, w, oak, &mut random)));
             }
         }
-        return Node { shapes: Shapes::Now(Vec::new()), bounds: Some(bounds), children: Some(Children::Fixed(children)), far: None };
+        return node(children);
     }
-    // Two rows of lots back to back, each facing its street; along z, lots 7 to 12 m wide.
-    for back in [false, true] {
-        let mut g = PAVEMENT;
+    // Two rows of lots back to back, each facing its street; along the block, lots 7 to 12 m wide.
+    for back_row in [false, true] {
+        let mut w = PAVEMENT;
         let mut n = 0;
-        while g < BLOCK_D - PAVEMENT {
+        while w < BLOCK_D - PAVEMENT {
             let mut width = m(7.0) + random.below(m(5.0) as u32) as i64;
-            if BLOCK_D - PAVEMENT - (g + width) < m(5.0) {
-                width = BLOCK_D - PAVEMENT - g;
+            if BLOCK_D - PAVEMENT - (w + width) < m(5.0) {
+                width = BLOCK_D - PAVEMENT - w;
             }
             let gap = if b.c == 0 { 0 } else { m(1.0) + random.below(m(1.0) as u32) as i64 };
             let setback = if b.c == 0 { 0 } else { random.below(m(2.0) as u32) as i64 };
             let depth = m(8.0) + random.below(m(3.0) as u32) as i64;
-            let (w0, w1) = if back {
-                (BLOCK_W - PAVEMENT - setback - depth, BLOCK_W - PAVEMENT - setback)
+            // The house's own frame: u along the street, w back from its front.
+            let front = PAVEMENT + setback;
+            let at = if back_row {
+                Frame::new([BLOCK_W - 1 - front, 0, w + gap], [W, V, back(U)])
             } else {
-                (PAVEMENT + setback, PAVEMENT + setback + depth)
+                Frame::new([front, 0, w + gap], [W, V, U])
             };
-            let (x0, x1) = across(b, w0, w1);
-            // Facing its street: away from the block's middle.
-            let facing = if back == (b.side > 0) { 1 } else { -1 };
             let storeys = if b.c == 0 { 2 + random.below(2) as i64 } else { 1 + random.below(2) as i64 };
-            let house = House { x0, x1, z0: b.z0 + g + gap, z1: b.z0 + g + width - gap, base, storeys, facing, shop: b.c == 0 && !back };
-            children.push(child(format!("house {} {n}", u8::from(back)), ANY_SIZE, house.node(&mut random)));
+            let house = House { length: width - 2 * gap, depth, storeys, shop: b.c == 0 && !back_row };
+            let mut shapes = Vec::new();
+            house.build(&mut Part::new(frame.then(at), &mut shapes), &mut random);
+            children.push(child(format!("house {} {n}", u8::from(back_row)), ANY_SIZE, thing(shapes)));
             // A tree in the yard behind, now and then.
-            let yard = BLOCK_W / 2 - (PAVEMENT + setback + depth);
+            let yard = BLOCK_W / 2 - (front + depth);
             if yard >= m(4.0) && random.chance(fixed(0.3)) {
-                let x = column(b, BLOCK_W / 2 + if back { yard / 2 } else { -yard / 2 });
-                let species = if random.chance(fixed(0.6)) { Species::Birch } else { Species::Oak };
-                let mut grow = Rng::new(random.next_u64());
-                let level = t.level;
-                let z = (b.z0 + g + width / 2) as f64;
+                let u = BLOCK_W / 2 + if back_row { yard / 2 } else { -yard / 2 };
+                let oak = !random.chance(fixed(0.6));
                 children.push(child(
-                    format!("tree {} {n}", u8::from(back)),
+                    format!("tree {} {n}", u8::from(back_row)),
                     ANY_SIZE,
-                    make_tree(species, x as f64, level as f64, z, &mut grow, &|_, _| level),
+                    tree(t, &frame, u, w + width / 2, oak, &mut random),
                 ));
             }
-            g += width;
+            w += width;
             n += 1;
         }
     }
-    Node { shapes: Shapes::Now(Vec::new()), bounds: Some(bounds), children: Some(Children::Fixed(children)), far: None }
+    node(children)
 }
 
-/** A house on [x0, x1) × [z0, z1) from `base` up, its front on x1 (facing +1) or x0 (−1). */
+/** A thing of `shapes`, its far form measured from them (see "Levels" in docs/generators.md). */
+fn thing(shapes: Vec<Shape>) -> Node {
+    Node { far: Some(Far::measured(fixed(2.0))), ..Node::of(shapes) }
+}
+
+/** A house in its own frame: u along its front, v up from its floor, w back from its front. */
 struct House {
-    x0: i64,
-    x1: i64,
-    z0: i64,
-    z1: i64,
-    base: i64,
+    length: i64,
+    depth: i64,
     storeys: i64,
-    facing: i64,
     shop: bool,
 }
 
 const PLASTERS: [K; 6] = [K::plasterOchre, K::plasterWhite, K::plasterPink, K::plasterBlue, K::plasterSage, K::brick];
 
-/** A facade: the plane `axis` (x or z, 0 or 2) = `face`, its outside towards `out` (±1). */
-struct Facade {
-    axis: usize,
-    face: i64,
-    out: i64,
-}
-
-impl Facade {
-    /** A box on it: from `a` to `b` deep into it (negative: in front of it), `along` it the other way, `y` up. */
-    fn bx(&self, a: i64, b: i64, along: (i64, i64), y: (i64, i64), kind: K, op: Op) -> Shape {
-        let (d0, d1) = if self.out > 0 { (self.face - b, self.face - a) } else { (self.face + a, self.face + b) };
-        let (mut min, mut max) = ([along.0, y.0, along.0], [along.1, y.1, along.1]);
-        (min[self.axis], max[self.axis]) = (d0, d1);
-        bx(min, max, kind, op)
+/**
+ * A window on a wall (its own frame: u along it, v up, w into it), from
+ * (u − half, v) to (u + half, v + tall): a frame round it, glass set back
+ * in a reveal, a sill, and shutters if any.
+ */
+fn window(wall: &mut Part, u: i64, v: i64, half: i64, tall: i64, shutters: Option<K>) {
+    wall.paint([u - half - 1, v - 1, 0], [u + half + 1, v + tall + 1, 1], k(K::trim));
+    wall.cut([u - half, v, 0], [u + half, v + tall, 2]);
+    wall.paint([u - half, v, 2], [u + half, v + tall, 3], k(K::glass));
+    wall.add([u - half - 1, v - 1, -1], [u + half + 1, v, 0], k(K::trim));
+    if let Some(kind) = shutters {
+        wall.add([u - half - 5, v, -1], [u - half - 1, v + tall, 0], k(kind));
+        wall.add([u + half + 1, v, -1], [u + half + 5, v + tall, 0], k(kind));
     }
 }
 
-/** A window from y up, centred on zc, `half` wide each way and `tall`: frame, reveal, glass, sill, and shutters if any. */
-fn window(f: &Facade, zc: i64, y: i64, half: i64, tall: i64, shutters: Option<K>, shapes: &mut Vec<Shape>) {
-    shapes.push(f.bx(0, 1, (zc - half - 1, zc + half + 1), (y - 1, y + tall + 1), K::trim, Op::Paint));
-    shapes.push(f.bx(0, 2, (zc - half, zc + half), (y, y + tall), K::trim, Op::Carve));
-    shapes.push(f.bx(2, 3, (zc - half, zc + half), (y, y + tall), K::glass, Op::Paint));
-    shapes.push(f.bx(-1, 0, (zc - half - 1, zc + half + 1), (y - 1, y), K::trim, Op::Fill));
-    if let Some(kind) = shutters {
-        shapes.push(f.bx(-1, 0, (zc - half - 5, zc - half - 1), (y, y + tall), kind, Op::Fill));
-        shapes.push(f.bx(-1, 0, (zc + half + 1, zc + half + 5), (y, y + tall), kind, Op::Fill));
+/** A door on a wall from (u − half, 0) up, `tall`: framed, its leaf set back, or open (`open`) through `thick`. */
+fn door(wall: &mut Part, u: i64, half: i64, tall: i64, open: Option<i64>) {
+    wall.paint([u - half - 1, 0, 0], [u + half + 1, tall + 1, 1], k(K::trim));
+    match open {
+        Some(thick) => {
+            wall.cut([u - half, 0, 0], [u + half, tall, thick]);
+        }
+        None => {
+            wall.cut([u - half, 0, 0], [u + half, tall, 2]);
+            wall.paint([u - half, 0, 2], [u + half, tall, 3], k(K::door));
+        }
     }
 }
 
 impl House {
-    fn node(&self, random: &mut Rng) -> Node {
-        let House { x0, x1, z0, z1, base, storeys, facing, .. } = *self;
+    fn build(&self, part: &mut Part, random: &mut Rng) {
+        let House { length, depth, storeys, .. } = *self;
         let kinds = if random.chance(fixed(0.1)) { 6 } else { 5 };
-        let plaster = PLASTERS[random.below(kinds) as usize];
-        let roof_kind = [K::roofRed, K::roofRed, K::roofBrown, K::slate][random.below(4) as usize];
-        let top = base + storeys * STOREY;
+        let plaster = k(PLASTERS[random.below(kinds) as usize]);
+        let roof = k([K::roofRed, K::roofRed, K::roofBrown, K::slate][random.below(4) as usize]);
+        let top = storeys * STOREY;
+        part.add([-1, -3, -1], [length + 1, 4, depth + 1], k(K::churchStone));
+        part.add([0, 0, 0], [length, top, depth], plaster);
         // Its ridge along the street, eaves to it; now and then gable-fronted.
-        let ridge = if random.chance(fixed(0.75)) { 2 } else { 0 };
+        let ridge = if random.chance(fixed(0.75)) { 0 } else { 2 };
         let across = 2 - ridge;
-        let (lo, hi) = if across == 0 { (x0, x1) } else { (z0, z1) };
-        let eaves = 3;
-        let rise = ((hi - lo) as f64 / 2.0 + eaves as f64) * (0.6 + random.next() * 0.4);
-        let widen = |v: [f64; 3], by: f64| {
-            let mut v = v;
-            v[across] += by;
-            v
+        let (width, eaves) = (if across == 0 { length } else { depth }, 3);
+        let rise = (width as f64 / 2.0 + eaves as f64) * (0.6 + random.next() * 0.4);
+        let roofed = |rise: f64, eaves: i64| {
+            let (mut min, mut max) = ([0.0, top as f64, 0.0], [length as f64, top as f64 + rise, depth as f64]);
+            (min[across], max[across]) = (-eaves as f64, (width + eaves) as f64);
+            (min, max)
         };
-        let (min, max) = ([x0 as f64, top as f64, z0 as f64], [x1 as f64, top as f64, z1 as f64]);
-        let wall_rise = rise * (hi - lo) as f64 / (hi - lo + 2 * eaves) as f64;
-        let mut body = vec![
-            bx([x0 - 1, base - 3, z0 - 1], [x1 + 1, base + 4, z1 + 1], K::churchStone, Op::Fill),
-            bx([x0, base, z0], [x1, top, z1], plaster, Op::Fill),
-            gable(min, [max[0], top as f64 + wall_rise, max[2]], ridge, k(plaster), SOLID, Op::Fill),
-            gable(
-                widen(min, -(eaves as f64)),
-                widen([max[0], top as f64 + rise, max[2]], eaves as f64),
-                ridge,
-                k(roof_kind),
-                SOLID,
-                Op::Fill,
-            ),
-        ];
+        let (min, max) = roofed(rise * width as f64 / (width + 2 * eaves) as f64, 0);
+        part.gable(min, max, ridge, plaster, Op::Fill);
+        let (min, max) = roofed(rise, eaves);
+        part.gable(min, max, ridge, roof, Op::Fill);
         // Eaves boarded along both sides: a thin wedge's edge would leave gaps.
-        for (from, to) in [(lo - eaves, lo), (hi, hi + eaves)] {
-            let (mut min, mut max) = ([x0, top - 2, z0], [x1, top + 1, z1]);
+        for (from, to) in [(-eaves, 0), (width, width + eaves)] {
+            let (mut min, mut max) = ([0, top - 2, 0], [length, top + 1, depth]);
             (min[across], max[across]) = (from, to);
-            body.push(bx(min, max, roof_kind, Op::Fill));
+            part.add(min, max, roof);
         }
-        let (cx, cz) =
-            (x0 + 4 + random.below((x1 - x0 - 9).max(1) as u32) as i64, z0 + 4 + random.below((z1 - z0 - 9).max(1) as u32) as i64);
-        body.push(bx([cx, top, cz], [cx + 5, top + rise as i64 + m(0.8), cz + 5], K::brick, Op::Fill));
+        let (cu, cw) = (4 + random.below((length - 9).max(1) as u32) as i64, 4 + random.below((depth - 9).max(1) as u32) as i64);
+        part.add([cu, top, cw], [cu + 5, top + rise as i64 + m(0.8), cw + 5], k(K::brick));
 
-        // Windows on both long sides, a door in the front's middle, a shop's open door and room on the ground floor.
+        // Windows front and back, a door in the front's middle; a shop's open door, wide windows and room on the ground floor.
         let shutters = random.chance(fixed(0.4)).then(|| if random.chance(ONE / 2) { K::shutterGreen } else { K::shutterBlue });
         let shop = self.shop && random.chance(ONE / 2);
-        let slots = 1.max((z1 - z0 - m(1.0)) / m(2.4));
-        let slot = |j: i64| z0 + (z1 - z0) * (2 * j + 1) / (2 * slots);
-        let door = slots / 2;
-        let mut openings = Vec::new();
-        let mut bands = Vec::new();
-        for front in [true, false] {
-            let out = if front { facing } else { -facing };
-            let f = Facade { axis: 0, face: if out > 0 { x1 } else { x0 }, out };
+        let slots = 1.max((length - m(1.0)) / m(2.4));
+        let slot = |j: i64| length * (2 * j + 1) / (2 * slots);
+        for (i, (wall, _)) in walls(length, depth).into_iter().enumerate().filter(|(i, _)| i % 2 == 0) {
+            let mut wall = part.within(wall);
             for storey in 0..storeys {
-                let floor = base + storey * STOREY;
-                let sill = floor + m(0.9);
-                // Far away, a band of the facade as much glass as its windows.
-                let glazed = (slots * 8) as f64 / (z1 - z0) as f64;
-                bands.push(f.bx(0, 1, (z0, z1), (sill, sill + 11), K::glass, Op::Paint));
-                bands.last_mut().expect("one").fill = Fill::Const(glazed);
+                let floor = storey * STOREY;
                 for j in 0..slots {
-                    let zc = slot(j);
-                    if front && storey == 0 && j == door {
-                        openings.push(f.bx(0, 1, (zc - 5, zc + 6), (floor, floor + 19), K::trim, Op::Paint));
-                        if shop {
-                            openings.push(f.bx(0, WALL, (zc - 4, zc + 5), (floor, floor + 18), K::trim, Op::Carve));
-                        } else {
-                            openings.push(f.bx(0, 2, (zc - 4, zc + 5), (floor, floor + 18), K::trim, Op::Carve));
-                            openings.push(f.bx(2, 3, (zc - 4, zc + 5), (floor, floor + 18), K::door, Op::Paint));
-                        }
-                    } else if front && storey == 0 && shop {
-                        window(&f, zc, floor + 3, ((z1 - z0) / slots / 2 - 3).min(9), 15, None, &mut openings);
+                    let u = slot(j);
+                    if i == 0 && storey == 0 && j == slots / 2 {
+                        door(&mut wall, u, 4, 18, shop.then_some(WALL));
+                    } else if i == 0 && storey == 0 && shop {
+                        window(&mut wall, u, 3, (length / slots / 2 - 3).min(9), 15, None);
                     } else {
-                        window(&f, zc, sill, 4, 11, shutters, &mut openings);
+                        window(&mut wall, u, floor + m(0.9), 4, 11, shutters);
                     }
                 }
             }
         }
         if shop {
-            let (r0, r1) = ([x0 + WALL, base + 1, z0 + WALL], [x1 - WALL, base + STOREY - 2, z1 - WALL]);
-            openings.push(bx(r0, r1, K::trim, Op::Carve));
-            openings.push(bx([r0[0], base, r0[2]], [r1[0], base + 1, r1[2]], K::planks, Op::Paint));
+            let room = ([WALL, 1, WALL], [length - WALL, STOREY - 2, depth - WALL]);
+            part.cut(room.0, room.1);
+            part.paint([room.0[0], 0, room.0[2]], [room.1[0], 1, room.1[2]], k(K::planks));
             // Shelves of goods along the back wall, a counter across the room.
-            let back = Facade { axis: 0, face: if facing > 0 { x0 } else { x1 }, out: -facing };
-            openings.push(back.bx(WALL, WALL + 4, (r0[2] + 2, r1[2] - 2), (base + 1, base + 17), K::counter, Op::Fill));
-            let mut goods = back.bx(WALL - 1, WALL + 4, (r0[2] + 2, r1[2] - 2), (base + 3, base + 16), K::goods, Op::Paint);
-            goods.fill = Fill::Const(0.5);
-            openings.push(goods);
-            let mid = Facade { axis: 0, face: (x0 + x1) / 2, out: -facing };
-            openings.push(mid.bx(0, 3, (r0[2] + 4, (r0[2] + r1[2]) / 2), (base + 1, base + 8), K::counter, Op::Fill));
-        }
-        let bounds = crate::generator::bounds_of_shapes(body.iter().chain(&openings).map(|s| &s.bounds));
-        let mut far = body.clone();
-        far.extend(bands);
-        Node {
-            shapes: Shapes::Now(body),
-            bounds: Some(bounds),
-            children: Some(Children::Fixed(vec![child("openings".into(), ANY_SIZE, Node::of(openings))])),
-            far: Some(Far { detail: fixed(2.0), shapes: far }),
+            let shelves = ([room.0[0] + 2, 1, room.1[2] - 4], [room.1[0] - 2, 17, room.1[2]]);
+            part.add(shelves.0, shelves.1, k(K::counter));
+            part.paint([shelves.0[0], 3, shelves.0[2] - 1], [shelves.1[0], 16, shelves.1[2]], k(K::goods)).fill = Fill::Const(0.5);
+            part.add([room.0[0] + 4, 1, depth / 2], [length / 2, 8, depth / 2 + 3], k(K::counter));
         }
     }
 }
 
-/** The church on the square: a nave along x, a tower with a spire at its front onto the main street. */
-fn church(t: &Town, b: &Block) -> Node {
-    let base = t.level + 1;
-    let (zc, half) = ((b.z0 + b.z1) / 2, m(6.0));
-    let (tower_lo, tower_hi) = across(b, m(4.0), m(9.0));
-    let (nave_lo, nave_hi) = across(b, m(9.0), BLOCK_W - m(3.0));
-    let nave_top = base + m(9.0);
+/** The church, in its own frame: its tower's front on u from 0 to TOWER, a nave behind it, CHURCH wide across w. */
+fn church(part: &mut Part) {
+    const TOWER: i64 = m(5.0);
+    const NAVE: i64 = m(12.0);
+    let (nave_length, nave_top, tower_top) = (BLOCK_W - m(7.0) - TOWER, m(9.0), m(22.0));
+    let stone = k(K::churchStone);
+    // The nave: u along it (from the tower), w across.
+    let mut nave = part.within(Frame::new([TOWER, 0, 0], [U, V, W]));
+    nave.add([0, -3, 0], [nave_length, nave_top, NAVE], stone);
     let rise = m(5.5) as f64;
-    let tower_top = base + m(22.0);
-    let tz = (zc - m(2.5), zc + m(2.5));
-    let mut shapes = vec![
-        bx([nave_lo, base - 3, zc - half], [nave_hi, nave_top, zc + half], K::churchStone, Op::Fill),
-        gable(
-            [nave_lo as f64, nave_top as f64, (zc - half) as f64],
-            [nave_hi as f64, nave_top as f64 + rise * 0.9, (zc + half) as f64],
-            0,
-            k(K::churchStone),
-            SOLID,
-            Op::Fill,
-        ),
-        gable(
-            [nave_lo as f64, nave_top as f64, (zc - half - 3) as f64],
-            [nave_hi as f64 + 2.0, nave_top as f64 + rise, (zc + half + 3) as f64],
-            0,
-            k(K::slate),
-            SOLID,
-            Op::Fill,
-        ),
-        bx([tower_lo, base - 3, tz.0], [tower_hi, tower_top, tz.1], K::churchStone, Op::Fill),
-    ];
-    let (cx, r) = (((tower_lo + tower_hi) / 2) as f64, (m(2.5) + 1) as f64);
-    let tip = m(12.0) as f64;
-    shapes.push(lathe(
-        [cx, tower_top as f64, zc as f64],
-        [cx, tower_top as f64 + tip, zc as f64],
+    nave.gable([0.0, nave_top as f64, 0.0], [nave_length as f64, nave_top as f64 + rise * 0.9, NAVE as f64], 0, stone, Op::Fill);
+    nave.gable(
+        [0.0, nave_top as f64, -3.0],
+        [nave_length as f64 + 2.0, nave_top as f64 + rise, (NAVE + 3) as f64],
+        0,
+        k(K::slate),
+        Op::Fill,
+    );
+    // Tall windows down its two long walls.
+    let windows = (nave_length - m(2.0)) / m(3.0);
+    for (wall, length) in walls(nave_length, NAVE).into_iter().step_by(2) {
+        let mut wall = nave.within(wall);
+        for i in 0..windows {
+            let u = m(1.5) + (length - m(3.0)) * (2 * i + 1) / (2 * windows);
+            wall.cut([u - 3, m(2.0), 0], [u + 3, m(7.0), 2]);
+            wall.paint([u - 3, m(2.0), 2], [u + 3, m(7.0), 3], k(K::glass));
+        }
+    }
+    // The tower: square, across the nave's middle, its door onto the square, a clock above, belfry openings on every side, a spire.
+    let mut tower = part.within(Frame::at([0, 0, NAVE / 2 - TOWER / 2]));
+    tower.add([0, -3, 0], [TOWER, tower_top, TOWER], stone);
+    for (q, (wall, _)) in walls(TOWER, TOWER).into_iter().enumerate() {
+        let mut wall = tower.within(wall);
+        if q == 3 {
+            door(&mut wall, TOWER / 2, 7, m(3.5), None);
+            wall.ball([(TOWER / 2) as f64, (tower_top - m(5.0)) as f64, 0.0], 7.0, k(K::trim), Op::Paint);
+        }
+        wall.cut([TOWER / 2 - 6, tower_top - m(3.0), 0], [TOWER / 2 + 6, tower_top - m(1.0), m(1.0)]);
+    }
+    let (c, r) = ((TOWER / 2) as f64, (TOWER / 2 + 1) as f64);
+    tower.lathe(
+        [c, tower_top as f64, c],
+        [c, (tower_top + m(12.0)) as f64, c],
         move |t| r * (1.0 - t) + 1.0,
         k(K::copper),
         SOLID,
         Op::Fill,
-    ));
-    let far = shapes.clone();
-    // Tall windows down the nave's sides, belfry openings and a clock on the tower, a door at its foot.
-    let mut openings = Vec::new();
-    let windows = (nave_hi - nave_lo - m(2.0)) / m(3.0);
-    for side in [-1, 1] {
-        let f = Facade { axis: 2, face: if side > 0 { zc + half } else { zc - half }, out: side };
-        for i in 0..windows {
-            let x = nave_lo + m(1.5) + (nave_hi - nave_lo - m(3.0)) * (2 * i + 1) / (2 * windows);
-            openings.push(f.bx(0, 2, (x - 3, x + 3), (base + m(2.0), base + m(7.0)), K::trim, Op::Carve));
-            openings.push(f.bx(2, 3, (x - 3, x + 3), (base + m(2.0), base + m(7.0)), K::glass, Op::Paint));
-        }
-    }
-    let front = Facade { axis: 0, face: if b.side > 0 { tower_lo } else { tower_hi }, out: -b.side };
-    openings.push(front.bx(0, 3, (zc - 7, zc + 7), (base, base + m(3.5)), K::trim, Op::Carve));
-    openings.push(front.bx(3, 4, (zc - 7, zc + 7), (base, base + m(3.5)), K::door, Op::Paint));
-    openings.push(ball([front.face as f64, (tower_top - m(5.0)) as f64, zc as f64], 7.0, k(K::trim), SOLID, Op::Paint));
-    for (face, out) in [(tower_lo, -1), (tower_hi, 1)] {
-        let f = Facade { axis: 0, face, out };
-        openings.push(f.bx(0, m(5.0), (zc - 6, zc + 6), (tower_top - m(3.0), tower_top - m(1.0)), K::trim, Op::Carve));
-    }
-    let bounds = crate::generator::bounds_of_shapes(far.iter().chain(&openings).map(|s| &s.bounds));
-    Node {
-        shapes: Shapes::Now(shapes),
-        bounds: Some(bounds),
-        children: Some(Children::Fixed(vec![child("openings".into(), ANY_SIZE, Node::of(openings))])),
-        far: Some(Far { detail: fixed(2.0), shapes: far }),
-    }
+    );
 }
 
 /** Street lamps down both sides of the main street in row r, by turns. */
 fn lamps(t: &Town, r: i64) -> Node {
-    let base = t.level + 2;
     let z0 = t.z - t.half_z() + r * (BLOCK_D + STREET);
     let mut shapes = Vec::new();
-    let mut z = z0 + m(4.0);
-    let mut side = 1;
+    let (mut z, mut side) = (z0 + m(4.0), 1);
     while z < z0 + BLOCK_D - m(2.0) {
-        let x = t.x + side * (MAIN / 2 + m(0.75));
-        let top = base + m(3.5);
-        shapes.push(bx([x - 2, base, z - 2], [x + 2, base + 2, z + 2], K::iron, Op::Fill));
-        shapes.push(bx([x - 1, base, z - 1], [x + 1, top, z + 1], K::iron, Op::Fill));
-        shapes.push(bx([x - 2, top, z - 2], [x + 2, top + 4, z + 2], K::lamp, Op::Fill));
-        shapes.push(bx([x - 3, top + 4, z - 3], [x + 3, top + 5, z + 3], K::iron, Op::Fill));
+        // On the pavement's kerb, a step above the street.
+        let mut lamp = Part::new(Frame::at([t.x + side * (MAIN / 2 + m(0.75)), t.level + 2, z]), &mut shapes);
+        let top = m(3.5);
+        lamp.add([-2, 0, -2], [2, 2, 2], k(K::iron));
+        lamp.add([-1, 0, -1], [1, top, 1], k(K::iron));
+        lamp.add([-2, top, -2], [2, top + 4, 2], k(K::lamp));
+        lamp.add([-3, top + 4, -3], [3, top + 5, 3], k(K::iron));
         z += m(16.0);
         side = -side;
     }
@@ -649,17 +581,16 @@ fn lamps(t: &Town, r: i64) -> Node {
 
 /** A fountain in the middle of the square: a basin, a column and a bowl, water in both. */
 fn fountain(t: &Town) -> Node {
-    let base = (t.level + 1) as f64;
     let z0 = t.z - t.half_z() + t.square_row() * (BLOCK_D + STREET);
-    let (x, z) = (t.x as f64, (z0 + BLOCK_D / 2) as f64);
-    let stone = k(K::churchStone);
-    let at = |y: f64| [x, base + y, z];
-    Node::of(vec![
-        lathe(at(-1.0), at(5.0), |_| m(3.0) as f64, stone, SOLID, Op::Fill),
-        lathe(at(3.0), at(5.0), |_| (m(3.0) - 3) as f64, k(K::water), SOLID, Op::Paint),
-        lathe(at(5.0), at(15.0), |_| 3.0, stone, SOLID, Op::Fill),
-        lathe(at(14.0), at(18.0), |t| 4.0 + 6.0 * t, stone, SOLID, Op::Fill),
-        lathe(at(17.0), at(18.0), |_| 7.0, k(K::water), SOLID, Op::Paint),
-        ball(at(20.0), 2.0, stone, SOLID, Op::Fill),
-    ])
+    let mut shapes = Vec::new();
+    let mut f = Part::new(Frame::at([t.x, t.level + 1, z0 + BLOCK_D / 2]), &mut shapes);
+    let (stone, water) = (k(K::churchStone), k(K::water));
+    let up = |y: f64| [0.0, y, 0.0];
+    f.lathe(up(-1.0), up(5.0), |_| m(3.0) as f64, stone, SOLID, Op::Fill);
+    f.lathe(up(3.0), up(5.0), |_| (m(3.0) - 3) as f64, water, SOLID, Op::Paint);
+    f.lathe(up(5.0), up(15.0), |_| 3.0, stone, SOLID, Op::Fill);
+    f.lathe(up(14.0), up(18.0), |t| 4.0 + 6.0 * t, stone, SOLID, Op::Fill);
+    f.lathe(up(17.0), up(18.0), |_| 7.0, water, SOLID, Op::Paint);
+    f.ball(up(20.0), 2.0, stone, Op::Fill);
+    Node::of(shapes)
 }

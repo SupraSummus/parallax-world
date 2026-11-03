@@ -6,7 +6,7 @@
 use std::rc::Rc;
 
 use crate::fields;
-use crate::forest::{self, GROUND_SCALE, Ground, PATH_SCALE, Relief};
+use crate::forest::{self, GROUND_SCALE, Ground, PATH_SCALE, Relief, m};
 use crate::generator::Generator;
 use crate::noise::{ONE, stream};
 use crate::plan::{Land, Plan};
@@ -63,8 +63,4 @@ pub fn valley(seed: u64) -> (Generator, [i64; 3]) {
     layers.extend(fields::layers(seed, land, FIELDS, ground, path));
     let kinds = [forest::KINDS, town::KINDS, fields::KINDS].concat();
     (Generator { kinds, seed: stream(seed, 4), layers }, spawn)
-}
-
-const fn m(metres: f64) -> i64 {
-    (metres / forest::UNIT_SIZE + 0.5 * if metres < 0.0 { -1.0 } else { 1.0 }) as i64
 }

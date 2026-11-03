@@ -5,6 +5,7 @@
 
 pub mod fields;
 pub mod forest;
+pub mod frame;
 pub mod generator;
 pub mod grid;
 pub mod js;

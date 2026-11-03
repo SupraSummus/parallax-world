@@ -6,7 +6,7 @@
 
 use std::rc::Rc;
 
-use crate::forest::{self, K as F, UNIT_SIZE};
+use crate::forest::{self, K as F, m};
 use crate::generator::{Field, FieldValues, Kind, Layer, Node, Op, Population, SOLID, Span, ball, stripe};
 use crate::kinds;
 use crate::noise::{Fbm, Fixed, ONE, Rng, ValueNoise, fixed, hash, hash64, smoothstep, stream};
@@ -21,10 +21,6 @@ kinds! {
     tilth: 2, ["#7a5a3e", "#86644a"];
     crop: 5, ["#4f8a34", "#5a9a3c", "#467c2e"];
     meadow: 1, ["#7aae48", "#86b850", "#6fa040"];
-}
-
-const fn m(metres: f64) -> i64 {
-    (metres / UNIT_SIZE + 0.5) as i64
 }
 
 /** Plan scale of the fields' bid, and of the slope they bid by. */
@@ -122,9 +118,7 @@ pub fn layers(seed: u64, land: Rc<Land>, me: usize, ground: Rc<Plan<i64>>, path:
                         Crop::Ploughed => vec![surface(k(if stripe(z, 8, spacing, dither) { K::furrow } else { K::tilth }))],
                         Crop::Rows => {
                             let mut spans = vec![surface(k(K::furrow))];
-                            if 2 * spacing > 12 {
-                                spans.push(medium(above, 2, k(K::crop), 0.3, spacing));
-                            } else if stripe(z, 12, spacing, dither) {
+                            if stripe(z, 12, spacing, dither) {
                                 spans.push(medium(above, 2, k(K::crop), 0.6, spacing));
                             }
                             spans

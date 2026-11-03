@@ -75,6 +75,7 @@ worldgen/                    # World generation, moving to integers, into the ba
     ├── noise.rs, grid.rs    # Integer hashes, random numbers, fixed-point noise; voxel-grid.ts's bricks
     ├── generator.rs         # The framework: shapes, nodes, fields, populations, drawing any box at any level
     ├── plan.rs              # Plans by column, each from coarser ones only; land domains bid for
+    ├── frame.rs             # Things built in frames of their own: quarter turns, mirrors, walls
     ├── forest.rs            # The forest, on ground it may share (UNIT_SIZE lives here)
     ├── town.rs, fields.rs   # Towns along the path, farmland around them: the valley's other domains
     ├── valley.rs            # The valley: the three domains on one land

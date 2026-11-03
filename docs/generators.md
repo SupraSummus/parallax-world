@@ -45,6 +45,17 @@ Shapes are analytic: `ball`, `ellipsoid`, `capsule`, `cuboid`, `lathe`
 Each `fill`s empty sites, `paint`s over them, or `carve`s them empty,
 and may keep each site only with a chance (`fill` < 1: foliage, fog).
 Authors never write sites; the framework draws shapes and fields at the level asked.
+A thing is drawn whole, then over the world:
+its carves cut only it, never the ground or other things
+(dig the ground with a field),
+and each of its sites meets the world as it was last drawn, filling or painting.
+
+Things are built in **frames** (`frame.rs`):
+a `Part` adds, paints and cuts boxes in coordinates of its own, u, v and w,
+placed in its parent's by quarter turns about v, mirrors and an offset,
+so boxes stay boxes and a part's sites land on its parent's.
+`walls` gives a footprint's four walls as frames, u along each and w into it,
+so one window serves every wall of a house, a nave or a tower.
 
 No direction is special;
 a world with a ground says so in its fields and anchors.
@@ -71,6 +82,16 @@ how many rays get how far, and what they stop on.
   (from `detail` on): a crown's outline for its leaf clusters,
   which drawn one by one would stop rays twice where they overlap;
   a cluster's ball for its sprays of leaves on twigs, a site thick at level 0.
+  Or the far form is the near form measured (`Far::measured`):
+  drawn whole at the coarsest level it is drawn at, then coarsened,
+  each coarse site kept with the chance a ray crossing its cell is stopped
+  (the share of its columns holding a site, on average over the axes)
+  and of a kind in proportion to what shows on its sides.
+  The chances are held to one threshold for the whole thing:
+  with one per site a house's outline came out ragged, a cloud of its cells;
+  so a porous thing is kept or not whole, right only over many of them.
+  That is exact where an outline is a guess, at a cost:
+  each box draws the things it reaches whole.
   Give such parts' children `bounds` and make their shapes only once read
   (`Shapes::lazy`): coarse boxes hold many things drawn only from afar.
   Parts a thing hides, like branches inside a crown, are children with a small `size`:
@@ -80,7 +101,8 @@ how many rays get how far, and what they stop on.
   beyond, they draw their `far` field instead:
   a medium as dense as their things, by the theory of Boolean models
   (extinction = things per volume · their mean shadow).
-  `area_profile` measures their area along an axis from sample things.
+  `Shadows` measures it from sample things drawn alone at a level:
+  what each slab of them across an axis hides, seen along each axis.
 - **Fields** are evaluated once per site or line of sites,
   and get the spacing, to smooth themselves to it.
 
@@ -96,7 +118,10 @@ Broken rules panic, naming the thing and pointing here:
   only things that get made are checked, so derive `reach` from the largest possible.
 - **Things.** A node with children gives `bounds` holding them;
   a child stays inside its parent's bounds;
-  siblings have unique names.
+  siblings have unique names;
+  a measured far form starts at a `detail` of a unit or more.
+- **Plans.** A plan reads only plans at least as coarse (see "Bands").
+- **Kinds.** A world has at most 255 materials: ids are bytes.
 
 Not checked, but caught by the tests:
 draw from position, seeds and named random sequences only
@@ -106,7 +131,8 @@ and fields from position alone.
 ## Checks
 
 `worldgen/tests/contract.rs` runs, for each world in its list
-(the forest, and test worlds of fog, caves, and a village of houses with doors and tables):
+(the forest, the valley, and test worlds of fog, caves,
+and a village of houses with doors and tables):
 
 - a box against eight parts generated alone, in reverse order,
   at levels 0, 2 and one past the last checked below:
@@ -118,6 +144,8 @@ and fields from position alone.
   Sites a level rougher and sheets a site thicker cost up to ~0.06;
   losing content, or a wrong fill law, 0.14 and more.
 
+With `--nocapture` it prints each level's margins.
+It also checks that a thing's carves cut only the thing.
 Add a new world to that list with a region that has a bit of everything in it.
 To see a world's layout without the renderer,
 `worldgen/examples/map.rs` draws it from above, any level, any area.
@@ -170,14 +198,11 @@ so the ground blends by the town's own terrace weight, not by shares.
 
 ### Far forms keep statistics
 
-A thing's far form keeps what its near form shows on average:
-a house's, from level 2 on, is its walls and roof,
-each row of its windows a band of glass as dense as the windows are,
-so rays stop on the same materials at every level.
-Patterns finer than the sites draw their parts in proportion (`stripe`),
-and media under two sites tall are made two sites tall,
-as much in the way of a ray as before (`medium` in `fields.rs`),
-instead of aliasing or vanishing.
+What is drawn far away keeps what is near on average, not its outline:
+the towns' things and the forest's canopy are measured ("Levels"),
+patterns finer than the sites draw their parts in proportion (`stripe`),
+and media too thin for the sites are thickened, as dense along a ray
+(`medium` in `fields.rs`).
 
 ### Kinds and things
 
@@ -186,20 +211,20 @@ after those of the domains it builds on:
 the forest's come first in any world it grows in,
 so its things are a library others draw from
 (the towns' trees are the forest's `make_tree`).
-A world has at most 255 materials.
 
 ## Open problems
 
-- **Far forms are calibrated from analytic areas.**
-  The forest's canopy (its trees from level 4 on) stops 0.05–0.1 more rays
-  at levels 5 to 7 (sites 4 to 16 m apart) than two levels finer:
-  porous, uneven crowns stop fewer rays than their outlines' area says,
-  while balls of sites stop ~1.5× more than a ball's area says.
-  Far forms should be measured from sample things drawn at level 0:
-  a site of level k stands for the 8^k sites of its cell (`cells.ts`),
-  so counting them is exact where an area is an estimate.
+- **The forest's coarse levels stop ~0.05 more rays than two finer**
+  (levels 6 and 7, sites 8 and 16 m apart).
+  Measuring the canopy from sample trees drawn at level 2,
+  instead of from their shapes' areas, brought level 4 from 0.024 off to 0.007,
+  but left levels 6 and 7 about where they were (0.05 and 0.06):
+  what is left is likely not the canopy's density but its band,
+  26 m tall, two or three sites there. Not checked yet.
 - **Media are isotropic.** A site stops rays from every direction alike;
   vertical trunks seen from above and from the side cannot both be right.
+  Measured far forms show it too: a town far away shows its walls from above
+  as much as its roofs, since a site's kind is what shows on all its sides.
 - **Things of one band can't see each other.** Bands order what decides where,
   but two populations of one scale ("no tree on a boulder") still can't
   exclude each other. Claims with hashed priorities would be local and
