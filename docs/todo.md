@@ -15,6 +15,10 @@ Numbers are for the forest at 1280×800, as measured when written.
   where slices re-tile as the camera moves along an axis,
   the new ones show nothing until baked.
   Its camera is f64, not fixed point (positions reach the GPU relative to it).
+  Its compositor needs indirect draws counted on the GPU
+  (`MULTI_DRAW_INDIRECT_COUNT`): Vulkan or DX12, not Metal or GL.
+  That its culling hides nothing that shows is checked only by hand
+  (shots with `hidden` off match pixel for pixel).
   Turning, a frame costs its main thread over 10 ms in the forest.
   `native/` is not built in CI.
 - **TS and Rust still say much the same twice.**
@@ -40,18 +44,22 @@ Numbers are for the forest at 1280×800, as measured when written.
   and what is behind it is skipped.
   The mask could follow the focal length and detail,
   keyed in the chunk like `fill`, leaving the slices as they are.
-- **Every splat in view is drawn every frame.**
-  The forest has millions in view;
+- **The web draws every splat in view every frame.**
+  The forest has millions in view, and only about 1.5 % show a pixel;
   headless Chromium's software WebGL takes over a second per frame,
   and WebGL on real GPUs is not measured yet.
-  Natively, on an Intel UHD, a frame of about 3 million costs
-  some 6 ns per splat before any pixel,
-  whatever its shape (quads, triangles, hexagons; instanced or not),
-  and about three quarters are behind nearer layers.
-  Culling single splats on the GPU needs a chunk's painting order
-  (now its draw order, ties at one depth) in the depth instead.
-  Splats a chunk's nearer ones hide from the whole eye's cell
-  need not be in it.
+  The native compositor culls clusters of them on the GPU
+  (section 4 of `docs/architecture.md`), which WebGL 2 cannot
+  (no compute, no indirect draws).
+  Its painting order is the draw order at one depth per layer,
+  which rounding breaks: natively, the same misordered about 6 % of the pixels.
+- **Most splats drawn natively are hidden within their own chunk.**
+  The native frame (about 8 ms on an Intel UHD, `--bench`)
+  is mostly drawing the clusters that show,
+  whose splats cover the screen several times over.
+  About half of all splats are hidden by nearer ones of their chunk,
+  the same from every camera (splats lie where the eye puts them),
+  so the baker could drop them.
 - **Bricks on the edge of a face's rhombus are baked whole.**
   Near where a level starts, about 19 bricks meet the rhombus,
   and most of them cross its edge or the screen's.

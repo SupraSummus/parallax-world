@@ -86,7 +86,7 @@ native/                      # Spike of a native frontend (eframe + wgpu), linki
     ├── layer_index.rs       # LayerIndex (voxel-grid.ts): where each face's layers hold voxels
     ├── renderer.rs          # renderer.ts: chunks in view, cached, stand-ins, coverage (bake's Coverage)
     ├── bakery.rs            # Worker threads baking chunks, a baker each sharing the tiles
-    ├── compositor.rs        # compositor.ts with wgpu: splats uploaded per chunk, placed relative to the camera
+    ├── compositor.rs        # compositor.ts with wgpu: splats uploaded per chunk in clusters, culled on the GPU against what showed
     ├── shot.rs              # --shot: one frame drawn offscreen on the GPU, saved as a PNG, no window
     └── compositor.wgsl
 ```

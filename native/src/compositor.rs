@@ -1,18 +1,21 @@
 //! Draws a frame's chunks with wgpu, as compositor.ts does with WebGL 2,
-//! inside egui's render pass (which has the depth buffer) or one of its own
-//! for a shot: each chunk's splats instanced, then the sky behind them.
+//! into a picture of its own, which egui's render pass (or a shot) shows:
+//! only the clusters of splats that may show, culled on the GPU against
+//! the depth of what the last frame showed (compositor.wgsl), then the sky
+//! behind them.
 //!
 //! A chunk's splats are uploaded when it comes into view, into one buffer
-//! for all, and dropped when it leaves; each frame rewrites only a table of
-//! the chunks' placements, relative to the camera, so precision does not
-//! fall off far from the origin.
+//! for all, in clusters of splats near each other on its plane, and dropped
+//! when it leaves; each frame rewrites only a table of the chunks'
+//! placements, relative to the camera, so precision does not fall off far
+//! from the origin, and the list of their clusters.
 
 use std::collections::HashMap;
 use std::ops::Range;
 
 use eframe::egui_wgpu::{self, wgpu};
 
-use crate::renderer::Frame;
+use crate::renderer::{Chunk, Frame};
 use crate::view::{Vec3, to_local, view_basis};
 
 /** A chunk as the shader reads it (Chunk in compositor.wgsl). */
@@ -28,153 +31,60 @@ struct GpuChunk {
     pad: f32,
 }
 
-/** A splat instance: its SPLAT numbers (chunk-baker.ts), its chunk's slot, and its order in the chunk (depth_of in compositor.wgsl). */
+/** A splat (splat_vertex's instance in compositor.wgsl): its SPLAT numbers (chunk-baker.ts), its chunk's slot, and its order in the chunk (depth_of). */
 type GpuSplat = [u32; 7];
-const SPLAT_BYTES: u64 = std::mem::size_of::<GpuSplat>() as u64;
 
-/** A chunk's splats on the GPU: where in the splat buffer, its slot in the table, and the frame it was last drawn in. */
+/** A cluster (Cluster in compositor.wgsl). */
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct GpuCluster {
+    min: [f32; 2],
+    max: [f32; 2],
+    first: u32,
+    slot_count: u32,
+    order: f32,
+    visible: u32,
+}
+
+/**
+ * Splats at most in a cluster (its count is a byte), and points across the
+ * blocks of a chunk's plane its clusters gather splats from, where the chunk
+ * is when it comes into view: the fastest in the forest, between fewer
+ * splats drawn and fewer clusters to cull and draw.
+ */
+const CLUSTER: usize = 16;
+const BLOCK: f64 = 12.0;
+
+/** A chunk's splats and clusters on the GPU, its slot in the table, and the frame it was last drawn in. */
 struct Resident {
     splats: Range<u32>,
+    clusters: Range<u32>,
     slot: u32,
     drawn: u64,
 }
 
-pub struct Compositor {
-    splats: wgpu::RenderPipeline,
-    sky: wgpu::RenderPipeline,
-    globals: wgpu::Buffer,
-    layout: wgpu::BindGroupLayout,
-    bind_group: wgpu::BindGroup,
-    /** The chunk table, by slot. */
-    table: wgpu::Buffer,
-    slots: u32,
-    free_slots: Vec<u32>,
-    instances: wgpu::Buffer,
-    /** Splats the buffer holds, the end of those in use, and free ranges below it. */
+/** A buffer of items `stride` bytes long, ranges of them allocated and freed. */
+struct Arena {
+    label: &'static str,
+    stride: u64,
+    usage: wgpu::BufferUsages,
+    buffer: wgpu::Buffer,
+    /** Items the buffer holds, the end of those in use, and free ranges below it. */
     capacity: u32,
     top: u32,
     free: Vec<Range<u32>>,
-    resident: HashMap<u32, Resident>,
     /** Whether the buffer grew this frame: its copy runs after the frame's writes, so free ranges below it wait. */
     grew: bool,
-    frames: u64,
-    draws: Vec<Range<u32>>,
 }
 
-const SKY_TOP: [f32; 3] = [0x3f as f32 / 255.0, 0x73 as f32 / 255.0, 0xb8 as f32 / 255.0];
-const SKY_HORIZON: [f32; 3] = [0xb9 as f32 / 255.0, 0xd3 as f32 / 255.0, 0xe8 as f32 / 255.0];
-/** f32 in Globals (compositor.wgsl). */
-const GLOBALS: usize = 224;
-
-fn buffer(device: &wgpu::Device, label: &str, size: u64, usage: wgpu::BufferUsages) -> wgpu::Buffer {
-    device.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size, usage, mapped_at_creation: false })
-}
-
-fn table_buffer(device: &wgpu::Device, slots: u32) -> wgpu::Buffer {
-    buffer(device, "chunks", slots as u64 * 32, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST)
-}
-
-fn splat_buffer(device: &wgpu::Device, capacity: u32) -> wgpu::Buffer {
-    buffer(
-        device,
-        "splats",
-        capacity as u64 * SPLAT_BYTES,
-        wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
-    )
-}
-
-fn bind(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, globals: &wgpu::Buffer, table: &wgpu::Buffer) -> wgpu::BindGroup {
-    device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: None,
-        layout,
-        entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: globals.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 1, resource: table.as_entire_binding() },
-        ],
-    })
-}
-
-impl Compositor {
-    /** For a target of `format`, with a Depth32Float depth buffer. */
-    pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Compositor {
-        let shader = device.create_shader_module(wgpu::include_wgsl!("compositor.wgsl"));
-        let globals = buffer(device, "globals", (GLOBALS * 4) as u64, wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST);
-        let entry = |binding, ty| wgpu::BindGroupLayoutEntry { binding, visibility: wgpu::ShaderStages::VERTEX_FRAGMENT, ty, count: None };
-        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: None,
-            entries: &[
-                entry(
-                    0,
-                    wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
-                ),
-                entry(
-                    1,
-                    wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                ),
-            ],
-        });
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: None,
-            bind_group_layouts: &[Some(&layout)],
-            immediate_size: 0,
-        });
-        let pipeline = |vertex: &str, fragment: &str, buffers: &[Option<wgpu::VertexBufferLayout>]| {
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some(vertex),
-                layout: Some(&pipeline_layout),
-                vertex: wgpu::VertexState { module: &shader, entry_point: Some(vertex), compilation_options: Default::default(), buffers },
-                fragment: Some(wgpu::FragmentState {
-                    module: &shader,
-                    entry_point: Some(fragment),
-                    compilation_options: Default::default(),
-                    targets: &[Some(format.into())],
-                }),
-                primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleStrip, ..Default::default() },
-                // Ties (the sky, cleared to 1) are drawn.
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: wgpu::TextureFormat::Depth32Float,
-                    depth_write_enabled: Some(true),
-                    depth_compare: Some(wgpu::CompareFunction::LessEqual),
-                    stencil: Default::default(),
-                    bias: Default::default(),
-                }),
-                multisample: Default::default(),
-                multiview_mask: None,
-                cache: None,
-            })
-        };
-        let splat_layout = wgpu::VertexBufferLayout {
-            array_stride: SPLAT_BYTES,
-            step_mode: wgpu::VertexStepMode::Instance,
-            attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Unorm8x4, 2 => Uint32, 3 => Float32],
-        };
-        let (slots, capacity) = (1024, 1 << 20);
-        let table = table_buffer(device, slots);
-        Compositor {
-            splats: pipeline("splat_vertex", "splat_fragment", &[Some(splat_layout)]),
-            sky: pipeline("sky_vertex", "sky_fragment", &[]),
-            bind_group: bind(device, &layout, &globals, &table),
-            globals,
-            layout,
-            table,
-            slots,
-            free_slots: Vec::new(),
-            instances: splat_buffer(device, capacity),
-            capacity,
-            top: 0,
-            free: Vec::new(),
-            resident: HashMap::new(),
-            grew: false,
-            frames: 0,
-            draws: Vec::new(),
-        }
+impl Arena {
+    fn new(device: &wgpu::Device, label: &'static str, stride: u64, usage: wgpu::BufferUsages, capacity: u32) -> Arena {
+        let usage = usage | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC;
+        let buffer = buffer(device, label, capacity as u64 * stride, usage);
+        Arena { label, stride, usage, buffer, capacity, top: 0, free: Vec::new(), grew: false }
     }
 
-    /** `count` splats' room in the buffer, grown if need be. */
+    /** `count` items' room in the buffer, grown if need be. */
     fn allocate(&mut self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, count: u32) -> Range<u32> {
         if let Some(k) = self.free.iter().position(|r| r.len() >= count as usize).filter(|_| !self.grew) {
             let r = self.free[k].clone();
@@ -187,9 +97,9 @@ impl Compositor {
         }
         if self.top + count > self.capacity {
             let capacity = (self.capacity * 2).max(self.top + count);
-            let grown = splat_buffer(device, capacity);
-            encoder.copy_buffer_to_buffer(&self.instances, 0, &grown, 0, self.top as u64 * SPLAT_BYTES);
-            (self.instances, self.capacity, self.grew) = (grown, capacity, true);
+            let grown = buffer(device, self.label, capacity as u64 * self.stride, self.usage);
+            encoder.copy_buffer_to_buffer(&self.buffer, 0, &grown, 0, self.top as u64 * self.stride);
+            (self.buffer, self.capacity, self.grew) = (grown, capacity, true);
         }
         self.top += count;
         self.top - count..self.top
@@ -209,44 +119,394 @@ impl Compositor {
             self.top = last.start;
         }
     }
+}
 
-    /** Uploads what `frame` draws that is not on the GPU yet, drops what it no longer draws, and writes the chunk table and globals. */
+/** What the compositor draws into, the size of the view in pixels. */
+struct Targets {
+    size: [u32; 2],
+    picture: wgpu::Texture,
+    depth: wgpu::Texture,
+    /** The pyramid of farthest depths, and per level a bind group to make it and its size. */
+    farthest: wgpu::Texture,
+    levels: Vec<(wgpu::BindGroup, [u32; 2])>,
+    show: wgpu::BindGroup,
+}
+
+/** The bind group layouts and pipelines (compositor.wgsl). */
+struct Pipelines {
+    draw: wgpu::BindGroupLayout,
+    cull: wgpu::BindGroupLayout,
+    reduce_depth: wgpu::BindGroupLayout,
+    reduce: wgpu::BindGroupLayout,
+    show: wgpu::BindGroupLayout,
+    splats: wgpu::RenderPipeline,
+    sky: wgpu::RenderPipeline,
+    show_picture: wgpu::RenderPipeline,
+    cull_drawn: wgpu::ComputePipeline,
+    cull_rest: wgpu::ComputePipeline,
+    reduce_depth_level: wgpu::ComputePipeline,
+    reduce_level: wgpu::ComputePipeline,
+}
+
+pub struct Compositor {
+    format: wgpu::TextureFormat,
+    pipelines: Pipelines,
+    globals: wgpu::Buffer,
+    /** The chunk table, by slot. */
+    table: wgpu::Buffer,
+    slots: u32,
+    free_slots: Vec<u32>,
+    splats: Arena,
+    clusters: Arena,
+    resident: HashMap<u32, Resident>,
+    frames: u64,
+    /** The frame's chunks' clusters, [first, first + count) each. */
+    candidates: wgpu::Buffer,
+    chunks: u32,
+    /** The clusters in view. */
+    in_view: u32,
+    /** By phase, the draws of clusters the culling lists, and how many. */
+    draws: [wgpu::Buffer; 2],
+    drawn: [wgpu::Buffer; 2],
+    targets: Option<Targets>,
+    /** What draws, and by phase what culls. */
+    draw_group: Option<wgpu::BindGroup>,
+    cull_groups: Vec<wgpu::BindGroup>,
+}
+
+const SKY_TOP: [f32; 3] = [0x3f as f32 / 255.0, 0x73 as f32 / 255.0, 0xb8 as f32 / 255.0];
+const SKY_HORIZON: [f32; 3] = [0xb9 as f32 / 255.0, 0xd3 as f32 / 255.0, 0xe8 as f32 / 255.0];
+/** f32 in Globals (compositor.wgsl). */
+const GLOBALS: usize = 220;
+const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+const FARTHEST: wgpu::TextureFormat = wgpu::TextureFormat::R32Float;
+
+fn buffer(device: &wgpu::Device, label: &str, size: u64, usage: wgpu::BufferUsages) -> wgpu::Buffer {
+    device.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size, usage, mapped_at_creation: false })
+}
+
+fn storage(device: &wgpu::Device, label: &str, size: u64) -> wgpu::Buffer {
+    buffer(device, label, size, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST)
+}
+
+/** Replaces `buffer` if it holds fewer than `size` bytes, by one of the next power of two. */
+fn at_least(device: &wgpu::Device, buffer: &mut wgpu::Buffer, size: u64) {
+    if buffer.size() < size {
+        *buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: size.next_power_of_two(),
+            usage: buffer.usage(),
+            mapped_at_creation: false,
+        });
+    }
+}
+
+/** What the compositor needs of a device: draws listed on the GPU, a cluster's splats each. */
+pub const FEATURES: wgpu::Features = wgpu::Features::INDIRECT_FIRST_INSTANCE.union(wgpu::Features::MULTI_DRAW_INDIRECT_COUNT);
+
+/** What the compositor needs of a device: buffers as large as the adapter allows, for the splats in view. */
+pub fn limits(adapter: &wgpu::Adapter) -> wgpu::Limits {
+    let adapter = adapter.limits();
+    wgpu::Limits {
+        max_buffer_size: adapter.max_buffer_size,
+        max_storage_buffer_binding_size: adapter.max_storage_buffer_binding_size,
+        // egui's, for surfaces up to 8K.
+        max_texture_dimension_2d: 8192,
+        ..Default::default()
+    }
+}
+
+fn layout(device: &wgpu::Device, entries: &[(u32, wgpu::ShaderStages, wgpu::BindingType)]) -> wgpu::BindGroupLayout {
+    let entries: Vec<_> =
+        entries.iter().map(|&(binding, visibility, ty)| wgpu::BindGroupLayoutEntry { binding, visibility, ty, count: None }).collect();
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: None, entries: &entries })
+}
+
+fn bind(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, entries: &[(u32, wgpu::BindingResource)]) -> wgpu::BindGroup {
+    let entries: Vec<_> =
+        entries.iter().map(|(binding, resource)| wgpu::BindGroupEntry { binding: *binding, resource: resource.clone() }).collect();
+    device.create_bind_group(&wgpu::BindGroupDescriptor { label: None, layout, entries: &entries })
+}
+
+impl Pipelines {
+    fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Pipelines {
+        use wgpu::ShaderStages as S;
+        let shader = device.create_shader_module(wgpu::include_wgsl!("compositor.wgsl"));
+        let buffer = |ty| wgpu::BindingType::Buffer { ty, has_dynamic_offset: false, min_binding_size: None };
+        let uniform = buffer(wgpu::BufferBindingType::Uniform);
+        let read = buffer(wgpu::BufferBindingType::Storage { read_only: true });
+        let write = buffer(wgpu::BufferBindingType::Storage { read_only: false });
+        let texture =
+            |sample_type| wgpu::BindingType::Texture { sample_type, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false };
+        let float = texture(wgpu::TextureSampleType::Float { filterable: false });
+        let level_out = wgpu::BindingType::StorageTexture {
+            access: wgpu::StorageTextureAccess::WriteOnly,
+            format: FARTHEST,
+            view_dimension: wgpu::TextureViewDimension::D2,
+        };
+        let draw = layout(device, &[(0, S::VERTEX_FRAGMENT, uniform), (1, S::VERTEX, read)]);
+        let cull = layout(
+            device,
+            &[
+                (0, S::COMPUTE, uniform),
+                (1, S::COMPUTE, read),
+                (4, S::COMPUTE, write),
+                (5, S::COMPUTE, read),
+                (6, S::COMPUTE, write),
+                (7, S::COMPUTE, write),
+                (8, S::COMPUTE, float),
+            ],
+        );
+        let reduce_depth = layout(device, &[(10, S::COMPUTE, texture(wgpu::TextureSampleType::Depth)), (12, S::COMPUTE, level_out)]);
+        let reduce = layout(device, &[(11, S::COMPUTE, float), (12, S::COMPUTE, level_out)]);
+        let show = layout(device, &[(13, S::FRAGMENT, float)]);
+        let pipeline_layout = |layout: &wgpu::BindGroupLayout| {
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: None,
+                bind_group_layouts: &[Some(layout)],
+                immediate_size: 0,
+            })
+        };
+        let splat = wgpu::VertexBufferLayout {
+            array_stride: size_of::<GpuSplat>() as u64,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Unorm8x4, 2 => Uint32, 3 => Float32],
+        };
+        let render = |layout: &wgpu::BindGroupLayout,
+                      vertex: &str,
+                      fragment: &str,
+                      buffers: &[Option<wgpu::VertexBufferLayout>],
+                      depth: bool| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(vertex),
+                layout: Some(&pipeline_layout(layout)),
+                vertex: wgpu::VertexState { module: &shader, entry_point: Some(vertex), compilation_options: Default::default(), buffers },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some(fragment),
+                    compilation_options: Default::default(),
+                    targets: &[Some(format.into())],
+                }),
+                primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleStrip, ..Default::default() },
+                // Ties (the sky, cleared to 1) are drawn.
+                depth_stencil: depth.then_some(wgpu::DepthStencilState {
+                    format: DEPTH,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                    stencil: Default::default(),
+                    bias: Default::default(),
+                }),
+                multisample: Default::default(),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        let compute = |layout: &wgpu::BindGroupLayout, entry: &str| {
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some(entry),
+                layout: Some(&pipeline_layout(layout)),
+                module: &shader,
+                entry_point: Some(entry),
+                compilation_options: Default::default(),
+                cache: None,
+            })
+        };
+        Pipelines {
+            splats: render(&draw, "splat_vertex", "splat_fragment", &[Some(splat)], true),
+            sky: render(&draw, "sky_vertex", "sky_fragment", &[], true),
+            show_picture: render(&show, "show_vertex", "show_fragment", &[], false),
+            cull_drawn: compute(&cull, "cull_drawn"),
+            cull_rest: compute(&cull, "cull_rest"),
+            reduce_depth_level: compute(&reduce_depth, "reduce_depth"),
+            reduce_level: compute(&reduce, "reduce"),
+            draw,
+            cull,
+            reduce_depth,
+            reduce,
+            show,
+        }
+    }
+}
+
+impl Targets {
+    fn new(device: &wgpu::Device, pipelines: &Pipelines, format: wgpu::TextureFormat, [width, height]: [u32; 2]) -> Targets {
+        let texture = |format, usage, mip_level_count, width, height| {
+            device.create_texture(&wgpu::TextureDescriptor {
+                label: None,
+                size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+                mip_level_count,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage,
+                view_formats: &[],
+            })
+        };
+        use wgpu::TextureUsages as U;
+        let picture = texture(format, U::RENDER_ATTACHMENT | U::TEXTURE_BINDING | U::COPY_SRC, 1, width, height);
+        let depth = texture(DEPTH, U::RENDER_ATTACHMENT | U::TEXTURE_BINDING, 1, width, height);
+        // Level 0 covers the view at 2 × 2 pixels a texel, in powers of two (so each next level halves the last), down to a texel.
+        let mut sizes = vec![[width.div_ceil(2).next_power_of_two(), height.div_ceil(2).next_power_of_two()]];
+        while let Some(&[w, h]) = sizes.last().filter(|s| s[0] > 1 || s[1] > 1) {
+            sizes.push([(w / 2).max(1), (h / 2).max(1)]);
+        }
+        let farthest = texture(FARTHEST, U::STORAGE_BINDING | U::TEXTURE_BINDING, sizes.len() as u32, sizes[0][0], sizes[0][1]);
+        let level = |k: usize| {
+            farthest.create_view(&wgpu::TextureViewDescriptor { base_mip_level: k as u32, mip_level_count: Some(1), ..Default::default() })
+        };
+        let levels = sizes
+            .iter()
+            .enumerate()
+            .map(|(k, &size)| {
+                let group = if k == 0 {
+                    let depth = depth.create_view(&Default::default());
+                    bind(
+                        device,
+                        &pipelines.reduce_depth,
+                        &[(10, wgpu::BindingResource::TextureView(&depth)), (12, wgpu::BindingResource::TextureView(&level(0)))],
+                    )
+                } else {
+                    bind(
+                        device,
+                        &pipelines.reduce,
+                        &[(11, wgpu::BindingResource::TextureView(&level(k - 1))), (12, wgpu::BindingResource::TextureView(&level(k)))],
+                    )
+                };
+                (group, size)
+            })
+            .collect();
+        let show = bind(device, &pipelines.show, &[(13, wgpu::BindingResource::TextureView(&picture.create_view(&Default::default())))]);
+        Targets { size: [width, height], picture, depth, farthest, levels, show }
+    }
+}
+
+impl Compositor {
+    /** For a target of `format`. */
+    pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Compositor {
+        use wgpu::BufferUsages as U;
+        let draws = |label| buffer(device, label, 1 << 20, U::STORAGE | U::INDIRECT | U::COPY_SRC);
+        let drawn = |label| buffer(device, label, 4, U::STORAGE | U::INDIRECT | U::COPY_DST | U::COPY_SRC);
+        Compositor {
+            format,
+            pipelines: Pipelines::new(device, format),
+            globals: buffer(device, "globals", (GLOBALS * 4) as u64, wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST),
+            table: storage(device, "chunks", 1024 * size_of::<GpuChunk>() as u64),
+            slots: 0,
+            free_slots: Vec::new(),
+            splats: Arena::new(device, "splats", size_of::<GpuSplat>() as u64, wgpu::BufferUsages::VERTEX, 1 << 20),
+            clusters: Arena::new(device, "clusters", size_of::<GpuCluster>() as u64, wgpu::BufferUsages::STORAGE, 1 << 15),
+            resident: HashMap::new(),
+            frames: 0,
+            candidates: storage(device, "candidates", 1024 * 8),
+            chunks: 0,
+            in_view: 0,
+            draws: [draws("draws first"), draws("draws next")],
+            drawn: [drawn("drawn first"), drawn("drawn next")],
+            targets: None,
+            draw_group: None,
+            cull_groups: Vec::new(),
+        }
+    }
+
+    /** The frame last drawn. */
+    pub fn picture(&self) -> &wgpu::Texture {
+        &self.targets.as_ref().expect("a frame").picture
+    }
+
+    /** By phase, the draws of clusters (how many splats each draws is its second word) and how many. */
+    pub fn draws(&self) -> (&[wgpu::Buffer; 2], &[wgpu::Buffer; 2]) {
+        (&self.draws, &self.drawn)
+    }
+
+    /** Uploads `chunk`'s splats in clusters, its plane `distance` ahead seen at `focal`. */
+    fn upload(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        chunk: &Chunk,
+        distance: f64,
+        focal: f64,
+    ) {
+        let numbers = chunk.baked.numbers.as_chunks::<5>().0;
+        let (painted, grown) = (chunk.baked.painted, numbers.len() - chunk.baked.painted);
+        // Painted splats in the first half of the layer's depths, nearer the later painted; grown ones in the second, behind them all.
+        let orders: Vec<f32> = (0..numbers.len())
+            .map(|s| {
+                let (half, k, n) = if s < painted { (0.0, s, painted) } else { (0.5, s - painted, grown) };
+                half + 0.5 * (n - k) as f32 / (n + 1) as f32
+            })
+            .collect();
+        // By block, nearest first, so that a block's first clusters are its front (orders are positive, so their bits sort as they do).
+        let unit = BLOCK * distance / focal;
+        let mut sorted: Vec<((i64, i64), u32, usize)> = (0..numbers.len())
+            .map(|s| {
+                let [x, y, ..] = numbers[s];
+                (((y as f64 / unit).floor() as i64, (x as f64 / unit).floor() as i64), orders[s].to_bits(), s)
+            })
+            .collect();
+        sorted.sort_unstable();
+        let slot = self.free_slots.pop().unwrap_or_else(|| {
+            self.slots += 1;
+            self.slots - 1
+        });
+        let splats = self.splats.allocate(device, encoder, numbers.len() as u32);
+        let mut clusters = Vec::new();
+        let mut first = splats.start;
+        for block in sorted.chunk_by(|a, b| a.0 == b.0) {
+            // Split evenly.
+            let parts = block.len().div_ceil(CLUSTER);
+            for p in 0..parts {
+                let part = &block[block.len() * p / parts..block.len() * (p + 1) / parts];
+                let mut cluster = GpuCluster {
+                    min: [f32::INFINITY; 2],
+                    max: [f32::NEG_INFINITY; 2],
+                    first,
+                    slot_count: slot << 8 | part.len() as u32,
+                    order: orders[part[0].2],
+                    visible: 0,
+                };
+                for &(_, _, s) in part {
+                    let [x, y, w, h, _] = numbers[s];
+                    cluster.min = [cluster.min[0].min(x - w), cluster.min[1].min(y - h)];
+                    cluster.max = [cluster.max[0].max(x + w), cluster.max[1].max(y + h)];
+                }
+                first += part.len() as u32;
+                clusters.push(cluster);
+            }
+        }
+        // Nearest first, so that splats are drawn near to far.
+        clusters.sort_by(|a, b| a.order.total_cmp(&b.order));
+        let data: Vec<GpuSplat> = sorted
+            .iter()
+            .map(|&(_, _, s)| {
+                let n = numbers[s];
+                [n[0].to_bits(), n[1].to_bits(), n[2].to_bits(), n[3].to_bits(), n[4].to_bits(), slot, orders[s].to_bits()]
+            })
+            .collect();
+        queue.write_buffer(&self.splats.buffer, splats.start as u64 * self.splats.stride, bytemuck::cast_slice(&data));
+        let range = self.clusters.allocate(device, encoder, clusters.len() as u32);
+        queue.write_buffer(&self.clusters.buffer, range.start as u64 * self.clusters.stride, bytemuck::cast_slice(&clusters));
+        self.resident.insert(chunk.id, Resident { splats, clusters: range, slot, drawn: 0 });
+    }
+
+    /** Uploads what `frame` draws that is not on the GPU yet, drops what it no longer draws, and writes the chunk table, the clusters to cull and globals. */
     pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, frame: &Frame, view: &View) {
         self.frames += 1;
-        self.grew = false;
-        let mut table = Vec::new();
-        self.draws.clear();
+        (self.splats.grew, self.clusters.grew) = (false, false);
+        let size = view.pixels.map(|v| v.max(1));
+        if self.targets.as_ref().is_none_or(|t| t.size != size) {
+            self.targets = Some(Targets::new(device, &self.pipelines, self.format, size));
+        }
         let scale = depth_scale(frame.layers.len());
+        let mut table = Vec::new();
+        let mut candidates: Vec<[u32; 2]> = Vec::new();
         for (k, layer) in frame.layers.iter().enumerate() {
             let depth = ((k as f64 - frame.layers.len() as f64) * scale as f64).exp2() as f32;
             for p in &layer.placements {
                 let chunk = &p.chunk;
                 if !self.resident.contains_key(&chunk.id) {
-                    let count = (chunk.baked.numbers.len() / 5) as u32;
-                    let splats = self.allocate(device, encoder, count);
-                    let slot = self.free_slots.pop().unwrap_or_else(|| {
-                        self.slots += 1;
-                        self.slots - 1
-                    });
-                    // Painted splats in the first half of the layer's depths, nearer the later painted; grown ones in the second, behind them all.
-                    let (painted, grown) = (chunk.baked.painted, count as usize - chunk.baked.painted);
-                    let order = |s: usize| {
-                        let (half, k, n) = if s < painted { (0.0, s, painted) } else { (0.5, s - painted, grown) };
-                        half + 0.5 * (n - k) as f32 / (n + 1) as f32
-                    };
-                    let data: Vec<GpuSplat> = chunk
-                        .baked
-                        .numbers
-                        .as_chunks::<5>()
-                        .0
-                        .iter()
-                        .enumerate()
-                        .map(|(s, n)| {
-                            [n[0].to_bits(), n[1].to_bits(), n[2].to_bits(), n[3].to_bits(), n[4].to_bits(), slot, order(s).to_bits()]
-                        })
-                        .collect();
-                    queue.write_buffer(&self.instances, splats.start as u64 * SPLAT_BYTES, bytemuck::cast_slice(&data));
-                    self.resident.insert(chunk.id, Resident { splats, slot, drawn: 0 });
+                    self.upload(device, queue, encoder, chunk, layer.distance, view.focal);
                 }
                 let resident = self.resident.get_mut(&chunk.id).expect("resident");
                 resident.drawn = self.frames;
@@ -263,44 +523,127 @@ impl Compositor {
                     depth,
                     pad: 0.0,
                 };
-                self.draws.push(resident.splats.clone());
+                candidates.push([resident.clusters.start, resident.clusters.len() as u32]);
             }
         }
-        // Neighbouring chunks in the splat buffer draw in one call.
-        self.draws.sort_unstable_by_key(|r| r.start);
-        self.draws.dedup_by(|next, last| {
-            let joins = next.start <= last.end;
-            if joins {
-                last.end = last.end.max(next.end);
-            }
-            joins
-        });
         let frames = self.frames;
         let gone: Vec<u32> = self.resident.iter().filter(|(_, r)| r.drawn < frames).map(|(id, _)| *id).collect();
         for id in gone {
             let r = self.resident.remove(&id).expect("resident");
             self.free_slots.push(r.slot);
-            self.release(r.splats);
+            self.splats.release(r.splats);
+            self.clusters.release(r.clusters);
         }
-        if self.slots as u64 * 32 > self.table.size() {
-            self.table = table_buffer(device, self.slots.next_power_of_two());
-            self.bind_group = bind(device, &self.layout, &self.globals, &self.table);
-        }
+        at_least(device, &mut self.table, self.slots as u64 * size_of::<GpuChunk>() as u64);
         if !table.is_empty() {
             queue.write_buffer(&self.table, 0, bytemuck::cast_slice(&table));
         }
+        at_least(device, &mut self.candidates, candidates.len().max(1) as u64 * 8);
+        queue.write_buffer(&self.candidates, 0, bytemuck::cast_slice(&candidates));
+        self.chunks = candidates.len() as u32;
+        self.in_view = candidates.iter().map(|c| c[1]).sum();
+        for draws in &mut self.draws {
+            at_least(device, draws, self.in_view.max(1) as u64 * 16);
+        }
         let sky_fog = 1.0 - (-frame.farthest / view.fog_distance).exp();
-        queue.write_buffer(&self.globals, 0, bytemuck::cast_slice(&view.globals(scale, sky_fog)));
+        queue.write_buffer(&self.globals, 0, bytemuck::cast_slice(&view.globals(size, scale, sky_fog)));
+        self.bind_groups(device);
     }
 
-    pub fn draw(&self, pass: &mut wgpu::RenderPass<'_>) {
-        pass.set_bind_group(0, &self.bind_group, &[]);
-        pass.set_pipeline(&self.splats);
-        pass.set_vertex_buffer(0, self.instances.slice(..));
-        for r in &self.draws {
-            pass.draw(0..4, r.clone());
+    fn bind_groups(&mut self, device: &wgpu::Device) {
+        let t = self.targets.as_ref().expect("targets");
+        let farthest = t.farthest.create_view(&Default::default());
+        use wgpu::BindingResource as R;
+        self.draw_group =
+            Some(bind(device, &self.pipelines.draw, &[(0, self.globals.as_entire_binding()), (1, self.table.as_entire_binding())]));
+        self.cull_groups = (0..2)
+            .map(|k| {
+                let entries = [
+                    (0, self.globals.as_entire_binding()),
+                    (1, self.table.as_entire_binding()),
+                    (4, self.clusters.buffer.as_entire_binding()),
+                    (5, self.candidates.as_entire_binding()),
+                    (6, self.draws[k].as_entire_binding()),
+                    (7, self.drawn[k].as_entire_binding()),
+                    (8, R::TextureView(&farthest)),
+                ];
+                bind(device, &self.pipelines.cull, &entries)
+            })
+            .collect();
+    }
+
+    /**
+     * Draws the frame prepared last into the picture: the clusters that
+     * showed last frame, then those that show now that did not, culled
+     * against the farthest depths of the first.
+     */
+    pub fn render(&self, encoder: &mut wgpu::CommandEncoder) {
+        let t = self.targets.as_ref().expect("prepared");
+        let p = &self.pipelines;
+        for drawn in &self.drawn {
+            encoder.clear_buffer(drawn, 0, None);
         }
-        pass.set_pipeline(&self.sky);
+        let cull = |encoder: &mut wgpu::CommandEncoder, phase: usize| {
+            let mut pass = encoder.begin_compute_pass(&Default::default());
+            if phase == 1 {
+                // The pyramid of what the first phase drew.
+                for (k, (group, [width, height])) in t.levels.iter().enumerate() {
+                    pass.set_pipeline(if k == 0 { &p.reduce_depth_level } else { &p.reduce_level });
+                    pass.set_bind_group(0, group, &[]);
+                    pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+                }
+            }
+            if self.chunks > 0 {
+                pass.set_pipeline(if phase == 0 { &p.cull_drawn } else { &p.cull_rest });
+                pass.set_bind_group(0, &self.cull_groups[phase], &[]);
+                pass.dispatch_workgroups(self.chunks, 1, 1);
+            }
+        };
+        let draw = |encoder: &mut wgpu::CommandEncoder, phase: usize| {
+            let (colour, depth) = if phase == 0 {
+                (wgpu::LoadOp::Clear(wgpu::Color::BLACK), wgpu::LoadOp::Clear(1.0))
+            } else {
+                (wgpu::LoadOp::Load, wgpu::LoadOp::Load)
+            };
+            let picture = t.picture.create_view(&Default::default());
+            let depth_view = t.depth.create_view(&Default::default());
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: None,
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &picture,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations { load: colour, store: wgpu::StoreOp::Store },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &depth_view,
+                    depth_ops: Some(wgpu::Operations { load: depth, store: wgpu::StoreOp::Store }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_bind_group(0, self.draw_group.as_ref(), &[]);
+            pass.set_pipeline(&p.splats);
+            pass.set_vertex_buffer(0, self.splats.buffer.slice(..));
+            pass.multi_draw_indirect_count(&self.draws[phase], 0, &self.drawn[phase], 0, self.in_view);
+            if phase == 1 {
+                pass.set_pipeline(&p.sky);
+                pass.draw(0..4, 0..1);
+            }
+        };
+        cull(encoder, 0);
+        draw(encoder, 0);
+        cull(encoder, 1);
+        draw(encoder, 1);
+    }
+
+    /** Shows the picture on the pass's viewport. */
+    pub fn show(&self, pass: &mut wgpu::RenderPass<'_>) {
+        let t = self.targets.as_ref().expect("prepared");
+        pass.set_pipeline(&self.pipelines.show_picture);
+        pass.set_bind_group(0, &t.show, &[]);
         pass.draw(0..4, 0..1);
     }
 }
@@ -310,7 +653,7 @@ fn depth_scale(layers: usize) -> f32 {
     (120.0 / layers.max(1) as f32).min(0.5)
 }
 
-/** How a frame is seen: orientation, focal length, fog, the faces' axes, and the view's rectangle in pixels of the target. */
+/** How a frame is seen: orientation, focal length, fog, the faces' axes, and the view's size in points and in pixels (the picture's). */
 #[derive(Clone, Copy)]
 pub struct View {
     pub yaw: f64,
@@ -318,21 +661,19 @@ pub struct View {
     pub focal: f64,
     pub fog_distance: f64,
     pub faces: [[Vec3; 3]; 12],
-    /** Left, top, width and height in points, and pixels per point. */
-    pub rect: [f32; 4],
-    pub pixels_per_point: f32,
+    pub size: [f32; 2],
+    pub pixels: [u32; 2],
 }
 
 impl View {
-    fn globals(&self, depth_scale: f32, sky_fog: f64) -> [f32; GLOBALS] {
+    fn globals(&self, pixels: [u32; 2], depth_scale: f32, sky_fog: f64) -> [f32; GLOBALS] {
         let mut g = [0.0f32; GLOBALS];
-        let [left, top, width, height] = self.rect;
-        let ppp = self.pixels_per_point;
-        g[0..2].copy_from_slice(&[width, height]);
-        g[2..4].copy_from_slice(&[width * ppp, height * ppp]);
-        g[4..6].copy_from_slice(&[left * ppp, top * ppp]);
-        g[6] = self.focal as f32;
-        g[7] = self.fog_distance as f32;
+        g[0..2].copy_from_slice(&self.size);
+        g[2..4].copy_from_slice(&pixels.map(|v| v as f32));
+        g[4] = self.focal as f32;
+        g[5] = self.fog_distance as f32;
+        g[6] = depth_scale;
+        g[7] = sky_fog as f32;
         g[8..11].copy_from_slice(&SKY_TOP);
         g[12..15].copy_from_slice(&SKY_HORIZON);
         let axes = view_basis(self.yaw, self.pitch);
@@ -344,10 +685,8 @@ impl View {
             }
         };
         columns(&mut g[16..28], axes);
-        g[28] = depth_scale;
-        g[30] = sky_fog as f32;
         for (f, face) in self.faces.iter().enumerate() {
-            let at = 32 + f * 16;
+            let at = 28 + f * 16;
             columns(&mut g[at..at + 12], axes.map(|axis| to_local(face, axis)));
         }
         g
@@ -358,6 +697,7 @@ impl View {
 pub struct Callback {
     pub frame: std::sync::Arc<Frame>,
     pub view: View,
+    pub rect: egui::Rect,
 }
 
 impl egui_wgpu::CallbackTrait for Callback {
@@ -370,14 +710,17 @@ impl egui_wgpu::CallbackTrait for Callback {
         resources: &mut egui_wgpu::CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
         let compositor: &mut Compositor = resources.get_mut().expect("compositor");
-        let view = View { pixels_per_point: screen.pixels_per_point, ..self.view };
+        // The viewport egui shows the picture on.
+        let viewport = egui::epaint::ViewportInPixels::from_points(&self.rect, screen.pixels_per_point, screen.size_in_pixels);
+        let view = View { pixels: [viewport.width_px as u32, viewport.height_px as u32], ..self.view };
         compositor.prepare(device, queue, encoder, &self.frame, &view);
+        compositor.render(encoder);
         Vec::new()
     }
 
     fn paint(&self, _info: egui::PaintCallbackInfo, pass: &mut wgpu::RenderPass<'static>, resources: &egui_wgpu::CallbackResources) {
         let compositor: &Compositor = resources.get().expect("compositor");
-        compositor.draw(pass);
+        compositor.show(pass);
     }
 }
 

@@ -499,6 +499,24 @@ A chunk's splats are uploaded when it comes into view
 and deleted when it leaves.
 No antialiasing, so voxel edges stay crisp.
 
+The native compositor (`native/src/compositor.rs`) draws only what may show:
+in the forest, under 2 % of the splats in view show a pixel.
+Painting order is in the depth instead of the draw order:
+layer k of L at 2^((k − L)·s), and within a chunk each splat's rank,
+nearer the later it is painted, grown ones in the layer's back half
+(`depth_of`, exponential so the largest chunks' ranks stay apart in f32).
+So splats can be drawn in any order,
+and a chunk's are uploaded in clusters of a few nearby on its plane,
+each with its box and nearest depth.
+Each frame it draws the clusters that showed in the last,
+reduces their depth to a pyramid of farthest depths,
+then tests every cluster in view against it on the GPU,
+draws those newly showing and keeps which show for the next frame
+(two-phase occlusion culling).
+Draws are listed per cluster on the GPU, roughly near to far,
+so nearer splats mostly hide what is behind them early.
+It draws into a picture of its own, which egui (or `--shot`) shows.
+
 **Fog.** A slice at distance d keeps `exp(−d / F)` of its own colour;
 the rest is the horizon colour, mixed in per pixel.
 F is a fixed share of the render distance (`FOG_PER_RENDER_DISTANCE`),
@@ -626,7 +644,7 @@ so from the parallax camera's position both renderers should agree.
   what fills less than a quarter of a coarse voxel's cell is lost
   (a lone voxel, a thin pole), and solids grow by up to half a coarse
   voxel.
-- The compositor draws every splat in view every frame (`todo.md`).
+- The web compositor draws every splat in view every frame (`todo.md`).
 - The world's grids are held by the main thread and by each worker.
   The reference viewer meshes level 0 only around the camera,
   the coarser grids in rings beyond.

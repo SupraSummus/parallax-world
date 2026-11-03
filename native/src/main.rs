@@ -8,8 +8,9 @@
 //!
 //! --shot draws the first frame once the world has its tiles and all its
 //! chunks are baked, at 1280×800, offscreen, and saves it; --bench only
-//! times that, and the main thread's frames after. --walk D moves the camera D
-//! units along the view after the first frame, and does the same there.
+//! times that, the main thread's frames after, and the GPU drawing the
+//! last. --walk D moves the camera D units along the view after the first
+//! frame, and does the same there.
 //! --check-requests takes a view the TS renderer dumped (native/dump.test.ts):
 //! the faces must be the same, and the chunks the first frame
 //! wants from its grids and camera too, but for some the TS renderer wants
@@ -128,10 +129,10 @@ impl eframe::App for App {
                 focal,
                 fog_distance: self.fog_distance,
                 faces: self.faces,
-                rect: [rect.min.x, rect.min.y, rect.width(), rect.height()],
-                pixels_per_point: 1.0,
+                size: [rect.width(), rect.height()],
+                pixels: [0, 0],
             };
-            let callback = compositor::Callback { frame: Arc::new(frame), view };
+            let callback = compositor::Callback { frame: Arc::new(frame), view, rect };
             ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, callback));
             // While moving, the view changes; until all is made and baked, tiles and chunks keep arriving, often enough for a frame now and then.
             if moving.iter().any(|m| *m != 0.0) || self.spin.is_some() {
@@ -276,17 +277,22 @@ fn main() -> eframe::Result {
                 println!("a frame {name}: {:.1} ms", start.elapsed().as_secs_f64() * 1000.0 / 20.0);
             }
         }
+        let view = compositor::View {
+            yaw: YAW,
+            pitch: PITCH,
+            focal,
+            fog_distance,
+            faces,
+            size: size.map(|v| v as f32),
+            pixels: size.map(|v| v as u32),
+        };
+        if args.iter().any(|a| a == "--bench") {
+            let splats: usize = frame.layers.iter().flat_map(|l| &l.placements).map(|p| p.chunk.baked.numbers.len() / 5).sum();
+            let (ms, [first, next]) = shot::time(&frame, &view, 30);
+            println!("the GPU draws the frame in {ms:.1} ms: of its {splats} splats, {first} that showed before and {next} more");
+        }
         if let Some(i) = args.iter().position(|a| a == "--shot") {
-            let view = compositor::View {
-                yaw: YAW,
-                pitch: PITCH,
-                focal,
-                fog_distance,
-                faces,
-                rect: [0.0, 0.0, size[0] as f32, size[1] as f32],
-                pixels_per_point: 1.0,
-            };
-            shot::save(&frame, &view, size.map(|v| v as u32), &args[i + 1]);
+            shot::save(&frame, &view, &args[i + 1]);
             println!("saved {}", args[i + 1]);
         }
         return Ok(());
@@ -294,8 +300,15 @@ fn main() -> eframe::Result {
     let spin = args.iter().any(|a| a == "--spin").then(|| (Instant::now(), 0));
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([1580.0, 800.0]),
-        depth_buffer: 32,
         wgpu_options: egui_wgpu::WgpuConfiguration {
+            wgpu_setup: egui_wgpu::WgpuSetup::CreateNew(egui_wgpu::WgpuSetupCreateNew {
+                device_descriptor: Arc::new(|adapter| eframe::wgpu::DeviceDescriptor {
+                    required_limits: compositor::limits(adapter),
+                    required_features: compositor::FEATURES,
+                    ..Default::default()
+                }),
+                ..egui_wgpu::WgpuSetupCreateNew::without_display_handle()
+            }),
             surface: egui_wgpu::SurfaceConfig {
                 present_mode: eframe::wgpu::PresentMode::AutoNoVsync,
                 ..egui_wgpu::SurfaceConfig::HIGH_THROUGHPUT
