@@ -38,9 +38,12 @@ struct Chunk {
 struct Splat {
   @builtin(position) position: vec4f,
   @location(0) corner: vec2f,
-  @location(1) @interpolate(flat) slant: f32,
-  @location(2) @interpolate(flat) colour: vec3f,
-  @location(3) @interpolate(flat) chunk: u32,
+  // Where on its chunk's plane, over the plane's distance: the ray's tangents in face coordinates.
+  @location(1) ray: vec2f,
+  @location(2) @interpolate(flat) slant: f32,
+  @location(3) @interpolate(flat) colour: vec3f,
+  // The chunk's left, top, right and bottom, as tangents too, a hair wider.
+  @location(4) @interpolate(flat) clip: vec4f,
 }
 
 fn ray_of(view: mat3x3f, position: vec4f) -> vec3f {
@@ -56,31 +59,34 @@ fn splat_vertex(@builtin(vertex_index) vertex: u32, @location(0) splat: vec4f, @
   var out: Splat;
   out.corner = vec2f(f32(vertex & 1u), f32(vertex >> 1u)) * 2.0 - 1.0;
   out.slant = splat.z / (sqrt(2.0) * splat.w);
-  out.colour = paint.rgb;
-  out.chunk = chunk & 0x7fffffffu;
-  let p = transpose(face.view) * vec3f(c.origin + splat.xy + out.corner * splat.zw, c.distance);
+  let fog = 1.0 - exp(-c.distance / globals.fog_distance);
+  out.colour = mix(paint.rgb, globals.horizon.rgb, fog);
+  let at = c.origin + splat.xy + out.corner * splat.zw;
+  out.ray = at / c.distance;
+  out.clip = vec4f(c.origin.x, c.origin.y, c.origin.x + c.extent.x, c.origin.y - c.extent.y) / c.distance + vec4f(-1.0, 1.0, 1.0, -1.0) * 1e-4;
+  let p = transpose(face.view) * vec3f(at, c.distance);
   let depth = c.depth + select(0.0, globals.half_layer, chunk >= 0x80000000u);
   out.position = vec4f(p.xy * globals.focal / (globals.viewport / 2.0), depth * p.z, p.z);
   return out;
 }
 
+// The face draws its own rays, a chunk its part of the plane, by the ray
+// each splat interpolates (working it out from the pixel costs more).
+// Rounding differs between splats, so faces and chunks overlap by a hair:
+// no pixel is left to neither; drawn twice, the later chunk wins.
 @fragment
 fn splat_fragment(in: Splat) -> @location(0) vec4f {
   if abs(in.corner.x) * in.slant + abs(in.corner.y) >= 1.0 {
     discard;
   }
-  let c = chunks[in.chunk];
-  let face = globals.faces[c.face];
-  let ray = ray_of(face.view, in.position);
-  if abs(ray.x) + sqrt(2.0) * abs(ray.y) > ray.z * 1.001 {
+  let t = in.ray;
+  if abs(t.x) + sqrt(2.0) * abs(t.y) > 1.001 {
     discard;
   }
-  let p = ray.xy / ray.z * c.distance;
-  if p.x < c.origin.x || p.x >= c.origin.x + c.extent.x || p.y > c.origin.y || p.y <= c.origin.y - c.extent.y {
+  if t.x < in.clip.x || t.x >= in.clip.z || t.y > in.clip.y || t.y <= in.clip.w {
     discard;
   }
-  let fog = 1.0 - exp(-c.distance / globals.fog_distance);
-  return vec4f(mix(in.colour, globals.horizon.rgb, fog), 1.0);
+  return vec4f(in.colour, 1.0);
 }
 
 struct Sky {

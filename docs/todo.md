@@ -15,7 +15,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   where slices re-tile as the camera moves along an axis,
   the new ones show nothing until baked.
   Its camera is f64, not fixed point (positions reach the GPU relative to it).
-  A frame costs its main thread over 10 ms in the forest.
+  Turning, a frame costs its main thread over 10 ms in the forest.
   `native/` is not built in CI.
 - **TS and Rust still say much the same twice.**
   `bake.ts`'s faces and palettes are `native/src/tables.rs` again,
@@ -45,7 +45,13 @@ Numbers are for the forest at 1280×800, as measured when written.
 - **Every splat in view is drawn every frame.**
   The forest has millions in view;
   headless Chromium's software WebGL takes over a second per frame,
-  and real GPUs are not measured yet.
+  and WebGL on real GPUs is not measured yet.
+  Natively, on an Intel UHD, a frame of about 3 million costs
+  some 6 ns per splat before any pixel,
+  whatever its shape (quads, triangles, hexagons; instanced or not),
+  and about three quarters are behind nearer layers.
+  Culling single splats on the GPU needs a chunk's painting order
+  (now its draw order, ties at one depth) in the depth instead.
   Splats a chunk's nearer ones hide from the whole eye's cell
   need not be in it.
 - **Bricks on the edge of a face's rhombus are baked whole.**
