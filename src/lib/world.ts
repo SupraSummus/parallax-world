@@ -1,9 +1,8 @@
 import { generateCity } from './city'
-import { forest } from './forest'
-import { generate, materialsOf, type Box, type Generator } from './generator'
 import { GRID_LEVELS } from './slice-selection'
 import { FACES } from './view'
-import { BRICK, coarsen, LayerIndex, VoxelGrid, type Material, type Voxel, type VoxelData } from './voxel-grid'
+import { BRICK, coarsen, LayerIndex, VoxelGrid, type Box, type Material, type Voxel, type VoxelData } from './voxel-grid'
+import { forest } from './worldgen'
 
 export interface Vec3 {
   x: number
@@ -32,12 +31,14 @@ const WATER: Material = { color: '#1E90FF', type: 8 }
 const FLOWER_COLORS = ['#FF6B6B', '#FFE66D', '#4ECDC4', '#C9B1FF']
 
 /**
- * A world generator.ts generates at each level, in any box: how far
- * around the camera each level's grid must hold it, in sites of the level;
- * the y its grid of each level spans; and where the camera starts.
+ * A world generated at each level, in any box (worldgen.ts): the voxels of
+ * a box at a level, all of `materials`; how far around the camera each
+ * level's grid must hold it, in sites of the level; the y its grid of each
+ * level spans; and where the camera starts.
  */
-interface Generated {
-  generator: Generator<string>
+export interface Generated {
+  materials: readonly Material[]
+  generate: (box: Box, level: number) => VoxelData
   spawn: Vec3
   reach: number
   heights: (level: number) => { minY: number; maxY: number }
@@ -86,13 +87,13 @@ const tileKey = ([i, k]: Tile) => `${String(i)},${String(k)}`
 let lastGenerated: { seed: number; worldType: WorldType; generated: Generated } | null = null
 
 /** The voxels of a part of a generated world's grid (see World.missingParts). */
-export function generatePart(seed: number, worldType: WorldType, { level, box }: GridPart): VoxelGrid {
+export function generatePart(seed: number, worldType: WorldType, { level, box }: GridPart): VoxelData {
   if (lastGenerated?.seed !== seed || lastGenerated.worldType !== worldType) {
     const make = GENERATED[worldType]
     if (!make) throw new RangeError(`${worldType} is not generated in parts`)
     lastGenerated = { seed, worldType, generated: make(seed) }
   }
-  return generate(lastGenerated.generated.generator, box, level)
+  return lastGenerated.generated.generate(box, level)
 }
 
 /**
@@ -177,7 +178,7 @@ export class World {
 
   /** The materials of every grid's ids. */
   get materials(): readonly Material[] {
-    return this.source ? materialsOf(this.source.generator) : this.level(0)?.materials ?? []
+    return this.source ? this.source.materials : this.level(0)?.materials ?? []
   }
 
   /**
@@ -223,7 +224,7 @@ export class World {
     this.missingPartsOf(level, camera)
     const pending = this.pending.get(level)
     for (const part of pending?.parts ?? []) {
-      if (!pending?.received.has(tileKey(part.tile))) this.receive(part, generate(source.generator, part.box, level))
+      if (!pending?.received.has(tileKey(part.tile))) this.receive(part, source.generate(part.box, level))
     }
     return this.level(level) as VoxelGrid
   }

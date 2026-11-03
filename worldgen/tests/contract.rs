@@ -193,7 +193,7 @@ fn random_rays(r: &Box3, count: usize) -> Vec<Ray> {
 
 /**
  * How far a level may stray from the one two finer, in the share of rays
- * through and of materials hit (see generator.test.ts).
+ * through and of materials hit (docs/generators.md).
  */
 const TOLERANCE: f64 = 0.1;
 

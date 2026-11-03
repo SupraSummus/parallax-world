@@ -1,6 +1,7 @@
-//! Chunk baking, compiled to WebAssembly for the bake workers: the voxels
-//! of a chunk cell that can show, as splats (hexagons of one colour) projected
-//! from an eye onto its slice's centre plane, and a mask of what they cover.
+//! Chunk baking, compiled to WebAssembly (in worldgen's module) for the
+//! bake workers: the voxels of a chunk cell that can show, as splats
+//! (hexagons of one colour) projected from an eye onto its slice's centre
+//! plane, and a mask of what they cover.
 //! A world is a grid per level of detail;
 //! each slice reads the one its atoms are the voxels of (in_grid).
 //! chunk-baker.ts drives it through the

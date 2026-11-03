@@ -1,6 +1,5 @@
-//! The forest (forest.ts): an autumn forest valley, endless, on the
-//! generator framework. Ported from forest.ts step for step; its numbers
-//! are moving to integers (docs/generators.md).
+//! The forest: an autumn forest valley, endless, on the generator
+//! framework. Its numbers are moving to integers (docs/generators.md).
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -13,7 +12,7 @@ use crate::grid::Box3;
 use crate::js::{self, round};
 use crate::noise::{Fixed, ONE, Rng, fbm, fixed, float, fraction, hash, hash64, smoothstep, stream, unit, value_noise};
 
-/** Metres per lattice unit (UNIT_SIZE in forest.ts). */
+/** Metres per lattice unit. */
 pub const UNIT_SIZE: f64 = 0.125;
 fn vox(metres: f64) -> f64 {
     round(metres / UNIT_SIZE)
@@ -48,7 +47,7 @@ macro_rules! kinds {
     };
 }
 
-// In the order of KINDS in forest.ts: a kind's materials follow it.
+// A kind's materials follow it, in this order.
 kinds! {
     moss: 1, ["#4f7a2a", "#5a8a30", "#466e26", "#628f37"];
     grass: 1, ["#74a83c", "#7fb544", "#6a9c36"];
@@ -94,7 +93,7 @@ fn k(kind: K) -> Kind {
     kind as Kind
 }
 
-// Shapes with forest.ts's defaults: ellipsoids, balls, lathes and boxes fill, capsules paint.
+// Shapes with the forest's defaults: ellipsoids, balls, lathes and boxes fill, capsules paint.
 fn cub(min: Point, max: Point, kind: K) -> Shape {
     cuboid(min, max, k(kind), SOLID, Op::Fill)
 }
@@ -260,7 +259,7 @@ fn pick_species(mut pick: Fixed, chances: &[Fixed; 3]) -> Species {
     Species::Oak
 }
 
-/** The forest's generator for `seed`, and where the camera starts (forest() in forest.ts). */
+/** The forest's generator for `seed`, and where the camera starts. */
 pub fn forest(seed: u64) -> (Generator, [i64; 3]) {
     let mut f =
         Forest { seed, path_phase: 0.0, spawn: [0; 3], kept: RefCell::new((vec![i64::MIN; 1 << 14], vec![0; 1 << 14], vec![0; 1 << 14])) };
@@ -508,7 +507,7 @@ struct Crown {
     fill: f64,
 }
 
-/** A tree of `shapes`, with the parts its crown hides as a child (tree() in forest.ts). */
+/** A tree of `shapes`, with the parts its crown hides as a child. */
 fn tree(shapes: Vec<Shape>, hidden: Vec<Shape>, fine: Vec<Child>, crown: Option<Crown>) -> Node {
     let hidden_bounds = bounds_of_shapes(hidden.iter().map(|s| &s.bounds));
     let mut children = vec![Child { name: "hidden".into(), size: vox(0.5) as i64, node: Node::of(hidden) }];

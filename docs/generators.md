@@ -1,12 +1,15 @@
 # World generators
 
-A generator (`src/lib/generator.ts`) describes a world;
+A generator (`worldgen/src/generator.rs`) describes a world;
 the framework draws any box of it, alone, at any level of detail,
 and gets the same voxels whichever boxes it drew before.
 That lets a world be endless and generated in pieces around the camera,
 coarser further away, for about the same cost per box at every level.
-The forest (`src/lib/forest.ts`) is written this way;
-the city and the toy worlds are not yet.
+The forest (`worldgen/src/forest.rs`) is written this way,
+and the web generates it as WebAssembly (`src/lib/worldgen.ts`);
+the city and the toy worlds (TS, `src/lib`) are not yet.
+Integers and fixed point (`noise.rs`) decide wherever they can,
+so a world is the same on every machine and as fine far from the origin.
 
 This is the second version of the contract (see "Open problems").
 
@@ -15,8 +18,8 @@ This is the second version of the contract (see "Open problems").
 A world is **layers** of two kinds, drawn in `order`:
 
 - **Fields:** something everywhere, from position alone: the ground, caves, fog.
-  A field gives a kind (or a medium) `at` each site,
-  or `spans` along each line of sites parallel to an `axis` (heightfields).
+  A field gives a kind (or a medium) at each site (`At`),
+  or `Spans` along each line of sites parallel to an `axis` (heightfields).
 - **Populations:** things in cells, at most one per cell.
   A population's cells are those of the lattice N times coarser, N·FCC
   (as the renderer's, `cells.ts`, when N is a power of two):
@@ -30,12 +33,12 @@ A world is **layers** of two kinds, drawn in `order`:
   (in a cube 2N wide, or on the ground under it)
   gives things as even and as dense as one per cube 2N wide would:
   every point is in one cell, which picks it as often as any.
-  A cell gives named random sequences (`cell.random('species')`)
+  A cell gives named random sequences (`cell.random("species")`)
   that depend on the cell and the name only.
 
 A thing is a **node**: its **shapes**, and **children**,
-finer things it makes only for the area asked for (`children(clip)`).
-Shapes are analytic: `ball`, `ellipsoid`, `capsule`, `box`, `lathe`
+finer things it makes only for the area asked for (`Children::Reaching`).
+Shapes are analytic: `ball`, `ellipsoid`, `capsule`, `cuboid`, `lathe`
 (a solid of revolution, e.g. a crown).
 Each `fill`s empty sites, `paint`s over them, or `carve`s them empty,
 and may keep each site only with a chance (`fill` < 1: foliage, fog).
@@ -67,7 +70,7 @@ how many rays get how far, and what they stop on.
   which drawn one by one would stop rays twice where they overlap;
   a cluster's ball for its sprays of leaves on twigs, a site thick at level 0.
   Give such parts' children `bounds` and make their shapes only once read
-  (`lazily` in `forest.ts`): coarse boxes hold many things drawn only from afar.
+  (`Shapes::lazy`): coarse boxes hold many things drawn only from afar.
   Parts a thing hides, like branches inside a crown, are children with a small `size`:
   drawn on their own, far away they would show.
 - **Populations** make things while sites are at most `size` apart,
@@ -75,7 +78,7 @@ how many rays get how far, and what they stop on.
   beyond, they draw their `far` field instead:
   a medium as dense as their things, by the theory of Boolean models
   (extinction = things per volume · their mean shadow).
-  `areaProfile` measures their area along an axis from sample things.
+  `area_profile` measures their area along an axis from sample things.
 - **Fields** are evaluated once per site or line of sites,
   and get the spacing, to smooth themselves to it.
 
@@ -84,7 +87,7 @@ a stack of discs a unit thick, each grown to a site, draws its outline, not its 
 
 ## Rules
 
-Broken rules throw, naming the thing and pointing here:
+Broken rules panic, naming the thing and pointing here:
 
 - **Populations.** A thing reaches at most `reach` past its cell's reach,
   N from its centre (one number or per axis);
@@ -95,12 +98,12 @@ Broken rules throw, naming the thing and pointing here:
 
 Not checked, but caught by the tests:
 draw from position, seeds and named random sequences only
-(no shared `rng`, no module state),
+(no shared `Rng`, no global state),
 and fields from position alone.
 
 ## Checks
 
-`src/lib/generator.test.ts` runs, for each world in its list
+`worldgen/tests/contract.rs` runs, for each world in its list
 (the forest, and test worlds of fog, caves, and a village of houses with doors and tables):
 
 - a box against eight parts generated alone, in reverse order,
@@ -114,12 +117,6 @@ and fields from position alone.
   losing content, or a wrong fill law, 0.14 and more.
 
 Add a new world to that list with a region that has a bit of everything in it.
-
-`worldgen/` is the framework and the forest in Rust, for the native frontend.
-It began as a port of the TS ones and now goes its own way:
-integers and fixed point (`noise.rs`) wherever they decide something,
-so a world is the same on every machine and as fine far from the origin.
-The web is to move onto it; until then the two forests differ.
 
 ## Open problems
 

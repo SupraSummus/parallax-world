@@ -1,8 +1,7 @@
-//! Numbers as the TS generators compute them in V8, left from the port and
-//! going as the generators move to integers: rounding, and
-//! the math functions V8 uses where Rust's differ in the last bit.
-//! `pow` is the C library's in both; atan2 and exp are fdlibm's (libm);
-//! V8's sin and cos are its own, within an ulp of libm's.
+//! Float math that gives the same bits on every target (native and
+//! WebAssembly): libm's functions, not the platform's. Named after JS's
+//! Math, as the generators were ported from TS; going as they move to
+//! integers.
 
 /** Math.round: to the nearest integer, halves up. */
 pub fn round(x: f64) -> f64 {
@@ -28,7 +27,7 @@ pub fn exp(x: f64) -> f64 {
 
 /** `x ** y` */
 pub fn pow(x: f64, y: f64) -> f64 {
-    x.powf(y)
+    libm::pow(x, y)
 }
 
 /** Math.hypot as V8 computes it: scaled by the largest, summed with Kahan's compensation. */

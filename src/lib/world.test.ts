@@ -1,11 +1,10 @@
 import { describe, it, expect, vi } from 'vitest'
-import { forest } from './forest'
-import { generate } from './generator'
-import type { VoxelGrid } from './voxel-grid'
+import { VoxelGrid } from './voxel-grid'
 import { generatePart, World, WORLD_TYPES, type GridPart, type Vec3 } from './world'
+import { forest } from './worldgen'
 
 // A small stand-in for the forest: these tests are about generating in parts.
-vi.mock('./forest', async () => ({ forest: (await import('./small-forest.test-helper')).smallForest }))
+vi.mock('./worldgen', async () => ({ forest: (await import('./small-forest.test-helper')).smallForest }))
 
 describe('World', () => {
   // The forest and the city are checked in their own tests; comparing them here is slow.
@@ -55,7 +54,8 @@ describe('World', () => {
   const generatedWhole = (grid: VoxelGrid | undefined, level: number) => {
     if (!grid) return false
     const { minX, minY, minZ, nx, ny, nz } = grid
-    const whole = generate(forest(7).generator, { minX, minY, minZ, maxX: minX + nx, maxY: minY + ny, maxZ: minZ + nz }, level)
+    const box = { minX, minY, minZ, maxX: minX + nx, maxY: minY + ny, maxZ: minZ + nz }
+    const whole = VoxelGrid.compose(box, grid.materials, [forest(7).generate(box, level)])
     let [voxels, wrong] = [0, 0]
     whole.forEach((x, y, z, id) => {
       voxels++
