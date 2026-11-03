@@ -1,6 +1,6 @@
 import { selectSlices, leakFreeDetail, leakAngle, eyeOf, sliceCentre, chunkCell, chunkCells, cellMargin, matchTilings, sliceKey as sliceName, siteLayers, MAX_LEVEL, GRID_LEVELS, atomLevel, atomSpacing, type SliceId } from './slice-selection'
 import { ChunkBaker, type ChunkSplats, type ChunkRequest } from './chunk-baker'
-import { generatePart, World, type GridPart, type Vec3, type WorldType } from './world'
+import { generatePart, World, WORLD_TYPES, type GridPart, type Vec3, type WorldType } from './world'
 import { LayerIndex, type LayerIndexData, type Material, type VoxelData } from './voxel-grid'
 import { Coverage } from './occlusion'
 import { FACES, LAYER, faceTangents, inFace, focalLength, onScreen, screenBox, toLocal, type Face, type Orientation, type ScreenBox, type TangentBox, type View } from './view'
@@ -59,6 +59,8 @@ interface UpdateStats {
   chunksRegenerated: number
   /** Chunks in view still baking (with a Bakery); an older bake of the same cell, if any, stands in. */
   chunksPending: number
+  /** Levels whose grids are being generated (World.generating); their chunks are wanted once there. */
+  levelsGenerating: number
   /** Cells and chunks in view covered by nearer layers, so not drawn (see Coverage). */
   chunksCovered: number
   /** Voxels painted in chunks baked since the previous render (including any whose content turned out to be off screen). */
@@ -67,6 +69,44 @@ interface UpdateStats {
   cacheEfficiency: number
   /** Bytes of all cached chunks, in view or not. */
   cachedBytes: number
+}
+
+/**
+ * A view in a URL's query, for the app and the 3D viewer:
+ * ?seed=&world=&camera=x,y,z&look=yaw,pitch&fov=&distance=.
+ */
+export interface ViewQuery {
+  seed?: number
+  worldType?: WorldType
+  camera?: Camera
+  look?: Orientation
+  fov?: number
+  distance?: number
+}
+
+export function viewQuery({ seed, worldType, camera, look, fov, distance }: Required<ViewQuery>): string {
+  const { x, y, z } = camera
+  return new URLSearchParams({
+    seed: String(seed), world: worldType, camera: [x, y, z].join(), look: [look.yaw, look.pitch].join(), fov: String(fov), distance: String(distance),
+  }).toString()
+}
+
+/** The view in `search` (viewQuery's); what it leaves out or gets wrong is undefined. */
+export function parseViewQuery(search: string): ViewQuery {
+  const params = new URLSearchParams(search)
+  const numbers = (name: string, count: number) => {
+    const values = (params.get(name) ?? '').split(',').map(v => (v.trim() === '' ? NaN : Number(v)))
+    return values.length === count && values.every(Number.isFinite) ? values : undefined
+  }
+  const [camera, look, world] = [numbers('camera', 3), numbers('look', 2), params.get('world')]
+  return {
+    seed: numbers('seed', 1)?.[0],
+    worldType: WORLD_TYPES.find(t => t.value === world)?.value,
+    camera: camera && { x: camera[0], y: camera[1], z: camera[2] },
+    look: look && { yaw: look[0], pitch: look[1] },
+    fov: numbers('fov', 1)?.[0],
+    distance: numbers('distance', 1)?.[0],
+  }
 }
 
 export interface SessionStats {
@@ -221,6 +261,8 @@ export interface RendererOptions {
   bakery?: Bakery
   /** Called whenever the bakery delivers chunks; render() again to show them. */
   onBaked?: () => void
+  /** Where the camera starts, if not at the world's spawn point: its grids are generated there first. */
+  camera?: Camera
 }
 
 /**
@@ -273,9 +315,9 @@ export class ParallaxRenderer {
     lastUpdate: null,
   }
 
-  constructor(world: World, { bakery, onBaked }: RendererOptions = {}) {
+  constructor(world: World, { bakery, onBaked, camera }: RendererOptions = {}) {
     this.world = world
-    this.camera = { ...world.spawn }
+    this.camera = { ...(camera ?? world.spawn) }
     this.bakery = bakery ?? null
     this.onBaked = onBaked ?? (() => undefined)
     this.bakery?.connect((request, chunk) => { this.receive(request, chunk) }, (part, grid, index) => { this.receivePart(part, grid, index) })
@@ -391,6 +433,7 @@ export class ParallaxRenderer {
       chunksReused,
       chunksRegenerated,
       chunksPending: pass.pending,
+      levelsGenerating: this.world.generating,
       chunksCovered,
       voxelsRendered,
       cacheEfficiency,

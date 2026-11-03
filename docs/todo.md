@@ -25,6 +25,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   and walking (`--stroll`) about 15 ms, 40 ms at the 99th percentile:
   most of a frame then, the GPU and uploads far less.
   `native/` is not built in CI.
+  Its `--shot` draws only a seed's spawn view, not the web's view query.
 - **TS and Rust still say much the same twice.**
   The tiles around the camera (`world.ts`) are `native/src/world.rs`,
   and slice selection, faces and the renderer are in `native/src` too;
@@ -85,12 +86,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   as the forest covers the screen in fine pieces.
   Testing quarters of a cell first would not help (two in three are mixed),
   nor would clipping without allocating in `shape`.
-- **One browser check for agents.**
-  Agent sessions spend about a third of their command time
-  in one-off Playwright scripts:
-  each rebuilds, starts a server
-  and waits fixed times for the scene to settle.
-  A committed script that waits until nothing is left to bake would do.
 - **Moved grids are posted whole.**
   When a grid moves with the camera (section 1 of `docs/architecture.md`),
   the main thread posts all of it to every worker, though they have most of it:
@@ -119,6 +114,8 @@ Numbers are for the forest at 1280×800, as measured when written.
 
 ## Ideas
 
+- Keep the view in the address bar as the camera moves,
+  so a view can be copied (the page reads it already).
 - Measure the seams between faces against ray-cast perspective.
 - Make the 12 stacks cheaper:
   four or more faces are in view at once, each with its own near slices.

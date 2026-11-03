@@ -56,4 +56,4 @@ a no-op 2D canvas context
 - Tag exports that only tests use `@internal`;
   `pnpm knip:production` checks that everything else is used outside tests.
 - Visual output is not covered by unit tests; check it in the browser
-  (`pnpm dev`).
+  (`pnpm dev`), or without a GPU with `pnpm shot` (see AGENTS.md).
