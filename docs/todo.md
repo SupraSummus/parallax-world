@@ -8,6 +8,11 @@ Numbers are for the forest at 1280×800, as measured when written.
   and so is the forest's geometry (sin, cos, pow, exp, atan2, hypot, from `js.rs`).
   They should go to fixed point like the noise,
   the forest building each thing relative to its anchor.
+- **The native frontend draws a view dumped by the TS renderer.**
+  It needs world tiles, slice selection, the renderer and coverage in Rust,
+  the camera in fixed point and positions relative to it in f32 for the GPU
+  (the compositor now sends absolute f32 coordinates, which jitter far out).
+  `native/` is not built in CI.
 - **Moving rebakes whole levels.**
   A level is baked again when the camera leaves its eye's cell,
   so walking rebakes 1.3–1.8× the chunks that one direction per chunk did,
