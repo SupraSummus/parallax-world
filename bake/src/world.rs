@@ -1,12 +1,10 @@
-//! The voxel grid (voxel-grid.ts) and the voxel's faces (fcc.ts), as the
-//! TS side hands them over.
+//! The voxel grid (voxel-grid.ts) as the TS side hands it over, tiles of
+//! grids, and the voxel's faces (tables.rs).
 
 use std::sync::Arc;
 
 /** Kinds of voxel faces. */
 pub const FACE_KINDS: usize = 12;
-/** f64 per kind in the geometry table: lattice offset (3), normal (3). */
-pub const GEOMETRY: usize = 6;
 /** i32 per face in the lattice table: R, U, F (3 each). */
 pub const LATTICE: usize = 9;
 /** Faces of the view (FACES in view.ts). */
@@ -14,26 +12,12 @@ pub const VIEW_FACES: usize = 12;
 
 /**
  * The voxel's faces in a face's lattice coordinates, the same for every
- * face (VOXEL_GEOMETRY in bake.ts): kind k's neighbour offset (a, b, c)
- * and its normal in face coordinates.
+ * face (tables.rs): kind k's neighbour offset (a, b, c) and its normal in
+ * face coordinates.
  */
 pub struct Geometry {
     pub offsets: [[i32; 3]; FACE_KINDS],
     pub normals: [[f64; 3]; FACE_KINDS],
-}
-
-impl Geometry {
-    pub fn from_table(table: &[f64]) -> Geometry {
-        let mut g = Geometry { offsets: [[0; 3]; FACE_KINDS], normals: [[0.0; 3]; FACE_KINDS] };
-        for k in 0..FACE_KINDS {
-            let t = &table[k * GEOMETRY..(k + 1) * GEOMETRY];
-            for d in 0..3 {
-                g.offsets[k][d] = t[d] as i32;
-                g.normals[k][d] = t[3 + d];
-            }
-        }
-        g
-    }
 }
 
 /** A face's lattice vectors R, U, F (integer, see Face in view.ts). */

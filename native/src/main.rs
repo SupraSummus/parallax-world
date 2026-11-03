@@ -11,7 +11,7 @@
 //! times that, and the main thread's frames after. --walk D moves the camera D
 //! units along the view after the first frame, and does the same there.
 //! --check-requests takes a view the TS renderer dumped (native/dump.test.ts):
-//! the baker's tables must be the same, and the chunks the first frame
+//! the faces must be the same, and the chunks the first frame
 //! wants from its grids and camera too, but for some the TS renderer wants
 //! and this one does not: its cells' extents count only the tiles a chunk
 //! reads, and those chunks draw nothing in view.
@@ -23,7 +23,6 @@ mod layer_index;
 mod renderer;
 mod shot;
 mod slicing;
-mod tables;
 mod view;
 mod world;
 
@@ -31,7 +30,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
-use bake::{Baker, Geometry, Lattice};
+use bake::{Baker, Lattice};
 use eframe::egui;
 use eframe::egui_wgpu;
 
@@ -148,12 +147,12 @@ impl eframe::App for App {
 /** The renderer and its bakery, for the forest of `seed`. */
 fn renderer(seed: u64, threads: usize, render_distance: f64) -> Renderer {
     let faces = view::faces();
-    let (table, palettes) = (tables::geometry(&faces), tables::palettes(&faces, &materials_of(&forest(seed).0)));
+    let colours: Vec<u32> = materials_of(&forest(seed).0).iter().map(|m| m.rgb()).collect();
     let lattices = std::array::from_fn(|f| {
         let [r, u, f] = faces[f].lattice;
         Lattice { r, u, f }
     });
-    let bakery = Bakery::new(threads, move || Baker::new(Geometry::from_table(&table), lattices, palettes.clone()));
+    let bakery = Bakery::new(threads, move || Baker::new(lattices, &colours));
     Renderer::new(faces, bakery, render_distance, std::array::from_fn(|level| worldgen::forest::heights(level as u32)))
 }
 
@@ -200,8 +199,6 @@ fn check_requests(dump: &Dump, seed: u64, threads: usize) {
     for (face, l) in faces.iter().zip(&dump.lattices) {
         assert_eq!(face.lattice, [l.r, l.u, l.f], "the faces are not the TS renderer's");
     }
-    assert_eq!(tables::geometry(&faces), dump.geometry, "the voxel geometry is not bake.ts's");
-    assert_eq!(tables::palettes(&faces, &materials_of(&forest(seed).0)), dump.palettes, "the palettes are not bake.ts's");
     let focal = focal_length(dump.fov, dump.width, dump.height);
     let view = &view::View { yaw: dump.yaw, pitch: dump.pitch, width: dump.width, height: dump.height, focal };
     let mut renderer = renderer(seed, threads, dump.render_distance);

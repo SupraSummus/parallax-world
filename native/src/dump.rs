@@ -1,5 +1,5 @@
-//! A view dumped by the spike's TS script: the camera, the
-//! baker's tables and grids as chunk-baker.ts hands them over, and the
+//! A view dumped by the spike's TS script: the camera, the faces'
+//! lattices and the grids as chunk-baker.ts hands them over, and the
 //! chunks the renderer wants.
 
 use std::sync::Arc;
@@ -26,10 +26,7 @@ pub struct Dump {
     pub width: f64,
     pub height: f64,
     pub render_distance: f64,
-    /** VOXEL_GEOMETRY in bake.ts. */
-    pub geometry: Vec<f64>,
     pub lattices: [Lattice; VIEW_FACES],
-    pub palettes: Vec<u32>,
     pub grids: Vec<Option<Arc<Grid>>>,
     pub requests: Vec<Request>,
 }
@@ -59,7 +56,7 @@ impl Bytes<'_> {
 
 pub fn read(bytes: &[u8]) -> Dump {
     let mut b = Bytes(bytes);
-    assert_eq!(b.u32(), 0x31445850, "not a dump");
+    assert_eq!(b.u32(), 0x32445850, "not a dump");
     let camera = [b.f64(), b.f64(), b.f64()];
     let (yaw, pitch, fov) = (b.f64(), b.f64(), b.f64());
     let (width, height) = (b.f64(), b.f64());
@@ -68,13 +65,11 @@ pub fn read(bytes: &[u8]) -> Dump {
     for _ in 0..VIEW_FACES * 9 {
         b.f64();
     }
-    let geometry = b.array(Bytes::f64);
     let l = b.array(Bytes::i32);
     let lattices = std::array::from_fn(|f| {
         let l = &l[f * 9..(f + 1) * 9];
         Lattice { r: [l[0], l[1], l[2]], u: [l[3], l[4], l[5]], f: [l[6], l[7], l[8]] }
     });
-    let palettes = b.array(Bytes::u32);
     let levels = b.u32();
     let grids = (0..levels)
         .map(|_| {
@@ -103,5 +98,5 @@ pub fn read(bytes: &[u8]) -> Dump {
         b.f64();
         r
     });
-    Dump { camera, yaw, pitch, fov, width, height, render_distance, geometry, lattices, palettes, grids, requests }
+    Dump { camera, yaw, pitch, fov, width, height, render_distance, lattices, grids, requests }
 }

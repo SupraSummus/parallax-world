@@ -1,14 +1,13 @@
 /**
  * Dumps a view of the forest for the native spike (native/src/dump.rs),
  * without WebAssembly: the renderer lists the chunks in view through the
- * recording Bakery below, and the world's grids and the baker's tables are
+ * recording Bakery below, and the faces' lattices and the world's grids are
  * written as chunk-baker.ts hands them to the baker.
  * Runs only when asked for: DUMP=frame.bin pnpm vitest run native/dump.test.ts
  * (SEED picks the forest). Outside tsconfig and ESLint: it needs Node's fs.
  */
 import { writeFileSync } from 'fs'
 import { test, vi } from 'vitest'
-import { shadedPalette, VOXEL_GEOMETRY } from '../src/lib/bake'
 import type { ChunkRequest } from '../src/lib/chunk-baker'
 import { ParallaxRenderer, type Bakery } from '../src/lib/renderer'
 import { sliceCentre } from '../src/lib/slice-selection'
@@ -57,17 +56,12 @@ test.skipIf(!process.env.DUMP)('dump a view for the native spike', () => {
   const f64 = (...v: number[]) => bytes(Float64Array.from(v))
   const array = (a: Uint8Array | Int32Array | Uint32Array | Float64Array) => { u32(a.length); bytes(a) }
 
-  u32(0x31445850)
+  u32(0x32445850)
   const camera = renderer.getCamera()
   const { yaw, pitch } = renderer.getOrientation()
   f64(camera.x, camera.y, camera.z, yaw, pitch, renderer.getFov(), WIDTH, HEIGHT, renderer.getRenderDistance())
   for (const face of FACES) f64(...[face.right, face.up, face.forward].flatMap(v => [v.x, v.y, v.z]))
-  array(VOXEL_GEOMETRY)
   array(Int32Array.from(FACES.flatMap(({ lattice: { right, up, forward } }) => [right, up, forward].flatMap(v => [v.x, v.y, v.z]))))
-  const palettes = FACES.map(face => shadedPalette(world.materials, face.lattice))
-  const all = new Uint32Array(palettes.reduce((n, p) => n + p.length, 0))
-  palettes.reduce((at, p) => { all.set(p, at); return at + p.length }, 0)
-  array(all)
   u32(grids.length)
   for (const grid of grids) {
     if (!grid) { u32(0); continue }

@@ -15,6 +15,7 @@ mod fill;
 mod slicing;
 mod splats;
 mod surface;
+mod tables;
 mod world;
 
 use std::cell::RefCell;
@@ -26,12 +27,12 @@ use fill::{fill_mask, solid_blocks};
 use slicing::{LAYER, atom_level, chunk_cell, spacing, thickness};
 use splats::{Splats, chunk_splats};
 use surface::{Voxel, cell_reads, cell_surface};
-use world::{FACE_KINDS, GEOMETRY, LATTICE, Reader};
+use world::{Geometry, LATTICE, Reader};
 
 // For native frontends, which link the baker instead of loading its WebAssembly.
 pub use coverage::Coverage;
 pub use surface::Slice;
-pub use world::{Geometry, Grid, Lattice, Tiles, VIEW_FACES};
+pub use world::{Grid, Lattice, Tiles, VIEW_FACES};
 
 /**
  * Mask pixels per unit of its grid for a slice of `level` as the grid
@@ -121,13 +122,14 @@ pub struct Baker {
 }
 
 impl Baker {
-    pub fn new(geometry: Geometry, lattices: [Lattice; VIEW_FACES], palettes: Vec<u32>) -> Baker {
+    /** A baker for the view's faces' lattices (FACES in view.ts) and the world's materials' colours, 0xrrggbb by id. */
+    pub fn new(lattices: [Lattice; VIEW_FACES], colours: &[u32]) -> Baker {
         Baker {
             grids: Vec::new(),
             last: 0,
-            geometry,
+            geometry: tables::geometry(&lattices[0]),
             lattices,
-            palettes,
+            palettes: tables::palettes(&lattices, colours),
             pairs: Cells::new(2),
             surfaces: HashMap::new(),
             uses: 0,
@@ -265,7 +267,7 @@ impl Baker {
 /** A world being handed over, then baking it. */
 enum State {
     None,
-    Loading { geometry: Vec<f64>, lattices: Vec<i32>, palettes: Vec<u32> },
+    Loading { lattices: Vec<i32>, colours: Vec<u32> },
     Ready(Box<Baker>),
 }
 
@@ -278,11 +280,7 @@ thread_local! {
 #[unsafe(no_mangle)]
 pub extern "C" fn world_start(materials: usize) {
     STATE.with_borrow_mut(|state| {
-        *state = State::Loading {
-            geometry: vec![0.0; FACE_KINDS * GEOMETRY],
-            lattices: vec![0; VIEW_FACES * LATTICE],
-            palettes: vec![0; VIEW_FACES * materials * FACE_KINDS],
-        };
+        *state = State::Loading { lattices: vec![0; VIEW_FACES * LATTICE], colours: vec![0; materials] };
     })
 }
 
@@ -309,14 +307,13 @@ pub extern "C" fn world_cells() -> *mut u8 {
     })
 }
 
-/** Where to write the loading world's tables: 0 geometry (f64), 1 lattices (i32), 2 palettes (u32). */
+/** Where to write the loading world's tables: 0 the faces' lattices (i32, see Baker::new), 1 the materials' colours (u32). */
 #[unsafe(no_mangle)]
 pub extern "C" fn world_table(table: u32) -> *mut u8 {
     STATE.with_borrow_mut(|state| match state {
-        State::Loading { geometry, lattices, palettes, .. } => match table {
-            0 => geometry.as_mut_ptr() as *mut u8,
-            1 => lattices.as_mut_ptr() as *mut u8,
-            _ => palettes.as_mut_ptr() as *mut u8,
+        State::Loading { lattices, colours } => match table {
+            0 => lattices.as_mut_ptr() as *mut u8,
+            _ => colours.as_mut_ptr() as *mut u8,
         },
         _ => std::ptr::null_mut(),
     })
@@ -326,12 +323,12 @@ pub extern "C" fn world_table(table: u32) -> *mut u8 {
 #[unsafe(no_mangle)]
 pub extern "C" fn world_ready() {
     STATE.with_borrow_mut(|state| {
-        if let State::Loading { geometry, lattices, palettes } = std::mem::replace(state, State::None) {
+        if let State::Loading { lattices, colours } = std::mem::replace(state, State::None) {
             let lattices = std::array::from_fn(|f| {
                 let l = &lattices[f * LATTICE..(f + 1) * LATTICE];
                 Lattice { r: [l[0], l[1], l[2]], u: [l[3], l[4], l[5]], f: [l[6], l[7], l[8]] }
             });
-            *state = State::Ready(Box::new(Baker::new(Geometry::from_table(&geometry), lattices, palettes)));
+            *state = State::Ready(Box::new(Baker::new(lattices, &colours)));
         }
     })
 }

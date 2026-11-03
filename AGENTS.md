@@ -51,7 +51,6 @@ src/
     ├── worker-bakery.ts     # Pool of bake workers the renderer sends missing chunks to
     ├── bake.worker.ts       # Bake worker entry
     ├── compositor.ts        # Draws the renderer's frames with WebGL 2: chunks' splats, instanced
-    ├── bake.ts              # Voxel face geometry and shaded palettes handed to the baker
     └── utils.ts             # cn() for class names
 viewer.html                  # Reference 3D viewer page (second Vite entry)
 src/viewer/
@@ -64,6 +63,7 @@ bake/                        # Chunk baker and coverage in Rust (no dependencies
     ├── cells.rs             # cells.ts, with a table per level
     ├── slicing.rs           # The parts of slice-selection.ts baking needs
     ├── surface.rs           # A cell's voxels that can show
+    ├── tables.rs            # The voxel's faces in lattice coordinates, the materials shaded per view face
     ├── splats.rs            # Which voxels a chunk shows, as hexagons on its centre plane; gap filling
     ├── fill.rs              # Splats filled into a mask, solid blocks (for coverage)
     └── coverage.rs          # Which screen cells nearer layers cover, on the main thread; its WebAssembly exports
@@ -79,8 +79,7 @@ native/                      # Spike of a native frontend (eframe + wgpu), linki
 ├── dump.test.ts             # Dumps a view from the TS renderer, to check it against (only with DUMP set)
 └── src/
     ├── main.rs              # The window and camera; --shot, --bench, --walk, --check-requests against a dump
-    ├── dump.rs              # Reads a dump: the baker's tables, a view, its grids and the chunks it wants
-    ├── tables.rs            # bake.ts: the voxel geometry and shaded palettes the bakers are given
+    ├── dump.rs              # Reads a dump: a view, its faces, grids and the chunks it wants
     ├── world.rs             # world.ts for generated worlds: worldgen's tiles, those the renderer wants first, made and indexed on threads
     ├── slicing.rs           # slice-selection.ts: slices, chunks, eyes
     ├── view.rs              # view.ts: faces, which rays and screen boxes they draw

@@ -1,5 +1,4 @@
 import { describe, it, expect } from 'vitest'
-import { shadedPalette, faceShade, FACE_SHADE } from './bake'
 import { ChunkBaker, SPLAT } from './chunk-baker'
 import { VOXEL_FACES } from './fcc'
 import { sliceCentre, holds, atomLevel, atomSpacing } from './slice-selection'
@@ -16,26 +15,8 @@ const toWorld = ({ lattice: { right: R, up: U, forward: F } }: Face, a: number, 
   y: (a * R.y + c * F.y) / 2 + b * U.y,
   z: (a * R.z + c * F.z) / 2 + b * U.z,
 })
-// Face kinds as bake.ts numbers them: VOXEL_FACES in the lattice coordinates of any face.
+// Face kinds as the baker numbers them: VOXEL_FACES in the lattice coordinates of any face.
 const kindOffsets = VOXEL_FACES.map(({ normal: [x, y, z] }) => toLattice(FACES[0], { x, y, z }))
-
-describe('shadedPalette', () => {
-  it('shades a face by the axes it faces along in the world', () => {
-    const { front, back, left, right, bottom, top } = FACE_SHADE
-    expect([[0, 0, -1], [0, 0, 1], [-1, 0, 0], [1, 0, 0], [0, -1, 0], [0, 1, 0]].map(([x, y, z]) => faceShade({ x, y, z })))
-      .toEqual([front, back, left, right, bottom, top])
-    expect(faceShade({ x: 0, y: 1, z: -1 })).toBeCloseTo((top + front) / 2)
-
-    const white = [{ color: '#000000', type: 0 }, { color: '#ffffff', type: 1 }]
-    const kind = (a: number, b: number, c: number) => kindOffsets.findIndex(o => o.a === a && o.b === b && o.c === c)
-    // Seen along +x+z (up is +y, right is (1, 0, -1) / √2): the front kind
-    // faces -x and -z; the kind a step up, right and towards the camera faces up and -z.
-    const palette = shadedPalette(white, (FACES.find(f => f.name === '+x+z') as Face).lattice)
-    const red = (k: number) => palette[VOXEL_FACES.length + k] & 255
-    expect(red(kind(0, 0, -2))).toBe(Math.round(255 * (left + front) / 2))
-    expect(red(kind(1, 1, -1))).toBe(Math.round(255 * (top + front) / 2))
-  })
-})
 
 /**
  * The first voxel of a slice, `size` times the lattice's, hit by the ray
@@ -103,12 +84,12 @@ describe('ChunkBaker', () => {
   it.each([
     [0, 0, Infinity, [0, 0, -12]], [0, 3, Infinity, [8, -4, -8]], [1, 1, Infinity, [-16, 0, -10]], [1, 2, Infinity, [4, 8, -6]],
     [2, 1, Infinity, [8, 4, -8]], [3, 0, 4, [8, 6, -14]], [4, 0, Infinity, [-8, -6, -20]], [5, 0, Infinity, [-8, -4, -20]], [5, 0, 8, [8, 4, -16]], [0, 5, Infinity, [0, -8, -4]],
-  ] as const)('paints every voxel a ray from the eye hits first, far to near, at its site (level %s, layer %s, cutoff %s, eye %j)', (level, layer, cutoff, eye) => {
+  ] as const)('paints every voxel a ray from the eye hits first, far to near, at its site, in its colour (level %s, layer %s, cutoff %s, eye %j)', (level, layer, cutoff, eye) => {
     const slice = { level, layer, cutoff }
     const centre = sliceCentre(slice)
     // The voxels of the grid it reads, N times the lattice's.
     const n = atomSpacing(level)
-    const voxels = levels[atomLevel(level)].toVoxels().map(v => toLattice(face, { x: n * v.x, y: n * v.y, z: n * v.z }))
+    const voxels = levels[atomLevel(level)].toVoxels().map(v => ({ ...toLattice(face, { x: n * v.x, y: n * v.y, z: n * v.z }), color: v.color }))
       .filter(v => holds(slice, [v.a, v.b, v.c]))
     const sites = voxels.map(v => ({ x: v.a * LAYER, y: v.b, z: v.c * LAYER }))
     expect(sites.length).toBeGreaterThan(20)
@@ -117,12 +98,17 @@ describe('ChunkBaker', () => {
     const from = { x: eye[0] * LAYER, y: eye[1], z: eye[2] * LAYER }
     const distance = (v: { a: number; b: number; c: number }) => (v.a - eye[0]) ** 2 + 2 * (v.b - eye[1]) ** 2 + (v.c - eye[2]) ** 2
 
-    // Each splat: centred where the line from the eye through its site meets the plane.
+    // Each splat: centred where the line from the eye through its site meets
+    // the plane, its voxel's colour shaded (so the channels it lacks stay 0).
     const lattice = baker.sites(splats.length / SPLAT)
+    const colorOf = new Map(voxels.map(v => [[v.a, v.b, v.c].join(), parseInt(v.color.slice(1), 16)]))
+    const rgba = new Uint32Array(splats.buffer)
+    const channels = (rgb: number, ...shifts: number[]) => shifts.map(s => ((rgb >> s) & 255) > 0)
     const splatted = new Set<string>()
     for (let k = 0; k < painted; k++) {
       const [a, b, c] = lattice.subarray(3 * k, 3 * k + 3)
       splatted.add([a, b, c].join())
+      expect(channels(rgba[k * SPLAT + 4], 0, 8, 16)).toEqual(channels(colorOf.get([a, b, c].join()) ?? 0, 16, 8, 0))
       const t = (centre - from.z) / (c * LAYER - from.z)
       expect(originX + splats[k * SPLAT]).toBeCloseTo(from.x + (a * LAYER - from.x) * t, 3)
       expect(originY + splats[k * SPLAT + 1]).toBeCloseTo(from.y + (b - from.y) * t, 3)

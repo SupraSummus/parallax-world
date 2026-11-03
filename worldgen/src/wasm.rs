@@ -29,11 +29,6 @@ fn result(values: &[f64]) -> *const f64 {
     })
 }
 
-/** '#rrggbb' as a number; 0 for none (material 0, empty). */
-fn rgb(color: &str) -> u32 {
-    color.strip_prefix('#').and_then(|hex| u32::from_str_radix(hex, 16).ok()).unwrap_or(0)
-}
-
 /**
  * Starts the forest of `seed` (an integer; JS numbers are f64); returns
  * RESULT: spawn x, y, z, REACH, materials, and a pointer to their
@@ -42,7 +37,7 @@ fn rgb(color: &str) -> u32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn forest_start(seed: f64) -> *const f64 {
     let (generator, spawn) = forest(seed as i64 as u64);
-    let materials = materials_of(&generator).iter().flat_map(|m| [rgb(m.color), m.material_type as u32]).collect();
+    let materials = materials_of(&generator).iter().flat_map(|m| [m.rgb(), m.material_type as u32]).collect();
     STATE.with_borrow_mut(|state| {
         let State { materials, .. } = state.insert(State { generator, materials, grid: None });
         result(&[

@@ -4,7 +4,6 @@
  * renderer directly (without workers) and inside bake workers, through the
  * message protocol below. No DOM.
  */
-import { shadedPalette, VOXEL_GEOMETRY } from './bake'
 import type { SliceId } from './slice-selection'
 import { FACES } from './view'
 import { BRICK_SITES, LayerIndex, usedCells, type LayerIndexData, type Material, type VoxelData } from './voxel-grid'
@@ -96,11 +95,10 @@ export class ChunkBaker {
   constructor(materials: readonly Material[], levels: readonly (VoxelData | undefined)[]) {
     const baker = wasmInstance() as unknown as Baker
     this.baker = baker
+    // It shades the materials' colours per face itself (bake/src/tables.rs).
     baker.world_start(materials.length)
-    this.write(Float64Array, baker.world_table(0), VOXEL_GEOMETRY)
-    this.write(Int32Array, baker.world_table(1), Int32Array.from(FACES.flatMap(({ lattice: { right, up, forward } }) => [right, up, forward].flatMap(v => [v.x, v.y, v.z]))))
-    const palettes = FACES.map(face => shadedPalette(materials, face.lattice))
-    palettes.forEach((palette, f) => { this.write(Uint32Array, baker.world_table(2) + f * palette.byteLength, palette) })
+    this.write(Int32Array, baker.world_table(0), Int32Array.from(FACES.flatMap(({ lattice: { right, up, forward } }) => [right, up, forward].flatMap(v => [v.x, v.y, v.z]))))
+    this.write(Uint32Array, baker.world_table(1), Uint32Array.from(materials, ({ color }) => parseInt(color.slice(1), 16) || 0))
     baker.world_ready()
     levels.forEach((grid, level) => { if (grid) this.addGrid(level, grid) })
   }
@@ -114,7 +112,7 @@ export class ChunkBaker {
   }
 
   /** Copies `values` into the baker's memory at `offset`. Memory may grow on each call, detaching earlier views of it. */
-  private write<T extends Uint8Array | Int32Array | Uint32Array | Float64Array>(View: new (buffer: ArrayBuffer, offset: number, length: number) => T, offset: number, values: T) {
+  private write<T extends Uint8Array | Int32Array | Uint32Array>(View: new (buffer: ArrayBuffer, offset: number, length: number) => T, offset: number, values: T) {
     new View(this.baker.memory.buffer, offset, values.length).set(values)
   }
 

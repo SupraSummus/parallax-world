@@ -530,6 +530,13 @@ pub struct Material {
     pub material_type: u8,
 }
 
+impl Material {
+    /** The colour '#rrggbb' as 0xrrggbb; 0 for none (material 0, empty). */
+    pub fn rgb(&self) -> u32 {
+        self.color.strip_prefix('#').and_then(|hex| u32::from_str_radix(hex, 16).ok()).unwrap_or(0)
+    }
+}
+
 /** Shades of the kinds' colours, as material ids picked by a hash of the position in lattice units. */
 struct Palette {
     materials: Vec<Material>,
