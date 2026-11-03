@@ -3,14 +3,16 @@
 //! (renderer.rs), worker threads baking them with the baker in bake/,
 //! sharing the tiles, and wgpu drawing them in an egui window.
 //!
-//! parallax-native [--threads N] [--seed S] [--shot out.png | --bench] [--walk D] [--spin]
+//! parallax-native [--threads N] [--seed S] [--leak DEG] [--shot out.png | --bench] [--walk D] [--stroll S] [--spin]
 //! parallax-native [--seed S] --check-requests frame.bin
 //!
 //! --shot draws the first frame once the world has its tiles and all its
 //! chunks are baked, at 1280×800, offscreen, and saves it; --bench only
 //! times that, the main thread's frames after, and the GPU drawing the
 //! last. --walk D moves the camera D units along the view after the first
-//! frame, and does the same there.
+//! frame, and does the same there. --stroll S then walks on for S seconds
+//! as the window would, a frame every 60th, and times each frame's parts.
+//! --leak sets how far hidden geometry may show between slices (renderer.rs).
 //! --check-requests takes a view the TS renderer dumped (native/dump.test.ts):
 //! the faces must be the same, and the chunks the first frame
 //! wants from its grids and camera too, but for some the TS renderer wants
@@ -216,12 +218,53 @@ fn check_requests(dump: &Dump, seed: u64, threads: usize) {
     }
 }
 
+/**
+ * Walks on along the view for `seconds` at the window's speed, a frame
+ * every 60th of a second as the window draws it, the GPU a frame behind,
+ * and says what the frames cost.
+ */
+fn stroll(seconds: f64, world: &mut World, renderer: &mut Renderer, mut camera: Vec3, view: &view::View, picture: &compositor::View) {
+    let mut gpu = shot::Offscreen::new();
+    // All of the first frame is new to this GPU.
+    gpu.prepare(&renderer.render(camera, view).0, picture);
+    let mut last = gpu.render();
+    let forward = view_basis(view.yaw, 0.0)[2];
+    let (mut times, mut short) = (Vec::new(), 0);
+    let ms = |a: Instant, b: Instant| (b - a).as_secs_f64() * 1000.0;
+    for _ in 0..((seconds * 60.0) as usize).max(1) {
+        camera = std::array::from_fn(|d| camera[d] + forward[d] * SPEED / 60.0);
+        let start = Instant::now();
+        let (frame, stats) = renderer.render(camera, view);
+        let rendered = Instant::now();
+        for (level, tiles) in world.update(camera, &stats.levels, &stats.tiles) {
+            renderer.set_tiles(level, tiles);
+        }
+        let updated = Instant::now();
+        gpu.prepare(&frame, picture);
+        let prepared = Instant::now();
+        gpu.wait_for(last);
+        last = gpu.render();
+        let end = Instant::now();
+        times.push([ms(start, rendered), ms(rendered, updated), ms(updated, prepared), ms(prepared, end), ms(start, end)]);
+        short += usize::from(!stats.wanted.is_empty() || !stats.tiles.is_empty());
+    }
+    println!("{} frames walking, {short} with chunks or tiles missing; ms at the median, 90th and 99th percentile, and most:", times.len());
+    for (k, name) in ["render", "world", "upload", "GPU", "frame"].iter().enumerate() {
+        let mut t: Vec<f64> = times.iter().map(|t| t[k]).collect();
+        t.sort_by(f64::total_cmp);
+        let at = |q: f64| t[((t.len() - 1) as f64 * q) as usize];
+        println!("  {name:>6}: {:6.1} {:6.1} {:6.1} {:6.1}", at(0.5), at(0.9), at(0.99), at(1.0));
+    }
+}
+
 /** The view the TS renderer starts with (renderer.ts), at the size --shot draws. */
 const YAW: f64 = 0.0;
 const PITCH: f64 = 0.0;
 const FOV: f64 = 90.0;
 const RENDER_DISTANCE: f64 = 8000.0;
 const SHOT: [f64; 2] = [1280.0, 800.0];
+/** Units a second the window starts moving at. */
+const SPEED: f64 = 40.0;
 
 fn main() -> eframe::Result {
     let args: Vec<String> = std::env::args().collect();
@@ -235,11 +278,14 @@ fn main() -> eframe::Result {
     let focal = focal_length(FOV, size[0], size[1]);
     let first = view::View { yaw: YAW, pitch: PITCH, width: size[0], height: size[1], focal };
     let mut renderer = renderer(seed, threads, RENDER_DISTANCE);
+    if let Some(i) = args.iter().position(|a| a == "--leak") {
+        renderer.max_leak = args[i + 1].parse().expect("leak");
+    }
     let mut world = World::new(seed, threads);
     let mut camera = worldgen::forest::forest(seed).1.map(|v| v as f64);
     let faces: [[Vec3; 3]; 12] = std::array::from_fn(|f| view::faces()[f].axes);
     let fog_distance = RENDER_DISTANCE * 0.7;
-    if args.iter().any(|a| a == "--bench") || args.iter().any(|a| a == "--shot") {
+    if args.iter().any(|a| ["--bench", "--shot", "--stroll"].contains(&a.as_str())) {
         let start = Instant::now();
         let (mut frame, mut stats) = complete(&mut world, &mut renderer, camera, &first);
         let report = |what: &str, start: Instant, frame: &renderer::Frame, stats: &renderer::Stats| {
@@ -277,9 +323,12 @@ fn main() -> eframe::Result {
             pixels: size.map(|v| v as u32),
         };
         if args.iter().any(|a| a == "--bench") {
-            let splats: usize = frame.layers.iter().flat_map(|l| &l.placements).map(|p| p.chunk.baked.numbers.len() / 5).sum();
+            let splats: usize = frame.layers.iter().flat_map(|l| &l.placements).map(|p| p.chunk.baked.splats.len()).sum();
             let (ms, [first, next]) = shot::time(&frame, &view, 30);
             println!("the GPU draws the frame in {ms:.1} ms: of its {splats} splats, {first} that showed before and {next} more");
+        }
+        if let Some(i) = args.iter().position(|a| a == "--stroll") {
+            stroll(args[i + 1].parse().expect("seconds"), &mut world, &mut renderer, camera, &first, &view);
         }
         if let Some(i) = args.iter().position(|a| a == "--shot") {
             shot::save(&frame, &view, &args[i + 1]);
@@ -297,6 +346,10 @@ fn main() -> eframe::Result {
                     required_features: compositor::FEATURES,
                     ..Default::default()
                 }),
+                instance_descriptor: eframe::wgpu::InstanceDescriptor {
+                    backends: compositor::BACKENDS,
+                    ..eframe::wgpu::InstanceDescriptor::new_without_display_handle()
+                },
                 ..egui_wgpu::WgpuSetupCreateNew::without_display_handle()
             }),
             surface: egui_wgpu::SurfaceConfig {
@@ -316,7 +369,7 @@ fn main() -> eframe::Result {
         pitch: PITCH,
         fov: FOV,
         fog_distance,
-        speed: 40.0,
+        speed: SPEED,
         stats: String::new(),
         frame_ms: 0.0,
         spin,

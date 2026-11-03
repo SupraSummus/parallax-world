@@ -10,39 +10,57 @@ use crate::renderer::Frame;
 /** egui's target format, so a shot looks as the window does. */
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
-/** A device and a compositor with `frame` prepared. */
-struct Offscreen {
+/** A device and a compositor drawing offscreen. */
+pub struct Offscreen {
     device: wgpu::Device,
     queue: wgpu::Queue,
     compositor: Compositor,
 }
 
 fn offscreen(frame: &Frame, view: &View) -> Offscreen {
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())).expect("adapter");
-    let descriptor = wgpu::DeviceDescriptor {
-        required_limits: compositor::limits(&adapter),
-        required_features: compositor::FEATURES,
-        ..Default::default()
-    };
-    let (device, queue) = pollster::block_on(adapter.request_device(&descriptor)).expect("device");
-    let mut compositor = Compositor::new(&device, FORMAT);
-    let mut encoder = device.create_command_encoder(&Default::default());
-    compositor.prepare(&device, &queue, &mut encoder, frame, view);
-    queue.submit([encoder.finish()]);
-    Offscreen { device, queue, compositor }
+    let mut o = Offscreen::new();
+    o.prepare(frame, view);
+    o
 }
 
 impl Offscreen {
-    /** Draws the frame. */
-    fn render(&self) {
+    pub fn new() -> Offscreen {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: compositor::BACKENDS,
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
+        });
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())).expect("adapter");
+        let descriptor = wgpu::DeviceDescriptor {
+            required_limits: compositor::limits(&adapter),
+            required_features: compositor::FEATURES,
+            ..Default::default()
+        };
+        let (device, queue) = pollster::block_on(adapter.request_device(&descriptor)).expect("device");
+        let compositor = Compositor::new(&device, FORMAT);
+        Offscreen { device, queue, compositor }
+    }
+
+    /** Uploads what `frame` needs (Compositor::prepare). */
+    pub fn prepare(&mut self, frame: &Frame, view: &View) {
         let mut encoder = self.device.create_command_encoder(&Default::default());
-        self.compositor.render(&mut encoder);
+        self.compositor.prepare(&self.device, &self.queue, &mut encoder, frame, view);
         self.queue.submit([encoder.finish()]);
     }
 
-    fn wait(&self) {
+    /** Draws the frame prepared last. */
+    pub fn render(&self) -> wgpu::SubmissionIndex {
+        let mut encoder = self.device.create_command_encoder(&Default::default());
+        self.compositor.render(&mut encoder);
+        self.queue.submit([encoder.finish()])
+    }
+
+    pub fn wait(&self) {
         self.device.poll(wgpu::PollType::wait_indefinitely()).expect("poll");
+    }
+
+    /** Waits until the GPU is done with `submission`. */
+    pub fn wait_for(&self, submission: wgpu::SubmissionIndex) {
+        self.device.poll(wgpu::PollType::Wait { submission_index: Some(submission), timeout: None }).expect("poll");
     }
 
     /** `size` bytes that `copy` copies into a buffer, once the GPU is done. */

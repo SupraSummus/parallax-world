@@ -508,8 +508,10 @@ layer k of L at 2^((k − L)·s), and within a chunk each splat's rank,
 nearer the later it is painted, grown ones in the layer's back half
 (`depth_of`, exponential so the largest chunks' ranks stay apart in f32).
 So splats can be drawn in any order,
-and a chunk's are uploaded in clusters of a few nearby on its plane,
+and the bake workers put a chunk's in clusters of a few nearby on its plane,
 each with its box and nearest depth.
+A chunk's slot in the table comes to the vertex shader as its draws' first vertex,
+so its splats are uploaded as the workers made them.
 Each frame it draws the clusters that showed in the last,
 reduces their depth to a pyramid of farthest depths,
 then tests every cluster in view against it on the GPU,

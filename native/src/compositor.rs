@@ -31,13 +31,13 @@ struct GpuChunk {
     pad: f32,
 }
 
-/** A splat (splat_vertex's instance in compositor.wgsl): its SPLAT numbers (chunk-baker.ts), its chunk's slot, and its order in the chunk (depth_of). */
-type GpuSplat = [u32; 7];
+/** A splat (splat_vertex's instance in compositor.wgsl): its SPLAT numbers (chunk-baker.ts) and its order in its chunk (depth_of). */
+pub type GpuSplat = [u32; 6];
 
 /** A cluster (Cluster in compositor.wgsl). */
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct GpuCluster {
+pub struct GpuCluster {
     min: [f32; 2],
     max: [f32; 2],
     first: u32,
@@ -54,6 +54,66 @@ struct GpuCluster {
  */
 const CLUSTER: usize = 16;
 const BLOCK: f64 = 12.0;
+
+/** The size of the blocks that cluster() gathers splats from, for a chunk on a plane `distance` ahead seen at `focal`. */
+pub fn block(distance: f64, focal: f64) -> f64 {
+    BLOCK * distance / focal
+}
+
+/**
+ * A chunk's splats (painted, then grown, each far to near) as the GPU takes
+ * them, in clusters of the splats in each block of size `block` on its plane
+ * (row by row, nearest first in each, so that a block's first clusters are
+ * its front), and the clusters, nearest first, so that splats are drawn
+ * near to far; their `first` counts from the chunk's first splat, and
+ * their chunk's slot is not in them yet. In the bake workers, so that a
+ * chunk's upload is a copy.
+ */
+pub fn cluster(numbers: &[f32], painted: usize, block: f64) -> (Vec<GpuSplat>, Vec<GpuCluster>) {
+    let numbers = numbers.as_chunks::<5>().0;
+    let grown = numbers.len() - painted;
+    // Painted splats in the first half of the layer's depths, nearer the later painted; grown ones in the second, behind them all.
+    let orders: Vec<f32> = (0..numbers.len())
+        .map(|s| {
+            let (half, k, n) = if s < painted { (0.0, s, painted) } else { (0.5, s - painted, grown) };
+            half + 0.5 * (n - k) as f32 / (n + 1) as f32
+        })
+        .collect();
+    let block_of = |s: usize| [1, 0].map(|d| (numbers[s][d] as f64 / block).floor() as i64);
+    let mut sorted: Vec<usize> = (0..painted).rev().chain((painted..numbers.len()).rev()).collect();
+    sorted.sort_by_key(|&s| block_of(s));
+    let mut clusters = Vec::new();
+    let mut start = 0;
+    for run in sorted.chunk_by(|&a, &b| block_of(a) == block_of(b)) {
+        // Split evenly.
+        let parts = run.len().div_ceil(CLUSTER);
+        for p in 0..parts {
+            let part = &run[run.len() * p / parts..run.len() * (p + 1) / parts];
+            let first = start + run.len() * p / parts;
+            let mut cluster = GpuCluster {
+                min: [f32::INFINITY; 2],
+                max: [f32::NEG_INFINITY; 2],
+                first: first as u32,
+                slot_count: part.len() as u32,
+                order: orders[part[0]],
+                visible: 0,
+            };
+            for &s in part {
+                let [x, y, w, h, _] = numbers[s];
+                cluster.min = [cluster.min[0].min(x - w), cluster.min[1].min(y - h)];
+                cluster.max = [cluster.max[0].max(x + w), cluster.max[1].max(y + h)];
+            }
+            clusters.push(cluster);
+        }
+        start += run.len();
+    }
+    clusters.sort_by(|a, b| a.order.total_cmp(&b.order));
+    let splats = sorted.iter().map(|&s| {
+        let [x, y, w, h, paint] = numbers[s].map(f32::to_bits);
+        [x, y, w, h, paint, orders[s].to_bits()]
+    });
+    (splats.collect(), clusters)
+}
 
 /** A chunk's splats and clusters on the GPU, its slot in the table, and the frame it was last drawn in. */
 struct Resident {
@@ -84,6 +144,25 @@ impl Arena {
         Arena { label, stride, usage, buffer, capacity, top: 0, free: Vec::new(), grew: false }
     }
 
+    /** Room for frames of `items` as the camera moves: three times that when it has less than twice, so that it seldom grows. */
+    fn room(&mut self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, items: u32) {
+        if 2 * items > self.capacity {
+            self.grow(device, encoder, 3 * items);
+        }
+    }
+
+    /** Grown to `capacity` items, as far as the device allows, what it holds copied over. */
+    fn grow(&mut self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, capacity: u32) {
+        let limits = device.limits();
+        let most = limits.max_buffer_size.min(limits.max_storage_buffer_binding_size) / self.stride;
+        let capacity = capacity.min(most.min(u32::MAX as u64) as u32);
+        if capacity > self.capacity {
+            let grown = buffer(device, self.label, capacity as u64 * self.stride, self.usage);
+            encoder.copy_buffer_to_buffer(&self.buffer, 0, &grown, 0, self.top as u64 * self.stride);
+            (self.buffer, self.capacity, self.grew) = (grown, capacity, true);
+        }
+    }
+
     /** `count` items' room in the buffer, grown if need be. */
     fn allocate(&mut self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, count: u32) -> Range<u32> {
         if let Some(k) = self.free.iter().position(|r| r.len() >= count as usize).filter(|_| !self.grew) {
@@ -96,10 +175,7 @@ impl Arena {
             return r.start..r.start + count;
         }
         if self.top + count > self.capacity {
-            let capacity = (self.capacity * 2).max(self.top + count);
-            let grown = buffer(device, self.label, capacity as u64 * self.stride, self.usage);
-            encoder.copy_buffer_to_buffer(&self.buffer, 0, &grown, 0, self.top as u64 * self.stride);
-            (self.buffer, self.capacity, self.grew) = (grown, capacity, true);
+            self.grow(device, encoder, (self.capacity * 2).max(self.top + count));
         }
         self.top += count;
         self.top - count..self.top
@@ -201,6 +277,13 @@ fn at_least(device: &wgpu::Device, buffer: &mut wgpu::Buffer, size: u64) {
     }
 }
 
+/**
+ * The backend the compositor draws with: on DX12, wgpu's indirect draws
+ * counted on the GPU leave their first vertex out of the vertex index,
+ * which carries the chunk's slot.
+ */
+pub const BACKENDS: wgpu::Backends = wgpu::Backends::VULKAN;
+
 /** What the compositor needs of a device: draws listed on the GPU, a cluster's splats each. */
 pub const FEATURES: wgpu::Features = wgpu::Features::INDIRECT_FIRST_INSTANCE.union(wgpu::Features::MULTI_DRAW_INDIRECT_COUNT);
 
@@ -270,7 +353,7 @@ impl Pipelines {
         let splat = wgpu::VertexBufferLayout {
             array_stride: size_of::<GpuSplat>() as u64,
             step_mode: wgpu::VertexStepMode::Instance,
-            attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Unorm8x4, 2 => Uint32, 3 => Float32],
+            attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Unorm8x4, 2 => Float32],
         };
         let render = |layout: &wgpu::BindGroupLayout,
                       vertex: &str,
@@ -418,73 +501,20 @@ impl Compositor {
         (&self.draws, &self.drawn)
     }
 
-    /** Uploads `chunk`'s splats in clusters, its plane `distance` ahead seen at `focal`. */
-    fn upload(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        encoder: &mut wgpu::CommandEncoder,
-        chunk: &Chunk,
-        distance: f64,
-        focal: f64,
-    ) {
-        let numbers = chunk.baked.numbers.as_chunks::<5>().0;
-        let (painted, grown) = (chunk.baked.painted, numbers.len() - chunk.baked.painted);
-        // Painted splats in the first half of the layer's depths, nearer the later painted; grown ones in the second, behind them all.
-        let orders: Vec<f32> = (0..numbers.len())
-            .map(|s| {
-                let (half, k, n) = if s < painted { (0.0, s, painted) } else { (0.5, s - painted, grown) };
-                half + 0.5 * (n - k) as f32 / (n + 1) as f32
-            })
-            .collect();
-        // By block, nearest first, so that a block's first clusters are its front (orders are positive, so their bits sort as they do).
-        let unit = BLOCK * distance / focal;
-        let mut sorted: Vec<((i64, i64), u32, usize)> = (0..numbers.len())
-            .map(|s| {
-                let [x, y, ..] = numbers[s];
-                (((y as f64 / unit).floor() as i64, (x as f64 / unit).floor() as i64), orders[s].to_bits(), s)
-            })
-            .collect();
-        sorted.sort_unstable();
+    /** Uploads `chunk`'s splats and clusters (see cluster). */
+    fn upload(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, chunk: &Chunk) {
         let slot = self.free_slots.pop().unwrap_or_else(|| {
             self.slots += 1;
             self.slots - 1
         });
-        let splats = self.splats.allocate(device, encoder, numbers.len() as u32);
-        let mut clusters = Vec::new();
-        let mut first = splats.start;
-        for block in sorted.chunk_by(|a, b| a.0 == b.0) {
-            // Split evenly.
-            let parts = block.len().div_ceil(CLUSTER);
-            for p in 0..parts {
-                let part = &block[block.len() * p / parts..block.len() * (p + 1) / parts];
-                let mut cluster = GpuCluster {
-                    min: [f32::INFINITY; 2],
-                    max: [f32::NEG_INFINITY; 2],
-                    first,
-                    slot_count: slot << 8 | part.len() as u32,
-                    order: orders[part[0].2],
-                    visible: 0,
-                };
-                for &(_, _, s) in part {
-                    let [x, y, w, h, _] = numbers[s];
-                    cluster.min = [cluster.min[0].min(x - w), cluster.min[1].min(y - h)];
-                    cluster.max = [cluster.max[0].max(x + w), cluster.max[1].max(y + h)];
-                }
-                first += part.len() as u32;
-                clusters.push(cluster);
-            }
-        }
-        // Nearest first, so that splats are drawn near to far.
-        clusters.sort_by(|a, b| a.order.total_cmp(&b.order));
-        let data: Vec<GpuSplat> = sorted
+        let baked = &chunk.baked;
+        let splats = self.splats.allocate(device, encoder, baked.splats.len() as u32);
+        queue.write_buffer(&self.splats.buffer, splats.start as u64 * self.splats.stride, bytemuck::cast_slice(&baked.splats));
+        let clusters: Vec<GpuCluster> = baked
+            .clusters
             .iter()
-            .map(|&(_, _, s)| {
-                let n = numbers[s];
-                [n[0].to_bits(), n[1].to_bits(), n[2].to_bits(), n[3].to_bits(), n[4].to_bits(), slot, orders[s].to_bits()]
-            })
+            .map(|c| GpuCluster { first: splats.start + c.first, slot_count: slot << 8 | c.slot_count, ..*c })
             .collect();
-        queue.write_buffer(&self.splats.buffer, splats.start as u64 * self.splats.stride, bytemuck::cast_slice(&data));
         let range = self.clusters.allocate(device, encoder, clusters.len() as u32);
         queue.write_buffer(&self.clusters.buffer, range.start as u64 * self.clusters.stride, bytemuck::cast_slice(&clusters));
         self.resident.insert(chunk.id, Resident { splats, clusters: range, slot, drawn: 0 });
@@ -500,13 +530,17 @@ impl Compositor {
         }
         let scale = depth_scale(frame.layers.len());
         let mut table = Vec::new();
+        // Growing copies all a buffer holds, so grow seldom.
+        let chunks = || frame.layers.iter().flat_map(|l| &l.placements).map(|p| &p.chunk.baked);
+        self.splats.room(device, encoder, chunks().map(|b| b.splats.len() as u32).sum());
+        self.clusters.room(device, encoder, chunks().map(|b| b.clusters.len() as u32).sum());
         let mut candidates: Vec<[u32; 2]> = Vec::new();
         for (k, layer) in frame.layers.iter().enumerate() {
             let depth = ((k as f64 - frame.layers.len() as f64) * scale as f64).exp2() as f32;
             for p in &layer.placements {
                 let chunk = &p.chunk;
                 if !self.resident.contains_key(&chunk.id) {
-                    self.upload(device, queue, encoder, chunk, layer.distance, view.focal);
+                    self.upload(device, queue, encoder, chunk);
                 }
                 let resident = self.resident.get_mut(&chunk.id).expect("resident");
                 resident.drawn = self.frames;

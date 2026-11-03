@@ -16,10 +16,14 @@ Numbers are for the forest at 1280×800, as measured when written.
   the new ones show nothing until baked.
   Its camera is f64, not fixed point (positions reach the GPU relative to it).
   Its compositor needs indirect draws counted on the GPU
-  (`MULTI_DRAW_INDIRECT_COUNT`): Vulkan or DX12, not Metal or GL.
+  (`MULTI_DRAW_INDIRECT_COUNT`), and so Vulkan:
+  Metal and GL lack them, and on DX12 wgpu's leave out the first vertex
+  the chunk's slot comes as (`BACKENDS`).
   That its culling hides nothing that shows is checked only by hand
   (shots with `hidden` off match pixel for pixel).
-  Turning, a frame costs its main thread over 10 ms in the forest.
+  Turning, a frame costs its main thread over 10 ms in the forest,
+  and walking (`--stroll`) about 15 ms, 40 ms at the 99th percentile:
+  most of a frame then, the GPU and uploads far less.
   `native/` is not built in CI.
 - **TS and Rust still say much the same twice.**
   The tiles around the camera (`world.ts`) are `native/src/world.rs`,

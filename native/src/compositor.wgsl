@@ -97,20 +97,19 @@ fn ray_of(view: mat3x3f, position: vec4f) -> vec3f {
 }
 
 // A splat instance (GpuSplat): its hexagon's centre relative to its chunk's
-// origin and half its width and height, its colour, its chunk's slot and its
-// order in the chunk.
+// origin and half its width and height, its colour and its order in the
+// chunk. Its chunk's slot comes as the first vertex's index over 4.
 @vertex
 fn splat_vertex(
   @builtin(vertex_index) vertex: u32,
   @location(0) splat: vec4f,
   @location(1) paint: vec4f,
-  @location(2) slot: u32,
-  @location(3) order: f32,
+  @location(2) order: f32,
 ) -> Splat {
-  let c = chunks[slot];
+  let c = chunks[vertex >> 2u];
   let face = globals.faces[c.face];
   var out: Splat;
-  out.corner = vec2f(f32(vertex & 1u), f32(vertex >> 1u)) * 2.0 - 1.0;
+  out.corner = vec2f(f32(vertex & 1u), f32((vertex >> 1u) & 1u)) * 2.0 - 1.0;
   out.slant = splat.z / (sqrt(2.0) * splat.w);
   let fog = 1.0 - exp(-c.distance / globals.fog_distance);
   out.colour = mix(paint.rgb, globals.horizon.rgb, fog);
@@ -222,7 +221,7 @@ fn cull(chunk: u32, thread: u32, phase: u32) {
   for (var k = thread; k < range.y; k += 64u) {
     let cluster = clusters[range.x + k];
     if draws_cluster(range.x + k, cluster, phase) {
-      draws[atomicAdd(&drawn, 1u)] = DrawArgs(4u, cluster.slot_count & 0xffu, 0u, cluster.first);
+      draws[atomicAdd(&drawn, 1u)] = DrawArgs(4u, cluster.slot_count & 0xffu, (cluster.slot_count >> 8u) * 4u, cluster.first);
     }
   }
 }

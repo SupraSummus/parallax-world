@@ -423,12 +423,13 @@ fn draw_slice(
                         continue;
                     }
                 }
-                wants.chunks.push((Request { face: of.face, slice: id, i, j, eye, fill, tiles }, distance, latest.is_some()));
+                let block = crate::compositor::block(distance, view.focal);
+                wants.chunks.push((Request { face: of.face, slice: id, i, j, eye, fill, tiles, block }, distance, latest.is_some()));
                 let Some(latest) = latest else { continue };
                 latest
             }
         };
-        if chunk.baked.numbers.is_empty() {
+        if chunk.baked.splats.is_empty() {
             continue;
         }
         // The chunk's content, not just its cell, must reach the screen.

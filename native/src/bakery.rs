@@ -14,6 +14,7 @@ use std::sync::{Arc, Condvar, Mutex};
 
 use bake::{Baker, Slice, Tiles};
 
+use crate::compositor::{GpuCluster, GpuSplat, cluster};
 use crate::slicing::{GRID_LEVELS, atom_level};
 
 /** A chunk to bake: cell (i, j) of a slice of a face, from `eye`, grown if `fill`, reading tiles [i0, i1] × [k0, k1] of its level. */
@@ -26,14 +27,17 @@ pub struct Request {
     pub eye: [i32; 3],
     pub fill: bool,
     pub tiles: [i32; 4],
+    /** The size of the blocks its splats are clustered by (compositor::cluster). */
+    pub block: f64,
 }
 
-/** A baked chunk (ChunkSplats in chunk-baker.ts): its splats as SPLAT numbers each, painted then grown, and its mask's blocks. */
+/** A baked chunk (ChunkSplats in chunk-baker.ts): its splats and their clusters as the GPU takes them (compositor::cluster), how many are painted, and its mask's blocks. */
 pub struct Baked {
     pub origin: [f64; 2],
     pub extent: [f64; 2],
     pub painted: usize,
-    pub numbers: Vec<f32>,
+    pub splats: Vec<GpuSplat>,
+    pub clusters: Vec<GpuCluster>,
     pub mask: Mask,
 }
 
@@ -160,11 +164,13 @@ fn work(queue: &Queue, send: &Sender<(Request, Baked)>, grids: &Grids, mut baker
             continue;
         }
         let b = baker.bake(r.face, &r.slice, r.i, r.j, r.eye, r.fill);
+        let (splats, clusters) = cluster(&baker.numbers, b.painted, r.block);
         let baked = Baked {
             origin: [b.origin_x, b.origin_y],
             extent: [b.extent_width, b.extent_height],
             painted: b.painted,
-            numbers: baker.numbers.clone(),
+            splats,
+            clusters,
             mask: Mask { width: b.width, height: b.height, scale: b.scale, blocks: baker.blocks.clone() },
         };
         if send.send((request, baked)).is_err() {
