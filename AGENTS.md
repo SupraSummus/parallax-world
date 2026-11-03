@@ -98,7 +98,7 @@ While iterating, run only the affected test files
 ([docs/testing.md](docs/testing.md));
 run `pnpm check` again only after changing code.
 
-`pnpm lint` and `pnpm test` cover the Rust in `bake/` too
+`pnpm lint` and `pnpm test` cover the Rust in `bake/` and `worldgen/` too
 (clippy with warnings as errors, rustfmt, `cargo test`);
 `pnpm dev`, `pnpm build` and `pnpm test` rebuild its WebAssembly first.
 CI runs the same scripts plus `pnpm build`. For rendering changes, also look

@@ -2,7 +2,7 @@
 
 Vitest in Node,
 with jsdom only in UI tests that opt in (`// @vitest-environment jsdom`),
-and `cargo test` for the baker's Rust in `bake/`.
+and `cargo test` for the Rust in `bake/` and `worldgen/`.
 Commands are in `package.json`:
 
 ```bash
@@ -31,7 +31,7 @@ pnpm exec vitest run bake       # files matching "bake"
 | `src/lib/generator.test.ts` | Every world generated in pieces equals it generated whole, at several levels |
 | `src/lib/world.test.ts` | Toy worlds; a generated world's grids put together from parts generated alone |
 | `src/lib/forest.test.ts`, `src/lib/city.test.ts` | The scenes: determinism, contents, spawn |
-| `worldgen/tests/contract.rs`, `worldgen/tests/forest.rs` | The same contract and forest checks for the Rust generator (`cargo test --release` in `worldgen/`) |
+| `worldgen/tests/contract.rs`, `worldgen/tests/forest.rs` | The same contract and forest checks for the Rust generator |
 | `src/viewer/mesh.test.ts` | Reference viewer mesh |
 | `src/App.test.tsx` | UI panels, keyboard movement and turning |
 
