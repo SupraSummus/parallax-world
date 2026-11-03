@@ -284,6 +284,20 @@ fn sky_fragment(in: Sky) -> @location(0) vec4f {
   return vec4f(mix(rgb, globals.horizon.rgb, globals.sky_fog), 1.0);
 }
 
+// The seams between faces, over the picture. A ray's face is the neighbour
+// direction (±1, ±1, 0) along its two largest components, so faces meet
+// where the second and third largest are equal in size.
+@fragment
+fn seams_fragment(in: Sky) -> @location(0) vec4f {
+  let a = abs(ray_of(globals.sky_view, in.position));
+  let second = max(min(a.x, a.y), min(max(a.x, a.y), a.z));
+  let third = min(min(a.x, a.y), a.z);
+  // Pixels to the seam, near it; the seam 1.5 points wide.
+  let pixels = (second - third) / max(fwidth(second - third), 1e-9);
+  let half = 0.75 * globals.resolution.x / globals.viewport.x;
+  return vec4f(1.0, 0x2f / 255.0, 0xd0 / 255.0, 1.0 - smoothstep(half - 0.5, half + 0.5, pixels));
+}
+
 struct Shown {
   @builtin(position) position: vec4f,
   @location(0) at: vec2f,

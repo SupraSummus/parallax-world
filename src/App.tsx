@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useRef, useState, useCallback, type PointerEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, useCallback, type PointerEvent, type ReactNode } from 'react'
 import { ParallaxRenderer, DEFAULT_FOV, MAX_FOV, MIN_FOV, DEFAULT_RENDER_DISTANCE, MAX_RENDER_DISTANCE, MIN_RENDER_DISTANCE, DEFAULT_MAX_LEAK, MAX_MAX_LEAK, MIN_MAX_LEAK, type Camera, type SessionStats } from '@/lib/renderer'
 import { World, WORLD_TYPES, type WorldType } from '@/lib/world'
 import type { Orientation } from '@/lib/view'
@@ -39,6 +39,9 @@ const TURN_DEGREES_PER_SECOND = 60
 /** Degrees of turn per CSS pixel of mouse drag. */
 const DRAG_DEGREES_PER_PIXEL = 0.15
 
+/** Lattice units a second the camera moves at. */
+const MOVE_SPEED = 60
+
 function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const rendererRef = useRef<ParallaxRenderer | null>(null)
@@ -55,8 +58,6 @@ function App() {
   const [camera, setCamera] = useState<Camera>({ x: 0, y: 0, z: 0 })
   const [orientation, setOrientation] = useState<Orientation>({ yaw: 0, pitch: 0 })
   const [showStats, setShowStats] = useState(true)
-  // Lattice units per second.
-  const [moveSpeed, setMoveSpeed] = useState(60)
   const [worldType, setWorldType] = useState<WorldType>('forest')
   const [fov, setFov] = useState(DEFAULT_FOV)
   const [renderDistance, setRenderDistance] = useState(DEFAULT_RENDER_DISTANCE)
@@ -66,9 +67,6 @@ function App() {
   const [showSeams, setShowSeams] = useState(false)
   // Generating a world blocks this thread for a second or two; a spinner shows meanwhile.
   const [generating, setGenerating] = useState(true)
-
-  // Read from the movement loop without restarting it.
-  const getMoveSpeed = useEffectEvent(() => moveSpeed)
 
   const requestRender = useCallback(() => {
     const renderer = rendererRef.current
@@ -154,7 +152,7 @@ function App() {
       lastTime = time
       const renderer = rendererRef.current
       if (renderer) {
-        const speed = getMoveSpeed() * dt
+        const speed = MOVE_SPEED * dt
         const cam = renderer.getCamera()
         const { yaw, pitch } = renderer.getOrientation()
         const [sin, cos] = [Math.sin((yaw * Math.PI) / 180), Math.cos((yaw * Math.PI) / 180)]
@@ -333,14 +331,6 @@ function App() {
             <StatRow label="Yaw, Pitch">
               {orientation.yaw.toFixed(1)}°, {orientation.pitch.toFixed(1)}°
             </StatRow>
-            <SliderRow
-              label={`Move Speed: ${String(moveSpeed)} units/s`}
-              value={moveSpeed}
-              min={10}
-              max={240}
-              step={10}
-              onChange={([v]) => { setMoveSpeed(v) }}
-            />
             <SliderRow
               label={`Field of View: ${String(fov)}°`}
               value={fov}

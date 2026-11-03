@@ -21,7 +21,7 @@ rectangular buildings), only their surfaces are made of rhombi.
 
 **Camera** – Arrow keys or dragging on the scene turn it all around
 (up to straight up or down). W/S forward/back and A/D left/right along
-where it looks (level), Space/Shift up/down, adjustable move speed, field
+where it looks (level), Space/Shift up/down; adjustable field
 of view (across the longer screen side) and render distance.
 
 **Slicing** – Twelve stacks of slices, one per direction to a voxel's

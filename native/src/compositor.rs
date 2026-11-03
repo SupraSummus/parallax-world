@@ -217,6 +217,7 @@ struct Pipelines {
     show: wgpu::BindGroupLayout,
     splats: wgpu::RenderPipeline,
     sky: wgpu::RenderPipeline,
+    seams: wgpu::RenderPipeline,
     show_picture: wgpu::RenderPipeline,
     cull_drawn: wgpu::ComputePipeline,
     cull_rest: wgpu::ComputePipeline,
@@ -245,6 +246,7 @@ pub struct Compositor {
     draws: [wgpu::Buffer; 2],
     drawn: [wgpu::Buffer; 2],
     targets: Option<Targets>,
+    seams: bool,
     /** What draws, and by phase what culls. */
     draw_group: Option<wgpu::BindGroup>,
     cull_groups: Vec<wgpu::BindGroup>,
@@ -355,30 +357,33 @@ impl Pipelines {
             step_mode: wgpu::VertexStepMode::Instance,
             attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Unorm8x4, 2 => Float32],
         };
+        // Ties (the sky, cleared to 1) are drawn.
+        let depth = |compare, write| wgpu::DepthStencilState {
+            format: DEPTH,
+            depth_write_enabled: Some(write),
+            depth_compare: Some(compare),
+            stencil: Default::default(),
+            bias: Default::default(),
+        };
+        let (tested, over) = (Some(depth(wgpu::CompareFunction::LessEqual, true)), Some(depth(wgpu::CompareFunction::Always, false)));
         let render = |layout: &wgpu::BindGroupLayout,
                       vertex: &str,
                       fragment: &str,
                       buffers: &[Option<wgpu::VertexBufferLayout>],
-                      depth: bool| {
+                      depth_stencil: Option<wgpu::DepthStencilState>,
+                      blend: Option<wgpu::BlendState>| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some(vertex),
+                label: Some(fragment),
                 layout: Some(&pipeline_layout(layout)),
                 vertex: wgpu::VertexState { module: &shader, entry_point: Some(vertex), compilation_options: Default::default(), buffers },
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,
                     entry_point: Some(fragment),
                     compilation_options: Default::default(),
-                    targets: &[Some(format.into())],
+                    targets: &[Some(wgpu::ColorTargetState { format, blend, write_mask: wgpu::ColorWrites::ALL })],
                 }),
                 primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleStrip, ..Default::default() },
-                // Ties (the sky, cleared to 1) are drawn.
-                depth_stencil: depth.then_some(wgpu::DepthStencilState {
-                    format: DEPTH,
-                    depth_write_enabled: Some(true),
-                    depth_compare: Some(wgpu::CompareFunction::LessEqual),
-                    stencil: Default::default(),
-                    bias: Default::default(),
-                }),
+                depth_stencil,
                 multisample: Default::default(),
                 multiview_mask: None,
                 cache: None,
@@ -395,9 +400,10 @@ impl Pipelines {
             })
         };
         Pipelines {
-            splats: render(&draw, "splat_vertex", "splat_fragment", &[Some(splat)], true),
-            sky: render(&draw, "sky_vertex", "sky_fragment", &[], true),
-            show_picture: render(&show, "show_vertex", "show_fragment", &[], false),
+            splats: render(&draw, "splat_vertex", "splat_fragment", &[Some(splat)], tested.clone(), None),
+            sky: render(&draw, "sky_vertex", "sky_fragment", &[], tested, None),
+            seams: render(&draw, "sky_vertex", "seams_fragment", &[], over, Some(wgpu::BlendState::ALPHA_BLENDING)),
+            show_picture: render(&show, "show_vertex", "show_fragment", &[], None, None),
             cull_drawn: compute(&cull, "cull_drawn"),
             cull_rest: compute(&cull, "cull_rest"),
             reduce_depth_level: compute(&reduce_depth, "reduce_depth"),
@@ -486,6 +492,7 @@ impl Compositor {
             draws: [draws("draws first"), draws("draws next")],
             drawn: [drawn("drawn first"), drawn("drawn next")],
             targets: None,
+            seams: false,
             draw_group: None,
             cull_groups: Vec::new(),
         }
@@ -525,6 +532,7 @@ impl Compositor {
         self.frames += 1;
         (self.splats.grew, self.clusters.grew) = (false, false);
         let size = view.pixels.map(|v| v.max(1));
+        self.seams = view.seams;
         if self.targets.as_ref().is_none_or(|t| t.size != size) {
             self.targets = Some(Targets::new(device, &self.pipelines, self.format, size));
         }
@@ -665,6 +673,10 @@ impl Compositor {
             if phase == 1 {
                 pass.set_pipeline(&p.sky);
                 pass.draw(0..4, 0..1);
+                if self.seams {
+                    pass.set_pipeline(&p.seams);
+                    pass.draw(0..4, 0..1);
+                }
             }
         };
         cull(encoder, 0);
@@ -697,6 +709,8 @@ pub struct View {
     pub faces: [[Vec3; 3]; 12],
     pub size: [f32; 2],
     pub pixels: [u32; 2],
+    /** Whether to draw the seams between faces over the picture. */
+    pub seams: bool,
 }
 
 impl View {

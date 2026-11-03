@@ -70,7 +70,7 @@ describe('App', () => {
     expect(cameraPosition()).toEqual(moved)
   })
 
-  it('moves at the set speed however slow the frames are', () => {
+  it('moves at one speed however slow the frames are', () => {
     vi.useFakeTimers()
     // 10 frames per second.
     vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback =>

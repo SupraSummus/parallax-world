@@ -3,7 +3,7 @@
 //! (renderer.rs), worker threads baking them with the baker in bake/,
 //! sharing the tiles, and wgpu drawing them in an egui window.
 //!
-//! parallax-native [--threads N] [--seed S] [--leak DEG] [--shot out.png | --bench] [--walk D] [--stroll S] [--spin]
+//! parallax-native [--threads N] [--seed S] [--leak DEG] [--shot out.png [--seams] | --bench] [--walk D] [--stroll S] [--spin]
 //! parallax-native [--seed S] --check-requests frame.bin
 //!
 //! --shot draws the first frame once the world has its tiles and all its
@@ -53,8 +53,7 @@ struct App {
     yaw: f64,
     pitch: f64,
     fov: f64,
-    fog_distance: f64,
-    speed: f64,
+    seams: bool,
     stats: String,
     frame_ms: f64,
     /** --spin: turns on its own and prints frames per second. */
@@ -67,8 +66,13 @@ impl eframe::App for App {
         egui::Panel::left("panel").show(ui, |ui| {
             ui.heading("Parallax (native spike)");
             ui.label(&self.stats);
-            ui.add(egui::Slider::new(&mut self.fov, 5.0..=120.0).text("FOV"));
-            ui.add(egui::Slider::new(&mut self.speed, 1.0..=400.0).logarithmic(true).text("Speed (units/s)"));
+            // The web's (App.tsx).
+            ui.add(egui::Slider::new(&mut self.fov, 5.0..=120.0).step_by(1.0).text("Field of View (°)"));
+            ui.add(egui::Slider::new(&mut self.renderer.render_distance, 40.0..=40000.0).logarithmic(true).text("Render Distance"));
+            ui.add(egui::Slider::new(&mut self.renderer.max_leak, 0.1..=6.0).step_by(0.1).text("Max Occlusion Leak (°)"));
+            ui.checkbox(&mut self.renderer.fill, "Fill Gaps");
+            ui.checkbox(&mut self.renderer.skip_covered, "Skip Covered Chunks");
+            ui.checkbox(&mut self.seams, "Show Face Seams");
             ui.label(format!(
                 "camera {:.0} {:.0} {:.0}  yaw {:.0}  pitch {:.0}",
                 self.camera[0], self.camera[1], self.camera[2], self.yaw, self.pitch
@@ -92,7 +96,7 @@ impl eframe::App for App {
             self.pitch = (self.pitch - drag.y as f64 * 0.2 + moving[4] * 90.0 * dt).clamp(-90.0, 90.0);
             let [right, _, _] = view_basis(self.yaw, 0.0);
             let level = [-right[2], 0.0, right[0]];
-            let step = self.speed * dt;
+            let step = SPEED * dt;
             for d in 0..3 {
                 self.camera[d] += (level[d] * moving[0] + right[d] * moving[1]) * step;
             }
@@ -128,10 +132,11 @@ impl eframe::App for App {
                 yaw: self.yaw,
                 pitch: self.pitch,
                 focal,
-                fog_distance: self.fog_distance,
+                fog_distance: self.renderer.render_distance * FOG_PER_RENDER_DISTANCE,
                 faces: self.faces,
                 size: [rect.width(), rect.height()],
                 pixels: [0, 0],
+                seams: self.seams,
             };
             let callback = compositor::Callback { frame: Arc::new(frame), view, rect };
             ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, callback));
@@ -263,8 +268,10 @@ const PITCH: f64 = 0.0;
 const FOV: f64 = 90.0;
 const RENDER_DISTANCE: f64 = 8000.0;
 const SHOT: [f64; 2] = [1280.0, 800.0];
-/** Units a second the window starts moving at. */
+/** Units a second the window moves at. */
 const SPEED: f64 = 40.0;
+/** renderer.ts's: the fog's distance, a share of the render distance. */
+const FOG_PER_RENDER_DISTANCE: f64 = 0.7;
 
 fn main() -> eframe::Result {
     let args: Vec<String> = std::env::args().collect();
@@ -284,7 +291,7 @@ fn main() -> eframe::Result {
     let mut world = World::new(seed, threads);
     let mut camera = worldgen::forest::forest(seed).1.map(|v| v as f64);
     let faces: [[Vec3; 3]; 12] = std::array::from_fn(|f| view::faces()[f].axes);
-    let fog_distance = RENDER_DISTANCE * 0.7;
+    let fog_distance = RENDER_DISTANCE * FOG_PER_RENDER_DISTANCE;
     if args.iter().any(|a| ["--bench", "--shot", "--stroll"].contains(&a.as_str())) {
         let start = Instant::now();
         let (mut frame, mut stats) = complete(&mut world, &mut renderer, camera, &first);
@@ -321,6 +328,7 @@ fn main() -> eframe::Result {
             faces,
             size: size.map(|v| v as f32),
             pixels: size.map(|v| v as u32),
+            seams: args.iter().any(|a| a == "--seams"),
         };
         if args.iter().any(|a| a == "--bench") {
             let splats: usize = frame.layers.iter().flat_map(|l| &l.placements).map(|p| p.chunk.baked.splats.len()).sum();
@@ -360,20 +368,8 @@ fn main() -> eframe::Result {
         },
         ..Default::default()
     };
-    let app = App {
-        world,
-        renderer,
-        faces,
-        camera,
-        yaw: YAW,
-        pitch: PITCH,
-        fov: FOV,
-        fog_distance,
-        speed: SPEED,
-        stats: String::new(),
-        frame_ms: 0.0,
-        spin,
-    };
+    let app =
+        App { world, renderer, faces, camera, yaw: YAW, pitch: PITCH, fov: FOV, seams: false, stats: String::new(), frame_ms: 0.0, spin };
     eframe::run_native(
         "Parallax",
         options,

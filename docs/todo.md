@@ -134,6 +134,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   growing faces.
 - Describe the city in metres, like the forest, instead of boxes on its plan.
 - Port the toy worlds to the forest's metric scale, or drop them.
-- Show move speed and render distance in metres:
+- Show render distance in metres:
   they are lattice units, and the forest's unit is 0.125 m.
 - Show the forest to 22 km again: `MAX_LEVEL` 13, one grid more.
