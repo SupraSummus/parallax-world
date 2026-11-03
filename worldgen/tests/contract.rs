@@ -226,7 +226,7 @@ fn whole_equals_parts(generator: &Generator, region: &Box3, level: u32) {
     }
 }
 
-fn level_shows_what_finer_shows(generator: &Generator, region: &Box3, level: u32) {
+fn level_shows_what_finer_shows(name: &str, generator: &Generator, region: &Box3, level: u32) {
     let (si, finer) = (1i64 << level, level.saturating_sub(2));
     let s = si as f64;
     let types: Vec<u8> = materials_of(generator).iter().map(|m| m.material_type).collect();
@@ -264,46 +264,52 @@ fn level_shows_what_finer_shows(generator: &Generator, region: &Box3, level: u32
     let keys: std::collections::BTreeSet<u8> = a.keys().chain(c.keys()).copied().collect();
     let tv = keys.iter().map(|t| (a.get(t).unwrap_or(&0.0) - c.get(t).unwrap_or(&0.0)).abs()).sum::<f64>() / 2.0;
     let gap = (through(&coarse) - through(&fine)).abs();
+    // The margins, to see with --nocapture.
+    println!(
+        "{name} level {level}: {:.3} of rays through, {:.3} two levels finer; materials differ by {tv:.3}",
+        through(&coarse),
+        through(&fine)
+    );
     assert!(gap < TOLERANCE, "level {level}: {gap} more or fewer rays get through than at level {finer}");
     assert!(tv < TOLERANCE, "level {level}: the materials hit differ by {tv} from level {finer}");
 }
 
 /** Every generator with a region with a bit of everything in it, and the level up to which it keeps what a camera sees. */
-fn check(generator: Generator, region: Box3, levels: u32) {
+fn check(name: &str, generator: Generator, region: Box3, levels: u32) {
     // Up to one level past the checked ones: the forest's trees as a medium.
     for level in [0, 2, levels + 1] {
         whole_equals_parts(&generator, &region, level);
     }
     for level in 1..=levels {
-        level_shows_what_finer_shows(&generator, &region, level);
+        level_shows_what_finer_shows(name, &generator, &region, level);
     }
 }
 
 #[test]
 fn forest_keeps_the_contract() {
     // Near the spawn point: path, trees, undergrowth, from under the ground to above the crowns.
-    check(forest(42).0, b(-128, -64, -384, 128, 384, -128), 6);
+    check("forest", forest(42).0, b(-128, -64, -384, 128, 384, -128), 6);
 }
 
 #[test]
 fn valley_keeps_the_contract() {
     // The first town's south edge: fields, its first row of houses and the main street, trees of its yards and of the forest.
-    check(valley(42).0, b(-128, -48, 760, 256, 208, 1016), 5);
+    check("valley", valley(42).0, b(-128, -48, 760, 256, 208, 1016), 5);
 }
 
 #[test]
 fn fog_keeps_the_contract() {
-    check(fog(), b(32, 32, 32, 96, 96, 96), 4);
+    check("fog", fog(), b(32, 32, 32, 96, 96, 96), 4);
 }
 
 #[test]
 fn caves_keep_the_contract() {
-    check(caves(), b(0, 0, 0, 128, 128, 128), 3);
+    check("caves", caves(), b(0, 0, 0, 128, 128, 128), 3);
 }
 
 #[test]
 fn village_keeps_the_contract() {
-    check(village(), b(-64, -16, -64, 64, 48, 64), 5);
+    check("village", village(), b(-64, -16, -64, 64, 48, 64), 5);
 }
 
 fn near() -> Box3 {
@@ -348,4 +354,29 @@ fn refuses_a_child_reaching_past_its_parent() {
 #[should_panic(expected = "two children named a")]
 fn refuses_two_children_of_one_name() {
     generate(&parent(|| vec![child("a", 2.0), child("a", 2.0)]), &near(), 0);
+}
+
+#[test]
+fn a_things_carve_cuts_only_the_thing() {
+    // A box of wood with a hole carved through it, standing in rock: the hole reaches into the rock but leaves it whole.
+    let generator = Generator {
+        kinds: KINDS.to_vec(),
+        seed: 1,
+        layers: vec![
+            spans("rock", 0, 64, ROCK),
+            single(
+                |_, _| {
+                    Some(Node::of(vec![
+                        cuboid([48.0, 48.0, 48.0], [80.0, 80.0, 80.0], WOOD, SOLID, Op::Paint),
+                        cuboid([60.0, 40.0, 60.0], [68.0, 90.0, 68.0], WOOD, SOLID, Op::Carve),
+                    ]))
+                },
+                64,
+            ),
+        ],
+    };
+    let grid = generate(&generator, &b(40, 40, 40, 90, 90, 90), 0);
+    let types: Vec<u8> = materials_of(&generator).iter().map(|m| m.material_type).collect();
+    let at = |x, y, z| types[grid.get(x, y, z) as usize];
+    assert_eq!((at(64, 70, 64), at(64, 44, 64), at(50, 70, 50)), (0, 3, 4), "carved, rock under it, wood beside it");
 }

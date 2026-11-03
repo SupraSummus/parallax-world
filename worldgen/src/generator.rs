@@ -77,10 +77,39 @@ pub struct Node {
     pub far: Option<Far>,
 }
 
+/** How a node is drawn while sites are further apart than `detail` (fixed point). */
 pub struct Far {
-    /** Drawn while sites are further apart than this (fixed point). */
     pub detail: Fixed,
-    pub shapes: Vec<Shape>,
+    pub form: FarForm,
+}
+
+pub enum FarForm {
+    Shapes(Vec<Shape>),
+    /**
+     * Its near form, drawn whole at the coarsest level it is drawn at
+     * and coarsened: each site kept with the chance a ray crossing it is
+     * stopped, of a kind in proportion to what shows on its sides.
+     */
+    Measured,
+}
+
+impl Far {
+    pub fn of(detail: Fixed, shapes: Vec<Shape>) -> Far {
+        Far { detail, form: FarForm::Shapes(shapes) }
+    }
+
+    pub fn measured(detail: Fixed) -> Far {
+        assert!(detail >= ONE, "a measured far form is measured from a level its near form is drawn at; see \"Levels\" in {DOCS}");
+        Far { detail, form: FarForm::Measured }
+    }
+
+    /** Its far shapes; none if measured. */
+    pub fn shapes(&self) -> &[Shape] {
+        match &self.form {
+            FarForm::Shapes(shapes) => shapes,
+            FarForm::Measured => &[],
+        }
+    }
 }
 
 /** A node's finer things: the same for any box, or those reaching the box asked for (lattice units). */
@@ -648,6 +677,7 @@ impl Palette {
                     .collect()
             })
             .collect();
+        assert!(materials.len() <= 256, "{} materials: ids are bytes, so at most 255 and none", materials.len());
         Palette { materials, shades, seed }
     }
 
@@ -679,29 +709,143 @@ pub fn generate(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
         let id = if op == Op::Carve { 0 } else { palette.shade(kind, x * s, y * s, z * s) };
         grid.set(x, y, z, id);
     };
-    for drawable in drawables_in(generator, &clip, s) {
-        match drawable.draw {
-            Draw::Field(field) => draw_field(field, generator.seed, s, &clip, &mut put),
-            Draw::Shapes(shapes, far) => {
-                for (i, shape) in shapes.iter().enumerate() {
-                    let seed = hash_text(&format!("{}#{}{i}", drawable.key, if far { "far" } else { "" }), generator.seed);
-                    draw_shape(shape, seed, s, &clip, &mut |x, y, z| put(shape.kind, shape.op, x, y, z));
+    let drawables = drawables_in(generator, &clip, s);
+    let mut at = 0;
+    while at < drawables.len() {
+        // A thing's drawables, together: those of fields one by one.
+        let thing = drawables[at].thing;
+        let end = if thing == 0 { at + 1 } else { (at..drawables.len()).find(|i| drawables[*i].thing != thing).unwrap_or(drawables.len()) };
+        let group = &drawables[at..end];
+        at = end;
+        let carves = group.iter().any(|d| matches!(&d.draw, Draw::Shapes(shapes, _) if shapes.iter().any(|s| s.op == Op::Carve)));
+        if !carves {
+            for drawable in group {
+                draw(drawable, generator.seed, s, &clip, &mut put);
+            }
+            continue;
+        }
+        // It cuts only itself: drawn aside, then over the world.
+        let mut own = Own::new(&thing_box(group, s).intersect(&clip));
+        for drawable in group {
+            draw(drawable, generator.seed, s, &clip, &mut |kind, op, x, y, z| own.put(kind, op, x, y, z));
+        }
+        own.each(&mut put);
+    }
+    grid
+}
+
+/**
+ * A thing's sites, drawn aside from the world: in a box of a level's
+ * sites, each its kind and how it meets the world, or carved.
+ */
+struct Own {
+    b: Box3,
+    n: [i64; 3],
+    /** 0: nothing; else kind + 1, and the op in bits 8 and 9. */
+    cells: Vec<u16>,
+}
+
+impl Own {
+    fn new(b: &Box3) -> Own {
+        let n = [0, 1, 2].map(|i| (b.max[i] - b.min[i]).max(0));
+        Own { b: *b, n, cells: vec![0; (n[0] * n[1] * n[2]) as usize] }
+    }
+
+    fn index(&self, x: i64, y: i64, z: i64) -> usize {
+        assert!(self.b.holds([x, y, z]), "a thing drew at ({x}, {y}, {z}), outside its bounds {:?}", self.b);
+        let [x, y, z] = [x - self.b.min[0], y - self.b.min[1], z - self.b.min[2]];
+        (x + self.n[0] * (y + self.n[1] * z)) as usize
+    }
+
+    /** As the world takes them, but within the thing: Fill where it has nothing, Paint over, Carve out. */
+    fn put(&mut self, kind: Kind, op: Op, x: i64, y: i64, z: i64) {
+        let i = self.index(x, y, z);
+        let carved = 3 << 8;
+        if op == Op::Fill && self.cells[i] != 0 && self.cells[i] != carved {
+            return;
+        }
+        self.cells[i] = match op {
+            Op::Carve => carved,
+            Op::Fill => (kind as u16 + 1) | 1 << 8,
+            Op::Paint => (kind as u16 + 1) | 2 << 8,
+        };
+    }
+
+    /** What the thing has at (x, y, z): its kind and how it meets the world. */
+    fn at(&self, x: i64, y: i64, z: i64) -> Option<(Kind, Op)> {
+        let cell = self.cells[self.index(x, y, z)];
+        let op = match cell >> 8 {
+            1 => Op::Fill,
+            2 => Op::Paint,
+            _ => return None,
+        };
+        Some((((cell & 255) - 1) as Kind, op))
+    }
+
+    /** Each site the thing has, with its kind and how it meets the world. */
+    fn each(&self, mut visit: impl FnMut(Kind, Op, i64, i64, i64)) {
+        for i in 0..self.cells.len() as i64 {
+            let (x, y, z) =
+                (i % self.n[0] + self.b.min[0], (i / self.n[0]) % self.n[1] + self.b.min[1], i / (self.n[0] * self.n[1]) + self.b.min[2]);
+            if let Some((kind, op)) = self.at(x, y, z) {
+                visit(kind, op, x, y, z);
+            }
+        }
+    }
+}
+
+/** The sites of level spacing `s` a thing's drawables may draw at: its shapes' bounds and two sites more, and its measured sites. */
+fn thing_box(group: &[Drawable], s: i64) -> Box3 {
+    let boxes: Vec<Box3> = group
+        .iter()
+        .flat_map(|d| match &d.draw {
+            Draw::Shapes(shapes, _) => shapes
+                .iter()
+                .map(|shape| Box3 {
+                    min: shape.bounds.min.map(|v| v.div_euclid(s) - 2),
+                    max: shape.bounds.max.map(|v| -(-v).div_euclid(s) + 2),
+                })
+                .collect(),
+            Draw::Sites(sites) => sites.iter().map(|(p, ..)| Box3 { min: *p, max: p.map(|v| v + 1) }).collect(),
+            Draw::Field(_) => Vec::new(),
+        })
+        .collect();
+    bounds_of_shapes(&boxes)
+}
+
+/** Draws one drawable at sites `s` apart into `clip`. */
+fn draw(drawable: &Drawable, seed: u64, s: i64, clip: &Box3, put: &mut dyn FnMut(Kind, Op, i64, i64, i64)) {
+    match &drawable.draw {
+        Draw::Field(field) => draw_field(field, seed, s, clip, put),
+        Draw::Shapes(shapes, far) => {
+            for (i, shape) in shapes.iter().enumerate() {
+                let seed = hash_text(&format!("{}#{}{i}", drawable.key, if *far { "far" } else { "" }), seed);
+                draw_shape(shape, seed, s, clip, &mut |x, y, z| put(shape.kind, shape.op, x, y, z));
+            }
+        }
+        Draw::Sites(sites) => {
+            for &([x, y, z], kind, op) in sites {
+                if clip.holds([x, y, z]) {
+                    put(kind, op, x, y, z);
                 }
             }
         }
     }
-    grid
 }
 
 enum Draw<'a> {
     Field(&'a Field),
     /** A node's shapes, and whether they are its far ones. */
     Shapes(Vec<Shape>, bool),
+    /** A thing measured: its sites. */
+    Sites(Sites),
 }
 
 struct Drawable<'a> {
     order: f64,
     key: String,
+    /** The thing it is part of, numbered from 1; 0 for fields. */
+    thing: u32,
     draw: Draw<'a>,
 }
 
@@ -710,48 +854,20 @@ fn drawables_in<'a>(generator: &'a Generator, clip: &Box3, s: i64) -> Vec<Drawab
     // The lattice units the sites of `clip` cover, with what a shape may grow by at this level.
     let units = Box3 { min: clip.min.map(|v| v * s), max: clip.max.map(|v| (v - 1) * s + 1) }.widen(s);
     let mut drawables = Vec::new();
+    let mut things = 0;
     for layer in &generator.layers {
         let population = match layer {
             Layer::Field(field) => {
-                drawables.push(Drawable { order: field.order, key: field.name.to_string(), draw: Draw::Field(field) });
+                drawables.push(Drawable { order: field.order, key: field.name.to_string(), thing: 0, draw: Draw::Field(field) });
                 continue;
             }
             Layer::Population(p) => p,
         };
         if s > population.size {
             if let Some(far) = &population.far {
-                drawables.push(Drawable { order: population.order, key: population.name.to_string(), draw: Draw::Field(far) });
+                drawables.push(Drawable { order: population.order, key: population.name.to_string(), thing: 0, draw: Draw::Field(far) });
             }
             continue;
-        }
-        fn visit<'a>(node: &Node, key: String, bounds: Box3, s: i64, units: &Box3, order: f64, drawables: &mut Vec<Drawable<'a>>) {
-            if !bounds.overlaps(units) {
-                return;
-            }
-            let far = node.far.as_ref().filter(|far| s * ONE > far.detail);
-            let shapes = far.map_or_else(|| node.shapes.get(), |far| &far.shapes);
-            drawables.push(Drawable { order, key: key.clone(), draw: Draw::Shapes(shapes.to_vec(), far.is_some()) });
-            if far.is_some() {
-                return;
-            }
-            let reaching;
-            let children: &[Child] = match &node.children {
-                None => &[],
-                Some(Children::Fixed(children)) => children,
-                Some(Children::Reaching(children)) => {
-                    reaching = children(units);
-                    &reaching
-                }
-            };
-            let mut names = std::collections::HashSet::new();
-            for child in children {
-                assert!(names.insert(&child.name), "{key} has two children named {}; see \"Things\" in {DOCS}", child.name);
-                let child_bounds = bounds_of(&child.node);
-                assert!(child_bounds.inside(&bounds), "{key}/{} reaches past its parent; see \"Things\" in {DOCS}", child.name);
-                if s <= child.size {
-                    visit(&child.node, format!("{key}/{}", child.name), child_bounds, s, units, order, drawables);
-                }
-            }
         }
         let n = population.cell;
         let [rx, ry, rz] = population.reach;
@@ -779,13 +895,242 @@ fn drawables_in<'a>(generator: &'a Generator, clip: &Box3, s: i64) -> Vec<Drawab
                         max: [centre[0] + n + rx, centre[1] + n + ry, centre[2] + n + rz],
                     };
                     assert!(bounds.inside(&reach), "{key} reaches past its population's reach; see \"Populations\" in {DOCS}");
-                    visit(&node, key, bounds, s, &units, population.order, &mut drawables);
+                    things += 1;
+                    let at = Visit { s, units: &units, order: population.order, thing: things, seed: generator.seed };
+                    visit(&node, key, bounds, &at, &mut drawables);
                 }
             }
         }
     }
     drawables.sort_by(|a, b| a.order.total_cmp(&b.order).then_with(|| a.key.cmp(&b.key)));
     drawables
+}
+
+/** A thing's sites of a level: each its kind and how it meets the world. */
+type Sites = Vec<([i64; 3], Kind, Op)>;
+
+/** Where a node is drawn: at sites `s` apart, for the lattice units `units`, in its layer's `order`, as part of `thing`. */
+struct Visit<'u> {
+    s: i64,
+    units: &'u Box3,
+    order: f64,
+    thing: u32,
+    seed: u64,
+}
+
+/** Adds a node's drawables and its children's, as far as they reach `at.units` and are drawn at its spacing. */
+fn visit(node: &Node, key: String, bounds: Box3, at: &Visit, drawables: &mut Vec<Drawable<'_>>) {
+    let Visit { s, units, order, thing, seed } = *at;
+    if !bounds.overlaps(units) {
+        return;
+    }
+    let far = node.far.as_ref().filter(|far| s * ONE > far.detail);
+    let draw = match far {
+        Some(Far { detail, form: FarForm::Measured }) => Draw::Sites(measure(node, &key, bounds, *detail, s, seed)),
+        Some(Far { form: FarForm::Shapes(shapes), .. }) => Draw::Shapes(shapes.to_vec(), true),
+        None => Draw::Shapes(node.shapes.get().to_vec(), false),
+    };
+    drawables.push(Drawable { order, key: key.clone(), thing, draw });
+    if far.is_some() {
+        return;
+    }
+    let reaching;
+    let children: &[Child] = match &node.children {
+        None => &[],
+        Some(Children::Fixed(children)) => children,
+        Some(Children::Reaching(children)) => {
+            reaching = children(units);
+            &reaching
+        }
+    };
+    let mut names = std::collections::HashSet::new();
+    for child in children {
+        assert!(names.insert(&child.name), "{key} has two children named {}; see \"Things\" in {DOCS}", child.name);
+        let child_bounds = bounds_of(&child.node);
+        assert!(child_bounds.inside(&bounds), "{key}/{} reaches past its parent; see \"Things\" in {DOCS}", child.name);
+        if s <= child.size {
+            visit(&child.node, format!("{key}/{}", child.name), child_bounds, at, drawables);
+        }
+    }
+}
+
+/** A node drawn alone, whole, at sites `f` apart. */
+fn alone(node: &Node, key: &str, bounds: Box3, f: i64, seed: u64) -> Own {
+    let units = bounds.widen(f);
+    let mut near = Vec::new();
+    visit(node, key.to_string(), bounds, &Visit { s: f, units: &units, order: 0.0, thing: 1, seed }, &mut near);
+    let fine = Box3 { min: bounds.min.map(|v| v.div_euclid(f) - 2), max: bounds.max.map(|v| -(-v).div_euclid(f) + 2) };
+    let mut own = Own::new(&fine);
+    for drawable in &near {
+        draw(drawable, seed, f, &fine, &mut |kind, op, x, y, z| own.put(kind, op, x, y, z));
+    }
+    own
+}
+
+/** A layer of a thing across an axis: what it hides seen along the axis (a bitset of the plane), and the columns along the other two it holds. */
+type Slice = (Vec<u64>, u32, u32);
+
+/**
+ * What slabs of things hide, measured: things drawn alone at a level,
+ * and for each slab of them across an axis the area it hides seen along
+ * each axis, on average over the three and the things. A population's
+ * far form, from things made at the origin, is as dense as that
+ * (extinction = things per volume · their mean shadow).
+ */
+pub struct Shadows {
+    f: i64,
+    /** By thing, its first layer across the axis and its layers from it. */
+    things: Vec<(i64, Vec<Slice>)>,
+}
+
+impl Shadows {
+    pub fn new(nodes: &[Node], level: u32, axis: usize) -> Shadows {
+        let f = 1i64 << level;
+        let (a, b) = ((axis + 1) % 3, (axis + 2) % 3);
+        let things = nodes
+            .iter()
+            .enumerate()
+            .map(|(i, node)| {
+                let own = alone(node, &format!("sample {i}"), bounds_of(node), f, 0);
+                let (n, min) = (own.n, own.b.min);
+                let words = ((n[a] * n[b]) as usize).div_ceil(64);
+                let layers = (0..n[axis])
+                    .map(|l| {
+                        let mut plane = vec![0u64; words];
+                        let (mut along_a, mut along_b) = (vec![false; n[b] as usize], vec![false; n[a] as usize]);
+                        for i in 0..n[a] {
+                            for j in 0..n[b] {
+                                let mut p = [0; 3];
+                                (p[axis], p[a], p[b]) = (l + min[axis], i + min[a], j + min[b]);
+                                if own.at(p[0], p[1], p[2]).is_some() {
+                                    let bit = (i * n[b] + j) as usize;
+                                    plane[bit / 64] |= 1 << (bit % 64);
+                                    (along_a[j as usize], along_b[i as usize]) = (true, true);
+                                }
+                            }
+                        }
+                        let count = |v: Vec<bool>| v.into_iter().filter(|b| *b).count() as u32;
+                        (plane, count(along_a), count(along_b))
+                    })
+                    .collect();
+                (min[axis], layers)
+            })
+            .collect();
+        Shadows { f, things }
+    }
+
+    /** The mean shadow (lattice units²) of the slab from `from` to `to` (exclusive) along the axis. */
+    pub fn slab(&self, from: i64, to: i64) -> f64 {
+        let (f, mut sum) = (self.f, 0.0);
+        for (first, layers) in &self.things {
+            let ceil = |v: i64| -(-v).div_euclid(f) - first;
+            let (lo, hi) = (ceil(from).max(0) as usize, ceil(to).clamp(0, layers.len() as i64) as usize);
+            if lo >= hi {
+                continue;
+            }
+            let mut plane = vec![0u64; layers[0].0.len()];
+            let (mut along_a, mut along_b) = (0, 0);
+            for (bits, a, b) in &layers[lo..hi] {
+                for (p, w) in plane.iter_mut().zip(bits) {
+                    *p |= w;
+                }
+                (along_a, along_b) = (along_a + a, along_b + b);
+            }
+            let across = plane.iter().map(|w| w.count_ones()).sum::<u32>();
+            sum += (across + along_a + along_b) as f64 * (f * f) as f64 / 3.0;
+        }
+        sum / self.things.len() as f64
+    }
+}
+
+/**
+ * A node's far form at sites `s` apart, measured from its near form:
+ * drawn whole at the coarsest level it is drawn at (spacing f, at most
+ * `detail`), then coarsened. A coarse site stands for the fine sites in
+ * its cell (those nearest it); it is kept with the chance a ray crossing
+ * the cell is stopped, the share of its columns along each axis holding
+ * a fine site (2 (s / f)² of them), on average over the axes, against
+ * one threshold for the whole thing; and is of a kind of the fine sites
+ * first along those columns from either end, in proportion.
+ */
+fn measure(node: &Node, key: &str, bounds: Box3, detail: Fixed, s: i64, seed: u64) -> Sites {
+    let f = 1i64 << ((detail / ONE).max(1).ilog2());
+    // Its far form not drawn at f: f is at most detail.
+    let own = alone(node, key, bounds, f, seed);
+    // By coarse site: per axis, how many of its columns hold a fine site; what shows at their ends, counted by kind.
+    #[derive(Default)]
+    struct Stats {
+        columns: [u32; 3],
+        shown: Vec<(Kind, Op, u32)>,
+    }
+    let show = |stats: &mut Stats, kind: Kind, op: Op| match stats.shown.iter_mut().find(|e| e.0 == kind) {
+        Some(e) => e.2 += 1,
+        None => stats.shown.push((kind, op, 1)),
+    };
+    let mut cells = std::collections::HashMap::<[i64; 3], Stats>::new();
+    let n = own.n;
+    for axis in 0..3 {
+        let (a, b) = ((axis + 1) % 3, (axis + 2) % 3);
+        let mut p = [0i64; 3];
+        for i in 0..n[a] {
+            for j in 0..n[b] {
+                (p[a], p[b]) = (i, j);
+                // A column crosses each cell once (they are convex): the run of it in a cell is one column of the cell's.
+                let mut run: Option<([i64; 3], Kind, Op)> = None;
+                for k in 0..n[axis] {
+                    p[axis] = k;
+                    let at = [0, 1, 2].map(|c| p[c] + own.b.min[c]);
+                    let Some((kind, op)) = own.at(at[0], at[1], at[2]) else { continue };
+                    let site = nearest_site(at.map(|v| v * f * ONE), s);
+                    match run {
+                        Some((cell, ..)) if cell == site => run = Some((site, kind, op)),
+                        _ => {
+                            if let Some((cell, last, last_op)) = run {
+                                show(cells.get_mut(&cell).expect("counted"), last, last_op);
+                            }
+                            let stats = cells.entry(site).or_default();
+                            stats.columns[axis] += 1;
+                            show(stats, kind, op);
+                            run = Some((site, kind, op));
+                        }
+                    }
+                }
+                if let Some((cell, last, last_op)) = run {
+                    show(cells.get_mut(&cell).expect("counted"), last, last_op);
+                }
+            }
+        }
+    }
+    let all = 2.0 * ((s / f) as f64).powi(2);
+    let kept = hash_text(&format!("{key}#measured"), seed);
+    let mut sites = Vec::new();
+    for (site, mut stats) in cells {
+        let chance = stats.columns.iter().map(|c| *c as f64 / all).sum::<f64>() / 3.0;
+        let [x, y, z] = site;
+        // One threshold for the whole thing, not one per site: a solid thing keeps a whole outline,
+        // not a ragged one; a porous one is kept or not as a whole, in proportion over many.
+        if unit(hash(kept, 0, 0, 0)) >= chance {
+            continue;
+        }
+        // In an order of their own: the columns' isn't one.
+        stats.shown.sort_by_key(|e| e.0);
+        let total: u32 = stats.shown.iter().map(|e| e.2).sum();
+        let mut pick = ((hash(kept ^ 1, x * s, y * s, z * s) as u64 * total as u64) >> 32) as u32;
+        let &(kind, op, _) = stats
+            .shown
+            .iter()
+            .find(|e| {
+                pick < e.2 || {
+                    pick -= e.2;
+                    false
+                }
+            })
+            .expect("a kind");
+        sites.push((site, kind, op));
+    }
+    // In an order of their own, as sites are put in it.
+    sites.sort_by_key(|e| e.0);
+    sites
 }
 
 /** Draws a field into `clip`; a medium keeps a site with the chance a ray crossing it is stopped. */
@@ -838,24 +1183,6 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut dyn FnMut
             }
         }
     }
-}
-
-/**
- * The mean area per unit length of `nodes` along `axis`, as a function of
- * the coordinate: for a population's far form, from things made at the origin.
- */
-pub fn area_profile(nodes: &[Node], axis: usize) -> impl Fn(i64) -> f64 + use<> {
-    let mut profile = std::collections::BTreeMap::<i64, f64>::new();
-    for node in nodes {
-        let shapes = node.far.as_ref().map_or_else(|| node.shapes.get(), |far| &far.shapes);
-        for shape in shapes {
-            let (lo, hi) = (shape.bounds.min[axis], shape.bounds.max[axis]);
-            for at in lo..hi {
-                *profile.entry(at).or_insert(0.0) += shape.area / (hi - lo) as f64 / nodes.len() as f64;
-            }
-        }
-    }
-    move |at: i64| profile.get(&at).copied().unwrap_or(0.0)
 }
 
 // ---------------------------------------------------------------------------
@@ -921,6 +1248,38 @@ mod tests {
         // 1000 units long, at 3 : 4 : 0, so its widest circle reaches 4, 3 and 5 units along x, y and z.
         let shape = lathe([0.0; 3], [600.0, 800.0, 0.0], |_| 5.0, 1, Fill::Const(1.0), Op::Fill);
         assert_eq!((shape.bounds.min, shape.bounds.max), ([-4, -3, -5], [605, 804, 6]));
+    }
+
+    #[test]
+    fn a_measured_far_form_keeps_what_rays_see() {
+        // A solid block 64 units wide, painted with a sheet of glass on top, and a sparse cloud: measured at sites 16 apart from sites 2 apart.
+        let block = Node {
+            far: Some(Far::measured(fixed(2.0))),
+            ..Node::of(vec![
+                cuboid([0.0; 3], [64.0; 3], 1, SOLID, Op::Fill),
+                cuboid([0.0, 60.0, 0.0], [64.0, 64.0, 64.0], 2, SOLID, Op::Paint),
+            ])
+        };
+        let sites = measure(&block, "block", bounds_of(&block), fixed(2.0), 16, 1);
+        let inside = |p: [i64; 3]| p.iter().all(|v| (1..4).contains(v));
+        assert!(
+            (1..4).all(|y| (1..4).all(|x| (1..4).all(|z| (x + y + z) % 2 == 1 || sites.iter().any(|s| s.0 == [x, y, z])))),
+            "its inside is all kept"
+        );
+        assert!(sites.iter().filter(|s| inside(s.0)).all(|s| s.1 == 1), "what shows inside is the block's");
+        // Its top row of cells is half covered, kept by some things' thresholds: there, the glass shows.
+        let tops =
+            (0..16).flat_map(|i| measure(&block, &format!("block {i}"), bounds_of(&block), fixed(2.0), 16, 1)).filter(|s| s.0[1] == 4);
+        assert!(tops.filter(|s| s.1 == 2).count() > 0, "the glass on top shows");
+        let cloud = Node { far: Some(Far::measured(fixed(2.0))), ..Node::of(vec![ball([0.0; 3], 64.0, 1, Fill::Const(0.02), Op::Fill)]) };
+        // Of its about 134 cells (a ball's volume over a site's, 2 · 16³), those a ray crossing is stopped in:
+        // a column crosses a cell over 16 units on average (its volume over its shadow, 2 · 16³ / 2 · 16²), so 4 sites 4 apart,
+        // each kept with 1 − 0.98² ≈ 0.04: 1 − 0.96⁴ ≈ 0.15 of them, a little less with the cells on its edge.
+        // Each cloud is kept or not as a whole, against its own threshold: on average over many.
+        let kept = (0..64).map(|i| measure(&cloud, &format!("cloud {i}"), bounds_of(&cloud), fixed(2.0), 16, 1).len()).sum::<usize>()
+            as f64
+            / (64.0 * 134.0);
+        assert!((0.1..0.2).contains(&kept), "sparse clouds keep {kept} of their sites");
     }
 
     #[test]

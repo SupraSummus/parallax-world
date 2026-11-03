@@ -27,6 +27,10 @@ impl Box3 {
         (0..3).all(|i| self.min[i] >= b.min[i] && self.max[i] <= b.max[i])
     }
 
+    pub fn intersect(&self, b: &Box3) -> Box3 {
+        Box3 { min: [0, 1, 2].map(|i| self.min[i].max(b.min[i])), max: [0, 1, 2].map(|i| self.max[i].min(b.max[i])) }
+    }
+
     pub fn widen(&self, m: i64) -> Box3 {
         Box3 { min: self.min.map(|v| v - m), max: self.max.map(|v| v + m) }
     }

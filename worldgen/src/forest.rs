@@ -1,11 +1,13 @@
 //! The forest: an autumn forest valley, endless, on the generator
 //! framework. Its numbers are moving to integers (docs/generators.md).
 
+use std::cell::{OnceCell, RefCell};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::generator::{
-    ANY_SIZE, Cell, Child, Children, Far, Field, FieldValues, Fill, Generator, Layer, Node, Op, Point, Population, SOLID, Shape, Shapes,
-    Span, area_profile, ball, bounds_of_shapes, capsule, cuboid, ellipsoid, lathe,
+    ANY_SIZE, Cell, Child, Children, Far, Field, FieldValues, Fill, Generator, Layer, Node, Op, Point, Population, SOLID, Shadows, Shape,
+    Shapes, Span, ball, bounds_of_shapes, capsule, cuboid, ellipsoid, lathe,
 };
 use crate::grid::Box3;
 use crate::js::{self, round};
@@ -17,6 +19,10 @@ use crate::plan::Plan;
 pub const UNIT_SIZE: f64 = 0.125;
 fn vox(metres: f64) -> f64 {
     round(metres / UNIT_SIZE)
+}
+/** Metres in whole units, rounded. */
+pub const fn m(metres: f64) -> i64 {
+    (metres / UNIT_SIZE + if metres < 0.0 { -0.5 } else { 0.5 }) as i64
 }
 /** Metres in units, fixed point. */
 const fn metres(metres: f64) -> Fixed {
@@ -358,16 +364,29 @@ pub fn layers(seed: u64, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
     // Trees, each in the cell its foot is in.
     let tree_cell = vox(2.0) as i64;
     let tree_top = vox(26.0) as i64;
-    let below: Rc<[Vec<f64>; 3]> = Rc::new(SPECIES.map(|species| {
-        let samples: Vec<Node> =
-            (0..64).map(|i| make_tree(species, 0.0, 0.0, 0.0, &mut Rng::new(hash64(f.s(17), i, 0, 0)), &|_, _| 0)).collect();
-        let profile = area_profile(&samples, 1);
-        let mut sums = vec![0.0; tree_top as usize + 1];
-        for h in 0..tree_top as usize {
-            sums[h + 1] = sums[h] + profile(h as i64);
-        }
-        sums
-    }));
+    // What slabs of each species' trees hide, measured from samples drawn at level 2 (the canopy's from level 4 on), by spacing.
+    let sample_seed = f.s(17);
+    let shadows = Rc::new(OnceCell::new());
+    let slabs = Rc::new(RefCell::new(HashMap::<i64, Rc<[Vec<f64>; 3]>>::new()));
+    let slabs_at = move |spacing: i64| {
+        slabs
+            .borrow_mut()
+            .entry(spacing)
+            .or_insert_with(|| {
+                let shadows: &[Shadows; 3] = shadows.get_or_init(|| {
+                    SPECIES.map(|species| {
+                        let samples: Vec<Node> = (0..64)
+                            .map(|i| make_tree(species, 0.0, 0.0, 0.0, &mut Rng::new(hash64(sample_seed, i, 0, 0)), &|_, _| 0))
+                            .collect();
+                        Shadows::new(&samples, 2, 1)
+                    })
+                });
+                Rc::new([0, 1, 2].map(|sp| {
+                    (0..tree_top).step_by(spacing as usize).map(|from| shadows[sp].slab(from, (from + spacing).min(tree_top))).collect()
+                }))
+            })
+            .clone()
+    };
     let trees = Population {
         name: "trees",
         order: 1.0,
@@ -408,21 +427,14 @@ pub fn layers(seed: u64, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
                         }
                         let chances = Forest::species_chances(&c);
                         let kind = k(foliage(pick_species(fraction(hash(f.s(18), x, z, 0)), &chances)));
+                        let slabs = slabs_at(spacing);
                         let mut spans = Vec::new();
-                        let mut from = 0;
-                        while from < tree_top {
-                            let to = (from + spacing).min(tree_top);
-                            let area =
-                                (0..3).fold(0.0, |sum, sp| sum + float(chances[sp]) * (below[sp][to as usize] - below[sp][from as usize]));
-                            if area > 0.0 {
-                                spans.push(Span {
-                                    from: c.height + from,
-                                    to: c.height + from + spacing,
-                                    kind,
-                                    extinction: Some((per_area * area) / spacing as f64 / 4.0),
-                                });
+                        for (i, from) in (0..tree_top).step_by(spacing as usize).enumerate() {
+                            let shadow = (0..3).fold(0.0, |sum, sp| sum + float(chances[sp]) * slabs[sp][i]);
+                            if shadow > 0.0 {
+                                let (from, to) = (c.height + from, c.height + from + spacing);
+                                spans.push(Span { from, to, kind, extinction: Some(per_area * shadow / spacing as f64) });
                             }
-                            from += spacing;
                         }
                         spans
                     }),
@@ -567,7 +579,7 @@ fn tree(shapes: Vec<Shape>, hidden: Vec<Shape>, fine: Vec<Child>, crown: Option<
     let mut children = vec![Child { name: "hidden".into(), size: vox(0.5) as i64, node: Node::of(hidden) }];
     children.extend(fine);
     let far = crown.map(|Crown { trunk, clusters, fill }| {
-        let far_shapes: Vec<&Shape> = clusters.iter().flat_map(|c| c.node.far.iter().flat_map(|f| &f.shapes)).collect();
+        let far_shapes: Vec<&Shape> = clusters.iter().flat_map(|c| c.node.far.iter().flat_map(|f| f.shapes())).collect();
         // An ellipsoid of the clusters' outline, shrunk to their volume and solid.
         let b = bounds_of_shapes(far_shapes.iter().map(|s| &s.bounds));
         let half = [0, 1, 2].map(|i| (b.max[i] - b.min[i]) as f64 / 2.0);
@@ -585,7 +597,7 @@ fn tree(shapes: Vec<Shape>, hidden: Vec<Shape>, fine: Vec<Child>, crown: Option<
             Op::Fill,
         );
         let detail = far_shapes.iter().flat_map(|s| s.extents).min().expect("clusters");
-        let far = Far { detail, shapes: vec![trunk, outline] };
+        let far = Far::of(detail, vec![trunk, outline]);
         children.extend(clusters);
         far
     });
@@ -637,7 +649,7 @@ fn leaf_cluster(name: String, centre: Point, radius: f64, kind: K, fill: f64, ra
     Child {
         name,
         size: ANY_SIZE,
-        node: Node { shapes: sprays, bounds: Some(far.bounds), children: None, far: Some(Far { detail: fixed(FINE), shapes: vec![far] }) },
+        node: Node { shapes: sprays, bounds: Some(far.bounds), children: None, far: Some(Far::of(fixed(FINE), vec![far])) },
     }
 }
 
@@ -770,7 +782,7 @@ fn spruce_tree(x: f64, ground: f64, z: f64, random: &mut Rng, ground_at: GroundA
         let distance = js::hypot(&[px - cx, pz - cz]);
         density(distance, py) * covered(vox(0.5).max(distance))
     }))));
-    near.far = Some(Far { detail: fixed(FINE), shapes: far });
+    near.far = Some(Far::of(fixed(FINE), far));
     near
 }
 
