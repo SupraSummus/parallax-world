@@ -52,22 +52,24 @@ impl LayerIndex {
                 shapes.push(*l);
             }
         }
-        let tables = shapes
+        let mut tables: Vec<Table> = shapes
             .iter()
-            .map(|&[r, u, f]| {
+            .map(|&[r, _, f]| {
                 let ((a_min, a_max), (c_min, c_max)) = (along(r), along(f));
                 let (layers, blocks) = (c_max - c_min + 1, (a_max - a_min) / BLOCK + 1);
-                let mut low = vec![i32::MAX; (layers * blocks) as usize];
-                let mut high = vec![i32::MIN; (layers * blocks) as usize];
-                each_site(grid, |p| {
-                    let (a, b, c) = (dot(r, p) - a_min, dot(u, p) as i32, dot(f, p) - c_min);
-                    let at = (c * blocks + a / BLOCK) as usize;
-                    low[at] = low[at].min(b);
-                    high[at] = high[at].max(b);
-                });
+                let (low, high) = (vec![i32::MAX; (layers * blocks) as usize], vec![i32::MIN; (layers * blocks) as usize]);
                 Table { forward: f, c_min, a_min, layers, blocks, low, high }
             })
             .collect();
+        // One pass for all the faces: the voxels are read once.
+        each_site(grid, |p| {
+            for (t, &[r, u, f]) in tables.iter_mut().zip(&shapes) {
+                let (a, b, c) = (dot(r, p) - t.a_min, dot(u, p) as i32, dot(f, p) - t.c_min);
+                let at = (c * t.blocks + a / BLOCK) as usize;
+                t.low[at] = t.low[at].min(b);
+                t.high[at] = t.high[at].max(b);
+            }
+        });
         LayerIndex { tables }
     }
 
