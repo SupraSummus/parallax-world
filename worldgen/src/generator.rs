@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use crate::grid::{Box3, VoxelGrid};
 use crate::js;
-use crate::noise::{Rng, hash, hash_text, hash64, unit};
+use crate::noise::{Fixed, ONE, Rng, fixed, float, hash, hash_text, hash64, unit};
 
 /** A material kind: its index in Generator::kinds. */
 pub type Kind = u8;
@@ -40,15 +40,18 @@ impl Fill {
 
 pub const SOLID: Fill = Fill::Const(1.0);
 
+/** A point in lattice units, fixed point. */
+type At = [Fixed; 3];
+
 #[derive(Clone)]
 enum Solid {
-    Ellipsoid { centre: Point, radii: Point },
-    Capsule { p: Point, d: [f64; 3], length2: f64, radius: f64 },
-    Lathe { p: Point, d: [f64; 3], length2: f64, length: f64, widest: f64, radius: Rc<dyn Fn(f64) -> f64> },
-    Cuboid { min: Point, max: Point, size: [f64; 3] },
+    Ellipsoid { centre: At, radii: At },
+    Capsule { p: At, d: At, radius: Fixed },
+    Lathe { p: At, d: At, length: Fixed, widest: Fixed, radius: Rc<dyn Fn(f64) -> f64> },
+    Cuboid { min: At, max: At },
 }
 
-/** A solid, in lattice units (Shape in generator.ts). */
+/** A solid, in lattice units (Shape in generator.ts): given in floats, kept in fixed point. */
 #[derive(Clone)]
 pub struct Shape {
     pub kind: Kind,
@@ -57,8 +60,8 @@ pub struct Shape {
     /** Every site it draws at level 0 is inside. */
     pub bounds: Box3,
     /** Its sizes along its own three axes. */
-    pub extents: [f64; 3],
-    pub centre: Point,
+    pub extents: [Fixed; 3],
+    centre: At,
     /** Surface area of an opaque body that stops as many rays. */
     pub area: f64,
     solid: Solid,
@@ -74,7 +77,8 @@ pub struct Node {
 }
 
 pub struct Far {
-    pub detail: f64,
+    /** Drawn while sites are further apart than this (fixed point). */
+    pub detail: Fixed,
     pub shapes: Vec<Shape>,
 }
 
@@ -214,23 +218,37 @@ fn effective_area(area: f64, chord: f64, fill: &Fill, centre: Point) -> f64 {
     area * (1.0 - js::pow(1.0 - f, chord / CHORD))
 }
 
+fn at(p: Point) -> At {
+    p.map(fixed)
+}
+
+fn mid(p: Point, q: Point) -> Point {
+    [0, 1, 2].map(|i| (p[i] + q[i]) / 2.0)
+}
+
+/** The first and last site of a level-0 box from min to max (fixed point), inclusive. */
+fn sites_between(min: At, max: At) -> Box3 {
+    Box3 { min: min.map(|v| -((-v) >> 16)), max: max.map(|v| (v >> 16) + 1) }
+}
+
+fn dot(a: At, b: At) -> i64 {
+    (0..3).map(|i| a[i] * b[i]).sum()
+}
+
 pub fn ellipsoid(centre: Point, radii: Point, kind: Kind, fill: Fill, op: Op) -> Shape {
-    let [cx, cy, cz] = centre;
     let [a, b, c] = radii;
     let p = 1.6075; // Knud Thomsen's approximation of the surface area
     let area = 4.0 * PI * js::pow((js::pow(a * b, p) + js::pow(a * c, p) + js::pow(b * c, p)) / 3.0, 1.0 / p);
+    let (centre_at, radii) = (at(centre), at(radii));
     Shape {
         kind,
         op,
-        centre,
-        bounds: Box3 {
-            min: [(cx - a).ceil(), (cy - b).ceil(), (cz - c).ceil()].map(|v| v as i64),
-            max: [(cx + a).floor(), (cy + b).floor(), (cz + c).floor()].map(|v| v as i64 + 1),
-        },
-        extents: [2.0 * a, 2.0 * b, 2.0 * c],
+        centre: centre_at,
+        bounds: sites_between([0, 1, 2].map(|i| centre_at[i] - radii[i]), [0, 1, 2].map(|i| centre_at[i] + radii[i])),
+        extents: radii.map(|r| 2 * r),
         area: effective_area(area, ((16.0 / 3.0) * PI * a * b * c) / area, &fill, centre),
         fill,
-        solid: Solid::Ellipsoid { centre, radii },
+        solid: Solid::Ellipsoid { centre: centre_at, radii },
     }
 }
 
@@ -238,33 +256,37 @@ pub fn ball(centre: Point, radius: f64, kind: Kind, fill: Fill, op: Op) -> Shape
     ellipsoid(centre, [radius, radius, radius], kind, fill, op)
 }
 
+/** The segment from p to q in fixed point: its start, direction and length. */
+fn segment(p: Point, q: Point) -> (At, At, Fixed) {
+    let (p, q) = (at(p), at(q));
+    let d = [0, 1, 2].map(|i| q[i] - p[i]);
+    (p, d, (dot(d, d) as u64).isqrt() as Fixed)
+}
+
 /** The points within `radius` of the segment from p to q: branches, logs. */
 pub fn capsule(p: Point, q: Point, radius: f64, kind: Kind, fill: Fill, op: Op) -> Shape {
-    let d = [q[0] - p[0], q[1] - p[1], q[2] - p[2]];
-    let length2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
-    let length = length2.sqrt();
-    let area = 2.0 * PI * radius * length + 4.0 * PI * (radius * radius);
-    let volume = PI * (radius * radius) * length + (4.0 / 3.0) * PI * js::pow(radius, 3.0);
-    let centre = [(p[0] + q[0]) / 2.0, (p[1] + q[1]) / 2.0, (p[2] + q[2]) / 2.0];
-    let lo: [i64; 3] = std::array::from_fn(|i| (p[i].min(q[i]) - radius).ceil() as i64);
-    let hi: [i64; 3] = std::array::from_fn(|i| (p[i].max(q[i]) + radius).floor() as i64 + 1);
+    let (p_at, d, length) = segment(p, q);
+    let r = fixed(radius);
+    let (lengthf, rf) = (float(length), radius);
+    let area = 2.0 * PI * rf * lengthf + 4.0 * PI * (rf * rf);
+    let volume = PI * (rf * rf) * lengthf + (4.0 / 3.0) * PI * js::pow(rf, 3.0);
+    let q_at = [0, 1, 2].map(|i| p_at[i] + d[i]);
     Shape {
         kind,
         op,
-        centre,
-        bounds: Box3 { min: lo, max: hi },
-        extents: [length + 2.0 * radius, 2.0 * radius, 2.0 * radius],
-        area: effective_area(area, (4.0 * volume) / area, &fill, centre),
+        centre: at(mid(p, q)),
+        bounds: sites_between([0, 1, 2].map(|i| p_at[i].min(q_at[i]) - r), [0, 1, 2].map(|i| p_at[i].max(q_at[i]) + r)),
+        extents: [length + 2 * r, 2 * r, 2 * r],
+        area: effective_area(area, (4.0 * volume) / area, &fill, mid(p, q)),
         fill,
-        solid: Solid::Capsule { p, d, length2, radius },
+        solid: Solid::Capsule { p: p_at, d, radius: r },
     }
 }
 
 /** A solid of revolution: the points within `radius(t)` of the segment from p to q, t from 0 at p to 1 at q. */
 pub fn lathe(p: Point, q: Point, radius: impl Fn(f64) -> f64 + 'static, kind: Kind, fill: Fill, op: Op) -> Shape {
-    let d = [q[0] - p[0], q[1] - p[1], q[2] - p[2]];
-    let length2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
-    let length = length2.sqrt();
+    let (p_at, d, length_at) = segment(p, q);
+    let length = float(length_at);
     // Area and volume by slices; the area is the convex hull's (see generator.ts).
     let n = 8f64.max(length.ceil()) as usize;
     let r: Vec<f64> = (0..=n).map(|i| radius(i as f64 / n as f64)).collect();
@@ -285,20 +307,28 @@ pub fn lathe(p: Point, q: Point, radius: impl Fn(f64) -> f64 + 'static, kind: Ki
     for i in 0..n {
         volume += (PI * (r[i] * r[i] + r[i + 1] * r[i + 1]) / 2.0) * (length / n as f64);
     }
-    let widest = js::max(r.iter().copied());
-    let centre = [(p[0] + q[0]) / 2.0, (p[1] + q[1]) / 2.0, (p[2] + q[2]) / 2.0];
-    let out = d.map(|v| widest * 0f64.max(1.0 - (v * v) / length2).sqrt());
-    let lo: [i64; 3] = std::array::from_fn(|i| (p[i].min(q[i]) - out[i]).ceil() as i64);
-    let hi: [i64; 3] = std::array::from_fn(|i| (p[i].max(q[i]) + out[i]).floor() as i64 + 1);
+    let widest = fixed(js::max(r.iter().copied()));
+    // How far the widest circle reaches along each axis: widest · sin of the
+    // angle to it, sin² with 22 bits after the point (l2 < 2^40), rounded up.
+    let (d8, l2) = (d.map(|v| v >> 8), dot(d.map(|v| v >> 8), d.map(|v| v >> 8)));
+    let out = d8.map(|v| {
+        if l2 == 0 {
+            return widest;
+        }
+        let sin2 = (((l2 - v * v) << 22) + l2 - 1) / l2;
+        let sin = sin2.isqrt() + i64::from(sin2.isqrt().pow(2) < sin2);
+        (widest * sin + 2047) >> 11
+    });
+    let q_at = [0, 1, 2].map(|i| p_at[i] + d[i]);
     Shape {
         kind,
         op,
-        centre,
-        bounds: Box3 { min: lo, max: hi },
-        extents: [length, 2.0 * widest, 2.0 * widest],
-        area: effective_area(area, (4.0 * volume) / area, &fill, centre),
+        centre: at(mid(p, q)),
+        bounds: sites_between([0, 1, 2].map(|i| p_at[i].min(q_at[i]) - out[i]), [0, 1, 2].map(|i| p_at[i].max(q_at[i]) + out[i])),
+        extents: [length_at, 2 * widest, 2 * widest],
+        area: effective_area(area, (4.0 * volume) / area, &fill, mid(p, q)),
         fill,
-        solid: Solid::Lathe { p, d, length2, length, widest, radius: Rc::new(radius) },
+        solid: Solid::Lathe { p: p_at, d, length: length_at, widest, radius: Rc::new(radius) },
     }
 }
 
@@ -306,59 +336,121 @@ pub fn lathe(p: Point, q: Point, radius: impl Fn(f64) -> f64 + 'static, kind: Ki
 pub fn cuboid(min: Point, max: Point, kind: Kind, fill: Fill, op: Op) -> Shape {
     let size = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
     let area = 2.0 * (size[0] * size[1] + size[1] * size[2] + size[0] * size[2]);
-    let centre = [(min[0] + max[0]) / 2.0, (min[1] + max[1]) / 2.0, (min[2] + max[2]) / 2.0];
+    let (lo, hi) = (at(min), at(max));
     Shape {
         kind,
         op,
-        centre,
-        bounds: Box3 { min: min.map(|v| v.ceil() as i64), max: max.map(|v| v.ceil() as i64) },
-        extents: size,
-        area: effective_area(area, (4.0 * size[0] * size[1] * size[2]) / area, &fill, centre),
+        centre: at(mid(min, max)),
+        bounds: Box3 { min: lo.map(|v| -((-v) >> 16)), max: hi.map(|v| -((-v) >> 16)) },
+        extents: [0, 1, 2].map(|i| hi[i] - lo[i]),
+        area: effective_area(area, (4.0 * size[0] * size[1] * size[2]) / area, &fill, mid(min, max)),
         fill,
-        solid: Solid::Cuboid { min, max, size },
+        solid: Solid::Cuboid { min: lo, max: hi },
+    }
+}
+
+/*
+ * Containment is tested on offsets from the shape with 8 bits after the
+ * point: a shape and its widening span at most 2^11 units, so squares stay
+ * under 2^40 and every product fits in an i64.
+ */
+
+/** `x − p`, with 8 bits after the point. */
+fn offset(x: At, p: At) -> At {
+    [0, 1, 2].map(|i| (x[i] - p[i]) >> 8)
+}
+
+/** A segment from 0 to d (8 bits after the point), and 2^62 / (d · d) for finding how far along it a point is without dividing. */
+#[derive(Clone, Copy)]
+struct Segment {
+    d: At,
+    l2: i64,
+    inverse: i64,
+}
+
+impl Segment {
+    fn new(d: At) -> Segment {
+        let d = d.map(|v| v >> 8);
+        let l2 = dot(d, d);
+        Segment { d, l2, inverse: if l2 == 0 { 0 } else { (1 << 62) / l2 } }
+    }
+
+    /** How far along the segment v's nearest point is, a fraction of ONE, given v · d. */
+    fn along(&self, vd: i64) -> Fixed {
+        // vd ≤ l2, so the product stays under 2^62.
+        (vd.clamp(0, self.l2) * self.inverse) >> 46
+    }
+
+    /** The squared distance of v from the segment, given v · d. */
+    fn away(&self, v: At, vd: i64) -> i64 {
+        let t = self.along(vd);
+        let a = [0, 1, 2].map(|i| v[i] - ((t * self.d[i]) >> 16));
+        dot(a, a)
+    }
+}
+
+/** A shape's test for one `min`, with what does not depend on the point worked out. */
+enum Inside<'a> {
+    Nothing,
+    Ellipsoid { centre: At, inverse: [i64; 3] },
+    Capsule { p: At, segment: Segment, r2: i64 },
+    Lathe { p: At, segment: Segment, reach: i64, widest2: i64, half: Fixed, radius: &'a dyn Fn(f64) -> f64 },
+    Cuboid { lo: At, hi: At, min: Fixed },
+}
+
+impl Inside<'_> {
+    fn holds(&self, x: At) -> bool {
+        match self {
+            Inside::Nothing => false,
+            Inside::Ellipsoid { centre, inverse } => {
+                let u = offset(x, *centre);
+                (0..3).map(|i| ((u[i] * inverse[i]) >> 16).pow(2)).sum::<i64>() <= ONE * ONE
+            }
+            Inside::Capsule { p, segment, r2 } => {
+                let v = offset(x, *p);
+                segment.away(v, dot(v, segment.d)) <= *r2
+            }
+            Inside::Lathe { p, segment, reach, widest2, half, radius } => {
+                let v = offset(x, *p);
+                let vd = dot(v, segment.d);
+                if vd < -reach || vd > segment.l2 + reach {
+                    return false;
+                }
+                let away = segment.away(v, vd);
+                away <= *widest2 && away <= (fixed(radius(float(segment.along(vd)))).max(*half) >> 8).pow(2)
+            }
+            Inside::Cuboid { lo, hi, min } => {
+                (0..3).all(|i| if hi[i] - lo[i] >= *min { lo[i] <= x[i] && x[i] < hi[i] } else { (2 * x[i] - lo[i] - hi[i]).abs() <= *min })
+            }
+        }
     }
 }
 
 impl Shape {
     /** Whether a point is inside the shape with each of its sizes made at least `min`. */
-    pub fn contains(&self, x: f64, y: f64, z: f64, min: f64) -> bool {
+    fn inside(&self, min: Fixed) -> Inside<'_> {
+        let half = min / 2;
+        let q8 = |v: Fixed| v >> 8;
         match &self.solid {
-            Solid::Ellipsoid { centre: [cx, cy, cz], radii: [a, b, c] } => {
-                let r = min / 2.0;
-                let (u, v, w) = ((x - cx) / a.max(r), (y - cy) / b.max(r), (z - cz) / c.max(r));
-                u * u + v * v + w * w <= 1.0
-            }
-            Solid::Capsule { p, d, length2, radius } => {
-                let v = [x - p[0], y - p[1], z - p[2]];
-                let t = if *length2 == 0.0 { 0.0 } else { 0f64.max(1f64.min((v[0] * d[0] + v[1] * d[1] + v[2] * d[2]) / length2)) };
-                let (a, b, c) = (v[0] - t * d[0], v[1] - t * d[1], v[2] - t * d[2]);
-                let r = radius.max(min / 2.0);
-                a * a + b * b + c * c <= r * r
-            }
-            Solid::Lathe { p, d, length2, length, widest, radius } => {
-                let (vx, vy, vz) = (x - p[0], y - p[1], z - p[2]);
-                let t = (vx * d[0] + vy * d[1] + vz * d[2]) / length2;
-                let reach = (length * 0f64.max(min - length)) / 2.0 / length2;
-                if t < -reach || t > 1.0 + reach {
-                    return false;
+            Solid::Ellipsoid { centre, radii } => {
+                // Σ (u / a)² ≤ 1, u / a as u · (2^32 / a) with 16 bits after the point.
+                let a = radii.map(|r| q8(r.max(half)));
+                if a.contains(&0) {
+                    return Inside::Nothing;
                 }
-                let c = 0f64.max(1f64.min(t));
-                let (a, b, e) = (vx - c * d[0], vy - c * d[1], vz - c * d[2]);
-                let away = a * a + b * b + e * e;
-                let limit = widest.max(min / 2.0);
-                if away > limit * limit {
-                    return false;
-                }
-                let r = radius(c).max(min / 2.0);
-                away <= r * r
+                Inside::Ellipsoid { centre: *centre, inverse: a.map(|a| (1 << 32) / a) }
             }
-            Solid::Cuboid { min: lo, max: hi, size } => {
-                let centre = self.centre;
-                [x, y, z]
-                    .iter()
-                    .enumerate()
-                    .all(|(i, v)| if size[i] >= min { lo[i] <= *v && *v < hi[i] } else { (v - centre[i]).abs() <= min / 2.0 })
-            }
+            Solid::Capsule { p, d, radius } => Inside::Capsule { p: *p, segment: Segment::new(*d), r2: q8((*radius).max(half)).pow(2) },
+            Solid::Lathe { p, d, length, widest, radius } => Inside::Lathe {
+                p: *p,
+                segment: Segment::new(*d),
+                // Ends reach on by up to half of min where the lathe is shorter than it, in units of v · d.
+                reach: q8(*length) * q8(0.max(min - length)) / 2,
+                widest2: q8((*widest).max(half)).pow(2),
+                half,
+                radius: radius.as_ref(),
+            },
+            Solid::Cuboid { min: lo, max: hi } => Inside::Cuboid { lo: *lo, hi: *hi, min },
         }
     }
 }
@@ -369,19 +461,21 @@ impl Shape {
  */
 fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &mut dyn FnMut(i64, i64, i64)) {
     let s = si as f64;
-    let small = shape.extents.iter().filter(|e| **e < s).count();
+    let spacing = si * ONE;
+    let small = shape.extents.iter().filter(|e| **e < spacing).count();
     let kept = |x: i64, y: i64, z: i64, chance: f64| chance >= 1.0 || unit(hash(seed, x * si, y * si, z * si)) < chance;
     if small == 3 {
-        let [x, y, z] = nearest_site(shape.centre.map(|v| v / s));
+        let [x, y, z] = nearest_site(shape.centre, si);
         if clip.holds([x, y, z]) && kept(x, y, z, shape.area / (VOXEL_AREA * s * s)) {
             put(x, y, z);
         }
         return;
     }
-    let min = [0.0, s, 1.6 * s][small];
+    let min = [0, spacing, spacing * 8 / 5][small];
     let b = &shape.bounds;
-    let [x0, y0, z0] = b.min.map(|v| ((v as f64 - min / 2.0) / s).ceil() as i64);
-    let [x1, y1, z1] = b.max.map(|v| ((v as f64 - 1.0 + min / 2.0) / s).floor() as i64);
+    let [x0, y0, z0] = b.min.map(|v| -(-(v * ONE - min / 2)).div_euclid(spacing));
+    let [x1, y1, z1] = b.max.map(|v| (v * ONE - ONE + min / 2).div_euclid(spacing));
+    let inside = shape.inside(min);
     let sites = |within: &Box3, visit: &mut dyn FnMut(i64, i64, i64)| {
         let (z_from, z_to) = (z0.max(within.min[2]), z1.min(within.max[2] - 1));
         let (y_from, y_to) = (y0.max(within.min[1]), y1.min(within.max[1] - 1));
@@ -390,7 +484,7 @@ fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &mut dyn FnMu
             for y in y_from..=y_to {
                 let mut x = from + ((from + y + z) & 1);
                 while x <= x_to {
-                    if shape.contains((x * si) as f64, (y * si) as f64, (z * si) as f64, min) {
+                    if inside.holds([x, y, z].map(|v| v * spacing)) {
                         visit(x, y, z);
                     }
                     x += 2;
@@ -406,7 +500,7 @@ fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &mut dyn FnMu
             }
         }),
         1 => {
-            let thickness = js::min(shape.extents);
+            let thickness = float(shape.extents.into_iter().min().expect("three"));
             sites(clip, &mut |x, y, z| {
                 if kept(x, y, z, 1.0 - js::pow(1.0 - fill(x, y, z), thickness / CHORD)) {
                     put(x, y, z)
@@ -538,7 +632,7 @@ fn drawables_in<'a>(generator: &'a Generator, clip: &Box3, s: i64) -> Vec<Drawab
             if !bounds.overlaps(units) {
                 return;
             }
-            let far = node.far.as_ref().filter(|far| s as f64 > far.detail);
+            let far = node.far.as_ref().filter(|far| s * ONE > far.detail);
             let shapes = far.map_or_else(|| node.shapes.get(), |far| &far.shapes);
             drawables.push(Drawable { order, key: key.clone(), draw: Draw::Shapes(shapes.to_vec(), far.is_some()) });
             if far.is_some() {
@@ -577,8 +671,7 @@ fn drawables_in<'a>(generator: &'a Generator, clip: &Box3, s: i64) -> Vec<Drawab
                     let cell = Cell { i, j, k, centre, population: population.name, seed: generator.seed };
                     k += 2;
                     let Some(anchor) = (population.anchor)(&cell) else { continue };
-                    let nf = n as f64;
-                    let [oi, oj, ok] = nearest_site([anchor[0] / nf, anchor[1] / nf, anchor[2] / nf]);
+                    let [oi, oj, ok] = nearest_site(at(anchor), n);
                     if oi != i || oj != j || ok != k - 2 {
                         continue;
                     }
@@ -672,22 +765,23 @@ pub fn area_profile(nodes: &[Node], axis: usize) -> impl Fn(i64) -> f64 + use<> 
 
 const EVERYWHERE: Box3 = Box3 { min: [i64::MIN / 4; 3], max: [i64::MAX / 4; 3] };
 
-/** The site nearest to a point: the one whose voxel holds it. */
-fn nearest_site(p: [f64; 3]) -> [i64; 3] {
-    let mut r = p.map(js::round);
-    if (r[0] as i64 + r[1] as i64 + r[2] as i64) & 1 != 0 {
+/** The site of sites `s` apart nearest to a point: the one whose voxel holds it. */
+fn nearest_site(p: At, s: i64) -> [i64; 3] {
+    let v = p.map(|c| c.div_euclid(s));
+    let mut r = v.map(|c| (c + ONE / 2) >> 16);
+    if (r[0] + r[1] + r[2]) & 1 != 0 {
         // Round the coordinate furthest from its integer the other way.
-        let [e0, e1, e2] = [(p[0] - r[0]).abs(), (p[1] - r[1]).abs(), (p[2] - r[2]).abs()];
-        let i = if e0 >= e1 && e0 >= e2 {
+        let e = [0, 1, 2].map(|i| (v[i] - r[i] * ONE).abs());
+        let i = if e[0] >= e[1] && e[0] >= e[2] {
             0
-        } else if e1 >= e2 {
+        } else if e[1] >= e[2] {
             1
         } else {
             2
         };
-        r[i] += if p[i] > r[i] { 1.0 } else { -1.0 };
+        r[i] += if v[i] > r[i] * ONE { 1 } else { -1 };
     }
-    r.map(|v| v as i64)
+    r
 }
 
 fn bounds_of(node: &Node) -> Box3 {
@@ -708,4 +802,16 @@ pub fn bounds_of_shapes<'a>(boxes: impl IntoIterator<Item = &'a Box3>) -> Box3 {
         }
     }
     b
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_long_lathe_reaches_its_widest_circle() {
+        // 1000 units long, at 3 : 4 : 0, so its widest circle reaches 4, 3 and 5 units along x, y and z.
+        let shape = lathe([0.0; 3], [600.0, 800.0, 0.0], |_| 5.0, 1, Fill::Const(1.0), Op::Fill);
+        assert_eq!((shape.bounds.min, shape.bounds.max), ([-4, -3, -5], [605, 804, 6]));
+    }
 }

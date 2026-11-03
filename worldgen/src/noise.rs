@@ -48,6 +48,11 @@ pub const fn fixed(x: f64) -> Fixed {
     (x * ONE as f64).round() as Fixed
 }
 
+/** `x` as a float, for what is still computed in floats. */
+pub fn float(x: Fixed) -> f64 {
+    x as f64 / ONE as f64
+}
+
 /** A 32-bit hash as a fraction of 1, in [0, ONE). */
 pub fn fraction(h: u32) -> Fixed {
     (h >> 16) as Fixed

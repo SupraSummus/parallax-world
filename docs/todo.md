@@ -4,10 +4,12 @@ Known problems, measured or derived, then open ideas.
 Numbers are for the forest at 1280×800, as measured when written.
 
 - **worldgen still decides some things with floats.**
-  Shapes, their containment tests, areas and fills are f64,
-  and so is the forest's geometry (sin, cos, pow, exp, atan2, hypot, from `js.rs`).
+  Shapes are kept and tested in fixed point,
+  but they are given in floats, and their areas, fills and lathe radii are f64,
+  as is the forest's geometry (sin, cos, pow, exp, atan2, hypot, from `js.rs`).
   They should go to fixed point like the noise,
   the forest building each thing relative to its anchor.
+  The fixed-point containment tests cost about 15% at level 0.
 - **The native frontend draws a view dumped by the TS renderer.**
   It needs world tiles, slice selection, the renderer and coverage in Rust,
   the camera in fixed point and positions relative to it in f32 for the GPU

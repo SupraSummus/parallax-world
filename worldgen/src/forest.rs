@@ -11,7 +11,7 @@ use crate::generator::{
 };
 use crate::grid::Box3;
 use crate::js::{self, round};
-use crate::noise::{Fixed, ONE, Rng, fbm, fixed, fraction, hash, hash64, smoothstep, stream, unit, value_noise};
+use crate::noise::{Fixed, ONE, Rng, fbm, fixed, float, fraction, hash, hash64, smoothstep, stream, unit, value_noise};
 
 /** Metres per lattice unit (UNIT_SIZE in forest.ts). */
 pub const UNIT_SIZE: f64 = 0.125;
@@ -344,7 +344,7 @@ pub fn forest(seed: u64) -> (Generator, [i64; 3]) {
                     axis: 1,
                     spans: Box::new(move |x, z, spacing| {
                         let c = f.column(x, z);
-                        let per_area = f.tree_chance(x, z, &c) as f64 / ONE as f64 / ((2 * tree_cell) * (2 * tree_cell)) as f64;
+                        let per_area = float(f.tree_chance(x, z, &c)) / ((2 * tree_cell) * (2 * tree_cell)) as f64;
                         if per_area == 0.0 {
                             return Vec::new();
                         }
@@ -354,9 +354,8 @@ pub fn forest(seed: u64) -> (Generator, [i64; 3]) {
                         let mut from = 0;
                         while from < tree_top {
                             let to = (from + spacing).min(tree_top);
-                            let area = (0..3).fold(0.0, |sum, sp| {
-                                sum + chances[sp] as f64 / ONE as f64 * (below[sp][to as usize] - below[sp][from as usize])
-                            });
+                            let area =
+                                (0..3).fold(0.0, |sum, sp| sum + float(chances[sp]) * (below[sp][to as usize] - below[sp][from as usize]));
                             if area > 0.0 {
                                 spans.push(Span {
                                     from: c.height + from,
@@ -521,7 +520,7 @@ fn tree(shapes: Vec<Shape>, hidden: Vec<Shape>, fine: Vec<Child>, crown: Option<
         let half = [0, 1, 2].map(|i| (b.max[i] - b.min[i]) as f64 / 2.0);
         let volume = (4.0 / 3.0) * PI * half[0] * half[1] * half[2];
         let filled = far_shapes.iter().fold(0.0, |sum, s| {
-            let [a, c, d] = s.extents;
+            let [a, c, d] = s.extents.map(float);
             sum + (PI / 6.0) * a * c * d * fill
         });
         let shrink = js::pow(1.0 - js::exp(-filled / volume), 1.0 / 3.0);
@@ -532,7 +531,7 @@ fn tree(shapes: Vec<Shape>, hidden: Vec<Shape>, fine: Vec<Child>, crown: Option<
             SOLID,
             Op::Fill,
         );
-        let detail = js::min(far_shapes.iter().map(|s| js::min(s.extents)));
+        let detail = far_shapes.iter().flat_map(|s| s.extents).min().expect("clusters");
         let far = Far { detail, shapes: vec![trunk, outline] };
         children.extend(clusters);
         far
@@ -585,7 +584,7 @@ fn leaf_cluster(name: String, centre: Point, radius: f64, kind: K, fill: f64, ra
     Child {
         name,
         size: ANY_SIZE,
-        node: Node { shapes: sprays, bounds: Some(far.bounds), children: None, far: Some(Far { detail: FINE, shapes: vec![far] }) },
+        node: Node { shapes: sprays, bounds: Some(far.bounds), children: None, far: Some(Far { detail: fixed(FINE), shapes: vec![far] }) },
     }
 }
 
@@ -718,7 +717,7 @@ fn spruce_tree(x: f64, ground: f64, z: f64, random: &mut Rng, ground_at: GroundA
         let distance = js::hypot(&[px - cx, pz - cz]);
         density(distance, py) * covered(vox(0.5).max(distance))
     }))));
-    near.far = Some(Far { detail: FINE, shapes: far });
+    near.far = Some(Far { detail: fixed(FINE), shapes: far });
     near
 }
 
