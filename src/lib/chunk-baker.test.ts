@@ -84,7 +84,7 @@ describe('ChunkBaker', () => {
   it.each([
     [0, 0, Infinity, [0, 0, -12]], [0, 3, Infinity, [8, -4, -8]], [1, 1, Infinity, [-16, 0, -10]], [1, 2, Infinity, [4, 8, -6]],
     [2, 1, Infinity, [8, 4, -8]], [3, 0, 4, [8, 6, -14]], [4, 0, Infinity, [-8, -6, -20]], [5, 0, Infinity, [-8, -4, -20]], [5, 0, 8, [8, 4, -16]], [0, 5, Infinity, [0, -8, -4]],
-  ] as const)('paints every voxel a ray from the eye hits first, far to near, at its site, in its colour (level %s, layer %s, cutoff %s, eye %j)', (level, layer, cutoff, eye) => {
+  ] as const)('paints every voxel a ray from the eye hits first, far to near, at its site, in its colour, its splat holding where the ray meets the plane (level %s, layer %s, cutoff %s, eye %j)', (level, layer, cutoff, eye) => {
     const slice = { level, layer, cutoff }
     const centre = sliceCentre(slice)
     // The voxels of the grid it reads, N times the lattice's.
@@ -104,16 +104,14 @@ describe('ChunkBaker', () => {
     const colorOf = new Map(voxels.map(v => [[v.a, v.b, v.c].join(), parseInt(v.color.slice(1), 16)]))
     const rgba = new Uint32Array(splats.buffer)
     const channels = (rgb: number, ...shifts: number[]) => shifts.map(s => ((rgb >> s) & 255) > 0)
-    const splatted = new Set<string>()
+    const splatOf = new Map<string, number>()
     for (let k = 0; k < painted; k++) {
       const [a, b, c] = lattice.subarray(3 * k, 3 * k + 3)
-      splatted.add([a, b, c].join())
+      splatOf.set([a, b, c].join(), k)
       expect(channels(rgba[k * SPLAT + 4], 0, 8, 16)).toEqual(channels(colorOf.get([a, b, c].join()) ?? 0, 16, 8, 0))
       const t = (centre - from.z) / (c * LAYER - from.z)
       expect(originX + splats[k * SPLAT]).toBeCloseTo(from.x + (a * LAYER - from.x) * t, 3)
       expect(originY + splats[k * SPLAT + 1]).toBeCloseTo(from.y + (b - from.y) * t, 3)
-      expect(splats[k * SPLAT + 2]).toBeCloseTo(n * t * LAYER, 3)
-      expect(splats[k * SPLAT + 3]).toBeCloseTo(n * t, 3)
       if (k > 0) {
         const [pa, pb, pc] = lattice.subarray(3 * k - 3, 3 * k)
         expect(distance({ a, b, c })).toBeLessThanOrEqual(distance({ a: pa, b: pb, c: pc }))
@@ -122,6 +120,7 @@ describe('ChunkBaker', () => {
 
     let compared = 0
     const missing: string[] = []
+    const uncovered: string[] = []
     // About 1000 samples: ray casting is slow.
     for (let row = 0.5; row < 24; row++) {
       for (let col = 0.5; col < 36; col++) {
@@ -131,15 +130,18 @@ describe('ChunkBaker', () => {
         if (hit === null || hit < 0) continue
         compared++
         const { a, b, c } = voxels[hit]
-        // Unless its splat misses what the chunk draws (its outline in perspective may reach further).
-        const t = (centre - from.z) / (c * LAYER - from.z)
-        const [x, y, w, h] = [from.x + (a * LAYER - from.x) * t, from.y + (b - from.y) * t, n * t * LAYER, n * t]
-        if (x + w <= originX || x - w >= originX + extentWidth || y + h <= originY - extentHeight || y - h >= originY) continue
-        if (!splatted.has([a, b, c].join())) missing.push([a, b, c].join())
+        const k = splatOf.get([a, b, c].join())
+        if (k === undefined) {
+          missing.push([a, b, c].join())
+          continue
+        }
+        const [u, v] = [Math.abs(px - originX - splats[k * SPLAT]), Math.abs(py - originY - splats[k * SPLAT + 1])]
+        if (u > splats[k * SPLAT + 2] + 1e-4 || u * Math.SQRT1_2 + v > splats[k * SPLAT + 3] + 1e-4) uncovered.push([a, b, c].join())
       }
     }
     expect(compared).toBeGreaterThan(200)
     expect(missing).toEqual([])
+    expect(uncovered).toEqual([])
   }, 30_000)
 
   it('knows the faces as view.ts orders them: the blob turned to face each bakes the same splats', () => {

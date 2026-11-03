@@ -32,8 +32,8 @@ at a coarser level of detail, so far voxels stay a pixel or two across.
 Slices are split into chunks, baked only in view and cached
 while the camera stays near where they were baked from.
 A chunk is a list of its visible voxels,
-each painted as a hexagon of one colour,
-its outline seen along the slice's axis, the same from every side:
+each painted as a hexagon of one colour
+holding its outline as seen from where the chunk was baked:
 an impressionist picture of the scene, not its exact faces.
 Slices are thin enough that
 geometry perspective would hide (e.g. stone under the lake's water

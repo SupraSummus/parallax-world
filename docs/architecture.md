@@ -286,13 +286,15 @@ cell's surface needs (`cellMargin`).
 **Splats.** A chunk is its voxels a ray from the eye may reach:
 those with an open or cut face facing it,
 normal · (p − eye) < 0 (`chunk_splats`).
-Each is painted as one hexagon, the same from every side (`Splat`):
-the voxel's outline seen straight along the face's axis,
-√2 wide and 2 high, its corners the rhombic dodecahedron's,
-centred where the line from the eye through its site meets the centre plane
-and scaled as that point is.
-Seen along the axis, the splats of a surface cover it as its voxels do;
-seen at a slant, a splat stands for all the faces its voxel shows.
+Each is painted as one hexagon (`Splat`)
+shaped like the voxel's outline seen straight along the face's axis
+(√2 wide and 2 high, its corners the rhombic dodecahedron's),
+centred where the line from the eye through its site meets the centre plane:
+the least such hexagon that holds the voxel's corners
+projected from the eye onto the plane.
+So the splats of a surface leave no gaps, seen from any side.
+The outline along the axis alone would not, as the plane is seen at a slant:
+where four faces meet, a voxel's outline is a square twice its width.
 A splat's colour is the mean of its voxel's open faces' shades
 (of its cut faces' where it has none),
 each shaded by the axes its normal leans towards, as in the reference viewer
@@ -618,9 +620,8 @@ so from the parallax camera's position both renderers should agree.
 - Each slice is drawn at the scale of its centre, as seen from its
   level's eye, so it is only approximately in perspective; section 2
   bounds the error.
-- A voxel is painted as its outline along the face's axis, one colour,
-  whatever side it is seen from:
-  seen at a slant, its faces' shapes and shades are lost,
+- A voxel is painted as one hexagon of one colour holding its outline:
+  its faces' shapes and shades are lost,
   and a silhouette is a row of hexagons.
 - A level is baked again all at once when the camera leaves its eye's
   cell (section 3): the near levels every unit or few of movement.
