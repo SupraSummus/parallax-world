@@ -3,7 +3,7 @@
 //! (renderer.rs), worker threads baking them with the baker in bake/,
 //! sharing the tiles, and wgpu drawing them in an egui window.
 //!
-//! parallax-native [--threads N] [--seed S] [--leak DEG] [--shot out.png [--seams] | --bench] [--walk D] [--stroll S] [--spin]
+//! parallax-native [--threads N] [--seed S] [--leak DEG] [--shot out.png [--seams] [--colour voxels|layers|chunks] | --bench] [--walk D] [--stroll S] [--spin]
 //! parallax-native [--seed S] --check-requests frame.bin
 //!
 //! --shot draws the first frame once the world has its tiles and all its
@@ -13,6 +13,7 @@
 //! frame, and does the same there. --stroll S then walks on for S seconds
 //! as the window would, a frame every 60th, and times each frame's parts.
 //! --leak sets how far hidden geometry may show between slices (renderer.rs).
+//! --seams and --colour draw the shot as the panel's switches do.
 //! --check-requests takes a view the TS renderer dumped (native/dump.test.ts):
 //! the faces must be the same, and the chunks the first frame
 //! wants from its grids and camera too, but for some the TS renderer wants
@@ -37,7 +38,7 @@ use eframe::egui;
 use eframe::egui_wgpu;
 
 use bakery::Bakery;
-use compositor::Compositor;
+use compositor::{Colours, Compositor};
 use dump::Dump;
 use renderer::Renderer;
 use view::{Vec3, focal_length, view_basis};
@@ -54,6 +55,7 @@ struct App {
     pitch: f64,
     fov: f64,
     seams: bool,
+    colours: Colours,
     stats: String,
     frame_ms: f64,
     /** --spin: turns on its own and prints frames per second. */
@@ -73,6 +75,12 @@ impl eframe::App for App {
             ui.checkbox(&mut self.renderer.fill, "Fill Gaps");
             ui.checkbox(&mut self.renderer.skip_covered, "Skip Covered Chunks");
             ui.checkbox(&mut self.seams, "Show Face Seams");
+            ui.horizontal(|ui| {
+                ui.label("Colour by");
+                for (colours, name) in Colours::ALL {
+                    ui.radio_value(&mut self.colours, colours, name);
+                }
+            });
             ui.label(format!(
                 "camera {:.0} {:.0} {:.0}  yaw {:.0}  pitch {:.0}",
                 self.camera[0], self.camera[1], self.camera[2], self.yaw, self.pitch
@@ -137,6 +145,7 @@ impl eframe::App for App {
                 size: [rect.width(), rect.height()],
                 pixels: [0, 0],
                 seams: self.seams,
+                colours: self.colours,
             };
             let callback = compositor::Callback { frame: Arc::new(frame), view, rect };
             ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, callback));
@@ -329,6 +338,13 @@ fn main() -> eframe::Result {
             size: size.map(|v| v as f32),
             pixels: size.map(|v| v as u32),
             seams: args.iter().any(|a| a == "--seams"),
+            colours: args.iter().position(|a| a == "--colour").map_or(Colours::Voxels, |i| {
+                Colours::ALL
+                    .into_iter()
+                    .find(|(_, name)| name.eq_ignore_ascii_case(&args[i + 1]))
+                    .expect("--colour voxels, layers or chunks")
+                    .0
+            }),
         };
         if args.iter().any(|a| a == "--bench") {
             let splats: usize = frame.layers.iter().flat_map(|l| &l.placements).map(|p| p.chunk.baked.splats.len()).sum();
@@ -368,8 +384,20 @@ fn main() -> eframe::Result {
         },
         ..Default::default()
     };
-    let app =
-        App { world, renderer, faces, camera, yaw: YAW, pitch: PITCH, fov: FOV, seams: false, stats: String::new(), frame_ms: 0.0, spin };
+    let app = App {
+        world,
+        renderer,
+        faces,
+        camera,
+        yaw: YAW,
+        pitch: PITCH,
+        fov: FOV,
+        seams: false,
+        colours: Colours::Voxels,
+        stats: String::new(),
+        frame_ms: 0.0,
+        spin,
+    };
     eframe::run_native(
         "Parallax",
         options,

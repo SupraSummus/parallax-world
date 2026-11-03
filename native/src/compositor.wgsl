@@ -31,7 +31,7 @@ struct Chunk {
   distance: f32, // of the centre plane, along the face's axis
   face: u32,
   depth: f32, // its layer's: see depth_of
-  _pad: f32,
+  tint: u32, // RGBA to paint its splats in, shaded as their voxels are; 0 for their own
 }
 
 // Splats of one chunk near each other on its plane: `first` and the next
@@ -112,7 +112,8 @@ fn splat_vertex(
   out.corner = vec2f(f32(vertex & 1u), f32((vertex >> 1u) & 1u)) * 2.0 - 1.0;
   out.slant = splat.z / (sqrt(2.0) * splat.w);
   let fog = 1.0 - exp(-c.distance / globals.fog_distance);
-  out.colour = mix(paint.rgb, globals.horizon.rgb, fog);
+  let tinted = unpack4x8unorm(c.tint).rgb * (0.3 + 0.7 * dot(paint.rgb, vec3f(0.3, 0.59, 0.11)));
+  out.colour = mix(select(paint.rgb, tinted, c.tint != 0u), globals.horizon.rgb, fog);
   let at = c.origin + splat.xy + out.corner * splat.zw;
   out.ray = at / c.distance;
   out.clip = vec4f(c.origin.x, c.origin.y, c.origin.x + c.extent.x, c.origin.y - c.extent.y) / c.distance + vec4f(-1.0, 1.0, 1.0, -1.0) * 1e-4;

@@ -28,7 +28,8 @@ struct GpuChunk {
     distance: f32,
     face: u32,
     depth: f32,
-    pad: f32,
+    /** RGBA to paint its splats, shaded as their voxels are (Colours); 0 for their own colours. */
+    tint: u32,
 }
 
 /** A splat (splat_vertex's instance in compositor.wgsl): its SPLAT numbers (chunk-baker.ts) and its order in its chunk (depth_of). */
@@ -544,6 +545,9 @@ impl Compositor {
         self.clusters.room(device, encoder, chunks().map(|b| b.clusters.len() as u32).sum());
         let mut candidates: Vec<[u32; 2]> = Vec::new();
         for (k, layer) in frame.layers.iter().enumerate() {
+            // A hue per layer (Colours), neighbours in a stack far apart.
+            let s = &layer.slice;
+            let hue = hash(&[layer.face as u64, s.level as u64, s.cutoff.to_bits()]) + 0.618 * s.layer as f64;
             let depth = ((k as f64 - frame.layers.len() as f64) * scale as f64).exp2() as f32;
             for p in &layer.placements {
                 let chunk = &p.chunk;
@@ -563,7 +567,11 @@ impl Compositor {
                     distance: layer.distance as f32,
                     face: layer.face as u32,
                     depth,
-                    pad: 0.0,
+                    tint: match view.colours {
+                        Colours::Voxels => 0,
+                        Colours::Layers => tint(hue),
+                        Colours::Chunks => tint(hash(&[hue.to_bits(), chunk.i as u64, chunk.j as u64])),
+                    },
                 };
                 candidates.push([resident.clusters.start, resident.clusters.len() as u32]);
             }
@@ -711,6 +719,35 @@ pub struct View {
     pub pixels: [u32; 2],
     /** Whether to draw the seams between faces over the picture. */
     pub seams: bool,
+    pub colours: Colours,
+}
+
+/** What splats are painted in: their voxels' colours, or to see how the picture is cut up, a colour per layer or per chunk. */
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Colours {
+    #[default]
+    Voxels,
+    Layers,
+    Chunks,
+}
+
+impl Colours {
+    pub const ALL: [(Colours, &str); 3] = [(Colours::Voxels, "Voxels"), (Colours::Layers, "Layers"), (Colours::Chunks, "Chunks")];
+}
+
+/** A number in [0, 1) from `numbers`, as if at random. */
+fn hash(numbers: &[u64]) -> f64 {
+    let h = numbers.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, &n| (h ^ n).wrapping_mul(0x0100_0000_01b3).rotate_left(29));
+    (h.wrapping_mul(0x9e37_79b9_7f4a_7c15) >> 11) as f64 / (1u64 << 53) as f64
+}
+
+/** A bright colour of `hue` (in turns), as RGBA. */
+fn tint(hue: f64) -> u32 {
+    let channel = |n: f64| {
+        let k = (n + hue.rem_euclid(1.0) * 6.0) % 6.0;
+        (255.0 * (1.0 - 0.75 * k.min(4.0 - k).clamp(0.0, 1.0))) as u32
+    };
+    0xff00_0000 | channel(1.0) << 16 | channel(3.0) << 8 | channel(5.0)
 }
 
 impl View {

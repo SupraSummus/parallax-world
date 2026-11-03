@@ -423,6 +423,7 @@ with a hair of overlap so no seam pixel falls to neither face.
 Looking straight along a world axis, as the scenes' walls and streets
 invite, puts a corner of 4 faces in the middle of the screen.
 "Show Face Seams" draws the seams over the picture.
+The native panel can also colour the splats by layer or by chunk (`Colours`).
 
 A chunk's eye depends on where the camera is, not where it looks,
 and detail on the leak tolerance only, not the field of view or viewport.

@@ -33,8 +33,8 @@ const CHUNKS_PER_CELL: usize = 2;
 /** A baked piece of a slice: cell (i, j), from `eye`, grown if `fill`. `id` names it to the coverage and the compositor. */
 pub struct Chunk {
     pub id: u32,
-    i: i32,
-    j: i32,
+    pub i: i32,
+    pub j: i32,
     eye: [i32; 3],
     fill: bool,
     pub baked: Baked,
@@ -50,6 +50,7 @@ pub struct Placement {
 /** A slice's centre plane, `distance` ahead of the camera along its face's axis, and what it draws there. */
 pub struct Layer {
     pub face: usize,
+    pub slice: Slice,
     pub distance: f64,
     pub placements: Vec<Placement>,
 }
@@ -366,7 +367,7 @@ fn draw_slice(
     let eye = of.eyes[id.level as usize];
     // Slices start at least NEAR_DEPTH ahead of the camera, so this is > 0.
     let distance = slice_centre(&id) - camera[2];
-    let mut layer = Layer { face: of.face, distance, placements: Vec::new() };
+    let mut layer = Layer { face: of.face, slice: id, distance, placements: Vec::new() };
     let [min_x, max_x, min_y, max_y] = of.tangents;
     let (left, right) = (camera[0] + min_x * distance, camera[0] + max_x * distance);
     let (bottom, top) = (camera[1] + min_y * distance, camera[1] + max_y * distance);
