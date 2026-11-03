@@ -158,17 +158,19 @@ impl Tiles {
         }
     }
 
-    /** Material id at site (x, y, z); 0 if empty, outside or in a tile with no grid. */
+    /** The tile (i, k) column (x, z) is in, relative to the table's first. */
     #[inline]
-    fn at(&self, x: i32, y: i32, z: i32) -> u8 {
-        let (i, k) = ((x - self.origin[0]) >> self.shift, (z - self.origin[1]) >> self.shift);
+    fn tile(&self, x: i32, z: i32) -> [i32; 2] {
+        [(x - self.origin[0]) >> self.shift, (z - self.origin[1]) >> self.shift]
+    }
+
+    /** Tile (i, k)'s grid, if it has one. */
+    #[inline]
+    fn grid(&self, [i, k]: [i32; 2]) -> Option<&Grid> {
         if i < 0 || i >= self.size[0] || k < 0 || k >= self.size[1] {
-            return 0;
+            return None;
         }
-        match &self.grids[(k * self.size[0] + i) as usize] {
-            Some(grid) => grid.at(x, y, z),
-            None => 0,
-        }
+        self.grids[(k * self.size[0] + i) as usize].as_deref()
     }
 }
 
@@ -202,16 +204,30 @@ impl<'a> Reader<'a> {
         Reader { tiles, lattice, min, max }
     }
 
-    /** Material id at (a, b, c); 0 if empty, outside or not a site. */
+    /**
+     * Material ids at (a + 2i, b, c) for i in [0, count), 0 where empty or
+     * outside, to `visit` with each i, for a site (a, b, c): stepping a by
+     * 2 steps (x, y, z) by R, and the grid only changes at a tile's edge.
+     */
     #[inline]
-    pub fn at(&self, a: i32, b: i32, c: i32) -> u8 {
-        if ((a ^ c) | (b ^ c)) & 1 != 0 {
-            return 0;
-        }
+    pub fn row(&self, a: i32, b: i32, c: i32, count: i32, mut visit: impl FnMut(i32, u8)) {
+        debug_assert!(((a ^ c) | (b ^ c)) & 1 == 0, "not a site");
         let Lattice { r, u, f } = self.lattice;
-        let x = (a * r[0] + c * f[0]) / 2 + b * u[0];
-        let y = (a * r[1] + c * f[1]) / 2 + b * u[1];
-        let z = (a * r[2] + c * f[2]) / 2 + b * u[2];
-        self.tiles.at(x, y, z)
+        let mut x = (a * r[0] + c * f[0]) / 2 + b * u[0];
+        let mut y = (a * r[1] + c * f[1]) / 2 + b * u[1];
+        let mut z = (a * r[2] + c * f[2]) / 2 + b * u[2];
+        let mut tile = self.tiles.tile(x, z);
+        let mut grid = self.tiles.grid(tile);
+        for i in 0..count {
+            let here = self.tiles.tile(x, z);
+            if here != tile {
+                tile = here;
+                grid = self.tiles.grid(tile);
+            }
+            visit(i, grid.map_or(0, |grid| grid.at(x, y, z)));
+            x += r[0];
+            y += r[1];
+            z += r[2];
+        }
     }
 }

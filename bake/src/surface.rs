@@ -119,13 +119,14 @@ pub fn cell_surface(reader: &Reader, geometry: &Geometry, next: &Cells, slice: &
         // A layer's sites have a and b of the parity of c.
         for b in (b0 - 1 + ((b0 - 1 + c) & 1)..=b1).step_by(2) {
             let row = (b - b0 + 1) * stride - a0 + 2;
-            for a in (a0 - 2 + ((a0 + c) & 1)..a1 + 2).step_by(2) {
-                let material = reader.at(a, b, c);
+            let first = a0 - 2 + ((a0 + c) & 1);
+            reader.row(first, b, c, (a1 + 2 - first + 1) / 2, |i, material| {
+                let a = first + 2 * i;
                 plane.0[(row + a) as usize] = material;
                 if material != 0 {
                     plane.1[(row + a) as usize] = classify(a, b, c);
                 }
-            }
+            });
         }
     };
 
