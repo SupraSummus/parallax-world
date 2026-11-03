@@ -28,8 +28,8 @@ struct GpuChunk {
     pad: f32,
 }
 
-/** A splat instance: its SPLAT numbers (chunk-baker.ts), then its chunk's slot, the top bit set if grown. */
-type GpuSplat = [u32; 6];
+/** A splat instance: its SPLAT numbers (chunk-baker.ts), its chunk's slot, and its order in the chunk (depth_of in compositor.wgsl). */
+type GpuSplat = [u32; 7];
 const SPLAT_BYTES: u64 = std::mem::size_of::<GpuSplat>() as u64;
 
 /** A chunk's splats on the GPU: where in the splat buffer, its slot in the table, and the frame it was last drawn in. */
@@ -134,7 +134,7 @@ impl Compositor {
                     targets: &[Some(format.into())],
                 }),
                 primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleStrip, ..Default::default() },
-                // Within a chunk, a later splat covers an earlier one at the same depth.
+                // Ties (the sky, cleared to 1) are drawn.
                 depth_stencil: Some(wgpu::DepthStencilState {
                     format: wgpu::TextureFormat::Depth32Float,
                     depth_write_enabled: Some(true),
@@ -150,7 +150,7 @@ impl Compositor {
         let splat_layout = wgpu::VertexBufferLayout {
             array_stride: SPLAT_BYTES,
             step_mode: wgpu::VertexStepMode::Instance,
-            attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Unorm8x4, 2 => Uint32],
+            attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Unorm8x4, 2 => Uint32, 3 => Float32],
         };
         let (slots, capacity) = (1024, 1 << 20);
         let table = table_buffer(device, slots);
@@ -214,12 +214,11 @@ impl Compositor {
     pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, frame: &Frame, view: &View) {
         self.frames += 1;
         self.grew = false;
-        let layers = frame.layers.len() as f32 + 1.5;
         let mut table = Vec::new();
         self.draws.clear();
+        let scale = depth_scale(frame.layers.len());
         for (k, layer) in frame.layers.iter().enumerate() {
-            // Layer k at (k + ½) / (L + 1.5), its grown splats half a layer behind, the sky behind all.
-            let depth = (k as f32 + 0.5) / layers;
+            let depth = ((k as f64 - frame.layers.len() as f64) * scale as f64).exp2() as f32;
             for p in &layer.placements {
                 let chunk = &p.chunk;
                 if !self.resident.contains_key(&chunk.id) {
@@ -229,6 +228,12 @@ impl Compositor {
                         self.slots += 1;
                         self.slots - 1
                     });
+                    // Painted splats in the first half of the layer's depths, nearer the later painted; grown ones in the second, behind them all.
+                    let (painted, grown) = (chunk.baked.painted, count as usize - chunk.baked.painted);
+                    let order = |s: usize| {
+                        let (half, k, n) = if s < painted { (0.0, s, painted) } else { (0.5, s - painted, grown) };
+                        half + 0.5 * (n - k) as f32 / (n + 1) as f32
+                    };
                     let data: Vec<GpuSplat> = chunk
                         .baked
                         .numbers
@@ -237,8 +242,7 @@ impl Compositor {
                         .iter()
                         .enumerate()
                         .map(|(s, n)| {
-                            let grown = if s < chunk.baked.painted { 0 } else { 1 << 31 };
-                            [n[0].to_bits(), n[1].to_bits(), n[2].to_bits(), n[3].to_bits(), n[4].to_bits(), slot | grown]
+                            [n[0].to_bits(), n[1].to_bits(), n[2].to_bits(), n[3].to_bits(), n[4].to_bits(), slot, order(s).to_bits()]
                         })
                         .collect();
                     queue.write_buffer(&self.instances, splats.start as u64 * SPLAT_BYTES, bytemuck::cast_slice(&data));
@@ -286,7 +290,7 @@ impl Compositor {
             queue.write_buffer(&self.table, 0, bytemuck::cast_slice(&table));
         }
         let sky_fog = 1.0 - (-frame.farthest / view.fog_distance).exp();
-        queue.write_buffer(&self.globals, 0, bytemuck::cast_slice(&view.globals(1.0 / layers, sky_fog)));
+        queue.write_buffer(&self.globals, 0, bytemuck::cast_slice(&view.globals(scale, sky_fog)));
     }
 
     pub fn draw(&self, pass: &mut wgpu::RenderPass<'_>) {
@@ -299,6 +303,11 @@ impl Compositor {
         pass.set_pipeline(&self.sky);
         pass.draw(0..4, 0..1);
     }
+}
+
+/** depth_scale (depth_of in compositor.wgsl) for `layers` layers: depths from 2^-120, far above f32's least normal, at most half an octave a layer. */
+fn depth_scale(layers: usize) -> f32 {
+    (120.0 / layers.max(1) as f32).min(0.5)
 }
 
 /** How a frame is seen: orientation, focal length, fog, the faces' axes, and the view's rectangle in pixels of the target. */
@@ -315,8 +324,7 @@ pub struct View {
 }
 
 impl View {
-    /** `step`: the depth from one layer to the next. */
-    fn globals(&self, step: f32, sky_fog: f64) -> [f32; GLOBALS] {
+    fn globals(&self, depth_scale: f32, sky_fog: f64) -> [f32; GLOBALS] {
         let mut g = [0.0f32; GLOBALS];
         let [left, top, width, height] = self.rect;
         let ppp = self.pixels_per_point;
@@ -336,8 +344,7 @@ impl View {
             }
         };
         columns(&mut g[16..28], axes);
-        g[28] = 1.0 - step;
-        g[29] = step / 2.0;
+        g[28] = depth_scale;
         g[30] = sky_fog as f32;
         for (f, face) in self.faces.iter().enumerate() {
             let at = 32 + f * 16;

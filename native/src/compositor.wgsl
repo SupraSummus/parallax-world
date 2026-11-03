@@ -16,8 +16,8 @@ struct Globals {
   sky_top: vec4f,
   horizon: vec4f,
   sky_view: mat3x3f, // the camera's axes in world coordinates
-  sky_depth: f32,
-  half_layer: f32, // depth from one layer to its grown splats
+  depth_scale: f32, // see depth_of
+  _pad1: f32,
   sky_fog: f32,
   _pad: f32,
   faces: array<FaceView, 12>,
@@ -28,7 +28,7 @@ struct Chunk {
   extent: vec2f,
   distance: f32, // of the centre plane, along the face's axis
   face: u32,
-  depth: f32, // the layer's depth in (0, 1)
+  depth: f32, // its layer's: see depth_of
   _pad: f32,
 }
 
@@ -51,10 +51,24 @@ fn ray_of(view: mat3x3f, position: vec4f) -> vec3f {
   return view * vec3f(vec2f(s.x, -s.y) * globals.viewport / globals.focal, 1.0);
 }
 
-// `chunk`'s top bit marks grown splats, drawn half a layer behind the painted.
+// Painting order is depth: layer k of L at 2^((k - L) · depth_scale),
+// near to far, and within a chunk by `order`, in [0, 1), nearer the later
+// a splat is painted (see Compositor::prepare), up to the next layer's.
+// Exponential, so each layer has about as many depths as a whole [½, 1)
+// would linearly, enough for every splat of the largest chunks.
+fn depth_of(layer: f32, order: f32) -> f32 {
+  return layer * exp2(order * globals.depth_scale);
+}
+
 @vertex
-fn splat_vertex(@builtin(vertex_index) vertex: u32, @location(0) splat: vec4f, @location(1) paint: vec4f, @location(2) chunk: u32) -> Splat {
-  let c = chunks[chunk & 0x7fffffffu];
+fn splat_vertex(
+  @builtin(vertex_index) vertex: u32,
+  @location(0) splat: vec4f,
+  @location(1) paint: vec4f,
+  @location(2) chunk: u32,
+  @location(3) order: f32,
+) -> Splat {
+  let c = chunks[chunk];
   let face = globals.faces[c.face];
   var out: Splat;
   out.corner = vec2f(f32(vertex & 1u), f32(vertex >> 1u)) * 2.0 - 1.0;
@@ -65,15 +79,14 @@ fn splat_vertex(@builtin(vertex_index) vertex: u32, @location(0) splat: vec4f, @
   out.ray = at / c.distance;
   out.clip = vec4f(c.origin.x, c.origin.y, c.origin.x + c.extent.x, c.origin.y - c.extent.y) / c.distance + vec4f(-1.0, 1.0, 1.0, -1.0) * 1e-4;
   let p = transpose(face.view) * vec3f(at, c.distance);
-  let depth = c.depth + select(0.0, globals.half_layer, chunk >= 0x80000000u);
-  out.position = vec4f(p.xy * globals.focal / (globals.viewport / 2.0), depth * p.z, p.z);
+  out.position = vec4f(p.xy * globals.focal / (globals.viewport / 2.0), depth_of(c.depth, order) * p.z, p.z);
   return out;
 }
 
 // The face draws its own rays, a chunk its part of the plane, by the ray
 // each splat interpolates (working it out from the pixel costs more).
 // Rounding differs between splats, so faces and chunks overlap by a hair:
-// no pixel is left to neither; drawn twice, the later chunk wins.
+// no pixel is left to neither.
 @fragment
 fn splat_fragment(in: Splat) -> @location(0) vec4f {
   if abs(in.corner.x) * in.slant + abs(in.corner.y) >= 1.0 {
@@ -96,7 +109,7 @@ struct Sky {
 @vertex
 fn sky_vertex(@builtin(vertex_index) vertex: u32) -> Sky {
   let corner = vec2f(f32(vertex & 1u), f32(vertex >> 1u)) * 2.0 - 1.0;
-  return Sky(vec4f(corner, globals.sky_depth, 1.0));
+  return Sky(vec4f(corner, 1.0, 1.0));
 }
 
 @fragment
