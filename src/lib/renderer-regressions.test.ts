@@ -176,9 +176,11 @@ describe('Renderer regressions', () => {
       const renderer = new ParallaxRenderer(floor)
       renderer.resize(1280, 800)
       renderer.setRenderDistance(800)
+      // Thicker slices than by default: splats now hold their voxel's
+      // outline from the eye, which covers these gaps at the default leak.
+      renderer.setMaxLeak(3)
       // Looking along the strip from just before it (a = 3.8, c = -8), off
-      // the eyes enough for gaps to open. From higher up, the far slices,
-      // of coarser voxels (thicker sheets), hide them.
+      // the eyes enough for gaps to open.
       renderer.setCamera({ x: -2.1, y: 50, z: -5.9 })
       renderer.setOrientation({ yaw: 45, pitch: 0 })
       renderer.setFillGaps(fillGaps)
