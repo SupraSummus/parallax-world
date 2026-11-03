@@ -16,8 +16,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   the new ones show nothing until baked.
   Its camera is f64, not fixed point (positions reach the GPU relative to it).
   A frame costs its main thread over 10 ms in the forest.
-  A moved grid's LayerIndex is built again whole,
-  though most of its tiles are the old grid's (world.ts indexes each part).
   `native/` is not built in CI.
 - **TS and Rust still say much the same twice.**
   `bake.ts`'s faces and palettes are `native/src/tables.rs` again,

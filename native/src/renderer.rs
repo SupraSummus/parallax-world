@@ -2,21 +2,23 @@
 //! (renderer.ts): each render picks the chunks in view, face by face and
 //! near to far, skips those nearer layers cover, has the missing ones baked
 //! (an older bake of a cell standing in meanwhile) and returns where each
-//! goes, relative to the camera. Drawing them is the compositor's job.
+//! goes, relative to the camera. A cell is baked once the world has all the
+//! tiles it reads; until then, the tiles are what it wants. Drawing them is
+//! the compositor's job.
 //! See docs/architecture.md, sections 3 to 5.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use bake::{Coverage, Grid, Slice};
+use bake::{Coverage, Slice, chunk_reads};
 
 use crate::bakery::{Baked, Bakery, Mask, Request};
-use crate::layer_index::LayerIndex;
 use crate::slicing::{
     GRID_LEVELS, LAYER, MAX_LEVEL, atom_level, cell_margin, chunk_cell, chunk_cells, eye_of, leak_free_detail, select_slices, site_layers,
     slice_centre,
 };
 use crate::view::{Face, ScreenBox, ScreenBoxes, Vec3, View, in_face, to_local};
+use crate::world::{Level, TILE, TileId};
 
 /** Slices start four layers ahead: the nearest voxels then reach three layers ahead, two past level 0's eye. */
 const NEAR_DEPTH: f64 = 4.0 * LAYER;
@@ -35,7 +37,6 @@ pub struct Chunk {
     j: i32,
     eye: [i32; 3],
     fill: bool,
-    grid: u32,
     pub baked: Baked,
 }
 
@@ -67,6 +68,10 @@ pub struct Stats {
     pub wanted: Vec<Request>,
     /** Cells and chunks covered by nearer layers, so neither drawn nor baked. */
     pub covered: usize,
+    /** The grid levels the frame's slices read, whether they have tiles yet or not. */
+    pub levels: [bool; GRID_LEVELS],
+    /** Tiles that cells in view read and the world has not made, by grid level, most wanted first. */
+    pub tiles: Vec<(usize, TileId)>,
 }
 
 #[derive(Default)]
@@ -75,8 +80,8 @@ struct Cell {
 }
 
 impl Cell {
-    fn find(&self, eye: [i32; 3], fill: bool, grid: u32) -> Option<&Arc<Chunk>> {
-        self.chunks.iter().find(|c| c.eye == eye && c.fill == fill && c.grid == grid)
+    fn find(&self, eye: [i32; 3], fill: bool) -> Option<&Arc<Chunk>> {
+        self.chunks.iter().find(|c| c.eye == eye && c.fill == fill)
     }
 
     fn latest(&self) -> Option<&Arc<Chunk>> {
@@ -90,7 +95,9 @@ struct CachedSlice {
     depth: i64,
     size: i64,
     cells: HashMap<(i32, i32), Cell>,
-    /** By cell: the least and greatest b of the voxels its chunks may draw, or None if none (see cell_margin). */
+    /** By cell: the tiles it reads (see cell_tiles). */
+    tiles: HashMap<(i32, i32), Option<[i32; 4]>>,
+    /** By cell, once it has its tiles: the least and greatest b of the voxels its chunks may draw, or None if none (see cell_margin). */
     extents: HashMap<(i32, i32), Option<(f64, f64)>>,
     used: u64,
 }
@@ -103,9 +110,9 @@ fn slice_key(face: usize, s: &Slice) -> SliceKey {
 
 pub struct Renderer {
     faces: Vec<Face>,
-    /** Per grid level, where its voxels are, and how many grids replaced the first; None while it has no grid. */
-    indices: Vec<Option<LayerIndex>>,
-    versions: Vec<u32>,
+    /** Per grid level, its tiles made so far, and the y of its sites, [low, high). */
+    levels: Vec<Arc<Level>>,
+    heights: [(i64, i64); GRID_LEVELS],
     slices: HashMap<SliceKey, CachedSlice>,
     coverage: Coverage,
     bakery: Bakery,
@@ -140,11 +147,12 @@ fn closest_to_zero(lo: f64, hi: f64) -> f64 {
 }
 
 impl Renderer {
-    pub fn new(faces: Vec<Face>, bakery: Bakery, render_distance: f64) -> Renderer {
+    /** A renderer of a world whose sites of each grid level have y in [low, high) of `heights`. */
+    pub fn new(faces: Vec<Face>, bakery: Bakery, render_distance: f64, heights: [(i64, i64); GRID_LEVELS]) -> Renderer {
         Renderer {
             faces,
-            indices: (0..GRID_LEVELS).map(|_| None).collect(),
-            versions: vec![0; GRID_LEVELS],
+            levels: (0..GRID_LEVELS).map(|_| Arc::new(Level::new(HashMap::new()))).collect(),
+            heights,
             slices: HashMap::new(),
             coverage: Coverage::default(),
             bakery,
@@ -157,19 +165,10 @@ impl Renderer {
         }
     }
 
-    /**
-     * Draws a new grid of `level` from now on: chunks baked from the old one
-     * only stand in until baked again from this one.
-     */
-    pub fn set_grid(&mut self, level: usize, grid: Arc<Grid>, index: LayerIndex) {
-        self.indices[level] = Some(index);
-        self.versions[level] += 1;
-        for slice in self.slices.values_mut() {
-            if atom_level(slice.id.level) as usize == level {
-                slice.extents.clear();
-            }
-        }
-        self.bakery.set_grid(level, grid, self.versions[level]);
+    /** Draws the tiles of grid level `level` from now on: cells that lacked them can be baked. */
+    pub fn set_tiles(&mut self, level: usize, tiles: Arc<Level>) {
+        self.bakery.set_tiles(level, tiles.grids.clone());
+        self.levels[level] = tiles;
     }
 
     /** Waits until the bakery delivers a chunk. */
@@ -187,6 +186,7 @@ impl Renderer {
         let mut frame = Frame { layers: Vec::new(), farthest: self.render_distance };
         let mut stats = Stats::default();
         let mut missing: Vec<(Request, f64, bool)> = Vec::new();
+        let mut tiles: Vec<(usize, TileId, f64)> = Vec::new();
         for f in 0..self.faces.len() {
             let face = &self.faces[f];
             let Some(tangents) = view.face_tangents(face) else { continue };
@@ -208,13 +208,16 @@ impl Renderer {
                 let slice = self.slices.entry(key).or_insert_with(|| {
                     let (first, last) = site_layers(id.level);
                     let depth = id.layer as i64 * (1i64 << id.level) + first as i64;
-                    CachedSlice { id, depth, size: (last - first + 1) as i64, cells: HashMap::new(), extents: HashMap::new(), used: 0 }
+                    let size = (last - first + 1) as i64;
+                    CachedSlice { id, depth, size, cells: HashMap::new(), tiles: HashMap::new(), extents: HashMap::new(), used: 0 }
                 });
                 slice.used = self.renders;
                 let level = atom_level(id.level) as usize;
-                let grid = (self.indices[level].as_ref(), self.versions[level]);
+                stats.levels[level] = true;
+                let source = Source { level, tiles: &self.levels[level], heights: self.heights[level] };
                 let coverage = self.skip_covered.then_some(&mut self.coverage);
-                let layer = draw_slice(&of, slice, grid, coverage, view, self.fill, &mut missing, &mut stats);
+                let wants = Wants { chunks: &mut missing, tiles: &mut tiles };
+                let layer = draw_slice(&of, slice, &source, coverage, view, self.fill, wants, &mut stats);
                 frame.farthest = frame.farthest.max(layer.distance);
                 if self.skip_covered {
                     for p in &layer.placements {
@@ -239,6 +242,9 @@ impl Renderer {
         // Cells that show nothing first, then the rest, near to far within each.
         missing.sort_by(|a, b| a.2.cmp(&b.2).then(a.1.total_cmp(&b.1)));
         stats.wanted = missing.iter().map(|m| m.0).collect();
+        tiles.sort_by(|a, b| a.2.total_cmp(&b.2));
+        let mut listed = std::collections::HashSet::new();
+        stats.tiles = tiles.into_iter().filter(|t| listed.insert((t.0, t.1))).map(|t| (t.0, t.1)).collect();
         self.bakery.want(&stats.wanted);
         self.evict();
         (frame, stats)
@@ -249,11 +255,11 @@ impl Renderer {
         for (r, baked) in self.bakery.take() {
             let Some(slice) = self.slices.get_mut(&slice_key(r.face, &r.slice)) else { continue };
             let cell = slice.cells.entry((r.i, r.j)).or_default();
-            if cell.find(r.eye, r.fill, r.grid).is_some() {
+            if cell.find(r.eye, r.fill).is_some() {
                 continue;
             }
             self.next_id += 1;
-            cell.chunks.push(Arc::new(Chunk { id: self.next_id, i: r.i, j: r.j, eye: r.eye, fill: r.fill, grid: r.grid, baked }));
+            cell.chunks.push(Arc::new(Chunk { id: self.next_id, i: r.i, j: r.j, eye: r.eye, fill: r.fill, baked }));
             if cell.chunks.len() > CHUNKS_PER_CELL {
                 cell.chunks.remove(0);
             }
@@ -277,24 +283,62 @@ fn known(coverage: &mut Coverage, chunk: &Chunk) -> u32 {
     chunk.id
 }
 
-/** The least and greatest b of the voxels chunk (i, j) of a slice may draw (cellExtent in renderer.ts), found on first use. */
-fn cell_extent(of: &FaceView, slice: &mut CachedSlice, index: &LayerIndex, i: i32, j: i32) -> Option<(f64, f64)> {
+/** Where a slice's cells read from: its grid level, the tiles made of it, and the y of its sites, [low, high). */
+struct Source<'a> {
+    level: usize,
+    tiles: &'a Level,
+    heights: (i64, i64),
+}
+
+/** What a frame wants: chunks to bake, their distance and whether something stands in; tiles to make, by grid level, and their distance. */
+struct Wants<'a> {
+    chunks: &'a mut Vec<(Request, f64, bool)>,
+    tiles: &'a mut Vec<(usize, TileId, f64)>,
+}
+
+/**
+ * The tiles chunk (i, j) of a slice reads (chunk_reads), [i0, k0, i1, k1]
+ * (those its box of sites meets), or None if it reads none, the box being
+ * all above or below the world. Found on first use.
+ */
+fn cell_tiles(of: &FaceView, slice: &mut CachedSlice, heights: (i64, i64), i: i32, j: i32) -> Option<[i32; 4]> {
+    *slice.tiles.entry((i, j)).or_insert_with(|| {
+        let (_, min, max) = chunk_reads(&slice.id, i, j);
+        let [r, u, f] = *of.lattice;
+        // x, y, z at (a, b, c) as bake's Reader has it, over the box's corners.
+        let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+        for corner in 0..8 {
+            let [a, b, c] = std::array::from_fn(|d| if corner >> d & 1 == 0 { min[d] } else { max[d] } as f64);
+            for d in 0..3 {
+                let v = (a * r[d] as f64 + c * f[d] as f64) / 2.0 + b * u[d] as f64;
+                lo[d] = lo[d].min(v);
+                hi[d] = hi[d].max(v);
+            }
+        }
+        if hi[1] < heights.0 as f64 || lo[1] >= heights.1 as f64 {
+            return None;
+        }
+        let tile = |v: f64| (v / TILE as f64).floor() as i32;
+        Some([tile(lo[0]), tile(lo[2]), tile(hi[0]), tile(hi[2])])
+    })
+}
+
+/** The least and greatest b of the voxels chunk (i, j) of a slice may draw (cellExtent in renderer.ts), once it has the tiles it reads. */
+fn cell_extent(of: &FaceView, slice: &mut CachedSlice, level: &Level, [i0, k0, i1, k1]: [i32; 4], i: i32, j: i32) -> Option<(f64, f64)> {
     *slice.extents.entry((i, j)).or_insert_with(|| {
-        let level = slice.id.level;
-        let rect = chunk_cell(level, i, j);
+        let rect = chunk_cell(slice.id.level, i, j);
         // The cell's sites, in lattice units.
         let (left, right) = ((rect.x / LAYER).round() as i64, ((rect.x + rect.width) / LAYER).round() as i64);
-        let (columns, rows) = cell_margin(level);
+        let (columns, rows) = cell_margin(slice.id.level);
         // In the units of the grid the slice reads, N times larger.
-        let n = 1i64 << atom_level(level);
+        let n = 1i64 << atom_level(slice.id.level);
         let ceil = |v: i64| -(-v).div_euclid(n);
-        let (lo, hi) = index.range(
-            of.lattice,
-            slice.depth.div_euclid(n),
-            ceil(slice.depth + slice.size),
-            (left - columns as i64).div_euclid(n),
-            ceil(right + columns as i64),
-        )?;
+        let (c0, c1) = (slice.depth.div_euclid(n), ceil(slice.depth + slice.size));
+        let (a0, a1) = ((left - columns as i64).div_euclid(n), ceil(right + columns as i64));
+        let (lo, hi) = (k0..=k1)
+            .flat_map(|k| (i0..=i1).map(move |i| (i, k)))
+            .filter_map(|t| level.tiles.get(&t)?.index.range(of.lattice, c0, c1, a0, a1))
+            .reduce(|a, b| (a.0.min(b.0), a.1.max(b.1)))?;
         let lo = ((lo * n) as f64).max(rect.y - rows as f64);
         let hi = ((hi * n) as f64).min(rect.y + rect.height + rows as f64);
         (lo <= hi).then_some((lo, hi))
@@ -303,18 +347,18 @@ fn cell_extent(of: &FaceView, slice: &mut CachedSlice, index: &LayerIndex, i: i3
 
 /**
  * The layer a slice draws, given what nearer layers cover (drawSlice in
- * renderer.ts): chunks it lacks are listed in `missing`, the cell's latest
- * bake standing in.
+ * renderer.ts): chunks it lacks are wanted, the cell's latest bake standing
+ * in, and so are the tiles of cells in view that lack them.
  */
 #[allow(clippy::too_many_arguments)]
 fn draw_slice(
     of: &FaceView,
     slice: &mut CachedSlice,
-    (index, grid): (Option<&LayerIndex>, u32),
+    source: &Source,
     mut coverage: Option<&mut Coverage>,
     view: &View,
     fill: bool,
-    missing: &mut Vec<(Request, f64, bool)>,
+    wants: Wants,
     stats: &mut Stats,
 ) -> Layer {
     let id = slice.id;
@@ -323,8 +367,6 @@ fn draw_slice(
     // Slices start at least NEAR_DEPTH ahead of the camera, so this is > 0.
     let distance = slice_centre(&id) - camera[2];
     let mut layer = Layer { face: of.face, distance, placements: Vec::new() };
-    // No grid of the slice's level yet: nothing to draw.
-    let Some(index) = index else { return layer };
     let [min_x, max_x, min_y, max_y] = of.tangents;
     let (left, right) = (camera[0] + min_x * distance, camera[0] + max_x * distance);
     let (bottom, top) = (camera[1] + min_y * distance, camera[1] + max_y * distance);
@@ -332,11 +374,18 @@ fn draw_slice(
     let shown = |b: Option<ScreenBox>| b.filter(|b| view.on_screen(b));
     for (i, j) in chunk_cells(id.level, left, right, bottom, top) {
         let rect = chunk_cell(id.level, i, j);
-        // Nothing to draw: not baked at all. Otherwise, what it draws lies within reach of its voxels.
-        let Some(extent) = cell_extent(of, slice, index, i, j) else { continue };
+        let Some(tiles) = cell_tiles(of, slice, source.heights, i, j) else { continue };
+        let [i0, k0, i1, k1] = tiles;
+        let complete = source.tiles.grids.has_all(tiles);
+        // Once it has its tiles: nothing to draw if not baked at all; otherwise, what it draws lies within reach of its voxels.
+        let (y0, y1) = if complete {
+            let Some(extent) = cell_extent(of, slice, source.tiles, tiles, i, j) else { continue };
+            (rect.y.max(extent.0 - reach), (rect.y + rect.height).min(extent.1 + reach))
+        } else {
+            (rect.y, rect.y + rect.height)
+        };
         let (x0, x1) = (rect.x - camera[0], rect.x + rect.width - camera[0]);
-        let y0 = rect.y.max(extent.0 - reach) - camera[1];
-        let y1 = (rect.y + rect.height).min(extent.1 + reach) - camera[1];
+        let (y0, y1) = (y0 - camera[1], y1 - camera[1]);
         if y0 >= y1 || !in_face(closest_to_zero(x0, x1), closest_to_zero(y0, y1), distance) {
             continue;
         }
@@ -345,9 +394,23 @@ fn draw_slice(
             stats.covered += 1;
             continue;
         }
+        if !complete {
+            for k in k0..=k1 {
+                for i in i0..=i1 {
+                    if !source.tiles.grids.has(i, k) {
+                        wants.tiles.push((source.level, (i, k), distance));
+                    }
+                }
+            }
+        }
         let cell = slice.cells.get(&(i, j));
-        let chunk = match cell.and_then(|c| c.find(eye, fill, grid)) {
+        let chunk = match cell.and_then(|c| c.find(eye, fill)) {
             Some(chunk) => chunk.clone(),
+            // Its tiles dropped since, the camera gone far and back: what they baked stands in.
+            None if !complete => match cell.and_then(Cell::latest) {
+                Some(latest) => latest.clone(),
+                None => continue,
+            },
             None => {
                 let latest = cell.and_then(Cell::latest).cloned();
                 // Not wanted if what stands in is hidden anyway.
@@ -360,7 +423,7 @@ fn draw_slice(
                         continue;
                     }
                 }
-                missing.push((Request { face: of.face, slice: id, i, j, eye, fill, grid }, distance, latest.is_some()));
+                wants.chunks.push((Request { face: of.face, slice: id, i, j, eye, fill, tiles }, distance, latest.is_some()));
                 let Some(latest) = latest else { continue };
                 latest
             }

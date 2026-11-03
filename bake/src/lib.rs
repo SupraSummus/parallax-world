@@ -2,7 +2,7 @@
 //! bake workers: the voxels of a chunk cell that can show, as splats
 //! (hexagons of one colour) projected from an eye onto its slice's centre
 //! plane, and a mask of what they cover.
-//! A world is a grid per level of detail;
+//! A world is a grid per level of detail, or tiles of grids;
 //! each slice reads the one its atoms are the voxels of (in_grid).
 //! chunk-baker.ts drives it through the
 //! exports at the bottom. See docs/architecture.md, section 3.
@@ -25,13 +25,13 @@ use cells::Cells;
 use fill::{fill_mask, solid_blocks};
 use slicing::{LAYER, atom_level, chunk_cell, spacing, thickness};
 use splats::{Splats, chunk_splats};
-use surface::{Voxel, cell_surface};
+use surface::{Voxel, cell_reads, cell_surface};
 use world::{FACE_KINDS, GEOMETRY, LATTICE, Reader};
 
 // For native frontends, which link the baker instead of loading its WebAssembly.
 pub use coverage::Coverage;
 pub use surface::Slice;
-pub use world::{Geometry, Grid, Lattice, VIEW_FACES};
+pub use world::{Geometry, Grid, Lattice, Tiles, VIEW_FACES};
 
 /**
  * Mask pixels per unit of its grid for a slice of `level` as the grid
@@ -58,6 +58,17 @@ fn in_grid(slice: &Slice, eye: [i32; 3]) -> (usize, Slice, [i32; 3]) {
     let l = atom_level(slice.level);
     let n = spacing(l);
     (l as usize, Slice { level: slice.level - l, layer: slice.layer, cutoff: slice.cutoff / n as f64 }, eye.map(|v| v / n))
+}
+
+/**
+ * The grid chunk (i, j) of a slice reads, and the sites of it it reads, a
+ * box of (a, b, c) in the face's lattice coordinates, in that grid's units,
+ * inclusive: a chunk is the same whatever else the grid holds.
+ */
+pub fn chunk_reads(slice: &Slice, i: i32, j: i32) -> (usize, [i32; 3], [i32; 3]) {
+    let (level, slice, _) = in_grid(slice, [0; 3]);
+    let (min, max) = cell_reads(&slice, i, j);
+    (level, min, max)
 }
 
 /** Cell surfaces kept for baking the same cell from other eyes. */
@@ -87,7 +98,7 @@ pub struct Baker {
      * By level: grid ℓ has the sites of 2^ℓ·FCC, in its own units, once set. They share materials.
      * Shared: native threads bake from one copy.
      */
-    grids: Vec<Arc<Grid>>,
+    grids: Vec<Arc<Tiles>>,
     /** The level set last. */
     last: usize,
     geometry: Geometry,
@@ -129,32 +140,34 @@ impl Baker {
         }
     }
 
-    /** Sets the grid of `level`; levels without one so far read as empty. */
+    /** Sets the grid of `level`, replacing what it had; levels without one so far read as empty. */
     pub fn set_grid(&mut self, level: usize, grid: Grid) -> &mut Grid {
         self.reach(level);
         self.surfaces.retain(|key, _| key.1 != level);
         self.last = level;
-        self.grids[level] = Arc::new(grid);
-        Arc::get_mut(&mut self.grids[level]).expect("just set")
+        self.grids[level] = Arc::new(Tiles::one(grid));
+        Arc::get_mut(&mut self.grids[level]).and_then(Tiles::only_mut).expect("just set")
     }
 
-    /** Sets the grid of `level` to one other bakers may share. */
-    pub fn share_grid(&mut self, level: usize, grid: Arc<Grid>) {
+    /**
+     * Sets the tiles of `level` to ones other bakers may share. Tiles may
+     * come and go but not change, so the surfaces kept stay right as long
+     * as every chunk baked has all the tiles it reads (chunk_reads).
+     */
+    pub fn share_tiles(&mut self, level: usize, tiles: Arc<Tiles>) {
         self.reach(level);
-        self.surfaces.retain(|key, _| key.1 != level);
-        self.last = level;
-        self.grids[level] = grid;
+        self.grids[level] = tiles;
     }
 
     /** Empty grids up to `level`, if it has none. */
     fn reach(&mut self, level: usize) {
         while self.grids.len() <= level {
-            self.grids.push(Arc::new(Grid::new([0; 3], [0; 3], 0)));
+            self.grids.push(Arc::new(Tiles::new(0, [])));
         }
     }
 
     fn last_grid(&mut self) -> Option<&mut Grid> {
-        self.grids.get_mut(self.last).and_then(Arc::get_mut)
+        self.grids.get_mut(self.last).and_then(Arc::get_mut).and_then(Tiles::only_mut)
     }
 
     /**

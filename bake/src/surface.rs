@@ -52,6 +52,22 @@ fn cell_margin(level: i32) -> (f64, f64) {
     ((1.0 + REACH) * half + 1.5, (LAYER + REACH) * half + 1.5)
 }
 
+/** The voxels cell_surface looks at for chunk cell (i, j) of a slice, as a box of (a, b, c), inclusive. */
+fn cell_box(slice: &Slice, i: i32, j: i32) -> ([i32; 3], [i32; 3]) {
+    let cell = chunk_cell(slice.level, i, j);
+    let (mx, my) = cell_margin(slice.level);
+    let (ma, mb) = ((mx / LAYER).ceil() as i32, my.ceil() as i32);
+    let start = slice.layer * (1 << slice.level);
+    let (first, last) = site_layers(slice.level);
+    ([cell.left - ma, cell.bottom - mb, start + first], [cell.left + cell.columns + ma - 1, cell.bottom + cell.rows + mb - 1, start + last])
+}
+
+/** The sites cell_surface reads for chunk cell (i, j) of a slice, its voxels' neighbours included, as a box of (a, b, c), inclusive. */
+pub fn cell_reads(slice: &Slice, i: i32, j: i32) -> ([i32; 3], [i32; 3]) {
+    let (from, to) = cell_box(slice, i, j);
+    ([from[0] - 2, from[1] - 1, from[2] - 2], [to[0] + 2, to[1] + 1, to[2] + 2])
+}
+
 /** Where a site is relative to a slice: in a nearer one, in it, in a farther one. */
 const NEARER: i8 = -1;
 const IN: i8 = 0;
@@ -66,20 +82,14 @@ const FARTHER: i8 = 1;
  * `next` are the cells of 2·FCC (for the cutoff).
  */
 pub fn cell_surface(reader: &Reader, geometry: &Geometry, next: &Cells, slice: &Slice, i: i32, j: i32) -> Vec<Voxel> {
-    let cell = chunk_cell(slice.level, i, j);
-    let (mx, my) = cell_margin(slice.level);
-    let (ma, mb) = ((mx / LAYER).ceil() as i32, my.ceil() as i32);
+    let (from, to) = cell_box(slice, i, j);
     let (min, max) = (reader.min, reader.max);
-    let a0 = (cell.left - ma).max(min[0]);
-    let a1 = (cell.left + cell.columns + ma).min(max[0] + 1);
-    let b0 = (cell.bottom - mb).max(min[1]);
-    let b1 = (cell.bottom + cell.rows + mb).min(max[1] + 1);
+    let (a0, a1) = (from[0].max(min[0]), (to[0] + 1).min(max[0] + 1));
+    let (b0, b1) = (from[1].max(min[1]), (to[1] + 1).min(max[1] + 1));
+    let (bottom, top) = (from[2].max(min[2]), to[2].min(max[2]));
     // Its sites are in layers [start, end).
     let start = slice.layer * (1 << slice.level);
     let end = start + (1 << slice.level);
-    let (first, last) = site_layers(slice.level);
-    let top = (start + last).min(max[2]);
-    let bottom = (start + first).max(min[2]);
     let mut voxels = Vec::new();
     if a0 >= a1 || b0 >= b1 || top < bottom {
         return voxels;

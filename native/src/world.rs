@@ -1,15 +1,19 @@
-//! A generated world's grids (World in world.ts): a grid per level of
-//! detail, made of tiles fixed in the world, around the camera. When the
-//! camera goes far enough from a grid's middle, a grid centred on it is
-//! started; its new tiles are generated on the world's thread pool (a forest
-//! per thread) and composed with the old grid's off the main thread, with its
-//! LayerIndex, and it replaces the old grid once whole.
+//! A generated world's tiles (World in world.ts): each level's voxels are
+//! tiles fixed in the world, TILE sites of the level wide along x and z,
+//! generated alone on the world's threads (a forest per thread) and indexed
+//! there. Which tiles, and in what order, is up to the renderer: every update
+//! hands over the tiles it misses for the cells in view, most wanted first,
+//! replacing the previous list; then the rest within REACH of the camera of
+//! each level it reads, so that turning finds them made. Tiles far from the
+//! camera are dropped. A tile never changes, so a chunk baked once all the
+//! tiles it reads are in stays right whatever comes after (bake's Tiles).
 
 use std::cell::RefCell;
-use std::sync::Arc;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::{Arc, Condvar, Mutex};
 
-use bake::Grid;
+use bake::{Grid, Tiles};
 use worldgen::forest::{REACH, forest, heights};
 use worldgen::generator::{Generator, generate};
 use worldgen::grid::{Box3, compose};
@@ -18,47 +22,69 @@ use crate::layer_index::LayerIndex;
 use crate::slicing::GRID_LEVELS;
 use crate::view::Vec3;
 
-/** Tiles are TILE sites of their level wide along x and z, on a tiling fixed in the world. */
-const TILE: i64 = 128;
+/** Tiles are 2^TILE_SHIFT sites of their level wide. */
+pub const TILE_SHIFT: u32 = 7;
+pub const TILE: i64 = 1 << TILE_SHIFT;
 
-/** A grid moves when the camera is more than this far from the middle of its centre tile (in the level's sites): past the tile's edge, so it does not move back and forth there. */
-const RECENTRE: i64 = TILE * 3 / 4;
+/** Tiles are made no farther from the camera than this (in the level's sites), and dropped once a tile farther. */
+const KEEP: f64 = REACH + 2.0 * TILE as f64;
 
 /** Tile (i, k) holds x in [i · TILE, (i + 1) · TILE), z likewise. */
-type Tile = (i64, i64);
+pub type TileId = (i32, i32);
 
 type Lattices = Vec<[[i32; 3]; 3]>;
 
-/** A level's grid, made whole: what the renderer and the bakers read. */
-pub struct NewGrid {
-    pub level: usize,
+/** A generated tile: its voxels, and where they are along each face's layers. */
+pub struct Tile {
     pub grid: Arc<Grid>,
     pub index: LayerIndex,
 }
 
-enum Done {
-    Part { level: usize, tile: Tile, grid: Grid },
-    Grid { centre: Tile, grid: NewGrid },
+/** A level's tiles made so far, and their voxels as the bakers read them. */
+pub struct Level {
+    pub tiles: HashMap<TileId, Arc<Tile>>,
+    pub grids: Arc<Tiles>,
 }
 
-/** A grid being made: its centre tile, the tiles it needs and those generated, until it is composed. */
-struct Pending {
-    centre: Tile,
-    tiles: Vec<Tile>,
-    received: Vec<Grid>,
+impl Level {
+    pub fn new(tiles: HashMap<TileId, Arc<Tile>>) -> Level {
+        let grids = Arc::new(Tiles::new(TILE_SHIFT, tiles.iter().map(|(&id, t)| (id, t.grid.clone()))));
+        Level { tiles, grids }
+    }
+
+    /** A whole grid of `level` cut into tiles, those it has voxels in. */
+    pub fn cut(level: usize, grid: &Grid, lattices: &[[[i32; 3]; 3]]) -> Level {
+        let tile = |v: i32| (v as i64).div_euclid(TILE) as i32;
+        let (from, to) = ([grid.min[0], grid.min[2]].map(tile), [grid.min[0] + grid.n[0] - 1, grid.min[2] + grid.n[2] - 1].map(tile));
+        let mut tiles = HashMap::new();
+        for k in from[1]..=to[1] {
+            for i in from[0]..=to[0] {
+                let part = compose(&tile_box(level, (i, k)), &[grid]);
+                if part.bricks.iter().any(|&b| b >= 0) {
+                    let index = LayerIndex::new(&part, lattices);
+                    tiles.insert((i, k), Arc::new(Tile { grid: Arc::new(part), index }));
+                }
+            }
+        }
+        Level::new(tiles)
+    }
 }
+
+/** The tiles to make, most wanted first, and those being made. */
+#[derive(Default)]
+struct Queue {
+    wanted: VecDeque<(usize, TileId)>,
+    in_flight: HashSet<(usize, TileId)>,
+}
+
+type Made = (usize, TileId, Tile);
 
 pub struct World {
-    seed: u64,
-    lattices: Lattices,
-    pool: Arc<rayon::ThreadPool>,
-    grids: Vec<Option<Arc<Grid>>>,
-    centres: Vec<Option<Tile>>,
-    pending: Vec<Option<Pending>>,
-    send: Sender<Done>,
-    done: Receiver<Done>,
+    tiles: Vec<HashMap<TileId, Arc<Tile>>>,
+    queue: Arc<(Mutex<Queue>, Condvar)>,
+    done: Receiver<Made>,
     /** Received by wait(), not taken yet. */
-    early: Vec<Done>,
+    early: Vec<Made>,
 }
 
 thread_local! {
@@ -75,122 +101,125 @@ fn generate_tile(seed: u64, level: usize, b: &Box3) -> Grid {
     })
 }
 
-/** Tiles either way of a grid's centre tile: enough to reach REACH sites around the camera wherever it is within RECENTRE. */
-const RADIUS: i64 = (2 * (REACH as i64 + RECENTRE) - TILE + 2 * TILE - 1) / (2 * TILE);
-
-fn holds(centre: Option<Tile>, (i, k): Tile) -> bool {
-    centre.is_some_and(|(ci, ck)| (i - ci).abs() <= RADIUS && (k - ck).abs() <= RADIUS)
+/** The box of tile `id` of `level`. */
+fn tile_box(level: usize, (i, k): TileId) -> Box3 {
+    let (min_y, max_y) = heights(level as u32);
+    let (i, k) = (i as i64, k as i64);
+    Box3 { min: [i * TILE, min_y, k * TILE], max: [(i + 1) * TILE, max_y, (k + 1) * TILE] }
 }
 
-/** The box of tiles from `from` to `to`, inclusive, at `level`. */
-fn tiles_box(level: usize, from: Tile, to: Tile) -> Box3 {
-    let (min_y, max_y) = heights(level as u32);
-    Box3 { min: [from.0 * TILE, min_y, from.1 * TILE], max: [(to.0 + 1) * TILE, max_y, (to.1 + 1) * TILE] }
+/** How far tile `id` of `level` is from the camera (lattice units) along x and z, in the level's sites. */
+fn distance(level: usize, camera: Vec3, (i, k): TileId) -> f64 {
+    let n = (1u64 << level) as f64;
+    let off = |v: f64, t: i32| {
+        let (lo, hi) = ((t as i64 * TILE) as f64, ((t as i64 + 1) * TILE) as f64);
+        (lo - v / n).max(v / n - hi).max(0.0)
+    };
+    off(camera[0], i).hypot(off(camera[2], k))
+}
+
+fn work(seed: u64, lattices: &Lattices, queue: &(Mutex<Queue>, Condvar), send: &Sender<Made>) {
+    loop {
+        let (level, id) = {
+            let mut q = queue.0.lock().expect("queue");
+            loop {
+                if let Some(job) = q.wanted.pop_front() {
+                    q.in_flight.insert(job);
+                    break job;
+                }
+                q = queue.1.wait(q).expect("queue");
+            }
+        };
+        let grid = generate_tile(seed, level, &tile_box(level, id));
+        let index = LayerIndex::new(&grid, lattices);
+        if send.send((level, id, Tile { grid: Arc::new(grid), index })).is_err() {
+            return;
+        }
+    }
 }
 
 impl World {
     /** A world generated and indexed on `threads` threads. */
     pub fn new(seed: u64, lattices: Lattices, threads: usize) -> World {
         let (send, done) = channel();
-        let pool = rayon::ThreadPoolBuilder::new().num_threads(threads).build().expect("a thread pool");
-        World {
-            seed,
-            lattices,
-            pool: Arc::new(pool),
-            grids: vec![None; GRID_LEVELS],
-            centres: vec![None; GRID_LEVELS],
-            pending: (0..GRID_LEVELS).map(|_| None).collect(),
-            send,
-            done,
-            early: Vec::new(),
+        let queue: Arc<(Mutex<Queue>, Condvar)> = Arc::default();
+        for _ in 0..threads {
+            let (lattices, queue, send) = (lattices.clone(), queue.clone(), send.clone());
+            std::thread::spawn(move || work(seed, &lattices, &queue, &send));
         }
+        World { tiles: (0..GRID_LEVELS).map(|_| HashMap::new()).collect(), queue, done, early: Vec::new() }
     }
 
-    /** Whether a grid is being made. */
+    /** Whether tiles are being made or wait to be. */
     pub fn busy(&self) -> bool {
-        self.pending.iter().any(Option::is_some)
+        let q = self.queue.0.lock().expect("queue");
+        !q.wanted.is_empty() || !q.in_flight.is_empty()
     }
 
-    /** Waits until a tile or a grid is made. */
+    /** Waits until a tile is made. */
     pub fn wait(&mut self) {
         self.early.extend(self.done.recv());
     }
 
-    /** Starts the grids the camera (lattice units) needs, finest level first, and returns those made whole since the last call. */
-    pub fn update(&mut self, camera: Vec3) -> Vec<NewGrid> {
-        for level in 0..GRID_LEVELS {
-            self.start(level, camera);
-        }
-        let mut made = Vec::new();
-        let done: Vec<Done> = std::mem::take(&mut self.early).into_iter().chain(self.done.try_iter()).collect();
-        for done in done {
-            match done {
-                Done::Part { level, tile, grid } => {
-                    let Some(p) = &mut self.pending[level] else { continue };
-                    if p.tiles.contains(&tile) {
-                        p.received.push(grid);
-                        if p.received.len() == p.tiles.len() {
-                            self.compose(level);
-                        }
-                    }
-                }
-                Done::Grid { centre, grid } => {
-                    self.grids[grid.level] = Some(grid.grid.clone());
-                    self.centres[grid.level] = Some(centre);
-                    self.pending[grid.level] = None;
-                    made.push(grid);
-                }
+    /**
+     * Takes the tiles made, drops those far from the camera (lattice units),
+     * and has the `wanted` ones made, most wanted first, then the rest
+     * within REACH of each of the `levels` read. Returns the levels whose
+     * tiles changed.
+     */
+    pub fn update(&mut self, camera: Vec3, levels: &[bool; GRID_LEVELS], wanted: &[(usize, TileId)]) -> Vec<(usize, Arc<Level>)> {
+        let mut changed = [false; GRID_LEVELS];
+        let made: Vec<Made> = std::mem::take(&mut self.early).into_iter().chain(self.done.try_iter()).collect();
+        {
+            let mut q = self.queue.0.lock().expect("queue");
+            for (level, id, _) in &made {
+                q.in_flight.remove(&(*level, *id));
             }
         }
-        made
-    }
+        for (level, id, tile) in made {
+            self.tiles[level].insert(id, Arc::new(tile));
+            changed[level] = true;
+        }
+        for (level, tiles) in self.tiles.iter_mut().enumerate() {
+            let before = tiles.len();
+            tiles.retain(|&id, _| distance(level, camera, id) <= KEEP + TILE as f64);
+            changed[level] |= tiles.len() < before;
+        }
 
-    /** Starts a grid of `level` centred on the camera's tile, unless one is being made or the grid is near enough. */
-    fn start(&mut self, level: usize, camera: Vec3) {
-        if self.pending[level].is_some() {
-            return;
+        let mut list = VecDeque::new();
+        let mut listed = HashSet::new();
+        let mut add = |tiles: &HashMap<TileId, Arc<Tile>>, level: usize, id: TileId| {
+            if !tiles.contains_key(&id) && distance(level, camera, id) <= KEEP && listed.insert((level, id)) {
+                list.push_back((level, id));
+            }
+        };
+        for &(level, id) in wanted {
+            add(&self.tiles[level], level, id);
         }
-        let n = (1u64 << level) as f64;
-        let off = |v: f64, c: i64| (v / n - (c as f64 + 0.5) * TILE as f64).abs() > RECENTRE as f64;
-        let old = self.centres[level];
-        if old.is_some_and(|(i, k)| !off(camera[0], i) && !off(camera[2], k)) {
-            return;
-        }
-        let centre = ((camera[0] / n / TILE as f64).floor() as i64, (camera[2] / n / TILE as f64).floor() as i64);
-        let mut tiles = Vec::new();
-        for k in centre.1 - RADIUS..=centre.1 + RADIUS {
-            for i in centre.0 - RADIUS..=centre.0 + RADIUS {
-                if !holds(old, (i, k)) {
-                    tiles.push((i, k));
-                }
+        for level in (0..GRID_LEVELS).filter(|&l| levels[l]) {
+            let n = (1u64 << level) as f64;
+            let tile = |v: f64| (v / n / TILE as f64).floor() as i32;
+            let r = (REACH / TILE as f64).ceil() as i32;
+            let (ci, ck) = (tile(camera[0]), tile(camera[2]));
+            let mut around: Vec<(f64, TileId)> = (ck - r..=ck + r)
+                .flat_map(|k| (ci - r..=ci + r).map(move |i| (i, k)))
+                .map(|id| (distance(level, camera, id), id))
+                .filter(|(d, _)| *d <= REACH)
+                .collect();
+            around.sort_by(|a, b| a.0.total_cmp(&b.0));
+            for (_, id) in around {
+                add(&self.tiles[level], level, id);
             }
         }
-        for &tile in &tiles {
-            let (seed, send) = (self.seed, self.send.clone());
-            self.pool.spawn(move || {
-                let grid = generate_tile(seed, level, &tiles_box(level, tile, tile));
-                // Gone if the world is.
-                let _ = send.send(Done::Part { level, tile, grid });
-            });
+        {
+            let mut q = self.queue.0.lock().expect("queue");
+            list.retain(|job| !q.in_flight.contains(job));
+            if !list.is_empty() {
+                self.queue.1.notify_all();
+            }
+            q.wanted = list;
         }
-        let empty = tiles.is_empty();
-        self.pending[level] = Some(Pending { centre, tiles, received: Vec::new() });
-        if empty {
-            self.compose(level);
-        }
-    }
 
-    /** Composes the grid being made of `level` from its tiles and the old grid's, with its LayerIndex, off the main thread. */
-    fn compose(&mut self, level: usize) {
-        let p = self.pending[level].as_mut().expect("being made");
-        let (centre, received) = (p.centre, std::mem::take(&mut p.received));
-        let (old, lattices, send) = (self.grids[level].clone(), self.lattices.clone(), self.send.clone());
-        self.pool.spawn(move || {
-            let b = tiles_box(level, (centre.0 - RADIUS, centre.1 - RADIUS), (centre.0 + RADIUS, centre.1 + RADIUS));
-            let parts: Vec<&Grid> = old.as_deref().into_iter().chain(&received).collect();
-            let grid = compose(&b, &parts);
-            let index = LayerIndex::new(&grid, &lattices);
-            let _ = send.send(Done::Grid { centre, grid: NewGrid { level, grid: Arc::new(grid), index } });
-        });
+        (0..GRID_LEVELS).filter(|&l| changed[l]).map(|l| (l, Arc::new(Level::new(self.tiles[l].clone())))).collect()
     }
 }

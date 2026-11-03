@@ -60,7 +60,7 @@ src/viewer/
 bake/                        # Chunk baker and coverage in Rust (no dependencies), in worldgen/'s WebAssembly
 └── src/
     ├── lib.rs               # Baker: cached cell surfaces, one chunk per call; the WebAssembly exports
-    ├── world.rs             # Grid and voxel faces as handed over, read per face
+    ├── world.rs             # Grid, tiles of grids, and voxel faces as handed over, read per face
     ├── cells.rs             # cells.ts, with a table per level
     ├── slicing.rs           # The parts of slice-selection.ts baking needs
     ├── surface.rs           # A cell's voxels that can show
@@ -80,12 +80,12 @@ native/                      # Spike of a native frontend (eframe + wgpu), linki
     ├── main.rs              # The window and camera; --shot, --bench, --walk, --check-requests against a dump
     ├── dump.rs              # Reads a dump: the baker's tables, a view, its grids and the chunks it wants
     ├── tables.rs            # bake.ts: the voxel geometry and shaded palettes the bakers are given
-    ├── world.rs             # world.ts for generated worlds: worldgen's tiles around the camera, grids composed off the main thread
+    ├── world.rs             # world.ts for generated worlds: worldgen's tiles, those the renderer wants first, made and indexed on threads
     ├── slicing.rs           # slice-selection.ts: slices, chunks, eyes
     ├── view.rs              # view.ts: faces, which rays and screen boxes they draw
     ├── layer_index.rs       # LayerIndex (voxel-grid.ts): where each face's layers hold voxels
     ├── renderer.rs          # renderer.ts: chunks in view, cached, stand-ins, coverage (bake's Coverage)
-    ├── bakery.rs            # Worker threads baking chunks, a baker each sharing the grids
+    ├── bakery.rs            # Worker threads baking chunks, a baker each sharing the tiles
     ├── compositor.rs        # compositor.ts with wgpu: splats uploaded per chunk, placed relative to the camera
     ├── shot.rs              # --shot: one frame drawn offscreen on the GPU, saved as a PNG, no window
     └── compositor.wgsl

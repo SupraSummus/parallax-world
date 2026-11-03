@@ -3,18 +3,20 @@
 //! it misses, most wanted first, replacing the previous list; a cell always
 //! goes to the same worker, which keeps its surface for other eyes.
 //! A chunk is in flight from when its worker takes it until take() hands it
-//! over, and is not queued again meanwhile.
+//! over, and is not queued again meanwhile. Workers bake from the latest
+//! tiles of each level; a chunk is only asked for once it has all the tiles
+//! it reads, so no bake goes stale.
 
 use std::collections::{HashSet, VecDeque};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Condvar, Mutex};
 
-use bake::{Baker, Grid, Slice};
+use bake::{Baker, Slice, Tiles};
 
 use crate::slicing::{GRID_LEVELS, atom_level};
 
-/** A chunk to bake: cell (i, j) of a slice of a face, from `eye`, grown if `fill`, from version `grid` of its level's grid. */
+/** A chunk to bake: cell (i, j) of a slice of a face, from `eye`, grown if `fill`, reading tiles [i0, i1] × [k0, k1] of its level. */
 #[derive(Clone, Copy)]
 pub struct Request {
     pub face: usize,
@@ -23,7 +25,7 @@ pub struct Request {
     pub j: i32,
     pub eye: [i32; 3],
     pub fill: bool,
-    pub grid: u32,
+    pub tiles: [i32; 4],
 }
 
 /** A baked chunk (ChunkSplats in chunk-baker.ts): its splats as SPLAT numbers each, painted then grown, and its mask's blocks. */
@@ -43,12 +45,12 @@ pub struct Mask {
     pub blocks: Vec<u8>,
 }
 
-/** What a request bakes: face, slice, cell, eye, fill, grid version. */
-type Key = (usize, i32, i32, u64, i32, i32, [i32; 3], bool, u32);
+/** What a request bakes: face, slice, cell, eye, fill. */
+type Key = (usize, i32, i32, u64, i32, i32, [i32; 3], bool);
 
 impl Request {
     fn key(&self) -> Key {
-        (self.face, self.slice.level, self.slice.layer, self.slice.cutoff.to_bits(), self.i, self.j, self.eye, self.fill, self.grid)
+        (self.face, self.slice.level, self.slice.layer, self.slice.cutoff.to_bits(), self.i, self.j, self.eye, self.fill)
     }
 
     /** The worker of the request's cell. */
@@ -68,8 +70,8 @@ struct Work {
 
 type Queue = (Mutex<Work>, Condvar);
 
-/** By grid level: its latest grid and version, which workers take before baking from it. */
-type Grids = Arc<Mutex<Vec<Option<(u32, Arc<Grid>)>>>>;
+/** By grid level: its latest tiles, which workers take before baking from them. */
+type Grids = Arc<Mutex<Vec<Arc<Tiles>>>>;
 
 pub struct Bakery {
     queues: Vec<Arc<Queue>>,
@@ -84,7 +86,7 @@ impl Bakery {
     pub fn new(threads: usize, baker: impl Fn() -> Baker + Send + Sync + 'static) -> Bakery {
         let (send, baked) = channel();
         let baker = Arc::new(baker);
-        let grids: Grids = Arc::new(Mutex::new(vec![None; GRID_LEVELS]));
+        let grids: Grids = Arc::new(Mutex::new((0..GRID_LEVELS).map(|_| Arc::new(Tiles::new(0, []))).collect()));
         let queues = (0..threads)
             .map(|_| {
                 let queue: Arc<Queue> = Arc::default();
@@ -96,9 +98,9 @@ impl Bakery {
         Bakery { queues, grids, baked, early: Vec::new() }
     }
 
-    /** Version `version` of the grid of `level`, for chunks requested from it. */
-    pub fn set_grid(&self, level: usize, grid: Arc<Grid>, version: u32) {
-        self.grids.lock().expect("grids")[level] = Some((version, grid));
+    /** The tiles of `level` from now on. */
+    pub fn set_tiles(&self, level: usize, tiles: Arc<Tiles>) {
+        self.grids.lock().expect("grids")[level] = tiles;
     }
 
     /** The chunks to bake, most wanted first; replaces the previous list. */
@@ -132,8 +134,8 @@ impl Bakery {
 }
 
 fn work(queue: &Queue, send: &Sender<(Request, Baked)>, grids: &Grids, mut baker: Baker) {
-    // The version of each level's grid the baker has.
-    let mut versions = [0; GRID_LEVELS];
+    // The tiles of each level the baker has: none yet.
+    let mut has: Vec<Arc<Tiles>> = (0..GRID_LEVELS).map(|_| Arc::new(Tiles::new(0, []))).collect();
     loop {
         let request = {
             let mut work = queue.0.lock().expect("queue");
@@ -147,17 +149,15 @@ fn work(queue: &Queue, send: &Sender<(Request, Baked)>, grids: &Grids, mut baker
         };
         let r = &request;
         let level = atom_level(r.slice.level) as usize;
-        if versions[level] != r.grid {
-            let grid = grids.lock().expect("grids")[level].clone();
-            if let Some((version, grid)) = grid {
-                baker.share_grid(level, grid);
-                versions[level] = version;
-            }
-            // A newer grid came meanwhile: this chunk is no longer wanted.
-            if versions[level] != r.grid {
-                queue.0.lock().expect("queue").in_flight.remove(&r.key());
-                continue;
-            }
+        let latest = grids.lock().expect("grids")[level].clone();
+        if !Arc::ptr_eq(&latest, &has[level]) {
+            baker.share_tiles(level, latest.clone());
+            has[level] = latest;
+        }
+        // Dropped meanwhile, the camera gone far: not wanted any more.
+        if !has[level].has_all(r.tiles) {
+            queue.0.lock().expect("queue").in_flight.remove(&r.key());
+            continue;
         }
         let b = baker.bake(r.face, &r.slice, r.i, r.j, r.eye, r.fill);
         let baked = Baked {

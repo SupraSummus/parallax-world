@@ -1,18 +1,20 @@
-//! Spike of a native frontend: worldgen's forest generated in tiles around
-//! the camera (world.rs), the renderer picking the chunks in view
-//! (renderer.rs), worker threads baking them with the baker in bake/ from
-//! one shared copy of the grids, and wgpu drawing them in an egui window.
+//! Spike of a native frontend: worldgen's forest generated in tiles, those
+//! in view first (world.rs), the renderer picking the chunks in view
+//! (renderer.rs), worker threads baking them with the baker in bake/,
+//! sharing the tiles, and wgpu drawing them in an egui window.
 //!
 //! parallax-native [--threads N] [--seed S] [--shot out.png | --bench] [--walk D] [--spin]
 //! parallax-native [--seed S] --check-requests frame.bin
 //!
-//! --shot draws the first frame once the grids are in and all its chunks
-//! are baked, at 1280×800, offscreen, and saves it; --bench only times
-//! that, and the main thread's frames after. --walk D moves the camera D
+//! --shot draws the first frame once the world has its tiles and all its
+//! chunks are baked, at 1280×800, offscreen, and saves it; --bench only
+//! times that, and the main thread's frames after. --walk D moves the camera D
 //! units along the view after the first frame, and does the same there.
 //! --check-requests takes a view the TS renderer dumped (native/dump.test.ts):
 //! the baker's tables must be the same, and the chunks the first frame
-//! wants from its grids and camera too.
+//! wants from its grids and camera too, but for some the TS renderer wants
+//! and this one does not: its cells' extents count only the tiles a chunk
+//! reads, and those chunks draw nothing in view.
 
 mod bakery;
 mod compositor;
@@ -36,10 +38,9 @@ use eframe::egui_wgpu;
 use bakery::Bakery;
 use compositor::Compositor;
 use dump::Dump;
-use layer_index::LayerIndex;
 use renderer::Renderer;
 use view::{Vec3, focal_length, view_basis};
-use world::World;
+use world::{Level, World};
 use worldgen::forest::forest;
 use worldgen::generator::materials_of;
 
@@ -107,12 +108,21 @@ impl eframe::App for App {
             let (width, height) = (rect.width() as f64, rect.height() as f64);
             let focal = focal_length(self.fov, width, height);
             let view = view::View { yaw: self.yaw, pitch: self.pitch, width, height, focal };
-            for g in self.world.update(self.camera) {
-                self.renderer.set_grid(g.level, g.grid, g.index);
-            }
             let (frame, stats) = self.renderer.render(self.camera, &view);
-            self.stats =
-                format!("{} layers, {} chunks\n{} baking, {} covered", frame.layers.len(), stats.chunks, stats.wanted.len(), stats.covered);
+            // Drawn from the next frame on.
+            let made = self.world.update(self.camera, &stats.levels, &stats.tiles);
+            let arrived = !made.is_empty();
+            for (level, tiles) in made {
+                self.renderer.set_tiles(level, tiles);
+            }
+            self.stats = format!(
+                "{} layers, {} chunks\n{} baking, {} tiles wanted, {} covered",
+                frame.layers.len(),
+                stats.chunks,
+                stats.wanted.len(),
+                stats.tiles.len(),
+                stats.covered
+            );
             let view = compositor::View {
                 yaw: self.yaw,
                 pitch: self.pitch,
@@ -124,9 +134,11 @@ impl eframe::App for App {
             };
             let callback = compositor::Callback { frame: Arc::new(frame), view };
             ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, callback));
-            // Until all is baked, chunks keep arriving; while moving, the view changes.
-            if !stats.wanted.is_empty() || self.world.busy() || moving.iter().any(|m| *m != 0.0) || self.spin.is_some() {
+            // While moving, the view changes; until all is made and baked, tiles and chunks keep arriving, often enough for a frame now and then.
+            if moving.iter().any(|m| *m != 0.0) || self.spin.is_some() {
                 ui.ctx().request_repaint();
+            } else if arrived || !stats.wanted.is_empty() || self.world.busy() {
+                ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
             }
         });
         self.frame_ms = start.elapsed().as_secs_f64() * 1000.0;
@@ -142,21 +154,37 @@ fn renderer(seed: u64, threads: usize, render_distance: f64) -> Renderer {
         Lattice { r, u, f }
     });
     let bakery = Bakery::new(threads, move || Baker::new(Geometry::from_table(&table), lattices, palettes.clone()));
-    Renderer::new(faces, bakery, render_distance)
+    Renderer::new(faces, bakery, render_distance, std::array::from_fn(|level| worldgen::forest::heights(level as u32)))
 }
 
 fn lattices() -> Vec<[[i32; 3]; 3]> {
     view::faces().iter().map(|f| f.lattice).collect()
 }
 
-/** Renders until the world's grids are in and the frame has every chunk it wants. */
+/**
+ * Renders until the world has made every tile it would and the frame has
+ * every chunk it wants; says when it first draws any, and when it has all
+ * the tiles and chunks in view.
+ */
 fn complete(world: &mut World, renderer: &mut Renderer, camera: Vec3, view: &view::View) -> (renderer::Frame, renderer::Stats) {
+    let start = Instant::now();
+    let (mut drawn, mut in_view) = (false, false);
     loop {
-        for g in world.update(camera) {
-            renderer.set_grid(g.level, g.grid, g.index);
-        }
         let (frame, stats) = renderer.render(camera, view);
-        if !stats.wanted.is_empty() {
+        if !drawn && stats.chunks > 0 {
+            println!("first chunks drawn after {:.2} s", start.elapsed().as_secs_f64());
+            drawn = true;
+        }
+        if !in_view && stats.tiles.is_empty() && stats.wanted.is_empty() {
+            println!("the view complete after {:.2} s", start.elapsed().as_secs_f64());
+            in_view = true;
+        }
+        let made = world.update(camera, &stats.levels, &stats.tiles);
+        if !made.is_empty() {
+            for (level, tiles) in made {
+                renderer.set_tiles(level, tiles);
+            }
+        } else if !stats.wanted.is_empty() {
             renderer.wait();
         } else if world.busy() {
             world.wait();
@@ -181,7 +209,7 @@ fn check_requests(dump: &Dump, seed: u64, threads: usize) {
     let lattices = lattices();
     for (level, grid) in dump.grids.iter().enumerate() {
         if let Some(grid) = grid {
-            renderer.set_grid(level, grid.clone(), LayerIndex::new(grid, &lattices));
+            renderer.set_tiles(level, Arc::new(Level::cut(level, grid, &lattices)));
         }
     }
     println!("indexed the dump's grids in {:.2} s", start.elapsed().as_secs_f64());
@@ -233,7 +261,7 @@ fn main() -> eframe::Result {
         };
         report("first frame", start, &frame, &stats);
         if let Some(i) = args.iter().position(|a| a == "--walk") {
-            // On along the view, the grids moving with the camera.
+            // On along the view, into tiles not made yet.
             let distance: f64 = args[i + 1].parse().expect("distance");
             let start = Instant::now();
             let forward = view_basis(YAW, 0.0)[2];

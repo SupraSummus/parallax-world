@@ -85,6 +85,14 @@ A level with no grid yet is no special case: its grid has no tiles.
 The bake workers generate the tiles, finest level first;
 a level's slices show once its grid is in,
 and a moved grid replaces the old one once all its tiles are.
+The native spike (`native/src/world.rs`) has no grids, only tiles,
+made in the order the renderer wants them:
+a cell is baked once the world has every tile it reads (`chunk_reads`),
+and until then it asks for them, nearest first.
+Then come the other tiles within reach of each level the slices read,
+so that turning finds them made, and far ones are dropped.
+A tile never changes once made,
+so no chunk or cell surface goes stale as tiles come.
 The other worlds' grids are each the one before it coarsened (`coarsen`):
 a coarse voxel is full if a quarter of its cell is,
 so a floor or wall one voxel thick stays one,
@@ -341,7 +349,7 @@ and its splats are copied out of the WebAssembly memory.
 A chunk's voxels are those of its cell and a margin around it
 (`cell_surface`, cached per cell, so other eyes reuse it).
 The native spike (`native/`) links the baker instead,
-a baker per worker thread sharing one copy of the grids (`share_grid`),
+a baker per worker thread sharing one copy of the tiles (`share_tiles`),
 and has the renderer, slice selection, coverage
 and the faces and palettes it hands the baker in Rust too.
 

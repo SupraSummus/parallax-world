@@ -2,9 +2,9 @@
 //! voxel-grid.ts): per layer c and block of BLOCK columns a, the least and
 //! greatest b of its voxels, from one pass over the grid, so the renderer can
 //! tell which chunk cells are empty and how high their content reaches.
+//! A world's tiles are indexed each on its own, as it is generated.
 
 use bake::Grid;
-use rayon::prelude::*;
 
 /** Width of a column block, in lattice units along a. */
 const BLOCK: i64 = 8;
@@ -53,7 +53,7 @@ impl LayerIndex {
             }
         }
         let tables = shapes
-            .par_iter()
+            .iter()
             .map(|&[r, u, f]| {
                 let ((a_min, a_max), (c_min, c_max)) = (along(r), along(f));
                 let (layers, blocks) = (c_max - c_min + 1, (a_max - a_min) / BLOCK + 1);
