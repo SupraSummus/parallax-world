@@ -4,11 +4,14 @@ import { generatePart, World, WORLD_TYPES, type GridPart, type Vec3 } from './wo
 import { forest } from './worldgen'
 
 // A small stand-in for the forest: these tests are about generating in parts.
-vi.mock('./worldgen', async () => ({ forest: (await import('./small-forest.test-helper')).smallForest }))
+vi.mock('./worldgen', async () => {
+  const { smallForest } = await import('./small-forest.test-helper')
+  return { forest: smallForest, valley: smallForest }
+})
 
 describe('World', () => {
-  // The forest and the city are checked in their own tests; comparing them here is slow.
-  const smallWorlds = WORLD_TYPES.map(t => t.value).filter(t => t !== 'forest' && t !== 'city')
+  // The forest, the valley and the city are checked in their own tests; comparing them here is slow.
+  const smallWorlds = WORLD_TYPES.map(t => t.value).filter(t => t !== 'forest' && t !== 'valley' && t !== 'city')
 
   it('is deterministic for a given seed and type', () => {
     for (const value of smallWorlds) {

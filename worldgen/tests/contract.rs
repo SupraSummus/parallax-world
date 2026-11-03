@@ -10,6 +10,7 @@ use worldgen::generator::{
 use worldgen::generator::{Cell, Fill, Point};
 use worldgen::grid::{Box3, VoxelGrid};
 use worldgen::noise::Rng;
+use worldgen::valley::valley;
 
 static KINDS: &[KindDef] = &[
     KindDef { kind_type: 8, colors: &["#cccccc"] },
@@ -50,7 +51,7 @@ fn spans(name: &'static str, from: i64, to: i64, kind: u8) -> Layer {
 /** A ball of fog, each site kept with chance 0.3. */
 fn fog() -> Generator {
     Generator {
-        kinds: KINDS,
+        kinds: KINDS.to_vec(),
         seed: 1,
         layers: vec![single(|_, _| Some(Node::of(vec![ball([64.0; 3], 56.0, FOG, Fill::Const(0.3), Op::Fill)])), 64)],
     }
@@ -68,7 +69,7 @@ fn caves() -> Generator {
             if v > 1.4 { Some((ROCK, None)) } else { None }
         })),
     };
-    Generator { kinds: KINDS, seed: 2, layers: vec![spans("rock", -1000, 1000, ROCK), Layer::Field(tunnels)] }
+    Generator { kinds: KINDS.to_vec(), seed: 2, layers: vec![spans("rock", -1000, 1000, ROCK), Layer::Field(tunnels)] }
 }
 
 /** Houses on a grass plain: thin walls with a door carved through, rooms of tables inside. */
@@ -114,7 +115,7 @@ fn village() -> Generator {
         }),
         far: None,
     };
-    Generator { kinds: KINDS, seed: 3, layers: vec![spans("ground", -64, 0, GRASS), Layer::Population(houses)] }
+    Generator { kinds: KINDS.to_vec(), seed: 3, layers: vec![spans("ground", -64, 0, GRASS), Layer::Population(houses)] }
 }
 
 fn b(min_x: i64, min_y: i64, min_z: i64, max_x: i64, max_y: i64, max_z: i64) -> Box3 {
@@ -285,6 +286,12 @@ fn forest_keeps_the_contract() {
 }
 
 #[test]
+fn valley_keeps_the_contract() {
+    // The first town's south edge: fields, its first row of houses and the main street, trees of its yards and of the forest.
+    check(valley(42).0, b(-128, -48, 760, 256, 208, 1016), 5);
+}
+
+#[test]
 fn fog_keeps_the_contract() {
     check(fog(), b(32, 32, 32, 96, 96, 96), 4);
 }
@@ -304,7 +311,7 @@ fn near() -> Box3 {
 }
 
 fn world(layer: Layer) -> Generator {
-    Generator { kinds: KINDS, seed: 1, layers: vec![layer] }
+    Generator { kinds: KINDS.to_vec(), seed: 1, layers: vec![layer] }
 }
 
 #[test]

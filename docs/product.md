@@ -61,6 +61,13 @@ A spinner shows while a world generates.
   Generated around the camera in the background, finest first,
   and again where the camera goes:
   each level of detail reaches twice as far as the one before, to 11 km.
+- *Valley with a Town*: the forest, with a town on its path
+  every kilometre or so, the first ahead of the camera:
+  streets of plastered houses with gable roofs, windows, doors and shops,
+  a square with a fountain, a church and its spire, lamps, yard trees,
+  and fields around it (wheat, stubble and haystacks, ploughed rows,
+  meadows, hedges), the forest thinning towards them.
+  Generated like the forest.
 - *City*: a district of a few blocks,
   for checking flat walls, thin frames and openings:
   low buildings whose rooms form a maze of doorways,

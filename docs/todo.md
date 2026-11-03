@@ -114,6 +114,20 @@ Numbers are for the forest at 1280×800, as measured when written.
 
 ## Ideas
 
+Composing generators (section "Composing" of `docs/generators.md`), untried:
+
+- Bid per quantity: a land per channel (use, ground, wetness),
+  each domain bidding in those it cares about, as the towns' terrace needs.
+- Let the framework sample plans finer than the level's sites
+  (`Plan::sampled` at the spacing), since plans declare their scale:
+  coarse levels would skip fine bands' cost as they skip their things.
+- Measure far forms instead of writing them: draw a thing at level 0
+  and count what each site of a coarser level stands for.
+  Authors would write near forms only.
+- Solve what a coarse cell decides (a block's lots, a room's furniture)
+  with a small search whose boundaries the coarser band fixes:
+  constraint solving stays local and needs no backtracking across cells.
+
 - Keep the view in the address bar as the camera moves,
   so a view can be copied (the page reads it already).
 - Measure the seams between faces against ray-cast perspective.

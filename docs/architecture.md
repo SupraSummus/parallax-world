@@ -590,11 +590,11 @@ Renderer distances are in world units.
 **Scenes** describe shapes in metres and fill the sites inside them;
 each world picks its own scale, the renderer assumes none.
 The forest's `UNIT_SIZE` sets its metres per unit.
-The forest is endless and can be generated in any box alone
+The forest and the valley are endless and can be generated in any box alone
 ([generators.md](generators.md)), by `worldgen/` (Rust),
 in the workers' WebAssembly (`worldgen.ts`);
-the app generates one box of it, its extent, into a grid.
-Its ground is a heightfield sampled per column of sites;
+the app generates one box of either, its extent, into a grid.
+The forest's ground is a heightfield sampled per column of sites;
 trunks are columns at least 2 units square,
 crowns leaf clusters (balls) or a solid of revolution (spruce),
 branches and fallen logs capsules, so thin parts stay one piece on the lattice

@@ -38,7 +38,7 @@ src/
     ├── fcc.ts               # Voxel geometry: rhombic dodecahedra of the FCC lattice
     ├── voxel-grid.ts        # Voxel storage on the FCC lattice, in bricks (typed arrays); coarsening it; LayerIndex, made by bake/
     ├── world.ts             # World: voxel grids by level of detail (generated in tiles around the camera), spawn, toy world types
-    ├── worldgen.ts          # The forest of worldgen/ (WebAssembly), any box at any level
+    ├── worldgen.ts          # The worlds of worldgen/ (WebAssembly), any box at any level
     ├── city.ts              # City scene generator: streets, buildings, maze of rooms
     ├── noise.ts             # Seeded hash and PRNG for the city
     ├── cells.ts             # Cells of the coarser lattices N·FCC that slices are made of
@@ -74,7 +74,10 @@ worldgen/                    # World generation, moving to integers, into the ba
     ├── js.rs                # Float math the same on every target (libm), named after JS's Math
     ├── noise.rs, grid.rs    # Integer hashes, random numbers, fixed-point noise; voxel-grid.ts's bricks
     ├── generator.rs         # The framework: shapes, nodes, fields, populations, drawing any box at any level
-    ├── forest.rs            # The forest (UNIT_SIZE lives here)
+    ├── plan.rs              # Plans by column, each from coarser ones only; land domains bid for
+    ├── forest.rs            # The forest, on ground it may share (UNIT_SIZE lives here)
+    ├── town.rs, fields.rs   # Towns along the path, farmland around them: the valley's other domains
+    ├── valley.rs            # The valley: the three domains on one land
     └── wasm.rs              # Its WebAssembly exports (the module holds bake/'s too)
 native/                      # Spike of a native frontend (eframe + wgpu), linking bake/; see src/main.rs
 ├── .cargo/config.toml       # Builds for x86-64-v3: floor and ceil inline (see there)

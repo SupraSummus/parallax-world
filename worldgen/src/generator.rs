@@ -49,6 +49,7 @@ enum Solid {
     Capsule { p: At, d: At, radius: Fixed },
     Lathe { p: At, d: At, length: Fixed, widest: Fixed, radius: Rc<dyn Fn(f64) -> f64> },
     Cuboid { min: At, max: At },
+    Gable { min: At, max: At, ridge: usize },
 }
 
 /** A solid, in lattice units: given in floats, kept in fixed point. */
@@ -190,13 +191,36 @@ pub enum Layer {
     Population(Population),
 }
 
+#[derive(Clone)]
 pub struct KindDef {
     pub kind_type: u8,
     pub colors: &'static [&'static str],
 }
 
+/**
+ * A domain's kinds, after `base` others (see "Composing" in
+ * docs/generators.md): `enum K` of their names, `KINDS` to append to a
+ * generator's, and `k` for a name's Kind.
+ */
+#[macro_export]
+macro_rules! kinds {
+    (base: $base:expr; $($name:ident: $type:expr, [$($color:expr),*];)*) => {
+        #[allow(non_camel_case_types, clippy::upper_case_acronyms)]
+        #[derive(Clone, Copy, PartialEq, Eq, Default)]
+        #[repr(u8)]
+        pub enum K { #[default] $($name),* }
+        pub const KINDS: &[$crate::generator::KindDef] = &[$($crate::generator::KindDef { kind_type: $type, colors: &[$($color),*] }),*];
+        /** Kinds of the generator's before these. */
+        pub const BASE: $crate::generator::Kind = $base;
+        pub fn k(kind: K) -> $crate::generator::Kind {
+            BASE + kind as $crate::generator::Kind
+        }
+    };
+}
+
 pub struct Generator {
-    pub kinds: &'static [KindDef],
+    /** A world of domains has each's kinds, those it builds on first (see "Composing" in docs/generators.md). */
+    pub kinds: Vec<KindDef>,
     pub seed: u64,
     pub layers: Vec<Layer>,
 }
@@ -350,6 +374,30 @@ pub fn cuboid(min: Point, max: Point, kind: Kind, fill: Fill, op: Op) -> Shape {
     }
 }
 
+/**
+ * The points of a gable roof over [min, max): along `ridge` (x or z, 0 or
+ * 2) from min to max, across the other from min to max at the bottom
+ * (y = min) and narrowing to the ridge line at the top (y = max). Up is +y.
+ */
+pub fn gable(min: Point, max: Point, ridge: usize, kind: Kind, fill: Fill, op: Op) -> Shape {
+    assert!(ridge == 0 || ridge == 2, "a gable's ridge runs along x or z");
+    let across = 2 - ridge;
+    let (length, width, height) = (max[ridge] - min[ridge], max[across] - min[across], max[1] - min[1]);
+    let slant = js::hypot(&[width / 2.0, height]);
+    let area = 2.0 * length * slant + width * height + length * width;
+    let (lo, hi) = (at(min), at(max));
+    Shape {
+        kind,
+        op,
+        centre: at(mid(min, max)),
+        bounds: Box3 { min: lo.map(|v| -((-v) >> 16)), max: hi.map(|v| -((-v) >> 16)) },
+        extents: [hi[ridge] - lo[ridge], hi[across] - lo[across], hi[1] - lo[1]],
+        area: effective_area(area, (2.0 * length * width * height) / area, &fill, mid(min, max)),
+        fill,
+        solid: Solid::Gable { min: lo, max: hi, ridge },
+    }
+}
+
 /*
  * Containment is tested on offsets from the shape with 8 bits after the
  * point: a shape and its widening span at most 2^11 units, so squares stay
@@ -393,10 +441,35 @@ impl Segment {
 /** A shape's test for one `min`, with what does not depend on the point worked out. */
 enum Inside<'a> {
     Nothing,
-    Ellipsoid { centre: At, inverse: [i64; 3] },
-    Capsule { p: At, segment: Segment, r2: i64 },
-    Lathe { p: At, segment: Segment, reach: i64, widest2: i64, half: Fixed, radius: &'a dyn Fn(f64) -> f64 },
-    Cuboid { lo: At, hi: At, min: Fixed },
+    Ellipsoid {
+        centre: At,
+        inverse: [i64; 3],
+    },
+    Capsule {
+        p: At,
+        segment: Segment,
+        r2: i64,
+    },
+    Lathe {
+        p: At,
+        segment: Segment,
+        reach: i64,
+        widest2: i64,
+        half: Fixed,
+        radius: &'a dyn Fn(f64) -> f64,
+    },
+    Cuboid {
+        lo: At,
+        hi: At,
+        min: Fixed,
+    },
+    /** Under the slopes: |2u − lo − hi| · height ≤ width · (top − y), with 8 bits after the point. */
+    Gable {
+        lo: At,
+        hi: At,
+        min: Fixed,
+        across: usize,
+    },
 }
 
 impl Inside<'_> {
@@ -422,6 +495,21 @@ impl Inside<'_> {
             }
             Inside::Cuboid { lo, hi, min } => {
                 (0..3).all(|i| if hi[i] - lo[i] >= *min { lo[i] <= x[i] && x[i] < hi[i] } else { (2 * x[i] - lo[i] - hi[i]).abs() <= *min })
+            }
+            Inside::Gable { lo, hi, min, across } => {
+                let a = *across;
+                let ridge = 2 - a;
+                let side =
+                    |i: usize| if hi[i] - lo[i] >= *min { lo[i] <= x[i] && x[i] < hi[i] } else { (2 * x[i] - lo[i] - hi[i]).abs() <= *min };
+                if !side(ridge) || !side(1) || !side(a) {
+                    return false;
+                }
+                // Too low or narrow for its slopes to show: its box.
+                if hi[1] - lo[1] < *min || hi[a] - lo[a] < *min {
+                    return true;
+                }
+                let u = (2 * x[a] - lo[a] - hi[a]).abs() >> 8;
+                u * ((hi[1] - lo[1]) >> 8) <= ((hi[a] - lo[a]) >> 8) * ((hi[1] - x[1]) >> 8)
             }
         }
     }
@@ -452,6 +540,7 @@ impl Shape {
                 radius: radius.as_ref(),
             },
             Solid::Cuboid { min: lo, max: hi } => Inside::Cuboid { lo: *lo, hi: *hi, min },
+            Solid::Gable { min: lo, max: hi, ridge } => Inside::Gable { lo: *lo, hi: *hi, min, across: 2 - ridge },
         }
     }
 }
@@ -570,7 +659,7 @@ impl Palette {
 
 /** The materials of the grids `generate` makes: ids are the same in all of them. */
 pub fn materials_of(generator: &Generator) -> Vec<Material> {
-    Palette::new(generator.kinds, generator.seed).materials
+    Palette::new(&generator.kinds, generator.seed).materials
 }
 
 /**
@@ -580,7 +669,7 @@ pub fn materials_of(generator: &Generator) -> Vec<Material> {
  */
 pub fn generate(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
     let s = 1i64 << level;
-    let palette = Palette::new(generator.kinds, generator.seed);
+    let palette = Palette::new(&generator.kinds, generator.seed);
     let mut grid = VoxelGrid::new(b);
     let clip = grid.clip();
     let mut put = |kind: Kind, op: Op, x: i64, y: i64, z: i64| {
@@ -772,6 +861,16 @@ pub fn area_profile(nodes: &[Node], axis: usize) -> impl Fn(i64) -> f64 + use<> 
 // ---------------------------------------------------------------------------
 // Helpers
 
+/**
+ * Whether coordinate `at` is in the first half of a stripe `period` wide,
+ * at sites `spacing` apart. Stripes finer than the sites would alias into
+ * wider ones: they draw each half as often as it is, by `dither` (a hash
+ * of the site).
+ */
+pub fn stripe(at: i64, period: i64, spacing: i64, dither: u32) -> bool {
+    if 2 * spacing <= period { at.rem_euclid(period) < period / 2 } else { dither < 1 << 31 }
+}
+
 const EVERYWHERE: Box3 = Box3 { min: [i64::MIN / 4; 3], max: [i64::MAX / 4; 3] };
 
 /** The site of sites `s` apart nearest to a point: the one whose voxel holds it. */
@@ -822,5 +921,15 @@ mod tests {
         // 1000 units long, at 3 : 4 : 0, so its widest circle reaches 4, 3 and 5 units along x, y and z.
         let shape = lathe([0.0; 3], [600.0, 800.0, 0.0], |_| 5.0, 1, Fill::Const(1.0), Op::Fill);
         assert_eq!((shape.bounds.min, shape.bounds.max), ([-4, -3, -5], [605, 804, 6]));
+    }
+
+    #[test]
+    fn a_gable_narrows_to_its_ridge() {
+        // 8 wide across x, 4 high: at height h, the sites within 4 · (1 − h / 4) of x = 4.
+        let shape = gable([0.0; 3], [8.0, 4.0, 6.0], 2, 1, SOLID, Op::Fill);
+        let inside = shape.inside(0);
+        let holds = |x: i64, y: i64| inside.holds([x, y, 2].map(|v| v * ONE));
+        assert!(holds(0, 0) && holds(7, 0) && holds(4, 3) && holds(3, 2) && holds(6, 1));
+        assert!(!holds(1, 3) && !holds(8, 0) && !holds(4, 4) && !holds(7, 2));
     }
 }

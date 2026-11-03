@@ -6,8 +6,10 @@ and gets the same voxels whichever boxes it drew before.
 That lets a world be endless and generated in pieces around the camera,
 coarser further away, for about the same cost per box at every level.
 The forest (`worldgen/src/forest.rs`) is written this way,
-and the web generates it as WebAssembly (`src/lib/worldgen.ts`);
-the city and the toy worlds (TS, `src/lib`) are not yet.
+and so is the valley (`valley.rs`), the forest with towns and fields,
+three domains composed as in "Composing";
+the web generates both as WebAssembly (`src/lib/worldgen.ts`);
+the TS city and the toy worlds (`src/lib`) are not on it.
 Integers and fixed point (`noise.rs`) decide wherever they can,
 so a world is the same on every machine and as fine far from the origin.
 
@@ -117,6 +119,74 @@ and fields from position alone.
   losing content, or a wrong fill law, 0.14 and more.
 
 Add a new world to that list with a region that has a bit of everything in it.
+To see a world's layout without the renderer,
+`worldgen/examples/map.rs` draws it from above, any level, any area.
+
+## Composing
+
+A world as large as the valley is **domains**
+(the forest, `town.rs`, `fields.rs`):
+modules of plans and layers that never call each other.
+They meet only through plans coarser than their own,
+through the land they bid for, and through things they share.
+Each part below is an experiment in how far that goes.
+
+### Bands
+
+A **plan** (`plan.rs`) is a decision for any column (x, z),
+made on demand and kept: the path's centre line, the ground, where towns are.
+Its **scale** is the size of the smallest features it decides,
+and it reads only plans at least as coarse; reading a finer one panics.
+Decisions then flow from coarse to fine, like bands of a frequency pyramid:
+one at a place depends on a neighbourhood no wider than the bands it reads,
+and a coarse decision never wobbles with a fine one.
+The rule shapes designs.
+A town can't sit on the path's bends, which are finer than a town:
+it sits on the path's mean, and the path, a finer band, bends to its main street.
+Its height is the mean of the valley floor under it, not one sample of its bumps.
+Sampling is the exception (`Plan::sampled`):
+it is the filter that makes a coarse band of fine ones,
+so a sampled plan may read finer ones (the fields' slope, every 2 m).
+Plans are built in order from those before them, so they can't form cycles;
+layers read any plan.
+
+### Land
+
+Domains share land by **bidding** for each column (`Land`; bids are plans).
+A domain's share eases from none to all
+as its bid goes from `width` behind the best of the rest to `width` ahead,
+and the domain with the most owns the column.
+What the domains propose blends by their shares:
+the forest's chances of trees, rocks and plants are times its share,
+so it thins towards the fields by itself,
+and the towns and fields draw only the columns they own.
+The forest bids nothing: it has what no one outbids it for.
+A domain added later is seen by the others only as a smaller share:
+adding the fields changed neither the forest nor the towns.
+Quantities want blends of their own, though.
+A town levels the ground 120 m past its streets,
+far beyond the metres in which it gives way to fields,
+so the ground blends by the town's own terrace weight, not by shares.
+
+### Far forms keep statistics
+
+A thing's far form keeps what its near form shows on average:
+a house's, from level 2 on, is its walls and roof,
+each row of its windows a band of glass as dense as the windows are,
+so rays stop on the same materials at every level.
+Patterns finer than the sites draw their parts in proportion (`stripe`),
+and media under two sites tall are made two sites tall,
+as much in the way of a ray as before (`medium` in `fields.rs`),
+instead of aliasing or vanishing.
+
+### Kinds and things
+
+A domain names its kinds with `kinds!`,
+after those of the domains it builds on:
+the forest's come first in any world it grows in,
+so its things are a library others draw from
+(the towns' trees are the forest's `make_tree`).
+A world has at most 255 materials.
 
 ## Open problems
 
@@ -130,5 +200,8 @@ Add a new world to that list with a region that has a bit of everything in it.
   so counting them is exact where an area is an estimate.
 - **Media are isotropic.** A site stops rays from every direction alike;
   vertical trunks seen from above and from the side cannot both be right.
-- **Layers can't see each other.** "No tree on a boulder"
-  needs a layer to ask another for its things in an area.
+- **Things of one band can't see each other.** Bands order what decides where,
+  but two populations of one scale ("no tree on a boulder") still can't
+  exclude each other. Claims with hashed priorities would be local and
+  order-free: a thing is kept unless a neighbour's claim of higher priority
+  overlaps it (one round of Luby's algorithm), from anchors alone.

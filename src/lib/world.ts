@@ -1,7 +1,7 @@
 import { generateCity } from './city'
 import { GRID_LEVELS } from './slice-selection'
 import { BRICK, coarsen, LayerIndex, Palette, VoxelGrid, type Box, type Material, type Voxel, type VoxelData } from './voxel-grid'
-import { forest } from './worldgen'
+import { forest, valley } from './worldgen'
 
 export interface Vec3 {
   x: number
@@ -9,10 +9,11 @@ export interface Vec3 {
   z: number
 }
 
-export type WorldType = 'forest' | 'city' | 'hills' | 'mountains' | 'hills_with_trees' | 'lake_with_island'
+export type WorldType = 'forest' | 'valley' | 'city' | 'hills' | 'mountains' | 'hills_with_trees' | 'lake_with_island'
 
 export const WORLD_TYPES: { value: WorldType; label: string }[] = [
   { value: 'forest', label: 'Forest' },
+  { value: 'valley', label: 'Valley with a Town' },
   { value: 'city', label: 'City' },
   { value: 'hills', label: 'Hills' },
   { value: 'mountains', label: 'Mountains' },
@@ -42,7 +43,7 @@ export interface Generated {
 }
 
 /** World types generated level by level, in parts; the grids of the rest are made whole, then coarsened. */
-const GENERATED: Partial<Record<WorldType, (seed: number) => Generated>> = { forest }
+const GENERATED: Partial<Record<WorldType, (seed: number) => Generated>> = { forest, valley }
 /** World types with their own scene builder; the rest are built here. */
 const SCENES: Partial<Record<WorldType, (seed: number) => { grid: VoxelGrid; spawn: Vec3 }>> = { city: generateCity }
 
