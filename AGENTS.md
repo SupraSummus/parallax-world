@@ -75,6 +75,7 @@ worldgen/                    # World generation, moving to integers, into the ba
     ├── forest.rs            # The forest (UNIT_SIZE lives here)
     └── wasm.rs              # Its WebAssembly exports (the module holds bake/'s too)
 native/                      # Spike of a native frontend (eframe + wgpu), linking bake/; see src/main.rs
+├── .cargo/config.toml       # Builds for x86-64-v3: floor and ceil inline (see there)
 ├── dump.test.ts             # Dumps a view from the TS renderer, to check it against (only with DUMP set)
 └── src/
     ├── main.rs              # The window and camera; --shot, --bench, --walk, --check-requests against a dump
