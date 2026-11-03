@@ -74,10 +74,11 @@ worldgen/                    # generator.ts and forest.ts in Rust, moving to int
     ├── generator.rs         # The framework: shapes, nodes, fields, populations, drawing any box at any level
     └── forest.rs            # The forest
 native/                      # Spike of a native frontend (eframe + wgpu), linking bake/; see src/main.rs
-├── dump.test.ts             # Dumps a view from the TS renderer for it (only with DUMP set)
+├── dump.test.ts             # Dumps a view from the TS renderer, to check it against (only with DUMP set)
 └── src/
-    ├── main.rs              # The window and camera; --shot, --bench, --walk, --check-requests against the dump
-    ├── dump.rs              # Reads the dump: the baker's tables, the starting view, its grids and chunks to check against
+    ├── main.rs              # The window and camera; --shot, --bench, --walk, --check-requests against a dump
+    ├── dump.rs              # Reads a dump: the baker's tables, a view, its grids and the chunks it wants
+    ├── tables.rs            # bake.ts: the voxel geometry and shaded palettes the bakers are given
     ├── world.rs             # world.ts for generated worlds: worldgen's tiles around the camera, grids composed off the main thread
     ├── slicing.rs           # slice-selection.ts: slices, chunks, eyes
     ├── view.rs              # view.ts: faces, which rays and screen boxes they draw

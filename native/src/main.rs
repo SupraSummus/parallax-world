@@ -2,18 +2,17 @@
 //! the camera (world.rs), the renderer picking the chunks in view
 //! (renderer.rs), worker threads baking them with the baker in bake/ from
 //! one shared copy of the grids, and wgpu drawing them in an egui window.
-//! The baker's tables and the starting view still come from a view dumped
-//! by the TS renderer (native/dump.test.ts).
 //!
-//! parallax-native <dump> [--threads N] [--seed S] [--shot out.png | --bench] [--walk D] [--check-requests | --spin]
+//! parallax-native [--threads N] [--seed S] [--shot out.png | --bench] [--walk D] [--spin]
+//! parallax-native [--seed S] --check-requests frame.bin
 //!
 //! --shot draws the first frame once the grids are in and all its chunks
-//! are baked, at the dump's size, offscreen, and saves it; --bench only
-//! times that, and the main thread's frames after. --walk D moves the
-//! camera D units along the view after the first frame, and does the same
-//! there. --check-requests
-//! compares the chunks the first frame wants, from the dump's grids and
-//! camera, with those the TS renderer wanted.
+//! are baked, at 1280×800, offscreen, and saves it; --bench only times
+//! that, and the main thread's frames after. --walk D moves the camera D
+//! units along the view after the first frame, and does the same there.
+//! --check-requests takes a view the TS renderer dumped (native/dump.test.ts):
+//! the baker's tables must be the same, and the chunks the first frame
+//! wants from its grids and camera too.
 
 mod bakery;
 mod compositor;
@@ -22,6 +21,7 @@ mod layer_index;
 mod renderer;
 mod shot;
 mod slicing;
+mod tables;
 mod view;
 mod world;
 
@@ -29,7 +29,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
-use bake::{Baker, Geometry};
+use bake::{Baker, Geometry, Lattice};
 use eframe::egui;
 use eframe::egui_wgpu;
 
@@ -40,6 +40,8 @@ use layer_index::LayerIndex;
 use renderer::Renderer;
 use view::{Vec3, focal_length, view_basis};
 use world::World;
+use worldgen::forest::forest;
+use worldgen::generator::materials_of;
 
 struct App {
     world: World,
@@ -131,15 +133,16 @@ impl eframe::App for App {
     }
 }
 
-/** The renderer and its bakery, from the dump's tables; checks that the faces are the TS renderer's. */
-fn renderer(dump: &Dump, threads: usize) -> Renderer {
+/** The renderer and its bakery, for the forest of `seed`. */
+fn renderer(seed: u64, threads: usize, render_distance: f64) -> Renderer {
     let faces = view::faces();
-    for (face, l) in faces.iter().zip(&dump.lattices) {
-        assert_eq!(face.lattice, [l.r, l.u, l.f], "the dump's faces are not ours");
-    }
-    let (table, lattices, palettes) = (dump.geometry.clone(), dump.lattices, dump.palettes.clone());
+    let (table, palettes) = (tables::geometry(&faces), tables::palettes(&faces, &materials_of(&forest(seed).0)));
+    let lattices = std::array::from_fn(|f| {
+        let [r, u, f] = faces[f].lattice;
+        Lattice { r, u, f }
+    });
     let bakery = Bakery::new(threads, move || Baker::new(Geometry::from_table(&table), lattices, palettes.clone()));
-    Renderer::new(faces, bakery, dump.render_distance)
+    Renderer::new(faces, bakery, render_distance)
 }
 
 fn lattices() -> Vec<[[i32; 3]; 3]> {
@@ -164,7 +167,16 @@ fn complete(world: &mut World, renderer: &mut Renderer, camera: Vec3, view: &vie
 }
 
 /** Compares the chunks the first frame wants, coverage off, with those the TS renderer wanted for the dump. */
-fn check_requests(dump: &Dump, renderer: &mut Renderer, view: &view::View) {
+fn check_requests(dump: &Dump, seed: u64, threads: usize) {
+    let faces = view::faces();
+    for (face, l) in faces.iter().zip(&dump.lattices) {
+        assert_eq!(face.lattice, [l.r, l.u, l.f], "the faces are not the TS renderer's");
+    }
+    assert_eq!(tables::geometry(&faces), dump.geometry, "the voxel geometry is not bake.ts's");
+    assert_eq!(tables::palettes(&faces, &materials_of(&forest(seed).0)), dump.palettes, "the palettes are not bake.ts's");
+    let focal = focal_length(dump.fov, dump.width, dump.height);
+    let view = &view::View { yaw: dump.yaw, pitch: dump.pitch, width: dump.width, height: dump.height, focal };
+    let mut renderer = renderer(seed, threads, dump.render_distance);
     let start = Instant::now();
     let lattices = lattices();
     for (level, grid) in dump.grids.iter().enumerate() {
@@ -188,24 +200,29 @@ fn check_requests(dump: &Dump, renderer: &mut Renderer, view: &view::View) {
     }
 }
 
+/** The view the TS renderer starts with (renderer.ts), at the size --shot draws. */
+const YAW: f64 = 0.0;
+const PITCH: f64 = 0.0;
+const FOV: f64 = 90.0;
+const RENDER_DISTANCE: f64 = 8000.0;
+const SHOT: [f64; 2] = [1280.0, 800.0];
+
 fn main() -> eframe::Result {
     let args: Vec<String> = std::env::args().collect();
-    let path = args.get(1).expect("usage: parallax-native <dump> [options]: see main.rs");
     let threads = args.iter().position(|a| a == "--threads").map_or_else(num_cpus, |i| args[i + 1].parse().expect("threads"));
-    let dump = dump::read(&std::fs::read(path).expect("dump"));
     let seed = args.iter().position(|a| a == "--seed").map_or(12345, |i| args[i + 1].parse().expect("seed"));
-    let size = [dump.width, dump.height];
-    let focal = focal_length(dump.fov, size[0], size[1]);
-    let first = view::View { yaw: dump.yaw, pitch: dump.pitch, width: size[0], height: size[1], focal };
-    let mut renderer = renderer(&dump, threads);
-    if args.iter().any(|a| a == "--check-requests") {
-        check_requests(&dump, &mut renderer, &first);
+    if let Some(i) = args.iter().position(|a| a == "--check-requests") {
+        check_requests(&dump::read(&std::fs::read(&args[i + 1]).expect("dump")), seed, threads);
         return Ok(());
     }
+    let size = SHOT;
+    let focal = focal_length(FOV, size[0], size[1]);
+    let first = view::View { yaw: YAW, pitch: PITCH, width: size[0], height: size[1], focal };
+    let mut renderer = renderer(seed, threads, RENDER_DISTANCE);
     let mut world = World::new(seed, lattices(), threads);
     let mut camera = worldgen::forest::forest(seed).1.map(|v| v as f64);
     let faces: [[Vec3; 3]; 12] = std::array::from_fn(|f| view::faces()[f].axes);
-    let fog_distance = dump.render_distance * 0.7;
+    let fog_distance = RENDER_DISTANCE * 0.7;
     if args.iter().any(|a| a == "--bench") || args.iter().any(|a| a == "--shot") {
         let start = Instant::now();
         let (mut frame, mut stats) = complete(&mut world, &mut renderer, camera, &first);
@@ -219,7 +236,7 @@ fn main() -> eframe::Result {
             // On along the view, the grids moving with the camera.
             let distance: f64 = args[i + 1].parse().expect("distance");
             let start = Instant::now();
-            let forward = view_basis(dump.yaw, 0.0)[2];
+            let forward = view_basis(YAW, 0.0)[2];
             camera = std::array::from_fn(|d| camera[d] + forward[d] * distance);
             (frame, stats) = complete(&mut world, &mut renderer, camera, &first);
             report(&format!("{distance} units on, the frame"), start, &frame, &stats);
@@ -236,8 +253,8 @@ fn main() -> eframe::Result {
         }
         if let Some(i) = args.iter().position(|a| a == "--shot") {
             let view = compositor::View {
-                yaw: dump.yaw,
-                pitch: dump.pitch,
+                yaw: YAW,
+                pitch: PITCH,
                 focal,
                 fog_distance,
                 faces,
@@ -267,9 +284,9 @@ fn main() -> eframe::Result {
         renderer,
         faces,
         camera,
-        yaw: dump.yaw,
-        pitch: dump.pitch,
-        fov: dump.fov,
+        yaw: YAW,
+        pitch: PITCH,
+        fov: FOV,
         fog_distance,
         speed: 40.0,
         stats: String::new(),

@@ -341,7 +341,8 @@ A chunk's voxels are those of its cell and a margin around it
 (`cell_surface`, cached per cell, so other eyes reuse it).
 The native spike (`native/`) links the baker instead,
 a baker per worker thread sharing one copy of the grids (`share_grid`),
-and has the renderer, slice selection and coverage in Rust too.
+and has the renderer, slice selection, coverage
+and the faces and palettes it hands the baker in Rust too.
 
 Each chunk is clipped to its cell: splats that miss it are dropped,
 and `originX`/`originY` and its extent record where on the centre plane
