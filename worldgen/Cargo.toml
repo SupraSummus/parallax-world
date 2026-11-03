@@ -4,10 +4,20 @@ version = "0.0.0"
 edition = "2024"
 publish = false
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 bake = { path = "../bake" }
-# atan2 and exp as V8 computes them (fdlibm); sin and cos within an ulp of it.
+# Math functions with the same bits on every target (js.rs).
 libm = "0.2"
 
 [profile.test]
 opt-level = 2
+
+# The web's WebAssembly (pnpm wasm): small and fast, however long it takes to build.
+[profile.wasm]
+inherits = "release"
+lto = true
+codegen-units = 1
+panic = "abort"

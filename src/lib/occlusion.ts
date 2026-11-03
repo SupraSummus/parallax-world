@@ -3,9 +3,9 @@
  * them need not be drawn. See docs/architecture.md, section 4.
  */
 import type { Chunk, Placement } from './renderer'
-import { bakerInstance } from './chunk-baker'
 import { FACES, faceBasis, type Face, type ScreenBox, type View } from './view'
 import { chunkCell } from './slice-selection'
+import { wasmInstance } from './wasm'
 
 /** The coverage exports (bake/src/coverage.rs). */
 interface Exports {
@@ -28,7 +28,7 @@ interface Exports {
  * to far.
  */
 export class Coverage {
-  private wasm = bakerInstance() as unknown as Exports
+  private wasm = wasmInstance() as unknown as Exports
   private view!: View
   // Chunks are handed over once, by a number; coverage.rs forgets those unused for a while, and they are handed over again.
   private handles = new WeakMap<Chunk, number>()

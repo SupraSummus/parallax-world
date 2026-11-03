@@ -330,7 +330,8 @@ and are drawn only where the chunk paints nothing (section 4).
 "Fill Gaps" turns it off.
 
 **The baker** is Rust (`bake/`), compiled to WebAssembly
-and inlined into the app, so it compiles synchronously
+with the world generator that depends on it (`worldgen/`, section 6)
+and inlined into the app (`wasm.ts`), so it compiles synchronously
 in a worker, on the main thread (for coverage, section 4) or in Node,
 with no files to fetch.
 `ChunkBaker` hands it a world once:
@@ -528,7 +529,7 @@ since the previous render and the bytes of all cached chunks;
 `SessionStats` accumulates them. `renderTime` is main-thread time, which
 excludes baking in workers.
 
-## 6. Worlds (`world.ts`, `forest.ts`, `city.ts`)
+## 6. Worlds (`world.ts`, `worldgen.ts`, `city.ts`)
 
 **The lattice** (`fcc.ts`). Voxels sit on the face-centred cubic lattice:
 the integer points (x, y, z) with x + y + z even.
@@ -557,7 +558,8 @@ Renderer distances are in world units.
 each world picks its own scale, the renderer assumes none.
 The forest's `UNIT_SIZE` sets its metres per unit.
 The forest is endless and can be generated in any box alone
-([generators.md](generators.md));
+([generators.md](generators.md)), by `worldgen/` (Rust),
+in the workers' WebAssembly (`worldgen.ts`);
 the app generates one box of it, its extent, into a grid.
 Its ground is a heightfield sampled per column of sites;
 trunks are columns at least 2 units square,

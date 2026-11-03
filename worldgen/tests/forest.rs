@@ -1,4 +1,4 @@
-//! The forest (forest.test.ts): determinism, contents, spawn.
+//! The forest: determinism, contents, spawn.
 
 use std::collections::HashSet;
 

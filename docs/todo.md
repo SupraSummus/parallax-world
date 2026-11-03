@@ -19,6 +19,14 @@ Numbers are for the forest at 1280×800, as measured when written.
   A moved grid's LayerIndex is built again whole,
   though most of its tiles are the old grid's (world.ts indexes each part).
   `native/` is not built in CI.
+- **TS and Rust still say much the same twice.**
+  `bake.ts`'s faces and palettes are `native/src/tables.rs` again,
+  `LayerIndex` (`voxel-grid.ts`) is `native/src/layer_index.rs`,
+  the tiles around the camera (`world.ts`) are `native/src/world.rs`,
+  and slice selection, faces and the renderer are in `native/src` too.
+  The baker could build its own tables from the materials,
+  and workers could index the parts they generate in WebAssembly;
+  the renderer is the large step.
 - **Moving rebakes whole levels.**
   A level is baked again when the camera leaves its eye's cell,
   so walking rebakes 1.3–1.8× the chunks that one direction per chunk did,
@@ -83,11 +91,14 @@ Numbers are for the forest at 1280×800, as measured when written.
   or bricks sent to a worker only once a chunk it bakes needs them.
   (Shared memory needs cross-origin isolation,
   which GitHub Pages can only get through a service worker.)
-- **Generating the forest's grids takes 7–20 s of worker time per level**,
-  most at levels 0 to 4 (a moved grid, a seventh of that):
-  mostly the ground's noise, which the terrain and the canopy
-  compute about 14 times per column (with its neighbours, for slopes);
-  at levels 0 and 1 also the undergrowth's many small shapes.
+- **Generating the forest's grids takes 3–8 s of worker time per level**
+  (worldgen's WebAssembly, in Node; the TS forest took twice that),
+  most at levels 0 to 4 (a moved grid, a seventh of that).
+  In the TS forest it was mostly the ground's noise,
+  which the terrain and the canopy compute about 14 times per column
+  (with its neighbours, for slopes),
+  and at levels 0 and 1 the undergrowth's many small shapes;
+  worldgen's is not profiled yet.
 - **The reference viewer freezes for over a minute on the forest**:
   it generates all its levels on the main thread,
   then holds about 25 million faces, over 2 GB.

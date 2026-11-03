@@ -38,16 +38,16 @@ src/
     ├── fcc.ts               # Voxel geometry: rhombic dodecahedra of the FCC lattice
     ├── voxel-grid.ts        # Voxel storage on the FCC lattice, in bricks (typed arrays); coarsening it
     ├── world.ts             # World: voxel grids by level of detail (generated in tiles around the camera), spawn, toy world types
-    ├── generator.ts         # Generating any box of a world alone, at any level of detail
-    ├── forest.ts            # Forest scene generator, on generator.ts (UNIT_SIZE lives here)
+    ├── worldgen.ts          # The forest of worldgen/ (WebAssembly), any box at any level
     ├── city.ts              # City scene generator: streets, buildings, maze of rooms
-    ├── noise.ts             # Seeded hash, value noise and PRNG for the generators
+    ├── noise.ts             # Seeded hash and PRNG for the city
     ├── cells.ts             # Cells of the coarser lattices N·FCC that slices are made of
     ├── slice-selection.ts   # Slices, chunks and the eyes they are baked from (pure functions)
     ├── view.ts              # Camera orientation, the 12 faces (FCC directions), projection
     ├── renderer.ts          # Slices and chunks in view, caching, screen placement (no DOM)
     ├── occlusion.ts         # Which screen cells nearer layers cover (bake/src/coverage.rs), to skip chunks behind them
     ├── chunk-baker.ts       # Bakes whole chunks with bake/ (WebAssembly); the bake worker's message protocol
+    ├── wasm.ts              # The WebAssembly module (worldgen/ with bake/), inlined; an instance per use
     ├── worker-bakery.ts     # Pool of bake workers the renderer sends missing chunks to
     ├── bake.worker.ts       # Bake worker entry
     ├── compositor.ts        # Draws the renderer's frames with WebGL 2: chunks' splats, instanced
@@ -57,7 +57,7 @@ viewer.html                  # Reference 3D viewer page (second Vite entry)
 src/viewer/
 ├── main.ts                  # three.js scene, orbit camera
 └── mesh.ts                  # World -> triangle mesh of exposed rhombic faces
-bake/                        # Chunk baker and coverage in Rust, compiled to WebAssembly (no dependencies)
+bake/                        # Chunk baker and coverage in Rust (no dependencies), in worldgen/'s WebAssembly
 └── src/
     ├── lib.rs               # Baker: cached cell surfaces, one chunk per call; the WebAssembly exports
     ├── world.rs             # Grid and voxel faces as handed over, read per face
@@ -67,12 +67,13 @@ bake/                        # Chunk baker and coverage in Rust, compiled to Web
     ├── splats.rs            # Which voxels a chunk shows, as hexagons on its centre plane; gap filling
     ├── fill.rs              # Splats filled into a mask, solid blocks (for coverage)
     └── coverage.rs          # Which screen cells nearer layers cover, on the main thread; its WebAssembly exports
-worldgen/                    # generator.ts and forest.ts in Rust, moving to integers; into the baker's grids
+worldgen/                    # World generation, moving to integers, into the baker's grids; the web's WebAssembly
 └── src/
-    ├── js.rs                # Math.round and the math functions as V8 computes them, left from the port
+    ├── js.rs                # Float math the same on every target (libm), named after JS's Math
     ├── noise.rs, grid.rs    # Integer hashes, random numbers, fixed-point noise; voxel-grid.ts's bricks
     ├── generator.rs         # The framework: shapes, nodes, fields, populations, drawing any box at any level
-    └── forest.rs            # The forest
+    ├── forest.rs            # The forest (UNIT_SIZE lives here)
+    └── wasm.rs              # Its WebAssembly exports (the module holds bake/'s too)
 native/                      # Spike of a native frontend (eframe + wgpu), linking bake/; see src/main.rs
 ├── dump.test.ts             # Dumps a view from the TS renderer, to check it against (only with DUMP set)
 └── src/

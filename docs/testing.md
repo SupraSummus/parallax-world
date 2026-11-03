@@ -6,7 +6,7 @@ and `cargo test` for the Rust in `bake/` and `worldgen/`.
 Commands are in `package.json`:
 
 ```bash
-pnpm test                       # build the baker, run both once (CI)
+pnpm test                       # build the WebAssembly, run both once (CI)
 pnpm exec vitest                # watch mode (after pnpm wasm)
 pnpm exec vitest -t "cache"     # filter by test name
 pnpm exec vitest run bake       # files matching "bake"
@@ -28,10 +28,10 @@ pnpm exec vitest run bake       # files matching "bake"
 | `src/lib/renderer.test.ts` | Slices and chunks in view, placement, caching, stats (on a small world) |
 | `src/lib/worker-bakery.test.ts` | Baking in workers (simulated) gives the same frames; what is baked first, and when not at all |
 | `src/lib/renderer-regressions.test.ts` | Previously fixed rendering bugs |
-| `src/lib/generator.test.ts` | Every world generated in pieces equals it generated whole, at several levels |
 | `src/lib/world.test.ts` | Toy worlds; a generated world's grids put together from parts generated alone |
-| `src/lib/forest.test.ts`, `src/lib/city.test.ts` | The scenes: determinism, contents, spawn |
-| `worldgen/tests/contract.rs`, `worldgen/tests/forest.rs` | The same contract and forest checks for the Rust generator |
+| `worldgen/tests/contract.rs` | Every world generated in pieces equals it generated whole, at several levels |
+| `worldgen/tests/forest.rs`, `src/lib/city.test.ts` | The scenes: determinism, contents, spawn |
+| `src/lib/worldgen.test.ts` | The forest as the web gets it from WebAssembly |
 | `src/viewer/mesh.test.ts` | Reference viewer mesh |
 | `src/App.test.tsx` | UI panels, keyboard movement and turning |
 

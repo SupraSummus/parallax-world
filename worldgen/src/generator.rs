@@ -1,6 +1,6 @@
-//! World generators (generator.ts): a world is fields and populations of
-//! things made of shapes; the framework draws any box of it alone, at any
-//! level of detail. See docs/generators.md.
+//! World generators: a world is fields and populations of things made of
+//! shapes; the framework draws any box of it alone, at any level of
+//! detail. See docs/generators.md.
 
 use std::cell::OnceCell;
 use std::rc::Rc;
@@ -51,7 +51,7 @@ enum Solid {
     Cuboid { min: At, max: At },
 }
 
-/** A solid, in lattice units (Shape in generator.ts): given in floats, kept in fixed point. */
+/** A solid, in lattice units: given in floats, kept in fixed point. */
 #[derive(Clone)]
 pub struct Shape {
     pub kind: Kind,
@@ -67,7 +67,7 @@ pub struct Shape {
     solid: Solid,
 }
 
-/** A thing: its shapes, and finer things in it (Node in generator.ts). */
+/** A thing: its shapes, and finer things in it. */
 pub struct Node {
     pub shapes: Shapes,
     /** Required with children: holds everything the node and its children draw. */
@@ -98,7 +98,7 @@ pub struct Child {
 
 /**
  * A node's shapes: given, or made only once asked for, from their own
- * random sequence (`lazily` in forest.ts).
+ * random sequence.
  */
 pub enum Shapes {
     Now(Vec<Shape>),
@@ -146,7 +146,7 @@ pub enum FieldValues {
     Spans { axis: usize, spans: Box<FieldSpans> },
 }
 
-/** Something everywhere, given by position alone (Field in generator.ts). */
+/** Something everywhere, given by position alone. */
 pub struct Field {
     pub name: &'static str,
     pub order: f64,
@@ -154,7 +154,7 @@ pub struct Field {
     pub values: FieldValues,
 }
 
-/** A cell of a population (Cell in generator.ts). */
+/** A cell of a population. */
 pub struct Cell<'a> {
     pub i: i64,
     pub j: i64,
@@ -171,7 +171,7 @@ impl Cell<'_> {
     }
 }
 
-/** Things placed in the cells of N·FCC, at most one per cell (Population in generator.ts). */
+/** Things placed in the cells of N·FCC, at most one per cell. */
 pub struct Population {
     pub name: &'static str,
     pub order: f64,
@@ -287,7 +287,8 @@ pub fn capsule(p: Point, q: Point, radius: f64, kind: Kind, fill: Fill, op: Op) 
 pub fn lathe(p: Point, q: Point, radius: impl Fn(f64) -> f64 + 'static, kind: Kind, fill: Fill, op: Op) -> Shape {
     let (p_at, d, length_at) = segment(p, q);
     let length = float(length_at);
-    // Area and volume by slices; the area is the convex hull's (see generator.ts).
+    // Area and volume by slices. The shadow it casts is its convex hull's, so the area is the hull's:
+    // a crown's whorls have undersides that cast no more shadow (Cauchy holds for convex bodies).
     let n = 8f64.max(length.ceil()) as usize;
     let r: Vec<f64> = (0..=n).map(|i| radius(i as f64 / n as f64)).collect();
     let mut hull: Vec<usize> = Vec::new();
@@ -456,8 +457,7 @@ impl Shape {
 }
 
 /**
- * Draws a shape at sites `s` apart, by how many of its sizes are under s
- * (drawShape in generator.ts).
+ * Draws a shape at sites `s` apart, by how many of its sizes are under s.
  */
 fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &mut dyn FnMut(i64, i64, i64)) {
     let s = si as f64;

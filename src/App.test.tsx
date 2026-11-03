@@ -5,7 +5,7 @@ import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import App from './App'
 
 // These tests cover the UI; a few voxels render much faster than the full forest.
-vi.mock('./lib/forest', async () => ({ forest: (await import('./lib/small-forest.test-helper')).smallForest }))
+vi.mock('./lib/worldgen', async () => ({ forest: (await import('./lib/small-forest.test-helper')).smallForest }))
 
 const cameraPosition = () =>
   (screen.getByText('Position').nextElementSibling?.textContent ?? '').split(',').map(Number)

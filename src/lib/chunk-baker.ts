@@ -1,14 +1,14 @@
 /**
  * Baking whole chunks: from a chunk request to its splats, by the baker in
- * bake/ (Rust, compiled to WebAssembly and inlined here). Used by the
+ * bake/ (Rust, in the WebAssembly module of wasm.ts). Used by the
  * renderer directly (without workers) and inside bake workers, through the
  * message protocol below. No DOM.
  */
-import wasm from '../../bake/target/wasm32-unknown-unknown/release/bake.wasm?inline'
 import { shadedPalette, VOXEL_GEOMETRY } from './bake'
 import type { SliceId } from './slice-selection'
 import { FACES } from './view'
 import { BRICK_SITES, LayerIndex, usedCells, type LayerIndexData, type Material, type VoxelData } from './voxel-grid'
+import { wasmInstance } from './wasm'
 import { generatePart, type GridPart, type WorldType } from './world'
 
 /**
@@ -82,16 +82,6 @@ interface Baker {
 }
 type Call = (face: number, level: number, layer: number, cutoff: number, i: number, j: number, eyeA: number, eyeB: number, eyeC: number, fill: number) => number
 
-// Compiled on first use, once per thread, synchronously
-// (browsers allow that for a module this small even on the main thread).
-let compiled: WebAssembly.Module | null = null
-const bakerModule = () => (compiled ??= new WebAssembly.Module(Uint8Array.from(atob(wasm.slice(wasm.indexOf(',') + 1)), c => c.charCodeAt(0))))
-
-/** A new instance of the module, with its own memory: for baking a world, or for Coverage (occlusion.ts). */
-export function bakerInstance(): WebAssembly.Exports {
-  return new WebAssembly.Instance(bakerModule()).exports
-}
-
 const faceIndex = new Map(FACES.map((face, index) => [face.name, index]))
 
 /**
@@ -104,7 +94,7 @@ export class ChunkBaker {
   private baker: Baker
 
   constructor(materials: readonly Material[], levels: readonly (VoxelData | undefined)[]) {
-    const baker = bakerInstance() as unknown as Baker
+    const baker = wasmInstance() as unknown as Baker
     this.baker = baker
     baker.world_start(materials.length)
     this.write(Float64Array, baker.world_table(0), VOXEL_GEOMETRY)

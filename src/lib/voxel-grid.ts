@@ -26,7 +26,7 @@ export interface Material {
 export type VoxelData = Pick<VoxelGrid, 'minX' | 'minY' | 'minZ' | 'nx' | 'ny' | 'nz' | 'bricks' | 'cells' | 'materials'>
 
 /** Half-open integer box: x in [minX, maxX), y and z likewise. */
-interface Box {
+export interface Box {
   minX: number
   minY: number
   minZ: number
