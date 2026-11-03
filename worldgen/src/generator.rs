@@ -696,9 +696,9 @@ fn drawables_in<'a>(generator: &'a Generator, clip: &Box3, s: i64) -> Vec<Drawab
 fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut dyn FnMut(Kind, Op, i64, i64, i64)) {
     let op = field.op;
     let field_seed = hash_text(field.name, seed);
-    let kept = |x: i64, y: i64, z: i64, extinction: Option<f64>| {
-        extinction.is_none_or(|e| unit(hash(field_seed, x * s, y * s, z * s)) < 1.0 - js::exp(-e * CHORD * s as f64))
-    };
+    // The chance a medium's site is kept, from its extinction.
+    let chance_of = |extinction: Option<f64>| extinction.map(|e| 1.0 - js::exp(-e * CHORD * s as f64));
+    let kept = |x: i64, y: i64, z: i64, chance: Option<f64>| chance.is_none_or(|p| unit(hash(field_seed, x * s, y * s, z * s)) < p);
     match &field.values {
         FieldValues::At(at) => {
             for z in clip.min[2]..clip.max[2] {
@@ -706,7 +706,7 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut dyn FnMut
                     let mut x = clip.min[0] + ((clip.min[0] + y + z) & 1);
                     while x < clip.max[0] {
                         if let Some((kind, extinction)) = at(x * s, y * s, z * s, s)
-                            && kept(x, y, z, extinction)
+                            && kept(x, y, z, chance_of(extinction))
                         {
                             put(kind, op, x, y, z);
                         }
@@ -726,11 +726,13 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut dyn FnMut
                     site[a] = u;
                     site[b] = v;
                     for span in spans(u * s, v * s, s) {
-                        let first = (-(-span.from).div_euclid(s)).max(lo[axis]);
+                        // s is a power of two: shifting is dividing, rounded down.
+                        let first = (-((-span.from) >> s.trailing_zeros())).max(lo[axis]);
                         let mut w = first + ((first + u + v) & 1);
+                        let chance = chance_of(span.extinction);
                         while w * s < span.to && w < hi[axis] {
                             site[axis] = w;
-                            if kept(site[0], site[1], site[2], span.extinction) {
+                            if kept(site[0], site[1], site[2], chance) {
                                 put(span.kind, op, site[0], site[1], site[2]);
                             }
                             w += 2;

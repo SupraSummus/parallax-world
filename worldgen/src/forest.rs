@@ -10,7 +10,7 @@ use crate::generator::{
 };
 use crate::grid::Box3;
 use crate::js::{self, round};
-use crate::noise::{Fixed, ONE, Rng, fbm, fixed, float, fraction, hash, hash64, smoothstep, stream, unit, value_noise};
+use crate::noise::{Fbm, Fixed, ONE, Rng, ValueNoise, fixed, float, fraction, hash, hash64, smoothstep, stream, unit};
 
 /** Metres per lattice unit. */
 pub const UNIT_SIZE: f64 = 0.125;
@@ -40,9 +40,9 @@ pub fn heights(level: u32) -> (i64, i64) {
 macro_rules! kinds {
     ($($name:ident: $type:expr, [$($color:expr),*];)*) => {
         #[allow(non_camel_case_types, clippy::upper_case_acronyms)]
-        #[derive(Clone, Copy, PartialEq, Eq)]
+        #[derive(Clone, Copy, PartialEq, Eq, Default)]
         #[repr(u8)]
-        enum K { $($name),* }
+        enum K { #[default] $($name),* }
         static KINDS: &[KindDef] = &[$(KindDef { kind_type: $type, colors: &[$($color),*] }),*];
     };
 }
@@ -128,7 +128,7 @@ fn foliage(species: Species) -> K {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 struct Column {
     height: i64,
     surface: K,
@@ -143,8 +143,46 @@ struct Forest {
     seed: u64,
     path_phase: f64,
     spawn: [i64; 3],
-    /** Recent ground heights, by a hash of (x, z): x, z, height. */
-    kept: RefCell<(Vec<i64>, Vec<i64>, Vec<i64>)>,
+    /** Recent ground heights and columns, by a hash of (x, z). */
+    heights: Kept<i64>,
+    columns: Kept<Column>,
+    /** Recent path centre lines, by z modulo their number: z, path_x. */
+    paths: RefCell<Vec<(i64, Fixed)>>,
+    noise: Noise,
+}
+
+/**
+ * Values by column, the last made in each of its slots: as many as two
+ * tiles have columns, so a layer finds what the one before made in its tile.
+ */
+struct Kept<T>(RefCell<Vec<(i64, i64, T)>>);
+
+impl<T: Copy + Default> Kept<T> {
+    fn new() -> Self {
+        Kept(RefCell::new(vec![(i64::MIN, 0, T::default()); 1 << 15]))
+    }
+
+    fn get(&self, x: i64, z: i64, make: impl FnOnce() -> T) -> T {
+        let key = (((x as u64).wrapping_mul(0x9e3779b97f4a7c15) ^ (z as u64).wrapping_mul(0xc2b2ae3d27d4eb4f)) >> 49) as usize;
+        let (kx, kz, value) = self.0.borrow()[key];
+        if (kx, kz) == (x, z) {
+            return value;
+        }
+        let value = make();
+        self.0.borrow_mut()[key] = (x, z, value);
+        value
+    }
+}
+
+/** The forest's noise, by what it decides. */
+struct Noise {
+    hills: Fbm<360, 4>,
+    bumps: ValueNoise<48>,
+    far: Fbm<7200, 4>,
+    conifer: Fbm<320, 4>,
+    density: Fbm<176, 4>,
+    path_edge: ValueNoise<24>,
+    floor: ValueNoise<20>,
 }
 
 impl Forest {
@@ -152,10 +190,16 @@ impl Forest {
         stream(self.seed, k)
     }
 
-    /** Path centre line at z, in units, fixed point. */
+    /** Path centre line at z, in units, fixed point; kept, as columns ask for it again and again. */
     fn path_x(&self, z: i64) -> Fixed {
-        let zm = z as f64 * UNIT_SIZE;
-        fixed((9.0 * js::sin(zm / 31.0 + self.path_phase) + 5.0 * js::sin(zm / 13.0 + self.path_phase * 2.0)) / UNIT_SIZE)
+        let mut paths = self.paths.borrow_mut();
+        let slot = z.rem_euclid(paths.len() as i64) as usize;
+        if paths[slot].0 != z {
+            let zm = z as f64 * UNIT_SIZE;
+            let x = fixed((9.0 * js::sin(zm / 31.0 + self.path_phase) + 5.0 * js::sin(zm / 13.0 + self.path_phase * 2.0)) / UNIT_SIZE);
+            paths[slot] = (z, x);
+        }
+        paths[slot].1
     }
 
     /** How far column (x, z) is from the path's centre line, in units, fixed point. */
@@ -166,34 +210,27 @@ impl Forest {
     /** Ground height in units, fixed point; noise periods in units too. */
     fn ground_fixed(&self, x: i64, z: i64) -> Fixed {
         let from_path = self.path_distance(x, z);
-        let hills = (fbm(self.s(2), x, z, 360, 4) - ONE / 2) * metres(10.0) / ONE
-            + (value_noise(self.s(3), x, z, 48) - ONE / 2) * metres(0.8) / ONE;
+        let n = &self.noise;
+        let hills = (n.hills.at(x, z) - ONE / 2) * metres(10.0) / ONE + (n.bumps.at(x, z) - ONE / 2) * metres(0.8) / ONE;
         let valley = smoothstep(metres(8.0), metres(42.0), from_path) * metres(18.0) / ONE;
-        let far = (fbm(self.s(9), x, z, 7200, 4) - ONE / 2) * metres(50.0) / ONE;
+        let far = (n.far.at(x, z) - ONE / 2) * metres(50.0) / ONE;
         let path_dip = (ONE - smoothstep(metres(1.0), metres(2.2), from_path)) * metres(0.3) / ONE;
         hills + valley + far - path_dip
     }
 
     /** Ground height in units. */
     fn ground(&self, x: i64, z: i64) -> i64 {
-        let key = (((x as i32).wrapping_mul(0x9e3779b1u32 as i32) ^ (z as i32).wrapping_mul(0x85ebca77u32 as i32)) as u32 >> 18) as usize;
-        let mut kept = self.kept.borrow_mut();
-        if kept.0[key] != x || kept.1[key] != z {
-            kept.0[key] = x;
-            kept.1[key] = z;
-            kept.2[key] = (self.ground_fixed(x, z) + ONE / 2) >> 16;
-        }
-        kept.2[key]
+        self.heights.get(x, z, || (self.ground_fixed(x, z) + ONE / 2) >> 16)
     }
 
     /** Column (x, z), given the ground's height there and at its four neighbours. */
     fn column_of(&self, x: i64, z: i64, h: i64, neighbours: [i64; 4]) -> Column {
         let slope = neighbours.map(|n| (n - h).abs()).into_iter().max().expect("four");
-        let conifer =
-            smoothstep(fixed(0.4), fixed(0.6), fbm(self.s(5), x, z, 320, 4)) * 3 / 4 + smoothstep(metres(6.0), metres(16.0), h * ONE) / 4;
-        let density = smoothstep(fixed(0.3), fixed(0.48), fbm(self.s(6), x, z, 176, 4));
-        let on_path = self.path_distance(x, z) < metres(1.1) + value_noise(self.s(7), z, 0, 24) * metres(0.5) / ONE;
-        let floor = value_noise(self.s(8), x, z, 20);
+        let n = &self.noise;
+        let conifer = smoothstep(fixed(0.4), fixed(0.6), n.conifer.at(x, z)) * 3 / 4 + smoothstep(metres(6.0), metres(16.0), h * ONE) / 4;
+        let density = smoothstep(fixed(0.3), fixed(0.48), n.density.at(x, z));
+        let on_path = self.path_distance(x, z) < metres(1.1) + n.path_edge.at(z, 0) * metres(0.5) / ONE;
+        let floor = n.floor.at(x, z);
         let surface = if on_path {
             K::path
         } else if slope >= 3 {
@@ -211,12 +248,14 @@ impl Forest {
     }
 
     fn column(&self, x: i64, z: i64) -> Column {
-        self.column_of(
-            x,
-            z,
-            self.ground(x, z),
-            [self.ground(x - 1, z), self.ground(x + 1, z), self.ground(x, z - 1), self.ground(x, z + 1)],
-        )
+        self.columns.get(x, z, || {
+            self.column_of(
+                x,
+                z,
+                self.ground(x, z),
+                [self.ground(x - 1, z), self.ground(x + 1, z), self.ground(x, z - 1), self.ground(x, z + 1)],
+            )
+        })
     }
 
     /** A random spot on the ground under the square a cell reaches over (2N wide). */
@@ -261,8 +300,23 @@ fn pick_species(mut pick: Fixed, chances: &[Fixed; 3]) -> Species {
 
 /** The forest's generator for `seed`, and where the camera starts. */
 pub fn forest(seed: u64) -> (Generator, [i64; 3]) {
-    let mut f =
-        Forest { seed, path_phase: 0.0, spawn: [0; 3], kept: RefCell::new((vec![i64::MIN; 1 << 14], vec![0; 1 << 14], vec![0; 1 << 14])) };
+    let mut f = Forest {
+        seed,
+        path_phase: 0.0,
+        spawn: [0; 3],
+        heights: Kept::new(),
+        columns: Kept::new(),
+        paths: RefCell::new(vec![(i64::MIN, 0); 1 << 10]),
+        noise: Noise {
+            hills: Fbm::new(stream(seed, 2)),
+            bumps: ValueNoise::new(stream(seed, 3)),
+            far: Fbm::new(stream(seed, 9)),
+            conifer: Fbm::new(stream(seed, 5)),
+            density: Fbm::new(stream(seed, 6)),
+            path_edge: ValueNoise::new(stream(seed, 7)),
+            floor: ValueNoise::new(stream(seed, 8)),
+        },
+    };
     f.path_phase = unit(hash(f.s(1), 0, 0, 0)) * 100.0;
     // Start on the path at the near end, at about the height of a tall shrub.
     let spawn_z = vox(-31.0) as i64;
@@ -283,7 +337,7 @@ pub fn forest(seed: u64) -> (Generator, [i64; 3]) {
                 spans: Box::new(move |x, z, spacing| {
                     let h = f.ground(x, z);
                     let around = [f.ground(x - spacing, z), f.ground(x + spacing, z), f.ground(x, z - spacing), f.ground(x, z + spacing)];
-                    let surface = if spacing == 1 { f.column_of(x, z, h, around) } else { f.column(x, z) }.surface;
+                    let surface = f.column(x, z).surface;
                     let bottom = around.into_iter().fold(h - vox(1.5) as i64, i64::min);
                     let top = h + 1 - (vox(1.0) as i64).max(2 * spacing);
                     let below = if surface == K::stone || surface == K::mossyStone { K::stone } else { K::soil };
@@ -681,7 +735,7 @@ fn spruce_tree(x: f64, ground: f64, z: f64, random: &mut Rng, ground_at: GroundA
     let crown_top = top + vox(0.5);
     let r = move |y: f64| {
         // Each whorl is widest at its bottom, giving the layered silhouette.
-        let phase = (((top - y) % whorl) + whorl) % whorl / whorl;
+        let phase = js::wrap(top - y, whorl) / whorl;
         radius * (1.0 - (y - base) / (crown_top - base)) * (0.5 + 0.5 * phase) + vox(0.35)
     };
     let (from, to) = (base - 0.5, crown_top + 0.5);
@@ -697,7 +751,7 @@ fn spruce_tree(x: f64, ground: f64, z: f64, random: &mut Rng, ground_at: GroundA
             return density(distance, py);
         }
         let a = js::atan2(pz - cz, px - cx) - twist - ((top - py) / whorl).floor() * 2.39996;
-        let off = ((a % sector) + sector) % sector;
+        let off = js::wrap(a, sector);
         if off.min(sector - off) * distance < half_width(distance) { density(distance, py) } else { 0.0 }
     };
     let crown = |fill: Fill| lathe([cx, from, cz], [cx, to, cz], move |t| r(round(from + t * (to - from))), k(K::spruce), fill, Op::Fill);

@@ -50,6 +50,20 @@ pub fn hypot(values: &[f64]) -> f64 {
     sum.sqrt() * max
 }
 
+/**
+ * `((x % m) + m) % m` for m > 0, exactly, without fmod's slow loop: x % m
+ * is x − trunc(x / m)·m, which a fused multiply-add gives exactly unless
+ * the quotient rounded off by one, and then it falls outside the range.
+ */
+pub fn wrap(x: f64, m: f64) -> f64 {
+    let r = (-(x / m).trunc()).mul_add(m, x);
+    let mut r = if r.abs() < m && (r == 0.0 || (r < 0.0) == (x < 0.0)) { r } else { x % m } + m;
+    while r >= m {
+        r -= m;
+    }
+    r
+}
+
 /** Math.max of a list (−∞ if empty). */
 pub fn max(values: impl IntoIterator<Item = f64>) -> f64 {
     values.into_iter().fold(f64::NEG_INFINITY, f64::max)
@@ -69,5 +83,17 @@ mod tests {
         assert_eq!(round(-2.5), -2.0);
         assert_eq!(round(2.5), 3.0);
         assert_eq!(hypot(&[3.0, 4.0]), 5.0);
+    }
+
+    #[test]
+    fn wraps_like_js() {
+        let mut random = crate::noise::Rng::new(5);
+        for _ in 0..1_000_000 {
+            let m = 0.1 + random.next() * 3.0;
+            let x = (random.next() - 0.5) * [2.0, 100.0, 1e6, 1e18][random.below(4) as usize];
+            for x in [x, (x / m).round() * m, (x / m).round() * m + 1e-12] {
+                assert_eq!(wrap(x, m).to_bits(), (((x % m) + m) % m).to_bits(), "{x} {m}");
+            }
+        }
     }
 }

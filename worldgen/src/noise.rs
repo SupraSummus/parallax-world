@@ -1,6 +1,8 @@
 //! Deterministic hashing, noise and randomness for the world generators:
 //! integers wherever they decide something, so a seed gives the same world everywhere and far from the origin.
 
+use std::cell::Cell;
+
 /** splitmix64's finaliser: a bijection of u64 that mixes every bit into every other. */
 fn mix(mut z: u64) -> u64 {
     z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
@@ -67,19 +69,50 @@ fn lerp(a: Fixed, b: Fixed, t: Fixed) -> Fixed {
     a + (((b - a) * t) >> 16)
 }
 
-/** Lattice noise in [0, ONE) at (x, y) / period: random values at multiples of `period`, eased between. */
-pub fn value_noise(seed: u64, x: i64, y: i64, period: i64) -> Fixed {
-    let (ix, iy) = (x.div_euclid(period), y.div_euclid(period));
-    let u = ease((x.rem_euclid(period) << 16) / period);
-    let v = ease((y.rem_euclid(period) << 16) / period);
-    let at = |i, j| fraction(hash(seed, i, j, 0));
-    lerp(lerp(at(ix, iy), at(ix + 1, iy), u), lerp(at(ix, iy + 1), at(ix + 1, iy + 1), u), v)
+/**
+ * Lattice noise in [0, ONE) at (x, y) / PERIOD: random values at multiples
+ * of PERIOD, eased between. A constant, so dividing by it is multiplying.
+ * The corners of the cell it was last asked in are kept, as neighbouring
+ * columns mostly ask in the same.
+ */
+pub struct ValueNoise<const PERIOD: i64> {
+    seed: u64,
+    cell: Cell<(i64, i64, [Fixed; 4])>,
 }
 
-/** Fractal value noise in [0, ONE): `octaves` of it, each at half the period and half the weight of the last. */
-pub fn fbm(seed: u64, x: i64, y: i64, period: i64, octaves: u32) -> Fixed {
-    let sum: Fixed = (0..octaves).map(|i| value_noise(stream(seed, i as u64), x << i, y << i, period) << (octaves - 1 - i)).sum();
-    sum / ((1 << octaves) - 1)
+impl<const PERIOD: i64> ValueNoise<PERIOD> {
+    pub fn new(seed: u64) -> Self {
+        ValueNoise { seed, cell: Cell::new((i64::MIN, i64::MIN, [0; 4])) }
+    }
+
+    #[inline(always)]
+    pub fn at(&self, x: i64, y: i64) -> Fixed {
+        let (ix, iy) = (x.div_euclid(PERIOD), y.div_euclid(PERIOD));
+        let (kx, ky, mut c) = self.cell.get();
+        if (kx, ky) != (ix, iy) {
+            let at = |i, j| fraction(hash(self.seed, i, j, 0));
+            c = [at(ix, iy), at(ix + 1, iy), at(ix, iy + 1), at(ix + 1, iy + 1)];
+            self.cell.set((ix, iy, c));
+        }
+        let u = ease((x.rem_euclid(PERIOD) << 16) / PERIOD);
+        let v = ease((y.rem_euclid(PERIOD) << 16) / PERIOD);
+        lerp(lerp(c[0], c[1], u), lerp(c[2], c[3], u), v)
+    }
+}
+
+/** Fractal value noise in [0, ONE): OCTAVES of it, each at half the period and half the weight of the last. */
+pub struct Fbm<const PERIOD: i64, const OCTAVES: usize>([ValueNoise<PERIOD>; OCTAVES]);
+
+impl<const PERIOD: i64, const OCTAVES: usize> Fbm<PERIOD, OCTAVES> {
+    pub fn new(seed: u64) -> Self {
+        Fbm(std::array::from_fn(|i| ValueNoise::new(stream(seed, i as u64))))
+    }
+
+    #[inline(always)]
+    pub fn at(&self, x: i64, y: i64) -> Fixed {
+        let sum: Fixed = self.0.iter().enumerate().map(|(i, octave)| octave.at(x << i, y << i) << (OCTAVES - 1 - i)).sum();
+        sum / ((1 << OCTAVES) - 1)
+    }
 }
 
 /** 0 below `edge0`, ONE above `edge1`, eased between. */
@@ -135,11 +168,12 @@ mod tests {
     #[test]
     fn noise_holds_up_far_from_the_origin() {
         for x0 in [-1000, 1 << 40] {
-            let mut last = value_noise(3, x0, 5, 48);
+            let (noise, fbm) = (ValueNoise::<48>::new(3), Fbm::<360, 4>::new(3));
+            let mut last = noise.at(x0, 5);
             for x in x0 + 1..x0 + 2000 {
-                let v = value_noise(3, x, 5, 48);
+                let v = noise.at(x, 5);
                 assert!((0..ONE).contains(&v) && (v - last).abs() < ONE / 16, "{x}: {last} to {v}");
-                assert!((0..ONE).contains(&fbm(3, x, 5, 360, 4)));
+                assert!((0..ONE).contains(&fbm.at(x, 5)));
                 last = v;
             }
         }
