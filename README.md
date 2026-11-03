@@ -53,7 +53,8 @@ where the sections below are too).
    so a chunk baked from a lattice site near the camera
    stays valid while the camera stays in that site's cell (sections 3–5).
 4. **Worlds generated in pieces, at any level of detail.**
-   A world on the generator framework of `worldgen/` (so far the forest)
+   A world on the generator framework of `worldgen/`
+   (the forest, and the valley: the forest with a town and fields)
    gives the same voxels for any box generated alone, at any level.
    Levels agree on what a camera sees
    (how far rays get, what they stop on),

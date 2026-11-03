@@ -30,7 +30,7 @@ pnpm exec vitest run bake       # files matching "bake"
 | `src/lib/renderer-regressions.test.ts` | Previously fixed rendering bugs |
 | `src/lib/world.test.ts` | Toy worlds; a generated world's grids put together from parts generated alone |
 | `worldgen/tests/contract.rs` | Every world generated in pieces equals it generated whole, at several levels |
-| `worldgen/tests/forest.rs`, `src/lib/city.test.ts` | The scenes: determinism, contents, spawn |
+| `worldgen/tests/forest.rs`, `worldgen/tests/valley.rs`, `src/lib/city.test.ts` | The scenes: determinism, contents, spawn |
 | `src/lib/worldgen.test.ts` | The forest as the web gets it from WebAssembly |
 | `src/viewer/mesh.test.ts` | Reference viewer mesh |
 | `src/App.test.tsx` | UI panels, keyboard movement and turning |

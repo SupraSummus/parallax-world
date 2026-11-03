@@ -1,4 +1,4 @@
-//! The WebAssembly interface: worldgen.ts starts a forest of a seed, then
+//! The WebAssembly interface: worldgen.ts starts a world of a seed, then
 //! generates box after box of it, reading each result from RESULT and the
 //! buffers it points to, which the next call reuses. The module is the
 //! web's only one: it holds the baker's interface too (bake/src/lib.rs,
@@ -9,8 +9,9 @@ use std::cell::RefCell;
 use crate::forest::{REACH, forest, heights};
 use crate::generator::{Generator, generate, materials_of};
 use crate::grid::{Box3, VoxelGrid};
+use crate::valley::valley;
 
-/** The forest started last, its materials' colours (0xrrggbb by id), and the grid generated last. */
+/** The world started last, its materials' colours (0xrrggbb by id), and the grid generated last. */
 struct State {
     generator: Generator,
     materials: Vec<u32>,
@@ -30,13 +31,14 @@ fn result(values: &[f64]) -> *const f64 {
 }
 
 /**
- * Starts the forest of `seed` (an integer; JS numbers are f64); returns
- * RESULT: spawn x, y, z, REACH, materials, and a pointer to their
- * colours (u32, 0xrrggbb).
+ * Starts world `world` (0: the forest, 1: the valley) of `seed` (an
+ * integer; JS numbers are f64); returns RESULT: spawn x, y, z, REACH,
+ * materials, and a pointer to their colours (u32, 0xrrggbb).
  */
 #[unsafe(no_mangle)]
-pub extern "C" fn forest_start(seed: f64) -> *const f64 {
-    let (generator, spawn) = forest(seed as i64 as u64);
+pub extern "C" fn worldgen_start(world: u32, seed: f64) -> *const f64 {
+    let seed = seed as i64 as u64;
+    let (generator, spawn) = if world == 1 { valley(seed) } else { forest(seed) };
     let materials = materials_of(&generator).iter().map(|m| m.rgb()).collect();
     STATE.with_borrow_mut(|state| {
         let State { materials, .. } = state.insert(State { generator, materials, grid: None });
@@ -44,9 +46,9 @@ pub extern "C" fn forest_start(seed: f64) -> *const f64 {
     })
 }
 
-/** The heights the forest has anything at in units of `level`; returns RESULT: min y, max y (exclusive). */
+/** The heights the worlds have anything at in units of `level`; returns RESULT: min y, max y (exclusive). */
 #[unsafe(no_mangle)]
-pub extern "C" fn forest_heights(level: u32) -> *const f64 {
+pub extern "C" fn worldgen_heights(level: u32) -> *const f64 {
     let (min, max) = heights(level);
     result(&[min as f64, max as f64])
 }
@@ -55,10 +57,10 @@ pub extern "C" fn forest_heights(level: u32) -> *const f64 {
  * Generates the box from (min_x, min_y, min_z) to (max_x, max_y, max_z)
  * (exclusive) at `level` (see generate); returns RESULT: the grid's min x,
  * y, z, nx, ny, nz, a pointer to its bricks (i32), their count, a pointer
- * to its sites (u8) and their count. Null before forest_start.
+ * to its sites (u8) and their count. Null before worldgen_start.
  */
 #[unsafe(no_mangle)]
-pub extern "C" fn forest_generate(level: u32, min_x: f64, min_y: f64, min_z: f64, max_x: f64, max_y: f64, max_z: f64) -> *const f64 {
+pub extern "C" fn worldgen_generate(level: u32, min_x: f64, min_y: f64, min_z: f64, max_x: f64, max_y: f64, max_z: f64) -> *const f64 {
     STATE.with_borrow_mut(|state| {
         let Some(state) = state else { return std::ptr::null() };
         let b = Box3 { min: [min_x as i64, min_y as i64, min_z as i64], max: [max_x as i64, max_y as i64, max_z as i64] };
