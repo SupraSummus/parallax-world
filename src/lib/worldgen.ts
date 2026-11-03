@@ -20,11 +20,9 @@ export function forest(seed: number): Generated {
   const exports = wasmInstance() as unknown as Exports
   // Before reading memory.buffer: each call may grow (and so replace) it.
   const result = (at: number, count: number) => new Float64Array(exports.memory.buffer, at, count)
-  const [x, y, z, reach, count, pairs] = result(exports.forest_start(seed), 6)
-  const ids = new Uint32Array(exports.memory.buffer, pairs, count * 2)
-  const materials: Material[] = Array.from({ length: count }, (_, id) => ({
-    color: id === 0 ? '' : `#${ids[2 * id].toString(16).padStart(6, '0')}`,
-    type: ids[2 * id + 1],
+  const [x, y, z, reach, count, colours] = result(exports.forest_start(seed), 6)
+  const materials: Material[] = Array.from(new Uint32Array(exports.memory.buffer, colours, count), (rgb, id) => ({
+    color: id === 0 ? '' : `#${rgb.toString(16).padStart(6, '0')}`,
   }))
   return {
     spawn: { x, y, z },

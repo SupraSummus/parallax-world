@@ -10,7 +10,7 @@ use crate::forest::{REACH, forest, heights};
 use crate::generator::{Generator, generate, materials_of};
 use crate::grid::{Box3, VoxelGrid};
 
-/** The forest started last, its materials as [rgb, type] pairs, and the grid generated last. */
+/** The forest started last, its materials' colours (0xrrggbb by id), and the grid generated last. */
 struct State {
     generator: Generator,
     materials: Vec<u32>,
@@ -32,22 +32,15 @@ fn result(values: &[f64]) -> *const f64 {
 /**
  * Starts the forest of `seed` (an integer; JS numbers are f64); returns
  * RESULT: spawn x, y, z, REACH, materials, and a pointer to their
- * [rgb, type] pairs (u32).
+ * colours (u32, 0xrrggbb).
  */
 #[unsafe(no_mangle)]
 pub extern "C" fn forest_start(seed: f64) -> *const f64 {
     let (generator, spawn) = forest(seed as i64 as u64);
-    let materials = materials_of(&generator).iter().flat_map(|m| [m.rgb(), m.material_type as u32]).collect();
+    let materials = materials_of(&generator).iter().map(|m| m.rgb()).collect();
     STATE.with_borrow_mut(|state| {
         let State { materials, .. } = state.insert(State { generator, materials, grid: None });
-        result(&[
-            spawn[0] as f64,
-            spawn[1] as f64,
-            spawn[2] as f64,
-            REACH,
-            (materials.len() / 2) as f64,
-            materials.as_ptr() as usize as f64,
-        ])
+        result(&[spawn[0] as f64, spawn[1] as f64, spawn[2] as f64, REACH, materials.len() as f64, materials.as_ptr() as usize as f64])
     })
 }
 

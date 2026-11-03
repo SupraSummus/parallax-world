@@ -7,11 +7,13 @@
 //! chunk-baker.ts drives it through the
 //! exports at the bottom. See docs/architecture.md, section 3.
 //! The same module finds what nearer layers cover on the main thread
-//! (coverage.rs).
+//! (coverage.rs), and where a grid's voxels are along the faces' layers
+//! (layer_index.rs).
 
 mod cells;
 mod coverage;
 mod fill;
+mod layer_index;
 mod slicing;
 mod splats;
 mod surface;
@@ -27,12 +29,13 @@ use fill::{fill_mask, solid_blocks};
 use slicing::{LAYER, atom_level, chunk_cell, spacing, thickness};
 use splats::{Splats, chunk_splats};
 use surface::{Voxel, cell_reads, cell_surface};
-use world::{Geometry, LATTICE, Reader};
+use world::{Geometry, Reader};
 
 // For native frontends, which link the baker instead of loading its WebAssembly.
 pub use coverage::Coverage;
+pub use layer_index::LayerIndex;
 pub use surface::Slice;
-pub use world::{Grid, Lattice, Tiles, VIEW_FACES};
+pub use world::{Grid, Lattice, Tiles, VIEW_FACES, lattices};
 
 /**
  * Mask pixels per unit of its grid for a slice of `level` as the grid
@@ -122,8 +125,9 @@ pub struct Baker {
 }
 
 impl Baker {
-    /** A baker for the view's faces' lattices (FACES in view.ts) and the world's materials' colours, 0xrrggbb by id. */
-    pub fn new(lattices: [Lattice; VIEW_FACES], colours: &[u32]) -> Baker {
+    /** A baker for the world's materials' colours, 0xrrggbb by id. */
+    pub fn new(colours: &[u32]) -> Baker {
+        let lattices = lattices();
         Baker {
             grids: Vec::new(),
             last: 0,
@@ -260,14 +264,15 @@ impl Baker {
     }
 }
 
-// The WebAssembly interface: chunk-baker.ts fills a world's tables through
-// the pointers these return, then bakes chunk after chunk, reading each
-// result from RESULT and the splat and block buffers it points to.
+// The WebAssembly interface: chunk-baker.ts writes a world's colours and
+// grids through the pointers these return, then bakes chunk after chunk,
+// reading each result from RESULT and the splat and block buffers it
+// points to.
 
 /** A world being handed over, then baking it. */
 enum State {
     None,
-    Loading { lattices: Vec<i32>, colours: Vec<u32> },
+    Loading { colours: Vec<u32> },
     Ready(Box<Baker>),
 }
 
@@ -276,11 +281,14 @@ thread_local! {
     static RESULT: RefCell<[f64; 12]> = const { RefCell::new([0.0; 12]) };
 }
 
-/** Starts a world of `materials` materials. */
+/** Starts a world of `materials` materials; returns where to write their colours (u32, 0xrrggbb by id), then call world_ready. */
 #[unsafe(no_mangle)]
-pub extern "C" fn world_start(materials: usize) {
+pub extern "C" fn world_start(materials: usize) -> *mut u32 {
     STATE.with_borrow_mut(|state| {
-        *state = State::Loading { lattices: vec![0; VIEW_FACES * LATTICE], colours: vec![0; materials] };
+        let mut colours = vec![0; materials];
+        let at = colours.as_mut_ptr();
+        *state = State::Loading { colours };
+        at
     })
 }
 
@@ -307,28 +315,12 @@ pub extern "C" fn world_cells() -> *mut u8 {
     })
 }
 
-/** Where to write the loading world's tables: 0 the faces' lattices (i32, see Baker::new), 1 the materials' colours (u32). */
-#[unsafe(no_mangle)]
-pub extern "C" fn world_table(table: u32) -> *mut u8 {
-    STATE.with_borrow_mut(|state| match state {
-        State::Loading { lattices, colours } => match table {
-            0 => lattices.as_mut_ptr() as *mut u8,
-            _ => colours.as_mut_ptr() as *mut u8,
-        },
-        _ => std::ptr::null_mut(),
-    })
-}
-
 /** Finishes loading. */
 #[unsafe(no_mangle)]
 pub extern "C" fn world_ready() {
     STATE.with_borrow_mut(|state| {
-        if let State::Loading { lattices, colours } = std::mem::replace(state, State::None) {
-            let lattices = std::array::from_fn(|f| {
-                let l = &lattices[f * LATTICE..(f + 1) * LATTICE];
-                Lattice { r: [l[0], l[1], l[2]], u: [l[3], l[4], l[5]], f: [l[6], l[7], l[8]] }
-            });
-            *state = State::Ready(Box::new(Baker::new(lattices, &colours)));
+        if let State::Loading { colours } = std::mem::replace(state, State::None) {
+            *state = State::Ready(Box::new(Baker::new(&colours)));
         }
     })
 }

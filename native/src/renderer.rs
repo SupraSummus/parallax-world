@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use bake::{Coverage, Slice, chunk_reads};
+use bake::{Coverage, Lattice, Slice, chunk_reads};
 
 use crate::bakery::{Baked, Bakery, Mask, Request};
 use crate::slicing::{
@@ -128,7 +128,7 @@ pub struct Renderer {
 /** One face as seen in one render. */
 struct FaceView<'a> {
     face: usize,
-    lattice: &'a [[i32; 3]; 3],
+    lattice: &'a Lattice,
     tangents: [f64; 4],
     camera: Vec3,
     eyes: Vec<[i32; 3]>,
@@ -304,7 +304,7 @@ struct Wants<'a> {
 fn cell_tiles(of: &FaceView, slice: &mut CachedSlice, heights: (i64, i64), i: i32, j: i32) -> Option<[i32; 4]> {
     *slice.tiles.entry((i, j)).or_insert_with(|| {
         let (_, min, max) = chunk_reads(&slice.id, i, j);
-        let [r, u, f] = *of.lattice;
+        let Lattice { r, u, f } = *of.lattice;
         // x, y, z at (a, b, c) as bake's Reader has it, over the box's corners.
         let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
         for corner in 0..8 {
@@ -337,7 +337,7 @@ fn cell_extent(of: &FaceView, slice: &mut CachedSlice, level: &Level, [i0, k0, i
         let (a0, a1) = ((left - columns as i64).div_euclid(n), ceil(right + columns as i64));
         let (lo, hi) = (k0..=k1)
             .flat_map(|k| (i0..=i1).map(move |i| (i, k)))
-            .filter_map(|t| level.tiles.get(&t)?.index.range(of.lattice, c0, c1, a0, a1))
+            .filter_map(|t| level.tiles.get(&t)?.index.range(of.lattice.f, c0, c1, a0, a1))
             .reduce(|a, b| (a.0.min(b.0), a.1.max(b.1)))?;
         let lo = ((lo * n) as f64).max(rect.y - rows as f64);
         let hi = ((hi * n) as f64).min(rect.y + rect.height + rows as f64);

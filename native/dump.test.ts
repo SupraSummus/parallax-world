@@ -1,8 +1,8 @@
 /**
  * Dumps a view of the forest for the native spike (native/src/dump.rs),
- * without WebAssembly: the renderer lists the chunks in view through the
- * recording Bakery below, and the faces' lattices and the world's grids are
- * written as chunk-baker.ts hands them to the baker.
+ * without baking: the renderer lists the chunks in view through the
+ * recording Bakery below, and the faces' lattices (to check bake's against)
+ * and the world's grids are written as chunk-baker.ts hands them to the baker.
  * Runs only when asked for: DUMP=frame.bin pnpm vitest run native/dump.test.ts
  * (SEED picks the forest). Outside tsconfig and ESLint: it needs Node's fs.
  */
@@ -43,8 +43,7 @@ test.skipIf(!process.env.DUMP)('dump a view for the native spike', () => {
     if (queue.length === 0) break
     for (const { seed, worldType, part } of queue.splice(0)) {
       const grid = generatePart(seed, worldType, part)
-      const { keys, tables } = new LayerIndex(grid, FACES.map(f => f.lattice))
-      generated(part, grid, { keys, tables })
+      generated(part, grid, LayerIndex.of(grid))
     }
   }
   console.log(`generated in ${((performance.now() - start) / 1000).toFixed(1)} s, ${requests.length} chunks wanted`)

@@ -20,7 +20,6 @@
 mod bakery;
 mod compositor;
 mod dump;
-mod layer_index;
 mod renderer;
 mod shot;
 mod slicing;
@@ -31,7 +30,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
-use bake::{Baker, Lattice};
+use bake::Baker;
 use eframe::egui;
 use eframe::egui_wgpu;
 
@@ -149,16 +148,8 @@ impl eframe::App for App {
 fn renderer(seed: u64, threads: usize, render_distance: f64) -> Renderer {
     let faces = view::faces();
     let colours: Vec<u32> = materials_of(&forest(seed).0).iter().map(|m| m.rgb()).collect();
-    let lattices = std::array::from_fn(|f| {
-        let [r, u, f] = faces[f].lattice;
-        Lattice { r, u, f }
-    });
-    let bakery = Bakery::new(threads, move || Baker::new(lattices, &colours));
+    let bakery = Bakery::new(threads, move || Baker::new(&colours));
     Renderer::new(faces, bakery, render_distance, std::array::from_fn(|level| worldgen::forest::heights(level as u32)))
-}
-
-fn lattices() -> Vec<[[i32; 3]; 3]> {
-    view::faces().iter().map(|f| f.lattice).collect()
 }
 
 /**
@@ -198,16 +189,15 @@ fn complete(world: &mut World, renderer: &mut Renderer, camera: Vec3, view: &vie
 fn check_requests(dump: &Dump, seed: u64, threads: usize) {
     let faces = view::faces();
     for (face, l) in faces.iter().zip(&dump.lattices) {
-        assert_eq!(face.lattice, [l.r, l.u, l.f], "the faces are not the TS renderer's");
+        assert_eq!(face.lattice, *l, "the faces are not the TS renderer's");
     }
     let focal = focal_length(dump.fov, dump.width, dump.height);
     let view = &view::View { yaw: dump.yaw, pitch: dump.pitch, width: dump.width, height: dump.height, focal };
     let mut renderer = renderer(seed, threads, dump.render_distance);
     let start = Instant::now();
-    let lattices = lattices();
     for (level, grid) in dump.grids.iter().enumerate() {
         if let Some(grid) = grid {
-            renderer.set_tiles(level, Arc::new(Level::cut(level, grid, &lattices)));
+            renderer.set_tiles(level, Arc::new(Level::cut(level, grid)));
         }
     }
     println!("indexed the dump's grids in {:.2} s", start.elapsed().as_secs_f64());
@@ -245,7 +235,7 @@ fn main() -> eframe::Result {
     let focal = focal_length(FOV, size[0], size[1]);
     let first = view::View { yaw: YAW, pitch: PITCH, width: size[0], height: size[1], focal };
     let mut renderer = renderer(seed, threads, RENDER_DISTANCE);
-    let mut world = World::new(seed, lattices(), threads);
+    let mut world = World::new(seed, threads);
     let mut camera = worldgen::forest::forest(seed).1.map(|v| v as f64);
     let faces: [[Vec3; 3]; 12] = std::array::from_fn(|f| view::faces()[f].axes);
     let fog_distance = RENDER_DISTANCE * 0.7;

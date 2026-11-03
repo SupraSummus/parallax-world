@@ -611,7 +611,7 @@ export class ParallaxRenderer {
 
   /** Takes a part the bakery generated, with its LayerIndex. */
   private receivePart(part: GridPart, data: VoxelData, index: LayerIndexData) {
-    const grid = this.world.receive(part, data, LayerIndex.from(index))
+    const grid = this.world.receive(part, data, new LayerIndex(index))
     if (grid) this.useGrid(part.level, grid)
   }
 

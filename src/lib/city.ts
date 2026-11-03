@@ -1,5 +1,5 @@
 import type { Vec3 } from './world'
-import { VoxelGrid, type Material } from './voxel-grid'
+import { Palette, VoxelGrid } from './voxel-grid'
 import { hash, rng } from './noise'
 
 /**
@@ -40,44 +40,40 @@ const MIN_Z = 0
 const MIN_Y = -1
 const MAX_Y = FLOOR0 + MAX_STOREYS * STOREY + vox(3.5)
 
-// `type` ids follow world.ts.
-const TYPE = { grass: 1, soil: 2, stone: 3, wood: 4, leaves: 5, water: 8, plaster: 10, glass: 11, metal: 12, fabric: 13 }
-
 /** A material kind: one of `colors` per plan cell, picked by position unless the caller picks. */
 interface Paint {
-  type: number
   colors: readonly string[]
 }
-const paint = (type: number, ...colors: string[]): Paint => ({ type, colors })
+const paint = (...colors: string[]): Paint => ({ colors })
 
-const ASPHALT = paint(TYPE.stone, '#3d3f42', '#414346', '#393b3e')
-const ROAD_MARK = paint(TYPE.stone, '#e6e2d6')
-const PAVING = paint(TYPE.stone, '#aba8a1', '#b4b1aa', '#a29f98')
-const KERB = paint(TYPE.stone, '#d0cdc5')
-const LAWN = paint(TYPE.grass, '#5f8f3a', '#679a40', '#588536')
-const HEDGE = paint(TYPE.leaves, '#2f5e2a', '#356a2f', '#2a5426')
-const SOIL = paint(TYPE.soil, '#4a3423', '#54392a')
-const BARK = paint(TYPE.wood, '#4b3621', '#57402a')
-const CANOPY = paint(TYPE.leaves, '#4c7f2a', '#5a8f30', '#447324', '#679a38')
-const POLE = paint(TYPE.metal, '#2e3236')
-const LIGHT = paint(TYPE.glass, '#fff3c4')
-const CONCRETE = paint(TYPE.stone, '#9a9690', '#a19d97')
-const PLINTH = paint(TYPE.stone, '#5e5a55', '#57534e')
-const GRAVEL = paint(TYPE.stone, '#6d6a66', '#75716c', '#686561')
-const GLASS = paint(TYPE.glass, '#5b7f97')
-const CEILING_PAINT = paint(TYPE.plaster, '#f4f2ec')
-const SKIRTING = paint(TYPE.wood, '#6b5a48')
-const BRASS = paint(TYPE.metal, '#c9a640')
-const RAILING = paint(TYPE.metal, '#2b2d30')
-const ROOF_UNIT = paint(TYPE.metal, '#9aa0a6', '#a3a9ae')
-const WATER = paint(TYPE.water, '#3f7fa8')
-const COURT_PAVING = paint(TYPE.stone, '#c8c0b0', '#bdb5a5')
-const TABLE = paint(TYPE.wood, '#6e4a2c')
-const CHAIR = paint(TYPE.wood, '#4a3424')
-const SHELF = paint(TYPE.wood, '#5c3e26')
-const BOOKS = paint(TYPE.fabric, '#8c2f2f', '#2f5a8c', '#d8b04a', '#3f7a4a', '#5a3a6e', '#e0dccf')
-const POT = paint(TYPE.stone, '#b5603c')
-const PLANT = paint(TYPE.leaves, '#3f7f35', '#4a8f3d', '#357030')
+const ASPHALT = paint('#3d3f42', '#414346', '#393b3e')
+const ROAD_MARK = paint('#e6e2d6')
+const PAVING = paint('#aba8a1', '#b4b1aa', '#a29f98')
+const KERB = paint('#d0cdc5')
+const LAWN = paint('#5f8f3a', '#679a40', '#588536')
+const HEDGE = paint('#2f5e2a', '#356a2f', '#2a5426')
+const SOIL = paint('#4a3423', '#54392a')
+const BARK = paint('#4b3621', '#57402a')
+const CANOPY = paint('#4c7f2a', '#5a8f30', '#447324', '#679a38')
+const POLE = paint('#2e3236')
+const LIGHT = paint('#fff3c4')
+const CONCRETE = paint('#9a9690', '#a19d97')
+const PLINTH = paint('#5e5a55', '#57534e')
+const GRAVEL = paint('#6d6a66', '#75716c', '#686561')
+const GLASS = paint('#5b7f97')
+const CEILING_PAINT = paint('#f4f2ec')
+const SKIRTING = paint('#6b5a48')
+const BRASS = paint('#c9a640')
+const RAILING = paint('#2b2d30')
+const ROOF_UNIT = paint('#9aa0a6', '#a3a9ae')
+const WATER = paint('#3f7fa8')
+const COURT_PAVING = paint('#c8c0b0', '#bdb5a5')
+const TABLE = paint('#6e4a2c')
+const CHAIR = paint('#4a3424')
+const SHELF = paint('#5c3e26')
+const BOOKS = paint('#8c2f2f', '#2f5a8c', '#d8b04a', '#3f7a4a', '#5a3a6e', '#e0dccf')
+const POT = paint('#b5603c')
+const PLANT = paint('#3f7f35', '#4a8f3d', '#357030')
 
 // Per building: one of each.
 const FACADES = ['#c9a27e', '#b5654a', '#d8cfb8', '#8a9aa6', '#a8b08a', '#c47d5a', '#7d8a7a', '#d6b85a']
@@ -88,10 +84,10 @@ const ROOM_DOORS = ['#8a5a32', '#6e4a2c', '#ece8de']
 
 // Floors, one pattern per room.
 const FLOORS = {
-  checker: [paint(TYPE.stone, '#e8e4dc'), paint(TYPE.stone, '#2c2c2e')],
-  tiles: [paint(TYPE.stone, '#d9d4c8'), paint(TYPE.stone, '#c9c3b5')],
-  parquet: [paint(TYPE.wood, '#a9743f', '#b8834a', '#9a6634', '#c0904f')],
-  carpet: [paint(TYPE.fabric, '#7a2e35', '#2e4a6b', '#3e5e3a', '#6b5a7a'), paint(TYPE.fabric, '#c9a85a', '#d8d0bc')],
+  checker: [paint('#e8e4dc'), paint('#2c2c2e')],
+  tiles: [paint('#d9d4c8'), paint('#c9c3b5')],
+  parquet: [paint('#a9743f', '#b8834a', '#9a6634', '#c0904f')],
+  carpet: [paint('#7a2e35', '#2e4a6b', '#3e5e3a', '#6b5a7a'), paint('#c9a85a', '#d8d0bc')],
   concrete: [CONCRETE],
 }
 type Floor = keyof typeof FLOORS
@@ -99,33 +95,20 @@ const FLOOR_KINDS = Object.keys(FLOORS) as Floor[]
 
 /** The voxel grid, painted cell by cell of the plan, with a material list that grows as paints are used. */
 class Canvas {
-  private readonly materials: Material[] = [{ color: '', type: 0 }]
-  private readonly ids = new Map<string, number>()
+  private readonly palette = new Palette()
   // Plan cell (x, y, z) holds the sites with x in [UNITS · x − 1, UNITS · x] (y, z likewise).
   readonly grid = new VoxelGrid(
     {
       minX: UNITS * MIN_X - 1, minY: UNITS * MIN_Y - 1, minZ: UNITS * MIN_Z - 1,
       maxX: UNITS * (MIN_X + SIZE) - 1, maxY: UNITS * MAX_Y - 1, maxZ: UNITS * (MIN_Z + SIZE) - 1,
     },
-    this.materials,
+    this.palette.materials,
   )
   constructor(private readonly shadeSeed: number) {}
 
   /** Fills plan cell (x, y, z) with `p` (one of its colours: picked by `pick` in [0, 1), else by position); null clears. Out-of-range cells are ignored. */
   put(x: number, y: number, z: number, p: Paint | null, pick?: number) {
-    let id = 0
-    if (p !== null) {
-      const color = p.colors[Math.floor((pick ?? hash(this.shadeSeed, x, y, z)) * p.colors.length)]
-      const key = `${color}|${String(p.type)}`
-      const known = this.ids.get(key)
-      if (known === undefined) {
-        id = this.materials.push({ color, type: p.type }) - 1
-        if (id > 255) throw new RangeError('too many city materials')
-        this.ids.set(key, id)
-      } else {
-        id = known
-      }
-    }
+    const id = p === null ? 0 : this.palette.id(p.colors[Math.floor((pick ?? hash(this.shadeSeed, x, y, z)) * p.colors.length)])
     this.grid.fillBox(UNITS * x - 1, UNITS * y - 1, UNITS * z - 1, UNITS * x + 1, UNITS * y + 1, UNITS * z + 1, id)
   }
 
@@ -430,7 +413,7 @@ function drawBuilding(canvas: Canvas, b: Building, seed: number) {
       const thick = e.facade ? 2 : 1
       switch (e.kind) {
         case 'door':
-          door(wall, thick, e.leaf, paint(TYPE.wood, ROOM_DOORS[Math.floor(random() * ROOM_DOORS.length)]), b.trim)
+          door(wall, thick, e.leaf, paint(ROOM_DOORS[Math.floor(random() * ROOM_DOORS.length)]), b.trim)
           break
         case 'arch':
           arch(wall, b.trim)
@@ -710,10 +693,10 @@ export function generateCity(seed: number): { grid: VoxelGrid; spawn: Vec3 } {
         court: random() < 0.6 ? { i: 1 + Math.floor(random() * (w - 2)), j: 1 + Math.floor(random() * (d - 2)) } : null,
         entrance: Math.floor(w / 2),
         backDoor: random() < 0.5 ? Math.floor(random() * w) : null,
-        facade: paint(TYPE.plaster, pick(FACADES)),
-        trim: paint(TYPE.plaster, pick(TRIMS)),
-        interior: paint(TYPE.plaster, pick(INTERIORS)),
-        entranceDoor: paint(TYPE.wood, pick(ENTRANCE_DOORS)),
+        facade: paint(pick(FACADES)),
+        trim: paint(pick(TRIMS)),
+        interior: paint(pick(INTERIORS)),
+        entranceDoor: paint(pick(ENTRANCE_DOORS)),
       }
 
       // Hedges round the back and sides of the lot, with a gap behind the back door.

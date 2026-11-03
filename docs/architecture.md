@@ -257,7 +257,8 @@ their cells are not searched again, but not shown.
 **Empty cells.** A chunk draws the voxels of its cell and a margin around it
 (`cellMargin`), within a few units of their b.
 The renderer looks them up in the layers the slice's sites span.
-`LayerIndex` (`voxel-grid.ts`) holds, per face, layer c and block of 8 columns a,
+`LayerIndex` (`voxel-grid.ts`, made by `bake/src/layer_index.rs`)
+holds, per face, layer c and block of 8 columns a,
 the least and greatest b of its voxels.
 A cell with no voxels it can draw is never baked.
 For the others, only the part of the cell within reach of those b
@@ -343,8 +344,9 @@ and inlined into the app (`wasm.ts`), so it compiles synchronously
 in a worker, on the main thread (for coverage, section 4) or in Node,
 with no files to fetch.
 `ChunkBaker` hands it a world once:
-the grid, the faces' lattices and the materials' colours;
-it shades them per face itself (`tables.rs`).
+the grid and the materials' colours.
+It knows the faces itself (`lattices`, in the order of `FACES`),
+and shades the colours per face (`tables.rs`).
 Then each chunk is one call,
 and its splats are copied out of the WebAssembly memory.
 A chunk's voxels are those of its cell and a margin around it

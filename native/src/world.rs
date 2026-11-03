@@ -13,12 +13,11 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Condvar, Mutex};
 
-use bake::{Grid, Tiles};
+use bake::{Grid, LayerIndex, Tiles};
 use worldgen::forest::{REACH, forest, heights};
 use worldgen::generator::{Generator, generate};
 use worldgen::grid::{Box3, compose};
 
-use crate::layer_index::LayerIndex;
 use crate::slicing::GRID_LEVELS;
 use crate::view::Vec3;
 
@@ -31,8 +30,6 @@ const KEEP: f64 = REACH + 2.0 * TILE as f64;
 
 /** Tile (i, k) holds x in [i · TILE, (i + 1) · TILE), z likewise. */
 pub type TileId = (i32, i32);
-
-type Lattices = Vec<[[i32; 3]; 3]>;
 
 /** A generated tile: its voxels, and where they are along each face's layers. */
 pub struct Tile {
@@ -53,7 +50,7 @@ impl Level {
     }
 
     /** A whole grid of `level` cut into tiles, those it has voxels in. */
-    pub fn cut(level: usize, grid: &Grid, lattices: &[[[i32; 3]; 3]]) -> Level {
+    pub fn cut(level: usize, grid: &Grid) -> Level {
         let tile = |v: i32| (v as i64).div_euclid(TILE) as i32;
         let (from, to) = ([grid.min[0], grid.min[2]].map(tile), [grid.min[0] + grid.n[0] - 1, grid.min[2] + grid.n[2] - 1].map(tile));
         let mut tiles = HashMap::new();
@@ -61,7 +58,7 @@ impl Level {
             for i in from[0]..=to[0] {
                 let part = compose(&tile_box(level, (i, k)), &[grid]);
                 if part.bricks.iter().any(|&b| b >= 0) {
-                    let index = LayerIndex::new(&part, lattices);
+                    let index = LayerIndex::new(&part);
                     tiles.insert((i, k), Arc::new(Tile { grid: Arc::new(part), index }));
                 }
             }
@@ -118,7 +115,7 @@ fn distance(level: usize, camera: Vec3, (i, k): TileId) -> f64 {
     off(camera[0], i).hypot(off(camera[2], k))
 }
 
-fn work(seed: u64, lattices: &Lattices, queue: &(Mutex<Queue>, Condvar), send: &Sender<Made>) {
+fn work(seed: u64, queue: &(Mutex<Queue>, Condvar), send: &Sender<Made>) {
     loop {
         let (level, id) = {
             let mut q = queue.0.lock().expect("queue");
@@ -131,7 +128,7 @@ fn work(seed: u64, lattices: &Lattices, queue: &(Mutex<Queue>, Condvar), send: &
             }
         };
         let grid = generate_tile(seed, level, &tile_box(level, id));
-        let index = LayerIndex::new(&grid, lattices);
+        let index = LayerIndex::new(&grid);
         if send.send((level, id, Tile { grid: Arc::new(grid), index })).is_err() {
             return;
         }
@@ -140,12 +137,12 @@ fn work(seed: u64, lattices: &Lattices, queue: &(Mutex<Queue>, Condvar), send: &
 
 impl World {
     /** A world generated and indexed on `threads` threads. */
-    pub fn new(seed: u64, lattices: Lattices, threads: usize) -> World {
+    pub fn new(seed: u64, threads: usize) -> World {
         let (send, done) = channel();
         let queue: Arc<(Mutex<Queue>, Condvar)> = Arc::default();
         for _ in 0..threads {
-            let (lattices, queue, send) = (lattices.clone(), queue.clone(), send.clone());
-            std::thread::spawn(move || work(seed, &lattices, &queue, &send));
+            let (queue, send) = (queue.clone(), send.clone());
+            std::thread::spawn(move || work(seed, &queue, &send));
         }
         World { tiles: (0..GRID_LEVELS).map(|_| HashMap::new()).collect(), queue, done, early: Vec::new() }
     }

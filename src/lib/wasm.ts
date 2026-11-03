@@ -12,9 +12,17 @@ const wasmModule = () => (compiled ??= new WebAssembly.Module(Uint8Array.from(at
 
 /**
  * A new instance of the module, with its own memory: for baking a world
- * (chunk-baker.ts), for Coverage (occlusion.ts), or for generating a
- * forest (worldgen.ts).
+ * (chunk-baker.ts), for Coverage (occlusion.ts), for generating a forest
+ * (worldgen.ts), or for indexing grids (LayerIndex in voxel-grid.ts).
  */
 export function wasmInstance(): WebAssembly.Exports {
   return new WebAssembly.Instance(wasmModule()).exports
+}
+
+/**
+ * Copies `values` into an instance's memory at byte `offset`. Memory may
+ * grow on any call into the instance, detaching earlier views of it.
+ */
+export function copyIn(memory: WebAssembly.Memory, offset: number, values: Uint8Array | Int32Array | Uint32Array) {
+  new Uint8Array(memory.buffer, offset, values.byteLength).set(new Uint8Array(values.buffer, values.byteOffset, values.byteLength))
 }

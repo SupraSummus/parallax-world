@@ -36,7 +36,7 @@ src/
 │   └── ui/                  # shadcn/ui primitives (generated; CLI config in components.json)
 └── lib/
     ├── fcc.ts               # Voxel geometry: rhombic dodecahedra of the FCC lattice
-    ├── voxel-grid.ts        # Voxel storage on the FCC lattice, in bricks (typed arrays); coarsening it
+    ├── voxel-grid.ts        # Voxel storage on the FCC lattice, in bricks (typed arrays); coarsening it; LayerIndex, made by bake/
     ├── world.ts             # World: voxel grids by level of detail (generated in tiles around the camera), spawn, toy world types
     ├── worldgen.ts          # The forest of worldgen/ (WebAssembly), any box at any level
     ├── city.ts              # City scene generator: streets, buildings, maze of rooms
@@ -59,13 +59,14 @@ src/viewer/
 bake/                        # Chunk baker and coverage in Rust (no dependencies), in worldgen/'s WebAssembly
 └── src/
     ├── lib.rs               # Baker: cached cell surfaces, one chunk per call; the WebAssembly exports
-    ├── world.rs             # Grid, tiles of grids, and voxel faces as handed over, read per face
+    ├── world.rs             # Grid, tiles of grids, the view's faces' lattices, voxels read per face
     ├── cells.rs             # cells.ts, with a table per level
     ├── slicing.rs           # The parts of slice-selection.ts baking needs
     ├── surface.rs           # A cell's voxels that can show
     ├── tables.rs            # The voxel's faces in lattice coordinates, the materials shaded per view face
     ├── splats.rs            # Which voxels a chunk shows, as hexagons on its centre plane; gap filling
     ├── fill.rs              # Splats filled into a mask, solid blocks (for coverage)
+    ├── layer_index.rs       # LayerIndex: where each face's layers hold voxels; its WebAssembly exports
     └── coverage.rs          # Which screen cells nearer layers cover, on the main thread; its WebAssembly exports
 worldgen/                    # World generation, moving to integers, into the baker's grids; the web's WebAssembly
 └── src/
@@ -83,7 +84,6 @@ native/                      # Spike of a native frontend (eframe + wgpu), linki
     ├── world.rs             # world.ts for generated worlds: worldgen's tiles, those the renderer wants first, made and indexed on threads
     ├── slicing.rs           # slice-selection.ts: slices, chunks, eyes
     ├── view.rs              # view.ts: faces, which rays and screen boxes they draw
-    ├── layer_index.rs       # LayerIndex (voxel-grid.ts): where each face's layers hold voxels
     ├── renderer.rs          # renderer.ts: chunks in view, cached, stand-ins, coverage (bake's Coverage)
     ├── bakery.rs            # Worker threads baking chunks, a baker each sharing the tiles
     ├── compositor.rs        # compositor.ts with wgpu: splats uploaded per chunk in clusters, culled on the GPU against what showed

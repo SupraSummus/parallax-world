@@ -69,7 +69,7 @@ describe('ChunkBaker', () => {
   for (let c = 0; c < 8; c++) {
     for (let b = -6 + ((c + 6) & 1); b < 30; b += 2) {
       for (let a = -6 + ((c + 6) & 1); a < 40; a += 2) {
-        if (b < 4 || random() < 0.25) voxels.push({ ...toWorld(face, a, b, c), a, b, c, color: colors[Math.floor(random() * 4)], type: 1 })
+        if (b < 4 || random() < 0.25) voxels.push({ ...toWorld(face, a, b, c), a, b, c, color: colors[Math.floor(random() * 4)] })
       }
     }
   }
@@ -141,6 +141,18 @@ describe('ChunkBaker', () => {
     expect(compared).toBeGreaterThan(200)
     expect(missing).toEqual([])
   }, 30_000)
+
+  it('knows the faces as view.ts orders them: the blob turned to face each bakes the same splats', () => {
+    const sitesOn = (face: Face) => {
+      const turned = VoxelGrid.fromVoxels(voxels.map(({ a, b, c, color }) => ({ ...toWorld(face, a, b, c), color })))
+      const turnedBaker = new ChunkBaker(turned.materials, [turned])
+      const { splats } = turnedBaker.bake({ face: face.name, level: 0, layer: 3, cutoff: Infinity, i: 0, j: 0, eye: [0, 0, -12], fill: false })
+      return turnedBaker.sites(splats.length / SPLAT)
+    }
+    const sites = sitesOn(face)
+    expect(sites.length).toBeGreaterThan(0)
+    for (const other of FACES) expect(sitesOn(other)).toEqual(sites)
+  })
 
   it('grows only voxels with an open face going on into another slice, past their painted splat', () => {
     // A floor two units thick through layers 0 to 7, seen from straight

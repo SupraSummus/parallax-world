@@ -29,16 +29,16 @@ describe('VoxelGrid', () => {
   })
 
   it('round-trips voxels, and refuses points that are not sites', () => {
-    const list = [{ x: 0, y: 0, z: 0, color: '#ff0000', type: 1 }, { x: 3, y: -1, z: 2, color: '#00ff00', type: 2 }]
+    const list = [{ x: 0, y: 0, z: 0, color: '#ff0000' }, { x: 3, y: -1, z: 2, color: '#00ff00' }]
     expect(VoxelGrid.fromVoxels(list).toVoxels()).toEqual(list)
-    expect(() => VoxelGrid.fromVoxels([{ x: 1, y: 0, z: 0, color: '#ff0000', type: 1 }])).toThrow(RangeError)
+    expect(() => VoxelGrid.fromVoxels([{ x: 1, y: 0, z: 0, color: '#ff0000' }])).toThrow(RangeError)
   })
 })
 
 const dot = (p: { x: number; y: number; z: number }, v: { x: number; y: number; z: number }) => p.x * v.x + p.y * v.y + p.z * v.z
 
 describe('LayerIndex', () => {
-  const index = new LayerIndex(grid, FACES.map(f => f.lattice))
+  const index = LayerIndex.of(grid)
   const along = (p: { x: number; y: number; z: number }, face: (typeof FACES)[number]) =>
     ({ a: dot(p, face.lattice.right), b: dot(p, face.lattice.up), c: dot(p, face.lattice.forward) })
 
@@ -71,11 +71,11 @@ describe('LayerIndex', () => {
 })
 
 describe('coarsen', () => {
-  const RED = { color: '#ff0000', type: 1 }
-  const BLUE = { color: '#0000ff', type: 1 }
+  const RED = { color: '#ff0000' }
+  const BLUE = { color: '#0000ff' }
   /** A grid of the sites in a box that `fill` gives a material (1 red, 2 blue) or 0. */
   const made = (fill: (x: number, y: number, z: number) => number) => {
-    const grid = new VoxelGrid({ minX: -16, minY: -16, minZ: -16, maxX: 16, maxY: 16, maxZ: 16 }, [{ color: '#000000', type: 0 }, RED, BLUE])
+    const grid = new VoxelGrid({ minX: -16, minY: -16, minZ: -16, maxX: 16, maxY: 16, maxZ: 16 }, [{ color: '' }, RED, BLUE])
     for (let z = -16; z < 16; z++) {
       for (let y = -16; y < 16; y++) {
         for (let x = -16; x < 16; x++) grid.set(x, y, z, fill(x, y, z))
