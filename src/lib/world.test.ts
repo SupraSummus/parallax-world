@@ -26,7 +26,8 @@ describe('World', () => {
   it.each(smallWorlds)('generates a %s world with a grass surface', worldType => {
     const world = new World(12345, worldType)
     expect(world.worldType).toBe(worldType)
-    expect(world.voxels.some(v => v.type === 1)).toBe(true)
+    // Grass of the hills, of the other toy worlds, of the island.
+    expect(world.voxels.some(v => ['#7CFC00', '#4CAF50', '#90EE90'].includes(v.color))).toBe(true)
     // Columns of blocks (two units wide: sites 2b - 1 and 2b) are filled from
     // bedrock at block y = -5 within blocks x, z in [-40, 40); trees may
     // overhang the edge by their 2-block canopy radius.
@@ -46,8 +47,9 @@ describe('World', () => {
     // Top voxel of the column of sites at block (x, z).
     const surfaceAt = (x: number, z: number) =>
       world.voxels.filter(v => v.x === 2 * x && v.z === 2 * z).reduce((top, v) => (v.y > top.y ? v : top))
-    expect(surfaceAt(15, 0).type).toBe(8) // water
-    expect(surfaceAt(0, 0).type).not.toBe(8)
+    const WATER = '#1E90FF'
+    expect(surfaceAt(15, 0).color).toBe(WATER)
+    expect(surfaceAt(0, 0).color).not.toBe(WATER)
   })
 
   /** Whether `grid` holds what generating its box whole at `level` gives. */

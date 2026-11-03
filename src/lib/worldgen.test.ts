@@ -13,7 +13,7 @@ describe('forest', () => {
   const box = { minX: x - 16, minY, minZ: z - 16, maxX: x + 16, maxY, maxZ: z + 16 }
 
   it('gives its materials as colours, and the spawn point on a site above its ground', () => {
-    expect(materials[0]).toEqual({ color: '', type: 0 })
+    expect(materials[0]).toEqual({ color: '' })
     for (const { color } of materials.slice(1)) expect(color).toMatch(/^#[0-9a-f]{6}$/)
     expect((spawn.x + spawn.y + spawn.z) & 1).toBe(0)
     let top = -Infinity

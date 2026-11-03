@@ -2,7 +2,7 @@
 import { VoxelGrid, type Box, type Material } from './voxel-grid'
 import type { Generated } from './world'
 
-const MATERIALS: Material[] = [{ color: '', type: 0 }, { color: '#4f7a2a', type: 1 }, { color: '#5a8a30', type: 1 }]
+const MATERIALS: Material[] = [{ color: '' }, { color: '#4f7a2a' }, { color: '#5a8a30' }]
 
 /** Gentle hills of moss, in two shades, held 64 sites of each level around the camera. */
 export function smallForest(seed: number): Generated {

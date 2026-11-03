@@ -314,7 +314,7 @@ describe.each([1, 0.5, 0.25])('Step 8: ray-cast leaks with tan(fov / 2) = %s', T
   function drawn(terrain: Cell[], slices: SliceId[]): { cells: Cell[]; levels: VoxelGrid[] } {
     const { right: R, up: U, forward: F } = face.lattice
     const levels = levelsOf(VoxelGrid.fromVoxels(terrain.map(({ u, z }) => ({
-      x: (u * R.x + z * F.x) / 2, y: (u * R.y + z * F.y) / 2, z: (u * R.z + z * F.z) / 2, color: '#808080', type: 3,
+      x: (u * R.x + z * F.x) / 2, y: (u * R.y + z * F.y) / 2, z: (u * R.z + z * F.z) / 2, color: '#808080',
     }))))
     const dot = (p: { x: number; y: number; z: number }, v: { x: number; y: number; z: number }) => p.x * v.x + p.y * v.y + p.z * v.z
     const inPlane = levels.map((grid, level) => grid.toVoxels().map(p => ({ u: dot(p, R) << level, b: dot(p, U), z: dot(p, F) << level, n: 2 ** level })).filter(c => c.b === 0))

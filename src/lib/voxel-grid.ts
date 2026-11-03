@@ -6,6 +6,7 @@
  * Plain typed arrays and integer ids, the same layout in TS or Rust/WASM.
  */
 
+import { copyIn, wasmInstance } from './wasm'
 import type { Vec3 } from './world'
 
 export interface Voxel {
@@ -13,13 +14,11 @@ export interface Voxel {
   y: number
   z: number
   color: string
-  type: number
 }
 
 export interface Material {
-  /** '#rrggbb' */
+  /** '#rrggbb'; '' for id 0, empty. */
   color: string
-  type: number
 }
 
 /** A grid's fields without its methods: what a worker receives from postMessage. */
@@ -44,7 +43,7 @@ const MAX_MATERIALS = 256
  * so the grid takes about a fifth of the bytes it would densely.
  */
 export const BRICK = 8
-export const BRICK_SITES = BRICK ** 3 / 2
+const BRICK_SITES = BRICK ** 3 / 2
 
 /**
  * Whether (x, y, z) is a site of the lattice.
@@ -176,8 +175,7 @@ export class VoxelGrid {
   toVoxels(): Voxel[] {
     const voxels: Voxel[] = []
     this.forEach((x, y, z, id) => {
-      const { color, type } = this.materials[id]
-      voxels.push({ x, y, z, color, type })
+      voxels.push({ x, y, z, color: this.materials[id].color })
     })
     return voxels
   }
@@ -231,39 +229,50 @@ export class VoxelGrid {
       box.maxZ = Math.max(box.maxZ, z + 1)
     }
 
-    const materials: Material[] = [{ color: '#000000', type: 0 }]
-    const ids = new Map<string, number>()
-    const idOf = ({ color, type }: Voxel) => {
-      const key = `${color}|${String(type)}`
-      let id = ids.get(key)
-      if (id === undefined) {
-        id = materials.push({ color, type }) - 1
-        ids.set(key, id)
-      }
-      return id
-    }
-    const voxelIds = voxels.map(idOf)
-    const grid = new VoxelGrid(box, materials)
-    voxels.forEach(({ x, y, z }, n) => { grid.set(x, y, z, voxelIds[n]) })
+    const palette = new Palette()
+    const grid = new VoxelGrid(box, palette.materials)
+    for (const { x, y, z, color } of voxels) grid.set(x, y, z, palette.id(color))
     return grid
   }
 }
 
-/** The sites of a grid's bricks in use, without the room `cells` has for more. */
-export function usedCells({ bricks, cells }: VoxelData): Uint8Array {
-  return cells.subarray(0, bricks.reduce((n, at) => Math.max(n, at + 1), 0) * BRICK_SITES)
+/** Materials by colour, an id each, added as they are first used; id 0 is empty. */
+export class Palette {
+  readonly materials: Material[] = [{ color: '' }]
+  private readonly ids = new Map<string, number>()
+
+  /** The id of `color` ('#rrggbb'). */
+  id(color: string): number {
+    let id = this.ids.get(color)
+    if (id === undefined) {
+      if (this.materials.length === MAX_MATERIALS) throw new RangeError(`at most ${String(MAX_MATERIALS)} materials`)
+      id = this.materials.push({ color }) - 1
+      this.ids.set(color, id)
+    }
+    return id
+  }
 }
 
 /**
- * Calls `visit` with the corner (x, y, z) of each brick of `grid` with
- * voxels (its first site is x or x + 1) and where its sites start in `cells`.
+ * Hands a grid to a WebAssembly instance (bake/): `start` takes its box
+ * and how many bricks of sites it uses and returns where to write its
+ * bricks, then `cells` where to write those sites.
  */
-function forEachBrick({ minX, minY, minZ, nx, ny, bricks }: VoxelData, visit: (x: number, y: number, z: number, at: number) => void) {
-  const [bx, by] = [Math.ceil(nx / BRICK), Math.ceil(ny / BRICK)]
-  for (let b = 0; b < bricks.length; b++) {
-    if (bricks[b] < 0) continue
-    visit(minX + (b % bx) * BRICK, minY + (Math.floor(b / bx) % by) * BRICK, minZ + Math.floor(b / (bx * by)) * BRICK, bricks[b] * BRICK_SITES)
-  }
+export function writeGrid(
+  memory: WebAssembly.Memory,
+  grid: VoxelData,
+  start: (minX: number, minY: number, minZ: number, nx: number, ny: number, nz: number, used: number) => number,
+  sites: () => number,
+) {
+  const { minX, minY, minZ, nx, ny, nz, bricks } = grid
+  const used = usedCells(grid)
+  copyIn(memory, start(minX, minY, minZ, nx, ny, nz, used.length / BRICK_SITES), bricks)
+  copyIn(memory, sites(), used)
+}
+
+/** The sites of a grid's bricks in use, without the room `cells` has for more. @internal */
+export function usedCells({ bricks, cells }: VoxelData): Uint8Array {
+  return cells.subarray(0, bricks.reduce((n, at) => Math.max(n, at + 1), 0) * BRICK_SITES)
 }
 
 /**
@@ -341,13 +350,6 @@ export function coarsen(grid: VoxelGrid): VoxelGrid {
 /** Width of a column block of LayerIndex, in lattice units along a. */
 const EXTENT_BLOCK = 8
 
-/** A face's lattice vectors R, U, F (see Face in view.ts). */
-interface Lattice {
-  right: Vec3
-  up: Vec3
-  forward: Vec3
-}
-
 /** Per face whose forward has its first non-zero component positive. */
 interface Table {
   cMin: number
@@ -359,76 +361,56 @@ interface Table {
   high: Int16Array
 }
 
-/** A LayerIndex's fields. */
+/** A LayerIndex's fields, as posted to or from a worker (a class's methods do not survive posting). */
 export type LayerIndexData = Pick<LayerIndex, 'keys' | 'tables'>
+
+/** The indexing exports (bake/src/layer_index.rs). */
+interface Indexer {
+  memory: WebAssembly.Memory
+  index_grid: (minX: number, minY: number, minZ: number, nx: number, ny: number, nz: number, used: number) => number
+  index_cells: () => number
+  index_build: () => number
+}
+
+/** Numbers per table in index_build's result, and tables: a face and its opposite share one. */
+const TABLE = 9
+const TABLES = 6
+
+// An instance per thread, made on first use.
+let indexer: Indexer | null = null
 
 /**
  * Where a grid's voxels are along each face's layers (in a face's lattice
  * coordinates (a, b, c), see Face in view.ts): for each layer c and block
- * of EXTENT_BLOCK columns a, the range of b of its voxels. From one pass
- * over the grid, so the renderer can tell which chunk cells are empty and
- * how high their content reaches, without walking or baking them.
+ * of EXTENT_BLOCK columns a, the range of b of its voxels. Made by
+ * bake/src/layer_index.rs, so the renderer can tell which chunk cells are
+ * empty and how high their content reaches, without walking or baking them.
  */
 export class LayerIndex {
   readonly keys: string[]
   readonly tables: Table[]
 
-  constructor(grid: VoxelData, lattices: readonly Lattice[]) {
-    const { minX, minY, minZ, nx, ny, nz, cells } = grid
-    // Bounds of v · p over the grid's box.
-    const along = (v: Vec3) => {
-      const ends = [0, 1].flatMap(i => [0, 1].flatMap(j => [0, 1].map(k =>
-        v.x * (minX + i * Math.max(0, nx - 1)) + v.y * (minY + j * Math.max(0, ny - 1)) + v.z * (minZ + k * Math.max(0, nz - 1)))))
-      return [Math.min(...ends), Math.max(...ends)]
-    }
-    // A table per pair of opposite faces (see table()).
-    const canonical = lattices.filter(l => !LayerIndex.mirrored(l.forward))
-    const shapes = canonical.filter((l, k) => canonical.findIndex(m => LayerIndex.key(m.forward) === LayerIndex.key(l.forward)) === k).map(lattice => {
-      const [aMin, aMax] = along(lattice.right)
-      const [cMin, cMax] = along(lattice.forward)
-      return { lattice, aMin, cMin, layers: cMax - cMin + 1, blocks: Math.floor((aMax - aMin) / EXTENT_BLOCK) + 1 }
-    })
-    // All tables' arrays in one, for one pass over the grid.
-    const n = shapes.length
-    const lowAt = new Int32Array(n + 1)
-    shapes.forEach(({ layers, blocks }, k) => { lowAt[k + 1] = lowAt[k] + layers * blocks })
-    const low = new Int16Array(lowAt[n]).fill(32767)
-    const high = new Int16Array(lowAt[n]).fill(-32768)
-    const blocks = Int32Array.from(shapes, s => s.blocks)
-    // Per table: a, b and c of site p are v · p − offset, for v = R, U, F.
-    const vectors = Int32Array.from(shapes.flatMap(({ lattice: { right: R, up: U, forward: F } }) => [R, U, F].flatMap(v => [v.x, v.y, v.z])))
-    const offsets = Int32Array.from(shapes.flatMap(s => [s.aMin, 0, s.cMin]))
-    // a, b and c of the row's first site, per table.
-    const row = new Int32Array(3 * n)
-    const visit = (x0: number, y0: number, z0: number, at: number) => {
-      for (let z = z0; z < z0 + BRICK; z++) {
-        for (let y = y0; y < y0 + BRICK; y++) {
-          const x1 = x0 + ((x0 + y + z) & 1)
-          for (let m = 0; m < 3 * n; m++) row[m] = vectors[3 * m] * x1 + vectors[3 * m + 1] * y + vectors[3 * m + 2] * z - offsets[m]
-          for (let dx = 0; dx < BRICK; dx += 2, at++) {
-            if (cells[at] === 0) continue
-            for (let k = 0; k < n; k++) {
-              const v = 9 * k
-              const a = row[3 * k] + vectors[v] * dx
-              const b = row[3 * k + 1] + vectors[v + 3] * dx
-              const c = row[3 * k + 2] + vectors[v + 6] * dx
-              // a ≥ 0 here, and EXTENT_BLOCK is 8.
-              const i = lowAt[k] + c * blocks[k] + (a >> 3)
-              if (b < low[i]) low[i] = b
-              if (b > high[i]) high[i] = b
-            }
-          }
-        }
-      }
-    }
-    forEachBrick(grid, visit)
-    this.tables = shapes.map((shape, k) => ({ ...shape, low: low.subarray(lowAt[k], lowAt[k + 1]), high: high.subarray(lowAt[k], lowAt[k + 1]) }))
-    this.keys = shapes.map(s => LayerIndex.key(s.lattice.forward))
+  constructor({ keys, tables }: LayerIndexData) {
+    this.keys = keys
+    this.tables = tables
   }
 
-  /** A LayerIndex of its fields, as posted to or from a worker (a class's methods do not survive posting). */
-  static from({ keys, tables }: LayerIndexData): LayerIndex {
-    return Object.assign(Object.create(LayerIndex.prototype) as LayerIndex, { keys, tables })
+  /** The index of `grid`, for the faces of view.ts. */
+  static of(grid: VoxelData): LayerIndex {
+    const wasm = (indexer ??= wasmInstance() as unknown as Indexer)
+    writeGrid(wasm.memory, grid, wasm.index_grid, wasm.index_cells)
+    // Before reading memory.buffer: the call may grow (and so replace) it.
+    const at = wasm.index_build()
+    const result = new Float64Array(wasm.memory.buffer, at, TABLES * TABLE)
+    const keys: string[] = []
+    const tables = Array.from({ length: TABLES }, (_, t) => {
+      const [x, y, z, cMin, aMin, layers, blocks, low, high] = result.subarray(t * TABLE, (t + 1) * TABLE)
+      keys.push(LayerIndex.key({ x, y, z }))
+      // Copied out: the next grid frees them.
+      const table = (from: number) => new Int16Array(wasm.memory.buffer, from, layers * blocks).slice()
+      return { cMin, aMin, layers, blocks, low: table(low), high: table(high) }
+    })
+    return new LayerIndex({ keys, tables })
   }
 
   /** Whether a face's forward is the opposite of one with its first non-zero component positive. */

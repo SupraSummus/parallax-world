@@ -6,8 +6,8 @@
  */
 import type { SliceId } from './slice-selection'
 import { FACES } from './view'
-import { BRICK_SITES, LayerIndex, usedCells, type LayerIndexData, type Material, type VoxelData } from './voxel-grid'
-import { wasmInstance } from './wasm'
+import { LayerIndex, writeGrid, type LayerIndexData, type Material, type VoxelData } from './voxel-grid'
+import { copyIn, wasmInstance } from './wasm'
 import { generatePart, type GridPart, type WorldType } from './world'
 
 /**
@@ -71,10 +71,9 @@ interface Mask {
 /** The baker's exports (bake/src/lib.rs). */
 interface Baker {
   memory: WebAssembly.Memory
-  world_start: (materials: number) => void
+  world_start: (materials: number) => number
   world_grid: (level: number, minX: number, minY: number, minZ: number, nx: number, ny: number, nz: number, used: number) => number
   world_cells: () => number
-  world_table: (table: number) => number
   world_ready: () => void
   bake: Call
   sites: () => number
@@ -85,7 +84,8 @@ const faceIndex = new Map(FACES.map((face, index) => [face.name, index]))
 
 /**
  * Bakes chunks of one world: a WebAssembly instance holding a copy of its
- * grids, the palette of each face, and the surfaces of recently baked
+ * grids, the palette of each face (it shades the materials' colours per
+ * face itself, bake/src/tables.rs), and the surfaces of recently baked
  * cells. `levels` are the world's grids by level of detail so far
  * (World.level), all of `materials`; the rest come with addGrid.
  */
@@ -95,25 +95,14 @@ export class ChunkBaker {
   constructor(materials: readonly Material[], levels: readonly (VoxelData | undefined)[]) {
     const baker = wasmInstance() as unknown as Baker
     this.baker = baker
-    // It shades the materials' colours per face itself (bake/src/tables.rs).
-    baker.world_start(materials.length)
-    this.write(Int32Array, baker.world_table(0), Int32Array.from(FACES.flatMap(({ lattice: { right, up, forward } }) => [right, up, forward].flatMap(v => [v.x, v.y, v.z]))))
-    this.write(Uint32Array, baker.world_table(1), Uint32Array.from(materials, ({ color }) => parseInt(color.slice(1), 16) || 0))
+    copyIn(baker.memory, baker.world_start(materials.length), Uint32Array.from(materials, ({ color }) => parseInt(color.slice(1), 16) || 0))
     baker.world_ready()
     levels.forEach((grid, level) => { if (grid) this.addGrid(level, grid) })
   }
 
   /** Sets the grid of `level`; until then, its chunks are empty. */
   addGrid(level: number, grid: VoxelData) {
-    const { minX, minY, minZ, nx, ny, nz, bricks } = grid
-    const cells = usedCells(grid)
-    this.write(Int32Array, this.baker.world_grid(level, minX, minY, minZ, nx, ny, nz, cells.length / BRICK_SITES), bricks)
-    this.write(Uint8Array, this.baker.world_cells(), cells)
-  }
-
-  /** Copies `values` into the baker's memory at `offset`. Memory may grow on each call, detaching earlier views of it. */
-  private write<T extends Uint8Array | Int32Array | Uint32Array>(View: new (buffer: ArrayBuffer, offset: number, length: number) => T, offset: number, values: T) {
-    new View(this.baker.memory.buffer, offset, values.length).set(values)
+    writeGrid(this.baker.memory, grid, (...box) => this.baker.world_grid(level, ...box), this.baker.world_cells)
   }
 
   /**
@@ -244,10 +233,10 @@ export function bakeHandler(
     const grid = generatePart(jobs.seed, jobs.worldType, part)
     if (jobs.parts.length === 0) jobs = null
     // Where its voxels are, so the main thread need not find out.
-    const { keys, tables } = new LayerIndex(grid, FACES.map(f => f.lattice))
+    const { keys, tables } = LayerIndex.of(grid)
     // Just the fields: a class's methods would not survive posting.
     const { minX, minY, minZ, nx, ny, nz, bricks, cells, materials } = grid
-    post({ type: 'part', generation, part, grid: { minX, minY, minZ, nx, ny, nz, bricks, cells, materials }, index: { keys, tables } }, [bricks.buffer, cells.buffer, tables[0].low.buffer, tables[0].high.buffer])
+    post({ type: 'part', generation, part, grid: { minX, minY, minZ, nx, ny, nz, bricks, cells, materials }, index: { keys, tables } }, [bricks.buffer, cells.buffer, ...tables.flatMap(t => [t.low.buffer, t.high.buffer])])
   }
   const step = () => {
     scheduled = false

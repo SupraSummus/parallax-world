@@ -22,11 +22,10 @@ Numbers are for the forest at 1280×800, as measured when written.
   Turning, a frame costs its main thread over 10 ms in the forest.
   `native/` is not built in CI.
 - **TS and Rust still say much the same twice.**
-  `LayerIndex` (`voxel-grid.ts`) is `native/src/layer_index.rs`,
-  the tiles around the camera (`world.ts`) are `native/src/world.rs`,
-  and slice selection, faces and the renderer are in `native/src` too.
-  Workers could index the parts they generate in WebAssembly;
-  the renderer is the large step.
+  The tiles around the camera (`world.ts`) are `native/src/world.rs`,
+  and slice selection, faces and the renderer are in `native/src` too;
+  `native/src/slicing.rs` restates parts of `bake/src/slicing.rs`.
+  The renderer is the large step.
 - **Moving rebakes whole levels.**
   A level is baked again when the camera leaves its eye's cell,
   so walking rebakes 1.3–1.8× the chunks that one direction per chunk did,

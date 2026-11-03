@@ -82,7 +82,7 @@ describe('Renderer regressions', () => {
     // A column from the ground up to eye level, 2 units ahead of the camera.
     const voxels: World['voxels'] = []
     for (let y = 0; y <= 30; y += 2) {
-      voxels.push({ x: 0, y, z: -58, color: '#00ff00', type: 1 })
+      voxels.push({ x: 0, y, z: -58, color: '#00ff00' })
     }
     const renderer = new ParallaxRenderer(makeWorldWithVoxels(voxels))
     renderer.resize(800, 600)
@@ -169,7 +169,7 @@ describe('Renderer regressions', () => {
     // c = x + z in [0, 2400) (lattice coordinates of +x+z, see view.ts).
     const voxels: World['voxels'] = []
     for (let a = -160; a < 160; a += 2) {
-      for (let c = 0; c < 2400; c += 2) voxels.push({ x: (a + c) / 2, y: 0, z: (c - a) / 2, color: '#40a040', type: 1 })
+      for (let c = 0; c < 2400; c += 2) voxels.push({ x: (a + c) / 2, y: 0, z: (c - a) / 2, color: '#40a040' })
     }
     const floor = makeWorldWithVoxels(voxels)
     const gaps = (fillGaps: boolean) => {

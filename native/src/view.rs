@@ -2,6 +2,8 @@
 //! own stack of slices and draws the rays closer to its axis than to any
 //! other's. See docs/architecture.md, section 4.
 
+use bake::Lattice;
+
 use crate::slicing::LAYER;
 
 pub type Vec3 = [f64; 3];
@@ -32,25 +34,16 @@ pub fn focal_length(fov: f64, width: f64, height: f64) -> f64 {
  */
 pub struct Face {
     pub axes: [Vec3; 3],
-    pub lattice: [[i32; 3]; 3],
+    pub lattice: Lattice,
 }
 
-/** One face per neighbour direction F, in the order of FACES in view.ts; up is the world axis across F. */
+/** One face per neighbour direction F, in the order of FACES in view.ts (bake's lattices). */
 pub fn faces() -> Vec<Face> {
-    let mut faces = Vec::new();
-    for k in [1, 0, 2] {
-        for (s, t) in [(1, 1), (-1, 1), (1, -1), (-1, -1)] {
-            let mut f = [0; 3];
-            f[(k + 1) % 3] = s;
-            f[(k + 2) % 3] = t;
-            let mut u = [0; 3];
-            u[k] = 1;
-            let r = [u[1] * f[2] - u[2] * f[1], u[2] * f[0] - u[0] * f[2], u[0] * f[1] - u[1] * f[0]];
-            let scaled = |v: [i32; 3], s: f64| v.map(|c| c as f64 * s);
-            faces.push(Face { axes: [scaled(r, LAYER), scaled(u, 1.0), scaled(f, LAYER)], lattice: [r, u, f] });
-        }
-    }
-    faces
+    let scaled = |v: [i32; 3], s: f64| v.map(|c| c as f64 * s);
+    bake::lattices()
+        .iter()
+        .map(|&lattice @ Lattice { r, u, f }| Face { axes: [scaled(r, LAYER), scaled(u, 1.0), scaled(f, LAYER)], lattice })
+        .collect()
 }
 
 /** Whether a ray (x, y, z) in face coordinates is the face's: |x| + √2 · |y| ≤ z. */

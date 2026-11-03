@@ -1,7 +1,6 @@
 import { generateCity } from './city'
 import { GRID_LEVELS } from './slice-selection'
-import { FACES } from './view'
-import { BRICK, coarsen, LayerIndex, VoxelGrid, type Box, type Material, type Voxel, type VoxelData } from './voxel-grid'
+import { BRICK, coarsen, LayerIndex, Palette, VoxelGrid, type Box, type Material, type Voxel, type VoxelData } from './voxel-grid'
 import { forest } from './worldgen'
 
 export interface Vec3 {
@@ -21,13 +20,11 @@ export const WORLD_TYPES: { value: WorldType; label: string }[] = [
   { value: 'lake_with_island', label: 'Lake with Island' },
 ]
 
-// `type` ids: 1 grass, 2 dirt, 3 stone, 4 wood, 5 leaves, 6 flower, 7 snow, 8 water, 9 sand,
-// 10 plaster, 11 glass, 12 metal, 13 fabric
-const GRASS: Material = { color: '#4CAF50', type: 1 }
-const DIRT: Material = { color: '#8B4513', type: 2 }
-const STONE: Material = { color: '#666666', type: 3 }
-const LEAVES: Material = { color: '#228B22', type: 5 }
-const WATER: Material = { color: '#1E90FF', type: 8 }
+const GRASS = '#4CAF50'
+const DIRT = '#8B4513'
+const STONE = '#666666'
+const LEAVES = '#228B22'
+const WATER = '#1E90FF'
 const FLOWER_COLORS = ['#FF6B6B', '#FFE66D', '#4ECDC4', '#C9B1FF']
 
 /**
@@ -262,7 +259,7 @@ export class World {
   /** Where each face's layers of the grid of `level` hold voxels, once it has one. */
   layerIndex(level: number): LayerIndex[] | undefined {
     const grid = this.level(level)
-    if (grid) this.indices[level] ??= this.tileIndices[level]?.map(t => t.index) ?? [new LayerIndex(grid, FACES.map(f => f.lattice))]
+    if (grid) this.indices[level] ??= this.tileIndices[level]?.map(t => t.index) ?? [LayerIndex.of(grid)]
     return this.indices[level]
   }
 
@@ -347,8 +344,8 @@ export class World {
     )
   }
 
-  private push(x: number, y: number, z: number, material: Material) {
-    this.generated.push({ x, y, z, color: material.color, type: material.type })
+  private push(x: number, y: number, z: number, color: string) {
+    this.generated.push({ x, y, z, color })
   }
 
   /** The grid of the generated blocks: block (x, y, z) is filled with the sites it holds; later blocks win. */
@@ -363,23 +360,16 @@ export class World {
       box.maxY = Math.max(box.maxY, BLOCK * y + 1)
       box.maxZ = Math.max(box.maxZ, BLOCK * z + 1)
     }
-    const materials: Material[] = [{ color: '#000000', type: 0 }]
-    const ids = new Map<string, number>()
-    const grid = new VoxelGrid(box, materials)
-    for (const { x, y, z, color, type } of blocks) {
-      const key = `${color}|${String(type)}`
-      let id = ids.get(key)
-      if (id === undefined) {
-        id = materials.push({ color, type }) - 1
-        ids.set(key, id)
-      }
-      grid.fillBox(BLOCK * x - 1, BLOCK * y - 1, BLOCK * z - 1, BLOCK * x + 1, BLOCK * y + 1, BLOCK * z + 1, id)
+    const palette = new Palette()
+    const grid = new VoxelGrid(box, palette.materials)
+    for (const { x, y, z, color } of blocks) {
+      grid.fillBox(BLOCK * x - 1, BLOCK * y - 1, BLOCK * z - 1, BLOCK * x + 1, BLOCK * y + 1, BLOCK * z + 1, palette.id(color))
     }
     return grid
   }
 
   /** Fills a column from bedrock to `top`: surface block, 2 subsoil blocks, rock below. */
-  private soilColumn(x: number, z: number, top: number, surface: Material, subsoil = DIRT, rock = STONE) {
+  private soilColumn(x: number, z: number, top: number, surface: string, subsoil = DIRT, rock = STONE) {
     for (let y = BEDROCK_Y; y <= top; y++) {
       this.push(x, y, z, y === top ? surface : y > top - 3 ? subsoil : rock)
     }
@@ -387,7 +377,7 @@ export class World {
 
   private tree(x: number, ground: number, z: number, height: number) {
     for (let y = ground + 1; y < ground + height; y++) {
-      this.push(x, y, z, { color: '#654321', type: 4 })
+      this.push(x, y, z, '#654321')
     }
     for (let dx = -2; dx <= 2; dx++) {
       for (let dz = -2; dz <= 2; dz++) {
@@ -402,12 +392,12 @@ export class World {
 
   private palm(x: number, ground: number, z: number, height: number) {
     for (let y = ground + 1; y < ground + height; y++) {
-      this.push(x, y, z, { color: '#8B7355', type: 4 })
+      this.push(x, y, z, '#8B7355')
     }
     for (let dx = -2; dx <= 2; dx++) {
       for (let dz = -2; dz <= 2; dz++) {
         if (Math.abs(dx) + Math.abs(dz) <= 2) {
-          this.push(x + dx, ground + height, z + dz, { color: '#32CD32', type: 5 })
+          this.push(x + dx, ground + height, z + dz, '#32CD32')
         }
       }
     }
@@ -417,10 +407,10 @@ export class World {
     switch (this.worldType) {
       case 'hills': {
         const ground = this.terrainHeight(x, z, 0.7)
-        this.soilColumn(x, z, ground, { color: '#7CFC00', type: 1 })
+        this.soilColumn(x, z, ground, '#7CFC00')
         if (this.noise(x * 0.4, 30, z * 0.4) > 0.8) {
           const color = FLOWER_COLORS[Math.floor(this.noise(x, z, 0) * FLOWER_COLORS.length)]
-          this.push(x, ground + 1, z, { color, type: 6 })
+          this.push(x, ground + 1, z, color)
         }
         break
       }
@@ -428,14 +418,14 @@ export class World {
       case 'mountains': {
         const ground = this.terrainHeight(x, z, 2.5)
         for (let y = BEDROCK_Y; y <= ground; y++) {
-          let material: Material
+          let color: string
           // Snow caps: the top two blocks of peaks above y=15.
-          if (y > 15 && y > ground - 2) material = { color: '#FFFFFF', type: 7 }
-          else if (y === ground && y > 8) material = { color: '#808080', type: 3 }
-          else if (y === ground) material = GRASS
-          else if (y > ground - 3) material = DIRT
-          else material = { color: '#555555', type: 3 }
-          this.push(x, y, z, material)
+          if (y > 15 && y > ground - 2) color = '#FFFFFF'
+          else if (y === ground && y > 8) color = '#808080'
+          else if (y === ground) color = GRASS
+          else if (y > ground - 3) color = DIRT
+          else color = '#555555'
+          this.push(x, y, z, color)
         }
         break
       }
@@ -454,14 +444,14 @@ export class World {
         const distFromCenter = Math.sqrt(x * x + z * z)
         if (distFromCenter <= 8) {
           const top = ground + 3
-          this.soilColumn(x, z, top, { color: '#90EE90', type: 1 }, { color: '#C4A76D', type: 2 })
+          this.soilColumn(x, z, top, '#90EE90', '#C4A76D')
           if (distFromCenter < 5 && this.noise(x * 0.5, 0, z * 0.5) > 0.7) {
             this.palm(x, top, z, 5 + Math.floor(this.noise(x, 0, z) * 2))
           }
         } else if (distFromCenter < 25) {
           this.soilColumn(x, z, 0, WATER, STONE)
         } else {
-          const sand = { color: '#F4D03F', type: 9 }
+          const sand = '#F4D03F'
           this.soilColumn(x, z, ground, distFromCenter < 28 ? sand : GRASS)
         }
         break

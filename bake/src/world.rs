@@ -5,8 +5,6 @@ use std::sync::Arc;
 
 /** Kinds of voxel faces. */
 pub const FACE_KINDS: usize = 12;
-/** i32 per face in the lattice table: R, U, F (3 each). */
-pub const LATTICE: usize = 9;
 /** Faces of the view (FACES in view.ts). */
 pub const VIEW_FACES: usize = 12;
 
@@ -21,11 +19,29 @@ pub struct Geometry {
 }
 
 /** A face's lattice vectors R, U, F (integer, see Face in view.ts). */
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Lattice {
     pub r: [i32; 3],
     pub u: [i32; 3],
     pub f: [i32; 3],
+}
+
+/**
+ * The view faces' lattices, in the order of FACES in view.ts: one per
+ * neighbour direction F, U the world axis across it, R = U × F.
+ */
+pub fn lattices() -> [Lattice; VIEW_FACES] {
+    std::array::from_fn(|face| {
+        let k = [1, 0, 2][face / 4];
+        let (s, t) = [(1, 1), (-1, 1), (1, -1), (-1, -1)][face % 4];
+        let mut f = [0; 3];
+        f[(k + 1) % 3] = s;
+        f[(k + 2) % 3] = t;
+        let mut u = [0; 3];
+        u[k] = 1;
+        let r = [u[1] * f[2] - u[2] * f[1], u[2] * f[0] - u[0] * f[2], u[0] * f[1] - u[1] * f[0]];
+        Lattice { r, u, f }
+    })
 }
 
 /** Bricks of the sites of a box (see VoxelGrid in voxel-grid.ts). */
