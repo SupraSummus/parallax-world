@@ -26,3 +26,9 @@ export function smallForest(seed: number): Generated {
     heights: level => ({ minY: Math.floor(-8 / 2 ** level), maxY: Math.ceil(10 / 2 ** level) }),
   }
 }
+
+/** Tests' stand-in for worldgen.ts (vi.mock): the forest and the valley, each smallForest. */
+export const smallWorldgen = {
+  worlds: () => ['forest', 'valley'],
+  generated: (_name: string, seed: number) => smallForest(seed),
+}

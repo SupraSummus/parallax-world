@@ -1,7 +1,7 @@
 import { generateCity } from './city'
 import { GRID_LEVELS } from './slice-selection'
 import { BRICK, coarsen, LayerIndex, Palette, VoxelGrid, type Box, type Material, type Voxel, type VoxelData } from './voxel-grid'
-import { forest, valley } from './worldgen'
+import { generated, worlds } from './worldgen'
 
 export interface Vec3 {
   x: number
@@ -9,17 +9,25 @@ export interface Vec3 {
   z: number
 }
 
-export type WorldType = 'forest' | 'valley' | 'city' | 'hills' | 'mountains' | 'hills_with_trees' | 'lake_with_island'
+/** A world's name: one of worldTypes()'s values. */
+export type WorldType = string
 
-export const WORLD_TYPES: { value: WorldType; label: string }[] = [
-  { value: 'forest', label: 'Forest' },
-  { value: 'valley', label: 'Valley with a Town' },
+/** The worlds of TS, made here or by their own scene builder (SCENES). */
+const TS_WORLDS: { value: WorldType; label: string }[] = [
   { value: 'city', label: 'City' },
   { value: 'hills', label: 'Hills' },
   { value: 'mountains', label: 'Mountains' },
   { value: 'hills_with_trees', label: 'Hills with Trees' },
   { value: 'lake_with_island', label: 'Lake with Island' },
 ]
+
+/**
+ * The world types, with their labels: worldgen.ts's worlds (Rust), as
+ * WORLDS lists them, each labelled with its name; then the worlds of TS.
+ */
+export function worldTypes(): { value: WorldType; label: string }[] {
+  return [...worlds().map(value => ({ value, label: value.charAt(0).toUpperCase() + value.slice(1) })), ...TS_WORLDS]
+}
 
 const GRASS = '#4CAF50'
 const DIRT = '#8B4513'
@@ -42,8 +50,6 @@ export interface Generated {
   heights: (level: number) => { minY: number; maxY: number }
 }
 
-/** World types generated level by level, in parts; the grids of the rest are made whole, then coarsened. */
-const GENERATED: Partial<Record<WorldType, (seed: number) => Generated>> = { forest, valley }
 /** World types with their own scene builder; the rest are built here. */
 const SCENES: Partial<Record<WorldType, (seed: number) => { grid: VoxelGrid; spawn: Vec3 }>> = { city: generateCity }
 
@@ -87,9 +93,7 @@ let lastGenerated: { seed: number; worldType: WorldType; generated: Generated } 
 /** The voxels of a part of a generated world's grid (see World.missingParts). */
 export function generatePart(seed: number, worldType: WorldType, { level, box }: GridPart): VoxelData {
   if (lastGenerated?.seed !== seed || lastGenerated.worldType !== worldType) {
-    const make = GENERATED[worldType]
-    if (!make) throw new RangeError(`${worldType} is not generated in parts`)
-    lastGenerated = { seed, worldType, generated: make(seed) }
+    lastGenerated = { seed, worldType, generated: generated(worldType, seed) }
   }
   return lastGenerated.generated.generate(box, level)
 }
@@ -117,8 +121,8 @@ export function levelsOf(grid: VoxelGrid): VoxelGrid[] {
 
 /**
  * A procedurally generated voxel world: a grid at each level of detail
- * the renderer reads. Generated worlds (GENERATED) are generated level by
- * level, in tiles, around the camera, anywhere (missingParts, receive),
+ * the renderer reads. Generated worlds (worldgen.ts's) are generated level
+ * by level, in tiles, around the camera, anywhere (missingParts, receive),
  * or here when asked for (levels); the rest are made here whole, and
  * coarsened.
  */
@@ -150,7 +154,8 @@ export class World {
     this.seed = seed
     this.worldType = worldType
 
-    this.source = GENERATED[worldType]?.(seed)
+    // Generated level by level, in parts; the grids of the rest are made whole, then coarsened.
+    this.source = worlds().includes(worldType) ? generated(worldType, seed) : undefined
     if (this.source) {
       this.spawn = this.source.spawn
       return
