@@ -14,5 +14,7 @@ coverage
 native/target
 worldgen/target
 worlds/target
+lab/target
+lab/out
 # Agents' git worktrees
 .claude/worktrees
