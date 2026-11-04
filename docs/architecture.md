@@ -341,7 +341,8 @@ and are drawn only where the chunk paints nothing (section 4).
 "Fill Gaps" turns it off.
 
 **The baker** is Rust (`bake/`), compiled to WebAssembly
-with the world generator that depends on it (`worldgen/`, section 6)
+with the worlds and their engine, which depend on it
+(`worlds/`, `worldgen/`, section 6)
 and inlined into the app (`wasm.ts`), so it compiles synchronously
 in a worker, on the main thread (for coverage, section 4) or in Node,
 with no files to fetch.
@@ -589,9 +590,11 @@ Renderer distances are in world units.
 
 **Scenes** describe shapes in metres and fill the sites inside them;
 each world picks its own scale, the renderer assumes none.
-The forest's `UNIT_SIZE` sets its metres per unit.
-The forest and the valley are endless and can be generated in any box alone
-([generators.md](generators.md)), by `worldgen/` (Rust),
+The forest and the valley have `UNIT_SIZE` metres per unit
+(`worldgen/src/units.rs`).
+They are endless and can be generated in any box alone
+([generators.md](generators.md)),
+by `worlds/` on the engine of `worldgen/` (Rust),
 in the workers' WebAssembly (`worldgen.ts`);
 the app generates one box of either, its extent, into a grid.
 The forest's ground is a heightfield sampled per column of sites;

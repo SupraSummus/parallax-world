@@ -2,14 +2,16 @@
 
 use std::collections::HashSet;
 
-use worldgen::forest::{UNIT_SIZE, forest, heights};
 use worldgen::generator::{generate, materials_of};
 use worldgen::grid::{Box3, VoxelGrid, is_site};
+use worldgen::units::UNIT_SIZE;
+use worlds::forest::forest;
 
 /** 48 m × 80 m ahead of the spawn point, all heights, and the spawn point. */
 fn generated(seed: u64) -> (VoxelGrid, Vec<u8>, [i64; 3]) {
-    let (generator, spawn) = forest(seed);
-    let (min_y, max_y) = heights(0);
+    let world = forest(seed);
+    let (min_y, max_y) = world.heights_at(0);
+    let (generator, spawn) = (world.generator, world.spawn);
     let unit = |metres: f64| (metres / UNIT_SIZE) as i64;
     // Grids start on an even x.
     let x = 2 * (spawn[0] - unit(24.0)).div_euclid(2);

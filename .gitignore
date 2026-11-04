@@ -13,3 +13,6 @@ coverage
 .DS_Store
 native/target
 worldgen/target
+worlds/target
+# Agents' git worktrees
+.claude/worktrees

@@ -100,7 +100,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   (Shared memory needs cross-origin isolation,
   which GitHub Pages can only get through a service worker.)
 - **Generating the forest's grids takes 3–8 s of worker time per level**
-  (worldgen's WebAssembly, in Node; the TS forest took twice that),
+  (the WebAssembly of `worlds/`, in Node; the TS forest took twice that),
   most at levels 0 to 4 (a moved grid, a seventh of that).
   In the TS forest it was mostly the ground's noise,
   which the terrain and the canopy compute about 14 times per column

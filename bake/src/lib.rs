@@ -1,4 +1,4 @@
-//! Chunk baking, compiled to WebAssembly (in worldgen's module) for the
+//! Chunk baking, compiled to WebAssembly (in the worlds' module) for the
 //! bake workers: the voxels of a chunk cell that can show, as splats
 //! (hexagons of one colour) projected from an eye onto its slice's centre
 //! plane, and a mask of what they cover.

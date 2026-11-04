@@ -1,5 +1,5 @@
 /**
- * The worlds of worldgen/ (Rust, worldgen/src/wasm.rs): the forest, and
+ * The worlds of worlds/ (Rust, worlds/src/wasm.rs): the forest, and
  * the valley (the forest with a town and fields), generated in any box
  * alone, at any level of detail, in a WebAssembly instance of their own.
  * See docs/generators.md. No DOM.
@@ -8,7 +8,7 @@ import { wasmInstance } from './wasm'
 import type { Box, Material, VoxelData } from './voxel-grid'
 import type { Generated } from './world'
 
-/** worldgen's exports (worldgen/src/wasm.rs). */
+/** The worlds' exports (worlds/src/wasm.rs). */
 interface Exports {
   memory: WebAssembly.Memory
   worldgen_start: (world: number, seed: number) => number
@@ -16,6 +16,7 @@ interface Exports {
   worldgen_generate: (level: number, minX: number, minY: number, minZ: number, maxX: number, maxY: number, maxZ: number) => number
 }
 
+// By their index in WORLDS (worlds/src/lib.rs).
 /** The forest of `seed` (an integer). */
 export const forest = (seed: number) => generated(0, seed)
 /** The valley of `seed`: the forest, with a town on its path and fields around it. */

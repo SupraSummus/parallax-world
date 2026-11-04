@@ -5,11 +5,14 @@
 
 use std::rc::Rc;
 
+use worldgen::World;
+use worldgen::generator::Generator;
+use worldgen::noise::{ONE, stream};
+use worldgen::plan::{Land, Plan};
+use worldgen::units::m;
+
 use crate::fields;
-use crate::forest::{self, GROUND_SCALE, Ground, PATH_SCALE, Relief, m};
-use crate::generator::Generator;
-use crate::noise::{ONE, stream};
-use crate::plan::{Land, Plan};
+use crate::forest::{self, GROUND_SCALE, Ground, PATH_SCALE, Relief};
 use crate::town::{self, TOWNS_SCALE, Towns};
 
 /** The domains, by their index in the land. */
@@ -17,8 +20,8 @@ const FOREST: usize = 0;
 const TOWN: usize = 1;
 const FIELDS: usize = 2;
 
-/** The valley's generator for `seed`, and where the camera starts: in the forest, on the path to the first town. */
-pub fn valley(seed: u64) -> (Generator, [i64; 3]) {
+/** The valley of `seed`; the camera starts in the forest, on the path to the first town. */
+pub fn valley(seed: u64) -> World {
     let relief = Rc::new(Relief::new(seed));
     let towns = Rc::new(Towns::new(seed, relief.clone()));
     // The path, bent onto each town's main street.
@@ -62,5 +65,6 @@ pub fn valley(seed: u64) -> (Generator, [i64; 3]) {
     layers.extend(town::layers(towns, land.clone(), TOWN, ground.clone()));
     layers.extend(fields::layers(seed, land, FIELDS, ground, path));
     let kinds = [forest::KINDS, town::KINDS, fields::KINDS].concat();
-    (Generator { kinds, seed: stream(seed, 4), layers }, spawn)
+    // The forest's heights and reach, which hold the towns and fields too.
+    World { generator: Generator { kinds, seed: stream(seed, 4), layers }, spawn, reach: forest::REACH, heights: forest::HEIGHTS }
 }

@@ -1,16 +1,16 @@
-//! World generation: the generator framework and the forest, into grids
-//! the baker reads, moving to integers (docs/generators.md). The native
-//! frontend links it; the web generates with it as WebAssembly (wasm.rs,
-//! src/lib/worldgen.ts).
+//! The world-generation engine: the generator framework, plans and frames
+//! to build worlds with, into grids the baker reads, moving to integers
+//! (docs/generators.md); a World for hosts, and the contract every world
+//! keeps. The worlds themselves are in worlds/.
 
-pub mod fields;
-pub mod forest;
+pub mod contract;
 pub mod frame;
 pub mod generator;
 pub mod grid;
 pub mod js;
 pub mod noise;
 pub mod plan;
-pub mod town;
-pub mod valley;
-pub mod wasm;
+pub mod units;
+pub mod world;
+
+pub use world::World;
