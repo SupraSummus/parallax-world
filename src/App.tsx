@@ -128,6 +128,7 @@ function App() {
     renderer.setMaxLeak(Number(experiment('leak') ?? DEFAULT_MAX_LEAK))
     renderer.setFillGaps(experiment('fill') !== '0')
     compositorRef.current?.setShowSeams(experiment('seams') === '1')
+    renderer.ortho = experiment('eyes') === 'ortho'
     setWorldType(renderer.getWorld().worldType)
     setFov(renderer.getFov())
     setRenderDistance(renderer.getRenderDistance())

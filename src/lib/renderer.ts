@@ -151,6 +151,13 @@ const MAX_HIDDEN_CHUNK_BYTES = 32_000_000
 // scales with the render distance so the far cut-off stays hazy.
 export const FOG_PER_RENDER_DISTANCE = 0.7
 
+/**
+ * EXPERIMENT: an eye far behind any camera along every face's axis (a
+ * site of every level's lattice), so its rays are parallel to the axis
+ * within 1e-6: an orthographic bake, with the baker as it is.
+ */
+const ORTHO_EYE: [number, number, number] = [0, 0, -(2 ** 25)]
+
 /** What a chunk holds in memory. */
 const bytesOf = (chunk: Chunk) => chunk.splats.byteLength + chunk.mask.blocks.byteLength
 
@@ -279,6 +286,8 @@ export class ParallaxRenderer {
   private maxLeak = DEFAULT_MAX_LEAK
   private renderDistance = DEFAULT_RENDER_DISTANCE
   private fillGaps = true
+  /** EXPERIMENT: bake every level from ORTHO_EYE: parallel rays along the face's axis, chunks never rebaked. */
+  ortho = false
   private skipCovered = true
   private width = 0
   private height = 0
@@ -358,7 +367,7 @@ export class ParallaxRenderer {
       if (!tangents) continue
       const camera = toLocal(face, this.camera)
       pass.coverage?.setFace(face)
-      const eyes = Array.from({ length: MAX_LEVEL + 1 }, (_, level) => eyeOf(level, camera))
+      const eyes = Array.from({ length: MAX_LEVEL + 1 }, (_, level) => this.ortho ? ORTHO_EYE : eyeOf(level, camera))
       const of = { face, tangents, camera, eyes, boxOf: screenBox(view, face) }
       const drawn: SliceId[] = []
       const commit = (slice: Slice, result: Drawn) => {
