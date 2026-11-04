@@ -25,9 +25,9 @@ fn keeps_the_contract(entry: &Entry, seeds: &[u64]) {
                     let name = format!("{} (seed {seed})", entry.name);
                     // Parts at one seed: they check how a world is drawn, which seeds don't change.
                     if seed == REGIONS_SEED {
-                        check(&name, &world, &regions, entry.levels)
+                        check(&name, &world, &regions, entry.levels, entry.from_above)
                     } else {
-                        check_content(&name, &world, &regions, entry.levels)
+                        check_content(&name, &world, &regions, entry.levels, entry.from_above)
                     }
                 });
                 (format!("seed {seed}"), thread)

@@ -42,19 +42,17 @@ const TOLERANCE: f64 = 0.1;
 /** Rays cast at each level, from as many origins. */
 const RAYS: usize = 20_000;
 
-/**
- * Levels from 1 up to this one are seen from above, at most. At level 4,
- * sites 2 m apart, a house's edges, of one kind seen from any side, grow
- * up to half a site and show walls from above, 0.11 off at the valley's
- * town's edge ("Media are isotropic" in docs/generators.md).
- */
-const FROM_ABOVE: u32 = 3;
+/** `region` grown to at least 16 sites of `level` across around its centre, along x and z. */
+fn around(region: &Box3, level: u32) -> Box3 {
+    let grow = |i: usize| if i == 1 { 0 } else { 0.max((8i64 << level) - (region.max[i] - region.min[i]) / 2) };
+    Box3 { min: [0, 1, 2].map(|i| region.min[i] - grow(i)), max: [0, 1, 2].map(|i| region.max[i] + grow(i)) }
+}
 
 /**
- * Levels past FROM_ABOVE up to this one see the fields of far regions
- * from above (sites 8 m apart at level 6), against level 0, within
- * FAR_TOLERANCE.
+ * Levels FAR_FROM to FAR see the fields of far regions from above
+ * (sites 2 to 8 m apart), against level 0, within FAR_TOLERANCE.
  */
+const FAR_FROM: u32 = 4;
 const FAR: u32 = 6;
 
 /**
@@ -375,11 +373,11 @@ fn levels_against_finer(generator: &Generator, region: &Box3, levels: u32, repor
     };
     let mut origins: Option<(u32, Box3, Vec<Ray>)> = None;
     for level in 1..=levels {
-        let (si, finer) = (1i64 << level, level.saturating_sub(2));
-        let s = si as f64;
-        // At least 16 sites of the level across, around the region's centre.
-        let grow = |i: usize| 0.max(8 * si - (region.max[i] - region.min[i]) / 2);
-        let area = Box3 { min: [0, 1, 2].map(|i| region.min[i] - grow(i)), max: [0, 1, 2].map(|i| region.max[i] + grow(i)) };
+        let (s, finer) = ((1i64 << level) as f64, level.saturating_sub(2));
+        // At least 16 sites of the level across and tall, around the region's centre.
+        let mut area = around(region, level);
+        let grow = 0.max((8i64 << level) - (region.max[1] - region.min[1]) / 2);
+        (area.min[1], area.max[1]) = (region.min[1] - grow, region.max[1] + grow);
         let reference = grid(&mut grids, finer, &area);
         if origins.as_ref().is_none_or(|(l, a, _)| *l != finer || *a != area) {
             let (rays, tried) = rays_from_open(&area, &grids[reference].2, finer);
@@ -417,32 +415,40 @@ fn levels_against_finer(generator: &Generator, region: &Box3, levels: u32, repor
 }
 
 /**
- * What a camera straight above `region` sees at each level from 1 to
- * `levels` (at most FROM_ABOVE): the materials of what each ray down
- * hits first, as at level 0, within TOLERANCE. Unlike levels two apart,
- * level 0 catches a drift, a little a level, such as walls taking over
- * from roofs.
+ * What a camera straight above `region`, grown to at least 16 sites of
+ * the level across around its centre, sees at each level from 1 to
+ * `levels`: the materials of what each ray down hits first, as at level
+ * 0, within TOLERANCE. Unlike levels two apart, level 0 catches a drift,
+ * a little a level, such as walls taking over from roofs.
  */
 fn from_above_against_level_0(world: &World, region: &Box3, levels: u32, report: &mut Report) {
-    from_above(world, region, 1..=levels.min(FROM_ABOVE), Measure::FromAbove, report);
+    from_above(world, region, 1..=levels, Measure::FromAbove, report);
 }
 
 /** What rays straight down over `region` hit first at each of `levels`, against level 0, as `measure`. */
 fn from_above(world: &World, region: &Box3, levels: impl Iterator<Item = u32>, measure: Measure, report: &mut Report) {
     let types: Vec<u8> = materials_of(&world.generator).iter().map(|m| m.material_type).collect();
-    // A ray every 2 units.
-    let width = ((region.max[0] - region.min[0]) / 2).clamp(16, 1024) as usize;
-    let camera = Camera::top([region.min[0] as f64, region.min[2] as f64], [region.max[0] as f64, region.max[2] as f64], width);
-    let seen = |level: u32| shares(picture(&world.generator, &camera, level, world.heights_at(level)).material);
-    let reference = seen(0);
+    let seen = |level: u32, area: &Box3| {
+        // A ray every 2 units.
+        let width = ((area.max[0] - area.min[0]) / 2).clamp(16, 1024) as usize;
+        let camera = Camera::top([area.min[0] as f64, area.min[2] as f64], [area.max[0] as f64, area.max[2] as f64], width);
+        shares(picture(&world.generator, &camera, level, world.heights_at(level)).material)
+    };
+    // Level 0 over the area of the levels since it last grew.
+    let mut reference: Option<(Box3, BTreeMap<u8, f64>)> = None;
     for level in levels {
-        let here = seen(level);
+        let area = around(region, level);
+        if reference.as_ref().is_none_or(|(a, _)| *a != area) {
+            reference = Some((area, seen(0, &area)));
+        }
+        let reference = &reference.as_ref().expect("made").1;
+        let here = seen(level, &area);
         report.margins.push(Margin {
             region: *region,
             measure,
             level,
             against: 0,
-            difference: difference(&by_type(&types, &reference), &by_type(&types, &here)),
+            difference: difference(&by_type(&types, reference), &by_type(&types, &here)),
             through: [0.0; 2],
             materials: [reference.clone(), here],
         });
@@ -452,20 +458,21 @@ fn from_above(world: &World, region: &Box3, levels: impl Iterator<Item = u32>, m
 /**
  * How far each level of `world`, named `name` (with its seed, say), up
  * to `levels` strays in each of `regions` from the level two finer (rays
- * from where a camera could be) and from level 0 (from above).
+ * from where a camera could be), and up to `from_above` from level 0
+ * (seen from above).
  */
-pub fn margins(name: &str, world: &World, regions: &[Box3], levels: u32) -> Report {
+pub fn margins(name: &str, world: &World, regions: &[Box3], levels: u32, from_above: u32) -> Report {
     let mut report = Report::new(name, &world.generator);
     for region in regions {
         levels_against_finer(&world.generator, region, levels, &mut report);
-        from_above_against_level_0(world, region, levels, &mut report);
+        from_above_against_level_0(world, region, from_above, &mut report);
     }
     report
 }
 
 /**
  * What `world`'s fields show from above over each of `regions`, wide
- * ones (only x and z count), at levels past FROM_ABOVE up to FAR,
+ * ones (only x and z count), at levels FAR_FROM to FAR,
  * against level 0. Its things are left out, and with them their far
  * fields: their far forms keep what rays see around them, not from
  * above ("Media are isotropic" in docs/generators.md).
@@ -474,7 +481,7 @@ pub fn far_margins(name: &str, mut world: World, regions: &[Box3]) -> Report {
     world.generator.layers.retain(|layer| matches!(layer, Layer::Field(_)));
     let mut report = Report::new(name, &world.generator);
     for region in regions {
-        from_above(&world, region, FROM_ABOVE + 1..=FAR, Measure::FieldsFromAbove, &mut report);
+        from_above(&world, region, FAR_FROM..=FAR, Measure::FieldsFromAbove, &mut report);
     }
     report
 }
@@ -649,10 +656,11 @@ pub fn follow_surface(regions: &[Box3], from: &World, to: &World) -> Vec<Box3> {
 /**
  * The whole contract for `world`, named `name` (with its seed, say), in
  * each of `regions` (between them, a bit of everything in it), up to the
- * level `levels` it keeps what a camera sees to. Prints its margins (see
- * them with --nocapture); panics where it breaks it.
+ * level `levels` it keeps what a camera sees to, and `from_above` what
+ * is seen from above. Prints its margins (see them with --nocapture);
+ * panics where it breaks it.
  */
-pub fn check(name: &str, world: &World, regions: &[Box3], levels: u32) {
+pub fn check(name: &str, world: &World, regions: &[Box3], levels: u32, from_above: u32) {
     let start = Instant::now();
     for region in regions {
         // Up to one level past the checked ones: where things may be drawn as media (a forest's trees).
@@ -661,16 +669,16 @@ pub fn check(name: &str, world: &World, regions: &[Box3], levels: u32) {
         }
     }
     println!("{name}: parts {:.1} s", start.elapsed().as_secs_f64());
-    check_content(name, world, regions, levels);
+    check_content(name, world, regions, levels, from_above);
 }
 
 /**
  * The contract but for parts: what a world's seed changes, its content.
  * For more seeds of a world `check` checks at one.
  */
-pub fn check_content(name: &str, world: &World, regions: &[Box3], levels: u32) {
+pub fn check_content(name: &str, world: &World, regions: &[Box3], levels: u32, from_above: u32) {
     let start = Instant::now();
-    let report = margins(name, world, regions, levels);
+    let report = margins(name, world, regions, levels, from_above);
     let rays = start.elapsed().as_secs_f64();
     let mut broken = heights_hold(world, regions, levels);
     let heights = start.elapsed().as_secs_f64() - rays;

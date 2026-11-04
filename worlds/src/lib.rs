@@ -31,6 +31,8 @@ pub struct Entry {
      * (worldgen::contract::check_far); only their x and z count.
      */
     pub far: &'static [Box3],
+    /** The level up to which it keeps what is seen from above, against level 0: at most `levels`. */
+    pub from_above: u32,
 }
 
 /** The seed a world's regions are chosen at. */
@@ -38,8 +40,16 @@ pub const REGIONS_SEED: u64 = 42;
 
 /** Every world; the web lists them by itself (worldgen_worlds) and starts them by index (worldgen_start). */
 pub const WORLDS: &[Entry] = &[
-    // Near the spawn point: path, trees, undergrowth, from under the ground to above the crowns.
-    Entry { name: "forest", make: forest::forest, regions: &[Box3 { min: [-128, -64, -384], max: [128, 384, -128] }], levels: 6, far: &[] },
+    // Near the spawn point: path, trees, undergrowth, from under the ground to above the crowns;
+    // seen from above at levels 5 and 6, 64 and 128 m of forest around it.
+    Entry {
+        name: "forest",
+        make: forest::forest,
+        regions: &[Box3 { min: [-128, -64, -384], max: [128, 384, -128] }],
+        levels: 6,
+        from_above: 6,
+        far: &[],
+    },
     // The first town's south edge: fields, its first row of houses and the main street, trees of its yards and of the forest;
     // and its centre: houses back to back, a cross street, the square with its fountain and church.
     // Far away, all of that town and a few metres of fields around it: its streets and paving are finer than the sites there.
@@ -48,6 +58,9 @@ pub const WORLDS: &[Entry] = &[
         make: valley::valley,
         regions: &[Box3 { min: [-128, -48, 760], max: [256, 208, 1016] }, Box3 { min: [-64, -48, 1408], max: [320, 288, 1856] }],
         levels: 4,
+        // At level 4, sites 2 m apart, a house's edges, of one kind seen from any side, grow up to half a site
+        // and show walls from above, 0.11 off at the town's edge ("Media are isotropic" in docs/generators.md).
+        from_above: 3,
         far: &[Box3 { min: [-704, -48, 864], max: [704, 288, 2336] }],
     },
     // The first steading: its hut, the cairns and the ring north of it, heather and grass, from under the ground to over the roof.
@@ -57,6 +70,7 @@ pub const WORLDS: &[Entry] = &[
         make: moor::moor,
         regions: &[Box3 { min: [-64, -32, -192], max: [192, 64, 192] }],
         levels: 5,
+        from_above: 3,
         far: &[Box3 { min: [-640, -32, -640], max: [768, 64, 768] }],
     },
     // The first settlement's main street where a cross street meets it: houses facing both, yards, trees, paving.
@@ -66,6 +80,7 @@ pub const WORLDS: &[Entry] = &[
         make: learned::learned,
         regions: &[Box3 { min: [64, -48, 1984], max: [448, 208, 2368] }],
         levels: 4,
+        from_above: 3,
         far: &[Box3 { min: [-1536, -48, 544], max: [1536, 288, 3616] }],
     },
 ];

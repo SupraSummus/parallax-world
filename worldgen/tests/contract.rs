@@ -135,17 +135,17 @@ fn world_of(generator: Generator, heights: (i64, i64)) -> World {
 
 #[test]
 fn fog_keeps_the_contract() {
-    check("fog", &world_of(fog(), (0, 128)), &[b(32, 32, 32, 96, 96, 96)], 4);
+    check("fog", &world_of(fog(), (0, 128)), &[b(32, 32, 32, 96, 96, 96)], 4, 3);
 }
 
 #[test]
 fn caves_keep_the_contract() {
-    check("caves", &world_of(caves(), (-256, 256)), &[b(0, 0, 0, 128, 128, 128)], 3);
+    check("caves", &world_of(caves(), (-256, 256)), &[b(0, 0, 0, 128, 128, 128)], 3, 3);
 }
 
 #[test]
 fn village_keeps_the_contract() {
-    check("village", &world_of(village(), (-64, 64)), &[b(-64, -16, -64, 64, 48, 64)], 4);
+    check("village", &world_of(village(), (-64, 64)), &[b(-64, -16, -64, 64, 48, 64)], 4, 3);
 }
 
 /**
@@ -218,7 +218,7 @@ fn finds_voxels_outside_the_heights() {
 
 #[test]
 fn margins_break_down_by_type_and_kind() {
-    let report = margins("fog", &world_of(fog(), (0, 128)), &[b(32, 32, 32, 96, 96, 96)], 2);
+    let report = margins("fog", &world_of(fog(), (0, 128)), &[b(32, 32, 32, 96, 96, 96)], 2, 2);
     let all = format!("{report:#}");
     assert!(all.starts_with("fog in x 32..96, y 32..96, z 32..96:\n  level 1 against 0, rays through: "), "{all}");
     assert!(all.contains("type   8: 1.000 -> 1.000 (+0.000): fog 1.000 -> 1.000"), "{all}");
