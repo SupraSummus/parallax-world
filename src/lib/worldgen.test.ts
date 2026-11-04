@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { VoxelGrid } from './voxel-grid'
 import { forest } from './worldgen'
 
-// worldgen/tests check the forest itself; these check what crosses from its WebAssembly.
+// worlds/tests check the forest itself; these check what crosses from its WebAssembly.
 describe('forest', () => {
   const { spawn, materials, heights, generate } = forest(7)
   // A coarse level: the ground around the spawn point in moments.

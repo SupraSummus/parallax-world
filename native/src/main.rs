@@ -1,4 +1,4 @@
-//! Spike of a native frontend: worldgen's forest generated in tiles, those
+//! Spike of a native frontend: the forest of worlds/ generated in tiles, those
 //! in view first (world.rs), the renderer picking the chunks in view
 //! (renderer.rs), worker threads baking them with the baker in bake/,
 //! sharing the tiles, and wgpu drawing them in an egui window.
@@ -42,9 +42,11 @@ use compositor::{Colours, Compositor};
 use dump::Dump;
 use renderer::Renderer;
 use view::{Vec3, focal_length, view_basis};
-use world::{Level, World};
-use worldgen::forest::forest;
+use world::{Level, Make, World};
 use worldgen::generator::materials_of;
+
+/** The world shown. */
+const WORLD: Make = worlds::forest::forest;
 
 struct App {
     world: World,
@@ -160,12 +162,12 @@ impl eframe::App for App {
     }
 }
 
-/** The renderer and its bakery, for the forest of `seed`. */
-fn renderer(seed: u64, threads: usize, render_distance: f64) -> Renderer {
+/** The renderer and its bakery, for `world`. */
+fn renderer(world: &worldgen::World, threads: usize, render_distance: f64) -> Renderer {
     let faces = view::faces();
-    let colours: Vec<u32> = materials_of(&forest(seed).0).iter().map(|m| m.rgb()).collect();
+    let colours: Vec<u32> = materials_of(&world.generator).iter().map(|m| m.rgb()).collect();
     let bakery = Bakery::new(threads, move || Baker::new(&colours));
-    Renderer::new(faces, bakery, render_distance, std::array::from_fn(|level| worldgen::forest::heights(level as u32)))
+    Renderer::new(faces, bakery, render_distance, world::heights(world))
 }
 
 /**
@@ -209,11 +211,13 @@ fn check_requests(dump: &Dump, seed: u64, threads: usize) {
     }
     let focal = focal_length(dump.fov, dump.width, dump.height);
     let view = &view::View { yaw: dump.yaw, pitch: dump.pitch, width: dump.width, height: dump.height, focal };
-    let mut renderer = renderer(seed, threads, dump.render_distance);
+    let shown = WORLD(seed);
+    let mut renderer = renderer(&shown, threads, dump.render_distance);
+    let heights = world::heights(&shown);
     let start = Instant::now();
     for (level, grid) in dump.grids.iter().enumerate() {
         if let Some(grid) = grid {
-            renderer.set_tiles(level, Arc::new(Level::cut(level, grid)));
+            renderer.set_tiles(level, Arc::new(Level::cut(&heights, level, grid)));
         }
     }
     println!("indexed the dump's grids in {:.2} s", start.elapsed().as_secs_f64());
@@ -293,12 +297,13 @@ fn main() -> eframe::Result {
     let size = SHOT;
     let focal = focal_length(FOV, size[0], size[1]);
     let first = view::View { yaw: YAW, pitch: PITCH, width: size[0], height: size[1], focal };
-    let mut renderer = renderer(seed, threads, RENDER_DISTANCE);
+    let shown = WORLD(seed);
+    let mut renderer = renderer(&shown, threads, RENDER_DISTANCE);
     if let Some(i) = args.iter().position(|a| a == "--leak") {
         renderer.max_leak = args[i + 1].parse().expect("leak");
     }
-    let mut world = World::new(seed, threads);
-    let mut camera = worldgen::forest::forest(seed).1.map(|v| v as f64);
+    let mut world = World::new(WORLD, seed, threads);
+    let mut camera = shown.spawn.map(|v| v as f64);
     let faces: [[Vec3; 3]; 12] = std::array::from_fn(|f| view::faces()[f].axes);
     let fog_distance = RENDER_DISTANCE * FOG_PER_RENDER_DISTANCE;
     if args.iter().any(|a| ["--bench", "--shot", "--stroll"].contains(&a.as_str())) {

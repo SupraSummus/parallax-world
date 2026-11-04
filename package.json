@@ -8,10 +8,10 @@
     "build": "pnpm wasm && vite build",
     "preview": "vite preview",
     "shot": "pnpm wasm && node scripts/shot.mjs",
-    "wasm": "cargo build --profile wasm --target wasm32-unknown-unknown --manifest-path worldgen/Cargo.toml",
+    "wasm": "cargo build --profile wasm --target wasm32-unknown-unknown --manifest-path worlds/Cargo.toml",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint . && cargo clippy --manifest-path bake/Cargo.toml --all-targets -- -D warnings && cargo fmt --manifest-path bake/Cargo.toml --check && cargo clippy --manifest-path worldgen/Cargo.toml --all-targets -- -D warnings && cargo fmt --manifest-path worldgen/Cargo.toml --check",
-    "test": "pnpm wasm && cargo test --manifest-path bake/Cargo.toml && cargo test --release --manifest-path worldgen/Cargo.toml && vitest run",
+    "lint": "eslint . && cargo clippy --manifest-path bake/Cargo.toml --all-targets -- -D warnings && cargo fmt --manifest-path bake/Cargo.toml --check && cargo clippy --manifest-path worldgen/Cargo.toml --all-targets -- -D warnings && cargo fmt --manifest-path worldgen/Cargo.toml --check && cargo clippy --manifest-path worlds/Cargo.toml --all-targets -- -D warnings && cargo fmt --manifest-path worlds/Cargo.toml --check",
+    "test": "pnpm wasm && cargo test --manifest-path bake/Cargo.toml && cargo test --release --manifest-path worldgen/Cargo.toml && cargo test --release --manifest-path worlds/Cargo.toml && vitest run",
     "knip": "knip",
     "knip:production": "knip --production",
     "check": "pnpm lint && pnpm typecheck && pnpm knip && pnpm knip:production && pnpm test"

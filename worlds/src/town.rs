@@ -5,13 +5,17 @@
 
 use std::rc::Rc;
 
-use crate::forest::{self, K as F, Relief, Species, m, make_tree};
-use crate::frame::{Frame, Part, U, V, W, back, walls};
-use crate::generator::{ANY_SIZE, Child, Children, Far, Field, FieldValues, Fill, Layer, Node, Op, Population, SOLID, Shape, Shapes, Span};
-use crate::grid::Box3;
-use crate::kinds;
-use crate::noise::{Fixed, ONE, Rng, fixed, hash64, smoothstep, stream};
-use crate::plan::{Land, Plan};
+use worldgen::frame::{Frame, Part, U, V, W, back, walls};
+use worldgen::generator::{
+    ANY_SIZE, Child, Children, Far, Field, FieldValues, Fill, Layer, Node, Op, Population, SOLID, Shape, Shapes, Span,
+};
+use worldgen::grid::Box3;
+use worldgen::kinds;
+use worldgen::noise::{Fixed, ONE, Rng, fixed, hash64, smoothstep, stream};
+use worldgen::plan::{Land, Plan};
+use worldgen::units::m;
+
+use crate::forest::{self, K as F, Relief, Species, make_tree};
 
 kinds! {
     base: forest::KINDS.len() as u8;

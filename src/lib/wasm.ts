@@ -1,9 +1,10 @@
 /**
- * The web's WebAssembly module, worldgen/ compiled with the baker of bake/
- * it depends on, inlined here (?inline) so it compiles synchronously, in a
- * worker, on the main thread or in Node, with no files to fetch.
+ * The web's WebAssembly module, the worlds of worlds/ compiled with the
+ * engine of worldgen/ and the baker of bake/ they depend on, inlined here
+ * (?inline) so it compiles synchronously, in a worker, on the main thread
+ * or in Node, with no files to fetch.
  */
-import wasm from '../../worldgen/target/wasm32-unknown-unknown/wasm/worldgen.wasm?inline'
+import wasm from '../../worlds/target/wasm32-unknown-unknown/wasm/worlds.wasm?inline'
 
 // Compiled on first use, once per thread, synchronously
 // (browsers allow that for a module this small even on the main thread).

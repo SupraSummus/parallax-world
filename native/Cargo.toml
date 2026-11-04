@@ -11,6 +11,7 @@ eframe = { version = "0.37", default-features = false, features = ["wgpu", "wayl
 png = "0.18"
 pollster = "1"
 worldgen = { path = "../worldgen" }
+worlds = { path = "../worlds" }
 
 [profile.release]
 debug = 0

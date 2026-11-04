@@ -2,7 +2,7 @@
 
 Vitest in Node,
 with jsdom only in UI tests that opt in (`// @vitest-environment jsdom`),
-and `cargo test` for the Rust in `bake/` and `worldgen/`.
+and `cargo test` for the Rust in `bake/`, `worldgen/` and `worlds/`.
 Commands are in `package.json`:
 
 ```bash
@@ -29,8 +29,8 @@ pnpm exec vitest run bake       # files matching "bake"
 | `src/lib/worker-bakery.test.ts` | Baking in workers (simulated) gives the same frames; what is baked first, and when not at all |
 | `src/lib/renderer-regressions.test.ts` | Previously fixed rendering bugs |
 | `src/lib/world.test.ts` | Toy worlds; a generated world's grids put together from parts generated alone |
-| `worldgen/tests/contract.rs` | Every world generated in pieces equals it generated whole, at several levels |
-| `worldgen/tests/forest.rs`, `worldgen/tests/valley.rs`, `src/lib/city.test.ts` | The scenes: determinism, contents, spawn |
+| `worlds/tests/contract.rs`, `worldgen/tests/contract.rs` | Every world, and the engine's test worlds, keep the contract (`worldgen/src/contract.rs`): generated in pieces equals generated whole, levels agree on what rays see |
+| `worlds/tests/forest.rs`, `worlds/tests/valley.rs`, `src/lib/city.test.ts` | The scenes: determinism, contents, spawn |
 | `src/lib/worldgen.test.ts` | The forest as the web gets it from WebAssembly |
 | `src/viewer/mesh.test.ts` | Reference viewer mesh |
 | `src/App.test.tsx` | UI panels, keyboard movement and turning |

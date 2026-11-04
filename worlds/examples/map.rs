@@ -3,31 +3,36 @@
 //!
 //! cargo run --release --example map -- valley 42 2 -1600 -400 3200 4000 map.ppm
 //!
-//! for world, seed, level, the area's min x and z, width and depth (lattice
+//! for world (by name, as in WORLDS), seed, level, the area's min x and z, width and depth (lattice
 //! units), and the file.
 
-use worldgen::forest::{forest, heights};
 use worldgen::generator::{generate, materials_of};
 use worldgen::grid::Box3;
-use worldgen::valley::valley;
+use worlds::{WORLDS, by_name};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let number = |i: usize| args[i].parse::<i64>().expect("a number");
     let seed = number(1) as u64;
-    let (generator, _) = if args[0] == "valley" { valley(seed) } else { forest(seed) };
+    let Some(entry) = by_name(&args[0]) else {
+        let names: Vec<&str> = WORLDS.iter().map(|e| e.name).collect();
+        eprintln!("no world {}; the worlds are {}", args[0], names.join(", "));
+        std::process::exit(1);
+    };
+    let world = (entry.make)(seed);
+    let generator = &world.generator;
     let level = number(2) as u32;
     let s = 1i64 << level;
     let (x0, z0, nx, nz) = (2 * (number(3) / s).div_euclid(2), number(4) / s, number(5) / s, number(6) / s);
-    let colours: Vec<u32> = materials_of(&generator).iter().map(|m| m.rgb()).collect();
-    let (min_y, max_y) = heights(level);
+    let colours: Vec<u32> = materials_of(generator).iter().map(|m| m.rgb()).collect();
+    let (min_y, max_y) = world.heights_at(level);
     let mut image = vec![0u8; (nx * nz * 3) as usize];
     // In tiles, as the web generates it.
     const TILE: i64 = 64;
     for tz in (0..nz).step_by(TILE as usize) {
         for tx in (0..nx).step_by(TILE as usize) {
             let b = Box3 { min: [x0 + tx, min_y, z0 + tz], max: [x0 + tx + TILE, max_y, z0 + tz + TILE] };
-            let grid = generate(&generator, &b, level);
+            let grid = generate(generator, &b, level);
             for z in b.min[2]..b.max[2].min(z0 + nz) {
                 for x in b.min[0]..b.max[0].min(x0 + nx) {
                     let Some((y, id)) =

@@ -6,11 +6,13 @@
 
 use std::rc::Rc;
 
-use crate::forest::{self, K as F, m};
-use crate::generator::{Field, FieldValues, Kind, Layer, Node, Op, Population, SOLID, Span, ball, stripe};
-use crate::kinds;
-use crate::noise::{Fbm, Fixed, ONE, Rng, ValueNoise, fixed, hash, hash64, smoothstep, stream};
-use crate::plan::{Land, Plan};
+use worldgen::generator::{Field, FieldValues, Kind, Layer, Node, Op, Population, SOLID, Span, ball, stripe};
+use worldgen::kinds;
+use worldgen::noise::{Fbm, Fixed, ONE, Rng, ValueNoise, fixed, hash, hash64, smoothstep, stream};
+use worldgen::plan::{Land, Plan};
+use worldgen::units::m;
+
+use crate::forest::{self, K as F};
 use crate::town::{self, Towns};
 
 kinds! {
