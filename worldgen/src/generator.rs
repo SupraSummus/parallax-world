@@ -9,6 +9,7 @@ use std::sync::OnceLock;
 use crate::grid::{Box3, VoxelGrid};
 use crate::js;
 use crate::noise::{Fixed, Fx, ONE, Rng, fixed, float, hash, hash_text, hash64, unit};
+use crate::plan;
 
 /** A material kind: its index in Generator::kinds. */
 pub type Kind = u8;
@@ -1334,13 +1335,28 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut dyn FnMut
     // The chance a medium's site is kept, from its extinction.
     let chance_of = |extinction: Option<f64>| extinction.map(|e| 1.0 - js::exp(-e * CHORD * s as f64));
     let kept = |x: i64, y: i64, z: i64, chance: Option<f64>| chance.is_none_or(|p| unit(hash(field_seed, x * s, y * s, z * s)) < p);
+    // Where column (i, j) of sites reads dithered plans, in the s × s columns it stands for (Plan::dithered): the same
+    // for every field, so a column's fields read one point. Along a row of columns the offsets across it are a Weyl
+    // sequence (the golden ratio's) from a phase hashed per row, so any run of them is spread evenly: a street along
+    // the row is read by as many columns as it covers, give or take one, not by chance. None at level 0.
+    let bits = s.trailing_zeros();
+    let offset = |i: i64, j: i64| -> [i64; 2] {
+        if bits == 0 {
+            return [0, 0];
+        }
+        let weyl = |n: i64, row: i64, axis: i64| {
+            let phase = hash64(seed, 0x0f00_7041, row, axis << 8 | bits as i64);
+            ((n as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15).wrapping_add(phase) >> (64 - bits)) as i64 - s / 2
+        };
+        [weyl(j, i, 0), weyl(i, j, 2)]
+    };
     match &field.values {
         FieldValues::At(at) => {
             for z in clip.min[2]..clip.max[2] {
                 for y in clip.min[1]..clip.max[1] {
                     let mut x = clip.min[0] + ((clip.min[0] + y + z) & 1);
                     while x < clip.max[0] {
-                        if let Some((kind, extinction)) = at(x * s, y * s, z * s, s)
+                        if let Some((kind, extinction)) = plan::footprint(s, offset(x, z), || at(x * s, y * s, z * s, s))
                             && kept(x, y, z, chance_of(extinction))
                         {
                             put(kind, op, x, y, z);
@@ -1361,7 +1377,12 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut dyn FnMut
                 for v in lo[b]..hi[b] {
                     site[a] = u;
                     site[b] = v;
-                    for span in spans(u * s, v * s, s) {
+                    // A line along x or z reads plans at one z or x: dithered across it only.
+                    let mut moved = offset(site[0], site[2]);
+                    if axis != 1 {
+                        moved[axis / 2] = 0;
+                    }
+                    for span in plan::footprint(s, moved, || spans(u * s, v * s, s)) {
                         // s is a power of two: shifting is dividing, rounded down.
                         let first = (-((-span.from) >> s.trailing_zeros())).max(lo[axis]);
                         let mut w = first + ((first + u + v) & 1);
