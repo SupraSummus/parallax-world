@@ -128,7 +128,9 @@ export class ChunkBaker {
 
   /** The sites (a, b, c in the face's lattice coordinates) of the splats of the chunk baked last, in their order. @internal */
   sites(count: number): Int32Array {
-    return new Int32Array(this.baker.memory.buffer, this.baker.sites(), count * 3).slice()
+    // Before reading the buffer: the call may grow the memory, detaching the old one.
+    const at = this.baker.sites()
+    return new Int32Array(this.baker.memory.buffer, at, count * 3).slice()
   }
 
   /** Calls `bake` and returns its result's numbers. */
