@@ -19,6 +19,20 @@ Numbers are for the forest at 1280×800, as measured when written.
   would be even for any height,
   but would leave holes in boxes under two sites thick
   and roughen every surface.
+- **A coarse voxel looks the same from every side.**
+  So from sites 2 m apart on, a house's edge shows wall from above
+  ("Media are isotropic" in `docs/generators.md`).
+  A study (a prototype in worldgen only, not kept)
+  gave measured sites a kind per axis, the first seen from either end,
+  and picked it by the ray's direction:
+  walls seen from above all but went
+  (the town's edge, from above against level 0 at level 4: 0.092 to 0.064,
+  at level 5: 0.159 to 0.117, over four seeds),
+  for 2 bytes more on the 2–18% of a coarse town's voxels it changes.
+  Opacity per direction made things worse.
+  The baker would pick a splat's colour by the direction from the eye
+  (dominant axis, or blended); compositors and coverage stay as they are.
+  The whole path, grids to baker to the web's transfer: about a week.
 - **The native frontend is missing pieces.**
   Its renderer has no `matchTilings`:
   where slices re-tile as the camera moves along an axis,
