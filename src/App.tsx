@@ -42,6 +42,9 @@ const DRAG_DEGREES_PER_PIXEL = 0.15
 /** Lattice units a second the camera moves at. */
 const MOVE_SPEED = 60
 
+/** EXPERIMENT: view settings the query may give beyond parseViewQuery's (leak, fill, seams, eyes), for comparing shots. */
+const experiment = (name: string) => new URLSearchParams(location.search).get(name)
+
 function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const rendererRef = useRef<ParallaxRenderer | null>(null)
@@ -61,10 +64,10 @@ function App() {
   const [worldType, setWorldType] = useState<WorldType>('forest')
   const [fov, setFov] = useState(DEFAULT_FOV)
   const [renderDistance, setRenderDistance] = useState(DEFAULT_RENDER_DISTANCE)
-  const [maxLeak, setMaxLeak] = useState(DEFAULT_MAX_LEAK)
-  const [fillGaps, setFillGaps] = useState(true)
+  const [maxLeak, setMaxLeak] = useState(() => Number(experiment('leak') ?? DEFAULT_MAX_LEAK))
+  const [fillGaps, setFillGaps] = useState(() => experiment('fill') !== '0')
   const [skipCovered, setSkipCovered] = useState(true)
-  const [showSeams, setShowSeams] = useState(false)
+  const [showSeams, setShowSeams] = useState(() => experiment('seams') === '1')
   // Generating a world blocks this thread for a second or two; a spinner shows meanwhile.
   const [generating, setGenerating] = useState(true)
 
@@ -121,6 +124,10 @@ function App() {
     if (query.look) renderer.setOrientation(query.look)
     if (query.fov !== undefined) renderer.setFov(query.fov)
     if (query.distance !== undefined) renderer.setRenderDistance(query.distance)
+    // EXPERIMENT: the rest of the view in the query (the panel's state starts from it too).
+    renderer.setMaxLeak(Number(experiment('leak') ?? DEFAULT_MAX_LEAK))
+    renderer.setFillGaps(experiment('fill') !== '0')
+    compositorRef.current?.setShowSeams(experiment('seams') === '1')
     setWorldType(renderer.getWorld().worldType)
     setFov(renderer.getFov())
     setRenderDistance(renderer.getRenderDistance())

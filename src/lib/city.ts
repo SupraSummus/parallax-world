@@ -99,8 +99,9 @@ class Canvas {
   // Plan cell (x, y, z) holds the sites with x in [UNITS · x − 1, UNITS · x] (y, z likewise).
   readonly grid = new VoxelGrid(
     {
-      minX: UNITS * MIN_X - 1, minY: UNITS * MIN_Y - 1, minZ: UNITS * MIN_Z - 1,
-      maxX: UNITS * (MIN_X + SIZE) - 1, maxY: UNITS * MAX_Y - 1, maxZ: UNITS * (MIN_Z + SIZE) - 1,
+      // EXPERIMENT: wide enough for seed 777's ground too.
+      minX: Math.min(UNITS * MIN_X - 1, -401), minY: UNITS * MIN_Y - 1, minZ: Math.min(UNITS * MIN_Z - 1, -201),
+      maxX: Math.max(UNITS * (MIN_X + SIZE) - 1, 401), maxY: UNITS * MAX_Y - 1, maxZ: UNITS * (MIN_Z + SIZE) - 1,
     },
     this.palette.materials,
   )
@@ -633,6 +634,17 @@ export function generateCity(seed: number): { grid: VoxelGrid; spawn: Vec3 } {
   const s = (k: number) => (seed | 0) + k * 1013904223
   const canvas = new Canvas(s(1))
 
+  // EXPERIMENT: seed 777 is flat ground ruled in straight lines, every 16 and 64 units, to see how slices bend them.
+  if (seed === 777) {
+    const [white, red, dark] = [paint('#f0f0f0'), paint('#d04040'), paint('#404040')]
+    const ruled = (v: number, period: number, width: number) => ((v % period) + period) % period < width
+    for (let x = -200; x < 200; x++) {
+      for (let z = -100; z < 300; z++) {
+        canvas.put(x, -1, z, ruled(x, 32, 4) || ruled(z, 32, 4) ? white : ruled(x, 8, 2) || ruled(z, 8, 2) ? red : dark)
+      }
+    }
+    return { grid: canvas.grid, spawn: { x: 0, y: 200, z: 0 } }
+  }
   // Ground.
   for (let tx = 0; tx < SIZE; tx++) {
     const sx = strip(tx)
