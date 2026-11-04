@@ -119,6 +119,20 @@ how many rays get how far, and what they stop on.
   what each slab of them across an axis hides, seen along each axis.
 - **Fields** are evaluated once per site or line of sites,
   and get the spacing, to smooth themselves to it.
+- **Faces.** Boxes and spans keep the sites in [min, max) along each axis.
+  On a plane of a level's sites (y = 0 is one at every level)
+  half the lines across a face have a site on it,
+  all kept at a bottom face and dropped at a top one,
+  so a ground and the houses on it would sink half a site, and more each level.
+  A site on a face counts as above it with the chance ½ + 1/(2s)
+  by a hash of its position and the axis (`Tie`):
+  always at level 0, about half the time far away,
+  so on average a face is where level 0 has it.
+  Boxes and spans meeting on a face share its sites;
+  a box one site thick keeps its bottom face whole, as at level 0,
+  as halves of two faces would let rays through.
+  Faces off those planes still round to the sites, up to half a site either way:
+  even over many heights, not for one flat thing.
 
 Build solids as one shape, not stacks of slices:
 a stack of discs a unit thick, each grown to a site, draws its outline, not its shape.
@@ -151,7 +165,8 @@ and fields from position alone.
 `worlds/tests/contract.rs` runs it for each world in `WORLDS`
 at seed 42 and three more, a thread each,
 and `worldgen/tests/contract.rs` for test worlds of fog, caves,
-and a village of houses with doors and tables.
+and a village of houses with doors and tables
+on y = 0, a plane of sites at every level ("Faces" in "Levels").
 An entry's regions are chosen at seed 42 (`REGIONS_SEED`);
 at other seeds each moves up or down with the world's surface over it
 (`follow_surface`: the median height of what is seen from above),
@@ -363,6 +378,23 @@ Carves along a line want the same margin.
   as a cell half covered by a wall stops every ray across the wall
   and is mostly kept;
   so the valley keeps what a camera sees to level 4.
+  Kinds credited by direction can't settle it:
+  from above only, level 4 from above came to 0.05,
+  but the materials rays hit at levels 3 and 4 to 0.12 and 0.16;
+  each axis's columns weighted by the thing's shadow along it,
+  or credited to the cell their first fine site is in,
+  moved neither by more than 0.01.
+- **A lone measured thing is kept or not almost whole.**
+  Its cells are held to one threshold,
+  and a hollow house's are only partly full:
+  the moor's hut, measured, drew to its threshold of 0.96 (seed 42),
+  so only wholly covered cells stayed,
+  and its thatch went from 21 % of the view from above to 15 % and 3 %
+  at levels 2 and 3; hence its outline.
+  Filling what rays from outside can't reach through gaps finer than a cell
+  (a closing) before measuring kept the thatch,
+  and brought the valley's town's materials hit at level 3 from 0.064 to 0.026,
+  but grew the houses over the streets (0.039 to 0.057 from above).
 - **Plans are point-sampled.**
   From level 6 (sites 8 m apart) the town's streets, 7 m wide, alias:
   seen from above, their share goes from 0.60 to 0.52.
