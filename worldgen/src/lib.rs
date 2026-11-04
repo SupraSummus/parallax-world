@@ -3,6 +3,8 @@
 //! (docs/generators.md); a World for hosts, and the contract every world
 //! keeps. The worlds themselves are in worlds/.
 
+pub mod build;
+pub mod column;
 pub mod contract;
 pub mod frame;
 pub mod generator;
