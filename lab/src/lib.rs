@@ -18,10 +18,18 @@
 //! and a split grammar of rectangles (grammar.rs); geometry.rs measures
 //! straight streets and rectangular roofs.
 //!
+//! The third makes the grammar's two sides of a cut agree, so cross
+//! streets cross: a cut keeps the strips running across it in training as
+//! guides for everything below it, which chooses its rules to fit them
+//! and snaps its cuts onto them (grammar.rs; geometry.rs counts crossings).
+//! And it samples a whole area by regimes (regimes.rs): towns at the
+//! sites of a plan, the grammar in their boxes down to rules of canopy and
+//! ground, a texture model (W0's) everywhere else.
+//!
 //! The examples run the experiments (`cargo run --release --example
-//! segment`, then `synth`; `gather`, then `geometry`), print Markdown
-//! tables and write pictures to out/; the worlds' columns are generated
-//! once and cached there.
+//! segment`, then `synth`; `gather`, then `geometry`, `shared` and
+//! `regimes`), print Markdown tables and write pictures to out/; the
+//! worlds' columns are generated once and cached there.
 
 pub mod experiment;
 pub mod geometry;
@@ -30,6 +38,7 @@ pub mod hierarchy;
 pub mod image;
 pub mod mixture;
 pub mod png;
+pub mod regimes;
 pub mod stats;
 pub mod synth;
 pub mod template;

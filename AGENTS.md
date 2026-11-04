@@ -93,7 +93,7 @@ worlds/                      # The worlds, on worldgen's public API only; the we
 │   └── wasm.rs              # Its WebAssembly exports (the module holds bake/'s too)
 ├── tests/                   # Every world in WORLDS keeps the contract; the scenes' contents
 └── examples/                # map: a world from above; look: a picture of it (picture.rs); forest_bench: timing forest tiles
-lab/                         # Experiment, not built by pnpm: hierarchical WFC rule-sets, pixel conditionals and split grammars learned from the valley (see src/lib.rs)
+lab/                         # Experiment, not built by pnpm: hierarchical WFC rule-sets, pixel conditionals, split grammars with shared splits and regimes, learned from the valley (see src/lib.rs)
 native/                      # Spike of a native frontend (eframe + wgpu), linking bake/ and worlds/; see src/main.rs
 ├── .cargo/config.toml       # Builds for x86-64-v3: floor and ceil inline (see there)
 ├── dump.test.ts             # Dumps a view from the TS renderer, to check it against (only with DUMP set)

@@ -77,6 +77,36 @@ impl TownCrop {
     }
 }
 
+/** A crop's shift from its town's centre, number `i`: anywhere in ±MARGIN, so a town is not aligned to the cells of any level. */
+pub fn shift(t: &TownCrop, i: i64) -> (i64, i64) {
+    let h = worldgen::noise::hash64(t.seed, t.n, i, 77);
+    let m = 2 * MARGIN as u64;
+    ((h % m) as i64 - MARGIN as i64, ((h >> 20) % m) as i64 - MARGIN as i64)
+}
+
+/** The crops to learn from: each town's at two shifts, as it is and mirrored. */
+pub fn training(towns: &[&TownCrop]) -> Vec<Image> {
+    towns
+        .iter()
+        .flat_map(|t| (0..2).flat_map(move |i| [false, true].map(|m| (i, m))).map(move |(i, m)| (t, i, m)))
+        .map(|(t, i, m)| {
+            let (dx, dz) = shift(t, i);
+            t.crop(dx, dz, m)
+        })
+        .collect()
+}
+
+/** The held-out crops: each town's at a shift of its own. */
+pub fn held_out(towns: &[&TownCrop]) -> Vec<Image> {
+    towns
+        .iter()
+        .map(|t| {
+            let (dx, dz) = shift(t, 9);
+            t.crop(dx, dz, false)
+        })
+        .collect()
+}
+
 /** The towns of `seeds` numbered `ns` along the path (some numbers have none), generated on `threads` threads, cached in `dir`. */
 pub fn gather(seeds: &[u64], ns: std::ops::RangeInclusive<i64>, threads: usize, dir: &str) -> Vec<TownCrop> {
     let mut wanted = Vec::new();

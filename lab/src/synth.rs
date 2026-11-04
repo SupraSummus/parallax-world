@@ -167,10 +167,29 @@ impl Window {
 
 /** The labels of level `k` (0 the finest) over `window`, alone. */
 pub fn sample(model: &Model, seed: u64, k: usize, window: Window, report: &mut Report) -> Image {
-    let Window { x0, y0, w, h } = window;
     if k == model.levels.len() {
-        return Image::filled(w, h, 0);
+        return Image::filled(window.w, window.h, 0);
     }
+    let parents = sample(model, seed, k + 1, parents_window(model, k, window), report);
+    refine(model, seed, k, window, &parents, report)
+}
+
+/** The window of level k + 1 that level k's `window` reads: the parents it touches and a ring around. */
+pub fn parents_window(model: &Model, k: usize, window: Window) -> Window {
+    let Window { x0, y0, w, h } = window;
+    let b = model.levels[k].b as i64;
+    let (pi0, pj0) = (x0.div_euclid(b), y0.div_euclid(b));
+    let (pi1, pj1) = ((x0 + w as i64 - 1).div_euclid(b) + 1, (y0 + h as i64 - 1).div_euclid(b) + 1);
+    Window::new(pi0 - 1, pj0 - 1, (pi1 - pi0 + 2) as usize, (pj1 - pj0 + 2) as usize)
+}
+
+/**
+ * Level `k` over `window` from `parents`, the labels of level k + 1 over
+ * parents_window: sampled by the model, or given (regimes.rs gives
+ * them), so long as they are a function of position alone.
+ */
+pub fn refine(model: &Model, seed: u64, k: usize, window: Window, parents: &Image, report: &mut Report) -> Image {
+    let Window { x0, y0, w, h } = window;
     for v in [&mut report.parts, &mut report.retried, &mut report.fallbacks] {
         v.resize(model.levels.len(), 0);
     }
@@ -179,7 +198,6 @@ pub fn sample(model: &Model, seed: u64, k: usize, window: Window, report: &mut R
     // The parents the box touches, and the ring around them that its corners and edges read.
     let (pi0, pj0) = (x0.div_euclid(b), y0.div_euclid(b));
     let (pi1, pj1) = ((x0 + w as i64 - 1).div_euclid(b) + 1, (y0 + h as i64 - 1).div_euclid(b) + 1);
-    let parents = sample(model, seed, k + 1, Window::new(pi0 - 1, pj0 - 1, (pi1 - pi0 + 2) as usize, (pj1 - pj0 + 2) as usize), report);
     let parent = |cx: i64, cy: i64| parents.at((cx.div_euclid(b) - pi0 + 1) as usize, (cy.div_euclid(b) - pj0 + 1) as usize) as usize;
     // Children of those parents and one more around, where the corners and edges reach.
     let (cx0, cy0) = (pi0 * b - 1, pj0 * b - 1);
