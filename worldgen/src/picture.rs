@@ -15,7 +15,7 @@ use crate::grid::{BRICK, Box3, VoxelGrid};
 const TILE: i64 = 64;
 
 /** The voxel's faces: towards its 12 neighbours, (p − site) · face ≤ 1 inside, in a level's units. */
-const FACES: [[i64; 3]; 12] = [
+pub(crate) const FACES: [[i64; 3]; 12] = [
     [1, 1, 0],
     [1, -1, 0],
     [-1, 1, 0],
@@ -238,21 +238,27 @@ impl Tiles {
                     continue;
                 }
             }
-            // Out by the face whose plane it reaches first.
-            let mut k = 0;
-            for j in 1..planes.len() {
-                if planes[j] < planes[k] {
-                    k = j;
-                }
-            }
-            ray.t = ray.t.max(planes[k]);
-            ray.face = walk.faces[k];
-            ray.site = [0, 1, 2].map(|i| ray.site[i] + FACES[ray.face][i]);
-            for (plane, after) in planes.iter_mut().zip(walk.after[k]) {
-                *plane += after;
-            }
+            walk.cross(ray, &mut planes);
         }
     }
+}
+
+/**
+ * Where a ray from `origin` along `direction` (a level's units) first
+ * enters a voxel of `grid`, if before `end`: how far, and its material id.
+ */
+pub(crate) fn first_voxel(grid: &VoxelGrid, origin: [f64; 3], direction: [f64; 3], end: f64) -> Option<(f64, u8)> {
+    let mut ray = Ray { pixel: 0, origin, direction, t: 0.0, end, site: nearest_site(origin), face: FACES.len() };
+    let walk = Walk::new(direction);
+    let mut planes = walk.planes(&ray);
+    while ray.t <= end {
+        let [x, y, z] = ray.site;
+        match grid.get(x, y, z) {
+            0 => walk.cross(&mut ray, &mut planes),
+            id => return Some((ray.t, id)),
+        }
+    }
+    None
 }
 
 /** When the ray leaves the box from `min` to `max` (a level's units), if it is in it now and goes further in it. */
@@ -303,6 +309,22 @@ impl Walk {
         walk
     }
 
+    /** Takes the ray into the next voxel: out by the face whose plane it reaches first. */
+    fn cross(&self, ray: &mut Ray, planes: &mut [f64; 6]) {
+        let mut k = 0;
+        for j in 1..planes.len() {
+            if planes[j] < planes[k] {
+                k = j;
+            }
+        }
+        ray.t = ray.t.max(planes[k]);
+        ray.face = self.faces[k];
+        ray.site = [0, 1, 2].map(|i| ray.site[i] + FACES[ray.face][i]);
+        for (plane, after) in planes.iter_mut().zip(self.after[k]) {
+            *plane += after;
+        }
+    }
+
     /** When the ray reaches each face's plane of its voxel's: (p − site) · face = 1. */
     fn planes(&self, ray: &Ray) -> [f64; 6] {
         let r = [0, 1, 2].map(|i| ray.origin[i] - ray.site[i] as f64);
@@ -323,7 +345,7 @@ fn normalize(v: [f64; 3]) -> [f64; 3] {
 }
 
 /** The site whose voxel holds p, in a level's units. */
-fn nearest_site(p: [f64; 3]) -> [i64; 3] {
+pub(crate) fn nearest_site(p: [f64; 3]) -> [i64; 3] {
     let mut r = p.map(|v| v.round());
     if (r[0] + r[1] + r[2]) as i64 & 1 != 0 {
         // Off by one in the coordinate rounded the furthest.

@@ -88,9 +88,19 @@ how many rays get how far, and what they stop on.
   a cluster's ball for its sprays of leaves on twigs, a site thick at level 0.
   Or the far form is the near form measured (`Far::measured`):
   drawn whole at the coarsest level it is drawn at, then coarsened,
-  each coarse site kept with the chance a ray crossing its cell is stopped
-  (the share of its columns holding a site, on average over the axes)
-  and of a kind in proportion to what shows on its sides.
+  each coarse site kept with the chance a ray crossing its cell is stopped:
+  the share of its columns holding a fine site of the thing,
+  on average over the axes,
+  of those holding a fine site at all.
+  Fine sites are two apart along a column,
+  so a cell holds fewer columns than its shadow, and unevenly by axis;
+  counted against its shadow, a solid cell came out 0.83 at sites twice apart,
+  and one house in six vanished.
+  A coarse site is of a kind in proportion to what rays along columns see:
+  each column's first fine site from either end
+  counts for the first kept cell the column crosses from that end.
+  From the ends of every column's run in the cell instead,
+  a town seen from above showed walls hidden inside its houses.
   The chances are held to one threshold for the whole thing:
   with one per site a house's outline came out ragged, a cloud of its cells;
   so a porous thing is kept or not whole, right only over many of them.
@@ -112,6 +122,9 @@ how many rays get how far, and what they stop on.
 
 Build solids as one shape, not stacks of slices:
 a stack of discs a unit thick, each grown to a site, draws its outline, not its shape.
+And give a sheet over something else, a roof over its gable,
+the depth of two sites of the levels it is measured at:
+columns of sites step over a thinner one to what is under it.
 
 ## Rules
 
@@ -142,17 +155,28 @@ and a village of houses with doors and tables:
 - a box against eight parts generated alone, in reverse order,
   at levels 0, 2 and one past the last checked below:
   any seam, order dependence or hidden state shows up as a differing site;
-- at each level up to the world's, rays from empty sites in random directions,
-  against the level two finer:
+- at each level up to the world's, 20,000 rays in random directions
+  from where a camera could be, against the level two finer:
   of the rays that get 2 sites far, the share that gets 4 more,
-  and the materials they stop on, must agree within 0.1.
-  Sites a level rougher and sheets a site thicker cost up to ~0.06;
-  losing content, or a wrong fill law, 0.14 and more.
+  and of those that hit something, the materials they hit,
+  must agree within 0.1.
+  A camera could be at the empty sites of the finer level
+  it could fly to from above,
+  through empty sites from the top of the box:
+  under a canopy (in the forest, all but 0.3 %), not under the ground's shell.
+  Sites a level rougher and sheets a site thicker cost up to ~0.08;
+  a town losing its roofs, 0.12;
+- at levels 1 to 3, what rays straight down over the region hit first,
+  against level 0, within 0.1:
+  levels two apart miss what drifts a little at every level,
+  like a town's walls taking over from its roofs (0.17 off at level 2).
+  At level 4 a house's edges show their walls from above
+  (see "Media are isotropic").
 
 With `--nocapture` it prints each level's margins.
 The engine's tests also check that a thing's carves cut only the thing.
 A new world is an entry in `WORLDS`
-with a region that has a bit of everything in it,
+with regions that have, between them, a bit of everything in it,
 and its name in `worlds!` in `worlds/tests/contract.rs`,
 whose tests fail without it.
 To see a world without the renderer,
@@ -235,8 +259,19 @@ so its things are a library others draw from
   26 m tall, two or three sites there. Not checked yet.
 - **Media are isotropic.** A site stops rays from every direction alike;
   vertical trunks seen from above and from the side cannot both be right.
-  Measured far forms show it too: a town far away shows its walls from above
-  as much as its roofs, since a site's kind is what shows on all its sides.
+  Measured far forms show it too: a site is of one kind from every side,
+  so at a house's edge, roof from above and wall from the side,
+  it shows walls from above some of the time:
+  at level 4 (sites 2 m apart) the valley's town is 0.11 off from above.
+  At level 5 its houses and church cover more of its streets
+  (rays hit streets 0.08 less often, 0.13 off),
+  as a cell half covered by a wall stops every ray across the wall
+  and is mostly kept;
+  so the valley keeps what a camera sees to level 4.
+- **Plans are point-sampled.**
+  From level 6 (sites 8 m apart) the town's streets, 7 m wide, alias:
+  seen from above, their share goes from 0.60 to 0.52.
+  Plans could be sampled finer than the sites (see docs/todo.md).
 - **Things of one band can't see each other.** Bands order what decides where,
   but two populations of one scale ("no tree on a boulder") still can't
   exclude each other. Claims with hashed priorities would be local and

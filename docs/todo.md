@@ -10,6 +10,17 @@ Numbers are for the forest at 1280×800, as measured when written.
   They should go to fixed point like the noise,
   the forest building each thing relative to its anchor.
   The fixed-point containment tests cost about 15% at level 0.
+- **Spans and boxes on a plane of sites sink half a site.**
+  Fields' spans and shapes keep the sites whose centres they hold,
+  from their bottom up to but not including their top,
+  so a bottom or top on a plane of a level's sites is half a site low there:
+  a ground's top and a house's floor both,
+  and the house shows half a site more wall.
+  y = 0 is such a plane at every level k, y = h where 2^k divides h;
+  elsewhere it is off either way and evens out.
+  The engine's village, on y = 0, strayed 0.10 and 0.18
+  at levels 3 and 4 of the contract, 0.04 and 0.01 lifted 3 units off it.
+  Sites on the plane could go up or down by a hash, as a medium's chances do.
 - **The native frontend is missing pieces.**
   Its renderer has no `matchTilings`:
   where slices re-tile as the camera moves along an axis,
