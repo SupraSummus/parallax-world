@@ -36,8 +36,9 @@ const HEIGHTS: (i64, i64) = (m(-24.0), m(32.0));
 
 /** Water stands in the hollows up to this height. */
 const WATER: Units = Units::m(-4.5);
-/** Plan scales: the stream's bends, the ground's bumps, the steadings' regions (one at most in each). */
+/** Plan scales: the stream's bends, its banks, the ground's bumps, the steadings' regions (one at most in each). */
 const STREAM_SCALE: i64 = m(32.0);
+const BANK_SCALE: i64 = m(1.0);
 const GROUND_SCALE: i64 = 8;
 const REGION: i64 = m(160.0);
 /** A steading's ring is this far inside its region, so the cell that owns it is centred in the region too. */
@@ -114,11 +115,27 @@ fn to_segment(x: f64, z: f64, a: [f64; 2], b: [f64; 2]) -> f64 {
     js::hypot(&[x - a[0] - t * dx, z - a[1] - t * dz])
 }
 
+/** What a column is by the stream: in its bed, on its boggy banks a metre either side, or neither. */
+#[derive(Clone, Copy, Default, PartialEq)]
+enum Streamside {
+    #[default]
+    Off,
+    Bank,
+    Bed,
+}
+
 struct Moor {
     relief: Rc<Relief>,
     stream: Rc<Plan<Fx>>,
+    /** Where its bed and banks are, a plan of categories: dithered far away, so the stream shows as often as it is. */
+    streamside: Plan<Streamside>,
     steadings: Rc<Plan<Option<Steading>>>,
     ground: Plan<Units>,
+}
+
+/** How far column (x, z) is from the centre line of `stream`; and the stream's half width there. */
+fn stream_distance(stream: &Plan<Fx>, x: i64, z: i64) -> (Units, Units) {
+    ((Units(x).to_fx() - stream.at(0, z)).abs().floor_units(), Units::m(1.0) + Units::m(0.6) * z.rem_euclid(97) / 97)
 }
 
 /** The region of column (x, z): REGION wide, region (0, 0) around the origin. */
@@ -134,7 +151,7 @@ impl Moor {
 
     /** How far column (x, z) is from the stream's centre line; and its half width there. */
     fn stream_distance(&self, x: i64, z: i64) -> (Units, Units) {
-        ((Units(x).to_fx() - self.stream.at(0, z)).abs().floor_units(), Units::m(1.0) + Units::m(0.6) * z.rem_euclid(97) / 97)
+        stream_distance(&self.stream, x, z)
     }
 
     /** Whether column (x, z) is on the path of its region's steading. */
@@ -213,7 +230,20 @@ pub fn moor(seed: u64) -> World {
             h.round_units()
         })
     };
-    let f = Rc::new(Moor { relief, stream: stream_plan, steadings, ground });
+    let streamside = {
+        let stream = stream_plan.clone();
+        Plan::dithered("streamside", BANK_SCALE, move |x, z| {
+            let (d, half) = stream_distance(&stream, x, z);
+            if d < half {
+                Streamside::Bed
+            } else if d < half + Units::m(1.0) {
+                Streamside::Bank
+            } else {
+                Streamside::Off
+            }
+        })
+    };
+    let f = Rc::new(Moor { relief, stream: stream_plan, streamside, steadings, ground });
     let spawn = {
         // Behind the first hut, or over the origin if its region has none.
         let [x, _, z] = f.steading(0, 0).map_or([0; 3], |s| s.frame().site([s.length / 2, 0, s.depth + m(6.0)]));
@@ -234,8 +264,7 @@ pub fn moor(seed: u64) -> World {
 fn terrain(f: Rc<Moor>) -> Field {
     Field::columns("terrain", 0.0, Op::Paint, move |x, z, spacing| {
         let h = f.ground.at(x, z);
-        let (d, half) = f.stream_distance(x, z);
-        let wet = h <= WATER || d < half + Units::m(1.0);
+        let wet = h <= WATER || f.streamside.at(x, z) != Streamside::Off;
         let path = !wet && f.on_path(x, z);
         let heathery = f.relief.patches.at(x, z) > fx(0.47);
         let surface = if wet {
@@ -250,19 +279,19 @@ fn terrain(f: Rc<Moor>) -> Field {
         // Peat down to the world's bottom and no further, where hosts stop generating: the heath is solid, not a shell.
         let column = Column::new(h.0, spacing).surface(surface, m(0.5)).fill_below_exactly(K::peat, HEIGHTS.0);
         match surface {
-            // Thickened only while it is at most four sites: taller, a medium stops rays skimming over the heath.
+            // Thickened only while it is at most four units: taller, a medium stops rays skimming over the heath,
+            // and stands over the patches beside it, whose edges it takes over seen from above.
             K::heather if spacing <= 2 => column.medium(K::heather, m(0.4), 0.5),
-            K::grass => column.medium(K::grass, 2, 0.25),
+            K::grass if spacing <= 2 => column.medium(K::grass, 2, 0.25),
             _ => column,
         }
     })
 }
 
-/** The stream's bed, carved out of the ground: a channel a metre deep, at least a site wide. */
+/** The stream's bed, carved out of the ground: a channel a metre deep. */
 fn stream_bed(f: Rc<Moor>) -> Field {
     Field::at("stream bed", 1.0, Op::Carve, move |x, y, z, spacing| {
-        let (d, half) = f.stream_distance(x, z);
-        if d >= half.max(Units(spacing)) {
+        if f.streamside.at(x, z) != Streamside::Bed {
             return None;
         }
         let h = f.ground.at(x, z).0;
@@ -279,8 +308,7 @@ fn stream_bed(f: Rc<Moor>) -> Field {
 fn water(f: Rc<Moor>) -> Field {
     Field::columns("water", 2.0, Op::Paint, move |x, z, spacing| {
         let h = f.ground.at(x, z).0;
-        let (d, half) = f.stream_distance(x, z);
-        if d < half.max(Units(spacing)) {
+        if f.streamside.at(x, z) == Streamside::Bed {
             return vec![Span::solid(h - m(1.0).max(2 * spacing), h - 1, K::water)];
         }
         Column::new(h, spacing).water_to(K::water, WATER.0).spans()
