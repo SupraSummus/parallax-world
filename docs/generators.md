@@ -155,9 +155,12 @@ A new world is an entry in `WORLDS`
 with a region that has a bit of everything in it,
 and its name in `worlds!` in `worlds/tests/contract.rs`,
 whose tests fail without it.
-To see a world's layout without the renderer,
-`worlds/examples/map.rs` draws it from above, any level, any area
-(`cargo run --release --example map` in `worlds/`, arguments in the file).
+To see a world without the renderer,
+`worlds/examples/map.rs` draws its layout from above, any level, any area,
+and `worlds/examples/look.rs` takes a picture of it at one level
+(`worldgen::picture`: rays through its voxels, from any eye or straight down),
+with what each pixel hit and how far away, for checks to measure
+(`cargo run --release --example map` or `look` in `worlds/`, arguments in the files).
 
 ## Composing
 

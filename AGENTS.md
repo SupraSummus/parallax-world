@@ -78,6 +78,7 @@ worldgen/                    # The world-generation engine, moving to integers, 
 │   ├── plan.rs              # Plans by column, each from coarser ones only; land domains bid for
 │   ├── frame.rs             # Things built in frames of their own: quarter turns, mirrors, walls
 │   ├── world.rs             # World: what a host needs to show one (generator, spawn, reach, heights)
+│   ├── picture.rs           # Pictures of a world at one level: rays through its voxels, as PNGs
 │   └── contract.rs          # The contract every world keeps, as checks for tests
 └── tests/contract.rs        # The engine on test worlds: fog, caves, a village; what it refuses
 worlds/                      # The worlds, on worldgen's public API only; the web's WebAssembly
@@ -88,7 +89,7 @@ worlds/                      # The worlds, on worldgen's public API only; the we
 │   ├── valley.rs            # The valley: the three domains on one land
 │   └── wasm.rs              # Its WebAssembly exports (the module holds bake/'s too)
 ├── tests/                   # Every world in WORLDS keeps the contract; the scenes' contents
-└── examples/                # map: a world from above; forest_bench: timing forest tiles
+└── examples/                # map: a world from above; look: a picture of it (picture.rs); forest_bench: timing forest tiles
 native/                      # Spike of a native frontend (eframe + wgpu), linking bake/ and worlds/; see src/main.rs
 ├── .cargo/config.toml       # Builds for x86-64-v3: floor and ceil inline (see there)
 ├── dump.test.ts             # Dumps a view from the TS renderer, to check it against (only with DUMP set)
