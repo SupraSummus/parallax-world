@@ -5,7 +5,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use crate::noise::{Fixed, ONE, smoothstep};
+use crate::noise::{Fixed, FixedPoint, Fx, smoothstep};
 
 const DOCS: &str = "docs/generators.md";
 
@@ -58,21 +58,22 @@ impl<T: Copy + Default> Plan<T> {
     }
 }
 
-impl Plan<Fixed> {
+impl<T: FixedPoint + Default + 'static> Plan<T> {
     /**
      * A smooth plan made only every `step` columns and interpolated
      * between: a band `step` or more wide costs a column a sample's share.
      * Sampling is what makes a coarse band of finer ones, so `make` may
      * read finer plans; what it reads finer than `step` aliases.
      */
-    pub fn sampled(name: &'static str, scale: i64, step: i64, make: impl Fn(i64, i64) -> Fixed + 'static) -> Plan<Fixed> {
+    pub fn sampled(name: &'static str, scale: i64, step: i64, make: impl Fn(i64, i64) -> T + 'static) -> Plan<T> {
         let mut samples = Plan::new(name, scale, move |i, k| make(i * step, k * step));
         samples.filter = true;
         Plan::new(name, scale, move |x, z| {
             let (i, k) = (x.div_euclid(step), z.div_euclid(step));
             let (u, v) = ((x.rem_euclid(step) << 16) / step, (z.rem_euclid(step) << 16) / step);
             let lerp = |a: Fixed, b: Fixed, t: Fixed| a + (((b - a) * t) >> 16);
-            lerp(lerp(samples.at(i, k), samples.at(i + 1, k), u), lerp(samples.at(i, k + 1), samples.at(i + 1, k + 1), u), v)
+            let corner = |i, k| samples.at(i, k).bits();
+            T::of_bits(lerp(lerp(corner(i, k), corner(i + 1, k), u), lerp(corner(i, k + 1), corner(i + 1, k + 1), u), v))
         })
     }
 }
@@ -80,16 +81,16 @@ impl Plan<Fixed> {
 /** The most domains a land is shared by. */
 pub const DOMAINS: usize = 4;
 
-/** Domains' shares of a column, fractions of ONE adding up to it, and the one with the most. */
+/** Domains' shares of a column, fractions adding up to one, and the one with the most. */
 #[derive(Clone, Copy, Default)]
 struct Shares {
-    share: [Fixed; DOMAINS],
+    share: [Fx; DOMAINS],
     winner: u8,
 }
 
 /**
  * Land shared by domains that never see each other: each bids for every
- * column (a plan, in fractions of ONE), and gets a share by how far it
+ * column (a plan of fractions), and gets a share by how far it
  * outbids the best of the rest: all of it `width` ahead, none as far
  * behind, eased between. Whatever the domains propose for a column
  * (heights, densities) blends by these shares.
@@ -100,30 +101,30 @@ pub struct Land {
 
 impl Land {
     /** Land of the domains bidding `bids`, in that order (their indices); `scale` at most the bids'. */
-    pub fn new(scale: i64, width: Fixed, bids: Vec<Rc<Plan<Fixed>>>) -> Land {
+    pub fn new(scale: i64, width: Fx, bids: Vec<Rc<Plan<Fx>>>) -> Land {
         assert!(bids.len() <= DOMAINS, "a land holds at most {DOMAINS} domains; see \"Composing\" in {DOCS}");
         Land {
             shares: Plan::new("land", scale, move |x, z| {
-                let mut bid = [Fixed::MIN; DOMAINS];
+                let mut bid = [Fx::MIN; DOMAINS];
                 for (d, plan) in bids.iter().enumerate() {
                     bid[d] = plan.at(x, z);
                 }
-                let mut raw = [0; DOMAINS];
+                let mut raw = [Fx::ZERO; DOMAINS];
                 for d in 0..bids.len() {
-                    let rest = (0..bids.len()).filter(|e| *e != d).map(|e| bid[e]).max().unwrap_or(Fixed::MIN / 2);
+                    let rest = (0..bids.len()).filter(|e| *e != d).map(|e| bid[e]).max().unwrap_or(Fx::from_bits(Fixed::MIN / 2));
                     raw[d] = smoothstep(-width, width, bid[d].saturating_sub(rest));
                 }
-                // The best bid is ahead of the rest or level with them, so the sum is at least ONE / 2.
-                let sum: Fixed = raw.iter().sum();
-                let share = raw.map(|r| r * ONE / sum);
+                // The best bid is ahead of the rest or level with them, so the sum is at least a half.
+                let sum: Fx = raw.into_iter().sum();
+                let share = raw.map(|r| r / sum);
                 let winner = (0..bids.len()).max_by_key(|d| (share[*d], -(*d as i64))).unwrap_or(0) as u8;
                 Shares { share, winner }
             }),
         }
     }
 
-    /** Domain `d`'s share of column (x, z), a fraction of ONE. */
-    pub fn share(&self, d: usize, x: i64, z: i64) -> Fixed {
+    /** Domain `d`'s share of column (x, z), a fraction. */
+    pub fn share(&self, d: usize, x: i64, z: i64) -> Fx {
         self.shares.at(x, z).share[d]
     }
 
@@ -136,6 +137,7 @@ impl Land {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::noise::{ONE, fx};
 
     #[test]
     #[should_panic(expected = "plan coarse (scale 64) reads fine of the finer scale 1")]
@@ -154,14 +156,14 @@ mod tests {
 
     #[test]
     fn shares_add_up_and_ease_across_the_edge() {
-        let a = Rc::new(Plan::new("a", 8, |x, _| x * ONE / 100));
-        let b = Rc::new(Plan::new("b", 8, |_, _| 0));
-        let land = Land::new(8, ONE / 10, vec![a, b]);
+        let a = Rc::new(Plan::new("a", 8, |x, _| Fx::from_bits(x * ONE / 100)));
+        let b = Rc::new(Plan::new("b", 8, |_, _| Fx::ZERO));
+        let land = Land::new(8, fx(0.1), vec![a, b]);
         for x in -30..30 {
             let (sa, sb) = (land.share(0, x, 0), land.share(1, x, 0));
-            assert!((sa + sb - ONE).abs() <= 1, "{x}: {sa} + {sb}");
+            assert!((sa + sb - Fx::ONE).abs() <= Fx::from_bits(1), "{x}: {sa:?} + {sb:?}");
             assert_eq!(land.owns(0, x, 0), sa >= sb, "{x}");
         }
-        assert_eq!((land.share(0, -20, 0), land.share(0, 20, 0)), (0, ONE));
+        assert_eq!((land.share(0, -20, 0), land.share(0, 20, 0)), (Fx::ZERO, Fx::ONE));
     }
 }

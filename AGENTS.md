@@ -72,8 +72,8 @@ bake/                        # Chunk baker and coverage in Rust (no dependencies
 worldgen/                    # The world-generation engine, moving to integers, into the baker's grids; no worlds
 ├── src/
 │   ├── js.rs                # Float math the same on every target (libm), named after JS's Math
-│   ├── noise.rs, grid.rs    # Integer hashes, random numbers, fixed-point noise; voxel-grid.ts's bricks
-│   ├── units.rs             # UNIT_SIZE: metres per lattice unit
+│   ├── noise.rs, grid.rs    # Integer hashes, random numbers, fixed point (Fx) and noise; voxel-grid.ts's bricks
+│   ├── units.rs             # UNIT_SIZE: metres per lattice unit; whole Units, typed apart from Fx
 │   ├── generator.rs         # The framework: shapes, nodes, fields, populations, drawing any box at any level
 │   ├── build.rs             # Short forms to write worlds with: constructors of fields, populations, nodes, solid shapes
 │   ├── column.rs            # A heightfield's spans, each tall enough to keep a site at every level
