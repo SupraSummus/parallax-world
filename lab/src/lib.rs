@@ -10,16 +10,29 @@
 //! children on its edges and corners decided by those alone, so any box is
 //! the same generated alone or as part of the whole. stats.rs scores both.
 //!
+//! The second experiment asks whether geometry can be learned: streets
+//! as lines on the edges of blocks, rectangular lots and houses, which
+//! neighbour counts in biomes cannot hold. Many towns, from several seeds
+//! (towns.rs), against two models sampled top down, any box alone: pixel
+//! conditionals with position, on a quadtree of templates (template.rs),
+//! and a split grammar of rectangles (grammar.rs); geometry.rs measures
+//! straight streets and rectangular roofs.
+//!
 //! The examples run the experiments (`cargo run --release --example
-//! segment`, then `synth`), print Markdown tables and write pictures to
-//! out/; the valley's columns are generated once and cached there.
+//! segment`, then `synth`; `gather`, then `geometry`), print Markdown
+//! tables and write pictures to out/; the worlds' columns are generated
+//! once and cached there.
 
 pub mod experiment;
+pub mod geometry;
+pub mod grammar;
 pub mod hierarchy;
 pub mod image;
 pub mod mixture;
 pub mod png;
 pub mod stats;
 pub mod synth;
+pub mod template;
+pub mod towns;
 pub mod valley;
 pub mod wfc;
