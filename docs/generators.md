@@ -239,7 +239,7 @@ What is drawn far away keeps what is near on average, not its outline:
 the towns' things and the forest's canopy are measured ("Levels"),
 patterns finer than the sites draw their parts in proportion (`stripe`),
 and media too thin for the sites are thickened, as dense along a ray
-(`medium` in `fields.rs`).
+(`Span::medium`, `column.rs`).
 
 ### Kinds and things
 
@@ -248,6 +248,66 @@ after those of the domains it builds on:
 the forest's come first in any world it grows in,
 so its things are a library others draw from
 (the towns' trees are the forest's `make_tree`).
+A kind's type (`kind_type`) is its class of material:
+the contract compares what rays hit by type, not by kind,
+so kinds that may stand in for each other far away share one.
+
+## Writing a world
+
+The moor (`worlds/src/moor.rs`) is the shortest whole world to start from.
+`build.rs` has the short forms:
+`Field::columns` and `Field::at`, `Population::new(…).reach(…).make(…)`,
+`Node::group`, `Child::new`, and `Shape::ball` and the like,
+solid and filling unless told to `paint` or `carve`.
+A shape kept with a chance is made with the long form (`ball(…, fill, op)`):
+how many rays it stops is worked out from its fill when it is made,
+so setting `fill` afterwards is not counted.
+
+### Units
+
+| What | Type | Unit |
+|------|------|------|
+| `Point`, shapes' sizes | `f64` | lattice units |
+| `m(metres)` | `i64` | whole lattice units, `UNIT_SIZE` m each |
+| Cells, reach, `Child` and population `size` | `i64` | lattice units |
+| `Plan` scale, plan and field arguments | `i64` | lattice units |
+| Noise, fractions, `Rng::chance` | `Fixed` | `ONE` (1 << 16) is 1 |
+| `Far` detail | `Fixed` | lattice units: `fixed(2.0)` is 2 |
+| A span's `extinction` | `f64` | per lattice unit of a ray's path |
+
+`Fixed` is an `i64` too, so the compiler can't tell it from units:
+a fraction times units is fixed point (`>> 16` for units),
+and `fixed(m(1.0) as f64)` is a metre in fixed point.
+Fields get the coordinates of sites in lattice units
+(already times the spacing) and the spacing.
+
+### Spans that stay
+
+A line of sites along an axis has a site only every two spacings
+(x + y + z is even at a level's sites),
+so a span shorter than that may hold none, and vanishes at that level:
+a pond, a layer of turf, a hedge.
+`Column` (`column.rs`) builds a column's spans from its ground's top,
+each at least two spacings tall:
+`Column::new(height, spacing).surface(grass, m(0.5)).fill_below(soil, bottom)`,
+`.medium(kind, height, extinction)` on top, thickened but as dense along a ray,
+`.water_to(kind, level)` where the ground is lower.
+Carves along a line want the same margin.
+
+### Pitfalls
+
+- **Thin skins vanish.** A skin of one kind over a slightly smaller solid
+  (thatch over a stone gable, plaster over a wall) is thinner than coarse sites,
+  which then show what is under it. Make it one solid, or paint it.
+- **Fields can't see things.** A field that has to know where things are
+  (a path to a steading) reads a plan of them,
+  and the population anchors each where the plan says,
+  in a region of the plan with a margin so the cell owning it is there too.
+- **Anchors on the ground.** `Cell::on_ground` picks a spot evenly under a cell;
+  things anchored there are as even as one per square 2N wide.
+- **Seeds.** The contract checks one seed; make the world, and its spawn,
+  for any: the spawn is a site (x + y + z even) in the air,
+  found without assuming a feature a seed may lack.
 
 ## Open problems
 
