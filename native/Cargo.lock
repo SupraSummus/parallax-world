@@ -1697,6 +1697,7 @@ dependencies = [
  "png",
  "pollster",
  "worldgen",
+ "worlds",
 ]
 
 [[package]]
@@ -3138,6 +3139,13 @@ version = "0.0.0"
 dependencies = [
  "bake",
  "libm",
+]
+
+[[package]]
+name = "worlds"
+version = "0.0.0"
+dependencies = [
+ "worldgen",
 ]
 
 [[package]]

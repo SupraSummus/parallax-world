@@ -6,14 +6,15 @@
 
 use std::cell::RefCell;
 
-use crate::forest::{REACH, forest, heights};
-use crate::generator::{Generator, generate, materials_of};
-use crate::grid::{Box3, VoxelGrid};
-use crate::valley::valley;
+use worldgen::World;
+use worldgen::generator::{generate, materials_of};
+use worldgen::grid::{Box3, VoxelGrid};
+
+use crate::WORLDS;
 
 /** The world started last, its materials' colours (0xrrggbb by id), and the grid generated last. */
 struct State {
-    generator: Generator,
+    world: World,
     materials: Vec<u32>,
     grid: Option<VoxelGrid>,
 }
@@ -31,26 +32,34 @@ fn result(values: &[f64]) -> *const f64 {
 }
 
 /**
- * Starts world `world` (0: the forest, 1: the valley) of `seed` (an
- * integer; JS numbers are f64); returns RESULT: spawn x, y, z, REACH,
- * materials, and a pointer to their colours (u32, 0xrrggbb).
+ * Starts world `world` (its index in WORLDS; the first if past them) of
+ * `seed` (an integer; JS numbers are f64); returns RESULT: spawn x, y, z,
+ * reach, materials, and a pointer to their colours (u32, 0xrrggbb).
  */
 #[unsafe(no_mangle)]
 pub extern "C" fn worldgen_start(world: u32, seed: f64) -> *const f64 {
-    let seed = seed as i64 as u64;
-    let (generator, spawn) = if world == 1 { valley(seed) } else { forest(seed) };
-    let materials = materials_of(&generator).iter().map(|m| m.rgb()).collect();
+    let make = WORLDS.get(world as usize).unwrap_or(&WORLDS[0]).make;
+    let world = make(seed as i64 as u64);
+    let materials = materials_of(&world.generator).iter().map(|m| m.rgb()).collect();
     STATE.with_borrow_mut(|state| {
-        let State { materials, .. } = state.insert(State { generator, materials, grid: None });
-        result(&[spawn[0] as f64, spawn[1] as f64, spawn[2] as f64, REACH, materials.len() as f64, materials.as_ptr() as usize as f64])
+        let State { world, materials, .. } = state.insert(State { world, materials, grid: None });
+        let [x, y, z] = world.spawn.map(|v| v as f64);
+        result(&[x, y, z, world.reach, materials.len() as f64, materials.as_ptr() as usize as f64])
     })
 }
 
-/** The heights the worlds have anything at in units of `level`; returns RESULT: min y, max y (exclusive). */
+/**
+ * The heights the world started last has anything at in units of
+ * `level`; returns RESULT: min y, max y (exclusive). Null before
+ * worldgen_start.
+ */
 #[unsafe(no_mangle)]
 pub extern "C" fn worldgen_heights(level: u32) -> *const f64 {
-    let (min, max) = heights(level);
-    result(&[min as f64, max as f64])
+    STATE.with_borrow(|state| {
+        let Some(state) = state else { return std::ptr::null() };
+        let (min, max) = state.world.heights_at(level);
+        result(&[min as f64, max as f64])
+    })
 }
 
 /**
@@ -64,7 +73,7 @@ pub extern "C" fn worldgen_generate(level: u32, min_x: f64, min_y: f64, min_z: f
     STATE.with_borrow_mut(|state| {
         let Some(state) = state else { return std::ptr::null() };
         let b = Box3 { min: [min_x as i64, min_y as i64, min_z as i64], max: [max_x as i64, max_y as i64, max_z as i64] };
-        let grid = state.grid.insert(generate(&state.generator, &b, level));
+        let grid = state.grid.insert(generate(&state.world.generator, &b, level));
         result(&[
             grid.min[0] as f64,
             grid.min[1] as f64,

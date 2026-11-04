@@ -1,7 +1,7 @@
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react-swc'
 import { resolve } from 'path'
-import { defineConfig } from 'vitest/config'
+import { configDefaults, defineConfig } from 'vitest/config'
 
 export default defineConfig({
   // Relative asset URLs, so the build works under any path
@@ -28,5 +28,7 @@ export default defineConfig({
   test: {
     // Baking whole views of FCC worlds takes a few seconds.
     testTimeout: 20_000,
+    // Agents' git worktrees hold copies of the tests.
+    exclude: [...configDefaults.exclude, '.claude/**'],
   },
 })

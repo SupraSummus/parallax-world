@@ -38,7 +38,7 @@ src/
     ├── fcc.ts               # Voxel geometry: rhombic dodecahedra of the FCC lattice
     ├── voxel-grid.ts        # Voxel storage on the FCC lattice, in bricks (typed arrays); coarsening it; LayerIndex, made by bake/
     ├── world.ts             # World: voxel grids by level of detail (generated in tiles around the camera), spawn, toy world types
-    ├── worldgen.ts          # The worlds of worldgen/ (WebAssembly), any box at any level
+    ├── worldgen.ts          # The worlds of worlds/ (WebAssembly), any box at any level
     ├── city.ts              # City scene generator: streets, buildings, maze of rooms
     ├── noise.ts             # Seeded hash and PRNG for the city
     ├── cells.ts             # Cells of the coarser lattices N·FCC that slices are made of
@@ -47,7 +47,7 @@ src/
     ├── renderer.ts          # Slices and chunks in view, caching, screen placement (no DOM)
     ├── occlusion.ts         # Which screen cells nearer layers cover (bake/src/coverage.rs), to skip chunks behind them
     ├── chunk-baker.ts       # Bakes whole chunks with bake/ (WebAssembly); the bake worker's message protocol
-    ├── wasm.ts              # The WebAssembly module (worldgen/ with bake/), inlined; an instance per use
+    ├── wasm.ts              # The WebAssembly module (worlds/ with worldgen/ and bake/), inlined; an instance per use
     ├── worker-bakery.ts     # Pool of bake workers the renderer sends missing chunks to
     ├── bake.worker.ts       # Bake worker entry
     ├── compositor.ts        # Draws the renderer's frames with WebGL 2: chunks' splats, instanced
@@ -57,7 +57,7 @@ scripts/shot.mjs             # pnpm shot: a view in headless Chromium, saved onc
 src/viewer/
 ├── main.ts                  # three.js scene, orbit camera
 └── mesh.ts                  # World -> triangle mesh of exposed rhombic faces
-bake/                        # Chunk baker and coverage in Rust (no dependencies), in worldgen/'s WebAssembly
+bake/                        # Chunk baker and coverage in Rust (no dependencies), in worlds/' WebAssembly
 └── src/
     ├── lib.rs               # Baker: cached cell surfaces, one chunk per call; the WebAssembly exports
     ├── world.rs             # Grid, tiles of grids, the view's faces' lattices, voxels read per face
@@ -69,24 +69,33 @@ bake/                        # Chunk baker and coverage in Rust (no dependencies
     ├── fill.rs              # Splats filled into a mask, solid blocks (for coverage)
     ├── layer_index.rs       # LayerIndex: where each face's layers hold voxels; its WebAssembly exports
     └── coverage.rs          # Which screen cells nearer layers cover, on the main thread; its WebAssembly exports
-worldgen/                    # World generation, moving to integers, into the baker's grids; the web's WebAssembly
-└── src/
-    ├── js.rs                # Float math the same on every target (libm), named after JS's Math
-    ├── noise.rs, grid.rs    # Integer hashes, random numbers, fixed-point noise; voxel-grid.ts's bricks
-    ├── generator.rs         # The framework: shapes, nodes, fields, populations, drawing any box at any level
-    ├── plan.rs              # Plans by column, each from coarser ones only; land domains bid for
-    ├── frame.rs             # Things built in frames of their own: quarter turns, mirrors, walls
-    ├── forest.rs            # The forest, on ground it may share (UNIT_SIZE lives here)
-    ├── town.rs, fields.rs   # Towns along the path, farmland around them: the valley's other domains
-    ├── valley.rs            # The valley: the three domains on one land
-    └── wasm.rs              # Its WebAssembly exports (the module holds bake/'s too)
-native/                      # Spike of a native frontend (eframe + wgpu), linking bake/; see src/main.rs
+worldgen/                    # The world-generation engine, moving to integers, into the baker's grids; no worlds
+├── src/
+│   ├── js.rs                # Float math the same on every target (libm), named after JS's Math
+│   ├── noise.rs, grid.rs    # Integer hashes, random numbers, fixed-point noise; voxel-grid.ts's bricks
+│   ├── units.rs             # UNIT_SIZE: metres per lattice unit
+│   ├── generator.rs         # The framework: shapes, nodes, fields, populations, drawing any box at any level
+│   ├── plan.rs              # Plans by column, each from coarser ones only; land domains bid for
+│   ├── frame.rs             # Things built in frames of their own: quarter turns, mirrors, walls
+│   ├── world.rs             # World: what a host needs to show one (generator, spawn, reach, heights)
+│   └── contract.rs          # The contract every world keeps, as checks for tests
+└── tests/contract.rs        # The engine on test worlds: fog, caves, a village; what it refuses
+worlds/                      # The worlds, on worldgen's public API only; the web's WebAssembly
+├── src/
+│   ├── lib.rs               # WORLDS: the registry hosts start worlds from by name, with the regions checked
+│   ├── forest.rs            # The forest, on ground it may share
+│   ├── town.rs, fields.rs   # Towns along the path, farmland around them: the valley's other domains
+│   ├── valley.rs            # The valley: the three domains on one land
+│   └── wasm.rs              # Its WebAssembly exports (the module holds bake/'s too)
+├── tests/                   # Every world in WORLDS keeps the contract; the scenes' contents
+└── examples/                # map: a world from above; forest_bench: timing forest tiles
+native/                      # Spike of a native frontend (eframe + wgpu), linking bake/ and worlds/; see src/main.rs
 ├── .cargo/config.toml       # Builds for x86-64-v3: floor and ceil inline (see there)
 ├── dump.test.ts             # Dumps a view from the TS renderer, to check it against (only with DUMP set)
 └── src/
     ├── main.rs              # The window and camera; --shot, --bench, --walk, --check-requests against a dump
     ├── dump.rs              # Reads a dump: a view, its faces, grids and the chunks it wants
-    ├── world.rs             # world.ts for generated worlds: worldgen's tiles, those the renderer wants first, made and indexed on threads
+    ├── world.rs             # world.ts for generated worlds: a World's tiles, those the renderer wants first, made and indexed on threads
     ├── slicing.rs           # slice-selection.ts: slices, chunks, eyes
     ├── view.rs              # view.ts: faces, which rays and screen boxes they draw
     ├── renderer.rs          # renderer.ts: chunks in view, cached, stand-ins, coverage (bake's Coverage)
@@ -110,7 +119,8 @@ While iterating, run only the affected test files
 ([docs/testing.md](docs/testing.md));
 run `pnpm check` again only after changing code.
 
-`pnpm lint` and `pnpm test` cover the Rust in `bake/` and `worldgen/` too
+`pnpm lint` and `pnpm test` cover the Rust
+in `bake/`, `worldgen/` and `worlds/` too
 (clippy with warnings as errors, rustfmt, `cargo test`);
 `pnpm dev`, `pnpm build` and `pnpm test` rebuild its WebAssembly first.
 CI runs the same scripts plus `pnpm build`. For rendering changes, also look

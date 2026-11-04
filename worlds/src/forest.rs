@@ -5,24 +5,21 @@ use std::cell::{OnceCell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use crate::generator::{
+use worldgen::World;
+use worldgen::generator::{
     ANY_SIZE, Cell, Child, Children, Far, Field, FieldValues, Fill, Generator, Layer, Node, Op, Point, Population, SOLID, Shadows, Shape,
     Shapes, Span, ball, bounds_of_shapes, capsule, cuboid, ellipsoid, lathe,
 };
-use crate::grid::Box3;
-use crate::js::{self, round};
-use crate::kinds;
-use crate::noise::{Fbm, Fixed, ONE, Rng, ValueNoise, fixed, float, fraction, hash, hash64, smoothstep, stream, unit};
-use crate::plan::Plan;
+use worldgen::grid::Box3;
+use worldgen::js::{self, round};
+use worldgen::kinds;
+use worldgen::noise::{Fbm, Fixed, ONE, Rng, ValueNoise, fixed, float, fraction, hash, hash64, smoothstep, stream, unit};
+use worldgen::plan::Plan;
+use worldgen::units::{UNIT_SIZE, m};
 
-/** Metres per lattice unit. */
-pub const UNIT_SIZE: f64 = 0.125;
+/** Metres in units, rounded. */
 fn vox(metres: f64) -> f64 {
     round(metres / UNIT_SIZE)
-}
-/** Metres in whole units, rounded. */
-pub const fn m(metres: f64) -> i64 {
-    (metres / UNIT_SIZE + if metres < 0.0 { -0.5 } else { 0.5 }) as i64
 }
 /** Metres in units, fixed point. */
 const fn metres(metres: f64) -> Fixed {
@@ -37,12 +34,8 @@ const PI: f64 = std::f64::consts::PI;
 
 /** How far around the camera the grid of level 0 must hold the forest, in units. */
 pub const REACH: f64 = 352.0;
-
-/** The heights it has anything at, in units of `level`. */
-pub fn heights(level: u32) -> (i64, i64) {
-    let s = 1i64 << level;
-    ((vox(-36.0) as i64).div_euclid(s), -(-(vox(80.0) as i64)).div_euclid(s))
-}
+/** The heights it has anything at, in units. */
+pub const HEIGHTS: (i64, i64) = (m(-36.0), m(80.0));
 
 // A kind's materials follow it, in this order. The forest's are first in any world it grows in.
 kinds! {
@@ -311,12 +304,13 @@ fn pick_species(mut pick: Fixed, chances: &[Fixed; 3]) -> Species {
     Species::Oak
 }
 
-/** The forest's generator for `seed`, and where the camera starts. */
-pub fn forest(seed: u64) -> (Generator, [i64; 3]) {
+/** The forest of `seed`. */
+pub fn forest(seed: u64) -> World {
     let ground = Ground::alone(Rc::new(Relief::new(seed)));
     // Start on the path at the near end, at about the height of a tall shrub.
     let spawn = ground.on_path(vox(-31.0) as i64, vox(3.0) as i64);
-    (Generator { kinds: KINDS.to_vec(), seed: stream(seed, 4), layers: layers(seed, ground, spawn) }, spawn)
+    let generator = Generator { kinds: KINDS.to_vec(), seed: stream(seed, 4), layers: layers(seed, ground, spawn) };
+    World { generator, spawn, reach: REACH, heights: HEIGHTS }
 }
 
 /** The forest's layers on `ground`, kept clear around `spawn`; their kinds are KINDS, first in the generator's. */

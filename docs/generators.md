@@ -5,9 +5,13 @@ the framework draws any box of it, alone, at any level of detail,
 and gets the same voxels whichever boxes it drew before.
 That lets a world be endless and generated in pieces around the camera,
 coarser further away, for about the same cost per box at every level.
-The forest (`worldgen/src/forest.rs`) is written this way,
+`worldgen/` is that engine, and `worlds/` the worlds on it,
+which use only the engine's public API.
+The forest (`worlds/src/forest.rs`) is written this way,
 and so is the valley (`valley.rs`), the forest with towns and fields,
 three domains composed as in "Composing";
+a host starts either by name from `WORLDS` (`worlds/src/lib.rs`),
+as a `World`: its generator, spawn, reach and heights;
 the web generates both as WebAssembly (`src/lib/worldgen.ts`);
 the TS city and the toy worlds (`src/lib`) are not on it.
 Integers and fixed point (`noise.rs`) decide wherever they can,
@@ -130,9 +134,10 @@ and fields from position alone.
 
 ## Checks
 
-`worldgen/tests/contract.rs` runs, for each world in its list
-(the forest, the valley, and test worlds of fog, caves,
-and a village of houses with doors and tables):
+`worldgen::contract` (`worldgen/src/contract.rs`) checks a world in a region:
+`worlds/tests/contract.rs` runs it for each world in `WORLDS`,
+and `worldgen/tests/contract.rs` for test worlds of fog, caves,
+and a village of houses with doors and tables:
 
 - a box against eight parts generated alone, in reverse order,
   at levels 0, 2 and one past the last checked below:
@@ -145,10 +150,14 @@ and a village of houses with doors and tables):
   losing content, or a wrong fill law, 0.14 and more.
 
 With `--nocapture` it prints each level's margins.
-It also checks that a thing's carves cut only the thing.
-Add a new world to that list with a region that has a bit of everything in it.
+The engine's tests also check that a thing's carves cut only the thing.
+A new world is an entry in `WORLDS`
+with a region that has a bit of everything in it,
+and its name in `worlds!` in `worlds/tests/contract.rs`,
+whose tests fail without it.
 To see a world's layout without the renderer,
-`worldgen/examples/map.rs` draws it from above, any level, any area.
+`worlds/examples/map.rs` draws it from above, any level, any area
+(`cargo run --release --example map` in `worlds/`, arguments in the file).
 
 ## Composing
 
