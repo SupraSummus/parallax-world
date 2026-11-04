@@ -2,7 +2,7 @@
 //! (worldgen::contract), and the framework refuses what breaks it.
 
 use worldgen::World;
-use worldgen::contract::check;
+use worldgen::contract::{check, heights_hold, margins, things_hold};
 use worldgen::generator::{
     ANY_SIZE, Child, Children, Field, FieldValues, Generator, KindDef, Layer, Node, Op, Population, SOLID, Shapes, Span, ball, cuboid,
     generate, materials_of,
@@ -11,11 +11,11 @@ use worldgen::generator::{Cell, Fill, Point};
 use worldgen::grid::Box3;
 
 static KINDS: &[KindDef] = &[
-    KindDef { kind_type: 8, colors: &["#cccccc"] },
-    KindDef { kind_type: 3, colors: &["#777777"] },
-    KindDef { kind_type: 10, colors: &["#eeeeee"] },
-    KindDef { kind_type: 4, colors: &["#664422"] },
-    KindDef { kind_type: 1, colors: &["#44aa44"] },
+    KindDef { name: "fog", kind_type: 8, colors: &["#cccccc"] },
+    KindDef { name: "rock", kind_type: 3, colors: &["#777777"] },
+    KindDef { name: "wall", kind_type: 10, colors: &["#eeeeee"] },
+    KindDef { name: "wood", kind_type: 4, colors: &["#664422"] },
+    KindDef { name: "grass", kind_type: 1, colors: &["#44aa44"] },
 ];
 const FOG: u8 = 0;
 const ROCK: u8 = 1;
@@ -160,6 +160,44 @@ fn world(layer: Layer) -> Generator {
 #[should_panic(expected = "reaches past its population's reach")]
 fn refuses_a_thing_reaching_past_its_populations_reach() {
     generate(&world(single(|_, _| Some(Node::of(vec![ball([64.0; 3], 1200.0, ROCK, SOLID, Op::Fill)])), 64)), &near(), 0);
+}
+
+#[test]
+fn finds_a_far_thing_reaching_past_its_populations_reach() {
+    // Only cells from 30 along x make things, too big for their reach: no box near spawn draws them.
+    let far = Layer::Population(Population {
+        name: "far",
+        order: 1.0,
+        cell: 64,
+        reach: [16; 3],
+        size: ANY_SIZE,
+        anchor: Box::new(|cell| (cell.i >= 30 && cell.j == 0).then_some(cell.centre.map(|v| v as f64))),
+        make: Box::new(|[x, y, z], _| Some(Node::of(vec![ball([x, y, z], 100.0, ROCK, SOLID, Op::Fill)]))),
+        far: None,
+    });
+    let broken = things_hold(&world_of(world(far), (-256, 256)));
+    assert_eq!(broken.len(), 1, "{broken:?}");
+    assert!(
+        broken[0].contains("far sampled reach past their population's reach [16, 16, 16]; it needs at least [37, 37, 37]"),
+        "{}",
+        broken[0]
+    );
+}
+
+#[test]
+fn finds_voxels_outside_the_heights() {
+    let broken = heights_hold(&world_of(world(spans("rock", -256, 256, ROCK)), (-64, 64)), &[near()], 1);
+    assert!(broken.iter().any(|b| b.contains("above the heights (-64, 64)") && b.contains("such as rock")), "{broken:?}");
+    assert!(broken.iter().any(|b| b.contains("below the heights")), "{broken:?}");
+}
+
+#[test]
+fn margins_break_down_by_type_and_kind() {
+    let report = margins("fog", &world_of(fog(), (0, 128)), &[b(32, 32, 32, 96, 96, 96)], 2);
+    let all = format!("{report:#}");
+    assert!(all.starts_with("fog in x 32..96, y 32..96, z 32..96:\n  level 1 against 0, rays through: "), "{all}");
+    assert!(all.contains("type   8: 1.000 -> 1.000 (+0.000): fog 1.000 -> 1.000"), "{all}");
+    assert!(report.broken().margins.is_empty());
 }
 
 fn parent(children: fn() -> Vec<Child>) -> Generator {
