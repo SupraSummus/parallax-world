@@ -26,6 +26,9 @@
 //! sites of a plan, the grammar in their boxes down to rules of canopy and
 //! ground, a texture model (W0's) everywhere else.
 //!
+//! The grammar with shared splits is also a world's: `export` writes a
+//! sample of its rules as the table worlds/src/learned.rs draws towns from.
+//!
 //! The examples run the experiments (`cargo run --release --example
 //! segment`, then `synth`; `gather`, then `geometry`, `shared` and
 //! `regimes`), print Markdown tables and write pictures to out/; the

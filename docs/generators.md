@@ -318,6 +318,32 @@ A kind's type (`kind_type`) is its class of material:
 the contract compares what rays hit by type, not by kind,
 so kinds that may stand in for each other far away share one.
 
+### Learned domains
+
+A domain's plan can be learned instead of written.
+The learned town (`worlds/src/learned.rs`) is the forest and fields
+with settlements whose layout is a split grammar
+learned in `lab/` from the valley's towns seen from above at a metre:
+rectangles of 32 kinds, each cut in two or a leaf.
+A settlement's crop is drawn top down from its site's seed:
+each rectangle takes a rule of a rectangle of its kind and about its size
+seen in training, and of its parent's kind and side,
+the one whose cross streets fit those passed down from the cuts above,
+and cuts where it did, from the nearer end;
+rectangles a leaf long (16 m) stop there,
+as their ground and the box of what was built on them.
+That is a function of the site alone, integers only,
+so it is drawn whole, once, and kept.
+What it says of each column is a dithered plan;
+the domains bid by it outright:
+streets, paving and yards are the town's,
+fields the fields', canopy and what the grammar left as texture the forest's,
+and the town's houses stand on the leaves' boxes, facing the street.
+The rule table (`worlds/data/town-grammar.bin`) is a sample of the rules,
+in proportion to how often each kind and size was seen, without pixels.
+`cargo run --release --example export` in `lab/` learns it again and writes it;
+with `-- --check` it says whether the committed one is what it learns.
+
 ## Writing a world
 
 The moor (`worlds/src/moor.rs`) is the shortest whole world to start from.

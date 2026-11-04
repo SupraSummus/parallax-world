@@ -81,6 +81,18 @@ pub fn sites(seed: u64, (x0, y0, w, h): (i64, i64, usize, usize)) -> Vec<Site> {
         .collect()
 }
 
+/** Which rules (the grammar's nodes) are texture: next to no town, and not mostly fields. */
+pub fn texture(grammar: &Grammar) -> Vec<bool> {
+    grammar
+        .nodes
+        .iter()
+        .map(|nd| {
+            let area = (nd.w * nd.h) as f64;
+            (nd.hist[..=4].iter().sum::<u32>() as f64) < TOWN * area && (nd.hist[7] as f64) < FIELDS * area
+        })
+        .collect()
+}
+
 impl Regimes {
     /**
      * The regimes of `grammar` (learned from town crops `crops`) and a
@@ -99,15 +111,7 @@ impl Regimes {
         let images: Vec<(usize, &Image)> = levels.iter().map(|l| (l.b, &l.image)).collect();
         let model = synth::Model::new(countryside, &images, 8, true);
 
-        // Rules are texture where they have next to no town, and not mostly fields.
-        let texture: Vec<bool> = grammar
-            .nodes
-            .iter()
-            .map(|nd| {
-                let area = (nd.w * nd.h) as f64;
-                (nd.hist[..=4].iter().sum::<u32>() as f64) < TOWN * area && (nd.hist[7] as f64) < FIELDS * area
-            })
-            .collect();
+        let texture = texture(&grammar);
 
         // Each training crop's finest biomes, by the countryside's.
         let fit = &levels[0].fit;

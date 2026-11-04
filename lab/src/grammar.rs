@@ -517,6 +517,121 @@ impl Grammar {
     }
 }
 
+/**
+ * One in CUTS_EVERY rules of rectangles longer than MAX_LEAF is kept,
+ * evenly through each (context, kind, size), and one in LEAVES_EVERY of
+ * the rest, which a world draws as leaves, through each (kind, size); at
+ * least one of each. In proportion to what training has of each, so a
+ * rule is found about as often as its like was seen; few, to keep the
+ * table small.
+ */
+pub const CUTS_EVERY: usize = 16;
+pub const LEAVES_EVERY: usize = 256;
+/** Labels that are built (roof, wall): a leaf's house. */
+const BUILT: usize = 2;
+
+/**
+ * The rule table the learned world draws from (worlds/src/learned.rs
+ * reads it): the roots, and of the other rules not under a `texture`
+ * rule (the grammar stops there) some of each context, kind and size
+ * (CUTS_EVERY, LEAVES_EVERY); a rule of a rectangle no longer than
+ * MAX_LEAF is a leaf, which keeps only its ground (the commonest label
+ * not built) and its house (the box of its built labels, if mostly
+ * built and 3 m a side). After `TGR2`, every number a LEB128 varint:
+ *
+ * - labels, kinds, MAX_LEAF, the crop's side, rules, roots, and each root;
+ * - each rule: w, h, kind, context (0 a root, else 1 + its parent's kind × 2 + which side),
+ *   flags (1 cut, 2 along y, 4 snaps to a guide's low edge, 8 to its high one, 16 texture);
+ * - a cut: its place, its sides' kinds, its shared strips (a count, then lo and hi of each),
+ *   and the guides crossing it along x, then y (a count, then each);
+ * - a leaf, not texture: its ground, and its house's x0, y0, x1, y1 (all 0 if none).
+ */
+pub fn export(g: &Grammar, texture: &[bool]) -> Vec<u8> {
+    let mut context = vec![0usize; g.nodes.len()];
+    let mut under = vec![false; g.nodes.len()];
+    for (i, nd) in g.nodes.iter().enumerate() {
+        if nd.cut.is_some() {
+            for (side, k) in nd.kids.iter().enumerate() {
+                context[*k] = 1 + nd.kind * 2 + side;
+                under[*k] = under[i] || texture[i];
+            }
+        }
+    }
+    let leaf = |nd: &Node| nd.w.max(nd.h) <= MAX_LEAF;
+    // Bins in index order, a few rules of each kept evenly through it.
+    let mut bins: HashMap<(usize, usize, i32, i32), Vec<usize>> = HashMap::new();
+    for (i, nd) in g.nodes.iter().enumerate().filter(|(i, _)| !under[*i]) {
+        let c = if leaf(nd) { usize::MAX } else { context[i] };
+        bins.entry((c, nd.kind, octaves(nd.w), octaves(nd.h))).or_default().push(i);
+    }
+    let mut keep = vec![false; g.nodes.len()];
+    g.roots.iter().for_each(|r| keep[*r] = true);
+    for (key, rules) in &bins {
+        let most = rules.len().div_ceil(if key.0 == usize::MAX { LEAVES_EVERY } else { CUTS_EVERY });
+        (0..most).for_each(|j| keep[rules[j * rules.len() / most]] = true);
+    }
+    let mut index = vec![u32::MAX; g.nodes.len()];
+    let order: Vec<usize> = (0..g.nodes.len()).filter(|i| keep[*i]).collect();
+    order.iter().enumerate().for_each(|(n, i)| index[*i] = n as u32);
+
+    let mut out = b"TGR2".to_vec();
+    let mut put = |v: usize| {
+        let mut v = v as u64;
+        while v >= 0x80 {
+            out.push((v as u8 & 0x7f) | 0x80);
+            v >>= 7;
+        }
+        out.push(v as u8);
+    };
+    [g.n, g.kinds, MAX_LEAF, g.crops[0].w, order.len(), g.roots.len()].into_iter().for_each(&mut put);
+    g.roots.iter().for_each(|r| put(index[*r] as usize));
+    for &i in &order {
+        let nd = &g.nodes[i];
+        let cut = nd.cut.filter(|_| !texture[i] && !leaf(nd));
+        let snap = match nd.snap {
+            Some(Edge::Lo) => 4,
+            Some(Edge::Hi) => 8,
+            None => 0,
+        };
+        let flags = cut.map_or(0, |(axis, _)| 1 | axis << 1) | snap | (texture[i] as usize) << 4;
+        [nd.w, nd.h, nd.kind, context[i], flags].into_iter().for_each(&mut put);
+        if let Some((_, at)) = cut {
+            [at, g.nodes[nd.kids[0]].kind, g.nodes[nd.kids[1]].kind, nd.shared.len()].into_iter().for_each(&mut put);
+            nd.shared.iter().flat_map(|(lo, hi)| [*lo, *hi]).for_each(&mut put);
+            for c in &nd.crossing {
+                put(c.len());
+                c.iter().for_each(|p| put(*p));
+            }
+        } else if !texture[i] {
+            leaf_of(g, nd).into_iter().for_each(|b| put(b as usize));
+        }
+    }
+    out
+}
+
+/** A leaf's ground and house (see `export`). */
+fn leaf_of(g: &Grammar, nd: &Node) -> [u8; 5] {
+    let ground = (BUILT..g.n).max_by_key(|l| (nd.hist[*l], std::cmp::Reverse(*l))).filter(|l| nd.hist[*l] > 0).unwrap_or(PAVING);
+    let crop = &g.crops[nd.crop];
+    let (mut lo, mut hi, mut built) = ([usize::MAX; 2], [0; 2], 0);
+    for y in 0..nd.h {
+        for x in 0..nd.w {
+            if (crop.at(nd.x0 + x, nd.y0 + y) as usize) < BUILT {
+                (lo, hi, built) = ([lo[0].min(x), lo[1].min(y)], [hi[0].max(x + 1), hi[1].max(y + 1)], built + 1);
+            }
+        }
+    }
+    let (w, h) = (hi[0].saturating_sub(lo[0]), hi[1].saturating_sub(lo[1]));
+    if w >= 3 && h >= 3 && 2 * built >= w * h {
+        [ground as u8, lo[0] as u8, lo[1] as u8, hi[0] as u8, hi[1] as u8]
+    } else {
+        [ground as u8, 0, 0, 0, 0]
+    }
+}
+
+/** Paving: a leaf's ground where all of it is built. */
+const PAVING: usize = 3;
+
 /** A rectangle to draw: its seed, rule if given, context, kind and extent. */
 #[derive(Clone, Copy)]
 struct Rect {

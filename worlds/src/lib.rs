@@ -5,6 +5,7 @@
 
 pub mod fields;
 pub mod forest;
+pub mod learned;
 pub mod moor;
 pub mod town;
 pub mod valley;
@@ -57,6 +58,15 @@ pub const WORLDS: &[Entry] = &[
         regions: &[Box3 { min: [-64, -32, -192], max: [192, 64, 192] }],
         levels: 5,
         far: &[Box3 { min: [-640, -32, -640], max: [768, 64, 768] }],
+    },
+    // The first settlement's main street where a cross street meets it: houses facing both, yards, trees, paving.
+    // Far away, all of its crop: streets, paving and yards, fields beside them, the forest round it.
+    Entry {
+        name: "learned",
+        make: learned::learned,
+        regions: &[Box3 { min: [64, -48, 1984], max: [448, 208, 2368] }],
+        levels: 4,
+        far: &[Box3 { min: [-1536, -48, 544], max: [1536, 288, 3616] }],
     },
 ];
 
