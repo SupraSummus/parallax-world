@@ -279,6 +279,8 @@ export class ParallaxRenderer {
   private maxLeak = DEFAULT_MAX_LEAK
   private renderDistance = DEFAULT_RENDER_DISTANCE
   private fillGaps = true
+  /** EXPERIMENT: eyes on the lattice 2^(level − eyeShift)·FCC, nearer the camera than the level's own; the slices stay the same. */
+  eyeShift = 0
   private skipCovered = true
   private width = 0
   private height = 0
@@ -358,7 +360,7 @@ export class ParallaxRenderer {
       if (!tangents) continue
       const camera = toLocal(face, this.camera)
       pass.coverage?.setFace(face)
-      const eyes = Array.from({ length: MAX_LEVEL + 1 }, (_, level) => eyeOf(level, camera))
+      const eyes = Array.from({ length: MAX_LEVEL + 1 }, (_, level) => eyeOf(Math.max(0, level - this.eyeShift), camera))
       const of = { face, tangents, camera, eyes, boxOf: screenBox(view, face) }
       const drawn: SliceId[] = []
       const commit = (slice: Slice, result: Drawn) => {
