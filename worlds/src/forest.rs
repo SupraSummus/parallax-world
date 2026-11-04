@@ -335,7 +335,7 @@ pub fn layers(seed: u64, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
     // Trees, each in the cell its foot is in.
     let tree_cell = vox(2.0) as i64;
     let tree_top = vox(26.0) as i64;
-    // What slabs of each species' trees hide, measured from samples drawn at level 2 (the canopy's from level 4 on), by spacing.
+    // What each slab of each species' trees adds to their shadow, measured from samples drawn at level 2 (the canopy's from level 4 on), by spacing.
     let sample_seed = f.s(17);
     let shadows = Rc::new(OnceCell::new());
     let slabs = Rc::new(RefCell::new(HashMap::<i64, Rc<[Vec<f64>; 3]>>::new()));

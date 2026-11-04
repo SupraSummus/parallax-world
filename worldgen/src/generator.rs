@@ -1076,16 +1076,28 @@ type Slice = (Vec<u64>, u32, u32);
 
 /**
  * What slabs of things hide, measured: things drawn alone at a level,
- * and for each slab of them across an axis the area it hides seen along
- * each axis, on average over the three and the things. A population's
- * far form, from things made at the origin, is as dense as that
- * (extinction = things per volume · their mean shadow).
+ * and for each slab of them across an axis what it adds to their shadow,
+ * on average over directions and the things. A population's far form,
+ * from things made at the origin, is as dense as that (extinction =
+ * things per volume · their mean shadow), each slab a medium of its own.
  */
 pub struct Shadows {
     f: i64,
     /** By thing, its first layer across the axis and its layers from it. */
     things: Vec<(i64, Vec<Slice>)>,
 }
+
+/**
+ * How much of what a slab adds to a thing's shadow across it, and of its
+ * shadow along the other axes, it shows on average over directions. A
+ * convex body's mean shadow is a quarter of its area (Cauchy): for a
+ * cylinder, half its shadow along its axis and π/4 of that across it,
+ * for a ball half of each. Media are isotropic: denser, the canopy hides
+ * more from above than its trees; thinner, less among them; these keep
+ * both best ("Levels" in docs/generators.md).
+ */
+const ACROSS: f64 = 0.5;
+const ALONG: f64 = 2.0 / 3.0;
 
 impl Shadows {
     pub fn new(nodes: &[Node], level: u32, axis: usize) -> Shadows {
@@ -1123,25 +1135,33 @@ impl Shadows {
         Shadows { f, things }
     }
 
-    /** The mean shadow (lattice units²) of the slab from `from` to `to` (exclusive) along the axis. */
+    /**
+     * The mean shadow (lattice units²) over directions of what the slab
+     * from `from` to `to` (exclusive) along the axis adds to the things':
+     * across it, what it adds seen from either side, as slabs of a thing
+     * overlap (from above, 2 to 3 times the tree's own in 2 m slabs);
+     * along the other axes, its own, as slabs side by side don't.
+     */
     pub fn slab(&self, from: i64, to: i64) -> f64 {
         let (f, mut sum) = (self.f, 0.0);
         for (first, layers) in &self.things {
             let ceil = |v: i64| -(-v).div_euclid(f) - first;
-            let (lo, hi) = (ceil(from).max(0) as usize, ceil(to).clamp(0, layers.len() as i64) as usize);
+            let (lo, hi) = (ceil(from).clamp(0, layers.len() as i64) as usize, ceil(to).clamp(0, layers.len() as i64) as usize);
             if lo >= hi {
                 continue;
             }
-            let mut plane = vec![0u64; layers[0].0.len()];
-            let (mut along_a, mut along_b) = (0, 0);
-            for (bits, a, b) in &layers[lo..hi] {
-                for (p, w) in plane.iter_mut().zip(bits) {
-                    *p |= w;
+            // What layers `range` hide across the axis together.
+            let across = |range: std::ops::Range<usize>| {
+                let mut plane = vec![0u64; layers[0].0.len()];
+                for (bits, ..) in &layers[range] {
+                    plane.iter_mut().zip(bits).for_each(|(p, w)| *p |= w);
                 }
-                (along_a, along_b) = (along_a + a, along_b + b);
-            }
-            let across = plane.iter().map(|w| w.count_ones()).sum::<u32>();
-            sum += (across + along_a + along_b) as f64 * (f * f) as f64 / 3.0;
+                plane.iter().map(|w| w.count_ones()).sum::<u32>() as f64
+            };
+            let n = layers.len();
+            let adds = (across(lo..n) - across(hi..n) + across(0..hi) - across(0..lo)) / 2.0;
+            let along: u32 = layers[lo..hi].iter().map(|(_, a, b)| a + b).sum();
+            sum += (ACROSS * adds + ALONG * along as f64 / 2.0) * (f * f) as f64;
         }
         sum / self.things.len() as f64
     }

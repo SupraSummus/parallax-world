@@ -115,8 +115,18 @@ how many rays get how far, and what they stop on.
   beyond, they draw their `far` field instead:
   a medium as dense as their things, by the theory of Boolean models
   (extinction = things per volume · their mean shadow).
-  `Shadows` measures it from sample things drawn alone at a level:
-  what each slab of them across an axis hides, seen along each axis.
+  `Shadows` measures it from sample things drawn alone at a level,
+  slab by slab across an axis, each slab a medium of its own:
+  seen across, what the slab adds to the shadow of the rest of the thing,
+  from either side, as a tree's slabs overlap
+  (the sum of 2 m slabs' own shadows from above was 2 to 3 times a tree's,
+  and the canopy from above 87 % at level 4 where level 0 shows 79 %);
+  seen along the other axes, its own shadow, as slabs side by side don't.
+  The two are weighed as in a convex body's mean shadow over directions,
+  half of what is seen across and ⅔ of what is seen along
+  (π/4 for a cylinder, ½ for a ball):
+  a medium is isotropic, and denser it hides more from above than the trees,
+  thinner it lets rays among them hit the ground ("Media are isotropic").
 - **Fields** are evaluated once per site or line of sites,
   and get the spacing, to smooth themselves to it.
 - **Plans** they read hold numbers, read where the line is,
@@ -204,12 +214,17 @@ names them in `worlds!` (`moor = [42]`).
   under a canopy (in the forest, all but 0.3 %), not under the ground's shell.
   Sites a level rougher and sheets a site thicker cost up to ~0.08;
   a town losing its roofs, 0.12;
-- at levels 1 to 3, what rays straight down over the region hit first,
+- at each level up to the entry's `from_above`,
+  what rays straight down hit first,
+  over the region grown to at least 16 sites of the level across,
   against level 0, within 0.1:
   levels two apart miss what drifts a little at every level,
   like a town's walls taking over from its roofs (0.17 off at level 2).
-  At level 4 a house's edges show their walls from above
-  (see "Media are isotropic");
+  The valley, the moor and the learned town stop at 3:
+  at level 4 a house's edges show their walls from above
+  (see "Media are isotropic").
+  The forest goes to 6, its canopy seen over 128 m there,
+  which takes most of its test's time;
 - in an entry's `far` regions, wide ones (only x and z count),
   what its fields alone show from above at levels 4 to 6, against level 0,
   within 0.025: fields come from position alone,
@@ -218,7 +233,8 @@ names them in `worlds!` (`moor = [42]`).
   Things are left out, with their far fields,
   as their far forms keep what rays see around them, not from above.
   The valley's has its first town (the same at every seed),
-  the moor's its stream and patches of heath;
+  the moor's its stream and patches of heath,
+  the learned town's its whole crop;
 - at each level up to one past the world's, in each region
   and a host tile's width around spawn,
   a slab above and one below the world's `heights` are empty:
@@ -426,13 +442,25 @@ Carves along a line want the same margin.
 
 ## Open problems
 
-- **The forest's coarse levels stop ~0.05 more rays than two finer**
-  (levels 6 and 7, sites 8 and 16 m apart).
-  Measuring the canopy from sample trees drawn at level 2,
-  instead of from their shapes' areas, brought level 4 from 0.024 off to 0.007,
-  but left levels 6 and 7 about where they were (0.05 and 0.06):
-  what is left is likely not the canopy's density but its band,
-  26 m tall, two or three sites there. Not checked yet.
+- **The forest's canopy thickens from level 6** (sites 8 m apart),
+  whatever its slabs' density:
+  from above, over 128 m at seed 42, 83, 84 and 87 % at levels 4 to 6
+  (79 % at level 0, 85 % at levels 1 to 3, whose trees the canopy is measured from),
+  and up to 0.05 fewer rays through at level 6 than at 4.
+  The canopy's spans predict 81 % at level 6, the same as at 4,
+  and a uniform medium over flat or sloping ground draws what it predicts.
+  Likely: a ray down crosses the sites of two columns in turn,
+  so it averages the density over a site,
+  and where that varies over 8 m (paths, clearings) it covers more.
+  Not checked yet.
+- **The forest's canopy is all leaves, and only over the trees' feet.**
+  Its trunks are leaves too: rays among the trees hit wood 0.04 less
+  at levels 4 and 5.
+  Each slab's kind drawn as bark in proportion to its wood seen from the side
+  overshot (materials hit 0.09 off).
+  Crowns reach over the path, the canopy doesn't:
+  spread over 2.5 m around each column, the materials rays hit came closer,
+  but from above at level 6 went to 0.096.
 - **Media are isotropic.** A site stops rays from every direction alike;
   vertical trunks seen from above and from the side cannot both be right.
   Measured far forms show it too: a site is of one kind from every side,
@@ -450,6 +478,13 @@ Carves along a line want the same margin.
   each axis's columns weighted by the thing's shadow along it,
   or credited to the cell their first fine site is in,
   moved neither by more than 0.01.
+  The forest's canopy is caught the same way ("Populations" in "Levels"):
+  from above, rays want what each slab adds seen across;
+  among the trees and obliquely, what it hides from the side.
+  Slabs as dense as what they add from above alone
+  put the materials rays hit at level 5 0.155 off;
+  as Cauchy has it for a cylinder (½ and π/4),
+  0.05 off, but from above 0.09 off at level 6.
 - **A lone measured thing is kept or not almost whole.**
   Its cells are held to one threshold,
   and a hollow house's are only partly full:
