@@ -4,6 +4,7 @@
 
 use std::cell::OnceCell;
 use std::rc::Rc;
+use std::sync::OnceLock;
 
 use crate::grid::{Box3, VoxelGrid};
 use crate::js;
@@ -1044,31 +1045,82 @@ impl Shadows {
 }
 
 /**
+ * How many columns along each axis of the sites `r` times finer than a
+ * cell hold one of them in the cell: fewer than the 2 r² of its shadow,
+ * and unevenly by axis, as a column's sites are 2 apart and nearest_site
+ * breaks ties one way. Cells of a level are congruent, ties and all
+ * (they differ by an even number of cells along the axes), so the count
+ * depends on r only.
+ */
+fn columns_of_cell(r: i64) -> [u32; 3] {
+    static COLUMNS: [OnceLock<[u32; 3]>; 64] = [const { OnceLock::new() }; 64];
+    *COLUMNS[r.trailing_zeros() as usize].get_or_init(|| {
+        std::array::from_fn(|axis| {
+            let (a, b) = ((axis + 1) % 3, (axis + 2) % 3);
+            let mut count = 0;
+            for i in -r..=r {
+                for j in -r..=r {
+                    // The cell is symmetric about its centre's plane across the column, and where a column runs
+                    // in one of its faces, ties go one way all along it: if the column has a site in the cell,
+                    // it has one within 2 of that plane (checked by a_cells_columns_are_counted).
+                    count += (-2..=2i64).filter(|k| (i + j + k) & 1 == 0).any(|k| {
+                        let mut p = [0; 3];
+                        (p[axis], p[a], p[b]) = (k, i, j);
+                        nearest_site(p.map(|v| v * ONE), r) == [0; 3]
+                    }) as u32;
+                }
+            }
+            count
+        })
+    })
+}
+
+/**
  * A node's far form at sites `s` apart, measured from its near form:
  * drawn whole at the coarsest level it is drawn at (spacing f, at most
  * `detail`), then coarsened. A coarse site stands for the fine sites in
- * its cell (those nearest it); it is kept with the chance a ray crossing
- * the cell is stopped, the share of its columns along each axis holding
- * a fine site (2 (s / f)² of them), on average over the axes, against
- * one threshold for the whole thing; and is of a kind of the fine sites
- * first along those columns from either end, in proportion.
+ * its cell (those nearest it). It is kept with the chance a ray crossing
+ * the cell is stopped: the share of the cell's columns along each axis
+ * holding a fine site of the thing, on average over the axes, against
+ * one threshold for the whole thing. It is of a kind of what rays along
+ * columns see: each column's first fine site from either end, credited
+ * to the first kept cell the column crosses from that end, in
+ * proportion; a cell no column sees first is of the kinds at the ends of
+ * its columns' runs in it.
  */
 fn measure(node: &Node, key: &str, bounds: Box3, detail: Fixed, s: i64, seed: u64) -> Sites {
     let f = 1i64 << ((detail / ONE).max(1).ilog2());
     // Its far form not drawn at f: f is at most detail.
     let own = alone(node, key, bounds, f, seed);
-    // By coarse site: per axis, how many of its columns hold a fine site; what shows at their ends, counted by kind.
+    // By coarse site: per axis, how many of its columns hold a fine site; what shows at the ends of their runs in it,
+    // and what rays along columns see first of all, counted by kind.
     #[derive(Default)]
     struct Stats {
         columns: [u32; 3],
-        shown: Vec<(Kind, Op, u32)>,
+        ends: Vec<(Kind, Op, u32)>,
+        seen: Vec<(Kind, Op, u32)>,
+        kept: bool,
     }
-    let show = |stats: &mut Stats, kind: Kind, op: Op| match stats.shown.iter_mut().find(|e| e.0 == kind) {
+    let count = |kinds: &mut Vec<(Kind, Op, u32)>, kind: Kind, op: Op| match kinds.iter_mut().find(|e| e.0 == kind) {
         Some(e) => e.2 += 1,
-        None => stats.shown.push((kind, op, 1)),
+        None => kinds.push((kind, op, 1)),
     };
-    let mut cells = std::collections::HashMap::<[i64; 3], Stats>::new();
     let n = own.n;
+    let cell_of = |p: [i64; 3]| nearest_site([0, 1, 2].map(|c| (p[c] + own.b.min[c]) * f * ONE), s);
+    // The cells of the coarse sites from those of its box's corners and two more on each side, in an array:
+    // nearest_site rounds each coordinate, then may move one by one, the corners' included.
+    let lo = cell_of([0; 3]).map(|v| v - 2);
+    let m = cell_of(n.map(|v| v - 1)).map(|v| v + 3);
+    let m = [0, 1, 2].map(|i| m[i] - lo[i]);
+    let index = |c: [i64; 3]| ((c[0] - lo[0]) + m[0] * ((c[1] - lo[1]) + m[1] * (c[2] - lo[2]))) as usize;
+    let site_of = |i: usize| {
+        let i = i as i64;
+        [i % m[0] + lo[0], i / m[0] % m[1] + lo[1], i / (m[0] * m[1]) + lo[2]]
+    };
+    let mut cells: Vec<Stats> = (0..m[0] * m[1] * m[2]).map(|_| Stats::default()).collect();
+    // By axis and column, what it shows at either end.
+    type Ends = Option<[(Kind, Op); 2]>;
+    let mut ends: [Vec<Ends>; 3] = Default::default();
     for axis in 0..3 {
         let (a, b) = ((axis + 1) % 3, (axis + 2) % 3);
         let mut p = [0i64; 3];
@@ -1077,47 +1129,88 @@ fn measure(node: &Node, key: &str, bounds: Box3, detail: Fixed, s: i64, seed: u6
                 (p[a], p[b]) = (i, j);
                 // A column crosses each cell once (they are convex): the run of it in a cell is one column of the cell's.
                 let mut run: Option<([i64; 3], Kind, Op)> = None;
+                let mut first = None;
                 for k in 0..n[axis] {
                     p[axis] = k;
                     let at = [0, 1, 2].map(|c| p[c] + own.b.min[c]);
                     let Some((kind, op)) = own.at(at[0], at[1], at[2]) else { continue };
-                    let site = nearest_site(at.map(|v| v * f * ONE), s);
+                    first.get_or_insert((kind, op));
+                    let site = cell_of(p);
                     match run {
                         Some((cell, ..)) if cell == site => run = Some((site, kind, op)),
                         _ => {
                             if let Some((cell, last, last_op)) = run {
-                                show(cells.get_mut(&cell).expect("counted"), last, last_op);
+                                count(&mut cells[index(cell)].ends, last, last_op);
                             }
-                            let stats = cells.entry(site).or_default();
+                            let stats = &mut cells[index(site)];
                             stats.columns[axis] += 1;
-                            show(stats, kind, op);
+                            count(&mut stats.ends, kind, op);
                             run = Some((site, kind, op));
                         }
                     }
                 }
                 if let Some((cell, last, last_op)) = run {
-                    show(cells.get_mut(&cell).expect("counted"), last, last_op);
+                    count(&mut cells[index(cell)].ends, last, last_op);
+                }
+                ends[axis].push(first.zip(run).map(|(first, (_, last, last_op))| [first, (last, last_op)]));
+            }
+        }
+    }
+    // Each column of a cell's counted against those holding one of its fine sites at all.
+    let all = columns_of_cell(s / f);
+    let kept = hash_text(&format!("{key}#measured"), seed);
+    // One threshold for the whole thing, not one per site: a solid thing keeps a whole outline,
+    // not a ragged one; a porous one is kept or not as a whole, in proportion over many.
+    let threshold = unit(hash(kept, 0, 0, 0));
+    // The kept cells' reach along each axis, in the box's fine sites: a cell reaches s from its site.
+    let (r, mut reach) = (s / f, [(i64::MAX, i64::MIN); 3]);
+    for (i, stats) in cells.iter_mut().enumerate() {
+        stats.kept = threshold < (0..3).map(|i| stats.columns[i] as f64 / all[i] as f64).sum::<f64>() / 3.0;
+        if stats.kept {
+            let site = site_of(i);
+            for c in 0..3 {
+                let at = site[c] * r - own.b.min[c];
+                reach[c] = (reach[c].0.min(at - r), reach[c].1.max(at + r));
+            }
+        }
+    }
+    // What a ray along each column sees, credited to the first kept cell it crosses.
+    for (axis, ends) in ends.iter().enumerate() {
+        let (a, b) = ((axis + 1) % 3, (axis + 2) % 3);
+        let (from, to) = (reach[axis].0.max(0), reach[axis].1.min(n[axis] - 1));
+        if from > to {
+            continue;
+        }
+        for (column, shown) in ends.iter().enumerate() {
+            let Some(shown) = shown else { continue };
+            let mut p = [0i64; 3];
+            (p[a], p[b]) = (column as i64 / n[b], column as i64 % n[b]);
+            // Its sites: those of the parity of the lattice.
+            let parity = (p[a] + p[b] + own.b.min.iter().sum::<i64>()).rem_euclid(2);
+            for (end, (kind, op)) in shown.iter().enumerate() {
+                let mut k = if end == 0 { from + (from + parity) % 2 } else { to - (to + parity) % 2 };
+                while (from..=to).contains(&k) {
+                    p[axis] = k;
+                    let stats = &mut cells[index(cell_of(p))];
+                    if stats.kept {
+                        count(&mut stats.seen, *kind, *op);
+                        break;
+                    }
+                    k += if end == 0 { 2 } else { -2 };
                 }
             }
         }
     }
-    let all = 2.0 * ((s / f) as f64).powi(2);
-    let kept = hash_text(&format!("{key}#measured"), seed);
     let mut sites = Vec::new();
-    for (site, mut stats) in cells {
-        let chance = stats.columns.iter().map(|c| *c as f64 / all).sum::<f64>() / 3.0;
+    for (i, stats) in cells.into_iter().enumerate().filter(|(_, stats)| stats.kept) {
+        let site = site_of(i);
         let [x, y, z] = site;
-        // One threshold for the whole thing, not one per site: a solid thing keeps a whole outline,
-        // not a ragged one; a porous one is kept or not as a whole, in proportion over many.
-        if unit(hash(kept, 0, 0, 0)) >= chance {
-            continue;
-        }
+        let mut kinds = if stats.seen.is_empty() { stats.ends } else { stats.seen };
         // In an order of their own: the columns' isn't one.
-        stats.shown.sort_by_key(|e| e.0);
-        let total: u32 = stats.shown.iter().map(|e| e.2).sum();
+        kinds.sort_by_key(|e| e.0);
+        let total: u32 = kinds.iter().map(|e| e.2).sum();
         let mut pick = ((hash(kept ^ 1, x * s, y * s, z * s) as u64 * total as u64) >> 32) as u32;
-        let &(kind, op, _) = stats
-            .shown
+        let &(kind, op, _) = kinds
             .iter()
             .find(|e| {
                 pick < e.2 || {
@@ -1266,20 +1359,63 @@ mod tests {
             (1..4).all(|y| (1..4).all(|x| (1..4).all(|z| (x + y + z) % 2 == 1 || sites.iter().any(|s| s.0 == [x, y, z])))),
             "its inside is all kept"
         );
-        assert!(sites.iter().filter(|s| inside(s.0)).all(|s| s.1 == 1), "what shows inside is the block's");
-        // Its top row of cells is half covered, kept by some things' thresholds: there, the glass shows.
-        let tops =
-            (0..16).flat_map(|i| measure(&block, &format!("block {i}"), bounds_of(&block), fixed(2.0), 16, 1)).filter(|s| s.0[1] == 4);
-        assert!(tops.filter(|s| s.1 == 2).count() > 0, "the glass on top shows");
+        // Cells no column reaches first, under the kept inside's top row, are of what is inside them: the block.
+        assert!(sites.iter().filter(|s| inside(s.0) && s.0[1] == 1).all(|s| s.1 == 1), "what is hidden inside is the block's");
+        // Its top row of cells, half covered, is kept by some things' thresholds. Rays straight down see the glass
+        // on it, credited by the columns from above; where it is dropped, they see the cells under it, which the
+        // columns from above credit with the glass too, and those from the sides with the block (a cell is of
+        // one kind seen from anywhere: "Media are isotropic" in docs/generators.md). Over these 16 blocks they
+        // see it 0.46 of the time; with kinds from the ends of the columns' runs in each cell, 0.19.
+        let from_above = |sites: &Sites| {
+            let kinds: std::collections::HashMap<[i64; 3], Kind> = sites.iter().map(|s| (s.0, s.1)).collect();
+            let mut glass = 0;
+            for x in (2..64).step_by(4) {
+                for z in (2..64).step_by(4) {
+                    let hit = (0..128).rev().find_map(|y| kinds.get(&nearest_site([x, y, z].map(|v| v * ONE), 16)));
+                    glass += (hit == Some(&2)) as u32;
+                }
+            }
+            glass as f64 / 256.0
+        };
+        let glass =
+            (0..16).map(|i| from_above(&measure(&block, &format!("block {i}"), bounds_of(&block), fixed(2.0), 16, 1))).sum::<f64>() / 16.0;
+        assert!(glass > 0.35, "rays from above see the glass on top {glass} of the time");
         let cloud = Node { far: Some(Far::measured(fixed(2.0))), ..Node::of(vec![ball([0.0; 3], 64.0, 1, Fill::Const(0.02), Op::Fill)]) };
-        // Of its about 134 cells (a ball's volume over a site's, 2 · 16³), those a ray crossing is stopped in:
-        // a column crosses a cell over 16 units on average (its volume over its shadow, 2 · 16³ / 2 · 16²), so 4 sites 4 apart,
-        // each kept with 1 − 0.98² ≈ 0.04: 1 − 0.96⁴ ≈ 0.15 of them, a little less with the cells on its edge.
-        // Each cloud is kept or not as a whole, against its own threshold: on average over many.
-        let kept = (0..64).map(|i| measure(&cloud, &format!("cloud {i}"), bounds_of(&cloud), fixed(2.0), 16, 1).len()).sum::<usize>()
+        // Of its about 134 cells (a ball's volume over a site's, 2 · 16³), those a ray crossing is stopped in.
+        // Fine sites 4 apart along a column, a cell's 512 fine sites are on 123, 126 and 128 of its columns along x, y
+        // and z (columns_of_cell; its shadow is 2 · 8² columns), 1 to 8 on each, 4 on average. Each kept with
+        // 1 − 0.98² ≈ 0.04, a column holds one with 1 − 0.96ⁿ: 0.15 on average over them, in a whole cell and
+        // over the ball's (its cells on its edge, cut short, add a little). Each cloud is kept or not as a whole,
+        // against its own threshold: on average over many, 256 for a share within about 0.02.
+        let kept = (0..256).map(|i| measure(&cloud, &format!("cloud {i}"), bounds_of(&cloud), fixed(2.0), 16, 1).len()).sum::<usize>()
             as f64
-            / (64.0 * 134.0);
+            / (256.0 * 134.0);
         assert!((0.1..0.2).contains(&kept), "sparse clouds keep {kept} of their sites");
+    }
+
+    #[test]
+    fn a_cells_columns_are_counted() {
+        // Every fine site near a few cells of a level, assigned to its nearest: each cell's columns holding one,
+        // per axis, as columns_of_cell counts them for any cell.
+        for r in [2i64, 4, 8, 16] {
+            for centre in [[0, 0, 0], [1, 1, 0], [-1, 0, 1], [0, 2, 0], [3, -1, 2]] {
+                let mut columns: [std::collections::HashSet<(i64, i64)>; 3] = Default::default();
+                let c = centre.map(|v| v * r);
+                for x in c[0] - r..=c[0] + r {
+                    for y in c[1] - r..=c[1] + r {
+                        for z in c[2] - r..=c[2] + r {
+                            if (x + y + z) & 1 == 0 && nearest_site([x, y, z].map(|v| v * ONE), r) == centre {
+                                columns[0].insert((y, z));
+                                columns[1].insert((z, x));
+                                columns[2].insert((x, y));
+                            }
+                        }
+                    }
+                }
+                assert_eq!(columns.map(|c| c.len() as u32), columns_of_cell(r), "cells {r} sites wide, at {centre:?}");
+            }
+            println!("{r}: {:?} of {}", columns_of_cell(r), 2 * r * r);
+        }
     }
 
     #[test]

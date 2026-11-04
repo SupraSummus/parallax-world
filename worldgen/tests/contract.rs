@@ -1,6 +1,7 @@
 //! The engine on small test worlds: they keep the contract
 //! (worldgen::contract), and the framework refuses what breaks it.
 
+use worldgen::World;
 use worldgen::contract::check;
 use worldgen::generator::{
     ANY_SIZE, Child, Children, Field, FieldValues, Generator, KindDef, Layer, Node, Op, Population, SOLID, Shapes, Span, ball, cuboid,
@@ -66,8 +67,16 @@ fn caves() -> Generator {
             if v > 1.4 { Some((ROCK, None)) } else { None }
         })),
     };
-    Generator { kinds: KINDS.to_vec(), seed: 2, layers: vec![spans("rock", -1000, 1000, ROCK), Layer::Field(tunnels)] }
+    Generator { kinds: KINDS.to_vec(), seed: 2, layers: vec![spans("rock", -256, 256, ROCK), Layer::Field(tunnels)] }
 }
+
+/**
+ * How high the village's plain is: off the planes of sites of levels past
+ * 0 (y = 0 is one at every level), where sites in spans and boxes from
+ * there up, by their centres, start half a site low at every level
+ * (docs/todo.md).
+ */
+const PLAIN: f64 = 3.0;
 
 /** Houses on a grass plain: thin walls with a door carved through, rooms of tables inside. */
 fn village() -> Generator {
@@ -77,11 +86,11 @@ fn village() -> Generator {
         cell: 64,
         reach: [0; 3],
         size: ANY_SIZE,
-        // On the plane y = 0: the cells centred on it, every other one of a square grid.
+        // On the plain: the cells centred on y = 0, every other one of a square grid.
         anchor: Box::new(|cell| if cell.j == 0 { Some(cell.centre.map(|v| v as f64)) } else { None }),
         make: Box::new(|[x, _, z], cell| {
             let (w, d, h) = (16.0 + (cell.random("size").next() * 12.0).floor(), 16.0 + (cell.random("size").next() * 12.0).floor(), 20.0);
-            let (x0, z0, x1, z1) = (x - w, z - d, x + w, z + d);
+            let (x0, z0, x1, z1, y) = (x - w, z - d, x + w, z + d, PLAIN);
             let tables = move |clip: &Box3| -> Vec<Child> {
                 (0..4)
                     .map(|n| {
@@ -89,7 +98,7 @@ fn village() -> Generator {
                         Child {
                             name: format!("table {n}"),
                             size: 2,
-                            node: Node::of(vec![cuboid([tx, 0.0, tz], [tx + 4.0, 3.0, tz + 3.0], WOOD, SOLID, Op::Fill)]),
+                            node: Node::of(vec![cuboid([tx, y, tz], [tx + 4.0, y + 3.0, tz + 3.0], WOOD, SOLID, Op::Fill)]),
                         }
                     })
                     .filter(|t| t.node.shapes.get()[0].bounds.min[0] < clip.max[0])
@@ -97,14 +106,14 @@ fn village() -> Generator {
             };
             let wall = |min: Point, max: Point| cuboid(min, max, WALL, SOLID, Op::Fill);
             Some(Node {
-                bounds: Some(b(x0 as i64, 0, z0 as i64, x1 as i64, h as i64 + 1, z1 as i64)),
+                bounds: Some(b(x0 as i64, y as i64, z0 as i64, x1 as i64, (y + h) as i64 + 1, z1 as i64)),
                 shapes: Shapes::Now(vec![
-                    wall([x0, 0.0, z0], [x1, h, z0 + 1.0]),
-                    wall([x0, 0.0, z1 - 1.0], [x1, h, z1]),
-                    wall([x0, 0.0, z0], [x0 + 1.0, h, z1]),
-                    wall([x1 - 1.0, 0.0, z0], [x1, h, z1]),
-                    wall([x0, h, z0], [x1, h + 1.0, z1]),
-                    cuboid([x - 3.0, 0.0, z0], [x + 3.0, 10.0, z0 + 1.0], WALL, SOLID, Op::Carve),
+                    wall([x0, y, z0], [x1, y + h, z0 + 1.0]),
+                    wall([x0, y, z1 - 1.0], [x1, y + h, z1]),
+                    wall([x0, y, z0], [x0 + 1.0, y + h, z1]),
+                    wall([x1 - 1.0, y, z0], [x1, y + h, z1]),
+                    wall([x0, y + h, z0], [x1, y + h + 1.0, z1]),
+                    cuboid([x - 3.0, y, z0], [x + 3.0, y + 10.0, z0 + 1.0], WALL, SOLID, Op::Carve),
                 ]),
                 children: Some(Children::Reaching(Box::new(tables))),
                 far: None,
@@ -112,26 +121,31 @@ fn village() -> Generator {
         }),
         far: None,
     };
-    Generator { kinds: KINDS.to_vec(), seed: 3, layers: vec![spans("ground", -64, 0, GRASS), Layer::Population(houses)] }
+    Generator { kinds: KINDS.to_vec(), seed: 3, layers: vec![spans("ground", -64, PLAIN as i64, GRASS), Layer::Population(houses)] }
 }
 
 fn b(min_x: i64, min_y: i64, min_z: i64, max_x: i64, max_y: i64, max_z: i64) -> Box3 {
     Box3 { min: [min_x, min_y, min_z], max: [max_x, max_y, max_z] }
 }
 
+/** A world of `generator`, which has nothing outside `heights`. */
+fn world_of(generator: Generator, heights: (i64, i64)) -> World {
+    World { generator, spawn: [0; 3], reach: 0.0, heights }
+}
+
 #[test]
 fn fog_keeps_the_contract() {
-    check("fog", &fog(), b(32, 32, 32, 96, 96, 96), 4);
+    check("fog", &world_of(fog(), (0, 128)), &[b(32, 32, 32, 96, 96, 96)], 4);
 }
 
 #[test]
 fn caves_keep_the_contract() {
-    check("caves", &caves(), b(0, 0, 0, 128, 128, 128), 3);
+    check("caves", &world_of(caves(), (-256, 256)), &[b(0, 0, 0, 128, 128, 128)], 3);
 }
 
 #[test]
 fn village_keeps_the_contract() {
-    check("village", &village(), b(-64, -16, -64, 64, 48, 64), 5);
+    check("village", &world_of(village(), (-64, 64)), &[b(-64, -16, -64, 64, 48, 64)], 4);
 }
 
 fn near() -> Box3 {

@@ -1,5 +1,5 @@
 //! Every world keeps the contract (worldgen::contract) in its registry
-//! entry's region: a test each, so they run in parallel.
+//! entry's regions: a test each, so they run in parallel.
 
 use worlds::WORLDS;
 
@@ -11,7 +11,7 @@ macro_rules! worlds {
                 #[test]
                 fn $name() {
                     let entry = worlds::by_name(stringify!($name)).expect("a world of that name");
-                    worldgen::contract::check(entry.name, &(entry.make)(42).generator, entry.region, entry.levels);
+                    worldgen::contract::check(entry.name, &(entry.make)(42), entry.regions, entry.levels);
                 }
             )*
         }
