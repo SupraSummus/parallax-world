@@ -316,6 +316,55 @@ fn sites_between(min: At, max: At) -> Box3 {
     Box3 { min: min.map(|v| -((-v) >> 16)), max: max.map(|v| (v >> 16) + 1) }
 }
 
+/**
+ * Which side of a face a site on it counts as on. A box or span keeps the
+ * sites whose centres are in [from, to); on a plane of a level's sites
+ * (y = 0 at every level), half its lines of sites have one on each face,
+ * kept at the bottom, dropped at the top, so it sinks half a site, more
+ * the coarser the level. Level 0's sink, half a unit, is the reference:
+ * a site on a face counts as above it, along `axis`, with the chance
+ * ½ + 1/(2s), sites s apart: always at level 0, nearly half the time far
+ * away, so a face is where level 0 has it on average (docs/generators.md,
+ * "Levels"). By a hash of the position and axis alone, so boxes and
+ * spans meeting on a face share its sites, and a site above at one level
+ * is above at the finer ones.
+ */
+#[derive(Clone, Copy)]
+struct Tie {
+    s: i64,
+    /** Above when the hash is under this, of 2^32. */
+    under: u64,
+}
+
+impl Tie {
+    fn new(s: i64) -> Tie {
+        Tie { s, under: (1 << 31) + (1 << 31) / s as u64 }
+    }
+
+    /**
+     * Whether coordinate `axis` of site `p` is in [lo, hi), all in units
+     * `one` to a lattice unit. A box one site thick keeps its bottom face's
+     * sites, as at level 0: each line across it has a site on one face
+     * only, and halves of both would let rays through.
+     */
+    fn within(&self, axis: usize, p: [i64; 3], lo: i64, hi: i64, one: i64) -> bool {
+        let v = p[axis];
+        if lo < v && v < hi {
+            return true;
+        }
+        if v != lo && v != hi {
+            return false;
+        }
+        if hi - lo <= self.s * one {
+            return v == lo;
+        }
+        let [x, y, z] = p.map(|c| c.div_euclid(one));
+        ((hash(TIE_SEEDS[axis], x, y, z) as u64) < self.under) == (v == lo)
+    }
+}
+
+const TIE_SEEDS: [u64; 3] = [0x7a1e_0001, 0x7a1e_0002, 0x7a1e_0003];
+
 fn dot(a: At, b: At) -> i64 {
     (0..3).map(|i| a[i] * b[i]).sum()
 }
@@ -523,6 +572,7 @@ enum Inside<'a> {
         lo: At,
         hi: At,
         min: Fixed,
+        tie: Tie,
     },
     /** Under the slopes: |2u − lo − hi| · height ≤ width · (top − y), with 8 bits after the point. */
     Gable {
@@ -530,6 +580,7 @@ enum Inside<'a> {
         hi: At,
         min: Fixed,
         across: usize,
+        tie: Tie,
     },
 }
 
@@ -554,14 +605,15 @@ impl Inside<'_> {
                 let away = segment.away(v, vd);
                 away <= *widest2 && away <= (fixed(radius(float(segment.along(vd)))).max(*half) >> 8).pow(2)
             }
-            Inside::Cuboid { lo, hi, min } => {
-                (0..3).all(|i| if hi[i] - lo[i] >= *min { lo[i] <= x[i] && x[i] < hi[i] } else { (2 * x[i] - lo[i] - hi[i]).abs() <= *min })
-            }
-            Inside::Gable { lo, hi, min, across } => {
+            Inside::Cuboid { lo, hi, min, tie } => (0..3).all(|i| {
+                if hi[i] - lo[i] >= *min { tie.within(i, x, lo[i], hi[i], ONE) } else { (2 * x[i] - lo[i] - hi[i]).abs() <= *min }
+            }),
+            Inside::Gable { lo, hi, min, across, tie } => {
                 let a = *across;
                 let ridge = 2 - a;
-                let side =
-                    |i: usize| if hi[i] - lo[i] >= *min { lo[i] <= x[i] && x[i] < hi[i] } else { (2 * x[i] - lo[i] - hi[i]).abs() <= *min };
+                let side = |i: usize| {
+                    if hi[i] - lo[i] >= *min { tie.within(i, x, lo[i], hi[i], ONE) } else { (2 * x[i] - lo[i] - hi[i]).abs() <= *min }
+                };
                 if !side(ridge) || !side(1) || !side(a) {
                     return false;
                 }
@@ -577,8 +629,8 @@ impl Inside<'_> {
 }
 
 impl Shape {
-    /** Whether a point is inside the shape with each of its sizes made at least `min`. */
-    fn inside(&self, min: Fixed) -> Inside<'_> {
+    /** Whether a point is inside the shape with each of its sizes made at least `min`, at sites `s` apart. */
+    fn inside(&self, min: Fixed, s: i64) -> Inside<'_> {
         let half = min / 2;
         let q8 = |v: Fixed| v >> 8;
         match &self.solid {
@@ -600,8 +652,8 @@ impl Shape {
                 half,
                 radius: radius.as_ref(),
             },
-            Solid::Cuboid { min: lo, max: hi } => Inside::Cuboid { lo: *lo, hi: *hi, min },
-            Solid::Gable { min: lo, max: hi, ridge } => Inside::Gable { lo: *lo, hi: *hi, min, across: 2 - ridge },
+            Solid::Cuboid { min: lo, max: hi } => Inside::Cuboid { lo: *lo, hi: *hi, min, tie: Tie::new(s) },
+            Solid::Gable { min: lo, max: hi, ridge } => Inside::Gable { lo: *lo, hi: *hi, min, across: 2 - ridge, tie: Tie::new(s) },
         }
     }
 }
@@ -623,9 +675,11 @@ fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &mut dyn FnMu
     }
     let min = [0, spacing, spacing * 8 / 5][small];
     let b = &shape.bounds;
+    // A box's sites on its top faces may count as under them (Tie), past its bounds but at level 0.
+    let past = if matches!(shape.solid, Solid::Cuboid { .. } | Solid::Gable { .. }) { 0 } else { ONE };
     let [x0, y0, z0] = b.min.map(|v| -(-(v * ONE - min / 2)).div_euclid(spacing));
-    let [x1, y1, z1] = b.max.map(|v| (v * ONE - ONE + min / 2).div_euclid(spacing));
-    let inside = shape.inside(min);
+    let [x1, y1, z1] = b.max.map(|v| (v * ONE - past + min / 2).div_euclid(spacing));
+    let inside = shape.inside(min, si);
     let sites = |within: &Box3, visit: &mut dyn FnMut(i64, i64, i64)| {
         let (z_from, z_to) = (z0.max(within.min[2]), z1.min(within.max[2] - 1));
         let (y_from, y_to) = (y0.max(within.min[1]), y1.min(within.max[1] - 1));
@@ -1301,6 +1355,7 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut dyn FnMut
             let (lo, hi) = (clip.min, clip.max);
             let others: Vec<usize> = (0..3).filter(|i| *i != axis).collect();
             let (a, b) = (others[0], others[1]);
+            let tie = Tie::new(s);
             let mut site = [0i64; 3];
             for u in lo[a]..hi[a] {
                 for v in lo[b]..hi[b] {
@@ -1311,9 +1366,9 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut dyn FnMut
                         let first = (-((-span.from) >> s.trailing_zeros())).max(lo[axis]);
                         let mut w = first + ((first + u + v) & 1);
                         let chance = chance_of(span.extinction);
-                        while w * s < span.to && w < hi[axis] {
+                        while w * s <= span.to && w < hi[axis] {
                             site[axis] = w;
-                            if kept(site[0], site[1], site[2], chance) {
+                            if tie.within(axis, site.map(|c| c * s), span.from, span.to, 1) && kept(site[0], site[1], site[2], chance) {
                                 put(span.kind, op, site[0], site[1], site[2]);
                             }
                             w += 2;
@@ -1492,9 +1547,66 @@ mod tests {
     fn a_gable_narrows_to_its_ridge() {
         // 8 wide across x, 4 high: at height h, the sites within 4 · (1 − h / 4) of x = 4.
         let shape = gable([0.0; 3], [8.0, 4.0, 6.0], 2, 1, SOLID, Op::Fill);
-        let inside = shape.inside(0);
+        let inside = shape.inside(0, 1);
         let holds = |x: i64, y: i64| inside.holds([x, y, 2].map(|v| v * ONE));
         assert!(holds(0, 0) && holds(7, 0) && holds(4, 3) && holds(3, 2) && holds(6, 1));
         assert!(!holds(1, 3) && !holds(8, 0) && !holds(4, 4) && !holds(7, 2));
+    }
+
+    #[test]
+    fn faces_on_a_plane_of_sites_stay_where_level_0_has_them() {
+        // Ground up to y = 0 and boxes from y = 0 up, on a plane of sites at every level, each drawn alone.
+        let ground = Layer::Field(Field {
+            name: "ground",
+            order: 0.0,
+            op: Op::Fill,
+            values: FieldValues::Spans { axis: 1, spans: Box::new(|_, _, _| vec![Span { from: -4096, to: 0, kind: 0, extinction: None }]) },
+        });
+        let n = 1 << 14;
+        let block = |top: f64| {
+            Layer::Population(Population {
+                name: "block",
+                order: 1.0,
+                cell: n,
+                reach: [0; 3],
+                size: ANY_SIZE,
+                anchor: Box::new(|cell| (cell.centre == [0; 3]).then_some([0.0; 3])),
+                make: Box::new(move |_, _| {
+                    Some(Node::of(vec![cuboid([-8192.0, 0.0, -8192.0], [8192.0, top, 8192.0], 0, SOLID, Op::Fill)]))
+                }),
+                far: None,
+            })
+        };
+        let kinds = vec![KindDef { name: "stone", kind_type: 1, colors: &["#808080"] }];
+        let alone = |layer: Layer| Generator { kinds: kinds.clone(), seed: 1, layers: vec![layer] };
+        let (ground, solid) = (alone(ground), alone(block(4096.0)));
+        for level in 0..6 {
+            let s = 1i64 << level;
+            let b = Box3 { min: [0, -32 / s - 2, 0], max: [128, 32 / s + 2, 128] };
+            let (below, above) = (generate(&ground, &b, level), generate(&solid, &b, level));
+            let (mut tops, mut lines) = (0, 0);
+            for x in 0..128 {
+                for z in 0..128 {
+                    let sites = (b.min[1]..b.max[1]).filter(|y| (x + y + z) & 1 == 0);
+                    let (mut top, mut bottom) = (i64::MIN, i64::MAX);
+                    for y in sites {
+                        let (g, h) = (below.get(x, y, z) != 0, above.get(x, y, z) != 0);
+                        assert!(g != h, "level {level}: ({x}, {y}, {z}) is in {} of the two", g as u8 + h as u8);
+                        if g { top = top.max(y) } else { bottom = bottom.min(y) }
+                    }
+                    assert_eq!(top + 2, bottom, "level {level}: the line at ({x}, {z}) is split once");
+                    // A site's voxel reaches a site's spacing along the line.
+                    tops += (top + 1) * s;
+                    lines += 1;
+                }
+            }
+            // Level 0's ground is half a unit low; a site on the plane counts as in it with chance ½ − 1/(2s), so
+            // the mean is within a few s / √lines of that, not (s − 1) / 2 lower.
+            let mean = tops as f64 / lines as f64;
+            assert!((mean + 0.5).abs() <= s as f64 / 16.0, "level {level}: the ground's top is at {mean} on average");
+            // A slab one site thick keeps the whole plane: half of it and half the next would let rays through.
+            let slab = generate(&alone(block(s as f64)), &b, level);
+            assert!((0..128).all(|x| (0..128).all(|z| (x + z) & 1 != 0 || slab.get(x, 0, z) != 0)), "level {level}: the slab has holes");
+        }
     }
 }
