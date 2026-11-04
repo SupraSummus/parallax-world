@@ -90,10 +90,12 @@ worlds/                      # The worlds, on worldgen's public API only; the we
 │   ├── town.rs, fields.rs   # Towns along the path, farmland around them: the valley's other domains
 │   ├── valley.rs            # The valley: the three domains on one land
 │   ├── moor.rs              # The moor: heath, a stream, steadings of a hut and a ring of stones
+│   ├── learned.rs           # The learned town: settlements drawn by a split grammar learned in lab/, on the forest's land
 │   └── wasm.rs              # Its WebAssembly exports (the module holds bake/'s too)
+├── data/town-grammar.bin    # learned.rs's rule table, written by lab's export example
 ├── tests/                   # Every world in WORLDS keeps the contract; the scenes' contents
 └── examples/                # map: a world from above; look: a picture of it (picture.rs); forest_bench: timing forest tiles
-lab/                         # Experiment, not built by pnpm: hierarchical WFC rule-sets, pixel conditionals, split grammars with shared splits and regimes, learned from the valley (see src/lib.rs)
+lab/                         # Experiment, not built by pnpm: hierarchical WFC rule-sets, pixel conditionals, split grammars with shared splits and regimes, learned from the valley (see src/lib.rs); exports the learned town's rules
 native/                      # Spike of a native frontend (eframe + wgpu), linking bake/ and worlds/; see src/main.rs
 ├── .cargo/config.toml       # Builds for x86-64-v3: floor and ceil inline (see there)
 ├── dump.test.ts             # Dumps a view from the TS renderer, to check it against (only with DUMP set)

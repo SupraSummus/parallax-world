@@ -73,7 +73,7 @@ macro_rules! worlds {
     (@seeds $($seed:expr),+) => { &[$($seed),+] };
 }
 
-worlds!(forest, valley, moor);
+worlds!(forest, valley, moor, learned);
 
 #[test]
 fn every_world_is_tested() {

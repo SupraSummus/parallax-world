@@ -431,16 +431,16 @@ fn block(t: &Town, b: &Block, bounds: Box3) -> Node {
 }
 
 /** A thing of `shapes`, its far form measured from them (see "Levels" in docs/generators.md). */
-fn thing(shapes: Vec<Shape>) -> Node {
+pub fn thing(shapes: Vec<Shape>) -> Node {
     Node { far: Some(Far::measured(fx(2.0))), ..Node::of(shapes) }
 }
 
-/** A house in its own frame: u along its front, v up from its floor, w back from its front. */
-struct House {
-    length: i64,
-    depth: i64,
-    storeys: i64,
-    shop: bool,
+/** A house in its own frame: u along its front, v up from its floor, w back from its front; a shop opens its ground floor. */
+pub struct House {
+    pub length: i64,
+    pub depth: i64,
+    pub storeys: i64,
+    pub shop: bool,
 }
 
 const PLASTERS: [K; 6] = [K::plasterOchre, K::plasterWhite, K::plasterPink, K::plasterBlue, K::plasterSage, K::brick];
@@ -476,7 +476,7 @@ fn door(wall: &mut Part, u: i64, half: i64, tall: i64, open: Option<i64>) {
 }
 
 impl House {
-    fn build(&self, part: &mut Part, random: &mut Rng) {
+    pub fn build(&self, part: &mut Part, random: &mut Rng) {
         let House { length, depth, storeys, .. } = *self;
         let kinds = if random.chance(fx(0.1)) { 6 } else { 5 };
         let plaster = k(PLASTERS[random.below(kinds) as usize]);
