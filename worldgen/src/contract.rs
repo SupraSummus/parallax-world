@@ -50,6 +50,24 @@ const RAYS: usize = 20_000;
  */
 const FROM_ABOVE: u32 = 3;
 
+/**
+ * Levels past FROM_ABOVE up to this one see the fields of far regions
+ * from above (sites 8 m apart at level 6), against level 0, within
+ * FAR_TOLERANCE.
+ */
+const FAR: u32 = 6;
+
+/**
+ * How far the fields of a far region may stray from level 0 seen from
+ * above. A field is drawn from position alone, and a wide region has
+ * hundreds of lines of sites at level 6, so it keeps closer than
+ * TOLERANCE, which allows for things' far forms and their surfaces; a
+ * plan finer than the sites read where each line is aliases by more
+ * (the valley's town at level 6: 0.03 before its plans were dithered,
+ * 0.015 after; "Levels" in docs/generators.md).
+ */
+const FAR_TOLERANCE: f64 = 0.025;
+
 /** A box of `region` at `level` generated in eight parts, alone and in any order, equals it generated whole. */
 pub fn whole_equals_parts(generator: &Generator, region: &Box3, level: u32) {
     let whole = box_at(region, level);
@@ -216,6 +234,8 @@ pub enum Measure {
     Hit,
     /** What rays straight down hit first. */
     FromAbove,
+    /** What rays straight down hit first of the fields alone. */
+    FieldsFromAbove,
 }
 
 /** How far a level of a world strays from another in a region, by one measure. */
@@ -236,7 +256,12 @@ pub struct Margin {
 
 impl Margin {
     pub fn broken(&self) -> bool {
-        self.difference >= TOLERANCE
+        self.difference >= self.tolerance()
+    }
+
+    /** How far it may be apart. */
+    pub fn tolerance(&self) -> f64 {
+        if self.measure == Measure::FieldsFromAbove { FAR_TOLERANCE } else { TOLERANCE }
     }
 }
 
@@ -319,8 +344,9 @@ impl std::fmt::Display for Report {
                 Measure::Through => ("rays through", format!(": {:.3} -> {:.3}", m.through[0], m.through[1])),
                 Measure::Hit => ("materials hit", String::new()),
                 Measure::FromAbove => ("from above", String::new()),
+                Measure::FieldsFromAbove => ("fields from above", String::new()),
             };
-            let broken = if m.broken() { format!(", breaks {TOLERANCE}") } else { String::new() };
+            let broken = if m.broken() { format!(", breaks {}", m.tolerance()) } else { String::new() };
             writeln!(f, "  level {} against {}, {what}{values}: {:.3} apart{broken}", m.level, m.against, m.difference)?;
             if m.measure != Measure::Through && (m.broken() || f.alternate()) {
                 self.breakdown(f, m)?;
@@ -398,17 +424,22 @@ fn levels_against_finer(generator: &Generator, region: &Box3, levels: u32, repor
  * from roofs.
  */
 fn from_above_against_level_0(world: &World, region: &Box3, levels: u32, report: &mut Report) {
+    from_above(world, region, 1..=levels.min(FROM_ABOVE), Measure::FromAbove, report);
+}
+
+/** What rays straight down over `region` hit first at each of `levels`, against level 0, as `measure`. */
+fn from_above(world: &World, region: &Box3, levels: impl Iterator<Item = u32>, measure: Measure, report: &mut Report) {
     let types: Vec<u8> = materials_of(&world.generator).iter().map(|m| m.material_type).collect();
     // A ray every 2 units.
     let width = ((region.max[0] - region.min[0]) / 2).clamp(16, 1024) as usize;
     let camera = Camera::top([region.min[0] as f64, region.min[2] as f64], [region.max[0] as f64, region.max[2] as f64], width);
     let seen = |level: u32| shares(picture(&world.generator, &camera, level, world.heights_at(level)).material);
     let reference = seen(0);
-    for level in 1..=levels.min(FROM_ABOVE) {
+    for level in levels {
         let here = seen(level);
         report.margins.push(Margin {
             region: *region,
-            measure: Measure::FromAbove,
+            measure,
             level,
             against: 0,
             difference: difference(&by_type(&types, &reference), &by_type(&types, &here)),
@@ -430,6 +461,31 @@ pub fn margins(name: &str, world: &World, regions: &[Box3], levels: u32) -> Repo
         from_above_against_level_0(world, region, levels, &mut report);
     }
     report
+}
+
+/**
+ * What `world`'s fields show from above over each of `regions`, wide
+ * ones (only x and z count), at levels past FROM_ABOVE up to FAR,
+ * against level 0. Its things are left out, and with them their far
+ * fields: their far forms keep what rays see around them, not from
+ * above ("Media are isotropic" in docs/generators.md).
+ */
+pub fn far_margins(name: &str, mut world: World, regions: &[Box3]) -> Report {
+    world.generator.layers.retain(|layer| matches!(layer, Layer::Field(_)));
+    let mut report = Report::new(name, &world.generator);
+    for region in regions {
+        from_above(&world, region, FROM_ABOVE + 1..=FAR, Measure::FieldsFromAbove, &mut report);
+    }
+    report
+}
+
+/** `far_margins`, printed; panics where one breaks FAR_TOLERANCE. */
+pub fn check_far(name: &str, world: World, regions: &[Box3]) {
+    let start = Instant::now();
+    let report = far_margins(name, world, regions);
+    println!("{report}{name}: far {:.1} s", start.elapsed().as_secs_f64());
+    let broken = report.broken();
+    assert!(broken.margins.is_empty(), "{name} breaks the contract far away:\n{broken}");
 }
 
 /** Sites of each level above and below a world's heights that `heights_hold` generates. */

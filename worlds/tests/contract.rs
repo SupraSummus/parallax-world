@@ -1,8 +1,8 @@
 //! Every world keeps the contract (worldgen::contract) in its registry
-//! entry's regions, at several seeds: a test each, so they run in
-//! parallel, and a thread each seed.
+//! entry's regions, at several seeds, and far away in its far ones: a
+//! test each, so they run in parallel, and a thread each seed.
 
-use worldgen::contract::{check, check_content, follow_surface};
+use worldgen::contract::{check, check_content, check_far, follow_surface};
 use worlds::{Entry, REGIONS_SEED, WORLDS};
 
 /** The seeds each world is checked at, but those that name their own. */
@@ -10,12 +10,12 @@ const SEEDS: &[u64] = &[REGIONS_SEED, 1, 2, 3];
 
 /**
  * `entry`'s world keeps the contract at each of `seeds`, its regions
- * following its surface from REGIONS_SEED's; panics with each seed's
- * breaks.
+ * following its surface from REGIONS_SEED's, and in its far regions at
+ * REGIONS_SEED; panics with each seed's breaks.
  */
 fn keeps_the_contract(entry: &Entry, seeds: &[u64]) {
     let broken: Vec<String> = std::thread::scope(|scope| {
-        let threads: Vec<_> = seeds
+        let mut threads: Vec<_> = seeds
             .iter()
             .map(|&seed| {
                 // World and Generator aren't Send: each thread makes its own.
@@ -30,15 +30,20 @@ fn keeps_the_contract(entry: &Entry, seeds: &[u64]) {
                         check_content(&name, &world, &regions, entry.levels)
                     }
                 });
-                (seed, thread)
+                (format!("seed {seed}"), thread)
             })
             .collect();
+        // Far regions at one seed too: they check how fields are read far away.
+        if !entry.far.is_empty() {
+            let name = format!("{} (seed {REGIONS_SEED})", entry.name);
+            threads.push(("far".into(), scope.spawn(move || check_far(&name, (entry.make)(REGIONS_SEED), entry.far))));
+        }
         threads
             .into_iter()
-            .filter_map(|(seed, thread)| {
+            .filter_map(|(what, thread)| {
                 let panic = thread.join().err()?;
                 let message = panic.downcast_ref::<String>().cloned().or_else(|| panic.downcast_ref::<&str>().map(|s| s.to_string()));
-                Some(format!("seed {seed}: {}", message.unwrap_or_default()))
+                Some(format!("{what}: {}", message.unwrap_or_default()))
             })
             .collect()
     });

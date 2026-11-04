@@ -119,6 +119,22 @@ how many rays get how far, and what they stop on.
   what each slab of them across an axis hides, seen along each axis.
 - **Fields** are evaluated once per site or line of sites,
   and get the spacing, to smooth themselves to it.
+- **Plans** they read hold numbers, read where the line is,
+  or categories, which can't be averaged (`Plan::dithered`:
+  what a town's column is, who owns the land).
+  Where the sites are further apart than its scale,
+  a line of sites reads a plan of categories at one point
+  of the s × s columns it stands for,
+  the same point for every such plan,
+  so each category shows as often as it covers, its edges dithered.
+  Along a row of lines the points are a Weyl sequence from a hashed phase,
+  so a street along the row is read by as many lines as it covers, give or take one,
+  not by chance.
+  Read where each line is, the town's streets aliased:
+  its fields from above were 0.03 off at level 6, under 0.015 dithered.
+  Numbers aren't dithered: heights would roughen by their slope times the spacing.
+  Things read plans where they ask,
+  so a thing at a dithered edge may stand a site off what the fields show.
 - **Faces.** Boxes and spans keep the sites in [min, max) along each axis.
   On a plane of a level's sites (y = 0 is one at every level)
   half the lines across a face have a site on it,
@@ -194,6 +210,14 @@ names them in `worlds!` (`moor = [42]`).
   like a town's walls taking over from its roofs (0.17 off at level 2).
   At level 4 a house's edges show their walls from above
   (see "Media are isotropic");
+- in an entry's `far` regions, wide ones (only x and z count),
+  what its fields alone show from above at levels 4 to 6, against level 0,
+  within 0.025: fields come from position alone,
+  and hundreds of lines of sites average out,
+  so what is finer than the sites must show in proportion ("Plans" in "Levels").
+  Things are left out, with their far fields,
+  as their far forms keep what rays see around them, not from above.
+  The valley's has its first town (the same at every seed);
 - at each level up to one past the world's, in each region
   and a host tile's width around spawn,
   a slab above and one below the world's `heights` are empty:
@@ -203,7 +227,7 @@ names them in `worlds!` (`moor = [42]`).
   keep within its `reach`, which drawing checks only where it draws;
   and where a thing's bounds leave the heights, nothing is drawn outside.
 
-Parts are checked at seed 42 only:
+Parts and far regions are checked at seed 42 only:
 they check how a world is drawn, not what a seed puts in it.
 `reach` in `World` is how far around the camera hosts generate each level,
 a rendering distance, not checked.
@@ -215,6 +239,7 @@ as a broken contract's message does, naming the world, seed, region and level.
 The engine's tests also check that a thing's carves cut only the thing.
 A new world is an entry in `WORLDS`
 with regions that have, between them, a bit of everything in it,
+`far` ones where its fields have patterns finer than the far sites,
 and its name in `worlds!` in `worlds/tests/contract.rs`,
 whose tests fail without it;
 the web app lists it by itself, under its name.
@@ -250,6 +275,8 @@ Its height is the mean of the valley floor under it, not one sample of its bumps
 Sampling is the exception (`Plan::sampled`):
 it is the filter that makes a coarse band of fine ones,
 so a sampled plan may read finer ones (the fields' slope, every 2 m).
+Layers whose sites are coarser than a plan of categories
+read it dithered ("Plans" in "Levels").
 Plans are built in order from those before them, so they can't form cycles;
 layers read any plan.
 
@@ -349,6 +376,9 @@ Carves along a line want the same margin.
   (a path to a steading) reads a plan of them,
   and the population anchors each where the plan says,
   in a region of the plan with a margin so the cell owning it is there too.
+- **Categories finer than the sites.** A field that decides kinds
+  on a pattern aligned with the sites (a checker, blocks and streets)
+  aliases far away: decide them in a `Plan::dithered`.
 - **Anchors on the ground.** `Cell::on_ground` picks a spot evenly under a cell;
   things anchored there are as even as one per square 2N wide.
 - **Seeds.** The contract checks four seeds; make the world, and its spawn,
@@ -395,10 +425,16 @@ Carves along a line want the same margin.
   (a closing) before measuring kept the thatch,
   and brought the valley's town's materials hit at level 3 from 0.064 to 0.026,
   but grew the houses over the streets (0.039 to 0.057 from above).
-- **Plans are point-sampled.**
-  From level 6 (sites 8 m apart) the town's streets, 7 m wide, alias:
-  seen from above, their share goes from 0.60 to 0.52.
-  Plans could be sampled finer than the sites (see docs/todo.md).
+- **Numbers and fields' own categories are point-sampled.**
+  A plan of numbers finer than the sites is read where each line is;
+  filtered to the spacing it would cost coarse levels less (see docs/todo.md).
+  Categories a field decides from position, not from a dithered plan
+  (the fields' crops, the forest's columns, which hold its heights too),
+  are read where each line is as well:
+  even where their edges are irregular, aliased where they follow the sites' grid,
+  as the town's square's checker of metres did (all light from level 4).
+  Over the forest at level 6 such reads of its floor came within 0.042 (seed 42)
+  of level 0, likely by chance: too close to the far check's tolerance to add it.
 - **Things of one band can't see each other.** Bands order what decides where,
   but two populations of one scale ("no tree on a boulder") still can't
   exclude each other. Claims with hashed priorities would be local and

@@ -1,6 +1,8 @@
 //! The engine on small test worlds: they keep the contract
 //! (worldgen::contract), and the framework refuses what breaks it.
 
+use std::rc::Rc;
+
 use worldgen::World;
 use worldgen::contract::{check, heights_hold, margins, things_hold};
 use worldgen::generator::{
@@ -9,6 +11,7 @@ use worldgen::generator::{
 };
 use worldgen::generator::{Cell, Fill, Point};
 use worldgen::grid::Box3;
+use worldgen::plan::Plan;
 
 static KINDS: &[KindDef] = &[
     KindDef { name: "fog", kind_type: 8, colors: &["#cccccc"] },
@@ -143,6 +146,31 @@ fn caves_keep_the_contract() {
 #[test]
 fn village_keeps_the_contract() {
     check("village", &world_of(village(), (-64, 64)), &[b(-64, -16, -64, 64, 48, 64)], 4);
+}
+
+/**
+ * Grass with a stripe of rock a unit wide every 8 along x, from a plan
+ * of scale 1, dithered or not: the share of rock among the sites drawn at
+ * `level`, and the grid.
+ */
+fn stripes(dithered: bool, level: u32) -> (f64, Vec<u8>) {
+    let make = |x: i64, _| if x.rem_euclid(8) == 0 { ROCK } else { GRASS };
+    let plan = Rc::new(if dithered { Plan::dithered("stripes", 1, make) } else { Plan::new("stripes", 1, make) });
+    let ground =
+        Field::columns("ground", 0.0, Op::Fill, move |x, z, _| vec![Span { from: -8, to: 0, kind: plan.at(x, z), extinction: None }]);
+    let grid = generate(&world(Layer::Field(ground)), &Box3 { min: [0, -8 >> level, 0], max: [4096 >> level, 0, 64] }, level);
+    let count = |kind: u8| grid.cells.iter().filter(|id| **id == kind + 1).count() as f64;
+    (count(ROCK) / (count(ROCK) + count(GRASS)), grid.cells)
+}
+
+#[test]
+fn fields_read_a_dithered_plan_as_often_as_it_covers() {
+    // Lines of sites 4 apart read where they are: every other one is on a stripe. Read at a point of the 4 × 4
+    // columns each stands for, one in eight.
+    let (point, dithered) = (stripes(false, 2).0, stripes(true, 2).0);
+    assert!((point - 0.5).abs() < 0.01, "read where each line is: {point}");
+    assert!((dithered - 0.125).abs() < 0.01, "dithered: {dithered}");
+    assert_eq!(stripes(false, 0).1, stripes(true, 0).1, "level 0 reads where each line is");
 }
 
 fn near() -> Box3 {

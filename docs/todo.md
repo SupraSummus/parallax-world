@@ -33,6 +33,13 @@ Numbers are for the forest at 1280×800, as measured when written.
   The baker would pick a splat's colour by the direction from the eye
   (dominant axis, or blended); compositors and coverage stay as they are.
   The whole path, grids to baker to the web's transfer: about a week.
+- **The moor's stream widens far away.**
+  Its water is drawn at least a site either side of its centre line,
+  so seen from above over 175 m around the first steading (fields alone)
+  water goes from 1.4 % at level 0 to 3.8 % and 6.9 % at levels 5 and 6,
+  and the moor can't have a far region (`far` in `worlds/src/lib.rs`).
+  A dithered plan of where the bed is
+  would draw it as often as it is ("Plans" in "Levels" of `docs/generators.md`).
 - **The native frontend is missing pieces.**
   Its renderer has no `matchTilings`:
   where slices re-tile as the camera moves along an axis,
@@ -168,18 +175,10 @@ Composing generators (section "Composing" of `docs/generators.md`), untried:
   not as children of one thing per town:
   a box in a town now draws the whole town's carves aside, in a buffer
   as large as the box, where each house's would do.
-- Let the framework sample plans finer than the level's sites
+- Let the framework filter plans of numbers finer than the level's sites
   (`Plan::sampled` at the spacing), since plans declare their scale:
   coarse levels would skip fine bands' cost as they skip their things.
-  Numbers filter; kinds (the town's `Spot`) can't, but a line of sites
-  could read every plan finer than its spacing at one point
-  hashed within its voxel's shadow,
-  so each kind shows as often as it covers, edges dithered as by `stripe`,
-  at no extra cost.
-  `draw_field` would set the point and `Plan::at` use it (a thread-local);
-  things placed from plans, read where they are, would disagree at edges,
-  and heights would roughen by their slope times the spacing.
-  Checking it needs the valley's town from above at level 6.
+  Plans of categories are read dithered already ("Plans" in "Levels").
 - Solve what a coarse cell decides (a block's lots, a room's furniture)
   with a small search whose boundaries the coarser band fixes:
   constraint solving stays local and needs no backtracking across cells.

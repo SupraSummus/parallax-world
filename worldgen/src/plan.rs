@@ -12,6 +12,25 @@ const DOCS: &str = "docs/generators.md";
 thread_local! {
     /** The plan being made on this thread and its scale (none: a layer, which may read any). */
     static MAKING: Cell<(&'static str, i64)> = const { Cell::new(("", 0)) };
+    /**
+     * The sites a layer reads plans for: their spacing, and how far from
+     * where it asks it reads dithered plans finer than that (`footprint`);
+     * none while plans or things are made.
+     */
+    static FOOTPRINT: Cell<Option<(i64, [i64; 2])>> = const { Cell::new(None) };
+}
+
+/**
+ * Runs `read`, a layer's reads for sites `spacing` apart, with dithered
+ * plans finer than the spacing read `offset` (x, z) from where asked:
+ * how a line of sites reads them at one point of its voxels' footprint
+ * (see Plan::dithered).
+ */
+pub(crate) fn footprint<R>(spacing: i64, offset: [i64; 2], read: impl FnOnce() -> R) -> R {
+    let outer = FOOTPRINT.replace(Some((spacing, offset)));
+    let value = read();
+    FOOTPRINT.set(outer);
+    value
 }
 
 /** Slots a plan keeps values in: as many as two tiles have columns, so a layer finds what the one before made in its tile. */
@@ -28,13 +47,35 @@ pub struct Plan<T> {
     scale: i64,
     /** Made from finer plans' samples: a filter, which may read any. */
     filter: bool,
+    /** Read by layers at a point of their sites' footprint where they are further apart than `scale`. */
+    dithered: bool,
     slots: RefCell<Vec<(i64, i64, T)>>,
     make: Box<dyn Fn(i64, i64) -> T>,
 }
 
 impl<T: Copy + Default> Plan<T> {
     pub fn new(name: &'static str, scale: i64, make: impl Fn(i64, i64) -> T + 'static) -> Plan<T> {
-        Plan { name, scale, filter: false, slots: RefCell::new(vec![(i64::MIN, 0, T::default()); SLOTS]), make: Box::new(make) }
+        Plan {
+            name,
+            scale,
+            filter: false,
+            dithered: false,
+            slots: RefCell::new(vec![(i64::MIN, 0, T::default()); SLOTS]),
+            make: Box::new(make),
+        }
+    }
+
+    /**
+     * A plan of categories, which can't be averaged (what a town's column
+     * is: street, pavement, yard). A line of sites further apart than
+     * `scale` reads it at one point of the columns it stands for, the
+     * same for every such plan it reads (spread evenly along rows of
+     * lines: generator.rs, draw_field), so each category shows as often
+     * as it covers, its edges dithered; read where the line is, it would
+     * alias. Things read it where they ask.
+     */
+    pub fn dithered(name: &'static str, scale: i64, make: impl Fn(i64, i64) -> T + 'static) -> Plan<T> {
+        Plan { dithered: true, ..Plan::new(name, scale, make) }
     }
 
     pub fn at(&self, x: i64, z: i64) -> T {
@@ -45,13 +86,20 @@ impl<T: Copy + Default> Plan<T> {
             self.name,
             self.scale
         );
+        let (x, z) = match FOOTPRINT.get() {
+            Some((spacing, [dx, dz])) if self.dithered && spacing > self.scale => (x + dx, z + dz),
+            _ => (x, z),
+        };
         let slot = (((x as u64).wrapping_mul(0x9e3779b97f4a7c15) ^ (z as u64).wrapping_mul(0xc2b2ae3d27d4eb4f)) >> 49) as usize;
         let (kx, kz, value) = self.slots.borrow()[slot];
         if (kx, kz) == (x, z) {
             return value;
         }
         let outer = MAKING.replace(if self.filter { ("", 0) } else { (self.name, self.scale) });
+        // What a plan decides for a column is the same whoever reads it.
+        let footprint = FOOTPRINT.take();
         let value = (self.make)(x, z);
+        FOOTPRINT.set(footprint);
         MAKING.set(outer);
         self.slots.borrow_mut()[slot] = (x, z, value);
         value
@@ -104,7 +152,7 @@ impl Land {
     pub fn new(scale: i64, width: Fx, bids: Vec<Rc<Plan<Fx>>>) -> Land {
         assert!(bids.len() <= DOMAINS, "a land holds at most {DOMAINS} domains; see \"Composing\" in {DOCS}");
         Land {
-            shares: Plan::new("land", scale, move |x, z| {
+            shares: Plan::dithered("land", scale, move |x, z| {
                 let mut bid = [Fx::MIN; DOMAINS];
                 for (d, plan) in bids.iter().enumerate() {
                     bid[d] = plan.at(x, z);

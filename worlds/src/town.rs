@@ -67,6 +67,8 @@ const JITTER: i64 = m(150.0);
 /** Plan scales: where towns are; the bid for their land. */
 pub const TOWNS_SCALE: i64 = m(400.0);
 pub const BID_SCALE: i64 = m(4.0);
+/** What a column of a town is: its finest parts the square's paving, a checker of metres. */
+const SPOT_SCALE: i64 = m(1.0);
 /** How far past its streets a town levels the ground, easing back to the valley's. */
 const TERRACE: Units = Units::m(120.0);
 
@@ -82,11 +84,14 @@ pub struct Town {
 }
 
 /** What a column of a town is. */
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
 enum Spot {
+    #[default]
     Outside,
     Street,
+    /** The square's paving, light and dark by turns. */
     Square,
+    SquareDark,
     Pavement,
     Yard,
 }
@@ -148,20 +153,26 @@ impl Town {
             return Spot::Street;
         }
         if a < MAIN / 2 {
-            return if r == self.square_row() { Spot::Square } else { Spot::Street };
+            return if r == self.square_row() { self.paving(x, z) } else { Spot::Street };
         }
         let (c, w) = ((a - MAIN / 2) / (BLOCK_W + STREET), (a - MAIN / 2) % (BLOCK_W + STREET));
         if w >= BLOCK_W {
             return Spot::Street;
         }
         if r == self.square_row() && c == 0 {
-            return Spot::Square;
+            return self.paving(x, z);
         }
         let along_street = w < PAVEMENT
             || (c < self.cols - 1 && w >= BLOCK_W - PAVEMENT)
             || (r > 0 && g < PAVEMENT)
             || (r < self.rows - 1 && g >= BLOCK_D - PAVEMENT);
         if along_street { Spot::Pavement } else { Spot::Yard }
+    }
+
+    /** The square's paving at column (x, z). */
+    fn paving(&self, x: i64, z: i64) -> Spot {
+        let light = ((x - self.x).div_euclid(m(1.0)) + (z - self.z).div_euclid(m(1.0))) & 1 == 0;
+        if light { Spot::Square } else { Spot::SquareDark }
     }
 
     /** Everything it draws: its blocks, and what grows over their edges, from under its streets to its church's spire. */
@@ -171,9 +182,16 @@ impl Town {
     }
 }
 
+/** The town of `towns` nearest z along the path, if it has one. */
+fn nearest(towns: &Plan<Option<Town>>, z: i64) -> Option<Town> {
+    towns.at(0, (z + SPACING / 2).div_euclid(SPACING))
+}
+
 /** The towns along the valley's path, by where they are. */
 pub struct Towns {
-    plan: Plan<Option<Town>>,
+    plan: Rc<Plan<Option<Town>>>,
+    /** What each column is, a plan of categories: dithered far away, so streets show as often as they are. */
+    spots: Plan<Spot>,
 }
 
 impl Towns {
@@ -184,30 +202,38 @@ impl Towns {
      */
     pub fn new(seed: u64, relief: Rc<Relief>) -> Towns {
         let s = stream(seed, 30);
-        Towns {
-            plan: Plan::new("towns", TOWNS_SCALE, move |_, n| {
-                let mut random = Rng::new(hash64(s, n, 0, 0));
-                if n != 0 && !random.chance(fx(0.6)) {
-                    return None;
-                }
-                let (z, cols, rows) = if n == 0 {
-                    (m(200.0), 2, 4)
-                } else {
-                    (n * SPACING - JITTER + random.below(2 * JITTER as u32) as i64, 1 + random.below(3) as i64, 3 + random.below(3) as i64)
-                };
-                let mut town = Town { x: 0, z, level: 0, cols, rows, seed: random.next_u64() };
-                // The floor's mean, not its bumps: a town's height is as coarse as the town.
-                let (hx, hz) = (town.half_x(), town.half_z());
-                let around = (-1..=1).flat_map(|i| (-1..=1).map(move |j| (i, j)));
-                town.level = Fx::mean(around.map(|(i, j)| relief.ground(i * hx, z + j * hz, Fx::ZERO))).round_units().0;
-                Some(town)
-            }),
-        }
+        let plan = Rc::new(Plan::new("towns", TOWNS_SCALE, move |_, n| {
+            let mut random = Rng::new(hash64(s, n, 0, 0));
+            if n != 0 && !random.chance(fx(0.6)) {
+                return None;
+            }
+            let (z, cols, rows) = if n == 0 {
+                (m(200.0), 2, 4)
+            } else {
+                (n * SPACING - JITTER + random.below(2 * JITTER as u32) as i64, 1 + random.below(3) as i64, 3 + random.below(3) as i64)
+            };
+            let mut town = Town { x: 0, z, level: 0, cols, rows, seed: random.next_u64() };
+            // The floor's mean, not its bumps: a town's height is as coarse as the town.
+            let (hx, hz) = (town.half_x(), town.half_z());
+            let around = (-1..=1).flat_map(|i| (-1..=1).map(move |j| (i, j)));
+            town.level = Fx::mean(around.map(|(i, j)| relief.ground(i * hx, z + j * hz, Fx::ZERO))).round_units().0;
+            Some(town)
+        }));
+        let spots = {
+            let plan = plan.clone();
+            Plan::dithered("town spots", SPOT_SCALE, move |x, z| nearest(&plan, z).map_or(Spot::Outside, |t| t.spot(x, z)))
+        };
+        Towns { plan, spots }
     }
 
     /** The town nearest z along the path, if it has one. */
     pub fn near(&self, z: i64) -> Option<Town> {
-        self.plan.at(0, (z + SPACING / 2).div_euclid(SPACING))
+        nearest(&self.plan, z)
+    }
+
+    /** What column (x, z) is of the town nearest it. */
+    fn spot(&self, x: i64, z: i64) -> Spot {
+        self.spots.at(x, z)
     }
 
     /** The path's centre line at z, with its fraction, bent from `route` onto the main street of the town there. */
@@ -247,8 +273,7 @@ pub fn layers(towns: Rc<Towns>, land: Rc<Land>, me: usize, ground: Rc<Plan<i64>>
             values: FieldValues::Spans {
                 axis: 1,
                 spans: Box::new(move |x, z, spacing| {
-                    let Some(t) = towns.near(z) else { return Vec::new() };
-                    let spot = t.spot(x, z);
+                    let spot = towns.spot(x, z);
                     if spot == Spot::Outside || !land.owns(me, x, z) {
                         return Vec::new();
                     }
@@ -257,10 +282,8 @@ pub fn layers(towns: Rc<Towns>, land: Rc<Land>, me: usize, ground: Rc<Plan<i64>>
                     let surface = |kind| Span { from: top, to: h + 1, kind, extinction: None };
                     match spot {
                         Spot::Street => vec![surface(k(K::cobble))],
-                        Spot::Square => {
-                            let checker = ((x - t.x).div_euclid(m(1.0)) + (z - t.z).div_euclid(m(1.0))) & 1 == 0;
-                            vec![surface(k(if checker { K::paving } else { K::pavingDark }))]
-                        }
+                        Spot::Square => vec![surface(k(K::paving))],
+                        Spot::SquareDark => vec![surface(k(K::pavingDark))],
                         // A kerb's height above the street.
                         Spot::Pavement => vec![surface(k(K::slab)), Span { from: h + 1, to: h + 2, kind: k(K::slab), extinction: None }],
                         _ => vec![surface(forest::k(F::grass))],
