@@ -21,7 +21,7 @@ pub struct Entry {
     pub make: fn(u64) -> World,
     /**
      * Regions with, between them, a bit of everything in it at REGIONS_SEED, lattice units
-     * (see worldgen::contract::check); at other seeds they follow its surface up or down.
+     * (see worldgen::contract::check); at other seeds they follow its ground up or down (follow_ground).
      */
     pub regions: &'static [Box3],
     /** The level up to which it keeps what a camera sees. */

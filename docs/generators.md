@@ -194,11 +194,18 @@ and `worldgen/tests/contract.rs` for test worlds of fog, caves,
 and a village of houses with doors and tables
 on y = 0, a plane of sites at every level ("Faces" in "Levels").
 An entry's regions are chosen at seed 42 (`REGIONS_SEED`);
-at other seeds each moves up or down with the world's surface over it
-(`follow_surface`: the median height of what is seen from above),
-as the ground lies higher or lower, while x and z stay.
-A world whose regions only hold what they should at some seeds
-names them in `worlds!` (`moor = [42]`).
+at other seeds each moves up or down with the world's ground under it
+(`follow_ground`), while x and z stay.
+The ground is what the fields alone show from above,
+things and their far fields left out:
+fields are given by position everywhere, and things stand on them.
+Everything seen from above would follow a forest's crowns,
+which rise and fall with the trees there:
+the learned town's region at seed 1, forest where seed 42 has streets,
+rose 112 units over ground that rose 52, and held none.
+Materials can't tell the ground, as the engine reads none,
+nor can what is connected below, as trunks hold up crowns and walls roofs;
+a world drawing a canopy as a field of its own would have it followed.
 
 - a box against eight parts generated alone, in reverse order,
   at levels 0, 2 and one past the last checked below:

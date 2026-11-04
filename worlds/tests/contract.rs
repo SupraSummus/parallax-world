@@ -2,26 +2,26 @@
 //! entry's regions, at several seeds, and far away in its far ones: a
 //! test each, so they run in parallel, and a thread each seed.
 
-use worldgen::contract::{check, check_content, check_far, follow_surface};
+use worldgen::contract::{check, check_content, check_far, follow_ground};
 use worlds::{Entry, REGIONS_SEED, WORLDS};
 
-/** The seeds each world is checked at, but those that name their own. */
+/** The seeds each world is checked at. */
 const SEEDS: &[u64] = &[REGIONS_SEED, 1, 2, 3];
 
 /**
- * `entry`'s world keeps the contract at each of `seeds`, its regions
- * following its surface from REGIONS_SEED's, and in its far regions at
+ * `entry`'s world keeps the contract at each of SEEDS, its regions
+ * following its ground from REGIONS_SEED's, and in its far regions at
  * REGIONS_SEED; panics with each seed's breaks.
  */
-fn keeps_the_contract(entry: &Entry, seeds: &[u64]) {
+fn keeps_the_contract(entry: &Entry) {
     let broken: Vec<String> = std::thread::scope(|scope| {
-        let mut threads: Vec<_> = seeds
+        let mut threads: Vec<_> = SEEDS
             .iter()
             .map(|&seed| {
                 // World and Generator aren't Send: each thread makes its own.
                 let thread = scope.spawn(move || {
+                    let regions = follow_ground(entry.regions, (entry.make)(REGIONS_SEED), (entry.make)(seed));
                     let world = (entry.make)(seed);
-                    let regions = follow_surface(entry.regions, &(entry.make)(REGIONS_SEED), &world);
                     let name = format!("{} (seed {seed})", entry.name);
                     // Parts at one seed: they check how a world is drawn, which seeds don't change.
                     if seed == REGIONS_SEED {
@@ -50,27 +50,20 @@ fn keeps_the_contract(entry: &Entry, seeds: &[u64]) {
     assert!(broken.is_empty(), "{}", broken.join("\n"));
 }
 
-/**
- * A test per world named, keeps_the_contract::<name>, and the names; a
- * world whose regions hold what they should at some seeds only names
- * them: `name = [seeds]`.
- */
+/** A test per world named, keeps_the_contract::<name>, and the names. */
 macro_rules! worlds {
-    ($($name:ident $(= [$($seed:expr),*])?),*) => {
+    ($($name:ident),*) => {
         mod keeps_the_contract {
             $(
                 #[test]
                 fn $name() {
                     let entry = worlds::by_name(stringify!($name)).expect("a world of that name");
-                    let seeds: &[u64] = worlds!(@seeds $($($seed),*)?);
-                    super::keeps_the_contract(entry, seeds);
+                    super::keeps_the_contract(entry);
                 }
             )*
         }
         const TESTED: &[&str] = &[$(stringify!($name)),*];
     };
-    (@seeds) => { super::SEEDS };
-    (@seeds $($seed:expr),+) => { &[$($seed),+] };
 }
 
 worlds!(forest, valley, moor, learned);
