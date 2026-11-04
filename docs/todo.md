@@ -10,17 +10,15 @@ Numbers are for the forest at 1280×800, as measured when written.
   They should go to fixed point like the noise,
   the forest building each thing relative to its anchor.
   The fixed-point containment tests cost about 15% at level 0.
-- **Spans and boxes on a plane of sites sink half a site.**
-  Fields' spans and shapes keep the sites whose centres they hold,
-  from their bottom up to but not including their top,
-  so a bottom or top on a plane of a level's sites is half a site low there:
-  a ground's top and a house's floor both,
-  and the house shows half a site more wall.
-  y = 0 is such a plane at every level k, y = h where 2^k divides h;
-  elsewhere it is off either way and evens out.
-  The engine's village, on y = 0, strayed 0.10 and 0.18
-  at levels 3 and 4 of the contract, 0.04 and 0.01 lifted 3 units off it.
-  Sites on the plane could go up or down by a hash, as a medium's chances do.
+- **A flat thing's faces round to the sites.**
+  Faces on a plane of a level's sites split its sites ("Faces" in
+  `docs/generators.md`); off those planes a face rounds to the sites,
+  up to half a site either way: even over a ground's many heights,
+  but a town's floors at one height all go one way.
+  Sites near a face kept with the share of their voxel inside it
+  would be even for any height,
+  but would leave holes in boxes under two sites thick
+  and roughen every surface.
 - **The native frontend is missing pieces.**
   Its renderer has no `matchTilings`:
   where slices re-tile as the camera moves along an axis,
@@ -159,6 +157,15 @@ Composing generators (section "Composing" of `docs/generators.md`), untried:
 - Let the framework sample plans finer than the level's sites
   (`Plan::sampled` at the spacing), since plans declare their scale:
   coarse levels would skip fine bands' cost as they skip their things.
+  Numbers filter; kinds (the town's `Spot`) can't, but a line of sites
+  could read every plan finer than its spacing at one point
+  hashed within its voxel's shadow,
+  so each kind shows as often as it covers, edges dithered as by `stripe`,
+  at no extra cost.
+  `draw_field` would set the point and `Plan::at` use it (a thread-local);
+  things placed from plans, read where they are, would disagree at edges,
+  and heights would roughen by their slope times the spacing.
+  Checking it needs the valley's town from above at level 6.
 - Solve what a coarse cell decides (a block's lots, a room's furniture)
   with a small search whose boundaries the coarser band fixes:
   constraint solving stays local and needs no backtracking across cells.

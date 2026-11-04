@@ -14,9 +14,13 @@ pub struct World {
 }
 
 impl World {
-    /** The heights it has anything at in units of `level`: those of whole sites holding them. */
+    /**
+     * The heights it has anything at in units of `level`: the sites whose
+     * voxels reach into them. A site on the top's plane stands for the half
+     * of its voxel below it, and may be drawn ("Faces" in docs/generators.md).
+     */
     pub fn heights_at(&self, level: u32) -> (i64, i64) {
         let s = 1i64 << level;
-        (self.heights.0.div_euclid(s), -(-self.heights.1).div_euclid(s))
+        (self.heights.0.div_euclid(s), self.heights.1.div_euclid(s) + 1)
     }
 }

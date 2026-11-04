@@ -71,14 +71,11 @@ fn caves() -> Generator {
 }
 
 /**
- * How high the village's plain is: off the planes of sites of levels past
- * 0 (y = 0 is one at every level), where sites in spans and boxes from
- * there up, by their centres, start half a site low at every level
- * (docs/todo.md).
+ * Houses on a grass plain: thin walls with a door carved through, rooms
+ * of tables inside. On y = 0, a plane of sites at every level, where the
+ * ground's top and the walls' feet would sink half a site but for how
+ * sites on faces are split ("Levels" in docs/generators.md).
  */
-const PLAIN: f64 = 3.0;
-
-/** Houses on a grass plain: thin walls with a door carved through, rooms of tables inside. */
 fn village() -> Generator {
     let houses = Population {
         name: "houses",
@@ -90,7 +87,7 @@ fn village() -> Generator {
         anchor: Box::new(|cell| if cell.j == 0 { Some(cell.centre.map(|v| v as f64)) } else { None }),
         make: Box::new(|[x, _, z], cell| {
             let (w, d, h) = (16.0 + (cell.random("size").next() * 12.0).floor(), 16.0 + (cell.random("size").next() * 12.0).floor(), 20.0);
-            let (x0, z0, x1, z1, y) = (x - w, z - d, x + w, z + d, PLAIN);
+            let (x0, z0, x1, z1, y) = (x - w, z - d, x + w, z + d, 0.0);
             let tables = move |clip: &Box3| -> Vec<Child> {
                 (0..4)
                     .map(|n| {
@@ -121,7 +118,7 @@ fn village() -> Generator {
         }),
         far: None,
     };
-    Generator { kinds: KINDS.to_vec(), seed: 3, layers: vec![spans("ground", -64, PLAIN as i64, GRASS), Layer::Population(houses)] }
+    Generator { kinds: KINDS.to_vec(), seed: 3, layers: vec![spans("ground", -64, 0, GRASS), Layer::Population(houses)] }
 }
 
 fn b(min_x: i64, min_y: i64, min_z: i64, max_x: i64, max_y: i64, max_z: i64) -> Box3 {
