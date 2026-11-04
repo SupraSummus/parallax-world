@@ -148,6 +148,27 @@ Numbers are for the forest at 1280×800, as measured when written.
 - Project splats from the eye in the vertex shader instead of in the baker:
   a chunk's splats would no longer depend on the eye, only its mask would,
   so moving would rebake masks, not splats.
+- Slices as reliefs: each splat keeps its depth from the centre plane,
+  and the compositor draws it where the camera, not the eye, sees its voxel.
+  A flat slice draws a point at depth z off by (σ − τ)·(z − D)
+  (section 2 of `docs/architecture.md`),
+  so a surface crossing slices at a slant, like the ground seen from above,
+  is sheared within each slice by the eye's offset over the distance,
+  the same way across a level: streets look tilted, in a sawtooth,
+  and jump when the eye changes.
+  Thinner slices shorten the teeth but not the tilt.
+  No warp of a flat slice can undo it: one point of the plane
+  is a whole ray from the eye, at every depth.
+  The depth fits in a byte (half layers of the slice's grid, within ±17),
+  in the colour's alpha, as splats are opaque;
+  the chunk's eye relative to the camera would be one more per-chunk uniform.
+  A CPU prototype (positions from the baker's sites) drew the city
+  from 200 m up at the widest leak with straight streets
+  and no seams between slices.
+  Coverage would then need a margin of the leak bound,
+  as what is drawn moves off the masks by up to that much.
+  It makes a slice a relief, no longer a flat picture moved rigidly:
+  a step away from compositing flat layers.
 - Paint cut cross-sections with the colour of the surface above them: a 2D
   prototype allowed slices twice as thick at the same leak.
 - Fill gaps in screen space (only pixels no layer covers) instead of
