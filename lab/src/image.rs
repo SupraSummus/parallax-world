@@ -92,6 +92,26 @@ pub fn write_side_by_side(path: &str, pictures: &[(usize, usize, Vec<u8>)], gap:
     png::write(path, w, h, &out);
 }
 
+/** Rows of pictures side by side, the rows one above another, `gap` white pixels between. */
+pub fn write_grid(path: &str, rows: &[Vec<(usize, usize, Vec<u8>)>], gap: usize) {
+    let w = rows.iter().map(|r| r.iter().map(|p| p.0).sum::<usize>() + gap * (r.len() - 1)).max().unwrap_or(0);
+    let heights: Vec<usize> = rows.iter().map(|r| r.iter().map(|p| p.1).max().unwrap_or(0)).collect();
+    let h = heights.iter().sum::<usize>() + gap * (rows.len() - 1);
+    let mut out = vec![255u8; w * h * 3];
+    let mut y0 = 0;
+    for (row, rh) in rows.iter().zip(&heights) {
+        let mut x0 = 0;
+        for (pw, ph, rgb) in row {
+            for y in 0..*ph {
+                out[((y0 + y) * w + x0) * 3..][..pw * 3].copy_from_slice(&rgb[y * pw * 3..][..pw * 3]);
+            }
+            x0 += pw + gap;
+        }
+        y0 += rh + gap;
+    }
+    png::write(path, w, h, &out);
+}
+
 /** Distinct colours for labels with no meaning of their own (biomes): golden-angle hues. */
 pub fn palette(label: u16) -> u32 {
     let hue = (label as f64 * 0.381966 + 0.07).fract() * 6.0;

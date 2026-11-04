@@ -148,9 +148,171 @@ impl Geometry {
     }
 }
 
+/**
+ * How blocky a map is: of the edges between two labels, the share in a
+ * straight run of at least `min` edges dividing the same two labels.
+ * Rectangles' sides are long runs; a forest's edge is not. Cells of
+ * IGNORED are left out, and edges with them, and those between labels not `wanted`.
+ */
+pub const IGNORED: u16 = u16::MAX;
+
+pub fn long_edges(image: &Image, min: usize, wanted: &dyn Fn(u16) -> bool) -> f64 {
+    let (w, h) = (image.w, image.h);
+    let (mut edges, mut long) = (0usize, 0usize);
+    // Along x, edges between rows y and y + 1; along y, between columns x and x + 1.
+    let mut count = |n: usize, pair: &dyn Fn(usize) -> Option<(u16, u16)>| {
+        let mut i = 0;
+        while i < n {
+            let Some(p) = pair(i) else {
+                i += 1;
+                continue;
+            };
+            let start = i;
+            while i < n && pair(i) == Some(p) {
+                i += 1;
+            }
+            edges += i - start;
+            if i - start >= min {
+                long += i - start;
+            }
+        }
+    };
+    for y in 0..h.saturating_sub(1) {
+        count(w, &|x| {
+            Some((image.at(x, y), image.at(x, y + 1))).filter(|(a, b)| a != b && *a != IGNORED && *b != IGNORED && wanted(*a) && wanted(*b))
+        });
+    }
+    for x in 0..w.saturating_sub(1) {
+        count(h, &|y| {
+            Some((image.at(x, y), image.at(x + 1, y))).filter(|(a, b)| a != b && *a != IGNORED && *b != IGNORED && wanted(*a) && wanted(*b))
+        });
+    }
+    long as f64 / edges.max(1) as f64
+}
+
+/**
+ * Do cross streets cross? Long straight streets (runs of street at least
+ * LONG, side by side in a band at most WIDE across) and the cross streets
+ * meeting them: street REACH out from the band's side. Of the long
+ * streets met from both sides, the cross streets per side and the share
+ * with one on the other side within ALIGNED of it (centre to centre).
+ */
+#[derive(Clone, Copy, Default, Debug)]
+pub struct Crossings {
+    pub streets: usize,
+    pub cross: usize,
+    pub aligned: usize,
+}
+
+const LONG: usize = 48;
+const WIDE: usize = 16;
+const REACH: usize = 8;
+const ALIGNED: f64 = 2.0;
+
+impl Crossings {
+    pub fn of(image: &Image, street: u16) -> Crossings {
+        let t = Image::new(image.h, image.w, (0..image.w * image.h).map(|i| image.at(i / image.h, i % image.h)).collect());
+        let (a, b) = (Self::along_y(image, street), Self::along_y(&t, street));
+        Crossings { streets: a.streets + b.streets, cross: a.cross + b.cross, aligned: a.aligned + b.aligned }
+    }
+
+    /** Of the streets along y (bands of columns). */
+    fn along_y(image: &Image, street: u16) -> Crossings {
+        let (w, h) = (image.w, image.h);
+        // Bands: (x first, x last, y from, y to), open while their last column is the one before.
+        let mut bands: Vec<(usize, usize, usize, usize)> = Vec::new();
+        for x in 0..w {
+            let mut y = 0;
+            while y < h {
+                let start = y;
+                while y < h && image.at(x, y) == street {
+                    y += 1;
+                }
+                let (y0, y1) = (start, y);
+                y += 1;
+                if y1 - y0 < LONG {
+                    continue;
+                }
+                let open = bands.iter_mut().find(|b| b.1 + 1 == x && b.2.max(y0) + LONG <= b.3.min(y1));
+                match open {
+                    Some(b) => *b = (b.0, x, b.2.max(y0), b.3.min(y1)),
+                    None => bands.push((x, x, y0, y1)),
+                }
+            }
+        }
+        let mut out = Crossings::default();
+        for (x0, x1, y0, y1) in bands {
+            if x1 - x0 + 1 > WIDE {
+                continue;
+            }
+            // Cross streets each side: runs of y where the REACH cells beyond the band are all street; their centres.
+            let side = |xs: &dyn Fn(usize) -> Option<usize>| {
+                let mut centres = Vec::new();
+                let mut run: Option<usize> = None;
+                for y in y0..=y1 {
+                    let cross = y < y1 && (0..REACH).all(|k| xs(k).is_some_and(|x| image.at(x, y) == street));
+                    match (cross, run) {
+                        (true, None) => run = Some(y),
+                        (false, Some(s)) => {
+                            centres.push((s + y - 1) as f64 / 2.0);
+                            run = None;
+                        }
+                        _ => {}
+                    }
+                }
+                centres
+            };
+            let left = side(&|k| (x0 > k).then(|| x0 - 1 - k));
+            let right = side(&|k| (x1 + 1 + k < w).then_some(x1 + 1 + k));
+            if left.is_empty() || right.is_empty() {
+                continue;
+            }
+            let matched = |c: &f64, other: &[f64]| other.iter().any(|o| (o - c).abs() <= ALIGNED);
+            out.streets += 1;
+            out.cross += left.len() + right.len();
+            out.aligned += left.iter().filter(|c| matched(c, &right)).count() + right.iter().filter(|c| matched(c, &left)).count();
+        }
+        out
+    }
+
+    /** Summed over maps: long streets met from both sides, and the share of their cross streets aligned. */
+    pub fn sum(all: &[Crossings]) -> Crossings {
+        all.iter().fold(Crossings::default(), |a, c| Crossings {
+            streets: a.streets + c.streets,
+            cross: a.cross + c.cross,
+            aligned: a.aligned + c.aligned,
+        })
+    }
+
+    pub fn share(&self) -> f64 {
+        self.aligned as f64 / self.cross.max(1) as f64
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cross_streets_that_cross_and_that_do_not() {
+        // A street along y at x 30..36; cross streets along x, one crossing (y 20..25), one each side apart (y 60, 70).
+        let mut im = Image::filled(80, 100, 0);
+        for y in 0..100 {
+            (30..36).for_each(|x| im.set(x, y, 1));
+        }
+        for x in 0..80 {
+            (20..25).for_each(|y| im.set(x, y, 1));
+        }
+        for x in 0..30 {
+            (60..64).for_each(|y| im.set(x, y, 1));
+        }
+        for x in 36..70 {
+            (70..74).for_each(|y| im.set(x, y, 1));
+        }
+        let c = Crossings::of(&im, 1);
+        // Along y: 4 cross streets, 2 aligned; the street along x at y 20 (run 80) has the y street crossing it.
+        assert_eq!((c.streets, c.cross, c.aligned), (2, 6, 4));
+    }
 
     #[test]
     fn a_street_grid_and_a_rectangle() {

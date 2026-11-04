@@ -261,7 +261,7 @@ fn main() {
             picture(&grammar_flat[i]),
         ]);
     }
-    write_grid(&format!("{OUT}/geometry.png"), &rows_png, 8);
+    lab::image::write_grid(&format!("{OUT}/geometry.png"), &rows_png, 8);
     let zoom = |im: &Image| (3 * 192, 3 * 192, im.crop(96, 96, 192, 192).to_rgb(&label_rgb, 3));
     write_side_by_side(&format!("{OUT}/geometry-zoom.png"), &[zoom(&real[1]), zoom(&quadtree_samples[1]), zoom(&grammar_samples[1])], 8);
     let levels_png: Vec<_> = (0..quadtree.levels.len())
@@ -310,24 +310,4 @@ fn parse_picture(g: &Grammar, crop: usize) -> Vec<u8> {
         }
     }
     rgb
-}
-
-/** Rows of pictures side by side, the rows one above another, `gap` white pixels between. */
-fn write_grid(path: &str, rows: &[Vec<(usize, usize, Vec<u8>)>], gap: usize) {
-    let w = rows.iter().map(|r| r.iter().map(|p| p.0).sum::<usize>() + gap * (r.len() - 1)).max().unwrap_or(0);
-    let heights: Vec<usize> = rows.iter().map(|r| r.iter().map(|p| p.1).max().unwrap_or(0)).collect();
-    let h = heights.iter().sum::<usize>() + gap * (rows.len() - 1);
-    let mut out = vec![255u8; w * h * 3];
-    let mut y0 = 0;
-    for (row, rh) in rows.iter().zip(&heights) {
-        let mut x0 = 0;
-        for (pw, ph, rgb) in row {
-            for y in 0..*ph {
-                out[((y0 + y) * w + x0) * 3..][..pw * 3].copy_from_slice(&rgb[y * pw * 3..][..pw * 3]);
-            }
-            x0 += pw + gap;
-        }
-        y0 += rh + gap;
-    }
-    lab::png::write(path, w, h, &out);
 }
