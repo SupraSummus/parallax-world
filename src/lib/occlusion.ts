@@ -5,7 +5,7 @@
 import type { Chunk, Placement } from './renderer'
 import { FACES, faceBasis, type Face, type ScreenBox, type View } from './view'
 import { chunkCell } from './slice-selection'
-import { wasmInstance } from './wasm'
+import { copyIn, wasmInstance } from './wasm'
 
 /** The coverage exports (bake/src/coverage.rs). */
 interface Exports {
@@ -84,9 +84,7 @@ export class Coverage {
     if (handle === undefined) this.handles.set(chunk, handle = ++this.count)
     if (wasm.coverage_use(handle)) return handle
     const { width, height, scale, blocks } = chunk.mask
-    // Read memory.buffer after the call: it may grow (and so replace) it.
-    const at = wasm.coverage_blocks(blocks.length)
-    new Uint8Array(wasm.memory.buffer, at >>> 0, blocks.length).set(blocks)
+    copyIn(wasm.memory, wasm.coverage_blocks(blocks.length) >>> 0, blocks)
     wasm.coverage_add(handle, width, height, scale)
     return handle
   }

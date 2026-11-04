@@ -20,10 +20,16 @@ export function wasmInstance(): WebAssembly.Exports {
   return new WebAssembly.Instance(wasmModule()).exports
 }
 
-/**
- * Copies `values` into an instance's memory at byte `offset`. Memory may
- * grow on any call into the instance, detaching earlier views of it.
- */
+// Memory may grow on any call into an instance, detaching earlier views of
+// it: copyIn and copyOut view it only once called, after the call that
+// gave the offset.
+
+/** Copies `values` into an instance's memory at byte `offset`. */
 export function copyIn(memory: WebAssembly.Memory, offset: number, values: Uint8Array | Int32Array | Uint32Array) {
   new Uint8Array(memory.buffer, offset, values.byteLength).set(new Uint8Array(values.buffer, values.byteOffset, values.byteLength))
+}
+
+/** A copy of `length` numbers of an instance's memory from byte `offset`, as `Type`. */
+export function copyOut<T extends { slice(): T }>(memory: WebAssembly.Memory, Type: new (buffer: ArrayBuffer, offset: number, length: number) => T, offset: number, length: number): T {
+  return new Type(memory.buffer, offset, length).slice()
 }

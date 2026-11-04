@@ -7,7 +7,7 @@
 import type { SliceId } from './slice-selection'
 import { FACES } from './view'
 import { LayerIndex, writeGrid, type LayerIndexData, type Material, type VoxelData } from './voxel-grid'
-import { copyIn, wasmInstance } from './wasm'
+import { copyIn, copyOut, wasmInstance } from './wasm'
 import { generatePart, type GridPart, type WorldType } from './world'
 
 /**
@@ -86,6 +86,8 @@ const faceIndex = new Map(FACES.map((face, index) => [face.name, index]))
  */
 export class ChunkBaker {
   private baker: Baker
+  /** How many splats the chunk baked last has. */
+  private count = 0
 
   constructor(materials: readonly Material[], levels: readonly (VoxelData | undefined)[]) {
     const baker = wasmInstance() as unknown as Baker
@@ -109,30 +111,30 @@ export class ChunkBaker {
   bake(request: Omit<ChunkRequest, 'grid'>): ChunkSplats {
     const { memory } = this.baker
     const [width, height, originX, originY, extentWidth, extentHeight, scale, count, splats, blocks, blockCount] = this.call(request)
+    this.count = count
     return {
       // Copied out: the baker reuses its buffers.
-      splats: new Float32Array(memory.buffer, splats, count * SPLAT).slice(),
+      splats: copyOut(memory, Float32Array, splats, count * SPLAT),
       originX,
       originY,
       extentWidth,
       extentHeight,
-      mask: { blocks: new Uint8Array(memory.buffer, blocks, blockCount).slice(), width, height, scale },
+      mask: { blocks: copyOut(memory, Uint8Array, blocks, blockCount), width, height, scale },
     }
   }
 
   /** The sites (a, b, c in the face's lattice coordinates) of the splats of the chunk baked last, in their order. @internal */
-  sites(count: number): Int32Array {
-    return new Int32Array(this.baker.memory.buffer, this.baker.sites(), count * 3).slice()
+  sites(): Int32Array {
+    return copyOut(this.baker.memory, Int32Array, this.baker.sites(), this.count * 3)
   }
 
   /** Calls `bake` and returns its result's numbers. */
   private call({ face, level, layer, cutoff, i, j }: Omit<ChunkRequest, 'grid'>): Float64Array {
     const index = faceIndex.get(face)
     if (index === undefined) throw new Error(`no face ${face}`)
-    // Before reading memory.buffer: the call may grow (and so replace) it.
     const at = this.baker.bake(index, level, layer, cutoff, i, j)
     if (at === 0) throw new Error('the baker has no world')
-    return new Float64Array(this.baker.memory.buffer, at, 11)
+    return copyOut(this.baker.memory, Float64Array, at, 11)
   }
 }
 
