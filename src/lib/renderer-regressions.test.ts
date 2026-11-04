@@ -101,15 +101,14 @@ describe('Renderer regressions', () => {
       const renderer = new ParallaxRenderer(world)
       renderer.resize(800, 600)
       // Coarser than the default, so that levels from 4 on are in range.
-      renderer.setMaxLeak(2.3)
+      renderer.setMaxLeak(7)
       renderer.setSkipCovered(false)
       renderer.setCamera({ x: 0, y: 30, z: -60 })
 
       const before = new Set(renderer.render().layers.flatMap(l => l.placements.map(p => p.chunk)))
       renderer.setCamera({ x: 0, y: 30, z: -58 })
-      // The near levels' eyes move (their cells are a few units across, and
-      // the camera is on a boundary of level 3's), so they are baked again;
-      // the cells of levels from 4 on reach 16 units and more.
+      // Chunks do not depend on where the camera is; only where the near
+      // levels begin do slices re-tile.
       const distant = renderer.render().layers.filter(l => l.slice.level >= 4).flatMap(l => l.placements.map(p => p.chunk))
       expect(distant.length).toBeGreaterThan(10)
       expect(distant.filter(chunk => before.has(chunk)).length).toBeGreaterThan(distant.length * 0.9)

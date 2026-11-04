@@ -1,10 +1,8 @@
 //! Slice selection (slice-selection.ts): which slices of a face's layers the
-//! camera draws, the chunks they are split into and the eyes they are baked
-//! from. Depths count layers, LAYER apart; see docs/architecture.md, section 1.
+//! camera draws and the chunks they are split into. Depths count layers,
+//! LAYER apart; see docs/architecture.md, section 1.
 
 use bake::Slice;
-
-use crate::view::Vec3;
 
 /** Spacing of a face's layers, and of its lattice along `right`. */
 pub const LAYER: f64 = std::f64::consts::FRAC_1_SQRT_2;
@@ -94,57 +92,24 @@ pub fn chunk_cells(level: i32, left: f64, right: f64, bottom: f64, top: f64) -> 
     cells
 }
 
-/** The site of N·FCC whose cell holds the point (a, b, c), in lattice coordinates (owner in cells.ts). */
-fn owner(n: f64, p: Vec3) -> [i32; 3] {
-    let mut best = [0.0; 3];
-    let mut best_d = f64::INFINITY;
-    for parity in [0.0, 1.0] {
-        let around = |x: f64| {
-            let t = ((x - parity * n) / (2.0 * n)).floor();
-            [n * (2.0 * t + parity), n * (2.0 * t + 2.0 + parity)]
-        };
-        let [xa, xb, xc] = p.map(around);
-        for a in xa {
-            for b in xb {
-                for c in xc {
-                    let d = (a - p[0]).powi(2) + 2.0 * (b - p[1]).powi(2) + (c - p[2]).powi(2);
-                    if d < best_d || (d == best_d && (c, b, a) > (best[2], best[1], best[0])) {
-                        best = [a, b, c];
-                        best_d = d;
-                    }
-                }
-            }
-        }
-    }
-    best.map(|v| v as i32)
-}
+/**
+ * How far a face's rays are from its axis, as a tangent, at most; slices
+ * are drawn as seen along the axis (MAX_SLANT in slice-selection.ts).
+ */
+const MAX_SLANT: f64 = 1.0;
 
-/** The eye of a slice of `level` for a camera at `camera` (face coordinates): the site of the level's lattice whose cell holds it. */
-pub fn eye_of(level: i32, camera: Vec3) -> [i32; 3] {
-    owner(spacing(level) as f64, [camera[0] / LAYER, camera[1], camera[2] / LAYER])
-}
-
-/** How far past the face's rays a ray from the eye may be, plus how far gap filling may grow faces. */
-const REACH: f64 = 2.0;
-
-/** How far around its cell a chunk of a slice of `level` may draw voxels from, in lattice units: along a, along b. */
+/** How far around its cell a chunk of a slice of `level` may draw voxels from, in lattice units: along a, along b (cellMargin in slice-selection.ts). */
 pub fn cell_margin(level: i32) -> (i32, i32) {
     let n = atom_spacing(level) as f64;
-    let half = (thickness(level) as f64 / n / 2.0) * LAYER;
-    let columns = n * (((1.0 + REACH) * half + 1.5) / LAYER).ceil();
-    let rows = n * ((LAYER + REACH) * half + 1.5).ceil();
+    let grow = MAX_SLANT * (thickness(level) as f64 / n / 2.0) * LAYER;
+    let columns = n * ((grow + 1.5) / LAYER).ceil();
+    let rows = n * (grow * 1.5f64.sqrt() + 1.5).ceil();
     (columns as i32, rows as i32)
 }
 
-/** The largest N / thickness of any level. */
-fn eye_ratio() -> f64 {
-    (0..=MAX_LEVEL).map(|level| spacing(level) as f64 / thickness(level) as f64).fold(0.0, f64::max)
-}
-
-/** Viewing distance over the largest slice thickness that keeps occlusion leaks under `max_leak` radians, rounded up to a quarter octave. */
+/** Viewing distance over slice thickness that keeps occlusion leaks under `max_leak` radians, rounded up to a quarter octave (leakFreeDetail in slice-selection.ts). */
 pub fn leak_free_detail(max_leak: f64) -> f64 {
-    let r = eye_ratio();
-    let detail = (3.0 * r).max((r + (r * r + 8.0 * r / max_leak).sqrt()) / 2.0);
+    let detail = (MAX_SLANT / max_leak - 0.5).max(1.0);
     2f64.powf((4.0 * detail.log2()).ceil() / 4.0)
 }
 

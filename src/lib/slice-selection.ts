@@ -35,13 +35,11 @@
  *
  * Slices are split in x and y into chunks: bricks (chunkCell), each the
  * shadow along the axis of a column of cells of a coarser lattice still.
- * The chunks of a level are baked in perspective from its eye (eyeOf), the
- * site of the level's lattice whose cell holds the camera. The closer the
- * eye is to the camera for the slices' distance, the thicker they may be.
+ * Chunks are baked as seen along the axis, so the camera's position
+ * changes none of them.
  */
 import { owner, ownedLayers, spacing } from './cells'
 import { LAYER } from './view'
-import type { Vec3 } from './world'
 
 /**
  * A slice: slab `layer` of `level`, i.e. its atoms (cells of
@@ -56,7 +54,7 @@ export interface SliceId {
   cutoff: number
 }
 
-/** Slabs of up to 4096 layers: from about 4 km on in the forest at 1280×800, slices grow no thicker. */
+/** Slabs of up to 4096 layers: from about 4 km on in the forest at 1280×800, slices grow no thicker. @internal */
 export const MAX_LEVEL = 12
 
 /**
@@ -167,87 +165,52 @@ export function chunkCells(level: number, left: number, right: number, bottom: n
 }
 
 /**
- * The eye of a slice of `level` for a camera at `camera` (face
- * coordinates): the site of N·FCC, the level's lattice (N = 2^level), whose
- * cell holds the camera, in lattice coordinates. The level's chunks are
- * baked in perspective from it, so they hold while the camera stays in
- * that cell.
+ * How far a face's rays are from its axis, as a tangent, at most: they are
+ * |x| + √2 · |y| ≤ z (inFace in view.ts). Slices are drawn as seen along
+ * the axis, so the camera sees a point d ahead of its slice's centre plane
+ * at most MAX_SLANT · d off where it is drawn (docs/architecture.md,
+ * section 2; MAX_SLANT in bake/src/slicing.rs).
  */
-export function eyeOf(level: number, camera: Vec3): [number, number, number] {
-  return owner(spacing(level), [camera.x / LAYER, camera.y, camera.z / LAYER])
-}
-
-/**
- * @internal How far (as a tangent) a ray from the eye of a slice of `level`
- * may be from the camera's ray to the same point, d layers ahead of the
- * eye: 2N / d (for tests; eye_error in bake/src/slicing.rs).
- * Off by δ from the eye, the camera sees a point along tangent σ that the
- * eye sees along τ = σ − (δx − σ · δz) / d (in world units). For σ among
- * the face's rays (|σx| ≤ 1, |σy| ≤ LAYER) and δ in the eye's cell,
- * |δx − σx · δz| ≤ |δx| + |δz| is at most √2 · N, at a corner of the cell
- * N / √2 off in x and N / √2 along z; in y, less. d layers are d · LAYER.
- */
-export function eyeError(level: number, d: number): number {
-  return (2 * spacing(level)) / d
-}
-
-/**
- * The largest eye error baking allows for (EYE_ERROR in bake/src/slicing.rs):
- * every voxel is at least 2N layers ahead of its eye (leakFreeDetail, and
- * NEAR_DEPTH in renderer.ts).
- */
-const EYE_ERROR = 1
-
-/**
- * How far past the face's rays (as a tangent) a ray from the eye may be
- * where the camera's rays are the face's, plus how far gap filling may grow
- * faces: EYE_ERROR each (REACH in bake/src/surface.rs).
- */
-const REACH = 2 * EYE_ERROR
+const MAX_SLANT = 1
 
 /**
  * How far around its cell a chunk of a slice of `level` may draw voxels
  * from, in lattice units: `columns` along a, `rows` along b (cell_margin in
  * bake/src/surface.rs, in the units of the slice's grid, N times these).
- * `rows` also bounds how far from a voxel's b its faces may be drawn where
- * the face's rays show them.
+ * Each voxel is drawn at its site with its outline, grown to fill gaps by
+ * up to MAX_SLANT times half the slice's thickness, √(3/2) as much in b.
+ * `rows` also bounds how far from a voxel's b it may be drawn.
  */
 export function cellMargin(level: number): { columns: number; rows: number } {
   const n = atomSpacing(level)
-  const half = (thickness(level) / n / 2) * LAYER
-  return { columns: n * Math.ceil(((1 + REACH) * half + 1.5) / LAYER), rows: n * Math.ceil((LAYER + REACH) * half + 1.5) }
+  const grow = MAX_SLANT * (thickness(level) / n / 2) * LAYER
+  return { columns: n * Math.ceil((grow + 1.5) / LAYER), rows: n * Math.ceil(grow * Math.sqrt(1.5) + 1.5) }
 }
-
-/** r: the largest N / thickness, the eye's spacing over its slices' thickness (16/17, from level ATOM_SHIFT on). */
-const EYE_RATIO = Math.max(...Array.from({ length: MAX_LEVEL + 1 }, (_, level) => spacing(level) / thickness(level)))
 
 /**
  * Detail (viewing distance / maximum slice thickness) that keeps occlusion
  * leaks at most `maxLeak` radians (maxLeak · focal pixels on screen).
  *
- * A slice t layers thick whose near side is a layers from the camera is
- * at least a − N layers from its eye, so its points are drawn with rays
- * at most e = 2N / (a − N) off (eyeError). A leak is at most e · t layer
- * spacings, e · t / a radians (docs/architecture.md, section 2).
- * With a ≥ t · detail and r = N / t, that is at most
- * 2r / (detail · (detail − r)) (leakAngle): ε for
- * detail = (r + √(r² + 8r / ε)) / 2, with r the largest of any
- * level (EYE_RATIO). At least 3r, so that voxels are 2N layers ahead of
- * the eye (EYE_ERROR).
+ * A slice t layers thick whose near side is a layers from the camera has
+ * its centre plane at a + t / 2. Its points are drawn up to t / 2 layer
+ * spacings before or behind where they are, along the axis, which the
+ * camera sees at most MAX_SLANT off; a leak is at most MAX_SLANT · t
+ * spacings, MAX_SLANT · t / (a + t / 2) radians (docs/architecture.md,
+ * section 2). With a ≥ t · detail that is at most
+ * MAX_SLANT / (detail + 1/2) (leakAngle): ε for
+ * detail = MAX_SLANT / ε − 1/2, at least 1.
  *
  * Rounded up to a quarter octave (denser slices are always safe), so small
  * changes of the tolerance keep the slicing and the cache.
  */
 export function leakFreeDetail(maxLeak: number): number {
-  const r = EYE_RATIO
-  const detail = Math.max(3 * r, (r + Math.sqrt(r * r + (8 * r) / maxLeak)) / 2)
+  const detail = Math.max(1, MAX_SLANT / maxLeak - 1 / 2)
   return 2 ** (Math.ceil(4 * Math.log2(detail)) / 4)
 }
 
 /** The largest occlusion leak slices of `detail` show, in radians (see leakFreeDetail). */
 export function leakAngle(detail: number): number {
-  const r = EYE_RATIO
-  return (2 * r) / (detail * (detail - r))
+  return MAX_SLANT / (detail + 1 / 2)
 }
 
 /**

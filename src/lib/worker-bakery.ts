@@ -18,7 +18,7 @@ interface Entry {
   sent: { requests: Float64Array; received: number } | null
 }
 
-/** Which of `count` workers bakes a chunk: always the same for a cell, so that its surface is cached once. */
+/** Which of `count` workers bakes a chunk: spread by cell. */
 function workerOf({ face, level, layer, cutoff, i, j }: ChunkRequest, count: number): number {
   let hash = 0x811c9dc5
   for (let k = 0; k < face.length; k++) hash = Math.imul(hash ^ face.charCodeAt(k), 0x01000193)

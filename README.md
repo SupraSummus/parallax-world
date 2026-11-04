@@ -46,12 +46,12 @@ where the sections below are too).
    and walls and floors along the axes stay flat (section 6).
 2. **One hierarchy of cells for everything.**
    The cells of N·FCC, N = 1, 2, 4, …,
-   shape slices, chunks, the eyes chunks are baked from,
+   shape slices, chunks,
    levels of detail, and where generators place things (section 1).
 3. **Slices named by the lattice, composited with parallax.**
    Slices along 12 directions are named by the lattice, not the camera,
-   so a chunk baked from a lattice site near the camera
-   stays valid while the camera stays in that site's cell (sections 3–5).
+   and baked as seen along their direction,
+   so a chunk, once baked, stays valid wherever the camera goes (sections 3–5).
 4. **Worlds generated in pieces, at any level of detail.**
    A world of `worlds/` on the generator framework of `worldgen/`
    (the forest, and the valley: the forest with a town and fields)

@@ -9,8 +9,8 @@ rectangular buildings), only their surfaces are made of rhombi.
 
 ## Goals
 
-- **Cheap camera movement.** Moving mostly redraws cached images; only
-  chunks coming into view, or of a level whose eye moved, are rasterised.
+- **Cheap camera movement.** Moving redraws cached chunks; only
+  chunks coming into view are baked.
 - **Close to true perspective.** Nothing that perspective would hide shows
   by more than a set angle.
 - **Event-driven.** Nothing renders while the camera is idle.
@@ -29,11 +29,10 @@ nearest neighbours (the faces of a rhombic dodecahedron around the
 camera), each cut along the lattice's layers across it.
 Slices grow thicker with viewing distance, and far ones draw the world
 at a coarser level of detail, so far voxels stay a pixel or two across.
-Slices are split into chunks, baked only in view and cached
-while the camera stays near where they were baked from.
+Slices are split into chunks, baked only in view, as seen along their
+direction, and cached: moving bakes only what comes into view.
 A chunk is a list of its visible voxels,
-each painted as a hexagon of one colour
-holding its outline as seen from where the chunk was baked:
+each painted as a hexagon of one colour, its outline along that direction:
 an impressionist picture of the scene, not its exact faces.
 Slices are thin enough that
 geometry perspective would hide (e.g. stone under the lake's water

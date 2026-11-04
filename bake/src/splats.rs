@@ -3,21 +3,18 @@
 
 use std::f64::consts::FRAC_1_SQRT_2;
 
-use crate::slicing::{LAYER, eye_error, slice_centre, spacing};
+use crate::slicing::{LAYER, MAX_SLANT, slice_centre};
 use crate::surface::{Slice, Voxel};
 use crate::world::{FACE_KINDS, Geometry};
 
 /**
  * A voxel painted as a hexagon on a slice's centre plane:
  * the points (x + u, y + v) with |u| ≤ width and |u| / √2 + |v| ≤ height,
- * the least that holds the voxel's outline seen from the eye.
- * Seen straight along the face's axis, from afar, that is the outline
- * (width 1/√2, height 1, in units of its grid);
- * at a slant it is wider: twice where four faces meet.
- * Grown, its sides move out.
+ * its outline seen along the face's axis (width 1/√2, height 1, in units
+ * of its grid). Grown, its sides move out.
  */
 pub struct Splat {
-    /** Its centre: its site, projected from the eye onto the plane. */
+    /** Its centre: its site, seen along the axis. */
     pub x: f64,
     pub y: f64,
     pub width: f64,
@@ -29,19 +26,8 @@ pub struct Splat {
 }
 
 /**
- * The rhombic dodecahedron's corners around its site, in face units, by
- * depth: a layer before it, level with it (its outline along the axis),
- * a layer after.
- */
-const CORNERS: [&[[f64; 2]]; 3] = [
-    &[[LAYER, 0.0], [-LAYER, 0.0], [0.0, 0.5], [0.0, -0.5]],
-    &[[0.0, 1.0], [0.0, -1.0], [LAYER, 0.5], [LAYER, -0.5], [-LAYER, 0.5], [-LAYER, -0.5]],
-    &[[LAYER, 0.0], [-LAYER, 0.0], [0.0, 0.5], [0.0, -0.5]],
-];
-
-/**
  * The splats of one chunk and their extent.
- * `painted` are the voxels rays from the eye may reach, far to near;
+ * `painted` are the voxels rays of the face may reach, far to near;
  * `grown` are voxels going on into another slice, their hexagons grown
  * to close the gaps between slices, also far to near:
  * drawn only where the chunk paints nothing (docs/architecture.md, section 3).
@@ -49,8 +35,8 @@ const CORNERS: [&[[f64; 2]]; 3] = [
 pub struct Splats {
     pub painted: Vec<Splat>,
     pub grown: Vec<Splat>,
-    /** Painting order: each surface voxel's squared distance from the eye, and its index. */
-    order: Vec<(i64, usize)>,
+    /** Painting order: each surface voxel's layer, and its index. */
+    order: Vec<(i32, usize)>,
     pub min_x: f64,
     pub max_x: f64,
     pub min_y: f64,
@@ -108,97 +94,71 @@ pub fn voxel_colour(voxel: &Voxel, palette: &[u32]) -> u32 {
 }
 
 /**
- * Fills `splats` with the voxels of a chunk of a slice that rays from the
- * eye (a site, in lattice coordinates, at least 2N layers before every
- * voxel, N = 2^level) reach, in painting order: far to near.
- * A voxel is painted if one of its open or cut faces faces the eye
- * (n · (p − eye) < 0 for its points p);
- * its splat is centred where the line from the eye through its site meets
- * the centre plane, and holds where the lines through its corners do.
+ * Whether a ray of a face (|x| + √2·|y| ≤ z, see inFace in view.ts) can
+ * meet one of `faces` from outside: n · r < 0 at a corner of the rhombus
+ * of rays, r = (±MAX_SLANT, 0, 1) or (0, ±MAX_SLANT · LAYER, 1).
+ */
+fn seen(geometry: &Geometry, faces: u16) -> bool {
+    (0..FACE_KINDS).any(|kind| {
+        let [nx, ny, nz] = geometry.normals[kind];
+        faces & (1 << kind) != 0 && nz < MAX_SLANT * nx.abs().max(LAYER * ny.abs())
+    })
+}
+
+/**
+ * Fills `splats` with the voxels of a chunk of a slice that rays of the
+ * face may reach, in painting order: far to near.
+ * Slices are drawn as seen along the face's axis (orthographically): a
+ * voxel's splat is its outline along the axis, centred on its site.
+ * A voxel is painted if a ray of the face can meet one of its open or cut
+ * faces (seen); along the axis, nearer voxels cover what they hide.
  *
- * Painting order: voxels by their site's distance from the eye, farthest
- * first. Voxels are the cells of their sites' Voronoi diagram, so a ray
- * from the eye that passes from one voxel into another crosses where
- * their sites are equally far, from the nearer site's side: along every
- * ray, a voxel it meets first is nearer the eye.
+ * Painting order: by layer, farthest first. Voxels of one layer do not
+ * overlap seen along the axis; of two that do, the one in the farther
+ * layer is behind.
  *
  * If `fill`, voxels with an open face and a neighbour in another slice,
  * where gaps open between slices (docs/architecture.md, section 3),
- * are also grown: including ones only some camera in the eye's cell
- * faces, which are not painted.
+ * are also grown.
  *
  * `surface` is the cell's (cell_surface), with the margin around the cell
  * that its chunks may show; `palette` the view face's (see voxel_colour).
  */
-pub fn chunk_splats(
-    splats: &mut Splats,
-    geometry: &Geometry,
-    palette: &[u32],
-    surface: &[Voxel],
-    slice: &Slice,
-    eye: [i32; 3],
-    fill: bool,
-) {
+pub fn chunk_splats(splats: &mut Splats, geometry: &Geometry, palette: &[u32], surface: &[Voxel], slice: &Slice, fill: bool) {
     splats.clear();
     let centre = slice_centre(slice.level, slice.layer);
-    let n = spacing(slice.level) as f64;
-    let (ex, ey, ez) = (eye[0] as f64 * LAYER, eye[1] as f64, eye[2] as f64 * LAYER);
 
     let mut order = std::mem::take(&mut splats.order);
     order.clear();
-    order.extend(surface.iter().enumerate().map(|(k, voxel)| {
-        let [a, b, c] = voxel.site;
-        let [da, db, dc] = [(a - eye[0]) as i64, (b - eye[1]) as i64, (c - eye[2]) as i64];
-        // Twice the squared distance: a and c are LAYER per unit, b is 1.
-        (da * da + 2 * db * db + dc * dc, k)
-    }));
-    order.sort_unstable_by_key(|&(distance, _)| std::cmp::Reverse(distance));
+    order.extend(surface.iter().enumerate().map(|(k, voxel)| (voxel.site[2], k)));
+    order.sort_unstable_by_key(|&(c, k)| (std::cmp::Reverse(c), k));
 
     for &(_, k) in &order {
         let voxel = &surface[k];
-        let [a, b, c] = voxel.site;
-        let (x, y, z) = (a as f64 * LAYER, b as f64, c as f64 * LAYER);
-        // Whether one of `faces` has n · (p − eye) < below for its points p,
-        // as n · (p − site) = 1 on a face (|n| = √2).
-        let facing = |faces: u16, below: f64| {
-            (0..FACE_KINDS).any(|kind| {
-                let [na, nb, nc] = geometry.normals[kind];
-                faces & (1 << kind) != 0 && na * (x - ex) + nb * (y - ey) + nc * (z - ez) + 1.0 < below
-            })
-        };
-        let painted = facing(voxel.open | voxel.cut, 0.0);
-        // A voxel going on into another slice grows where some camera in the
-        // eye's cell faces one of its open faces: the cell reaches N / √2
-        // along a face's normal n, n · δ ≤ N.
-        let grows = fill && voxel.cut != 0 && facing(voxel.open, n);
+        let painted = seen(geometry, voxel.open | voxel.cut);
+        let grows = fill && voxel.cut != 0 && seen(geometry, voxel.open);
         if !painted && !grows {
             continue;
         }
-
-        let t = (centre - ez) / (z - ez);
-        let (sx, sy) = (ex + (x - ex) * t, ey + (y - ey) * t);
-        let (mut width, mut height) = (0.0f64, 0.0f64);
-        for (corners, depth) in CORNERS.iter().zip([-LAYER, 0.0, LAYER]) {
-            let at = (centre - ez) / (z + depth - ez);
-            for [u, v] in corners.iter() {
-                let (du, dv) = ((ex + (x + u - ex) * at - sx).abs(), (ey + (y + v - ey) * at - sy).abs());
-                width = width.max(du);
-                height = height.max(du * FRAC_1_SQRT_2 + dv);
-            }
-        }
-        let splat = Splat { x: sx, y: sy, width, height, colour: voxel_colour(voxel, palette), site: voxel.site };
+        let [a, b, c] = voxel.site;
+        let splat = Splat {
+            x: a as f64 * LAYER,
+            y: b as f64,
+            width: FRAC_1_SQRT_2,
+            height: 1.0,
+            colour: voxel_colour(voxel, palette),
+            site: voxel.site,
+        };
         if grows {
-            // A camera in the eye's cell sees the voxel's points at most
-            // `error` off the eye's rays (as tangents); a point d ahead of
-            // the centre plane is drawn (σ − τ) · d off, σ the camera's ray
-            // and τ the eye's (section 2). Where its voxel meets one in
-            // another slice, within a layer of its own, that may pull it
-            // away from the other slice's drawing of the surface, so its
-            // sides move out by that much: the slanted ones, with normals
-            // (±1/√2, ±1) / √(3/2), by √(3/2) as much in `height`.
-            let error = eye_error(slice.level, (c - 1 - eye[2]) as f64);
+            // The camera sees a point along a ray at most MAX_SLANT off the
+            // axis (as a tangent), so one d ahead of the centre plane is
+            // drawn at most MAX_SLANT · d off (section 2). Where its voxel
+            // meets one in another slice, within a layer of its own, that
+            // may pull it away from the other slice's drawing of the surface,
+            // so its sides move out by that much: the slanted ones, with
+            // normals (±1/√2, ±1) / √(3/2), by √(3/2) as much in `height`.
             let d = ((c + 1) as f64 * LAYER - centre).abs().max(((c - 1) as f64 * LAYER - centre).abs());
-            let grow = error * d;
+            let grow = MAX_SLANT * d;
             let grown = Splat { width: splat.width + grow, height: splat.height + grow * 1.5f64.sqrt(), site: voxel.site, ..splat };
             splats.extend(&grown);
             splats.grown.push(grown);
@@ -218,10 +178,10 @@ mod tests {
     use crate::world::lattices;
 
     #[test]
-    fn a_ray_from_the_eye_lands_in_the_splat_of_the_voxel_it_meets_first() {
+    fn a_ray_along_the_axis_shows_the_voxel_it_meets_first() {
         // A solid block of level 2's slab of layers, its side a + c = 0
-        // facing the eye at 45° to the axis, as a tree trunk ahead does where
-        // four faces meet; its inside buried, so only that side shows.
+        // at 45° to the axis, as a tree trunk ahead does where four faces
+        // meet; its inside buried, so only its surface is kept.
         let geometry = geometry(&lattices()[0]);
         let solid = |[a, b, c]: [i32; 3]| (0..4).contains(&c) && a.abs() <= 12 && b.abs() <= 12 && a + c >= 0;
         let sites: Vec<[i32; 3]> = (0..4)
@@ -238,37 +198,44 @@ mod tests {
             })
             .filter(|v| v.open != 0)
             .collect();
-        // 2N layers before the nearest voxel's front, a layer before its site.
-        let (slice, eye) = (Slice { level: 2, layer: 0, cutoff: f64::INFINITY }, [-12, -4, -12]);
+        let slice = Slice { level: 2, layer: 0, cutoff: f64::INFINITY };
         let mut splats = Splats::new();
-        chunk_splats(&mut splats, &geometry, &[0; FACE_KINDS], &surface, &slice, eye, false);
+        chunk_splats(&mut splats, &geometry, &[0; FACE_KINDS], &surface, &slice, false);
 
-        let centre = slice_centre(slice.level, slice.layer);
-        let from = [eye[0] as f64 * LAYER, eye[1] as f64, eye[2] as f64 * LAYER];
         let at = |[a, b, c]: [i32; 3]| [a as f64 * LAYER, b as f64, c as f64 * LAYER];
         let mut hits = 0;
-        for (px, py) in (0..60).flat_map(|i| (0..60).map(move |j| (-1.5 + i as f64 * 0.05, -1.5 + j as f64 * 0.05))) {
-            // The voxel the ray meets first: inside one, n · (p − site) ≤ 1 for each face's normal n.
-            let ray = [px - from[0], py - from[1], centre - from[2]];
+        for (px, py) in (0..80).flat_map(|i| (0..80).map(move |j| (-4.0 + i as f64 * 0.1, -4.0 + j as f64 * 0.1))) {
+            // The voxel the ray (px, py, z) meets first, z growing: inside one,
+            // n · (p − site) ≤ 1 for each face's normal n.
             let enter = |&site: &[i32; 3]| {
                 let p = at(site);
                 let (mut enter, mut exit) = (f64::NEG_INFINITY, f64::INFINITY);
                 for n in geometry.normals {
-                    let (along, off) = ((0..3).map(|d| n[d] * ray[d]).sum::<f64>(), (0..3).map(|d| n[d] * (from[d] - p[d])).sum::<f64>());
-                    let t = (1.0 - off) / along;
-                    if along < 0.0 { enter = enter.max(t) } else { exit = exit.min(t) }
+                    let off = n[0] * (px - p[0]) + n[1] * (py - p[1]) - n[2] * p[2];
+                    if n[2] == 0.0 {
+                        if off > 1.0 {
+                            return None;
+                        }
+                        continue;
+                    }
+                    let z = (1.0 - off) / n[2];
+                    if n[2] < 0.0 { enter = enter.max(z) } else { exit = exit.min(z) }
                 }
                 (enter < exit).then_some(enter)
             };
-            let Some((_, site)) = sites.iter().filter_map(|s| enter(s).map(|t| (t, *s))).min_by(|a, b| a.0.total_cmp(&b.0)) else {
+            let Some((_, site)) = sites.iter().filter_map(|s| enter(s).map(|z| (z, *s))).min_by(|a, b| a.0.total_cmp(&b.0)) else {
                 continue;
             };
             hits += 1;
-            let s = splats.painted.iter().find(|s| s.site == site).expect("the voxel met is painted");
-            let (u, v) = ((px - s.x).abs(), (py - s.y).abs());
-            assert!(u <= s.width + 1e-9 && u * FRAC_1_SQRT_2 + v <= s.height + 1e-9, "({px}, {py}) misses the splat of {site:?}");
+            // What shows there: the last splat painted that holds the point.
+            let holds =
+                |s: &&Splat| (px - s.x).abs() <= s.width + 1e-9 && (px - s.x).abs() * FRAC_1_SQRT_2 + (py - s.y).abs() <= s.height + 1e-9;
+            let shown = splats.painted.iter().rev().find(holds).expect("a splat holds the point");
+            // On an edge between two outlines either may show.
+            let edge = splats.painted.iter().filter(holds).filter(|s| s.site[2] == shown.site[2]).count() > 1;
+            assert!(shown.site == site || edge, "({px}, {py}) shows {:?}, not {site:?}", shown.site);
         }
-        assert!(hits > 1000, "{hits} rays met the block");
+        assert!(hits > 3000, "{hits} rays met the block");
     }
 
     #[test]

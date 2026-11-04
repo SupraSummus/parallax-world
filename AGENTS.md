@@ -42,7 +42,7 @@ src/
     ├── city.ts              # City scene generator: streets, buildings, maze of rooms
     ├── noise.ts             # Seeded hash and PRNG for the city
     ├── cells.ts             # Cells of the coarser lattices N·FCC that slices are made of
-    ├── slice-selection.ts   # Slices, chunks and the eyes they are baked from (pure functions)
+    ├── slice-selection.ts   # Slices, chunks and the leak bound (pure functions)
     ├── view.ts              # Camera orientation, the 12 faces (FCC directions), projection
     ├── renderer.ts          # Slices and chunks in view, caching, screen placement (no DOM)
     ├── occlusion.ts         # Which screen cells nearer layers cover (bake/src/coverage.rs), to skip chunks behind them
@@ -59,7 +59,7 @@ src/viewer/
 └── mesh.ts                  # World -> triangle mesh of exposed rhombic faces
 bake/                        # Chunk baker and coverage in Rust (no dependencies), in worlds/' WebAssembly
 └── src/
-    ├── lib.rs               # Baker: cached cell surfaces, one chunk per call; the WebAssembly exports
+    ├── lib.rs               # Baker: one chunk per call; the WebAssembly exports
     ├── world.rs             # Grid, tiles of grids, the view's faces' lattices, voxels read per face
     ├── cells.rs             # cells.ts, with a table per level
     ├── slicing.rs           # The parts of slice-selection.ts baking needs
@@ -103,7 +103,7 @@ native/                      # Spike of a native frontend (eframe + wgpu), linki
     ├── main.rs              # The window and camera; --shot, --bench, --walk, --check-requests against a dump
     ├── dump.rs              # Reads a dump: a view, its faces, grids and the chunks it wants
     ├── world.rs             # world.ts for generated worlds: a World's tiles, those the renderer wants first, made and indexed on threads
-    ├── slicing.rs           # slice-selection.ts: slices, chunks, eyes
+    ├── slicing.rs           # slice-selection.ts: slices, chunks, the leak bound
     ├── view.rs              # view.ts: faces, which rays and screen boxes they draw
     ├── renderer.rs          # renderer.ts: chunks in view, cached, stand-ins, coverage (bake's Coverage)
     ├── bakery.rs            # Worker threads baking chunks, a baker each sharing the tiles, and clustering their splats for the GPU

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { ParallaxRenderer, DEFAULT_RENDER_DISTANCE, parseViewQuery, viewQuery, type Chunk, type Frame } from './renderer'
 import { World } from './world'
-import { selectSlices, chunkCell, eyeOf } from './slice-selection'
+import { selectSlices, chunkCell } from './slice-selection'
 import { FACES, LAYER, faceTangents, focalLength, projector, toLocal, viewBasis, type Face, type Orientation } from './view'
 import type { Vec3 } from './world'
 
@@ -9,7 +9,7 @@ import type { Vec3 } from './world'
 // takes seconds per test. The renderer never modifies its world.
 const world = new World(12345, 'hills_with_trees')
 // Degrees: coarser than the default, so fewer chunks to bake.
-const MAX_LEAK = 2.3
+const MAX_LEAK = 7
 
 const faceNamed = (name: string) => FACES.find(f => f.name === name) as Face
 // Looking along +x+z (yaw 45°), that face's layers are parallel to the
@@ -103,7 +103,8 @@ describe('ParallaxRenderer', () => {
         for (const chunk of layer.chunks) {
           const { x, y, width: w, height: h } = chunkCell(layer.slice.level, chunk.i, chunk.j)
           expect(Number.isInteger(chunk.i) && Number.isInteger(chunk.j)).toBe(true)
-          expect(chunk.painted).toBeGreaterThan(0)
+          // Some cells show only grown splats of voxels just outside them.
+          expect(chunk.splats.length).toBeGreaterThan(0)
           expect(chunk.originX).toBeGreaterThanOrEqual(x - 1e-9)
           expect(chunk.originX + chunk.extentWidth).toBeLessThanOrEqual(x + w + 1e-9)
           expect(chunk.originY).toBeLessThanOrEqual(y + h + 1e-9)
@@ -115,22 +116,16 @@ describe('ParallaxRenderer', () => {
       expect(lastUpdate().voxelsRendered).toBeGreaterThanOrEqual(chunks.reduce((n, c) => n + c.painted, 0))
     })
 
-    it("bakes a level's chunks from its eye, and again only once the camera leaves the eye's cell", () => {
+    it('bakes a chunk once: moving keeps those still in view', () => {
+      const shown = () => new Map(layers().flatMap(({ face, slice: { level, layer, cutoff }, chunks }) =>
+        chunks.map(c => [[face, level, layer, cutoff, c.i, c.j].join(), c])))
       render()
-      const eyes = (camera: Vec3) => new Map(layers().map(l => [`${l.face}:${String(l.slice.level)}`, eyeOf(l.slice.level, toLocal(faceNamed(l.face), camera)).join()]))
-      const before = eyes(renderer.getCamera())
-      for (const layer of layers()) {
-        for (const chunk of layer.chunks) expect(chunk.eye.join()).toBe(before.get(`${layer.face}:${String(layer.slice.level)}`))
-      }
-      // Up past level 0's cell, within the others'.
-      renderer.setCamera({ y: renderer.getCamera().y + 0.75 })
+      const before = shown()
+      renderer.setCamera({ x: renderer.getCamera().x + 3, y: renderer.getCamera().y + 0.75 })
       render()
-      const after = eyes(renderer.getCamera())
-      const moved = new Set([...after].filter(([key, eye]) => before.get(key) !== eye).map(([key]) => key))
-      expect(moved.size).toBeGreaterThan(0)
-      const rebaked = layers().filter(l => l.chunks.some(c => c.eye.join() !== before.get(`${l.face}:${String(l.slice.level)}`)))
-      expect(rebaked.length).toBeGreaterThan(0)
-      expect(rebaked.every(l => moved.has(`${l.face}:${String(l.slice.level)}`))).toBe(true)
+      const kept = [...shown()].filter(([key]) => before.has(key))
+      expect(kept.length).toBeGreaterThan(10)
+      for (const [key, chunk] of kept) expect(chunk).toBe(before.get(key))
     })
 
     it('masks farther, thicker slices more coarsely', () => {
@@ -339,10 +334,10 @@ describe('ParallaxRenderer', () => {
     })
 
     it('uses fewer, thicker slices for a larger tolerance', () => {
-      renderer.setMaxLeak(0.3)
+      renderer.setMaxLeak(3)
       render()
       const strict = lastUpdate()
-      renderer.setMaxLeak(6)
+      renderer.setMaxLeak(12)
       render()
       expect(lastUpdate().detail).toBeLessThan(strict.detail)
       expect(lastUpdate().layerCount).toBeLessThan(strict.layerCount)

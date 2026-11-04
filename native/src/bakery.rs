@@ -1,7 +1,7 @@
 //! Bakes chunks on worker threads (WorkerBakery in worker-bakery.ts), each
 //! with its own baker sharing the grids. Every render hands over the chunks
-//! it misses, most wanted first, replacing the previous list; a cell always
-//! goes to the same worker, which keeps its surface for other eyes.
+//! it misses, most wanted first, replacing the previous list, spread over
+//! the workers by cell.
 //! A chunk is in flight from when its worker takes it until take() hands it
 //! over, and is not queued again meanwhile. Workers bake from the latest
 //! tiles of each level; a chunk is only asked for once it has all the tiles
@@ -17,14 +17,13 @@ use bake::{Baker, Slice, Tiles};
 use crate::compositor::{GpuCluster, GpuSplat, cluster};
 use crate::slicing::{GRID_LEVELS, atom_level};
 
-/** A chunk to bake: cell (i, j) of a slice of a face, from `eye`, grown if `fill`, reading tiles [i0, i1] × [k0, k1] of its level. */
+/** A chunk to bake: cell (i, j) of a slice of a face, grown if `fill`, reading tiles [i0, i1] × [k0, k1] of its level. */
 #[derive(Clone, Copy)]
 pub struct Request {
     pub face: usize,
     pub slice: Slice,
     pub i: i32,
     pub j: i32,
-    pub eye: [i32; 3],
     pub fill: bool,
     pub tiles: [i32; 4],
     /** The size of the blocks its splats are clustered by (compositor::cluster). */
@@ -49,12 +48,12 @@ pub struct Mask {
     pub blocks: Vec<u8>,
 }
 
-/** What a request bakes: face, slice, cell, eye, fill. */
-type Key = (usize, i32, i32, u64, i32, i32, [i32; 3], bool);
+/** What a request bakes: face, slice, cell, fill. */
+type Key = (usize, i32, i32, u64, i32, i32, bool);
 
 impl Request {
     fn key(&self) -> Key {
-        (self.face, self.slice.level, self.slice.layer, self.slice.cutoff.to_bits(), self.i, self.j, self.eye, self.fill)
+        (self.face, self.slice.level, self.slice.layer, self.slice.cutoff.to_bits(), self.i, self.j, self.fill)
     }
 
     /** The worker of the request's cell. */
@@ -163,7 +162,7 @@ fn work(queue: &Queue, send: &Sender<(Request, Baked)>, grids: &Grids, mut baker
             queue.0.lock().expect("queue").in_flight.remove(&r.key());
             continue;
         }
-        let b = baker.bake(r.face, &r.slice, r.i, r.j, r.eye, r.fill);
+        let b = baker.bake(r.face, &r.slice, r.i, r.j, r.fill);
         let (splats, clusters) = cluster(&baker.numbers, b.painted, r.block);
         let baked = Baked {
             origin: [b.origin_x, b.origin_y],

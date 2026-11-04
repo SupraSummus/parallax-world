@@ -1,7 +1,7 @@
 //! Chunk baking, compiled to WebAssembly (in the worlds' module) for the
 //! bake workers: the voxels of a chunk cell that can show, as splats
-//! (hexagons of one colour) projected from an eye onto its slice's centre
-//! plane, and a mask of what they cover.
+//! (hexagons of one colour) on its slice's centre plane, seen along the
+//! face's axis, and a mask of what they cover.
 //! A world is a grid per level of detail, or tiles of grids;
 //! each slice reads the one its atoms are the voxels of (in_grid).
 //! chunk-baker.ts drives it through the
@@ -21,14 +21,13 @@ mod tables;
 mod world;
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use cells::Cells;
 use fill::{fill_mask, solid_blocks};
 use slicing::{LAYER, atom_level, chunk_cell, spacing, thickness};
 use splats::{Splats, chunk_splats};
-use surface::{Voxel, cell_reads, cell_surface};
+use surface::{cell_reads, cell_surface};
 use world::{Geometry, Reader};
 
 // For native frontends, which link the baker instead of loading its WebAssembly.
@@ -51,17 +50,15 @@ fn mask_scale(level: i32) -> f64 {
 }
 
 /**
- * A slice (level, layer, cutoff) of the world and its eye as the grid the
- * slice reads sees them: grid ℓ = atom_level(level) has the sites of N·FCC,
- * N = 2^ℓ, as its own units, so the slice is slab `layer` of
- * 2^(level − ℓ) of its layers, cut off at cutoff / N: a slice of single
- * voxels. The eye, a site of 2^level·FCC, is one of the grid's.
- * Returns ℓ, that slice and that eye.
+ * A slice (level, layer, cutoff) of the world as the grid it reads sees it:
+ * grid ℓ = atom_level(level) has the sites of N·FCC, N = 2^ℓ, as its own
+ * units, so the slice is slab `layer` of 2^(level − ℓ) of its layers, cut
+ * off at cutoff / N: a slice of single voxels. Returns ℓ and that slice.
  */
-fn in_grid(slice: &Slice, eye: [i32; 3]) -> (usize, Slice, [i32; 3]) {
+fn in_grid(slice: &Slice) -> (usize, Slice) {
     let l = atom_level(slice.level);
     let n = spacing(l);
-    (l as usize, Slice { level: slice.level - l, layer: slice.layer, cutoff: slice.cutoff / n as f64 }, eye.map(|v| v / n))
+    (l as usize, Slice { level: slice.level - l, layer: slice.layer, cutoff: slice.cutoff / n as f64 })
 }
 
 /**
@@ -70,13 +67,10 @@ fn in_grid(slice: &Slice, eye: [i32; 3]) -> (usize, Slice, [i32; 3]) {
  * inclusive: a chunk is the same whatever else the grid holds.
  */
 pub fn chunk_reads(slice: &Slice, i: i32, j: i32) -> (usize, [i32; 3], [i32; 3]) {
-    let (level, slice, _) = in_grid(slice, [0; 3]);
+    let (level, slice) = in_grid(slice);
     let (min, max) = cell_reads(&slice, i, j);
     (level, min, max)
 }
-
-/** Cell surfaces kept for baking the same cell from other eyes. */
-const MAX_SURFACES: usize = 1024;
 
 /** A baked chunk: see ChunkSplats. Its numbers and blocks stay in the baker until the next bake. */
 pub struct Baked {
@@ -93,9 +87,6 @@ pub struct Baked {
     pub grown: usize,
 }
 
-/** Face, grid level, then the slice as the grid sees it: level, layer, cutoff (as bits), i, j. */
-type SurfaceKey = (usize, usize, i32, i32, u64, i32, i32);
-
 /** One world's grids, palettes and lattices, and the buffers reused across bakes. */
 pub struct Baker {
     /**
@@ -111,9 +102,6 @@ pub struct Baker {
     palettes: Vec<u32>,
     /** Which cell of 2·FCC owns each site, for cutoffs. */
     pairs: Cells,
-    /** Cell surfaces, with the bake count they were last used at. */
-    surfaces: HashMap<SurfaceKey, (Vec<Voxel>, u64)>,
-    uses: u64,
     splats: Splats,
     mask: Vec<bool>,
     pub blocks: Vec<u8>,
@@ -135,8 +123,6 @@ impl Baker {
             lattices,
             palettes: tables::palettes(&lattices, colours),
             pairs: Cells::new(2),
-            surfaces: HashMap::new(),
-            uses: 0,
             splats: Splats::new(),
             mask: Vec::new(),
             blocks: Vec::new(),
@@ -149,7 +135,6 @@ impl Baker {
     /** Sets the grid of `level`, replacing what it had; levels without one so far read as empty. */
     pub fn set_grid(&mut self, level: usize, grid: Grid) -> &mut Grid {
         self.reach(level);
-        self.surfaces.retain(|key, _| key.1 != level);
         self.last = level;
         self.grids[level] = Arc::new(Tiles::one(grid));
         Arc::get_mut(&mut self.grids[level]).and_then(Tiles::only_mut).expect("just set")
@@ -157,8 +142,8 @@ impl Baker {
 
     /**
      * Sets the tiles of `level` to ones other bakers may share. Tiles may
-     * come and go but not change, so the surfaces kept stay right as long
-     * as every chunk baked has all the tiles it reads (chunk_reads).
+     * come and go but not change, so a chunk baked stays right as long as
+     * it had all the tiles it reads (chunk_reads).
      */
     pub fn share_tiles(&mut self, level: usize, tiles: Arc<Tiles>) {
         self.reach(level);
@@ -177,41 +162,19 @@ impl Baker {
     }
 
     /**
-     * Fills self.splats with the splats of a chunk (see chunk_splats) of a
-     * slice as grid `level` sees it (in_grid), from its cell's surface,
-     * cached.
+     * Bakes chunk (i, j) of a slice of view face `face`, grown to fill gaps
+     * if `fill`: its splats that reach into the cell (chunk_splats), the
+     * extent of what they draw clipped to the cell, and a mask of it.
+     * See ChunkBaker.bake.
      */
-    #[allow(clippy::too_many_arguments)]
-    fn chunk_splats(&mut self, face: usize, level: usize, slice: &Slice, i: i32, j: i32, eye: [i32; 3], fill: bool) {
-        self.uses += 1;
+    pub fn bake(&mut self, face: usize, slice: &Slice, i: i32, j: i32, fill: bool) -> Baked {
+        let (level, slice) = in_grid(slice);
         self.reach(level);
-        let key = (face, level, slice.level, slice.layer, slice.cutoff.to_bits(), i, j);
-        if !self.surfaces.contains_key(&key) {
-            if self.surfaces.len() >= MAX_SURFACES {
-                let oldest = self.surfaces.iter().min_by_key(|(_, (_, used))| *used).map(|(k, _)| *k);
-                if let Some(oldest) = oldest {
-                    self.surfaces.remove(&oldest);
-                }
-            }
-            let reader = Reader::new(&self.grids[level], self.lattices[face]);
-            self.surfaces.insert(key, (cell_surface(&reader, &self.geometry, &self.pairs, slice, i, j), 0));
-        }
-        let surface = self.surfaces.get_mut(&key).expect("just inserted");
-        surface.1 = self.uses;
+        let reader = Reader::new(&self.grids[level], self.lattices[face]);
+        let surface = cell_surface(&reader, &self.geometry, &self.pairs, &slice, i, j);
         let palettes = self.palettes.len() / VIEW_FACES;
         let palette = &self.palettes[face * palettes..(face + 1) * palettes];
-        chunk_splats(&mut self.splats, &self.geometry, palette, &surface.0, slice, eye, fill);
-    }
-
-    /**
-     * Bakes chunk (i, j) of a slice of view face `face` from `eye` (a site,
-     * in the face's lattice coordinates), grown to fill gaps if `fill`:
-     * its splats that reach into the cell, the extent of what they draw
-     * clipped to the cell, and a mask of it. See ChunkBaker.bake.
-     */
-    pub fn bake(&mut self, face: usize, slice: &Slice, i: i32, j: i32, eye: [i32; 3], fill: bool) -> Baked {
-        let (level, slice, eye) = in_grid(slice, eye);
-        self.chunk_splats(face, level, &slice, i, j, eye, fill);
+        chunk_splats(&mut self.splats, &self.geometry, palette, &surface, &slice, fill);
 
         // Drawn extent, clipped to the cell, in the grid's units.
         let cell = chunk_cell(slice.level, i, j);
@@ -332,21 +295,10 @@ pub extern "C" fn world_ready() {
  */
 #[unsafe(no_mangle)]
 #[allow(clippy::too_many_arguments)]
-pub extern "C" fn bake(
-    face: u32,
-    level: i32,
-    layer: i32,
-    cutoff: f64,
-    i: i32,
-    j: i32,
-    eye_a: i32,
-    eye_b: i32,
-    eye_c: i32,
-    fill: u32,
-) -> *const f64 {
+pub extern "C" fn bake(face: u32, level: i32, layer: i32, cutoff: f64, i: i32, j: i32, fill: u32) -> *const f64 {
     STATE.with_borrow_mut(|state| {
         let State::Ready(baker) = state else { return std::ptr::null() };
-        let baked = baker.bake(face as usize, &Slice { level, layer, cutoff }, i, j, [eye_a, eye_b, eye_c], fill != 0);
+        let baked = baker.bake(face as usize, &Slice { level, layer, cutoff }, i, j, fill != 0);
         RESULT.with_borrow_mut(|result| {
             *result = [
                 baked.width as f64,

@@ -30,7 +30,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   at level 5: 0.159 to 0.117, over four seeds),
   for 2 bytes more on the 2–18% of a coarse town's voxels it changes.
   Opacity per direction made things worse.
-  The baker would pick a splat's colour by the direction from the eye
+  The baker would pick a splat's colour by its face's axis
   (dominant axis, or blended); compositors and coverage stay as they are.
   The whole path, grids to baker to the web's transfer: about a week.
 - **The native frontend is missing pieces.**
@@ -54,14 +54,25 @@ Numbers are for the forest at 1280×800, as measured when written.
   and slice selection, faces and the renderer are in `native/src` too;
   `native/src/slicing.rs` restates parts of `bake/src/slicing.rs`.
   The renderer is the large step.
-- **Moving rebakes whole levels.**
-  A level is baked again when the camera leaves its eye's cell,
-  so walking rebakes 1.3–1.8× the chunks that one direction per chunk did,
-  mostly of levels 0 and 1 (cells 1 and 2 units across).
-  By the scaling of section 2, eyes on a lattice finer than the level's
-  (N = 2^(k−1)) would cut both: detail ∝ √N,
-  chunks in view ∝ detail³ and rebakes per unit moved ∝ chunks / N,
-  so ∝ √N, with eyes between voxel sites.
+- **The leak bound wants thin slices.**
+  Slices are drawn as seen along their face's axis,
+  so the slant of the camera's ray, up to 1 at a face's edge,
+  sets the leak (section 2 of `docs/architecture.md`): detail ∝ 1/ε.
+  Chunks once baked in perspective from a site near the camera
+  had detail ∝ 1/√ε, but a level was baked again
+  whenever the camera left that site's cell.
+  Holding 1.5° now takes about 3 times the layers
+  and 5–10 times the chunks in view in the city.
+  A depth per splat would draw each voxel where the camera sees it.
+- **Gap filling grows splats for the most slanted rays.**
+  A gap between slices opens by the slant of the camera's ray
+  times a voxel's depth in its slice (section 3 of `docs/architecture.md`),
+  but a chunk does not know the slant, so grown splats grow by up to half
+  a slice's thickness everywhere: silhouettes thicken where no gap opens,
+  towards a face's middle.
+  The compositor knows the slant and could scale the growth;
+  masks would then have to tell what a chunk covers for every camera
+  from what it may draw for some.
 - **Coverage masks are coarser than the screen.**
   `mask_scale` marks ⌊40 / t⌋ pixels per unit of a slice t thick,
   but at a level's nearest slices a unit is focal / (t · detail · LAYER)
@@ -85,7 +96,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   is mostly drawing the clusters that show,
   whose splats cover the screen several times over.
   About half of all splats are hidden by nearer ones of their chunk,
-  the same from every camera (splats lie where the eye puts them),
+  the same from every camera (splats lie at their sites),
   so the baker could drop them.
 - **Bricks on the edge of a face's rhombus are baked whole.**
   Near where a level starts, about 19 bricks meet the rhombus,
@@ -93,8 +104,8 @@ Numbers are for the forest at 1280×800, as measured when written.
 - **Most baked splats are hidden.**
   When chunks were bitmaps,
   over 95 % of opaque baked pixels were covered by nearer slices.
-  The eye's cell bounds where the camera can see from,
-  so content hidden from the whole cell need not be baked.
+  Content that no ray of the face reaches within its slice
+  need not be baked.
 - **Flying, the main thread can't keep up with the workers.**
   Flying up (a trace in a desktop browser),
   workers bake about 4,000 chunks a second
@@ -145,13 +156,13 @@ Numbers are for the forest at 1280×800, as measured when written.
 - Find covered chunks more exactly: many chunks drawn show no pixel.
 - Measure the WebGL compositor on real GPUs (headless Chromium only has a
   software one); if draw calls matter, pack chunks' splats into one buffer.
-- Project splats from the eye in the vertex shader instead of in the baker:
-  a chunk's splats would no longer depend on the eye, only its mask would,
-  so moving would rebake masks, not splats.
 - Paint cut cross-sections with the colour of the surface above them: a 2D
   prototype allowed slices twice as thick at the same leak.
 - Fill gaps in screen space (only pixels no layer covers) instead of
   growing faces.
+- Drop a splat's size: painted ones are all a voxel's outline,
+  and grown ones grow the same within a layer,
+  so a splat could be its site and colour.
 - Describe the city in metres, like the forest, instead of boxes on its plan.
 - Port the toy worlds to the forest's metric scale, or drop them.
 - Show render distance in metres:

@@ -14,28 +14,26 @@ use bake::{Coverage, Lattice, Slice, chunk_reads};
 
 use crate::bakery::{Baked, Bakery, Mask, Request};
 use crate::slicing::{
-    GRID_LEVELS, LAYER, MAX_LEVEL, atom_level, cell_margin, chunk_cell, chunk_cells, eye_of, leak_free_detail, select_slices, site_layers,
-    slice_centre,
+    GRID_LEVELS, LAYER, atom_level, cell_margin, chunk_cell, chunk_cells, leak_free_detail, select_slices, site_layers, slice_centre,
 };
 use crate::view::{Face, ScreenBox, ScreenBoxes, Vec3, View, in_face, to_local};
 use crate::world::{Level, TILE, TileId};
 
-/** Slices start four layers ahead: the nearest voxels then reach three layers ahead, two past level 0's eye. */
+/** Slices start four layers ahead: a nearer one would blow single voxels up over the screen. */
 const NEAR_DEPTH: f64 = 4.0 * LAYER;
 
 /** Slices unused for this many renders are dropped once there are more than MAX_SLICES. */
 const MAX_SLICES: usize = 2048;
 const UNUSED_RENDERS: u64 = 300;
 
-/** Chunks kept per cell: the latest and the one before, so going back and forth over an eye's edge rebakes nothing. */
+/** Chunks kept per cell: the latest and the one before, so toggling gap filling back rebakes nothing. */
 const CHUNKS_PER_CELL: usize = 2;
 
-/** A baked piece of a slice: cell (i, j), from `eye`, grown if `fill`. `id` names it to the coverage and the compositor. */
+/** A baked piece of a slice: cell (i, j), grown if `fill`. `id` names it to the coverage and the compositor. */
 pub struct Chunk {
     pub id: u32,
     pub i: i32,
     pub j: i32,
-    eye: [i32; 3],
     fill: bool,
     pub baked: Baked,
 }
@@ -81,8 +79,8 @@ struct Cell {
 }
 
 impl Cell {
-    fn find(&self, eye: [i32; 3], fill: bool) -> Option<&Arc<Chunk>> {
-        self.chunks.iter().find(|c| c.eye == eye && c.fill == fill)
+    fn find(&self, fill: bool) -> Option<&Arc<Chunk>> {
+        self.chunks.iter().find(|c| c.fill == fill)
     }
 
     fn latest(&self) -> Option<&Arc<Chunk>> {
@@ -132,7 +130,6 @@ struct FaceView<'a> {
     lattice: &'a Lattice,
     tangents: [f64; 4],
     camera: Vec3,
-    eyes: Vec<[i32; 3]>,
     boxes: ScreenBoxes,
 }
 
@@ -159,7 +156,7 @@ impl Renderer {
             bakery,
             next_id: 0,
             renders: 0,
-            max_leak: 1.5,
+            max_leak: 6.0,
             render_distance,
             fill: true,
             skip_covered: true,
@@ -196,14 +193,7 @@ impl Renderer {
                 let [r, u, fw] = view.face_basis(face);
                 self.coverage.set_face(f, r, u, fw);
             }
-            let of = FaceView {
-                face: f,
-                lattice: &face.lattice,
-                tangents,
-                camera,
-                eyes: (0..=MAX_LEVEL).map(|level| eye_of(level, camera)).collect(),
-                boxes: view.screen_boxes(face),
-            };
+            let of = FaceView { face: f, lattice: &face.lattice, tangents, camera, boxes: view.screen_boxes(face) };
             for id in select_slices(camera[2] / LAYER, NEAR_DEPTH / LAYER, self.render_distance / LAYER, detail) {
                 let key = slice_key(f, &id);
                 let slice = self.slices.entry(key).or_insert_with(|| {
@@ -256,11 +246,11 @@ impl Renderer {
         for (r, baked) in self.bakery.take() {
             let Some(slice) = self.slices.get_mut(&slice_key(r.face, &r.slice)) else { continue };
             let cell = slice.cells.entry((r.i, r.j)).or_default();
-            if cell.find(r.eye, r.fill).is_some() {
+            if cell.find(r.fill).is_some() {
                 continue;
             }
             self.next_id += 1;
-            cell.chunks.push(Arc::new(Chunk { id: self.next_id, i: r.i, j: r.j, eye: r.eye, fill: r.fill, baked }));
+            cell.chunks.push(Arc::new(Chunk { id: self.next_id, i: r.i, j: r.j, fill: r.fill, baked }));
             if cell.chunks.len() > CHUNKS_PER_CELL {
                 cell.chunks.remove(0);
             }
@@ -364,7 +354,6 @@ fn draw_slice(
 ) -> Layer {
     let id = slice.id;
     let camera = of.camera;
-    let eye = of.eyes[id.level as usize];
     // Slices start at least NEAR_DEPTH ahead of the camera, so this is > 0.
     let distance = slice_centre(&id) - camera[2];
     let mut layer = Layer { face: of.face, slice: id, distance, placements: Vec::new() };
@@ -405,7 +394,7 @@ fn draw_slice(
             }
         }
         let cell = slice.cells.get(&(i, j));
-        let chunk = match cell.and_then(|c| c.find(eye, fill)) {
+        let chunk = match cell.and_then(|c| c.find(fill)) {
             Some(chunk) => chunk.clone(),
             // Its tiles dropped since, the camera gone far and back: what they baked stands in.
             None if !complete => match cell.and_then(Cell::latest) {
@@ -425,7 +414,7 @@ fn draw_slice(
                     }
                 }
                 let block = crate::compositor::block(distance, view.focal);
-                wants.chunks.push((Request { face: of.face, slice: id, i, j, eye, fill, tiles, block }, distance, latest.is_some()));
+                wants.chunks.push((Request { face: of.face, slice: id, i, j, fill, tiles, block }, distance, latest.is_some()));
                 let Some(latest) = latest else { continue };
                 latest
             }
