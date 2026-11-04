@@ -1,8 +1,9 @@
-//! The WebAssembly interface: worldgen.ts starts a world of a seed, then
-//! generates box after box of it, reading each result from RESULT and the
-//! buffers it points to, which the next call reuses. The module is the
-//! web's only one: it holds the baker's interface too (bake/src/lib.rs,
-//! bake/src/coverage.rs), as a dependency's exports are the module's.
+//! The WebAssembly interface: worldgen.ts lists the worlds, starts one of
+//! a seed, then generates box after box of it, reading each result from
+//! RESULT and the buffers it points to, which the next call reuses. The
+//! module is the web's only one: it holds the baker's interface too
+//! (bake/src/lib.rs, bake/src/coverage.rs), as a dependency's exports are
+//! the module's.
 
 use std::cell::RefCell;
 
@@ -22,6 +23,8 @@ struct State {
 thread_local! {
     static STATE: RefCell<Option<State>> = const { RefCell::new(None) };
     static RESULT: RefCell<[f64; 10]> = const { RefCell::new([0.0; 10]) };
+    /** The names of WORLDS, in UTF-8, each ended by a NUL. */
+    static NAMES: Vec<u8> = WORLDS.iter().flat_map(|e| e.name.bytes().chain([0])).collect();
 }
 
 fn result(values: &[f64]) -> *const f64 {
@@ -29,6 +32,12 @@ fn result(values: &[f64]) -> *const f64 {
         result[..values.len()].copy_from_slice(values);
         result.as_ptr()
     })
+}
+
+/** The worlds; returns RESULT: their count, and a pointer to NAMES and its length in bytes. */
+#[unsafe(no_mangle)]
+pub extern "C" fn worldgen_worlds() -> *const f64 {
+    NAMES.with(|names| result(&[WORLDS.len() as f64, names.as_ptr() as usize as f64, names.len() as f64]))
 }
 
 /**

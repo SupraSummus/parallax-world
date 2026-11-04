@@ -23,7 +23,7 @@ pub struct Entry {
     pub levels: u32,
 }
 
-/** Every world; their indices are the web's (worldgen_start). */
+/** Every world; the web lists them by itself (worldgen_worlds) and starts them by index (worldgen_start). */
 pub const WORLDS: &[Entry] = &[
     // Near the spawn point: path, trees, undergrowth, from under the ground to above the crowns.
     Entry { name: "forest", make: forest::forest, regions: &[Box3 { min: [-128, -64, -384], max: [128, 384, -128] }], levels: 6 },
