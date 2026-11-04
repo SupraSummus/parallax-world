@@ -17,8 +17,8 @@ pub struct Entry {
     pub name: &'static str,
     /** The world of a seed. */
     pub make: fn(u64) -> World,
-    /** A region with a bit of everything in it, lattice units (see worldgen::contract::check). */
-    pub region: Box3,
+    /** Regions with, between them, a bit of everything in it, lattice units (see worldgen::contract::check). */
+    pub regions: &'static [Box3],
     /** The level up to which it keeps what a camera sees. */
     pub levels: u32,
 }
@@ -26,9 +26,15 @@ pub struct Entry {
 /** Every world; their indices are the web's (worldgen_start). */
 pub const WORLDS: &[Entry] = &[
     // Near the spawn point: path, trees, undergrowth, from under the ground to above the crowns.
-    Entry { name: "forest", make: forest::forest, region: Box3 { min: [-128, -64, -384], max: [128, 384, -128] }, levels: 6 },
-    // The first town's south edge: fields, its first row of houses and the main street, trees of its yards and of the forest.
-    Entry { name: "valley", make: valley::valley, region: Box3 { min: [-128, -48, 760], max: [256, 208, 1016] }, levels: 5 },
+    Entry { name: "forest", make: forest::forest, regions: &[Box3 { min: [-128, -64, -384], max: [128, 384, -128] }], levels: 6 },
+    // The first town's south edge: fields, its first row of houses and the main street, trees of its yards and of the forest;
+    // and its centre: houses back to back, a cross street, the square with its fountain and church.
+    Entry {
+        name: "valley",
+        make: valley::valley,
+        regions: &[Box3 { min: [-128, -48, 760], max: [256, 208, 1016] }, Box3 { min: [-64, -48, 1408], max: [320, 288, 1856] }],
+        levels: 4,
+    },
 ];
 
 /** The world named `name`. */

@@ -55,6 +55,12 @@ const BLOCK_D: i64 = m(40.0);
 const PAVEMENT: i64 = m(2.5);
 const STOREY: i64 = m(3.25);
 const WALL: i64 = 3;
+/**
+ * How much deeper a roof is than what it covers, measured straight down,
+ * besides its slope: two sites of level 1, so that columns of its sites
+ * cross it rather than step over it to the wall under it.
+ */
+const ROOF: i64 = 4;
 /** Towns are this far apart along the path, give or take JITTER. */
 const SPACING: i64 = m(1200.0);
 const JITTER: i64 = m(150.0);
@@ -467,7 +473,8 @@ impl House {
             (min[across], max[across]) = (-eaves as f64, (width + eaves) as f64);
             (min, max)
         };
-        let (min, max) = roofed(rise * width as f64 / (width + 2 * eaves) as f64, 0);
+        let (mut min, mut max) = roofed(rise * width as f64 / (width + 2 * eaves) as f64, 0);
+        (min[1], max[1]) = (min[1] - ROOF as f64, max[1] - ROOF as f64);
         part.gable(min, max, ridge, plaster, Op::Fill);
         let (min, max) = roofed(rise, eaves);
         part.gable(min, max, ridge, roof, Op::Fill);
@@ -524,7 +531,8 @@ fn church(part: &mut Part) {
     let mut nave = part.within(Frame::new([TOWER, 0, 0], [U, V, W]));
     nave.add([0, -3, 0], [nave_length, nave_top, NAVE], stone);
     let rise = m(5.5) as f64;
-    nave.gable([0.0, nave_top as f64, 0.0], [nave_length as f64, nave_top as f64 + rise * 0.9, NAVE as f64], 0, stone, Op::Fill);
+    let gable = (nave_top - ROOF) as f64;
+    nave.gable([0.0, gable, 0.0], [nave_length as f64, gable + rise * 0.9, NAVE as f64], 0, stone, Op::Fill);
     nave.gable(
         [0.0, nave_top as f64, -3.0],
         [nave_length as f64 + 2.0, nave_top as f64 + rise, (NAVE + 3) as f64],
