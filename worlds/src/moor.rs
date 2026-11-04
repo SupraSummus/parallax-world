@@ -249,8 +249,8 @@ fn terrain(f: Rc<Moor>) -> Field {
         } else {
             K::grass
         };
-        // Peat down to the world's bottom: the heath is solid, not a shell.
-        let column = Column::new(h, spacing).surface(surface, m(0.5)).fill_below(K::peat, HEIGHTS.0);
+        // Peat down to the world's bottom and no further, where hosts stop generating: the heath is solid, not a shell.
+        let column = Column::new(h, spacing).surface(surface, m(0.5)).fill_below_exactly(K::peat, HEIGHTS.0);
         match surface {
             // Thickened only while it is at most four sites: taller, a medium stops rays skimming over the heath.
             K::heather if spacing <= 2 => column.medium(K::heather, m(0.4), 0.5),

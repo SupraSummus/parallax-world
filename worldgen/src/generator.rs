@@ -241,6 +241,8 @@ pub enum Layer {
 
 #[derive(Clone)]
 pub struct KindDef {
+    /** For messages (worldgen::contract's margins). */
+    pub name: &'static str,
     /**
      * Its class of material, shared by kinds that may stand in for each
      * other far away: the contract compares what rays hit by type, not
@@ -262,7 +264,7 @@ macro_rules! kinds {
         #[derive(Clone, Copy, PartialEq, Eq, Default)]
         #[repr(u8)]
         pub enum K { #[default] $($name),* }
-        pub const KINDS: &[$crate::generator::KindDef] = &[$($crate::generator::KindDef { kind_type: $type, colors: &[$($color),*] }),*];
+        pub const KINDS: &[$crate::generator::KindDef] = &[$($crate::generator::KindDef { name: stringify!($name), kind_type: $type, colors: &[$($color),*] }),*];
         /** Kinds of the generator's before these. */
         pub const BASE: $crate::generator::Kind = $base;
         pub fn k(kind: K) -> $crate::generator::Kind {
@@ -1355,6 +1357,29 @@ fn nearest_site(p: At, s: i64) -> [i64; 3] {
         r[i] += if v[i] > r[i] * ONE { 1 } else { -1 };
     }
     r
+}
+
+/**
+ * The thing `population` makes in cell (i, j, k) of N·FCC (i + j + k
+ * even), as `generate` makes it: its key, its bounds and the box its
+ * population's reach allows it; none if it makes none there. For checks
+ * that look at more things than a box draws (worldgen::contract).
+ */
+pub fn thing_in(generator: &Generator, population: &Population, i: i64, j: i64, k: i64) -> Option<(String, Box3, Box3)> {
+    let n = population.cell;
+    let centre = [i * n, j * n, k * n];
+    let cell = Cell { i, j, k, centre, n, population: population.name, seed: generator.seed };
+    let anchor = (population.anchor)(&cell)?;
+    if nearest_site(at(anchor), n) != [i, j, k] {
+        return None;
+    }
+    let node = (population.make)(anchor, &cell)?;
+    let [rx, ry, rz] = population.reach;
+    let reach = Box3 {
+        min: [centre[0] - n - rx, centre[1] - n - ry, centre[2] - n - rz],
+        max: [centre[0] + n + rx, centre[1] + n + ry, centre[2] + n + rz],
+    };
+    Some((format!("{} {i},{j},{k}", population.name), bounds_of(&node), reach))
 }
 
 fn bounds_of(node: &Node) -> Box3 {

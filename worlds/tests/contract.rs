@@ -1,22 +1,71 @@
 //! Every world keeps the contract (worldgen::contract) in its registry
-//! entry's regions: a test each, so they run in parallel.
+//! entry's regions, at several seeds: a test each, so they run in
+//! parallel, and a thread each seed.
 
-use worlds::WORLDS;
+use worldgen::contract::{check, check_content, follow_surface};
+use worlds::{Entry, REGIONS_SEED, WORLDS};
 
-/** A test per world named, keeps_the_contract::<name>, and the names. */
+/** The seeds each world is checked at, but those that name their own. */
+const SEEDS: &[u64] = &[REGIONS_SEED, 1, 2, 3];
+
+/**
+ * `entry`'s world keeps the contract at each of `seeds`, its regions
+ * following its surface from REGIONS_SEED's; panics with each seed's
+ * breaks.
+ */
+fn keeps_the_contract(entry: &Entry, seeds: &[u64]) {
+    let broken: Vec<String> = std::thread::scope(|scope| {
+        let threads: Vec<_> = seeds
+            .iter()
+            .map(|&seed| {
+                // World and Generator aren't Send: each thread makes its own.
+                let thread = scope.spawn(move || {
+                    let world = (entry.make)(seed);
+                    let regions = follow_surface(entry.regions, &(entry.make)(REGIONS_SEED), &world);
+                    let name = format!("{} (seed {seed})", entry.name);
+                    // Parts at one seed: they check how a world is drawn, which seeds don't change.
+                    if seed == REGIONS_SEED {
+                        check(&name, &world, &regions, entry.levels)
+                    } else {
+                        check_content(&name, &world, &regions, entry.levels)
+                    }
+                });
+                (seed, thread)
+            })
+            .collect();
+        threads
+            .into_iter()
+            .filter_map(|(seed, thread)| {
+                let panic = thread.join().err()?;
+                let message = panic.downcast_ref::<String>().cloned().or_else(|| panic.downcast_ref::<&str>().map(|s| s.to_string()));
+                Some(format!("seed {seed}: {}", message.unwrap_or_default()))
+            })
+            .collect()
+    });
+    assert!(broken.is_empty(), "{}", broken.join("\n"));
+}
+
+/**
+ * A test per world named, keeps_the_contract::<name>, and the names; a
+ * world whose regions hold what they should at some seeds only names
+ * them: `name = [seeds]`.
+ */
 macro_rules! worlds {
-    ($($name:ident),*) => {
+    ($($name:ident $(= [$($seed:expr),*])?),*) => {
         mod keeps_the_contract {
             $(
                 #[test]
                 fn $name() {
                     let entry = worlds::by_name(stringify!($name)).expect("a world of that name");
-                    worldgen::contract::check(entry.name, &(entry.make)(42), entry.regions, entry.levels);
+                    let seeds: &[u64] = worlds!(@seeds $($($seed),*)?);
+                    super::keeps_the_contract(entry, seeds);
                 }
             )*
         }
         const TESTED: &[&str] = &[$(stringify!($name)),*];
     };
+    (@seeds) => { super::SEEDS };
+    (@seeds $($seed:expr),+) => { &[$($seed),+] };
 }
 
 worlds!(forest, valley, moor);

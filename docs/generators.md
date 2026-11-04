@@ -148,9 +148,16 @@ and fields from position alone.
 ## Checks
 
 `worldgen::contract` (`worldgen/src/contract.rs`) checks a world in a region:
-`worlds/tests/contract.rs` runs it for each world in `WORLDS`,
+`worlds/tests/contract.rs` runs it for each world in `WORLDS`
+at seed 42 and three more, a thread each,
 and `worldgen/tests/contract.rs` for test worlds of fog, caves,
-and a village of houses with doors and tables:
+and a village of houses with doors and tables.
+An entry's regions are chosen at seed 42 (`REGIONS_SEED`);
+at other seeds each moves up or down with the world's surface over it
+(`follow_surface`: the median height of what is seen from above),
+as the ground lies higher or lower, while x and z stay.
+A world whose regions only hold what they should at some seeds
+names them in `worlds!` (`moor = [42]`).
 
 - a box against eight parts generated alone, in reverse order,
   at levels 0, 2 and one past the last checked below:
@@ -171,9 +178,25 @@ and a village of houses with doors and tables:
   levels two apart miss what drifts a little at every level,
   like a town's walls taking over from its roofs (0.17 off at level 2).
   At level 4 a house's edges show their walls from above
-  (see "Media are isotropic").
+  (see "Media are isotropic");
+- at each level up to one past the world's, in each region
+  and a host tile's width around spawn,
+  a slab above and one below the world's `heights` are empty:
+  hosts generate only within them, and cut whatever is outside;
+- the things of each population in a few thousand columns of cells
+  spread over kilometres around spawn, of all heights,
+  keep within its `reach`, which drawing checks only where it draws;
+  and where a thing's bounds leave the heights, nothing is drawn outside.
 
-With `--nocapture` it prints each level's margins.
+Parts are checked at seed 42 only:
+they check how a world is drawn, not what a seed puts in it.
+`reach` in `World` is how far around the camera hosts generate each level,
+a rendering distance, not checked.
+With `--nocapture` it prints each level's margins;
+`contract::margins` returns them as a `Report` to print,
+which breaks a margin down by material type, and each type by kind,
+largest differences first (`{}` the broken ones, `{:#}` all),
+as a broken contract's message does, naming the world, seed, region and level.
 The engine's tests also check that a thing's carves cut only the thing.
 A new world is an entry in `WORLDS`
 with regions that have, between them, a bit of everything in it,
@@ -305,9 +328,12 @@ Carves along a line want the same margin.
   in a region of the plan with a margin so the cell owning it is there too.
 - **Anchors on the ground.** `Cell::on_ground` picks a spot evenly under a cell;
   things anchored there are as even as one per square 2N wide.
-- **Seeds.** The contract checks one seed; make the world, and its spawn,
+- **Seeds.** The contract checks four seeds; make the world, and its spawn,
   for any: the spawn is a site (x + y + z even) in the air,
   found without assuming a feature a seed may lack.
+- **The bottom.** Spans at least two spacings tall grow past a fixed bottom
+  at coarse levels, out of the heights:
+  fill to the world's bottom with `fill_below_exactly`.
 
 ## Open problems
 

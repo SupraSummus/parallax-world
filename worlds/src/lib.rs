@@ -18,11 +18,17 @@ pub struct Entry {
     pub name: &'static str,
     /** The world of a seed. */
     pub make: fn(u64) -> World,
-    /** Regions with, between them, a bit of everything in it, lattice units (see worldgen::contract::check). */
+    /**
+     * Regions with, between them, a bit of everything in it at REGIONS_SEED, lattice units
+     * (see worldgen::contract::check); at other seeds they follow its surface up or down.
+     */
     pub regions: &'static [Box3],
     /** The level up to which it keeps what a camera sees. */
     pub levels: u32,
 }
+
+/** The seed a world's regions are chosen at. */
+pub const REGIONS_SEED: u64 = 42;
 
 /** Every world; the web lists them by itself (worldgen_worlds) and starts them by index (worldgen_start). */
 pub const WORLDS: &[Entry] = &[
