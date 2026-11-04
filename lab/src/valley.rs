@@ -7,8 +7,9 @@ use std::rc::Rc;
 
 use worldgen::generator::{Kind, generate};
 use worldgen::grid::Box3;
-use worldgen::noise::ONE;
+use worldgen::noise::{Fx, ONE, fx};
 use worldgen::plan::{Land, Plan};
+use worldgen::units::Units;
 use worlds::fields;
 use worlds::forest::{self, GROUND_SCALE, K as F, PATH_SCALE, Relief};
 use worlds::town::{self, K as T, TOWNS_SCALE, Towns};
@@ -135,18 +136,18 @@ pub fn land(seed: u64) -> (Rc<Towns>, Land) {
         let step = 16;
         Rc::new(Plan::sampled("slope", fields::SLOPE_SCALE, step, move |x, z| {
             let rise = (ground.at(x + step, z) - ground.at(x - step, z)).abs() + (ground.at(x, z + step) - ground.at(x, z - step)).abs();
-            rise * ONE / (2 * step)
+            Units(rise).to_fx() / Units(2 * step)
         }))
     };
     let bids = vec![
-        Rc::new(Plan::new("forest's bid", TOWNS_SCALE, |_, _| 0)),
+        Rc::new(Plan::new("forest's bid", TOWNS_SCALE, |_, _| Fx::ZERO)),
         {
             let towns = towns.clone();
-            Rc::new(Plan::new("town's bid", town::BID_SCALE, move |x, z| towns.bid(x, z)))
+            Rc::new(Plan::new("town's bid", town::BID_SCALE, move |x, z| Fx::from_bits(towns.bid(x, z))))
         },
         Rc::new(fields::bid(seed, towns.clone(), slope)),
     ];
-    (towns, Land::new(town::BID_SCALE, ONE / 8, bids))
+    (towns, Land::new(town::BID_SCALE, fx(0.125), bids))
 }
 
 /** An area of columns at a level: its first column (level units) and size. */

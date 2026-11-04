@@ -11,9 +11,9 @@ use worldgen::frame::{Frame, Part, facing, walls};
 use worldgen::generator::{ANY_SIZE, Child, Far, Field, Generator, Layer, Node, Op, Population, Shape, Span};
 use worldgen::js;
 use worldgen::kinds;
-use worldgen::noise::{Fbm, Fixed, ONE, Rng, ValueNoise, fixed, hash64, stream};
+use worldgen::noise::{Fbm, Fx, Rng, ValueNoise, fixed, fx, hash64, smoothstep, stream};
 use worldgen::plan::Plan;
-use worldgen::units::m;
+use worldgen::units::{Units, m};
 
 kinds! {
     base: 0;
@@ -35,7 +35,7 @@ const REACH: f64 = 352.0;
 const HEIGHTS: (i64, i64) = (m(-24.0), m(32.0));
 
 /** Water stands in the hollows up to this height. */
-const WATER: i64 = m(-4.5);
+const WATER: Units = Units::m(-4.5);
 /** Plan scales: the stream's bends, the ground's bumps, the steadings' regions (one at most in each). */
 const STREAM_SCALE: i64 = m(32.0);
 const GROUND_SCALE: i64 = 8;
@@ -51,7 +51,7 @@ const HUT_HALF: i64 = m(5.0);
 /** How far a steading reaches past its cell across: to the hut's far corner, or the ring's far stone. */
 const REACH_ACROSS: i64 = if HUT_FROM_RING + HUT_HALF > RING_RADIUS { HUT_FROM_RING + HUT_HALF + m(2.0) } else { RING_RADIUS + m(2.0) };
 /** How far the ground eases from a hut's level back to the heath's. */
-const TERRACE: i64 = m(12.0);
+const TERRACE: Units = Units::m(12.0);
 const WALL: i64 = 3;
 
 /** The moor's relief and noise, from its seed alone. */
@@ -63,16 +63,15 @@ struct Relief {
 }
 
 impl Relief {
-    /** The heath's height at (x, z), fixed point: hills tens of metres apart, bumps of a few. */
-    fn heath(&self, x: i64, z: i64) -> Fixed {
-        // A fraction of ONE times whole units is fixed point.
-        (self.hills.at(x, z) - ONE / 2) * m(28.0) + (self.bumps.at(x, z) - ONE / 2) * m(0.8)
+    /** The heath's height at (x, z), with its fraction: hills tens of metres apart, bumps of a few. */
+    fn heath(&self, x: i64, z: i64) -> Fx {
+        (self.hills.fx(x, z) - Fx::HALF) * Units::m(28.0) + (self.bumps.fx(x, z) - Fx::HALF) * Units::m(0.8)
     }
 
-    /** The stream's centre line at z, fixed point: winding along z west of the origin. */
-    fn stream_x(&self, z: i64) -> Fixed {
+    /** The stream's centre line at z, with its fraction: winding along z west of the origin. */
+    fn stream_x(&self, z: i64) -> Fx {
         let zm = z as f64 / m(1.0) as f64;
-        fixed(m(-40.0) as f64 + m(1.0) as f64 * (12.0 * js::sin(zm / 37.0 + self.phase) + 4.0 * js::sin(zm / 11.0 + 2.0 * self.phase)))
+        fx(m(-40.0) as f64 + m(1.0) as f64 * (12.0 * js::sin(zm / 37.0 + self.phase) + 4.0 * js::sin(zm / 11.0 + 2.0 * self.phase)))
     }
 }
 
@@ -80,12 +79,12 @@ impl Relief {
 #[derive(Clone, Copy, Default)]
 struct Steading {
     ring: [i64; 2],
-    ring_ground: i64,
+    ring_ground: Units,
     radius: i64,
     stones: i64,
     /** The hut's footprint centre (x, z), floor level, footprint and quarter turns. */
     centre: [i64; 2],
-    level: i64,
+    level: Units,
     length: i64,
     depth: i64,
     turns: i64,
@@ -94,7 +93,7 @@ struct Steading {
 
 impl Steading {
     fn frame(&self) -> Frame {
-        Frame::centred([self.centre[0], self.level + 1, self.centre[1]], [self.length, 0, self.depth], self.turns)
+        Frame::centred([self.centre[0], self.level.0 + 1, self.centre[1]], [self.length, 0, self.depth], self.turns)
     }
 
     /** Where the path starts and ends: outside the hut's door, and at the ring's edge. */
@@ -117,9 +116,9 @@ fn to_segment(x: f64, z: f64, a: [f64; 2], b: [f64; 2]) -> f64 {
 
 struct Moor {
     relief: Rc<Relief>,
-    stream: Rc<Plan<Fixed>>,
+    stream: Rc<Plan<Fx>>,
     steadings: Rc<Plan<Option<Steading>>>,
-    ground: Plan<i64>,
+    ground: Plan<Units>,
 }
 
 /** The region of column (x, z): REGION wide, region (0, 0) around the origin. */
@@ -133,9 +132,9 @@ impl Moor {
         self.steadings.at(i, k)
     }
 
-    /** How far column (x, z) is from the stream's centre line, units; and its half width there. */
-    fn stream_distance(&self, x: i64, z: i64) -> (i64, i64) {
-        ((x * ONE - self.stream.at(0, z)).abs() >> 16, m(1.0) + (z.rem_euclid(97) * m(0.6) / 97))
+    /** How far column (x, z) is from the stream's centre line; and its half width there. */
+    fn stream_distance(&self, x: i64, z: i64) -> (Units, Units) {
+        ((Units(x).to_fx() - self.stream.at(0, z)).abs().floor_units(), Units::m(1.0) + Units::m(0.6) * z.rem_euclid(97) / 97)
     }
 
     /** Whether column (x, z) is on the path of its region's steading. */
@@ -150,7 +149,7 @@ impl Moor {
 /** The steading of region (i, k), if it has one: its ring placed MARGIN inside it, the hut 22 to 30 m off it, both off the stream and out of the water. */
 fn steading_of(seed: u64, relief: &Relief, i: i64, k: i64) -> Option<Steading> {
     let mut random = Rng::new(hash64(seed, i, k, 0));
-    if (i, k) != (0, 0) && !random.chance(fixed(0.6)) {
+    if (i, k) != (0, 0) && !random.chance(fx(0.6)) {
         return None;
     }
     let inner = (REGION - 2 * MARGIN) as u32;
@@ -166,13 +165,12 @@ fn steading_of(seed: u64, relief: &Relief, i: i64, k: i64) -> Option<Steading> {
     let turns = facing(ring[0] - centre[0], ring[1] - centre[1]);
     // A hut's level is the mean of the heath under it, as coarse as the hut.
     let mean = |c: [i64; 2]| {
-        let sum: Fixed =
-            (-1..=1).flat_map(|a| (-1..=1).map(move |b| (a, b))).map(|(a, b)| relief.heath(c[0] + a * m(4.0), c[1] + b * m(4.0))).sum();
-        (sum / 9 + ONE / 2) >> 16
+        let around = (-1..=1).flat_map(|a| (-1..=1).map(move |b| (a, b)));
+        Fx::mean(around.map(|(a, b)| relief.heath(c[0] + a * m(4.0), c[1] + b * m(4.0)))).round_units()
     };
     let level = mean(centre);
-    let off_stream = |c: [i64; 2]| (c[0] * ONE - relief.stream_x(c[1])).abs() > m(14.0) * ONE;
-    if level <= WATER + m(1.0) || !off_stream(centre) || !off_stream(ring) {
+    let off_stream = |c: [i64; 2]| (Units(c[0]).to_fx() - relief.stream_x(c[1])).abs() > Units::m(14.0).to_fx();
+    if level <= WATER + Units::m(1.0) || !off_stream(centre) || !off_stream(ring) {
         return None;
     }
     let ring_ground = mean(ring);
@@ -206,20 +204,20 @@ pub fn moor(seed: u64) -> World {
             let h = match steadings.at(i, k) {
                 Some(s) => {
                     let c = s.centre;
-                    let d = ((x - c[0]).abs().max((z - c[1]).abs()) - HUT_HALF).max(0);
-                    let weight = ONE - worldgen::noise::smoothstep(0, TERRACE * ONE, d * ONE);
-                    heath + (((s.level * ONE - heath) * weight) >> 16)
+                    let d = Units(((x - c[0]).abs().max((z - c[1]).abs()) - HUT_HALF).max(0));
+                    let weight = Fx::ONE - smoothstep(Fx::ZERO, TERRACE.to_fx(), d.to_fx());
+                    heath + (s.level.to_fx() - heath) * weight
                 }
                 None => heath,
             };
-            (h + ONE / 2) >> 16
+            h.round_units()
         })
     };
     let f = Rc::new(Moor { relief, stream: stream_plan, steadings, ground });
     let spawn = {
         // Behind the first hut, or over the origin if its region has none.
         let [x, _, z] = f.steading(0, 0).map_or([0; 3], |s| s.frame().site([s.length / 2, 0, s.depth + m(6.0)]));
-        let y = f.ground.at(x, z).max(WATER) + m(2.0);
+        let y = (f.ground.at(x, z).max(WATER) + Units::m(2.0)).0;
         [x, y + ((x + y + z) & 1), z]
     };
     let layers = vec![
@@ -237,9 +235,9 @@ fn terrain(f: Rc<Moor>) -> Field {
     Field::columns("terrain", 0.0, Op::Paint, move |x, z, spacing| {
         let h = f.ground.at(x, z);
         let (d, half) = f.stream_distance(x, z);
-        let wet = h <= WATER || d < half + m(1.0);
+        let wet = h <= WATER || d < half + Units::m(1.0);
         let path = !wet && f.on_path(x, z);
-        let heathery = f.relief.patches.at(x, z) > fixed(0.47);
+        let heathery = f.relief.patches.fx(x, z) > fx(0.47);
         let surface = if wet {
             K::bog
         } else if path {
@@ -250,7 +248,7 @@ fn terrain(f: Rc<Moor>) -> Field {
             K::grass
         };
         // Peat down to the world's bottom and no further, where hosts stop generating: the heath is solid, not a shell.
-        let column = Column::new(h, spacing).surface(surface, m(0.5)).fill_below_exactly(K::peat, HEIGHTS.0);
+        let column = Column::new(h.0, spacing).surface(surface, m(0.5)).fill_below_exactly(K::peat, HEIGHTS.0);
         match surface {
             // Thickened only while it is at most four sites: taller, a medium stops rays skimming over the heath.
             K::heather if spacing <= 2 => column.medium(K::heather, m(0.4), 0.5),
@@ -264,10 +262,10 @@ fn terrain(f: Rc<Moor>) -> Field {
 fn stream_bed(f: Rc<Moor>) -> Field {
     Field::at("stream bed", 1.0, Op::Carve, move |x, y, z, spacing| {
         let (d, half) = f.stream_distance(x, z);
-        if d >= half.max(spacing) {
+        if d >= half.max(Units(spacing)) {
             return None;
         }
-        let h = f.ground.at(x, z);
+        let h = f.ground.at(x, z).0;
         // At least two sites deep: a line of sites along y has one every two.
         (y > h - m(1.0).max(2 * spacing) && y <= h + m(0.5)).then_some((0, None))
     })
@@ -280,29 +278,31 @@ fn stream_bed(f: Rc<Moor>) -> Field {
  */
 fn water(f: Rc<Moor>) -> Field {
     Field::columns("water", 2.0, Op::Paint, move |x, z, spacing| {
-        let h = f.ground.at(x, z);
+        let h = f.ground.at(x, z).0;
         let (d, half) = f.stream_distance(x, z);
-        if d < half.max(spacing) {
+        if d < half.max(Units(spacing)) {
             return vec![Span::solid(h - m(1.0).max(2 * spacing), h - 1, K::water)];
         }
-        Column::new(h, spacing).water_to(K::water, WATER).spans()
+        Column::new(h, spacing).water_to(K::water, WATER.0).spans()
     })
 }
 
 /** Boulders half sunk in the heath, granite or lichened, off the water and the paths. */
 fn boulders(f: Rc<Moor>) -> Population {
     let ground = f.clone();
-    Population::new("boulders", 3.0, m(6.0)).reach(m(2.5)).anchor_on_ground(move |x, z| ground.ground.at(x, z)).make(move |[x, y, z], c| {
-        let mut random = c.random("boulder");
-        let (xi, zi) = (x as i64, z as i64);
-        if !random.chance(fixed(0.1)) || y <= WATER as f64 + 2.0 || f.stream_distance(xi, zi).0 < m(4.0) || f.on_path(xi, zi) {
-            return None;
-        }
-        let r = m(0.4) as f64 + random.next() * m(0.8) as f64;
-        let radii = [r * (1.0 + random.next() * 0.6), r * 0.7, r * (1.0 + random.next() * 0.6)];
-        let kind = if random.chance(ONE / 3) { K::lichen } else { K::granite };
-        Some(Node::of(vec![Shape::ellipsoid([x, y + r * 0.25, z], radii, kind)]))
-    })
+    Population::new("boulders", 3.0, m(6.0)).reach(m(2.5)).anchor_on_ground(move |x, z| ground.ground.at(x, z).0).make(
+        move |[x, y, z], c| {
+            let mut random = c.random("boulder");
+            let (xi, zi) = (x as i64, z as i64);
+            if !random.chance(fx(0.1)) || y <= WATER.0 as f64 + 2.0 || f.stream_distance(xi, zi).0 < Units::m(4.0) || f.on_path(xi, zi) {
+                return None;
+            }
+            let r = m(0.4) as f64 + random.next() * m(0.8) as f64;
+            let radii = [r * (1.0 + random.next() * 0.6), r * 0.7, r * (1.0 + random.next() * 0.6)];
+            let kind = if random.chance(fx(1.0 / 3.0)) { K::lichen } else { K::granite };
+            Some(Node::of(vec![Shape::ellipsoid([x, y + r * 0.25, z], radii, kind)]))
+        },
+    )
 }
 
 /** The steadings: each owned by the cell its ring's centre is in. */
@@ -310,7 +310,7 @@ fn steadings_population(f: Rc<Moor>) -> Population {
     let anchor = f.clone();
     Population::new("steadings", 4.0, STEADING_CELL)
         .reach([REACH_ACROSS, m(16.0), REACH_ACROSS])
-        .anchor(move |c| anchor.steading(c.centre[0], c.centre[2]).map(|s| [s.ring[0] as f64, s.ring_ground as f64, s.ring[1] as f64]))
+        .anchor(move |c| anchor.steading(c.centre[0], c.centre[2]).map(|s| [s.ring[0] as f64, s.ring_ground.0 as f64, s.ring[1] as f64]))
         .make(move |_, c| f.steading(c.centre[0], c.centre[2]).map(|s| steading(&f, &s)))
 }
 
@@ -359,9 +359,9 @@ fn ring(f: &Moor, s: &Steading, random: &mut Rng) -> Node {
     for i in 0..s.stones {
         let a = (i as f64 + random.next() * 0.3) * 2.0 * std::f64::consts::PI / s.stones as f64;
         let (x, z) = (s.ring[0] as f64 + s.radius as f64 * js::cos(a), s.ring[1] as f64 + s.radius as f64 * js::sin(a));
-        let g = f.ground.at(x as i64, z as i64) as f64;
+        let g = f.ground.at(x as i64, z as i64).0 as f64;
         let (tall, wide) = (m(1.6) as f64 + random.next() * m(1.6) as f64, 2.5 + random.next() * 1.5);
-        let kind = if random.chance(ONE / 2) { K::lichen } else { K::granite };
+        let kind = if random.chance(Fx::HALF) { K::lichen } else { K::granite };
         let shape = if i == fallen {
             let (dx, dz) = (js::cos(a + 1.3) * tall, js::sin(a + 1.3) * tall);
             Shape::capsule([x, g + wide, z], [x + dx, g + wide, z + dz], wide, kind)
@@ -385,7 +385,7 @@ fn cairns(f: &Moor, s: &Steading, random: &mut Rng) -> Node {
     while t < length - m(2.0) as f64 {
         let off = side * m(1.3) as f64;
         let (x, z) = (a[0] + dx * t / length + nx * off, a[1] + dz * t / length + nz * off);
-        let g = f.ground.at(x as i64, z as i64) as f64;
+        let g = f.ground.at(x as i64, z as i64).0 as f64;
         let r = 2.5 + random.next();
         shapes.push(Shape::ball([x, g + r * 0.6, z], r, K::granite));
         shapes.push(Shape::ball([x, g + r * 1.6, z], r * 0.75, K::lichen));
