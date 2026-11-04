@@ -7,9 +7,9 @@ use std::rc::Rc;
 
 use worldgen::World;
 use worldgen::generator::Generator;
-use worldgen::noise::{ONE, stream};
+use worldgen::noise::{Fx, ONE, fx, stream};
 use worldgen::plan::{Land, Plan};
-use worldgen::units::m;
+use worldgen::units::{Units, m};
 
 use crate::fields;
 use crate::forest::{self, GROUND_SCALE, Ground, PATH_SCALE, Relief};
@@ -41,23 +41,23 @@ pub fn valley(seed: u64) -> World {
         let step = 16;
         Rc::new(Plan::sampled("slope", fields::SLOPE_SCALE, step, move |x, z| {
             let rise = (ground.at(x + step, z) - ground.at(x - step, z)).abs() + (ground.at(x, z + step) - ground.at(x, z - step)).abs();
-            rise * ONE / (2 * step)
+            Units(rise).to_fx() / Units(2 * step)
         }))
     };
     // The forest bids nothing: it has what the others don't outbid it for.
     let bids = vec![
-        Rc::new(Plan::new("forest's bid", TOWNS_SCALE, |_, _| 0)),
+        Rc::new(Plan::new("forest's bid", TOWNS_SCALE, |_, _| Fx::ZERO)),
         {
             let towns = towns.clone();
-            Rc::new(Plan::new("town's bid", town::BID_SCALE, move |x, z| towns.bid(x, z)))
+            Rc::new(Plan::new("town's bid", town::BID_SCALE, move |x, z| Fx::from_bits(towns.bid(x, z))))
         },
         Rc::new(fields::bid(seed, towns.clone(), slope)),
     ];
-    let land = Rc::new(Land::new(town::BID_SCALE, ONE / 8, bids));
+    let land = Rc::new(Land::new(town::BID_SCALE, fx(0.125), bids));
 
     let share = {
         let land = land.clone();
-        Rc::new(move |x, z| land.share(FOREST, x, z))
+        Rc::new(move |x, z| land.share(FOREST, x, z).to_bits())
     };
     let forest_ground = Ground { ground: ground.clone(), path: path.clone(), share };
     let spawn = forest_ground.on_path(m(-31.0), m(3.0));

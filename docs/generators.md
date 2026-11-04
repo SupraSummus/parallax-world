@@ -291,16 +291,24 @@ so setting `fill` afterwards is not counted.
 | What | Type | Unit |
 |------|------|------|
 | `Point`, shapes' sizes | `f64` | lattice units |
-| `m(metres)` | `i64` | whole lattice units, `UNIT_SIZE` m each |
+| Heights, distances: `Units::m(metres)` | `Units` | whole lattice units, `UNIT_SIZE` m each |
+| `m(metres)`, for `i64` arguments and const generics | `i64` | whole lattice units |
 | Cells, reach, `Child` and population `size` | `i64` | lattice units |
 | `Plan` scale, plan and field arguments | `i64` | lattice units |
-| Noise, fractions, `Rng::chance` | `Fixed` | `ONE` (1 << 16) is 1 |
+| Noise (`.fx`), fractions, `smoothstep`, `Rng::chance`, `Land` | `Fx` | `Fx::ONE` is 1 |
 | `Far` detail | `Fixed` | lattice units: `fixed(2.0)` is 2 |
 | A span's `extinction` | `f64` | per lattice unit of a ray's path |
 
-`Fixed` is an `i64` too, so the compiler can't tell it from units:
-a fraction times units is fixed point (`>> 16` for units),
-and `fixed(m(1.0) as f64)` is a metre in fixed point.
+`Fx` is fixed point, 16 bits after the point:
+a fraction, or a length in units with its fraction kept.
+It meets `Units` only as `Fx * Units` (exact, an `Fx`)
+and `Fx / Units` (a fraction),
+and becomes units only by `floor_units` or `round_units`;
+so a fraction can't pass for units, as it could as an `i64`
+(`Fixed` and `ONE`, which the forest and town still use).
+Products of `Fx` are floored, quotients truncated towards zero.
+`Units(x)` takes a coordinate as units, `.0` gives units to an `i64` argument,
+and `Fx::from_bits` and `to_bits` meet untyped `Fixed`.
 Fields get the coordinates of sites in lattice units
 (already times the spacing) and the spacing.
 

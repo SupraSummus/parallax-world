@@ -9,9 +9,9 @@ use std::rc::Rc;
 use worldgen::column::Column;
 use worldgen::generator::{Field, Layer, Node, Op, Population, Shape, stripe};
 use worldgen::kinds;
-use worldgen::noise::{Fbm, Fixed, ONE, Rng, ValueNoise, fixed, hash, hash64, smoothstep, stream};
+use worldgen::noise::{Fbm, Fixed, Fx, Rng, ValueNoise, fx, hash, hash64, smoothstep, stream};
 use worldgen::plan::{Land, Plan};
-use worldgen::units::m;
+use worldgen::units::{Units, m};
 
 use crate::forest::K as F;
 use crate::town::{self, Towns};
@@ -33,18 +33,18 @@ pub const SLOPE_SCALE: i64 = m(16.0);
 /**
  * The fields' bid for column (x, z): up to 0.6 at a town's edge, none
  * 90 to 150 m out (by noise), and none where the ground is steep:
- * `slope`, rise over run as a fraction of ONE.
+ * `slope`, rise over run.
  */
-pub fn bid(seed: u64, towns: Rc<Towns>, slope: Rc<Plan<Fixed>>) -> Plan<Fixed> {
+pub fn bid(seed: u64, towns: Rc<Towns>, slope: Rc<Plan<Fx>>) -> Plan<Fx> {
     let reach = Fbm::<{ m(160.0) }, 3>::new(stream(seed, 40));
     Plan::new("fields' bid", BID_SCALE, move |x, z| {
-        let d = towns.distance(x, z).max(0);
-        let r = m(90.0) + reach.at(x, z) * m(60.0) / ONE;
+        let d = Units(towns.distance(x, z).max(0));
+        let r = Units::m(90.0) + (reach.fx(x, z) * Units::m(60.0)).floor_units();
         if d >= r {
-            return -ONE;
+            return -Fx::ONE;
         }
-        let near = fixed(0.6) * (r - d) / r;
-        near - smoothstep(fixed(0.12), fixed(0.25), slope.at(x, z))
+        let near = fx(0.6) * (r - d) / r;
+        near - smoothstep(fx(0.12), fx(0.25), slope.at(x, z))
     })
 }
 
@@ -64,6 +64,7 @@ struct Fields {
     seed: u64,
     land: Rc<Land>,
     me: usize,
+    /** The forest's path, not typed yet. */
     path: Rc<Plan<Fixed>>,
     warp: ValueNoise<{ m(64.0) }>,
 }
@@ -75,17 +76,17 @@ impl Fields {
      * a hedge on some of their edges.
      */
     fn crop(&self, x: i64, z: i64) -> Option<Crop> {
-        let from_path = x * ONE - self.path.at(0, z);
-        if from_path.abs() < m(1.6) * ONE || !self.land.owns(self.me, x, z) {
+        let from_path = Units(x).to_fx() - Fx::from_bits(self.path.at(0, z));
+        if from_path.abs() < Units::m(1.6).to_fx() || !self.land.owns(self.me, x, z) {
             return None;
         }
         let side = from_path.signum();
-        let across = (from_path.abs() >> 16) + self.warp.at(z, 0) * m(12.0) / ONE;
-        let along = z + self.warp.at(x, 1) * m(12.0) / ONE;
-        let (band, strip) = (across.div_euclid(m(40.0)), along.div_euclid(m(28.0)));
-        let edge = |v: i64, w: i64| v.rem_euclid(w) < m(1.0);
-        let h = hash(stream(self.seed, 41), side, band, strip);
-        if (edge(across, m(40.0)) && h & 1 == 0) || (edge(along, m(28.0)) && h & 2 == 0) {
+        let across = from_path.abs().floor_units() + (self.warp.fx(z, 0) * Units::m(12.0)).floor_units();
+        let along = Units(z) + (self.warp.fx(x, 1) * Units::m(12.0)).floor_units();
+        let (plot, strip) = (Units::m(40.0), Units::m(28.0));
+        let edge = |v: Units, w: Units| v.rem_euclid(w) < Units::m(1.0);
+        let h = hash(stream(self.seed, 41), side, across.div_euclid(plot), along.div_euclid(strip));
+        if (edge(across, plot) && h & 1 == 0) || (edge(along, strip) && h & 2 == 0) {
             return Some(Crop::Hedge);
         }
         Some(CROPS[(h >> 8) as usize % CROPS.len()])
@@ -124,7 +125,7 @@ pub fn layers(seed: u64, land: Rc<Land>, me: usize, ground: Rc<Plan<i64>>, path:
             .anchor(move |c| Some(c.on_ground_by(&mut Rng::new(hash64(seed, c.i, c.j, c.k)), |x, z| ground.at(x, z))))
             .make(move |[x, y, z], cell| {
                 let mut random = cell.random("haystack");
-                if f.crop(x as i64, z as i64) != Some(Crop::Stubble) || !random.chance(fixed(0.3)) {
+                if f.crop(x as i64, z as i64) != Some(Crop::Stubble) || !random.chance(fx(0.3)) {
                     return None;
                 }
                 let r = m(1.0) as f64 + random.next() * 4.0;
