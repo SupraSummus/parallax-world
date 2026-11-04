@@ -2,7 +2,80 @@
 //! a box, in bricks BRICK units wide, only bricks with voxels stored. The
 //! same layout as the baker's Grid, which `into_grid` hands over.
 
+use std::collections::HashMap;
+use std::sync::OnceLock;
+
 use bake::Grid;
+
+/**
+ * Study (not for merging): view-dependent coarse voxels. WORLDGEN_ANISO=1
+ * makes measured far forms record, per coarse site, the material seen
+ * from each of the 6 axis directions (`VoxelGrid::aniso`), and rays pick
+ * one by their direction. WORLDGEN_ANISO_GROUPS: 6 (each direction its
+ * own), 3 (from above, from below, from the sides), up (from above, and
+ * the rest); WORLDGEN_ANISO_PICK: dom (the ray's dominant axis) or mix
+ * (an axis with the chance |d_i| / Σ|d_j|, its faces' projected areas).
+ */
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Aniso {
+    pub on: bool,
+    pub groups: u8,
+    pub mix: bool,
+    /**
+     * WORLDGEN_ANISO_OPACITY=1: measured sites are kept per axis (the share of the cell's columns holding a
+     * fine site), see-through (id 0) along the others; 2: per direction, by the columns' first fine sites
+     * from that end that land in the cell, of those reaching it (a coarsened depth map per direction).
+     */
+    pub opacity: u8,
+}
+
+pub fn aniso() -> Aniso {
+    static MODE: OnceLock<Aniso> = OnceLock::new();
+    *MODE.get_or_init(|| {
+        let var = |name: &str| std::env::var(name).unwrap_or_default();
+        Aniso {
+            on: var("WORLDGEN_ANISO") == "1",
+            groups: match var("WORLDGEN_ANISO_GROUPS").as_str() {
+                "3" => 3,
+                "up" => 1,
+                "ts" => 2,
+                "axes" => 4,
+                _ => 6,
+            },
+            mix: var("WORLDGEN_ANISO_PICK") == "mix",
+            opacity: var("WORLDGEN_ANISO_OPACITY").parse().unwrap_or(0),
+        }
+    })
+}
+
+/**
+ * Which of the 6 directions a ray along `d` sees a voxel from: 2·axis +
+ * 1 if it comes from the axis's high side (d_axis < 0), else 2·axis.
+ */
+pub fn direction_seen(d: [f64; 3]) -> usize {
+    let mode = aniso();
+    let m = d.map(f64::abs);
+    let axis = if mode.mix {
+        // A hash of the direction: the same ray picks the same.
+        let h = d.iter().fold(0x9e37_79b9_7f4a_7c15u64, |h, v| (h ^ v.to_bits()).wrapping_mul(0x1000_0000_01b3).rotate_left(29));
+        let h = h ^ (h >> 31);
+        let u = (h.wrapping_mul(0xbf58_476d_1ce4_e5b9) >> 11) as f64 / (1u64 << 53) as f64 * (m[0] + m[1] + m[2]);
+        if u < m[0] {
+            0
+        } else if u < m[0] + m[1] {
+            1
+        } else {
+            2
+        }
+    } else if m[0] >= m[1] && m[0] >= m[2] {
+        0
+    } else if m[1] >= m[2] {
+        1
+    } else {
+        2
+    };
+    2 * axis + (d[axis] < 0.0) as usize
+}
 
 pub const BRICK: i64 = 8;
 const BRICK_SITES: usize = (BRICK * BRICK * BRICK / 2) as usize;
@@ -49,6 +122,8 @@ pub struct VoxelGrid {
     /** Per brick, z-major, then y, then x: where its sites start in `cells`, in BRICK_SITES; −1 if empty. */
     pub bricks: Vec<i32>,
     pub cells: Vec<u8>,
+    /** Study: per site with a view-dependent material, its id seen from each of the 6 directions (see `aniso`). */
+    pub aniso: HashMap<[i64; 3], [u8; 6]>,
 }
 
 impl VoxelGrid {
@@ -66,7 +141,17 @@ impl VoxelGrid {
             by,
             bricks: vec![-1; (bx * by * bz) as usize],
             cells: Vec::new(),
+            aniso: HashMap::new(),
         }
+    }
+
+    /** Study: the material at (x, y, z) as a ray along `d` sees it. */
+    pub fn get_seen(&self, x: i64, y: i64, z: i64, d: [f64; 3]) -> u8 {
+        let id = self.get(x, y, z);
+        if id == 0 || self.aniso.is_empty() {
+            return id;
+        }
+        self.aniso.get(&[x, y, z]).map_or(id, |ids| ids[direction_seen(d)])
     }
 
     /** The box of its sites. */
@@ -119,6 +204,9 @@ impl VoxelGrid {
             }
         };
         self.cells[i] = id;
+        if !self.aniso.is_empty() {
+            self.aniso.remove(&[x, y, z]);
+        }
     }
 
     pub fn into_grid(self) -> Grid {
@@ -132,7 +220,7 @@ impl VoxelGrid {
  * (VoxelGrid.compose in voxel-grid.ts). The rest of the box is empty.
  */
 pub fn compose(b: &Box3, parts: &[&Grid]) -> Grid {
-    let VoxelGrid { min, n, bx, by, mut bricks, mut cells } = VoxelGrid::new(b);
+    let VoxelGrid { min, n, bx, by, mut bricks, mut cells, .. } = VoxelGrid::new(b);
     let bz = (n[2] + BRICK - 1) / BRICK;
     for part in parts {
         let offset: [i64; 3] = std::array::from_fn(|i| {

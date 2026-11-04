@@ -404,7 +404,9 @@ fn from_above_against_level_0(world: &World, region: &Box3, levels: u32, report:
     let camera = Camera::top([region.min[0] as f64, region.min[2] as f64], [region.max[0] as f64, region.max[2] as f64], width);
     let seen = |level: u32| shares(picture(&world.generator, &camera, level, world.heights_at(level)).material);
     let reference = seen(0);
-    for level in 1..=levels.min(FROM_ABOVE) {
+    // Study: WORLDGEN_FROM_ABOVE overrides how many levels are seen from above.
+    let from_above = std::env::var("WORLDGEN_FROM_ABOVE").ok().and_then(|v| v.parse().ok()).unwrap_or(FROM_ABOVE);
+    for level in 1..=levels.min(from_above) {
         let here = seen(level);
         report.margins.push(Margin {
             region: *region,

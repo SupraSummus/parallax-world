@@ -788,13 +788,15 @@ pub fn generate(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
     let palette = Palette::new(&generator.kinds, generator.seed);
     let mut grid = VoxelGrid::new(b);
     let clip = grid.clip();
-    let mut put = |kind: Kind, op: Op, x: i64, y: i64, z: i64| {
+    let put_in = |grid: &mut VoxelGrid, kind: Kind, op: Op, x: i64, y: i64, z: i64| {
         if op == Op::Fill && grid.get(x, y, z) != 0 {
-            return;
+            return false;
         }
         let id = if op == Op::Carve { 0 } else { palette.shade(kind, x * s, y * s, z * s) };
         grid.set(x, y, z, id);
+        op != Op::Carve
     };
+    let aniso = crate::grid::aniso().on;
     let drawables = drawables_in(generator, &clip, s);
     let mut at = 0;
     while at < drawables.len() {
@@ -806,7 +808,22 @@ pub fn generate(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
         let carves = group.iter().any(|d| matches!(&d.draw, Draw::Shapes(shapes, _) if shapes.iter().any(|s| s.op == Op::Carve)));
         if !carves {
             for drawable in group {
-                draw(drawable, generator.seed, s, &clip, &mut put);
+                match &drawable.draw {
+                    // Study: a measured thing's sites with the kinds seen from each direction.
+                    Draw::Sites(sites) if aniso => {
+                        for &([x, y, z], kind, op, seen) in sites {
+                            if clip.holds([x, y, z]) && put_in(&mut grid, kind, op, x, y, z) && seen.iter().any(|k| *k != kind) {
+                                grid.aniso.insert(
+                                    [x, y, z],
+                                    seen.map(|k| if k == TRANSPARENT { 0 } else { palette.shade(k, x * s, y * s, z * s) }),
+                                );
+                            }
+                        }
+                    }
+                    _ => draw(drawable, generator.seed, s, &clip, &mut |kind, op, x, y, z| {
+                        put_in(&mut grid, kind, op, x, y, z);
+                    }),
+                }
             }
             continue;
         }
@@ -815,7 +832,9 @@ pub fn generate(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
         for drawable in group {
             draw(drawable, generator.seed, s, &clip, &mut |kind, op, x, y, z| own.put(kind, op, x, y, z));
         }
-        own.each(&mut put);
+        own.each(&mut |kind, op, x, y, z| {
+            put_in(&mut grid, kind, op, x, y, z);
+        });
     }
     grid
 }
@@ -910,7 +929,7 @@ fn draw(drawable: &Drawable, seed: u64, s: i64, clip: &Box3, put: &mut dyn FnMut
             }
         }
         Draw::Sites(sites) => {
-            for &([x, y, z], kind, op) in sites {
+            for &([x, y, z], kind, op, _) in sites {
                 if clip.holds([x, y, z]) {
                     put(kind, op, x, y, z);
                 }
@@ -1009,7 +1028,8 @@ fn past_reach(key: &str, bounds: &Box3, reach: &Box3, n: i64, population: [i64; 
 }
 
 /** A thing's sites of a level: each its kind and how it meets the world. */
-type Sites = Vec<([i64; 3], Kind, Op)>;
+/** Study: and the kind seen from each of the 6 axis directions (see grid::aniso). */
+type Sites = Vec<([i64; 3], Kind, Op, [Kind; 6])>;
 
 /** Where a node is drawn: at sites `s` apart, for the lattice units `units`, in its layer's `order`, as part of `thing`. */
 struct Visit<'u> {
@@ -1083,12 +1103,52 @@ pub struct Shadows {
     f: i64,
     /** By thing, its first layer across the axis and its layers from it. */
     things: Vec<(i64, Vec<Slice>)>,
+    /** Study: the same, of each kind alone. */
+    kinds: Vec<(i64, Vec<Vec<(Kind, Slice)>>)>,
 }
 
 impl Shadows {
     pub fn new(nodes: &[Node], level: u32, axis: usize) -> Shadows {
         let f = 1i64 << level;
         let (a, b) = ((axis + 1) % 3, (axis + 2) % 3);
+        // Study: each kind's slices alone.
+        let kinds = nodes
+            .iter()
+            .enumerate()
+            .map(|(i, node)| {
+                let own = alone(node, &format!("sample {i}"), bounds_of(node), f, 0);
+                let (n, min) = (own.n, own.b.min);
+                let words = ((n[a] * n[b]) as usize).div_ceil(64);
+                let layers = (0..n[axis])
+                    .map(|l| {
+                        let mut by_kind: Vec<(Kind, (Vec<u64>, Vec<bool>, Vec<bool>))> = Vec::new();
+                        for i in 0..n[a] {
+                            for j in 0..n[b] {
+                                let mut p = [0; 3];
+                                (p[axis], p[a], p[b]) = (l + min[axis], i + min[a], j + min[b]);
+                                if let Some((kind, _)) = own.at(p[0], p[1], p[2]) {
+                                    let at = match by_kind.iter().position(|e| e.0 == kind) {
+                                        Some(at) => at,
+                                        None => {
+                                            by_kind
+                                                .push((kind, (vec![0u64; words], vec![false; n[b] as usize], vec![false; n[a] as usize])));
+                                            by_kind.len() - 1
+                                        }
+                                    };
+                                    let (plane, along_a, along_b) = &mut by_kind[at].1;
+                                    let bit = (i * n[b] + j) as usize;
+                                    plane[bit / 64] |= 1 << (bit % 64);
+                                    (along_a[j as usize], along_b[i as usize]) = (true, true);
+                                }
+                            }
+                        }
+                        let count = |v: &[bool]| v.iter().filter(|b| **b).count() as u32;
+                        by_kind.into_iter().map(|(k, (plane, aa, ab))| (k, (plane, count(&aa), count(&ab)))).collect()
+                    })
+                    .collect();
+                (min[axis], layers)
+            })
+            .collect();
         let things = nodes
             .iter()
             .enumerate()
@@ -1118,7 +1178,61 @@ impl Shadows {
                 (min[axis], layers)
             })
             .collect();
-        Shadows { f, things }
+        Shadows { f, things, kinds }
+    }
+
+    /**
+     * Study: the slab's mean shadow seen along each axis (across it, then
+     * along the next two axes), of each kind alone; and of all, last.
+     */
+    pub fn slab_by_axis(&self, from: i64, to: i64) -> Vec<(Kind, [f64; 3])> {
+        let f = self.f;
+        let mut out: Vec<(Kind, [f64; 3])> = Vec::new();
+        let mut all = [0.0; 3];
+        for (t, (first, layers)) in self.kinds.iter().enumerate() {
+            let ceil = |v: i64| -(-v).div_euclid(f) - first;
+            let (lo, hi) = (ceil(from).max(0) as usize, ceil(to).clamp(0, layers.len() as i64) as usize);
+            if lo >= hi {
+                continue;
+            }
+            let mut kinds: Vec<(Kind, Vec<u64>, u32, u32)> = Vec::new();
+            for layer in &layers[lo..hi] {
+                for (kind, (bits, a, b)) in layer {
+                    let at = kinds.iter().position(|e| e.0 == *kind).unwrap_or_else(|| {
+                        kinds.push((*kind, vec![0u64; bits.len()], 0, 0));
+                        kinds.len() - 1
+                    });
+                    let e = &mut kinds[at];
+                    e.1.iter_mut().zip(bits).for_each(|(p, w)| *p |= w);
+                    (e.2, e.3) = (e.2 + a, e.3 + b);
+                }
+            }
+            for (kind, plane, a, b) in kinds {
+                let across = plane.iter().map(|w| w.count_ones()).sum::<u32>();
+                let v = [across as f64, a as f64, b as f64].map(|c| c * (f * f) as f64);
+                let at = out.iter().position(|e| e.0 == kind).unwrap_or_else(|| {
+                    out.push((kind, [0.0; 3]));
+                    out.len() - 1
+                });
+                (0..3).for_each(|i| out[at].1[i] += v[i]);
+            }
+            // All kinds together, from the things' own slices.
+            let (_, layers) = &self.things[t];
+            let mut plane = vec![0u64; layers[0].0.len()];
+            let (mut a, mut b) = (0, 0);
+            for (bits, la, lb) in &layers[lo..hi] {
+                plane.iter_mut().zip(bits).for_each(|(p, w)| *p |= w);
+                (a, b) = (a + la, b + lb);
+            }
+            let across = plane.iter().map(|w| w.count_ones()).sum::<u32>();
+            let v = [across as f64, a as f64, b as f64].map(|c| c * (f * f) as f64);
+            (0..3).for_each(|i| all[i] += v[i]);
+        }
+        let n = self.things.len() as f64;
+        out.iter_mut().for_each(|e| e.1 = e.1.map(|v| v / n));
+        out.sort_by_key(|e| e.0);
+        out.push((Kind::MAX, all.map(|v| v / n)));
+        out
     }
 
     /** The mean shadow (lattice units²) of the slab from `from` to `to` (exclusive) along the axis. */
@@ -1200,7 +1314,15 @@ fn measure(node: &Node, key: &str, bounds: Box3, detail: Fixed, s: i64, seed: u6
         columns: [u32; 3],
         ends: Vec<(Kind, Op, u32)>,
         seen: Vec<(Kind, Op, u32)>,
+        /** Study: what rays along columns see first, by direction (2·axis + end, end 1 from the high side). */
+        seen_from: [Vec<(Kind, Op, u32)>; 6],
         kept: bool,
+        /** Study: kept for rays along each axis (WORLDGEN_ANISO_OPACITY), else as `kept`. */
+        kept_along: [bool; 3],
+        /** Study (opacity 2): by direction, the kinds of the columns' first fine sites from it that are in the cell, and how many columns reach it unstopped. */
+        here_from: [Vec<(Kind, Op, u32)>; 6],
+        reach_from: [u32; 6],
+        kept_from: [bool; 6],
     }
     let count = |kinds: &mut Vec<(Kind, Op, u32)>, kind: Kind, op: Op| match kinds.iter_mut().find(|e| e.0 == kind) {
         Some(e) => e.2 += 1,
@@ -1219,6 +1341,7 @@ fn measure(node: &Node, key: &str, bounds: Box3, detail: Fixed, s: i64, seed: u6
         [i % m[0] + lo[0], i / m[0] % m[1] + lo[1], i / (m[0] * m[1]) + lo[2]]
     };
     let mut cells: Vec<Stats> = (0..m[0] * m[1] * m[2]).map(|_| Stats::default()).collect();
+    let depth_maps = crate::grid::aniso().on && crate::grid::aniso().opacity == 2;
     // By axis and column, what it shows at either end.
     type Ends = Option<[(Kind, Op); 2]>;
     let mut ends: [Vec<Ends>; 3] = Default::default();
@@ -1231,10 +1354,22 @@ fn measure(node: &Node, key: &str, bounds: Box3, detail: Fixed, s: i64, seed: u6
                 // A column crosses each cell once (they are convex): the run of it in a cell is one column of the cell's.
                 let mut run: Option<([i64; 3], Kind, Op)> = None;
                 let mut first = None;
+                // Study (opacity 2): the cells the column's sites are in, in order; where its first and last fine sites are.
+                let (mut seq, mut first_at, mut last_at): (Vec<[i64; 3]>, Option<usize>, usize) = (Vec::new(), None, 0);
                 for k in 0..n[axis] {
                     p[axis] = k;
                     let at = [0, 1, 2].map(|c| p[c] + own.b.min[c]);
+                    if depth_maps && (at[0] + at[1] + at[2]) & 1 == 0 {
+                        let c = cell_of(p);
+                        if seq.last() != Some(&c) {
+                            seq.push(c);
+                        }
+                    }
                     let Some((kind, op)) = own.at(at[0], at[1], at[2]) else { continue };
+                    if depth_maps {
+                        first_at.get_or_insert(seq.len() - 1);
+                        last_at = seq.len() - 1;
+                    }
                     first.get_or_insert((kind, op));
                     let site = cell_of(p);
                     match run {
@@ -1253,6 +1388,21 @@ fn measure(node: &Node, key: &str, bounds: Box3, detail: Fixed, s: i64, seed: u6
                 if let Some((cell, last, last_op)) = run {
                     count(&mut cells[index(cell)].ends, last, last_op);
                 }
+                if depth_maps {
+                    match (first_at, first, run) {
+                        (Some(fi), Some((kind, op)), Some((_, last, last_op))) => {
+                            seq[..=fi].iter().for_each(|c| cells[index(*c)].reach_from[2 * axis] += 1);
+                            count_n(&mut cells[index(seq[fi])].here_from[2 * axis], kind, op, 1);
+                            seq[last_at..].iter().for_each(|c| cells[index(*c)].reach_from[2 * axis + 1] += 1);
+                            count_n(&mut cells[index(seq[last_at])].here_from[2 * axis + 1], last, last_op, 1);
+                        }
+                        _ => seq.iter().for_each(|c| {
+                            let stats = &mut cells[index(*c)];
+                            stats.reach_from[2 * axis] += 1;
+                            stats.reach_from[2 * axis + 1] += 1;
+                        }),
+                    }
+                }
                 ends[axis].push(first.zip(run).map(|(first, (_, last, last_op))| [first, (last, last_op)]));
             }
         }
@@ -1267,6 +1417,19 @@ fn measure(node: &Node, key: &str, bounds: Box3, detail: Fixed, s: i64, seed: u6
     let (r, mut reach) = (s / f, [(i64::MAX, i64::MIN); 3]);
     for (i, stats) in cells.iter_mut().enumerate() {
         stats.kept = threshold < (0..3).map(|i| stats.columns[i] as f64 / all[i] as f64).sum::<f64>() / 3.0;
+        stats.kept_along = [stats.kept; 3];
+        if depth_maps {
+            stats.kept_from = std::array::from_fn(|d| {
+                let here: u32 = stats.here_from[d].iter().map(|e| e.2).sum();
+                stats.reach_from[d] > 0 && threshold < here as f64 / stats.reach_from[d] as f64
+            });
+            stats.kept = stats.kept_from.iter().any(|k| *k);
+            stats.kept_along = [stats.kept; 3];
+        } else if crate::grid::aniso().opacity == 1 {
+            // Study: a ray along an axis is stopped with the share of the cell's columns along it holding a fine site.
+            stats.kept_along = [0, 1, 2].map(|i| threshold < stats.columns[i] as f64 / all[i] as f64);
+            stats.kept = stats.kept_along.iter().any(|k| *k);
+        }
         if stats.kept {
             let site = site_of(i);
             for c in 0..3 {
@@ -1293,8 +1456,9 @@ fn measure(node: &Node, key: &str, bounds: Box3, detail: Fixed, s: i64, seed: u6
                 while (from..=to).contains(&k) {
                     p[axis] = k;
                     let stats = &mut cells[index(cell_of(p))];
-                    if stats.kept {
+                    if stats.kept_along[axis] {
                         count(&mut stats.seen, *kind, *op);
+                        count(&mut stats.seen_from[2 * axis + end], *kind, *op);
                         break;
                     }
                     k += if end == 0 { 2 } else { -2 };
@@ -1303,15 +1467,13 @@ fn measure(node: &Node, key: &str, bounds: Box3, detail: Fixed, s: i64, seed: u6
         }
     }
     let mut sites = Vec::new();
-    for (i, stats) in cells.into_iter().enumerate().filter(|(_, stats)| stats.kept) {
-        let site = site_of(i);
-        let [x, y, z] = site;
-        let mut kinds = if stats.seen.is_empty() { stats.ends } else { stats.seen };
+    // A kind of `kinds`, in proportion, by a hash of the site and `salt`.
+    let choose = |mut kinds: Vec<(Kind, Op, u32)>, salt: u64, [x, y, z]: [i64; 3]| {
         // In an order of their own: the columns' isn't one.
         kinds.sort_by_key(|e| e.0);
         let total: u32 = kinds.iter().map(|e| e.2).sum();
-        let mut pick = ((hash(kept ^ 1, x * s, y * s, z * s) as u64 * total as u64) >> 32) as u32;
-        let &(kind, op, _) = kinds
+        let mut pick = ((hash(kept ^ salt, x * s, y * s, z * s) as u64 * total as u64) >> 32) as u32;
+        *kinds
             .iter()
             .find(|e| {
                 pick < e.2 || {
@@ -1319,12 +1481,93 @@ fn measure(node: &Node, key: &str, bounds: Box3, detail: Fixed, s: i64, seed: u6
                     false
                 }
             })
-            .expect("a kind");
-        sites.push((site, kind, op));
+            .expect("a kind")
+    };
+    let mode = crate::grid::aniso();
+    // Study: which directions share a kind: each its own; from below, from above, the sides; from above, the rest.
+    let groups: &[&[usize]] = match mode.groups {
+        3 => &[&[2], &[3], &[0, 1, 4, 5]],
+        1 => &[&[3], &[0, 1, 2, 4, 5]],
+        2 => &[&[3], &[0, 1, 4, 5]],
+        4 => &[&[0, 1], &[2, 3], &[4, 5]],
+        _ => &[&[0], &[1], &[2], &[3], &[4], &[5]],
+    };
+    for (i, stats) in cells.into_iter().enumerate().filter(|(_, stats)| stats.kept) {
+        let site = site_of(i);
+        if depth_maps {
+            // Study (opacity 2): from each direction it is kept from, the kinds of the first fine sites in it.
+            let mut pooled = Vec::new();
+            for d in (0..6).filter(|d| stats.kept_from[*d]) {
+                stats.here_from[d].iter().for_each(|e| count_n(&mut pooled, e.0, e.1, e.2));
+            }
+            let (kind, op, _) = choose(pooled, 1, site);
+            let seen: [Kind; 6] = std::array::from_fn(|d| {
+                if stats.kept_from[d] { choose(stats.here_from[d].clone(), 2 + d as u64, site).0 } else { TRANSPARENT }
+            });
+            record_aniso(s, site, kind, seen);
+            sites.push((site, kind, op, seen));
+            continue;
+        }
+        let (kind, op, _) = choose(if stats.seen.is_empty() { stats.ends.clone() } else { stats.seen.clone() }, 1, site);
+        let mut seen = [kind; 6];
+        if mode.on {
+            for (g, group) in groups.iter().enumerate() {
+                let mut kinds: Vec<(Kind, Op, u32)> = Vec::new();
+                for d in group.iter() {
+                    for e in &stats.seen_from[*d] {
+                        count_n(&mut kinds, e.0, e.1, e.2);
+                    }
+                }
+                if kinds.is_empty() && std::env::var("WORLDGEN_ANISO_FALLBACK").is_ok() {
+                    // Study: no column sees it first from these directions: what those across them see.
+                    for d in (0..6).filter(|d| group.iter().all(|e| e / 2 != d / 2)) {
+                        for e in &stats.seen_from[d] {
+                            count_n(&mut kinds, e.0, e.1, e.2);
+                        }
+                    }
+                }
+                if !kinds.is_empty() {
+                    let k = choose(kinds, 2 + g as u64, site).0;
+                    group.iter().for_each(|d| seen[*d] = k);
+                }
+            }
+            if mode.groups == 2 {
+                // Study: two materials, from above and the rest: from below as from the sides.
+                seen[2] = seen[0];
+            }
+            // Study: see-through along the axes it isn't kept along.
+            for (axis, kept) in stats.kept_along.iter().enumerate() {
+                if !kept {
+                    (seen[2 * axis], seen[2 * axis + 1]) = (TRANSPARENT, TRANSPARENT);
+                }
+            }
+            record_aniso(s, site, kind, seen);
+        }
+        sites.push((site, kind, op, seen));
     }
     // In an order of their own, as sites are put in it.
     sites.sort_by_key(|e| e.0);
     sites
+}
+
+/** Study: a direction a measured site lets rays through along. */
+pub const TRANSPARENT: Kind = Kind::MAX;
+
+fn count_n(kinds: &mut Vec<(Kind, Op, u32)>, kind: Kind, op: Op, n: u32) {
+    match kinds.iter_mut().find(|e| e.0 == kind) {
+        Some(e) => e.2 += n,
+        None => kinds.push((kind, op, n)),
+    }
+}
+
+/** Study: every measured coarse site recorded, by spacing and site: its kind and those seen from each direction. */
+pub static ANISO_SITES: std::sync::Mutex<std::collections::BTreeMap<(i64, [i64; 3]), (Kind, [Kind; 6])>> =
+    std::sync::Mutex::new(std::collections::BTreeMap::new());
+
+fn record_aniso(s: i64, site: [i64; 3], kind: Kind, seen: [Kind; 6]) {
+    if std::env::var("WORLDGEN_ANISO_STATS").is_ok() {
+        ANISO_SITES.lock().expect("not poisoned").insert((s, site), (kind, seen));
+    }
 }
 
 /** Draws a field into `clip`; a medium keeps a site with the chance a ray crossing it is stopped. */

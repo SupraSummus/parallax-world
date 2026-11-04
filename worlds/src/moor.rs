@@ -349,6 +349,10 @@ fn hut(s: &Steading, random: &mut Rng) -> Node {
     let mut outline = Part::new(s.frame(), &mut far);
     outline.add([-1, -m(1.5), -1], [length + 1, top, depth + 1], K::drystone);
     outline.gable([-2.0, (top - 2) as f64, -3.0], [(length + 2) as f64, top as f64 + rise, (depth + 3) as f64], 0, K::thatch, Op::Fill);
+    // Study: MOOR_HUT_MEASURED=1 measures it instead.
+    if std::env::var("MOOR_HUT_MEASURED").is_ok() {
+        return Node { far: Some(Far::measured(fixed(2.0))), ..Node::of(shapes) };
+    }
     Node::of(shapes).with_far(Far::of(fixed(2.0), far))
 }
 

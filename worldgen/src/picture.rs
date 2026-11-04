@@ -129,7 +129,8 @@ struct Ray {
 
 #[derive(Clone, Copy)]
 enum Step {
-    Hit(u8, [f64; 3]),
+    /** Study: and the ids seen from each direction, if they differ. */
+    Hit(u8, [f64; 3], Option<[u8; 6]>),
     Miss,
     /** The tile (x, z) it reached is not generated yet. */
     Needs((i64, i64)),
@@ -218,9 +219,13 @@ impl Tiles {
                 } else {
                     match tile.grid.get_or_empty_brick(x, y, z) {
                         Some(0) => None,
-                        Some(id) => {
+                        // Study: see-through from this direction.
+                        Some(_) if tile.grid.get_seen(x, y, z, ray.direction) == 0 => None,
+                        Some(_) => {
+                            let id = tile.grid.get_seen(x, y, z, ray.direction);
+                            let seen = tile.grid.aniso.get(&[x, y, z]).copied();
                             return match self.normal(ray.site, &tile.grid) {
-                                Ok(normal) => Step::Hit(id, normal),
+                                Ok(normal) => Step::Hit(id, normal, seen),
                                 Err(key) => Step::Needs(key),
                             };
                         }
@@ -255,7 +260,10 @@ pub(crate) fn first_voxel(grid: &VoxelGrid, origin: [f64; 3], direction: [f64; 3
         let [x, y, z] = ray.site;
         match grid.get(x, y, z) {
             0 => walk.cross(&mut ray, &mut planes),
-            id => return Some((ray.t, id)),
+            _ => match grid.get_seen(x, y, z, direction) {
+                0 => walk.cross(&mut ray, &mut planes),
+                id => return Some((ray.t, id)),
+            },
         }
     }
     None
@@ -499,7 +507,7 @@ fn picture_of_tiles(camera: &Camera, level: u32, heights: (i64, i64), colours: &
                     left.push(ray);
                 }
                 Step::Miss => picture.set(ray.pixel, 0, f64::INFINITY, sky(ray.direction)),
-                Step::Hit(id, normal) => {
+                Step::Hit(id, normal, seen) => {
                     let entered = match FACES.get(ray.face) {
                         Some(face) => normalize(face.map(|v| -v as f64)),
                         None => ray.direction.map(|v| -v),
@@ -508,7 +516,20 @@ fn picture_of_tiles(camera: &Camera, level: u32, heights: (i64, i64), colours: &
                     let n = if normal == [0.0; 3] { entered } else { normalize([0, 1, 2].map(|i| normal[i] + 0.3 * entered[i])) };
                     let light = AMBIENT + SKYLIGHT * (0.5 + 0.5 * n[1]) + SUNLIGHT * dot(n, normalize(SUN)).max(0.0);
                     let c = colours[id as usize];
-                    let lit = [16, 8, 0].map(|shift| ((c >> shift) & 255) as f64 * light);
+                    let mut lit = [16, 8, 0].map(|shift| ((c >> shift) & 255) as f64 * light);
+                    // Study: WORLDGEN_ANISO_BLEND blends the colours seen along each axis by |d_i|, as a baker could per splat.
+                    if let Some(seen) = seen.filter(|_| std::env::var("WORLDGEN_ANISO_BLEND").is_ok()) {
+                        let d = ray.direction;
+                        let along = |axis: usize| seen[2 * axis + (d[axis] < 0.0) as usize];
+                        let total: f64 = (0..3).filter(|a| along(*a) != 0).map(|a| d[a].abs()).sum();
+                        lit = [0.0; 3];
+                        for axis in (0..3).filter(|a| along(*a) != 0) {
+                            let c = colours[along(axis) as usize];
+                            for (i, shift) in [16, 8, 0].into_iter().enumerate() {
+                                lit[i] += ((c >> shift) & 255) as f64 * light * d[axis].abs() / total;
+                            }
+                        }
+                    }
                     let distance = ray.t * s;
                     let f = (fog * (distance / camera.far).powi(2)).min(fog);
                     picture.set(ray.pixel, id, distance, [0, 1, 2].map(|i| lit[i] + (HORIZON[i] - lit[i]) * f));

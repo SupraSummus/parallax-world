@@ -354,8 +354,26 @@ pub fn layers(seed: u64, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
                         Shadows::new(&samples, 2, 1)
                     })
                 });
+                // Study: FOREST_CANOPY_AXIS=y (or side) takes the shadow seen from above (or from the side) for every direction.
+                let axis = std::env::var("FOREST_CANOPY_AXIS").unwrap_or_default();
                 Rc::new([0, 1, 2].map(|sp| {
-                    (0..tree_top).step_by(spacing as usize).map(|from| shadows[sp].slab(from, (from + spacing).min(tree_top))).collect()
+                    (0..tree_top)
+                        .step_by(spacing as usize)
+                        .map(|from| {
+                            let to = (from + spacing).min(tree_top);
+                            let all = || shadows[sp].slab_by_axis(from, to).last().expect("all").1;
+                            match axis.as_str() {
+                                "y" => all()[0],
+                                "side" => (all()[1] + all()[2]) / 2.0,
+                                // What the slab adds to the shadow from above of the slabs over it: rays from above, right.
+                                "top" => {
+                                    let above = |from: i64| shadows[sp].slab_by_axis(from, tree_top).last().expect("all").1[0];
+                                    above(from) - if to < tree_top { above(to) } else { 0.0 }
+                                }
+                                _ => shadows[sp].slab(from, to),
+                            }
+                        })
+                        .collect()
                 }))
             })
             .clone()
