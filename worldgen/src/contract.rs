@@ -477,8 +477,8 @@ pub fn margins(name: &str, world: &World, regions: &[Box3], levels: u32, from_ab
  * fields: their far forms keep what rays see around them, not from
  * above ("Media are isotropic" in docs/generators.md).
  */
-pub fn far_margins(name: &str, mut world: World, regions: &[Box3]) -> Report {
-    world.generator.layers.retain(|layer| matches!(layer, Layer::Field(_)));
+pub fn far_margins(name: &str, world: World, regions: &[Box3]) -> Report {
+    let world = fields_of(world);
     let mut report = Report::new(name, &world.generator);
     for region in regions {
         from_above(&world, region, FAR_FROM..=FAR, Measure::FieldsFromAbove, &mut report);
@@ -622,7 +622,13 @@ pub fn things_hold(world: &World) -> Vec<String> {
     broken
 }
 
-/** The height of `world`'s surface over `region`: the median of what rays straight down hit first, at level 2. */
+/** `world` with its fields alone: its things left out, and with them their far fields. */
+fn fields_of(mut world: World) -> World {
+    world.generator.layers.retain(|layer| matches!(layer, Layer::Field(_)));
+    world
+}
+
+/** The height of what `world` shows over `region`: the median of what rays straight down hit first, at level 2. */
 fn surface(world: &World, region: &Box3) -> Option<f64> {
     const LEVEL: u32 = 2;
     let width = ((region.max[0] - region.min[0]) / 8).clamp(16, 256) as usize;
@@ -636,15 +642,19 @@ fn surface(world: &World, region: &Box3) -> Option<f64> {
 }
 
 /**
- * `regions`, chosen in `from`, moved up or down as far as `to`'s surface
- * over each is higher or lower: for a world of another seed, whose
- * ground lies higher or lower.
+ * `regions`, chosen in `from`, moved up or down as far as `to`'s ground
+ * over each is higher or lower: for a world of another seed. The ground
+ * is the surface of the fields alone, things and their far fields left
+ * out: what is given by position everywhere, which things stand on. Seen
+ * whole, a forest's surface is its crowns, which rise and fall with the
+ * trees there, not the ground (docs/generators.md, "Checks").
  */
-pub fn follow_surface(regions: &[Box3], from: &World, to: &World) -> Vec<Box3> {
+pub fn follow_ground(regions: &[Box3], from: World, to: World) -> Vec<Box3> {
+    let (from, to) = (fields_of(from), fields_of(to));
     regions
         .iter()
         .map(|r| {
-            let d = match (surface(from, r), surface(to, r)) {
+            let d = match (surface(&from, r), surface(&to, r)) {
                 (Some(a), Some(b)) => (b - a).round() as i64,
                 _ => 0,
             };
