@@ -50,7 +50,14 @@ pub const WORLDS: &[Entry] = &[
         far: &[Box3 { min: [-704, -48, 864], max: [704, 288, 2336] }],
     },
     // The first steading: its hut, the cairns and the ring north of it, heather and grass, from under the ground to over the roof.
-    Entry { name: "moor", make: moor::moor, regions: &[Box3 { min: [-64, -32, -192], max: [192, 64, 192] }], levels: 5, far: &[] },
+    // Far away, 175 m around it: the stream, narrower than the sites there, and patches of heather and grass.
+    Entry {
+        name: "moor",
+        make: moor::moor,
+        regions: &[Box3 { min: [-64, -32, -192], max: [192, 64, 192] }],
+        levels: 5,
+        far: &[Box3 { min: [-640, -32, -640], max: [768, 64, 768] }],
+    },
 ];
 
 /** The world named `name`. */

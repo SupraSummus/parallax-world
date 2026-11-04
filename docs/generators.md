@@ -217,7 +217,8 @@ names them in `worlds!` (`moor = [42]`).
   so what is finer than the sites must show in proportion ("Plans" in "Levels").
   Things are left out, with their far fields,
   as their far forms keep what rays see around them, not from above.
-  The valley's has its first town (the same at every seed);
+  The valley's has its first town (the same at every seed),
+  the moor's its stream and patches of heath;
 - at each level up to one past the world's, in each region
   and a host tile's width around spawn,
   a slab above and one below the world's `heights` are empty:
@@ -379,6 +380,14 @@ Carves along a line want the same margin.
 - **Categories finer than the sites.** A field that decides kinds
   on a pattern aligned with the sites (a checker, blocks and streets)
   aliases far away: decide them in a `Plan::dithered`.
+  Don't widen them to a site either:
+  the moor's stream, drawn at least a site wide, covered five times its share
+  at level 6; decided in a dithered plan, it shows as often as it is.
+- **Thickened media spread.** A medium thickened to two sites
+  stands over the columns beside it, and takes over their edges from above
+  (the moor's grass over its heather, 0.03 at level 6),
+  and stops rays skimming over it.
+  Give a thin medium only while sites are close.
 - **Anchors on the ground.** `Cell::on_ground` picks a spot evenly under a cell;
   things anchored there are as even as one per square 2N wide.
 - **Seeds.** The contract checks four seeds; make the world, and its spawn,

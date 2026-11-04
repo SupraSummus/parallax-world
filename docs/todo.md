@@ -33,13 +33,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   The baker would pick a splat's colour by the direction from the eye
   (dominant axis, or blended); compositors and coverage stay as they are.
   The whole path, grids to baker to the web's transfer: about a week.
-- **The moor's stream widens far away.**
-  Its water is drawn at least a site either side of its centre line,
-  so seen from above over 175 m around the first steading (fields alone)
-  water goes from 1.4 % at level 0 to 3.8 % and 6.9 % at levels 5 and 6,
-  and the moor can't have a far region (`far` in `worlds/src/lib.rs`).
-  A dithered plan of where the bed is
-  would draw it as often as it is ("Plans" in "Levels" of `docs/generators.md`).
 - **The native frontend is missing pieces.**
   Its renderer has no `matchTilings`:
   where slices re-tile as the camera moves along an axis,
