@@ -45,12 +45,12 @@ pub fn unit(h: u32) -> f64 {
     h as f64 / 4294967296.0
 }
 
-/** A fixed-point number: 16 bits after the point. Untyped: worlds are moving to `Fx`. */
-pub type Fixed = i64;
-pub const ONE: Fixed = 1 << 16;
+/** A fixed-point number, 16 bits after the point, untyped: the engine's inside; the worlds have `Fx`. */
+pub(crate) type Fixed = i64;
+pub(crate) const ONE: Fixed = 1 << 16;
 
 /** `x` in fixed point, for constants. */
-pub const fn fixed(x: f64) -> Fixed {
+pub(crate) const fn fixed(x: f64) -> Fixed {
     (x * ONE as f64).round() as Fixed
 }
 
@@ -75,15 +75,22 @@ impl Fx {
     pub const HALF: Fx = Fx(ONE / 2);
     pub const ONE: Fx = Fx(ONE);
     pub const MIN: Fx = Fx(Fixed::MIN);
+    /** The least above zero, 2⁻¹⁶. */
+    pub const EPSILON: Fx = Fx(1);
 
-    /** The `Fx` of an untyped `Fixed`, where typed code meets code not yet typed. */
-    pub const fn from_bits(bits: Fixed) -> Fx {
+    /** The `Fx` of an untyped `Fixed`, where the engine's typed and untyped code meet. */
+    pub(crate) const fn from_bits(bits: Fixed) -> Fx {
         Fx(bits)
     }
 
-    /** As an untyped `Fixed`, for code not yet typed. */
-    pub const fn to_bits(self) -> Fixed {
+    /** As an untyped `Fixed`, for the engine's untyped code. */
+    pub(crate) const fn to_bits(self) -> Fixed {
         self.0
+    }
+
+    /** A 32-bit hash as a fraction, in [0, 1). */
+    pub const fn fraction(h: u32) -> Fx {
+        Fx(fraction(h))
     }
 
     /** The whole units at or below it. */
@@ -175,6 +182,22 @@ impl Div for Fx {
     }
 }
 
+/** Exact. */
+impl Mul<i64> for Fx {
+    type Output = Fx;
+    fn mul(self, n: i64) -> Fx {
+        Fx(self.0 * n)
+    }
+}
+
+/** Truncated towards zero. */
+impl Div<i64> for Fx {
+    type Output = Fx;
+    fn div(self, n: i64) -> Fx {
+        Fx(self.0 / n)
+    }
+}
+
 /** Exact: a fraction of whole units is units with a fraction. */
 impl Mul<Units> for Fx {
     type Output = Fx;
@@ -198,45 +221,13 @@ impl Div<Units> for Fx {
     }
 }
 
-pub(crate) mod sealed {
-    /** The raw bits of a fixed-point number, out of reach of the worlds. */
-    pub trait Bits: Copy {
-        fn bits(self) -> super::Fixed;
-        fn of_bits(bits: super::Fixed) -> Self;
-    }
-}
-
-/** `Fx`, or the untyped `Fixed` it replaces: what the fixed-point helpers take while the worlds move to `Fx`. */
-pub trait FixedPoint: sealed::Bits {}
-
-impl sealed::Bits for Fixed {
-    fn bits(self) -> Fixed {
-        self
-    }
-    fn of_bits(bits: Fixed) -> Fixed {
-        bits
-    }
-}
-
-impl sealed::Bits for Fx {
-    fn bits(self) -> Fixed {
-        self.0
-    }
-    fn of_bits(bits: Fixed) -> Fx {
-        Fx(bits)
-    }
-}
-
-impl FixedPoint for Fixed {}
-impl FixedPoint for Fx {}
-
 /** `x` as a float, for what is still computed in floats. */
-pub fn float(x: Fixed) -> f64 {
+pub(crate) fn float(x: Fixed) -> f64 {
     x as f64 / ONE as f64
 }
 
 /** A 32-bit hash as a fraction of 1, in [0, ONE). */
-pub fn fraction(h: u32) -> Fixed {
+pub(crate) const fn fraction(h: u32) -> Fixed {
     (h >> 16) as Fixed
 }
 
@@ -266,7 +257,7 @@ impl<const PERIOD: i64> ValueNoise<PERIOD> {
     }
 
     #[inline(always)]
-    pub fn at(&self, x: i64, y: i64) -> Fixed {
+    fn bits(&self, x: i64, y: i64) -> Fixed {
         let (ix, iy) = (x.div_euclid(PERIOD), y.div_euclid(PERIOD));
         let (kx, ky, mut c) = self.cell.get();
         if (kx, ky) != (ix, iy) {
@@ -279,10 +270,9 @@ impl<const PERIOD: i64> ValueNoise<PERIOD> {
         lerp(lerp(c[0], c[1], u), lerp(c[2], c[3], u), v)
     }
 
-    /** `at`, typed. */
     #[inline(always)]
-    pub fn fx(&self, x: i64, y: i64) -> Fx {
-        Fx(self.at(x, y))
+    pub fn at(&self, x: i64, y: i64) -> Fx {
+        Fx(self.bits(x, y))
     }
 }
 
@@ -295,22 +285,16 @@ impl<const PERIOD: i64, const OCTAVES: usize> Fbm<PERIOD, OCTAVES> {
     }
 
     #[inline(always)]
-    pub fn at(&self, x: i64, y: i64) -> Fixed {
-        let sum: Fixed = self.0.iter().enumerate().map(|(i, octave)| octave.at(x << i, y << i) << (OCTAVES - 1 - i)).sum();
-        sum / ((1 << OCTAVES) - 1)
-    }
-
-    /** `at`, typed. */
-    #[inline(always)]
-    pub fn fx(&self, x: i64, y: i64) -> Fx {
-        Fx(self.at(x, y))
+    pub fn at(&self, x: i64, y: i64) -> Fx {
+        let sum: Fixed = self.0.iter().enumerate().map(|(i, octave)| octave.bits(x << i, y << i) << (OCTAVES - 1 - i)).sum();
+        Fx(sum / ((1 << OCTAVES) - 1))
     }
 }
 
-/** 0 below `edge0`, ONE above `edge1`, eased between. */
-pub fn smoothstep<T: FixedPoint>(edge0: T, edge1: T, x: T) -> T {
-    let (edge0, edge1, x) = (edge0.bits(), edge1.bits(), x.bits());
-    T::of_bits(if x <= edge0 {
+/** 0 below `edge0`, 1 above `edge1`, eased between. */
+pub fn smoothstep(edge0: Fx, edge1: Fx, x: Fx) -> Fx {
+    let (edge0, edge1, x) = (edge0.0, edge1.0, x.0);
+    Fx(if x <= edge0 {
         0
     } else if x >= edge1 {
         ONE
@@ -342,9 +326,9 @@ impl Rng {
         ((self.next_u32() as u64 * n as u64) >> 32) as u32
     }
 
-    /** True with chance `p` (a fraction of ONE). */
-    pub fn chance(&mut self, p: impl FixedPoint) -> bool {
-        fraction(self.next_u32()) < p.bits()
+    /** True with chance `p`. */
+    pub fn chance(&mut self, p: Fx) -> bool {
+        fraction(self.next_u32()) < p.0
     }
 
     /** A fraction of 1 in [0, 1), in steps of 2^-32. */
@@ -365,8 +349,8 @@ mod tests {
             let mut last = noise.at(x0, 5);
             for x in x0 + 1..x0 + 2000 {
                 let v = noise.at(x, 5);
-                assert!((0..ONE).contains(&v) && (v - last).abs() < ONE / 16, "{x}: {last} to {v}");
-                assert!((0..ONE).contains(&fbm.at(x, 5)));
+                assert!((Fx::ZERO..Fx::ONE).contains(&v) && (v - last).abs() < Fx::ONE / 16, "{x}: {last:?} to {v:?}");
+                assert!((Fx::ZERO..Fx::ONE).contains(&fbm.at(x, 5)));
                 last = v;
             }
         }

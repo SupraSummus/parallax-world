@@ -11,9 +11,9 @@ use worldgen::generator::{
 };
 use worldgen::grid::Box3;
 use worldgen::kinds;
-use worldgen::noise::{Fixed, ONE, Rng, fixed, hash64, smoothstep, stream};
+use worldgen::noise::{Fx, Rng, fx, hash64, smoothstep, stream};
 use worldgen::plan::{Land, Plan};
-use worldgen::units::m;
+use worldgen::units::{Units, m};
 
 use crate::forest::{self, K as F, Relief, Species, make_tree};
 
@@ -68,7 +68,7 @@ const JITTER: i64 = m(150.0);
 pub const TOWNS_SCALE: i64 = m(400.0);
 pub const BID_SCALE: i64 = m(4.0);
 /** How far past its streets a town levels the ground, easing back to the valley's. */
-const TERRACE: i64 = m(120.0);
+const TERRACE: Units = Units::m(120.0);
 
 /** A town: its main street's centre line x, its middle z, the height of its streets, and blocks per side and rows of them. */
 #[derive(Clone, Copy, Default)]
@@ -116,14 +116,14 @@ impl Town {
         self.rows / 2
     }
 
-    /** Distance from the town's streets and blocks, in units: negative inside. */
-    pub fn distance(&self, x: i64, z: i64) -> i64 {
+    /** Distance from the town's streets and blocks: negative inside. */
+    pub fn distance(&self, x: i64, z: i64) -> Units {
         let (dx, dz) = ((x - self.x).abs() - self.half_x(), (z - self.z).abs() - self.half_z());
         if dx <= 0 && dz <= 0 {
-            return dx.max(dz);
+            return Units(dx.max(dz));
         }
         let (dx, dz) = (dx.max(0), dz.max(0));
-        ((dx * dx + dz * dz) as u64).isqrt() as i64
+        Units(((dx * dx + dz * dz) as u64).isqrt() as i64)
     }
 
     /** Block `c` of side `side` in row `r`. */
@@ -187,7 +187,7 @@ impl Towns {
         Towns {
             plan: Plan::new("towns", TOWNS_SCALE, move |_, n| {
                 let mut random = Rng::new(hash64(s, n, 0, 0));
-                if n != 0 && !random.chance(fixed(0.6)) {
+                if n != 0 && !random.chance(fx(0.6)) {
                     return None;
                 }
                 let (z, cols, rows) = if n == 0 {
@@ -198,11 +198,8 @@ impl Towns {
                 let mut town = Town { x: 0, z, level: 0, cols, rows, seed: random.next_u64() };
                 // The floor's mean, not its bumps: a town's height is as coarse as the town.
                 let (hx, hz) = (town.half_x(), town.half_z());
-                let mut sum = 0;
-                for (i, j) in (-1..=1).flat_map(|i| (-1..=1).map(move |j| (i, j))) {
-                    sum += relief.ground(i * hx, z + j * hz, 0);
-                }
-                town.level = (sum / 9 + ONE / 2) >> 16;
+                let around = (-1..=1).flat_map(|i| (-1..=1).map(move |j| (i, j)));
+                town.level = Fx::mean(around.map(|(i, j)| relief.ground(i * hx, z + j * hz, Fx::ZERO))).round_units().0;
                 Some(town)
             }),
         }
@@ -213,28 +210,29 @@ impl Towns {
         self.plan.at(0, (z + SPACING / 2).div_euclid(SPACING))
     }
 
-    /** The path's centre line at z (fixed point), bent from `route` onto the main street of the town there. */
-    pub fn street_x(&self, z: i64, route: Fixed) -> Fixed {
+    /** The path's centre line at z, with its fraction, bent from `route` onto the main street of the town there. */
+    pub fn street_x(&self, z: i64, route: Fx) -> Fx {
         let Some(t) = self.near(z) else { return route };
-        let bend = ONE - smoothstep(0, m(60.0) * ONE, ((z - t.z).abs() - t.half_z()) * ONE);
-        route + (((t.x * ONE - route) * bend) >> 16)
+        let bend = Fx::ONE - smoothstep(Fx::ZERO, Units::m(60.0).to_fx(), Units((z - t.z).abs() - t.half_z()).to_fx());
+        route + (Units(t.x).to_fx() - route) * bend
     }
 
     /** The town's bid for column (x, z), BID_SCALE: ahead inside its streets, behind a few metres out. */
-    pub fn bid(&self, x: i64, z: i64) -> Fixed {
-        self.near(z).map_or(-4 * ONE, |t| ((m(4.0) - t.distance(x, z)) * ONE / m(8.0)).clamp(-4 * ONE, 4 * ONE))
+    pub fn bid(&self, x: i64, z: i64) -> Fx {
+        let most = fx(4.0);
+        self.near(z).map_or(-most, |t| ((Units::m(4.0) - t.distance(x, z)).to_fx() / Units::m(8.0)).clamp(-most, most))
     }
 
-    /** `ground` (fixed point) levelled to the town's streets, all the way under it and easing back over TERRACE. */
-    pub fn terraced(&self, x: i64, z: i64, ground: Fixed) -> Fixed {
+    /** `ground`, with its fraction, levelled to the town's streets, all the way under it and easing back over TERRACE. */
+    pub fn terraced(&self, x: i64, z: i64, ground: Fx) -> Fx {
         let Some(t) = self.near(z) else { return ground };
-        let weight = ONE - smoothstep(0, TERRACE * ONE, t.distance(x, z).max(0) * ONE);
-        ground + (((t.level * ONE - ground) * weight) >> 16)
+        let weight = Fx::ONE - smoothstep(Fx::ZERO, TERRACE.to_fx(), t.distance(x, z).max(Units(0)).to_fx());
+        ground + (Units(t.level).to_fx() - ground) * weight
     }
 
-    /** How far column (x, z) is from the nearest town, in units (negative inside); far if none. */
-    pub fn distance(&self, x: i64, z: i64) -> i64 {
-        self.near(z).map_or(i64::MAX / 4, |t| t.distance(x, z))
+    /** How far column (x, z) is from the nearest town (negative inside); far if none. */
+    pub fn distance(&self, x: i64, z: i64) -> Units {
+        self.near(z).map_or(Units(i64::MAX / 4), |t| t.distance(x, z))
     }
 }
 
@@ -361,7 +359,7 @@ fn block(t: &Town, b: &Block, bounds: Box3) -> Node {
                     .into_iter()
                     .enumerate()
             {
-                let oak = random.chance(ONE / 2);
+                let oak = random.chance(Fx::HALF);
                 children.push(child(format!("tree {i}"), ANY_SIZE, tree(t, &frame, u, w, oak, &mut random)));
             }
         }
@@ -393,9 +391,9 @@ fn block(t: &Town, b: &Block, bounds: Box3) -> Node {
             children.push(child(format!("house {} {n}", u8::from(back_row)), ANY_SIZE, thing(shapes)));
             // A tree in the yard behind, now and then.
             let yard = BLOCK_W / 2 - (front + depth);
-            if yard >= m(4.0) && random.chance(fixed(0.3)) {
+            if yard >= m(4.0) && random.chance(fx(0.3)) {
                 let u = BLOCK_W / 2 + if back_row { yard / 2 } else { -yard / 2 };
-                let oak = !random.chance(fixed(0.6));
+                let oak = !random.chance(fx(0.6));
                 children.push(child(
                     format!("tree {} {n}", u8::from(back_row)),
                     ANY_SIZE,
@@ -411,7 +409,7 @@ fn block(t: &Town, b: &Block, bounds: Box3) -> Node {
 
 /** A thing of `shapes`, its far form measured from them (see "Levels" in docs/generators.md). */
 fn thing(shapes: Vec<Shape>) -> Node {
-    Node { far: Some(Far::measured(fixed(2.0))), ..Node::of(shapes) }
+    Node { far: Some(Far::measured(fx(2.0))), ..Node::of(shapes) }
 }
 
 /** A house in its own frame: u along its front, v up from its floor, w back from its front. */
@@ -457,14 +455,14 @@ fn door(wall: &mut Part, u: i64, half: i64, tall: i64, open: Option<i64>) {
 impl House {
     fn build(&self, part: &mut Part, random: &mut Rng) {
         let House { length, depth, storeys, .. } = *self;
-        let kinds = if random.chance(fixed(0.1)) { 6 } else { 5 };
+        let kinds = if random.chance(fx(0.1)) { 6 } else { 5 };
         let plaster = k(PLASTERS[random.below(kinds) as usize]);
         let roof = k([K::roofRed, K::roofRed, K::roofBrown, K::slate][random.below(4) as usize]);
         let top = storeys * STOREY;
         part.add([-1, -3, -1], [length + 1, 4, depth + 1], k(K::churchStone));
         part.add([0, 0, 0], [length, top, depth], plaster);
         // Its ridge along the street, eaves to it; now and then gable-fronted.
-        let ridge = if random.chance(fixed(0.75)) { 0 } else { 2 };
+        let ridge = if random.chance(fx(0.75)) { 0 } else { 2 };
         let across = 2 - ridge;
         let (width, eaves) = (if across == 0 { length } else { depth }, 3);
         let rise = (width as f64 / 2.0 + eaves as f64) * (0.6 + random.next() * 0.4);
@@ -488,8 +486,8 @@ impl House {
         part.add([cu, top, cw], [cu + 5, top + rise as i64 + m(0.8), cw + 5], k(K::brick));
 
         // Windows front and back, a door in the front's middle; a shop's open door, wide windows and room on the ground floor.
-        let shutters = random.chance(fixed(0.4)).then(|| if random.chance(ONE / 2) { K::shutterGreen } else { K::shutterBlue });
-        let shop = self.shop && random.chance(ONE / 2);
+        let shutters = random.chance(fx(0.4)).then(|| if random.chance(Fx::HALF) { K::shutterGreen } else { K::shutterBlue });
+        let shop = self.shop && random.chance(Fx::HALF);
         let slots = 1.max((length - m(1.0)) / m(2.4));
         let slot = |j: i64| length * (2 * j + 1) / (2 * slots);
         for (i, (wall, _)) in walls(length, depth).into_iter().enumerate().filter(|(i, _)| i % 2 == 0) {

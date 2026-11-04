@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use worldgen::generator::{Kind, generate};
 use worldgen::grid::Box3;
-use worldgen::noise::{Fx, ONE, fx};
+use worldgen::noise::{Fx, fx};
 use worldgen::plan::{Land, Plan};
 use worldgen::units::Units;
 use worlds::fields;
@@ -129,7 +129,7 @@ pub fn land(seed: u64) -> (Rc<Towns>, Land) {
     let ground = {
         let (towns, path) = (towns.clone(), path.clone());
         Rc::new(Plan::new("ground", GROUND_SCALE, move |x, z| {
-            (towns.terraced(x, z, relief.ground(x, z, (x * ONE - path.at(0, z)).abs())) + ONE / 2) >> 16
+            towns.terraced(x, z, relief.ground(x, z, forest::path_distance(&path, x, z))).round_units().0
         }))
     };
     let slope = {
@@ -143,7 +143,7 @@ pub fn land(seed: u64) -> (Rc<Towns>, Land) {
         Rc::new(Plan::new("forest's bid", TOWNS_SCALE, |_, _| Fx::ZERO)),
         {
             let towns = towns.clone();
-            Rc::new(Plan::new("town's bid", town::BID_SCALE, move |x, z| Fx::from_bits(towns.bid(x, z))))
+            Rc::new(Plan::new("town's bid", town::BID_SCALE, move |x, z| towns.bid(x, z)))
         },
         Rc::new(fields::bid(seed, towns.clone(), slope)),
     ];
@@ -210,7 +210,7 @@ pub fn valley(seed: u64, area: Area, threads: usize, cache: &str) -> Valley {
                                         .map(|y| grid.get(x, y, z))
                                         .find(|id| *id != 0);
                                     let owner = (0..DOMAINS.len()).find(|d| land.owns(*d, x * s, z * s)).unwrap_or(0) as u8;
-                                    let metres = (towns.distance(x * s, z * s) / 8).clamp(-10_000, 10_000) as i32;
+                                    let metres = (towns.distance(x * s, z * s).0 / 8).clamp(-10_000, 10_000) as i32;
                                     out.push((j * area.nx + i, material_class[id.unwrap_or(0) as usize], owner, metres));
                                 }
                             }
