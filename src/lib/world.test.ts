@@ -1,17 +1,14 @@
 import { describe, it, expect, vi } from 'vitest'
 import { VoxelGrid } from './voxel-grid'
-import { generatePart, World, WORLD_TYPES, type GridPart, type Vec3 } from './world'
-import { forest } from './worldgen'
+import { generatePart, World, worldTypes, type GridPart, type Vec3 } from './world'
+import { generated, worlds } from './worldgen'
 
 // A small stand-in for the forest: these tests are about generating in parts.
-vi.mock('./worldgen', async () => {
-  const { smallForest } = await import('./small-forest.test-helper')
-  return { forest: smallForest, valley: smallForest }
-})
+vi.mock('./worldgen', async () => (await import('./small-forest.test-helper')).smallWorldgen)
 
 describe('World', () => {
-  // The forest, the valley and the city are checked in their own tests; comparing them here is slow.
-  const smallWorlds = WORLD_TYPES.map(t => t.value).filter(t => t !== 'forest' && t !== 'valley' && t !== 'city')
+  // worldgen.ts's worlds and the city are checked in their own tests; comparing them here is slow.
+  const smallWorlds = worldTypes().map(t => t.value).filter(t => !worlds().includes(t) && t !== 'city')
 
   it('is deterministic for a given seed and type', () => {
     for (const value of smallWorlds) {
@@ -60,7 +57,7 @@ describe('World', () => {
     if (!grid) return false
     const { minX, minY, minZ, nx, ny, nz } = grid
     const box = { minX, minY, minZ, maxX: minX + nx, maxY: minY + ny, maxZ: minZ + nz }
-    const whole = VoxelGrid.compose(box, grid.materials, [forest(7).generate(box, level)])
+    const whole = VoxelGrid.compose(box, grid.materials, [generated('forest', 7).generate(box, level)])
     let [voxels, wrong] = [0, 0]
     whole.forEach((x, y, z, id) => {
       voxels++

@@ -12,7 +12,7 @@ and so is the valley (`valley.rs`), the forest with towns and fields,
 three domains composed as in "Composing";
 a host starts either by name from `WORLDS` (`worlds/src/lib.rs`),
 as a `World`: its generator, spawn, reach and heights;
-the web generates both as WebAssembly (`src/lib/worldgen.ts`);
+the web lists and generates them all as WebAssembly (`src/lib/worldgen.ts`);
 the TS city and the toy worlds (`src/lib`) are not on it.
 Integers and fixed point (`noise.rs`) decide wherever they can,
 so a world is the same on every machine and as fine far from the origin.
@@ -178,7 +178,8 @@ The engine's tests also check that a thing's carves cut only the thing.
 A new world is an entry in `WORLDS`
 with regions that have, between them, a bit of everything in it,
 and its name in `worlds!` in `worlds/tests/contract.rs`,
-whose tests fail without it.
+whose tests fail without it;
+the web app lists it by itself, under its name.
 To see a world without the renderer,
 `worlds/examples/map.rs` draws its layout from above, any level, any area,
 and `worlds/examples/look.rs` takes a picture of it at one level

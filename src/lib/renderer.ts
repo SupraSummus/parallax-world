@@ -1,6 +1,6 @@
 import { selectSlices, leakFreeDetail, leakAngle, eyeOf, sliceCentre, chunkCell, chunkCells, cellMargin, matchTilings, sliceKey as sliceName, siteLayers, MAX_LEVEL, GRID_LEVELS, atomLevel, atomSpacing, type SliceId } from './slice-selection'
 import { ChunkBaker, type ChunkSplats, type ChunkRequest } from './chunk-baker'
-import { generatePart, World, WORLD_TYPES, type GridPart, type Vec3, type WorldType } from './world'
+import { generatePart, World, worldTypes, type GridPart, type Vec3, type WorldType } from './world'
 import { LayerIndex, type LayerIndexData, type Material, type VoxelData } from './voxel-grid'
 import { Coverage } from './occlusion'
 import { FACES, LAYER, faceTangents, inFace, focalLength, onScreen, screenBox, toLocal, type Face, type Orientation, type ScreenBox, type TangentBox, type View } from './view'
@@ -101,7 +101,7 @@ export function parseViewQuery(search: string): ViewQuery {
   const [camera, look, world] = [numbers('camera', 3), numbers('look', 2), params.get('world')]
   return {
     seed: numbers('seed', 1)?.[0],
-    worldType: WORLD_TYPES.find(t => t.value === world)?.value,
+    worldType: worldTypes().find(t => t.value === world)?.value,
     camera: camera && { x: camera[0], y: camera[1], z: camera[2] },
     look: look && { yaw: look[0], pitch: look[1] },
     fov: numbers('fov', 1)?.[0],

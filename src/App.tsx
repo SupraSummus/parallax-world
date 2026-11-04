@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback, type PointerEvent, type ReactNode } from 'react'
 import { ParallaxRenderer, DEFAULT_FOV, MAX_FOV, MIN_FOV, DEFAULT_RENDER_DISTANCE, MAX_RENDER_DISTANCE, MIN_RENDER_DISTANCE, DEFAULT_MAX_LEAK, MAX_MAX_LEAK, MIN_MAX_LEAK, parseViewQuery, viewQuery, type Camera, type SessionStats } from '@/lib/renderer'
-import { World, WORLD_TYPES, type WorldType } from '@/lib/world'
+import { World, worldTypes, type WorldType } from '@/lib/world'
 import type { Orientation } from '@/lib/view'
 import { Compositor } from '@/lib/compositor'
 import { startBakeWorkers } from '@/lib/worker-bakery'
@@ -379,12 +379,12 @@ function App() {
           </Panel>
 
           <Panel icon={<Box size={16} />} title="World">
-            <Select value={worldType} onValueChange={(v) => { handleRegenerateWorld(v as WorldType) }}>
+            <Select value={worldType} onValueChange={(v) => { handleRegenerateWorld(v) }}>
               <SelectTrigger className="w-full" aria-label="World type">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {WORLD_TYPES.map(type => (
+                {worldTypes().map(type => (
                   <SelectItem key={type.value} value={type.value}>{type.label}</SelectItem>
                 ))}
               </SelectContent>

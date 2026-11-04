@@ -9,10 +9,7 @@ import { atomLevel, GRID_LEVELS } from './slice-selection'
 import { levelsOf, World } from './world'
 
 // A small stand-in for the forest, which the workers generate in moments.
-vi.mock('./worldgen', async () => {
-  const { smallForest } = await import('./small-forest.test-helper')
-  return { forest: smallForest, valley: smallForest }
-})
+vi.mock('./worldgen', async () => (await import('./small-forest.test-helper')).smallWorldgen)
 
 // A small world with trees, as in renderer.test.ts.
 const world = new World(12345, 'hills_with_trees')
