@@ -19,7 +19,7 @@ macro_rules! worlds {
     };
 }
 
-worlds!(forest, valley);
+worlds!(forest, valley, moor);
 
 #[test]
 fn every_world_is_tested() {

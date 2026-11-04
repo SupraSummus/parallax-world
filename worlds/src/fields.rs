@@ -6,13 +6,14 @@
 
 use std::rc::Rc;
 
-use worldgen::generator::{Field, FieldValues, Kind, Layer, Node, Op, Population, SOLID, Span, ball, stripe};
+use worldgen::column::Column;
+use worldgen::generator::{Field, Layer, Node, Op, Population, Shape, stripe};
 use worldgen::kinds;
 use worldgen::noise::{Fbm, Fixed, ONE, Rng, ValueNoise, fixed, hash, hash64, smoothstep, stream};
 use worldgen::plan::{Land, Plan};
 use worldgen::units::m;
 
-use crate::forest::{self, K as F};
+use crate::forest::K as F;
 use crate::town::{self, Towns};
 
 kinds! {
@@ -91,73 +92,44 @@ impl Fields {
     }
 }
 
-/** A medium from `from`, `height` tall: at least two sites tall, as dense along a ray through it as it is (its extinction times height kept). */
-fn medium(from: i64, height: i64, kind: Kind, extinction: f64, spacing: i64) -> Span {
-    let tall = height.max(2 * spacing);
-    Span { from, to: from + tall, kind, extinction: Some(extinction * height as f64 / tall as f64) }
-}
-
 /** The fields' layers on `ground`, along `path`, where domain `me` of `land` owns the land. */
 pub fn layers(seed: u64, land: Rc<Land>, me: usize, ground: Rc<Plan<i64>>, path: Rc<Plan<Fixed>>) -> Vec<Layer> {
     let f = Rc::new(Fields { seed, land, me, path, warp: ValueNoise::new(stream(seed, 42)) });
     let plots = {
         let (f, ground) = (f.clone(), ground.clone());
-        Field {
-            name: "fields",
-            order: 0.6,
-            op: Op::Paint,
-            values: FieldValues::Spans {
-                axis: 1,
-                spans: Box::new(move |x, z, spacing| {
-                    let Some(crop) = f.crop(x, z) else { return Vec::new() };
-                    let h = ground.at(x, z);
-                    let dither = hash(stream(f.seed, 43), x, z, 0);
-                    let surface = |kind: Kind| Span { from: h + 1 - m(0.5).max(2 * spacing), to: h + 1, kind, extinction: None };
-                    let above = h + 1;
-                    match crop {
-                        Crop::Wheat => vec![surface(k(K::stubble)), medium(above, m(0.9), k(K::wheat), 0.35, spacing)],
-                        Crop::Stubble => vec![surface(k(K::stubble))],
-                        Crop::Ploughed => vec![surface(k(if stripe(z, 8, spacing, dither) { K::furrow } else { K::tilth }))],
-                        Crop::Rows => {
-                            let mut spans = vec![surface(k(K::furrow))];
-                            if stripe(z, 12, spacing, dither) {
-                                spans.push(medium(above, 2, k(K::crop), 0.6, spacing));
-                            }
-                            spans
-                        }
-                        Crop::Meadow => vec![surface(k(K::meadow)), medium(above, 2, k(K::meadow), 0.2, spacing)],
-                        Crop::Hedge => vec![surface(k(K::meadow)), medium(above, m(1.4), forest::k(F::bush), 0.45, spacing)],
-                    }
-                }),
-            },
-        }
+        Field::columns("fields", 0.6, Op::Paint, move |x, z, spacing| {
+            let Some(crop) = f.crop(x, z) else { return Vec::new() };
+            let dither = hash(stream(f.seed, 43), x, z, 0);
+            // Half a metre of soil (or stubble) under each, and what grows on it.
+            let h = ground.at(x, z);
+            let soil = |kind: K| Column::new(h, spacing).surface(kind, m(0.5));
+            match crop {
+                Crop::Wheat => soil(K::stubble).medium(K::wheat, m(0.9), 0.35),
+                Crop::Stubble => soil(K::stubble),
+                Crop::Ploughed => soil(if stripe(z, 8, spacing, dither) { K::furrow } else { K::tilth }),
+                Crop::Rows if stripe(z, 12, spacing, dither) => soil(K::furrow).medium(K::crop, 2, 0.6),
+                Crop::Rows => soil(K::furrow),
+                Crop::Meadow => soil(K::meadow).medium(K::meadow, 2, 0.2),
+                Crop::Hedge => soil(K::meadow).medium(F::bush, m(1.4), 0.45),
+            }
+            .spans()
+        })
     };
     // Haystacks on the stubble.
-    let cell = m(6.0);
-    let haystacks = Population {
-        name: "haystacks",
-        order: 3.0,
-        cell,
-        reach: [m(2.0); 3],
-        size: m(4.0),
-        anchor: {
-            let (ground, seed) = (ground.clone(), stream(seed, 44));
-            Box::new(move |cell_at| {
-                let [cx, _, cz] = cell_at.centre;
-                let mut pick = Rng::new(hash64(seed, cell_at.i, cell_at.j, cell_at.k));
-                let (x, z) = (cx - cell + pick.below(2 * cell as u32) as i64, cz - cell + pick.below(2 * cell as u32) as i64);
-                Some([x as f64, ground.at(x, z) as f64, z as f64])
+    let haystacks = {
+        let seed = stream(seed, 44);
+        Population::new("haystacks", 3.0, m(6.0))
+            .reach(m(2.0))
+            .size(m(4.0))
+            .anchor(move |c| Some(c.on_ground_by(&mut Rng::new(hash64(seed, c.i, c.j, c.k)), |x, z| ground.at(x, z))))
+            .make(move |[x, y, z], cell| {
+                let mut random = cell.random("haystack");
+                if f.crop(x as i64, z as i64) != Some(Crop::Stubble) || !random.chance(fixed(0.3)) {
+                    return None;
+                }
+                let r = m(1.0) as f64 + random.next() * 4.0;
+                Some(Node::of(vec![Shape::ball([x, y + r * 0.5, z], r, F::hay)]))
             })
-        },
-        make: Box::new(move |[x, y, z], cell| {
-            let mut random = cell.random("haystack");
-            if f.crop(x as i64, z as i64) != Some(Crop::Stubble) || !random.chance(fixed(0.3)) {
-                return None;
-            }
-            let r = m(1.0) as f64 + random.next() * 4.0;
-            Some(Node::of(vec![ball([x, y + r * 0.5, z], r, forest::k(F::hay), SOLID, Op::Fill)]))
-        }),
-        far: None,
     };
     vec![Layer::Field(plots), Layer::Population(haystacks)]
 }

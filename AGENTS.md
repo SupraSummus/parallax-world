@@ -75,6 +75,8 @@ worldgen/                    # The world-generation engine, moving to integers, 
 │   ├── noise.rs, grid.rs    # Integer hashes, random numbers, fixed-point noise; voxel-grid.ts's bricks
 │   ├── units.rs             # UNIT_SIZE: metres per lattice unit
 │   ├── generator.rs         # The framework: shapes, nodes, fields, populations, drawing any box at any level
+│   ├── build.rs             # Short forms to write worlds with: constructors of fields, populations, nodes, solid shapes
+│   ├── column.rs            # A heightfield's spans, each tall enough to keep a site at every level
 │   ├── plan.rs              # Plans by column, each from coarser ones only; land domains bid for
 │   ├── frame.rs             # Things built in frames of their own: quarter turns, mirrors, walls
 │   ├── world.rs             # World: what a host needs to show one (generator, spawn, reach, heights)
@@ -87,6 +89,7 @@ worlds/                      # The worlds, on worldgen's public API only; the we
 │   ├── forest.rs            # The forest, on ground it may share
 │   ├── town.rs, fields.rs   # Towns along the path, farmland around them: the valley's other domains
 │   ├── valley.rs            # The valley: the three domains on one land
+│   ├── moor.rs              # The moor: heath, a stream, steadings of a hut and a ring of stones
 │   └── wasm.rs              # Its WebAssembly exports (the module holds bake/'s too)
 ├── tests/                   # Every world in WORLDS keeps the contract; the scenes' contents
 └── examples/                # map: a world from above; look: a picture of it (picture.rs); forest_bench: timing forest tiles

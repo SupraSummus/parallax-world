@@ -3,7 +3,7 @@
 //! offset, so boxes stay boxes and a part's sites land on its parent's.
 //! See "Model" in docs/generators.md.
 
-use crate::generator::{Fill, Kind, Op, Point, SOLID, Shape, ball, cuboid, gable, lathe};
+use crate::generator::{Fill, Kind, Op, Point, SOLID, Shape, ball, capsule, cuboid, ellipsoid, gable, lathe};
 
 /**
  * Where a frame's coordinates are in its parent's: `axes[i]` is where
@@ -33,6 +33,15 @@ impl Frame {
     /** The parent's coordinates from `origin` on. */
     pub fn at(origin: [i64; 3]) -> Frame {
         Frame { origin, ..Frame::SAME }
+    }
+
+    /**
+     * Turned by `quarters` about v, the box [0, size) of it centred on
+     * `centre` (its site size / 2, rounded down, there).
+     */
+    pub fn centred(centre: [i64; 3], size: [i64; 3], quarters: i64) -> Frame {
+        let offset = Frame::SAME.turned(quarters).site(size.map(|v| v / 2));
+        Frame::at([0, 1, 2].map(|i| centre[i] - offset[i])).turned(quarters)
     }
 
     /** Turned by `quarters` about its v axis, from u towards w. */
@@ -91,6 +100,21 @@ impl Frame {
     }
 }
 
+/**
+ * The quarter turns about v (as `Frame::turned`) that take a frame's
+ * front, its −w, nearest to the direction (dx, dz) of its parent's x
+ * and z; along z where they tie.
+ */
+pub fn facing(dx: i64, dz: i64) -> i64 {
+    if dx.abs() > dz.abs() {
+        if dx > 0 { 1 } else { 3 }
+    } else if dz > 0 {
+        2
+    } else {
+        0
+    }
+}
+
 /** Its axes and their opposites, to give frames by. */
 pub const U: [i64; 3] = [1, 0, 0];
 pub const V: [i64; 3] = [0, 1, 0];
@@ -130,19 +154,19 @@ impl Part<'_> {
     }
 
     /** The cells from `min` to `max` (exclusive) of `kind`, by `op`. */
-    pub fn cells(&mut self, min: [i64; 3], max: [i64; 3], kind: Kind, op: Op) -> &mut Shape {
+    pub fn cells(&mut self, min: [i64; 3], max: [i64; 3], kind: impl Into<Kind>, op: Op) -> &mut Shape {
         let (a, b) = self.frame.cells(min.map(|v| v as f64), max.map(|v| v as f64));
-        self.shapes.push(cuboid(a, b, kind, SOLID, op));
+        self.shapes.push(cuboid(a, b, kind.into(), SOLID, op));
         self.shapes.last_mut().expect("one")
     }
 
     /** Solid `kind` in the cells from min to max, where empty. */
-    pub fn add(&mut self, min: [i64; 3], max: [i64; 3], kind: Kind) -> &mut Shape {
+    pub fn add(&mut self, min: [i64; 3], max: [i64; 3], kind: impl Into<Kind>) -> &mut Shape {
         self.cells(min, max, kind, Op::Fill)
     }
 
     /** `kind` over whatever the thing has in the cells from min to max. */
-    pub fn paint(&mut self, min: [i64; 3], max: [i64; 3], kind: Kind) -> &mut Shape {
+    pub fn paint(&mut self, min: [i64; 3], max: [i64; 3], kind: impl Into<Kind>) -> &mut Shape {
         self.cells(min, max, kind, Op::Paint)
     }
 
@@ -152,20 +176,47 @@ impl Part<'_> {
     }
 
     /** A gable roof over the cells from min to max, its ridge along `ridge` (u or w, 0 or 2), up along v. */
-    pub fn gable(&mut self, min: [f64; 3], max: [f64; 3], ridge: usize, kind: Kind, op: Op) -> &mut Shape {
+    pub fn gable(&mut self, min: [f64; 3], max: [f64; 3], ridge: usize, kind: impl Into<Kind>, op: Op) -> &mut Shape {
         let (a, b) = self.frame.cells(min, max);
-        self.shapes.push(gable(a, b, self.frame.axis(ridge), kind, SOLID, op));
+        self.shapes.push(gable(a, b, self.frame.axis(ridge), kind.into(), SOLID, op));
         self.shapes.last_mut().expect("one")
     }
 
     /** A solid of revolution from p to q, radius(t) wide. */
-    pub fn lathe(&mut self, p: Point, q: Point, radius: impl Fn(f64) -> f64 + 'static, kind: Kind, fill: Fill, op: Op) -> &mut Shape {
-        self.shapes.push(lathe(self.frame.point(p), self.frame.point(q), radius, kind, fill, op));
+    pub fn lathe(
+        &mut self,
+        p: Point,
+        q: Point,
+        radius: impl Fn(f64) -> f64 + 'static,
+        kind: impl Into<Kind>,
+        fill: Fill,
+        op: Op,
+    ) -> &mut Shape {
+        self.shapes.push(lathe(self.frame.point(p), self.frame.point(q), radius, kind.into(), fill, op));
         self.shapes.last_mut().expect("one")
     }
 
-    pub fn ball(&mut self, centre: Point, radius: f64, kind: Kind, op: Op) -> &mut Shape {
-        self.shapes.push(ball(self.frame.point(centre), radius, kind, SOLID, op));
+    // Shapes are solid but for the lathe's (a crown's leaves): how many rays one stops is
+    // worked out from its fill when it is made, so a fill set after is not counted.
+
+    pub fn ball(&mut self, centre: Point, radius: f64, kind: impl Into<Kind>, op: Op) -> &mut Shape {
+        self.shapes.push(ball(self.frame.point(centre), radius, kind.into(), SOLID, op));
+        self.shapes.last_mut().expect("one")
+    }
+
+    /** An ellipsoid of `radii` along u, v and w. */
+    pub fn ellipsoid(&mut self, centre: Point, radii: Point, kind: impl Into<Kind>, op: Op) -> &mut Shape {
+        let mut along = [0.0; 3];
+        for (i, r) in radii.into_iter().enumerate() {
+            along[self.frame.axis(i)] = r;
+        }
+        self.shapes.push(ellipsoid(self.frame.point(centre), along, kind.into(), SOLID, op));
+        self.shapes.last_mut().expect("one")
+    }
+
+    /** The points within `radius` of the segment from p to q. */
+    pub fn capsule(&mut self, p: Point, q: Point, radius: f64, kind: impl Into<Kind>, op: Op) -> &mut Shape {
+        self.shapes.push(capsule(self.frame.point(p), self.frame.point(q), radius, kind.into(), SOLID, op));
         self.shapes.last_mut().expect("one")
     }
 }
@@ -182,6 +233,27 @@ mod tests {
                 assert!((0..5).contains(&p[0]) && (0..3).contains(&p[2]), "{frame:?}: {p:?}");
             }
         }
+    }
+
+    #[test]
+    fn centred_frames_are_centred_and_face_where_asked() {
+        for (dx, dz) in [(5, 1), (-5, 2), (1, 5), (2, -5), (3, 3)] {
+            let quarters = facing(dx, dz);
+            let frame = Frame::centred([10, 2, -7], [6, 0, 4], quarters);
+            assert_eq!(frame.site([3, 0, 2]), [10, 2, -7]);
+            // Its front, −w, points along the larger of dx and dz, the same way.
+            let front = [0, 1, 2].map(|i| frame.site([0, 0, -1])[i] - frame.site([0, 0, 0])[i]);
+            let along = if dx.abs() > dz.abs() { [dx.signum(), 0, 0] } else { [0, 0, dz.signum()] };
+            assert_eq!(front, along, "({dx}, {dz})");
+        }
+    }
+
+    #[test]
+    fn a_parts_ellipsoid_turns_with_it() {
+        let mut shapes = Vec::new();
+        Part::new(Frame::at([0, 0, 0]).turned(1), &mut shapes).ellipsoid([0.0; 3], [4.0, 2.0, 1.0], 1, Op::Fill);
+        let b = shapes[0].bounds;
+        assert_eq!((b.max[0] - b.min[0], b.max[2] - b.min[2]), (3, 9), "{b:?}");
     }
 
     #[test]

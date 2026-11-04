@@ -1,0 +1,198 @@
+//! Short forms for writing worlds: constructors of fields, populations,
+//! nodes and solid shapes, and anchors on the ground, so a world says
+//! what it draws without struct literals and boxes. The long forms stay:
+//! they are the model (generator.rs). See "Writing a world" in
+//! docs/generators.md.
+
+use crate::generator::{
+    ANY_SIZE, Cell, Child, Children, Far, Field, FieldValues, Kind, Node, Op, Point, Population, SOLID, Shape, Shapes, Span, ball,
+    bounds_of_shapes, capsule, cuboid, ellipsoid, gable, lathe,
+};
+use crate::grid::Box3;
+use crate::noise::Rng;
+
+impl Field {
+    /** A kind, with a medium's extinction if it is one, at each site: `at(x, y, z, spacing)`, lattice units. */
+    pub fn at(name: &'static str, order: f64, op: Op, at: impl Fn(i64, i64, i64, i64) -> Option<(Kind, Option<f64>)> + 'static) -> Field {
+        Field { name, order, op, values: FieldValues::At(Box::new(at)) }
+    }
+
+    /** Spans along each line of sites parallel to `axis`: `spans(u, v, spacing)`, the line's other coordinates in axis order. */
+    pub fn spans<S: Into<Vec<Span>>>(
+        name: &'static str,
+        order: f64,
+        op: Op,
+        axis: usize,
+        spans: impl Fn(i64, i64, i64) -> S + 'static,
+    ) -> Field {
+        Field { name, order, op, values: FieldValues::Spans { axis, spans: Box::new(move |u, v, s| spans(u, v, s).into()) } }
+    }
+
+    /** Spans along each column, up y: `spans(x, z, spacing)`, lattice units; a `Column` or the spans. */
+    pub fn columns<S: Into<Vec<Span>>>(name: &'static str, order: f64, op: Op, spans: impl Fn(i64, i64, i64) -> S + 'static) -> Field {
+        Field::spans(name, order, op, 1, spans)
+    }
+}
+
+/** One number for every axis, or one per axis. */
+pub trait PerAxis {
+    fn per_axis(self) -> [i64; 3];
+}
+
+impl PerAxis for i64 {
+    fn per_axis(self) -> [i64; 3] {
+        [self; 3]
+    }
+}
+
+impl PerAxis for [i64; 3] {
+    fn per_axis(self) -> [i64; 3] {
+        self
+    }
+}
+
+impl Population {
+    /**
+     * Things in the cells of `cell`·FCC: none until it is given `make`.
+     * Each is anchored at its cell's centre unless given an anchor,
+     * reaches nowhere past its cell unless given `reach`, and is made at
+     * every level unless given a `size`.
+     */
+    pub fn new(name: &'static str, order: f64, cell: i64) -> Population {
+        Population {
+            name,
+            order,
+            cell,
+            reach: [0; 3],
+            size: ANY_SIZE,
+            anchor: Box::new(|c| Some(c.centre.map(|v| v as f64))),
+            make: Box::new(|_, _| None),
+            far: None,
+        }
+    }
+
+    /** How far a thing reaches past N from its cell's centre: one number, or per axis. */
+    pub fn reach(self, reach: impl PerAxis) -> Population {
+        Population { reach: reach.per_axis(), ..self }
+    }
+
+    /** Things are made while sites are at most `size` apart; beyond, the far field is drawn, if any. */
+    pub fn size(self, size: i64) -> Population {
+        Population { size, ..self }
+    }
+
+    /** Where a cell's thing is: the cell owns one only if its anchor is in it. */
+    pub fn anchor(self, anchor: impl Fn(&Cell) -> Option<Point> + 'static) -> Population {
+        Population { anchor: Box::new(anchor), ..self }
+    }
+
+    /** Anchored on the ground, at `ground(x, z)`, picked evenly under each cell (`Cell::on_ground`). */
+    pub fn anchor_on_ground(self, ground: impl Fn(i64, i64) -> i64 + 'static) -> Population {
+        self.anchor(move |cell| Some(cell.on_ground(&ground)))
+    }
+
+    /** The thing at an anchor, of a cell, if it has one. */
+    pub fn make(self, make: impl Fn(Point, &Cell) -> Option<Node> + 'static) -> Population {
+        Population { make: Box::new(make), ..self }
+    }
+
+    /** What it draws while its sites are further apart than its `size`: a medium as dense as its things. */
+    pub fn far(self, far: Field) -> Population {
+        Population { far: Some(far), ..self }
+    }
+}
+
+impl Cell<'_> {
+    /**
+     * A spot on the ground under the cell, at `ground(x, z)`, picked
+     * evenly in the square of columns it reaches over (2N wide) with its
+     * random sequence "spot". Each column's spot is in one cell of those
+     * over it, so anchored there, things are as even as one per square.
+     */
+    pub fn on_ground(&self, ground: impl Fn(i64, i64) -> i64) -> Point {
+        self.on_ground_by(&mut self.random("spot"), ground)
+    }
+
+    /** As `on_ground`, picked by `pick`: one that is the same for every cell of a column, say. */
+    pub fn on_ground_by(&self, pick: &mut Rng, ground: impl Fn(i64, i64) -> i64) -> Point {
+        let (n, [cx, _, cz]) = (self.n, self.centre);
+        let x = cx - n + pick.below(2 * n as u32) as i64;
+        let z = cz - n + pick.below(2 * n as u32) as i64;
+        [x as f64, ground(x, z) as f64, z as f64]
+    }
+}
+
+impl Child {
+    /** A finer thing of a node, drawn while sites are at most `size` apart (ANY_SIZE for always). */
+    pub fn new(name: impl Into<String>, size: i64, node: Node) -> Child {
+        Child { name: name.into(), size, node }
+    }
+}
+
+impl Node {
+    /** A thing of nothing but its children, its bounds theirs. */
+    pub fn group(children: Vec<Child>) -> Node {
+        Node::of(Vec::new()).with_children(children)
+    }
+
+    /** Shapes made only once read, by `make` from a random sequence of `seed`, within `bounds`. */
+    pub fn lazy(bounds: Box3, seed: u64, make: impl Fn(&mut Rng) -> Vec<Shape> + 'static) -> Node {
+        Node { shapes: Shapes::lazy(seed, make), bounds: Some(bounds), children: None, far: None }
+    }
+
+    /** With `children`, and bounds holding them and what it had. */
+    pub fn with_children(self, children: Vec<Child>) -> Node {
+        assert!(self.children.is_none(), "a node's children are given once");
+        let boxes: Vec<Box3> = std::iter::once(self.bounds()).chain(children.iter().map(|c| c.node.bounds())).collect();
+        Node { bounds: Some(bounds_of_shapes(&boxes)), children: Some(Children::Fixed(children)), ..self }
+    }
+
+    /** Drawn as `far` while sites are further apart than its detail. */
+    pub fn with_far(self, far: impl Into<Option<Far>>) -> Node {
+        Node { far: far.into(), ..self }
+    }
+}
+
+/**
+ * Solid shapes that fill empty sites: the common case, without `SOLID,
+ * Op::Fill`. `paint` and `carve` change how one meets the world; a shape
+ * kept with a chance (`Fill`) is made with the long form (`ball` and so
+ * on), since how many rays it stops depends on it from the start.
+ */
+impl Shape {
+    pub fn ball(centre: Point, radius: f64, kind: impl Into<Kind>) -> Shape {
+        ball(centre, radius, kind.into(), SOLID, Op::Fill)
+    }
+
+    pub fn ellipsoid(centre: Point, radii: Point, kind: impl Into<Kind>) -> Shape {
+        ellipsoid(centre, radii, kind.into(), SOLID, Op::Fill)
+    }
+
+    pub fn capsule(p: Point, q: Point, radius: f64, kind: impl Into<Kind>) -> Shape {
+        capsule(p, q, radius, kind.into(), SOLID, Op::Fill)
+    }
+
+    pub fn lathe(p: Point, q: Point, radius: impl Fn(f64) -> f64 + 'static, kind: impl Into<Kind>) -> Shape {
+        lathe(p, q, radius, kind.into(), SOLID, Op::Fill)
+    }
+
+    pub fn cuboid(min: Point, max: Point, kind: impl Into<Kind>) -> Shape {
+        cuboid(min, max, kind.into(), SOLID, Op::Fill)
+    }
+
+    pub fn gable(min: Point, max: Point, ridge: usize, kind: impl Into<Kind>) -> Shape {
+        gable(min, max, ridge, kind.into(), SOLID, Op::Fill)
+    }
+
+    /** Over whatever is drawn before it. */
+    pub fn paint(mut self) -> Shape {
+        self.op = Op::Paint;
+        self
+    }
+
+    /** Cutting its sites out of its thing (never out of the world: see "Model"). */
+    pub fn carve(mut self) -> Shape {
+        self.op = Op::Carve;
+        self
+    }
+}

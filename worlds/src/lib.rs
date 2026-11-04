@@ -5,6 +5,7 @@
 
 pub mod fields;
 pub mod forest;
+pub mod moor;
 pub mod town;
 pub mod valley;
 pub mod wasm;
@@ -35,6 +36,8 @@ pub const WORLDS: &[Entry] = &[
         regions: &[Box3 { min: [-128, -48, 760], max: [256, 208, 1016] }, Box3 { min: [-64, -48, 1408], max: [320, 288, 1856] }],
         levels: 4,
     },
+    // The first steading: its hut, the cairns and the ring north of it, heather and grass, from under the ground to over the roof.
+    Entry { name: "moor", make: moor::moor, regions: &[Box3 { min: [-64, -32, -192], max: [192, 64, 192] }], levels: 5 },
 ];
 
 /** The world named `name`. */

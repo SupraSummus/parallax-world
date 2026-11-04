@@ -160,9 +160,21 @@ impl Node {
     pub fn of(shapes: Vec<Shape>) -> Node {
         Node { shapes: Shapes::Now(shapes), bounds: None, children: None, far: None }
     }
+
+    /** Its `bounds`, or without children its shapes'. */
+    pub fn bounds(&self) -> Box3 {
+        bounds_of(self)
+    }
 }
 
-/** Part of a line of sites: [from, to) along the line, solid, or a medium if it has `extinction`. */
+/**
+ * Part of a line of sites: [from, to) along the line, solid, or a medium
+ * if it has `extinction`: per lattice unit of a ray's path through it,
+ * so a site is kept with the chance 1 − exp(−extinction · c), c the mean
+ * chord of its voxel (about 0.94 units at level 0, twice that a level up).
+ * A line has a site every two spacings, so a span shorter than that may
+ * have none: `Column` (column.rs) makes spans that keep one.
+ */
 pub struct Span {
     pub from: i64,
     pub to: i64,
@@ -171,9 +183,13 @@ pub struct Span {
 }
 
 pub enum FieldValues {
-    /** A kind, with a medium's extinction if it is one, at each site; given the level's spacing. */
+    /** A kind, with a medium's extinction if it is one, at each site; given (x, y, z, spacing), all in lattice units. */
     At(Box<FieldAt>),
-    /** Spans along each line of sites parallel to `axis`, at (u, v) the other two coordinates, in order. */
+    /**
+     * Spans along each line of sites parallel to `axis`, drawn in order;
+     * given (u, v, spacing): the line's other two coordinates in axis
+     * order and the sites' spacing, all in lattice units.
+     */
     Spans { axis: usize, spans: Box<FieldSpans> },
 }
 
@@ -191,6 +207,8 @@ pub struct Cell<'a> {
     pub j: i64,
     pub k: i64,
     pub centre: [i64; 3],
+    /** N: the cell reaches N from its centre along each axis. */
+    pub n: i64,
     population: &'a str,
     seed: u64,
 }
@@ -223,6 +241,11 @@ pub enum Layer {
 
 #[derive(Clone)]
 pub struct KindDef {
+    /**
+     * Its class of material, shared by kinds that may stand in for each
+     * other far away: the contract compares what rays hit by type, not
+     * kind, and look's stats count by it. Not a colour or a behaviour.
+     */
     pub kind_type: u8,
     pub colors: &'static [&'static str],
 }
@@ -244,6 +267,12 @@ macro_rules! kinds {
         pub const BASE: $crate::generator::Kind = $base;
         pub fn k(kind: K) -> $crate::generator::Kind {
             BASE + kind as $crate::generator::Kind
+        }
+        /** A K where a Kind is taken: shapes, parts and columns take either. */
+        impl From<K> for $crate::generator::Kind {
+            fn from(kind: K) -> $crate::generator::Kind {
+                k(kind)
+            }
         }
     };
 }
@@ -881,7 +910,7 @@ fn drawables_in<'a>(generator: &'a Generator, clip: &Box3, s: i64) -> Vec<Drawab
                 let mut k = k0 + ((k0 + i + j) & 1);
                 while k <= k1 {
                     let centre = [i * n, j * n, k * n];
-                    let cell = Cell { i, j, k, centre, population: population.name, seed: generator.seed };
+                    let cell = Cell { i, j, k, centre, n, population: population.name, seed: generator.seed };
                     k += 2;
                     let Some(anchor) = (population.anchor)(&cell) else { continue };
                     let [oi, oj, ok] = nearest_site(at(anchor), n);
@@ -895,7 +924,7 @@ fn drawables_in<'a>(generator: &'a Generator, clip: &Box3, s: i64) -> Vec<Drawab
                         min: [centre[0] - n - rx, centre[1] - n - ry, centre[2] - n - rz],
                         max: [centre[0] + n + rx, centre[1] + n + ry, centre[2] + n + rz],
                     };
-                    assert!(bounds.inside(&reach), "{key} reaches past its population's reach; see \"Populations\" in {DOCS}");
+                    assert!(bounds.inside(&reach), "{}", past_reach(&key, &bounds, &reach, n, population.reach));
                     things += 1;
                     let at = Visit { s, units: &units, order: population.order, thing: things, seed: generator.seed };
                     visit(&node, key, bounds, &at, &mut drawables);
@@ -905,6 +934,22 @@ fn drawables_in<'a>(generator: &'a Generator, clip: &Box3, s: i64) -> Vec<Drawab
     }
     drawables.sort_by(|a, b| a.order.total_cmp(&b.order).then_with(|| a.key.cmp(&b.key)));
     drawables
+}
+
+/** Why a thing within `bounds` is past its cell's `reach` (N and the population's reach past its centre): along which axes, by how much, what would hold it. */
+fn past_reach(key: &str, bounds: &Box3, reach: &Box3, n: i64, population: [i64; 3]) -> String {
+    let centre = [0, 1, 2].map(|i| (reach.min[i] + reach.max[i]) / 2);
+    let needed = [0, 1, 2].map(|i| population[i].max(centre[i] - n - bounds.min[i]).max(bounds.max[i] - centre[i] - n));
+    let axes: Vec<String> = (0..3)
+        .filter(|i| needed[*i] > population[*i])
+        .map(|i| format!("{} by {}", ["x", "y", "z"][i], needed[i] - population[i]))
+        .collect();
+    format!(
+        "{key} reaches past its population's reach along {}: its bounds are {bounds:?}, its cell's {reach:?} \
+         (N = {n} and reach {population:?} from its centre); reach {needed:?} would hold this one, \
+         but derive it from the largest possible thing; see \"Populations\" in {DOCS}",
+        axes.join(", ")
+    )
 }
 
 /** A thing's sites of a level: each its kind and how it meets the world. */
