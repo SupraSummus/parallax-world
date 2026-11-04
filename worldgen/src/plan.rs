@@ -5,7 +5,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use crate::noise::{Fixed, FixedPoint, Fx, smoothstep};
+use crate::noise::{Fixed, Fx, smoothstep};
 
 const DOCS: &str = "docs/generators.md";
 
@@ -58,22 +58,22 @@ impl<T: Copy + Default> Plan<T> {
     }
 }
 
-impl<T: FixedPoint + Default + 'static> Plan<T> {
+impl Plan<Fx> {
     /**
      * A smooth plan made only every `step` columns and interpolated
      * between: a band `step` or more wide costs a column a sample's share.
      * Sampling is what makes a coarse band of finer ones, so `make` may
      * read finer plans; what it reads finer than `step` aliases.
      */
-    pub fn sampled(name: &'static str, scale: i64, step: i64, make: impl Fn(i64, i64) -> T + 'static) -> Plan<T> {
+    pub fn sampled(name: &'static str, scale: i64, step: i64, make: impl Fn(i64, i64) -> Fx + 'static) -> Plan<Fx> {
         let mut samples = Plan::new(name, scale, move |i, k| make(i * step, k * step));
         samples.filter = true;
         Plan::new(name, scale, move |x, z| {
             let (i, k) = (x.div_euclid(step), z.div_euclid(step));
             let (u, v) = ((x.rem_euclid(step) << 16) / step, (z.rem_euclid(step) << 16) / step);
             let lerp = |a: Fixed, b: Fixed, t: Fixed| a + (((b - a) * t) >> 16);
-            let corner = |i, k| samples.at(i, k).bits();
-            T::of_bits(lerp(lerp(corner(i, k), corner(i + 1, k), u), lerp(corner(i, k + 1), corner(i + 1, k + 1), u), v))
+            let corner = |i, k| samples.at(i, k).to_bits();
+            Fx::from_bits(lerp(lerp(corner(i, k), corner(i + 1, k), u), lerp(corner(i, k + 1), corner(i + 1, k + 1), u), v))
         })
     }
 }
@@ -138,6 +138,7 @@ impl Land {
 mod tests {
     use super::*;
     use crate::noise::{ONE, fx};
+    use crate::units::Units;
 
     #[test]
     #[should_panic(expected = "plan coarse (scale 64) reads fine of the finer scale 1")]
@@ -149,9 +150,9 @@ mod tests {
 
     #[test]
     fn a_sampled_plan_may_read_finer_ones_and_interpolates() {
-        let fine = Rc::new(Plan::new("fine", 1, |x, z| (x + 2 * z) * ONE));
+        let fine = Rc::new(Plan::new("fine", 1, |x, z| Units(x + 2 * z).to_fx()));
         let coarse = Plan::sampled("coarse", 64, 16, move |x, z| fine.at(x, z));
-        assert_eq!((coarse.at(0, 0), coarse.at(8, 0), coarse.at(5, 3)), (0, 8 * ONE, 11 * ONE));
+        assert_eq!((coarse.at(0, 0), coarse.at(8, 0), coarse.at(5, 3)), (Fx::ZERO, fx(8.0), fx(11.0)));
     }
 
     #[test]

@@ -9,7 +9,7 @@ use std::rc::Rc;
 use worldgen::column::Column;
 use worldgen::generator::{Field, Layer, Node, Op, Population, Shape, stripe};
 use worldgen::kinds;
-use worldgen::noise::{Fbm, Fixed, Fx, Rng, ValueNoise, fx, hash, hash64, smoothstep, stream};
+use worldgen::noise::{Fbm, Fx, Rng, ValueNoise, fx, hash, hash64, smoothstep, stream};
 use worldgen::plan::{Land, Plan};
 use worldgen::units::{Units, m};
 
@@ -38,8 +38,8 @@ pub const SLOPE_SCALE: i64 = m(16.0);
 pub fn bid(seed: u64, towns: Rc<Towns>, slope: Rc<Plan<Fx>>) -> Plan<Fx> {
     let reach = Fbm::<{ m(160.0) }, 3>::new(stream(seed, 40));
     Plan::new("fields' bid", BID_SCALE, move |x, z| {
-        let d = Units(towns.distance(x, z).max(0));
-        let r = Units::m(90.0) + (reach.fx(x, z) * Units::m(60.0)).floor_units();
+        let d = towns.distance(x, z).max(Units(0));
+        let r = Units::m(90.0) + (reach.at(x, z) * Units::m(60.0)).floor_units();
         if d >= r {
             return -Fx::ONE;
         }
@@ -64,8 +64,8 @@ struct Fields {
     seed: u64,
     land: Rc<Land>,
     me: usize,
-    /** The forest's path, not typed yet. */
-    path: Rc<Plan<Fixed>>,
+    /** The forest's path. */
+    path: Rc<Plan<Fx>>,
     warp: ValueNoise<{ m(64.0) }>,
 }
 
@@ -76,13 +76,13 @@ impl Fields {
      * a hedge on some of their edges.
      */
     fn crop(&self, x: i64, z: i64) -> Option<Crop> {
-        let from_path = Units(x).to_fx() - Fx::from_bits(self.path.at(0, z));
+        let from_path = Units(x).to_fx() - self.path.at(0, z);
         if from_path.abs() < Units::m(1.6).to_fx() || !self.land.owns(self.me, x, z) {
             return None;
         }
         let side = from_path.signum();
-        let across = from_path.abs().floor_units() + (self.warp.fx(z, 0) * Units::m(12.0)).floor_units();
-        let along = Units(z) + (self.warp.fx(x, 1) * Units::m(12.0)).floor_units();
+        let across = from_path.abs().floor_units() + (self.warp.at(z, 0) * Units::m(12.0)).floor_units();
+        let along = Units(z) + (self.warp.at(x, 1) * Units::m(12.0)).floor_units();
         let (plot, strip) = (Units::m(40.0), Units::m(28.0));
         let edge = |v: Units, w: Units| v.rem_euclid(w) < Units::m(1.0);
         let h = hash(stream(self.seed, 41), side, across.div_euclid(plot), along.div_euclid(strip));
@@ -94,7 +94,7 @@ impl Fields {
 }
 
 /** The fields' layers on `ground`, along `path`, where domain `me` of `land` owns the land. */
-pub fn layers(seed: u64, land: Rc<Land>, me: usize, ground: Rc<Plan<i64>>, path: Rc<Plan<Fixed>>) -> Vec<Layer> {
+pub fn layers(seed: u64, land: Rc<Land>, me: usize, ground: Rc<Plan<i64>>, path: Rc<Plan<Fx>>) -> Vec<Layer> {
     let f = Rc::new(Fields { seed, land, me, path, warp: ValueNoise::new(stream(seed, 42)) });
     let plots = {
         let (f, ground) = (f.clone(), ground.clone());

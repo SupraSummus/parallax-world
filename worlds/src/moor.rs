@@ -11,7 +11,7 @@ use worldgen::frame::{Frame, Part, facing, walls};
 use worldgen::generator::{ANY_SIZE, Child, Far, Field, Generator, Layer, Node, Op, Population, Shape, Span};
 use worldgen::js;
 use worldgen::kinds;
-use worldgen::noise::{Fbm, Fx, Rng, ValueNoise, fixed, fx, hash64, smoothstep, stream};
+use worldgen::noise::{Fbm, Fx, Rng, ValueNoise, fx, hash64, smoothstep, stream};
 use worldgen::plan::Plan;
 use worldgen::units::{Units, m};
 
@@ -65,7 +65,7 @@ struct Relief {
 impl Relief {
     /** The heath's height at (x, z), with its fraction: hills tens of metres apart, bumps of a few. */
     fn heath(&self, x: i64, z: i64) -> Fx {
-        (self.hills.fx(x, z) - Fx::HALF) * Units::m(28.0) + (self.bumps.fx(x, z) - Fx::HALF) * Units::m(0.8)
+        (self.hills.at(x, z) - Fx::HALF) * Units::m(28.0) + (self.bumps.at(x, z) - Fx::HALF) * Units::m(0.8)
     }
 
     /** The stream's centre line at z, with its fraction: winding along z west of the origin. */
@@ -237,7 +237,7 @@ fn terrain(f: Rc<Moor>) -> Field {
         let (d, half) = f.stream_distance(x, z);
         let wet = h <= WATER || d < half + Units::m(1.0);
         let path = !wet && f.on_path(x, z);
-        let heathery = f.relief.patches.fx(x, z) > fx(0.47);
+        let heathery = f.relief.patches.at(x, z) > fx(0.47);
         let surface = if wet {
             K::bog
         } else if path {
@@ -349,7 +349,7 @@ fn hut(s: &Steading, random: &mut Rng) -> Node {
     let mut outline = Part::new(s.frame(), &mut far);
     outline.add([-1, -m(1.5), -1], [length + 1, top, depth + 1], K::drystone);
     outline.gable([-2.0, (top - 2) as f64, -3.0], [(length + 2) as f64, top as f64 + rise, (depth + 3) as f64], 0, K::thatch, Op::Fill);
-    Node::of(shapes).with_far(Far::of(fixed(2.0), far))
+    Node::of(shapes).with_far(Far::of(fx(2.0), far))
 }
 
 /** A ring of standing stones round its centre, each a child; one of them fallen. */

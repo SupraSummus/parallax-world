@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use worldgen::World;
 use worldgen::generator::Generator;
-use worldgen::noise::{Fx, ONE, fx, stream};
+use worldgen::noise::{Fx, fx, stream};
 use worldgen::plan::{Land, Plan};
 use worldgen::units::{Units, m};
 
@@ -33,7 +33,7 @@ pub fn valley(seed: u64) -> World {
     let ground = {
         let (towns, path) = (towns.clone(), path.clone());
         Rc::new(Plan::new("ground", GROUND_SCALE, move |x, z| {
-            (towns.terraced(x, z, relief.ground(x, z, (x * ONE - path.at(0, z)).abs())) + ONE / 2) >> 16
+            towns.terraced(x, z, relief.ground(x, z, forest::path_distance(&path, x, z))).round_units().0
         }))
     };
     let slope = {
@@ -49,7 +49,7 @@ pub fn valley(seed: u64) -> World {
         Rc::new(Plan::new("forest's bid", TOWNS_SCALE, |_, _| Fx::ZERO)),
         {
             let towns = towns.clone();
-            Rc::new(Plan::new("town's bid", town::BID_SCALE, move |x, z| Fx::from_bits(towns.bid(x, z))))
+            Rc::new(Plan::new("town's bid", town::BID_SCALE, move |x, z| towns.bid(x, z)))
         },
         Rc::new(fields::bid(seed, towns.clone(), slope)),
     ];
@@ -57,7 +57,7 @@ pub fn valley(seed: u64) -> World {
 
     let share = {
         let land = land.clone();
-        Rc::new(move |x, z| land.share(FOREST, x, z).to_bits())
+        Rc::new(move |x, z| land.share(FOREST, x, z))
     };
     let forest_ground = Ground { ground: ground.clone(), path: path.clone(), share };
     let spawn = forest_ground.on_path(m(-31.0), m(3.0));

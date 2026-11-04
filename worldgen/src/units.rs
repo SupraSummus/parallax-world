@@ -3,7 +3,7 @@
 
 use std::ops::{Add, AddAssign, Div, Mul, Neg, Sub, SubAssign};
 
-use crate::noise::{Fx, ONE};
+use crate::noise::{Fx, ONE, fx};
 
 /** Metres per lattice unit. */
 pub const UNIT_SIZE: f64 = 0.125;
@@ -20,11 +20,11 @@ pub const fn m(metres: f64) -> i64 {
  * fixed point, as plain `i64`s could:
  *
  * ```compile_fail,E0277
- * use worldgen::noise::{Fbm, Fx, ONE};
+ * use worldgen::noise::{Fbm, Fx};
  * use worldgen::units::Units;
  * let hills = Fbm::<1920, 4>::new(1);
- * // Whole units by dividing by ONE: with `Fixed`, a height 2^16 times too low, and a flat moor.
- * let heath = (hills.fx(0, 0) - Fx::HALF) * Units::m(28.0) / ONE;
+ * // Whole units plus fixed point: as plain `i64`s, one of them 2^16 times off (the flat moor, F11).
+ * let heath = Units::m(-2.0) + (hills.at(0, 0) - Fx::HALF) * Units::m(28.0);
  * ```
  *
  * ```compile_fail,E0308
@@ -32,14 +32,14 @@ pub const fn m(metres: f64) -> i64 {
  * use worldgen::units::Units;
  * let hills = Fbm::<1920, 4>::new(1);
  * // An `Fx`, not whole units.
- * let heath: Units = (hills.fx(0, 0) - Fx::HALF) * Units::m(28.0);
+ * let heath: Units = (hills.at(0, 0) - Fx::HALF) * Units::m(28.0);
  * ```
  *
  * ```
  * use worldgen::noise::{Fbm, Fx};
  * use worldgen::units::Units;
  * let hills = Fbm::<1920, 4>::new(1);
- * let heath: Units = ((hills.fx(0, 0) - Fx::HALF) * Units::m(28.0)).round_units();
+ * let heath: Units = ((hills.at(0, 0) - Fx::HALF) * Units::m(28.0)).round_units();
  * assert!(heath.abs() <= Units::m(14.0));
  * ```
  */
@@ -68,6 +68,13 @@ impl Units {
     /** How many whole `w` fit below it, rounded down. */
     pub const fn div_euclid(self, w: Units) -> i64 {
         self.0.div_euclid(w.0)
+    }
+}
+
+impl Fx {
+    /** Metres in units, their fraction kept. */
+    pub const fn m(metres: f64) -> Fx {
+        fx(metres / UNIT_SIZE)
     }
 }
 

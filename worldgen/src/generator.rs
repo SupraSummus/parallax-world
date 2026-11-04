@@ -8,7 +8,7 @@ use std::sync::OnceLock;
 
 use crate::grid::{Box3, VoxelGrid};
 use crate::js;
-use crate::noise::{Fixed, ONE, Rng, fixed, float, hash, hash_text, hash64, unit};
+use crate::noise::{Fixed, Fx, ONE, Rng, fixed, float, hash, hash_text, hash64, unit};
 
 /** A material kind: its index in Generator::kinds. */
 pub type Kind = u8;
@@ -62,7 +62,7 @@ pub struct Shape {
     /** Every site it draws at level 0 is inside. */
     pub bounds: Box3,
     /** Its sizes along its own three axes. */
-    pub extents: [Fixed; 3],
+    pub extents: [Fx; 3],
     centre: At,
     /** Surface area of an opaque body that stops as many rays. */
     pub area: f64,
@@ -78,9 +78,9 @@ pub struct Node {
     pub far: Option<Far>,
 }
 
-/** How a node is drawn while sites are further apart than `detail` (fixed point). */
+/** How a node is drawn while sites are further apart than `detail` (lattice units). */
 pub struct Far {
-    pub detail: Fixed,
+    pub detail: Fx,
     pub form: FarForm,
 }
 
@@ -95,12 +95,12 @@ pub enum FarForm {
 }
 
 impl Far {
-    pub fn of(detail: Fixed, shapes: Vec<Shape>) -> Far {
+    pub fn of(detail: Fx, shapes: Vec<Shape>) -> Far {
         Far { detail, form: FarForm::Shapes(shapes) }
     }
 
-    pub fn measured(detail: Fixed) -> Far {
-        assert!(detail >= ONE, "a measured far form is measured from a level its near form is drawn at; see \"Levels\" in {DOCS}");
+    pub fn measured(detail: Fx) -> Far {
+        assert!(detail >= Fx::ONE, "a measured far form is measured from a level its near form is drawn at; see \"Levels\" in {DOCS}");
         Far { detail, form: FarForm::Measured }
     }
 
@@ -379,7 +379,7 @@ pub fn ellipsoid(centre: Point, radii: Point, kind: Kind, fill: Fill, op: Op) ->
         op,
         centre: centre_at,
         bounds: sites_between([0, 1, 2].map(|i| centre_at[i] - radii[i]), [0, 1, 2].map(|i| centre_at[i] + radii[i])),
-        extents: radii.map(|r| 2 * r),
+        extents: radii.map(|r| Fx::from_bits(2 * r)),
         area: effective_area(area, ((16.0 / 3.0) * PI * a * b * c) / area, &fill, centre),
         fill,
         solid: Solid::Ellipsoid { centre: centre_at, radii },
@@ -410,7 +410,7 @@ pub fn capsule(p: Point, q: Point, radius: f64, kind: Kind, fill: Fill, op: Op) 
         op,
         centre: at(mid(p, q)),
         bounds: sites_between([0, 1, 2].map(|i| p_at[i].min(q_at[i]) - r), [0, 1, 2].map(|i| p_at[i].max(q_at[i]) + r)),
-        extents: [length + 2 * r, 2 * r, 2 * r],
+        extents: [length + 2 * r, 2 * r, 2 * r].map(Fx::from_bits),
         area: effective_area(area, (4.0 * volume) / area, &fill, mid(p, q)),
         fill,
         solid: Solid::Capsule { p: p_at, d, radius: r },
@@ -460,7 +460,7 @@ pub fn lathe(p: Point, q: Point, radius: impl Fn(f64) -> f64 + 'static, kind: Ki
         op,
         centre: at(mid(p, q)),
         bounds: sites_between([0, 1, 2].map(|i| p_at[i].min(q_at[i]) - out[i]), [0, 1, 2].map(|i| p_at[i].max(q_at[i]) + out[i])),
-        extents: [length_at, 2 * widest, 2 * widest],
+        extents: [length_at, 2 * widest, 2 * widest].map(Fx::from_bits),
         area: effective_area(area, (4.0 * volume) / area, &fill, mid(p, q)),
         fill,
         solid: Solid::Lathe { p: p_at, d, length: length_at, widest, radius: Rc::new(radius) },
@@ -477,7 +477,7 @@ pub fn cuboid(min: Point, max: Point, kind: Kind, fill: Fill, op: Op) -> Shape {
         op,
         centre: at(mid(min, max)),
         bounds: Box3 { min: lo.map(|v| -((-v) >> 16)), max: hi.map(|v| -((-v) >> 16)) },
-        extents: [0, 1, 2].map(|i| hi[i] - lo[i]),
+        extents: [0, 1, 2].map(|i| Fx::from_bits(hi[i] - lo[i])),
         area: effective_area(area, (4.0 * size[0] * size[1] * size[2]) / area, &fill, mid(min, max)),
         fill,
         solid: Solid::Cuboid { min: lo, max: hi },
@@ -501,7 +501,7 @@ pub fn gable(min: Point, max: Point, ridge: usize, kind: Kind, fill: Fill, op: O
         op,
         centre: at(mid(min, max)),
         bounds: Box3 { min: lo.map(|v| -((-v) >> 16)), max: hi.map(|v| -((-v) >> 16)) },
-        extents: [hi[ridge] - lo[ridge], hi[across] - lo[across], hi[1] - lo[1]],
+        extents: [hi[ridge] - lo[ridge], hi[across] - lo[across], hi[1] - lo[1]].map(Fx::from_bits),
         area: effective_area(area, (2.0 * length * width * height) / area, &fill, mid(min, max)),
         fill,
         solid: Solid::Gable { min: lo, max: hi, ridge },
@@ -664,7 +664,7 @@ impl Shape {
 fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &mut dyn FnMut(i64, i64, i64)) {
     let s = si as f64;
     let spacing = si * ONE;
-    let small = shape.extents.iter().filter(|e| **e < spacing).count();
+    let small = shape.extents.iter().filter(|e| e.to_bits() < spacing).count();
     let kept = |x: i64, y: i64, z: i64, chance: f64| chance >= 1.0 || unit(hash(seed, x * si, y * si, z * si)) < chance;
     if small == 3 {
         let [x, y, z] = nearest_site(shape.centre, si);
@@ -704,7 +704,7 @@ fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &mut dyn FnMu
             }
         }),
         1 => {
-            let thickness = float(shape.extents.into_iter().min().expect("three"));
+            let thickness = shape.extents.into_iter().min().expect("three").to_f64();
             sites(clip, &mut |x, y, z| {
                 if kept(x, y, z, 1.0 - js::pow(1.0 - fill(x, y, z), thickness / CHORD)) {
                     put(x, y, z)
@@ -1026,9 +1026,9 @@ fn visit(node: &Node, key: String, bounds: Box3, at: &Visit, drawables: &mut Vec
     if !bounds.overlaps(units) {
         return;
     }
-    let far = node.far.as_ref().filter(|far| s * ONE > far.detail);
+    let far = node.far.as_ref().filter(|far| s * ONE > far.detail.to_bits());
     let draw = match far {
-        Some(Far { detail, form: FarForm::Measured }) => Draw::Sites(measure(node, &key, bounds, *detail, s, seed)),
+        Some(Far { detail, form: FarForm::Measured }) => Draw::Sites(measure(node, &key, bounds, detail.to_bits(), s, seed)),
         Some(Far { form: FarForm::Shapes(shapes), .. }) => Draw::Shapes(shapes.to_vec(), true),
         None => Draw::Shapes(node.shapes.get().to_vec(), false),
     };
@@ -1460,6 +1460,7 @@ pub fn bounds_of_shapes<'a>(boxes: impl IntoIterator<Item = &'a Box3>) -> Box3 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::noise::fx;
 
     #[test]
     fn a_long_lathe_reaches_its_widest_circle() {
@@ -1472,7 +1473,7 @@ mod tests {
     fn a_measured_far_form_keeps_what_rays_see() {
         // A solid block 64 units wide, painted with a sheet of glass on top, and a sparse cloud: measured at sites 16 apart from sites 2 apart.
         let block = Node {
-            far: Some(Far::measured(fixed(2.0))),
+            far: Some(Far::measured(fx(2.0))),
             ..Node::of(vec![
                 cuboid([0.0; 3], [64.0; 3], 1, SOLID, Op::Fill),
                 cuboid([0.0, 60.0, 0.0], [64.0, 64.0, 64.0], 2, SOLID, Op::Paint),
@@ -1505,7 +1506,7 @@ mod tests {
         let glass =
             (0..16).map(|i| from_above(&measure(&block, &format!("block {i}"), bounds_of(&block), fixed(2.0), 16, 1))).sum::<f64>() / 16.0;
         assert!(glass > 0.35, "rays from above see the glass on top {glass} of the time");
-        let cloud = Node { far: Some(Far::measured(fixed(2.0))), ..Node::of(vec![ball([0.0; 3], 64.0, 1, Fill::Const(0.02), Op::Fill)]) };
+        let cloud = Node { far: Some(Far::measured(fx(2.0))), ..Node::of(vec![ball([0.0; 3], 64.0, 1, Fill::Const(0.02), Op::Fill)]) };
         // Of its about 134 cells (a ball's volume over a site's, 2 · 16³), those a ray crossing is stopped in.
         // Fine sites 4 apart along a column, a cell's 512 fine sites are on 123, 126 and 128 of its columns along x, y
         // and z (columns_of_cell; its shadow is 2 · 8² columns), 1 to 8 on each, 4 on average. Each kept with
