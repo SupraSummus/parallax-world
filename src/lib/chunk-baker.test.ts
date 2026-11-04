@@ -93,7 +93,7 @@ describe('ChunkBaker', () => {
     // Each splat: centred on its site, its depth past the centre plane in
     // half layers of the grid in its alpha, its voxel's colour shaded (so
     // the channels it lacks stay 0).
-    const lattice = baker.sites(splats.length / SPLAT)
+    const lattice = baker.sites()
     const colorOf = new Map(voxels.map(v => [[v.a, v.b, v.c].join(), parseInt(v.color.slice(1), 16)]))
     const rgba = new Uint32Array(splats.buffer)
     const channels = (rgb: number, ...shifts: number[]) => shifts.map(s => ((rgb >> s) & 255) > 0)
@@ -138,8 +138,8 @@ describe('ChunkBaker', () => {
     const sitesOn = (face: Face) => {
       const turned = VoxelGrid.fromVoxels(voxels.map(({ a, b, c, color }) => ({ ...toWorld(face, a, b, c), color })))
       const turnedBaker = new ChunkBaker(turned.materials, [turned])
-      const { splats } = turnedBaker.bake({ face: face.name, level: 0, layer: 3, cutoff: Infinity, i: 0, j: 0 })
-      return turnedBaker.sites(splats.length / SPLAT)
+      turnedBaker.bake({ face: face.name, level: 0, layer: 3, cutoff: Infinity, i: 0, j: 0 })
+      return turnedBaker.sites()
     }
     const sites = sitesOn(face)
     expect(sites.length).toBeGreaterThan(0)

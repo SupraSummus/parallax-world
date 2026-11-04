@@ -6,7 +6,7 @@
  * Plain typed arrays and integer ids, the same layout in TS or Rust/WASM.
  */
 
-import { copyIn, wasmInstance } from './wasm'
+import { copyIn, copyOut, wasmInstance } from './wasm'
 import type { Vec3 } from './world'
 
 export interface Voxel {
@@ -399,15 +399,13 @@ export class LayerIndex {
   static of(grid: VoxelData): LayerIndex {
     const wasm = (indexer ??= wasmInstance() as unknown as Indexer)
     writeGrid(wasm.memory, grid, wasm.index_grid, wasm.index_cells)
-    // Before reading memory.buffer: the call may grow (and so replace) it.
-    const at = wasm.index_build()
-    const result = new Float64Array(wasm.memory.buffer, at, TABLES * TABLE)
+    const result = copyOut(wasm.memory, Float64Array, wasm.index_build(), TABLES * TABLE)
     const keys: string[] = []
     const tables = Array.from({ length: TABLES }, (_, t) => {
       const [x, y, z, cMin, aMin, layers, blocks, low, high] = result.subarray(t * TABLE, (t + 1) * TABLE)
       keys.push(LayerIndex.key({ x, y, z }))
       // Copied out: the next grid frees them.
-      const table = (from: number) => new Int16Array(wasm.memory.buffer, from, layers * blocks).slice()
+      const table = (from: number) => copyOut(wasm.memory, Int16Array, from, layers * blocks)
       return { cMin, aMin, layers, blocks, low: table(low), high: table(high) }
     })
     return new LayerIndex({ keys, tables })

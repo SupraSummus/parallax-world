@@ -289,7 +289,7 @@ describe.each([1, 0.5, 0.25])('Step 8: ray-cast leaks with tan(fov / 2) = %s', T
       }))
       for (const i of chunkCells) {
         const chunk = baker.bake({ face: face.name, ...slice, i, j: 0 })
-        const sites = baker.sites(chunk.splats.length / SPLAT)
+        const sites = baker.sites()
         const alphas = new Uint32Array(chunk.splats.buffer)
         // Tangents of the rays through what the chunk draws on the centre plane.
         const [left, right] = [chunk.originX, chunk.originX + chunk.extentWidth].map(x => (x - cu * LAYER) / distance)
