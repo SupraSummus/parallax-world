@@ -97,6 +97,15 @@ impl VoxelGrid {
         }
     }
 
+    /** As `get`, but None if the brick of (x, y, z) holds nothing: rays skip it. */
+    pub fn get_or_empty_brick(&self, x: i64, y: i64, z: i64) -> Option<u8> {
+        match self.slot(x, y, z) {
+            Some(Ok(i)) => Some(self.cells[i]),
+            Some(Err(_)) => None,
+            None => Some(0),
+        }
+    }
+
     /** Sets site (x, y, z) to material `id` (0 clears); outside the box or off the sites, nothing. */
     pub fn set(&mut self, x: i64, y: i64, z: i64, id: u8) {
         let i = match self.slot(x, y, z) {
