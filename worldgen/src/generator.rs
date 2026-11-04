@@ -59,7 +59,8 @@ enum Solid {
 pub struct Shape {
     pub kind: Kind,
     pub op: Op,
-    pub fill: Fill,
+    /** Given only to its constructor, which works out its `area` from it: set after, it would not count. */
+    fill: Fill,
     /** Every site it draws at level 0 is inside. */
     pub bounds: Box3,
     /** Its sizes along its own three axes. */

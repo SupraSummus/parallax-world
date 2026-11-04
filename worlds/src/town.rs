@@ -536,7 +536,7 @@ impl House {
             // Shelves of goods along the back wall, a counter across the room.
             let shelves = ([room.0[0] + 2, 1, room.1[2] - 4], [room.1[0] - 2, 17, room.1[2]]);
             part.add(shelves.0, shelves.1, k(K::counter));
-            part.paint([shelves.0[0], 3, shelves.0[2] - 1], [shelves.1[0], 16, shelves.1[2]], k(K::goods)).fill = Fill::Const(0.5);
+            part.cells([shelves.0[0], 3, shelves.0[2] - 1], [shelves.1[0], 16, shelves.1[2]], k(K::goods), Fill::Const(0.5), Op::Paint);
             part.add([room.0[0] + 4, 1, depth / 2], [length / 2, 8, depth / 2 + 3], k(K::counter));
         }
     }
