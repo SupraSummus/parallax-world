@@ -68,18 +68,9 @@ pub fn slice_centre(level: i32, layer: i32) -> f64 {
 }
 
 /**
- * How far (as a tangent) a ray from the eye, a site of N·FCC (N = 2^level)
- * whose cell holds the camera, may be from the camera's ray to the same
- * point, d layers ahead of the eye: 2N / d (see eyeError in
- * slice-selection.ts).
+ * How far a face's rays are from its axis, as a tangent, at most: the
+ * face's rays are |x| + √2 · |y| ≤ z (inFace in view.ts). Slices are drawn
+ * as seen along the axis, so a point d ahead of its slice's centre plane
+ * is drawn at most MAX_SLANT · d off (see MAX_SLANT in slice-selection.ts).
  */
-pub fn eye_error(level: i32, d: f64) -> f64 {
-    2.0 * spacing(level) as f64 / d
-}
-
-/**
- * The largest eye error baking allows for: the slicing keeps every voxel
- * at least 2N layers ahead of its eye (leakFreeDetail, and NEAR_DEPTH in
- * renderer.ts).
- */
-pub const EYE_ERROR: f64 = 1.0;
+pub const MAX_SLANT: f64 = 1.0;

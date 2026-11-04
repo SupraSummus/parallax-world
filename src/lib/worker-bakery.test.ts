@@ -31,7 +31,7 @@ class FakeWorker implements BakeWorker {
 }
 
 /** A chunk of a far slice, cheap to bake. */
-const at = (i: number): ChunkRequest => ({ face: '+x+z', level: 6, layer: 0, cutoff: Infinity, i, j: 0, eye: [0, 0, 0], fill: false, grid: 0 })
+const at = (i: number): ChunkRequest => ({ face: '+x+z', level: 6, layer: 0, cutoff: Infinity, i, j: 0, fill: false, grid: 0 })
 
 const tick = () => new Promise(resolve => setTimeout(resolve))
 
@@ -96,12 +96,13 @@ function checksum(splats: Float32Array): number {
 
 /** Each layer's chunks: content and where they go. */
 const shown = (frame: Frame) => frame.layers.map(l => l.placements.map(({ chunk, x, y }) =>
-  ({ i: chunk.i, j: chunk.j, eye: chunk.eye.join(), splats: checksum(chunk.splats), x, y })))
+  ({ i: chunk.i, j: chunk.j, splats: checksum(chunk.splats), x, y })))
 
 /** What baking on the main thread shows. */
-function reference(camera?: Camera, from = world, orientation?: Orientation) {
+function reference(camera?: Camera, from = world, orientation?: Orientation, fill = true) {
   const renderer = new ParallaxRenderer(from)
   renderer.resize(800, 600)
+  renderer.setFillGaps(fill)
   if (camera) renderer.setCamera(camera)
   if (orientation) renderer.setOrientation(orientation)
   return shown(renderer.render())
@@ -122,15 +123,15 @@ describe('WorkerBakery', () => {
     expect(faces.size).toBeGreaterThanOrEqual(yaw === 0 ? 4 : 3)
   })
 
-  it("shows a cell's older bake while its new eye's is baking", async () => {
+  it("shows a cell's older bake while its new one is baking", async () => {
     const renderer = workerRenderer()
     await settle(renderer)
-    // Far enough sideways that the eyes of the nearest slices change.
-    renderer.setCamera({ x: renderer.getCamera().x + 3 })
+    // Without gap filling, every chunk is baked again.
+    renderer.setFillGaps(false)
     const baking = shown(renderer.render())
-    const target = reference(renderer.getCamera())
+    const target = reference(renderer.getCamera(), world, undefined, false)
     const standIns = baking.flatMap((layer, i) => layer.filter(c =>
-      target[i].some(t => t.i === c.i && t.j === c.j && t.eye !== c.eye)))
+      target[i].some(t => t.i === c.i && t.j === c.j && t.splats !== c.splats)))
     expect(standIns.length).toBeGreaterThan(0)
     expect(shown(await settle(renderer))).toEqual(target)
   })
@@ -194,7 +195,9 @@ describe('WorkerBakery', () => {
     renderer.setSkipCovered(false)
     await settle(renderer)
     const baked = new Set(bakery.all.map(cell))
-    // Forward and sideways: near slices re-tile, and the near levels' eyes move.
+    // Every cell baked again, without gap filling; and forward and
+    // sideways, so near slices re-tile and new cells come into view.
+    renderer.setFillGaps(false)
     const { x, z } = renderer.getCamera()
     renderer.setCamera({ x: x + 3, z: z + 3 })
     renderer.render()
@@ -204,11 +207,11 @@ describe('WorkerBakery', () => {
   })
 
   it('stops baking once settled, though the cache is past its cap', async () => {
-    // The city at full HD, 1° leaks: its chunks with fill gaps on and off pass the cap
+    // The city at full HD, 3° leaks: its chunks with fill gaps on and off pass the cap
     // on hidden chunks, so eviction reaches the slices in view.
     const renderer = new ParallaxRenderer(new World(12345, 'city'), { bakery: new WorkerBakery([new FakeWorker()]) })
     renderer.resize(1920, 1080)
-    renderer.setMaxLeak(1)
+    renderer.setMaxLeak(3)
     await settle(renderer)
     renderer.setFillGaps(false)
     await settle(renderer)

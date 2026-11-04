@@ -75,7 +75,7 @@ test.skipIf(!process.env.DUMP)('dump a view for the native spike', () => {
     u32(faceIndex.get(r.face) ?? 0)
     i32(r.level, r.layer)
     f64(r.cutoff)
-    i32(r.i, r.j, ...r.eye, r.fill ? 1 : 0)
+    i32(r.i, r.j, r.fill ? 1 : 0)
     f64(sliceCentre(r))
   }
   writeFileSync(process.env.DUMP ?? '', Buffer.concat(parts))

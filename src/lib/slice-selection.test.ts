@@ -91,15 +91,14 @@ describe('selectSlices', () => {
 
 // That the bound holds is leak-bound.test.ts; these pin the formula's two cases.
 describe('leakFreeDetail', () => {
-  it('is (r + √(r² + 8r / ε)) / 2, r = 16/17', () => {
-    // 16 px at focal 640 (1280 px wide at 90°): ε = 1/40.
-    // (r + √(r² + 8r · 40)) / 2 = 9.2, rounded up to a quarter octave.
-    expect(leakFreeDetail(16 / 640)).toBe(2 ** 3.25)
+  it('is 1 / ε − 1/2', () => {
+    // 64 px at focal 640 (1280 px wide at 90°): ε = 1/10.
+    // 10 − 1/2 = 9.5, rounded up to a quarter octave.
+    expect(leakFreeDetail(64 / 640)).toBe(2 ** 3.25)
   })
 
-  it('is at least 3r, so that voxels are 2N layers ahead of their eye', () => {
-    // r = 16/17: (r + √(r² + 8r)) / 2 = 1.92; 3r = 2.82, rounded up.
-    expect(leakFreeDetail(1)).toBe(2 ** 1.5)
+  it('is at least 1: slices no thicker than their distance', () => {
+    expect(leakFreeDetail(1)).toBe(1)
   })
 
   it.each([0.001, 0.025, 0.1, 1])('leaks at most ε = %s (leakAngle)', epsilon => {
