@@ -325,9 +325,10 @@ The moor (`worlds/src/moor.rs`) is the shortest whole world to start from.
 `Field::columns` and `Field::at`, `Population::new(…).reach(…).make(…)`,
 `Node::group`, `Child::new`, and `Shape::ball` and the like,
 solid and filling unless told to `paint` or `carve`.
-A shape kept with a chance is made with the long form (`ball(…, fill, op)`):
+A shape kept with a chance is made with the long form (`ball(…, fill, op)`,
+`Part::cells(…, fill, op)`):
 how many rays it stops is worked out from its fill when it is made,
-so setting `fill` afterwards is not counted.
+so its fill is given only then, and can't be set afterwards.
 
 ### Units
 

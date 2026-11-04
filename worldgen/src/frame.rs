@@ -153,26 +153,26 @@ impl Part<'_> {
         Part { frame: self.frame.then(frame), shapes: self.shapes }
     }
 
-    /** The cells from `min` to `max` (exclusive) of `kind`, by `op`. */
-    pub fn cells(&mut self, min: [i64; 3], max: [i64; 3], kind: impl Into<Kind>, op: Op) -> &mut Shape {
+    /** The cells from `min` to `max` (exclusive) of `kind`, each kept with the chance `fill`, by `op`. */
+    pub fn cells(&mut self, min: [i64; 3], max: [i64; 3], kind: impl Into<Kind>, fill: Fill, op: Op) -> &mut Shape {
         let (a, b) = self.frame.cells(min.map(|v| v as f64), max.map(|v| v as f64));
-        self.shapes.push(cuboid(a, b, kind.into(), SOLID, op));
+        self.shapes.push(cuboid(a, b, kind.into(), fill, op));
         self.shapes.last_mut().expect("one")
     }
 
     /** Solid `kind` in the cells from min to max, where empty. */
     pub fn add(&mut self, min: [i64; 3], max: [i64; 3], kind: impl Into<Kind>) -> &mut Shape {
-        self.cells(min, max, kind, Op::Fill)
+        self.cells(min, max, kind, SOLID, Op::Fill)
     }
 
     /** `kind` over whatever the thing has in the cells from min to max. */
     pub fn paint(&mut self, min: [i64; 3], max: [i64; 3], kind: impl Into<Kind>) -> &mut Shape {
-        self.cells(min, max, kind, Op::Paint)
+        self.cells(min, max, kind, SOLID, Op::Paint)
     }
 
     /** The cells from min to max cut out of the thing. */
     pub fn cut(&mut self, min: [i64; 3], max: [i64; 3]) -> &mut Shape {
-        self.cells(min, max, 0, Op::Carve)
+        self.cells(min, max, 0, SOLID, Op::Carve)
     }
 
     /** A gable roof over the cells from min to max, its ridge along `ridge` (u or w, 0 or 2), up along v. */
@@ -196,8 +196,8 @@ impl Part<'_> {
         self.shapes.last_mut().expect("one")
     }
 
-    // Shapes are solid but for the lathe's (a crown's leaves): how many rays one stops is
-    // worked out from its fill when it is made, so a fill set after is not counted.
+    // Shapes are solid but for the lathe's (a crown's leaves) and the cells' (goods on shelves):
+    // how many rays one stops is worked out from its fill when it is made, so only then is it given.
 
     pub fn ball(&mut self, centre: Point, radius: f64, kind: impl Into<Kind>, op: Op) -> &mut Shape {
         self.shapes.push(ball(self.frame.point(centre), radius, kind.into(), SOLID, op));
