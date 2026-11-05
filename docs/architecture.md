@@ -6,6 +6,7 @@ and each slice into chunks, bricks of the lattice seen along its axis;
 each chunk in view is baked once, as seen along the slice's axis,
 into a list of its visible voxels,
 each a hexagon of one colour (a splat) at its site,
+that of its face towards the camera,
 and WebGL draws the splats in perspective, each at its own depth:
 a slice is a relief.
 Voxels are rhombic dodecahedra on the face-centred cubic (FCC) lattice
@@ -98,6 +99,9 @@ The other worlds' grids are each the one before it coarsened (`coarsen`):
 a coarse voxel is full if a quarter of its cell is,
 so a floor or wall one voxel thick stays one,
 and solids grow by up to half a coarse voxel.
+Each of its faces that shows takes what most of the cell's open faces
+facing its way show (section 6):
+a coarse voxel at a roof's edge is roof from above, wall from the side.
 A slice is about 1/detail of its distance thick (section 2),
 so from level 4 on, a slab of 16 atoms,
 a voxel stays about the same size on screen (`docs/todo.md`).
@@ -293,12 +297,14 @@ and, within the face's rays, no higher;
 the compositor widens it so,
 and the splats of a surface leave no gaps from any ray of the face,
 within a slice or across slices.
-A splat's colour is the mean of its voxel's open faces' shades
+A splat's colour is that of the voxel's face towards the camera, −F
+(the face a slice seen along F shows; `Reader` in `bake/` reads it),
+shaded as the mean of its open faces' shades
 (of its cut faces' where it has none),
-each shaded by the axes its normal leans towards, as in the reference viewer
+each by the axes its normal leans towards, as in the reference viewer
 (`faceShade`, `voxel_colour`):
 a voxel is shaded by the way its surface faces,
-and looks the same along every face.
+and coloured by what is seen of it along the face.
 
 **Painting order.** Voxels by their layer, farthest first:
 a ray of the face passes from a voxel into one of the next layer,
@@ -554,6 +560,15 @@ and the 12 faces of section 4 map sites to sites.
 **Storage** (`voxel-grid.ts`). A world is a voxel grid per level of
 detail (section 1) plus a spawn point: one material id byte per site of a
 box, 0 for empty.
+A voxel has a material on each of its 12 faces (`VOXEL_FACES` in `fcc.ts`),
+what is seen of it looking at that face:
+a coarse voxel stands for its cell, which may look different from each side.
+Mostly the faces are its site's material;
+the sites whose faces differ are listed apart (`faces`).
+Each reader shows the faces it sees:
+the baker the face towards its slices' camera (section 3),
+the reference viewer every face,
+rays (`worldgen/src/picture.rs`) the one they enter by.
 The box is cut into bricks 8 units wide, 256 sites,
 and only bricks with voxels are stored.
 A worker reads its copy of the grids for every face (`Reader` in `bake/`),
@@ -597,8 +612,9 @@ so from the parallax camera's position both renderers should agree.
 - A voxel's hexagon holds its outline, not more:
   near a slant's extremes it may hide a neighbour in its layer that is in
   front (section 3).
-- A voxel is painted as one hexagon of one colour holding its outline:
-  its faces' shapes and shades are lost,
+- A voxel is painted as one hexagon of one colour holding its outline,
+  that of its face towards the camera:
+  its other faces' shapes, shades and materials are lost,
   and a silhouette is a row of hexagons.
 - Within `NEAR_DEPTH` of the camera along a face's axis nothing is
   drawn, and near voxels seen at a steep angle are the least accurate.

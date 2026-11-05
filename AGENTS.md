@@ -36,7 +36,7 @@ src/
 │   └── ui/                  # shadcn/ui primitives (generated; CLI config in components.json)
 └── lib/
     ├── fcc.ts               # Voxel geometry: rhombic dodecahedra of the FCC lattice
-    ├── voxel-grid.ts        # Voxel storage on the FCC lattice, in bricks (typed arrays); coarsening it; LayerIndex, made by bake/
+    ├── voxel-grid.ts        # Voxel storage on the FCC lattice, in bricks (typed arrays), a material per voxel face; coarsening it; LayerIndex, made by bake/
     ├── world.ts             # World: voxel grids by level of detail (generated in tiles around the camera), spawn, toy world types
     ├── worldgen.ts          # The worlds of worlds/ (WebAssembly), any box at any level
     ├── city.ts              # City scene generator: streets, buildings, maze of rooms

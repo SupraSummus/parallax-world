@@ -3,6 +3,8 @@
 
 use std::sync::Arc;
 
+use crate::tables::VOXEL_FACES;
+
 /** Kinds of voxel faces. */
 pub const FACE_KINDS: usize = 12;
 /** Faces of the view (FACES in view.ts). */
@@ -24,6 +26,13 @@ pub struct Lattice {
     pub r: [i32; 3],
     pub u: [i32; 3],
     pub f: [i32; 3],
+}
+
+impl Lattice {
+    /** The kind (of VOXEL_FACES) of a voxel's face towards a camera looking along F: −F's. */
+    pub fn front(&self) -> usize {
+        VOXEL_FACES.iter().position(|&n| n == self.f.map(|v| -v)).expect("−F is a face")
+    }
 }
 
 /**
@@ -48,7 +57,27 @@ pub fn lattices() -> [Lattice; VIEW_FACES] {
 pub const BRICK: i32 = 8;
 const BRICK_SITES: usize = (BRICK * BRICK * BRICK / 2) as usize;
 
-/** The sites of a box in bricks, BRICK units wide (see VoxelGrid). */
+/** A voxel's material on each of its faces, by kind (VOXEL_FACES). */
+pub type Faces = [u8; FACE_KINDS];
+
+/**
+ * Words per site in a grid's `faces`: its index in `cells`, then its
+ * faces' materials, four to a word, the first in the lowest byte.
+ */
+pub const FACE_WORDS: usize = 4;
+
+/** A site's words in `faces`: its index in `cells` and its faces' materials. */
+pub fn face_words(index: usize, faces: &Faces) -> [u32; FACE_WORDS] {
+    let word = |w: usize| u32::from_le_bytes(std::array::from_fn(|i| faces[4 * w + i]));
+    [index as u32, word(0), word(1), word(2)]
+}
+
+/**
+ * The sites of a box in bricks, BRICK units wide (see VoxelGrid).
+ * A voxel has a material on each of its 12 faces: what is seen of it
+ * looking at that face. Mostly they are one, its site's in `cells`;
+ * the sites whose faces differ list them in `faces`.
+ */
 pub struct Grid {
     pub min: [i32; 3],
     pub n: [i32; 3],
@@ -56,28 +85,56 @@ pub struct Grid {
     pub bricks: Vec<i32>,
     /** Each brick's sites, z-major, then y, then every other x. */
     pub cells: Vec<u8>,
+    /** The sites whose faces are not all of their material in `cells`, by index in `cells`: FACE_WORDS each (face_words). */
+    pub faces: Vec<u32>,
 }
 
 impl Grid {
     /** A grid of the box with `used` bricks of sites; `bricks` and `cells` to be written. */
     pub fn new(min: [i32; 3], n: [i32; 3], used: usize) -> Grid {
         let count = n.map(|v| (v.max(0) + BRICK - 1) / BRICK);
-        Grid { min, n, bricks: vec![-1; (count[0] * count[1] * count[2]) as usize], cells: vec![0; used * BRICK_SITES] }
+        Grid { min, n, bricks: vec![-1; (count[0] * count[1] * count[2]) as usize], cells: vec![0; used * BRICK_SITES], faces: Vec::new() }
     }
 
-    /** Material id at site (x, y, z); 0 if empty or outside. */
+    /** Site (x, y, z)'s index in `cells`; None if its brick is empty or it is outside. */
     #[inline]
-    fn at(&self, x: i32, y: i32, z: i32) -> u8 {
+    fn index(&self, x: i32, y: i32, z: i32) -> Option<usize> {
         let (x, y, z) = (x - self.min[0], y - self.min[1], z - self.min[2]);
         if x < 0 || x >= self.n[0] || y < 0 || y >= self.n[1] || z < 0 || z >= self.n[2] {
-            return 0;
+            return None;
         }
         let bricks = [(self.n[0] + BRICK - 1) / BRICK, (self.n[1] + BRICK - 1) / BRICK];
         let at = self.bricks[(((z >> 3) * bricks[1] + (y >> 3)) * bricks[0] + (x >> 3)) as usize];
-        if at < 0 {
-            return 0;
+        (at >= 0).then(|| at as usize * BRICK_SITES + ((((z & 7) * BRICK + (y & 7)) * BRICK + (x & 7)) >> 1) as usize)
+    }
+
+    /** The material of face `kind` (of VOXEL_FACES) of the voxel at site (x, y, z); 0 if empty or outside. */
+    #[inline]
+    pub fn face(&self, x: i32, y: i32, z: i32, kind: usize) -> u8 {
+        let Some(i) = self.index(x, y, z) else { return 0 };
+        match self.cells[i] {
+            0 => 0,
+            material if self.faces.is_empty() => material,
+            material => self.faces_at(i).map_or(material, |faces| faces[kind]),
         }
-        self.cells[at as usize * BRICK_SITES + ((((z & 7) * BRICK + (y & 7)) * BRICK + (x & 7)) >> 1) as usize]
+    }
+
+    /** The faces' materials of the site at index `i` of `cells`, if they differ. */
+    fn faces_at(&self, i: usize) -> Option<Faces> {
+        let sites = self.faces.len() / FACE_WORDS;
+        let (mut lo, mut hi) = (0, sites);
+        while lo < hi {
+            let mid = (lo + hi) / 2;
+            match (self.faces[mid * FACE_WORDS] as usize).cmp(&i) {
+                std::cmp::Ordering::Less => lo = mid + 1,
+                std::cmp::Ordering::Greater => hi = mid,
+                std::cmp::Ordering::Equal => {
+                    let words = &self.faces[mid * FACE_WORDS + 1..(mid + 1) * FACE_WORDS];
+                    return Some(std::array::from_fn(|k| words[k / 4].to_le_bytes()[k % 4]));
+                }
+            }
+        }
+        None
     }
 }
 
@@ -174,10 +231,17 @@ impl Tiles {
     }
 }
 
-/** The sites read in a face's lattice coordinates (a, b, c) (see Face in view.ts). */
+/**
+ * The sites read in a face's lattice coordinates (a, b, c) (see Face in
+ * view.ts), each voxel's material the one of its face towards the
+ * camera, −F: a slice is drawn as seen along F, so that is the face its
+ * voxels show (docs/architecture.md, section 3).
+ */
 pub struct Reader<'a> {
     tiles: &'a Tiles,
     lattice: Lattice,
+    /** The kind of the faces towards the camera. */
+    front: usize,
     /** Bounds of a, b, c over the sites, inclusive. */
     pub min: [i32; 3],
     pub max: [i32; 3],
@@ -201,11 +265,12 @@ impl<'a> Reader<'a> {
         if (0..3).any(|d| tiles.min[d] > tiles.max[d]) {
             (min, max) = ([0; 3], [-1; 3]);
         }
-        Reader { tiles, lattice, min, max }
+        Reader { tiles, lattice, front: lattice.front(), min, max }
     }
 
     /**
-     * Material ids at (a + 2i, b, c) for i in [0, count), 0 where empty or
+     * Material ids at (a + 2i, b, c) for i in [0, count), those of the
+     * faces towards the camera, 0 where empty or
      * outside, to `visit` with each i, for a site (a, b, c): stepping a by
      * 2 steps (x, y, z) by R, and the grid only changes at a tile's edge.
      */
@@ -224,10 +289,41 @@ impl<'a> Reader<'a> {
                 tile = here;
                 grid = self.tiles.grid(tile);
             }
-            visit(i, grid.map_or(0, |grid| grid.at(x, y, z)));
+            visit(i, grid.map_or(0, |grid| grid.face(x, y, z, self.front)));
             x += r[0];
             y += r[1];
             z += r[2];
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn each_face_reads_the_material_of_the_voxels_faces_towards_it() {
+        // Two voxels, one of material 1 all round, one whose faces are each of a material of their own.
+        let mut grid = Grid::new([0, 0, 0], [8, 8, 8], 1);
+        grid.bricks[0] = 0;
+        let index = |[x, y, z]: [i32; 3]| (((z * BRICK + y) * BRICK + x) >> 1) as usize;
+        let (plain, painted) = ([2, 2, 2], [4, 4, 2]);
+        grid.cells[index(plain)] = 1;
+        grid.cells[index(painted)] = 1;
+        let faces: Faces = std::array::from_fn(|k| 10 + k as u8);
+        grid.faces = face_words(index(painted), &faces).to_vec();
+        let tiles = Tiles::one(grid);
+        for lattice in lattices() {
+            let reader = Reader::new(&tiles, lattice);
+            let read = |[x, y, z]: [i32; 3]| {
+                let [a, b, c] = [lattice.r, lattice.u, lattice.f].map(|v| v[0] * x + v[1] * y + v[2] * z);
+                let mut material = None;
+                reader.row(a, b, c, 1, |_, m| material = Some(m));
+                material.expect("read")
+            };
+            assert_eq!(read(plain), 1);
+            assert_eq!(read(painted), 10 + lattice.front() as u8, "seen along {:?}", lattice.f);
+            assert_eq!(read([6, 6, 2]), 0);
         }
     }
 }

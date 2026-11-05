@@ -78,7 +78,7 @@ pub fn read(bytes: &[u8]) -> Dump {
             let n = [b.i32(), b.i32(), b.i32()];
             let bricks = b.array(Bytes::i32);
             let cells = b.array(|b| b.take::<1>()[0]);
-            Some(Arc::new(Grid { min, n, bricks, cells }))
+            Some(Arc::new(Grid { min, n, bricks, cells, faces: Vec::new() }))
         })
         .collect();
     let requests = b.array(|b| {

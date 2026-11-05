@@ -15,6 +15,8 @@ const toWorld = ({ lattice: { right: R, up: U, forward: F } }: Face, a: number, 
   y: (a * R.y + c * F.y) / 2 + b * U.y,
   z: (a * R.z + c * F.z) / 2 + b * U.z,
 })
+/** The kind (of VOXEL_FACES) of a voxel's face towards a camera looking along a face's forward F: −F's. */
+const frontOf = ({ lattice: { forward: { x, y, z } } }: Face) => VOXEL_FACES.findIndex(({ normal }) => normal[0] === -x && normal[1] === -y && normal[2] === -z)
 
 /**
  * The first voxel of a slice, `size` times the lattice's, hit by the ray
@@ -78,12 +80,14 @@ describe('ChunkBaker', () => {
   it.each([
     [0, 0, Infinity], [0, 3, Infinity], [1, 1, Infinity], [1, 2, Infinity],
     [2, 1, Infinity], [3, 0, 4], [4, 0, Infinity], [5, 0, Infinity], [5, 0, 8], [0, 5, Infinity],
-  ] as const)('paints every voxel a ray along the axis hits first, far to near, at its site and depth, in its colour, its splat holding where the ray meets the plane (level %s, layer %s, cutoff %s)', (level, layer, cutoff) => {
+  ] as const)('paints every voxel a ray along the axis hits first, far to near, at its site and depth, in the colour of its face towards the camera, its splat holding where the ray meets the plane (level %s, layer %s, cutoff %s)', (level, layer, cutoff) => {
     const slice = { level, layer, cutoff }
     const centre = sliceCentre(slice)
-    // The voxels of the grid it reads, N times the lattice's.
+    // The voxels of the grid it reads, N times the lattice's, in the colour of their faces towards the camera.
     const n = atomSpacing(level)
-    const voxels = levels[atomLevel(level)].toVoxels().map(v => ({ ...toLattice(face, { x: n * v.x, y: n * v.y, z: n * v.z }), color: v.color }))
+    const read = levels[atomLevel(level)]
+    const voxels = read.toVoxels()
+      .map(v => ({ ...toLattice(face, { x: n * v.x, y: n * v.y, z: n * v.z }), color: read.materials[read.face(v.x, v.y, v.z, frontOf(face))].color }))
       .filter(v => holds(slice, [v.a, v.b, v.c]))
     const sites = voxels.map(v => ({ x: v.a * LAYER, y: v.b, z: v.c * LAYER }))
     expect(sites.length).toBeGreaterThan(20)
@@ -144,5 +148,18 @@ describe('ChunkBaker', () => {
     const sites = sitesOn(face)
     expect(sites.length).toBeGreaterThan(0)
     for (const other of FACES) expect(sitesOn(other)).toEqual(sites)
+  })
+
+  it('paints a voxel in the material of its face towards the camera', () => {
+    for (const face of FACES) {
+      // A voxel at the origin, red but for its face towards the camera, which is blue.
+      const one = new VoxelGrid({ minX: -2, minY: -2, minZ: -2, maxX: 2, maxY: 2, maxZ: 2 }, [{ color: '' }, { color: '#ff0000' }, { color: '#0000ff' }])
+      one.set(0, 0, 0, 1)
+      one.setFaces([[0, 0, 0, VOXEL_FACES.map((_, k) => (k === frontOf(face) ? 2 : 1))]])
+      const { splats } = new ChunkBaker(one.materials, [one]).bake({ face: face.name, level: 0, layer: 0, cutoff: Infinity, i: 0, j: 0 })
+      expect(splats.length).toBe(SPLAT)
+      const rgb = new Uint32Array(splats.buffer)[4]
+      expect([rgb & 255, (rgb >> 16) & 255].map(c => c > 0), face.name).toEqual([false, true])
+    }
   })
 })

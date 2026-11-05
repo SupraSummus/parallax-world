@@ -8,27 +8,41 @@ use std::panic::AssertUnwindSafe;
 use std::sync::{Mutex, mpsc};
 use std::time::{Duration, Instant};
 
+use bake::{FACE_KINDS, VOXEL_FACES};
+
 use crate::generator::{Generator, generate, materials_of};
 use crate::grid::{BRICK, Box3, VoxelGrid};
 
 /** Sites per tile in x and z, at the picture's level; a tile spans the heights. */
 const TILE: i64 = 64;
 
-/** The voxel's faces: towards its 12 neighbours, (p − site) · face ≤ 1 inside, in a level's units. */
-pub(crate) const FACES: [[i64; 3]; 12] = [
-    [1, 1, 0],
-    [1, -1, 0],
-    [-1, 1, 0],
-    [-1, -1, 0],
-    [1, 0, 1],
-    [1, 0, -1],
-    [-1, 0, 1],
-    [-1, 0, -1],
-    [0, 1, 1],
-    [0, 1, -1],
-    [0, -1, 1],
-    [0, -1, -1],
-];
+/** The voxel's faces: towards its 12 neighbours, (p − site) · face ≤ 1 inside, in a level's units (bake's VOXEL_FACES). */
+pub(crate) const FACES: [[i64; 3]; FACE_KINDS] = {
+    let mut faces = [[0; 3]; FACE_KINDS];
+    let mut k = 0;
+    while k < FACE_KINDS {
+        faces[k] = [VOXEL_FACES[k][0] as i64, VOXEL_FACES[k][1] as i64, VOXEL_FACES[k][2] as i64];
+        k += 1;
+    }
+    faces
+};
+
+/**
+ * The face a ray enters its voxel by: the one opposite the face it left
+ * the voxel before by, or, if it came from elsewhere, the face whose plane
+ * it crosses last on its way in ((p − site) · face ≤ 1 inside).
+ */
+fn entered(ray: &Ray) -> usize {
+    if ray.face < FACE_KINDS {
+        return FACES.iter().position(|f| *f == FACES[ray.face].map(|v| -v)).expect("faces come in pairs");
+    }
+    let r = [0, 1, 2].map(|i| ray.origin[i] - ray.site[i] as f64);
+    let enters = |f: &[i64; 3]| {
+        let (f, along) = (f.map(|v| v as f64), dot(f.map(|v| v as f64), ray.direction));
+        if along < 0.0 { (1.0 - dot(r, f)) / along } else { f64::NEG_INFINITY }
+    };
+    (0..FACE_KINDS).max_by(|&a, &b| enters(&FACES[a]).total_cmp(&enters(&FACES[b]))).expect("faces")
+}
 
 /** Where the sun is, and how much light comes from the sky and from it. */
 const SUN: [f64; 3] = [-0.48, 0.74, -0.47];
@@ -105,7 +119,7 @@ pub struct Picture {
     pub height: usize,
     /** RGB, 3 bytes a pixel. */
     pub rgb: Vec<u8>,
-    /** The material id hit (materials_of), 0 for none. */
+    /** The material id of the face hit (materials_of), 0 for none. */
     pub material: Vec<u8>,
     /** How far along its ray it was hit, lattice units (looking down, from just above the heights); infinite for none. */
     pub depth: Vec<f32>,
@@ -218,7 +232,8 @@ impl Tiles {
                 } else {
                     match tile.grid.get_or_empty_brick(x, y, z) {
                         Some(0) => None,
-                        Some(id) => {
+                        Some(_) => {
+                            let id = tile.grid.face(x, y, z, entered(ray));
                             return match self.normal(ray.site, &tile.grid) {
                                 Ok(normal) => Step::Hit(id, normal),
                                 Err(key) => Step::Needs(key),
@@ -245,7 +260,8 @@ impl Tiles {
 
 /**
  * Where a ray from `origin` along `direction` (a level's units) first
- * enters a voxel of `grid`, if before `end`: how far, and its material id.
+ * enters a voxel of `grid`, if before `end`: how far, and the material
+ * of the face it enters by.
  */
 pub(crate) fn first_voxel(grid: &VoxelGrid, origin: [f64; 3], direction: [f64; 3], end: f64) -> Option<(f64, u8)> {
     let mut ray = Ray { pixel: 0, origin, direction, t: 0.0, end, site: nearest_site(origin), face: FACES.len() };
@@ -253,7 +269,7 @@ pub(crate) fn first_voxel(grid: &VoxelGrid, origin: [f64; 3], direction: [f64; 3
     let mut planes = walk.planes(&ray);
     while ray.t <= end {
         let [x, y, z] = ray.site;
-        match grid.get(x, y, z) {
+        match grid.face(x, y, z, entered(&ray)) {
             0 => walk.cross(&mut ray, &mut planes),
             id => return Some((ray.t, id)),
         }
@@ -682,6 +698,17 @@ mod tests {
                 far: None,
             })],
         }
+    }
+
+    #[test]
+    fn a_ray_sees_the_face_it_enters_by() {
+        // A voxel whose faces up are of material 2, the others of 1.
+        let mut grid = VoxelGrid::new(&Box3 { min: [-4; 3], max: [4; 3] });
+        grid.set_faces(0, 0, 0, 1, std::array::from_fn(|k| if FACES[k][1] > 0 { 2 } else { 1 }));
+        let seen = |origin: [f64; 3], direction: [f64; 3]| first_voxel(&grid, origin, normalize(direction), 8.0).map(|hit| hit.1);
+        assert_eq!(seen([0.1, 3.0, 0.2], [0.0, -1.0, 0.0]), Some(2));
+        assert_eq!(seen([-3.0, 0.1, 0.2], [1.0, 0.0, 0.0]), Some(1));
+        assert_eq!(seen([-3.0, 3.2, 0.1], [1.0, -1.0, 0.0]), Some(2));
     }
 
     #[test]

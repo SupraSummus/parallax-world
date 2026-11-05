@@ -5,7 +5,7 @@
  * instance of their own. See docs/generators.md. No DOM.
  */
 import { wasmInstance } from './wasm'
-import type { Box, Material, VoxelData } from './voxel-grid'
+import { FACE_WORDS, type Box, type Material, type VoxelData } from './voxel-grid'
 import type { Generated } from './world'
 
 /** The worlds' exports (worlds/src/wasm.rs). */
@@ -52,13 +52,14 @@ export function generated(name: string, seed: number): Generated {
       return { minY, maxY }
     },
     generate: ({ minX, minY, minZ, maxX, maxY, maxZ }: Box, level: number): VoxelData => {
-      const [gx, gy, gz, nx, ny, nz, bricks, brickCount, cells, cellCount] = result(exports.worldgen_generate(level, minX, minY, minZ, maxX, maxY, maxZ), 10)
+      const [gx, gy, gz, nx, ny, nz, bricks, brickCount, cells, cellCount, faces, faceCount] = result(exports.worldgen_generate(level, minX, minY, minZ, maxX, maxY, maxZ), 12)
       const { buffer } = exports.memory
       // Copied out: the next call reuses the buffers.
       return {
         minX: gx, minY: gy, minZ: gz, nx, ny, nz,
         bricks: new Int32Array(buffer, bricks, brickCount).slice(),
         cells: new Uint8Array(buffer, cells, cellCount).slice(),
+        faces: new Uint32Array(buffer, faces, faceCount * FACE_WORDS).slice(),
         materials,
       }
     },

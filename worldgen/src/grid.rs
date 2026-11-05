@@ -2,7 +2,12 @@
 //! a box, in bricks BRICK units wide, only bricks with voxels stored. The
 //! same layout as the baker's Grid, which `into_grid` hands over.
 
-use bake::Grid;
+use std::collections::BTreeMap;
+
+use bake::{Faces, face_words};
+
+// The baker's grids, as worlds hand them over (worlds/src/wasm.rs), and the voxel's faces.
+pub use bake::{FACE_WORDS, Grid, VOXEL_FACES};
 
 pub const BRICK: i64 = 8;
 const BRICK_SITES: usize = (BRICK * BRICK * BRICK / 2) as usize;
@@ -40,7 +45,11 @@ pub fn is_site(x: i64, y: i64, z: i64) -> bool {
     (x + y + z) & 1 == 0
 }
 
-/** The sites of a box: see VoxelGrid in voxel-grid.ts. */
+/**
+ * The sites of a box: see VoxelGrid in voxel-grid.ts. A voxel has a
+ * material on each of its faces (bake's Grid): its site's in `cells`,
+ * unless `faces` gives them.
+ */
 pub struct VoxelGrid {
     pub min: [i64; 3],
     pub n: [i64; 3],
@@ -49,6 +58,8 @@ pub struct VoxelGrid {
     /** Per brick, z-major, then y, then x: where its sites start in `cells`, in BRICK_SITES; −1 if empty. */
     pub bricks: Vec<i32>,
     pub cells: Vec<u8>,
+    /** By index in `cells`, the faces' materials of the sites whose faces are not all of their material there. */
+    pub faces: BTreeMap<usize, Faces>,
 }
 
 impl VoxelGrid {
@@ -66,6 +77,7 @@ impl VoxelGrid {
             by,
             bricks: vec![-1; (bx * by * bz) as usize],
             cells: Vec::new(),
+            faces: BTreeMap::new(),
         }
     }
 
@@ -106,7 +118,38 @@ impl VoxelGrid {
         }
     }
 
-    /** Sets site (x, y, z) to material `id` (0 clears); outside the box or off the sites, nothing. */
+    /** The material of face `kind` (of bake's VOXEL_FACES) of the voxel at (x, y, z); 0 if empty, outside the box or not a site. */
+    pub fn face(&self, x: i64, y: i64, z: i64, kind: usize) -> u8 {
+        match self.slot(x, y, z) {
+            Some(Ok(i)) if self.cells[i] != 0 => self.faces.get(&i).map_or(self.cells[i], |faces| faces[kind]),
+            _ => 0,
+        }
+    }
+
+    /** The faces' materials of the voxel at (x, y, z), if they are not all its site's. */
+    pub fn faces_at(&self, x: i64, y: i64, z: i64) -> Option<&Faces> {
+        match self.slot(x, y, z) {
+            Some(Ok(i)) => self.faces.get(&i),
+            _ => None,
+        }
+    }
+
+    /**
+     * Sets the faces of the voxel at (x, y, z) to `faces`' materials,
+     * none 0, its site to `id`: the material it stands for to whatever
+     * does not look at its faces. Outside the box or off the sites, nothing.
+     */
+    pub fn set_faces(&mut self, x: i64, y: i64, z: i64, id: u8, faces: Faces) {
+        debug_assert!(id != 0 && !faces.contains(&0), "a face of nothing");
+        self.set(x, y, z, id);
+        if let Some(Ok(i)) = self.slot(x, y, z)
+            && faces.iter().any(|&m| m != id)
+        {
+            self.faces.insert(i, faces);
+        }
+    }
+
+    /** Sets site (x, y, z) to material `id` (0 clears), all its faces; outside the box or off the sites, nothing. */
     pub fn set(&mut self, x: i64, y: i64, z: i64, id: u8) {
         let i = match self.slot(x, y, z) {
             None => return,
@@ -119,10 +162,19 @@ impl VoxelGrid {
             }
         };
         self.cells[i] = id;
+        if !self.faces.is_empty() {
+            self.faces.remove(&i);
+        }
     }
 
     pub fn into_grid(self) -> Grid {
-        Grid { min: self.min.map(|v| v as i32), n: self.n.map(|v| v as i32), bricks: self.bricks, cells: self.cells }
+        Grid {
+            min: self.min.map(|v| v as i32),
+            n: self.n.map(|v| v as i32),
+            bricks: self.bricks,
+            cells: self.cells,
+            faces: self.faces.iter().flat_map(|(i, faces)| face_words(*i, faces)).collect(),
+        }
     }
 }
 
@@ -132,7 +184,8 @@ impl VoxelGrid {
  * (VoxelGrid.compose in voxel-grid.ts). The rest of the box is empty.
  */
 pub fn compose(b: &Box3, parts: &[&Grid]) -> Grid {
-    let VoxelGrid { min, n, bx, by, mut bricks, mut cells } = VoxelGrid::new(b);
+    let VoxelGrid { min, n, bx, by, mut bricks, mut cells, .. } = VoxelGrid::new(b);
+    let mut faces: Vec<[u32; FACE_WORDS]> = Vec::new();
     let bz = (n[2] + BRICK - 1) / BRICK;
     for part in parts {
         let offset: [i64; 3] = std::array::from_fn(|i| {
@@ -140,6 +193,8 @@ pub fn compose(b: &Box3, parts: &[&Grid]) -> Grid {
             (part.min[i] as i64 - min[i]) / BRICK
         });
         let [pbx, pby, pbz] = part.n.map(|v| (v as i64 + BRICK - 1) / BRICK);
+        // Where each of the part's bricks of sites went, if it did.
+        let mut moved = vec![None; part.cells.len() / BRICK_SITES];
         for k in 0..pbz {
             for j in 0..pby {
                 for i in 0..pbx {
@@ -148,12 +203,41 @@ pub fn compose(b: &Box3, parts: &[&Grid]) -> Grid {
                     if at < 0 || gi < 0 || gj < 0 || gk < 0 || gi >= bx || gj >= by || gk >= bz {
                         continue;
                     }
+                    moved[at as usize] = Some(cells.len());
                     bricks[((gk * by + gj) * bx + gi) as usize] = (cells.len() / BRICK_SITES) as i32;
                     let from = at as usize * BRICK_SITES;
                     cells.extend_from_slice(&part.cells[from..from + BRICK_SITES]);
                 }
             }
         }
+        for &[i, words @ ..] in part.faces.as_chunks::<FACE_WORDS>().0 {
+            if let Some(to) = moved[i as usize / BRICK_SITES] {
+                faces.push([(to + i as usize % BRICK_SITES) as u32, words[0], words[1], words[2]]);
+            }
+        }
     }
-    Grid { min: min.map(|v| v as i32), n: n.map(|v| v as i32), bricks, cells }
+    faces.sort_unstable_by_key(|site| site[0]);
+    Grid { min: min.map(|v| v as i32), n: n.map(|v| v as i32), bricks, cells, faces: faces.concat() }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn faces_are_set_with_their_site_and_go_with_it() {
+        let mut grid = VoxelGrid::new(&Box3 { min: [0; 3], max: [16, 8, 8] });
+        let faces: Faces = std::array::from_fn(|k| 2 + (k % 2) as u8);
+        grid.set_faces(2, 2, 2, 2, faces);
+        grid.set_faces(4, 2, 2, 2, [2; 12]);
+        grid.set_faces(10, 2, 2, 3, faces);
+        assert_eq!((grid.faces.len(), grid.face(2, 2, 2, 1), grid.face(4, 2, 2, 1), grid.get(2, 2, 2)), (2, 3, 2, 2));
+        grid.set(2, 2, 2, 5);
+        assert_eq!((grid.faces.len(), grid.face(2, 2, 2, 1)), (1, 5));
+
+        // Composed into a box a brick wider, the bricks move, and their sites' faces with them.
+        let whole = compose(&Box3 { min: [-8, 0, 0], max: [16, 8, 8] }, &[&grid.into_grid()]);
+        assert_eq!([0, 1].map(|k| whole.face(10, 2, 2, k)), [2, 3]);
+        assert_eq!([0, 1].map(|k| whole.face(2, 2, 2, k)), [5, 5]);
+    }
 }

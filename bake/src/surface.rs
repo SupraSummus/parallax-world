@@ -10,6 +10,7 @@ use crate::world::{FACE_KINDS, Geometry, Reader};
 pub struct Voxel {
     /** Lattice coordinates (a, b, c). */
     pub site: [i32; 3],
+    /** That of its face towards the camera (Reader). */
     pub material: u8,
     /** Faces with no neighbour across them. */
     pub open: u16,

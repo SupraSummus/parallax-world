@@ -1,5 +1,6 @@
 //! A world from above, to see its layout at a glance: each column's
-//! topmost voxel, lighter the higher it is, +z up. Writes a PPM:
+//! topmost voxel as its faces up show it, lighter the higher it is, +z up.
+//! Writes a PPM:
 //!
 //! cargo run --release --example map -- valley 42 2 -1600 -400 3200 4000 map.ppm
 //!
@@ -7,7 +8,7 @@
 //! units), and the file.
 
 use worldgen::generator::{generate, materials_of};
-use worldgen::grid::Box3;
+use worldgen::grid::{Box3, VOXEL_FACES};
 use worlds::{WORLDS, by_name};
 
 fn main() {
@@ -27,6 +28,8 @@ fn main() {
     let colours: Vec<u32> = materials_of(generator).iter().map(|m| m.rgb()).collect();
     let (min_y, max_y) = world.heights_at(level);
     let mut image = vec![0u8; (nx * nz * 3) as usize];
+    // A ray straight down enters a voxel by one of its four faces up: what most of them show.
+    let up: Vec<usize> = (0..VOXEL_FACES.len()).filter(|&k| VOXEL_FACES[k][1] > 0).collect();
     // In tiles, as the web generates it.
     const TILE: i64 = 64;
     for tz in (0..nz).step_by(TILE as usize) {
@@ -35,11 +38,11 @@ fn main() {
             let grid = generate(generator, &b, level);
             for z in b.min[2]..b.max[2].min(z0 + nz) {
                 for x in b.min[0]..b.max[0].min(x0 + nx) {
-                    let Some((y, id)) =
-                        (min_y..max_y).rev().filter(|y| (x + y + z) & 1 == 0).map(|y| (y, grid.get(x, y, z))).find(|(_, id)| *id != 0)
-                    else {
+                    let Some(y) = (min_y..max_y).rev().filter(|y| (x + y + z) & 1 == 0).find(|&y| grid.get(x, y, z) != 0) else {
                         continue;
                     };
+                    let faces: Vec<u8> = up.iter().map(|&k| grid.face(x, y, z, k)).collect();
+                    let id = *faces.iter().max_by_key(|m| faces.iter().filter(|n| n == m).count()).expect("four");
                     let (c, light) = (colours[id as usize], 0.75 + 0.25 * (y - min_y) as f64 / (max_y - min_y) as f64);
                     let at = ((nz - 1 - (z - z0)) * nx + (x - x0)) as usize * 3;
                     for (i, shift) in [16, 8, 0].into_iter().enumerate() {

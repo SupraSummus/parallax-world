@@ -9,7 +9,7 @@ use std::cell::RefCell;
 
 use worldgen::World;
 use worldgen::generator::{generate, materials_of};
-use worldgen::grid::{Box3, VoxelGrid};
+use worldgen::grid::{Box3, FACE_WORDS, Grid};
 
 use crate::WORLDS;
 
@@ -17,12 +17,12 @@ use crate::WORLDS;
 struct State {
     world: World,
     materials: Vec<u32>,
-    grid: Option<VoxelGrid>,
+    grid: Option<Grid>,
 }
 
 thread_local! {
     static STATE: RefCell<Option<State>> = const { RefCell::new(None) };
-    static RESULT: RefCell<[f64; 10]> = const { RefCell::new([0.0; 10]) };
+    static RESULT: RefCell<[f64; 12]> = const { RefCell::new([0.0; 12]) };
     /** The names of WORLDS, in UTF-8, each ended by a NUL. */
     static NAMES: Vec<u8> = WORLDS.iter().flat_map(|e| e.name.bytes().chain([0])).collect();
 }
@@ -75,14 +75,16 @@ pub extern "C" fn worldgen_heights(level: u32) -> *const f64 {
  * Generates the box from (min_x, min_y, min_z) to (max_x, max_y, max_z)
  * (exclusive) at `level` (see generate); returns RESULT: the grid's min x,
  * y, z, nx, ny, nz, a pointer to its bricks (i32), their count, a pointer
- * to its sites (u8) and their count. Null before worldgen_start.
+ * to its sites (u8) and their count, a pointer to the faces of the sites
+ * whose faces differ (u32, FACE_WORDS each) and their count. Null before
+ * worldgen_start.
  */
 #[unsafe(no_mangle)]
 pub extern "C" fn worldgen_generate(level: u32, min_x: f64, min_y: f64, min_z: f64, max_x: f64, max_y: f64, max_z: f64) -> *const f64 {
     STATE.with_borrow_mut(|state| {
         let Some(state) = state else { return std::ptr::null() };
         let b = Box3 { min: [min_x as i64, min_y as i64, min_z as i64], max: [max_x as i64, max_y as i64, max_z as i64] };
-        let grid = state.grid.insert(generate(&state.world.generator, &b, level));
+        let grid = state.grid.insert(generate(&state.world.generator, &b, level).into_grid());
         result(&[
             grid.min[0] as f64,
             grid.min[1] as f64,
@@ -94,6 +96,8 @@ pub extern "C" fn worldgen_generate(level: u32, min_x: f64, min_y: f64, min_z: f
             grid.bricks.len() as f64,
             grid.cells.as_ptr() as usize as f64,
             grid.cells.len() as f64,
+            grid.faces.as_ptr() as usize as f64,
+            (grid.faces.len() / FACE_WORDS) as f64,
         ])
     })
 }
