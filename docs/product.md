@@ -57,10 +57,6 @@ but what a column shows along it is its nearest voxel's colour,
 so a lawn's shades and a road's markings stretch along it.
 "Pillars over Columns" (on by default, `?pillars=0`) draws them so;
 off, each column is its nearest voxel alone, as baked, and the stripes show.
-"Flat Voxels" (off by default) draws slices flat, as "Max Occlusion Leak" assumes,
-and "Voxels in Relief" (on by default) in relief;
-with both, each voxel is a pillar from its slice's plane to its depth
-(and over its column, with "One Voxel per Column"; `?flat=1`, `?relief=0`).
 See [architecture.md](architecture.md).
 
 **Worlds** – Procedurally generated, regenerable with a new seed; the camera

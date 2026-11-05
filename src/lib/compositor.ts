@@ -18,9 +18,8 @@ const SEAM_WIDTH = 1.5
 // `halfLayer` past the layer's plane per step of its alpha past 128, and
 // as much wider as the ray to it slants across (Splat in
 // bake/src/splats.rs), swept along the axis over its run (`run` half
-// layers, times `runs`: 0 draws it without): a prism, an instance of
-// PRISM, its vertices 0–5 the near hexagon's and 6–11 the far one's. `relief` [1, 1] draws it so; [0, 0]
-// flat, at the layer's plane; [0, 1] from the plane on.
+// layers): a prism, an instance of PRISM, its vertices 0–5 the near
+// hexagon's and 6–11 the far one's.
 // Projected like projector() in view.ts, `view` having the camera's axes
 // as columns, in the layer's face coordinates (the world's for the sky).
 // `origin` is the chunk's top-left corner, camera-relative. The sky and
@@ -38,8 +37,6 @@ uniform mat3 view;
 uniform vec2 origin;
 uniform float distance;
 uniform float halfLayer;
-uniform vec2 relief;
-uniform float runs;
 uniform float depth;
 uniform float slot;
 uniform float halfDepth;
@@ -57,13 +54,13 @@ void main() {
     return;
   }
   float offset = (paint.a * 255.0 - 128.0) * halfLayer;
-  float back = offset + splat.w * runs * halfLayer;
+  float back = offset + splat.w * halfLayer;
   vec2 site = origin + splat.xy;
   float width = splat.z * (1.0 + abs(site.x / (distance + offset)));
   float height = splat.z * sqrt(2.0);
   vec2 corner = CORNERS[gl_VertexID % 6];
   vec2 u = corner * vec2(width, height - abs(corner.x) * width / sqrt(2.0));
-  float z = distance + (gl_VertexID < 6 ? min(offset * relief.x, offset * relief.y) : max(offset * relief.x, back * relief.y));
+  float z = distance + (gl_VertexID < 6 ? offset : back);
   colour = paint.rgb;
   vec3 p = transpose(view) * vec3(site + u, z);
   // Homogeneous, so the GPU clips what is behind the camera and interpolates in perspective.
@@ -138,7 +135,7 @@ void main() {
 
 const rgb = (hex: string) => [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255) as [number, number, number]
 
-const UNIFORMS = ['viewport', 'resolution', 'focal', 'view', 'origin', 'clip', 'distance', 'halfLayer', 'relief', 'runs', 'depth', 'slot', 'halfDepth', 'skyTop', 'horizon', 'fog', 'sky', 'seams', 'seamColor', 'seamWidth'] as const
+const UNIFORMS = ['viewport', 'resolution', 'focal', 'view', 'origin', 'clip', 'distance', 'halfLayer', 'depth', 'slot', 'halfDepth', 'skyTop', 'horizon', 'fog', 'sky', 'seams', 'seamColor', 'seamWidth'] as const
 type Uniform = (typeof UNIFORMS)[number]
 
 /** Attribute locations of a splat's numbers (see SPLAT). */
@@ -158,8 +155,6 @@ export class Compositor {
   private buffers = new Map<Chunk, WebGLBuffer>()
   private frame: Frame | null = null
   private showSeams = false
-  // How far each splat's pillar reaches from its layer's plane towards its depth and over its run: 0 flat, 1 in relief.
-  private relief: [number, number] | null = [1, 1]
   // Whether splats are swept over their runs (chunks of one voxel per column have them).
   private runs = true
 
@@ -185,15 +180,6 @@ export class Compositor {
   /** Whether to draw the seams between faces over the picture; redraws the last frame. */
   setShowSeams(show: boolean) {
     this.showSeams = show
-    if (this.frame) this.draw(this.frame)
-  }
-
-  /**
-   * Whether to draw splats flat on their layer's plane, in relief, or (both)
-   * as pillars from the one over the other; neither draws none. Redraws the last frame.
-   */
-  setPlacement(flat: boolean, inRelief: boolean) {
-    this.relief = flat || inRelief ? [flat ? 0 : 1, inRelief ? 1 : 0] : null
     if (this.frame) this.draw(this.frame)
   }
 
@@ -235,10 +221,6 @@ export class Compositor {
     const z = (i: number) => (2 * i + 1) / (frame.layers.length + 1) - 1
     gl.uniform1f(u.slot, 0.9 / (frame.layers.length + 1))
     gl.uniform1i(u.sky, 0)
-    if (this.relief) gl.uniform2f(u.relief, ...this.relief)
-    gl.uniform1f(u.runs, this.runs ? 1 : 0)
-    // Splats are flat but for runs (only in chunks of one voxel per column) or drawn from the plane on.
-    const pillars = this.relief !== null && this.relief[0] !== this.relief[1]
     const drawn = new Set<Chunk>()
     gl.enable(gl.CULL_FACE)
     gl.enableVertexAttribArray(SPLAT_AT)
@@ -258,12 +240,11 @@ export class Compositor {
       for (const { chunk, x, y } of placements) {
         gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer(chunk))
         drawn.add(chunk)
-        if (!this.relief) continue
         gl.uniform2f(u.origin, x, y)
         gl.uniform4f(u.clip, x, y, x + chunk.extentWidth, y - chunk.extentHeight)
         gl.vertexAttribPointer(SPLAT_AT, 4, gl.FLOAT, false, SPLAT * 4, 0)
         gl.vertexAttribPointer(PAINT_AT, 4, gl.UNSIGNED_BYTE, true, SPLAT * 4, 16)
-        gl.drawElementsInstanced(gl.TRIANGLES, (chunk.firstInColumn && this.runs) || pillars ? PRISM.length : HEXAGON, gl.UNSIGNED_BYTE, 0, chunk.splats.length / SPLAT)
+        gl.drawElementsInstanced(gl.TRIANGLES, chunk.firstInColumn && this.runs ? PRISM.length : HEXAGON, gl.UNSIGNED_BYTE, 0, chunk.splats.length / SPLAT)
       }
     })
     gl.disableVertexAttribArray(SPLAT_AT)
