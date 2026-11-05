@@ -189,8 +189,7 @@ and so their level of detail (section 1) and how many there are
 (`docs/todo.md`).
 Drawn flat, the gap between two slices could show a cross-section of
 the farther slice where the top and side faces of nearer voxels hide it
-in perspective, e.g. the ground under the moor's pools
-("Flat Voxels" draws them so).
+in perspective, e.g. the ground under the moor's pools.
 
 Bound, with ε = the "max occlusion leak" setting:
 **geometry that perspective hides would not show by more than the angle ε**
@@ -499,8 +498,6 @@ then the sky behind them.
 A splat is a prism of triangles, its hexagon swept along the axis
 over its run (section 3), those facing away culled;
 without a run, the near hexagon alone.
-It is drawn at its depth, or flat on the slice's centre plane
-("Flat Voxels"), or with both switches from the plane on.
 A prism spans layers, so no painting order is right for every ray
 (a lawn's run behind a trunk on it):
 each vertex has a depth within its layer's share of the depth range,
