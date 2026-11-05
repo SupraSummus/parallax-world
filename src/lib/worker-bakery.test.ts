@@ -7,12 +7,20 @@ import { VoxelGrid } from './voxel-grid'
 import { WorkerBakery, type BakeWorker } from './worker-bakery'
 import { atomLevel, GRID_LEVELS } from './slice-selection'
 import { levelsOf, World } from './world'
+import { hills } from './hills.test-helper'
 
-// A small stand-in for the forest, which the workers generate in moments.
-vi.mock('./worldgen', async () => (await import('./small-forest.test-helper')).smallWorldgen)
+// A small stand-in for the forest, which the workers generate in moments; and the city as it is.
+vi.mock('./worldgen', async importOriginal => {
+  const { generated } = await importOriginal<typeof import('./worldgen')>()
+  const { smallWorldgen } = await import('./small-forest.test-helper')
+  return {
+    worlds: () => [...smallWorldgen.worlds(), 'city'],
+    generated: (name: string, seed: number) => (name === 'city' ? generated : smallWorldgen.generated)(name, seed),
+  }
+})
 
 // A small world with trees, as in renderer.test.ts.
-const world = new World(12345, 'hills_with_trees')
+const world = hills(12345)
 
 /** bake.worker.ts in microtasks: asynchronous and in order, like a worker, and done before the next timer. */
 class FakeWorker implements BakeWorker {
@@ -107,6 +115,15 @@ async function moveFirstGrid(bakery: Bakery) {
 }
 
 /** Renders until no chunk in view is still baking. */
+/** Once the workers have generated each level's grid of the renderer's world around its spawn point. */
+async function gridsIn(renderer: ParallaxRenderer) {
+  const world = renderer.getWorld()
+  while (Array.from({ length: GRID_LEVELS }, (_, level) => world.level(level)).some(grid => !grid)) {
+    renderer.render()
+    await tick()
+  }
+}
+
 async function settle(renderer: ParallaxRenderer): Promise<Frame> {
   for (;;) {
     const frame = renderer.render()
@@ -227,6 +244,7 @@ describe('WorkerBakery', () => {
     const renderer = new ParallaxRenderer(new World(12345, 'city'), { bakery: new WorkerBakery([new FakeWorker()]) })
     renderer.resize(1920, 1080)
     renderer.setMaxLeak(3)
+    await gridsIn(renderer)
     await settle(renderer)
     renderer.setMaxLeak(2)
     await settle(renderer)
@@ -344,7 +362,8 @@ describe('WorkerBakery', () => {
 
   it('bakes the new world after regeneration', async () => {
     const renderer = workerRenderer()
-    renderer.regenerateWorld(99999, 'hills_with_trees')
-    expect(shown(await settle(renderer))).toEqual(reference(undefined, new World(99999, 'hills_with_trees')))
+    renderer.regenerateWorld(99999, 'valley')
+    await gridsIn(renderer)
+    expect(shown(await settle(renderer))).toEqual(reference(undefined, new World(99999, 'valley')))
   })
 })

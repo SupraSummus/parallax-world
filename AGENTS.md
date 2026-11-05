@@ -37,10 +37,8 @@ src/
 └── lib/
     ├── fcc.ts               # Voxel geometry: rhombic dodecahedra of the FCC lattice
     ├── voxel-grid.ts        # Voxel storage on the FCC lattice, in bricks (typed arrays), a material per voxel face; coarsening it; LayerIndex, made by bake/
-    ├── world.ts             # World: voxel grids by level of detail (generated in tiles around the camera), spawn, toy world types
+    ├── world.ts             # World: voxel grids by level of detail (generated in tiles around the camera), spawn; tests' worlds of voxels
     ├── worldgen.ts          # The worlds of worlds/ (WebAssembly), any box at any level
-    ├── city.ts              # City scene generator: streets, buildings, maze of rooms
-    ├── noise.ts             # Seeded hash and PRNG for the city
     ├── cells.ts             # Cells of the coarser lattices N·FCC that slices are made of
     ├── slice-selection.ts   # Slices, chunks and the leak bound (pure functions)
     ├── view.ts              # Camera orientation, the 12 faces (FCC directions), projection
@@ -90,6 +88,7 @@ worlds/                      # The worlds, on worldgen's public API only; the we
 │   ├── town.rs, fields.rs   # Towns along the path, farmland around them: the valley's other domains
 │   ├── valley.rs            # The valley: the three domains on one land
 │   ├── moor.rs              # The moor: heath, a stream, steadings of a hut and a ring of stones
+│   ├── city.rs              # The city: blocks of buildings whose rooms form a maze, boxes on a plan of quarter metres
 │   ├── learned.rs           # The learned town: settlements drawn by a split grammar learned in lab/, on the forest's land
 │   └── wasm.rs              # Its WebAssembly exports (the module holds bake/'s too)
 ├── data/town-grammar.bin    # learned.rs's rule table, written by lab's export example

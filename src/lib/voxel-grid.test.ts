@@ -2,9 +2,9 @@ import { describe, it, expect } from 'vitest'
 import { FACES } from './view'
 import { VOXEL_FACES } from './fcc'
 import { coarsen, LayerIndex, VoxelGrid, isSite } from './voxel-grid'
-import { World } from './world'
+import { hills } from './hills.test-helper'
 
-const { grid, voxels } = new World(7, 'hills_with_trees')
+const { grid, voxels } = hills(7)
 
 describe('VoxelGrid', () => {
   it('stores the sites of its box, in bricks of those it has voxels in, and nothing else', () => {

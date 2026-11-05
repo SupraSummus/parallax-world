@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { ParallaxRenderer, type Frame } from './renderer'
 import { World } from './world'
+import { hills } from './hills.test-helper'
 import { projector } from './view'
 import { rasterise } from './picture.test-helper'
 
@@ -10,15 +11,8 @@ import { rasterise } from './picture.test-helper'
  * frame puts them, and the per-render stats.
  */
 
-// A small world with trees: rasterising the forest (~700k voxels)
-// takes seconds per test. The renderer never modifies its world.
-const world = new World(12345, 'hills_with_trees')
-
-function makeWorldWithVoxels(voxels: World['voxels']): World {
-  const custom = new World(1, 'hills') // cheapest world to generate; its voxels are replaced
-  custom.voxels = voxels
-  return custom
-}
+// The renderer never modifies its world.
+const world = hills(12345)
 
 /** Screen positions (CSS pixels) of the centres of all drawn pixels of the chunks' rasters (see rasterise). */
 function drawnPixels(frame: Frame): { x: number; y: number }[] {
@@ -84,7 +78,7 @@ describe('Renderer regressions', () => {
     for (let y = 0; y <= 30; y += 2) {
       voxels.push({ x: 0, y, z: -58, color: '#00ff00' })
     }
-    const renderer = new ParallaxRenderer(makeWorldWithVoxels(voxels))
+    const renderer = new ParallaxRenderer(World.ofVoxels(voxels))
     renderer.resize(800, 600)
     renderer.setCamera({ x: 0, y: 30, z: -60 })
 
@@ -171,7 +165,7 @@ describe('Renderer regressions', () => {
     for (let a = -160; a < 160; a += 2) {
       for (let c = 0; c < 2400; c += 2) voxels.push({ x: (a + c) / 2, y: 0, z: (c - a) / 2, color: '#40a040' })
     }
-    const floor = makeWorldWithVoxels(voxels)
+    const floor = World.ofVoxels(voxels)
 
     it.each([3, 12])('shows no gaps between slices (max leak %s°)', maxLeak => {
       const renderer = new ParallaxRenderer(floor)

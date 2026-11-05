@@ -3,9 +3,7 @@ import { World } from '@/lib/world'
 import { buildVoxelMesh } from './mesh'
 
 function worldOf(sites: [number, number, number][]): World {
-  const world = new World(1, 'hills') // cheapest world to generate; its voxels are replaced
-  world.voxels = sites.map(([x, y, z]) => ({ x, y, z, color: '#808080' }))
-  return world
+  return World.ofVoxels(sites.map(([x, y, z]) => ({ x, y, z, color: '#808080' })))
 }
 
 describe('buildVoxelMesh', () => {

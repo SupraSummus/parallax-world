@@ -28,15 +28,16 @@ pnpm exec vitest run bake       # files matching "bake"
 | `src/lib/renderer.test.ts` | Slices and chunks in view, placement, caching, stats (on a small world) |
 | `src/lib/worker-bakery.test.ts` | Baking in workers (simulated) gives the same frames; what is baked first, and when not at all |
 | `src/lib/renderer-regressions.test.ts` | Previously fixed rendering bugs |
-| `src/lib/world.test.ts` | Toy worlds; a generated world's grids put together from parts generated alone |
+| `src/lib/world.test.ts` | The worlds listed; a generated world's grids put together from parts generated alone |
 | `worlds/tests/contract.rs`, `worldgen/tests/contract.rs` | Every world, and the engine's test worlds, keep the contract (`worldgen/src/contract.rs`): generated in pieces equals generated whole, levels agree on what rays see, and seen from above with level 0 |
-| `worlds/tests/forest.rs`, `worlds/tests/valley.rs`, `src/lib/city.test.ts` | The scenes: determinism, contents, spawn |
+| `worlds/tests/forest.rs`, `worlds/tests/valley.rs`, `worlds/tests/city.rs` | The scenes: determinism, contents, spawn |
 | `src/lib/worldgen.test.ts` | The worlds as the web lists and gets them from WebAssembly |
 | `src/viewer/mesh.test.ts` | Reference viewer mesh |
 | `src/App.test.tsx` | UI panels, keyboard movement and turning |
 
 `src/lib/picture.test-helper.ts` stands in for the compositor in tests that compare pictures,
-and `src/lib/small-forest.test-helper.ts` for the forest where it would be too slow.
+`src/lib/small-forest.test-helper.ts` for the forest where it would be too slow,
+and `src/lib/hills.test-helper.ts` is a small scene with trees, a world of voxels, for the renderer's tests.
 `src/dom.test-helper.ts`, imported by UI tests, stubs what jsdom lacks:
 a no-op 2D canvas context
 (no WebGL, so `compositor.ts` is only checked in the browser),

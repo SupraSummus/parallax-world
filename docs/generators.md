@@ -9,11 +9,11 @@ coarser further away, for about the same cost per box at every level.
 which use only the engine's public API.
 The forest (`worlds/src/forest.rs`) is written this way,
 and so is the valley (`valley.rs`), the forest with towns and fields,
-three domains composed as in "Composing";
+three domains composed as in "Composing",
+and the city (`city.rs`), boxes on a plan of quarter metres;
 a host starts either by name from `WORLDS` (`worlds/src/lib.rs`),
 as a `World`: its generator, spawn, reach and heights;
-the web lists and generates them all as WebAssembly (`src/lib/worldgen.ts`);
-the TS city and the toy worlds (`src/lib`) are not on it.
+the web lists and generates them all as WebAssembly (`src/lib/worldgen.ts`).
 Integers and fixed point (`noise.rs`) decide wherever they can,
 so a world is the same on every machine and as fine far from the origin.
 
@@ -505,6 +505,9 @@ Carves along a line want the same margin.
   (a closing) before measuring kept the thatch,
   and brought the valley's town's materials hit at level 3 from 0.064 to 0.026,
   but grew the houses over the streets (0.039 to 0.057 from above).
+  The city's buildings, hollow all through, vanished whole at some seeds;
+  they are measured from their solid outline instead (`INSIDE` in `city.rs`),
+  and a lone one still shrinks or grows by a site at level 4.
 - **Numbers and fields' own categories are point-sampled.**
   A plan of numbers finer than the sites is read where each line is;
   filtered to the spacing it would cost coarse levels less (see docs/todo.md).

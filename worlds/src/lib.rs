@@ -3,6 +3,7 @@
 //! native frontend links them; the web generates them as WebAssembly
 //! (wasm.rs, src/lib/worldgen.ts).
 
+pub mod city;
 pub mod fields;
 pub mod forest;
 pub mod learned;
@@ -80,6 +81,17 @@ pub const WORLDS: &[Entry] = &[
         levels: 4,
         from_above: 4,
         far: &[Box3 { min: [-1536, -48, 544], max: [1536, 288, 3616] }],
+    },
+    // The front row of blocks: the road before them, their entrances and the rooms behind, from under the road to over the roofs.
+    // To level 3: at level 4, sites 2 m apart, a building's measured outline (city.rs, INSIDE) is kept or lost a site at a time.
+    // Far away, the whole district: its markings, kerbs and paving slabs are finer than the sites there.
+    Entry {
+        name: "city",
+        make: city::city,
+        regions: &[Box3 { min: [-480, -8, 0], max: [480, 120, 320] }],
+        levels: 3,
+        from_above: 3,
+        far: &[Box3 { min: [-480, -8, -16], max: [480, 120, 944] }],
     },
 ];
 
