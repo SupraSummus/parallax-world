@@ -130,7 +130,7 @@ describe('ChunkBaker', () => {
           continue
         }
         const [u, v] = [Math.abs(px - originX - splats[k * SPLAT]), Math.abs(py - originY - splats[k * SPLAT + 1])]
-        if (u > splats[k * SPLAT + 2] + 1e-4 || u * Math.SQRT1_2 + v > splats[k * SPLAT + 3] + 1e-4) uncovered.push([a, b, c].join())
+        if (u > splats[k * SPLAT + 2] + 1e-4 || u * Math.SQRT1_2 + v > splats[k * SPLAT + 2] * Math.SQRT2 + 1e-4) uncovered.push([a, b, c].join())
       }
     }
     expect(compared).toBeGreaterThan(200)

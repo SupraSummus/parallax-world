@@ -106,7 +106,6 @@ export function holds({ level, layer, cutoff }: SliceId, site: [number, number, 
  * A slice's thickness in layer spacings: its atoms' sites are every N-th
  * of its 2^level layers, and its voxels, N wide, reach N layers past them
  * (see fcc.ts). 2^level + N.
- * @internal
  */
 export function thickness(level: number): number {
   return 2 ** level + atomSpacing(level)

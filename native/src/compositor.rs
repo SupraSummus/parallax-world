@@ -36,7 +36,7 @@ struct GpuChunk {
     _pad: f32,
 }
 
-/** A splat (splat_vertex's instance in compositor.wgsl): its SPLAT numbers (chunk-baker.ts) and its order in its chunk (depth_of). */
+/** A splat (splat_vertex's instance in compositor.wgsl): its SPLAT numbers (chunk-baker.ts), its height for its run, and its order in its chunk (depth_of). */
 pub type GpuSplat = [u32; 6];
 
 /** A cluster (Cluster in compositor.wgsl). */
@@ -110,7 +110,8 @@ pub fn cluster(numbers: &[f32], half_layer: f64, block: f64) -> (Vec<GpuSplat>, 
                 _pad: 0,
             };
             for &s in part {
-                let [x, y, w, h, paint] = numbers[s];
+                let [x, y, w, _, paint] = numbers[s];
+                let h = w * std::f32::consts::SQRT_2;
                 let off = (((paint.to_bits() >> 24) as f64 - 128.0) * half_layer) as f32;
                 cluster.min = [cluster.min[0].min(x - w), cluster.min[1].min(y - h)];
                 cluster.max = [cluster.max[0].max(x + w), cluster.max[1].max(y + h)];
@@ -121,9 +122,10 @@ pub fn cluster(numbers: &[f32], half_layer: f64, block: f64) -> (Vec<GpuSplat>, 
         start += run.len();
     }
     clusters.sort_by(|a, b| a.order.total_cmp(&b.order));
+    // Its height in place of its run: native chunks have none (every voxel is baked).
     let splats = sorted.iter().map(|&s| {
-        let [x, y, w, h, paint] = numbers[s].map(f32::to_bits);
-        [x, y, w, h, paint, orders[s].to_bits()]
+        let [x, y, w, _, paint] = numbers[s];
+        [x, y, w, w * std::f32::consts::SQRT_2, paint, orders[s]].map(f32::to_bits)
     });
     (splats.collect(), clusters)
 }

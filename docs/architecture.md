@@ -314,6 +314,15 @@ With "One Voxel per Column", chunks keep only those (`ChunkRequest.firstInColumn
 about half the splats,
 but a slanted ray sees past a column's edge into farther slices
 where it would meet the column behind.
+Where the axis lies in a surface (a lawn seen along a level face),
+a column of it runs through the slice,
+and a ray looking down passes over its nearest voxel
+into the next slice, under the surface: stripes.
+So a kept voxel stands for its run (`run_ends`),
+the solid voxels behind it in its column up to the last a ray may see,
+and is drawn as a prism over them (section 4; `src/lib/pillars.test.ts`).
+A run shows its first voxel's colour,
+so a lawn's shades or a road's markings stretch along the axis.
 Chunks baked either way are cached apart;
 the native frontend bakes every voxel.
 
@@ -485,20 +494,30 @@ and coverage only decides which cells are baked and have their tiles made.
 A cell coming into view waits for the next pass, a frame or two.
 
 The `Compositor` draws a frame onto one opaque WebGL 2 canvas:
-per chunk its splats, instanced, each a rectangle cut to its hexagon,
+per chunk its splats, instanced,
 then the sky behind them.
+A splat is a prism of triangles, its hexagon swept along the axis
+over its run (section 3), those facing away culled;
+without a run, the near hexagon alone.
+It is drawn at its depth, or flat on the slice's centre plane
+("Flat Voxels"), or with both switches from the plane on.
+A prism spans layers, so no painting order is right for every ray
+(a lawn's run behind a trunk on it):
+each vertex has a depth within its layer's share of the depth range,
+by how far along the axis it is.
 Splats are opaque, so it draws near to far with a depth test:
-what nearer slices cover is rejected instead of blended
-(the forest stacks dozens of screens of chunks). Depth is the layer's index,
+what is nearer rejects what is behind before the fragment shader runs
+(the forest stacks dozens of screens of chunks). Depth is first the layer's index,
 not its distance: a face's slices are parallel planes, so every ray
 meets them near to far, and faces share pixels only along seams
 (the first face drawn wins there).
 Within a layer, a chunk draws only on its own part of the plane,
-decided by each pixel's ray, so chunks neither overlap nor leave seams;
-a later splat at the same depth covers an earlier one,
-so a chunk's are painted in order.
-A chunk's splats are uploaded when it comes into view
-and deleted when it leaves.
+decided by each pixel's ray, so chunks neither overlap nor leave seams.
+A chunk's splats are uploaded when it comes into view,
+near to far (its painting order reversed),
+so its nearer splats reject most of those behind them;
+where two are as near, the one painted later shows.
+They are deleted when it leaves.
 No antialiasing, so voxel edges stay crisp.
 
 The native compositor (`native/src/compositor.rs`) draws only what may show:

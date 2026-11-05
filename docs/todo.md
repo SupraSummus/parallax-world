@@ -100,6 +100,17 @@ Numbers are for the forest at 1280×800, as measured when written.
   the ground's steps flatten, trunks show seams, crowns fray.
   Dropping only those hidden from the axis and the rhombus's corners
   (as masks are filled) may keep most of the saving; not measured yet.
+  On the web, each drawn as a prism over its run closes those gaps
+  (section 3 of `docs/architecture.md`), but a run shows one colour.
+  Modelled in Node (a lawn, the hills, the city),
+  one voxel per column has 0.5–0.8 of the instances
+  but more vertices (12 against 6) and about as many fragments
+  as every voxel drawn as hexagons:
+  half of what rectangles cut to hexagons took, either way.
+  Not measured on a GPU; the native compositor has no runs.
+- **The depth within a layer needs a fine depth buffer.**
+  A layer's splats share 1 / (layers + 1) of the depth range;
+  WebGL promises only 16 bits, which leaves a few dozen steps for them.
 - **Bricks on the edge of a face's rhombus are baked whole.**
   Near where a level starts, about 19 bricks meet the rhombus,
   and most of them cross its edge or the screen's.

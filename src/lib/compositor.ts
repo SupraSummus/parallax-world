@@ -1,7 +1,7 @@
 import { SPLAT } from './chunk-baker'
 import type { Chunk, Frame } from './renderer'
-import { halfLayer } from './slice-selection'
-import { faceBasis, viewBasis, type Basis, type Face } from './view'
+import { halfLayer, thickness } from './slice-selection'
+import { faceBasis, LAYER, viewBasis, type Basis, type Face } from './view'
 
 // Sky gradient: from the horizon colour at eye level up to SKY_TOP at
 // SKY_TOP_TANGENT (tangent of the elevation; 32°), flat above and below.
@@ -14,15 +14,23 @@ const SKY_TOP_TANGENT = 0.625
 const SEAM_COLOR = '#ff2fd0'
 const SEAM_WIDTH = 1.5
 
-// Each splat is a rectangle around its hexagon across the face's axis at
-// its site, from gl_VertexID, one instance per splat: `halfLayer` past the
-// layer's plane per step of its alpha past 128 (times `relief`: 0 draws it
-// flat, on the plane), and as much wider as the
-// ray to it slants across (Splat in bake/src/splats.rs). Projected like
-// projector() in view.ts, `view` having the camera's axes as columns, in
-// the layer's face coordinates (the world's for the sky). `origin` is the
-// chunk's top-left corner, camera-relative. The sky and the seams cover
-// the screen.
+// Each splat is a voxel's hexagon across the face's axis at its site,
+// `halfLayer` past the layer's plane per step of its alpha past 128, and
+// as much wider as the ray to it slants across (Splat in
+// bake/src/splats.rs), swept along the axis over its run (`run` half
+// layers, times `runs`: 0 draws it without): a prism, an instance of
+// PRISM, its vertices 0–5 the near hexagon's and 6–11 the far one's. `relief` [1, 1] draws it so; [0, 0]
+// flat, at the layer's plane; [0, 1] from the plane on.
+// Projected like projector() in view.ts, `view` having the camera's axes
+// as columns, in the layer's face coordinates (the world's for the sky).
+// `origin` is the chunk's top-left corner, camera-relative. The sky and
+// the seams cover the screen.
+// Depth: layer i's is `depth`, the sky's behind them all; within ±`slot`
+// of it, by how far along the axis the vertex is (±`halfDepth`, the
+// slice's half thickness), so the prisms of a layer hide each other about
+// as their voxels would, before the fragment shader runs. Interpolated
+// linearly on screen, not in perspective: surfaces of one layer much
+// nearer each other than a prism is long may show in the wrong order.
 const VERTEX_SHADER = `#version 300 es
 uniform vec2 viewport;
 uniform float focal;
@@ -30,29 +38,49 @@ uniform mat3 view;
 uniform vec2 origin;
 uniform float distance;
 uniform float halfLayer;
-uniform float relief;
+uniform vec2 relief;
+uniform float runs;
 uniform float depth;
+uniform float slot;
+uniform float halfDepth;
 uniform bool sky;
 uniform bool seams;
-in vec4 splat; // centre x, y relative to origin, width, height
+in vec4 splat; // centre x, y relative to origin, width, run
 in vec4 paint;
-out vec2 corner; // in the rectangle, from -1 to 1
-flat out float slant; // the hexagon is |corner.x| · slant + |corner.y| ≤ 1
 flat out vec3 colour;
+// The hexagon's corners from the top, clockwise as the camera sees them:
+// (x · width, y · (height − |x| · width / √2)).
+const vec2 CORNERS[6] = vec2[](vec2(0, 1), vec2(1, 1), vec2(1, -1), vec2(0, -1), vec2(-1, -1), vec2(-1, 1));
 void main() {
-  corner = vec2(gl_VertexID & 1, gl_VertexID >> 1) * 2.0 - 1.0;
   if (sky || seams) {
-    gl_Position = vec4(corner, depth, 1.0);
+    gl_Position = vec4(vec2(gl_VertexID & 1, gl_VertexID >> 1) * 2.0 - 1.0, depth, 1.0);
     return;
   }
-  vec3 site = vec3(origin + splat.xy, distance + (paint.a * 255.0 - 128.0) * halfLayer * relief);
-  vec2 size = vec2(splat.z * (1.0 + abs(site.x / site.z)), splat.w);
-  slant = size.x / (sqrt(2.0) * size.y);
+  float offset = (paint.a * 255.0 - 128.0) * halfLayer;
+  float back = offset + splat.w * runs * halfLayer;
+  vec2 site = origin + splat.xy;
+  float width = splat.z * (1.0 + abs(site.x / (distance + offset)));
+  float height = splat.z * sqrt(2.0);
+  vec2 corner = CORNERS[gl_VertexID % 6];
+  vec2 u = corner * vec2(width, height - abs(corner.x) * width / sqrt(2.0));
+  float z = distance + (gl_VertexID < 6 ? min(offset * relief.x, offset * relief.y) : max(offset * relief.x, back * relief.y));
   colour = paint.rgb;
-  vec3 p = transpose(view) * (site + vec3(corner * size, 0.0));
+  vec3 p = transpose(view) * vec3(site + u, z);
   // Homogeneous, so the GPU clips what is behind the camera and interpolates in perspective.
-  gl_Position = vec4(p.xy * focal / (viewport / 2.0), depth * p.z, p.z);
+  gl_Position = vec4(p.xy * focal / (viewport / 2.0), (depth + slot * clamp((z - distance) / halfDepth, -1.0, 1.0)) * p.z, p.z);
 }`
+
+/**
+ * A prism's triangles (see VERTEX_SHADER), each clockwise seen from
+ * outside: the near hexagon (the first HEXAGON indices, all a flat splat
+ * needs), the far one, the six sides.
+ */
+const PRISM = new Uint8Array([
+  ...[1, 2, 3, 4].flatMap(k => [0, k, k + 1]),
+  ...[1, 2, 3, 4].flatMap(k => [6, k + 7, k + 6]),
+  ...[0, 1, 2, 3, 4, 5].flatMap(k => [k, k + 6, ((k + 1) % 6) + 6, k, ((k + 1) % 6) + 6, (k + 1) % 6]),
+])
+const HEXAGON = 12
 
 // `ray` is the pixel's direction in face coordinates, the same for every
 // layer of a face. A face draws only its own rays (inFace in view.ts), so
@@ -61,7 +89,7 @@ void main() {
 // part of the layer's plane (camera-relative left, top, right, bottom),
 // decided by where the pixel's ray crosses it, so neighbouring chunks
 // share no pixel and leave none out. Splats are opaque: nothing is
-// blended, and the depth test hides what nearer layers cover. The sky is
+// blended, and the depth test hides what is behind. The sky is
 // one more rectangle, behind every layer.
 // Seams, if shown, are drawn last, over everything, with `view` in world
 // coordinates. A ray's face is the neighbour direction (±1, ±1, 0) along its
@@ -82,8 +110,6 @@ uniform bool sky;
 uniform bool seams;
 uniform vec3 seamColor;
 uniform float seamWidth; // device pixels
-in vec2 corner;
-flat in float slant;
 flat in vec3 colour;
 out vec4 color;
 void main() {
@@ -102,7 +128,6 @@ void main() {
     float elevation = ray.y / length(ray.xz);
     rgb = mix(horizon, skyTop, clamp(elevation / ${String(SKY_TOP_TANGENT)}, 0.0, 1.0));
   } else {
-    if (abs(corner.x) * slant + abs(corner.y) >= 1.0) discard;
     if (abs(ray.x) + sqrt(2.0) * abs(ray.y) > ray.z * 1.001) discard;
     vec2 p = ray.xy / ray.z * distance;
     if (p.x < clip.x || p.x >= clip.z || p.y > clip.y || p.y <= clip.w) discard;
@@ -113,7 +138,7 @@ void main() {
 
 const rgb = (hex: string) => [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255) as [number, number, number]
 
-const UNIFORMS = ['viewport', 'resolution', 'focal', 'view', 'origin', 'clip', 'distance', 'halfLayer', 'relief', 'depth', 'skyTop', 'horizon', 'fog', 'sky', 'seams', 'seamColor', 'seamWidth'] as const
+const UNIFORMS = ['viewport', 'resolution', 'focal', 'view', 'origin', 'clip', 'distance', 'halfLayer', 'relief', 'runs', 'depth', 'slot', 'halfDepth', 'skyTop', 'horizon', 'fog', 'sky', 'seams', 'seamColor', 'seamWidth'] as const
 type Uniform = (typeof UNIFORMS)[number]
 
 /** Attribute locations of a splat's numbers (see SPLAT). */
@@ -122,9 +147,9 @@ const PAINT_AT = 1
 
 /**
  * Draws Frames with WebGL 2 onto one canvas, near to far with a depth test,
- * so what nearer layers cover is rejected rather than blended. A chunk's
- * splats are uploaded as a buffer when it comes into view and dropped when
- * it leaves.
+ * so what is nearer rejects what is behind rather than covering it.
+ * A chunk's splats are uploaded as a buffer, near to far,
+ * when it comes into view and dropped when it leaves.
  */
 export class Compositor {
   private canvas: HTMLCanvasElement
@@ -133,8 +158,10 @@ export class Compositor {
   private buffers = new Map<Chunk, WebGLBuffer>()
   private frame: Frame | null = null
   private showSeams = false
-  // How far each splat is drawn towards its depth: 0 flat, 1 in relief.
-  private reliefs = [1]
+  // How far each splat's pillar reaches from its layer's plane towards its depth and over its run: 0 flat, 1 in relief.
+  private relief: [number, number] | null = [1, 1]
+  // Whether splats are swept over their runs (chunks of one voxel per column have them).
+  private runs = true
 
   /** Throws if the browser has no WebGL 2. */
   constructor(canvas: HTMLCanvasElement) {
@@ -161,9 +188,18 @@ export class Compositor {
     if (this.frame) this.draw(this.frame)
   }
 
-  /** Whether to draw splats flat on their layer's plane, in relief, or both; redraws the last frame. */
+  /**
+   * Whether to draw splats flat on their layer's plane, in relief, or (both)
+   * as pillars from the one over the other; neither draws none. Redraws the last frame.
+   */
   setPlacement(flat: boolean, inRelief: boolean) {
-    this.reliefs = [...(flat ? [0] : []), ...(inRelief ? [1] : [])]
+    this.relief = flat || inRelief ? [flat ? 0 : 1, inRelief ? 1 : 0] : null
+    if (this.frame) this.draw(this.frame)
+  }
+
+  /** Whether to draw splats with runs as pillars over them, or as their nearest voxel alone; redraws the last frame. */
+  setRuns(on: boolean) {
+    this.runs = on
     if (this.frame) this.draw(this.frame)
   }
 
@@ -192,13 +228,19 @@ export class Compositor {
     }
 
     // Layer i at depth z(i), strictly inside (-1, 1) so rounding never clips
-    // it; the sky behind all of them, still in front of the cleared depth.
-    // Within a chunk, a later splat covers an earlier one at the same depth
-    // (LEQUAL), so they are painted in order; drawn twice, the copies in
-    // relief cover the flat ones.
+    // it, its splats within `slot` of that; the sky behind all of them,
+    // still in front of the cleared depth. A chunk's splats come near to
+    // far, so the GPU rejects most of those its nearer ones hide; where two
+    // are as near, the first drawn (the nearer in painting order) shows (LESS).
     const z = (i: number) => (2 * i + 1) / (frame.layers.length + 1) - 1
-    const drawn = new Set<Chunk>()
+    gl.uniform1f(u.slot, 0.9 / (frame.layers.length + 1))
     gl.uniform1i(u.sky, 0)
+    if (this.relief) gl.uniform2f(u.relief, ...this.relief)
+    gl.uniform1f(u.runs, this.runs ? 1 : 0)
+    // Splats are flat but for runs (only in chunks of one voxel per column) or drawn from the plane on.
+    const pillars = this.relief !== null && this.relief[0] !== this.relief[1]
+    const drawn = new Set<Chunk>()
+    gl.enable(gl.CULL_FACE)
     gl.enableVertexAttribArray(SPLAT_AT)
     gl.enableVertexAttribArray(PAINT_AT)
     let face: Face | null = null
@@ -207,26 +249,26 @@ export class Compositor {
         face = layer.face
         setView(faceBasis(face, frame.orientation))
       }
-      const { distance, placements, fog } = layer
+      const { distance, placements, fog, slice: { level } } = layer
       gl.uniform1f(u.distance, distance)
-      gl.uniform1f(u.halfLayer, halfLayer(layer.slice.level))
+      gl.uniform1f(u.halfLayer, halfLayer(level))
+      gl.uniform1f(u.halfDepth, (thickness(level) * LAYER) / 2)
       gl.uniform1f(u.fog, fog)
       gl.uniform1f(u.depth, z(i))
       for (const { chunk, x, y } of placements) {
         gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer(chunk))
         drawn.add(chunk)
+        if (!this.relief) continue
         gl.uniform2f(u.origin, x, y)
         gl.uniform4f(u.clip, x, y, x + chunk.extentWidth, y - chunk.extentHeight)
         gl.vertexAttribPointer(SPLAT_AT, 4, gl.FLOAT, false, SPLAT * 4, 0)
         gl.vertexAttribPointer(PAINT_AT, 4, gl.UNSIGNED_BYTE, true, SPLAT * 4, 16)
-        for (const relief of this.reliefs) {
-          gl.uniform1f(u.relief, relief)
-          gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, chunk.splats.length / SPLAT)
-        }
+        gl.drawElementsInstanced(gl.TRIANGLES, (chunk.firstInColumn && this.runs) || pillars ? PRISM.length : HEXAGON, gl.UNSIGNED_BYTE, 0, chunk.splats.length / SPLAT)
       }
     })
     gl.disableVertexAttribArray(SPLAT_AT)
     gl.disableVertexAttribArray(PAINT_AT)
+    gl.disable(gl.CULL_FACE)
     gl.uniform1i(u.sky, 1)
     setView(viewBasis(frame.orientation))
     gl.uniform1f(u.depth, z(frame.layers.length))
@@ -272,9 +314,13 @@ export class Compositor {
     gl.uniform3f(this.uniforms.skyTop, ...rgb(SKY_TOP))
     gl.uniform3f(this.uniforms.horizon, ...rgb(SKY_HORIZON))
     gl.uniform3f(this.uniforms.seamColor, ...rgb(SEAM_COLOR))
+    // The prism's triangles, for every splat; the default vertex array keeps them bound.
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, gl.createBuffer())
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, PRISM, gl.STATIC_DRAW)
+    gl.frontFace(gl.CW)
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
     gl.enable(gl.DEPTH_TEST)
-    gl.depthFunc(gl.LEQUAL)
+    gl.depthFunc(gl.LESS)
     for (const at of [SPLAT_AT, PAINT_AT]) gl.vertexAttribDivisor(at, 1)
   }
 
@@ -284,7 +330,11 @@ export class Compositor {
     const { gl } = this
     buffer = gl.createBuffer()
     gl.bindBuffer(gl.ARRAY_BUFFER, buffer)
-    gl.bufferData(gl.ARRAY_BUFFER, chunk.splats, gl.STATIC_DRAW)
+    // Near to far: the baker's painting order reversed.
+    const { splats } = chunk
+    const reversed = new Float32Array(splats.length)
+    for (let k = 0; k < splats.length; k += SPLAT) reversed.set(splats.subarray(k, k + SPLAT), splats.length - SPLAT - k)
+    gl.bufferData(gl.ARRAY_BUFFER, reversed, gl.STATIC_DRAW)
     this.buffers.set(chunk, buffer)
     return buffer
   }

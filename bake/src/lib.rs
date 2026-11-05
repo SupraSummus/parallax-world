@@ -208,8 +208,9 @@ impl Baker {
             self.numbers.extend([
                 ((s.x - min_x) * n) as f32,
                 ((s.y - max_y) * n) as f32,
+                // Its height is √2 times that.
                 (s.width * n) as f32,
-                (s.height * n) as f32,
+                s.run as f32,
                 // Its depth in the alpha byte, as splats are opaque: within ±2^ATOM_SHIFT half layers.
                 f32::from_bits(s.colour & 0x00ff_ffff | ((128 + s.depth) as u32) << 24),
             ]);

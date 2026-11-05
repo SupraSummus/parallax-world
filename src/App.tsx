@@ -42,8 +42,16 @@ const DRAG_DEGREES_PER_PIXEL = 0.15
 /** Lattice units a second the camera moves at. */
 const MOVE_SPEED = 60
 
-/** Whether the page's query asks for one voxel per column (?first=1, see setFirstInColumn). */
-const firstInColumnQuery = () => new URLSearchParams(location.search).get('first') === '1'
+/**
+ * A switch as the page's query sets it, if it does (`?name=1` or `?name=0`):
+ * `first` one voxel per column (see setFirstInColumn), `pillars` whether
+ * over their columns (see Compositor.setRuns), `flat` and `relief` where
+ * splats are drawn (see Compositor.setPlacement).
+ */
+const queryFlag = (name: string, fallback: boolean) => {
+  const value = new URLSearchParams(location.search).get(name)
+  return value === null ? fallback : value === '1'
+}
 
 function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -66,10 +74,11 @@ function App() {
   const [renderDistance, setRenderDistance] = useState(DEFAULT_RENDER_DISTANCE)
   const [maxLeak, setMaxLeak] = useState(DEFAULT_MAX_LEAK)
   const [skipCovered, setSkipCovered] = useState(true)
-  const [firstInColumn, setFirstInColumn] = useState(firstInColumnQuery)
+  const [firstInColumn, setFirstInColumn] = useState(() => queryFlag('first', false))
   const [showSeams, setShowSeams] = useState(false)
-  const [showFlat, setShowFlat] = useState(false)
-  const [showRelief, setShowRelief] = useState(true)
+  const [showFlat, setShowFlat] = useState(() => queryFlag('flat', false))
+  const [showRelief, setShowRelief] = useState(() => queryFlag('relief', true))
+  const [pillars, setPillars] = useState(() => queryFlag('pillars', true))
   // Generating a world blocks this thread for a second or two; a spinner shows meanwhile.
   const [generating, setGenerating] = useState(true)
 
@@ -126,7 +135,9 @@ function App() {
     if (query.look) renderer.setOrientation(query.look)
     if (query.fov !== undefined) renderer.setFov(query.fov)
     if (query.distance !== undefined) renderer.setRenderDistance(query.distance)
-    renderer.setFirstInColumn(firstInColumnQuery())
+    renderer.setFirstInColumn(queryFlag('first', false))
+    compositorRef.current?.setPlacement(queryFlag('flat', false), queryFlag('relief', true))
+    compositorRef.current?.setRuns(queryFlag('pillars', true))
     setWorldType(renderer.getWorld().worldType)
     setFov(renderer.getFov())
     setRenderDistance(renderer.getRenderDistance())
@@ -303,6 +314,11 @@ function App() {
     compositorRef.current?.setPlacement(value, showRelief)
   }
 
+  const handlePillarsChange = (value: boolean) => {
+    setPillars(value)
+    compositorRef.current?.setRuns(value)
+  }
+
   const handleShowReliefChange = (value: boolean) => {
     setShowRelief(value)
     compositorRef.current?.setPlacement(showFlat, value)
@@ -376,6 +392,7 @@ function App() {
             />
             <SwitchRow label="Skip Covered Chunks" checked={skipCovered} onChange={handleSkipCoveredChange} />
             <SwitchRow label="One Voxel per Column" checked={firstInColumn} onChange={handleFirstInColumnChange} />
+            <SwitchRow label="Pillars over Columns" checked={pillars} onChange={handlePillarsChange} />
             <SwitchRow label="Show Face Seams" checked={showSeams} onChange={handleShowSeamsChange} />
             <SwitchRow label="Flat Voxels" checked={showFlat} onChange={handleShowFlatChange} />
             <SwitchRow label="Voxels in Relief" checked={showRelief} onChange={handleShowReliefChange} />

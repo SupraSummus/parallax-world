@@ -1,7 +1,7 @@
 //! The voxels of a chunk that can show, each a hexagonal dab of paint
 //! (a splat) at its site, in relief over its slice's centre plane.
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::f64::consts::FRAC_1_SQRT_2;
 
 use crate::slicing::{LAYER, MAX_SLANT, slice_centre};
@@ -16,13 +16,16 @@ use crate::world::{FACE_KINDS, Geometry};
  * Seen along a ray slanting σ off the axis, the voxel's outline is
  * |σx| · width wider (its tips a layer before and after move sideways),
  * no higher in the face's rays; the compositor widens it so.
+ * With `run` > 0 it stands for its column's voxels behind it too, that
+ * many half layers deep: a pillar along the axis (see chunk_splats).
  */
 pub struct Splat {
     pub x: f64,
     pub y: f64,
     pub depth: i32,
+    /** How many half layers its pillar reaches past its site. */
+    pub run: i32,
     pub width: f64,
-    pub height: f64,
     /** Opaque RGBA (see voxel_colour). */
     pub colour: u32,
     /** Its voxel's lattice coordinates. */
@@ -30,14 +33,20 @@ pub struct Splat {
 }
 
 impl Splat {
+    /** √2 times its width, as a voxel's outline is (the numbers of ChunkSplats leave it out). */
+    pub fn height(&self) -> f64 {
+        self.width * std::f64::consts::SQRT_2
+    }
+
     /** How far past its centre plane it is, in units of its grid. */
     pub fn offset(&self) -> f64 {
         self.depth as f64 * LAYER / 2.0
     }
 
-    /** See reach. */
+    /** See reach; its pillar's farther end, if it moves more. */
     pub fn reach(&self) -> (f64, f64) {
-        reach(self.width, self.height, self.offset())
+        let far = (self.depth + self.run) as f64 * LAYER / 2.0;
+        reach(self.width, self.height(), if far.abs() > self.offset().abs() { far } else { self.offset() })
     }
 }
 
@@ -56,8 +65,10 @@ pub struct Splats {
     pub splats: Vec<Splat>,
     /** Painting order: each surface voxel's layer, and its index. */
     order: Vec<(i32, usize)>,
-    /** The columns (a, b) kept so far, with first_in_column. */
-    columns: HashSet<(i32, i32)>,
+    /** With first_in_column: a voxel's index by column (a, b), for run_ends and to keep the first. */
+    columns: HashMap<(i32, i32), usize>,
+    /** With first_in_column: by surface voxel, the layer its run ends at (run_ends). */
+    ends: Vec<i32>,
     pub min_x: f64,
     pub max_x: f64,
     pub min_y: f64,
@@ -69,7 +80,8 @@ impl Splats {
         Splats {
             splats: Vec::new(),
             order: Vec::new(),
-            columns: HashSet::new(),
+            columns: HashMap::new(),
+            ends: Vec::new(),
             min_x: f64::INFINITY,
             max_x: f64::NEG_INFINITY,
             min_y: f64::INFINITY,
@@ -129,6 +141,33 @@ fn seen(geometry: &Geometry, faces: u16) -> bool {
 }
 
 /**
+ * The layer at which each surface voxel's run ends: the last of the
+ * voxels behind it in its column (a, b), every two layers, with nothing
+ * between them but solid voxels of the slice, that a ray may see by an
+ * open face (seen); its own layer if none. A voxel whose face away from
+ * the camera (towards c + 2) is open or cut ends its column's solid part;
+ * one that isn't has a solid voxel of the slice behind it, buried (so not
+ * in the surface, and with solid behind it again) or the next surface
+ * voxel of its column. Inside a solid, behind a cut through it, nothing
+ * shows from the side, so its columns have no run. `order` is the
+ * surface's (c, index), near to far.
+ */
+fn run_ends(ends: &mut Vec<i32>, columns: &mut HashMap<(i32, i32), usize>, geometry: &Geometry, surface: &[Voxel], order: &[(i32, usize)]) {
+    let behind = geometry.offsets.iter().position(|&o| o == [0, 0, 2]).expect("a face along the axis");
+    ends.clear();
+    ends.resize(surface.len(), 0);
+    columns.clear();
+    for &(c, k) in order.iter().rev() {
+        let voxel = &surface[k];
+        let goes_on = (voxel.open | voxel.cut) & (1 << behind) == 0;
+        ends[k] = match columns.insert((voxel.site[0], voxel.site[1]), k) {
+            Some(next) if goes_on && (ends[next] > surface[next].site[2] || seen(geometry, surface[next].open)) => ends[next],
+            _ => c,
+        };
+    }
+}
+
+/**
  * Fills `splats` with the voxels of a chunk of a slice that rays of the
  * face may reach, in painting order: far to near.
  * A voxel is painted if a ray of the face can meet one of its open or cut
@@ -139,8 +178,12 @@ fn seen(geometry: &Geometry, faces: u16) -> bool {
  * normal is along the axis or (±1, ±√2, 1) / 2, and the rays are
  * |σx| + √2·|σy| ≤ 1. Voxels of one layer meet only side by side.
  *
- * With `first_in_column`, only the nearest of each column (a, b):
- * all the axis sees (docs/architecture.md, section 3).
+ * With `first_in_column`, only the nearest of each column (a, b) that a
+ * ray may meet: all the axis sees (docs/architecture.md, section 3).
+ * Each stands for its run (run_ends) as a pillar, so that a slanted ray
+ * meets the column where its voxels are, and no gap opens behind it.
+ * A pillar spans several layers, so no painting order is right for every
+ * ray: the compositor draws pillars by the depth where a ray enters them.
  *
  * `surface` is the cell's (cell_surface), with the margin around the cell
  * that its chunks may show; `palette` the view face's (see voxel_colour).
@@ -150,17 +193,21 @@ pub fn chunk_splats(splats: &mut Splats, geometry: &Geometry, palette: &[u32], s
     // Twice the centre plane's depth, in layers: a whole number.
     let centre = (2.0 * slice_centre(slice) / LAYER).round() as i32;
 
-    // Near to far, those a ray may meet.
+    // Near to far.
     let mut order = std::mem::take(&mut splats.order);
     order.clear();
-    order.extend(
-        surface.iter().enumerate().filter(|(_, voxel)| seen(geometry, voxel.open | voxel.cut)).map(|(k, voxel)| (voxel.site[2], k)),
-    );
+    order.extend(surface.iter().enumerate().map(|(k, voxel)| (voxel.site[2], k)));
     order.sort_unstable_by_key(|&(c, k)| (c, std::cmp::Reverse(k)));
+    let mut ends = std::mem::take(&mut splats.ends);
+    if first_in_column {
+        run_ends(&mut ends, &mut splats.columns, geometry, surface, &order);
+    }
+    // Those a ray may meet.
+    order.retain(|&(_, k)| seen(geometry, surface[k].open | surface[k].cut));
     if first_in_column {
         let columns = &mut splats.columns;
         columns.clear();
-        order.retain(|&(_, k)| columns.insert((surface[k].site[0], surface[k].site[1])));
+        order.retain(|&(_, k)| columns.insert((surface[k].site[0], surface[k].site[1]), k).is_none());
     }
 
     for &(_, k) in order.iter().rev() {
@@ -170,13 +217,14 @@ pub fn chunk_splats(splats: &mut Splats, geometry: &Geometry, palette: &[u32], s
             x: a as f64 * LAYER,
             y: b as f64,
             depth: 2 * c - centre,
+            run: if first_in_column { 2 * (ends[k] - c) } else { 0 },
             width: FRAC_1_SQRT_2,
-            height: 1.0,
             colour: voxel_colour(voxel, palette),
             site: voxel.site,
         });
     }
     splats.order = order;
+    splats.ends = ends;
 }
 
 #[cfg(test)]
@@ -250,7 +298,7 @@ mod tests {
                 let shown = splats.splats.iter().rev().find(|s| {
                     let (x, y) = (px + slant[0] * s.offset(), py + slant[1] * s.offset());
                     let width = s.width * (1.0 + slant[0].abs());
-                    (x - s.x).abs() <= width && (x - s.x).abs() * FRAC_1_SQRT_2 + (y - s.y).abs() <= s.height
+                    (x - s.x).abs() <= width && (x - s.x).abs() * FRAC_1_SQRT_2 + (y - s.y).abs() <= s.height()
                 });
                 let shown = shown.expect("a splat holds the point").site;
                 // Or its neighbour in its layer: the order within a layer is the
@@ -276,12 +324,12 @@ mod tests {
         };
         let (all, first) = (bake(false), bake(true));
         assert!(first.len() * 3 < all.len() * 2, "{} of {}", first.len(), all.len());
-        let columns: HashSet<_> = first.iter().map(|s| (s.site[0], s.site[1])).collect();
+        let columns: std::collections::HashSet<_> = first.iter().map(|s| (s.site[0], s.site[1])).collect();
         assert_eq!(columns.len(), first.len());
 
         // Along the axis each point shows the same voxel: the last splat holding it.
         let shown = |splats: &[Splat], x: f64, y: f64| {
-            let holds = |s: &&Splat| (x - s.x).abs() <= s.width && (x - s.x).abs() * FRAC_1_SQRT_2 + (y - s.y).abs() <= s.height;
+            let holds = |s: &&Splat| (x - s.x).abs() <= s.width && (x - s.x).abs() * FRAC_1_SQRT_2 + (y - s.y).abs() <= s.height();
             splats.iter().rev().find(holds).map(|s| s.site)
         };
         for (x, y) in (0..80).flat_map(|i| (0..80).map(move |j| (-8.0 + i as f64 * 0.2 + 0.013, -8.0 + j as f64 * 0.2 + 0.007))) {
