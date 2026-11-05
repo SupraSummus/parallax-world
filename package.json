@@ -8,6 +8,7 @@
     "build": "pnpm wasm && vite build",
     "preview": "vite preview",
     "shot": "pnpm wasm && node scripts/shot.mjs",
+    "shot:native": "cargo run --release --config native/.cargo/config.toml --manifest-path native/Cargo.toml --",
     "wasm": "cargo build --profile wasm --target wasm32-unknown-unknown --manifest-path worlds/Cargo.toml",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . && cargo clippy --manifest-path bake/Cargo.toml --all-targets -- -D warnings && cargo fmt --manifest-path bake/Cargo.toml --check && cargo clippy --manifest-path worldgen/Cargo.toml --all-targets -- -D warnings && cargo fmt --manifest-path worldgen/Cargo.toml --check && cargo clippy --manifest-path worlds/Cargo.toml --all-targets -- -D warnings && cargo fmt --manifest-path worlds/Cargo.toml --check",

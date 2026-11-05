@@ -9,6 +9,9 @@
  *
  * It draws with Mesa's software Vulkan (lavapipe) where installed,
  * several times faster than Chromium's own SwiftShader.
+ * Even so a frame takes seconds, so it draws none until the view is complete:
+ * those frames would only take cores from the bake workers.
+ * The native frontend's --shot is faster still (see AGENTS.md).
  * Playwright is not a dependency: it comes with the machine (NODE_PATH).
  */
 import { existsSync } from 'node:fs'
@@ -40,6 +43,14 @@ try {
   const page = await browser.newPage({ viewport: { width, height } })
   page.on('console', m => { if (['error', 'warning'].includes(m.type())) console.log(`page ${m.type()}: ${m.text()}`) })
   page.on('pageerror', e => { console.log(`page error: ${e.message}`) })
+  // WebGL 2's draws do nothing until window.shotDraws is set.
+  await page.addInitScript(() => {
+    const gl = WebGL2RenderingContext.prototype
+    for (const name of ['drawArrays', 'drawElements', 'drawArraysInstanced', 'drawElementsInstanced', 'drawRangeElements']) {
+      const draw = gl[name]
+      gl[name] = function (...a) { if (window.shotDraws) draw.apply(this, a) }
+    }
+  })
   const url = new URL(server.resolvedUrls.local[0])
   url.search = query
   await page.goto(url.href)
@@ -54,6 +65,11 @@ try {
   const complete = await page.locator('canvas[data-pending="0"]').waitFor({ timeout }).then(() => true, () => false)
   log(complete ? 'complete' : `gave up, ${await page.locator('canvas').getAttribute('data-pending')} still pending`)
   if (!ui) await page.addStyleTag({ content: 'body * { visibility: hidden } canvas { visibility: visible }' })
+  // A resize renders again (App.tsx), drawing this time; the screenshot waits for that frame.
+  await page.evaluate(() => {
+    window.shotDraws = true
+    window.dispatchEvent(new Event('resize'))
+  })
   await page.screenshot({ path: out, timeout: 120_000 })
   log(`saved ${out}`)
   process.exitCode = complete ? 0 : 1

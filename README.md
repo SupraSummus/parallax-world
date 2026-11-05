@@ -89,8 +89,8 @@ The page takes a view in its query, as the 3D viewer does:
 `?seed=&world=&camera=x,y,z&look=yaw,pitch&fov=&distance=`
 (camera in lattice units, angles in degrees).
 
-Other scripts (`test`, `lint`, `typecheck`, `knip`, `build`, `shot`) are in
-`package.json`.
+Other scripts (`test`, `lint`, `typecheck`, `knip`, `build`, `shot`,
+`shot:native`) are in `package.json`.
 
 ## Documentation
 

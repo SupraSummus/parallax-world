@@ -3,14 +3,16 @@
 //! the chunks in view (renderer.rs), worker threads baking them with the
 //! baker in bake/, sharing the tiles, and wgpu drawing them in an egui window.
 //!
-//! parallax-native [--world NAME] [--threads N] [--seed S] [--leak DEG] [--all-chunks] [--shot out.png [--seams] [--colour voxels|layers|chunks] | --bench] [--walk D] [--stroll S] [--spin]
+//! parallax-native [--world NAME] [--threads N] [--seed S] [--view QUERY] [--leak DEG] [--all-chunks] [--shot out.png [--size WxH] [--seams] [--colour voxels|layers|chunks] | --bench] [--walk D] [--stroll S] [--spin]
 //! parallax-native [--world NAME] [--seed S] --check-requests frame.bin
 //!
-//! --shot draws the first frame once the world has its tiles and all its
-//! chunks are baked, at 1280×800, offscreen, and saves it; --bench only
-//! times that, the main thread's frames after, and the GPU drawing the
-//! last. --walk D moves the camera D units along the view after the first
-//! frame, and does the same there. --stroll S then walks on for S seconds
+//! --view takes the web page's view query (viewQuery in renderer.ts),
+//! overriding --seed and --world.
+//! --shot draws the first frame once all the tiles and chunks in view are
+//! in, at 1280×800 or --size, offscreen, and saves it; --bench only times
+//! the first frame once the world has all its tiles, the main thread's
+//! frames after, and the GPU drawing the last. --walk D moves the camera
+//! D units along the view after the first frame, and does the same there. --stroll S then walks on for S seconds
 //! as the window would, a frame every 60th, and times each frame's parts.
 //! --leak sets how far hidden geometry may show between slices (renderer.rs);
 //! --all-chunks bakes every chunk in view, covered or not, as the panel's
@@ -172,11 +174,17 @@ fn renderer(world: &worldgen::World, threads: usize, render_distance: f64) -> Re
 }
 
 /**
- * Renders until the world has made every tile it would and the frame has
- * every chunk it wants; says when it first draws any, and when it has all
- * the tiles and chunks in view.
+ * Renders until the frame has every chunk it wants and, if `whole`, the
+ * world has made every tile it would, else stops it making them; says
+ * when it first draws any, and when it has all the tiles and chunks in view.
  */
-fn complete(world: &mut World, renderer: &mut Renderer, camera: Vec3, view: &view::View) -> (renderer::Frame, renderer::Stats) {
+fn complete(
+    world: &mut World,
+    renderer: &mut Renderer,
+    camera: Vec3,
+    view: &view::View,
+    whole: bool,
+) -> (renderer::Frame, renderer::Stats) {
     let start = Instant::now();
     let (mut drawn, mut in_view) = (false, false);
     loop {
@@ -188,6 +196,11 @@ fn complete(world: &mut World, renderer: &mut Renderer, camera: Vec3, view: &vie
         if !in_view && stats.tiles.is_empty() && stats.wanted.is_empty() && !stats.occluding {
             println!("the view complete after {:.2} s", start.elapsed().as_secs_f64());
             in_view = true;
+            if !whole {
+                // Tiles still to make are out of view: they would only take cores from the GPU's drawing.
+                world.stop();
+                return (frame, stats);
+            }
         }
         let made = world.update(camera, &stats.levels, &stats.tiles);
         if !made.is_empty() {
@@ -277,61 +290,108 @@ fn stroll(seconds: f64, world: &mut World, renderer: &mut Renderer, mut camera: 
     }
 }
 
-/** The view the TS renderer starts with (renderer.ts), at the size --shot draws. */
+/** The view the TS renderer starts with (renderer.ts), at the size --shot draws unless --size. */
 const YAW: f64 = 0.0;
 const PITCH: f64 = 0.0;
 const FOV: f64 = 90.0;
 const RENDER_DISTANCE: f64 = 8000.0;
 const SHOT: [f64; 2] = [1280.0, 800.0];
+
 /** Units a second the window moves at. */
 const SPEED: f64 = 40.0;
 /** renderer.ts's: the fog's distance, a share of the render distance. */
 const FOG_PER_RENDER_DISTANCE: f64 = 0.7;
 
+/** A view as the web's page query gives it (parseViewQuery in renderer.ts); what it leaves out or gets wrong is None. */
+#[derive(Default)]
+struct ViewQuery {
+    seed: Option<u64>,
+    world: Option<String>,
+    camera: Option<Vec3>,
+    look: Option<[f64; 2]>,
+    fov: Option<f64>,
+    distance: Option<f64>,
+}
+
+fn parse_view_query(query: &str) -> ViewQuery {
+    // URLSearchParams writes commas as %2C.
+    let pairs: Vec<(&str, String)> = query
+        .trim_start_matches('?')
+        .split('&')
+        .filter_map(|p| p.split_once('='))
+        .map(|(k, v)| (k, v.replace("%2C", ",").replace("%2c", ",")))
+        .collect();
+    let get = |name: &str| pairs.iter().find(|(k, _)| *k == name).map(|(_, v)| v.as_str());
+    fn numbers<const N: usize>(value: Option<&str>) -> Option<[f64; N]> {
+        let v: Vec<f64> = value?.split(',').map(|v| v.trim().parse::<f64>()).collect::<Result<_, _>>().ok()?;
+        v.try_into().ok().filter(|v: &[f64; N]| v.iter().all(|x| x.is_finite()))
+    }
+    ViewQuery {
+        // As worlds' WebAssembly takes the web's.
+        seed: numbers::<1>(get("seed")).map(|[v]| v as i64 as u64),
+        world: get("world").filter(|w| worlds::by_name(w).is_some()).map(str::to_string),
+        camera: numbers::<3>(get("camera")),
+        look: numbers::<2>(get("look")),
+        fov: numbers::<1>(get("fov")).map(|[v]| v),
+        distance: numbers::<1>(get("distance")).map(|[v]| v),
+    }
+}
+
 fn main() -> eframe::Result {
     let args: Vec<String> = std::env::args().collect();
-    let threads = args.iter().position(|a| a == "--threads").map_or_else(num_cpus, |i| args[i + 1].parse().expect("threads"));
-    let seed = args.iter().position(|a| a == "--seed").map_or(12345, |i| args[i + 1].parse().expect("seed"));
-    let make = args.iter().position(|a| a == "--world").map_or(WORLD, |i| {
+    let flag = |name: &str| args.iter().any(|a| a == name);
+    let value = |name: &str| args.iter().position(|a| a == name).map(|i| args[i + 1].as_str());
+    let threads = value("--threads").map_or_else(num_cpus, |v| v.parse().expect("threads"));
+    let query = value("--view").map(parse_view_query).unwrap_or_default();
+    let seed = query.seed.unwrap_or_else(|| value("--seed").map_or(12345, |v| v.parse().expect("seed")));
+    let world_name = query.world.as_deref().or_else(|| value("--world"));
+    let make = world_name.map_or(WORLD, |name| {
         let names: Vec<&str> = worlds::WORLDS.iter().map(|e| e.name).collect();
-        worlds::by_name(&args[i + 1]).unwrap_or_else(|| panic!("--world {}", names.join(", "))).make
+        worlds::by_name(name).unwrap_or_else(|| panic!("--world {}", names.join(", "))).make
     });
-    if let Some(i) = args.iter().position(|a| a == "--check-requests") {
-        check_requests(&dump::read(&std::fs::read(&args[i + 1]).expect("dump")), make, seed, threads);
+    if let Some(v) = value("--check-requests") {
+        check_requests(&dump::read(&std::fs::read(v).expect("dump")), make, seed, threads);
         return Ok(());
     }
-    let size = SHOT;
-    let focal = focal_length(FOV, size[0], size[1]);
-    let first = view::View { yaw: YAW, pitch: PITCH, width: size[0], height: size[1], focal };
+    let size = value("--size").map_or(SHOT, |v| {
+        let size: Vec<f64> = v.split('x').map(|v| v.parse().expect("--size WxH")).collect();
+        size.try_into().expect("--size WxH")
+    });
+    let [yaw, pitch] = query.look.unwrap_or([YAW, PITCH]);
+    let (fov, render_distance) = (query.fov.unwrap_or(FOV), query.distance.unwrap_or(RENDER_DISTANCE));
+    let focal = focal_length(fov, size[0], size[1]);
+    let first = view::View { yaw, pitch, width: size[0], height: size[1], focal };
     let shown = make(seed);
-    let mut renderer = renderer(&shown, threads, RENDER_DISTANCE);
-    if let Some(i) = args.iter().position(|a| a == "--leak") {
-        renderer.max_leak = args[i + 1].parse().expect("leak");
+    let mut renderer = renderer(&shown, threads, render_distance);
+    if let Some(v) = value("--leak") {
+        renderer.max_leak = v.parse().expect("leak");
     }
-    renderer.skip_covered = !args.iter().any(|a| a == "--all-chunks");
+    renderer.skip_covered = !flag("--all-chunks");
     let mut world = World::new(make, seed, threads);
-    let mut camera = shown.spawn.map(|v| v as f64);
+    let mut camera = query.camera.unwrap_or(shown.spawn.map(|v| v as f64));
     let faces: [[Vec3; 3]; 12] = std::array::from_fn(|f| view::faces()[f].axes);
-    let fog_distance = RENDER_DISTANCE * FOG_PER_RENDER_DISTANCE;
-    if args.iter().any(|a| ["--bench", "--shot", "--stroll"].contains(&a.as_str())) {
+    let fog_distance = render_distance * FOG_PER_RENDER_DISTANCE;
+    if ["--bench", "--shot", "--stroll"].into_iter().any(flag) {
         let start = Instant::now();
-        let (mut frame, mut stats) = complete(&mut world, &mut renderer, camera, &first);
+        // A shot alone needs only the view; the timings, all the world would make around it.
+        let whole = ["--bench", "--walk", "--stroll"].into_iter().any(flag);
+        let (mut frame, mut stats) = complete(&mut world, &mut renderer, camera, &first, whole);
         let report = |what: &str, start: Instant, frame: &renderer::Frame, stats: &renderer::Stats| {
             let seconds = start.elapsed().as_secs_f64();
             let (layers, chunks, covered) = (frame.layers.len(), stats.chunks, stats.covered);
             println!("{what} complete in {seconds:.2} s on {threads} threads: {layers} layers, {chunks} chunks, {covered} covered");
         };
         report("first frame", start, &frame, &stats);
-        if let Some(i) = args.iter().position(|a| a == "--walk") {
+        if let Some(v) = value("--walk") {
             // On along the view, into tiles not made yet.
-            let distance: f64 = args[i + 1].parse().expect("distance");
+            let distance: f64 = v.parse().expect("distance");
             let start = Instant::now();
-            let forward = view_basis(YAW, 0.0)[2];
+            let forward = view_basis(yaw, 0.0)[2];
             camera = std::array::from_fn(|d| camera[d] + forward[d] * distance);
-            (frame, stats) = complete(&mut world, &mut renderer, camera, &first);
+            (frame, stats) = complete(&mut world, &mut renderer, camera, &first, whole);
             report(&format!("{distance} units on, the frame"), start, &frame, &stats);
         }
-        if args.iter().any(|a| a == "--bench") {
+        if flag("--bench") {
             // What a frame costs the main thread once everything is baked, still and turning.
             for (name, turn) in [("still", 0.0), ("turning", 1.0)] {
                 let start = Instant::now();
@@ -344,37 +404,33 @@ fn main() -> eframe::Result {
             println!("an occlusion pass, on its own thread: {:.1} ms", renderer.occlusion_seconds() * 1000.0);
         }
         let view = compositor::View {
-            yaw: YAW,
-            pitch: PITCH,
+            yaw,
+            pitch,
             focal,
             fog_distance,
             faces,
             size: size.map(|v| v as f32),
             pixels: size.map(|v| v as u32),
-            seams: args.iter().any(|a| a == "--seams"),
-            colours: args.iter().position(|a| a == "--colour").map_or(Colours::Voxels, |i| {
-                Colours::ALL
-                    .into_iter()
-                    .find(|(_, name)| name.eq_ignore_ascii_case(&args[i + 1]))
-                    .expect("--colour voxels, layers or chunks")
-                    .0
+            seams: flag("--seams"),
+            colours: value("--colour").map_or(Colours::Voxels, |v| {
+                Colours::ALL.into_iter().find(|(_, name)| name.eq_ignore_ascii_case(v)).expect("--colour voxels, layers or chunks").0
             }),
         };
-        if args.iter().any(|a| a == "--bench") {
+        if flag("--bench") {
             let splats: usize = frame.layers.iter().flat_map(|l| &l.placements).map(|p| p.chunk.baked.splats.len()).sum();
             let (ms, [first, next]) = shot::time(&frame, &view, 30);
             println!("the GPU draws the frame in {ms:.1} ms: of its {splats} splats, {first} that showed before and {next} more");
         }
-        if let Some(i) = args.iter().position(|a| a == "--stroll") {
-            stroll(args[i + 1].parse().expect("seconds"), &mut world, &mut renderer, camera, &first, &view);
+        if let Some(v) = value("--stroll") {
+            stroll(v.parse().expect("seconds"), &mut world, &mut renderer, camera, &first, &view);
         }
-        if let Some(i) = args.iter().position(|a| a == "--shot") {
-            shot::save(&frame, &view, &args[i + 1]);
-            println!("saved {}", args[i + 1]);
+        if let Some(v) = value("--shot") {
+            shot::save(&frame, &view, v);
+            println!("saved {v}");
         }
         return Ok(());
     }
-    let spin = args.iter().any(|a| a == "--spin").then(|| (Instant::now(), 0));
+    let spin = flag("--spin").then(|| (Instant::now(), 0));
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([1580.0, 800.0]),
         wgpu_options: egui_wgpu::WgpuConfiguration {
@@ -403,9 +459,9 @@ fn main() -> eframe::Result {
         renderer,
         faces,
         camera,
-        yaw: YAW,
-        pitch: PITCH,
-        fov: FOV,
+        yaw,
+        pitch,
+        fov,
         seams: false,
         colours: Colours::Voxels,
         stats: String::new(),
