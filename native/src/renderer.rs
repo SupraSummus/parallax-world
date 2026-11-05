@@ -1,17 +1,20 @@
 //! Renders the world as stacks of cached slices split into chunks
 //! (renderer.ts): each render picks the chunks in view, face by face and
-//! near to far, skips those nearer layers cover, has the missing ones baked
-//! and returns where each goes, relative to the camera. A cell is baked once the world has all the
-//! tiles it reads; until then, the tiles are what it wants. Drawing them is
-//! the compositor's job.
+//! near to far, has the missing ones baked and returns where each goes,
+//! relative to the camera. A cell is baked once the world has all the
+//! tiles it reads; until then, the tiles are what it wants. Cells nearer
+//! layers cover want neither, as the occlusion thread finds from what
+//! earlier renders saw (occlusion.rs); drawing what is in view, and culling
+//! what of it is hidden, is the compositor's job.
 //! See docs/architecture.md, sections 3 to 5.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use bake::{Coverage, Lattice, Slice, chunk_reads};
+use bake::{Lattice, Slice, chunk_reads};
 
-use crate::bakery::{Baked, Bakery, Mask, Request};
+use crate::bakery::{Baked, Bakery, Request};
+use crate::occlusion::{self, CellKey, Occlusion, Seeing, Seen};
 use crate::slicing::{
     GRID_LEVELS, LAYER, atom_level, cell_margin, chunk_cell, chunk_cells, leak_free_detail, select_slices, site_layers, slice_centre,
 };
@@ -60,8 +63,10 @@ pub struct Stats {
     pub chunks: usize,
     /** Chunks in view to bake, nearest first. */
     pub wanted: Vec<Request>,
-    /** Cells and chunks covered by nearer layers, so neither drawn nor baked. */
+    /** Cells covered by nearer layers, so not baked, and chunks in view hidden, as the latest occlusion pass found. */
     pub covered: usize,
+    /** Whether an occlusion pass for this view is yet to come, or cells in view wait for one to say whether they are covered. */
+    pub occluding: bool,
     /** The grid levels the frame's slices read, whether they have tiles yet or not. */
     pub levels: [bool; GRID_LEVELS],
     /** Tiles that cells in view read and the world has not made, by grid level, most wanted first. */
@@ -94,7 +99,7 @@ pub struct Renderer {
     levels: Vec<Arc<Level>>,
     heights: [(i64, i64); GRID_LEVELS],
     slices: HashMap<SliceKey, CachedSlice>,
-    coverage: Coverage,
+    occlusion: Occlusion,
     bakery: Bakery,
     next_id: u32,
     renders: u64,
@@ -132,7 +137,7 @@ impl Renderer {
             levels: (0..GRID_LEVELS).map(|_| Arc::new(Level::new(HashMap::new()))).collect(),
             heights,
             slices: HashMap::new(),
-            coverage: Coverage::default(),
+            occlusion: Occlusion::new(),
             bakery,
             next_id: 0,
             renders: 0,
@@ -153,25 +158,31 @@ impl Renderer {
         self.bakery.wait();
     }
 
+    /** Waits until the occlusion thread has passed over the last render. */
+    pub fn wait_for_occlusion(&self) {
+        self.occlusion.wait();
+    }
+
+    /** How long the latest occlusion pass took, in seconds. */
+    pub fn occlusion_seconds(&self) -> f64 {
+        self.occlusion.answer().0.seconds
+    }
+
     pub fn render(&mut self, camera: Vec3, view: &View) -> (Frame, Stats) {
         self.receive();
         self.renders += 1;
         let detail = leak_free_detail(self.max_leak.to_radians());
-        if self.skip_covered {
-            self.coverage.set_view(view.width, view.height, view.focal);
-        }
+        let (answer, _) = self.occlusion.answer();
         let mut frame = Frame { layers: Vec::new(), farthest: self.render_distance };
-        let mut stats = Stats::default();
+        let mut stats = Stats { covered: if self.skip_covered { answer.hidden } else { 0 }, ..Stats::default() };
         let mut missing: Vec<(Request, f64)> = Vec::new();
         let mut tiles: Vec<(usize, TileId, f64)> = Vec::new();
+        let mut seeing = Seeing { width: view.width, height: view.height, focal: view.focal, faces: Vec::new() };
         for f in 0..self.faces.len() {
             let face = &self.faces[f];
             let Some(tangents) = view.face_tangents(face) else { continue };
             let camera = to_local(&face.axes, camera);
-            if self.skip_covered {
-                let [r, u, fw] = view.face_basis(face);
-                self.coverage.set_face(f, r, u, fw);
-            }
+            let mut seen = occlusion::Face { face: f, basis: view.face_basis(face), layers: Vec::new() };
             let of = FaceView { face: f, lattice: &face.lattice, tangents, camera, boxes: view.screen_boxes(face) };
             for id in select_slices(camera[2] / LAYER, NEAR_DEPTH / LAYER, self.render_distance / LAYER, detail) {
                 let key = slice_key(f, &id);
@@ -185,29 +196,30 @@ impl Renderer {
                 let level = atom_level(id.level) as usize;
                 stats.levels[level] = true;
                 let source = Source { level, tiles: &self.levels[level], heights: self.heights[level] };
-                let coverage = self.skip_covered.then_some(&mut self.coverage);
-                let wants = Wants { chunks: &mut missing, tiles: &mut tiles };
-                let layer = draw_slice(&of, slice, &source, coverage, view, wants, &mut stats);
-                frame.farthest = frame.farthest.max(layer.distance);
-                if self.skip_covered {
-                    for p in &layer.placements {
-                        let cell = chunk_cell(id.level, p.chunk.i, p.chunk.j);
-                        self.coverage.cover(
-                            p.chunk.id,
-                            p.x,
-                            p.y,
-                            cell.x - camera[0],
-                            cell.y - camera[1],
-                            cell.width,
-                            cell.height,
-                            layer.distance,
-                        );
+                let (layer, cells, asking) = draw_slice(&of, slice, &source, view);
+                // What cells ask for, once the latest pass found them uncovered.
+                for (key, asks) in asking {
+                    match if self.skip_covered { answer.covered.get(&key).copied() } else { Some(false) } {
+                        Some(false) => {
+                            missing.extend(asks.chunk);
+                            tiles.extend(asks.tiles);
+                        }
+                        Some(true) => {}
+                        None => stats.occluding = true,
                     }
-                    self.coverage.end_layer(layer.distance);
                 }
+                if self.skip_covered {
+                    seen.layers.push(occlusion::Layer { distance: layer.distance, cells });
+                }
+                frame.farthest = frame.farthest.max(layer.distance);
                 stats.chunks += layer.placements.len();
                 frame.layers.push(layer);
             }
+            seeing.faces.push(seen);
+        }
+        if self.skip_covered {
+            self.occlusion.ask(seeing);
+            stats.occluding |= self.occlusion.answer().1;
         }
         // Near to far.
         missing.sort_by(|a, b| a.1.total_cmp(&b.1));
@@ -240,15 +252,6 @@ impl Renderer {
     }
 }
 
-/** Hands a chunk's mask to the coverage unless it has it. */
-fn known(coverage: &mut Coverage, chunk: &Chunk) -> u32 {
-    if !coverage.use_chunk(chunk.id) {
-        let Mask { width, height, scale, ref blocks } = chunk.baked.mask;
-        coverage.add(chunk.id, width, height, scale, blocks);
-    }
-    chunk.id
-}
-
 /** Where a slice's cells read from: its grid level, the tiles made of it, and the y of its sites, [low, high). */
 struct Source<'a> {
     level: usize,
@@ -256,10 +259,11 @@ struct Source<'a> {
     heights: (i64, i64),
 }
 
-/** What a frame wants: chunks to bake and their distance; tiles to make, by grid level, and their distance. */
-struct Wants<'a> {
-    chunks: &'a mut Vec<(Request, f64)>,
-    tiles: &'a mut Vec<(usize, TileId, f64)>,
+/** What a cell wants: its chunk baked, and its distance; tiles made, by grid level, and its distance. */
+#[derive(Default)]
+struct Asks {
+    chunk: Option<(Request, f64)>,
+    tiles: Vec<(usize, TileId, f64)>,
 }
 
 /**
@@ -312,24 +316,17 @@ fn cell_extent(of: &FaceView, slice: &mut CachedSlice, level: &Level, [i0, k0, i
 }
 
 /**
- * The layer a slice draws, given what nearer layers cover (drawSlice in
- * renderer.ts): chunks it lacks are wanted, and so are the tiles of cells
- * in view that lack them.
+ * The layer a slice draws (drawSlice in renderer.ts): every chunk in view;
+ * and its cells in view as the occlusion thread wants them, with what each
+ * asks for, if anything: its chunk baked, or the tiles it lacks.
  */
-fn draw_slice(
-    of: &FaceView,
-    slice: &mut CachedSlice,
-    source: &Source,
-    mut coverage: Option<&mut Coverage>,
-    view: &View,
-    wants: Wants,
-    stats: &mut Stats,
-) -> Layer {
+fn draw_slice(of: &FaceView, slice: &mut CachedSlice, source: &Source, view: &View) -> (Layer, Vec<Seen>, Vec<(CellKey, Asks)>) {
     let id = slice.id;
     let camera = of.camera;
     // Slices start at least NEAR_DEPTH ahead of the camera, so this is > 0.
     let distance = slice_centre(&id) - camera[2];
     let mut layer = Layer { face: of.face, slice: id, distance, placements: Vec::new() };
+    let (mut cells, mut asking) = (Vec::new(), Vec::new());
     let [min_x, max_x, min_y, max_y] = of.tangents;
     let (left, right) = (camera[0] + min_x * distance, camera[0] + max_x * distance);
     let (bottom, top) = (camera[1] + min_y * distance, camera[1] + max_y * distance);
@@ -353,44 +350,42 @@ fn draw_slice(
             continue;
         }
         let Some(cell_box) = shown(of.boxes.of(x0, x1, y0, y1, distance)) else { continue };
-        if coverage.as_ref().is_some_and(|c| c.hides(cell_box.min_x, cell_box.max_x, cell_box.min_y, cell_box.max_y)) {
-            stats.covered += 1;
-            continue;
-        }
+        let mut asks = Asks::default();
         if !complete {
             for k in k0..=k1 {
                 for i in i0..=i1 {
                     if !source.tiles.grids.has(i, k) {
-                        wants.tiles.push((source.level, (i, k), distance));
+                        asks.tiles.push((source.level, (i, k), distance));
                     }
                 }
             }
         }
         // Baked once its tiles are in; kept once baked, though its tiles go.
-        let Some(chunk) = slice.cells.get(&(i, j)).cloned() else {
-            if complete {
-                let block = crate::compositor::block(distance, view.focal);
-                wants.chunks.push((Request { face: of.face, slice: id, i, j, tiles, block }, distance));
-            }
-            continue;
-        };
-        if chunk.baked.splats.is_empty() {
-            continue;
+        let chunk = slice.cells.get(&(i, j)).cloned();
+        if chunk.is_none() && complete {
+            let block = crate::compositor::block(distance, view.focal);
+            asks.chunk = Some((Request { face: of.face, slice: id, i, j, tiles, block }, distance));
         }
         // The chunk's content, not just its cell, must reach the screen.
-        let (x, y) = (chunk.baked.origin[0] - camera[0], chunk.baked.origin[1] - camera[1]);
-        let [width, height] = chunk.baked.extent;
-        if shown(of.boxes.of(x, x + width, y - height, y, distance)).is_none() {
+        let placement = chunk.filter(|c| !c.baked.splats.is_empty()).and_then(|chunk| {
+            let (x, y) = (chunk.baked.origin[0] - camera[0], chunk.baked.origin[1] - camera[1]);
+            let [width, height] = chunk.baked.extent;
+            shown(of.boxes.of(x, x + width, y - height, y, distance)).map(|_| Placement { chunk, x, y })
+        });
+        let asks = (asks.chunk.is_some() || !asks.tiles.is_empty()).then_some(asks);
+        if placement.is_none() && asks.is_none() {
             continue;
         }
-        if let Some(c) = coverage.as_deref_mut() {
-            let handle = known(c, &chunk);
-            if c.hides_chunk(handle, x, y, distance) {
-                stats.covered += 1;
-                continue;
-            }
-        }
-        layer.placements.push(Placement { chunk, x, y });
+        let key = (of.face, id.level, id.layer, id.cutoff.to_bits(), i, j);
+        cells.push(Seen {
+            key,
+            screen: cell_box,
+            rect: [x0, rect.y - camera[1], rect.width, rect.height],
+            shown: placement.as_ref().map(|p| (p.chunk.clone(), p.x, p.y)),
+            asks: asks.is_some(),
+        });
+        asking.extend(asks.map(|asks| (key, asks)));
+        layer.placements.extend(placement);
     }
-    layer
+    (layer, cells, asking)
 }

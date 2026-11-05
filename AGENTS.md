@@ -105,7 +105,8 @@ native/                      # Spike of a native frontend (eframe + wgpu), linki
     ├── world.rs             # world.ts for generated worlds: a World's tiles, those the renderer wants first, made and indexed on threads
     ├── slicing.rs           # slice-selection.ts: slices, chunks, the leak bound
     ├── view.rs              # view.ts: faces, which rays and screen boxes they draw
-    ├── renderer.rs          # renderer.ts: chunks in view, cached, coverage (bake's Coverage)
+    ├── renderer.rs          # renderer.ts: chunks in view, cached, which cells to bake as occlusion.rs found
+    ├── occlusion.rs         # bake's Coverage on a thread of its own: which cells in view are covered, so not baked
     ├── bakery.rs            # Worker threads baking chunks, a baker each sharing the tiles, and clustering their splats for the GPU
     ├── compositor.rs        # compositor.ts with wgpu: splats uploaded per chunk in clusters, culled on the GPU against what showed
     ├── shot.rs              # --shot: one frame drawn offscreen on the GPU, saved as a PNG, no window

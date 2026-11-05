@@ -41,9 +41,10 @@ surface) would show were slices drawn flat.
 Drawn in relief, it hardly shows at all,
 so the setting now trades detail against slices.
 The field of view only zooms the picture, without re-slicing.
-"Skip Covered Chunks" (on by default) doesn't draw chunks that nearer
-ones cover, nor bakes them; the picture is the same, it is there to
-compare. "Show Face Seams" (off by default) draws lines where the twelve
+"Skip Covered Chunks" (on by default) doesn't bake chunks that nearer
+ones cover, nor (on the web) draw them;
+the picture is the same, it is there to compare.
+"Show Face Seams" (off by default) draws lines where the twelve
 stacks meet on screen. See [architecture.md](architecture.md).
 
 **Worlds** – Procedurally generated, regenerable with a new seed; the camera

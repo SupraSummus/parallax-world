@@ -461,6 +461,11 @@ show nothing until baked, a frame or two.
 The rays through each sub-block are kept per face while the camera only moves,
 and turning, found only in the cells the face crosses or holds
 (a face's side is a half-plane of the screen).
+The native renderer runs `Coverage` on a thread of its own
+(`native/src/occlusion.rs`), over what each render saw:
+every baked chunk in view is drawn, its GPU culling hiding what is covered,
+and coverage only decides which cells are baked and have their tiles made.
+A cell coming into view waits for the next pass, a frame or two.
 
 The `Compositor` draws a frame onto one opaque WebGL 2 canvas:
 per chunk its splats, instanced, each a rectangle cut to its hexagon,

@@ -3,7 +3,7 @@
 //! the chunks in view (renderer.rs), worker threads baking them with the
 //! baker in bake/, sharing the tiles, and wgpu drawing them in an egui window.
 //!
-//! parallax-native [--world NAME] [--threads N] [--seed S] [--leak DEG] [--shot out.png [--seams] [--colour voxels|layers|chunks] | --bench] [--walk D] [--stroll S] [--spin]
+//! parallax-native [--world NAME] [--threads N] [--seed S] [--leak DEG] [--all-chunks] [--shot out.png [--seams] [--colour voxels|layers|chunks] | --bench] [--walk D] [--stroll S] [--spin]
 //! parallax-native [--world NAME] [--seed S] --check-requests frame.bin
 //!
 //! --shot draws the first frame once the world has its tiles and all its
@@ -12,7 +12,9 @@
 //! last. --walk D moves the camera D units along the view after the first
 //! frame, and does the same there. --stroll S then walks on for S seconds
 //! as the window would, a frame every 60th, and times each frame's parts.
-//! --leak sets how far hidden geometry may show between slices (renderer.rs).
+//! --leak sets how far hidden geometry may show between slices (renderer.rs);
+//! --all-chunks bakes every chunk in view, covered or not, as the panel's
+//! switch does.
 //! --seams and --colour draw the shot as the panel's switches do.
 //! --check-requests takes a view the TS renderer dumped (native/dump.test.ts):
 //! the faces must be the same, and the chunks the first frame
@@ -23,6 +25,7 @@
 mod bakery;
 mod compositor;
 mod dump;
+mod occlusion;
 mod renderer;
 mod shot;
 mod slicing;
@@ -153,7 +156,7 @@ impl eframe::App for App {
             // While moving, the view changes; until all is made and baked, tiles and chunks keep arriving, often enough for a frame now and then.
             if moving.iter().any(|m| *m != 0.0) || self.spin.is_some() {
                 ui.ctx().request_repaint();
-            } else if arrived || !stats.wanted.is_empty() || self.world.busy() {
+            } else if arrived || !stats.wanted.is_empty() || stats.occluding || self.world.busy() {
                 ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
             }
         });
@@ -183,7 +186,7 @@ fn complete(world: &mut World, renderer: &mut Renderer, camera: Vec3, view: &vie
             println!("first chunks drawn after {:.2} s", start.elapsed().as_secs_f64());
             drawn = true;
         }
-        if !in_view && stats.tiles.is_empty() && stats.wanted.is_empty() {
+        if !in_view && stats.tiles.is_empty() && stats.wanted.is_empty() && !stats.occluding {
             println!("the view complete after {:.2} s", start.elapsed().as_secs_f64());
             in_view = true;
         }
@@ -194,6 +197,8 @@ fn complete(world: &mut World, renderer: &mut Renderer, camera: Vec3, view: &vie
             }
         } else if !stats.wanted.is_empty() {
             renderer.wait();
+        } else if stats.occluding {
+            renderer.wait_for_occlusion();
         } else if world.busy() {
             world.wait();
         } else {
@@ -262,7 +267,7 @@ fn stroll(seconds: f64, world: &mut World, renderer: &mut Renderer, mut camera: 
         last = gpu.render();
         let end = Instant::now();
         times.push([ms(start, rendered), ms(rendered, updated), ms(updated, prepared), ms(prepared, end), ms(start, end)]);
-        short += usize::from(!stats.wanted.is_empty() || !stats.tiles.is_empty());
+        short += usize::from(!stats.wanted.is_empty() || !stats.tiles.is_empty() || stats.occluding);
     }
     println!("{} frames walking, {short} with chunks or tiles missing; ms at the median, 90th and 99th percentile, and most:", times.len());
     for (k, name) in ["render", "world", "upload", "GPU", "frame"].iter().enumerate() {
@@ -304,6 +309,7 @@ fn main() -> eframe::Result {
     if let Some(i) = args.iter().position(|a| a == "--leak") {
         renderer.max_leak = args[i + 1].parse().expect("leak");
     }
+    renderer.skip_covered = !args.iter().any(|a| a == "--all-chunks");
     let mut world = World::new(make, seed, threads);
     let mut camera = shown.spawn.map(|v| v as f64);
     let faces: [[Vec3; 3]; 12] = std::array::from_fn(|f| view::faces()[f].axes);
@@ -335,6 +341,8 @@ fn main() -> eframe::Result {
                 }
                 println!("a frame {name}: {:.1} ms", start.elapsed().as_secs_f64() * 1000.0 / 20.0);
             }
+            renderer.wait_for_occlusion();
+            println!("an occlusion pass, on its own thread: {:.1} ms", renderer.occlusion_seconds() * 1000.0);
         }
         let view = compositor::View {
             yaw: YAW,

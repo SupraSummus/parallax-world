@@ -44,9 +44,11 @@ Numbers are for the forest at 1280×800, as measured when written.
   the chunk's slot comes as (`BACKENDS`).
   That its culling hides nothing that shows is checked only by hand
   (shots with `hidden` off match pixel for pixel).
-  Turning, a frame costs its main thread over 10 ms in the forest,
-  and walking (`--stroll`) about 15 ms, 40 ms at the 99th percentile:
-  most of a frame then, the GPU and uploads far less.
+  Its frames are bound by the GPU (`--stroll`):
+  culling the clusters in view costs about a third of a frame,
+  drawing those that show most of the rest.
+  The first phase reads every cluster only to find those that showed;
+  a list of them, kept from the last frame, would spare that.
   `native/` is not built in CI.
   Its `--shot` draws only a seed's spawn view, not the web's view query.
 - **TS and Rust still say much the same twice.**
