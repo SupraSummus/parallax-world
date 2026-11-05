@@ -44,8 +44,7 @@ const MOVE_SPEED = 60
 
 /**
  * A switch as the page's query sets it, if it does (`?name=1` or `?name=0`):
- * `first` one voxel per column (see setFirstInColumn), `pillars` whether
- * over their columns (see Compositor.setRuns).
+ * `pillars` whether splats are drawn over their columns (see Compositor.setRuns).
  */
 const queryFlag = (name: string, fallback: boolean) => {
   const value = new URLSearchParams(location.search).get(name)
@@ -73,7 +72,6 @@ function App() {
   const [renderDistance, setRenderDistance] = useState(DEFAULT_RENDER_DISTANCE)
   const [maxLeak, setMaxLeak] = useState(DEFAULT_MAX_LEAK)
   const [skipCovered, setSkipCovered] = useState(true)
-  const [firstInColumn, setFirstInColumn] = useState(() => queryFlag('first', false))
   const [showSeams, setShowSeams] = useState(false)
   const [pillars, setPillars] = useState(() => queryFlag('pillars', true))
   // Generating a world blocks this thread for a second or two; a spinner shows meanwhile.
@@ -132,7 +130,6 @@ function App() {
     if (query.look) renderer.setOrientation(query.look)
     if (query.fov !== undefined) renderer.setFov(query.fov)
     if (query.distance !== undefined) renderer.setRenderDistance(query.distance)
-    renderer.setFirstInColumn(queryFlag('first', false))
     compositorRef.current?.setRuns(queryFlag('pillars', true))
     setWorldType(renderer.getWorld().worldType)
     setFov(renderer.getFov())
@@ -294,12 +291,6 @@ function App() {
     requestRender()
   }
 
-  const handleFirstInColumnChange = (value: boolean) => {
-    setFirstInColumn(value)
-    rendererRef.current?.setFirstInColumn(value)
-    requestRender()
-  }
-
   const handleShowSeamsChange = (value: boolean) => {
     setShowSeams(value)
     compositorRef.current?.setShowSeams(value)
@@ -377,7 +368,6 @@ function App() {
               onChange={handleMaxLeakChange}
             />
             <SwitchRow label="Skip Covered Chunks" checked={skipCovered} onChange={handleSkipCoveredChange} />
-            <SwitchRow label="One Voxel per Column" checked={firstInColumn} onChange={handleFirstInColumnChange} />
             <SwitchRow label="Pillars over Columns" checked={pillars} onChange={handlePillarsChange} />
             <SwitchRow label="Show Face Seams" checked={showSeams} onChange={handleShowSeamsChange} />
             <div className="space-y-0.5 text-xs text-muted-foreground">

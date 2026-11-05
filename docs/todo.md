@@ -46,8 +46,9 @@ Numbers are for the forest at 1280×800, as measured when written.
   Every world is generated at each level;
   only tests' worlds of voxels (`World.ofVoxels`) are coarsened, in TS.
   Tests on small generated worlds would let it go.
-- **Slicing keeps a leak bound slices no longer need.**
-  Drawn in relief, slices leak only slivers however thick they are
+- **Slicing keeps a leak bound slices need less.**
+  Drawn in relief, slices of the bound leak nothing,
+  and much thicker ones only where a column has a gap
   (step 8 of `src/lib/leak-bound.test.ts`),
   but they are still as thin as drawn flat they would need to be
   (section 2 of `docs/architecture.md`),
@@ -88,26 +89,29 @@ Numbers are for the forest at 1280×800, as measured when written.
   (no compute, no indirect draws).
   Its painting order is the draw order at one depth per layer,
   which rounding breaks: natively, the same misordered about 6 % of the pixels.
-- **Most splats drawn natively are hidden within their own chunk.**
-  The native frame (about 12 ms on an Intel UHD, `--bench`)
-  is mostly drawing the clusters that show,
-  whose splats cover the screen several times over.
-  Keeping only each column's nearest voxel keeps all the axis sees
-  ("One Voxel per Column", section 3 of `docs/architecture.md`).
-  In the forest that halved the splats,
-  but changed about one pixel in eight,
-  mostly towards a face's corners, where rays slant most:
-  the ground's steps flatten, trunks show seams, crowns fray.
-  Dropping only those hidden from the axis and the rhombus's corners
-  (as masks are filled) may keep most of the saving; not measured yet.
-  On the web, each drawn as a prism over its run closes those gaps
-  (section 3 of `docs/architecture.md`), but a run shows one colour.
+- **The native compositor draws no runs.**
+  Chunks keep only each column's nearest voxel
+  (section 3 of `docs/architecture.md`),
+  and natively each is drawn as its near hexagon alone:
+  where the axis lies in a surface, the ground shows stripes,
+  and towards a face's corners, where rays slant most,
+  its steps flatten, trunks show seams, crowns fray.
+  The web draws each as a prism over its run;
+  natively, prisms need a depth by where a ray enters them
+  in place of each splat's rank in its chunk (`depth_of`),
+  for drawing and for culling.
   Modelled in Node (a lawn, the hills, the city),
-  one voxel per column has 0.5–0.8 of the instances
-  but more vertices (12 against 6) and about as many fragments
-  as every voxel drawn as hexagons:
-  half of what rectangles cut to hexagons took, either way.
-  Not measured on a GPU; the native compositor has no runs.
+  prisms of each column's nearest voxel have 0.5–0.8 of the instances
+  every voxel had, but 12 vertices against 6, and about as many fragments;
+  not measured on a GPU.
+- **A chunk could be an image.**
+  It holds at most one voxel per column,
+  so it could be a texture of colour, depth and run,
+  drawn as one rectangle whose fragment shader follows each ray
+  through it (a heightfield with thickness), in place of a prism per voxel:
+  far fewer instances, no depth within a layer,
+  and runs natively too.
+  Its columns are a checkerboard (a and b of one parity), to lay out.
 - **The depth within a layer needs a fine depth buffer.**
   A layer's splats share 1 / (layers + 1) of the depth range;
   WebGL promises only 16 bits, which leaves a few dozen steps for them.

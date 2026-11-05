@@ -41,22 +41,24 @@ so a coarse voxel at a house's eaves is roof from above and wall from the side.
 How thick slices are follows "Max Occlusion Leak":
 how far geometry perspective hides (e.g. the ground under the moor's
 pools) would show were slices drawn flat.
-Drawn in relief, it hardly shows at all,
-so the setting now trades detail against slices.
+Drawn in relief, slices that thin hardly leak at all;
+much thicker ones would where a column along a slice's direction
+has a gap (a valley between two hills):
+only what is before it is drawn, and farther slices show through.
 The field of view only zooms the picture, without re-slicing.
 "Skip Covered Chunks" (on by default) doesn't bake chunks that nearer
 ones cover, nor (on the web) draw them;
 the picture is the same, it is there to compare.
 "Show Face Seams" (off by default) draws lines where the twelve
 stacks meet on screen.
-"One Voxel per Column" (off by default, `?first=1`) keeps of each column
-along a stack's direction only its nearest voxel: about half as much to bake
-and draw, each a pillar over the voxels behind it in the column,
+Each slice is a picture along its stack's direction with a depth per point:
+of each column along it, only the nearest voxel,
+drawn as a pillar over the voxels behind it in the column,
 so the ground shows no stripes where the view slants;
 but what a column shows along it is its nearest voxel's colour,
 so a lawn's shades and a road's markings stretch along it.
 "Pillars over Columns" (on by default, `?pillars=0`) draws them so;
-off, each column is its nearest voxel alone, as baked, and the stripes show.
+off, each column is its nearest voxel alone, and the stripes show.
 See [architecture.md](architecture.md).
 
 **Worlds** – Procedurally generated, regenerable with a new seed; the camera

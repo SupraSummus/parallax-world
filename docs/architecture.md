@@ -179,10 +179,12 @@ but a few where levels change (section 5).
 
 Splats are drawn at their voxels' depths (section 3),
 so slices show what perspective shows,
-but for slivers where a hexagon stands in for a voxel's outline
-(step 8 of the test below: under 0.1 pixel even for slices as thick as
-their distance).
-The slicing still keeps the bound below,
+but for slivers where a hexagon stands in for a voxel's outline,
+and for what a column hides behind a gap in it
+(a valley between two hills: only its nearest voxel is kept).
+Step 8 of the test below finds no leak from slices of the bound,
+and leaks past it only from much thicker ones.
+The slicing keeps the bound below,
 derived for slices drawn flat, everything at the scale of its centre:
 it sets how thick slices are,
 and so their level of detail (section 1) and how many there are
@@ -284,9 +286,13 @@ It is keyed by its level's grid (`World.version`):
 when the grid moves, the level is baked again,
 the old chunks standing in meanwhile.
 
-**Splats.** A chunk is its voxels a ray of the face may reach:
-those with an open or cut face that a ray in the face's rhombus (section 4)
-meets from outside (`chunk_splats`).
+**Splats.** A chunk is a picture of its slice along the face's axis
+with a depth per point (`chunk_splats`).
+Seen along the axis, a face's columns (a, b) tile the plane,
+so a column's nearest voxel is all the axis sees of it:
+of each column, the chunk keeps the nearest voxel
+with an open or cut face that a ray in the face's rhombus (section 4)
+meets from outside.
 Each is painted as one hexagon (`Splat`),
 the voxel's outline seen along the face's axis
 (√2 wide and 2 high, its corners the rhombic dodecahedron's),
@@ -307,28 +313,22 @@ each by the axes its normal leans towards, as in the reference viewer
 a voxel is shaded by the way its surface faces,
 and coloured by what is seen of it along the face.
 
-**One voxel per column.** Seen along the axis, a face's columns (a, b)
-tile the plane, so a column's nearest voxel is all the axis sees of it.
-With "One Voxel per Column", chunks keep only those (`ChunkRequest.firstInColumn`):
-about half the splats,
-but a slanted ray sees past a column's edge into farther slices
+**Pillars.** A slanted ray sees past a column's edge,
 where it would meet the column behind.
 Where the axis lies in a surface (a lawn seen along a level face),
 a column of it runs through the slice,
-and a ray looking down passes over its nearest voxel
+and a ray looking down would pass over its nearest voxel
 into the next slice, under the surface: stripes.
 So a kept voxel stands for its run (`run_ends`),
 the solid voxels behind it in its column up to the last a ray may see,
 and is drawn as a prism over them (section 4; `src/lib/pillars.test.ts`).
 A run shows its first voxel's colour,
 so a lawn's shades or a road's markings stretch along the axis.
-Chunks baked either way are cached apart;
-the native frontend bakes every voxel.
 
-**Painting order.** Voxels by their layer, farthest first:
-a ray of the face passes from a voxel into one of the next layer,
-never back (their common face's normal is along the axis
-or (±1, ±√2, 1) / 2, the rays |σx| + √2·|σy| ≤ 1).
+**Painting order.** Voxels by their layer, farthest first.
+A pillar spans layers, so no order is right for every ray:
+the compositor draws pillars by where a ray enters them,
+and where two tie, the later painted.
 Voxels of one layer meet only side by side;
 widened, their hexagons overlap,
 and which shows there is the same for every ray,
@@ -336,8 +336,8 @@ so near a slant's extremes a voxel's neighbour in its layer may show
 on up to |σx| of its width.
 `src/lib/chunk-baker.test.ts` checks against rays cast along the axis
 that every voxel one meets first is painted,
-and `bake/src/splats.rs` that along slanted rays it is the one that shows,
-or its neighbour so.
+and `bake/src/splats.rs` that a slanted ray enters first
+the pillar of the column it meets first, or its neighbour so.
 
 **The baker** is Rust (`bake/`), compiled to WebAssembly
 with the worlds and their engine, which depend on it
@@ -538,6 +538,9 @@ draws those newly showing and keeps which show for the next frame
 Draws are listed per cluster on the GPU, roughly near to far,
 so nearer splats mostly hide what is behind them early.
 It draws into a picture of its own, which egui (or `--shot`) shows.
+It draws each splat as its near hexagon, without its run,
+so where the axis lies in a surface, stripes show
+([todo.md](todo.md)).
 
 **Fog.** A slice at distance d keeps `exp(−d / F)` of its own colour;
 the rest is the horizon colour, mixed in per pixel.

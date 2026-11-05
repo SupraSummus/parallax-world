@@ -1,5 +1,6 @@
-//! The voxels of a chunk that can show, each a hexagonal dab of paint
-//! (a splat) at its site, in relief over its slice's centre plane.
+//! The voxels of a chunk the face's axis sees, each a hexagonal dab of
+//! paint (a splat) at its site, in relief over its slice's centre plane,
+//! swept over its column's voxels behind it.
 
 use std::collections::HashMap;
 use std::f64::consts::FRAC_1_SQRT_2;
@@ -65,9 +66,9 @@ pub struct Splats {
     pub splats: Vec<Splat>,
     /** Painting order: each surface voxel's layer, and its index. */
     order: Vec<(i32, usize)>,
-    /** With first_in_column: a voxel's index by column (a, b), for run_ends and to keep the first. */
+    /** A voxel's index by column (a, b), for run_ends and to keep the first. */
     columns: HashMap<(i32, i32), usize>,
-    /** With first_in_column: by surface voxel, the layer its run ends at (run_ends). */
+    /** By surface voxel, the layer its run ends at (run_ends). */
     ends: Vec<i32>,
     pub min_x: f64,
     pub max_x: f64,
@@ -168,27 +169,21 @@ fn run_ends(ends: &mut Vec<i32>, columns: &mut HashMap<(i32, i32), usize>, geome
 }
 
 /**
- * Fills `splats` with the voxels of a chunk of a slice that rays of the
- * face may reach, in painting order: far to near.
- * A voxel is painted if a ray of the face can meet one of its open or cut
- * faces (seen).
- *
- * Painting order: by layer, farthest first. A ray of the face passes from
- * a voxel into one of the next layer, never back: their common face's
- * normal is along the axis or (±1, ±√2, 1) / 2, and the rays are
- * |σx| + √2·|σy| ≤ 1. Voxels of one layer meet only side by side.
- *
- * With `first_in_column`, only the nearest of each column (a, b) that a
- * ray may meet: all the axis sees (docs/architecture.md, section 3).
+ * Fills `splats` with the voxels of a chunk of a slice that the face's
+ * axis sees: of each column (a, b), the nearest voxel a ray of the face
+ * can meet by an open or cut face (seen), in painting order, far to near
+ * (docs/architecture.md, section 3). A chunk is a picture along the axis
+ * with a depth per point.
  * Each stands for its run (run_ends) as a pillar, so that a slanted ray
  * meets the column where its voxels are, and no gap opens behind it.
  * A pillar spans several layers, so no painting order is right for every
- * ray: the compositor draws pillars by the depth where a ray enters them.
+ * ray: the compositor draws pillars by the depth where a ray enters them,
+ * and where they tie, the later painted.
  *
  * `surface` is the cell's (cell_surface), with the margin around the cell
  * that its chunks may show; `palette` the view face's (see voxel_colour).
  */
-pub fn chunk_splats(splats: &mut Splats, geometry: &Geometry, palette: &[u32], surface: &[Voxel], slice: &Slice, first_in_column: bool) {
+pub fn chunk_splats(splats: &mut Splats, geometry: &Geometry, palette: &[u32], surface: &[Voxel], slice: &Slice) {
     splats.clear();
     // Twice the centre plane's depth, in layers: a whole number.
     let centre = (2.0 * slice_centre(slice) / LAYER).round() as i32;
@@ -199,16 +194,13 @@ pub fn chunk_splats(splats: &mut Splats, geometry: &Geometry, palette: &[u32], s
     order.extend(surface.iter().enumerate().map(|(k, voxel)| (voxel.site[2], k)));
     order.sort_unstable_by_key(|&(c, k)| (c, std::cmp::Reverse(k)));
     let mut ends = std::mem::take(&mut splats.ends);
-    if first_in_column {
-        run_ends(&mut ends, &mut splats.columns, geometry, surface, &order);
-    }
-    // Those a ray may meet.
-    order.retain(|&(_, k)| seen(geometry, surface[k].open | surface[k].cut));
-    if first_in_column {
-        let columns = &mut splats.columns;
-        columns.clear();
-        order.retain(|&(_, k)| columns.insert((surface[k].site[0], surface[k].site[1]), k).is_none());
-    }
+    run_ends(&mut ends, &mut splats.columns, geometry, surface, &order);
+    // The nearest of each column that a ray may meet.
+    let columns = &mut splats.columns;
+    columns.clear();
+    order.retain(|&(_, k)| {
+        seen(geometry, surface[k].open | surface[k].cut) && columns.insert((surface[k].site[0], surface[k].site[1]), k).is_none()
+    });
 
     for &(_, k) in order.iter().rev() {
         let voxel = &surface[k];
@@ -217,7 +209,7 @@ pub fn chunk_splats(splats: &mut Splats, geometry: &Geometry, palette: &[u32], s
             x: a as f64 * LAYER,
             y: b as f64,
             depth: 2 * c - centre,
-            run: if first_in_column { 2 * (ends[k] - c) } else { 0 },
+            run: 2 * (ends[k] - c),
             width: FRAC_1_SQRT_2,
             colour: voxel_colour(voxel, palette),
             site: voxel.site,
@@ -261,7 +253,7 @@ mod tests {
         let (sites, surface) = blob(&geometry, 0..4, |[a, b, c]| (0..4).contains(&c) && a.abs() <= 12 && b.abs() <= 12 && a + c >= 0);
         let slice = Slice { level: 2, layer: 0, cutoff: f64::INFINITY };
         let mut splats = Splats::new();
-        chunk_splats(&mut splats, &geometry, &[0; FACE_KINDS], &surface, &slice, false);
+        chunk_splats(&mut splats, &geometry, &[0; FACE_KINDS], &surface, &slice);
         let centre = slice_centre(&slice);
 
         let at = |[a, b, c]: [i32; 3]| [a as f64 * LAYER, b as f64, c as f64 * LAYER];
@@ -294,46 +286,51 @@ mod tests {
                 }
                 hits += 1;
                 // What shows there: the last splat whose hexagon, at its depth and
-                // widened by the slant, holds where the ray crosses it.
+                // widened by the slant, holds where the ray crosses it. Runs
+                // are left out: in this block they change nothing that shows
+                // (pillars.test.ts draws a lawn where they do).
                 let shown = splats.splats.iter().rev().find(|s| {
                     let (x, y) = (px + slant[0] * s.offset(), py + slant[1] * s.offset());
                     let width = s.width * (1.0 + slant[0].abs());
                     (x - s.x).abs() <= width && (x - s.x).abs() * FRAC_1_SQRT_2 + (y - s.y).abs() <= s.height()
                 });
                 let shown = shown.expect("a splat holds the point").site;
-                // Or its neighbour in its layer: the order within a layer is the
-                // same for every ray, and widened, their hexagons overlap.
+                // Its column's nearest voxel, or its neighbour in its layer: the
+                // order within a layer is the same for every ray, and widened,
+                // their hexagons overlap.
+                let column = shown[..2] == site[..2] && shown[2] <= site[2];
                 let beside = shown[2] == site[2] && shown[1] == site[1] && (shown[0] - site[0]).abs() == 2;
-                assert!(shown == site || beside, "({px}, {py}) along {slant:?} shows {shown:?}, not {site:?}");
+                assert!(column || beside, "({px}, {py}) along {slant:?} shows {shown:?}, not {site:?}");
             }
         }
         assert!(hits > 5000, "{hits} rays met the block");
     }
 
     #[test]
-    fn first_in_column_keeps_what_the_axis_sees() {
+    fn keeps_what_the_axis_sees() {
         // A porous blob of level 3's slab: columns with several voxels that show.
         let geometry = geometry(&lattices()[0]);
         let hash = |[a, b, c]: [i32; 3]| (a.wrapping_mul(73_856_093) ^ b.wrapping_mul(19_349_663) ^ c.wrapping_mul(83_492_791)) as u32;
         let (_, surface) = blob(&geometry, 0..8, |site| (0..8).contains(&site[2]) && hash(site) % 3 == 0);
         let slice = Slice { level: 3, layer: 0, cutoff: f64::INFINITY };
-        let bake = |first| {
-            let mut splats = Splats::new();
-            chunk_splats(&mut splats, &geometry, &[0; FACE_KINDS], &surface, &slice, first);
-            splats.splats
-        };
-        let (all, first) = (bake(false), bake(true));
-        assert!(first.len() * 3 < all.len() * 2, "{} of {}", first.len(), all.len());
-        let columns: std::collections::HashSet<_> = first.iter().map(|s| (s.site[0], s.site[1])).collect();
-        assert_eq!(columns.len(), first.len());
+        let mut splats = Splats::new();
+        chunk_splats(&mut splats, &geometry, &[0; FACE_KINDS], &surface, &slice);
+        let kept = splats.splats;
+        // Every voxel a ray may meet, far to near.
+        let mut all: Vec<[i32; 3]> = surface.iter().filter(|v| seen(&geometry, v.open | v.cut)).map(|v| v.site).collect();
+        all.sort_by_key(|site| std::cmp::Reverse(site[2]));
+        assert!(kept.len() * 3 < all.len() * 2, "{} of {}", kept.len(), all.len());
+        let columns: std::collections::HashSet<_> = kept.iter().map(|s| (s.site[0], s.site[1])).collect();
+        assert_eq!(columns.len(), kept.len());
 
         // Along the axis each point shows the same voxel: the last splat holding it.
-        let shown = |splats: &[Splat], x: f64, y: f64| {
-            let holds = |s: &&Splat| (x - s.x).abs() <= s.width && (x - s.x).abs() * FRAC_1_SQRT_2 + (y - s.y).abs() <= s.height();
-            splats.iter().rev().find(holds).map(|s| s.site)
+        let holds = |site: [i32; 3], x: f64, y: f64| {
+            let dx = (x - site[0] as f64 * LAYER).abs();
+            dx <= FRAC_1_SQRT_2 && dx * FRAC_1_SQRT_2 + (y - site[1] as f64).abs() <= 1.0
         };
         for (x, y) in (0..80).flat_map(|i| (0..80).map(move |j| (-8.0 + i as f64 * 0.2 + 0.013, -8.0 + j as f64 * 0.2 + 0.007))) {
-            assert_eq!(shown(&first, x, y), shown(&all, x, y), "at ({x}, {y})");
+            let shown = kept.iter().rev().map(|s| s.site).find(|&site| holds(site, x, y));
+            assert_eq!(shown, all.iter().rev().copied().find(|&site| holds(site, x, y)), "at ({x}, {y})");
         }
     }
 

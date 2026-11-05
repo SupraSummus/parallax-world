@@ -160,7 +160,7 @@ fn work(queue: &Queue, send: &Sender<(Request, Baked)>, grids: &Grids, mut baker
             queue.0.lock().expect("queue").in_flight.remove(&r.key());
             continue;
         }
-        let b = baker.bake(r.face, &r.slice, r.i, r.j, false);
+        let b = baker.bake(r.face, &r.slice, r.i, r.j);
         let (splats, clusters) = cluster(&baker.numbers, half_layer(r.slice.level), r.block);
         let baked = Baked {
             origin: [b.origin_x, b.origin_y],

@@ -15,25 +15,24 @@ import { generatePart, type GridPart, type WorldType } from './world'
  * a face (by name, see FACES), from its level's grid of
  * World.version `grid`. The baker bakes from the grid it has;
  * `grid` only tells bakes apart.
- * `firstInColumn`: only each column's nearest voxel (chunk_splats).
  */
 export interface ChunkRequest extends SliceId {
   face: string
   i: number
   j: number
   grid: number
-  firstInColumn: boolean
 }
 
-/** A ChunkRequest without its grid, every voxel unless `firstInColumn`. */
-type BakeRequest = Omit<ChunkRequest, 'grid' | 'firstInColumn'> & { firstInColumn?: boolean }
+/** A ChunkRequest without its grid. */
+type BakeRequest = Omit<ChunkRequest, 'grid'>
 
 /** Numbers per splat in ChunkSplats.splats. */
 export const SPLAT = 5
 
 /**
- * A baked chunk: its visible voxels, each a hexagon of one colour (a
- * splat) at its site, in relief over its slice's centre plane (see
+ * A baked chunk: the voxels its face's axis sees, the nearest of each
+ * column, each a hexagon of one colour (a splat) at its site, in relief
+ * over its slice's centre plane, swept over its column's run (see
  * chunk_splats and Splat in bake/src/splats.rs), those that may be drawn
  * in its cell.
  */
@@ -43,8 +42,7 @@ export interface ChunkSplats {
    * and its width (the points (x + u, y + v) with |u| ≤ width and
    * |u| / √2 + |v| ≤ height, √2 times the width), in world units; its run,
    * how many half layers of its grid its pillar reaches past its site
-   * (Splat in bake/src/splats.rs; 0 unless baked with one voxel per
-   * column); then its colour as RGBA bytes (little-endian, as in
+   * (Splat in bake/src/splats.rs); then its colour as RGBA bytes (little-endian, as in
    * ImageData) as the float's bits: opaque, its alpha instead how many
    * half layers of its grid past the centre plane it is, plus 128.
    * Far to near: in painting order.
@@ -83,7 +81,7 @@ interface Baker {
   bake: Call
   sites: () => number
 }
-type Call = (face: number, level: number, layer: number, cutoff: number, i: number, j: number, firstInColumn: number) => number
+type Call = (face: number, level: number, layer: number, cutoff: number, i: number, j: number) => number
 
 const faceIndex = new Map(FACES.map((face, index) => [face.name, index]))
 
@@ -138,37 +136,37 @@ export class ChunkBaker {
   }
 
   /** Calls `bake` and returns its result's numbers. */
-  private call({ face, level, layer, cutoff, i, j, firstInColumn = false }: BakeRequest): Float64Array {
+  private call({ face, level, layer, cutoff, i, j }: BakeRequest): Float64Array {
     const index = faceIndex.get(face)
     if (index === undefined) throw new Error(`no face ${face}`)
-    const at = this.baker.bake(index, level, layer, cutoff, i, j, firstInColumn ? 1 : 0)
+    const at = this.baker.bake(index, level, layer, cutoff, i, j)
     if (at === 0) throw new Error('the baker has no world')
     return copyOut(this.baker.memory, Float64Array, at, 11)
   }
 }
 
 /** Numbers per request in a `want` message (see encodeRequests). */
-const REQUEST = 8
+const REQUEST = 7
 
 /** Requests packed into numbers, REQUEST each, to post to a worker cheaply. */
 export function encodeRequests(requests: readonly ChunkRequest[]): Float64Array {
   const packed = new Float64Array(requests.length * REQUEST)
-  requests.forEach(({ face, level, layer, cutoff, i, j, grid, firstInColumn }, n) => {
+  requests.forEach(({ face, level, layer, cutoff, i, j, grid }, n) => {
     const index = faceIndex.get(face)
     if (index === undefined) throw new Error(`no face ${face}`)
-    packed.set([index, level, layer, cutoff, i, j, grid, firstInColumn ? 1 : 0], n * REQUEST)
+    packed.set([index, level, layer, cutoff, i, j, grid], n * REQUEST)
   })
   return packed
 }
 
 /** The n-th request of encodeRequests' numbers. */
 function decodeRequest(packed: Float64Array, n: number): ChunkRequest {
-  const [face, level, layer, cutoff, i, j, grid, first] = packed.subarray(n * REQUEST, (n + 1) * REQUEST)
-  return { face: FACES[face].name, level, layer, cutoff, i, j, grid, firstInColumn: first === 1 }
+  const [face, level, layer, cutoff, i, j, grid] = packed.subarray(n * REQUEST, (n + 1) * REQUEST)
+  return { face: FACES[face].name, level, layer, cutoff, i, j, grid }
 }
 
 /** A key per chunk request. */
-const requestKey = ({ face, level, layer, cutoff, i, j, grid, firstInColumn }: ChunkRequest) => [face, level, layer, cutoff, i, j, grid, firstInColumn].join()
+const requestKey = ({ face, level, layer, cutoff, i, j, grid }: ChunkRequest) => [face, level, layer, cutoff, i, j, grid].join()
 
 /**
  * Messages to a bake worker: a new world (numbered by `generation`, which

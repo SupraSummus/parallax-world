@@ -155,7 +155,7 @@ export class Compositor {
   private buffers = new Map<Chunk, WebGLBuffer>()
   private frame: Frame | null = null
   private showSeams = false
-  // Whether splats are swept over their runs (chunks of one voxel per column have them).
+  // Whether splats are swept over their runs.
   private runs = true
 
   /** Throws if the browser has no WebGL 2. */
@@ -244,7 +244,7 @@ export class Compositor {
         gl.uniform4f(u.clip, x, y, x + chunk.extentWidth, y - chunk.extentHeight)
         gl.vertexAttribPointer(SPLAT_AT, 4, gl.FLOAT, false, SPLAT * 4, 0)
         gl.vertexAttribPointer(PAINT_AT, 4, gl.UNSIGNED_BYTE, true, SPLAT * 4, 16)
-        gl.drawElementsInstanced(gl.TRIANGLES, chunk.firstInColumn && this.runs ? PRISM.length : HEXAGON, gl.UNSIGNED_BYTE, 0, chunk.splats.length / SPLAT)
+        gl.drawElementsInstanced(gl.TRIANGLES, this.runs ? PRISM.length : HEXAGON, gl.UNSIGNED_BYTE, 0, chunk.splats.length / SPLAT)
       }
     })
     gl.disableVertexAttribArray(SPLAT_AT)

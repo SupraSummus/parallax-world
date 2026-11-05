@@ -63,7 +63,7 @@ bake/                        # Chunk baker and coverage in Rust (no dependencies
     ├── slicing.rs           # slice-selection.ts: slices, chunks, the leak bound (native's too)
     ├── surface.rs           # A cell's voxels that can show
     ├── tables.rs            # The voxel's faces in lattice coordinates, the materials shaded per view face
-    ├── splats.rs            # Which voxels a chunk shows, as hexagons at their sites, in relief; runs of one voxel per column
+    ├── splats.rs            # Which voxels a chunk shows: each column's nearest, a hexagon at its site, in relief, over its run
     ├── fill.rs              # Splats filled into a mask for every slant, solid blocks (for coverage)
     ├── layer_index.rs       # LayerIndex: where each face's layers hold voxels; its WebAssembly exports
     └── coverage.rs          # Which screen cells nearer layers cover, on the main thread; its WebAssembly exports
