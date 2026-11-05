@@ -133,7 +133,12 @@ CI runs the same scripts plus `pnpm build`. For rendering changes, also look
 at the result in the browser (`pnpm dev`); unit tests can't see pixels.
 Without a GPU, `pnpm shot` saves a picture of a view once it is complete
 (`scripts/shot.mjs`);
-with `mesa-vulkan-drivers` installed it draws several times faster.
+`pnpm shot:native --view QUERY --shot out.png` saves the native frontend's,
+several times faster, though it still differs in places
+([docs/todo.md](docs/todo.md)).
+Both take the page's view query, e.g. `'seed=1&world=moor&look=30,-10'`,
+and want Mesa's software Vulkan (`apt-get install mesa-vulkan-drivers`):
+without it the native one cannot draw, the web's draws several times slower.
 
 ## Rules
 

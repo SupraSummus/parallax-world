@@ -36,7 +36,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   The first phase reads every cluster only to find those that showed;
   a list of them, kept from the last frame, would spare that.
   `native/` is not built in CI.
-  Its `--shot` draws only a seed's spawn view, not the web's view query.
 - **TS and Rust still say much the same twice.**
   The tiles around the camera (`world.ts`) are `native/src/world.rs`,
   slice selection (`bake/src/slicing.rs`) is `slice-selection.ts`,

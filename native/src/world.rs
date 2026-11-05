@@ -164,6 +164,11 @@ impl World {
         self.reach + 2.0 * TILE as f64
     }
 
+    /** Makes no more tiles but those being made. */
+    pub fn stop(&self) {
+        self.queue.0.lock().expect("queue").wanted.clear();
+    }
+
     /** Whether tiles are being made or wait to be. */
     pub fn busy(&self) -> bool {
         let q = self.queue.0.lock().expect("queue");
