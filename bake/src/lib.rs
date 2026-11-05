@@ -168,14 +168,14 @@ impl Baker {
      * may be drawn clipped to the cell, and a mask of it.
      * See ChunkBaker.bake.
      */
-    pub fn bake(&mut self, face: usize, slice: &Slice, i: i32, j: i32, first_in_column: bool) -> Baked {
+    pub fn bake(&mut self, face: usize, slice: &Slice, i: i32, j: i32) -> Baked {
         let (level, slice) = in_grid(slice);
         self.reach(level);
         let reader = Reader::new(&self.grids[level], self.lattices[face]);
         let surface = cell_surface(&reader, &self.geometry, &self.pairs, &slice, i, j);
         let palettes = self.palettes.len() / VIEW_FACES;
         let palette = &self.palettes[face * palettes..(face + 1) * palettes];
-        chunk_splats(&mut self.splats, &self.geometry, palette, &surface, &slice, first_in_column);
+        chunk_splats(&mut self.splats, &self.geometry, palette, &surface, &slice);
 
         // Where they may be drawn, clipped to the cell, in the grid's units.
         let cell = chunk_cell(slice.level, i, j);
@@ -305,15 +305,15 @@ pub extern "C" fn world_ready() {
 }
 
 /**
- * Bakes a chunk (see Baker::bake), `first_in_column` 0 or 1; returns RESULT: mask width, height,
+ * Bakes a chunk (see Baker::bake); returns RESULT: mask width, height,
  * origin x, origin y, extent width, height, mask scale, splats, splats
  * pointer (f32, 5 each), blocks pointer, blocks length.
  */
 #[unsafe(no_mangle)]
-pub extern "C" fn bake(face: u32, level: i32, layer: i32, cutoff: f64, i: i32, j: i32, first_in_column: u32) -> *const f64 {
+pub extern "C" fn bake(face: u32, level: i32, layer: i32, cutoff: f64, i: i32, j: i32) -> *const f64 {
     STATE.with_borrow_mut(|state| {
         let State::Ready(baker) = state else { return std::ptr::null() };
-        let baked = baker.bake(face as usize, &Slice { level, layer, cutoff }, i, j, first_in_column != 0);
+        let baked = baker.bake(face as usize, &Slice { level, layer, cutoff }, i, j);
         RESULT.with_borrow_mut(|result| {
             *result = [
                 baked.width as f64,

@@ -7,9 +7,9 @@
  * 2 · `detail` layer spacings, where slices cannot be thinner than one
  * layer of voxels (two layer spacings: a voxel reaches a layer past its
  * own, see fcc.ts) and the bound is two layer spacings.
- * The renderer draws them in relief instead, each voxel at its depth
- * (compositor.ts), and leaks only slivers (step 8): the bound is what the
- * slicing keeps, no longer what is seen.
+ * The renderer draws them in relief instead, each column's nearest voxel
+ * at its depth over its run (compositor.ts), and leaks nothing from such
+ * slices; much thicker ones leak where a column has a gap (step 8).
  *
  * Each `describe` below is one step (step 1 aside, one line of algebra):
  * the claim in words, then a check on random samples (seeded, so failures
@@ -269,14 +269,18 @@ describe.each([1, 0.5, 0.25])('Step 8: ray-cast leaks with tan(fov / 2) = %s', T
 
   /**
    * Which voxel each ray shows: the renderer's own face logic, on voxels
-   * (u, 0, z) of the face's lattice, its splats drawn in relief, as the
-   * compositor does, or `flat` on their slices' centre planes.
+   * (u, 0, z) of the face's lattice, its splats drawn in relief as the
+   * compositor does, each a pillar over its run, the one a ray enters
+   * first showing (the later painted where they tie), or `flat` on their
+   * slices' centre planes, in painting order.
    */
   function parallaxOwners({ cells, levels }: { cells: Cell[]; levels: VoxelGrid[] }, cu: number, cz: number, slices: SliceId[], flat: boolean): number[] {
     const baker = new ChunkBaker(levels[0].materials, levels)
     const cellAt = new Map(cells.map(({ u, z, n }, cell) => [`${String(n)}:${String(u)},${String(z)}`, cell]))
     const owner = rays.map(() => -1)
     for (const slice of [...slices].reverse()) {
+      // Within the slice, where each ray enters what it shows.
+      const entered = rays.map(() => Infinity)
       const centre = sliceCentre(slice)
       const distance = centre - cz * LAYER
       // Bricks of row 0, which holds b = 0: brick i spans [x + i · w, x + (i + 1) · w).
@@ -294,7 +298,7 @@ describe.each([1, 0.5, 0.25])('Step 8: ray-cast leaks with tan(fov / 2) = %s', T
         // Tangents of the rays through what the chunk draws on the centre plane.
         const [left, right] = [chunk.originX, chunk.originX + chunk.extentWidth].map(x => (x - cu * LAYER) / distance)
         for (let k = 0; k < chunk.splats.length / SPLAT; k++) {
-          const [sx, sy, sw] = chunk.splats.subarray(k * SPLAT, k * SPLAT + 3)
+          const [sx, sy, sw, run] = chunk.splats.subarray(k * SPLAT, k * SPLAT + 4)
           const sh = sw * Math.SQRT2
           // Its site, camera-relative, at its depth (compositor.ts).
           const x = chunk.originX + sx - cu * LAYER
@@ -304,9 +308,23 @@ describe.each([1, 0.5, 0.25])('Step 8: ray-cast leaks with tan(fov / 2) = %s', T
           const half = Math.min(width, (sh - Math.abs(chunk.originY + sy)) * Math.SQRT2)
           if (half <= 0) continue
           const voxel = cellAt.get(`${String(n)}:${String(sites[3 * k])},${String(sites[3 * k + 2])}`) ?? -1
-          const first = Math.ceil((Math.max(left, (x - half) / z) + TAN_HALF_FOV) / step)
-          const last = Math.floor((Math.min(right, (x + half) / z) + TAN_HALF_FOV) / step)
-          for (let k = Math.max(0, first); k <= Math.min(RAYS - 1, last); k++) owner[k] = voxel
+          // Its pillar's far end; the rays that meet it are those through either end's hexagon.
+          const back = flat ? z : z + run * halfLayer(slice.level)
+          const first = Math.ceil((Math.max(left, Math.min((x - half) / z, (x - half) / back)) + TAN_HALF_FOV) / step)
+          const last = Math.floor((Math.min(right, Math.max((x + half) / z, (x + half) / back)) + TAN_HALF_FOV) / step)
+          for (let k = Math.max(0, first); k <= Math.min(RAYS - 1, last); k++) {
+            // Where the ray (t·d, d) is within `half` of x, between the pillar's ends.
+            const t = rays[k]
+            let [enter, exit] = [z, back]
+            if (t !== 0) {
+              const [d0, d1] = [(x - half) / t, (x + half) / t]
+              enter = Math.max(enter, Math.min(d0, d1))
+              exit = Math.min(exit, Math.max(d0, d1))
+            } else if (Math.abs(x) > half) continue
+            if (enter > exit || enter > entered[k]) continue
+            entered[k] = enter
+            owner[k] = voxel
+          }
         }
       }
     }
@@ -360,11 +378,19 @@ describe.each([1, 0.5, 0.25])('Step 8: ray-cast leaks with tan(fov / 2) = %s', T
     expect(outside.length).toBeGreaterThan(0)
   })
 
-  // Each voxel drawn where it is, nothing hidden shows but a ray's sliver
-  // where hexagons stand in for outlines.
-  it('in relief, leaks nothing even from slices as thick as their distance', () => {
+  // Each column's nearest voxel drawn where it is, over its run, nothing
+  // hidden shows but a ray's sliver where hexagons stand in for outlines.
+  it('in relief, leaks nothing from slices of leakFreeDetail', () => {
     for (const { cells, cu, cz } of scenes) {
-      expect(leaks(cells, cu, cz, 1, false).filter(l => l.pixels > 0.1)).toEqual([])
+      expect(leaks(cells, cu, cz, detail, false).filter(l => l.pixels > 0.1)).toEqual([])
     }
+  })
+
+  // A column along the axis through a hill, a valley and another hill
+  // keeps the first alone: a ray looking down into the valley meets the
+  // slices behind, not the second hill.
+  it('in relief, leaks past the bound from slices as thick as their distance', () => {
+    const outside = scenes.flatMap(({ cells, cu, cz }) => leaks(cells, cu, cz, 1, false).filter(l => !withinBound(l)))
+    expect(outside.length).toBeGreaterThan(0)
   })
 })

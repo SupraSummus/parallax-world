@@ -122,7 +122,7 @@ pub fn cluster(numbers: &[f32], half_layer: f64, block: f64) -> (Vec<GpuSplat>, 
         start += run.len();
     }
     clusters.sort_by(|a, b| a.order.total_cmp(&b.order));
-    // Its height in place of its run: native chunks have none (every voxel is baked).
+    // Its height in place of its run: drawn without it (docs/todo.md).
     let splats = sorted.iter().map(|&s| {
         let [x, y, w, _, paint] = numbers[s];
         [x, y, w, w * std::f32::consts::SQRT_2, paint, orders[s]].map(f32::to_bits)
