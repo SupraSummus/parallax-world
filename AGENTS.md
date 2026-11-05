@@ -62,7 +62,7 @@ bake/                        # Chunk baker and coverage in Rust (no dependencies
     ├── lib.rs               # Baker: one chunk per call; the WebAssembly exports
     ├── world.rs             # Grid, tiles of grids, the view's faces' lattices, voxels read per face
     ├── cells.rs             # cells.ts, with a table per level
-    ├── slicing.rs           # The parts of slice-selection.ts baking needs
+    ├── slicing.rs           # slice-selection.ts: slices, chunks, the leak bound (native's too)
     ├── surface.rs           # A cell's voxels that can show
     ├── tables.rs            # The voxel's faces in lattice coordinates, the materials shaded per view face
     ├── splats.rs            # Which voxels a chunk shows, as hexagons at their sites, in relief
@@ -103,7 +103,6 @@ native/                      # Spike of a native frontend (eframe + wgpu), linki
     ├── main.rs              # The window and camera; --shot, --bench, --walk, --check-requests against a dump
     ├── dump.rs              # Reads a dump: a view, its faces, grids and the chunks it wants
     ├── world.rs             # world.ts for generated worlds: a World's tiles, those the renderer wants first, made and indexed on threads
-    ├── slicing.rs           # slice-selection.ts: slices, chunks, the leak bound
     ├── view.rs              # view.ts: faces, which rays and screen boxes they draw
     ├── renderer.rs          # renderer.ts: chunks in view, cached, which cells to bake as occlusion.rs found
     ├── occlusion.rs         # bake's Coverage on a thread of its own: which cells in view are covered, so not baked

@@ -11,13 +11,13 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use bake::slicing::{
+    GRID_LEVELS, LAYER, atom_level, cell_margin, chunk_cell, chunk_cells, leak_free_detail, select_slices, site_layers, slice_centre,
+};
 use bake::{Lattice, Slice, chunk_reads};
 
 use crate::bakery::{Baked, Bakery, Request};
 use crate::occlusion::{self, CellKey, Occlusion, Seeing, Seen};
-use crate::slicing::{
-    GRID_LEVELS, LAYER, atom_level, cell_margin, chunk_cell, chunk_cells, leak_free_detail, select_slices, site_layers, slice_centre,
-};
 use crate::view::{Face, ScreenBox, ScreenBoxes, Vec3, View, in_face, to_local};
 use crate::world::{Level, TILE, TileId};
 
@@ -296,9 +296,9 @@ fn cell_tiles(of: &FaceView, slice: &mut CachedSlice, heights: (i64, i64), i: i3
 /** The least and greatest b of the voxels chunk (i, j) of a slice may draw (cellExtent in renderer.ts), once it has the tiles it reads. */
 fn cell_extent(of: &FaceView, slice: &mut CachedSlice, level: &Level, [i0, k0, i1, k1]: [i32; 4], i: i32, j: i32) -> Option<(f64, f64)> {
     *slice.extents.entry((i, j)).or_insert_with(|| {
-        let rect = chunk_cell(slice.id.level, i, j);
+        let cell = chunk_cell(slice.id.level, i, j);
         // The cell's sites, in lattice units.
-        let (left, right) = ((rect.x / LAYER).round() as i64, ((rect.x + rect.width) / LAYER).round() as i64);
+        let (left, right) = (cell.left as i64, (cell.left + cell.columns) as i64);
         let (columns, rows) = cell_margin(slice.id.level);
         // In the units of the grid the slice reads, N times larger.
         let n = 1i64 << atom_level(slice.id.level);
@@ -309,8 +309,9 @@ fn cell_extent(of: &FaceView, slice: &mut CachedSlice, level: &Level, [i0, k0, i
             .flat_map(|k| (i0..=i1).map(move |i| (i, k)))
             .filter_map(|t| level.tiles.get(&t)?.index.range(of.lattice.f, c0, c1, a0, a1))
             .reduce(|a, b| (a.0.min(b.0), a.1.max(b.1)))?;
-        let lo = ((lo * n) as f64).max(rect.y - rows as f64);
-        let hi = ((hi * n) as f64).min(rect.y + rect.height + rows as f64);
+        let (bottom, top) = (cell.bottom as f64, (cell.bottom + cell.rows) as f64);
+        let lo = ((lo * n) as f64).max(bottom - rows as f64);
+        let hi = ((hi * n) as f64).min(top + rows as f64);
         (lo <= hi).then_some((lo, hi))
     })
 }
@@ -333,18 +334,19 @@ fn draw_slice(of: &FaceView, slice: &mut CachedSlice, source: &Source, view: &Vi
     let reach = cell_margin(id.level).1 as f64;
     let shown = |b: Option<ScreenBox>| b.filter(|b| view.on_screen(b));
     for (i, j) in chunk_cells(id.level, left, right, bottom, top) {
-        let rect = chunk_cell(id.level, i, j);
+        let cell = chunk_cell(id.level, i, j);
+        let (x, y) = (cell.left as f64 * LAYER, cell.bottom as f64);
         let Some(tiles) = cell_tiles(of, slice, source.heights, i, j) else { continue };
         let [i0, k0, i1, k1] = tiles;
         let complete = source.tiles.grids.has_all(tiles);
         // Once it has its tiles: nothing to draw if not baked at all; otherwise, what it draws lies within reach of its voxels.
         let (y0, y1) = if complete {
             let Some(extent) = cell_extent(of, slice, source.tiles, tiles, i, j) else { continue };
-            (rect.y.max(extent.0 - reach), (rect.y + rect.height).min(extent.1 + reach))
+            (y.max(extent.0 - reach), (y + cell.height).min(extent.1 + reach))
         } else {
-            (rect.y, rect.y + rect.height)
+            (y, y + cell.height)
         };
-        let (x0, x1) = (rect.x - camera[0], rect.x + rect.width - camera[0]);
+        let (x0, x1) = (x - camera[0], x + cell.width - camera[0]);
         let (y0, y1) = (y0 - camera[1], y1 - camera[1]);
         if y0 >= y1 || !in_face(closest_to_zero(x0, x1), closest_to_zero(y0, y1), distance) {
             continue;
@@ -380,7 +382,7 @@ fn draw_slice(of: &FaceView, slice: &mut CachedSlice, source: &Source, view: &Vi
         cells.push(Seen {
             key,
             screen: cell_box,
-            rect: [x0, rect.y - camera[1], rect.width, rect.height],
+            rect: [x0, y - camera[1], cell.width, cell.height],
             shown: placement.as_ref().map(|p| (p.chunk.clone(), p.x, p.y)),
             asks: asks.is_some(),
         });

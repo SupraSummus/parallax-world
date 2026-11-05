@@ -28,7 +28,6 @@ mod dump;
 mod occlusion;
 mod renderer;
 mod shot;
-mod slicing;
 mod view;
 mod world;
 

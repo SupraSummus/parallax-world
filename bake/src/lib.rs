@@ -14,7 +14,7 @@ mod cells;
 mod coverage;
 mod fill;
 mod layer_index;
-mod slicing;
+pub mod slicing;
 mod splats;
 mod surface;
 mod tables;

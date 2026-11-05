@@ -3,8 +3,7 @@
 //! other's. See docs/architecture.md, section 4.
 
 use bake::Lattice;
-
-use crate::slicing::LAYER;
+use bake::slicing::LAYER;
 
 pub type Vec3 = [f64; 3];
 

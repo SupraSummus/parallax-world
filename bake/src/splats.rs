@@ -148,7 +148,7 @@ fn seen(geometry: &Geometry, faces: u16) -> bool {
 pub fn chunk_splats(splats: &mut Splats, geometry: &Geometry, palette: &[u32], surface: &[Voxel], slice: &Slice, first_in_column: bool) {
     splats.clear();
     // Twice the centre plane's depth, in layers: a whole number.
-    let centre = (2.0 * slice_centre(slice.level, slice.layer) / LAYER).round() as i32;
+    let centre = (2.0 * slice_centre(slice) / LAYER).round() as i32;
 
     // Near to far, those a ray may meet.
     let mut order = std::mem::take(&mut splats.order);
@@ -214,7 +214,7 @@ mod tests {
         let slice = Slice { level: 2, layer: 0, cutoff: f64::INFINITY };
         let mut splats = Splats::new();
         chunk_splats(&mut splats, &geometry, &[0; FACE_KINDS], &surface, &slice, false);
-        let centre = slice_centre(slice.level, slice.layer);
+        let centre = slice_centre(&slice);
 
         let at = |[a, b, c]: [i32; 3]| [a as f64 * LAYER, b as f64, c as f64 * LAYER];
         // Where the ray through (px, py) on the centre plane along (sx, sy, 1)
