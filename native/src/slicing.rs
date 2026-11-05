@@ -98,12 +98,17 @@ pub fn chunk_cells(level: i32, left: f64, right: f64, bottom: f64, top: f64) -> 
  */
 const MAX_SLANT: f64 = 1.0;
 
+/** How far past its slice's centre plane a splat is per step of its depth byte, in world units (halfLayer in slice-selection.ts). */
+pub fn half_layer(level: i32) -> f64 {
+    atom_spacing(level) as f64 * LAYER / 2.0
+}
+
 /** How far around its cell a chunk of a slice of `level` may draw voxels from, in lattice units: along a, along b (cellMargin in slice-selection.ts). */
 pub fn cell_margin(level: i32) -> (i32, i32) {
     let n = atom_spacing(level) as f64;
-    let grow = MAX_SLANT * (thickness(level) as f64 / n / 2.0) * LAYER;
-    let columns = n * ((grow + 1.5) / LAYER).ceil();
-    let rows = n * (grow * 1.5f64.sqrt() + 1.5).ceil();
+    let off = MAX_SLANT * (thickness(level) as f64 / n / 2.0) * LAYER;
+    let columns = n * ((off + 1.5) / LAYER).ceil();
+    let rows = n * (off * std::f64::consts::FRAC_1_SQRT_2 + 1.5).ceil();
     (columns as i32, rows as i32)
 }
 

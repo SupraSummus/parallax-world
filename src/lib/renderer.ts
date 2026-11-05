@@ -1,5 +1,5 @@
-import { selectSlices, leakFreeDetail, leakAngle, sliceCentre, chunkCell, chunkCells, cellMargin, matchTilings, sliceKey as sliceName, siteLayers, GRID_LEVELS, atomLevel, atomSpacing, type SliceId } from './slice-selection'
-import { ChunkBaker, type ChunkSplats, type ChunkRequest } from './chunk-baker'
+import { selectSlices, leakFreeDetail, sliceCentre, chunkCell, chunkCells, cellMargin, matchTilings, sliceKey as sliceName, siteLayers, GRID_LEVELS, atomLevel, atomSpacing, type SliceId } from './slice-selection'
+import { ChunkBaker, SPLAT, type ChunkSplats, type ChunkRequest } from './chunk-baker'
 import { generatePart, World, worldTypes, type GridPart, type Vec3, type WorldType } from './world'
 import { LayerIndex, type LayerIndexData, type Material, type VoxelData } from './voxel-grid'
 import { Coverage } from './occlusion'
@@ -12,8 +12,6 @@ export interface Chunk extends ChunkSplats {
   /** Its cell (see chunkCell). */
   i: number
   j: number
-  /** Whether its splats are grown to fill gaps (see chunk_splats in bake/src/splats.rs). */
-  fill: boolean
   /** Which of its level's grids it is baked from (see ChunkRequest). */
   grid: number
 }
@@ -47,8 +45,6 @@ interface UpdateStats {
   renderTime: number
   /** Distance / max slice thickness, from the leak tolerance (see leakFreeDetail). */
   detail: number
-  /** The leak bound in pixels of this view: the compositor's focal length times leakAngle. */
-  leakPixels: number
   layerCount: number
   /** Non-empty chunks in view. */
   chunkCount: number
@@ -169,7 +165,7 @@ interface Slice {
   extents: Map<number, [number, number] | null>
 }
 
-/** The chunks baked of a cell, one per growth and grid, and the most recent one, shown while the one wanted is baking. */
+/** The chunks baked of a cell, one per grid, and the most recent one, shown while the one wanted is baking. */
 interface CellChunks {
   chunks: Chunk[]
   latest: Chunk | undefined
@@ -190,7 +186,6 @@ interface Missing {
 /** One render's settings and what it gathers across slices. */
 interface Pass {
   view: View
-  fill: boolean
   coverage: Coverage | null
   missing: Missing[]
   /** Chunks of the cells in view. */
@@ -223,9 +218,9 @@ function cellKey(i: number, j: number): number {
   return (i + 2 ** 20) * 2 ** 21 + j + 2 ** 20
 }
 
-/** The cell's chunk grown if `fill`, from the `grid`-th grid of its level. */
-function findChunk(cell: CellChunks | undefined, fill: boolean, grid: number): Chunk | undefined {
-  return cell?.chunks.find(chunk => chunk.fill === fill && chunk.grid === grid)
+/** The cell's chunk from the `grid`-th grid of its level. */
+function findChunk(cell: CellChunks | undefined, grid: number): Chunk | undefined {
+  return cell?.chunks.find(chunk => chunk.grid === grid)
 }
 
 /**
@@ -271,7 +266,6 @@ export class ParallaxRenderer {
   private fov = DEFAULT_FOV
   private maxLeak = DEFAULT_MAX_LEAK
   private renderDistance = DEFAULT_RENDER_DISTANCE
-  private fillGaps = true
   private skipCovered = true
   private width = 0
   private height = 0
@@ -329,7 +323,6 @@ export class ParallaxRenderer {
     }
     const pass: Pass = {
       view,
-      fill: this.fillGaps,
       coverage: this.skipCovered ? this.coverage : null,
       missing: [],
       inView: new Set(),
@@ -418,7 +411,6 @@ export class ParallaxRenderer {
     s.lastUpdate = {
       renderTime,
       detail,
-      leakPixels: leakAngle(detail) * view.focal,
       layerCount: frame.layers.length,
       chunkCount,
       chunksReused,
@@ -481,7 +473,7 @@ export class ParallaxRenderer {
    * never baked.
    */
   private drawSlice(pass: Pass, { face, tangents, camera, boxOf }: FaceView, slice: Slice, mode: 'want' | 'standIn' | 'probe'): Drawn {
-    const { view, fill, coverage, inView } = pass
+    const { view, coverage, inView } = pass
     const { id } = slice
     const { level, layer, cutoff } = id
     const grid = this.world.version(atomLevel(level))
@@ -518,7 +510,7 @@ export class ParallaxRenderer {
       const cellBox = boxOf(x0, x1, y0, y1, distance)
       if (!onScreen(view, cellBox)) continue
       const cell = slice.cells.get(cellKey(i, j))
-      let chunk = findChunk(cell, fill, grid)
+      let chunk = findChunk(cell, grid)
       if (covered(cellBox)) {
         // Not drawn, nor baked, but kept if baked.
         const kept = chunk ?? cell?.latest
@@ -535,17 +527,17 @@ export class ParallaxRenderer {
         if (mode === 'standIn') {
           chunk = latest
         } else if (this.baker) {
-          const request = { face: face.name, level, layer, cutoff, i, j, fill, grid }
+          const request = { face: face.name, level, layer, cutoff, i, j, grid }
           chunk = this.store(request, this.baker.bake(request))
         } else {
           // Not wanted if what stands in is hidden anyway.
-          if (latest && coverage && latest.painted > 0 && coverage.hidesChunk(latest, latest.originX - camera.x, latest.originY - camera.y, distance)) {
+          if (latest && coverage && latest.splats.length > 0 && coverage.hidesChunk(latest, latest.originX - camera.x, latest.originY - camera.y, distance)) {
             inView.add(latest)
             result.covered++
             continue
           }
           pass.pending++
-          pass.missing.push({ request: { face: face.name, level, layer, cutoff, i, j, fill, grid }, distance, stale: !!latest })
+          pass.missing.push({ request: { face: face.name, level, layer, cutoff, i, j, grid }, distance, stale: !!latest })
           chunk = latest
         }
         if (!chunk) continue
@@ -690,11 +682,6 @@ export class ParallaxRenderer {
     this.maxLeak = Math.min(MAX_MAX_LEAK, Math.max(MIN_MAX_LEAK, degrees))
   }
 
-  /** Whether splats are grown to fill the gaps between slices (see chunk_splats in bake/src/splats.rs). */
-  setFillGaps(fill: boolean) {
-    this.fillGaps = fill
-  }
-
   /** Whether chunks covered by nearer layers are skipped: not drawn, and baked last (see Coverage). */
   setSkipCovered(skip: boolean) {
     this.skipCovered = skip
@@ -749,20 +736,20 @@ export class ParallaxRenderer {
 
   /** Caches a baked chunk, unless its slice has been evicted meanwhile. */
   private store(request: ChunkRequest, baked: ChunkSplats): Chunk | undefined {
-    const { face, level, layer, cutoff, i, j, fill, grid } = request
+    const { face, level, layer, cutoff, i, j, grid } = request
     const slice = this.slices.get(sliceKey(face, { level, layer, cutoff }))
     if (!slice) return
     const key = cellKey(i, j)
     let cell = slice.cells.get(key)
     if (!cell) slice.cells.set(key, cell = { chunks: [], latest: undefined })
-    if (findChunk(cell, fill, grid)) return
-    const chunk: Chunk = { ...baked, i, j, fill, grid }
+    if (findChunk(cell, grid)) return
+    const chunk: Chunk = { ...baked, i, j, grid }
     cell.chunks.push(chunk)
     cell.latest = chunk
     slice.bytes += bytesOf(chunk)
     this.bytes += bytesOf(chunk)
     this.fresh.add(chunk)
-    this.voxelsBaked += chunk.painted
+    this.voxelsBaked += chunk.splats.length / SPLAT
     return chunk
   }
 

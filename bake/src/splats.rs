@@ -1,5 +1,5 @@
 //! The voxels of a chunk that can show, each a hexagonal dab of paint
-//! (a splat) on its slice's centre plane.
+//! (a splat) at its site, in relief over its slice's centre plane.
 
 use std::f64::consts::FRAC_1_SQRT_2;
 
@@ -8,15 +8,18 @@ use crate::surface::{Slice, Voxel};
 use crate::world::{FACE_KINDS, Geometry};
 
 /**
- * A voxel painted as a hexagon on a slice's centre plane:
+ * A voxel painted as a hexagon across the face's axis, at its site:
  * the points (x + u, y + v) with |u| ≤ width and |u| / √2 + |v| ≤ height,
- * its outline seen along the face's axis (width 1/√2, height 1, in units
- * of its grid). Grown, its sides move out.
+ * its outline seen along the axis (width 1/√2, height 1, in units of its
+ * grid), `depth` half layers past its slice's centre plane.
+ * Seen along a ray slanting σ off the axis, the voxel's outline is
+ * |σx| · width wider (its tips a layer before and after move sideways),
+ * no higher in the face's rays; the compositor widens it so.
  */
 pub struct Splat {
-    /** Its centre: its site, seen along the axis. */
     pub x: f64,
     pub y: f64,
+    pub depth: i32,
     pub width: f64,
     pub height: f64,
     /** Opaque RGBA (see voxel_colour). */
@@ -25,16 +28,31 @@ pub struct Splat {
     pub site: [i32; 3],
 }
 
+impl Splat {
+    /** How far past its centre plane it is, in units of its grid. */
+    pub fn offset(&self) -> f64 {
+        self.depth as f64 * LAYER / 2.0
+    }
+
+    /** See reach. */
+    pub fn reach(&self) -> (f64, f64) {
+        reach(self.width, self.height, self.offset())
+    }
+}
+
 /**
- * The splats of one chunk and their extent.
- * `painted` are the voxels rays of the face may reach, far to near;
- * `grown` are voxels going on into another slice, their hexagons grown
- * to close the gaps between slices, also far to near:
- * drawn only where the chunk paints nothing (docs/architecture.md, section 3).
+ * The width and height of the hexagon holding where a splat `offset` past
+ * its centre plane may be drawn on that plane, for any ray of the face:
+ * seen along a ray slanting σ off the axis, |σx| + √2·|σy| ≤ MAX_SLANT,
+ * it is drawn σ · offset off its site, |σx| · width wider.
  */
+pub fn reach(width: f64, height: f64, offset: f64) -> (f64, f64) {
+    (width + MAX_SLANT * (width + offset.abs()), height + MAX_SLANT * offset.abs() * FRAC_1_SQRT_2)
+}
+
+/** The splats of one chunk, far to near, and the extent of their reach. */
 pub struct Splats {
-    pub painted: Vec<Splat>,
-    pub grown: Vec<Splat>,
+    pub splats: Vec<Splat>,
     /** Painting order: each surface voxel's layer, and its index. */
     order: Vec<(i32, usize)>,
     pub min_x: f64,
@@ -46,8 +64,7 @@ pub struct Splats {
 impl Splats {
     pub fn new() -> Splats {
         Splats {
-            painted: Vec::new(),
-            grown: Vec::new(),
+            splats: Vec::new(),
             order: Vec::new(),
             min_x: f64::INFINITY,
             max_x: f64::NEG_INFINITY,
@@ -58,16 +75,17 @@ impl Splats {
 
     /** Empties it, keeping the lists' memory. */
     fn clear(&mut self) {
-        self.painted.clear();
-        self.grown.clear();
+        self.splats.clear();
         (self.min_x, self.max_x, self.min_y, self.max_y) = (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
     }
 
-    fn extend(&mut self, splat: &Splat) {
-        self.min_x = self.min_x.min(splat.x - splat.width);
-        self.max_x = self.max_x.max(splat.x + splat.width);
-        self.min_y = self.min_y.min(splat.y - splat.height);
-        self.max_y = self.max_y.max(splat.y + splat.height);
+    fn push(&mut self, splat: Splat) {
+        let (width, height) = splat.reach();
+        self.min_x = self.min_x.min(splat.x - width);
+        self.max_x = self.max_x.max(splat.x + width);
+        self.min_y = self.min_y.min(splat.y - height);
+        self.max_y = self.max_y.max(splat.y + height);
+        self.splats.push(splat);
     }
 }
 
@@ -108,25 +126,21 @@ fn seen(geometry: &Geometry, faces: u16) -> bool {
 /**
  * Fills `splats` with the voxels of a chunk of a slice that rays of the
  * face may reach, in painting order: far to near.
- * Slices are drawn as seen along the face's axis (orthographically): a
- * voxel's splat is its outline along the axis, centred on its site.
  * A voxel is painted if a ray of the face can meet one of its open or cut
- * faces (seen); along the axis, nearer voxels cover what they hide.
+ * faces (seen).
  *
- * Painting order: by layer, farthest first. Voxels of one layer do not
- * overlap seen along the axis; of two that do, the one in the farther
- * layer is behind.
- *
- * If `fill`, voxels with an open face and a neighbour in another slice,
- * where gaps open between slices (docs/architecture.md, section 3),
- * are also grown.
+ * Painting order: by layer, farthest first. A ray of the face passes from
+ * a voxel into one of the next layer, never back: their common face's
+ * normal is along the axis or (±1, ±√2, 1) / 2, and the rays are
+ * |σx| + √2·|σy| ≤ 1. Voxels of one layer meet only side by side.
  *
  * `surface` is the cell's (cell_surface), with the margin around the cell
  * that its chunks may show; `palette` the view face's (see voxel_colour).
  */
-pub fn chunk_splats(splats: &mut Splats, geometry: &Geometry, palette: &[u32], surface: &[Voxel], slice: &Slice, fill: bool) {
+pub fn chunk_splats(splats: &mut Splats, geometry: &Geometry, palette: &[u32], surface: &[Voxel], slice: &Slice) {
     splats.clear();
-    let centre = slice_centre(slice.level, slice.layer);
+    // Twice the centre plane's depth, in layers: a whole number.
+    let centre = (2.0 * slice_centre(slice.level, slice.layer) / LAYER).round() as i32;
 
     let mut order = std::mem::take(&mut splats.order);
     order.clear();
@@ -135,38 +149,19 @@ pub fn chunk_splats(splats: &mut Splats, geometry: &Geometry, palette: &[u32], s
 
     for &(_, k) in &order {
         let voxel = &surface[k];
-        let painted = seen(geometry, voxel.open | voxel.cut);
-        let grows = fill && voxel.cut != 0 && seen(geometry, voxel.open);
-        if !painted && !grows {
+        if !seen(geometry, voxel.open | voxel.cut) {
             continue;
         }
         let [a, b, c] = voxel.site;
-        let splat = Splat {
+        splats.push(Splat {
             x: a as f64 * LAYER,
             y: b as f64,
+            depth: 2 * c - centre,
             width: FRAC_1_SQRT_2,
             height: 1.0,
             colour: voxel_colour(voxel, palette),
             site: voxel.site,
-        };
-        if grows {
-            // The camera sees a point along a ray at most MAX_SLANT off the
-            // axis (as a tangent), so one d ahead of the centre plane is
-            // drawn at most MAX_SLANT · d off (section 2). Where its voxel
-            // meets one in another slice, within a layer of its own, that
-            // may pull it away from the other slice's drawing of the surface,
-            // so its sides move out by that much: the slanted ones, with
-            // normals (±1/√2, ±1) / √(3/2), by √(3/2) as much in `height`.
-            let d = ((c + 1) as f64 * LAYER - centre).abs().max(((c - 1) as f64 * LAYER - centre).abs());
-            let grow = MAX_SLANT * d;
-            let grown = Splat { width: splat.width + grow, height: splat.height + grow * 1.5f64.sqrt(), site: voxel.site, ..splat };
-            splats.extend(&grown);
-            splats.grown.push(grown);
-        }
-        if painted {
-            splats.extend(&splat);
-            splats.painted.push(splat);
-        }
+        });
     }
     splats.order = order;
 }
@@ -178,7 +173,7 @@ mod tests {
     use crate::world::lattices;
 
     #[test]
-    fn a_ray_along_the_axis_shows_the_voxel_it_meets_first() {
+    fn a_slanted_ray_shows_the_voxel_it_meets_first() {
         // A solid block of level 2's slab of layers, its side a + c = 0
         // at 45° to the axis, as a tree trunk ahead does where four faces
         // meet; its inside buried, so only its surface is kept.
@@ -200,42 +195,53 @@ mod tests {
             .collect();
         let slice = Slice { level: 2, layer: 0, cutoff: f64::INFINITY };
         let mut splats = Splats::new();
-        chunk_splats(&mut splats, &geometry, &[0; FACE_KINDS], &surface, &slice, false);
+        chunk_splats(&mut splats, &geometry, &[0; FACE_KINDS], &surface, &slice);
+        let centre = slice_centre(slice.level, slice.layer);
 
         let at = |[a, b, c]: [i32; 3]| [a as f64 * LAYER, b as f64, c as f64 * LAYER];
+        // Where the ray through (px, py) on the centre plane along (sx, sy, 1)
+        // enters a voxel, if it meets it: inside, n · (p − site) ≤ 1 for each
+        // face's normal n.
+        let enter = |px: f64, py: f64, [sx, sy]: [f64; 2], site: [i32; 3]| {
+            let p = at(site);
+            let (mut enter, mut exit) = (f64::NEG_INFINITY, f64::INFINITY);
+            for n in geometry.normals {
+                let along = n[0] * sx + n[1] * sy + n[2];
+                let off = n[0] * (px - p[0]) + n[1] * (py - p[1]) + n[2] * (centre - p[2]);
+                let t = (1.0 - off) / along;
+                if along < 0.0 { enter = enter.max(t) } else { exit = exit.min(t) }
+            }
+            (enter < exit).then_some(enter)
+        };
+        let first = |px: f64, py: f64, slant: [f64; 2]| {
+            let met = sites.iter().filter_map(|&s| enter(px, py, slant, s).map(|t| (t, s)));
+            met.min_by(|a, b| a.0.total_cmp(&b.0)).map(|(_, site)| site)
+        };
         let mut hits = 0;
-        for (px, py) in (0..80).flat_map(|i| (0..80).map(move |j| (-4.0 + i as f64 * 0.1, -4.0 + j as f64 * 0.1))) {
-            // The voxel the ray (px, py, z) meets first, z growing: inside one,
-            // n · (p − site) ≤ 1 for each face's normal n.
-            let enter = |&site: &[i32; 3]| {
-                let p = at(site);
-                let (mut enter, mut exit) = (f64::NEG_INFINITY, f64::INFINITY);
-                for n in geometry.normals {
-                    let off = n[0] * (px - p[0]) + n[1] * (py - p[1]) - n[2] * p[2];
-                    if n[2] == 0.0 {
-                        if off > 1.0 {
-                            return None;
-                        }
-                        continue;
-                    }
-                    let z = (1.0 - off) / n[2];
-                    if n[2] < 0.0 { enter = enter.max(z) } else { exit = exit.min(z) }
+        for slant in [[0.0, 0.0], [0.99, 0.0], [-0.99, 0.0], [0.5, 0.35], [-0.3, -0.45], [0.0, 0.7]] {
+            for (px, py) in (0..60).flat_map(|i| (0..60).map(move |j| (-4.0 + i as f64 * 0.13, -4.0 + j as f64 * 0.13))) {
+                let Some(site) = first(px, py, slant) else { continue };
+                // Near an outline rays may disagree, as the hexagon holds the outline only.
+                let near = [[0.2, 0.0], [-0.2, 0.0], [0.0, 0.2], [0.0, -0.2]];
+                if near.iter().any(|[dx, dy]| first(px + dx, py + dy, slant) != Some(site)) {
+                    continue;
                 }
-                (enter < exit).then_some(enter)
-            };
-            let Some((_, site)) = sites.iter().filter_map(|s| enter(s).map(|z| (z, *s))).min_by(|a, b| a.0.total_cmp(&b.0)) else {
-                continue;
-            };
-            hits += 1;
-            // What shows there: the last splat painted that holds the point.
-            let holds =
-                |s: &&Splat| (px - s.x).abs() <= s.width + 1e-9 && (px - s.x).abs() * FRAC_1_SQRT_2 + (py - s.y).abs() <= s.height + 1e-9;
-            let shown = splats.painted.iter().rev().find(holds).expect("a splat holds the point");
-            // On an edge between two outlines either may show.
-            let edge = splats.painted.iter().filter(holds).filter(|s| s.site[2] == shown.site[2]).count() > 1;
-            assert!(shown.site == site || edge, "({px}, {py}) shows {:?}, not {site:?}", shown.site);
+                hits += 1;
+                // What shows there: the last splat whose hexagon, at its depth and
+                // widened by the slant, holds where the ray crosses it.
+                let shown = splats.splats.iter().rev().find(|s| {
+                    let (x, y) = (px + slant[0] * s.offset(), py + slant[1] * s.offset());
+                    let width = s.width * (1.0 + slant[0].abs());
+                    (x - s.x).abs() <= width && (x - s.x).abs() * FRAC_1_SQRT_2 + (y - s.y).abs() <= s.height
+                });
+                let shown = shown.expect("a splat holds the point").site;
+                // Or its neighbour in its layer: the order within a layer is the
+                // same for every ray, and widened, their hexagons overlap.
+                let beside = shown[2] == site[2] && shown[1] == site[1] && (shown[0] - site[0]).abs() == 2;
+                assert!(shown == site || beside, "({px}, {py}) along {slant:?} shows {shown:?}, not {site:?}");
+            }
         }
-        assert!(hits > 3000, "{hits} rays met the block");
+        assert!(hits > 5000, "{hits} rays met the block");
     }
 
     #[test]

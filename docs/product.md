@@ -32,17 +32,15 @@ at a coarser level of detail, so far voxels stay a pixel or two across.
 Slices are split into chunks, baked only in view, as seen along their
 direction, and cached: moving bakes only what comes into view.
 A chunk is a list of its visible voxels,
-each painted as a hexagon of one colour, its outline along that direction:
+each painted as a hexagon of one colour, its outline along that direction,
+drawn at its voxel's depth, so a slice is a relief:
 an impressionist picture of the scene, not its exact faces.
-Slices are thin enough that
-geometry perspective would hide (e.g. stone under the lake's water
-surface) never shows by more than a set angle ("Max Occlusion Leak").
-The field of view only zooms the picture, without re-slicing,
-so zoomed in, the same slices leak more pixels;
-the statistics show the slice detail and how many pixels that is.
-"Fill Gaps" (on by default) grows the hexagons of voxels that run from one
-slice into the next, where nothing else is drawn in their chunk, so thin
-things like a floor seen from above don't show sky between slices.
+How thick slices are follows "Max Occlusion Leak":
+how far geometry perspective hides (e.g. stone under the lake's water
+surface) would show were slices drawn flat.
+Drawn in relief, it hardly shows at all,
+so the setting now trades detail against slices.
+The field of view only zooms the picture, without re-slicing.
 "Skip Covered Chunks" (on by default) doesn't draw chunks that nearer
 ones cover, nor bakes them; the picture is the same, it is there to
 compare. "Show Face Seams" (off by default) draws lines where the twelve
@@ -88,7 +86,7 @@ slice renderer.
 
 **Statistics panel** – Session totals (updates, average render time, average
 cache efficiency, voxels rendered) and details of the last update (layers,
-slice detail, leak bound in pixels, chunks in view reused vs newly baked,
+slice detail, chunks in view reused vs newly baked,
 chunks still baking, levels of detail still generating,
 chunks covered, cached chunk bytes).
 Chunks bake in background workers, so moving never waits for them;

@@ -31,7 +31,7 @@ class FakeWorker implements BakeWorker {
 }
 
 /** A chunk of a far slice, cheap to bake. */
-const at = (i: number): ChunkRequest => ({ face: '+x+z', level: 6, layer: 0, cutoff: Infinity, i, j: 0, fill: false, grid: 0 })
+const at = (i: number): ChunkRequest => ({ face: '+x+z', level: 6, layer: 0, cutoff: Infinity, i, j: 0, grid: 0 })
 
 const tick = () => new Promise(resolve => setTimeout(resolve))
 
@@ -62,14 +62,20 @@ function slowRenderer() {
   return { renderer, bake, baked: () => baked }
 }
 
-/** Remembers the chunks wanted: all of them, and the latest list. */
+/** Remembers the latest list of chunks wanted, and the chunks delivered. */
 class RecordingBakery extends WorkerBakery {
-  all: ChunkRequest[] = []
   latest: ChunkRequest[] = []
+  delivered: ChunkRequest[] = []
   override want(requests: ChunkRequest[]) {
-    this.all.push(...requests)
     this.latest = requests
     super.want(requests)
+  }
+
+  override connect(...[deliver, generated]: Parameters<WorkerBakery['connect']>) {
+    super.connect((request, chunk) => {
+      this.delivered.push(request)
+      deliver(request, chunk)
+    }, generated)
   }
 }
 
@@ -77,6 +83,28 @@ class RecordingBakery extends WorkerBakery {
 const cell = ({ face, level, layer, cutoff, i, j }: ChunkRequest) => [face, level, layer, cutoff, i, j].join()
 
 const pending = (renderer: ParallaxRenderer) => renderer.getStats().lastUpdate?.chunksPending ?? 0
+
+/**
+ * The generated forest through `bakery`, settled, then moved forward
+ * until its first grid moves with the camera: the cells baked from it
+ * still in view are baked again, from the new one. Every chunk wanted
+ * so far is baked.
+ */
+async function moveFirstGrid(bakery: Bakery) {
+  const renderer = new ParallaxRenderer(world, { bakery })
+  renderer.resize(800, 600)
+  renderer.regenerateWorld(3, 'forest')
+  const generated = renderer.getWorld()
+  while (Array.from({ length: GRID_LEVELS }, (_, level) => generated.level(level)).some(grid => !grid)) await tick()
+  await settle(renderer)
+  const { x, y, z } = renderer.getCamera()
+  renderer.setCamera({ x, y, z: z + 100 })
+  do {
+    renderer.render()
+    await tick()
+  } while (generated.version(0) === 0)
+  return renderer
+}
 
 /** Renders until no chunk in view is still baking. */
 async function settle(renderer: ParallaxRenderer): Promise<Frame> {
@@ -99,10 +127,9 @@ const shown = (frame: Frame) => frame.layers.map(l => l.placements.map(({ chunk,
   ({ i: chunk.i, j: chunk.j, splats: checksum(chunk.splats), x, y })))
 
 /** What baking on the main thread shows. */
-function reference(camera?: Camera, from = world, orientation?: Orientation, fill = true) {
+function reference(camera?: Camera, from = world, orientation?: Orientation) {
   const renderer = new ParallaxRenderer(from)
   renderer.resize(800, 600)
-  renderer.setFillGaps(fill)
   if (camera) renderer.setCamera(camera)
   if (orientation) renderer.setOrientation(orientation)
   return shown(renderer.render())
@@ -123,17 +150,12 @@ describe('WorkerBakery', () => {
     expect(faces.size).toBeGreaterThanOrEqual(yaw === 0 ? 4 : 3)
   })
 
-  it("shows a cell's older bake while its new one is baking", async () => {
-    const renderer = workerRenderer()
-    await settle(renderer)
-    // Without gap filling, every chunk is baked again.
-    renderer.setFillGaps(false)
-    const baking = shown(renderer.render())
-    const target = reference(renderer.getCamera(), world, undefined, false)
-    const standIns = baking.flatMap((layer, i) => layer.filter(c =>
-      target[i].some(t => t.i === c.i && t.j === c.j && t.splats !== c.splats)))
-    expect(standIns.length).toBeGreaterThan(0)
-    expect(shown(await settle(renderer))).toEqual(target)
+  it("shows a cell's bake from its grid's old place while the new one is baking", async () => {
+    const renderer = await moveFirstGrid(new WorkerBakery([new FakeWorker(), new FakeWorker()]))
+    const grids = (frame: Frame) => frame.layers.filter(l => atomLevel(l.slice.level) === 0).flatMap(l => l.placements.map(p => p.chunk.grid))
+    expect(grids(renderer.render())).toContain(0)
+    expect(pending(renderer)).toBeGreaterThan(0)
+    expect(new Set(grids(await settle(renderer)))).toEqual(new Set([1]))
   })
 
   it('bakes only the chunks of the latest render', async () => {
@@ -188,32 +210,25 @@ describe('WorkerBakery', () => {
   })
 
   it('bakes cells that show nothing before rebaking cells an older bake stands in for', async () => {
+    // Forward: new cells come into view, and those of the first grid are baked again.
     const bakery = new RecordingBakery([new FakeWorker(), new FakeWorker()])
-    const renderer = new ParallaxRenderer(world, { bakery })
-    renderer.resize(800, 600)
-    // Covered cells are not baked: bake every cell, so each has an older bake.
-    renderer.setSkipCovered(false)
-    await settle(renderer)
-    const baked = new Set(bakery.all.map(cell))
-    // Every cell baked again, without gap filling; and forward and
-    // sideways, so near slices re-tile and new cells come into view.
-    renderer.setFillGaps(false)
-    const { x, z } = renderer.getCamera()
-    renderer.setCamera({ x: x + 3, z: z + 3 })
-    renderer.render()
-    const standsIn = bakery.latest.map(r => baked.has(cell(r)))
+    const renderer = await moveFirstGrid(bakery)
+    const baked = new Set(bakery.delivered.map(cell))
+    // Re-tiled segments come between, their slices drawn only once all baked.
+    const drawn = new Set(renderer.render().layers.map(({ face, slice: { level, layer, cutoff } }) => [face.name, level, layer, cutoff].join()))
+    const standsIn = bakery.latest.filter(r => drawn.has([r.face, r.level, r.layer, r.cutoff].join())).map(r => baked.has(cell(r)))
     expect(standsIn.indexOf(false)).toBe(0)
     expect(standsIn.lastIndexOf(false)).toBeLessThan(standsIn.indexOf(true))
   })
 
   it('stops baking once settled, though the cache is past its cap', async () => {
-    // The city at full HD, 3° leaks: its chunks with fill gaps on and off pass the cap
+    // The city at full HD, sliced at two leaks: their chunks pass the cap
     // on hidden chunks, so eviction reaches the slices in view.
     const renderer = new ParallaxRenderer(new World(12345, 'city'), { bakery: new WorkerBakery([new FakeWorker()]) })
     renderer.resize(1920, 1080)
     renderer.setMaxLeak(3)
     await settle(renderer)
-    renderer.setFillGaps(false)
+    renderer.setMaxLeak(2)
     await settle(renderer)
     expect(renderer.getStats().lastUpdate?.cachedBytes).toBeGreaterThan(32_000_000)
     // settle()'s last render evicted; did it drop chunks the view wants but does not draw?
@@ -232,8 +247,8 @@ describe('WorkerBakery', () => {
     }
     const [skipping, all] = [settled(true), settled(false)]
     expect(skipping.picture).toEqual(all.picture)
-    // ~240 against ~680.
-    expect(skipping.bakes).toBeLessThan(all.bakes / 2)
+    // ~450 against ~880: what a chunk covers for every camera, less than for one.
+    expect(skipping.bakes).toBeLessThan(all.bakes * 0.6)
   })
 
   it('while slices re-tile, shows the slices they replace until the new ones are baked', async () => {
@@ -274,12 +289,12 @@ describe('WorkerBakery', () => {
   })
 
   it('drops chunks baked from a replaced world', async () => {
-    const request = { face: '+x+z', level: 5, layer: 0, cutoff: Infinity, i: 0, j: 0, eye: [0, 0, 0] as const, fill: false, grid: 0 }
-    expect(new ChunkBaker(world.materials, world.levels).bake(request).painted).toBeGreaterThan(0)
+    const request = { face: '+x+z', level: 5, layer: 0, cutoff: Infinity, i: 0, j: 0, grid: 0 }
+    expect(new ChunkBaker(world.materials, world.levels).bake(request).splats.length).toBeGreaterThan(0)
 
     const bakery = new WorkerBakery([new FakeWorker()])
     const delivered: number[] = []
-    bakery.connect((_, chunk) => { delivered.push(chunk.painted) })
+    bakery.connect((_, chunk) => { delivered.push(chunk.splats.length) })
     bakery.setWorld(world.materials, world.levels)
     bakery.want([request])
     const empty = VoxelGrid.fromVoxels([])

@@ -33,6 +33,7 @@ use world::{Geometry, Reader};
 // For native frontends, which link the baker instead of loading its WebAssembly.
 pub use coverage::Coverage;
 pub use layer_index::LayerIndex;
+pub use splats::reach;
 pub use surface::Slice;
 pub use world::{Grid, Lattice, Tiles, VIEW_FACES, lattices};
 
@@ -83,8 +84,8 @@ pub struct Baked {
     pub extent_width: f64,
     pub extent_height: f64,
     pub scale: f64,
-    pub painted: usize,
-    pub grown: usize,
+    /** How many splats. */
+    pub count: usize,
 }
 
 /** One world's grids, palettes and lattices, and the buffers reused across bakes. */
@@ -103,9 +104,9 @@ pub struct Baker {
     /** Which cell of 2·FCC owns each site, for cutoffs. */
     pairs: Cells,
     splats: Splats,
-    mask: Vec<bool>,
+    mask: Vec<u8>,
     pub blocks: Vec<u8>,
-    /** The splats as numbers (see ChunkSplats), painted then grown. */
+    /** The splats as numbers (see ChunkSplats). */
     pub numbers: Vec<f32>,
     /** Their sites, filled by sites(), and the spacing of the grid they were read from. */
     sites: Vec<i32>,
@@ -162,21 +163,21 @@ impl Baker {
     }
 
     /**
-     * Bakes chunk (i, j) of a slice of view face `face`, grown to fill gaps
-     * if `fill`: its splats that reach into the cell (chunk_splats), the
-     * extent of what they draw clipped to the cell, and a mask of it.
+     * Bakes chunk (i, j) of a slice of view face `face`: its splats that
+     * may be drawn in the cell (chunk_splats), the extent of where they
+     * may be drawn clipped to the cell, and a mask of it.
      * See ChunkBaker.bake.
      */
-    pub fn bake(&mut self, face: usize, slice: &Slice, i: i32, j: i32, fill: bool) -> Baked {
+    pub fn bake(&mut self, face: usize, slice: &Slice, i: i32, j: i32) -> Baked {
         let (level, slice) = in_grid(slice);
         self.reach(level);
         let reader = Reader::new(&self.grids[level], self.lattices[face]);
         let surface = cell_surface(&reader, &self.geometry, &self.pairs, &slice, i, j);
         let palettes = self.palettes.len() / VIEW_FACES;
         let palette = &self.palettes[face * palettes..(face + 1) * palettes];
-        chunk_splats(&mut self.splats, &self.geometry, palette, &surface, &slice, fill);
+        chunk_splats(&mut self.splats, &self.geometry, palette, &surface, &slice);
 
-        // Drawn extent, clipped to the cell, in the grid's units.
+        // Where they may be drawn, clipped to the cell, in the grid's units.
         let cell = chunk_cell(slice.level, i, j);
         let (left, bottom) = (cell.left as f64 * LAYER, cell.bottom as f64);
         let splats = &mut self.splats;
@@ -186,17 +187,16 @@ impl Baker {
         let max_y = splats.max_y.min(bottom + cell.height);
         let empty = max_x <= min_x || max_y <= min_y;
         // Splats that miss the cell draw nothing.
-        let reaches = |s: &splats::Splat| {
-            !empty && s.x + s.width > min_x && s.x - s.width < max_x && s.y + s.height > min_y && s.y - s.height < max_y
-        };
-        splats.painted.retain(reaches);
-        splats.grown.retain(reaches);
+        splats.splats.retain(|s| {
+            let (w, h) = s.reach();
+            !empty && s.x + w > min_x && s.x - w < max_x && s.y + h > min_y && s.y - h < max_y
+        });
 
         let scale = mask_scale(slice.level);
         let width = if empty { 0 } else { ((max_x - min_x) * scale).ceil() as usize };
         let height = if empty { 0 } else { ((max_y - min_y) * scale).ceil() as usize };
         self.mask.clear();
-        self.mask.resize(width * height, false);
+        self.mask.resize(width * height, 0);
         fill_mask(splats, &mut self.mask, width, height, min_x, max_y, scale);
         solid_blocks(&mut self.blocks, &self.mask, width, height);
 
@@ -204,13 +204,14 @@ impl Baker {
         self.spacing = spacing(level as i32);
         let n = self.spacing as f64;
         self.numbers.clear();
-        for s in splats.painted.iter().chain(&splats.grown) {
+        for s in &splats.splats {
             self.numbers.extend([
                 ((s.x - min_x) * n) as f32,
                 ((s.y - max_y) * n) as f32,
                 (s.width * n) as f32,
                 (s.height * n) as f32,
-                f32::from_bits(s.colour),
+                // Its depth in the alpha byte, as splats are opaque: within ±2^ATOM_SHIFT half layers.
+                f32::from_bits(s.colour & 0x00ff_ffff | ((128 + s.depth) as u32) << 24),
             ]);
         }
         Baked {
@@ -221,8 +222,7 @@ impl Baker {
             extent_width: if empty { 0.0 } else { (max_x - min_x) * n },
             extent_height: if empty { 0.0 } else { (max_y - min_y) * n },
             scale: scale / n,
-            painted: splats.painted.len(),
-            grown: splats.grown.len(),
+            count: splats.splats.len(),
         }
     }
 }
@@ -241,7 +241,7 @@ enum State {
 
 thread_local! {
     static STATE: RefCell<State> = const { RefCell::new(State::None) };
-    static RESULT: RefCell<[f64; 12]> = const { RefCell::new([0.0; 12]) };
+    static RESULT: RefCell<[f64; 11]> = const { RefCell::new([0.0; 11]) };
 }
 
 /** Starts a world of `materials` materials; returns where to write their colours (u32, 0xrrggbb by id), then call world_ready. */
@@ -290,15 +290,14 @@ pub extern "C" fn world_ready() {
 
 /**
  * Bakes a chunk (see Baker::bake); returns RESULT: mask width, height,
- * origin x, origin y, extent width, height, mask scale, painted and grown
- * splats, splats pointer (f32, 5 each), blocks pointer, blocks length.
+ * origin x, origin y, extent width, height, mask scale, splats, splats
+ * pointer (f32, 5 each), blocks pointer, blocks length.
  */
 #[unsafe(no_mangle)]
-#[allow(clippy::too_many_arguments)]
-pub extern "C" fn bake(face: u32, level: i32, layer: i32, cutoff: f64, i: i32, j: i32, fill: u32) -> *const f64 {
+pub extern "C" fn bake(face: u32, level: i32, layer: i32, cutoff: f64, i: i32, j: i32) -> *const f64 {
     STATE.with_borrow_mut(|state| {
         let State::Ready(baker) = state else { return std::ptr::null() };
-        let baked = baker.bake(face as usize, &Slice { level, layer, cutoff }, i, j, fill != 0);
+        let baked = baker.bake(face as usize, &Slice { level, layer, cutoff }, i, j);
         RESULT.with_borrow_mut(|result| {
             *result = [
                 baked.width as f64,
@@ -308,8 +307,7 @@ pub extern "C" fn bake(face: u32, level: i32, layer: i32, cutoff: f64, i: i32, j
                 baked.extent_width,
                 baked.extent_height,
                 baked.scale,
-                baked.painted as f64,
-                baked.grown as f64,
+                baked.count as f64,
                 baker.numbers.as_ptr() as usize as f64,
                 baker.blocks.as_ptr() as usize as f64,
                 baker.blocks.len() as f64,
@@ -320,7 +318,7 @@ pub extern "C" fn bake(face: u32, level: i32, layer: i32, cutoff: f64, i: i32, j
 }
 
 /**
- * The sites of the last baked chunk's splats, painted then grown, for
+ * The sites of the last baked chunk's splats, for
  * tests: a, b, c (i32) each, in world units.
  */
 #[unsafe(no_mangle)]
@@ -329,7 +327,7 @@ pub extern "C" fn sites() -> *const i32 {
         State::Ready(baker) => {
             let Baker { splats, sites, spacing, .. } = &mut **baker;
             sites.clear();
-            sites.extend(splats.painted.iter().chain(&splats.grown).flat_map(|s| s.site.map(|v| v * *spacing)));
+            sites.extend(splats.splats.iter().flat_map(|s| s.site.map(|v| v * *spacing)));
             sites.as_ptr()
         }
         _ => std::ptr::null(),

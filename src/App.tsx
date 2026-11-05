@@ -62,7 +62,6 @@ function App() {
   const [fov, setFov] = useState(DEFAULT_FOV)
   const [renderDistance, setRenderDistance] = useState(DEFAULT_RENDER_DISTANCE)
   const [maxLeak, setMaxLeak] = useState(DEFAULT_MAX_LEAK)
-  const [fillGaps, setFillGaps] = useState(true)
   const [skipCovered, setSkipCovered] = useState(true)
   const [showSeams, setShowSeams] = useState(false)
   // Generating a world blocks this thread for a second or two; a spinner shows meanwhile.
@@ -286,12 +285,6 @@ function App() {
     compositorRef.current?.setShowSeams(value)
   }
 
-  const handleFillGapsChange = (value: boolean) => {
-    setFillGaps(value)
-    rendererRef.current?.setFillGaps(value)
-    requestRender()
-  }
-
   const totalUpdates = sessionStats?.totalUpdates ?? 0
   const averageCacheEfficiency = sessionStats?.averageCacheEfficiency ?? 0
   const lastUpdate = sessionStats?.lastUpdate
@@ -358,10 +351,6 @@ function App() {
               step={0.1}
               onChange={handleMaxLeakChange}
             />
-            <label className="flex items-center justify-between text-xs text-muted-foreground">
-              Fill Gaps
-              <Switch checked={fillGaps} onCheckedChange={handleFillGapsChange} aria-label="Fill gaps" />
-            </label>
             <label className="flex items-center justify-between text-xs text-muted-foreground">
               Skip Covered Chunks
               <Switch checked={skipCovered} onCheckedChange={handleSkipCoveredChange} aria-label="Skip covered chunks" />
@@ -441,7 +430,6 @@ function App() {
                     <StatRow label="Render Time">{lastUpdate.renderTime.toFixed(2)}ms</StatRow>
                     <StatRow label="Active Layers">{lastUpdate.layerCount}</StatRow>
                     <StatRow label="Slice Detail">{lastUpdate.detail.toFixed(1)}</StatRow>
-                    <StatRow label="Leak Bound">{lastUpdate.leakPixels.toFixed(1)} px</StatRow>
                     <StatRow label="Chunks in View">{lastUpdate.chunkCount}</StatRow>
                     <StatRow label="Reused / Regenerated">
                       <span className="text-primary">{lastUpdate.chunksReused}</span>

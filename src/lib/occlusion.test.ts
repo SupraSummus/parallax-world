@@ -7,11 +7,13 @@ const world = new World(12345, 'hills_with_trees')
 const [WIDTH, HEIGHT] = [800, 600]
 
 describe('skipping covered chunks', () => {
-  it.each([[0, 0], [20, -25], [-30, 10]])('leaves the picture unchanged (yaw %s°, pitch %s°)', (yaw, pitch) => {
+  // The thickest slices too: in relief, their splats move most with the camera.
+  it.each([[0, 0, 6], [20, -25, 6], [-30, 10, 6], [20, -25, 12], [-30, 10, 12]])('leaves the picture unchanged (yaw %s°, pitch %s°, max leak %s°)', (yaw, pitch, maxLeak) => {
     const frames = [false, true].map(skip => {
       const renderer = new ParallaxRenderer(world)
       renderer.resize(WIDTH, HEIGHT)
       renderer.setOrientation({ yaw, pitch })
+      renderer.setMaxLeak(maxLeak)
       renderer.setSkipCovered(skip)
       renderer.render()
       return { frame: renderer.render(), covered: renderer.getStats().lastUpdate?.chunksCovered ?? 0 }
