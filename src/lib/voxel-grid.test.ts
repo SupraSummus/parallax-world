@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { FACES } from './view'
+import { VOXEL_FACES } from './fcc'
 import { coarsen, LayerIndex, VoxelGrid, isSite } from './voxel-grid'
 import { World } from './world'
 
@@ -110,5 +111,18 @@ describe('coarsen', () => {
     const coarse = coarsen(made((_, y) => (y <= 0 ? 1 : 2)))
     expect(coarse.get(0, 0, 0)).toBe(1)
     expect(coarse.get(1, 1, 0)).toBe(2)
+  })
+
+  it('makes each face that shows of the material of the open faces facing its way', () => {
+    // A red block under a blue sheet one voxel thick, up to x = 8. From above, coarse voxels of the sheet
+    // hide the block's; at its edge, the red one under the sheet is blue only on its faces up towards ±z,
+    // which nothing coarse covers, and red on the rest, which look at the block's side or are covered.
+    const coarse = coarsen(made((x, y) => (x > 8 ? 0 : y === 1 ? 2 : y <= 0 ? 1 : 0)))
+    const faces = (grid: VoxelGrid, x: number) => VOXEL_FACES.map((_, k) => grid.face(x, 0, 0, k))
+    const edge = VOXEL_FACES.map(({ normal: [a, b] }) => (a === 0 && b > 0 ? 2 : 1))
+    expect([coarse.get(4, 0, 0), coarse.get(3, 1, 0)]).toEqual([1, 2])
+    expect(faces(coarse, 4)).toEqual(edge)
+    // A coarser level measures the finer one's faces.
+    expect(faces(coarsen(coarse), 2)).toEqual(edge)
   })
 })

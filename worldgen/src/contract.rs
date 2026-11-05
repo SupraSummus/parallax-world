@@ -90,7 +90,8 @@ pub fn whole_equals_parts(generator: &Generator, region: &Box3, level: u32) {
     for part in parts.iter().rev() {
         let alone = generate(generator, part, level);
         for (x, y, z) in sites(part) {
-            assert_eq!(alone.get(x, y, z), grid.get(x, y, z), "level {level}: part {part:?} differs at ({x}, {y}, {z})");
+            let look = |g: &VoxelGrid| (g.get(x, y, z), g.faces_at(x, y, z).copied());
+            assert_eq!(look(&alone), look(&grid), "level {level}: part {part:?} differs at ({x}, {y}, {z})");
         }
     }
 }

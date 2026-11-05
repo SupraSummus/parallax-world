@@ -33,8 +33,11 @@ Slices are split into chunks, baked only in view, as seen along their
 direction, and cached: moving bakes only what comes into view.
 A chunk is a list of its visible voxels,
 each painted as a hexagon of one colour, its outline along that direction,
-drawn at its voxel's depth, so a slice is a relief:
+drawn at its voxel's depth, so a slice is a relief,
+in the colour of its voxel's face towards it:
 an impressionist picture of the scene, not its exact faces.
+A voxel may have a different material on each of its 12 faces,
+so a coarse voxel at a house's eaves is roof from above and wall from the side.
 How thick slices are follows "Max Occlusion Leak":
 how far geometry perspective hides (e.g. stone under the lake's water
 surface) would show were slices drawn flat.

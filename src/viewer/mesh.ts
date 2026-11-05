@@ -36,7 +36,8 @@ const FACES = VOXEL_FACES.map(({ normal: [a, b, c], corners }) => ({
  * Voxel (x, y, z) of level ℓ is the rhombic dodecahedron around site
  * 2^ℓ · (x, y, z) (see fcc.ts).
  * A face is drawn unless a neighbour in the ring covers it,
- * so each ring is closed where it meets the next.
+ * so each ring is closed where it meets the next,
+ * in its own material (VoxelGrid.face).
  */
 export function buildVoxelMesh(world: World, around: Vec3 = { x: 0, y: 0, z: 0 }, reach = Infinity, level = 0): VoxelMesh {
   const grid = world.levelAround(level, around)
@@ -45,12 +46,12 @@ export function buildVoxelMesh(world: World, around: Vec3 = { x: 0, y: 0, z: 0 }
     const d = Math.max(Math.abs(x * scale - around.x), Math.abs(z * scale - around.z))
     return d <= reach * scale && (level === 0 || d > (reach * scale) / 2)
   }
-  // Each face drawn: f(x, y, z, id, face index).
+  // Each face drawn: f(x, y, z, its material, face index).
   const eachFace = (f: (x: number, y: number, z: number, id: number, face: number) => void) => {
-    grid.forEach((x, y, z, id) => {
+    grid.forEach((x, y, z) => {
       if (!inRing(x, z)) return
       FACES.forEach(({ normal: [a, b, c] }, k) => {
-        if (grid.get(x + a, y + b, z + c) === 0 || !inRing(x + a, z + c)) f(x, y, z, id, k)
+        if (grid.get(x + a, y + b, z + c) === 0 || !inRing(x + a, z + c)) f(x, y, z, grid.face(x, y, z, k), k)
       })
     })
   }

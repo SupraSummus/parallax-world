@@ -58,9 +58,7 @@ pub const WORLDS: &[Entry] = &[
         make: valley::valley,
         regions: &[Box3 { min: [-128, -48, 760], max: [256, 208, 1016] }, Box3 { min: [-64, -48, 1408], max: [320, 288, 1856] }],
         levels: 4,
-        // At level 4, sites 2 m apart, a house's edges, of one kind seen from any side, grow up to half a site
-        // and show walls from above, 0.11 off at the town's edge ("Media are isotropic" in docs/generators.md).
-        from_above: 3,
+        from_above: 4,
         far: &[Box3 { min: [-704, -48, 864], max: [704, 288, 2336] }],
     },
     // The first steading: its hut, the cairns and the ring north of it, heather and grass, from under the ground to over the roof.
@@ -70,7 +68,7 @@ pub const WORLDS: &[Entry] = &[
         make: moor::moor,
         regions: &[Box3 { min: [-64, -32, -192], max: [192, 64, 192] }],
         levels: 5,
-        from_above: 3,
+        from_above: 5,
         far: &[Box3 { min: [-640, -32, -640], max: [768, 64, 768] }],
     },
     // The first settlement's main street where a cross street meets it: houses facing both, yards, trees, paving.
@@ -80,7 +78,7 @@ pub const WORLDS: &[Entry] = &[
         make: learned::learned,
         regions: &[Box3 { min: [64, -48, 1984], max: [448, 208, 2368] }],
         levels: 4,
-        from_above: 3,
+        from_above: 4,
         far: &[Box3 { min: [-1536, -48, 544], max: [1536, 288, 3616] }],
     },
 ];

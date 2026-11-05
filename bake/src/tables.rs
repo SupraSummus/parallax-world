@@ -5,8 +5,12 @@
 use crate::slicing::LAYER;
 use crate::world::{FACE_KINDS, Geometry, Lattice};
 
-/** The voxel's 12 faces' normals, the offsets of the neighbours across them; a face's index is its kind. */
-const NORMALS: [[i32; 3]; FACE_KINDS] = [
+/**
+ * The voxel's 12 faces' normals in the world, the offsets of the
+ * neighbours across them; a face's index is its kind (VOXEL_FACES in
+ * fcc.ts, in the same order).
+ */
+pub const VOXEL_FACES: [[i32; 3]; FACE_KINDS] = [
     [-1, -1, 0],
     [-1, 1, 0],
     [1, -1, 0],
@@ -32,7 +36,7 @@ fn lattice_of(Lattice { r, u, f }: &Lattice, v: [i32; 3]) -> [i32; 3] {
  * the same for every face, as they see the same lattice.
  */
 pub fn geometry(lattice: &Lattice) -> Geometry {
-    let offsets = NORMALS.map(|n| lattice_of(lattice, n));
+    let offsets = VOXEL_FACES.map(|n| lattice_of(lattice, n));
     Geometry { offsets, normals: offsets.map(|[a, b, c]| [a as f64 * LAYER, b as f64, c as f64 * LAYER]) }
 }
 
@@ -55,7 +59,7 @@ fn face_shade([x, y, z]: [f64; 3]) -> f64 {
 pub fn palettes(lattices: &[Lattice], colours: &[u32]) -> Vec<u32> {
     let mut all = Vec::with_capacity(lattices.len() * colours.len() * FACE_KINDS);
     for Lattice { r, u, f } in lattices {
-        let shades = NORMALS.map(|n| {
+        let shades = VOXEL_FACES.map(|n| {
             let [a, b, c] = lattice_of(&lattices[0], n).map(f64::from);
             face_shade(std::array::from_fn(|d| (a * r[d] as f64 + c * f[d] as f64) / 2.0 + b * u[d] as f64))
         });
@@ -82,7 +86,7 @@ mod tests {
         // camera faces up and −z.
         let lattice = Lattice { r: [1, 0, -1], u: [0, 1, 0], f: [1, 0, 1] };
         let palette = palettes(&[lattice], &[0, 0xff0000]);
-        let kind = |offset: [i32; 3]| NORMALS.iter().position(|&n| lattice_of(&lattice, n) == offset).expect("a kind");
+        let kind = |offset: [i32; 3]| VOXEL_FACES.iter().position(|&n| lattice_of(&lattice, n) == offset).expect("a kind");
         let red = |k: usize| palette[FACE_KINDS + k] & 255;
         assert_eq!(red(kind([0, 0, -2])), (255.0 * (left + front) / 2.0 + 0.5).floor() as u32);
         assert_eq!(red(kind([1, 1, -1])), (255.0 * (top + front) / 2.0 + 0.5).floor() as u32);

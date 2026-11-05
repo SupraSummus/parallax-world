@@ -96,9 +96,17 @@ how many rays get how far, and what they stop on.
   so a cell holds fewer columns than its shadow, and unevenly by axis;
   counted against its shadow, a solid cell came out 0.83 at sites twice apart,
   and one house in six vanished.
-  A coarse site is of a kind in proportion to what rays along columns see:
-  each column's first fine site from either end
-  counts for the first kept cell the column crosses from that end.
+  Each face of a coarse site is of a kind
+  in proportion to what rays through it see
+  (a site's `Look`: a kind, and one per face where they differ,
+  so a house's eaves are roof from above and wall from the side).
+  Along the face's normal, a line of nearest neighbours,
+  each column's first fine site from that end
+  counts for that face of the first kept cell the column crosses from there;
+  a face no column sees first through takes what its runs in the cell
+  start with.
+  The site's own kind is of what all its faces see,
+  for whatever does not look at faces.
   From the ends of every column's run in the cell instead,
   a town seen from above showed walls hidden inside its houses.
   The chances are held to one threshold for the whole thing:
@@ -227,10 +235,9 @@ a world drawing a canopy as a field of its own would have it followed.
   against level 0, within 0.1:
   levels two apart miss what drifts a little at every level,
   like a town's walls taking over from its roofs (0.17 off at level 2).
-  The valley, the moor and the learned town stop at 3:
-  at level 4 a house's edges show their walls from above
-  (see "Media are isotropic").
-  The forest goes to 6, its canopy seen over 128 m there,
+  Rays see the faces they enter by, from above the ones up.
+  Each world goes as far as it keeps what a camera sees;
+  the forest to 6, its canopy seen over 128 m there,
   which takes most of its test's time;
 - in an entry's `far` regions, wide ones (only x and z count),
   what its fields alone show from above at levels 4 to 6, against level 0,
@@ -470,21 +477,16 @@ Carves along a line want the same margin.
   but from above at level 6 went to 0.096.
 - **Media are isotropic.** A site stops rays from every direction alike;
   vertical trunks seen from above and from the side cannot both be right.
-  Measured far forms show it too: a site is of one kind from every side,
-  so at a house's edge, roof from above and wall from the side,
-  it shows walls from above some of the time:
-  at level 4 (sites 2 m apart) the valley's town is 0.11 off from above.
+  (Opacity per direction, tried in a prototype, made things worse.)
+  What they show needn't be: measured far forms give each face its kind,
+  and at level 4 (sites 2 m apart) the valley's town edge from above
+  came from 0.105 to 0.071 off, the learned town's from 0.099 to 0.062 (seed 42),
+  while the materials rays hit from anywhere stayed within 0.08.
   At level 5 its houses and church cover more of its streets
   (rays hit streets 0.08 less often, 0.13 off),
   as a cell half covered by a wall stops every ray across the wall
   and is mostly kept;
   so the valley keeps what a camera sees to level 4.
-  Kinds credited by direction can't settle it:
-  from above only, level 4 from above came to 0.05,
-  but the materials rays hit at levels 3 and 4 to 0.12 and 0.16;
-  each axis's columns weighted by the thing's shadow along it,
-  or credited to the cell their first fine site is in,
-  moved neither by more than 0.01.
   The forest's canopy is caught the same way ("Populations" in "Levels"):
   from above, rays want what each slab adds seen across;
   among the trees and obliquely, what it hides from the side.

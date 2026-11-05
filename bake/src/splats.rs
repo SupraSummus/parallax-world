@@ -90,11 +90,12 @@ impl Splats {
 }
 
 /**
- * A voxel's colour, the same from every side: the mean of its open faces'
- * shaded colours (or of its cut faces', if it has none), so a splat is
- * shaded by the way its surface faces. `palette` is a view face's
- * (material · FACE_KINDS + kind → RGBA); every view face's gives the same,
- * as it shades a face by the way it faces in the world.
+ * A voxel's colour: its material (that of its face towards the camera,
+ * as Reader reads it) shaded as the mean of its open faces' shades (or
+ * of its cut faces', if it has none), so a splat is shaded by the way its
+ * surface faces. `palette` is a view face's (material · FACE_KINDS + kind
+ * → RGBA); every view face's shades alike, by the way a face faces in the
+ * world.
  */
 pub fn voxel_colour(voxel: &Voxel, palette: &[u32]) -> u32 {
     let faces = if voxel.open != 0 { voxel.open } else { voxel.cut };

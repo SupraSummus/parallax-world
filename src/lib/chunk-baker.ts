@@ -70,6 +70,7 @@ interface Baker {
   world_start: (materials: number) => number
   world_grid: (level: number, minX: number, minY: number, minZ: number, nx: number, ny: number, nz: number, used: number) => number
   world_cells: () => number
+  world_faces: (sites: number) => number
   world_ready: () => void
   bake: Call
   sites: () => number
@@ -99,7 +100,7 @@ export class ChunkBaker {
 
   /** Sets the grid of `level`; until then, its chunks are empty. */
   addGrid(level: number, grid: VoxelData) {
-    writeGrid(this.baker.memory, grid, (...box) => this.baker.world_grid(level, ...box), this.baker.world_cells)
+    writeGrid(this.baker.memory, grid, (...box) => this.baker.world_grid(level, ...box), this.baker.world_cells, this.baker.world_faces)
   }
 
   /**
@@ -231,8 +232,8 @@ export function bakeHandler(
     // Where its voxels are, so the main thread need not find out.
     const { keys, tables } = LayerIndex.of(grid)
     // Just the fields: a class's methods would not survive posting.
-    const { minX, minY, minZ, nx, ny, nz, bricks, cells, materials } = grid
-    post({ type: 'part', generation, part, grid: { minX, minY, minZ, nx, ny, nz, bricks, cells, materials }, index: { keys, tables } }, [bricks.buffer, cells.buffer, ...tables.flatMap(t => [t.low.buffer, t.high.buffer])])
+    const { minX, minY, minZ, nx, ny, nz, bricks, cells, faces, materials } = grid
+    post({ type: 'part', generation, part, grid: { minX, minY, minZ, nx, ny, nz, bricks, cells, faces, materials }, index: { keys, tables } }, [bricks.buffer, cells.buffer, faces.buffer, ...tables.flatMap(t => [t.low.buffer, t.high.buffer])])
   }
   const step = () => {
     scheduled = false

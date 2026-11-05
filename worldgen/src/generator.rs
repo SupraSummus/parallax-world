@@ -3,8 +3,11 @@
 //! detail. See docs/generators.md.
 
 use std::cell::OnceCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::OnceLock;
+
+use bake::{FACE_KINDS, VOXEL_FACES};
 
 use crate::grid::{Box3, VoxelGrid};
 use crate::js;
@@ -13,6 +16,26 @@ use crate::plan;
 
 /** A material kind: its index in Generator::kinds. */
 pub type Kind = u8;
+
+/**
+ * What a site is of: a kind, and the kind of each of its faces (by bake's
+ * VOXEL_FACES), what is seen looking at that face, where they differ:
+ * a coarse site at a house's eaves is roof seen from above, wall from the side.
+ */
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Look {
+    pub kind: Kind,
+    pub faces: Option<[Kind; FACE_KINDS]>,
+}
+
+impl From<Kind> for Look {
+    fn from(kind: Kind) -> Look {
+        Look { kind, faces: None }
+    }
+}
+
+/** Where drawing puts a site: what it is of and how it meets the world, at (x, y, z) of the level. */
+type Put<'a> = dyn FnMut(Look, Op, i64, i64, i64) + 'a;
 /** A point in lattice units. */
 pub type Point = [f64; 3];
 
@@ -790,12 +813,16 @@ pub fn generate(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
     let palette = Palette::new(&generator.kinds, generator.seed);
     let mut grid = VoxelGrid::new(b);
     let clip = grid.clip();
-    let mut put = |kind: Kind, op: Op, x: i64, y: i64, z: i64| {
+    let mut put = |look: Look, op: Op, x: i64, y: i64, z: i64| {
         if op == Op::Fill && grid.get(x, y, z) != 0 {
             return;
         }
-        let id = if op == Op::Carve { 0 } else { palette.shade(kind, x * s, y * s, z * s) };
-        grid.set(x, y, z, id);
+        let shade = |kind: Kind| palette.shade(kind, x * s, y * s, z * s);
+        match (op, look.faces) {
+            (Op::Carve, _) => grid.set(x, y, z, 0),
+            (_, None) => grid.set(x, y, z, shade(look.kind)),
+            (_, Some(faces)) => grid.set_faces(x, y, z, shade(look.kind), faces.map(shade)),
+        }
     };
     let drawables = drawables_in(generator, &clip, s);
     let mut at = 0;
@@ -815,7 +842,7 @@ pub fn generate(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
         // It cuts only itself: drawn aside, then over the world.
         let mut own = Own::new(&thing_box(group, s).intersect(&clip));
         for drawable in group {
-            draw(drawable, generator.seed, s, &clip, &mut |kind, op, x, y, z| own.put(kind, op, x, y, z));
+            draw(drawable, generator.seed, s, &clip, &mut |look, op, x, y, z| own.put(look, op, x, y, z));
         }
         own.each(&mut put);
     }
@@ -824,19 +851,21 @@ pub fn generate(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
 
 /**
  * A thing's sites, drawn aside from the world: in a box of a level's
- * sites, each its kind and how it meets the world, or carved.
+ * sites, each what it is of and how it meets the world, or carved.
  */
 struct Own {
     b: Box3,
     n: [i64; 3],
     /** 0: nothing; else kind + 1, and the op in bits 8 and 9. */
     cells: Vec<u16>,
+    /** By index in `cells`, the faces' kinds of the sites whose faces differ. */
+    faces: HashMap<usize, [Kind; FACE_KINDS]>,
 }
 
 impl Own {
     fn new(b: &Box3) -> Own {
         let n = [0, 1, 2].map(|i| (b.max[i] - b.min[i]).max(0));
-        Own { b: *b, n, cells: vec![0; (n[0] * n[1] * n[2]) as usize] }
+        Own { b: *b, n, cells: vec![0; (n[0] * n[1] * n[2]) as usize], faces: HashMap::new() }
     }
 
     fn index(&self, x: i64, y: i64, z: i64) -> usize {
@@ -846,7 +875,7 @@ impl Own {
     }
 
     /** As the world takes them, but within the thing: Fill where it has nothing, Paint over, Carve out. */
-    fn put(&mut self, kind: Kind, op: Op, x: i64, y: i64, z: i64) {
+    fn put(&mut self, look: Look, op: Op, x: i64, y: i64, z: i64) {
         let i = self.index(x, y, z);
         let carved = 3 << 8;
         if op == Op::Fill && self.cells[i] != 0 && self.cells[i] != carved {
@@ -854,12 +883,16 @@ impl Own {
         }
         self.cells[i] = match op {
             Op::Carve => carved,
-            Op::Fill => (kind as u16 + 1) | 1 << 8,
-            Op::Paint => (kind as u16 + 1) | 2 << 8,
+            Op::Fill => (look.kind as u16 + 1) | 1 << 8,
+            Op::Paint => (look.kind as u16 + 1) | 2 << 8,
+        };
+        match look.faces.filter(|_| op != Op::Carve) {
+            Some(faces) => self.faces.insert(i, faces),
+            None => self.faces.remove(&i),
         };
     }
 
-    /** What the thing has at (x, y, z): its kind and how it meets the world. */
+    /** What the thing has at (x, y, z): its site's kind (measured, its faces are measured anew) and how it meets the world. */
     fn at(&self, x: i64, y: i64, z: i64) -> Option<(Kind, Op)> {
         let cell = self.cells[self.index(x, y, z)];
         let op = match cell >> 8 {
@@ -870,13 +903,13 @@ impl Own {
         Some((((cell & 255) - 1) as Kind, op))
     }
 
-    /** Each site the thing has, with its kind and how it meets the world. */
-    fn each(&self, mut visit: impl FnMut(Kind, Op, i64, i64, i64)) {
+    /** Each site the thing has, with what it is of and how it meets the world. */
+    fn each(&self, visit: &mut Put) {
         for i in 0..self.cells.len() as i64 {
             let (x, y, z) =
                 (i % self.n[0] + self.b.min[0], (i / self.n[0]) % self.n[1] + self.b.min[1], i / (self.n[0] * self.n[1]) + self.b.min[2]);
             if let Some((kind, op)) = self.at(x, y, z) {
-                visit(kind, op, x, y, z);
+                visit(Look { kind, faces: self.faces.get(&(i as usize)).copied() }, op, x, y, z);
             }
         }
     }
@@ -902,19 +935,19 @@ fn thing_box(group: &[Drawable], s: i64) -> Box3 {
 }
 
 /** Draws one drawable at sites `s` apart into `clip`. */
-fn draw(drawable: &Drawable, seed: u64, s: i64, clip: &Box3, put: &mut dyn FnMut(Kind, Op, i64, i64, i64)) {
+fn draw(drawable: &Drawable, seed: u64, s: i64, clip: &Box3, put: &mut Put) {
     match &drawable.draw {
         Draw::Field(field) => draw_field(field, seed, s, clip, put),
         Draw::Shapes(shapes, far) => {
             for (i, shape) in shapes.iter().enumerate() {
                 let seed = hash_text(&format!("{}#{}{i}", drawable.key, if *far { "far" } else { "" }), seed);
-                draw_shape(shape, seed, s, clip, &mut |x, y, z| put(shape.kind, shape.op, x, y, z));
+                draw_shape(shape, seed, s, clip, &mut |x, y, z| put(shape.kind.into(), shape.op, x, y, z));
             }
         }
         Draw::Sites(sites) => {
-            for &([x, y, z], kind, op) in sites {
+            for &([x, y, z], look, op) in sites {
                 if clip.holds([x, y, z]) {
-                    put(kind, op, x, y, z);
+                    put(look, op, x, y, z);
                 }
             }
         }
@@ -1010,8 +1043,8 @@ fn past_reach(key: &str, bounds: &Box3, reach: &Box3, n: i64, population: [i64; 
     )
 }
 
-/** A thing's sites of a level: each its kind and how it meets the world. */
-type Sites = Vec<([i64; 3], Kind, Op)>;
+/** A thing's sites of a level: each what it is of and how it meets the world. */
+type Sites = Vec<([i64; 3], Look, Op)>;
 
 /** Where a node is drawn: at sites `s` apart, for the lattice units `units`, in its layer's `order`, as part of `thing`. */
 struct Visit<'u> {
@@ -1066,7 +1099,7 @@ fn alone(node: &Node, key: &str, bounds: Box3, f: i64, seed: u64) -> Own {
     let fine = Box3 { min: bounds.min.map(|v| v.div_euclid(f) - 2), max: bounds.max.map(|v| -(-v).div_euclid(f) + 2) };
     let mut own = Own::new(&fine);
     for drawable in &near {
-        draw(drawable, seed, f, &fine, &mut |kind, op, x, y, z| own.put(kind, op, x, y, z));
+        draw(drawable, seed, f, &fine, &mut |look, op, x, y, z| own.put(look, op, x, y, z));
     }
     own
 }
@@ -1205,30 +1238,36 @@ fn columns_of_cell(r: i64) -> [u32; 3] {
  * its cell (those nearest it). It is kept with the chance a ray crossing
  * the cell is stopped: the share of the cell's columns along each axis
  * holding a fine site of the thing, on average over the axes, against
- * one threshold for the whole thing. It is of a kind of what rays along
- * columns see: each column's first fine site from either end, credited
- * to the first kept cell the column crosses from that end, in
- * proportion; a cell no column sees first is of the kinds at the ends of
- * its columns' runs in it.
+ * one threshold for the whole thing.
+ * Each of its faces is of a kind of what rays through it see: along the
+ * face's normal, a line of nearest neighbours, each such column's first
+ * fine site from the face's end is credited to that face of the first
+ * kept cell the column crosses from there, in proportion; a face no
+ * column sees first through is of the kinds its columns' runs in the
+ * cell start with seen from it. The site is of a kind of all its faces
+ * see, for whatever does not look at faces.
  */
 fn measure(node: &Node, key: &str, bounds: Box3, detail: Fixed, s: i64, seed: u64) -> Sites {
     let f = 1i64 << ((detail / ONE).max(1).ilog2());
     // Its far form not drawn at f: f is at most detail.
     let own = alone(node, key, bounds, f, seed);
-    // By coarse site: per axis, how many of its columns hold a fine site; what shows at the ends of their runs in it,
-    // and what rays along columns see first of all, counted by kind.
+    // Kinds counted, each with how it meets the world.
+    type Counts = Vec<(Kind, Op, u32)>;
+    // By coarse site: per axis, how many of its columns hold a fine site; per face, what the ends of the runs of
+    // columns through it show of it, and what rays through it see first of all, counted by kind.
     #[derive(Default)]
     struct Stats {
         columns: [u32; 3],
-        ends: Vec<(Kind, Op, u32)>,
-        seen: Vec<(Kind, Op, u32)>,
+        ends: [Counts; FACE_KINDS],
+        seen: [Counts; FACE_KINDS],
         kept: bool,
     }
-    let count = |kinds: &mut Vec<(Kind, Op, u32)>, kind: Kind, op: Op| match kinds.iter_mut().find(|e| e.0 == kind) {
+    let count = |kinds: &mut Counts, kind: Kind, op: Op| match kinds.iter_mut().find(|e| e.0 == kind) {
         Some(e) => e.2 += 1,
         None => kinds.push((kind, op, 1)),
     };
     let n = own.n;
+    let at = |p: [i64; 3]| own.at(p[0] + own.b.min[0], p[1] + own.b.min[1], p[2] + own.b.min[2]);
     let cell_of = |p: [i64; 3]| nearest_site([0, 1, 2].map(|c| (p[c] + own.b.min[c]) * f * ONE), s);
     // The cells of the coarse sites from those of its box's corners and two more on each side, in an array:
     // nearest_site rounds each coordinate, then may move one by one, the corners' included.
@@ -1241,41 +1280,22 @@ fn measure(node: &Node, key: &str, bounds: Box3, detail: Fixed, s: i64, seed: u6
         [i % m[0] + lo[0], i / m[0] % m[1] + lo[1], i / (m[0] * m[1]) + lo[2]]
     };
     let mut cells: Vec<Stats> = (0..m[0] * m[1] * m[2]).map(|_| Stats::default()).collect();
-    // By axis and column, what it shows at either end.
-    type Ends = Option<[(Kind, Op); 2]>;
-    let mut ends: [Vec<Ends>; 3] = Default::default();
+    // Along each axis, how many of a cell's columns hold a fine site: a column crosses each cell once (they are
+    // convex), so a run of it in a cell is one of the cell's columns.
     for axis in 0..3 {
         let (a, b) = ((axis + 1) % 3, (axis + 2) % 3);
         let mut p = [0i64; 3];
         for i in 0..n[a] {
             for j in 0..n[b] {
                 (p[a], p[b]) = (i, j);
-                // A column crosses each cell once (they are convex): the run of it in a cell is one column of the cell's.
-                let mut run: Option<([i64; 3], Kind, Op)> = None;
-                let mut first = None;
+                let mut cell = None;
                 for k in 0..n[axis] {
                     p[axis] = k;
-                    let at = [0, 1, 2].map(|c| p[c] + own.b.min[c]);
-                    let Some((kind, op)) = own.at(at[0], at[1], at[2]) else { continue };
-                    first.get_or_insert((kind, op));
-                    let site = cell_of(p);
-                    match run {
-                        Some((cell, ..)) if cell == site => run = Some((site, kind, op)),
-                        _ => {
-                            if let Some((cell, last, last_op)) = run {
-                                count(&mut cells[index(cell)].ends, last, last_op);
-                            }
-                            let stats = &mut cells[index(site)];
-                            stats.columns[axis] += 1;
-                            count(&mut stats.ends, kind, op);
-                            run = Some((site, kind, op));
-                        }
+                    if at(p).is_some() && cell != Some(cell_of(p)) {
+                        cell = Some(cell_of(p));
+                        cells[index(cell_of(p))].columns[axis] += 1;
                     }
                 }
-                if let Some((cell, last, last_op)) = run {
-                    count(&mut cells[index(cell)].ends, last, last_op);
-                }
-                ends[axis].push(first.zip(run).map(|(first, (_, last, last_op))| [first, (last, last_op)]));
             }
         }
     }
@@ -1285,41 +1305,47 @@ fn measure(node: &Node, key: &str, bounds: Box3, detail: Fixed, s: i64, seed: u6
     // One threshold for the whole thing, not one per site: a solid thing keeps a whole outline,
     // not a ragged one; a porous one is kept or not as a whole, in proportion over many.
     let threshold = unit(hash(kept, 0, 0, 0));
-    // The kept cells' reach along each axis, in the box's fine sites: a cell reaches s from its site.
-    let (r, mut reach) = (s / f, [(i64::MAX, i64::MIN); 3]);
-    for (i, stats) in cells.iter_mut().enumerate() {
+    for stats in &mut cells {
         stats.kept = threshold < (0..3).map(|i| stats.columns[i] as f64 / all[i] as f64).sum::<f64>() / 3.0;
-        if stats.kept {
-            let site = site_of(i);
-            for c in 0..3 {
-                let at = site[c] * r - own.b.min[c];
-                reach[c] = (reach[c].0.min(at - r), reach[c].1.max(at + r));
-            }
-        }
     }
-    // What a ray along each column sees, credited to the first kept cell it crosses.
-    for (axis, ends) in ends.iter().enumerate() {
-        let (a, b) = ((axis + 1) % 3, (axis + 2) % 3);
-        let (from, to) = (reach[axis].0.max(0), reach[axis].1.min(n[axis] - 1));
-        if from > to {
-            continue;
-        }
-        for (column, shown) in ends.iter().enumerate() {
-            let Some(shown) = shown else { continue };
-            let mut p = [0i64; 3];
-            (p[a], p[b]) = (column as i64 / n[b], column as i64 % n[b]);
-            // Its sites: those of the parity of the lattice.
-            let parity = (p[a] + p[b] + own.b.min.iter().sum::<i64>()).rem_euclid(2);
-            for (end, (kind, op)) in shown.iter().enumerate() {
-                let mut k = if end == 0 { from + (from + parity) % 2 } else { to - (to + parity) % 2 };
-                while (from..=to).contains(&k) {
-                    p[axis] = k;
-                    let stats = &mut cells[index(cell_of(p))];
-                    if stats.kept {
-                        count(&mut stats.seen, *kind, *op);
-                        break;
+    // Columns along each line of nearest neighbours d, from its start on the side of −d to its end on the side of
+    // d: rays coming from either end see the faces towards it.
+    for (from_end, d) in VOXEL_FACES.iter().enumerate().filter(|(_, d)| d.iter().find(|v| **v != 0) == Some(&-1)) {
+        let d = d.map(i64::from);
+        let from_start = VOXEL_FACES.iter().position(|e| e.map(i64::from) == d.map(|v| -v)).expect("−d is a face");
+        let inside = |p: [i64; 3]| (0..3).all(|c| (0..n[c]).contains(&p[c]));
+        // Columns of sites start where a step back leaves the box.
+        let parity = own.b.min.iter().sum::<i64>();
+        for start in (0..n[0]).flat_map(|x| (0..n[1]).flat_map(move |y| (0..n[2]).map(move |z| [x, y, z]))) {
+            if (start.iter().sum::<i64>() + parity) & 1 != 0 || inside([0, 1, 2].map(|c| start[c] - d[c])) {
+                continue;
+            }
+            let column: Vec<[i64; 3]> =
+                std::iter::successors(Some(start), |p| Some([0, 1, 2].map(|c| p[c] + d[c]))).take_while(|p| inside(*p)).collect();
+            // The runs of its fine sites in each cell: what they start with seen from either end.
+            let (mut run, mut first, mut last): (Option<([i64; 3], Kind, Op)>, _, _) = (None, None, None);
+            for &p in &column {
+                let Some((kind, op)) = at(p) else { continue };
+                first.get_or_insert((kind, op));
+                last = Some((kind, op));
+                let cell = cell_of(p);
+                if run.is_none_or(|(c, ..)| c != cell) {
+                    if let Some((c, kind, op)) = run {
+                        count(&mut cells[index(c)].ends[from_end], kind, op);
                     }
-                    k += if end == 0 { 2 } else { -2 };
+                    count(&mut cells[index(cell)].ends[from_start], kind, op);
+                }
+                run = Some((cell, kind, op));
+            }
+            if let Some((c, kind, op)) = run {
+                count(&mut cells[index(c)].ends[from_end], kind, op);
+            }
+            // What rays along it see first from either end, credited to the first kept cell it crosses from there.
+            let kept_from = |points: &mut dyn Iterator<Item = &[i64; 3]>| points.map(|p| index(cell_of(*p))).find(|&i| cells[i].kept);
+            let (start_cell, end_cell) = (kept_from(&mut column.iter()), kept_from(&mut column.iter().rev()));
+            for (face, shown, cell) in [(from_start, first, start_cell), (from_end, last, end_cell)] {
+                if let (Some((kind, op)), Some(i)) = (shown, cell) {
+                    count(&mut cells[i].seen[face], kind, op);
                 }
             }
         }
@@ -1328,21 +1354,37 @@ fn measure(node: &Node, key: &str, bounds: Box3, detail: Fixed, s: i64, seed: u6
     for (i, stats) in cells.into_iter().enumerate().filter(|(_, stats)| stats.kept) {
         let site = site_of(i);
         let [x, y, z] = site;
-        let mut kinds = if stats.seen.is_empty() { stats.ends } else { stats.seen };
-        // In an order of their own: the columns' isn't one.
-        kinds.sort_by_key(|e| e.0);
-        let total: u32 = kinds.iter().map(|e| e.2).sum();
-        let mut pick = ((hash(kept ^ 1, x * s, y * s, z * s) as u64 * total as u64) >> 32) as u32;
-        let &(kind, op, _) = kinds
-            .iter()
-            .find(|e| {
-                pick < e.2 || {
-                    pick -= e.2;
-                    false
-                }
-            })
-            .expect("a kind");
-        sites.push((site, kind, op));
+        let faces: [Counts; FACE_KINDS] =
+            std::array::from_fn(|k| if stats.seen[k].is_empty() { stats.ends[k].clone() } else { stats.seen[k].clone() });
+        // One pick for all of its faces and itself: faces that see alike are of one kind.
+        let u = hash(kept ^ 1, x * s, y * s, z * s) as u64;
+        let pick = |kinds: &Counts| -> (Kind, Op) {
+            // In an order of their own: the columns' isn't one.
+            let mut kinds = kinds.clone();
+            kinds.sort_by_key(|e| e.0);
+            let total: u32 = kinds.iter().map(|e| e.2).sum();
+            let mut pick = ((u * total as u64) >> 32) as u32;
+            let &(kind, op, _) = kinds
+                .iter()
+                .find(|e| {
+                    pick < e.2 || {
+                        pick -= e.2;
+                        false
+                    }
+                })
+                .expect("a kind");
+            (kind, op)
+        };
+        let mut all: Counts = Vec::new();
+        for (kind, op, n) in faces.iter().flatten() {
+            match all.iter_mut().find(|e| e.0 == *kind) {
+                Some(e) => e.2 += n,
+                None => all.push((*kind, *op, *n)),
+            }
+        }
+        let (kind, op) = pick(&all);
+        let faces = faces.map(|counts| pick(&counts).0);
+        sites.push((site, Look { kind, faces: faces.iter().any(|k| *k != kind).then_some(faces) }, op));
     }
     // In an order of their own, as sites are put in it.
     sites.sort_by_key(|e| e.0);
@@ -1350,7 +1392,7 @@ fn measure(node: &Node, key: &str, bounds: Box3, detail: Fixed, s: i64, seed: u6
 }
 
 /** Draws a field into `clip`; a medium keeps a site with the chance a ray crossing it is stopped. */
-fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut dyn FnMut(Kind, Op, i64, i64, i64)) {
+fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) {
     let op = field.op;
     let field_seed = hash_text(field.name, seed);
     // The chance a medium's site is kept, from its extinction.
@@ -1380,7 +1422,7 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut dyn FnMut
                         if let Some((kind, extinction)) = plan::footprint(s, offset(x, z), || at(x * s, y * s, z * s, s))
                             && kept(x, y, z, chance_of(extinction))
                         {
-                            put(kind, op, x, y, z);
+                            put(kind.into(), op, x, y, z);
                         }
                         x += 2;
                     }
@@ -1411,7 +1453,7 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut dyn FnMut
                         while w * s <= span.to && w < hi[axis] {
                             site[axis] = w;
                             if tie.within(axis, site.map(|c| c * s), span.from, span.to, 1) && kept(site[0], site[1], site[2], chance) {
-                                put(span.kind, op, site[0], site[1], site[2]);
+                                put(span.kind.into(), op, site[0], site[1], site[2]);
                             }
                             w += 2;
                         }
@@ -1528,26 +1570,35 @@ mod tests {
             "its inside is all kept"
         );
         // Cells no column reaches first, under the kept inside's top row, are of what is inside them: the block.
-        assert!(sites.iter().filter(|s| inside(s.0) && s.0[1] == 1).all(|s| s.1 == 1), "what is hidden inside is the block's");
+        assert!(sites.iter().filter(|s| inside(s.0) && s.0[1] == 1).all(|s| s.1.kind == 1), "what is hidden inside is the block's");
         // Its top row of cells, half covered, is kept by some things' thresholds. Rays straight down see the glass
-        // on it, credited by the columns from above; where it is dropped, they see the cells under it, which the
-        // columns from above credit with the glass too, and those from the sides with the block (a cell is of
-        // one kind seen from anywhere: "Media are isotropic" in docs/generators.md). Over these 16 blocks they
-        // see it 0.46 of the time; with kinds from the ends of the columns' runs in each cell, 0.19.
-        let from_above = |sites: &Sites| {
-            let kinds: std::collections::HashMap<[i64; 3], Kind> = sites.iter().map(|s| (s.0, s.1)).collect();
-            let mut glass = 0;
-            for x in (2..64).step_by(4) {
-                for z in (2..64).step_by(4) {
-                    let hit = (0..128).rev().find_map(|y| kinds.get(&nearest_site([x, y, z].map(|v| v * ONE), 16)));
-                    glass += (hit == Some(&2)) as u32;
+        // on it, through the faces towards them; where it is dropped, the cells under it, whose faces up the
+        // columns from above credit with the glass too. Rays from the sides see the block through the faces
+        // towards them, but in the top row, where the glass shows at their tops.
+        let seen = |sites: &Sites, ray: [i64; 3]| {
+            let looks: std::collections::HashMap<[i64; 3], Look> = sites.iter().map(|s| (s.0, s.1)).collect();
+            let face = |look: &Look, k: usize| look.faces.map_or(look.kind, |faces| faces[k]);
+            // The faces a ray along `ray` may enter by: those facing back along it.
+            let faces: Vec<usize> =
+                (0..FACE_KINDS).filter(|&k| (0..3).map(|c| VOXEL_FACES[k][c] as i64 * ray[c]).sum::<i64>() < 0).collect();
+            let (mut glass, mut hits) = (0, 0);
+            for u in (2..64).step_by(4) {
+                for v in (2..64).step_by(4) {
+                    // From above, or from −x, at the middle height.
+                    let along = |t: i64| if ray[1] < 0 { [u, 127 - t, v] } else { [t - 64, 32 + (u % 16) - 8, v] };
+                    let Some(look) = (0..192).find_map(|t| looks.get(&nearest_site(along(t).map(|v| v * ONE), 16))) else { continue };
+                    hits += faces.len();
+                    glass += faces.iter().filter(|&&k| face(look, k) == 2).count();
                 }
             }
-            glass as f64 / 256.0
+            glass as f64 / hits as f64
         };
-        let glass =
-            (0..16).map(|i| from_above(&measure(&block, &format!("block {i}"), bounds_of(&block), fixed(2.0), 16, 1))).sum::<f64>() / 16.0;
-        assert!(glass > 0.35, "rays from above see the glass on top {glass} of the time");
+        let blocks: Vec<Sites> = (0..16).map(|i| measure(&block, &format!("block {i}"), bounds_of(&block), fixed(2.0), 16, 1)).collect();
+        let from_above = blocks.iter().map(|sites| seen(sites, [0, -1, 0])).sum::<f64>() / 16.0;
+        let from_the_side = blocks.iter().map(|sites| seen(sites, [1, 0, 0])).sum::<f64>() / 16.0;
+        // Over these 16 blocks, 0.76 from above; with one kind a cell, its faces' together, 0.28.
+        assert!(from_above > 0.65, "rays from above see the glass on top {from_above} of the time");
+        assert!(from_the_side < 0.1, "rays from the side see the glass {from_the_side} of the time");
         let cloud = Node { far: Some(Far::measured(fx(2.0))), ..Node::of(vec![ball([0.0; 3], 64.0, 1, Fill::Const(0.02), Op::Fill)]) };
         // Of its about 134 cells (a ball's volume over a site's, 2 · 16³), those a ray crossing is stopped in.
         // Fine sites 4 apart along a column, a cell's 512 fine sites are on 123, 126 and 128 of its columns along x, y

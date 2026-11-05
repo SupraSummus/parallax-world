@@ -34,7 +34,8 @@ use world::{Geometry, Reader};
 pub use coverage::Coverage;
 pub use layer_index::LayerIndex;
 pub use surface::Slice;
-pub use world::{Grid, Lattice, Tiles, VIEW_FACES, lattices};
+pub use tables::VOXEL_FACES;
+pub use world::{FACE_KINDS, FACE_WORDS, Faces, Grid, Lattice, Tiles, VIEW_FACES, face_words, lattices};
 
 /**
  * Mask pixels per unit of its grid for a slice of `level` as the grid
@@ -273,6 +274,21 @@ pub extern "C" fn world_grid(level: usize, min_x: i32, min_y: i32, min_z: i32, n
 pub extern "C" fn world_cells() -> *mut u8 {
     STATE.with_borrow_mut(|state| match state {
         State::Ready(baker) => baker.last_grid().map_or(std::ptr::null_mut(), |g| g.cells.as_mut_ptr()),
+        _ => std::ptr::null_mut(),
+    })
+}
+
+/**
+ * Where to write the faces (Grid::faces) of the grid world_grid set
+ * last: FACE_WORDS words (u32) for each of `sites` sites, by index.
+ */
+#[unsafe(no_mangle)]
+pub extern "C" fn world_faces(sites: usize) -> *mut u32 {
+    STATE.with_borrow_mut(|state| match state {
+        State::Ready(baker) => baker.last_grid().map_or(std::ptr::null_mut(), |g| {
+            g.faces = vec![0; sites * FACE_WORDS];
+            g.faces.as_mut_ptr()
+        }),
         _ => std::ptr::null_mut(),
     })
 }
