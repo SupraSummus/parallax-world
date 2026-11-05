@@ -66,7 +66,7 @@ macro_rules! worlds {
     };
 }
 
-worlds!(forest, valley, moor, learned);
+worlds!(forest, valley, moor, learned, city);
 
 #[test]
 fn every_world_is_tested() {

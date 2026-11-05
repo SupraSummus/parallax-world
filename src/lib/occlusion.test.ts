@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import { ParallaxRenderer } from './renderer'
 import { picture } from './picture.test-helper'
-import { World } from './world'
+import { hills } from './hills.test-helper'
 
-const world = new World(12345, 'hills_with_trees')
+const world = hills(12345)
 const [WIDTH, HEIGHT] = [800, 600]
 
 describe('skipping covered chunks', () => {

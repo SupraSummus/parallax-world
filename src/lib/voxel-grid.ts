@@ -312,7 +312,7 @@ export class VoxelGrid {
 }
 
 /** Materials by colour, an id each, added as they are first used; id 0 is empty. */
-export class Palette {
+class Palette {
   readonly materials: Material[] = [{ color: '' }]
   private readonly ids = new Map<string, number>()
 

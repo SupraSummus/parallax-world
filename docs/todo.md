@@ -19,11 +19,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   would be even for any height,
   but would leave holes in boxes under two sites thick
   and roughen every surface.
-- **Coarsening the city takes twice as long with faces.**
-  `coarsen` measures the faces of every coarse voxel at the surface
-  whose cell holds more than one material,
-  and the city's walls and floors hold several almost everywhere:
-  about 0.7 s more for its level 1, on the main thread, at first use.
 - **The native frontend is missing pieces.**
   Its renderer has no `matchTilings`:
   where slices re-tile as the camera moves along an axis,
@@ -45,8 +40,13 @@ Numbers are for the forest at 1280×800, as measured when written.
 - **TS and Rust still say much the same twice.**
   The tiles around the camera (`world.ts`) are `native/src/world.rs`,
   slice selection (`bake/src/slicing.rs`) is `slice-selection.ts`,
-  and faces and the renderer are in `native/src` too.
+  and faces and the renderer are in `native/src` too;
+  `LayerIndex.range` (`voxel-grid.ts`) is `bake/src/layer_index.rs`'s.
   The renderer is the large step.
+- **`coarsen` serves only tests.**
+  Every world is generated at each level;
+  only tests' worlds of voxels (`World.ofVoxels`) are coarsened, in TS.
+  Tests on small generated worlds would let it go.
 - **Slicing keeps a leak bound slices no longer need.**
   Drawn in relief, slices leak only slivers however thick they are
   (step 8 of `src/lib/leak-bound.test.ts`),
@@ -161,8 +161,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   software one); if draw calls matter, pack chunks' splats into one buffer.
 - Drop a splat's size: every splat is a voxel's outline,
   so a splat could be its site, depth and colour.
-- Describe the city in metres, like the forest, instead of boxes on its plan.
-- Port the toy worlds to the forest's metric scale, or drop them.
 - Show render distance in metres:
   they are lattice units, and the forest's unit is 0.125 m.
 - Show the forest to 22 km again: `MAX_LEVEL` 13, one grid more.

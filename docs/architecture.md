@@ -77,7 +77,7 @@ A slice draws its atoms as the voxels of grid ℓ.
 In that grid's units it is a slice of level k − ℓ of single voxels,
 so the baker bakes it as one and scales the chunk back
 (`in_grid` in `bake/src/lib.rs`).
-The forest is generated at each level (`docs/generators.md`),
+Every world is generated at each level (`docs/generators.md`),
 around the camera, each grid reaching twice as far as the one before.
 A grid is made of tiles fixed in the world:
 when the camera goes far enough from its middle,
@@ -95,7 +95,8 @@ Then come the other tiles within reach of each level the slices read,
 so that turning finds them made, and far ones are dropped.
 A tile never changes once made,
 so no chunk or cell surface goes stale as tiles come.
-The other worlds' grids are each the one before it coarsened (`coarsen`):
+Tests' scenes, worlds of voxels alone (`World.ofVoxels`),
+have each grid the one before it coarsened (`coarsen`):
 a coarse voxel is full if a quarter of its cell is,
 so a floor or wall one voxel thick stays one,
 and solids grow by up to half a coarse voxel.
@@ -188,7 +189,7 @@ and so their level of detail (section 1) and how many there are
 (`docs/todo.md`).
 Drawn flat, the gap between two slices could show a cross-section of
 the farther slice where the top and side faces of nearer voxels hide it
-in perspective, e.g. stone under the lake's water surface.
+in perspective, e.g. the ground under the moor's pools.
 
 Bound, with ε = the "max occlusion leak" setting:
 **geometry that perspective hides would not show by more than the angle ε**
@@ -558,7 +559,7 @@ since the previous render and the bytes of all cached chunks;
 `SessionStats` accumulates them. `renderTime` is main-thread time, which
 excludes baking in workers.
 
-## 6. Worlds (`world.ts`, `worldgen.ts`, `city.ts`)
+## 6. Worlds (`world.ts`, `worldgen.ts`)
 
 **The lattice** (`fcc.ts`). Voxels sit on the face-centred cubic lattice:
 the integer points (x, y, z) with x + y + z even.
@@ -594,7 +595,7 @@ Renderer distances are in world units.
 
 **Scenes** describe shapes in metres and fill the sites inside them;
 each world picks its own scale, the renderer assumes none.
-The forest and the valley have `UNIT_SIZE` metres per unit
+The worlds have `UNIT_SIZE` metres per unit
 (`worldgen/src/units.rs`).
 They are endless and can be generated in any box alone
 ([generators.md](generators.md)),
@@ -606,11 +607,9 @@ trunks are columns at least 2 units square,
 crowns leaf clusters (balls) or a solid of revolution (spruce),
 branches and fallen logs capsules, so thin parts stay one piece on the lattice
 (a single column of sites only touches at corners).
-The city is planned on a 0.25 m grid (`PLAN_CELL_SIZE`):
+The city (`worlds/src/city.rs`) is planned on a 0.25 m grid:
 each plan cell is a box holding four sites, so walls stay flat and frames one piece.
-The toy worlds are built of blocks 2 units wide in the same way.
-Columns of ground are filled a few units deep;
-the renderer only draws faces that no neighbour covers.
+The renderer only draws faces that no neighbour covers.
 
 ## 7. Reference viewer (`src/viewer`)
 

@@ -39,8 +39,8 @@ an impressionist picture of the scene, not its exact faces.
 A voxel may have a different material on each of its 12 faces,
 so a coarse voxel at a house's eaves is roof from above and wall from the side.
 How thick slices are follows "Max Occlusion Leak":
-how far geometry perspective hides (e.g. stone under the lake's water
-surface) would show were slices drawn flat.
+how far geometry perspective hides (e.g. the ground under the moor's
+pools) would show were slices drawn flat.
 Drawn in relief, it hardly shows at all,
 so the setting now trades detail against slices.
 The field of view only zooms the picture, without re-slicing.
@@ -76,10 +76,10 @@ A spinner shows while a world generates.
 - *City*: a district of a few blocks,
   for checking flat walls, thin frames and openings:
   low buildings whose rooms form a maze of doorways,
-  with windows, balconies, courtyards, furniture, street lamps and trees.
+  with windows, balconies, courtyards, furniture, street lamps and trees,
+  on lawn.
   The camera starts in front of an open entrance.
-- Hills, mountains, hills with trees, lake with island: small toy
-  scenes of blocks without a real-world scale.
+  Generated like the forest.
 
 **Views in the URL** – The page's query can give the world, its seed,
 the camera, where it looks, the field of view and the render distance,

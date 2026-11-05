@@ -1,6 +1,5 @@
-import { generateCity } from './city'
 import { GRID_LEVELS } from './slice-selection'
-import { BRICK, coarsen, LayerIndex, Palette, VoxelGrid, type Box, type Material, type Voxel, type VoxelData } from './voxel-grid'
+import { BRICK, coarsen, LayerIndex, VoxelGrid, type Box, type Material, type Voxel, type VoxelData } from './voxel-grid'
 import { generated, worlds } from './worldgen'
 
 export interface Vec3 {
@@ -12,29 +11,10 @@ export interface Vec3 {
 /** A world's name: one of worldTypes()'s values. */
 export type WorldType = string
 
-/** The worlds of TS, made here or by their own scene builder (SCENES). */
-const TS_WORLDS: { value: WorldType; label: string }[] = [
-  { value: 'city', label: 'City' },
-  { value: 'hills', label: 'Hills' },
-  { value: 'mountains', label: 'Mountains' },
-  { value: 'hills_with_trees', label: 'Hills with Trees' },
-  { value: 'lake_with_island', label: 'Lake with Island' },
-]
-
-/**
- * The world types, with their labels: worldgen.ts's worlds (Rust), as
- * WORLDS lists them, each labelled with its name; then the worlds of TS.
- */
+/** The world types, with their labels: worldgen.ts's worlds (Rust), as WORLDS lists them, each labelled with its name. */
 export function worldTypes(): { value: WorldType; label: string }[] {
-  return [...worlds().map(value => ({ value, label: value.charAt(0).toUpperCase() + value.slice(1) })), ...TS_WORLDS]
+  return worlds().map(value => ({ value, label: value.charAt(0).toUpperCase() + value.slice(1) }))
 }
-
-const GRASS = '#4CAF50'
-const DIRT = '#8B4513'
-const STONE = '#666666'
-const LEAVES = '#228B22'
-const WATER = '#1E90FF'
-const FLOWER_COLORS = ['#FF6B6B', '#FFE66D', '#4ECDC4', '#C9B1FF']
 
 /**
  * A world generated at each level, in any box (worldgen.ts): the voxels of
@@ -49,9 +29,6 @@ export interface Generated {
   reach: number
   heights: (level: number) => { minY: number; maxY: number }
 }
-
-/** World types with their own scene builder; the rest are built here. */
-const SCENES: Partial<Record<WorldType, (seed: number) => { grid: VoxelGrid; spawn: Vec3 }>> = { city: generateCity }
 
 /**
  * A generated world's grid of each level is made of tiles, generated
@@ -99,16 +76,6 @@ export function generatePart(seed: number, worldType: WorldType, { level, box }:
 }
 
 /**
- * Toy worlds are built of blocks BLOCK lattice units wide: block (x, y, z)
- * holds the sites with x in [BLOCK · x − 1, BLOCK · x] (y, z likewise).
- */
-const BLOCK = 2
-/** The world spans blocks x, z in [-HALF_SIZE, HALF_SIZE). */
-const HALF_SIZE = 40
-/** Every column is filled from this y up to its surface. */
-const BEDROCK_Y = -5
-
-/**
  * A grid at each level of detail the renderer reads (GRID_LEVELS): `grid`,
  * then each the last one coarsened.
  * @internal
@@ -120,10 +87,10 @@ export function levelsOf(grid: VoxelGrid): VoxelGrid[] {
 }
 
 /**
- * A procedurally generated voxel world: a grid at each level of detail
- * the renderer reads. Generated worlds (worldgen.ts's) are generated level
- * by level, in tiles, around the camera, anywhere (missingParts, receive),
- * or here when asked for (levels); the rest are made here whole, and
+ * A procedurally generated voxel world (worldgen.ts's): a grid at each
+ * level of detail the renderer reads, generated level by level, in tiles,
+ * around the camera, anywhere (missingParts, receive), or here when asked
+ * for (levels). Tests' scenes are worlds of voxels alone (ofVoxels),
  * coarsened.
  */
 export class World {
@@ -133,7 +100,7 @@ export class World {
   readonly spawn: Readonly<Vec3>
 
   private readonly source: Generated | undefined
-  // By level; generated worlds' only once generated, the rest's coarsened on first use.
+  // By level; generated worlds' only once generated, those of voxels coarsened on first use.
   private grids: (VoxelGrid | undefined)[] = []
   // The tile each generated grid is centred on, by level.
   private centres: (Tile | undefined)[] = []
@@ -147,36 +114,28 @@ export class World {
   private pending = new Map<number, Pending>()
   // Voxels as a list, built from the grid on first use.
   private list: Voxel[] | null = null
-  // Toy world blocks while generating.
-  private generated: Voxel[] = []
 
-  constructor(seed: number = Date.now(), worldType: WorldType = 'forest') {
+  /** The world `worldType` (one of worldTypes()) of `seed`; for a scene, see ofVoxels. */
+  constructor(seed: number = Date.now(), worldType: WorldType = 'forest', scene?: { grid: VoxelGrid; spawn: Readonly<Vec3> }) {
     this.seed = seed
     this.worldType = worldType
-
-    // Generated level by level, in parts; the grids of the rest are made whole, then coarsened.
-    this.source = worlds().includes(worldType) ? generated(worldType, seed) : undefined
-    if (this.source) {
-      this.spawn = this.source.spawn
-      return
-    }
-    const scene = SCENES[worldType]
     if (scene) {
-      const { grid, spawn } = scene(seed)
-      this.grids = [grid]
-      this.spawn = spawn
+      this.grids = [scene.grid]
+      this.spawn = scene.spawn
       return
     }
+    // Generated level by level, in parts.
+    this.source = generated(worldType, seed)
+    this.spawn = this.source.spawn
+  }
 
-    this.spawn = { x: 0, y: 20 * BLOCK, z: -70 * BLOCK }
-
-    for (let x = -HALF_SIZE; x < HALF_SIZE; x++) {
-      for (let z = -HALF_SIZE; z < HALF_SIZE; z++) {
-        this.generateColumn(x, z)
-      }
-    }
-    this.grids = [World.fromBlocks(this.generated)]
-    this.generated = []
+  /**
+   * A world of `voxels` alone, its coarser levels coarsened from them:
+   * tests' scenes.
+   * @internal
+   */
+  static ofVoxels(voxels: readonly Voxel[], spawn: Readonly<Vec3> = { x: 0, y: 0, z: 0 }): World {
+    return new World(0, 'voxels', { grid: VoxelGrid.fromVoxels(voxels), spawn })
   }
 
   /** The materials of every grid's ids. */
@@ -186,7 +145,7 @@ export class World {
 
   /**
    * The grid of `level` of detail, if there is one yet: a generated world's
-   * once generated (receive), the rest's always.
+   * once generated (receive), one of voxels' always.
    */
   level(level: number): VoxelGrid | undefined {
     if (!this.source) {
@@ -327,146 +286,9 @@ export class World {
     return this.level(level) ?? this.levelAround(level, this.spawn)
   }
 
-  /** The voxels as a list, ordered by z, y, x. Assigning replaces the world's contents (tests build worlds this way). */
+  /** The voxels as a list, ordered by z, y, x. */
   get voxels(): Voxel[] {
     this.list ??= this.grid.toVoxels()
     return this.list
-  }
-
-  set voxels(voxels: Voxel[]) {
-    if (this.source) throw new RangeError('a generated world\'s voxels are its generator\'s')
-    this.grids = [VoxelGrid.fromVoxels(voxels)]
-    this.list = null
-  }
-
-  /** Deterministic hash noise in [0, 1). */
-  private noise(x: number, y: number, z: number): number {
-    const n = Math.sin(x * 12.9898 + y * 78.233 + z * 45.164 + this.seed * 0.001) * 43758.5453
-    return n - Math.floor(n)
-  }
-
-  private terrainHeight(x: number, z: number, heightMultiplier: number): number {
-    const nx = (x / HALF_SIZE) * 4
-    const nz = (z / HALF_SIZE) * 4
-    return Math.floor(
-      this.noise(nx, 0, nz) * 8 * heightMultiplier +
-      this.noise(nx * 2, 0, nz * 2) * 4 * heightMultiplier +
-      this.noise(nx * 4, 0, nz * 4) * 2 * heightMultiplier
-    )
-  }
-
-  private push(x: number, y: number, z: number, color: string) {
-    this.generated.push({ x, y, z, color })
-  }
-
-  /** The grid of the generated blocks: block (x, y, z) is filled with the sites it holds; later blocks win. */
-  private static fromBlocks(blocks: readonly Voxel[]): VoxelGrid {
-    if (blocks.length === 0) return VoxelGrid.fromVoxels([])
-    const box = { minX: Infinity, minY: Infinity, minZ: Infinity, maxX: -Infinity, maxY: -Infinity, maxZ: -Infinity }
-    for (const { x, y, z } of blocks) {
-      box.minX = Math.min(box.minX, BLOCK * x - 1)
-      box.minY = Math.min(box.minY, BLOCK * y - 1)
-      box.minZ = Math.min(box.minZ, BLOCK * z - 1)
-      box.maxX = Math.max(box.maxX, BLOCK * x + 1)
-      box.maxY = Math.max(box.maxY, BLOCK * y + 1)
-      box.maxZ = Math.max(box.maxZ, BLOCK * z + 1)
-    }
-    const palette = new Palette()
-    const grid = new VoxelGrid(box, palette.materials)
-    for (const { x, y, z, color } of blocks) {
-      grid.fillBox(BLOCK * x - 1, BLOCK * y - 1, BLOCK * z - 1, BLOCK * x + 1, BLOCK * y + 1, BLOCK * z + 1, palette.id(color))
-    }
-    return grid
-  }
-
-  /** Fills a column from bedrock to `top`: surface block, 2 subsoil blocks, rock below. */
-  private soilColumn(x: number, z: number, top: number, surface: string, subsoil = DIRT, rock = STONE) {
-    for (let y = BEDROCK_Y; y <= top; y++) {
-      this.push(x, y, z, y === top ? surface : y > top - 3 ? subsoil : rock)
-    }
-  }
-
-  private tree(x: number, ground: number, z: number, height: number) {
-    for (let y = ground + 1; y < ground + height; y++) {
-      this.push(x, y, z, '#654321')
-    }
-    for (let dx = -2; dx <= 2; dx++) {
-      for (let dz = -2; dz <= 2; dz++) {
-        for (let dy = 0; dy < 3; dy++) {
-          if (Math.abs(dx) + Math.abs(dz) + dy < 4) {
-            this.push(x + dx, ground + height - 1 + dy, z + dz, LEAVES)
-          }
-        }
-      }
-    }
-  }
-
-  private palm(x: number, ground: number, z: number, height: number) {
-    for (let y = ground + 1; y < ground + height; y++) {
-      this.push(x, y, z, '#8B7355')
-    }
-    for (let dx = -2; dx <= 2; dx++) {
-      for (let dz = -2; dz <= 2; dz++) {
-        if (Math.abs(dx) + Math.abs(dz) <= 2) {
-          this.push(x + dx, ground + height, z + dz, '#32CD32')
-        }
-      }
-    }
-  }
-
-  private generateColumn(x: number, z: number) {
-    switch (this.worldType) {
-      case 'hills': {
-        const ground = this.terrainHeight(x, z, 0.7)
-        this.soilColumn(x, z, ground, '#7CFC00')
-        if (this.noise(x * 0.4, 30, z * 0.4) > 0.8) {
-          const color = FLOWER_COLORS[Math.floor(this.noise(x, z, 0) * FLOWER_COLORS.length)]
-          this.push(x, ground + 1, z, color)
-        }
-        break
-      }
-
-      case 'mountains': {
-        const ground = this.terrainHeight(x, z, 2.5)
-        for (let y = BEDROCK_Y; y <= ground; y++) {
-          let color: string
-          // Snow caps: the top two blocks of peaks above y=15.
-          if (y > 15 && y > ground - 2) color = '#FFFFFF'
-          else if (y === ground && y > 8) color = '#808080'
-          else if (y === ground) color = GRASS
-          else if (y > ground - 3) color = DIRT
-          else color = '#555555'
-          this.push(x, y, z, color)
-        }
-        break
-      }
-
-      case 'hills_with_trees': {
-        const ground = this.terrainHeight(x, z, 0.8)
-        this.soilColumn(x, z, ground, GRASS)
-        if (this.noise(x * 0.3, 0, z * 0.3) > 0.75 && ground > 2) {
-          this.tree(x, ground, z, 4 + Math.floor(this.noise(x, 0, z) * 3))
-        }
-        break
-      }
-
-      case 'lake_with_island': {
-        const ground = this.terrainHeight(x, z, 0.6)
-        const distFromCenter = Math.sqrt(x * x + z * z)
-        if (distFromCenter <= 8) {
-          const top = ground + 3
-          this.soilColumn(x, z, top, '#90EE90', '#C4A76D')
-          if (distFromCenter < 5 && this.noise(x * 0.5, 0, z * 0.5) > 0.7) {
-            this.palm(x, top, z, 5 + Math.floor(this.noise(x, 0, z) * 2))
-          }
-        } else if (distFromCenter < 25) {
-          this.soilColumn(x, z, 0, WATER, STONE)
-        } else {
-          const sand = '#F4D03F'
-          this.soilColumn(x, z, ground, distFromCenter < 28 ? sand : GRASS)
-        }
-        break
-      }
-    }
   }
 }

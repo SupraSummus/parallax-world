@@ -336,7 +336,7 @@ describe.each([1, 0.5, 0.25])('Step 8: ray-cast leaks with tan(fov / 2) = %s', T
     return runs.map(r => ({ pixels: r.rays * step * focal, units: r.rays * step * r.distance }))
   }
 
-  // Camera above the terrain looking over it, like the lake world.
+  // Camera above the terrain looking over it.
   const scenes = [1, 2, 3, 4].map(seed => ({ cells: terrain(seed), cu: 12 + seed * 7.4, cz: -0.2 - seed * 0.4 }))
   const detail = leakFreeDetail(MAX_LEAK / focal)
   // Within the leak bound, give or take one ray. Slices are at least one

@@ -292,10 +292,10 @@ fn main() -> eframe::Result {
     let args: Vec<String> = std::env::args().collect();
     let threads = args.iter().position(|a| a == "--threads").map_or_else(num_cpus, |i| args[i + 1].parse().expect("threads"));
     let seed = args.iter().position(|a| a == "--seed").map_or(12345, |i| args[i + 1].parse().expect("seed"));
-    let make = args
-        .iter()
-        .position(|a| a == "--world")
-        .map_or(WORLD, |i| worlds::by_name(&args[i + 1]).expect("--world forest, valley, moor or learned").make);
+    let make = args.iter().position(|a| a == "--world").map_or(WORLD, |i| {
+        let names: Vec<&str> = worlds::WORLDS.iter().map(|e| e.name).collect();
+        worlds::by_name(&args[i + 1]).unwrap_or_else(|| panic!("--world {}", names.join(", "))).make
+    });
     if let Some(i) = args.iter().position(|a| a == "--check-requests") {
         check_requests(&dump::read(&std::fs::read(&args[i + 1]).expect("dump")), make, seed, threads);
         return Ok(());
