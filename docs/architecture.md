@@ -487,7 +487,9 @@ nearer the later it is painted
 (`depth_of`, exponential so the largest chunks' ranks stay apart in f32).
 So splats can be drawn in any order,
 and the bake workers put a chunk's in clusters of a few nearby on its plane,
-each with its box and nearest depth.
+each with the box of their outlines along the axis,
+how far before and past the plane they are, and its nearest depth:
+the culling finds where the camera's rays draw them in relief.
 A chunk's slot in the table comes to the vertex shader as its draws' first vertex,
 so its splats are uploaded as the workers made them.
 Each frame it draws the clusters that showed in the last,

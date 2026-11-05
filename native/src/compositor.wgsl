@@ -37,9 +37,10 @@ struct Chunk {
 }
 
 // Splats of one chunk near each other on its plane: `first` and the next
-// `count` (low byte of `slot_count`, its chunk's slot above), their box
-// relative to the chunk's origin, the least order among them, and whether
-// any showed in the last frame.
+// `count` (low byte of `slot_count`, its chunk's slot above), the box of
+// their outlines along the axis relative to the chunk's origin, the least
+// order among them, whether any showed in the last frame, how far past the
+// plane they are, nearest and farthest, and the widest's half width.
 struct Cluster {
   min: vec2f,
   max: vec2f,
@@ -47,6 +48,10 @@ struct Cluster {
   slot_count: u32,
   order: f32,
   visible: u32,
+  near: f32,
+  far: f32,
+  wide: f32,
+  _pad: u32,
 }
 
 // A cluster's draw: its splats, instances of splat_vertex.
@@ -157,19 +162,30 @@ fn closest_to_zero(lo: f32, hi: f32) -> f32 {
 // a hair wider (splat_fragment); empty if it draws nowhere.
 fn screen_box(cluster: Cluster) -> vec4f {
   let c = chunks[cluster.slot_count >> 8u];
-  let hair = 1e-4 * c.distance;
-  let lo = max(c.origin + cluster.min, vec2f(c.origin.x, c.origin.y - c.extent.y) - hair);
-  let hi = min(c.origin + cluster.max, vec2f(c.origin.x + c.extent.x, c.origin.y) + hair);
+  // The rays through its splats, as tangents: each is drawn at its depth,
+  // wider by its slant across (splat_vertex), at most the box's corners'.
+  let z = c.distance + vec2f(cluster.near, cluster.far);
+  if z.x <= 0.0 {
+    return vec4f(vec2f(0.0), globals.resolution);
+  }
+  var lo = c.origin + cluster.min;
+  var hi = c.origin + cluster.max;
+  let slant = max(max(abs(lo.x) / z.x, abs(hi.x) / z.x), max(abs(lo.x) / z.y, abs(hi.x) / z.y));
+  lo.x -= cluster.wide * slant;
+  hi.x += cluster.wide * slant;
+  // Then clipped as splat_fragment clips them, to its chunk and its face.
+  lo = max(min(lo / z.x, lo / z.y), vec2f(c.origin.x, c.origin.y - c.extent.y) / c.distance - 1e-4);
+  hi = min(max(hi / z.x, hi / z.y), vec2f(c.origin.x + c.extent.x, c.origin.y) / c.distance + 1e-4);
   if any(lo >= hi) {
     return vec4f(0.0);
   }
-  if closest_to_zero(lo.x, hi.x) + sqrt(2.0) * closest_to_zero(lo.y, hi.y) > 1.001 * c.distance {
+  if closest_to_zero(lo.x, hi.x) + sqrt(2.0) * closest_to_zero(lo.y, hi.y) > 1.001 {
     return vec4f(0.0);
   }
   let view = transpose(globals.faces[c.face].view);
   var b = vec4f(globals.resolution, vec2f(0.0));
   for (var k = 0u; k < 4u; k++) {
-    let p = view * vec3f(select(lo.x, hi.x, (k & 1u) != 0u), select(lo.y, hi.y, k >= 2u), c.distance);
+    let p = view * vec3f(select(lo.x, hi.x, (k & 1u) != 0u), select(lo.y, hi.y, k >= 2u), 1.0);
     // A corner behind the camera: the box goes off the screen, so take all of it.
     if p.z <= 0.0 {
       return vec4f(vec2f(0.0), globals.resolution);

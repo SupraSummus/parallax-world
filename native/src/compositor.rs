@@ -13,7 +13,6 @@
 use std::collections::HashMap;
 use std::ops::Range;
 
-use bake::reach;
 use eframe::egui_wgpu::{self, wgpu};
 
 use crate::renderer::{Chunk, Frame};
@@ -50,6 +49,10 @@ pub struct GpuCluster {
     slot_count: u32,
     order: f32,
     visible: u32,
+    near: f32,
+    far: f32,
+    wide: f32,
+    _pad: u32,
 }
 
 /**
@@ -72,10 +75,11 @@ pub fn block(distance: f64, focal: f64) -> f64 {
  * first in each, so that a block's first clusters are its front), and the
  * clusters, nearest first, so that splats are drawn near to far; their
  * `first` counts from the chunk's first splat, and their chunk's slot is
- * not in them yet. A cluster's box holds where its splats may be drawn on
- * the plane, `half_layer` past it per step of their alpha past 128
- * (bake::reach). In the bake workers, so that a
- * chunk's upload is a copy.
+ * not in them yet. A cluster's box holds its splats' outlines along the
+ * axis, from `near` to `far` past the plane, `half_layer` per step of their
+ * alpha past 128, and how wide the widest is: the GPU finds where they are
+ * drawn for its camera. In the bake workers, so that a chunk's upload is a
+ * copy.
  */
 pub fn cluster(numbers: &[f32], half_layer: f64, block: f64) -> (Vec<GpuSplat>, Vec<GpuCluster>) {
     let numbers = numbers.as_chunks::<5>().0;
@@ -100,14 +104,17 @@ pub fn cluster(numbers: &[f32], half_layer: f64, block: f64) -> (Vec<GpuSplat>, 
                 slot_count: part.len() as u32,
                 order: orders[part[0]],
                 visible: 0,
+                near: f32::INFINITY,
+                far: f32::NEG_INFINITY,
+                wide: 0.0,
+                _pad: 0,
             };
             for &s in part {
                 let [x, y, w, h, paint] = numbers[s];
-                let off = ((paint.to_bits() >> 24) as f64 - 128.0) * half_layer;
-                let (w, h) = reach(w as f64, h as f64, off);
-                let (w, h) = (w as f32, h as f32);
+                let off = (((paint.to_bits() >> 24) as f64 - 128.0) * half_layer) as f32;
                 cluster.min = [cluster.min[0].min(x - w), cluster.min[1].min(y - h)];
                 cluster.max = [cluster.max[0].max(x + w), cluster.max[1].max(y + h)];
+                (cluster.near, cluster.far, cluster.wide) = (cluster.near.min(off), cluster.far.max(off), cluster.wide.max(w));
             }
             clusters.push(cluster);
         }

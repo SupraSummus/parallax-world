@@ -33,7 +33,6 @@ use world::{Geometry, Reader};
 // For native frontends, which link the baker instead of loading its WebAssembly.
 pub use coverage::Coverage;
 pub use layer_index::LayerIndex;
-pub use splats::reach;
 pub use surface::Slice;
 pub use world::{Grid, Lattice, Tiles, VIEW_FACES, lattices};
 

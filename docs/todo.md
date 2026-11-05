@@ -97,7 +97,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   Its painting order is the draw order at one depth per layer,
   which rounding breaks: natively, the same misordered about 6 % of the pixels.
 - **Most splats drawn natively are hidden within their own chunk.**
-  The native frame (about 9 ms on an Intel UHD, `--bench`)
+  The native frame (about 12 ms on an Intel UHD, `--bench`)
   is mostly drawing the clusters that show,
   whose splats cover the screen several times over.
   About half of all splats were hidden by nearer ones of their chunk
