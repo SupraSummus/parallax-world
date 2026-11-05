@@ -306,6 +306,15 @@ each by the axes its normal leans towards, as in the reference viewer
 a voxel is shaded by the way its surface faces,
 and coloured by what is seen of it along the face.
 
+**One voxel per column.** Seen along the axis, a face's columns (a, b)
+tile the plane, so a column's nearest voxel is all the axis sees of it.
+With "One Voxel per Column", chunks keep only those (`ChunkRequest.firstInColumn`):
+about half the splats,
+but a slanted ray sees past a column's edge into farther slices
+where it would meet the column behind.
+Chunks baked either way are cached apart;
+the native frontend bakes every voxel.
+
 **Painting order.** Voxels by their layer, farthest first:
 a ray of the face passes from a voxel into one of the next layer,
 never back (their common face's normal is along the axis

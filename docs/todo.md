@@ -93,10 +93,14 @@ Numbers are for the forest at 1280×800, as measured when written.
   The native frame (about 12 ms on an Intel UHD, `--bench`)
   is mostly drawing the clusters that show,
   whose splats cover the screen several times over.
-  About half of all splats were hidden by nearer ones of their chunk
-  when slices were drawn flat;
-  in relief, those hidden from the axis and the corners of the rhombus
-  of rays (as masks are filled) could be dropped by the baker.
+  Keeping only each column's nearest voxel keeps all the axis sees
+  ("One Voxel per Column", section 3 of `docs/architecture.md`).
+  In the forest that halved the splats,
+  but changed about one pixel in eight,
+  mostly towards a face's corners, where rays slant most:
+  the ground's steps flatten, trunks show seams, crowns fray.
+  Dropping only those hidden from the axis and the rhombus's corners
+  (as masks are filled) may keep most of the saving; not measured yet.
 - **Bricks on the edge of a face's rhombus are baked whole.**
   Near where a level starts, about 19 bricks meet the rhombus,
   and most of them cross its edge or the screen's.
