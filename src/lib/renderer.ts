@@ -12,8 +12,9 @@ export interface Chunk extends ChunkSplats {
   /** Its cell (see chunkCell). */
   i: number
   j: number
-  /** Which of its level's grids it is baked from (see ChunkRequest). */
+  /** Which of its level's grids it is baked from, and how (see ChunkRequest). */
   grid: number
+  firstInColumn: boolean
 }
 
 /**
@@ -165,7 +166,7 @@ interface Slice {
   extents: Map<number, [number, number] | null>
 }
 
-/** The chunks baked of a cell, one per grid, and the most recent one, shown while the one wanted is baking. */
+/** The chunks baked of a cell, one per grid and firstInColumn, and the most recent one, shown while the one wanted is baking. */
 interface CellChunks {
   chunks: Chunk[]
   latest: Chunk | undefined
@@ -218,9 +219,9 @@ function cellKey(i: number, j: number): number {
   return (i + 2 ** 20) * 2 ** 21 + j + 2 ** 20
 }
 
-/** The cell's chunk from the `grid`-th grid of its level. */
-function findChunk(cell: CellChunks | undefined, grid: number): Chunk | undefined {
-  return cell?.chunks.find(chunk => chunk.grid === grid)
+/** The cell's chunk from the `grid`-th grid of its level, baked `firstInColumn` or not. */
+function findChunk(cell: CellChunks | undefined, grid: number, firstInColumn: boolean): Chunk | undefined {
+  return cell?.chunks.find(chunk => chunk.grid === grid && chunk.firstInColumn === firstInColumn)
 }
 
 /**
@@ -267,6 +268,7 @@ export class ParallaxRenderer {
   private maxLeak = DEFAULT_MAX_LEAK
   private renderDistance = DEFAULT_RENDER_DISTANCE
   private skipCovered = true
+  private firstInColumn = false
   private width = 0
   private height = 0
 
@@ -477,6 +479,7 @@ export class ParallaxRenderer {
     const { id } = slice
     const { level, layer, cutoff } = id
     const grid = this.world.version(atomLevel(level))
+    const { firstInColumn } = this
     // Slices start at least NEAR_DEPTH ahead of the camera, so this is > 0.
     const distance = sliceCentre(id) - camera.z
     const result: Drawn = { distance, placements: [], covered: 0, unbaked: 0 }
@@ -510,7 +513,7 @@ export class ParallaxRenderer {
       const cellBox = boxOf(x0, x1, y0, y1, distance)
       if (!onScreen(view, cellBox)) continue
       const cell = slice.cells.get(cellKey(i, j))
-      let chunk = findChunk(cell, grid)
+      let chunk = findChunk(cell, grid, firstInColumn)
       if (covered(cellBox)) {
         // Not drawn, nor baked, but kept if baked.
         const kept = chunk ?? cell?.latest
@@ -527,7 +530,7 @@ export class ParallaxRenderer {
         if (mode === 'standIn') {
           chunk = latest
         } else if (this.baker) {
-          const request = { face: face.name, level, layer, cutoff, i, j, grid }
+          const request = { face: face.name, level, layer, cutoff, i, j, grid, firstInColumn }
           chunk = this.store(request, this.baker.bake(request))
         } else {
           // Not wanted if what stands in is hidden anyway.
@@ -537,7 +540,7 @@ export class ParallaxRenderer {
             continue
           }
           pass.pending++
-          pass.missing.push({ request: { face: face.name, level, layer, cutoff, i, j, grid }, distance, stale: !!latest })
+          pass.missing.push({ request: { face: face.name, level, layer, cutoff, i, j, grid, firstInColumn }, distance, stale: !!latest })
           chunk = latest
         }
         if (!chunk) continue
@@ -687,6 +690,11 @@ export class ParallaxRenderer {
     this.skipCovered = skip
   }
 
+  /** Whether chunks hold only each column's nearest voxel (see ChunkRequest); those baked the other way stand in meanwhile. */
+  setFirstInColumn(first: boolean) {
+    this.firstInColumn = first
+  }
+
   /**
    * Slice detail for the leak tolerance. It depends on nothing else,
    * so turning, zooming and resizing keep the slices.
@@ -736,14 +744,14 @@ export class ParallaxRenderer {
 
   /** Caches a baked chunk, unless its slice has been evicted meanwhile. */
   private store(request: ChunkRequest, baked: ChunkSplats): Chunk | undefined {
-    const { face, level, layer, cutoff, i, j, grid } = request
+    const { face, level, layer, cutoff, i, j, grid, firstInColumn } = request
     const slice = this.slices.get(sliceKey(face, { level, layer, cutoff }))
     if (!slice) return
     const key = cellKey(i, j)
     let cell = slice.cells.get(key)
     if (!cell) slice.cells.set(key, cell = { chunks: [], latest: undefined })
-    if (findChunk(cell, grid)) return
-    const chunk: Chunk = { ...baked, i, j, grid }
+    if (findChunk(cell, grid, firstInColumn)) return
+    const chunk: Chunk = { ...baked, i, j, grid, firstInColumn }
     cell.chunks.push(chunk)
     cell.latest = chunk
     slice.bytes += bytesOf(chunk)

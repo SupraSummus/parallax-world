@@ -319,6 +319,23 @@ describe('ParallaxRenderer', () => {
   })
 
   describe('settings', () => {
+    it('bakes one voxel per column into chunks of their own, keeping both', () => {
+      // Every chunk drawn either way: what nearer ones cover differs.
+      renderer.setSkipCovered(false)
+      const voxels = (chunks: Chunk[]) => chunks.reduce((sum, c) => sum + c.splats.length / SPLAT, 0)
+      render()
+      const all = allChunks()
+      renderer.setFirstInColumn(true)
+      render()
+      const first = allChunks()
+      expect(first.every(c => c.firstInColumn && !all.includes(c))).toBe(true)
+      expect(voxels(first)).toBeLessThan(voxels(all) * 0.9)
+      renderer.setFirstInColumn(false)
+      render()
+      expect(lastUpdate().chunksRegenerated).toBe(0)
+      expect(allChunks().every((c, i) => c === all[i])).toBe(true)
+    })
+
     it('zooms without re-slicing', () => {
       render()
       const slicesOf = (face: string) => layers().filter(l => l.face === face).map(l => l.slice)

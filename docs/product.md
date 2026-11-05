@@ -48,7 +48,11 @@ The field of view only zooms the picture, without re-slicing.
 ones cover, nor (on the web) draw them;
 the picture is the same, it is there to compare.
 "Show Face Seams" (off by default) draws lines where the twelve
-stacks meet on screen. See [architecture.md](architecture.md).
+stacks meet on screen.
+"One Voxel per Column" (off by default, `?first=1`) keeps of each column
+along a stack's direction only its nearest voxel: about half as much to bake
+and draw, but where the view slants most the ground's steps flatten,
+trunks show seams and crowns fray. See [architecture.md](architecture.md).
 
 **Worlds** – Procedurally generated, regenerable with a new seed; the camera
 moves to the world's spawn point.

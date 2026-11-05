@@ -42,6 +42,9 @@ const DRAG_DEGREES_PER_PIXEL = 0.15
 /** Lattice units a second the camera moves at. */
 const MOVE_SPEED = 60
 
+/** Whether the page's query asks for one voxel per column (?first=1, see setFirstInColumn). */
+const firstInColumnQuery = () => new URLSearchParams(location.search).get('first') === '1'
+
 function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const rendererRef = useRef<ParallaxRenderer | null>(null)
@@ -63,6 +66,7 @@ function App() {
   const [renderDistance, setRenderDistance] = useState(DEFAULT_RENDER_DISTANCE)
   const [maxLeak, setMaxLeak] = useState(DEFAULT_MAX_LEAK)
   const [skipCovered, setSkipCovered] = useState(true)
+  const [firstInColumn, setFirstInColumn] = useState(firstInColumnQuery)
   const [showSeams, setShowSeams] = useState(false)
   // Generating a world blocks this thread for a second or two; a spinner shows meanwhile.
   const [generating, setGenerating] = useState(true)
@@ -120,6 +124,7 @@ function App() {
     if (query.look) renderer.setOrientation(query.look)
     if (query.fov !== undefined) renderer.setFov(query.fov)
     if (query.distance !== undefined) renderer.setRenderDistance(query.distance)
+    renderer.setFirstInColumn(firstInColumnQuery())
     setWorldType(renderer.getWorld().worldType)
     setFov(renderer.getFov())
     setRenderDistance(renderer.getRenderDistance())
@@ -280,6 +285,12 @@ function App() {
     requestRender()
   }
 
+  const handleFirstInColumnChange = (value: boolean) => {
+    setFirstInColumn(value)
+    rendererRef.current?.setFirstInColumn(value)
+    requestRender()
+  }
+
   const handleShowSeamsChange = (value: boolean) => {
     setShowSeams(value)
     compositorRef.current?.setShowSeams(value)
@@ -354,6 +365,10 @@ function App() {
             <label className="flex items-center justify-between text-xs text-muted-foreground">
               Skip Covered Chunks
               <Switch checked={skipCovered} onCheckedChange={handleSkipCoveredChange} aria-label="Skip covered chunks" />
+            </label>
+            <label className="flex items-center justify-between text-xs text-muted-foreground">
+              One Voxel per Column
+              <Switch checked={firstInColumn} onCheckedChange={handleFirstInColumnChange} aria-label="One voxel per column" />
             </label>
             <label className="flex items-center justify-between text-xs text-muted-foreground">
               Show Face Seams

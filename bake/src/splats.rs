@@ -1,6 +1,7 @@
 //! The voxels of a chunk that can show, each a hexagonal dab of paint
 //! (a splat) at its site, in relief over its slice's centre plane.
 
+use std::collections::HashSet;
 use std::f64::consts::FRAC_1_SQRT_2;
 
 use crate::slicing::{LAYER, MAX_SLANT, slice_centre};
@@ -55,6 +56,8 @@ pub struct Splats {
     pub splats: Vec<Splat>,
     /** Painting order: each surface voxel's layer, and its index. */
     order: Vec<(i32, usize)>,
+    /** The columns (a, b) kept so far, with first_in_column. */
+    columns: HashSet<(i32, i32)>,
     pub min_x: f64,
     pub max_x: f64,
     pub min_y: f64,
@@ -66,6 +69,7 @@ impl Splats {
         Splats {
             splats: Vec::new(),
             order: Vec::new(),
+            columns: HashSet::new(),
             min_x: f64::INFINITY,
             max_x: f64::NEG_INFINITY,
             min_y: f64::INFINITY,
@@ -135,24 +139,32 @@ fn seen(geometry: &Geometry, faces: u16) -> bool {
  * normal is along the axis or (±1, ±√2, 1) / 2, and the rays are
  * |σx| + √2·|σy| ≤ 1. Voxels of one layer meet only side by side.
  *
+ * With `first_in_column`, only the nearest of each column (a, b):
+ * all the axis sees (docs/architecture.md, section 3).
+ *
  * `surface` is the cell's (cell_surface), with the margin around the cell
  * that its chunks may show; `palette` the view face's (see voxel_colour).
  */
-pub fn chunk_splats(splats: &mut Splats, geometry: &Geometry, palette: &[u32], surface: &[Voxel], slice: &Slice) {
+pub fn chunk_splats(splats: &mut Splats, geometry: &Geometry, palette: &[u32], surface: &[Voxel], slice: &Slice, first_in_column: bool) {
     splats.clear();
     // Twice the centre plane's depth, in layers: a whole number.
     let centre = (2.0 * slice_centre(slice.level, slice.layer) / LAYER).round() as i32;
 
+    // Near to far, those a ray may meet.
     let mut order = std::mem::take(&mut splats.order);
     order.clear();
-    order.extend(surface.iter().enumerate().map(|(k, voxel)| (voxel.site[2], k)));
-    order.sort_unstable_by_key(|&(c, k)| (std::cmp::Reverse(c), k));
+    order.extend(
+        surface.iter().enumerate().filter(|(_, voxel)| seen(geometry, voxel.open | voxel.cut)).map(|(k, voxel)| (voxel.site[2], k)),
+    );
+    order.sort_unstable_by_key(|&(c, k)| (c, std::cmp::Reverse(k)));
+    if first_in_column {
+        let columns = &mut splats.columns;
+        columns.clear();
+        order.retain(|&(_, k)| columns.insert((surface[k].site[0], surface[k].site[1])));
+    }
 
-    for &(_, k) in &order {
+    for &(_, k) in order.iter().rev() {
         let voxel = &surface[k];
-        if !seen(geometry, voxel.open | voxel.cut) {
-            continue;
-        }
         let [a, b, c] = voxel.site;
         splats.push(Splat {
             x: a as f64 * LAYER,
@@ -173,18 +185,13 @@ mod tests {
     use crate::tables::geometry;
     use crate::world::lattices;
 
-    #[test]
-    fn a_slanted_ray_shows_the_voxel_it_meets_first() {
-        // A solid block of level 2's slab of layers, its side a + c = 0
-        // at 45° to the axis, as a tree trunk ahead does where four faces
-        // meet; its inside buried, so only its surface is kept.
-        let geometry = geometry(&lattices()[0]);
-        let solid = |[a, b, c]: [i32; 3]| (0..4).contains(&c) && a.abs() <= 12 && b.abs() <= 12 && a + c >= 0;
-        let sites: Vec<[i32; 3]> = (0..4)
+    /** The sites of layers `layers`, |a| and |b| ≤ 12, where `solid` holds, and their surface: those with an open face. */
+    fn blob(geometry: &Geometry, layers: std::ops::Range<i32>, solid: impl Fn([i32; 3]) -> bool) -> (Vec<[i32; 3]>, Vec<Voxel>) {
+        let sites: Vec<[i32; 3]> = layers
             .flat_map(|c| (-12..=12).flat_map(move |b| (-12..=12).map(move |a| [a, b, c])))
             .filter(|&[a, b, c]| (a - b) % 2 == 0 && (b - c) % 2 == 0 && solid([a, b, c]))
             .collect();
-        let surface: Vec<Voxel> = sites
+        let surface = sites
             .iter()
             .map(|&site| {
                 let open = (0..FACE_KINDS)
@@ -194,9 +201,19 @@ mod tests {
             })
             .filter(|v| v.open != 0)
             .collect();
+        (sites, surface)
+    }
+
+    #[test]
+    fn a_slanted_ray_shows_the_voxel_it_meets_first() {
+        // A solid block of level 2's slab of layers, its side a + c = 0
+        // at 45° to the axis, as a tree trunk ahead does where four faces
+        // meet; its inside buried, so only its surface is kept.
+        let geometry = geometry(&lattices()[0]);
+        let (sites, surface) = blob(&geometry, 0..4, |[a, b, c]| (0..4).contains(&c) && a.abs() <= 12 && b.abs() <= 12 && a + c >= 0);
         let slice = Slice { level: 2, layer: 0, cutoff: f64::INFINITY };
         let mut splats = Splats::new();
-        chunk_splats(&mut splats, &geometry, &[0; FACE_KINDS], &surface, &slice);
+        chunk_splats(&mut splats, &geometry, &[0; FACE_KINDS], &surface, &slice, false);
         let centre = slice_centre(slice.level, slice.layer);
 
         let at = |[a, b, c]: [i32; 3]| [a as f64 * LAYER, b as f64, c as f64 * LAYER];
@@ -243,6 +260,33 @@ mod tests {
             }
         }
         assert!(hits > 5000, "{hits} rays met the block");
+    }
+
+    #[test]
+    fn first_in_column_keeps_what_the_axis_sees() {
+        // A porous blob of level 3's slab: columns with several voxels that show.
+        let geometry = geometry(&lattices()[0]);
+        let hash = |[a, b, c]: [i32; 3]| (a.wrapping_mul(73_856_093) ^ b.wrapping_mul(19_349_663) ^ c.wrapping_mul(83_492_791)) as u32;
+        let (_, surface) = blob(&geometry, 0..8, |site| (0..8).contains(&site[2]) && hash(site) % 3 == 0);
+        let slice = Slice { level: 3, layer: 0, cutoff: f64::INFINITY };
+        let bake = |first| {
+            let mut splats = Splats::new();
+            chunk_splats(&mut splats, &geometry, &[0; FACE_KINDS], &surface, &slice, first);
+            splats.splats
+        };
+        let (all, first) = (bake(false), bake(true));
+        assert!(first.len() * 3 < all.len() * 2, "{} of {}", first.len(), all.len());
+        let columns: HashSet<_> = first.iter().map(|s| (s.site[0], s.site[1])).collect();
+        assert_eq!(columns.len(), first.len());
+
+        // Along the axis each point shows the same voxel: the last splat holding it.
+        let shown = |splats: &[Splat], x: f64, y: f64| {
+            let holds = |s: &&Splat| (x - s.x).abs() <= s.width && (x - s.x).abs() * FRAC_1_SQRT_2 + (y - s.y).abs() <= s.height;
+            splats.iter().rev().find(holds).map(|s| s.site)
+        };
+        for (x, y) in (0..80).flat_map(|i| (0..80).map(move |j| (-8.0 + i as f64 * 0.2 + 0.013, -8.0 + j as f64 * 0.2 + 0.007))) {
+            assert_eq!(shown(&first, x, y), shown(&all, x, y), "at ({x}, {y})");
+        }
     }
 
     #[test]

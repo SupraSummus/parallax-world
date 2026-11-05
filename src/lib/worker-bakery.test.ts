@@ -31,7 +31,7 @@ class FakeWorker implements BakeWorker {
 }
 
 /** A chunk of a far slice, cheap to bake. */
-const at = (i: number): ChunkRequest => ({ face: '+x+z', level: 6, layer: 0, cutoff: Infinity, i, j: 0, grid: 0 })
+const at = (i: number): ChunkRequest => ({ face: '+x+z', level: 6, layer: 0, cutoff: Infinity, i, j: 0, grid: 0, firstInColumn: false })
 
 const tick = () => new Promise(resolve => setTimeout(resolve))
 
@@ -289,7 +289,7 @@ describe('WorkerBakery', () => {
   })
 
   it('drops chunks baked from a replaced world', async () => {
-    const request = { face: '+x+z', level: 5, layer: 0, cutoff: Infinity, i: 0, j: 0, grid: 0 }
+    const request = { face: '+x+z', level: 5, layer: 0, cutoff: Infinity, i: 0, j: 0, grid: 0, firstInColumn: false }
     expect(new ChunkBaker(world.materials, world.levels).bake(request).splats.length).toBeGreaterThan(0)
 
     const bakery = new WorkerBakery([new FakeWorker()])
