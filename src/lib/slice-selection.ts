@@ -166,25 +166,31 @@ export function chunkCells(level: number, left: number, right: number, bottom: n
 
 /**
  * How far a face's rays are from its axis, as a tangent, at most: they are
- * |x| + √2 · |y| ≤ z (inFace in view.ts). Slices are drawn as seen along
- * the axis, so the camera sees a point d ahead of its slice's centre plane
- * at most MAX_SLANT · d off where it is drawn (docs/architecture.md,
- * section 2; MAX_SLANT in bake/src/slicing.rs).
+ * |x| + √2 · |y| ≤ z (inFace in view.ts). Seen along them, a point d ahead
+ * of its slice's centre plane is up to MAX_SLANT · d off its site there:
+ * where drawn flat it would be off (docs/architecture.md, section 2),
+ * where drawn in relief its splat moves (MAX_SLANT in bake/src/slicing.rs).
  */
 const MAX_SLANT = 1
+
+/** How far past its slice's centre plane a splat is per step of its depth byte (see ChunkSplats), in world units: half a layer of its grid. */
+export function halfLayer(level: number): number {
+  return (atomSpacing(level) * LAYER) / 2
+}
 
 /**
  * How far around its cell a chunk of a slice of `level` may draw voxels
  * from, in lattice units: `columns` along a, `rows` along b (cell_margin in
  * bake/src/surface.rs, in the units of the slice's grid, N times these).
- * Each voxel is drawn at its site with its outline, grown to fill gaps by
- * up to MAX_SLANT times half the slice's thickness, √(3/2) as much in b.
- * `rows` also bounds how far from a voxel's b it may be drawn.
+ * A voxel's splat, less than half the slice's thickness off the centre
+ * plane, is drawn up to MAX_SLANT times that off its site, widened (reach
+ * in bake/src/splats.rs). `rows` also bounds how far from a voxel's b it
+ * may be drawn.
  */
 export function cellMargin(level: number): { columns: number; rows: number } {
   const n = atomSpacing(level)
-  const grow = MAX_SLANT * (thickness(level) / n / 2) * LAYER
-  return { columns: n * Math.ceil((grow + 1.5) / LAYER), rows: n * Math.ceil(grow * Math.sqrt(1.5) + 1.5) }
+  const off = MAX_SLANT * (thickness(level) / n / 2) * LAYER
+  return { columns: n * Math.ceil((off + 1.5) / LAYER), rows: n * Math.ceil(off * Math.SQRT1_2 + 1.5) }
 }
 
 /**
@@ -208,7 +214,7 @@ export function leakFreeDetail(maxLeak: number): number {
   return 2 ** (Math.ceil(4 * Math.log2(detail)) / 4)
 }
 
-/** The largest occlusion leak slices of `detail` show, in radians (see leakFreeDetail). */
+/** The largest occlusion leak slices of `detail` would show drawn flat, in radians (see leakFreeDetail). @internal */
 export function leakAngle(detail: number): number {
   return MAX_SLANT / (detail + 1 / 2)
 }

@@ -65,8 +65,8 @@ bake/                        # Chunk baker and coverage in Rust (no dependencies
     ├── slicing.rs           # The parts of slice-selection.ts baking needs
     ├── surface.rs           # A cell's voxels that can show
     ├── tables.rs            # The voxel's faces in lattice coordinates, the materials shaded per view face
-    ├── splats.rs            # Which voxels a chunk shows, as hexagons on its centre plane; gap filling
-    ├── fill.rs              # Splats filled into a mask, solid blocks (for coverage)
+    ├── splats.rs            # Which voxels a chunk shows, as hexagons at their sites, in relief
+    ├── fill.rs              # Splats filled into a mask for every slant, solid blocks (for coverage)
     ├── layer_index.rs       # LayerIndex: where each face's layers hold voxels; its WebAssembly exports
     └── coverage.rs          # Which screen cells nearer layers cover, on the main thread; its WebAssembly exports
 worldgen/                    # The world-generation engine, moving to integers, into the baker's grids; no worlds
@@ -105,7 +105,7 @@ native/                      # Spike of a native frontend (eframe + wgpu), linki
     ├── world.rs             # world.ts for generated worlds: a World's tiles, those the renderer wants first, made and indexed on threads
     ├── slicing.rs           # slice-selection.ts: slices, chunks, the leak bound
     ├── view.rs              # view.ts: faces, which rays and screen boxes they draw
-    ├── renderer.rs          # renderer.ts: chunks in view, cached, stand-ins, coverage (bake's Coverage)
+    ├── renderer.rs          # renderer.ts: chunks in view, cached, coverage (bake's Coverage)
     ├── bakery.rs            # Worker threads baking chunks, a baker each sharing the tiles, and clustering their splats for the GPU
     ├── compositor.rs        # compositor.ts with wgpu: splats uploaded per chunk in clusters, culled on the GPU against what showed
     ├── shot.rs              # --shot: one frame drawn offscreen on the GPU, saved as a PNG, no window

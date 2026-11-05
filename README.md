@@ -50,8 +50,9 @@ where the sections below are too).
    levels of detail, and where generators place things (section 1).
 3. **Slices named by the lattice, composited with parallax.**
    Slices along 12 directions are named by the lattice, not the camera,
-   and baked as seen along their direction,
-   so a chunk, once baked, stays valid wherever the camera goes (sections 3–5).
+   and baked as seen along their direction, each voxel at its depth,
+   so a chunk, once baked, stays valid wherever the camera goes,
+   and is drawn in relief (sections 3–5).
 4. **Worlds generated in pieces, at any level of detail.**
    A world of `worlds/` on the generator framework of `worldgen/`
    (the forest, and the valley: the forest with a town and fields)

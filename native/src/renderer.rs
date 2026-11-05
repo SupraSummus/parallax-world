@@ -1,8 +1,7 @@
-//! Renders the world as stacks of flat, cached slices split into chunks
+//! Renders the world as stacks of cached slices split into chunks
 //! (renderer.ts): each render picks the chunks in view, face by face and
 //! near to far, skips those nearer layers cover, has the missing ones baked
-//! (an older bake of a cell standing in meanwhile) and returns where each
-//! goes, relative to the camera. A cell is baked once the world has all the
+//! and returns where each goes, relative to the camera. A cell is baked once the world has all the
 //! tiles it reads; until then, the tiles are what it wants. Drawing them is
 //! the compositor's job.
 //! See docs/architecture.md, sections 3 to 5.
@@ -26,15 +25,11 @@ const NEAR_DEPTH: f64 = 4.0 * LAYER;
 const MAX_SLICES: usize = 2048;
 const UNUSED_RENDERS: u64 = 300;
 
-/** Chunks kept per cell: the latest and the one before, so toggling gap filling back rebakes nothing. */
-const CHUNKS_PER_CELL: usize = 2;
-
-/** A baked piece of a slice: cell (i, j), grown if `fill`. `id` names it to the coverage and the compositor. */
+/** A baked piece of a slice: cell (i, j). `id` names it to the coverage and the compositor. */
 pub struct Chunk {
     pub id: u32,
     pub i: i32,
     pub j: i32,
-    fill: bool,
     pub baked: Baked,
 }
 
@@ -63,7 +58,7 @@ pub struct Frame {
 #[derive(Default)]
 pub struct Stats {
     pub chunks: usize,
-    /** Chunks in view to bake, most wanted first; an older bake of the cell, if any, stands in meanwhile. */
+    /** Chunks in view to bake, nearest first. */
     pub wanted: Vec<Request>,
     /** Cells and chunks covered by nearer layers, so neither drawn nor baked. */
     pub covered: usize,
@@ -73,27 +68,13 @@ pub struct Stats {
     pub tiles: Vec<(usize, TileId)>,
 }
 
-#[derive(Default)]
-struct Cell {
-    chunks: Vec<Arc<Chunk>>,
-}
-
-impl Cell {
-    fn find(&self, fill: bool) -> Option<&Arc<Chunk>> {
-        self.chunks.iter().find(|c| c.fill == fill)
-    }
-
-    fn latest(&self) -> Option<&Arc<Chunk>> {
-        self.chunks.last()
-    }
-}
-
 struct CachedSlice {
     id: Slice,
     /** Its voxels may be in its face's layers [depth, depth + size). */
     depth: i64,
     size: i64,
-    cells: HashMap<(i32, i32), Cell>,
+    /** By cell: its chunk, once baked. */
+    cells: HashMap<(i32, i32), Arc<Chunk>>,
     /** By cell: the tiles it reads (see cell_tiles). */
     tiles: HashMap<(i32, i32), Option<[i32; 4]>>,
     /** By cell, once it has its tiles: the least and greatest b of the voxels its chunks may draw, or None if none (see cell_margin). */
@@ -120,7 +101,6 @@ pub struct Renderer {
     /** Degrees: how far hidden geometry may show between slices. */
     pub max_leak: f64,
     pub render_distance: f64,
-    pub fill: bool,
     pub skip_covered: bool,
 }
 
@@ -158,7 +138,6 @@ impl Renderer {
             renders: 0,
             max_leak: 6.0,
             render_distance,
-            fill: true,
             skip_covered: true,
         }
     }
@@ -183,7 +162,7 @@ impl Renderer {
         }
         let mut frame = Frame { layers: Vec::new(), farthest: self.render_distance };
         let mut stats = Stats::default();
-        let mut missing: Vec<(Request, f64, bool)> = Vec::new();
+        let mut missing: Vec<(Request, f64)> = Vec::new();
         let mut tiles: Vec<(usize, TileId, f64)> = Vec::new();
         for f in 0..self.faces.len() {
             let face = &self.faces[f];
@@ -208,7 +187,7 @@ impl Renderer {
                 let source = Source { level, tiles: &self.levels[level], heights: self.heights[level] };
                 let coverage = self.skip_covered.then_some(&mut self.coverage);
                 let wants = Wants { chunks: &mut missing, tiles: &mut tiles };
-                let layer = draw_slice(&of, slice, &source, coverage, view, self.fill, wants, &mut stats);
+                let layer = draw_slice(&of, slice, &source, coverage, view, wants, &mut stats);
                 frame.farthest = frame.farthest.max(layer.distance);
                 if self.skip_covered {
                     for p in &layer.placements {
@@ -230,8 +209,8 @@ impl Renderer {
                 frame.layers.push(layer);
             }
         }
-        // Cells that show nothing first, then the rest, near to far within each.
-        missing.sort_by(|a, b| a.2.cmp(&b.2).then(a.1.total_cmp(&b.1)));
+        // Near to far.
+        missing.sort_by(|a, b| a.1.total_cmp(&b.1));
         stats.wanted = missing.iter().map(|m| m.0).collect();
         tiles.sort_by(|a, b| a.2.total_cmp(&b.2));
         let mut listed = std::collections::HashSet::new();
@@ -245,15 +224,11 @@ impl Renderer {
     fn receive(&mut self) {
         for (r, baked) in self.bakery.take() {
             let Some(slice) = self.slices.get_mut(&slice_key(r.face, &r.slice)) else { continue };
-            let cell = slice.cells.entry((r.i, r.j)).or_default();
-            if cell.find(r.fill).is_some() {
+            if slice.cells.contains_key(&(r.i, r.j)) {
                 continue;
             }
             self.next_id += 1;
-            cell.chunks.push(Arc::new(Chunk { id: self.next_id, i: r.i, j: r.j, fill: r.fill, baked }));
-            if cell.chunks.len() > CHUNKS_PER_CELL {
-                cell.chunks.remove(0);
-            }
+            slice.cells.insert((r.i, r.j), Arc::new(Chunk { id: self.next_id, i: r.i, j: r.j, baked }));
         }
     }
 
@@ -281,9 +256,9 @@ struct Source<'a> {
     heights: (i64, i64),
 }
 
-/** What a frame wants: chunks to bake, their distance and whether something stands in; tiles to make, by grid level, and their distance. */
+/** What a frame wants: chunks to bake and their distance; tiles to make, by grid level, and their distance. */
 struct Wants<'a> {
-    chunks: &'a mut Vec<(Request, f64, bool)>,
+    chunks: &'a mut Vec<(Request, f64)>,
     tiles: &'a mut Vec<(usize, TileId, f64)>,
 }
 
@@ -338,17 +313,15 @@ fn cell_extent(of: &FaceView, slice: &mut CachedSlice, level: &Level, [i0, k0, i
 
 /**
  * The layer a slice draws, given what nearer layers cover (drawSlice in
- * renderer.ts): chunks it lacks are wanted, the cell's latest bake standing
- * in, and so are the tiles of cells in view that lack them.
+ * renderer.ts): chunks it lacks are wanted, and so are the tiles of cells
+ * in view that lack them.
  */
-#[allow(clippy::too_many_arguments)]
 fn draw_slice(
     of: &FaceView,
     slice: &mut CachedSlice,
     source: &Source,
     mut coverage: Option<&mut Coverage>,
     view: &View,
-    fill: bool,
     wants: Wants,
     stats: &mut Stats,
 ) -> Layer {
@@ -393,31 +366,13 @@ fn draw_slice(
                 }
             }
         }
-        let cell = slice.cells.get(&(i, j));
-        let chunk = match cell.and_then(|c| c.find(fill)) {
-            Some(chunk) => chunk.clone(),
-            // Its tiles dropped since, the camera gone far and back: what they baked stands in.
-            None if !complete => match cell.and_then(Cell::latest) {
-                Some(latest) => latest.clone(),
-                None => continue,
-            },
-            None => {
-                let latest = cell.and_then(Cell::latest).cloned();
-                // Not wanted if what stands in is hidden anyway.
-                if let (Some(latest), Some(c)) = (&latest, coverage.as_deref_mut())
-                    && latest.baked.painted > 0
-                {
-                    let handle = known(c, latest);
-                    if c.hides_chunk(handle, latest.baked.origin[0] - camera[0], latest.baked.origin[1] - camera[1], distance) {
-                        stats.covered += 1;
-                        continue;
-                    }
-                }
+        // Baked once its tiles are in; kept once baked, though its tiles go.
+        let Some(chunk) = slice.cells.get(&(i, j)).cloned() else {
+            if complete {
                 let block = crate::compositor::block(distance, view.focal);
-                wants.chunks.push((Request { face: of.face, slice: id, i, j, fill, tiles, block }, distance, latest.is_some()));
-                let Some(latest) = latest else { continue };
-                latest
+                wants.chunks.push((Request { face: of.face, slice: id, i, j, tiles, block }, distance));
             }
+            continue;
         };
         if chunk.baked.splats.is_empty() {
             continue;

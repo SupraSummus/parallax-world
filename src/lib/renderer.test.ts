@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { ParallaxRenderer, DEFAULT_RENDER_DISTANCE, parseViewQuery, viewQuery, type Chunk, type Frame } from './renderer'
 import { World } from './world'
+import { SPLAT } from './chunk-baker'
 import { selectSlices, chunkCell } from './slice-selection'
 import { FACES, LAYER, faceTangents, focalLength, projector, toLocal, viewBasis, type Face, type Orientation } from './view'
 import type { Vec3 } from './world'
@@ -113,7 +114,7 @@ describe('ParallaxRenderer', () => {
           expect(chunk.mask.width).toBe(Math.ceil(chunk.extentWidth * chunk.mask.scale - 1e-9))
         }
       }
-      expect(lastUpdate().voxelsRendered).toBeGreaterThanOrEqual(chunks.reduce((n, c) => n + c.painted, 0))
+      expect(lastUpdate().voxelsRendered).toBeGreaterThanOrEqual(chunks.reduce((n, c) => n + c.splats.length / SPLAT, 0))
     })
 
     it('bakes a chunk once: moving keeps those still in view', () => {
@@ -318,19 +319,16 @@ describe('ParallaxRenderer', () => {
   })
 
   describe('settings', () => {
-    it('zooms without re-slicing, so the same slices leak more pixels', () => {
+    it('zooms without re-slicing', () => {
       render()
       const slicesOf = (face: string) => layers().filter(l => l.face === face).map(l => l.slice)
-      const wide = { leak: lastUpdate().leakPixels, slices: new Map(FACES.map(f => [f.name, slicesOf(f.name)])) }
-      expect(wide.leak).toBeLessThanOrEqual((MAX_LEAK * Math.PI / 180) * 400)
-      // 4×: tan 45° / tan 14.04°.
+      const wide = new Map(FACES.map(f => [f.name, slicesOf(f.name)]))
       renderer.setFov((2 * Math.atan(0.25) * 180) / Math.PI)
       render()
-      expect(lastUpdate().leakPixels).toBeCloseTo(4 * wide.leak)
       // Fewer faces are in view, each with the same slices.
       const faces = new Set(layers().map(l => l.face))
       expect(faces.size).toBeGreaterThan(0)
-      for (const face of faces) expect(slicesOf(face)).toEqual(wide.slices.get(face))
+      for (const face of faces) expect(slicesOf(face)).toEqual(wide.get(face))
     })
 
     it('uses fewer, thicker slices for a larger tolerance', () => {

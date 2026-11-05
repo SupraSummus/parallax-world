@@ -54,25 +54,30 @@ Numbers are for the forest at 1280×800, as measured when written.
   and slice selection, faces and the renderer are in `native/src` too;
   `native/src/slicing.rs` restates parts of `bake/src/slicing.rs`.
   The renderer is the large step.
-- **The leak bound wants thin slices.**
-  Slices are drawn as seen along their face's axis,
-  so the slant of the camera's ray, up to 1 at a face's edge,
-  sets the leak (section 2 of `docs/architecture.md`): detail ∝ 1/ε.
-  Chunks once baked in perspective from a site near the camera
-  had detail ∝ 1/√ε, but a level was baked again
-  whenever the camera left that site's cell.
-  Holding 1.5° now takes about 3 times the layers
-  and 5–10 times the chunks in view in the city.
-  A depth per splat would draw each voxel where the camera sees it.
-- **Gap filling grows splats for the most slanted rays.**
-  A gap between slices opens by the slant of the camera's ray
-  times a voxel's depth in its slice (section 3 of `docs/architecture.md`),
-  but a chunk does not know the slant, so grown splats grow by up to half
-  a slice's thickness everywhere: silhouettes thicken where no gap opens,
-  towards a face's middle.
-  The compositor knows the slant and could scale the growth;
-  masks would then have to tell what a chunk covers for every camera
-  from what it may draw for some.
+- **Slicing keeps a leak bound slices no longer need.**
+  Drawn in relief, slices leak only slivers however thick they are
+  (step 8 of `src/lib/leak-bound.test.ts`),
+  but they are still as thin as drawn flat they would need to be
+  (section 2 of `docs/architecture.md`),
+  and "Max Occlusion Leak" sets both their thickness
+  and their level of detail (atoms of 2^(k−4) at level k).
+  Thicker is faster but coarser: in the forest, a first render takes
+  about 6.5 s at detail 9.5 (6°), 3 s at 2.4 and 2.7 s at 1
+  (voxels 4 and 10 times as large), against 2.5 s drawn flat at 9.5
+  (Node, 1280×800).
+  Thickness could follow what culling and the slice count want,
+  and the level of detail the screen's pixels;
+  the bound's derivation would go.
+- **Coverage is weaker in relief.**
+  A splat moves on its centre plane with the camera,
+  so a chunk's mask holds what it covers from the axis and the corners
+  of the rhombus of rays, and what it may reach from any:
+  in the forest at 6°, twice the chunks of flat slices are drawn.
+  Nor is that exact: a block covered from each of those may still open
+  between them, which no picture has shown yet.
+  The camera's slant is known where coverage is tested;
+  masks for a few slants, picked per block, would cover nearly as much
+  as flat ones, and between nearer slants.
 - **Coverage masks are coarser than the screen.**
   `mask_scale` marks ⌊40 / t⌋ pixels per unit of a slice t thick,
   but at a level's nearest slices a unit is focal / (t · detail · LAYER)
@@ -81,7 +86,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   so a gap between splats narrower than a mask pixel can count as covered,
   and what is behind it is skipped.
   The mask could follow the focal length and detail,
-  keyed in the chunk like `fill`, leaving the slices as they are.
+  keyed in the chunk like its grid, leaving the slices as they are.
 - **The web draws every splat in view every frame.**
   The forest has millions in view, and only about 1.5 % show a pixel;
   headless Chromium's software WebGL takes over a second per frame,
@@ -95,9 +100,10 @@ Numbers are for the forest at 1280×800, as measured when written.
   The native frame (about 9 ms on an Intel UHD, `--bench`)
   is mostly drawing the clusters that show,
   whose splats cover the screen several times over.
-  About half of all splats are hidden by nearer ones of their chunk,
-  the same from every camera (splats lie at their sites),
-  so the baker could drop them.
+  About half of all splats were hidden by nearer ones of their chunk
+  when slices were drawn flat;
+  in relief, those hidden from the axis and the corners of the rhombus
+  of rays (as masks are filled) could be dropped by the baker.
 - **Bricks on the edge of a face's rhombus are baked whole.**
   Near where a level starts, about 19 bricks meet the rhombus,
   and most of them cross its edge or the screen's.
@@ -156,13 +162,8 @@ Numbers are for the forest at 1280×800, as measured when written.
 - Find covered chunks more exactly: many chunks drawn show no pixel.
 - Measure the WebGL compositor on real GPUs (headless Chromium only has a
   software one); if draw calls matter, pack chunks' splats into one buffer.
-- Paint cut cross-sections with the colour of the surface above them: a 2D
-  prototype allowed slices twice as thick at the same leak.
-- Fill gaps in screen space (only pixels no layer covers) instead of
-  growing faces.
-- Drop a splat's size: painted ones are all a voxel's outline,
-  and grown ones grow the same within a layer,
-  so a splat could be its site and colour.
+- Drop a splat's size: every splat is a voxel's outline,
+  so a splat could be its site, depth and colour.
 - Describe the city in metres, like the forest, instead of boxes on its plan.
 - Port the toy worlds to the forest's metric scale, or drop them.
 - Show render distance in metres:

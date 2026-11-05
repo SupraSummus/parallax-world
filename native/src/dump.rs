@@ -13,7 +13,6 @@ pub struct Request {
     pub cutoff: f64,
     pub i: i32,
     pub j: i32,
-    pub fill: bool,
 }
 
 pub struct Dump {
@@ -83,8 +82,7 @@ pub fn read(bytes: &[u8]) -> Dump {
         })
         .collect();
     let requests = b.array(|b| {
-        let r =
-            Request { face: b.u32() as usize, level: b.i32(), layer: b.i32(), cutoff: b.f64(), i: b.i32(), j: b.i32(), fill: b.i32() == 1 };
+        let r = Request { face: b.u32() as usize, level: b.i32(), layer: b.i32(), cutoff: b.f64(), i: b.i32(), j: b.i32() };
         // The slice's centre plane: slicing.rs finds it.
         b.f64();
         r

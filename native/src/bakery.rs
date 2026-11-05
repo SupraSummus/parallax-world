@@ -15,32 +15,30 @@ use std::sync::{Arc, Condvar, Mutex};
 use bake::{Baker, Slice, Tiles};
 
 use crate::compositor::{GpuCluster, GpuSplat, cluster};
-use crate::slicing::{GRID_LEVELS, atom_level};
+use crate::slicing::{GRID_LEVELS, atom_level, half_layer};
 
-/** A chunk to bake: cell (i, j) of a slice of a face, grown if `fill`, reading tiles [i0, i1] × [k0, k1] of its level. */
+/** A chunk to bake: cell (i, j) of a slice of a face, reading tiles [i0, i1] × [k0, k1] of its level. */
 #[derive(Clone, Copy)]
 pub struct Request {
     pub face: usize,
     pub slice: Slice,
     pub i: i32,
     pub j: i32,
-    pub fill: bool,
     pub tiles: [i32; 4],
     /** The size of the blocks its splats are clustered by (compositor::cluster). */
     pub block: f64,
 }
 
-/** A baked chunk (ChunkSplats in chunk-baker.ts): its splats and their clusters as the GPU takes them (compositor::cluster), how many are painted, and its mask's blocks. */
+/** A baked chunk (ChunkSplats in chunk-baker.ts): its splats and their clusters as the GPU takes them (compositor::cluster), and its mask's blocks. */
 pub struct Baked {
     pub origin: [f64; 2],
     pub extent: [f64; 2],
-    pub painted: usize,
     pub splats: Vec<GpuSplat>,
     pub clusters: Vec<GpuCluster>,
     pub mask: Mask,
 }
 
-/** Which blocks of what a chunk draws are drawn all or partly (see fill.rs), for Coverage. */
+/** Which blocks of what a chunk draws are drawn all, whatever the camera, or maybe partly (see fill.rs), for Coverage. */
 pub struct Mask {
     pub width: usize,
     pub height: usize,
@@ -48,12 +46,12 @@ pub struct Mask {
     pub blocks: Vec<u8>,
 }
 
-/** What a request bakes: face, slice, cell, fill. */
-type Key = (usize, i32, i32, u64, i32, i32, bool);
+/** What a request bakes: face, slice, cell. */
+type Key = (usize, i32, i32, u64, i32, i32);
 
 impl Request {
     fn key(&self) -> Key {
-        (self.face, self.slice.level, self.slice.layer, self.slice.cutoff.to_bits(), self.i, self.j, self.fill)
+        (self.face, self.slice.level, self.slice.layer, self.slice.cutoff.to_bits(), self.i, self.j)
     }
 
     /** The worker of the request's cell. */
@@ -162,12 +160,11 @@ fn work(queue: &Queue, send: &Sender<(Request, Baked)>, grids: &Grids, mut baker
             queue.0.lock().expect("queue").in_flight.remove(&r.key());
             continue;
         }
-        let b = baker.bake(r.face, &r.slice, r.i, r.j, r.fill);
-        let (splats, clusters) = cluster(&baker.numbers, b.painted, r.block);
+        let b = baker.bake(r.face, &r.slice, r.i, r.j);
+        let (splats, clusters) = cluster(&baker.numbers, half_layer(r.slice.level), r.block);
         let baked = Baked {
             origin: [b.origin_x, b.origin_y],
             extent: [b.extent_width, b.extent_height],
-            painted: b.painted,
             splats,
             clusters,
             mask: Mask { width: b.width, height: b.height, scale: b.scale, blocks: baker.blocks.clone() },

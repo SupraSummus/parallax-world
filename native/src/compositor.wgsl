@@ -32,6 +32,8 @@ struct Chunk {
   face: u32,
   depth: f32, // its layer's: see depth_of
   tint: u32, // RGBA to paint its splats in, shaded as their voxels are; 0 for their own
+  half_layer: f32, // how far a splat is past the plane per step of its alpha past 128
+  _pad: f32,
 }
 
 // Splats of one chunk near each other on its plane: `first` and the next
@@ -97,8 +99,10 @@ fn ray_of(view: mat3x3f, position: vec4f) -> vec3f {
 }
 
 // A splat instance (GpuSplat): its hexagon's centre relative to its chunk's
-// origin and half its width and height, its colour and its order in the
-// chunk. Its chunk's slot comes as the first vertex's index over 4.
+// origin and half its width and height, its colour (its alpha its depth
+// past the plane) and its order in the chunk; drawn at its depth, as much
+// wider as the ray to it slants across (compositor.ts). Its chunk's slot
+// comes as the first vertex's index over 4.
 @vertex
 fn splat_vertex(
   @builtin(vertex_index) vertex: u32,
@@ -110,14 +114,16 @@ fn splat_vertex(
   let face = globals.faces[c.face];
   var out: Splat;
   out.corner = vec2f(f32(vertex & 1u), f32((vertex >> 1u) & 1u)) * 2.0 - 1.0;
-  out.slant = splat.z / (sqrt(2.0) * splat.w);
+  let site = vec3f(c.origin + splat.xy, c.distance + (paint.a * 255.0 - 128.0) * c.half_layer);
+  let size = vec2f(splat.z * (1.0 + abs(site.x / site.z)), splat.w);
+  out.slant = size.x / (sqrt(2.0) * size.y);
   let fog = 1.0 - exp(-c.distance / globals.fog_distance);
   let tinted = unpack4x8unorm(c.tint).rgb * (0.3 + 0.7 * dot(paint.rgb, vec3f(0.3, 0.59, 0.11)));
   out.colour = mix(select(paint.rgb, tinted, c.tint != 0u), globals.horizon.rgb, fog);
-  let at = c.origin + splat.xy + out.corner * splat.zw;
-  out.ray = at / c.distance;
+  let at = site + vec3f(out.corner * size, 0.0);
+  out.ray = at.xy / at.z;
   out.clip = vec4f(c.origin.x, c.origin.y, c.origin.x + c.extent.x, c.origin.y - c.extent.y) / c.distance + vec4f(-1.0, 1.0, 1.0, -1.0) * 1e-4;
-  let p = transpose(face.view) * vec3f(at, c.distance);
+  let p = transpose(face.view) * at;
   out.position = vec4f(p.xy * globals.focal / (globals.viewport / 2.0), depth_of(c.depth, order) * p.z, p.z);
   return out;
 }

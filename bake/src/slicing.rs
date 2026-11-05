@@ -13,6 +13,8 @@ pub fn spacing(level: i32) -> i32 {
 
 /** See ATOM_SHIFT in slice-selection.ts. */
 const ATOM_SHIFT: i32 = 4;
+// A splat's depth in half layers of its grid, within ±2^ATOM_SHIFT, rides in a byte (Splat).
+const _: () = assert!(1 << ATOM_SHIFT < 128);
 
 /** See atomLevel: the level of the grid a slice of `level` reads. */
 pub fn atom_level(level: i32) -> i32 {
@@ -69,8 +71,8 @@ pub fn slice_centre(level: i32, layer: i32) -> f64 {
 
 /**
  * How far a face's rays are from its axis, as a tangent, at most: the
- * face's rays are |x| + √2 · |y| ≤ z (inFace in view.ts). Slices are drawn
- * as seen along the axis, so a point d ahead of its slice's centre plane
- * is drawn at most MAX_SLANT · d off (see MAX_SLANT in slice-selection.ts).
+ * face's rays are |x| + √2 · |y| ≤ z (inFace in view.ts). Seen along them,
+ * a splat d ahead of its slice's centre plane is drawn up to
+ * MAX_SLANT · d off its site there (MAX_SLANT in slice-selection.ts).
  */
 pub const MAX_SLANT: f64 = 1.0;

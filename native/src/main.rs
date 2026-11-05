@@ -74,7 +74,6 @@ impl eframe::App for App {
             ui.add(egui::Slider::new(&mut self.fov, 5.0..=120.0).step_by(1.0).text("Field of View (°)"));
             ui.add(egui::Slider::new(&mut self.renderer.render_distance, 40.0..=40000.0).logarithmic(true).text("Render Distance"));
             ui.add(egui::Slider::new(&mut self.renderer.max_leak, 1.0..=12.0).step_by(0.1).text("Max Occlusion Leak (°)"));
-            ui.checkbox(&mut self.renderer.fill, "Fill Gaps");
             ui.checkbox(&mut self.renderer.skip_covered, "Skip Covered Chunks");
             ui.checkbox(&mut self.seams, "Show Face Seams");
             ui.horizontal(|ui| {
@@ -223,10 +222,10 @@ fn check_requests(dump: &Dump, seed: u64, threads: usize) {
     println!("indexed the dump's grids in {:.2} s", start.elapsed().as_secs_f64());
     renderer.skip_covered = false;
     let (_, stats) = renderer.render(dump.camera, view);
-    type Key = (usize, i32, i32, u64, i32, i32, bool);
+    type Key = (usize, i32, i32, u64, i32, i32);
     let ours: HashSet<Key> =
-        stats.wanted.iter().map(|r| (r.face, r.slice.level, r.slice.layer, r.slice.cutoff.to_bits(), r.i, r.j, r.fill)).collect();
-    let theirs: HashSet<Key> = dump.requests.iter().map(|r| (r.face, r.level, r.layer, r.cutoff.to_bits(), r.i, r.j, r.fill)).collect();
+        stats.wanted.iter().map(|r| (r.face, r.slice.level, r.slice.layer, r.slice.cutoff.to_bits(), r.i, r.j)).collect();
+    let theirs: HashSet<Key> = dump.requests.iter().map(|r| (r.face, r.level, r.layer, r.cutoff.to_bits(), r.i, r.j)).collect();
     println!("ours {}, the dump's {}, in both {}", ours.len(), theirs.len(), ours.intersection(&theirs).count());
     for (name, a, b) in [("only ours", &ours, &theirs), ("only the dump's", &theirs, &ours)] {
         let mut only: Vec<_> = a.difference(b).collect();

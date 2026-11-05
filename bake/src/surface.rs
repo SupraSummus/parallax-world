@@ -1,5 +1,7 @@
 //! The voxels of a chunk cell that can show: its surface.
 
+use std::f64::consts::FRAC_1_SQRT_2;
+
 use crate::cells::Cells;
 use crate::slicing::{LAYER, MAX_SLANT, chunk_cell, site_layers, thickness};
 use crate::world::{FACE_KINDS, Geometry, Reader};
@@ -34,13 +36,13 @@ pub struct Slice {
 
 /**
  * How far around its cell, in face units, a chunk of a slice of `level`
- * may draw voxels: each at its own site, seen along the axis, with its
- * outline, grown by up to MAX_SLANT times half the slice's thickness
- * (chunk_splats), by √(3/2) as much in y (cellMargin in slice-selection.ts).
+ * may draw voxels: within their reach (Splat::reach), their sites less
+ * than half the slice's thickness off its centre plane
+ * (cellMargin in slice-selection.ts).
  */
 fn cell_margin(level: i32) -> (f64, f64) {
-    let grow = MAX_SLANT * thickness(level) as f64 / 2.0 * LAYER;
-    (grow + 1.5, grow * 1.5f64.sqrt() + 1.5)
+    let off = MAX_SLANT * thickness(level) as f64 / 2.0 * LAYER;
+    (off + 1.5, off * FRAC_1_SQRT_2 + 1.5)
 }
 
 /** The voxels cell_surface looks at for chunk cell (i, j) of a slice, as a box of (a, b, c), inclusive. */

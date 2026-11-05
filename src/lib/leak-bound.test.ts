@@ -1,16 +1,20 @@
 /**
  * The occlusion-leak bound, derived step by step and checked.
  *
- * Claim: with the slicing of slice-selection.ts, geometry that true
- * perspective hides never shows by more than ε screen pixels (ε = the
- * renderer's max leak), except closer than 2 · `detail` layer spacings,
- * where slices cannot be thinner than one layer of voxels (two layer
- * spacings: a voxel reaches a layer past its own, see fcc.ts) and the bound
- * is two layer spacings.
+ * Claim: with the slicing of slice-selection.ts, slices drawn flat on
+ * their centre planes show geometry that true perspective hides by at most
+ * ε screen pixels (ε = the renderer's max leak), except closer than
+ * 2 · `detail` layer spacings, where slices cannot be thinner than one
+ * layer of voxels (two layer spacings: a voxel reaches a layer past its
+ * own, see fcc.ts) and the bound is two layer spacings.
+ * The renderer draws them in relief instead, each voxel at its depth
+ * (compositor.ts), and leaks only slivers (step 8): the bound is what the
+ * slicing keeps, no longer what is seen.
  *
  * Each `describe` below is one step (step 1 aside, one line of algebra):
  * the claim in words, then a check on random samples (seeded, so failures
- * reproduce) using the same functions the renderer uses. Steps 1, 2 and 4–6 are exact geometry and algebra.
+ * reproduce) using the same functions the renderer uses.
+ * Steps 1, 2 and 4–6 are exact geometry and algebra.
  * Step 3 is the one modelling assumption: that a leak is at most the error
  * of the occluding edge plus that of the hidden one. It holds for single
  * intervals; for real scenes (several occluders, faces seen edge-on, the
@@ -30,14 +34,13 @@
  *
  * Notation, for one lateral axis: the camera is at lateral 0, depth 0 (so
  * z is relative to it). A slice of level k has its near face a layers
- * ahead, thickness t, and centre plane at distance D, the plane its chunks
- * are baked onto and drawn at. They are baked as seen along the face's axis
- * (orthographically): a point is drawn at its own lateral position, which
- * the camera sees along tangent x / D where it sees the point along σ.
+ * ahead, thickness t, and centre plane at distance D. Drawn flat, a point
+ * is drawn at its own lateral position on that plane, which the camera
+ * sees along tangent x / D where it sees the point along σ.
  * focal is the focal length in pixels, ε the leak tolerance in pixels.
  */
 import { describe, it, expect } from 'vitest'
-import { selectSlices, leakFreeDetail, leakAngle, chunkCell, sliceCentre, thickness, holds, atomLevel, atomSpacing, MAX_LEVEL, type SliceId } from './slice-selection'
+import { selectSlices, leakFreeDetail, leakAngle, halfLayer, chunkCell, sliceCentre, thickness, holds, atomLevel, atomSpacing, MAX_LEVEL, type SliceId } from './slice-selection'
 import { ChunkBaker, SPLAT } from './chunk-baker'
 import { FACES, LAYER, inFace } from './view'
 import { VoxelGrid } from './voxel-grid'
@@ -264,8 +267,12 @@ describe.each([1, 0.5, 0.25])('Step 8: ray-cast leaks with tan(fov / 2) = %s', T
     return { cells: [...cells.values()], levels }
   }
 
-  function parallaxOwners({ cells, levels }: { cells: Cell[]; levels: VoxelGrid[] }, cu: number, cz: number, slices: SliceId[]): number[] {
-    // The renderer's own face logic, on voxels (u, 0, z) of the face's lattice.
+  /**
+   * Which voxel each ray shows: the renderer's own face logic, on voxels
+   * (u, 0, z) of the face's lattice, its splats drawn in relief, as the
+   * compositor does, or `flat` on their slices' centre planes.
+   */
+  function parallaxOwners({ cells, levels }: { cells: Cell[]; levels: VoxelGrid[] }, cu: number, cz: number, slices: SliceId[], flat: boolean): number[] {
     const baker = new ChunkBaker(levels[0].materials, levels)
     const cellAt = new Map(cells.map(({ u, z, n }, cell) => [`${String(n)}:${String(u)},${String(z)}`, cell]))
     const owner = rays.map(() => -1)
@@ -281,19 +288,23 @@ describe.each([1, 0.5, 0.25])('Step 8: ray-cast leaks with tan(fov / 2) = %s', T
         return [i - 1, i, i + 1]
       }))
       for (const i of chunkCells) {
-        const chunk = baker.bake({ face: face.name, ...slice, i, j: 0, fill: false })
+        const chunk = baker.bake({ face: face.name, ...slice, i, j: 0 })
         const sites = baker.sites(chunk.splats.length / SPLAT)
-        for (let k = 0; k < chunk.painted; k++) {
+        const alphas = new Uint32Array(chunk.splats.buffer)
+        // Tangents of the rays through what the chunk draws on the centre plane.
+        const [left, right] = [chunk.originX, chunk.originX + chunk.extentWidth].map(x => (x - cu * LAYER) / distance)
+        for (let k = 0; k < chunk.splats.length / SPLAT; k++) {
           const [sx, sy, sw, sh] = chunk.splats.subarray(k * SPLAT, k * SPLAT + 4)
-          // Where its hexagon meets the line b = 0, clipped to what the chunk draws.
-          const half = Math.min(sw, (sh - Math.abs(chunk.originY + sy)) * Math.SQRT2)
+          // Its site, camera-relative, at its depth (compositor.ts).
+          const x = chunk.originX + sx - cu * LAYER
+          const z = flat ? distance : distance + ((alphas[k * SPLAT + 4] >>> 24) - 128) * halfLayer(slice.level)
+          // Where its hexagon, widened by the slant, meets the line b = 0.
+          const width = flat ? sw : sw * (1 + Math.abs(x / z))
+          const half = Math.min(width, (sh - Math.abs(chunk.originY + sy)) * Math.SQRT2)
           if (half <= 0) continue
-          const from = Math.max(chunk.originX, chunk.originX + sx - half)
-          const to = Math.min(chunk.originX + chunk.extentWidth, chunk.originX + sx + half)
           const voxel = cellAt.get(`${String(n)}:${String(sites[3 * k])},${String(sites[3 * k + 2])}`) ?? -1
-          // Drawn at the centre plane's distance.
-          const first = Math.ceil(((from - cu * LAYER) / distance + TAN_HALF_FOV) / step)
-          const last = Math.floor(((to - cu * LAYER) / distance + TAN_HALF_FOV) / step)
+          const first = Math.ceil((Math.max(left, (x - half) / z) + TAN_HALF_FOV) / step)
+          const last = Math.floor((Math.min(right, (x + half) / z) + TAN_HALF_FOV) / step)
           for (let k = Math.max(0, first); k <= Math.min(RAYS - 1, last); k++) owner[k] = voxel
         }
       }
@@ -302,13 +313,13 @@ describe.each([1, 0.5, 0.25])('Step 8: ray-cast leaks with tan(fov / 2) = %s', T
   }
 
   /** Every leak: its width in screen pixels and in lattice units at its nearest leaked voxel. */
-  function leaks(terrain: Cell[], cu: number, cz: number, detail: number): { pixels: number; units: number }[] {
+  function leaks(terrain: Cell[], cu: number, cz: number, detail: number, flat: boolean): { pixels: number; units: number }[] {
     const slices = selectSlices(cz, NEAR, DEPTH, detail)
     // Against the world the slices stand for, coarser where they are.
     const world = drawn(terrain, slices)
     const { cells } = world
     const visible = perspectiveVisible(cells, cu, cz)
-    const owner = parallaxOwners(world, cu, cz, slices)
+    const owner = parallaxOwners(world, cu, cz, slices, flat)
     const runs: { rays: number; distance: number }[] = []
     let run: { rays: number; distance: number } | null = null
     for (const cell of owner) {
@@ -334,17 +345,25 @@ describe.each([1, 0.5, 0.25])('Step 8: ray-cast leaks with tan(fov / 2) = %s', T
   const withinBound = ({ pixels, units }: { pixels: number; units: number }) =>
     pixels <= MAX_LEAK + step * focal || units <= 2 + step * DEPTH
 
-  it('keeps every leak within max(max leak pixels, 2 units) with leakFreeDetail', () => {
+  it('drawn flat, keeps every leak within max(max leak pixels, 2 units) with leakFreeDetail', () => {
     for (const { cells, cu, cz } of scenes) {
-      expect(leaks(cells, cu, cz, detail).filter(l => !withinBound(l))).toEqual([])
+      expect(leaks(cells, cu, cz, detail, true).filter(l => !withinBound(l))).toEqual([])
     }
   })
 
   // Not vacuously: slices 16 times as thick leak past it. (The bound is
   // loose here, at the face's edge only and for the worst occluders:
   // 4 times as thick leak past it at tan(fov / 2) = 1, not at 0.25.)
-  it('leaks more from slices 16 times as thick', () => {
-    const outside = scenes.flatMap(({ cells, cu, cz }) => leaks(cells, cu, cz, detail / 16).filter(l => !withinBound(l)))
+  it('drawn flat, leaks more from slices 16 times as thick', () => {
+    const outside = scenes.flatMap(({ cells, cu, cz }) => leaks(cells, cu, cz, detail / 16, true).filter(l => !withinBound(l)))
     expect(outside.length).toBeGreaterThan(0)
+  })
+
+  // Each voxel drawn where it is, nothing hidden shows but a ray's sliver
+  // where hexagons stand in for outlines.
+  it('in relief, leaks nothing even from slices as thick as their distance', () => {
+    for (const { cells, cu, cz } of scenes) {
+      expect(leaks(cells, cu, cz, 1, false).filter(l => l.pixels > 0.1)).toEqual([])
+    }
   })
 })

@@ -13,9 +13,11 @@
 use std::collections::HashMap;
 use std::ops::Range;
 
+use bake::reach;
 use eframe::egui_wgpu::{self, wgpu};
 
 use crate::renderer::{Chunk, Frame};
+use crate::slicing::half_layer;
 use crate::view::{Vec3, to_local, view_basis};
 
 /** A chunk as the shader reads it (Chunk in compositor.wgsl). */
@@ -30,6 +32,9 @@ struct GpuChunk {
     depth: f32,
     /** RGBA to paint its splats, shaded as their voxels are (Colours); 0 for their own colours. */
     tint: u32,
+    /** How far a splat is past the plane per step of its alpha past 128. */
+    half_layer: f32,
+    _pad: f32,
 }
 
 /** A splat (splat_vertex's instance in compositor.wgsl): its SPLAT numbers (chunk-baker.ts) and its order in its chunk (depth_of). */
@@ -62,26 +67,23 @@ pub fn block(distance: f64, focal: f64) -> f64 {
 }
 
 /**
- * A chunk's splats (painted, then grown, each far to near) as the GPU takes
- * them, in clusters of the splats in each block of size `block` on its plane
- * (row by row, nearest first in each, so that a block's first clusters are
- * its front), and the clusters, nearest first, so that splats are drawn
- * near to far; their `first` counts from the chunk's first splat, and
- * their chunk's slot is not in them yet. In the bake workers, so that a
+ * A chunk's splats (far to near) as the GPU takes them, in clusters of the
+ * splats in each block of size `block` on its plane (row by row, nearest
+ * first in each, so that a block's first clusters are its front), and the
+ * clusters, nearest first, so that splats are drawn near to far; their
+ * `first` counts from the chunk's first splat, and their chunk's slot is
+ * not in them yet. A cluster's box holds where its splats may be drawn on
+ * the plane, `half_layer` past it per step of their alpha past 128
+ * (bake::reach). In the bake workers, so that a
  * chunk's upload is a copy.
  */
-pub fn cluster(numbers: &[f32], painted: usize, block: f64) -> (Vec<GpuSplat>, Vec<GpuCluster>) {
+pub fn cluster(numbers: &[f32], half_layer: f64, block: f64) -> (Vec<GpuSplat>, Vec<GpuCluster>) {
     let numbers = numbers.as_chunks::<5>().0;
-    let grown = numbers.len() - painted;
-    // Painted splats in the first half of the layer's depths, nearer the later painted; grown ones in the second, behind them all.
-    let orders: Vec<f32> = (0..numbers.len())
-        .map(|s| {
-            let (half, k, n) = if s < painted { (0.0, s, painted) } else { (0.5, s - painted, grown) };
-            half + 0.5 * (n - k) as f32 / (n + 1) as f32
-        })
-        .collect();
+    let n = numbers.len();
+    // Nearer the later painted.
+    let orders: Vec<f32> = (0..n).map(|k| (n - k) as f32 / (n + 1) as f32).collect();
     let block_of = |s: usize| [1, 0].map(|d| (numbers[s][d] as f64 / block).floor() as i64);
-    let mut sorted: Vec<usize> = (0..painted).rev().chain((painted..numbers.len()).rev()).collect();
+    let mut sorted: Vec<usize> = (0..n).rev().collect();
     sorted.sort_by_key(|&s| block_of(s));
     let mut clusters = Vec::new();
     let mut start = 0;
@@ -100,7 +102,10 @@ pub fn cluster(numbers: &[f32], painted: usize, block: f64) -> (Vec<GpuSplat>, V
                 visible: 0,
             };
             for &s in part {
-                let [x, y, w, h, _] = numbers[s];
+                let [x, y, w, h, paint] = numbers[s];
+                let off = ((paint.to_bits() >> 24) as f64 - 128.0) * half_layer;
+                let (w, h) = reach(w as f64, h as f64, off);
+                let (w, h) = (w as f32, h as f32);
                 cluster.min = [cluster.min[0].min(x - w), cluster.min[1].min(y - h)];
                 cluster.max = [cluster.max[0].max(x + w), cluster.max[1].max(y + h)];
             }
@@ -572,6 +577,8 @@ impl Compositor {
                         Colours::Layers => tint(hue),
                         Colours::Chunks => tint(hash(&[hue.to_bits(), chunk.i as u64, chunk.j as u64])),
                     },
+                    half_layer: half_layer(s.level) as f32,
+                    _pad: 0.0,
                 };
                 candidates.push([resident.clusters.start, resident.clusters.len() as u32]);
             }

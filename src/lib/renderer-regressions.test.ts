@@ -22,11 +22,11 @@ function makeWorldWithVoxels(voxels: World['voxels']): World {
 
 /** Screen positions (CSS pixels) of the centres of all drawn pixels of the chunks' rasters (see rasterise). */
 function drawnPixels(frame: Frame): { x: number; y: number }[] {
-  return frame.layers.flatMap(({ face, distance, placements }) => placements.flatMap(({ chunk, x, y }) => {
+  return frame.layers.flatMap(({ face, slice, distance, placements }) => placements.flatMap(({ chunk, x, y }) => {
     const points: { x: number; y: number }[] = []
     const project = projector(frame, face)
     const { width, scale } = chunk.mask
-    rasterise(chunk).forEach((pixel, i) => {
+    rasterise(chunk, { x, y }, distance, slice.level).forEach((pixel, i) => {
       if (pixel === 0) return
       const point = project({
         x: x + ((i % width) + 0.5) / scale,
@@ -47,11 +47,11 @@ function drawnPixels(frame: Frame): { x: number; y: number }[] {
 function gapPixels(frame: Frame, along: string, fromX: number, toX: number): number {
   const { width, height, focal } = frame
   const covered = new Uint8Array(width * height)
-  for (const { face, distance, placements } of frame.layers.filter(l => l.face.name === along)) {
+  for (const { face, slice, distance, placements } of frame.layers.filter(l => l.face.name === along)) {
     for (const { chunk, x, y } of placements) {
       const corner = projector(frame, face)({ x, y, z: distance })
       if (!corner) continue
-      const pixels = rasterise(chunk)
+      const pixels = rasterise(chunk, { x, y }, distance, slice.level)
       const mask = chunk.mask
       // Screen pixels per raster pixel.
       const scale = focal / distance / mask.scale
@@ -161,8 +161,9 @@ describe('Renderer regressions', () => {
     })
   })
 
-  // Slices move what they show by up to the leak bound, so a thin floor
-  // seen from high above showed the sky between them. Grown faces cover it.
+  // Flat slices drew a point up to the leak bound off, so a thin floor seen
+  // from high above showed the sky between slices. Drawn in relief, each
+  // voxel where it is, slices meet.
   describe('one layer thick floor seen from high above', () => {
     // A strip along +x+z: its sites at y = 0, a = x - z in [-160, 160) and
     // c = x + z in [0, 2400) (lattice coordinates of +x+z, see view.ts).
@@ -171,29 +172,17 @@ describe('Renderer regressions', () => {
       for (let c = 0; c < 2400; c += 2) voxels.push({ x: (a + c) / 2, y: 0, z: (c - a) / 2, color: '#40a040' })
     }
     const floor = makeWorldWithVoxels(voxels)
-    const gaps = (fillGaps: boolean) => {
+
+    it.each([3, 12])('shows no gaps between slices (max leak %s°)', maxLeak => {
       const renderer = new ParallaxRenderer(floor)
       renderer.resize(1280, 800)
       renderer.setRenderDistance(800)
-      // Thicker slices than by default: splats now hold their voxel's
-      // outline from the eye, which covers these gaps at the default leak.
-      renderer.setMaxLeak(3)
-      // Looking along the strip from just before it (a = 3.8, c = -8), off
-      // the eyes enough for gaps to open.
+      renderer.setMaxLeak(maxLeak)
+      // Looking along the strip from just before it (a = 3.8, c = -8).
       renderer.setCamera({ x: -2.1, y: 50, z: -5.9 })
       renderer.setOrientation({ yaw: 45, pitch: 0 })
-      renderer.setFillGaps(fillGaps)
-      // Columns well inside the floor: grown faces may stick out past its
-      // sides, and its sides are jagged (voxels are rhombic dodecahedra).
-      return gapPixels(renderer.render(), '+x+z', 540, 720)
-    }
-
-    // Filling is approximate: a stray pixel may stay.
-    it('fills nearly every gap between slices', () => {
-      const [unfilled, filled] = [gaps(false), gaps(true)]
-      // Without filling the gaps show (the test would pass vacuously otherwise).
-      expect(unfilled).toBeGreaterThan(20)
-      expect(filled).toBeLessThanOrEqual(unfilled / 20)
+      // Columns well inside the floor: its sides are jagged (voxels are rhombic dodecahedra).
+      expect(gapPixels(renderer.render(), '+x+z', 540, 720)).toBe(0)
     }, 60_000)
   })
 })

@@ -3,10 +3,11 @@
 The world is cut into slices, each a slab between two layers of a
 coarser FCC lattice made of whole cells of a finer one,
 and each slice into chunks, bricks of the lattice seen along its axis;
-each chunk in view is baked once, flat, as seen along the slice's axis,
+each chunk in view is baked once, as seen along the slice's axis,
 into a list of its visible voxels,
-each a hexagon of one colour (a splat) on its slice's plane,
-and WebGL draws the splats on their slices' planes in perspective.
+each a hexagon of one colour (a splat) at its site,
+and WebGL draws the splats in perspective, each at its own depth:
+a slice is a relief.
 Voxels are rhombic dodecahedra on the face-centred cubic (FCC) lattice
 (section 6).
 Sections 1–3 describe one stack of slices, looking along one of the
@@ -110,7 +111,7 @@ Why many layers of atoms and not one:
 cells of neighbouring layers interlock, as voxels do.
 Along the axis, a layer of rhombic dodecahedra N layers apart is 2N deep,
 in columns alternating between even and odd layers;
-a slice is drawn flat and the leak bound limits its depth (section 2),
+the leak bound limits a slice's depth (section 2),
 so slices of single layers of cells would take twice as many.
 In a slab of R layers of cells only its two faces are ragged:
 it is about (R + 1)·N deep for R·N layers, 1.06 times for R = 16.
@@ -171,19 +172,26 @@ but a few where levels change (section 5).
 
 ## 2. Occlusion leaks
 
-A slice is flat: everything in it is drawn at the scale of its centre. In
-true perspective, the top and side faces of nearer voxels hide what lies
-behind them; in slices, the gap between two slices can instead show a
-cross-section of the farther slice. Too-thick slices show what perspective
-hides, e.g. stone under the lake's water surface.
+Splats are drawn at their voxels' depths (section 3),
+so slices show what perspective shows,
+but for slivers where a hexagon stands in for a voxel's outline
+(step 8 of the test below: under 0.1 pixel even for slices as thick as
+their distance).
+The slicing still keeps the bound below,
+derived for slices drawn flat, everything at the scale of its centre:
+it sets how thick slices are,
+and so their level of detail (section 1) and how many there are
+(`docs/todo.md`).
+Drawn flat, the gap between two slices could show a cross-section of
+the farther slice where the top and side faces of nearer voxels hide it
+in perspective, e.g. stone under the lake's water surface.
 
 Bound, with ε = the "max occlusion leak" setting:
-**geometry that perspective hides never shows by more than the angle ε**
+**geometry that perspective hides would not show by more than the angle ε**
 (or, closer than 2 · `detail` layers, by more than two layer spacings;
 see below).
-It is an angle because slicing knows neither the field of view nor the viewport.
-The compositor makes it ε · `focal` pixels (`leakPixels`),
-so zoomed in it is more pixels.
+It is an angle because slicing knows neither the field of view nor the viewport:
+ε · `focal` pixels, more zoomed in.
 
 **Derivation.** Every step below is stated and checked on random samples,
 plus end to end against ray-cast perspective, in
@@ -191,7 +199,7 @@ plus end to end against ray-cast perspective, in
 follow or change the reasoning. In short, for one lateral axis, a slice
 of level k with near side a layers ahead, t layer spacings thick
 (`thickness`, as voxels reach past their sites), centre plane at D = a + t/2,
-is baked as seen along the face's axis (section 3):
+is drawn flat, as seen along the face's axis:
 
 1. A point the camera sees along tangent σ, at depth z, is drawn at its
    own lateral position on the plane, σ·(z − D) off.
@@ -225,9 +233,8 @@ so leaks there can be up to 2× larger in a 90° view.
 The bound is reached only towards a face's edges, where rays slant most,
 and by the worst occluders; towards a face's middle a slice leaks little.
 It cannot be pushed to zero by thinner slices:
-even single layers leak, because the back faces and the inside of the slab
-are flattened.
-Why chunks are not baked in perspective instead: `docs/todo.md`.
+even single layers would leak, because the back faces and the inside of
+the slab are flattened.
 
 ## 3. Chunks and splats (`renderer.ts`, `chunk-baker.ts`, `bake/`)
 
@@ -265,7 +272,7 @@ is checked against the screen and coverage (section 4),
 so a treetop's chunk is not held to the sky above it.
 
 **Baking along the axis.** A chunk is baked as seen along its face's axis:
-each voxel at its own lateral position on the centre plane.
+each voxel at its site, its depth past the centre plane kept.
 So it does not depend on the camera, and is baked once:
 moving, only chunks coming into view are baked.
 It is keyed by its level's grid (`World.version`):
@@ -278,7 +285,14 @@ meets from outside (`chunk_splats`).
 Each is painted as one hexagon (`Splat`),
 the voxel's outline seen along the face's axis
 (√2 wide and 2 high, its corners the rhombic dodecahedron's),
-centred on its site.
+across the axis at its site:
+its depth, in half layers, rides in its colour's alpha, as splats are opaque.
+Seen along a ray slanting σ off the axis, the outline is 1 + |σx| times
+as wide (the voxel's tips a layer before and after move sideways)
+and, within the face's rays, no higher;
+the compositor widens it so,
+and the splats of a surface leave no gaps from any ray of the face,
+within a slice or across slices.
 A splat's colour is the mean of its voxel's open faces' shades
 (of its cut faces' where it has none),
 each shaded by the axes its normal leans towards, as in the reference viewer
@@ -286,37 +300,19 @@ each shaded by the axes its normal leans towards, as in the reference viewer
 a voxel is shaded by the way its surface faces,
 and looks the same along every face.
 
-**Painting order.** Voxels by their layer, farthest first.
-Seen along the axis, voxels of one layer do not overlap,
-and of two that do, the one in the farther layer is behind.
+**Painting order.** Voxels by their layer, farthest first:
+a ray of the face passes from a voxel into one of the next layer,
+never back (their common face's normal is along the axis
+or (±1, ±√2, 1) / 2, the rays |σx| + √2·|σy| ≤ 1).
+Voxels of one layer meet only side by side;
+widened, their hexagons overlap,
+and which shows there is the same for every ray,
+so near a slant's extremes a voxel's neighbour in its layer may show
+on up to |σx| of its width.
 `src/lib/chunk-baker.test.ts` checks against rays cast along the axis
 that every voxel one meets first is painted,
-and `bake/src/splats.rs` that it is the one that shows.
-
-**Filling gaps.** A slice draws a point at depth z′,
-which the camera sees along σ, σ·(z′ − c) off (section 2).
-Within a slice that keeps surfaces whole;
-only where a surface goes on into another slice can it tear.
-At the boundary between slices k (nearer) and k + 1,
-the nearer one draws its far edge σ·s_k/2 off
-and the farther one its near edge −σ·s_{k+1}/2 off,
-so on screen they are apart by
-J = σ·s_k/(2D_k) + σ·s_{k+1}/(2D_{k+1}).
-(s is the slice's thickness.)
-A surface running along z moves towards the face's axis
-with depth, which slices drawn along the axis do not: J opens a gap there.
-A gap is |J| − t/D_{k+1}, as the cut of a solid t units thick covers t/D:
-only thin things tear, e.g. a one-layer floor seen from high above.
-So each slice closes its share:
-voxels with an open face and a neighbour in another slice
-grow, by |σ|·d for d the depth of the voxel's tips from the centre plane
-(slices interlock, so where they meet is the voxel's own depth, at most s/2)
-(`chunk_splats`; |σ| is at most 1, section 2):
-each side of its hexagon moves out by that much,
-if a ray of the face meets one of its open faces.
-Grown splats come after a chunk's painted ones,
-and are drawn only where the chunk paints nothing (section 4).
-"Fill Gaps" turns it off.
+and `bake/src/splats.rs` that along slanted rays it is the one that shows,
+or its neighbour so.
 
 **The baker** is Rust (`bake/`), compiled to WebAssembly
 with the worlds and their engine, which depend on it
@@ -331,14 +327,15 @@ and shades the colours per face (`tables.rs`).
 Then each chunk is one call,
 and its splats are copied out of the WebAssembly memory.
 A chunk's voxels are those of its cell and a margin around it
-as wide as its splats, grown, may reach (`cell_surface`).
+as wide as its splats may be drawn (`Splat::reach`, `cell_surface`).
 The native spike (`native/`) links the baker instead,
 a baker per worker thread sharing one copy of the tiles (`share_tiles`),
 and has the renderer, slice selection and coverage in Rust too.
 
-Each chunk is clipped to its cell: splats that miss it are dropped,
+Each chunk is clipped to its cell, by where pixels' rays cross its
+centre plane: splats that may not be drawn in it are dropped,
 and `originX`/`originY` and its extent record where on the centre plane
-the rest draw. A chunk does not depend on the camera's position,
+the rest may draw. A chunk does not depend on the camera's position,
 so it is baked once when it first comes into view and never again.
 Splats have no resolution: the compositor draws them at the screen's.
 
@@ -346,8 +343,8 @@ Splats have no resolution: the compositor draws them at the screen's.
 each render lists the missing chunks in view,
 and up to 8 workers, each with a copy of the world, bake them
 (`WorkerBakery`, `bake.worker.ts`, `ChunkBaker`).
-Until a chunk arrives, the cell's latest bake (of an older grid, or with
-gap filling toggled) stands in;
+Until a chunk arrives, the cell's latest bake (of its level's older grid)
+stands in;
 if that one is covered (section 4), nothing is baked.
 A cell never baked shows nothing yet, e.g. right after start.
 Those cells are baked first, near to far across all faces;
@@ -444,9 +441,13 @@ and sub-blocks outside the face count as covered.
 A sub-block is covered once one layer's chunks draw all of the face's part of it,
 but different sub-blocks may be covered by different layers:
 leaves, trunks and the ground together close what none of them closes alone.
-Bakers fill a mask of what a chunk draws, its splats' pixels at
-`mask_scale`, about as many per chunk at every level,
-and record which blocks of it are all drawn and which partly (`fill_mask`, `solid_blocks`);
+Bakers fill a mask of what a chunk draws on its centre plane,
+its splats' pixels at `mask_scale`, about as many per chunk at every level,
+and record which blocks of it are all drawn whatever the camera,
+and which may be partly (`fill_mask`, `solid_blocks`):
+drawn in relief, a splat moves on the plane with the camera,
+so a block is all drawn if it is from the axis and the corners of the
+rhombus of rays, and maybe drawn if a splat may reach it from any ray;
 the blocks under a sub-block, plus a pixel around, must all be drawn.
 The mask is coarser than the screen (`todo.md`):
 a gap between splats narrower than a mask pixel may hide nothing behind it.
@@ -474,9 +475,6 @@ Within a layer, a chunk draws only on its own part of the plane,
 decided by each pixel's ray, so chunks neither overlap nor leave seams;
 a later splat at the same depth covers an earlier one,
 so a chunk's are painted in order.
-Its grown splats are drawn at depth i + ½:
-behind every splat of layer i, in front of layer i + 1,
-and nearest wins among them, as they are painted far to near.
 A chunk's splats are uploaded when it comes into view
 and deleted when it leaves.
 No antialiasing, so voxel edges stay crisp.
@@ -485,7 +483,7 @@ The native compositor (`native/src/compositor.rs`) draws only what may show:
 in the forest, under 2 % of the splats in view show a pixel.
 Painting order is in the depth instead of the draw order:
 layer k of L at 2^((k − L)·s), and within a chunk each splat's rank,
-nearer the later it is painted, grown ones in the layer's back half
+nearer the later it is painted
 (`depth_of`, exponential so the largest chunks' ranks stay apart in f32).
 So splats can be drawn in any order,
 and the bake workers put a chunk's in clusters of a few nearby on its plane,
@@ -530,7 +528,6 @@ baked again on every render.
 | leak tolerance change | Slices still needed are reused |
 | small z movement | Slices reused but where levels change: there a few slices get a new cutoff or level, the ones they replace standing in until baked |
 | resize | Slices and chunks reused; placements update |
-| gap filling toggle | Chunks rebaked (keyed by whether they are grown) |
 | world regeneration | Whole cache cleared |
 
 Per-render stats (`UpdateStats`) report chunks reused vs shown for the
@@ -597,10 +594,9 @@ so from the parallax camera's position both renderers should agree.
 
 ## Limitations
 
-- Each slice is drawn at the scale of its centre, as seen along its
-  face's axis, so it is only approximately in perspective; section 2
-  bounds the error. A surface crossing slices at a slant, like the ground
-  seen from above, is drawn in pieces, each pulled towards the face's axis.
+- A voxel's hexagon holds its outline, not more:
+  near a slant's extremes it may hide a neighbour in its layer that is in
+  front (section 3).
 - A voxel is painted as one hexagon of one colour holding its outline:
   its faces' shapes and shades are lost,
   and a silhouette is a row of hexagons.
@@ -608,14 +604,12 @@ so from the parallax camera's position both renderers should agree.
   drawn, and near voxels seen at a steep angle are the least accurate.
 - Inside a voxel (the camera has no collisions), the cut faces of the
   nearest slices fill the screen.
-- At a seam, the two faces slice the world differently: geometry
-  crossing it can be off by up to the leak bound on each side.
+- At a seam, the two faces slice the world differently, and paint a
+  layer's voxels in different orders.
   Looking along a world axis, four faces meet in the middle of the screen.
 - More faces are in view at once than with a cube's six (four or more,
   against one to three), each with its own near slices,
   so more is baked.
-- Gap filling may leave a few pixels,
-  e.g. on a one-layer floor seen from above.
 - Slices are slabs of whole cells, drawn in order, but a voxel on a
   cell's boundary is half in the next layer of cells: where it overlaps a
   voxel of the next slice on screen, the nearer slice's one may show
