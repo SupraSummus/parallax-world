@@ -12,10 +12,10 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Condvar, Mutex};
 
+use bake::slicing::{GRID_LEVELS, atom_level, half_layer};
 use bake::{Baker, Slice, Tiles};
 
 use crate::compositor::{GpuCluster, GpuSplat, cluster};
-use crate::slicing::{GRID_LEVELS, atom_level, half_layer};
 
 /** A chunk to bake: cell (i, j) of a slice of a face, reading tiles [i0, i1] × [k0, k1] of its level. */
 #[derive(Clone, Copy)]

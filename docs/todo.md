@@ -44,8 +44,8 @@ Numbers are for the forest at 1280×800, as measured when written.
   Its `--shot` draws only a seed's spawn view, not the web's view query.
 - **TS and Rust still say much the same twice.**
   The tiles around the camera (`world.ts`) are `native/src/world.rs`,
-  and slice selection, faces and the renderer are in `native/src` too;
-  `native/src/slicing.rs` restates parts of `bake/src/slicing.rs`.
+  slice selection (`bake/src/slicing.rs`) is `slice-selection.ts`,
+  and faces and the renderer are in `native/src` too.
   The renderer is the large step.
 - **Slicing keeps a leak bound slices no longer need.**
   Drawn in relief, slices leak only slivers however thick they are

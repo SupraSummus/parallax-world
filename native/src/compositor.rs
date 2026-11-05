@@ -13,10 +13,10 @@
 use std::collections::HashMap;
 use std::ops::Range;
 
+use bake::slicing::half_layer;
 use eframe::egui_wgpu::{self, wgpu};
 
 use crate::renderer::{Chunk, Frame};
-use crate::slicing::half_layer;
 use crate::view::{Vec3, to_local, view_basis};
 
 /** A chunk as the shader reads it (Chunk in compositor.wgsl). */

@@ -14,11 +14,11 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Condvar, Mutex};
 
+use bake::slicing::GRID_LEVELS;
 use bake::{Grid, LayerIndex, Tiles};
 use worldgen::generator::{Generator, generate};
 use worldgen::grid::{Box3, compose};
 
-use crate::slicing::GRID_LEVELS;
 use crate::view::Vec3;
 
 /** Tiles are 2^TILE_SHIFT sites of their level wide. */
