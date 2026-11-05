@@ -68,6 +68,8 @@ function App() {
   const [skipCovered, setSkipCovered] = useState(true)
   const [firstInColumn, setFirstInColumn] = useState(firstInColumnQuery)
   const [showSeams, setShowSeams] = useState(false)
+  const [showFlat, setShowFlat] = useState(false)
+  const [showRelief, setShowRelief] = useState(true)
   // Generating a world blocks this thread for a second or two; a spinner shows meanwhile.
   const [generating, setGenerating] = useState(true)
 
@@ -296,6 +298,16 @@ function App() {
     compositorRef.current?.setShowSeams(value)
   }
 
+  const handleShowFlatChange = (value: boolean) => {
+    setShowFlat(value)
+    compositorRef.current?.setPlacement(value, showRelief)
+  }
+
+  const handleShowReliefChange = (value: boolean) => {
+    setShowRelief(value)
+    compositorRef.current?.setPlacement(showFlat, value)
+  }
+
   const totalUpdates = sessionStats?.totalUpdates ?? 0
   const averageCacheEfficiency = sessionStats?.averageCacheEfficiency ?? 0
   const lastUpdate = sessionStats?.lastUpdate
@@ -362,18 +374,11 @@ function App() {
               step={0.1}
               onChange={handleMaxLeakChange}
             />
-            <label className="flex items-center justify-between text-xs text-muted-foreground">
-              Skip Covered Chunks
-              <Switch checked={skipCovered} onCheckedChange={handleSkipCoveredChange} aria-label="Skip covered chunks" />
-            </label>
-            <label className="flex items-center justify-between text-xs text-muted-foreground">
-              One Voxel per Column
-              <Switch checked={firstInColumn} onCheckedChange={handleFirstInColumnChange} aria-label="One voxel per column" />
-            </label>
-            <label className="flex items-center justify-between text-xs text-muted-foreground">
-              Show Face Seams
-              <Switch checked={showSeams} onCheckedChange={handleShowSeamsChange} aria-label="Show face seams" />
-            </label>
+            <SwitchRow label="Skip Covered Chunks" checked={skipCovered} onChange={handleSkipCoveredChange} />
+            <SwitchRow label="One Voxel per Column" checked={firstInColumn} onChange={handleFirstInColumnChange} />
+            <SwitchRow label="Show Face Seams" checked={showSeams} onChange={handleShowSeamsChange} />
+            <SwitchRow label="Flat Voxels" checked={showFlat} onChange={handleShowFlatChange} />
+            <SwitchRow label="Voxels in Relief" checked={showRelief} onChange={handleShowReliefChange} />
             <div className="space-y-0.5 text-xs text-muted-foreground">
               <div className="flex items-center gap-2"><Move size={14} /><span>W/S - Forward/Back</span></div>
               <div className="pl-[22px]">A/D - Left/Right</div>
@@ -520,6 +525,20 @@ function SliderRow({ label, value, min, max, step, onChange }: {
       <label className="block text-xs text-muted-foreground">{label}</label>
       <Slider value={[value]} onValueChange={onChange} min={min} max={max} step={step} />
     </div>
+  )
+}
+
+// The label names the switch.
+function SwitchRow({ label, checked, onChange }: {
+  label: string
+  checked: boolean
+  onChange: (checked: boolean) => void
+}) {
+  return (
+    <label className="flex items-center justify-between text-xs text-muted-foreground">
+      {label}
+      <Switch checked={checked} onCheckedChange={onChange} />
+    </label>
   )
 }
 

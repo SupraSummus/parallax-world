@@ -16,7 +16,8 @@ const SEAM_WIDTH = 1.5
 
 // Each splat is a rectangle around its hexagon across the face's axis at
 // its site, from gl_VertexID, one instance per splat: `halfLayer` past the
-// layer's plane per step of its alpha past 128, and as much wider as the
+// layer's plane per step of its alpha past 128 (times `relief`: 0 draws it
+// flat, on the plane), and as much wider as the
 // ray to it slants across (Splat in bake/src/splats.rs). Projected like
 // projector() in view.ts, `view` having the camera's axes as columns, in
 // the layer's face coordinates (the world's for the sky). `origin` is the
@@ -29,6 +30,7 @@ uniform mat3 view;
 uniform vec2 origin;
 uniform float distance;
 uniform float halfLayer;
+uniform float relief;
 uniform float depth;
 uniform bool sky;
 uniform bool seams;
@@ -43,7 +45,7 @@ void main() {
     gl_Position = vec4(corner, depth, 1.0);
     return;
   }
-  vec3 site = vec3(origin + splat.xy, distance + (paint.a * 255.0 - 128.0) * halfLayer);
+  vec3 site = vec3(origin + splat.xy, distance + (paint.a * 255.0 - 128.0) * halfLayer * relief);
   vec2 size = vec2(splat.z * (1.0 + abs(site.x / site.z)), splat.w);
   slant = size.x / (sqrt(2.0) * size.y);
   colour = paint.rgb;
@@ -111,7 +113,7 @@ void main() {
 
 const rgb = (hex: string) => [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255) as [number, number, number]
 
-const UNIFORMS = ['viewport', 'resolution', 'focal', 'view', 'origin', 'clip', 'distance', 'halfLayer', 'depth', 'skyTop', 'horizon', 'fog', 'sky', 'seams', 'seamColor', 'seamWidth'] as const
+const UNIFORMS = ['viewport', 'resolution', 'focal', 'view', 'origin', 'clip', 'distance', 'halfLayer', 'relief', 'depth', 'skyTop', 'horizon', 'fog', 'sky', 'seams', 'seamColor', 'seamWidth'] as const
 type Uniform = (typeof UNIFORMS)[number]
 
 /** Attribute locations of a splat's numbers (see SPLAT). */
@@ -131,6 +133,8 @@ export class Compositor {
   private buffers = new Map<Chunk, WebGLBuffer>()
   private frame: Frame | null = null
   private showSeams = false
+  // How far each splat is drawn towards its depth: 0 flat, 1 in relief.
+  private reliefs = [1]
 
   /** Throws if the browser has no WebGL 2. */
   constructor(canvas: HTMLCanvasElement) {
@@ -154,6 +158,12 @@ export class Compositor {
   /** Whether to draw the seams between faces over the picture; redraws the last frame. */
   setShowSeams(show: boolean) {
     this.showSeams = show
+    if (this.frame) this.draw(this.frame)
+  }
+
+  /** Whether to draw splats flat on their layer's plane, in relief, or both; redraws the last frame. */
+  setPlacement(flat: boolean, inRelief: boolean) {
+    this.reliefs = [...(flat ? [0] : []), ...(inRelief ? [1] : [])]
     if (this.frame) this.draw(this.frame)
   }
 
@@ -184,7 +194,8 @@ export class Compositor {
     // Layer i at depth z(i), strictly inside (-1, 1) so rounding never clips
     // it; the sky behind all of them, still in front of the cleared depth.
     // Within a chunk, a later splat covers an earlier one at the same depth
-    // (LEQUAL), so they are painted in order.
+    // (LEQUAL), so they are painted in order; drawn twice, the copies in
+    // relief cover the flat ones.
     const z = (i: number) => (2 * i + 1) / (frame.layers.length + 1) - 1
     const drawn = new Set<Chunk>()
     gl.uniform1i(u.sky, 0)
@@ -208,7 +219,10 @@ export class Compositor {
         gl.uniform4f(u.clip, x, y, x + chunk.extentWidth, y - chunk.extentHeight)
         gl.vertexAttribPointer(SPLAT_AT, 4, gl.FLOAT, false, SPLAT * 4, 0)
         gl.vertexAttribPointer(PAINT_AT, 4, gl.UNSIGNED_BYTE, true, SPLAT * 4, 16)
-        gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, chunk.splats.length / SPLAT)
+        for (const relief of this.reliefs) {
+          gl.uniform1f(u.relief, relief)
+          gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, chunk.splats.length / SPLAT)
+        }
       }
     })
     gl.disableVertexAttribArray(SPLAT_AT)

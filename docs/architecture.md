@@ -189,7 +189,8 @@ and so their level of detail (section 1) and how many there are
 (`docs/todo.md`).
 Drawn flat, the gap between two slices could show a cross-section of
 the farther slice where the top and side faces of nearer voxels hide it
-in perspective, e.g. the ground under the moor's pools.
+in perspective, e.g. the ground under the moor's pools
+("Flat Voxels" draws them so).
 
 Bound, with ε = the "max occlusion leak" setting:
 **geometry that perspective hides would not show by more than the angle ε**
