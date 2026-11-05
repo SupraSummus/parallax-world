@@ -164,6 +164,17 @@ Numbers are for the forest at 1280×800, as measured when written.
 - Show render distance in metres:
   they are lattice units, and the forest's unit is 0.125 m.
 - Show the forest to 22 km again: `MAX_LEVEL` 13, one grid more.
+- Learn a world from examples instead of the split grammar.
+  Two models in lab draw any box alone, flat or on the FCC lattice.
+  The masked model (`lab/src/masked.rs`, `masked_fcc.rs`)
+  learns the statistics and new layouts,
+  but breaks long thin things (lanes, tunnels) into pieces.
+  Synthesis by coordinates (`lab/src/exemplar.rs`, `exemplar_fcc.rs`)
+  copies pieces of the examples, so it keeps lanes whole,
+  but cuts houses where pieces of two towns meet.
+  Worth trying: coordinates guided by the masked model's coarse levels.
+- Join lab's cubic and FCC samplers with one lattice type
+  (sites, neighbours, parents): each pair now repeats its box bookkeeping.
 
 Composing generators (section "Composing" of `docs/generators.md`), untried:
 

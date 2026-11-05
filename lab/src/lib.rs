@@ -29,22 +29,43 @@
 //! The grammar with shared splits is also a world's: `export` writes a
 //! sample of its rules as the table worlds/src/learned.rs draws towns from.
 //!
+//! The fourth asks for one learner of any scene, flat or 3D: a pyramid of
+//! learned codes, each level drawn from the one above by a small local
+//! network (masked.rs; masked_fcc.rs on the worlds' FCC lattice, where
+//! coarse cells overlap). It learns statistics and new layouts, but breaks
+//! long thin things (lanes, tunnels) into pieces. The scenes are in
+//! scenes.rs.
+//!
+//! The fifth draws addresses instead of labels (exemplar.rs,
+//! exemplar_fcc.rs): each cell points into an example, so whole pieces
+//! come through. It keeps lanes whole and islands apart, but cuts houses
+//! and street grids where pieces of two towns meet.
+//!
 //! The examples run the experiments (`cargo run --release --example
 //! segment`, then `synth`; `gather`, then `geometry`, `shared` and
-//! `regimes`), print Markdown tables and write pictures to out/; the
-//! worlds' columns are generated once and cached there.
+//! `regimes`; `masked`, `masked_fcc`; `exemplar`, `exemplar_fcc`), print
+//! Markdown tables and write pictures to out/; the worlds' columns are
+//! generated once and cached there.
 
+pub mod exemplar;
+pub mod exemplar_fcc;
 pub mod experiment;
+pub mod fcc_stats;
 pub mod geometry;
 pub mod grammar;
 pub mod hierarchy;
 pub mod image;
+pub mod masked;
+pub mod masked_fcc;
 pub mod mixture;
+pub mod net;
 pub mod png;
 pub mod regimes;
+pub mod scenes;
 pub mod stats;
 pub mod synth;
 pub mod template;
 pub mod towns;
 pub mod valley;
+pub mod vol;
 pub mod wfc;

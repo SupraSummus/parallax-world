@@ -52,7 +52,7 @@ pub const CLASSES: [Class; 21] = [
 ];
 
 /** Each of the valley's kinds' class. */
-fn class_of_kind(kinds: usize) -> Vec<u8> {
+pub fn class_of_kind(kinds: usize) -> Vec<u8> {
     use worlds::fields::K as P;
     let forest: [(&[F], u8); 10] = [
         (&[F::moss, F::grass, F::tallGrass], 0),
