@@ -1,10 +1,10 @@
-//! Spike of a native frontend: the forest of worlds/ generated in tiles, those
-//! in view first (world.rs), the renderer picking the chunks in view
-//! (renderer.rs), worker threads baking them with the baker in bake/,
-//! sharing the tiles, and wgpu drawing them in an egui window.
+//! Spike of a native frontend: a world of worlds/ (the forest, or --world)
+//! generated in tiles, those in view first (world.rs), the renderer picking
+//! the chunks in view (renderer.rs), worker threads baking them with the
+//! baker in bake/, sharing the tiles, and wgpu drawing them in an egui window.
 //!
-//! parallax-native [--threads N] [--seed S] [--leak DEG] [--shot out.png [--seams] [--colour voxels|layers|chunks] | --bench] [--walk D] [--stroll S] [--spin]
-//! parallax-native [--seed S] --check-requests frame.bin
+//! parallax-native [--world NAME] [--threads N] [--seed S] [--leak DEG] [--shot out.png [--seams] [--colour voxels|layers|chunks] | --bench] [--walk D] [--stroll S] [--spin]
+//! parallax-native [--world NAME] [--seed S] --check-requests frame.bin
 //!
 //! --shot draws the first frame once the world has its tiles and all its
 //! chunks are baked, at 1280×800, offscreen, and saves it; --bench only
@@ -45,7 +45,7 @@ use view::{Vec3, focal_length, view_basis};
 use world::{Level, Make, World};
 use worldgen::generator::materials_of;
 
-/** The world shown. */
+/** The world shown unless --world names another (worlds::WORLDS). */
 const WORLD: Make = worlds::forest::forest;
 
 struct App {
@@ -203,14 +203,14 @@ fn complete(world: &mut World, renderer: &mut Renderer, camera: Vec3, view: &vie
 }
 
 /** Compares the chunks the first frame wants, coverage off, with those the TS renderer wanted for the dump. */
-fn check_requests(dump: &Dump, seed: u64, threads: usize) {
+fn check_requests(dump: &Dump, make: Make, seed: u64, threads: usize) {
     let faces = view::faces();
     for (face, l) in faces.iter().zip(&dump.lattices) {
         assert_eq!(face.lattice, *l, "the faces are not the TS renderer's");
     }
     let focal = focal_length(dump.fov, dump.width, dump.height);
     let view = &view::View { yaw: dump.yaw, pitch: dump.pitch, width: dump.width, height: dump.height, focal };
-    let shown = WORLD(seed);
+    let shown = make(seed);
     let mut renderer = renderer(&shown, threads, dump.render_distance);
     let heights = world::heights(&shown);
     let start = Instant::now();
@@ -288,19 +288,23 @@ fn main() -> eframe::Result {
     let args: Vec<String> = std::env::args().collect();
     let threads = args.iter().position(|a| a == "--threads").map_or_else(num_cpus, |i| args[i + 1].parse().expect("threads"));
     let seed = args.iter().position(|a| a == "--seed").map_or(12345, |i| args[i + 1].parse().expect("seed"));
+    let make = args
+        .iter()
+        .position(|a| a == "--world")
+        .map_or(WORLD, |i| worlds::by_name(&args[i + 1]).expect("--world forest, valley, moor or learned").make);
     if let Some(i) = args.iter().position(|a| a == "--check-requests") {
-        check_requests(&dump::read(&std::fs::read(&args[i + 1]).expect("dump")), seed, threads);
+        check_requests(&dump::read(&std::fs::read(&args[i + 1]).expect("dump")), make, seed, threads);
         return Ok(());
     }
     let size = SHOT;
     let focal = focal_length(FOV, size[0], size[1]);
     let first = view::View { yaw: YAW, pitch: PITCH, width: size[0], height: size[1], focal };
-    let shown = WORLD(seed);
+    let shown = make(seed);
     let mut renderer = renderer(&shown, threads, RENDER_DISTANCE);
     if let Some(i) = args.iter().position(|a| a == "--leak") {
         renderer.max_leak = args[i + 1].parse().expect("leak");
     }
-    let mut world = World::new(WORLD, seed, threads);
+    let mut world = World::new(make, seed, threads);
     let mut camera = shown.spawn.map(|v| v as f64);
     let faces: [[Vec3; 3]; 12] = std::array::from_fn(|f| view::faces()[f].axes);
     let fog_distance = RENDER_DISTANCE * FOG_PER_RENDER_DISTANCE;
