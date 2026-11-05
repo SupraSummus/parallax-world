@@ -9,8 +9,9 @@ const rasters = new WeakMap<ChunkSplats, { key: string; pixels: Uint32Array }>()
 /**
  * A chunk's splats as the compositor paints them placed at (x, y) on the
  * plane z = distance of a slice of `level`, seen from the camera: at each
- * of its mask's pixels (see Mask) on that plane, RGBA of the last splat
- * the camera's ray through it meets at the splat's depth, 0 if none.
+ * of its mask's pixels (see Mask) on that plane, RGBA of the splat whose
+ * pillar (its hexagon swept over its run) the camera's ray through it
+ * enters first, the last drawn where they tie; 0 if none.
  */
 export function rasterise(chunk: ChunkSplats, { x, y }: Omit<Placement, 'chunk'>, distance: number, level: number): Uint32Array {
   const key = [x, y, distance, level].join()
@@ -18,20 +19,50 @@ export function rasterise(chunk: ChunkSplats, { x, y }: Omit<Placement, 'chunk'>
   if (cached?.key === key) return cached.pixels
   const { splats, mask: { width, height, scale } } = chunk
   const pixels = new Uint32Array(width * height)
+  const depths = new Float64Array(width * height).fill(Infinity)
   const colours = new Uint32Array(splats.buffer, splats.byteOffset, splats.length)
+  // The depths along a ray between which it may meet the splat being
+  // drawn, narrowed to where |a·z − b| ≤ k.
+  let [from, to] = [0, 0]
+  const narrow = (a: number, b: number, k: number) => {
+    if (a === 0) {
+      if (Math.abs(b) > k) to = -Infinity
+      return
+    }
+    const [p, q] = [(b - k) / a, (b + k) / a]
+    from = Math.max(from, Math.min(p, q))
+    to = Math.min(to, Math.max(p, q))
+  }
+  // Mask pixels from a camera-relative point on the plane.
+  const [col, row] = [(px: number) => (px - x) * scale - 0.5, (py: number) => (y - py) * scale - 0.5]
   for (let k = 0; k < splats.length / SPLAT; k++) {
-    const [sx, sy, sw, sh] = splats.subarray(k * SPLAT, k * SPLAT + 4)
+    const [sx, sy, sw, run] = splats.subarray(k * SPLAT, k * SPLAT + 4)
     const colour = colours[k * SPLAT + 4]
-    // Its site and size, camera-relative; and its depth over the plane's.
-    const [cx, cy, z] = [x + sx, y + sy, distance + ((colour >>> 24) - 128) * halfLayer(level)]
-    const [w, h, ratio] = [sw * (1 + Math.abs(cx / z)), sh, distance / z]
-    // Mask pixels from a camera-relative point on the plane.
-    const [col, row] = [(px: number) => (px - x) * scale - 0.5, (py: number) => (y - py) * scale - 0.5]
-    for (let r = Math.max(0, Math.ceil(row((cy + h) * ratio))); r <= Math.min(height - 1, row((cy - h) * ratio)); r++) {
-      for (let c = Math.max(0, Math.ceil(col((cx - w) * ratio))); c <= Math.min(width - 1, col((cx + w) * ratio)); c++) {
-        // Where the ray through the pixel's centre is at the splat's depth.
-        const [u, v] = [Math.abs((x + (c + 0.5) / scale) / ratio - cx), Math.abs((y - (r + 0.5) / scale) / ratio - cy)]
-        if (u < w && u / Math.SQRT2 + v < h) pixels[r * width + c] = colour | 0xff000000
+    // Its site and size, camera-relative; its pillar's ends along the axis.
+    const [cx, cy] = [x + sx, y + sy]
+    const near = distance + ((colour >>> 24) - 128) * halfLayer(level)
+    const far = near + run * halfLayer(level)
+    const [w, h] = [sw * (1 + Math.abs(cx / near)), sw * Math.SQRT2]
+    // Both ends' hexagons seen from the camera on the plane: what holds them.
+    const [n, f] = [distance / near, distance / far]
+    const [left, right] = [Math.min((cx - w) * n, (cx - w) * f), Math.max((cx + w) * n, (cx + w) * f)]
+    const [bottom, top] = [Math.min((cy - h) * n, (cy - h) * f), Math.max((cy + h) * n, (cy + h) * f)]
+    for (let r = Math.max(0, Math.ceil(row(top))); r <= Math.min(height - 1, row(bottom)); r++) {
+      for (let c = Math.max(0, Math.ceil(col(left))); c <= Math.min(width - 1, col(right)); c++) {
+        // The ray through the pixel's centre is at σ·z at depth z; it meets
+        // the pillar if, between its ends, it is in the hexagon's three
+        // slabs: |u| ≤ w, |u / √2 + v| ≤ h and |u / √2 − v| ≤ h, u and v
+        // from the site, each over a range of z.
+        const [ax, ay] = [(x + (c + 0.5) / scale) / distance, (y - (r + 0.5) / scale) / distance]
+        from = near
+        to = far
+        narrow(ax, cx, w)
+        narrow(ax * Math.SQRT1_2 + ay, cx * Math.SQRT1_2 + cy, h)
+        narrow(ax * Math.SQRT1_2 - ay, cx * Math.SQRT1_2 - cy, h)
+        if (from <= to && from <= depths[r * width + c]) {
+          pixels[r * width + c] = colour | 0xff000000
+          depths[r * width + c] = from
+        }
       }
     }
   }

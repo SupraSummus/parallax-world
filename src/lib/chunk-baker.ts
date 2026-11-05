@@ -39,12 +39,15 @@ export const SPLAT = 5
  */
 export interface ChunkSplats {
   /**
-   * SPLAT numbers each, far to near: x, y of its centre relative to
-   * (originX, originY), its width and height (the points (x + u, y + v)
-   * with |u| ≤ width and |u| / √2 + |v| ≤ height), in world units, then its
-   * colour as RGBA bytes (little-endian, as in ImageData) as the float's
-   * bits: opaque, its alpha instead how many half layers of its grid past
-   * the centre plane it is, plus 128.
+   * SPLAT numbers each: x, y of its centre relative to (originX, originY)
+   * and its width (the points (x + u, y + v) with |u| ≤ width and
+   * |u| / √2 + |v| ≤ height, √2 times the width), in world units; its run,
+   * how many half layers of its grid its pillar reaches past its site
+   * (Splat in bake/src/splats.rs; 0 unless baked with one voxel per
+   * column); then its colour as RGBA bytes (little-endian, as in
+   * ImageData) as the float's bits: opaque, its alpha instead how many
+   * half layers of its grid past the centre plane it is, plus 128.
+   * Far to near: in painting order.
    */
   splats: Float32Array
   /** x, y of the top-left corner of where it may draw, in face coordinates, and its size in world units. */

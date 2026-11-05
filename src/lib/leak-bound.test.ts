@@ -294,7 +294,8 @@ describe.each([1, 0.5, 0.25])('Step 8: ray-cast leaks with tan(fov / 2) = %s', T
         // Tangents of the rays through what the chunk draws on the centre plane.
         const [left, right] = [chunk.originX, chunk.originX + chunk.extentWidth].map(x => (x - cu * LAYER) / distance)
         for (let k = 0; k < chunk.splats.length / SPLAT; k++) {
-          const [sx, sy, sw, sh] = chunk.splats.subarray(k * SPLAT, k * SPLAT + 4)
+          const [sx, sy, sw] = chunk.splats.subarray(k * SPLAT, k * SPLAT + 3)
+          const sh = sw * Math.SQRT2
           // Its site, camera-relative, at its depth (compositor.ts).
           const x = chunk.originX + sx - cu * LAYER
           const z = flat ? distance : distance + ((alphas[k * SPLAT + 4] >>> 24) - 128) * halfLayer(slice.level)

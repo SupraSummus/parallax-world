@@ -48,7 +48,7 @@ src/
     ├── wasm.ts              # The WebAssembly module (worlds/ with worldgen/ and bake/), inlined; an instance per use
     ├── worker-bakery.ts     # Pool of bake workers the renderer sends missing chunks to
     ├── bake.worker.ts       # Bake worker entry
-    ├── compositor.ts        # Draws the renderer's frames with WebGL 2: chunks' splats, instanced
+    ├── compositor.ts        # Draws the renderer's frames with WebGL 2: chunks' splats as instanced prisms
     └── utils.ts             # cn() for class names
 viewer.html                  # Reference 3D viewer page (second Vite entry)
 scripts/shot.mjs             # pnpm shot: a view in headless Chromium, saved once complete
@@ -63,7 +63,7 @@ bake/                        # Chunk baker and coverage in Rust (no dependencies
     ├── slicing.rs           # slice-selection.ts: slices, chunks, the leak bound (native's too)
     ├── surface.rs           # A cell's voxels that can show
     ├── tables.rs            # The voxel's faces in lattice coordinates, the materials shaded per view face
-    ├── splats.rs            # Which voxels a chunk shows, as hexagons at their sites, in relief
+    ├── splats.rs            # Which voxels a chunk shows, as hexagons at their sites, in relief; runs of one voxel per column
     ├── fill.rs              # Splats filled into a mask for every slant, solid blocks (for coverage)
     ├── layer_index.rs       # LayerIndex: where each face's layers hold voxels; its WebAssembly exports
     └── coverage.rs          # Which screen cells nearer layers cover, on the main thread; its WebAssembly exports

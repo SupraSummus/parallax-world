@@ -23,6 +23,7 @@ pnpm exec vitest run bake       # files matching "bake"
 | `src/lib/chunk-baker.test.ts`, `bake/src/splats.rs` | Baked chunks' splats against rays cast along the axis and, in relief, slanted |
 | `bake/src/fill.rs`, `bake/src/coverage.rs` | Splats filled into a mask; solid blocks and their sums |
 | `src/lib/occlusion.test.ts` | Skipping covered chunks leaves the picture unchanged |
+| `src/lib/pillars.test.ts` | One voxel per column, each a pillar over its column, shows a lawn as all voxels do; without runs, stripes |
 | `src/lib/view.test.ts` | Camera basis, faces, projection, culling |
 | `src/lib/voxel-grid.test.ts` | Storage on the lattice, `LayerIndex`, coarsening |
 | `src/lib/renderer.test.ts` | Slices and chunks in view, placement, caching, stats (on a small world) |

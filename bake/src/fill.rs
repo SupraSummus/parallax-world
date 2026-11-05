@@ -43,7 +43,7 @@ pub fn fill_mask(splats: &Splats, mask: &mut [u8], width: usize, height: usize, 
     for splat in &splats.splats {
         let off = splat.offset();
         for (k, [sx, sy]) in SLANTS.iter().enumerate() {
-            hexagon(1 << k, splat.x + sx * off, splat.y + sy * off, splat.width * (1.0 + sx.abs()), splat.height);
+            hexagon(1 << k, splat.x + sx * off, splat.y + sy * off, splat.width * (1.0 + sx.abs()), splat.height());
         }
         let (w, h) = splat.reach();
         hexagon(REACHED, splat.x, splat.y, w, h);
@@ -96,7 +96,7 @@ mod tests {
     fn marks_the_pixels_whose_centre_is_in_a_hexagon_seen_along_each_slant() {
         // 80 × 80 pixels showing [0, 8] × [0, 8] at 10 pixels per unit.
         let mut splats = Splats::new();
-        let splat = Splat { x: 4.1, y: 3.9, depth: 3, width: FRAC_1_SQRT_2, height: 1.0, colour: 0, site: [0; 3] };
+        let splat = Splat { x: 4.1, y: 3.9, depth: 3, run: 0, width: FRAC_1_SQRT_2, colour: 0, site: [0; 3] };
         let inside = |x: f64, y: f64, s: &Splat, (w, h): (f64, f64)| {
             let (u, v) = ((x - s.x).abs(), (y - s.y).abs());
             u < w && u * FRAC_1_SQRT_2 + v < h
@@ -111,7 +111,7 @@ mod tests {
                 let (x, y) = ((col as f64 + 0.5) / 10.0, 8.0 - (row as f64 + 0.5) / 10.0);
                 let pixel = mask[row * 80 + col];
                 for (k, [sx, sy]) in SLANTS.iter().enumerate() {
-                    let seen = inside(x - sx * s.offset(), y - sy * s.offset(), s, (s.width * (1.0 + sx.abs()), s.height));
+                    let seen = inside(x - sx * s.offset(), y - sy * s.offset(), s, (s.width * (1.0 + sx.abs()), s.height()));
                     assert_eq!(pixel & 1 << k != 0, seen, "pixel ({col}, {row}) along {sx}, {sy}");
                     marked[k] += seen as usize;
                 }
