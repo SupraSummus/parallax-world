@@ -16,7 +16,7 @@ use worlds::town::{self, K as T, TOWNS_SCALE, Towns};
 
 use crate::image::Image;
 
-/** A class of kinds: what a column shows from above, coarser than the 71 kinds. */
+/** A class of kinds: what a column shows from above, coarser than its kinds. */
 pub struct Class {
     pub name: &'static str,
     pub rgb: u32,
@@ -80,7 +80,7 @@ pub fn class_of_kind(kinds: usize) -> Vec<u8> {
         ),
     ];
     let town: [(&[T], u8); 6] = [
-        (&[T::roofRed, T::roofBrown, T::slate, T::copper], 10),
+        (&[T::roofRed, T::roofTile, T::roofBrown, T::slate, T::thatch, T::copper], 10),
         (
             &[
                 T::plasterOchre,
@@ -88,7 +88,10 @@ pub fn class_of_kind(kinds: usize) -> Vec<u8> {
                 T::plasterPink,
                 T::plasterBlue,
                 T::plasterSage,
+                T::plasterGrey,
+                T::faluRed,
                 T::brick,
+                T::timber,
                 T::trim,
                 T::shutterGreen,
                 T::shutterBlue,

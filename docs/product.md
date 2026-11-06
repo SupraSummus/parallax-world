@@ -77,9 +77,14 @@ A spinner shows while a world generates.
   each level of detail reaches twice as far as the one before, to 11 km.
 - *Valley*: the forest, with a town on its path
   every kilometre or so, the first ahead of the camera:
-  streets of plastered houses with gable roofs, windows, doors and shops,
-  a square with a fountain, a church and its spire, lamps, yard trees,
-  and fields around it (wheat, stubble and haystacks, ploughed rows,
+  hamlets, villages and market towns,
+  each in a style of its own: southern plaster under low red tiles,
+  northern walls under steep slate, timber frames, or brick with stepped gables.
+  Houses with gable roofs, windows, doors and shops, front gardens and fences,
+  a square or a green with a fountain, a well or a market hall,
+  a church and its spire, lamps or an avenue of trees,
+  some market towns walled with gates on their main street,
+  and fields around each (wheat, stubble and haystacks, ploughed rows,
   meadows, hedges), the forest thinning towards them.
   Generated like the forest.
 - *City*: a district of a few blocks,
