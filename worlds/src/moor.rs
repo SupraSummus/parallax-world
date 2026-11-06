@@ -2,47 +2,57 @@
 //! its hollows, scattered boulders, and steadings: a stone hut with a
 //! thatched roof, a ring of standing stones, and a path of cairns between
 //! them. Written from the engine's public API alone (docs/generators.md).
+//!
+//! A domain too, like the forest: its layers lie on ground decided outside
+//! it, where it owns the land (`Ground`), and what it places, steadings and
+//! pools, only where it surely will (`Moorland`). The valley (valley.rs)
+//! has it on its uplands and along stretches of its floor (`Uplands`);
+//! `moor` is the moor alone, all of its land, with its own stream.
 
 use std::rc::Rc;
 
 use worldgen::World;
 use worldgen::column::Column;
 use worldgen::frame::{Frame, Part, facing, walls};
-use worldgen::generator::{ANY_SIZE, Child, Far, Field, Generator, Layer, Node, Op, Population, Shape, Span};
+use worldgen::generator::{ANY_SIZE, Child, Far, Field, Generator, Kind, Layer, Node, Op, Population, Shape, Span};
 use worldgen::js;
 use worldgen::kinds;
 use worldgen::noise::{Fbm, Fx, Rng, ValueNoise, fx, hash64, smoothstep, stream};
-use worldgen::plan::Plan;
+use worldgen::plan::{Land, Plan};
 use worldgen::units::{Units, m};
 
+use crate::forest::{self, K as F};
+use crate::landmarks::{self, Landmarks};
+use crate::mountains::K as A;
+use crate::town::K as T;
+use crate::valley::{self, Terrain};
+
+// After the valley's kinds, the moor's own; the rest are the forest's stone, soil and path,
+// the town's thatch, timber and water, the mountains' grass.
 kinds! {
-    base: 0;
-    heather: 5, ["#6b3a5e", "#7a4569", "#5e3352", "#84506f"];
-    grass: 1, ["#8a9a4a", "#7d8c42", "#96a556"];
+    base: landmarks::BASE + landmarks::KINDS.len() as u8;
+    heather: 5, ["#6b3a5e", "#7a4569", "#84506f"];
     bog: 1, ["#5a7a3a", "#4f6e33"];
-    peat: 2, ["#3b2a1e", "#33241a", "#423022"];
-    gravel: 2, ["#9a8f7a", "#8c8270", "#a59a84"];
-    granite: 3, ["#8a8680", "#7c7872", "#96928a"];
-    lichen: 3, ["#9a9a7a", "#a6a682", "#8e8e70"];
-    drystone: 3, ["#6f6a62", "#7a756c", "#655f58"];
-    thatch: 9, ["#a8874a", "#9a7a40", "#b4945a"];
-    timber: 4, ["#4a3424", "#563d2a"];
-    water: 13, ["#3f6a8a", "#4a7898"], walk_through;
+    lichen: 3, ["#9a9a7a", "#a6a682"];
+    drystone: 3, ["#6f6a62", "#7a756c"];
     // What stands on the heath and the grass, in their colours: walked through, the ground not.
-    heatherSprigs: 5, ["#6b3a5e", "#7a4569", "#5e3352", "#84506f"], walk_through;
-    grassBlades: 1, ["#8a9a4a", "#7d8c42", "#96a556"], walk_through;
+    heatherSprigs: 5, ["#6b3a5e", "#7a4569", "#84506f"], walk_through;
+    grassBlades: 1, ["#8fa052", "#9aab5c"], walk_through;
 }
 
-/** The heights the moor has anything at (lattice units). */
+/** The heights the moor alone has anything at (lattice units). */
 const HEIGHTS: (i64, i64) = (m(-24.0), m(32.0));
 
-/** Water stands in the hollows up to this height. */
+/** Water stands in the moor alone's hollows up to this height. */
 const WATER: Units = Units::m(-4.5);
-/** Plan scales: the stream's bends, its banks, the ground's bumps, the steadings' regions (one at most in each). */
+/** Bog this high above water too. */
+const BOG: Units = Units::m(0.25);
+/** Plan scales: the stream's bends, its banks, the ground's bumps, the steadings' regions (one at most in each), the pools'. */
 const STREAM_SCALE: i64 = m(32.0);
 const BANK_SCALE: i64 = m(1.0);
 const GROUND_SCALE: i64 = 8;
 const REGION: i64 = m(160.0);
+const POOL_REGION: i64 = m(64.0);
 /** A steading's ring is this far inside its region, so the cell that owns it is centred in the region too. */
 const MARGIN: i64 = m(50.0);
 /** A steading's cell, and how far its things reach past it. */
@@ -55,28 +65,15 @@ const HUT_HALF: i64 = m(5.0);
 const REACH_ACROSS: i64 = if HUT_FROM_RING + HUT_HALF > RING_RADIUS { HUT_FROM_RING + HUT_HALF + m(2.0) } else { RING_RADIUS + m(2.0) };
 /** How far the ground eases from a hut's level back to the heath's. */
 const TERRACE: Units = Units::m(12.0);
+/** A pool's radius at most, and how far inside its region its centre is: so a pool is in its region's columns only. */
+const POOL_RADIUS: i64 = m(14.0);
+const POOL_MARGIN: i64 = m(16.0);
+/** How far the moor's bid leads the rest where it has room for a steading or a pool: the land's width and some. */
+const SURE: Fx = fx(0.2);
 const WALL: i64 = 3;
 
-/** The moor's relief and noise, from its seed alone. */
-struct Relief {
-    hills: Fbm<{ m(240.0) }, 4>,
-    bumps: ValueNoise<{ m(10.0) }>,
-    patches: Fbm<{ m(30.0) }, 2>,
-    phase: f64,
-}
-
-impl Relief {
-    /** The heath's height at (x, z), with its fraction: hills tens of metres apart, bumps of a few. */
-    fn heath(&self, x: i64, z: i64) -> Fx {
-        (self.hills.at(x, z) - Fx::HALF) * Units::m(28.0) + (self.bumps.at(x, z) - Fx::HALF) * Units::m(0.8)
-    }
-
-    /** The stream's centre line at z, with its fraction: winding along z west of the origin. */
-    fn stream_x(&self, z: i64) -> Fx {
-        let zm = z as f64 / m(1.0) as f64;
-        fx(m(-40.0) as f64 + m(1.0) as f64 * (12.0 * js::sin(zm / 37.0 + self.phase) + 4.0 * js::sin(zm / 11.0 + 2.0 * self.phase)))
-    }
-}
+/** A quantity of column (x, z) from position alone, with its fraction: the ground's height, a bid's lead. */
+type ByColumn = Rc<dyn Fn(i64, i64) -> Fx>;
 
 /** A steading: a ring of stones, a hut facing it (its front wall towards the ring), a path between. */
 #[derive(Clone, Copy, Default)]
@@ -107,6 +104,38 @@ impl Steading {
         let end = (d - self.radius as f64 + m(1.5) as f64).max(0.0) / d;
         ([x as f64, z as f64], [x as f64 + dx * end, z as f64 + dz * end])
     }
+
+    /** The ground's height at (x, z), `heath` there, levelled under its hut and easing back over TERRACE. */
+    fn terraced(&self, x: i64, z: i64, heath: Fx) -> Fx {
+        let c = self.centre;
+        let d = Units(((x - c[0]).abs().max((z - c[1]).abs()) - HUT_HALF).max(0));
+        let weight = Fx::ONE - smoothstep(Fx::ZERO, TERRACE.to_fx(), d.to_fx());
+        heath + (self.level.to_fx() - heath) * weight
+    }
+}
+
+/** A pool in a hollow, dug `dig` deeper at its centre: water up to `level` where the ground is under it, within `radius` of its centre. */
+#[derive(Clone, Copy, Default)]
+struct Pool {
+    centre: [i64; 2],
+    radius: i64,
+    level: Units,
+    dig: Units,
+}
+
+impl Pool {
+    /** How far column (x, z) is inside it, a fraction: none at its rim and beyond, all at its centre. */
+    fn inside(&self, x: i64, z: i64) -> Fx {
+        let [cx, cz] = self.centre;
+        let d2 = (x - cx).pow(2) + (z - cz).pow(2);
+        if d2 >= self.radius.pow(2) { Fx::ZERO } else { Fx::ONE - Units(d2).to_fx() / Units(self.radius.pow(2)) }
+    }
+
+    /** `ground` at (x, z), with its fraction, hollowed: deepest at the centre, easing to nothing at the rim. */
+    fn hollowed(&self, x: i64, z: i64, ground: Fx) -> Fx {
+        let inside = self.inside(x, z);
+        ground - inside * inside * self.dig
+    }
 }
 
 /** Distance from (x, z) to the segment from a to b. */
@@ -126,13 +155,16 @@ enum Streamside {
     Bed,
 }
 
-struct Moor {
-    relief: Rc<Relief>,
-    stream: Rc<Plan<Fx>>,
-    /** Where its bed and banks are, a plan of categories: dithered far away, so the stream shows as often as it is. */
-    streamside: Plan<Streamside>,
-    steadings: Rc<Plan<Option<Steading>>>,
-    ground: Plan<Units>,
+/** The moor alone's stream: its centre line by z, and where its bed and banks are, dithered far away, so it shows as often as it is. */
+struct Stream {
+    line: Rc<Plan<Fx>>,
+    side: Plan<Streamside>,
+}
+
+/** Where water stands: in every hollow up to a level, or in pools in hollows where the moor has room for them. */
+enum Water {
+    Level(Units),
+    Pools(Plan<Option<Pool>>),
 }
 
 /** How far column (x, z) is from the centre line of `stream`; and the stream's half width there. */
@@ -140,20 +172,115 @@ fn stream_distance(stream: &Plan<Fx>, x: i64, z: i64) -> (Units, Units) {
     ((Units(x).to_fx() - stream.at(0, z)).abs().floor_units(), Units::m(1.0) + Units::m(0.6) * z.rem_euclid(97) / 97)
 }
 
-/** The region of column (x, z): REGION wide, region (0, 0) around the origin. */
-fn region(x: i64, z: i64) -> (i64, i64) {
-    ((x + REGION / 2).div_euclid(REGION), (z + REGION / 2).div_euclid(REGION))
+/** The region `size` wide of column (x, z), region (0, 0) around the origin. */
+fn region(x: i64, z: i64, size: i64) -> (i64, i64) {
+    ((x + size / 2).div_euclid(size), (z + size / 2).div_euclid(size))
 }
 
-impl Moor {
+/**
+ * The moor's decisions from position alone, coarser than any column:
+ * its patches of heather, its stream, if it has one, its steadings and
+ * its water. A host whose ground they stand on levels it under the huts
+ * and hollows it under the pools (`shaped`).
+ */
+pub struct Moorland {
+    seed: u64,
+    patches: Fbm<{ m(30.0) }, 2>,
+    stream: Option<Stream>,
+    steadings: Rc<Plan<Option<Steading>>>,
+    water: Water,
+}
+
+impl Moorland {
+    /**
+     * The moorland of `seed` on ground `height` high (before it levels
+     * it), with steadings and pools where `lead`, by how much its bid
+     * leads every other domain's at least, is SURE: their columns are its.
+     * A steading in each region by `chance`; a stream along `line`, if
+     * any; water in every hollow up to `level`, or without one, in pools.
+     */
+    fn new(seed: u64, height: ByColumn, lead: ByColumn, chance: Fx, line: Option<Rc<dyn Fn(i64) -> Fx>>, level: Option<Units>) -> Moorland {
+        let brook = line.clone().map(|line| {
+            let line = Rc::new(Plan::new("stream", STREAM_SCALE, move |_, z| line(z)));
+            let side = {
+                let line = line.clone();
+                Plan::dithered("streamside", BANK_SCALE, move |x, z| {
+                    let (d, half) = stream_distance(&line, x, z);
+                    if d < half {
+                        Streamside::Bed
+                    } else if d < half + Units::m(1.0) {
+                        Streamside::Bank
+                    } else {
+                        Streamside::Off
+                    }
+                })
+            };
+            Stream { line, side }
+        });
+        let steadings = {
+            let (height, lead) = (height.clone(), lead.clone());
+            let s = stream(seed, 5);
+            Rc::new(Plan::new("steadings", REGION, move |i, k| {
+                // The stream's plan is finer than the steadings': its line is read here.
+                let off_stream = |c: [i64; 2]| line.as_ref().is_none_or(|l| (Units(c[0]).to_fx() - l(c[1])).abs() > Units::m(14.0).to_fx());
+                let steading = steading_of(s, chance, &*height, i, k)?;
+                let low = level.is_some_and(|w| steading.level <= w + Units::m(1.0));
+                // Room all round the hut and the ring.
+                let around = |c: [i64; 2]| (-1..=1).all(|a| (-1..=1).all(|b| lead(c[0] + a * m(20.0), c[1] + b * m(20.0)) >= SURE));
+                (!low && off_stream(steading.centre) && off_stream(steading.ring) && around(steading.centre) && around(steading.ring))
+                    .then_some(steading)
+            }))
+        };
+        let water = match level {
+            Some(level) => Water::Level(level),
+            None => {
+                let (steadings, s) = (steadings.clone(), stream(seed, 7));
+                Water::Pools(Plan::new("pools", POOL_REGION, move |i, k| {
+                    let ground = |x, z| terraced(&steadings, x, z, height(x, z));
+                    if !Rng::new(hash64(s, i, k, 0)).chance(fx(0.35)) {
+                        return None;
+                    }
+                    let pool = pool_of(s, &ground, i, k)?;
+                    let [x, z] = pool.centre;
+                    let r = pool.radius + m(4.0);
+                    let room = [(0, 0), (r, 0), (-r, 0), (0, r), (0, -r)].iter().all(|(a, b)| lead(x + a, z + b) >= SURE);
+                    // Off the steadings: theirs is levelled ground, and their hut and paths dry.
+                    let (i, k) = region(x, z, REGION);
+                    let off = (-1..=1).all(|a| {
+                        (-1..=1).all(|b| {
+                            steadings.at(i + a, k + b).is_none_or(|s| {
+                                let near = |c: [i64; 2]| (c[0] - x).abs().max((c[1] - z).abs()) < r + HUT_FROM_RING;
+                                !near(s.centre) && !near(s.ring)
+                            })
+                        })
+                    });
+                    (room && off).then_some(pool)
+                }))
+            }
+        };
+        Moorland { seed: stream(seed, 8), patches: Fbm::new(stream(seed, 3)), stream: brook, steadings, water }
+    }
+
+    /** `ground` at (x, z), with its fraction, levelled under the hut of a steading there, hollowed under a pool. */
+    pub fn shaped(&self, x: i64, z: i64, ground: Fx) -> Fx {
+        let ground = terraced(&self.steadings, x, z, ground);
+        self.pool(x, z).map_or(ground, |pool| pool.hollowed(x, z, ground))
+    }
+
+    /** The pool of column (x, z)'s region, if it has one. */
+    fn pool(&self, x: i64, z: i64) -> Option<Pool> {
+        let Water::Pools(pools) = &self.water else { return None };
+        let (i, k) = region(x, z, POOL_REGION);
+        pools.at(i, k)
+    }
+
     fn steading(&self, x: i64, z: i64) -> Option<Steading> {
-        let (i, k) = region(x, z);
+        let (i, k) = region(x, z, REGION);
         self.steadings.at(i, k)
     }
 
-    /** How far column (x, z) is from the stream's centre line; and its half width there. */
-    fn stream_distance(&self, x: i64, z: i64) -> (Units, Units) {
-        stream_distance(&self.stream, x, z)
+    fn streamside(&self, x: i64, z: i64) -> Streamside {
+        self.stream.as_ref().map_or(Streamside::Off, |s| s.side.at(x, z))
     }
 
     /** Whether column (x, z) is on the path of its region's steading. */
@@ -163,12 +290,26 @@ impl Moor {
             to_segment(x as f64, z as f64, a, b) < m(0.7) as f64
         })
     }
+
+    /** The level water stands to in column (x, z), where it is under it. */
+    fn water(&self, x: i64, z: i64) -> Option<Units> {
+        match &self.water {
+            Water::Level(level) => Some(*level),
+            Water::Pools(_) => self.pool(x, z).and_then(|pool| (pool.inside(x, z) > Fx::ZERO).then_some(pool.level)),
+        }
+    }
 }
 
-/** The steading of region (i, k), if it has one: its ring placed MARGIN inside it, the hut 22 to 30 m off it, both off the stream and out of the water. */
-fn steading_of(seed: u64, relief: &Relief, i: i64, k: i64) -> Option<Steading> {
+/** `ground` at (x, z), levelled under the hut of the steading of its region in `steadings`. */
+fn terraced(steadings: &Plan<Option<Steading>>, x: i64, z: i64, ground: Fx) -> Fx {
+    let (i, k) = region(x, z, REGION);
+    steadings.at(i, k).map_or(ground, |s| s.terraced(x, z, ground))
+}
+
+/** The steading of region (i, k), if it has one (by `chance`): its ring placed MARGIN inside it, the hut 22 to 30 m off it, on ground `height` high. */
+fn steading_of(seed: u64, chance: Fx, height: &dyn Fn(i64, i64) -> Fx, i: i64, k: i64) -> Option<Steading> {
     let mut random = Rng::new(hash64(seed, i, k, 0));
-    if (i, k) != (0, 0) && !random.chance(fx(0.6)) {
+    if (i, k) != (0, 0) && !random.chance(chance) {
         return None;
     }
     let inner = (REGION - 2 * MARGIN) as u32;
@@ -185,118 +326,232 @@ fn steading_of(seed: u64, relief: &Relief, i: i64, k: i64) -> Option<Steading> {
     // A hut's level is the mean of the heath under it, as coarse as the hut.
     let mean = |c: [i64; 2]| {
         let around = (-1..=1).flat_map(|a| (-1..=1).map(move |b| (a, b)));
-        Fx::mean(around.map(|(a, b)| relief.heath(c[0] + a * m(4.0), c[1] + b * m(4.0)))).round_units()
+        Fx::mean(around.map(|(a, b)| height(c[0] + a * m(4.0), c[1] + b * m(4.0)))).round_units()
     };
     let level = mean(centre);
-    let off_stream = |c: [i64; 2]| (Units(c[0]).to_fx() - relief.stream_x(c[1])).abs() > Units::m(14.0).to_fx();
-    if level <= WATER + Units::m(1.0) || !off_stream(centre) || !off_stream(ring) {
-        return None;
-    }
     let ring_ground = mean(ring);
     let radius = m(7.0) + random.below(m(3.0) as u32) as i64;
     let stones = 9 + random.below(5) as i64;
     Some(Steading { ring, ring_ground, radius, stones, centre, level, length, depth, turns, seed: random.next_u64() })
 }
 
-/** The moor of `seed`; the camera starts behind the first steading's hut, looking past it to the ring. */
-pub fn moor(seed: u64) -> World {
-    let relief = Rc::new(Relief {
-        hills: Fbm::new(stream(seed, 1)),
-        bumps: ValueNoise::new(stream(seed, 2)),
-        patches: Fbm::new(stream(seed, 3)),
-        phase: (hash64(stream(seed, 4), 0, 0, 0) % 1000) as f64 / 100.0,
-    });
-    let stream_plan = {
-        let relief = relief.clone();
-        Rc::new(Plan::new("stream", STREAM_SCALE, move |_, z| relief.stream_x(z)))
-    };
-    let steadings = {
-        let (relief, seed) = (relief.clone(), stream(seed, 5));
-        Rc::new(Plan::new("steadings", REGION, move |i, k| steading_of(seed, &relief, i, k)))
-    };
-    // The heath, levelled under each hut.
-    let ground = {
-        let (relief, steadings) = (relief.clone(), steadings.clone());
-        Plan::new("ground", GROUND_SCALE, move |x, z| {
-            let heath = relief.heath(x, z);
-            let (i, k) = region(x, z);
-            let h = match steadings.at(i, k) {
-                Some(s) => {
-                    let c = s.centre;
-                    let d = Units(((x - c[0]).abs().max((z - c[1]).abs()) - HUT_HALF).max(0));
-                    let weight = Fx::ONE - smoothstep(Fx::ZERO, TERRACE.to_fx(), d.to_fx());
-                    heath + (s.level.to_fx() - heath) * weight
-                }
-                None => heath,
-            };
-            h.round_units()
-        })
-    };
-    let streamside = {
-        let stream = stream_plan.clone();
-        Plan::dithered("streamside", BANK_SCALE, move |x, z| {
-            let (d, half) = stream_distance(&stream, x, z);
-            if d < half {
-                Streamside::Bed
-            } else if d < half + Units::m(1.0) {
-                Streamside::Bank
-            } else {
-                Streamside::Off
-            }
-        })
-    };
-    let f = Rc::new(Moor { relief, stream: stream_plan, streamside, steadings, ground });
-    let spawn = {
-        // Behind the first hut, or over the origin if its region has none.
-        let [x, _, z] = f.steading(0, 0).map_or([0; 3], |s| s.frame().site([s.length / 2, 0, s.depth + m(6.0)]));
-        let y = (f.ground.at(x, z).max(WATER) + Units::m(2.0)).0;
-        [x, y + ((x + y + z) & 1), z]
-    };
-    let layers = vec![
-        Layer::Field(terrain(f.clone())),
-        Layer::Field(stream_bed(f.clone())),
-        Layer::Field(water(f.clone())),
-        Layer::Population(boulders(f.clone())),
-        Layer::Population(steadings_population(f)),
-    ];
-    World { generator: Generator { kinds: KINDS.to_vec(), seed: stream(seed, 6), layers }, spawn, heights: HEIGHTS }
+/**
+ * The pool of region (i, k), if it has one: in the lowest of a few spots
+ * inside it, as wide as the ground round it is level enough, up to
+ * POOL_RADIUS; water up to half a metre under the lowest of that ground,
+ * so it and its boggy shore stay inside it, the hollow dug deeper where
+ * it is shallow.
+ */
+fn pool_of(seed: u64, ground: &dyn Fn(i64, i64) -> Fx, i: i64, k: i64) -> Option<Pool> {
+    let inner = POOL_REGION - 2 * POOL_MARGIN;
+    let (x0, z0) = (i * POOL_REGION - POOL_REGION / 2 + POOL_MARGIN, k * POOL_REGION - POOL_REGION / 2 + POOL_MARGIN);
+    let spots = (0..5).flat_map(|a| (0..5).map(move |b| [x0 + a * inner / 4, z0 + b * inner / 4]));
+    let centre = spots.min_by_key(|[x, z]| ground(*x, *z))?;
+    let bottom = ground(centre[0], centre[1]);
+    let smallest = m(4.0) + Rng::new(hash64(seed, i, k, 1)).below(m(4.0) as u32) as i64;
+    (0..4).map(|n| POOL_RADIUS - n * (POOL_RADIUS - smallest) / 3).find_map(|radius| {
+        let rim: Vec<Fx> = (0..32)
+            .map(|a| {
+                let angle = a as f64 * std::f64::consts::PI / 16.0;
+                ground(centre[0] + (radius as f64 * js::cos(angle)) as i64, centre[1] + (radius as f64 * js::sin(angle)) as i64)
+            })
+            .collect();
+        let (low, high) = (*rim.iter().min()?, *rim.iter().max()?);
+        let level = (low - Fx::m(0.5)).floor_units();
+        let dig = (bottom - (level - Units::m(0.8)).to_fx()).max(Fx::ZERO).round_units();
+        (high - low < Fx::m(1.5) && dig < Units::m(1.5)).then_some(Pool { centre, radius, level, dig })
+    })
 }
 
-/** The ground: peat under heather, grass or bog, a gravel path to each ring; heather and grass standing on it as media. */
-fn terrain(f: Rc<Moor>) -> Field {
-    Field::columns("terrain", 0.0, Op::Paint, move |x, z, spacing| {
-        let h = f.ground.at(x, z);
-        let wet = h <= WATER || f.streamside.at(x, z) != Streamside::Off;
-        let path = !wet && f.on_path(x, z);
-        let heathery = f.relief.patches.at(x, z) > fx(0.47);
-        let surface = if wet {
-            K::bog
-        } else if path {
-            K::gravel
-        } else if heathery {
-            K::heather
-        } else {
-            K::grass
-        };
-        // Peat down to the world's bottom and no further, where hosts stop generating: the heath is solid, not a shell.
-        let column = Column::new(h.0, spacing).surface(surface, m(0.5)).fill_below_exactly(K::peat, HEIGHTS.0);
-        match surface {
-            // Thickened only while it is at most four units: taller, a medium stops rays skimming over the heath,
-            // and stands over the patches beside it, whose edges it takes over seen from above.
-            K::heather if spacing <= 2 => column.medium(K::heatherSprigs, m(0.4), 0.5),
-            K::grass if spacing <= 2 => column.medium(K::grassBlades, 2, 0.25),
-            _ => column,
+/**
+ * The moor's bid for the valley's land (valley.rs), from position alone:
+ * on the uplands under the treeline, and over stretches of the valley a
+ * kilometre or so long and kilometres apart; patchy, so copses of the
+ * forest stand in it and heath in the forest, its edges ragged. None
+ * between `clear`'s two z, nor on the towns' farmland. Steadings and
+ * pools keep off the towns, the landmarks and the path (`lead`).
+ */
+pub struct Uplands {
+    terrain: Rc<Terrain>,
+    landmarks: Rc<Landmarks>,
+    clear: [i64; 2],
+    stretches: ValueNoise<{ m(1600.0) }>,
+    patches: Fbm<{ m(160.0) }, 2>,
+}
+
+impl Uplands {
+    pub fn new(seed: u64, terrain: Rc<Terrain>, landmarks: Rc<Landmarks>, clear: [i64; 2]) -> Uplands {
+        Uplands { terrain, landmarks, clear, stretches: ValueNoise::new(stream(seed, 80)), patches: Fbm::new(stream(seed, 81)) }
+    }
+
+    /** Its bid for column (x, z), from position alone. */
+    pub fn bid(&self, x: i64, z: i64) -> Fx {
+        let h = self.terrain.ground(x, z).round_units().0;
+        let (ranges, units) = (&self.terrain.ranges, |d: i64| Units(d).to_fx());
+        // From 65 m under the treeline, rising over 30 m; giving way to the mountains' meadows round the treeline, none above.
+        let uplands = Fx::ONE - ranges.below_treeline(x, z, h + m(35.0));
+        let below = ranges.below_treeline(x, z, h - m(10.0));
+        // Stretches across the whole valley: their noise four times as long across it.
+        let patches = self.patches.at(x, z) - Fx::HALF;
+        let stretch = smoothstep(fx(0.76), fx(0.84), self.stretches.at(x / 4, z) + patches / 2);
+        let moorish = uplands.max(stretch) * below;
+        let [from, to] = self.clear;
+        let clear = Fx::ONE - smoothstep(Fx::ZERO, Fx::m(150.0), units((from - z).max(z - to)));
+        // The towns' farmland reaches 90 to 150 m out of them (fields.rs).
+        let farmland = Fx::ONE - smoothstep(Fx::m(90.0), Fx::m(150.0), self.town_distance(x, z));
+        (moorish - Fx::HALF) * 4 / 5 + patches * 6 / 5 - (clear + farmland + Fx::ONE - below) * 2
+    }
+
+    /** How far column (x, z) is from the nearest town, up to 300 m. */
+    fn town_distance(&self, x: i64, z: i64) -> Fx {
+        self.terrain.towns.distance(x, z).min(Units::m(300.0)).to_fx()
+    }
+
+    /**
+     * By how much its bid leads every other domain's at least: off the
+     * towns and their fields, and some way off the landmarks' clearings,
+     * the others bid nothing (the forest); less by the path, which
+     * steadings and pools keep off.
+     */
+    fn lead(&self, x: i64, z: i64) -> Fx {
+        let from_path = (Units(x).to_fx() - self.terrain.path_x(z)).abs();
+        let towns = Fx::ONE - smoothstep(Fx::m(200.0), Fx::m(300.0), self.town_distance(x, z));
+        // The landmarks' bid rises by one every 2 m into their clearings from -4, 8 m out.
+        let landmark = if self.landmarks.bid(x, z) > fx(-3.75) { Fx::ONE } else { Fx::ZERO };
+        self.bid(x, z) - (Fx::ONE - smoothstep(Fx::m(25.0), Fx::m(40.0), from_path) + towns + landmark) * 2
+    }
+
+    /** The moorland on them, of `seed`: steadings, fewer than on the moor alone, and pools where it leads; no stream. */
+    pub fn moorland(self: &Rc<Self>, seed: u64) -> Moorland {
+        let (terrain, lead) = (self.terrain.clone(), self.clone());
+        Moorland::new(seed, Rc::new(move |x, z| terrain.ground(x, z)), Rc::new(move |x, z| lead.lead(x, z)), fx(0.25), None, None)
+    }
+}
+
+/**
+ * What the moor lies on, decided outside it when it shares its land:
+ * the ground's height, the land and its index in it if it shares one (it
+ * draws what it owns, and its boulders are as many as its share), a path
+ * through it that others draw, and where its peat ends below if nothing
+ * is under it.
+ */
+pub struct Ground {
+    pub ground: Rc<Plan<i64>>,
+    pub land: Option<(Rc<Land>, usize)>,
+    pub path: Option<Rc<Plan<Fx>>>,
+    pub bottom: Option<i64>,
+}
+
+/** The moor's layers' state: its moorland, and what it lies on. */
+struct Moor {
+    moorland: Rc<Moorland>,
+    ground: Ground,
+}
+
+impl Moor {
+    fn height(&self, x: i64, z: i64) -> i64 {
+        self.ground.ground.at(x, z)
+    }
+
+    fn owns(&self, x: i64, z: i64) -> bool {
+        self.ground.land.as_ref().is_none_or(|(land, me)| land.owns(*me, x, z))
+    }
+
+    fn share(&self, x: i64, z: i64) -> Fx {
+        self.ground.land.as_ref().map_or(Fx::ONE, |(land, me)| land.share(*me, x, z))
+    }
+
+    /** Whether column (x, z) is within `distance` of the centre line of the path through it, if any. */
+    fn by_path(&self, x: i64, z: i64, distance: Fx) -> bool {
+        self.ground.path.as_ref().is_some_and(|p| forest::path_distance(p, x, z) < distance)
+    }
+}
+
+/** The moor of `seed`, all of it; the camera starts behind the first steading's hut, looking past it to the ring. */
+pub fn moor(seed: u64) -> World {
+    let hills = Fbm::<{ m(240.0) }, 4>::new(stream(seed, 1));
+    let bumps = ValueNoise::<{ m(10.0) }>::new(stream(seed, 2));
+    let heath: ByColumn = Rc::new(move |x, z| (hills.at(x, z) - Fx::HALF) * Units::m(28.0) + (bumps.at(x, z) - Fx::HALF) * Units::m(0.8));
+    // Winding along z west of the origin.
+    let phase = (hash64(stream(seed, 4), 0, 0, 0) % 1000) as f64 / 100.0;
+    let line: Rc<dyn Fn(i64) -> Fx> = Rc::new(move |z| {
+        let zm = z as f64 / m(1.0) as f64;
+        fx(m(-40.0) as f64 + m(1.0) as f64 * (12.0 * js::sin(zm / 37.0 + phase) + 4.0 * js::sin(zm / 11.0 + 2.0 * phase)))
+    });
+    let moorland = Rc::new(Moorland::new(seed, heath.clone(), Rc::new(|_, _| Fx::ONE), fx(0.6), Some(line), Some(WATER)));
+    // The heath, levelled under each hut.
+    let ground = {
+        let moorland = moorland.clone();
+        Rc::new(Plan::new("ground", GROUND_SCALE, move |x, z| moorland.shaped(x, z, heath(x, z)).round_units().0))
+    };
+    let spawn = {
+        // Behind the first hut, or over the origin if its region has none.
+        let [x, _, z] = moorland.steading(0, 0).map_or([0; 3], |s| s.frame().site([s.length / 2, 0, s.depth + m(6.0)]));
+        let y = Units(ground.at(x, z)).max(WATER).0 + m(2.0);
+        [x, y + ((x + y + z) & 1), z]
+    };
+    let layers = layers(moorland, Ground { ground, land: None, path: None, bottom: Some(HEIGHTS.0) });
+    // The valley's kinds, its own last.
+    World { generator: Generator { kinds: valley::kinds(), seed: stream(seed, 6), layers }, spawn, heights: HEIGHTS }
+}
+
+/** The moor's layers on `ground`, of `moorland`: drawn where it owns the land; its kinds are KINDS, after the valley's. */
+pub fn layers(moorland: Rc<Moorland>, ground: Ground) -> Vec<Layer> {
+    let f = Rc::new(Moor { moorland, ground });
+    let mut layers = vec![Layer::Field(heath(f.clone()))];
+    if f.moorland.stream.is_some() {
+        layers.push(Layer::Field(stream_bed(f.clone())));
+    }
+    layers.extend([Layer::Field(water(f.clone())), Layer::Population(boulders(f.clone())), Layer::Population(steadings_population(f))]);
+    layers
+}
+
+/** The heath: heather, grass or bog over peat, a gravel path to each ring; heather and grass standing on it as media. */
+fn heath(f: Rc<Moor>) -> Field {
+    Field::columns("heath", 0.7, Op::Paint, move |x, z, spacing| {
+        if !f.owns(x, z) || f.by_path(x, z, Fx::m(1.6)) {
+            return Vec::new();
         }
+        let h = f.height(x, z);
+        let wet = f.moorland.water(x, z).is_some_and(|level| Units(h) <= level + BOG) || f.moorland.streamside(x, z) != Streamside::Off;
+        let surface: Kind = if wet {
+            K::bog.into()
+        } else if f.moorland.on_path(x, z) {
+            F::path.into()
+        } else if f.moorland.patches.at(x, z) > fx(0.47) {
+            K::heather.into()
+        } else {
+            A::alpine.into()
+        };
+        let column = Column::new(h, spacing).surface(surface, m(0.5));
+        // Peat down to the world's bottom and no further, where hosts stop generating: the heath is solid, not a shell.
+        // On another's ground, half a metre of it.
+        let column = match f.ground.bottom {
+            Some(bottom) => column.fill_below_exactly(F::soil, bottom),
+            None => column.surface(F::soil, m(0.5)),
+        };
+        // Thickened only while it is at most four units: taller, a medium stops rays skimming over the heath,
+        // and stands over the patches beside it, whose edges it takes over seen from above.
+        if spacing > 2 || wet {
+            column
+        } else if surface == K::heather.into() {
+            column.medium(K::heatherSprigs, m(0.4), 0.5)
+        } else if surface == A::alpine.into() {
+            column.medium(K::grassBlades, 2, 0.25)
+        } else {
+            column
+        }
+        .spans()
     })
 }
 
 /** The stream's bed, carved out of the ground: a channel a metre deep. */
 fn stream_bed(f: Rc<Moor>) -> Field {
     Field::at("stream bed", 1.0, Op::Carve, move |x, y, z, spacing| {
-        if f.streamside.at(x, z) != Streamside::Bed {
+        if f.moorland.streamside(x, z) != Streamside::Bed {
             return None;
         }
-        let h = f.ground.at(x, z).0;
+        let h = f.height(x, z);
         // At least two sites deep: a line of sites along y has one every two.
         (y > h - m(1.0).max(2 * spacing) && y <= h + m(0.5)).then_some((0, None))
     })
@@ -304,35 +559,46 @@ fn stream_bed(f: Rc<Moor>) -> Field {
 
 /**
  * Water: in the stream's bed, a few units under its banks, and in the
- * hollows up to WATER. Painted, so at coarse levels, where the ground's
- * surface is two sites thick, its top site is water, not lost under it.
+ * hollows. Painted, so at coarse levels, where the ground's surface is
+ * two sites thick, its top site is water, not lost under it.
  */
 fn water(f: Rc<Moor>) -> Field {
     Field::columns("water", 2.0, Op::Paint, move |x, z, spacing| {
-        let h = f.ground.at(x, z).0;
-        if f.streamside.at(x, z) == Streamside::Bed {
-            return vec![Span::solid(h - m(1.0).max(2 * spacing), h - 1, K::water)];
+        let h = f.height(x, z);
+        if f.moorland.streamside(x, z) == Streamside::Bed {
+            return vec![Span::solid(h - m(1.0).max(2 * spacing), h - 1, T::water)];
         }
-        Column::new(h, spacing).water_to(K::water, WATER.0).spans()
+        match f.moorland.water(x, z) {
+            Some(level) if f.owns(x, z) => Column::new(h, spacing).water_to(T::water, level.0).spans(),
+            _ => Vec::new(),
+        }
     })
 }
 
-/** Boulders half sunk in the heath, granite or lichened, off the water and the paths. */
+/** Boulders half sunk in the heath, granite or lichened, off the water and the paths; as many as the moor's share. */
 fn boulders(f: Rc<Moor>) -> Population {
     let ground = f.clone();
-    Population::new("boulders", 3.0, m(6.0)).reach(m(2.5)).anchor_on_ground(move |x, z| ground.ground.at(x, z).0).make(
-        move |[x, y, z], c| {
+    // A spot per column of cells, owned by the one it is in: tall heights hold many over each.
+    Population::new("moor boulders", 3.0, m(6.0))
+        .reach(m(2.5))
+        .anchor(move |c| {
+            let spot = c.on_ground_by(&mut Rng::new(hash64(ground.moorland.seed, c.i, 0, c.k)), |x, z| ground.height(x, z));
+            ((spot[1] - c.centre[1] as f64).abs() <= c.n as f64).then_some(spot)
+        })
+        .make(move |[x, y, z], c| {
             let mut random = c.random("boulder");
             let (xi, zi) = (x as i64, z as i64);
-            if !random.chance(fx(0.1)) || y <= WATER.0 as f64 + 2.0 || f.stream_distance(xi, zi).0 < Units::m(4.0) || f.on_path(xi, zi) {
+            let chance = fx(0.1) * f.share(xi, zi);
+            let wet = f.moorland.water(xi, zi).is_some_and(|level| y <= level.0 as f64 + 2.0);
+            let by_stream = f.moorland.stream.as_ref().is_some_and(|s| stream_distance(&s.line, xi, zi).0 < Units::m(4.0));
+            if !random.chance(chance) || wet || by_stream || f.moorland.on_path(xi, zi) || f.by_path(xi, zi, Fx::m(3.0)) {
                 return None;
             }
             let r = m(0.4) as f64 + random.next() * m(0.8) as f64;
             let radii = [r * (1.0 + random.next() * 0.6), r * 0.7, r * (1.0 + random.next() * 0.6)];
-            let kind = if random.chance(fx(1.0 / 3.0)) { K::lichen } else { K::granite };
+            let kind: Kind = if random.chance(fx(1.0 / 3.0)) { K::lichen.into() } else { F::stone.into() };
             Some(Node::of(vec![Shape::ellipsoid([x, y + r * 0.25, z], radii, kind)]))
-        },
-    )
+        })
 }
 
 /** The steadings: each owned by the cell its ring's centre is in. */
@@ -340,8 +606,11 @@ fn steadings_population(f: Rc<Moor>) -> Population {
     let anchor = f.clone();
     Population::new("steadings", 4.0, STEADING_CELL)
         .reach([REACH_ACROSS, m(16.0), REACH_ACROSS])
-        .anchor(move |c| anchor.steading(c.centre[0], c.centre[2]).map(|s| [s.ring[0] as f64, s.ring_ground.0 as f64, s.ring[1] as f64]))
-        .make(move |_, c| f.steading(c.centre[0], c.centre[2]).map(|s| steading(&f, &s)))
+        .anchor(move |c| {
+            let s = anchor.moorland.steading(c.centre[0], c.centre[2])?;
+            ((s.ring_ground.0 - c.centre[1]).abs() <= c.n).then_some([s.ring[0] as f64, s.ring_ground.0 as f64, s.ring[1] as f64])
+        })
+        .make(move |_, c| f.moorland.steading(c.centre[0], c.centre[2]).map(|s| steading(&f, &s)))
 }
 
 /** A steading's node: the hut, the ring of stones and the cairns, each a child. */
@@ -359,26 +628,25 @@ fn hut(s: &Steading, random: &mut Rng) -> Node {
     let top = m(2.0);
     let mut shapes = Vec::new();
     let mut part = Part::new(s.frame(), &mut shapes);
-    part.add([-1, -m(1.5), -1], [length + 1, 0, depth + 1], K::granite);
+    part.add([-1, -m(1.5), -1], [length + 1, 0, depth + 1], F::stone);
     part.add([0, 0, 0], [length, top, depth], K::drystone);
     part.cut([WALL, 0, WALL], [length - WALL, top, depth - WALL]);
     let [(front, _), _, (back, back_length), _] = walls(length, depth);
     part.within(front).cut([length / 2 - 4, 0, 0], [length / 2 + 4, m(1.7), WALL]);
     part.within(back).cut([back_length / 2 - 2, 7, 0], [back_length / 2 + 2, 11, WALL]);
     // A lintel over the door, a hearth on the floor.
-    part.within(front).add([length / 2 - 6, m(1.7), -1], [length / 2 + 6, m(1.7) + 2, 0], K::timber);
-    part.ball([(length / 2) as f64, 0.5, (depth * 2 / 3) as f64], 2.5, K::granite, Op::Fill);
+    part.within(front).add([length / 2 - 6, m(1.7), -1], [length / 2 + 6, m(1.7) + 2, 0], T::timber);
+    part.ball([(length / 2) as f64, 0.5, (depth * 2 / 3) as f64], 2.5, F::stone, Op::Fill);
     // A thatched roof, one solid, overhanging all round: a skin of thatch over a stone gable
     // would be thinner than coarse sites, and they would show the stone.
     let rise = (depth as f64 / 2.0 + 3.0) * (0.9 + random.next() * 0.3);
-    part.gable([-2.0, (top - 2) as f64, -3.0], [(length + 2) as f64, top as f64 + rise, (depth + 3) as f64], 0, K::thatch, Op::Fill);
-    // From afar, measured: its walls and roof as they show, the room inside as the rays it lets through.
+    part.gable([-2.0, (top - 2) as f64, -3.0], [(length + 2) as f64, top as f64 + rise, (depth + 3) as f64], 0, T::thatch, Op::Fill);
     // From afar, its outline. Measured (Far::measured), the roof's thatch is lost from above at levels 2 and 3
     // and what rays hit differs ~0.03 more at levels 2 and 3 in the contract.
     let mut far = Vec::new();
     let mut outline = Part::new(s.frame(), &mut far);
     outline.add([-1, -m(1.5), -1], [length + 1, top, depth + 1], K::drystone);
-    outline.gable([-2.0, (top - 2) as f64, -3.0], [(length + 2) as f64, top as f64 + rise, (depth + 3) as f64], 0, K::thatch, Op::Fill);
+    outline.gable([-2.0, (top - 2) as f64, -3.0], [(length + 2) as f64, top as f64 + rise, (depth + 3) as f64], 0, T::thatch, Op::Fill);
     Node::of(shapes).with_far(Far::of(fx(2.0), far))
 }
 
@@ -389,9 +657,9 @@ fn ring(f: &Moor, s: &Steading, random: &mut Rng) -> Node {
     for i in 0..s.stones {
         let a = (i as f64 + random.next() * 0.3) * 2.0 * std::f64::consts::PI / s.stones as f64;
         let (x, z) = (s.ring[0] as f64 + s.radius as f64 * js::cos(a), s.ring[1] as f64 + s.radius as f64 * js::sin(a));
-        let g = f.ground.at(x as i64, z as i64).0 as f64;
+        let g = f.height(x as i64, z as i64) as f64;
         let (tall, wide) = (m(1.6) as f64 + random.next() * m(1.6) as f64, 2.5 + random.next() * 1.5);
-        let kind = if random.chance(Fx::HALF) { K::lichen } else { K::granite };
+        let kind: Kind = if random.chance(Fx::HALF) { K::lichen.into() } else { F::stone.into() };
         let shape = if i == fallen {
             let (dx, dz) = (js::cos(a + 1.3) * tall, js::sin(a + 1.3) * tall);
             Shape::capsule([x, g + wide, z], [x + dx, g + wide, z + dz], wide, kind)
@@ -415,11 +683,11 @@ fn cairns(f: &Moor, s: &Steading, random: &mut Rng) -> Node {
     while t < length - m(2.0) as f64 {
         let off = side * m(1.3) as f64;
         let (x, z) = (a[0] + dx * t / length + nx * off, a[1] + dz * t / length + nz * off);
-        let g = f.ground.at(x as i64, z as i64).0 as f64;
+        let g = f.height(x as i64, z as i64) as f64;
         let r = 2.5 + random.next();
-        shapes.push(Shape::ball([x, g + r * 0.6, z], r, K::granite));
+        shapes.push(Shape::ball([x, g + r * 0.6, z], r, F::stone));
         shapes.push(Shape::ball([x, g + r * 1.6, z], r * 0.75, K::lichen));
-        shapes.push(Shape::ball([x, g + r * 2.3, z], r * 0.5, K::granite));
+        shapes.push(Shape::ball([x, g + r * 2.3, z], r * 0.5, F::stone));
         t += m(5.0) as f64;
         side = -side;
     }

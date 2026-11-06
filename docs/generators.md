@@ -9,8 +9,9 @@ coarser further away, for about the same cost per box at every level
 `worldgen/` is that engine, and `worlds/` the worlds on it,
 which use only the engine's public API.
 The forest (`worlds/src/forest.rs`) is written this way,
-and so is the valley (`valley.rs`), the forest with towns, fields and landmarks
-between mountains, four domains composed as in "Composing",
+and so is the valley (`valley.rs`),
+the forest with towns, fields, landmarks and moorland between mountains,
+five domains composed as in "Composing",
 and the city (`city.rs`), boxes on a plan of quarter metres;
 a host starts either by name from `WORLDS` (`worlds/src/lib.rs`),
 as a `World`: its generator, spawn and heights;
@@ -315,7 +316,7 @@ writes the baselines anew, and their diff shows it.
 ## Composing
 
 A world as large as the valley is **domains**
-(the forest, `town.rs`, `fields.rs`):
+(the forest, `town.rs`, `fields.rs`, `landmarks.rs`, `moor.rs`):
 modules of plans and layers that never call each other.
 They meet only through plans coarser than their own,
 through the land they bid for, and through things they share.
@@ -365,6 +366,14 @@ A town levels the ground 120 m past its streets,
 far beyond the metres in which it gives way to fields,
 so the ground blends by the town's own terrace weight, not by shares.
 
+A domain can't place what it builds whole, a hut or a pool, by the shares:
+they are a finer band than its places,
+and they read the ground (the fields bid by its slope), which a hut levels.
+So the moor bids from position alone,
+and places its steadings and pools only where it surely owns the land:
+where its bid leads the most any other may bid there
+by more than the land's width.
+
 ### Far forms keep statistics
 
 What is drawn far away keeps what is near on average, not its outline:
@@ -380,6 +389,10 @@ after those of the domains it builds on:
 the forest's come first in any world it grows in,
 so its things are a library others draw from
 (the towns' trees are the forest's `make_tree`).
+A world of fewer domains may still have all their kinds:
+the moor alone has the valley's (`valley::kinds`), its own last,
+so its ids are the same in both,
+and it reuses the forest's stone and the town's thatch.
 A kind's type (`kind_type`) is its class of material:
 the contract compares what rays hit by type, not by kind,
 so kinds that may stand in for each other far away share one.
@@ -392,7 +405,7 @@ even of one colour (the moor's `heather` and `heatherSprigs`).
 
 Structures that stand alone (`worlds/src/landmarks.rs`),
 a ruined keep, a watchtower, chapels, ponds, farmsteads and windmills,
-are the valley's fourth domain, which fills its land (`DOMAINS`):
+are the valley's fourth domain:
 a new structure joins it as a landmark, or as a thing of a domain.
 A coarse plan gives each region at most one site,
 its cell's centre and all it shapes and bids for inside the region,

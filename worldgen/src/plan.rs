@@ -128,12 +128,16 @@ impl Plan<Fx> {
 }
 
 /** The most domains a land is shared by. */
-pub const DOMAINS: usize = 4;
+pub const DOMAINS: usize = 6;
 
-/** Domains' shares of a column, fractions adding up to one, and the one with the most. */
+/**
+ * Domains' shares of a column, fractions adding up to one, and the one
+ * with the most. Kept in every slot of the land's plan, so small: a
+ * share is its `Fx`'s bits, which fit in 32 for a fraction.
+ */
 #[derive(Clone, Copy, Default)]
 struct Shares {
-    share: [Fx; DOMAINS],
+    share: [i32; DOMAINS],
     winner: u8,
 }
 
@@ -167,14 +171,14 @@ impl Land {
                 let sum: Fx = raw.into_iter().sum();
                 let share = raw.map(|r| r / sum);
                 let winner = (0..bids.len()).max_by_key(|d| (share[*d], -(*d as i64))).unwrap_or(0) as u8;
-                Shares { share, winner }
+                Shares { share: share.map(|s| s.to_bits() as i32), winner }
             }),
         }
     }
 
     /** Domain `d`'s share of column (x, z), a fraction. */
     pub fn share(&self, d: usize, x: i64, z: i64) -> Fx {
-        self.shares.at(x, z).share[d]
+        Fx::from_bits(self.shares.at(x, z).share[d].into())
     }
 
     /** Whether domain `d` has the most of column (x, z): the first of those with the most. */

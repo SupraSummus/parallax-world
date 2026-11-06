@@ -1,4 +1,4 @@
-//! The valley: the forest, towns, fields and landmarks on one land.
+//! The valley: the forest, towns, fields, landmarks and moorland on one land.
 
 use std::rc::Rc;
 

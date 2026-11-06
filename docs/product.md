@@ -91,6 +91,10 @@ A spinner shows while a world generates.
   some market towns walled with gates on their main street,
   and fields around each (wheat, stubble and haystacks, ploughed rows,
   meadows, hedges), the forest thinning towards them.
+  Moorland on the uplands under the treeline,
+  and along stretches of the valley kilometres apart:
+  heather, grass and bog, pools in hollows, boulders,
+  and steadings of a drystone hut and a ring of standing stones.
   Generated like the forest.
 - *City*: a district of a few blocks,
   for checking flat walls, thin frames and openings:

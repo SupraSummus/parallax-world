@@ -203,11 +203,13 @@ Numbers are for the forest at 1280×800, as measured when written.
   where the trees thin out to the treeline,
   came 0.10 to 0.15 apart at level 4, in materials hit and from above:
   leaves in place of trunks and of the slope's scree and rock.
-- **Landmarks keep off their regions' edges.**
+- **Landmarks and the moor's steadings keep off their regions' edges.**
   A landmark keeps its cell and all it shapes inside its region (`landmarks.rs`),
   so a strip along every region's edge never holds one,
   and a town's farmland there no farmstead or windmill
   (rows of regions are staggered, so the strips differ from row to row).
+  So do the moor's steadings and pools (`moor.rs`), one to a region,
+  and its regions are not staggered.
   Claims with hashed priorities between neighbouring regions
   ("Open problems" in `docs/generators.md`) would let one stand anywhere.
 - **The highest massifs end in broad rounded domes of snow.**

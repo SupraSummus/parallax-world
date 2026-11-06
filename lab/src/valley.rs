@@ -12,6 +12,9 @@ use worldgen::plan::{Land, Plan};
 use worldgen::units::Units;
 use worlds::fields;
 use worlds::forest::{self, GROUND_SCALE, K as F, PATH_SCALE, Relief};
+use worlds::landmarks::{self, K as L};
+use worlds::moor::{self, K as M};
+use worlds::mountains::{self, K as A};
 use worlds::town::{self, K as T, TOWNS_SCALE, Towns};
 
 use crate::image::Image;
@@ -107,13 +110,34 @@ pub fn class_of_kind(kinds: usize) -> Vec<u8> {
         (&[T::water], 15),
     ];
     let farm: [(&[P], u8); 5] =
-        [(&[P::wheat], 16), (&[P::stubble], 17), (&[P::furrow, P::tilth], 18), (&[P::crop], 19), (&[P::meadow], 20)];
+        [(&[P::wheat], 16), (&[P::stubble], 17), (&[P::furrow, P::tilth], 18), (&[P::crop], 19), (&[P::meadow, P::meadowGrass], 20)];
     let mut class = vec![u8::MAX; kinds];
     let mut set = |kind: Kind, c: u8| class[kind as usize] = c;
     forest.iter().for_each(|(ks, c)| ks.iter().for_each(|k| set(forest::k(*k), *c)));
     town.iter().for_each(|(ks, c)| ks.iter().for_each(|k| set(town::k(*k), *c)));
     farm.iter().for_each(|(ks, c)| ks.iter().for_each(|k| set(fields::k(*k), *c)));
     set(forest::k(F::hay), 17);
+    // The domains after the fields', which the experiments don't tell apart: as the forest's ground, rock or undergrowth,
+    // the towns' walls or fittings.
+    for (kind, c) in [
+        (mountains::k(A::alpine), 0),
+        (mountains::k(A::scree), 3),
+        (mountains::k(A::rock), 3),
+        (mountains::k(A::snow), 3),
+        (landmarks::k(L::sand), 0),
+        (landmarks::k(L::reed), 8),
+        (landmarks::k(L::lily), 8),
+        (landmarks::k(L::sail), 11),
+        (landmarks::k(L::bronze), 14),
+        (moor::k(M::heather), 8),
+        (moor::k(M::heatherSprigs), 8),
+        (moor::k(M::bog), 0),
+        (moor::k(M::grassBlades), 0),
+        (moor::k(M::lichen), 3),
+        (moor::k(M::drystone), 3),
+    ] {
+        set(kind, c);
+    }
     assert!(class.iter().all(|c| *c != u8::MAX), "a kind without a class");
     class
 }
