@@ -35,6 +35,9 @@ Numbers are for the forest at 1280×800, as measured when written.
   drawing those that show most of the rest.
   The first phase reads every cluster only to find those that showed;
   a list of them, kept from the last frame, would spare that.
+  A lost GPU device (a hang the driver resets, or memory running out)
+  ends it with a panic in egui-wgpu, which makes its device once:
+  to recover in the same window, it would need a winit loop of its own.
   `native/` is not built in CI.
 - **TS and Rust still say much the same twice.**
   The tiles around the camera (`world.ts`) are `native/src/world.rs`,
