@@ -193,6 +193,15 @@ Numbers are for the forest at 1280×800, as measured when written.
   Learned again from today's, mostly hamlets and villages,
   it draws far less town: 235 houses in `learned.rs`'s test, not over 600.
   Learn it from the market towns alone, or let the learned town be sparser.
+- **The forest on steep slopes breaks the contract at level 4.**
+  A region on a wooded mountainside of the valley,
+  where the trees thin out to the treeline,
+  came 0.10 to 0.15 apart at level 4, in materials hit and from above:
+  leaves in place of trunks and of the slope's scree and rock.
+- **The highest massifs end in broad rounded domes of snow.**
+  Behind the crest the high country is one smooth noise,
+  and wherever it stands over the snowline, all of it is snow.
+  It wants crags and cirques of its own, or less snow where it is broad.
 
 ## Ideas
 

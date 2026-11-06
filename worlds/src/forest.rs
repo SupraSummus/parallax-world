@@ -192,6 +192,8 @@ struct Forest {
     spawn: [i64; 3],
     ground: Ground,
     columns: Plan<Column>,
+    /** Spots of columns of cells, by N and the column (spot's key), the last asked in each slot. */
+    spots: RefCell<Vec<([i64; 3], Point)>>,
 }
 
 /** The forest's own noise, by what it decides. */
@@ -253,10 +255,25 @@ impl Forest {
         chance * (self.ground.share)(x, z)
     }
 
-    /** A random spot on the ground under the square a cell reaches over (2N wide). */
-    fn spot(&self, cell: &Cell) -> Point {
-        // The same for every cell over a column: the one the ground is in owns it.
-        cell.on_ground_by(&mut Rng::new(hash64(self.s(19), cell.n, cell.i, cell.k)), |x, z| self.ground(x, z))
+    /**
+     * A random spot on the ground under the square a cell reaches over
+     * (2N wide), if it may be in the cell: the same for every cell over a
+     * column, so the one the ground is in owns it. Kept, as a box of the
+     * mountains' heights asks every cell over a column for it in turn.
+     */
+    fn spot(&self, cell: &Cell) -> Option<Point> {
+        let key = [cell.n, cell.i, cell.k];
+        let slot = (hash(0, cell.n, cell.i, cell.k) & 4095) as usize;
+        let (kept, spot) = self.spots.borrow()[slot];
+        let spot = if kept == key {
+            spot
+        } else {
+            let spot = cell.on_ground_by(&mut Rng::new(hash64(self.s(19), cell.n, cell.i, cell.k)), |x, z| self.ground(x, z));
+            self.spots.borrow_mut()[slot] = (key, spot);
+            spot
+        };
+        // A cell reaches N from its centre along each axis.
+        ((spot[1] - cell.centre[1] as f64).abs() <= cell.n as f64).then_some(spot)
     }
 
     /** The chance a cell of trees around column (x, z) has one. */
@@ -314,7 +331,7 @@ pub fn layers(seed: u64, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
             column_of(&noise, &path, x, z, h(x, z), [h(x - 1, z), h(x + 1, z), h(x, z - 1), h(x, z + 1)])
         })
     };
-    let f = Rc::new(Forest { seed, spawn, ground, columns });
+    let f = Rc::new(Forest { seed, spawn, ground, columns, spots: RefCell::new(vec![([i64::MIN; 3], [0.0; 3]); 4096]) });
 
     // The ground: along each column, soil or stone under a layer of its surface.
     let terrain = {
@@ -324,8 +341,9 @@ pub fn layers(seed: u64, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
             let around = [f.ground(x - spacing, z), f.ground(x + spacing, z), f.ground(x, z - spacing), f.ground(x, z + spacing)];
             let surface = f.column(x, z).surface;
             let below = if surface == K::stone || surface == K::mossyStone { K::stone } else { K::soil };
-            // Down to the lowest neighbour, so a slope's sides are solid.
-            let bottom = around.into_iter().fold(h - vox(1.5) as i64, i64::min);
+            // Two spacings past the lowest neighbour, so a slope's sides are solid: a span's ends round
+            // to its column's sites, up to a spacing each; with less, rays slipped through the mountains' faces.
+            let bottom = around.into_iter().fold(h - vox(1.5) as i64, i64::min) - 2 * spacing;
             column::Column::new(h, spacing).surface(surface, vox(1.0) as i64).fill_below_exactly(below, bottom)
         })
     };
@@ -384,7 +402,7 @@ pub fn layers(seed: u64, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
         Population::new("trees", 1.0, tree_cell)
             .reach([vox(9.0) as i64, tree_top, vox(9.0) as i64])
             .size(vox(1.0) as i64)
-            .anchor(move |cell| Some(anchor.spot(cell)))
+            .anchor(move |cell| anchor.spot(cell))
             .make(move |[x, y, z], cell| {
                 let mut random = cell.random("tree");
                 let (xi, zi) = (x as i64, z as i64);
@@ -402,7 +420,7 @@ pub fn layers(seed: u64, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
     let rock_cell = vox(4.0) as i64;
     let on_ground = |name, reach| {
         let anchor = f.clone();
-        Population::new(name, 2.0, rock_cell).reach(reach).size(vox(2.0) as i64).anchor(move |cell| Some(anchor.spot(cell)))
+        Population::new(name, 2.0, rock_cell).reach(reach).size(vox(2.0) as i64).anchor(move |cell| anchor.spot(cell))
     };
     let boulders = {
         let f = f.clone();

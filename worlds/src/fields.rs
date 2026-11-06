@@ -124,7 +124,11 @@ pub fn layers(seed: u64, land: Rc<Land>, me: usize, ground: Rc<Plan<i64>>, path:
         Population::new("haystacks", 3.0, m(6.0))
             .reach(m(2.0))
             .size(m(4.0))
-            .anchor(move |c| Some(c.on_ground_by(&mut Rng::new(hash64(seed, c.i, c.j, c.k)), |x, z| ground.at(x, z))))
+            // A spot per column of cells, owned by the one it is in: the mountains' heights hold many over each.
+            .anchor(move |c| {
+                let spot = c.on_ground_by(&mut Rng::new(hash64(seed, c.i, 0, c.k)), |x, z| ground.at(x, z));
+                ((spot[1] - c.centre[1] as f64).abs() <= c.n as f64).then_some(spot)
+            })
             .make(move |[x, y, z], cell| {
                 let mut random = cell.random("haystack");
                 if f.crop(x as i64, z as i64) != Some(Crop::Stubble) || !random.chance(fx(0.3)) {
