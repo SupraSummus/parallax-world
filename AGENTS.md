@@ -77,7 +77,7 @@ worldgen/                    # The world-generation engine, moving to integers, 
 │   ├── generator.rs         # The framework: shapes, nodes, fields, populations, drawing any box at any level
 │   ├── build.rs             # Short forms to write worlds with: constructors of fields, populations, nodes, solid shapes
 │   ├── column.rs            # A heightfield's spans, each tall enough to keep a site at every level
-│   ├── plan.rs              # Plans by column, each from coarser ones only; land domains bid for
+│   ├── plan.rs              # Plans by column, each from coarser ones only; land domains bid for; claims, things kept apart anywhere
 │   ├── frame.rs             # Things built in frames of their own: quarter turns, mirrors, walls
 │   ├── world.rs             # World: what a host needs to show one (generator, spawn, heights), the places it names
 │   ├── picture.rs           # Pictures of a world at one level: rays through its voxels, as PNGs

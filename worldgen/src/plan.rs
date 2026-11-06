@@ -5,7 +5,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use crate::noise::{Fixed, Fx, smoothstep};
+use crate::noise::{Fixed, Fx, Rng, hash64, smoothstep};
 
 const DOCS: &str = "docs/generators.md";
 
@@ -187,6 +187,121 @@ impl Land {
     }
 }
 
+/** A cell proposes as many spots as thresholds (of 2^32) its hash reaches: Poisson, one on average, at most 8. */
+const POISSON: [u32; 8] = [1580030169, 3160060337, 3950075422, 4213413783, 4279248374, 4292415292, 4294609778, 4294923276];
+/** Keys a cell's spots take, its own and the first's: k · SPOTS + n. */
+const SPOTS: i64 = 16;
+
+/** A thing claimed: where it stands, and what it is. */
+pub type Claim<T> = Option<([i64; 2], T)>;
+
+/**
+ * Things at least `apart` from each other, anywhere (see "Claims" in
+ * docs/generators.md). Each cell `cell` wide proposes spots evenly in it,
+ * a Poisson number, one on average; `claim` makes each a thing at most a
+ * cell from it, or none. A thing is kept unless one of higher hashed
+ * priority stands closer than `apart`. The spot `first`, if any, is
+ * proposed too, with the highest. The spots and things are plans of
+ * scale `cell`: `claim` reads only plans as coarse.
+ */
+pub struct Claims<T> {
+    apart: i64,
+    /** Each spot's thing, by its key. */
+    proposed: Rc<Plan<Claim<T>>>,
+    /** The keys of the things kept near each stretch of columns `apart` / 8 wide, for `near`. */
+    nearby: Plan<[(i32, i32); NEARBY]>,
+}
+
+/**
+ * Things kept within 9/8 of `apart` of a point, at most: 8 would need a
+ * circle 1.152 times as wide round it (7 round one more).
+ */
+const NEARBY: usize = 7;
+
+impl<T: Copy + Default + 'static> Claims<T> {
+    pub fn new(
+        name: &'static str,
+        seed: u64,
+        cell: i64,
+        apart: i64,
+        first: Option<[i64; 2]>,
+        claim: impl Fn([i64; 2], &mut Rng) -> Claim<T> + 'static,
+    ) -> Claims<T> {
+        let proposed = Rc::new(Plan::new(name, cell, move |i, key| {
+            let mut random = Rng::new(hash64(seed, i, key, 0));
+            let spot = match first {
+                Some(spot) if key.rem_euclid(SPOTS) == SPOTS - 1 => spot,
+                _ => [i * cell + random.below(cell as u32) as i64, key.div_euclid(SPOTS) * cell + random.below(cell as u32) as i64],
+            };
+            let made = claim(spot, &mut random);
+            if let Some((at, _)) = made {
+                assert!(
+                    (0..2).all(|a| (at[a] - spot[a]).abs() <= cell),
+                    "claims {name}: a thing at {at:?} stands over a cell from its spot {spot:?}; see \"Claims\" in {DOCS}"
+                );
+            }
+            made
+        }));
+        let kept = {
+            let proposed = proposed.clone();
+            Plan::new(name, cell, move |i, key| {
+                let Some(([x, z], _)) = proposed.at(i, key) else { return false };
+                let priority =
+                    |i: i64, key: i64| (if key.rem_euclid(SPOTS) == SPOTS - 1 { u64::MAX } else { hash64(seed, i, key, 1) }, i, key);
+                let outranks = |(j, other): (i64, i64)| {
+                    priority(j, other) > priority(i, key)
+                        && proposed.at(j, other).is_some_and(|([u, w], _)| (u - x).pow(2) + (w - z).pow(2) < apart * apart)
+                };
+                !spots(cell, seed, first, [x, z], apart).into_iter().any(outranks)
+            })
+        };
+        let nearby = {
+            let (proposed, stretch) = (proposed.clone(), (apart / 8).max(1));
+            Plan::new(name, cell, move |a, b| {
+                let (centre, reach) = ([a * stretch + stretch / 2, b * stretch + stretch / 2], apart + stretch);
+                let near = spots(cell, seed, first, centre, reach).into_iter().filter(|&(i, key)| {
+                    kept.at(i, key)
+                        && proposed.at(i, key).is_some_and(|([u, w], _)| (u - centre[0]).pow(2) + (w - centre[1]).pow(2) <= reach * reach)
+                });
+                let mut keys = [(i32::MIN, 0); NEARBY];
+                for (n, (i, key)) in near.enumerate() {
+                    assert!(n < NEARBY, "claims {name}: over {NEARBY} things {apart} apart near {centre:?}");
+                    keys[n] = (i as i32, key as i32);
+                }
+                keys
+            })
+        };
+        Claims { apart, proposed, nearby }
+    }
+
+    /** The thing kept nearest (x, z) within `within`, at most `apart`, if any: of those kept for its stretch of columns. */
+    pub fn near(&self, x: i64, z: i64, within: i64) -> Claim<T> {
+        assert!(within <= self.apart, "claims are near within {} at most, not {within}", self.apart);
+        let stretch = (self.apart / 8).max(1);
+        let keys = self.nearby.at(x.div_euclid(stretch), z.div_euclid(stretch));
+        let distance = |[u, w]: [i64; 2]| (u - x).pow(2) + (w - z).pow(2);
+        let near = keys.into_iter().take_while(|k| k.0 != i32::MIN).filter_map(|(i, key)| self.proposed.at(i.into(), key.into()));
+        near.filter(|(at, _)| distance(*at) <= within * within).min_by_key(|(at, _)| (distance(*at), *at))
+    }
+}
+
+/** The keys (i, k · SPOTS + n) of the spots whose things may stand within `reach` of `at`: at most a cell from cells reaching it. */
+fn spots(cell: i64, seed: u64, first: Option<[i64; 2]>, at: [i64; 2], reach: i64) -> Vec<(i64, i64)> {
+    let range = |a: usize| (at[a] - reach - 2 * cell).div_euclid(cell)..=(at[a] + reach + cell).div_euclid(cell);
+    let first = first.map(|f| f.map(|v| v.div_euclid(cell)));
+    let mut keys = Vec::new();
+    for i in range(0) {
+        for k in range(1) {
+            let h = (hash64(seed, i, k, 2) >> 32) as u32;
+            keys.extend((0..POISSON.iter().filter(|&&t| h >= t).count() as i64).map(|n| (i, k * SPOTS + n)));
+            if first == Some([i, k]) {
+                keys.push((i, k * SPOTS + SPOTS - 1));
+            }
+        }
+    }
+    keys
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -219,5 +334,37 @@ mod tests {
             assert_eq!(land.owns(0, x, 0), sa >= sb, "{x}");
         }
         assert_eq!((land.share(0, -20, 0), land.share(0, 20, 0)), (Fx::ZERO, Fx::ONE));
+    }
+
+    #[test]
+    fn claims_are_apart_and_prefer_no_places() {
+        use std::collections::BTreeSet;
+
+        use crate::grid::Box3;
+        use crate::places::{SIDE, preference};
+        // Things at least 100 apart, where x + z is even (a ground they suit), the first at (5, 5); in cells 64 wide.
+        let claims = |seed| Claims::new("claims", seed, 64, 100, Some([5, 5]), |[x, z], _| ((x + z) & 1 == 0).then_some(([x, z], ())));
+        let area = Box3 { min: [-SIDE / 2, 0, -SIDE / 2], max: [SIDE / 2, 1, SIDE / 2] };
+        let places: Vec<(u64, Vec<[i64; 3]>)> = (0..4)
+            .map(|seed| {
+                let claims = claims(seed);
+                let near = |[x, z]: [i64; 2]| claims.near(x, z, 100).map(|([x, z], ())| [x, 0, z]);
+                // All those in a square, each the nearest to a point of a grid finer than they are apart.
+                let square: BTreeSet<_> = (-20..20).flat_map(|i| (-20..20).map(move |k| [25 * i, 25 * k])).filter_map(near).collect();
+                assert!(square.contains(&[5, 0, 5]), "the first is kept");
+                for a in &square {
+                    for b in square.range(..*a) {
+                        assert!((a[0] - b[0]).pow(2) + (a[2] - b[2]).pow(2) >= 100 * 100, "{a:?} and {b:?}");
+                    }
+                }
+                let mut random = Rng::new(seed);
+                let anywhere: BTreeSet<_> =
+                    (0..4000).filter_map(|_| near([0, 2].map(|a| area.min[a] + random.below(SIDE as u32) as i64))).collect();
+                (seed, anywhere.into_iter().collect())
+            })
+            .collect();
+        // Periods from the cells' width up.
+        let p = preference("claims", 16, &area, &places);
+        assert!(!p.broken(), "{p}");
     }
 }
