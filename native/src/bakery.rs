@@ -25,8 +25,9 @@ pub struct Request {
     pub i: i32,
     pub j: i32,
     pub tiles: [i32; 4],
-    /** The size of the blocks its splats are clustered by (compositor::cluster). */
+    /** The size of the blocks its splats are clustered by, and whether with pillars (compositor::cluster). */
     pub block: f64,
+    pub pillars: bool,
 }
 
 /** A baked chunk (ChunkSplats in chunk-baker.ts): its splats and their clusters as the GPU takes them (compositor::cluster), and its mask's blocks. */
@@ -35,6 +36,8 @@ pub struct Baked {
     pub extent: [f64; 2],
     pub splats: Vec<GpuSplat>,
     pub clusters: Vec<GpuCluster>,
+    /** Whether its runs are drawn as pillars. */
+    pub pillars: bool,
     pub mask: Mask,
 }
 
@@ -46,12 +49,12 @@ pub struct Mask {
     pub blocks: Vec<u8>,
 }
 
-/** What a request bakes: face, slice, cell. */
-type Key = (usize, i32, i32, u64, i32, i32);
+/** What a request bakes: face, slice, cell, and whether with pillars. */
+type Key = (usize, i32, i32, u64, i32, i32, bool);
 
 impl Request {
     fn key(&self) -> Key {
-        (self.face, self.slice.level, self.slice.layer, self.slice.cutoff.to_bits(), self.i, self.j)
+        (self.face, self.slice.level, self.slice.layer, self.slice.cutoff.to_bits(), self.i, self.j, self.pillars)
     }
 
     /** The worker of the request's cell. */
@@ -161,12 +164,13 @@ fn work(queue: &Queue, send: &Sender<(Request, Baked)>, grids: &Grids, mut baker
             continue;
         }
         let b = baker.bake(r.face, &r.slice, r.i, r.j);
-        let (splats, clusters) = cluster(&baker.numbers, half_layer(r.slice.atoms), r.block);
+        let (splats, clusters) = cluster(&baker.numbers, half_layer(r.slice.atoms), r.block, r.pillars);
         let baked = Baked {
             origin: [b.origin_x, b.origin_y],
             extent: [b.extent_width, b.extent_height],
             splats,
             clusters,
+            pillars: r.pillars,
             mask: Mask { width: b.width, height: b.height, scale: b.scale, blocks: baker.blocks.clone() },
         };
         if send.send((request, baked)).is_err() {

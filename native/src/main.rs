@@ -7,7 +7,7 @@
 //! parallax-native [--world NAME] [--seed S] --check-requests frame.bin
 //!
 //! --view takes the web page's view query (viewQuery in renderer.ts),
-//! overriding --seed and --world.
+//! overriding --seed and --world; its pillars=0 draws no pillars, as the page's.
 //! --shot draws the first frame once all the tiles and chunks in view are
 //! in, at 1280×800 or --size, offscreen, and saves it; --bench only times
 //! the first frame once the world has all its tiles, the main thread's
@@ -17,7 +17,7 @@
 //! --leak sets how far hidden geometry may show between slices (renderer.rs);
 //! --all-chunks bakes every chunk in view, covered or not, as the panel's
 //! switch does.
-//! --seams and --colour draw the shot as the panel's switches do.
+//! --seams and --colour draw as the panel's switches do.
 //! --check-requests takes a view the TS renderer dumped (native/dump.test.ts):
 //! the faces must be the same, and the chunks the first frame
 //! wants from its grids and camera too, but for some the TS renderer wants
@@ -80,6 +80,7 @@ impl eframe::App for App {
             ui.add(egui::Slider::new(&mut self.renderer.max_leak, 1.0..=12.0).step_by(0.1).text("Max Occlusion Leak (°)"));
             ui.checkbox(&mut self.renderer.skip_covered, "Skip Covered Chunks");
             ui.checkbox(&mut self.seams, "Show Face Seams");
+            ui.checkbox(&mut self.renderer.pillars, "Pillars over Columns");
             ui.horizontal(|ui| {
                 ui.label("Colour by");
                 for (colours, name) in Colours::ALL {
@@ -312,6 +313,8 @@ struct ViewQuery {
     fov: Option<f64>,
     distance: Option<f64>,
     leak: Option<f64>,
+    /** The page's switch (queryFlag in App.tsx). */
+    pillars: Option<bool>,
 }
 
 fn parse_view_query(query: &str) -> ViewQuery {
@@ -336,6 +339,7 @@ fn parse_view_query(query: &str) -> ViewQuery {
         fov: numbers::<1>(get("fov")).map(|[v]| v),
         distance: numbers::<1>(get("distance")).map(|[v]| v),
         leak: numbers::<1>(get("leak")).map(|[v]| v),
+        pillars: get("pillars").map(|v| v == "1"),
     }
 }
 
@@ -369,6 +373,9 @@ fn main() -> eframe::Result {
         renderer.max_leak = v;
     }
     renderer.skip_covered = !flag("--all-chunks");
+    if let Some(v) = query.pillars {
+        renderer.pillars = v;
+    }
     let mut world = World::new(make, seed, threads);
     let mut camera = query.camera.unwrap_or(shown.spawn.map(|v| v as f64));
     let faces: [[Vec3; 3]; 12] = std::array::from_fn(|f| view::faces()[f].axes);

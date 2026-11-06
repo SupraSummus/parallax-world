@@ -36,7 +36,7 @@ struct GpuChunk {
     _pad: f32,
 }
 
-/** A splat (splat_vertex's instance in compositor.wgsl): its SPLAT numbers (chunk-baker.ts), its height for its run, and its order in its chunk (depth_of). */
+/** A splat (splat_vertex's instance in compositor.wgsl): its SPLAT numbers (chunk-baker.ts), its height in place of its run, and its order in its chunk (depth_of). */
 pub type GpuSplat = [u32; 6];
 
 /** A cluster (Cluster in compositor.wgsl). */
@@ -70,7 +70,8 @@ pub fn block(distance: f64, focal: f64) -> f64 {
 }
 
 /**
- * A chunk's splats (far to near) as the GPU takes them, in clusters of the
+ * A chunk's splats (far to near) as the GPU takes them, each with a run as
+ * a row of splats if `pillars` (see rows), in clusters of the
  * splats in each block of size `block` on its plane (row by row, nearest
  * first in each, so that a block's first clusters are its front), and the
  * clusters, nearest first, so that splats are drawn near to far; their
@@ -81,8 +82,8 @@ pub fn block(distance: f64, focal: f64) -> f64 {
  * drawn for its camera. In the bake workers, so that a chunk's upload is a
  * copy.
  */
-pub fn cluster(numbers: &[f32], half_layer: f64, block: f64) -> (Vec<GpuSplat>, Vec<GpuCluster>) {
-    let numbers = numbers.as_chunks::<5>().0;
+pub fn cluster(numbers: &[f32], half_layer: f64, block: f64, pillars: bool) -> (Vec<GpuSplat>, Vec<GpuCluster>) {
+    let numbers = &rows(numbers.as_chunks::<5>().0, pillars)[..];
     let n = numbers.len();
     // Nearer the later painted.
     let orders: Vec<f32> = (0..n).map(|k| (n - k) as f32 / (n + 1) as f32).collect();
@@ -122,12 +123,37 @@ pub fn cluster(numbers: &[f32], half_layer: f64, block: f64) -> (Vec<GpuSplat>, 
         start += run.len();
     }
     clusters.sort_by(|a, b| a.order.total_cmp(&b.order));
-    // Its height in place of its run: drawn without it (docs/todo.md).
+    // Its height in place of its run, drawn by rows if at all.
     let splats = sorted.iter().map(|&s| {
         let [x, y, w, _, paint] = numbers[s];
         [x, y, w, w * std::f32::consts::SQRT_2, paint, orders[s]].map(f32::to_bits)
     });
     (splats.collect(), clusters)
+}
+
+/** Half layers between a column's voxels. */
+const VOXEL: i32 = 4;
+
+/**
+ * A chunk's splats (far to near) and, if `pillars`, for each with a run (a
+ * pillar along the axis, see chunk_splats in bake/src/splats.rs), a splat
+ * at each voxel of it, the same but deeper; still far to near. A voxel apart, a row's
+ * hexagons meet from every ray of the face, so a slanted ray meets the
+ * pillar wherever its voxels are; farther apart, gaps open between them.
+ */
+fn rows(numbers: &[[f32; 5]], pillars: bool) -> Vec<[f32; 5]> {
+    let mut all: Vec<(i32, [f32; 5])> = Vec::with_capacity(numbers.len());
+    for &[x, y, w, run, paint] in numbers {
+        let paint = paint.to_bits();
+        let depth = (paint >> 24) as i32 - 128;
+        // Its depth past the plane in the alpha byte, as the splat's.
+        let at = |d: i32| f32::from_bits(paint & 0x00ff_ffff | ((128 + depth + d) as u32) << 24);
+        let run = if pillars { run as i32 } else { 0 };
+        all.extend((0..=run).step_by(VOXEL as usize).map(|d| (depth + d, [x, y, w, 0.0, at(d)])));
+    }
+    // Far first; stable, so the chunk's order where depths tie.
+    all.sort_by_key(|&(depth, _)| std::cmp::Reverse(depth));
+    all.into_iter().map(|(_, s)| s).collect()
 }
 
 /** A chunk's splats and clusters on the GPU, its slot in the table, and the frame it was last drawn in. */

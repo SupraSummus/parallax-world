@@ -545,9 +545,13 @@ draws those newly showing and keeps which show for the next frame
 Draws are listed per cluster on the GPU, roughly near to far,
 so nearer splats mostly hide what is behind them early.
 It draws into a picture of its own, which egui (or `--shot`) shows.
-It draws each splat as its near hexagon, without its run,
-so where the axis lies in a surface, stripes show
-([todo.md](todo.md)).
+It draws a run as a row of splats along the axis,
+one at each voxel of the column (`rows`),
+clustered and culled as any splat.
+A voxel apart, a row's hexagons meet from every ray of the face;
+farther apart, gaps open.
+Switching "Pillars over Columns" bakes the chunks in view again,
+the old ones standing in meanwhile.
 
 **Fog.** A slice at distance d keeps `exp(−d / F)` of its own colour;
 the rest is the horizon colour, mixed in per pixel.

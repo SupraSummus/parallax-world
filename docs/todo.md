@@ -90,21 +90,18 @@ Numbers are for the forest at 1280×800, as measured when written.
   (no compute, no indirect draws).
   Its painting order is the draw order at one depth per layer,
   which rounding breaks: natively, the same misordered about 6 % of the pixels.
-- **The native compositor draws no runs.**
-  Chunks keep only each column's nearest voxel
-  (section 3 of `docs/architecture.md`),
-  and natively each is drawn as its near hexagon alone:
-  where the axis lies in a surface, the ground shows stripes,
-  and towards a face's corners, where rays slant most,
-  its steps flatten, trunks show seams, crowns fray.
-  The web draws each as a prism over its run;
-  natively, prisms need a depth by where a ray enters them
-  in place of each splat's rank in its chunk (`depth_of`),
-  for drawing and for culling.
-  Modelled in Node (a lawn, the hills, the city),
-  prisms of each column's nearest voxel have 0.5–0.8 of the instances
-  every voxel had, but 12 vertices against 6, and about as many fragments;
-  not measured on a GPU.
+- **Native pillars more than double the splats.**
+  Natively a run is a row of splats, one a voxel
+  (section 4 of `docs/architecture.md`),
+  which in the forest adds more than half to the GPU's frame.
+  Splats of a row that no ray of the face can see,
+  hidden by neighbouring columns with runs as long,
+  need not be made.
+  Fewer, larger splats cost more, not less:
+  a splat every other voxel, grown to leave no gaps
+  and with its depth varying along the axis, culled worse;
+  one splat cut to the hull of a pillar's ends drew large rectangles,
+  mostly discarded.
 - **A chunk could be an image.**
   It holds at most one voxel per column,
   so it could be a texture of colour, depth and run,
