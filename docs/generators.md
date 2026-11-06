@@ -284,6 +284,8 @@ and each seed's alone:
 a grid whose phase a seed draws still keeps towns off its regions' edges.
 Only things are checked: plans of fields (the moor's pools) are not,
 and things as rare as the valley's haystacks are too few to tell.
+`worlds/tests/places.rs` checks each world in `WORLDS`,
+but for the populations it knows prefer places (`KNOWN`, docs/todo.md).
 
 Parts and far regions are checked at seed 42 only:
 they check how a world is drawn, not what a seed puts in it.
