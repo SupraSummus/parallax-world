@@ -19,7 +19,7 @@ pub const fn m(metres: f64) -> i64 {
  * fraction), so a fraction can't be taken for units, nor units for
  * fixed point, as plain `i64`s could:
  *
- * ```compile_fail,E0277
+ * ```compile_fail,E0308
  * use worldgen::noise::{Fbm, Fx};
  * use worldgen::units::Units;
  * let hills = Fbm::<1920, 4>::new(1);

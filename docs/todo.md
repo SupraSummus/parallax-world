@@ -42,6 +42,14 @@ Numbers are for the forest at 1280×800, as measured when written.
   and faces and the renderer are in `native/src` too;
   `LayerIndex.range` (`voxel-grid.ts`) is `bake/src/layer_index.rs`'s.
   The renderer is the large step.
+- **Tests take most of CI's time.**
+  Most of it is the worlds' contract, bound by the CPU:
+  pictures from above generate level 0 over all of a world's heights.
+  Not tried: the Rust tests beside vitest
+  (whose 20 s timeout may then be too short),
+  Rust's builds cached in CI,
+  and one Cargo target for `bake/`, `worldgen/` and `worlds/`,
+  each of which now builds the ones before it again.
 - **`coarsen` serves only tests.**
   Every world is generated at each level;
   only tests' worlds of voxels (`World.ofVoxels`) are coarsened, in TS.

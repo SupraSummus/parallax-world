@@ -164,9 +164,13 @@ impl Tile {
     }
 }
 
-/** The level's tiles generated so far, and the heights of sites in them. */
-struct Tiles {
+/**
+ * A level's tiles generated so far, and the heights of sites in them:
+ * pictures at the level that share one generate each tile once.
+ */
+pub struct Tiles {
     tiles: HashMap<(i64, i64), Tile>,
+    level: u32,
     heights: (i64, i64),
 }
 
@@ -175,6 +179,11 @@ fn tile_of(x: i64, z: i64) -> (i64, i64) {
 }
 
 impl Tiles {
+    /** None yet, of `level` between `heights` (in the level's units). */
+    pub fn new(level: u32, heights: (i64, i64)) -> Tiles {
+        Tiles { tiles: HashMap::new(), level, heights }
+    }
+
     /** Site (x, y, z)'s material; Err if its tile is not generated. */
     fn get(&self, [x, y, z]: [i64; 3]) -> Result<u8, (i64, i64)> {
         if y < self.heights.0 || y >= self.heights.1 {
@@ -389,10 +398,14 @@ fn sky(direction: [f64; 3]) -> [f64; 3] {
  * reach are generated on this thread; the rays are cast on all.
  */
 pub fn picture(generator: &Generator, camera: &Camera, level: u32, heights: (i64, i64)) -> Picture {
+    picture_in(generator, camera, &mut Tiles::new(level, heights))
+}
+
+/** As `picture`, at `tiles`' level and heights, generating only the tiles it lacks, into it. */
+pub fn picture_in(generator: &Generator, camera: &Camera, tiles: &mut Tiles) -> Picture {
     let colours: Vec<u32> = materials_of(generator).iter().map(|m| m.rgb()).collect();
-    picture_of_tiles(camera, level, heights, &colours, &mut |keys| {
-        keys.iter().map(|key| generate(generator, &tile(*key, heights), level)).collect()
-    })
+    let (level, heights) = (tiles.level, tiles.heights);
+    picture_of_tiles(camera, tiles, &colours, &mut |keys| keys.iter().map(|key| generate(generator, &tile(*key, heights), level)).collect())
 }
 
 /**
@@ -418,7 +431,7 @@ pub fn picture_on_threads(make: &(dyn Fn() -> Generator + Sync), camera: &Camera
             });
         }
         drop(done);
-        let picture = picture_of_tiles(camera, level, heights, &colours, &mut |keys| {
+        let picture = picture_of_tiles(camera, &mut Tiles::new(level, heights), &colours, &mut |keys| {
             for job in keys.iter().copied().enumerate() {
                 jobs.send(job).expect("a thread takes it");
             }
@@ -447,7 +460,8 @@ fn threads() -> usize {
 /** Generates the tiles of the keys it is given, in their order. */
 type MakeTiles<'a> = dyn FnMut(&[(i64, i64)]) -> Vec<VoxelGrid> + 'a;
 
-fn picture_of_tiles(camera: &Camera, level: u32, heights: (i64, i64), colours: &[u32], make: &mut MakeTiles) -> Picture {
+fn picture_of_tiles(camera: &Camera, tiles: &mut Tiles, colours: &[u32], make: &mut MakeTiles) -> Picture {
+    let (level, heights) = (tiles.level, tiles.heights);
     let s = (1i64 << level) as f64;
     let pixels = camera.width * camera.height;
     let mut picture = Picture {
@@ -485,14 +499,14 @@ fn picture_of_tiles(camera: &Camera, level: u32, heights: (i64, i64), colours: &
         Projection::Perspective { .. } => FOG,
         Projection::Top { .. } => 0.0,
     };
-    let mut tiles = Tiles { tiles: HashMap::new(), heights };
+    let before = tiles.tiles.len();
     // In rounds: cast every ray till it stops or needs a tile, then generate the tiles needed.
     while !rays.is_empty() {
         let start = Instant::now();
         let mut steps = vec![Step::Miss; rays.len()];
         {
             let work = Mutex::new(rays.chunks_mut(1024).zip(steps.chunks_mut(1024)));
-            let tiles = &tiles;
+            let tiles = &*tiles;
             std::thread::scope(|scope| {
                 for _ in 0..threads() {
                     scope.spawn(|| {
@@ -538,7 +552,7 @@ fn picture_of_tiles(camera: &Camera, level: u32, heights: (i64, i64), colours: &
         tiles.tiles.extend(needed.iter().copied().zip(make(&needed).into_iter().map(Tile::new)));
         picture.generating += start.elapsed();
     }
-    picture.tiles = tiles.tiles.len();
+    picture.tiles = tiles.tiles.len() - before;
     picture
 }
 

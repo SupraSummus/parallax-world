@@ -9,15 +9,8 @@ import { GRID_LEVELS } from './slice-selection'
 import { levelsOf, World } from './world'
 import { hills } from './hills.test-helper'
 
-// A small stand-in for the forest, which the workers generate in moments; and the city as it is.
-vi.mock('./worldgen', async importOriginal => {
-  const { generated } = await importOriginal<typeof import('./worldgen')>()
-  const { smallWorldgen } = await import('./small-forest.test-helper')
-  return {
-    worlds: () => [...smallWorldgen.worlds(), 'city'],
-    generated: (name: string, seed: number) => (name === 'city' ? generated : smallWorldgen.generated)(name, seed),
-  }
-})
+// A small stand-in for the forest, which the workers generate in moments.
+vi.mock('./worldgen', async () => (await import('./small-forest.test-helper')).smallWorldgen)
 
 // A small world with trees, as in renderer.test.ts.
 const world = hills(12345)
@@ -242,20 +235,24 @@ describe('WorkerBakery', () => {
   })
 
   it('stops baking once settled, though the cache is past its cap', async () => {
-    // The city at full HD, sliced at two leaks: their chunks pass the cap
-    // on hidden chunks, so eviction reaches the slices in view.
-    const renderer = new ParallaxRenderer(new World(12345, 'city'), { bakery: new WorkerBakery([new FakeWorker()]) })
-    renderer.resize(1920, 1080)
-    renderer.setMaxLeak(3)
-    await gridsIn(renderer)
-    await settle(renderer)
-    renderer.setMaxLeak(2)
-    await settle(renderer)
-    expect(renderer.getStats().lastUpdate?.cachedBytes).toBeGreaterThan(32_000_000)
-    // settle()'s last render evicted; did it drop chunks the view wants but does not draw?
-    renderer.render()
-    expect(pending(renderer)).toBe(0)
-  }, 60_000)
+    // Sliced at one leak, then another: the first's slices are hidden.
+    const settled = async (maxHiddenChunkBytes?: number) => {
+      const renderer = new ParallaxRenderer(world, { bakery: new WorkerBakery([new FakeWorker()]), maxHiddenChunkBytes })
+      renderer.resize(800, 600)
+      renderer.setMaxLeak(3)
+      await gridsIn(renderer)
+      await settle(renderer)
+      renderer.setMaxLeak(2)
+      await settle(renderer)
+      // settle()'s last render evicted; did it drop chunks the view wants but does not draw?
+      renderer.render()
+      return { pending: pending(renderer), bytes: renderer.getStats().lastUpdate?.cachedBytes ?? 0 }
+    }
+    // With no room for hidden chunks, eviction reaches the slices in view.
+    const [capped, uncapped] = [await settled(0), await settled()]
+    expect(capped.pending).toBe(0)
+    expect(capped.bytes).toBeLessThan(uncapped.bytes)
+  })
 
   it('bakes no cell nearer layers cover, and ends up showing the same', () => {
     const settled = (skip: boolean) => {
