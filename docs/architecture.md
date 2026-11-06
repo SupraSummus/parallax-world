@@ -505,6 +505,9 @@ then the sky behind them.
 A splat is a prism of triangles, its hexagon swept along the axis
 over its run (section 3), those facing away culled;
 without a run, the near hexagon alone.
+The camera sees at most the near hexagon and three sides,
+so each splat is one triangle strip of those,
+the sides picked in the vertex shader.
 A prism spans layers, so no painting order is right for every ray
 (a lawn's run behind a trunk on it):
 each vertex has a depth within its layer's share of the depth range,

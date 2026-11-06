@@ -1,6 +1,6 @@
 import { SPLAT } from './chunk-baker'
 import type { Chunk, Frame } from './renderer'
-import { halfLayer, thickness } from './slice-selection'
+import { halfLayer, MAX_SLANT, thickness } from './slice-selection'
 import { faceBasis, LAYER, viewBasis, type Basis, type Face } from './view'
 
 // Sky gradient: from the horizon colour at eye level up to SKY_TOP at
@@ -18,8 +18,15 @@ const SEAM_WIDTH = 1.5
 // `halfLayer` past the layer's plane per step of its alpha past 128, and
 // as much wider as the ray to it slants across (Splat in
 // bake/src/splats.rs), swept along the axis over its run (`run` half
-// layers): a prism, an instance of PRISM, its vertices 0–5 the near
-// hexagon's and 6–11 the far one's.
+// layers): a prism, an instance of one triangle strip of STRIP vertices.
+// Rays of the face slant at most MAX_SLANT, so it widens no more, and
+// stays convex. The camera sees the near hexagon and the sides facing it,
+// at most three in a row (their normals are 55° and 71° apart),
+// so the strip is the hexagon, a degenerate fold, then the three sides
+// from k, the first facing side after one that does not;
+// a side facing away is culled.
+// Indexed triangles of the whole prism cost several times as much
+// per instance on an Intel GPU (Mesa, through ANGLE).
 // Projected like projector() in view.ts, `view` having the camera's axes
 // as columns, in the layer's face coordinates (the world's for the sky).
 // `origin` is the chunk's top-left corner, camera-relative. The sky and
@@ -30,7 +37,12 @@ const SEAM_WIDTH = 1.5
 // as their voxels would, before the fragment shader runs. Interpolated
 // linearly on screen, not in perspective: surfaces of one layer much
 // nearer each other than a prism is long may show in the wrong order.
+/** Vertices of a splat's strip (see VERTEX_SHADER); the first HEXAGON are the near hexagon, all a flat splat needs. */
+const STRIP = 14
+const HEXAGON = 6
+
 const VERTEX_SHADER = `#version 300 es
+uniform float maxSlant;
 uniform vec2 viewport;
 uniform float focal;
 uniform mat3 view;
@@ -48,6 +60,10 @@ flat out vec3 colour;
 // The hexagon's corners from the top, clockwise as the camera sees them:
 // (x · width, y · (height − |x| · width / √2)).
 const vec2 CORNERS[6] = vec2[](vec2(0, 1), vec2(1, 1), vec2(1, -1), vec2(0, -1), vec2(-1, -1), vec2(-1, 1));
+// The strip's corners, counted from k: the hexagon zigzagged (each
+// triangle clockwise), k again, then near and far ends of corners k to k + 3
+// (the far ones at odd places from 7 on).
+const int STRIP_CORNERS[${String(STRIP)}] = int[](3, 4, 2, 5, 1, 0, 0, 0, 1, 1, 2, 2, 3, 3);
 void main() {
   if (sky || seams) {
     gl_Position = vec4(vec2(gl_VertexID & 1, gl_VertexID >> 1) * 2.0 - 1.0, depth, 1.0);
@@ -56,28 +72,30 @@ void main() {
   float offset = (paint.a * 255.0 - 128.0) * halfLayer;
   float back = offset + splat.w * halfLayer;
   vec2 site = origin + splat.xy;
-  float width = splat.z * (1.0 + abs(site.x / (distance + offset)));
+  float width = splat.z * (1.0 + min(abs(site.x / (distance + offset)), maxSlant));
   float height = splat.z * sqrt(2.0);
-  vec2 corner = CORNERS[gl_VertexID % 6];
-  vec2 u = corner * vec2(width, height - abs(corner.x) * width / sqrt(2.0));
-  float z = distance + (gl_VertexID < 6 ? offset : back);
+  vec2 corners[6];
+  for (int j = 0; j < 6; j++) corners[j] = site + CORNERS[j] * vec2(width, height - abs(CORNERS[j].x) * width / sqrt(2.0));
+  // Side j, from corner j to j + 1 clockwise, faces the camera (at 0 across
+  // the axis) if the camera is on its left, or it has no length (at MAX_SLANT).
+  int facing = 0;
+  for (int j = 0; j < 6; j++) {
+    vec2 a = corners[j];
+    vec2 e = corners[(j + 1) % 6] - a;
+    if (e.y * a.x - e.x * a.y >= 0.0) facing |= 1 << j;
+  }
+  int k = 0;
+  for (int j = 0; j < 6; j++) {
+    if (((facing >> j) & 1) == 1 && ((facing >> ((j + 5) % 6)) & 1) == 0) k = j;
+  }
+  vec2 corner = corners[(k + STRIP_CORNERS[gl_VertexID]) % 6];
+  float z = distance + (gl_VertexID >= 7 && (gl_VertexID & 1) == 1 ? back : offset);
   colour = paint.rgb;
-  vec3 p = transpose(view) * vec3(site + u, z);
+  vec3 p = transpose(view) * vec3(corner, z);
   // Homogeneous, so the GPU clips what is behind the camera and interpolates in perspective.
   gl_Position = vec4(p.xy * focal / (viewport / 2.0), (depth + slot * clamp((z - distance) / halfDepth, -1.0, 1.0)) * p.z, p.z);
 }`
 
-/**
- * A prism's triangles (see VERTEX_SHADER), each clockwise seen from
- * outside: the near hexagon (the first HEXAGON indices, all a flat splat
- * needs), the far one, the six sides.
- */
-const PRISM = new Uint8Array([
-  ...[1, 2, 3, 4].flatMap(k => [0, k, k + 1]),
-  ...[1, 2, 3, 4].flatMap(k => [6, k + 7, k + 6]),
-  ...[0, 1, 2, 3, 4, 5].flatMap(k => [k, k + 6, ((k + 1) % 6) + 6, k, ((k + 1) % 6) + 6, (k + 1) % 6]),
-])
-const HEXAGON = 12
 
 // `ray` is the pixel's direction in face coordinates, the same for every
 // layer of a face. A face draws only its own rays (inFace in view.ts), so
@@ -244,7 +262,7 @@ export class Compositor {
         gl.uniform4f(u.clip, x, y, x + chunk.extentWidth, y - chunk.extentHeight)
         gl.vertexAttribPointer(SPLAT_AT, 4, gl.FLOAT, false, SPLAT * 4, 0)
         gl.vertexAttribPointer(PAINT_AT, 4, gl.UNSIGNED_BYTE, true, SPLAT * 4, 16)
-        gl.drawElementsInstanced(gl.TRIANGLES, this.runs ? PRISM.length : HEXAGON, gl.UNSIGNED_BYTE, 0, chunk.splats.length / SPLAT)
+        gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, this.runs ? STRIP : HEXAGON, chunk.splats.length / SPLAT)
       }
     })
     gl.disableVertexAttribArray(SPLAT_AT)
@@ -295,9 +313,7 @@ export class Compositor {
     gl.uniform3f(this.uniforms.skyTop, ...rgb(SKY_TOP))
     gl.uniform3f(this.uniforms.horizon, ...rgb(SKY_HORIZON))
     gl.uniform3f(this.uniforms.seamColor, ...rgb(SEAM_COLOR))
-    // The prism's triangles, for every splat; the default vertex array keeps them bound.
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, gl.createBuffer())
-    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, PRISM, gl.STATIC_DRAW)
+    gl.uniform1f(gl.getUniformLocation(program, 'maxSlant'), MAX_SLANT)
     gl.frontFace(gl.CW)
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
     gl.enable(gl.DEPTH_TEST)

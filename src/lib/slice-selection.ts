@@ -205,7 +205,7 @@ export function chunkCells(level: number, left: number, right: number, bottom: n
  * where drawn flat it would be off (docs/architecture.md, section 2),
  * where drawn in relief its splat moves (MAX_SLANT in bake/src/slicing.rs).
  */
-const MAX_SLANT = 1
+export const MAX_SLANT = 1
 
 /** How far past its slice's centre plane a splat is per step of its depth byte (see ChunkSplats), in world units: half a layer of its grid. */
 export function halfLayer(slab: Slab): number {
