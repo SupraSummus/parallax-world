@@ -57,6 +57,7 @@ pub const WORLDS: &[Entry] = &[
     // and its centre: houses back to back, a cross street, the square with its fountain and church.
     // Landmarks (landmarks.rs), from under the ground to over the crowns: the first chapel by the path ahead of the camera,
     // its churchyard and the forest round it; and a windmill west of the town, its sails, fields and forest round it.
+    // A mountainside above the treeline: alpine meadows, scree and rock.
     // Far away, all of that town and a few metres of fields around it: its streets and paving are finer than the sites there.
     Entry {
         name: "valley",
@@ -66,6 +67,7 @@ pub const WORLDS: &[Entry] = &[
             Box3 { min: [-64, -48, 1408], max: [320, 288, 1856] },
             Box3 { min: [-192, -64, -112], max: [192, 384, 208] },
             Box3 { min: [-1104, -64, 1264], max: [-720, 384, 1584] },
+            Box3 { min: [12544, 4300, 46432], max: [12800, 4640, 46688] },
         ],
         levels: 4,
         from_above: 4,

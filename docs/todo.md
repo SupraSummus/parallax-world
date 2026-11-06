@@ -176,6 +176,11 @@ Numbers are for the forest at 1280×800, as measured when written.
   it generates all its levels on the main thread,
   then holds about 25 million faces, over 2 GB.
   Generating in the bake workers would unfreeze it.
+- **The forest on steep slopes breaks the contract at level 4.**
+  A region on a wooded mountainside of the valley,
+  where the trees thin out to the treeline,
+  came 0.10 to 0.15 apart at level 4, in materials hit and from above:
+  leaves in place of trunks and of the slope's scree and rock.
 
 ## Ideas
 

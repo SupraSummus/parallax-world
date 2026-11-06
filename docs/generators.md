@@ -322,6 +322,11 @@ and the towns and fields draw only the columns they own.
 The forest bids nothing: it has what no one outbids it for.
 A domain added later is seen by the others only as a smaller share:
 adding the fields changed neither the forest nor the towns.
+Relief is not a domain:
+the valley's mountains (`mountains.rs`) raise the ground all of them stand on,
+massifs and passes along it, crests, spurs and side valleys across,
+and end the forest by its share at a treeline,
+where a field paints meadows, scree, rock and snow by height, slope and hollows.
 Quantities want blends of their own, though.
 A town levels the ground 120 m past its streets,
 far beyond the metres in which it gives way to fields,
@@ -479,6 +484,12 @@ Carves along a line want the same margin.
   Give a thin medium only while sites are close.
 - **Anchors on the ground.** `Cell::on_ground` picks a spot evenly under a cell;
   things anchored there are as even as one per square 2N wide.
+- **Tall heights.** A host's tiles span the world's heights,
+  and a population is asked for an anchor in every cell over each column,
+  most of them in the air over the ground or under it:
+  under the valley's mountains, a ground read per cell is most of a tile's time.
+  Pick the spot once per column of cells,
+  keep it, and turn down the cells it is not in (the forest's `spot`).
 - **Seeds.** The contract checks four seeds; make the world, and its spawn,
   for any: the spawn is a site (x + y + z even) in the air,
   found without assuming a feature a seed may lack.

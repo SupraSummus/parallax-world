@@ -88,13 +88,14 @@ worlds/                      # The worlds, on worldgen's public API only; the we
 │   ├── town.rs, fields.rs   # Towns along the path, farmland around them: the valley's other domains
 │   ├── landmarks.rs         # The valley's fourth domain: a keep, a watchtower, chapels, ponds, farmsteads, windmills
 │   ├── valley.rs            # The valley: the four domains on one land
+│   ├── mountains.rs         # The valley's ranges: massifs, crests, peaks and passes, side valleys; treeline, meadows, scree, rock, snow
 │   ├── moor.rs              # The moor: heath, a stream, steadings of a hut and a ring of stones
 │   ├── city.rs              # The city: blocks of buildings whose rooms form a maze, boxes on a plan of quarter metres
 │   ├── learned.rs           # The learned town: settlements drawn by a split grammar learned in lab/, on the forest's land
 │   └── wasm.rs              # Its WebAssembly exports (the module holds bake/'s too)
 ├── data/town-grammar.bin    # learned.rs's rule table, written by lab's export example
 ├── tests/                   # Every world in WORLDS keeps the contract; the scenes' contents
-└── examples/                # map: a world from above; look: a picture of it (picture.rs); forest_bench: timing forest tiles
+└── examples/                # map: a world from above; look: a picture of it (picture.rs); bench: timing a world's tiles
 lab/                         # Experiment, not built by pnpm: hierarchical WFC rule-sets, pixel conditionals, split grammars with shared splits and regimes, learned from the valley; a masked model of any volume, flat, 3D or on the FCC lattice; synthesis by coordinates into examples (see src/lib.rs); exports the learned town's rules
 native/                      # Spike of a native frontend (eframe + wgpu), linking bake/ and worlds/; see src/main.rs
 ├── .cargo/config.toml       # Builds for x86-64-v3: floor and ceil inline (see there)
