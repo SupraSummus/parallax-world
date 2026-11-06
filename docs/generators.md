@@ -9,8 +9,8 @@ coarser further away, for about the same cost per box at every level
 `worldgen/` is that engine, and `worlds/` the worlds on it,
 which use only the engine's public API.
 The forest (`worlds/src/forest.rs`) is written this way,
-and so is the valley (`valley.rs`), the forest with towns and fields
-between mountains, three domains composed as in "Composing",
+and so is the valley (`valley.rs`), the forest with towns, fields and landmarks
+between mountains, four domains composed as in "Composing",
 and the city (`city.rs`), boxes on a plan of quarter metres;
 a host starts either by name from `WORLDS` (`worlds/src/lib.rs`),
 as a `World`: its generator, spawn and heights;
@@ -387,6 +387,28 @@ A kind marked `walk_through` is one a walking body goes through
 (plants, water; see `bake/src/walk.rs`), the rest it stands on;
 so ground and what stands on it are different kinds,
 even of one colour (the moor's `heather` and `heatherSprigs`).
+
+### Landmarks
+
+Structures that stand alone (`worlds/src/landmarks.rs`),
+a ruined keep, a watchtower, chapels, ponds, farmsteads and windmills,
+are the valley's fourth domain, which fills its land (`DOMAINS`):
+a new structure joins it as a landmark, or as a thing of a domain.
+A coarse plan gives each region at most one site,
+its cell's centre and all it shapes and bids for inside the region,
+so a column asks only its own region's.
+What suits a kind is read off the valley's ground
+before landmarks shape it (`valley::Terrain`):
+how far the place is from a town and from the path,
+whether it is up on a rise or down in a hollow,
+how even the ground under the footprint is.
+A site levels the ground plan under it (a pond digs a bowl),
+bids for its footprint and a clearing, which trees and crops then keep off,
+and paints its ground;
+a population anchored at the sites builds each in its own frame.
+A pond's water stops under the rim its bowl leaves,
+so it never stands over the ground round it.
+Region (0, 0)'s is a chapel beside the path, in the camera's view at spawn.
 
 ### Learned domains
 

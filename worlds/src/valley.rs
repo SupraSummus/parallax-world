@@ -1,9 +1,10 @@
-//! The valley, the flagship world: the forest, with towns along its path
-//! and farmland around them, between mountain ranges. Domains on one land
-//! (plan.rs) that never call each other: each reads only plans coarser
-//! than its own, bids for every column, and draws what it wins; the
-//! mountains raise the ground they all stand on. New structures join it
-//! as domains or as things of one. See "Composing" in docs/generators.md.
+//! The valley, the flagship world: the forest, with towns along its path,
+//! farmland around them and landmarks scattered through it, between
+//! mountain ranges. Domains on one land (plan.rs) that never call each
+//! other: each reads only plans coarser than its own, bids for every
+//! column, and draws what it wins; the mountains raise the ground they all
+//! stand on. New structures join it as landmarks (landmarks.rs), as
+//! domains, or as things of one. See "Composing" in docs/generators.md.
 
 use std::rc::Rc;
 
@@ -15,6 +16,7 @@ use worldgen::units::{Units, m};
 
 use crate::fields;
 use crate::forest::{self, GROUND_SCALE, Ground, PATH_SCALE, Relief};
+use crate::landmarks::{self, Landmarks};
 use crate::mountains::{self, Ranges};
 use crate::town::{self, TOWNS_SCALE, Towns};
 
@@ -22,23 +24,58 @@ use crate::town::{self, TOWNS_SCALE, Towns};
 const FOREST: usize = 0;
 const TOWN: usize = 1;
 const FIELDS: usize = 2;
+const LANDMARKS: usize = 3;
+
+/**
+ * The valley's lie of the land before landmarks shape it: the relief
+ * and the ranges along the path, levelled under the towns. Functions of
+ * position, read by its plans and by coarse plans that can't read the
+ * fine ground plan (where landmarks stand).
+ */
+pub struct Terrain {
+    pub relief: Rc<Relief>,
+    pub ranges: Rc<Ranges>,
+    pub towns: Rc<Towns>,
+}
+
+impl Terrain {
+    pub fn new(seed: u64) -> Terrain {
+        let relief = Rc::new(Relief::new(seed));
+        let towns = Rc::new(Towns::new(seed, relief.clone()));
+        Terrain { relief, ranges: Rc::new(Ranges::new(seed)), towns }
+    }
+
+    /** The path's centre line at z, with its fraction, bent onto each town's main street. */
+    pub fn path_x(&self, z: i64) -> Fx {
+        self.towns.street_x(z, self.relief.path_x(z))
+    }
+
+    /** The ground at (x, z), with its fraction, `from_path` off the path's centre line. */
+    pub fn ground_by(&self, x: i64, z: i64, from_path: Fx) -> Fx {
+        self.towns.terraced(x, z, self.relief.ground(x, z, from_path) + self.ranges.height(x, z, from_path))
+    }
+
+    /** The ground at (x, z), with its fraction. */
+    pub fn ground(&self, x: i64, z: i64) -> Fx {
+        self.ground_by(x, z, (Units(x).to_fx() - self.path_x(z)).abs())
+    }
+}
 
 /** The valley of `seed`; the camera starts in the forest, on the path to the first town. */
 pub fn valley(seed: u64) -> World {
-    let relief = Rc::new(Relief::new(seed));
-    let ranges = Rc::new(Ranges::new(seed));
-    let towns = Rc::new(Towns::new(seed, relief.clone()));
-    // The path, bent onto each town's main street.
+    let terrain = Rc::new(Terrain::new(seed));
+    let (ranges, towns) = (terrain.ranges.clone(), terrain.towns.clone());
+    let landmarks = Rc::new(Landmarks::new(seed, terrain.clone()));
     let path = {
-        let (relief, towns) = (relief.clone(), towns.clone());
-        Rc::new(Plan::new("path", PATH_SCALE, move |_, z| towns.street_x(z, relief.path_x(z))))
+        let terrain = terrain.clone();
+        Rc::new(Plan::new("path", PATH_SCALE, move |_, z| terrain.path_x(z)))
     };
-    // The valley's ground along the path, rising into the ranges, levelled under the towns.
+    // The valley's ground along the path, rising into the ranges, levelled under the towns, shaped under the landmarks.
     let ground = {
-        let (towns, path, ranges) = (towns.clone(), path.clone(), ranges.clone());
+        let (path, landmarks) = (path.clone(), landmarks.clone());
         Rc::new(Plan::new("ground", GROUND_SCALE, move |x, z| {
             let from_path = forest::path_distance(&path, x, z);
-            towns.terraced(x, z, relief.ground(x, z, from_path) + ranges.height(x, z, from_path)).round_units().0
+            landmarks.shaped(x, z, terrain.ground_by(x, z, from_path)).round_units().0
         }))
     };
     let slope = {
@@ -57,6 +94,10 @@ pub fn valley(seed: u64) -> World {
             Rc::new(Plan::new("town's bid", town::BID_SCALE, move |x, z| towns.bid(x, z)))
         },
         Rc::new(fields::bid(seed, towns.clone(), slope)),
+        {
+            let landmarks = landmarks.clone();
+            Rc::new(Plan::new("landmarks' bid", landmarks::BID_SCALE, move |x, z| landmarks.bid(x, z)))
+        },
     ];
     let land = Rc::new(Land::new(town::BID_SCALE, fx(0.125), bids));
 
@@ -69,8 +110,9 @@ pub fn valley(seed: u64) -> World {
     let spawn = forest_ground.on_path(m(-31.0), m(3.0));
     let mut layers = forest::layers(seed, forest_ground, spawn);
     layers.extend(town::layers(towns, land.clone(), TOWN, ground.clone()));
-    layers.extend(fields::layers(seed, land, FIELDS, ground.clone(), path));
+    layers.extend(fields::layers(seed, land.clone(), FIELDS, ground.clone(), path));
+    layers.extend(landmarks::layers(landmarks, land, LANDMARKS, ground.clone()));
     layers.extend(mountains::layers(ranges, ground));
-    let kinds = [forest::KINDS, town::KINDS, fields::KINDS, mountains::KINDS].concat();
+    let kinds = [forest::KINDS, town::KINDS, fields::KINDS, mountains::KINDS, landmarks::KINDS].concat();
     World { generator: Generator { kinds, seed: stream(seed, 4), layers }, spawn, heights: mountains::HEIGHTS }
 }
