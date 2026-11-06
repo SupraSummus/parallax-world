@@ -8,6 +8,7 @@ pub mod fields;
 pub mod forest;
 pub mod learned;
 pub mod moor;
+pub mod mountains;
 pub mod town;
 pub mod valley;
 pub mod wasm;
