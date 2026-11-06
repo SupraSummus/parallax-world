@@ -426,6 +426,29 @@ and places its steadings and pools only where it surely owns the land:
 where its bid leads the most any other may bid there
 by more than the land's width.
 
+### Claims
+
+Things placed whole at a coarse band, a town or a steading,
+must keep apart, yet a plan of one per region,
+kept inside it so a column asks only its region's,
+never puts one where regions meet ("Checks").
+`Claims` (`plan.rs`) places them anywhere instead:
+each cell proposes spots evenly in it, a Poisson number,
+the world's `claim` makes each a thing there or turns it down,
+and a thing is kept unless one of higher priority stands closer than `apart`,
+priorities hashed from the spots
+(one round of Luby's algorithm, Matérn's second hard-core process).
+That is local, order-free and from position and seed alone,
+and no spot is likelier anywhere, so no place is preferred.
+A column asks `near` for the thing kept nearest it, within `apart`;
+the keys of the few kept near each stretch of columns `apart` / 8 wide
+are kept, so a column doesn't read the cells around afresh.
+A thing may stand up to a cell from its spot:
+the valley's towns turn down spots over half a cell from the path,
+and stand on it.
+A `first` spot, kept whatever is near, puts one where a world needs it:
+the one place preferred.
+
 ### Far forms keep statistics
 
 What is drawn far away keeps what is near on average, not its outline:
@@ -659,6 +682,6 @@ Carves along a line want the same margin.
   of level 0, likely by chance: too close to the far check's tolerance to add it.
 - **Things of one band can't see each other.** Bands order what decides where,
   but two populations of one scale ("no tree on a boulder") still can't
-  exclude each other. Claims with hashed priorities would be local and
-  order-free: a thing is kept unless a neighbour's claim of higher priority
-  overlaps it (one round of Luby's algorithm), from anchors alone.
+  exclude each other.
+  `Claims` keep things of one plan apart ("Claims" in "Composing");
+  populations' anchors could claim the same way, against each other's.
