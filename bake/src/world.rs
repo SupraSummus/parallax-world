@@ -108,6 +108,12 @@ impl Grid {
         (at >= 0).then(|| at as usize * BRICK_SITES + ((((z & 7) * BRICK + (y & 7)) * BRICK + (x & 7)) >> 1) as usize)
     }
 
+    /** The material of the voxel at site (x, y, z), as stored in `cells`; 0 if empty or outside. */
+    #[inline]
+    pub fn get(&self, x: i32, y: i32, z: i32) -> u8 {
+        self.index(x, y, z).map_or(0, |i| self.cells[i])
+    }
+
     /** The material of face `kind` (of VOXEL_FACES) of the voxel at site (x, y, z); 0 if empty or outside. */
     #[inline]
     pub fn face(&self, x: i32, y: i32, z: i32, kind: usize) -> u8 {
@@ -194,6 +200,13 @@ impl Tiles {
             min,
             max,
         }
+    }
+
+    /** The material at site (x, y, z), 0 if empty; None if no tile's grid holds its column. */
+    pub fn at(&self, x: i32, y: i32, z: i32) -> Option<u8> {
+        let grid = self.grid(self.tile(x, z))?;
+        let holds = |v: i32, d: usize| (grid.min[d]..grid.min[d] + grid.n[d]).contains(&v);
+        (holds(x, 0) && holds(z, 2)).then(|| grid.get(x, y, z))
     }
 
     /** Whether tile (i, k) has a grid. */

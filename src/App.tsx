@@ -4,6 +4,7 @@ import { World, worldTypes, type WorldType } from '@/lib/world'
 import type { Orientation } from '@/lib/view'
 import { Compositor } from '@/lib/compositor'
 import { startBakeWorkers } from '@/lib/worker-bakery'
+import { Walker } from '@/lib/walk'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
@@ -15,7 +16,7 @@ import { Box, ChartLine, Crosshair, ExternalLink, Eye, EyeOff, History, Move, Re
 /**
  * Key -> movement direction for held keys: right, up, forward relative to
  * where the camera looks (level: looking up does not lift W). Keys are
- * lower-cased.
+ * lower-cased. Walking, up jumps and down sneaks.
  */
 const MOVEMENT_KEYS: Record<string, [number, number, number]> = {
   w: [0, 0, 1],
@@ -41,6 +42,9 @@ const DRAG_DEGREES_PER_PIXEL = 0.15
 
 /** Lattice units a second the camera moves at. */
 const MOVE_SPEED = 60
+
+/** Toggles walking on the ground and flying. */
+const WALK_KEY = 'f'
 
 /**
  * A switch as the page's query sets it, if it does (`?name=1` or `?name=0`):
@@ -74,6 +78,11 @@ function App() {
   const [skipCovered, setSkipCovered] = useState(true)
   const [showSeams, setShowSeams] = useState(false)
   const [pillars, setPillars] = useState(() => queryFlag('pillars', true))
+  // Walking on the ground: the body the camera is the eye of; null flying.
+  const walkerRef = useRef<Walker | null>(null)
+  const [walking, setWalking] = useState(false)
+  // Starts the movement loop (see its effect), e.g. for a body to fall.
+  const startMovingRef = useRef<() => void>(() => undefined)
   // Generating a world blocks this thread for a second or two; a spinner shows meanwhile.
   const [generating, setGenerating] = useState(true)
 
@@ -155,15 +164,26 @@ function App() {
     }
   }, [requestRender, hasWebGL2])
 
-  // Keyboard movement and turning: one animation-frame loop runs while any such key is held.
+  // Walking starts with the eye where the camera is.
+  const handleWalkingChange = useCallback((value: boolean) => {
+    const renderer = rendererRef.current
+    walkerRef.current = value && renderer ? new Walker(renderer.getCamera()) : null
+    setWalking(walkerRef.current !== null)
+    startMovingRef.current()
+  }, [])
+
+  // Keyboard movement and turning: one animation-frame loop runs while any such key is held,
+  // or a walking body is not yet at rest.
   useEffect(() => {
     const held = new Set<string>()
     let frame: number | undefined
     let lastTime: number | undefined
 
+    const moving = () => held.size > 0 || walkerRef.current?.settled === false
     const tick = (time: number) => {
-      if (held.size === 0) {
+      if (!moving()) {
         frame = undefined
+        lastTime = undefined
         return
       }
       // Seconds since the previous frame, so a slow frame moves further.
@@ -177,6 +197,7 @@ function App() {
         const { yaw, pitch } = renderer.getOrientation()
         const [sin, cos] = [Math.sin((yaw * Math.PI) / 180), Math.cos((yaw * Math.PI) / 180)]
         let [turnYaw, turnPitch] = [0, 0]
+        const input = { right: 0, up: 0, forward: 0 }
         for (const key of held) {
           if (key in LOOK_KEYS) {
             turnYaw += LOOK_KEYS[key][0] * TURN_DEGREES_PER_SECOND * dt
@@ -184,9 +205,17 @@ function App() {
             continue
           }
           const [right, up, forward] = MOVEMENT_KEYS[key]
-          cam.x += (right * cos + forward * sin) * speed
-          cam.y += up * speed
-          cam.z += (forward * cos - right * sin) * speed
+          input.right += right
+          input.up += up
+          input.forward += forward
+        }
+        const walker = walkerRef.current
+        if (walker) {
+          Object.assign(cam, walker.step({ ...input, yaw, jump: held.has(' '), sneak: held.has('shift') }, dt, renderer.getWorld()))
+        } else {
+          cam.x += (input.right * cos + input.forward * sin) * speed
+          cam.y += input.up * speed
+          cam.z += (input.forward * cos - input.right * sin) * speed
         }
         renderer.setCamera(cam)
         renderer.setOrientation({ yaw: yaw + turnYaw, pitch: pitch + turnPitch })
@@ -197,6 +226,8 @@ function App() {
       frame = requestAnimationFrame(tick)
     }
 
+    const start = () => { frame ??= requestAnimationFrame(tick) }
+    startMovingRef.current = start
     const stop = () => {
       held.clear()
       if (frame !== undefined) cancelAnimationFrame(frame)
@@ -206,30 +237,37 @@ function App() {
 
     const handleKeyDown = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase()
-      if (!(key in MOVEMENT_KEYS) && !(key in LOOK_KEYS)) return
+      const walkKey = key === WALK_KEY && !e.ctrlKey && !e.metaKey && !e.altKey
+      if (!(key in MOVEMENT_KEYS) && !(key in LOOK_KEYS) && !walkKey) return
       // Don't hijack typing/space activation inside form controls.
       if (e.target instanceof HTMLElement && e.target.closest('input, textarea, select, [role="combobox"]')) return
       e.preventDefault()
+      if (walkKey) {
+        if (!e.repeat) handleWalkingChange(walkerRef.current === null)
+        return
+      }
       held.add(key)
-      frame ??= requestAnimationFrame(tick)
+      start()
     }
 
     const handleKeyUp = (e: KeyboardEvent) => {
       held.delete(e.key.toLowerCase())
-      if (held.size === 0) stop()
+      if (!moving()) stop()
     }
 
     window.addEventListener('keydown', handleKeyDown)
     window.addEventListener('keyup', handleKeyUp)
-    // Releasing keys while the window is unfocused never fires keyup.
-    window.addEventListener('blur', stop)
+    // Releasing keys while the window is unfocused never fires keyup;
+    // a walking body still comes to rest.
+    const release = () => { held.clear() }
+    window.addEventListener('blur', release)
     return () => {
       window.removeEventListener('keydown', handleKeyDown)
       window.removeEventListener('keyup', handleKeyUp)
-      window.removeEventListener('blur', stop)
+      window.removeEventListener('blur', release)
       stop()
     }
-  }, [])
+  }, [handleWalkingChange])
 
   // Dragging on the scene turns the camera: right turns right, up looks up.
   const handlePointerMove = (e: PointerEvent) => {
@@ -250,6 +288,8 @@ function App() {
     requestAnimationFrame(() => {
       setTimeout(() => {
         rendererRef.current?.regenerateWorld(Date.now(), type)
+        // At the new world's spawn point.
+        if (walkerRef.current) handleWalkingChange(true)
         requestRender()
         setGenerating(false)
       })
@@ -369,6 +409,7 @@ function App() {
               step={0.1}
               onChange={handleMaxLeakChange}
             />
+            <SwitchRow label="Walk on Ground (F)" checked={walking} onChange={handleWalkingChange} />
             <SwitchRow label="Skip Covered Chunks" checked={skipCovered} onChange={handleSkipCoveredChange} />
             <SwitchRow label="Pillars over Columns" checked={pillars} onChange={handlePillarsChange} />
             <SwitchRow label="Show Face Seams" checked={showSeams} onChange={handleShowSeamsChange} />
@@ -376,6 +417,7 @@ function App() {
               <div className="flex items-center gap-2"><Move size={14} /><span>W/S - Forward/Back</span></div>
               <div className="pl-[22px]">A/D - Left/Right</div>
               <div className="pl-[22px]">Space/Shift - Up/Down</div>
+              <div className="pl-[22px]">Walking: Space - Jump, Shift - Sneak</div>
               <div className="pl-[22px]">Arrows/Drag - Look around</div>
             </div>
           </Panel>

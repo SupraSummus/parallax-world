@@ -154,6 +154,11 @@ impl Renderer {
         self.levels[level] = tiles;
     }
 
+    /** The tiles of `level` it has. */
+    pub fn level(&self, level: usize) -> &Level {
+        &self.levels[level]
+    }
+
     /** Waits until the bakery delivers a chunk. */
     pub fn wait(&mut self) {
         self.bakery.wait();

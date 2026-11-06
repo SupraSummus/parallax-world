@@ -345,6 +345,10 @@ so its things are a library others draw from
 A kind's type (`kind_type`) is its class of material:
 the contract compares what rays hit by type, not by kind,
 so kinds that may stand in for each other far away share one.
+A kind marked `walk_through` is one a walking body goes through
+(plants, water; see `bake/src/walk.rs`), the rest it stands on;
+so ground and what stands on it are different kinds,
+even of one colour (the moor's `heather` and `heatherSprigs`).
 
 ### Learned domains
 

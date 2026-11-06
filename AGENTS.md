@@ -42,6 +42,7 @@ src/
     ├── cells.ts             # Cells of the coarser lattices N·FCC that slices are made of
     ├── slice-selection.ts   # Slices, chunks and the leak bound (pure functions)
     ├── view.ts              # Camera orientation, the 12 faces (FCC directions), projection
+    ├── walk.ts              # Walking on the ground with bake/src/walk.rs (WebAssembly)
     ├── renderer.ts          # Slices and chunks in view, caching, screen placement (no DOM)
     ├── occlusion.ts         # Which screen cells nearer layers cover (bake/src/coverage.rs), to skip chunks behind them
     ├── chunk-baker.ts       # Bakes whole chunks with bake/ (WebAssembly); the bake worker's message protocol
@@ -55,7 +56,7 @@ scripts/shot.mjs             # pnpm shot: a view in headless Chromium, saved onc
 src/viewer/
 ├── main.ts                  # three.js scene, orbit camera
 └── mesh.ts                  # World -> triangle mesh of exposed rhombic faces
-bake/                        # Chunk baker and coverage in Rust (no dependencies), in worlds/' WebAssembly
+bake/                        # Chunk baker, coverage and walking in Rust (no dependencies), in worlds/' WebAssembly
 └── src/
     ├── lib.rs               # Baker: one chunk per call; the WebAssembly exports
     ├── world.rs             # Grid, tiles of grids, the view's faces' lattices, voxels read per face
@@ -66,6 +67,7 @@ bake/                        # Chunk baker and coverage in Rust (no dependencies
     ├── splats.rs            # Which voxels a chunk shows: each column's nearest, a hexagon at its site, in relief, over its run
     ├── fill.rs              # Splats filled into a mask for every slant, solid blocks (for coverage)
     ├── layer_index.rs       # LayerIndex: where each face's layers hold voxels; its WebAssembly exports
+    ├── walk.rs              # Walking: a body that falls, collides, steps and jumps; its WebAssembly exports
     └── coverage.rs          # Which screen cells nearer layers cover, on the main thread; its WebAssembly exports
 worldgen/                    # The world-generation engine, moving to integers, into the baker's grids; no worlds
 ├── src/
@@ -99,7 +101,7 @@ native/                      # Spike of a native frontend (eframe + wgpu), linki
 ├── .cargo/config.toml       # Builds for x86-64-v3: floor and ceil inline (see there)
 ├── dump.test.ts             # Dumps a view from the TS renderer, to check it against (only with DUMP set)
 └── src/
-    ├── main.rs              # The window and camera; --shot, --bench, --walk, --check-requests against a dump
+    ├── main.rs              # The window and camera (flying or walking, F); --shot, --bench, --walk, --check-requests against a dump
     ├── dump.rs              # Reads a dump: a view, its faces, grids and the chunks it wants
     ├── world.rs             # world.ts for generated worlds: a World's tiles, those the renderer wants first, made and indexed on threads
     ├── view.rs              # view.ts: faces, which rays and screen boxes they draw

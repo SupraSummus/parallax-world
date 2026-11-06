@@ -24,5 +24,6 @@ dependencies = [
 name = "worlds"
 version = "0.0.0"
 dependencies = [
+ "bake",
  "worldgen",
 ]

@@ -38,6 +38,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use bake::Baker;
+use bake::walk::{COLLISION_LEVEL, Ground, WalkInput, Walker};
 use eframe::egui;
 use eframe::egui_wgpu;
 
@@ -66,6 +67,10 @@ struct App {
     frame_ms: f64,
     /** --spin: turns on its own and prints frames per second. */
     spin: Option<(Instant, u32)>,
+    /** Walking on the ground (bake's walk.rs): the body the camera is the eye of; None flying. */
+    walker: Option<Walker>,
+    /** By material id, whether a walking body goes through it (KindDef::walk_through). */
+    walk_through: Vec<bool>,
 }
 
 impl eframe::App for App {
@@ -78,6 +83,10 @@ impl eframe::App for App {
             ui.add(egui::Slider::new(&mut self.fov, 5.0..=120.0).step_by(1.0).text("Field of View (°)"));
             ui.add(egui::Slider::new(&mut self.renderer.render_distance, 40.0..=40000.0).logarithmic(true).text("Render Distance"));
             ui.add(egui::Slider::new(&mut self.renderer.max_leak, 1.0..=12.0).step_by(0.1).text("Max Occlusion Leak (°)"));
+            let mut walking = self.walker.is_some();
+            if ui.checkbox(&mut walking, "Walk on Ground (F)").changed() {
+                self.walker = walking.then(|| Walker::at(self.camera));
+            }
             ui.checkbox(&mut self.renderer.skip_covered, "Skip Covered Chunks");
             ui.checkbox(&mut self.seams, "Show Face Seams");
             ui.checkbox(&mut self.renderer.pillars, "Pillars over Columns");
@@ -92,29 +101,41 @@ impl eframe::App for App {
                 self.camera[0], self.camera[1], self.camera[2], self.yaw, self.pitch
             ));
             ui.label(format!("render {:.1} ms", self.frame_ms));
-            ui.label("WASD, Space/Shift, arrows or drag");
+            ui.label("WASD, Space/Shift, arrows or drag\nWalking: Space jumps, Shift sneaks");
         });
         egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
             let (rect, response) = ui.allocate_exact_size(ui.available_size(), egui::Sense::drag());
             let drag = response.drag_delta();
-            let (dt, moving) = ui.input(|i| {
+            let (dt, moving, toggle) = ui.input(|i| {
                 let key = |k| if i.key_down(k) { 1.0 } else { 0.0 };
                 let forward = key(egui::Key::W) - key(egui::Key::S);
                 let right = key(egui::Key::D) - key(egui::Key::A);
-                let up = key(egui::Key::Space) - (if i.modifiers.shift { 1.0 } else { 0.0 });
+                let (jump, sneak) = (key(egui::Key::Space), if i.modifiers.shift { 1.0 } else { 0.0 });
                 let turn = key(egui::Key::ArrowRight) - key(egui::Key::ArrowLeft);
                 let look = key(egui::Key::ArrowUp) - key(egui::Key::ArrowDown);
-                (i.stable_dt.min(0.1) as f64, [forward, right, up, turn, look])
+                (i.stable_dt.min(0.1) as f64, [forward, right, jump - sneak, turn, look, jump, sneak], i.key_pressed(egui::Key::F))
             });
+            if toggle {
+                self.walker = if self.walker.is_some() { None } else { Some(Walker::at(self.camera)) };
+            }
             self.yaw += drag.x as f64 * 0.2 + moving[3] * 90.0 * dt;
             self.pitch = (self.pitch - drag.y as f64 * 0.2 + moving[4] * 90.0 * dt).clamp(-90.0, 90.0);
             let [right, _, _] = view_basis(self.yaw, 0.0);
             let level = [-right[2], 0.0, right[0]];
-            let step = SPEED * dt;
-            for d in 0..3 {
-                self.camera[d] += (level[d] * moving[0] + right[d] * moving[1]) * step;
+            if let Some(walker) = self.walker {
+                let ground = Ground { tiles: &self.renderer.level(COLLISION_LEVEL as usize).grids, walk_through: &self.walk_through };
+                let input =
+                    WalkInput { forward: moving[0], right: moving[1], yaw: self.yaw, jump: moving[5] > 0.0, sneak: moving[6] > 0.0 };
+                let walker = walker.walk(input, dt, &ground);
+                self.camera = walker.eye();
+                self.walker = Some(walker);
+            } else {
+                let step = SPEED * dt;
+                for d in 0..3 {
+                    self.camera[d] += (level[d] * moving[0] + right[d] * moving[1]) * step;
+                }
+                self.camera[1] += moving[2] * step;
             }
-            self.camera[1] += moving[2] * step;
             if let Some((since, frames)) = &mut self.spin {
                 self.yaw += 30.0 * dt;
                 *frames += 1;
@@ -129,7 +150,10 @@ impl eframe::App for App {
             let view = view::View { yaw: self.yaw, pitch: self.pitch, width, height, focal };
             let (frame, stats) = self.renderer.render(self.camera, &view);
             // Drawn from the next frame on.
-            let made = self.world.update(self.camera, &stats.levels, &stats.tiles);
+            // Walking, the ground's level too, whether drawn or not.
+            let mut levels = stats.levels;
+            levels[COLLISION_LEVEL as usize] |= self.walker.is_some();
+            let made = self.world.update(self.camera, &levels, &stats.tiles);
             let arrived = !made.is_empty();
             for (level, tiles) in made {
                 self.renderer.set_tiles(level, tiles);
@@ -156,7 +180,9 @@ impl eframe::App for App {
             let callback = compositor::Callback { frame: Arc::new(frame), view, rect };
             ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, callback));
             // While moving, the view changes; until all is made and baked, tiles and chunks keep arriving, often enough for a frame now and then.
-            if moving.iter().any(|m| *m != 0.0) || self.spin.is_some() {
+            // A walking body moves on while it falls or its eye catches up with a step.
+            let walking = self.walker.is_some_and(|w| !w.settled());
+            if moving.iter().any(|m| *m != 0.0) || walking || self.spin.is_some() {
                 ui.ctx().request_repaint();
             } else if arrived || !stats.wanted.is_empty() || stats.occluding || self.world.busy() {
                 ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
@@ -476,6 +502,8 @@ fn main() -> eframe::Result {
         stats: String::new(),
         frame_ms: 0.0,
         spin,
+        walker: None,
+        walk_through: materials_of(&shown.generator).iter().map(|m| m.walk_through).collect(),
     };
     eframe::run_native(
         "Parallax",

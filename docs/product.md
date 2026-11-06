@@ -23,6 +23,11 @@ rectangular buildings), only their surfaces are made of rhombi.
 (up to straight up or down). W/S forward/back and A/D left/right along
 where it looks (level), Space/Shift up/down; adjustable field
 of view (across the longer screen side) and render distance.
+"Walk on Ground" (F) walks instead, as in Minecraft:
+the camera is the eye of a body 1.8 m tall that falls onto the ground,
+is stopped by walls and trunks, steps up and down what is half a metre high,
+jumps (Space) and sneaks (Shift);
+it walks through plants and water, as each world marks its kinds.
 
 **Slicing** – Twelve stacks of slices, one per direction to a voxel's
 nearest neighbours (the faces of a rhombic dodecahedron around the

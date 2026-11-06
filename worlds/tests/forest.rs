@@ -77,3 +77,24 @@ fn forest_is_deterministic_has_ground_trees_and_a_clear_spawn() {
         }
     }
 }
+
+#[test]
+fn a_body_walks_the_path_through_its_ferns() {
+    use bake::walk::{COLLISION_LEVEL, Ground, WalkInput, Walker};
+    let world = forest(7);
+    let level = COLLISION_LEVEL;
+    let [x, z] = [world.spawn[0], world.spawn[2]].map(|v| v >> level);
+    let (min_y, max_y) = world.heights_at(level);
+    let area = Box3 { min: [2 * ((x - 32) / 2), min_y, z - 8], max: [x + 32, max_y, z + 128] };
+    let tiles = bake::Tiles::one(generate(&world.generator, &area, level).into_grid());
+    let walk_through: Vec<bool> = materials_of(&world.generator).iter().map(|m| m.walk_through).collect();
+    let ground = Ground { tiles: &tiles, walk_through: &walk_through };
+    let mut body = Walker::at(world.spawn.map(|v| v as f64));
+    let forward = WalkInput { forward: 1.0, ..WalkInput::default() };
+    for _ in 0..6 * 60 {
+        body = body.walk(forward, 1.0 / 60.0, &ground);
+    }
+    // At walking speed, 4.3 m/s, all the way: unstopped by the ferns by the path.
+    let walked = (body.eye()[2] - world.spawn[2] as f64) * UNIT_SIZE;
+    assert!(walked > 25.0, "walked {walked:.1} m");
+}

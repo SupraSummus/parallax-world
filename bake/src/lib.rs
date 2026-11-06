@@ -7,8 +7,8 @@
 //! chunk-baker.ts drives it through the
 //! exports at the bottom. See docs/architecture.md, section 3.
 //! The same module finds what nearer layers cover on the main thread
-//! (coverage.rs), and where a grid's voxels are along the faces' layers
-//! (layer_index.rs).
+//! (coverage.rs), where a grid's voxels are along the faces' layers
+//! (layer_index.rs), and walks a body on the ground (walk.rs).
 
 mod cells;
 mod coverage;
@@ -18,6 +18,7 @@ pub mod slicing;
 mod splats;
 mod surface;
 mod tables;
+pub mod walk;
 mod world;
 
 use std::cell::RefCell;

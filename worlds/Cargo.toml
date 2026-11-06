@@ -10,6 +10,9 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 worldgen = { path = "../worldgen" }
 
+[dev-dependencies]
+bake = { path = "../bake" }
+
 [profile.test]
 opt-level = 2
 

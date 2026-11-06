@@ -109,6 +109,27 @@ describe('App', () => {
     expect(cameraPosition()[1]).toBe(start[1])
   })
 
+  it('walks on the ground with F, at eye height over it, and flies again with F', async () => {
+    render(<App />)
+    const walk = screen.getByRole('switch', { name: /Walk on Ground/ })
+    fireEvent.keyDown(window, { key: 'f' })
+    fireEvent.keyUp(window, { key: 'f' })
+    expect(walk).toBeChecked()
+    // The test world's ground is about y = 1 under the spawn point, 6 high; the eye 1.62 m (13 units) over it.
+    await waitFor(() => { expect(cameraPosition()[1]).toBeGreaterThan(12) })
+    await new Promise(resolve => setTimeout(resolve, 300))
+    const standing = cameraPosition()
+    expect(standing[1]).toBeLessThan(17)
+
+    fireEvent.keyDown(window, { key: 'w' })
+    await waitFor(() => { expect(cameraPosition()[2] - standing[2]).toBeGreaterThanOrEqual(4) })
+    fireEvent.keyUp(window, { key: 'w' })
+    expect(Math.abs(cameraPosition()[1] - standing[1])).toBeLessThan(4)
+
+    fireEvent.click(walk)
+    expect(walk).not.toBeChecked()
+  })
+
   it('ignores unrelated keys', async () => {
     render(<App />)
     const start = cameraPosition()
