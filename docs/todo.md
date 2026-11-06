@@ -203,19 +203,26 @@ Numbers are for the forest at 1280×800, as measured when written.
   where the trees thin out to the treeline,
   came 0.10 to 0.15 apart at level 4, in materials hit and from above:
   leaves in place of trunks and of the slope's scree and rock.
-- **Landmarks and the moor's steadings keep off their regions' edges.**
-  A landmark keeps its cell and all it shapes inside its region (`landmarks.rs`),
-  so a strip along every region's edge never holds one,
-  and a town's farmland there no farmstead or windmill
-  (rows of regions are staggered, so the strips differ from row to row).
-  So do the moor's steadings and pools (`moor.rs`), one to a region,
-  and its regions are not staggered.
-  Claims with hashed priorities between neighbouring regions
-  ("Open problems" in `docs/generators.md`) would let one stand anywhere.
 - **The highest massifs end in broad rounded domes of snow.**
   Behind the crest the high country is one smooth noise,
   and wherever it stands over the snowline, all of it is snow.
   It wants crags and cirques of its own, or less snow where it is broad.
+- **Things placed one per region prefer places.**
+  `worlds/tests/places.rs` lists them (`KNOWN`).
+  The valley's towns and the learned town's settlements
+  come every 1200 m along z, give or take 150 m,
+  so none lies in most of each period.
+  A landmark keeps its cell and all it shapes inside its region (`landmarks.rs`),
+  so a strip along every region's edge never holds one,
+  and a town's farmland there no farmstead or windmill
+  (rows of regions are staggered along x, so the strips differ from row to row).
+  So do the steadings of the moor and of the valley's moorland,
+  50 m inside regions 160 m wide, and their pools, 16 m inside 64 m
+  (`moor.rs`; regions not staggered),
+  though the check can't see pools (a plan of a field).
+  Claims with hashed priorities between neighbouring regions
+  ("Things of one band can't see each other" in `docs/generators.md`)
+  would let each stand anywhere.
 
 ## Ideas
 
