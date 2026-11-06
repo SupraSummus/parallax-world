@@ -17,7 +17,7 @@ use worldgen::generator::{
 use worldgen::grid::Box3;
 use worldgen::kinds;
 use worldgen::noise::{Fx, Rng, fx, hash64, smoothstep, stream};
-use worldgen::plan::{Land, Plan};
+use worldgen::plan::{Claims, Land, Plan};
 use worldgen::units::{Units, m};
 
 use crate::forest::{self, K as F, Relief, Species, make_tree};
@@ -74,11 +74,17 @@ const ROOF: i64 = 4;
 /** A walled town's wall stands this far out from its blocks, a lane inside it; it is TOWN_WALL thick. */
 const RING: i64 = m(6.0);
 const TOWN_WALL: i64 = m(1.5);
-/** Towns are this far apart along the path, give or take JITTER. */
-const SPACING: i64 = m(1200.0);
-const JITTER: i64 = m(150.0);
-/** Plan scales: where towns are; the bid for their land. */
-pub const TOWNS_SCALE: i64 = m(400.0);
+/**
+ * Towns stand at least APART along the path, claimed (Claims) from spots
+ * one every CLAIM of it on average: about one every 2 km. A column's town
+ * is the nearest within WITHIN. The first's middle is at FIRST.
+ */
+const APART: i64 = m(900.0);
+const CLAIM: i64 = m(800.0);
+const WITHIN: i64 = m(600.0);
+const FIRST: i64 = m(200.0);
+/** Plan scales: where towns are (their claims' cells); the bid for their land. */
+pub const TOWNS_SCALE: i64 = CLAIM;
 pub const BID_SCALE: i64 = m(4.0);
 /** What a column of a town is: its finest parts the square's paving, a checker of metres. */
 const SPOT_SCALE: i64 = m(1.0);
@@ -364,49 +370,47 @@ impl Town {
 }
 
 /** The town of `towns` nearest z along the path, if it has one. */
-fn nearest(towns: &Plan<Option<Town>>, z: i64) -> Option<Town> {
-    towns.at(0, (z + SPACING / 2).div_euclid(SPACING))
+fn nearest(towns: &Claims<Town>, z: i64) -> Option<Town> {
+    towns.near(0, z, WITHIN).map(|(_, town)| town)
 }
 
 /** The towns along the valley's path, by where they are. */
 pub struct Towns {
-    plan: Rc<Plan<Option<Town>>>,
+    plan: Rc<Claims<Town>>,
     /** What each column is, a plan of categories: dithered far away, so streets show as often as they are. */
     spots: Plan<Spot>,
 }
 
 impl Towns {
     /**
-     * Towns every SPACING along z, some of them, the first near the start:
-     * hamlets, villages and market towns. Each lies on the path's coarse
-     * band (its mean, x = 0: the path bends to meet it) at the mean height
-     * of the valley floor under it.
+     * Towns along the path, anywhere at least APART, the first near the
+     * start: hamlets, villages and market towns. Each lies on the path's
+     * coarse band (its mean, x = 0: the path bends to meet it), claimed
+     * from spots within half a cell of it, at the mean height of the
+     * valley floor under it.
      */
     pub fn new(seed: u64, relief: Rc<Relief>) -> Towns {
         let s = stream(seed, 30);
-        let plan = Rc::new(Plan::new("towns", TOWNS_SCALE, move |_, n| {
-            let mut random = Rng::new(hash64(s, n, 0, 0));
-            if n != 0 && !random.chance(fx(0.6)) {
-                return None;
-            }
-            let mut town = if n == 0 {
+        let plan = Rc::new(Claims::new("towns", s, CLAIM, APART, Some([0, FIRST]), move |[x, z], random| {
+            let mut town = if [x, z] == [0, FIRST] {
                 // The first, which the contract's regions look at: two blocks a side, four rows, a fountain, its church east.
-                let town = Town::of(Size::Market, m(200.0), &mut random);
+                let town = Town::of(Size::Market, FIRST, &mut Rng::new(hash64(s, 0, 0, 0)));
                 Town { cols: 2, rows: 4, centre: Centre::Fountain, church: 1, walled: false, ..town }
-            } else {
-                let z = n * SPACING - JITTER + random.below(2 * JITTER as u32) as i64;
+            } else if x.abs() < CLAIM / 2 {
                 let size = match random.below(10) {
                     0..3 => Size::Hamlet,
                     3..7 => Size::Village,
                     _ => Size::Market,
                 };
-                Town::of(size, z, &mut random)
+                Town::of(size, z, random)
+            } else {
+                return None;
             };
             // The floor's mean, not its bumps: a town's height is as coarse as the town.
             let (hx, hz, z) = (town.half_x(), town.half_z(), town.z);
             let around = (-1..=1).flat_map(|i| (-1..=1).map(move |j| (i, j)));
             town.level = Fx::mean(around.map(|(i, j)| relief.ground(i * hx, z + j * hz, Fx::ZERO))).round_units().0;
-            Some(town)
+            Some(([town.x, town.z], town))
         }));
         let spots = {
             let plan = plan.clone();
@@ -417,7 +421,7 @@ impl Towns {
 
     /** The first town, near the start: every seed has it. */
     pub fn first(&self) -> Town {
-        self.plan.at(0, 0).expect("the first town")
+        self.near(FIRST).expect("the first town")
     }
 
     /** The town nearest z along the path, if it has one. */

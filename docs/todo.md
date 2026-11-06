@@ -205,20 +205,18 @@ Numbers are for the forest at 1280×800, as measured when written.
   leaves in place of trunks and of the slope's scree and rock.
 - **The canopy stops at the trees' feet, so a clearing can break the contract**
   ("Open problems" in `docs/generators.md`):
-  the valley's first windmill at seeds 1 and 3
-  (`KNOWN_BREAKS` in `worlds/tests/contract.rs`, which fails once it passes);
-  at seed 3 since the moor gives way on the towns' farmland,
-  so forest stands round that windmill instead of moorland.
+  the valley's first windmill at seed 1
+  (`KNOWN_BREAKS` in `worlds/tests/contract.rs`, which fails once it passes).
   A wider clearing kept the first chapel's.
   Spread the canopy over the crowns' radius without thickening it from above
-  (spread over 2.5 m, it did), then drop them from the list.
+  (spread over 2.5 m, it did), then drop it from the list.
 - **The highest massifs end in broad rounded domes of snow.**
   Behind the crest the high country is one smooth noise,
   and wherever it stands over the snowline, all of it is snow.
   It wants crags and cirques of its own, or less snow where it is broad.
 - **Things placed one per region prefer places.**
   `worlds/tests/places.rs` lists them (`KNOWN`).
-  The valley's towns and the learned town's settlements
+  The learned town's settlements
   come every 1200 m along z, give or take 150 m,
   so none lies in most of each period.
   A landmark keeps its cell and all it shapes inside its region (`landmarks.rs`),
@@ -229,9 +227,8 @@ Numbers are for the forest at 1280×800, as measured when written.
   50 m inside regions 160 m wide, and their pools, 16 m inside 64 m
   (`moor.rs`; regions not staggered),
   though the check can't see pools (a plan of a field).
-  Claims with hashed priorities between neighbouring regions
-  ("Things of one band can't see each other" in `docs/generators.md`)
-  would let each stand anywhere.
+  Claimed instead (`Claims`, as the valley's towns are),
+  each would stand anywhere.
 - **The valley's town tiles are over the budget at levels 4 and 6**
   (`OVER_BUDGET` in `worlds/tests/cost.rs`; `worlds/examples/cost.rs` shows why):
   most of it is drawing the houses whole to measure them;

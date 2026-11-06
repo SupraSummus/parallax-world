@@ -19,7 +19,7 @@ use crate::valley::{self, Area};
 pub const CROP: usize = 384;
 pub const MARGIN: usize = 32;
 
-/** Towns are this far apart along the path (worlds' town.rs, private there). */
+/** The path is looked along this often for the town nearest (worlds' town.rs finds one within 600 m, 900 m apart). */
 const SPACING: i64 = m(1200.0);
 
 pub struct Label {
@@ -118,7 +118,9 @@ pub fn gather(seeds: &[u64], ns: std::ops::RangeInclusive<i64>, threads: usize, 
     for &seed in seeds {
         let (towns, _) = valley::land(seed);
         for n in ns.clone() {
-            if let Some(t) = towns.near(n * SPACING) {
+            if let Some(t) = towns.near(n * SPACING)
+                && !wanted.iter().any(|w: &(u64, i64, i64, i64)| (w.0, w.3) == (seed, t.z / m(1.0)))
+            {
                 wanted.push((seed, n, t.x / m(1.0), t.z / m(1.0)));
             }
         }
