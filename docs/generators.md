@@ -635,8 +635,7 @@ Carves along a line want the same margin.
   but from above at level 6 went to 0.096.
   So a clearing the crowns overhang, a landmark's, grows far away:
   from above, the valley's first windmill at seed 1 was 0.167 off at level 4,
-  0.14 less canopy, and at seed 3 0.107 off, 0.09 less
-  (`KNOWN_BREAKS`; planned in `docs/todo.md`).
+  0.14 less canopy (`KNOWN_BREAKS`; planned in `docs/todo.md`).
 - **Media are isotropic.** A site stops rays from every direction alike;
   vertical trunks seen from above and from the side cannot both be right.
   (Opacity per direction, tried in a prototype, made things worse.)
