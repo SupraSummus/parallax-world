@@ -1,0 +1,256 @@
+# valley (seed 42): work by tile and layer (worldgen::cost)
+place        level     cells     owned     nodes     tests  measured     reads     plans   largest layer
+spawn            0     98734        89       103   1201662         0         0         0    239483 trees
+spawn            0      6419        14         1      8602         0         0         0      8602 boulders
+spawn            0     16093        33         1       210         0         0         0       210 logs
+spawn            0     32126       121        60     28737         0         0         0      1917 plants
+spawn            0        31         1         0         0         0         0         0         0 towns
+spawn            0      2640         9         0         0         0         0         0         0 haystacks
+spawn            0         0         0         0         0         0     16384         0         0 terrain
+spawn            0         0         0         0         0         0     16384         0         0 streets
+spawn            0         0         0         0         0         0     16384         0         0 fields
+spawn            0         0         0         0         0         0     16384         0         0 mountains
+spawn            0         0         0         0         0         0         0     40894         0 plan ground
+spawn            0         0         0         0         0         0         0       313         0 plan path
+spawn            0         0         0         0         0         0         0     21286         0 plan forest columns
+spawn            0         0         0         0         0         0         0     18457         0 plan land
+spawn            0         0         0         0         0         0         0     18457         0 plan forest's bid
+spawn            0         0         0         0         0         0         0     18457         0 plan town's bid
+spawn            0         0         0         0         0         0         0     18457         0 plan fields' bid
+spawn            0         0         0         0         0         0         0       418         0 plan slope
+spawn            0         0         0         0         0         0         0     16384         0 plan town spots
+spawn            2    505702       466      1306    534406         0         0         0      7508 trees
+spawn            2     47291        93         4       626         0         0         0       210 boulders
+spawn            2     70357       136         4      2143         0         0         0      1494 logs
+spawn            2        31         1         0         0         0         0         0         0 towns
+spawn            2     17248        57         0         0         0         0         0         0 haystacks
+spawn            2         0         0         0         0         0     16384         0         0 terrain
+spawn            2         0         0         0         0         0     16384         0         0 streets
+spawn            2         0         0         0         0         0     16384         0         0 fields
+spawn            2         0         0         0         0         0     16384         0         0 mountains
+spawn            2         0         0         0         0         0         0    100821         0 plan ground
+spawn            2         0         0         0         0         0         0       726         0 plan path
+spawn            2         0         0         0         0         0         0     16850         0 plan forest columns
+spawn            2         0         0         0         0         0         0     16158         0 plan land
+spawn            2         0         0         0         0         0         0     16158         0 plan forest's bid
+spawn            2         0         0         0         0         0         0     16158         0 plan town's bid
+spawn            2         0         0         0         0         0         0     16158         0 plan fields' bid
+spawn            2         0         0         0         0         0         0      3252         0 plan slope
+spawn            2         0         0         0         0         0         0     16384         0 plan town spots
+spawn            4    610368      1172       163      1678         0         0         0        96 boulders
+spawn            4    694656      1310        99      5561         0         0         0       158 logs
+spawn            4        56         1         0         0         0         0         0         0 towns
+spawn            4    186208       562         0         0         0         0         0         0 haystacks
+spawn            4         0         0         0         0         0     16384         0         0 terrain
+spawn            4         0         0         0         0         0     16384         0         0 streets
+spawn            4         0         0         0         0         0     16384         0         0 fields
+spawn            4         0         0         0         0         0     16384         0         0 mountains
+spawn            4         0         0      1640    722757         0         0         0         0 shadows
+spawn            4         0         0         0         0         0     16384         0         0 trees
+spawn            4         0         0         0         0         0         0    136400         0 plan ground
+spawn            4         0         0         0         0         0         0      2285         0 plan path
+spawn            4         0         0         0         0         0         0     24475         0 plan land
+spawn            4         0         0         0         0         0         0     24475         0 plan forest's bid
+spawn            4         0         0         0         0         0         0     24475         0 plan town's bid
+spawn            4         0         0         0         0         0         0     24475         0 plan fields' bid
+spawn            4         0         0         0         0         0         0       549         0 plan slope
+spawn            4         0         0         0         0         0         0     22979         0 plan forest columns
+spawn            4         0         0         0         0         0         0     16384         0 plan town spots
+spawn            6       171         2         0         0         0         0         0         0 towns
+spawn            6         0         0         0         0         0     16384         0         0 terrain
+spawn            6         0         0         0         0         0     16384         0         0 streets
+spawn            6         0         0         0         0         0     16384         0         0 fields
+spawn            6         0         0         0         0         0     16384         0         0 mountains
+spawn            6         0         0      1640    722757         0         0         0         0 shadows
+spawn            6         0         0         0         0         0     16384         0         0 trees
+spawn            6         0         0         0         0         0         0         1         0 plan towns
+spawn            6         0         0         0         0         0         0    138924         0 plan ground
+spawn            6         0         0         0         0         0         0       546         0 plan path
+spawn            6         0         0         0         0         0         0     22997         0 plan forest columns
+spawn            6         0         0         0         0         0         0     16384         0 plan town spots
+spawn            6         0         0         0         0         0         0     22722         0 plan land
+spawn            6         0         0         0         0         0         0     22722         0 plan forest's bid
+spawn            6         0         0         0         0         0         0     22722         0 plan town's bid
+spawn            6         0         0         0         0         0         0     22722         0 plan fields' bid
+spawn            6         0         0         0         0         0         0       916         0 plan slope
+region1          0     98734       106         0         0         0         0         0         0 trees
+region1          0      6419        10         0         0         0         0         0         0 boulders
+region1          0     16093        24         0         0         0         0         0         0 logs
+region1          0     32126       121         0         0         0         0         0         0 plants
+region1          0        42         1         4      6400         0         0         0      6400 towns
+region1          0      3168         6         0         0         0         0         0         0 haystacks
+region1          0         0         0         0         0         0     16384         0         0 terrain
+region1          0         0         0         0         0         0     16384         0         0 streets
+region1          0         0         0         0         0         0     16384         0         0 fields
+region1          0         0         0         0         0         0     16384         0         0 mountains
+region1          0         0         0         0         0         0         0     46159         0 plan ground
+region1          0         0         0         0         0         0         0       315         0 plan path
+region1          0         0         0         0         0         0         0     21343         0 plan forest columns
+region1          0         0         0         0         0         0         0     20347         0 plan land
+region1          0         0         0         0         0         0         0     20347         0 plan forest's bid
+region1          0         0         0         0         0         0         0     20347         0 plan town's bid
+region1          0         0         0         0         0         0         0     20347         0 plan fields' bid
+region1          0         0         0         0         0         0         0     20672         0 plan slope
+region1          0         0         0         0         0         0         0     16384         0 plan town spots
+region1          2    505702       486       511    188482         0         0         0      7270 trees
+region1          2     47291        83         2       488         0         0         0       432 boulders
+region1          2     70357       127         2       270         0         0         0       181 logs
+region1          2        42         1        39    644956   1041983         0         0     36710 towns
+region1          2     16016        38         0         0         0         0         0         0 haystacks
+region1          2         0         0         0         0         0     16384         0         0 terrain
+region1          2         0         0         0         0         0     16384         0         0 streets
+region1          2         0         0         0         0         0     16384         0         0 fields
+region1          2         0         0         0         0         0     16384         0         0 mountains
+region1          2         0         0         0         0         0         0    104616         0 plan ground
+region1          2         0         0         0         0         0         0       725         0 plan path
+region1          2         0         0         0         0         0         0     16863         0 plan forest columns
+region1          2         0         0         0         0         0         0     17672         0 plan land
+region1          2         0         0         0         0         0         0     17672         0 plan forest's bid
+region1          2         0         0         0         0         0         0     17672         0 plan town's bid
+region1          2         0         0         0         0         0         0     17672         0 plan fields' bid
+region1          2         0         0         0         0         0         0     19467         0 plan slope
+region1          2         0         0         0         0         0         0     16384         0 plan town spots
+region1          4    610368      1126        96       956         0         0         0        48 boulders
+region1          4    694656      1279        44      2359         0         0         0       102 logs
+region1          4        56         1       128   2944061   5720259         0         0      3986 towns
+region1          4    186208       537         7        14         0         0         0         4 haystacks
+region1          4         0         0         0         0         0     16384         0         0 terrain
+region1          4         0         0         0         0         0     16384         0         0 streets
+region1          4         0         0         0         0         0     16384         0         0 fields
+region1          4         0         0         0         0         0     16384         0         0 mountains
+region1          4         0         0      1640    722757         0         0         0         0 shadows
+region1          4         0         0         0         0         0     16384         0         0 trees
+region1          4         0         0         0         0         0         0    150066         0 plan ground
+region1          4         0         0         0         0         0         0      2268         0 plan path
+region1          4         0         0         0         0         0         0     24858         0 plan land
+region1          4         0         0         0         0         0         0     24858         0 plan forest's bid
+region1          4         0         0         0         0         0         0     24858         0 plan town's bid
+region1          4         0         0         0         0         0         0     24858         0 plan fields' bid
+region1          4         0         0         0         0         0         0     36787         0 plan slope
+region1          4         0         0         0         0         0         0     23007         0 plan forest columns
+region1          4         0         0         0         0         0         0     16384         0 plan town spots
+region1          6       171         1       174   4684234   8613235         0         0       336 towns
+region1          6         0         0         0         0         0     16384         0         0 terrain
+region1          6         0         0         0         0         0     16384         0         0 streets
+region1          6         0         0         0         0         0     16384         0         0 fields
+region1          6         0         0         0         0         0     16384         0         0 mountains
+region1          6         0         0      1640    722757         0         0         0         0 shadows
+region1          6         0         0         0         0         0     16384         0         0 trees
+region1          6         0         0         0         0         0         0         1         0 plan towns
+region1          6         0         0         0         0         0         0    143409         0 plan ground
+region1          6         0         0         0         0         0         0       549         0 plan path
+region1          6         0         0         0         0         0         0     22955         0 plan forest columns
+region1          6         0         0         0         0         0         0     16384         0 plan town spots
+region1          6         0         0         0         0         0         0     22634         0 plan land
+region1          6         0         0         0         0         0         0     22634         0 plan forest's bid
+region1          6         0         0         0         0         0         0     22634         0 plan town's bid
+region1          6         0         0         0         0         0         0     22634         0 plan fields' bid
+region1          6         0         0         0         0         0         0      6630         0 plan slope
+region2          0     98734        82         0         0         0         0         0         0 trees
+region2          0      6419        10         0         0         0         0         0         0 boulders
+region2          0     16093        26         0         0         0         0         0         0 logs
+region2          0     32126       121         0         0         0         0         0         0 plants
+region2          0        32         1         5     82391         0         0         0     82391 towns
+region2          0      2640         9         0         0         0         0         0         0 haystacks
+region2          0         0         0         0         0         0     16384         0         0 terrain
+region2          0         0         0         0         0         0     16384         0         0 streets
+region2          0         0         0         0         0         0     16384         0         0 fields
+region2          0         0         0         0         0         0     16384         0         0 mountains
+region2          0         0         0         0         0         0         0     47184         0 plan ground
+region2          0         0         0         0         0         0         0       310         0 plan path
+region2          0         0         0         0         0         0         0     21186         0 plan forest columns
+region2          0         0         0         0         0         0         0     27488         0 plan land
+region2          0         0         0         0         0         0         0     27488         0 plan forest's bid
+region2          0         0         0         0         0         0         0     27488         0 plan town's bid
+region2          0         0         0         0         0         0         0     27488         0 plan fields' bid
+region2          0         0         0         0         0         0         0     27813         0 plan slope
+region2          0         0         0         0         0         0         0     16384         0 plan town spots
+region2          2    505702       459         0         0         0         0         0         0 trees
+region2          2     47291        84         0         0         0         0         0         0 boulders
+region2          2     70357       131         0         0         0         0         0         0 logs
+region2          2        32         1        47    821592   1948274         0         0     53086 towns
+region2          2     17248        45         0         0         0         0         0         0 haystacks
+region2          2         0         0         0         0         0     16384         0         0 terrain
+region2          2         0         0         0         0         0     16384         0         0 streets
+region2          2         0         0         0         0         0     16384         0         0 fields
+region2          2         0         0         0         0         0     16384         0         0 mountains
+region2          2         0         0         0         0         0         0    107953         0 plan ground
+region2          2         0         0         0         0         0         0       729         0 plan path
+region2          2         0         0         0         0         0         0     16834         0 plan forest columns
+region2          2         0         0         0         0         0         0     23414         0 plan land
+region2          2         0         0         0         0         0         0     23414         0 plan forest's bid
+region2          2         0         0         0         0         0         0     23414         0 plan town's bid
+region2          2         0         0         0         0         0         0     23414         0 plan fields' bid
+region2          2         0         0         0         0         0         0     25195         0 plan slope
+region2          2         0         0         0         0         0         0     16384         0 plan town spots
+region3          0     98734       101         0         0         0         0         0         0 trees
+region3          0      6419         9         0         0         0         0         0         0 boulders
+region3          0     16093        24         0         0         0         0         0         0 logs
+region3          0     32126       121         0         0         0         0         0         0 plants
+region3          0        32         0         0         0         0         0         0         0 towns
+region3          0      3168        12         0         0         0         0         0         0 haystacks
+region3          0         0         0         0         0         0     16384         0         0 terrain
+region3          0         0         0         0         0         0     16384         0         0 streets
+region3          0         0         0         0         0         0     16384         0         0 fields
+region3          0         0         0         0         0         0     16384         0         0 mountains
+region3          0         0         0         0         0         0         0    102658         0 plan ground
+region3          0         0         0         0         0         0         0       333         0 plan path
+region3          0         0         0         0         0         0         0         1         0 plan towns
+region3          0         0         0         0         0         0         0     21300         0 plan forest columns
+region3          0         0         0         0         0         0         0     21332         0 plan land
+region3          0         0         0         0         0         0         0     21332         0 plan forest's bid
+region3          0         0         0         0         0         0         0     21332         0 plan town's bid
+region3          0         0         0         0         0         0         0     21332         0 plan fields' bid
+region3          0         0         0         0         0         0         0     16384         0 plan town spots
+region3          2    505702       495         0         0         0         0         0         0 trees
+region3          2     47291        90         0         0         0         0         0         0 boulders
+region3          2     70357       129         0         0         0         0         0         0 logs
+region3          2        42         0         0         0         0         0         0         0 towns
+region3          2     17248        48         0         0         0         0         0         0 haystacks
+region3          2         0         0         0         0         0     16384         0         0 terrain
+region3          2         0         0         0         0         0     16384         0         0 streets
+region3          2         0         0         0         0         0     16384         0         0 fields
+region3          2         0         0         0         0         0     16384         0         0 mountains
+region3          2         0         0         0         0         0         0    120419         0 plan ground
+region3          2         0         0         0         0         0         0       722         0 plan path
+region3          2         0         0         0         0         0         0         2         0 plan towns
+region3          2         0         0         0         0         0         0     16869         0 plan forest columns
+region3          2         0         0         0         0         0         0     17046         0 plan land
+region3          2         0         0         0         0         0         0     17046         0 plan forest's bid
+region3          2         0         0         0         0         0         0     17046         0 plan town's bid
+region3          2         0         0         0         0         0         0     17046         0 plan fields' bid
+region3          2         0         0         0         0         0         0     16384         0 plan town spots
+region3          4    610368      1132         0         0         0         0         0         0 boulders
+region3          4    694656      1288         0         0         0         0         0         0 logs
+region3          4        56         0         0         0         0         0         0         0 towns
+region3          4    186208       527         0         0         0         0         0         0 haystacks
+region3          4         0         0         0         0         0     16384         0         0 terrain
+region3          4         0         0         0         0         0     16384         0         0 streets
+region3          4         0         0         0         0         0     16384         0         0 fields
+region3          4         0         0         0         0         0     16384         0         0 mountains
+region3          4         0         0         0         0         0     16384         0         0 trees
+region3          4         0         0         0         0         0         0    140687         0 plan ground
+region3          4         0         0         0         0         0         0      2239         0 plan path
+region3          4         0         0         0         0         0         0         2         0 plan towns
+region3          4         0         0         0         0         0         0     24638         0 plan land
+region3          4         0         0         0         0         0         0     24638         0 plan forest's bid
+region3          4         0         0         0         0         0         0     24638         0 plan town's bid
+region3          4         0         0         0         0         0         0     24638         0 plan fields' bid
+region3          4         0         0         0         0         0         0     22792         0 plan forest columns
+region3          4         0         0         0         0         0         0     16384         0 plan town spots
+region3          6       171         0         0         0         0         0         0         0 towns
+region3          6         0         0         0         0         0     16384         0         0 terrain
+region3          6         0         0         0         0         0     16384         0         0 streets
+region3          6         0         0         0         0         0     16384         0         0 fields
+region3          6         0         0         0         0         0     16384         0         0 mountains
+region3          6         0         0      1640    722757         0         0         0         0 shadows
+region3          6         0         0         0         0         0     16384         0         0 trees
+region3          6         0         0         0         0         0         0         2         0 plan towns
+region3          6         0         0         0         0         0         0    170102         0 plan ground
+region3          6         0         0         0         0         0         0       517         0 plan path
+region3          6         0         0         0         0         0         0     23182         0 plan forest columns
+region3          6         0         0         0         0         0         0     16384         0 plan town spots
+region3          6         0         0         0         0         0         0     22891         0 plan land
+region3          6         0         0         0         0         0         0     22891         0 plan forest's bid
+region3          6         0         0         0         0         0         0     22891         0 plan town's bid
+region3          6         0         0         0         0         0         0     22891         0 plan fields' bid

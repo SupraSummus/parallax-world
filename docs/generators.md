@@ -4,7 +4,8 @@ A generator (`worldgen/src/generator.rs`) describes a world;
 the framework draws any box of it, alone, at any level of detail,
 and gets the same voxels whichever boxes it drew before.
 That lets a world be endless and generated in pieces around the camera,
-coarser further away, for about the same cost per box at every level.
+coarser further away, for about the same cost per box at every level
+(where it is not, "Cost" shows).
 `worldgen/` is that engine, and `worlds/` the worlds on it,
 which use only the engine's public API.
 The forest (`worlds/src/forest.rs`) is written this way,
@@ -278,6 +279,38 @@ and `worlds/examples/look.rs` takes a picture of it at one level
 (`worldgen::picture`: rays through its voxels, from any eye or straight down),
 with what each pixel hit and how far away, for checks to measure
 (`cargo run --release --example map` or `look` in `worlds/`, arguments in the files).
+
+## Cost
+
+Timings are noisy on a shared machine, so what generating costs is counted
+(`worldgen/src/cost.rs`):
+while `cost::counted` runs, `generate` counts its work
+by layer and by plan (`Work`).
+Counts are the same on every machine;
+weighed by rough times per count (`NS`),
+they show what takes the time.
+
+`cost::report` generates a world's host tiles at several levels
+around some places, each tile by a fresh world, as a host's first is.
+It prints the estimate by layer and level, largest first,
+the time each tile took here,
+and flags what looks costly:
+a tile over budget,
+a layer growing fourfold from one level to the next,
+a population asking many more cells for anchors than own one,
+a field read at every site,
+one huge thing,
+things drawn whole to be measured.
+`cargo run --release --example cost -- <world>` in `worlds/` prints it
+(arguments in the file).
+
+`worlds/tests/cost.rs` holds each world in `WORLDS`
+to its baseline, `worlds/data/cost/<world>.txt`:
+it fails when a count rises or falls by more than a quarter
+and the change weighs a hundredth of its tile or more.
+When the change is meant,
+`COST_BLESS=1 cargo test --release --test cost` in `worlds/`
+writes the baselines anew, and their diff shows it.
 
 ## Composing
 

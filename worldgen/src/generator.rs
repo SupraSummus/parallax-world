@@ -9,6 +9,7 @@ use std::sync::OnceLock;
 
 use bake::{FACE_KINDS, VOXEL_FACES};
 
+use crate::cost::{self, Work};
 use crate::grid::{Box3, VoxelGrid};
 use crate::js;
 use crate::noise::{Fixed, Fx, ONE, Rng, fixed, float, hash, hash_text, hash64, unit};
@@ -692,9 +693,10 @@ impl Shape {
 }
 
 /**
- * Draws a shape at sites `s` apart, by how many of its sizes are under s.
+ * Draws a shape at sites `s` apart, by how many of its sizes are under s;
+ * returns how many sites it tested.
  */
-fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &mut dyn FnMut(i64, i64, i64)) {
+fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &mut dyn FnMut(i64, i64, i64)) -> u64 {
     let s = si as f64;
     let spacing = si * ONE;
     let small = shape.extents.iter().filter(|e| e.to_bits() < spacing).count();
@@ -704,7 +706,7 @@ fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &mut dyn FnMu
         if clip.holds([x, y, z]) && kept(x, y, z, shape.area / (VOXEL_AREA * s * s)) {
             put(x, y, z);
         }
-        return;
+        return 1;
     }
     let min = [0, spacing, spacing * 8 / 5][small];
     let b = &shape.bounds;
@@ -713,6 +715,7 @@ fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &mut dyn FnMu
     let [x0, y0, z0] = b.min.map(|v| -(-(v * ONE - min / 2)).div_euclid(spacing));
     let [x1, y1, z1] = b.max.map(|v| (v * ONE - past + min / 2).div_euclid(spacing));
     let inside = shape.inside(min, si);
+    // Visits the sites within that are inside; returns about how many it tested (half of each row's points).
     let sites = |within: &Box3, visit: &mut dyn FnMut(i64, i64, i64)| {
         let (z_from, z_to) = (z0.max(within.min[2]), z1.min(within.max[2] - 1));
         let (y_from, y_to) = (y0.max(within.min[1]), y1.min(within.max[1] - 1));
@@ -728,6 +731,7 @@ fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &mut dyn FnMu
                 }
             }
         }
+        [z_to - z_from, y_to - y_from, (x_to - from).div_euclid(2)].iter().map(|n| (n + 1).max(0) as u64).product::<u64>()
     };
     let fill = |x: i64, y: i64, z: i64| shape.fill.at((x * si) as f64, (y * si) as f64, (z * si) as f64);
     match small {
@@ -747,13 +751,14 @@ fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &mut dyn FnMu
         _ => {
             // Counted whole, so every box gets the same chance.
             let mut count = 0;
-            sites(&EVERYWHERE, &mut |_, _, _| count += 1);
+            let tested = sites(&EVERYWHERE, &mut |_, _, _| count += 1);
             let chance = shape.area / (count as f64 * VOXEL_AREA * s * s);
-            sites(clip, &mut |x, y, z| {
-                if kept(x, y, z, chance) {
-                    put(x, y, z)
-                }
-            })
+            tested
+                + sites(clip, &mut |x, y, z| {
+                    if kept(x, y, z, chance) {
+                        put(x, y, z)
+                    }
+                })
         }
     }
 }
@@ -843,18 +848,23 @@ pub fn generate(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
         let group = &drawables[at..end];
         at = end;
         let carves = group.iter().any(|d| matches!(&d.draw, Draw::Shapes(shapes, _) if shapes.iter().any(|s| s.op == Op::Carve)));
+        let mut work = Work::default();
         if !carves {
             for drawable in group {
-                draw(drawable, generator.seed, s, &clip, &mut put);
+                work.add(&draw(drawable, generator.seed, s, &clip, &mut put));
             }
-            continue;
+        } else {
+            // It cuts only itself: drawn aside, then over the world.
+            let mut own = Own::new(&thing_box(group, s).intersect(&clip));
+            for drawable in group {
+                work.add(&draw(drawable, generator.seed, s, &clip, &mut |look, op, x, y, z| own.put(look, op, x, y, z)));
+            }
+            own.each(&mut put);
         }
-        // It cuts only itself: drawn aside, then over the world.
-        let mut own = Own::new(&thing_box(group, s).intersect(&clip));
-        for drawable in group {
-            draw(drawable, generator.seed, s, &clip, &mut |look, op, x, y, z| own.put(look, op, x, y, z));
+        if thing != 0 {
+            work.largest = work.tests;
         }
-        own.each(&mut put);
+        cost::add(group[0].layer, work);
     }
     grid
 }
@@ -944,15 +954,17 @@ fn thing_box(group: &[Drawable], s: i64) -> Box3 {
     bounds_of_shapes(&boxes)
 }
 
-/** Draws one drawable at sites `s` apart into `clip`. */
-fn draw(drawable: &Drawable, seed: u64, s: i64, clip: &Box3, put: &mut Put) {
+/** Draws one drawable at sites `s` apart into `clip`; returns the work. */
+fn draw(drawable: &Drawable, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> Work {
     match &drawable.draw {
         Draw::Field(field) => draw_field(field, seed, s, clip, put),
         Draw::Shapes(shapes, far) => {
+            let mut tests = 0;
             for (i, shape) in shapes.iter().enumerate() {
                 let seed = hash_text(&format!("{}#{}{i}", drawable.key, if *far { "far" } else { "" }), seed);
-                draw_shape(shape, seed, s, clip, &mut |x, y, z| put(shape.kind.into(), shape.op, x, y, z));
+                tests += draw_shape(shape, seed, s, clip, &mut |x, y, z| put(shape.kind.into(), shape.op, x, y, z));
             }
+            Work { nodes: 1, tests, ..Work::default() }
         }
         Draw::Sites(sites) => {
             for &([x, y, z], look, op) in sites {
@@ -960,6 +972,7 @@ fn draw(drawable: &Drawable, seed: u64, s: i64, clip: &Box3, put: &mut Put) {
                     put(look, op, x, y, z);
                 }
             }
+            Work { nodes: 1, tests: sites.len() as u64, ..Work::default() }
         }
     }
 }
@@ -975,6 +988,8 @@ enum Draw<'a> {
 struct Drawable<'a> {
     order: f64,
     key: String,
+    /** The layer it is of, for its cost. */
+    layer: &'static str,
     /** The thing it is part of, numbered from 1; 0 for fields. */
     thing: u32,
     draw: Draw<'a>,
@@ -989,17 +1004,20 @@ fn drawables_in<'a>(generator: &'a Generator, clip: &Box3, s: i64) -> Vec<Drawab
     for layer in &generator.layers {
         let population = match layer {
             Layer::Field(field) => {
-                drawables.push(Drawable { order: field.order, key: field.name.to_string(), thing: 0, draw: Draw::Field(field) });
+                let layer = field.name;
+                drawables.push(Drawable { order: field.order, key: field.name.to_string(), layer, thing: 0, draw: Draw::Field(field) });
                 continue;
             }
             Layer::Population(p) => p,
         };
         if s > population.size {
             if let Some(far) = &population.far {
-                drawables.push(Drawable { order: population.order, key: population.name.to_string(), thing: 0, draw: Draw::Field(far) });
+                let (order, layer) = (population.order, population.name);
+                drawables.push(Drawable { order, key: population.name.to_string(), layer, thing: 0, draw: Draw::Field(far) });
             }
             continue;
         }
+        let mut work = Work::default();
         let n = population.cell;
         let [rx, ry, rz] = population.reach;
         // Cells whose reach meets `units`: centres within N + reach of it.
@@ -1013,11 +1031,13 @@ fn drawables_in<'a>(generator: &'a Generator, clip: &Box3, s: i64) -> Vec<Drawab
                     let centre = [i * n, j * n, k * n];
                     let cell = Cell { i, j, k, centre, n, population: population.name, seed: generator.seed };
                     k += 2;
+                    work.cells += 1;
                     let Some(anchor) = (population.anchor)(&cell) else { continue };
                     let [oi, oj, ok] = nearest_site(at(anchor), n);
                     if oi != i || oj != j || ok != k - 2 {
                         continue;
                     }
+                    work.owned += 1;
                     let Some(node) = (population.make)(anchor, &cell) else { continue };
                     let key = format!("{} {i},{j},{}", population.name, k - 2);
                     let bounds = bounds_of(&node);
@@ -1027,11 +1047,13 @@ fn drawables_in<'a>(generator: &'a Generator, clip: &Box3, s: i64) -> Vec<Drawab
                     };
                     assert!(bounds.inside(&reach), "{}", past_reach(&key, &bounds, &reach, n, population.reach));
                     things += 1;
-                    let at = Visit { s, units: &units, order: population.order, thing: things, seed: generator.seed };
+                    let at =
+                        Visit { s, units: &units, order: population.order, layer: population.name, thing: things, seed: generator.seed };
                     visit(&node, key, bounds, &at, &mut drawables);
                 }
             }
         }
+        cost::add(population.name, work);
     }
     drawables.sort_by(|a, b| a.order.total_cmp(&b.order).then_with(|| a.key.cmp(&b.key)));
     drawables
@@ -1061,23 +1083,24 @@ struct Visit<'u> {
     s: i64,
     units: &'u Box3,
     order: f64,
+    layer: &'static str,
     thing: u32,
     seed: u64,
 }
 
 /** Adds a node's drawables and its children's, as far as they reach `at.units` and are drawn at its spacing. */
 fn visit(node: &Node, key: String, bounds: Box3, at: &Visit, drawables: &mut Vec<Drawable<'_>>) {
-    let Visit { s, units, order, thing, seed } = *at;
+    let Visit { s, units, order, layer, thing, seed } = *at;
     if !bounds.overlaps(units) {
         return;
     }
     let far = node.far.as_ref().filter(|far| s * ONE > far.detail.to_bits());
     let draw = match far {
-        Some(Far { detail, form: FarForm::Measured }) => Draw::Sites(measure(node, &key, bounds, detail.to_bits(), s, seed)),
+        Some(Far { detail, form: FarForm::Measured }) => Draw::Sites(measure(node, &key, layer, bounds, detail.to_bits(), s, seed)),
         Some(Far { form: FarForm::Shapes(shapes), .. }) => Draw::Shapes(shapes.to_vec(), true),
         None => Draw::Shapes(node.shapes.get().to_vec(), false),
     };
-    drawables.push(Drawable { order, key: key.clone(), thing, draw });
+    drawables.push(Drawable { order, key: key.clone(), layer, thing, draw });
     if far.is_some() {
         return;
     }
@@ -1101,16 +1124,18 @@ fn visit(node: &Node, key: String, bounds: Box3, at: &Visit, drawables: &mut Vec
     }
 }
 
-/** A node drawn alone, whole, at sites `f` apart. */
-fn alone(node: &Node, key: &str, bounds: Box3, f: i64, seed: u64) -> Own {
+/** A node of `layer` drawn alone, whole, at sites `f` apart. */
+fn alone(node: &Node, key: &str, layer: &'static str, bounds: Box3, f: i64, seed: u64) -> Own {
     let units = bounds.widen(f);
     let mut near = Vec::new();
-    visit(node, key.to_string(), bounds, &Visit { s: f, units: &units, order: 0.0, thing: 1, seed }, &mut near);
+    visit(node, key.to_string(), bounds, &Visit { s: f, units: &units, order: 0.0, layer, thing: 1, seed }, &mut near);
     let fine = Box3 { min: bounds.min.map(|v| v.div_euclid(f) - 2), max: bounds.max.map(|v| -(-v).div_euclid(f) + 2) };
     let mut own = Own::new(&fine);
+    let mut work = Work::default();
     for drawable in &near {
-        draw(drawable, seed, f, &fine, &mut |look, op, x, y, z| own.put(look, op, x, y, z));
+        work.add(&draw(drawable, seed, f, &fine, &mut |look, op, x, y, z| own.put(look, op, x, y, z)));
     }
+    cost::add(layer, work);
     own
 }
 
@@ -1150,7 +1175,7 @@ impl Shadows {
             .iter()
             .enumerate()
             .map(|(i, node)| {
-                let own = alone(node, &format!("sample {i}"), bounds_of(node), f, 0);
+                let own = alone(node, &format!("sample {i}"), cost::SHADOWS, bounds_of(node), f, 0);
                 let (n, min) = (own.n, own.b.min);
                 let words = ((n[a] * n[b]) as usize).div_ceil(64);
                 let layers = (0..n[axis])
@@ -1257,10 +1282,11 @@ fn columns_of_cell(r: i64) -> [u32; 3] {
  * cell start with seen from it. The site is of a kind of all its faces
  * see, for whatever does not look at faces.
  */
-fn measure(node: &Node, key: &str, bounds: Box3, detail: Fixed, s: i64, seed: u64) -> Sites {
+fn measure(node: &Node, key: &str, layer: &'static str, bounds: Box3, detail: Fixed, s: i64, seed: u64) -> Sites {
     let f = 1i64 << ((detail / ONE).max(1).ilog2());
     // Its far form not drawn at f: f is at most detail.
-    let own = alone(node, key, bounds, f, seed);
+    let own = alone(node, key, layer, bounds, f, seed);
+    cost::add(layer, Work { measured: own.cells.len() as u64, ..Work::default() });
     // Kinds counted, each with how it meets the world.
     type Counts = Vec<(Kind, Op, u32)>;
     // By coarse site: per axis, how many of its columns hold a fine site; per face, what the ends of the runs of
@@ -1401,8 +1427,9 @@ fn measure(node: &Node, key: &str, bounds: Box3, detail: Fixed, s: i64, seed: u6
     sites
 }
 
-/** Draws a field into `clip`; a medium keeps a site with the chance a ray crossing it is stopped. */
-fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) {
+/** Draws a field into `clip`, a medium keeping a site with the chance a ray crossing it is stopped; returns the work. */
+fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> Work {
+    let mut work = Work::default();
     let op = field.op;
     let field_seed = hash_text(field.name, seed);
     // The chance a medium's site is kept, from its extinction.
@@ -1428,6 +1455,7 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) {
             for z in clip.min[2]..clip.max[2] {
                 for y in clip.min[1]..clip.max[1] {
                     let mut x = clip.min[0] + ((clip.min[0] + y + z) & 1);
+                    work.reads += 0.max((clip.max[0] - x + 1) / 2) as u64;
                     while x < clip.max[0] {
                         if let Some((kind, extinction)) = plan::footprint(s, offset(x, z), || at(x * s, y * s, z * s, s))
                             && kept(x, y, z, chance_of(extinction))
@@ -1455,6 +1483,7 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) {
                     if axis != 1 {
                         moved[axis / 2] = 0;
                     }
+                    work.reads += 1;
                     for span in plan::footprint(s, moved, || spans(u * s, v * s, s)) {
                         // s is a power of two: shifting is dividing, rounded down.
                         let first = (-((-span.from) >> s.trailing_zeros())).max(lo[axis]);
@@ -1472,6 +1501,7 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) {
             }
         }
     }
+    work
 }
 
 // ---------------------------------------------------------------------------
@@ -1588,7 +1618,7 @@ mod tests {
             ])
         };
         let one = block();
-        let sites = measure(&one, "block", bounds_of(&one), fixed(2.0), 16, 1);
+        let sites = measure(&one, "block", "blocks", bounds_of(&one), fixed(2.0), 16, 1);
         let inside = |p: [i64; 3]| p.iter().all(|v| (1..4).contains(v));
         assert!(
             (1..4).all(|y| (1..4).all(|x| (1..4).all(|z| (x + y + z) % 2 == 1 || sites.iter().any(|s| s.0 == [x, y, z])))),
@@ -1620,7 +1650,7 @@ mod tests {
         };
         let blocks: Vec<Sites> = on_threads(16, |i| {
             let block = block();
-            measure(&block, &format!("block {i}"), bounds_of(&block), fixed(2.0), 16, 1)
+            measure(&block, &format!("block {i}"), "blocks", bounds_of(&block), fixed(2.0), 16, 1)
         });
         let from_above = blocks.iter().map(|sites| seen(sites, [0, -1, 0])).sum::<f64>() / 16.0;
         let from_the_side = blocks.iter().map(|sites| seen(sites, [1, 0, 0])).sum::<f64>() / 16.0;
@@ -1636,7 +1666,7 @@ mod tests {
         // against its own threshold: on average over many, 256 for a share within about 0.02.
         let kept = on_threads(256, |i| {
             let cloud = cloud();
-            measure(&cloud, &format!("cloud {i}"), bounds_of(&cloud), fixed(2.0), 16, 1).len()
+            measure(&cloud, &format!("cloud {i}"), "clouds", bounds_of(&cloud), fixed(2.0), 16, 1).len()
         })
         .iter()
         .sum::<usize>() as f64

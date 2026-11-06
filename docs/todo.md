@@ -182,7 +182,9 @@ Numbers are for the forest at 1280×800, as measured when written.
   which the terrain and the canopy compute about 14 times per column
   (with its neighbours, for slopes),
   and at levels 0 and 1 the undergrowth's many small shapes;
-  worldgen's is not profiled yet.
+  worldgen's, counted ("Cost" in `docs/generators.md`),
+  goes mostly to the trees at levels 0 to 2
+  and to measuring their shadows from level 4.
 - **The reference viewer freezes for over a minute on the forest**:
   it generates all its levels on the main thread,
   then holds about 25 million faces, over 2 GB.
@@ -205,6 +207,9 @@ Numbers are for the forest at 1280×800, as measured when written.
 
 ## Ideas
 
+- Report cost at points the worlds name (a town's square, a pass),
+  not at the spawn and the regions' centres (`cost::places`).
+- Keep the fit of `cost::NS` in the repo, to refit it on a quiet machine.
 - Generate the web's tiles as the native spike does:
   those the chunks in view read, nearest first,
   instead of every tile within `GRID_REACH` of the camera.
@@ -255,7 +260,8 @@ Composing generators (section "Composing" of `docs/generators.md`), untried:
 - Bid per quantity: a land per channel (use, ground, wetness),
   each domain bidding in those it cares about, as the towns' terrace needs.
 - Measure a thing's far forms for all levels from one drawing:
-  `Far::measured` draws a thing whole again for each level and box.
+  `Far::measured` draws a thing whole again for each level and box,
+  most of a coarse tile's cost by a town (`worlds/examples/cost.rs`).
 - Place the houses as things of their own, from the plan of lots,
   not as children of one thing per town:
   a box in a town now draws the whole town's carves aside, in a buffer
