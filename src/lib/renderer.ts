@@ -256,6 +256,8 @@ export interface RendererOptions {
   onBaked?: () => void
   /** Where the camera starts, if not at the world's spawn point: its grids are generated there first. */
   camera?: Camera
+  /** Instead of MAX_HIDDEN_CHUNK_BYTES, for tests. @internal */
+  maxHiddenChunkBytes?: number
 }
 
 /**
@@ -285,6 +287,7 @@ export class ParallaxRenderer {
   private inView = new Set<Chunk>()
   // Bytes of all cached chunks.
   private bytes = 0
+  private readonly maxHiddenChunkBytes: number
   // Kept across renders for its buffers.
   private coverage: Coverage | null = null
 
@@ -307,8 +310,9 @@ export class ParallaxRenderer {
     lastUpdate: null,
   }
 
-  constructor(world: World, { bakery, onBaked, camera }: RendererOptions = {}) {
+  constructor(world: World, { bakery, onBaked, camera, maxHiddenChunkBytes }: RendererOptions = {}) {
     this.world = world
+    this.maxHiddenChunkBytes = maxHiddenChunkBytes ?? MAX_HIDDEN_CHUNK_BYTES
     this.camera = { ...(camera ?? world.spawn) }
     this.bakery = bakery ?? null
     this.onBaked = onBaked ?? (() => undefined)
@@ -771,7 +775,7 @@ export class ParallaxRenderer {
   /**
    * Drops least-recently-used slices beyond MAX_CACHED_SLICES, then hidden
    * chunks (least recently used slices first) until they fit
-   * MAX_HIDDEN_CHUNK_BYTES. What is in view is never evicted.
+   * maxHiddenChunkBytes. What is in view is never evicted.
    */
   private evict(inView: Set<Slice>) {
     for (const [key, slice] of this.slices) {
@@ -783,7 +787,7 @@ export class ParallaxRenderer {
     let hidden = this.bytes
     for (const chunk of this.inView) hidden -= bytesOf(chunk)
     for (const slice of this.slices.values()) {
-      if (hidden <= MAX_HIDDEN_CHUNK_BYTES) return
+      if (hidden <= this.maxHiddenChunkBytes) return
       for (const [key, cell] of slice.cells) {
         const kept = cell.chunks.filter(chunk => this.inView.has(chunk))
         for (const chunk of cell.chunks) {

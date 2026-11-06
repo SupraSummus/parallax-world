@@ -4,21 +4,31 @@ import type { Generated } from './world'
 
 const MATERIALS: Material[] = [{ color: '' }, { color: '#4f7a2a' }, { color: '#5a8a30' }]
 
+// Every test makes the same few worlds: each box is generated once, and shared.
+// Callers only read it (VoxelGrid.compose copies it).
+const generated = new Map<string, VoxelGrid>()
+
 /** Gentle hills of moss, in two shades, held 64 sites of each level around the camera. */
 export function smallForest(seed: number): Generated {
+  // All a seed changes.
+  const parity = seed & 1
   return {
     materials: MATERIALS,
     generate: (box: Box, level: number) => {
+      const key = [parity, level, box.minX, box.minY, box.minZ, box.maxX, box.maxY, box.maxZ].join()
+      const known = generated.get(key)
+      if (known) return known
       const s = 2 ** level
       const grid = new VoxelGrid(box, MATERIALS)
       for (let z = box.minZ; z < box.maxZ; z++) {
         for (let x = grid.minX; x < grid.minX + grid.nx; x++) {
           // In lattice units: sites of the level are s apart.
           const top = 1 + Math.round(8 * Math.sin((x * s) / 40) * Math.sin((z * s) / 40))
-          const shade = 1 + ((((x * s) >> 3) ^ ((z * s) >> 3) ^ seed) & 1)
+          const shade = 1 + ((((x * s) >> 3) ^ ((z * s) >> 3) ^ parity) & 1)
           grid.fillBox(x, Math.ceil(-8 / s), z, x + 1, Math.ceil(top / s), z + 1, shade)
         }
       }
+      generated.set(key, grid)
       return grid
     },
     spawn: { x: 0, y: 6, z: -4 },

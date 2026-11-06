@@ -11,7 +11,7 @@ use crate::World;
 use crate::generator::{Generator, Layer, generate, materials_of, thing_in};
 use crate::grid::{Box3, VoxelGrid, is_site};
 use crate::noise::{Rng, hash_text};
-use crate::picture::{Camera, FACES, first_voxel, nearest_site, picture};
+use crate::picture::{Camera, FACES, Tiles, first_voxel, nearest_site, picture, picture_in};
 
 fn b(min_x: i64, min_y: i64, min_z: i64, max_x: i64, max_y: i64, max_z: i64) -> Box3 {
     Box3 { min: [min_x, min_y, min_z], max: [max_x, max_y, max_z] }
@@ -429,21 +429,23 @@ fn from_above_against_level_0(world: &World, region: &Box3, levels: u32, report:
 /** What rays straight down over `region` hit first at each of `levels`, against level 0, as `measure`. */
 fn from_above(world: &World, region: &Box3, levels: impl Iterator<Item = u32>, measure: Measure, report: &mut Report) {
     let types: Vec<u8> = materials_of(&world.generator).iter().map(|m| m.material_type).collect();
-    let seen = |level: u32, area: &Box3| {
+    let seen = |tiles: &mut Tiles, area: &Box3| {
         // A ray every 2 units.
         let width = ((area.max[0] - area.min[0]) / 2).clamp(16, 1024) as usize;
         let camera = Camera::top([area.min[0] as f64, area.min[2] as f64], [area.max[0] as f64, area.max[2] as f64], width);
-        shares(picture(&world.generator, &camera, level, world.heights_at(level)).material)
+        shares(picture_in(&world.generator, &camera, tiles).material)
     };
-    // Level 0 over the area of the levels since it last grew.
+    // Level 0 over the area of the levels since it last grew; the areas
+    // nest, so its tiles are kept for the next.
+    let mut level_0 = Tiles::new(0, world.heights_at(0));
     let mut reference: Option<(Box3, BTreeMap<u8, f64>)> = None;
     for level in levels {
         let area = around(region, level);
         if reference.as_ref().is_none_or(|(a, _)| *a != area) {
-            reference = Some((area, seen(0, &area)));
+            reference = Some((area, seen(&mut level_0, &area)));
         }
         let reference = &reference.as_ref().expect("made").1;
-        let here = seen(level, &area);
+        let here = seen(&mut Tiles::new(level, world.heights_at(level)), &area);
         report.margins.push(Margin {
             region: *region,
             measure,

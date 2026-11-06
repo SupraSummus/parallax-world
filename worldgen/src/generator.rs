@@ -1553,17 +1553,32 @@ mod tests {
         assert_eq!((shape.bounds.min, shape.bounds.max), ([-4, -3, -5], [605, 804, 6]));
     }
 
+    /** `f` of 0 to `n`, in order, on every core: many seeds take long to measure one by one. */
+    fn on_threads<T: Send>(n: usize, f: impl Fn(usize) -> T + Sync) -> Vec<T> {
+        let per_thread = n.div_ceil(std::thread::available_parallelism().map_or(1, |t| t.get())).max(1);
+        let f = &f;
+        std::thread::scope(|scope| {
+            let parts: Vec<_> = (0..n)
+                .step_by(per_thread)
+                .map(|from| scope.spawn(move || (from..n.min(from + per_thread)).map(f).collect::<Vec<_>>()))
+                .collect();
+            parts.into_iter().flat_map(|part| part.join().expect("measured")).collect()
+        })
+    }
+
     #[test]
     fn a_measured_far_form_keeps_what_rays_see() {
         // A solid block 64 units wide, painted with a sheet of glass on top, and a sparse cloud: measured at sites 16 apart from sites 2 apart.
-        let block = Node {
+        // Made on each thread: a node is not Sync.
+        let block = || Node {
             far: Some(Far::measured(fx(2.0))),
             ..Node::of(vec![
                 cuboid([0.0; 3], [64.0; 3], 1, SOLID, Op::Fill),
                 cuboid([0.0, 60.0, 0.0], [64.0, 64.0, 64.0], 2, SOLID, Op::Paint),
             ])
         };
-        let sites = measure(&block, "block", bounds_of(&block), fixed(2.0), 16, 1);
+        let one = block();
+        let sites = measure(&one, "block", bounds_of(&one), fixed(2.0), 16, 1);
         let inside = |p: [i64; 3]| p.iter().all(|v| (1..4).contains(v));
         assert!(
             (1..4).all(|y| (1..4).all(|x| (1..4).all(|z| (x + y + z) % 2 == 1 || sites.iter().any(|s| s.0 == [x, y, z])))),
@@ -1593,21 +1608,28 @@ mod tests {
             }
             glass as f64 / hits as f64
         };
-        let blocks: Vec<Sites> = (0..16).map(|i| measure(&block, &format!("block {i}"), bounds_of(&block), fixed(2.0), 16, 1)).collect();
+        let blocks: Vec<Sites> = on_threads(16, |i| {
+            let block = block();
+            measure(&block, &format!("block {i}"), bounds_of(&block), fixed(2.0), 16, 1)
+        });
         let from_above = blocks.iter().map(|sites| seen(sites, [0, -1, 0])).sum::<f64>() / 16.0;
         let from_the_side = blocks.iter().map(|sites| seen(sites, [1, 0, 0])).sum::<f64>() / 16.0;
         // Over these 16 blocks, 0.76 from above; with one kind a cell, its faces' together, 0.28.
         assert!(from_above > 0.65, "rays from above see the glass on top {from_above} of the time");
         assert!(from_the_side < 0.1, "rays from the side see the glass {from_the_side} of the time");
-        let cloud = Node { far: Some(Far::measured(fx(2.0))), ..Node::of(vec![ball([0.0; 3], 64.0, 1, Fill::Const(0.02), Op::Fill)]) };
+        let cloud = || Node { far: Some(Far::measured(fx(2.0))), ..Node::of(vec![ball([0.0; 3], 64.0, 1, Fill::Const(0.02), Op::Fill)]) };
         // Of its about 134 cells (a ball's volume over a site's, 2 · 16³), those a ray crossing is stopped in.
         // Fine sites 4 apart along a column, a cell's 512 fine sites are on 123, 126 and 128 of its columns along x, y
         // and z (columns_of_cell; its shadow is 2 · 8² columns), 1 to 8 on each, 4 on average. Each kept with
         // 1 − 0.98² ≈ 0.04, a column holds one with 1 − 0.96ⁿ: 0.15 on average over them, in a whole cell and
         // over the ball's (its cells on its edge, cut short, add a little). Each cloud is kept or not as a whole,
         // against its own threshold: on average over many, 256 for a share within about 0.02.
-        let kept = (0..256).map(|i| measure(&cloud, &format!("cloud {i}"), bounds_of(&cloud), fixed(2.0), 16, 1).len()).sum::<usize>()
-            as f64
+        let kept = on_threads(256, |i| {
+            let cloud = cloud();
+            measure(&cloud, &format!("cloud {i}"), bounds_of(&cloud), fixed(2.0), 16, 1).len()
+        })
+        .iter()
+        .sum::<usize>() as f64
             / (256.0 * 134.0);
         assert!((0.1..0.2).contains(&kept), "sparse clouds keep {kept} of their sites");
     }
