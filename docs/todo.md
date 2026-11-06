@@ -102,14 +102,18 @@ Numbers are for the forest at 1280×800, as measured when written.
   and with its depth varying along the axis, culled worse;
   one splat cut to the hull of a pillar's ends drew large rectangles,
   mostly discarded.
-- **A chunk could be an image.**
-  It holds at most one voxel per column,
-  so it could be a texture of colour, depth and run,
-  drawn as one rectangle whose fragment shader follows each ray
-  through it (a heightfield with thickness), in place of a prism per voxel:
-  far fewer instances, no depth within a layer,
-  and runs natively too.
-  Its columns are a checkerboard (a and b of one parity), to lay out.
+- **A chunk as an image was slower, on an Intel GPU.**
+  The branch `relief-chunks` draws a chunk's columns as tiles of
+  colour, depth and run, a rectangle each whose fragment shader
+  follows each ray through them, or traced in compute:
+  right to the pixel, runs included, a tenth of the vertices,
+  but slower than splats in the forest.
+  There (Mesa's driver), a fragment shader that discards
+  or writes its depth, even conservatively, is depth tested after it runs,
+  so it runs for several times the fragments that lie before what shows.
+  GPUs that test early despite discarding may differ;
+  fewer, thicker slices, a column holding several runs,
+  would cut the layers a ray crosses.
 - **The depth within a layer needs a fine depth buffer.**
   A layer's splats share 1 / (layers + 1) of the depth range;
   WebGL promises only 16 bits, which leaves a few dozen steps for them.
