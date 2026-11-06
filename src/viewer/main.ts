@@ -16,7 +16,7 @@ const query = parseViewQuery(location.search)
 const seed = query.seed ?? 1
 const fov = query.fov ?? DEFAULT_FOV
 const renderDistance = query.distance ?? DEFAULT_RENDER_DISTANCE
-const worldType: WorldType = query.worldType ?? 'forest'
+const worldType: WorldType = query.worldType ?? 'valley'
 
 const started = performance.now()
 const world = new World(seed, worldType)

@@ -67,7 +67,7 @@ function App() {
   const [camera, setCamera] = useState<Camera>({ x: 0, y: 0, z: 0 })
   const [orientation, setOrientation] = useState<Orientation>({ yaw: 0, pitch: 0 })
   const [showStats, setShowStats] = useState(true)
-  const [worldType, setWorldType] = useState<WorldType>('forest')
+  const [worldType, setWorldType] = useState<WorldType>('valley')
   const [fov, setFov] = useState(DEFAULT_FOV)
   const [renderDistance, setRenderDistance] = useState(DEFAULT_RENDER_DISTANCE)
   const [maxLeak, setMaxLeak] = useState(DEFAULT_MAX_LEAK)
@@ -126,7 +126,7 @@ function App() {
     }
     // The view the page's query asks for, if any (as the 3D viewer's).
     const query = parseViewQuery(location.search)
-    const renderer = new ParallaxRenderer(new World(query.seed ?? Date.now(), query.worldType), { bakery, onBaked, camera: query.camera })
+    const renderer = new ParallaxRenderer(new World(query.seed ?? Date.now(), query.worldType ?? 'valley'), { bakery, onBaked, camera: query.camera })
     if (query.look) renderer.setOrientation(query.look)
     if (query.fov !== undefined) renderer.setFov(query.fov)
     if (query.distance !== undefined) renderer.setRenderDistance(query.distance)
