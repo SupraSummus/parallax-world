@@ -216,9 +216,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   It wants crags and cirques of its own, or less snow where it is broad.
 - **Things placed one per region prefer places.**
   `worlds/tests/places.rs` lists them (`KNOWN`).
-  The learned town's settlements
-  come every 1200 m along z, give or take 150 m,
-  so none lies in most of each period.
   A landmark keeps its cell and all it shapes inside its region (`landmarks.rs`),
   so a strip along every region's edge never holds one,
   and a town's farmland there no farmstead or windmill
@@ -227,7 +224,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   50 m inside regions 160 m wide, and their pools, 16 m inside 64 m
   (`moor.rs`; regions not staggered),
   though the check can't see pools (a plan of a field).
-  Claimed instead (`Claims`, as the valley's towns are),
+  Claimed instead (`Claims`), as towns and settlements are,
   each would stand anywhere.
 - **The valley's town tiles are over the budget at levels 4 and 6**
   (`OVER_BUDGET` in `worlds/tests/cost.rs`; `worlds/examples/cost.rs` shows why):
