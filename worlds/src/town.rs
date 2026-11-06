@@ -54,7 +54,7 @@ kinds! {
     goods: 6, ["#c8483a", "#e0b040", "#4a7ab0", "#5a9a4a", "#e8e0d0"];
     iron: 3, ["#2b2d30"];
     lamp: 6, ["#fff3c4"];
-    water: 13, ["#3f7fa8", "#4a8ab2"];
+    water: 13, ["#3f7fa8", "#4a8ab2"], walk_through;
 }
 
 // The plan of a town, in units: a main street along z, blocks on either side of it in rows, side and cross streets between them.

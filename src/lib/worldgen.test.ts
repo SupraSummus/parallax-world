@@ -31,8 +31,11 @@ describe('forest', () => {
   const [x, z] = [Math.floor(spawn.x / s), Math.floor(spawn.z / s)]
   const box = { minX: x - 16, minY, minZ: z - 16, maxX: x + 16, maxY, maxZ: z + 16 }
 
-  it('gives its materials as colours, and the spawn point on a site above its ground', () => {
-    expect(materials[0]).toEqual({ color: '' })
+  it('gives its materials as colours, whether walked through, and the spawn point on a site above its ground', () => {
+    expect(materials[0]).toEqual({ color: '', walkThrough: true })
+    // Ground is stood on, plants are walked through.
+    expect(materials.some(m => m.walkThrough === false)).toBe(true)
+    expect(materials.slice(1).some(m => m.walkThrough === true)).toBe(true)
     for (const { color } of materials.slice(1)) expect(color).toMatch(/^#[0-9a-f]{6}$/)
     expect((spawn.x + spawn.y + spawn.z) & 1).toBe(0)
     let top = -Infinity

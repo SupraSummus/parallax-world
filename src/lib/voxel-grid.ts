@@ -20,6 +20,8 @@ export interface Voxel {
 export interface Material {
   /** '#rrggbb'; '' for id 0, empty. */
   color: string
+  /** Whether a walking body goes through it, as through plants and water (walk.ts); scenes of voxels' are solid. */
+  walkThrough?: boolean
 }
 
 /** A grid's fields without its methods: what a worker receives from postMessage. */

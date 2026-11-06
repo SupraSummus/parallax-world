@@ -699,7 +699,7 @@ mod tests {
     /** A ball of radius 40 at the origin, on the corner of four tiles. */
     fn a_ball() -> Generator {
         Generator {
-            kinds: vec![KindDef { name: "red", kind_type: 1, colors: &["#c04030"] }],
+            kinds: vec![KindDef { name: "red", kind_type: 1, colors: &["#c04030"], walk_through: false }],
             seed: 1,
             layers: vec![Layer::Population(Population {
                 name: "ball",

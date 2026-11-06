@@ -18,12 +18,14 @@ use crate::town::{self, Towns};
 
 kinds! {
     base: town::BASE + town::KINDS.len() as u8;
-    wheat: 1, ["#d9b44a", "#e3c25a", "#cfa83e"];
+    wheat: 1, ["#d9b44a", "#e3c25a", "#cfa83e"], walk_through;
     stubble: 1, ["#c8b070", "#bba363", "#d2bb7c"];
     furrow: 2, ["#5e4430", "#6a4d36"];
     tilth: 2, ["#7a5a3e", "#86644a"];
-    crop: 5, ["#4f8a34", "#5a9a3c", "#467c2e"];
+    crop: 5, ["#4f8a34", "#5a9a3c", "#467c2e"], walk_through;
     meadow: 1, ["#7aae48", "#86b850", "#6fa040"];
+    // The meadow's grass, in its colours: walked through, the meadow not.
+    meadowGrass: 1, ["#7aae48", "#86b850", "#6fa040"], walk_through;
 }
 
 /** Plan scale of the fields' bid, and of the slope they bid by. */
@@ -110,7 +112,7 @@ pub fn layers(seed: u64, land: Rc<Land>, me: usize, ground: Rc<Plan<i64>>, path:
                 Crop::Ploughed => soil(if stripe(z, 8, spacing, dither) { K::furrow } else { K::tilth }),
                 Crop::Rows if stripe(z, 12, spacing, dither) => soil(K::furrow).medium(K::crop, 2, 0.6),
                 Crop::Rows => soil(K::furrow),
-                Crop::Meadow => soil(K::meadow).medium(K::meadow, 2, 0.2),
+                Crop::Meadow => soil(K::meadow).medium(K::meadowGrass, 2, 0.2),
                 Crop::Hedge => soil(K::meadow).medium(F::bush, m(1.4), 0.45),
             }
             .spans()

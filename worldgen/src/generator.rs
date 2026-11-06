@@ -275,21 +275,29 @@ pub struct KindDef {
      */
     pub kind_type: u8,
     pub colors: &'static [&'static str],
+    /**
+     * Whether a body walking in the world goes through it, as through
+     * plants and water, rather than stands on it and is stopped by it.
+     */
+    pub walk_through: bool,
 }
 
 /**
  * A domain's kinds, after `base` others (see "Composing" in
  * docs/generators.md): `enum K` of their names, `KINDS` to append to a
- * generator's, and `k` for a name's Kind.
+ * generator's, and `k` for a name's Kind. A kind followed by `walk_through`
+ * is one a body walks through (KindDef::walk_through).
  */
 #[macro_export]
 macro_rules! kinds {
-    (base: $base:expr; $($name:ident: $type:expr, [$($color:expr),*];)*) => {
+    (@walk_through) => { false };
+    (@walk_through walk_through) => { true };
+    (base: $base:expr; $($name:ident: $type:expr, [$($color:expr),*] $(, $through:ident)?;)*) => {
         #[allow(non_camel_case_types, clippy::upper_case_acronyms)]
         #[derive(Clone, Copy, PartialEq, Eq, Default)]
         #[repr(u8)]
         pub enum K { #[default] $($name),* }
-        pub const KINDS: &[$crate::generator::KindDef] = &[$($crate::generator::KindDef { name: stringify!($name), kind_type: $type, colors: &[$($color),*] }),*];
+        pub const KINDS: &[$crate::generator::KindDef] = &[$($crate::generator::KindDef { name: stringify!($name), kind_type: $type, colors: &[$($color),*], walk_through: $crate::kinds!(@walk_through $($through)?) }),*];
         /** Kinds of the generator's before these. */
         pub const BASE: $crate::generator::Kind = $base;
         pub fn k(kind: K) -> $crate::generator::Kind {
@@ -757,6 +765,8 @@ fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &mut dyn FnMu
 pub struct Material {
     pub color: &'static str,
     pub material_type: u8,
+    /** Its kind's KindDef::walk_through. */
+    pub walk_through: bool,
 }
 
 impl Material {
@@ -775,14 +785,14 @@ struct Palette {
 
 impl Palette {
     fn new(kinds: &[KindDef], seed: u64) -> Palette {
-        let mut materials = vec![Material { color: "", material_type: 0 }];
+        let mut materials = vec![Material { color: "", material_type: 0, walk_through: true }];
         let shades = kinds
             .iter()
             .map(|k| {
                 k.colors
                     .iter()
                     .map(|color| {
-                        materials.push(Material { color, material_type: k.kind_type });
+                        materials.push(Material { color, material_type: k.kind_type, walk_through: k.walk_through });
                         (materials.len() - 1) as u8
                     })
                     .collect()
@@ -1693,7 +1703,7 @@ mod tests {
                 far: None,
             })
         };
-        let kinds = vec![KindDef { name: "stone", kind_type: 1, colors: &["#808080"] }];
+        let kinds = vec![KindDef { name: "stone", kind_type: 1, colors: &["#808080"], walk_through: false }];
         let alone = |layer: Layer| Generator { kinds: kinds.clone(), seed: 1, layers: vec![layer] };
         let (ground, solid) = (alone(ground), alone(block(4096.0)));
         for level in 0..6 {

@@ -13,7 +13,7 @@ use worldgen::grid::{Box3, FACE_WORDS, Grid};
 
 use crate::WORLDS;
 
-/** The world started last, its materials' colours (0xrrggbb by id), and the grid generated last. */
+/** The world started last, its materials' colours (as worldgen_start gives them, by id), and the grid generated last. */
 struct State {
     world: World,
     materials: Vec<u32>,
@@ -43,13 +43,14 @@ pub extern "C" fn worldgen_worlds() -> *const f64 {
 /**
  * Starts world `world` (its index in WORLDS; the first if past them) of
  * `seed` (an integer; JS numbers are f64); returns RESULT: spawn x, y, z,
- * materials, and a pointer to their colours (u32, 0xrrggbb).
+ * materials, and a pointer to their colours (u32, 0xrrggbb), bit 24 set
+ * if a walking body goes through it (KindDef::walk_through).
  */
 #[unsafe(no_mangle)]
 pub extern "C" fn worldgen_start(world: u32, seed: f64) -> *const f64 {
     let make = WORLDS.get(world as usize).unwrap_or(&WORLDS[0]).make;
     let world = make(seed as i64 as u64);
-    let materials = materials_of(&world.generator).iter().map(|m| m.rgb()).collect();
+    let materials = materials_of(&world.generator).iter().map(|m| m.rgb() | u32::from(m.walk_through) << 24).collect();
     STATE.with_borrow_mut(|state| {
         let State { world, materials, .. } = state.insert(State { world, materials, grid: None });
         let [x, y, z] = world.spawn.map(|v| v as f64);

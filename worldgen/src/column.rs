@@ -150,8 +150,11 @@ mod tests {
         assert_eq!(spans[3].extinction, Some(0.5 * 2.0 / 8.0));
         // A field of columns draws them.
         let layers = vec![Layer::Field(Field::columns("ground", 0.0, Op::Fill, |_, _, s| Column::new(0, s).surface(0, 1)))];
-        let world =
-            Generator { kinds: vec![crate::generator::KindDef { name: "stone", kind_type: 1, colors: &["#808080"] }], seed: 1, layers };
+        let world = Generator {
+            kinds: vec![crate::generator::KindDef { name: "stone", kind_type: 1, colors: &["#808080"], walk_through: false }],
+            seed: 1,
+            layers,
+        };
         let grid = generate(&world, &Box3 { min: [0, -4, 0], max: [4, 4, 4] }, 0);
         assert!((0..4).all(|x| (0..4).all(|z| (-1..=0).any(|y| grid.get(x, y, z) != 0))), "the turf is on every column");
     }

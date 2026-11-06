@@ -27,7 +27,10 @@ kinds! {
     drystone: 3, ["#6f6a62", "#7a756c", "#655f58"];
     thatch: 9, ["#a8874a", "#9a7a40", "#b4945a"];
     timber: 4, ["#4a3424", "#563d2a"];
-    water: 13, ["#3f6a8a", "#4a7898"];
+    water: 13, ["#3f6a8a", "#4a7898"], walk_through;
+    // What stands on the heath and the grass, in their colours: walked through, the ground not.
+    heatherSprigs: 5, ["#6b3a5e", "#7a4569", "#5e3352", "#84506f"], walk_through;
+    grassBlades: 1, ["#8a9a4a", "#7d8c42", "#96a556"], walk_through;
 }
 
 /** The heights the moor has anything at (lattice units). */
@@ -280,8 +283,8 @@ fn terrain(f: Rc<Moor>) -> Field {
         match surface {
             // Thickened only while it is at most four units: taller, a medium stops rays skimming over the heath,
             // and stands over the patches beside it, whose edges it takes over seen from above.
-            K::heather if spacing <= 2 => column.medium(K::heather, m(0.4), 0.5),
-            K::grass if spacing <= 2 => column.medium(K::grass, 2, 0.25),
+            K::heather if spacing <= 2 => column.medium(K::heatherSprigs, m(0.4), 0.5),
+            K::grass if spacing <= 2 => column.medium(K::grassBlades, 2, 0.25),
             _ => column,
         }
     })

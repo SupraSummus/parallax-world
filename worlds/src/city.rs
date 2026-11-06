@@ -30,7 +30,7 @@ kinds! {
     hedge: 1, ["#2f5e2a", "#356a2f", "#2a5426"];
     soil: 2, ["#4a3423", "#54392a"];
     bark: 4, ["#4b3621", "#57402a"];
-    canopy: 1, ["#4c7f2a", "#5a8f30", "#447324", "#679a38"];
+    canopy: 1, ["#4c7f2a", "#5a8f30", "#447324", "#679a38"], walk_through;
     pole: 3, ["#2e3236"];
     light: 6, ["#fff3c4"];
     concrete: 12, ["#9a9690", "#a19d97"];
@@ -42,7 +42,7 @@ kinds! {
     brass: 3, ["#c9a640"];
     railing: 3, ["#2b2d30"];
     roofUnit: 3, ["#9aa0a6", "#a3a9ae"];
-    water: 13, ["#3f7fa8"];
+    water: 13, ["#3f7fa8"], walk_through;
     courtLight: 12, ["#c8c0b0"];
     courtDark: 12, ["#bdb5a5"];
     table: 4, ["#6e4a2c"];
@@ -55,7 +55,7 @@ kinds! {
     bookPurple: 6, ["#5a3a6e"];
     bookWhite: 6, ["#e0dccf"];
     pot: 2, ["#b5603c"];
-    plant: 1, ["#3f7f35", "#4a8f3d", "#357030"];
+    plant: 1, ["#3f7f35", "#4a8f3d", "#357030"], walk_through;
     facadeSand: 10, ["#c9a27e"];
     facadeRust: 10, ["#b5654a"];
     facadeCream: 10, ["#d8cfb8"];
