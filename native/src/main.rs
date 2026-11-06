@@ -1,4 +1,4 @@
-//! Spike of a native frontend: a world of worlds/ (the forest, or --world)
+//! Spike of a native frontend: a world of worlds/ (the valley, or --world)
 //! generated in tiles, those in view first (world.rs), the renderer picking
 //! the chunks in view (renderer.rs), worker threads baking them with the
 //! baker in bake/, sharing the tiles, and wgpu drawing them in an egui window.
@@ -51,7 +51,7 @@ use world::{Level, Make, World};
 use worldgen::generator::materials_of;
 
 /** The world shown unless --world names another (worlds::WORLDS). */
-const WORLD: Make = worlds::forest::forest;
+const WORLD: Make = worlds::valley::valley;
 
 struct App {
     world: World,
