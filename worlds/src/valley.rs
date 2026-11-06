@@ -66,5 +66,5 @@ pub fn valley(seed: u64) -> World {
     layers.extend(fields::layers(seed, land, FIELDS, ground, path));
     let kinds = [forest::KINDS, town::KINDS, fields::KINDS].concat();
     // The forest's heights and reach, which hold the towns and fields too.
-    World { generator: Generator { kinds, seed: stream(seed, 4), layers }, spawn, reach: forest::REACH, heights: forest::HEIGHTS }
+    World { generator: Generator { kinds, seed: stream(seed, 4), layers }, spawn, heights: forest::HEIGHTS }
 }

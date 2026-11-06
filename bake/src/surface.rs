@@ -21,14 +21,15 @@ pub struct Voxel {
 }
 
 /**
- * A slice as its grid sees it (in_grid in lib.rs): slab `layer` of `level`
- * (see SliceId in slice-selection.ts), the sites in the slab's 2^level
- * layers. If `cutoff` is finite, only those whose cell of 2·FCC has its
- * site before layer `cutoff`.
+ * A slice: slab `layer` of `level`, made of cells of level `atoms` (see
+ * SliceId in slice-selection.ts). As its grid sees it (in_grid in lib.rs),
+ * of single voxels: the sites in the slab's 2^level layers. If `cutoff` is
+ * finite, only those whose cell of 2·FCC has its site before layer `cutoff`.
  */
 #[derive(Clone, Copy)]
 pub struct Slice {
     pub level: i32,
+    pub atoms: i32,
     pub layer: i32,
     pub cutoff: f64,
 }
@@ -36,9 +37,9 @@ pub struct Slice {
 /** The voxels cell_surface looks at for chunk cell (i, j) of a slice, as a box of (a, b, c), inclusive. */
 fn cell_box(slice: &Slice, i: i32, j: i32) -> ([i32; 3], [i32; 3]) {
     let cell = chunk_cell(slice.level, i, j);
-    let (ma, mb) = cell_margin(slice.level);
+    let (ma, mb) = cell_margin(slice.level, slice.atoms);
     let start = slice.layer * (1 << slice.level);
-    let (first, last) = site_layers(slice.level);
+    let (first, last) = site_layers(slice.level, slice.atoms);
     ([cell.left - ma, cell.bottom - mb, start + first], [cell.left + cell.columns + ma - 1, cell.bottom + cell.rows + mb - 1, start + last])
 }
 

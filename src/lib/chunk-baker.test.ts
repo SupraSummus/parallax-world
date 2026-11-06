@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { ChunkBaker, SPLAT } from './chunk-baker'
 import { VOXEL_FACES } from './fcc'
-import { sliceCentre, holds, halfLayer, atomLevel, atomSpacing } from './slice-selection'
+import { sliceCentre, holds, halfLayer, atomLevel, atomSpacing, ATOM_SHIFT } from './slice-selection'
 import { FACES, LAYER, toLocal, type Face } from './view'
 import { VoxelGrid, type Voxel } from './voxel-grid'
 import { levelsOf, type Vec3 } from './world'
@@ -81,11 +81,11 @@ describe('ChunkBaker', () => {
     [0, 0, Infinity], [0, 3, Infinity], [1, 1, Infinity], [1, 2, Infinity],
     [2, 1, Infinity], [3, 0, 4], [4, 0, Infinity], [5, 0, Infinity], [5, 0, 8], [0, 5, Infinity],
   ] as const)('paints every voxel a ray along the axis hits first, far to near, at its site and depth, in the colour of its face towards the camera, its splat holding where the ray meets the plane (level %s, layer %s, cutoff %s)', (level, layer, cutoff) => {
-    const slice = { level, layer, cutoff }
+    const slice = { level, atoms: atomLevel(level, ATOM_SHIFT), layer, cutoff }
     const centre = sliceCentre(slice)
     // The voxels of the grid it reads, N times the lattice's, in the colour of their faces towards the camera.
-    const n = atomSpacing(level)
-    const read = levels[atomLevel(level)]
+    const n = atomSpacing(slice)
+    const read = levels[slice.atoms]
     const voxels = read.toVoxels()
       .map(v => ({ ...toLattice(face, { x: n * v.x, y: n * v.y, z: n * v.z }), color: read.materials[read.face(v.x, v.y, v.z, frontOf(face))].color }))
       .filter(v => holds(slice, [v.a, v.b, v.c]))
@@ -108,7 +108,7 @@ describe('ChunkBaker', () => {
       expect(channels(rgba[k * SPLAT + 4], 0, 8, 16)).toEqual(channels(colorOf.get([a, b, c].join()) ?? 0, 16, 8, 0))
       expect(originX + splats[k * SPLAT]).toBeCloseTo(a * LAYER, 3)
       expect(originY + splats[k * SPLAT + 1]).toBeCloseTo(b, 3)
-      expect(centre + ((rgba[k * SPLAT + 4] >>> 24) - 128) * halfLayer(level)).toBeCloseTo(c * LAYER, 9)
+      expect(centre + ((rgba[k * SPLAT + 4] >>> 24) - 128) * halfLayer(slice)).toBeCloseTo(c * LAYER, 9)
       if (k > 0) expect(c).toBeLessThanOrEqual(lattice[3 * k - 1])
     }
 
@@ -142,7 +142,7 @@ describe('ChunkBaker', () => {
     const sitesOn = (face: Face) => {
       const turned = VoxelGrid.fromVoxels(voxels.map(({ a, b, c, color }) => ({ ...toWorld(face, a, b, c), color })))
       const turnedBaker = new ChunkBaker(turned.materials, [turned])
-      turnedBaker.bake({ face: face.name, level: 0, layer: 3, cutoff: Infinity, i: 0, j: 0 })
+      turnedBaker.bake({ face: face.name, level: 0, atoms: 0, layer: 3, cutoff: Infinity, i: 0, j: 0 })
       return turnedBaker.sites()
     }
     const sites = sitesOn(face)
@@ -156,7 +156,7 @@ describe('ChunkBaker', () => {
       const one = new VoxelGrid({ minX: -2, minY: -2, minZ: -2, maxX: 2, maxY: 2, maxZ: 2 }, [{ color: '' }, { color: '#ff0000' }, { color: '#0000ff' }])
       one.set(0, 0, 0, 1)
       one.setFaces([[0, 0, 0, VOXEL_FACES.map((_, k) => (k === frontOf(face) ? 2 : 1))]])
-      const { splats } = new ChunkBaker(one.materials, [one]).bake({ face: face.name, level: 0, layer: 0, cutoff: Infinity, i: 0, j: 0 })
+      const { splats } = new ChunkBaker(one.materials, [one]).bake({ face: face.name, level: 0, atoms: 0, layer: 0, cutoff: Infinity, i: 0, j: 0 })
       expect(splats.length).toBe(SPLAT)
       const rgb = new Uint32Array(splats.buffer)[4]
       expect([rgb & 255, (rgb >> 16) & 255].map(c => c > 0), face.name).toEqual([false, true])

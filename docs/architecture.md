@@ -62,9 +62,10 @@ So each level is used on its own.
 
 A slice (`SliceId`) of level k is a slab between two layers of 2^k·FCC:
 its atoms with their own site in the 2^k layers from layer · 2^k.
-Its atoms are the cells of 2^ℓ·FCC, ℓ = `atomLevel(k)` = max(0, k − 4):
-up to level 4 single voxels, slabs of 1 to 16 layers of them;
-above, 16 layers of cells of 2, 4, … 256 layers.
+Its atoms are the cells of 2^ℓ·FCC, ℓ = `atomLevel(k, s)` = max(0, k − s),
+s the atom shift (at most 4, see below):
+up to level s single voxels, slabs of 1 to 2^s layers of them;
+above, 2^s layers of cells of 2, 4, … up to 256 layers, the coarsest grid's.
 Slabs of levels with the same atoms nest: one of level k + 1 is two of level k.
 A slice splits no atom, except where the atoms grow (cutoffs, below):
 there the smaller cells along the boundary are shared by two levels.
@@ -91,7 +92,7 @@ The native spike (`native/src/world.rs`) has no grids, only tiles,
 made in the order the renderer wants them:
 a cell is baked once the world has every tile it reads (`chunk_reads`),
 and until then it asks for them, nearest first.
-Then come the other tiles within reach of each level the slices read,
+Then come the other tiles within `GRID_REACH` of each level the slices read,
 so that turning finds them made, and far ones are dropped.
 A tile never changes once made,
 so no chunk or cell surface goes stale as tiles come.
@@ -104,13 +105,19 @@ Each of its faces that shows takes what most of the cell's open faces
 facing its way show (section 6):
 a coarse voxel at a roof's edge is roof from above, wall from the side.
 A slice is about 1/detail of its distance thick (section 2),
-so from level 4 on, a slab of 16 atoms,
-a voxel stays about the same size on screen (`docs/todo.md`).
-Up to where level 5, the first of coarse voxels, begins,
-and √2 times as far to the sides of a face,
-level 0's grid must hold the world.
-Atoms twice as fine on screen would need level 0's grid twice as wide,
-four times the bytes in every worker (`ATOM_SHIFT`).
+so from level s on, a slab of 2^s atoms,
+a voxel stays about the same size on screen,
+about 1 / (2^s · detail) radians (`docs/todo.md`).
+
+**Grid reach.** Each grid holds the world `GRID_REACH` of its units
+around the camera (`World.holds`, a square with its corners cut),
+and slices read no grid farther:
+the atom shift is the largest whose slices keep within it (`atomShift`).
+So thinner slices (a smaller leak) take coarser atoms sooner,
+voxels on screen stay within about twice their size at the default leak,
+and the grids' bytes are the same at every leak.
+Atoms twice as fine on screen would need `GRID_REACH` twice as large,
+four times the bytes in every worker.
 
 Why many layers of atoms and not one:
 cells of neighbouring layers interlock, as voxels do.
@@ -134,7 +141,7 @@ A ray within a face's rhombus (section 4) meets the cells of a face's
 layers in order, as it meets voxels;
 only voxels on a cell's boundary, half in one cell and half in the next,
 can be met out of order by a ray, by up to a voxel.
-A slice is named by face, level, slab and cutoff (below),
+A slice is named by face, level, atoms, slab and cutoff (below),
 so it always holds the same voxels and can be cached.
 
 ### Camera selection

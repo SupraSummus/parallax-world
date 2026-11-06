@@ -22,7 +22,6 @@ export function smallForest(seed: number): Generated {
       return grid
     },
     spawn: { x: 0, y: 6, z: -4 },
-    reach: 64,
     heights: level => ({ minY: Math.floor(-8 / 2 ** level), maxY: Math.ceil(10 / 2 ** level) }),
   }
 }

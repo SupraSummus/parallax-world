@@ -73,7 +73,7 @@ test.skipIf(!process.env.DUMP)('dump a view for the native spike', () => {
   u32(requests.length)
   for (const r of requests) {
     u32(faceIndex.get(r.face) ?? 0)
-    i32(r.level, r.layer)
+    i32(r.level, r.atoms, r.layer)
     f64(r.cutoff)
     i32(r.i, r.j)
     f64(sliceCentre(r))

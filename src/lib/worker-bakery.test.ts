@@ -5,7 +5,7 @@ import type { Orientation } from './view'
 import { picture } from './picture.test-helper'
 import { VoxelGrid } from './voxel-grid'
 import { WorkerBakery, type BakeWorker } from './worker-bakery'
-import { atomLevel, GRID_LEVELS } from './slice-selection'
+import { GRID_LEVELS } from './slice-selection'
 import { levelsOf, World } from './world'
 import { hills } from './hills.test-helper'
 
@@ -39,7 +39,7 @@ class FakeWorker implements BakeWorker {
 }
 
 /** A chunk of a far slice, cheap to bake. */
-const at = (i: number): ChunkRequest => ({ face: '+x+z', level: 6, layer: 0, cutoff: Infinity, i, j: 0, grid: 0 })
+const at = (i: number): ChunkRequest => ({ face: '+x+z', level: 6, atoms: 2, layer: 0, cutoff: Infinity, i, j: 0, grid: 0 })
 
 const tick = () => new Promise(resolve => setTimeout(resolve))
 
@@ -169,7 +169,7 @@ describe('WorkerBakery', () => {
 
   it("shows a cell's bake from its grid's old place while the new one is baking", async () => {
     const renderer = await moveFirstGrid(new WorkerBakery([new FakeWorker(), new FakeWorker()]))
-    const grids = (frame: Frame) => frame.layers.filter(l => atomLevel(l.slice.level) === 0).flatMap(l => l.placements.map(p => p.chunk.grid))
+    const grids = (frame: Frame) => frame.layers.filter(l => l.slice.atoms === 0).flatMap(l => l.placements.map(p => p.chunk.grid))
     expect(grids(renderer.render())).toContain(0)
     expect(pending(renderer)).toBeGreaterThan(0)
     expect(new Set(grids(await settle(renderer)))).toEqual(new Set([1]))
@@ -231,6 +231,9 @@ describe('WorkerBakery', () => {
     const bakery = new RecordingBakery([new FakeWorker(), new FakeWorker()])
     const renderer = await moveFirstGrid(bakery)
     const baked = new Set(bakery.delivered.map(cell))
+    // Turned: cells never baked come into view too.
+    const { yaw, pitch } = renderer.getOrientation()
+    renderer.setOrientation({ yaw: yaw + 45, pitch })
     // Re-tiled segments come between, their slices drawn only once all baked.
     const drawn = new Set(renderer.render().layers.map(({ face, slice: { level, layer, cutoff } }) => [face.name, level, layer, cutoff].join()))
     const standsIn = bakery.latest.filter(r => drawn.has([r.face, r.level, r.layer, r.cutoff].join())).map(r => baked.has(cell(r)))
@@ -307,7 +310,7 @@ describe('WorkerBakery', () => {
   })
 
   it('drops chunks baked from a replaced world', async () => {
-    const request = { face: '+x+z', level: 5, layer: 0, cutoff: Infinity, i: 0, j: 0, grid: 0 }
+    const request = { face: '+x+z', level: 5, atoms: 1, layer: 0, cutoff: Infinity, i: 0, j: 0, grid: 0 }
     expect(new ChunkBaker(world.materials, world.levels).bake(request).splats.length).toBeGreaterThan(0)
 
     const bakery = new WorkerBakery([new FakeWorker()])
@@ -334,7 +337,7 @@ describe('WorkerBakery', () => {
     const settled = await settle(renderer)
     expect(shown(settled)).toEqual(reference(undefined, new World(3, 'forest')))
     // Coarse grids among them.
-    expect(settled.layers.some(l => atomLevel(l.slice.level) > 0 && l.placements.length > 0)).toBe(true)
+    expect(settled.layers.some(l => l.slice.atoms > 0 && l.placements.length > 0)).toBe(true)
   })
 
   it('moves the grids with the camera: far from the spawn point, near slices still show', async () => {
@@ -344,17 +347,12 @@ describe('WorkerBakery', () => {
     const levels = () => Array.from({ length: GRID_LEVELS }, (_, level) => generated.level(level)).filter(Boolean).length
     while (levels() < GRID_LEVELS) await tick()
     await settle(renderer)
-    // Well past where level 0's first grid ends; levels 0 and 1 move.
-    const camera = { ...generated.spawn, x: generated.spawn.x + 600 }
-    const holds = (level: number) => {
-      const grid = generated.level(level)
-      const x = camera.x / 2 ** level
-      return !!grid && grid.minX <= x && x < grid.minX + grid.nx
-    }
-    expect(holds(0)).toBe(false)
+    // Far enough for the grids of levels 0 and 1 to move, not 2's (see RECENTRE in world.ts).
+    const camera = { ...generated.spawn, x: generated.spawn.x + 500 }
     renderer.setCamera(camera)
     renderer.render()
-    while (!holds(0) || !holds(1)) await tick()
+    while (generated.version(0) === 0 || generated.version(1) === 0 || generated.generating > 0) await tick()
+    expect(generated.version(2)).toBe(0)
     const settled = await settle(renderer)
     expect(settled.layers.some(l => l.slice.level === 0 && l.placements.length > 0)).toBe(true)
     expect(shown(settled)).toEqual(reference(camera, new World(3, 'forest')))

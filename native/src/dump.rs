@@ -9,6 +9,7 @@ use bake::{Grid, Lattice, VIEW_FACES};
 pub struct Request {
     pub face: usize,
     pub level: i32,
+    pub atoms: i32,
     pub layer: i32,
     pub cutoff: f64,
     pub i: i32,
@@ -82,7 +83,7 @@ pub fn read(bytes: &[u8]) -> Dump {
         })
         .collect();
     let requests = b.array(|b| {
-        let r = Request { face: b.u32() as usize, level: b.i32(), layer: b.i32(), cutoff: b.f64(), i: b.i32(), j: b.i32() };
+        let r = Request { face: b.u32() as usize, level: b.i32(), atoms: b.i32(), layer: b.i32(), cutoff: b.f64(), i: b.i32(), j: b.i32() };
         // The slice's centre plane: bake's slicing finds it.
         b.f64();
         r

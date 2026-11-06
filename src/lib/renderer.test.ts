@@ -404,7 +404,7 @@ describe('ParallaxRenderer', () => {
 
 describe('view query', () => {
   it('reads back what is written, and leaves out what is missing or wrong', () => {
-    const view = { seed: 7, worldType: 'forest', camera: { x: 1, y: -2, z: 3.5 }, look: { yaw: 30, pitch: -10 }, fov: 60, distance: 500 } as const
+    const view = { seed: 7, worldType: 'forest', camera: { x: 1, y: -2, z: 3.5 }, look: { yaw: 30, pitch: -10 }, fov: 60, distance: 500, leak: 2.5 } as const
     expect(parseViewQuery(viewQuery(view))).toEqual(view)
     expect(parseViewQuery('?seed=x&world=moon&camera=1,2&look=30,&fov=')).toEqual({})
     // The worlds of worlds/ by their names in WORLDS.

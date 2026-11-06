@@ -39,13 +39,12 @@ export function generated(name: string, seed: number): Generated {
   const exports = wasmInstance() as unknown as Exports
   // Before reading memory.buffer: each call may grow (and so replace) it.
   const result = (at: number, count: number) => new Float64Array(exports.memory.buffer, at, count)
-  const [x, y, z, reach, count, colours] = result(exports.worldgen_start(world, seed), 6)
+  const [x, y, z, count, colours] = result(exports.worldgen_start(world, seed), 5)
   const materials: Material[] = Array.from(new Uint32Array(exports.memory.buffer, colours, count), (rgb, id) => ({
     color: id === 0 ? '' : `#${rgb.toString(16).padStart(6, '0')}`,
   }))
   return {
     spawn: { x, y, z },
-    reach,
     materials,
     heights: level => {
       const [minY, maxY] = result(exports.worldgen_heights(level), 2)

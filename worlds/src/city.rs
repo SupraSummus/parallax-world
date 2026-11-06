@@ -134,8 +134,7 @@ const SILL: i64 = vox(0.75);
 const WINDOW_TOP: i64 = vox(2.75);
 const TRANSOM: i64 = WINDOW_TOP - 2;
 
-/** How far around the camera level 0's grid must hold the city, and the heights it has anything at (lattice units). */
-const REACH: f64 = 352.0;
+/** The heights the city has anything at (lattice units). */
 const HEIGHTS: (i64, i64) = (m(-16.0), m(16.0));
 
 // Per building: one of each.
@@ -1044,5 +1043,5 @@ pub fn city(seed: u64) -> World {
         .anchor(|cell| (cell.centre == [0, 0, 0]).then_some([0.0; 3]))
         .make(move |_, _| Some(district(blocks.clone())));
     let layers = vec![Layer::Field(ground(stream(seed, 2))), Layer::Population(population)];
-    World { generator: Generator { kinds: KINDS.to_vec(), seed: stream(seed, 6), layers }, spawn, reach: REACH, heights: HEIGHTS }
+    World { generator: Generator { kinds: KINDS.to_vec(), seed: stream(seed, 6), layers }, spawn, heights: HEIGHTS }
 }

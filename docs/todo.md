@@ -53,7 +53,8 @@ Numbers are for the forest at 1280×800, as measured when written.
   but they are still as thin as drawn flat they would need to be
   (section 2 of `docs/architecture.md`),
   and "Max Occlusion Leak" sets both their thickness
-  and their level of detail (atoms of 2^(k−4) at level k).
+  and their level of detail (atoms of 2^(k−s) at level k,
+  s as large as the grids' reach allows).
   Thicker is faster but coarser: in the forest, a first render takes
   about 6.5 s at detail 9.5 (6°), 3 s at 2.4 and 2.7 s at 1
   (voxels 4 and 10 times as large), against 2.5 s drawn flat at 9.5
@@ -137,15 +138,27 @@ Numbers are for the forest at 1280×800, as measured when written.
   as the forest covers the screen in fine pieces.
   Testing quarters of a cell first would not help (two in three are mixed),
   nor would clipping without allocating in `shape`.
+- **The native compositor's buffers stop at the device's limit.**
+  `Arena::grow` caps a buffer at what the device allows
+  (128 MB of splats on lavapipe), and `allocate` then hands out room past it:
+  wgpu panics in `Compositor::prepare`
+  (the city at 1280×660 with a 2.4° leak did, before `GRID_REACH`).
+  Past the limit it could drop the farthest chunks, or split the buffer.
+- **After a long jump, the workers' frame culls more than the main thread's.**
+  Once the grids of three or more levels move at once,
+  a renderer baking in workers counts a few more chunks covered
+  than one baking on the main thread at the same view
+  (`worker-bakery.test.ts` keeps its move short of that).
+  Whether it shows on screen is not checked.
 - **Moved grids are posted whole.**
   When a grid moves with the camera (section 1 of `docs/architecture.md`),
   the main thread posts all of it to every worker, though they have most of it:
   at level 0, ~40 MB a worker every 12 m walked.
   Workers could keep the tiles and put the grid together themselves.
 - **Far voxels 5.6–11 pixels across.**
-  With `ATOM_SHIFT` 6 they were 1.4–2.7 pixels,
-  but level 0's grid would have to reach 4 times as far (from 115 m on):
-  ~16 times its 40 MB, in each bake worker.
+  Atoms 4 times as fine (1.4–2.7 pixels)
+  would need `GRID_REACH` 4 times as large:
+  ~16 times the grids' bytes, in each bake worker.
   Grids shared between the workers would allow it,
   or bricks sent to a worker only once a chunk it bakes needs them.
   (Shared memory needs cross-origin isolation,
@@ -165,6 +178,9 @@ Numbers are for the forest at 1280×800, as measured when written.
 
 ## Ideas
 
+- Generate the web's tiles as the native spike does:
+  those the chunks in view read, nearest first,
+  instead of every tile within `GRID_REACH` of the camera.
 - Keep the view in the address bar as the camera moves,
   so a view can be copied (the page reads it already).
 - Measure the seams between faces against ray-cast perspective.

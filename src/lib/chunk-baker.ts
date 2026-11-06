@@ -81,7 +81,7 @@ interface Baker {
   bake: Call
   sites: () => number
 }
-type Call = (face: number, level: number, layer: number, cutoff: number, i: number, j: number) => number
+type Call = (face: number, level: number, atoms: number, layer: number, cutoff: number, i: number, j: number) => number
 
 const faceIndex = new Map(FACES.map((face, index) => [face.name, index]))
 
@@ -136,37 +136,37 @@ export class ChunkBaker {
   }
 
   /** Calls `bake` and returns its result's numbers. */
-  private call({ face, level, layer, cutoff, i, j }: BakeRequest): Float64Array {
+  private call({ face, level, atoms, layer, cutoff, i, j }: BakeRequest): Float64Array {
     const index = faceIndex.get(face)
     if (index === undefined) throw new Error(`no face ${face}`)
-    const at = this.baker.bake(index, level, layer, cutoff, i, j)
+    const at = this.baker.bake(index, level, atoms, layer, cutoff, i, j)
     if (at === 0) throw new Error('the baker has no world')
     return copyOut(this.baker.memory, Float64Array, at, 11)
   }
 }
 
 /** Numbers per request in a `want` message (see encodeRequests). */
-const REQUEST = 7
+const REQUEST = 8
 
 /** Requests packed into numbers, REQUEST each, to post to a worker cheaply. */
 export function encodeRequests(requests: readonly ChunkRequest[]): Float64Array {
   const packed = new Float64Array(requests.length * REQUEST)
-  requests.forEach(({ face, level, layer, cutoff, i, j, grid }, n) => {
+  requests.forEach(({ face, level, atoms, layer, cutoff, i, j, grid }, n) => {
     const index = faceIndex.get(face)
     if (index === undefined) throw new Error(`no face ${face}`)
-    packed.set([index, level, layer, cutoff, i, j, grid], n * REQUEST)
+    packed.set([index, level, atoms, layer, cutoff, i, j, grid], n * REQUEST)
   })
   return packed
 }
 
 /** The n-th request of encodeRequests' numbers. */
 function decodeRequest(packed: Float64Array, n: number): ChunkRequest {
-  const [face, level, layer, cutoff, i, j, grid] = packed.subarray(n * REQUEST, (n + 1) * REQUEST)
-  return { face: FACES[face].name, level, layer, cutoff, i, j, grid }
+  const [face, level, atoms, layer, cutoff, i, j, grid] = packed.subarray(n * REQUEST, (n + 1) * REQUEST)
+  return { face: FACES[face].name, level, atoms, layer, cutoff, i, j, grid }
 }
 
 /** A key per chunk request. */
-const requestKey = ({ face, level, layer, cutoff, i, j, grid }: ChunkRequest) => [face, level, layer, cutoff, i, j, grid].join()
+const requestKey = ({ face, level, atoms, layer, cutoff, i, j, grid }: ChunkRequest) => [face, level, atoms, layer, cutoff, i, j, grid].join()
 
 /**
  * Messages to a bake worker: a new world (numbered by `generation`, which

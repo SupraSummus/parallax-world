@@ -231,10 +231,10 @@ export class Compositor {
         face = layer.face
         setView(faceBasis(face, frame.orientation))
       }
-      const { distance, placements, fog, slice: { level } } = layer
+      const { distance, placements, fog, slice } = layer
       gl.uniform1f(u.distance, distance)
-      gl.uniform1f(u.halfLayer, halfLayer(level))
-      gl.uniform1f(u.halfDepth, (thickness(level) * LAYER) / 2)
+      gl.uniform1f(u.halfLayer, halfLayer(slice))
+      gl.uniform1f(u.halfDepth, (thickness(slice) * LAYER) / 2)
       gl.uniform1f(u.fog, fog)
       gl.uniform1f(u.depth, z(i))
       for (const { chunk, x, y } of placements) {

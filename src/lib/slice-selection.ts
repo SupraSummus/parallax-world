@@ -6,10 +6,10 @@
  * A slice is a slab of a face's layers between two layers of a coarser
  * lattice 2^k·FCC (k its level), made of the cells of a finer one 2^ℓ·FCC
  * (its atoms, cells.ts) that have their own site in the slab, drawn as
- * the voxels of the world's grid of level ℓ. Up to level ATOM_SHIFT the
- * atoms are single voxels and a slab is 2^k layers of them; above, a slab
- * is 2^ATOM_SHIFT layers of coarser voxels. In grid ℓ's units a slice is
- * one of level k − ℓ: slices are the same at every scale. Voxels of
+ * the voxels of the world's grid of level ℓ. Up to level s, the atom shift
+ * (atomShift), the atoms are single voxels and a slab is 2^k layers of
+ * them; above, a slab is 2^s layers of coarser voxels. In grid ℓ's units a
+ * slice is one of level k − ℓ: slices are the same at every scale. Voxels of
  * neighbouring layers interlock, so the slab's voxels span a little more
  * than its 2^k layers; its centre plane, where its chunks are baked and
  * drawn, is the middle of that.
@@ -23,9 +23,13 @@
  *    screen, so slices grow with distance and covering distance n takes
  *    O(detail · log n) slices.
  *
- * 2. Caching. A slice is named by its level and its slab (and its cutoff,
- *    see SliceId) wherever the camera is, so it always has the same content
- *    and can be cached.
+ * 2. Caching. A slice is named by its level, atoms and slab (and its
+ *    cutoff, see SliceId) wherever the camera is, so it always has the same
+ *    content and can be cached.
+ *
+ * 3. Grids. Each grid holds the world GRID_REACH of its units around the
+ *    camera, and the slices read no farther: the finer the slices (the
+ *    higher detail), the sooner their atoms grow (atomShift).
  *
  * Walking away from the camera, each level takes over once its slices are
  * thin enough there. Slabs of levels with the same atoms nest; where the
@@ -42,44 +46,75 @@ import { owner, ownedLayers, spacing } from './cells'
 import { LAYER } from './view'
 
 /**
- * A slice: slab `layer` of `level`, i.e. its atoms (cells of
- * atomLevel(level)) with their own site in layers
+ * A slice: slab `layer` of `level`, i.e. its atoms (cells of level
+ * `atoms`, see atomLevel) with their own site in layers
  * [layer · 2^level, (layer + 1) · 2^level). If `cutoff` is finite, only
  * those whose cell one atom size up has its site in a layer before
  * `cutoff`; the rest belong to the next level's slices.
  */
 export interface SliceId {
   level: number
+  atoms: number
   layer: number
   cutoff: number
 }
+
+/** What a slice's shape depends on: its level and its atoms'. */
+export type Slab = Pick<SliceId, 'level' | 'atoms'>
 
 /** Slabs of up to 4096 layers: from about 4 km on in the forest at 1280×800, slices grow no thicker. @internal */
 export const MAX_LEVEL = 12
 
 /**
- * Above level ATOM_SHIFT a slab is 2^ATOM_SHIFT layers of cells, not of
- * voxels. A slice is about 1/detail of its distance thick, so its atoms
- * stay 5.6 to 11 pixels across with the defaults; each step up halves
- * that, and quadruples the bytes of level 0's grid (docs/architecture.md,
- * section 1).
+ * The largest atom shift: slabs of at most 2^ATOM_SHIFT layers of cells,
+ * as the baker's splats' depths ride in a byte (bake/src/slicing.rs).
+ * @internal
  */
-const ATOM_SHIFT = 4
+export const ATOM_SHIFT = 4
+
+/** Levels of a world's grids: one per atom level up to MAX_LEVEL's at the largest shift. */
+export const GRID_LEVELS = MAX_LEVEL - ATOM_SHIFT + 1
+
+/**
+ * How far around the camera each grid holds the world, in its units
+ * (World.holds), and so how far slices may read it (atomShift).
+ * Its reciprocal is about the angle the farthest atoms of each grid span:
+ * larger makes atoms finer on screen, and grids' bytes grow as its square.
+ */
+export const GRID_REACH = 400
 
 /**
  * The level of the cells (cells.ts) a slice of `level` is made of, and so
- * of the grid it reads: 0, single voxels, up to ATOM_SHIFT.
+ * of the grid it reads, at atom shift `shift`: 0, single voxels, up to
+ * level `shift`, then one more per level, up to the coarsest grid's.
+ * @internal
  */
-export function atomLevel(level: number): number {
-  return Math.max(0, level - ATOM_SHIFT)
+export function atomLevel(level: number, shift: number): number {
+  return Math.min(GRID_LEVELS - 1, Math.max(0, level - shift))
 }
 
-/** Levels of a world's grids: one per atomLevel up to MAX_LEVEL's. */
-export const GRID_LEVELS = atomLevel(MAX_LEVEL) + 1
+/**
+ * The atom shift for slices of `detail`: the largest (the finest atoms)
+ * whose slices read no grid but the coarsest farther than GRID_REACH,
+ * for any detail the panel offers.
+ *
+ * In grid ℓ's units, level s + ℓ, the last with its atoms, is level s.
+ * It ends where the next level begins (selectSlices): that level's
+ * thickness · detail ahead, rounded up to two slabs of 2^s, and 7 more:
+ * the next level's near side (2), sites past the cutoff (3), their
+ * neighbours and voxels (2). A face's rays are |x| + √2 · |y| ≤ z, so a
+ * site c layers ahead is at most c units away.
+ */
+function atomShift(detail: number): number {
+  const reach = (s: number) => thickness({ level: s + 1, atoms: 1 }) * detail + 2 * 2 ** s + 7
+  let shift = ATOM_SHIFT
+  while (shift > 0 && reach(shift) > GRID_REACH) shift--
+  return shift
+}
 
 /** N: the spacing of its atoms' sites, in layers (and lattice units). */
-export function atomSpacing(level: number): number {
-  return spacing(atomLevel(level))
+export function atomSpacing({ atoms }: Slab): number {
+  return spacing(atoms)
 }
 
 /**
@@ -88,17 +123,17 @@ export function atomSpacing(level: number): number {
  * there, every N-th, and the cell of each holds the sites of finer grids
  * ownedLayers around its own.
  */
-export function siteLayers(level: number): [number, number] {
-  const [lo, hi] = ownedLayers(atomLevel(level))
-  return [lo, 2 ** level - atomSpacing(level) + hi]
+export function siteLayers(slab: Slab): [number, number] {
+  const [lo, hi] = ownedLayers(slab.atoms)
+  return [lo, 2 ** slab.level - atomSpacing(slab) + hi]
 }
 
 /**
  * @internal Whether a slice holds site (a, b, c) of any grid, i.e. its
  * atom (for tests; classify in bake/src/surface.rs).
  */
-export function holds({ level, layer, cutoff }: SliceId, site: [number, number, number]): boolean {
-  const n = spacing(atomLevel(level))
+export function holds({ level, atoms, layer, cutoff }: SliceId, site: [number, number, number]): boolean {
+  const n = spacing(atoms)
   return Math.floor(owner(n, site)[2] / 2 ** level) === layer && (cutoff === Infinity || owner(2 * n, site)[2] < cutoff)
 }
 
@@ -107,18 +142,18 @@ export function holds({ level, layer, cutoff }: SliceId, site: [number, number, 
  * of its 2^level layers, and its voxels, N wide, reach N layers past them
  * (see fcc.ts). 2^level + N.
  */
-export function thickness(level: number): number {
-  return 2 ** level + atomSpacing(level)
+export function thickness(slab: Slab): number {
+  return 2 ** slab.level + atomSpacing(slab)
 }
 
 /** Its near side, the near tips of its nearest voxels, in layers. */
-function nearSide({ level, layer }: { level: number; layer: number }): number {
-  return layer * 2 ** level - atomSpacing(level)
+function nearSide(slice: Slab & { layer: number }): number {
+  return slice.layer * 2 ** slice.level - atomSpacing(slice)
 }
 
 /** A name for a slice of a face, the same wherever the camera is. */
-export function sliceKey({ level, layer, cutoff }: SliceId): string {
-  return `${String(level)}:${String(layer)}:${String(cutoff)}`
+export function sliceKey({ level, atoms, layer, cutoff }: SliceId): string {
+  return `${String(level)}/${String(atoms)}:${String(layer)}:${String(cutoff)}`
 }
 
 /**
@@ -173,12 +208,12 @@ export function chunkCells(level: number, left: number, right: number, bottom: n
 const MAX_SLANT = 1
 
 /** How far past its slice's centre plane a splat is per step of its depth byte (see ChunkSplats), in world units: half a layer of its grid. */
-export function halfLayer(level: number): number {
-  return (atomSpacing(level) * LAYER) / 2
+export function halfLayer(slab: Slab): number {
+  return (atomSpacing(slab) * LAYER) / 2
 }
 
 /**
- * How far around its cell a chunk of a slice of `level` may draw voxels
+ * How far around its cell a chunk of a slice of `slab` may draw voxels
  * from, in lattice units: `columns` along a, `rows` along b (cell_margin in
  * bake/src/surface.rs, in the units of the slice's grid, N times these).
  * A voxel's splat, less than half the slice's thickness off the centre
@@ -186,9 +221,9 @@ export function halfLayer(level: number): number {
  * in bake/src/splats.rs). `rows` also bounds how far from a voxel's b it
  * may be drawn.
  */
-export function cellMargin(level: number): { columns: number; rows: number } {
-  const n = atomSpacing(level)
-  const off = MAX_SLANT * (thickness(level) / n / 2) * LAYER
+export function cellMargin(slab: Slab): { columns: number; rows: number } {
+  const n = atomSpacing(slab)
+  const off = MAX_SLANT * (thickness(slab) / n / 2) * LAYER
   return { columns: n * Math.ceil((off + 1.5) / LAYER), rows: n * Math.ceil(off * Math.SQRT1_2 + 1.5) }
 }
 
@@ -224,7 +259,7 @@ export function leakAngle(detail: number): number {
  * reach thickness / 2 to either side.
  */
 export function sliceCentre(slice: SliceId): number {
-  return (nearSide(slice) + thickness(slice.level) / 2) * LAYER
+  return (nearSide(slice) + thickness(slice) / 2) * LAYER
 }
 
 /** The smallest multiple of n ≥ x. */
@@ -250,25 +285,28 @@ const alignUp = (x: number, n: number) => Math.ceil(x / n) * n
 export function selectSlices(cameraZ: number, minRelativeDepth: number, maxRelativeDepth: number, detail: number): SliceId[] {
   if (minRelativeDepth >= maxRelativeDepth) return []
   const far = cameraZ + maxRelativeDepth
+  const shift = atomShift(detail)
+  const slabOf = (level: number): Slab => ({ level, atoms: atomLevel(level, shift) })
   const slices: SliceId[] = []
   // Round up: a slice closer than minRelativeDepth would be blown up over the screen.
   let from = Math.ceil(cameraZ + minRelativeDepth)
   for (let level = 0; ; level++) {
     const slab = 2 ** level
-    const n = spacing(atomLevel(level))
-    const first = siteLayers(level)[0]
+    const { atoms } = slabOf(level)
+    const n = spacing(atoms)
+    const first = siteLayers(slabOf(level))[0]
     let until = Infinity
     let grows = false
     if (level < MAX_LEVEL) {
-      const next = level + 1
-      grows = atomLevel(next) > atomLevel(level)
-      until = alignUp(Math.max(cameraZ - nearSide({ level: next, layer: 0 }) + thickness(next) * detail, from + (grows ? 3 * n : 0)), 2 * slab)
+      const next = slabOf(level + 1)
+      grows = next.atoms > atoms
+      until = alignUp(Math.max(cameraZ - nearSide({ ...next, layer: 0 }) + thickness(next) * detail, from + (grows ? 3 * n : 0)), 2 * slab)
       // The next level's sites reach at most its first site layer before its slabs.
       if (until + siteLayers(next)[0] >= far) until = Infinity
     }
     const last = until === Infinity ? (m: number) => m * slab + first < far : grows ? (m: number) => m * slab <= until : (m: number) => m * slab < until
     for (let layer = Math.ceil(from / slab); last(layer); layer++) {
-      slices.push({ level, layer, cutoff: grows && (layer + 1) * slab + 4 * n + 2 > until ? until : Infinity })
+      slices.push({ level, atoms, layer, cutoff: grows && (layer + 1) * slab + 4 * n + 2 > until ? until : Infinity })
     }
     if (until === Infinity) return slices
     from = until

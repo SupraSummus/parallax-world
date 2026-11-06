@@ -30,8 +30,7 @@ kinds! {
     water: 13, ["#3f6a8a", "#4a7898"];
 }
 
-/** How far around the camera level 0's grid must hold the moor, and the heights it has anything at (lattice units). */
-const REACH: f64 = 352.0;
+/** The heights the moor has anything at (lattice units). */
 const HEIGHTS: (i64, i64) = (m(-24.0), m(32.0));
 
 /** Water stands in the hollows up to this height. */
@@ -257,7 +256,7 @@ pub fn moor(seed: u64) -> World {
         Layer::Population(boulders(f.clone())),
         Layer::Population(steadings_population(f)),
     ];
-    World { generator: Generator { kinds: KINDS.to_vec(), seed: stream(seed, 6), layers }, spawn, reach: REACH, heights: HEIGHTS }
+    World { generator: Generator { kinds: KINDS.to_vec(), seed: stream(seed, 6), layers }, spawn, heights: HEIGHTS }
 }
 
 /** The ground: peat under heather, grass or bog, a gravel path to each ring; heather and grass standing on it as media. */

@@ -29,8 +29,6 @@ fn log_radius() -> f64 {
 const FINE: f64 = 1.0;
 const PI: f64 = std::f64::consts::PI;
 
-/** How far around the camera the grid of level 0 must hold the forest, in units. */
-pub const REACH: f64 = 352.0;
 /** The heights it has anything at, in units. */
 pub const HEIGHTS: (i64, i64) = (m(-36.0), m(80.0));
 
@@ -298,7 +296,7 @@ pub fn forest(seed: u64) -> World {
     // Start on the path at the near end, at about the height of a tall shrub.
     let spawn = ground.on_path(vox(-31.0) as i64, vox(3.0) as i64);
     let generator = Generator { kinds: KINDS.to_vec(), seed: stream(seed, 4), layers: layers(seed, ground, spawn) };
-    World { generator, spawn, reach: REACH, heights: HEIGHTS }
+    World { generator, spawn, heights: HEIGHTS }
 }
 
 /** The forest's layers on `ground`, kept clear around `spawn`; their kinds are KINDS, first in the generator's. */

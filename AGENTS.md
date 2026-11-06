@@ -77,7 +77,7 @@ worldgen/                    # The world-generation engine, moving to integers, 
 │   ├── column.rs            # A heightfield's spans, each tall enough to keep a site at every level
 │   ├── plan.rs              # Plans by column, each from coarser ones only; land domains bid for
 │   ├── frame.rs             # Things built in frames of their own: quarter turns, mirrors, walls
-│   ├── world.rs             # World: what a host needs to show one (generator, spawn, reach, heights)
+│   ├── world.rs             # World: what a host needs to show one (generator, spawn, heights)
 │   ├── picture.rs           # Pictures of a world at one level: rays through its voxels, as PNGs
 │   └── contract.rs          # The contract every world keeps, as checks for tests
 └── tests/contract.rs        # The engine on test worlds: fog, caves, a village; what it refuses

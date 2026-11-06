@@ -25,7 +25,7 @@ use std::sync::Arc;
 
 use cells::Cells;
 use fill::{fill_mask, solid_blocks};
-use slicing::{LAYER, atom_level, chunk_cell, spacing, thickness};
+use slicing::{LAYER, chunk_cell, spacing, thickness};
 use splats::{Splats, chunk_splats};
 use surface::{cell_reads, cell_surface};
 use world::{Geometry, Reader};
@@ -47,19 +47,19 @@ pub use world::{FACE_KINDS, FACE_WORDS, Faces, Grid, Lattice, Tiles, VIEW_FACES,
  * as many pixels.
  */
 fn mask_scale(level: i32) -> f64 {
-    (40.0 / thickness(level) as f64).floor().clamp(1.0, 10.0)
+    (40.0 / thickness(level, 0) as f64).floor().clamp(1.0, 10.0)
 }
 
 /**
- * A slice (level, layer, cutoff) of the world as the grid it reads sees it:
- * grid ℓ = atom_level(level) has the sites of N·FCC, N = 2^ℓ, as its own
- * units, so the slice is slab `layer` of 2^(level − ℓ) of its layers, cut
- * off at cutoff / N: a slice of single voxels. Returns ℓ and that slice.
+ * A slice of the world as the grid it reads sees it: grid ℓ = its atoms'
+ * level has the sites of N·FCC, N = 2^ℓ, as its own units, so the slice is
+ * slab `layer` of 2^(level − ℓ) of its layers, cut off at cutoff / N: a
+ * slice of single voxels. Returns ℓ and that slice.
  */
 fn in_grid(slice: &Slice) -> (usize, Slice) {
-    let l = atom_level(slice.level);
+    let l = slice.atoms;
     let n = spacing(l);
-    (l as usize, Slice { level: slice.level - l, layer: slice.layer, cutoff: slice.cutoff / n as f64 })
+    (l as usize, Slice { level: slice.level - l, atoms: 0, layer: slice.layer, cutoff: slice.cutoff / n as f64 })
 }
 
 /**
@@ -310,10 +310,10 @@ pub extern "C" fn world_ready() {
  * pointer (f32, 5 each), blocks pointer, blocks length.
  */
 #[unsafe(no_mangle)]
-pub extern "C" fn bake(face: u32, level: i32, layer: i32, cutoff: f64, i: i32, j: i32) -> *const f64 {
+pub extern "C" fn bake(face: u32, level: i32, atoms: i32, layer: i32, cutoff: f64, i: i32, j: i32) -> *const f64 {
     STATE.with_borrow_mut(|state| {
         let State::Ready(baker) = state else { return std::ptr::null() };
-        let baked = baker.bake(face as usize, &Slice { level, layer, cutoff }, i, j);
+        let baked = baker.bake(face as usize, &Slice { level, atoms, layer, cutoff }, i, j);
         RESULT.with_borrow_mut(|result| {
             *result = [
                 baked.width as f64,

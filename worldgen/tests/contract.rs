@@ -130,7 +130,7 @@ fn b(min_x: i64, min_y: i64, min_z: i64, max_x: i64, max_y: i64, max_z: i64) -> 
 
 /** A world of `generator`, which has nothing outside `heights`. */
 fn world_of(generator: Generator, heights: (i64, i64)) -> World {
-    World { generator, spawn: [0; 3], reach: 0.0, heights }
+    World { generator, spawn: [0; 3], heights }
 }
 
 #[test]

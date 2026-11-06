@@ -12,7 +12,7 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Condvar, Mutex};
 
-use bake::slicing::{GRID_LEVELS, atom_level, half_layer};
+use bake::slicing::{GRID_LEVELS, half_layer};
 use bake::{Baker, Slice, Tiles};
 
 use crate::compositor::{GpuCluster, GpuSplat, cluster};
@@ -149,7 +149,7 @@ fn work(queue: &Queue, send: &Sender<(Request, Baked)>, grids: &Grids, mut baker
             }
         };
         let r = &request;
-        let level = atom_level(r.slice.level) as usize;
+        let level = r.slice.atoms as usize;
         let latest = grids.lock().expect("grids")[level].clone();
         if !Arc::ptr_eq(&latest, &has[level]) {
             baker.share_tiles(level, latest.clone());
@@ -161,7 +161,7 @@ fn work(queue: &Queue, send: &Sender<(Request, Baked)>, grids: &Grids, mut baker
             continue;
         }
         let b = baker.bake(r.face, &r.slice, r.i, r.j);
-        let (splats, clusters) = cluster(&baker.numbers, half_layer(r.slice.level), r.block);
+        let (splats, clusters) = cluster(&baker.numbers, half_layer(r.slice.atoms), r.block);
         let baked = Baked {
             origin: [b.origin_x, b.origin_y],
             extent: [b.extent_width, b.extent_height],

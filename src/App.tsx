@@ -130,10 +130,12 @@ function App() {
     if (query.look) renderer.setOrientation(query.look)
     if (query.fov !== undefined) renderer.setFov(query.fov)
     if (query.distance !== undefined) renderer.setRenderDistance(query.distance)
+    if (query.leak !== undefined) renderer.setMaxLeak(query.leak)
     compositorRef.current?.setRuns(queryFlag('pillars', true))
     setWorldType(renderer.getWorld().worldType)
     setFov(renderer.getFov())
     setRenderDistance(renderer.getRenderDistance())
+    setMaxLeak(renderer.getMaxLeak())
     rendererRef.current = renderer
 
     const handleResize = () => {
@@ -260,7 +262,7 @@ function App() {
     if (!renderer) return
     const { seed, worldType } = renderer.getWorld()
     const query = viewQuery({
-      seed, worldType, camera: renderer.getCamera(), look: renderer.getOrientation(), fov: renderer.getFov(), distance: renderer.getRenderDistance(),
+      seed, worldType, camera: renderer.getCamera(), look: renderer.getOrientation(), fov: renderer.getFov(), distance: renderer.getRenderDistance(), leak: renderer.getMaxLeak(),
     })
     window.open(`${import.meta.env.BASE_URL}viewer.html?${query}`, '_blank', 'noopener')
   }

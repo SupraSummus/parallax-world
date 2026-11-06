@@ -1,4 +1,4 @@
-import { GRID_LEVELS } from './slice-selection'
+import { GRID_LEVELS, GRID_REACH } from './slice-selection'
 import { BRICK, coarsen, LayerIndex, VoxelGrid, type Box, type Material, type Voxel, type VoxelData } from './voxel-grid'
 import { generated, worlds } from './worldgen'
 
@@ -18,15 +18,13 @@ export function worldTypes(): { value: WorldType; label: string }[] {
 
 /**
  * A world generated at each level, in any box (worldgen.ts): the voxels of
- * a box at a level, all of `materials`; how far around the camera each
- * level's grid must hold it, in sites of the level; the y its grid of each
- * level spans; and where the camera starts.
+ * a box at a level, all of `materials`; the y its grid of each level spans;
+ * and where the camera starts.
  */
 export interface Generated {
   materials: readonly Material[]
   generate: (box: Box, level: number) => VoxelData
   spawn: Vec3
-  reach: number
   heights: (level: number) => { minY: number; maxY: number }
 }
 
@@ -45,6 +43,9 @@ const TILE = 16 * BRICK
  * edge, so that it does not move back and forth there.
  */
 const RECENTRE = (3 / 4) * TILE
+
+/** Tiles either way of a grid's centre tile, at most (see World.holds). */
+const RADIUS = Math.ceil((GRID_REACH + RECENTRE) / TILE - 0.5)
 
 /** A tile of the grid of `level` of a generated world, its box in the level's units. */
 export interface GridPart {
@@ -233,26 +234,26 @@ export class World {
     return this.indices[level]
   }
 
-  /** Whether a grid centred on tile `centre` holds tile `tile`. */
+  /**
+   * Whether a grid centred on tile `centre` holds tile `tile`: whether the
+   * tile comes within GRID_REACH of where the camera may be while the grid
+   * is centred there (RECENTRE about the centre tile's middle). The tiles
+   * make a square with its corners cut, RADIUS either way.
+   */
   private holds(centre: Tile | undefined, [i, k]: Tile): boolean {
-    const radius = this.radius()
-    return !!centre && Math.abs(i - centre[0]) <= radius && Math.abs(k - centre[1]) <= radius
-  }
-
-  /** Tiles either way of a grid's centre tile: enough for it to reach the generator's reach around the camera (see RECENTRE). */
-  private radius(): number {
-    return Math.ceil(((this.source?.reach ?? 0) + RECENTRE) / TILE - 0.5)
+    if (!centre) return false
+    const gap = (d: number) => Math.max(0, (Math.abs(d) - 0.5) * TILE - RECENTRE)
+    return Math.hypot(gap(i - centre[0]), gap(k - centre[1])) < GRID_REACH
   }
 
   /** Starts a grid of `level` centred on tile `centre`; returns the parts it needs. */
   private start(level: number, centre: Tile): GridPart[] {
     const { minY, maxY } = (this.source as Generated).heights(level)
-    const radius = this.radius()
     const parts: GridPart[] = []
-    for (let k = centre[1] - radius; k <= centre[1] + radius; k++) {
-      for (let i = centre[0] - radius; i <= centre[0] + radius; i++) {
+    for (let k = centre[1] - RADIUS; k <= centre[1] + RADIUS; k++) {
+      for (let i = centre[0] - RADIUS; i <= centre[0] + RADIUS; i++) {
         const part: GridPart = { level, tile: [i, k], box: { minX: i * TILE, minY, minZ: k * TILE, maxX: (i + 1) * TILE, maxY, maxZ: (k + 1) * TILE } }
-        if (!this.holds(this.centres[level], part.tile)) parts.push(part)
+        if (this.holds(centre, part.tile) && !this.holds(this.centres[level], part.tile)) parts.push(part)
       }
     }
     this.pending.set(level, { centre, parts, received: new Map() })
@@ -264,11 +265,13 @@ export class World {
   private place(level: number): VoxelGrid {
     const { centre, received } = this.pending.get(level) as Pending
     const { minY, maxY } = (this.source as Generated).heights(level)
-    const [reach, old] = [(this.radius() + 0.5) * TILE, this.grids[level]]
+    const [reach, old] = [(RADIUS + 0.5) * TILE, this.grids[level]]
     const [x, z] = centre.map(c => (c + 0.5) * TILE)
     const box = { minX: x - reach, minY, minZ: z - reach, maxX: x + reach, maxY, maxZ: z + reach }
     const parts = [...received.values()]
-    const grid = VoxelGrid.compose(box, this.materials, [...(old ? [old] : []), ...parts.map(p => p.data)])
+    // The old grid's tiles that this one does not hold are left out.
+    const keeps = (x: number, z: number) => this.holds(centre, [Math.floor(x / TILE), Math.floor(z / TILE)])
+    const grid = VoxelGrid.compose(box, this.materials, [...(old ? [old] : []), ...parts.map(p => p.data)], keeps)
     // Each tile's LayerIndex, while the workers made them all.
     const kept = old ? this.tileIndices[level]?.filter(t => this.holds(centre, t.tile)) : []
     const fresh = parts.flatMap(({ tile, index }) => (index ? [{ tile, index }] : []))

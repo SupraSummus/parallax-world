@@ -1,4 +1,4 @@
-import { selectSlices, leakFreeDetail, sliceCentre, chunkCell, chunkCells, cellMargin, matchTilings, sliceKey as sliceName, siteLayers, GRID_LEVELS, atomLevel, atomSpacing, type SliceId } from './slice-selection'
+import { selectSlices, leakFreeDetail, sliceCentre, chunkCell, chunkCells, cellMargin, matchTilings, sliceKey as sliceName, siteLayers, GRID_LEVELS, atomSpacing, type SliceId } from './slice-selection'
 import { ChunkBaker, SPLAT, type ChunkSplats, type ChunkRequest } from './chunk-baker'
 import { generatePart, World, worldTypes, type GridPart, type Vec3, type WorldType } from './world'
 import { LayerIndex, type LayerIndexData, type Material, type VoxelData } from './voxel-grid'
@@ -67,7 +67,8 @@ interface UpdateStats {
 
 /**
  * A view in a URL's query, for the app and the 3D viewer:
- * ?seed=&world=&camera=x,y,z&look=yaw,pitch&fov=&distance=.
+ * ?seed=&world=&camera=x,y,z&look=yaw,pitch&fov=&distance=&leak=
+ * (the max occlusion leak, in degrees).
  */
 export interface ViewQuery {
   seed?: number
@@ -76,12 +77,13 @@ export interface ViewQuery {
   look?: Orientation
   fov?: number
   distance?: number
+  leak?: number
 }
 
-export function viewQuery({ seed, worldType, camera, look, fov, distance }: Required<ViewQuery>): string {
+export function viewQuery({ seed, worldType, camera, look, fov, distance, leak }: Required<ViewQuery>): string {
   const { x, y, z } = camera
   return new URLSearchParams({
-    seed: String(seed), world: worldType, camera: [x, y, z].join(), look: [look.yaw, look.pitch].join(), fov: String(fov), distance: String(distance),
+    seed: String(seed), world: worldType, camera: [x, y, z].join(), look: [look.yaw, look.pitch].join(), fov: String(fov), distance: String(distance), leak: String(leak),
   }).toString()
 }
 
@@ -100,6 +102,7 @@ export function parseViewQuery(search: string): ViewQuery {
     look: look && { yaw: look[0], pitch: look[1] },
     fov: numbers('fov', 1)?.[0],
     distance: numbers('distance', 1)?.[0],
+    leak: numbers('leak', 1)?.[0],
   }
 }
 
@@ -443,15 +446,15 @@ export class ParallaxRenderer {
     let extent = slice.extents.get(key)
     if (extent === undefined) {
       const { id, depth, size } = slice
-      const indices = this.world.layerIndex(atomLevel(id.level))
+      const indices = this.world.layerIndex(id.atoms)
       if (!indices) return
       const { x, y, width, height } = chunkCell(id.level, i, j)
       // The cell's sites, in lattice units.
       const [left, right] = [x, x + width].map(v => Math.round(v / LAYER))
       const [bottom, top] = [y, y + height]
-      const margin = cellMargin(id.level)
+      const margin = cellMargin(id)
       // In the units of the grid the slice reads, N times larger.
-      const n = atomSpacing(id.level)
+      const n = atomSpacing(id)
       let [lo, hi] = [Infinity, -Infinity]
       for (const index of indices) {
         const found = index.range(face.lattice, Math.floor(depth / n), Math.ceil((depth + size) / n), Math.floor((left - margin.columns) / n), Math.ceil((right + margin.columns) / n))
@@ -475,8 +478,8 @@ export class ParallaxRenderer {
   private drawSlice(pass: Pass, { face, tangents, camera, boxOf }: FaceView, slice: Slice, mode: 'want' | 'standIn' | 'probe'): Drawn {
     const { view, coverage, inView } = pass
     const { id } = slice
-    const { level, layer, cutoff } = id
-    const grid = this.world.version(atomLevel(level))
+    const { level, atoms, layer, cutoff } = id
+    const grid = this.world.version(id.atoms)
     // Slices start at least NEAR_DEPTH ahead of the camera, so this is > 0.
     const distance = sliceCentre(id) - camera.z
     const result: Drawn = { distance, placements: [], covered: 0, unbaked: 0 }
@@ -493,7 +496,7 @@ export class ParallaxRenderer {
     const top = camera.y + tangents.maxY * distance
     const h = chunkCell(level, 0, 0).height
     // How far from its voxel's b a face may be drawn where the face's rays show it.
-    const reach = cellMargin(level).rows
+    const reach = cellMargin(id).rows
     for (const [i, j] of chunkCells(level, left, right, bottom, top)) {
       const cellRect = chunkCell(level, i, j)
       // Nothing to draw: not baked at all. Otherwise, what it draws lies within reach of its voxels.
@@ -527,7 +530,7 @@ export class ParallaxRenderer {
         if (mode === 'standIn') {
           chunk = latest
         } else if (this.baker) {
-          const request = { face: face.name, level, layer, cutoff, i, j, grid }
+          const request = { face: face.name, level, atoms, layer, cutoff, i, j, grid }
           chunk = this.store(request, this.baker.bake(request))
         } else {
           // Not wanted if what stands in is hidden anyway.
@@ -537,7 +540,7 @@ export class ParallaxRenderer {
             continue
           }
           pass.pending++
-          pass.missing.push({ request: { face: face.name, level, layer, cutoff, i, j, grid }, distance, stale: !!latest })
+          pass.missing.push({ request: { face: face.name, level, atoms, layer, cutoff, i, j, grid }, distance, stale: !!latest })
           chunk = latest
         }
         if (!chunk) continue
@@ -646,7 +649,7 @@ export class ParallaxRenderer {
    * (World.version).
    */
   private useGrid(level: number, grid: VoxelData) {
-    for (const slice of this.slices.values()) if (atomLevel(slice.id.level) === level) slice.extents.clear()
+    for (const slice of this.slices.values()) if (slice.id.atoms === level) slice.extents.clear()
     this.bakery?.addGrid(level, grid)
     this.baker?.addGrid(level, grid)
     this.onBaked()
@@ -671,6 +674,10 @@ export class ParallaxRenderer {
   /** Sets how far ahead slices are drawn (clamped to [MIN_RENDER_DISTANCE, MAX_RENDER_DISTANCE]). */
   setRenderDistance(distance: number) {
     this.renderDistance = Math.min(MAX_RENDER_DISTANCE, Math.max(MIN_RENDER_DISTANCE, distance))
+  }
+
+  getMaxLeak(): number {
+    return this.maxLeak
   }
 
   /**
@@ -721,7 +728,7 @@ export class ParallaxRenderer {
     }
 
     const start = id.layer * 2 ** id.level
-    const [first, last] = siteLayers(id.level)
+    const [first, last] = siteLayers(id)
     const slice: Slice = {
       id,
       depth: start + first,
@@ -736,8 +743,8 @@ export class ParallaxRenderer {
 
   /** Caches a baked chunk, unless its slice has been evicted meanwhile. */
   private store(request: ChunkRequest, baked: ChunkSplats): Chunk | undefined {
-    const { face, level, layer, cutoff, i, j, grid } = request
-    const slice = this.slices.get(sliceKey(face, { level, layer, cutoff }))
+    const { face, level, atoms, layer, cutoff, i, j, grid } = request
+    const slice = this.slices.get(sliceKey(face, { level, atoms, layer, cutoff }))
     if (!slice) return
     const key = cellKey(i, j)
     let cell = slice.cells.get(key)

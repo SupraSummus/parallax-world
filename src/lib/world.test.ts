@@ -2,30 +2,34 @@ import { describe, it, expect, vi } from 'vitest'
 import { VoxelGrid } from './voxel-grid'
 import { generatePart, World, type GridPart, type Vec3 } from './world'
 import { generated } from './worldgen'
+import { GRID_REACH } from './slice-selection'
 
 // A small stand-in for the forest: these tests are about generating in parts.
 vi.mock('./worldgen', async () => (await import('./small-forest.test-helper')).smallWorldgen)
 
 describe('World', () => {
-  /** Whether `grid` holds what generating its box whole at `level` gives. */
-  const generatedWhole = (grid: VoxelGrid | undefined, level: number) => {
+  /** Where (x, z) of `level` is within GRID_REACH of `camera`. */
+  const near = ({ x, z }: Vec3, level: number) => (gx: number, gz: number) => Math.hypot(gx - x / 2 ** level, gz - z / 2 ** level) < GRID_REACH
+  /** Whether `grid` holds what generating its box whole at `level` gives, within GRID_REACH of `camera`. */
+  const generatedWhole = (grid: VoxelGrid | undefined, camera: Vec3, level: number) => {
     if (!grid) return false
     const { minX, minY, minZ, nx, ny, nz } = grid
     const box = { minX, minY, minZ, maxX: minX + nx, maxY: minY + ny, maxZ: minZ + nz }
     const whole = VoxelGrid.compose(box, grid.materials, [generated('forest', 7).generate(box, level)])
+    const within = near(camera, level)
     let [voxels, wrong] = [0, 0]
     whole.forEach((x, y, z, id) => {
+      if (!within(x, z)) return
       voxels++
       if (grid.get(x, y, z) !== id) wrong++
     })
-    grid.forEach(() => { voxels-- })
+    grid.forEach((x, _, z) => { if (within(x, z)) voxels-- })
     return voxels === 0 && wrong === 0
   }
-  /** Whether `grid` holds the box `reach` (smallForest's) around `camera` at `level`. */
+  /** Whether `grid` holds the square GRID_REACH around `camera` at `level`. */
   const holds = (grid: VoxelGrid | undefined, { x, z }: Vec3, level: number) => {
-    const reach = 64
     const [cx, cz] = [x / 2 ** level, z / 2 ** level]
-    return !!grid && grid.minX <= cx - reach && grid.minX + grid.nx >= cx + reach && grid.minZ <= cz - reach && grid.minZ + grid.nz >= cz + reach
+    return !!grid && grid.minX <= cx - GRID_REACH && grid.minX + grid.nx >= cx + GRID_REACH && grid.minZ <= cz - GRID_REACH && grid.minZ + grid.nz >= cz + GRID_REACH
   }
 
   it("puts a generated world's grids together from parts generated alone, in any order", () => {
@@ -37,7 +41,7 @@ describe('World', () => {
     expect(world.missingParts(world.spawn).some(p => p.level === level)).toBe(false)
     const grid = received[received.length - 1]
     expect(holds(grid, world.spawn, level)).toBe(true)
-    expect(generatedWhole(grid, level)).toBe(true)
+    expect(generatedWhole(grid, world.spawn, level)).toBe(true)
   })
 
   it('moves its grids with the camera, generating only the tiles they lack', () => {
@@ -59,6 +63,6 @@ describe('World', () => {
     const grid = receive(parts).find(Boolean)
     expect(grid).toBe(world.level(0))
     expect(holds(grid, camera, 0)).toBe(true)
-    expect(generatedWhole(grid, 0)).toBe(true)
+    expect(generatedWhole(grid, camera, 0)).toBe(true)
   })
 })

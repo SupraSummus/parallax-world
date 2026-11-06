@@ -40,7 +40,7 @@
  * focal is the focal length in pixels, ε the leak tolerance in pixels.
  */
 import { describe, it, expect } from 'vitest'
-import { selectSlices, leakFreeDetail, leakAngle, halfLayer, chunkCell, sliceCentre, thickness, holds, atomLevel, atomSpacing, MAX_LEVEL, type SliceId } from './slice-selection'
+import { selectSlices, leakFreeDetail, leakAngle, halfLayer, chunkCell, sliceCentre, thickness, holds, atomLevel, atomSpacing, ATOM_SHIFT, MAX_LEVEL, type SliceId } from './slice-selection'
 import { ChunkBaker, SPLAT } from './chunk-baker'
 import { FACES, LAYER, inFace } from './view'
 import { VoxelGrid } from './voxel-grid'
@@ -68,11 +68,13 @@ const EPSILON = 1e-9
 /** Where level 0 begins, in layers ahead of the camera, as in the renderer (NEAR_DEPTH). */
 const NEAR = 4
 
-/** A random slice: level, layer, no cutoff. */
-const randomSlice = (r: (lo: number, hi: number) => number, from: number, to: number): SliceId =>
-  ({ level: Math.floor(r(0, MAX_LEVEL + 1)), layer: Math.floor(r(from, to)), cutoff: Infinity })
+/** A random slice: level, atoms at any atom shift, layer, no cutoff. */
+const randomSlice = (r: (lo: number, hi: number) => number, from: number, to: number): SliceId => {
+  const level = Math.floor(r(0, MAX_LEVEL + 1))
+  return { level, atoms: atomLevel(level, Math.floor(r(0, ATOM_SHIFT + 1))), layer: Math.floor(r(from, to)), cutoff: Infinity }
+}
 /** The layer of a slice's voxels' near tips: its atoms' sites are its slab's layers, every N-th, and its voxels reach N layers past them. */
-const nearSide = ({ level, layer }: SliceId) => layer * 2 ** level - atomSpacing(level)
+const nearSide = (slice: SliceId) => slice.layer * 2 ** slice.level - atomSpacing(slice)
 
 /*
  * Step 1: a baked, drawn point is off by σ·(z − D). A point at lateral x,
@@ -95,14 +97,14 @@ describe('Step 2: within a slice |z − D| ≤ t/2', () => {
     forAll(2000, r => {
       const slice = randomSlice(r, -10, 10)
       const slab = 2 ** slice.level
-      const n = atomSpacing(slice.level)
+      const n = atomSpacing(slice)
       // A site of its grid near the slab, kept if the slice holds it.
       const c = Math.floor((slice.layer * slab + r(-slab, 2 * slab)) / n)
       const site: [number, number, number] = [n * (2 * Math.floor(r(-4, 4)) + (c & 1)), n * (2 * Math.floor(r(-4, 4)) + (c & 1)), n * c]
       return { slice, site, z: (site[2] + r(-n, n)) * LAYER }
     }, ({ slice, site, z }) => {
       if (!holds(slice, site)) return true
-      return Math.abs(z - sliceCentre(slice)) <= (thickness(slice.level) / 2) * LAYER + EPSILON
+      return Math.abs(z - sliceCentre(slice)) <= (thickness(slice) / 2) * LAYER + EPSILON
     })
   })
 })
@@ -159,7 +161,7 @@ describe('Step 5: in pixels, a leak is at most t·focal / (a + t/2)', () => {
     forAll(300, r => ({ cameraZ: r(-300, 300), detail: 2 ** r(0, 8), range: r(10, 1000) }), ({ cameraZ, detail, range }) =>
       selectSlices(cameraZ, NEAR, range, detail).every(s => {
         const a = nearSide(s) - cameraZ
-        const t = thickness(s.level)
+        const t = thickness(s)
         return t <= Math.max(2, a / detail) && Math.abs(sliceCentre(s) / LAYER - cameraZ - (a + t / 2)) < 1e-6
       }))
   })
@@ -262,7 +264,7 @@ describe.each([1, 0.5, 0.25])('Step 8: ray-cast leaks with tan(fov / 2) = %s', T
     const inPlane = levels.map((grid, level) => grid.toVoxels().map(p => ({ u: dot(p, R) << level, b: dot(p, U), z: dot(p, F) << level, n: 2 ** level })).filter(c => c.b === 0))
     const cells = new Map<string, Cell>()
     for (const slice of slices) {
-      for (const { u, z, n } of inPlane[atomLevel(slice.level)]) if (holds(slice, [u, 0, z])) cells.set(`${String(n)}:${String(u)},${String(z)}`, { u, z, n })
+      for (const { u, z, n } of inPlane[slice.atoms]) if (holds(slice, [u, 0, z])) cells.set(`${String(n)}:${String(u)},${String(z)}`, { u, z, n })
     }
     return { cells: [...cells.values()], levels }
   }
@@ -285,7 +287,7 @@ describe.each([1, 0.5, 0.25])('Step 8: ray-cast leaks with tan(fov / 2) = %s', T
       const distance = centre - cz * LAYER
       // Bricks of row 0, which holds b = 0: brick i spans [x + i · w, x + (i + 1) · w).
       const { x, width: w } = chunkCell(slice.level, 0, 0)
-      const n = atomSpacing(slice.level)
+      const n = atomSpacing(slice)
       const inSlice = (cell: Cell) => cell.n === n && holds(slice, [cell.u, 0, cell.z])
       const chunkCells = new Set(cells.filter(inSlice).flatMap(({ u }) => {
         const i = Math.floor((u * LAYER - x) / w)
@@ -302,14 +304,14 @@ describe.each([1, 0.5, 0.25])('Step 8: ray-cast leaks with tan(fov / 2) = %s', T
           const sh = sw * Math.SQRT2
           // Its site, camera-relative, at its depth (compositor.ts).
           const x = chunk.originX + sx - cu * LAYER
-          const z = flat ? distance : distance + ((alphas[k * SPLAT + 4] >>> 24) - 128) * halfLayer(slice.level)
+          const z = flat ? distance : distance + ((alphas[k * SPLAT + 4] >>> 24) - 128) * halfLayer(slice)
           // Where its hexagon, widened by the slant, meets the line b = 0.
           const width = flat ? sw : sw * (1 + Math.abs(x / z))
           const half = Math.min(width, (sh - Math.abs(chunk.originY + sy)) * Math.SQRT2)
           if (half <= 0) continue
           const voxel = cellAt.get(`${String(n)}:${String(sites[3 * k])},${String(sites[3 * k + 2])}`) ?? -1
           // Its pillar's far end; the rays that meet it are those through either end's hexagon.
-          const back = flat ? z : z + run * halfLayer(slice.level)
+          const back = flat ? z : z + run * halfLayer(slice)
           const first = Math.ceil((Math.max(left, Math.min((x - half) / z, (x - half) / back)) + TAN_HALF_FOV) / step)
           const last = Math.floor((Math.min(right, Math.max((x + half) / z, (x + half) / back)) + TAN_HALF_FOV) / step)
           for (let k = Math.max(0, first); k <= Math.min(RAYS - 1, last); k++) {

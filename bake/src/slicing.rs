@@ -3,7 +3,8 @@
 //! and how far a chunk's voxels reach. Depths count layers, LAYER apart;
 //! see docs/architecture.md, section 1. The baker reads slices as their
 //! grid sees them (in_grid in lib.rs): of level at most ATOM_SHIFT, made of
-//! single voxels, in the grid's units.
+//! single voxels, in the grid's units. Functions of a slice's shape take
+//! its level and its atoms' (see Slice).
 
 use crate::surface::Slice;
 
@@ -13,26 +14,39 @@ pub const LAYER: f64 = std::f64::consts::FRAC_1_SQRT_2;
 /** The coarsest level: slabs of 4096 layers. */
 pub const MAX_LEVEL: i32 = 12;
 
-/** Above this level a slab is 2^ATOM_SHIFT layers of cells, not of voxels. */
+/** The largest atom shift: slabs of at most 2^ATOM_SHIFT layers of cells (ATOM_SHIFT in slice-selection.ts). */
 const ATOM_SHIFT: i32 = 4;
 // A splat's depth in half layers of its grid, within ±2^ATOM_SHIFT, rides in a byte (Splat).
 const _: () = assert!(1 << ATOM_SHIFT < 128);
 
-/** The level of the cells a slice of `level` is made of, and so of the grid it reads (atomLevel). */
-pub fn atom_level(level: i32) -> i32 {
-    (level - ATOM_SHIFT).max(0)
+/** Levels of a world's grids: one per atom level up to MAX_LEVEL's at the largest shift. */
+pub const GRID_LEVELS: usize = (MAX_LEVEL - ATOM_SHIFT + 1) as usize;
+
+/** How far around the camera each grid holds the world, in its units, and slices read it (GRID_REACH in slice-selection.ts). */
+pub const GRID_REACH: f64 = 400.0;
+
+/** The level of the cells a slice of `level` is made of at atom shift `shift`, and so of the grid it reads (atomLevel). */
+pub fn atom_level(level: i32, shift: i32) -> i32 {
+    (level - shift).clamp(0, GRID_LEVELS as i32 - 1)
 }
 
-/** Levels of a world's grids: one per atom level up to MAX_LEVEL's. */
-pub const GRID_LEVELS: usize = (MAX_LEVEL - ATOM_SHIFT + 1) as usize;
+/** The atom shift for slices of `detail`: the finest atoms whose slices read no grid past GRID_REACH (atomShift, which explains it). */
+pub fn atom_shift(detail: f64) -> i32 {
+    let reach = |s: i32| thickness(s + 1, 1) as f64 * detail + 2.0 + 2.0 * (1 << s) as f64 + 3.0 + 1.0 + 1.0;
+    let mut shift = ATOM_SHIFT;
+    while shift > 0 && reach(shift) > GRID_REACH {
+        shift -= 1;
+    }
+    shift
+}
 
 /** N = 2^level, the spacing in layers of the sites of cells of `level`: see spacing in cells.ts. */
 pub fn spacing(level: i32) -> i32 {
     1 << level
 }
 
-fn atom_spacing(level: i32) -> i32 {
-    spacing(atom_level(level))
+fn atom_spacing(atoms: i32) -> i32 {
+    spacing(atoms)
 }
 
 /** The layers c − c0 of the sites a cell of `level` holds, c0 its own site's layer (ownedLayers in cells.ts). */
@@ -45,20 +59,20 @@ fn owned_layers(level: i32) -> (i32, i32) {
     }
 }
 
-/** The layers the sites a slice of `level` stands for may be in, relative to the first layer of its slab (siteLayers). */
-pub fn site_layers(level: i32) -> (i32, i32) {
-    let (lo, hi) = owned_layers(atom_level(level));
-    (lo, (1 << level) - atom_spacing(level) + hi)
+/** The layers the sites a slice of `level` and `atoms` stands for may be in, relative to the first layer of its slab (siteLayers). */
+pub fn site_layers(level: i32, atoms: i32) -> (i32, i32) {
+    let (lo, hi) = owned_layers(atoms);
+    (lo, (1 << level) - atom_spacing(atoms) + hi)
 }
 
 /** A slice's thickness in layer spacings, 2^level + N: its voxels reach a layer past their sites' (thickness). */
-pub fn thickness(level: i32) -> i32 {
-    (1 << level) + atom_spacing(level)
+pub fn thickness(level: i32, atoms: i32) -> i32 {
+    (1 << level) + atom_spacing(atoms)
 }
 
 /** Its near side, the near tips of its nearest voxels, in layers. */
-fn near_side(level: i32, layer: i32) -> f64 {
-    layer as f64 * (1 << level) as f64 - atom_spacing(level) as f64
+fn near_side(level: i32, atoms: i32, layer: i32) -> f64 {
+    layer as f64 * (1 << level) as f64 - atom_spacing(atoms) as f64
 }
 
 /** M / 2^level, the bricks' lattice M·FCC (brickSpacing in slice-selection.ts). */
@@ -117,8 +131,8 @@ pub fn chunk_cells(level: i32, left: f64, right: f64, bottom: f64, top: f64) -> 
 pub const MAX_SLANT: f64 = 1.0;
 
 /** How far past its slice's centre plane a splat is per step of its depth byte, in world units (halfLayer in slice-selection.ts). */
-pub fn half_layer(level: i32) -> f64 {
-    atom_spacing(level) as f64 * LAYER / 2.0
+pub fn half_layer(atoms: i32) -> f64 {
+    atom_spacing(atoms) as f64 * LAYER / 2.0
 }
 
 /**
@@ -127,9 +141,9 @@ pub fn half_layer(level: i32) -> f64 {
  * (Splat::reach), their sites less than half the slice's thickness off its
  * centre plane (cellMargin in slice-selection.ts).
  */
-pub fn cell_margin(level: i32) -> (i32, i32) {
-    let n = atom_spacing(level) as f64;
-    let off = MAX_SLANT * (thickness(level) as f64 / n / 2.0) * LAYER;
+pub fn cell_margin(level: i32, atoms: i32) -> (i32, i32) {
+    let n = atom_spacing(atoms) as f64;
+    let off = MAX_SLANT * (thickness(level, atoms) as f64 / n / 2.0) * LAYER;
     let columns = n * ((off + 1.5) / LAYER).ceil();
     let rows = n * (off * std::f64::consts::FRAC_1_SQRT_2 + 1.5).ceil();
     (columns as i32, rows as i32)
@@ -143,7 +157,7 @@ pub fn leak_free_detail(max_leak: f64) -> f64 {
 
 /** z (face coordinates) of a slice's centre plane, halfway through what its voxels span: where its chunks are baked and drawn (sliceCentre). */
 pub fn slice_centre(slice: &Slice) -> f64 {
-    (near_side(slice.level, slice.layer) + thickness(slice.level) as f64 / 2.0) * LAYER
+    (near_side(slice.level, slice.atoms, slice.layer) + thickness(slice.level, slice.atoms) as f64 / 2.0) * LAYER
 }
 
 /**
@@ -157,18 +171,21 @@ pub fn select_slices(camera_z: f64, near: f64, far: f64, detail: f64) -> Vec<Sli
         return slices;
     }
     let far = camera_z + far;
+    let shift = atom_shift(detail);
     let mut from = (camera_z + near).ceil();
     for level in 0.. {
         let slab = (1u64 << level) as f64;
-        let n = atom_spacing(level) as f64;
-        let first = site_layers(level).0 as f64;
+        let atoms = atom_level(level, shift);
+        let n = atom_spacing(atoms) as f64;
+        let first = site_layers(level, atoms).0 as f64;
         let (mut until, mut grows) = (f64::INFINITY, false);
         if level < MAX_LEVEL {
-            let next = level + 1;
-            grows = atom_level(next) > atom_level(level);
-            let at_least = (camera_z - near_side(next, 0) + thickness(next) as f64 * detail).max(from + if grows { 3.0 * n } else { 0.0 });
+            let (next, next_atoms) = (level + 1, atom_level(level + 1, shift));
+            grows = next_atoms > atoms;
+            let at_least = (camera_z - near_side(next, next_atoms, 0) + thickness(next, next_atoms) as f64 * detail)
+                .max(from + if grows { 3.0 * n } else { 0.0 });
             until = (at_least / (2.0 * slab)).ceil() * 2.0 * slab;
-            if until + site_layers(next).0 as f64 >= far {
+            if until + site_layers(next, next_atoms).0 as f64 >= far {
                 until = f64::INFINITY;
             }
         }
@@ -185,7 +202,7 @@ pub fn select_slices(camera_z: f64, near: f64, far: f64, detail: f64) -> Vec<Sli
                 break;
             }
             let cutoff = if grows && (layer + 1.0) * slab + 4.0 * n + 2.0 > until { until } else { f64::INFINITY };
-            slices.push(Slice { level, layer: layer as i32, cutoff });
+            slices.push(Slice { level, atoms, layer: layer as i32, cutoff });
             layer += 1.0;
         }
         if until == f64::INFINITY {
