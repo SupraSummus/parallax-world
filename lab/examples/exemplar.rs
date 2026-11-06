@@ -33,6 +33,8 @@ fn options() -> Options {
         pool: 4,
         position: 4.0,
         mixed: true,
+        guide: 0.0,
+        lines: 0.0,
         seed: 1,
     }
 }
