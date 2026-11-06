@@ -117,7 +117,7 @@ export class World {
   private list: Voxel[] | null = null
 
   /** The world `worldType` (one of worldTypes()) of `seed`; for a scene, see ofVoxels. */
-  constructor(seed: number = Date.now(), worldType: WorldType = 'forest', scene?: { grid: VoxelGrid; spawn: Readonly<Vec3> }) {
+  constructor(seed: number = Date.now(), worldType: WorldType = 'valley', scene?: { grid: VoxelGrid; spawn: Readonly<Vec3> }) {
     this.seed = seed
     this.worldType = worldType
     if (scene) {

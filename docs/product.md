@@ -66,7 +66,7 @@ See [architecture.md](architecture.md).
 **Worlds** – Procedurally generated, regenerable with a new seed; the camera
 moves to the world's spawn point.
 A spinner shows while a world generates.
-- *Forest* (default): an endless autumn forest valley on hills kilometres
+- *Forest*: an endless autumn forest valley on hills kilometres
   wide: a winding path, spruces, birches and oaks, ferns, bushes, boulders
   and fallen logs.
   Its finest voxels, 0.125 m, show what is lost further away:
@@ -75,7 +75,7 @@ A spinner shows while a world generates.
   Generated around the camera in the background, finest first,
   and again where the camera goes:
   each level of detail reaches twice as far as the one before, to 11 km.
-- *Valley*: the forest, with a town on its path
+- *Valley* (default, the flagship new structures are added to): the forest, with a town on its path
   every kilometre or so, the first ahead of the camera:
   streets of plastered houses with gable roofs, windows, doors and shops,
   a square with a fountain, a church and its spire, lamps, yard trees,
