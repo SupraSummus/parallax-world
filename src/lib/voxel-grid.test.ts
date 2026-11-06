@@ -69,6 +69,17 @@ describe('LayerIndex', () => {
     expect(some).toBeGreaterThan(20)
     expect(none).toBeGreaterThan(20)
   })
+
+  it('is as large as the voxels, not the box: tiles span the world heights', () => {
+    const tables = (maxY: number) => {
+      const grid = new VoxelGrid({ minX: 0, minY: 0, minZ: 0, maxX: 32, maxY, maxZ: 32 }, [{ color: '' }, { color: '#ff0000' }])
+      for (let x = 0; x < 32; x++) {
+        for (let z = 0; z < 32; z++) grid.set(x, (x + z) % 2, z, 1)
+      }
+      return LayerIndex.of(grid).tables
+    }
+    expect(tables(1024)).toEqual(tables(16))
+  })
 })
 
 describe('coarsen', () => {

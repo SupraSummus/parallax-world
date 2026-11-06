@@ -40,12 +40,13 @@ fn dot(v: [i32; 3], p: [i64; 3]) -> i64 {
 impl LayerIndex {
     /** The index of `grid` for the view's faces (lattices). */
     pub fn new(grid: &Grid) -> LayerIndex {
-        let lo = grid.min.map(i64::from);
-        let hi: [i64; 3] = std::array::from_fn(|i| lo[i] + (grid.n[i] as i64 - 1).max(0));
-        // Bounds of v · p over the grid's box.
+        // Bounds of v · p over the corners of the bricks with voxels, not of the grid's box:
+        // a tile's box spans all the world's heights, and tables over it grow with their square.
+        let full: Vec<[i64; 3]> = bricks(grid).filter(|(_, sites)| sites.iter().any(|&s| s != 0)).map(|(p, _)| p).collect();
         let along = |v: [i32; 3]| {
-            let ends = (0..8).map(|k| dot(v, std::array::from_fn(|i| if k >> i & 1 == 0 { lo[i] } else { hi[i] })));
-            (ends.clone().min().expect("corners"), ends.max().expect("corners"))
+            let corners = full.iter().flat_map(|p| (0..8).map(move |k| std::array::from_fn(|i| p[i] + (k >> i & 1) * (BRICK as i64 - 1))));
+            let ends = corners.map(|p| dot(v, p));
+            ends.clone().min().zip(ends.max()).unwrap_or((0, -1))
         };
         let mut shapes: Vec<[[i32; 3]; 3]> = Vec::new();
         for l in lattices().iter().filter(|l| !mirrored(l.f)) {
@@ -97,22 +98,26 @@ impl LayerIndex {
     }
 }
 
+/** The grid's bricks that hold sites: each one's least corner, in world coordinates, and its sites. */
+fn bricks(grid: &Grid) -> impl Iterator<Item = ([i64; 3], &[u8])> {
+    let [bx, by] = [0, 1].map(|i| (grid.n[i] + BRICK - 1) / BRICK);
+    let count = (BRICK * BRICK * BRICK / 2) as usize;
+    grid.bricks.iter().enumerate().filter(|(_, at)| **at >= 0).map(move |(b, &at)| {
+        let b = b as i32;
+        let corner = [b % bx, (b / bx) % by, b / (bx * by)];
+        (std::array::from_fn(|i| (grid.min[i] + corner[i] * BRICK) as i64), &grid.cells[at as usize * count..][..count])
+    })
+}
+
 /** Every site of the grid with a voxel, in world coordinates. */
 fn each_site(grid: &Grid, mut visit: impl FnMut([i64; 3])) {
-    let [bx, by] = [(grid.n[0] + BRICK - 1) / BRICK, (grid.n[1] + BRICK - 1) / BRICK];
-    for (b, &at) in grid.bricks.iter().enumerate() {
-        if at < 0 {
-            continue;
-        }
-        let b = b as i32;
-        let [x0, y0, z0] = [b % bx, (b / bx) % by, b / (bx * by)].map(|v| (v * BRICK) as i64);
-        let [x0, y0, z0] = [x0 + grid.min[0] as i64, y0 + grid.min[1] as i64, z0 + grid.min[2] as i64];
-        let mut site = at as usize * (BRICK * BRICK * BRICK / 2) as usize;
+    for ([x0, y0, z0], sites) in bricks(grid) {
+        let mut site = 0;
         for z in z0..z0 + BRICK as i64 {
             for y in y0..y0 + BRICK as i64 {
                 let x1 = x0 + ((x0 + y + z) & 1);
                 for dx in (0..BRICK as i64).step_by(2) {
-                    if grid.cells[site] != 0 {
+                    if sites[site] != 0 {
                         visit([x1 + dx, y, z]);
                     }
                     site += 1;
