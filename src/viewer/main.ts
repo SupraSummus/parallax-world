@@ -5,7 +5,7 @@
  */
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
-import { World, type Vec3, type WorldType } from '@/lib/world'
+import { World, type Vec3 } from '@/lib/world'
 import { DEFAULT_FOV, DEFAULT_RENDER_DISTANCE, FOG_PER_RENDER_DISTANCE, parseViewQuery } from '@/lib/renderer'
 import { SKY_HORIZON, SKY_TOP } from '@/lib/compositor'
 import { focalLength, viewBasis } from '@/lib/view'
@@ -16,10 +16,9 @@ const query = parseViewQuery(location.search)
 const seed = query.seed ?? 1
 const fov = query.fov ?? DEFAULT_FOV
 const renderDistance = query.distance ?? DEFAULT_RENDER_DISTANCE
-const worldType: WorldType = query.worldType ?? 'forest'
 
 const started = performance.now()
-const world = new World(seed, worldType)
+const world = new World(seed, query.worldType)
 const parallaxCamera: Vec3 = query.camera ?? world.spawn
 // Level 0 within REACH units in x and z (all of the forest's would take gigabytes of buffers),
 // then coarser levels in rings (buildVoxelMesh) to the render distance,
@@ -80,7 +79,7 @@ function resize() {
 const info = document.getElementById('info')
 if (info) {
   info.textContent =
-    `${worldType} · seed ${String(seed)} · ${String(levels)} levels to ±${String(REACH * 2 ** (levels - 1))} units around the camera · ` +
+    `${world.worldType} · seed ${String(seed)} · ${String(levels)} levels to ±${String(REACH * 2 ** (levels - 1))} units around the camera · ` +
     `${faceCount.toLocaleString()} faces · built in ${buildTime.toFixed(0)} ms`
 }
 document.getElementById('reset')?.addEventListener('click', toParallaxView)

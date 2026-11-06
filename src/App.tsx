@@ -67,7 +67,7 @@ function App() {
   const [camera, setCamera] = useState<Camera>({ x: 0, y: 0, z: 0 })
   const [orientation, setOrientation] = useState<Orientation>({ yaw: 0, pitch: 0 })
   const [showStats, setShowStats] = useState(true)
-  const [worldType, setWorldType] = useState<WorldType>('forest')
+  const [worldType, setWorldType] = useState<WorldType>('valley')
   const [fov, setFov] = useState(DEFAULT_FOV)
   const [renderDistance, setRenderDistance] = useState(DEFAULT_RENDER_DISTANCE)
   const [maxLeak, setMaxLeak] = useState(DEFAULT_MAX_LEAK)
