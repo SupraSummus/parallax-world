@@ -187,6 +187,12 @@ Numbers are for the forest at 1280×800, as measured when written.
   it generates all its levels on the main thread,
   then holds about 25 million faces, over 2 GB.
   Generating in the bake workers would unfreeze it.
+- **The learned town's rules are from the old towns.**
+  `worlds/data/town-grammar.bin` was learned when the valley's towns
+  were all market towns alike, so lab's `export -- --check` says it differs.
+  Learned again from today's, mostly hamlets and villages,
+  it draws far less town: 235 houses in `learned.rs`'s test, not over 600.
+  Learn it from the market towns alone, or let the learned town be sparser.
 
 ## Ideas
 
