@@ -28,7 +28,7 @@ use worldgen::frame::{Frame, Part, U, V, W, back};
 use worldgen::generator::{ANY_SIZE, Child, Children, Field, Generator, Layer, Node, Op, Population, Shapes, Span};
 use worldgen::grid::Box3;
 use worldgen::noise::{Fx, Rng, fx, hash64, smoothstep, stream};
-use worldgen::plan::{Land, Plan};
+use worldgen::plan::{Claims, Land, Plan};
 use worldgen::units::{Units, m};
 use worldgen::world::{Find, World};
 
@@ -332,9 +332,14 @@ impl Grammar {
 // ---------------------------------------------------------------------------
 // The world
 
-/** Settlements are this far apart along the path, give or take JITTER; the first's middle. */
-const SPACING: i64 = m(1200.0);
-const JITTER: i64 = m(150.0);
+/**
+ * Settlements stand at least APART along the path, claimed from spots one
+ * every CLAIM of it on average (as the valley's towns); a column's is the
+ * nearest within WITHIN. The first's middle is at FIRST.
+ */
+const APART: i64 = m(900.0);
+const CLAIM: i64 = m(800.0);
+const WITHIN: i64 = m(600.0);
 const FIRST: i64 = m(260.0);
 /** How far past its crop's middle a settlement levels the ground, and how far beyond it eases back. */
 const LEVELLED: i64 = m(170.0);
@@ -347,10 +352,9 @@ const FOREST: usize = 0;
 const TOWN: usize = 1;
 const FIELD: usize = 2;
 
-/** A settlement: its number along the path, its crop's middle, its streets' height, its seed. */
+/** A settlement: its crop's middle, its streets' height, its seed. */
 #[derive(Clone, Copy, Default)]
 struct Site {
-    n: i64,
     x: i64,
     z: i64,
     level: i64,
@@ -392,7 +396,7 @@ impl Spot {
 
 /** The settlements along the path: where they are, and each one's layout, drawn once and kept (the last few). */
 struct Settlements {
-    sites: Plan<Option<Site>>,
+    sites: Claims<Site>,
     layouts: RefCell<Vec<(i64, Rc<Layout>)>>,
     spots: Plan<Spot>,
 }
@@ -404,17 +408,19 @@ impl Settlements {
     fn new(seed: u64, relief: Rc<Relief>) -> Rc<Settlements> {
         let s = stream(seed, 60);
         let crop = grammar().crop;
-        let sites = Plan::new("settlements", TOWNS_SCALE, move |_, n| {
-            let mut random = Rng::new(hash64(s, n, 0, 0));
-            if n != 0 && !random.chance(fx(0.6)) {
+        let sites = Claims::new("settlements", s, CLAIM, APART, Some([0, FIRST]), move |[x, z], random| {
+            let seed = if [x, z] == [0, FIRST] {
+                Rng::new(hash64(s, 0, 0, 0)).next_u64()
+            } else if x.abs() < CLAIM / 2 {
+                random.next_u64()
+            } else {
                 return None;
-            }
-            let z = if n == 0 { FIRST } else { n * SPACING - JITTER + random.below(2 * JITTER as u32) as i64 };
+            };
             // The floor's mean, as coarse as the settlement.
             let half = m(1.0) * crop as i64 / 4;
             let around = (-1..=1).flat_map(|i| (-1..=1).map(move |j| (i, j)));
             let level = Fx::mean(around.map(|(i, j)| relief.ground(i * half, z + j * half, Fx::ZERO))).round_units().0;
-            Some(Site { n, x: 0, z, level, seed: random.next_u64() })
+            Some(([0, z], Site { x: 0, z, level, seed }))
         });
         Rc::new_cyclic(|me: &std::rc::Weak<Settlements>| {
             let me = me.clone();
@@ -427,19 +433,19 @@ impl Settlements {
     }
 
     fn near(&self, z: i64) -> Option<Site> {
-        self.sites.at(0, (z + SPACING / 2).div_euclid(SPACING))
+        self.sites.near(0, z, WITHIN).map(|(_, site)| site)
     }
 
     fn layout(&self, site: &Site) -> Rc<Layout> {
         let mut kept = self.layouts.borrow_mut();
-        if let Some((_, l)) = kept.iter().find(|(n, _)| *n == site.n) {
+        if let Some((_, l)) = kept.iter().find(|(z, _)| *z == site.z) {
             return l.clone();
         }
         let layout = Rc::new(grammar().layout(site.seed));
         if kept.len() >= KEPT {
             kept.remove(0);
         }
-        kept.push((site.n, layout.clone()));
+        kept.push((site.z, layout.clone()));
         layout
     }
 
@@ -522,7 +528,7 @@ pub fn learned(seed: u64) -> World {
     layers.extend(town_layers(settlements, land.clone(), ground.clone()));
     layers.extend(fields::layers(seed, land, FIELD, ground, path));
     let kinds = [forest::KINDS, town::KINDS, fields::KINDS].concat();
-    let first: Find = Box::new(move || first.sites.at(0, 0).map(|s| [s.x, s.level, s.z]).expect("the first settlement"));
+    let first: Find = Box::new(move || first.near(FIRST).map(|s| [s.x, s.level, s.z]).expect("the first settlement"));
     World {
         generator: Generator { kinds, seed: stream(seed, 4), layers },
         spawn,
