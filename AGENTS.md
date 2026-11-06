@@ -89,7 +89,8 @@ worlds/                      # The worlds, on worldgen's public API only; the we
 │   ├── lib.rs               # WORLDS: the registry hosts start worlds from by name, with the regions checked
 │   ├── forest.rs            # The forest, on ground it may share
 │   ├── town.rs, fields.rs   # Towns along the path, farmland around them: the valley's other domains
-│   ├── valley.rs            # The valley: the three domains on one land
+│   ├── landmarks.rs         # The valley's fourth domain: a keep, a watchtower, chapels, ponds, farmsteads, windmills
+│   ├── valley.rs            # The valley: the four domains on one land
 │   ├── mountains.rs         # The valley's ranges: massifs, crests, peaks and passes, side valleys; treeline, meadows, scree, rock, snow
 │   ├── moor.rs              # The moor: heath, a stream, steadings of a hut and a ring of stones
 │   ├── city.rs              # The city: blocks of buildings whose rooms form a maze, boxes on a plan of quarter metres

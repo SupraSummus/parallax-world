@@ -271,11 +271,11 @@ impl Town {
         town
     }
 
-    fn half_x(&self) -> i64 {
+    pub(crate) fn half_x(&self) -> i64 {
         MAIN / 2 + self.cols * BLOCK_W + (self.cols - 1) * STREET
     }
 
-    fn half_z(&self) -> i64 {
+    pub(crate) fn half_z(&self) -> i64 {
         (self.rows * BLOCK_D + (self.rows - 1) * STREET) / 2
     }
 
