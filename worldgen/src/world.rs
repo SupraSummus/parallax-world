@@ -1,5 +1,5 @@
-//! What a host needs to show a world: its generator, and where and how far
-//! to generate it.
+//! What a host needs to show a world: its generator, where the camera
+//! starts, and the heights to generate it in.
 
 use crate::generator::Generator;
 
@@ -7,8 +7,6 @@ pub struct World {
     pub generator: Generator,
     /** Where the camera starts, lattice units. */
     pub spawn: [i64; 3],
-    /** How far around the camera level 0's grid must hold it, lattice units. */
-    pub reach: f64,
     /** The heights it has anything at, lattice units, [min, max). */
     pub heights: (i64, i64),
 }

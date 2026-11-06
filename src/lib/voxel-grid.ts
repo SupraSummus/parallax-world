@@ -246,9 +246,10 @@ export class VoxelGrid {
   /**
    * The grid of `box`, its bricks copied from `parts`, grids of the same
    * materials: each a whole number of bricks from the box's corner, no two
-   * with voxels in one brick of it. The rest of the box is empty.
+   * with voxels in one brick of it, but only the bricks whose corner
+   * (x, z) it `keeps`. The rest of the box is empty.
    */
-  static compose(box: Box, materials: readonly Material[], parts: readonly VoxelData[]): VoxelGrid {
+  static compose(box: Box, materials: readonly Material[], parts: readonly VoxelData[], keeps: (x: number, z: number) => boolean = () => true): VoxelGrid {
     const grid = new VoxelGrid(box, materials)
     const bz = Math.ceil(grid.nz / BRICK)
     // Calls `visit` with each of a part's bricks with voxels in the box: its index in the grid, and where its sites are in the part.
@@ -259,6 +260,7 @@ export class VoxelGrid {
       for (let k = Math.max(0, -k0); k < Math.min(pz, bz - k0); k++) {
         for (let j = Math.max(0, -j0); j < Math.min(py, grid.by - j0); j++) {
           for (let i = Math.max(0, -i0); i < Math.min(px, grid.bx - i0); i++) {
+            if (!keeps(minX + i * BRICK, minZ + k * BRICK)) continue
             const at = bricks[(k * py + j) * px + i]
             if (at >= 0) visit(((k + k0) * grid.by + j + j0) * grid.bx + i + i0, at)
           }

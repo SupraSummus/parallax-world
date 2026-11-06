@@ -3,8 +3,8 @@
 //! generated alone on the world's threads (a generator per thread) and
 //! indexed there. Which tiles, and in what order, is up to the renderer:
 //! every update hands over the tiles it misses for the cells in view, most
-//! wanted first, replacing the previous list; then the rest within the
-//! world's reach of the camera of each level it reads, so that turning
+//! wanted first, replacing the previous list; then the rest within
+//! GRID_REACH of the camera of each level it reads, so that turning
 //! finds them made. Tiles far from the camera are dropped. A tile never
 //! changes, so a chunk baked once all the tiles it reads are in stays right
 //! whatever comes after (bake's Tiles).
@@ -14,7 +14,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Condvar, Mutex};
 
-use bake::slicing::GRID_LEVELS;
+use bake::slicing::{GRID_LEVELS, GRID_REACH};
 use bake::{Grid, LayerIndex, Tiles};
 use worldgen::generator::{Generator, generate};
 use worldgen::grid::{Box3, compose};
@@ -90,8 +90,6 @@ pub struct World {
     done: Receiver<Made>,
     /** Received by wait(), not taken yet. */
     early: Vec<Made>,
-    /** How far around the camera each level's tiles are made, in the level's sites (World::reach). */
-    reach: f64,
 }
 
 thread_local! {
@@ -149,19 +147,14 @@ impl World {
     /** The world `make` makes of `seed`, generated and indexed on `threads` threads. */
     pub fn new(make: Make, seed: u64, threads: usize) -> World {
         let world = make(seed);
-        let (heights, reach) = (heights(&world), world.reach);
+        let heights = heights(&world);
         let (send, done) = channel();
         let queue: Arc<(Mutex<Queue>, Condvar)> = Arc::default();
         for _ in 0..threads {
             let (queue, send) = (queue.clone(), send.clone());
             std::thread::spawn(move || work(make, seed, &heights, &queue, &send));
         }
-        World { tiles: (0..GRID_LEVELS).map(|_| HashMap::new()).collect(), queue, done, early: Vec::new(), reach }
-    }
-
-    /** Tiles are made no farther from the camera than this (in the level's sites), and dropped once a tile farther. */
-    fn keep(&self) -> f64 {
-        self.reach + 2.0 * TILE as f64
+        World { tiles: (0..GRID_LEVELS).map(|_| HashMap::new()).collect(), queue, done, early: Vec::new() }
     }
 
     /** Makes no more tiles but those being made. */
@@ -187,7 +180,8 @@ impl World {
      * tiles changed.
      */
     pub fn update(&mut self, camera: Vec3, levels: &[bool; GRID_LEVELS], wanted: &[(usize, TileId)]) -> Vec<(usize, Arc<Level>)> {
-        let (reach, keep) = (self.reach, self.keep());
+        // Tiles are made no farther from the camera than `keep` (in the level's sites), and dropped once a tile farther.
+        let (reach, keep) = (GRID_REACH, GRID_REACH + 2.0 * TILE as f64);
         let mut changed = [false; GRID_LEVELS];
         let made: Vec<Made> = std::mem::take(&mut self.early).into_iter().chain(self.done.try_iter()).collect();
         {

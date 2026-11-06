@@ -11,9 +11,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use bake::slicing::{
-    GRID_LEVELS, LAYER, atom_level, cell_margin, chunk_cell, chunk_cells, leak_free_detail, select_slices, site_layers, slice_centre,
-};
+use bake::slicing::{GRID_LEVELS, LAYER, cell_margin, chunk_cell, chunk_cells, leak_free_detail, select_slices, site_layers, slice_centre};
 use bake::{Lattice, Slice, chunk_reads};
 
 use crate::bakery::{Baked, Bakery, Request};
@@ -87,10 +85,10 @@ struct CachedSlice {
     used: u64,
 }
 
-type SliceKey = (usize, i32, i32, u64);
+type SliceKey = (usize, i32, i32, i32, u64);
 
 fn slice_key(face: usize, s: &Slice) -> SliceKey {
-    (face, s.level, s.layer, s.cutoff.to_bits())
+    (face, s.level, s.atoms, s.layer, s.cutoff.to_bits())
 }
 
 pub struct Renderer {
@@ -187,13 +185,13 @@ impl Renderer {
             for id in select_slices(camera[2] / LAYER, NEAR_DEPTH / LAYER, self.render_distance / LAYER, detail) {
                 let key = slice_key(f, &id);
                 let slice = self.slices.entry(key).or_insert_with(|| {
-                    let (first, last) = site_layers(id.level);
+                    let (first, last) = site_layers(id.level, id.atoms);
                     let depth = id.layer as i64 * (1i64 << id.level) + first as i64;
                     let size = (last - first + 1) as i64;
                     CachedSlice { id, depth, size, cells: HashMap::new(), tiles: HashMap::new(), extents: HashMap::new(), used: 0 }
                 });
                 slice.used = self.renders;
-                let level = atom_level(id.level) as usize;
+                let level = id.atoms as usize;
                 stats.levels[level] = true;
                 let source = Source { level, tiles: &self.levels[level], heights: self.heights[level] };
                 let (layer, cells, asking) = draw_slice(&of, slice, &source, view);
@@ -299,9 +297,9 @@ fn cell_extent(of: &FaceView, slice: &mut CachedSlice, level: &Level, [i0, k0, i
         let cell = chunk_cell(slice.id.level, i, j);
         // The cell's sites, in lattice units.
         let (left, right) = (cell.left as i64, (cell.left + cell.columns) as i64);
-        let (columns, rows) = cell_margin(slice.id.level);
+        let (columns, rows) = cell_margin(slice.id.level, slice.id.atoms);
         // In the units of the grid the slice reads, N times larger.
-        let n = 1i64 << atom_level(slice.id.level);
+        let n = 1i64 << slice.id.atoms;
         let ceil = |v: i64| -(-v).div_euclid(n);
         let (c0, c1) = (slice.depth.div_euclid(n), ceil(slice.depth + slice.size));
         let (a0, a1) = ((left - columns as i64).div_euclid(n), ceil(right + columns as i64));
@@ -331,7 +329,7 @@ fn draw_slice(of: &FaceView, slice: &mut CachedSlice, source: &Source, view: &Vi
     let [min_x, max_x, min_y, max_y] = of.tangents;
     let (left, right) = (camera[0] + min_x * distance, camera[0] + max_x * distance);
     let (bottom, top) = (camera[1] + min_y * distance, camera[1] + max_y * distance);
-    let reach = cell_margin(id.level).1 as f64;
+    let reach = cell_margin(id.level, id.atoms).1 as f64;
     let shown = |b: Option<ScreenBox>| b.filter(|b| view.on_screen(b));
     for (i, j) in chunk_cells(id.level, left, right, bottom, top) {
         let cell = chunk_cell(id.level, i, j);

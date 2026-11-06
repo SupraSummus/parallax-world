@@ -12,7 +12,7 @@ and so is the valley (`valley.rs`), the forest with towns and fields,
 three domains composed as in "Composing",
 and the city (`city.rs`), boxes on a plan of quarter metres;
 a host starts either by name from `WORLDS` (`worlds/src/lib.rs`),
-as a `World`: its generator, spawn, reach and heights;
+as a `World`: its generator, spawn and heights;
 the web lists and generates them all as WebAssembly (`src/lib/worldgen.ts`).
 Integers and fixed point (`noise.rs`) decide wherever they can,
 so a world is the same on every machine and as fine far from the origin.
@@ -260,8 +260,6 @@ a world drawing a canopy as a field of its own would have it followed.
 
 Parts and far regions are checked at seed 42 only:
 they check how a world is drawn, not what a seed puts in it.
-`reach` in `World` is how far around the camera hosts generate each level,
-a rendering distance, not checked.
 With `--nocapture` it prints each level's margins;
 `contract::margins` returns them as a `Report` to print,
 which breaks a margin down by material type, and each type by kind,

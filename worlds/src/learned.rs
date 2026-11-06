@@ -521,7 +521,7 @@ pub fn learned(seed: u64) -> World {
     layers.extend(town_layers(settlements, land.clone(), ground.clone()));
     layers.extend(fields::layers(seed, land, FIELD, ground, path));
     let kinds = [forest::KINDS, town::KINDS, fields::KINDS].concat();
-    World { generator: Generator { kinds, seed: stream(seed, 4), layers }, spawn, reach: forest::REACH, heights: forest::HEIGHTS }
+    World { generator: Generator { kinds, seed: stream(seed, 4), layers }, spawn, heights: forest::HEIGHTS }
 }
 
 /** The town's layers: its streets, paving and yards where it owns the land, and its settlements' houses. */

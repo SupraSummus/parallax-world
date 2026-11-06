@@ -239,10 +239,10 @@ fn check_requests(dump: &Dump, make: Make, seed: u64, threads: usize) {
     println!("indexed the dump's grids in {:.2} s", start.elapsed().as_secs_f64());
     renderer.skip_covered = false;
     let (_, stats) = renderer.render(dump.camera, view);
-    type Key = (usize, i32, i32, u64, i32, i32);
+    type Key = (usize, i32, i32, i32, u64, i32, i32);
     let ours: HashSet<Key> =
-        stats.wanted.iter().map(|r| (r.face, r.slice.level, r.slice.layer, r.slice.cutoff.to_bits(), r.i, r.j)).collect();
-    let theirs: HashSet<Key> = dump.requests.iter().map(|r| (r.face, r.level, r.layer, r.cutoff.to_bits(), r.i, r.j)).collect();
+        stats.wanted.iter().map(|r| (r.face, r.slice.level, r.slice.atoms, r.slice.layer, r.slice.cutoff.to_bits(), r.i, r.j)).collect();
+    let theirs: HashSet<Key> = dump.requests.iter().map(|r| (r.face, r.level, r.atoms, r.layer, r.cutoff.to_bits(), r.i, r.j)).collect();
     println!("ours {}, the dump's {}, in both {}", ours.len(), theirs.len(), ours.intersection(&theirs).count());
     for (name, a, b) in [("only ours", &ours, &theirs), ("only the dump's", &theirs, &ours)] {
         let mut only: Vec<_> = a.difference(b).collect();
@@ -311,6 +311,7 @@ struct ViewQuery {
     look: Option<[f64; 2]>,
     fov: Option<f64>,
     distance: Option<f64>,
+    leak: Option<f64>,
 }
 
 fn parse_view_query(query: &str) -> ViewQuery {
@@ -334,6 +335,7 @@ fn parse_view_query(query: &str) -> ViewQuery {
         look: numbers::<2>(get("look")),
         fov: numbers::<1>(get("fov")).map(|[v]| v),
         distance: numbers::<1>(get("distance")).map(|[v]| v),
+        leak: numbers::<1>(get("leak")).map(|[v]| v),
     }
 }
 
@@ -363,8 +365,8 @@ fn main() -> eframe::Result {
     let first = view::View { yaw, pitch, width: size[0], height: size[1], focal };
     let shown = make(seed);
     let mut renderer = renderer(&shown, threads, render_distance);
-    if let Some(v) = value("--leak") {
-        renderer.max_leak = v.parse().expect("leak");
+    if let Some(v) = value("--leak").map(|v| v.parse().expect("leak")).or(query.leak) {
+        renderer.max_leak = v;
     }
     renderer.skip_covered = !flag("--all-chunks");
     let mut world = World::new(make, seed, threads);

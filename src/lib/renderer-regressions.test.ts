@@ -20,7 +20,7 @@ function drawnPixels(frame: Frame): { x: number; y: number }[] {
     const points: { x: number; y: number }[] = []
     const project = projector(frame, face)
     const { width, scale } = chunk.mask
-    rasterise(chunk, { x, y }, distance, slice.level).forEach((pixel, i) => {
+    rasterise(chunk, { x, y }, distance, slice).forEach((pixel, i) => {
       if (pixel === 0) return
       const point = project({
         x: x + ((i % width) + 0.5) / scale,
@@ -45,7 +45,7 @@ function gapPixels(frame: Frame, along: string, fromX: number, toX: number): num
     for (const { chunk, x, y } of placements) {
       const corner = projector(frame, face)({ x, y, z: distance })
       if (!corner) continue
-      const pixels = rasterise(chunk, { x, y }, distance, slice.level)
+      const pixels = rasterise(chunk, { x, y }, distance, slice)
       const mask = chunk.mask
       // Screen pixels per raster pixel.
       const scale = focal / distance / mask.scale

@@ -41,6 +41,8 @@ so a coarse voxel at a house's eaves is roof from above and wall from the side.
 How thick slices are follows "Max Occlusion Leak":
 how far geometry perspective hides (e.g. the ground under the moor's
 pools) would show were slices drawn flat.
+Thinner slices draw coarser voxels sooner,
+so that the world generated around the camera holds all they show.
 Drawn in relief, slices that thin hardly leak at all;
 much thicker ones would where a column along a slice's direction
 has a gap (a valley between two hills):

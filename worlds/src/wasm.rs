@@ -43,7 +43,7 @@ pub extern "C" fn worldgen_worlds() -> *const f64 {
 /**
  * Starts world `world` (its index in WORLDS; the first if past them) of
  * `seed` (an integer; JS numbers are f64); returns RESULT: spawn x, y, z,
- * reach, materials, and a pointer to their colours (u32, 0xrrggbb).
+ * materials, and a pointer to their colours (u32, 0xrrggbb).
  */
 #[unsafe(no_mangle)]
 pub extern "C" fn worldgen_start(world: u32, seed: f64) -> *const f64 {
@@ -53,7 +53,7 @@ pub extern "C" fn worldgen_start(world: u32, seed: f64) -> *const f64 {
     STATE.with_borrow_mut(|state| {
         let State { world, materials, .. } = state.insert(State { world, materials, grid: None });
         let [x, y, z] = world.spawn.map(|v| v as f64);
-        result(&[x, y, z, world.reach, materials.len() as f64, materials.as_ptr() as usize as f64])
+        result(&[x, y, z, materials.len() as f64, materials.as_ptr() as usize as f64])
     })
 }
 

@@ -1,20 +1,20 @@
 /** Tests' stand-in for the compositor (compositor.ts needs WebGL, which tests lack). */
 import { SPLAT, type ChunkSplats } from './chunk-baker'
 import type { Frame, Placement } from './renderer'
-import { halfLayer } from './slice-selection'
+import { halfLayer, type Slab } from './slice-selection'
 import { inFace, screenBox, screenRay } from './view'
 
 const rasters = new WeakMap<ChunkSplats, { key: string; pixels: Uint32Array }>()
 
 /**
  * A chunk's splats as the compositor paints them placed at (x, y) on the
- * plane z = distance of a slice of `level`, seen from the camera: at each
+ * plane z = distance of a slice of `slab`, seen from the camera: at each
  * of its mask's pixels (see Mask) on that plane, RGBA of the splat whose
  * pillar (its hexagon swept over its run) the camera's ray through it
  * enters first, the last drawn where they tie; 0 if none.
  */
-export function rasterise(chunk: ChunkSplats, { x, y }: Omit<Placement, 'chunk'>, distance: number, level: number): Uint32Array {
-  const key = [x, y, distance, level].join()
+export function rasterise(chunk: ChunkSplats, { x, y }: Omit<Placement, 'chunk'>, distance: number, slab: Slab): Uint32Array {
+  const key = [x, y, distance, slab.level, slab.atoms].join()
   const cached = rasters.get(chunk)
   if (cached?.key === key) return cached.pixels
   const { splats, mask: { width, height, scale } } = chunk
@@ -40,8 +40,8 @@ export function rasterise(chunk: ChunkSplats, { x, y }: Omit<Placement, 'chunk'>
     const colour = colours[k * SPLAT + 4]
     // Its site and size, camera-relative; its pillar's ends along the axis.
     const [cx, cy] = [x + sx, y + sy]
-    const near = distance + ((colour >>> 24) - 128) * halfLayer(level)
-    const far = near + run * halfLayer(level)
+    const near = distance + ((colour >>> 24) - 128) * halfLayer(slab)
+    const far = near + run * halfLayer(slab)
     const [w, h] = [sw * (1 + Math.abs(cx / near)), sw * Math.SQRT2]
     // Both ends' hexagons seen from the camera on the plane: what holds them.
     const [n, f] = [distance / near, distance / far]
@@ -84,7 +84,7 @@ export function picture(frame: Frame, step: number): Uint32Array {
     for (const { chunk, x, y } of placements) {
       const box = boxOf(x, x + chunk.extentWidth, y - chunk.extentHeight, y, distance)
       if (!box) continue
-      const pixels = rasterise(chunk, { x, y }, distance, slice.level)
+      const pixels = rasterise(chunk, { x, y }, distance, slice)
       for (let j = Math.max(0, Math.floor(box.minY / step)); j * step < Math.min(frame.height, box.maxY); j++) {
         for (let i = Math.max(0, Math.floor(box.minX / step)); i * step < Math.min(frame.width, box.maxX); i++) {
           const k = j * cols + i

@@ -251,7 +251,7 @@ mod tests {
         // meet; its inside buried, so only its surface is kept.
         let geometry = geometry(&lattices()[0]);
         let (sites, surface) = blob(&geometry, 0..4, |[a, b, c]| (0..4).contains(&c) && a.abs() <= 12 && b.abs() <= 12 && a + c >= 0);
-        let slice = Slice { level: 2, layer: 0, cutoff: f64::INFINITY };
+        let slice = Slice { level: 2, atoms: 0, layer: 0, cutoff: f64::INFINITY };
         let mut splats = Splats::new();
         chunk_splats(&mut splats, &geometry, &[0; FACE_KINDS], &surface, &slice);
         let centre = slice_centre(&slice);
@@ -312,7 +312,7 @@ mod tests {
         let geometry = geometry(&lattices()[0]);
         let hash = |[a, b, c]: [i32; 3]| (a.wrapping_mul(73_856_093) ^ b.wrapping_mul(19_349_663) ^ c.wrapping_mul(83_492_791)) as u32;
         let (_, surface) = blob(&geometry, 0..8, |site| (0..8).contains(&site[2]) && hash(site) % 3 == 0);
-        let slice = Slice { level: 3, layer: 0, cutoff: f64::INFINITY };
+        let slice = Slice { level: 3, atoms: 0, layer: 0, cutoff: f64::INFINITY };
         let mut splats = Splats::new();
         chunk_splats(&mut splats, &geometry, &[0; FACE_KINDS], &surface, &slice);
         let kept = splats.splats;

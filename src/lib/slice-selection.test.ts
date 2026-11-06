@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { selectSlices, leakFreeDetail, leakAngle, matchTilings, sliceCentre, thickness, sliceKey, chunkCell, chunkCells, holds, atomSpacing, type SliceId } from './slice-selection'
+import { selectSlices, leakFreeDetail, leakAngle, matchTilings, sliceCentre, thickness, sliceKey, chunkCell, chunkCells, holds, atomSpacing, siteLayers, GRID_REACH, type SliceId } from './slice-selection'
+import { MAX_MAX_LEAK, MAX_RENDER_DISTANCE, MIN_MAX_LEAK } from './renderer'
 import { LAYER } from './view'
 
 const name = ({ level, layer, cutoff }: SliceId) => `${String(level)}:${String(layer)}${Number.isFinite(cutoff) ? `|${String(cutoff)}` : ''}`
@@ -63,8 +64,8 @@ describe('selectSlices', () => {
 
       for (const s of slices) {
         // Past level 0, never thicker than (distance to the near side) / detail.
-        const a = s.layer * 2 ** s.level - atomSpacing(s.level) - cameraZ
-        if (s.level > 0) expect(thickness(s.level)).toBeLessThanOrEqual(a / detail)
+        const a = s.layer * 2 ** s.level - atomSpacing(s) - cameraZ
+        if (s.level > 0) expect(thickness(s)).toBeLessThanOrEqual(a / detail)
       }
 
       // Logarithmic, not linear, in the view distance.
@@ -106,8 +107,29 @@ describe('leakFreeDetail', () => {
   })
 })
 
+describe('atomShift', () => {
+  /*
+   * At every leak the panel offers and wherever the camera is, no slice
+   * reads its grid farther than GRID_REACH of it, in the grid's units:
+   * the sites it holds, before its slab's end or less than 3N past its
+   * cutoff (selectSlices), their neighbours and voxels 2N more. A site
+   * c layers ahead is at most c units away (atomShift).
+   */
+  const leaks = Array.from({ length: (MAX_MAX_LEAK - MIN_MAX_LEAK) * 4 + 1 }, (_, k) => MIN_MAX_LEAK + k / 4)
+  it.each(leaks)('keeps slices within GRID_REACH of their grids at a leak of %s°', degrees => {
+    const detail = leakFreeDetail((degrees * Math.PI) / 180)
+    for (let cameraZ = -60000; cameraZ < 60000; cameraZ += 2997.3) {
+      for (const s of selectSlices(cameraZ, 4, MAX_RENDER_DISTANCE / LAYER, detail)) {
+        const n = atomSpacing(s)
+        const last = Math.min(s.layer * 2 ** s.level + siteLayers(s)[1], s.cutoff + 3 * n)
+        expect((last + 2 * n - cameraZ) / n, sliceKey(s)).toBeLessThanOrEqual(GRID_REACH)
+      }
+    }
+  })
+})
+
 describe('matchTilings', () => {
-  const s = (level: number, layer: number, cutoff = Infinity): SliceId => ({ level, layer, cutoff })
+  const s = (level: number, layer: number, cutoff = Infinity): SliceId => ({ level, atoms: 0, layer, cutoff })
 
   it('pairs slices in both with themselves, and the ones between with what is between in the other', () => {
     const previous = [s(0, 1), s(0, 2, 6), s(0, 3, 6), s(1, 3), s(1, 4)]
@@ -143,13 +165,15 @@ describe('matchTilings', () => {
 describe('sliceCentre', () => {
   it('is halfway through what the voxels of the slice span', () => {
     // Level 3, slabs of 8 voxel layers: sites in layers 40 to 47, voxels reaching from 39 to 48.
-    expect(sliceCentre({ level: 3, layer: 5, cutoff: Infinity })).toBeCloseTo(43.5 * LAYER)
+    expect(sliceCentre({ level: 3, atoms: 0, layer: 5, cutoff: Infinity })).toBeCloseTo(43.5 * LAYER)
     // Level 4, sites in layers 16 to 31, voxels reaching from 15 to 32.
-    expect(sliceCentre({ level: 4, layer: 1, cutoff: Infinity })).toBeCloseTo(23.5 * LAYER)
+    expect(sliceCentre({ level: 4, atoms: 0, layer: 1, cutoff: Infinity })).toBeCloseTo(23.5 * LAYER)
     // Level 5, slabs of 16 layers of voxels of 2·FCC: their sites in layers 32 to 62, reaching from 30 to 64.
-    expect(sliceCentre({ level: 5, layer: 1, cutoff: Infinity })).toBeCloseTo(47 * LAYER)
+    expect(sliceCentre({ level: 5, atoms: 1, layer: 1, cutoff: Infinity })).toBeCloseTo(47 * LAYER)
     // Level 6, voxels of 4·FCC in layers 64 to 124, reaching from 60 to 128.
-    expect(sliceCentre({ level: 6, layer: 1, cutoff: Infinity })).toBeCloseTo(94 * LAYER)
+    expect(sliceCentre({ level: 6, atoms: 2, layer: 1, cutoff: Infinity })).toBeCloseTo(94 * LAYER)
+    // Level 4 at atom shift 2: 4 layers of voxels of 4·FCC, their sites in layers 16 to 28, reaching from 12 to 32.
+    expect(sliceCentre({ level: 4, atoms: 2, layer: 1, cutoff: Infinity })).toBeCloseTo(22 * LAYER)
   })
 })
 

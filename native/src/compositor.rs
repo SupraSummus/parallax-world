@@ -586,7 +586,7 @@ impl Compositor {
                         Colours::Layers => tint(hue),
                         Colours::Chunks => tint(hash(&[hue.to_bits(), chunk.i as u64, chunk.j as u64])),
                     },
-                    half_layer: half_layer(s.level) as f32,
+                    half_layer: half_layer(s.atoms) as f32,
                     _pad: 0.0,
                 };
                 candidates.push([resident.clusters.start, resident.clusters.len() as u32]);
