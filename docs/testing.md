@@ -32,6 +32,7 @@ pnpm exec vitest run bake       # files matching "bake"
 | `src/lib/renderer-regressions.test.ts` | Previously fixed rendering bugs |
 | `src/lib/world.test.ts` | The worlds listed; a generated world's grids put together from parts generated alone |
 | `worlds/tests/contract.rs`, `worldgen/tests/contract.rs` | Every world, and the engine's test worlds, keep the contract (`worldgen/src/contract.rs`): generated in pieces equals generated whole, levels agree on what rays see, and seen from above with level 0 |
+| `worlds/tests/cost.rs` | What generating each world costs, counted, stays within a quarter of its baseline (`worlds/data/cost/`; "Cost" in `docs/generators.md`) |
 | `worlds/tests/forest.rs`, `worlds/tests/valley.rs`, `worlds/tests/city.rs` | The scenes: determinism, contents, spawn |
 | `src/lib/worldgen.test.ts` | The worlds as the web lists and gets them from WebAssembly |
 | `src/viewer/mesh.test.ts` | Reference viewer mesh |

@@ -98,6 +98,7 @@ impl<T: Copy + Default> Plan<T> {
         let outer = MAKING.replace(if self.filter { ("", 0) } else { (self.name, self.scale) });
         // What a plan decides for a column is the same whoever reads it.
         let footprint = FOOTPRINT.take();
+        crate::cost::plan(self.name);
         let value = (self.make)(x, z);
         FOOTPRINT.set(footprint);
         MAKING.set(outer);

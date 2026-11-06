@@ -81,6 +81,7 @@ worldgen/                    # The world-generation engine, moving to integers, 
 │   ├── frame.rs             # Things built in frames of their own: quarter turns, mirrors, walls
 │   ├── world.rs             # World: what a host needs to show one (generator, spawn, heights)
 │   ├── picture.rs           # Pictures of a world at one level: rays through its voxels, as PNGs
+│   ├── cost.rs              # What generating costs: work counted by layer, reported for a world's tiles, against a baseline
 │   └── contract.rs          # The contract every world keeps, as checks for tests
 └── tests/contract.rs        # The engine on test worlds: fog, caves, a village; what it refuses
 worlds/                      # The worlds, on worldgen's public API only; the web's WebAssembly
@@ -95,8 +96,9 @@ worlds/                      # The worlds, on worldgen's public API only; the we
 │   ├── learned.rs           # The learned town: settlements drawn by a split grammar learned in lab/, on the forest's land
 │   └── wasm.rs              # Its WebAssembly exports (the module holds bake/'s too)
 ├── data/town-grammar.bin    # learned.rs's rule table, written by lab's export example
-├── tests/                   # Every world in WORLDS keeps the contract; the scenes' contents
-└── examples/                # map: a world from above; look: a picture of it (picture.rs); bench: timing a world's tiles
+├── data/cost/               # Each world's cost baseline, which tests/cost.rs holds it to
+├── tests/                   # Every world in WORLDS keeps the contract and its cost baseline; the scenes' contents
+└── examples/                # map: a world from above; look: a picture of it (picture.rs); cost: what its tiles cost (cost.rs); bench: timing a world's tiles
 lab/                         # Experiment, not built by pnpm: hierarchical WFC rule-sets, pixel conditionals, split grammars with shared splits and regimes, learned from the valley; a masked model of any volume, flat, 3D or on the FCC lattice; synthesis by coordinates into examples; a critic and profiles that score any of them; real places (scripts/overture.py) drawn to a plan (see src/lib.rs); exports the learned town's rules
 native/                      # Spike of a native frontend (eframe + wgpu), linking bake/ and worlds/; see src/main.rs
 ├── .cargo/config.toml       # Builds for x86-64-v3: floor and ceil inline (see there)

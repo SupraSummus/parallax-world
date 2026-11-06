@@ -1,0 +1,73 @@
+# moor (seed 42): work by tile and layer (worldgen::cost)
+place        level     cells     owned     nodes     tests  measured     reads     plans   largest layer
+spawn            0       180         9         0         0         0         0         0         0 boulders
+spawn            0        62         1         2     38288         0         0         0     38288 steadings
+spawn            0         0         0         0         0         0     16384         0         0 terrain
+spawn            0         0         0         0         0         0   3678208         0         0 stream bed
+spawn            0         0         0         0         0         0     16384         0         0 water
+spawn            0         0         0         0         0         0         0     22819         0 plan ground
+spawn            0         0         0         0         0         0         0         1         0 plan steadings
+spawn            0         0         0         0         0         0         0     26098         0 plan streamside
+spawn            0         0         0         0         0         0         0       128         0 plan stream
+spawn            2      1176        48         4        60         0         0         0        30 boulders
+spawn            2       123         1         3       733         0         0         0       733 steadings
+spawn            2         0         0         0         0         0     16384         0         0 terrain
+spawn            2         0         0         0         0         0    925696         0         0 stream bed
+spawn            2         0         0         0         0         0     16384         0         0 water
+spawn            2         0         0         0         0         0         0     24025         0 plan ground
+spawn            2         0         0         0         0         0         0       132         0 plan stream
+spawn            2         0         0         0         0         0         0         3         0 plan steadings
+spawn            2         0         0         0         0         0         0     26615         0 plan streamside
+spawn            4     13754       518        46       167         0         0         0        36 boulders
+spawn            4       423         6        32       307         0         0         0       184 steadings
+spawn            4         0         0         0         0         0     16384         0         0 terrain
+spawn            4         0         0         0         0         0    237568         0         0 stream bed
+spawn            4         0         0         0         0         0     16384         0         0 water
+spawn            4         0         0         0         0         0         0     36723         0 plan ground
+spawn            4         0         0         0         0         0         0         8         0 plan steadings
+spawn            4         0         0         0         0         0         0      2053         0 plan stream
+spawn            4         0         0         0         0         0         0     27002         0 plan streamside
+spawn            6    229687      7549       731       731         0         0         0         1 boulders
+spawn            6      3423        23       271       251         0         0         0        15 steadings
+spawn            6         0         0         0         0         0     16384         0         0 terrain
+spawn            6         0         0         0         0         0     65536         0         0 stream bed
+spawn            6         0         0         0         0         0     16384         0         0 water
+spawn            6         0         0         0         0         0         0    252636         0 plan ground
+spawn            6         0         0         0         0         0         0        63         0 plan steadings
+spawn            6         0         0         0         0         0         0      8210         0 plan stream
+spawn            6         0         0         0         0         0         0     26737         0 plan streamside
+region1          0       216         9         0         0         0         0         0         0 boulders
+region1          0        63         1        13      6949         0         0         0      6949 steadings
+region1          0         0         0         0         0         0     16384         0         0 terrain
+region1          0         0         0         0         0         0   3678208         0         0 stream bed
+region1          0         0         0         0         0         0     16384         0         0 water
+region1          0         0         0         0         0         0         0     22992         0 plan ground
+region1          0         0         0         0         0         0         0       130         0 plan stream
+region1          0         0         0         0         0         0         0     26441         0 plan streamside
+region1          2      1176        44         3        88         0         0         0        45 boulders
+region1          2       123         1        16       144         0         0         0       144 steadings
+region1          2         0         0         0         0         0     16384         0         0 terrain
+region1          2         0         0         0         0         0    925696         0         0 stream bed
+region1          2         0         0         0         0         0     16384         0         0 water
+region1          2         0         0         0         0         0         0     24013         0 plan ground
+region1          2         0         0         0         0         0         0       133         0 plan stream
+region1          2         0         0         0         0         0         0         3         0 plan steadings
+region1          2         0         0         0         0         0         0     26470         0 plan streamside
+region1          4     13754       515        40       160         0         0         0        24 boulders
+region1          4       423         6        45       420         0         0         0       171 steadings
+region1          4         0         0         0         0         0     16384         0         0 terrain
+region1          4         0         0         0         0         0    237568         0         0 stream bed
+region1          4         0         0         0         0         0     16384         0         0 water
+region1          4         0         0         0         0         0         0     36732         0 plan ground
+region1          4         0         0         0         0         0         0         8         0 plan steadings
+region1          4         0         0         0         0         0         0      2053         0 plan stream
+region1          4         0         0         0         0         0         0     26566         0 plan streamside
+region1          6    229688      7669       731       731         0         0         0         1 boulders
+region1          6      3423        30       393       363         0         0         0        15 steadings
+region1          6         0         0         0         0         0     16384         0         0 terrain
+region1          6         0         0         0         0         0     65536         0         0 stream bed
+region1          6         0         0         0         0         0     16384         0         0 water
+region1          6         0         0         0         0         0         0    252696         0 plan ground
+region1          6         0         0         0         0         0         0        63         0 plan steadings
+region1          6         0         0         0         0         0         0      8206         0 plan stream
+region1          6         0         0         0         0         0         0     26606         0 plan streamside
