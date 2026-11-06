@@ -34,7 +34,7 @@ use worldgen::units::{Units, m};
 
 use crate::fields;
 use crate::forest::{self, GROUND_SCALE, Ground, K as F, PATH_SCALE, Relief};
-use crate::town::{self, House, K as T, TOWNS_SCALE};
+use crate::town::{self, House, K as T, Style, TOWNS_SCALE};
 
 /** The rule table, learned in lab/ (examples/export.rs) from 54 of the valley's towns. */
 const TABLE: &[u8] = include_bytes!("../data/town-grammar.bin");
@@ -618,7 +618,7 @@ fn house(site: &Site, layout: &Layout, i: usize, crop: usize) -> Node {
     let mut random = Rng::new(hash64(site.seed, i as i64, 0, 7));
     let storeys = 1 + random.below(2) as i64;
     let mut shapes = Vec::new();
-    House { length, depth, storeys, shop: false }.build(&mut Part::new(frame, &mut shapes), &mut random);
+    House::new(length, depth, storeys, Style::of(site.seed)).build(&mut Part::new(frame, &mut shapes), &mut random);
     town::thing(shapes)
 }
 

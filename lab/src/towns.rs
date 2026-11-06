@@ -13,7 +13,8 @@ use crate::valley::{self, Area};
 
 /**
  * A crop's side, metres: the largest town (3 blocks a side, 5 rows) is
- * 254 × 228 m. Gathered MARGIN wider each side, to be cut at a shift.
+ * 254 × 228 m, 266 × 240 m with its wall. Gathered MARGIN wider each
+ * side, to be cut at a shift.
  */
 pub const CROP: usize = 384;
 pub const MARGIN: usize = 32;
