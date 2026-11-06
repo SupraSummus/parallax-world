@@ -235,8 +235,8 @@ const CELLS_PER_ANCHOR: u64 = 8;
 const SHARE: f64 = 0.1;
 /** The share of a tile's time one thing, or things drawn whole to be measured, may take before it is flagged. */
 const LARGE: f64 = 0.25;
-/** The time a tile may take, estimated, before it is flagged: nanoseconds. */
-const BUDGET: u64 = 200_000_000;
+/** The time a tile may take, estimated, before it is flagged (and fails worlds/tests/cost.rs): nanoseconds. */
+pub const BUDGET: u64 = 200_000_000;
 
 fn ms(ns: u64) -> f64 {
     ns as f64 / 1e6

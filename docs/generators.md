@@ -356,6 +356,10 @@ and the change weighs a hundredth of its tile or more.
 When the change is meant,
 `COST_BLESS=1 cargo test --release --test cost` in `worlds/`
 writes the baselines anew, and their diff shows it.
+It also fails when a tile's estimate is over the budget (`cost::BUDGET`),
+unless the tile is listed in `OVER_BUDGET` there,
+and when a listed one is not, to take it off:
+the list only shrinks, and blessing does not move it.
 
 ## Composing
 
