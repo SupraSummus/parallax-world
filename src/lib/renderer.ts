@@ -25,6 +25,8 @@ export interface Placement {
   chunk: Chunk
   x: number
   y: number
+  /** Which of its clusters (see ChunkSplats.clusters) may show, a byte each, 0 if not; all if absent. */
+  show?: Uint8Array
 }
 
 /**
@@ -148,7 +150,7 @@ const MAX_HIDDEN_CHUNK_BYTES = 32_000_000
 export const FOG_PER_RENDER_DISTANCE = 0.7
 
 /** What a chunk holds in memory. */
-const bytesOf = (chunk: Chunk) => chunk.splats.byteLength + chunk.mask.blocks.byteLength
+const bytesOf = (chunk: Chunk) => chunk.splats.byteLength + chunk.mask.blocks.byteLength + chunk.cluster.byteLength + chunk.clusters.byteLength
 
 function sliceKey(face: string, slice: SliceId): string {
   return `${face}:${sliceName(slice)}`
@@ -552,11 +554,12 @@ export class ParallaxRenderer {
       const contentTop = chunk.originY - camera.y
       const box = boxOf(contentLeft, contentLeft + chunk.extentWidth, contentTop - chunk.extentHeight, contentTop, distance)
       if (!onScreen(view, box)) continue
-      if (coverage?.hidesChunk(chunk, contentLeft, contentTop, distance)) {
+      const show = coverage?.showClusters(chunk, contentLeft, contentTop, distance)
+      if (show === null) {
         result.covered++
         continue
       }
-      result.placements.push({ chunk, x: contentLeft, y: contentTop })
+      result.placements.push(show ? { chunk, x: contentLeft, y: contentTop, show } : { chunk, x: contentLeft, y: contentTop })
     }
     return result
   }

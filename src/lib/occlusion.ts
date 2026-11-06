@@ -4,8 +4,9 @@
  */
 import type { Chunk, Placement } from './renderer'
 import { FACES, faceBasis, type Face, type ScreenBox, type View } from './view'
+import { CLUSTER } from './chunk-baker'
 import { chunkCell } from './slice-selection'
-import { copyIn, wasmInstance } from './wasm'
+import { copyIn, copyOut, wasmInstance } from './wasm'
 
 /** The coverage exports (bake/src/coverage.rs). */
 interface Exports {
@@ -15,8 +16,11 @@ interface Exports {
   coverage_hides: (minX: number, maxX: number, minY: number, maxY: number) => number
   coverage_use: (handle: number) => number
   coverage_blocks: (count: number) => number
+  coverage_clusters: (count: number) => number
   coverage_add: (handle: number, width: number, height: number, scale: number) => void
   coverage_hides_chunk: (handle: number, x: number, y: number, distance: number) => number
+  coverage_show_clusters: (handle: number, x: number, y: number, distance: number) => number
+  coverage_shown: () => number
   coverage_cover: (handle: number, x: number, y: number, cellLeft: number, cellBottom: number, cellWidth: number, cellHeight: number, distance: number) => void
   coverage_end_layer: (distance: number) => void
 }
@@ -65,6 +69,19 @@ export class Coverage {
   }
 
   /**
+   * Which of a chunk's clusters (see ChunkSplats.clusters), placed as in
+   * hidesChunk, may show: none (null, hidden whole), all (undefined),
+   * or which, a byte per cluster, 0 if hidden (see hides) or off screen.
+   */
+  showClusters(chunk: Chunk, x: number, y: number, distance: number): Uint8Array | null | undefined {
+    const { wasm } = this
+    const count = wasm.coverage_show_clusters(this.handle(chunk), x, y, distance)
+    if (count === 0) return null
+    const clusters = chunk.clusters.length / CLUSTER
+    return count === clusters ? undefined : copyOut(wasm.memory, Uint8Array, wasm.coverage_shown() >>> 0, clusters)
+  }
+
+  /**
    * Adds what a layer of the current face draws opaque: its placements
    * (chunks of a slice of `level`, see chunkCell) on the plane
    * z = distance. `camera` is the camera's position in face coordinates.
@@ -85,6 +102,7 @@ export class Coverage {
     if (wasm.coverage_use(handle)) return handle
     const { width, height, scale, blocks } = chunk.mask
     copyIn(wasm.memory, wasm.coverage_blocks(blocks.length) >>> 0, blocks)
+    copyIn(wasm.memory, wasm.coverage_clusters(chunk.clusters.length) >>> 0, chunk.clusters)
     wasm.coverage_add(handle, width, height, scale)
     return handle
   }

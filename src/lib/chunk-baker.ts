@@ -4,7 +4,7 @@
  * renderer directly (without workers) and inside bake workers, through the
  * message protocol below. No DOM.
  */
-import type { SliceId } from './slice-selection'
+import { halfLayer, MAX_SLANT, type SliceId } from './slice-selection'
 import { FACES } from './view'
 import { LayerIndex, writeGrid, type LayerIndexData, type Material, type VoxelData } from './voxel-grid'
 import { copyIn, copyOut, wasmInstance } from './wasm'
@@ -28,6 +28,12 @@ type BakeRequest = Omit<ChunkRequest, 'grid'>
 
 /** Numbers per splat in ChunkSplats.splats. */
 export const SPLAT = 5
+
+/** Numbers per cluster in ChunkSplats.clusters. */
+export const CLUSTER = 6
+
+/** Clusters across and down a chunk's extent (see ChunkSplats.clusters): at most 256, a byte per splat. */
+const CLUSTERS = 8
 
 /**
  * A baked chunk: the voxels its face's axis sees, the nearest of each
@@ -54,6 +60,17 @@ export interface ChunkSplats {
   extentWidth: number
   extentHeight: number
   mask: Mask
+  /**
+   * Its splats in groups, by where their sites are in a grid of
+   * CLUSTERS × CLUSTERS over its extent, so that groups hidden behind
+   * nearer layers need not be drawn (Coverage.showClusters): per splat,
+   * its group (`cluster`); per group, CLUSTER numbers (`clusters`), the box
+   * holding its splats as drawn from any ray of the face: left, right,
+   * bottom, top relative to (originX, originY), then how far before and
+   * past the slice's centre plane, in world units.
+   */
+  cluster: Uint8Array
+  clusters: Float32Array
 }
 
 /**
@@ -119,14 +136,16 @@ export class ChunkBaker {
     const { memory } = this.baker
     const [width, height, originX, originY, extentWidth, extentHeight, scale, count, splats, blocks, blockCount] = this.call(request)
     this.count = count
+    // Copied out: the baker reuses its buffers.
+    const numbers = copyOut(memory, Float32Array, splats, count * SPLAT)
     return {
-      // Copied out: the baker reuses its buffers.
-      splats: copyOut(memory, Float32Array, splats, count * SPLAT),
+      splats: numbers,
       originX,
       originY,
       extentWidth,
       extentHeight,
       mask: { blocks: copyOut(memory, Uint8Array, blocks, blockCount), width, height, scale },
+      ...cluster(numbers, extentWidth, extentHeight, halfLayer(request)),
     }
   }
 
@@ -143,6 +162,46 @@ export class ChunkBaker {
     if (at === 0) throw new Error('the baker has no world')
     return copyOut(this.baker.memory, Float64Array, at, 11)
   }
+}
+
+/**
+ * A chunk's splats grouped by where their sites are (see ChunkSplats.clusters),
+ * `half` world units a half layer. The compositor widens a splat by
+ * the slant of the rays to it, at most MAX_SLANT (Splat in bake/src/splats.rs).
+ */
+function cluster(splats: Float32Array, extentWidth: number, extentHeight: number, half: number): { cluster: Uint8Array; clusters: Float32Array } {
+  const count = splats.length / SPLAT
+  const colours = new Uint32Array(splats.buffer, splats.byteOffset, splats.length)
+  const of = new Uint8Array(count)
+  const bounds = new Float32Array(CLUSTERS * CLUSTERS * 7)
+  for (let c = 0; c < CLUSTERS * CLUSTERS; c++) bounds.set([Infinity, -Infinity, Infinity, -Infinity, Infinity, -Infinity, 0], c * 7)
+  const at = (v: number, extent: number) => Math.min(CLUSTERS - 1, Math.max(0, Math.floor((v / extent) * CLUSTERS)))
+  for (let k = 0; k < count; k++) {
+    const [x, y, width, run] = splats.subarray(k * SPLAT, k * SPLAT + 4)
+    const c = at(-y, extentHeight) * CLUSTERS + at(x, extentWidth)
+    of[k] = c
+    const near = ((colours[k * SPLAT + 4] >>> 24) - 128) * half
+    const b = c * 7
+    bounds[b] = Math.min(bounds[b], x)
+    bounds[b + 1] = Math.max(bounds[b + 1], x)
+    bounds[b + 2] = Math.min(bounds[b + 2], y)
+    bounds[b + 3] = Math.max(bounds[b + 3], y)
+    bounds[b + 4] = Math.min(bounds[b + 4], near)
+    bounds[b + 5] = Math.max(bounds[b + 5], near + run * half)
+    bounds[b + 6] = Math.max(bounds[b + 6], width)
+  }
+  const clusters = new Float32Array(CLUSTERS * CLUSTERS * CLUSTER)
+  for (let c = 0; c < CLUSTERS * CLUSTERS; c++) {
+    const [left, right, bottom, top, near, far, width] = bounds.subarray(c * 7, c * 7 + 7)
+    // An empty one: left past right.
+    if (left > right) {
+      clusters[c * CLUSTER] = 1
+      continue
+    }
+    const [w, h] = [(1 + MAX_SLANT) * width, Math.SQRT2 * width]
+    clusters.set([left - w, right + w, bottom - h, top + h, near, far], c * CLUSTER)
+  }
+  return { cluster: of, clusters }
 }
 
 /** Numbers per request in a `want` message (see encodeRequests). */
@@ -228,7 +287,7 @@ export function bakeHandler(
       baked.push({ request, chunk: baker.bake(request) })
       posted.set(key, seq + 1)
     }
-    if (baked.length > 0) post({ type: 'chunks', generation, seq: ++seq, baked }, baked.flatMap(({ chunk }) => [chunk.splats.buffer, chunk.mask.blocks.buffer]))
+    if (baked.length > 0) post({ type: 'chunks', generation, seq: ++seq, baked }, baked.flatMap(({ chunk }) => [chunk.splats.buffer, chunk.mask.blocks.buffer, chunk.cluster.buffer, chunk.clusters.buffer]))
   }
   const generate = () => {
     if (!jobs) return

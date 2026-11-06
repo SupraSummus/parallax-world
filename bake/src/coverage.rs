@@ -219,6 +219,13 @@ struct Chunk {
      * with a pixel drawn, left ≥ right if none.
      */
     tiles: [[usize; 4]; TILES * TILES],
+    /**
+     * Boxes holding groups of its splats, as drawn from any ray of the face
+     * (left, right, bottom, top relative to its top-left corner, then how far
+     * before and past its plane), to draw only those that show (see
+     * show_clusters); none if not handed over.
+     */
+    clusters: Vec<[f32; 6]>,
     /** The render it was last used in. */
     used: u64,
 }
@@ -248,7 +255,7 @@ impl Chunk {
                 }
             }
         }
-        Chunk { width, height, scale, solid: solid.map(|v| v as f64), sums, tiles, used: 0 }
+        Chunk { width, height, scale, solid: solid.map(|v| v as f64), sums, tiles, clusters: Vec::new(), used: 0 }
     }
 
     /**
@@ -531,6 +538,36 @@ impl Coverage {
     }
 
     /**
+     * Which of chunk `handle`'s clusters, placed as in hides_chunk, may
+     * show: per cluster, 0 if the chunk is hidden, the cluster empty (left
+     * past right) or its box off screen or hidden (see hides), else 1,
+     * into `show`. How many may show.
+     */
+    pub fn show_clusters(&self, handle: u32, x: f64, y: f64, distance: f64, show: &mut Vec<u8>) -> usize {
+        show.clear();
+        let Some(chunk) = self.chunks.get(&handle) else { return 0 };
+        let look = self.current().map(|shape| shape.look);
+        let hidden = self.hides_chunk(handle, x, y, distance);
+        show.extend(chunk.clusters.iter().map(|c| {
+            let [l, r, b, t, near, far] = c.map(f64::from);
+            let Some(look) = look else { return 1 };
+            if hidden || l > r {
+                return 0;
+            }
+            let ends = [near, far].map(|d| look.screen_box(x + l, x + r, y + b, y + t, distance + d));
+            let [Some(n), Some(f)] = ends else { return 1 };
+            let union = Bounds {
+                min_x: n.min_x.min(f.min_x),
+                max_x: n.max_x.max(f.max_x),
+                min_y: n.min_y.min(f.min_y),
+                max_y: n.max_y.max(f.max_y),
+            };
+            u8::from(look.on_screen(&union) && !self.hides_box(&union))
+        }));
+        show.iter().filter(|&&s| s != 0).count()
+    }
+
+    /**
      * Adds what chunk `handle` of a layer of the current face, placed at
      * (x, y) on the plane z = distance, draws opaque; its grid cell (see
      * chunkCell) starts at (cell_left, cell_bottom), camera-relative. The
@@ -661,9 +698,10 @@ impl Coverage {
         self.chunks.get_mut(&handle).map(|chunk| chunk.used = self.renders).is_some()
     }
 
-    /** Adds chunk `handle`, used in this render (see Chunk::new). */
-    pub fn add(&mut self, handle: u32, width: usize, height: usize, scale: f64, blocks: &[u8]) {
-        let chunk = Chunk { used: self.renders, ..Chunk::new(width, height, scale, blocks) };
+    /** Adds chunk `handle`, used in this render (see Chunk::new), with its clusters (see Chunk::clusters), 6 numbers each. */
+    pub fn add(&mut self, handle: u32, width: usize, height: usize, scale: f64, blocks: &[u8], clusters: &[f32]) {
+        let clusters = clusters.as_chunks::<6>().0.to_vec();
+        let chunk = Chunk { used: self.renders, clusters, ..Chunk::new(width, height, scale, blocks) };
         self.chunks.insert(handle, chunk);
     }
 }
@@ -674,6 +712,10 @@ thread_local! {
     static COVERAGE: RefCell<Coverage> = RefCell::new(Coverage::default());
     /** A chunk's blocks being handed over: see coverage_blocks. */
     static BLOCKS: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
+    /** A chunk's clusters being handed over: see coverage_clusters. */
+    static CLUSTERS: RefCell<Vec<f32>> = const { RefCell::new(Vec::new()) };
+    /** Which clusters may show: see coverage_show_clusters. */
+    static SHOW: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
 }
 
 /** Starts a render (see Coverage::set_view). */
@@ -695,7 +737,7 @@ pub extern "C" fn coverage_hides(min_x: f64, max_x: f64, min_y: f64, max_y: f64)
     COVERAGE.with_borrow(|coverage| coverage.hides(min_x, max_x, min_y, max_y) as u32)
 }
 
-/** See Coverage::use_chunk: 1 if chunk `handle` is known, else 0, and it is to be handed over with coverage_blocks and coverage_add. */
+/** See Coverage::use_chunk: 1 if chunk `handle` is known, else 0, and it is to be handed over with coverage_blocks, coverage_clusters and coverage_add. */
 #[unsafe(no_mangle)]
 pub extern "C" fn coverage_use(handle: u32) -> u32 {
     COVERAGE.with_borrow_mut(|coverage| coverage.use_chunk(handle) as u32)
@@ -711,10 +753,36 @@ pub extern "C" fn coverage_blocks(count: u32) -> *mut u8 {
     })
 }
 
-/** Adds a chunk, its blocks written to coverage_blocks (see Coverage::add). */
+/** Where to write the `count` numbers of a chunk's clusters to add (see Chunk::clusters). */
+#[unsafe(no_mangle)]
+pub extern "C" fn coverage_clusters(count: u32) -> *mut f32 {
+    CLUSTERS.with_borrow_mut(|clusters| {
+        clusters.clear();
+        clusters.resize(count as usize, 0.0);
+        clusters.as_mut_ptr()
+    })
+}
+
+/** Adds a chunk, its blocks written to coverage_blocks and its clusters to coverage_clusters (see Coverage::add). */
 #[unsafe(no_mangle)]
 pub extern "C" fn coverage_add(handle: u32, width: u32, height: u32, scale: f64) {
-    BLOCKS.with_borrow(|blocks| COVERAGE.with_borrow_mut(|coverage| coverage.add(handle, width as usize, height as usize, scale, blocks)));
+    BLOCKS.with_borrow(|blocks| {
+        CLUSTERS.with_borrow(|clusters| {
+            COVERAGE.with_borrow_mut(|coverage| coverage.add(handle, width as usize, height as usize, scale, blocks, clusters))
+        })
+    });
+}
+
+/** See Coverage::show_clusters: how many may show; which, a byte each, at coverage_shown. */
+#[unsafe(no_mangle)]
+pub extern "C" fn coverage_show_clusters(handle: u32, x: f64, y: f64, distance: f64) -> u32 {
+    SHOW.with_borrow_mut(|show| COVERAGE.with_borrow(|coverage| coverage.show_clusters(handle, x, y, distance, show) as u32))
+}
+
+/** Where coverage_show_clusters put which clusters may show. */
+#[unsafe(no_mangle)]
+pub extern "C" fn coverage_shown() -> *const u8 {
+    SHOW.with_borrow(|show| show.as_ptr())
 }
 
 /** See Coverage::hides_chunk. */

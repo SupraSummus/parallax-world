@@ -468,6 +468,13 @@ a cell whose box, plus a margin around it, lies on covered sub-blocks
 is neither drawn nor baked,
 and a baked chunk is not drawn if each of its tiles
 with something drawn lies on covered sub-blocks.
+Of a chunk that is drawn, only the clusters of its splats that may show are,
+as the GPU's time goes with the splats drawn:
+the bake workers group its splats by where their sites are,
+each group with a box holding them as drawn from any ray of the face
+(`cluster` in `chunk-baker.ts`),
+and a cluster whose box lies on covered sub-blocks is left out
+(`show_clusters`).
 Each pixel shows one face, so coverage starts over for each face,
 and sub-blocks outside the face count as covered.
 A sub-block is covered once one layer's chunks draw all of the face's part of it,
@@ -500,8 +507,10 @@ and coverage only decides which cells are baked and have their tiles made.
 A cell coming into view waits for the next pass, a frame or two.
 
 The `Compositor` draws a frame onto one opaque WebGL 2 canvas:
-per chunk its splats, instanced,
+per chunk the splats of its clusters that may show, instanced,
 then the sky behind them.
+A chunk's splats are a buffer in cluster order,
+and each run of neighbouring clusters shown is one instanced draw.
 A splat is a prism of triangles, its hexagon swept along the axis
 over its run (section 3), those facing away culled;
 without a run, the near hexagon alone.
@@ -521,9 +530,9 @@ meets them near to far, and faces share pixels only along seams
 Within a layer, a chunk draws only on its own part of the plane,
 decided by each pixel's ray, so chunks neither overlap nor leave seams.
 A chunk's splats are uploaded when it comes into view,
-near to far (its painting order reversed),
+cluster by cluster, each near to far (its painting order reversed),
 so its nearer splats reject most of those behind them;
-where two are as near, the one painted later shows.
+where two of a cluster are as near, the one painted later shows.
 They are deleted when it leaves.
 No antialiasing, so voxel edges stay crisp.
 

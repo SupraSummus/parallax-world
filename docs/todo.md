@@ -81,15 +81,16 @@ Numbers are for the forest at 1280×800, as measured when written.
   and what is behind it is skipped.
   The mask could follow the focal length and detail,
   keyed in the chunk like its grid, leaving the slices as they are.
-- **The web draws every splat in view every frame.**
-  The forest has millions in view, and only about 1.5 % show a pixel;
-  headless Chromium's software WebGL takes over a second per frame,
-  and WebGL on real GPUs is not measured yet.
-  The native compositor culls clusters of them on the GPU
+- **The web culls only whole clusters, on the main thread.**
+  The forest has millions of splats in view, and only about 1.5 % show a pixel;
+  coverage leaves out the clusters hidden whole,
+  and the rest are drawn.
+  The native compositor culls finer, on the GPU
   (section 4 of `docs/architecture.md`), which WebGL 2 cannot
-  (no compute, no indirect draws).
-  Its painting order is the draw order at one depth per layer,
-  which rounding breaks: natively, the same misordered about 6 % of the pixels.
+  (no compute, no indirect draws);
+  WebGPU can, where a browser has it.
+  Natively, the painting order is the draw order at one depth per layer,
+  which rounding breaks: the same misordered about 6 % of the pixels.
 - **Native pillars more than double the splats.**
   Natively a run is a row of splats, one a voxel
   (section 4 of `docs/architecture.md`),
@@ -139,6 +140,8 @@ Numbers are for the forest at 1280×800, as measured when written.
   as the forest covers the screen in fine pieces.
   Testing quarters of a cell first would not help (two in three are mixed),
   nor would clipping without allocating in `shape`.
+  Natively coverage runs on a thread of its own (`native/src/occlusion.rs`);
+  the web could run it in a worker, a frame behind.
 - **The native compositor's buffers stop at the device's limit.**
   `Arena::grow` caps a buffer at what the device allows
   (128 MB of splats on lavapipe), and `allocate` then hands out room past it:

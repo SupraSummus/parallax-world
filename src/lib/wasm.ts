@@ -25,7 +25,7 @@ export function wasmInstance(): WebAssembly.Exports {
 // gave the offset.
 
 /** Copies `values` into an instance's memory at byte `offset`. */
-export function copyIn(memory: WebAssembly.Memory, offset: number, values: Uint8Array | Int32Array | Uint32Array) {
+export function copyIn(memory: WebAssembly.Memory, offset: number, values: Uint8Array | Int32Array | Uint32Array | Float32Array) {
   new Uint8Array(memory.buffer, offset, values.byteLength).set(new Uint8Array(values.buffer, values.byteOffset, values.byteLength))
 }
 

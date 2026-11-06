@@ -22,7 +22,7 @@ pnpm exec vitest run bake       # files matching "bake"
 | `src/lib/leak-bound.test.ts` | The occlusion-leak bound, step by step, then end to end against ray-cast perspective |
 | `src/lib/chunk-baker.test.ts`, `bake/src/splats.rs` | Baked chunks' splats against rays cast along the axis and, in relief, slanted |
 | `bake/src/fill.rs`, `bake/src/coverage.rs` | Splats filled into a mask; solid blocks and their sums |
-| `src/lib/occlusion.test.ts` | Skipping covered chunks leaves the picture unchanged |
+| `src/lib/occlusion.test.ts` | Skipping covered chunks and clusters leaves the picture unchanged |
 | `src/lib/pillars.test.ts` | Each column a pillar over its run shows a lawn without the soil under it; without runs, stripes |
 | `src/lib/view.test.ts` | Camera basis, faces, projection, culling |
 | `src/lib/voxel-grid.test.ts` | Storage on the lattice, `LayerIndex`, coarsening |

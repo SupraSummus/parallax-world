@@ -168,7 +168,7 @@ fn work(shared: &Shared) {
 fn known(coverage: &mut Coverage, chunk: &Chunk) -> u32 {
     if !coverage.use_chunk(chunk.id) {
         let Mask { width, height, scale, ref blocks } = chunk.baked.mask;
-        coverage.add(chunk.id, width, height, scale, blocks);
+        coverage.add(chunk.id, width, height, scale, blocks, &[]);
     }
     chunk.id
 }

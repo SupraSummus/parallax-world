@@ -11,10 +11,11 @@ const rasters = new WeakMap<ChunkSplats, { key: string; pixels: Uint32Array }>()
  * plane z = distance of a slice of `slab`, seen from the camera: at each
  * of its mask's pixels (see Mask) on that plane, RGBA of the splat whose
  * pillar (its hexagon swept over its run) the camera's ray through it
- * enters first, the last drawn where they tie; 0 if none.
+ * enters first, the last drawn where they tie; 0 if none. Only the
+ * splats of clusters `show`n, if given.
  */
-export function rasterise(chunk: ChunkSplats, { x, y }: Omit<Placement, 'chunk'>, distance: number, slab: Slab): Uint32Array {
-  const key = [x, y, distance, slab.level, slab.atoms].join()
+export function rasterise(chunk: ChunkSplats, { x, y, show }: Omit<Placement, 'chunk'>, distance: number, slab: Slab): Uint32Array {
+  const key = [x, y, distance, slab.level, slab.atoms, show?.join('') ?? ''].join()
   const cached = rasters.get(chunk)
   if (cached?.key === key) return cached.pixels
   const { splats, mask: { width, height, scale } } = chunk
@@ -36,6 +37,8 @@ export function rasterise(chunk: ChunkSplats, { x, y }: Omit<Placement, 'chunk'>
   // Mask pixels from a camera-relative point on the plane.
   const [col, row] = [(px: number) => (px - x) * scale - 0.5, (py: number) => (y - py) * scale - 0.5]
   for (let k = 0; k < splats.length / SPLAT; k++) {
+    // Not drawn if its cluster is hidden.
+    if (show && show[chunk.cluster[k]] === 0) continue
     const [sx, sy, sw, run] = splats.subarray(k * SPLAT, k * SPLAT + 4)
     const colour = colours[k * SPLAT + 4]
     // Its site and size, camera-relative; its pillar's ends along the axis.
@@ -81,10 +84,10 @@ export function picture(frame: Frame, step: number): Uint32Array {
   const depth = new Float64Array(colour.length).fill(Infinity)
   frame.layers.forEach(({ face, slice, distance, placements }, index) => {
     const boxOf = screenBox(frame, face)
-    for (const { chunk, x, y } of placements) {
+    for (const { chunk, x, y, show } of placements) {
       const box = boxOf(x, x + chunk.extentWidth, y - chunk.extentHeight, y, distance)
       if (!box) continue
-      const pixels = rasterise(chunk, { x, y }, distance, slice)
+      const pixels = rasterise(chunk, { x, y, show }, distance, slice)
       for (let j = Math.max(0, Math.floor(box.minY / step)); j * step < Math.min(frame.height, box.maxY); j++) {
         for (let i = Math.max(0, Math.floor(box.minX / step)); i * step < Math.min(frame.width, box.maxX); i++) {
           const k = j * cols + i

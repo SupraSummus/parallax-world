@@ -1,4 +1,4 @@
-import { SPLAT } from './chunk-baker'
+import { CLUSTER, SPLAT } from './chunk-baker'
 import type { Chunk, Frame } from './renderer'
 import { halfLayer, MAX_SLANT, thickness } from './slice-selection'
 import { faceBasis, LAYER, viewBasis, type Basis, type Face } from './view'
@@ -160,17 +160,24 @@ type Uniform = (typeof UNIFORMS)[number]
 const SPLAT_AT = 0
 const PAINT_AT = 1
 
+/** A chunk on the GPU: its splats' buffer, and where each of its clusters' splats start in it (and the end). */
+interface Resident {
+  buffer: WebGLBuffer
+  starts: Uint32Array
+}
+
 /**
  * Draws Frames with WebGL 2 onto one canvas, near to far with a depth test,
  * so what is nearer rejects what is behind rather than covering it.
- * A chunk's splats are uploaded as a buffer, near to far,
- * when it comes into view and dropped when it leaves.
+ * A chunk's splats are uploaded as a buffer, cluster by cluster, each near
+ * to far, when it comes into view and dropped when it leaves; only the
+ * clusters that may show (Placement.show) are drawn.
  */
 export class Compositor {
   private canvas: HTMLCanvasElement
   private gl: WebGL2RenderingContext
   private uniforms = {} as Record<Uniform, WebGLUniformLocation | null>
-  private buffers = new Map<Chunk, WebGLBuffer>()
+  private resident = new Map<Chunk, Resident>()
   private frame: Frame | null = null
   private showSeams = false
   // Whether splats are swept over their runs.
@@ -187,7 +194,7 @@ export class Compositor {
     // over when it comes back.
     canvas.addEventListener('webglcontextlost', e => {
       e.preventDefault()
-      this.buffers.clear()
+      this.resident.clear()
     })
     canvas.addEventListener('webglcontextrestored', () => {
       this.setup()
@@ -243,6 +250,7 @@ export class Compositor {
     gl.enable(gl.CULL_FACE)
     gl.enableVertexAttribArray(SPLAT_AT)
     gl.enableVertexAttribArray(PAINT_AT)
+    const vertices = this.runs ? STRIP : HEXAGON
     let face: Face | null = null
     frame.layers.forEach((layer, i) => {
       if (layer.face !== face) {
@@ -255,14 +263,13 @@ export class Compositor {
       gl.uniform1f(u.halfDepth, (thickness(slice) * LAYER) / 2)
       gl.uniform1f(u.fog, fog)
       gl.uniform1f(u.depth, z(i))
-      for (const { chunk, x, y } of placements) {
-        gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer(chunk))
+      for (const { chunk, x, y, show } of placements) {
+        const { buffer, starts } = this.upload(chunk)
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer)
         drawn.add(chunk)
         gl.uniform2f(u.origin, x, y)
         gl.uniform4f(u.clip, x, y, x + chunk.extentWidth, y - chunk.extentHeight)
-        gl.vertexAttribPointer(SPLAT_AT, 4, gl.FLOAT, false, SPLAT * 4, 0)
-        gl.vertexAttribPointer(PAINT_AT, 4, gl.UNSIGNED_BYTE, true, SPLAT * 4, 16)
-        gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, this.runs ? STRIP : HEXAGON, chunk.splats.length / SPLAT)
+        this.drawRanges(starts, show, vertices)
       }
     })
     gl.disableVertexAttribArray(SPLAT_AT)
@@ -285,10 +292,33 @@ export class Compositor {
       gl.uniform1i(u.seams, 0)
     }
 
-    for (const [chunk, buffer] of this.buffers) {
+    for (const [chunk, { buffer }] of this.resident) {
       if (drawn.has(chunk)) continue
       gl.deleteBuffer(buffer)
-      this.buffers.delete(chunk)
+      this.resident.delete(chunk)
+    }
+  }
+
+  /**
+   * Draws the bound chunk's splats in the clusters `show`n (all if not
+   * given), a call per run of neighbouring clusters, its attributes
+   * pointing at the run's first splat (WebGL 2 has no base instance).
+   */
+  private drawRanges(starts: Uint32Array, show: Uint8Array | undefined, vertices: number) {
+    const { gl } = this
+    const clusters = starts.length - 1
+    for (let c = 0; c < clusters; ) {
+      if (show && show[c] === 0) {
+        c++
+        continue
+      }
+      const from = starts[c]
+      while (c < clusters && !(show && show[c] === 0)) c++
+      const count = starts[c] - from
+      if (count === 0) continue
+      gl.vertexAttribPointer(SPLAT_AT, 4, gl.FLOAT, false, SPLAT * 4, from * SPLAT * 4)
+      gl.vertexAttribPointer(PAINT_AT, 4, gl.UNSIGNED_BYTE, true, SPLAT * 4, from * SPLAT * 4 + 16)
+      gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, vertices, count)
     }
   }
 
@@ -310,10 +340,10 @@ export class Compositor {
     for (const name of UNIFORMS) {
       this.uniforms[name] = gl.getUniformLocation(program, name)
     }
+    gl.uniform1f(gl.getUniformLocation(program, 'maxSlant'), MAX_SLANT)
     gl.uniform3f(this.uniforms.skyTop, ...rgb(SKY_TOP))
     gl.uniform3f(this.uniforms.horizon, ...rgb(SKY_HORIZON))
     gl.uniform3f(this.uniforms.seamColor, ...rgb(SEAM_COLOR))
-    gl.uniform1f(gl.getUniformLocation(program, 'maxSlant'), MAX_SLANT)
     gl.frontFace(gl.CW)
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
     gl.enable(gl.DEPTH_TEST)
@@ -321,18 +351,28 @@ export class Compositor {
     for (const at of [SPLAT_AT, PAINT_AT]) gl.vertexAttribDivisor(at, 1)
   }
 
-  private buffer(chunk: Chunk): WebGLBuffer {
-    let buffer = this.buffers.get(chunk)
-    if (buffer) return buffer
+  /**
+   * The chunk on the GPU, uploaded if new: its splats cluster by cluster,
+   * each near to far (the baker's painting order reversed).
+   */
+  private upload(chunk: Chunk): Resident {
+    const cached = this.resident.get(chunk)
+    if (cached) return cached
     const { gl } = this
-    buffer = gl.createBuffer()
+    const { splats, cluster } = chunk
+    const count = splats.length / SPLAT
+    const clusters = chunk.clusters.length / CLUSTER
+    const starts = new Uint32Array(clusters + 1)
+    for (const c of cluster) starts[c + 1]++
+    for (let c = 0; c < clusters; c++) starts[c + 1] += starts[c]
+    const ordered = new Float32Array(splats.length)
+    const next = starts.slice(0, clusters)
+    for (let k = count - 1; k >= 0; k--) ordered.set(splats.subarray(k * SPLAT, k * SPLAT + SPLAT), next[cluster[k]]++ * SPLAT)
+    const buffer = gl.createBuffer()
     gl.bindBuffer(gl.ARRAY_BUFFER, buffer)
-    // Near to far: the baker's painting order reversed.
-    const { splats } = chunk
-    const reversed = new Float32Array(splats.length)
-    for (let k = 0; k < splats.length; k += SPLAT) reversed.set(splats.subarray(k, k + SPLAT), splats.length - SPLAT - k)
-    gl.bufferData(gl.ARRAY_BUFFER, reversed, gl.STATIC_DRAW)
-    this.buffers.set(chunk, buffer)
-    return buffer
+    gl.bufferData(gl.ARRAY_BUFFER, ordered, gl.STATIC_DRAW)
+    const entry = { buffer, starts }
+    this.resident.set(chunk, entry)
+    return entry
   }
 }
