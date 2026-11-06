@@ -6,6 +6,7 @@
 pub mod city;
 pub mod fields;
 pub mod forest;
+pub mod landmarks;
 pub mod learned;
 pub mod moor;
 pub mod mountains;
@@ -54,11 +55,18 @@ pub const WORLDS: &[Entry] = &[
     },
     // The first town's south edge: fields, its first row of houses and the main street, trees of its yards and of the forest;
     // and its centre: houses back to back, a cross street, the square with its fountain and church.
+    // Landmarks (landmarks.rs), from under the ground to over the crowns: the first chapel by the path ahead of the camera,
+    // its churchyard and the forest round it; and a windmill west of the town, its sails, fields and forest round it.
     // Far away, all of that town and a few metres of fields around it: its streets and paving are finer than the sites there.
     Entry {
         name: "valley",
         make: valley::valley,
-        regions: &[Box3 { min: [-128, -48, 760], max: [256, 208, 1016] }, Box3 { min: [-64, -48, 1408], max: [320, 288, 1856] }],
+        regions: &[
+            Box3 { min: [-128, -48, 760], max: [256, 208, 1016] },
+            Box3 { min: [-64, -48, 1408], max: [320, 288, 1856] },
+            Box3 { min: [-192, -64, -112], max: [192, 384, 208] },
+            Box3 { min: [-1104, -64, 1264], max: [-720, 384, 1584] },
+        ],
         levels: 4,
         from_above: 4,
         far: &[Box3 { min: [-704, -48, 864], max: [704, 288, 2336] }],

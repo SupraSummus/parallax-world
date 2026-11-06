@@ -8,8 +8,8 @@ coarser further away, for about the same cost per box at every level.
 `worldgen/` is that engine, and `worlds/` the worlds on it,
 which use only the engine's public API.
 The forest (`worlds/src/forest.rs`) is written this way,
-and so is the valley (`valley.rs`), the forest with towns and fields,
-three domains composed as in "Composing",
+and so is the valley (`valley.rs`), the forest with towns, fields and landmarks,
+four domains composed as in "Composing",
 and the city (`city.rs`), boxes on a plan of quarter metres;
 a host starts either by name from `WORLDS` (`worlds/src/lib.rs`),
 as a `World`: its generator, spawn and heights;
@@ -345,6 +345,40 @@ so its things are a library others draw from
 A kind's type (`kind_type`) is its class of material:
 the contract compares what rays hit by type, not by kind,
 so kinds that may stand in for each other far away share one.
+
+### Landmarks
+
+Structures that stand alone (`worlds/src/landmarks.rs`),
+a ruined keep, a watchtower, chapels, ponds, farmsteads and windmills,
+are the valley's fourth domain, which fills its land (`DOMAINS`):
+a new structure is a landmark, or a thing of a domain.
+A coarse plan gives each region 224 m wide at most one site.
+Kinds are tried there in an order drawn by weight, each at a few places,
+anywhere, beside the path or in the farmland round a town,
+and the first place one suits and fits takes it.
+What suits a kind is read off the valley's ground before landmarks shape it
+(`valley::Terrain`): how far the place is from a town and from the path,
+whether it is up on a rise or down in a hollow,
+how even the ground under the footprint is.
+A site keeps its cell's centre and all it shapes and bids for in its region,
+so a column asks only its region's;
+the rows of regions are staggered,
+or the farmland at a town's edge fell where every row's edges were.
+A site levels the ground plan under it (a pond digs a bowl),
+bids for its footprint and a clearing, which trees and crops then keep off,
+and paints its ground;
+a population anchored at the sites builds each in its own frame.
+A pond's water is a field up to a level under the rim its bowl leaves,
+so it never stands over the ground round it.
+Region (0, 0)'s is a chapel beside the path, in the camera's view at spawn.
+
+A new landmark is a variant of `Landmark` and its `Spec`:
+the places it suits and how often it is chosen,
+where in a region it is tried,
+its footprint, clearing and how it shapes the ground,
+and its builder:
+hollow solids with a measured far form (`town::thing`),
+open frames and boards as they are.
 
 ### Learned domains
 
