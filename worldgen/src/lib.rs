@@ -13,6 +13,7 @@ pub mod grid;
 pub mod js;
 pub mod noise;
 pub mod picture;
+pub mod places;
 pub mod plan;
 pub mod units;
 pub mod world;

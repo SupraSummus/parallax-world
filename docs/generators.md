@@ -260,6 +260,31 @@ a world drawing a canopy as a field of its own would have it followed.
   keep within its `reach`, which drawing checks only where it draws;
   and where a thing's bounds leave the heights, nothing is drawn outside.
 
+A world's layout must not follow the grids it is generated on:
+a town placed once per region, kept inside it,
+is never where two regions meet.
+`worldgen::places` (`places.rs`) checks that things prefer no places.
+It gathers each population's things over 16 km around spawn at eight seeds,
+from columns of cells in patches anywhere
+(a cell's anchor finds the thing of the cell it is in,
+so one thing per region of a plan is found from any of its cells).
+For each axis and period, from four cells to an eighth of the area,
+it sums the things' phases 2π·x/P over stretches of whole periods;
+a preference is a mean of those sums away from zero
+against how much they vary from stretch to stretch
+(Hotelling's T², its chance over all the tests under 10⁻³).
+Stretches, not things, are the samples:
+things that come in clusters, or bunch where a world has a feature
+(towns along a path at x = 0 at every seed),
+are a bias in one stretch, a place;
+the same bias in every stretch is a period.
+All seeds' things are tested together,
+to find few things that prefer the same places at every seed,
+and each seed's alone:
+a grid whose phase a seed draws still keeps towns off its regions' edges.
+Only things are checked: plans of fields (the moor's pools) are not,
+and things as rare as the valley's haystacks are too few to tell.
+
 Parts and far regions are checked at seed 42 only:
 they check how a world is drawn, not what a seed puts in it.
 With `--nocapture` it prints each level's margins;

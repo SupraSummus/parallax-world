@@ -1545,20 +1545,37 @@ fn nearest_site(p: At, s: i64) -> [i64; 3] {
  * that look at more things than a box draws (worldgen::contract).
  */
 pub fn thing_in(generator: &Generator, population: &Population, i: i64, j: i64, k: i64) -> Option<(String, Box3, Box3)> {
-    let n = population.cell;
-    let centre = [i * n, j * n, k * n];
-    let cell = Cell { i, j, k, centre, n, population: population.name, seed: generator.seed };
-    let anchor = (population.anchor)(&cell)?;
-    if nearest_site(at(anchor), n) != [i, j, k] {
-        return None;
-    }
-    let node = (population.make)(anchor, &cell)?;
+    let (_, node) = made_in(generator, population, i, j, k)?;
+    let (n, centre) = (population.cell, [i, j, k].map(|c| c * population.cell));
     let [rx, ry, rz] = population.reach;
     let reach = Box3 {
         min: [centre[0] - n - rx, centre[1] - n - ry, centre[2] - n - rz],
         max: [centre[0] + n + rx, centre[1] + n + ry, centre[2] + n + rz],
     };
     Some((format!("{} {i},{j},{k}", population.name), bounds_of(&node), reach))
+}
+
+/**
+ * The anchor of the thing `population` makes in cell (i, j, k) of N·FCC
+ * (i + j + k even), and the thing, as `generate` makes them; none if it
+ * makes none there.
+ */
+pub fn made_in(generator: &Generator, population: &Population, i: i64, j: i64, k: i64) -> Option<(Point, Node)> {
+    let (anchor, owner) = anchor_in(generator, population, i, j, k)?;
+    let n = population.cell;
+    let cell = Cell { i, j, k, centre: [i * n, j * n, k * n], n, population: population.name, seed: generator.seed };
+    (owner == [i, j, k]).then(|| (population.make)(anchor, &cell)).flatten().map(|node| (anchor, node))
+}
+
+/**
+ * The anchor cell (i, j, k) of `population` asks for, if any, and the
+ * cell it is in, which owns a thing there if it is this one.
+ */
+pub fn anchor_in(generator: &Generator, population: &Population, i: i64, j: i64, k: i64) -> Option<(Point, [i64; 3])> {
+    let n = population.cell;
+    let cell = Cell { i, j, k, centre: [i * n, j * n, k * n], n, population: population.name, seed: generator.seed };
+    let anchor = (population.anchor)(&cell)?;
+    Some((anchor, nearest_site(at(anchor), n)))
 }
 
 fn bounds_of(node: &Node) -> Box3 {
