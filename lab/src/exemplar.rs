@@ -19,6 +19,7 @@ use worldgen::noise::{Rng, hash64, stream, unit};
 
 use crate::image::Image;
 use crate::net;
+use crate::plan::{Lines, Plan};
 
 #[derive(Clone, Debug)]
 pub struct Options {
@@ -35,6 +36,10 @@ pub struct Options {
     pub position: f64,
     /** Whether the top level starts from an example per cell rather than one for all. */
     pub mixed: bool,
+    /** Weight of a candidate's context's distance from the plan's (`sample_guided`), squared. */
+    pub guide: f64,
+    /** Weight of the distance between the shares of lines around a candidate in its example and around its place in the plan, squared. */
+    pub lines: f64,
     pub seed: u64,
 }
 
@@ -55,6 +60,13 @@ pub struct Exemplars {
     /** Per example, a summed-area table per label, wrapping (boxes are under 2^16 cells). */
     sat: Vec<Vec<u16>>,
     levels: Vec<(Vec<f32>, Vec<Vec<Coord>>)>,
+    /** Each example's plan, and coordinates by cluster of their contexts (`with_plans`). */
+    plans: Vec<Plan>,
+    by_context: (Vec<f32>, Vec<Vec<Coord>>),
+}
+
+fn distance2(a: &[f32], b: &[f32]) -> f64 {
+    a.iter().zip(b).map(|(x, y)| ((x - y) * (x - y)) as f64).sum()
 }
 
 const DIM_CELLS: usize = 9;
@@ -81,7 +93,17 @@ impl Exemplars {
                 t
             })
             .collect();
-        let mut ex = Exemplars { options: options.clone(), n, w, h, labels: examples.to_vec(), sat, levels: Vec::new() };
+        let mut ex = Exemplars {
+            options: options.clone(),
+            n,
+            w,
+            h,
+            labels: examples.to_vec(),
+            sat,
+            levels: Vec::new(),
+            plans: Vec::new(),
+            by_context: (Vec::new(), Vec::new()),
+        };
         let dim = DIM_CELLS * n;
         for l in 0..=options.levels {
             if !ex.pools_at(l) {
@@ -105,6 +127,58 @@ impl Exemplars {
             ex.levels.push((centroids, pools));
         }
         ex
+    }
+
+    /** Gives each example its plan, so `sample_guided` can follow one; coordinates are clustered by their contexts. */
+    pub fn with_plans(mut self, plans: Vec<Plan>) -> Exemplars {
+        assert_eq!(plans.len(), self.labels.len(), "a plan per example");
+        let dim = plans[0].context.dim;
+        let mut rng = Rng::new(stream(self.options.seed, 70));
+        const SAMPLE: usize = 30_000;
+        let coords: Vec<Coord> = (0..SAMPLE)
+            .map(|_| Coord {
+                e: rng.below(self.labels.len() as u32) as u16,
+                x: rng.below(self.w as u32) as i32,
+                y: rng.below(self.h as u32) as i32,
+            })
+            .collect();
+        let points: Vec<f32> = coords.iter().flat_map(|c| plans[c.e as usize].context.at(c.x, c.y).to_vec()).collect();
+        let centroids = net::kmeans(&points, dim, 64, stream(self.options.seed, 71));
+        let mut pools = vec![Vec::new(); centroids.len() / dim];
+        for (i, c) in coords.iter().enumerate() {
+            pools[net::nearest(&centroids, dim, &points[i * dim..][..dim])].push(*c);
+        }
+        // Clusters left empty (contexts repeat: all forest, all fields) are dropped, so a target never lands in one.
+        let kept: Vec<usize> = (0..pools.len()).filter(|k| !pools[*k].is_empty()).collect();
+        let centroids = kept.iter().flat_map(|k| centroids[k * dim..][..dim].to_vec()).collect();
+        let pools = kept.iter().map(|k| std::mem::take(&mut pools[*k])).collect();
+        self.plans = plans;
+        self.by_context = (centroids, pools);
+        self
+    }
+
+    fn context(&self, c: Coord) -> &[f32] {
+        self.plans[c.e as usize].context.at(c.x, c.y)
+    }
+
+    /**
+     * How far the lines around `c` in its example are from those around
+     * `place` in the plan's: the squared distances of their √ shares in the
+     * 3 × 3 blocks a level's spacing apart.
+     */
+    fn line_cost(&self, level: usize, c: Coord, lines: &Lines, place: (i64, i64)) -> f64 {
+        let (s, k) = (self.spacing(level) as i64, lines.labels.len());
+        let (mut a, mut b) = (vec![0f32; k], vec![0f32; k]);
+        let mut cost = 0.0;
+        for (dx, dy) in OFFSETS.map(|(x, y)| (x as i64 * s - s / 2, y as i64 * s - s / 2)) {
+            match &self.plans[c.e as usize].lines {
+                Some(own) => own.shares(c.x as i64 + dx, c.y as i64 + dy, s, &mut a),
+                None => a.iter_mut().for_each(|v| *v = 0.0),
+            }
+            lines.shares(place.0 + dx, place.1 + dy, s, &mut b);
+            cost += a.iter().zip(&b).map(|(p, q)| ((p.sqrt() - q.sqrt()) as f64).powi(2)).sum::<f64>();
+        }
+        cost
     }
 
     /** Whether level `l` draws candidates from pools: not the two finest, where neighbours' coordinates suffice. */
@@ -154,7 +228,19 @@ impl Exemplars {
      * The window (x0, y0) w × h of a crop the examples' size drawn from
      * `seed`: its labels, and the coordinates they come from.
      */
-    pub fn sample(&self, seed: u64, (x0, y0, ww, wh): (usize, usize, usize, usize)) -> (Image, Vec<Coord>) {
+    pub fn sample(&self, seed: u64, window: (usize, usize, usize, usize)) -> (Image, Vec<Coord>) {
+        self.sample_guided(seed, window, None)
+    }
+
+    /**
+     * As `sample`, drawn to `target`, a plan over the whole crop: the top
+     * level starts each cell from a place in the examples of about its
+     * context, every candidate pays `guide` for its distance from it and
+     * `lines` for how differently lines run around it, and the plan's lines
+     * are drawn over what comes out.
+     */
+    pub fn sample_guided(&self, seed: u64, (x0, y0, ww, wh): (usize, usize, usize, usize), target: Option<&Plan>) -> (Image, Vec<Coord>) {
+        assert!(target.is_none() || !self.plans.is_empty(), "examples' plans to follow a target with");
         let top = self.options.levels;
         let subpasses = 4 * self.options.passes as i64;
         let dims = |l: usize| ((self.w >> (top - l)) as i64, (self.h >> (top - l)) as i64);
@@ -185,10 +271,20 @@ impl Exemplars {
             let jitter = self.options.jitter.get(l).copied().unwrap_or(0.0);
             for y in r0.1..r0.3 {
                 for x in r0.0..r0.2 {
-                    let base = if l == 0 {
+                    let place = ((x * s + s / 2) as i32, (y * s + s / 2) as i32);
+                    let base = if let (0, Some(t)) = (l, target) {
+                        // The best for the place's context of a few from the examples of about it.
+                        let want = t.context.at(place.0, place.1);
+                        let (centroids, pools) = &self.by_context;
+                        let pool = &pools[net::nearest(centroids, want.len(), want)];
+                        (0..8)
+                            .map(|i| pool[(hash64(seed, x, y, 200 + i) % pool.len() as u64) as usize])
+                            .min_by(|a, b| distance2(self.context(*a), want).total_cmp(&distance2(self.context(*b), want)))
+                            .expect("a pool holds coordinates")
+                    } else if l == 0 {
                         // One example's coarse layout, or each top cell its own example's.
                         let e = if self.options.mixed { (hash64(seed, x, y, 8) % self.labels.len() as u64) as u16 } else { first };
-                        Coord { e, x: (x * s + s / 2) as i32, y: (y * s + s / 2) as i32 }
+                        Coord { e, x: place.0, y: place.1 }
                     } else {
                         let p = above[((y / 2) * above_w + x / 2) as usize];
                         debug_assert!(p != UNDRAWN, "a parent read was never drawn");
@@ -255,6 +351,12 @@ impl Exemplars {
                                 }
                                 let d2 = ((c.x as f64 - place.0).powi(2) + (c.y as f64 - place.1).powi(2)) / (self.w * self.h) as f64;
                                 cost += self.options.position * d2;
+                                if let Some(t) = target {
+                                    cost += self.options.guide * distance2(self.context(c), t.context.at(place.0 as i32, place.1 as i32));
+                                    if let Some(lines) = &t.lines {
+                                        cost += self.options.lines * self.line_cost(l, c, lines, (place.0 as i64, place.1 as i64));
+                                    }
+                                }
                                 if cost < best.0 {
                                     best = (cost, c);
                                 }
@@ -272,7 +374,8 @@ impl Exemplars {
         for y in 0..wh {
             for x in 0..ww {
                 let c = above[(y + y0) * self.w + x + x0];
-                out.set(x, y, self.label(c));
+                let line = target.and_then(|t| t.lines.as_ref()).and_then(|l| l.at((x + x0) as i64, (y + y0) as i64));
+                out.set(x, y, line.unwrap_or_else(|| self.label(c)));
                 coords.push(c);
             }
         }
@@ -353,15 +456,30 @@ pub fn dominant(examples: impl Iterator<Item = u16>) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::plan::Context;
 
     #[test]
     fn a_window_alone_is_that_window_of_the_whole() {
         let examples: Vec<Image> = crate::masked::tests::volumes([32, 1, 32], 4).iter().map(|v| v.to_image()).collect();
-        let options =
-            Options { levels: 2, passes: 1, jitter: vec![0.5, 0.3, 0.0], clusters: 4, pool: 2, position: 1.0, mixed: true, seed: 1 };
-        let ex = Exemplars::new(&examples, 2, options);
-        let (alone, whole) = (ex.sample(7, (13, 11, 6, 7)).1, ex.sample(7, (0, 0, 32, 32)).1);
-        let window: Vec<Coord> = (11..18).flat_map(|y| whole[y * 32 + 13..][..6].to_vec()).collect();
-        assert_eq!(alone, window);
+        let options = Options {
+            levels: 2,
+            passes: 1,
+            jitter: vec![0.5, 0.3, 0.0],
+            clusters: 4,
+            pool: 2,
+            position: 1.0,
+            mixed: true,
+            guide: 4.0,
+            lines: 1.0,
+            seed: 1,
+        };
+        let plan = |e: &Image| Plan { context: Context::of(e, &[&[1]], 4, 1), lines: Some(Lines::of(e, &[1])) };
+        let ex = Exemplars::new(&examples, 2, options).with_plans(examples.iter().map(plan).collect());
+        let target = plan(&examples[2]);
+        for target in [None, Some(&target)] {
+            let (alone, whole) = (ex.sample_guided(7, (13, 11, 6, 7), target).1, ex.sample_guided(7, (0, 0, 32, 32), target).1);
+            let window: Vec<Coord> = (11..18).flat_map(|y| whole[y * 32 + 13..][..6].to_vec()).collect();
+            assert_eq!(alone, window);
+        }
     }
 }

@@ -39,6 +39,10 @@ pub const LABELS: [Label; 8] = [
 pub const ROOF: u16 = 0;
 pub const STREET: u16 = 2;
 pub const PAVING: u16 = 3;
+pub const WATER: u16 = 4;
+pub const CANOPY: u16 = 5;
+pub const GROUND: u16 = 6;
+pub const FIELDS: u16 = 7;
 
 /** A valley class's label. */
 pub fn label_of_class(class: u16) -> u16 {

@@ -41,12 +41,46 @@
 //! come through. It keeps lanes whole and islands apart, but cuts houses
 //! and street grids where pieces of two towns meet.
 //!
+//! The sixth scores them without asking how like the examples they are,
+//! which a copy wins (critic.rs): can a small network tell their windows
+//! from real ones, at 16, 64 and 256 m; how much do they copy verbatim.
+//! Checked first on maps whose verdict is known (unseen real towns, the
+//! training crops, patchworks of training tiles), it puts synthesis by
+//! coordinates ahead of the grammar and the masked model, whose streets
+//! and blocks give them away at 64 m. But on real places it barely sees
+//! streets cut into pieces; a profile (profile.rs) does: per label, the
+//! sizes of its parts, its widths and its distances to the others, set
+//! against real places' beyond how much those differ among themselves.
+//!
+//! The seventh learns from real places (real.rs, from OpenStreetMap by
+//! scripts/overture.py) and draws to a plan (plan.rs: the shares of
+//! built, forest, fields and water around each 16 m), held-out places' or
+//! painted ones (blend.rs). Both models follow a plan and blend where it
+//! says, as real places blend at their edges; the critic sets each window
+//! against real ones of the same plan, to judge the filling-in apart from
+//! the plan. But shares can't hold what is long and thin: no model drew a
+//! painted river, and streets fell into pieces. So a plan has lines too:
+//! main roads and water, given exactly, the rest drawn around them.
+//! Rivers and roads come through whole; the streets the models draw
+//! themselves still fall into pieces.
+//!
+//! Why, for the masked model: given a real place's codes from 8 m up, its
+//! lower levels join the streets; from 16 m up, they don't. Not for what
+//! the codes hold (128 a level, or which faces of a cell a label crosses)
+//! nor for how well each level is learned (a wider network, or attention
+//! among a cell's slots, hold out no fewer bits): of thousands of cells
+//! drawn, a few stray, and each cuts a street. Drawn surer than learned,
+//! streets join but everything comes out wider; four times the steps
+//! barely help.
+//!
 //! The examples run the experiments (`cargo run --release --example
 //! segment`, then `synth`; `gather`, then `geometry`, `shared` and
-//! `regimes`; `masked`, `masked_fcc`; `exemplar`, `exemplar_fcc`), print
+//! `regimes`; `masked`, `masked_fcc`; `exemplar`, `exemplar_fcc`;
+//! `critic`; scripts/overture.py, then `blend`), print
 //! Markdown tables and write pictures to out/; the worlds' columns are
 //! generated once and cached there.
 
+pub mod critic;
 pub mod exemplar;
 pub mod exemplar_fcc;
 pub mod experiment;
@@ -59,7 +93,10 @@ pub mod masked;
 pub mod masked_fcc;
 pub mod mixture;
 pub mod net;
+pub mod plan;
 pub mod png;
+pub mod profile;
+pub mod real;
 pub mod regimes;
 pub mod scenes;
 pub mod stats;

@@ -16,7 +16,7 @@ use lab::image::Image;
 use lab::mixture::Tiles;
 use lab::regimes::{self, Regimes};
 use lab::stats;
-use lab::towns::{self, CROP, LABELS, ROOF, STREET, TownCrop, label_rgb};
+use lab::towns::{self, CANOPY, CROP, GROUND, LABELS, ROOF, STREET, TownCrop, label_rgb};
 
 const TRAIN_SEEDS: u64 = 18;
 const KINDS: usize = 32;
@@ -26,8 +26,6 @@ const COUNTRYSIDE: [u64; 4] = [1, 2, 3, 4];
 const HELD_OUT: [u64; 3] = [19, 20, 21];
 const SAMPLES: u64 = 6;
 const DISTANCES: [usize; 4] = [1, 4, 16, 64];
-const CANOPY: u16 = 5;
-const GROUND: u16 = 6;
 
 fn main() {
     let all = towns::gather(&(1..=TRAIN_SEEDS).collect::<Vec<_>>(), -2..=2, 2, &format!("{OUT}/towns"));

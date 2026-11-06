@@ -203,7 +203,24 @@ Numbers are for the forest at 1280×800, as measured when written.
   Synthesis by coordinates (`lab/src/exemplar.rs`, `exemplar_fcc.rs`)
   copies pieces of the examples, so it keeps lanes whole,
   but cuts houses where pieces of two towns meet.
-  Worth trying: coordinates guided by the masked model's coarse levels.
+  The critic (`lab/src/critic.rs`) says what tells them from real maps
+  and what they copy;
+  profiles (`lab/src/profile.rs`) how their parts are laid out.
+  Drawn to a plan learned from real places (`lab/src/plan.rs`),
+  shares with main roads and rivers as lines,
+  both blend where the plan says, and keep the lines whole;
+  but the streets they draw themselves fall into pieces
+  (the masked model's, to a few stray draws: `lab/src/lib.rs`),
+  and both draw paving in specks.
+  Worth trying: a draw that settles neighbouring cells together,
+  not each alone (cells drawn in an order that keeps neighbours apart early);
+  a plan composed for a world worth walking through
+  (landmarks, views, contrasts), not an average one.
+- The critic judges flat maps only;
+  3D scenes are still scored by pooled statistics (`lab/src/fcc_stats.rs`).
+  Its windows as volumes would judge the FCC models too.
+- Drop lab's superseded experiments (WFC rule-sets, templates),
+  their findings kept in `lab/src/lib.rs`: the critic now says which model wins.
 - Join lab's cubic and FCC samplers with one lattice type
   (sites, neighbours, parents): each pair now repeats its box bookkeeping.
 
