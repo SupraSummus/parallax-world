@@ -82,6 +82,7 @@ worldgen/                    # The world-generation engine, moving to integers, 
 │   ├── world.rs             # World: what a host needs to show one (generator, spawn, heights)
 │   ├── picture.rs           # Pictures of a world at one level: rays through its voxels, as PNGs
 │   ├── cost.rs              # What generating costs: work counted by layer, reported for a world's tiles, against a baseline
+│   ├── places.rs            # Whether things prefer places: positions modulo periods, as on a grid, over seeds
 │   └── contract.rs          # The contract every world keeps, as checks for tests
 └── tests/contract.rs        # The engine on test worlds: fog, caves, a village; what it refuses
 worlds/                      # The worlds, on worldgen's public API only; the web's WebAssembly
