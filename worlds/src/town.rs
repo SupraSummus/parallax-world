@@ -12,7 +12,7 @@ use std::rc::Rc;
 
 use worldgen::frame::{Frame, Part, U, V, W, back, walls};
 use worldgen::generator::{
-    ANY_SIZE, Child, Children, Far, Field, FieldValues, Fill, Layer, Node, Op, Population, SOLID, Shape, Shapes, Span,
+    ANY_SIZE, Anchors, Child, Children, Far, Field, FieldValues, Fill, Layer, Node, Op, Population, SOLID, Shape, Shapes, Span,
 };
 use worldgen::grid::Box3;
 use worldgen::kinds;
@@ -415,6 +415,11 @@ impl Towns {
         Towns { plan, spots }
     }
 
+    /** The first town, near the start: every seed has it. */
+    pub fn first(&self) -> Town {
+        self.plan.at(0, 0).expect("the first town")
+    }
+
     /** The town nearest z along the path, if it has one. */
     pub fn near(&self, z: i64) -> Option<Town> {
         nearest(&self.plan, z)
@@ -490,7 +495,10 @@ pub fn layers(towns: Rc<Towns>, land: Rc<Land>, me: usize, ground: Rc<Plan<i64>>
         size: ANY_SIZE,
         anchor: {
             let towns = towns.clone();
-            Box::new(move |cell| towns.near(cell.centre[2]).map(|t| [t.x as f64, t.level as f64, t.z as f64]))
+            Anchors::Lines {
+                axis: 1,
+                anchor: Box::new(move |line| towns.near(line.centre[1]).map(|t| [t.x as f64, t.level as f64, t.z as f64])),
+            }
         },
         make: Box::new(move |_, cell| towns.near(cell.centre[2]).map(town)),
         far: None,

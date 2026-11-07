@@ -9,16 +9,16 @@
 
 use std::rc::Rc;
 
-use worldgen::World;
 use worldgen::generator::{Generator, KindDef};
 use worldgen::noise::{Fx, fx, stream};
 use worldgen::plan::{Land, Plan};
 use worldgen::units::{Units, m};
+use worldgen::world::{Find, World};
 
 use crate::fields;
 use crate::forest::{self, GROUND_SCALE, Ground, PATH_SCALE, Relief};
-use crate::landmarks::{self, Landmarks};
-use crate::moor::{self, Uplands};
+use crate::landmarks::{self, Landmark, Landmarks};
+use crate::moor::{self, Moorland, Uplands};
 use crate::mountains::{self, Ranges};
 use crate::town::{self, TOWNS_SCALE, Towns};
 
@@ -72,6 +72,7 @@ pub fn valley(seed: u64) -> World {
     // No moor from behind the spawn to past the first town: the contract's regions are there.
     let uplands = Rc::new(Uplands::new(seed, terrain.clone(), landmarks.clone(), [m(-200.0), m(500.0)]));
     let moorland = Rc::new(uplands.moorland(stream(seed, 82)));
+    let points = points(&terrain, &landmarks, &moorland);
     let path = {
         let terrain = terrain.clone();
         Rc::new(Plan::new("path", PATH_SCALE, move |_, z| terrain.path_x(z)))
@@ -122,10 +123,78 @@ pub fn valley(seed: u64) -> World {
     layers
         .extend(moor::layers(moorland, moor::Ground { ground: ground.clone(), land: Some((land, MOOR)), path: Some(path), bottom: None }));
     layers.extend(mountains::layers(ranges, ground));
-    World { generator: Generator { kinds: kinds(), seed: stream(seed, 4), layers }, spawn, heights: mountains::HEIGHTS }
+    World { generator: Generator { kinds: kinds(), seed: stream(seed, 4), layers }, spawn, heights: mountains::HEIGHTS, points }
 }
 
 /** The valley's kinds, each domain's after those of the domains it draws from; the moor alone has them too. */
 pub fn kinds() -> Vec<KindDef> {
     [forest::KINDS, town::KINDS, fields::KINDS, mountains::KINDS, landmarks::KINDS, moor::KINDS].concat()
+}
+
+/** Where its features are, at any seed: the first town, chapel and windmill, a mountainside, a steading on the moor. */
+fn points(terrain: &Rc<Terrain>, landmarks: &Rc<Landmarks>, moorland: &Rc<Moorland>) -> Vec<(&'static str, Find)> {
+    let site = |landmark| -> Find {
+        let landmarks = landmarks.clone();
+        Box::new(move || {
+            let s = landmarks.first(landmark);
+            [s.centre[0], s.level, s.centre[1]]
+        })
+    };
+    let (towns, moorland) = (terrain.towns.clone(), moorland.clone());
+    let (range, floor) = (terrain.clone(), terrain.clone());
+    vec![
+        (
+            "town",
+            Box::new(move || {
+                let t = towns.first();
+                [t.x, t.level, t.z]
+            }),
+        ),
+        ("chapel", site(Landmark::Chapel)),
+        ("windmill", site(Landmark::Windmill)),
+        ("mountainside", Box::new(move || mountainside(&range))),
+        ("steading", Box::new(move || steading(&floor, &moorland))),
+    ]
+}
+
+/**
+ * A mountainside above the treeline, where meadows give way to scree
+ * and rock: just behind the crest of the range east of the path, 20 m
+ * down from its top, where the crest stands 250 m over the treeline.
+ * Looked for every 64 m along the valley, ahead and behind in turn, from
+ * 5820 m on, where REGIONS_SEED's is, so its region stays where it was
+ * laid out; the first from the start is elsewhere at that seed.
+ */
+fn mountainside(terrain: &Terrain) -> [i64; 3] {
+    (0..400)
+        .flat_map(|k| [k, -k - 1])
+        .map(|k| m(5820.0) + k * m(64.0))
+        .find_map(|z| {
+            let path = terrain.path_x(z).round_units().0;
+            let out: Vec<(i64, Fx)> = (path..path + m(3000.0)).step_by(m(8.0) as usize).map(|x| (x, terrain.ground(x, z))).collect();
+            let (x, top) = out.iter().fold(out[0], |a, b| if b.1 > a.1 { *b } else { a });
+            if top < terrain.ranges.treeline(x, z) + Fx::m(250.0) {
+                return None;
+            }
+            let behind = out.iter().skip_while(|(at, _)| *at < x);
+            behind.map(|&(x, h)| [x, h.round_units().0, z]).find(|p| Units(p[1]).to_fx() <= top - Fx::m(20.0))
+        })
+        .expect("a mountainside within 25 km along the valley")
+}
+
+/**
+ * A steading of the moor on the valley's floor: in the first row of the
+ * moor's regions with one within 400 m of the path, the nearest it.
+ * From 4.5 km on, where REGIONS_SEED's is, as for the mountainside.
+ */
+fn steading(terrain: &Terrain, moorland: &Moorland) -> [i64; 3] {
+    let path = |z: i64| terrain.path_x(z).round_units().0;
+    (0..1000)
+        .map(|row| m(4500.0) + row * moor::REGION)
+        .find_map(|z| {
+            let (i, k) = moor::steading_region(path(z), z);
+            let near = (i - 3..=i + 3).filter_map(|i| moorland.steading_in(i, k)).map(|p| ((p[0] - path(p[2])).abs(), p));
+            near.filter(|(d, _)| *d < m(400.0)).min().map(|(_, p)| p)
+        })
+        .expect("a steading by the path within 160 km along the valley")
 }

@@ -1043,5 +1043,5 @@ pub fn city(seed: u64) -> World {
         .anchor(|cell| (cell.centre == [0, 0, 0]).then_some([0.0; 3]))
         .make(move |_, _| Some(district(blocks.clone())));
     let layers = vec![Layer::Field(ground(stream(seed, 2))), Layer::Population(population)];
-    World { generator: Generator { kinds: KINDS.to_vec(), seed: stream(seed, 6), layers }, spawn, heights: HEIGHTS }
+    World { generator: Generator { kinds: KINDS.to_vec(), seed: stream(seed, 6), layers }, spawn, heights: HEIGHTS, points: Vec::new() }
 }

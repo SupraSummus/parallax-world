@@ -46,7 +46,7 @@ macro_rules! work {
 }
 
 work! {
-    /** Cells of a population whose anchor was asked for. */
+    /** Cells of a population whose anchor was asked for, or lines of them (`Anchors::Lines`). */
     cells,
     /** Cells whose anchor is in them: those asked to make a thing. */
     owned,

@@ -79,15 +79,15 @@ worldgen/                    # The world-generation engine, moving to integers, 
 │   ├── column.rs            # A heightfield's spans, each tall enough to keep a site at every level
 │   ├── plan.rs              # Plans by column, each from coarser ones only; land domains bid for
 │   ├── frame.rs             # Things built in frames of their own: quarter turns, mirrors, walls
-│   ├── world.rs             # World: what a host needs to show one (generator, spawn, heights)
+│   ├── world.rs             # World: what a host needs to show one (generator, spawn, heights), the places it names
 │   ├── picture.rs           # Pictures of a world at one level: rays through its voxels, as PNGs
 │   ├── cost.rs              # What generating costs: work counted by layer, reported for a world's tiles, against a baseline
 │   ├── places.rs            # Whether things prefer places: positions modulo periods, as on a grid, over seeds
 │   └── contract.rs          # The contract every world keeps, as checks for tests
-└── tests/contract.rs        # The engine on test worlds: fog, caves, a village; what it refuses
+└── tests/contract.rs        # The engine on test worlds: fog, caves, a village, knobs on a wall; what it refuses
 worlds/                      # The worlds, on worldgen's public API only; the web's WebAssembly
 ├── src/
-│   ├── lib.rs               # WORLDS: the registry hosts start worlds from by name, with the regions checked
+│   ├── lib.rs               # WORLDS: the registry hosts start worlds from by name, with the regions checked around their places
 │   ├── forest.rs            # The forest, on ground it may share
 │   ├── town.rs, fields.rs   # Towns along the path, farmland around them: the valley's other domains
 │   ├── landmarks.rs         # The valley's fourth domain: a keep, a watchtower, chapels, ponds, farmsteads, windmills
@@ -100,7 +100,7 @@ worlds/                      # The worlds, on worldgen's public API only; the we
 ├── data/town-grammar.bin    # learned.rs's rule table, written by lab's export example
 ├── data/cost/               # Each world's cost baseline, which tests/cost.rs holds it to
 ├── tests/                   # Every world in WORLDS keeps the contract and its cost baseline; the scenes' contents
-└── examples/                # map: a world from above; look: a picture of it (picture.rs); cost: what its tiles cost (cost.rs); bench: timing a world's tiles
+└── examples/                # map: a world from above; look: a picture of it, of any place it names (picture.rs); cost: what its tiles cost (cost.rs); bench: timing a world's tiles
 lab/                         # Experiment, not built by pnpm: hierarchical WFC rule-sets, pixel conditionals, split grammars with shared splits and regimes, learned from the valley; a masked model of any volume, flat, 3D or on the FCC lattice; synthesis by coordinates into examples; a critic and profiles that score any of them; real places (scripts/overture.py) drawn to a plan (see src/lib.rs); exports the learned town's rules
 native/                      # Spike of a native frontend (eframe + wgpu), linking bake/ and worlds/; see src/main.rs
 ├── .cargo/config.toml       # Builds for x86-64-v3: floor and ceil inline (see there)

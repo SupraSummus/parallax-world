@@ -14,7 +14,8 @@ the forest with towns, fields, landmarks and moorland between mountains,
 five domains composed as in "Composing",
 and the city (`city.rs`), boxes on a plan of quarter metres;
 a host starts either by name from `WORLDS` (`worlds/src/lib.rs`),
-as a `World`: its generator, spawn and heights;
+as a `World`: its generator, spawn and heights,
+and the places it names (`points`);
 the web lists and generates them all as WebAssembly (`src/lib/worldgen.ts`).
 Integers and fixed point (`noise.rs`) decide wherever they can,
 so a world is the same on every machine and as fine far from the origin.
@@ -37,12 +38,22 @@ A world is **layers** of two kinds, drawn in `order`:
   the cell owns a thing only if its anchor is in it
   (a tree belongs to the cell its foot is in),
   then asks it to `make` the thing.
-  An anchor picked evenly within the cell's reach
-  (in a cube 2N wide, or on the ground under it)
+  An anchor picked evenly within the cell's reach (a cube 2N wide)
   gives things as even and as dense as one per cube 2N wide would:
   every point is in one cell, which picks it as often as any.
-  A cell gives named random sequences (`cell.random("species")`)
-  that depend on the cell and the name only.
+  Or the population gives an anchor per **line** of cells along an `axis`
+  (`anchor_along`): the cells whose centres differ only along it, every 2N,
+  which lie within a square 2N wide across it.
+  The framework asks each line a box reaches once,
+  and the cell of the line the anchor is in owns it;
+  an anchor in another line's cell is no one's.
+  Every point is in one cell, so in one line along each axis:
+  a point picked evenly in each line's square,
+  on a surface each line crosses once (`Line::pick`, a ground under columns),
+  gives things as even as one per square 2N wide,
+  for one pick however long the line.
+  Cells and lines give named random sequences (`cell.random("species")`)
+  that depend on them and the name only.
 
 A thing is a **node**: its **shapes**, and **children**,
 finer things it makes only for the area asked for (`Children::Reaching`).
@@ -181,7 +192,7 @@ columns of sites step over a thinner one to what is under it.
 Broken rules panic, naming the thing and pointing here:
 
 - **Populations.** A thing reaches at most `reach` past its cell's reach,
-  N from its centre (one number or per axis);
+  N from its centre (one number or per axis), whichever way it is anchored;
   only things that get made are checked, so derive `reach` from the largest possible.
 - **Things.** A node with children gives `bounds` holding them;
   a child stays inside its parent's bounds;
@@ -202,20 +213,23 @@ and fields from position alone.
 at seed 42 and three more, a thread each,
 and `worldgen/tests/contract.rs` for test worlds of fog, caves,
 and a village of houses with doors and tables
-on y = 0, a plane of sites at every level ("Faces" in "Levels").
-An entry's regions are chosen at seed 42 (`REGIONS_SEED`);
-at other seeds each moves up or down with the world's ground under it
-(`follow_ground`), while x and z stay.
-The ground is what the fields alone show from above,
-things and their far fields left out:
-fields are given by position everywhere, and things stand on them.
-Everything seen from above would follow a forest's crowns,
-which rise and fall with the trees there:
-the learned town's region at seed 1, forest where seed 42 has streets,
-rose 112 units over ground that rose 52, and held none.
-Materials can't tell the ground, as the engine reads none,
-nor can what is connected below, as trunks hold up crowns and walls roofs;
-a world drawing a canopy as a field of its own would have it followed.
+on y = 0, a plane of sites at every level ("Faces" in "Levels");
+and knobs anchored along x on a slanting wall,
+one per square 2N wide across x.
+An entry's regions are boxes around places its world names
+(`Region`, `World::point`: the spawn, the first town, a windmill),
+which the world finds at any seed,
+so each region looks at the same feature at every seed,
+laid out at seed 42 (`REGIONS_SEED`).
+Boxes kept where they were at seed 42 held only forest at other seeds,
+not the valley's landmarks;
+moving them with the ground needs a ground, which the engine has not.
+A region a world is known to break at a seed is checked apart there
+(`KNOWN_BREAKS` in `worlds/tests/contract.rs`) and must still break,
+so the list only shrinks; each is planned work in `docs/todo.md`.
+The checks do take y as up, as hosts do:
+a world's heights are along it, and "from above" looks down it
+(see `docs/todo.md`).
 
 - a box against eight parts generated alone, in reverse order,
   at levels 0, 2 and one past the last checked below:
@@ -248,7 +262,7 @@ a world drawing a canopy as a field of its own would have it followed.
   so what is finer than the sites must show in proportion ("Plans" in "Levels").
   Things are left out, with their far fields,
   as their far forms keep what rays see around them, not from above.
-  The valley's has its first town (the same at every seed),
+  The valley's has its first town,
   the moor's its stream and patches of heath,
   the learned town's its whole crop;
 - at each level up to one past the world's, in each region
@@ -307,6 +321,9 @@ and `worlds/examples/look.rs` takes a picture of it at one level
 (`worldgen::picture`: rays through its voxels, from any eye or straight down),
 with what each pixel hit and how far away, for checks to measure
 (`cargo run --release --example map` or `look` in `worlds/`, arguments in the files).
+`look` takes the places a world names for its eye, target or area,
+so a feature can be seen at any seed (`at windmill`);
+to find one more, give its world a point for it, not a scratch search.
 
 ## Cost
 
@@ -480,7 +497,8 @@ with `-- --check` it says whether the committed one is what it learns.
 
 The moor (`worlds/src/moor.rs`) is the shortest whole world to start from.
 `build.rs` has the short forms:
-`Field::columns` and `Field::at`, `Population::new(…).reach(…).make(…)`,
+`Field::columns` and `Field::at`,
+`Population::new(…).reach(…).anchor(…)` or `.anchor_along(axis, …)`, `.make(…)`,
 `Node::group`, `Child::new`, and `Shape::ball` and the like,
 solid and filling unless told to `paint` or `carve`.
 A shape kept with a chance is made with the long form (`ball(…, fill, op)`,
@@ -547,17 +565,18 @@ Carves along a line want the same margin.
   (the moor's grass over its heather, 0.03 at level 6),
   and stops rays skimming over it.
   Give a thin medium only while sites are close.
-- **Anchors on the ground.** `Cell::on_ground` picks a spot evenly under a cell;
-  things anchored there are as even as one per square 2N wide.
-- **Tall heights.** A host's tiles span the world's heights,
-  and a population is asked for an anchor in every cell over each column,
-  most of them in the air over the ground or under it:
-  under the valley's mountains, a ground read per cell is most of a tile's time.
-  Pick the spot once per column of cells,
-  keep it, and turn down the cells it is not in (the forest's `spot`).
-- **Seeds.** The contract checks four seeds; make the world, and its spawn,
-  for any: the spawn is a site (x + y + z even) in the air,
-  found without assuming a feature a seed may lack.
+- **Things on a surface.** Anchor them along the axis across it
+  (`anchor_along(1, …)` with `Line::pick` for a ground under columns),
+  not per cell:
+  a host's tiles span the world's heights,
+  and asked per cell, a population reads the ground in every cell over each column,
+  most of them in the air or under it;
+  under the valley's mountains that was most of a tile's time.
+- **Seeds.** The contract checks four seeds; make the world, its spawn
+  and the places it names, for any: the spawn is a site (x + y + z even) in the air,
+  found without assuming a feature a seed may lack,
+  and a place is searched for until found (the valley's first windmill
+  is kilometres away at some seeds).
 - **The bottom.** Spans at least two spacings tall grow past a fixed bottom
   at coarse levels, out of the heights:
   fill to the world's bottom with `fill_below_exactly`.
@@ -583,6 +602,10 @@ Carves along a line want the same margin.
   Crowns reach over the path, the canopy doesn't:
   spread over 2.5 m around each column, the materials rays hit came closer,
   but from above at level 6 went to 0.096.
+  So a clearing the crowns overhang, a landmark's, grows far away:
+  from above, the valley's first windmill at seed 1 was 0.167 off at level 4,
+  0.14 less canopy, and at seed 3 0.107 off, 0.09 less
+  (`KNOWN_BREAKS`; planned in `docs/todo.md`).
 - **Media are isotropic.** A site stops rays from every direction alike;
   vertical trunks seen from above and from the side cannot both be right.
   (Opacity per direction, tried in a prototype, made things worse.)

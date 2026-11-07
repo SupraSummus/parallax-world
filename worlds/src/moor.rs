@@ -51,7 +51,7 @@ const BOG: Units = Units::m(0.25);
 const STREAM_SCALE: i64 = m(32.0);
 const BANK_SCALE: i64 = m(1.0);
 const GROUND_SCALE: i64 = 8;
-const REGION: i64 = m(160.0);
+pub const REGION: i64 = m(160.0);
 const POOL_REGION: i64 = m(64.0);
 /** A steading's ring is this far inside its region, so the cell that owns it is centred in the region too. */
 const MARGIN: i64 = m(50.0);
@@ -177,6 +177,11 @@ fn region(x: i64, z: i64, size: i64) -> (i64, i64) {
     ((x + size / 2).div_euclid(size), (z + size / 2).div_euclid(size))
 }
 
+/** The region of column (x, z) that may have a steading (`Moorland::steading_in`). */
+pub fn steading_region(x: i64, z: i64) -> (i64, i64) {
+    region(x, z, REGION)
+}
+
 /**
  * The moor's decisions from position alone, coarser than any column:
  * its patches of heather, its stream, if it has one, its steadings and
@@ -272,6 +277,12 @@ impl Moorland {
         let Water::Pools(pools) = &self.water else { return None };
         let (i, k) = region(x, z, POOL_REGION);
         pools.at(i, k)
+    }
+
+    /** Where the steading of region (i, k) is, if it has one: between its hut and its ring, at the hut's floor. */
+    pub fn steading_in(&self, i: i64, k: i64) -> Option<[i64; 3]> {
+        let s = self.steadings.at(i, k)?;
+        Some([(s.centre[0] + s.ring[0]).div_euclid(2), s.level.0, (s.centre[1] + s.ring[1]).div_euclid(2)])
     }
 
     fn steading(&self, x: i64, z: i64) -> Option<Steading> {
@@ -492,7 +503,7 @@ pub fn moor(seed: u64) -> World {
     };
     let layers = layers(moorland, Ground { ground, land: None, path: None, bottom: Some(HEIGHTS.0) });
     // The valley's kinds, its own last.
-    World { generator: Generator { kinds: valley::kinds(), seed: stream(seed, 6), layers }, spawn, heights: HEIGHTS }
+    World { generator: Generator { kinds: valley::kinds(), seed: stream(seed, 6), layers }, spawn, heights: HEIGHTS, points: Vec::new() }
 }
 
 /** The moor's layers on `ground`, of `moorland`: drawn where it owns the land; its kinds are KINDS, after the valley's. */
@@ -578,12 +589,11 @@ fn water(f: Rc<Moor>) -> Field {
 /** Boulders half sunk in the heath, granite or lichened, off the water and the paths; as many as the moor's share. */
 fn boulders(f: Rc<Moor>) -> Population {
     let ground = f.clone();
-    // A spot per column of cells, owned by the one it is in: tall heights hold many over each.
     Population::new("moor boulders", 3.0, m(6.0))
         .reach(m(2.5))
-        .anchor(move |c| {
-            let spot = c.on_ground_by(&mut Rng::new(hash64(ground.moorland.seed, c.i, 0, c.k)), |x, z| ground.height(x, z));
-            ((spot[1] - c.centre[1] as f64).abs() <= c.n as f64).then_some(spot)
+        .anchor_along(1, move |line| {
+            let [i, k] = line.across;
+            Some(line.pick(&mut Rng::new(hash64(ground.moorland.seed, i, 0, k)), |x, z| ground.height(x, z)))
         })
         .make(move |[x, y, z], c| {
             let mut random = c.random("boulder");
@@ -606,9 +616,9 @@ fn steadings_population(f: Rc<Moor>) -> Population {
     let anchor = f.clone();
     Population::new("steadings", 4.0, STEADING_CELL)
         .reach([REACH_ACROSS, m(16.0), REACH_ACROSS])
-        .anchor(move |c| {
-            let s = anchor.moorland.steading(c.centre[0], c.centre[2])?;
-            ((s.ring_ground.0 - c.centre[1]).abs() <= c.n).then_some([s.ring[0] as f64, s.ring_ground.0 as f64, s.ring[1] as f64])
+        .anchor_along(1, move |line| {
+            let s = anchor.moorland.steading(line.centre[0], line.centre[1])?;
+            Some([s.ring[0] as f64, s.ring_ground.0 as f64, s.ring[1] as f64])
         })
         .make(move |_, c| f.moorland.steading(c.centre[0], c.centre[2]).map(|s| steading(&f, &s)))
 }
