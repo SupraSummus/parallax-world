@@ -313,9 +313,10 @@ each by the axes its normal leans towards
 (`face_shade`, `voxel_colour`):
 a voxel is shaded by the way its surface faces,
 and coloured by what is seen of it along the face.
-A lit grid (native's `--light`) carries instead
-the light each surface voxel's face sends out
-(`bake/src/light.rs`, made by `worldgen/src/light.rs`):
+A host that lights the world (native's `--light`) hands the baker instead
+the light each face of a voxel it shows sends out
+(`bake/src/light.rs`, found by `worldgen/src/light.rs`),
+so only what shows is lit:
 a splat shows the mean of its open faces',
 each as much as it faces the camera.
 

@@ -1,6 +1,6 @@
 //! Light on the lattices 2^k·FCC: a prototype, for look's pictures and
-//! native's `--light`, which hand the light from voxels' faces to the
-//! baker (bake's light.rs).
+//! native's `--light`, whose bakers ask for the light from the faces of
+//! the voxels they show (bake's light.rs).
 //!
 //! Light comes to a site from its 12 neighbours' directions: from one
 //! step at the site's level, and beyond it from the next coarser level's
@@ -23,7 +23,7 @@ use bake::light::{FaceLight, linear_to_srgb, srgb_to_linear};
 use bake::slicing::GRID_LEVELS;
 
 use crate::World;
-use crate::generator::{generate, materials_of};
+use crate::generator::{Generator, generate, materials_of};
 use crate::grid::{Box3, VoxelGrid};
 use crate::picture::{FACES, Picture, nearest_site};
 
@@ -40,7 +40,7 @@ const TOP_STEPS: usize = 64;
 /** Sites per tile in x and z, at each level, as native's; a tile spans the heights. */
 pub const TILE: i64 = 128;
 /** What a level keeps before it forgets, to find again if asked: sites' light, tiles (each Light's and their Grids). */
-const KEPT_SITES: usize = 1 << 18;
+const KEPT_SITES: usize = 1 << 12;
 const KEPT_TILES: usize = 16;
 const SHARED_TILES: usize = 64;
 
@@ -49,11 +49,17 @@ type Tile = Arc<OnceLock<VoxelGrid>>;
 /** Tiles by level and key. */
 type Tiles = Map<(usize, (i64, i64)), Tile>;
 
-/** Tiles of every level, shared by the Lights of one world (a thread's each): generated once, by whichever needs one first. */
+/** Tiles of every level, shared by the Lights of one world (a thread's each) and its host: generated once, by whichever needs one first. */
 #[derive(Clone, Default)]
 pub struct Grids(Arc<Mutex<Tiles>>);
 
 impl Grids {
+    /** Tile `key` of `level` of the world `generator` makes, `heights` tall (World::heights_at), as its Lights read it. */
+    pub fn tile(&self, generator: &Generator, level: u32, heights: (i64, i64), key: (i64, i64)) -> VoxelGrid {
+        let tile = self.get(level as usize, key, || generate(generator, &tile_box(heights, key), level));
+        tile.get().expect("made").clone()
+    }
+
     /** Tile `key` of level `i`, made by `make` if not yet. */
     fn get(&self, i: usize, key: (i64, i64), make: impl FnOnce() -> VoxelGrid) -> Tile {
         let tile = {
@@ -164,12 +170,6 @@ impl Light {
         Light { world, grids, levels, unit, enters, albedo, emission, sky: skies, background }
     }
 
-    /** Tile `key`'s box at level `i`. */
-    fn tile_box(&self, i: usize, key: (i64, i64)) -> Box3 {
-        let heights = self.levels[i].heights;
-        Box3 { min: [key.0 * TILE, heights.0, key.1 * TILE], max: [(key.0 + 1) * TILE, heights.1, (key.1 + 1) * TILE] }
-    }
-
     /** Keeps tile `key` of level `i`, and the glow at its sites. */
     fn keep(&mut self, i: usize, key: (i64, i64), grid: Tile) {
         let Level { tiles, glow, .. } = &mut self.levels[i];
@@ -192,7 +192,7 @@ impl Light {
     /** Tile `key` of level `i`, from the Grids, generated if not yet. */
     fn hold(&mut self, i: usize, key: (i64, i64)) -> &VoxelGrid {
         if !self.levels[i].tiles.contains_key(&key) {
-            let b = self.tile_box(i, key);
+            let b = tile_box(self.levels[i].heights, key);
             let generator = &self.world.generator;
             let grid = self.grids.get(i, key, || generate(generator, &b, i as u32));
             self.keep(i, key, grid);
@@ -286,25 +286,24 @@ impl Light {
     }
 
     /**
-     * Tile `key` of `level` (TILE sites square, the heights tall), lit:
-     * the light from each face of each of its voxels with an empty
-     * neighbour, its colour times the light on it and what it glows.
+     * The light from each face of the voxel at `site` of `level`: its
+     * colour times the light on it, and what it glows. A voxel with no
+     * empty neighbour (shown where a slice cuts it) takes the mean of its
+     * neighbours' that have one, or none.
      */
-    pub fn tile(&mut self, level: u32, key: (i64, i64)) -> VoxelGrid {
+    pub fn faces(&mut self, level: u32, site: [i64; 3]) -> FaceLight {
         let i = level as usize;
-        let mut grid = self.hold(i, key).clone();
-        let sites: Vec<[i64; 3]> = grid.sites().collect();
-        for site in sites {
-            if FACES.iter().all(|f| !self.empty(i, add(site, *f))) {
-                continue;
+        let out = if self.surface(i, site) {
+            self.lit(i, site)
+        } else {
+            let mut lit = Vec::new();
+            for n in FACES.map(|f| add(site, f)) {
+                if !self.empty(i, n) && self.surface(i, n) {
+                    lit.push(self.lit(i, n));
+                }
             }
-            let light = self.light(i, site);
-            let out: FaceLight = std::array::from_fn(|f| {
-                let (on, m) = (self.on(&light, self.unit[f]), grid.face(site[0], site[1], site[2], f) as usize);
-                std::array::from_fn(|c| self.albedo[m][c] * on[c] + self.emission[m][c])
-            });
-            grid.set_light(site[0], site[1], site[2], out);
-        }
+            std::array::from_fn(|f| std::array::from_fn(|c| lit.iter().map(|l| l[f][c]).sum::<f32>() / lit.len().max(1) as f32))
+        };
         // Forgets what grew too much, to find it again if asked.
         for level in &mut self.levels {
             if level.light.len() > KEPT_SITES {
@@ -315,7 +314,21 @@ impl Light {
                 level.glow.clear();
             }
         }
-        grid
+        out
+    }
+
+    /** Whether the voxel at `site` of level `i` has an empty neighbour. */
+    fn surface(&mut self, i: usize, site: [i64; 3]) -> bool {
+        FACES.iter().any(|f| self.empty(i, add(site, *f)))
+    }
+
+    /** The light from each face of the voxel at `site` of level `i`, on its surface. */
+    fn lit(&mut self, i: usize, site: [i64; 3]) -> FaceLight {
+        let light = self.light(i, site);
+        std::array::from_fn(|f| {
+            let (on, m) = (self.on(&light, self.unit[f]), self.face(i, site, f) as usize);
+            std::array::from_fn(|c| self.albedo[m][c] * on[c] + self.emission[m][c])
+        })
     }
 
     /** What lights the voxel at `site` of `level` to its colour at 1: the light on its surface, which faces its empty neighbours. */
@@ -366,6 +379,11 @@ pub(crate) fn around(x: [f64; 3]) -> impl Iterator<Item = ([i64; 3], f64)> {
         let weight = 1.5 - dot(r, r).sqrt();
         (weight > 0.0).then_some((site, weight))
     })
+}
+
+/** Tile `key`'s box, `heights` tall. */
+fn tile_box(heights: (i64, i64), key: (i64, i64)) -> Box3 {
+    Box3 { min: [key.0 * TILE, heights.0, key.1 * TILE], max: [(key.0 + 1) * TILE, heights.1, (key.1 + 1) * TILE] }
 }
 
 /** Where a site of one level is in the next coarser's units. */
@@ -475,8 +493,7 @@ mod tests {
     fn a_wall_is_lit_on_the_lamps_side() {
         // A wall one site thick across x, the lamp on its +x side.
         let world = world(&[[80.0, 10.0, 64.0]], |x, y, z, s| y < 0 || (64..64 + s).contains(&x) && y < 32 && (32..96).contains(&z));
-        let grid = Light::new(world, Brightness { sky: 0.0, sun: 0.0, glow: 1.0 }, Grids::default()).tile(0, (0, 0));
-        let light = grid.into_grid().light(64, 10, 64).expect("the wall is lit");
+        let light = Light::new(world, Brightness { sky: 0.0, sun: 0.0, glow: 1.0 }, Grids::default()).faces(0, [64, 10, 64]);
         let side = |sign: i64| FACES.iter().zip(&light).filter(|(f, _)| f[0] == sign).map(|(_, l)| l[0]).sum::<f32>();
         assert!(side(1) > 100.0 * side(-1), "towards the lamp {}, away {}", side(1), side(-1));
     }
