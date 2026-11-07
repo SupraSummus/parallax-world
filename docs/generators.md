@@ -57,7 +57,8 @@ A world is **layers** of two kinds, drawn in `order`:
 
 A thing is a **node**: its **shapes**, and **children**,
 finer things it makes only for the area asked for (`Children::Reaching`).
-Shapes are analytic: `ball`, `ellipsoid`, `capsule`, `cuboid`, `lathe`
+Shapes are analytic: `ball`, `ellipsoid`, `tube` (along a curve, below)
+and `capsule` (a straight one), `cuboid`, `lathe`
 (a solid of revolution, e.g. a crown).
 Each `fill`s empty sites, `paint`s over them, or `carve`s them empty,
 and may keep each site only with a chance (`fill` < 1: foliage, fog).
@@ -91,6 +92,12 @@ between ends the world finds near a point.
 The forest's path (`worlds/src/path.rs`) is one, in pieces 8 m long:
 what is on it or keeps off it measures from the curve;
 the valley is laid out across its centre line, along x.
+
+A **tube** is the points within a radius of a curve: a branch, a root.
+At sites s apart it is drawn through the points of the coarsest level
+whose corridor is s / 2 or less,
+so far away it is the same curve, coarser, within half a site of where it is.
+The forest's branches bend a little, along random curves (`Curve::wandering`).
 
 No direction is special;
 a world with a ground says so in its fields and anchors.

@@ -7,6 +7,7 @@ use std::rc::Rc;
 
 use worldgen::World;
 use worldgen::column;
+use worldgen::curve::Curve;
 use worldgen::generator::{
     ANY_SIZE, Child, Far, Field, Fill, Generator, Layer, Line, Node, Op, Point, Population, SOLID, Shadows, Shape, Span, ball,
     bounds_of_shapes, capsule, ellipsoid, lathe,
@@ -25,6 +26,10 @@ fn vox(metres: f64) -> f64 {
     round(metres / UNIT_SIZE)
 }
 const BRANCH_RADIUS: f64 = 1.2;
+/** How branches bend: once, off straight by up to a third of a metre at their middle, by where their ends are. */
+fn branch() -> Curve<3> {
+    Curve::wandering(0xb2a4c4, vec![fx(3.0)])
+}
 fn log_radius() -> f64 {
     vox(0.45)
 }
@@ -800,6 +805,7 @@ fn birch_tree(x: f64, ground: f64, z: f64, random: &mut Rng) -> Node {
     let rx = vox(2.0 + random.next() * 1.2);
     let count = 12.0 + random.below(6) as f64;
     let mid = (width - 1.0) / 2.0;
+    let bend = branch();
     let (mut branches, mut clusters) = (Vec::new(), Vec::new());
     for i in 0..count as usize {
         // Uniform point in the crown ellipsoid.
@@ -813,7 +819,7 @@ fn birch_tree(x: f64, ground: f64, z: f64, random: &mut Rng) -> Node {
             }
         }
         let p = [tx + ox * rx, cy + oy * ry, tz + oz * rx];
-        branches.push(Shape::capsule([tx + mid, p[1] - vox(0.5), tz + mid], p, BRANCH_RADIUS, K::birchBark).paint());
+        branches.push(Shape::tube(&bend, [tx + mid, p[1] - vox(0.5), tz + mid], p, BRANCH_RADIUS, K::birchBark).paint());
         let radius = vox(0.8 + random.next() * 0.6);
         clusters.push(leaf_cluster(format!("leaves {i}"), p, radius, foliage, 0.7, random, 0.6, turning));
     }
@@ -843,7 +849,7 @@ fn oak_tree(x: f64, ground: f64, z: f64, random: &mut Rng, ground_at: GroundAt) 
     shapes.extend(roots(cx, ground, cz, width / 2.0, K::bark, random, ground_at));
     let branches = 4.0 + random.below(3) as f64;
     let mut ends: Vec<Point> = vec![[cx, ground + height - vox(2.0), cz]];
-    let mut hidden = Vec::new();
+    let (mut hidden, bend) = (Vec::new(), branch());
     for i in 0..branches as usize {
         let angle = (i as f64 / branches) * PI * 2.0 + random.next() * 0.8;
         let reach = vox(2.5 + random.next() * 2.5);
@@ -851,7 +857,7 @@ fn oak_tree(x: f64, ground: f64, z: f64, random: &mut Rng, ground_at: GroundAt) 
         let end_x = cx + js::cos(angle) * reach;
         let end_y = (start_y + vox(2.0 + random.next() * 3.0)).min(ground + height - vox(1.5));
         let end = [end_x, end_y, cz + js::sin(angle) * reach];
-        hidden.push(Shape::capsule([cx, start_y, cz], end, BRANCH_RADIUS * 1.5, K::bark).paint());
+        hidden.push(Shape::tube(&bend, [cx, start_y, cz], end, BRANCH_RADIUS * 1.5, K::bark).paint());
         ends.push(end);
     }
     let clusters = ends

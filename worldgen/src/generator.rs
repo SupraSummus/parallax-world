@@ -10,6 +10,7 @@ use std::sync::OnceLock;
 use bake::{FACE_KINDS, VOXEL_FACES};
 
 use crate::cost::{self, Work};
+use crate::curve::Curve;
 use crate::grid::{Box3, VoxelGrid};
 use crate::js;
 use crate::noise::{Fixed, Fx, ONE, Rng, fixed, float, hash, hash_text, hash64, unit};
@@ -72,7 +73,7 @@ type At = [Fixed; 3];
 #[derive(Clone)]
 enum Solid {
     Ellipsoid { centre: At, radii: At },
-    Capsule { p: At, d: At, radius: Fixed },
+    Tube { pieces: Vec<Piece>, radius: Fixed },
     Lathe { p: At, d: At, length: Fixed, widest: Fixed, radius: Rc<dyn Fn(f64) -> f64> },
     Cuboid { min: At, max: At },
     Gable { min: At, max: At, ridge: usize },
@@ -493,23 +494,53 @@ fn segment(p: Point, q: Point) -> (At, At, Fixed) {
     (p, d, (dot(d, d) as u64).isqrt() as Fixed)
 }
 
-/** The points within `radius` of the segment from p to q: branches, logs. */
+/** The points within `radius` of the segment from p to q: twigs, logs; a straight tube. */
 pub fn capsule(p: Point, q: Point, radius: f64, kind: Kind, fill: Fill, op: Op) -> Shape {
-    let (p_at, d, length) = segment(p, q);
-    let r = fixed(radius);
-    let (lengthf, rf) = (float(length), radius);
+    // A curve refined no times: the segment.
+    tube(&Curve::new(Vec::new(), |_, a, _| a), p, q, radius, kind, fill, op)
+}
+
+/**
+ * The points within `radius` of `curve` from p to q: a branch, a root.
+ * At sites s apart it is drawn along the points of the coarsest level
+ * the curve strays from by s / 2 or less, so within half a site of
+ * where it is.
+ */
+pub fn tube(curve: &Curve<3>, p: Point, q: Point, radius: f64, kind: Kind, fill: Fill, op: Op) -> Shape {
+    let points: Vec<At> = curve.points([p, q].map(|e| at(e).map(Fx::from_bits))).into_iter().map(|e| e.map(Fx::to_bits)).collect();
+    let n = points.len() - 1;
+    let between = |i: usize, j: usize| [0, 1, 2].map(|k| points[j][k] - points[i][k]);
+    // Level by level, coarsest first, 1, 2, 4… pieces, in one allocation: capsules are many, twigs and leaves.
+    let mut pieces = Vec::with_capacity(2 * n - 1);
+    for (level, stray) in curve.corridors().enumerate() {
+        let step = n >> level;
+        pieces.extend((0..n).step_by(step).map(|i| Piece {
+            p: points[i],
+            segment: Segment::new(between(i, i + step)),
+            stray: stray.to_bits(),
+        }));
+    }
+    let length: Fixed = (0..n)
+        .map(|i| {
+            let d = between(i, i + 1);
+            (dot(d, d) as u64).isqrt() as Fixed
+        })
+        .sum();
+    let (r, lengthf, rf) = (fixed(radius), float(length), radius);
     let area = 2.0 * PI * rf * lengthf + 4.0 * PI * (rf * rf);
     let volume = PI * (rf * rf) * lengthf + (4.0 / 3.0) * PI * js::pow(rf, 3.0);
-    let q_at = [0, 1, 2].map(|i| p_at[i] + d[i]);
     Shape {
         kind,
         op,
         centre: at(mid(p, q)),
-        bounds: sites_between([0, 1, 2].map(|i| p_at[i].min(q_at[i]) - r), [0, 1, 2].map(|i| p_at[i].max(q_at[i]) + r)),
+        bounds: sites_between(
+            [0, 1, 2].map(|k| points.iter().map(|e| e[k]).min().expect("ends") - r),
+            [0, 1, 2].map(|k| points.iter().map(|e| e[k]).max().expect("ends") + r),
+        ),
         extents: [length + 2 * r, 2 * r, 2 * r].map(Fx::from_bits),
         area: effective_area(area, (4.0 * volume) / area, &fill, mid(p, q)),
         fill,
-        solid: Solid::Capsule { p: p_at, d, radius: r },
+        solid: Solid::Tube { pieces, radius: r },
     }
 }
 
@@ -644,6 +675,22 @@ impl Segment {
     }
 }
 
+/** A tube's piece: from p along `segment`, of a level whose points the curve strays from by `stray`. */
+#[derive(Clone, Copy)]
+struct Piece {
+    p: At,
+    segment: Segment,
+    stray: Fixed,
+}
+
+impl Piece {
+    /** Whether x is within √r2 of it (8 bits after the point). */
+    fn holds(&self, x: At, r2: i64) -> bool {
+        let v = offset(x, self.p);
+        self.segment.away(v, dot(v, self.segment.d)) <= r2
+    }
+}
+
 /** A shape's test for one `min`, with what does not depend on the point worked out. */
 enum Inside<'a> {
     Nothing,
@@ -651,9 +698,14 @@ enum Inside<'a> {
         centre: At,
         inverse: [i64; 3],
     },
-    Capsule {
-        p: At,
-        segment: Segment,
+    /** A tube drawn in one piece, as most are, by value: looping over one cost a few percent at level 0. */
+    Piece {
+        piece: Piece,
+        r2: i64,
+    },
+    /** The pieces of the level drawn. */
+    Tube {
+        pieces: &'a [Piece],
         r2: i64,
     },
     Lathe {
@@ -688,10 +740,8 @@ impl Inside<'_> {
                 let u = offset(x, *centre);
                 (0..3).map(|i| ((u[i] * inverse[i]) >> 16).pow(2)).sum::<i64>() <= ONE * ONE
             }
-            Inside::Capsule { p, segment, r2 } => {
-                let v = offset(x, *p);
-                segment.away(v, dot(v, segment.d)) <= *r2
-            }
+            Inside::Piece { piece, r2 } => piece.holds(x, *r2),
+            Inside::Tube { pieces, r2 } => pieces.iter().any(|piece| piece.holds(x, *r2)),
             Inside::Lathe { p, segment, reach, widest2, half, radius } => {
                 let v = offset(x, *p);
                 let vd = dot(v, segment.d);
@@ -738,7 +788,15 @@ impl Shape {
                 }
                 Inside::Ellipsoid { centre: *centre, inverse: a.map(|a| (1 << 32) / a) }
             }
-            Solid::Capsule { p, d, radius } => Inside::Capsule { p: *p, segment: Segment::new(*d), r2: q8((*radius).max(half)).pow(2) },
+            Solid::Tube { pieces, radius } => {
+                // The coarsest level within half a site of the curve; level l is pieces 2^l − 1 to 2^(l+1) − 2.
+                let level = (0..).find(|&l| pieces[(1 << l) - 1].stray <= s * ONE / 2).expect("the finest strays nowhere");
+                let r2 = q8((*radius).max(half)).pow(2);
+                match &pieces[(1 << level) - 1..(2 << level) - 1] {
+                    [piece] => Inside::Piece { piece: *piece, r2 },
+                    pieces => Inside::Tube { pieces, r2 },
+                }
+            }
             Solid::Lathe { p, d, length, widest, radius } => Inside::Lathe {
                 p: *p,
                 segment: Segment::new(*d),
@@ -1907,6 +1965,44 @@ mod tests {
                 assert_eq!(columns.map(|c| c.len() as u32), columns_of_cell(r), "cells {r} sites wide, at {centre:?}");
             }
             println!("{r}: {:?} of {}", columns_of_cell(r), 2 * r * r);
+        }
+    }
+
+    /**
+     * Levels of detail by construction: at sites s apart, a tube holds
+     * what is within its radius of the curve, give or take s / 2, as the
+     * curve is drawn through the points of a level it strays from by
+     * no more.
+     */
+    #[test]
+    fn a_tube_is_within_half_a_site_of_its_curve() {
+        let curve = Curve::wandering(3, [8.0, 4.0, 2.0, 1.0].map(fx).to_vec());
+        let ends = [[0.0, 0.0, 0.0], [96.0, 40.0, -24.0]];
+        let line: Vec<Point> = curve.points(ends.map(|e| e.map(fx))).iter().map(|p| p.map(Fx::to_f64)).collect();
+        let shape = tube(&curve, ends[0], ends[1], 3.0, 1, SOLID, Op::Fill);
+        let distance = |p: Point| {
+            let to = |a: Point, b: Point| {
+                let (ab, ap) = ([0, 1, 2].map(|k| b[k] - a[k]), [0, 1, 2].map(|k| p[k] - a[k]));
+                let t = ((0..3).map(|k| ab[k] * ap[k]).sum::<f64>() / (0..3).map(|k| ab[k] * ab[k]).sum::<f64>()).clamp(0.0, 1.0);
+                js::hypot(&[0, 1, 2].map(|k| ap[k] - t * ab[k]))
+            };
+            line.windows(2).map(|s| to(s[0], s[1])).fold(f64::INFINITY, f64::min)
+        };
+        let b = shape.bounds;
+        for s in [1, 2, 4, 8, 16] {
+            let inside = shape.inside(0, s);
+            // A hundredth of a unit for rounding.
+            let slack = s as f64 / 2.0 + 0.01;
+            for x in b.min[0].div_euclid(s)..=b.max[0].div_euclid(s) {
+                for y in b.min[1].div_euclid(s)..=b.max[1].div_euclid(s) {
+                    for z in b.min[2].div_euclid(s)..=b.max[2].div_euclid(s) {
+                        let d = distance([x, y, z].map(|v| (v * s) as f64));
+                        let holds = inside.holds([x, y, z].map(|v| v * s * ONE));
+                        assert!(holds || d > 3.0 - slack, "at sites {s} apart, ({x}, {y}, {z}) is {d:.3} from the curve, not held");
+                        assert!(!holds || d <= 3.0 + slack, "at sites {s} apart, ({x}, {y}, {z}) is {d:.3} from the curve, held");
+                    }
+                }
+            }
         }
     }
 

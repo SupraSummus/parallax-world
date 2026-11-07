@@ -639,7 +639,7 @@ the app generates one box of either, its extent, into a grid.
 The forest's ground is a heightfield sampled per column of sites;
 trunks are columns at least 2 units square,
 crowns leaf clusters (balls) or a solid of revolution (spruce),
-branches and fallen logs capsules, so thin parts stay one piece on the lattice
+branches tubes and fallen logs capsules, so thin parts stay one piece on the lattice
 (a single column of sites only touches at corners).
 The city (`worlds/src/city.rs`) is planned on a 0.25 m grid:
 each plan cell is a box holding four sites, so walls stay flat and frames one piece.
