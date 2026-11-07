@@ -208,15 +208,16 @@ pub struct Claims<T> {
     apart: i64,
     /** Each spot's thing, by its key. */
     proposed: Rc<Plan<Claim<T>>>,
-    /** The keys of the things kept near each stretch of columns `apart` / 8 wide, for `near`. */
+    /** The keys of the things kept near each stretch of columns `apart` / 2 wide, for `near`. */
     nearby: Plan<[(i32, i32); NEARBY]>,
 }
 
 /**
- * Things kept within 9/8 of `apart` of a point, at most: 8 would need a
- * circle 1.152 times as wide round it (7 round one more).
+ * Things kept within 11/8 of `apart` of a point, at most: 10 would need
+ * a circle 1.407 times as wide round it. A stretch's columns are within
+ * 3/8 of `apart` of its centre (half its diagonal is under 0.354 of it).
  */
-const NEARBY: usize = 7;
+const NEARBY: usize = 9;
 
 impl<T: Copy + Default + 'static> Claims<T> {
     pub fn new(
@@ -256,9 +257,9 @@ impl<T: Copy + Default + 'static> Claims<T> {
             })
         };
         let nearby = {
-            let (proposed, stretch) = (proposed.clone(), (apart / 8).max(1));
+            let (proposed, stretch) = (proposed.clone(), (apart / 2).max(1));
             Plan::new(name, cell, move |a, b| {
-                let (centre, reach) = ([a * stretch + stretch / 2, b * stretch + stretch / 2], apart + stretch);
+                let (centre, reach) = ([a * stretch + stretch / 2, b * stretch + stretch / 2], apart + (apart * 3 + 7) / 8);
                 let near = spots(cell, seed, first, centre, reach).into_iter().filter(|&(i, key)| {
                     kept.at(i, key)
                         && proposed.at(i, key).is_some_and(|([u, w], _)| (u - centre[0]).pow(2) + (w - centre[1]).pow(2) <= reach * reach)
@@ -277,7 +278,7 @@ impl<T: Copy + Default + 'static> Claims<T> {
     /** The thing kept nearest (x, z) within `within`, at most `apart`, if any: of those kept for its stretch of columns. */
     pub fn near(&self, x: i64, z: i64, within: i64) -> Claim<T> {
         assert!(within <= self.apart, "claims are near within {} at most, not {within}", self.apart);
-        let stretch = (self.apart / 8).max(1);
+        let stretch = (self.apart / 2).max(1);
         let keys = self.nearby.at(x.div_euclid(stretch), z.div_euclid(stretch));
         let distance = |[u, w]: [i64; 2]| (u - x).pow(2) + (w - z).pow(2);
         let near = keys.into_iter().take_while(|k| k.0 != i32::MIN).filter_map(|(i, key)| self.proposed.at(i.into(), key.into()));

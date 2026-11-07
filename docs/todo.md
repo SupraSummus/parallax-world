@@ -216,22 +216,25 @@ Numbers are for the forest at 1280×800, as measured when written.
   Behind the crest the high country is one smooth noise,
   and wherever it stands over the snowline, all of it is snow.
   It wants crags and cirques of its own, or less snow where it is broad.
-- **Things placed one per region prefer places.**
-  `worlds/tests/places.rs` lists them (`KNOWN`).
+- **Landmarks, placed one per region, prefer places**
+  (`KNOWN` in `worlds/tests/places.rs`).
   A landmark keeps its cell and all it shapes inside its region (`landmarks.rs`),
   so a strip along every region's edge never holds one,
   and a town's farmland there no farmstead or windmill
   (rows of regions are staggered along x, so the strips differ from row to row).
-  So do the steadings of the moor and of the valley's moorland,
-  50 m inside regions 160 m wide, and their pools, 16 m inside 64 m
-  (`moor.rs`; regions not staggered),
-  though the check can't see pools (a plan of a field).
-  Claimed instead (`Claims`), as towns and settlements are,
+  Claimed instead (`Claims`),
+  as towns, settlements and the moor's steadings and pools are,
   each would stand anywhere.
 - **The valley's town tiles are over the budget at levels 4 and 6**
   (`OVER_BUDGET` in `worlds/tests/cost.rs`; `worlds/examples/cost.rs` shows why):
   most of it is drawing the houses whole to measure them;
   remembering measured forms would spare little ("Levels" in `docs/generators.md`).
+- **Cost weighs every plan's columns alike** (`NS` in `worldgen/src/cost.rs`),
+  however many other plans making one looks up.
+  `Claims` keeping keys for stretches finer than a level's columns
+  made the valley's level-6 tiles near twice as slow,
+  while the estimate rose by a tenth.
+  Counting lookups (`Plan::at`), not only columns made, would show it.
 
 ## Ideas
 

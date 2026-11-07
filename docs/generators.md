@@ -300,7 +300,7 @@ All seeds' things are tested together,
 to find few things that prefer the same places at every seed,
 and each seed's alone:
 a grid whose phase a seed draws still keeps towns off its regions' edges.
-Only things are checked: plans of fields (the moor's pools) are not,
+Only things are checked: claims a field draws (the moor's pools) are not,
 and things as rare as the valley's haystacks are too few to tell.
 `worlds/tests/places.rs` checks each world in `WORLDS`,
 but for the populations it knows prefer places (`KNOWN`, docs/todo.md).
@@ -441,11 +441,16 @@ priorities hashed from the spots
 That is local, order-free and from position and seed alone,
 and no spot is likelier anywhere, so no place is preferred.
 A column asks `near` for the thing kept nearest it, within `apart`;
-the keys of the few kept near each stretch of columns `apart` / 8 wide
+the keys of the few kept near each stretch of columns `apart` / 2 wide
 are kept, so a column doesn't read the cells around afresh.
 A thing may stand up to a cell from its spot:
 the valley's towns turn down spots over half a cell from the path,
 and stand on it.
+A thing that reaches round its point,
+a steading's hut, path and levelled ground,
+or a pool, which a field draws,
+is asked for within its reach, at most half of `apart`,
+so a column is reached by one at most.
 A `first` spot, kept whatever is near, puts one where a world needs it:
 the one place preferred.
 
@@ -583,8 +588,9 @@ Carves along a line want the same margin.
   which then show what is under it. Make it one solid, or paint it.
 - **Fields can't see things.** A field that has to know where things are
   (a path to a steading) reads a plan of them,
-  and the population anchors each where the plan says,
-  in a region of the plan with a margin so the cell owning it is there too.
+  and the population anchors each where the plan says:
+  each cell asks for the thing near it (`Claims::near`),
+  and the cell it stands in owns it.
 - **Categories finer than the sites.** A field that decides kinds
   on a pattern aligned with the sites (a checker, blocks and streets)
   aliases far away: decide them in a `Plan::dithered`.
