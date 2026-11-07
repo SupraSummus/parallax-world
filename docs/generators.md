@@ -339,7 +339,12 @@ to find one more, give its world a point for it, not a scratch search.
 Timings are noisy on a shared machine, so what generating costs is counted
 (`worldgen/src/cost.rs`):
 while `cost::counted` runs, `generate` counts its work
-by layer and by plan (`Work`).
+by layer and by plan (`Work`),
+plans' lookups (`Plan::at`) among it,
+counted to the layer or plan looking them up:
+a layer reading a plan at many points around each column shows,
+as does a plan keyed finer than a level's columns,
+made afresh for nearly every one.
 Counts are the same on every machine;
 weighed by rough times per count (`NS`),
 they show what takes the time.

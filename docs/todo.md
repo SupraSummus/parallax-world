@@ -240,12 +240,13 @@ Numbers are for the forest at 1280×800, as measured when written.
   (`OVER_BUDGET` in `worlds/tests/cost.rs`; `worlds/examples/cost.rs` shows why):
   most of it is drawing the houses whole to measure them;
   remembering measured forms would spare little ("Levels" in `docs/generators.md`).
-- **Cost weighs every plan's columns alike** (`NS` in `worldgen/src/cost.rs`),
-  however many other plans making one looks up.
-  `Claims` keeping keys for stretches finer than a level's columns
-  made the valley's level-6 tiles near twice as slow,
-  while the estimate rose by a tenth.
-  Counting lookups (`Plan::at`), not only columns made, would show it.
+- **Cost weighs every plan lookup alike** (`NS` in `worldgen/src/cost.rs`),
+  though one of a column just read costs a fraction
+  of one among claims making their keys.
+  The moor's level-0 tiles, whose stream bed reads a plan at every site,
+  are estimated at twice their time;
+  drawn by column (`Field::columns`), as its water is,
+  it would read it once a column.
 
 ## Ideas
 
