@@ -236,6 +236,18 @@ Numbers are for the forest at 1280×800, as measured when written.
   Claimed instead (`Claims`),
   as towns, settlements and the moor's steadings and pools are,
   each would stand anywhere.
+- **Towns and the city line up with the lattice.**
+  `worlds/tests/directions.rs` lists them (`KNOWN`).
+  The valley's first town lays out streets and blocks along x and z,
+  and builds in frames of quarter turns (`frame.rs`):
+  a four-fold harmonic of 10 %.
+  The city is boxes on a plan, all along the axes: 4 %.
+  The learned town's settlements are such boxes too (2.5 %),
+  but their streets' own direction (2 %) hides them from the check.
+  Square noise (`ValueNoise`, `Fbm`) draws under 1 %, too little to tell.
+  `mountains.rs` turns its noise by 37° (`turned`),
+  which leaves its four-fold harmonic mostly on the diagonals;
+  22.6°, (12, 5)/13, would leave none there.
 - **The valley's town tiles are over the budget at levels 4 and 6**
   (`OVER_BUDGET` in `worlds/tests/cost.rs`; `worlds/examples/cost.rs` shows why):
   most of it is drawing the houses whole to measure them;
@@ -259,6 +271,13 @@ Numbers are for the forest at 1280×800, as measured when written.
   hosts tile x and z over them,
   and the checks look from above down y;
   an endless holey cheese wants tiles along y too, and no heights.
+- Lay out towns at any angle?
+  Walls along the lattice's axes look crisp on FCC;
+  at other angles they jag.
+  But every town and the city runs north–south and east–west,
+  which at the scale of a layout reads as a grid.
+  A middle way: streets and plots at any angle, the buildings on the axes.
+  The buildings' walls would still show to `directions.rs`.
 - Keep the fit of `cost::NS` in the repo, to refit it on a quiet machine.
 - Generate the web's tiles as the native spike does:
   those the chunks in view read, nearest first,
