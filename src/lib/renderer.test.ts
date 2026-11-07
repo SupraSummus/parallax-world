@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { ParallaxRenderer, DEFAULT_RENDER_DISTANCE, parseViewQuery, type Chunk, type Frame } from './renderer'
 import { World } from './world'
 import { hills } from './hills.test-helper'
-import { SPLAT } from './chunk-baker'
 import { selectSlices, chunkCell } from './slice-selection'
 import { FACES, LAYER, faceTangents, focalLength, projector, toLocal, viewBasis, type Face, type Orientation } from './view'
 import type { Vec3 } from './world'
@@ -117,7 +116,6 @@ describe('ParallaxRenderer', () => {
           expect(chunk.mask.width).toBe(Math.ceil(chunk.extentWidth * chunk.mask.scale - 1e-9))
         }
       }
-      expect(lastUpdate().voxelsRendered).toBeGreaterThanOrEqual(chunks.reduce((n, c) => n + c.splats.length / SPLAT, 0))
     })
 
     it('bakes a chunk once: moving keeps those still in view', () => {
@@ -290,8 +288,6 @@ describe('ParallaxRenderer', () => {
       render()
       render()
       expect(lastUpdate().chunksRegenerated).toBe(0)
-      expect(lastUpdate().voxelsRendered).toBe(0)
-      expect(lastUpdate().cacheEfficiency).toBe(100)
     })
 
     it('keeps the slices when turning, baking only chunks that come into view', () => {
@@ -395,9 +391,7 @@ describe('ParallaxRenderer', () => {
       const stats = renderer.getStats()
       expect(stats.totalUpdates).toBe(2)
       expect(stats.totalChunksRegenerated).toBe(first.chunksRegenerated + second.chunksRegenerated)
-      expect(stats.totalVoxelsRendered).toBe(first.voxelsRendered + second.voxelsRendered)
       expect(stats.totalRenderTime).toBeCloseTo(first.renderTime + second.renderTime)
-      expect(stats.averageCacheEfficiency).toBeCloseTo((first.cacheEfficiency + second.cacheEfficiency) / 2)
     })
   })
 })

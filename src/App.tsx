@@ -317,7 +317,6 @@ function App() {
   }
 
   const totalUpdates = sessionStats?.totalUpdates ?? 0
-  const averageCacheEfficiency = sessionStats?.averageCacheEfficiency ?? 0
   const lastUpdate = sessionStats?.lastUpdate
   const avgRenderTime = totalUpdates > 0 && sessionStats
     ? (sessionStats.totalRenderTime / totalUpdates).toFixed(2)
@@ -442,8 +441,6 @@ function App() {
                 </h3>
                 <StatRow label="Total Updates">{totalUpdates}</StatRow>
                 <StatRow label="Avg Render Time">{avgRenderTime}ms</StatRow>
-                <StatRow label="Avg Cache Efficiency">{averageCacheEfficiency.toFixed(1)}%</StatRow>
-                <StatRow label="Total Voxels">{(sessionStats?.totalVoxelsRendered ?? 0).toLocaleString()}</StatRow>
               </div>
               {lastUpdate && (
                 <>
@@ -462,8 +459,6 @@ function App() {
                     <StatRow label="Chunks Baking">{lastUpdate.chunksPending}</StatRow>
                     <StatRow label="Levels Generating">{lastUpdate.levelsGenerating}</StatRow>
                     <StatRow label="Chunks Covered">{lastUpdate.chunksCovered}</StatRow>
-                    <StatRow label="Cache Efficiency">{lastUpdate.cacheEfficiency.toFixed(1)}%</StatRow>
-                    <StatRow label="Voxels Rendered">{lastUpdate.voxelsRendered.toLocaleString()}</StatRow>
                     <StatRow label="Cached Chunks">{(lastUpdate.cachedBytes / 1e6).toFixed(1)} MB</StatRow>
                   </div>
                 </>
