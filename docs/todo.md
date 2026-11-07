@@ -225,6 +225,9 @@ Numbers are for the forest at 1280×800, as measured when written.
   (`OVER_BUDGET` in `worlds/tests/cost.rs`; `worlds/examples/cost.rs` shows why):
   most of it is drawing the houses whole to measure them;
   remembering measured forms would spare little ("Levels" in `docs/generators.md`).
+- **A field reads every column of a tile, even where it draws nothing:**
+  the railway's two, away from its line.
+  A field could say which boxes it may draw in, and be skipped elsewhere.
 - **Cost weighs every plan lookup alike** (`NS` in `worldgen/src/cost.rs`),
   though one of a column just read costs a fraction
   of one among claims making their keys.
@@ -235,6 +238,16 @@ Numbers are for the forest at 1280×800, as measured when written.
   The valley's landmarks: 118 at eight seeds (not 686 as one per region),
   under ENOUGH a seed, so no seed is tested alone;
   its towns 57, its haystacks 2.
+- **The railway's line turns at points, and its bridges and tunnels can be short.**
+  A curve's rule reads only a point's two neighbours,
+  so a wander bounds the turn at the point it puts, not between points:
+  seen from above, the line is straight between them and turns at each,
+  up to 2.5°.
+  A rule reading the points beyond the neighbours too
+  (a four-point scheme) would make it smooth by construction.
+  What carries the track is decided point by point,
+  so where the ground just crosses a threshold
+  a bridge or a tunnel can be one segment long (8 m).
 - **The valley is still laid out along x, across the path's centre line.**
   The path is a curve (`worlds/src/path.rs`),
   but the ground's walls and dip, the ranges, the fields' plots
@@ -325,16 +338,12 @@ Composing generators (section "Composing" of `docs/generators.md`), untried:
   (`Plan::sampled` at the spacing), since plans declare their scale:
   coarse levels would skip fine bands' cost as they skip their things.
   Plans of categories are read dithered already ("Plans" in "Levels").
-- A railway, the first new user of curves (`curve.rs`):
-  stations claimed near towns or landmarks;
-  a graph between them, made locally;
-  each edge refined top-down, at each level a midpoint picked among candidates
-  by cost, within a wander a quarter the level before's,
-  so it keeps within a known corridor and bends no sharper than the wanders let;
-  a height profile along it, the terrain smoothed under a slope limit;
-  bridges, tunnels, cuttings and embankments where the profile leaves the ground;
-  things along it by arc length, sleepers and piers.
-  Curves still lack arc length from an end (`Near::along` counts segments).
+- More of the railway (`worlds/src/railway.rs`):
+  a graph of lines between stations, made locally, and branch lines;
+  catenary poles; a road from each station to its town;
+  water in the route's cost, once the ground the line reads has any.
+  Curves still lack arc length from an end (`Near::along` counts segments):
+  the line's sleepers and piers stand by its segments along z.
 - Rivers and roads along curves, in pieces and from `near`, as the path is,
   not as tubes:
   a tube makes all its points when made,

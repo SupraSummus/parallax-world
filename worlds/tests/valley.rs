@@ -7,6 +7,7 @@ use worldgen::grid::{Box3, is_site};
 use worldgen::picture::{Camera, picture};
 use worldgen::units::UNIT_SIZE;
 use worlds::landmarks::{LANDMARKS, Landmark, Landmarks, NEAR, Site};
+use worlds::railway::Railway;
 use worlds::valley::{Terrain, valley};
 
 fn unit(metres: f64) -> i64 {
@@ -32,7 +33,7 @@ fn the_forest_keeps_off_the_first_towns_main_street() {
  */
 fn landmarks(seed: u64) -> (Vec<Site>, Rc<Terrain>) {
     let terrain = Rc::new(Terrain::new(seed));
-    let landmarks = &Landmarks::new(seed, terrain.clone());
+    let landmarks = &Landmarks::new(seed, terrain.clone(), Rc::new(Railway::new(seed, terrain.clone())));
     let points = |from: f64, to: f64| (unit(from)..=unit(to)).step_by(NEAR as usize);
     let mut sites: Vec<Site> =
         points(-500.0, 8000.0).flat_map(|z| points(-500.0, 500.0).filter_map(move |x| landmarks.site(x, z))).collect();

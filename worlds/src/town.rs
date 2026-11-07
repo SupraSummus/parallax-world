@@ -83,13 +83,15 @@ const APART: i64 = m(900.0);
 const CLAIM: i64 = m(800.0);
 const WITHIN: i64 = m(600.0);
 const FIRST: i64 = m(200.0);
-/** Plan scales: where towns are (their claims' cells); the bid for their land. */
-pub const TOWNS_SCALE: i64 = CLAIM;
+/** Plan scale of the land they bid for. */
 pub const BID_SCALE: i64 = m(4.0);
 /** What a column of a town is: its finest parts the square's paving, a checker of metres. */
 const SPOT_SCALE: i64 = m(1.0);
 /** How far past its streets a town levels the ground, easing back to the valley's. */
 const TERRACE: Units = Units::m(120.0);
+/** The most blocks a side of the main street, and so the furthest a town reaches across from it, its wall included. */
+const COLS: i64 = 3;
+pub const ACROSS: i64 = MAIN / 2 + COLS * BLOCK_W + (COLS - 1) * STREET + RING;
 
 /** How a town builds: its houses' walls, roofs and windows, its church, its fences and its wall. */
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
@@ -269,7 +271,7 @@ impl Town {
                 town.avenue = random.chance(fx(0.5));
             }
             Size::Market => {
-                (town.cols, town.rows) = (2 + random.below(2) as i64, 4 + random.below(2) as i64);
+                (town.cols, town.rows) = (2 + random.below(COLS as u32 - 1) as i64, 4 + random.below(2) as i64);
                 town.centre = if random.chance(fx(0.65)) { Centre::Hall } else { Centre::Fountain };
                 town.walled = random.chance(fx(0.6));
             }
@@ -440,7 +442,7 @@ impl Towns {
         ease_towards(route, Units(t.x).to_fx(), Units::m(60.0), Units((z - t.z).abs() - t.half_z() - t.ring()))
     }
 
-    /** The town's bid for column (x, z), BID_SCALE: ahead inside its streets, behind a few metres out. */
+    /** The town's bid for column (x, z): ahead inside its streets, behind a few metres out. */
     pub fn bid(&self, x: i64, z: i64) -> Fx {
         let most = fx(4.0);
         self.near(z).map_or(-most, |t| ((Units::m(4.0) - t.distance(x, z)).to_fx() / Units::m(8.0)).clamp(-most, most))

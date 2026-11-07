@@ -11,6 +11,7 @@ pub mod learned;
 pub mod moor;
 pub mod mountains;
 pub mod path;
+pub mod railway;
 pub mod town;
 pub mod valley;
 pub mod wasm;
@@ -76,6 +77,7 @@ pub const WORLDS: &[Entry] = &[
     // its churchyard and the forest round it; and the first windmill, its sails, fields and forest round it.
     // A mountainside behind a crest above the treeline: scree and rock, and alpine meadows among them at some seeds.
     // Moorland on the valley's floor, a steading by the path from 4.5 km on: heather and grass, boulders, its hut, path and ring.
+    // The railway's first station: its building, the platform, the track and the formation either side, forest or fields round them.
     // Far away, all of that town and a few metres of fields around it: its streets and paving are finer than the sites there.
     Entry {
         name: "valley",
@@ -87,6 +89,7 @@ pub const WORLDS: &[Entry] = &[
             Region::at("windmill", [-193, -90, -162], [191, 358, 158]),
             Region::at("mountainside", [-128, -189, -128], [128, 151, 128]),
             Region::at("steading", [-197, -50, -178], [219, 174, 206]),
+            Region::at("station", [-192, -60, -256], [192, 240, 256]),
         ],
         levels: 4,
         from_above: 4,

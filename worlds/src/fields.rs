@@ -29,8 +29,7 @@ kinds! {
     meadowGrass: 1, ["#7aae48", "#86b850", "#6fa040"], walk_through;
 }
 
-/** Plan scale of the fields' bid, and of the slope they bid by. */
-pub const BID_SCALE: i64 = m(4.0);
+/** Plan scale of the slope they bid by. */
 pub const SLOPE_SCALE: i64 = m(16.0);
 
 /**
@@ -38,9 +37,9 @@ pub const SLOPE_SCALE: i64 = m(16.0);
  * 90 to 150 m out (by noise), and none where the ground is steep:
  * `slope`, rise over run.
  */
-pub fn bid(seed: u64, towns: Rc<Towns>, slope: Rc<Plan<Fx>>) -> Plan<Fx> {
+pub fn bid(seed: u64, towns: Rc<Towns>, slope: Rc<Plan<Fx>>) -> impl Fn(i64, i64) -> Fx {
     let reach = Fbm::<{ m(160.0) }, 3>::new(stream(seed, 40));
-    Plan::new("fields' bid", BID_SCALE, move |x, z| {
+    move |x, z| {
         let d = towns.distance(x, z).max(Units(0));
         let r = Units::m(90.0) + (reach.at(x, z) * Units::m(60.0)).floor_units();
         if d >= r {
@@ -48,7 +47,7 @@ pub fn bid(seed: u64, towns: Rc<Towns>, slope: Rc<Plan<Fx>>) -> Plan<Fx> {
         }
         let near = fx(0.6) * (r - d) / r;
         near - smoothstep(fx(0.12), fx(0.25), slope.at(x, z))
-    })
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
