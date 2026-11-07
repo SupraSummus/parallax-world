@@ -199,15 +199,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   where the trees thin out to the treeline,
   came 0.10 to 0.15 apart at level 4, in materials hit and from above:
   leaves in place of trunks and of the slope's scree and rock.
-- **From level 6 the canopy is the trees expected.**
-  There a column is as wide as a root of the trees' `Points`,
-  whose count costs a Poisson draw and a corner's chances:
-  read so, the forest's tiles at level 6 took half as long again;
-  wider, a cell costs its roots' corners, sites the level's tiles don't read
-  (`docs/generators.md`, "Points").
-  So the canopy there is the chances at each column, not the trees that stand.
-  A plan of the chances filtered to a level's spacing
-  would let roots be wider than the chances vary over.
 - **The highest massifs end in broad rounded domes of snow.**
   Behind the crest the high country is one smooth noise,
   and wherever it stands over the snowline, all of it is snow.

@@ -267,6 +267,12 @@ But a cell as wide as the roots costs a column a Poisson draw and a corner,
 and wider ones the corners of their roots, sites the level doesn't read:
 from level 6 the forest's canopy is the trees expected,
 whose shadow there falls mostly on their own column.
+Weighing cells by their chances filtered to their size doesn't avoid it:
+the trees keep to chance only with chances read every 16 m or closer,
+so a wide cell still reads sites its level doesn't
+(the forest's level-8 tiles took 6.5 times the instructions),
+and counting the trees that stand at levels 6 and 7
+did little for the windmill there (0.099 to 0.089 over 16 seeds).
 Points keep no distance between things, as `Claims` do:
 a hard core would make a cell's count hang on its neighbours' points.
 
