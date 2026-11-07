@@ -9,10 +9,17 @@ on:
 permissions:
   contents: read
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
+# A newer push to a pull request's branch cancels its older run;
+# pushes to main each get a group of their own, so every commit is checked.
+concurrency:
+  group: ci-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
 
+# pnpm check in jobs side by side, a runner each: the tests are bound by the CPU,
+# and the valley's contract alone takes as long as the rest of the Rust tests.
+jobs:
+  lint:
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -32,8 +39,40 @@ jobs:
       - name: Test-only code (knip --production)
         run: pnpm knip:production
 
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up environment
+        uses: ./.github/actions/setup
+
       - name: Test
-        run: pnpm test
+        run: pnpm test:web
 
       - name: Build
         run: pnpm build
+
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up environment
+        uses: ./.github/actions/setup
+
+      # pnpm hands what follows `--` to test:rust's last command, worlds' cargo test.
+      - name: Test, but the valley's contract
+        run: pnpm test:rust -- --skip keeps_the_contract::valley
+
+  valley-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      # Only Cargo, which the runner has.
+      - name: Test the valley's contract
+        run: cargo test --release --manifest-path worlds/Cargo.toml --test contract keeps_the_contract::valley

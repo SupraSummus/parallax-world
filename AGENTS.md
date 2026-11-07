@@ -135,8 +135,9 @@ run `pnpm check` again only after changing code.
 `pnpm lint` and `pnpm test` cover the Rust
 in `bake/`, `worldgen/` and `worlds/` too
 (clippy with warnings as errors, rustfmt, `cargo test`);
-`pnpm dev`, `pnpm build` and `pnpm test` rebuild its WebAssembly first.
-CI runs the same scripts plus `pnpm build`. For rendering changes, also look
+`pnpm dev`, `pnpm build` and `pnpm test:web` rebuild its WebAssembly first.
+CI runs the same scripts plus `pnpm build`, in jobs side by side.
+For rendering changes, also look
 at the result in the browser (`pnpm dev`); unit tests can't see pixels.
 Without a GPU, `pnpm shot` saves a picture of a view once it is complete
 (`scripts/shot.mjs`);

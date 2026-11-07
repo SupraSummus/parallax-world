@@ -6,7 +6,7 @@ and `cargo test` for the Rust in `bake/`, `worldgen/` and `worlds/`.
 Commands are in `package.json`:
 
 ```bash
-pnpm test                       # build the WebAssembly, run both once (CI)
+pnpm test                       # run both once: pnpm test:rust, then test:web
 pnpm exec vitest                # watch mode (after pnpm wasm)
 pnpm exec vitest -t "cache"     # filter by test name
 pnpm exec vitest run bake       # files matching "bake"
