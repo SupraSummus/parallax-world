@@ -215,16 +215,26 @@ Numbers are for the forest at 1280×800, as measured when written.
   `mountains.rs` turns its noise by 37° (`turned`),
   which leaves its four-fold harmonic mostly on the diagonals;
   22.6°, (12, 5)/13, would leave none there.
-- **The valley's first town barely keeps the contract at level 4**
-  (seed 42, materials hit against level 2: 0.099 of 0.1).
-  Its houses' plaster walls at level 2 show as fields at level 4,
-  0.065 of it, so any change to what stands near the town can tip it.
-  Houses measured as their walls' share, not drawn whole, would fix it
-  (the town tiles over the budget below).
-- **The valley's town tiles are over the budget at levels 4 and 6**
-  (`OVER_BUDGET` in `worlds/tests/cost.rs`; `worlds/examples/cost.rs` shows why):
-  most of it is drawing the houses whole to measure them;
-  remembering measured forms would spare little ("Levels" in `docs/generators.md`).
+- **Fields stand taller at level 4.**
+  At the valley's first town's edge, rays hit fields about 0.04 more often
+  at level 4 than at level 2 (seed 42), whatever the houses' far form:
+  a crop thinner than two sites is made two sites tall (`Span::medium`),
+  4 m of wheat in front of the houses' walls.
+  Sunk into the ground, its top where level 0 has it,
+  the wheat showed less but the stubble under it more.
+- **Measured houses show their walls from above at level 6**,
+  which the contract does not check.
+  Around the valley's first town's centre (seed 42),
+  level 6 shows 46 % houses from above against 25 % at level 0,
+  and 16 % roofs against 24 %: the rest is walls, timber and stone
+  (0.31 off; 0.18 measured from level 1, 0.22 from level 3).
+  Measured from level 4, a house is a few fine sites
+  ("Levels" in `docs/generators.md`):
+  its eaves, thinner than one, leave its walls' tops to show,
+  and its gable ends (`gable_ends` in `town.rs`), grown to one,
+  paint its roof's ends.
+  And a cell's share counts rays the cells behind it stop too,
+  so a thing keeps more cells than it stops rays.
 - **A field reads every column of a tile, even where it draws nothing:**
   the railway's two, away from its line.
   A field could say which boxes it may draw in, and be skipped elsewhere.
@@ -333,7 +343,7 @@ Composing generators (section "Composing" of `docs/generators.md`), untried:
   a box in a town now draws the whole town's carves aside, in a buffer
   as large as the box, where each house's would do.
   Counted as `Points` by kind, they could be drawn far away from their counts,
-  not each drawn whole to be measured (the town tiles over the budget).
+  not each drawn whole to be measured.
 - Let the framework filter plans of numbers finer than the level's sites
   (`Plan::sampled` at the spacing), since plans declare their scale:
   coarse levels would skip fine bands' cost as they skip their things.
