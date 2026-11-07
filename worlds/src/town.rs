@@ -12,7 +12,7 @@ use std::rc::Rc;
 
 use worldgen::frame::{Frame, Part, U, V, W, back, walls};
 use worldgen::generator::{
-    ANY_SIZE, Anchors, Child, Children, Far, Field, FieldValues, Fill, Layer, Node, Op, Population, SOLID, Shape, Shapes, Span,
+    ANY_SIZE, Anchors, Child, Children, Far, Field, FieldValues, Fill, Kind, Layer, Node, Op, Population, SOLID, Shape, Shapes, Span,
 };
 use worldgen::grid::Box3;
 use worldgen::kinds;
@@ -65,12 +65,8 @@ const BLOCK_D: i64 = m(40.0);
 const PAVEMENT: i64 = m(2.5);
 const STOREY: i64 = m(3.25);
 const WALL: i64 = 3;
-/**
- * How much deeper a roof is than what it covers, measured straight down,
- * besides its slope: two sites of level 1, so that columns of its sites
- * cross it rather than step over it to the wall under it.
- */
-const ROOF: i64 = 4;
+/** How far under a roof's top its gable ends stop (`gable_ends`), besides its slope: the roof's edge seen at them. */
+pub const ROOF: i64 = 4;
 /** A walled town's wall stands this far out from its blocks, a lane inside it; it is TOWN_WALL thick. */
 const RING: i64 = m(6.0);
 const TOWN_WALL: i64 = m(1.5);
@@ -796,6 +792,20 @@ fn roof_at(e: i64, rise: f64, run: f64, eaves: i64) -> f64 {
     rise * (e + eaves) as f64 / run
 }
 
+/**
+ * The ends of a gable over [min, max), its ridge along `ridge`, a unit
+ * thick, painted over the roof drawn before them. A roof is solid down to
+ * its eaves, so measured (`thing`) it is roof from above, not the walls
+ * under it; its gables are walls only at its ends, where they show.
+ */
+pub fn gable_ends(part: &mut Part, mut min: [f64; 3], mut max: [f64; 3], ridge: usize, kind: Kind) {
+    let (from, to) = (min[ridge], max[ridge]);
+    for end in [from, to - 1.0] {
+        (min[ridge], max[ridge]) = (end, end + 1.0);
+        part.gable(min, max, ridge, kind, Op::Paint);
+    }
+}
+
 impl House {
     /** A plain house of `style`: no shop, no thatch. */
     pub fn new(length: i64, depth: i64, storeys: i64, style: Style) -> House {
@@ -853,15 +863,15 @@ impl House {
             (min[across], max[across]) = (-eaves as f64, (width + eaves) as f64);
             (min, max)
         };
+        let (min, max) = roofed(rise, eaves);
+        part.gable(min, max, ridge, roof, Op::Fill);
         let (mut min, mut max) = roofed(rise * width as f64 / (width + 2 * eaves) as f64, 0);
         (min[1], max[1]) = (min[1] - ROOF as f64, max[1] - ROOF as f64);
-        part.gable(min, max, ridge, plaster, Op::Fill);
+        gable_ends(part, min, max, ridge, plaster);
         if style == Style::Timbered {
             let floors: Vec<i64> = (0..=storeys).map(|s| s * STOREY).collect();
             timbers(part, length, depth, &floors, slots, Some((ridge, max[1] - min[1])));
         }
-        let (min, max) = roofed(rise, eaves);
-        part.gable(min, max, ridge, roof, Op::Fill);
         // Eaves boarded along both sides: a thin wedge's edge would leave gaps.
         for (from, to) in [(-eaves, 0), (width, width + eaves)] {
             let (mut min, mut max) = ([0, top - 2, 0], [length, top + 1, depth]);
@@ -924,9 +934,7 @@ impl House {
  * at its corners and between its `slots` of windows, a rail at each of
  * `floors` (the first 0, the last its walls' top), braces across its ends'
  * panels; on its gables, given by their ridge (u or w) and how high they
- * rise from ROOF under its top, posts and a tie. Paint makes a thing's
- * sites where it has none, which its roof would then not fill, so the
- * gables' timbers keep a unit inside them.
+ * rise from ROOF under its top, posts and a tie, a unit inside them.
  */
 fn timbers(part: &mut Part, length: i64, depth: i64, floors: &[i64], slots: i64, gable: Option<(usize, f64)>) {
     let beam = k(K::timber);
@@ -981,16 +989,11 @@ fn barn(style: Style, length: i64, depth: i64, part: &mut Part, random: &mut Rng
     part.add([0, -3, 0], [length, top, depth], k(walls_of));
     let (eaves, run) = (4, depth as f64 / 2.0 + 4.0);
     let rise = run * 0.9;
-    part.gable(
-        [0.0, (top - ROOF) as f64, 0.0],
-        [length as f64, top as f64 + rise * 0.85 - ROOF as f64, depth as f64],
-        0,
-        k(walls_of),
-        Op::Fill,
-    );
-    part.gable([-2.0, top as f64, -eaves as f64], [(length + 2) as f64, top as f64 + rise, (depth + eaves) as f64], 0, k(roof), Op::Fill);
+    part.gable([0.0, top as f64, -eaves as f64], [length as f64, top as f64 + rise, (depth + eaves) as f64], 0, k(roof), Op::Fill);
+    let gable = (top - ROOF) as f64;
+    gable_ends(part, [0.0, gable, 0.0], [length as f64, gable + rise * 0.85, depth as f64], 0, k(walls_of));
     for (from, to) in [(-eaves, 0), (depth, depth + eaves)] {
-        part.add([-2, top - 2, from], [length + 2, top + 1, to], k(roof));
+        part.add([0, top - 2, from], [length, top + 1, to], k(roof));
     }
     // Wide doors in the middle of its front.
     let u = length / 2;
@@ -1044,9 +1047,9 @@ fn church(part: &mut Part, style: Style) {
     let mut nave = part.within(Frame::new([TOWER, 0, 0], [U, V, W]));
     nave.add([0, -3, 0], [nave_length, nave_top, NAVE], stone);
     let rise = m(5.5) as f64;
+    nave.gable([0.0, nave_top as f64, -3.0], [nave_length as f64, nave_top as f64 + rise, (NAVE + 3) as f64], 0, k(roof), Op::Fill);
     let gable = (nave_top - ROOF) as f64;
-    nave.gable([0.0, gable, 0.0], [nave_length as f64, gable + rise * 0.9, NAVE as f64], 0, stone, Op::Fill);
-    nave.gable([0.0, nave_top as f64, -3.0], [nave_length as f64 + 2.0, nave_top as f64 + rise, (NAVE + 3) as f64], 0, k(roof), Op::Fill);
+    gable_ends(&mut nave, [0.0, gable, 0.0], [nave_length as f64, gable + rise * 0.9, NAVE as f64], 0, stone);
     // Tall windows down its two long walls.
     let windows = (nave_length - m(2.0)) / m(3.0);
     for (wall, length) in walls(nave_length, NAVE).into_iter().step_by(2) {
@@ -1168,8 +1171,9 @@ fn hall(t: &Town) -> Node {
     }
     let (run, eaves) = ((WIDE / 2 + 4) as f64, 4.0);
     let rise = run * 1.1;
-    h.gable([0.0, (TOP - ROOF) as f64, 0.0], [WIDE as f64, TOP as f64 + rise * 0.9 - ROOF as f64, LONG as f64], 2, walls_of, Op::Fill);
-    h.gable([-eaves, TOP as f64, -eaves], [WIDE as f64 + eaves, TOP as f64 + rise, LONG as f64 + eaves], 2, roof, Op::Fill);
+    h.gable([-eaves, TOP as f64, 0.0], [WIDE as f64 + eaves, TOP as f64 + rise, LONG as f64], 2, roof, Op::Fill);
+    let gable = (TOP - ROOF) as f64;
+    gable_ends(&mut h, [0.0, gable, 0.0], [WIDE as f64, gable + rise * 0.9, LONG as f64], 2, walls_of);
     // The turret.
     let (c, top) = ((WIDE / 2) as f64, TOP + rise as i64);
     h.add([WIDE / 2 - 8, top - m(1.5), LONG / 2 - 8], [WIDE / 2 + 8, top + m(1.8), LONG / 2 + 8], k(K::timber));

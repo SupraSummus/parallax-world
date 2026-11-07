@@ -998,8 +998,8 @@ fn blocks(seed: u64) -> Vec<Block> {
  * A building is its outline, and while sites are at most INSIDE apart
  * (a wall a plan cell thick is then a sheet of sites), a child that cuts
  * the outline away and draws the building as it is. Beyond OUTLINE the
- * outline is measured: measured itself, a hollow building would vanish,
- * its walls filling about half their coarse cells (Far::measured).
+ * outline is measured: measured itself, a hollow building would keep
+ * only the share of its cells its walls fill (Far::measured).
  */
 const INSIDE: i64 = 2 * PLAN;
 const OUTLINE: i64 = 2 * INSIDE;

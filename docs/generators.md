@@ -141,15 +141,26 @@ how many rays get how far, and what they stop on.
   a cluster's ball for its sprays of leaves on twigs, a site thick at level 0,
   as wide as their shadow, not the whole ball they reach.
   Or the far form is the near form measured (`Far::measured`):
-  drawn whole at the coarsest level it is drawn at, then coarsened,
-  each coarse site kept with the chance a ray crossing its cell is stopped:
-  the share of its columns holding a fine site of the thing,
+  drawn whole two levels finer than it is drawn at,
+  but no finer than the coarsest level its near form is drawn at,
+  then coarsened.
+  A ray crossing a coarse site's cell is stopped
+  as often as its columns hold a fine site of the thing,
   on average over the axes,
   of those holding a fine site at all.
   Fine sites are two apart along a column,
   so a cell holds fewer columns than its shadow, and unevenly by axis;
   counted against its shadow, a solid cell came out 0.83 at sites twice apart,
   and one house in six vanished.
+  A thing keeps as many cells as those shares add up to, rounded by chance,
+  its most covered ones.
+  Each kept with its share as a chance,
+  a house's outline came out ragged, a cloud of its cells;
+  all held to one threshold, each house came out fatter or thinner by a site,
+  and the few a camera sees often all one way
+  (the valley's first town lost a third of its walls at level 4, 0.099 off);
+  each kept where more than half covered,
+  its houses lost half their roofs at level 6.
   Each face of a coarse site is of a kind
   in proportion to what rays through it see
   (a site's `Look`: a kind, and one per face where they differ,
@@ -163,15 +174,13 @@ how many rays get how far, and what they stop on.
   for whatever does not look at faces.
   From the ends of every column's run in the cell instead,
   a town seen from above showed walls hidden inside its houses.
-  The chances are held to one threshold for the whole thing:
-  with one per site a house's outline came out ragged, a cloud of its cells;
-  so a porous thing is kept or not whole, right only over many of them.
-  That is exact where an outline is a guess, at a cost:
-  each box draws the things it reaches whole, and measures them anew.
-  Remembering their forms across boxes would spare little:
-  things are measured where they are much smaller than a host's tiles,
-  so few reach two tiles, and hosts spread their tiles over workers,
-  a generator each.
+  Two levels finer, a cell holds enough fine sites to measure,
+  and a thing costs an eighth as much a level coarser,
+  where a tile holds four times as many:
+  measured at its finest, the valley's town tiles at levels 4 and 6
+  were over the budget ("Cost").
+  But a thing only a few fine sites big loses what is finer
+  (the town's houses at level 6, docs/todo.md).
   Give such parts' children `bounds` and make their shapes only once read
   (`Shapes::lazy`): coarse boxes hold many things drawn only from afar.
   Parts a thing hides, like branches inside a crown, are children with a small `size`:
@@ -233,9 +242,11 @@ how many rays get how far, and what they stop on.
 
 Build solids as one shape, not stacks of slices:
 a stack of discs a unit thick, each grown to a site, draws its outline, not its shape.
-And give a sheet over something else, a roof over its gable,
-the depth of two sites of the levels it is measured at:
-columns of sites step over a thinner one to what is under it.
+And build what a sheet covers of the sheet's kind, then paint what shows:
+columns of sites step over a sheet thinner than two sites to what is under it,
+at whatever level it is measured.
+A roof is solid down to its eaves, its gables walls only at its ends
+(`gable_ends` in `town.rs`), so it is roof from above, not the walls under it.
 
 ## Points
 
@@ -810,20 +821,15 @@ Carves along a line want the same margin.
   put the materials rays hit at level 5 0.155 off;
   as Cauchy has it for a cylinder (½ and π/4),
   0.05 off, but from above 0.09 off at level 6.
-- **A lone measured thing is kept or not almost whole.**
-  Its cells are held to one threshold,
-  and a hollow house's are only partly full:
-  the moor's hut, measured, drew to its threshold of 0.96 (seed 42),
-  so only wholly covered cells stayed,
-  and its thatch went from 21 % of the view from above to 15 % and 3 %
-  at levels 2 and 3; hence its outline.
+- **A hollow thing measured keeps only what its walls cover.**
+  A thing keeps as many cells as its shares add up to,
+  and a hollow one's walls fill theirs only partly:
+  the city's buildings, hollow all through, are measured
+  from their solid outline instead (`INSIDE` in `city.rs`),
+  and the moor's hut is drawn as one from afar.
   Filling what rays from outside can't reach through gaps finer than a cell
-  (a closing) before measuring kept the thatch,
-  and brought the valley's town's materials hit at level 3 from 0.064 to 0.026,
-  but grew the houses over the streets (0.039 to 0.057 from above).
-  The city's buildings, hollow all through, vanished whole at some seeds;
-  they are measured from their solid outline instead (`INSIDE` in `city.rs`),
-  and a lone one still shrinks or grows by a site at level 4.
+  (a closing) before measuring would keep them whole,
+  but grew the valley's houses over the streets when tried.
 - **Numbers and fields' own categories are point-sampled.**
   A plan of numbers finer than the sites is read where each line is;
   filtered to the spacing it would cost coarse levels less (see docs/todo.md).

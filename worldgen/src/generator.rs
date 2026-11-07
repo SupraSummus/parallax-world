@@ -115,9 +115,9 @@ pub struct Far {
 pub enum FarForm {
     Shapes(Vec<Shape>),
     /**
-     * Its near form, drawn whole at the coarsest level it is drawn at
-     * and coarsened: each site kept with the chance a ray crossing it is
-     * stopped, of a kind in proportion to what shows on its sides.
+     * Its near form, drawn whole two levels finer and coarsened: its most
+     * covered sites, as many as their shares of rays stopped add up to,
+     * each of a kind in proportion to what shows on its sides.
      */
     Measured,
 }
@@ -1221,16 +1221,18 @@ fn visit(node: &Node, key: String, bounds: Box3, at: &Visit, drawables: &mut Vec
     if !bounds.overlaps(units) {
         return;
     }
-    let far = node.far.as_ref().filter(|far| s * ONE > far.detail.to_bits());
-    let draw = match far {
+    let draw = match node.far.as_ref().filter(|far| s * ONE > far.detail.to_bits()) {
         Some(Far { detail, form: FarForm::Measured }) => Draw::Sites(measure(node, &key, layer, bounds, detail.to_bits(), s, seed)),
         Some(Far { form: FarForm::Shapes(shapes), .. }) => Draw::Shapes(shapes.to_vec(), true),
-        None => Draw::Shapes(node.shapes.get().to_vec(), false),
+        None => return near(node, key, bounds, at, drawables),
     };
-    drawables.push(Drawable { order, key: key.clone(), layer, thing, draw });
-    if far.is_some() {
-        return;
-    }
+    drawables.push(Drawable { order, key, layer, thing, draw });
+}
+
+/** Adds a node's near form, whatever the spacing: its shapes, and its children's drawables (`visit`). */
+fn near(node: &Node, key: String, bounds: Box3, at: &Visit, drawables: &mut Vec<Drawable<'_>>) {
+    let Visit { s, units, order, layer, thing, .. } = *at;
+    drawables.push(Drawable { order, key: key.clone(), layer, thing, draw: Draw::Shapes(node.shapes.get().to_vec(), false) });
     let reaching;
     let children: &[Child] = match &node.children {
         None => &[],
@@ -1251,15 +1253,18 @@ fn visit(node: &Node, key: String, bounds: Box3, at: &Visit, drawables: &mut Vec
     }
 }
 
-/** A node of `layer` drawn alone, whole, at sites `f` apart. */
-fn alone(node: &Node, key: &str, layer: &'static str, bounds: Box3, f: i64, seed: u64) -> Own {
+/** How a node's drawables are added: `visit`, or `near` for its near form. */
+type Form = fn(&Node, String, Box3, &Visit, &mut Vec<Drawable>);
+
+/** A node of `layer` drawn alone, whole, at sites `f` apart, its drawables added by `form`. */
+fn alone(node: &Node, key: &str, layer: &'static str, bounds: Box3, f: i64, seed: u64, form: Form) -> Own {
     let units = bounds.widen(f);
-    let mut near = Vec::new();
-    visit(node, key.to_string(), bounds, &Visit { s: f, units: &units, order: 0.0, layer, thing: 1, seed }, &mut near);
+    let mut drawables = Vec::new();
+    form(node, key.to_string(), bounds, &Visit { s: f, units: &units, order: 0.0, layer, thing: 1, seed }, &mut drawables);
     let fine = Box3 { min: bounds.min.map(|v| v.div_euclid(f) - 2), max: bounds.max.map(|v| -(-v).div_euclid(f) + 2) };
     let mut own = Own::new(&fine);
     let mut work = Work::default();
-    for drawable in &near {
+    for drawable in &drawables {
         work.add(&draw(drawable, seed, f, &fine, &mut |look, op, x, y, z| own.put(look, op, x, y, z)));
     }
     cost::add(layer, work);
@@ -1315,7 +1320,7 @@ impl Shadows {
             .iter()
             .enumerate()
             .map(|(i, node)| {
-                let own = alone(node, &format!("sample {i}"), cost::SHADOWS, bounds_of(node), f, 0);
+                let own = alone(node, &format!("sample {i}"), cost::SHADOWS, bounds_of(node), f, 0, visit);
                 let (n, min) = (own.n, own.b.min);
                 let words = ((n[a] * n[b]) as usize).div_ceil(64);
                 let layers = (0..n[axis])
@@ -1477,12 +1482,14 @@ fn columns_of_cell(r: i64) -> [u32; 3] {
 
 /**
  * A node's far form at sites `s` apart, measured from its near form:
- * drawn whole at the coarsest level it is drawn at (spacing f, at most
- * `detail`), then coarsened. A coarse site stands for the fine sites in
- * its cell (those nearest it). It is kept with the chance a ray crossing
- * the cell is stopped: the share of the cell's columns along each axis
- * holding a fine site of the thing, on average over the axes, against
- * one threshold for the whole thing.
+ * drawn whole two levels finer (spacing f), or at the coarsest level it
+ * is drawn at (at most `detail`) if that is coarser, then coarsened.
+ * A coarse site stands for the fine sites in its cell (those nearest
+ * it). A ray crossing the cell is stopped as often as the cell's columns
+ * along each axis hold a fine site of the thing, on average over the
+ * axes: its share. The thing keeps its most covered cells, as many as
+ * their shares add up to, rounded by chance (why: "Levels" in
+ * docs/generators.md).
  * Each of its faces is of a kind of what rays through it see: along the
  * face's normal, a line of nearest neighbours, each such column's first
  * fine site from the face's end is credited to that face of the first
@@ -1492,9 +1499,9 @@ fn columns_of_cell(r: i64) -> [u32; 3] {
  * see, for whatever does not look at faces.
  */
 fn measure(node: &Node, key: &str, layer: &'static str, bounds: Box3, detail: Fixed, s: i64, seed: u64) -> Sites {
-    let f = 1i64 << ((detail / ONE).max(1).ilog2());
-    // Its far form not drawn at f: f is at most detail.
-    let own = alone(node, key, layer, bounds, f, seed);
+    // Two levels finer, its cells hold enough fine sites to measure, and a tile's things cost less a level coarser.
+    let f = (1i64 << ((detail / ONE).max(1).ilog2())).max(s / 4);
+    let own = alone(node, key, layer, bounds, f, seed, near);
     cost::add(layer, Work { measured: own.cells.len() as u64, ..Work::default() });
     // Kinds counted, each with how it meets the world.
     type Counts = Vec<(Kind, Op, u32)>;
@@ -1560,12 +1567,15 @@ fn measure(node: &Node, key: &str, layer: &'static str, bounds: Box3, detail: Fi
     }
     // Each column of a cell's counted against those holding one of its fine sites at all.
     let all = columns_of_cell(s / f);
-    let kept = hash_text(&format!("{key}#measured"), seed);
-    // One threshold for the whole thing, not one per site: a solid thing keeps a whole outline,
-    // not a ragged one; a porous one is kept or not as a whole, in proportion over many.
-    let threshold = unit(hash(kept, 0, 0, 0));
-    let keeps: Vec<bool> =
-        cells.iter().map(|stats| threshold < (0..3).map(|i| stats.columns[i] as f64 / all[i] as f64).sum::<f64>() / 3.0).collect();
+    let picks = hash_text(&format!("{key}#measured"), seed);
+    let shares: Vec<f64> = cells.iter().map(|stats| (0..3).map(|i| stats.columns[i] as f64 / all[i] as f64).sum::<f64>() / 3.0).collect();
+    let kept = (shares.iter().sum::<f64>() + unit(hash(picks, 0, 0, 0))) as usize;
+    let mut order: Vec<usize> = (0..cells.len()).filter(|i| shares[*i] > 0.0).collect();
+    // Of cells as covered, some by chance: in an order of their own, the cells' isn't one.
+    let tie = |i: usize| hash(picks, site_of(i)[0], site_of(i)[1], site_of(i)[2]);
+    order.sort_by(|a, b| shares[*b].total_cmp(&shares[*a]).then_with(|| tie(*a).cmp(&tie(*b))));
+    let mut keeps = vec![false; cells.len()];
+    order.into_iter().take(kept).for_each(|i| keeps[i] = true);
     // Columns along each line of nearest neighbours d, from its start on the side of −d to its end on the side of
     // d: rays coming from either end see the faces towards it.
     for (from_end, d) in VOXEL_FACES.iter().enumerate().filter(|(_, d)| d.iter().find(|v| **v != 0) == Some(&-1)) {
@@ -1629,7 +1639,7 @@ fn measure(node: &Node, key: &str, layer: &'static str, bounds: Box3, detail: Fi
         let faces: [Counts; FACE_KINDS] =
             std::array::from_fn(|k| if stats.seen[k].is_empty() { stats.ends[k].clone() } else { stats.seen[k].clone() });
         // One pick for all of its faces and itself: faces that see alike are of one kind.
-        let u = hash(kept ^ 1, x * s, y * s, z * s) as u64;
+        let u = hash(picks, x * s, y * s, z * s) as u64;
         let pick = |kinds: &Counts| -> (Kind, Op) {
             // In an order of their own: the columns' isn't one.
             let mut kinds = kinds.clone();
@@ -1962,13 +1972,14 @@ mod tests {
 
     #[test]
     fn a_measured_far_form_keeps_what_rays_see() {
-        // A solid block 64 units wide, painted with a sheet of glass on top, and a sparse cloud: measured at sites 16 apart from sites 2 apart.
+        // A solid block 64 units wide, painted with a sheet of glass on top two fine sites deep, and a sparse cloud:
+        // measured at sites 16 apart from sites 4 apart.
         // Made on each thread: a node is not Sync.
         let block = || Node {
             far: Some(Far::measured(fx(2.0))),
             ..Node::of(vec![
                 cuboid([0.0; 3], [64.0; 3], 1, SOLID, Op::Fill),
-                cuboid([0.0, 60.0, 0.0], [64.0, 64.0, 64.0], 2, SOLID, Op::Paint),
+                cuboid([0.0, 56.0, 0.0], [64.0, 64.0, 64.0], 2, SOLID, Op::Paint),
             ])
         };
         let one = block();
@@ -1980,10 +1991,10 @@ mod tests {
         );
         // Cells no column reaches first, under the kept inside's top row, are of what is inside them: the block.
         assert!(sites.iter().filter(|s| inside(s.0) && s.0[1] == 1).all(|s| s.1.kind == 1), "what is hidden inside is the block's");
-        // Its top row of cells, half covered, is kept by some things' thresholds. Rays straight down see the glass
-        // on it, through the faces towards them; where it is dropped, the cells under it, whose faces up the
-        // columns from above credit with the glass too. Rays from the sides see the block through the faces
-        // towards them, but in the top row, where the glass shows at their tops.
+        // Rays straight down see the glass on its top row of cells, half covered, through the faces towards them;
+        // where that is dropped, the cells under it, whose faces up the columns from above credit with the glass
+        // too. Rays from the sides see the block through the faces towards them, but in the top row, where the
+        // glass shows at their tops. Each block picks its cells' kinds anew.
         let seen = |sites: &Sites, ray: [i64; 3]| {
             let looks: std::collections::HashMap<[i64; 3], Look> = sites.iter().map(|s| (s.0, s.1)).collect();
             let face = |look: &Look, k: usize| look.faces.map_or(look.kind, |faces| faces[k]);
@@ -2008,24 +2019,17 @@ mod tests {
         });
         let from_above = blocks.iter().map(|sites| seen(sites, [0, -1, 0])).sum::<f64>() / 16.0;
         let from_the_side = blocks.iter().map(|sites| seen(sites, [1, 0, 0])).sum::<f64>() / 16.0;
-        // Over these 16 blocks, 0.76 from above; with one kind a cell, its faces' together, 0.28.
+        // Over these 16 blocks, 0.79 from above.
         assert!(from_above > 0.65, "rays from above see the glass on top {from_above} of the time");
         assert!(from_the_side < 0.1, "rays from the side see the glass {from_the_side} of the time");
+        // A sparse cloud keeps as many of its about 134 cells (a ball's volume over a site's, 2 · 16³) as its shares
+        // add up to, about a sixth, each cloud within a cell or two of that: not kept or dropped whole.
         let cloud = || Node { far: Some(Far::measured(fx(2.0))), ..Node::of(vec![ball([0.0; 3], 64.0, 1, Fill::Const(0.02), Op::Fill)]) };
-        // Of its about 134 cells (a ball's volume over a site's, 2 · 16³), those a ray crossing is stopped in.
-        // Fine sites 4 apart along a column, a cell's 512 fine sites are on 123, 126 and 128 of its columns along x, y
-        // and z (columns_of_cell; its shadow is 2 · 8² columns), 1 to 8 on each, 4 on average. Each kept with
-        // 1 − 0.98² ≈ 0.04, a column holds one with 1 − 0.96ⁿ: 0.15 on average over them, in a whole cell and
-        // over the ball's (its cells on its edge, cut short, add a little). Each cloud is kept or not as a whole,
-        // against its own threshold: on average over many, 256 for a share within about 0.02.
-        let kept = on_threads(256, |i| {
+        let kept: Vec<usize> = on_threads(16, |i| {
             let cloud = cloud();
             measure(&cloud, &format!("cloud {i}"), "clouds", bounds_of(&cloud), fixed(2.0), 16, 1).len()
-        })
-        .iter()
-        .sum::<usize>() as f64
-            / (256.0 * 134.0);
-        assert!((0.1..0.2).contains(&kept), "sparse clouds keep {kept} of their sites");
+        });
+        assert!(kept.iter().all(|n| (16..28).contains(n)), "sparse clouds keep {kept:?} of their about 134 cells");
     }
 
     #[test]

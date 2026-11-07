@@ -63,7 +63,7 @@ region1          0       361         0         0         0         0         0  
 region1          0        49        16         0         0         0         0        65         0         0         0 boulders
 region1          0       121        32         0         0         0         0       153         0         0         0 logs
 region1          0       121       121         2         8         0         0     15609         0         0         4 plants
-region1          0         9         1         3     92723         0         0        30         0         0     92723 settlements
+region1          0         9         1         3     79763         0         0        30         0         0     79763 settlements
 region1          0        36         5         0         0         0         0        41         0         0         0 haystacks
 region1          0         0         0         0         0         0     16384     98304         0         0         0 terrain
 region1          0         0         0         0         0         0     16384     49152         0         0         0 learned streets
@@ -78,7 +78,7 @@ region1          0         0         0         0         0         0         0  
 region1          2      1849        22        43     35093         0         0       306         0         0      5202 trees
 region1          2       361        89         0         0         0         0       450         0         0         0 boulders
 region1          2       529       131         0         0         0         0       668         0         0         0 logs
-region1          2        16         1        27    335169    694688         0        51         0         0     21869 settlements
+region1          2        16         1        27    296218    694688         0        51         0         0     23460 settlements
 region1          2       182        36         0         0         0         0       218         0         0         0 haystacks
 region1          2         0         0         0         0         0     16384     98304         0         0         0 terrain
 region1          2         0         0         0         0         0     16384     46648         0         0         0 learned streets
@@ -92,7 +92,7 @@ region1          2         0         0         0         0         0         0  
 region1          2         0         0         0         0         0         0      6554      2121      2121         0 plan trees
 region1          4      4624      1168       125      1678         0         0      5792         0         0        72 boulders
 region1          4      5184      1293        58      2725         0         0      7146         0         0       103 logs
-region1          4        16         1        51    569079   1266904         0        51         0         0       664 settlements
+region1          4        16         1        51     81394    228124         0        51         0         0       796 settlements
 region1          4      2116       513         3        10         0         0      2727         0         0         4 haystacks
 region1          4         0         0         0         0         0     16384     98304         0         0         0 terrain
 region1          4         0         0         0         0         0     16384     20326         0         0         0 learned streets
@@ -106,7 +106,7 @@ region1          4         0         0         0         0         0         0  
 region1          4         0         0         0         0         0         0     76224     38112     37875         0 plan land
 region1          4         0         0         0         0         0         0    122047     20238     20238         0 plan forest columns
 region1          4         0         0         0         0         0         0     68625     22668     20169         0 plan trees
-region1          6        49         2        93    895966   2045216         0       146         0         0        33 settlements
+region1          6        49         2        93     11304     28033         0       146         0         0        38 settlements
 region1          6         0         0         0         0         0     16384     98304         0         0         0 terrain
 region1          6         0         0         0         0         0     16384     16796         0         0         0 learned streets
 region1          6         0         0         0         0         0     16384     16822         0         0         0 fields

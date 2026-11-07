@@ -25,7 +25,7 @@ use worldgen::units::{Units, m};
 use crate::forest::K as F;
 use crate::mountains::{self, K as M};
 use crate::railway::Railway;
-use crate::town::{House, K as T, Style, thing};
+use crate::town::{House, K as T, ROOF, Style, gable_ends, thing};
 use crate::valley::Terrain;
 
 kinds! {
@@ -69,8 +69,6 @@ const STEEP: Units = Units::m(2.0);
 const POND_DEPTH: i64 = m(1.8);
 const POND_DROP: i64 = m(0.4);
 const POND_SHORE: i64 = m(3.0);
-/** How much deeper a roof is than the gable under it (as town.rs's). */
-const ROOF: i64 = 4;
 
 /** What a landmark is. */
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
@@ -620,10 +618,10 @@ fn roof(part: &mut Part, [length, depth]: [i64; 2], top: i64, rise: i64, ridge: 
         (min[across], max[across]) = (-eaves as f64, (width + eaves) as f64);
         (min, max)
     };
-    let (min, max) = box_of(rise as f64 * width as f64 / (width + 2 * eaves) as f64, 0, top - ROOF);
-    part.gable(min, max, ridge, wall, Op::Fill);
     let (min, max) = box_of(rise as f64, eaves, top);
     part.gable(min, max, ridge, roof, Op::Fill);
+    let (min, max) = box_of(rise as f64 * width as f64 / (width + 2 * eaves) as f64, 0, top - ROOF);
+    gable_ends(part, min, max, ridge, wall);
     // Eaves boarded along both sides: a thin wedge's edge would leave gaps.
     for (from, to) in [(-eaves, 0), (width, width + eaves)] {
         let (mut min, mut max) = ([0, top - 2, 0], [length, top + 1, depth]);
