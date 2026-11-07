@@ -64,8 +64,6 @@ drawn as a pillar over the voxels behind it in the column,
 so the ground shows no stripes where the view slants;
 but what a column shows along it is its nearest voxel's colour,
 so a lawn's shades and a road's markings stretch along it.
-"Pillars over Columns" (on by default, `?pillars=0`) draws them so;
-off, each column is its nearest voxel alone, and the stripes show.
 See [architecture.md](architecture.md).
 
 **Worlds** – Procedurally generated, regenerable with a new seed; the camera

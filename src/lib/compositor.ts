@@ -37,9 +37,8 @@ const SEAM_WIDTH = 1.5
 // as their voxels would, before the fragment shader runs. Interpolated
 // linearly on screen, not in perspective: surfaces of one layer much
 // nearer each other than a prism is long may show in the wrong order.
-/** Vertices of a splat's strip (see VERTEX_SHADER); the first HEXAGON are the near hexagon, all a flat splat needs. */
+/** Vertices of a splat's strip (see VERTEX_SHADER). */
 const STRIP = 14
-const HEXAGON = 6
 
 const VERTEX_SHADER = `#version 300 es
 uniform float maxSlant;
@@ -180,8 +179,6 @@ export class Compositor {
   private resident = new Map<Chunk, Resident>()
   private frame: Frame | null = null
   private showSeams = false
-  // Whether splats are swept over their runs.
-  private runs = true
 
   /** Throws if the browser has no WebGL 2. */
   constructor(canvas: HTMLCanvasElement) {
@@ -205,12 +202,6 @@ export class Compositor {
   /** Whether to draw the seams between faces over the picture; redraws the last frame. */
   setShowSeams(show: boolean) {
     this.showSeams = show
-    if (this.frame) this.draw(this.frame)
-  }
-
-  /** Whether to draw splats with runs as pillars over them, or as their nearest voxel alone; redraws the last frame. */
-  setRuns(on: boolean) {
-    this.runs = on
     if (this.frame) this.draw(this.frame)
   }
 
@@ -250,7 +241,6 @@ export class Compositor {
     gl.enable(gl.CULL_FACE)
     gl.enableVertexAttribArray(SPLAT_AT)
     gl.enableVertexAttribArray(PAINT_AT)
-    const vertices = this.runs ? STRIP : HEXAGON
     let face: Face | null = null
     frame.layers.forEach((layer, i) => {
       if (layer.face !== face) {
@@ -269,7 +259,7 @@ export class Compositor {
         drawn.add(chunk)
         gl.uniform2f(u.origin, x, y)
         gl.uniform4f(u.clip, x, y, x + chunk.extentWidth, y - chunk.extentHeight)
-        this.drawRanges(starts, show, vertices)
+        this.drawRanges(starts, show)
       }
     })
     gl.disableVertexAttribArray(SPLAT_AT)
@@ -304,7 +294,7 @@ export class Compositor {
    * given), a call per run of neighbouring clusters, its attributes
    * pointing at the run's first splat (WebGL 2 has no base instance).
    */
-  private drawRanges(starts: Uint32Array, show: Uint8Array | undefined, vertices: number) {
+  private drawRanges(starts: Uint32Array, show: Uint8Array | undefined) {
     const { gl } = this
     const clusters = starts.length - 1
     for (let c = 0; c < clusters; ) {
@@ -318,7 +308,7 @@ export class Compositor {
       if (count === 0) continue
       gl.vertexAttribPointer(SPLAT_AT, 4, gl.FLOAT, false, SPLAT * 4, from * SPLAT * 4)
       gl.vertexAttribPointer(PAINT_AT, 4, gl.UNSIGNED_BYTE, true, SPLAT * 4, from * SPLAT * 4 + 16)
-      gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, vertices, count)
+      gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, STRIP, count)
     }
   }
 

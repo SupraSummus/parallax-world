@@ -46,15 +46,6 @@ const MOVE_SPEED = 60
 /** Toggles walking on the ground and flying. */
 const WALK_KEY = 'f'
 
-/**
- * A switch as the page's query sets it, if it does (`?name=1` or `?name=0`):
- * `pillars` whether splats are drawn over their columns (see Compositor.setRuns).
- */
-const queryFlag = (name: string, fallback: boolean) => {
-  const value = new URLSearchParams(location.search).get(name)
-  return value === null ? fallback : value === '1'
-}
-
 function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const rendererRef = useRef<ParallaxRenderer | null>(null)
@@ -77,7 +68,6 @@ function App() {
   const [maxLeak, setMaxLeak] = useState(DEFAULT_MAX_LEAK)
   const [skipCovered, setSkipCovered] = useState(true)
   const [showSeams, setShowSeams] = useState(false)
-  const [pillars, setPillars] = useState(() => queryFlag('pillars', true))
   // Walking on the ground: the body the camera is the eye of; null flying.
   const walkerRef = useRef<Walker | null>(null)
   const [walking, setWalking] = useState(false)
@@ -140,7 +130,6 @@ function App() {
     if (query.fov !== undefined) renderer.setFov(query.fov)
     if (query.distance !== undefined) renderer.setRenderDistance(query.distance)
     if (query.leak !== undefined) renderer.setMaxLeak(query.leak)
-    compositorRef.current?.setRuns(queryFlag('pillars', true))
     setWorldType(renderer.getWorld().worldType)
     setFov(renderer.getFov())
     setRenderDistance(renderer.getRenderDistance())
@@ -327,11 +316,6 @@ function App() {
     compositorRef.current?.setShowSeams(value)
   }
 
-  const handlePillarsChange = (value: boolean) => {
-    setPillars(value)
-    compositorRef.current?.setRuns(value)
-  }
-
   const totalUpdates = sessionStats?.totalUpdates ?? 0
   const averageCacheEfficiency = sessionStats?.averageCacheEfficiency ?? 0
   const lastUpdate = sessionStats?.lastUpdate
@@ -400,7 +384,6 @@ function App() {
             />
             <SwitchRow label="Walk on Ground (F)" checked={walking} onChange={handleWalkingChange} />
             <SwitchRow label="Skip Covered Chunks" checked={skipCovered} onChange={handleSkipCoveredChange} />
-            <SwitchRow label="Pillars over Columns" checked={pillars} onChange={handlePillarsChange} />
             <SwitchRow label="Show Face Seams" checked={showSeams} onChange={handleShowSeamsChange} />
             <div className="space-y-0.5 text-xs text-muted-foreground">
               <div className="flex items-center gap-2"><Move size={14} /><span>W/S - Forward/Back</span></div>
