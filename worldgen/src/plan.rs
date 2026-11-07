@@ -120,7 +120,7 @@ impl<T: Copy + Default> Plan<T> {
         }
         let outer = MAKING.replace(if self.filter { ("", 0) } else { (self.name, self.scale) });
         // What a plan decides for a column is the same whoever reads it.
-        let value = where_asked(|| crate::cost::plan(self.name, || (self.make)(x, z)));
+        let value = where_asked(|| crate::cost::plan(self.name, self, [x, 0, z], || (self.make)(x, z)));
         MAKING.set(outer);
         self.slots.borrow_mut()[slot] = (x, z, value);
         value

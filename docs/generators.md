@@ -459,7 +459,9 @@ a layer growing fourfold from one level to the next,
 a population asking many more cells for anchors than own one,
 a field read at every site,
 one huge thing,
-things drawn whole to be measured.
+things drawn whole to be measured,
+a plan making each column over `cost::REMADE` times,
+as a failing cache does (each plan's row shows its times made).
 `cargo run --release --example cost -- <world>` in `worlds/` prints it
 (arguments in the file).
 
@@ -474,6 +476,8 @@ It also fails when a tile's estimate is over the budget (`cost::BUDGET`),
 unless the tile is listed in `OVER_BUDGET` there,
 and when a listed one is not, to take it off:
 the list only shrinks, and blessing does not move it.
+It fails, too, when a plan makes a tile's columns over `REMADE` times each,
+so a failing cache can't be blessed in.
 
 Counts are an estimate and miss things.
 When speed matters, time real tiles with `worlds/examples/bench.rs`;
