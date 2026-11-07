@@ -117,8 +117,8 @@ A spinner shows while a world generates.
 the camera, where it looks, the field of view and the render distance,
 so a view can be shown again.
 
-**Statistics panel** – Session totals (updates, average render time, average
-cache efficiency, voxels rendered) and details of the last update (layers,
+**Statistics panel** – Session totals (updates, average render time)
+and details of the last update (layers,
 slice detail, chunks in view reused vs newly baked,
 chunks still baking, levels of detail still generating,
 chunks covered, cached chunk bytes).

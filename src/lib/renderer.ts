@@ -1,5 +1,5 @@
 import { selectSlices, leakFreeDetail, sliceCentre, chunkCell, chunkCells, cellMargin, matchTilings, sliceKey as sliceName, siteLayers, GRID_LEVELS, atomSpacing, type SliceId } from './slice-selection'
-import { ChunkBaker, SPLAT, type ChunkSplats, type ChunkRequest } from './chunk-baker'
+import { ChunkBaker, type ChunkSplats, type ChunkRequest } from './chunk-baker'
 import { generatePart, World, worldTypes, type GridPart, type Vec3, type WorldType } from './world'
 import { LayerIndex, type LayerIndexData, type Material, type VoxelData } from './voxel-grid'
 import { Coverage } from './occlusion'
@@ -59,10 +59,6 @@ interface UpdateStats {
   levelsGenerating: number
   /** Cells and chunks in view covered by nearer layers, so not drawn (see Coverage). */
   chunksCovered: number
-  /** Voxels painted in chunks baked since the previous render (including any whose content turned out to be off screen). */
-  voxelsRendered: number
-  /** Percentage of chunks in view served from the cache. */
-  cacheEfficiency: number
   /** Bytes of all cached chunks, in view or not. */
   cachedBytes: number
 }
@@ -105,8 +101,6 @@ export interface SessionStats {
   totalUpdates: number
   totalRenderTime: number
   totalChunksRegenerated: number
-  totalVoxelsRendered: number
-  averageCacheEfficiency: number
   lastUpdate: UpdateStats | null
 }
 
@@ -291,15 +285,11 @@ export class ParallaxRenderer {
   private baker: ChunkBaker | null = null
   // Baked but not shown yet: counted as regenerated when first shown.
   private fresh = new WeakSet<Chunk>()
-  // Voxels painted in chunks baked since the last render.
-  private voxelsBaked = 0
 
   private stats: SessionStats = {
     totalUpdates: 0,
     totalRenderTime: 0,
     totalChunksRegenerated: 0,
-    totalVoxelsRendered: 0,
-    averageCacheEfficiency: 0,
     lastUpdate: null,
   }
 
@@ -398,18 +388,12 @@ export class ParallaxRenderer {
     this.bakery?.want(pass.missing
       .sort((a, b) => group(a) - group(b) || (a.segmentMisses ?? 0) - (b.segmentMisses ?? 0) || a.distance - b.distance)
       .map(m => m.request))
-    const voxelsRendered = this.voxelsBaked
-    this.voxelsBaked = 0
-
     const chunkCount = chunksReused + chunksRegenerated
     const renderTime = performance.now() - startTime
-    const cacheEfficiency = chunkCount > 0 ? (chunksReused / chunkCount) * 100 : 100
     const s = this.stats
     s.totalUpdates++
     s.totalRenderTime += renderTime
     s.totalChunksRegenerated += chunksRegenerated
-    s.totalVoxelsRendered += voxelsRendered
-    s.averageCacheEfficiency += (cacheEfficiency - s.averageCacheEfficiency) / s.totalUpdates
     s.lastUpdate = {
       renderTime,
       detail,
@@ -420,8 +404,6 @@ export class ParallaxRenderer {
       chunksPending: pass.pending,
       levelsGenerating: this.world.generating,
       chunksCovered,
-      voxelsRendered,
-      cacheEfficiency,
       cachedBytes: this.bytes,
     }
     return frame
@@ -601,7 +583,6 @@ export class ParallaxRenderer {
     this.tilings.clear()
     this.slices.clear()
     this.bytes = 0
-    this.voxelsBaked = 0
     this.useWorld()
   }
 
@@ -756,7 +737,6 @@ export class ParallaxRenderer {
     slice.bytes += bytesOf(chunk)
     this.bytes += bytesOf(chunk)
     this.fresh.add(chunk)
-    this.voxelsBaked += chunk.splats.length / SPLAT
     return chunk
   }
 
