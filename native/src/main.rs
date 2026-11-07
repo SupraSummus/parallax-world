@@ -3,7 +3,7 @@
 //! the chunks in view (renderer.rs), worker threads baking them with the
 //! baker in bake/, sharing the tiles, and wgpu drawing them in an egui window.
 //!
-//! parallax-native [--world NAME] [--threads N] [--seed S] [--view QUERY] [--leak DEG] [--all-chunks] [--shot out.png [--size WxH] [--seams] [--colour voxels|layers|chunks] | --bench] [--walk D] [--stroll S] [--spin]
+//! parallax-native [--world NAME] [--threads N] [--seed S] [--view QUERY] [--leak DEG] [--all-chunks] [--shot out.png [--size WxH] [--seams] [--colour voxels|layers|chunks] | --bench] [--walk D] [--stroll S [--on-ground]] [--spin]
 //! parallax-native [--world NAME] [--seed S] --check-requests frame.bin
 //!
 //! --view takes the web page's view query (viewQuery in renderer.ts),
@@ -12,8 +12,8 @@
 //! in, at 1280×800 or --size, offscreen, and saves it; --bench only times
 //! the first frame once the world has all its tiles, the main thread's
 //! frames after, and the GPU drawing the last. --walk D moves the camera
-//! D units along the view after the first frame, and does the same there. --stroll S then walks on for S seconds
-//! as the window would, a frame every 60th, and times each frame's parts.
+//! D units along the view after the first frame, and does the same there. --stroll S then flies on for S seconds
+//! (walks, --on-ground) as the window would, a frame every 60th, and times each frame's parts.
 //! --leak sets how far hidden geometry may show between slices (renderer.rs);
 //! --all-chunks bakes every chunk in view, covered or not, as the panel's
 //! switch does.
@@ -279,11 +279,20 @@ fn check_requests(dump: &Dump, make: Make, seed: u64, threads: usize) {
 }
 
 /**
- * Walks on along the view for `seconds` at the window's speed, a frame
- * every 60th of a second as the window draws it, the GPU a frame behind,
- * and says what the frames cost.
+ * Moves on along the view for `seconds` at the window's speed, flying, or
+ * walking on the ground with `walk_through`, a frame every 60th of a
+ * second as the window draws it, the GPU a frame behind, and says what
+ * the frames cost, and where the slowest were.
  */
-fn stroll(seconds: f64, world: &mut World, renderer: &mut Renderer, mut camera: Vec3, view: &view::View, picture: &compositor::View) {
+fn stroll(
+    seconds: f64,
+    walk_through: Option<&[bool]>,
+    world: &mut World,
+    renderer: &mut Renderer,
+    mut camera: Vec3,
+    view: &view::View,
+    picture: &compositor::View,
+) {
     let mut gpu = shot::Offscreen::new();
     // All of the first frame is new to this GPU.
     gpu.prepare(&renderer.render(camera, view).0, picture);
@@ -291,12 +300,25 @@ fn stroll(seconds: f64, world: &mut World, renderer: &mut Renderer, mut camera: 
     let forward = view_basis(view.yaw, 0.0)[2];
     let (mut times, mut short) = (Vec::new(), 0);
     let ms = |a: Instant, b: Instant| (b - a).as_secs_f64() * 1000.0;
+    let mut walker = Walker::at(camera);
+    let mut cameras = Vec::new();
     for _ in 0..((seconds * 60.0) as usize).max(1) {
-        camera = std::array::from_fn(|d| camera[d] + forward[d] * SPEED / 60.0);
+        camera = match walk_through {
+            Some(walk_through) => {
+                let ground = Ground { tiles: &renderer.level(COLLISION_LEVEL as usize).grids, walk_through };
+                let input = WalkInput { forward: 1.0, right: 0.0, yaw: view.yaw, jump: false, sneak: false };
+                walker = walker.walk(input, 1.0 / 60.0, &ground);
+                walker.eye()
+            }
+            None => std::array::from_fn(|d| camera[d] + forward[d] * SPEED / 60.0),
+        };
+        cameras.push(camera);
         let start = Instant::now();
         let (frame, stats) = renderer.render(camera, view);
         let rendered = Instant::now();
-        for (level, tiles) in world.update(camera, &stats.levels, &stats.tiles) {
+        let mut levels = stats.levels;
+        levels[COLLISION_LEVEL as usize] |= walk_through.is_some();
+        for (level, tiles) in world.update(camera, &levels, &stats.tiles) {
             renderer.set_tiles(level, tiles);
         }
         let updated = Instant::now();
@@ -314,6 +336,12 @@ fn stroll(seconds: f64, world: &mut World, renderer: &mut Renderer, mut camera: 
         t.sort_by(f64::total_cmp);
         let at = |q: f64| t[((t.len() - 1) as f64 * q) as usize];
         println!("  {name:>6}: {:6.1} {:6.1} {:6.1} {:6.1}", at(0.5), at(0.9), at(0.99), at(1.0));
+    }
+    let mut slowest: Vec<usize> = (0..times.len()).collect();
+    slowest.sort_by(|&a, &b| times[b][3].total_cmp(&times[a][3]));
+    for &k in slowest.iter().take(5) {
+        let [x, y, z] = cameras[k];
+        println!("  frame {k}: GPU {:.1} ms at camera={x},{y},{z}", times[k][3]);
     }
 }
 
@@ -457,7 +485,9 @@ fn main() -> eframe::Result {
             println!("the GPU draws the frame in {ms:.1} ms: of its {splats} splats, {first} that showed before and {next} more");
         }
         if let Some(v) = value("--stroll") {
-            stroll(v.parse().expect("seconds"), &mut world, &mut renderer, camera, &first, &view);
+            let walk_through: Vec<bool> = materials_of(&shown.generator).iter().map(|m| m.walk_through).collect();
+            let on_ground = flag("--on-ground").then_some(walk_through.as_slice());
+            stroll(v.parse().expect("seconds"), on_ground, &mut world, &mut renderer, camera, &first, &view);
         }
         if let Some(v) = value("--shot") {
             shot::save(&frame, &view, v);
