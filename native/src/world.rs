@@ -8,9 +8,8 @@
 //! finds them made. Tiles far from the camera are dropped. A tile never
 //! changes, so a chunk baked once all the tiles it reads are in stays right
 //! whatever comes after (bake's Tiles). Given a brightness, each tile is
-//! lit as it is made (worldgen's Light, one on each thread).
+//! lit as it is made (worldgen's Light, one on each thread, sharing tiles).
 
-use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Condvar, Mutex};
@@ -19,13 +18,15 @@ use bake::slicing::{GRID_LEVELS, GRID_REACH};
 use bake::{Grid, LayerIndex, Tiles};
 use worldgen::generator::{Generator, generate};
 use worldgen::grid::{Box3, compose};
-use worldgen::light::{Brightness, Light};
+use worldgen::light::{Brightness, Grids, Light};
 
 use crate::view::Vec3;
 
 /** Tiles are 2^TILE_SHIFT sites of their level wide. */
 pub const TILE_SHIFT: u32 = 7;
 pub const TILE: i64 = 1 << TILE_SHIFT;
+// Lit, tiles are Light's.
+const _: () = assert!(TILE == worldgen::light::TILE);
 
 /** The world of a seed. */
 pub type Make = fn(u64) -> worldgen::World;
@@ -94,24 +95,20 @@ pub struct World {
     early: Vec<Made>,
 }
 
-thread_local! {
-    /** The world of the seed last generated on this thread. */
-    static GENERATOR: RefCell<Option<(u64, Generator)>> = const { RefCell::new(None) };
-    /** Its light, if lit. */
-    static LIGHT: RefCell<Option<Light>> = const { RefCell::new(None) };
+/** What makes a thread's tiles, made on it (a generator is not Send): a generator, or lit, a Light (which holds one). */
+enum Maker {
+    Plain(Generator),
+    Lit(Box<Light>),
 }
 
-fn generate_tile(make: Make, seed: u64, level: usize, b: &Box3, brightness: Option<Brightness>) -> Grid {
-    let mut grid = GENERATOR.with_borrow_mut(|g| {
-        if g.as_ref().is_none_or(|(s, _)| *s != seed) {
-            *g = Some((seed, make(seed).generator));
+impl Maker {
+    fn tile(&mut self, level: usize, heights: &Heights, id: TileId) -> Grid {
+        match self {
+            Maker::Plain(generator) => generate(generator, &tile_box(heights, level, id), level as u32),
+            Maker::Lit(light) => light.tile(level as u32, (id.0 as i64, id.1 as i64)),
         }
-        generate(&g.as_ref().expect("made").1, b, level as u32)
-    });
-    if let Some(brightness) = brightness {
-        LIGHT.with_borrow_mut(|light| light.get_or_insert_with(|| Light::new(make(seed), brightness)).light_tile(level as u32, &mut grid));
+        .into_grid()
     }
-    grid.into_grid()
 }
 
 /** The box of tile `id` of `level`, of a world of `heights`. */
@@ -131,7 +128,12 @@ fn distance(level: usize, camera: Vec3, (i, k): TileId) -> f64 {
     off(camera[0], i).hypot(off(camera[2], k))
 }
 
-fn work(make: Make, seed: u64, brightness: Option<Brightness>, heights: &Heights, queue: &(Mutex<Queue>, Condvar), send: &Sender<Made>) {
+fn work(make: Make, seed: u64, lit: Option<(Brightness, Grids)>, heights: &Heights, queue: &(Mutex<Queue>, Condvar), send: &Sender<Made>) {
+    let mut maker = match lit {
+        // Its tiles from those the world's threads share.
+        Some((brightness, grids)) => Maker::Lit(Box::new(Light::new(make(seed), brightness, grids))),
+        None => Maker::Plain(make(seed).generator),
+    };
     loop {
         let (level, id) = {
             let mut q = queue.0.lock().expect("queue");
@@ -143,7 +145,7 @@ fn work(make: Make, seed: u64, brightness: Option<Brightness>, heights: &Heights
                 q = queue.1.wait(q).expect("queue");
             }
         };
-        let grid = generate_tile(make, seed, level, &tile_box(heights, level, id), brightness);
+        let grid = maker.tile(level, heights, id);
         let index = LayerIndex::new(&grid);
         if send.send((level, id, Tile { grid: Arc::new(grid), index })).is_err() {
             return;
@@ -158,9 +160,10 @@ impl World {
         let heights = heights(&world);
         let (send, done) = channel();
         let queue: Arc<(Mutex<Queue>, Condvar)> = Arc::default();
+        let lit = brightness.map(|b| (b, Grids::default()));
         for _ in 0..threads {
-            let (queue, send) = (queue.clone(), send.clone());
-            std::thread::spawn(move || work(make, seed, brightness, &heights, &queue, &send));
+            let (queue, send, lit) = (queue.clone(), send.clone(), lit.clone());
+            std::thread::spawn(move || work(make, seed, lit, &heights, &queue, &send));
         }
         World { tiles: (0..GRID_LEVELS).map(|_| HashMap::new()).collect(), queue, done, early: Vec::new() }
     }
