@@ -544,15 +544,22 @@ fn heath(f: Rc<Moor>) -> Field {
     })
 }
 
-/** The stream's bed, carved out of the ground: a channel a metre deep. */
+/** The bottom of the stream's bed under ground `h` high: a metre deep, at least two sites, as a line of sites along y has one every two. */
+fn bed_bottom(h: i64, spacing: i64) -> i64 {
+    h - m(1.0).max(2 * spacing)
+}
+
+/**
+ * The stream's bed: the ground carved out down to where `water`, drawn
+ * after, fills it from; on the faces they share, they keep the same sites.
+ */
 fn stream_bed(f: Rc<Moor>) -> Field {
-    Field::at("stream bed", 1.0, Op::Carve, move |x, y, z, spacing| {
+    Field::columns("stream bed", 1.0, Op::Carve, move |x, z, spacing| {
         if f.moorland.streamside(x, z) != Streamside::Bed {
-            return None;
+            return Vec::new();
         }
         let h = f.height(x, z);
-        // At least two sites deep: a line of sites along y has one every two.
-        (y > h - m(1.0).max(2 * spacing) && y <= h + m(0.5)).then_some((0, None))
+        vec![Span::solid(bed_bottom(h, spacing), h + 1, 0)]
     })
 }
 
@@ -565,7 +572,7 @@ fn water(f: Rc<Moor>) -> Field {
     Field::columns("water", 2.0, Op::Paint, move |x, z, spacing| {
         let h = f.height(x, z);
         if f.moorland.streamside(x, z) == Streamside::Bed {
-            return vec![Span::solid(h - m(1.0).max(2 * spacing), h - 1, T::water)];
+            return vec![Span::solid(bed_bottom(h, spacing), h - 1, T::water)];
         }
         match f.moorland.water(x, z) {
             Some(level) if f.owns(x, z) => Column::new(h, spacing).water_to(T::water, level.0).spans(),

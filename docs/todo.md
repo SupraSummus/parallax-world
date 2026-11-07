@@ -243,10 +243,6 @@ Numbers are for the forest at 1280×800, as measured when written.
 - **Cost weighs every plan lookup alike** (`NS` in `worldgen/src/cost.rs`),
   though one of a column just read costs a fraction
   of one among claims making their keys.
-  The moor's level-0 tiles, whose stream bed reads a plan at every site,
-  are estimated at twice their time;
-  drawn by column (`Field::columns`), as its water is,
-  it would read it once a column.
 
 ## Ideas
 
