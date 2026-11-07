@@ -13,6 +13,7 @@ pub mod frame;
 pub mod generator;
 pub mod grid;
 pub mod js;
+pub mod light;
 pub mod noise;
 pub mod picture;
 pub mod places;

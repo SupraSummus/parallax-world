@@ -80,6 +80,7 @@ worldgen/                    # The world-generation engine, moving to integers, 
 │   ├── frame.rs             # Things built in frames of their own: quarter turns, mirrors, walls
 │   ├── world.rs             # World: what a host needs to show one (generator, spawn, heights), the places it names
 │   ├── picture.rs           # Pictures of a world at one level: rays through its voxels, as PNGs
+│   ├── light.rs             # Light for pictures (a prototype): sky, sun and glowing kinds, down from coarser levels; glow summed up
 │   ├── cost.rs              # What generating costs: work counted by layer, reported for a world's tiles, against a baseline
 │   ├── places.rs            # Whether things prefer places: positions modulo periods, as on a grid, over seeds
 │   ├── directions.rs        # Whether a world's directions follow the lattice's: four-fold harmonics of pairs' directions, over seeds
@@ -101,7 +102,7 @@ worlds/                      # The worlds, on worldgen's public API only; the we
 ├── data/town-grammar.bin    # learned.rs's rule table, written by lab's export example
 ├── data/cost/               # Each world's cost baseline, which tests/cost.rs holds it to
 ├── tests/                   # Every world in WORLDS keeps the contract and its cost baseline; the scenes' contents
-└── examples/                # map: a world from above; look: a picture of it, of any place it names (picture.rs); cost: what its tiles cost (cost.rs); bench: timing a world's tiles
+└── examples/                # map: a world from above; look: a picture of it, of any place it names (picture.rs), lit (light.rs); cost: what its tiles cost (cost.rs); bench: timing a world's tiles
 lab/                         # Experiment, not built by pnpm: split grammars with shared splits, learned from the valley's towns; a masked model of any volume, flat, 3D or on the FCC lattice; synthesis by coordinates into examples; a critic and profiles that score any of them; real places (scripts/overture.py) drawn to a plan (see src/lib.rs); exports the learned town's rules
 native/                      # Spike of a native frontend (egui on winit and wgpu), linking bake/ and worlds/; see src/main.rs
 ├── .cargo/config.toml       # Builds for x86-64-v3: floor and ceil inline (see there)

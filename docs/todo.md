@@ -255,6 +255,21 @@ Numbers are for the forest at 1280×800, as measured when written.
   what is far would read a coarser band of the curve, its mean.
   The moor's stream (`stream_distance` in `moor.rs`) is measured along x too;
   from a curve its banks would move where it bends, so it is left as it is.
+- **Light is a prototype, in look's pictures only** (`worldgen/src/light.rs`).
+  Each level's light comes from coarser levels', glow is summed up from finer ones;
+  the city's lamps light its streets, trees and facades at night
+  (`look city 42 0 … light 0.01 0 0.5`), a lamp about as brightly
+  as the square of its distance says, if it is high enough over the horizon:
+  light comes along 18 directions,
+  so light from low down is seen along a flatter one, or a steeper,
+  and crossings show diagonal bands.
+  Glow is summed from the base level's tiles, so lamps light only what is
+  within about 2^7 of its units, and generating those is most of the time;
+  above level 0 the grids have lost most lamps already.
+  The engine could give how much glows in a cell of any size, as `Points` do.
+  The sun is one of the 18 directions; the renderer does not use any of it.
+  Surfaces send light back from the coarser level's,
+  so a lit tree tints a wall near it over a coarse cell.
 
 ## Ideas
 

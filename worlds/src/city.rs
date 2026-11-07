@@ -32,7 +32,7 @@ kinds! {
     bark: 4, ["#4b3621", "#57402a"];
     canopy: 1, ["#4c7f2a", "#5a8f30", "#447324", "#679a38"], walk_through;
     pole: 3, ["#2e3236"];
-    light: 6, ["#fff3c4"];
+    light: 6, ["#fff3c4"], glows;
     concrete: 12, ["#9a9690", "#a19d97"];
     plinth: 3, ["#5e5a55", "#57534e"];
     gravel: 9, ["#6d6a66", "#75716c", "#686561"];

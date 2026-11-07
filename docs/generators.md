@@ -590,6 +590,8 @@ A kind marked `walk_through` is one a walking body goes through
 (plants, water; see `bake/src/walk.rs`), the rest it stands on;
 so ground and what stands on it are different kinds,
 even of one colour (the moor's `heather` and `heatherSprigs`).
+A kind marked `glows` gives light of its colour, as the city's lamps do
+(`worldgen/src/light.rs`, for now only in look's pictures).
 
 ### Landmarks
 
