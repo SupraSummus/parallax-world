@@ -151,6 +151,9 @@ without it the native one cannot draw, the web's draws several times slower.
 
 ## Rules
 
+0. **Simplicity first.** README.md's design principles open with Hoare's
+   motto: make it so simple that there are obviously no deficiencies.
+   Judge every change by it, and prefer deleting to adding.
 1. **No dangling files.** Every file is imported, referenced by config, or
    linked from this file or README.md. When removing a file, remove its
    references. `knip` enforces this for code.
