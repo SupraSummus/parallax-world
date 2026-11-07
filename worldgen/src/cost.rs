@@ -5,6 +5,7 @@
 //! "Cost").
 
 use std::cell::{Cell, RefCell};
+use std::collections::HashSet;
 use std::fmt::Write;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
@@ -23,6 +24,8 @@ thread_local! {
      * or a plan: kept unwatched too, as cheap as asking whether to.
      */
     static LOOKUPS: Cell<u64> = const { Cell::new(0) };
+    /** The columns plans made while counting, each by its plan's address: to tell those made again. */
+    static MADE: RefCell<HashSet<(usize, [i64; 3])>> = RefCell::new(HashSet::new());
 }
 
 /** Defines `Work`, a count of each of what time goes on, and its counts' names in order. */
@@ -67,6 +70,8 @@ work! {
     lookups,
     /** Columns a plan decided (made, not found kept); the lookups making them are its `lookups`. */
     plans,
+    /** Of those, columns made for the first time: fewer where some were made again. */
+    distinct,
     /** The most sites tested for one thing in one box. */
     largest,
 }
@@ -80,10 +85,12 @@ work! {
  * many (claims making their keys afresh for every column, a canopy
  * reading a plan around each), as it varies with what it finds, and
  * `plans` refitted with it. They rank work more than they time it; a
- * report's "took here" shows how far off they are elsewhere. `largest`
- * is among `tests`, so weighs nothing of its own.
+ * report's "took here" shows how far off they are elsewhere. `distinct`
+ * is among `plans` and `largest` among `tests`, so weigh nothing of
+ * their own.
  */
-const NS: Work = Work { cells: 100, owned: 1300, nodes: 1800, tests: 50, measured: 35, reads: 20, lookups: 25, plans: 45, largest: 0 };
+const NS: Work =
+    Work { cells: 100, owned: 1300, nodes: 1800, tests: 50, measured: 35, reads: 20, lookups: 25, plans: 45, distinct: 0, largest: 0 };
 
 impl Work {
     /** Adds `w`'s counts, but for the largest, the larger. */
@@ -95,6 +102,11 @@ impl Work {
     /** Its time estimated with NS, in nanoseconds. */
     pub fn ns(&self) -> u64 {
         self.counts().iter().zip(NS.counts()).map(|(c, ns)| c * ns).sum()
+    }
+
+    /** How many times each column was made, on average: a plan's (0 for a layer). */
+    pub fn times_made(&self) -> f64 {
+        self.plans as f64 / self.distinct.max(1) as f64
     }
 }
 
@@ -113,6 +125,11 @@ impl Counts {
         total
     }
 
+    /** Plans making each column over REMADE times, and how many. */
+    pub fn remade(&self) -> impl Iterator<Item = (&'static str, f64)> {
+        self.plans.iter().map(|(name, w)| (*name, w.times_made())).filter(|(_, times)| *times > REMADE)
+    }
+
     /** Layers by name, then plans as "plan <name>". */
     fn rows(&self) -> impl Iterator<Item = (String, &Work)> {
         let layers = self.layers.iter().map(|(name, w)| (name.to_string(), w));
@@ -129,10 +146,11 @@ fn add_to(rows: &mut Vec<(&'static str, Work)>, name: &'static str, work: &Work)
 
 /** Runs `f`, counting the work of what it generates on this thread. */
 pub fn counted<R>(f: impl FnOnce() -> R) -> (R, Counts) {
-    let outer = (COUNTING.replace(true), COUNTS.take(), LOOKUPS.take());
+    let outer = (COUNTING.replace(true), COUNTS.take(), LOOKUPS.take(), MADE.take());
     let value = f();
     COUNTING.set(outer.0);
     LOOKUPS.set(outer.2);
+    MADE.set(outer.3);
     (value, COUNTS.replace(outer.1))
 }
 
@@ -152,14 +170,20 @@ pub(crate) fn lookup() {
     LOOKUPS.set(LOOKUPS.get() + 1);
 }
 
-/** Makes a column of `plan` with `make`, counting it and the lookups making it, if counting. */
+/**
+ * Makes column `at` of `plan` with `make`, counting it and the lookups
+ * making it, if counting; `of` is the plan, told by its address from
+ * others of its name.
+ */
 #[inline]
-pub(crate) fn plan<T>(plan: &'static str, make: impl FnOnce() -> T) -> T {
+pub(crate) fn plan<T, P>(plan: &'static str, of: &P, at: [i64; 3], make: impl FnOnce() -> T) -> T {
     let outer = LOOKUPS.take();
     let value = make();
     let lookups = LOOKUPS.replace(outer);
     if COUNTING.get() {
-        COUNTS.with_borrow_mut(|counts| add_to(&mut counts.plans, plan, &Work { lookups, plans: 1, ..Work::default() }));
+        let distinct = MADE.with_borrow_mut(|made| made.insert((std::ptr::from_ref(of).addr(), at))).into();
+        let work = Work { lookups, plans: 1, distinct, ..Work::default() };
+        COUNTS.with_borrow_mut(|counts| add_to(&mut counts.plans, plan, &work));
     }
     value
 }
@@ -262,6 +286,14 @@ const SHARE: f64 = 0.1;
 const LARGE: f64 = 0.25;
 /** The time a tile may take, estimated, before it is flagged (and fails worlds/tests/cost.rs): nanoseconds. */
 pub const BUDGET: u64 = 200_000_000;
+/**
+ * How many times a plan may make each column of a tile, on average,
+ * before it is flagged (and fails worlds/tests/cost.rs): dithered or
+ * coarse plans make some again where a tile reads more than their slots
+ * keep apart, up to about 1.8 times; a cache that fails makes them
+ * several times each.
+ */
+pub const REMADE: f64 = 2.5;
 
 fn ms(ns: u64) -> f64 {
     ns as f64 / 1e6
@@ -269,7 +301,8 @@ fn ms(ns: u64) -> f64 {
 
 impl Report {
     /**
-     * What looks costly, by tile: a tile over BUDGET; a layer taking
+     * What looks costly, by tile: a tile over BUDGET; a plan making its
+     * columns over REMADE times each; a layer taking
      * GROWTH times as much as at the level before, cells asked for anchors
      * in vain, a field's values read at every site, one huge thing, or
      * things drawn whole to be measured.
@@ -287,6 +320,9 @@ impl Report {
             };
             if total > BUDGET {
                 flags.push(format!("{at}: the tile takes {:.0} ms, over the budget of {:.0}", ms(total), ms(BUDGET)));
+            }
+            for (plan, times) in t.counts.remade() {
+                flags.push(format!("{at}: plan {plan} makes each column {times:.1} times"));
             }
             let [x, y, z] = [0, 1, 2].map(|i| (t.b.max[i] - t.b.min[i]) as u64);
             for (layer, w) in t.counts.rows().filter(|(name, _)| name != SHADOWS) {
@@ -405,28 +441,32 @@ impl std::fmt::Display for Report {
         for place in places {
             let tiles: Vec<&Tile> = self.tiles.iter().filter(|t| t.place == place).collect();
             let levels: String = tiles.iter().map(|t| format!(" {:>8}", format!("level {}", t.level))).collect();
-            writeln!(f, "  {place:<24}{levels}")?;
+            // And a plan's columns made per distinct one, the most of any level.
+            writeln!(f, "  {place:<24}{levels}  times made")?;
             let mut rows: Vec<String> = Vec::new();
             for (name, _) in tiles.iter().flat_map(|t| t.counts.rows()) {
                 if !rows.contains(&name) {
                     rows.push(name);
                 }
             }
-            let ns = |t: &Tile, row: &str| t.counts.rows().find(|(name, _)| name == row).map_or(0, |(_, w)| w.ns());
+            let work = |t: &Tile, row: &str| t.counts.rows().find(|(name, _)| name == row).map_or(Work::default(), |(_, w)| *w);
+            let ns = |t: &Tile, row: &str| work(t, row).ns();
             let most = |row: &str| tiles.iter().map(|t| ns(t, row)).max().unwrap_or(0);
             // By the most a row takes at any level, largest first; those under a hundredth of the most a tile takes left out.
             rows.sort_by_key(|row| std::cmp::Reverse(most(row)));
             let least = tiles.iter().map(|t| t.counts.total().ns()).max().unwrap_or(0) / 100;
-            let line = |f: &mut std::fmt::Formatter, row: &str, ms: &dyn Fn(&Tile) -> f64| {
+            let line = |f: &mut std::fmt::Formatter, row: &str, ms: &dyn Fn(&Tile) -> f64, after: &str| {
                 let values: String = tiles.iter().map(|t| format!(" {:>8.1}", ms(t))).collect();
-                writeln!(f, "    {row:<22}{values}")
+                writeln!(f, "    {row:<22}{values}{after}")
             };
             for row in rows.iter().filter(|row| most(row) >= least) {
                 let name = if row == SHADOWS { format!("{row} (once a world)") } else { row.clone() };
-                line(f, &name, &|t| ms(ns(t, row)))?;
+                let times = tiles.iter().map(|t| work(t, row).times_made()).fold(0.0, f64::max);
+                let made = if times > 0.0 { format!(" {times:>11.2}") } else { String::new() };
+                line(f, &name, &|t| ms(ns(t, row)), &made)?;
             }
-            line(f, "total (no shadows)", &|t| ms(t.counts.total().ns()))?;
-            line(f, "took here", &|t| t.took.as_secs_f64() * 1e3)?;
+            line(f, "total (no shadows)", &|t| ms(t.counts.total().ns()), "")?;
+            line(f, "took here", &|t| t.took.as_secs_f64() * 1e3, "")?;
         }
         for flag in self.flags() {
             writeln!(f, "  ! {flag}")?;
