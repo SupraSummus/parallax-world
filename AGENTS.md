@@ -76,6 +76,7 @@ worldgen/                    # The world-generation engine, moving to integers, 
 │   ├── column.rs            # A heightfield's spans, each tall enough to keep a site at every level
 │   ├── plan.rs              # Plans by column, each from coarser ones only; land domains bid for; claims, things kept apart anywhere
 │   ├── curve.rs             # Curves: lines through space made top-down within narrowing corridors; where one passes nearest a point
+│   ├── points.rs            # Points: where things are, drawn top down, so a cell of any size knows how many it holds; blurs of their counts
 │   ├── frame.rs             # Things built in frames of their own: quarter turns, mirrors, walls
 │   ├── world.rs             # World: what a host needs to show one (generator, spawn, heights), the places it names
 │   ├── picture.rs           # Pictures of a world at one level: rays through its voxels, as PNGs

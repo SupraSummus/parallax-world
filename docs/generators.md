@@ -22,6 +22,18 @@ so a world is the same on every machine and as fine far from the origin.
 
 This is the second version of the contract (see "Open problems").
 
+## Where it is going
+
+The engine is moving towards worlds made of continuous parts only:
+fields, points and shapes, each given at any position.
+Only the engine would know the lattice, its cells, levels and caches,
+and what the checks below measure
+(levels that agree, cost, no preferred places or directions)
+would follow from how the parts are built, not be tested.
+Points are a first step:
+a far form can read the things that stand, by construction
+(the forest's canopy at levels 4 and 5).
+
 ## Model
 
 A world is **layers** of two kinds, drawn in `order`:
@@ -54,6 +66,8 @@ A world is **layers** of two kinds, drawn in `order`:
   for one pick however long the line.
   Cells and lines give named random sequences (`cell.random("species")`)
   that depend on them and the name only.
+  Or a population makes a thing at each point of `Points`
+  (`anchor_points`; see "Points").
 
 A thing is a **node**: its **shapes**, and **children**,
 finer things it makes only for the area asked for (`Children::Reaching`).
@@ -178,9 +192,10 @@ how many rays get how far, and what they stop on.
   (π/4 for a cylinder, ½ for a ball):
   a medium is isotropic, and denser it hides more from above than the trees,
   thinner it lets rays among them hit the ground ("Media are isotropic").
+  The forest's medium is as dense as the trees that stand ("Points").
   Things reach past their cells, crowns over a clearing:
-  `Shadows::footprint` measures where around them their shadow falls,
-  and the forest's canopy over a column hides, from above,
+  `Shadows::spread` measures where around a cell its things' shadow falls,
+  and at levels 4 and 5 the forest's canopy over a column hides, from above,
   at least what the crowns reaching over it from around would.
 - **Fields** are evaluated once per site or line of sites,
   and get the spacing, to smooth themselves to it.
@@ -220,6 +235,40 @@ a stack of discs a unit thick, each grown to a site, draws its outline, not its 
 And give a sheet over something else, a roof over its gable,
 the depth of two sites of the levels it is measured at:
 columns of sites step over a thinner one to what is under it.
+
+## Points
+
+`Points` (`points.rs`) say where things are, top down,
+so a cell of any size knows how many it holds without making them.
+Its cells are squares on the axes it spans,
+from leaves to roots, each twice as wide as the one below.
+It is given, by mark (a tree's species),
+the chance a leaf at a point holds a thing of it,
+read where asked, as a plan's columns are made:
+read dithered, a cell's count would hang on the layer asking.
+A root holds a Poisson number of each mark;
+a cell's points go to its children one by one,
+by the chances at their corners times their leaves still free;
+a leaf's points stand where their mark has a chance.
+So a cell's counts are its children's added, by construction,
+and a far form reading them shows the things that stand.
+A `Blur` weighs the counts of the cells around a column by their offset,
+reading a block of cells at a time:
+the forest's canopy at levels 4 and 5
+is the trees standing in the cells a column meets,
+and the crowns reaching over it from those around.
+A cell costs the chances at its corners,
+sites of every level at least as fine,
+so roots should be no wider than the chances vary over:
+the forest's are 8 m wide
+(32 m wide, its trees in 32 m squares varied in number
+three times as much as chance has them).
+But a cell as wide as the roots costs a column a Poisson draw and a corner,
+and wider ones the corners of their roots, sites the level doesn't read:
+from level 6 the forest's canopy is the trees expected,
+whose shadow there falls mostly on their own column.
+Points keep no distance between things, as `Claims` do:
+a hard core would make a cell's count hang on its neighbours' points.
 
 ## Rules
 
@@ -595,7 +644,7 @@ with `-- --check` it says whether the committed one is what it learns.
 The moor (`worlds/src/moor.rs`) is the shortest whole world to start from.
 `build.rs` has the short forms:
 `Field::columns` and `Field::at`,
-`Population::new(…).reach(…).anchor(…)` or `.anchor_along(axis, …)`, `.make(…)`,
+`Population::new(…).reach(…).anchor(…)`, `.anchor_along(axis, …)` or `.anchor_points(…)`, `.make(…)`,
 `Node::group`, `Child::new`, and `Shape::ball` and the like,
 solid and filling unless told to `paint` or `carve`.
 A shape kept with a chance is made with the long form (`ball(…, fill, op)`,
@@ -665,7 +714,7 @@ Carves along a line want the same margin.
   Give a thin medium only while sites are close.
 - **Things on a surface.** Anchor them along the axis across it
   (`anchor_along(1, …)` with `Line::pick` for a ground under columns),
-  not per cell:
+  or at points of the axes across it (`anchor_points`), not per cell:
   a host's tiles span the world's heights,
   and asked per cell, a population reads the ground in every cell over each column,
   most of them in the air or under it;
@@ -681,24 +730,24 @@ Carves along a line want the same margin.
 
 ## Open problems
 
-- **The forest's canopy thickens from level 6** (sites 8 m apart),
-  whatever its slabs' density:
-  from above, over 128 m at seed 42, 82, 83 and 85 % at levels 4 to 6
-  (79 % at level 0, 81 % at levels 1 to 3, whose trees the canopy is measured from),
-  and up to 0.05 fewer rays through at level 6 than at 4.
+- **The forest's canopy from above drifts with the level.**
+  Leaves seen from above over 128 m round the spawn, at seed 42:
+  80 % at level 0, 81 to 83 % at levels 1 to 3, 77, 80 and 81 % at levels 4 to 6;
+  at seed 6, 75 % at level 0, 78 to 79 % at levels 1 to 3 and 5 to 6, 75 % at level 4.
   A uniform medium over flat or sloping ground draws what its spans predict.
   Likely: a ray down crosses the sites of two columns in turn,
   so it averages the density over a site,
-  and where that varies over 8 m (paths, clearings) it covers more.
-  (The canopy's crowns around a clearing allow for half a site of that,
-  `Shadows::footprint`.)
+  and where that varies (paths, clearings) it covers more.
   Not checked yet.
-- **The forest's canopy is all leaves.**
-  Its trunks are leaves too: rays among the trees hit wood 0.04 less
-  at levels 4 and 5, and up to 0.07 less where trees stand apart
-  (the learned town at level 4).
-  Each slab's kind drawn as bark in proportion to its wood seen from the side
-  overshot (materials hit 0.09 off).
+- **The forest's canopy shows its trunks from above.**
+  Each slab of it is its trees' bark as often as their sites in it are wood
+  (`Shadows::share`), else their foliage;
+  all leaves, rays among the trees hit wood up to 0.10 less at level 4
+  (the learned town at seed 1).
+  But a site looks the same from every side,
+  so from above, where the crowns are thin, rays reach bark that crowns hide:
+  over the forest's spawn at seed 4, 0.03 of what level 4 shows from above,
+  0.007 at level 0.
 - **Media are isotropic.** A site stops rays from every direction alike;
   vertical trunks seen from above and from the side cannot both be right.
   (Opacity per direction, tried in a prototype, made things worse.)

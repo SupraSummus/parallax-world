@@ -25,6 +25,11 @@ pub fn exp(x: f64) -> f64 {
     libm::exp(x)
 }
 
+/** Math.log: the natural logarithm. */
+pub fn log(x: f64) -> f64 {
+    libm::log(x)
+}
+
 /** `x ** y` */
 pub fn pow(x: f64, y: f64) -> f64 {
     libm::pow(x, y)

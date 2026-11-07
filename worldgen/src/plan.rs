@@ -33,6 +33,14 @@ pub(crate) fn footprint<R>(spacing: i64, offset: [i64; 2], read: impl FnOnce() -
     value
 }
 
+/** Runs `read` with plans read where asked, whoever asks: as a plan's columns are made, and points' chances (points.rs). */
+pub(crate) fn where_asked<R>(read: impl FnOnce() -> R) -> R {
+    let outer = FOOTPRINT.take();
+    let value = read();
+    FOOTPRINT.set(outer);
+    value
+}
+
 /** Slots a plan keeps values in: as many as two tiles have columns, so a layer finds what the one before made in its tile. */
 const SLOTS: usize = 1 << 15;
 const _: () = assert!(SLOTS.is_power_of_two());
@@ -112,9 +120,7 @@ impl<T: Copy + Default> Plan<T> {
         }
         let outer = MAKING.replace(if self.filter { ("", 0) } else { (self.name, self.scale) });
         // What a plan decides for a column is the same whoever reads it.
-        let footprint = FOOTPRINT.take();
-        let value = crate::cost::plan(self.name, || (self.make)(x, z));
-        FOOTPRINT.set(footprint);
+        let value = where_asked(|| crate::cost::plan(self.name, || (self.make)(x, z)));
         MAKING.set(outer);
         self.slots.borrow_mut()[slot] = (x, z, value);
         value

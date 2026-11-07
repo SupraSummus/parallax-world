@@ -20,7 +20,7 @@ use std::f64::consts::TAU;
 use std::fmt;
 
 use crate::World;
-use crate::generator::{Generator, Layer, Population, anchor_in, made_in};
+use crate::generator::{Anchors, Generator, Layer, Population, anchor_in, anchors_in, made_in};
 use crate::grid::Box3;
 use crate::noise::{Rng, hash_text};
 
@@ -76,17 +76,17 @@ pub fn places(generator: &Generator, population: &Population, area: &Box3) -> Ve
     };
     let (mut found, mut asked) = (Vec::new(), HashSet::new());
     for (i, k) in columns {
-        for j in (j0..=j1).filter(|j| (i + j + k) & 1 == 0) {
-            let Some((_, [i, j, k])) = anchor_in(generator, population, i, j, k) else { continue };
-            if asked.insert([i, j, k])
-                && let Some((anchor, _)) = made_in(generator, population, i, j, k)
-            {
-                let p = anchor.map(|v| v.round() as i64);
-                if area.holds(p) {
-                    found.push(p);
-                }
-            }
-        }
+        let anchors = match population.anchor {
+            // A leaf's points are its own: they are found from it.
+            Anchors::Points { .. } => anchors_in(generator, population, [(i, i), (j0, j1), (k, k)]),
+            _ => (j0..=j1)
+                .filter(|j| (i + j + k) & 1 == 0)
+                .filter_map(|j| anchor_in(generator, population, i, j, k))
+                .filter(|(_, owner)| asked.insert(*owner))
+                .filter_map(|(_, [i, j, k])| made_in(generator, population, i, j, k).map(|(anchor, _)| anchor))
+                .collect(),
+        };
+        found.extend(anchors.iter().map(|a| a.map(|v| v.round() as i64)).filter(|p| area.holds(*p)));
         if !all && found.len() >= THINGS {
             break;
         }

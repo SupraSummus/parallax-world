@@ -15,6 +15,7 @@ use crate::grid::{Box3, VoxelGrid};
 use crate::js;
 use crate::noise::{Fixed, Fx, ONE, Rng, fixed, float, hash, hash_text, hash64, unit};
 use crate::plan;
+use crate::points::{Points, Spot};
 
 /** A material kind: its index in Generator::kinds. */
 pub type Kind = u8;
@@ -169,6 +170,7 @@ type FieldAt = dyn Fn(i64, i64, i64, i64) -> Option<(Kind, Option<f64>)>;
 type FieldSpans = dyn Fn(i64, i64, i64) -> Vec<Span>;
 type CellAnchor = dyn Fn(&Cell) -> Option<Point>;
 type LineAnchor = dyn Fn(&Line) -> Option<Point>;
+type SpotAnchor = dyn Fn(&Spot) -> Option<Point>;
 type Make = dyn Fn(Point, &Cell) -> Option<Node>;
 
 impl Shapes {
@@ -229,7 +231,11 @@ pub struct Field {
     pub values: FieldValues,
 }
 
-/** A cell of a population. */
+/**
+ * A cell of a population: of N·FCC, or the leaf of a point (`Points`),
+ * with its mark and number there; along the axes the points don't span,
+ * its index is 0 and its centre the anchor's.
+ */
 pub struct Cell<'a> {
     pub i: i64,
     pub j: i64,
@@ -237,19 +243,30 @@ pub struct Cell<'a> {
     pub centre: [i64; 3],
     /** N: the cell reaches N from its centre along each axis. */
     pub n: i64,
+    /** Its point's mark; 0 for cells of N·FCC. */
+    pub mark: usize,
+    nth: u32,
     population: &'a str,
     seed: u64,
 }
 
 impl Cell<'_> {
+    /** Cell (i, j, k) of N·FCC, i + j + k even. */
+    fn fcc(population: &Population, seed: u64, [i, j, k]: [i64; 3]) -> Cell<'_> {
+        let n = population.cell;
+        Cell { i, j, k, centre: [i * n, j * n, k * n], n, mark: 0, nth: 0, population: population.name, seed }
+    }
+
     /** A random sequence that depends on the cell and `stream` only. */
     pub fn random(&self, stream: &str) -> Rng {
-        Rng::new(hash64(hash_text(&format!("{}:{stream}", self.population), self.seed), self.i, self.j, self.k))
+        let point = (self.mark as u64) << 32 | self.nth as u64;
+        Rng::new(hash64(hash_text(&format!("{}:{stream}", self.population), self.seed) ^ point, self.i, self.j, self.k))
     }
 
     /** Its thing's name, for messages and drawing order. */
     fn key(&self) -> String {
-        format!("{} {},{},{}", self.population, self.i, self.j, self.k)
+        let point = if (self.mark, self.nth) == (0, 0) { String::new() } else { format!(" {}.{}", self.mark, self.nth) };
+        format!("{} {},{},{}{point}", self.population, self.i, self.j, self.k)
     }
 }
 
@@ -297,10 +314,11 @@ fn across(axis: usize) -> [usize; 2] {
     [(axis == 0) as usize, 2 - (axis == 2) as usize]
 }
 
-/** Things placed in the cells of N·FCC, at most one per cell. */
+/** Things placed in the cells of N·FCC, at most one per cell, or at points. */
 pub struct Population {
     pub name: &'static str,
     pub order: f64,
+    /** N; anchored at points, their leaves' width. */
     pub cell: i64,
     /** How far a thing reaches past N from its cell's centre, per axis. */
     pub reach: [i64; 3],
@@ -321,6 +339,11 @@ pub enum Anchors {
      * ground under columns of cells), as even as one per cell's square.
      */
     Lines { axis: usize, anchor: Box<LineAnchor> },
+    /**
+     * A thing at each point of `points` (points.rs), anchored where
+     * `anchor` lifts it to along the axes they don't span (onto a ground).
+     */
+    Points { points: Rc<Points>, anchor: Box<SpotAnchor> },
 }
 
 pub enum Layer {
@@ -1150,7 +1173,7 @@ fn drawables_in<'a>(generator: &'a Generator, clip: &Box3, s: i64) -> Vec<Drawab
             let reach = population.reach[axis];
             (-(-(units.min[axis] - n - reach)).div_euclid(n), (units.max[axis] - 1 + n + reach).div_euclid(n))
         });
-        let work = each_thing(generator, population, cells, |cell, node| {
+        let work = each_thing(generator, population, cells, |cell, _, node| {
             let (key, bounds, reach) = (cell.key(), bounds_of(&node), reach_of(population, cell));
             assert!(bounds.inside(&reach), "{}", past_reach(&key, &bounds, &reach, n, population.reach));
             things += 1;
@@ -1243,8 +1266,11 @@ fn alone(node: &Node, key: &str, layer: &'static str, bounds: Box3, f: i64, seed
     own
 }
 
-/** A layer of a thing across an axis: what it hides seen along the axis (a bitset of the plane), and the columns along the other two it holds. */
-type Slice = (Vec<u64>, u32, u32);
+/**
+ * A layer of a thing across an axis: what it hides seen along the axis (a bitset of the plane), the columns along
+ * the other two it holds, and how many of its sites are of each kind.
+ */
+type Slice = (Vec<u64>, u32, u32, Vec<(Kind, u32)>);
 
 /** What `layers` hide along the axis together: their planes' union, empty if none. */
 fn union(layers: &[Slice]) -> Vec<u64> {
@@ -1295,12 +1321,17 @@ impl Shadows {
                 let layers = (0..n[axis])
                     .map(|l| {
                         let mut plane = vec![0u64; words];
+                        let mut of_kind: Vec<(Kind, u32)> = Vec::new();
                         let (mut along_a, mut along_b) = (vec![false; n[b] as usize], vec![false; n[a] as usize]);
                         for i in 0..n[a] {
                             for j in 0..n[b] {
                                 let mut p = [0; 3];
                                 (p[axis], p[a], p[b]) = (l + min[axis], i + min[a], j + min[b]);
-                                if own.at(p[0], p[1], p[2]).is_some() {
+                                if let Some((kind, _)) = own.at(p[0], p[1], p[2]) {
+                                    match of_kind.iter_mut().find(|k| k.0 == kind) {
+                                        Some(k) => k.1 += 1,
+                                        None => of_kind.push((kind, 1)),
+                                    }
                                     let bit = (i * n[b] + j) as usize;
                                     plane[bit / 64] |= 1 << (bit % 64);
                                     (along_a[j as usize], along_b[i as usize]) = (true, true);
@@ -1308,13 +1339,28 @@ impl Shadows {
                             }
                         }
                         let count = |v: Vec<bool>| v.into_iter().filter(|b| *b).count() as u32;
-                        (plane, count(along_a), count(along_b))
+                        (plane, count(along_a), count(along_b), of_kind)
                     })
                     .collect();
                 (min, n[b], layers)
             })
             .collect();
         Shadows { f, axis, things }
+    }
+
+    /** The share of the things' sites in the slab from `from` to `to` (exclusive) along the axis whose kinds `of` holds. */
+    pub fn share(&self, from: i64, to: i64, of: impl Fn(Kind) -> bool) -> f64 {
+        let (mut sum, mut all) = (0u64, 0u64);
+        for (min, _, layers) in &self.things {
+            let ceil = |v: i64| (-(-v).div_euclid(self.f) - min[self.axis]).clamp(0, layers.len() as i64) as usize;
+            for (.., kinds) in &layers[ceil(from)..ceil(to)] {
+                for &(kind, n) in kinds {
+                    all += n as u64;
+                    sum += if of(kind) { n as u64 } else { 0 };
+                }
+            }
+        }
+        if all == 0 { 0.0 } else { sum as f64 / all as f64 }
     }
 
     /**
@@ -1349,36 +1395,47 @@ impl Shadows {
             let across = |range: std::ops::Range<usize>| union(&layers[range]).iter().map(|w| w.count_ones()).sum::<u32>() as f64;
             let n = layers.len();
             let adds = (across(lo..n) - across(hi..n) + across(0..hi) - across(0..lo)) / 2.0;
-            let along: u32 = layers[lo..hi].iter().map(|(_, a, b)| a + b).sum();
+            let along: u32 = layers[lo..hi].iter().map(|(_, a, b, _)| a + b).sum();
             sum += of(adds, along as f64) * (f * f) as f64;
         }
         sum / self.things.len() as f64
     }
 
     /**
-     * Where the things' shadow across the axis falls around where they
-     * were made, for a medium in columns of sites `size` apart: its mean
-     * area (lattice units²) by offset (zero along the axis), each part
-     * moved to the multiple of `size` towards where they were made. A ray
-     * along the axis crosses the sites of the columns beside its own
-     * between its own's (a column has one every two along it), which
-     * spreads a column's medium half a site wider; rounded to the nearest
-     * multiple instead, a canopy covered 0.02 more around clearings than
-     * its trees.
+     * Where the things' shadow across the axis falls, for things anywhere
+     * in a cell `size` wide (of `Points`, cornered at multiples of it): its
+     * mean area (lattice units²) over the column of sites `size` apart at
+     * (0, 0), by the cell's offset from it in cells (zero along the axis).
+     * A column reaches half its width round its site, so a cell meets four,
+     * and a part of the shadow covers each column as often as the thing's
+     * place in the cell puts it there.
      */
-    pub fn footprint(&self, size: i64) -> Vec<([i64; 3], f64)> {
+    pub fn spread(&self, size: i64) -> Vec<([i64; 3], f64)> {
         let (f, axis) = (self.f, self.axis);
         let (a, b) = ((axis + 1) % 3, (axis + 2) % 3);
-        let square = |v: i64| v / size * size;
+        // The cells a part p from the thing's foot covers the column from, with how often: the overlap of the
+        // column with the part's places, the cell's corner plus [0, size).
+        let cells = |p: i64| {
+            let r = p + size / 2;
+            let first = -(r + size - 1).div_euclid(size);
+            (first..=first + 1).filter_map(move |o| {
+                let w = 1.0 - (o * size + r).abs() as f64 / size as f64;
+                (w > 0.0).then_some((o, w))
+            })
+        };
         let mut areas = std::collections::BTreeMap::<[i64; 3], f64>::new();
         for (min, n_b, layers) in &self.things {
             for (word, mut bits) in union(layers).into_iter().enumerate() {
                 while bits != 0 {
                     let bit = (word * 64) as i64 + bits.trailing_zeros() as i64;
                     bits &= bits - 1;
-                    let mut offset = [0; 3];
-                    (offset[a], offset[b]) = (square((bit / n_b + min[a]) * f), square((bit % n_b + min[b]) * f));
-                    *areas.entry(offset).or_insert(0.0) += (f * f) as f64;
+                    for (oa, wa) in cells((bit / n_b + min[a]) * f) {
+                        for (ob, wb) in cells((bit % n_b + min[b]) * f) {
+                            let mut offset = [0; 3];
+                            (offset[a], offset[b]) = (oa, ob);
+                            *areas.entry(offset).or_insert(0.0) += wa * wb * (f * f) as f64;
+                        }
+                    }
                 }
             }
         }
@@ -1727,13 +1784,13 @@ fn nearest_unit_site(v: At) -> [i64; 3] {
  * anchors are in them, asked of each cell or once of each line of them;
  * returns the work of asking.
  */
-fn each_thing(generator: &Generator, population: &Population, cells: [(i64, i64); 3], mut each: impl FnMut(&Cell, Node)) -> Work {
+fn each_thing(generator: &Generator, population: &Population, cells: [(i64, i64); 3], mut each: impl FnMut(&Cell, Point, Node)) -> Work {
     let mut work = Work::default();
     let n = population.cell;
-    let cell = |[i, j, k]: [i64; 3]| Cell { i, j, k, centre: [i * n, j * n, k * n], n, population: population.name, seed: generator.seed };
+    let cell = |c: [i64; 3]| Cell::fcc(population, generator.seed, c);
     let mut make = |cell: &Cell, anchor: Point| {
         if let Some(node) = (population.make)(anchor, cell) {
-            each(cell, node);
+            each(cell, anchor, node);
         }
     };
     match &population.anchor {
@@ -1768,6 +1825,23 @@ fn each_thing(generator: &Generator, population: &Population, cells: [(i64, i64)
                 }
             }
         }
+        Anchors::Points { points, anchor } => {
+            // Cells are leaves along the axes the points span; along the others, those their anchors are nearest.
+            let spans = points.spans();
+            work.cells += (0..3).filter(|a| spans[*a]).map(|a| (cells[a].1 - cells[a].0 + 1) as u64).product::<u64>();
+            for spot in points.points_in(cells.map(|c| c.0 * n), cells.map(|c| (c.1 + 1) * n)) {
+                let Some(p) = anchor(&spot) else { continue };
+                let along = |a: usize| (p[a].round() as i64 + n / 2).div_euclid(n);
+                if (0..3).any(|a| !spans[a] && !(cells[a].0..=cells[a].1).contains(&along(a))) {
+                    continue;
+                }
+                let [i, j, k] = [0, 1, 2].map(|a| if spans[a] { spot.leaf[a].div_euclid(n) } else { 0 });
+                let centre = [0, 1, 2].map(|a| if spans[a] { spot.leaf[a] + n / 2 } else { p[a].round() as i64 });
+                let (mark, nth) = (spot.mark, spot.nth);
+                work.owned += 1;
+                make(&Cell { i, j, k, centre, n: n / 2, mark, nth, population: population.name, seed: generator.seed }, p);
+            }
+        }
     }
     work
 }
@@ -1787,7 +1861,7 @@ fn reach_of(population: &Population, cell: &Cell) -> Box3 {
  */
 pub fn things_in(generator: &Generator, population: &Population, cells: [(i64, i64); 3]) -> Vec<(String, Box3, Box3)> {
     let mut things = Vec::new();
-    each_thing(generator, population, cells, |cell, node| {
+    each_thing(generator, population, cells, |cell, _, node| {
         things.push((cell.key(), bounds_of(&node), reach_of(population, cell)));
     });
     things
@@ -1800,21 +1874,30 @@ pub fn things_in(generator: &Generator, population: &Population, cells: [(i64, i
  */
 pub fn made_in(generator: &Generator, population: &Population, i: i64, j: i64, k: i64) -> Option<(Point, Node)> {
     let (anchor, owner) = anchor_in(generator, population, i, j, k)?;
-    let n = population.cell;
-    let cell = Cell { i, j, k, centre: [i * n, j * n, k * n], n, population: population.name, seed: generator.seed };
+    let cell = Cell::fcc(population, generator.seed, [i, j, k]);
     (owner == [i, j, k]).then(|| (population.make)(anchor, &cell)).flatten().map(|node| (anchor, node))
 }
 
 /**
+ * The anchors of the things `population` makes in the cells whose
+ * indices are in `cells` ([first, last] along each axis), as `generate`
+ * makes them: anchored at points, those of the points of these leaves.
+ */
+pub fn anchors_in(generator: &Generator, population: &Population, cells: [(i64, i64); 3]) -> Vec<Point> {
+    let mut anchors = Vec::new();
+    each_thing(generator, population, cells, |_, anchor, _| anchors.push(anchor));
+    anchors
+}
+
+/**
  * The anchor asked for cell (i, j, k) of `population`, or for its line,
- * if any, and the cell it is in, which owns a thing there if it is this one.
+ * if any, and the cell it is in, which owns a thing there if it is this
+ * one; none anchored at points.
  */
 pub fn anchor_in(generator: &Generator, population: &Population, i: i64, j: i64, k: i64) -> Option<(Point, [i64; 3])> {
     let n = population.cell;
     let anchor = match &population.anchor {
-        Anchors::Cells(anchor) => {
-            anchor(&Cell { i, j, k, centre: [i * n, j * n, k * n], n, population: population.name, seed: generator.seed })
-        }
+        Anchors::Cells(anchor) => anchor(&Cell::fcc(population, generator.seed, [i, j, k])),
         Anchors::Lines { axis, anchor } => {
             let ([a, b], c) = (across(*axis), [i, j, k]);
             anchor(&Line {
@@ -1826,6 +1909,8 @@ pub fn anchor_in(generator: &Generator, population: &Population, i: i64, j: i64,
                 seed: generator.seed,
             })
         }
+        // A leaf holds any number: see anchors_in.
+        Anchors::Points { .. } => None,
     }?;
     Some((anchor, nearest_site(at(anchor), n)))
 }
