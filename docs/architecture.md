@@ -570,7 +570,8 @@ distance (or of the last slice, if farther).
 
 ## 5. Caching
 
-Slices are keyed by `face:level:slab:cutoff` and hold their chunks keyed by brick.
+Slices are keyed by face, level, atoms, layer and cutoff (`sliceKey`)
+and hold their chunks by cell (`cellKey`), the latest bake beside older ones standing in.
 Insertion order of the slice `Map` is the LRU order. Slices and chunks that
 leave the view lose their buffers but stay cached so moving back
 reuses them: up to `MAX_CACHED_SLICES` slices, and hidden chunks
