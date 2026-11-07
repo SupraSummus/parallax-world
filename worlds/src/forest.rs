@@ -715,26 +715,31 @@ fn spruce_tree(x: f64, ground: f64, z: f64, random: &mut Rng, ground_at: GroundA
     let top = ground + height;
     let base = ground + round(height * (0.15 + random.next() * 0.15));
     let bole = trunk(x, ground, z, base, width, K::spruceBark);
-    let hidden = vec![Shape::cuboid([x, base + 1.0, z], [x + width, top, z + width], K::spruceBark).paint()];
     let radius = height * (0.17 + random.next() * 0.05);
     let whorl = vox(1.5 + random.next() * 0.6);
     let (cx, cz) = (x + (width - 1.0) / 2.0, z + (width - 1.0) / 2.0);
     let crown_top = top + vox(0.5);
+    let tip = vox(0.35);
     let r = move |y: f64| {
-        // Each whorl is widest at its bottom, giving the layered silhouette.
+        // Each whorl is widest at its bottom, giving the layered silhouette; at its top, half as wide.
         let phase = js::wrap(top - y, whorl) / whorl;
-        radius * (1.0 - (y - base) / (crown_top - base)) * (0.5 + 0.5 * phase) + vox(0.35)
+        radius * (1.0 - (y - base) / (crown_top - base)) * (0.5 + 0.5 * phase) + tip
     };
+    // Dense within a trunk's width of its axis, so the fans' gaps show no bark. The trunk goes up as far as the
+    // crown, even at a whorl's top, holds that core: above, it would stick out, a brown spike for a tip.
+    let core = width;
+    let hidden_top = base + (crown_top - base) * (1.0 - 2.0 * (core - tip) / radius);
+    let hidden = vec![Shape::cuboid([x, base + 1.0, z], [x + width, hidden_top, z + width], K::spruceBark).paint()];
     let (from, to) = (base - 0.5, crown_top + 0.5);
     let density = move |distance: f64, py: f64| 0.95 - 0.35 * js::pow(distance / r(py), 3.0);
     let spokes = 6.0 + random.below(3) as f64;
     let sector = (2.0 * PI) / spokes;
     let twist = random.next() * sector;
     let half_width = |distance: f64| vox(0.15) + 0.07 * distance;
-    let covered = move |distance: f64| 1f64.min((2.0 * half_width(distance)) / (distance * sector));
+    let covered = move |distance: f64| if distance < core { 1.0 } else { 1f64.min((2.0 * half_width(distance)) / (distance * sector)) };
     let fans = move |px: f64, py: f64, pz: f64| {
         let distance = js::hypot(&[px - cx, pz - cz]);
-        if distance < vox(0.5) {
+        if distance < core {
             return density(distance, py);
         }
         let a = js::atan2(pz - cz, px - cx) - twist - ((top - py) / whorl).floor() * 2.39996;
@@ -755,7 +760,7 @@ fn spruce_tree(x: f64, ground: f64, z: f64, random: &mut Rng, ground_at: GroundA
     far.extend(foot);
     far.push(crown(Fill::At(Rc::new(move |px, py, pz| {
         let distance = js::hypot(&[px - cx, pz - cz]);
-        density(distance, py) * covered(vox(0.5).max(distance))
+        density(distance, py) * covered(distance)
     }))));
     near.far = Some(Far::of(fx(FINE), far));
     near
