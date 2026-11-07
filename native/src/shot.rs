@@ -2,7 +2,7 @@
 
 use std::time::Instant;
 
-use eframe::egui_wgpu::wgpu;
+use egui_wgpu::wgpu;
 
 use crate::compositor::{self, Compositor, View};
 use crate::renderer::Frame;

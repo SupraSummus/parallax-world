@@ -1,7 +1,8 @@
 //! Spike of a native frontend: a world of worlds/ (the valley, or --world)
 //! generated in tiles, those in view first (world.rs), the renderer picking
 //! the chunks in view (renderer.rs), worker threads baking them with the
-//! baker in bake/, sharing the tiles, and wgpu drawing them in an egui window.
+//! baker in bake/, sharing the tiles, and wgpu drawing them in an egui window
+//! (window.rs).
 //!
 //! parallax-native [--world NAME] [--threads N] [--seed S] [--view QUERY] [--leak DEG] [--all-chunks] [--shot out.png [--size WxH] [--seams] [--colour voxels|layers|chunks] | --bench] [--walk D] [--stroll S [--on-ground]] [--spin]
 //! parallax-native [--world NAME] [--seed S] --check-requests frame.bin
@@ -14,6 +15,7 @@
 //! frames after, and the GPU drawing the last. --walk D moves the camera
 //! D units along the view after the first frame, and does the same there. --stroll S then flies on for S seconds
 //! (walks, --on-ground) as the window would, a frame every 60th, and times each frame's parts.
+//! When the window panics or loses its GPU device, it says what it showed as these arguments.
 //! --leak sets how far hidden geometry may show between slices (renderer.rs);
 //! --all-chunks bakes every chunk in view, covered or not, as the panel's
 //! switch does.
@@ -31,6 +33,7 @@ mod occlusion;
 mod renderer;
 mod shot;
 mod view;
+mod window;
 mod world;
 
 use std::collections::HashSet;
@@ -39,11 +42,9 @@ use std::time::Instant;
 
 use bake::Baker;
 use bake::walk::{COLLISION_LEVEL, Ground, WalkInput, Walker};
-use eframe::egui;
-use eframe::egui_wgpu;
 
 use bakery::Bakery;
-use compositor::{Colours, Compositor};
+use compositor::Colours;
 use dump::Dump;
 use renderer::Renderer;
 use view::{Vec3, focal_length, view_basis};
@@ -71,10 +72,22 @@ struct App {
     walker: Option<Walker>,
     /** By material id, whether a walking body goes through it (KindDef::walk_through). */
     walk_through: Vec<bool>,
+    /** The world, as --view gives it: `seed=…` and `&world=…` if given. */
+    world_query: String,
+    /** The frame the ui drew last, for the window to draw (window::Content). */
+    picture: Option<(Arc<renderer::Frame>, compositor::View, egui::Rect)>,
 }
 
-impl eframe::App for App {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+impl window::Content for App {
+    fn picture(&mut self) -> Option<(Arc<renderer::Frame>, compositor::View, egui::Rect)> {
+        self.picture.take()
+    }
+
+    fn describe(&self) -> String {
+        last_frame()
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui) {
         let start = Instant::now();
         egui::Panel::left("panel").show(ui, |ui| {
             ui.heading("Parallax (native spike)");
@@ -177,8 +190,10 @@ impl eframe::App for App {
                 seams: self.seams,
                 colours: self.colours,
             };
-            let callback = compositor::Callback { frame: Arc::new(frame), view, rect };
-            ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, callback));
+            let pixels = ui.ctx().pixels_per_point();
+            self.remember([rect.width() * pixels, rect.height() * pixels]);
+            self.picture = Some((Arc::new(frame), view, rect));
+            ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, compositor::Shown));
             // While moving, the view changes; until all is made and baked, tiles and chunks keep arriving, often enough for a frame now and then.
             // A walking body moves on while it falls or its eye catches up with a step.
             let walking = self.walker.is_some_and(|w| !w.settled());
@@ -189,6 +204,35 @@ impl eframe::App for App {
             }
         });
         self.frame_ms = start.elapsed().as_secs_f64() * 1000.0;
+    }
+}
+
+/** The last frame, as the arguments that draw it (--shot, --bench) and its stats: for a report, should the window panic or lose its GPU device. */
+static LAST_FRAME: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
+fn last_frame() -> String {
+    LAST_FRAME.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+impl App {
+    fn remember(&self, size: [f32; 2]) {
+        let ([x, y, z], r) = (self.camera, &self.renderer);
+        let mut frame = format!(
+            "--view '{}&camera={x},{y},{z}&look={},{}&fov={}&distance={:.0}&leak={}&pillars={}' --size {:.0}x{:.0}",
+            self.world_query,
+            self.yaw,
+            self.pitch,
+            self.fov,
+            r.render_distance,
+            r.max_leak,
+            u8::from(r.pillars),
+            size[0],
+            size[1],
+        );
+        if !r.skip_covered {
+            frame += " --all-chunks";
+        }
+        *LAST_FRAME.lock().unwrap_or_else(|e| e.into_inner()) = format!("{frame}\n{}", self.stats);
     }
 }
 
@@ -397,7 +441,7 @@ fn parse_view_query(query: &str) -> ViewQuery {
     }
 }
 
-fn main() -> eframe::Result {
+fn main() {
     let args: Vec<String> = std::env::args().collect();
     let flag = |name: &str| args.iter().any(|a| a == name);
     let value = |name: &str| args.iter().position(|a| a == name).map(|i| args[i + 1].as_str());
@@ -411,7 +455,7 @@ fn main() -> eframe::Result {
     });
     if let Some(v) = value("--check-requests") {
         check_requests(&dump::read(&std::fs::read(v).expect("dump")), make, seed, threads);
-        return Ok(());
+        return;
     }
     let size = value("--size").map_or(SHOT, |v| {
         let size: Vec<f64> = v.split('x').map(|v| v.parse().expect("--size WxH")).collect();
@@ -493,32 +537,9 @@ fn main() -> eframe::Result {
             shot::save(&frame, &view, v);
             println!("saved {v}");
         }
-        return Ok(());
+        return;
     }
     let spin = flag("--spin").then(|| (Instant::now(), 0));
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([1580.0, 800.0]),
-        wgpu_options: egui_wgpu::WgpuConfiguration {
-            wgpu_setup: egui_wgpu::WgpuSetup::CreateNew(egui_wgpu::WgpuSetupCreateNew {
-                device_descriptor: Arc::new(|adapter| eframe::wgpu::DeviceDescriptor {
-                    required_limits: compositor::limits(adapter),
-                    required_features: compositor::FEATURES,
-                    ..Default::default()
-                }),
-                instance_descriptor: eframe::wgpu::InstanceDescriptor {
-                    backends: compositor::BACKENDS,
-                    ..eframe::wgpu::InstanceDescriptor::new_without_display_handle()
-                },
-                ..egui_wgpu::WgpuSetupCreateNew::without_display_handle()
-            }),
-            surface: egui_wgpu::SurfaceConfig {
-                present_mode: eframe::wgpu::PresentMode::AutoNoVsync,
-                ..egui_wgpu::SurfaceConfig::HIGH_THROUGHPUT
-            },
-            ..Default::default()
-        },
-        ..Default::default()
-    };
     let app = App {
         world,
         renderer,
@@ -534,17 +555,15 @@ fn main() -> eframe::Result {
         spin,
         walker: None,
         walk_through: materials_of(&shown.generator).iter().map(|m| m.walk_through).collect(),
+        world_query: format!("seed={seed}{}", world_name.map(|w| format!("&world={w}")).unwrap_or_default()),
+        picture: None,
     };
-    eframe::run_native(
-        "Parallax",
-        options,
-        Box::new(move |cc| {
-            let render_state = cc.wgpu_render_state.as_ref().expect("wgpu");
-            let compositor = Compositor::new(&render_state.device, render_state.target_format);
-            render_state.renderer.write().callback_resources.insert(compositor);
-            Ok(Box::new(app))
-        }),
-    )
+    let panic = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        eprintln!("The last frame:\n{}", last_frame());
+        panic(info);
+    }));
+    window::run("Parallax", [1580.0, 800.0], app);
 }
 
 fn num_cpus() -> usize {

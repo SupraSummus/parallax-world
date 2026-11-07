@@ -35,9 +35,10 @@ Numbers are for the forest at 1280×800, as measured when written.
   drawing those that show most of the rest.
   The first phase reads every cluster only to find those that showed;
   a list of them, kept from the last frame, would spare that.
-  A lost GPU device (a hang the driver resets, or memory running out)
-  ends it with a panic in egui-wgpu, which makes its device once:
-  to recover in the same window, it would need a winit loop of its own.
+  Walking in the window for minutes, a frame sometimes takes seconds
+  until the driver resets the GPU (seen on Intel UHD with Mesa);
+  the window then makes its device again (`window.rs`).
+  Why is open: the same views and paths, drawn headless, take milliseconds.
   `native/` is not built in CI.
 - **TS and Rust still say much the same twice.**
   The tiles around the camera (`world.ts`) are `native/src/world.rs`,

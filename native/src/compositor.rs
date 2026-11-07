@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::ops::Range;
 
 use bake::slicing::half_layer;
-use eframe::egui_wgpu::{self, wgpu};
+use egui_wgpu::wgpu;
 
 use crate::renderer::{Chunk, Frame};
 use crate::view::{Vec3, to_local, view_basis};
@@ -820,35 +820,12 @@ impl View {
     }
 }
 
-/** A frame for egui's render pass. */
-pub struct Callback {
-    pub frame: std::sync::Arc<Frame>,
-    pub view: View,
-    pub rect: egui::Rect,
-}
+/** egui's paint callback for where the window shows the picture drawn last. */
+pub struct Shown;
 
-impl egui_wgpu::CallbackTrait for Callback {
-    fn prepare(
-        &self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        screen: &egui_wgpu::ScreenDescriptor,
-        encoder: &mut wgpu::CommandEncoder,
-        resources: &mut egui_wgpu::CallbackResources,
-    ) -> Vec<wgpu::CommandBuffer> {
-        let compositor: &mut Compositor = resources.get_mut().expect("compositor");
-        // The viewport egui shows the picture on.
-        let viewport = egui::epaint::ViewportInPixels::from_points(&self.rect, screen.pixels_per_point, screen.size_in_pixels);
-        let view = View { pixels: [viewport.width_px as u32, viewport.height_px as u32], ..self.view };
-        compositor.prepare(device, queue, encoder, &self.frame, &view);
-        compositor.render(encoder);
-        Vec::new()
-    }
-
+impl egui_wgpu::CallbackTrait for Shown {
     fn paint(&self, _info: egui::PaintCallbackInfo, pass: &mut wgpu::RenderPass<'static>, resources: &egui_wgpu::CallbackResources) {
         let compositor: &Compositor = resources.get().expect("compositor");
         compositor.show(pass);
     }
 }
-
-use eframe::egui;
