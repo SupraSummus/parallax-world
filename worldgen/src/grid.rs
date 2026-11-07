@@ -4,6 +4,7 @@
 
 use std::collections::BTreeMap;
 
+use bake::light::{FaceLight, LIGHT_WORDS, light_words};
 use bake::{Faces, face_words};
 
 // The baker's grids, as worlds hand them over (worlds/src/wasm.rs), and the voxel's faces.
@@ -50,6 +51,7 @@ pub fn is_site(x: i64, y: i64, z: i64) -> bool {
  * material on each of its faces (bake's Grid): its site's in `cells`,
  * unless `faces` gives them.
  */
+#[derive(Clone)]
 pub struct VoxelGrid {
     pub min: [i64; 3],
     pub n: [i64; 3],
@@ -60,6 +62,15 @@ pub struct VoxelGrid {
     pub cells: Vec<u8>,
     /** By index in `cells`, the faces' materials of the sites whose faces are not all of their material there. */
     pub faces: BTreeMap<usize, Faces>,
+    /**
+     * What glows at sites: each glowing shape's, shared between the sites
+     * around its centre (light::around), whether or not they keep voxels,
+     * with its material and its mean shadow (a quarter of its area,
+     * lattice units²).
+     */
+    pub glows: Vec<([i64; 3], u8, f32)>,
+    /** By index in `cells`, the light from the faces of the sites lit (light.rs). */
+    pub light: BTreeMap<usize, FaceLight>,
 }
 
 impl VoxelGrid {
@@ -78,6 +89,8 @@ impl VoxelGrid {
             bricks: vec![-1; (bx * by * bz) as usize],
             cells: Vec::new(),
             faces: BTreeMap::new(),
+            glows: Vec::new(),
+            light: BTreeMap::new(),
         }
     }
 
@@ -174,7 +187,32 @@ impl VoxelGrid {
             bricks: self.bricks,
             cells: self.cells,
             faces: self.faces.iter().flat_map(|(i, faces)| face_words(*i, faces)).collect(),
+            light: self.light.iter().flat_map(|(i, light)| light_words(*i, light)).collect(),
         }
+    }
+
+    /** Sets the light from the faces of the voxel at (x, y, z); if empty, nothing. */
+    pub fn set_light(&mut self, x: i64, y: i64, z: i64, light: FaceLight) {
+        if let Some(Ok(i)) = self.slot(x, y, z)
+            && self.cells[i] != 0
+        {
+            self.light.insert(i, light);
+        }
+    }
+
+    /** The sites with voxels. */
+    pub fn sites(&self) -> impl Iterator<Item = [i64; 3]> + '_ {
+        let [bx, by] = [self.bx, self.by];
+        self.bricks
+            .iter()
+            .enumerate()
+            .filter(|(_, at)| **at >= 0)
+            .flat_map(move |(b, _)| {
+                let b = b as i64;
+                let corner = [b % bx, b / bx % by, b / (bx * by)].map(|c| c * BRICK);
+                (0..BRICK * BRICK * BRICK).map(move |i| [0, 1, 2].map(|d| self.min[d] + corner[d] + (i >> (3 * d) & 7)))
+            })
+            .filter(|&[x, y, z]| self.get(x, y, z) != 0)
     }
 }
 
@@ -186,6 +224,7 @@ impl VoxelGrid {
 pub fn compose(b: &Box3, parts: &[&Grid]) -> Grid {
     let VoxelGrid { min, n, bx, by, mut bricks, mut cells, .. } = VoxelGrid::new(b);
     let mut faces: Vec<[u32; FACE_WORDS]> = Vec::new();
+    let mut light: Vec<[u32; LIGHT_WORDS]> = Vec::new();
     let bz = (n[2] + BRICK - 1) / BRICK;
     for part in parts {
         let offset: [i64; 3] = std::array::from_fn(|i| {
@@ -215,9 +254,16 @@ pub fn compose(b: &Box3, parts: &[&Grid]) -> Grid {
                 faces.push([(to + i as usize % BRICK_SITES) as u32, words[0], words[1], words[2]]);
             }
         }
+        for site in part.light.as_chunks::<LIGHT_WORDS>().0 {
+            if let Some(to) = moved[site[0] as usize / BRICK_SITES] {
+                light.push(std::array::from_fn(|w| if w == 0 { (to + site[0] as usize % BRICK_SITES) as u32 } else { site[w] }));
+            }
+        }
     }
     faces.sort_unstable_by_key(|site| site[0]);
-    Grid { min: min.map(|v| v as i32), n: n.map(|v| v as i32), bricks, cells, faces: faces.concat() }
+    light.sort_unstable_by_key(|site| site[0]);
+    let (min, n) = (min.map(|v| v as i32), n.map(|v| v as i32));
+    Grid { min, n, bricks, cells, faces: faces.concat(), light: light.concat() }
 }
 
 #[cfg(test)]

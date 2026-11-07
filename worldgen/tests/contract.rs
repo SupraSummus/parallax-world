@@ -14,11 +14,11 @@ use worldgen::grid::Box3;
 use worldgen::plan::Plan;
 
 static KINDS: &[KindDef] = &[
-    KindDef { name: "fog", kind_type: 8, colors: &["#cccccc"], walk_through: false },
-    KindDef { name: "rock", kind_type: 3, colors: &["#777777"], walk_through: false },
-    KindDef { name: "wall", kind_type: 10, colors: &["#eeeeee"], walk_through: false },
-    KindDef { name: "wood", kind_type: 4, colors: &["#664422"], walk_through: false },
-    KindDef { name: "grass", kind_type: 1, colors: &["#44aa44"], walk_through: false },
+    KindDef { name: "fog", kind_type: 8, colors: &["#cccccc"], walk_through: false, glows: false },
+    KindDef { name: "rock", kind_type: 3, colors: &["#777777"], walk_through: false, glows: false },
+    KindDef { name: "wall", kind_type: 10, colors: &["#eeeeee"], walk_through: false, glows: false },
+    KindDef { name: "wood", kind_type: 4, colors: &["#664422"], walk_through: false, glows: false },
+    KindDef { name: "grass", kind_type: 1, colors: &["#44aa44"], walk_through: false, glows: false },
 ];
 const FOG: u8 = 0;
 const ROCK: u8 = 1;

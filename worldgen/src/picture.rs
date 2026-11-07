@@ -123,6 +123,8 @@ pub struct Picture {
     pub material: Vec<u8>,
     /** How far along its ray it was hit, lattice units (looking down, from just above the heights); infinite for none. */
     pub depth: Vec<f32>,
+    /** The site of the voxel hit, in the level's units; any where none was. */
+    pub sites: Vec<[i64; 3]>,
     /** How many tiles were generated, and the time it took, and that of the rays. */
     pub tiles: usize,
     pub generating: Duration,
@@ -470,6 +472,7 @@ fn picture_of_tiles(camera: &Camera, tiles: &mut Tiles, colours: &[u32], make: &
         rgb: vec![0; 3 * pixels],
         material: vec![0; pixels],
         depth: vec![f32::INFINITY; pixels],
+        sites: vec![[0; 3]; pixels],
         tiles: 0,
         generating: Duration::ZERO,
         casting: Duration::ZERO,
@@ -542,6 +545,7 @@ fn picture_of_tiles(camera: &Camera, tiles: &mut Tiles, colours: &[u32], make: &
                     let distance = ray.t * s;
                     let f = (fog * (distance / camera.far).powi(2)).min(fog);
                     picture.set(ray.pixel, id, distance, [0, 1, 2].map(|i| lit[i] + (HORIZON[i] - lit[i]) * f));
+                    picture.sites[ray.pixel] = ray.site;
                 }
             }
         }
@@ -653,6 +657,7 @@ mod tests {
             rgb: rgb.clone(),
             material: vec![0; width * height],
             depth: vec![0.0; width * height],
+            sites: vec![[0; 3]; width * height],
             tiles: 0,
             generating: Duration::ZERO,
             casting: Duration::ZERO,
@@ -699,7 +704,7 @@ mod tests {
     /** A ball of radius 40 at the origin, on the corner of four tiles. */
     fn a_ball() -> Generator {
         Generator {
-            kinds: vec![KindDef { name: "red", kind_type: 1, colors: &["#c04030"], walk_through: false }],
+            kinds: vec![KindDef { name: "red", kind_type: 1, colors: &["#c04030"], walk_through: false, glows: false }],
             seed: 1,
             layers: vec![Layer::Population(Population {
                 name: "ball",

@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 
+use crate::light::{FaceLight, LIGHT_WORDS, decode};
 use crate::tables::VOXEL_FACES;
 
 /** Kinds of voxel faces. */
@@ -32,6 +33,12 @@ impl Lattice {
     /** The kind (of VOXEL_FACES) of a voxel's face towards a camera looking along F: −F's. */
     pub fn front(&self) -> usize {
         VOXEL_FACES.iter().position(|&n| n == self.f.map(|v| -v)).expect("−F is a face")
+    }
+
+    /** Lattice coordinates (a, b, c) in the world: (a·R + c·F) / 2 + b·U. */
+    pub fn world(&self, [a, b, c]: [i32; 3]) -> [i32; 3] {
+        let Lattice { r, u, f } = self;
+        std::array::from_fn(|d| (a * r[d] + c * f[d]) / 2 + b * u[d])
     }
 }
 
@@ -87,13 +94,36 @@ pub struct Grid {
     pub cells: Vec<u8>,
     /** The sites whose faces are not all of their material in `cells`, by index in `cells`: FACE_WORDS each (face_words). */
     pub faces: Vec<u32>,
+    /** If the world is lit, the light on its surface sites' faces, by index in `cells`: LIGHT_WORDS each (light_words). */
+    pub light: Vec<u32>,
+}
+
+/** The words after site index `i` in `words`, `per` words a site, sorted by index; None if it has none. */
+fn words_of(words: &[u32], per: usize, i: usize) -> Option<&[u32]> {
+    let (mut lo, mut hi) = (0, words.len() / per);
+    while lo < hi {
+        let mid = (lo + hi) / 2;
+        match (words[mid * per] as usize).cmp(&i) {
+            std::cmp::Ordering::Less => lo = mid + 1,
+            std::cmp::Ordering::Greater => hi = mid,
+            std::cmp::Ordering::Equal => return Some(&words[mid * per + 1..(mid + 1) * per]),
+        }
+    }
+    None
 }
 
 impl Grid {
     /** A grid of the box with `used` bricks of sites; `bricks` and `cells` to be written. */
     pub fn new(min: [i32; 3], n: [i32; 3], used: usize) -> Grid {
         let count = n.map(|v| (v.max(0) + BRICK - 1) / BRICK);
-        Grid { min, n, bricks: vec![-1; (count[0] * count[1] * count[2]) as usize], cells: vec![0; used * BRICK_SITES], faces: Vec::new() }
+        Grid {
+            min,
+            n,
+            bricks: vec![-1; (count[0] * count[1] * count[2]) as usize],
+            cells: vec![0; used * BRICK_SITES],
+            faces: Vec::new(),
+            light: Vec::new(),
+        }
     }
 
     /** Site (x, y, z)'s index in `cells`; None if its brick is empty or it is outside. */
@@ -127,20 +157,14 @@ impl Grid {
 
     /** The faces' materials of the site at index `i` of `cells`, if they differ. */
     fn faces_at(&self, i: usize) -> Option<Faces> {
-        let sites = self.faces.len() / FACE_WORDS;
-        let (mut lo, mut hi) = (0, sites);
-        while lo < hi {
-            let mid = (lo + hi) / 2;
-            match (self.faces[mid * FACE_WORDS] as usize).cmp(&i) {
-                std::cmp::Ordering::Less => lo = mid + 1,
-                std::cmp::Ordering::Greater => hi = mid,
-                std::cmp::Ordering::Equal => {
-                    let words = &self.faces[mid * FACE_WORDS + 1..(mid + 1) * FACE_WORDS];
-                    return Some(std::array::from_fn(|k| words[k / 4].to_le_bytes()[k % 4]));
-                }
-            }
-        }
-        None
+        let words = words_of(&self.faces, FACE_WORDS, i)?;
+        Some(std::array::from_fn(|k| words[k / 4].to_le_bytes()[k % 4]))
+    }
+
+    /** The light on the faces of the voxel at (x, y, z), by kind, if it is lit. */
+    pub fn light(&self, x: i32, y: i32, z: i32) -> Option<FaceLight> {
+        let words = words_of(&self.light, LIGHT_WORDS, self.index(x, y, z)?)?;
+        Some(std::array::from_fn(|k| decode(words[k])))
     }
 }
 
@@ -207,6 +231,22 @@ impl Tiles {
         let grid = self.grid(self.tile(x, z))?;
         let holds = |v: i32, d: usize| (grid.min[d]..grid.min[d] + grid.n[d]).contains(&v);
         (holds(x, 0) && holds(z, 2)).then(|| grid.get(x, y, z))
+    }
+
+    /**
+     * The light from the faces of the voxel at site (x, y, z), if its
+     * tile's grid is lit (else None): its own, or if no light reached it
+     * (buried, shown where a slice cuts it), its lit neighbours' mean, or
+     * none.
+     */
+    pub fn light(&self, x: i32, y: i32, z: i32) -> Option<FaceLight> {
+        let grid = self.grid(self.tile(x, z)).filter(|grid| !grid.light.is_empty())?;
+        grid.light(x, y, z).or_else(|| {
+            let around: Vec<FaceLight> =
+                VOXEL_FACES.iter().filter_map(|n| self.grid(self.tile(x + n[0], z + n[2]))?.light(x + n[0], y + n[1], z + n[2])).collect();
+            let mean = |f: usize, c: usize| around.iter().map(|l| l[f][c]).sum::<f32>() / around.len().max(1) as f32;
+            Some(std::array::from_fn(|f| std::array::from_fn(|c| mean(f, c))))
+        })
     }
 
     /** Whether tile (i, k) has a grid. */
@@ -290,10 +330,8 @@ impl<'a> Reader<'a> {
     #[inline]
     pub fn row(&self, a: i32, b: i32, c: i32, count: i32, mut visit: impl FnMut(i32, u8)) {
         debug_assert!(((a ^ c) | (b ^ c)) & 1 == 0, "not a site");
-        let Lattice { r, u, f } = self.lattice;
-        let mut x = (a * r[0] + c * f[0]) / 2 + b * u[0];
-        let mut y = (a * r[1] + c * f[1]) / 2 + b * u[1];
-        let mut z = (a * r[2] + c * f[2]) / 2 + b * u[2];
+        let r = self.lattice.r;
+        let [mut x, mut y, mut z] = self.lattice.world([a, b, c]);
         let mut tile = self.tiles.tile(x, z);
         let mut grid = self.tiles.grid(tile);
         for i in 0..count {

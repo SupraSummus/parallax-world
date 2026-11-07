@@ -7,7 +7,8 @@
 //! GRID_REACH of the camera of each level it reads, so that turning
 //! finds them made. Tiles far from the camera are dropped. A tile never
 //! changes, so a chunk baked once all the tiles it reads are in stays right
-//! whatever comes after (bake's Tiles).
+//! whatever comes after (bake's Tiles). Given a brightness, each tile is
+//! lit as it is made (worldgen's Light, one on each thread).
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -18,6 +19,7 @@ use bake::slicing::{GRID_LEVELS, GRID_REACH};
 use bake::{Grid, LayerIndex, Tiles};
 use worldgen::generator::{Generator, generate};
 use worldgen::grid::{Box3, compose};
+use worldgen::light::{Brightness, Light};
 
 use crate::view::Vec3;
 
@@ -95,15 +97,21 @@ pub struct World {
 thread_local! {
     /** The world of the seed last generated on this thread. */
     static GENERATOR: RefCell<Option<(u64, Generator)>> = const { RefCell::new(None) };
+    /** Its light, if lit. */
+    static LIGHT: RefCell<Option<Light>> = const { RefCell::new(None) };
 }
 
-fn generate_tile(make: Make, seed: u64, level: usize, b: &Box3) -> Grid {
-    GENERATOR.with_borrow_mut(|g| {
+fn generate_tile(make: Make, seed: u64, level: usize, b: &Box3, brightness: Option<Brightness>) -> Grid {
+    let mut grid = GENERATOR.with_borrow_mut(|g| {
         if g.as_ref().is_none_or(|(s, _)| *s != seed) {
             *g = Some((seed, make(seed).generator));
         }
-        generate(&g.as_ref().expect("made").1, b, level as u32).into_grid()
-    })
+        generate(&g.as_ref().expect("made").1, b, level as u32)
+    });
+    if let Some(brightness) = brightness {
+        LIGHT.with_borrow_mut(|light| light.get_or_insert_with(|| Light::new(make(seed), brightness)).light_tile(level as u32, &mut grid));
+    }
+    grid.into_grid()
 }
 
 /** The box of tile `id` of `level`, of a world of `heights`. */
@@ -123,7 +131,7 @@ fn distance(level: usize, camera: Vec3, (i, k): TileId) -> f64 {
     off(camera[0], i).hypot(off(camera[2], k))
 }
 
-fn work(make: Make, seed: u64, heights: &Heights, queue: &(Mutex<Queue>, Condvar), send: &Sender<Made>) {
+fn work(make: Make, seed: u64, brightness: Option<Brightness>, heights: &Heights, queue: &(Mutex<Queue>, Condvar), send: &Sender<Made>) {
     loop {
         let (level, id) = {
             let mut q = queue.0.lock().expect("queue");
@@ -135,7 +143,7 @@ fn work(make: Make, seed: u64, heights: &Heights, queue: &(Mutex<Queue>, Condvar
                 q = queue.1.wait(q).expect("queue");
             }
         };
-        let grid = generate_tile(make, seed, level, &tile_box(heights, level, id));
+        let grid = generate_tile(make, seed, level, &tile_box(heights, level, id), brightness);
         let index = LayerIndex::new(&grid);
         if send.send((level, id, Tile { grid: Arc::new(grid), index })).is_err() {
             return;
@@ -144,15 +152,15 @@ fn work(make: Make, seed: u64, heights: &Heights, queue: &(Mutex<Queue>, Condvar
 }
 
 impl World {
-    /** The world `make` makes of `seed`, generated and indexed on `threads` threads. */
-    pub fn new(make: Make, seed: u64, threads: usize) -> World {
+    /** The world `make` makes of `seed`, generated, lit if given a brightness, and indexed on `threads` threads. */
+    pub fn new(make: Make, seed: u64, brightness: Option<Brightness>, threads: usize) -> World {
         let world = make(seed);
         let heights = heights(&world);
         let (send, done) = channel();
         let queue: Arc<(Mutex<Queue>, Condvar)> = Arc::default();
         for _ in 0..threads {
             let (queue, send) = (queue.clone(), send.clone());
-            std::thread::spawn(move || work(make, seed, &heights, &queue, &send));
+            std::thread::spawn(move || work(make, seed, brightness, &heights, &queue, &send));
         }
         World { tiles: (0..GRID_LEVELS).map(|_| HashMap::new()).collect(), queue, done, early: Vec::new() }
     }

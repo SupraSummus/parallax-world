@@ -13,6 +13,7 @@ use std::rc::Rc;
 use worldgen::frame::{Frame, Part, U, V, W, back, walls};
 use worldgen::generator::{
     ANY_SIZE, Anchors, Child, Children, Far, Field, FieldValues, Fill, Kind, Layer, Node, Op, Population, SOLID, Shape, Shapes, Span,
+    bounds_of_shapes,
 };
 use worldgen::grid::Box3;
 use worldgen::kinds;
@@ -53,7 +54,7 @@ kinds! {
     counter: 4, ["#5c3e26"];
     goods: 6, ["#c8483a", "#e0b040", "#4a7ab0", "#5a9a4a", "#e8e0d0"];
     iron: 3, ["#2b2d30"];
-    lamp: 6, ["#fff3c4"];
+    lamp: 6, ["#fff3c4"], glows;
     water: 13, ["#3f7fa8", "#4a8ab2"], walk_through;
 }
 
@@ -539,7 +540,8 @@ fn town(t: Town) -> Node {
                 for r in (0..t.rows).filter(|r| Some(*r) != t.square_row()) {
                     let lamps = lamps(&t, r);
                     if lamps.bounds.is_some_and(|b| b.overlaps(units)) {
-                        children.push(child(format!("lamps {r}"), m(1.0), lamps));
+                        // At every level: too small to see from afar, they still light the street.
+                        children.push(child(format!("lamps {r}"), ANY_SIZE, lamps));
                     }
                 }
             }
@@ -1095,7 +1097,9 @@ fn lamps(t: &Town, r: i64) -> Node {
         z += m(16.0);
         side = -side;
     }
-    Node::of(shapes)
+    // Bounded, so that it is drawn where it reaches.
+    let bounds = (!shapes.is_empty()).then(|| bounds_of_shapes(shapes.iter().map(|s| &s.bounds)));
+    Node { bounds, ..Node::of(shapes) }
 }
 
 /** A fountain in the middle of the square: a basin, a column and a bowl, water in both. */
