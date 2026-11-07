@@ -11,9 +11,9 @@
 
 use std::time::Instant;
 
-use lab::experiment::OUT;
+use lab::OUT;
 use lab::geometry::Geometry;
-use lab::grammar::{Grammar, Leaves};
+use lab::grammar::Grammar;
 use lab::image::write_grid;
 use lab::masked::{Model, Options};
 use lab::scenes::{self, AIR, LABELS3, label3_rgb};
@@ -100,7 +100,7 @@ fn scene(name: &str) -> Scene {
                     .iter()
                     .map(|s| {
                         let world = worlds::valley::valley(*s);
-                        let (t, _) = lab::valley::land(*s);
+                        let t = lab::valley::towns(*s);
                         let unit = worldgen::units::m(1.0);
                         let town = t.near(0).expect("a town");
                         let h = hash64(*s, 0, 0, 6);
@@ -281,11 +281,10 @@ fn run(s: &Scene) {
     rows.push(("masked model".into(), samples.clone()));
     if s.flat {
         let images: Vec<_> = s.train.iter().map(|v| v.to_image()).collect();
-        let mut grammar = Grammar::learn(&images, n, 32, 1, true);
+        let mut grammar = Grammar::learn(&images, n, 32, 1);
         (grammar.shared, grammar.matching, grammar.snap) = (true, true, lab::grammar::SNAP);
         let side = images[0].w;
-        let drawn: Vec<Vol> =
-            (0..SAMPLES).map(|seed| Vol::of_image(&grammar.sample(seed, (0, 0, side, side), Leaves::Pixels).image)).collect();
+        let drawn: Vec<Vol> = (0..SAMPLES).map(|seed| Vol::of_image(&grammar.sample(seed, (0, 0, side, side)).image)).collect();
         rows.push(("split grammar".into(), drawn));
     }
     report(&rows, n, s.flat);

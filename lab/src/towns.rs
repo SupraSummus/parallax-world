@@ -46,7 +46,7 @@ pub const GROUND: u16 = 6;
 pub const FIELDS: u16 = 7;
 
 /** A valley class's label. */
-pub fn label_of_class(class: u16) -> u16 {
+fn label_of_class(class: u16) -> u16 {
     match class {
         10 => 0,
         11 => 1,
@@ -116,7 +116,7 @@ pub fn held_out(towns: &[&TownCrop]) -> Vec<Image> {
 pub fn gather(seeds: &[u64], ns: std::ops::RangeInclusive<i64>, threads: usize, dir: &str) -> Vec<TownCrop> {
     let mut wanted = Vec::new();
     for &seed in seeds {
-        let (towns, _) = valley::land(seed);
+        let towns = valley::towns(seed);
         for n in ns.clone() {
             if let Some(t) = towns.near(n * SPACING)
                 && !wanted.iter().any(|w: &(u64, i64, i64, i64)| (w.0, w.3) == (seed, t.z / m(1.0)))
@@ -138,8 +138,8 @@ pub fn gather(seeds: &[u64], ns: std::ops::RangeInclusive<i64>, threads: usize, 
                         let side = CROP + 2 * MARGIN;
                         let half = (side / 2) as i64;
                         let area = Area { level: 3, x0: x - half, z0: z - half, nx: side, nz: side };
-                        let v = valley::valley(seed, area, 1, &format!("{dir}/town-{seed}-{n}.bin"));
-                        let labels = Image::new(side, side, v.class.data.iter().map(|c| label_of_class(*c)).collect());
+                        let v = valley::valley(seed, area, &format!("{dir}/town-{seed}-{n}.bin"));
+                        let labels = Image::new(side, side, v.data.iter().map(|c| label_of_class(*c)).collect());
                         out.push((i, TownCrop { seed, n, labels }));
                     }
                     out

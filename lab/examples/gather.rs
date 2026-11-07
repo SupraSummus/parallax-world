@@ -4,7 +4,7 @@
 
 use std::time::Instant;
 
-use lab::experiment::OUT;
+use lab::OUT;
 use lab::towns::{self, CROP, label_rgb};
 
 fn main() {

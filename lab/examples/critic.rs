@@ -13,10 +13,10 @@
 
 use std::time::Instant;
 
+use lab::OUT;
 use lab::critic::{self, Reference, SCALES, Verdict};
 use lab::exemplar::{self, Exemplars};
-use lab::experiment::OUT;
-use lab::grammar::{Grammar, Leaves};
+use lab::grammar::Grammar;
 use lab::image::{Image, write_grid};
 use lab::masked::{self, Model};
 use lab::profile::{self, Profile};
@@ -87,9 +87,9 @@ fn main() {
     ];
 
     let start = Instant::now();
-    let mut grammar = Grammar::learn(&train, n, 32, 1, true);
+    let mut grammar = Grammar::learn(&train, n, 32, 1);
     (grammar.shared, grammar.matching, grammar.snap) = (true, true, lab::grammar::SNAP);
-    rows.push(("split grammar".into(), (0..SAMPLES).map(|s| grammar.sample(s, (0, 0, w, h), Leaves::Pixels).image).collect()));
+    rows.push(("split grammar".into(), (0..SAMPLES).map(|s| grammar.sample(s, (0, 0, w, h)).image).collect()));
     eprintln!("grammar in {:.0} s", start.elapsed().as_secs_f64());
 
     let start = Instant::now();

@@ -1,15 +1,16 @@
 //! Shared splits: do a split grammar's cross streets cross once the two
-//! sides of a cut share their strips (grammar.rs)? The towns of geometry's
-//! data and split, against W1's grammar (each side on its own, or both on
-//! one seed). Prints Markdown tables, writes pictures to out/.
+//! sides of a cut share their strips (grammar.rs)? Towns of several seeds
+//! (towns.rs), held out by seed, against the plain grammar (each side on
+//! its own, or both on one seed). Prints Markdown tables, writes pictures
+//! to out/.
 //!
 //! cargo run --release --example shared
 
 use std::time::Instant;
 
-use lab::experiment::OUT;
+use lab::OUT;
 use lab::geometry::{Crossings, Geometry};
-use lab::grammar::{Edge, Grammar, Leaves};
+use lab::grammar::{Edge, Grammar};
 use lab::image::Image;
 use lab::stats;
 use lab::towns::{self, CROP, LABELS, ROOF, STREET, TownCrop, label_rgb};
@@ -18,8 +19,8 @@ const TRAIN_SEEDS: u64 = 18;
 const ALL_SEEDS: u64 = 24;
 const SAMPLES: u64 = 24;
 const KINDS: usize = 32;
-/** The variant shown as W2. */
-const W2: usize = 5;
+/** The variant the pictures show: shared splits, snapping 16 m. */
+const SHOWN: usize = 5;
 const DISTANCES: [usize; 4] = [1, 4, 16, 64];
 
 fn main() {
@@ -30,7 +31,7 @@ fn main() {
     println!("{} towns to learn from ({} crops), {} held out; crops of {CROP} m\n", train.len(), shifted.len(), real.len());
 
     let start = Instant::now();
-    let mut grammar = Grammar::learn(&shifted, LABELS.len(), KINDS, 1, true);
+    let mut grammar = Grammar::learn(&shifted, LABELS.len(), KINDS, 1);
     let cuts = grammar.nodes.iter().filter(|nd| nd.cut.is_some()).count();
     let sharing = grammar.nodes.iter().filter(|nd| !nd.shared.is_empty()).count();
     let strips: usize = grammar.nodes.iter().map(|nd| nd.shared.len()).sum();
@@ -46,19 +47,19 @@ fn main() {
     // The variants, each SAMPLES crops of the same seeds.
     // (name, shared, matching, snap, same seed)
     let variants: [(&str, bool, bool, usize, bool); 7] = [
-        ("W1 grammar (sides apart)", false, false, 0, false),
-        ("W1, both sides one seed", false, false, 0, true),
-        ("W2 guides, cuts snap (16 m)", true, false, 16, false),
-        ("W2 guides, rules fit them", true, true, 0, false),
-        ("W2 shared splits: fit, snap 8 m", true, true, 8, false),
-        ("W2 shared splits: fit, snap 16 m", true, true, 16, false),
-        ("W2 shared splits: fit, snap 32 m", true, true, 32, false),
+        ("plain grammar (sides apart)", false, false, 0, false),
+        ("plain, both sides one seed", false, false, 0, true),
+        ("guides, cuts snap (16 m)", true, false, 16, false),
+        ("guides, rules fit them", true, true, 0, false),
+        ("shared splits: fit, snap 8 m", true, true, 8, false),
+        ("shared splits: fit, snap 16 m", true, true, 16, false),
+        ("shared splits: fit, snap 32 m", true, true, 32, false),
     ];
     let mut samples: Vec<(&str, Vec<Image>)> = Vec::new();
     for (name, shared, matching, snap, same_seed) in variants {
         (grammar.shared, grammar.matching, grammar.snap, grammar.same_seed) = (shared, matching, snap, same_seed);
         let start = Instant::now();
-        let drawn: Vec<_> = (0..SAMPLES).map(|s| grammar.sample(s, (0, 0, CROP, CROP), Leaves::Pixels)).collect();
+        let drawn: Vec<_> = (0..SAMPLES).map(|s| grammar.sample(s, (0, 0, CROP, CROP))).collect();
         let k = SAMPLES as f64;
         let mean = |f: &dyn Fn(&lab::grammar::Drawn) -> usize| drawn.iter().map(f).sum::<usize>() as f64 / k;
         println!(
@@ -129,21 +130,19 @@ fn main() {
     let boxes = [(0, 0, 100, 100), (117, 203, 150, 111), (300, 20, 84, 300), (191, 192, 1, 1), (150, 0, 3, 384)];
     let same = (0..4u64)
         .flat_map(|s| boxes.iter().map(move |b| (s, b)))
-        .filter(|(s, (x, y, w, h))| {
-            grammar.sample(*s, (*x, *y, *w, *h), Leaves::Pixels).image == samples[W2].1[*s as usize].crop(*x, *y, *w, *h)
-        })
+        .filter(|(s, (x, y, w, h))| grammar.sample(*s, (*x, *y, *w, *h)).image == samples[SHOWN].1[*s as usize].crop(*x, *y, *w, *h))
         .count();
     println!("\nBoxes alone equal to the same box of the whole crop, shared splits: {same} of {}", 4 * boxes.len());
 
-    // Pictures: real | W1 | W2 crops, three rows; the towns zoomed.
+    // Pictures: real | plain | SHOWN crops, three rows; the towns zoomed.
     let whole = |im: &Image| (CROP, CROP, im.to_rgb(&label_rgb, 1));
     let zoom = |im: &Image| (2 * 256, 2 * 256, im.crop(64, 64, 256, 256).to_rgb(&label_rgb, 2));
     let pick = [0usize, 2, 4];
-    let grid: Vec<Vec<_>> = pick.iter().map(|i| vec![whole(&real[*i]), whole(&samples[0].1[*i]), whole(&samples[W2].1[*i])]).collect();
+    let grid: Vec<Vec<_>> = pick.iter().map(|i| vec![whole(&real[*i]), whole(&samples[0].1[*i]), whole(&samples[SHOWN].1[*i])]).collect();
     lab::image::write_grid(&format!("{OUT}/shared.png"), &grid, 8);
-    let grid: Vec<Vec<_>> = pick.iter().map(|i| vec![zoom(&real[*i]), zoom(&samples[0].1[*i]), zoom(&samples[W2].1[*i])]).collect();
+    let grid: Vec<Vec<_>> = pick.iter().map(|i| vec![zoom(&real[*i]), zoom(&samples[0].1[*i]), zoom(&samples[SHOWN].1[*i])]).collect();
     lab::image::write_grid(&format!("{OUT}/shared-zoom.png"), &grid, 8);
-    let more: Vec<Vec<_>> = (0..3).map(|r| (0..6).map(|c| whole(&samples[W2].1[6 + r * 6 + c])).collect()).collect();
+    let more: Vec<Vec<_>> = (0..3).map(|r| (0..6).map(|c| whole(&samples[SHOWN].1[6 + r * 6 + c])).collect()).collect();
     lab::image::write_grid(&format!("{OUT}/shared-more.png"), &more, 8);
     let parses: Vec<_> = [0, 8, 16].iter().map(|c| (CROP, CROP, parse_picture(&grammar, *c))).collect();
     let zoomed = |rgb: &[u8]| {

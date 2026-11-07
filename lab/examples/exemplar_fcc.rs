@@ -10,8 +10,8 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
+use lab::OUT;
 use lab::exemplar_fcc::{Coord, Exemplars, Options};
-use lab::experiment::OUT;
 use lab::fcc_stats::{picture, report};
 use lab::image::write_grid;
 use lab::masked_fcc::{self, Cells, Model};
