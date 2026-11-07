@@ -319,8 +319,6 @@ Numbers are for the forest at 1280×800, as measured when written.
 - The critic judges flat maps only;
   3D scenes are still scored by pooled statistics (`lab/src/fcc_stats.rs`).
   Its windows as volumes would judge the FCC models too.
-- Drop lab's superseded experiments (WFC rule-sets, templates),
-  their findings kept in `lab/src/lib.rs`: the critic now says which model wins.
 - Join lab's cubic and FCC samplers with one lattice type
   (sites, neighbours, parents): each pair now repeats its box bookkeeping.
 
@@ -349,3 +347,7 @@ Composing generators (section "Composing" of `docs/generators.md`), untried:
 - Solve what a coarse cell decides (a block's lots, a room's furniture)
   with a small search whose boundaries the coarser band fixes:
   constraint solving stays local and needs no backtracking across cells.
+  Lab's WFC sampler did so on squares (`lab/src/synth.rs` at 114c077),
+  in rounds: corners from their four parents, then edges, then insides.
+  On the FCC lattice, a fine site in six coarse cells, two or one
+  would be a corner, an edge or an inside.

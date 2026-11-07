@@ -590,7 +590,7 @@ pub fn villages_flat(train: usize, held: usize) -> (Vec<Vol>, Vec<Vol>) {
 pub fn lattice(name: &str) -> (Vec<Vol>, Vec<Vol>) {
     const BOX: [usize; 3] = [96, 48, 96];
     const TALL: [usize; 3] = [96, 64, 96];
-    let dir = format!("{}/masked_fcc", crate::experiment::OUT);
+    let dir = format!("{}/masked_fcc", crate::OUT);
     let corner = |h: u64, spread: u64| ((h % spread) as i64 - spread as i64 / 2).div_euclid(32) * 32;
     match name {
         "forest" => {
@@ -611,7 +611,7 @@ pub fn lattice(name: &str) -> (Vec<Vol>, Vec<Vol>) {
                     .iter()
                     .map(|s| {
                         let world = worlds::valley::valley(*s);
-                        let (t, _) = valley::land(*s);
+                        let t = valley::towns(*s);
                         let unit = worldgen::units::m(1.0);
                         let town = t.near(0).expect("a town");
                         let h = hash64(*s, 0, 0, 6);

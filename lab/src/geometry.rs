@@ -149,48 +149,6 @@ impl Geometry {
 }
 
 /**
- * How blocky a map is: of the edges between two labels, the share in a
- * straight run of at least `min` edges dividing the same two labels.
- * Rectangles' sides are long runs; a forest's edge is not. Cells of
- * IGNORED are left out, and edges with them, and those between labels not `wanted`.
- */
-pub const IGNORED: u16 = u16::MAX;
-
-pub fn long_edges(image: &Image, min: usize, wanted: &dyn Fn(u16) -> bool) -> f64 {
-    let (w, h) = (image.w, image.h);
-    let (mut edges, mut long) = (0usize, 0usize);
-    // Along x, edges between rows y and y + 1; along y, between columns x and x + 1.
-    let mut count = |n: usize, pair: &dyn Fn(usize) -> Option<(u16, u16)>| {
-        let mut i = 0;
-        while i < n {
-            let Some(p) = pair(i) else {
-                i += 1;
-                continue;
-            };
-            let start = i;
-            while i < n && pair(i) == Some(p) {
-                i += 1;
-            }
-            edges += i - start;
-            if i - start >= min {
-                long += i - start;
-            }
-        }
-    };
-    for y in 0..h.saturating_sub(1) {
-        count(w, &|x| {
-            Some((image.at(x, y), image.at(x, y + 1))).filter(|(a, b)| a != b && *a != IGNORED && *b != IGNORED && wanted(*a) && wanted(*b))
-        });
-    }
-    for x in 0..w.saturating_sub(1) {
-        count(h, &|y| {
-            Some((image.at(x, y), image.at(x + 1, y))).filter(|(a, b)| a != b && *a != IGNORED && *b != IGNORED && wanted(*a) && wanted(*b))
-        });
-    }
-    long as f64 / edges.max(1) as f64
-}
-
-/**
  * Do cross streets cross? Long straight streets (runs of street at least
  * LONG, side by side in a band at most WIDE across) and the cross streets
  * meeting them: street REACH out from the band's side. Of the long

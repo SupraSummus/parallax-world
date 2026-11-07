@@ -26,9 +26,6 @@
 //! training fit those crossing it best, and a snapping cut moves to the
 //! nearest guide's edge. Guides a rectangle inherits win over its rule's
 //! own, so a grid set high holds throughout.
-//!
-//! Regimes: rules can be marked as texture, where the grammar stops and
-//! another model (regimes.rs) fills the rectangle, whatever its size.
 
 use std::collections::HashMap;
 
@@ -272,8 +269,6 @@ pub struct Grammar {
      * child), kind and size (half-octaves of w and h).
      */
     by_size: HashMap<(usize, usize, i32, i32), Vec<usize>>,
-    /** Whether a rule is chosen by the parent's kind and side too, when one of about the size has been seen there. */
-    pub contextual: bool,
     /**
      * Whether rules pass their shared strips down as guides; whether a
      * rule is chosen to fit the guides crossing its rectangle; how far a
@@ -282,34 +277,17 @@ pub struct Grammar {
     pub shared: bool,
     pub matching: bool,
     pub snap: usize,
-    /** Whether both sides of a cut draw with the same seed (W1's other try at lining them up). */
+    /** Whether both sides of a cut draw with the same seed (a first try at lining them up). */
     pub same_seed: bool,
-    /** Rules (nodes, if any) where the grammar stops: another model fills their rectangles (TEXTURE in the image, the kind in `kind`). */
-    pub texture: Vec<bool>,
 }
-
-/** What a draw leaves where a texture rule's rectangle is, for another model to fill. */
-pub const TEXTURE: u16 = 100;
 
 fn octaves(s: usize) -> i32 {
     ((s as f64).log2() * 2.0).round() as i32
 }
 
-/** How leaves are filled: with their rule's pixels, or its commonest label (so that all the shapes are the cuts'). */
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Leaves {
-    Pixels,
-    Commonest,
-}
-
-/** What a draw took: rectangles drawn, and which training crop each cell's leaf came from. */
+/** What a draw took: its image, and rectangles drawn. */
 pub struct Drawn {
     pub image: Image,
-    pub source: Vec<u32>,
-    /** Each cell's place in that crop: its rule's rectangle scaled to the cell's. */
-    pub at: Vec<(u16, u16)>,
-    /** Each cell's rectangle's kind: its leaf's, or the texture rectangle's. */
-    pub kind: Vec<u16>,
     pub rectangles: usize,
     /** Cuts drawn whose rule snaps, those with a guide's edge to snap to there, and those moved to it. */
     pub snaps: [usize; 3],
@@ -322,7 +300,7 @@ type Guides = [Vec<(usize, usize)>; 2];
 
 impl Grammar {
     /** The grammar of `crops` (labels below `n`), its rectangles in `kinds` kinds. */
-    pub fn learn(crops: &[Image], n: usize, kinds: usize, seed: u64, contextual: bool) -> Grammar {
+    pub fn learn(crops: &[Image], n: usize, kinds: usize, seed: u64) -> Grammar {
         let mut nodes = Vec::new();
         let roots: Vec<usize> = crops.iter().enumerate().map(|(i, c)| parse(c, n, i, (0, 0, c.w, c.h), &mut nodes)).collect();
         for &r in &roots {
@@ -351,20 +329,7 @@ impl Grammar {
                 by_size.entry((context[i], nd.kind, octaves(nd.w), octaves(nd.h))).or_default().push(i);
             }
         }
-        Grammar {
-            n,
-            kinds,
-            nodes,
-            roots,
-            crops: crops.to_vec(),
-            by_size,
-            contextual,
-            shared: false,
-            matching: true,
-            snap: SNAP,
-            same_seed: false,
-            texture: Vec::new(),
-        }
+        Grammar { n, kinds, nodes, roots, crops: crops.to_vec(), by_size, shared: false, matching: true, snap: SNAP, same_seed: false }
     }
 
     /**
@@ -376,7 +341,7 @@ impl Grammar {
      */
     fn rule(&self, context: usize, kind: usize, (w, hh): (usize, usize), wanted: &[Vec<usize>; 2], h: u64) -> Option<usize> {
         let (ow, oh) = (octaves(w), octaves(hh));
-        let tries = if self.contextual && context > 0 { vec![(context, 2i32), (0, 12)] } else { vec![(0, 12)] };
+        let tries = if context > 0 { vec![(context, 2i32), (0, 12)] } else { vec![(0, 12)] };
         let guided = wanted.iter().any(|g| !g.is_empty());
         let mut found: Vec<usize> = Vec::new();
         for (c, radius) in tries {
@@ -418,25 +383,17 @@ impl Grammar {
     }
 
     /** The crop of `seed`, w × h like the training crops, over the box (x0, y0) bw × bh of it, alone. */
-    pub fn sample(&self, seed: u64, (x0, y0, bw, bh): (usize, usize, usize, usize), leaves: Leaves) -> Drawn {
-        let mut drawn = Drawn {
-            image: Image::filled(bw, bh, 0),
-            source: vec![0; bw * bh],
-            at: vec![(0, 0); bw * bh],
-            kind: vec![0; bw * bh],
-            rectangles: 0,
-            snaps: [0; 3],
-            guides: 0,
-        };
+    pub fn sample(&self, seed: u64, (x0, y0, bw, bh): (usize, usize, usize, usize)) -> Drawn {
+        let mut drawn = Drawn { image: Image::filled(bw, bh, 0), rectangles: 0, snaps: [0; 3], guides: 0 };
         let root = self.roots[(hash64(seed, 0, 0, 1) % self.roots.len() as u64) as usize];
         let (w, h) = (self.crops[0].w, self.crops[0].h);
         let mut guides: Guides = [Vec::new(), Vec::new()];
         let at = Rect { h: hash64(seed, 0, 0, 2), rule: Some(root), context: 0, kind: self.nodes[root].kind, r: (0, 0, w, h) };
-        self.draw(at, &mut guides, (x0, y0, bw, bh), leaves, &mut drawn);
+        self.draw(at, &mut guides, (x0, y0, bw, bh), &mut drawn);
         drawn
     }
 
-    fn draw(&self, at: Rect, guides: &mut Guides, bx: (usize, usize, usize, usize), leaves: Leaves, out: &mut Drawn) {
+    fn draw(&self, at: Rect, guides: &mut Guides, bx: (usize, usize, usize, usize), out: &mut Drawn) {
         let Rect { h, rule, context, kind, r } = at;
         let (rx, ry, rw, rh) = r;
         let (bx0, by0, bw, bh) = bx;
@@ -444,17 +401,6 @@ impl Grammar {
             return;
         }
         out.rectangles += 1;
-        // Fills the rectangle from rule `node`: each cell `label` of where it falls in the rule's.
-        let cells = |out: &mut Drawn, node: &Node, label: &dyn Fn(usize, usize) -> u16| {
-            for y in ry.max(by0)..(ry + rh).min(by0 + bh) {
-                for x in rx.max(bx0)..(rx + rw).min(bx0 + bw) {
-                    let (u, v) = (node.x0 + (x - rx) * node.w / rw, node.y0 + (y - ry) * node.h / rh);
-                    let i = (y - by0) * bw + x - bx0;
-                    (out.image.data[i], out.source[i], out.kind[i]) = (label(u, v), node.crop as u32, kind as u16);
-                    out.at[i] = (u as u16, v as u16);
-                }
-            }
-        };
         let wanted: [Vec<usize>; 2] = if self.shared && self.matching {
             [crossing(&guides[0], (rx, rw)), crossing(&guides[1], (ry, rh))]
         } else {
@@ -462,10 +408,6 @@ impl Grammar {
         };
         let Some(e) = rule.or_else(|| self.rule(context, kind, (rw, rh), &wanted, h)) else { return };
         let node = &self.nodes[e];
-        if self.texture.get(e).copied().unwrap_or(false) {
-            cells(out, node, &|_, _| TEXTURE);
-            return;
-        }
         if let Some((axis, cut)) = node.cut {
             let (le, lt, start) = if axis == 0 { (node.w, rw, rx) } else { (node.h, rh, ry) };
             if lt >= 2 {
@@ -504,16 +446,20 @@ impl Grammar {
                 for (side, (kid, part)) in node.kids.iter().zip([a, b]).enumerate() {
                     let seed = hash64(h, if self.same_seed { 0 } else { side as i64 }, 0, 3);
                     let kid = Rect { h: seed, rule: None, context: 1 + kind * 2 + side, kind: self.nodes[*kid].kind, r: part };
-                    self.draw(kid, guides, bx, leaves, out);
+                    self.draw(kid, guides, bx, out);
                 }
                 guides[other].truncate(before);
                 return;
             }
         }
-        // A leaf: the rule's pixels, scaled to the rectangle, or its commonest label.
+        // A leaf: the rule's pixels, scaled to the rectangle.
         let crop = &self.crops[node.crop];
-        let common = (0..self.n).max_by_key(|l| (node.hist[*l], std::cmp::Reverse(*l))).unwrap_or(0) as u16;
-        cells(out, node, &|u, v| if leaves == Leaves::Pixels { crop.at(u, v) } else { common });
+        for y in ry.max(by0)..(ry + rh).min(by0 + bh) {
+            for x in rx.max(bx0)..(rx + rw).min(bx0 + bw) {
+                let (u, v) = (node.x0 + (x - rx) * node.w / rw, node.y0 + (y - ry) * node.h / rh);
+                out.image.data[(y - by0) * bw + x - bx0] = crop.at(u, v);
+            }
+        }
     }
 }
 
@@ -720,7 +666,7 @@ mod tests {
 
     #[test]
     fn a_parse_cuts_along_the_street() {
-        let g = Grammar::learn(&crops(), 3, 4, 1, true);
+        let g = Grammar::learn(&crops(), 3, 4, 1);
         let root = &g.nodes[g.roots[0]];
         assert_eq!(root.cut.map(|c| c.0), Some(1), "first cut along y");
     }
@@ -757,10 +703,10 @@ mod tests {
 
     #[test]
     fn cross_streets_cross_with_shared_splits() {
-        let mut g = Grammar::learn(&grids(), 3, 6, 1, true);
+        let mut g = Grammar::learn(&grids(), 3, 6, 1);
         assert!(g.nodes.iter().any(|nd| !nd.shared.is_empty()), "a cut with strips across it");
         let aligned = |g: &Grammar| {
-            let all: Vec<Crossings> = (0..16).map(|s| Crossings::of(&g.sample(s, (0, 0, 128, 128), Leaves::Pixels).image, 1)).collect();
+            let all: Vec<Crossings> = (0..16).map(|s| Crossings::of(&g.sample(s, (0, 0, 128, 128)).image, 1)).collect();
             Crossings::sum(&all).share()
         };
         let apart = aligned(&g);
@@ -771,23 +717,23 @@ mod tests {
 
     #[test]
     fn a_box_alone_is_the_same_box_of_the_whole_with_shared_splits() {
-        let mut g = Grammar::learn(&grids(), 3, 6, 1, true);
+        let mut g = Grammar::learn(&grids(), 3, 6, 1);
         g.shared = true;
         for seed in 0..4 {
-            let whole = g.sample(seed, (0, 0, 128, 128), Leaves::Pixels).image;
+            let whole = g.sample(seed, (0, 0, 128, 128)).image;
             for (x, y, w, h) in [(0, 0, 13, 9), (37, 51, 20, 7), (127, 127, 1, 1), (60, 3, 40, 100)] {
-                assert_eq!(g.sample(seed, (x, y, w, h), Leaves::Pixels).image, whole.crop(x, y, w, h), "box {x} {y} {w} {h}");
+                assert_eq!(g.sample(seed, (x, y, w, h)).image, whole.crop(x, y, w, h), "box {x} {y} {w} {h}");
             }
         }
     }
 
     #[test]
     fn a_box_alone_is_the_same_box_of_the_whole() {
-        let g = Grammar::learn(&crops(), 3, 4, 1, true);
+        let g = Grammar::learn(&crops(), 3, 4, 1);
         for seed in 0..4 {
-            let whole = g.sample(seed, (0, 0, 64, 64), Leaves::Pixels).image;
+            let whole = g.sample(seed, (0, 0, 64, 64)).image;
             for (x, y, w, h) in [(0, 0, 13, 9), (37, 51, 20, 7), (63, 63, 1, 1), (5, 3, 40, 40)] {
-                assert_eq!(g.sample(seed, (x, y, w, h), Leaves::Pixels).image, whole.crop(x, y, w, h), "box {x} {y} {w} {h}");
+                assert_eq!(g.sample(seed, (x, y, w, h)).image, whole.crop(x, y, w, h), "box {x} {y} {w} {h}");
             }
         }
     }

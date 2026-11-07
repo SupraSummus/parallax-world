@@ -5,7 +5,7 @@
 //! surrounds it: fields, forest, rivers, and the edges between them; and
 //! its lines, the main roads and water, for plans (plan.rs).
 
-use crate::experiment::OUT;
+use crate::OUT;
 use crate::image::Image;
 use crate::plan::NONE;
 

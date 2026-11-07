@@ -12,7 +12,7 @@
 
 use std::time::Instant;
 
-use lab::experiment::OUT;
+use lab::OUT;
 use lab::fcc_stats::{picture, report};
 use lab::image::write_grid;
 use lab::masked_fcc::{Cells, Model, Options};

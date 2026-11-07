@@ -23,9 +23,9 @@
 
 use std::time::Instant;
 
+use lab::OUT;
 use lab::critic::{self, Reference, SCALES};
 use lab::exemplar::{Exemplars, Options};
-use lab::experiment::OUT;
 use lab::image::{Image, write_grid};
 use lab::masked::{self, Model};
 use lab::plan::{Context, Lines, NONE, Plan};

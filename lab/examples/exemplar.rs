@@ -9,10 +9,10 @@
 
 use std::time::Instant;
 
+use lab::OUT;
 use lab::exemplar::{self, Exemplars, Options};
-use lab::experiment::OUT;
 use lab::geometry::Geometry;
-use lab::grammar::{Grammar, Leaves};
+use lab::grammar::Grammar;
 use lab::image::{Image, write_grid};
 use lab::masked::{self, Model};
 use lab::scenes;
@@ -135,9 +135,9 @@ fn main() {
             let model = Model::learn(&vols, &hv, n, masked::Options { augment: isotropic, ..masked_options() });
             eprintln!("masked model in {:.0} s", start.elapsed().as_secs_f64());
             rows.push(("masked model".into(), (0..SAMPLES).map(|s| model.sample(s, [0; 3], model.size()).to_image()).collect()));
-            let mut grammar = Grammar::learn(&train, n, 32, 1, true);
+            let mut grammar = Grammar::learn(&train, n, 32, 1);
             (grammar.shared, grammar.matching, grammar.snap) = (true, true, lab::grammar::SNAP);
-            rows.push(("split grammar".into(), (0..SAMPLES).map(|s| grammar.sample(s, (0, 0, w, h), Leaves::Pixels).image).collect()));
+            rows.push(("split grammar".into(), (0..SAMPLES).map(|s| grammar.sample(s, (0, 0, w, h)).image).collect()));
         }
         let dists = [1, 4, 16, 64];
         let reference: Vec<(Vec<f64>, Vec<f64>)> = dists.iter().map(|d| pooled(&rows[0].1, n, *d)).collect();
