@@ -179,7 +179,7 @@ impl Points {
 
     /** The chances at a point, kept. */
     fn chances_at(&self, at: [i64; 3]) -> Chances {
-        self.corners.get(self.slot(self.leaf, at), at, || cost::plan(self.name, || self.chances(at)))
+        self.corners.get(self.slot(self.leaf, at), at, || cost::plan(self.name, self, at, || self.chances(at)))
     }
 
     /** By mark, the weight of the cell `size` wide at `corner`: its corners' chances, added (fixed point), times the leaves it holds. */
