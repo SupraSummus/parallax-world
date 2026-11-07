@@ -4,10 +4,10 @@
 use std::rc::Rc;
 
 use worldgen::World;
-use worldgen::contract::{check, heights_hold, margins, things_hold};
+use worldgen::contract::{check, heights_hold, margins, things_hold, whole_equals_parts};
 use worldgen::generator::{
-    ANY_SIZE, Child, Children, Field, FieldValues, Generator, KindDef, Layer, Node, Op, Population, SOLID, Shapes, Span, ball, cuboid,
-    generate, materials_of,
+    ANY_SIZE, Anchors, Child, Children, Field, FieldValues, Generator, KindDef, Layer, Node, Op, Population, SOLID, Shapes, Span, ball,
+    cuboid, generate, materials_of, things_in,
 };
 use worldgen::generator::{Cell, Fill, Point};
 use worldgen::grid::Box3;
@@ -34,7 +34,7 @@ fn single(make: impl Fn(Point, &Cell) -> Option<Node> + 'static, reach: i64) -> 
         cell: 1024,
         reach: [reach; 3],
         size: ANY_SIZE,
-        anchor: Box::new(|cell| if cell.i == 0 && cell.j == 0 && cell.k == 0 { Some([64.0, 64.0, 64.0]) } else { None }),
+        anchor: Anchors::Cells(Box::new(|cell| if cell.i == 0 && cell.j == 0 && cell.k == 0 { Some([64.0, 64.0, 64.0]) } else { None })),
         make: Box::new(make),
         far: None,
     })
@@ -87,7 +87,7 @@ fn village() -> Generator {
         reach: [0; 3],
         size: ANY_SIZE,
         // On the plain: the cells centred on y = 0, every other one of a square grid.
-        anchor: Box::new(|cell| if cell.j == 0 { Some(cell.centre.map(|v| v as f64)) } else { None }),
+        anchor: Anchors::Cells(Box::new(|cell| if cell.j == 0 { Some(cell.centre.map(|v| v as f64)) } else { None })),
         make: Box::new(|[x, _, z], cell| {
             let (w, d, h) = (16.0 + (cell.random("size").next() * 12.0).floor(), 16.0 + (cell.random("size").next() * 12.0).floor(), 20.0);
             let (x0, z0, x1, z1, y) = (x - w, z - d, x + w, z + d, 0.0);
@@ -130,7 +130,47 @@ fn b(min_x: i64, min_y: i64, min_z: i64, max_x: i64, max_y: i64, max_z: i64) -> 
 
 /** A world of `generator`, which has nothing outside `heights`. */
 fn world_of(generator: Generator, heights: (i64, i64)) -> World {
-    World { generator, spawn: [0; 3], heights }
+    World { generator, spawn: [0; 3], heights, points: Vec::new() }
+}
+
+/** The face of a wall of rock facing +x, at x = wall(y, z): a ground along x. */
+fn wall(y: i64, z: i64) -> i64 {
+    (3 * y + 2 * z).div_euclid(4)
+}
+
+/** The wall, and `knobs` on its face: a unit of wood at each anchor. */
+fn knobbly_wall(knobs: Population) -> Generator {
+    let rock = Field::spans("rock", 0.0, Op::Fill, 0, |y, z, _| {
+        vec![Span { from: wall(y, z) - 64, to: wall(y, z), kind: ROCK, extinction: None }]
+    });
+    let knobs = knobs.reach(2).make(|p, _| Some(Node::of(vec![cuboid(p, p.map(|v| v + 1.0), WOOD, SOLID, Op::Fill)])));
+    Generator { kinds: KINDS.to_vec(), seed: 4, layers: vec![Layer::Field(rock), Layer::Population(knobs)] }
+}
+
+#[test]
+fn anchors_along_an_axis_are_one_per_square_across_it() {
+    // On a slanting wall, so the lines of cells along x cross it in any of their cells: a spot picked evenly in each line's square
+    // across x, owned by the cell it is in, is one per square 2N wide, wherever in the lattice's period.
+    const N: i64 = 8;
+    const LINES: i64 = 128;
+    let generator = knobbly_wall(Population::new("knobs", 1.0, N).anchor_along(0, |line| Some(line.pick(&mut line.random("spot"), wall))));
+    let Layer::Population(knobs) = &generator.layers[1] else { unreachable!() };
+    // The cells of LINES² lines along x, as far along as the wall over them goes.
+    let along = (wall(-N, -N).div_euclid(N) - 1, wall(LINES * N, LINES * N).div_euclid(N) + 1);
+    let things = things_in(&generator, knobs, [along, (0, LINES - 1), (0, LINES - 1)]);
+    let expected = (LINES * LINES) as f64 / 4.0;
+    assert!((things.len() as f64 / expected - 1.0).abs() < 0.05, "{} knobs, not about {expected}", things.len());
+    // Where they are across x within the lattice's period, 2N, in squares N / 2 wide.
+    let mut squares = [0; 16];
+    for (_, bounds, _) in &things {
+        let [y, z] = [1, 2].map(|i| (bounds.min[i].rem_euclid(2 * N) / (N / 2)) as usize);
+        squares[4 * y + z] += 1;
+    }
+    let each = expected / 16.0;
+    assert!(squares.iter().all(|n| (*n as f64 / each - 1.0).abs() < 0.25), "{squares:?} knobs by where in 2N, not about {each}");
+    for level in [0, 2] {
+        whole_equals_parts(&generator, &b(0, 0, 0, 128, 128, 128), level);
+    }
 }
 
 #[test]
@@ -196,7 +236,7 @@ fn finds_a_far_thing_reaching_past_its_populations_reach() {
         cell: 64,
         reach: [16; 3],
         size: ANY_SIZE,
-        anchor: Box::new(|cell| (cell.i >= 30 && cell.j == 0).then_some(cell.centre.map(|v| v as f64))),
+        anchor: Anchors::Cells(Box::new(|cell| (cell.i >= 30 && cell.j == 0).then_some(cell.centre.map(|v| v as f64)))),
         make: Box::new(|[x, y, z], _| Some(Node::of(vec![ball([x, y, z], 100.0, ROCK, SOLID, Op::Fill)]))),
         far: None,
     });

@@ -8,10 +8,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 
 use crate::World;
-use crate::generator::{Generator, Layer, generate, materials_of, thing_in};
+use crate::generator::{Generator, Layer, generate, materials_of, things_in};
 use crate::grid::{Box3, VoxelGrid, is_site};
 use crate::noise::{Rng, hash_text};
-use crate::picture::{Camera, FACES, Tiles, first_voxel, nearest_site, picture, picture_in};
+use crate::picture::{Camera, FACES, Tiles, first_voxel, nearest_site, picture_in};
 
 fn b(min_x: i64, min_y: i64, min_z: i64, max_x: i64, max_y: i64, max_z: i64) -> Box3 {
     Box3 { min: [min_x, min_y, min_z], max: [max_x, max_y, max_z] }
@@ -586,8 +586,7 @@ pub fn things_hold(world: &World) -> Vec<String> {
         let (j0, j1) = ((h0 - n - reach[1]).div_euclid(n), (h1 + n + reach[1]).div_euclid(n) + 1);
         let (mut made, mut past, mut needed, mut example, mut outside) = (0, 0, reach, None, 0);
         for (i, k) in columns {
-            for j in (j0..=j1).filter(|j| (i + j + k) & 1 == 0) {
-                let Some((key, bounds, allowed)) = thing_in(&world.generator, population, i, j, k) else { continue };
+            for (key, bounds, allowed) in things_in(&world.generator, population, [(i, i), (j0, j1), (k, k)]) {
                 made += 1;
                 if !bounds.inside(&allowed) {
                     past += 1;
@@ -629,41 +628,6 @@ pub fn things_hold(world: &World) -> Vec<String> {
 fn fields_of(mut world: World) -> World {
     world.generator.layers.retain(|layer| matches!(layer, Layer::Field(_)));
     world
-}
-
-/** The height of what `world` shows over `region`: the median of what rays straight down hit first, at level 2. */
-fn surface(world: &World, region: &Box3) -> Option<f64> {
-    const LEVEL: u32 = 2;
-    let width = ((region.max[0] - region.min[0]) / 8).clamp(16, 256) as usize;
-    let camera = Camera::top([region.min[0] as f64, region.min[2] as f64], [region.max[0] as f64, region.max[2] as f64], width);
-    let heights = world.heights_at(LEVEL);
-    let top = ((heights.1 + 1) << LEVEL) as f64;
-    let mut hits: Vec<f64> =
-        picture(&world.generator, &camera, LEVEL, heights).depth.iter().filter(|d| d.is_finite()).map(|d| top - *d as f64).collect();
-    hits.sort_by(f64::total_cmp);
-    hits.get(hits.len() / 2).copied()
-}
-
-/**
- * `regions`, chosen in `from`, moved up or down as far as `to`'s ground
- * over each is higher or lower: for a world of another seed. The ground
- * is the surface of the fields alone, things and their far fields left
- * out: what is given by position everywhere, which things stand on. Seen
- * whole, a forest's surface is its crowns, which rise and fall with the
- * trees there, not the ground (docs/generators.md, "Checks").
- */
-pub fn follow_ground(regions: &[Box3], from: World, to: World) -> Vec<Box3> {
-    let (from, to) = (fields_of(from), fields_of(to));
-    regions
-        .iter()
-        .map(|r| {
-            let d = match (surface(&from, r), surface(&to, r)) {
-                (Some(a), Some(b)) => (b - a).round() as i64,
-                _ => 0,
-            };
-            Box3 { min: [r.min[0], r.min[1] + d, r.min[2]], max: [r.max[0], r.max[1] + d, r.max[2]] }
-        })
-        .collect()
 }
 
 /**

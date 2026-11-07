@@ -627,7 +627,7 @@ fn adler32(bytes: &[u8]) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::generator::{ANY_SIZE, KindDef, Layer, Node, Op, Population, SOLID, ball};
+    use crate::generator::{ANY_SIZE, Anchors, KindDef, Layer, Node, Op, Population, SOLID, ball};
 
     #[test]
     fn checksums_are_zlib_and_png_ones() {
@@ -707,7 +707,7 @@ mod tests {
                 cell: 1024,
                 reach: [64; 3],
                 size: ANY_SIZE,
-                anchor: Box::new(|cell| if cell.i == 0 && cell.j == 0 && cell.k == 0 { Some([0.0; 3]) } else { None }),
+                anchor: Anchors::Cells(Box::new(|cell| if cell.i == 0 && cell.j == 0 && cell.k == 0 { Some([0.0; 3]) } else { None })),
                 make: Box::new(|at, _| Some(Node::of(vec![ball(at, 40.0, 0, SOLID, Op::Fill)]))),
                 far: None,
             })],

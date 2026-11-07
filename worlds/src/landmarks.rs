@@ -45,6 +45,8 @@ const REGION: i64 = m(224.0);
 /** The chance a region has a landmark, and how many places each kind is tried at in it. */
 const CHANCE: Fx = fx(0.6);
 const TRIES: usize = 8;
+/** How many rows of regions either way `Landmarks::first` looks in. */
+const ROWS: i64 = 1000;
 /** A landmark's cell, and how far it reaches past it across, up and across: a farmstead's corners, a watchtower's pennant. */
 const CELL: i64 = m(16.0);
 const REACH: [i64; 3] = [m(20.0), m(30.0), m(20.0)];
@@ -433,6 +435,17 @@ impl Landmarks {
         self.sites.at(i, k)
     }
 
+    /**
+     * The first `landmark` along the path: in the rows of regions from the
+     * first, ahead and behind in turn, those across it from the middle out.
+     */
+    pub fn first(&self, landmark: Landmark) -> Site {
+        let rows = (0..ROWS).flat_map(|k| [-k, k + 1]);
+        rows.flat_map(|k| [0, -1, 1, -2, 2].map(|i| (i, k)))
+            .find_map(|(i, k)| self.of_region(i, k).filter(|s| s.landmark == landmark))
+            .unwrap_or_else(|| panic!("no {landmark:?} in {ROWS} rows of regions either way"))
+    }
+
     /** The landmark of column (x, z)'s region, if any. */
     pub fn site(&self, x: i64, z: i64) -> Option<Site> {
         let (i, k) = region(x, z);
@@ -548,7 +561,9 @@ pub fn layers(landmarks: Rc<Landmarks>, land: Rc<Land>, me: usize, ground: Rc<Pl
         let anchor = landmarks.clone();
         Population::new("landmarks", 1.6, CELL)
             .reach(REACH)
-            .anchor(move |c| anchor.site(c.centre[0], c.centre[2]).map(|s| [s.centre[0] as f64, s.level as f64, s.centre[1] as f64]))
+            .anchor_along(1, move |line| {
+                anchor.site(line.centre[0], line.centre[1]).map(|s| [s.centre[0] as f64, s.level as f64, s.centre[1] as f64])
+            })
             .make(move |_, c| landmarks.site(c.centre[0], c.centre[2]).map(|s| (s.landmark.spec().build)(&s, &mut Rng::new(s.seed))))
     };
     vec![Layer::Field(surface), Layer::Field(water), Layer::Population(built)]

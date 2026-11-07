@@ -166,7 +166,8 @@ type ChildrenReaching = dyn Fn(&Box3) -> Vec<Child>;
 type MakeShapes = dyn Fn(&mut Rng) -> Vec<Shape>;
 type FieldAt = dyn Fn(i64, i64, i64, i64) -> Option<(Kind, Option<f64>)>;
 type FieldSpans = dyn Fn(i64, i64, i64) -> Vec<Span>;
-type Anchor = dyn Fn(&Cell) -> Option<Point>;
+type CellAnchor = dyn Fn(&Cell) -> Option<Point>;
+type LineAnchor = dyn Fn(&Line) -> Option<Point>;
 type Make = dyn Fn(Point, &Cell) -> Option<Node>;
 
 impl Shapes {
@@ -244,6 +245,55 @@ impl Cell<'_> {
     pub fn random(&self, stream: &str) -> Rng {
         Rng::new(hash64(hash_text(&format!("{}:{stream}", self.population), self.seed), self.i, self.j, self.k))
     }
+
+    /** Its thing's name, for messages and drawing order. */
+    fn key(&self) -> String {
+        format!("{} {},{},{}", self.population, self.i, self.j, self.k)
+    }
+}
+
+/**
+ * A line of cells of a population along an axis: those whose centres
+ * differ only along it (every 2N, as i + j + k is even). They lie in the
+ * square 2N wide across the axis around its centre; every point is in
+ * one cell, so in one line along each axis.
+ */
+pub struct Line<'a> {
+    pub axis: usize,
+    /** The cells' indices across the axis, in axis order. */
+    pub across: [i64; 2],
+    /** Their centres across the axis, lattice units: `across` times N. */
+    pub centre: [i64; 2],
+    pub n: i64,
+    population: &'a str,
+    seed: u64,
+}
+
+impl Line<'_> {
+    /** A random sequence that depends on the line and `stream` only. */
+    pub fn random(&self, stream: &str) -> Rng {
+        let [u, v] = self.across;
+        Rng::new(hash64(hash_text(&format!("{}:{stream} along {}", self.population, self.axis), self.seed), u, v, 0))
+    }
+
+    /**
+     * A point picked by `random` evenly in the line's square across its
+     * axis, at `along(u, v)` along it (u and v in axis order). Each point
+     * of a surface crossing the lines once is in one line's cells, which
+     * picks it as often as any: anchored there, things are as even as one
+     * per square 2N wide.
+     */
+    pub fn pick(&self, random: &mut Rng, along: impl Fn(i64, i64) -> i64) -> Point {
+        let [u, v] = self.centre.map(|c| c - self.n + random.below(2 * self.n as u32) as i64);
+        let ([a, b], mut point) = (across(self.axis), [0.0; 3]);
+        (point[a], point[b], point[self.axis]) = (u as f64, v as f64, along(u, v) as f64);
+        point
+    }
+}
+
+/** The axes across `axis`, in order. */
+fn across(axis: usize) -> [usize; 2] {
+    [(axis == 0) as usize, 2 - (axis == 2) as usize]
 }
 
 /** Things placed in the cells of N·FCC, at most one per cell. */
@@ -255,9 +305,21 @@ pub struct Population {
     pub reach: [i64; 3],
     /** Things are made while sites are at most this far apart (ANY_SIZE: always). */
     pub size: i64,
-    pub anchor: Box<Anchor>,
+    pub anchor: Anchors,
     pub make: Box<Make>,
     pub far: Option<Field>,
+}
+
+/** Where a population's things are, each owned by the cell it is in, if asked there. */
+pub enum Anchors {
+    /** At most one a cell, asked of each. */
+    Cells(Box<CellAnchor>),
+    /**
+     * At most one a line of cells along `axis`, asked once however many
+     * of its cells a box reaches: for things on a surface across it (a
+     * ground under columns of cells), as even as one per cell's square.
+     */
+    Lines { axis: usize, anchor: Box<LineAnchor> },
 }
 
 pub enum Layer {
@@ -1017,42 +1079,19 @@ fn drawables_in<'a>(generator: &'a Generator, clip: &Box3, s: i64) -> Vec<Drawab
             }
             continue;
         }
-        let mut work = Work::default();
         let n = population.cell;
-        let [rx, ry, rz] = population.reach;
         // Cells whose reach meets `units`: centres within N + reach of it.
-        let range =
-            |axis: usize, reach: i64| (-(-(units.min[axis] - n - reach)).div_euclid(n), (units.max[axis] - 1 + n + reach).div_euclid(n));
-        let ((i0, i1), (j0, j1), (k0, k1)) = (range(0, rx), range(1, ry), range(2, rz));
-        for i in i0..=i1 {
-            for j in j0..=j1 {
-                let mut k = k0 + ((k0 + i + j) & 1);
-                while k <= k1 {
-                    let centre = [i * n, j * n, k * n];
-                    let cell = Cell { i, j, k, centre, n, population: population.name, seed: generator.seed };
-                    k += 2;
-                    work.cells += 1;
-                    let Some(anchor) = (population.anchor)(&cell) else { continue };
-                    let [oi, oj, ok] = nearest_site(at(anchor), n);
-                    if oi != i || oj != j || ok != k - 2 {
-                        continue;
-                    }
-                    work.owned += 1;
-                    let Some(node) = (population.make)(anchor, &cell) else { continue };
-                    let key = format!("{} {i},{j},{}", population.name, k - 2);
-                    let bounds = bounds_of(&node);
-                    let reach = Box3 {
-                        min: [centre[0] - n - rx, centre[1] - n - ry, centre[2] - n - rz],
-                        max: [centre[0] + n + rx, centre[1] + n + ry, centre[2] + n + rz],
-                    };
-                    assert!(bounds.inside(&reach), "{}", past_reach(&key, &bounds, &reach, n, population.reach));
-                    things += 1;
-                    let at =
-                        Visit { s, units: &units, order: population.order, layer: population.name, thing: things, seed: generator.seed };
-                    visit(&node, key, bounds, &at, &mut drawables);
-                }
-            }
-        }
+        let cells = [0, 1, 2].map(|axis| {
+            let reach = population.reach[axis];
+            (-(-(units.min[axis] - n - reach)).div_euclid(n), (units.max[axis] - 1 + n + reach).div_euclid(n))
+        });
+        let work = each_thing(generator, population, cells, |cell, node| {
+            let (key, bounds, reach) = (cell.key(), bounds_of(&node), reach_of(population, cell));
+            assert!(bounds.inside(&reach), "{}", past_reach(&key, &bounds, &reach, n, population.reach));
+            things += 1;
+            let at = Visit { s, units: &units, order: population.order, layer: population.name, thing: things, seed: generator.seed };
+            visit(&node, key, bounds, &at, &mut drawables);
+        });
         cost::add(population.name, work);
     }
     drawables.sort_by(|a, b| a.order.total_cmp(&b.order).then_with(|| a.key.cmp(&b.key)));
@@ -1539,20 +1578,75 @@ fn nearest_site(p: At, s: i64) -> [i64; 3] {
 }
 
 /**
- * The thing `population` makes in cell (i, j, k) of N·FCC (i + j + k
- * even), as `generate` makes it: its key, its bounds and the box its
- * population's reach allows it; none if it makes none there. For checks
- * that look at more things than a box draws (worldgen::contract).
+ * Each thing `population` makes in the cells of N·FCC whose indices are
+ * in `cells` ([first, last] along each axis), with its cell: those whose
+ * anchors are in them, asked of each cell or once of each line of them;
+ * returns the work of asking.
  */
-pub fn thing_in(generator: &Generator, population: &Population, i: i64, j: i64, k: i64) -> Option<(String, Box3, Box3)> {
-    let (_, node) = made_in(generator, population, i, j, k)?;
-    let (n, centre) = (population.cell, [i, j, k].map(|c| c * population.cell));
-    let [rx, ry, rz] = population.reach;
-    let reach = Box3 {
-        min: [centre[0] - n - rx, centre[1] - n - ry, centre[2] - n - rz],
-        max: [centre[0] + n + rx, centre[1] + n + ry, centre[2] + n + rz],
+fn each_thing(generator: &Generator, population: &Population, cells: [(i64, i64); 3], mut each: impl FnMut(&Cell, Node)) -> Work {
+    let mut work = Work::default();
+    let n = population.cell;
+    let cell = |[i, j, k]: [i64; 3]| Cell { i, j, k, centre: [i * n, j * n, k * n], n, population: population.name, seed: generator.seed };
+    let mut make = |cell: &Cell, anchor: Point| {
+        if let Some(node) = (population.make)(anchor, cell) {
+            each(cell, node);
+        }
     };
-    Some((format!("{} {i},{j},{k}", population.name), bounds_of(&node), reach))
+    match &population.anchor {
+        Anchors::Cells(anchor) => {
+            let [(i0, i1), (j0, j1), (k0, k1)] = cells;
+            for i in i0..=i1 {
+                for j in j0..=j1 {
+                    for k in (k0 + ((k0 + i + j) & 1)..=k1).step_by(2) {
+                        let cell = cell([i, j, k]);
+                        work.cells += 1;
+                        if let Some(p) = anchor(&cell).filter(|p| nearest_site(at(*p), n) == [i, j, k]) {
+                            work.owned += 1;
+                            make(&cell, p);
+                        }
+                    }
+                }
+            }
+        }
+        Anchors::Lines { axis, anchor } => {
+            let (axis, [a, b]) = (*axis, across(*axis));
+            for u in cells[a].0..=cells[a].1 {
+                for v in cells[b].0..=cells[b].1 {
+                    let line = Line { axis, across: [u, v], centre: [u * n, v * n], n, population: population.name, seed: generator.seed };
+                    work.cells += 1;
+                    let Some(p) = anchor(&line) else { continue };
+                    // Owned by the cell of the line it is in, if the box reaches it.
+                    let owner = nearest_site(at(p), n);
+                    if owner[a] == u && owner[b] == v && (cells[axis].0..=cells[axis].1).contains(&owner[axis]) {
+                        work.owned += 1;
+                        make(&cell(owner), p);
+                    }
+                }
+            }
+        }
+    }
+    work
+}
+
+/** The box a thing of `population` in `cell` may reach: N and the population's reach from the cell's centre. */
+fn reach_of(population: &Population, cell: &Cell) -> Box3 {
+    let (c, n, r) = (cell.centre, cell.n, population.reach);
+    Box3 { min: [0, 1, 2].map(|i| c[i] - n - r[i]), max: [0, 1, 2].map(|i| c[i] + n + r[i]) }
+}
+
+/**
+ * The things `population` makes in the cells of N·FCC whose indices are
+ * in `cells` ([first, last] along each axis), as `generate` makes them:
+ * each one's key, its bounds and the box its population's reach allows
+ * it. For checks that look at more things than a box draws
+ * (worldgen::contract).
+ */
+pub fn things_in(generator: &Generator, population: &Population, cells: [(i64, i64); 3]) -> Vec<(String, Box3, Box3)> {
+    let mut things = Vec::new();
+    each_thing(generator, population, cells, |cell, node| {
+        things.push((cell.key(), bounds_of(&node), reach_of(population, cell)));
+    });
+    things
 }
 
 /**
@@ -1568,13 +1662,27 @@ pub fn made_in(generator: &Generator, population: &Population, i: i64, j: i64, k
 }
 
 /**
- * The anchor cell (i, j, k) of `population` asks for, if any, and the
- * cell it is in, which owns a thing there if it is this one.
+ * The anchor asked for cell (i, j, k) of `population`, or for its line,
+ * if any, and the cell it is in, which owns a thing there if it is this one.
  */
 pub fn anchor_in(generator: &Generator, population: &Population, i: i64, j: i64, k: i64) -> Option<(Point, [i64; 3])> {
     let n = population.cell;
-    let cell = Cell { i, j, k, centre: [i * n, j * n, k * n], n, population: population.name, seed: generator.seed };
-    let anchor = (population.anchor)(&cell)?;
+    let anchor = match &population.anchor {
+        Anchors::Cells(anchor) => {
+            anchor(&Cell { i, j, k, centre: [i * n, j * n, k * n], n, population: population.name, seed: generator.seed })
+        }
+        Anchors::Lines { axis, anchor } => {
+            let ([a, b], c) = (across(*axis), [i, j, k]);
+            anchor(&Line {
+                axis: *axis,
+                across: [c[a], c[b]],
+                centre: [c[a] * n, c[b] * n],
+                n,
+                population: population.name,
+                seed: generator.seed,
+            })
+        }
+    }?;
     Some((anchor, nearest_site(at(anchor), n)))
 }
 
@@ -1743,7 +1851,7 @@ mod tests {
                 cell: n,
                 reach: [0; 3],
                 size: ANY_SIZE,
-                anchor: Box::new(|cell| (cell.centre == [0; 3]).then_some([0.0; 3])),
+                anchor: Anchors::Cells(Box::new(|cell| (cell.centre == [0; 3]).then_some([0.0; 3]))),
                 make: Box::new(move |_, _| {
                     Some(Node::of(vec![cuboid([-8192.0, 0.0, -8192.0], [8192.0, top, 8192.0], 0, SOLID, Op::Fill)]))
                 }),

@@ -142,7 +142,7 @@ impl Ranges {
     }
 
     /** Where trees end, by column, lattice units. */
-    fn treeline(&self, x: i64, z: i64) -> Fx {
+    pub fn treeline(&self, x: i64, z: i64) -> Fx {
         Fx::m(230.0) + self.lines.at(x, z) * Units::m(120.0)
     }
 
@@ -173,14 +173,15 @@ pub fn layers(ranges: Rc<Ranges>, ground: Rc<Plan<i64>>) -> Vec<Layer> {
         if height < treeline - Fx::m(30.0) {
             return Vec::new();
         }
-        // Rise over run to the sites around, at least a metre off; and to those further off, for cliffs nearby.
+        // Rise over run to the ground a metre off at any spacing, as smoothed to the spacing it would be gentler, and grassier
+        // far away; and to the ground further off, for cliffs nearby.
         let around = |step: i64| [(step, 0), (-step, 0), (0, step), (0, -step)].map(|(dx, dz)| ground.at(x + dx, z + dz));
-        let near = around(spacing.max(m(1.0)));
-        // As deep as the ground under it (the forest's terrain).
-        let bottom = near.into_iter().fold(h - m(1.5), i64::min) - 2 * spacing;
+        let near = around(m(1.0));
+        // Filled down to the sites around, and as deep under them as the ground there (the forest's terrain).
+        let bottom = if spacing > m(1.0) { around(spacing) } else { near }.into_iter().fold(h - m(1.5), i64::min) - 2 * spacing;
         let slope =
             |heights: [i64; 4], step: i64| Units(heights.map(|n| (n - h).abs()).into_iter().max().unwrap_or(0)).to_fx() / Units(step);
-        let steep = slope(near, spacing.max(m(1.0)));
+        let steep = slope(near, m(1.0));
         let far = spacing.max(m(12.0));
         let wide = around(far);
         let cliffs = slope(wide, far);

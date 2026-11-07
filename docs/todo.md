@@ -203,6 +203,15 @@ Numbers are for the forest at 1280×800, as measured when written.
   where the trees thin out to the treeline,
   came 0.10 to 0.15 apart at level 4, in materials hit and from above:
   leaves in place of trunks and of the slope's scree and rock.
+- **The canopy stops at the trees' feet, so a clearing can break the contract**
+  ("Open problems" in `docs/generators.md`):
+  the valley's first windmill at seeds 1 and 3
+  (`KNOWN_BREAKS` in `worlds/tests/contract.rs`, which fails once it passes);
+  at seed 3 since the moor gives way on the towns' farmland,
+  so forest stands round that windmill instead of moorland.
+  A wider clearing kept the first chapel's.
+  Spread the canopy over the crowns' radius without thickening it from above
+  (spread over 2.5 m, it did), then drop them from the list.
 - **The highest massifs end in broad rounded domes of snow.**
   Behind the crest the high country is one smooth noise,
   and wherever it stands over the snowline, all of it is snow.
@@ -226,8 +235,15 @@ Numbers are for the forest at 1280×800, as measured when written.
 
 ## Ideas
 
-- Report cost at points the worlds name (a town's square, a pass),
-  not at the spawn and the regions' centres (`cost::places`).
+- Report cost at the places worlds name (`World::points`),
+  not at the spawn and the regions' centres (`cost::places`),
+  once the forest, the moor and the city name some:
+  they would be measured at their spawn alone.
+- Drop y as up from hosts and checks.
+  A world is bounded along y by its `heights`,
+  hosts tile x and z over them,
+  and the checks look from above down y;
+  an endless holey cheese wants tiles along y too, and no heights.
 - Keep the fit of `cost::NS` in the repo, to refit it on a quiet machine.
 - Generate the web's tiles as the native spike does:
   those the chunks in view read, nearest first,

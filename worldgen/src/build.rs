@@ -1,12 +1,12 @@
 //! Short forms for writing worlds: constructors of fields, populations,
-//! nodes and solid shapes, and anchors on the ground, so a world says
-//! what it draws without struct literals and boxes. The long forms stay:
+//! nodes and solid shapes, so a world says what it draws without struct
+//! literals and boxes. The long forms stay:
 //! they are the model (generator.rs). See "Writing a world" in
 //! docs/generators.md.
 
 use crate::generator::{
-    ANY_SIZE, Cell, Child, Children, Far, Field, FieldValues, Kind, Node, Op, Point, Population, SOLID, Shape, Shapes, Span, ball,
-    bounds_of_shapes, capsule, cuboid, ellipsoid, gable, lathe,
+    ANY_SIZE, Anchors, Cell, Child, Children, Far, Field, FieldValues, Kind, Line, Node, Op, Point, Population, SOLID, Shape, Shapes, Span,
+    ball, bounds_of_shapes, capsule, cuboid, ellipsoid, gable, lathe,
 };
 use crate::grid::Box3;
 use crate::noise::Rng;
@@ -65,7 +65,7 @@ impl Population {
             cell,
             reach: [0; 3],
             size: ANY_SIZE,
-            anchor: Box::new(|c| Some(c.centre.map(|v| v as f64))),
+            anchor: Anchors::Cells(Box::new(|c| Some(c.centre.map(|v| v as f64)))),
             make: Box::new(|_, _| None),
             far: None,
         }
@@ -83,12 +83,16 @@ impl Population {
 
     /** Where a cell's thing is: the cell owns one only if its anchor is in it. */
     pub fn anchor(self, anchor: impl Fn(&Cell) -> Option<Point> + 'static) -> Population {
-        Population { anchor: Box::new(anchor), ..self }
+        Population { anchor: Anchors::Cells(Box::new(anchor)), ..self }
     }
 
-    /** Anchored on the ground, at `ground(x, z)`, picked evenly under each cell (`Cell::on_ground`). */
-    pub fn anchor_on_ground(self, ground: impl Fn(i64, i64) -> i64 + 'static) -> Population {
-        self.anchor(move |cell| Some(cell.on_ground(&ground)))
+    /**
+     * Where the thing of each line of cells along `axis` is, asked once
+     * however many of them a box reaches: the cell of the line it is in
+     * owns it (`Line::pick` picks a point on a surface across the axis).
+     */
+    pub fn anchor_along(self, axis: usize, anchor: impl Fn(&Line) -> Option<Point> + 'static) -> Population {
+        Population { anchor: Anchors::Lines { axis, anchor: Box::new(anchor) }, ..self }
     }
 
     /** The thing at an anchor, of a cell, if it has one. */
@@ -99,26 +103,6 @@ impl Population {
     /** What it draws while its sites are further apart than its `size`: a medium as dense as its things. */
     pub fn far(self, far: Field) -> Population {
         Population { far: Some(far), ..self }
-    }
-}
-
-impl Cell<'_> {
-    /**
-     * A spot on the ground under the cell, at `ground(x, z)`, picked
-     * evenly in the square of columns it reaches over (2N wide) with its
-     * random sequence "spot". Each column's spot is in one cell of those
-     * over it, so anchored there, things are as even as one per square.
-     */
-    pub fn on_ground(&self, ground: impl Fn(i64, i64) -> i64) -> Point {
-        self.on_ground_by(&mut self.random("spot"), ground)
-    }
-
-    /** As `on_ground`, picked by `pick`: one that is the same for every cell of a column, say. */
-    pub fn on_ground_by(&self, pick: &mut Rng, ground: impl Fn(i64, i64) -> i64) -> Point {
-        let (n, [cx, _, cz]) = (self.n, self.centre);
-        let x = cx - n + pick.below(2 * n as u32) as i64;
-        let z = cz - n + pick.below(2 * n as u32) as i64;
-        [x as f64, ground(x, z) as f64, z as f64]
     }
 }
 

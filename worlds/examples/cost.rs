@@ -6,7 +6,8 @@
 //!
 //! for world, then optionally seed (REGIONS_SEED), `levels` (0 2 4 6), places to
 //! look at with `at` (lattice units; the spawn and the centres of the
-//! world's regions), and `all` for every count of every tile.
+//! world's regions there, around the places it names), and `all` for
+//! every count of every tile.
 
 use worldgen::cost::{places, report};
 use worlds::{REGIONS_SEED, WORLDS, by_name};
@@ -44,7 +45,9 @@ fn main() {
         levels = vec![0, 2, 4, 6];
     }
     if at.is_empty() {
-        at = places(&(entry.make)(seed), entry.regions);
+        let world = (entry.make)(seed);
+        let regions: Vec<_> = entry.regions.iter().map(|r| r.of(&world)).collect();
+        at = places(&world, &regions);
     }
     let report = report(&format!("{} (seed {seed})", entry.name), &|| (entry.make)(seed), &at, &levels);
     print!("{report}");

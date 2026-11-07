@@ -17,7 +17,9 @@ fn costs_keep_to_their_baselines() {
     let bless = std::env::var_os("COST_BLESS").is_some();
     let mut changed = Vec::new();
     for entry in WORLDS {
-        let places = places(&(entry.make)(REGIONS_SEED), entry.regions);
+        let world = (entry.make)(REGIONS_SEED);
+        let regions: Vec<_> = entry.regions.iter().map(|r| r.of(&world)).collect();
+        let places = places(&world, &regions);
         let report = report(&format!("{} (seed {REGIONS_SEED})", entry.name), &|| (entry.make)(REGIONS_SEED), &places, LEVELS);
         let path = format!("{}/data/cost/{}.txt", env!("CARGO_MANIFEST_DIR"), entry.name);
         if bless {

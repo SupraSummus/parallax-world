@@ -8,7 +8,7 @@ use std::rc::Rc;
 use worldgen::World;
 use worldgen::column;
 use worldgen::generator::{
-    ANY_SIZE, Cell, Child, Far, Field, Fill, Generator, Layer, Node, Op, Point, Population, SOLID, Shadows, Shape, Span, ball,
+    ANY_SIZE, Child, Far, Field, Fill, Generator, Layer, Line, Node, Op, Point, Population, SOLID, Shadows, Shape, Span, ball,
     bounds_of_shapes, capsule, ellipsoid, lathe,
 };
 use worldgen::grid::Box3;
@@ -192,8 +192,6 @@ struct Forest {
     spawn: [i64; 3],
     ground: Ground,
     columns: Plan<Column>,
-    /** Spots of columns of cells, by N and the column (spot's key), the last asked in each slot. */
-    spots: RefCell<Vec<([i64; 3], Point)>>,
 }
 
 /** The forest's own noise, by what it decides. */
@@ -255,25 +253,10 @@ impl Forest {
         chance * (self.ground.share)(x, z)
     }
 
-    /**
-     * A random spot on the ground under the square a cell reaches over
-     * (2N wide), if it may be in the cell: the same for every cell over a
-     * column, so the one the ground is in owns it. Kept, as a box of the
-     * mountains' heights asks every cell over a column for it in turn.
-     */
-    fn spot(&self, cell: &Cell) -> Option<Point> {
-        let key = [cell.n, cell.i, cell.k];
-        let slot = (hash(0, cell.n, cell.i, cell.k) & 4095) as usize;
-        let (kept, spot) = self.spots.borrow()[slot];
-        let spot = if kept == key {
-            spot
-        } else {
-            let spot = cell.on_ground_by(&mut Rng::new(hash64(self.s(19), cell.n, cell.i, cell.k)), |x, z| self.ground(x, z));
-            self.spots.borrow_mut()[slot] = (key, spot);
-            spot
-        };
-        // A cell reaches N from its centre along each axis.
-        ((spot[1] - cell.centre[1] as f64).abs() <= cell.n as f64).then_some(spot)
+    /** A spot on the ground picked evenly under a column of cells, the same for every population of its N. */
+    fn spot(&self, line: &Line) -> Point {
+        let [i, k] = line.across;
+        line.pick(&mut Rng::new(hash64(self.s(19), line.n, i, k)), |x, z| self.ground(x, z))
     }
 
     /** The chance a cell of trees around column (x, z) has one. */
@@ -313,7 +296,7 @@ pub fn forest(seed: u64) -> World {
     // Start on the path at the near end, at about the height of a tall shrub.
     let spawn = ground.on_path(vox(-31.0) as i64, vox(3.0) as i64);
     let generator = Generator { kinds: KINDS.to_vec(), seed: stream(seed, 4), layers: layers(seed, ground, spawn) };
-    World { generator, spawn, heights: HEIGHTS }
+    World { generator, spawn, heights: HEIGHTS, points: Vec::new() }
 }
 
 /** The forest's layers on `ground`, kept clear around `spawn`; their kinds are KINDS, first in the generator's. */
@@ -331,7 +314,7 @@ pub fn layers(seed: u64, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
             column_of(&noise, &path, x, z, h(x, z), [h(x - 1, z), h(x + 1, z), h(x, z - 1), h(x, z + 1)])
         })
     };
-    let f = Rc::new(Forest { seed, spawn, ground, columns, spots: RefCell::new(vec![([i64::MIN; 3], [0.0; 3]); 4096]) });
+    let f = Rc::new(Forest { seed, spawn, ground, columns });
 
     // The ground: along each column, soil or stone under a layer of its surface.
     let terrain = {
@@ -402,7 +385,7 @@ pub fn layers(seed: u64, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
         Population::new("trees", 1.0, tree_cell)
             .reach([vox(9.0) as i64, tree_top, vox(9.0) as i64])
             .size(vox(1.0) as i64)
-            .anchor(move |cell| anchor.spot(cell))
+            .anchor_along(1, move |line| Some(anchor.spot(line)))
             .make(move |[x, y, z], cell| {
                 let mut random = cell.random("tree");
                 let (xi, zi) = (x as i64, z as i64);
@@ -420,7 +403,7 @@ pub fn layers(seed: u64, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
     let rock_cell = vox(4.0) as i64;
     let on_ground = |name, reach| {
         let anchor = f.clone();
-        Population::new(name, 2.0, rock_cell).reach(reach).size(vox(2.0) as i64).anchor(move |cell| anchor.spot(cell))
+        Population::new(name, 2.0, rock_cell).reach(reach).size(vox(2.0) as i64).anchor_along(1, move |line| Some(anchor.spot(line)))
     };
     let boulders = {
         let f = f.clone();
@@ -449,8 +432,8 @@ pub fn layers(seed: u64, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
     let plants = Population::new("plants", 3.0, PLANTS)
         .reach([0, vox(10.0) as i64, 0])
         .size(column_width)
-        .anchor(move |cell| {
-            let [cx, _, cz] = cell.centre;
+        .anchor_along(1, move |line| {
+            let [cx, cz] = line.centre;
             Some([cx as f64, anchor.ground(cx, cz) as f64 + 0.5, cz as f64])
         })
         .make(move |_, cell| {

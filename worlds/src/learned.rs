@@ -24,13 +24,13 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::OnceLock;
 
-use worldgen::World;
 use worldgen::frame::{Frame, Part, U, V, W, back};
 use worldgen::generator::{ANY_SIZE, Child, Children, Field, Generator, Layer, Node, Op, Population, Shapes, Span};
 use worldgen::grid::Box3;
 use worldgen::noise::{Fx, Rng, fx, hash64, smoothstep, stream};
 use worldgen::plan::{Land, Plan};
 use worldgen::units::{Units, m};
+use worldgen::world::{Find, World};
 
 use crate::fields;
 use crate::forest::{self, GROUND_SCALE, Ground, K as F, PATH_SCALE, Relief};
@@ -489,6 +489,7 @@ impl Settlements {
 pub fn learned(seed: u64) -> World {
     let relief = Rc::new(Relief::new(seed));
     let settlements = Settlements::new(seed, relief.clone());
+    let first = settlements.clone();
     let path = {
         let (relief, settlements) = (relief.clone(), settlements.clone());
         Rc::new(Plan::new("path", PATH_SCALE, move |_, z| settlements.path_x(z, relief.path_x(z))))
@@ -521,7 +522,13 @@ pub fn learned(seed: u64) -> World {
     layers.extend(town_layers(settlements, land.clone(), ground.clone()));
     layers.extend(fields::layers(seed, land, FIELD, ground, path));
     let kinds = [forest::KINDS, town::KINDS, fields::KINDS].concat();
-    World { generator: Generator { kinds, seed: stream(seed, 4), layers }, spawn, heights: forest::HEIGHTS }
+    let first: Find = Box::new(move || first.sites.at(0, 0).map(|s| [s.x, s.level, s.z]).expect("the first settlement"));
+    World {
+        generator: Generator { kinds, seed: stream(seed, 4), layers },
+        spawn,
+        heights: forest::HEIGHTS,
+        points: vec![("settlement", first)],
+    }
 }
 
 /** The town's layers: its streets, paving and yards where it owns the land, and its settlements' houses. */
@@ -549,7 +556,7 @@ fn town_layers(settlements: Rc<Settlements>, land: Rc<Land>, ground: Rc<Plan<i64
         let anchor = settlements.clone();
         Population::new("settlements", 1.5, m(256.0))
             .reach([m(200.0), m(32.0), m(200.0)])
-            .anchor(move |cell| anchor.near(cell.centre[2]).map(|s| [s.x as f64, s.level as f64, s.z as f64]))
+            .anchor_along(1, move |line| anchor.near(line.centre[1]).map(|s| [s.x as f64, s.level as f64, s.z as f64]))
             .make(move |_, cell| {
                 let site = settlements.near(cell.centre[2])?;
                 let layout = settlements.layout(&site);
