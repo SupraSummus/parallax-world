@@ -310,6 +310,23 @@ and things as rare as the valley's haystacks are too few to tell.
 `worlds/tests/places.rs` checks each world in `WORLDS`,
 but for the populations it knows prefer places (`KNOWN`, docs/todo.md).
 
+Nor must a world's directions follow the lattice's.
+Its own may be anything: up, a heading, a valley along z.
+But about the vertical the lattice, square noise and tiles are four-fold,
+and leave a four-fold harmonic of horizontal directions
+at the lattice's phase, the same at every seed.
+`worldgen::directions` (`directions.rs`) measures it
+in pairs of points a few metres apart, in random directions,
+from how often the two differ in kind;
+seeds are the samples (Student's t, its chance over all the tests under 10⁻³).
+A world's own direction makes a four-fold harmonic too,
+but none larger than its two-fold one, so only the excess counts:
+a strong direction of the world's own hides as much of the lattice's.
+Each place a world names is tested apart, in a box around it at each seed,
+as is the rest of the world, in boxes anywhere.
+`worlds/tests/directions.rs` checks each world in `WORLDS`,
+but for the places it knows follow the lattice (`KNOWN`, docs/todo.md).
+
 Parts and far regions are checked at seed 42 only:
 they check how a world is drawn, not what a seed puts in it.
 With `--nocapture` it prints each level's margins;

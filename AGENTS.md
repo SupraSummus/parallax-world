@@ -83,6 +83,7 @@ worldgen/                    # The world-generation engine, moving to integers, 
 │   ├── picture.rs           # Pictures of a world at one level: rays through its voxels, as PNGs
 │   ├── cost.rs              # What generating costs: work counted by layer, reported for a world's tiles, against a baseline
 │   ├── places.rs            # Whether things prefer places: positions modulo periods, as on a grid, over seeds
+│   ├── directions.rs        # Whether a world's directions follow the lattice's: four-fold harmonics of pairs' directions, over seeds
 │   └── contract.rs          # The contract every world keeps, as checks for tests
 └── tests/contract.rs        # The engine on test worlds: fog, caves, a village, knobs on a wall; what it refuses
 worlds/                      # The worlds, on worldgen's public API only; the web's WebAssembly

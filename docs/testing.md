@@ -34,6 +34,7 @@ pnpm exec vitest run bake       # files matching "bake"
 | `worlds/tests/contract.rs`, `worldgen/tests/contract.rs` | Every world, and the engine's test worlds, keep the contract (`worldgen/src/contract.rs`): generated in pieces equals generated whole, levels agree on what rays see, and seen from above with level 0 |
 | `worlds/tests/cost.rs` | What generating each world costs, counted, stays within a quarter of its baseline (`worlds/data/cost/`; "Cost" in `docs/generators.md`) |
 | `worlds/tests/places.rs` | No world's things prefer places on its grids (`worldgen/src/places.rs`), but those known to (`KNOWN`, docs/todo.md) |
+| `worlds/tests/directions.rs`, `worldgen/src/directions.rs` | No world's directions follow the lattice's, but around the places known to (`KNOWN`, docs/todo.md); walls along the axes or the diagonals do; hills, gentle or steep, rows along z, and walls turned any way a seed likes don't |
 | `worlds/tests/forest.rs`, `worlds/tests/valley.rs`, `worlds/tests/city.rs` | The scenes: determinism, contents, spawn |
 | `src/lib/worldgen.test.ts` | The worlds as the web lists and gets them from WebAssembly |
 | `src/viewer/mesh.test.ts` | Reference viewer mesh |
