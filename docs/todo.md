@@ -232,6 +232,10 @@ Numbers are for the forest at 1280×800, as measured when written.
   Claims with hashed priorities between neighbouring regions
   ("Things of one band can't see each other" in `docs/generators.md`)
   would let each stand anywhere.
+- **The valley's town tiles are over the budget at levels 4 and 6**
+  (`OVER_BUDGET` in `worlds/tests/cost.rs`; `worlds/examples/cost.rs` shows why):
+  most of it is drawing the houses whole to measure them;
+  remembering measured forms would spare little ("Levels" in `docs/generators.md`).
 
 ## Ideas
 
@@ -294,9 +298,6 @@ Composing generators (section "Composing" of `docs/generators.md`), untried:
 
 - Bid per quantity: a land per channel (use, ground, wetness),
   each domain bidding in those it cares about, as the towns' terrace needs.
-- Measure a thing's far forms for all levels from one drawing:
-  `Far::measured` draws a thing whole again for each level and box,
-  most of a coarse tile's cost by a town (`worlds/examples/cost.rs`).
 - Place the houses as things of their own, from the plan of lots,
   not as children of one thing per town:
   a box in a town now draws the whole town's carves aside, in a buffer

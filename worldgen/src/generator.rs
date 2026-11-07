@@ -970,13 +970,20 @@ impl Own {
         };
         match look.faces.filter(|_| op != Op::Carve) {
             Some(faces) => self.faces.insert(i, faces),
-            None => self.faces.remove(&i),
+            // Most things have no faces of their own: hashing every site to find none would be most of drawing them.
+            None if !self.faces.is_empty() => self.faces.remove(&i),
+            None => None,
         };
     }
 
     /** What the thing has at (x, y, z): its site's kind (measured, its faces are measured anew) and how it meets the world. */
     fn at(&self, x: i64, y: i64, z: i64) -> Option<(Kind, Op)> {
-        let cell = self.cells[self.index(x, y, z)];
+        self.of(self.index(x, y, z))
+    }
+
+    /** What the thing has at index `i` of `cells`, as `at`. */
+    fn of(&self, i: usize) -> Option<(Kind, Op)> {
+        let cell = self.cells[i];
         let op = match cell >> 8 {
             1 => Op::Fill,
             2 => Op::Paint,
@@ -1335,15 +1342,15 @@ fn measure(node: &Node, key: &str, layer: &'static str, bounds: Box3, detail: Fi
         columns: [u32; 3],
         ends: [Counts; FACE_KINDS],
         seen: [Counts; FACE_KINDS],
-        kept: bool,
     }
     let count = |kinds: &mut Counts, kind: Kind, op: Op| match kinds.iter_mut().find(|e| e.0 == kind) {
         Some(e) => e.2 += 1,
         None => kinds.push((kind, op, 1)),
     };
     let n = own.n;
-    let at = |p: [i64; 3]| own.at(p[0] + own.b.min[0], p[1] + own.b.min[1], p[2] + own.b.min[2]);
-    let cell_of = |p: [i64; 3]| nearest_site([0, 1, 2].map(|c| (p[c] + own.b.min[c]) * f * ONE), s);
+    // A fine point's coordinate along an axis in units of the coarse sites' spacing, then its cell.
+    let scaled = |c: usize, v: i64| ((v + own.b.min[c]) * f * ONE).div_euclid(s);
+    let cell_of = |p: [i64; 3]| nearest_unit_site([0, 1, 2].map(|c| scaled(c, p[c])));
     // The cells of the coarse sites from those of its box's corners and two more on each side, in an array:
     // nearest_site rounds each coordinate, then may move one by one, the corners' included.
     let lo = cell_of([0; 3]).map(|v| v - 2);
@@ -1355,20 +1362,34 @@ fn measure(node: &Node, key: &str, layer: &'static str, bounds: Box3, detail: Fi
         [i % m[0] + lo[0], i / m[0] % m[1] + lo[1], i / (m[0] * m[1]) + lo[2]]
     };
     let mut cells: Vec<Stats> = (0..m[0] * m[1] * m[2]).map(|_| Stats::default()).collect();
+    // Fine points by their index in `own` (x first): steps along each axis, and the cell of each fine site
+    // (x + y + z even), found once for all the passes.
+    let stride = [1, n[0], n[0] * n[1]];
+    let parity = own.b.min.iter().sum::<i64>();
+    let units: [Vec<Fixed>; 3] = std::array::from_fn(|c| (0..n[c]).map(|v| scaled(c, v)).collect());
+    let mut cell_at = vec![u32::MAX; own.cells.len()];
+    for z in 0..n[2] {
+        for y in 0..n[1] {
+            let row = (y * stride[1] + z * stride[2]) as usize;
+            for x in ((y + z + parity) & 1..n[0]).step_by(2) {
+                let v = [units[0][x as usize], units[1][y as usize], units[2][z as usize]];
+                cell_at[row + x as usize] = index(nearest_unit_site(v)) as u32;
+            }
+        }
+    }
     // Along each axis, how many of a cell's columns hold a fine site: a column crosses each cell once (they are
     // convex), so a run of it in a cell is one of the cell's columns.
     for axis in 0..3 {
         let (a, b) = ((axis + 1) % 3, (axis + 2) % 3);
-        let mut p = [0i64; 3];
         for i in 0..n[a] {
             for j in 0..n[b] {
-                (p[a], p[b]) = (i, j);
                 let mut cell = None;
                 for k in 0..n[axis] {
-                    p[axis] = k;
-                    if at(p).is_some() && cell != Some(cell_of(p)) {
-                        cell = Some(cell_of(p));
-                        cells[index(cell_of(p))].columns[axis] += 1;
+                    let p = (i * stride[a] + j * stride[b] + k * stride[axis]) as usize;
+                    let c = cell_at[p] as usize;
+                    if own.of(p).is_some() && cell != Some(c) {
+                        cell = Some(c);
+                        cells[c].columns[axis] += 1;
                     }
                 }
             }
@@ -1380,53 +1401,66 @@ fn measure(node: &Node, key: &str, layer: &'static str, bounds: Box3, detail: Fi
     // One threshold for the whole thing, not one per site: a solid thing keeps a whole outline,
     // not a ragged one; a porous one is kept or not as a whole, in proportion over many.
     let threshold = unit(hash(kept, 0, 0, 0));
-    for stats in &mut cells {
-        stats.kept = threshold < (0..3).map(|i| stats.columns[i] as f64 / all[i] as f64).sum::<f64>() / 3.0;
-    }
+    let keeps: Vec<bool> =
+        cells.iter().map(|stats| threshold < (0..3).map(|i| stats.columns[i] as f64 / all[i] as f64).sum::<f64>() / 3.0).collect();
     // Columns along each line of nearest neighbours d, from its start on the side of −d to its end on the side of
     // d: rays coming from either end see the faces towards it.
     for (from_end, d) in VOXEL_FACES.iter().enumerate().filter(|(_, d)| d.iter().find(|v| **v != 0) == Some(&-1)) {
         let d = d.map(i64::from);
         let from_start = VOXEL_FACES.iter().position(|e| e.map(i64::from) == d.map(|v| -v)).expect("−d is a face");
-        let inside = |p: [i64; 3]| (0..3).all(|c| (0..n[c]).contains(&p[c]));
-        // Columns of sites start where a step back leaves the box.
-        let parity = own.b.min.iter().sum::<i64>();
-        for start in (0..n[0]).flat_map(|x| (0..n[1]).flat_map(move |y| (0..n[2]).map(move |z| [x, y, z]))) {
-            if (start.iter().sum::<i64>() + parity) & 1 != 0 || inside([0, 1, 2].map(|c| start[c] - d[c])) {
-                continue;
-            }
-            let column: Vec<[i64; 3]> =
-                std::iter::successors(Some(start), |p| Some([0, 1, 2].map(|c| p[c] + d[c]))).take_while(|p| inside(*p)).collect();
-            // The runs of its fine sites in each cell: what they start with seen from either end.
-            let (mut run, mut first, mut last): (Option<([i64; 3], Kind, Op)>, _, _) = (None, None, None);
-            for &p in &column {
-                let Some((kind, op)) = at(p) else { continue };
-                first.get_or_insert((kind, op));
-                last = Some((kind, op));
-                let cell = cell_of(p);
-                if run.is_none_or(|(c, ..)| c != cell) {
-                    if let Some((c, kind, op)) = run {
-                        count(&mut cells[index(c)].ends[from_end], kind, op);
+        let step: i64 = (0..3).map(|c| d[c] * stride[c]).sum();
+        // Columns of sites start where a step back leaves the box: on its side of −d along an axis d moves on.
+        let edge = |c: usize, v: i64| d[c] != 0 && v == if d[c] < 0 { n[c] - 1 } else { 0 };
+        // In order of x, y, z, as counts keep the first way a kind meets the world they are given.
+        let starts = (0..n[0]).flat_map(|x| (0..n[1]).map(move |y| [x, y]));
+        for [x, y] in starts {
+            let zs = if edge(0, x) || edge(1, y) {
+                0..n[2]
+            } else if d[2] != 0 && n[2] > 0 {
+                let z = if d[2] < 0 { n[2] - 1 } else { 0 };
+                z..z + 1
+            } else {
+                0..0
+            };
+            for z in zs.filter(|z| (x + y + z + parity) & 1 == 0) {
+                let start = [x, y, z];
+                let origin = x + y * stride[1] + z * stride[2];
+                let length =
+                    (0..3).filter(|c| d[*c] != 0).map(|c| if d[c] > 0 { n[c] - start[c] } else { start[c] + 1 }).min().expect("d moves");
+                // The runs of its fine sites in each cell: what they start with seen from either end;
+                // and the first kept cell it crosses from either end.
+                let (mut run, mut first, mut last): (Option<(usize, Kind, Op)>, _, _) = (None, None, None);
+                let (mut start_cell, mut end_cell) = (None, None);
+                for p in (0..length).map(|t| (origin + t * step) as usize) {
+                    let cell = cell_at[p] as usize;
+                    if keeps[cell] {
+                        start_cell.get_or_insert(cell);
+                        end_cell = Some(cell);
                     }
-                    count(&mut cells[index(cell)].ends[from_start], kind, op);
+                    let Some((kind, op)) = own.of(p) else { continue };
+                    first.get_or_insert((kind, op));
+                    last = Some((kind, op));
+                    if run.is_none_or(|(c, ..)| c != cell) {
+                        if let Some((c, kind, op)) = run {
+                            count(&mut cells[c].ends[from_end], kind, op);
+                        }
+                        count(&mut cells[cell].ends[from_start], kind, op);
+                    }
+                    run = Some((cell, kind, op));
                 }
-                run = Some((cell, kind, op));
-            }
-            if let Some((c, kind, op)) = run {
-                count(&mut cells[index(c)].ends[from_end], kind, op);
-            }
-            // What rays along it see first from either end, credited to the first kept cell it crosses from there.
-            let kept_from = |points: &mut dyn Iterator<Item = &[i64; 3]>| points.map(|p| index(cell_of(*p))).find(|&i| cells[i].kept);
-            let (start_cell, end_cell) = (kept_from(&mut column.iter()), kept_from(&mut column.iter().rev()));
-            for (face, shown, cell) in [(from_start, first, start_cell), (from_end, last, end_cell)] {
-                if let (Some((kind, op)), Some(i)) = (shown, cell) {
-                    count(&mut cells[i].seen[face], kind, op);
+                let (Some((c, kind, op)), Some(first), Some(last)) = (run, first, last) else { continue };
+                count(&mut cells[c].ends[from_end], kind, op);
+                // What rays along it see first from either end, credited to the first kept cell it crosses from there.
+                for (face, (kind, op), cell) in [(from_start, first, start_cell), (from_end, last, end_cell)] {
+                    if let Some(i) = cell {
+                        count(&mut cells[i].seen[face], kind, op);
+                    }
                 }
             }
         }
     }
     let mut sites = Vec::new();
-    for (i, stats) in cells.into_iter().enumerate().filter(|(_, stats)| stats.kept) {
+    for (i, stats) in cells.into_iter().enumerate().filter(|(i, _)| keeps[*i]) {
         let site = site_of(i);
         let [x, y, z] = site;
         let faces: [Counts; FACE_KINDS] =
@@ -1560,7 +1594,11 @@ const EVERYWHERE: Box3 = Box3 { min: [i64::MIN / 4; 3], max: [i64::MAX / 4; 3] }
 
 /** The site of sites `s` apart nearest to a point: the one whose voxel holds it. */
 fn nearest_site(p: At, s: i64) -> [i64; 3] {
-    let v = p.map(|c| c.div_euclid(s));
+    nearest_unit_site(p.map(|c| c.div_euclid(s)))
+}
+
+/** The site nearest to `v`, in units of the sites' spacing (nearest_site of a point divided by it). */
+fn nearest_unit_site(v: At) -> [i64; 3] {
     let mut r = v.map(|c| (c + ONE / 2) >> 16);
     if (r[0] + r[1] + r[2]) & 1 != 0 {
         // Round the coordinate furthest from its integer the other way.
