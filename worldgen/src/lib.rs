@@ -7,6 +7,7 @@ pub mod build;
 pub mod column;
 pub mod contract;
 pub mod cost;
+pub mod curve;
 pub mod directions;
 pub mod frame;
 pub mod generator;

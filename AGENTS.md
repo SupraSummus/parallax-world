@@ -75,6 +75,7 @@ worldgen/                    # The world-generation engine, moving to integers, 
 │   ├── build.rs             # Short forms to write worlds with: constructors of fields, populations, nodes, solid shapes
 │   ├── column.rs            # A heightfield's spans, each tall enough to keep a site at every level
 │   ├── plan.rs              # Plans by column, each from coarser ones only; land domains bid for; claims, things kept apart anywhere
+│   ├── curve.rs             # Curves: lines through space made top-down within narrowing corridors; where one passes nearest a point
 │   ├── frame.rs             # Things built in frames of their own: quarter turns, mirrors, walls
 │   ├── world.rs             # World: what a host needs to show one (generator, spawn, heights), the places it names
 │   ├── picture.rs           # Pictures of a world at one level: rays through its voxels, as PNGs
@@ -87,6 +88,7 @@ worlds/                      # The worlds, on worldgen's public API only; the we
 ├── src/
 │   ├── lib.rs               # WORLDS: the registry hosts start worlds from by name, with the regions checked around their places
 │   ├── forest.rs            # The forest, on ground it may share
+│   ├── path.rs              # The forest's path along the valley: its centre line by z, and a curve through it
 │   ├── town.rs, fields.rs   # Towns along the path, farmland around them: the valley's other domains
 │   ├── landmarks.rs         # The valley's fourth domain: a keep, a watchtower, chapels, ponds, farmsteads, windmills
 │   ├── valley.rs            # The valley: the five domains on one land

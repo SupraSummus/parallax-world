@@ -74,6 +74,24 @@ so boxes stay boxes and a part's sites land on its parent's.
 `walls` gives a footprint's four walls as frames, u along each and w into it,
 so one window serves every wall of a house, a nave or a tower.
 
+**Curves** (`curve.rs`) are lines through space: a path, a river, a tunnel.
+A curve runs between two ends and is made top-down:
+each level puts a point between each two of the level before,
+at most its `wander` from their middle,
+reading only them and what is coarser.
+So the curve between two neighbours of a level
+stays within the finer levels' wanders, summed, of the segment between them:
+its corridor.
+`near` finds where a curve passes nearest a point, if within a distance:
+how far, how far along, and the point.
+It looks only into segments whose corridor reaches that near,
+so it costs little but close to the curve.
+One rule serves every piece of a curve too long to make whole,
+between ends the world finds near a point.
+The forest's path (`worlds/src/path.rs`) is one, in pieces 8 m long:
+what is on it or keeps off it measures from the curve;
+the valley is laid out across its centre line, along x.
+
 No direction is special;
 a world with a ground says so in its fields and anchors.
 
@@ -208,6 +226,9 @@ Broken rules panic, naming the thing and pointing here:
   siblings have unique names;
   a measured far form starts at a `detail` of a unit or more.
 - **Plans.** A plan reads only plans at least as coarse (see "Bands").
+- **Curves.** A curve's point stays within its level's `wander`;
+  only points a query looks at are checked,
+  so derive `wander` from the most a rule can stray.
 - **Kinds.** A world has at most 255 materials: ids are bytes.
 
 Not checked, but caught by the tests:

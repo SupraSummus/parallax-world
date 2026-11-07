@@ -252,6 +252,17 @@ Numbers are for the forest at 1280×800, as measured when written.
   The valley's landmarks: 118 at eight seeds (not 686 as one per region),
   under ENOUGH a seed, so no seed is tested alone;
   its towns 57, its haystacks 2.
+- **The valley is still laid out along x, across the path's centre line.**
+  The path is a curve (`worlds/src/path.rs`),
+  but the ground's walls and dip, the ranges, the fields' plots
+  and the landmarks measure across its centre line.
+  A curve's distance folds past a bend's radius
+  (16 m at the tightest, where the path bends onto a street),
+  which would crease the walls and the ranges,
+  and costs a search far from the curve;
+  what is far would read a coarser band of the curve, its mean.
+  The moor's stream (`stream_distance` in `moor.rs`) is measured along x too;
+  from a curve its banks would move where it bends, so it is left as it is.
 
 ## Ideas
 
@@ -329,6 +340,16 @@ Composing generators (section "Composing" of `docs/generators.md`), untried:
   (`Plan::sampled` at the spacing), since plans declare their scale:
   coarse levels would skip fine bands' cost as they skip their things.
   Plans of categories are read dithered already ("Plans" in "Levels").
+- A railway, the first new user of curves (`curve.rs`):
+  stations claimed near towns or landmarks;
+  a graph between them, made locally;
+  each edge refined top-down, at each level a midpoint picked among candidates
+  by cost, within a wander a quarter the level before's,
+  so it keeps within a known corridor and bends no sharper than the wanders let;
+  a height profile along it, the terrain smoothed under a slope limit;
+  bridges, tunnels, cuttings and embankments where the profile leaves the ground;
+  things along it by arc length, sleepers and piers.
+  Curves still lack arc length from an end (`Near::along` counts segments).
 - Solve what a coarse cell decides (a block's lots, a room's furniture)
   with a small search whose boundaries the coarser band fixes:
   constraint solving stays local and needs no backtracking across cells.

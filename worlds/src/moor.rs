@@ -21,9 +21,10 @@ use worldgen::noise::{Fbm, Fx, Rng, ValueNoise, ease_towards, fx, hash64, smooth
 use worldgen::plan::{Claims, Land, Plan};
 use worldgen::units::{Units, m};
 
-use crate::forest::{self, K as F};
+use crate::forest::K as F;
 use crate::landmarks::{self, Landmarks};
 use crate::mountains::K as A;
+use crate::path::Path;
 use crate::town::K as T;
 use crate::valley::{self, Terrain};
 
@@ -436,7 +437,7 @@ impl Uplands {
 pub struct Ground {
     pub ground: Rc<Plan<i64>>,
     pub land: Option<(Rc<Land>, usize)>,
-    pub path: Option<Rc<Plan<Fx>>>,
+    pub path: Option<Rc<Path>>,
     pub bottom: Option<i64>,
 }
 
@@ -459,9 +460,9 @@ impl Moor {
         self.ground.land.as_ref().map_or(Fx::ONE, |(land, me)| land.share(*me, x, z))
     }
 
-    /** Whether column (x, z) is within `distance` of the centre line of the path through it, if any. */
+    /** Whether column (x, z) is within `distance` of the path through it, if any. */
     fn by_path(&self, x: i64, z: i64, distance: Fx) -> bool {
-        self.ground.path.as_ref().is_some_and(|p| forest::path_distance(p, x, z) < distance)
+        self.ground.path.as_ref().is_some_and(|p| p.by(x, z, distance))
     }
 }
 

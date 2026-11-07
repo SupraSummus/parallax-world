@@ -10,6 +10,7 @@ pub mod landmarks;
 pub mod learned;
 pub mod moor;
 pub mod mountains;
+pub mod path;
 pub mod town;
 pub mod valley;
 pub mod wasm;
