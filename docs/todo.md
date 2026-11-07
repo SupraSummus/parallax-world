@@ -56,10 +56,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   Caching Rust's builds would spare little: `libm` is their one dependency.
   Not tried: one Cargo target for `bake/`, `worldgen/` and `worlds/`,
   each of which now builds the ones before it again.
-- **`coarsen` serves only tests.**
-  Every world is generated at each level;
-  only tests' worlds of voxels (`World.ofVoxels`) are coarsened, in TS.
-  Tests on small generated worlds would let it go.
 - **Slicing keeps a leak bound slices need less.**
   Drawn in relief, slices of the bound leak nothing,
   and much thicker ones only where a column has a gap

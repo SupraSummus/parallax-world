@@ -2,8 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { SPLAT } from './chunk-baker'
 import { ParallaxRenderer, type Frame } from './renderer'
 import { picture } from './picture.test-helper'
-import type { Voxel } from './voxel-grid'
-import { World } from './world'
+import { ofVoxels, type Voxel } from './scene.test-helper'
 
 // One surface: a lawn of three greens, a layer of sites on soil.
 const GREENS = ['#5f8f3a', '#679a40', '#588536']
@@ -15,7 +14,7 @@ for (let x = -200; x <= 200; x++) {
     }
   }
 }
-const lawn = World.ofVoxels(voxels, { x: 0, y: 30, z: 0 })
+const lawn = ofVoxels(voxels, { x: 0, y: 30, z: 0 })
 
 /** The frame at `yaw`, looking down. */
 const view = (yaw: number) => {

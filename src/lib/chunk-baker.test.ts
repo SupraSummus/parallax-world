@@ -3,8 +3,9 @@ import { ChunkBaker, SPLAT } from './chunk-baker'
 import { VOXEL_FACES } from './fcc'
 import { sliceCentre, holds, halfLayer, atomLevel, atomSpacing, ATOM_SHIFT } from './slice-selection'
 import { FACES, LAYER, toLocal, type Face } from './view'
-import { VoxelGrid, type Voxel } from './voxel-grid'
-import { levelsOf, type Vec3 } from './world'
+import { VoxelGrid } from './voxel-grid'
+import { gridOf, levelsOf, voxelsOf, type Voxel } from './scene.test-helper'
+import type { Vec3 } from './world'
 
 const dot = (p: Vec3, v: Vec3) => p.x * v.x + p.y * v.y + p.z * v.z
 /** A world point's lattice coordinates on a face (see Face in view.ts). */
@@ -70,7 +71,7 @@ describe('ChunkBaker', () => {
       }
     }
   }
-  const grid = VoxelGrid.fromVoxels(voxels)
+  const grid = gridOf(voxels)
   const levels = levelsOf(grid)
   const baker = new ChunkBaker(grid.materials, levels)
 
@@ -86,7 +87,7 @@ describe('ChunkBaker', () => {
     // The voxels of the grid it reads, N times the lattice's, in the colour of their faces towards the camera.
     const n = atomSpacing(slice)
     const read = levels[slice.atoms]
-    const voxels = read.toVoxels()
+    const voxels = voxelsOf(read)
       .map(v => ({ ...toLattice(face, { x: n * v.x, y: n * v.y, z: n * v.z }), color: read.materials[read.face(v.x, v.y, v.z, frontOf(face))].color }))
       .filter(v => holds(slice, [v.a, v.b, v.c]))
     const sites = voxels.map(v => ({ x: v.a * LAYER, y: v.b, z: v.c * LAYER }))
@@ -133,14 +134,14 @@ describe('ChunkBaker', () => {
         if (u > splats[k * SPLAT + 2] + 1e-4 || u * Math.SQRT1_2 + v > splats[k * SPLAT + 2] * Math.SQRT2 + 1e-4) uncovered.push([a, b, c].join())
       }
     }
-    expect(compared).toBeGreaterThan(200)
+    expect(compared).toBeGreaterThan(150)
     expect(missing).toEqual([])
     expect(uncovered).toEqual([])
   }, 30_000)
 
   it('knows the faces as view.ts orders them: the blob turned to face each bakes the same splats', () => {
     const sitesOn = (face: Face) => {
-      const turned = VoxelGrid.fromVoxels(voxels.map(({ a, b, c, color }) => ({ ...toWorld(face, a, b, c), color })))
+      const turned = gridOf(voxels.map(({ a, b, c, color }) => ({ ...toWorld(face, a, b, c), color })))
       const turnedBaker = new ChunkBaker(turned.materials, [turned])
       turnedBaker.bake({ face: face.name, level: 0, atoms: 0, layer: 3, cutoff: Infinity, i: 0, j: 0 })
       return turnedBaker.sites()

@@ -1,5 +1,5 @@
 import { GRID_LEVELS, GRID_REACH } from './slice-selection'
-import { BRICK, coarsen, LayerIndex, VoxelGrid, type Box, type Material, type Voxel, type VoxelData } from './voxel-grid'
+import { BRICK, LayerIndex, VoxelGrid, type Box, type Material, type VoxelData } from './voxel-grid'
 import { generated, worlds } from './worldgen'
 
 export interface Vec3 {
@@ -77,22 +77,10 @@ export function generatePart(seed: number, worldType: WorldType, { level, box }:
 }
 
 /**
- * A grid at each level of detail the renderer reads (GRID_LEVELS): `grid`,
- * then each the last one coarsened.
- * @internal
- */
-export function levelsOf(grid: VoxelGrid): VoxelGrid[] {
-  const levels = [grid]
-  while (levels.length < GRID_LEVELS) levels.push(coarsen(levels[levels.length - 1]))
-  return levels
-}
-
-/**
  * A procedurally generated voxel world (worldgen.ts's): a grid at each
  * level of detail the renderer reads, generated level by level, in tiles,
  * around the camera, anywhere (missingParts, receive), or here when asked
- * for (levels). Tests' scenes are worlds of voxels alone (ofVoxels),
- * coarsened.
+ * for (levelAround). Tests' scenes are given, a grid per level.
  */
 export class World {
   readonly seed: number
@@ -101,7 +89,7 @@ export class World {
   readonly spawn: Readonly<Vec3>
 
   private readonly source: Generated | undefined
-  // By level; generated worlds' only once generated, those of voxels coarsened on first use.
+  // By level; generated worlds' only once generated.
   private grids: (VoxelGrid | undefined)[] = []
   // The tile each generated grid is centred on, by level.
   private centres: (Tile | undefined)[] = []
@@ -113,30 +101,19 @@ export class World {
   private indices: (LayerIndex[] | undefined)[] = []
   // By level, the grid being generated.
   private pending = new Map<number, Pending>()
-  // Voxels as a list, built from the grid on first use.
-  private list: Voxel[] | null = null
 
-  /** The world `worldType` (one of worldTypes()) of `seed`; for a scene, see ofVoxels. */
-  constructor(seed: number = Date.now(), worldType: WorldType = 'valley', scene?: { grid: VoxelGrid; spawn: Readonly<Vec3> }) {
+  /** The world `worldType` (one of worldTypes()) of `seed`; or tests' `scene`, its grid of each level given (scene.test-helper.ts). */
+  constructor(seed: number = Date.now(), worldType: WorldType = 'valley', scene?: { levels: readonly VoxelGrid[]; spawn: Readonly<Vec3> }) {
     this.seed = seed
     this.worldType = worldType
     if (scene) {
-      this.grids = [scene.grid]
+      this.grids = [...scene.levels]
       this.spawn = scene.spawn
       return
     }
     // Generated level by level, in parts.
     this.source = generated(worldType, seed)
     this.spawn = this.source.spawn
-  }
-
-  /**
-   * A world of `voxels` alone, its coarser levels coarsened from them:
-   * tests' scenes.
-   * @internal
-   */
-  static ofVoxels(voxels: readonly Voxel[], spawn: Readonly<Vec3> = { x: 0, y: 0, z: 0 }): World {
-    return new World(0, 'voxels', { grid: VoxelGrid.fromVoxels(voxels), spawn })
   }
 
   /** The materials of every grid's ids. */
@@ -146,23 +123,10 @@ export class World {
 
   /**
    * The grid of `level` of detail, if there is one yet: a generated world's
-   * once generated (receive), one of voxels' always.
+   * once generated (receive), a scene's always.
    */
   level(level: number): VoxelGrid | undefined {
-    if (!this.source) {
-      for (let l = this.grids.length; l <= level; l++) this.grids.push(coarsen(this.grids[l - 1] as VoxelGrid))
-    }
     return this.grids[level]
-  }
-
-  /** The grid at each level of detail the renderer reads, generated here (around the spawn point) if not yet. */
-  get levels(): VoxelGrid[] {
-    return Array.from({ length: GRID_LEVELS }, (_, level) => this.generate(level))
-  }
-
-  /** The voxels as stored at level 0, generated here (around the spawn point) if not yet. */
-  get grid(): VoxelGrid {
-    return this.generate(0)
   }
 
   /**
@@ -280,18 +244,6 @@ export class World {
     this.pending.delete(level)
     if (this.centres[level]) this.versions[level] = this.version(level) + 1
     this.centres[level] = centre
-    if (level === 0) this.list = null
     return (this.grids[level] = grid)
-  }
-
-  /** The grid of `level`; if there is none, generated here around the spawn point. */
-  private generate(level: number): VoxelGrid {
-    return this.level(level) ?? this.levelAround(level, this.spawn)
-  }
-
-  /** The voxels as a list, ordered by z, y, x. */
-  get voxels(): Voxel[] {
-    this.list ??= this.grid.toVoxels()
-    return this.list
   }
 }

@@ -2,8 +2,8 @@
  * Tests' small scene with trees, a world of voxels: rendering the forest
  * takes seconds per test, this moments.
  */
-import type { Voxel } from './voxel-grid'
-import { World } from './world'
+import { ofVoxels, type Voxel } from './scene.test-helper'
+import type { World } from './world'
 
 /** Hills 80 blocks wide, grass on dirt on stone, trees here and there; the camera starts south of them, above. */
 export function hills(seed: number): World {
@@ -35,5 +35,5 @@ export function hills(seed: number): World {
       }
     }
   }
-  return World.ofVoxels([...sites.values()], { x: 0, y: 40, z: -140 })
+  return ofVoxels([...sites.values()], { x: 0, y: 40, z: -140 })
 }

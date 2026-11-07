@@ -6,7 +6,7 @@ import { picture } from './picture.test-helper'
 import { VoxelGrid } from './voxel-grid'
 import { WorkerBakery, type BakeWorker } from './worker-bakery'
 import { GRID_LEVELS } from './slice-selection'
-import { levelsOf, World } from './world'
+import { World } from './world'
 import { hills } from './hills.test-helper'
 
 // A small stand-in for the forest, which the workers generate in moments.
@@ -14,6 +14,7 @@ vi.mock('./worldgen', async () => (await import('./small-forest.test-helper')).s
 
 // A small world with trees, as in renderer.test.ts.
 const world = hills(12345)
+const levels = Array.from({ length: GRID_LEVELS }, (_, level) => world.levelAround(level, world.spawn))
 
 /** bake.worker.ts in microtasks: asynchronous and in order, like a worker, and done before the next timer. */
 class FakeWorker implements BakeWorker {
@@ -48,7 +49,7 @@ function workerRenderer(workers = [new FakeWorker(), new FakeWorker()]) {
  * `bake` returns how many it baked, `baked` how many in all.
  */
 function slowRenderer() {
-  const baker = new ChunkBaker(world.materials, world.levels)
+  const baker = new ChunkBaker(world.materials, levels)
   let wanted: ChunkRequest[] = []
   let deliver: Parameters<Bakery['connect']>[0] = () => undefined
   const renderer = new ParallaxRenderer(world, { bakery: { connect(d) { deliver = d }, setWorld() {}, addGrid() {}, generate() {}, want(r) { wanted = r } } })
@@ -196,7 +197,7 @@ describe('WorkerBakery', () => {
       handle({ type: 'want', requests: encodeRequests(cells.map(at)), received })
     }
     const run = (count = Infinity) => { for (; count > 0 && steps.length > 0; count--) steps.shift()?.() }
-    handle({ type: 'world', generation: 1, materials: world.materials, levels: world.levels })
+    handle({ type: 'world', generation: 1, materials: world.materials, levels })
     want(0, 0, 1, 2)
     run(1)
     // Replaces what is left; 0 is on its way, so not baked again.
@@ -213,7 +214,7 @@ describe('WorkerBakery', () => {
     const posts: number[] = []
     let step: () => void = () => undefined
     const handle = bakeHandler(result => { if (result.type === 'chunks') posts.push(result.baked.length) }, s => { step = s }, Infinity)
-    handle({ type: 'world', generation: 1, materials: world.materials, levels: world.levels })
+    handle({ type: 'world', generation: 1, materials: world.materials, levels })
     handle({ type: 'want', requests: encodeRequests([0, 1, 2].map(at)), received: 0 })
     step()
     expect(posts).toEqual([3])
@@ -308,15 +309,15 @@ describe('WorkerBakery', () => {
 
   it('drops chunks baked from a replaced world', async () => {
     const request = { face: '+x+z', level: 5, atoms: 1, layer: 0, cutoff: Infinity, i: 0, j: 0, grid: 0 }
-    expect(new ChunkBaker(world.materials, world.levels).bake(request).splats.length).toBeGreaterThan(0)
+    expect(new ChunkBaker(world.materials, levels).bake(request).splats.length).toBeGreaterThan(0)
 
     const bakery = new WorkerBakery([new FakeWorker()])
     const delivered: number[] = []
     bakery.connect((_, chunk) => { delivered.push(chunk.splats.length) })
-    bakery.setWorld(world.materials, world.levels)
+    bakery.setWorld(world.materials, levels)
     bakery.want([request])
-    const empty = VoxelGrid.fromVoxels([])
-    bakery.setWorld(empty.materials, levelsOf(empty))
+    const empty = new VoxelGrid({ minX: 0, minY: 0, minZ: 0, maxX: 0, maxY: 0, maxZ: 0 }, [{ color: '' }])
+    bakery.setWorld(empty.materials, Array.from({ length: GRID_LEVELS }, () => empty))
     bakery.want([request])
     await tick()
     expect(delivered).toEqual([0])

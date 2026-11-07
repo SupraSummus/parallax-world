@@ -25,7 +25,7 @@ export function smallForest(seed: number): Generated {
           // In lattice units: sites of the level are s apart.
           const top = 1 + Math.round(8 * Math.sin((x * s) / 40) * Math.sin((z * s) / 40))
           const shade = 1 + ((((x * s) >> 3) ^ ((z * s) >> 3) ^ parity) & 1)
-          grid.fillBox(x, Math.ceil(-8 / s), z, x + 1, Math.ceil(top / s), z + 1, shade)
+          for (let y = Math.ceil(-8 / s); y < Math.ceil(top / s); y++) grid.set(x, y, z, shade)
         }
       }
       generated.set(key, grid)

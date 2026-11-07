@@ -25,7 +25,7 @@ pnpm exec vitest run bake       # files matching "bake"
 | `src/lib/pillars.test.ts` | Each column a pillar over its run shows a lawn without the soil under it; without runs, stripes |
 | `src/lib/view.test.ts` | Camera basis, faces, projection, culling |
 | `bake/src/walk.rs`, `worlds/tests/forest.rs` | Walking: the ground, steps, walls, jumps; the forest's path through its ferns |
-| `src/lib/voxel-grid.test.ts` | Storage on the lattice, `LayerIndex`, coarsening |
+| `src/lib/voxel-grid.test.ts` | Storage on the lattice, `LayerIndex` |
 | `src/lib/renderer.test.ts` | Slices and chunks in view, placement, caching, stats (on a small world) |
 | `src/lib/worker-bakery.test.ts` | Baking in workers (simulated) gives the same frames; what is baked first, and when not at all |
 | `src/lib/renderer-regressions.test.ts` | Previously fixed rendering bugs |
@@ -41,6 +41,8 @@ pnpm exec vitest run bake       # files matching "bake"
 `src/lib/picture.test-helper.ts` stands in for the compositor in tests that compare pictures,
 `src/lib/small-forest.test-helper.ts` for the forest where it would be too slow,
 and `src/lib/hills.test-helper.ts` is a small scene with trees, a world of voxels, for the renderer's tests.
+`src/lib/scene.test-helper.ts` makes such worlds of hand-made voxels,
+their coarser levels sampled at their sites.
 `src/dom.test-helper.ts`, imported by UI tests, stubs what jsdom lacks:
 a no-op 2D canvas context
 (no WebGL, so `compositor.ts` is only checked in the browser),
