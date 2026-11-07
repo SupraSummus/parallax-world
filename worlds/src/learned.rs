@@ -33,7 +33,8 @@ use worldgen::units::{Units, m};
 use worldgen::world::{Find, World};
 
 use crate::fields;
-use crate::forest::{self, GROUND_SCALE, Ground, K as F, PATH_SCALE, Relief};
+use crate::forest::{self, GROUND_SCALE, Ground, K as F, Relief};
+use crate::path::Path;
 use crate::town::{self, House, K as T, Style, TOWNS_SCALE};
 
 /** The rule table, learned in lab/ (examples/export.rs) from 54 of the valley's towns. */
@@ -496,12 +497,12 @@ pub fn learned(seed: u64) -> World {
     let first = settlements.clone();
     let path = {
         let (relief, settlements) = (relief.clone(), settlements.clone());
-        Rc::new(Plan::new("path", PATH_SCALE, move |_, z| settlements.path_x(z, relief.path_x(z))))
+        Rc::new(Path::new(move |z| settlements.path_x(z, relief.path_x(z))))
     };
     let ground = {
         let (settlements, path) = (settlements.clone(), path.clone());
         Rc::new(Plan::new("ground", GROUND_SCALE, move |x, z| {
-            settlements.terraced(x, z, relief.ground(x, z, forest::path_distance(&path, x, z))).round_units().0
+            settlements.terraced(x, z, relief.ground(x, z, path.across(x, z))).round_units().0
         }))
     };
     // What the grammar drew bids for each column, outright: the forest bids nothing.

@@ -14,6 +14,7 @@ use worldgen::plan::{Land, Plan};
 use worldgen::units::{Units, m};
 
 use crate::forest::K as F;
+use crate::path::Path;
 use crate::town::{self, Towns};
 
 kinds! {
@@ -67,7 +68,7 @@ struct Fields {
     land: Rc<Land>,
     me: usize,
     /** The forest's path. */
-    path: Rc<Plan<Fx>>,
+    path: Rc<Path>,
     warp: ValueNoise<{ m(64.0) }>,
 }
 
@@ -78,10 +79,10 @@ impl Fields {
      * a hedge on some of their edges.
      */
     fn crop(&self, x: i64, z: i64) -> Option<Crop> {
-        let from_path = Units(x).to_fx() - self.path.at(0, z);
-        if from_path.abs() < Units::m(1.6).to_fx() || !self.land.owns(self.me, x, z) {
+        if !self.land.owns(self.me, x, z) || self.path.by(x, z, Units::m(1.6).to_fx()) {
             return None;
         }
+        let from_path = Units(x).to_fx() - self.path.x(z);
         let side = from_path.signum();
         let across = from_path.abs().floor_units() + (self.warp.at(z, 0) * Units::m(12.0)).floor_units();
         let along = Units(z) + (self.warp.at(x, 1) * Units::m(12.0)).floor_units();
@@ -96,7 +97,7 @@ impl Fields {
 }
 
 /** The fields' layers on `ground`, along `path`, where domain `me` of `land` owns the land. */
-pub fn layers(seed: u64, land: Rc<Land>, me: usize, ground: Rc<Plan<i64>>, path: Rc<Plan<Fx>>) -> Vec<Layer> {
+pub fn layers(seed: u64, land: Rc<Land>, me: usize, ground: Rc<Plan<i64>>, path: Rc<Path>) -> Vec<Layer> {
     let f = Rc::new(Fields { seed, land, me, path, warp: ValueNoise::new(stream(seed, 42)) });
     let plots = {
         let (f, ground) = (f.clone(), ground.clone());

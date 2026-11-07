@@ -16,10 +16,11 @@ use worldgen::units::{Units, m};
 use worldgen::world::{Find, World};
 
 use crate::fields;
-use crate::forest::{self, GROUND_SCALE, Ground, PATH_SCALE, Relief};
+use crate::forest::{self, GROUND_SCALE, Ground, Relief};
 use crate::landmarks::{self, Landmark, Landmarks};
 use crate::moor::{self, Moorland, Uplands};
 use crate::mountains::{self, Ranges};
+use crate::path::Path;
 use crate::town::{self, TOWNS_SCALE, Towns};
 
 /** The domains, by their index in the land. */
@@ -75,14 +76,13 @@ pub fn valley(seed: u64) -> World {
     let points = points(&terrain, &landmarks, &moorland);
     let path = {
         let terrain = terrain.clone();
-        Rc::new(Plan::new("path", PATH_SCALE, move |_, z| terrain.path_x(z)))
+        Rc::new(Path::new(move |z| terrain.path_x(z)))
     };
     // The valley's ground along the path, rising into the ranges, levelled under the towns, shaped by landmarks and the moor.
     let ground = {
         let (path, landmarks, moorland) = (path.clone(), landmarks.clone(), moorland.clone());
         Rc::new(Plan::new("ground", GROUND_SCALE, move |x, z| {
-            let from_path = forest::path_distance(&path, x, z);
-            landmarks.shaped(x, z, moorland.shaped(x, z, terrain.ground_by(x, z, from_path))).round_units().0
+            landmarks.shaped(x, z, moorland.shaped(x, z, terrain.ground_by(x, z, path.across(x, z)))).round_units().0
         }))
     };
     let slope = {

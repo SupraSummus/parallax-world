@@ -18,6 +18,8 @@ use worldgen::noise::{Fbm, Fx, Rng, ValueNoise, fx, hash, hash64, smoothstep, st
 use worldgen::plan::Plan;
 use worldgen::units::{UNIT_SIZE, Units, m};
 
+use crate::path::Path;
+
 /** Metres in units, rounded. */
 fn vox(metres: f64) -> f64 {
     round(metres / UNIT_SIZE)
@@ -155,12 +157,12 @@ impl Relief {
 
 /**
  * What the forest grows on, decided outside it when it shares its land:
- * the ground's height, the path's centre line (by z, at x = 0), and its
- * share of each column (a fraction), which thins whatever it grows.
+ * the ground's height, the path, and its share of each column (a
+ * fraction), which thins whatever it grows.
  */
 pub struct Ground {
     pub ground: Rc<Plan<i64>>,
-    pub path: Rc<Plan<Fx>>,
+    pub path: Rc<Path>,
     pub share: Rc<dyn Fn(i64, i64) -> Fx>,
 }
 
@@ -169,18 +171,18 @@ impl Ground {
     pub fn alone(relief: Rc<Relief>) -> Ground {
         let path = {
             let relief = relief.clone();
-            Rc::new(Plan::new("path", PATH_SCALE, move |_, z| relief.path_x(z)))
+            Rc::new(Path::new(move |z| relief.path_x(z)))
         };
         let ground = {
             let path = path.clone();
-            Rc::new(Plan::new("ground", GROUND_SCALE, move |x, z| relief.ground(x, z, path_distance(&path, x, z)).round_units().0))
+            Rc::new(Plan::new("ground", GROUND_SCALE, move |x, z| relief.ground(x, z, path.across(x, z)).round_units().0))
         };
         Ground { ground, path, share: Rc::new(|_, _| Fx::ONE) }
     }
 
     /** On the path at z, `above` units over the ground, on a site. */
     pub fn on_path(&self, z: i64, above: i64) -> [i64; 3] {
-        let x = self.path.at(0, z).round_units().0;
+        let x = self.path.x(z).round_units().0;
         let y = self.ground.at(x, z) + above;
         [x, y + ((x + y + z) & 1), z]
     }
@@ -202,17 +204,12 @@ struct Noise {
     floor: ValueNoise<20>,
 }
 
-/** How far column (x, z) is from the path's centre line, with its fraction. */
-pub fn path_distance(path: &Plan<Fx>, x: i64, z: i64) -> Fx {
-    (Units(x).to_fx() - path.at(0, z)).abs()
-}
-
 /** Column (x, z), given the ground's height there and at its four neighbours. */
-fn column_of(n: &Noise, path: &Plan<Fx>, x: i64, z: i64, h: i64, neighbours: [i64; 4]) -> Column {
+fn column_of(n: &Noise, path: &Path, x: i64, z: i64, h: i64, neighbours: [i64; 4]) -> Column {
     let slope = neighbours.map(|n| (n - h).abs()).into_iter().max().expect("four");
     let conifer = smoothstep(fx(0.4), fx(0.6), n.conifer.at(x, z)) * 3 / 4 + smoothstep(Fx::m(6.0), Fx::m(16.0), Units(h).to_fx()) / 4;
     let density = smoothstep(fx(0.3), fx(0.48), n.density.at(x, z));
-    let on_path = path_distance(path, x, z) < Fx::m(1.1) + n.path_edge.at(z, 0) * Units::m(0.5);
+    let on_path = path.by(x, z, Fx::m(1.1) + n.path_edge.at(z, 0) * Units::m(0.5));
     let floor = n.floor.at(x, z);
     let surface = if on_path {
         K::path
@@ -233,10 +230,6 @@ fn column_of(n: &Noise, path: &Plan<Fx>, x: i64, z: i64, h: i64, neighbours: [i6
 impl Forest {
     fn s(&self, k: u64) -> u64 {
         stream(self.seed, k)
-    }
-
-    fn path_distance(&self, x: i64, z: i64) -> Fx {
-        path_distance(&self.ground.path, x, z)
     }
 
     /** Ground height in units. */
@@ -261,7 +254,7 @@ impl Forest {
 
     /** The chance a cell of trees around column (x, z) has one. */
     fn tree_chance(&self, x: i64, z: i64, c: &Column) -> Fx {
-        if c.surface == K::stone || self.path_distance(x, z) < Fx::m(2.8) {
+        if c.surface == K::stone || self.ground.path.by(x, z, Fx::m(2.8)) {
             return Fx::ZERO;
         }
         // Keep the view from the spawn point clear of low branches.

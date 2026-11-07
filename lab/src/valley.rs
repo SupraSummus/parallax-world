@@ -11,10 +11,11 @@ use worldgen::noise::{Fx, fx};
 use worldgen::plan::{Land, Plan};
 use worldgen::units::Units;
 use worlds::fields;
-use worlds::forest::{self, GROUND_SCALE, K as F, PATH_SCALE, Relief};
+use worlds::forest::{self, GROUND_SCALE, K as F, Relief};
 use worlds::landmarks::{self, K as L};
 use worlds::moor::{self, K as M};
 use worlds::mountains::{self, K as A};
+use worlds::path::Path;
 use worlds::town::{self, K as T, TOWNS_SCALE, Towns};
 
 use crate::image::Image;
@@ -151,13 +152,11 @@ pub fn land(seed: u64) -> (Rc<Towns>, Land) {
     let towns = Rc::new(Towns::new(seed, relief.clone()));
     let path = {
         let (relief, towns) = (relief.clone(), towns.clone());
-        Rc::new(Plan::new("path", PATH_SCALE, move |_, z| towns.street_x(z, relief.path_x(z))))
+        Rc::new(Path::new(move |z| towns.street_x(z, relief.path_x(z))))
     };
     let ground = {
         let (towns, path) = (towns.clone(), path.clone());
-        Rc::new(Plan::new("ground", GROUND_SCALE, move |x, z| {
-            towns.terraced(x, z, relief.ground(x, z, forest::path_distance(&path, x, z))).round_units().0
-        }))
+        Rc::new(Plan::new("ground", GROUND_SCALE, move |x, z| towns.terraced(x, z, relief.ground(x, z, path.across(x, z))).round_units().0))
     };
     let slope = {
         let step = 16;
