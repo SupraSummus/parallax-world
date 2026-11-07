@@ -20,7 +20,7 @@
 //! It prints the time taken and the share of pixels of each material type.
 
 use worldgen::generator::materials_of;
-use worldgen::light::{Brightness, Light};
+use worldgen::light::{Brightness, Grids, Light};
 use worldgen::picture::{Camera, picture_on_threads};
 use worlds::{WORLDS, by_name};
 
@@ -122,7 +122,7 @@ fn main() {
     let mut picture = picture_on_threads(&|| (entry.make)(seed).generator, &camera, level, world.heights_at(level));
     if let Some(brightness) = brightness {
         let start = std::time::Instant::now();
-        Light::new((entry.make)(seed), brightness).relight(&mut picture, level);
+        Light::new((entry.make)(seed), brightness, Grids::default()).relight(&mut picture, level);
         println!("lit in {:.2} s", start.elapsed().as_secs_f64());
     }
     std::fs::write(args.last().expect("a file"), picture.png()).expect("written");

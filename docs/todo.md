@@ -273,11 +273,13 @@ Numbers are for the forest at 1280×800, as measured when written.
   (`worldgen/src/light.rs`); the web does not light its tiles.
   Light comes along the 12 neighbours' directions,
   so light from low over the horizon is too weak or too strong.
-  Each world thread has a `Light` of its own (a generator is not `Send`),
-  which generates the neighbours and coarser levels of the tiles it lights
-  again, and forgets what grows too much:
-  native's first frames come several times slower.
-  Sharing tiles between them, and with the world, would spare most of that.
+  Native's first frames come several times slower lit,
+  mostly finding the light of every surface site of every level's tiles,
+  most of which no splat shows.
+  Lighting only the voxels the baker shows,
+  or showing tiles before they are lit, would spare most of that.
+  Each world thread has a `Light` of its own (a generator is not `Send`):
+  they share tiles (`Grids`), but each finds the coarse levels' light again.
   The sun is one of the 12 directions.
   `light::around` reads the nearest site and its 12 neighbours,
   so near a corner where six voxels meet it misses one within its reach,
