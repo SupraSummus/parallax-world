@@ -192,10 +192,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   worldgen's, counted ("Cost" in `docs/generators.md`),
   goes mostly to the trees at levels 0 to 2
   and to measuring their shadows from level 4.
-- **The reference viewer freezes for over a minute on the forest**:
-  it generates all its levels on the main thread,
-  then holds about 25 million faces, over 2 GB.
-  Generating in the bake workers would unfreeze it.
 - **The learned town's rules are from the old towns.**
   `worlds/data/town-grammar.bin` was learned when the valley's towns
   were all market towns alike, so lab's `export -- --check` says it differs.

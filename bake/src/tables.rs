@@ -43,7 +43,7 @@ pub fn geometry(lattice: &Lattice) -> Geometry {
 /**
  * Brightness of a face by its outward normal in the world: the axes' shades
  * weighted by the squared components, so a face between the top and the
- * front gets the mean of both (as the reference viewer, src/viewer/mesh.ts).
+ * front gets the mean of both.
  */
 fn face_shade([x, y, z]: [f64; 3]) -> f64 {
     let (front, back, left, right, bottom, top) = (0.9, 0.65, 0.7, 0.8, 0.55, 1.0);

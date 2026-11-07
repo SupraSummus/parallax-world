@@ -16,7 +16,7 @@ const toWorld = ({ lattice: { right: R, up: U, forward: F } }: Face, a: number, 
   z: (a * R.z + c * F.z) / 2 + b * U.z,
 })
 /** The kind (of VOXEL_FACES) of a voxel's face towards a camera looking along a face's forward F: −F's. */
-const frontOf = ({ lattice: { forward: { x, y, z } } }: Face) => VOXEL_FACES.findIndex(({ normal }) => normal[0] === -x && normal[1] === -y && normal[2] === -z)
+const frontOf = ({ lattice: { forward: { x, y, z } } }: Face) => VOXEL_FACES.findIndex(([a, b, c]) => a === -x && b === -y && c === -z)
 
 /**
  * The first voxel of a slice, `size` times the lattice's, hit by the ray
@@ -26,7 +26,7 @@ const frontOf = ({ lattice: { forward: { x, y, z } } }: Face) => VOXEL_FACES.fin
  */
 function rayCast(sites: Vec3[], size: number, centre: number, px: number, py: number): number | null {
   // Kinds' normals in face coordinates, the same on every face.
-  const normals = VOXEL_FACES.map(({ normal: [x, y, z] }) => toLocal(FACES[0], { x, y, z }))
+  const normals = VOXEL_FACES.map(([x, y, z]) => toLocal(FACES[0], { x, y, z }))
   // Along (0, 0, 1) from the plane, both ways: p = (ox, oy, centre + t).
   const one = (ox: number, oy: number) => {
     let best = { t: Infinity, site: -1 }

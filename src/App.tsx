@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback, type PointerEvent, type ReactNode } from 'react'
-import { ParallaxRenderer, DEFAULT_FOV, MAX_FOV, MIN_FOV, DEFAULT_RENDER_DISTANCE, MAX_RENDER_DISTANCE, MIN_RENDER_DISTANCE, DEFAULT_MAX_LEAK, MAX_MAX_LEAK, MIN_MAX_LEAK, parseViewQuery, viewQuery, type Camera, type SessionStats } from '@/lib/renderer'
+import { ParallaxRenderer, DEFAULT_FOV, MAX_FOV, MIN_FOV, DEFAULT_RENDER_DISTANCE, MAX_RENDER_DISTANCE, MIN_RENDER_DISTANCE, DEFAULT_MAX_LEAK, MAX_MAX_LEAK, MIN_MAX_LEAK, parseViewQuery, type Camera, type SessionStats } from '@/lib/renderer'
 import { World, worldTypes, type WorldType } from '@/lib/world'
 import type { Orientation } from '@/lib/view'
 import { Compositor } from '@/lib/compositor'
@@ -11,7 +11,7 @@ import { Separator } from '@/components/ui/separator'
 import { Slider } from '@/components/ui/slider'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Box, ChartLine, Crosshair, ExternalLink, Eye, EyeOff, History, Move, RefreshCw } from 'lucide-react'
+import { Box, ChartLine, Crosshair, Eye, EyeOff, History, Move, RefreshCw } from 'lucide-react'
 
 /**
  * Key -> movement direction for held keys: right, up, forward relative to
@@ -133,7 +133,7 @@ function App() {
     const onBaked = () => {
       bakedFrameRef.current ??= requestAnimationFrame(() => { renderBehindMessagesRef.current() })
     }
-    // The view the page's query asks for, if any (as the 3D viewer's).
+    // The view the page's query asks for, if any.
     const query = parseViewQuery(location.search)
     const renderer = new ParallaxRenderer(new World(query.seed ?? Date.now(), query.worldType), { bakery, onBaked, camera: query.camera })
     if (query.look) renderer.setOrientation(query.look)
@@ -296,17 +296,6 @@ function App() {
     })
   }
 
-  // The viewer rebuilds the same world from its seed and type.
-  const openViewer = () => {
-    const renderer = rendererRef.current
-    if (!renderer) return
-    const { seed, worldType } = renderer.getWorld()
-    const query = viewQuery({
-      seed, worldType, camera: renderer.getCamera(), look: renderer.getOrientation(), fov: renderer.getFov(), distance: renderer.getRenderDistance(), leak: renderer.getMaxLeak(),
-    })
-    window.open(`${import.meta.env.BASE_URL}viewer.html?${query}`, '_blank', 'noopener')
-  }
-
   const handleFovChange = ([value]: number[]) => {
     setFov(value)
     rendererRef.current?.setFov(value)
@@ -436,10 +425,6 @@ function App() {
             <Button onClick={() => { handleRegenerateWorld() }} className="w-full">
               <RefreshCw size={16} />
               Regenerate World
-            </Button>
-            <Button onClick={openViewer} variant="outline" className="w-full">
-              <ExternalLink size={16} />
-              Open in 3D Viewer
             </Button>
             {!showStats && (
               <Button onClick={() => { setShowStats(true) }} variant="outline" className="w-full">

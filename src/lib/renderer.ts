@@ -68,7 +68,7 @@ interface UpdateStats {
 }
 
 /**
- * A view in a URL's query, for the app and the 3D viewer:
+ * A view in the page's query:
  * ?seed=&world=&camera=x,y,z&look=yaw,pitch&fov=&distance=&leak=
  * (the max occlusion leak, in degrees).
  */
@@ -82,14 +82,7 @@ export interface ViewQuery {
   leak?: number
 }
 
-export function viewQuery({ seed, worldType, camera, look, fov, distance, leak }: Required<ViewQuery>): string {
-  const { x, y, z } = camera
-  return new URLSearchParams({
-    seed: String(seed), world: worldType, camera: [x, y, z].join(), look: [look.yaw, look.pitch].join(), fov: String(fov), distance: String(distance), leak: String(leak),
-  }).toString()
-}
-
-/** The view in `search` (viewQuery's); what it leaves out or gets wrong is undefined. */
+/** The view in `search`; what it leaves out or gets wrong is undefined. */
 export function parseViewQuery(search: string): ViewQuery {
   const params = new URLSearchParams(search)
   const numbers = (name: string, count: number) => {
@@ -147,7 +140,7 @@ const MAX_HIDDEN_CHUNK_BYTES = 32_000_000
 // Exponential distance fog towards the horizon colour: at viewing distance d
 // a voxel keeps exp(-d / fogDistance) of its own colour. The fog distance
 // scales with the render distance so the far cut-off stays hazy.
-export const FOG_PER_RENDER_DISTANCE = 0.7
+const FOG_PER_RENDER_DISTANCE = 0.7
 
 /** What a chunk holds in memory. */
 const bytesOf = (chunk: Chunk) => chunk.splats.byteLength + chunk.mask.blocks.byteLength + chunk.cluster.byteLength + chunk.clusters.byteLength

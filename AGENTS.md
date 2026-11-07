@@ -52,11 +52,7 @@ src/
     ├── bake.worker.ts       # Bake worker entry
     ├── compositor.ts        # Draws the renderer's frames with WebGL 2: chunks' splats as instanced prisms
     └── utils.ts             # cn() for class names
-viewer.html                  # Reference 3D viewer page (second Vite entry)
 scripts/shot.mjs             # pnpm shot: a view in headless Chromium, saved once complete
-src/viewer/
-├── main.ts                  # three.js scene, orbit camera
-└── mesh.ts                  # World -> triangle mesh of exposed rhombic faces
 bake/                        # Chunk baker, coverage and walking in Rust (no dependencies), in worlds/' WebAssembly
 └── src/
     ├── lib.rs               # Baker: one chunk per call; the WebAssembly exports

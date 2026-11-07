@@ -315,8 +315,8 @@ A splat's colour is that of the voxel's face towards the camera, −F
 (the face a slice seen along F shows; `Reader` in `bake/` reads it),
 shaded as the mean of its open faces' shades
 (of its cut faces' where it has none),
-each by the axes its normal leans towards, as in the reference viewer
-(`faceShade`, `voxel_colour`):
+each by the axes its normal leans towards
+(`face_shade`, `voxel_colour`):
 a voxel is shaded by the way its surface faces,
 and coloured by what is seen of it along the face.
 
@@ -627,7 +627,6 @@ Mostly the faces are its site's material;
 the sites whose faces differ are listed apart (`faces`).
 Each reader shows the faces it sees:
 the baker the face towards its slices' camera (section 3),
-the reference viewer every face,
 rays (`worldgen/src/picture.rs`) the one they enter by.
 The box is cut into bricks 8 units wide, 256 sites,
 and only bricks with voxels are stored.
@@ -653,17 +652,6 @@ branches and fallen logs capsules, so thin parts stay one piece on the lattice
 The city (`worlds/src/city.rs`) is planned on a 0.25 m grid:
 each plan cell is a box holding four sites, so walls stay flat and frames one piece.
 The renderer only draws faces that no neighbour covers.
-
-## 7. Reference viewer (`src/viewer`)
-
-`viewer.html` rebuilds the world from its seed
-and draws every exposed voxel face, a rhombus, with three.js:
-level 0 around the camera,
-then each coarser grid in a ring twice as wide, to the render distance.
-World (x, y, z) maps to three.js (x, y, −z),
-so the default camera, looking down −z, looks along world +z.
-The app passes its orientation, field of view and render distance in the URL,
-so from the parallax camera's position both renderers should agree.
 
 ## Limitations
 
@@ -698,8 +686,6 @@ so from the parallax camera's position both renderers should agree.
   voxel.
 - The web compositor draws every splat in view every frame (`todo.md`).
 - The world's grids are held by the main thread and by each worker.
-  The reference viewer meshes level 0 only around the camera,
-  the coarser grids in rings beyond.
 - Moving far, a level's grid is generated again where the camera went
   (section 1): until it is in, the far edges of its slices show nothing,
   and moving faster than it generates, the near ones too.
