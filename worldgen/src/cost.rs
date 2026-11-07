@@ -18,6 +18,11 @@ thread_local! {
     static COUNTING: Cell<bool> = const { Cell::new(false) };
     /** Its counts. */
     static COUNTS: RefCell<Counts> = const { RefCell::new(Counts { layers: Vec::new(), plans: Vec::new() }) };
+    /**
+     * Plans looked up (`Plan::at`) since the last were counted to a layer
+     * or a plan: kept unwatched too, as cheap as asking whether to.
+     */
+    static LOOKUPS: Cell<u64> = const { Cell::new(0) };
 }
 
 /** Defines `Work`, a count of each of what time goes on, and its counts' names in order. */
@@ -58,7 +63,9 @@ work! {
     measured,
     /** A field's values: at a site, or a line of sites' spans. */
     reads,
-    /** Columns a plan decided (made, not found kept). */
+    /** Plans' columns looked up, found kept or made: counted to the layer or plan looking them up. */
+    lookups,
+    /** Columns a plan decided (made, not found kept); the lookups making them are its `lookups`. */
     plans,
     /** The most sites tested for one thing in one box. */
     largest,
@@ -68,12 +75,15 @@ work! {
  * Rough nanoseconds per count, to weigh counts into one estimate:
  * fitted once, by least squares, to the times of every world's tiles
  * at levels 0 to 6 on one busy machine; `measured` scaled since by how
- * much less time measuring a site took once it was made faster. They
- * rank work more than they time it; a report's "took here" shows how far
- * off they are elsewhere. `largest` is among `tests`, so weighs nothing
- * of its own.
+ * much less time measuring a site took once it was made faster;
+ * `lookups` set since between what one took in two changes that added
+ * many (claims making their keys afresh for every column, a canopy
+ * reading a plan around each), as it varies with what it finds, and
+ * `plans` refitted with it. They rank work more than they time it; a
+ * report's "took here" shows how far off they are elsewhere. `largest`
+ * is among `tests`, so weighs nothing of its own.
  */
-const NS: Work = Work { cells: 100, owned: 1300, nodes: 1800, tests: 50, measured: 35, reads: 20, plans: 120, largest: 0 };
+const NS: Work = Work { cells: 100, owned: 1300, nodes: 1800, tests: 50, measured: 35, reads: 20, lookups: 25, plans: 45, largest: 0 };
 
 impl Work {
     /** Adds `w`'s counts, but for the largest, the larger. */
@@ -119,26 +129,39 @@ fn add_to(rows: &mut Vec<(&'static str, Work)>, name: &'static str, work: &Work)
 
 /** Runs `f`, counting the work of what it generates on this thread. */
 pub fn counted<R>(f: impl FnOnce() -> R) -> (R, Counts) {
-    let outer = (COUNTING.replace(true), COUNTS.take());
+    let outer = (COUNTING.replace(true), COUNTS.take(), LOOKUPS.take());
     let value = f();
     COUNTING.set(outer.0);
+    LOOKUPS.set(outer.2);
     (value, COUNTS.replace(outer.1))
 }
 
-/** Adds `work` to `layer`'s, if counting. */
+/** Adds `work` to `layer`'s, if counting, with the plans looked up since work was last added: the layer's. */
 #[inline]
 pub(crate) fn add(layer: &'static str, work: Work) {
+    let lookups = LOOKUPS.take();
     if COUNTING.get() {
+        let work = Work { lookups: work.lookups + lookups, ..work };
         COUNTS.with_borrow_mut(|counts| add_to(&mut counts.layers, layer, &work));
     }
 }
 
-/** Counts a column `plan` decided, if counting. */
+/** Counts a plan looked up. */
 #[inline]
-pub(crate) fn plan(plan: &'static str) {
+pub(crate) fn lookup() {
+    LOOKUPS.set(LOOKUPS.get() + 1);
+}
+
+/** Makes a column of `plan` with `make`, counting it and the lookups making it, if counting. */
+#[inline]
+pub(crate) fn plan<T>(plan: &'static str, make: impl FnOnce() -> T) -> T {
+    let outer = LOOKUPS.take();
+    let value = make();
+    let lookups = LOOKUPS.replace(outer);
     if COUNTING.get() {
-        COUNTS.with_borrow_mut(|counts| add_to(&mut counts.plans, plan, &Work { plans: 1, ..Work::default() }));
+        COUNTS.with_borrow_mut(|counts| add_to(&mut counts.plans, plan, &Work { lookups, plans: 1, ..Work::default() }));
     }
+    value
 }
 
 /** What `Shadows` draws counts to: things measured once a world, not per tile. */

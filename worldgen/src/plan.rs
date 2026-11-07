@@ -79,6 +79,7 @@ impl<T: Copy + Default> Plan<T> {
     }
 
     pub fn at(&self, x: i64, z: i64) -> T {
+        crate::cost::lookup();
         let (reader, finest) = MAKING.get();
         assert!(
             self.scale >= finest,
@@ -98,8 +99,7 @@ impl<T: Copy + Default> Plan<T> {
         let outer = MAKING.replace(if self.filter { ("", 0) } else { (self.name, self.scale) });
         // What a plan decides for a column is the same whoever reads it.
         let footprint = FOOTPRINT.take();
-        crate::cost::plan(self.name);
-        let value = (self.make)(x, z);
+        let value = crate::cost::plan(self.name, || (self.make)(x, z));
         FOOTPRINT.set(footprint);
         MAKING.set(outer);
         self.slots.borrow_mut()[slot] = (x, z, value);
@@ -322,6 +322,25 @@ mod tests {
         let fine = Rc::new(Plan::new("fine", 1, |x, z| Units(x + 2 * z).to_fx()));
         let coarse = Plan::sampled("coarse", 64, 16, move |x, z| fine.at(x, z));
         assert_eq!((coarse.at(0, 0), coarse.at(8, 0), coarse.at(5, 3)), (Fx::ZERO, fx(8.0), fx(11.0)));
+    }
+
+    #[test]
+    fn lookups_count_to_whoever_looks_up() {
+        use crate::cost::{self, Work};
+        let fine = Rc::new(Plan::new("fine", 8, |x, _| x));
+        let coarse = Plan::new("coarse", 1, move |x, z| fine.at(x, z) + fine.at(x + 1, z));
+        let counts = cost::counted(|| {
+            coarse.at(0, 0);
+            coarse.at(0, 0);
+            cost::add("layer", Work::default());
+        })
+        .1;
+        let of = |rows: &[(&str, Work)], name| rows.iter().find(|r| r.0 == name).map(|r| (r.1.lookups, r.1.plans));
+        // (lookups, columns made): the layer's second lookup finds the column kept; making it looked up fine's two.
+        assert_eq!(
+            (of(&counts.layers, "layer"), of(&counts.plans, "coarse"), of(&counts.plans, "fine")),
+            (Some((2, 0)), Some((2, 1)), Some((0, 2)))
+        );
     }
 
     #[test]
