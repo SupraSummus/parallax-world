@@ -48,10 +48,12 @@ Numbers are for the forest at 1280×800, as measured when written.
 - **Tests take most of CI's time.**
   Most of it is the worlds' contract, bound by the CPU:
   pictures from above generate level 0 over all of a world's heights.
-  Not tried: the Rust tests beside vitest
-  (whose 20 s timeout may then be too short),
-  Rust's builds cached in CI,
-  and one Cargo target for `bake/`, `worldgen/` and `worlds/`,
+  CI runs the valley's in a job of its own;
+  it and the rest of the Rust tests are CI's longest jobs.
+  If CI is still too slow, the contract at seeds but `REGIONS_SEED`
+  (`worlds/tests/contract.rs`) could run only on main.
+  Caching Rust's builds would spare little: `libm` is their one dependency.
+  Not tried: one Cargo target for `bake/`, `worldgen/` and `worlds/`,
   each of which now builds the ones before it again.
 - **`coarsen` serves only tests.**
   Every world is generated at each level;
