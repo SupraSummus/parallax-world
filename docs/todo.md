@@ -344,6 +344,19 @@ Composing generators (section "Composing" of `docs/generators.md`), untried:
   bridges, tunnels, cuttings and embankments where the profile leaves the ground;
   things along it by arc length, sleepers and piers.
   Curves still lack arc length from an end (`Near::along` counts segments).
+- Rivers and roads along curves, in pieces and from `near`, as the path is,
+  not as tubes:
+  a tube makes all its points when made,
+  and a shape cuts only its own thing, where a river digs the ground.
+- Test only the sites of a row a shape can hold:
+  a shape tests every site of its box,
+  mostly empty for a slanting capsule,
+  and a tube's against each piece of the level drawn
+  (bent, the forest's branches cost a few percent more at level 0).
+  A span per row from the pieces' boxes would keep the test exact.
+- Trunks as tubes, bent where the birch's boxes step:
+  they want a radius changing along the tube, as a lathe's,
+  and bark marks on round faces, not on boxes' faces.
 - Solve what a coarse cell decides (a block's lots, a room's furniture)
   with a small search whose boundaries the coarser band fixes:
   constraint solving stays local and needs no backtracking across cells.
