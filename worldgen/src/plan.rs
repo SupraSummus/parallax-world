@@ -35,6 +35,20 @@ pub(crate) fn footprint<R>(spacing: i64, offset: [i64; 2], read: impl FnOnce() -
 
 /** Slots a plan keeps values in: as many as two tiles have columns, so a layer finds what the one before made in its tile. */
 const SLOTS: usize = 1 << 15;
+const _: () = assert!(SLOTS.is_power_of_two());
+/** Column (x, z) takes slot `sum(x, z) >> SHIFT`: each a run of 2^SHIFT sums. */
+const SHIFT: u32 = 64 - SLOTS.trailing_zeros();
+
+/**
+ * x and z times two odd constants, added. Columns whose sums differ by
+ * 2^SHIFT or more never share a slot. Of random constants tried, these
+ * keep near columns so, which a mixed hash would put together by chance:
+ * a tile's at every level and Claims' keys (the test). Columns further
+ * apart share as by chance, or more along a few directions nothing reads.
+ */
+fn sum(x: i64, z: i64) -> u64 {
+    (x as u64).wrapping_mul(0xd548ecfaef79b2e7).wrapping_add((z as u64).wrapping_mul(0xf0d62a6465469d21))
+}
 
 /**
  * A decision for any column, made on demand and kept (the last made in
@@ -91,7 +105,7 @@ impl<T: Copy + Default> Plan<T> {
             Some((spacing, [dx, dz])) if self.dithered && spacing > self.scale => (x + dx, z + dz),
             _ => (x, z),
         };
-        let slot = (((x as u64).wrapping_mul(0x9e3779b97f4a7c15) ^ (z as u64).wrapping_mul(0xc2b2ae3d27d4eb4f)) >> 49) as usize;
+        let slot = (sum(x, z) >> SHIFT) as usize;
         let (kx, kz, value) = self.slots.borrow()[slot];
         if (kx, kz) == (x, z) {
             return value;
@@ -386,5 +400,19 @@ mod tests {
         // Periods from the cells' width up.
         let p = preference("claims", 16, &area, &places);
         assert!(!p.broken(), "{p}");
+    }
+
+    #[test]
+    fn near_keys_take_a_slot_each() {
+        // Keys w by h, s apart, anywhere: their differences' sums are 2^SHIFT or more from zero.
+        let apart = |w: i64, h: i64, s: i64| {
+            (1 - w..w).all(|dx| (1 - h..h).all(|dz| (dx, dz) == (0, 0) || (sum(dx * s, dz * s) as i64).unsigned_abs() >> SHIFT > 0))
+        };
+        // A host's tile of 128 by 128 sites, at each level it draws (GRID_LEVELS in bake/src/slicing.rs).
+        for level in 0..9 {
+            assert!(apart(128, 128, 1 << level), "a tile at level {level}");
+        }
+        // Claims' keys (i, k · SPOTS + n) of 36 by 36 cells.
+        assert!(apart(36, 36 * SPOTS, 1), "claims' keys");
     }
 }
