@@ -1188,6 +1188,15 @@ fn alone(node: &Node, key: &str, layer: &'static str, bounds: Box3, f: i64, seed
 /** A layer of a thing across an axis: what it hides seen along the axis (a bitset of the plane), and the columns along the other two it holds. */
 type Slice = (Vec<u64>, u32, u32);
 
+/** What `layers` hide along the axis together: their planes' union, empty if none. */
+fn union(layers: &[Slice]) -> Vec<u64> {
+    let mut plane = vec![0u64; layers.first().map_or(0, |l| l.0.len())];
+    for (bits, ..) in layers {
+        plane.iter_mut().zip(bits).for_each(|(p, w)| *p |= w);
+    }
+    plane
+}
+
 /**
  * What slabs of things hide, measured: things drawn alone at a level,
  * and for each slab of them across an axis what it adds to their shadow,
@@ -1197,8 +1206,9 @@ type Slice = (Vec<u64>, u32, u32);
  */
 pub struct Shadows {
     f: i64,
-    /** By thing, its first layer across the axis and its layers from it. */
-    things: Vec<(i64, Vec<Slice>)>,
+    axis: usize,
+    /** By thing, its first site along each axis, how many sites it spans along the plane's second axis, and its layers across the axis from the first. */
+    things: Vec<([i64; 3], i64, Vec<Slice>)>,
 }
 
 /**
@@ -1243,10 +1253,10 @@ impl Shadows {
                         (plane, count(along_a), count(along_b))
                     })
                     .collect();
-                (min[axis], layers)
+                (min, n[b], layers)
             })
             .collect();
-        Shadows { f, things }
+        Shadows { f, axis, things }
     }
 
     /**
@@ -1257,27 +1267,65 @@ impl Shadows {
      * along the other axes, its own, as slabs side by side don't.
      */
     pub fn slab(&self, from: i64, to: i64) -> f64 {
+        self.mean(from, to, |adds, along| ACROSS * adds + ALONG * along / 2.0)
+    }
+
+    /**
+     * What the slab from `from` to `to` (exclusive) adds to the things'
+     * shadow seen across it, from either side (lattice units²): what the
+     * slabs add sums to the shadow.
+     */
+    pub fn across(&self, from: i64, to: i64) -> f64 {
+        self.mean(from, to, |adds, _| adds)
+    }
+
+    /** The mean over the things of `of`(what their slab adds to their shadow across the axis, its own shadow along the other two). */
+    fn mean(&self, from: i64, to: i64, of: impl Fn(f64, f64) -> f64) -> f64 {
         let (f, mut sum) = (self.f, 0.0);
-        for (first, layers) in &self.things {
-            let ceil = |v: i64| -(-v).div_euclid(f) - first;
+        for (min, _, layers) in &self.things {
+            let ceil = |v: i64| -(-v).div_euclid(f) - min[self.axis];
             let (lo, hi) = (ceil(from).clamp(0, layers.len() as i64) as usize, ceil(to).clamp(0, layers.len() as i64) as usize);
             if lo >= hi {
                 continue;
             }
-            // What layers `range` hide across the axis together.
-            let across = |range: std::ops::Range<usize>| {
-                let mut plane = vec![0u64; layers[0].0.len()];
-                for (bits, ..) in &layers[range] {
-                    plane.iter_mut().zip(bits).for_each(|(p, w)| *p |= w);
-                }
-                plane.iter().map(|w| w.count_ones()).sum::<u32>() as f64
-            };
+            let across = |range: std::ops::Range<usize>| union(&layers[range]).iter().map(|w| w.count_ones()).sum::<u32>() as f64;
             let n = layers.len();
             let adds = (across(lo..n) - across(hi..n) + across(0..hi) - across(0..lo)) / 2.0;
             let along: u32 = layers[lo..hi].iter().map(|(_, a, b)| a + b).sum();
-            sum += (ACROSS * adds + ALONG * along as f64 / 2.0) * (f * f) as f64;
+            sum += of(adds, along as f64) * (f * f) as f64;
         }
         sum / self.things.len() as f64
+    }
+
+    /**
+     * Where the things' shadow across the axis falls around where they
+     * were made, for a medium in columns of sites `size` apart: its mean
+     * area (lattice units²) by offset (zero along the axis), each part
+     * moved to the multiple of `size` towards where they were made. A ray
+     * along the axis crosses the sites of the columns beside its own
+     * between its own's (a column has one every two along it), which
+     * spreads a column's medium half a site wider; rounded to the nearest
+     * multiple instead, a canopy covered 0.02 more around clearings than
+     * its trees.
+     */
+    pub fn footprint(&self, size: i64) -> Vec<([i64; 3], f64)> {
+        let (f, axis) = (self.f, self.axis);
+        let (a, b) = ((axis + 1) % 3, (axis + 2) % 3);
+        let square = |v: i64| v / size * size;
+        let mut areas = std::collections::BTreeMap::<[i64; 3], f64>::new();
+        for (min, n_b, layers) in &self.things {
+            for (word, mut bits) in union(layers).into_iter().enumerate() {
+                while bits != 0 {
+                    let bit = (word * 64) as i64 + bits.trailing_zeros() as i64;
+                    bits &= bits - 1;
+                    let mut offset = [0; 3];
+                    (offset[a], offset[b]) = (square((bit / n_b + min[a]) * f), square((bit % n_b + min[b]) * f));
+                    *areas.entry(offset).or_insert(0.0) += (f * f) as f64;
+                }
+            }
+        }
+        let things = self.things.len() as f64;
+        areas.into_iter().map(|(o, area)| (o, area / things)).collect()
     }
 }
 

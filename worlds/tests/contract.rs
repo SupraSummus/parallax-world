@@ -13,10 +13,12 @@ const SEEDS: &[u64] = &[REGIONS_SEED, 1, 2, 3];
 /**
  * Regions where a world is known to break the contract at a seed, by
  * world, seed and the place they are around: checked apart, they must
- * still break, so the list only shrinks ("The canopy stops at the
- * trees' feet" in docs/todo.md).
+ * still break, so the list only shrinks; each is planned work in
+ * docs/todo.md. Empty now, but a change that moves a place can land on
+ * a seed where it breaks (the windmills' clearings from above at level
+ * 4 vary by seed: "The canopy is the trees expected" there).
  */
-const KNOWN_BREAKS: &[(&str, u64, &str)] = &[("valley", 1, "windmill")];
+const KNOWN_BREAKS: &[(&str, u64, &str)] = &[];
 
 /**
  * `entry`'s world keeps the contract at each of SEEDS, in its regions

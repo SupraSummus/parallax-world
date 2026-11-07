@@ -18,7 +18,7 @@ spawn            0         0         0         0         0         0         0  
 spawn            0         0         0         0         0         0         0     25084         0 plan learned spots
 spawn            0         0         0         0         0         0         0     18460         0 plan fields' bid
 spawn            0         0         0         0         0         0         0         9         0 plan settlements
-spawn            2      1849       469      1303    530149         0         0         0      7545 trees
+spawn            2      1849       469      1303    464145         0         0         0      7309 trees
 spawn            2       361        94         6       634         0         0         0       210 boulders
 spawn            2       529       133         5      2297         0         0         0      1394 logs
 spawn            2        16         0         0         0         0         0         0         0 settlements
@@ -42,22 +42,23 @@ spawn            4      2116       558         0         0         0         0  
 spawn            4         0         0         0         0         0     16384         0         0 terrain
 spawn            4         0         0         0         0         0     16384         0         0 learned streets
 spawn            4         0         0         0         0         0     16384         0         0 fields
-spawn            4         0         0      1640    722757         0         0         0         0 shadows
+spawn            4         0         0      1640    619208         0         0         0         0 shadows
 spawn            4         0         0         0         0         0     16384         0         0 trees
-spawn            4         0         0         0         0         0         0    119235         0 plan ground
+spawn            4         0         0         0         0         0         0    132432         0 plan ground
 spawn            4         0         0         0         0         0         0      2281         0 plan path
-spawn            4         0         0         0         0         0         0     24471         0 plan land
-spawn            4         0         0         0         0         0         0     24471         0 plan forest's bid
-spawn            4         0         0         0         0         0         0     24471         0 plan town's bid
-spawn            4         0         0         0         0         0         0     31006         0 plan learned spots
-spawn            4         0         0         0         0         0         0     24471         0 plan fields' bid
+spawn            4         0         0         0         0         0         0     47710         0 plan land
+spawn            4         0         0         0         0         0         0     47710         0 plan forest's bid
+spawn            4         0         0         0         0         0         0     47710         0 plan town's bid
+spawn            4         0         0         0         0         0         0     54245         0 plan learned spots
+spawn            4         0         0         0         0         0         0     47710         0 plan fields' bid
 spawn            4         0         0         0         0         0         0        29         0 plan settlements
-spawn            4         0         0         0         0         0         0     22979         0 plan forest columns
+spawn            4         0         0         0         0         0         0     28248         0 plan forest columns
+spawn            4         0         0         0         0         0         0     21405         0 plan forest's trees
 spawn            6        49         0         0         0         0         0         0         0 settlements
 spawn            6         0         0         0         0         0     16384         0         0 terrain
 spawn            6         0         0         0         0         0     16384         0         0 learned streets
 spawn            6         0         0         0         0         0     16384         0         0 fields
-spawn            6         0         0      1640    722757         0         0         0         0 shadows
+spawn            6         0         0      1640    619208         0         0         0         0 shadows
 spawn            6         0         0         0         0         0     16384         0         0 trees
 spawn            6         0         0         0         0         0         0        36         0 plan settlements
 spawn            6         0         0         0         0         0         0    111462         0 plan ground
@@ -86,7 +87,7 @@ region1          0         0         0         0         0         0         0  
 region1          0         0         0         0         0         0         0     27748         0 plan town's bid
 region1          0         0         0         0         0         0         0     27748         0 plan learned spots
 region1          0         0         0         0         0         0         0     27748         0 plan fields' bid
-region1          2      1849       484        42     24325         0         0         0      5960 trees
+region1          2      1849       484        42     22649         0         0         0      5960 trees
 region1          2       361        89         0         0         0         0         0         0 boulders
 region1          2       529       131         0         0         0         0         0         0 logs
 region1          2        16         1        27    335169    694688         0         0     21869 settlements
@@ -110,22 +111,23 @@ region1          4      2116       513         3        10         0         0  
 region1          4         0         0         0         0         0     16384         0         0 terrain
 region1          4         0         0         0         0         0     16384         0         0 learned streets
 region1          4         0         0         0         0         0     16384         0         0 fields
-region1          4         0         0      1640    722757         0         0         0         0 shadows
+region1          4         0         0      1640    619208         0         0         0         0 shadows
 region1          4         0         0         0         0         0     16384         0         0 trees
-region1          4         0         0         0         0         0         0    121624         0 plan ground
+region1          4         0         0         0         0         0         0    134756         0 plan ground
 region1          4         0         0         0         0         0         0      2239         0 plan path
 region1          4         0         0         0         0         0         0        25         0 plan settlements
-region1          4         0         0         0         0         0         0     24731         0 plan land
-region1          4         0         0         0         0         0         0     24731         0 plan forest's bid
-region1          4         0         0         0         0         0         0     24731         0 plan town's bid
-region1          4         0         0         0         0         0         0     30055         0 plan learned spots
-region1          4         0         0         0         0         0         0     24731         0 plan fields' bid
-region1          4         0         0         0         0         0         0     22963         0 plan forest columns
+region1          4         0         0         0         0         0         0     47618         0 plan land
+region1          4         0         0         0         0         0         0     47618         0 plan forest's bid
+region1          4         0         0         0         0         0         0     47618         0 plan town's bid
+region1          4         0         0         0         0         0         0     52942         0 plan learned spots
+region1          4         0         0         0         0         0         0     47618         0 plan fields' bid
+region1          4         0         0         0         0         0         0     27955         0 plan forest columns
+region1          4         0         0         0         0         0         0     21142         0 plan forest's trees
 region1          6        49         2        93    895966   2045216         0         0        33 settlements
 region1          6         0         0         0         0         0     16384         0         0 terrain
 region1          6         0         0         0         0         0     16384         0         0 learned streets
 region1          6         0         0         0         0         0     16384         0         0 fields
-region1          6         0         0      1640    722757         0         0         0         0 shadows
+region1          6         0         0      1640    619208         0         0         0         0 shadows
 region1          6         0         0         0         0         0     16384         0         0 trees
 region1          6         0         0         0         0         0         0        36         0 plan settlements
 region1          6         0         0         0         0         0         0    111267         0 plan ground
