@@ -59,6 +59,11 @@ a no-op 2D canvas context
 - Prefer one invariant test over a grid of inputs to many near-identical
   example tests. For a claim about all inputs, check it on seeded random
   samples (`forAll` in `leak-bound.test.ts`) so failures reproduce.
+- The worlds' checks list their known exceptions
+  (`KNOWN_BREAKS`, `OVER_BUDGET`, `KNOWN`) and fail both ways:
+  on a new failure, and on a listed one that now passes, to take it off.
+  Change a list only with the reason, in the commit or docs/todo.md;
+  never pick seeds, places or points to dodge a check.
 - Tag exports that only tests use `@internal`;
   `pnpm knip:production` checks that everything else is used outside tests.
 - Visual output is not covered by unit tests; check it in the browser

@@ -392,6 +392,11 @@ unless the tile is listed in `OVER_BUDGET` there,
 and when a listed one is not, to take it off:
 the list only shrinks, and blessing does not move it.
 
+Counts are an estimate and miss things.
+When speed matters, time real tiles with `worlds/examples/bench.rs`;
+its hashes of what they hold, before and after,
+show a change leaves generation as it was.
+
 ## Composing
 
 A world as large as the valley is **domains**
