@@ -249,17 +249,6 @@ Numbers are for the forest at 1280×800, as measured when written.
 - **Cost weighs every plan lookup alike** (`NS` in `worldgen/src/cost.rs`),
   though one of a column just read costs a fraction
   of one among claims making their keys.
-- **Plans' slots collide far more often than by chance** (`Plan::at`).
-  A plan keeps the last value made in each slot,
-  and the slot, the xor of two products of x and z, repeats on small keys:
-  Claims' keys share slots up to forty times as often,
-  a level-0 tile's columns two and a half times.
-  Values that share a slot and are read by turns are made each time:
-  steadings' claims three to ten times each on average, some hundreds,
-  and the valley's landmarks' a tenth more work in a tile
-  until `landmarks.rs` kept what each spot claimed (drop that then).
-  Adding the products and mixing the sum (a shift and a multiply)
-  makes most claims once.
 - **The places check finds few things of sparse populations**
   (`worldgen/src/places.rs`):
   it asks COLUMNS cells at most,

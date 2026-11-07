@@ -11,8 +11,6 @@
 //! solids with a measured far form (`town::thing`), open frames and boards
 //! as they are.
 
-use std::cell::RefCell;
-use std::collections::HashMap;
 use std::rc::Rc;
 
 use worldgen::column::Column;
@@ -51,8 +49,6 @@ pub const NEAR: i64 = m(40.0);
 /** The chance a spot is tried, and how many places each kind is tried at round it. */
 const CHANCE: Fx = fx(0.66);
 const TRIES: usize = 8;
-/** How many spots' claims `Landmarks` keeps at most: some 200 km²'s worth. */
-const KEPT: usize = 4096;
 /** How many rows NEAR apart either way, and points across them either side of the path, `Landmarks::first` looks at. */
 const ROWS: i64 = 6000;
 const ACROSS: i64 = 12;
@@ -441,24 +437,11 @@ impl Landmarks {
         let sites = {
             let (terrain, s) = (terrain.clone(), stream(seed, 70));
             let first = levelled(&terrain, first(&terrain, &mut Rng::new(hash64(s, 0, 0, 0))));
-            // Each spot's claim, kept: Claims remake it while plans' slots collide (docs/todo.md).
-            let claimed = RefCell::new(HashMap::new());
             Claims::new("landmarks", s, CLAIM, APART, Some(first.centre), move |spot, random| {
                 if spot == first.centre {
                     return Some((first.centre, first));
                 }
-                let key = (spot, random.clone().next_u64());
-                let known = claimed.borrow().get(&key).copied();
-                let site = known.unwrap_or_else(|| {
-                    let site = claim(&terrain, spot, random);
-                    let mut claimed = claimed.borrow_mut();
-                    if claimed.len() >= KEPT {
-                        claimed.clear();
-                    }
-                    claimed.insert(key, site);
-                    site
-                });
-                site.map(|site| (site.centre, site))
+                claim(&terrain, spot, random).map(|site| (site.centre, site))
             })
         };
         Landmarks { terrain, sites, patches: ValueNoise::new(stream(seed, 71)), reeds: ValueNoise::new(stream(seed, 72)) }
