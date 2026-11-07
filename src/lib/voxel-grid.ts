@@ -10,13 +10,6 @@ import { VOXEL_FACES } from './fcc'
 import { copyIn, copyOut, wasmInstance } from './wasm'
 import type { Vec3 } from './world'
 
-export interface Voxel {
-  x: number
-  y: number
-  z: number
-  color: string
-}
-
 export interface Material {
   /** '#rrggbb'; '' for id 0, empty. */
   color: string
@@ -147,17 +140,11 @@ export class VoxelGrid {
     return at < 0 ? this.cells[i] : (this.faces[at + 1 + (kind >> 2)] >>> (8 * (kind & 3))) & 255
   }
 
-  /** Whether the faces of the voxel at (x, y, z) are not all of its site's material. */
-  facesDiffer(x: number, y: number, z: number): boolean {
-    if (this.faces.length === 0) return false
-    const i = this.slot(x, y, z)
-    return i >= 0 && this.faceRecord(i) >= 0
-  }
-
   /**
    * Sets the faces of the voxels `sites` holds, each its position and
    * its faces' materials (by VOXEL_FACES), as the only ones whose faces
    * differ from their site's material. Sites not set yet are left out.
+   * @internal
    */
   setFaces(sites: Iterable<readonly [number, number, number, ArrayLike<number>]>) {
     const faces: Uint32Array[] = []
@@ -192,31 +179,6 @@ export class VoxelGrid {
     this.cells[i] = id
   }
 
-  /** Fills the sites in the box [x0, x1) × [y0, y1) × [z0, z1) with material `id` (0 clears), clipped to the grid. */
-  fillBox(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, id: number) {
-    const [fromX, toX] = [Math.max(x0, this.minX), Math.min(x1, this.minX + this.nx)]
-    for (let z = Math.max(z0, this.minZ); z < Math.min(z1, this.minZ + this.nz); z++) {
-      for (let y = Math.max(y0, this.minY); y < Math.min(y1, this.minY + this.ny); y++) {
-        for (let x = fromX + ((fromX + y + z) & 1); x < toX; x += 2) this.set(x, y, z, id)
-      }
-    }
-  }
-
-  /** Whether any brick meeting the box [x0, x1) × [y0, y1) × [z0, z1) holds voxels. */
-  mayHold(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number): boolean {
-    const range = (lo: number, hi: number, min: number, n: number) =>
-      [Math.max(0, Math.floor((lo - min) / BRICK)), Math.min(Math.ceil(n / BRICK), Math.ceil((hi - min) / BRICK))]
-    const [i0, i1] = range(x0, x1, this.minX, this.nx)
-    const [j0, j1] = range(y0, y1, this.minY, this.ny)
-    const [k0, k1] = range(z0, z1, this.minZ, this.nz)
-    for (let k = k0; k < k1; k++) {
-      for (let j = j0; j < j1; j++) {
-        for (let i = i0; i < i1; i++) if (this.bricks[(k * this.by + j) * this.bx + i] >= 0) return true
-      }
-    }
-    return false
-  }
-
   /** Calls `visit` with every voxel's position and material id, ordered by z, then y, then x. */
   forEach(visit: (x: number, y: number, z: number, id: number) => void) {
     const { minX, minY, minZ, nx, ny, nz } = this
@@ -234,15 +196,6 @@ export class VoxelGrid {
         }
       }
     }
-  }
-
-  /** Every voxel, ordered by z, then y, then x. */
-  toVoxels(): Voxel[] {
-    const voxels: Voxel[] = []
-    this.forEach((x, y, z, id) => {
-      voxels.push({ x, y, z, color: this.materials[id].color })
-    })
-    return voxels
   }
 
   /**
@@ -292,44 +245,6 @@ export class VoxelGrid {
     grid.faces = facesOf(faces)
     return grid
   }
-
-  /** The smallest grid holding `voxels`, which must be sites; where two share a site, the later one wins. */
-  static fromVoxels(voxels: readonly Voxel[]): VoxelGrid {
-    const box = voxels.length === 0
-      ? { minX: 0, minY: 0, minZ: 0, maxX: 0, maxY: 0, maxZ: 0 }
-      : { minX: Infinity, minY: Infinity, minZ: Infinity, maxX: -Infinity, maxY: -Infinity, maxZ: -Infinity }
-    for (const { x, y, z } of voxels) {
-      if (!isSite(x, y, z)) throw new RangeError(`(${String(x)}, ${String(y)}, ${String(z)}) is not a lattice site`)
-      box.minX = Math.min(box.minX, x)
-      box.minY = Math.min(box.minY, y)
-      box.minZ = Math.min(box.minZ, z)
-      box.maxX = Math.max(box.maxX, x + 1)
-      box.maxY = Math.max(box.maxY, y + 1)
-      box.maxZ = Math.max(box.maxZ, z + 1)
-    }
-
-    const palette = new Palette()
-    const grid = new VoxelGrid(box, palette.materials)
-    for (const { x, y, z, color } of voxels) grid.set(x, y, z, palette.id(color))
-    return grid
-  }
-}
-
-/** Materials by colour, an id each, added as they are first used; id 0 is empty. */
-class Palette {
-  readonly materials: Material[] = [{ color: '' }]
-  private readonly ids = new Map<string, number>()
-
-  /** The id of `color` ('#rrggbb'). */
-  id(color: string): number {
-    let id = this.ids.get(color)
-    if (id === undefined) {
-      if (this.materials.length === MAX_MATERIALS) throw new RangeError(`at most ${String(MAX_MATERIALS)} materials`)
-      id = this.materials.push({ color }) - 1
-      this.ids.set(color, id)
-    }
-    return id
-  }
 }
 
 /** A grid's `faces` of sites' words (FACE_WORDS each), ordered by index. */
@@ -371,141 +286,6 @@ export function writeGrid(
 /** The sites of a grid's bricks in use, without the room `cells` has for more. @internal */
 export function usedCells({ bricks, cells }: VoxelData): Uint8Array {
   return cells.subarray(0, bricks.reduce((n, at) => Math.max(n, at + 1), 0) * BRICK_SITES)
-}
-
-/**
- * The parts of the fine sites that make up the cell of 2·FCC around a site
- * of it, times 6 (cells.ts): the site itself, a half of each of its 12
- * neighbours (on the cell's faces) and a sixth of each of the 6 sites two
- * away along an axis (at its corners), 8 sites in all.
- */
-const COARSE_CELL: readonly (readonly [number, number, number, number])[] = [
-  [0, 0, 0, 6],
-  ...[-1, 1].flatMap(s => [-1, 1].flatMap(t => [[s, t, 0, 3], [s, 0, t, 3], [0, s, t, 3]] as const)),
-  ...[-2, 2].flatMap(s => [[s, 0, 0, 1], [0, s, 0, 1], [0, 0, s, 1]] as const),
-]
-
-/**
- * How much of a cell (of 48, COARSE_CELL's weights) must be full for its
- * coarse voxel to be: a quarter. A plane of voxels one thick holds a
- * quarter of each of the two layers of cells it runs between (or nearly
- * half of the one it runs through), so it stays a plane; a half would lose
- * it, and with it every thin wall and floor seen from afar. Solids grow by
- * about half a coarse voxel where their surface runs between layers.
- */
-const COARSE_FULL = 12
-
-/**
- * The fine sites a cell's faces are measured from, x, y, z each:
- * COARSE_CELL's parts, then the sites next to them across their faces.
- * ACROSS[kind][k] is the index of part k's neighbour across face `kind`.
- */
-const SITES: number[] = COARSE_CELL.flatMap(([x, y, z]) => [x, y, z])
-const ACROSS = VOXEL_FACES.map(([a, b, c]) =>
-  Int8Array.from(COARSE_CELL, ([x, y, z]) => {
-    const [u, v, w] = [x + a, y + b, z + c]
-    for (let i = 0; i < SITES.length; i += 3) if (SITES[i] === u && SITES[i + 1] === v && SITES[i + 2] === w) return i / 3
-    return SITES.push(u, v, w) / 3 - 1
-  }))
-/** COARSE_CELL as numbers: x, y, z and weight of each part; VOXEL_FACES' normals, x, y, z each. */
-const PARTS = Int8Array.from(COARSE_CELL.flat())
-const NORMALS = Int8Array.from(VOXEL_FACES.flat())
-
-/**
- * The grid one level of detail coarser: the sites of 2·FCC, in their own
- * units (site S stands for 2S of this grid). Each stands for its cell, and
- * is full if at least a quarter of the cell is (COARSE_FULL), with the
- * material most of it has; ties go to the lower id. With the same materials.
- * Each face that shows, with no coarse voxel across it, is of the material
- * most of the cell's open faces facing its way have (those with no voxel
- * across them); a face with none, or hidden, is of the site's: a coarse
- * voxel at a roof's edge is roof seen from above, wall from the side.
- */
-export function coarsen(grid: VoxelGrid): VoxelGrid {
-  const { minX, minY, minZ, nx, ny, nz } = grid
-  // The coarse sites whose cells meet the box.
-  const coarse = new VoxelGrid({
-    minX: Math.floor((minX - 2) / 2), minY: Math.floor((minY - 2) / 2), minZ: Math.floor((minZ - 2) / 2),
-    maxX: Math.ceil((minX + nx + 1) / 2), maxY: Math.ceil((minY + ny + 1) / 2), maxZ: Math.ceil((minZ + nz + 1) / 2),
-  }, grid.materials)
-  const weights = new Uint8Array(grid.materials.length)
-  const ids: number[] = []
-  // Adds a part's weight to its material's; the material of most weight, then empties them.
-  const weigh = (id: number, weight: number) => {
-    if (weights[id] === 0) ids.push(id)
-    weights[id] += weight
-  }
-  const heaviest = () => {
-    let best = 0
-    for (const id of ids) if (weights[id] > weights[best] || (weights[id] === weights[best] && id < best)) best = id
-    for (const id of ids) weights[id] = 0
-    ids.length = 0
-    return best
-  }
-  // The full sites whose faces may differ, x, y, z each: their cells hold more than one material, or faces that do.
-  const mixed: number[] = []
-  const hasFaces = grid.faces.length > 0
-  const [endX, endY, endZ] = [coarse.minX + coarse.nx, coarse.minY + coarse.ny, coarse.minZ + coarse.nz]
-  // Brick by coarse brick, skipping those whose cells meet no fine voxels.
-  for (let bz = coarse.minZ; bz < endZ; bz += BRICK) {
-    for (let by = coarse.minY; by < endY; by += BRICK) {
-      for (let bx = coarse.minX; bx < endX; bx += BRICK) {
-        if (!grid.mayHold(2 * bx - 2, 2 * by - 2, 2 * bz - 2, 2 * (bx + BRICK) + 2, 2 * (by + BRICK) + 2, 2 * (bz + BRICK) + 2)) continue
-        for (let z = bz; z < Math.min(bz + BRICK, endZ); z++) {
-          for (let y = by; y < Math.min(by + BRICK, endY); y++) {
-            for (let x = bx + ((bx + y + z) & 1); x < Math.min(bx + BRICK, endX); x += 2) {
-              let full = 0
-              let differ = false
-              for (let k = 0; k < PARTS.length; k += 4) {
-                const id = grid.get(2 * x + PARTS[k], 2 * y + PARTS[k + 1], 2 * z + PARTS[k + 2])
-                if (id === 0) continue
-                weigh(id, PARTS[k + 3])
-                full += PARTS[k + 3]
-                differ ||= hasFaces && grid.facesDiffer(2 * x + PARTS[k], 2 * y + PARTS[k + 1], 2 * z + PARTS[k + 2])
-              }
-              differ ||= ids.length > 1
-              const id = heaviest()
-              if (full < COARSE_FULL) continue
-              coarse.set(x, y, z, id)
-              if (differ) mixed.push(x, y, z)
-            }
-          }
-        }
-      }
-    }
-  }
-
-  // Their faces that show, with no coarse voxel across them.
-  const near = new Uint8Array(SITES.length / 3)
-  const materials = new Uint8Array(VOXEL_FACES.length)
-  const faces: [number, number, number, Uint8Array][] = []
-  let [x, y, z] = [0, 0, 0]
-  // The material of SITES' j-th around (x, y, z), read once needed.
-  const at = (j: number) => {
-    if (near[j] === 255) near[j] = grid.get(2 * x + SITES[3 * j], 2 * y + SITES[3 * j + 1], 2 * z + SITES[3 * j + 2])
-    return near[j]
-  }
-  for (let m = 0; m < mixed.length; m += 3) {
-    x = mixed[m]
-    y = mixed[m + 1]
-    z = mixed[m + 2]
-    const id = coarse.get(x, y, z)
-    near.fill(255)
-    let differ = false
-    for (let kind = 0; kind < VOXEL_FACES.length; kind++) {
-      materials[kind] = id
-      if (coarse.get(x + NORMALS[3 * kind], y + NORMALS[3 * kind + 1], z + NORMALS[3 * kind + 2]) !== 0) continue
-      for (let k = 0; k < COARSE_CELL.length; k++) {
-        if (at(k) === 0 || at(ACROSS[kind][k]) !== 0) continue
-        weigh(hasFaces ? grid.face(2 * x + SITES[3 * k], 2 * y + SITES[3 * k + 1], 2 * z + SITES[3 * k + 2], kind) : at(k), PARTS[4 * k + 3])
-      }
-      if (ids.length > 0) materials[kind] = heaviest()
-      differ ||= materials[kind] !== id
-    }
-    if (differ) faces.push([x, y, z, materials.slice()])
-  }
-  coarse.setFaces(faces)
-  return coarse
 }
 
 /** Width of a column block of LayerIndex, in lattice units along a. */

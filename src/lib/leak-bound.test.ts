@@ -44,7 +44,7 @@ import { selectSlices, leakFreeDetail, leakAngle, halfLayer, chunkCell, sliceCen
 import { ChunkBaker, SPLAT } from './chunk-baker'
 import { FACES, LAYER, inFace } from './view'
 import { VoxelGrid } from './voxel-grid'
-import { levelsOf } from './world'
+import { gridOf, levelsOf, voxelsOf } from './scene.test-helper'
 
 /** Seeded uniform samples in [lo, hi). */
 function sampler(seed: number) {
@@ -257,11 +257,11 @@ describe.each([1, 0.5, 0.25])('Step 8: ray-cast leaks with tan(fov / 2) = %s', T
    */
   function drawn(terrain: Cell[], slices: SliceId[]): { cells: Cell[]; levels: VoxelGrid[] } {
     const { right: R, up: U, forward: F } = face.lattice
-    const levels = levelsOf(VoxelGrid.fromVoxels(terrain.map(({ u, z }) => ({
+    const levels = levelsOf(gridOf(terrain.map(({ u, z }) => ({
       x: (u * R.x + z * F.x) / 2, y: (u * R.y + z * F.y) / 2, z: (u * R.z + z * F.z) / 2, color: '#808080',
     }))))
     const dot = (p: { x: number; y: number; z: number }, v: { x: number; y: number; z: number }) => p.x * v.x + p.y * v.y + p.z * v.z
-    const inPlane = levels.map((grid, level) => grid.toVoxels().map(p => ({ u: dot(p, R) << level, b: dot(p, U), z: dot(p, F) << level, n: 2 ** level })).filter(c => c.b === 0))
+    const inPlane = levels.map((grid, level) => voxelsOf(grid).map(p => ({ u: dot(p, R) << level, b: dot(p, U), z: dot(p, F) << level, n: 2 ** level })).filter(c => c.b === 0))
     const cells = new Map<string, Cell>()
     for (const slice of slices) {
       for (const { u, z, n } of inPlane[slice.atoms]) if (holds(slice, [u, 0, z])) cells.set(`${String(n)}:${String(u)},${String(z)}`, { u, z, n })

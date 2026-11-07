@@ -96,14 +96,8 @@ Then come the other tiles within `GRID_REACH` of each level the slices read,
 so that turning finds them made, and far ones are dropped.
 A tile never changes once made,
 so no chunk or cell surface goes stale as tiles come.
-Tests' scenes, worlds of voxels alone (`World.ofVoxels`),
-have each grid the one before it coarsened (`coarsen`):
-a coarse voxel is full if a quarter of its cell is,
-so a floor or wall one voxel thick stays one,
-and solids grow by up to half a coarse voxel.
-Each of its faces that shows takes what most of the cell's open faces
-facing its way show (section 6):
-a coarse voxel at a roof's edge is roof from above, wall from the side.
+Tests' scenes of hand-made voxels are given a grid per level,
+the coarser ones sampled at their sites (`src/lib/scene.test-helper.ts`).
 A slice is about 1/detail of its distance thick (section 2),
 so from level s on, a slab of 2^s atoms,
 a voxel stays about the same size on screen,
@@ -632,7 +626,6 @@ The box is cut into bricks 8 units wide, 256 sites,
 and only bricks with voxels are stored.
 A worker reads its copy of the grids for every face (`Reader` in `bake/`),
 without turned copies.
-A list of voxel objects is built only on request (tests).
 Renderer distances are in world units.
 
 **Scenes** describe shapes in metres and fill the sites inside them;
@@ -680,10 +673,6 @@ The renderer only draws faces that no neighbour covers.
   (R + 1) / R times as deep as their R layers of atoms (section 1),
   1.06 for the 16 of the far levels,
   so they take about that many more slices than slabs of whole layers.
-- Far slices draw coarse voxels (section 1):
-  what fills less than a quarter of a coarse voxel's cell is lost
-  (a lone voxel, a thin pole), and solids grow by up to half a coarse
-  voxel.
 - The web compositor draws every splat in view every frame (`todo.md`).
 - The world's grids are held by the main thread and by each worker.
 - Moving far, a level's grid is generated again where the camera went

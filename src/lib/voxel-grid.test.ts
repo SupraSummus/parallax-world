@@ -1,10 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import { FACES } from './view'
-import { VOXEL_FACES } from './fcc'
-import { coarsen, LayerIndex, VoxelGrid, isSite } from './voxel-grid'
+import { LayerIndex, VoxelGrid, isSite } from './voxel-grid'
 import { hills } from './hills.test-helper'
+import { voxelsOf } from './scene.test-helper'
 
-const { grid, voxels } = hills(7)
+const grid = hills(7).levelAround(0, { x: 0, y: 0, z: 0 })
+const voxels = voxelsOf(grid)
 
 describe('VoxelGrid', () => {
   it('stores the sites of its box, in bricks of those it has voxels in, and nothing else', () => {
@@ -27,12 +28,6 @@ describe('VoxelGrid', () => {
     grid.set(0, 0, 0, 0)
     expect(grid.get(0, 0, 0)).toBe(0)
     expect(new VoxelGrid({ minX: 0, minY: 0, minZ: 0, maxX: 64, maxY: 64, maxZ: 64 }, []).bricks.every(b => b === -1)).toBe(true)
-  })
-
-  it('round-trips voxels, and refuses points that are not sites', () => {
-    const list = [{ x: 0, y: 0, z: 0, color: '#ff0000' }, { x: 3, y: -1, z: 2, color: '#00ff00' }]
-    expect(VoxelGrid.fromVoxels(list).toVoxels()).toEqual(list)
-    expect(() => VoxelGrid.fromVoxels([{ x: 1, y: 0, z: 0, color: '#ff0000' }])).toThrow(RangeError)
   })
 })
 
@@ -79,61 +74,5 @@ describe('LayerIndex', () => {
       return LayerIndex.of(grid).tables
     }
     expect(tables(1024)).toEqual(tables(16))
-  })
-})
-
-describe('coarsen', () => {
-  const RED = { color: '#ff0000' }
-  const BLUE = { color: '#0000ff' }
-  /** A grid of the sites in a box that `fill` gives a material (1 red, 2 blue) or 0. */
-  const made = (fill: (x: number, y: number, z: number) => number) => {
-    const grid = new VoxelGrid({ minX: -16, minY: -16, minZ: -16, maxX: 16, maxY: 16, maxZ: 16 }, [{ color: '' }, RED, BLUE])
-    for (let z = -16; z < 16; z++) {
-      for (let y = -16; y < 16; y++) {
-        for (let x = -16; x < 16; x++) grid.set(x, y, z, fill(x, y, z))
-      }
-    }
-    return grid
-  }
-  /**
-   * The y of the full coarse sites around the vertical line (x, z), away
-   * from the box's edges: in the columns (x, z) and (x + 1, z), the one
-   * holding the sites of even y and the other those of odd y.
-   */
-  const column = (grid: VoxelGrid, x: number, z: number) =>
-    Array.from({ length: 12 }, (_, k) => k - 6).filter(y => grid.get(x, y, z) !== 0 || grid.get(x + 1, y, z) !== 0)
-
-  it('keeps the surface of a solid where it is, or half a coarse voxel up', () => {
-    // Ground up to y = 0: coarse sites up to y = 0 (2y = 0); up to y = 1: up to 1 (2y = 2).
-    expect(column(coarsen(made((_, y) => (y <= 0 ? 1 : 0))), 0, 0)).toEqual([-6, -5, -4, -3, -2, -1, 0])
-    expect(column(coarsen(made((_, y) => (y <= 1 ? 1 : 0))), 0, 0)).toEqual([-6, -5, -4, -3, -2, -1, 0, 1])
-  })
-
-  it('keeps a plane one voxel thick, between layers of cells or through them', () => {
-    for (const plane of [0, 1, 2, 3]) {
-      const coarse = coarsen(made((_, y) => (y === plane ? 1 : 0)))
-      for (const [x, z] of [[0, 0], [2, 1], [-3, 2], [1, 3]]) expect(column(coarse, x, z).length, `plane ${String(plane)}`).toBeGreaterThan(0)
-    }
-  })
-
-  it('drops a lone voxel, and takes the material most of a cell has', () => {
-    expect(coarsen(made((x, y, z) => (x === 0 && y === 0 && z === 0 ? 1 : 0))).toVoxels()).toEqual([])
-    // Red below y = 0, blue above: the coarse site at the origin holds more red (its own site and the layer below).
-    const coarse = coarsen(made((_, y) => (y <= 0 ? 1 : 2)))
-    expect(coarse.get(0, 0, 0)).toBe(1)
-    expect(coarse.get(1, 1, 0)).toBe(2)
-  })
-
-  it('makes each face that shows of the material of the open faces facing its way', () => {
-    // A red block under a blue sheet one voxel thick, up to x = 8. From above, coarse voxels of the sheet
-    // hide the block's; at its edge, the red one under the sheet is blue only on its faces up towards ±z,
-    // which nothing coarse covers, and red on the rest, which look at the block's side or are covered.
-    const coarse = coarsen(made((x, y) => (x > 8 ? 0 : y === 1 ? 2 : y <= 0 ? 1 : 0)))
-    const faces = (grid: VoxelGrid, x: number) => VOXEL_FACES.map((_, k) => grid.face(x, 0, 0, k))
-    const edge = VOXEL_FACES.map(([a, b]) => (a === 0 && b > 0 ? 2 : 1))
-    expect([coarse.get(4, 0, 0), coarse.get(3, 1, 0)]).toEqual([1, 2])
-    expect(faces(coarse, 4)).toEqual(edge)
-    // A coarser level measures the finer one's faces.
-    expect(faces(coarsen(coarse), 2)).toEqual(edge)
   })
 })
