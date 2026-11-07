@@ -67,11 +67,13 @@ work! {
 /**
  * Rough nanoseconds per count, to weigh counts into one estimate:
  * fitted once, by least squares, to the times of every world's tiles
- * at levels 0 to 6 on one busy machine. They rank work more than they
- * time it; a report's "took here" shows how far off they are elsewhere.
- * `largest` is among `tests`, so weighs nothing of its own.
+ * at levels 0 to 6 on one busy machine; `measured` scaled since by how
+ * much less time measuring a site took once it was made faster. They
+ * rank work more than they time it; a report's "took here" shows how far
+ * off they are elsewhere. `largest` is among `tests`, so weighs nothing
+ * of its own.
  */
-const NS: Work = Work { cells: 100, owned: 1300, nodes: 1800, tests: 50, measured: 150, reads: 20, plans: 120, largest: 0 };
+const NS: Work = Work { cells: 100, owned: 1300, nodes: 1800, tests: 50, measured: 35, reads: 20, plans: 120, largest: 0 };
 
 impl Work {
     /** Adds `w`'s counts, but for the largest, the larger. */

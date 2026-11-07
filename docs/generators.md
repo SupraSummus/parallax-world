@@ -126,7 +126,11 @@ how many rays get how far, and what they stop on.
   with one per site a house's outline came out ragged, a cloud of its cells;
   so a porous thing is kept or not whole, right only over many of them.
   That is exact where an outline is a guess, at a cost:
-  each box draws the things it reaches whole.
+  each box draws the things it reaches whole, and measures them anew.
+  Remembering their forms across boxes would spare little:
+  things are measured where they are much smaller than a host's tiles,
+  so few reach two tiles, and hosts spread their tiles over workers,
+  a generator each.
   Give such parts' children `bounds` and make their shapes only once read
   (`Shapes::lazy`): coarse boxes hold many things drawn only from afar.
   Parts a thing hides, like branches inside a crown, are children with a small `size`:
