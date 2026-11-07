@@ -18,7 +18,7 @@ use worldgen::generator::{ANY_SIZE, Child, Far, Field, Generator, Kind, Layer, N
 use worldgen::js;
 use worldgen::kinds;
 use worldgen::noise::{Fbm, Fx, Rng, ValueNoise, fx, hash64, smoothstep, stream};
-use worldgen::plan::{Land, Plan};
+use worldgen::plan::{Claims, Land, Plan};
 use worldgen::units::{Units, m};
 
 use crate::forest::{self, K as F};
@@ -47,14 +47,23 @@ const HEIGHTS: (i64, i64) = (m(-24.0), m(32.0));
 const WATER: Units = Units::m(-4.5);
 /** Bog this high above water too. */
 const BOG: Units = Units::m(0.25);
-/** Plan scales: the stream's bends, its banks, the ground's bumps, the steadings' regions (one at most in each), the pools'. */
+/** Plan scales: the stream's bends, its banks, the ground's bumps. */
 const STREAM_SCALE: i64 = m(32.0);
 const BANK_SCALE: i64 = m(1.0);
 const GROUND_SCALE: i64 = 8;
-pub const REGION: i64 = m(160.0);
-const POOL_REGION: i64 = m(64.0);
-/** A steading's ring is this far inside its region, so the cell that owns it is centred in the region too. */
-const MARGIN: i64 = m(50.0);
+/**
+ * Steadings' rings stand at least APART, claimed (Claims) from spots one
+ * in each square CLAIM wide on average; a steading reaches NEAR from its
+ * ring at most (its hut, the ground it levels, its path), so a column is
+ * near one at most. The first's ring is at FIRST.
+ */
+const CLAIM: i64 = m(128.0);
+const APART: i64 = m(112.0);
+pub const NEAR: i64 = m(56.0);
+const FIRST: [i64; 2] = [m(8.0), m(10.0)];
+/** Pools' centres stand at least POOLS_APART, claimed from spots one in each square POOL_CLAIM wide on average. */
+const POOL_CLAIM: i64 = m(64.0);
+const POOLS_APART: i64 = m(32.0);
 /** A steading's cell, and how far its things reach past it. */
 const STEADING_CELL: i64 = m(32.0);
 /** Hut from ring, at most; ring radius, at most; hut's half diagonal, at most. */
@@ -65,9 +74,11 @@ const HUT_HALF: i64 = m(5.0);
 const REACH_ACROSS: i64 = if HUT_FROM_RING + HUT_HALF > RING_RADIUS { HUT_FROM_RING + HUT_HALF + m(2.0) } else { RING_RADIUS + m(2.0) };
 /** How far the ground eases from a hut's level back to the heath's. */
 const TERRACE: Units = Units::m(12.0);
-/** A pool's radius at most, and how far inside its region its centre is: so a pool is in its region's columns only. */
+// The levelled ground's far corner (a square round the hut) is the furthest a steading reaches from its ring.
+const _: () = assert!(HUT_FROM_RING + (HUT_HALF + TERRACE.0) * 3 / 2 <= NEAR && 2 * NEAR <= APART);
+/** A pool's radius at most: pools stand at least two apart, so a column is in one at most. */
 const POOL_RADIUS: i64 = m(14.0);
-const POOL_MARGIN: i64 = m(16.0);
+const _: () = assert!(2 * POOL_RADIUS <= POOLS_APART);
 /** How far the moor's bid leads the rest where it has room for a steading or a pool: the land's width and some. */
 const SURE: Fx = fx(0.2);
 const WALL: i64 = 3;
@@ -164,22 +175,12 @@ struct Stream {
 /** Where water stands: in every hollow up to a level, or in pools in hollows where the moor has room for them. */
 enum Water {
     Level(Units),
-    Pools(Plan<Option<Pool>>),
+    Pools(Claims<Pool>),
 }
 
 /** How far column (x, z) is from the centre line of `stream`; and the stream's half width there. */
 fn stream_distance(stream: &Plan<Fx>, x: i64, z: i64) -> (Units, Units) {
     ((Units(x).to_fx() - stream.at(0, z)).abs().floor_units(), Units::m(1.0) + Units::m(0.6) * z.rem_euclid(97) / 97)
-}
-
-/** The region `size` wide of column (x, z), region (0, 0) around the origin. */
-fn region(x: i64, z: i64, size: i64) -> (i64, i64) {
-    ((x + size / 2).div_euclid(size), (z + size / 2).div_euclid(size))
-}
-
-/** The region of column (x, z) that may have a steading (`Moorland::steading_in`). */
-pub fn steading_region(x: i64, z: i64) -> (i64, i64) {
-    region(x, z, REGION)
 }
 
 /**
@@ -192,7 +193,7 @@ pub struct Moorland {
     seed: u64,
     patches: Fbm<{ m(30.0) }, 2>,
     stream: Option<Stream>,
-    steadings: Rc<Plan<Option<Steading>>>,
+    steadings: Rc<Claims<Steading>>,
     water: Water,
 }
 
@@ -201,7 +202,7 @@ impl Moorland {
      * The moorland of `seed` on ground `height` high (before it levels
      * it), with steadings and pools where `lead`, by how much its bid
      * leads every other domain's at least, is SURE: their columns are its.
-     * A steading in each region by `chance`; a stream along `line`, if
+     * Steadings claimed from spots by `chance`; a stream along `line`, if
      * any; water in every hollow up to `level`, or without one, in pools.
      */
     fn new(seed: u64, height: ByColumn, lead: ByColumn, chance: Fx, line: Option<Rc<dyn Fn(i64) -> Fx>>, level: Option<Units>) -> Moorland {
@@ -225,41 +226,39 @@ impl Moorland {
         let steadings = {
             let (height, lead) = (height.clone(), lead.clone());
             let s = stream(seed, 5);
-            Rc::new(Plan::new("steadings", REGION, move |i, k| {
+            Rc::new(Claims::new("steadings", s, CLAIM, APART, Some(FIRST), move |ring, random| {
                 // The stream's plan is finer than the steadings': its line is read here.
                 let off_stream = |c: [i64; 2]| line.as_ref().is_none_or(|l| (Units(c[0]).to_fx() - l(c[1])).abs() > Units::m(14.0).to_fx());
-                let steading = steading_of(s, chance, &*height, i, k)?;
+                let steading = if ring == FIRST {
+                    steading_at(ring, true, &mut Rng::new(hash64(s, 0, 0, 0)), &*height)
+                } else if random.chance(chance) {
+                    steading_at(ring, false, random, &*height)
+                } else {
+                    return None;
+                };
                 let low = level.is_some_and(|w| steading.level <= w + Units::m(1.0));
                 // Room all round the hut and the ring.
                 let around = |c: [i64; 2]| (-1..=1).all(|a| (-1..=1).all(|b| lead(c[0] + a * m(20.0), c[1] + b * m(20.0)) >= SURE));
                 (!low && off_stream(steading.centre) && off_stream(steading.ring) && around(steading.centre) && around(steading.ring))
-                    .then_some(steading)
+                    .then_some((ring, steading))
             }))
         };
         let water = match level {
             Some(level) => Water::Level(level),
             None => {
-                let (steadings, s) = (steadings.clone(), stream(seed, 7));
-                Water::Pools(Plan::new("pools", POOL_REGION, move |i, k| {
-                    let ground = |x, z| terraced(&steadings, x, z, height(x, z));
-                    if !Rng::new(hash64(s, i, k, 0)).chance(fx(0.35)) {
+                let steadings = steadings.clone();
+                Water::Pools(Claims::new("pools", stream(seed, 7), POOL_CLAIM, POOLS_APART, None, move |spot, random| {
+                    if !random.chance(fx(0.35)) {
                         return None;
                     }
-                    let pool = pool_of(s, &ground, i, k)?;
+                    let ground = |x, z| terraced(&steadings, x, z, height(x, z));
+                    let pool = pool_at(spot, &ground, random)?;
                     let [x, z] = pool.centre;
                     let r = pool.radius + m(4.0);
                     let room = [(0, 0), (r, 0), (-r, 0), (0, r), (0, -r)].iter().all(|(a, b)| lead(x + a, z + b) >= SURE);
-                    // Off the steadings: theirs is levelled ground, and their hut and paths dry.
-                    let (i, k) = region(x, z, REGION);
-                    let off = (-1..=1).all(|a| {
-                        (-1..=1).all(|b| {
-                            steadings.at(i + a, k + b).is_none_or(|s| {
-                                let near = |c: [i64; 2]| (c[0] - x).abs().max((c[1] - z).abs()) < r + HUT_FROM_RING;
-                                !near(s.centre) && !near(s.ring)
-                            })
-                        })
-                    });
-                    (room && off).then_some(pool)
+                    // Off all the steadings reach: theirs is levelled ground, and their huts and paths dry.
+                    let off = steadings.near(x, z, r + NEAR).is_none();
+                    (room && off).then_some((pool.centre, pool))
                 }))
             }
         };
@@ -272,29 +271,28 @@ impl Moorland {
         self.pool(x, z).map_or(ground, |pool| pool.hollowed(x, z, ground))
     }
 
-    /** The pool of column (x, z)'s region, if it has one. */
+    /** The pool column (x, z) may be in, if any. */
     fn pool(&self, x: i64, z: i64) -> Option<Pool> {
         let Water::Pools(pools) = &self.water else { return None };
-        let (i, k) = region(x, z, POOL_REGION);
-        pools.at(i, k)
+        pools.near(x, z, POOL_RADIUS).map(|(_, pool)| pool)
     }
 
-    /** Where the steading of region (i, k) is, if it has one: between its hut and its ring, at the hut's floor. */
-    pub fn steading_in(&self, i: i64, k: i64) -> Option<[i64; 3]> {
-        let s = self.steadings.at(i, k)?;
+    /** Where the steading reaching column (x, z) is, if any: between its hut and its ring, at the hut's floor. */
+    pub fn steading_near(&self, x: i64, z: i64) -> Option<[i64; 3]> {
+        let s = self.steading(x, z)?;
         Some([(s.centre[0] + s.ring[0]).div_euclid(2), s.level.0, (s.centre[1] + s.ring[1]).div_euclid(2)])
     }
 
+    /** The steading reaching column (x, z), if any: its ring within NEAR. */
     fn steading(&self, x: i64, z: i64) -> Option<Steading> {
-        let (i, k) = region(x, z, REGION);
-        self.steadings.at(i, k)
+        self.steadings.near(x, z, NEAR).map(|(_, s)| s)
     }
 
     fn streamside(&self, x: i64, z: i64) -> Streamside {
         self.stream.as_ref().map_or(Streamside::Off, |s| s.side.at(x, z))
     }
 
-    /** Whether column (x, z) is on the path of its region's steading. */
+    /** Whether column (x, z) is on the path of the steading reaching it. */
     fn on_path(&self, x: i64, z: i64) -> bool {
         self.steading(x, z).is_some_and(|s| {
             let (a, b) = s.path();
@@ -311,23 +309,15 @@ impl Moorland {
     }
 }
 
-/** `ground` at (x, z), levelled under the hut of the steading of its region in `steadings`. */
-fn terraced(steadings: &Plan<Option<Steading>>, x: i64, z: i64, ground: Fx) -> Fx {
-    let (i, k) = region(x, z, REGION);
-    steadings.at(i, k).map_or(ground, |s| s.terraced(x, z, ground))
+/** `ground` at (x, z), levelled under the hut of the steading reaching it in `steadings`. */
+fn terraced(steadings: &Claims<Steading>, x: i64, z: i64, ground: Fx) -> Fx {
+    steadings.near(x, z, NEAR).map_or(ground, |(_, s)| s.terraced(x, z, ground))
 }
 
-/** The steading of region (i, k), if it has one (by `chance`): its ring placed MARGIN inside it, the hut 22 to 30 m off it, on ground `height` high. */
-fn steading_of(seed: u64, chance: Fx, height: &dyn Fn(i64, i64) -> Fx, i: i64, k: i64) -> Option<Steading> {
-    let mut random = Rng::new(hash64(seed, i, k, 0));
-    if (i, k) != (0, 0) && !random.chance(chance) {
-        return None;
-    }
-    let inner = (REGION - 2 * MARGIN) as u32;
-    let (x0, z0) = (i * REGION - REGION / 2 + MARGIN, k * REGION - REGION / 2 + MARGIN);
-    let ring = if (i, k) == (0, 0) { [m(8.0), m(10.0)] } else { [x0 + random.below(inner) as i64, z0 + random.below(inner) as i64] };
+/** The steading whose ring is at `ring`, the first if `first`: its hut 22 to 30 m off it, on ground `height` high. */
+fn steading_at(ring: [i64; 2], first: bool, random: &mut Rng, height: &dyn Fn(i64, i64) -> Fx) -> Steading {
     // The first steading's hut east of its ring, away from the stream.
-    let turn = if (i, k) == (0, 0) { 0.6 * random.next() - 0.3 } else { random.next() };
+    let turn = if first { 0.6 * random.next() - 0.3 } else { random.next() };
     let angle = turn * 2.0 * std::f64::consts::PI;
     let from = m(22.0) as f64 + random.next() * m(8.0) as f64;
     let centre = [ring[0] + (from * js::cos(angle)) as i64, ring[1] + (from * js::sin(angle)) as i64];
@@ -343,23 +333,21 @@ fn steading_of(seed: u64, chance: Fx, height: &dyn Fn(i64, i64) -> Fx, i: i64, k
     let ring_ground = mean(ring);
     let radius = m(7.0) + random.below(m(3.0) as u32) as i64;
     let stones = 9 + random.below(5) as i64;
-    Some(Steading { ring, ring_ground, radius, stones, centre, level, length, depth, turns, seed: random.next_u64() })
+    Steading { ring, ring_ground, radius, stones, centre, level, length, depth, turns, seed: random.next_u64() }
 }
 
 /**
- * The pool of region (i, k), if it has one: in the lowest of a few spots
- * inside it, as wide as the ground round it is level enough, up to
- * POOL_RADIUS; water up to half a metre under the lowest of that ground,
- * so it and its boggy shore stay inside it, the hollow dug deeper where
- * it is shallow.
+ * The pool claimed from `spot`, if the ground lets it: in the lowest of a
+ * few points within 16 m of it, as wide as the ground round it is level
+ * enough, up to POOL_RADIUS; water up to half a metre under the lowest of
+ * that ground, so it and its boggy shore stay inside it, the hollow dug
+ * deeper where it is shallow.
  */
-fn pool_of(seed: u64, ground: &dyn Fn(i64, i64) -> Fx, i: i64, k: i64) -> Option<Pool> {
-    let inner = POOL_REGION - 2 * POOL_MARGIN;
-    let (x0, z0) = (i * POOL_REGION - POOL_REGION / 2 + POOL_MARGIN, k * POOL_REGION - POOL_REGION / 2 + POOL_MARGIN);
-    let spots = (0..5).flat_map(|a| (0..5).map(move |b| [x0 + a * inner / 4, z0 + b * inner / 4]));
-    let centre = spots.min_by_key(|[x, z]| ground(*x, *z))?;
+fn pool_at(spot: [i64; 2], ground: &dyn Fn(i64, i64) -> Fx, random: &mut Rng) -> Option<Pool> {
+    let points = (-2..=2).flat_map(|a| (-2..=2).map(move |b| [spot[0] + a * m(8.0), spot[1] + b * m(8.0)]));
+    let centre = points.min_by_key(|[x, z]| ground(*x, *z))?;
     let bottom = ground(centre[0], centre[1]);
-    let smallest = m(4.0) + Rng::new(hash64(seed, i, k, 1)).below(m(4.0) as u32) as i64;
+    let smallest = m(4.0) + random.below(m(4.0) as u32) as i64;
     (0..4).map(|n| POOL_RADIUS - n * (POOL_RADIUS - smallest) / 3).find_map(|radius| {
         let rim: Vec<Fx> = (0..32)
             .map(|a| {
@@ -435,7 +423,7 @@ impl Uplands {
     /** The moorland on them, of `seed`: steadings, fewer than on the moor alone, and pools where it leads; no stream. */
     pub fn moorland(self: &Rc<Self>, seed: u64) -> Moorland {
         let (terrain, lead) = (self.terrain.clone(), self.clone());
-        Moorland::new(seed, Rc::new(move |x, z| terrain.ground(x, z)), Rc::new(move |x, z| lead.lead(x, z)), fx(0.25), None, None)
+        Moorland::new(seed, Rc::new(move |x, z| terrain.ground(x, z)), Rc::new(move |x, z| lead.lead(x, z)), fx(0.225), None, None)
     }
 }
 
@@ -489,14 +477,14 @@ pub fn moor(seed: u64) -> World {
         let zm = z as f64 / m(1.0) as f64;
         fx(m(-40.0) as f64 + m(1.0) as f64 * (12.0 * js::sin(zm / 37.0 + phase) + 4.0 * js::sin(zm / 11.0 + 2.0 * phase)))
     });
-    let moorland = Rc::new(Moorland::new(seed, heath.clone(), Rc::new(|_, _| Fx::ONE), fx(0.6), Some(line), Some(WATER)));
+    let moorland = Rc::new(Moorland::new(seed, heath.clone(), Rc::new(|_, _| Fx::ONE), fx(0.65), Some(line), Some(WATER)));
     // The heath, levelled under each hut.
     let ground = {
         let moorland = moorland.clone();
         Rc::new(Plan::new("ground", GROUND_SCALE, move |x, z| moorland.shaped(x, z, heath(x, z)).round_units().0))
     };
     let spawn = {
-        // Behind the first hut, or over the origin if its region has none.
+        // Behind the first hut, or over the origin if there is none.
         let [x, _, z] = moorland.steading(0, 0).map_or([0; 3], |s| s.frame().site([s.length / 2, 0, s.depth + m(6.0)]));
         let y = Units(ground.at(x, z)).max(WATER).0 + m(2.0);
         [x, y + ((x + y + z) & 1), z]

@@ -183,17 +183,18 @@ fn mountainside(terrain: &Terrain) -> [i64; 3] {
 }
 
 /**
- * A steading of the moor on the valley's floor: in the first row of the
- * moor's regions with one within 400 m of the path, the nearest it.
- * From 4.5 km on, where REGIONS_SEED's is, as for the mountainside.
+ * A steading of the moor on the valley's floor, within 400 m of the
+ * path: of those reaching the first row of points that any reaches, the
+ * nearest the path. Rows and points are as far apart as a steading
+ * reaches (moor::NEAR), so none falls between. From 4.5 km on, where
+ * REGIONS_SEED's is, as for the mountainside.
  */
 fn steading(terrain: &Terrain, moorland: &Moorland) -> [i64; 3] {
     let path = |z: i64| terrain.path_x(z).round_units().0;
-    (0..1000)
-        .map(|row| m(4500.0) + row * moor::REGION)
+    (m(4500.0)..m(164_500.0))
+        .step_by(moor::NEAR as usize)
         .find_map(|z| {
-            let (i, k) = moor::steading_region(path(z), z);
-            let near = (i - 3..=i + 3).filter_map(|i| moorland.steading_in(i, k)).map(|p| ((p[0] - path(p[2])).abs(), p));
+            let near = (-8..=8).filter_map(|i| moorland.steading_near(path(z) + i * moor::NEAR, z)).map(|p| ((p[0] - path(p[2])).abs(), p));
             near.filter(|(d, _)| *d < m(400.0)).min().map(|(_, p)| p)
         })
         .expect("a steading by the path within 160 km along the valley")
