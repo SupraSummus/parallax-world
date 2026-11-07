@@ -8,7 +8,7 @@
 //! parallax-native [--world NAME] [--seed S] --check-requests frame.bin
 //!
 //! --view takes the web page's view query (parseViewQuery in renderer.ts),
-//! overriding --seed and --world; its pillars=0 draws no pillars, as the page's.
+//! overriding --seed and --world.
 //! --shot draws the first frame once all the tiles and chunks in view are
 //! in, at 1280×800 or --size, offscreen, and saves it; --bench only times
 //! the first frame once the world has all its tiles, the main thread's
@@ -102,7 +102,6 @@ impl window::Content for App {
             }
             ui.checkbox(&mut self.renderer.skip_covered, "Skip Covered Chunks");
             ui.checkbox(&mut self.seams, "Show Face Seams");
-            ui.checkbox(&mut self.renderer.pillars, "Pillars over Columns");
             ui.horizontal(|ui| {
                 ui.label("Colour by");
                 for (colours, name) in Colours::ALL {
@@ -218,16 +217,8 @@ impl App {
     fn remember(&self, size: [f32; 2]) {
         let ([x, y, z], r) = (self.camera, &self.renderer);
         let mut frame = format!(
-            "--view '{}&camera={x},{y},{z}&look={},{}&fov={}&distance={:.0}&leak={}&pillars={}' --size {:.0}x{:.0}",
-            self.world_query,
-            self.yaw,
-            self.pitch,
-            self.fov,
-            r.render_distance,
-            r.max_leak,
-            u8::from(r.pillars),
-            size[0],
-            size[1],
+            "--view '{}&camera={x},{y},{z}&look={},{}&fov={}&distance={:.0}&leak={}' --size {:.0}x{:.0}",
+            self.world_query, self.yaw, self.pitch, self.fov, r.render_distance, r.max_leak, size[0], size[1],
         );
         if !r.skip_covered {
             frame += " --all-chunks";
@@ -411,8 +402,6 @@ struct ViewQuery {
     fov: Option<f64>,
     distance: Option<f64>,
     leak: Option<f64>,
-    /** The page's switch (queryFlag in App.tsx). */
-    pillars: Option<bool>,
 }
 
 fn parse_view_query(query: &str) -> ViewQuery {
@@ -437,7 +426,6 @@ fn parse_view_query(query: &str) -> ViewQuery {
         fov: numbers::<1>(get("fov")).map(|[v]| v),
         distance: numbers::<1>(get("distance")).map(|[v]| v),
         leak: numbers::<1>(get("leak")).map(|[v]| v),
-        pillars: get("pillars").map(|v| v == "1"),
     }
 }
 
@@ -471,9 +459,6 @@ fn main() {
         renderer.max_leak = v;
     }
     renderer.skip_covered = !flag("--all-chunks");
-    if let Some(v) = query.pillars {
-        renderer.pillars = v;
-    }
     let mut world = World::new(make, seed, threads);
     let mut camera = query.camera.unwrap_or(shown.spawn.map(|v| v as f64));
     let faces: [[Vec3; 3]; 12] = std::array::from_fn(|f| view::faces()[f].axes);

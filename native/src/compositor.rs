@@ -71,7 +71,7 @@ pub fn block(distance: f64, focal: f64) -> f64 {
 
 /**
  * A chunk's splats (far to near) as the GPU takes them, each with a run as
- * a row of splats if `pillars` (see rows), in clusters of the
+ * a row of splats (see rows), in clusters of the
  * splats in each block of size `block` on its plane (row by row, nearest
  * first in each, so that a block's first clusters are its front), and the
  * clusters, nearest first, so that splats are drawn near to far; their
@@ -82,8 +82,8 @@ pub fn block(distance: f64, focal: f64) -> f64 {
  * drawn for its camera. In the bake workers, so that a chunk's upload is a
  * copy.
  */
-pub fn cluster(numbers: &[f32], half_layer: f64, block: f64, pillars: bool) -> (Vec<GpuSplat>, Vec<GpuCluster>) {
-    let numbers = &rows(numbers.as_chunks::<5>().0, pillars)[..];
+pub fn cluster(numbers: &[f32], half_layer: f64, block: f64) -> (Vec<GpuSplat>, Vec<GpuCluster>) {
+    let numbers = &rows(numbers.as_chunks::<5>().0)[..];
     let n = numbers.len();
     // Nearer the later painted.
     let orders: Vec<f32> = (0..n).map(|k| (n - k) as f32 / (n + 1) as f32).collect();
@@ -135,21 +135,20 @@ pub fn cluster(numbers: &[f32], half_layer: f64, block: f64, pillars: bool) -> (
 const VOXEL: i32 = 4;
 
 /**
- * A chunk's splats (far to near) and, if `pillars`, for each with a run (a
+ * A chunk's splats (far to near) and, for each with a run (a
  * pillar along the axis, see chunk_splats in bake/src/splats.rs), a splat
  * at each voxel of it, the same but deeper; still far to near. A voxel apart, a row's
  * hexagons meet from every ray of the face, so a slanted ray meets the
  * pillar wherever its voxels are; farther apart, gaps open between them.
  */
-fn rows(numbers: &[[f32; 5]], pillars: bool) -> Vec<[f32; 5]> {
+fn rows(numbers: &[[f32; 5]]) -> Vec<[f32; 5]> {
     let mut all: Vec<(i32, [f32; 5])> = Vec::with_capacity(numbers.len());
     for &[x, y, w, run, paint] in numbers {
         let paint = paint.to_bits();
         let depth = (paint >> 24) as i32 - 128;
         // Its depth past the plane in the alpha byte, as the splat's.
         let at = |d: i32| f32::from_bits(paint & 0x00ff_ffff | ((128 + depth + d) as u32) << 24);
-        let run = if pillars { run as i32 } else { 0 };
-        all.extend((0..=run).step_by(VOXEL as usize).map(|d| (depth + d, [x, y, w, 0.0, at(d)])));
+        all.extend((0..=run as i32).step_by(VOXEL as usize).map(|d| (depth + d, [x, y, w, 0.0, at(d)])));
     }
     // Far first; stable, so the chunk's order where depths tie.
     all.sort_by_key(|&(depth, _)| std::cmp::Reverse(depth));

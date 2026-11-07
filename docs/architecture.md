@@ -556,8 +556,6 @@ one at each voxel of the column (`rows`),
 clustered and culled as any splat.
 A voxel apart, a row's hexagons meet from every ray of the face;
 farther apart, gaps open.
-Switching "Pillars over Columns" bakes the chunks in view again,
-the old ones standing in meanwhile.
 
 **Fog.** A slice at distance d keeps `exp(−d / F)` of its own colour;
 the rest is the horizon colour, mixed in per pixel.

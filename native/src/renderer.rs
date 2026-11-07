@@ -105,8 +105,6 @@ pub struct Renderer {
     pub max_leak: f64,
     pub render_distance: f64,
     pub skip_covered: bool,
-    /** Whether runs are drawn as pillars: chunks baked otherwise are baked again, standing in meanwhile. */
-    pub pillars: bool,
 }
 
 /** One face as seen in one render. */
@@ -144,7 +142,6 @@ impl Renderer {
             max_leak: 6.0,
             render_distance,
             skip_covered: true,
-            pillars: true,
         }
     }
 
@@ -202,7 +199,7 @@ impl Renderer {
                 let level = id.atoms as usize;
                 stats.levels[level] = true;
                 let source = Source { level, tiles: &self.levels[level], heights: self.heights[level] };
-                let (layer, cells, asking) = draw_slice(&of, slice, &source, view, self.pillars);
+                let (layer, cells, asking) = draw_slice(&of, slice, &source, view);
                 // What cells ask for, once the latest pass found them uncovered.
                 for (key, asks) in asking {
                     match if self.skip_covered { answer.covered.get(&key).copied() } else { Some(false) } {
@@ -238,17 +235,11 @@ impl Renderer {
         (frame, stats)
     }
 
-    /**
-     * Caches what the bakery delivered, unless its slice was dropped
-     * meanwhile, or its cell has a chunk already that it does not replace:
-     * one with pillars as they are to be drawn now, or the delivered one
-     * has not.
-     */
+    /** Caches what the bakery delivered, unless its slice was dropped meanwhile, or its cell has a chunk already. */
     fn receive(&mut self) {
         for (r, baked) in self.bakery.take() {
             let Some(slice) = self.slices.get_mut(&slice_key(r.face, &r.slice)) else { continue };
-            let pillars = self.pillars;
-            if slice.cells.get(&(r.i, r.j)).is_some_and(|c| c.baked.pillars == pillars || r.pillars != pillars) {
+            if slice.cells.contains_key(&(r.i, r.j)) {
                 continue;
             }
             self.next_id += 1;
@@ -333,13 +324,7 @@ fn cell_extent(of: &FaceView, slice: &mut CachedSlice, level: &Level, [i0, k0, i
  * and its cells in view as the occlusion thread wants them, with what each
  * asks for, if anything: its chunk baked, or the tiles it lacks.
  */
-fn draw_slice(
-    of: &FaceView,
-    slice: &mut CachedSlice,
-    source: &Source,
-    view: &View,
-    pillars: bool,
-) -> (Layer, Vec<Seen>, Vec<(CellKey, Asks)>) {
+fn draw_slice(of: &FaceView, slice: &mut CachedSlice, source: &Source, view: &View) -> (Layer, Vec<Seen>, Vec<(CellKey, Asks)>) {
     let id = slice.id;
     let camera = of.camera;
     // Slices start at least NEAR_DEPTH ahead of the camera, so this is > 0.
@@ -380,12 +365,11 @@ fn draw_slice(
                 }
             }
         }
-        // Baked once its tiles are in; kept once baked, though its tiles go;
-        // baked again if its pillars are to be drawn otherwise, standing in meanwhile.
+        // Baked once its tiles are in; kept once baked, though its tiles go.
         let chunk = slice.cells.get(&(i, j)).cloned();
-        if chunk.as_ref().is_none_or(|c| c.baked.pillars != pillars) && complete {
+        if chunk.is_none() && complete {
             let block = crate::compositor::block(distance, view.focal);
-            asks.chunk = Some((Request { face: of.face, slice: id, i, j, tiles, block, pillars }, distance));
+            asks.chunk = Some((Request { face: of.face, slice: id, i, j, tiles, block }, distance));
         }
         // The chunk's content, not just its cell, must reach the screen.
         let placement = chunk.filter(|c| !c.baked.splats.is_empty()).and_then(|chunk| {
