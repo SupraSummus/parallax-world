@@ -16,7 +16,7 @@ use worldgen::generator::{
 };
 use worldgen::grid::Box3;
 use worldgen::kinds;
-use worldgen::noise::{Fx, Rng, fx, hash64, smoothstep, stream};
+use worldgen::noise::{Fx, Rng, ease_towards, fx, hash64, stream};
 use worldgen::plan::{Claims, Land, Plan};
 use worldgen::units::{Units, m};
 
@@ -437,8 +437,7 @@ impl Towns {
     /** The path's centre line at z, with its fraction, bent from `route` onto the main street of the town there. */
     pub fn street_x(&self, z: i64, route: Fx) -> Fx {
         let Some(t) = self.near(z) else { return route };
-        let bend = Fx::ONE - smoothstep(Fx::ZERO, Units::m(60.0).to_fx(), Units((z - t.z).abs() - t.half_z() - t.ring()).to_fx());
-        route + (Units(t.x).to_fx() - route) * bend
+        ease_towards(route, Units(t.x).to_fx(), Units::m(60.0), Units((z - t.z).abs() - t.half_z() - t.ring()))
     }
 
     /** The town's bid for column (x, z), BID_SCALE: ahead inside its streets, behind a few metres out. */
@@ -450,8 +449,7 @@ impl Towns {
     /** `ground`, with its fraction, levelled to the town's streets, all the way under it and easing back over TERRACE. */
     pub fn terraced(&self, x: i64, z: i64, ground: Fx) -> Fx {
         let Some(t) = self.near(z) else { return ground };
-        let weight = Fx::ONE - smoothstep(Fx::ZERO, TERRACE.to_fx(), t.distance(x, z).max(Units(0)).to_fx());
-        ground + (Units(t.level).to_fx() - ground) * weight
+        ease_towards(ground, Units(t.level).to_fx(), TERRACE, t.distance(x, z))
     }
 
     /** How far column (x, z) is from the nearest town (negative inside); far if none. */

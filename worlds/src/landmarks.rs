@@ -18,7 +18,7 @@ use worldgen::frame::{Frame, Part, facing, walls};
 use worldgen::generator::{ANY_SIZE, Child, Field, Fill, Kind, Layer, Node, Op, Population, SOLID};
 use worldgen::js;
 use worldgen::kinds;
-use worldgen::noise::{Fx, Rng, ValueNoise, fx, hash64, smoothstep, stream};
+use worldgen::noise::{Fx, Rng, ValueNoise, ease_towards, fx, hash64, stream};
 use worldgen::plan::{Claims, Land, Plan};
 use worldgen::units::{Units, m};
 
@@ -475,8 +475,7 @@ impl Landmarks {
         if d >= TERRACE {
             return ground;
         }
-        let weight = Fx::ONE - smoothstep(Fx::ZERO, TERRACE.to_fx(), d.to_fx());
-        let level = ground + (Units(s.level).to_fx() - ground) * weight;
+        let level = ease_towards(ground, Units(s.level).to_fx(), TERRACE, d);
         match s.landmark.spec().shaping {
             Shaping::Bowl => level - (Fx::ONE - s.bowl(x, z)).max(Fx::ZERO) * Units(POND_DEPTH),
             Shaping::Level(_) => level,

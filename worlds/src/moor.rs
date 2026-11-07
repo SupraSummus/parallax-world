@@ -17,7 +17,7 @@ use worldgen::frame::{Frame, Part, facing, walls};
 use worldgen::generator::{ANY_SIZE, Child, Far, Field, Generator, Kind, Layer, Node, Op, Population, Shape, Span};
 use worldgen::js;
 use worldgen::kinds;
-use worldgen::noise::{Fbm, Fx, Rng, ValueNoise, fx, hash64, smoothstep, stream};
+use worldgen::noise::{Fbm, Fx, Rng, ValueNoise, ease_towards, fx, hash64, smoothstep, stream};
 use worldgen::plan::{Claims, Land, Plan};
 use worldgen::units::{Units, m};
 
@@ -119,9 +119,8 @@ impl Steading {
     /** The ground's height at (x, z), `heath` there, levelled under its hut and easing back over TERRACE. */
     fn terraced(&self, x: i64, z: i64, heath: Fx) -> Fx {
         let c = self.centre;
-        let d = Units(((x - c[0]).abs().max((z - c[1]).abs()) - HUT_HALF).max(0));
-        let weight = Fx::ONE - smoothstep(Fx::ZERO, TERRACE.to_fx(), d.to_fx());
-        heath + (self.level.to_fx() - heath) * weight
+        let d = Units((x - c[0]).abs().max((z - c[1]).abs()) - HUT_HALF);
+        ease_towards(heath, self.level.to_fx(), TERRACE, d)
     }
 }
 
