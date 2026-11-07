@@ -16,6 +16,15 @@ the picture links to the same view in the demo.</sub>
 
 ## Design principles
 
+> There are two ways of constructing a software design:
+> one way is to make it so simple that there are obviously no deficiencies,
+> and the other way is to make it so complicated
+> that there are no obvious deficiencies.
+> The first method is far more difficult.
+>
+> — C. A. R. Hoare, *The Emperor's Old Clothes* (1980)
+
+We take the first way.
 What the design is held to, beyond speed:
 
 1. **Structure comes from the lattice, not the screen.**
@@ -32,6 +41,13 @@ What the design is held to, beyond speed:
    This outranks nesting (a tree of cells) and ease of implementation.
 4. **Elegance is a criterion in its own right.**
    Results should be visible, not only measured.
+5. **Correct by construction, not by measurement.**
+   A property should follow from how a thing is built,
+   so that a whole class of mistakes can't be written.
+   Checks and their lists of known exceptions are a safety net,
+   not the design;
+   when one catches something, ask what would make it impossible.
+   A fix that needs more special cases is a sign to step back.
 
 ## Key ideas
 
