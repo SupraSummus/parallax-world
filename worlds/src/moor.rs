@@ -25,6 +25,7 @@ use crate::forest::K as F;
 use crate::landmarks::{self, Landmarks};
 use crate::mountains::K as A;
 use crate::path::Path;
+use crate::railway::Railway;
 use crate::town::K as T;
 use crate::valley::{self, Terrain};
 
@@ -368,19 +369,20 @@ fn pool_at(spot: [i64; 2], ground: &dyn Fn(i64, i64) -> Fx, random: &mut Rng) ->
  * kilometre or so long and kilometres apart; patchy, so copses of the
  * forest stand in it and heath in the forest, its edges ragged. None
  * between `clear`'s two z, nor on the towns' farmland. Steadings and
- * pools keep off the towns, the landmarks and the path (`lead`).
+ * pools keep off the towns, the landmarks, the path and the railway (`lead`).
  */
 pub struct Uplands {
     terrain: Rc<Terrain>,
     landmarks: Rc<Landmarks>,
+    railway: Rc<Railway>,
     clear: [i64; 2],
     stretches: ValueNoise<{ m(1600.0) }>,
     patches: Fbm<{ m(160.0) }, 2>,
 }
 
 impl Uplands {
-    pub fn new(seed: u64, terrain: Rc<Terrain>, landmarks: Rc<Landmarks>, clear: [i64; 2]) -> Uplands {
-        Uplands { terrain, landmarks, clear, stretches: ValueNoise::new(stream(seed, 80)), patches: Fbm::new(stream(seed, 81)) }
+    pub fn new(seed: u64, terrain: Rc<Terrain>, landmarks: Rc<Landmarks>, railway: Rc<Railway>, clear: [i64; 2]) -> Uplands {
+        Uplands { terrain, landmarks, railway, clear, stretches: ValueNoise::new(stream(seed, 80)), patches: Fbm::new(stream(seed, 81)) }
     }
 
     /** Its bid for column (x, z), from position alone. */
@@ -409,15 +411,16 @@ impl Uplands {
     /**
      * By how much its bid leads every other domain's at least: off the
      * towns and their fields, and some way off the landmarks' clearings,
-     * the others bid nothing (the forest); less by the path, which
-     * steadings and pools keep off.
+     * the others bid nothing (the forest); less by the path and the
+     * railway, which steadings and pools keep off.
      */
     fn lead(&self, x: i64, z: i64) -> Fx {
         let from_path = (Units(x).to_fx() - self.terrain.path_x(z)).abs();
         let towns = Fx::ONE - smoothstep(Fx::m(200.0), Fx::m(300.0), self.town_distance(x, z));
         // The landmarks' bid rises by one every 2 m into their clearings from -4, 8 m out.
         let landmark = if self.landmarks.bid(x, z) > fx(-3.75) { Fx::ONE } else { Fx::ZERO };
-        self.bid(x, z) - (Fx::ONE - smoothstep(Fx::m(25.0), Fx::m(40.0), from_path) + towns + landmark) * 2
+        let railway = if self.railway.reaches(x, z, m(8.0)) { Fx::ONE } else { Fx::ZERO };
+        self.bid(x, z) - (Fx::ONE - smoothstep(Fx::m(25.0), Fx::m(40.0), from_path) + towns + landmark + railway) * 2
     }
 
     /** The moorland on them, of `seed`: steadings, fewer than on the moor alone, and pools where it leads; no stream. */

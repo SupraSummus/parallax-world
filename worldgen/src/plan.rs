@@ -60,9 +60,10 @@ fn sum(x: i64, z: i64) -> u64 {
 
 /**
  * A decision for any column, made on demand and kept (the last made in
- * each slot). Its `scale` is the size of the smallest features it decides,
- * in lattice units; it reads only plans at least as coarse, and panics
- * otherwise, naming both.
+ * each slot; a large one, such as a curve's points, as an `Rc`). Its
+ * `scale` is the size of the smallest features it decides, in lattice
+ * units; it reads only plans at least as coarse, and panics otherwise,
+ * naming both.
  */
 pub struct Plan<T> {
     name: &'static str,
@@ -75,7 +76,7 @@ pub struct Plan<T> {
     make: Box<dyn Fn(i64, i64) -> T>,
 }
 
-impl<T: Copy + Default> Plan<T> {
+impl<T: Clone + Default> Plan<T> {
     pub fn new(name: &'static str, scale: i64, make: impl Fn(i64, i64) -> T + 'static) -> Plan<T> {
         Plan {
             name,
@@ -114,15 +115,16 @@ impl<T: Copy + Default> Plan<T> {
             _ => (x, z),
         };
         let slot = (sum(x, z) >> SHIFT) as usize;
-        let (kx, kz, value) = self.slots.borrow()[slot];
-        if (kx, kz) == (x, z) {
-            return value;
+        if let (kx, kz, value) = &self.slots.borrow()[slot]
+            && (*kx, *kz) == (x, z)
+        {
+            return value.clone();
         }
         let outer = MAKING.replace(if self.filter { ("", 0) } else { (self.name, self.scale) });
         // What a plan decides for a column is the same whoever reads it.
         let value = where_asked(|| crate::cost::plan(self.name, self, [x, 0, z], || (self.make)(x, z)));
         MAKING.set(outer);
-        self.slots.borrow_mut()[slot] = (x, z, value);
+        self.slots.borrow_mut()[slot] = (x, z, value.clone());
         value
     }
 }
@@ -162,25 +164,31 @@ struct Shares {
 }
 
 /**
+ * A domain's bid for column (x, z), a fraction: read once a column, by
+ * the land's plan, so it reads only plans as coarse as the land's.
+ */
+pub type Bid = Box<dyn Fn(i64, i64) -> Fx>;
+
+/**
  * Land shared by domains that never see each other: each bids for every
- * column (a plan of fractions), and gets a share by how far it
- * outbids the best of the rest: all of it `width` ahead, none as far
- * behind, eased between. Whatever the domains propose for a column
- * (heights, densities) blends by these shares.
+ * column, and gets a share by how far it outbids the best of the rest:
+ * all of it `width` ahead, none as far behind, eased between. Whatever
+ * the domains propose for a column (heights, densities) blends by these
+ * shares.
  */
 pub struct Land {
     shares: Plan<Shares>,
 }
 
 impl Land {
-    /** Land of the domains bidding `bids`, in that order (their indices); `scale` at most the bids'. */
-    pub fn new(scale: i64, width: Fx, bids: Vec<Rc<Plan<Fx>>>) -> Land {
+    /** Land of the domains bidding `bids`, in that order (their indices), decided at `scale`. */
+    pub fn new(scale: i64, width: Fx, bids: Vec<Bid>) -> Land {
         assert!(bids.len() <= DOMAINS, "a land holds at most {DOMAINS} domains; see \"Composing\" in {DOCS}");
         Land {
             shares: Plan::dithered("land", scale, move |x, z| {
                 let mut bid = [Fx::MIN; DOMAINS];
-                for (d, plan) in bids.iter().enumerate() {
-                    bid[d] = plan.at(x, z);
+                for (d, of) in bids.iter().enumerate() {
+                    bid[d] = of(x, z);
                 }
                 let mut raw = [Fx::ZERO; DOMAINS];
                 for d in 0..bids.len() {
@@ -365,9 +373,7 @@ mod tests {
 
     #[test]
     fn shares_add_up_and_ease_across_the_edge() {
-        let a = Rc::new(Plan::new("a", 8, |x, _| Fx::from_bits(x * ONE / 100)));
-        let b = Rc::new(Plan::new("b", 8, |_, _| Fx::ZERO));
-        let land = Land::new(8, fx(0.1), vec![a, b]);
+        let land = Land::new(8, fx(0.1), vec![Box::new(|x, _| Fx::from_bits(x * ONE / 100)), Box::new(|_, _| Fx::ZERO)]);
         for x in -30..30 {
             let (sa, sb) = (land.share(0, x, 0), land.share(1, x, 0));
             assert!((sa + sb - Fx::ONE).abs() <= Fx::from_bits(1), "{x}: {sa:?} + {sb:?}");

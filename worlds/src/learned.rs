@@ -28,14 +28,14 @@ use worldgen::frame::{Frame, Part, U, V, W, back};
 use worldgen::generator::{ANY_SIZE, Child, Children, Field, Generator, Layer, Node, Op, Population, Shapes, Span};
 use worldgen::grid::Box3;
 use worldgen::noise::{Fx, Rng, ease_towards, fx, hash64, stream};
-use worldgen::plan::{Claims, Land, Plan};
+use worldgen::plan::{Bid, Claims, Land, Plan};
 use worldgen::units::{Units, m};
 use worldgen::world::{Find, World};
 
 use crate::fields;
 use crate::forest::{self, GROUND_SCALE, Ground, K as F, Relief};
 use crate::path::Path;
-use crate::town::{self, House, K as T, Style, TOWNS_SCALE};
+use crate::town::{self, House, K as T, Style};
 
 /** The rule table, learned in lab/ (examples/export.rs) from 54 of the valley's towns. */
 const TABLE: &[u8] = include_bytes!("../data/town-grammar.bin");
@@ -506,15 +506,11 @@ pub fn learned(seed: u64) -> World {
         }))
     };
     // What the grammar drew bids for each column, outright: the forest bids nothing.
-    let bid = |name: &'static str, wins: fn(Spot) -> bool| {
+    let bid = |wins: fn(Spot) -> bool| -> Bid {
         let settlements = settlements.clone();
-        Rc::new(Plan::new(name, SPOT_SCALE, move |x, z| if wins(settlements.spot(x, z)) { Fx::ONE } else { -Fx::ONE }))
+        Box::new(move |x, z| if wins(settlements.spot(x, z)) { Fx::ONE } else { -Fx::ONE })
     };
-    let bids = vec![
-        Rc::new(Plan::new("forest's bid", TOWNS_SCALE, |_, _| Fx::ZERO)),
-        bid("town's bid", Spot::town),
-        bid("fields' bid", |s| s == Spot::Fields),
-    ];
+    let bids = vec![Box::new(|_, _| Fx::ZERO), bid(Spot::town), bid(|s| s == Spot::Fields)];
     let land = Rc::new(Land::new(SPOT_SCALE, fx(0.125), bids));
 
     let share = {

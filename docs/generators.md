@@ -10,8 +10,8 @@ coarser further away, for about the same cost per box at every level
 which use only the engine's public API.
 The forest (`worlds/src/forest.rs`) is written this way,
 and so is the valley (`valley.rs`),
-the forest with towns, fields, landmarks and moorland between mountains,
-five domains composed as in "Composing",
+the forest with towns, fields, landmarks, moorland and a railway
+between mountains, six domains composed as in "Composing",
 and the city (`city.rs`), boxes on a plan of quarter metres;
 a host starts either by name from `WORLDS` (`worlds/src/lib.rs`),
 as a `World`: its generator, spawn and heights,
@@ -106,6 +106,7 @@ between ends the world finds near a point.
 The forest's path (`worlds/src/path.rs`) is one, in pieces 8 m long:
 what is on it or keeps off it measures from the curve;
 the valley is laid out across its centre line, along x.
+The railway's line is another, its points chosen by cost ("Railway").
 
 A **tube** is the points within a radius of a curve: a branch, a root.
 At sites s apart it is drawn through the points of the coarsest level
@@ -487,7 +488,7 @@ show a change leaves generation as it was.
 ## Composing
 
 A world as large as the valley is **domains**
-(the forest, `town.rs`, `fields.rs`, `landmarks.rs`, `moor.rs`):
+(the forest, `town.rs`, `fields.rs`, `landmarks.rs`, `moor.rs`, `railway.rs`):
 modules of plans and layers that never call each other.
 They meet only through plans coarser than their own,
 through the land they bid for, and through things they share.
@@ -516,7 +517,10 @@ layers read any plan.
 
 ### Land
 
-Domains share land by **bidding** for each column (`Land`; bids are plans).
+Domains share land by **bidding** for each column (`Land`).
+A bid is a function of the column,
+read once a column by the land's plan, so not kept apart:
+a domain bidding nothing somewhere costs nothing there.
 A domain's share eases from none to all
 as its bid goes from `width` behind the best of the rest to `width` ahead,
 and the domain with the most owns the column.
@@ -622,6 +626,35 @@ a population anchored at the sites builds each in its own frame.
 A pond's water stops under the rim its bowl leaves,
 so it never stands over the ground round it.
 The first is a chapel beside the path, in the camera's view at spawn.
+
+### Railway
+
+The railway (`worlds/src/railway.rs`) is a domain built on curves.
+Its main line runs along one side of the valley,
+in pieces 4 km long whose ends stand off the middle by noise.
+Each piece is a curve in x, y and z, made top-down:
+at each level a point between two neighbours,
+its x the one of a few within the level's wander
+whose track leaves the ground least,
+its y the ground there as far as the grade lets it from both neighbours.
+So no stretch is steeper than the grade,
+and each wander is a quarter of the one before,
+which bounds how sharply it turns at each point.
+The line reads the ground as the towns level it (`valley::Terrain`),
+not as it cuts and fills it;
+it stands far enough across the valley
+that it never reaches a town, by construction,
+and the landmarks and the moor keep off it.
+
+What carries the track comes from comparing it with the ground under it,
+the same everywhere:
+ground far above it is tunnelled, ground far below it bridged,
+and nearer it is cut or filled, sloping from the formation's edges.
+A station stands by each town the line passes on the ground.
+The railway bids for its formation and under its bridges, not over its tunnels.
+Seen from above, the line keeps within a corridor of the segment
+between its piece's ends,
+so it turns away columns further across before reading any plan.
 
 ### Learned domains
 

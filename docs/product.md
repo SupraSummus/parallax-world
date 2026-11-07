@@ -97,6 +97,10 @@ A spinner shows while a world generates.
   wayside chapels, ponds, farmsteads and windmills.
   Mountain ranges along both sides: crests, peaks and passes,
   side valleys, meadows and scree above the treeline, snow on the peaks.
+  A railway up one side of the valley:
+  ballast, sleepers and rails in cuttings and on embankments,
+  bridges on piers and lined tunnels where the ground is far from the track,
+  and a station by each town it passes on the ground.
   Generated like the forest.
 - *Moor*: the valley's moorland alone: rolling heath, a stream and pools,
   boulders, and steadings with a path of cairns between hut and ring.

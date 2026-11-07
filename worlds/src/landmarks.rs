@@ -24,6 +24,7 @@ use worldgen::units::{Units, m};
 
 use crate::forest::K as F;
 use crate::mountains::{self, K as M};
+use crate::railway::Railway;
 use crate::town::{House, K as T, Style, thing};
 use crate::valley::Terrain;
 
@@ -57,8 +58,7 @@ const CELL: i64 = m(16.0);
 const REACH: [i64; 3] = [m(20.0), m(30.0), m(20.0)];
 /** The first chapel's clearing: wider than a chapel's, so that the trees between it and the camera hide less of it. */
 const FIRST_CLEARING: Units = Units::m(16.0);
-/** Plan scales: the bid for land, what each column of a landmark's is. */
-pub const BID_SCALE: i64 = m(4.0);
+/** Plan scale of what each column of a landmark's is. */
 const SPOT_SCALE: i64 = m(1.0);
 /** How far round its footprint a landmark eases the ground back to the valley's, and how much the ground may rise under it. */
 const TERRACE: Units = Units::m(12.0);
@@ -289,8 +289,8 @@ fn place(terrain: &Terrain, [x, z]: [i64; 2]) -> Place {
     }
 }
 
-/** Whether `site` keeps off the path and out of the towns, and stands below the mountains and well over the world's bottom. */
-fn fits(terrain: &Terrain, site: &Site) -> bool {
+/** Whether `site` keeps off the path, out of the towns and clear of the railway, and stands below the mountains and well over the world's bottom. */
+fn fits(terrain: &Terrain, railway: &Railway, site: &Site) -> bool {
     let ([hx, hz], [cx, cz]) = (site.half(), site.centre);
     let off_path = (cz - hz..=cz + hz).step_by(m(1.0) as usize).all(|z| {
         let path = terrain.path_x(z).round_units().0;
@@ -304,7 +304,7 @@ fn fits(terrain: &Terrain, site: &Site) -> bool {
     off_path
         && points.all(|(x, z)| {
             let ground = terrain.ground(x, z);
-            terrain.towns.distance(x, z) > clear && ground < Fx::m(35.0) && ground > Fx::m(-24.0)
+            terrain.towns.distance(x, z) > clear && ground < Fx::m(35.0) && ground > Fx::m(-24.0) && !railway.reaches(x, z, TERRACE.0)
         })
 }
 
@@ -337,7 +337,7 @@ fn even(terrain: &Terrain, site: &Site) -> bool {
  * wide round the spot (beside the path if it stands by it), the first
  * that suits one and fits it.
  */
-fn claim(terrain: &Terrain, spot: [i64; 2], random: &mut Rng) -> Option<Site> {
+fn claim(terrain: &Terrain, railway: &Railway, spot: [i64; 2], random: &mut Rng) -> Option<Site> {
     if !random.chance(CHANCE) {
         return None;
     }
@@ -367,7 +367,7 @@ fn claim(terrain: &Terrain, spot: [i64; 2], random: &mut Rng) -> Option<Site> {
             }
             let turns = if spec.faces_path { facing(terrain.path_x(z).round_units().0 - x, 0) } else { random.below(4) as i64 };
             let site = Site { landmark, centre: [x, z], level: 0, size, turns, seed: random.next_u64(), clearing: spec.clearing };
-            if fits(terrain, &site) && even(terrain, &site) && (spec.suits)(&place(terrain, site.centre)) {
+            if fits(terrain, railway, &site) && even(terrain, &site) && (spec.suits)(&place(terrain, site.centre)) {
                 return Some(levelled(terrain, site));
             }
         }
@@ -432,8 +432,8 @@ pub struct Landmarks {
 }
 
 impl Landmarks {
-    /** The landmarks of `seed` on `terrain`, the first a chapel by the path ahead of the camera. */
-    pub fn new(seed: u64, terrain: Rc<Terrain>) -> Landmarks {
+    /** The landmarks of `seed` on `terrain`, clear of `railway`, the first a chapel by the path ahead of the camera. */
+    pub fn new(seed: u64, terrain: Rc<Terrain>, railway: Rc<Railway>) -> Landmarks {
         let sites = {
             let (terrain, s) = (terrain.clone(), stream(seed, 70));
             let first = levelled(&terrain, first(&terrain, &mut Rng::new(hash64(s, 0, 0, 0))));
@@ -441,7 +441,7 @@ impl Landmarks {
                 if spot == first.centre {
                     return Some((first.centre, first));
                 }
-                claim(&terrain, spot, random).map(|site| (site.centre, site))
+                claim(&terrain, &railway, spot, random).map(|site| (site.centre, site))
             })
         };
         Landmarks { terrain, sites, patches: ValueNoise::new(stream(seed, 71)), reeds: ValueNoise::new(stream(seed, 72)) }
@@ -482,7 +482,7 @@ impl Landmarks {
         }
     }
 
-    /** Its bid for column (x, z), BID_SCALE: ahead over a landmark's footprint and clearing, never on the path. */
+    /** Its bid for column (x, z): ahead over a landmark's footprint and clearing, never on the path. */
     pub fn bid(&self, x: i64, z: i64) -> Fx {
         let most = fx(4.0);
         let Some(s) = self.site(x, z) else { return -most };

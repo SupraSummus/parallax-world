@@ -11,6 +11,7 @@ use worlds::forest::{self, K as F, Relief};
 use worlds::landmarks::{self, K as L};
 use worlds::moor::{self, K as M};
 use worlds::mountains::{self, K as A};
+use worlds::railway::{self, K as R};
 use worlds::town::{self, K as T, Towns};
 
 use crate::image::Image;
@@ -100,6 +101,7 @@ pub fn class_of_kind(kinds: usize) -> Vec<u8> {
         (moor::k(M::grassBlades), 0),
         (moor::k(M::lichen), 3),
         (moor::k(M::drystone), 3),
+        (railway::k(R::ballast), 3),
     ] {
         set(kind, c);
     }
