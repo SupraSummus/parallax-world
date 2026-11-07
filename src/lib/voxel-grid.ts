@@ -401,7 +401,7 @@ const COARSE_FULL = 12
  * ACROSS[kind][k] is the index of part k's neighbour across face `kind`.
  */
 const SITES: number[] = COARSE_CELL.flatMap(([x, y, z]) => [x, y, z])
-const ACROSS = VOXEL_FACES.map(({ normal: [a, b, c] }) =>
+const ACROSS = VOXEL_FACES.map(([a, b, c]) =>
   Int8Array.from(COARSE_CELL, ([x, y, z]) => {
     const [u, v, w] = [x + a, y + b, z + c]
     for (let i = 0; i < SITES.length; i += 3) if (SITES[i] === u && SITES[i + 1] === v && SITES[i + 2] === w) return i / 3
@@ -409,7 +409,7 @@ const ACROSS = VOXEL_FACES.map(({ normal: [a, b, c] }) =>
   }))
 /** COARSE_CELL as numbers: x, y, z and weight of each part; VOXEL_FACES' normals, x, y, z each. */
 const PARTS = Int8Array.from(COARSE_CELL.flat())
-const NORMALS = Int8Array.from(VOXEL_FACES.flatMap(({ normal }) => normal))
+const NORMALS = Int8Array.from(VOXEL_FACES.flat())
 
 /**
  * The grid one level of detail coarser: the sites of 2·FCC, in their own

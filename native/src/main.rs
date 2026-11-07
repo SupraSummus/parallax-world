@@ -7,7 +7,7 @@
 //! parallax-native [--world NAME] [--threads N] [--seed S] [--view QUERY] [--leak DEG] [--all-chunks] [--shot out.png [--size WxH] [--seams] [--colour voxels|layers|chunks] | --bench] [--walk D] [--stroll S [--on-ground]] [--spin]
 //! parallax-native [--world NAME] [--seed S] --check-requests frame.bin
 //!
-//! --view takes the web page's view query (viewQuery in renderer.ts),
+//! --view takes the web page's view query (parseViewQuery in renderer.ts),
 //! overriding --seed and --world; its pillars=0 draws no pillars, as the page's.
 //! --shot draws the first frame once all the tiles and chunks in view are
 //! in, at 1280×800 or --size, offscreen, and saves it; --bench only times

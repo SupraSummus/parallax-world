@@ -16,14 +16,8 @@ export default defineConfig({
     },
   },
   build: {
-    // three.js (~540 kB) is only loaded by the viewer page.
-    chunkSizeWarningLimit: 600,
-    rolldownOptions: {
-      input: {
-        main: resolve(import.meta.dirname, 'index.html'),
-        viewer: resolve(import.meta.dirname, 'viewer.html'),
-      },
-    },
+    // Both bundles, the page's and the bake worker's, inline the WebAssembly as base64: most of their size.
+    chunkSizeWarningLimit: 2500,
   },
   test: {
     // Baking whole views of FCC worlds takes a few seconds.

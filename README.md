@@ -62,10 +62,9 @@ where the sections below are too).
    Levels agree on what a camera sees
    (how far rays get, what they stop on),
    not on exact geometry ([docs/generators.md](docs/generators.md)).
-5. **Checked against references.**
+5. **Checked against rays.**
    Tests check the leak bound, painting order and levels of detail
-   against rays cast through the world,
-   and the 3D viewer draws the same world conventionally.
+   against rays cast through the world.
 
 ## Quick start
 
@@ -82,11 +81,9 @@ pnpm dev
 
 Controls: W/S forward/back, A/D left/right, Space/Shift up/down, arrow
 keys or drag to look around.
-"Open in 3D Viewer" shows the same scene with a conventional (three.js)
-renderer and an orbit camera.
 
-The page takes a view in its query, as the 3D viewer does:
-`?seed=&world=&camera=x,y,z&look=yaw,pitch&fov=&distance=`
+The page takes a view in its query:
+`?seed=&world=&camera=x,y,z&look=yaw,pitch&fov=&distance=&leak=`
 (camera in lattice units, angles in degrees).
 
 Other scripts (`test`, `lint`, `typecheck`, `knip`, `build`, `shot`,

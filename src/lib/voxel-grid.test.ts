@@ -130,7 +130,7 @@ describe('coarsen', () => {
     // which nothing coarse covers, and red on the rest, which look at the block's side or are covered.
     const coarse = coarsen(made((x, y) => (x > 8 ? 0 : y === 1 ? 2 : y <= 0 ? 1 : 0)))
     const faces = (grid: VoxelGrid, x: number) => VOXEL_FACES.map((_, k) => grid.face(x, 0, 0, k))
-    const edge = VOXEL_FACES.map(({ normal: [a, b] }) => (a === 0 && b > 0 ? 2 : 1))
+    const edge = VOXEL_FACES.map(([a, b]) => (a === 0 && b > 0 ? 2 : 1))
     expect([coarse.get(4, 0, 0), coarse.get(3, 1, 0)]).toEqual([1, 2])
     expect(faces(coarse, 4)).toEqual(edge)
     // A coarser level measures the finer one's faces.

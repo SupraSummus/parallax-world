@@ -6,8 +6,8 @@ import { faceBasis, LAYER, viewBasis, type Basis, type Face } from './view'
 // Sky gradient: from the horizon colour at eye level up to SKY_TOP at
 // SKY_TOP_TANGENT (tangent of the elevation; 32°), flat above and below.
 // Fog has the horizon colour.
-export const SKY_TOP = '#3f73b8'
-export const SKY_HORIZON = '#b9d3e8'
+const SKY_TOP = '#3f73b8'
+const SKY_HORIZON = '#b9d3e8'
 const SKY_TOP_TANGENT = 0.625
 
 // Seams between faces, when shown: lines this many CSS pixels wide.

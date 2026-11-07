@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { ParallaxRenderer, DEFAULT_RENDER_DISTANCE, parseViewQuery, viewQuery, type Chunk, type Frame } from './renderer'
+import { ParallaxRenderer, DEFAULT_RENDER_DISTANCE, parseViewQuery, type Chunk, type Frame } from './renderer'
 import { World } from './world'
 import { hills } from './hills.test-helper'
 import { SPLAT } from './chunk-baker'
@@ -403,9 +403,9 @@ describe('ParallaxRenderer', () => {
 })
 
 describe('view query', () => {
-  it('reads back what is written, and leaves out what is missing or wrong', () => {
+  it('reads a view, and leaves out what is missing or wrong', () => {
     const view = { seed: 7, worldType: 'forest', camera: { x: 1, y: -2, z: 3.5 }, look: { yaw: 30, pitch: -10 }, fov: 60, distance: 500, leak: 2.5 } as const
-    expect(parseViewQuery(viewQuery(view))).toEqual(view)
+    expect(parseViewQuery('?seed=7&world=forest&camera=1,-2,3.5&look=30,-10&fov=60&distance=500&leak=2.5')).toEqual(view)
     expect(parseViewQuery('?seed=x&world=moon&camera=1,2&look=30,&fov=')).toEqual({})
     // The worlds of worlds/ by their names in WORLDS.
     expect(parseViewQuery('?world=valley')).toEqual({ worldType: 'valley' })

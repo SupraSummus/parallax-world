@@ -16,7 +16,6 @@ pnpm exec vitest run bake       # files matching "bake"
 
 | File | Covers |
 |------|--------|
-| `src/lib/fcc.test.ts` | Voxel geometry |
 | `src/lib/cells.test.ts`, `bake/src/cells.rs` | Cells of N·FCC and the baker's table of them |
 | `src/lib/slice-selection.test.ts` | Slices, bricks and eyes; every site in exactly one slice |
 | `src/lib/leak-bound.test.ts` | The occlusion-leak bound, step by step, then end to end against ray-cast perspective |
@@ -37,7 +36,6 @@ pnpm exec vitest run bake       # files matching "bake"
 | `worlds/tests/directions.rs`, `worldgen/src/directions.rs` | No world's directions follow the lattice's, but around the places known to (`KNOWN`, docs/todo.md); walls along the axes or the diagonals do; hills, gentle or steep, rows along z, and walls turned any way a seed likes don't |
 | `worlds/tests/forest.rs`, `worlds/tests/valley.rs`, `worlds/tests/city.rs` | The scenes: determinism, contents, spawn |
 | `src/lib/worldgen.test.ts` | The worlds as the web lists and gets them from WebAssembly |
-| `src/viewer/mesh.test.ts` | Reference viewer mesh |
 | `src/App.test.tsx` | UI panels, keyboard movement and turning, walking |
 
 `src/lib/picture.test-helper.ts` stands in for the compositor in tests that compare pictures,
