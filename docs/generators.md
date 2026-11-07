@@ -455,7 +455,7 @@ by more than the land's width.
 
 ### Claims
 
-Things placed whole at a coarse band, a town or a steading,
+Things placed whole at a coarse band, a town, a steading or a landmark,
 must keep apart, yet a plan of one per region,
 kept inside it so a column asks only its region's,
 never puts one where regions meet ("Checks").
@@ -475,6 +475,7 @@ the valley's towns turn down spots over half a cell from the path,
 and stand on it.
 A thing that reaches round its point,
 a steading's hut, path and levelled ground,
+a landmark's footprint and clearing,
 or a pool, which a field draws,
 is asked for within its reach, at most half of `apart`,
 so a column is reached by one at most.
@@ -514,9 +515,9 @@ Structures that stand alone (`worlds/src/landmarks.rs`),
 a ruined keep, a watchtower, chapels, ponds, farmsteads and windmills,
 are the valley's fourth domain:
 a new structure joins it as a landmark, or as a thing of a domain.
-A coarse plan gives each region at most one site,
-its cell's centre and all it shapes and bids for inside the region,
-so a column asks only its own region's.
+Sites are claimed ("Claims"):
+each spot tries the kinds in a square around it,
+and a column asks for the one site within its reach.
 What suits a kind is read off the valley's ground
 before landmarks shape it (`valley::Terrain`):
 how far the place is from a town and from the path,
@@ -528,7 +529,7 @@ and paints its ground;
 a population anchored at the sites builds each in its own frame.
 A pond's water stops under the rim its bowl leaves,
 so it never stands over the ground round it.
-Region (0, 0)'s is a chapel beside the path, in the camera's view at spawn.
+The first is a chapel beside the path, in the camera's view at spawn.
 
 ### Learned domains
 

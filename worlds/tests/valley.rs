@@ -6,7 +6,7 @@ use worldgen::generator::{Generator, generate, materials_of};
 use worldgen::grid::{Box3, is_site};
 use worldgen::picture::{Camera, picture};
 use worldgen::units::UNIT_SIZE;
-use worlds::landmarks::{LANDMARKS, Landmark, Landmarks, Site};
+use worlds::landmarks::{LANDMARKS, Landmark, Landmarks, NEAR, Site};
 use worlds::valley::{Terrain, valley};
 
 fn unit(metres: f64) -> i64 {
@@ -25,11 +25,19 @@ fn the_forest_keeps_off_the_first_towns_main_street() {
     assert!(generate(&world.generator, &street, 0).cells.iter().all(|id| *id == 0), "something stands on the main street");
 }
 
-/** The landmarks of `seed` in the regions within about 500 m of the valley's path along its first 8 km, and the terrain they stand on. */
+/**
+ * The landmarks of `seed` near points NEAR apart within 500 m of the
+ * valley's middle along its first 8 km, so all those standing there, and
+ * the terrain they stand on.
+ */
 fn landmarks(seed: u64) -> (Vec<Site>, Rc<Terrain>) {
     let terrain = Rc::new(Terrain::new(seed));
-    let landmarks = Landmarks::new(seed, terrain.clone());
-    let sites = (-2..36).flat_map(|k| (-2..=2).map(move |i| (i, k))).filter_map(|(i, k)| landmarks.of_region(i, k)).collect();
+    let landmarks = &Landmarks::new(seed, terrain.clone());
+    let points = |from: f64, to: f64| (unit(from)..=unit(to)).step_by(NEAR as usize);
+    let mut sites: Vec<Site> =
+        points(-500.0, 8000.0).flat_map(|z| points(-500.0, 500.0).filter_map(move |x| landmarks.site(x, z))).collect();
+    sites.sort_by_key(|s| s.centre);
+    sites.dedup_by_key(|s| s.centre);
     (sites, terrain)
 }
 
