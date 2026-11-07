@@ -303,6 +303,11 @@ pub fn smoothstep(edge0: Fx, edge1: Fx, x: Fx) -> Fx {
     })
 }
 
+/** `to` where `d` is 0 or less, easing back to `from` by `over`: ground levelled to a terrace, a path bent onto a street. */
+pub fn ease_towards(from: Fx, to: Fx, over: Units, d: Units) -> Fx {
+    from + (to - from) * (Fx::ONE - smoothstep(Fx::ZERO, over.to_fx(), d.to_fx()))
+}
+
 /** A seeded random sequence (splitmix64). */
 #[derive(Clone)]
 pub struct Rng(u64);

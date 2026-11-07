@@ -27,7 +27,7 @@ use std::sync::OnceLock;
 use worldgen::frame::{Frame, Part, U, V, W, back};
 use worldgen::generator::{ANY_SIZE, Child, Children, Field, Generator, Layer, Node, Op, Population, Shapes, Span};
 use worldgen::grid::Box3;
-use worldgen::noise::{Fx, Rng, fx, hash64, smoothstep, stream};
+use worldgen::noise::{Fx, Rng, ease_towards, fx, hash64, stream};
 use worldgen::plan::{Claims, Land, Plan};
 use worldgen::units::{Units, m};
 use worldgen::world::{Find, World};
@@ -479,15 +479,13 @@ impl Settlements {
     /** The path's centre line at z, with its fraction, bent from `route` onto the settlement's middle there. */
     fn path_x(&self, z: i64, route: Fx) -> Fx {
         let Some(s) = self.near(z) else { return route };
-        let bend = Fx::ONE - smoothstep(Fx::ZERO, Units::m(60.0).to_fx(), Units((z - s.z).abs() - LEVELLED).to_fx());
-        route + (Units(s.x).to_fx() - route) * bend
+        ease_towards(route, Units(s.x).to_fx(), Units::m(60.0), Units((z - s.z).abs() - LEVELLED))
     }
 
     /** `ground`, with its fraction, levelled to the settlement's streets under its crop and easing back over TERRACE. */
     fn terraced(&self, x: i64, z: i64, ground: Fx) -> Fx {
         let Some(s) = self.near(z) else { return ground };
-        let weight = Fx::ONE - smoothstep(Fx::ZERO, TERRACE.to_fx(), s.distance(x, z).to_fx());
-        ground + (Units(s.level).to_fx() - ground) * weight
+        ease_towards(ground, Units(s.level).to_fx(), TERRACE, s.distance(x, z))
     }
 }
 
