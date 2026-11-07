@@ -205,13 +205,23 @@ Numbers are for the forest at 1280×800, as measured when written.
   where the trees thin out to the treeline,
   came 0.10 to 0.15 apart at level 4, in materials hit and from above:
   leaves in place of trunks and of the slope's scree and rock.
-- **The canopy stops at the trees' feet, so a clearing can break the contract**
-  ("Open problems" in `docs/generators.md`):
-  the valley's first windmill at seed 1
-  (`KNOWN_BREAKS` in `worlds/tests/contract.rs`, which fails once it passes).
-  A wider clearing kept the first chapel's.
-  Spread the canopy over the crowns' radius without thickening it from above
-  (spread over 2.5 m, it did), then drop it from the list.
+- **The canopy is the trees expected, not those that stand.**
+  Far away the forest is a medium as dense as its trees on average
+  ("Populations" in "Levels" of `docs/generators.md`),
+  and a clearing's edge holds few of them:
+  from above at level 4, the valley's first windmill came 0.03 to 0.13 apart
+  over 16 seeds, with more canopy than level 0 or less,
+  0.1 or more at four seeds the contract doesn't check;
+  seed 1, which it checks, keeps it narrowly (materials hit 0.094):
+  the canopy reading fewer columns around
+  (not the farthest of 38 at level 4, 5 % of the crowns' shadow)
+  would spare level 4 tiles 10 to 35 ms, but broke it again.
+  Its sails, sheets a site thick, add 0.02 to 0.03 there.
+  A plan of the trees, which the population anchors from and the canopy reads
+  ("Fields can't see things" in `docs/generators.md`),
+  would draw those that stand,
+  at levels 4 and 5 at least
+  (from level 6 a column's own trees' shadow covers its site).
 - **The highest massifs end in broad rounded domes of snow.**
   Behind the crest the high country is one smooth noise,
   and wherever it stands over the snowline, all of it is snow.

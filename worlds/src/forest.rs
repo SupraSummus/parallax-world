@@ -290,6 +290,16 @@ fn pick_species(mut pick: Fx, chances: &[Fx; 3]) -> Species {
     Species::Oak
 }
 
+/** The trees measured for the canopy at a spacing, by species. */
+struct Measured {
+    /** What each slab of a tree adds to its shadow over directions (lattice units²), from its foot up, a spacing each. */
+    slabs: [Vec<f64>; 3],
+    /** The share of a tree's shadow from above each slab adds. */
+    above: [Vec<f64>; 3],
+    /** A tree's shadow from above over each column around its foot's (lattice units²), by offset (x, z). */
+    spread: Vec<([i64; 2], [f64; 3])>,
+}
+
 /** The forest of `seed`. */
 pub fn forest(seed: u64) -> World {
     let ground = Ground::alone(Rc::new(Relief::new(seed)));
@@ -334,12 +344,13 @@ pub fn layers(seed: u64, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
     // Trees, each in the cell its foot is in.
     let tree_cell = vox(2.0) as i64;
     let tree_top = vox(26.0) as i64;
-    // What each slab of each species' trees adds to their shadow, measured from samples drawn at level 2 (the canopy's from level 4 on), by spacing.
+    // What each slab of each species' trees adds to their shadow, and where around their feet they hide
+    // what from above, measured from samples drawn at level 2 (the canopy's from level 4 on), by spacing.
     let sample_seed = f.s(17);
     let shadows = Rc::new(OnceCell::new());
-    let slabs = Rc::new(RefCell::new(HashMap::<i64, Rc<[Vec<f64>; 3]>>::new()));
-    let slabs_at = move |spacing: i64| {
-        slabs
+    let measured = Rc::new(RefCell::new(HashMap::<i64, Rc<Measured>>::new()));
+    let measured_at = move |spacing: i64| {
+        measured
             .borrow_mut()
             .entry(spacing)
             .or_insert_with(|| {
@@ -351,27 +362,69 @@ pub fn layers(seed: u64, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
                         Shadows::new(&samples, 2, 1)
                     })
                 });
-                Rc::new([0, 1, 2].map(|sp| {
-                    (0..tree_top).step_by(spacing as usize).map(|from| shadows[sp].slab(from, (from + spacing).min(tree_top))).collect()
-                }))
+                let slabs_of = |of: &dyn Fn(&Shadows, i64, i64) -> f64| {
+                    [0, 1, 2].map(|sp| {
+                        (0..tree_top).step_by(spacing as usize).map(|from| of(&shadows[sp], from, (from + spacing).min(tree_top))).collect()
+                    })
+                };
+                let slabs = slabs_of(&|s, from, to| s.slab(from, to));
+                let above: [Vec<f64>; 3] = slabs_of(&|s, from, to| s.across(from, to));
+                let above = above.map(|slabs| {
+                    let sum: f64 = slabs.iter().sum();
+                    slabs.iter().map(|s| s / sum).collect()
+                });
+                let mut spread = std::collections::BTreeMap::<[i64; 2], [f64; 3]>::new();
+                for (sp, shadow) in shadows.iter().enumerate() {
+                    for ([x, _, z], area) in shadow.footprint(spacing) {
+                        spread.entry([x, z]).or_default()[sp] += area;
+                    }
+                }
+                Rc::new(Measured { slabs, above, spread: spread.into_iter().collect() })
             })
             .clone()
     };
-    // A medium as dense as the trees' area per volume over each column.
+    // The chance of a tree of each species in a column's cell, for the canopy over the columns around. A plan,
+    // read where asked: read dithered, as the canopy reads its own column, every column would read the land
+    // around it anew (in the learned town at level 4, 25 times as often).
+    let chances = {
+        let f = f.clone();
+        Rc::new(Plan::new("forest's trees", COLUMN_SCALE, move |x, z| {
+            let c = f.column(x, z);
+            Forest::species_chances(&c).map(|sp| f.tree_chance(x, z, &c) * sp)
+        }))
+    };
+    // A medium as dense as the trees' area per volume over each column, the trees standing in it. Where the
+    // crowns reaching over it from around hide more from above than that (over a clearing, a path, a street),
+    // it hides the rest too, slab by slab as they do. Not their whole medium spread around: denser from above
+    // than the trees ("Media are isotropic" in docs/generators.md), it filled the gaps among them (from above
+    // at level 4, 0.14 apart in the forest).
     let canopy = {
         let f = f.clone();
         Field::columns("canopy", 1.0, Op::Fill, move |x, z, spacing| {
+            let measured = measured_at(spacing);
+            let Measured { slabs, above, spread } = &*measured;
+            // The chance of a tree of each species in the column's cell, and the area the trees of the cells
+            // around hide from above over the column, by those chances.
             let c = f.column(x, z);
-            let per_area = f.tree_chance(x, z, &c).to_f64() / ((2 * tree_cell) * (2 * tree_cell)) as f64;
-            if per_area == 0.0 {
+            let own = Forest::species_chances(&c).map(|sp| f.tree_chance(x, z, &c).to_f64() * sp.to_f64());
+            let mut over = [0.0; 3];
+            for ([dx, dz], areas) in spread {
+                // Its own as read above, so that from level 6, where its trees' whole shadow falls on its own
+                // column, it hides as much as before.
+                let around = if [*dx, *dz] == [0, 0] { own } else { chances.at(x - dx, z - dz).map(Fx::to_f64) };
+                (0..3).for_each(|sp| over[sp] += areas[sp] * around[sp]);
+            }
+            let hidden: f64 = over.iter().sum();
+            if hidden == 0.0 {
                 return Vec::new();
             }
-            let chances = Forest::species_chances(&c);
-            let kind = k(foliage(pick_species(Fx::fraction(hash(f.s(18), x, z, 0)), &chances)));
-            let slabs = slabs_at(spacing);
+            let rest = (hidden - (0..3).map(|sp| own[sp] * slabs[sp].iter().sum::<f64>()).sum::<f64>()).max(0.0);
+            let per_area = 1.0 / ((2 * tree_cell) * (2 * tree_cell)) as f64;
+            // Of a species picked by how much their crowns hide from above.
+            let kind = k(foliage(pick_species(Fx::fraction(hash(f.s(18), x, z, 0)), &over.map(|o| fx(o / hidden)))));
             let mut spans = Vec::new();
             for (i, from) in (0..tree_top).step_by(spacing as usize).enumerate() {
-                let shadow = (0..3).fold(0.0, |sum, sp| sum + chances[sp].to_f64() * slabs[sp][i]);
+                let shadow = (0..3).fold(0.0, |sum, sp| sum + own[sp] * slabs[sp][i] + rest * over[sp] / hidden * above[sp][i]);
                 if shadow > 0.0 {
                     let (from, to) = (c.height + from, c.height + from + spacing);
                     spans.push(Span { from, to, kind, extinction: Some(per_area * shadow / spacing as f64) });
@@ -542,7 +595,18 @@ fn direction(random: &mut Rng) -> Point {
     [r * js::cos(a), y, r * js::sin(a)]
 }
 
-/** A cluster of leaves around `centre`: sprays of leaves on twigs at level 0, further the ball they fill. */
+/**
+ * The radius of a leaf cluster's ball from afar, its sprays reaching
+ * `radius` (units): as wide as their shadow, which covers 0.57 of the
+ * whole ball's and 0.06 more a metre of radius, as measured (a small
+ * cluster has fewer sprays, thick for its size). The whole ball drew
+ * crowns a fifth to a third larger than level 0's.
+ */
+fn far_radius(radius: f64) -> f64 {
+    radius * (0.57 + 0.06 * radius * UNIT_SIZE).sqrt()
+}
+
+/** A cluster of leaves around `centre`: sprays of leaves on twigs at level 0, further a ball as wide as their shadow. */
 #[allow(clippy::too_many_arguments)]
 fn leaf_cluster(name: String, centre: Point, radius: f64, kind: K, fill: f64, random: &mut Rng, droop: f64, turning: K) -> Child {
     let seed = random.next_u64();
@@ -564,8 +628,9 @@ fn leaf_cluster(name: String, centre: Point, radius: f64, kind: K, fill: f64, ra
         twigs.extend(leaves);
         twigs
     };
-    let far = ball(centre, radius, k(kind), Fill::Const(fill), Op::Fill);
-    Child::new(name, ANY_SIZE, Node::lazy(far.bounds, seed, sprays).with_far(Far::of(fx(FINE), vec![far])))
+    let bounds = ball(centre, radius, k(kind), Fill::Const(fill), Op::Fill).bounds;
+    let far = ball(centre, far_radius(radius), k(kind), Fill::Const(fill), Op::Fill);
+    Child::new(name, ANY_SIZE, Node::lazy(bounds, seed, sprays).with_far(Far::of(fx(FINE), vec![far])))
 }
 
 /** A child of a thing within `bounds`, drawn only at level 0, its shapes made only then. */

@@ -98,7 +98,8 @@ how many rays get how far, and what they stop on.
 - **Nodes** whose parts get smaller than the sites draw their `far` shapes instead
   (from `detail` on): a crown's outline for its leaf clusters,
   which drawn one by one would stop rays twice where they overlap;
-  a cluster's ball for its sprays of leaves on twigs, a site thick at level 0.
+  a cluster's ball for its sprays of leaves on twigs, a site thick at level 0,
+  as wide as their shadow, not the whole ball they reach.
   Or the far form is the near form measured (`Far::measured`):
   drawn whole at the coarsest level it is drawn at, then coarsened,
   each coarse site kept with the chance a ray crossing its cell is stopped:
@@ -152,6 +153,10 @@ how many rays get how far, and what they stop on.
   (π/4 for a cylinder, ½ for a ball):
   a medium is isotropic, and denser it hides more from above than the trees,
   thinner it lets rays among them hit the ground ("Media are isotropic").
+  Things reach past their cells, crowns over a clearing:
+  `Shadows::footprint` measures where around them their shadow falls,
+  and the forest's canopy over a column hides, from above,
+  at least what the crowns reaching over it from around would.
 - **Fields** are evaluated once per site or line of sites,
   and get the spacing, to smooth themselves to it.
 - **Plans** they read hold numbers, read where the line is,
@@ -622,26 +627,22 @@ Carves along a line want the same margin.
 
 - **The forest's canopy thickens from level 6** (sites 8 m apart),
   whatever its slabs' density:
-  from above, over 128 m at seed 42, 83, 84 and 87 % at levels 4 to 6
-  (79 % at level 0, 85 % at levels 1 to 3, whose trees the canopy is measured from),
+  from above, over 128 m at seed 42, 82, 83 and 85 % at levels 4 to 6
+  (79 % at level 0, 81 % at levels 1 to 3, whose trees the canopy is measured from),
   and up to 0.05 fewer rays through at level 6 than at 4.
-  The canopy's spans predict 81 % at level 6, the same as at 4,
-  and a uniform medium over flat or sloping ground draws what it predicts.
+  A uniform medium over flat or sloping ground draws what its spans predict.
   Likely: a ray down crosses the sites of two columns in turn,
   so it averages the density over a site,
   and where that varies over 8 m (paths, clearings) it covers more.
+  (The canopy's crowns around a clearing allow for half a site of that,
+  `Shadows::footprint`.)
   Not checked yet.
-- **The forest's canopy is all leaves, and only over the trees' feet.**
+- **The forest's canopy is all leaves.**
   Its trunks are leaves too: rays among the trees hit wood 0.04 less
-  at levels 4 and 5.
+  at levels 4 and 5, and up to 0.07 less where trees stand apart
+  (the learned town at level 4).
   Each slab's kind drawn as bark in proportion to its wood seen from the side
   overshot (materials hit 0.09 off).
-  Crowns reach over the path, the canopy doesn't:
-  spread over 2.5 m around each column, the materials rays hit came closer,
-  but from above at level 6 went to 0.096.
-  So a clearing the crowns overhang, a landmark's, grows far away:
-  from above, the valley's first windmill at seed 1 was 0.167 off at level 4,
-  0.14 less canopy (`KNOWN_BREAKS`; planned in `docs/todo.md`).
 - **Media are isotropic.** A site stops rays from every direction alike;
   vertical trunks seen from above and from the side cannot both be right.
   (Opacity per direction, tried in a prototype, made things worse.)
