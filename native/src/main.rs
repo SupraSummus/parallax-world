@@ -52,7 +52,7 @@ use renderer::Renderer;
 use view::{Vec3, focal_length, view_basis};
 use world::{Level, Make, World};
 use worldgen::generator::materials_of;
-use worldgen::light::Brightness;
+use worldgen::light::{Brightness, Grids, Light};
 
 /** The world shown unless --world names another (worlds::WORLDS). */
 const WORLD: Make = worlds::valley::valley;
@@ -233,11 +233,21 @@ impl App {
     }
 }
 
-/** The renderer and its bakery, for `world`. */
-fn renderer(world: &worldgen::World, threads: usize, render_distance: f64) -> Renderer {
+/** The world `make` makes of a seed, lit this bright, from tiles in Grids. */
+type Lit = (Make, u64, Brightness, Grids);
+
+/** The renderer and its bakery, for `world`; if `lit`, each baker lights the voxels it shows (a Light each). */
+fn renderer(world: &worldgen::World, lit: Option<Lit>, threads: usize, render_distance: f64) -> Renderer {
     let faces = view::faces();
     let colours: Vec<u32> = materials_of(&world.generator).iter().map(|m| m.rgb()).collect();
-    let bakery = Bakery::new(threads, move || Baker::new(&colours));
+    let bakery = Bakery::new(threads, move || {
+        let mut baker = Baker::new(&colours);
+        if let Some((make, seed, brightness, grids)) = lit.clone() {
+            let mut light = Light::new(make(seed), brightness, grids);
+            baker.light = Some(Box::new(move |level, site| light.faces(level as u32, site.map(i64::from))));
+        }
+        baker
+    });
     Renderer::new(faces, bakery, render_distance, world::heights(world))
 }
 
@@ -296,7 +306,7 @@ fn check_requests(dump: &Dump, make: Make, seed: u64, threads: usize) {
     let focal = focal_length(dump.fov, dump.width, dump.height);
     let view = &view::View { yaw: dump.yaw, pitch: dump.pitch, width: dump.width, height: dump.height, focal };
     let shown = make(seed);
-    let mut renderer = renderer(&shown, threads, dump.render_distance);
+    let mut renderer = renderer(&shown, None, threads, dump.render_distance);
     let heights = world::heights(&shown);
     let start = Instant::now();
     for (level, grid) in dump.grids.iter().enumerate() {
@@ -459,20 +469,21 @@ fn main() {
     let (fov, render_distance) = (query.fov.unwrap_or(FOV), query.distance.unwrap_or(RENDER_DISTANCE));
     let focal = focal_length(fov, size[0], size[1]);
     let first = view::View { yaw, pitch, width: size[0], height: size[1], focal };
-    let shown = make(seed);
-    let mut renderer = renderer(&shown, threads, render_distance);
-    if let Some(v) = value("--leak").map(|v| v.parse().expect("leak")).or(query.leak) {
-        renderer.max_leak = v;
-    }
-    renderer.skip_covered = !flag("--all-chunks");
     // Sky, sun and lamps, as in look's `light`: 1,1,0 a clear day, 0.01,0,1 night.
     let brightness = value("--light").map(|v| {
         let v: Vec<f32> = v.split(',').map(|v| v.parse().expect("--light SKY,SUN,GLOW")).collect();
         let [sky, sun, glow] = v.try_into().expect("--light SKY,SUN,GLOW");
         Brightness { sky, sun, glow }
     });
+    let lit = brightness.map(|b| (make, seed, b, Grids::default()));
+    let shown = make(seed);
+    let mut renderer = renderer(&shown, lit.clone(), threads, render_distance);
+    if let Some(v) = value("--leak").map(|v| v.parse().expect("leak")).or(query.leak) {
+        renderer.max_leak = v;
+    }
+    renderer.skip_covered = !flag("--all-chunks");
     let sky = brightness.map_or(1.0, |b| b.sky);
-    let mut world = World::new(make, seed, brightness, threads);
+    let mut world = World::new(make, seed, lit.map(|(.., grids)| grids), threads);
     let mut camera = query.camera.unwrap_or(shown.spawn.map(|v| v as f64));
     let faces: [[Vec3; 3]; 12] = std::array::from_fn(|f| view::faces()[f].axes);
     let fog_distance = render_distance * FOG_PER_RENDER_DISTANCE;

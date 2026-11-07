@@ -62,7 +62,7 @@ bake/                        # Chunk baker, coverage and walking in Rust (no dep
     ├── surface.rs           # A cell's voxels that can show
     ├── tables.rs            # The voxel's faces in lattice coordinates, the materials shaded per view face
     ├── splats.rs            # Which voxels a chunk shows: each column's nearest, a hexagon at its site, in relief, over its run
-    ├── light.rs             # The light from voxels' faces in lit grids, as hosts hand it over: RGB9E5 per face
+    ├── light.rs             # The light from voxels' faces, as hosts that light a world hand it over
     ├── fill.rs              # Splats filled into a mask for every slant, solid blocks (for coverage)
     ├── layer_index.rs       # LayerIndex: where each face's layers hold voxels; its WebAssembly exports
     ├── walk.rs              # Walking: a body that falls, collides, steps and jumps; its WebAssembly exports
@@ -113,11 +113,11 @@ native/                      # Spike of a native frontend (egui on winit and wgp
     ├── main.rs              # The camera (flying or walking, F) and panel; --shot, --bench, --walk, --stroll, --check-requests against a dump
     ├── window.rs            # The window: egui on winit and wgpu, its GPU device made again when lost
     ├── dump.rs              # Reads a dump: a view, its faces, grids and the chunks it wants
-    ├── world.rs             # world.ts for generated worlds: a World's tiles, those the renderer wants first, made, lit and indexed on threads
+    ├── world.rs             # world.ts for generated worlds: a World's tiles, those the renderer wants first, made and indexed on threads
     ├── view.rs              # view.ts: faces, which rays and screen boxes they draw
     ├── renderer.rs          # renderer.ts: chunks in view, cached, which cells to bake as occlusion.rs found
     ├── occlusion.rs         # bake's Coverage on a thread of its own: which cells in view are covered, so not baked
-    ├── bakery.rs            # Worker threads baking chunks, a baker each sharing the tiles, and clustering their splats for the GPU
+    ├── bakery.rs            # Worker threads baking chunks, a baker each sharing the tiles (lit, with a Light each), and clustering their splats for the GPU
     ├── compositor.rs        # compositor.ts with wgpu: splats uploaded per chunk in clusters, culled on the GPU against what showed
     ├── shot.rs              # --shot: one frame drawn offscreen on the GPU, saved as a PNG, no window
     └── compositor.wgsl

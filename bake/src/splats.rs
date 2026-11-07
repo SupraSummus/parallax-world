@@ -204,7 +204,7 @@ fn run_ends(ends: &mut Vec<i32>, columns: &mut HashMap<(i32, i32), usize>, geome
  * `surface` is the cell's (cell_surface), with the margin around the cell
  * that its chunks may show; `colour` gives each voxel's (voxel_colour).
  */
-pub fn chunk_splats(splats: &mut Splats, geometry: &Geometry, colour: &dyn Fn(&Voxel) -> u32, surface: &[Voxel], slice: &Slice) {
+pub fn chunk_splats(splats: &mut Splats, geometry: &Geometry, colour: &mut dyn FnMut(&Voxel) -> u32, surface: &[Voxel], slice: &Slice) {
     splats.clear();
     // Twice the centre plane's depth, in layers: a whole number.
     let centre = (2.0 * slice_centre(slice) / LAYER).round() as i32;
@@ -274,7 +274,7 @@ mod tests {
         let (sites, surface) = blob(&geometry, 0..4, |[a, b, c]| (0..4).contains(&c) && a.abs() <= 12 && b.abs() <= 12 && a + c >= 0);
         let slice = Slice { level: 2, atoms: 0, layer: 0, cutoff: f64::INFINITY };
         let mut splats = Splats::new();
-        chunk_splats(&mut splats, &geometry, &|v| voxel_colour(v, &[0; FACE_KINDS]), &surface, &slice);
+        chunk_splats(&mut splats, &geometry, &mut |v| voxel_colour(v, &[0; FACE_KINDS]), &surface, &slice);
         let centre = slice_centre(&slice);
 
         let at = |[a, b, c]: [i32; 3]| [a as f64 * LAYER, b as f64, c as f64 * LAYER];
@@ -335,7 +335,7 @@ mod tests {
         let (_, surface) = blob(&geometry, 0..8, |site| (0..8).contains(&site[2]) && hash(site) % 3 == 0);
         let slice = Slice { level: 3, atoms: 0, layer: 0, cutoff: f64::INFINITY };
         let mut splats = Splats::new();
-        chunk_splats(&mut splats, &geometry, &|v| voxel_colour(v, &[0; FACE_KINDS]), &surface, &slice);
+        chunk_splats(&mut splats, &geometry, &mut |v| voxel_colour(v, &[0; FACE_KINDS]), &surface, &slice);
         let kept = splats.splats;
         // Every voxel a ray may meet, far to near.
         let mut all: Vec<[i32; 3]> = surface.iter().filter(|v| seen(&geometry, v.open | v.cut)).map(|v| v.site).collect();

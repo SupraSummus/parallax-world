@@ -27,6 +27,7 @@ use std::sync::Arc;
 
 use cells::Cells;
 use fill::{fill_mask, solid_blocks};
+use light::Lighting;
 use slicing::{LAYER, chunk_cell, spacing, thickness};
 use splats::{Splats, chunk_splats, lit_voxel_colour, voxel_colour};
 use surface::{cell_reads, cell_surface};
@@ -103,8 +104,10 @@ pub struct Baker {
     lattices: [Lattice; VIEW_FACES],
     /** Per view face: material · FACE_KINDS + kind → RGBA. */
     palettes: Vec<u32>,
-    /** Per view face, its face kinds' in the world (tables::world_kinds), for lit grids. */
+    /** Per view face, its face kinds' in the world (tables::world_kinds), as `light` has them. */
     world_kinds: [[usize; FACE_KINDS]; VIEW_FACES],
+    /** If the host lights the world, its light; else voxels are shaded by the way their faces face (voxel_colour). */
+    pub light: Option<Lighting>,
     /** Which cell of 2·FCC owns each site, for cutoffs. */
     pairs: Cells,
     splats: Splats,
@@ -128,6 +131,7 @@ impl Baker {
             lattices,
             palettes: tables::palettes(&lattices, colours),
             world_kinds: tables::world_kinds(&lattices),
+            light: None,
             pairs: Cells::new(2),
             splats: Splats::new(),
             mask: Vec::new(),
@@ -181,15 +185,12 @@ impl Baker {
         let surface = cell_surface(&reader, &self.geometry, &self.pairs, &slice, i, j);
         let palettes = self.palettes.len() / VIEW_FACES;
         let palette = &self.palettes[face * palettes..(face + 1) * palettes];
-        // Lit by the grid's light if it has any, else shaded by the way its faces face (voxel_colour).
-        let colour = |voxel: &surface::Voxel| {
-            let [x, y, z] = lattice.world(voxel.site);
-            match tiles.light(x, y, z) {
-                Some(light) => lit_voxel_colour(voxel, &light, &self.world_kinds[face], lattice.f.map(|v| -v)),
-                None => voxel_colour(voxel, palette),
-            }
+        let (light, kinds) = (&mut self.light, &self.world_kinds[face]);
+        let mut colour = |voxel: &surface::Voxel| match light {
+            Some(light) => lit_voxel_colour(voxel, &light(level, lattice.world(voxel.site)), kinds, lattice.f.map(|v| -v)),
+            None => voxel_colour(voxel, palette),
         };
-        chunk_splats(&mut self.splats, &self.geometry, &colour, &surface, &slice);
+        chunk_splats(&mut self.splats, &self.geometry, &mut colour, &surface, &slice);
 
         // Where they may be drawn, clipped to the cell, in the grid's units.
         let cell = chunk_cell(slice.level, i, j);

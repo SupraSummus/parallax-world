@@ -3,7 +3,6 @@
 
 use std::sync::Arc;
 
-use crate::light::{FaceLight, LIGHT_WORDS, decode};
 use crate::tables::VOXEL_FACES;
 
 /** Kinds of voxel faces. */
@@ -94,8 +93,6 @@ pub struct Grid {
     pub cells: Vec<u8>,
     /** The sites whose faces are not all of their material in `cells`, by index in `cells`: FACE_WORDS each (face_words). */
     pub faces: Vec<u32>,
-    /** If the world is lit, the light on its surface sites' faces, by index in `cells`: LIGHT_WORDS each (light_words). */
-    pub light: Vec<u32>,
 }
 
 /** The words after site index `i` in `words`, `per` words a site, sorted by index; None if it has none. */
@@ -116,14 +113,7 @@ impl Grid {
     /** A grid of the box with `used` bricks of sites; `bricks` and `cells` to be written. */
     pub fn new(min: [i32; 3], n: [i32; 3], used: usize) -> Grid {
         let count = n.map(|v| (v.max(0) + BRICK - 1) / BRICK);
-        Grid {
-            min,
-            n,
-            bricks: vec![-1; (count[0] * count[1] * count[2]) as usize],
-            cells: vec![0; used * BRICK_SITES],
-            faces: Vec::new(),
-            light: Vec::new(),
-        }
+        Grid { min, n, bricks: vec![-1; (count[0] * count[1] * count[2]) as usize], cells: vec![0; used * BRICK_SITES], faces: Vec::new() }
     }
 
     /** Site (x, y, z)'s index in `cells`; None if its brick is empty or it is outside. */
@@ -159,12 +149,6 @@ impl Grid {
     fn faces_at(&self, i: usize) -> Option<Faces> {
         let words = words_of(&self.faces, FACE_WORDS, i)?;
         Some(std::array::from_fn(|k| words[k / 4].to_le_bytes()[k % 4]))
-    }
-
-    /** The light on the faces of the voxel at (x, y, z), by kind, if it is lit. */
-    pub fn light(&self, x: i32, y: i32, z: i32) -> Option<FaceLight> {
-        let words = words_of(&self.light, LIGHT_WORDS, self.index(x, y, z)?)?;
-        Some(std::array::from_fn(|k| decode(words[k])))
     }
 }
 
@@ -231,22 +215,6 @@ impl Tiles {
         let grid = self.grid(self.tile(x, z))?;
         let holds = |v: i32, d: usize| (grid.min[d]..grid.min[d] + grid.n[d]).contains(&v);
         (holds(x, 0) && holds(z, 2)).then(|| grid.get(x, y, z))
-    }
-
-    /**
-     * The light from the faces of the voxel at site (x, y, z), if its
-     * tile's grid is lit (else None): its own, or if no light reached it
-     * (buried, shown where a slice cuts it), its lit neighbours' mean, or
-     * none.
-     */
-    pub fn light(&self, x: i32, y: i32, z: i32) -> Option<FaceLight> {
-        let grid = self.grid(self.tile(x, z)).filter(|grid| !grid.light.is_empty())?;
-        grid.light(x, y, z).or_else(|| {
-            let around: Vec<FaceLight> =
-                VOXEL_FACES.iter().filter_map(|n| self.grid(self.tile(x + n[0], z + n[2]))?.light(x + n[0], y + n[1], z + n[2])).collect();
-            let mean = |f: usize, c: usize| around.iter().map(|l| l[f][c]).sum::<f32>() / around.len().max(1) as f32;
-            Some(std::array::from_fn(|f| std::array::from_fn(|c| mean(f, c))))
-        })
     }
 
     /** Whether tile (i, k) has a grid. */
