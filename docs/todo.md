@@ -210,13 +210,15 @@ Numbers are for the forest at 1280×800, as measured when written.
   Far away the forest is a medium as dense as its trees on average
   ("Populations" in "Levels" of `docs/generators.md`),
   and a clearing's edge holds few of them:
-  from above at level 4, the valley's first windmill came 0.03 to 0.13 apart
+  from above at level 4, the valley's first windmill came 0.02 to 0.13 apart
   over 16 seeds, with more canopy than level 0 or less,
-  0.1 or more at four seeds the contract doesn't check;
-  seed 1, which it checks, keeps it narrowly (materials hit 0.094):
-  the canopy reading fewer columns around
+  0.1 or more at two seeds the contract doesn't check;
+  seed 3, which it checks, keeps it narrowly
+  (materials hit 0.096 at level 4 against 2, canopy for bark).
+  The canopy reading fewer columns around
   (not the farthest of 38 at level 4, 5 % of the crowns' shadow)
-  would spare level 4 tiles 10 to 35 ms, but broke it again.
+  would spare level 4 tiles 10 to 35 ms,
+  but broke a checked seed's windmill when tried, before landmarks were claimed.
   Its sails, sheets a site thick, add 0.02 to 0.03 there.
   A plan of the trees, which the population anchors from and the canopy reads
   ("Fields can't see things" in `docs/generators.md`),
@@ -227,15 +229,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   Behind the crest the high country is one smooth noise,
   and wherever it stands over the snowline, all of it is snow.
   It wants crags and cirques of its own, or less snow where it is broad.
-- **Landmarks, placed one per region, prefer places**
-  (`KNOWN` in `worlds/tests/places.rs`).
-  A landmark keeps its cell and all it shapes inside its region (`landmarks.rs`),
-  so a strip along every region's edge never holds one,
-  and a town's farmland there no farmstead or windmill
-  (rows of regions are staggered along x, so the strips differ from row to row).
-  Claimed instead (`Claims`),
-  as towns, settlements and the moor's steadings and pools are,
-  each would stand anywhere.
 - **Towns and the city line up with the lattice.**
   `worlds/tests/directions.rs` lists them (`KNOWN`).
   The valley's first town lays out streets and blocks along x and z,
@@ -255,6 +248,24 @@ Numbers are for the forest at 1280×800, as measured when written.
 - **Cost weighs every plan lookup alike** (`NS` in `worldgen/src/cost.rs`),
   though one of a column just read costs a fraction
   of one among claims making their keys.
+- **Plans' slots collide far more often than by chance** (`Plan::at`).
+  A plan keeps the last value made in each slot,
+  and the slot, the xor of two products of x and z, repeats on small keys:
+  Claims' keys share slots up to forty times as often,
+  a level-0 tile's columns two and a half times.
+  Values that share a slot and are read by turns are made each time:
+  steadings' claims three to ten times each on average, some hundreds,
+  and the valley's landmarks' a tenth more work in a tile
+  until `landmarks.rs` kept what each spot claimed (drop that then).
+  Adding the products and mixing the sum (a shift and a multiply)
+  makes most claims once.
+- **The places check finds few things of sparse populations**
+  (`worldgen/src/places.rs`):
+  it asks COLUMNS cells at most,
+  and finds a claimed thing only from those within its reach.
+  The valley's landmarks: 118 at eight seeds (not 686 as one per region),
+  under ENOUGH a seed, so no seed is tested alone;
+  its towns 57, its haystacks 2.
 
 ## Ideas
 

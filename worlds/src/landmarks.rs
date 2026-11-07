@@ -1,16 +1,18 @@
 //! Landmarks: structures standing alone through the valley, a ruined keep
 //! on a hilltop in the forest, a watchtower on a rise, a wayside chapel by
 //! the path, a pond in a hollow, a farmstead and a windmill in the
-//! farmland. A domain of the valley (valley.rs): at most one in each
-//! region, chosen by what the valley's raw ground is like there; it
-//! shapes the ground under it, bids for its footprint and a clearing
-//! round it, so trees and crops keep off, and draws what it wins.
+//! farmland. A domain of the valley (valley.rs): landmarks claimed
+//! anywhere, apart, each chosen by what the valley's raw ground is like
+//! there; each shapes the ground under it, bids for its footprint and a
+//! clearing round it, so trees and crops keep off, and draws what it wins.
 //!
 //! A new landmark is a variant of `Landmark` and its `Spec`: where it may
 //! stand, its footprint, how it shapes the ground, and its builder: hollow
 //! solids with a measured far form (`town::thing`), open frames and boards
 //! as they are.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use worldgen::column::Column;
@@ -19,7 +21,7 @@ use worldgen::generator::{ANY_SIZE, Child, Field, Fill, Kind, Layer, Node, Op, P
 use worldgen::js;
 use worldgen::kinds;
 use worldgen::noise::{Fx, Rng, ValueNoise, fx, hash64, smoothstep, stream};
-use worldgen::plan::{Land, Plan};
+use worldgen::plan::{Claims, Land, Plan};
 use worldgen::units::{Units, m};
 
 use crate::forest::K as F;
@@ -37,24 +39,35 @@ kinds! {
 }
 
 /**
- * At most one landmark stands in each region this wide, its cell's
- * centre and all it shapes and bids for inside it: only the region's
- * landmark is asked about a column.
+ * Landmarks stand at least APART, claimed (Claims) from spots one in
+ * each square CLAIM wide on average, each tried in the square CLAIM wide
+ * round its spot. A landmark reaches NEAR from its centre at most (its
+ * footprint's corners, the ground it eases back, its clearing and its
+ * bid falling off past it), so a column is near one at most.
  */
-const REGION: i64 = m(224.0);
-/** The chance a region has a landmark, and how many places each kind is tried at in it. */
-const CHANCE: Fx = fx(0.6);
+const CLAIM: i64 = m(224.0);
+const APART: i64 = m(80.0);
+pub const NEAR: i64 = m(40.0);
+/** The chance a spot is tried, and how many places each kind is tried at round it. */
+const CHANCE: Fx = fx(0.66);
 const TRIES: usize = 8;
-/** How many rows of regions either way `Landmarks::first` looks in. */
-const ROWS: i64 = 1000;
+/** How many spots' claims `Landmarks` keeps at most: some 200 km²'s worth. */
+const KEPT: usize = 4096;
+/** How many rows NEAR apart either way, and points across them either side of the path, `Landmarks::first` looks at. */
+const ROWS: i64 = 6000;
+const ACROSS: i64 = 12;
 /** A landmark's cell, and how far it reaches past it across, up and across: a farmstead's corners, a watchtower's pennant. */
 const CELL: i64 = m(16.0);
 const REACH: [i64; 3] = [m(20.0), m(30.0), m(20.0)];
+/** The first chapel's clearing: wider than a chapel's, so that the trees between it and the camera hide less of it. */
+const FIRST_CLEARING: Units = Units::m(16.0);
 /** Plan scales: the bid for land, what each column of a landmark's is. */
 pub const BID_SCALE: i64 = m(4.0);
 const SPOT_SCALE: i64 = m(1.0);
 /** How far round its footprint a landmark eases the ground back to the valley's, and how much the ground may rise under it. */
 const TERRACE: Units = Units::m(12.0);
+/** How far past its clearing's edge, where it is level with the rest, a landmark's bid falls to its least. */
+const FADE: Units = Units::m(8.0);
 const STEEP: Units = Units::m(2.0);
 /** A pond's bowl is this deep, its water this far under its rim, its shore this wide. */
 const POND_DEPTH: i64 = m(1.8);
@@ -64,8 +77,9 @@ const POND_SHORE: i64 = m(3.0);
 const ROOF: i64 = 4;
 
 /** What a landmark is. */
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
 pub enum Landmark {
+    #[default]
     Ruin,
     Watchtower,
     Chapel,
@@ -96,7 +110,7 @@ enum Shaping {
     Bowl,
 }
 
-/** Where in its region a landmark is tried. */
+/** Where round its spot a landmark is tried. */
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Stands {
     Anywhere,
@@ -111,8 +125,9 @@ struct Spec {
     suits: fn(&Place) -> bool,
     /** How often it is chosen of those that suit a place. */
     weight: u32,
-    /** Its footprint in its own frame, u along its front and w back from it, lattice units. */
+    /** Its footprint in its own frame, u along its front and w back from it, lattice units; and the largest. */
     size: fn(&mut Rng) -> [i64; 2],
+    most: [i64; 2],
     /** Its front (−w) to the path, or any way. */
     faces_path: bool,
     stands: Stands,
@@ -123,12 +138,13 @@ struct Spec {
 }
 
 impl Landmark {
-    fn spec(self) -> Spec {
+    const fn spec(self) -> Spec {
         match self {
             Landmark::Ruin => Spec {
                 suits: |p| p.town > Units::m(300.0) && p.path > Units::m(30.0) && p.prominence >= Units::m(1.0),
                 weight: 3,
                 size: |r| [m(17.0) + r.below(m(2.0) as u32) as i64; 2],
+                most: [m(19.0); 2],
                 faces_path: false,
                 stands: Stands::Anywhere,
                 shaping: Shaping::Level(0),
@@ -139,6 +155,7 @@ impl Landmark {
                 suits: |p| p.town > Units::m(150.0) && p.path > Units::m(16.0) && p.prominence >= Units::m(0.8),
                 weight: 1,
                 size: |_| [m(6.0), m(6.0)],
+                most: [m(6.0), m(6.0)],
                 faces_path: true,
                 stands: Stands::Anywhere,
                 shaping: Shaping::Level(0),
@@ -149,6 +166,7 @@ impl Landmark {
                 suits: |p| p.town > Units::m(100.0) && p.path > Units::m(11.0) && p.path < Units::m(20.0),
                 weight: 2,
                 size: |_| [m(7.0), m(12.0)],
+                most: [m(7.0), m(12.0)],
                 faces_path: true,
                 stands: Stands::ByPath,
                 shaping: Shaping::Level(0),
@@ -162,6 +180,7 @@ impl Landmark {
                     let (a, b) = (m(6.0) + r.below(m(4.0) as u32) as i64, m(5.0) + r.below(m(3.0) as u32) as i64);
                     [2 * (a + POND_SHORE), 2 * (b + POND_SHORE)]
                 },
+                most: [2 * (m(10.0) + POND_SHORE), 2 * (m(8.0) + POND_SHORE)],
                 faces_path: false,
                 stands: Stands::Anywhere,
                 shaping: Shaping::Bowl,
@@ -172,6 +191,7 @@ impl Landmark {
                 suits: |p| p.town > Units::m(10.0) && p.town < Units::m(60.0) && p.path > Units::m(26.0),
                 weight: 8,
                 size: |r| [m(30.0) + r.below(m(4.0) as u32) as i64, m(24.0) + r.below(m(4.0) as u32) as i64],
+                most: [m(34.0), m(28.0)],
                 faces_path: true,
                 stands: Stands::ByTown,
                 shaping: Shaping::Level(0),
@@ -182,6 +202,7 @@ impl Landmark {
                 suits: |p| p.town > Units::m(15.0) && p.town < Units::m(60.0) && p.path > Units::m(20.0),
                 weight: 8,
                 size: |_| [m(10.0), m(10.0)],
+                most: [m(10.0), m(10.0)],
                 faces_path: false,
                 stands: Stands::ByTown,
                 shaping: Shaping::Level(m(1.5)),
@@ -192,8 +213,31 @@ impl Landmark {
     }
 }
 
+/**
+ * Whether a landmark at most `most` across, owning `clearing` round it,
+ * reaches NEAR from its centre at most: its footprint's corners, and
+ * past them the ground it eases back or its clearing and the bid
+ * falling off past that, whichever is further.
+ */
+const fn within_near(most: [i64; 2], clearing: Units) -> bool {
+    let past = if TERRACE.0 > clearing.0 + FADE.0 { TERRACE.0 } else { clearing.0 + FADE.0 };
+    let r = NEAR - past;
+    r >= 0 && (most[0] / 2).pow(2) + (most[1] / 2).pow(2) <= r * r
+}
+
+// Every kind, and the first chapel with its wider clearing; a cell's centre near the landmark in it; a column near one at most.
+const _: () = {
+    let mut n = 0;
+    while n < LANDMARKS.len() {
+        let spec = LANDMARKS[n].spec();
+        assert!(within_near(spec.most, spec.clearing));
+        n += 1;
+    }
+    assert!(within_near(Landmark::Chapel.spec().most, FIRST_CLEARING) && CELL <= NEAR && 2 * NEAR <= APART);
+};
+
 /** A landmark where it stands: its centre (x, z), the top of the ground under it, its footprint and quarter turns. */
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Default, Debug)]
 pub struct Site {
     pub landmark: Landmark,
     pub centre: [i64; 2],
@@ -238,21 +282,6 @@ impl Site {
     }
 }
 
-/**
- * The region of column (x, z): REGION wide, region (0, 0) around the
- * origin; each row of them shifted along x by 0.618 of the one before,
- * so what their edges keep landmarks off differs from row to row.
- */
-fn region(x: i64, z: i64) -> (i64, i64) {
-    let k = (z + REGION / 2).div_euclid(REGION);
-    ((x - origin(0, k)[0]).div_euclid(REGION), k)
-}
-
-/** Region (i, k)'s least x and z. */
-fn origin(i: i64, k: i64) -> [i64; 2] {
-    [i * REGION - REGION / 2 - (k * REGION * 618 / 1000).rem_euclid(REGION), k * REGION - REGION / 2]
-}
-
 /** What place `centre` is, on `terrain`. */
 fn place(terrain: &Terrain, [x, z]: [i64; 2]) -> Place {
     let (r, d) = (m(24.0), m(24.0) * 7 / 10);
@@ -264,20 +293,9 @@ fn place(terrain: &Terrain, [x, z]: [i64; 2]) -> Place {
     }
 }
 
-/**
- * Whether `site` keeps off the path and out of the towns, stands below
- * the mountains and well over the world's bottom, and its region holds
- * its cell and all it shapes.
- */
+/** Whether `site` keeps off the path and out of the towns, and stands below the mountains and well over the world's bottom. */
 fn fits(terrain: &Terrain, site: &Site) -> bool {
     let ([hx, hz], [cx, cz]) = (site.half(), site.centre);
-    let reach = TERRACE.0.max(site.clearing.0 + m(2.0));
-    let (i, k) = region(cx, cz);
-    let [x0, z0] = origin(i, k);
-    let inside = |c: i64, h: i64, c0: i64| c - h - reach >= c0 && c + h + reach < c0 + REGION && c - CELL >= c0 && c + CELL < c0 + REGION;
-    if !inside(cx, hx, x0) || !inside(cz, hz, z0) {
-        return false;
-    }
     let off_path = (cz - hz..=cz + hz).step_by(m(1.0) as usize).all(|z| {
         let path = terrain.path_x(z).round_units().0;
         (path - cx).abs() - hx >= m(3.5)
@@ -318,20 +336,15 @@ fn even(terrain: &Terrain, site: &Site) -> bool {
 }
 
 /**
- * The landmark of region (i, k), if it has one: the kinds in an order
- * drawn by weight, each tried at a few places in the region (beside the
- * path if it stands by it), the first that suits one and fits it.
- * The first region's is a chapel by the path ahead of the camera.
+ * The landmark claimed from `spot`, if any (by CHANCE): the kinds in an
+ * order drawn by weight, each tried at a few places in the square CLAIM
+ * wide round the spot (beside the path if it stands by it), the first
+ * that suits one and fits it.
  */
-fn site_of(seed: u64, terrain: &Terrain, i: i64, k: i64) -> Option<Site> {
-    let mut random = Rng::new(hash64(seed, i, k, 0));
-    if (i, k) == (0, 0) {
-        return Some(levelled(terrain, first(terrain, &mut random)));
-    }
+fn claim(terrain: &Terrain, spot: [i64; 2], random: &mut Rng) -> Option<Site> {
     if !random.chance(CHANCE) {
         return None;
     }
-    let [x0, z0] = origin(i, k);
     let mut kinds: Vec<Landmark> = LANDMARKS.to_vec();
     while !kinds.is_empty() {
         let total: u32 = kinds.iter().map(|l| l.spec().weight).sum();
@@ -350,9 +363,10 @@ fn site_of(seed: u64, terrain: &Terrain, i: i64, k: i64) -> Option<Site> {
         let landmark = kinds.swap_remove(n);
         let spec = landmark.spec();
         for _ in 0..TRIES {
-            let size = (spec.size)(&mut random);
-            let Some([x, z]) = candidate(terrain, spec.stands, (x0, z0), size, &mut random) else { break };
-            if region(x, z) != (i, k) {
+            let size = (spec.size)(random);
+            assert!(size[0] <= spec.most[0] && size[1] <= spec.most[1], "{landmark:?} larger than its most");
+            let Some([x, z]) = candidate(terrain, spec.stands, spot, size, random) else { break };
+            if (x - spot[0]).abs() > CLAIM / 2 || (z - spot[1]).abs() > CLAIM / 2 {
                 continue;
             }
             let turns = if spec.faces_path { facing(terrain.path_x(z).round_units().0 - x, 0) } else { random.below(4) as i64 };
@@ -365,24 +379,25 @@ fn site_of(seed: u64, terrain: &Terrain, i: i64, k: i64) -> Option<Site> {
     None
 }
 
-/** A place in the region from (x0, z0) to try a landmark of `size` at, as it `stands`; none if it can't stand in it. */
-fn candidate(terrain: &Terrain, stands: Stands, (x0, z0): (i64, i64), size: [i64; 2], random: &mut Rng) -> Option<[i64; 2]> {
+/** A place in the square CLAIM wide round `spot` to try a landmark of `size` at, as it `stands`; none if it can't stand there. */
+fn candidate(terrain: &Terrain, stands: Stands, spot: [i64; 2], size: [i64; 2], random: &mut Rng) -> Option<[i64; 2]> {
     let side = if random.chance(Fx::HALF) { 1 } else { -1 };
+    let [x0, z0] = spot.map(|v| v - CLAIM / 2);
     match stands {
-        Stands::Anywhere => Some([x0 + below(random, REGION), z0 + below(random, REGION)]),
+        Stands::Anywhere => Some([x0 + below(random, CLAIM), z0 + below(random, CLAIM)]),
         Stands::ByPath => {
-            let z = z0 + below(random, REGION);
+            let z = z0 + below(random, CLAIM);
             Some([terrain.path_x(z).round_units().0 + side * (size[1] / 2 + m(5.0) + below(random, m(5.0))), z])
         }
         Stands::ByTown => {
-            let t = terrain.towns.near(z0 + REGION / 2)?;
+            let t = terrain.towns.near(spot[1])?;
             let (half_z, out) = (t.half_z() + m(40.0), size[0].max(size[1]) / 2 + m(6.0) + below(random, m(24.0)));
             Some([t.x + side * (t.half_x() + out), t.z - half_z + below(random, 2 * half_z)])
         }
     }
 }
 
-/** The first region's chapel, beside the path 33 m ahead of the camera, its front to the path, nearer the camera's line of sight. */
+/** The first chapel, beside the path 33 m ahead of the camera, its front to the path, nearer the camera's line of sight. */
 fn first(terrain: &Terrain, random: &mut Rng) -> Site {
     let landmark = Landmark::Chapel;
     let size = (landmark.spec().size)(random);
@@ -396,8 +411,7 @@ fn first(terrain: &Terrain, random: &mut Rng) -> Site {
         .max()
         .expect("a step");
     let x = side * (near + size[1] / 2 + m(5.0));
-    // A wider clearing than a chapel's, so that the trees between hide less of it.
-    Site { landmark, centre: [x, z], level: 0, size, turns: facing(-side, 0), seed: random.next_u64(), clearing: Units::m(16.0) }
+    Site { landmark, centre: [x, z], level: 0, size, turns: facing(-side, 0), seed: random.next_u64(), clearing: FIRST_CLEARING }
 }
 
 /** What a column round a landmark is. */
@@ -412,44 +426,63 @@ enum Spot {
     Mud,
 }
 
-/** The valley's landmarks, by region. */
+/** The valley's landmarks, claimed anywhere. */
 pub struct Landmarks {
     terrain: Rc<Terrain>,
-    sites: Plan<Option<Site>>,
+    sites: Claims<Site>,
     /** Patches of gravel and of a yard's grass; clumps of reeds. */
     patches: ValueNoise<{ m(3.0) }>,
     reeds: ValueNoise<{ m(2.5) }>,
 }
 
 impl Landmarks {
+    /** The landmarks of `seed` on `terrain`, the first a chapel by the path ahead of the camera. */
     pub fn new(seed: u64, terrain: Rc<Terrain>) -> Landmarks {
         let sites = {
-            let (terrain, seed) = (terrain.clone(), stream(seed, 70));
-            Plan::new("landmarks", REGION, move |i, k| site_of(seed, &terrain, i, k))
+            let (terrain, s) = (terrain.clone(), stream(seed, 70));
+            let first = levelled(&terrain, first(&terrain, &mut Rng::new(hash64(s, 0, 0, 0))));
+            // Each spot's claim, kept: Claims remake it while plans' slots collide (docs/todo.md).
+            let claimed = RefCell::new(HashMap::new());
+            Claims::new("landmarks", s, CLAIM, APART, Some(first.centre), move |spot, random| {
+                if spot == first.centre {
+                    return Some((first.centre, first));
+                }
+                let key = (spot, random.clone().next_u64());
+                let known = claimed.borrow().get(&key).copied();
+                let site = known.unwrap_or_else(|| {
+                    let site = claim(&terrain, spot, random);
+                    let mut claimed = claimed.borrow_mut();
+                    if claimed.len() >= KEPT {
+                        claimed.clear();
+                    }
+                    claimed.insert(key, site);
+                    site
+                });
+                site.map(|site| (site.centre, site))
+            })
         };
         Landmarks { terrain, sites, patches: ValueNoise::new(stream(seed, 71)), reeds: ValueNoise::new(stream(seed, 72)) }
     }
 
-    /** The landmark of region (i, k), if any. */
-    pub fn of_region(&self, i: i64, k: i64) -> Option<Site> {
-        self.sites.at(i, k)
-    }
-
     /**
-     * The first `landmark` along the path: in the rows of regions from the
-     * first, ahead and behind in turn, those across it from the middle out.
+     * The first `landmark` along the path: of those near rows NEAR apart
+     * from the start, ahead and behind in turn, the first near points
+     * NEAR apart across the path, from the middle out. Every landmark
+     * within ACROSS points of the path is near one.
      */
     pub fn first(&self, landmark: Landmark) -> Site {
-        let rows = (0..ROWS).flat_map(|k| [-k, k + 1]);
-        rows.flat_map(|k| [0, -1, 1, -2, 2].map(|i| (i, k)))
-            .find_map(|(i, k)| self.of_region(i, k).filter(|s| s.landmark == landmark))
-            .unwrap_or_else(|| panic!("no {landmark:?} in {ROWS} rows of regions either way"))
+        let rows = (0..ROWS).flat_map(|k| [-k, k + 1]).map(|k| k * NEAR);
+        rows.flat_map(|z| {
+            let path = self.terrain.path_x(z).round_units().0;
+            (0..ACROSS).flat_map(|i| [i, -i - 1]).map(move |i| [path + i * NEAR, z])
+        })
+        .find_map(|[x, z]| self.site(x, z).filter(|s| s.landmark == landmark))
+        .unwrap_or_else(|| panic!("no {landmark:?} within {ROWS} rows either way"))
     }
 
-    /** The landmark of column (x, z)'s region, if any. */
+    /** The landmark reaching column (x, z), if any: its centre within NEAR. */
     pub fn site(&self, x: i64, z: i64) -> Option<Site> {
-        let (i, k) = region(x, z);
-        self.of_region(i, k)
+        self.sites.near(x, z, NEAR).map(|(_, s)| s)
     }
 
     /** The valley's `ground` at (x, z), with its fraction, shaped by the landmark there: levelled under it, easing back over TERRACE. */
@@ -474,7 +507,7 @@ impl Landmarks {
         if (Units(x).to_fx() - self.terrain.path_x(z)).abs() < Fx::m(2.4) {
             return -most;
         }
-        ((s.clearing - s.outside(x, z)).to_fx() / Units::m(2.0)).clamp(-most, most)
+        ((s.clearing - s.outside(x, z)).to_fx() * most / FADE).clamp(-most, most)
     }
 
     /** What column (x, z) is of the landmark there. */

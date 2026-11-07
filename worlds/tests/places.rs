@@ -8,7 +8,7 @@ use worlds::WORLDS;
 const SEEDS: &[u64] = &[42, 1, 2, 3, 4, 5, 6, 7];
 
 /** Populations known to prefer places, by world (docs/todo.md); each must still, or come off. */
-const KNOWN: &[(&str, &str)] = &[("valley", "landmarks")];
+const KNOWN: &[(&str, &str)] = &[];
 
 /** The things of each population of the world `name` prefer no places, but those KNOWN; prints each one's strongest preference. */
 fn even(name: &str) {

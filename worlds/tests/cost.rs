@@ -18,8 +18,7 @@ const TOLERANCE: f64 = 0.25;
  * it fails unless listed here, and a listed one fails once within it, to
  * be taken off: a ratchet, blessing does not move it.
  */
-const OVER_BUDGET: &[(&str, &str, u32)] =
-    &[("valley", "region1", 4), ("valley", "region1", 6), ("valley", "region4", 4), ("valley", "region4", 6)];
+const OVER_BUDGET: &[(&str, &str, u32)] = &[("valley", "region1", 4), ("valley", "region1", 6), ("valley", "region4", 4)];
 
 #[test]
 fn costs_keep_to_their_baselines() {
