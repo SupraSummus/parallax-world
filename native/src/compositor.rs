@@ -13,6 +13,7 @@
 use std::collections::HashMap;
 use std::ops::Range;
 
+use bake::light::{linear_to_srgb, srgb_to_linear};
 use bake::slicing::half_layer;
 use egui_wgpu::wgpu;
 
@@ -761,6 +762,8 @@ pub struct View {
     /** Whether to draw the seams between faces over the picture. */
     pub seams: bool,
     pub colours: Colours,
+    /** How bright the sky is: 1 by day, less as --light dims it. */
+    pub sky: f32,
 }
 
 /** What splats are painted in: their voxels' colours, or to see how the picture is cut up, a colour per layer or per chunk. */
@@ -800,8 +803,10 @@ impl View {
         g[5] = self.fog_distance as f32;
         g[6] = depth_scale;
         g[7] = sky_fog as f32;
-        g[8..11].copy_from_slice(&SKY_TOP);
-        g[12..15].copy_from_slice(&SKY_HORIZON);
+        // Dimmed in linear terms, as light adds up.
+        let dim = |colour: [f32; 3]| colour.map(|c| linear_to_srgb(srgb_to_linear(c) * self.sky));
+        g[8..11].copy_from_slice(&dim(SKY_TOP));
+        g[12..15].copy_from_slice(&dim(SKY_HORIZON));
         let axes = view_basis(self.yaw, self.pitch);
         let columns = |g: &mut [f32], axes: [Vec3; 3]| {
             for (c, axis) in axes.iter().enumerate() {

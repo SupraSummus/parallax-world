@@ -5,8 +5,10 @@
 use std::collections::HashMap;
 use std::f64::consts::FRAC_1_SQRT_2;
 
+use crate::light::{FaceLight, colour};
 use crate::slicing::{LAYER, MAX_SLANT, slice_centre};
 use crate::surface::{Slice, Voxel};
+use crate::tables::VOXEL_FACES;
 use crate::world::{FACE_KINDS, Geometry};
 
 /**
@@ -130,6 +132,25 @@ pub fn voxel_colour(voxel: &Voxel, palette: &[u32]) -> u32 {
 }
 
 /**
+ * A lit voxel's colour: the light from its open faces (from its cut
+ * faces, if it has none), each as much as it faces the camera, along
+ * `towards`; `kinds` takes its faces' kinds to the world's, as `light`
+ * has them.
+ */
+pub fn lit_voxel_colour(voxel: &Voxel, light: &FaceLight, kinds: &[usize; FACE_KINDS], towards: [i32; 3]) -> u32 {
+    let faces = if voxel.open != 0 { voxel.open } else { voxel.cut };
+    let (mut sum, mut total) = ([0.0f32; 3], 0.0);
+    for kind in (0..FACE_KINDS).filter(|k| faces & (1 << k) != 0) {
+        let n = VOXEL_FACES[kinds[kind]];
+        // Faced away, it still counts a little: a voxel all of whose faces do keeps their light.
+        let weight = (n[0] * towards[0] + n[1] * towards[1] + n[2] * towards[2]).max(0) as f32 + 0.25;
+        (0..3).for_each(|c| sum[c] += weight * light[kinds[kind]][c]);
+        total += weight;
+    }
+    colour(sum.map(|c| if total > 0.0 { c / total } else { c }))
+}
+
+/**
  * Whether a ray of a face (|x| + √2·|y| ≤ z, see inFace in view.ts) can
  * meet one of `faces` from outside: n · r < 0 at a corner of the rhombus
  * of rays, r = (±MAX_SLANT, 0, 1) or (0, ±MAX_SLANT · LAYER, 1).
@@ -181,9 +202,9 @@ fn run_ends(ends: &mut Vec<i32>, columns: &mut HashMap<(i32, i32), usize>, geome
  * and where they tie, the later painted.
  *
  * `surface` is the cell's (cell_surface), with the margin around the cell
- * that its chunks may show; `palette` the view face's (see voxel_colour).
+ * that its chunks may show; `colour` gives each voxel's (voxel_colour).
  */
-pub fn chunk_splats(splats: &mut Splats, geometry: &Geometry, palette: &[u32], surface: &[Voxel], slice: &Slice) {
+pub fn chunk_splats(splats: &mut Splats, geometry: &Geometry, colour: &dyn Fn(&Voxel) -> u32, surface: &[Voxel], slice: &Slice) {
     splats.clear();
     // Twice the centre plane's depth, in layers: a whole number.
     let centre = (2.0 * slice_centre(slice) / LAYER).round() as i32;
@@ -211,7 +232,7 @@ pub fn chunk_splats(splats: &mut Splats, geometry: &Geometry, palette: &[u32], s
             depth: 2 * c - centre,
             run: 2 * (ends[k] - c),
             width: FRAC_1_SQRT_2,
-            colour: voxel_colour(voxel, palette),
+            colour: colour(voxel),
             site: voxel.site,
         });
     }
@@ -253,7 +274,7 @@ mod tests {
         let (sites, surface) = blob(&geometry, 0..4, |[a, b, c]| (0..4).contains(&c) && a.abs() <= 12 && b.abs() <= 12 && a + c >= 0);
         let slice = Slice { level: 2, atoms: 0, layer: 0, cutoff: f64::INFINITY };
         let mut splats = Splats::new();
-        chunk_splats(&mut splats, &geometry, &[0; FACE_KINDS], &surface, &slice);
+        chunk_splats(&mut splats, &geometry, &|v| voxel_colour(v, &[0; FACE_KINDS]), &surface, &slice);
         let centre = slice_centre(&slice);
 
         let at = |[a, b, c]: [i32; 3]| [a as f64 * LAYER, b as f64, c as f64 * LAYER];
@@ -314,7 +335,7 @@ mod tests {
         let (_, surface) = blob(&geometry, 0..8, |site| (0..8).contains(&site[2]) && hash(site) % 3 == 0);
         let slice = Slice { level: 3, atoms: 0, layer: 0, cutoff: f64::INFINITY };
         let mut splats = Splats::new();
-        chunk_splats(&mut splats, &geometry, &[0; FACE_KINDS], &surface, &slice);
+        chunk_splats(&mut splats, &geometry, &|v| voxel_colour(v, &[0; FACE_KINDS]), &surface, &slice);
         let kept = splats.splats;
         // Every voxel a ray may meet, far to near.
         let mut all: Vec<[i32; 3]> = surface.iter().filter(|v| seen(&geometry, v.open | v.cut)).map(|v| v.site).collect();

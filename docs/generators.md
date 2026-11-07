@@ -615,6 +615,18 @@ A kind marked `walk_through` is one a walking body goes through
 (plants, water; see `bake/src/walk.rs`), the rest it stands on;
 so ground and what stands on it are different kinds,
 even of one colour (the moor's `heather` and `heatherSprigs`).
+A kind marked `glows` gives light of its colour, as lamps do
+(`worldgen/src/light.rs`, for now only in look and native's `--light`).
+Each glowing shape a level draws, near or far,
+or measured from its near form,
+puts its glow on the sites around its centre at that level
+(`VoxelGrid::glows`): a quarter of its area,
+whether or not a voxel is kept for it.
+So a level glows as much as level 0, as it hides as much.
+A far form without its near form's lamps goes dark,
+as does a child too small to be drawn at a level (give lamps `ANY_SIZE`):
+lamps light what is far from them only from coarse levels.
+Fields do not glow.
 
 ### Landmarks
 

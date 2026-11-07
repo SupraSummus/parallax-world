@@ -3,7 +3,7 @@
 //! colour per view face.
 
 use crate::slicing::LAYER;
-use crate::world::{FACE_KINDS, Geometry, Lattice};
+use crate::world::{FACE_KINDS, Geometry, Lattice, VIEW_FACES};
 
 /**
  * The voxel's 12 faces' normals in the world, the offsets of the
@@ -49,6 +49,19 @@ fn face_shade([x, y, z]: [f64; 3]) -> f64 {
     let (front, back, left, right, bottom, top) = (0.9, 0.65, 0.7, 0.8, 0.55, 1.0);
     let side = |v: f64, negative: f64, positive: f64| v * v * if v < 0.0 { negative } else { positive };
     (side(x, left, right) + side(y, bottom, top) + side(z, front, back)) / (x * x + y * y + z * z)
+}
+
+/**
+ * Per view face, each face kind's (of the voxels it reads, see geometry)
+ * kind in the world (VOXEL_FACES).
+ */
+pub fn world_kinds(lattices: &[Lattice; VIEW_FACES]) -> [[usize; FACE_KINDS]; VIEW_FACES] {
+    lattices.map(|lattice| {
+        VOXEL_FACES.map(|n| {
+            let world = lattice.world(lattice_of(&lattices[0], n));
+            VOXEL_FACES.iter().position(|&m| m == world).expect("a face goes to a face")
+        })
+    })
 }
 
 /**

@@ -5,24 +5,29 @@
 //! cargo run --release --example look -- valley 7 2 eye windmill -400 200 -400 at windmill out.png
 //! cargo run --release --example look -- valley 42 3 top -800 800 800 2400 size 960 out.png
 //! cargo run --release --example look -- valley 7 3 top mountainside 400 out.png
+//! cargo run --release --example look -- city 42 0 eye spawn -20 30 -10 at spawn -100 10 50 light 0.01 0 1 out.png
 //!
 //! for world, seed and level, then the camera: its eye and a target to
 //! look at or a yaw and pitch (degrees; yaw 0 looks along +z), with `fov`
 //! (degrees across), `far` (lattice units) and `size` (pixels) optional;
 //! or `top` and an area (min x and z, max x and z) to look straight down
-//! at. Last, the file. A point is x y z (lattice units), or a place the
-//! world names (`World::point`: spawn, a town, a windmill…) and,
-//! optionally, x y z from it; `top` takes one and how far around it.
+//! at; `light` and how bright the sky, the sun and glowing kinds are
+//! (1 1 0: a clear day; 0.01 0 1: night) lights the picture by
+//! worldgen::light instead of a fixed sun. Last, the file. A point is
+//! x y z (lattice units), or a place the world names (`World::point`:
+//! spawn, a town, a windmill…) and, optionally, x y z from it; `top`
+//! takes one and how far around it.
 //! It prints the time taken and the share of pixels of each material type.
 
 use worldgen::generator::materials_of;
+use worldgen::light::{Brightness, Light};
 use worldgen::picture::{Camera, picture_on_threads};
 use worlds::{WORLDS, by_name};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let usage = "look <world> <seed> <level> (eye <point> (at <point>|yaw <d> pitch <d>) | top <x0 z0 x1 z1|place d>) \
-                 [fov <d>] [far <units>] [size <w> [h]] <out.png>, a point x y z or <place> [x y z]";
+                 [fov <d>] [far <units>] [size <w> [h]] [light <sky> <sun> <glow>] <out.png>, a point x y z or <place> [x y z]";
     let is_number = |i: usize| args.get(i).is_some_and(|a| a.parse::<f64>().is_ok());
     let number = |i: usize| args.get(i).and_then(|a| a.parse::<f64>().ok()).unwrap_or_else(|| panic!("a number at {i}: {usage}"));
     let seed = number(1) as u64;
@@ -55,7 +60,7 @@ fn main() {
     };
     let level = number(2) as u32;
     let (mut eye, mut target, mut angles, mut area) = (None, None, [0.0, 0.0], None);
-    let (mut fov, mut far, mut size) = (70.0, 3000.0, [960, 600]);
+    let (mut fov, mut far, mut size, mut brightness) = (70.0, 3000.0, [960, 600], None);
     let mut i = 3;
     while i + 1 < args.len() {
         let word = args[i].as_str();
@@ -78,6 +83,11 @@ fn main() {
                     _ => far = number(i),
                 }
                 i += 1;
+            }
+            "light" => {
+                let [sky, sun, glow] = [0, 1, 2].map(|k| number(i + k) as f32);
+                brightness = Some(Brightness { sky, sun, glow });
+                i += 3;
             }
             "top" if is_number(i) => {
                 area = Some(([number(i), number(i + 1)], [number(i + 2), number(i + 3)]));
@@ -109,7 +119,12 @@ fn main() {
         }
         _ => panic!("no camera: {usage}"),
     };
-    let picture = picture_on_threads(&|| (entry.make)(seed).generator, &camera, level, world.heights_at(level));
+    let mut picture = picture_on_threads(&|| (entry.make)(seed).generator, &camera, level, world.heights_at(level));
+    if let Some(brightness) = brightness {
+        let start = std::time::Instant::now();
+        Light::new((entry.make)(seed), brightness).relight(&mut picture, level);
+        println!("lit in {:.2} s", start.elapsed().as_secs_f64());
+    }
     std::fs::write(args.last().expect("a file"), picture.png()).expect("written");
     let middle = picture.height / 2 * picture.width + picture.width / 2;
     println!(

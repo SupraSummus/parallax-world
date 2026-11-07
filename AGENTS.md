@@ -62,6 +62,7 @@ bake/                        # Chunk baker, coverage and walking in Rust (no dep
     ├── surface.rs           # A cell's voxels that can show
     ├── tables.rs            # The voxel's faces in lattice coordinates, the materials shaded per view face
     ├── splats.rs            # Which voxels a chunk shows: each column's nearest, a hexagon at its site, in relief, over its run
+    ├── light.rs             # The light from voxels' faces in lit grids, as hosts hand it over: RGB9E5 per face
     ├── fill.rs              # Splats filled into a mask for every slant, solid blocks (for coverage)
     ├── layer_index.rs       # LayerIndex: where each face's layers hold voxels; its WebAssembly exports
     ├── walk.rs              # Walking: a body that falls, collides, steps and jumps; its WebAssembly exports
@@ -80,6 +81,7 @@ worldgen/                    # The world-generation engine, moving to integers, 
 │   ├── frame.rs             # Things built in frames of their own: quarter turns, mirrors, walls
 │   ├── world.rs             # World: what a host needs to show one (generator, spawn, heights), the places it names
 │   ├── picture.rs           # Pictures of a world at one level: rays through its voxels, as PNGs
+│   ├── light.rs             # Light (a prototype, for look and native's --light): sky, sun and what glows, each level's from coarser levels'
 │   ├── cost.rs              # What generating costs: work counted by layer, reported for a world's tiles, against a baseline
 │   ├── places.rs            # Whether things prefer places: positions modulo periods, as on a grid, over seeds
 │   ├── directions.rs        # Whether a world's directions follow the lattice's: four-fold harmonics of pairs' directions, over seeds
@@ -102,7 +104,7 @@ worlds/                      # The worlds, on worldgen's public API only; the we
 ├── data/town-grammar.bin    # learned.rs's rule table, written by lab's export example
 ├── data/cost/               # Each world's cost baseline, which tests/cost.rs holds it to
 ├── tests/                   # Every world in WORLDS keeps the contract and its cost baseline; the scenes' contents
-└── examples/                # map: a world from above; look: a picture of it, of any place it names (picture.rs); cost: what its tiles cost (cost.rs); bench: timing a world's tiles
+└── examples/                # map: a world from above; look: a picture of it, of any place it names (picture.rs), lit (light.rs); cost: what its tiles cost (cost.rs); bench: timing a world's tiles
 lab/                         # Experiment, not built by pnpm: split grammars with shared splits, learned from the valley's towns; a masked model of any volume, flat, 3D or on the FCC lattice; synthesis by coordinates into examples; a critic and profiles that score any of them; real places (scripts/overture.py) drawn to a plan (see src/lib.rs); exports the learned town's rules
 native/                      # Spike of a native frontend (egui on winit and wgpu), linking bake/ and worlds/; see src/main.rs
 ├── .cargo/config.toml       # Builds for x86-64-v3: floor and ceil inline (see there)
@@ -111,7 +113,7 @@ native/                      # Spike of a native frontend (egui on winit and wgp
     ├── main.rs              # The camera (flying or walking, F) and panel; --shot, --bench, --walk, --stroll, --check-requests against a dump
     ├── window.rs            # The window: egui on winit and wgpu, its GPU device made again when lost
     ├── dump.rs              # Reads a dump: a view, its faces, grids and the chunks it wants
-    ├── world.rs             # world.ts for generated worlds: a World's tiles, those the renderer wants first, made and indexed on threads
+    ├── world.rs             # world.ts for generated worlds: a World's tiles, those the renderer wants first, made, lit and indexed on threads
     ├── view.rs              # view.ts: faces, which rays and screen boxes they draw
     ├── renderer.rs          # renderer.ts: chunks in view, cached, which cells to bake as occlusion.rs found
     ├── occlusion.rs         # bake's Coverage on a thread of its own: which cells in view are covered, so not baked

@@ -313,6 +313,11 @@ each by the axes its normal leans towards
 (`face_shade`, `voxel_colour`):
 a voxel is shaded by the way its surface faces,
 and coloured by what is seen of it along the face.
+A lit grid (native's `--light`) carries instead
+the light each surface voxel's face sends out
+(`bake/src/light.rs`, made by `worldgen/src/light.rs`):
+a splat shows the mean of its open faces',
+each as much as it faces the camera.
 
 **Pillars.** A slanted ray sees past a column's edge,
 where it would meet the column behind.

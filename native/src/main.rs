@@ -4,7 +4,7 @@
 //! baker in bake/, sharing the tiles, and wgpu drawing them in an egui window
 //! (window.rs).
 //!
-//! parallax-native [--world NAME] [--threads N] [--seed S] [--view QUERY] [--leak DEG] [--all-chunks] [--shot out.png [--size WxH] [--seams] [--colour voxels|layers|chunks] | --bench] [--walk D] [--stroll S [--on-ground]] [--spin]
+//! parallax-native [--world NAME] [--threads N] [--seed S] [--view QUERY] [--light SKY,SUN,GLOW] [--leak DEG] [--all-chunks] [--shot out.png [--size WxH] [--seams] [--colour voxels|layers|chunks] | --bench] [--walk D] [--stroll S [--on-ground]] [--spin]
 //! parallax-native [--world NAME] [--seed S] --check-requests frame.bin
 //!
 //! --view takes the web page's view query (parseViewQuery in renderer.ts),
@@ -16,6 +16,8 @@
 //! D units along the view after the first frame, and does the same there. --stroll S then flies on for S seconds
 //! (walks, --on-ground) as the window would, a frame every 60th, and times each frame's parts.
 //! When the window panics or loses its GPU device, it says what it showed as these arguments.
+//! --light lights the world (worldgen's light.rs), the sky, the sun and
+//! what glows this bright: 1,1,0 a clear day, 0.01,0,1 night.
 //! --leak sets how far hidden geometry may show between slices (renderer.rs);
 //! --all-chunks bakes every chunk in view, covered or not, as the panel's
 //! switch does.
@@ -50,6 +52,7 @@ use renderer::Renderer;
 use view::{Vec3, focal_length, view_basis};
 use world::{Level, Make, World};
 use worldgen::generator::materials_of;
+use worldgen::light::Brightness;
 
 /** The world shown unless --world names another (worlds::WORLDS). */
 const WORLD: Make = worlds::valley::valley;
@@ -74,6 +77,8 @@ struct App {
     walk_through: Vec<bool>,
     /** The world, as --view gives it: `seed=…` and `&world=…` if given. */
     world_query: String,
+    /** How bright the sky is (compositor::View). */
+    sky: f32,
     /** The frame the ui drew last, for the window to draw (window::Content). */
     picture: Option<(Arc<renderer::Frame>, compositor::View, egui::Rect)>,
 }
@@ -188,6 +193,7 @@ impl window::Content for App {
                 pixels: [0, 0],
                 seams: self.seams,
                 colours: self.colours,
+                sky: self.sky,
             };
             let pixels = ui.ctx().pixels_per_point();
             self.remember([rect.width() * pixels, rect.height() * pixels]);
@@ -459,7 +465,14 @@ fn main() {
         renderer.max_leak = v;
     }
     renderer.skip_covered = !flag("--all-chunks");
-    let mut world = World::new(make, seed, threads);
+    // Sky, sun and lamps, as in look's `light`: 1,1,0 a clear day, 0.01,0,1 night.
+    let brightness = value("--light").map(|v| {
+        let v: Vec<f32> = v.split(',').map(|v| v.parse().expect("--light SKY,SUN,GLOW")).collect();
+        let [sky, sun, glow] = v.try_into().expect("--light SKY,SUN,GLOW");
+        Brightness { sky, sun, glow }
+    });
+    let sky = brightness.map_or(1.0, |b| b.sky);
+    let mut world = World::new(make, seed, brightness, threads);
     let mut camera = query.camera.unwrap_or(shown.spawn.map(|v| v as f64));
     let faces: [[Vec3; 3]; 12] = std::array::from_fn(|f| view::faces()[f].axes);
     let fog_distance = render_distance * FOG_PER_RENDER_DISTANCE;
@@ -507,6 +520,7 @@ fn main() {
             colours: value("--colour").map_or(Colours::Voxels, |v| {
                 Colours::ALL.into_iter().find(|(_, name)| name.eq_ignore_ascii_case(v)).expect("--colour voxels, layers or chunks").0
             }),
+            sky,
         };
         if flag("--bench") {
             let splats: usize = frame.layers.iter().flat_map(|l| &l.placements).map(|p| p.chunk.baked.splats.len()).sum();
@@ -540,6 +554,7 @@ fn main() {
         spin,
         walker: None,
         walk_through: materials_of(&shown.generator).iter().map(|m| m.walk_through).collect(),
+        sky,
         world_query: format!("seed={seed}{}", world_name.map(|w| format!("&world={w}")).unwrap_or_default()),
         picture: None,
     };
