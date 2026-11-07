@@ -160,7 +160,8 @@ Numbers are for the forest at 1280×800, as measured when written.
   `Arena::grow` caps a buffer at what the device allows
   (128 MB of splats on lavapipe), and `allocate` then hands out room past it:
   wgpu panics in `Compositor::prepare`
-  (the city at 1280×660 with a 2.4° leak did, before `GRID_REACH`).
+  (the city at 1280×660 with a 2.4° leak did, before `GRID_REACH`;
+  the forest at its defaults does, `seed=42&world=forest&look=200,10`).
   Past the limit it could drop the farthest chunks, or split the buffer.
 - **After a long jump, the workers' frame culls more than the main thread's.**
   Once the grids of three or more levels move at once,
