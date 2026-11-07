@@ -12,6 +12,7 @@ Entry point for AI agents working on this codebase. Read this first.
 | [docs/testing.md](docs/testing.md) | Test layout and conventions | Writing tests |
 | [docs/todo.md](docs/todo.md) | Planned work: known problems and open ideas | Looking for what to do next |
 | [docs/generators.md](docs/generators.md) | Generating worlds in pieces: layers, things, rules | Writing or changing a world generator |
+| [.claude/skills/lead/SKILL.md](.claude/skills/lead/SKILL.md) | The lead role: driving changes to main through delegated work and PRs | Only when the user asks for it (`/lead`) |
 
 Each concept has one home:
 build/test commands live in `package.json` scripts,
