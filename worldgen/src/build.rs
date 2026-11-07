@@ -11,6 +11,7 @@ use crate::generator::{
 };
 use crate::grid::Box3;
 use crate::noise::Rng;
+use crate::points::{Points, Spot};
 
 impl Field {
     /** A kind, with a medium's extinction if it is one, at each site: `at(x, y, z, spacing)`, lattice units. */
@@ -94,6 +95,15 @@ impl Population {
      */
     pub fn anchor_along(self, axis: usize, anchor: impl Fn(&Line) -> Option<Point> + 'static) -> Population {
         Population { anchor: Anchors::Lines { axis, anchor: Box::new(anchor) }, ..self }
+    }
+
+    /**
+     * A thing at each of `points`, anchored where `anchor` lifts it to
+     * along the axes they don't span (onto a ground); its cells are their
+     * leaves, and its cell's `mark` the point's.
+     */
+    pub fn anchor_points(self, points: std::rc::Rc<Points>, anchor: impl Fn(&Spot) -> Option<Point> + 'static) -> Population {
+        Population { cell: points.leaf, anchor: Anchors::Points { points, anchor: Box::new(anchor) }, ..self }
     }
 
     /** The thing at an anchor, of a cell, if it has one. */

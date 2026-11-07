@@ -17,6 +17,7 @@ use worldgen::js::{self, round};
 use worldgen::kinds;
 use worldgen::noise::{Fbm, Fx, Rng, ValueNoise, fx, hash, hash64, smoothstep, stream, unit};
 use worldgen::plan::Plan;
+use worldgen::points::{Blur, MARKS, Points, Weights};
 use worldgen::units::{UNIT_SIZE, Units, m};
 
 use crate::path::Path;
@@ -97,6 +98,15 @@ pub fn make_tree(species: Species, x: f64, ground: f64, z: f64, random: &mut Rng
         Species::Spruce => spruce_tree(x, ground, z, random, ground_at),
         Species::Birch => birch_tree(x, ground, z, random),
         Species::Oak => oak_tree(x, ground, z, random, ground_at),
+    }
+}
+
+/** Each species' bark. */
+fn bark_of(species: Species) -> K {
+    match species {
+        Species::Spruce => K::spruceBark,
+        Species::Birch => K::birchBark,
+        Species::Oak => K::bark,
     }
 }
 
@@ -257,7 +267,7 @@ impl Forest {
         line.pick(&mut Rng::new(hash64(self.s(19), line.n, i, k)), |x, z| self.ground(x, z))
     }
 
-    /** The chance a cell of trees around column (x, z) has one. */
+    /** The chance a square 4 m wide around column (x, z) holds a tree. */
     fn tree_chance(&self, x: i64, z: i64, c: &Column) -> Fx {
         if c.surface == K::stone || self.ground.path.by(x, z, Fx::m(2.8)) {
             return Fx::ZERO;
@@ -274,6 +284,13 @@ impl Forest {
     fn species_chances(c: &Column) -> [Fx; 3] {
         let broad = Fx::ONE - c.conifer;
         [c.conifer, broad * 45 / 100, broad - broad * 45 / 100]
+    }
+
+    /** By species, the chance a square 2 m wide around column (x, z) holds a tree of it. */
+    fn leaf_chances(&self, x: i64, z: i64) -> [Fx; 3] {
+        let c = self.column(x, z);
+        let chance = self.tree_chance(x, z, &c) / 4;
+        Forest::species_chances(&c).map(|sp| chance * sp)
     }
 }
 
@@ -294,8 +311,19 @@ struct Measured {
     slabs: [Vec<f64>; 3],
     /** The share of a tree's shadow from above each slab adds. */
     above: [Vec<f64>; 3],
-    /** A tree's shadow from above over each column around its foot's (lattice units²), by offset (x, z). */
-    spread: Vec<([i64; 2], [f64; 3])>,
+    /** The share of each slab's sites that are wood. */
+    wood: [Vec<f64>; 3],
+    /** A tree's shadow from above (lattice units²). */
+    shadow: [f64; 3],
+    /** The trees standing in a column, by species: a quarter of those of each of the four cells it meets. */
+    own: Blur,
+    /**
+     * How densely the crowns of the trees around hide a column from above, as an area. A crown covers a
+     * share f of it (Shadows::spread) and leaves 1 − f open, so trees together leave the product: as dense
+     * as −ln(1 − f) each, not f, which would leave more open under them (from above at level 4, 0.02 to
+     * 0.05 less canopy than level 0 at two seeds).
+     */
+    over: Blur,
 }
 
 /** The forest of `seed`. */
@@ -339,14 +367,23 @@ pub fn layers(seed: u64, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
         })
     };
 
-    // Trees, each in the cell its foot is in.
-    let tree_cell = vox(2.0) as i64;
+    // Trees, at the trees' points (worldgen's Points), of their marks' species: leaves 2 m wide, each holding one
+    // by its share of tree_chance, a square 4 m wide's; roots 8 m wide, as wide as the chances follow.
+    let tree_leaf = vox(2.0) as i64;
     let tree_top = vox(26.0) as i64;
-    // What each slab of each species' trees adds to their shadow, and where around their feet they hide
-    // what from above, measured from samples drawn at level 2 (the canopy's from level 4 on), by spacing.
+    let points = {
+        let f = f.clone();
+        Rc::new(Points::new("trees", f.s(20), &[0, 2], tree_leaf, vox(8.0) as i64, 3, move |[x, _, z]| {
+            let [spruce, birch, oak] = f.leaf_chances(x, z);
+            [spruce, birch, oak, Fx::ZERO]
+        }))
+    };
+    // What each slab of each species' trees adds to their shadow, and where around their cells they hide what
+    // from above, measured from samples drawn at level 2 (the canopy's from level 4 on), by spacing.
     let sample_seed = f.s(17);
     let shadows = Rc::new(OnceCell::new());
     let measured = Rc::new(RefCell::new(HashMap::<i64, Rc<Measured>>::new()));
+    let blurred = points.clone();
     let measured_at = move |spacing: i64| {
         measured
             .borrow_mut()
@@ -366,65 +403,66 @@ pub fn layers(seed: u64, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
                     })
                 };
                 let slabs = slabs_of(&|s, from, to| s.slab(from, to));
+                let wood = slabs_of(&|s, from, to| s.share(from, to, |kind| KINDS[kind as usize].kind_type == 4));
                 let above: [Vec<f64>; 3] = slabs_of(&|s, from, to| s.across(from, to));
                 let above = above.map(|slabs| {
                     let sum: f64 = slabs.iter().sum();
                     slabs.iter().map(|s| s / sum).collect()
                 });
-                let mut spread = std::collections::BTreeMap::<[i64; 2], [f64; 3]>::new();
-                for (sp, shadow) in shadows.iter().enumerate() {
-                    for ([x, _, z], area) in shadow.footprint(spacing) {
-                        spread.entry([x, z]).or_default()[sp] += area;
+                let (mut shadow, mut dense) = ([0.0; 3], std::collections::BTreeMap::<[i64; 2], Weights>::new());
+                let column = (spacing * spacing) as f64;
+                for (sp, shadows) in shadows.iter().enumerate() {
+                    for ([x, _, z], area) in shadows.spread(spacing) {
+                        shadow[sp] += area;
+                        dense.entry([x, z]).or_default()[sp] = -js::log(1.0 - (area / column).min(0.99)) * column;
                     }
                 }
-                Rc::new(Measured { slabs, above, spread: spread.into_iter().collect() })
+                let feet = [[-1, -1], [-1, 0], [0, -1], [0, 0]].map(|o| (o, [0.25; MARKS])).to_vec();
+                let (own, over) =
+                    (Blur::new(blurred.clone(), spacing, feet), Blur::new(blurred.clone(), spacing, dense.into_iter().collect()));
+                Rc::new(Measured { slabs, above, wood, shadow, own, over })
             })
             .clone()
     };
-    // The chance of a tree of each species in a column's cell, for the canopy over the columns around. A plan,
-    // read where asked: read dithered, as the canopy reads its own column, every column would read the land
-    // around it anew (in the learned town at level 4, 25 times as often).
-    let chances = {
-        let f = f.clone();
-        Rc::new(Plan::new("forest's trees", COLUMN_SCALE, move |x, z| {
-            let c = f.column(x, z);
-            Forest::species_chances(&c).map(|sp| f.tree_chance(x, z, &c) * sp)
-        }))
-    };
-    // A medium as dense as the trees' area per volume over each column, the trees standing in it. Where the
-    // crowns reaching over it from around hide more from above than that (over a clearing, a path, a street),
-    // it hides the rest too, slab by slab as they do. Not their whole medium spread around: denser from above
+    // A medium as dense as the trees standing in each column, their area per volume. Where the crowns of the
+    // trees around reaching over it hide more from above than that (over a clearing, a path, a street), it
+    // hides the rest too, slab by slab as they do. Not their whole medium spread around: denser from above
     // than the trees ("Media are isotropic" in docs/generators.md), it filled the gaps among them (from above
     // at level 4, 0.14 apart in the forest).
     let canopy = {
-        let f = f.clone();
+        let (f, points) = (f.clone(), points.clone());
         Field::columns("canopy", 1.0, Op::Fill, move |x, z, spacing| {
             let measured = measured_at(spacing);
-            let Measured { slabs, above, spread } = &*measured;
-            // The chance of a tree of each species in the column's cell, and the area the trees of the cells
-            // around hide from above over the column, by those chances.
-            let c = f.column(x, z);
-            let own = Forest::species_chances(&c).map(|sp| f.tree_chance(x, z, &c).to_f64() * sp.to_f64());
-            let mut over = [0.0; 3];
-            for ([dx, dz], areas) in spread {
-                // Its own as read above, so that from level 6, where its trees' whole shadow falls on its own
-                // column, it hides as much as before.
-                let around = if [*dx, *dz] == [0, 0] { own } else { chances.at(x - dx, z - dz).map(Fx::to_f64) };
-                (0..3).for_each(|sp| over[sp] += areas[sp] * around[sp]);
-            }
+            let Measured { slabs, above, wood, shadow, own, over } = &*measured;
+            // The trees standing in the column, by species, and how densely their crowns hide it from above.
+            let (own, over): ([f64; 3], [f64; 3]) = if spacing < points.root {
+                let (own, over) = (own.at([x, z]), over.at([x, z]));
+                ([own[0], own[1], own[2]], [over[0], over[1], over[2]])
+            } else {
+                // As wide as the roots, a cell's count costs a Poisson draw and a corner, and wider the corners of
+                // its roots, sites of finer levels only: the trees expected over the column, by the chances at its site.
+                let (chances, leaves) = (f.leaf_chances(x, z), ((spacing / tree_leaf) as f64).powi(2));
+                let own = [0, 1, 2].map(|sp| chances[sp].to_f64() * leaves);
+                (own, [0, 1, 2].map(|sp| own[sp] * shadow[sp]))
+            };
             let hidden: f64 = over.iter().sum();
             if hidden == 0.0 {
                 return Vec::new();
             }
             let rest = (hidden - (0..3).map(|sp| own[sp] * slabs[sp].iter().sum::<f64>()).sum::<f64>()).max(0.0);
-            let per_area = 1.0 / ((2 * tree_cell) * (2 * tree_cell)) as f64;
-            // Of a species picked by how much their crowns hide from above.
-            let kind = k(foliage(pick_species(Fx::fraction(hash(f.s(18), x, z, 0)), &over.map(|o| fx(o / hidden)))));
+            let per_area = 1.0 / (spacing * spacing) as f64;
+            // Of a species picked by how much their crowns hide from above, each slab its bark as often as the
+            // sites of its trees' slab are wood, and its foliage else.
+            let species = pick_species(Fx::fraction(hash(f.s(18), x, z, 0)), &over.map(|o| fx(o / hidden)));
+            let sp = SPECIES.iter().position(|s| *s == species).expect("a species");
+            let height = f.column(x, z).height;
             let mut spans = Vec::new();
             for (i, from) in (0..tree_top).step_by(spacing as usize).enumerate() {
                 let shadow = (0..3).fold(0.0, |sum, sp| sum + own[sp] * slabs[sp][i] + rest * over[sp] / hidden * above[sp][i]);
                 if shadow > 0.0 {
-                    let (from, to) = (c.height + from, c.height + from + spacing);
+                    let (from, to) = (height + from, height + from + spacing);
+                    let bark = unit(hash(f.s(21), x, i as i64, z)) < wood[sp][i];
+                    let kind = k(if bark { bark_of(species) } else { foliage(species) });
                     spans.push(Span { from, to, kind, extinction: Some(per_area * shadow / spacing as f64) });
                 }
             }
@@ -432,21 +470,15 @@ pub fn layers(seed: u64, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
         })
     };
     let trees = {
-        let (f, anchor) = (f.clone(), f.clone());
-        Population::new("trees", 1.0, tree_cell)
+        let (f, ground) = (f.clone(), f.clone());
+        Population::new("trees", 1.0, tree_leaf)
             .reach([vox(9.0) as i64, tree_top, vox(9.0) as i64])
             .size(vox(1.0) as i64)
-            .anchor_along(1, move |line| Some(anchor.spot(line)))
-            .make(move |[x, y, z], cell| {
-                let mut random = cell.random("tree");
-                let (xi, zi) = (x as i64, z as i64);
-                let c = f.column(xi, zi);
-                if !random.chance(f.tree_chance(xi, zi, &c)) {
-                    return None;
-                }
-                let species = pick_species(Fx::fraction(random.next_u32()), &Forest::species_chances(&c));
-                Some(make_tree(species, x, y, z, &mut random, &|x, z| f.ground(x, z)))
+            .anchor_points(points, move |spot| {
+                let [x, _, z] = spot.at;
+                Some([x as f64, ground.ground(x, z) as f64, z as f64])
             })
+            .make(move |[x, y, z], cell| Some(make_tree(SPECIES[cell.mark], x, y, z, &mut cell.random("tree"), &|x, z| f.ground(x, z))))
             .far(canopy)
     };
 

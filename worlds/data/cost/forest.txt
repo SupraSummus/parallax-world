@@ -1,62 +1,66 @@
 # forest (seed 42): work by tile and layer (worldgen::cost)
 place        level     cells     owned     nodes     tests  measured     reads   lookups     plans   largest layer
-spawn            0       361        89       103   1200366         0         0       744         0    239483 trees
+spawn            0       361        70       154   2192719         0         0       535         0    361524 trees
 spawn            0        49        14         1      8602         0         0        49         0      8602 boulders
 spawn            0       121        33         1       210         0         0       148         0       210 logs
 spawn            0       121       121        60     28613         0         0      7865         0      1917 plants
 spawn            0         0         0         0         0         0     16384     98304         0         0 terrain
-spawn            0         0         0         0         0         0         0         0       314         0 plan path
-spawn            0         0         0         0         0         0         0     28456     28456         0 plan ground
-spawn            0         0         0         0         0         0         0    130485     20106         0 plan forest columns
-spawn            2      1849       480      1338    476624         0         0      3853         0      7309 trees
+spawn            0         0         0         0         0         0         0         0       321         0 plan path
+spawn            0         0         0         0         0         0         0     30117     30117         0 plan ground
+spawn            0         0         0         0         0         0         0    132619     20460         0 plan forest columns
+spawn            0         0         0         0         0         0         0      1174       489         0 plan trees
+spawn            2      1849       272      1195    503194         0         0      1973         0      9157 trees
 spawn            2       361        90         5       662         0         0       361         0       210 boulders
 spawn            2       529       134         4      2044         0         0       634         0      1395 logs
 spawn            2         0         0         0         0         0     16384     98304         0         0 terrain
-spawn            2         0         0         0         0         0         0         0       732         0 plan path
-spawn            2         0         0         0         0         0         0     87447     87447         0 plan ground
-spawn            2         0         0         0         0         0         0    103344     16860         0 plan forest columns
+spawn            2         0         0         0         0         0         0         0       722         0 plan path
+spawn            2         0         0         0         0         0         0     91550     91550         0 plan ground
+spawn            2         0         0         0         0         0         0    109190     17816         0 plan forest columns
+spawn            2         0         0         0         0         0         0      4675      2121         0 plan trees
 spawn            4      4624      1181       170      2010         0         0      4624         0        96 boulders
 spawn            4      5184      1321        93      5126         0         0      6289         0       158 logs
 spawn            4         0         0         0         0         0     16384     98304         0         0 terrain
 spawn            4         0         0      1640    619650         0         0         0         0         0 shadows
-spawn            4         0         0         0         0         0     16384    673718         0         0 trees
-spawn            4         0         0         0         0         0         0         0      2215         0 plan path
-spawn            4         0         0         0         0         0         0     97257     97257         0 plan ground
-spawn            4         0         0         0         0         0         0    108808     18057         0 plan forest columns
-spawn            4         0         0         0         0         0         0     74822     17945         0 plan forest's trees
+spawn            4         0         0         0         0         0     16384     80290         0         0 trees
+spawn            4         0         0         0         0         0         0         0      2226         0 plan path
+spawn            4         0         0         0         0         0         0    108397    108397         0 plan ground
+spawn            4         0         0         0         0         0         0    122272     20281         0 plan forest columns
+spawn            4         0         0         0         0         0         0     46647     22668         0 plan trees
 spawn            6         0         0         0         0         0     16384     98304         0         0 terrain
 spawn            6         0         0      1640    619650         0         0         0         0         0 shadows
-spawn            6         0         0         0         0         0     16384     66079         0         0 trees
+spawn            6         0         0         0         0         0     16384     49306         0         0 trees
 spawn            6         0         0         0         0         0         0         0       480         0 plan path
 spawn            6         0         0         0         0         0         0     82432     82432         0 plan ground
 spawn            6         0         0         0         0         0         0     98362     16384         0 plan forest columns
-region1          0       361        99       153   2350077         0         0       847         0    295189 trees
+region1          0       361        75       162   3210824         0         0       580         0    347107 trees
 region1          0        49        10         1     24786         0         0        49         0     24786 boulders
 region1          0       121        29         1     22187         0         0       138         0     22187 logs
 region1          0       121       121        63     23462         0         0      7865         0      2662 plants
 region1          0         0         0         0         0         0     16384     98304         0         0 terrain
-region1          0         0         0         0         0         0         0         0       313         0 plan path
-region1          0         0         0         0         0         0         0     28527     28527         0 plan ground
-region1          0         0         0         0         0         0         0    120687     20109         0 plan forest columns
-region1          2      1849       475      1045    755944         0         0      4358         0      8702 trees
+region1          0         0         0         0         0         0         0         0       321         0 plan path
+region1          0         0         0         0         0         0         0     30207     30207         0 plan ground
+region1          0         0         0         0         0         0         0    122943     20470         0 plan forest columns
+region1          0         0         0         0         0         0         0      1141       489         0 plan trees
+region1          2      1849       349      1181    730921         0         0      2644         0      8544 trees
 region1          2       361        96        18      3564         0         0       361         0       392 boulders
 region1          2       529       139        10      2015         0         0       696         0       502 logs
 region1          2         0         0         0         0         0     16384     98304         0         0 terrain
-region1          2         0         0         0         0         0         0         0       731         0 plan path
-region1          2         0         0         0         0         0         0     88029     88029         0 plan ground
-region1          2         0         0         0         0         0         0    101258     16865         0 plan forest columns
+region1          2         0         0         0         0         0         0         0       736         0 plan path
+region1          2         0         0         0         0         0         0     92354     92354         0 plan ground
+region1          2         0         0         0         0         0         0    107598     17886         0 plan forest columns
+region1          2         0         0         0         0         0         0      4637      2121         0 plan trees
 region1          4      4624      1199       168      1772         0         0      4624         0        96 boulders
 region1          4      5184      1330        91      4550         0         0      6296         0       127 logs
 region1          4         0         0         0         0         0     16384     98304         0         0 terrain
 region1          4         0         0      1640    619650         0         0         0         0         0 shadows
-region1          4         0         0         0         0         0     16384    673307         0         0 trees
-region1          4         0         0         0         0         0         0         0      2208         0 plan path
-region1          4         0         0         0         0         0         0     97172     97172         0 plan ground
-region1          4         0         0         0         0         0         0    108797     18061         0 plan forest columns
-region1          4         0         0         0         0         0         0     74435     17945         0 plan forest's trees
+region1          4         0         0         0         0         0     16384     80247         0         0 trees
+region1          4         0         0         0         0         0         0         0      2221         0 plan path
+region1          4         0         0         0         0         0         0    108312    108312         0 plan ground
+region1          4         0         0         0         0         0         0    122318     20285         0 plan forest columns
+region1          4         0         0         0         0         0         0     46613     22668         0 plan trees
 region1          6         0         0         0         0         0     16384     98304         0         0 terrain
 region1          6         0         0      1640    619650         0         0         0         0         0 shadows
-region1          6         0         0         0         0         0     16384     66232         0         0 trees
+region1          6         0         0         0         0         0     16384     49326         0         0 trees
 region1          6         0         0         0         0         0         0         0       505         0 plan path
 region1          6         0         0         0         0         0         0     82432     82432         0 plan ground
 region1          6         0         0         0         0         0         0     98404     16384         0 plan forest columns

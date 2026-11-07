@@ -15,8 +15,7 @@ const SEEDS: &[u64] = &[REGIONS_SEED, 1, 2, 3];
  * world, seed and the place they are around: checked apart, they must
  * still break, so the list only shrinks; each is planned work in
  * docs/todo.md. Empty now, but a change that moves a place can land on
- * a seed where it breaks (the windmills' clearings from above at level
- * 4 vary by seed: "The canopy is the trees expected" there).
+ * a seed where it breaks.
  */
 const KNOWN_BREAKS: &[(&str, u64, &str)] = &[];
 

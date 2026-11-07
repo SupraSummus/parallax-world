@@ -199,25 +199,15 @@ Numbers are for the forest at 1280×800, as measured when written.
   where the trees thin out to the treeline,
   came 0.10 to 0.15 apart at level 4, in materials hit and from above:
   leaves in place of trunks and of the slope's scree and rock.
-- **The canopy is the trees expected, not those that stand.**
-  Far away the forest is a medium as dense as its trees on average
-  ("Populations" in "Levels" of `docs/generators.md`),
-  and a clearing's edge holds few of them:
-  from above at level 4, the valley's first windmill came 0.02 to 0.13 apart
-  over 16 seeds, with more canopy than level 0 or less,
-  0.1 or more at two seeds the contract doesn't check;
-  seed 3, which it checks, keeps it narrowly
-  (materials hit 0.096 at level 4 against 2, canopy for bark).
-  The canopy reading fewer columns around
-  (not the farthest of 38 at level 4, 5 % of the crowns' shadow)
-  would spare level 4 tiles 10 to 35 ms,
-  but broke a checked seed's windmill when tried, before landmarks were claimed.
-  Its sails, sheets a site thick, add 0.02 to 0.03 there.
-  A plan of the trees, which the population anchors from and the canopy reads
-  ("Fields can't see things" in `docs/generators.md`),
-  would draw those that stand,
-  at levels 4 and 5 at least
-  (from level 6 a column's own trees' shadow covers its site).
+- **From level 6 the canopy is the trees expected.**
+  There a column is as wide as a root of the trees' `Points`,
+  whose count costs a Poisson draw and a corner's chances:
+  read so, the forest's tiles at level 6 took half as long again;
+  wider, a cell costs its roots' corners, sites the level's tiles don't read
+  (`docs/generators.md`, "Points").
+  So the canopy there is the chances at each column, not the trees that stand.
+  A plan of the chances filtered to a level's spacing
+  would let roots be wider than the chances vary over.
 - **The highest massifs end in broad rounded domes of snow.**
   Behind the crest the high country is one smooth noise,
   and wherever it stands over the snowline, all of it is snow.
@@ -234,6 +224,12 @@ Numbers are for the forest at 1280×800, as measured when written.
   `mountains.rs` turns its noise by 37° (`turned`),
   which leaves its four-fold harmonic mostly on the diagonals;
   22.6°, (12, 5)/13, would leave none there.
+- **The valley's first town barely keeps the contract at level 4**
+  (seed 42, materials hit against level 2: 0.099 of 0.1).
+  Its houses' plaster walls at level 2 show as fields at level 4,
+  0.065 of it, so any change to what stands near the town can tip it.
+  Houses measured as their walls' share, not drawn whole, would fix it
+  (the town tiles over the budget below).
 - **The valley's town tiles are over the budget at levels 4 and 6**
   (`OVER_BUDGET` in `worlds/tests/cost.rs`; `worlds/examples/cost.rs` shows why):
   most of it is drawing the houses whole to measure them;
@@ -324,12 +320,16 @@ Numbers are for the forest at 1280×800, as measured when written.
 
 Composing generators (section "Composing" of `docs/generators.md`), untried:
 
+- More populations at `Points`, their far forms from what stands:
+  the forest's boulders, logs and plants, the valley's haystacks.
 - Bid per quantity: a land per channel (use, ground, wetness),
   each domain bidding in those it cares about, as the towns' terrace needs.
 - Place the houses as things of their own, from the plan of lots,
   not as children of one thing per town:
   a box in a town now draws the whole town's carves aside, in a buffer
   as large as the box, where each house's would do.
+  Counted as `Points` by kind, they could be drawn far away from their counts,
+  not each drawn whole to be measured (the town tiles over the budget).
 - Let the framework filter plans of numbers finer than the level's sites
   (`Plan::sampled` at the spacing), since plans declare their scale:
   coarse levels would skip fine bands' cost as they skip their things.
