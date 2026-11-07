@@ -93,6 +93,17 @@ A spinner shows while a world generates.
   and along stretches of the valley kilometres apart:
   heather, grass and bog, pools in hollows, boulders,
   and steadings of a drystone hut and a ring of standing stones.
+  Landmarks standing alone: a ruined keep on a hilltop, a watchtower,
+  wayside chapels, ponds, farmsteads and windmills.
+  Mountain ranges along both sides: crests, peaks and passes,
+  side valleys, meadows and scree above the treeline, snow on the peaks.
+  Generated like the forest.
+- *Moor*: the valley's moorland alone: rolling heath, a stream and pools,
+  boulders, and steadings with a path of cairns between hut and ring.
+  Generated like the forest.
+- *Learned*: the forest, with settlements along its path
+  drawn by a split grammar learned from the valley's towns
+  (`lab/`), not written.
   Generated like the forest.
 - *City*: a district of a few blocks,
   for checking flat walls, thin frames and openings:
