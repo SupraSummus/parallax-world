@@ -76,3 +76,8 @@ jobs:
       # Only Cargo, which the runner has.
       - name: Test the valley's contract
         run: cargo test --release --manifest-path worlds/Cargo.toml --test contract keeps_the_contract::valley
+
+      # lab/ is no part of pnpm check, but on worldgen's and worlds' API:
+      # built here, so a change to them that breaks it shows.
+      - name: Build the lab
+        run: cargo build --release --all-targets --manifest-path lab/Cargo.toml
