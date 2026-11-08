@@ -227,14 +227,27 @@ impl VoxelGrid {
         }
     }
 
-    /** How light sees site (x, y, z): of ALPHA how much it stops, face `kind`'s material, its glow. */
+    /** How light sees site (x, y, z): of ALPHA how much it stops, face `kind`'s material (0 if it stops nothing), its glow. */
     pub fn light(&self, x: i64, y: i64, z: i64, kind: usize) -> (u8, u8, [u32; 3]) {
         match self.slot(x, y, z) {
             Some(Ok(i)) => {
-                let material = self.faces.get(&i).map_or(self.seen[i], |faces| faces[kind]);
-                (self.alpha[i], material, self.glow.get(&i).copied().unwrap_or_default())
+                let glow = if self.glow.is_empty() { [0; 3] } else { self.glow.get(&i).copied().unwrap_or_default() };
+                if self.alpha[i] == 0 {
+                    return (0, 0, glow);
+                }
+                let material =
+                    if self.faces.is_empty() { self.seen[i] } else { self.faces.get(&i).map_or(self.seen[i], |faces| faces[kind]) };
+                (self.alpha[i], material, glow)
             }
             _ => (0, 0, [0; 3]),
+        }
+    }
+
+    /** Of ALPHA, how much of the rays through site (x, y, z) it stops. */
+    pub fn alpha(&self, x: i64, y: i64, z: i64) -> u8 {
+        match self.slot(x, y, z) {
+            Some(Ok(i)) => self.alpha[i],
+            _ => 0,
         }
     }
 

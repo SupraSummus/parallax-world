@@ -275,15 +275,19 @@ Numbers are for the forest at 1280×800, as measured when written.
   so light from low over the horizon is too weak or too strong.
   Native's bakers each light what they show with a `Light` of their own
   (a generator is not `Send`):
-  they share tiles (`Grids`) with the world's threads,
-  but each finds the coarse levels' light again
-  and makes a generator, whose plans' caches take tens of MB.
-  Lit, the first chunks wait for the coarsest levels' tiles,
-  which the renderer does not read.
+  they share tiles and the light found (`Shared`)
+  with each other and the world's threads,
+  but each makes a generator, whose plans' caches take tens of MB.
+  Lit, the world's threads make each level's tiles near the camera first,
+  the coarsest's before all,
+  but a tile of the coarsest levels takes several times a fine one's work
+  (the plans over its whole area),
+  so the first chunks come seconds later than unlit.
   The sun is one of the 12 directions.
   `light::around` reads the nearest site and its 12 neighbours,
   so near a corner where six voxels meet it misses one within its reach,
-  and light jumps a little there.
+  and light jumps a little there;
+  every site within reach would leak light through walls one site thick.
 - **Light sees each site's alpha and glow (`VoxelGrid`), a prototype**:
   - a site shows a voxel where a hash is under its alpha (`VoxelGrid::show`),
     till splats show the alpha itself, measured houses' walls come out ragged;
