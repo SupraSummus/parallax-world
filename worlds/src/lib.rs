@@ -12,6 +12,7 @@ pub mod moor;
 pub mod mountains;
 pub mod path;
 pub mod railway;
+pub mod scene;
 pub mod town;
 pub mod valley;
 pub mod wasm;
@@ -126,9 +127,26 @@ pub const WORLDS: &[Entry] = &[
         from_above: 3,
         far: &[Region::at("spawn", [-478, -20, -32], [482, 108, 928])],
     },
+    // All of Sponza's atrium, from its middle: floor, colonnades, galleries, the roof's edge (scene.rs).
+    #[cfg(feature = "sponza")]
+    Entry {
+        name: "sponza",
+        make: sponza,
+        regions: &[Region::at("spawn", [-242, -46, -150], [242, 160, 150])],
+        levels: 5,
+        from_above: 4,
+        far: &[],
+    },
 ];
 
 /** The world named `name`. */
 pub fn by_name(name: &str) -> Option<&'static Entry> {
     WORLDS.iter().find(|e| e.name == name)
+}
+
+/** Crytek's Sponza at twice its size (docs/generators.md, "Scenes"); the same at every seed. */
+#[cfg(feature = "sponza")]
+fn sponza(_seed: u64) -> World {
+    // The eye 1.75 m over its floor, which is a metre over its lowest point (a drain's), both scaled.
+    scene::Scene::read(include_bytes!("../data/scenes/sponza.bin")).world(2.0 * 2.75)
 }

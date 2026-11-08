@@ -18,3 +18,5 @@ lab/target
 lab/out
 # Agents' git worktrees
 .claude/worktrees
+# Scenes made elsewhere, voxelized (scripts/voxelize.py): their licences keep them out
+worlds/data/scenes

@@ -320,6 +320,9 @@ Numbers are for the forest at 1280×800, as measured when written.
 
 ## Ideas
 
+- More scenes (`worlds/src/scene.rs`): Bistro, San Miguel.
+  Not tried in them: walking, on walls a site thick.
+  Lit (`--light 1,1,0`), Sponza's atrium is all but black; not looked into.
 - Light along more directions at coarser levels, as radiance cascades do:
   near, light wants fine places and few directions; far, coarse places and many.
   Light keeps 12 at every level, too few far off (a lamp's lobes, blurred shadows).
