@@ -271,8 +271,16 @@ Numbers are for the forest at 1280×800, as measured when written.
   from a curve its banks would move where it bends, so it is left as it is.
 - **Light is a prototype, in look's pictures and native's `--light`**
   (`worldgen/src/light.rs`); the web does not light its tiles.
-  Light comes along the 12 neighbours' directions,
-  so light from low over the horizon is too weak or too strong.
+  Light comes along the 12 neighbours' directions only,
+  and each level takes one step (`STEPS`) before the coarser one takes over.
+  Against the reference (`light/reference.rs`, test `against_the_reference`;
+  the ignored test `maps` draws the scenes from above):
+  a lamp lights the ground in four lobes, along the upward directions,
+  and up to ten times too little right under it;
+  a roof shades as much as it should only along the lattice,
+  twice too little turned 45°;
+  a wall's shadow in the sun is short and blotchy,
+  as the levels that carry it get coarser.
   Native's bakers each light what they show with a `Light` of their own
   (a generator is not `Send`):
   they share tiles and the light found (`Shared`)
@@ -298,14 +306,23 @@ Numbers are for the forest at 1280×800, as measured when written.
   - a lamp glows from one site at each level:
     further off, that site may be as low as the ground's,
     its light comes flat, and none falls on the ground;
-    two or three steps a level, not one,
-    would read each level only where its sites are small next to the distance;
+    two or three steps a level (`STEPS`), not one,
+    would read each level only where its sites are small next to the distance,
+    but against the reference they sharpen the wall's shadow
+    and leave less light under the roofs and right under the lamp:
+    the coarser levels' blur no longer hides how few the directions are.
+    Or it is that light is only passed straight on:
+    what enters a site by one face leaves only by the opposite one,
+    where what it reflects and scatters would leave by the others too;
   - things in a site add up as if apart, and alpha has 255 steps,
     so at the coarsest levels a lamp stops nothing;
   - generating costs more, lit or not: every covered site is put for light.
 
 ## Ideas
 
+- Light along more directions at coarser levels, as radiance cascades do:
+  near, light wants fine places and few directions; far, coarse places and many.
+  Light keeps 12 at every level, too few far off (a lamp's lobes, blurred shadows).
 - Splats that show alpha (`VoxelGrid`'s, now one coin per site):
   a chunk keeps a column's voxels till their alpha adds up to whole,
   and splats that overlap in a slice may add up to an opaque one,

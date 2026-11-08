@@ -3,12 +3,11 @@
 //! the voxels they show (bake's light.rs).
 //!
 //! Light comes to a site from its 12 neighbours' directions: from the
-//! neighbour one step along each, and past it from the next coarser
-//! level's light. The neighbour sends what it glows, and of what it
-//! stops (its alpha) its colour times the light on it, also from the
-//! coarser level; the rest of what comes from past it gets through. So
-//! each level's light comes from coarser ones only, the coarsest's from
-//! the sky.
+//! next STEPS sites along each, and past them from the next coarser
+//! level's light. Each sends what it glows, and of what it stops (its
+//! alpha) its colour times the light on it, also from the coarser level;
+//! the rest of what comes from past it gets through. So each level's
+//! light comes from coarser ones only, the coarsest's from the sky.
 //!
 //! The grids say how light sees each site, whether a voxel is shown there
 //! or not (VoxelGrid's `alpha`, `seen`, `glow`): a coarse site a small
@@ -34,8 +33,12 @@ const N: usize = 12;
 /** The directions light comes along: towards the neighbours, through the voxel's faces. */
 const DIRECTIONS: [[i64; 3]; N] = FACES;
 
-/** At the coarsest level, steps along a direction before the sky's light takes over; at the others, one before the coarser level's does. */
+/** Steps along a direction before the coarser level's light takes over; at the coarsest, before the sky's does. */
+const STEPS: usize = 1;
 const TOP_STEPS: usize = 64;
+/** Where `near` reads the coarser level's light: past the steps along each direction (the first N), and where each step starts, for the light on what it meets (`on_place`; every first step's at the centre). */
+const ON_PLACES: usize = 1 + N * (STEPS - 1);
+const PLACES: usize = N + ON_PLACES;
 /** Sites per tile in x and z, at each level, as native's; a tile spans the heights. */
 pub const TILE: i64 = 128;
 /** Sites whose light a level keeps, in PARTS parts, each locked and forgotten on its own. */
@@ -151,6 +154,12 @@ impl Hasher for Fast {
 
 type Map<K, V> = HashMap<K, V, BuildHasherDefault<Fast>>;
 
+/** The coarser level's light, as `along` takes it: per direction, from past its steps, and on the face towards the site of what each step meets. */
+struct Near {
+    past: [Rgb; N],
+    on: [[Rgb; STEPS]; N],
+}
+
 /** A level's voxels, generated in tiles as they are needed. */
 struct Level {
     heights: (i64, i64),
@@ -192,13 +201,7 @@ impl Light {
             weights.map(|w| (w / total) as f32)
         });
         let enters = DIRECTIONS.map(|d| DIRECTIONS.iter().position(|f| *f == d.map(|c| -c)).expect("faces come in pairs"));
-        let materials = materials_of(&world.generator);
-        // Light adds up in linear terms; colours are sRGB.
-        let colour = |m: &crate::generator::Material| {
-            let rgb = m.rgb();
-            [16, 8, 0].map(|shift| srgb_to_linear(((rgb >> shift) & 255) as f32 / 255.0))
-        };
-        let albedo = materials.iter().map(colour).collect();
+        let albedo = albedo(&world.generator);
         let sun_at = DIRECTIONS.iter().position(|d| *d == SUN_DIRECTION).expect("the sun is in one of them");
         let skies = std::array::from_fn(|d| {
             let up = unit[d][1];
@@ -261,73 +264,59 @@ impl Light {
         level.last.as_ref().expect("held").1.get().expect("made")
     }
 
-    /**
-     * The light coming to site `p` of level `i` from every direction:
-     * past the neighbour, the coarser level's light (`near`), or at the
-     * coarsest the sky (`march`).
-     */
+    /** The light coming to site `p` of level `i` from every direction (`along`). */
     fn light(&mut self, i: usize, p: [i64; 3]) -> [Rgb; N] {
         if let Some(light) = self.shared.found(i, p) {
             return light;
         }
-        let light = if i + 1 == self.levels.len() { std::array::from_fn(|d| self.march(i, p, d)) } else { self.passed_on(i, p) };
+        let near = (i + 1 < self.levels.len()).then(|| self.near(i + 1, p));
+        let light = std::array::from_fn(|d| self.along(i, p, d, near.as_ref()));
         self.shared.keep(i, p, light);
         light
     }
 
-    /** The light coming to `p` (a site of level `i`, not the coarsest) from each direction: from its neighbour that way, and past it. */
-    fn passed_on(&mut self, i: usize, p: [i64; 3]) -> [Rgb; N] {
-        let (on, past) = self.near(i + 1, p);
-        let heights = self.levels[i].heights;
-        std::array::from_fn(|d| {
-            let (v, q) = (DIRECTIONS[d], add(p, DIRECTIONS[d]));
-            let (alpha, colour, glow) = self.see(i, q, self.enters[d]);
-            // Above every voxel and not going down, or below them and not going up, nothing more is met.
-            let beyond = if q[1] > heights.1 && v[1] >= 0 {
-                self.sky[d]
-            } else if q[1] < heights.0 - 1 && v[1] <= 0 {
-                [0.0; 3]
-            } else {
-                past[d]
-            };
-            // Of what it stops, its colour times the light on its face towards p.
-            let on_it = if alpha > 0.0 { self.on_face(&on, self.enters[d]) } else { [0.0; 3] };
-            std::array::from_fn(|c| glow[c] + alpha * colour[c] * on_it[c] + (1.0 - alpha) * beyond[c])
-        })
-    }
-
-    /** The light coming to `p` (a site of the coarsest level) from direction `d`, marching TOP_STEPS to the sky. */
-    fn march(&mut self, i: usize, p: [i64; 3], d: usize) -> Rgb {
+    /**
+     * The light coming to `p`, a site of level `i`, from direction `d`:
+     * from the next STEPS sites that way, each sending what it glows and,
+     * of what it stops, its colour times the light on it; past them, the
+     * coarser level's light (`near`). At the coarsest level (no `near`),
+     * from the next TOP_STEPS, and past them the sky.
+     */
+    fn along(&mut self, i: usize, p: [i64; 3], d: usize, near: Option<&Near>) -> Rgb {
         let (v, heights) = (DIRECTIONS[d], self.levels[i].heights);
         // What has come so far, and how much of what comes from further on gets through.
         let (mut sum, mut through) = ([0.0f32; 3], 1.0f32);
         let mut q = p;
-        for _ in 0..TOP_STEPS {
+        for step in 0..if near.is_some() { STEPS } else { TOP_STEPS } {
             q = add(q, v);
-            let (alpha, _, glow) = self.see(i, q, self.enters[d]);
-            (0..3).for_each(|c| sum[c] += through * glow[c]);
+            let (alpha, colour, glow) = self.see(i, q, self.enters[d]);
+            let on = match near {
+                Some(near) if alpha > 0.0 => near.on[d][step],
+                _ => [0.0; 3],
+            };
+            (0..3).for_each(|c| sum[c] += through * (glow[c] + alpha * colour[c] * on[c]));
             through *= 1.0 - alpha;
+            // Nothing more gets through, or nothing more is met: below every voxel and not going up, or above them and not going down.
             if through < 1.0 / ALPHA as f32 || q[1] < heights.0 - 1 && v[1] <= 0 {
                 return sum;
             }
             if q[1] > heights.1 && v[1] >= 0 {
-                break;
+                return std::array::from_fn(|c| sum[c] + through * self.sky[d][c]);
             }
         }
-        let sky = if v[1] >= 0 { self.sky[d] } else { [0.0; 3] };
-        std::array::from_fn(|c| sum[c] + through * sky[c])
+        let beyond = match near {
+            Some(near) => near.past[d],
+            None if v[1] >= 0 => self.sky[d],
+            None => [0.0; 3],
+        };
+        std::array::from_fn(|c| sum[c] + through * beyond[c])
     }
 
-    /**
-     * The light at the sites of level `i` around `p`, a site of level
-     * `i − 1`, each weighed by how much light it lets in (`around`):
-     * all of it at p's centre, and each direction's where p's neighbour
-     * that way ends.
-     */
-    fn near(&mut self, i: usize, p: [i64; 3]) -> ([Rgb; N], [Rgb; N]) {
+    /** The coarser level's light around `p`, a site of level `i − 1`, at the places `along` takes it from (`around`), each site weighed by how much light it lets in. */
+    fn near(&mut self, i: usize, p: [i64; 3]) -> Near {
         let (class, base) = class(p);
-        let (mut on, mut on_total) = ([[0.0f32; 3]; N], 0.0f32);
-        let (mut past, mut past_total) = ([[0.0f32; 3]; N], [0.0f32; N]);
+        let (mut past, mut on) = ([[0.0f32; 3]; N], [[[0.0f32; 3]; N]; ON_PLACES]);
+        let mut totals = [0.0f32; PLACES];
         for (offset, weights) in &around()[class] {
             let site = add(base, *offset);
             let open = self.open(i, site);
@@ -335,19 +324,25 @@ impl Light {
                 continue;
             }
             let light = self.light(i, site);
-            let w = weights[N] * open;
-            on_total += w;
-            for (sum, l) in on.iter_mut().zip(&light) {
-                (0..3).for_each(|c| sum[c] += w * l[c]);
-            }
             for d in 0..N {
                 let w = weights[d] * open;
-                past_total[d] += w;
+                totals[d] += w;
                 (0..3).for_each(|c| past[d][c] += w * light[d][c]);
+            }
+            for (k, sums) in on.iter_mut().enumerate() {
+                let w = weights[N + k] * open;
+                totals[N + k] += w;
+                for (sum, l) in sums.iter_mut().zip(&light) {
+                    (0..3).for_each(|c| sum[c] += w * l[c]);
+                }
             }
         }
         let mean = |sum: Rgb, total: f32| if total > 0.0 { sum.map(|c| c / total) } else { sum };
-        (on.map(|sum| mean(sum, on_total)), std::array::from_fn(|d| mean(past[d], past_total[d])))
+        let on: [[Rgb; N]; ON_PLACES] = std::array::from_fn(|k| on[k].map(|sum| mean(sum, totals[N + k])));
+        Near {
+            past: std::array::from_fn(|d| mean(past[d], totals[d])),
+            on: std::array::from_fn(|d| std::array::from_fn(|step| self.on_face(&on[on_place(d, step)], self.enters[d]))),
+        }
     }
 
     /** Over π, the light on face `f` from `light`: its mean over the directions it faces, weighed by their cosines. */
@@ -452,12 +447,15 @@ impl Light {
 
 /**
  * The coarser level's sites `near` reads, as offsets from the base of a
- * site's class, and their weights at the centre (the last) and a quarter
- * step along each direction: at each place, the nearest site and its
- * neighbours, 1.5 less the distance. Any further would leak light through
- * walls one site thick.
+ * site's class, and their weights at each of its PLACES: at each place, the
+ * nearest site and its neighbours, 1.5 less the distance. Any further
+ * would leak light through walls one site thick.
  */
-type Around = Vec<([i64; 3], [f32; N + 1])>;
+type Around = Vec<([i64; 3], [f32; PLACES])>;
+
+fn on_place(d: usize, step: usize) -> usize {
+    if step == 0 { 0 } else { 1 + d * (STEPS - 1) + step - 1 }
+}
 
 /** A site's class, of the 8 that the sites around its centre come in (`around`), and the base they are from: half of it, rounded down. */
 fn class(p: [i64; 3]) -> (usize, [i64; 3]) {
@@ -476,9 +474,15 @@ fn around() -> &'static [Around; 8] {
             let p = [2 * b + (c & 1), c >> 1, ((c & 1) + (c >> 1)) & 1];
             let base = [b, 0, 0];
             assert_eq!(self::class(p), (class, base));
-            let centre = half(p);
-            let at: [[f64; 3]; N + 1] =
-                std::array::from_fn(|d| if d == N { centre } else { std::array::from_fn(|k| centre[k] + DIRECTIONS[d][k] as f64 / 4.0) });
+            // From the centre, along each direction: where the coarser level's voxels begin as the last step's ends, and the middle of where each step starts.
+            let from_centre = |d: usize, along: f64| std::array::from_fn(|c| p[c] as f64 / 2.0 + along * DIRECTIONS[d][c] as f64);
+            let mut at = [[0.0; 3]; PLACES];
+            for d in 0..N {
+                at[d] = from_centre(d, (2 * STEPS - 1) as f64 / 4.0);
+                for step in 0..STEPS {
+                    at[N + on_place(d, step)] = from_centre(d, step as f64 / 2.0);
+                }
+            }
             let mut sites = BTreeMap::new();
             for (k, x) in at.iter().enumerate() {
                 let nearest = nearest_site(*x);
@@ -487,7 +491,7 @@ fn around() -> &'static [Around; 8] {
                     let weight = 1.5 - dot(r, r).sqrt();
                     if weight > 0.0 {
                         let offset = [0, 1, 2].map(|c| site[c] - base[c]);
-                        sites.entry(offset).or_insert([0.0; N + 1])[k] = weight as f32;
+                        sites.entry(offset).or_insert([0.0; PLACES])[k] = weight as f32;
                     }
                 }
             }
@@ -496,14 +500,15 @@ fn around() -> &'static [Around; 8] {
     })
 }
 
+/** Per material id: its colour as a share of the light on it, linear, as light adds up; colours are sRGB. */
+fn albedo(generator: &Generator) -> Vec<Rgb> {
+    let linear = |rgb: u32| [16, 8, 0].map(|shift| srgb_to_linear(((rgb >> shift) & 255) as f32 / 255.0));
+    materials_of(generator).iter().map(|m| linear(m.rgb())).collect()
+}
+
 /** Tile `key`'s box, `heights` tall. */
 fn tile_box(heights: (i64, i64), key: (i64, i64)) -> Box3 {
     Box3 { min: [key.0 * TILE, heights.0, key.1 * TILE], max: [(key.0 + 1) * TILE, heights.1, (key.1 + 1) * TILE] }
-}
-
-/** Where a site of one level is in the next coarser's units. */
-fn half(p: [i64; 3]) -> [f64; 3] {
-    p.map(|c| c as f64 / 2.0)
 }
 
 fn add(a: [i64; 3], b: [i64; 3]) -> [i64; 3] {
@@ -524,16 +529,18 @@ fn normalize(v: [f64; 3]) -> [f64; 3] {
 }
 
 #[cfg(test)]
+mod reference;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::generator::{Field, Generator, KindDef, Layer, Node, Op, Population, SOLID, cuboid};
+    use bake::light::colour;
 
     const STONE: u8 = 0;
     const LAMP_KIND: u8 = 1;
     /** Lamps are cubes 4 units wide, as the towns' are: many sites, its glow on those inside. */
     const LAMP: f64 = 4.0;
-    /** A lamp's mean shadow: its area over four. */
-    const LAMP_SHADOW: f64 = 6.0 * LAMP * LAMP / 4.0;
 
     /**
      * Stone where `stone(x, y, z, spacing)` says, and white lamps at
@@ -560,19 +567,6 @@ mod tests {
     fn ground(x: i64, z: i64) -> [i64; 3] {
         assert!((x + z) % 2 != 0, "({x}, {z}) is not on top");
         [x, -1, z]
-    }
-
-    #[test]
-    fn the_sky_lights_open_ground_and_a_roof_shades_it() {
-        let world = world(&[], |x, y, z, s| y < 0 || x.abs() <= 64 && z.abs() <= 64 && (24..24 + 2 * s).contains(&y));
-        let mut light = Light::new(world, Shared::new(Brightness { sky: 1.0, sun: 0.0, glow: 0.0 }));
-        let open = light.on_voxel(0, ground(401, 400));
-        let under = light.on_voxel(0, ground(1, 0));
-        for c in 0..3 {
-            assert!((open[c] / SKY[c] - 1.0).abs() < 0.1, "open ground {open:?}, the sky {SKY:?}");
-        }
-        // Under the middle of the roof, a sky between its edge and the horizon: an eighth of open ground's, the ground's light besides.
-        assert!(under[1] < 0.3 * open[1], "under the roof {under:?}, open {open:?}");
     }
 
     #[test]
@@ -627,20 +621,187 @@ mod tests {
         assert!(side(1) > 100.0 * side(-1), "towards the lamp {}, away {}", side(1), side(-1));
     }
 
-    #[test]
-    fn a_lamp_lights_the_ground_as_the_square_of_its_distance() {
-        let height = 24.0;
-        let world = world(&[[0.0, height, 0.0]], |_, y, _, _| y < 0);
-        let mut light = Light::new(world, Shared::new(Brightness { sky: 0.0, sun: 0.0, glow: 1.0 }));
-        let mut ratios = Vec::new();
-        for (x, z) in [(9, 0), (16, 7), (33, 0)] {
-            let d = [x as f64, height + 1.0, z as f64];
-            let d2 = dot(d, d);
-            let expected = GLOW as f64 * LAMP_SHADOW * (d[1] / d2.sqrt()) / (std::f64::consts::PI * d2);
-            ratios.push(light.on_voxel(0, ground(x, z))[0] as f64 / expected);
+    /** A scene to hold Light to the reference: its world, how bright, the ground sites to probe, rays per face, and the bound on Light's error there. */
+    struct Scene {
+        name: String,
+        world: World,
+        brightness: Brightness,
+        probes: Vec<[i64; 3]>,
+        samples: u64,
+        bound: f64,
+    }
+
+    fn scenes() -> Vec<Scene> {
+        let day = Brightness { sky: 1.0, sun: 1.0, glow: 0.0 };
+        let sky = Brightness { sky: 1.0, sun: 0.0, glow: 0.0 };
+        let night = Brightness { sky: 0.0, sun: 0.0, glow: 1.0 };
+        let scene =
+            |name: &str, world, brightness, probes, samples, bound| Scene { name: name.into(), world, brightness, probes, samples, bound };
+        let mut scenes = vec![
+            scene("open ground", world(&[], |_, y, _, _| y < 0), sky, vec![ground(1, 0)], 4096, 0.1),
+            scene(
+                "wall, sun",
+                world(&[], |x, y, z, s| y < 0 || (0..2 * s).contains(&x) && y < 32 && z.abs() < 96),
+                day,
+                [-9, -1, 3, 17, 29, 41].map(|x| ground(x, 0)).to_vec(),
+                4096,
+                0.25,
+            ),
+            scene(
+                "lamp",
+                world(&[[0.0, 24.0, 0.0]], |_, y, _, _| y < 0),
+                night,
+                vec![ground(1, 0), ground(16, 7), ground(33, 0)],
+                1 << 16,
+                1.6,
+            ),
+        ];
+        // A roof 2 sites thick and 128 units wide at y = 24, turned about y, probed across it: the same light at every turn.
+        for (turn, bound) in [(0.0, 0.35), (22.5, 0.35), (45.0, 0.55)] {
+            let (sin, cos) = f64::to_radians(turn).sin_cos();
+            let roof = world(&[], move |x, y, z, s| {
+                let (u, v) = (cos * x as f64 + sin * z as f64, cos * z as f64 - sin * x as f64);
+                y < 0 || u.abs() <= 64.0 && v.abs() <= 64.0 && (24..24 + 2 * s).contains(&y)
+            });
+            let probes = [0.0, 40.0, 56.0, 72.0, 96.0].map(|d: f64| ground_near(d * cos, d * sin)).to_vec();
+            scenes.push(scene(&format!("roof turned {turn}°"), roof, sky, probes, 4096, bound));
         }
-        // Light from low over the horizon is seen along the nearest of the 12 directions, which may be flatter; further
-        // off, the lamp is in a site as low as the ground's, its light comes flat, and none falls on it (docs/todo.md).
-        assert!(ratios.iter().all(|r| (0.2..1.6).contains(r)), "measured over expected by distance {ratios:?}");
+        scenes
+    }
+
+    /** The ground site nearest (x, z). */
+    fn ground_near(x: f64, z: f64) -> [i64; 3] {
+        let (x, z) = (x.round() as i64, z.round() as i64);
+        ground(x + (x + z + 1).rem_euclid(2), z)
+    }
+
+    /** What the open faces of the voxel at `site` (level 0) send out by Light, on average. */
+    fn lit(light: &mut Light, site: [i64; 3]) -> Rgb {
+        let open: Vec<usize> = (0..N).filter(|&f| !light.shown(0, add(site, FACES[f]))).collect();
+        let faces = light.faces(0, site);
+        std::array::from_fn(|c| open.iter().map(|&f| faces[f][c]).sum::<f32>() / open.len().max(1) as f32)
+    }
+
+    /** Where the reference's light at the scenes' probes is kept (`reference_values`), as lines of scene, site, light and its standard error. */
+    const VALUES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/data/light-reference.txt");
+
+    fn line(name: &str, [x, y, z]: [i64; 3]) -> String {
+        format!("{name}; {x} {y} {z}")
+    }
+
+    /** The reference's light at each scene's probes, written to VALUES: run by hand when the scenes change, as it takes a while. */
+    #[test]
+    #[ignore]
+    fn reference_values() {
+        let mut lines = String::new();
+        for Scene { name, world, brightness, probes, samples, .. } in scenes() {
+            let reference = reference::Reference::new(&world, brightness);
+            for site in probes {
+                let (light, error) = reference.voxel(site, samples);
+                let [r, g, b] = light;
+                lines += &format!("{}; {r} {g} {b}; {error}\n", line(&name, site));
+            }
+        }
+        std::fs::write(VALUES, lines).expect("written");
+    }
+
+    /**
+     * Light against the reference (reference.rs, as `reference_values`
+     * kept it), scene by scene: how far off the light from each probe's
+     * open faces is, as the root mean square of ln(light / reference)
+     * over the probes. The bounds are Light's errors as they were; lower
+     * one as Light gets closer. `-- --nocapture` prints each probe.
+     */
+    #[test]
+    fn against_the_reference() {
+        let kept = std::fs::read_to_string(VALUES).expect("the reference's values: run reference_values");
+        let value = |name: &str, site| {
+            let key = line(name, site);
+            let found = kept
+                .lines()
+                .find_map(|l| l.strip_prefix(&key)?.strip_prefix("; "))
+                .unwrap_or_else(|| panic!("{key}: run reference_values"));
+            let [light, error] = [0, 1].map(|k| found.split("; ").nth(k).expect("light; error"));
+            (light.split(' ').map(|v| v.parse::<f32>().expect("a number")).sum::<f32>(), error.parse::<f32>().expect("a number"))
+        };
+        let mut over = Vec::new();
+        for Scene { name, world, brightness, probes, bound, .. } in scenes() {
+            let mut light = Light::new(world, Shared::new(brightness));
+            let mut squares = 0.0;
+            for &site in &probes {
+                let (m, (r, error)) = (lit(&mut light, site).iter().sum::<f32>(), value(&name, site));
+                println!("{name}, {site:?}: light {m:.4}, reference {r:.4} ± {error:.4}, light / reference {:.2}", m / r);
+                squares += ((m / r) as f64).ln().powi(2);
+            }
+            let rms = (squares / probes.len() as f64).sqrt();
+            println!("{name}: Light is off by {rms:.2} (ln), at most {bound}");
+            if rms > bound {
+                over.push(name);
+            }
+        }
+        assert!(over.is_empty(), "Light is further off than it was in {over:?}");
+    }
+
+    /**
+     * Maps of the ground around each scene, from above, as PNGs in the
+     * directory OUT: Light's, the reference's (a sixty-fourth of the rays,
+     * kept in OUT for the next run) and where Light is brighter (red) or
+     * darker (blue), up to e^1.5 times.
+     * Run by hand: OUT=dir cargo test --release maps -- --ignored
+     */
+    #[test]
+    #[ignore]
+    fn maps() {
+        const HALF: i64 = 96;
+        let out = std::env::var("OUT").expect("OUT, a directory");
+        let (w, scale, gap) = (HALF as usize, 4, 4);
+        for Scene { name, world, brightness, samples, .. } in scenes() {
+            let file = format!("{out}/{}", name.replace([' ', ',', '°'], ""));
+            let sites: Vec<[i64; 3]> =
+                (0..w * w).map(|k| ground_near(2.0 * (k % w) as f64 - HALF as f64, HALF as f64 - 2.0 * (k / w) as f64)).collect();
+            let kept: Vec<f32> = std::fs::read(format!("{file}.reference"))
+                .unwrap_or_default()
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|b| f32::from_le_bytes(*b))
+                .collect();
+            let references: Vec<Rgb> = if kept.len() == 3 * sites.len() {
+                kept.as_chunks::<3>().0.to_vec()
+            } else {
+                let reference = reference::Reference::new(&world, brightness);
+                let found: Vec<Rgb> = sites.iter().map(|&site| reference.voxel(site, samples / 64).0).collect();
+                std::fs::write(format!("{file}.reference"), found.iter().flatten().flat_map(|v| v.to_le_bytes()).collect::<Vec<u8>>())
+                    .expect("kept");
+                found
+            };
+            let mut light = Light::new(world, Shared::new(brightness));
+            let lights: Vec<Rgb> = sites.iter().map(|&site| lit(&mut light, site)).collect();
+            // Exposed so that the reference's brightest tenth is white.
+            let mut sums: Vec<f32> = references.iter().map(|r| r.iter().sum()).collect();
+            sums.sort_by(f32::total_cmp);
+            let exposure = 3.0 / sums[sums.len() * 9 / 10].max(1e-9);
+            let shown = |l: Rgb| colour(l.map(|c| c * exposure)).to_le_bytes();
+            let off = |m: Rgb, r: Rgb| {
+                let ratio = (m.iter().sum::<f32>() / r.iter().sum::<f32>()).ln();
+                let ratio = if ratio.is_nan() { 0.0 } else { ratio.clamp(-1.5, 1.5) / 1.5 };
+                let pale = (255.0 * (1.0 - ratio.abs())) as u8;
+                if ratio > 0.0 { [255, pale, pale, 255] } else { [pale, pale, 255, 255] }
+            };
+            let width = 3 * w + 2 * gap;
+            let mut rgb = vec![255; width * w * 3];
+            for (k, (&m, &r)) in lights.iter().zip(&references).enumerate() {
+                for (panel, pixel) in [shown(m), shown(r), off(m, r)].into_iter().enumerate() {
+                    let at = 3 * ((k / w) * width + panel * (w + gap) + k % w);
+                    rgb[at..at + 3].copy_from_slice(&pixel[..3]);
+                }
+            }
+            let rgb = (0..w * scale)
+                .flat_map(|y| (0..width * scale).flat_map(move |x| [0, 1, 2].map(|c| ((y / scale) * width + x / scale) * 3 + c)))
+                .map(|at| rgb[at])
+                .collect();
+            let picture = Picture { width: width * scale, height: w * scale, rgb, ..Picture::default() };
+            std::fs::write(format!("{file}.png"), picture.png()).expect("written");
+        }
     }
 }

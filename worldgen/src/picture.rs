@@ -114,6 +114,7 @@ impl Camera {
 }
 
 /** A picture, row by row from the top: colours, and what each pixel's ray hit and how far away. */
+#[derive(Default)]
 pub struct Picture {
     pub width: usize,
     pub height: usize,
@@ -275,15 +276,20 @@ impl Tiles {
  * of the face it enters by.
  */
 pub(crate) fn first_voxel(grid: &VoxelGrid, origin: [f64; 3], direction: [f64; 3], end: f64) -> Option<(f64, u8)> {
+    first_hit(grid, origin, direction, end).map(|(t, [x, y, z], face)| (t, grid.face(x, y, z, face)))
+}
+
+/** As `first_voxel`, but the voxel's site and the face it enters by. */
+pub(crate) fn first_hit(grid: &VoxelGrid, origin: [f64; 3], direction: [f64; 3], end: f64) -> Option<(f64, [i64; 3], usize)> {
     let mut ray = Ray { pixel: 0, origin, direction, t: 0.0, end, site: nearest_site(origin), face: FACES.len() };
     let walk = Walk::new(direction);
     let mut planes = walk.planes(&ray);
     while ray.t <= end {
         let [x, y, z] = ray.site;
-        match grid.face(x, y, z, entered(&ray)) {
-            0 => walk.cross(&mut ray, &mut planes),
-            id => return Some((ray.t, id)),
+        if grid.get(x, y, z) != 0 {
+            return Some((ray.t, ray.site, entered(&ray)));
         }
+        walk.cross(&mut ray, &mut planes);
     }
     None
 }
