@@ -8,7 +8,9 @@
 //! finds them made. Tiles far from the camera are dropped. A tile never
 //! changes, so a chunk baked once all the tiles it reads are in stays right
 //! whatever comes after (bake's Tiles). Lit, the tiles are those the
-//! bakers' Lights read (worldgen's Grids), made once.
+//! bakers' Lights read (worldgen's Shared), made once, and the light reads
+//! every level coarser than a voxel's: the tiles near the camera come
+//! first, the coarsest's before all.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -18,7 +20,7 @@ use bake::slicing::{GRID_LEVELS, GRID_REACH};
 use bake::{Grid, LayerIndex, Tiles};
 use worldgen::generator::generate;
 use worldgen::grid::{Box3, compose};
-use worldgen::light::Grids;
+use worldgen::light::Shared;
 
 use crate::view::Vec3;
 
@@ -89,6 +91,8 @@ type Made = (usize, TileId, Tile);
 
 pub struct World {
     tiles: Vec<HashMap<TileId, Arc<Tile>>>,
+    /** Whether the bakers light what they show, reading every level coarser than theirs. */
+    lit: bool,
     queue: Arc<(Mutex<Queue>, Condvar)>,
     done: Receiver<Made>,
     /** Received by wait(), not taken yet. */
@@ -112,7 +116,20 @@ fn distance(level: usize, camera: Vec3, (i, k): TileId) -> f64 {
     off(camera[0], i).hypot(off(camera[2], k))
 }
 
-fn work(make: Make, seed: u64, grids: Option<Grids>, heights: &Heights, queue: &(Mutex<Queue>, Condvar), send: &Sender<Made>) {
+/** The tiles of `level` within `reach` of the camera (lattice units) in the level's sites, nearest first. */
+fn around(level: usize, camera: Vec3, reach: f64) -> Vec<(f64, TileId)> {
+    let tile = |v: f64| (v / (1u64 << level) as f64 / TILE as f64).floor() as i32;
+    let (ci, ck, r) = (tile(camera[0]), tile(camera[2]), (reach / TILE as f64).ceil() as i32);
+    let mut around: Vec<(f64, TileId)> = (ck - r..=ck + r)
+        .flat_map(|k| (ci - r..=ci + r).map(move |i| (i, k)))
+        .map(|id| (distance(level, camera, id), id))
+        .filter(|(d, _)| *d <= reach)
+        .collect();
+    around.sort_by(|a, b| a.0.total_cmp(&b.0));
+    around
+}
+
+fn work(make: Make, seed: u64, shared: Option<Shared>, heights: &Heights, queue: &(Mutex<Queue>, Condvar), send: &Sender<Made>) {
     // Made on the thread: a generator is not Send.
     let generator = make(seed).generator;
     loop {
@@ -126,8 +143,8 @@ fn work(make: Make, seed: u64, grids: Option<Grids>, heights: &Heights, queue: &
                 q = queue.1.wait(q).expect("queue");
             }
         };
-        let grid = match &grids {
-            Some(grids) => grids.tile(&generator, level as u32, heights[level], (id.0 as i64, id.1 as i64)),
+        let grid = match &shared {
+            Some(shared) => shared.tile(&generator, level as u32, heights[level], (id.0 as i64, id.1 as i64)),
             None => generate(&generator, &tile_box(heights, level, id), level as u32),
         }
         .into_grid();
@@ -139,17 +156,17 @@ fn work(make: Make, seed: u64, grids: Option<Grids>, heights: &Heights, queue: &
 }
 
 impl World {
-    /** The world `make` makes of `seed`, generated (into `grids` if given) and indexed on `threads` threads. */
-    pub fn new(make: Make, seed: u64, grids: Option<Grids>, threads: usize) -> World {
+    /** The world `make` makes of `seed`, generated (into `shared` if given) and indexed on `threads` threads. */
+    pub fn new(make: Make, seed: u64, shared: Option<Shared>, threads: usize) -> World {
         let world = make(seed);
         let heights = heights(&world);
         let (send, done) = channel();
         let queue: Arc<(Mutex<Queue>, Condvar)> = Arc::default();
         for _ in 0..threads {
-            let (queue, send, grids) = (queue.clone(), send.clone(), grids.clone());
-            std::thread::spawn(move || work(make, seed, grids, &heights, &queue, &send));
+            let (queue, send, shared) = (queue.clone(), send.clone(), shared.clone());
+            std::thread::spawn(move || work(make, seed, shared, &heights, &queue, &send));
         }
-        World { tiles: (0..GRID_LEVELS).map(|_| HashMap::new()).collect(), queue, done, early: Vec::new() }
+        World { tiles: (0..GRID_LEVELS).map(|_| HashMap::new()).collect(), lit: shared.is_some(), queue, done, early: Vec::new() }
     }
 
     /** Makes no more tiles but those being made. */
@@ -202,21 +219,26 @@ impl World {
                 list.push_back((level, id));
             }
         };
+        // Lit, every voxel's light comes from each coarser level's around it (worldgen's light.rs): the tiles of every
+        // level near the camera first, the coarsest's, which take longest, before all; then those of the levels coarser
+        // than any read as far as the coarsest read reaches, at their sites' size.
+        let coarsest = (0..GRID_LEVELS).rev().find(|&l| levels[l]);
+        let reach_of = |level: usize| match coarsest {
+            Some(c) if self.lit && level > c => Some(reach / (1u64 << (level - c)) as f64),
+            _ => levels[level].then_some(reach),
+        };
+        if self.lit {
+            for level in (0..GRID_LEVELS).rev() {
+                for (_, id) in around(level, camera, TILE as f64 / 2.0) {
+                    add(&self.tiles[level], level, id);
+                }
+            }
+        }
         for &(level, id) in wanted {
             add(&self.tiles[level], level, id);
         }
-        for level in (0..GRID_LEVELS).filter(|&l| levels[l]) {
-            let n = (1u64 << level) as f64;
-            let tile = |v: f64| (v / n / TILE as f64).floor() as i32;
-            let r = (reach / TILE as f64).ceil() as i32;
-            let (ci, ck) = (tile(camera[0]), tile(camera[2]));
-            let mut around: Vec<(f64, TileId)> = (ck - r..=ck + r)
-                .flat_map(|k| (ci - r..=ci + r).map(move |i| (i, k)))
-                .map(|id| (distance(level, camera, id), id))
-                .filter(|(d, _)| *d <= reach)
-                .collect();
-            around.sort_by(|a, b| a.0.total_cmp(&b.0));
-            for (_, id) in around {
+        for level in 0..GRID_LEVELS {
+            for (_, id) in reach_of(level).map(|r| around(level, camera, r)).unwrap_or_default() {
                 add(&self.tiles[level], level, id);
             }
         }
