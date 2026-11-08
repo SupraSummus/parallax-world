@@ -510,7 +510,8 @@ and turning, found only in the cells the face crosses or holds
 The native renderer runs `Coverage` on a thread of its own
 (`native/src/occlusion.rs`), over what each render saw:
 every baked chunk in view is drawn, its GPU culling hiding what is covered,
-and coverage only decides which cells are baked and have their tiles made.
+and coverage only decides which cells are baked and have their tiles made,
+so a pass covers a face's layers only as far as the farthest cell that asks.
 A cell coming into view waits for the next pass, a frame or two.
 
 The `Compositor` draws a frame onto one opaque WebGL 2 canvas:
