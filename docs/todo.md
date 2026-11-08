@@ -272,7 +272,8 @@ Numbers are for the forest at 1280×800, as measured when written.
 - **Light is a prototype, in look's pictures and native's `--light`**
   (`worldgen/src/light.rs`); the web does not light its tiles.
   Light comes along the 12 neighbours' directions only,
-  and each level takes one step (`STEPS`) before the coarser one takes over.
+  and each level takes one step (`STEPS`) before the coarser one takes over,
+  or more where the coarser fills what it leaves empty.
   Against the reference (`light/reference.rs`, test `against_the_reference`;
   the ignored test `maps` draws the scenes from above):
   a lamp lights the ground in four lobes, along the upward directions,
@@ -280,7 +281,14 @@ Numbers are for the forest at 1280×800, as measured when written.
   a roof shades as much as it should only along the lattice,
   twice too little turned 45°;
   a wall's shadow in the sun is short and blotchy,
-  as the levels that carry it get coarser.
+  as the levels that carry it get coarser;
+  past a door from a yard, where only bounced light comes,
+  a room is several times too bright, and the yard a third as bright.
+  A coarse site holding part of a door (as `Far::measured` draws one)
+  lets light through in every direction alike:
+  drawn so, the yard's door made the room tens of times too bright.
+  A window smaller than the coarser levels' sites lets no sky in at all
+  (they close the room), so a room lit by its windows is black.
   Native's bakers each light what they show with a `Light` of their own
   (a generator is not `Send`):
   they share tiles and the light found (`Shared`)
@@ -292,7 +300,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   (the plans over its whole area),
   so the first chunks come seconds later than unlit.
   The sun is one of the 12 directions.
-  `light::around` reads the nearest site and its 12 neighbours,
+  `Light::coarser` reads the nearest site and its 12 neighbours,
   so near a corner where six voxels meet it misses one within its reach,
   and light jumps a little there;
   every site within reach would leak light through walls one site thick.
@@ -311,9 +319,12 @@ Numbers are for the forest at 1280×800, as measured when written.
     but against the reference they sharpen the wall's shadow
     and leave less light under the roofs and right under the lamp:
     the coarser levels' blur no longer hides how few the directions are.
-    Or it is that light is only passed straight on:
-    what enters a site by one face leaves only by the opposite one,
-    where what it reflects and scatters would leave by the others too;
+    Light entering a site by each of the five faces it crosses
+    (weighed as `cosines`), not by one,
+    did better on the flat scenes with four or five steps,
+    but darkened the valley, as its side lines ran into uneven ground,
+    did not help the yard, and cost 2.5 to 4 times the time;
+    mixing each direction's light into its neighbours' blurred more every level;
   - things in a site add up as if apart, and alpha has 255 steps,
     so at the coarsest levels a lamp stops nothing;
   - generating costs more, lit or not: every covered site is put for light.
