@@ -152,6 +152,16 @@ Numbers are for the forest at 1280×800, as measured when written.
   nor would clipping without allocating in `shape`.
   Natively coverage runs on a thread of its own (`native/src/occlusion.rs`);
   the web could run it in a worker, a frame behind.
+- **Walking, native keeps more than a core busy**
+  (the valley, `--stroll 20 --on-ground`, outside the GPU driver):
+  new tiles take about 30 %, baking 20 %, its masks for coverage 20 %,
+  coverage 15 %, the main thread 15 %.
+  Most chunks baked are of new slices,
+  where layers cross from one level to the next; a third are empty.
+  In the valley coverage hardly pays (`--all-chunks` costs about the same);
+  in the city it bakes a quarter fewer chunks.
+  Natively a pass stops at the farthest cell that asks;
+  the web's can't, as it also picks the clusters to draw.
 - **The native compositor's buffers stop at the device's limit.**
   `Arena::grow` caps a buffer at what the device allows
   (128 MB of splats on lavapipe), and `allocate` then hands out room past it:
