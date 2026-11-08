@@ -617,12 +617,13 @@ so ground and what stands on it are different kinds,
 even of one colour (the moor's `heather` and `heatherSprigs`).
 A kind marked `glows` gives light of its colour, as lamps do
 (`worldgen/src/light.rs`, for now only in look and native's `--light`).
-Each glowing shape a level draws, near or far,
-or measured from its near form,
-puts its glow on the sites around its centre at that level
-(`VoxelGrid::glows`): a quarter of its area,
-whether or not a voxel is kept for it.
-So a level glows as much as level 0, as it hides as much.
+Light sees each site as much as what is in it stops rays,
+whether or not a voxel is kept there
+(`VoxelGrid`'s `alpha`, `seen` and `glow`):
+a thing's chance to be kept at a site is its share of it,
+and the site glows as its glowing things, in proportion to their shares.
+So a lamp too small to keep a coarse site's voxel
+is in it as a little glow, and stops a little light.
 A far form without its near form's lamps goes dark,
 as does a child too small to be drawn at a level (give lamps `ANY_SIZE`):
 lamps light what is far from them only from coarse levels.

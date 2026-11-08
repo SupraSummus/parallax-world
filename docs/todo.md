@@ -280,15 +280,29 @@ Numbers are for the forest at 1280×800, as measured when written.
   and makes a generator, whose plans' caches take tens of MB.
   Lit, the first chunks wait for the coarsest levels' tiles,
   which the renderer does not read.
-  Grids hold materials only, but for glow:
-  the generator shares each glowing shape's among the sites around it
-  (`glow_shares`), which is light's business;
-  handing over the shapes alone, light would share it,
-  reading the tiles around a site for the shapes near it.
   The sun is one of the 12 directions.
   `light::around` reads the nearest site and its 12 neighbours,
   so near a corner where six voxels meet it misses one within its reach,
-  and glow and light jump a little there.
+  and light jumps a little there.
+- **Light sees each site's alpha and glow (`VoxelGrid`), a prototype**:
+  - the voxels shown are kept by chance apart from it,
+    so a voxel shown may let most light through;
+    kept where a hash is under the alpha,
+    they would follow from it (measured things keep their most covered cells);
+  - a site's colour is its voxel's faces', or what is in it the most,
+    not the mean of what its faces see;
+    with that mean per face, `seen` would go;
+  - things drawn alone (measured, or carving) give light their voxels only,
+    and measured things are measured from fine voxels kept by chance,
+    so their small lamps come and go;
+  - a lamp glows from one site at each level:
+    further off, that site may be as low as the ground's,
+    its light comes flat, and none falls on the ground;
+    two or three steps a level, not one,
+    would read each level only where its sites are small next to the distance;
+  - things in a site add up as if apart, and alpha has 255 steps,
+    so at the coarsest levels a lamp stops nothing;
+  - generating costs more, lit or not: every covered site is put for light.
 
 ## Ideas
 

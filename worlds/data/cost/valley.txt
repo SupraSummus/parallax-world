@@ -36,7 +36,7 @@ spawn            2       361        93         4       522         0         0  
 spawn            2       529       137         3      1841         0         0       857         0         0      1494 logs
 spawn            2         9         1         0         0         0         0        20         0         0         0 towns
 spawn            2       196        58         0         0         0         0       256         0         0         0 haystacks
-spawn            2        81         1         2     21516     78416         0       157         0         0      1479 landmarks
+spawn            2        81         1         2     23749     78416         0       157         0         0      3712 landmarks
 spawn            2       196        50         0         0         0         0       296         0         0         0 moor boulders
 spawn            2        49         0         0         0         0         0        49         0         0         0 steadings
 spawn            2        49         0         0         0         0         0       196         0         0         0 stations
@@ -65,7 +65,7 @@ spawn            4      4624      1172       163      1632         0         0  
 spawn            4      5184      1311        98      5482         0         0      8932         0         0       158 logs
 spawn            4        16         1         0         0         0         0        34         0         0         0 towns
 spawn            4      2116       563         0         0         0         0      2681         0         0         0 haystacks
-spawn            4       441         1         2      2959     13328         0       549         0         0        27 landmarks
+spawn            4       441         1         2      3063     13328         0       549         0         0       131 landmarks
 spawn            4      2116       510         0         0         0         0      3136         0         0         0 moor boulders
 spawn            4       169         0         0         0         0         0       169         0         0         0 steadings
 spawn            4       361         0         0         0         0         0      1444         0         0         0 stations
@@ -93,7 +93,7 @@ spawn            4         0         0         0         0         0         0  
 spawn            4         0         0         0         0         0         0     19200     16384     16384         0 plan landmark spots
 spawn            4         0         0         0         0         0         0     91139     22668     20169         0 plan trees
 spawn            6        49         1         0         0         0         0        86         0         0         0 towns
-spawn            6      4761         5         7       918       880         0      5436         0         0       249 landmarks
+spawn            6      4761         5         7       929       880         0      5436         0         0       249 landmarks
 spawn            6     30625      7613        38        38         0         0     45927         0         0         1 moor boulders
 spawn            6      1369         0         0         0         0         0      1369         0         0         0 steadings
 spawn            6      4624         0         0         0         0         0     12240         0         0         0 stations
@@ -154,7 +154,7 @@ region1          0         0         0         0         0         0         0  
 region1          2      1849        93       722    214999         0         0       852         0         0      5935 trees
 region1          2       361        83         2       488         0         0       527         0         0       432 boulders
 region1          2       529       127         2       270         0         0       821         0         0       181 logs
-region1          2        12         1        39    521112   1041983         0        26         0         0     35719 towns
+region1          2        12         1        40    573460   1041983         0        26         0         0     88067 towns
 region1          2       182        38         0         0         0         0       256         0         0         0 haystacks
 region1          2        81         0         0         0         0         0       119         0         0         0 landmarks
 region1          2       182        47         0         0         0         0       276         0         0         0 moor boulders
@@ -183,12 +183,12 @@ region1          2         0         0         0         0         0         0  
 region1          2         0         0         0         0         0         0     26880     16384     16384         0 plan landmark spots
 region1          4      4624      1124        90       876         0         0      6872         0         0        48 boulders
 region1          4      5184      1278        38      1957         0         0      8215         0         0       102 logs
-region1          4        16         1       128    492909    930978         0        34         0         0      3897 towns
+region1          4        16         1       131    506542    930978         0        34         0         0     17530 towns
 region1          4      2116       538         7        14         0         0      2830         0         0         4 haystacks
-region1          4       441         1         2      2959     13328         0       596         0         0        27 landmarks
+region1          4       441         1         2      3063     13328         0       596         0         0       131 landmarks
 region1          4      2116       528         0         0         0         0      3172         0         0         0 moor boulders
 region1          4       169         0         0         0         0         0       169         0         0         0 steadings
-region1          4       361         1         2      5796     15640         0      1448         0         0        55 stations
+region1          4       361         1         2      6067     15640         0      1448         0         0       326 stations
 region1          4         0         0         0         0         0     16384     98304         0         0         0 terrain
 region1          4         0         0         0         0         0     16384     22500         0         0         0 streets
 region1          4         0         0         0         0         0     16384     16681         0         0         0 landmarks' ground
@@ -213,11 +213,11 @@ region1          4         0         0         0         0         0         0  
 region1          4         0         0         0         0         0         0     32768     16384     16384         0 plan town spots
 region1          4         0         0         0         0         0         0     21522     16384     16384         0 plan landmark spots
 region1          4         0         0         0         0         0         0     90942     22668     20169         0 plan trees
-region1          6        49         1       174     82948     81302         0       100         0         0       315 towns
-region1          6      4761        11        19      1622      3700         0      6146         0         0       247 landmarks
+region1          6        49         1       177     84524     81302         0       100         0         0      1891 towns
+region1          6      4761        11        19      1663      3700         0      6146         0         0       247 landmarks
 region1          6     30625      7636         6         6         0         0     45909         0         0         1 moor boulders
 region1          6      1369         0         0         0         0         0      1369         0         0         0 steadings
-region1          6      4624         1         2       371      1080         0     16460         0         0         1 stations
+region1          6      4624         1         2       386      1080         0     16460         0         0        16 stations
 region1          6         0         0         0         0         0     16384     98304         0         0         0 terrain
 region1          6         0         0         0         0         0     16384     16878         0         0         0 streets
 region1          6         0         0         0         0         0     16384     16575         0         0         0 landmarks' ground
@@ -277,7 +277,7 @@ region2          0         0         0         0         0         0         0  
 region2          2      1849         0         0         0         0         0         0         0         0         0 trees
 region2          2       361        84         0         0         0         0       529         0         0         0 boulders
 region2          2       529       131         0         0         0         0       791         0         0         0 logs
-region2          2         9         1        47    679576   1940322         0        20         0         0     51084 towns
+region2          2         9         1        49    747729   1940322         0        20         0         0    119237 towns
 region2          2       196        45         0         0         0         0       241         0         0         0 haystacks
 region2          2        81         0         0         0         0         0       117         0         0         0 landmarks
 region2          2       196        49         0         0         0         0       294         0         0         0 moor boulders
@@ -340,7 +340,7 @@ region3          2       361        99         7      1124         0         0  
 region3          2       529       142         1        54         0         0       870         0         0        54 logs
 region3          2         9         1         0         0         0         0        20         0         0         0 towns
 region3          2       196        60         0         0         0         0       286         0         0         0 haystacks
-region3          2        81         1         2     21516     78416         0       152         0         0      1479 landmarks
+region3          2        81         1         2     23749     78416         0       152         0         0      3712 landmarks
 region3          2       196        52         0         0         0         0       300         0         0         0 moor boulders
 region3          2        49         0         0         0         0         0        49         0         0         0 steadings
 region3          2        49         0         0         0         0         0       196         0         0         0 stations
@@ -399,9 +399,9 @@ region4          0         0         0         0         0         0         0  
 region4          2      1849       139       430    119727         0         0      1576         0         0      7684 trees
 region4          2       361        97         1       210         0         0       555         0         0       210 boulders
 region4          2       529       143         0         0         0         0       853         0         0         0 logs
-region4          2        12         1        20    313505    628016         0        26         0         0     21263 towns
+region4          2        12         1        20    345150    628016         0        26         0         0     52908 towns
 region4          2       169        41         1        75         0         0       238         0         0        75 haystacks
-region4          2        81         1         4     27194     93860         0       163         0         0      3670 landmarks
+region4          2        81         1         4     29248     93860         0       163         0         0      5724 landmarks
 region4          2       169        47         0         0         0         0       263         0         0         0 moor boulders
 region4          2        49         0         0         0         0         0        49         0         0         0 steadings
 region4          2        49         0         0         0         0         0       196         0         0         0 stations
@@ -428,9 +428,9 @@ region4          2         0         0         0         0         0         0  
 region4          2         0         0         0         0         0         0     32768     16384     16384         0 plan landmark spots
 region4          4      4624      1129       114      1126         0         0      6882         0         0        48 boulders
 region4          4      5184      1263        55      2810         0         0      8341         0         0       130 logs
-region4          4        16         1        61    177198    290647         0        34         0         0      1612 towns
+region4          4        16         1        62    182108    290647         0        34         0         0      6522 towns
 region4          4      2116       522         3         4         0         0      2770         0         0         2 haystacks
-region4          4       441         2         6      6933     28763         0       729         0         0       493 landmarks
+region4          4       441         2         6      7171     28763         0       729         0         0       601 landmarks
 region4          4      2116       526         0         0         0         0      3168         0         0         0 moor boulders
 region4          4       169         0         0         0         0         0       169         0         0         0 steadings
 region4          4       361         0         0         0         0         0      1444         0         0         0 stations
@@ -680,7 +680,7 @@ region6          4         0         0         0         0         0         0  
 region6          4         0         0         0         0         0         0     17783     16384     16384         0 plan landmark spots
 region6          4         0         0         0         0         0         0     91100     22668     20169         0 plan trees
 region6          6        49         0         0         0         0         0        91         0         0         0 towns
-region6          6      4761         3         5       442       968         0      5146         0         0       226 landmarks
+region6          6      4761         3         5       451       968         0      5146         0         0       226 landmarks
 region6          6     30625      7638       471       471         0         0     47178         0         0         1 moor boulders
 region6          6      1369         5        58        54         0         0      1833         0         0        15 steadings
 region6          6      4624         0         0         0         0         0     10472         0         0         0 stations
@@ -748,7 +748,7 @@ region7          2       196        59         0         0         0         0  
 region7          2        81         0         0         0         0         0       101         0         0         0 landmarks
 region7          2       196        42         0         0         0         0       280         0         0         0 moor boulders
 region7          2        49         0         0         0         0         0        49         0         0         0 steadings
-region7          2        49         1         2     38046     86800         0       200         0         0      3094 stations
+region7          2        49         1         2     43114     86800         0       200         0         0      8162 stations
 region7          2         0         0         0         0         0     16384     98304         0         0         0 terrain
 region7          2         0         0         0         0         0     16384     16384         0         0         0 streets
 region7          2         0         0         0         0         0     16384     16384         0         0         0 landmarks' ground
