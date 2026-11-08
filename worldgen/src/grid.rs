@@ -48,9 +48,9 @@ pub fn is_site(x: i64, y: i64, z: i64) -> bool {
 /**
  * The sites of a box: see VoxelGrid in voxel-grid.ts. A voxel has a
  * material on each of its faces (bake's Grid): its site's in `cells`,
- * unless `faces` gives them. Those are the voxels shown; light sees
- * more (`alpha`, `seen`, `glow`): how much of each site stops rays,
- * whether shown or not.
+ * unless `faces` gives them. Those are the voxels shown, as often as
+ * their sites stop rays (`show`); light sees every site as it is
+ * (`alpha`, `seen`, `glow`).
  */
 #[derive(Clone)]
 pub struct VoxelGrid {
@@ -65,7 +65,7 @@ pub struct VoxelGrid {
     pub faces: BTreeMap<usize, Faces>,
     /** By index in `cells`: of ALPHA, how much of the site's rays what is in it stops. */
     pub alpha: Vec<u8>,
-    /** By index in `cells`: the material of what is in the site the most, for light where it is not shown. */
+    /** By index in `cells`: the material the site shows if shown, its faces' in `faces` if they differ. */
     pub seen: Vec<u8>,
     /** By index in `cells`, of the sites that glow: how much, per channel, of GLOW_ONE. */
     pub glow: BTreeMap<usize, [u32; 3]>,
@@ -146,7 +146,7 @@ impl VoxelGrid {
     /** The faces' materials of the voxel at (x, y, z), if they are not all its site's. */
     pub fn faces_at(&self, x: i64, y: i64, z: i64) -> Option<&Faces> {
         match self.slot(x, y, z) {
-            Some(Ok(i)) => self.faces.get(&i),
+            Some(Ok(i)) if self.cells[i] != 0 => self.faces.get(&i),
             _ => None,
         }
     }
@@ -195,12 +195,44 @@ impl VoxelGrid {
         }
     }
 
-    /** How light sees site (x, y, z): of ALPHA how much it stops, face `kind`'s material (shown, else what it looks like), its glow. */
+    /** Sets what site `i` shows if shown: material `id`, its faces' if they differ. */
+    pub fn see(&mut self, i: usize, id: u8, faces: Option<Faces>) {
+        self.seen[i] = id;
+        match faces.filter(|faces| faces.iter().any(|&m| m != id)) {
+            Some(faces) => self.faces.insert(i, faces),
+            None if !self.faces.is_empty() => self.faces.remove(&i),
+            None => None,
+        };
+    }
+
+    /** Shows each site what it `seen`s where its alpha is over `coin` of it (under ALPHA), else nothing. */
+    pub fn show(&mut self, coin: impl Fn(i64, i64, i64) -> u8) {
+        for (brick, &at) in self.bricks.iter().enumerate() {
+            let Ok(at) = usize::try_from(at) else { continue };
+            let b = brick as i64;
+            let corner = [b % self.bx, b / self.bx % self.by, b / (self.bx * self.by)].map(|v| v * BRICK);
+            for k in 0..BRICK {
+                for j in 0..BRICK {
+                    for i in 0..BRICK {
+                        let [x, y, z] = [0, 1, 2].map(|c| self.min[c] + corner[c] + [i, j, k][c]);
+                        if !is_site(x, y, z) {
+                            continue;
+                        }
+                        let site = at * BRICK_SITES + (((k * BRICK + j) * BRICK + i) >> 1) as usize;
+                        let shown = self.alpha[site] > coin(x, y, z);
+                        self.cells[site] = if shown { self.seen[site] } else { 0 };
+                    }
+                }
+            }
+        }
+    }
+
+    /** How light sees site (x, y, z): of ALPHA how much it stops, face `kind`'s material, its glow. */
     pub fn light(&self, x: i64, y: i64, z: i64, kind: usize) -> (u8, u8, [u32; 3]) {
         match self.slot(x, y, z) {
             Some(Ok(i)) => {
-                let shown = self.face(x, y, z, kind);
-                (self.alpha[i], if shown != 0 { shown } else { self.seen[i] }, self.glow.get(&i).copied().unwrap_or_default())
+                let material = self.faces.get(&i).map_or(self.seen[i], |faces| faces[kind]);
+                (self.alpha[i], material, self.glow.get(&i).copied().unwrap_or_default())
             }
             _ => (0, 0, [0; 3]),
         }
@@ -227,8 +259,12 @@ impl VoxelGrid {
                 cells.extend_from_slice(brick);
             }
         }
-        let mut faces: Vec<_> =
-            self.faces.iter().filter_map(|(i, faces)| moved[i / BRICK_SITES].map(|to| (to + i % BRICK_SITES, faces))).collect();
+        let mut faces: Vec<_> = self
+            .faces
+            .iter()
+            .filter(|(i, _)| self.cells[**i] != 0)
+            .filter_map(|(i, faces)| moved[i / BRICK_SITES].map(|to| (to + i % BRICK_SITES, faces)))
+            .collect();
         faces.sort_unstable_by_key(|(i, _)| *i);
         Grid {
             min: self.min.map(|v| v as i32),

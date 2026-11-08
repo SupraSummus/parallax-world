@@ -3,18 +3,17 @@
 //! detail. See docs/generators.md.
 
 use std::cell::OnceCell;
-use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::OnceLock;
 
 use bake::light::srgb_to_linear;
-use bake::{FACE_KINDS, VOXEL_FACES};
+use bake::{FACE_KINDS, Faces, VOXEL_FACES};
 
 use crate::cost::{self, Work};
 use crate::curve::Curve;
 use crate::grid::{ALPHA, Box3, VoxelGrid};
 use crate::js;
-use crate::noise::{Fixed, Fx, ONE, Rng, fixed, float, hash, hash_text, hash64, unit};
+use crate::noise::{Fixed, Fx, ONE, Rng, fixed, float, hash, hash_text, hash64};
 use crate::plan;
 use crate::points::{Points, Spot};
 
@@ -41,16 +40,22 @@ impl From<Kind> for Look {
 /**
  * Where drawing puts a site: what it is of, how it meets the world, its
  * share of the site (of SHARE: how much of the site's rays it stops) and
- * whether it keeps a voxel there, at (x, y, z) of the level. Light sees
- * the shares (VoxelGrid's `alpha`), a picture the voxels.
+ * its pick (of SHARE, the thing's own hash there), at (x, y, z) of the
+ * level. The shares add up to the site's alpha; the picks choose what
+ * of it the site shows (`see`).
  */
-type Put<'a> = dyn FnMut(Look, Op, u32, bool, i64, i64, i64) + 'a;
+type Put<'a> = dyn FnMut(Look, Op, u32, u32, i64, i64, i64) + 'a;
 /** A whole site's share. */
 pub const SHARE: u32 = 1 << 16;
 
 /** A chance as a share (of SHARE). */
 fn share(chance: f64) -> u32 {
     (chance.clamp(0.0, 1.0) * SHARE as f64) as u32
+}
+
+/** A hash as a pick: uniform, under SHARE. */
+fn to_pick(hash: u32) -> u32 {
+    ((hash as u64 * SHARE as u64) >> 32) as u32
 }
 /** A point in lattice units. */
 pub type Point = [f64; 3];
@@ -858,16 +863,16 @@ impl Shape {
  * Draws a shape at sites `s` apart, by how many of its sizes are under s;
  * returns how many sites it tested.
  */
-fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &mut dyn FnMut(u32, bool, i64, i64, i64)) -> u64 {
+fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &mut dyn FnMut(u32, u32, i64, i64, i64)) -> u64 {
     let s = si as f64;
     let spacing = si * ONE;
     let small = shape.extents.iter().filter(|e| e.to_bits() < spacing).count();
-    let kept = |x: i64, y: i64, z: i64, chance: f64| chance >= 1.0 || unit(hash(seed, x * si, y * si, z * si)) < chance;
+    let picked = |x: i64, y: i64, z: i64| to_pick(hash(seed, x * si, y * si, z * si));
     if small == 3 {
         let [x, y, z] = nearest_site(shape.centre, si);
         let chance = shape.area / (VOXEL_AREA * s * s);
         if clip.holds([x, y, z]) {
-            put(share(chance), kept(x, y, z, chance), x, y, z);
+            put(share(chance), picked(x, y, z), x, y, z);
         }
         return 1;
     }
@@ -900,13 +905,13 @@ fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &mut dyn FnMu
     match small {
         0 => sites(clip, &mut |x, y, z| {
             let chance = 1.0 - js::pow(1.0 - fill(x, y, z), s);
-            put(share(chance), kept(x, y, z, chance), x, y, z)
+            put(share(chance), picked(x, y, z), x, y, z)
         }),
         1 => {
             let thickness = shape.extents.into_iter().min().expect("three").to_f64();
             sites(clip, &mut |x, y, z| {
                 let chance = 1.0 - js::pow(1.0 - fill(x, y, z), thickness / CHORD);
-                put(share(chance), kept(x, y, z, chance), x, y, z)
+                put(share(chance), picked(x, y, z), x, y, z)
             })
         }
         _ => {
@@ -914,7 +919,7 @@ fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &mut dyn FnMu
             let mut count = 0;
             let tested = sites(&EVERYWHERE, &mut |_, _, _| count += 1);
             let chance = shape.area / (count as f64 * VOXEL_AREA * s * s);
-            tested + sites(clip, &mut |x, y, z| put(share(chance), kept(x, y, z, chance), x, y, z))
+            tested + sites(clip, &mut |x, y, z| put(share(chance), picked(x, y, z), x, y, z))
         }
     }
 }
@@ -996,20 +1001,11 @@ pub fn generate(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
     let palette = Palette::new(&generator.kinds, generator.seed);
     let mut grid = VoxelGrid::new(b);
     let clip = grid.clip();
-    let mut put = |look: Look, op: Op, share: u32, shown: bool, x: i64, y: i64, z: i64| {
+    let mut put = |look: Look, op: Op, share: u32, pick: u32, x: i64, y: i64, z: i64| {
         let shade = |kind: Kind| palette.shade(kind, x * s, y * s, z * s);
-        if share > 0 {
-            let id = shade(look.kind);
-            see(&mut grid, op, share, id, palette.glows[id as usize], x, y, z);
-        }
-        if !shown || op == Op::Fill && grid.get(x, y, z) != 0 {
-            return;
-        }
-        match (op, look.faces) {
-            (Op::Carve, _) => grid.set(x, y, z, 0),
-            (_, None) => grid.set(x, y, z, shade(look.kind)),
-            (_, Some(faces)) => grid.set_faces(x, y, z, shade(look.kind), faces.map(shade)),
-        }
+        let id = shade(look.kind);
+        let faces = look.faces.map(|faces| faces.map(shade));
+        see(&mut grid, op, share, pick, (id, faces), palette.glows[id as usize], x, y, z);
     };
     let drawables = drawables_in(generator, &clip, s);
     let mut at = 0;
@@ -1029,7 +1025,9 @@ pub fn generate(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
             // It cuts only itself: drawn aside, then over the world.
             let mut own = Own::new(&thing_box(group, s).intersect(&clip));
             for drawable in group {
-                work.add(&draw(drawable, generator.seed, s, &clip, &mut |look, op, _, shown, x, y, z| own.put(look, op, shown, x, y, z)));
+                work.add(&draw(drawable, generator.seed, s, &clip, &mut |look, op, share, pick, x, y, z| {
+                    own.put(look, op, share, pick, x, y, z)
+                }));
             }
             own.each(&mut put);
         }
@@ -1038,16 +1036,25 @@ pub fn generate(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
         }
         cost::add(group[0].layer, work);
     }
+    // One coin per site: shown as often as it stops rays.
+    let coins = hash_text("shown", generator.seed);
+    grid.show(|x, y, z| ((hash(coins, x * s, y * s, z * s) as u64 * ALPHA as u64) >> 32) as u8);
     grid
 }
 
 /**
- * Adds a thing's `share` of site (x, y, z) to how light sees it (VoxelGrid's
- * `alpha`, `seen`, `glow`), of material `id` glowing `glow`: as a Fill
- * behind what is there, a Paint in front of it, a Carve taking it out.
+ * Adds a thing's `share` of site (x, y, z) to it (VoxelGrid's `alpha`,
+ * `seen`, `glow`), of material `id` (its faces' if they differ) glowing
+ * `glow`: as a Fill behind what is there, a Paint in front of it, a Carve
+ * taking it out. What the site shows is one of what is in it, each as
+ * often as it is seen there: the thing replaces it as often as it makes
+ * up of what the site now stops, by its pick.
  */
 #[allow(clippy::too_many_arguments)]
-fn see(grid: &mut VoxelGrid, op: Op, share: u32, id: u8, glow: [u32; 3], x: i64, y: i64, z: i64) {
+fn see(grid: &mut VoxelGrid, op: Op, share: u32, pick: u32, (id, faces): (u8, Option<Faces>), glow: [u32; 3], x: i64, y: i64, z: i64) {
+    if share == 0 {
+        return;
+    }
     let Some(i) = grid.index(x, y, z) else { return };
     let (alpha, share) = (grid.alpha[i] as u64, share.min(SHARE) as u64);
     let (all, one) = (ALPHA as u64, SHARE as u64);
@@ -1058,12 +1065,13 @@ fn see(grid: &mut VoxelGrid, op: Op, share: u32, id: u8, glow: [u32; 3], x: i64,
         Op::Fill => (one, (all - alpha) * share / all),
         Op::Paint => (one - share, share),
     };
-    grid.alpha[i] = match op {
+    let now = match op {
         Op::Carve => alpha * kept / one,
         _ => alpha + (all - alpha) * share / one,
-    } as u8;
-    if visible * all >= alpha * one {
-        grid.seen[i] = id;
+    };
+    grid.alpha[i] = now as u8;
+    if (pick as u64) * now < visible * all {
+        grid.see(i, id, faces);
     }
     let glow = [0, 1, 2].map(|c| (old[c] as u64 * kept / one + visible * glow[c] as u64) as u32);
     if glow != [0; 3] {
@@ -1075,21 +1083,24 @@ fn see(grid: &mut VoxelGrid, op: Op, share: u32, id: u8, glow: [u32; 3], x: i64,
 
 /**
  * A thing's sites, drawn aside from the world: in a box of a level's
- * sites, each what it is of and how it meets the world, or carved.
+ * sites, what it puts at each since it last carved it, put on the world
+ * as they came (`each`).
  */
 struct Own {
     b: Box3,
     n: [i64; 3],
-    /** 0: nothing; else kind + 1, and the op in bits 8 and 9. */
-    cells: Vec<u16>,
-    /** By index in `cells`, the faces' kinds of the sites whose faces differ. */
-    faces: HashMap<usize, [Kind; FACE_KINDS]>,
+    /** By site, its last put in `puts`; NONE if none. */
+    cells: Vec<u32>,
+    /** Puts: each what it is of, how it meets the world, its share and pick (Put), and the site's put before it. */
+    puts: Vec<(Look, Op, u32, u32, u32)>,
 }
+
+const NONE: u32 = u32::MAX;
 
 impl Own {
     fn new(b: &Box3) -> Own {
         let n = [0, 1, 2].map(|i| (b.max[i] - b.min[i]).max(0));
-        Own { b: *b, n, cells: vec![0; (n[0] * n[1] * n[2]) as usize], faces: HashMap::new() }
+        Own { b: *b, n, cells: vec![NONE; (n[0] * n[1] * n[2]) as usize], puts: Vec::new() }
     }
 
     fn index(&self, x: i64, y: i64, z: i64) -> usize {
@@ -1098,52 +1109,55 @@ impl Own {
         (x + self.n[0] * (y + self.n[1] * z)) as usize
     }
 
-    /** As the world takes them, but within the thing, its voxels only: Fill where it has nothing, Paint over, Carve out. */
-    fn put(&mut self, look: Look, op: Op, shown: bool, x: i64, y: i64, z: i64) {
-        if !shown {
-            return;
-        }
+    /** Within the thing only: a Carve, where it keeps a voxel, takes out what the thing put there. */
+    #[allow(clippy::too_many_arguments)]
+    fn put(&mut self, look: Look, op: Op, share: u32, pick: u32, x: i64, y: i64, z: i64) {
         let i = self.index(x, y, z);
-        let carved = 3 << 8;
-        if op == Op::Fill && self.cells[i] != 0 && self.cells[i] != carved {
+        if op == Op::Carve {
+            if pick < share {
+                self.cells[i] = NONE;
+            }
             return;
         }
-        self.cells[i] = match op {
-            Op::Carve => carved,
-            Op::Fill => (look.kind as u16 + 1) | 1 << 8,
-            Op::Paint => (look.kind as u16 + 1) | 2 << 8,
-        };
-        match look.faces.filter(|_| op != Op::Carve) {
-            Some(faces) => self.faces.insert(i, faces),
-            // Most things have no faces of their own: hashing every site to find none would be most of drawing them.
-            None if !self.faces.is_empty() => self.faces.remove(&i),
-            None => None,
-        };
+        self.puts.push((look, op, share, pick, self.cells[i]));
+        self.cells[i] = (self.puts.len() - 1) as u32;
     }
 
-    /** What the thing has at (x, y, z): its site's kind (measured, its faces are measured anew) and how it meets the world. */
+    /** The puts at index `i` of `cells`, last first. */
+    fn puts_at(&self, i: usize) -> impl Iterator<Item = &(Look, Op, u32, u32, u32)> {
+        std::iter::successors(self.puts.get(self.cells[i] as usize), |p| self.puts.get(p.4 as usize))
+    }
+
+    /** What the thing has at (x, y, z), as `of`. */
     fn at(&self, x: i64, y: i64, z: i64) -> Option<(Kind, Op)> {
         self.of(self.index(x, y, z))
     }
 
-    /** What the thing has at index `i` of `cells`, as `at`. */
+    /**
+     * What the thing has at index `i` of `cells`, its voxels kept by chance:
+     * its site's kind (measured, its faces are measured anew) and how it meets the world.
+     */
     fn of(&self, i: usize) -> Option<(Kind, Op)> {
-        let cell = self.cells[i];
-        let op = match cell >> 8 {
-            1 => Op::Fill,
-            2 => Op::Paint,
-            _ => return None,
-        };
-        Some((((cell & 255) - 1) as Kind, op))
+        // Last first: the last Paint kept, else the first Fill kept.
+        let mut fill = None;
+        for &(look, op, ..) in self.puts_at(i).filter(|p| p.3 < p.2) {
+            match op {
+                Op::Paint => return Some((look.kind, op)),
+                _ => fill = Some((look.kind, op)),
+            }
+        }
+        fill
     }
 
-    /** Each site the thing has, with what it is of and how it meets the world. */
+    /** Puts what the thing put, as it came. */
     fn each(&self, visit: &mut Put) {
-        for i in 0..self.cells.len() as i64 {
+        for i in 0..self.cells.len() {
+            let puts: Vec<_> = self.puts_at(i).collect();
+            let j = i as i64;
             let (x, y, z) =
-                (i % self.n[0] + self.b.min[0], (i / self.n[0]) % self.n[1] + self.b.min[1], i / (self.n[0] * self.n[1]) + self.b.min[2]);
-            if let Some((kind, op)) = self.at(x, y, z) {
-                visit(Look { kind, faces: self.faces.get(&(i as usize)).copied() }, op, SHARE, true, x, y, z);
+                (j % self.n[0] + self.b.min[0], (j / self.n[0]) % self.n[1] + self.b.min[1], j / (self.n[0] * self.n[1]) + self.b.min[2]);
+            for &&(look, op, share, pick, _) in puts.iter().rev() {
+                visit(look, op, share, pick, x, y, z);
             }
         }
     }
@@ -1177,14 +1191,14 @@ fn draw(drawable: &Drawable, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
             for (i, shape) in shapes.iter().enumerate() {
                 let seed = hash_text(&format!("{}#{}{i}", drawable.key, if *far { "far" } else { "" }), seed);
                 tests +=
-                    draw_shape(shape, seed, s, clip, &mut |share, shown, x, y, z| put(shape.kind.into(), shape.op, share, shown, x, y, z));
+                    draw_shape(shape, seed, s, clip, &mut |share, pick, x, y, z| put(shape.kind.into(), shape.op, share, pick, x, y, z));
             }
             Work { nodes: 1, tests, ..Work::default() }
         }
         Draw::Sites(sites) => {
-            for &([x, y, z], look, op, share, shown) in sites {
+            for &([x, y, z], look, op, share, pick) in sites {
                 if clip.holds([x, y, z]) {
-                    put(look, op, share, shown, x, y, z);
+                    put(look, op, share, pick, x, y, z);
                 }
             }
             Work { nodes: 1, tests: sites.len() as u64, ..Work::default() }
@@ -1269,8 +1283,8 @@ fn past_reach(key: &str, bounds: &Box3, reach: &Box3, n: i64, population: [i64; 
     )
 }
 
-/** A thing's sites of a level: each what it is of, how it meets the world, its share and whether shown (Put). */
-type Sites = Vec<([i64; 3], Look, Op, u32, bool)>;
+/** A thing's sites of a level: each what it is of, how it meets the world, its share and pick (Put). */
+type Sites = Vec<([i64; 3], Look, Op, u32, u32)>;
 
 /** Where a node is drawn: at sites `s` apart, for the lattice units `units`, in its layer's `order`, as part of `thing`. */
 struct Visit<'u> {
@@ -1332,7 +1346,7 @@ fn alone(node: &Node, key: &str, layer: &'static str, bounds: Box3, f: i64, seed
     let mut own = Own::new(&fine);
     let mut work = Work::default();
     for drawable in &drawables {
-        work.add(&draw(drawable, seed, f, &fine, &mut |look, op, _, shown, x, y, z| own.put(look, op, shown, x, y, z)));
+        work.add(&draw(drawable, seed, f, &fine, &mut |look, op, share, pick, x, y, z| own.put(look, op, share, pick, x, y, z)));
     }
     cost::add(layer, work);
     own
@@ -1554,16 +1568,13 @@ fn columns_of_cell(r: i64) -> [u32; 3] {
  * A coarse site stands for the fine sites in its cell (those nearest
  * it). A ray crossing the cell is stopped as often as the cell's columns
  * along each axis hold a fine site of the thing, on average over the
- * axes: its share. The thing keeps its most covered cells, as many as
- * their shares add up to, rounded by chance (why: "Levels" in
- * docs/generators.md).
+ * axes: its share, with which it is drawn.
  * Each of its faces is of a kind of what rays through it see: along the
  * face's normal, a line of nearest neighbours, each such column's first
- * fine site from the face's end is credited to that face of the first
- * kept cell the column crosses from there, in proportion; a face no
- * column sees first through is of the kinds its columns' runs in the
- * cell start with seen from it. The site is of a kind of all its faces
- * see, for whatever does not look at faces.
+ * fine site from the face's end is credited to that face of every cell
+ * the column crosses, in proportion (a ray that gets to the cell sees
+ * that). The site is of a kind of all its faces see, for whatever does
+ * not look at faces.
  */
 fn measure(node: &Node, key: &str, layer: &'static str, bounds: Box3, detail: Fixed, s: i64, seed: u64) -> Sites {
     // Two levels finer, its cells hold enough fine sites to measure, and a tile's things cost less a level coarser.
@@ -1572,12 +1583,11 @@ fn measure(node: &Node, key: &str, layer: &'static str, bounds: Box3, detail: Fi
     cost::add(layer, Work { measured: own.cells.len() as u64, ..Work::default() });
     // Kinds counted, each with how it meets the world.
     type Counts = Vec<(Kind, Op, u32)>;
-    // By coarse site: per axis, how many of its columns hold a fine site; per face, what the ends of the runs of
-    // columns through it show of it, and what rays through it see first of all, counted by kind.
+    // By coarse site: per axis, how many of its columns hold a fine site; per face, what rays through it see first
+    // of all, counted by kind.
     #[derive(Default)]
     struct Stats {
         columns: [u32; 3],
-        ends: [Counts; FACE_KINDS],
         seen: [Counts; FACE_KINDS],
     }
     let count = |kinds: &mut Counts, kind: Kind, op: Op| match kinds.iter_mut().find(|e| e.0 == kind) {
@@ -1636,13 +1646,6 @@ fn measure(node: &Node, key: &str, layer: &'static str, bounds: Box3, detail: Fi
     let all = columns_of_cell(s / f);
     let picks = hash_text(&format!("{key}#measured"), seed);
     let shares: Vec<f64> = cells.iter().map(|stats| (0..3).map(|i| stats.columns[i] as f64 / all[i] as f64).sum::<f64>() / 3.0).collect();
-    let kept = (shares.iter().sum::<f64>() + unit(hash(picks, 0, 0, 0))) as usize;
-    let mut order: Vec<usize> = (0..cells.len()).filter(|i| shares[*i] > 0.0).collect();
-    // Of cells as covered, some by chance: in an order of their own, the cells' isn't one.
-    let tie = |i: usize| hash(picks, site_of(i)[0], site_of(i)[1], site_of(i)[2]);
-    order.sort_by(|a, b| shares[*b].total_cmp(&shares[*a]).then_with(|| tie(*a).cmp(&tie(*b))));
-    let mut keeps = vec![false; cells.len()];
-    order.into_iter().take(kept).for_each(|i| keeps[i] = true);
     // Columns along each line of nearest neighbours d, from its start on the side of −d to its end on the side of
     // d: rays coming from either end see the faces towards it.
     for (from_end, d) in VOXEL_FACES.iter().enumerate().filter(|(_, d)| d.iter().find(|v| **v != 0) == Some(&-1)) {
@@ -1667,34 +1670,25 @@ fn measure(node: &Node, key: &str, layer: &'static str, bounds: Box3, detail: Fi
                 let origin = x + y * stride[1] + z * stride[2];
                 let length =
                     (0..3).filter(|c| d[*c] != 0).map(|c| if d[c] > 0 { n[c] - start[c] } else { start[c] + 1 }).min().expect("d moves");
-                // The runs of its fine sites in each cell: what they start with seen from either end;
-                // and the first kept cell it crosses from either end.
-                let (mut run, mut first, mut last): (Option<(usize, Kind, Op)>, _, _) = (None, None, None);
-                let (mut start_cell, mut end_cell) = (None, None);
+                // What it holds first and last, and the cells it crosses that the thing is in.
+                let (mut first, mut last) = (None, None);
+                let mut crossed: Vec<usize> = Vec::new();
                 for p in (0..length).map(|t| (origin + t * step) as usize) {
                     let cell = cell_at[p] as usize;
-                    if keeps[cell] {
-                        start_cell.get_or_insert(cell);
-                        end_cell = Some(cell);
+                    if shares[cell] > 0.0 && crossed.last() != Some(&cell) {
+                        crossed.push(cell);
                     }
-                    let Some((kind, op)) = own.of(p) else { continue };
-                    first.get_or_insert((kind, op));
-                    last = Some((kind, op));
-                    if run.is_none_or(|(c, ..)| c != cell) {
-                        if let Some((c, kind, op)) = run {
-                            count(&mut cells[c].ends[from_end], kind, op);
-                        }
-                        count(&mut cells[cell].ends[from_start], kind, op);
+                    if let Some(at) = own.of(p) {
+                        first.get_or_insert(at);
+                        last = Some(at);
                     }
-                    run = Some((cell, kind, op));
                 }
-                let (Some((c, kind, op)), Some(first), Some(last)) = (run, first, last) else { continue };
-                count(&mut cells[c].ends[from_end], kind, op);
-                // What rays along it see first from either end, credited to the first kept cell it crosses from there.
-                for (face, (kind, op), cell) in [(from_start, first, start_cell), (from_end, last, end_cell)] {
-                    if let Some(i) = cell {
-                        count(&mut cells[i].seen[face], kind, op);
-                    }
+                let (Some(first), Some(last)) = (first, last) else { continue };
+                // What rays along it see first from either end, credited to every cell it crosses: a ray that gets
+                // to one, through those before it, sees that.
+                for &i in &crossed {
+                    count(&mut cells[i].seen[from_start], first.0, first.1);
+                    count(&mut cells[i].seen[from_end], last.0, last.1);
                 }
             }
         }
@@ -1703,8 +1697,7 @@ fn measure(node: &Node, key: &str, layer: &'static str, bounds: Box3, detail: Fi
     for (i, stats) in cells.into_iter().enumerate().filter(|(i, _)| shares[*i] > 0.0) {
         let site = site_of(i);
         let [x, y, z] = site;
-        let faces: [Counts; FACE_KINDS] =
-            std::array::from_fn(|k| if stats.seen[k].is_empty() { stats.ends[k].clone() } else { stats.seen[k].clone() });
+        let faces = stats.seen;
         // One pick for all of its faces and itself: faces that see alike are of one kind.
         let u = hash(picks, x * s, y * s, z * s) as u64;
         let pick = |kinds: &Counts| -> (Kind, Op) {
@@ -1731,19 +1724,17 @@ fn measure(node: &Node, key: &str, layer: &'static str, bounds: Box3, detail: Fi
                 None => all.push((*kind, *op, *n)),
             }
         }
-        // As light sees it: its share, of each kind as much as its faces see of it, each kind's of what the ones
-        // before leave, so that together they stop as much as the cell's share.
+        // Its share, of each kind as much as its faces see of it, each kind's of what the ones before leave, so that
+        // together they stop as much as the cell's share; each with the faces seen.
+        let faces = faces.map(|counts| pick(&counts).0);
         let total = all.iter().map(|e| e.2).sum::<u32>().max(1) as f64;
         let mut before = 0.0f64;
         for &(kind, op, n) in &all {
             let part = shares[i] * n as f64 / total;
-            sites.push((site, kind.into(), op, share(part / (1.0 - before).max(f64::EPSILON)), false));
+            let look = Look { kind, faces: faces.iter().any(|k| *k != kind).then_some(faces) };
+            let picked = to_pick(hash(picks.wrapping_add(kind as u64 + 1), x * s, y * s, z * s));
+            sites.push((site, look, op, share(part / (1.0 - before).max(f64::EPSILON)), picked));
             before += part;
-        }
-        if keeps[i] {
-            let (kind, op) = pick(&all);
-            let faces = faces.map(|counts| pick(&counts).0);
-            sites.push((site, Look { kind, faces: faces.iter().any(|k| *k != kind).then_some(faces) }, op, 0, true));
         }
     }
     // In an order of their own, as sites are put in it.
@@ -1756,9 +1747,9 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
     let mut work = Work::default();
     let op = field.op;
     let field_seed = hash_text(field.name, seed);
-    // The chance a medium's site is kept, from its extinction.
-    let chance_of = |extinction: Option<f64>| extinction.map(|e| 1.0 - js::exp(-e * CHORD * s as f64));
-    let kept = |x: i64, y: i64, z: i64, chance: Option<f64>| chance.is_none_or(|p| unit(hash(field_seed, x * s, y * s, z * s)) < p);
+    // A medium's share of a site, from its extinction.
+    let share_of = |extinction: Option<f64>| extinction.map_or(SHARE, |e| share(1.0 - js::exp(-e * CHORD * s as f64)));
+    let picked = |x: i64, y: i64, z: i64| to_pick(hash(field_seed, x * s, y * s, z * s));
     // Where column (i, j) of sites reads dithered plans, in the s × s columns it stands for (Plan::dithered): the same
     // for every field, so a column's fields read one point. Along a row of columns the offsets across it are a Weyl
     // sequence (the golden ratio's) from a phase hashed per row, so any run of them is spread evenly: a street along
@@ -1782,8 +1773,7 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
                     work.reads += 0.max((clip.max[0] - x + 1) / 2) as u64;
                     while x < clip.max[0] {
                         if let Some((kind, extinction)) = plan::footprint(s, offset(x, z), || at(x * s, y * s, z * s, s)) {
-                            let chance = chance_of(extinction);
-                            put(kind.into(), op, chance.map_or(SHARE, share), kept(x, y, z, chance), x, y, z);
+                            put(kind.into(), op, share_of(extinction), picked(x, y, z), x, y, z);
                         }
                         x += 2;
                     }
@@ -1811,12 +1801,11 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
                         // s is a power of two: shifting is dividing, rounded down.
                         let first = (-((-span.from) >> s.trailing_zeros())).max(lo[axis]);
                         let mut w = first + ((first + u + v) & 1);
-                        let chance = chance_of(span.extinction);
+                        let share = share_of(span.extinction);
                         while w * s <= span.to && w < hi[axis] {
                             site[axis] = w;
                             if tie.within(axis, site.map(|c| c * s), span.from, span.to, 1) {
-                                let shown = kept(site[0], site[1], site[2], chance);
-                                put(span.kind.into(), op, chance.map_or(SHARE, share), shown, site[0], site[1], site[2]);
+                                put(span.kind.into(), op, share, picked(site[0], site[1], site[2]), site[0], site[1], site[2]);
                             }
                             w += 2;
                         }
@@ -2060,17 +2049,12 @@ mod tests {
                 cuboid([0.0, 56.0, 0.0], [64.0, 64.0, 64.0], 2, SOLID, Op::Paint),
             ])
         };
-        // Its voxels: those shown.
-        let shown = |sites: Sites| -> Sites { sites.into_iter().filter(|s| s.4).collect() };
         let one = block();
-        let sites = shown(measure(&one, "block", "blocks", bounds_of(&one), fixed(2.0), 16, 1));
-        let inside = |p: [i64; 3]| p.iter().all(|v| (1..4).contains(v));
+        let sites = measure(&one, "block", "blocks", bounds_of(&one), fixed(2.0), 16, 1);
         assert!(
             (1..4).all(|y| (1..4).all(|x| (1..4).all(|z| (x + y + z) % 2 == 1 || sites.iter().any(|s| s.0 == [x, y, z])))),
-            "its inside is all kept"
+            "its inside is all drawn"
         );
-        // Cells no column reaches first, under the kept inside's top row, are of what is inside them: the block.
-        assert!(sites.iter().filter(|s| inside(s.0) && s.0[1] == 1).all(|s| s.1.kind == 1), "what is hidden inside is the block's");
         // Rays straight down see the glass on its top row of cells, half covered, through the faces towards them;
         // where that is dropped, the cells under it, whose faces up the columns from above credit with the glass
         // too. Rays from the sides see the block through the faces towards them, but in the top row, where the
@@ -2095,21 +2079,22 @@ mod tests {
         };
         let blocks: Vec<Sites> = on_threads(16, |i| {
             let block = block();
-            shown(measure(&block, &format!("block {i}"), "blocks", bounds_of(&block), fixed(2.0), 16, 1))
+            measure(&block, &format!("block {i}"), "blocks", bounds_of(&block), fixed(2.0), 16, 1)
         });
         let from_above = blocks.iter().map(|sites| seen(sites, [0, -1, 0])).sum::<f64>() / 16.0;
         let from_the_side = blocks.iter().map(|sites| seen(sites, [1, 0, 0])).sum::<f64>() / 16.0;
         // Over these 16 blocks, 0.79 from above.
         assert!(from_above > 0.65, "rays from above see the glass on top {from_above} of the time");
         assert!(from_the_side < 0.1, "rays from the side see the glass {from_the_side} of the time");
-        // A sparse cloud keeps as many of its about 134 cells (a ball's volume over a site's, 2 · 16³) as its shares
-        // add up to, about a sixth, each cloud within a cell or two of that: not kept or dropped whole.
+        // A sparse cloud's shares of its about 134 cells (a ball's volume over a site's, 2 · 16³) add up to about a
+        // sixth of them, each cloud's within a cell or two of that: it is not kept or dropped whole.
         let cloud = || Node { far: Some(Far::measured(fx(2.0))), ..Node::of(vec![ball([0.0; 3], 64.0, 1, Fill::Const(0.02), Op::Fill)]) };
-        let kept: Vec<usize> = on_threads(16, |i| {
+        let kept: Vec<f64> = on_threads(16, |i| {
             let cloud = cloud();
-            shown(measure(&cloud, &format!("cloud {i}"), "clouds", bounds_of(&cloud), fixed(2.0), 16, 1)).len()
+            let sites = measure(&cloud, &format!("cloud {i}"), "clouds", bounds_of(&cloud), fixed(2.0), 16, 1);
+            sites.iter().map(|s| s.3 as f64 / SHARE as f64).sum()
         });
-        assert!(kept.iter().all(|n| (16..28).contains(n)), "sparse clouds keep {kept:?} of their about 134 cells");
+        assert!(kept.iter().all(|n| (16.0..28.0).contains(n)), "sparse clouds keep {kept:?} of their about 134 cells");
     }
 
     #[test]

@@ -152,10 +152,9 @@ how many rays get how far, and what they stop on.
   so a cell holds fewer columns than its shadow, and unevenly by axis;
   counted against its shadow, a solid cell came out 0.83 at sites twice apart,
   and one house in six vanished.
-  A thing keeps as many cells as those shares add up to, rounded by chance,
-  its most covered ones.
-  Each kept with its share as a chance,
-  a house's outline came out ragged, a cloud of its cells;
+  Each cell is drawn with its share, as alpha (see "Kinds and things").
+  Shown as often as covered, a house's walls come out ragged
+  till splats show alpha;
   all held to one threshold, each house came out fatter or thinner by a site,
   and the few a camera sees often all one way
   (the valley's first town lost a third of its walls at level 4, 0.099 off);
@@ -167,13 +166,14 @@ how many rays get how far, and what they stop on.
   so a house's eaves are roof from above and wall from the side).
   Along the face's normal, a line of nearest neighbours,
   each column's first fine site from that end
-  counts for that face of the first kept cell the column crosses from there;
-  a face no column sees first through takes what its runs in the cell
-  start with.
+  counts for that face of every cell the column crosses:
+  a ray that gets to a cell, through the cells before it, sees that.
   The site's own kind is of what all its faces see,
   for whatever does not look at faces.
   From the ends of every column's run in the cell instead,
-  a town seen from above showed walls hidden inside its houses.
+  a town seen from above showed walls hidden inside its houses;
+  credited to the first cell only,
+  through holes in its roofs.
   Two levels finer, a cell holds enough fine sites to measure,
   and a thing costs an eighth as much a level coarser,
   where a tile holds four times as many:
@@ -617,12 +617,11 @@ so ground and what stands on it are different kinds,
 even of one colour (the moor's `heather` and `heatherSprigs`).
 A kind marked `glows` gives light of its colour, as lamps do
 (`worldgen/src/light.rs`, for now only in look and native's `--light`).
-Light sees each site as much as what is in it stops rays,
-whether or not a voxel is kept there
-(`VoxelGrid`'s `alpha`, `seen` and `glow`):
-a thing's chance to be kept at a site is its share of it,
-and the site glows as its glowing things, in proportion to their shares.
-So a lamp too small to keep a coarse site's voxel
+Each site holds as much as what is in it stops rays
+(`VoxelGrid`'s `alpha`, `seen` and `glow`), each thing its share,
+and glows as its glowing things, in proportion to their shares;
+it shows a voxel as often as its alpha.
+So a lamp too small for a coarse site
 is in it as a little glow, and stops a little light.
 A far form without its near form's lamps goes dark,
 as does a child too small to be drawn at a level (give lamps `ANY_SIZE`):
