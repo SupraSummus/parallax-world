@@ -77,8 +77,6 @@ pub struct Answer {
     /** The pass it answers, counting from 1; 0 for none yet. */
     pub pass: u64,
     pub covered: HashMap<CellKey, bool>,
-    /** Cells covered, and chunks drawn that are hidden. */
-    pub hidden: usize,
     pub seconds: f64,
 }
 
@@ -184,9 +182,11 @@ fn answer(coverage: &mut Coverage, pass: u64, seeing: &Seeing) -> Answer {
     let mut covering = Vec::new();
     coverage.set_view(seeing.width, seeing.height, seeing.focal);
     for face in &seeing.faces {
+        // Layers past the farthest that asks cover nothing that is asked about.
+        let Some(last) = face.layers.iter().rposition(|layer| layer.cells.iter().any(|seen| seen.asks)) else { continue };
         let [right, up, forward] = face.basis;
         coverage.set_face(face.face, right, up, forward);
-        for layer in &face.layers {
+        for layer in &face.layers[..=last] {
             for seen in &layer.cells {
                 let ScreenBox { min_x, max_x, min_y, max_y } = seen.screen;
                 let mut covered = coverage.hides(min_x, max_x, min_y, max_y);
@@ -197,7 +197,6 @@ fn answer(coverage: &mut Coverage, pass: u64, seeing: &Seeing) -> Answer {
                         covering.push((handle, *x, *y, seen.rect));
                     }
                 }
-                answer.hidden += usize::from(covered);
                 if seen.asks {
                     answer.covered.insert(seen.key, covered);
                 }

@@ -61,7 +61,7 @@ pub struct Stats {
     pub chunks: usize,
     /** Chunks in view to bake, nearest first. */
     pub wanted: Vec<Request>,
-    /** Cells covered by nearer layers, so not baked, and chunks in view hidden, as the latest occlusion pass found. */
+    /** Cells in view not baked, as the latest occlusion pass found nearer layers cover them. */
     pub covered: usize,
     /** Whether an occlusion pass for this view is yet to come, or cells in view wait for one to say whether they are covered. */
     pub occluding: bool,
@@ -177,7 +177,7 @@ impl Renderer {
         let detail = leak_free_detail(self.max_leak.to_radians());
         let (answer, _) = self.occlusion.answer();
         let mut frame = Frame { layers: Vec::new(), farthest: self.render_distance };
-        let mut stats = Stats { covered: if self.skip_covered { answer.hidden } else { 0 }, ..Stats::default() };
+        let mut stats = Stats::default();
         let mut missing: Vec<(Request, f64)> = Vec::new();
         let mut tiles: Vec<(usize, TileId, f64)> = Vec::new();
         let mut seeing = Seeing { width: view.width, height: view.height, focal: view.focal, faces: Vec::new() };
@@ -207,7 +207,7 @@ impl Renderer {
                             missing.extend(asks.chunk);
                             tiles.extend(asks.tiles);
                         }
-                        Some(true) => {}
+                        Some(true) => stats.covered += 1,
                         None => stats.occluding = true,
                     }
                 }
