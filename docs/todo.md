@@ -285,15 +285,11 @@ Numbers are for the forest at 1280×800, as measured when written.
   so near a corner where six voxels meet it misses one within its reach,
   and light jumps a little there.
 - **Light sees each site's alpha and glow (`VoxelGrid`), a prototype**:
-  - the voxels shown are kept by chance apart from it,
-    so a voxel shown may let most light through;
-    kept where a hash is under the alpha,
-    they would follow from it (measured things keep their most covered cells);
-  - a site's colour is its voxel's faces', or what is in it the most,
+  - a site shows a voxel where a hash is under its alpha (`VoxelGrid::show`),
+    till splats show the alpha itself, measured houses' walls come out ragged;
+  - a site's colour is one of what is in it, picked as often as it is seen,
     not the mean of what its faces see;
-    with that mean per face, `seen` would go;
-  - things drawn alone (measured, or carving) give light their voxels only,
-    and measured things are measured from fine voxels kept by chance,
+  - measured things are measured from fine voxels kept by chance,
     so their small lamps come and go;
   - a lamp glows from one site at each level:
     further off, that site may be as low as the ground's,
@@ -306,6 +302,12 @@ Numbers are for the forest at 1280×800, as measured when written.
 
 ## Ideas
 
+- Splats that show alpha (`VoxelGrid`'s, now one coin per site):
+  a chunk keeps a column's voxels till their alpha adds up to whole,
+  and splats that overlap in a slice may add up to an opaque one,
+  the rest drawn see-through.
+  Alpha in steps of optical depth (−ln of what gets through),
+  which add up where things are apart, might take fewer bits.
 - Report cost at the places worlds name (`World::points`),
   not at the spawn and the regions' centres (`cost::places`),
   once the forest, the moor and the city name some:
