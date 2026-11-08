@@ -330,7 +330,14 @@ So a kept voxel stands for its run (`run_ends`),
 the solid voxels behind it in its column up to the last a ray may see,
 and is drawn as a prism over them (section 4; `src/lib/pillars.test.ts`).
 A run shows its first voxel's colour,
-so a lawn's shades or a road's markings stretch along the axis.
+so a lawn's shades or a road's markings stretch along the axis,
+unless no ray sees that voxel by an open face,
+as one kept only for a cut through it:
+the solid goes on in the nearer slice, which hides the cut,
+and what shows of the pillar is the run behind it.
+So it shows the first voxel of its run a ray sees (`run_ends`):
+shaded by the cut, it would show the soil under a slope's grass,
+or, lit, black, in bands along each slice's near side.
 
 **Painting order.** Voxels by their layer, farthest first.
 A pillar spans layers, so no order is right for every ray:

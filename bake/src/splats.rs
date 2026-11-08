@@ -72,6 +72,8 @@ pub struct Splats {
     columns: HashMap<(i32, i32), usize>,
     /** By surface voxel, the layer its run ends at (run_ends). */
     ends: Vec<i32>,
+    /** By surface voxel, the voxel of its run its pillar shows (run_ends). */
+    showing: Vec<usize>,
     pub min_x: f64,
     pub max_x: f64,
     pub min_y: f64,
@@ -85,6 +87,7 @@ impl Splats {
             order: Vec::new(),
             columns: HashMap::new(),
             ends: Vec::new(),
+            showing: Vec::new(),
             min_x: f64::INFINITY,
             max_x: f64::NEG_INFINITY,
             min_y: f64::INFINITY,
@@ -173,18 +176,34 @@ fn seen(geometry: &Geometry, faces: u16) -> bool {
  * voxel of its column. Inside a solid, behind a cut through it, nothing
  * shows from the side, so its columns have no run. `order` is the
  * surface's (c, index), near to far.
+ *
+ * And the voxel each pillar shows (`showing`): its own, or if no ray sees
+ * it by an open face, the first of its run a ray does. A voxel kept only
+ * for a cut through it shows nothing of its own where the solid goes on in
+ * a nearer slice, which hides the cut: what shows of its pillar is the run
+ * behind it, where the face's rays enter its column from the side. (Where
+ * cells interlock, the solid may go on in a farther slice instead, and the
+ * cut stands for it; the run's voxel stands for it as well as the cut.)
  */
-fn run_ends(ends: &mut Vec<i32>, columns: &mut HashMap<(i32, i32), usize>, geometry: &Geometry, surface: &[Voxel], order: &[(i32, usize)]) {
+fn run_ends(splats: &mut Splats, geometry: &Geometry, surface: &[Voxel], order: &[(i32, usize)]) {
     let behind = geometry.offsets.iter().position(|&o| o == [0, 0, 2]).expect("a face along the axis");
+    let Splats { ends, showing, columns, .. } = splats;
     ends.clear();
     ends.resize(surface.len(), 0);
+    showing.clear();
+    showing.resize(surface.len(), 0);
     columns.clear();
     for &(c, k) in order.iter().rev() {
         let voxel = &surface[k];
         let goes_on = (voxel.open | voxel.cut) & (1 << behind) == 0;
-        ends[k] = match columns.insert((voxel.site[0], voxel.site[1]), k) {
-            Some(next) if goes_on && (ends[next] > surface[next].site[2] || seen(geometry, surface[next].open)) => ends[next],
-            _ => c,
+        let next = match columns.insert((voxel.site[0], voxel.site[1]), k) {
+            Some(next) if goes_on && (ends[next] > surface[next].site[2] || seen(geometry, surface[next].open)) => Some(next),
+            _ => None,
+        };
+        ends[k] = next.map_or(c, |next| ends[next]);
+        showing[k] = match next {
+            Some(next) if !seen(geometry, voxel.open) => showing[next],
+            _ => k,
         };
     }
 }
@@ -202,7 +221,8 @@ fn run_ends(ends: &mut Vec<i32>, columns: &mut HashMap<(i32, i32), usize>, geome
  * and where they tie, the later painted.
  *
  * `surface` is the cell's (cell_surface), with the margin around the cell
- * that its chunks may show; `colour` gives each voxel's (voxel_colour).
+ * that its chunks may show; `colour` gives each voxel's (voxel_colour),
+ * a pillar the colour of the voxel it shows (run_ends).
  */
 pub fn chunk_splats(splats: &mut Splats, geometry: &Geometry, colour: &mut dyn FnMut(&Voxel) -> u32, surface: &[Voxel], slice: &Slice) {
     splats.clear();
@@ -214,8 +234,8 @@ pub fn chunk_splats(splats: &mut Splats, geometry: &Geometry, colour: &mut dyn F
     order.clear();
     order.extend(surface.iter().enumerate().map(|(k, voxel)| (voxel.site[2], k)));
     order.sort_unstable_by_key(|&(c, k)| (c, std::cmp::Reverse(k)));
-    let mut ends = std::mem::take(&mut splats.ends);
-    run_ends(&mut ends, &mut splats.columns, geometry, surface, &order);
+    run_ends(splats, geometry, surface, &order);
+    let (ends, showing) = (std::mem::take(&mut splats.ends), std::mem::take(&mut splats.showing));
     // The nearest of each column that a ray may meet.
     let columns = &mut splats.columns;
     columns.clear();
@@ -232,12 +252,13 @@ pub fn chunk_splats(splats: &mut Splats, geometry: &Geometry, colour: &mut dyn F
             depth: 2 * c - centre,
             run: 2 * (ends[k] - c),
             width: FRAC_1_SQRT_2,
-            colour: colour(voxel),
+            colour: colour(&surface[showing[k]]),
             site: voxel.site,
         });
     }
     splats.order = order;
     splats.ends = ends;
+    splats.showing = showing;
 }
 
 #[cfg(test)]
@@ -353,6 +374,34 @@ mod tests {
             let shown = kept.iter().rev().map(|s| s.site).find(|&site| holds(site, x, y));
             assert_eq!(shown, all.iter().rev().copied().find(|&site| holds(site, x, y)), "at ({x}, {y})");
         }
+    }
+
+    #[test]
+    fn a_pillar_whose_voxel_is_cut_shows_the_first_of_its_run_a_ray_sees() {
+        // Columns of voxels cut by the slice's near side (material 1), each
+        // in its own material behind: 2 open across the axis, a ray sees;
+        // 3 open only away from the camera, no ray sees, its run going on to
+        // 4, which a ray sees; 5 cut by the far side, no ray sees, so the
+        // column has no run and its voxel shows itself.
+        let geometry = geometry(&lattices()[0]);
+        let kind = |offset: [i32; 3]| 1 << geometry.offsets.iter().position(|&o| o == offset).expect("a face");
+        let (near, far, across, away) = (kind([0, 0, -2]), kind([0, 0, 2]), kind([-2, 0, 0]), kind([1, 1, 1]));
+        let voxel = |site: [i32; 3], material: u8, open: u16, cut: u16| Voxel { site, material, open, cut };
+        let surface = [
+            voxel([0, 0, 0], 1, 0, near),
+            voxel([0, 0, 4], 2, across, 0),
+            voxel([2, 0, 0], 1, 0, near),
+            voxel([2, 0, 2], 3, away, 0),
+            voxel([2, 0, 6], 4, across, 0),
+            voxel([4, 0, 0], 1, 0, near),
+            voxel([4, 0, 4], 5, 0, far),
+        ];
+        let slice = Slice { level: 3, atoms: 0, layer: 0, cutoff: f64::INFINITY };
+        let mut splats = Splats::new();
+        chunk_splats(&mut splats, &geometry, &mut |v| 0xff00_0000 | v.material as u32, &surface, &slice);
+        let mut pillars: Vec<_> = splats.splats.iter().map(|s| (s.site, s.run, s.colour & 255)).collect();
+        pillars.sort_unstable();
+        assert_eq!(pillars, [([0, 0, 0], 8, 2), ([2, 0, 0], 12, 4), ([4, 0, 0], 0, 1)]);
     }
 
     #[test]
