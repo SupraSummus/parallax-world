@@ -53,6 +53,7 @@ src/
     ├── compositor.ts        # Draws the renderer's frames with WebGL 2: chunks' splats as instanced prisms
     └── utils.ts             # cn() for class names
 scripts/shot.mjs             # pnpm shot: a view in headless Chromium, saved once complete
+scripts/voxelize.py          # A glTF scene as voxels of the FCC lattice, for worlds/src/scene.rs (numpy, Pillow)
 bake/                        # Chunk baker, coverage and walking in Rust (no dependencies), in worlds/' WebAssembly
 └── src/
     ├── lib.rs               # Baker: one chunk per call; the WebAssembly exports
@@ -101,8 +102,10 @@ worlds/                      # The worlds, on worldgen's public API only; the we
 │   ├── railway.rs           # The valley's railway: a line along it made by cost, cut, filled, bridged and tunnelled; stations by towns
 │   ├── city.rs              # The city: blocks of buildings whose rooms form a maze, boxes on a plan of quarter metres
 │   ├── learned.rs           # The learned town: settlements drawn by a split grammar learned in lab/, on the forest's land
+│   ├── scene.rs             # Scenes made elsewhere: voxels read from a file (scripts/voxelize.py); lib.rs adds Sponza, with its feature
 │   └── wasm.rs              # Its WebAssembly exports (the module holds bake/'s too)
 ├── data/town-grammar.bin    # learned.rs's rule table, written by lab's export example
+├── data/scenes/             # Scenes' voxels, not in git (their licences): see docs/generators.md, "Scenes"
 ├── data/cost/               # Each world's cost baseline, which tests/cost.rs holds it to
 ├── tests/                   # Every world in WORLDS keeps the contract and its cost baseline; the scenes' contents
 └── examples/                # map: a world from above; look: a picture of it, of any place it names (picture.rs), lit (light.rs); cost: what its tiles cost (cost.rs); bench: timing a world's tiles

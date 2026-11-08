@@ -10,6 +10,10 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 worldgen = { path = "../worldgen" }
 
+[features]
+# Sponza's atrium (lib.rs), from a file scripts/voxelize.py makes.
+sponza = []
+
 [dev-dependencies]
 bake = { path = "../bake" }
 

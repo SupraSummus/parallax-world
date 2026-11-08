@@ -705,6 +705,39 @@ in proportion to how often each kind and size was seen, without pixels.
 `cargo run --release --example export` in `lab/` learns it again and writes it;
 with `-- --check` it says whether the committed one is what it learns.
 
+## Scenes
+
+A world can be a scene made elsewhere:
+`scripts/voxelize.py` turns a glTF scene into voxels at level 0,
+each the mean colour of the surfaces through it, of 255;
+`worlds/src/scene.rs` draws them as a field,
+each coarser level made from the one below.
+A scene is its surfaces only, hollow inside.
+`--scale` makes it bigger, so finer than the lattice's unit:
+Sponza is drawn twice its size.
+
+Scenes' licences keep them out of the repository:
+their files go to `worlds/data/scenes/`, which git ignores,
+and each world is built only with its feature.
+The tests run without them,
+as no scene keeps `places` or `directions`.
+
+Sponza is the `glTF/` folder of
+[Khronos' sample](https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/Sponza);
+then, from the repository's root:
+
+```bash
+python3 scripts/voxelize.py Sponza/glTF/Sponza.gltf worlds/data/scenes/sponza.bin --scale 2
+```
+
+```bash
+pnpm wasm --features sponza && pnpm exec vite
+```
+
+```bash
+cargo run --release --config native/.cargo/config.toml --manifest-path native/Cargo.toml --features worlds/sponza -- --view 'world=sponza&look=90,5' --shot out.png
+```
+
 ## Writing a world
 
 The moor (`worlds/src/moor.rs`) is the shortest whole world to start from.
