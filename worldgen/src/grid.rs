@@ -48,7 +48,9 @@ pub fn is_site(x: i64, y: i64, z: i64) -> bool {
 /**
  * The sites of a box: see VoxelGrid in voxel-grid.ts. A voxel has a
  * material on each of its faces (bake's Grid): its site's in `cells`,
- * unless `faces` gives them.
+ * unless `faces` gives them. Those are the voxels shown; light sees
+ * more (`alpha`, `seen`, `glow`): how much of each site stops rays,
+ * whether shown or not.
  */
 #[derive(Clone)]
 pub struct VoxelGrid {
@@ -61,14 +63,18 @@ pub struct VoxelGrid {
     pub cells: Vec<u8>,
     /** By index in `cells`, the faces' materials of the sites whose faces are not all of their material there. */
     pub faces: BTreeMap<usize, Faces>,
-    /**
-     * What glows at sites: each glowing shape's, shared between the sites
-     * around its centre (light::around), whether or not they keep voxels,
-     * with its material and its mean shadow (a quarter of its area,
-     * lattice units²).
-     */
-    pub glows: Vec<([i64; 3], u8, f32)>,
+    /** By index in `cells`: of ALPHA, how much of the site's rays what is in it stops. */
+    pub alpha: Vec<u8>,
+    /** By index in `cells`: the material of what is in the site the most, for light where it is not shown. */
+    pub seen: Vec<u8>,
+    /** By index in `cells`, of the sites that glow: how much, per channel, of GLOW_ONE. */
+    pub glow: BTreeMap<usize, [u32; 3]>,
 }
+
+/** A whole site's alpha: it stops every ray. */
+pub const ALPHA: u8 = 255;
+/** The glow of a site all of a glowing white: 255 per channel (linear), of a whole share (generator's SHARE). */
+pub const GLOW_ONE: u32 = 255 << 16;
 
 impl VoxelGrid {
     /** A grid of the sites in `b`, widened by one in x if needed to start and end on an even x. */
@@ -86,7 +92,9 @@ impl VoxelGrid {
             bricks: vec![-1; (bx * by * bz) as usize],
             cells: Vec::new(),
             faces: BTreeMap::new(),
-            glows: Vec::new(),
+            alpha: Vec::new(),
+            seen: Vec::new(),
+            glow: BTreeMap::new(),
         }
     }
 
@@ -164,11 +172,7 @@ impl VoxelGrid {
             None => return,
             Some(Ok(i)) => i,
             Some(Err(_)) if id == 0 => return,
-            Some(Err(brick)) => {
-                self.bricks[brick] = (self.cells.len() / BRICK_SITES) as i32;
-                self.cells.resize(self.cells.len() + BRICK_SITES, 0);
-                self.slot(x, y, z).and_then(Result::ok).expect("brick just added")
-            }
+            Some(Err(_)) => self.index(x, y, z).expect("in the box"),
         };
         self.cells[i] = id;
         if !self.faces.is_empty() {
@@ -176,13 +180,62 @@ impl VoxelGrid {
         }
     }
 
+    /** Where site (x, y, z) is in `cells`, its brick added if empty; None outside the box or off the sites. */
+    pub fn index(&mut self, x: i64, y: i64, z: i64) -> Option<usize> {
+        match self.slot(x, y, z)? {
+            Ok(i) => Some(i),
+            Err(brick) => {
+                self.bricks[brick] = (self.cells.len() / BRICK_SITES) as i32;
+                let len = self.cells.len() + BRICK_SITES;
+                self.cells.resize(len, 0);
+                self.alpha.resize(len, 0);
+                self.seen.resize(len, 0);
+                self.slot(x, y, z).and_then(Result::ok)
+            }
+        }
+    }
+
+    /** How light sees site (x, y, z): of ALPHA how much it stops, face `kind`'s material (shown, else what it looks like), its glow. */
+    pub fn light(&self, x: i64, y: i64, z: i64, kind: usize) -> (u8, u8, [u32; 3]) {
+        match self.slot(x, y, z) {
+            Some(Ok(i)) => {
+                let shown = self.face(x, y, z, kind);
+                (self.alpha[i], if shown != 0 { shown } else { self.seen[i] }, self.glow.get(&i).copied().unwrap_or_default())
+            }
+            _ => (0, 0, [0; 3]),
+        }
+    }
+
+    /** The voxels shown, as the baker takes them: bricks with none left out. */
     pub fn into_grid(self) -> Grid {
+        let mut bricks = self.bricks;
+        // By brick of `cells`, where it is in `bricks`.
+        let mut slots = vec![usize::MAX; self.cells.len() / BRICK_SITES];
+        for (slot, &at) in bricks.iter().enumerate() {
+            if at >= 0 {
+                slots[at as usize] = slot;
+            }
+        }
+        let mut cells = Vec::with_capacity(self.cells.len());
+        let mut moved = vec![None; slots.len()];
+        for (at, brick) in self.cells.chunks(BRICK_SITES).enumerate() {
+            if brick.iter().all(|&c| c == 0) {
+                bricks[slots[at]] = -1;
+            } else {
+                moved[at] = Some(cells.len());
+                bricks[slots[at]] = (cells.len() / BRICK_SITES) as i32;
+                cells.extend_from_slice(brick);
+            }
+        }
+        let mut faces: Vec<_> =
+            self.faces.iter().filter_map(|(i, faces)| moved[i / BRICK_SITES].map(|to| (to + i % BRICK_SITES, faces))).collect();
+        faces.sort_unstable_by_key(|(i, _)| *i);
         Grid {
             min: self.min.map(|v| v as i32),
             n: self.n.map(|v| v as i32),
-            bricks: self.bricks,
-            cells: self.cells,
-            faces: self.faces.iter().flat_map(|(i, faces)| face_words(*i, faces)).collect(),
+            bricks,
+            cells,
+            faces: faces.into_iter().flat_map(|(i, faces)| face_words(i, faces)).collect(),
         }
     }
 }
