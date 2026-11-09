@@ -136,10 +136,13 @@ how many rays get how far, and what they stop on.
   Chances are compared with a hash of the position in lattice units,
   so a site kept at one level stays kept where coarser levels give it as high a chance.
 - **Nodes** whose parts get smaller than the sites draw their `far` shapes instead
-  (from `detail` on): a crown's outline for its leaf clusters,
-  which drawn one by one would stop rays twice where they overlap;
-  a cluster's ball for its sprays of leaves on twigs, a site thick at level 0,
-  as wide as their shadow, not the whole ball they reach.
+  (from `detail` on):
+  a cluster's ball for its sprays of leaves on twigs, a site thick at level 0:
+  the whole ball they reach, as dense as they are on average,
+  so see-through near its edge, as they are.
+  Clumped, the sprays stop as many rays as half their density spread evenly.
+  A ball as wide as their shadow and all but opaque kept the shadow too,
+  but darkened the crowns inside.
   Or the far form is the near form measured (`Far::measured`):
   drawn whole two levels finer than it is drawn at,
   but no finer than the coarsest level its near form is drawn at,

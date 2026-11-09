@@ -9,8 +9,8 @@ use worldgen::World;
 use worldgen::column;
 use worldgen::curve::Curve;
 use worldgen::generator::{
-    ANY_SIZE, Child, Far, Field, Fill, Generator, Layer, Line, Node, Op, Point, Population, SOLID, Shadows, Shape, Span, ball,
-    bounds_of_shapes, capsule, ellipsoid, lathe,
+    ANY_SIZE, Child, Far, Field, Fill, Generator, Layer, Line, Node, Op, Point, Population, Shadows, Shape, Span, ball, bounds_of_shapes,
+    capsule, ellipsoid, lathe,
 };
 use worldgen::grid::Box3;
 use worldgen::js::{self, round};
@@ -35,6 +35,8 @@ fn log_radius() -> f64 {
     vox(0.45)
 }
 const FINE: f64 = 1.0;
+/** How much of a site's rays a spray's leaves stop. */
+const LEAVES: f64 = 0.45;
 const PI: f64 = std::f64::consts::PI;
 
 /** The heights it has anything at, in units. */
@@ -580,40 +582,12 @@ pub fn layers(seed: u64, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
 // ---------------------------------------------------------------------------
 // Things. `random` picks their shapes.
 
-struct Crown {
-    trunk: Shape,
-    clusters: Vec<Child>,
-    fill: f64,
-}
-
-/** A tree of `shapes`, with the parts its crown hides as a child. */
-fn tree(shapes: Vec<Shape>, hidden: Vec<Shape>, fine: Vec<Child>, crown: Option<Crown>) -> Node {
+/** A tree of `shapes`, with the parts its crown hides as a child, and its crown's leaf clusters. */
+fn tree(shapes: Vec<Shape>, hidden: Vec<Shape>, fine: Vec<Child>, clusters: Vec<Child>) -> Node {
     let mut children = vec![Child::new("hidden", vox(0.5) as i64, Node::of(hidden))];
     children.extend(fine);
-    let far = crown.map(|Crown { trunk, clusters, fill }| {
-        let far_shapes: Vec<&Shape> = clusters.iter().flat_map(|c| c.node.far.iter().flat_map(|f| f.shapes())).collect();
-        // An ellipsoid of the clusters' outline, shrunk to their volume and solid.
-        let b = bounds_of_shapes(far_shapes.iter().map(|s| &s.bounds));
-        let half = [0, 1, 2].map(|i| (b.max[i] - b.min[i]) as f64 / 2.0);
-        let volume = (4.0 / 3.0) * PI * half[0] * half[1] * half[2];
-        let filled = far_shapes.iter().fold(0.0, |sum, s| {
-            let [a, c, d] = s.extents.map(Fx::to_f64);
-            sum + (PI / 6.0) * a * c * d * fill
-        });
-        let shrink = js::pow(1.0 - js::exp(-filled / volume), 1.0 / 3.0);
-        let outline = ellipsoid(
-            [0, 1, 2].map(|i| (b.min[i] + b.max[i]) as f64 / 2.0),
-            [half[0] * shrink, half[1] * shrink, half[2] * shrink],
-            far_shapes[0].kind,
-            SOLID,
-            Op::Fill,
-        );
-        let detail = far_shapes.iter().flat_map(|s| s.extents).min().expect("clusters");
-        let far = Far::of(detail, vec![trunk, outline]);
-        children.extend(clusters);
-        far
-    });
-    Node::of(shapes).with_children(children).with_far(far)
+    children.extend(clusters);
+    Node::of(shapes).with_children(children)
 }
 
 /** A vertical trunk, `width` units square, from just below `ground` up to `top`. */
@@ -630,23 +604,18 @@ fn direction(random: &mut Rng) -> Point {
 }
 
 /**
- * The radius of a leaf cluster's ball from afar, its sprays reaching
- * `radius` (units): as wide as their shadow, which covers 0.57 of the
- * whole ball's and 0.06 more a metre of radius, as measured (a small
- * cluster has fewer sprays, thick for its size). The whole ball drew
- * crowns a fifth to a third larger than level 0's.
+ * A cluster of leaves around `centre`, reaching `radius`: sprays of
+ * leaves on twigs around a core as dense as `fill` at level 0, further a
+ * ball as dense as they are on average, see-through where they are.
  */
-fn far_radius(radius: f64) -> f64 {
-    radius * (0.57 + 0.06 * radius * UNIT_SIZE).sqrt()
-}
-
-/** A cluster of leaves around `centre`: sprays of leaves on twigs at level 0, further a ball as wide as their shadow. */
 #[allow(clippy::too_many_arguments)]
 fn leaf_cluster(name: String, centre: Point, radius: f64, kind: K, fill: f64, random: &mut Rng, droop: f64, turning: K) -> Child {
     let seed = random.next_u64();
+    // Sprays from `inner` out, around a core `core` wide.
+    let spray = vox(0.45).min(radius * 0.4);
+    let count = 4f64.max(round(0.95 * js::pow(radius / spray, 2.0)));
+    let (inner, core) = (radius * 0.3, radius * 0.55);
     let sprays = move |random: &mut Rng| {
-        let spray = vox(0.45).min(radius * 0.4);
-        let count = 4f64.max(round(0.95 * js::pow(radius / spray, 2.0)));
         let (mut twigs, mut leaves) = (Vec::new(), Vec::new());
         let at = |d: Point, r: f64| [centre[0] + d[0] * r, centre[1] + d[1] * r, centre[2] + d[2] * r];
         for _ in 0..count as usize {
@@ -656,14 +625,23 @@ fn leaf_cluster(name: String, centre: Point, radius: f64, kind: K, fill: f64, ra
             let tip = radius - spray;
             twigs.push(Shape::capsule(at(d, radius * 0.1), at(d, tip - spray / 2.0), FINE, K::twig));
             let leaf = if random.chance(fx(0.25)) { turning } else { kind };
-            leaves.push(capsule(at(d, radius * 0.3), at(d, tip), spray, k(leaf), Fill::Const(0.75), Op::Fill));
+            leaves.push(capsule(at(d, inner), at(d, tip), spray, k(leaf), Fill::Const(LEAVES), Op::Fill));
         }
-        twigs.push(ball(centre, radius * 0.55, k(kind), Fill::Const(fill), Op::Fill));
+        twigs.push(ball(centre, core, k(kind), Fill::Const(fill), Op::Fill));
         twigs.extend(leaves);
         twigs
     };
     let bounds = ball(centre, radius, k(kind), Fill::Const(fill), Op::Fill).bounds;
-    let far = ball(centre, far_radius(radius), k(kind), Fill::Const(fill), Op::Fill);
+    // As dense as the core and the sprays at each distance r from the centre. The sprays, radial, cover
+    // count · π spray² of the sphere of radius r; clumped, they stop as many rays as half that spread evenly
+    // (all of it, the ball's shadow was a quarter to a third more).
+    let density = move |x: f64, y: f64, z: f64| {
+        let r = js::hypot(&[x - centre[0], y - centre[1], z - centre[2]]);
+        let cored = if r < core { fill } else { 0.0 };
+        let sprays = if r >= inner { LEAVES * (0.5 * count * spray * spray / (4.0 * r * r)).min(1.0) } else { 0.0 };
+        1.0 - (1.0 - cored) * (1.0 - sprays)
+    };
+    let far = ball(centre, radius, k(kind), Fill::At(Rc::new(density)), Op::Fill);
     Child::new(name, ANY_SIZE, Node::lazy(bounds, seed, sprays).with_far(Far::of(fx(FINE), vec![far])))
 }
 
@@ -765,7 +743,7 @@ fn spruce_tree(x: f64, ground: f64, z: f64, random: &mut Rng, ground_at: GroundA
     let hidden_top = base + (crown_top - base) * (1.0 - 2.0 * (core - tip) / radius);
     let hidden = vec![Shape::cuboid([x, base + 1.0, z], [x + width, hidden_top, z + width], K::spruceBark).paint()];
     let (from, to) = (base - 0.5, crown_top + 0.5);
-    let density = move |distance: f64, py: f64| 0.95 - 0.35 * js::pow(distance / r(py), 3.0);
+    let density = move |distance: f64, py: f64| 0.75 - 0.3 * js::pow(distance / r(py), 3.0);
     let spokes = 6.0 + random.below(3) as f64;
     let sector = (2.0 * PI) / spokes;
     let twist = random.next() * sector;
@@ -788,7 +766,7 @@ fn spruce_tree(x: f64, ground: f64, z: f64, random: &mut Rng, ground_at: GroundA
     let mut shapes = vec![bole.clone()];
     shapes.extend(foot.iter().cloned());
     shapes.push(crown(Fill::At(Rc::new(fans))));
-    let mut near = tree(shapes, hidden, fine, None);
+    let mut near = tree(shapes, hidden, fine, Vec::new());
     // Its hidden parts are not drawn beyond level 0: inside a crown this dense they don't show.
     let mut far = vec![bole];
     far.extend(foot);
@@ -834,7 +812,6 @@ fn birch_tree(x: f64, ground: f64, z: f64, random: &mut Rng) -> Node {
     let foliage = foliage(Species::Birch, random.next());
     let turning = if foliage == K::birchGold { K::birchGreen } else { K::birchGold };
     let crown_bottom = ground + height * 0.45;
-    let bole = Shape::cuboid([x, ground - 1.0, z], [x + width, crown_bottom, z + width], K::birchBark).paint();
     let crown_top = ground + height + vox(1.0);
     let cy = (crown_bottom + crown_top) / 2.0;
     let ry = (crown_top - crown_bottom) / 2.0;
@@ -857,12 +834,12 @@ fn birch_tree(x: f64, ground: f64, z: f64, random: &mut Rng) -> Node {
         let p = [tx + ox * rx, cy + oy * ry, tz + oz * rx];
         branches.push(Shape::tube(&bend, [tx + mid, p[1] - vox(0.5), tz + mid], p, BRANCH_RADIUS, K::birchBark).paint());
         let radius = vox(0.8 + random.next() * 0.6);
-        clusters.push(leaf_cluster(format!("leaves {i}"), p, radius, foliage, 0.7, random, 0.6, turning));
+        clusters.push(leaf_cluster(format!("leaves {i}"), p, radius, foliage, 0.35, random, 0.6, turning));
     }
     let dashes = fine_child("bark", bounds_of_shapes(shapes.iter().map(|s| &s.bounds)), random, move |random| {
         segments.iter().flat_map(|&[sx, sz, y0, y1]| bark(sx, sz, width, y0, y1, BarkStyle::Dashes, K::birchMark, random)).collect()
     });
-    tree(shapes, branches, vec![dashes], Some(Crown { trunk: bole, clusters, fill: 0.7 }))
+    tree(shapes, branches, vec![dashes], clusters)
 }
 
 /** Broad oak: thick trunk, a few branches each ending in a leaf cluster. */
@@ -894,14 +871,13 @@ fn oak_tree(x: f64, ground: f64, z: f64, random: &mut Rng, ground_at: GroundAt) 
         .enumerate()
         .map(|(i, end)| {
             let radius = vox(1.8 + random.next() * 1.2);
-            leaf_cluster(format!("leaves {i}"), *end, radius, foliage, 0.8, random, 0.0, turning)
+            leaf_cluster(format!("leaves {i}"), *end, radius, foliage, 0.4, random, 0.0, turning)
         })
         .collect();
     let fine = vec![fine_child("bark", shapes[0].bounds, random, move |random| {
         bark(x, z, width, ground, trunk_top, BarkStyle::Furrows, K::barkFurrow, random)
     })];
-    let trunk_shape = shapes[0].clone();
-    tree(shapes, hidden, fine, Some(Crown { trunk: trunk_shape, clusters, fill: 0.8 }))
+    tree(shapes, hidden, fine, clusters)
 }
 
 // Undergrowth on the ground at (x, y, z): blades, stems and leaves a unit or two thick.
