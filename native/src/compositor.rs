@@ -26,10 +26,10 @@ use crate::view::{Vec3, to_local, view_basis};
 struct GpuChunk {
     /** Top-left corner of what it draws, relative to the camera, face coordinates. */
     origin: [f32; 2],
-    extent: [f32; 2],
     distance: f32,
     face: u32,
-    depth: f32,
+    /** Its level (depth_of in compositor.wgsl). */
+    level: f32,
     /** RGBA to paint its splats, shaded as their voxels are (Colours); 0 for their own colours. */
     tint: u32,
     /** How far a splat is past the plane per step of its alpha past 128. */
@@ -37,8 +37,8 @@ struct GpuChunk {
     _pad: f32,
 }
 
-/** A splat (splat_vertex's instance in compositor.wgsl): its SPLAT numbers (chunk-baker.ts), its height in place of its run, and its order in its chunk (depth_of). */
-pub type GpuSplat = [u32; 6];
+/** A splat (splat_vertex's instance in compositor.wgsl): its SPLAT numbers (chunk-baker.ts), its height in place of its run (cells' splats have none). */
+pub type GpuSplat = [u32; 5];
 
 /** A cluster (Cluster in compositor.wgsl). */
 #[repr(C)]
@@ -48,12 +48,10 @@ pub struct GpuCluster {
     max: [f32; 2],
     first: u32,
     slot_count: u32,
-    order: f32,
     visible: u32,
     near: f32,
     far: f32,
     wide: f32,
-    _pad: u32,
 }
 
 /**
@@ -71,26 +69,22 @@ pub fn block(distance: f64, focal: f64) -> f64 {
 }
 
 /**
- * A chunk's splats (far to near) as the GPU takes them, each with a run as
- * a row of splats (see rows), in clusters of the
- * splats in each block of size `block` on its plane (row by row, nearest
- * first in each, so that a block's first clusters are its front), and the
- * clusters, nearest first, so that splats are drawn near to far; their
- * `first` counts from the chunk's first splat, and their chunk's slot is
- * not in them yet. A cluster's box holds its splats' outlines along the
- * axis, from `near` to `far` past the plane, `half_layer` per step of their
- * alpha past 128, and how wide the widest is: the GPU finds where they are
- * drawn for its camera. In the bake workers, so that a chunk's upload is a
- * copy.
+ * A chunk's splats as the GPU takes them, in clusters of the splats in
+ * each block of size `block` on its plane (nearest first in each, so that
+ * a block's first clusters are its front), and the clusters, nearest
+ * first, so that splats are drawn near to far; their `first` counts from
+ * the chunk's first splat, and their chunk's slot is not in them yet.
+ * A cluster's box holds its splats' outlines along the axis, from `near`
+ * to `far` past the plane, `half_layer` per step of their alpha past 128,
+ * and how wide the widest is: the GPU finds where they are drawn for its
+ * camera. In the bake workers, so that a chunk's upload is a copy.
  */
 pub fn cluster(numbers: &[f32], half_layer: f64, block: f64) -> (Vec<GpuSplat>, Vec<GpuCluster>) {
-    let numbers = &rows(numbers.as_chunks::<5>().0)[..];
-    let n = numbers.len();
-    // Nearer the later painted.
-    let orders: Vec<f32> = (0..n).map(|k| (n - k) as f32 / (n + 1) as f32).collect();
+    let numbers = numbers.as_chunks::<5>().0;
     let block_of = |s: usize| [1, 0].map(|d| (numbers[s][d] as f64 / block).floor() as i64);
-    let mut sorted: Vec<usize> = (0..n).rev().collect();
-    sorted.sort_by_key(|&s| block_of(s));
+    let depth = |s: usize| numbers[s][4].to_bits() >> 24;
+    let mut sorted: Vec<usize> = (0..numbers.len()).collect();
+    sorted.sort_by_key(|&s| (block_of(s), depth(s)));
     let mut clusters = Vec::new();
     let mut start = 0;
     for run in sorted.chunk_by(|&a, &b| block_of(a) == block_of(b)) {
@@ -104,12 +98,10 @@ pub fn cluster(numbers: &[f32], half_layer: f64, block: f64) -> (Vec<GpuSplat>, 
                 max: [f32::NEG_INFINITY; 2],
                 first: first as u32,
                 slot_count: part.len() as u32,
-                order: orders[part[0]],
                 visible: 0,
                 near: f32::INFINITY,
                 far: f32::NEG_INFINITY,
                 wide: 0.0,
-                _pad: 0,
             };
             for &s in part {
                 let [x, y, w, _, paint] = numbers[s];
@@ -123,37 +115,12 @@ pub fn cluster(numbers: &[f32], half_layer: f64, block: f64) -> (Vec<GpuSplat>, 
         }
         start += run.len();
     }
-    clusters.sort_by(|a, b| a.order.total_cmp(&b.order));
-    // Its height in place of its run, drawn by rows if at all.
+    clusters.sort_by(|a, b| a.near.total_cmp(&b.near));
     let splats = sorted.iter().map(|&s| {
         let [x, y, w, _, paint] = numbers[s];
-        [x, y, w, w * std::f32::consts::SQRT_2, paint, orders[s]].map(f32::to_bits)
+        [x, y, w, w * std::f32::consts::SQRT_2, paint].map(f32::to_bits)
     });
     (splats.collect(), clusters)
-}
-
-/** Half layers between a column's voxels. */
-const VOXEL: i32 = 4;
-
-/**
- * A chunk's splats (far to near) and, for each with a run (a
- * pillar along the axis, see chunk_splats in bake/src/splats.rs), a splat
- * at each voxel of it, the same but deeper; still far to near. A voxel apart, a row's
- * hexagons meet from every ray of the face, so a slanted ray meets the
- * pillar wherever its voxels are; farther apart, gaps open between them.
- */
-fn rows(numbers: &[[f32; 5]]) -> Vec<[f32; 5]> {
-    let mut all: Vec<(i32, [f32; 5])> = Vec::with_capacity(numbers.len());
-    for &[x, y, w, run, paint] in numbers {
-        let paint = paint.to_bits();
-        let depth = (paint >> 24) as i32 - 128;
-        // Its depth past the plane in the alpha byte, as the splat's.
-        let at = |d: i32| f32::from_bits(paint & 0x00ff_ffff | ((128 + depth + d) as u32) << 24);
-        all.extend((0..=run as i32).step_by(VOXEL as usize).map(|d| (depth + d, [x, y, w, 0.0, at(d)])));
-    }
-    // Far first; stable, so the chunk's order where depths tie.
-    all.sort_by_key(|&(depth, _)| std::cmp::Reverse(depth));
-    all.into_iter().map(|(_, s)| s).collect()
 }
 
 /** A chunk's splats and clusters on the GPU, and its slot in the table. */
@@ -405,7 +372,7 @@ impl Pipelines {
         let splat = wgpu::VertexBufferLayout {
             array_stride: size_of::<GpuSplat>() as u64,
             step_mode: wgpu::VertexStepMode::Instance,
-            attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Unorm8x4, 2 => Float32],
+            attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Unorm8x4],
         };
         // Ties (the sky, cleared to 1) are drawn.
         let depth = |compare, write| wgpu::DepthStencilState {
@@ -588,7 +555,6 @@ impl Compositor {
         if self.targets.as_ref().is_none_or(|t| t.size != size) {
             self.targets = Some(Targets::new(device, &self.pipelines, self.format, size));
         }
-        let scale = depth_scale(frame.chunks.len());
         let mut table = Vec::new();
         // What the frame no longer draws makes room first.
         let wanted: HashSet<u32> = frame.chunks.iter().map(|p| p.chunk.id).collect();
@@ -605,13 +571,12 @@ impl Compositor {
         self.clusters.room(device, encoder, chunks().map(|b| b.clusters.len() as u32).sum());
         let mut candidates: Vec<[u32; 2]> = Vec::new();
         let mut full = false;
-        for (k, p) in frame.chunks.iter().enumerate() {
+        for p in &frame.chunks {
             // A hue per layer of a level's cells (Colours), neighbours in a stack far apart.
             let cell = &p.cell;
             let hue = hash(&[p.face as u64, cell.level as u64]) + 0.618 * (cell.site[2] / cell.spacing()) as f64;
-            let depth = ((k as f64 - frame.chunks.len() as f64) * scale as f64).exp2() as f32;
             let chunk = &p.chunk;
-            // Chunks go in painting order: once the buffers are full, nothing behind is uploaded.
+            // Chunks come finest and nearest first: once the buffers are full, what is farther waits.
             if !self.resident.contains_key(&chunk.id) && (full || !self.upload(device, queue, encoder, chunk)) {
                 full = true;
                 continue;
@@ -621,13 +586,11 @@ impl Compositor {
             if table.len() <= slot {
                 table.resize(slot + 1, GpuChunk::default());
             }
-            let [width, height] = chunk.baked.extent;
             table[slot] = GpuChunk {
                 origin: [p.x as f32, p.y as f32],
-                extent: [width as f32, height as f32],
                 distance: p.distance as f32,
                 face: p.face as u32,
-                depth,
+                level: cell.level as f32,
                 tint: match view.colours {
                     Colours::Voxels => 0,
                     Colours::Layers => tint(hue),
@@ -650,7 +613,7 @@ impl Compositor {
             at_least(device, draws, self.in_view.max(1) as u64 * 16);
         }
         let sky_fog = 1.0 - (-frame.farthest / view.fog_distance).exp();
-        queue.write_buffer(&self.globals, 0, bytemuck::cast_slice(&view.globals(size, scale, sky_fog)));
+        queue.write_buffer(&self.globals, 0, bytemuck::cast_slice(&view.globals(size, sky_fog)));
         self.bind_groups(device);
     }
 
@@ -756,11 +719,6 @@ impl Compositor {
     }
 }
 
-/** depth_scale (depth_of in compositor.wgsl) for `chunks` chunks: depths from 2^-120, far above f32's least normal, at most half an octave a chunk. */
-fn depth_scale(chunks: usize) -> f32 {
-    (120.0 / chunks.max(1) as f32).min(0.5)
-}
-
 /** How a frame is seen: orientation, focal length, fog, the faces' axes, and the view's size in points and in pixels (the picture's). */
 #[derive(Clone, Copy)]
 pub struct View {
@@ -807,13 +765,12 @@ fn tint(hue: f64) -> u32 {
 }
 
 impl View {
-    fn globals(&self, pixels: [u32; 2], depth_scale: f32, sky_fog: f64) -> [f32; GLOBALS] {
+    fn globals(&self, pixels: [u32; 2], sky_fog: f64) -> [f32; GLOBALS] {
         let mut g = [0.0f32; GLOBALS];
         g[0..2].copy_from_slice(&self.size);
         g[2..4].copy_from_slice(&pixels.map(|v| v as f32));
         g[4] = self.focal as f32;
         g[5] = self.fog_distance as f32;
-        g[6] = depth_scale;
         g[7] = sky_fog as f32;
         // Dimmed in linear terms, as light adds up.
         let dim = |colour: [f32; 3]| colour.map(|c| linear_to_srgb(srgb_to_linear(c) * self.sky));

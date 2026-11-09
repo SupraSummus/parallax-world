@@ -18,7 +18,7 @@ pnpm exec vitest run bake       # files matching "bake"
 |------|--------|
 | `src/lib/cells.test.ts`, `bake/src/cells.rs` | Cells of N·FCC and the baker's table of them |
 | `src/lib/slice-selection.test.ts`, `bake/src/slicing.rs` | Slices, bricks and eyes; every site in exactly one slice; slicings paired as they re-tile |
-| `bake/src/lod.rs` | Native's cells: every site drawn first at the finest level claiming it; chunks a ray meets come in painting order |
+| `bake/src/lod.rs` | Native's cells: every site drawn first at the finest level claiming it; no ray meets a finer level after a coarser |
 | `src/lib/relief.test.ts` | Slices drawn in relief against ray-cast perspective: what they leak by detail |
 | `src/lib/chunk-baker.test.ts`, `bake/src/splats.rs` | Baked chunks' splats against rays cast along the axis and, in relief, slanted |
 | `bake/src/fill.rs`, `bake/src/coverage.rs` | Splats filled into a mask; solid blocks and their sums |

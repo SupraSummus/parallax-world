@@ -1,7 +1,6 @@
 //! Renders the world as chunks that are cells of the lattice (bake's
-//! lod.rs): per face, the cells lod.rs picks, each chunk its own layer,
-//! painted level by level and within a level near to far, relative to the
-//! camera. A chunk is a whole cell, whatever the camera: baked once the
+//! lod.rs): per face, the cells lod.rs picks, relative to the camera,
+//! finest and nearest first. A chunk is a whole cell, whatever the camera: baked once the
 //! world has all the tiles it reads, it is kept while in use; until then,
 //! the tiles are what it wants. Every chunk in view is baked: drawing what
 //! is in view, and culling what of it is hidden, is the compositor's job.
@@ -42,7 +41,7 @@ pub struct Placement {
     pub y: f64,
 }
 
-/** What to draw: chunks face by face, in painting order. */
+/** What to draw: chunks face by face, finest and nearest first, as the compositor has room for them. */
 pub struct Frame {
     pub chunks: Vec<Placement>,
     /** The farthest chunk's distance, or the render distance if farther: the sky's fog. */
@@ -179,7 +178,7 @@ impl Renderer {
             let mut picked = Vec::new();
             let eye = [local[0] / LAYER, local[1], local[2] / LAYER];
             lod.select(eye, self.render_distance, tangents, |cell, d| picked.push((cell, d)));
-            // The painting order: level by level, near to far.
+            // Finest and nearest first: what the compositor takes first.
             picked.sort_by(|a, b| (a.0.level, a.1).partial_cmp(&(b.0.level, b.1)).expect("distances"));
             for (cell, d) in picked {
                 let level = cell.atoms as usize;

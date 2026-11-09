@@ -96,7 +96,7 @@ impl window::Content for App {
             if ui.checkbox(&mut walking, "Walk on Ground (F)").changed() {
                 self.walker = walking.then(|| Walker::at(self.camera));
             }
-            ui.add(egui::Slider::new(&mut self.renderer.shift, 1..=4).text("Voxels Finer than Cells (levels)"));
+            ui.add(egui::Slider::new(&mut self.renderer.shift, 1..=5).text("Voxels Finer than Cells (levels)"));
             ui.checkbox(&mut self.seams, "Show Face Seams");
             ui.horizontal(|ui| {
                 ui.label("Colour by");
