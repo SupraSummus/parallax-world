@@ -7,31 +7,29 @@ distance, but never so thick that they show more than a small angle of what
 true perspective would hide; camera movement mostly just moves cached
 images.
 
-Live demo: <https://suprasummus.github.io/parallax-world/> (deployed from `main`).
-
-[![The forest: a path under autumn birches, maples and spruces](docs/shots/forest.webp)](https://suprasummus.github.io/parallax-world/?seed=12345&camera=-14,40,-200&look=-25,6)
+![The forest: a path under autumn birches, maples and spruces](docs/shots/forest.webp "seed=12345&camera=-14,40,-200&look=-25,6")
 
 <table>
 <tr>
-<td width="50%"><a href="https://suprasummus.github.io/parallax-world/?seed=12345&amp;world=valley&amp;camera=0,400,1000&amp;look=0,-3&amp;distance=40000"><img src="docs/shots/valley.webp" alt="The valley: a town's square and church, forest up to the mountains"></a><br><sub>The valley, 5 km deep</sub></td>
-<td width="50%"><a href="https://suprasummus.github.io/parallax-world/?seed=12345&amp;world=valley&amp;camera=0,40,1420&amp;look=0,-6"><img src="docs/shots/town.webp" alt="A street into the town's square, its fountain and church"></a><br><sub>The town's square</sub></td>
+<td width="50%"><img src="docs/shots/valley.webp" alt="The valley: a town's square and church, forest up to the mountains" title="seed=12345&amp;world=valley&amp;camera=0,400,1000&amp;look=0,-3&amp;distance=40000"><br><sub>The valley, 5 km deep</sub></td>
+<td width="50%"><img src="docs/shots/town.webp" alt="A street into the town's square, its fountain and church" title="seed=12345&amp;world=valley&amp;camera=0,40,1420&amp;look=0,-6"><br><sub>The town's square</sub></td>
 </tr>
 <tr>
-<td><a href="https://suprasummus.github.io/parallax-world/?seed=12345&amp;world=valley"><img src="docs/shots/chapel.webp" alt="A chapel by the forest path"></a><br><sub>A chapel by the path</sub></td>
-<td><a href="https://suprasummus.github.io/parallax-world/?seed=12345&amp;world=valley&amp;camera=748,450,547&amp;look=34,-45"><img src="docs/shots/windmill.webp" alt="A windmill among fields and forest, seen from above"></a><br><sub>A windmill among the fields</sub></td>
+<td><img src="docs/shots/chapel.webp" alt="A chapel by the forest path" title="seed=12345&amp;world=valley"><br><sub>A chapel by the path</sub></td>
+<td><img src="docs/shots/windmill.webp" alt="A windmill among fields and forest, seen from above" title="seed=12345&amp;world=valley&amp;camera=748,450,547&amp;look=34,-45"><br><sub>A windmill among the fields</sub></td>
 </tr>
 <tr>
-<td><a href="https://suprasummus.github.io/parallax-world/?seed=12345&amp;world=valley&amp;camera=9571,4500,33856&amp;look=30,-5&amp;distance=40000"><img src="docs/shots/mountains.webp" alt="A crest over the treeline, a peak and a snowy massif behind"></a><br><sub>The ranges over the treeline</sub></td>
-<td><a href="https://suprasummus.github.io/parallax-world/?seed=12345&amp;world=city&amp;camera=-2,250,-150&amp;look=0,-30"><img src="docs/shots/city.webp" alt="City blocks, streets and crossings from above"></a><br><sub>The city</sub></td>
+<td><img src="docs/shots/mountains.webp" alt="A crest over the treeline, a peak and a snowy massif behind" title="seed=12345&amp;world=valley&amp;camera=9571,4500,33856&amp;look=30,-5&amp;distance=40000"><br><sub>The ranges over the treeline</sub></td>
+<td><img src="docs/shots/city.webp" alt="City blocks, streets and crossings from above" title="seed=12345&amp;world=city&amp;camera=-2,250,-150&amp;look=0,-30"><br><sub>The city</sub></td>
 </tr>
 <tr>
-<td><a href="https://suprasummus.github.io/parallax-world/?seed=12345&amp;world=learned&amp;camera=0,450,1700&amp;look=0,-30"><img src="docs/shots/learned.webp" alt="A settlement in the forest, drawn by a learned grammar"></a><br><sub>The learned town</sub></td>
-<td><a href="https://suprasummus.github.io/parallax-world/?seed=12345&amp;world=moor&amp;camera=0,200,-200&amp;look=0,-5&amp;distance=40000"><img src="docs/shots/moor.webp" alt="Heather, grass, a stream and pools to the horizon"></a><br><sub>The moor, 5 km deep</sub></td>
+<td><img src="docs/shots/learned.webp" alt="A settlement in the forest, drawn by a learned grammar" title="seed=12345&amp;world=learned&amp;camera=0,450,1700&amp;look=0,-30"><br><sub>The learned town</sub></td>
+<td><img src="docs/shots/moor.webp" alt="Heather, grass, a stream and pools to the horizon" title="seed=12345&amp;world=moor&amp;camera=0,200,-200&amp;look=0,-5&amp;distance=40000"><br><sub>The moor, 5 km deep</sub></td>
 </tr>
 </table>
 
 <sub>Seed 12345, drawn by `pnpm shot`;
-each picture links to the same view in the demo.</sub>
+each picture's view is its title (hover over it).</sub>
 
 ## Design principles
 
