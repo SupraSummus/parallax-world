@@ -180,19 +180,24 @@ but a few where levels change (section 5).
 The native spike has no slices (`bake/src/lod.rs`, `native/src/renderer.rs`).
 A chunk is a whole cell of 2^L·FCC,
 drawn as the voxels of grid max(0, L − S) (`--shift S`)
-in relief over the plane through its site;
+over the plane through its site;
 nothing else, the camera least of all, changes it.
+It holds the voxels of its cell a ray can enter by an open face,
+each one hexagon (`cell_splats`):
+no runs and no cut faces, as a slice has (section 3).
+A ray's first voxel is entered so and is in one cell,
+and the compositor's depth decides between cells:
+finer levels in front, and within a level the voxel whose site is nearer the eye,
+which, voxels being the lattice's Voronoi cells, is the one a ray meets first.
 The camera only picks the chunks a face composes,
 by its layer along the face's axis alone, in whole numbers:
 level L claims the cells up to 2Q · 2^L layers ahead,
 and draws those not all within the finer level's claims.
 Where a cell overlaps finer ones, both draw what is there,
-and the finer is painted first.
-Painted level by level, and within a level by their sites' distance from the eye,
-chunks need no clipping or margins, for any ray of the face:
-a face's rays cross a level's cells layer after layer,
-so they leave a level's claims at most once,
-and of two cells of one level, they meet first the one whose site is nearer.
+and the finer is in front.
+A face's rays cross a level's cells layer after layer,
+so they leave a level's claims at most once
+and never meet a finer level after a coarser one.
 Where they overlap, coarser voxels may show a little past the finer ones' edges.
 There is no coverage: every chunk in view is baked,
 and the compositor culls what is hidden (section 4).
@@ -517,11 +522,9 @@ No antialiasing, so voxel edges stay crisp.
 
 The native compositor (`native/src/compositor.rs`) draws only what may show:
 in the forest, under 2 % of the splats in view show a pixel.
-Painting order is in the depth instead of the draw order:
-chunk k of L at 2^((k − L)·s), and within a chunk each splat's rank,
-nearer the later it is painted
-(`depth_of`, exponential so the largest chunks' ranks stay apart in f32).
-So splats can be drawn in any order,
+Its chunks are cells (section 1), and their splats have no runs:
+the depth is the level, then the distance from the eye to the splat's site
+(`depth_of`), so splats can be drawn in any order,
 and the bake workers put a chunk's in clusters of a few nearby on its plane,
 each with the box of their outlines along the axis,
 how far before and past the plane they are, and its nearest depth:

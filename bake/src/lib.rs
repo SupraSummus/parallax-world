@@ -31,7 +31,7 @@ use fill::{fill_mask, solid_blocks};
 use light::Lighting;
 use lod::CellChunk;
 use slicing::{LAYER, chunk_cell, slice_centre, spacing, thickness};
-use splats::{Splats, chunk_splats, lit_voxel_colour, voxel_colour};
+use splats::{Splats, SplatsOf, cell_splats, chunk_splats, lit_voxel_colour, voxel_colour};
 use surface::{cell_surface, surface};
 use world::{Geometry, Reader};
 
@@ -186,7 +186,7 @@ impl Baker {
         self.reach(level);
         let reader = Reader::new(&self.grids[level], self.lattices[face]);
         let surface = cell_surface(&reader, &self.geometry, &self.pairs, &slice, i, j);
-        self.paint(face, level, &surface, (2.0 * slice_centre(&slice) / LAYER).round() as i32);
+        self.paint(face, level, &surface, (2.0 * slice_centre(&slice) / LAYER).round() as i32, chunk_splats);
 
         // Where they may be drawn, clipped to the cell, in the grid's units.
         let cell = chunk_cell(slice.level, i, j);
@@ -215,10 +215,10 @@ impl Baker {
     }
 
     /**
-     * Bakes a cell chunk (lod.rs) of view face `face`: its cell's voxels that
-     * can show, as splats over the plane through its site, unclipped: no
-     * other chunk of its level draws its voxels, and the composition paints
-     * finer chunks first. No mask: what is covered is left to the GPU.
+     * Bakes a cell chunk (lod.rs) of view face `face`: its cell's voxels a
+     * ray can enter (cell_splats), as splats over the plane through its site,
+     * unclipped: no other chunk of its level draws its voxels, and depth
+     * decides between them. No mask: what is covered is left to the GPU.
      */
     pub fn bake_cell(&mut self, face: usize, chunk: &CellChunk) -> Baked {
         let level = chunk.atoms as usize;
@@ -233,15 +233,15 @@ impl Baker {
         let (from, to) = chunk.bounds();
         let surface = surface(&reader, &self.geometry, from, to, holds);
         // Over the plane through its site.
-        self.paint(face, level, &surface, 2 * chunk.site[2]);
+        self.paint(face, level, &surface, 2 * chunk.site[2], cell_splats);
         let s = &self.splats;
         let extent = if s.splats.is_empty() { [0.0; 2] } else { [s.max_x - s.min_x, s.max_y - s.min_y] };
         self.blocks.clear();
         self.numbers(level, s.min_x, s.max_y, extent, [0, 0], 1.0)
     }
 
-    /** The splats of a surface read from grid `level` along view face `face`, coloured (chunk_splats). */
-    fn paint(&mut self, face: usize, level: usize, surface: &[surface::Voxel], centre: i32) {
+    /** The splats `splats` makes of a surface read from grid `level` along view face `face`, coloured. */
+    fn paint(&mut self, face: usize, level: usize, surface: &[surface::Voxel], centre: i32, splats: SplatsOf) {
         let lattice = self.lattices[face];
         let palettes = self.palettes.len() / VIEW_FACES;
         let palette = &self.palettes[face * palettes..(face + 1) * palettes];
@@ -250,7 +250,7 @@ impl Baker {
             Some(light) => lit_voxel_colour(voxel, &light(level, lattice.world(voxel.site)), kinds, lattice.f.map(|v| -v)),
             None => voxel_colour(voxel, palette),
         };
-        chunk_splats(&mut self.splats, &self.geometry, &mut colour, surface, centre);
+        splats(&mut self.splats, &self.geometry, &mut colour, surface, centre);
     }
 
     /**

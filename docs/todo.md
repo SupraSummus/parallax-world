@@ -36,7 +36,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   Why is open: the same views and paths, drawn headless, take milliseconds.
 - **Native's cells could be simpler and cheaper**
   (section 1 of `docs/architecture.md`).
-  The compositor still clips each chunk to its rectangle, which cells don't need.
   Which cells may hold voxels is asked of `LayerIndex`, per face, layer and block of columns;
   the cells of each level are the same lattice for every face,
   so a set of the cells holding voxels, per level, would do for all twelve.
@@ -45,10 +44,12 @@ Numbers are for the forest at 1280×800, as measured when written.
   the depth pyramid it culls clusters with could cull cells not yet baked too.
   Cells straddling where a face's levels meet are drawn at both.
   The main thread finds every cell in view each render, most of them empty:
-  about 30 ms in the forest.
-  Chunks keep the faces cut between cells:
-  without them, paths show holes where the relief's hexagons and pillars leave gaps.
-  The web still draws slices.
+  about 30 ms in the forest at the default detail, under 1 ms at 1.
+  `surface` still finds a cell's cut faces, which `cell_splats` drops.
+  Detail sets Q = max(4, ⌈2·detail⌉), so below 2 it changes nothing;
+  Q itself, a whole number, would say what it does.
+  The web still draws slices, with runs and cut faces:
+  its compositor would need depth by distance too to draw cells.
 
 - **TS and Rust still say much the same twice.**
   The tiles around the camera (`world.ts`) are `native/src/world.rs`,

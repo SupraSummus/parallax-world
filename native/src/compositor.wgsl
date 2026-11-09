@@ -1,6 +1,6 @@
 // compositor.ts in WGSL, drawing only the clusters of splats that may show:
-// each splat names its chunk's slot in `chunks`, which gives its face,
-// plane and clip relative to the camera. Per frame, cull_drawn lists draws
+// each splat names its chunk's slot in `chunks`, which gives its face and
+// plane relative to the camera. Per frame, cull_drawn lists draws
 // of the clusters that showed last frame, and splat_vertex draws them; their depth
 // is reduced to a pyramid of farthest depths (reduce_depth, reduce), and
 // cull_rest tests every cluster against it: those that showed are kept for
@@ -17,7 +17,7 @@ struct Globals {
   resolution: vec2f, // device pixels
   focal: f32,
   fog_distance: f32,
-  depth_scale: f32, // see depth_of
+  _pad: f32,
   sky_fog: f32,
   sky_top: vec4f,
   horizon: vec4f,
@@ -27,10 +27,9 @@ struct Globals {
 
 struct Chunk {
   origin: vec2f, // top-left corner of what is drawn, relative to the camera, face coordinates
-  extent: vec2f,
   distance: f32, // of the centre plane, along the face's axis
   face: u32,
-  depth: f32, // its place in the painting order: see depth_of
+  level: f32, // see depth_of
   tint: u32, // RGBA to paint its splats in, shaded as their voxels are; 0 for their own
   half_layer: f32, // how far a splat is past the plane per step of its alpha past 128
   _pad: f32,
@@ -38,20 +37,18 @@ struct Chunk {
 
 // Splats of one chunk near each other on its plane: `first` and the next
 // `count` (low byte of `slot_count`, its chunk's slot above), the box of
-// their outlines along the axis relative to the chunk's origin, the least
-// order among them, whether any showed in the last frame, how far past the
-// plane they are, nearest and farthest, and the widest's half width.
+// their outlines along the axis relative to the chunk's origin, whether
+// any showed in the last frame, how far past the plane they are, nearest
+// and farthest, and the widest's half width.
 struct Cluster {
   min: vec2f,
   max: vec2f,
   first: u32,
   slot_count: u32,
-  order: f32,
   visible: u32,
   near: f32,
   far: f32,
   wide: f32,
-  _pad: u32,
 }
 
 // A cluster's draw: its splats, instances of splat_vertex.
@@ -78,13 +75,15 @@ struct DrawArgs {
 // Showing the frame.
 @group(0) @binding(13) var picture: texture_2d<f32>;
 
-// Painting order is depth: chunk k of L at 2^((k - L) · depth_scale),
-// and within a chunk by `order`, in [0, 1), nearer the later a splat is
-// painted (see Compositor::prepare), up to the next chunk's.
-// Exponential, so each chunk has about as many depths as a whole [½, 1)
-// would linearly, enough for every splat of the largest chunks.
-fn depth_of(chunk: f32, order: f32) -> f32 {
-  return chunk * exp2(order * globals.depth_scale);
+// The depth of a splat of a chunk of `level`, its site `distance` from the
+// eye: finer levels in front (lod.rs), and within a level the nearer site,
+// which, voxels being the lattice's Voronoi cells, is the one a ray meets
+// first. Level L's depths are [2^(L - 64), 2^(L - 63)), HALFWAY halfway:
+// any distance in the view's scale keeps f32's steps far below a voxel.
+// Where faces overlap by a hair (splat_fragment), the first is in front.
+const HALFWAY = 1000.0;
+fn depth_of(level: f32, distance: f32, face: u32) -> f32 {
+  return exp2(level - 64.0) * (1.0 + distance / (distance + HALFWAY)) * (1.0 + f32(face) * exp2(-21.0));
 }
 
 struct Splat {
@@ -94,8 +93,6 @@ struct Splat {
   @location(1) ray: vec2f,
   @location(2) @interpolate(flat) slant: f32,
   @location(3) @interpolate(flat) colour: vec3f,
-  // The chunk's left, top, right and bottom, as tangents too, a hair wider.
-  @location(4) @interpolate(flat) clip: vec4f,
 }
 
 fn ray_of(view: mat3x3f, position: vec4f) -> vec3f {
@@ -104,16 +101,15 @@ fn ray_of(view: mat3x3f, position: vec4f) -> vec3f {
 }
 
 // A splat instance (GpuSplat): its hexagon's centre relative to its chunk's
-// origin and half its width and height, its colour (its alpha its depth
-// past the plane) and its order in the chunk; drawn at its depth, as much
-// wider as the ray to it slants across (compositor.ts). Its chunk's slot
-// comes as the first vertex's index over 4.
+// origin and half its width and height, and its colour (its alpha its depth
+// past the plane); drawn at its depth, as much wider as the ray to it
+// slants across (compositor.ts). Its chunk's slot comes as the first
+// vertex's index over 4.
 @vertex
 fn splat_vertex(
   @builtin(vertex_index) vertex: u32,
   @location(0) splat: vec4f,
   @location(1) paint: vec4f,
-  @location(2) order: f32,
 ) -> Splat {
   let c = chunks[vertex >> 2u];
   let face = globals.faces[c.face];
@@ -127,16 +123,14 @@ fn splat_vertex(
   out.colour = mix(select(paint.rgb, tinted, c.tint != 0u), globals.horizon.rgb, fog);
   let at = site + vec3f(out.corner * size, 0.0);
   out.ray = at.xy / at.z;
-  out.clip = vec4f(c.origin.x, c.origin.y, c.origin.x + c.extent.x, c.origin.y - c.extent.y) / c.distance + vec4f(-1.0, 1.0, 1.0, -1.0) * 1e-4;
   let p = transpose(face.view) * at;
-  out.position = vec4f(p.xy * globals.focal / (globals.viewport / 2.0), depth_of(c.depth, order) * p.z, p.z);
+  out.position = vec4f(p.xy * globals.focal / (globals.viewport / 2.0), depth_of(c.level, length(site), c.face) * p.z, p.z);
   return out;
 }
 
-// The face draws its own rays, a chunk its part of the plane, by the ray
-// each splat interpolates (working it out from the pixel costs more).
-// Rounding differs between splats, so faces and chunks overlap by a hair:
-// no pixel is left to neither.
+// The face draws its own rays, by the ray each splat interpolates (working
+// it out from the pixel costs more). Rounding differs between splats, so
+// faces overlap by a hair: no pixel is left to neither.
 @fragment
 fn splat_fragment(in: Splat) -> @location(0) vec4f {
   if abs(in.corner.x) * in.slant + abs(in.corner.y) >= 1.0 {
@@ -144,9 +138,6 @@ fn splat_fragment(in: Splat) -> @location(0) vec4f {
   }
   let t = in.ray;
   if abs(t.x) + sqrt(2.0) * abs(t.y) > 1.001 {
-    discard;
-  }
-  if t.x < in.clip.x || t.x >= in.clip.z || t.y > in.clip.y || t.y <= in.clip.w {
     discard;
   }
   return vec4f(in.colour, 1.0);
@@ -158,8 +149,8 @@ fn closest_to_zero(lo: f32, hi: f32) -> f32 {
 }
 
 // Where a cluster may draw on screen, in pixels (left, top, right, bottom),
-// as its chunk is clipped to its cell and its face to the face's rays, both
-// a hair wider (splat_fragment); empty if it draws nowhere.
+// within its face's rays, a hair wider (splat_fragment); empty if it draws
+// nowhere.
 fn screen_box(cluster: Cluster) -> vec4f {
   let c = chunks[cluster.slot_count >> 8u];
   // The rays through its splats, as tangents: each is drawn at its depth,
@@ -173,12 +164,8 @@ fn screen_box(cluster: Cluster) -> vec4f {
   let slant = max(max(abs(lo.x) / z.x, abs(hi.x) / z.x), max(abs(lo.x) / z.y, abs(hi.x) / z.y));
   lo.x -= cluster.wide * slant;
   hi.x += cluster.wide * slant;
-  // Then clipped as splat_fragment clips them, to its chunk and its face.
-  lo = max(min(lo / z.x, lo / z.y), vec2f(c.origin.x, c.origin.y - c.extent.y) / c.distance - 1e-4);
-  hi = min(max(hi / z.x, hi / z.y), vec2f(c.origin.x + c.extent.x, c.origin.y) / c.distance + 1e-4);
-  if any(lo >= hi) {
-    return vec4f(0.0);
-  }
+  lo = min(lo / z.x, lo / z.y);
+  hi = max(hi / z.x, hi / z.y);
   if closest_to_zero(lo.x, hi.x) + sqrt(2.0) * closest_to_zero(lo.y, hi.y) > 1.001 {
     return vec4f(0.0);
   }
@@ -233,7 +220,9 @@ fn draws_cluster(at: u32, cluster: Cluster, phase: u32) -> bool {
   if phase == 0u {
     return cluster.visible != 0u && shows(b);
   }
-  let depth = depth_of(chunks[cluster.slot_count >> 8u].depth, cluster.order);
+  let c = chunks[cluster.slot_count >> 8u];
+  // Its nearest splat's distance is no less than how far ahead it is.
+  let depth = depth_of(c.level, max(c.distance + cluster.near, 0.0), c.face);
   let visible = shows(b) && !(culls && hidden(b, depth));
   clusters[at].visible = u32(visible);
   // The first phase drew those visible before and in view.

@@ -12,19 +12,17 @@
 //! within the finer one's claims. A site claimed by level L − 1 is by level
 //! L (Q ≥ 3), so each level's claims hold the finer ones'. Where a cell
 //! overlaps finer cells, both draw what is there, and the finer is painted
-//! first: in front.
+//! in front.
 //!
-//! Painted level by level, finest first, and within a level by their sites'
-//! distance from the eye, near to far, chunks need no clipping where they
-//! meet, for any ray of the face from anywhere. A face draws the rays nearer
-//! its axis F than any other of the 12 directions, and a ray crossing from a
-//! cell into its neighbour across n (one of the 12, scaled) has v · n > 0;
-//! were n · F < 0, n would be m − F or −F for one of them, m, and
-//! v · n = v · m − v · F ≤ 0. So along a ray of the face, a level's cells
-//! come layer after layer, and once it leaves a level's claims it is never
-//! back: levels never decrease along it. And of two cells of one level a ray
-//! crosses (pieces of them even), the first has its site nearer the eye:
-//! |x − a|² − |x − b|² is linear along the ray.
+//! Finer levels in front, and within a level whichever voxel is nearer
+//! (the compositor's depth), chunks need no clipping where they meet, for
+//! any ray of the face from anywhere: no ray meets a finer level after a
+//! coarser one. A face draws the rays nearer its axis F than any other of
+//! the 12 directions, and a ray crossing from a cell into its neighbour
+//! across n (one of the 12, scaled) has v · n > 0; were n · F < 0, n would
+//! be m − F or −F for one of them, m, and v · n = v · m − v · F ≤ 0. So
+//! along a ray of the face, a level's cells come layer after layer, and once
+//! it leaves a level's claims it is never back.
 
 use crate::slicing::{GRID_LEVELS, LAYER};
 
@@ -89,12 +87,13 @@ impl Lod {
      * eye's layer to `far` (world units) ahead
      * along the axis, whose rays have x / z and y / z within `tangents`
      * (min x, max x, min y, max y; the face's coordinates, see view.ts),
-     * each with its site's distance from the eye: painted by level, then by
-     * that. `eye` is in the face's lattice coordinates, in units of grid 0.
+     * each with its site's distance from the eye, by which the nearest are
+     * baked first. `eye` is in the face's lattice coordinates, in units of
+     * grid 0.
      */
     pub fn select(&self, eye: [f64; 3], far: f64, tangents: [f64; 4], mut visit: impl FnMut(CellChunk, f64)) {
         let [ea, eb, ec] = eye;
-        // Any whole layer near the eye would do: the painting order holds for any.
+        // Any whole layer near the eye would do: the levels' order holds for any.
         let camera = ec.floor() as i32;
         let last = camera as i64 + (far / LAYER).ceil() as i64;
         for level in 0..=self.top() {
@@ -142,13 +141,12 @@ mod tests {
     use super::*;
     use crate::cells::owner;
 
-    /** The chunks a face composes from `eye`, by level and site in units of grid 0, and their painting order: (level, distance). */
-    fn composed(lod: &Lod, eye: [f64; 3], far: f64) -> std::collections::HashMap<(i32, [i32; 3]), (i32, f64)> {
+    /** The chunks a face composes from `eye`, by level and site in units of grid 0. */
+    fn composed(lod: &Lod, eye: [f64; 3], far: f64) -> std::collections::HashSet<(i32, [i32; 3])> {
         let rhombus = [-1.0, 1.0, -std::f64::consts::FRAC_1_SQRT_2, std::f64::consts::FRAC_1_SQRT_2];
-        let mut chunks = std::collections::HashMap::new();
-        lod.select(eye, far, rhombus, |chunk, d| {
-            let key = (chunk.level, chunk.site.map(|v| v << chunk.atoms));
-            assert!(chunks.insert(key, (chunk.level, d)).is_none(), "{chunk:?} twice");
+        let mut chunks = std::collections::HashSet::new();
+        lod.select(eye, far, rhombus, |chunk, _| {
+            assert!(chunks.insert((chunk.level, chunk.site.map(|v| v << chunk.atoms))), "{chunk:?} twice");
         });
         chunks
     }
@@ -168,7 +166,7 @@ mod tests {
             let camera = eye[2].floor() as i32;
             let near = camera + NEAR;
             let chunks = composed(&lod, eye, far);
-            let levels: std::collections::BTreeSet<i32> = chunks.keys().map(|k| k.0).collect();
+            let levels: std::collections::BTreeSet<i32> = chunks.iter().map(|k| k.0).collect();
             assert!(levels.len() >= 3, "levels {levels:?}");
             let mut ahead = 0;
             for a in -90..=90 {
@@ -179,7 +177,7 @@ mod tests {
                             continue;
                         }
                         // The chunks holding it, finest first.
-                        let holding: Vec<i32> = levels.iter().copied().filter(|&l| chunks.contains_key(&(l, owner(1 << l, p)))).collect();
+                        let holding: Vec<i32> = levels.iter().copied().filter(|&l| chunks.contains(&(l, owner(1 << l, p)))).collect();
                         if c < near {
                             assert!(holding.is_empty(), "shift {shift}: {p:?}, before the near plane, in {holding:?}");
                             continue;
@@ -195,20 +193,18 @@ mod tests {
     }
 
     /**
-     * The chunks a ray from `eye` meets, where each shows (the one painted
-     * first of those holding a point): how many times it goes from one to
-     * another, and how many of those against the painting order.
+     * The levels a ray from `eye` meets, where each shows (the finest of
+     * the chunks holding a point): how many times it goes from one to
+     * another, and how many of those to a finer one.
      */
     fn crossings(lod: &Lod, eye: [f64; 3], far: f64) -> (usize, usize) {
         let chunks = composed(lod, eye, far);
-        let shows = |x: [f64; 3]| {
-            (0..=lod.top()).filter_map(|l| chunks.get(&(l, nearest(1 << l, x))).copied()).min_by(|p, q| p.partial_cmp(q).expect("ordered"))
-        };
+        let shows = |x: [f64; 3]| (0..=lod.top()).find(|&l| chunks.contains(&(l, nearest(1 << l, x))));
         let (mut met, mut wrong) = (0, 0);
         for r in 0..200 {
             let (u, v) = ((r * 37 % 101) as f64 / 101.0 * 1.9 - 0.95, (r * 53 % 97) as f64 / 97.0 * 1.3 - 0.65);
             let dir = [u / LAYER, v * (1.0 - u.abs()) / std::f64::consts::SQRT_2, 1.0 / LAYER];
-            let mut last: Option<(i32, f64)> = None;
+            let mut last: Option<i32> = None;
             for t in 6..1600 {
                 let x: [f64; 3] = std::array::from_fn(|d| eye[d] + dir[d] * t as f64 * 0.07);
                 if !in_view(eye, x, far) {
@@ -228,7 +224,7 @@ mod tests {
     }
 
     #[test]
-    fn chunks_a_ray_meets_come_in_painting_order_from_anywhere() {
+    fn no_ray_meets_a_finer_level_after_a_coarser_from_anywhere() {
         let (mut met, mut wrong) = (0, 0);
         for e in 0..6 {
             let lod = Lod { shift: 2, q: 4 + e % 3 };
@@ -236,7 +232,7 @@ mod tests {
             let (m, w) = crossings(&lod, eye, 120.0);
             (met, wrong) = (met + m, wrong + w);
         }
-        assert!(met > 10000 && wrong == 0, "{wrong} of {met} crossings out of painting order");
+        assert!(met > 1000 && wrong == 0, "{wrong} of {met} crossings to a finer level");
     }
 
     /** The site of N·FCC nearest point x, in a face's lattice coordinates. */

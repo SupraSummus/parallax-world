@@ -62,7 +62,7 @@ bake/                        # Chunk baker, coverage and walking in Rust (no dep
     ├── slicing.rs           # slice-selection.ts's slices' shapes and chunks, for the web's baker
     ├── surface.rs           # A cell's voxels that can show
     ├── tables.rs            # The voxel's faces in lattice coordinates, the materials shaded per view face
-    ├── splats.rs            # Which voxels a chunk shows: each column's nearest, a hexagon at its site, in relief, over its run
+    ├── splats.rs            # Which voxels a chunk shows, each a hexagon at its site: of a slice, each column's nearest over its run; of a cell, each a ray can enter
     ├── light.rs             # The light from voxels' faces, as hosts that light a world hand it over
     ├── lod.rs               # Native's chunks: whole cells of the lattice, each face's levels by depth along it
     ├── fill.rs              # Splats filled into a mask for every slant, solid blocks (for coverage)
@@ -118,9 +118,9 @@ native/                      # Spike of a native frontend (egui on winit and wgp
     ├── window.rs            # The window: egui on winit and wgpu, its GPU device made again when lost
     ├── world.rs             # world.ts for generated worlds: a World's tiles, those the renderer wants first, made and indexed on threads
     ├── view.rs              # view.ts: faces, which rays and screen boxes they draw
-    ├── renderer.rs          # Chunks in view: cells of the lattice (bake's lod.rs), not slices; cached, painted level by level
+    ├── renderer.rs          # Chunks in view: cells of the lattice (bake's lod.rs), not slices; cached, finest and nearest first
     ├── bakery.rs            # Worker threads baking chunks, a baker each sharing the tiles (lit, with a Light each), and clustering their splats for the GPU
-    ├── compositor.rs        # compositor.ts with wgpu: splats uploaded per chunk in clusters, culled on the GPU against what showed
+    ├── compositor.rs        # compositor.ts with wgpu, for cells: splats uploaded per chunk in clusters, by depth, culled on the GPU against what showed
     ├── shot.rs              # --shot: one frame drawn offscreen on the GPU, saved as a PNG, no window
     └── compositor.wgsl
 ```
