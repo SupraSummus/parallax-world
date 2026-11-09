@@ -19,7 +19,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use bake::slicing::{GRID_LEVELS, GRID_REACH};
 use bake::{Grid, LayerIndex, Tiles};
 use worldgen::generator::generate;
-use worldgen::grid::{Box3, compose};
+use worldgen::grid::Box3;
 use worldgen::light::Shared;
 
 use crate::view::Vec3;
@@ -60,23 +60,6 @@ impl Level {
     pub fn new(tiles: HashMap<TileId, Arc<Tile>>) -> Level {
         let grids = Arc::new(Tiles::new(TILE_SHIFT, tiles.iter().map(|(&id, t)| (id, t.grid.clone()))));
         Level { tiles, grids }
-    }
-
-    /** A whole grid of `level` of a world of `heights` cut into tiles, those it has voxels in. */
-    pub fn cut(heights: &Heights, level: usize, grid: &Grid) -> Level {
-        let tile = |v: i32| (v as i64).div_euclid(TILE) as i32;
-        let (from, to) = ([grid.min[0], grid.min[2]].map(tile), [grid.min[0] + grid.n[0] - 1, grid.min[2] + grid.n[2] - 1].map(tile));
-        let mut tiles = HashMap::new();
-        for k in from[1]..=to[1] {
-            for i in from[0]..=to[0] {
-                let part = compose(&tile_box(heights, level, (i, k)), &[grid]);
-                if part.bricks.iter().any(|&b| b >= 0) {
-                    let index = LayerIndex::new(&part);
-                    tiles.insert((i, k), Arc::new(Tile { grid: Arc::new(part), index }));
-                }
-            }
-        }
-        Level::new(tiles)
     }
 }
 
