@@ -4,7 +4,7 @@
 //! baker in bake/, sharing the tiles, and wgpu drawing them in an egui window
 //! (window.rs).
 //!
-//! parallax-native [--world NAME] [--threads N] [--seed S] [--view QUERY] [--light SKY,SUN,GLOW] [--leak DEG] [--all-chunks] [--shot out.png [--size WxH] [--seams] [--colour voxels|layers|chunks] | --bench] [--stroll S [--on-ground]]
+//! parallax-native [--world NAME] [--threads N] [--seed S] [--view QUERY] [--light SKY,SUN,GLOW] [--detail D] [--all-chunks] [--shot out.png [--size WxH] [--seams] [--colour voxels|layers|chunks] | --bench] [--stroll S [--on-ground]]
 //!
 //! --view takes the web page's view query (parseViewQuery in renderer.ts),
 //! overriding --seed and --world.
@@ -16,7 +16,7 @@
 //! When the window panics or loses its GPU device, it says what it showed as these arguments.
 //! --light lights the world (worldgen's light.rs), the sky, the sun and
 //! what glows this bright: 1,1,0 a clear day, 0.01,0,1 night.
-//! --leak sets how far hidden geometry may show between slices (renderer.rs);
+//! --detail sets viewing distance over slice thickness (renderer.rs);
 //! --all-chunks bakes every chunk in view, covered or not, as the panel's
 //! switch does.
 //! --seams and --colour draw as the panel's switches do.
@@ -88,7 +88,12 @@ impl window::Content for App {
             // The web's (App.tsx).
             ui.add(egui::Slider::new(&mut self.fov, 5.0..=120.0).step_by(1.0).text("Field of View (°)"));
             ui.add(egui::Slider::new(&mut self.renderer.render_distance, 40.0..=40000.0).logarithmic(true).text("Render Distance"));
-            ui.add(egui::Slider::new(&mut self.renderer.max_leak, 1.0..=12.0).step_by(0.1).text("Max Occlusion Leak (°)"));
+            // In quarter octaves, as the web's: dragging re-slices only at each step.
+            let mut octaves = self.renderer.detail.log2();
+            let detail = egui::Slider::new(&mut octaves, 0.0..=6.0).step_by(0.25).custom_formatter(|v, _| format!("{:.1}", 2f64.powf(v)));
+            if ui.add(detail.text("Slice Detail")).changed() {
+                self.renderer.detail = 2f64.powf(octaves);
+            }
             let mut walking = self.walker.is_some();
             if ui.checkbox(&mut walking, "Walk on Ground (F)").changed() {
                 self.walker = walking.then(|| Walker::at(self.camera));
@@ -202,8 +207,8 @@ impl App {
     fn remember(&self, size: [f32; 2]) {
         let ([x, y, z], r) = (self.camera, &self.renderer);
         let mut frame = format!(
-            "--view '{}&camera={x},{y},{z}&look={},{}&fov={}&distance={:.0}&leak={}' --size {:.0}x{:.0}",
-            self.world_query, self.yaw, self.pitch, self.fov, r.render_distance, r.max_leak, size[0], size[1],
+            "--view '{}&camera={x},{y},{z}&look={},{}&fov={}&distance={:.0}&detail={}' --size {:.0}x{:.0}",
+            self.world_query, self.yaw, self.pitch, self.fov, r.render_distance, r.detail, size[0], size[1],
         );
         if !r.skip_covered {
             frame += " --all-chunks";
@@ -364,7 +369,7 @@ struct ViewQuery {
     look: Option<[f64; 2]>,
     fov: Option<f64>,
     distance: Option<f64>,
-    leak: Option<f64>,
+    detail: Option<f64>,
 }
 
 fn parse_view_query(query: &str) -> ViewQuery {
@@ -388,7 +393,7 @@ fn parse_view_query(query: &str) -> ViewQuery {
         look: numbers::<2>(get("look")),
         fov: numbers::<1>(get("fov")).map(|[v]| v),
         distance: numbers::<1>(get("distance")).map(|[v]| v),
-        leak: numbers::<1>(get("leak")).map(|[v]| v),
+        detail: numbers::<1>(get("detail")).map(|[v]| v),
     }
 }
 
@@ -421,8 +426,8 @@ fn main() {
     let lit = brightness.map(|b| (make, seed, Shared::new(b)));
     let shown = make(seed);
     let mut renderer = renderer(&shown, lit.clone(), threads, render_distance);
-    if let Some(v) = value("--leak").map(|v| v.parse().expect("leak")).or(query.leak) {
-        renderer.max_leak = v;
+    if let Some(v) = value("--detail").map(|v| v.parse().expect("detail")).or(query.detail) {
+        renderer.detail = v;
     }
     renderer.skip_covered = !flag("--all-chunks");
     let sky = brightness.map_or(1.0, |b| b.sky);

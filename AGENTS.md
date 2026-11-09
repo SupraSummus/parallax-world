@@ -41,7 +41,7 @@ src/
     ├── world.ts             # World: voxel grids by level of detail (generated in tiles around the camera), spawn; tests' scenes, a grid per level given
     ├── worldgen.ts          # The worlds of worlds/ (WebAssembly), any box at any level
     ├── cells.ts             # Cells of the coarser lattices N·FCC that slices are made of
-    ├── slice-selection.ts   # Slices, chunks and the leak bound (pure functions)
+    ├── slice-selection.ts   # Slices and chunks (pure functions)
     ├── view.ts              # Camera orientation, the 12 faces (FCC directions), projection
     ├── walk.ts              # Walking on the ground with bake/src/walk.rs (WebAssembly)
     ├── renderer.ts          # Slices and chunks in view, caching, screen placement (no DOM)
@@ -59,7 +59,7 @@ bake/                        # Chunk baker, coverage and walking in Rust (no dep
     ├── lib.rs               # Baker: one chunk per call; the WebAssembly exports
     ├── world.rs             # Grid, tiles of grids, the view's faces' lattices, voxels read per face
     ├── cells.rs             # cells.ts, with a table per level
-    ├── slicing.rs           # slice-selection.ts: slices, chunks, the leak bound (native's too)
+    ├── slicing.rs           # slice-selection.ts: slices and chunks (native's too)
     ├── surface.rs           # A cell's voxels that can show
     ├── tables.rs            # The voxel's faces in lattice coordinates, the materials shaded per view face
     ├── splats.rs            # Which voxels a chunk shows: each column's nearest, a hexagon at its site, in relief, over its run

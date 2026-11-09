@@ -236,14 +236,14 @@ describe('WorkerBakery', () => {
   })
 
   it('stops baking once settled, though the cache is past its cap', async () => {
-    // Sliced at one leak, then another: the first's slices are hidden.
+    // Sliced at one detail, then another: the first's slices are hidden.
     const settled = async (maxHiddenChunkBytes?: number) => {
       const renderer = new ParallaxRenderer(world, { bakery: new WorkerBakery([new FakeWorker()]), maxHiddenChunkBytes })
       renderer.resize(800, 600)
-      renderer.setMaxLeak(3)
+      renderer.setDetail(2 ** 4.25)
       await gridsIn(renderer)
       await settle(renderer)
-      renderer.setMaxLeak(2)
+      renderer.setDetail(32)
       await settle(renderer)
       // settle()'s last render evicted; did it drop chunks the view wants but does not draw?
       renderer.render()

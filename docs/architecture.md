@@ -29,8 +29,8 @@ World (voxels) ──selectSlices──▶ slices ──chunks in view──▶ 
 
 ## 1. Slice selection (`slice-selection.ts`, `cells.ts`)
 
-Two constraints: slices must be thin enough not to show what perspective
-hides (physical, section 2), and named the same wherever the camera is,
+Two constraints: slices must be thin enough for their distance
+(`detail`, section 2), and named the same wherever the camera is,
 so they can be cached.
 
 ### Cells of coarser lattices
@@ -107,9 +107,9 @@ about 1 / (2^s · detail) radians (`docs/todo.md`).
 around the camera (`World.holds`, a square with its corners cut),
 and slices read no grid farther:
 the atom shift is the largest whose slices keep within it (`atomShift`).
-So thinner slices (a smaller leak) take coarser atoms sooner,
-voxels on screen stay within about twice their size at the default leak,
-and the grids' bytes are the same at every leak.
+So thinner slices (more detail) take coarser atoms sooner,
+voxels on screen stay within about twice their size at the default detail,
+and the grids' bytes are the same at every detail.
 Atoms twice as fine on screen would need `GRID_REACH` twice as large,
 four times the bytes in every worker.
 
@@ -117,7 +117,7 @@ Why many layers of atoms and not one:
 cells of neighbouring layers interlock, as voxels do.
 Along the axis, a layer of rhombic dodecahedra N layers apart is 2N deep,
 in columns alternating between even and odd layers;
-the leak bound limits a slice's depth (section 2),
+detail limits a slice's depth (section 2),
 so slices of single layers of cells would take twice as many.
 In a slab of R layers of cells only its two faces are ragged:
 it is about (R + 1)·N deep for R·N layers, 1.06 times for R = 16.
@@ -147,7 +147,6 @@ Level 0 starts at the first layer at least `near` ahead
 Each next level begins at `until`,
 the first of its slabs (a multiple of 2^(k+1)) far enough for its
 thickness, at most a / detail with a the distance to its near side.
-`detail` comes from the leak tolerance (section 2).
 Level 0 is always allowed: a voxel can't be cut.
 
 From level 6 on, the next level's atoms are larger,
@@ -176,73 +175,26 @@ up to `MAX_LEVEL`, then O(n).
 Moving the camera along the axis keeps every slice
 but a few where levels change (section 5).
 
-## 2. Occlusion leaks
+## 2. Detail and leaks
+
+A slice is at most 1/`detail` of its distance thick (section 1),
+the panel's "Slice Detail":
+far voxels are small on screen,
+so slices grow with distance and a range n takes O(detail · log n) of them.
+Detail depends on nothing else, not the field of view or viewport.
 
 Splats are drawn at their voxels' depths (section 3),
 so slices show what perspective shows,
 but for slivers where a hexagon stands in for a voxel's outline,
 and for what a column hides behind a gap in it
-(a valley between two hills: only its nearest voxel is kept).
-Step 8 of the test below finds no leak from slices of the bound,
-and leaks past it only from much thicker ones.
-The slicing keeps the bound below,
-derived for slices drawn flat, everything at the scale of its centre:
-it sets how thick slices are,
-and so their level of detail (section 1) and how many there are
-(`docs/todo.md`).
-Drawn flat, the gap between two slices could show a cross-section of
-the farther slice where the top and side faces of nearer voxels hide it
-in perspective, e.g. the ground under the moor's pools.
-
-Bound, with ε = the "max occlusion leak" setting:
-**geometry that perspective hides would not show by more than the angle ε**
-(or, closer than 2 · `detail` layers, by more than two layer spacings;
-see below).
-It is an angle because slicing knows neither the field of view nor the viewport:
-ε · `focal` pixels, more zoomed in.
-
-**Derivation.** Every step below is stated and checked on random samples,
-plus end to end against ray-cast perspective, in
-[`src/lib/leak-bound.test.ts`](../src/lib/leak-bound.test.ts); read it to
-follow or change the reasoning. In short, for one lateral axis, a slice
-of level k with near side a layers ahead, t layer spacings thick
-(`thickness`, as voxels reach past their sites), centre plane at D = a + t/2,
-is drawn flat, as seen along the face's axis:
-
-1. A point the camera sees along tangent σ, at depth z, is drawn at its
-   own lateral position on the plane, σ·(z − D) off.
-2. In the slice |z − D| ≤ t/2, so every edge is off by at most |σ|·t/2.
-3. A hidden voxel shows past its occluder by at most both edges' errors:
-   |σ|·t (the one modelling assumption; checked end to end).
-4. The face draws the rays |x| + √2·|y| ≤ z (section 4), so |σ| ≤ 1
-   (`MAX_SLANT`), at its rhombus's corners.
-5. As an angle the leak is at most t / (a + t/2),
-   t·focal / (a + t/2) pixels,
-   and slices are at most a / detail thick.
-6. That is at most 1 / (detail + 1/2) (`leakAngle`),
-   which `leakFreeDetail` makes ε, rounded up to a quarter octave:
-
-```
-detail = 1/ε − 1/2
-```
-
-Measured in world units instead of an angle, the bound would be the
-same thickness at every distance and a slice count linear in the range.
-What matters on screen is the angle, and far voxels are small, so slices
-grow with distance. Slices are at least one layer (two spacings) thick, though,
-so closer than 2 · `detail` layers the leak is bounded by two spacings
-instead, which can be more than ε.
-
-This holds straight along the stack's axis.
-A turned view draws a plane larger towards the screen's edges
-(by 1 / cos² of the angle from the screen centre),
-so leaks there can be up to 2× larger in a 90° view.
-
-The bound is reached only towards a face's edges, where rays slant most,
-and by the worst occluders; towards a face's middle a slice leaks little.
-It cannot be pushed to zero by thinner slices:
-even single layers would leak, because the back faces and the inside of
-the slab are flattened.
+(a valley between two hills: only its nearest voxel is kept,
+and farther slices show through).
+The thicker the slice, the more of such a column it holds:
+against rays cast in perspective,
+[`src/lib/relief.test.ts`](../src/lib/relief.test.ts)
+finds no leak at the most detail
+and leaks from slices as thick as their distance;
+at the default, a few pixels zoomed in.
 
 ## 3. Chunks and splats (`renderer.ts`, `chunk-baker.ts`, `bake/`)
 
@@ -439,7 +391,7 @@ invite, puts a corner of 4 faces in the middle of the screen.
 The native panel can also colour the splats by layer or by chunk (`Colours`).
 
 Chunks depend on neither where the camera is nor where it looks,
-and detail on the leak tolerance only, not the field of view or viewport.
+and detail on nothing else, not the field of view or viewport.
 So turning, zooming and resizing keep every slice and chunk;
 only chunks coming into view are baked,
 and faces coming into view are sliced.
@@ -598,7 +550,7 @@ baked again on every render.
 | x/y movement | Chunks still in view reused; chunks entering the view baked; placements update |
 | turning | Slices and chunks reused; chunks entering the view baked |
 | field of view change | Slices and chunks reused; only the compositor's focal length changes |
-| leak tolerance change | Slices still needed are reused |
+| detail change | Slices still needed are reused |
 | small z movement | Slices reused but where levels change: there a few slices get a new cutoff or level, the ones they replace standing in until baked |
 | resize | Slices and chunks reused; placements update |
 | world regeneration | Whole cache cleared |

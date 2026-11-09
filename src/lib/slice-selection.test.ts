@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { selectSlices, leakFreeDetail, leakAngle, matchTilings, sliceCentre, thickness, sliceKey, chunkCell, chunkCells, holds, atomSpacing, siteLayers, GRID_REACH, type SliceId } from './slice-selection'
-import { MAX_MAX_LEAK, MAX_RENDER_DISTANCE, MIN_MAX_LEAK } from './renderer'
+import { selectSlices, matchTilings, sliceCentre, thickness, sliceKey, chunkCell, chunkCells, holds, atomSpacing, siteLayers, GRID_REACH, type SliceId } from './slice-selection'
+import { MAX_DETAIL, MAX_RENDER_DISTANCE, MIN_DETAIL } from './renderer'
 import { LAYER } from './view'
 
 const name = ({ level, layer, cutoff }: SliceId) => `${String(level)}:${String(layer)}${Number.isFinite(cutoff) ? `|${String(cutoff)}` : ''}`
@@ -90,34 +90,16 @@ describe('selectSlices', () => {
   })
 })
 
-// That the bound holds is leak-bound.test.ts; these pin the formula's two cases.
-describe('leakFreeDetail', () => {
-  it('is 1 / ε − 1/2', () => {
-    // 64 px at focal 640 (1280 px wide at 90°): ε = 1/10.
-    // 10 − 1/2 = 9.5, rounded up to a quarter octave.
-    expect(leakFreeDetail(64 / 640)).toBe(2 ** 3.25)
-  })
-
-  it('is at least 1: slices no thicker than their distance', () => {
-    expect(leakFreeDetail(1)).toBe(1)
-  })
-
-  it.each([0.001, 0.025, 0.1, 1])('leaks at most ε = %s (leakAngle)', epsilon => {
-    expect(leakAngle(leakFreeDetail(epsilon))).toBeLessThanOrEqual(epsilon)
-  })
-})
-
 describe('atomShift', () => {
   /*
-   * At every leak the panel offers and wherever the camera is, no slice
+   * At every detail the panel offers and wherever the camera is, no slice
    * reads its grid farther than GRID_REACH of it, in the grid's units:
    * the sites it holds, before its slab's end or less than 3N past its
    * cutoff (selectSlices), their neighbours and voxels 2N more. A site
    * c layers ahead is at most c units away (atomShift).
    */
-  const leaks = Array.from({ length: (MAX_MAX_LEAK - MIN_MAX_LEAK) * 4 + 1 }, (_, k) => MIN_MAX_LEAK + k / 4)
-  it.each(leaks)('keeps slices within GRID_REACH of their grids at a leak of %s°', degrees => {
-    const detail = leakFreeDetail((degrees * Math.PI) / 180)
+  const details = Array.from({ length: 4 * Math.log2(MAX_DETAIL / MIN_DETAIL) + 1 }, (_, k) => MIN_DETAIL * 2 ** (k / 4))
+  it.each(details)('keeps slices within GRID_REACH of their grids at detail %s', detail => {
     for (let cameraZ = -60000; cameraZ < 60000; cameraZ += 2997.3) {
       for (const s of selectSlices(cameraZ, 4, MAX_RENDER_DISTANCE / LAYER, detail)) {
         const n = atomSpacing(s)

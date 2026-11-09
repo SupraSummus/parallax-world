@@ -149,12 +149,6 @@ pub fn cell_margin(level: i32, atoms: i32) -> (i32, i32) {
     (columns as i32, rows as i32)
 }
 
-/** Viewing distance over slice thickness that keeps occlusion leaks under `max_leak` radians, rounded up to a quarter octave (leakFreeDetail in slice-selection.ts). */
-pub fn leak_free_detail(max_leak: f64) -> f64 {
-    let detail = (MAX_SLANT / max_leak - 0.5).max(1.0);
-    2f64.powf((4.0 * detail.log2()).ceil() / 4.0)
-}
-
 /** z (face coordinates) of a slice's centre plane, halfway through what its voxels span: where its chunks are baked and drawn (sliceCentre). */
 pub fn slice_centre(slice: &Slice) -> f64 {
     (near_side(slice.level, slice.atoms, slice.layer) + thickness(slice.level, slice.atoms) as f64 / 2.0) * LAYER

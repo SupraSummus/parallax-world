@@ -283,8 +283,8 @@ export function writeGrid(
   if (faces && grid.faces.length > 0) copyIn(memory, faces(grid.faces.length / FACE_WORDS), grid.faces)
 }
 
-/** The sites of a grid's bricks in use, without the room `cells` has for more. @internal */
-export function usedCells({ bricks, cells }: VoxelData): Uint8Array {
+/** The sites of a grid's bricks in use, without the room `cells` has for more. */
+function usedCells({ bricks, cells }: VoxelData): Uint8Array {
   return cells.subarray(0, bricks.reduce((n, at) => Math.max(n, at + 1), 0) * BRICK_SITES)
 }
 

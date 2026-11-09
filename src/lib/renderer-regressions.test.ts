@@ -95,7 +95,7 @@ describe('Renderer regressions', () => {
       const renderer = new ParallaxRenderer(world)
       renderer.resize(800, 600)
       // Coarser than the default, so that levels from 4 on are in range.
-      renderer.setMaxLeak(7)
+      renderer.setDetail(8)
       renderer.setSkipCovered(false)
       renderer.setCamera({ x: 0, y: 30, z: -60 })
 
@@ -155,7 +155,7 @@ describe('Renderer regressions', () => {
     })
   })
 
-  // Flat slices drew a point up to the leak bound off, so a thin floor seen
+  // Flat slices drew a point up to half a slice's thickness off, so a thin floor seen
   // from high above showed the sky between slices. Drawn in relief, each
   // voxel where it is, slices meet.
   describe('one layer thick floor seen from high above', () => {
@@ -167,11 +167,11 @@ describe('Renderer regressions', () => {
     }
     const floor = ofVoxels(voxels)
 
-    it.each([3, 12])('shows no gaps between slices (max leak %s°)', maxLeak => {
+    it.each([2 ** 4.25, 2 ** 2.25])('shows no gaps between slices (detail %s)', detail => {
       const renderer = new ParallaxRenderer(floor)
       renderer.resize(1280, 800)
       renderer.setRenderDistance(800)
-      renderer.setMaxLeak(maxLeak)
+      renderer.setDetail(detail)
       // Looking along the strip from just before it (a = 3.8, c = -8).
       renderer.setCamera({ x: -2.1, y: 50, z: -5.9 })
       renderer.setOrientation({ yaw: 45, pitch: 0 })

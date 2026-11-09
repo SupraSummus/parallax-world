@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use bake::slicing::{GRID_LEVELS, LAYER, cell_margin, chunk_cell, chunk_cells, leak_free_detail, select_slices, site_layers, slice_centre};
+use bake::slicing::{GRID_LEVELS, LAYER, cell_margin, chunk_cell, chunk_cells, select_slices, site_layers, slice_centre};
 use bake::{Lattice, Slice, chunk_reads};
 
 use crate::bakery::{Baked, Bakery, Request};
@@ -101,8 +101,8 @@ pub struct Renderer {
     bakery: Bakery,
     next_id: u32,
     renders: u64,
-    /** Degrees: how far hidden geometry may show between slices. */
-    pub max_leak: f64,
+    /** Viewing distance over slice thickness (selectSlices in slice-selection.ts). */
+    pub detail: f64,
     pub render_distance: f64,
     pub skip_covered: bool,
 }
@@ -139,7 +139,8 @@ impl Renderer {
             bakery,
             next_id: 0,
             renders: 0,
-            max_leak: 6.0,
+            // DEFAULT_DETAIL in renderer.ts.
+            detail: 2f64.powf(3.25),
             render_distance,
             skip_covered: true,
         }
@@ -174,7 +175,7 @@ impl Renderer {
     pub fn render(&mut self, camera: Vec3, view: &View) -> (Frame, Stats) {
         self.receive();
         self.renders += 1;
-        let detail = leak_free_detail(self.max_leak.to_radians());
+        let detail = self.detail;
         let (answer, _) = self.occlusion.answer();
         let mut frame = Frame { layers: Vec::new(), farthest: self.render_distance };
         let mut stats = Stats::default();

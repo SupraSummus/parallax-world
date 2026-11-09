@@ -12,7 +12,7 @@ vi.mock('./worldgen', async () => (await import('./small-forest.test-helper')).s
 // The renderer never modifies its world.
 const world = hills(12345)
 // Degrees: coarser than the default, so fewer chunks to bake.
-const MAX_LEAK = 7
+const DETAIL = 8
 
 const faceNamed = (name: string) => FACES.find(f => f.name === name) as Face
 // Looking along +x+z (yaw 45°), that face's layers are parallel to the
@@ -68,7 +68,7 @@ describe('ParallaxRenderer', () => {
   beforeEach(() => {
     renderer = new ParallaxRenderer(world)
     renderer.resize(800, 600)
-    renderer.setMaxLeak(MAX_LEAK)
+    renderer.setDetail(DETAIL)
   })
 
   describe('camera', () => {
@@ -153,7 +153,7 @@ describe('ParallaxRenderer', () => {
       const narrow = new ParallaxRenderer(world)
       narrow.resize(400, 300)
       narrow.setFov((2 * Math.atan(0.5) * 180) / Math.PI)
-      narrow.setMaxLeak(MAX_LEAK)
+      narrow.setDetail(DETAIL)
       narrow.setOrientation({ yaw, pitch })
       narrow.render()
       expect(narrow.getStats().lastUpdate?.cachedBytes).toBeLessThan(wide.cachedBytes)
@@ -330,15 +330,14 @@ describe('ParallaxRenderer', () => {
       for (const face of faces) expect(slicesOf(face)).toEqual(wide.get(face))
     })
 
-    it('uses fewer, thicker slices for a larger tolerance', () => {
-      renderer.setMaxLeak(3)
+    it('uses fewer, thicker slices for less detail', () => {
+      renderer.setDetail(2 ** 4.25)
       render()
-      const strict = lastUpdate()
-      renderer.setMaxLeak(12)
+      const fine = lastUpdate()
+      renderer.setDetail(2 ** 2.25)
       render()
-      expect(lastUpdate().detail).toBeLessThan(strict.detail)
-      expect(lastUpdate().layerCount).toBeLessThan(strict.layerCount)
-      expect(lastUpdate().layerCount).toBe(expectedSlices(world.spawn, renderer.getOrientation(), lastUpdate().detail).length)
+      expect(lastUpdate().layerCount).toBeLessThan(fine.layerCount)
+      expect(lastUpdate().layerCount).toBe(expectedSlices(world.spawn, renderer.getOrientation(), 2 ** 2.25).length)
     })
   })
 
@@ -398,8 +397,8 @@ describe('ParallaxRenderer', () => {
 
 describe('view query', () => {
   it('reads a view, and leaves out what is missing or wrong', () => {
-    const view = { seed: 7, worldType: 'forest', camera: { x: 1, y: -2, z: 3.5 }, look: { yaw: 30, pitch: -10 }, fov: 60, distance: 500, leak: 2.5 } as const
-    expect(parseViewQuery('?seed=7&world=forest&camera=1,-2,3.5&look=30,-10&fov=60&distance=500&leak=2.5')).toEqual(view)
+    const view = { seed: 7, worldType: 'forest', camera: { x: 1, y: -2, z: 3.5 }, look: { yaw: 30, pitch: -10 }, fov: 60, distance: 500, detail: 22.5 } as const
+    expect(parseViewQuery('?seed=7&world=forest&camera=1,-2,3.5&look=30,-10&fov=60&distance=500&detail=22.5')).toEqual(view)
     expect(parseViewQuery('?seed=x&world=moon&camera=1,2&look=30,&fov=')).toEqual({})
     // The worlds of worlds/ by their names in WORLDS.
     expect(parseViewQuery('?world=valley')).toEqual({ worldType: 'valley' })
