@@ -39,8 +39,13 @@ const STEPS: usize = 1;
 const TOP_STEPS: usize = 64;
 /** Sites per tile in x and z, at each level, as native's; a tile spans the heights. */
 pub const TILE: i64 = 128;
-/** Sites whose light a level keeps, in PARTS parts, each locked and forgotten on its own. */
-const KEPT_SITES: usize = 1 << 17;
+/**
+ * Sites whose light a level keeps, in PARTS parts, each locked and
+ * forgotten on its own: walking, light found once is read again long
+ * after. A hash map fills up to 7/8 of its slots, so a part's 2^14, some
+ * 1.4 MB.
+ */
+const KEPT_SITES: usize = 7 << 17;
 const PARTS: usize = 64;
 /** Tiles of a level a Light keeps, and that all keep in Shared, before forgetting them. */
 const KEPT_TILES: usize = 16;
@@ -50,8 +55,8 @@ const SHARED_TILES: usize = 64;
 type Tile = Arc<OnceLock<VoxelGrid>>;
 /** Tiles by level and key. */
 type Tiles = Map<(usize, (i64, i64)), Tile>;
-/** The light coming to sites from each direction, as found. */
-type Found = Map<[i64; 3], [Rgb; N]>;
+/** The light coming to sites from each direction, as found: in half-precision floats (`half`), sites as the baker's (i32). */
+type Found = Map<[i32; 3], [[u16; 3]; N]>;
 
 /**
  * What the Lights of one world under one brightness share (a thread's
@@ -102,7 +107,8 @@ impl Shared {
 
     /** The light found at `site` of level `i`, if it was. */
     fn found(&self, i: usize, site: [i64; 3]) -> Option<[Rgb; N]> {
-        self.part(i, site).lock().expect("light").get(&site).copied()
+        let light = *self.part(i, site).lock().expect("light").get(&site.map(|c| c as i32))?;
+        Some(light.map(|rgb| rgb.map(full)))
     }
 
     /** Keeps the light found at `site` of level `i`, its part forgotten first if full. */
@@ -111,7 +117,7 @@ impl Shared {
         if part.len() >= KEPT_SITES / PARTS {
             part.clear();
         }
-        part.insert(site, light);
+        part.insert(site.map(|c| c as i32), light.map(|rgb| rgb.map(half)));
     }
 }
 
@@ -481,6 +487,22 @@ fn tile_box(heights: (i64, i64), key: (i64, i64)) -> Box3 {
     Box3 { min: [key.0 * TILE, heights.0, key.1 * TILE], max: [(key.0 + 1) * TILE, heights.1, (key.1 + 1) * TILE] }
 }
 
+/** `x` as a half-precision float's bits, rounded; 0 below its normal numbers, its largest above them. */
+fn half(x: f32) -> u16 {
+    let bits = x.to_bits();
+    let exponent = (bits >> 23) as i32 - 127 + 15;
+    if x <= 0.0 || exponent <= 0 {
+        return 0;
+    }
+    let rounded = (exponent as u32) << 10 | (bits >> 13) & 0x3ff;
+    (rounded + (bits >> 12 & 1)).min(0x7bff) as u16
+}
+
+/** The float whose bits `half` gave. */
+fn full(h: u16) -> f32 {
+    if h == 0 { 0.0 } else { f32::from_bits((u32::from(h >> 10) + 112) << 23 | u32::from(h & 0x3ff) << 13) }
+}
+
 fn add(a: [i64; 3], b: [i64; 3]) -> [i64; 3] {
     [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
 }
@@ -597,6 +619,14 @@ mod tests {
     fn ground(x: i64, z: i64) -> [i64; 3] {
         assert!((x + z) % 2 != 0, "({x}, {z}) is not on top");
         [x, -1, z]
+    }
+
+    #[test]
+    fn halves_keep_three_digits() {
+        for x in [0.0, 1e-4, 0.5, 1.0, 1.9995, 3.0, 250.0, 6e4] {
+            let y = full(half(x));
+            assert!((y - x).abs() <= x / 2048.0, "{x} came back as {y}");
+        }
     }
 
     #[test]
