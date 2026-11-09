@@ -210,6 +210,10 @@ Numbers are for the forest at 1280×800, as measured when written.
   where the trees thin out to the treeline,
   came 0.10 to 0.15 apart at level 4, in materials hit and from above:
   leaves in place of trunks and of the slope's scree and rock.
+- **A leaf cluster's ball from afar is of its tree's foliage alone**,
+  so the quarter of its sprays that are turning is gone from level 1:
+  seen from above at seed 42, oakGold is 0.08 of what stops rays at level 0
+  and 0.01 at level 1, within the contract's colours.
 - **The highest massifs end in broad rounded domes of snow.**
   Behind the crest the high country is one smooth noise,
   and wherever it stands over the snowline, all of it is snow.
