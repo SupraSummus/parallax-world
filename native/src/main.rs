@@ -513,3 +513,59 @@ fn main() {
 fn num_cpus() -> usize {
     std::thread::available_parallelism().map_or(1, |n| n.get())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /**
+     * World `name` of seed 1 from its spawn, looking `yaw` and `pitch`,
+     * once the view is complete: the frame, and how it is seen.
+     */
+    fn complete_view(name: &str, [yaw, pitch]: [f64; 2], detail: f64, skip_covered: bool) -> (renderer::Frame, compositor::View) {
+        let make = worlds::by_name(name).expect("world").make;
+        let shown = make(1);
+        let mut renderer = renderer(&shown, None, 4, 1000.0);
+        renderer.detail = detail;
+        renderer.skip_covered = skip_covered;
+        let mut world = World::new(make, 1, None, 4);
+        let size = [320.0, 200.0];
+        let focal = focal_length(FOV, size[0], size[1]);
+        let first = view::View { yaw, pitch, width: size[0], height: size[1], focal };
+        let (frame, _) = complete(&mut world, &mut renderer, shown.spawn.map(|v| v as f64), &first, false);
+        let view = compositor::View {
+            yaw,
+            pitch,
+            focal,
+            fog_distance: 1000.0 * FOG_PER_RENDER_DISTANCE,
+            faces: std::array::from_fn(|f| view::faces()[f].axes),
+            size: size.map(|v| v as f32),
+            pixels: size.map(|v| v as u32),
+            seams: false,
+            colours: Colours::Voxels,
+            sky: 1.0,
+        };
+        (frame, view)
+    }
+
+    /** World, look and detail as a power of two. The thickest slices too: in relief, their splats move most with the camera. */
+    const VIEWS: [(&str, [f64; 2], f64); 3] =
+        [("forest", [0.0, 0.0], 3.25), ("forest", [20.0, -25.0], 2.25), ("moor", [-30.0, 10.0], 3.25)];
+
+    #[test]
+    #[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
+    fn skipping_covered_cells_leaves_the_picture_unchanged() {
+        let chunks = |frame: &renderer::Frame| frame.layers.iter().map(|l| l.placements.len()).sum::<usize>();
+        // Cells are baked until the occlusion thread finds them covered, so how many are skipped varies from run to run.
+        let mut skipped = 0;
+        for (name, look, octaves) in VIEWS {
+            let detail = 2f64.powf(octaves);
+            let (frame, view) = complete_view(name, look, detail, false);
+            let (all, baked) = (shot::picture(&frame, &view).2, chunks(&frame));
+            let (frame, view) = complete_view(name, look, detail, true);
+            skipped += baked.saturating_sub(chunks(&frame));
+            assert!(all == shot::picture(&frame, &view).2, "{name} {look:?} detail {detail}");
+        }
+        assert!(skipped > 0, "none skipped");
+    }
+}

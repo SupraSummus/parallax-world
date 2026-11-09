@@ -97,19 +97,15 @@ mod tests {
     }
 
     #[test]
-    fn owner_is_a_nearest_coarse_site() {
+    fn owner_is_the_nearest_coarse_site_ties_to_the_greatest_c_then_b_then_a() {
         for n in [1, 2, 4] {
+            let coarse: Vec<[i32; 3]> =
+                sites(-4 * n - 9, 4 * n + 9).into_iter().filter(|q| q.iter().all(|v| v % n == 0 && (v / n - q[2] / n) & 1 == 0)).collect();
             for site in sites(-9, 9) {
-                let o = owner(n, site);
-                assert!(o.iter().all(|v| v % n == 0) && ((o[0] / n) ^ (o[2] / n)) & 1 == 0 && ((o[1] / n) ^ (o[2] / n)) & 1 == 0);
-                let d = distance2(o[0] - site[0], o[1] - site[1], o[2] - site[2]);
-                // No coarse site nearby is nearer.
-                for q in sites(-4 * n - 9, 4 * n + 9) {
-                    let coarse = q.iter().all(|v| v % n == 0) && ((q[0] / n) ^ (q[2] / n)) & 1 == 0 && ((q[1] / n) ^ (q[2] / n)) & 1 == 0;
-                    if coarse {
-                        assert!(distance2(q[0] - site[0], q[1] - site[1], q[2] - site[2]) >= d);
-                    }
-                }
+                let d = |q: &[i32; 3]| distance2(q[0] - site[0], q[1] - site[1], q[2] - site[2]);
+                let nearest = coarse.iter().map(d).min().unwrap();
+                let last = coarse.iter().filter(|q| d(q) == nearest).max_by_key(|q| (q[2], q[1], q[0])).unwrap();
+                assert_eq!(owner(n, site), *last, "n {n} site {site:?}");
             }
         }
     }

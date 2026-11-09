@@ -81,3 +81,20 @@ jobs:
       # built here, so a change to them that breaks it shows.
       - name: Build the lab
         run: cargo build --release --all-targets --manifest-path lab/Cargo.toml
+
+  # The native frontend's GPU half, which the other jobs do not run,
+  # on Mesa's software Vulkan: its tests that draw, and a view drawn.
+  native-gpu:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install software Vulkan
+        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers
+
+      - name: Test what draws
+        run: cargo test --release --config native/.cargo/config.toml --manifest-path native/Cargo.toml -- --ignored
+
+      - name: Draw a view
+        run: cargo run --release --config native/.cargo/config.toml --manifest-path native/Cargo.toml -- --view 'seed=1&world=moor&look=30,-10' --size 320x200 --shot shot.png

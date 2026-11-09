@@ -20,16 +20,17 @@ Numbers are for the forest at 1280×800, as measured when written.
   but would leave holes in boxes under two sites thick
   and roughen every surface.
 - **The native frontend is missing pieces.**
-  Its renderer has no `matchTilings`:
-  where slices re-tile as the camera moves along an axis,
-  the new ones show nothing until baked.
   Its camera is f64, not fixed point (positions reach the GPU relative to it).
   Its compositor needs indirect draws counted on the GPU
   (`MULTI_DRAW_INDIRECT_COUNT`), and so Vulkan:
   Metal and GL lack them, and on DX12 wgpu's leave out the first vertex
   the chunk's slot comes as (`BACKENDS`).
-  That its culling hides nothing that shows is checked only by hand
-  (shots with `hidden` off match pixel for pixel).
+  With `hidden` returning false, 370 of 64000 pixels change
+  (the forest from its spawn, 320×200): near splats take a neighbour's colour.
+  `hidden`'s margin does not change them.
+  Which picture is right is open:
+  the culling may hide what shows,
+  or drawing everything misorder more (the painting order, below).
   Its frames are bound by the GPU (`--stroll`):
   culling the clusters in view costs about a third of a frame,
   drawing those that show most of the rest.
@@ -39,13 +40,14 @@ Numbers are for the forest at 1280×800, as measured when written.
   until the driver resets the GPU (seen on Intel UHD with Mesa);
   the window then makes its device again (`window.rs`).
   Why is open: the same views and paths, drawn headless, take milliseconds.
-  `native/` is not built in CI.
 - **TS and Rust still say much the same twice.**
   The tiles around the camera (`world.ts`) are `native/src/world.rs`,
   slice selection (`bake/src/slicing.rs`) is `slice-selection.ts`,
   and faces and the renderer are in `native/src` too;
   `LayerIndex.range` (`voxel-grid.ts`) is `bake/src/layer_index.rs`'s.
   The renderer is the large step.
+  Tests too: slicing's, cells' and view's are in both;
+  relief's, pillars', the renderer's and its regressions' only in TS.
 - **Tests take most of CI's time.**
   Most of it is the worlds' contract, bound by the CPU:
   pictures from above generate level 0 over all of a world's heights.

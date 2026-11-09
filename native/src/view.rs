@@ -172,3 +172,164 @@ impl ScreenBoxes {
         Some(b)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /** Seeded uniform samples in [lo, hi), so failures reproduce (sampler in view.test.ts). */
+    fn sampler(seed: u64) -> impl FnMut(f64, f64) -> f64 {
+        let mut state = seed;
+        move |lo, hi| {
+            state = (state * 1103515245 + 12345) % 2147483648;
+            lo + (hi - lo) * state as f64 / 2147483648.0
+        }
+    }
+
+    fn cross(a: Vec3, b: Vec3) -> Vec3 {
+        [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+    }
+
+    fn view(yaw: f64, pitch: f64, focal: f64) -> View {
+        View { yaw, pitch, width: 800.0, height: 600.0, focal }
+    }
+
+    /** Not a face of the renderer: face coordinates are world coordinates. */
+    fn identity() -> Face {
+        Face { axes: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], lattice: Lattice { r: [1, 0, 0], u: [0, 1, 0], f: [0, 0, 1] } }
+    }
+
+    /** The world ray through pixel (sx, sy). */
+    fn screen_ray(v: &View, sx: f64, sy: f64) -> Vec3 {
+        let [r, u, f] = view_basis(v.yaw, v.pitch);
+        let (a, b) = (sx - v.width / 2.0, v.height / 2.0 - sy);
+        [0, 1, 2].map(|i| f[i] * v.focal + r[i] * a + u[i] * b)
+    }
+
+    /** Where point p, camera-relative in a face's coordinates, is on screen, if in front of the camera. */
+    fn project(v: &View, face: &Face, p: Vec3) -> Option<[f64; 2]> {
+        let world = [0, 1, 2].map(|i| face.axes[0][i] * p[0] + face.axes[1][i] * p[1] + face.axes[2][i] * p[2]);
+        let [r, u, f] = view_basis(v.yaw, v.pitch).map(|axis| dot(world, axis));
+        (f > 0.0).then(|| [v.width / 2.0 + r * v.focal / f, v.height / 2.0 - u * v.focal / f])
+    }
+
+    #[test]
+    fn view_basis_is_orthonormal_keeps_right_level_and_turns_right_and_up() {
+        let mut random = sampler(1);
+        for _ in 0..100 {
+            let (yaw, pitch) = (random(-80.0, 80.0), random(-80.0, 80.0));
+            let [right, up, forward] = view_basis(yaw, pitch);
+            for (a, b) in [(right, up), (up, forward), (forward, right)] {
+                assert!(dot(a, b).abs() < 1e-12);
+            }
+            for v in [right, up, forward] {
+                assert!((dot(v, v) - 1.0).abs() < 1e-12);
+            }
+            assert_eq!(right[1], 0.0);
+            assert_eq!(forward[0].signum(), yaw.signum());
+            assert_eq!(forward[1].signum(), pitch.signum());
+        }
+    }
+
+    // A mirrored face would draw its world mirrored.
+    #[test]
+    fn faces_are_rotations_one_looking_at_each_nearest_neighbour() {
+        let faces = faces();
+        for Face { axes: [right, up, forward], .. } in &faces {
+            assert!((dot(cross(*right, *up), *forward) - 1.0).abs() < 1e-12);
+        }
+        let mut forwards: Vec<[i32; 3]> = faces.iter().map(|f| f.lattice.f).collect();
+        forwards.sort();
+        forwards.dedup();
+        assert_eq!(forwards.len(), 12);
+        // Nearest neighbours: two of x, y, z ±1, the third 0.
+        assert!(forwards.iter().all(|f| f.iter().map(|c| c.abs()).sum::<i32>() == 2 && f.iter().all(|c| c.abs() <= 1)));
+    }
+
+    // Each ray belongs to the face whose axis is nearest; in_face must agree.
+    #[test]
+    fn faces_share_out_the_rays_each_to_the_face_of_the_nearest_axis() {
+        let faces = faces();
+        let mut random = sampler(4);
+        for _ in 0..1000 {
+            let ray = [random(-1.0, 1.0), random(-1.0, 1.0), random(-1.0, 1.0)];
+            let nearest = (0..12).max_by(|&a, &b| dot(ray, faces[a].axes[2]).total_cmp(&dot(ray, faces[b].axes[2]))).unwrap();
+            let owners: Vec<usize> = (0..12)
+                .filter(|&f| {
+                    let [x, y, z] = to_local(&faces[f].axes, ray);
+                    in_face(x, y, z)
+                })
+                .collect();
+            assert_eq!(owners, [nearest]);
+        }
+    }
+
+    #[test]
+    fn face_tangents_are_the_screen_within_the_face_and_none_of_faces_behind() {
+        let faces = faces();
+        let face = |f: [i32; 3]| faces.iter().find(|face| face.lattice.f == f).unwrap();
+        // Looking along +x+z: the screen reaches past the face's rays at its sides.
+        let [min_x, max_x, _, max_y] = view(45.0, 0.0, 400.0).face_tangents(face([1, 0, 1])).unwrap();
+        assert!((min_x + 1.0).abs() < 1e-9 && (max_x - 1.0).abs() < 1e-9 && (max_y - LAYER).abs() < 1e-9);
+        assert!(view(45.0, 0.0, 400.0).face_tangents(face([-1, 0, -1])).is_none());
+    }
+
+    #[test]
+    fn face_tangents_cover_every_ray_on_screen_by_its_face() {
+        let faces = faces();
+        let mut random = sampler(3);
+        for _ in 0..300 {
+            let v = view(random(-180.0, 180.0), random(-90.0, 90.0), random(150.0, 1000.0));
+            let world = screen_ray(&v, random(0.0, 800.0), random(0.0, 600.0));
+            let face = faces
+                .iter()
+                .find(|f| {
+                    let [x, y, z] = to_local(&f.axes, world);
+                    in_face(x, y, z)
+                })
+                .unwrap();
+            let [x, y, z] = to_local(&face.axes, world);
+            let [min_x, max_x, min_y, max_y] = v.face_tangents(face).unwrap();
+            assert!(x / z >= min_x - 1e-9 && x / z <= max_x + 1e-9);
+            assert!(y / z >= min_y - 1e-9 && y / z <= max_y + 1e-9);
+        }
+    }
+
+    fn visible(v: &View, left: f64, right: f64, bottom: f64, top: f64, distance: f64) -> bool {
+        v.screen_boxes(&identity()).of(left, right, bottom, top, distance).is_some_and(|b| v.on_screen(&b))
+    }
+
+    #[test]
+    fn screen_boxes_show_a_rectangle_around_the_view_direction_not_one_to_the_side_or_behind() {
+        // The view direction meets z = 10 at about (1.76, -1.79).
+        assert!(visible(&view(10.0, -10.0, 400.0), 1.0, 2.0, -2.0, -1.0, 10.0));
+        assert!(!visible(&view(10.0, -10.0, 400.0), -30.0, -20.0, -2.0, -1.0, 10.0));
+        assert!(!visible(&view(180.0, 0.0, 400.0), 1.0, 2.0, -2.0, -1.0, 10.0));
+        // Looking along +x; the rectangle on z = 10 spans x from -50 to 50: from behind the camera into view.
+        assert!(visible(&view(90.0, 0.0, 400.0), -50.0, 50.0, -1.0, 1.0, 10.0));
+    }
+
+    #[test]
+    fn screen_boxes_bound_the_projected_corners_of_a_rectangle_in_front_of_the_camera() {
+        let faces = faces();
+        let mut random = sampler(5);
+        let mut checked = 0;
+        for _ in 0..300 {
+            let v = view(random(-180.0, 180.0), random(-90.0, 90.0), 400.0);
+            let face = &faces[random(0.0, 12.0) as usize];
+            let (x, y, d) = (random(-20.0, 20.0), random(-20.0, 20.0), random(1.0, 30.0));
+            let corners: Option<Vec<[f64; 2]>> =
+                [[x, y], [x + 3.0, y], [x + 3.0, y + 2.0], [x, y + 2.0]].iter().map(|&[cx, cy]| project(&v, face, [cx, cy, d])).collect();
+            let Some(corners) = corners else { continue };
+            let b = v.screen_boxes(face).of(x, x + 3.0, y, y + 2.0, d).unwrap();
+            let bound = |axis: usize, min: bool| corners.iter().map(|c| c[axis]).reduce(if min { f64::min } else { f64::max }).unwrap();
+            for (got, want) in
+                [(b.min_x, bound(0, true)), (b.max_x, bound(0, false)), (b.min_y, bound(1, true)), (b.max_y, bound(1, false))]
+            {
+                assert!((got - want).abs() < 1e-6, "{got} {want}");
+            }
+            checked += 1;
+        }
+        assert!(checked > 50);
+    }
+}

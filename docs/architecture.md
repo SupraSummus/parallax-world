@@ -343,7 +343,8 @@ then the re-tiled segments below, those missing fewest chunks first;
 then the rest, near to far.
 When the camera moves along a face's axis, its slices re-tile
 where levels change.
-`matchTilings` pairs the new slices with the ones drawn last:
+`matchTilings` (`match_tilings` in `bake/src/slicing.rs`, for native)
+pairs the new slices with the ones drawn last:
 slices in both stand for themselves,
 and the new ones between two of them
 for the old ones between the same two;
