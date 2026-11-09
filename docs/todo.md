@@ -25,12 +25,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   (`MULTI_DRAW_INDIRECT_COUNT`), and so Vulkan:
   Metal and GL lack them, and on DX12 wgpu's leave out the first vertex
   the chunk's slot comes as (`BACKENDS`).
-  With `hidden` returning false, 370 of 64000 pixels change
-  (the forest from its spawn, 320×200): near splats take a neighbour's colour.
-  `hidden`'s margin does not change them.
-  Which picture is right is open:
-  the culling may hide what shows,
-  or drawing everything misorder more (the painting order, below).
   Its frames are bound by the GPU (`--stroll`):
   culling the clusters in view costs about a third of a frame,
   drawing those that show most of the rest.
@@ -98,8 +92,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   (section 4 of `docs/architecture.md`), which WebGL 2 cannot
   (no compute, no indirect draws);
   WebGPU can, where a browser has it.
-  Natively, the painting order is the draw order at one depth per layer,
-  which rounding breaks: the same misordered about 6 % of the pixels.
 - **Native pillars more than double the splats.**
   Natively a run is a row of splats, one a voxel
   (section 4 of `docs/architecture.md`),

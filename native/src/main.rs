@@ -571,11 +571,26 @@ mod tests {
 
     #[test]
     #[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
+    fn culling_on_the_gpu_leaves_the_picture_unchanged() {
+        for (name, look, octaves) in VIEWS {
+            let (frame, view) = complete_view(name, look, 2f64.powf(octaves), true);
+            let [culled, all] = [true, false].map(|culls| {
+                let mut gpu = shot::Offscreen::with(None, culls);
+                gpu.prepare(&frame, &view);
+                (gpu.picture().2, gpu.drawn().iter().sum::<u32>())
+            });
+            assert!(culled.0 == all.0, "{name} {look:?}");
+            assert!(culled.1 < all.1, "{name} {look:?}: culling drew {} splats of {}", culled.1, all.1);
+        }
+    }
+
+    #[test]
+    #[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
     fn what_the_buffers_cannot_hold_is_left_out_farthest_first() {
         let (mut frame, view) = complete_view("moor", [-30.0, 10.0], 2f64.powf(3.25), true);
         let all = shot::picture(&frame, &view).2;
         // About half of the frame's splats.
-        let mut gpu = shot::Offscreen::with(Some(32 << 20));
+        let mut gpu = shot::Offscreen::with(Some(32 << 20), true);
         gpu.prepare(&frame, &view);
         let some = gpu.picture().2;
         frame.layers.clear();
