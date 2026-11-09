@@ -359,7 +359,7 @@ fn bind(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, entries: &[(u32, 
 }
 
 impl Pipelines {
-    fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Pipelines {
+    fn new(device: &wgpu::Device, format: wgpu::TextureFormat, culls: bool) -> Pipelines {
         use wgpu::ShaderStages as S;
         let shader = device.create_shader_module(wgpu::include_wgsl!("compositor.wgsl"));
         let buffer = |ty| wgpu::BindingType::Buffer { ty, has_dynamic_offset: false, min_binding_size: None };
@@ -434,13 +434,13 @@ impl Pipelines {
                 cache: None,
             })
         };
-        let compute = |layout: &wgpu::BindGroupLayout, entry: &str| {
+        let compute = |layout: &wgpu::BindGroupLayout, entry: &str, constants: &[(&str, f64)]| {
             device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                 label: Some(entry),
                 layout: Some(&pipeline_layout(layout)),
                 module: &shader,
                 entry_point: Some(entry),
-                compilation_options: Default::default(),
+                compilation_options: wgpu::PipelineCompilationOptions { constants, ..Default::default() },
                 cache: None,
             })
         };
@@ -449,10 +449,10 @@ impl Pipelines {
             sky: render(&draw, "sky_vertex", "sky_fragment", &[], tested, None),
             seams: render(&draw, "sky_vertex", "seams_fragment", &[], over, Some(wgpu::BlendState::ALPHA_BLENDING)),
             show_picture: render(&show, "show_vertex", "show_fragment", &[], None, None),
-            cull_drawn: compute(&cull, "cull_drawn"),
-            cull_rest: compute(&cull, "cull_rest"),
-            reduce_depth_level: compute(&reduce_depth, "reduce_depth"),
-            reduce_level: compute(&reduce, "reduce"),
+            cull_drawn: compute(&cull, "cull_drawn", &[]),
+            cull_rest: compute(&cull, "cull_rest", &[("culls", f64::from(culls))]),
+            reduce_depth_level: compute(&reduce_depth, "reduce_depth", &[]),
+            reduce_level: compute(&reduce, "reduce", &[]),
             draw,
             cull,
             reduce_depth,
@@ -515,14 +515,14 @@ impl Targets {
 }
 
 impl Compositor {
-    /** For a target of `format`. */
-    pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Compositor {
+    /** For a target of `format`; `culls` off, it draws every cluster in view (compositor.wgsl). */
+    pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat, culls: bool) -> Compositor {
         use wgpu::BufferUsages as U;
         let draws = |label| buffer(device, label, 1 << 20, U::STORAGE | U::INDIRECT | U::COPY_SRC);
         let drawn = |label| buffer(device, label, 4, U::STORAGE | U::INDIRECT | U::COPY_DST | U::COPY_SRC);
         Compositor {
             format,
-            pipelines: Pipelines::new(device, format),
+            pipelines: Pipelines::new(device, format, culls),
             globals: buffer(device, "globals", (GLOBALS * 4) as u64, wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST),
             table: storage(device, "chunks", 1024 * size_of::<GpuChunk>() as u64),
             slots: 0,

@@ -98,7 +98,7 @@ impl Gpu {
         };
         surface.configure(&device, &config);
         let mut renderer = egui_wgpu::Renderer::new(&device, format, Default::default());
-        renderer.callback_resources.insert(Compositor::new(&device, format));
+        renderer.callback_resources.insert(Compositor::new(&device, format, true));
         Gpu { device, queue, surface, config, renderer, lost }
     }
 

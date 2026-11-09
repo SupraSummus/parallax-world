@@ -208,7 +208,9 @@ fn hidden(b: vec4f, depth: f32) -> bool {
   let size = max(b.z - b.x, b.w - b.y);
   let level = clamp(i32(ceil(log2(max(size, 1.0)))) - 1, 0, levels - 1);
   let texel = f32(2 << u32(level));
-  let last = vec2i(textureDimensions(farthest, level)) - 1;
+  // Each level halves the last (Targets::new). Asked for one level per
+  // thread, Mesa's lavapipe gave some threads another level's size.
+  let last = (vec2i(textureDimensions(farthest)) >> vec2u(u32(level))) - 1;
   let start = min(vec2i(floor(b.xy / texel)), last);
   let end = min(vec2i(ceil(b.zw / texel)) - 1, last);
   var far = 0.0;
@@ -221,6 +223,9 @@ fn hidden(b: vec4f, depth: f32) -> bool {
   return depth * (1.0 - exp2(-18.0)) > far;
 }
 
+// Off, every cluster in view is drawn: for tests, as what culling must not change.
+override culls = true;
+
 // Whether to draw a cluster in a phase; in the second, whether it shows is
 // kept for the next frame.
 fn draws_cluster(at: u32, cluster: Cluster, phase: u32) -> bool {
@@ -229,7 +234,7 @@ fn draws_cluster(at: u32, cluster: Cluster, phase: u32) -> bool {
     return cluster.visible != 0u && shows(b);
   }
   let depth = depth_of(chunks[cluster.slot_count >> 8u].depth, cluster.order);
-  let visible = shows(b) && !hidden(b, depth);
+  let visible = shows(b) && !(culls && hidden(b, depth));
   clusters[at].visible = u32(visible);
   // The first phase drew those visible before and in view.
   return visible && cluster.visible == 0u;

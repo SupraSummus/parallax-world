@@ -25,11 +25,11 @@ fn offscreen(frame: &Frame, view: &View) -> Offscreen {
 
 impl Offscreen {
     pub fn new() -> Offscreen {
-        Offscreen::with(None)
+        Offscreen::with(None, true)
     }
 
-    /** A device with buffers as large as it allows, or `most` bytes. */
-    pub fn with(most: Option<u64>) -> Offscreen {
+    /** A device with buffers as large as it allows, or `most` bytes, and a compositor that culls or not. */
+    pub fn with(most: Option<u64>, culls: bool) -> Offscreen {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: compositor::BACKENDS,
             ..wgpu::InstanceDescriptor::new_without_display_handle()
@@ -41,7 +41,7 @@ impl Offscreen {
         }
         let descriptor = wgpu::DeviceDescriptor { required_limits: limits, required_features: compositor::FEATURES, ..Default::default() };
         let (device, queue) = pollster::block_on(adapter.request_device(&descriptor)).expect("device");
-        let compositor = Compositor::new(&device, FORMAT);
+        let compositor = Compositor::new(&device, FORMAT, culls);
         Offscreen { device, queue, compositor }
     }
 
@@ -103,13 +103,7 @@ pub fn time(frame: &Frame, view: &View, runs: usize) -> (f64, [u32; 2]) {
     }
     o.wait();
     let ms = start.elapsed().as_secs_f64() * 1000.0 / runs as f64;
-    let (draws, counts) = o.compositor.draws();
-    let drawn = std::array::from_fn(|phase| {
-        let n = u32::from_le_bytes(o.read_buffer(&counts[phase], 4).try_into().expect("count")) as u64;
-        let draws = o.read_buffer(&draws[phase], (n * 16).max(16));
-        draws.as_chunks::<16>().0[..n as usize].iter().map(|d| u32::from_le_bytes(d[4..8].try_into().expect("draw"))).sum()
-    });
-    (ms, drawn)
+    (ms, o.drawn())
 }
 
 /** Draws `frame` as the window would after a few frames still, and saves it. */
@@ -127,6 +121,16 @@ pub fn picture(frame: &Frame, view: &View) -> (u32, u32, Vec<u8>) {
 }
 
 impl Offscreen {
+    /** How many splats the frame drawn last drew in each phase. */
+    pub fn drawn(&self) -> [u32; 2] {
+        let (draws, counts) = self.compositor.draws();
+        std::array::from_fn(|phase| {
+            let n = u32::from_le_bytes(self.read_buffer(&counts[phase], 4).try_into().expect("count")) as u64;
+            let draws = self.read_buffer(&draws[phase], (n * 16).max(16));
+            draws.as_chunks::<16>().0[..n as usize].iter().map(|d| u32::from_le_bytes(d[4..8].try_into().expect("draw"))).sum()
+        })
+    }
+
     /** The frame prepared last, drawn as `picture` says. */
     pub fn picture(&self) -> (u32, u32, Vec<u8>) {
         for _ in 0..3 {
