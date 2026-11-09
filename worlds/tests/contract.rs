@@ -19,7 +19,6 @@ const KNOWN_BREAKS: &[(&str, u64, &str)] = &[
     ("valley", 1, "landmarks sail"),
     ("valley", 2, "landmarks sail"),
     ("valley", 3, "landmarks sail"),
-    ("valley", 1, "heath alpine"),
     ("valley", 2, "towns › block › house plasterSage"),
 ];
 

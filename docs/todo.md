@@ -19,6 +19,40 @@ Numbers are for the forest at 1280×800, as measured when written.
   would be even for any height,
   but would leave holes in boxes under two sites thick
   and roughen every surface.
+- **Sheets and rods stop too much seen along them.**
+  Grown to a site and opaque ("Levels" in `docs/generators.md`),
+  a wall stops every ray across it, as it should, and every ray down it:
+  from above, walls a unit thick cover 8 times what they do at level 0
+  at levels 3 and 4, posts 4 to 6 times from level 1 (`worldgen/tests/shapes.rs`).
+  A site stops rays alike from every direction;
+  the windmills' sails from above (below) are boards so drawn.
+- **Small things on a ground sink into it at coarse levels.**
+  A solid under the sites is drawn at the site nearest it,
+  which a few units over a ground on a plane of sites is the ground's,
+  full already: what the solid stops is lost.
+  From level 4, small blocks, balls and specks on the ground
+  keep 0.4 to 0.6 of what they stop from above; lifted clear of it, 0.8.
+- **A thin ellipsoid between two planes of sites can vanish.**
+  Its thickness grows to half a site either way of its centre,
+  so centred between two planes it holds their sites only at a point:
+  discs 2 units thick, each 10 units over the ground, were gone at level 2.
+  Boxes keep the sites on their faces by `Tie`.
+- **Fields get the spacing, and mostly use it for one rule.**
+  Of the 15 fields in `worlds/`, 9 hand it to `Column`,
+  and 7 write its rule out (`m(0.5).max(2 * spacing)`):
+  a layer at least two sites thick.
+  The rest leave detail out by level (the moor's heather, the rails),
+  dither by hand (the railway's ballast, in shares of iron and timber),
+  or make their own far form (the forest's canopy, a scene's levels).
+  A stack declared once (layers down from a height, media up,
+  which end of each is fixed), sizes on spans as children have,
+  and patterns read through `Plan::dithered`
+  would leave the spacing to the engine but in the canopy and scenes:
+  a field's levels would be the engine's to keep, not each world's.
+  Found on the way: the ponds' reeds and the fields' crops are thickened
+  at every level, the reeds against their comment
+  ("Fields stand taller at level 4", below);
+  the town's kerbs (a unit) and the railway's tunnel lining never are.
 - **The native frontend is missing pieces.**
   Its camera is f64, not fixed point (positions reach the GPU relative to it).
   Its compositor needs indirect draws counted on the GPU
@@ -224,8 +258,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   of what rays straight down see at level 3, against 0.01 at level 0,
   in place of planks and grass: 0.10 to 0.12 apart.
   The region around the first windmill, 48 m wide, blurred it under 0.1.
-- **The heath above the treeline lets rays through at level 4** (seed 1):
-  0.44 of them get the 4 sites more at level 4, against 0.34 at level 2.
 - **Worlds share tables of kinds**, so the contract only prints
   the kinds nothing surveyed draws, and fails on silent layers alone:
   the moor's, the learned town's and the city's are the valley's.

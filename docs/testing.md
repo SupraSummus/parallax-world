@@ -33,7 +33,7 @@ pnpm exec vitest run bake       # files matching "bake"
 | `src/lib/worker-bakery.test.ts` | Baking in workers (simulated) gives the same frames; what is baked first, and when not at all |
 | `src/lib/renderer-regressions.test.ts` | Previously fixed rendering bugs |
 | `src/lib/world.test.ts` | The worlds listed; a generated world's grids put together from parts generated alone |
-| `worlds/tests/contract.rs`, `worldgen/tests/contract.rs` | Every world, and the engine's test worlds, keep the contract (`worldgen/src/contract.rs`): generated in pieces equals generated whole, levels agree on what rays see, and seen from above with level 0 |
+| `worlds/tests/contract.rs`, `worldgen/tests/contract.rs`, `worldgen/tests/shapes.rs` | Every world, the engine's test worlds and each solid keep the contract (`worldgen/src/contract.rs`): generated in pieces equals generated whole, levels agree on what rays see, and seen from above with level 0 |
 | `worlds/tests/cost.rs` | What generating each world costs, counted, stays within a quarter of its baseline (`worlds/data/cost/`; "Cost" in `docs/generators.md`) |
 | `worlds/src/railway.rs` | The valley's railway keeps its grade and its side of the valley, out of towns; it has bridges and tunnels |
 | `worldgen/src/points.rs` | Points: a cell holds its children's, whichever is asked first; they stand where their mark has a chance, as often as it is; a blur is its cells' counts weighed, wherever its blocks fall |
