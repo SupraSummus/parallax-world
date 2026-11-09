@@ -325,6 +325,10 @@ and a village of houses with doors and tables
 on y = 0, a plane of sites at every level ("Faces" in "Levels");
 and knobs anchored along x on a slanting wall,
 one per square 2N wide across x.
+`worldgen/tests/shapes.rs` holds each solid to the levels it keeps,
+as many of one kind, of sizes and places drawn at random, on a ground:
+bright on dark, the palette that hides the least:
+a world's colours can only hide what breaks there.
 
 The survey asks every layer of the generator around spawn,
 drawing no voxels.

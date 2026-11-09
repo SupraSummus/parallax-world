@@ -90,7 +90,7 @@ worldgen/                    # The world-generation engine, moving to integers, 
 │   ├── survey.rs            # What a world is made of: its layers asked around spawn, things taken apart, strata to check
 │   └── contract.rs          # The contract every world keeps, as checks for tests, in regions holding every stratum: rays see each site by its alpha, its colour and glow
 ├── data/light-reference.txt # The reference's light in light.rs's test scenes, written by its test reference_values
-└── tests/contract.rs        # The engine on test worlds: fog, caves, a village, knobs on a wall; what it refuses
+└── tests/                  # contract.rs: the engine on test worlds (fog, caves, a village, knobs on a wall), what it refuses; shapes.rs: each solid, to the levels it keeps the contract
 worlds/                      # The worlds, on worldgen's public API only; the web's WebAssembly
 ├── src/
 │   ├── lib.rs               # WORLDS: the registry hosts start worlds from by name, with the regions checked around their places

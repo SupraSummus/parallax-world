@@ -1065,10 +1065,15 @@ fn see(grid: &mut VoxelGrid, op: Op, share: u32, pick: u32, (id, faces): (u8, Op
         Op::Fill => (one, (all - alpha) * share / all),
         Op::Paint => (one - share, share),
     };
-    let now = match op {
-        Op::Carve => alpha * kept / one,
-        _ => alpha + (all - alpha) * share / one,
+    // In SHARE-ths of a step of alpha, rounded up as often as the remainder,
+    // by a coin from the pick (its bits scrambled by an odd factor):
+    // cut off, all of a speck's share under one step was lost far away.
+    let exact = match op {
+        Op::Carve => alpha * kept,
+        _ => alpha * one + (all - alpha) * share,
     };
+    let coin = (pick as u64 * 40_503) % one;
+    let now = exact / one + u64::from(exact % one > coin);
     grid.alpha[i] = now as u8;
     if (pick as u64) * now < visible * all {
         grid.see(i, id, faces);
