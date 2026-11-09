@@ -2,7 +2,7 @@
 
 use crate::cells::Cells;
 use crate::slicing::{cell_margin, chunk_cell, site_layers};
-use crate::world::{FACE_KINDS, Geometry, Reader};
+use crate::world::{ALPHA, FACE_KINDS, Geometry, Reader};
 
 /** A voxel of a cell's surface. Bit k of `open` and `cut` is face kind k. */
 pub struct Voxel {
@@ -10,7 +10,9 @@ pub struct Voxel {
     pub site: [i32; 3],
     /** That of its face towards the camera (Reader). */
     pub material: u8,
-    /** Faces with no neighbour across them. */
+    /** Of ALPHA, how much of the rays through its site it stops. */
+    pub alpha: u8,
+    /** Faces whose neighbour across them lets rays through: none, or a see-through one. */
     pub open: u16,
     /**
      * Faces drawn because the slice is cut there: their neighbour is in
@@ -65,8 +67,9 @@ pub fn cell_surface(reader: &Reader, geometry: &Geometry, next: &Cells, slice: &
 
 /**
  * The voxels of a box of sites (a, b, c), inclusive, that a chunk `holds`
- * and that have an open face, or a face whose neighbour it does not hold
- * (the chunk is cut there and the cut must show).
+ * and that have an open face (whose neighbour lets rays through), or a face
+ * whose neighbour it does not hold (the chunk is cut there and the cut must
+ * show).
  */
 pub fn surface(reader: &Reader, geometry: &Geometry, from: [i32; 3], to: [i32; 3], holds: impl Fn(i32, i32, i32) -> bool) -> Vec<Voxel> {
     let (min, max) = (reader.min, reader.max);
@@ -80,28 +83,31 @@ pub fn surface(reader: &Reader, geometry: &Geometry, from: [i32; 3], to: [i32; 3
 
     // Layers as dense planes of the cell and its sites' neighbours (up to 2
     // away in a, 1 in b): site (a, b) at (b - b0 + 1) · stride + a - a0 + 2,
-    // its material and whether it is in the chunk.
+    // its material, its alpha and whether it is in the chunk.
     let stride = a1 - a0 + 4;
     let plane_size = (stride * (b1 - b0 + 2)) as usize;
     let offsets: [isize; FACE_KINDS] = std::array::from_fn(|k| (geometry.offsets[k][1] * stride + geometry.offsets[k][0]) as isize);
-    let fill = |plane: &mut (Vec<u8>, Vec<bool>), c: i32| {
+    let fill = |plane: &mut Plane, c: i32| {
         plane.0.fill(0);
+        plane.1.fill(0);
         // A layer's sites have a and b of the parity of c.
         for b in (b0 - 1 + ((b0 - 1 + c) & 1)..=b1).step_by(2) {
             let row = (b - b0 + 1) * stride - a0 + 2;
             let first = a0 - 2 + ((a0 + c) & 1);
-            reader.row(first, b, c, (a1 + 2 - first + 1) / 2, |i, material| {
+            reader.row(first, b, c, (a1 + 2 - first + 1) / 2, |i, material, alpha| {
                 let a = first + 2 * i;
                 plane.0[(row + a) as usize] = material;
+                plane.1[(row + a) as usize] = alpha;
                 if material != 0 {
-                    plane.1[(row + a) as usize] = holds(a, b, c);
+                    plane.2[(row + a) as usize] = holds(a, b, c);
                 }
             });
         }
     };
 
     // Planes of layers c - 2 to c + 2: a voxel's neighbours.
-    let mut planes: [(Vec<u8>, Vec<bool>); 5] = std::array::from_fn(|_| (vec![0; plane_size], vec![false; plane_size]));
+    type Plane = (Vec<u8>, Vec<u8>, Vec<bool>);
+    let mut planes: [Plane; 5] = std::array::from_fn(|_| (vec![0; plane_size], vec![0; plane_size], vec![false; plane_size]));
     for d in -2..=2 {
         fill(&mut planes[(d + 2) as usize], top + d);
     }
@@ -115,16 +121,16 @@ pub fn surface(reader: &Reader, geometry: &Geometry, from: [i32; 3], to: [i32; 3
             let row = (b - b0 + 1) * stride - a0 + 2;
             for a in (a0 + ((a0 + c) & 1)..a1).step_by(2) {
                 let n = (row + a) as isize;
-                let material = current.0[n as usize];
-                if material == 0 || !current.1[n as usize] {
+                let (material, alpha) = (current.0[n as usize], current.1[n as usize]);
+                if material == 0 || !current.2[n as usize] {
                     continue;
                 }
                 let mut open = 0;
                 let mut cut = 0;
                 for k in 0..FACE_KINDS {
-                    let (materials, places) = &planes[(geometry.offsets[k][2] + 2) as usize];
+                    let (_, alphas, places) = &planes[(geometry.offsets[k][2] + 2) as usize];
                     let m = (n + offsets[k]) as usize;
-                    if materials[m] == 0 {
+                    if alphas[m] < ALPHA {
                         open |= 1 << k;
                     } else if !places[m] {
                         cut |= 1 << k;
@@ -133,7 +139,7 @@ pub fn surface(reader: &Reader, geometry: &Geometry, from: [i32; 3], to: [i32; 3
                 if open == 0 && cut == 0 {
                     continue;
                 }
-                voxels.push(Voxel { site: [a, b, c], material, open, cut });
+                voxels.push(Voxel { site: [a, b, c], material, alpha, open, cut });
             }
         }
     }

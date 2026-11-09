@@ -31,7 +31,7 @@ struct Chunk {
   face: u32,
   level: f32, // see depth_of
   tint: u32, // RGBA to paint its splats in, shaded as their voxels are; 0 for their own
-  half_layer: f32, // how far a splat is past the plane per step of its alpha past 128
+  half_layer: f32, // a half layer of its grid: the unit of its splats' depths
   _pad: f32,
 }
 
@@ -74,6 +74,10 @@ struct DrawArgs {
 @group(0) @binding(12) var level_out: texture_storage_2d<r32float, write>;
 // Showing the frame.
 @group(0) @binding(13) var picture: texture_2d<f32>;
+// Blended: the see-through splats' colours, weighted, and how much of what
+// is behind them they let through (see_through_fragment).
+@group(0) @binding(14) var blended: texture_2d<f32>;
+@group(0) @binding(15) var through: texture_2d<f32>;
 
 // The depth of a splat of a chunk of `level`, its site `distance` from the
 // eye: finer levels in front (lod.rs), and within a level the nearer site,
@@ -92,7 +96,10 @@ struct Splat {
   // Where on its chunk's plane, over the plane's distance: the ray's tangents in face coordinates.
   @location(1) ray: vec2f,
   @location(2) @interpolate(flat) slant: f32,
-  @location(3) @interpolate(flat) colour: vec3f,
+  // Its alpha its voxel's: of the rays through its site, how many it stops.
+  @location(3) @interpolate(flat) colour: vec4f,
+  @location(4) @interpolate(flat) splat: u32,
+  @location(5) @interpolate(flat) distance: f32,
 }
 
 fn ray_of(view: mat3x3f, position: vec4f) -> vec3f {
@@ -101,13 +108,14 @@ fn ray_of(view: mat3x3f, position: vec4f) -> vec3f {
 }
 
 // A splat instance (GpuSplat): its hexagon's centre relative to its chunk's
-// origin and half its width and height, and its colour (its alpha its depth
-// past the plane); drawn at its depth, as much wider as the ray to it
+// origin, half its width (its height √2 times that) and its depth past the
+// plane, and its colour; drawn at its depth, as much wider as the ray to it
 // slants across (compositor.ts). Its chunk's slot comes as the first
 // vertex's index over 4.
 @vertex
 fn splat_vertex(
   @builtin(vertex_index) vertex: u32,
+  @builtin(instance_index) instance: u32,
   @location(0) splat: vec4f,
   @location(1) paint: vec4f,
 ) -> Splat {
@@ -115,12 +123,14 @@ fn splat_vertex(
   let face = globals.faces[c.face];
   var out: Splat;
   out.corner = vec2f(f32(vertex & 1u), f32((vertex >> 1u) & 1u)) * 2.0 - 1.0;
-  let site = vec3f(c.origin + splat.xy, c.distance + (paint.a * 255.0 - 128.0) * c.half_layer);
-  let size = vec2f(splat.z * (1.0 + abs(site.x / site.z)), splat.w);
+  let site = vec3f(c.origin + splat.xy, c.distance + splat.w * c.half_layer);
+  let size = vec2f(splat.z * (1.0 + abs(site.x / site.z)), splat.z * sqrt(2.0));
   out.slant = size.x / (sqrt(2.0) * size.y);
+  out.splat = instance;
+  out.distance = length(site);
   let fog = 1.0 - exp(-c.distance / globals.fog_distance);
   let tinted = unpack4x8unorm(c.tint).rgb * (0.3 + 0.7 * dot(paint.rgb, vec3f(0.3, 0.59, 0.11)));
-  out.colour = mix(select(paint.rgb, tinted, c.tint != 0u), globals.horizon.rgb, fog);
+  out.colour = vec4f(mix(select(paint.rgb, tinted, c.tint != 0u), globals.horizon.rgb, fog), paint.a);
   let at = site + vec3f(out.corner * size, 0.0);
   out.ray = at.xy / at.z;
   let p = transpose(face.view) * at;
@@ -128,19 +138,75 @@ fn splat_vertex(
   return out;
 }
 
-// The face draws its own rays, by the ray each splat interpolates (working
-// it out from the pixel costs more). Rounding differs between splats, so
-// faces overlap by a hair: no pixel is left to neither.
+// A number in [0, 1) as if at random, for pixel `p` and splat `s`.
+fn chance(p: vec2u, s: u32) -> f32 {
+  var h = p.x * 0x8da6b343u ^ p.y * 0xd8163841u ^ s * 0xcb1ab31fu;
+  h = (h ^ (h >> 16u)) * 0x7feb352du;
+  h = (h ^ (h >> 15u)) * 0x846ca68bu;
+  return f32((h ^ (h >> 16u)) >> 8u) / 16777216.0;
+}
+
+// Whether the pixel is in the splat's hexagon, and its face draws its ray,
+// by the ray each splat interpolates (working it out from the pixel costs
+// more). Rounding differs between splats, so faces overlap by a hair: no
+// pixel is left to neither.
+fn covers(in: Splat) -> bool {
+  let t = in.ray;
+  return abs(in.corner.x) * in.slant + abs(in.corner.y) < 1.0 && abs(t.x) + sqrt(2.0) * abs(t.y) <= 1.001;
+}
+
+// By chance: a pixel's ray stops at a splat as often as its voxel stops
+// rays, by a chance of the pixel and splat. The depth test leaves the
+// nearest it stops at, so it sees through each see-through voxel, by a
+// chance of its own, in whatever order they are drawn. A whole voxel's
+// alpha is 1: it always stops.
 @fragment
 fn splat_fragment(in: Splat) -> @location(0) vec4f {
-  if abs(in.corner.x) * in.slant + abs(in.corner.y) >= 1.0 {
+  if !covers(in) || chance(vec2u(in.position.xy), in.splat) >= in.colour.a {
     discard;
   }
-  let t = in.ray;
-  if abs(t.x) + sqrt(2.0) * abs(t.y) > 1.001 {
+  return vec4f(in.colour.rgb, 1.0);
+}
+
+// Blended, first the whole voxels, with depth, as by chance.
+@fragment
+fn whole_fragment(in: Splat) -> @location(0) vec4f {
+  if !covers(in) || in.colour.a < 1.0 {
     discard;
   }
-  return vec4f(in.colour, 1.0);
+  return vec4f(in.colour.rgb, 1.0);
+}
+
+struct Blended {
+  @location(0) colour: vec4f,
+  @location(1) through: vec4f,
+}
+
+// Then the see-through ones in front of them, in any order (weighted
+// blended order-independent transparency, McGuire and Bavoil 2013): what
+// they let through is exact, the product of 1 − alpha; the colour, each
+// one's weighted by its alpha and by how near it is, so that the nearer
+// show over the farther. The weight keeps the sum within a half float.
+@fragment
+fn see_through_fragment(in: Splat) -> Blended {
+  if !covers(in) || in.colour.a >= 1.0 {
+    discard;
+  }
+  let a = in.colour.a;
+  let weight = a * clamp(1e3 * pow(in.distance, -1.5), 1e-3, 1e3);
+  return Blended(vec4f(in.colour.rgb, 1.0) * weight, vec4f(a));
+}
+
+// Their colour over the picture, as much as they stop.
+@fragment
+fn composite_fragment(in: Sky) -> @location(0) vec4f {
+  let p = vec2i(in.position.xy);
+  let through = textureLoad(through, p, 0).r;
+  if through >= 1.0 {
+    discard;
+  }
+  let sum = textureLoad(blended, p, 0);
+  return vec4f(sum.rgb / max(sum.a, 1e-6), 1.0 - through);
 }
 
 // |v| for the v in [lo, hi] nearest to 0.

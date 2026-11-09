@@ -185,6 +185,11 @@ nothing else, the camera least of all, changes it.
 It holds the voxels of its cell a ray can enter by an open face,
 each one hexagon (`cell_splats`):
 no runs and no cut faces, as a slice has (section 3).
+Its tiles hold every site that stops rays, with how much it does,
+not the voxels the web's coin shows (`VoxelGrid::into_grid`):
+a face is open where its neighbour lets rays through,
+so a cell holds what shows through see-through voxels too,
+and each splat its voxel's alpha (section 4, "See-through").
 A ray's first voxel is entered so and is in one cell,
 and the compositor's depth decides between cells:
 finer levels in front, and within a level the voxel whose site is nearer the eye,
@@ -277,7 +282,10 @@ Each is painted as one hexagon (`Splat`),
 the voxel's outline seen along the face's axis
 (√2 wide and 2 high, its corners the rhombic dodecahedron's),
 across the axis at its site:
-its depth, in half layers, rides in its colour's alpha, as splats are opaque.
+its depth, in half layers, rides in its colour's alpha,
+as a slice draws its voxels whole (`slice_numbers`);
+a cell's splat has its depth as a number of its own,
+and its voxel's alpha (`cell_numbers`).
 Seen along a ray slanting σ off the axis, the outline is 1 + |σx| times
 as wide (the voxel's tips a layer before and after move sideways)
 and, within the face's rays, no higher;
@@ -544,6 +552,17 @@ one at each voxel of the column (`rows`),
 clustered and culled as any splat.
 A voxel apart, a row's hexagons meet from every ray of the face;
 farther apart, gaps open.
+
+**See-through.** A native splat's alpha is how much of the rays
+through its voxel's site the voxel stops,
+shown two ways, a switch of the panel and of `--see-through` (`SeeThrough`):
+- By chance: a pixel keeps a splat as often as its alpha,
+  and the depth test leaves the nearest kept;
+  so draws keep any order, and culling is as for whole voxels.
+- Blended (weighted blended order-independent transparency):
+  the whole splats are drawn and culled as by chance,
+  then the see-through ones in front of them are summed apart
+  and laid over the picture; what they let through is exact.
 
 **Fog.** A slice at distance d keeps `exp(−d / F)` of its own colour;
 the rest is the horizon colour, mixed in per pixel.

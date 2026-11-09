@@ -165,6 +165,17 @@ Numbers are for the forest at 1280×800, as measured when written.
   measured when it drew slices: new tiles took about a third.
   Lit, about 1.6 times that: the light itself (`Light::light` most),
   and new tiles half as much again, why is open.
+- **Native's see-through voxels (`SeeThrough`): two ways, to pick one.**
+  - By chance, the picture is noisy, and the noise moves with the camera.
+  - Blended, overlapping ones' colour is only about the nearest's,
+    and nothing behind them is culled:
+    the forest's GPU frame took three times as long as by chance (lavapipe).
+  - What is behind them is drawn too: the forest's splats doubled.
+  - A site's colour is one of what is in it (see "Light sees each site's
+    alpha"): blended, a hexagon shows it flat.
+  - What is see-through counts twice where it is drawn twice:
+    where a coarser cell overlaps finer ones (`lod.rs`),
+    and where neighbours' hexagons in a layer, widened, overlap.
 - **The native compositor's buffers stop at the device's limit.**
   `Arena::grow` caps a buffer at what the device allows
   (128 MB of splats on lavapipe), and `allocate` then hands out room past it:
@@ -346,8 +357,9 @@ Numbers are for the forest at 1280×800, as measured when written.
   and light jumps a little there;
   every site within reach would leak light through walls one site thick.
 - **Light sees each site's alpha and glow (`VoxelGrid`), a prototype**:
-  - a site shows a voxel where a hash is under its alpha (`VoxelGrid::show`),
-    till splats show the alpha itself, measured houses' walls come out ragged;
+  - on the web, a site shows a voxel where a hash is under its alpha
+    (`VoxelGrid::show`): till its splats show the alpha itself,
+    measured houses' walls come out ragged;
   - a site's colour is one of what is in it, picked as often as it is seen,
     not the mean of what its faces see;
   - measured things are measured from fine voxels kept by chance,
@@ -378,12 +390,14 @@ Numbers are for the forest at 1280×800, as measured when written.
 - Light along more directions at coarser levels, as radiance cascades do:
   near, light wants fine places and few directions; far, coarse places and many.
   Light keeps 12 at every level, too few far off (a lamp's lobes, blurred shadows).
-- Splats that show alpha (`VoxelGrid`'s, now one coin per site):
+- Slices' splats that show alpha (the web's still show one coin per site):
   a chunk keeps a column's voxels till their alpha adds up to whole,
   and splats that overlap in a slice may add up to an opaque one,
   the rest drawn see-through.
   Alpha in steps of optical depth (−ln of what gets through),
   which add up where things are apart, might take fewer bits.
+  Then no host needs the coin:
+  `VoxelGrid`'s `cells` and `show`, and `into_grid`'s choice, go.
 - Report cost at the places worlds name (`World::points`),
   not at the spawn and the regions' centres (`cost::places`),
   once the forest, the moor and the city name some:

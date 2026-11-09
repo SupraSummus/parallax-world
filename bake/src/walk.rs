@@ -5,7 +5,7 @@
 
 use std::cell::RefCell;
 
-use crate::world::{Grid, Tiles};
+use crate::world::{ALPHA, Grid, Tiles};
 
 /** Lattice units per metre. */
 const M: f64 = 8.0;
@@ -39,8 +39,9 @@ pub trait Solid {
 }
 
 /**
- * The voxels of COLLISION_LEVEL's tiles, but those of materials
- * `walk_through` marks (plants, water: KindDef::walk_through), by id.
+ * The voxels of COLLISION_LEVEL's tiles that stop more than half the rays
+ * through their sites, but those of materials `walk_through` marks
+ * (plants, water: KindDef::walk_through), by id.
  * Columns no tile holds are solid: the body stops there rather than fall.
  */
 pub struct Ground<'a> {
@@ -53,7 +54,7 @@ impl Solid for Ground<'_> {
         let [x, y, z] = nearest_site(p.map(|v| v / self.scale()));
         match self.tiles.at(x, y, z) {
             None => true,
-            Some(id) => id != 0 && !self.walk_through.get(id as usize).copied().unwrap_or(false),
+            Some((id, alpha)) => alpha > ALPHA / 2 && !self.walk_through.get(id as usize).copied().unwrap_or(false),
         }
     }
 

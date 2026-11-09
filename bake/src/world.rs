@@ -63,6 +63,9 @@ pub fn lattices() -> [Lattice; VIEW_FACES] {
 pub const BRICK: i32 = 8;
 const BRICK_SITES: usize = (BRICK * BRICK * BRICK / 2) as usize;
 
+/** A whole voxel's alpha: it stops every ray through its site. */
+pub const ALPHA: u8 = 255;
+
 /** A voxel's material on each of its faces, by kind (VOXEL_FACES). */
 pub type Faces = [u8; FACE_KINDS];
 
@@ -82,7 +85,9 @@ pub fn face_words(index: usize, faces: &Faces) -> [u32; FACE_WORDS] {
  * The sites of a box in bricks, BRICK units wide (see VoxelGrid).
  * A voxel has a material on each of its 12 faces: what is seen of it
  * looking at that face. Mostly they are one, its site's in `cells`;
- * the sites whose faces differ list them in `faces`.
+ * the sites whose faces differ list them in `faces`. Its alpha is how much
+ * of the rays through its site it stops: mostly all (ALPHA), and `alpha`
+ * lists them only for a grid with some see-through ones.
  */
 pub struct Grid {
     pub min: [i32; 3],
@@ -93,6 +98,8 @@ pub struct Grid {
     pub cells: Vec<u8>,
     /** The sites whose faces are not all of their material in `cells`, by index in `cells`: FACE_WORDS each (face_words). */
     pub faces: Vec<u32>,
+    /** By index in `cells`: each voxel's alpha, 0 where there is none; empty if all are whole. */
+    pub alpha: Vec<u8>,
 }
 
 /** The words after site index `i` in `words`, `per` words a site, sorted by index; None if it has none. */
@@ -113,7 +120,14 @@ impl Grid {
     /** A grid of the box with `used` bricks of sites; `bricks` and `cells` to be written. */
     pub fn new(min: [i32; 3], n: [i32; 3], used: usize) -> Grid {
         let count = n.map(|v| (v.max(0) + BRICK - 1) / BRICK);
-        Grid { min, n, bricks: vec![-1; (count[0] * count[1] * count[2]) as usize], cells: vec![0; used * BRICK_SITES], faces: Vec::new() }
+        Grid {
+            min,
+            n,
+            bricks: vec![-1; (count[0] * count[1] * count[2]) as usize],
+            cells: vec![0; used * BRICK_SITES],
+            faces: Vec::new(),
+            alpha: Vec::new(),
+        }
     }
 
     /** Site (x, y, z)'s index in `cells`; None if its brick is empty or it is outside. */
@@ -128,20 +142,30 @@ impl Grid {
         (at >= 0).then(|| at as usize * BRICK_SITES + ((((z & 7) * BRICK + (y & 7)) * BRICK + (x & 7)) >> 1) as usize)
     }
 
-    /** The material of the voxel at site (x, y, z), as stored in `cells`; 0 if empty or outside. */
+    /** The material of the voxel at site (x, y, z), as stored in `cells`, and its alpha; (0, 0) if empty or outside. */
     #[inline]
-    pub fn get(&self, x: i32, y: i32, z: i32) -> u8 {
-        self.index(x, y, z).map_or(0, |i| self.cells[i])
+    pub fn get(&self, x: i32, y: i32, z: i32) -> (u8, u8) {
+        self.index(x, y, z).map_or((0, 0), |i| (self.cells[i], self.alpha_at(i)))
     }
 
-    /** The material of face `kind` (of VOXEL_FACES) of the voxel at site (x, y, z); 0 if empty or outside. */
+    /** The material of face `kind` (of VOXEL_FACES) of the voxel at site (x, y, z), and its alpha; (0, 0) if empty or outside. */
     #[inline]
-    pub fn face(&self, x: i32, y: i32, z: i32, kind: usize) -> u8 {
-        let Some(i) = self.index(x, y, z) else { return 0 };
-        match self.cells[i] {
+    pub fn face(&self, x: i32, y: i32, z: i32, kind: usize) -> (u8, u8) {
+        let Some(i) = self.index(x, y, z) else { return (0, 0) };
+        let material = match self.cells[i] {
             0 => 0,
             material if self.faces.is_empty() => material,
             material => self.faces_at(i).map_or(material, |faces| faces[kind]),
+        };
+        (material, self.alpha_at(i))
+    }
+
+    /** The alpha of the voxel at index `i` of `cells`: 0 if none. */
+    #[inline]
+    pub fn alpha_at(&self, i: usize) -> u8 {
+        match self.cells[i] {
+            0 => 0,
+            _ => self.alpha.get(i).copied().unwrap_or(ALPHA),
         }
     }
 
@@ -210,8 +234,8 @@ impl Tiles {
         }
     }
 
-    /** The material at site (x, y, z), 0 if empty; None if no tile's grid holds its column. */
-    pub fn at(&self, x: i32, y: i32, z: i32) -> Option<u8> {
+    /** The material at site (x, y, z) and its alpha, (0, 0) if empty; None if no tile's grid holds its column. */
+    pub fn at(&self, x: i32, y: i32, z: i32) -> Option<(u8, u8)> {
         let grid = self.grid(self.tile(x, z))?;
         let holds = |v: i32, d: usize| (grid.min[d]..grid.min[d] + grid.n[d]).contains(&v);
         (holds(x, 0) && holds(z, 2)).then(|| grid.get(x, y, z))
@@ -291,12 +315,12 @@ impl<'a> Reader<'a> {
 
     /**
      * Material ids at (a + 2i, b, c) for i in [0, count), those of the
-     * faces towards the camera, 0 where empty or
+     * faces towards the camera, and their alpha, (0, 0) where empty or
      * outside, to `visit` with each i, for a site (a, b, c): stepping a by
      * 2 steps (x, y, z) by R, and the grid only changes at a tile's edge.
      */
     #[inline]
-    pub fn row(&self, a: i32, b: i32, c: i32, count: i32, mut visit: impl FnMut(i32, u8)) {
+    pub fn row(&self, a: i32, b: i32, c: i32, count: i32, mut visit: impl FnMut(i32, u8, u8)) {
         debug_assert!(((a ^ c) | (b ^ c)) & 1 == 0, "not a site");
         let r = self.lattice.r;
         let [mut x, mut y, mut z] = self.lattice.world([a, b, c]);
@@ -308,7 +332,8 @@ impl<'a> Reader<'a> {
                 tile = here;
                 grid = self.tiles.grid(tile);
             }
-            visit(i, grid.map_or(0, |grid| grid.face(x, y, z, self.front)));
+            let (material, alpha) = grid.map_or((0, 0), |grid| grid.face(x, y, z, self.front));
+            visit(i, material, alpha);
             x += r[0];
             y += r[1];
             z += r[2];
@@ -337,7 +362,7 @@ mod tests {
             let read = |[x, y, z]: [i32; 3]| {
                 let [a, b, c] = [lattice.r, lattice.u, lattice.f].map(|v| v[0] * x + v[1] * y + v[2] * z);
                 let mut material = None;
-                reader.row(a, b, c, 1, |_, m| material = Some(m));
+                reader.row(a, b, c, 1, |_, m, _| material = Some(m));
                 material.expect("read")
             };
             assert_eq!(read(plain), 1);

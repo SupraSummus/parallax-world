@@ -157,7 +157,7 @@ how many rays get how far, and what they stop on.
   and one house in six vanished.
   Each cell is drawn with its share, as alpha (see "Kinds and things").
   Shown as often as covered, a house's walls come out ragged
-  till splats show alpha;
+  where splats do not show alpha (the web's; native's do);
   all held to one threshold, each house came out fatter or thinner by a site,
   and the few a camera sees often all one way
   (the valley's first town lost a third of its walls at level 4, 0.099 off);
@@ -646,7 +646,8 @@ A kind marked `glows` gives light of its colour, as lamps do
 Each site holds as much as what is in it stops rays
 (`VoxelGrid`'s `alpha`, `seen` and `glow`), each thing its share,
 and glows as its glowing things, in proportion to their shares;
-it shows a voxel as often as its alpha.
+a host that draws alpha (native) shows it as see-through as that,
+the web a voxel as often (`VoxelGrid::show`).
 So a lamp too small for a coarse site
 is in it as a little glow, and stops a little light.
 A far form without its near form's lamps goes dark,

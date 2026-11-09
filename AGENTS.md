@@ -121,7 +121,7 @@ native/                      # Spike of a native frontend (egui on winit and wgp
     ├── view.rs              # view.ts: faces, which rays and screen boxes they draw
     ├── renderer.rs          # Chunks in view: cells of the lattice (bake's lod.rs), not slices; cached, finest and nearest first
     ├── bakery.rs            # Worker threads baking chunks, a baker each sharing the tiles (lit, with a Light each), and clustering their splats for the GPU
-    ├── compositor.rs        # compositor.ts with wgpu, for cells: splats uploaded per chunk in clusters, by depth, culled on the GPU against what showed
+    ├── compositor.rs        # compositor.ts with wgpu, for cells: splats uploaded per chunk in clusters, by depth, culled on the GPU against what showed; see-through by chance or blended
     ├── shot.rs              # --shot: one frame drawn offscreen on the GPU, saved as a PNG, no window
     └── compositor.wgsl
 ```

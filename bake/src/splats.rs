@@ -29,7 +29,7 @@ pub struct Splat {
     /** How many half layers its pillar reaches past its site. */
     pub run: i32,
     pub width: f64,
-    /** Opaque RGBA (see voxel_colour). */
+    /** RGBA (see voxel_colour), its alpha its voxel's (Voxel). */
     pub colour: u32,
     /** Its voxel's lattice coordinates. */
     pub site: [i32; 3],
@@ -293,7 +293,7 @@ mod tests {
     use crate::slicing::slice_centre;
     use crate::surface::Slice;
     use crate::tables::geometry;
-    use crate::world::lattices;
+    use crate::world::{ALPHA, lattices};
 
     /** Twice a slice's centre plane's depth in layers, as chunk_splats takes it. */
     fn centre(slice: &Slice) -> i32 {
@@ -312,7 +312,7 @@ mod tests {
                 let open = (0..FACE_KINDS)
                     .filter(|&k| !solid(std::array::from_fn(|d| site[d] + geometry.offsets[k][d])))
                     .fold(0, |o, k| o | 1 << k);
-                Voxel { site, material: 0, open, cut: 0 }
+                Voxel { site, material: 0, alpha: ALPHA, open, cut: 0 }
             })
             .filter(|v| v.open != 0)
             .collect();
@@ -419,7 +419,7 @@ mod tests {
         let geometry = geometry(&lattices()[0]);
         let kind = |offset: [i32; 3]| 1 << geometry.offsets.iter().position(|&o| o == offset).expect("a face");
         let (near, far, across, away) = (kind([0, 0, -2]), kind([0, 0, 2]), kind([-2, 0, 0]), kind([1, 1, 1]));
-        let voxel = |site: [i32; 3], material: u8, open: u16, cut: u16| Voxel { site, material, open, cut };
+        let voxel = |site: [i32; 3], material: u8, open: u16, cut: u16| Voxel { site, material, alpha: ALPHA, open, cut };
         let surface = [
             voxel([0, 0, 0], 1, 0, near),
             voxel([0, 0, 4], 2, across, 0),
@@ -441,7 +441,7 @@ mod tests {
     fn colours_a_voxel_by_its_open_faces_or_else_its_cut_ones() {
         // Material 1's kinds: kind k is grey k · 10.
         let palette: Vec<u32> = (0..2 * FACE_KINDS as u32).map(|i| 0xff00_0000 | ((i % 12 * 10) * 0x0001_0101)).collect();
-        let voxel = |open: u16, cut: u16| Voxel { site: [0; 3], material: 1, open, cut };
+        let voxel = |open: u16, cut: u16| Voxel { site: [0; 3], material: 1, alpha: ALPHA, open, cut };
         assert_eq!(voxel_colour(&voxel(0b1000_0100, 0b1), &palette), 0xff00_0000 | (45 * 0x0001_0101));
         assert_eq!(voxel_colour(&voxel(0, 0b11), &palette), 0xff00_0000 | (5 * 0x0001_0101));
     }

@@ -86,7 +86,7 @@ fn a_body_walks_the_path_through_its_ferns() {
     let [x, z] = [world.spawn[0], world.spawn[2]].map(|v| v >> level);
     let (min_y, max_y) = world.heights_at(level);
     let area = Box3 { min: [2 * ((x - 32) / 2), min_y, z - 8], max: [x + 32, max_y, z + 128] };
-    let tiles = bake::Tiles::one(generate(&world.generator, &area, level).into_grid());
+    let tiles = bake::Tiles::one(generate(&world.generator, &area, level).into_grid(true));
     let walk_through: Vec<bool> = materials_of(&world.generator).iter().map(|m| m.walk_through).collect();
     let ground = Ground { tiles: &tiles, walk_through: &walk_through };
     let mut body = Walker::at(world.spawn.map(|v| v as f64));
