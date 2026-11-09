@@ -31,7 +31,7 @@ use fill::{fill_mask, solid_blocks};
 use light::Lighting;
 use lod::CellChunk;
 use slicing::{LAYER, chunk_cell, slice_centre, spacing, thickness};
-use splats::{Splats, SplatsOf, cell_splats, chunk_splats, lit_voxel_colour, voxel_colour};
+use splats::{Splat, Splats, SplatsOf, cell_splats, chunk_splats, lit_voxel_colour, voxel_colour};
 use surface::{cell_surface, surface};
 use world::{Geometry, Reader};
 
@@ -40,7 +40,7 @@ pub use coverage::Coverage;
 pub use layer_index::LayerIndex;
 pub use surface::Slice;
 pub use tables::VOXEL_FACES;
-pub use world::{FACE_KINDS, FACE_WORDS, Faces, Grid, Lattice, Tiles, VIEW_FACES, face_words, lattices};
+pub use world::{ALPHA, FACE_KINDS, FACE_WORDS, Faces, Grid, Lattice, Tiles, VIEW_FACES, face_words, lattices};
 
 /**
  * Mask pixels per unit of its grid for a slice of `level` as the grid
@@ -211,7 +211,7 @@ impl Baker {
         fill_mask(splats, &mut self.mask, width, height, min_x, max_y, scale);
         solid_blocks(&mut self.blocks, &self.mask, width, height);
         let extent = if empty { [0.0; 2] } else { [max_x - min_x, max_y - min_y] };
-        self.numbers(level, min_x, max_y, extent, [width, height], scale)
+        self.numbers(level, min_x, max_y, extent, [width, height], scale, slice_numbers)
     }
 
     /**
@@ -219,6 +219,7 @@ impl Baker {
      * ray can enter (cell_splats), as splats over the plane through its site,
      * unclipped: no other chunk of its level draws its voxels, and depth
      * decides between them. No mask: what is covered is left to the GPU.
+     * Its numbers are cell_numbers'.
      */
     pub fn bake_cell(&mut self, face: usize, chunk: &CellChunk) -> Baked {
         let level = chunk.atoms as usize;
@@ -237,7 +238,7 @@ impl Baker {
         let s = &self.splats;
         let extent = if s.splats.is_empty() { [0.0; 2] } else { [s.max_x - s.min_x, s.max_y - s.min_y] };
         self.blocks.clear();
-        self.numbers(level, s.min_x, s.max_y, extent, [0, 0], 1.0)
+        self.numbers(level, s.min_x, s.max_y, extent, [0, 0], 1.0, cell_numbers)
     }
 
     /** The splats `splats` makes of a surface read from grid `level` along view face `face`, coloured. */
@@ -246,9 +247,12 @@ impl Baker {
         let palettes = self.palettes.len() / VIEW_FACES;
         let palette = &self.palettes[face * palettes..(face + 1) * palettes];
         let (light, kinds) = (&mut self.light, &self.world_kinds[face]);
-        let mut colour = |voxel: &surface::Voxel| match light {
-            Some(light) => lit_voxel_colour(voxel, &light(level, lattice.world(voxel.site)), kinds, lattice.f.map(|v| -v)),
-            None => voxel_colour(voxel, palette),
+        let mut colour = |voxel: &surface::Voxel| {
+            let rgb = match light {
+                Some(light) => lit_voxel_colour(voxel, &light(level, lattice.world(voxel.site)), kinds, lattice.f.map(|v| -v)),
+                None => voxel_colour(voxel, palette),
+            };
+            rgb & 0x00ff_ffff | u32::from(voxel.alpha) << 24
         };
         splats(&mut self.splats, &self.geometry, &mut colour, surface, centre);
     }
@@ -256,9 +260,20 @@ impl Baker {
     /**
      * The splats as numbers, in world units relative to the top-left corner
      * (min_x, max_y) of what they draw, `extent` wide and high in the grid's
-     * units, and the mask's size and pixels per unit.
+     * units, and the mask's size and pixels per unit; `last` gives each
+     * splat's last two.
      */
-    fn numbers(&mut self, level: usize, min_x: f64, max_y: f64, extent: [f64; 2], [width, height]: [usize; 2], scale: f64) -> Baked {
+    #[allow(clippy::too_many_arguments)]
+    fn numbers(
+        &mut self,
+        level: usize,
+        min_x: f64,
+        max_y: f64,
+        extent: [f64; 2],
+        [width, height]: [usize; 2],
+        scale: f64,
+        last: fn(&Splat) -> [f32; 2],
+    ) -> Baked {
         self.spacing = spacing(level as i32);
         let n = self.spacing as f64;
         self.numbers.clear();
@@ -268,10 +283,8 @@ impl Baker {
                 ((s.y - max_y) * n) as f32,
                 // Its height is √2 times that.
                 (s.width * n) as f32,
-                s.run as f32,
-                // Its depth in the alpha byte, as splats are opaque: within ±2^ATOM_SHIFT half layers.
-                f32::from_bits(s.colour & 0x00ff_ffff | ((128 + s.depth) as u32) << 24),
             ]);
+            self.numbers.extend(last(s));
         }
         Baked {
             width,
@@ -284,6 +297,20 @@ impl Baker {
             count: self.splats.splats.len(),
         }
     }
+}
+
+/**
+ * A slice's splat's last two numbers (see ChunkSplats): its run, and its
+ * colour with its depth in the alpha byte, as slices draw voxels whole:
+ * within ±2^ATOM_SHIFT half layers.
+ */
+fn slice_numbers(s: &Splat) -> [f32; 2] {
+    [s.run as f32, f32::from_bits(s.colour & 0x00ff_ffff | ((128 + s.depth) as u32) << 24)]
+}
+
+/** A cell's splat's last two numbers: its depth in half layers past the plane, and its colour, its alpha its voxel's. */
+fn cell_numbers(s: &Splat) -> [f32; 2] {
+    [s.depth as f32, f32::from_bits(s.colour)]
 }
 
 // The WebAssembly interface: chunk-baker.ts writes a world's colours and

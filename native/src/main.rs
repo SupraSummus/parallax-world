@@ -4,7 +4,7 @@
 //! baker in bake/, sharing the tiles, and wgpu drawing them in an egui window
 //! (window.rs).
 //!
-//! parallax-native [--world NAME] [--threads N] [--seed S] [--view QUERY] [--light SKY,SUN,GLOW] [--detail D] [--shift S] [--shot out.png [--size WxH] [--seams] [--colour voxels|layers|chunks] | --bench] [--stroll S [--on-ground]]
+//! parallax-native [--world NAME] [--threads N] [--seed S] [--view QUERY] [--light SKY,SUN,GLOW] [--detail D] [--shift S] [--shot out.png [--size WxH] [--seams] [--colour voxels|layers|chunks] [--see-through chance|blend] | --bench] [--stroll S [--on-ground]]
 //!
 //! --view takes the web page's view query (parseViewQuery in renderer.ts),
 //! overriding --seed and --world.
@@ -18,7 +18,7 @@
 //! what glows this bright: 1,1,0 a clear day, 0.01,0,1 night.
 //! --detail sets viewing distance over a cell's thickness, --shift how many
 //! levels finer than a cell its voxels are (bake's lod.rs), as the panel does.
-//! --seams and --colour draw as the panel's switches do.
+//! --seams, --colour and --see-through draw as the panel's switches do.
 
 mod bakery;
 mod compositor;
@@ -35,7 +35,7 @@ use bake::Baker;
 use bake::walk::{COLLISION_LEVEL, Ground, WalkInput, Walker};
 
 use bakery::Bakery;
-use compositor::Colours;
+use compositor::{Colours, SeeThrough};
 use renderer::Renderer;
 use view::{Vec3, focal_length, view_basis};
 use world::{Make, World};
@@ -55,6 +55,7 @@ struct App {
     fov: f64,
     seams: bool,
     colours: Colours,
+    see_through: SeeThrough,
     stats: String,
     frame_ms: f64,
     /** Walking on the ground (bake's walk.rs): the body the camera is the eye of; None flying. */
@@ -102,6 +103,12 @@ impl window::Content for App {
                 ui.label("Colour by");
                 for (colours, name) in Colours::ALL {
                     ui.radio_value(&mut self.colours, colours, name);
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.label("See-through by");
+                for (see_through, name) in SeeThrough::ALL {
+                    ui.radio_value(&mut self.see_through, see_through, name);
                 }
             });
             ui.label(format!(
@@ -168,6 +175,7 @@ impl window::Content for App {
                 pixels: [0, 0],
                 seams: self.seams,
                 colours: self.colours,
+                see_through: self.see_through,
                 sky: self.sky,
             };
             let pixels = ui.ctx().pixels_per_point();
@@ -198,8 +206,8 @@ impl App {
     fn remember(&self, size: [f32; 2]) {
         let ([x, y, z], r) = (self.camera, &self.renderer);
         let frame = format!(
-            "--view '{}&camera={x},{y},{z}&look={},{}&fov={}&distance={:.0}&detail={}' --shift {} --size {:.0}x{:.0}",
-            self.world_query, self.yaw, self.pitch, self.fov, r.render_distance, r.detail, r.shift, size[0], size[1],
+            "--view '{}&camera={x},{y},{z}&look={},{}&fov={}&distance={:.0}&detail={}' --shift {} --size {:.0}x{:.0} --see-through {:?}",
+            self.world_query, self.yaw, self.pitch, self.fov, r.render_distance, r.detail, r.shift, size[0], size[1], self.see_through,
         );
         *LAST_FRAME.lock().unwrap_or_else(|e| e.into_inner()) = format!("{frame}\n{}", self.stats);
     }
@@ -452,6 +460,9 @@ fn main() {
             colours: value("--colour").map_or(Colours::Voxels, |v| {
                 Colours::ALL.into_iter().find(|(_, name)| name.eq_ignore_ascii_case(v)).expect("--colour voxels, layers or chunks").0
             }),
+            see_through: value("--see-through").map_or(SeeThrough::Chance, |v| {
+                SeeThrough::ALL.into_iter().find(|(_, name)| name.eq_ignore_ascii_case(v)).expect("--see-through chance or blend").0
+            }),
             sky,
         };
         if flag("--bench") {
@@ -480,6 +491,7 @@ fn main() {
         fov,
         seams: false,
         colours: Colours::Voxels,
+        see_through: SeeThrough::Chance,
         stats: String::new(),
         frame_ms: 0.0,
         walker: None,
@@ -528,6 +540,7 @@ mod tests {
             pixels: size.map(|v| v as u32),
             seams: false,
             colours: Colours::Voxels,
+            see_through: SeeThrough::Chance,
             sky: 1.0,
         };
         (frame, view)
@@ -542,13 +555,18 @@ mod tests {
     fn culling_on_the_gpu_leaves_the_picture_unchanged() {
         for (name, look, octaves) in VIEWS {
             let (frame, view) = complete_view(name, look, 2f64.powf(octaves));
-            let [culled, all] = [true, false].map(|culls| {
-                let mut gpu = shot::Offscreen::with(None, culls);
-                gpu.prepare(&frame, &view);
-                (gpu.picture().2, gpu.drawn().iter().sum::<u32>())
-            });
-            assert!(culled.0 == all.0, "{name} {look:?}");
-            assert!(culled.1 < all.1, "{name} {look:?}: culling drew {} splats of {}", culled.1, all.1);
+            for (see_through, _) in SeeThrough::ALL {
+                let view = compositor::View { see_through, ..view };
+                let [culled, all] = [true, false].map(|culls| {
+                    let mut gpu = shot::Offscreen::with(None, culls);
+                    gpu.prepare(&frame, &view);
+                    (gpu.picture().2, gpu.drawn().iter().sum::<u32>())
+                });
+                // Blended sums round by the order they are drawn in, which culling changes.
+                let off = if see_through == SeeThrough::Blend { 2 } else { 0 };
+                assert!(culled.0.iter().zip(&all.0).all(|(a, b)| a.abs_diff(*b) <= off), "{name} {look:?} {see_through:?}");
+                assert!(culled.1 < all.1, "{name} {look:?}: culling drew {} splats of {}", culled.1, all.1);
+            }
         }
     }
 
@@ -569,6 +587,9 @@ mod tests {
         let left_out = (0..all.len()).filter(|&k| some[k] != all[k]).count();
         let drawn = (0..all.len()).filter(|&k| some[k] != sky[k]).count();
         assert!(left_out > 0 && drawn > 0, "{left_out} pixels left out, {drawn} drawn");
-        assert!((0..all.len()).all(|k| some[k] == all[k] || some[k] == sky[k]), "what is drawn shows as it would");
+        // But for a few: within a level chunks go by their sites' distance, not every ray's order, and a ray seeing
+        // through see-through voxels may meet a drawn chunk behind one left out.
+        let wrong = (0..all.len()).filter(|&k| some[k] != all[k] && some[k] != sky[k]).count();
+        assert!(wrong * 100 < left_out, "what is drawn shows as it would: {wrong} pixels of {left_out} do not");
     }
 }

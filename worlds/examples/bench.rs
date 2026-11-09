@@ -27,7 +27,7 @@ fn main() {
         let (mut voxels, mut hash) = (0, DefaultHasher::new());
         for i in 0..4 {
             let (x, z) = (cx + 128 * (i % 2), cz + 128 * (i / 2));
-            let grid = generate(generator, &Box3 { min: [x, min_y, z], max: [x + 128, max_y, z + 128] }, level).into_grid();
+            let grid = generate(generator, &Box3 { min: [x, min_y, z], max: [x + 128, max_y, z + 128] }, level).into_grid(false);
             voxels += grid.cells.len();
             (&grid.bricks, &grid.cells).hash(&mut hash);
         }

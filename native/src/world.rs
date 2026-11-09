@@ -130,7 +130,7 @@ fn work(make: Make, seed: u64, shared: Option<Shared>, heights: &Heights, queue:
             Some(shared) => shared.tile(&generator, level as u32, heights[level], (id.0 as i64, id.1 as i64)),
             None => generate(&generator, &tile_box(heights, level, id), level as u32),
         }
-        .into_grid();
+        .into_grid(true);
         let index = LayerIndex::new(&grid);
         if send.send((level, id, Tile { grid: Arc::new(grid), index })).is_err() {
             return;

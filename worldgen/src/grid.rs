@@ -6,8 +6,8 @@ use std::collections::BTreeMap;
 
 use bake::{Faces, face_words};
 
-// The baker's grids, as worlds hand them over (worlds/src/wasm.rs), and the voxel's faces.
-pub use bake::{FACE_WORDS, Grid, VOXEL_FACES};
+// The baker's grids, as worlds hand them over (worlds/src/wasm.rs), the voxel's faces, and a whole site's alpha: it stops every ray.
+pub use bake::{ALPHA, FACE_WORDS, Grid, VOXEL_FACES};
 
 pub const BRICK: i64 = 8;
 const BRICK_SITES: usize = (BRICK * BRICK * BRICK / 2) as usize;
@@ -71,8 +71,6 @@ pub struct VoxelGrid {
     pub glow: BTreeMap<usize, [u32; 3]>,
 }
 
-/** A whole site's alpha: it stops every ray. */
-pub const ALPHA: u8 = 255;
 /** The glow of a site all of a glowing white: 255 per channel (linear), of a whole share (generator's SHARE). */
 pub const GLOW_ONE: u32 = 255 << 16;
 
@@ -251,85 +249,52 @@ impl VoxelGrid {
         }
     }
 
-    /** The voxels shown, as the baker takes them: bricks with none left out. */
-    pub fn into_grid(self) -> Grid {
-        let mut bricks = self.bricks;
-        // By brick of `cells`, where it is in `bricks`.
-        let mut slots = vec![usize::MAX; self.cells.len() / BRICK_SITES];
+    /**
+     * The voxels as the baker takes them, bricks with none left out: those
+     * shown (`show`), whole; or `see_through`, for a host that draws alpha,
+     * every site that stops rays, as much as it does (`seen`, `alpha`).
+     */
+    pub fn into_grid(self, see_through: bool) -> Grid {
+        let VoxelGrid { min, n, mut bricks, cells, faces, alpha, seen, .. } = self;
+        let (all, alpha) = if see_through {
+            (seen.iter().zip(&alpha).map(|(&m, &a)| if a > 0 { m } else { 0 }).collect(), alpha)
+        } else {
+            (cells, Vec::new())
+        };
+        // By brick of `all`, where it is in `bricks`.
+        let mut slots = vec![usize::MAX; all.len() / BRICK_SITES];
         for (slot, &at) in bricks.iter().enumerate() {
             if at >= 0 {
                 slots[at as usize] = slot;
             }
         }
-        let mut cells = Vec::with_capacity(self.cells.len());
+        let (mut cells, mut alphas) = (Vec::with_capacity(all.len()), Vec::with_capacity(alpha.len()));
         let mut moved = vec![None; slots.len()];
-        for (at, brick) in self.cells.chunks(BRICK_SITES).enumerate() {
+        for (at, brick) in all.chunks(BRICK_SITES).enumerate() {
             if brick.iter().all(|&c| c == 0) {
                 bricks[slots[at]] = -1;
             } else {
                 moved[at] = Some(cells.len());
                 bricks[slots[at]] = (cells.len() / BRICK_SITES) as i32;
                 cells.extend_from_slice(brick);
+                alphas.extend_from_slice(alpha.get(at * BRICK_SITES..(at + 1) * BRICK_SITES).unwrap_or_default());
             }
         }
-        let mut faces: Vec<_> = self
-            .faces
+        let mut faces: Vec<_> = faces
             .iter()
-            .filter(|(i, _)| self.cells[**i] != 0)
+            .filter(|(i, _)| all[**i] != 0)
             .filter_map(|(i, faces)| moved[i / BRICK_SITES].map(|to| (to + i % BRICK_SITES, faces)))
             .collect();
         faces.sort_unstable_by_key(|(i, _)| *i);
         Grid {
-            min: self.min.map(|v| v as i32),
-            n: self.n.map(|v| v as i32),
+            min: min.map(|v| v as i32),
+            n: n.map(|v| v as i32),
             bricks,
             cells,
             faces: faces.into_iter().flat_map(|(i, faces)| face_words(i, faces)).collect(),
+            alpha: alphas,
         }
     }
-}
-
-/**
- * The grid of `b`, its bricks taken from `parts`: each a whole number of
- * bricks from the box's corner, no two with voxels in one brick of it
- * (VoxelGrid.compose in voxel-grid.ts). The rest of the box is empty.
- */
-pub fn compose(b: &Box3, parts: &[&Grid]) -> Grid {
-    let VoxelGrid { min, n, bx, by, mut bricks, mut cells, .. } = VoxelGrid::new(b);
-    let mut faces: Vec<[u32; FACE_WORDS]> = Vec::new();
-    let bz = (n[2] + BRICK - 1) / BRICK;
-    for part in parts {
-        let offset: [i64; 3] = std::array::from_fn(|i| {
-            assert_eq!((part.min[i] as i64 - min[i]) % BRICK, 0, "a part is not a whole number of bricks from the box");
-            (part.min[i] as i64 - min[i]) / BRICK
-        });
-        let [pbx, pby, pbz] = part.n.map(|v| (v as i64 + BRICK - 1) / BRICK);
-        // Where each of the part's bricks of sites went, if it did.
-        let mut moved = vec![None; part.cells.len() / BRICK_SITES];
-        for k in 0..pbz {
-            for j in 0..pby {
-                for i in 0..pbx {
-                    let at = part.bricks[((k * pby + j) * pbx + i) as usize];
-                    let [gi, gj, gk] = [i + offset[0], j + offset[1], k + offset[2]];
-                    if at < 0 || gi < 0 || gj < 0 || gk < 0 || gi >= bx || gj >= by || gk >= bz {
-                        continue;
-                    }
-                    moved[at as usize] = Some(cells.len());
-                    bricks[((gk * by + gj) * bx + gi) as usize] = (cells.len() / BRICK_SITES) as i32;
-                    let from = at as usize * BRICK_SITES;
-                    cells.extend_from_slice(&part.cells[from..from + BRICK_SITES]);
-                }
-            }
-        }
-        for &[i, words @ ..] in part.faces.as_chunks::<FACE_WORDS>().0 {
-            if let Some(to) = moved[i as usize / BRICK_SITES] {
-                faces.push([(to + i as usize % BRICK_SITES) as u32, words[0], words[1], words[2]]);
-            }
-        }
-    }
-    faces.sort_unstable_by_key(|site| site[0]);
-    let (min, n) = (min.map(|v| v as i32), n.map(|v| v as i32));
-    Grid { min, n, bricks, cells, faces: faces.concat() }
 }
 
 #[cfg(test)]
@@ -347,9 +312,11 @@ mod tests {
         grid.set(2, 2, 2, 5);
         assert_eq!((grid.faces.len(), grid.face(2, 2, 2, 1)), (1, 5));
 
-        // Composed into a box a brick wider, the bricks move, and their sites' faces with them.
-        let whole = compose(&Box3 { min: [-8, 0, 0], max: [16, 8, 8] }, &[&grid.into_grid()]);
-        assert_eq!([0, 1].map(|k| whole.face(10, 2, 2, k)), [2, 3]);
-        assert_eq!([0, 1].map(|k| whole.face(2, 2, 2, k)), [5, 5]);
+        // Handed over with its first brick emptied, that brick is left out, and the next moves with its sites' faces.
+        grid.set(2, 2, 2, 0);
+        grid.set(4, 2, 2, 0);
+        let whole = grid.into_grid(false);
+        assert_eq!((whole.cells.len(), whole.get(2, 2, 2)), (BRICK_SITES, (0, 0)));
+        assert_eq!([0, 1].map(|k| whole.face(10, 2, 2, k)), [(2, ALPHA), (3, ALPHA)]);
     }
 }

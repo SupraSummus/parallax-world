@@ -85,7 +85,7 @@ pub extern "C" fn worldgen_generate(level: u32, min_x: f64, min_y: f64, min_z: f
     STATE.with_borrow_mut(|state| {
         let Some(state) = state else { return std::ptr::null() };
         let b = Box3 { min: [min_x as i64, min_y as i64, min_z as i64], max: [max_x as i64, max_y as i64, max_z as i64] };
-        let grid = state.grid.insert(generate(&state.world.generator, &b, level).into_grid());
+        let grid = state.grid.insert(generate(&state.world.generator, &b, level).into_grid(false));
         result(&[
             grid.min[0] as f64,
             grid.min[1] as f64,
