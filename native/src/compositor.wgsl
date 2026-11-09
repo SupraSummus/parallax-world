@@ -30,7 +30,7 @@ struct Chunk {
   extent: vec2f,
   distance: f32, // of the centre plane, along the face's axis
   face: u32,
-  depth: f32, // its layer's: see depth_of
+  depth: f32, // its place in the painting order: see depth_of
   tint: u32, // RGBA to paint its splats in, shaded as their voxels are; 0 for their own
   half_layer: f32, // how far a splat is past the plane per step of its alpha past 128
   _pad: f32,
@@ -78,13 +78,13 @@ struct DrawArgs {
 // Showing the frame.
 @group(0) @binding(13) var picture: texture_2d<f32>;
 
-// Painting order is depth: layer k of L at 2^((k - L) · depth_scale),
-// near to far, and within a chunk by `order`, in [0, 1), nearer the later
-// a splat is painted (see Compositor::prepare), up to the next layer's.
-// Exponential, so each layer has about as many depths as a whole [½, 1)
+// Painting order is depth: chunk k of L at 2^((k - L) · depth_scale),
+// and within a chunk by `order`, in [0, 1), nearer the later a splat is
+// painted (see Compositor::prepare), up to the next chunk's.
+// Exponential, so each chunk has about as many depths as a whole [½, 1)
 // would linearly, enough for every splat of the largest chunks.
-fn depth_of(layer: f32, order: f32) -> f32 {
-  return layer * exp2(order * globals.depth_scale);
+fn depth_of(chunk: f32, order: f32) -> f32 {
+  return chunk * exp2(order * globals.depth_scale);
 }
 
 struct Splat {

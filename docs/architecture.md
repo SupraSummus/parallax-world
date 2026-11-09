@@ -92,7 +92,7 @@ The native spike (`native/src/world.rs`) has no grids, only tiles,
 made in the order the renderer wants them:
 a cell is baked once the world has every tile it reads (`chunk_reads`),
 and until then it asks for them, nearest first.
-Then come the other tiles within `GRID_REACH` of each level the slices read,
+Then come the other tiles within `GRID_REACH` of each level the chunks read,
 so that turning finds them made, and far ones are dropped.
 A tile never changes once made,
 so no chunk or cell surface goes stale as tiles come.
@@ -174,6 +174,28 @@ Covering distance n takes O(detail · log n) slices,
 up to `MAX_LEVEL`, then O(n).
 Moving the camera along the axis keeps every slice
 but a few where levels change (section 5).
+
+### Native: cells instead of slices
+
+The native spike has no slices (`bake/src/lod.rs`, `native/src/renderer.rs`).
+A chunk is a whole cell of 2^L·FCC,
+drawn as the voxels of grid max(0, L − S) (`--shift S`)
+in relief over the plane through its site;
+nothing else, the camera least of all, changes it.
+The camera only picks the chunks a face composes,
+by its layer along the face's axis alone, in whole numbers:
+level L claims the cells up to 2Q · 2^L layers ahead,
+and draws those not all within the finer level's claims.
+Where a cell overlaps finer ones, both draw what is there,
+and the finer is painted first.
+Painted level by level, and within a level by their sites' distance from the eye,
+chunks need no clipping or margins, for any ray of the face:
+a face's rays cross a level's cells layer after layer,
+so they leave a level's claims at most once,
+and of two cells of one level, they meet first the one whose site is nearer.
+Where they overlap, coarser voxels may show a little past the finer ones' edges.
+There is no coverage: every chunk in view is baked,
+and the compositor culls what is hidden (section 4).
 
 ## 2. Detail and leaks
 
@@ -343,7 +365,7 @@ then the re-tiled segments below, those missing fewest chunks first;
 then the rest, near to far.
 When the camera moves along a face's axis, its slices re-tile
 where levels change.
-`matchTilings` (`match_tilings` in `bake/src/slicing.rs`, for native)
+`matchTilings`
 pairs the new slices with the ones drawn last:
 slices in both stand for themselves,
 and the new ones between two of them
@@ -460,12 +482,8 @@ show nothing until baked, a frame or two.
 The rays through each sub-block are kept per face while the camera only moves,
 and turning, found only in the cells the face crosses or holds
 (a face's side is a half-plane of the screen).
-The native renderer runs `Coverage` on a thread of its own
-(`native/src/occlusion.rs`), over what each render saw:
-every baked chunk in view is drawn, its GPU culling hiding what is covered,
-and coverage only decides which cells are baked and have their tiles made,
-so a pass covers a face's layers only as far as the farthest cell that asks.
-A cell coming into view waits for the next pass, a frame or two.
+The native renderer has no coverage (section 1):
+it bakes every chunk in view, and its GPU culling hides what is covered.
 
 The `Compositor` draws a frame onto one opaque WebGL 2 canvas:
 per chunk the splats of its clusters that may show, instanced,
@@ -500,7 +518,7 @@ No antialiasing, so voxel edges stay crisp.
 The native compositor (`native/src/compositor.rs`) draws only what may show:
 in the forest, under 2 % of the splats in view show a pixel.
 Painting order is in the depth instead of the draw order:
-layer k of L at 2^((k − L)·s), and within a chunk each splat's rank,
+chunk k of L at 2^((k − L)·s), and within a chunk each splat's rank,
 nearer the later it is painted
 (`depth_of`, exponential so the largest chunks' ranks stay apart in f32).
 So splats can be drawn in any order,

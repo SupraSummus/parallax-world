@@ -41,39 +41,47 @@ pub fn owner(n: i32, site: [i32; 3]) -> [i32; 3] {
 }
 
 /**
- * Which layer of N·FCC owns each site, from a table over a period of the
+ * Which site of N·FCC owns each site, from a table over a period of the
  * lattice: N·FCC repeats every 2N along each of a, b and c, and so does the
  * owner relative to the site.
  */
 pub struct Cells {
     n: i32,
-    /** Per residue (a, b, c) mod 2N: the owner's c minus the site's. */
-    dc: Vec<i8>,
+    /** Per residue (a, b, c) mod 2N: the owner minus the site. */
+    offsets: Vec<[i8; 3]>,
 }
 
 impl Cells {
     pub fn new(n: i32) -> Cells {
         let period = 2 * n;
-        let mut dc = vec![0; (period * period * period) as usize];
+        let mut offsets = vec![[0; 3]; (period * period * period) as usize];
         for a in 0..period {
             for b in 0..period {
                 for c in 0..period {
                     // Only sites with a, b, c of one parity exist; the rest stay 0.
                     if (a ^ c) & 1 == 0 && (b ^ c) & 1 == 0 {
-                        dc[((a * period + b) * period + c) as usize] = (owner(n, [a, b, c])[2] - c) as i8;
+                        let o = owner(n, [a, b, c]);
+                        offsets[((a * period + b) * period + c) as usize] = [o[0] - a, o[1] - b, o[2] - c].map(|v| v as i8);
                     }
                 }
             }
         }
-        Cells { n, dc }
+        Cells { n, offsets }
+    }
+
+    /** The site of N·FCC owning site (a, b, c). */
+    #[inline]
+    pub fn owner(&self, a: i32, b: i32, c: i32) -> [i32; 3] {
+        let period = 2 * self.n;
+        let index = (a.rem_euclid(period) * period + b.rem_euclid(period)) * period + c.rem_euclid(period);
+        let [da, db, dc] = self.offsets[index as usize];
+        [a + da as i32, b + db as i32, c + dc as i32]
     }
 
     /** c of the site of N·FCC owning site (a, b, c): a multiple of N. */
     #[inline]
     pub fn owner_c(&self, a: i32, b: i32, c: i32) -> i32 {
-        let period = 2 * self.n;
-        let index = (a.rem_euclid(period) * period + b.rem_euclid(period)) * period + c.rem_euclid(period);
-        c + self.dc[index as usize] as i32
+        self.owner(a, b, c)[2]
     }
 }
 
@@ -135,7 +143,7 @@ mod tests {
         for n in [1, 2, 4, 8] {
             let cells = Cells::new(n);
             for site in sites(-3 * n - 2, 3 * n + 2) {
-                assert_eq!(cells.owner_c(site[0], site[1], site[2]), owner(n, site)[2], "n {n} site {site:?}");
+                assert_eq!(cells.owner(site[0], site[1], site[2]), owner(n, site), "n {n} site {site:?}");
             }
         }
     }
