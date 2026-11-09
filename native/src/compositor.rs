@@ -10,7 +10,7 @@
 //! placements, relative to the camera, so precision does not fall off far
 //! from the origin, and the list of their clusters.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
 use bake::light::{linear_to_srgb, srgb_to_linear};
@@ -156,12 +156,11 @@ fn rows(numbers: &[[f32; 5]]) -> Vec<[f32; 5]> {
     all.into_iter().map(|(_, s)| s).collect()
 }
 
-/** A chunk's splats and clusters on the GPU, its slot in the table, and the frame it was last drawn in. */
+/** A chunk's splats and clusters on the GPU, and its slot in the table. */
 struct Resident {
     splats: Range<u32>,
     clusters: Range<u32>,
     slot: u32,
-    drawn: u64,
 }
 
 /** A buffer of items `stride` bytes long, ranges of them allocated and freed. */
@@ -195,7 +194,11 @@ impl Arena {
     /** Grown to `capacity` items, as far as the device allows, what it holds copied over. */
     fn grow(&mut self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, capacity: u32) {
         let limits = device.limits();
-        let most = limits.max_buffer_size.min(limits.max_storage_buffer_binding_size) / self.stride;
+        let mut most = limits.max_buffer_size;
+        if self.usage.contains(wgpu::BufferUsages::STORAGE) {
+            most = most.min(limits.max_storage_buffer_binding_size);
+        }
+        let most = most / self.stride;
         let capacity = capacity.min(most.min(u32::MAX as u64) as u32);
         if capacity > self.capacity {
             let grown = buffer(device, self.label, capacity as u64 * self.stride, self.usage);
@@ -204,8 +207,8 @@ impl Arena {
         }
     }
 
-    /** `count` items' room in the buffer, grown if need be. */
-    fn allocate(&mut self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, count: u32) -> Range<u32> {
+    /** `count` items' room in the buffer, grown if need be; none when the device allows no more. */
+    fn allocate(&mut self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, count: u32) -> Option<Range<u32>> {
         if let Some(k) = self.free.iter().position(|r| r.len() >= count as usize).filter(|_| !self.grew) {
             let r = self.free[k].clone();
             if r.len() == count as usize {
@@ -213,13 +216,15 @@ impl Arena {
             } else {
                 self.free[k].start += count;
             }
-            return r.start..r.start + count;
+            return Some(r.start..r.start + count);
         }
         if self.top + count > self.capacity {
             self.grow(device, encoder, (self.capacity * 2).max(self.top + count));
         }
-        self.top += count;
-        self.top - count..self.top
+        (self.top + count <= self.capacity).then(|| {
+            self.top += count;
+            self.top - count..self.top
+        })
     }
 
     /** Frees a range, merging it with free neighbours. */
@@ -277,7 +282,6 @@ pub struct Compositor {
     splats: Arena,
     clusters: Arena,
     resident: HashMap<u32, Resident>,
-    frames: u64,
     /** The frame's chunks' clusters, [first, first + count) each. */
     candidates: wgpu::Buffer,
     chunks: u32,
@@ -526,7 +530,6 @@ impl Compositor {
             splats: Arena::new(device, "splats", size_of::<GpuSplat>() as u64, wgpu::BufferUsages::VERTEX, 1 << 20),
             clusters: Arena::new(device, "clusters", size_of::<GpuCluster>() as u64, wgpu::BufferUsages::STORAGE, 1 << 15),
             resident: HashMap::new(),
-            frames: 0,
             candidates: storage(device, "candidates", 1024 * 8),
             chunks: 0,
             in_view: 0,
@@ -549,28 +552,31 @@ impl Compositor {
         (&self.draws, &self.drawn)
     }
 
-    /** Uploads `chunk`'s splats and clusters (see cluster). */
-    fn upload(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, chunk: &Chunk) {
+    /** Uploads `chunk`'s splats and clusters (see cluster), unless the buffers can hold no more. */
+    fn upload(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, chunk: &Chunk) -> bool {
+        let baked = &chunk.baked;
+        let Some(splats) = self.splats.allocate(device, encoder, baked.splats.len() as u32) else { return false };
+        let Some(range) = self.clusters.allocate(device, encoder, baked.clusters.len() as u32) else {
+            self.splats.release(splats);
+            return false;
+        };
         let slot = self.free_slots.pop().unwrap_or_else(|| {
             self.slots += 1;
             self.slots - 1
         });
-        let baked = &chunk.baked;
-        let splats = self.splats.allocate(device, encoder, baked.splats.len() as u32);
         queue.write_buffer(&self.splats.buffer, splats.start as u64 * self.splats.stride, bytemuck::cast_slice(&baked.splats));
         let clusters: Vec<GpuCluster> = baked
             .clusters
             .iter()
             .map(|c| GpuCluster { first: splats.start + c.first, slot_count: slot << 8 | c.slot_count, ..*c })
             .collect();
-        let range = self.clusters.allocate(device, encoder, clusters.len() as u32);
         queue.write_buffer(&self.clusters.buffer, range.start as u64 * self.clusters.stride, bytemuck::cast_slice(&clusters));
-        self.resident.insert(chunk.id, Resident { splats, clusters: range, slot, drawn: 0 });
+        self.resident.insert(chunk.id, Resident { splats, clusters: range, slot });
+        true
     }
 
     /** Uploads what `frame` draws that is not on the GPU yet, drops what it no longer draws, and writes the chunk table, the clusters to cull and globals. */
     pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, frame: &Frame, view: &View) {
-        self.frames += 1;
         (self.splats.grew, self.clusters.grew) = (false, false);
         let size = view.pixels.map(|v| v.max(1));
         self.seams = view.seams;
@@ -579,11 +585,21 @@ impl Compositor {
         }
         let scale = depth_scale(frame.layers.len());
         let mut table = Vec::new();
+        // What the frame no longer draws makes room first.
+        let wanted: HashSet<u32> = frame.layers.iter().flat_map(|l| &l.placements).map(|p| p.chunk.id).collect();
+        let gone: Vec<u32> = self.resident.keys().filter(|id| !wanted.contains(id)).copied().collect();
+        for id in gone {
+            let r = self.resident.remove(&id).expect("resident");
+            self.free_slots.push(r.slot);
+            self.splats.release(r.splats);
+            self.clusters.release(r.clusters);
+        }
         // Growing copies all a buffer holds, so grow seldom.
         let chunks = || frame.layers.iter().flat_map(|l| &l.placements).map(|p| &p.chunk.baked);
         self.splats.room(device, encoder, chunks().map(|b| b.splats.len() as u32).sum());
         self.clusters.room(device, encoder, chunks().map(|b| b.clusters.len() as u32).sum());
         let mut candidates: Vec<[u32; 2]> = Vec::new();
+        let mut full = false;
         for (k, layer) in frame.layers.iter().enumerate() {
             // A hue per layer (Colours), neighbours in a stack far apart.
             let s = &layer.slice;
@@ -591,11 +607,12 @@ impl Compositor {
             let depth = ((k as f64 - frame.layers.len() as f64) * scale as f64).exp2() as f32;
             for p in &layer.placements {
                 let chunk = &p.chunk;
-                if !self.resident.contains_key(&chunk.id) {
-                    self.upload(device, queue, encoder, chunk);
+                // Layers go near to far: once the buffers are full, nothing farther is uploaded.
+                if !self.resident.contains_key(&chunk.id) && (full || !self.upload(device, queue, encoder, chunk)) {
+                    full = true;
+                    continue;
                 }
-                let resident = self.resident.get_mut(&chunk.id).expect("resident");
-                resident.drawn = self.frames;
+                let resident = &self.resident[&chunk.id];
                 let slot = resident.slot as usize;
                 if table.len() <= slot {
                     table.resize(slot + 1, GpuChunk::default());
@@ -617,14 +634,6 @@ impl Compositor {
                 };
                 candidates.push([resident.clusters.start, resident.clusters.len() as u32]);
             }
-        }
-        let frames = self.frames;
-        let gone: Vec<u32> = self.resident.iter().filter(|(_, r)| r.drawn < frames).map(|(id, _)| *id).collect();
-        for id in gone {
-            let r = self.resident.remove(&id).expect("resident");
-            self.free_slots.push(r.slot);
-            self.splats.release(r.splats);
-            self.clusters.release(r.clusters);
         }
         at_least(device, &mut self.table, self.slots as u64 * size_of::<GpuChunk>() as u64);
         if !table.is_empty() {

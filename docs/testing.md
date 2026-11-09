@@ -25,6 +25,7 @@ pnpm exec vitest run bake       # files matching "bake"
 | `src/lib/pillars.test.ts` | Each column a pillar over its run shows a lawn without the soil under it; without runs, stripes |
 | `src/lib/view.test.ts`, `native/src/view.rs` | Camera basis, faces, projection, culling |
 | `native/src/renderer.rs` | Slices that re-tile stand in for each other until baked |
+| `native/src/main.rs` | What the GPU's buffers cannot hold is left out, the farthest first |
 | `bake/src/walk.rs`, `worlds/tests/forest.rs` | Walking: the ground, steps, walls, jumps; the forest's path through its ferns |
 | `src/lib/voxel-grid.test.ts` | Storage on the lattice, `LayerIndex` |
 | `src/lib/renderer.test.ts` | Slices and chunks in view, placement, caching, stats (on a small world) |
