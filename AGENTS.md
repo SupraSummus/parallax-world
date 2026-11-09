@@ -87,7 +87,8 @@ worldgen/                    # The world-generation engine, moving to integers, 
 │   ├── cost.rs              # What generating costs: work counted by layer, reported for a world's tiles, against a baseline
 │   ├── places.rs            # Whether things prefer places: positions modulo periods, as on a grid, over seeds
 │   ├── directions.rs        # Whether a world's directions follow the lattice's: four-fold harmonics of pairs' directions, over seeds
-│   └── contract.rs          # The contract every world keeps, as checks for tests: rays see each site by its alpha, its colour and glow
+│   ├── survey.rs            # What a world is made of: its layers asked around spawn, things taken apart, strata to check
+│   └── contract.rs          # The contract every world keeps, as checks for tests, in regions holding every stratum: rays see each site by its alpha, its colour and glow
 ├── data/light-reference.txt # The reference's light in light.rs's test scenes, written by its test reference_values
 └── tests/contract.rs        # The engine on test worlds: fog, caves, a village, knobs on a wall; what it refuses
 worlds/                      # The worlds, on worldgen's public API only; the web's WebAssembly

@@ -19,6 +19,7 @@ pub mod picture;
 pub mod places;
 pub mod plan;
 pub mod points;
+pub mod survey;
 pub mod units;
 pub mod world;
 

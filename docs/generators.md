@@ -315,7 +315,9 @@ and fields from position alone.
 
 ## Checks
 
-`worldgen::contract` (`worldgen/src/contract.rs`) checks a world in a region:
+`worldgen::contract` (`worldgen/src/contract.rs`) checks a world
+in regions holding everything it is made of around spawn,
+which it finds itself (`worldgen::survey`, `survey.rs`), not from a list:
 `worlds/tests/contract.rs` runs it for each world in `WORLDS`
 at seed 42 and three more, a thread each,
 and `worldgen/tests/contract.rs` for test worlds of fog, caves,
@@ -323,17 +325,30 @@ and a village of houses with doors and tables
 on y = 0, a plane of sites at every level ("Faces" in "Levels");
 and knobs anchored along x on a slanting wall,
 one per square 2N wide across x.
-An entry's regions are boxes around places its world names
-(`Region`, `World::point`: the spawn, the first town, a windmill),
-which the world finds at any seed,
-so each region looks at the same feature at every seed,
-laid out at seed 42 (`REGIONS_SEED`).
-Boxes kept where they were at seed 42 held only forest at other seeds,
-not the valley's landmarks;
-moving them with the ground needs a ground, which the engine has not.
-A region a world is known to break at a seed is checked apart there
-(`KNOWN_BREAKS` in `worlds/tests/contract.rs`) and must still break,
-so the list only shrinks; each is planned work in `docs/todo.md`.
+
+The survey asks every layer of the generator around spawn,
+drawing no voxels.
+Things come apart into parts no wider than a region (`REGION`),
+named by their children's names, numbers left out (`towns › block › house`);
+a dense population is surveyed over a smaller square than a sparse one (`PARTS`).
+Fields are asked at columns of a coarse level, and at level 0 there:
+they keep what is finer than their sites in proportion ("Plans" in "Levels"),
+so a railway, a kerb or a pond shows.
+A stratum is a part or a field, with a kind it draws.
+Every stratum found gets a region: the rarest first,
+each in the region it widens least, or in one of its own nearest spawn.
+So a rare thing is checked without being listed,
+and not lost among the rest of a wide region;
+but a part's variants drawing the same kinds are one stratum.
+A layer that draws nothing surveyed breaks the contract;
+the kinds nothing draws are only printed,
+as worlds share tables of kinds (the moor's is the valley's).
+`CONTRACT_ONLY='towns › church,railway'` checks only the regions
+of strata so named, and surveys only their layers.
+Where a world is known to break the contract at a seed,
+in the regions holding a stratum (`KNOWN_BREAKS` in `worlds/tests/contract.rs`),
+they must still break, so the list only shrinks;
+each is planned work in `docs/todo.md`.
 The checks do take y as up, as hosts do:
 a world's heights are along it, and "from above" looks down it
 (see `docs/todo.md`).
@@ -386,8 +401,7 @@ in shares of material types.
   and a host tile's width around spawn,
   a slab above and one below the world's `heights` stop no rays at all:
   hosts generate only within them, and cut whatever is outside;
-- the things of each population in a few thousand columns of cells
-  spread over kilometres around spawn, of all heights,
+- the things of each population the survey found, of all heights,
   keep within its `reach`, which drawing checks only where it draws;
   and where a thing's bounds leave the heights, nothing is drawn outside.
 
@@ -445,8 +459,7 @@ largest differences first (`{}` the broken ones, `{:#}` all),
 as a broken contract's message does, naming the world, seed, region and level.
 The engine's tests also check that a thing's carves cut only the thing.
 A new world is an entry in `WORLDS`
-with regions that have, between them, a bit of everything in it,
-`far` ones where its fields have patterns finer than the far sites,
+with `far` regions where its fields have patterns finer than the far sites,
 and its name in `worlds!` in `worlds/tests/contract.rs`,
 whose tests fail without it;
 the web app lists it by itself, under its name.

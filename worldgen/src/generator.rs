@@ -1938,10 +1938,18 @@ fn reach_of(population: &Population, cell: &Cell) -> Box3 {
  */
 pub fn things_in(generator: &Generator, population: &Population, cells: [(i64, i64); 3]) -> Vec<(String, Box3, Box3)> {
     let mut things = Vec::new();
-    each_thing(generator, population, cells, |cell, _, node| {
-        things.push((cell.key(), bounds_of(&node), reach_of(population, cell)));
-    });
+    each_made(generator, population, cells, |key, bounds, allowed, _| things.push((key, bounds, allowed)));
     things
+}
+
+/** As `things_in`, each with the thing itself, to look into (worldgen::survey); returns how many cells were asked. */
+pub fn each_made(
+    generator: &Generator,
+    population: &Population,
+    cells: [(i64, i64); 3],
+    mut each: impl FnMut(String, Box3, Box3, &Node),
+) -> u64 {
+    each_thing(generator, population, cells, |cell, _, node| each(cell.key(), bounds_of(&node), reach_of(population, cell), &node)).cells
 }
 
 /**

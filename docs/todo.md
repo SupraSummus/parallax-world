@@ -65,6 +65,8 @@ Numbers are for the forest at 1280×800, as measured when written.
   it and the rest of the Rust tests are CI's longest jobs.
   If CI is still too slow, the contract at seeds but `REGIONS_SEED`
   (`worlds/tests/contract.rs`) could run only on main.
+  The contract's survey asks every cell of a sparse population's square:
+  the valley's haystacks' anchors cost most of it.
   Caching Rust's builds would spare little: `libm` is their one dependency.
   Not tried: one Cargo target for `bake/`, `worldgen/` and `worlds/`,
   each of which now builds the ones before it again.
@@ -205,6 +207,29 @@ Numbers are for the forest at 1280×800, as measured when written.
   Learned again from today's, mostly hamlets and villages,
   it draws far less town: 235 houses in `learned.rs`'s test, not over 600.
   Learn it from the market towns alone, or let the learned town be sparser.
+- **Windmills show sails and plaster from above at levels 2 and 3.**
+  In a region of a windmill alone (the contract's since `worldgen::survey`),
+  at seeds 1, 2 and 3, sails and white plaster take 0.12 to 0.16
+  of what rays straight down see at level 3, against 0.01 at level 0,
+  in place of planks and grass: 0.10 to 0.12 apart.
+  The region around the first windmill, 48 m wide, blurred it under 0.1.
+- **The heath above the treeline lets rays through at level 4** (seed 1):
+  0.44 of them get the 4 sites more at level 4, against 0.34 at level 2.
+- **Worlds share tables of kinds**, so the contract only prints
+  the kinds nothing surveyed draws, and fails on silent layers alone:
+  the moor's, the learned town's and the city's are the valley's.
+  With only the kinds it draws, a world could fail on a kind
+  drawn only far from spawn, or never.
+- **Far regions and cost's places are still listed by hand**
+  (`Entry` in `worlds/src/lib.rs`).
+  The survey could give both: wide boxes around fields' strata,
+  the places of the costliest strata.
+  Then `Region` would go.
+- **Things' variants of one part, drawing the same kinds, are one stratum**
+  (`worldgen::survey`): a ruin and a watchtower, both of stone,
+  are checked in one region between them.
+  Naming a landmark's node by its variant, as towns name their children,
+  would part them; or the survey could count which code drew each part.
 - **The forest on steep slopes breaks the contract at level 4.**
   A region on a wooded mountainside of the valley,
   where the trees thin out to the treeline,
@@ -238,7 +263,8 @@ Numbers are for the forest at 1280×800, as measured when written.
   Sunk into the ground, its top where level 0 has it,
   the wheat showed less but the stubble under it more.
 - **Measured houses show their walls from above at level 6**,
-  which the contract does not check.
+  which the contract does not check, and at level 4 in a region of houses alone
+  (seed 2: plaster 0.19 against 0.01 at level 0, 0.106 apart).
   Around the valley's first town's centre (seed 42),
   level 6 shows 46 % houses from above against 25 % at level 0,
   and 16 % roofs against 24 %: the rest is walls, timber and stone

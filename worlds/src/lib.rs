@@ -39,12 +39,16 @@ impl Region {
     }
 }
 
-/** A world hosts can start by name, with the regions the contract checks it in. */
+/** A world hosts can start by name, with how far the contract checks it, and the regions its costs are measured in. */
 pub struct Entry {
     pub name: &'static str,
     /** The world of a seed. */
     pub make: fn(u64) -> World,
-    /** Regions with, between them, a bit of everything in it (see worldgen::contract::check). */
+    /**
+     * Regions with, between them, the costliest of it: where
+     * worldgen::cost measures its tiles (tests/cost.rs). The contract
+     * finds its own (worldgen::contract::regions).
+     */
     pub regions: &'static [Region],
     /** The level up to which it keeps what a camera sees. */
     pub levels: u32,
@@ -57,7 +61,7 @@ pub struct Entry {
     pub from_above: u32,
 }
 
-/** The seed a world's regions were laid out at; its parts and far regions are checked at it alone. */
+/** The seed a world's regions were laid out at; its costs, parts and far regions are checked at it alone. */
 pub const REGIONS_SEED: u64 = 42;
 
 /** Every world; the web lists them by itself (worldgen_worlds) and starts them by index (worldgen_start). */
