@@ -568,4 +568,23 @@ mod tests {
         }
         assert!(skipped > 0, "none skipped");
     }
+
+    #[test]
+    #[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
+    fn what_the_buffers_cannot_hold_is_left_out_farthest_first() {
+        let (mut frame, view) = complete_view("moor", [-30.0, 10.0], 2f64.powf(3.25), true);
+        let all = shot::picture(&frame, &view).2;
+        // About half of the frame's splats.
+        let mut gpu = shot::Offscreen::with(Some(32 << 20));
+        gpu.prepare(&frame, &view);
+        let some = gpu.picture().2;
+        frame.layers.clear();
+        let sky = shot::picture(&frame, &view).2;
+        let pixels = |p: &[u8]| p.as_chunks::<4>().0.to_vec();
+        let (all, some, sky) = (pixels(&all), pixels(&some), pixels(&sky));
+        let left_out = (0..all.len()).filter(|&k| some[k] != all[k]).count();
+        let drawn = (0..all.len()).filter(|&k| some[k] != sky[k]).count();
+        assert!(left_out > 0 && drawn > 0, "{left_out} pixels left out, {drawn} drawn");
+        assert!((0..all.len()).all(|k| some[k] == all[k] || some[k] == sky[k]), "what is drawn shows as it would");
+    }
 }

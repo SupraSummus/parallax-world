@@ -25,16 +25,21 @@ fn offscreen(frame: &Frame, view: &View) -> Offscreen {
 
 impl Offscreen {
     pub fn new() -> Offscreen {
+        Offscreen::with(None)
+    }
+
+    /** A device with buffers as large as it allows, or `most` bytes. */
+    pub fn with(most: Option<u64>) -> Offscreen {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: compositor::BACKENDS,
             ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())).expect("adapter");
-        let descriptor = wgpu::DeviceDescriptor {
-            required_limits: compositor::limits(&adapter),
-            required_features: compositor::FEATURES,
-            ..Default::default()
-        };
+        let mut limits = compositor::limits(&adapter);
+        if let Some(most) = most {
+            limits.max_buffer_size = limits.max_buffer_size.min(most);
+        }
+        let descriptor = wgpu::DeviceDescriptor { required_limits: limits, required_features: compositor::FEATURES, ..Default::default() };
         let (device, queue) = pollster::block_on(adapter.request_device(&descriptor)).expect("device");
         let compositor = Compositor::new(&device, FORMAT);
         Offscreen { device, queue, compositor }
@@ -118,17 +123,23 @@ pub fn save(frame: &Frame, view: &View, path: &str) {
 
 /** `frame` drawn as the window would after a few frames still: its width, height and RGBA pixels, row by row from the top. */
 pub fn picture(frame: &Frame, view: &View) -> (u32, u32, Vec<u8>) {
-    let o = offscreen(frame, view);
-    for _ in 0..3 {
-        o.render();
+    offscreen(frame, view).picture()
+}
+
+impl Offscreen {
+    /** The frame prepared last, drawn as `picture` says. */
+    pub fn picture(&self) -> (u32, u32, Vec<u8>) {
+        for _ in 0..3 {
+            self.render();
+        }
+        let picture = self.compositor.picture();
+        let wgpu::Extent3d { width, height, .. } = picture.size();
+        // Rows of the copy are padded to 256 bytes.
+        let row = (width * 4).div_ceil(256) * 256;
+        let mapped = self.read((row * height) as u64, |encoder, buffer| {
+            let layout = wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: None };
+            encoder.copy_texture_to_buffer(picture.as_image_copy(), wgpu::TexelCopyBufferInfo { buffer, layout }, picture.size())
+        });
+        (width, height, mapped.chunks(row as usize).flat_map(|r| &r[..(width * 4) as usize]).copied().collect())
     }
-    let picture = o.compositor.picture();
-    let wgpu::Extent3d { width, height, .. } = picture.size();
-    // Rows of the copy are padded to 256 bytes.
-    let row = (width * 4).div_ceil(256) * 256;
-    let mapped = o.read((row * height) as u64, |encoder, buffer| {
-        let layout = wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: None };
-        encoder.copy_texture_to_buffer(picture.as_image_copy(), wgpu::TexelCopyBufferInfo { buffer, layout }, picture.size())
-    });
-    (width, height, mapped.chunks(row as usize).flat_map(|r| &r[..(width * 4) as usize]).copied().collect())
 }
