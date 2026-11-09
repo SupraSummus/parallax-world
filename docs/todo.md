@@ -156,6 +156,8 @@ Numbers are for the forest at 1280×800, as measured when written.
   (the valley, `--stroll 20 --on-ground`, outside the GPU driver):
   new tiles take about 30 %, baking 20 %, its masks for coverage 20 %,
   coverage 15 %, the main thread 15 %.
+  Lit, about 1.6 times that: the light itself (`Light::light` most),
+  and new tiles half as much again, why is open.
   Most chunks baked are of new slices,
   where layers cross from one level to the next; a third are empty.
   In the valley coverage hardly pays (`--all-chunks` costs about the same);
