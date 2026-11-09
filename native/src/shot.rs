@@ -109,6 +109,15 @@ pub fn time(frame: &Frame, view: &View, runs: usize) -> (f64, [u32; 2]) {
 
 /** Draws `frame` as the window would after a few frames still, and saves it. */
 pub fn save(frame: &Frame, view: &View, path: &str) {
+    let (width, height, pixels) = picture(frame, view);
+    let mut encoder = png::Encoder::new(std::io::BufWriter::new(std::fs::File::create(path).expect("shot file")), width, height);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    encoder.write_header().expect("png").write_image_data(&pixels).expect("png");
+}
+
+/** `frame` drawn as the window would after a few frames still: its width, height and RGBA pixels, row by row from the top. */
+pub fn picture(frame: &Frame, view: &View) -> (u32, u32, Vec<u8>) {
     let o = offscreen(frame, view);
     for _ in 0..3 {
         o.render();
@@ -121,10 +130,5 @@ pub fn save(frame: &Frame, view: &View, path: &str) {
         let layout = wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: None };
         encoder.copy_texture_to_buffer(picture.as_image_copy(), wgpu::TexelCopyBufferInfo { buffer, layout }, picture.size())
     });
-    let pixels: Vec<u8> = mapped.chunks(row as usize).flat_map(|r| &r[..(width * 4) as usize]).copied().collect();
-
-    let mut encoder = png::Encoder::new(std::io::BufWriter::new(std::fs::File::create(path).expect("shot file")), width, height);
-    encoder.set_color(png::ColorType::Rgba);
-    encoder.set_depth(png::BitDepth::Eight);
-    encoder.write_header().expect("png").write_image_data(&pixels).expect("png");
+    (width, height, mapped.chunks(row as usize).flat_map(|r| &r[..(width * 4) as usize]).copied().collect())
 }

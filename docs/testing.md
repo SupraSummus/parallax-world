@@ -2,7 +2,7 @@
 
 Vitest in Node,
 with jsdom only in UI tests that opt in (`// @vitest-environment jsdom`),
-and `cargo test` for the Rust in `bake/`, `worldgen/` and `worlds/`.
+and `cargo test` for the Rust in `bake/`, `worldgen/`, `worlds/` and `native/`.
 Commands are in `package.json`:
 
 ```bash
@@ -17,13 +17,14 @@ pnpm exec vitest run bake       # files matching "bake"
 | File | Covers |
 |------|--------|
 | `src/lib/cells.test.ts`, `bake/src/cells.rs` | Cells of N·FCC and the baker's table of them |
-| `src/lib/slice-selection.test.ts` | Slices, bricks and eyes; every site in exactly one slice |
+| `src/lib/slice-selection.test.ts`, `bake/src/slicing.rs` | Slices, bricks and eyes; every site in exactly one slice; slicings paired as they re-tile |
 | `src/lib/relief.test.ts` | Slices drawn in relief against ray-cast perspective: what they leak by detail |
 | `src/lib/chunk-baker.test.ts`, `bake/src/splats.rs` | Baked chunks' splats against rays cast along the axis and, in relief, slanted |
 | `bake/src/fill.rs`, `bake/src/coverage.rs` | Splats filled into a mask; solid blocks and their sums |
-| `src/lib/occlusion.test.ts` | Skipping covered chunks and clusters leaves the picture unchanged |
+| `src/lib/occlusion.test.ts`, `native/src/main.rs` | Skipping covered chunks and clusters leaves the picture unchanged (natively drawn on the GPU) |
 | `src/lib/pillars.test.ts` | Each column a pillar over its run shows a lawn without the soil under it; without runs, stripes |
-| `src/lib/view.test.ts` | Camera basis, faces, projection, culling |
+| `src/lib/view.test.ts`, `native/src/view.rs` | Camera basis, faces, projection, culling |
+| `native/src/renderer.rs` | Slices that re-tile stand in for each other until baked |
 | `bake/src/walk.rs`, `worlds/tests/forest.rs` | Walking: the ground, steps, walls, jumps; the forest's path through its ferns |
 | `src/lib/voxel-grid.test.ts` | Storage on the lattice, `LayerIndex` |
 | `src/lib/renderer.test.ts` | Slices and chunks in view, placement, caching, stats (on a small world) |
@@ -68,5 +69,9 @@ a no-op 2D canvas context
   never pick seeds, places or points to dodge a check.
 - Tag exports that only tests use `@internal`;
   `pnpm knip:production` checks that everything else is used outside tests.
-- Visual output is not covered by unit tests; check it in the browser
-  (`pnpm dev`), or without a GPU with `pnpm shot` (see AGENTS.md).
+- Pixels are checked only by native tests that draw on the GPU.
+  They need Vulkan (Mesa's software one will do),
+  so `pnpm test` skips them (`#[ignore]`) and CI's `native-gpu` job runs them
+  (`cargo test` in `native/` with `-- --ignored`).
+  Otherwise look in the browser (`pnpm dev`),
+  or without a GPU with `pnpm shot` (see AGENTS.md).
