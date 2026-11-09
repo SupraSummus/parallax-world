@@ -3,7 +3,7 @@
 //! level's voxels exactly, one rhombic dodecahedron to the next; the tiles
 //! they cross are generated as they reach them.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::panic::AssertUnwindSafe;
 use std::sync::{Mutex, mpsc};
 use std::time::{Duration, Instant};
@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use bake::{FACE_KINDS, VOXEL_FACES};
 
 use crate::generator::{Generator, generate, materials_of};
-use crate::grid::{BRICK, Box3, VoxelGrid};
+use crate::grid::{ALPHA, BRICK, Box3, GLOW_ONE, VoxelGrid};
 
 /** Sites per tile in x and z, at the picture's level; a tile spans the heights. */
 const TILE: i64 = 64;
@@ -132,7 +132,11 @@ pub struct Picture {
     pub casting: Duration,
 }
 
-/** A ray through the level's voxels, in its units: where it is, the voxel it is in and the face it entered by (12: none). */
+/**
+ * A ray through the level's voxels, in its units: where it is, the voxel
+ * it is in and the face it entered by (12: none); composited, how much of
+ * it gets through what it crossed.
+ */
 #[derive(Clone, Copy)]
 struct Ray {
     pixel: usize,
@@ -142,6 +146,50 @@ struct Ray {
     end: f64,
     site: [i64; 3],
     face: usize,
+    through: f64,
+}
+
+/**
+ * What rays see composited, each site by its alpha through what is in
+ * front of it, as light does: by material id (of the face a ray enters
+ * by), how much of them it stops, 0 what gets through everything; and
+ * what glowing sites send them (linear, of a site all of a glowing white).
+ */
+#[derive(Clone, Debug, Default)]
+pub struct Seen {
+    pub stopped: BTreeMap<u8, f64>,
+    pub glow: [f64; 3],
+}
+
+impl Seen {
+    pub(crate) fn add(&mut self, id: u8, stopped: f64, glow: [f64; 3]) {
+        if stopped > 0.0 {
+            *self.stopped.entry(id).or_default() += stopped;
+        }
+        (0..3).for_each(|c| self.glow[c] += glow[c]);
+    }
+
+    fn merge(&mut self, other: Seen) {
+        other.stopped.into_iter().for_each(|(id, stopped)| self.add(id, stopped, [0.0; 3]));
+        self.add(0, 0.0, other.glow);
+    }
+}
+
+/** Composited, a ray stops where less than this of it gets through. */
+const OPAQUE: f64 = 1e-4;
+
+/**
+ * What the site `ray` is in shows it, as light sees it: the material of
+ * the face it entered by, how much of the ray it stops and what it glows
+ * to it; the rest goes on (`through`).
+ */
+fn composite(ray: &mut Ray, grid: &VoxelGrid) -> (u8, f64, [f64; 3]) {
+    let [x, y, z] = ray.site;
+    let (alpha, id, glow) = grid.light(x, y, z, entered(ray));
+    let stopped = ray.through * alpha as f64 / ALPHA as f64;
+    let glow = glow.map(|g| ray.through * g as f64 / GLOW_ONE as f64);
+    ray.through -= stopped;
+    (id, stopped, glow)
 }
 
 #[derive(Clone, Copy)]
@@ -214,9 +262,13 @@ impl Tiles {
     /**
      * How far the ray goes: to a voxel, out of the slab of heights or past
      * its end, or to a tile not generated. It skips what holds nothing:
-     * the space over a tile's highest brick, and empty bricks.
+     * the space over a tile's highest brick, and empty bricks. Given
+     * `seen`, it composites instead: it goes on through every site,
+     * adding to `seen` the material of the face it enters by, how much of
+     * the ray it stops and what it glows to it, till none gets through
+     * (then a Miss).
      */
-    fn march(&self, ray: &mut Ray) -> Step {
+    fn march(&self, ray: &mut Ray, mut seen: Option<&mut Seen>) -> Step {
         let walk = Walk::new(ray.direction);
         let mut planes = walk.planes(ray);
         let mut current: Option<((i64, i64), &Tile)> = None;
@@ -243,6 +295,14 @@ impl Tiles {
                     leaves(ray, [x0, tile.top + 1, z0].map(|v| v as f64), [(x0 + TILE - 1) as f64, f64::INFINITY, (z0 + TILE - 1) as f64])
                 } else {
                     match tile.grid.get_or_empty_brick(x, y, z) {
+                        Some(_) if seen.is_some() => {
+                            let (id, stopped, glow) = composite(ray, &tile.grid);
+                            seen.as_mut().expect("composited").add(id, stopped, glow);
+                            if ray.through < OPAQUE {
+                                return Step::Miss;
+                            }
+                            None
+                        }
                         Some(0) => None,
                         Some(_) => {
                             let id = tile.grid.face(x, y, z, entered(ray));
@@ -271,17 +331,31 @@ impl Tiles {
 }
 
 /**
- * Where a ray from `origin` along `direction` (a level's units) first
- * enters a voxel of `grid`, if before `end`: how far, and the material
- * of the face it enters by.
+ * What a ray from `origin` along `direction` (a level's units) sees of
+ * `grid` before `end`, site by site, as `composite`: how far along it
+ * enters each that stops some of it or glows, and what that shows it;
+ * till next to none of it gets through.
  */
-pub(crate) fn first_voxel(grid: &VoxelGrid, origin: [f64; 3], direction: [f64; 3], end: f64) -> Option<(f64, u8)> {
-    first_hit(grid, origin, direction, end).map(|(t, [x, y, z], face)| (t, grid.face(x, y, z, face)))
+pub(crate) fn composited(grid: &VoxelGrid, origin: [f64; 3], direction: [f64; 3], end: f64) -> Vec<(f64, u8, f64, [f64; 3])> {
+    let mut ray = Ray { pixel: 0, origin, direction, t: 0.0, end, site: nearest_site(origin), face: FACES.len(), through: 1.0 };
+    let walk = Walk::new(direction);
+    let mut planes = walk.planes(&ray);
+    let mut seen = Vec::new();
+    while ray.t <= end && ray.through >= OPAQUE {
+        let t = ray.t;
+        let (id, stopped, glow) = composite(&mut ray, grid);
+        if stopped > 0.0 || glow != [0.0; 3] {
+            seen.push((t, id, stopped, glow));
+        }
+        walk.cross(&mut ray, &mut planes);
+    }
+    seen
 }
 
-/** As `first_voxel`, but the voxel's site and the face it enters by. */
+/** Where a ray from `origin` along `direction` (a level's units) first enters a voxel of `grid`, if before `end`: how far, the voxel's site and the face it enters by. */
+#[cfg(test)]
 pub(crate) fn first_hit(grid: &VoxelGrid, origin: [f64; 3], direction: [f64; 3], end: f64) -> Option<(f64, [i64; 3], usize)> {
-    let mut ray = Ray { pixel: 0, origin, direction, t: 0.0, end, site: nearest_site(origin), face: FACES.len() };
+    let mut ray = Ray { pixel: 0, origin, direction, t: 0.0, end, site: nearest_site(origin), face: FACES.len(), through: 1.0 };
     let walk = Walk::new(direction);
     let mut planes = walk.planes(&ray);
     while ray.t <= end {
@@ -411,9 +485,24 @@ pub fn picture(generator: &Generator, camera: &Camera, level: u32, heights: (i64
 
 /** As `picture`, at `tiles`' level and heights, generating only the tiles it lacks, into it. */
 pub fn picture_in(generator: &Generator, camera: &Camera, tiles: &mut Tiles) -> Picture {
+    tiled(generator, camera, tiles, false).0
+}
+
+/**
+ * As `picture_in`, but composited: what its rays see on average (Seen),
+ * each site by its alpha, not as one of the voxels it shows by chance.
+ */
+pub fn composite_in(generator: &Generator, camera: &Camera, tiles: &mut Tiles) -> Seen {
+    let Seen { stopped, glow } = tiled(generator, camera, tiles, true).1;
+    let pixels = (camera.width * camera.height) as f64;
+    Seen { stopped: stopped.into_iter().map(|(id, sum)| (id, sum / pixels)).collect(), glow: glow.map(|g| g / pixels) }
+}
+
+fn tiled(generator: &Generator, camera: &Camera, tiles: &mut Tiles, composite: bool) -> (Picture, Seen) {
     let colours: Vec<u32> = materials_of(generator).iter().map(|m| m.rgb()).collect();
     let (level, heights) = (tiles.level, tiles.heights);
-    picture_of_tiles(camera, tiles, &colours, &mut |keys| keys.iter().map(|key| generate(generator, &tile(*key, heights), level)).collect())
+    let make = &mut |keys: &[(i64, i64)]| keys.iter().map(|key| generate(generator, &tile(*key, heights), level)).collect();
+    picture_of_tiles(camera, tiles, &colours, make, composite)
 }
 
 /**
@@ -439,17 +528,24 @@ pub fn picture_on_threads(make: &(dyn Fn() -> Generator + Sync), camera: &Camera
             });
         }
         drop(done);
-        let picture = picture_of_tiles(camera, &mut Tiles::new(level, heights), &colours, &mut |keys| {
-            for job in keys.iter().copied().enumerate() {
-                jobs.send(job).expect("a thread takes it");
-            }
-            let mut grids: Vec<Option<VoxelGrid>> = keys.iter().map(|_| None).collect();
-            for _ in keys {
-                let (i, grid) = results.recv().expect("a thread sends it");
-                grids[i] = Some(grid.unwrap_or_else(|panic| std::panic::resume_unwind(panic)));
-            }
-            grids.into_iter().map(|grid| grid.expect("each sent")).collect()
-        });
+        let picture = picture_of_tiles(
+            camera,
+            &mut Tiles::new(level, heights),
+            &colours,
+            &mut |keys: &[(i64, i64)]| {
+                for job in keys.iter().copied().enumerate() {
+                    jobs.send(job).expect("a thread takes it");
+                }
+                let mut grids: Vec<Option<VoxelGrid>> = keys.iter().map(|_| None).collect();
+                for _ in keys {
+                    let (i, grid) = results.recv().expect("a thread sends it");
+                    grids[i] = Some(grid.unwrap_or_else(|panic| std::panic::resume_unwind(panic)));
+                }
+                grids.into_iter().map(|grid| grid.expect("each sent")).collect()
+            },
+            false,
+        )
+        .0;
         // The threads end with the jobs.
         drop(jobs);
         picture
@@ -468,7 +564,8 @@ fn threads() -> usize {
 /** Generates the tiles of the keys it is given, in their order. */
 type MakeTiles<'a> = dyn FnMut(&[(i64, i64)]) -> Vec<VoxelGrid> + 'a;
 
-fn picture_of_tiles(camera: &Camera, tiles: &mut Tiles, colours: &[u32], make: &mut MakeTiles) -> Picture {
+/** The picture `camera` sees in `tiles`, generating those it lacks with `make`; composited, what its rays see summed over the pixels (Seen), else nothing. */
+fn picture_of_tiles(camera: &Camera, tiles: &mut Tiles, colours: &[u32], make: &mut MakeTiles, composite: bool) -> (Picture, Seen) {
     let (level, heights) = (tiles.level, tiles.heights);
     let s = (1i64 << level) as f64;
     let pixels = camera.width * camera.height;
@@ -483,6 +580,7 @@ fn picture_of_tiles(camera: &Camera, tiles: &mut Tiles, colours: &[u32], make: &
         generating: Duration::ZERO,
         casting: Duration::ZERO,
     };
+    let mut seen = Seen::default();
     // Each ray from where it enters the slab of heights (and a voxel's reach past them) to where it leaves it, or `far`.
     let (low, high) = ((heights.0 - 1) as f64, (heights.1 + 1) as f64);
     let top = high * s;
@@ -499,10 +597,11 @@ fn picture_of_tiles(camera: &Camera, tiles: &mut Tiles, colours: &[u32], make: &
         }
         if t > end {
             picture.set(pixel, 0, f64::INFINITY, sky(direction));
+            seen.add(0, 1.0, [0.0; 3]);
             continue;
         }
         let site = nearest_site([0, 1, 2].map(|i| origin[i] + t * direction[i]));
-        rays.push(Ray { pixel, origin, direction, t, end, site, face: FACES.len() });
+        rays.push(Ray { pixel, origin, direction, t, end, site, face: FACES.len(), through: 1.0 });
     }
     let fog = match camera.projection {
         Projection::Perspective { .. } => FOG,
@@ -515,16 +614,19 @@ fn picture_of_tiles(camera: &Camera, tiles: &mut Tiles, colours: &[u32], make: &
         let mut steps = vec![Step::Miss; rays.len()];
         {
             let work = Mutex::new(rays.chunks_mut(1024).zip(steps.chunks_mut(1024)));
+            let seen = Mutex::new(&mut seen);
             let tiles = &*tiles;
             std::thread::scope(|scope| {
                 for _ in 0..threads() {
                     scope.spawn(|| {
+                        let mut here = Seen::default();
                         loop {
                             let Some((rays, steps)) = work.lock().expect("no thread panicked").next() else { break };
                             for (ray, step) in rays.iter_mut().zip(steps) {
-                                *step = tiles.march(ray);
+                                *step = tiles.march(ray, composite.then_some(&mut here));
                             }
                         }
+                        seen.lock().expect("no thread panicked").merge(here);
                     });
                 }
             });
@@ -537,7 +639,10 @@ fn picture_of_tiles(camera: &Camera, tiles: &mut Tiles, colours: &[u32], make: &
                     needed.insert(key);
                     left.push(ray);
                 }
-                Step::Miss => picture.set(ray.pixel, 0, f64::INFINITY, sky(ray.direction)),
+                Step::Miss => {
+                    picture.set(ray.pixel, 0, f64::INFINITY, sky(ray.direction));
+                    seen.add(0, ray.through, [0.0; 3]);
+                }
                 Step::Hit(id, normal) => {
                     let entered = match FACES.get(ray.face) {
                         Some(face) => normalize(face.map(|v| -v as f64)),
@@ -563,7 +668,7 @@ fn picture_of_tiles(camera: &Camera, tiles: &mut Tiles, colours: &[u32], make: &
         picture.generating += start.elapsed();
     }
     picture.tiles = tiles.tiles.len() - before;
-    picture
+    (picture, seen)
 }
 
 impl Picture {
@@ -730,7 +835,9 @@ mod tests {
         // A voxel whose faces up are of material 2, the others of 1.
         let mut grid = VoxelGrid::new(&Box3 { min: [-4; 3], max: [4; 3] });
         grid.set_faces(0, 0, 0, 1, std::array::from_fn(|k| if FACES[k][1] > 0 { 2 } else { 1 }));
-        let seen = |origin: [f64; 3], direction: [f64; 3]| first_voxel(&grid, origin, normalize(direction), 8.0).map(|hit| hit.1);
+        let seen = |origin: [f64; 3], direction: [f64; 3]| {
+            first_hit(&grid, origin, normalize(direction), 8.0).map(|(_, [x, y, z], face)| grid.face(x, y, z, face))
+        };
         assert_eq!(seen([0.1, 3.0, 0.2], [0.0, -1.0, 0.0]), Some(2));
         assert_eq!(seen([-3.0, 0.1, 0.2], [1.0, 0.0, 0.0]), Some(1));
         assert_eq!(seen([-3.0, 3.2, 0.1], [1.0, -1.0, 0.0]), Some(2));

@@ -335,26 +335,36 @@ The checks do take y as up, as hosts do:
 a world's heights are along it, and "from above" looks down it
 (see `docs/todo.md`).
 
+Rays see each site by its alpha (`VoxelGrid`'s), as light does:
+each stops its share of what gets to it, and shows that much of its colour,
+and what it glows (`composited` in `picture.rs`).
+What they see is compared as under a white light all round (`colour`),
+in the sRGB channel that differs the most:
+colours, alpha and glow average as a coarse site stands for finer ones;
+materials don't (by type, the canopy's oaks could all turn orange).
+The voxels a site's coin shows (`VoxelGrid::show`) are as often, but noisy,
+and a site too thin to show one still stops light.
+Margins quoted elsewhere in this document are older ones,
+in shares of material types.
+
 - a box against eight parts generated alone, in reverse order,
   at levels 0, 2 and one past the last checked below:
-  any seam, order dependence or hidden state shows up as a differing site;
+  any seam, order dependence or hidden state shows up as a differing site,
+  in its voxels, its alpha, its faces' materials or its glow;
 - at each level up to the world's, 20,000 rays in random directions
   from where a camera could be, against the level two finer:
-  of the rays that get 2 sites far, the share that gets 4 more,
-  and of those that hit something, the materials they hit,
-  must agree within 0.1.
-  A camera could be at the empty sites of the finer level
+  of what of the rays gets 2 sites far, the share that gets 4 more,
+  and what they see past those 2, must agree within 0.1.
+  A camera could be at the sites of the finer level that show no voxel
   it could fly to from above,
-  through empty sites from the top of the box:
+  through such sites from the top of the box (it collides with voxels shown):
   under a canopy (in the forest, all but 0.3 %), not under the ground's shell.
-  Sites a level rougher and sheets a site thicker cost up to ~0.08;
-  a town losing its roofs, 0.12;
 - at each level up to the entry's `from_above`,
-  what rays straight down hit first,
+  what rays straight down see,
   over the region grown to at least 16 sites of the level across,
   against level 0, within 0.1:
   levels two apart miss what drifts a little at every level,
-  like a town's walls taking over from its roofs (0.17 off at level 2).
+  like a town's walls taking over from its roofs.
   Rays see the faces they enter by, from above the ones up.
   Each world goes as far as it keeps what a camera sees;
   the forest to 6, its canopy seen over 128 m there,
@@ -371,7 +381,7 @@ a world's heights are along it, and "from above" looks down it
   the learned town's its whole crop;
 - at each level up to one past the world's, in each region
   and a host tile's width around spawn,
-  a slab above and one below the world's `heights` are empty:
+  a slab above and one below the world's `heights` stop no rays at all:
   hosts generate only within them, and cut whatever is outside;
 - the things of each population in a few thousand columns of cells
   spread over kilometres around spawn, of all heights,
@@ -426,7 +436,8 @@ Parts and far regions are checked at seed 42 only:
 they check how a world is drawn, not what a seed puts in it.
 With `--nocapture` it prints each level's margins;
 `contract::margins` returns them as a `Report` to print,
-which breaks a margin down by material type, and each type by kind,
+which breaks a margin of colours down by material type, and each type by kind
+(what changed, not what is checked),
 largest differences first (`{}` the broken ones, `{:#}` all),
 as a broken contract's message does, naming the world, seed, region and level.
 The engine's tests also check that a thing's carves cut only the thing.
@@ -608,9 +619,8 @@ A world of fewer domains may still have all their kinds:
 the moor alone has the valley's (`valley::kinds`), its own last,
 so its ids are the same in both,
 and it reuses the forest's stone and the town's thatch.
-A kind's type (`kind_type`) is its class of material:
-the contract compares what rays hit by type, not by kind,
-so kinds that may stand in for each other far away share one.
+A kind's type (`kind_type`) is its class of material,
+by which the contract's reports break down what rays see.
 A kind marked `walk_through` is one a walking body goes through
 (plants, water; see `bake/src/walk.rs`), the rest it stands on;
 so ground and what stands on it are different kinds,

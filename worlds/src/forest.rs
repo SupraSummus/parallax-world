@@ -110,12 +110,15 @@ fn bark_of(species: Species) -> K {
     }
 }
 
-/** The colour of each species' crowns from far away. */
-fn foliage(species: Species) -> K {
+/** A tree's foliage, by a fraction `pick`: each of its species' colours as often as its trees have it. */
+fn foliage(species: Species, pick: f64) -> K {
     match species {
         Species::Spruce => K::spruce,
-        Species::Birch => K::birchGold,
-        Species::Oak => K::oakOrange,
+        Species::Birch if pick < 0.65 => K::birchGold,
+        Species::Birch => K::birchGreen,
+        Species::Oak if pick < 0.45 => K::oakGreen,
+        Species::Oak if pick < 0.75 => K::oakOrange,
+        Species::Oak => K::oakGold,
     }
 }
 
@@ -452,7 +455,8 @@ pub fn layers(seed: u64, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
             let rest = (hidden - (0..3).map(|sp| own[sp] * slabs[sp].iter().sum::<f64>()).sum::<f64>()).max(0.0);
             let per_area = 1.0 / (spacing * spacing) as f64;
             // Of a species picked by how much their crowns hide from above, each slab its bark as often as the
-            // sites of its trees' slab are wood, and its foliage else.
+            // sites of its trees' slab are wood, and else one of its foliage's colours, as often as its trees have
+            // it: of one colour, all oaks were orange from afar.
             let species = pick_species(Fx::fraction(hash(f.s(18), x, z, 0)), &over.map(|o| fx(o / hidden)));
             let sp = SPECIES.iter().position(|s| *s == species).expect("a species");
             let height = f.column(x, z).height;
@@ -462,7 +466,7 @@ pub fn layers(seed: u64, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
                 if shadow > 0.0 {
                     let (from, to) = (height + from, height + from + spacing);
                     let bark = unit(hash(f.s(21), x, i as i64, z)) < wood[sp][i];
-                    let kind = k(if bark { bark_of(species) } else { foliage(species) });
+                    let kind = k(if bark { bark_of(species) } else { foliage(species, unit(hash(f.s(22), x, i as i64, z))) });
                     spans.push(Span { from, to, kind, extinction: Some(per_area * shadow / spacing as f64) });
                 }
             }
@@ -827,7 +831,7 @@ fn birch_tree(x: f64, ground: f64, z: f64, random: &mut Rng) -> Node {
         y += 1.0;
     }
     shapes.extend(marks);
-    let foliage = if random.chance(fx(0.65)) { K::birchGold } else { K::birchGreen };
+    let foliage = foliage(Species::Birch, random.next());
     let turning = if foliage == K::birchGold { K::birchGreen } else { K::birchGold };
     let crown_bottom = ground + height * 0.45;
     let bole = Shape::cuboid([x, ground - 1.0, z], [x + width, crown_bottom, z + width], K::birchBark).paint();
@@ -867,14 +871,7 @@ fn oak_tree(x: f64, ground: f64, z: f64, random: &mut Rng, ground_at: GroundAt) 
     let trunk_top = ground + round(height * (0.45 + random.next() * 0.1));
     let width = vox(1.0);
     let mut shapes = vec![trunk(x, ground, z, trunk_top, width, K::bark)];
-    let roll = random.next();
-    let foliage = if roll < 0.45 {
-        K::oakGreen
-    } else if roll < 0.75 {
-        K::oakOrange
-    } else {
-        K::oakGold
-    };
+    let foliage = foliage(Species::Oak, random.next());
     let turning = if foliage == K::oakGold { K::oakOrange } else { K::oakGold };
     let cx = x + (width - 1.0) / 2.0;
     let cz = z + (width - 1.0) / 2.0;

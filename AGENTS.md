@@ -82,12 +82,12 @@ worldgen/                    # The world-generation engine, moving to integers, 
 │   ├── points.rs            # Points: where things are, drawn top down, so a cell of any size knows how many it holds; blurs of their counts
 │   ├── frame.rs             # Things built in frames of their own: quarter turns, mirrors, walls
 │   ├── world.rs             # World: what a host needs to show one (generator, spawn, heights), the places it names
-│   ├── picture.rs           # Pictures of a world at one level: rays through its voxels, as PNGs
+│   ├── picture.rs           # Pictures of a world at one level: rays through its voxels, as PNGs, or through its sites' alpha
 │   ├── light.rs             # Light (a prototype, for look and native's --light): sky, sun and what glows, each level's from coarser levels'; held to light/reference.rs, rays traced through level 0
 │   ├── cost.rs              # What generating costs: work counted by layer, reported for a world's tiles, against a baseline
 │   ├── places.rs            # Whether things prefer places: positions modulo periods, as on a grid, over seeds
 │   ├── directions.rs        # Whether a world's directions follow the lattice's: four-fold harmonics of pairs' directions, over seeds
-│   └── contract.rs          # The contract every world keeps, as checks for tests
+│   └── contract.rs          # The contract every world keeps, as checks for tests: rays see each site by its alpha, its colour and glow
 ├── data/light-reference.txt # The reference's light in light.rs's test scenes, written by its test reference_values
 └── tests/contract.rs        # The engine on test worlds: fog, caves, a village, knobs on a wall; what it refuses
 worlds/                      # The worlds, on worldgen's public API only; the web's WebAssembly

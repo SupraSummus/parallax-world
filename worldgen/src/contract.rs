@@ -2,16 +2,22 @@
 //! in tests: a box generated in parts, alone and in any order, equals it
 //! generated whole; each level shows rays from where a camera could be
 //! what the level two finer shows; seen from above, what level 0 shows;
-//! nothing lies outside its heights, and things keep their reach.
+//! nothing lies outside its heights, and things keep their reach. Rays
+//! see each site by its alpha, through what is in front of it: its
+//! colour and its glow, which average, as a coarse site stands for finer
+//! ones; not its material, which doesn't.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
+
+use bake::FACE_KINDS;
+use bake::light::{linear_to_srgb, srgb_to_linear};
 
 use crate::World;
 use crate::generator::{Generator, Layer, generate, materials_of, things_in};
 use crate::grid::{Box3, VoxelGrid, is_site};
 use crate::noise::{Rng, hash_text};
-use crate::picture::{Camera, FACES, Tiles, first_voxel, nearest_site, picture_in};
+use crate::picture::{Camera, FACES, Seen, Tiles, composite_in, composited, nearest_site};
 
 fn b(min_x: i64, min_y: i64, min_z: i64, max_x: i64, max_y: i64, max_z: i64) -> Box3 {
     Box3 { min: [min_x, min_y, min_z], max: [max_x, max_y, max_z] }
@@ -32,12 +38,14 @@ fn sites(b: &Box3) -> impl Iterator<Item = (i64, i64, i64)> + '_ {
     })
 }
 
+/** How far a level may stray from the one two finer in the share of rays through (docs/generators.md). */
+const THROUGH_TOLERANCE: f64 = 0.1;
+
 /**
- * How far a level may stray: from the one two finer, in the share of rays
- * through and of materials hit; from level 0, in the materials seen from
- * above (docs/generators.md).
+ * How far a level's colours may stray, from the one two finer and from
+ * level 0 seen from above: in any channel of what rays see (`colour`).
  */
-const TOLERANCE: f64 = 0.1;
+const COLOUR_TOLERANCE: f64 = 0.1;
 
 /** Rays cast at each level, from as many origins. */
 const RAYS: usize = 20_000;
@@ -59,10 +67,9 @@ const FAR: u32 = 6;
  * How far the fields of a far region may stray from level 0 seen from
  * above. A field is drawn from position alone, and a wide region has
  * hundreds of lines of sites at level 6, so it keeps closer than
- * TOLERANCE, which allows for things' far forms and their surfaces; a
- * plan finer than the sites read where each line is aliases by more
- * (the valley's town at level 6: 0.03 before its plans were dithered,
- * 0.015 after; "Levels" in docs/generators.md).
+ * COLOUR_TOLERANCE, which allows for things' far forms and their
+ * surfaces; a plan finer than the sites read where each line is aliases
+ * ("Plans" in "Levels" in docs/generators.md).
  */
 const FAR_TOLERANCE: f64 = 0.025;
 
@@ -90,7 +97,10 @@ pub fn whole_equals_parts(generator: &Generator, region: &Box3, level: u32) {
     for part in parts.iter().rev() {
         let alone = generate(generator, part, level);
         for (x, y, z) in sites(part) {
-            let look = |g: &VoxelGrid| (g.get(x, y, z), g.faces_at(x, y, z).copied());
+            // What shows, and what rays and light see: its alpha, each face's material, its glow.
+            let look = |g: &VoxelGrid| {
+                (g.get(x, y, z), g.faces_at(x, y, z).copied(), std::array::from_fn::<_, FACE_KINDS, _>(|face| g.light(x, y, z, face)))
+            };
             assert_eq!(look(&alone), look(&grid), "level {level}: part {part:?} differs at ({x}, {y}, {z})");
         }
     }
@@ -99,9 +109,10 @@ pub fn whole_equals_parts(generator: &Generator, region: &Box3, level: u32) {
 /**
  * The empty sites of a grid a camera could be at: those it could fly to
  * from above, connected to the top of the grid's box through empty sites
- * (voxels sharing a face). Under the ground's shell, inside a closed
- * house or a boulder are not; under a canopy, open to the sky somewhere,
- * is.
+ * (voxels sharing a face): empty as shown, as a camera collides with the
+ * voxels shown, not with what stops some rays. Under the ground's shell,
+ * inside a closed house or a boulder are not; under a canopy, open to
+ * the sky somewhere, is.
  */
 struct Open {
     b: Box3,
@@ -188,52 +199,81 @@ fn rays_from_open(area: &Box3, reference: &VoxelGrid, level: u32) -> (Vec<Ray>, 
     (rays, tried)
 }
 
-/** How far each ray goes before entering a voxel of `grid` (at `level`), lattice units, and its material; or till it leaves its area, material 0. */
-fn first_hits(grid: &VoxelGrid, level: u32, rays: &[Ray]) -> Vec<(f64, u8)> {
+/** What a ray sees of a grid (`composited`), its distances along it in lattice units. */
+type Path = Vec<(f64, u8, f64, [f64; 3])>;
+
+/** Each ray's path through `grid` (at `level`), till it leaves its area. */
+fn paths(grid: &VoxelGrid, level: u32, rays: &[Ray]) -> Vec<Path> {
     let s = (1i64 << level) as f64;
-    rays.iter()
-        .map(|ray| match first_voxel(grid, ray.origin.map(|v| v / s), ray.direction, ray.end / s) {
-            Some((t, id)) => (t * s, id),
-            None => (ray.end, 0),
-        })
+    let path = |ray: &Ray| composited(grid, ray.origin.map(|v| v / s), ray.direction, ray.end / s);
+    rays.iter().map(|ray| path(ray).into_iter().map(|(t, id, stopped, glow)| (t * s, id, stopped, glow)).collect()).collect()
+}
+
+/** How much of a ray gets past `t` along `path` (lattice units). */
+fn through_to(path: &Path, t: f64) -> f64 {
+    1.0 - path.iter().take_while(|(at, ..)| *at <= t).map(|(_, _, stopped, _)| stopped).sum::<f64>()
+}
+
+/** Each material id's colour, linear. */
+fn linear_colours(generator: &Generator) -> Vec<[f64; 3]> {
+    materials_of(generator)
+        .iter()
+        .map(|m| [16, 8, 0].map(|shift| srgb_to_linear(((m.rgb() >> shift) & 255) as f32 / 255.0) as f64))
         .collect()
 }
 
-/** Half the sum of the shares' differences: how much of one is not in the other. */
-fn difference(a: &BTreeMap<u8, f64>, c: &BTreeMap<u8, f64>) -> f64 {
-    let keys: BTreeSet<u8> = a.keys().chain(c.keys()).copied().collect();
-    keys.iter().map(|t| (a.get(t).unwrap_or(&0.0) - c.get(t).unwrap_or(&0.0)).abs()).sum::<f64>() / 2.0
+/**
+ * What rays see, as under a white light all round, sRGB: of each site
+ * its colour (`linear_colours`) by how much of them it stops, and what it
+ * glows to them; for as much light as stops, so that what gets through
+ * does not count (Through does).
+ */
+fn colour(seen: &Seen, colours: &[[f64; 3]]) -> [f64; 3] {
+    let (mut sum, mut total) = (seen.glow, 0.0);
+    for (&id, &stopped) in seen.stopped.iter().filter(|(id, _)| **id != 0) {
+        (0..3).for_each(|c| sum[c] += stopped * colours[id as usize][c]);
+        total += stopped;
+    }
+    sum.map(|v| if total > 0.0 { srgb(v / total) } else { 0.0 })
 }
 
-/** Shares of `counts`' keys in their total. */
-fn shares(counts: impl IntoIterator<Item = u8>) -> BTreeMap<u8, f64> {
+/** Of what stops rays, the share of each material id. */
+fn materials(seen: &Seen) -> BTreeMap<u8, f64> {
+    shares(seen.stopped.iter().filter(|(id, _)| **id != 0).map(|(&id, &stopped)| (id, stopped)))
+}
+
+/** A linear channel, sRGB. */
+fn srgb(linear: f64) -> f64 {
+    linear_to_srgb(linear as f32) as f64
+}
+
+/** How far apart two colours are: in the channel they differ the most in. */
+fn colour_difference(a: [f64; 3], c: [f64; 3]) -> f64 {
+    (0..3).map(|i| (a[i] - c[i]).abs()).fold(0.0, f64::max)
+}
+
+/** Shares of the keys in the total of their weights. */
+fn shares(weights: impl IntoIterator<Item = (u8, f64)>) -> BTreeMap<u8, f64> {
     let mut shares = BTreeMap::new();
     let mut total = 0.0;
-    for key in counts {
-        *shares.entry(key).or_insert(0.0) += 1.0;
-        total += 1.0;
+    for (key, weight) in weights {
+        *shares.entry(key).or_insert(0.0) += weight;
+        total += weight;
     }
     shares.values_mut().for_each(|v| *v /= total);
     shares
 }
 
-/** Shares by material type, of shares by material id: `types` is each id's. */
-fn by_type(types: &[u8], shares: &BTreeMap<u8, f64>) -> BTreeMap<u8, f64> {
-    let mut by_type = BTreeMap::new();
-    shares.iter().for_each(|(id, v)| *by_type.entry(types[*id as usize]).or_insert(0.0) += v);
-    by_type
-}
-
 /** What a margin measures. */
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Measure {
-    /** Of the rays that get 2 sites of the level far, the share that gets 4 more. */
+    /** Of what of the rays gets 2 sites of the level far, the share that gets 4 more. */
     Through,
-    /** Of those that hit something, the materials they hit. */
-    Hit,
-    /** What rays straight down hit first. */
+    /** What they see past those 2 sites (`colour`). */
+    Colour,
+    /** What rays straight down see. */
     FromAbove,
-    /** What rays straight down hit first of the fields alone. */
+    /** What rays straight down see of the fields alone. */
     FieldsFromAbove,
 }
 
@@ -245,11 +285,11 @@ pub struct Margin {
     pub level: u32,
     /** The level it is measured against: two finer, or 0 from above. */
     pub against: u32,
-    /** How far apart: in the share through, or how much of one's materials are not in the other's. */
+    /** How far apart: in the share through, or in a channel of the colours (sRGB). */
     pub difference: f64,
-    /** The share of rays through, at `against` and at `level` (Through only). */
-    pub through: [f64; 2],
-    /** The share of each material id, at `against` and at `level` (Hit and FromAbove). */
+    /** What is measured, at `against` and at `level`: the share through (in the first channel), or a colour (sRGB). */
+    pub values: [[f64; 3]; 2],
+    /** Of what stops rays, the share of each material id, at `against` and at `level`: to tell what changed, not checked. */
     pub materials: [BTreeMap<u8, f64>; 2],
 }
 
@@ -260,7 +300,11 @@ impl Margin {
 
     /** How far it may be apart. */
     pub fn tolerance(&self) -> f64 {
-        if self.measure == Measure::FieldsFromAbove { FAR_TOLERANCE } else { TOLERANCE }
+        match self.measure {
+            Measure::Through => THROUGH_TOLERANCE,
+            Measure::FieldsFromAbove => FAR_TOLERANCE,
+            _ => COLOUR_TOLERANCE,
+        }
     }
 }
 
@@ -339,15 +383,20 @@ impl std::fmt::Display for Report {
                 writeln!(f, "{} in x {}..{}, y {}..{}, z {}..{}:", self.name, r.min[0], r.max[0], r.min[1], r.max[1], r.min[2], r.max[2])?;
                 region = Some(r);
             }
-            let (what, values) = match m.measure {
-                Measure::Through => ("rays through", format!(": {:.3} -> {:.3}", m.through[0], m.through[1])),
-                Measure::Hit => ("materials hit", String::new()),
-                Measure::FromAbove => ("from above", String::new()),
-                Measure::FieldsFromAbove => ("fields from above", String::new()),
+            let what = match m.measure {
+                Measure::Through => "rays through",
+                Measure::Colour => "colour",
+                Measure::FromAbove => "colour from above",
+                Measure::FieldsFromAbove => "fields' colour from above",
+            };
+            let [a, c] = m.values;
+            let values = match m.measure {
+                Measure::Through => format!("{:.3} -> {:.3}", a[0], c[0]),
+                _ => format!("{:.3} {:.3} {:.3} -> {:.3} {:.3} {:.3}", a[0], a[1], a[2], c[0], c[1], c[2]),
             };
             let broken = if m.broken() { format!(", breaks {}", m.tolerance()) } else { String::new() };
-            writeln!(f, "  level {} against {}, {what}{values}: {:.3} apart{broken}", m.level, m.against, m.difference)?;
-            if m.measure != Measure::Through && (m.broken() || f.alternate()) {
+            writeln!(f, "  level {} against {}, {what}: {values}: {:.3} apart{broken}", m.level, m.against, m.difference)?;
+            if !m.materials[0].is_empty() && (m.broken() || f.alternate()) {
                 self.breakdown(f, m)?;
             }
         }
@@ -357,12 +406,12 @@ impl std::fmt::Display for Report {
 
 /**
  * What rays from where a camera could be see of `region` at each level
- * from 1 to `levels`: as many get through, and of those that hit
- * something, as many hit each material type, as at the level two finer,
- * within TOLERANCE.
+ * from 1 to `levels`: as much gets through, and of what stops, as much
+ * that they see of the same colour, as at the level two finer, within
+ * THROUGH_TOLERANCE and COLOUR_TOLERANCE.
  */
 fn levels_against_finer(generator: &Generator, region: &Box3, levels: u32, report: &mut Report) {
-    let types: Vec<u8> = materials_of(generator).iter().map(|m| m.material_type).collect();
+    let colours = linear_colours(generator);
     // Grids generated, by level and box: a level's is the reference of the level two coarser.
     let mut grids: Vec<(u32, Box3, VoxelGrid)> = Vec::new();
     let grid = |grids: &mut Vec<(u32, Box3, VoxelGrid)>, level: u32, area: &Box3| -> usize {
@@ -386,30 +435,45 @@ fn levels_against_finer(generator: &Generator, region: &Box3, levels: u32, repor
             origins = Some((finer, area, rays));
         }
         let rays = &origins.as_ref().expect("made").2;
-        let fine = first_hits(&grids[reference].2, finer, rays);
+        let fine = paths(&grids[reference].2, finer, rays);
         let coarse_grid = grid(&mut grids, level, &area);
-        let coarse = first_hits(&grids[coarse_grid].2, level, rays);
-        // A level is seen from afar: of the rays that got 2 of its sites far, how many get 4 more,
-        // and what those that stop stop on.
+        let coarse = paths(&grids[coarse_grid].2, level, rays);
+        // A level is seen from afar: of the light of rays that got 2 of its sites far, how much gets 4 more,
+        // and what stops the rest. Not counted: what leaves the area before it could get the 4 more.
         let (from, d) = (2.0 * s, 4.0 * s);
-        let through = |hits: &[(f64, u8)]| {
-            let seen: Vec<_> = hits.iter().filter(|(t, id)| *t > from && !(*id == 0 && *t <= from + d)).collect();
-            seen.iter().filter(|(t, _)| *t > from + d).count() as f64 / seen.len() as f64
+        let through = |paths: &[Path]| {
+            let (mut seen, mut through) = (0.0, 0.0);
+            for (path, ray) in paths.iter().zip(rays) {
+                if ray.end > from + d {
+                    seen += through_to(path, from);
+                    through += through_to(path, from + d);
+                } else if ray.end > from {
+                    seen += through_to(path, from) - through_to(path, ray.end);
+                }
+            }
+            through / seen
         };
-        let hit = |hits: &[(f64, u8)]| shares(hits.iter().filter(|(t, id)| *t > from && *id != 0).map(|(_, id)| *id));
-        let (a, c) = (hit(&fine), hit(&coarse));
-        let margin = |measure, difference, through, materials| Margin {
+        let seen = |paths: &[Path]| {
+            let mut seen = Seen::default();
+            paths.iter().flatten().filter(|(t, ..)| *t > from).for_each(|&(_, id, stopped, glow)| seen.add(id, stopped, glow));
+            seen
+        };
+        let margin = |measure, values: [[f64; 3]; 2], materials| Margin {
             region: *region,
             measure,
             level,
             against: finer,
-            difference,
-            through,
+            difference: if measure == Measure::Through {
+                (values[1][0] - values[0][0]).abs()
+            } else {
+                colour_difference(values[0], values[1])
+            },
+            values,
             materials,
         };
-        let through = [through(&fine), through(&coarse)];
-        report.margins.push(margin(Measure::Through, (through[1] - through[0]).abs(), through, Default::default()));
-        report.margins.push(margin(Measure::Hit, difference(&by_type(&types, &a), &by_type(&types, &c)), [0.0; 2], [a, c]));
+        report.margins.push(margin(Measure::Through, [through(&fine), through(&coarse)].map(|t| [t, 0.0, 0.0]), Default::default()));
+        let seen = [seen(&fine), seen(&coarse)];
+        report.margins.push(margin(Measure::Colour, seen.each_ref().map(|s| colour(s, &colours)), seen.each_ref().map(materials)));
         // Only the grids the coming levels read: the coarse one, and the one after it.
         grids.retain(|(l, ..)| *l + 1 >= level);
     }
@@ -418,27 +482,27 @@ fn levels_against_finer(generator: &Generator, region: &Box3, levels: u32, repor
 /**
  * What a camera straight above `region`, grown to at least 16 sites of
  * the level across around its centre, sees at each level from 1 to
- * `levels`: the materials of what each ray down hits first, as at level
- * 0, within TOLERANCE. Unlike levels two apart, level 0 catches a drift,
+ * `levels`: what rays down see (`colour`), as at level 0, within
+ * COLOUR_TOLERANCE. Unlike levels two apart, level 0 catches a drift,
  * a little a level, such as walls taking over from roofs.
  */
 fn from_above_against_level_0(world: &World, region: &Box3, levels: u32, report: &mut Report) {
     from_above(world, region, 1..=levels, Measure::FromAbove, report);
 }
 
-/** What rays straight down over `region` hit first at each of `levels`, against level 0, as `measure`. */
+/** What rays straight down over `region` see at each of `levels`, against level 0, as `measure`. */
 fn from_above(world: &World, region: &Box3, levels: impl Iterator<Item = u32>, measure: Measure, report: &mut Report) {
-    let types: Vec<u8> = materials_of(&world.generator).iter().map(|m| m.material_type).collect();
+    let colours = linear_colours(&world.generator);
     let seen = |tiles: &mut Tiles, area: &Box3| {
         // A ray every 2 units.
         let width = ((area.max[0] - area.min[0]) / 2).clamp(16, 1024) as usize;
         let camera = Camera::top([area.min[0] as f64, area.min[2] as f64], [area.max[0] as f64, area.max[2] as f64], width);
-        shares(picture_in(&world.generator, &camera, tiles).material)
+        composite_in(&world.generator, &camera, tiles)
     };
     // Level 0 over the area of the levels since it last grew; the areas
     // nest, so its tiles are kept for the next.
     let mut level_0 = Tiles::new(0, world.heights_at(0));
-    let mut reference: Option<(Box3, BTreeMap<u8, f64>)> = None;
+    let mut reference: Option<(Box3, Seen)> = None;
     for level in levels {
         let area = around(region, level);
         if reference.as_ref().is_none_or(|(a, _)| *a != area) {
@@ -446,15 +510,10 @@ fn from_above(world: &World, region: &Box3, levels: impl Iterator<Item = u32>, m
         }
         let reference = &reference.as_ref().expect("made").1;
         let here = seen(&mut Tiles::new(level, world.heights_at(level)), &area);
-        report.margins.push(Margin {
-            region: *region,
-            measure,
-            level,
-            against: 0,
-            difference: difference(&by_type(&types, reference), &by_type(&types, &here)),
-            through: [0.0; 2],
-            materials: [reference.clone(), here],
-        });
+        let values = [colour(reference, &colours), colour(&here, &colours)];
+        let difference = colour_difference(values[0], values[1]);
+        let materials = [materials(reference), materials(&here)];
+        report.margins.push(Margin { region: *region, measure, level, against: 0, difference, values, materials });
     }
 }
 
@@ -513,12 +572,12 @@ fn kind_of(generator: &Generator, id: u8) -> &'static str {
     "none"
 }
 
-/** Where a level `level` box of `grid` has a voxel, in lattice units, and its kind; how many it has. */
-fn voxels(generator: &Generator, grid: &VoxelGrid, level: u32) -> Option<([i64; 3], &'static str, usize)> {
+/** Where a level `level` box of `grid` has a site that stops any light (its alpha), in lattice units, and its kind; how many it has. */
+fn stopping(generator: &Generator, grid: &VoxelGrid, level: u32) -> Option<([i64; 3], &'static str, usize)> {
     let b = grid.clip();
-    let full: Vec<_> = sites(&b).filter(|&(x, y, z)| grid.get(x, y, z) != 0).collect();
+    let full: Vec<_> = sites(&b).filter(|&(x, y, z)| grid.alpha(x, y, z) != 0).collect();
     let &(x, y, z) = full.first()?;
-    Some(([x, y, z].map(|v| v << level), kind_of(generator, grid.get(x, y, z)), full.len()))
+    Some(([x, y, z].map(|v| v << level), kind_of(generator, grid.light(x, y, z, 0).1), full.len()))
 }
 
 /**
@@ -539,10 +598,10 @@ pub fn heights_hold(world: &World, regions: &[Box3], levels: u32) -> Vec<String>
             let b = box_at(area, level);
             for (from, to, side) in [(high, high + BEYOND, "above"), (low - BEYOND, low, "below")] {
                 let slab = Box3 { min: [b.min[0], from, b.min[2]], max: [b.max[0], to, b.max[2]] };
-                if let Some((at, kind, n)) = voxels(&world.generator, &generate(&world.generator, &slab, level), level) {
+                if let Some((at, kind, n)) = stopping(&world.generator, &generate(&world.generator, &slab, level), level) {
                     let place = if i == regions.len() { "around spawn".to_string() } else { format!("in {area:?}") };
                     broken.push(format!(
-                        "level {level}, {place}: {n} voxels {side} the heights {:?} (World::heights), which hosts don't generate, \
+                        "level {level}, {place}: {n} sites stopping light {side} the heights {:?} (World::heights), which hosts don't generate, \
                          such as {kind} at {at:?} lattice units",
                         world.heights
                     ));
@@ -601,9 +660,9 @@ pub fn things_hold(world: &World) -> Vec<String> {
                             continue;
                         }
                         let b = Box3 { min: [bounds.min[0] - 2, from, bounds.min[2] - 2], max: [bounds.max[0] + 2, to, bounds.max[2] + 2] };
-                        if let Some((at, kind, n)) = voxels(&world.generator, &generate(&world.generator, &b, 0), 0) {
+                        if let Some((at, kind, n)) = stopping(&world.generator, &generate(&world.generator, &b, 0), 0) {
                             broken.push(format!(
-                                "{key}: {n} voxels {side} the heights {:?} (World::heights), which hosts don't generate, \
+                                "{key}: {n} sites stopping light {side} the heights {:?} (World::heights), which hosts don't generate, \
                                  such as {kind} at {at:?} lattice units",
                                 world.heights
                             ));
