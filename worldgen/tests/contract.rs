@@ -4,7 +4,7 @@
 use std::rc::Rc;
 
 use worldgen::World;
-use worldgen::contract::{check, heights_hold, margins, things_hold, whole_equals_parts};
+use worldgen::contract::{Measure, Report, check, heights_hold, margins, things_hold, whole_equals_parts};
 use worldgen::generator::{
     ANY_SIZE, Anchors, Child, Children, Field, FieldValues, Generator, KindDef, Layer, Node, Op, Population, SOLID, Shapes, Span, ball,
     cuboid, generate, materials_of, things_in,
@@ -19,12 +19,16 @@ static KINDS: &[KindDef] = &[
     KindDef { name: "wall", kind_type: 10, colors: &["#eeeeee"], walk_through: false, glows: false },
     KindDef { name: "wood", kind_type: 4, colors: &["#664422"], walk_through: false, glows: false },
     KindDef { name: "grass", kind_type: 1, colors: &["#44aa44"], walk_through: false, glows: false },
+    KindDef { name: "smoke", kind_type: 8, colors: &["#333333"], walk_through: false, glows: false },
+    KindDef { name: "glowing fog", kind_type: 8, colors: &["#cccccc"], walk_through: false, glows: true },
 ];
 const FOG: u8 = 0;
 const ROCK: u8 = 1;
 const WALL: u8 = 2;
 const WOOD: u8 = 3;
 const GRASS: u8 = 4;
+const SMOKE: u8 = 5;
+const GLOWING_FOG: u8 = 6;
 
 /** One population of one thing, near the origin: cells reach 1024 + `reach` from their centres. */
 fn single(make: impl Fn(Point, &Cell) -> Option<Node> + 'static, reach: i64) -> Layer {
@@ -254,6 +258,60 @@ fn finds_voxels_outside_the_heights() {
     let broken = heights_hold(&world_of(world(spans("rock", -256, 256, ROCK)), (-64, 64)), &[near()], 1);
     assert!(broken.iter().any(|b| b.contains("above the heights (-64, 64)") && b.contains("such as rock")), "{broken:?}");
     assert!(broken.iter().any(|b| b.contains("below the heights")), "{broken:?}");
+}
+
+/** Fog in a layer from y = `from` to `to`, its kind and its extinction per lattice unit given the sites' spacing. */
+fn fog_layer(from: i64, to: i64, kind: fn(i64) -> u8, extinction: fn(i64) -> f64) -> Generator {
+    world(Layer::Field(Field {
+        name: "fog",
+        order: 0.0,
+        op: Op::Fill,
+        values: FieldValues::At(Box::new(move |_, y, _, spacing| {
+            (from..to).contains(&y).then(|| (kind(spacing), Some(extinction(spacing))))
+        })),
+    }))
+}
+
+/** The broken margins of fog of `kind` and `extinction` (as `fog_layer`) at levels 1 and 2. */
+fn fog_breaks(kind: fn(i64) -> u8, extinction: fn(i64) -> f64) -> Report {
+    margins("fog", &world_of(fog_layer(-64, 64, kind, extinction), (-256, 256)), &[b(0, -32, 0, 128, 32, 128)], 2, 2).broken()
+}
+
+#[test]
+fn finds_fog_drawn_thicker_at_coarser_levels() {
+    // A medium's extinction is per unit of a ray's path at every level; read per site, it thickens a level up.
+    let fine = fog_breaks(|_| FOG, |_| 0.01);
+    assert!(fine.margins.is_empty(), "{fine}");
+    let thick = fog_breaks(|_| FOG, |spacing| 0.01 * spacing as f64);
+    assert!(thick.margins.iter().any(|m| m.measure == Measure::Through), "{thick}");
+}
+
+#[test]
+fn finds_fog_of_another_colour_at_coarser_levels() {
+    // Of one type, as the materials' types would have it, but darker.
+    let smoke = fog_breaks(|spacing| if spacing == 1 { FOG } else { SMOKE }, |_| 0.01);
+    assert!(smoke.margins.iter().all(|m| m.measure != Measure::Through), "{smoke}");
+    assert!(smoke.margins.iter().any(|m| m.measure == Measure::Colour), "{smoke}");
+}
+
+#[test]
+fn finds_fog_that_glows_only_near() {
+    // Of one colour, but it glows only at level 0: what rays see is brighter there.
+    let glow = fog_breaks(|spacing| if spacing == 1 { GLOWING_FOG } else { FOG }, |_| 0.01);
+    assert!(glow.margins.iter().any(|m| m.measure == Measure::FromAbove), "{glow}");
+}
+
+#[test]
+fn finds_a_speck_too_small_to_show_outside_the_heights() {
+    // A speck stops a few of a site's rays: it shows no voxel, but light and the composited rays see it.
+    let speck = world(single(|_, _| Some(Node::of(vec![ball([64.0, 70.0, 64.0], 0.1, ROCK, SOLID, Op::Fill)])), 64));
+    let grid = generate(&speck, &near(), 0);
+    assert!(grid.cells.iter().all(|id| *id == 0) && grid.alpha.iter().any(|a| *a > 0), "the speck shows");
+    let broken = heights_hold(&world_of(speck, (-64, 64)), &[near()], 0);
+    assert!(
+        broken.iter().any(|b| b.contains("1 sites stopping light above the heights (-64, 64)") && b.contains("such as rock")),
+        "{broken:?}"
+    );
 }
 
 #[test]
