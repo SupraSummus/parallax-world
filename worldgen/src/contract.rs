@@ -14,10 +14,12 @@ use bake::FACE_KINDS;
 use bake::light::{linear_to_srgb, srgb_to_linear};
 
 use crate::World;
-use crate::generator::{Generator, Layer, generate, materials_of, things_in};
+use crate::generator::{Generator, Layer, generate, materials_of};
 use crate::grid::{Box3, VoxelGrid, is_site};
-use crate::noise::{Rng, hash_text};
+use crate::noise::Rng;
 use crate::picture::{Camera, FACES, Seen, Tiles, composite_in, composited, nearest_site};
+use crate::survey::{Survey, survey};
+use crate::units::m;
 
 fn b(min_x: i64, min_y: i64, min_z: i64, max_x: i64, max_y: i64, max_z: i64) -> Box3 {
     Box3 { min: [min_x, min_y, min_z], max: [max_x, max_y, max_z] }
@@ -319,6 +321,8 @@ pub type KindShares = BTreeMap<(u8, usize, &'static str), f64>;
 pub struct Report {
     pub name: String,
     pub margins: Vec<Margin>,
+    /** What regions hold, to print after them: the strata `check` made them for. */
+    pub held: Vec<(Box3, String)>,
     /** Each material id's kind (index in Generator::kinds), its name and type; none for id 0. */
     materials: Vec<Option<(usize, &'static str, u8)>>,
 }
@@ -330,7 +334,7 @@ impl Report {
         for (i, kind) in generator.kinds.iter().enumerate() {
             materials.extend(kind.colors.iter().map(|_| Some((i, kind.name, kind.kind_type))));
         }
-        Report { name: name.to_string(), margins: Vec::new(), materials }
+        Report { name: name.to_string(), margins: Vec::new(), held: Vec::new(), materials }
     }
 
     /** Only the broken margins. */
@@ -380,7 +384,12 @@ impl std::fmt::Display for Report {
         for m in &self.margins {
             if region != Some(m.region) {
                 let r = m.region;
-                writeln!(f, "{} in x {}..{}, y {}..{}, z {}..{}:", self.name, r.min[0], r.max[0], r.min[1], r.max[1], r.min[2], r.max[2])?;
+                let held = self.held.iter().find(|(b, _)| *b == r).map_or(String::new(), |(_, h)| format!(" {h}"));
+                writeln!(
+                    f,
+                    "{} in x {}..{}, y {}..{}, z {}..{}:{held}",
+                    self.name, r.min[0], r.max[0], r.min[1], r.max[1], r.min[2], r.max[2]
+                )?;
                 region = Some(r);
             }
             let what = match m.measure {
@@ -612,73 +621,43 @@ pub fn heights_hold(world: &World, regions: &[Box3], levels: u32) -> Vec<String>
     broken
 }
 
-/** Columns of cells of each population that `things_hold` looks in, at most. */
-const COLUMNS: usize = 4096;
-/** How far apart the columns it looks in are, at most, lattice units across (4 km); or 64 cells. */
-const AROUND: i64 = 32_000;
-/** Things whose bounds leave the heights that it generates, at most, of each population. */
-const OUTSIDE: usize = 16;
-
 /**
- * Things of each population of `world` in up to COLUMNS columns of cells
- * spread over a square AROUND spawn, of all heights: each keeps within
- * its population's reach (which `generate` checks only where it draws), and
- * where its bounds leave the world's heights, nothing is generated
- * outside them (at level 0). Returns where they do not.
+ * The things of each population of `world` that `survey` found, of all
+ * heights: each keeps within its population's reach (which `generate`
+ * checks only where it draws), and where its bounds leave the world's
+ * heights, nothing is generated outside them (at level 0). Returns where
+ * they do not.
  */
-pub fn things_hold(world: &World) -> Vec<String> {
+pub fn things_hold(world: &World, survey: &Survey) -> Vec<String> {
     let mut broken = Vec::new();
     let (h0, h1) = world.heights;
-    for layer in &world.generator.layers {
-        let Layer::Population(population) = layer else { continue };
-        let (n, reach) = (population.cell, population.reach);
-        let half = (AROUND / 2 / n).max(32);
-        let [ci, _, ck] = world.spawn.map(|v| v.div_euclid(n));
-        let side = (2 * half + 1) as usize;
-        let mut random = Rng::new(hash_text(population.name, 13));
-        let columns: Vec<(i64, i64)> = if side * side <= COLUMNS {
-            (0..side * side).map(|c| (ci - half + (c % side) as i64, ck - half + (c / side) as i64)).collect()
-        } else {
-            (0..COLUMNS).map(|_| (ci - half + random.below(side as u32) as i64, ck - half + random.below(side as u32) as i64)).collect()
-        };
-        // Cells whose reach meets the heights.
-        let (j0, j1) = ((h0 - n - reach[1]).div_euclid(n), (h1 + n + reach[1]).div_euclid(n) + 1);
-        let (mut made, mut past, mut needed, mut example, mut outside) = (0, 0, reach, None, 0);
-        for (i, k) in columns {
-            for (key, bounds, allowed) in things_in(&world.generator, population, [(i, i), (j0, j1), (k, k)]) {
-                made += 1;
-                if !bounds.inside(&allowed) {
-                    past += 1;
-                    let over = |a: usize| 0.max(allowed.min[a] - bounds.min[a]).max(bounds.max[a] - allowed.max[a]);
-                    needed = [0, 1, 2].map(|a| needed[a].max(reach[a] + over(a)));
-                    example.get_or_insert(format!("{key}: bounds {bounds:?}, reach allows {allowed:?}"));
+    for things in &survey.things {
+        for (key, bounds) in &things.leaving {
+            for (from, to, side) in [(h1, bounds.max[1] + 2, "above"), (bounds.min[1] - 2, h0, "below")] {
+                if from >= to {
+                    continue;
                 }
-                if (bounds.min[1] < h0 || bounds.max[1] > h1) && outside < OUTSIDE {
-                    outside += 1;
-                    for (from, to, side) in [(h1, bounds.max[1] + 2, "above"), (bounds.min[1] - 2, h0, "below")] {
-                        if from >= to {
-                            continue;
-                        }
-                        let b = Box3 { min: [bounds.min[0] - 2, from, bounds.min[2] - 2], max: [bounds.max[0] + 2, to, bounds.max[2] + 2] };
-                        if let Some((at, kind, n)) = stopping(&world.generator, &generate(&world.generator, &b, 0), 0) {
-                            broken.push(format!(
-                                "{key}: {n} sites stopping light {side} the heights {:?} (World::heights), which hosts don't generate, \
-                                 such as {kind} at {at:?} lattice units",
-                                world.heights
-                            ));
-                        }
-                    }
+                let b = Box3 { min: [bounds.min[0] - 2, from, bounds.min[2] - 2], max: [bounds.max[0] + 2, to, bounds.max[2] + 2] };
+                if let Some((at, kind, n)) = stopping(&world.generator, &generate(&world.generator, &b, 0), 0) {
+                    broken.push(format!(
+                        "{key}: {n} sites stopping light {side} the heights {:?} (World::heights), which hosts don't generate, \
+                         such as {kind} at {at:?} lattice units",
+                        world.heights
+                    ));
                 }
             }
         }
-        if past > 0 {
-            broken.push(format!(
-                "{past} of the {made} {} sampled reach past their population's reach {reach:?}; it needs at least {needed:?} \
-                 (see \"Populations\" in docs/generators.md); such as {}",
-                population.name,
-                example.expect("one")
-            ));
-        }
+        let Some((key, bounds, allowed)) = things.past.first() else { continue };
+        let over = |b: &Box3, a: &Box3, i: usize| 0.max(a.min[i] - b.min[i]).max(b.max[i] - a.max[i]);
+        let needed: [i64; 3] = [0, 1, 2].map(|i| things.reach[i] + things.past.iter().map(|(_, b, a)| over(b, a, i)).max().unwrap_or(0));
+        broken.push(format!(
+            "{} of the {} {} surveyed reach past their population's reach {:?}; it needs at least {needed:?} \
+             (see \"Populations\" in docs/generators.md); such as {key}: bounds {bounds:?}, reach allows {allowed:?}",
+            things.past.len(),
+            things.made,
+            things.population,
+            things.reach,
+        ));
     }
     broken
 }
@@ -690,42 +669,117 @@ fn fields_of(mut world: World) -> World {
 }
 
 /**
- * The whole contract for `world`, named `name` (with its seed, say), in
- * each of `regions` (between them, a bit of everything in it), up to the
- * level `levels` it keeps what a camera sees to, and `from_above` what
- * is seen from above. Prints its margins (see them with --nocapture);
- * panics where it breaks it.
+ * The widest region the contract checks in (32 m), along any axis: each
+ * holds places of strata (worldgen::survey), as many as fit.
  */
-pub fn check(name: &str, world: &World, regions: &[Box3], levels: u32, from_above: u32) {
-    let start = Instant::now();
-    for region in regions {
-        // Up to one level past the checked ones: where things may be drawn as media (a forest's trees).
-        for level in [0, 2, levels + 1] {
-            whole_equals_parts(&world.generator, region, level);
+pub const REGION: i64 = m(32.0);
+
+/**
+ * What `world` is made of (`survey`), and regions holding a place of
+ * each of its strata, with their names; `only` those of strata whose
+ * names hold one of `only`, if any (a layer's name first: "towns ›
+ * church", "railway"), and only their layers surveyed.
+ */
+pub fn regions(world: &World, only: &[&str]) -> (Survey, Vec<(Box3, Vec<String>)>) {
+    let survey = survey(world, REGION, |layer| only.is_empty() || only.iter().any(|o| o.starts_with(layer) || layer.starts_with(o)));
+    let names: Vec<String> = (0..survey.strata.len()).map(|i| survey.describe(&world.generator, i)).collect();
+    let wanted = |i: &usize| only.is_empty() || only.iter().any(|o| names[*i].contains(o));
+    let regions = survey.regions(wanted).into_iter().map(|(b, strata)| (b, strata.iter().map(|i| names[*i].clone()).collect())).collect();
+    (survey, regions)
+}
+
+/** What `check` found: where `world` breaks the contract. */
+pub struct Checked {
+    pub name: String,
+    /** Each region, the strata it holds, and how it breaks the contract there (its margins), if it does. */
+    pub regions: Vec<(Box3, Vec<String>, String)>,
+    /** How it breaks it elsewhere: its heights, things' reach. */
+    pub broken: Vec<String>,
+    /** The layers of its generator that draw nothing surveyed, by name: none checked, if `complete`. */
+    pub silent: Vec<&'static str>,
+    /** Whether the regions hold every stratum, not `only` some. */
+    pub complete: bool,
+}
+
+impl Checked {
+    /**
+     * Panics where it breaks the contract, but in regions holding a
+     * stratum whose name holds one of `known`; and where one of `known`
+     * no longer breaks it, to be taken off the list.
+     */
+    pub fn assert_kept(&self, known: &[&str]) {
+        let holds = |strata: &[String], k: &str| strata.iter().any(|s| s.contains(k));
+        let mut broken = self.broken.clone();
+        if self.complete && !self.silent.is_empty() {
+            broken.push(format!("{} draw nothing around spawn (worldgen::survey): too far from it, or not at all", self.silent.join(", ")));
         }
+        for (_, strata, breaks) in &self.regions {
+            if !breaks.is_empty() && !known.iter().any(|k| holds(strata, k)) {
+                broken.push(breaks.clone());
+            }
+        }
+        for k in known {
+            let held: Vec<_> = self.regions.iter().filter(|(_, strata, _)| holds(strata, k)).collect();
+            if (self.complete || !held.is_empty()) && held.iter().all(|(.., breaks)| breaks.is_empty()) {
+                broken.push(format!("{} keeps the contract around {k}: take it off the known breaks", self.name));
+            }
+        }
+        assert!(broken.is_empty(), "{} breaks the contract:\n{}", self.name, broken.join("\n"));
     }
-    println!("{name}: parts {:.1} s", start.elapsed().as_secs_f64());
-    check_content(name, world, regions, levels, from_above);
 }
 
 /**
- * The contract but for parts: what a world's seed changes, its content.
- * For more seeds of a world `check` checks at one.
+ * The whole contract for `world`, named `name` (with its seed, say), in
+ * regions holding everything it is made of around spawn (`regions`),
+ * `only` some if any, up to the level `levels` it keeps what a camera
+ * sees to, and `from_above` what is seen from above; and with `parts`,
+ * each region generated in parts. Prints its regions and margins (see
+ * them with --nocapture); returns where it breaks it.
  */
-pub fn check_content(name: &str, world: &World, regions: &[Box3], levels: u32, from_above: u32) {
+pub fn check(name: &str, world: &World, levels: u32, from_above: u32, parts: bool, only: &[&str]) -> Checked {
     let start = Instant::now();
-    let report = margins(name, world, regions, levels, from_above);
+    let (survey, regions) = regions(world, only);
+    let layers: Vec<String> = survey
+        .layers
+        .iter()
+        .map(|l| format!("{} {:.1} km {:.1} s", l.layer, 2.0 * l.half as f64 * crate::units::UNIT_SIZE / 1000.0, l.seconds))
+        .collect();
+    let (n, took) = (survey.strata.len(), start.elapsed().as_secs_f64());
+    println!("{name}: {n} strata in {} regions, surveyed in {took:.1} s: {}", regions.len(), layers.join(", "));
+    if only.is_empty() {
+        // Not checked: a world may share a table of kinds with others (the moor's is the valley's).
+        println!("{name}: kinds nothing surveyed draws: {}", survey.unseen(&world.generator).join(", "));
+    }
+    let boxes: Vec<Box3> = regions.iter().map(|(b, _)| *b).collect();
+    let mut broken = Vec::new();
+    if parts {
+        let start = Instant::now();
+        for region in &boxes {
+            // Up to one level past the checked ones: where things may be drawn as media (a forest's trees).
+            for level in [0, 2, levels + 1] {
+                whole_equals_parts(&world.generator, region, level);
+            }
+        }
+        println!("{name}: parts {:.1} s", start.elapsed().as_secs_f64());
+    }
+    let start = Instant::now();
+    let report = Report {
+        held: regions.iter().map(|(b, strata)| (*b, strata.join(", "))).collect(),
+        ..margins(name, world, &boxes, levels, from_above)
+    };
     let rays = start.elapsed().as_secs_f64();
-    let mut broken = heights_hold(world, regions, levels);
+    broken.extend(heights_hold(world, &boxes, levels));
     let heights = start.elapsed().as_secs_f64() - rays;
-    broken.extend(things_hold(world));
+    broken.extend(things_hold(world, &survey));
     let things = start.elapsed().as_secs_f64() - rays - heights;
     println!("{report}{name}: margins {rays:.1} s, heights {heights:.1} s, things {things:.1} s");
-    let margins = report.broken();
-    assert!(
-        margins.margins.is_empty() && broken.is_empty(),
-        "{name} breaks the contract:\n{}{}",
-        if margins.margins.is_empty() { String::new() } else { margins.to_string() },
-        broken.join("\n")
-    );
+    let regions = regions
+        .into_iter()
+        .map(|(b, strata)| {
+            let breaks = Report { margins: report.broken().margins.into_iter().filter(|m| m.region == b).collect(), ..report.clone() };
+            (b, strata, if breaks.margins.is_empty() { String::new() } else { breaks.to_string() })
+        })
+        .collect();
+    let silent = survey.layers.iter().filter(|l| l.found == 0).map(|l| l.layer).collect();
+    Checked { name: name.to_string(), regions, broken, silent, complete: only.is_empty() }
 }

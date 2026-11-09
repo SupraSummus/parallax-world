@@ -507,7 +507,7 @@ pub fn layers(seed: u64, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
         on_ground("logs", vox(10.0) as i64).make(move |[x, _, z], cell| {
             let mut random = cell.random("log");
             if random.chance(f.thinned(fx(0.077), x as i64, z as i64)) && !f.column(x as i64, z as i64).on_path {
-                Some(Node::of(fallen_log(x, z, &|x, z| f.ground(x, z), &mut random)))
+                fallen_log(x, z, &|x, z| f.ground(x, z), &mut random).map(Node::of)
             } else {
                 None
             }
@@ -986,7 +986,13 @@ fn boulder(x: f64, ground: f64, z: f64, random: &mut Rng) -> Vec<Shape> {
 }
 
 /** A fallen trunk lying across the ground, with moss on top. */
-fn fallen_log(x: f64, z: f64, ground: GroundAt, random: &mut Rng) -> Vec<Shape> {
+/**
+ * A fallen log from (x, z) and moss on it; none where the ground under
+ * it falls over FALL from end to end, as on a mountainside: it would
+ * roll, and reach past its population's reach.
+ */
+fn fallen_log(x: f64, z: f64, ground: GroundAt, random: &mut Rng) -> Option<Vec<Shape>> {
+    const FALL: f64 = 4.0;
     let length = vox(4.0 + random.next() * 5.0);
     let angle = random.next() * PI;
     let dx = js::cos(angle);
@@ -994,6 +1000,11 @@ fn fallen_log(x: f64, z: f64, ground: GroundAt, random: &mut Rng) -> Vec<Shape> 
     let (ex, ez) = (x + dx * length, z + dz * length);
     let lift = log_radius();
     let at = |x: f64, z: f64| ground(x as i64, z as i64) as f64;
+    let heights = (0..=(length / vox(0.5)) as usize).map(|i| at(round(x + dx * i as f64 * vox(0.5)), round(z + dz * i as f64 * vox(0.5))));
+    let (low, high) = heights.chain([at(round(ex), round(ez))]).fold((f64::MAX, f64::MIN), |(l, h), y| (l.min(y), h.max(y)));
+    if high - low > vox(FALL) {
+        return None;
+    }
     let mut shapes =
         vec![Shape::capsule([x, at(x, z) + lift, z], [ex, at(round(ex), round(ez)) + lift, ez], log_radius(), K::deadwood).paint()];
     // Moss in patches on top.
@@ -1006,5 +1017,5 @@ fn fallen_log(x: f64, z: f64, ground: GroundAt, random: &mut Rng) -> Vec<Shape> 
         }
         i += vox(0.5);
     }
-    shapes
+    Some(shapes)
 }

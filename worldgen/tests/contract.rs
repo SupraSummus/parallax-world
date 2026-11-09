@@ -4,7 +4,7 @@
 use std::rc::Rc;
 
 use worldgen::World;
-use worldgen::contract::{Measure, Report, check, heights_hold, margins, things_hold, whole_equals_parts};
+use worldgen::contract::{Measure, REGION, Report, check, heights_hold, margins, regions, things_hold, whole_equals_parts};
 use worldgen::generator::{
     ANY_SIZE, Anchors, Child, Children, Field, FieldValues, Generator, KindDef, Layer, Node, Op, Population, SOLID, Shapes, Span, ball,
     cuboid, generate, materials_of, things_in,
@@ -12,6 +12,7 @@ use worldgen::generator::{
 use worldgen::generator::{Cell, Fill, Point};
 use worldgen::grid::Box3;
 use worldgen::plan::Plan;
+use worldgen::survey::survey;
 
 static KINDS: &[KindDef] = &[
     KindDef { name: "fog", kind_type: 8, colors: &["#cccccc"], walk_through: false, glows: false },
@@ -177,19 +178,24 @@ fn anchors_along_an_axis_are_one_per_square_across_it() {
     }
 }
 
+/** `world` keeps the contract up to `levels`, seen from above to level 3. */
+fn keeps_the_contract(name: &str, world: &World, levels: u32) {
+    check(name, world, levels, 3, true, &[]).assert_kept(&[]);
+}
+
 #[test]
 fn fog_keeps_the_contract() {
-    check("fog", &world_of(fog(), (0, 128)), &[b(32, 32, 32, 96, 96, 96)], 4, 3);
+    keeps_the_contract("fog", &world_of(fog(), (0, 128)), 4);
 }
 
 #[test]
 fn caves_keep_the_contract() {
-    check("caves", &world_of(caves(), (-256, 256)), &[b(0, 0, 0, 128, 128, 128)], 3, 3);
+    keeps_the_contract("caves", &world_of(caves(), (-256, 256)), 3);
 }
 
 #[test]
 fn village_keeps_the_contract() {
-    check("village", &world_of(village(), (-64, 64)), &[b(-64, -16, -64, 64, 48, 64)], 4, 3);
+    keeps_the_contract("village", &world_of(village(), (-64, 64)), 4);
 }
 
 /**
@@ -244,13 +250,27 @@ fn finds_a_far_thing_reaching_past_its_populations_reach() {
         make: Box::new(|[x, y, z], _| Some(Node::of(vec![ball([x, y, z], 100.0, ROCK, SOLID, Op::Fill)]))),
         far: None,
     });
-    let broken = things_hold(&world_of(world(far), (-256, 256)));
+    let world = world_of(world(far), (-256, 256));
+    let broken = things_hold(&world, &survey(&world, REGION, |_| true));
     assert_eq!(broken.len(), 1, "{broken:?}");
     assert!(
-        broken[0].contains("far sampled reach past their population's reach [16, 16, 16]; it needs at least [37, 37, 37]"),
+        broken[0].contains("far surveyed reach past their population's reach [16, 16, 16]; it needs at least [37, 37, 37]"),
         "{}",
         broken[0]
     );
+}
+
+#[test]
+fn a_rare_thing_far_from_spawn_gets_a_region() {
+    // A wooden post in every cell on y = 0, but one of rock 400 m away: a stratum of its own.
+    let posts = Population::new("posts", 1.0, 64).anchor(|cell| (cell.j == 0).then_some(cell.centre.map(|v| v as f64))).make(|p, cell| {
+        let kind = if (cell.i, cell.k) == (50, 50) { ROCK } else { WOOD };
+        Some(Node::of(vec![cuboid(p, p.map(|v| v + 8.0), kind, SOLID, Op::Fill)]))
+    });
+    let (_, regions) = regions(&world_of(world(Layer::Population(posts)), (-64, 64)), &[]);
+    let names: Vec<String> = regions.iter().flat_map(|(_, strata)| strata.clone()).collect();
+    assert_eq!(names, ["posts rock", "posts wood"]);
+    assert!(regions[0].0.holds([50 * 64, 0, 50 * 64]), "{regions:?}");
 }
 
 #[test]
