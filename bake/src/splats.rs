@@ -6,8 +6,8 @@ use std::collections::HashMap;
 use std::f64::consts::FRAC_1_SQRT_2;
 
 use crate::light::{FaceLight, colour};
-use crate::slicing::{LAYER, MAX_SLANT, slice_centre};
-use crate::surface::{Slice, Voxel};
+use crate::slicing::{LAYER, MAX_SLANT};
+use crate::surface::Voxel;
 use crate::tables::VOXEL_FACES;
 use crate::world::{FACE_KINDS, Geometry};
 
@@ -220,14 +220,13 @@ fn run_ends(splats: &mut Splats, geometry: &Geometry, surface: &[Voxel], order: 
  * ray: the compositor draws pillars by the depth where a ray enters them,
  * and where they tie, the later painted.
  *
- * `surface` is the cell's (cell_surface), with the margin around the cell
- * that its chunks may show; `colour` gives each voxel's (voxel_colour),
- * a pillar the colour of the voxel it shows (run_ends).
+ * `surface` is the chunk's (cell_surface), with the margin around its cell
+ * that it may show; `colour` gives each voxel's (voxel_colour),
+ * a pillar the colour of the voxel it shows (run_ends). `centre` is twice
+ * the depth of its centre plane, in layers: a whole number.
  */
-pub fn chunk_splats(splats: &mut Splats, geometry: &Geometry, colour: &mut dyn FnMut(&Voxel) -> u32, surface: &[Voxel], slice: &Slice) {
+pub fn chunk_splats(splats: &mut Splats, geometry: &Geometry, colour: &mut dyn FnMut(&Voxel) -> u32, surface: &[Voxel], centre: i32) {
     splats.clear();
-    // Twice the centre plane's depth, in layers: a whole number.
-    let centre = (2.0 * slice_centre(slice) / LAYER).round() as i32;
 
     // Near to far.
     let mut order = std::mem::take(&mut splats.order);
@@ -264,8 +263,15 @@ pub fn chunk_splats(splats: &mut Splats, geometry: &Geometry, colour: &mut dyn F
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::slicing::slice_centre;
+    use crate::surface::Slice;
     use crate::tables::geometry;
     use crate::world::lattices;
+
+    /** Twice a slice's centre plane's depth in layers, as chunk_splats takes it. */
+    fn centre(slice: &Slice) -> i32 {
+        (2.0 * slice_centre(slice) / LAYER).round() as i32
+    }
 
     /** The sites of layers `layers`, |a| and |b| ≤ 12, where `solid` holds, and their surface: those with an open face. */
     fn blob(geometry: &Geometry, layers: std::ops::Range<i32>, solid: impl Fn([i32; 3]) -> bool) -> (Vec<[i32; 3]>, Vec<Voxel>) {
@@ -295,7 +301,7 @@ mod tests {
         let (sites, surface) = blob(&geometry, 0..4, |[a, b, c]| (0..4).contains(&c) && a.abs() <= 12 && b.abs() <= 12 && a + c >= 0);
         let slice = Slice { level: 2, atoms: 0, layer: 0, cutoff: f64::INFINITY };
         let mut splats = Splats::new();
-        chunk_splats(&mut splats, &geometry, &mut |v| voxel_colour(v, &[0; FACE_KINDS]), &surface, &slice);
+        chunk_splats(&mut splats, &geometry, &mut |v| voxel_colour(v, &[0; FACE_KINDS]), &surface, centre(&slice));
         let centre = slice_centre(&slice);
 
         let at = |[a, b, c]: [i32; 3]| [a as f64 * LAYER, b as f64, c as f64 * LAYER];
@@ -356,7 +362,7 @@ mod tests {
         let (_, surface) = blob(&geometry, 0..8, |site| (0..8).contains(&site[2]) && hash(site) % 3 == 0);
         let slice = Slice { level: 3, atoms: 0, layer: 0, cutoff: f64::INFINITY };
         let mut splats = Splats::new();
-        chunk_splats(&mut splats, &geometry, &mut |v| voxel_colour(v, &[0; FACE_KINDS]), &surface, &slice);
+        chunk_splats(&mut splats, &geometry, &mut |v| voxel_colour(v, &[0; FACE_KINDS]), &surface, centre(&slice));
         let kept = splats.splats;
         // Every voxel a ray may meet, far to near.
         let mut all: Vec<[i32; 3]> = surface.iter().filter(|v| seen(&geometry, v.open | v.cut)).map(|v| v.site).collect();
@@ -398,7 +404,7 @@ mod tests {
         ];
         let slice = Slice { level: 3, atoms: 0, layer: 0, cutoff: f64::INFINITY };
         let mut splats = Splats::new();
-        chunk_splats(&mut splats, &geometry, &mut |v| 0xff00_0000 | v.material as u32, &surface, &slice);
+        chunk_splats(&mut splats, &geometry, &mut |v| 0xff00_0000 | v.material as u32, &surface, centre(&slice));
         let mut pillars: Vec<_> = splats.splats.iter().map(|s| (s.site, s.run, s.colour & 255)).collect();
         pillars.sort_unstable();
         assert_eq!(pillars, [([0, 0, 0], 8, 2), ([2, 0, 0], 12, 4), ([4, 0, 0], 0, 1)]);

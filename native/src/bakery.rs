@@ -12,52 +12,42 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Condvar, Mutex};
 
+use bake::lod::CellChunk;
 use bake::slicing::{GRID_LEVELS, half_layer};
-use bake::{Baker, Slice, Tiles};
+use bake::{Baker, Tiles};
 
 use crate::compositor::{GpuCluster, GpuSplat, cluster};
 
-/** A chunk to bake: cell (i, j) of a slice of a face, reading tiles [i0, i1] × [k0, k1] of its level. */
+/** A chunk to bake: a cell of a face, reading tiles [i0, i1] × [k0, k1] of its grid level. */
 #[derive(Clone, Copy)]
 pub struct Request {
     pub face: usize,
-    pub slice: Slice,
-    pub i: i32,
-    pub j: i32,
+    pub cell: CellChunk,
     pub tiles: [i32; 4],
     /** The size of the blocks its splats are clustered by (compositor::cluster). */
     pub block: f64,
 }
 
-/** A baked chunk (ChunkSplats in chunk-baker.ts): its splats and their clusters as the GPU takes them (compositor::cluster), and its mask's blocks. */
+/** A baked chunk (ChunkSplats in chunk-baker.ts): its splats and their clusters as the GPU takes them (compositor::cluster). */
 pub struct Baked {
     pub origin: [f64; 2],
     pub extent: [f64; 2],
     pub splats: Vec<GpuSplat>,
     pub clusters: Vec<GpuCluster>,
-    pub mask: Mask,
 }
 
-/** Which blocks of what a chunk draws are drawn all, whatever the camera, or maybe partly (see fill.rs), for Coverage. */
-pub struct Mask {
-    pub width: usize,
-    pub height: usize,
-    pub scale: f64,
-    pub blocks: Vec<u8>,
-}
-
-/** What a request bakes: face, slice and cell. */
-type Key = (usize, i32, i32, u64, i32, i32);
+/** What a request bakes: face and cell. */
+type Key = (usize, CellChunk);
 
 impl Request {
     fn key(&self) -> Key {
-        (self.face, self.slice.level, self.slice.layer, self.slice.cutoff.to_bits(), self.i, self.j)
+        (self.face, self.cell)
     }
 
-    /** The worker of the request's cell. */
+    /** The worker of the request's chunk. */
     fn worker(&self, workers: usize) -> usize {
         let mut h = DefaultHasher::new();
-        (self.face, self.slice.level, self.slice.layer, self.slice.cutoff.to_bits(), self.i, self.j).hash(&mut h);
+        self.key().hash(&mut h);
         h.finish() as usize % workers
     }
 }
@@ -149,7 +139,7 @@ fn work(queue: &Queue, send: &Sender<(Request, Baked)>, grids: &Grids, mut baker
             }
         };
         let r = &request;
-        let level = r.slice.atoms as usize;
+        let level = r.cell.atoms as usize;
         let latest = grids.lock().expect("grids")[level].clone();
         if !Arc::ptr_eq(&latest, &has[level]) {
             baker.share_tiles(level, latest.clone());
@@ -160,15 +150,9 @@ fn work(queue: &Queue, send: &Sender<(Request, Baked)>, grids: &Grids, mut baker
             queue.0.lock().expect("queue").in_flight.remove(&r.key());
             continue;
         }
-        let b = baker.bake(r.face, &r.slice, r.i, r.j);
-        let (splats, clusters) = cluster(&baker.numbers, half_layer(r.slice.atoms), r.block);
-        let baked = Baked {
-            origin: [b.origin_x, b.origin_y],
-            extent: [b.extent_width, b.extent_height],
-            splats,
-            clusters,
-            mask: Mask { width: b.width, height: b.height, scale: b.scale, blocks: baker.blocks.clone() },
-        };
+        let b = baker.bake_cell(r.face, &r.cell);
+        let (splats, clusters) = cluster(&baker.numbers, half_layer(r.cell.atoms), r.block);
+        let baked = Baked { origin: [b.origin_x, b.origin_y], extent: [b.extent_width, b.extent_height], splats, clusters };
         if send.send((request, baked)).is_err() {
             return;
         }

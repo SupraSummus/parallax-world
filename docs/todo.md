@@ -34,13 +34,28 @@ Numbers are for the forest at 1280×800, as measured when written.
   until the driver resets the GPU (seen on Intel UHD with Mesa);
   the window then makes its device again (`window.rs`).
   Why is open: the same views and paths, drawn headless, take milliseconds.
+- **Native's cells could be simpler and cheaper**
+  (section 1 of `docs/architecture.md`).
+  The compositor still clips each chunk to its rectangle, which cells don't need.
+  Which cells may hold voxels is asked of `LayerIndex`, per face, layer and block of columns;
+  the cells of each level are the same lattice for every face,
+  so a set of the cells holding voxels, per level, would do for all twelve.
+  Nothing skips cells behind nearer ones: every cell in view is baked,
+  and the compositor's culling hides them;
+  the depth pyramid it culls clusters with could cull cells not yet baked too.
+  Cells straddling where a face's levels meet are drawn at both.
+  The main thread finds every cell in view each render, most of them empty:
+  about 30 ms in the forest.
+  Chunks keep the faces cut between cells:
+  without them, paths show holes where the relief's hexagons and pillars leave gaps.
+  The web still draws slices.
+
 - **TS and Rust still say much the same twice.**
   The tiles around the camera (`world.ts`) are `native/src/world.rs`,
-  slice selection (`bake/src/slicing.rs`) is `slice-selection.ts`,
-  and faces and the renderer are in `native/src` too;
+  and faces are in `native/src` too, though its renderer draws cells, not slices;
   `LayerIndex.range` (`voxel-grid.ts`) is `bake/src/layer_index.rs`'s.
   The renderer is the large step.
-  Tests too: slicing's, cells' and view's are in both;
+  Tests too: cells' and view's are in both;
   relief's, pillars', the renderer's and its regressions' only in TS.
 - **Tests take most of CI's time.**
   Most of it is the worlds' contract, bound by the CPU:
@@ -141,20 +156,12 @@ Numbers are for the forest at 1280×800, as measured when written.
   as the forest covers the screen in fine pieces.
   Testing quarters of a cell first would not help (two in three are mixed),
   nor would clipping without allocating in `shape`.
-  Natively coverage runs on a thread of its own (`native/src/occlusion.rs`);
-  the web could run it in a worker, a frame behind.
+  The web could run it in a worker, a frame behind.
 - **Walking, native keeps more than a core busy**
-  (the valley, `--stroll 20 --on-ground`, outside the GPU driver):
-  new tiles take about 30 %, baking 20 %, its masks for coverage 20 %,
-  coverage 15 %, the main thread 15 %.
+  (the valley, `--stroll 20 --on-ground`, outside the GPU driver),
+  measured when it drew slices: new tiles took about a third.
   Lit, about 1.6 times that: the light itself (`Light::light` most),
   and new tiles half as much again, why is open.
-  Most chunks baked are of new slices,
-  where layers cross from one level to the next; a third are empty.
-  In the valley coverage hardly pays (`--all-chunks` costs about the same);
-  in the city it bakes a quarter fewer chunks.
-  Natively a pass stops at the farthest cell that asks;
-  the web's can't, as it also picks the clusters to draw.
 - **The native compositor's buffers stop at the device's limit.**
   `Arena::grow` caps a buffer at what the device allows
   (128 MB of splats on lavapipe), and `allocate` then hands out room past it:

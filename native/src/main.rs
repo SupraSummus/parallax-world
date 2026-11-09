@@ -4,7 +4,7 @@
 //! baker in bake/, sharing the tiles, and wgpu drawing them in an egui window
 //! (window.rs).
 //!
-//! parallax-native [--world NAME] [--threads N] [--seed S] [--view QUERY] [--light SKY,SUN,GLOW] [--detail D] [--all-chunks] [--shot out.png [--size WxH] [--seams] [--colour voxels|layers|chunks] | --bench] [--stroll S [--on-ground]]
+//! parallax-native [--world NAME] [--threads N] [--seed S] [--view QUERY] [--light SKY,SUN,GLOW] [--detail D] [--shift S] [--shot out.png [--size WxH] [--seams] [--colour voxels|layers|chunks] | --bench] [--stroll S [--on-ground]]
 //!
 //! --view takes the web page's view query (parseViewQuery in renderer.ts),
 //! overriding --seed and --world.
@@ -16,14 +16,12 @@
 //! When the window panics or loses its GPU device, it says what it showed as these arguments.
 //! --light lights the world (worldgen's light.rs), the sky, the sun and
 //! what glows this bright: 1,1,0 a clear day, 0.01,0,1 night.
-//! --detail sets viewing distance over slice thickness (renderer.rs);
-//! --all-chunks bakes every chunk in view, covered or not, as the panel's
-//! switch does.
+//! --detail sets viewing distance over a cell's thickness, --shift how many
+//! levels finer than a cell its voxels are (bake's lod.rs), as the panel does.
 //! --seams and --colour draw as the panel's switches do.
 
 mod bakery;
 mod compositor;
-mod occlusion;
 mod renderer;
 mod shot;
 mod view;
@@ -88,17 +86,17 @@ impl window::Content for App {
             // The web's (App.tsx).
             ui.add(egui::Slider::new(&mut self.fov, 5.0..=120.0).step_by(1.0).text("Field of View (°)"));
             ui.add(egui::Slider::new(&mut self.renderer.render_distance, 40.0..=40000.0).logarithmic(true).text("Render Distance"));
-            // In quarter octaves, as the web's: dragging re-slices only at each step.
+            // In quarter octaves, as the web's: dragging picks cells anew only at each step.
             let mut octaves = self.renderer.detail.log2();
             let detail = egui::Slider::new(&mut octaves, 0.0..=6.0).step_by(0.25).custom_formatter(|v, _| format!("{:.1}", 2f64.powf(v)));
-            if ui.add(detail.text("Slice Detail")).changed() {
+            if ui.add(detail.text("Detail")).changed() {
                 self.renderer.detail = 2f64.powf(octaves);
             }
             let mut walking = self.walker.is_some();
             if ui.checkbox(&mut walking, "Walk on Ground (F)").changed() {
                 self.walker = walking.then(|| Walker::at(self.camera));
             }
-            ui.checkbox(&mut self.renderer.skip_covered, "Skip Covered Chunks");
+            ui.add(egui::Slider::new(&mut self.renderer.shift, 1..=4).text("Voxels Finer than Cells (levels)"));
             ui.checkbox(&mut self.seams, "Show Face Seams");
             ui.horizontal(|ui| {
                 ui.label("Colour by");
@@ -159,14 +157,7 @@ impl window::Content for App {
             for (level, tiles) in made {
                 self.renderer.set_tiles(level, tiles);
             }
-            self.stats = format!(
-                "{} layers, {} chunks\n{} baking, {} tiles wanted, {} covered",
-                frame.layers.len(),
-                stats.chunks,
-                stats.wanted.len(),
-                stats.tiles.len(),
-                stats.covered
-            );
+            self.stats = format!("{} chunks\n{} baking, {} tiles wanted", frame.chunks.len(), stats.wanted.len(), stats.tiles.len());
             let view = compositor::View {
                 yaw: self.yaw,
                 pitch: self.pitch,
@@ -188,7 +179,7 @@ impl window::Content for App {
             let walking = self.walker.is_some_and(|w| !w.settled());
             if moving.iter().any(|m| *m != 0.0) || walking {
                 ui.ctx().request_repaint();
-            } else if arrived || !stats.wanted.is_empty() || stats.occluding || self.world.busy() {
+            } else if arrived || !stats.wanted.is_empty() || self.world.busy() {
                 ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
             }
         });
@@ -206,13 +197,10 @@ fn last_frame() -> String {
 impl App {
     fn remember(&self, size: [f32; 2]) {
         let ([x, y, z], r) = (self.camera, &self.renderer);
-        let mut frame = format!(
-            "--view '{}&camera={x},{y},{z}&look={},{}&fov={}&distance={:.0}&detail={}' --size {:.0}x{:.0}",
-            self.world_query, self.yaw, self.pitch, self.fov, r.render_distance, r.detail, size[0], size[1],
+        let frame = format!(
+            "--view '{}&camera={x},{y},{z}&look={},{}&fov={}&distance={:.0}&detail={}' --shift {} --size {:.0}x{:.0}",
+            self.world_query, self.yaw, self.pitch, self.fov, r.render_distance, r.detail, r.shift, size[0], size[1],
         );
-        if !r.skip_covered {
-            frame += " --all-chunks";
-        }
         *LAST_FRAME.lock().unwrap_or_else(|e| e.into_inner()) = format!("{frame}\n{}", self.stats);
     }
 }
@@ -251,11 +239,11 @@ fn complete(
     let (mut drawn, mut in_view) = (false, false);
     loop {
         let (frame, stats) = renderer.render(camera, view);
-        if !drawn && stats.chunks > 0 {
+        if !drawn && !frame.chunks.is_empty() {
             println!("first chunks drawn after {:.2} s", start.elapsed().as_secs_f64());
             drawn = true;
         }
-        if !in_view && stats.tiles.is_empty() && stats.wanted.is_empty() && !stats.occluding {
+        if !in_view && stats.tiles.is_empty() && stats.wanted.is_empty() {
             println!("the view complete after {:.2} s", start.elapsed().as_secs_f64());
             in_view = true;
             if !whole {
@@ -271,8 +259,6 @@ fn complete(
             }
         } else if !stats.wanted.is_empty() {
             renderer.wait();
-        } else if stats.occluding {
-            renderer.wait_for_occlusion();
         } else if world.busy() {
             world.wait();
         } else {
@@ -331,7 +317,7 @@ fn stroll(
         last = gpu.render();
         let end = Instant::now();
         times.push([ms(start, rendered), ms(rendered, updated), ms(updated, prepared), ms(prepared, end), ms(start, end)]);
-        short += usize::from(!stats.wanted.is_empty() || !stats.tiles.is_empty() || stats.occluding);
+        short += usize::from(!stats.wanted.is_empty() || !stats.tiles.is_empty());
     }
     println!("{} frames walking, {short} with chunks or tiles missing; ms at the median, 90th and 99th percentile, and most:", times.len());
     for (k, name) in ["render", "world", "upload", "GPU", "frame"].iter().enumerate() {
@@ -429,7 +415,9 @@ fn main() {
     if let Some(v) = value("--detail").map(|v| v.parse().expect("detail")).or(query.detail) {
         renderer.detail = v;
     }
-    renderer.skip_covered = !flag("--all-chunks");
+    if let Some(v) = value("--shift") {
+        renderer.shift = v.parse().expect("--shift S");
+    }
     let sky = brightness.map_or(1.0, |b| b.sky);
     let mut world = World::new(make, seed, lit.map(|(.., shared)| shared), threads);
     let camera = query.camera.unwrap_or(shown.spawn.map(|v| v as f64));
@@ -439,9 +427,9 @@ fn main() {
         let start = Instant::now();
         // A shot alone needs only the view; the timings, all the world would make around it.
         let whole = flag("--bench") || flag("--stroll");
-        let (frame, stats) = complete(&mut world, &mut renderer, camera, &first, whole);
-        let (layers, chunks, covered, seconds) = (frame.layers.len(), stats.chunks, stats.covered, start.elapsed().as_secs_f64());
-        println!("first frame complete in {seconds:.2} s on {threads} threads: {layers} layers, {chunks} chunks, {covered} covered");
+        let (frame, _) = complete(&mut world, &mut renderer, camera, &first, whole);
+        let (chunks, seconds) = (frame.chunks.len(), start.elapsed().as_secs_f64());
+        println!("first frame complete in {seconds:.2} s on {threads} threads: {chunks} chunks");
         if flag("--bench") {
             // What a frame costs the main thread once everything is baked, still and turning.
             for (name, turn) in [("still", 0.0), ("turning", 1.0)] {
@@ -451,8 +439,6 @@ fn main() {
                 }
                 println!("a frame {name}: {:.1} ms", start.elapsed().as_secs_f64() * 1000.0 / 20.0);
             }
-            renderer.wait_for_occlusion();
-            println!("an occlusion pass, on its own thread: {:.1} ms", renderer.occlusion_seconds() * 1000.0);
         }
         let view = compositor::View {
             yaw,
@@ -469,7 +455,7 @@ fn main() {
             sky,
         };
         if flag("--bench") {
-            let splats: usize = frame.layers.iter().flat_map(|l| &l.placements).map(|p| p.chunk.baked.splats.len()).sum();
+            let splats: usize = frame.chunks.iter().map(|p| p.chunk.baked.splats.len()).sum();
             let (ms, [first, next]) = shot::time(&frame, &view, 30);
             println!("the GPU draws the frame in {ms:.1} ms: of its {splats} splats, {first} that showed before and {next} more");
         }
@@ -522,12 +508,11 @@ mod tests {
      * World `name` of seed 1 from its spawn, looking `yaw` and `pitch`,
      * once the view is complete: the frame, and how it is seen.
      */
-    fn complete_view(name: &str, [yaw, pitch]: [f64; 2], detail: f64, skip_covered: bool) -> (renderer::Frame, compositor::View) {
+    fn complete_view(name: &str, [yaw, pitch]: [f64; 2], detail: f64) -> (renderer::Frame, compositor::View) {
         let make = worlds::by_name(name).expect("world").make;
         let shown = make(1);
         let mut renderer = renderer(&shown, None, 4, 1000.0);
         renderer.detail = detail;
-        renderer.skip_covered = skip_covered;
         let mut world = World::new(make, 1, None, 4);
         let size = [320.0, 200.0];
         let focal = focal_length(FOV, size[0], size[1]);
@@ -548,32 +533,15 @@ mod tests {
         (frame, view)
     }
 
-    /** World, look and detail as a power of two. The thickest slices too: in relief, their splats move most with the camera. */
+    /** World, look and detail as a power of two. The thickest cells too: in relief, their splats move most with the camera. */
     const VIEWS: [(&str, [f64; 2], f64); 3] =
         [("forest", [0.0, 0.0], 3.25), ("forest", [20.0, -25.0], 2.25), ("moor", [-30.0, 10.0], 3.25)];
 
     #[test]
     #[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
-    fn skipping_covered_cells_leaves_the_picture_unchanged() {
-        let chunks = |frame: &renderer::Frame| frame.layers.iter().map(|l| l.placements.len()).sum::<usize>();
-        // Cells are baked until the occlusion thread finds them covered, so how many are skipped varies from run to run.
-        let mut skipped = 0;
-        for (name, look, octaves) in VIEWS {
-            let detail = 2f64.powf(octaves);
-            let (frame, view) = complete_view(name, look, detail, false);
-            let (all, baked) = (shot::picture(&frame, &view).2, chunks(&frame));
-            let (frame, view) = complete_view(name, look, detail, true);
-            skipped += baked.saturating_sub(chunks(&frame));
-            assert!(all == shot::picture(&frame, &view).2, "{name} {look:?} detail {detail}");
-        }
-        assert!(skipped > 0, "none skipped");
-    }
-
-    #[test]
-    #[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
     fn culling_on_the_gpu_leaves_the_picture_unchanged() {
         for (name, look, octaves) in VIEWS {
-            let (frame, view) = complete_view(name, look, 2f64.powf(octaves), true);
+            let (frame, view) = complete_view(name, look, 2f64.powf(octaves));
             let [culled, all] = [true, false].map(|culls| {
                 let mut gpu = shot::Offscreen::with(None, culls);
                 gpu.prepare(&frame, &view);
@@ -587,13 +555,14 @@ mod tests {
     #[test]
     #[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
     fn what_the_buffers_cannot_hold_is_left_out_farthest_first() {
-        let (mut frame, view) = complete_view("moor", [-30.0, 10.0], 2f64.powf(3.25), true);
+        let (mut frame, view) = complete_view("moor", [-30.0, 10.0], 2f64.powf(3.25));
         let all = shot::picture(&frame, &view).2;
         // About half of the frame's splats.
-        let mut gpu = shot::Offscreen::with(Some(32 << 20), true);
+        let splats: usize = frame.chunks.iter().map(|p| p.chunk.baked.splats.len()).sum();
+        let mut gpu = shot::Offscreen::with(Some((splats * size_of::<compositor::GpuSplat>() / 2) as u64), true);
         gpu.prepare(&frame, &view);
         let some = gpu.picture().2;
-        frame.layers.clear();
+        frame.chunks.clear();
         let sky = shot::picture(&frame, &view).2;
         let pixels = |p: &[u8]| p.as_chunks::<4>().0.to_vec();
         let (all, some, sky) = (pixels(&all), pixels(&some), pixels(&sky));

@@ -15,6 +15,7 @@ mod coverage;
 mod fill;
 mod layer_index;
 pub mod light;
+pub mod lod;
 pub mod slicing;
 mod splats;
 mod surface;
@@ -28,9 +29,10 @@ use std::sync::Arc;
 use cells::Cells;
 use fill::{fill_mask, solid_blocks};
 use light::Lighting;
-use slicing::{LAYER, chunk_cell, spacing, thickness};
+use lod::CellChunk;
+use slicing::{LAYER, chunk_cell, slice_centre, spacing, thickness};
 use splats::{Splats, chunk_splats, lit_voxel_colour, voxel_colour};
-use surface::{cell_reads, cell_surface};
+use surface::{cell_surface, surface};
 use world::{Geometry, Reader};
 
 // For native frontends, which link the baker instead of loading its WebAssembly.
@@ -66,14 +68,13 @@ fn in_grid(slice: &Slice) -> (usize, Slice) {
 }
 
 /**
- * The grid chunk (i, j) of a slice reads, and the sites of it it reads, a
- * box of (a, b, c) in the face's lattice coordinates, in that grid's units,
+ * The grid a cell chunk reads, and the sites of it it reads, a box of
+ * (a, b, c) in the face's lattice coordinates, in that grid's units,
  * inclusive: a chunk is the same whatever else the grid holds.
  */
-pub fn chunk_reads(slice: &Slice, i: i32, j: i32) -> (usize, [i32; 3], [i32; 3]) {
-    let (level, slice) = in_grid(slice);
-    let (min, max) = cell_reads(&slice, i, j);
-    (level, min, max)
+pub fn chunk_reads(chunk: &CellChunk) -> (usize, [i32; 3], [i32; 3]) {
+    let (min, max) = chunk.bounds();
+    (chunk.atoms as usize, [min[0] - 2, min[1] - 1, min[2] - 2], [max[0] + 2, max[1] + 1, max[2] + 2])
 }
 
 /** A baked chunk: see ChunkSplats. Its numbers and blocks stay in the baker until the next bake. */
@@ -110,6 +111,8 @@ pub struct Baker {
     pub light: Option<Lighting>,
     /** Which cell of 2·FCC owns each site, for cutoffs. */
     pairs: Cells,
+    /** Which cell of N·FCC owns each site, by N, for cell chunks (bake_cell). */
+    owners: Vec<(i32, Cells)>,
     splats: Splats,
     mask: Vec<u8>,
     pub blocks: Vec<u8>,
@@ -133,6 +136,7 @@ impl Baker {
             world_kinds: tables::world_kinds(&lattices),
             light: None,
             pairs: Cells::new(2),
+            owners: Vec::new(),
             splats: Splats::new(),
             mask: Vec::new(),
             blocks: Vec::new(),
@@ -180,17 +184,9 @@ impl Baker {
     pub fn bake(&mut self, face: usize, slice: &Slice, i: i32, j: i32) -> Baked {
         let (level, slice) = in_grid(slice);
         self.reach(level);
-        let (tiles, lattice) = (&self.grids[level], self.lattices[face]);
-        let reader = Reader::new(tiles, lattice);
+        let reader = Reader::new(&self.grids[level], self.lattices[face]);
         let surface = cell_surface(&reader, &self.geometry, &self.pairs, &slice, i, j);
-        let palettes = self.palettes.len() / VIEW_FACES;
-        let palette = &self.palettes[face * palettes..(face + 1) * palettes];
-        let (light, kinds) = (&mut self.light, &self.world_kinds[face]);
-        let mut colour = |voxel: &surface::Voxel| match light {
-            Some(light) => lit_voxel_colour(voxel, &light(level, lattice.world(voxel.site)), kinds, lattice.f.map(|v| -v)),
-            None => voxel_colour(voxel, palette),
-        };
-        chunk_splats(&mut self.splats, &self.geometry, &mut colour, &surface, &slice);
+        self.paint(face, level, &surface, (2.0 * slice_centre(&slice) / LAYER).round() as i32);
 
         // Where they may be drawn, clipped to the cell, in the grid's units.
         let cell = chunk_cell(slice.level, i, j);
@@ -214,12 +210,59 @@ impl Baker {
         self.mask.resize(width * height, 0);
         fill_mask(splats, &mut self.mask, width, height, min_x, max_y, scale);
         solid_blocks(&mut self.blocks, &self.mask, width, height);
+        let extent = if empty { [0.0; 2] } else { [max_x - min_x, max_y - min_y] };
+        self.numbers(level, min_x, max_y, extent, [width, height], scale)
+    }
 
-        // In world units, relative to the top-left corner.
+    /**
+     * Bakes a cell chunk (lod.rs) of view face `face`: its cell's voxels that
+     * can show, as splats over the plane through its site, unclipped: no
+     * other chunk of its level draws its voxels, and the composition paints
+     * finer chunks first. No mask: what is covered is left to the GPU.
+     */
+    pub fn bake_cell(&mut self, face: usize, chunk: &CellChunk) -> Baked {
+        let level = chunk.atoms as usize;
+        self.reach(level);
+        let m = chunk.spacing();
+        if !self.owners.iter().any(|(k, _)| *k == m) {
+            self.owners.push((m, Cells::new(m)));
+        }
+        let own = &self.owners.iter().find(|(k, _)| *k == m).expect("made").1;
+        let holds = |a: i32, b: i32, c: i32| own.owner(a, b, c) == chunk.site;
+        let reader = Reader::new(&self.grids[level], self.lattices[face]);
+        let (from, to) = chunk.bounds();
+        let surface = surface(&reader, &self.geometry, from, to, holds);
+        // Over the plane through its site.
+        self.paint(face, level, &surface, 2 * chunk.site[2]);
+        let s = &self.splats;
+        let extent = if s.splats.is_empty() { [0.0; 2] } else { [s.max_x - s.min_x, s.max_y - s.min_y] };
+        self.blocks.clear();
+        self.numbers(level, s.min_x, s.max_y, extent, [0, 0], 1.0)
+    }
+
+    /** The splats of a surface read from grid `level` along view face `face`, coloured (chunk_splats). */
+    fn paint(&mut self, face: usize, level: usize, surface: &[surface::Voxel], centre: i32) {
+        let lattice = self.lattices[face];
+        let palettes = self.palettes.len() / VIEW_FACES;
+        let palette = &self.palettes[face * palettes..(face + 1) * palettes];
+        let (light, kinds) = (&mut self.light, &self.world_kinds[face]);
+        let mut colour = |voxel: &surface::Voxel| match light {
+            Some(light) => lit_voxel_colour(voxel, &light(level, lattice.world(voxel.site)), kinds, lattice.f.map(|v| -v)),
+            None => voxel_colour(voxel, palette),
+        };
+        chunk_splats(&mut self.splats, &self.geometry, &mut colour, surface, centre);
+    }
+
+    /**
+     * The splats as numbers, in world units relative to the top-left corner
+     * (min_x, max_y) of what they draw, `extent` wide and high in the grid's
+     * units, and the mask's size and pixels per unit.
+     */
+    fn numbers(&mut self, level: usize, min_x: f64, max_y: f64, extent: [f64; 2], [width, height]: [usize; 2], scale: f64) -> Baked {
         self.spacing = spacing(level as i32);
         let n = self.spacing as f64;
         self.numbers.clear();
-        for s in &splats.splats {
+        for s in &self.splats.splats {
             self.numbers.extend([
                 ((s.x - min_x) * n) as f32,
                 ((s.y - max_y) * n) as f32,
@@ -235,10 +278,10 @@ impl Baker {
             height,
             origin_x: min_x * n,
             origin_y: max_y * n,
-            extent_width: if empty { 0.0 } else { (max_x - min_x) * n },
-            extent_height: if empty { 0.0 } else { (max_y - min_y) * n },
+            extent_width: extent[0] * n,
+            extent_height: extent[1] * n,
             scale: scale / n,
-            count: splats.splats.len(),
+            count: self.splats.splats.len(),
         }
     }
 }

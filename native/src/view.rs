@@ -1,5 +1,5 @@
 //! The camera's view and the 12 faces around it (view.ts): each face has its
-//! own stack of slices and draws the rays closer to its axis than to any
+//! own chunks and draws the rays closer to its axis than to any
 //! other's. See docs/architecture.md, section 4.
 
 use bake::Lattice;

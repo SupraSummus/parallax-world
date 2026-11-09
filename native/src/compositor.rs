@@ -180,8 +180,19 @@ struct Arena {
 impl Arena {
     fn new(device: &wgpu::Device, label: &'static str, stride: u64, usage: wgpu::BufferUsages, capacity: u32) -> Arena {
         let usage = usage | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC;
+        let capacity = capacity.min(Arena::most(device, stride, usage));
         let buffer = buffer(device, label, capacity as u64 * stride, usage);
         Arena { label, stride, usage, buffer, capacity, top: 0, free: Vec::new(), grew: false }
+    }
+
+    /** The most items of `stride` bytes a buffer of `usage` may hold on the device. */
+    fn most(device: &wgpu::Device, stride: u64, usage: wgpu::BufferUsages) -> u32 {
+        let limits = device.limits();
+        let mut most = limits.max_buffer_size;
+        if usage.contains(wgpu::BufferUsages::STORAGE) {
+            most = most.min(limits.max_storage_buffer_binding_size);
+        }
+        (most / stride).min(u32::MAX as u64) as u32
     }
 
     /** Room for frames of `items` as the camera moves: three times that when it has less than twice, so that it seldom grows. */
@@ -193,13 +204,7 @@ impl Arena {
 
     /** Grown to `capacity` items, as far as the device allows, what it holds copied over. */
     fn grow(&mut self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, capacity: u32) {
-        let limits = device.limits();
-        let mut most = limits.max_buffer_size;
-        if self.usage.contains(wgpu::BufferUsages::STORAGE) {
-            most = most.min(limits.max_storage_buffer_binding_size);
-        }
-        let most = most / self.stride;
-        let capacity = capacity.min(most.min(u32::MAX as u64) as u32);
+        let capacity = capacity.min(Arena::most(device, self.stride, self.usage));
         if capacity > self.capacity {
             let grown = buffer(device, self.label, capacity as u64 * self.stride, self.usage);
             encoder.copy_buffer_to_buffer(&self.buffer, 0, &grown, 0, self.top as u64 * self.stride);
@@ -583,10 +588,10 @@ impl Compositor {
         if self.targets.as_ref().is_none_or(|t| t.size != size) {
             self.targets = Some(Targets::new(device, &self.pipelines, self.format, size));
         }
-        let scale = depth_scale(frame.layers.len());
+        let scale = depth_scale(frame.chunks.len());
         let mut table = Vec::new();
         // What the frame no longer draws makes room first.
-        let wanted: HashSet<u32> = frame.layers.iter().flat_map(|l| &l.placements).map(|p| p.chunk.id).collect();
+        let wanted: HashSet<u32> = frame.chunks.iter().map(|p| p.chunk.id).collect();
         let gone: Vec<u32> = self.resident.keys().filter(|id| !wanted.contains(id)).copied().collect();
         for id in gone {
             let r = self.resident.remove(&id).expect("resident");
@@ -595,45 +600,43 @@ impl Compositor {
             self.clusters.release(r.clusters);
         }
         // Growing copies all a buffer holds, so grow seldom.
-        let chunks = || frame.layers.iter().flat_map(|l| &l.placements).map(|p| &p.chunk.baked);
+        let chunks = || frame.chunks.iter().map(|p| &p.chunk.baked);
         self.splats.room(device, encoder, chunks().map(|b| b.splats.len() as u32).sum());
         self.clusters.room(device, encoder, chunks().map(|b| b.clusters.len() as u32).sum());
         let mut candidates: Vec<[u32; 2]> = Vec::new();
         let mut full = false;
-        for (k, layer) in frame.layers.iter().enumerate() {
-            // A hue per layer (Colours), neighbours in a stack far apart.
-            let s = &layer.slice;
-            let hue = hash(&[layer.face as u64, s.level as u64, s.cutoff.to_bits()]) + 0.618 * s.layer as f64;
-            let depth = ((k as f64 - frame.layers.len() as f64) * scale as f64).exp2() as f32;
-            for p in &layer.placements {
-                let chunk = &p.chunk;
-                // Layers go near to far: once the buffers are full, nothing farther is uploaded.
-                if !self.resident.contains_key(&chunk.id) && (full || !self.upload(device, queue, encoder, chunk)) {
-                    full = true;
-                    continue;
-                }
-                let resident = &self.resident[&chunk.id];
-                let slot = resident.slot as usize;
-                if table.len() <= slot {
-                    table.resize(slot + 1, GpuChunk::default());
-                }
-                let [width, height] = chunk.baked.extent;
-                table[slot] = GpuChunk {
-                    origin: [p.x as f32, p.y as f32],
-                    extent: [width as f32, height as f32],
-                    distance: layer.distance as f32,
-                    face: layer.face as u32,
-                    depth,
-                    tint: match view.colours {
-                        Colours::Voxels => 0,
-                        Colours::Layers => tint(hue),
-                        Colours::Chunks => tint(hash(&[hue.to_bits(), chunk.i as u64, chunk.j as u64])),
-                    },
-                    half_layer: half_layer(s.atoms) as f32,
-                    _pad: 0.0,
-                };
-                candidates.push([resident.clusters.start, resident.clusters.len() as u32]);
+        for (k, p) in frame.chunks.iter().enumerate() {
+            // A hue per layer of a level's cells (Colours), neighbours in a stack far apart.
+            let cell = &p.cell;
+            let hue = hash(&[p.face as u64, cell.level as u64]) + 0.618 * (cell.site[2] / cell.spacing()) as f64;
+            let depth = ((k as f64 - frame.chunks.len() as f64) * scale as f64).exp2() as f32;
+            let chunk = &p.chunk;
+            // Chunks go in painting order: once the buffers are full, nothing behind is uploaded.
+            if !self.resident.contains_key(&chunk.id) && (full || !self.upload(device, queue, encoder, chunk)) {
+                full = true;
+                continue;
             }
+            let resident = &self.resident[&chunk.id];
+            let slot = resident.slot as usize;
+            if table.len() <= slot {
+                table.resize(slot + 1, GpuChunk::default());
+            }
+            let [width, height] = chunk.baked.extent;
+            table[slot] = GpuChunk {
+                origin: [p.x as f32, p.y as f32],
+                extent: [width as f32, height as f32],
+                distance: p.distance as f32,
+                face: p.face as u32,
+                depth,
+                tint: match view.colours {
+                    Colours::Voxels => 0,
+                    Colours::Layers => tint(hue),
+                    Colours::Chunks => tint(hash(&[hue.to_bits(), cell.site[0] as u64, cell.site[1] as u64])),
+                },
+                half_layer: half_layer(cell.atoms) as f32,
+                _pad: 0.0,
+            };
+            candidates.push([resident.clusters.start, resident.clusters.len() as u32]);
         }
         at_least(device, &mut self.table, self.slots as u64 * size_of::<GpuChunk>() as u64);
         if !table.is_empty() {
@@ -753,9 +756,9 @@ impl Compositor {
     }
 }
 
-/** depth_scale (depth_of in compositor.wgsl) for `layers` layers: depths from 2^-120, far above f32's least normal, at most half an octave a layer. */
-fn depth_scale(layers: usize) -> f32 {
-    (120.0 / layers.max(1) as f32).min(0.5)
+/** depth_scale (depth_of in compositor.wgsl) for `chunks` chunks: depths from 2^-120, far above f32's least normal, at most half an octave a chunk. */
+fn depth_scale(chunks: usize) -> f32 {
+    (120.0 / chunks.max(1) as f32).min(0.5)
 }
 
 /** How a frame is seen: orientation, focal length, fog, the faces' axes, and the view's size in points and in pixels (the picture's). */
