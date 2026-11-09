@@ -8,12 +8,12 @@ const [WIDTH, HEIGHT] = [800, 600]
 
 describe('skipping covered chunks and clusters', () => {
   // The thickest slices too: in relief, their splats move most with the camera.
-  it.each([[0, 0, 6], [20, -25, 6], [-30, 10, 6], [20, -25, 12], [-30, 10, 12]])('leaves the picture unchanged (yaw %s°, pitch %s°, max leak %s°)', (yaw, pitch, maxLeak) => {
+  it.each([[0, 0, 2 ** 3.25], [20, -25, 2 ** 3.25], [-30, 10, 2 ** 3.25], [20, -25, 2 ** 2.25], [-30, 10, 2 ** 2.25]])('leaves the picture unchanged (yaw %s°, pitch %s°, detail %s)', (yaw, pitch, detail) => {
     const frames = [false, true].map(skip => {
       const renderer = new ParallaxRenderer(world)
       renderer.resize(WIDTH, HEIGHT)
       renderer.setOrientation({ yaw, pitch })
-      renderer.setMaxLeak(maxLeak)
+      renderer.setDetail(detail)
       renderer.setSkipCovered(skip)
       renderer.render()
       const frame = renderer.render()

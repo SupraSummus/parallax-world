@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback, type PointerEvent, type ReactNode } from 'react'
-import { ParallaxRenderer, DEFAULT_FOV, MAX_FOV, MIN_FOV, DEFAULT_RENDER_DISTANCE, MAX_RENDER_DISTANCE, MIN_RENDER_DISTANCE, DEFAULT_MAX_LEAK, MAX_MAX_LEAK, MIN_MAX_LEAK, parseViewQuery, type Camera, type SessionStats } from '@/lib/renderer'
+import { ParallaxRenderer, DEFAULT_FOV, MAX_FOV, MIN_FOV, DEFAULT_RENDER_DISTANCE, MAX_RENDER_DISTANCE, MIN_RENDER_DISTANCE, DEFAULT_DETAIL, MAX_DETAIL, MIN_DETAIL, parseViewQuery, type Camera, type SessionStats } from '@/lib/renderer'
 import { World, worldTypes, type WorldType } from '@/lib/world'
 import type { Orientation } from '@/lib/view'
 import { Compositor } from '@/lib/compositor'
@@ -65,7 +65,7 @@ function App() {
   const [worldType, setWorldType] = useState<WorldType>('valley')
   const [fov, setFov] = useState(DEFAULT_FOV)
   const [renderDistance, setRenderDistance] = useState(DEFAULT_RENDER_DISTANCE)
-  const [maxLeak, setMaxLeak] = useState(DEFAULT_MAX_LEAK)
+  const [detail, setDetail] = useState(DEFAULT_DETAIL)
   const [skipCovered, setSkipCovered] = useState(true)
   const [showSeams, setShowSeams] = useState(false)
   // Walking on the ground: the body the camera is the eye of; null flying.
@@ -129,11 +129,11 @@ function App() {
     if (query.look) renderer.setOrientation(query.look)
     if (query.fov !== undefined) renderer.setFov(query.fov)
     if (query.distance !== undefined) renderer.setRenderDistance(query.distance)
-    if (query.leak !== undefined) renderer.setMaxLeak(query.leak)
+    if (query.detail !== undefined) renderer.setDetail(query.detail)
     setWorldType(renderer.getWorld().worldType)
     setFov(renderer.getFov())
     setRenderDistance(renderer.getRenderDistance())
-    setMaxLeak(renderer.getMaxLeak())
+    setDetail(renderer.getDetail())
     rendererRef.current = renderer
 
     const handleResize = () => {
@@ -299,9 +299,9 @@ function App() {
     requestRender()
   }
 
-  const handleMaxLeakChange = ([value]: number[]) => {
-    setMaxLeak(value)
-    rendererRef.current?.setMaxLeak(value)
+  const handleDetailChange = ([value]: number[]) => {
+    setDetail(2 ** value)
+    rendererRef.current?.setDetail(2 ** value)
     requestRender()
   }
 
@@ -374,12 +374,12 @@ function App() {
               onChange={handleRenderDistanceChange}
             />
             <SliderRow
-              label={`Max Occlusion Leak: ${maxLeak.toFixed(1)}°`}
-              value={maxLeak}
-              min={MIN_MAX_LEAK}
-              max={MAX_MAX_LEAK}
-              step={0.1}
-              onChange={handleMaxLeakChange}
+              label={`Slice Detail: ${detail.toFixed(1)}`}
+              value={Math.log2(detail)}
+              min={Math.log2(MIN_DETAIL)}
+              max={Math.log2(MAX_DETAIL)}
+              step={0.25}
+              onChange={handleDetailChange}
             />
             <SwitchRow label="Walk on Ground (F)" checked={walking} onChange={handleWalkingChange} />
             <SwitchRow label="Skip Covered Chunks" checked={skipCovered} onChange={handleSkipCoveredChange} />
@@ -449,7 +449,6 @@ function App() {
                     <h3 className="text-xs font-semibold">Last Update</h3>
                     <StatRow label="Render Time">{lastUpdate.renderTime.toFixed(2)}ms</StatRow>
                     <StatRow label="Active Layers">{lastUpdate.layerCount}</StatRow>
-                    <StatRow label="Slice Detail">{lastUpdate.detail.toFixed(1)}</StatRow>
                     <StatRow label="Chunks in View">{lastUpdate.chunkCount}</StatRow>
                     <StatRow label="Reused / Regenerated">
                       <span className="text-primary">{lastUpdate.chunksReused}</span>

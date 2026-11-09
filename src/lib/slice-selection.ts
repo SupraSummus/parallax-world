@@ -14,14 +14,13 @@
  * than its 2^k layers; its centre plane, where its chunks are baked and
  * drawn, is the middle of that.
  *
- * Constraints (see docs/architecture.md for the derivation and worked examples):
+ * Constraints (see docs/architecture.md for worked examples):
  *
- * 1. Occlusion (physical). A slice is drawn flat, so a thick slice can show
- *    geometry that true perspective hides. A slice at viewing distance d at
- *    most d / detail thick, with detail = leakFreeDetail(...), never shows
- *    more than the `max leak` angle of it. Far voxels are small on
- *    screen, so slices grow with distance and covering distance n takes
- *    O(detail · log n) slices.
+ * 1. Detail. A slice at viewing distance d is at most d / detail thick.
+ *    Far voxels are small on screen, so slices grow with distance and
+ *    covering distance n takes O(detail · log n) slices. Drawn in relief,
+ *    slices show what perspective shows (docs/architecture.md, section 2),
+ *    so detail sets only how coarse far slices are and how many there are.
  *
  * 2. Caching. A slice is named by its level, atoms and slab (and its
  *    cutoff, see SliceId) wherever the camera is, so it always has the same
@@ -62,8 +61,8 @@ export interface SliceId {
 /** What a slice's shape depends on: its level and its atoms'. */
 export type Slab = Pick<SliceId, 'level' | 'atoms'>
 
-/** Slabs of up to 4096 layers: from about 4 km on in the forest at 1280×800, slices grow no thicker. @internal */
-export const MAX_LEVEL = 12
+/** Slabs of up to 4096 layers: from about 4 km on in the forest at 1280×800, slices grow no thicker. */
+const MAX_LEVEL = 12
 
 /**
  * The largest atom shift: slabs of at most 2^ATOM_SHIFT layers of cells,
@@ -201,9 +200,8 @@ export function chunkCells(level: number, left: number, right: number, bottom: n
 /**
  * How far a face's rays are from its axis, as a tangent, at most: they are
  * |x| + √2 · |y| ≤ z (inFace in view.ts). Seen along them, a point d ahead
- * of its slice's centre plane is up to MAX_SLANT · d off its site there:
- * where drawn flat it would be off (docs/architecture.md, section 2),
- * where drawn in relief its splat moves (MAX_SLANT in bake/src/slicing.rs).
+ * of its slice's centre plane is up to MAX_SLANT · d off its site there,
+ * so its splat, drawn in relief, moves that far (MAX_SLANT in bake/src/slicing.rs).
  */
 export const MAX_SLANT = 1
 
@@ -225,32 +223,6 @@ export function cellMargin(slab: Slab): { columns: number; rows: number } {
   const n = atomSpacing(slab)
   const off = MAX_SLANT * (thickness(slab) / n / 2) * LAYER
   return { columns: n * Math.ceil((off + 1.5) / LAYER), rows: n * Math.ceil(off * Math.SQRT1_2 + 1.5) }
-}
-
-/**
- * Detail (viewing distance / maximum slice thickness) that keeps occlusion
- * leaks at most `maxLeak` radians (maxLeak · focal pixels on screen).
- *
- * A slice t layers thick whose near side is a layers from the camera has
- * its centre plane at a + t / 2. Its points are drawn up to t / 2 layer
- * spacings before or behind where they are, along the axis, which the
- * camera sees at most MAX_SLANT off; a leak is at most MAX_SLANT · t
- * spacings, MAX_SLANT · t / (a + t / 2) radians (docs/architecture.md,
- * section 2). With a ≥ t · detail that is at most
- * MAX_SLANT / (detail + 1/2) (leakAngle): ε for
- * detail = MAX_SLANT / ε − 1/2, at least 1.
- *
- * Rounded up to a quarter octave (denser slices are always safe), so small
- * changes of the tolerance keep the slicing and the cache.
- */
-export function leakFreeDetail(maxLeak: number): number {
-  const detail = Math.max(1, MAX_SLANT / maxLeak - 1 / 2)
-  return 2 ** (Math.ceil(4 * Math.log2(detail)) / 4)
-}
-
-/** The largest occlusion leak slices of `detail` would show drawn flat, in radians (see leakFreeDetail). @internal */
-export function leakAngle(detail: number): number {
-  return MAX_SLANT / (detail + 1 / 2)
 }
 
 /**

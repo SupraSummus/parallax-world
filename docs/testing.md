@@ -18,7 +18,7 @@ pnpm exec vitest run bake       # files matching "bake"
 |------|--------|
 | `src/lib/cells.test.ts`, `bake/src/cells.rs` | Cells of N·FCC and the baker's table of them |
 | `src/lib/slice-selection.test.ts` | Slices, bricks and eyes; every site in exactly one slice |
-| `src/lib/leak-bound.test.ts` | The occlusion-leak bound, step by step, then end to end against ray-cast perspective |
+| `src/lib/relief.test.ts` | Slices drawn in relief against ray-cast perspective: what they leak by detail |
 | `src/lib/chunk-baker.test.ts`, `bake/src/splats.rs` | Baked chunks' splats against rays cast along the axis and, in relief, slanted |
 | `bake/src/fill.rs`, `bake/src/coverage.rs` | Splats filled into a mask; solid blocks and their sums |
 | `src/lib/occlusion.test.ts` | Skipping covered chunks and clusters leaves the picture unchanged |
@@ -60,7 +60,7 @@ a no-op 2D canvas context
   `renderer-regressions.test.ts` does.
 - Prefer one invariant test over a grid of inputs to many near-identical
   example tests. For a claim about all inputs, check it on seeded random
-  samples (`forAll` in `leak-bound.test.ts`) so failures reproduce.
+  samples so failures reproduce.
 - The worlds' checks list their known exceptions
   (`KNOWN_BREAKS`, `OVER_BUDGET`, `KNOWN`) and fail both ways:
   on a new failure, and on a listed one that now passes, to take it off.

@@ -43,13 +43,11 @@ in the colour of its voxel's face towards it:
 an impressionist picture of the scene, not its exact faces.
 A voxel may have a different material on each of its 12 faces,
 so a coarse voxel at a house's eaves is roof from above and wall from the side.
-How thick slices are follows "Max Occlusion Leak":
-how far geometry perspective hides (e.g. the ground under the moor's
-pools) would show were slices drawn flat.
+How thick slices are follows "Slice Detail":
+a slice is at most 1/detail of its distance thick.
 Thinner slices draw coarser voxels sooner,
 so that the world generated around the camera holds all they show.
-Drawn in relief, slices that thin hardly leak at all;
-much thicker ones would where a column along a slice's direction
+Thicker ones are faster, but leak where a column along a slice's direction
 has a gap (a valley between two hills):
 only what is before it is drawn, and farther slices show through.
 The field of view only zooms the picture, without re-slicing.

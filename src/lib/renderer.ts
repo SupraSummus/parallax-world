@@ -1,4 +1,4 @@
-import { selectSlices, leakFreeDetail, sliceCentre, chunkCell, chunkCells, cellMargin, matchTilings, sliceKey as sliceName, siteLayers, GRID_LEVELS, atomSpacing, type SliceId } from './slice-selection'
+import { selectSlices, sliceCentre, chunkCell, chunkCells, cellMargin, matchTilings, sliceKey as sliceName, siteLayers, GRID_LEVELS, atomSpacing, type SliceId } from './slice-selection'
 import { ChunkBaker, type ChunkSplats, type ChunkRequest } from './chunk-baker'
 import { generatePart, World, worldTypes, type GridPart, type Vec3, type WorldType } from './world'
 import { LayerIndex, type LayerIndexData, type Material, type VoxelData } from './voxel-grid'
@@ -45,8 +45,6 @@ export interface Frame extends View {
 
 interface UpdateStats {
   renderTime: number
-  /** Distance / max slice thickness, from the leak tolerance (see leakFreeDetail). */
-  detail: number
   layerCount: number
   /** Non-empty chunks in view. */
   chunkCount: number
@@ -65,8 +63,7 @@ interface UpdateStats {
 
 /**
  * A view in the page's query:
- * ?seed=&world=&camera=x,y,z&look=yaw,pitch&fov=&distance=&leak=
- * (the max occlusion leak, in degrees).
+ * ?seed=&world=&camera=x,y,z&look=yaw,pitch&fov=&distance=&detail=
  */
 export interface ViewQuery {
   seed?: number
@@ -75,7 +72,7 @@ export interface ViewQuery {
   look?: Orientation
   fov?: number
   distance?: number
-  leak?: number
+  detail?: number
 }
 
 /** The view in `search`; what it leaves out or gets wrong is undefined. */
@@ -93,7 +90,7 @@ export function parseViewQuery(search: string): ViewQuery {
     look: look && { yaw: look[0], pitch: look[1] },
     fov: numbers('fov', 1)?.[0],
     distance: numbers('distance', 1)?.[0],
-    leak: numbers('leak', 1)?.[0],
+    detail: numbers('detail', 1)?.[0],
   }
 }
 
@@ -109,12 +106,11 @@ export const DEFAULT_FOV = 90
 export const MIN_FOV = 5
 export const MAX_FOV = 120
 
-// How far geometry that perspective would hide may show through the gaps
-// between slices, in degrees: an angle, as slicing knows no field of view.
-// Larger means thicker slices, fewer layers.
-export const DEFAULT_MAX_LEAK = 6
-export const MIN_MAX_LEAK = 1
-export const MAX_MAX_LEAK = 12
+// Viewing distance over slice thickness (selectSlices), stepped by the panel
+// in quarter octaves: larger means thinner slices, and more of them.
+export const DEFAULT_DETAIL = 2 ** 3.25
+export const MIN_DETAIL = 1
+export const MAX_DETAIL = 64
 
 // Visible depth range, relative to the camera: from NEAR_DEPTH to the render
 // distance, in world units (a voxel's neighbours are √2 away, see fcc.ts).
@@ -258,7 +254,7 @@ export class ParallaxRenderer {
   private camera: Camera
   private orientation: Orientation = { yaw: 0, pitch: 0 }
   private fov = DEFAULT_FOV
-  private maxLeak = DEFAULT_MAX_LEAK
+  private detail = DEFAULT_DETAIL
   private renderDistance = DEFAULT_RENDER_DISTANCE
   private skipCovered = true
   private width = 0
@@ -396,7 +392,6 @@ export class ParallaxRenderer {
     s.totalChunksRegenerated += chunksRegenerated
     s.lastUpdate = {
       renderTime,
-      detail,
       layerCount: frame.layers.length,
       chunkCount,
       chunksReused,
@@ -657,17 +652,20 @@ export class ParallaxRenderer {
     this.renderDistance = Math.min(MAX_RENDER_DISTANCE, Math.max(MIN_RENDER_DISTANCE, distance))
   }
 
-  getMaxLeak(): number {
-    return this.maxLeak
+  /**
+   * Slice detail. It depends on nothing else, so turning, zooming and
+   * resizing keep the slices.
+   */
+  getDetail(): number {
+    return this.detail
   }
 
   /**
-   * Sets how far hidden geometry may show between slices, in degrees
-   * (clamped to [MIN_MAX_LEAK, MAX_MAX_LEAK]). Slices are keyed by level and
-   * layer, so the ones still needed stay cached.
+   * Sets the slice detail (clamped to [MIN_DETAIL, MAX_DETAIL]). Slices
+   * are keyed by level and layer, so the ones still needed stay cached.
    */
-  setMaxLeak(degrees: number) {
-    this.maxLeak = Math.min(MAX_MAX_LEAK, Math.max(MIN_MAX_LEAK, degrees))
+  setDetail(detail: number) {
+    this.detail = Math.min(MAX_DETAIL, Math.max(MIN_DETAIL, detail))
   }
 
   /** Whether chunks covered by nearer layers are skipped: not drawn, and baked last (see Coverage). */
@@ -675,13 +673,6 @@ export class ParallaxRenderer {
     this.skipCovered = skip
   }
 
-  /**
-   * Slice detail for the leak tolerance. It depends on nothing else,
-   * so turning, zooming and resizing keep the slices.
-   */
-  getDetail(): number {
-    return leakFreeDetail((this.maxLeak * Math.PI) / 180)
-  }
 
   private view(): View {
     return {

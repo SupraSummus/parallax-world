@@ -22,7 +22,7 @@ const view = (yaw: number) => {
   renderer.resize(320, 240)
   renderer.setOrientation({ yaw, pitch: -22 })
   renderer.setRenderDistance(300)
-  renderer.setMaxLeak(12)
+  renderer.setDetail(2 ** 2.25)
   renderer.render()
   return renderer.render()
 }

@@ -56,27 +56,24 @@ Numbers are for the forest at 1280×800, as measured when written.
   Caching Rust's builds would spare little: `libm` is their one dependency.
   Not tried: one Cargo target for `bake/`, `worldgen/` and `worlds/`,
   each of which now builds the ones before it again.
-- **Slicing keeps a leak bound slices need less.**
-  Drawn in relief, slices of the bound leak nothing,
-  and much thicker ones only where a column has a gap
-  (step 8 of `src/lib/leak-bound.test.ts`),
-  but they are still as thin as drawn flat they would need to be
-  (section 2 of `docs/architecture.md`),
-  and "Max Occlusion Leak" sets both their thickness
-  and their level of detail (atoms of 2^(k−s) at level k,
+- **Slice detail sets both thickness and level of detail.**
+  "Slice Detail" sets how thick slices are,
+  and so their level of detail (atoms of 2^(k−s) at level k,
   s as large as the grids' reach allows).
   Thicker is faster but coarser: in the forest, a first render takes
-  about 6.5 s at detail 9.5 (6°), 3 s at 2.4 and 2.7 s at 1
+  about 6.5 s at detail 9.5, 3 s at 2.4 and 2.7 s at 1
   (voxels 4 and 10 times as large), against 2.5 s drawn flat at 9.5
   (Node, 1280×800).
   Thickness could follow what culling and the slice count want,
-  and the level of detail the screen's pixels;
-  the bound's derivation would go.
+  and the level of detail the screen's pixels:
+  coarser atoms than detail gives are a smaller s,
+  finer ones need more than 2^4 layers of atoms a slab,
+  so splats' depths in more than a byte (`ATOM_SHIFT`).
 - **Coverage is weaker in relief.**
   A splat moves on its centre plane with the camera,
   so a chunk's mask holds what it covers from the axis and the corners
   of the rhombus of rays, and what it may reach from any:
-  in the forest at 6°, twice the chunks of flat slices are drawn.
+  in the forest at the default detail, twice the chunks of flat slices are drawn.
   Nor is that exact: a block covered from each of those may still open
   between them, which no picture has shown yet.
   The camera's slant is known where coverage is tested;
@@ -85,7 +82,7 @@ Numbers are for the forest at 1280×800, as measured when written.
 - **Coverage masks are coarser than the screen.**
   `mask_scale` marks ⌊40 / t⌋ pixels per unit of a slice t thick,
   but at a level's nearest slices a unit is focal / (t · detail · LAYER)
-  pixels on screen, about 95 / t at 90° on 1280 px with the default leak.
+  pixels on screen, about 95 / t at 90° on 1280 px at the default detail.
   A mask pixel counts as drawn when its centre is in a splat,
   so a gap between splats narrower than a mask pixel can count as covered,
   and what is behind it is skipped.
@@ -168,7 +165,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   `Arena::grow` caps a buffer at what the device allows
   (128 MB of splats on lavapipe), and `allocate` then hands out room past it:
   wgpu panics in `Compositor::prepare`
-  (the city at 1280×660 with a 2.4° leak did, before `GRID_REACH`;
+  (the city at 1280×660 at detail 27 did, before `GRID_REACH`;
   the forest at its defaults does, `seed=42&world=forest&look=200,10`).
   Past the limit it could drop the farthest chunks, or split the buffer.
 - **After a long jump, the workers' frame culls more than the main thread's.**

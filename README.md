@@ -98,7 +98,7 @@ where the sections below are too).
    (how far rays get, what they stop on),
    not on exact geometry ([docs/generators.md](docs/generators.md)).
 5. **Checked against rays.**
-   Tests check the leak bound, painting order and levels of detail
+   Tests check leaks, painting order and levels of detail
    against rays cast through the world.
 
 ## Quick start
@@ -118,7 +118,7 @@ Controls: W/S forward/back, A/D left/right, Space/Shift up/down, arrow
 keys or drag to look around.
 
 The page takes a view in its query:
-`?seed=&world=&camera=x,y,z&look=yaw,pitch&fov=&distance=&leak=`
+`?seed=&world=&camera=x,y,z&look=yaw,pitch&fov=&distance=&detail=`
 (camera in lattice units, angles in degrees).
 
 Other scripts (`test`, `lint`, `typecheck`, `knip`, `build`, `shot`,

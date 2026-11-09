@@ -45,7 +45,7 @@ pub use world::{FACE_KINDS, FACE_WORDS, Faces, Grid, Lattice, Tiles, VIEW_FACES,
  * sees it (in_grid): 40 / t, t its thickness (see thickness), between 1
  * (2 pixels across a voxel) and 10. Such a slice lies at distance
  * ≥ t · detail · LAYER, where a unit is at most focal / (t · detail · LAYER)
- * screen pixels: with the default view and leak more than 40 / t, so a
+ * screen pixels: with the default view and detail more than 40 / t, so a
  * mask is coarser than the screen (docs/todo.md), but each chunk's is about
  * as many pixels.
  */
