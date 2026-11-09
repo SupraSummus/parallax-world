@@ -4,16 +4,14 @@
 //! baker in bake/, sharing the tiles, and wgpu drawing them in an egui window
 //! (window.rs).
 //!
-//! parallax-native [--world NAME] [--threads N] [--seed S] [--view QUERY] [--light SKY,SUN,GLOW] [--leak DEG] [--all-chunks] [--shot out.png [--size WxH] [--seams] [--colour voxels|layers|chunks] | --bench] [--walk D] [--stroll S [--on-ground]] [--spin]
-//! parallax-native [--world NAME] [--seed S] --check-requests frame.bin
+//! parallax-native [--world NAME] [--threads N] [--seed S] [--view QUERY] [--light SKY,SUN,GLOW] [--leak DEG] [--all-chunks] [--shot out.png [--size WxH] [--seams] [--colour voxels|layers|chunks] | --bench] [--stroll S [--on-ground]]
 //!
 //! --view takes the web page's view query (parseViewQuery in renderer.ts),
 //! overriding --seed and --world.
 //! --shot draws the first frame once all the tiles and chunks in view are
 //! in, at 1280×800 or --size, offscreen, and saves it; --bench only times
 //! the first frame once the world has all its tiles, the main thread's
-//! frames after, and the GPU drawing the last. --walk D moves the camera
-//! D units along the view after the first frame, and does the same there. --stroll S then flies on for S seconds
+//! frames after, and the GPU drawing the last. --stroll S then flies on for S seconds
 //! (walks, --on-ground) as the window would, a frame every 60th, and times each frame's parts.
 //! When the window panics or loses its GPU device, it says what it showed as these arguments.
 //! --light lights the world (worldgen's light.rs), the sky, the sun and
@@ -22,15 +20,9 @@
 //! --all-chunks bakes every chunk in view, covered or not, as the panel's
 //! switch does.
 //! --seams and --colour draw as the panel's switches do.
-//! --check-requests takes a view the TS renderer dumped (native/dump.test.ts):
-//! the faces must be the same, and the chunks the first frame
-//! wants from its grids and camera too, but for some the TS renderer wants
-//! and this one does not: its cells' extents count only the tiles a chunk
-//! reads, and those chunks draw nothing in view.
 
 mod bakery;
 mod compositor;
-mod dump;
 mod occlusion;
 mod renderer;
 mod shot;
@@ -38,7 +30,6 @@ mod view;
 mod window;
 mod world;
 
-use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -47,10 +38,9 @@ use bake::walk::{COLLISION_LEVEL, Ground, WalkInput, Walker};
 
 use bakery::Bakery;
 use compositor::Colours;
-use dump::Dump;
 use renderer::Renderer;
 use view::{Vec3, focal_length, view_basis};
-use world::{Level, Make, World};
+use world::{Make, World};
 use worldgen::generator::materials_of;
 use worldgen::light::{Brightness, Light, Shared};
 
@@ -69,8 +59,6 @@ struct App {
     colours: Colours,
     stats: String,
     frame_ms: f64,
-    /** --spin: turns on its own and prints frames per second. */
-    spin: Option<(Instant, u32)>,
     /** Walking on the ground (bake's walk.rs): the body the camera is the eye of; None flying. */
     walker: Option<Walker>,
     /** By material id, whether a walking body goes through it (KindDef::walk_through). */
@@ -153,15 +141,6 @@ impl window::Content for App {
                 }
                 self.camera[1] += moving[2] * step;
             }
-            if let Some((since, frames)) = &mut self.spin {
-                self.yaw += 30.0 * dt;
-                *frames += 1;
-                if since.elapsed().as_secs_f64() >= 2.0 {
-                    println!("{:.1} fps", *frames as f64 / since.elapsed().as_secs_f64());
-                    *since = Instant::now();
-                    *frames = 0;
-                }
-            }
             let (width, height) = (rect.width() as f64, rect.height() as f64);
             let focal = focal_length(self.fov, width, height);
             let view = view::View { yaw: self.yaw, pitch: self.pitch, width, height, focal };
@@ -202,7 +181,7 @@ impl window::Content for App {
             // While moving, the view changes; until all is made and baked, tiles and chunks keep arriving, often enough for a frame now and then.
             // A walking body moves on while it falls or its eye catches up with a step.
             let walking = self.walker.is_some_and(|w| !w.settled());
-            if moving.iter().any(|m| *m != 0.0) || walking || self.spin.is_some() {
+            if moving.iter().any(|m| *m != 0.0) || walking {
                 ui.ctx().request_repaint();
             } else if arrived || !stats.wanted.is_empty() || stats.occluding || self.world.busy() {
                 ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
@@ -294,38 +273,6 @@ fn complete(
         } else {
             return (frame, stats);
         }
-    }
-}
-
-/** Compares the chunks the first frame wants, coverage off, with those the TS renderer wanted for the dump. */
-fn check_requests(dump: &Dump, make: Make, seed: u64, threads: usize) {
-    let faces = view::faces();
-    for (face, l) in faces.iter().zip(&dump.lattices) {
-        assert_eq!(face.lattice, *l, "the faces are not the TS renderer's");
-    }
-    let focal = focal_length(dump.fov, dump.width, dump.height);
-    let view = &view::View { yaw: dump.yaw, pitch: dump.pitch, width: dump.width, height: dump.height, focal };
-    let shown = make(seed);
-    let mut renderer = renderer(&shown, None, threads, dump.render_distance);
-    let heights = world::heights(&shown);
-    let start = Instant::now();
-    for (level, grid) in dump.grids.iter().enumerate() {
-        if let Some(grid) = grid {
-            renderer.set_tiles(level, Arc::new(Level::cut(&heights, level, grid)));
-        }
-    }
-    println!("indexed the dump's grids in {:.2} s", start.elapsed().as_secs_f64());
-    renderer.skip_covered = false;
-    let (_, stats) = renderer.render(dump.camera, view);
-    type Key = (usize, i32, i32, i32, u64, i32, i32);
-    let ours: HashSet<Key> =
-        stats.wanted.iter().map(|r| (r.face, r.slice.level, r.slice.atoms, r.slice.layer, r.slice.cutoff.to_bits(), r.i, r.j)).collect();
-    let theirs: HashSet<Key> = dump.requests.iter().map(|r| (r.face, r.level, r.atoms, r.layer, r.cutoff.to_bits(), r.i, r.j)).collect();
-    println!("ours {}, the dump's {}, in both {}", ours.len(), theirs.len(), ours.intersection(&theirs).count());
-    for (name, a, b) in [("only ours", &ours, &theirs), ("only the dump's", &theirs, &ours)] {
-        let mut only: Vec<_> = a.difference(b).collect();
-        only.sort();
-        println!("{name}: {}{}", only.len(), only.iter().take(8).map(|k| format!("\n  {k:?}")).collect::<String>());
     }
 }
 
@@ -457,10 +404,6 @@ fn main() {
         let names: Vec<&str> = worlds::WORLDS.iter().map(|e| e.name).collect();
         worlds::by_name(name).unwrap_or_else(|| panic!("--world {}", names.join(", "))).make
     });
-    if let Some(v) = value("--check-requests") {
-        check_requests(&dump::read(&std::fs::read(v).expect("dump")), make, seed, threads);
-        return;
-    }
     let size = value("--size").map_or(SHOT, |v| {
         let size: Vec<f64> = v.split('x').map(|v| v.parse().expect("--size WxH")).collect();
         size.try_into().expect("--size WxH")
@@ -484,29 +427,16 @@ fn main() {
     renderer.skip_covered = !flag("--all-chunks");
     let sky = brightness.map_or(1.0, |b| b.sky);
     let mut world = World::new(make, seed, lit.map(|(.., shared)| shared), threads);
-    let mut camera = query.camera.unwrap_or(shown.spawn.map(|v| v as f64));
+    let camera = query.camera.unwrap_or(shown.spawn.map(|v| v as f64));
     let faces: [[Vec3; 3]; 12] = std::array::from_fn(|f| view::faces()[f].axes);
     let fog_distance = render_distance * FOG_PER_RENDER_DISTANCE;
     if ["--bench", "--shot", "--stroll"].into_iter().any(flag) {
         let start = Instant::now();
         // A shot alone needs only the view; the timings, all the world would make around it.
-        let whole = ["--bench", "--walk", "--stroll"].into_iter().any(flag);
-        let (mut frame, mut stats) = complete(&mut world, &mut renderer, camera, &first, whole);
-        let report = |what: &str, start: Instant, frame: &renderer::Frame, stats: &renderer::Stats| {
-            let seconds = start.elapsed().as_secs_f64();
-            let (layers, chunks, covered) = (frame.layers.len(), stats.chunks, stats.covered);
-            println!("{what} complete in {seconds:.2} s on {threads} threads: {layers} layers, {chunks} chunks, {covered} covered");
-        };
-        report("first frame", start, &frame, &stats);
-        if let Some(v) = value("--walk") {
-            // On along the view, into tiles not made yet.
-            let distance: f64 = v.parse().expect("distance");
-            let start = Instant::now();
-            let forward = view_basis(yaw, 0.0)[2];
-            camera = std::array::from_fn(|d| camera[d] + forward[d] * distance);
-            (frame, stats) = complete(&mut world, &mut renderer, camera, &first, whole);
-            report(&format!("{distance} units on, the frame"), start, &frame, &stats);
-        }
+        let whole = flag("--bench") || flag("--stroll");
+        let (frame, stats) = complete(&mut world, &mut renderer, camera, &first, whole);
+        let (layers, chunks, covered, seconds) = (frame.layers.len(), stats.chunks, stats.covered, start.elapsed().as_secs_f64());
+        println!("first frame complete in {seconds:.2} s on {threads} threads: {layers} layers, {chunks} chunks, {covered} covered");
         if flag("--bench") {
             // What a frame costs the main thread once everything is baked, still and turning.
             for (name, turn) in [("still", 0.0), ("turning", 1.0)] {
@@ -549,7 +479,6 @@ fn main() {
         }
         return;
     }
-    let spin = flag("--spin").then(|| (Instant::now(), 0));
     let app = App {
         world,
         renderer,
@@ -562,7 +491,6 @@ fn main() {
         colours: Colours::Voxels,
         stats: String::new(),
         frame_ms: 0.0,
-        spin,
         walker: None,
         walk_through: materials_of(&shown.generator).iter().map(|m| m.walk_through).collect(),
         sky,

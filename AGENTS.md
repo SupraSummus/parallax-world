@@ -112,11 +112,9 @@ worlds/                      # The worlds, on worldgen's public API only; the we
 lab/                         # Experiment, not built by pnpm: split grammars with shared splits, learned from the valley's towns; a masked model of any volume, flat, 3D or on the FCC lattice; synthesis by coordinates into examples; a critic and profiles that score any of them; real places (scripts/overture.py) drawn to a plan (see src/lib.rs); exports the learned town's rules
 native/                      # Spike of a native frontend (egui on winit and wgpu), linking bake/ and worlds/; see src/main.rs
 ├── .cargo/config.toml       # Builds for x86-64-v3: floor and ceil inline (see there)
-├── dump.test.ts             # Dumps a view from the TS renderer, to check it against (only with DUMP set)
 └── src/
-    ├── main.rs              # The camera (flying or walking, F) and panel; --shot, --bench, --walk, --stroll, --check-requests against a dump
+    ├── main.rs              # The camera (flying or walking, F) and panel; --shot, --bench, --stroll
     ├── window.rs            # The window: egui on winit and wgpu, its GPU device made again when lost
-    ├── dump.rs              # Reads a dump: a view, its faces, grids and the chunks it wants
     ├── world.rs             # world.ts for generated worlds: a World's tiles, those the renderer wants first, made and indexed on threads
     ├── view.rs              # view.ts: faces, which rays and screen boxes they draw
     ├── renderer.rs          # renderer.ts: chunks in view, cached, which cells to bake as occlusion.rs found
