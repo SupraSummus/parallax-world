@@ -547,11 +547,6 @@ draws those newly showing and keeps which show for the next frame
 Draws are listed per cluster on the GPU, roughly near to far,
 so nearer splats mostly hide what is behind them early.
 It draws into a picture of its own, which egui (or `--shot`) shows.
-It draws a run as a row of splats along the axis,
-one at each voxel of the column (`rows`),
-clustered and culled as any splat.
-A voxel apart, a row's hexagons meet from every ray of the face;
-farther apart, gaps open.
 
 **See-through.** A native splat's alpha is how much of the rays
 through its voxel's site the voxel stops,
