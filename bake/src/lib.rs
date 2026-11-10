@@ -219,26 +219,44 @@ impl Baker {
      * ray can enter (cell_splats), as splats over the plane through its site,
      * unclipped: no other chunk of its level draws its voxels, and depth
      * decides between them. No mask: what is covered is left to the GPU.
-     * Its numbers are cell_numbers'.
+     * Its numbers are cell_numbers', and the layer of the cell of the
+     * next finer level holding each voxel, in half layers past the plane:
+     * where that level draws it too, the compositor leaves out the
+     * see-through ones, so that none counts twice.
      */
     pub fn bake_cell(&mut self, face: usize, chunk: &CellChunk) -> Baked {
         let level = chunk.atoms as usize;
         self.reach(level);
         let m = chunk.spacing();
-        if !self.owners.iter().any(|(k, _)| *k == m) {
-            self.owners.push((m, Cells::new(m)));
+        // At level 0, none finer: its own.
+        // At level 0, none finer: its own.
+        let finer = if chunk.level > 0 { m / 2 } else { m };
+        let mut owners = std::mem::take(&mut self.owners);
+        for n in [m, finer] {
+            if !owners.iter().any(|(k, _)| *k == n) {
+                owners.push((n, Cells::new(n)));
+            }
         }
-        let own = &self.owners.iter().find(|(k, _)| *k == m).expect("made").1;
-        let holds = |a: i32, b: i32, c: i32| own.owner(a, b, c) == chunk.site;
+        let own = |n: i32| &owners.iter().find(|(k, _)| *k == n).expect("made").1;
+        let holds = |a: i32, b: i32, c: i32| own(m).owner(a, b, c) == chunk.site;
         let reader = Reader::new(&self.grids[level], self.lattices[face]);
         let (from, to) = chunk.bounds();
         let surface = surface(&reader, &self.geometry, from, to, holds);
         // Over the plane through its site.
-        self.paint(face, level, &surface, 2 * chunk.site[2], cell_splats);
+        let centre = 2 * chunk.site[2];
+        self.paint(face, level, &surface, centre, cell_splats);
         let s = &self.splats;
         let extent = if s.splats.is_empty() { [0.0; 2] } else { [s.max_x - s.min_x, s.max_y - s.min_y] };
         self.blocks.clear();
-        self.numbers(level, s.min_x, s.max_y, extent, [0, 0], 1.0, cell_numbers)
+        let finer = own(finer);
+        let numbers = |s: &Splat| {
+            let [a, b, c] = s.site;
+            let [depth, colour] = cell_numbers(s);
+            [depth, colour, (2 * finer.owner(a, b, c)[2] - centre) as f32]
+        };
+        let baked = self.numbers(level, s.min_x, s.max_y, extent, [0, 0], 1.0, numbers);
+        self.owners = owners;
+        baked
     }
 
     /** The splats `splats` makes of a surface read from grid `level` along view face `face`, coloured. */
@@ -264,7 +282,7 @@ impl Baker {
      * splat's last two.
      */
     #[allow(clippy::too_many_arguments)]
-    fn numbers(
+    fn numbers<const N: usize>(
         &mut self,
         level: usize,
         min_x: f64,
@@ -272,7 +290,7 @@ impl Baker {
         extent: [f64; 2],
         [width, height]: [usize; 2],
         scale: f64,
-        last: fn(&Splat) -> [f32; 2],
+        last: impl Fn(&Splat) -> [f32; N],
     ) -> Baked {
         self.spacing = spacing(level as i32);
         let n = self.spacing as f64;

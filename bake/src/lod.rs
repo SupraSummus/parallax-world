@@ -83,6 +83,16 @@ impl Lod {
     }
 
     /**
+     * The last layer whose cells the level finer than `level` draws, for an
+     * eye in layer `eye` (composed's); none at level 0. Its cells hold all
+     * that `level`'s cells meeting them hold there: what they hold of cells
+     * of the finer level up to it, `level` draws again.
+     */
+    pub fn finer_reach(&self, level: i32, eye: f64) -> Option<i64> {
+        (level > 0).then(|| self.reach(level - 1, eye.floor() as i32))
+    }
+
+    /**
      * The layers of `level`'s sites, c / N, it claims for an eye in `eyes`
      * (Eyes) and to `far` ahead: from the nearest eye's claims to the
      * farthest's, as reach grows with the camera's layer; none, nor any
@@ -341,7 +351,7 @@ mod tests {
     }
 
     #[test]
-    fn every_site_ahead_is_drawn_first_at_the_finest_level_claiming_it() {
+    fn every_site_ahead_is_drawn_first_at_the_finest_level_claiming_it_and_seen_through_only_there() {
         let far = 150.0;
         for (k, shift) in [(0, 1), (1, 2), (2, 3)] {
             let lod = Lod { shift, q: 4 + k };
@@ -367,6 +377,13 @@ mod tests {
                         }
                         let finest = (0..).find(|&l| owner(1 << l, p)[2] as i64 <= lod.reach(l, camera));
                         assert_eq!(holding.first().copied(), finest, "shift {shift} site {p:?}");
+                        // Where it is see-through, only there: coarser chunks leave out what the next finer level's draw.
+                        let see_through: Vec<i32> = holding
+                            .iter()
+                            .copied()
+                            .filter(|&l| lod.finer_reach(l, eye[2]).is_none_or(|r| owner(1 << (l - 1), p)[2] as i64 > r))
+                            .collect();
+                        assert_eq!(see_through, Vec::from_iter(finest), "shift {shift} site {p:?}");
                         ahead += 1;
                     }
                 }

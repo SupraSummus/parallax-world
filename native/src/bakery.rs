@@ -28,12 +28,17 @@ pub struct Request {
     pub block: f64,
 }
 
-/** A baked chunk (ChunkSplats in chunk-baker.ts): its splats and their clusters as the GPU takes them (compositor::cluster). */
+/**
+ * A baked chunk (ChunkSplats in chunk-baker.ts): its splats and their
+ * clusters as the GPU takes them, and its first see-through cluster's
+ * index (compositor::cluster).
+ */
 pub struct Baked {
     pub origin: [f64; 2],
     pub extent: [f64; 2],
     pub splats: Vec<GpuSplat>,
     pub clusters: Vec<GpuCluster>,
+    pub see_through: usize,
 }
 
 /** What a request bakes: face and cell. */
@@ -151,8 +156,8 @@ fn work(queue: &Queue, send: &Sender<(Request, Baked)>, grids: &Grids, mut baker
             continue;
         }
         let b = baker.bake_cell(r.face, &r.cell);
-        let (splats, clusters) = cluster(&baker.numbers, half_layer(r.cell.atoms), r.block);
-        let baked = Baked { origin: [b.origin_x, b.origin_y], extent: [b.extent_width, b.extent_height], splats, clusters };
+        let (splats, clusters, see_through) = cluster(&baker.numbers, half_layer(r.cell.atoms), r.block);
+        let baked = Baked { origin: [b.origin_x, b.origin_y], extent: [b.extent_width, b.extent_height], splats, clusters, see_through };
         if send.send((request, baked)).is_err() {
             return;
         }

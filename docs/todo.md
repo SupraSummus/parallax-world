@@ -201,17 +201,19 @@ Numbers are for the forest at 1280×800, as measured when written.
   measured when it drew slices: new tiles took about a third.
   Lit, about 1.6 times that: the light itself (`Light::light` most),
   and new tiles half as much again, why is open.
-- **Native's see-through voxels (`SeeThrough`): two ways, to pick one.**
-  - By chance, the picture is noisy, and the noise moves with the camera.
-  - Blended, overlapping ones' colour is only about the nearest's,
-    and nothing behind them is culled:
-    the forest's GPU frame took three times as long as by chance (lavapipe).
-  - What is behind them is drawn too: the forest's splats doubled.
+- **Native's see-through voxels cost all of them, drawn.**
+  Over each other in order (architecture.md, "See-through"),
+  nothing behind them is culled, and each is a tent four times its outline:
+  in the forest three in four splats are see-through,
+  and its GPU frame took 1.1 s against 0.18 s by chance (lavapipe), seed 42;
+  the valley's 0.7 s against 0.28 s.
+  A see-through splat's sixth number (its finer cell's layer) is in every splat's,
+  a fifth more memory where the buffers already meet lavapipe's limit (below).
+  Leaving out what is behind pixels already all but covered
+  (front to back, nothing after a ray is stopped matters) is not done.
   - A site's colour is one of what is in it (see "Light sees each site's
-    alpha"): blended, a hexagon shows it flat.
-  - What is see-through counts twice where it is drawn twice:
-    where a coarser cell overlaps finer ones (`lod.rs`),
-    and where neighbours' hexagons in a layer, widened, overlap.
+    alpha"): a coarse site of a crown and mist may show as mist.
+  - Near, a see-through voxel is as soft as its tent: leaves at level 0 blur.
 - **The native compositor's buffers stop at the device's limit.**
   `Arena::grow` caps a buffer at what the device allows
   (128 MB of splats on lavapipe), and `allocate` then hands out room past it:

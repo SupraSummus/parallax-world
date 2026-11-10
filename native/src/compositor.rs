@@ -2,8 +2,8 @@
 //! into a picture of its own, which egui's render pass (or a shot) shows:
 //! only the clusters of splats that may show, culled on the GPU against
 //! the depth of what the last frame showed (compositor.wgsl), then the sky
-//! behind them. See-through voxels show as SeeThrough says: by chance, or
-//! blended over the rest after it.
+//! behind them. See-through voxels come after, nearest first, each over
+//! what is behind it as much as it stops rays, then over the picture.
 //!
 //! A chunk's splats are uploaded when it comes into view, into one buffer
 //! for all, in clusters of splats near each other on its plane, and dropped
@@ -35,11 +35,15 @@ struct GpuChunk {
     tint: u32,
     /** A half layer of its grid: the unit of its splats' depths. */
     half_layer: f32,
-    _pad: f32,
+    /**
+     * Its see-through splats whose cell of the next finer level is at most
+     * this far past its plane, in half layers, that level draws: left out.
+     */
+    clip: f32,
 }
 
-/** A splat (splat_vertex's instance in compositor.wgsl): its numbers as a cell's are baked (bake's cell_numbers). */
-pub type GpuSplat = [u32; 5];
+/** A splat (splat_vertex's instance in compositor.wgsl): its numbers as a cell's are baked (bake's bake_cell). */
+pub type GpuSplat = [u32; 6];
 
 /** A cluster (Cluster in compositor.wgsl). */
 #[repr(C)]
@@ -70,59 +74,76 @@ pub fn block(distance: f64, focal: f64) -> f64 {
 }
 
 /**
- * A chunk's splats as the GPU takes them, in clusters of the splats in
- * each block of size `block` on its plane (nearest first in each, so that
- * a block's first clusters are its front), and the clusters, nearest
- * first, so that splats are drawn near to far; their `first` counts from
- * the chunk's first splat, and their chunk's slot is not in them yet.
+ * A chunk's splats as the GPU takes them, in clusters, and where its
+ * see-through ones' clusters begin. The whole ones in clusters of the
+ * splats in each block of size `block` on its plane (nearest first in
+ * each, so that a block's first clusters are its front), the clusters
+ * nearest first, so that splats are drawn near to far; then the
+ * see-through ones, nearest first, layer by layer, the order a ray of its
+ * face meets them in. Their `first` counts from the chunk's first splat,
+ * and their chunk's slot is not in them yet.
  * A cluster's box holds its splats' outlines along the axis, from `near`
  * to `far` past the plane, `half_layer` per half layer of their depth,
  * and how wide the widest is: the GPU finds where they are drawn for its
  * camera. In the bake workers, so that a chunk's upload is a copy.
  */
-pub fn cluster(numbers: &[f32], half_layer: f64, block: f64) -> (Vec<GpuSplat>, Vec<GpuCluster>) {
-    let numbers = numbers.as_chunks::<5>().0;
+pub fn cluster(numbers: &[f32], half_layer: f64, block: f64) -> (Vec<GpuSplat>, Vec<GpuCluster>, usize) {
+    let numbers = numbers.as_chunks::<6>().0;
     let block_of = |s: usize| [1, 0].map(|d| (numbers[s][d] as f64 / block).floor() as i64);
-    let mut sorted: Vec<usize> = (0..numbers.len()).collect();
-    sorted.sort_by_key(|&s| (block_of(s), numbers[s][3] as i32));
+    let depth = |s: usize| numbers[s][3] as i32;
+    let whole = |s: &usize| numbers[*s][4].to_bits() >> 24 == 255;
+    let (mut sorted, mut see_through): (Vec<usize>, Vec<usize>) = (0..numbers.len()).partition(whole);
+    sorted.sort_by_key(|&s| (block_of(s), depth(s)));
+    see_through.sort_by_key(|&s| (depth(s), block_of(s)));
+    // A see-through splat reaches twice as far (veil_fragment).
+    let of = |part: &[usize], first: usize, reach: f32| {
+        let mut cluster = GpuCluster {
+            min: [f32::INFINITY; 2],
+            max: [f32::NEG_INFINITY; 2],
+            first: first as u32,
+            slot_count: part.len() as u32,
+            visible: 0,
+            near: f32::INFINITY,
+            far: f32::NEG_INFINITY,
+            wide: 0.0,
+        };
+        for &s in part {
+            let [x, y, w, depth, ..] = numbers[s];
+            let w = w * reach;
+            let h = w * std::f32::consts::SQRT_2;
+            let off = (depth as f64 * half_layer) as f32;
+            cluster.min = [cluster.min[0].min(x - w), cluster.min[1].min(y - h)];
+            cluster.max = [cluster.max[0].max(x + w), cluster.max[1].max(y + h)];
+            (cluster.near, cluster.far, cluster.wide) = (cluster.near.min(off), cluster.far.max(off), cluster.wide.max(w));
+        }
+        cluster
+    };
     let mut clusters = Vec::new();
     let mut start = 0;
     for run in sorted.chunk_by(|&a, &b| block_of(a) == block_of(b)) {
         // Split evenly.
         let parts = run.len().div_ceil(CLUSTER);
         for p in 0..parts {
-            let part = &run[run.len() * p / parts..run.len() * (p + 1) / parts];
-            let first = start + run.len() * p / parts;
-            let mut cluster = GpuCluster {
-                min: [f32::INFINITY; 2],
-                max: [f32::NEG_INFINITY; 2],
-                first: first as u32,
-                slot_count: part.len() as u32,
-                visible: 0,
-                near: f32::INFINITY,
-                far: f32::NEG_INFINITY,
-                wide: 0.0,
-            };
-            for &s in part {
-                let [x, y, w, depth, _] = numbers[s];
-                let h = w * std::f32::consts::SQRT_2;
-                let off = (depth as f64 * half_layer) as f32;
-                cluster.min = [cluster.min[0].min(x - w), cluster.min[1].min(y - h)];
-                cluster.max = [cluster.max[0].max(x + w), cluster.max[1].max(y + h)];
-                (cluster.near, cluster.far, cluster.wide) = (cluster.near.min(off), cluster.far.max(off), cluster.wide.max(w));
-            }
-            clusters.push(cluster);
+            let first = run.len() * p / parts;
+            clusters.push(of(&run[first..run.len() * (p + 1) / parts], start + first, 1.0));
         }
         start += run.len();
     }
     clusters.sort_by(|a, b| a.near.total_cmp(&b.near));
-    (sorted.iter().map(|&s| numbers[s].map(f32::to_bits)).collect(), clusters)
+    let whole = clusters.len();
+    for (k, part) in see_through.chunks(CLUSTER).enumerate() {
+        clusters.push(of(part, start + k * CLUSTER, 2.0));
+    }
+    sorted.extend(see_through);
+    (sorted.iter().map(|&s| numbers[s].map(f32::to_bits)).collect(), clusters, whole)
 }
 
 /** A chunk's splats and clusters on the GPU, and its slot in the table. */
 struct Resident {
     splats: Range<u32>,
     clusters: Range<u32>,
+    /** Its first see-through cluster's. */
+    see_through: u32,
     slot: u32,
 }
 
@@ -216,9 +237,8 @@ struct Targets {
     size: [u32; 2],
     picture: wgpu::Texture,
     depth: wgpu::Texture,
-    /** Blended, the see-through splats' weighted colours and how much of the picture they let through (compositor.wgsl). */
-    blended: wgpu::Texture,
-    through: wgpu::Texture,
+    /** The see-through splats over each other: their colour, and how much of the picture they let through (veil_fragment). */
+    veil: wgpu::Texture,
     composite: wgpu::BindGroup,
     /** The pyramid of farthest depths, and per level a bind group to make it and its size. */
     farthest: wgpu::Texture,
@@ -230,20 +250,21 @@ struct Targets {
 struct Pipelines {
     draw: wgpu::BindGroupLayout,
     cull: wgpu::BindGroupLayout,
+    cull_veil: wgpu::BindGroupLayout,
     reduce_depth: wgpu::BindGroupLayout,
     reduce: wgpu::BindGroupLayout,
     show: wgpu::BindGroupLayout,
     composite: wgpu::BindGroupLayout,
-    /** By chance; blended, the whole and the see-through ones, and those composited over the picture. */
+    /** The whole splats, then the see-through ones over each other, and those over the picture. */
     splats: wgpu::RenderPipeline,
-    whole: wgpu::RenderPipeline,
-    see_through: wgpu::RenderPipeline,
+    veil: wgpu::RenderPipeline,
     composite_picture: wgpu::RenderPipeline,
     sky: wgpu::RenderPipeline,
     seams: wgpu::RenderPipeline,
     show_picture: wgpu::RenderPipeline,
     cull_drawn: wgpu::ComputePipeline,
     cull_rest: wgpu::ComputePipeline,
+    cull_see_through: wgpu::ComputePipeline,
     reduce_depth_level: wgpu::ComputePipeline,
     reduce_level: wgpu::ComputePipeline,
 }
@@ -262,6 +283,15 @@ pub struct Compositor {
     /** The frame's chunks' clusters, [first, first + count) each. */
     candidates: wgpu::Buffer,
     chunks: u32,
+    /**
+     * The frame's chunks' see-through clusters, [first, first + count) and
+     * where their draws go, each a draw in that order: finest level first,
+     * and within a level nearest first; how many chunks and draws.
+     */
+    veiled: wgpu::Buffer,
+    veiled_chunks: u32,
+    veil_draws: wgpu::Buffer,
+    veils: u32,
     /** The clusters in view. */
     in_view: u32,
     /** By phase, the draws of clusters the culling lists, and how many. */
@@ -269,10 +299,10 @@ pub struct Compositor {
     drawn: [wgpu::Buffer; 2],
     targets: Option<Targets>,
     seams: bool,
-    see_through: SeeThrough,
-    /** What draws, and by phase what culls. */
+    /** What draws, by phase what culls, and what culls the see-through. */
     draw_group: Option<wgpu::BindGroup>,
     cull_groups: Vec<wgpu::BindGroup>,
+    veil_group: Option<wgpu::BindGroup>,
 }
 
 const SKY_TOP: [f32; 3] = [0x3f as f32 / 255.0, 0x73 as f32 / 255.0, 0xb8 as f32 / 255.0];
@@ -281,8 +311,7 @@ const SKY_HORIZON: [f32; 3] = [0xb9 as f32 / 255.0, 0xd3 as f32 / 255.0, 0xe8 as
 const GLOBALS: usize = 220;
 const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const FARTHEST: wgpu::TextureFormat = wgpu::TextureFormat::R32Float;
-const BLENDED: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
-const THROUGH: wgpu::TextureFormat = wgpu::TextureFormat::R16Float;
+const VEIL: wgpu::TextureFormat = wgpu::TextureFormat::Rgba32Float;
 
 fn buffer(device: &wgpu::Device, label: &str, size: u64, usage: wgpu::BufferUsages) -> wgpu::Buffer {
     device.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size, usage, mapped_at_creation: false })
@@ -290,6 +319,16 @@ fn buffer(device: &wgpu::Device, label: &str, size: u64, usage: wgpu::BufferUsag
 
 fn storage(device: &wgpu::Device, label: &str, size: u64) -> wgpu::Buffer {
     buffer(device, label, size, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST)
+}
+
+/**
+ * Workgroups for `n` chunks, a workgroup each: in as many rows as it takes
+ * of at most as many as a dispatch may have along an axis.
+ */
+fn groups(n: u32) -> [u32; 2] {
+    let most = wgpu::Limits::default().max_compute_workgroups_per_dimension;
+    let rows = n.div_ceil(most).max(1);
+    [n.div_ceil(rows), rows]
 }
 
 /** Replaces `buffer` if it holds fewer than `size` bytes, by one of the next power of two. */
@@ -312,7 +351,8 @@ fn at_least(device: &wgpu::Device, buffer: &mut wgpu::Buffer, size: u64) {
 pub const BACKENDS: wgpu::Backends = wgpu::Backends::VULKAN;
 
 /** What the compositor needs of a device: draws listed on the GPU, a cluster's splats each. */
-pub const FEATURES: wgpu::Features = wgpu::Features::INDIRECT_FIRST_INSTANCE.union(wgpu::Features::MULTI_DRAW_INDIRECT_COUNT);
+pub const FEATURES: wgpu::Features =
+    wgpu::Features::INDIRECT_FIRST_INSTANCE.union(wgpu::Features::MULTI_DRAW_INDIRECT_COUNT).union(wgpu::Features::FLOAT32_BLENDABLE);
 
 /** What the compositor needs of a device: buffers as large as the adapter allows, for the splats in view. */
 pub fn limits(adapter: &wgpu::Adapter) -> wgpu::Limits {
@@ -367,10 +407,21 @@ impl Pipelines {
                 (8, S::COMPUTE, float),
             ],
         );
+        let cull_veil = layout(
+            device,
+            &[
+                (0, S::COMPUTE, uniform),
+                (1, S::COMPUTE, read),
+                (4, S::COMPUTE, write),
+                (8, S::COMPUTE, float),
+                (9, S::COMPUTE, read),
+                (16, S::COMPUTE, write),
+            ],
+        );
         let reduce_depth = layout(device, &[(10, S::COMPUTE, texture(wgpu::TextureSampleType::Depth)), (12, S::COMPUTE, level_out)]);
         let reduce = layout(device, &[(11, S::COMPUTE, float), (12, S::COMPUTE, level_out)]);
         let show = layout(device, &[(13, S::FRAGMENT, float)]);
-        let composite = layout(device, &[(14, S::FRAGMENT, float), (15, S::FRAGMENT, float)]);
+        let composite = layout(device, &[(14, S::FRAGMENT, float)]);
         let pipeline_layout = |layout: &wgpu::BindGroupLayout| {
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: None,
@@ -381,7 +432,7 @@ impl Pipelines {
         let splat = wgpu::VertexBufferLayout {
             array_stride: size_of::<GpuSplat>() as u64,
             step_mode: wgpu::VertexStepMode::Instance,
-            attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Unorm8x4],
+            attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Unorm8x4, 2 => Float32],
         };
         // Ties (the sky, cleared to 1) are drawn.
         let depth = |compare, write| wgpu::DepthStencilState {
@@ -394,21 +445,12 @@ impl Pipelines {
         let (tested, over) = (Some(depth(wgpu::CompareFunction::LessEqual, true)), Some(depth(wgpu::CompareFunction::Always, false)));
         let behind = Some(depth(wgpu::CompareFunction::LessEqual, false));
         let target = |format, blend| Some(wgpu::ColorTargetState { format, blend, write_mask: wgpu::ColorWrites::ALL });
-        let add = wgpu::BlendComponent {
-            src_factor: wgpu::BlendFactor::One,
-            dst_factor: wgpu::BlendFactor::One,
-            operation: wgpu::BlendOperation::Add,
-        };
-        // What the picture shows through them: a product, each letting 1 − alpha through.
-        let times = wgpu::BlendComponent {
-            src_factor: wgpu::BlendFactor::Zero,
-            dst_factor: wgpu::BlendFactor::OneMinusSrc,
-            operation: wgpu::BlendOperation::Add,
-        };
-        let blended = [
-            target(BLENDED, Some(wgpu::BlendState { color: add, alpha: add })),
-            target(THROUGH, Some(wgpu::BlendState { color: times, alpha: times })),
-        ];
+        let blend = |src_factor, dst_factor| wgpu::BlendComponent { src_factor, dst_factor, operation: wgpu::BlendOperation::Add };
+        use wgpu::BlendFactor as F;
+        // Nearest first, each under those before: its colour as much as they let through, and what it lets through.
+        let under = wgpu::BlendState { color: blend(F::DstAlpha, F::One), alpha: blend(F::Zero, F::OneMinusSrcAlpha) };
+        // Over the picture: their colour, and the picture as much as they let through.
+        let over_picture = wgpu::BlendState { color: blend(F::One, F::SrcAlpha), alpha: blend(F::Zero, F::One) };
         let render = |layout: &wgpu::BindGroupLayout,
                       vertex: &str,
                       fragment: &str,
@@ -444,25 +486,26 @@ impl Pipelines {
         };
         Pipelines {
             splats: render(&draw, "splat_vertex", "splat_fragment", &[Some(splat.clone())], tested.clone(), &[target(format, None)]),
-            whole: render(&draw, "splat_vertex", "whole_fragment", &[Some(splat.clone())], tested.clone(), &[target(format, None)]),
-            see_through: render(&draw, "splat_vertex", "see_through_fragment", &[Some(splat)], behind, &blended),
+            veil: render(&draw, "veil_vertex", "veil_fragment", &[Some(splat)], behind, &[target(VEIL, Some(under))]),
             composite_picture: render(
                 &composite,
                 "sky_vertex",
                 "composite_fragment",
                 &[],
                 over.clone(),
-                &[target(format, Some(wgpu::BlendState::ALPHA_BLENDING))],
+                &[target(format, Some(over_picture))],
             ),
             sky: render(&draw, "sky_vertex", "sky_fragment", &[], tested, &[target(format, None)]),
             seams: render(&draw, "sky_vertex", "seams_fragment", &[], over, &[target(format, Some(wgpu::BlendState::ALPHA_BLENDING))]),
             show_picture: render(&show, "show_vertex", "show_fragment", &[], None, &[target(format, None)]),
             cull_drawn: compute(&cull, "cull_drawn", &[]),
             cull_rest: compute(&cull, "cull_rest", &[("culls", f64::from(culls))]),
+            cull_see_through: compute(&cull_veil, "cull_see_through", &[("culls", f64::from(culls))]),
             reduce_depth_level: compute(&reduce_depth, "reduce_depth", &[]),
             reduce_level: compute(&reduce, "reduce", &[]),
             draw,
             cull,
+            cull_veil,
             reduce_depth,
             reduce,
             show,
@@ -519,17 +562,10 @@ impl Targets {
             })
             .collect();
         let show = bind(device, &pipelines.show, &[(13, wgpu::BindingResource::TextureView(&picture.create_view(&Default::default())))]);
-        let blended = texture(BLENDED, U::RENDER_ATTACHMENT | U::TEXTURE_BINDING, 1, width, height);
-        let through = texture(THROUGH, U::RENDER_ATTACHMENT | U::TEXTURE_BINDING, 1, width, height);
-        let composite = bind(
-            device,
-            &pipelines.composite,
-            &[
-                (14, wgpu::BindingResource::TextureView(&blended.create_view(&Default::default()))),
-                (15, wgpu::BindingResource::TextureView(&through.create_view(&Default::default()))),
-            ],
-        );
-        Targets { size: [width, height], picture, depth, blended, through, composite, farthest, levels, show }
+        let veil = texture(VEIL, U::RENDER_ATTACHMENT | U::TEXTURE_BINDING, 1, width, height);
+        let composite =
+            bind(device, &pipelines.composite, &[(14, wgpu::BindingResource::TextureView(&veil.create_view(&Default::default())))]);
+        Targets { size: [width, height], picture, depth, veil, composite, farthest, levels, show }
     }
 }
 
@@ -551,14 +587,18 @@ impl Compositor {
             resident: HashMap::new(),
             candidates: storage(device, "candidates", 1024 * 8),
             chunks: 0,
+            veiled: storage(device, "see-through candidates", 1024 * 16),
+            veiled_chunks: 0,
+            veil_draws: buffer(device, "see-through draws", 1 << 16, U::STORAGE | U::INDIRECT),
+            veils: 0,
             in_view: 0,
             draws: [draws("draws first"), draws("draws next")],
             drawn: [drawn("drawn first"), drawn("drawn next")],
             targets: None,
             seams: false,
-            see_through: SeeThrough::Chance,
             draw_group: None,
             cull_groups: Vec::new(),
+            veil_group: None,
         }
     }
 
@@ -591,7 +631,7 @@ impl Compositor {
             .map(|c| GpuCluster { first: splats.start + c.first, slot_count: slot << 8 | c.slot_count, ..*c })
             .collect();
         queue.write_buffer(&self.clusters.buffer, range.start as u64 * self.clusters.stride, bytemuck::cast_slice(&clusters));
-        self.resident.insert(chunk.id, Resident { splats, clusters: range, slot });
+        self.resident.insert(chunk.id, Resident { splats, see_through: range.start + baked.see_through as u32, clusters: range, slot });
         true
     }
 
@@ -599,7 +639,7 @@ impl Compositor {
     pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, frame: &Frame, view: &View) {
         (self.splats.grew, self.clusters.grew) = (false, false);
         let size = view.pixels.map(|v| v.max(1));
-        (self.seams, self.see_through) = (view.seams, view.see_through);
+        self.seams = view.seams;
         if self.targets.as_ref().is_none_or(|t| t.size != size) {
             self.targets = Some(Targets::new(device, &self.pipelines, self.format, size));
         }
@@ -618,6 +658,8 @@ impl Compositor {
         self.splats.room(device, encoder, chunks().map(|b| b.splats.len() as u32).sum());
         self.clusters.room(device, encoder, chunks().map(|b| b.clusters.len() as u32).sum());
         let mut candidates: Vec<[u32; 2]> = Vec::new();
+        // Each with its level and how far its site is from the eye.
+        let mut veiled: Vec<([u32; 4], (i32, f64))> = Vec::new();
         let mut full = false;
         for p in &frame.chunks {
             // A hue per layer of a level's cells (Colours), neighbours in a stack far apart.
@@ -645,18 +687,42 @@ impl Compositor {
                     Colours::Chunks => tint(hash(&[hue.to_bits(), cell.site[0] as u64, cell.site[1] as u64])),
                 },
                 half_layer: half_layer(cell.atoms) as f32,
-                _pad: 0.0,
+                // In its grid's units, of which reach's layers are 2^atoms.
+                clip: p.finer.map_or(f32::NEG_INFINITY, |r| (2 * ((r >> cell.atoms) - cell.site[2] as i64)) as f32),
             };
-            candidates.push([resident.clusters.start, resident.clusters.len() as u32]);
+            let Resident { clusters, see_through, .. } = resident;
+            candidates.push([clusters.start, see_through - clusters.start]);
+            if *see_through < clusters.end {
+                veiled.push(([*see_through, clusters.end - see_through, 0, 0], (cell.level, p.from_eye)));
+            }
         }
+        // A ray of a face meets finer levels first (lod.rs), and within a level the cells of the lattice's Voronoi
+        // cells nearer the eye: at a face between two, the nearer one's site is nearer.
+        veiled.sort_by(|a, b| a.1.0.cmp(&b.1.0).then(a.1.1.total_cmp(&b.1.1)));
+        let mut veils = 0;
+        let mut veiled: Vec<[u32; 4]> = veiled
+            .into_iter()
+            .map(|([first, count, ..], _)| {
+                veils += count;
+                [first, count, veils - count, 0]
+            })
+            .collect();
         at_least(device, &mut self.table, self.slots as u64 * size_of::<GpuChunk>() as u64);
         if !table.is_empty() {
             queue.write_buffer(&self.table, 0, bytemuck::cast_slice(&table));
         }
+        (self.chunks, self.veiled_chunks, self.veils) = (candidates.len() as u32, veiled.len() as u32, veils);
+        self.in_view = candidates.iter().map(|c| c[1]).sum();
+        // A workgroup each, and those of the last row past the end none.
+        let [across, rows] = groups(self.chunks);
+        candidates.resize((across * rows) as usize, [0; 2]);
+        let [across, rows] = groups(self.veiled_chunks);
+        veiled.resize((across * rows) as usize, [0; 4]);
         at_least(device, &mut self.candidates, candidates.len().max(1) as u64 * 8);
         queue.write_buffer(&self.candidates, 0, bytemuck::cast_slice(&candidates));
-        self.chunks = candidates.len() as u32;
-        self.in_view = candidates.iter().map(|c| c[1]).sum();
+        at_least(device, &mut self.veiled, veiled.len().max(1) as u64 * 16);
+        queue.write_buffer(&self.veiled, 0, bytemuck::cast_slice(&veiled));
+        at_least(device, &mut self.veil_draws, veils.max(1) as u64 * 16);
         for draws in &mut self.draws {
             at_least(device, draws, self.in_view.max(1) as u64 * 16);
         }
@@ -685,12 +751,22 @@ impl Compositor {
                 bind(device, &self.pipelines.cull, &entries)
             })
             .collect();
+        let entries = [
+            (0, self.globals.as_entire_binding()),
+            (1, self.table.as_entire_binding()),
+            (4, self.clusters.buffer.as_entire_binding()),
+            (8, R::TextureView(&farthest)),
+            (9, self.veiled.as_entire_binding()),
+            (16, self.veil_draws.as_entire_binding()),
+        ];
+        self.veil_group = Some(bind(device, &self.pipelines.cull_veil, &entries));
     }
 
     /**
      * Draws the frame prepared last into the picture: the clusters that
      * showed last frame, then those that show now that did not, culled
-     * against the farthest depths of the first.
+     * against the farthest depths of the first; then the see-through ones
+     * in front of them, nearest first, and those over the picture.
      */
     pub fn render(&self, encoder: &mut wgpu::CommandEncoder) {
         let t = self.targets.as_ref().expect("prepared");
@@ -711,35 +787,43 @@ impl Compositor {
             if self.chunks > 0 {
                 pass.set_pipeline(if phase == 0 { &p.cull_drawn } else { &p.cull_rest });
                 pass.set_bind_group(0, &self.cull_groups[phase], &[]);
-                pass.dispatch_workgroups(self.chunks, 1, 1);
+                let [across, rows] = groups(self.chunks);
+                pass.dispatch_workgroups(across, rows, 1);
+            }
+            if phase == 1 && self.veiled_chunks > 0 {
+                pass.set_pipeline(&p.cull_see_through);
+                pass.set_bind_group(0, self.veil_group.as_ref(), &[]);
+                let [across, rows] = groups(self.veiled_chunks);
+                pass.dispatch_workgroups(across, rows, 1);
             }
         };
-        let blend = self.see_through == SeeThrough::Blend;
-        let splats = |pass: &mut wgpu::RenderPass<'_>, pipeline: &wgpu::RenderPipeline, phases: &[usize]| {
+        let splats = |pass: &mut wgpu::RenderPass<'_>, pipeline: &wgpu::RenderPipeline| {
             pass.set_bind_group(0, self.draw_group.as_ref(), &[]);
             pass.set_pipeline(pipeline);
             pass.set_vertex_buffer(0, self.splats.buffer.slice(..));
-            for &phase in phases {
-                pass.multi_draw_indirect_count(&self.draws[phase], 0, &self.drawn[phase], 0, self.in_view);
-            }
         };
-        // Blended, the whole splats first, with depth; the see-through ones after.
-        let first = if blend { &p.whole } else { &p.splats };
         cull(encoder, 0);
-        splats(&mut pass(encoder, &[(&t.picture, Some(wgpu::Color::BLACK))], (&t.depth, Some(1.0))), first, &[0]);
+        {
+            let mut pass = pass(encoder, &[(&t.picture, Some(wgpu::Color::BLACK))], (&t.depth, Some(1.0)));
+            splats(&mut pass, &p.splats);
+            pass.multi_draw_indirect_count(&self.draws[0], 0, &self.drawn[0], 0, self.in_view);
+        }
         cull(encoder, 1);
         {
             let mut pass = pass(encoder, &[(&t.picture, None)], (&t.depth, None));
-            splats(&mut pass, first, &[1]);
+            splats(&mut pass, &p.splats);
+            pass.multi_draw_indirect_count(&self.draws[1], 0, &self.drawn[1], 0, self.in_view);
             pass.set_pipeline(&p.sky);
             pass.draw(0..4, 0..1);
         }
-        if blend {
-            let targets = [(&t.blended, Some(wgpu::Color::TRANSPARENT)), (&t.through, Some(wgpu::Color::WHITE))];
-            splats(&mut pass(encoder, &targets, (&t.depth, None)), &p.see_through, &[0, 1]);
+        if self.veils > 0 {
+            // Nothing yet, all let through.
+            let mut veil = pass(encoder, &[(&t.veil, Some(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }))], (&t.depth, None));
+            splats(&mut veil, &p.veil);
+            veil.multi_draw_indirect(&self.veil_draws, 0, self.veils);
         }
         let mut pass = pass(encoder, &[(&t.picture, None)], (&t.depth, None));
-        if blend {
+        if self.veils > 0 {
             pass.set_pipeline(&p.composite_picture);
             pass.set_bind_group(0, &t.composite, &[]);
             pass.draw(0..4, 0..1);
@@ -810,7 +894,6 @@ pub struct View {
     /** Whether to draw the seams between faces over the picture. */
     pub seams: bool,
     pub colours: Colours,
-    pub see_through: SeeThrough,
     /** How bright the sky is: 1 by day, less as --light dims it. */
     pub sky: f32,
 }
@@ -826,22 +909,6 @@ pub enum Colours {
 
 impl Colours {
     pub const ALL: [(Colours, &str); 3] = [(Colours::Voxels, "Voxels"), (Colours::Layers, "Layers"), (Colours::Chunks, "Chunks")];
-}
-
-/**
- * How see-through voxels show (compositor.wgsl): each pixel of their
- * splats by chance, as often as they stop rays; or blended, weighted by
- * nearness, over what the whole ones show.
- */
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum SeeThrough {
-    #[default]
-    Chance,
-    Blend,
-}
-
-impl SeeThrough {
-    pub const ALL: [(SeeThrough, &str); 2] = [(SeeThrough::Chance, "Chance"), (SeeThrough::Blend, "Blend")];
 }
 
 /** A number in [0, 1) from `numbers`, as if at random. */
@@ -883,6 +950,7 @@ impl View {
         for (f, face) in self.faces.iter().enumerate() {
             let at = 28 + f * 16;
             columns(&mut g[at..at + 12], axes.map(|axis| to_local(face, axis)));
+            g[at + 12..at + 15].copy_from_slice(&face[2].map(|v| (v * std::f64::consts::SQRT_2).round() as f32));
         }
         g
     }
@@ -895,5 +963,20 @@ impl egui_wgpu::CallbackTrait for Shown {
     fn paint(&self, _info: egui::PaintCallbackInfo, pass: &mut wgpu::RenderPass<'static>, resources: &egui_wgpu::CallbackResources) {
         let compositor: &Compositor = resources.get().expect("compositor");
         compositor.show(pass);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn groups_hold_every_chunk_in_rows_a_dispatch_allows() {
+        let most = wgpu::Limits::default().max_compute_workgroups_per_dimension;
+        for n in [0, 1, 1000, most, most + 1, 3 * most + 7] {
+            let [across, rows] = groups(n);
+            // Within the limit, all of them, and at most a workgroup a row to spare.
+            assert!(across <= most && across * rows >= n && across * rows < n + rows, "{n}: {across} × {rows}");
+        }
     }
 }
