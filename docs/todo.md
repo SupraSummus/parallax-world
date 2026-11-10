@@ -77,8 +77,10 @@ Numbers are for the forest at 1280×800, as measured when written.
   and the compositor's culling hides them;
   the depth pyramid it culls clusters with could cull cells not yet baked too.
   Cells straddling where a face's levels meet are drawn at both.
-  The main thread finds every cell in view each render, most of them empty:
-  about 30 ms in the forest at the default detail, under 1 ms at 1.
+  Each render tests every cell a face composes against the screen,
+  though a face keeps its cells picked (`Lod::pick`);
+  the render that picks them anew, every few units moved,
+  takes a few times longer.
   `surface` still finds a cell's cut faces, which `cell_splats` drops.
   Detail sets Q = max(4, ⌈2·detail⌉), so below 2 it changes nothing;
   Q itself, a whole number, would say what it does.

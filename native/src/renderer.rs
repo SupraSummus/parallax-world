@@ -1,15 +1,15 @@
 //! Renders the world as chunks that are cells of the lattice (bake's
 //! lod.rs): per face, the cells lod.rs picks, relative to the camera,
 //! finest and nearest first. A chunk is a whole cell, whatever the camera: baked once the
-//! world has all the tiles it reads, it is kept while in use; until then,
-//! the tiles are what it wants. Every chunk in view is baked: drawing what
+//! world has all the tiles it reads, it is kept while its face's pick holds
+//! it, and a while after; until then, the tiles are what it wants. Every chunk in view is baked: drawing what
 //! is in view, and culling what of it is hidden, is the compositor's job.
 //! See docs/architecture.md, sections 1 to 5.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use bake::lod::{CellChunk, Lod};
+use bake::lod::{CellChunk, Lod, Picked, distance};
 use bake::slicing::{GRID_LEVELS, LAYER};
 use bake::{Lattice, chunk_reads};
 
@@ -17,9 +17,14 @@ use crate::bakery::{Baked, Bakery, Request};
 use crate::view::{Face, Vec3, View, in_face, to_local};
 use crate::world::{Level, TILE, TileId};
 
-/** Cells kept, in use or not, before those unused for UNUSED_RENDERS are dropped. */
+/**
+ * Cells known beyond the picks, before those not looked up or let go for
+ * UNUSED_RENDERS are forgotten, looked for every EVICTS renders: each
+ * time, all are.
+ */
 const MAX_CELLS: usize = 100_000;
 const UNUSED_RENDERS: u64 = 300;
+const EVICTS: u64 = 60;
 
 /** A baked chunk. `id` names it to the compositor. */
 pub struct Chunk {
@@ -58,12 +63,29 @@ pub struct Stats {
     pub tiles: Vec<(usize, TileId)>,
 }
 
-/** What is known of a cell of a face: the tiles it reads (None if all above or below the world); once it has them, whether it may hold voxels; its chunk, once baked; and the render that last used it. */
-struct Cell {
-    tiles: Option<[i32; 4]>,
-    holds: Option<bool>,
-    chunk: Option<Arc<Chunk>>,
-    used: u64,
+/**
+ * How far the eye may move from where a face's cells were picked, in units
+ * of grid 0, and how far its tangents may turn, before they are picked
+ * anew: each frame finds which of them it composes now, rather than pick
+ * hundreds of thousands of cells, and knows what it knew of them.
+ */
+const DRIFT: f64 = 8.0;
+const TURN: f64 = 0.15;
+
+/**
+ * What is known of a cell of a face: nothing yet; that it holds nothing
+ * (all above or below the world, outside its grid's index, or baked
+ * empty); that it waits for the tiles it reads, [i0, k0, i1, k1], or for
+ * its bake; or its chunk.
+ */
+#[derive(Clone, Default)]
+enum Seen {
+    #[default]
+    Unknown,
+    Empty,
+    Tiles([i32; 4]),
+    Bake([i32; 4]),
+    Baked(Arc<Chunk>),
 }
 
 pub struct Renderer {
@@ -71,8 +93,13 @@ pub struct Renderer {
     /** Per grid level, its tiles made so far, and the y of its sites, [low, high). */
     levels: Vec<Arc<Level>>,
     heights: [(i64, i64); GRID_LEVELS],
-    /** By face and chunk: what is known of its cell. */
-    cells: HashMap<(usize, CellChunk), Cell>,
+    /**
+     * By face, its cells picked last, each with what is known of it; and
+     * by face and cell, what was known of those that came and went, and the
+     * render that last looked them up or let them go, kept a while.
+     */
+    picks: Vec<Option<Picked<Seen>>>,
+    cells: HashMap<(usize, CellChunk), (Seen, u64)>,
     bakery: Bakery,
     next_id: u32,
     renders: u64,
@@ -131,6 +158,7 @@ impl Renderer {
     /** A renderer of a world whose sites of each grid level have y in [low, high) of `heights`. */
     pub fn new(faces: Vec<Face>, bakery: Bakery, render_distance: f64, heights: [(i64, i64); GRID_LEVELS]) -> Renderer {
         Renderer {
+            picks: faces.iter().map(|_| None).collect(),
             faces,
             levels: (0..GRID_LEVELS).map(|_| Arc::new(Level::new(HashMap::new()))).collect(),
             heights,
@@ -175,13 +203,34 @@ impl Renderer {
             let lattice = face.lattice;
             let local = to_local(&face.axes, camera);
             let boxes = view.screen_boxes(face);
-            let mut picked = Vec::new();
             let eye = [local[0] / LAYER, local[1], local[2] / LAYER];
-            lod.select(eye, self.render_distance, tangents, |cell, d| picked.push((cell, d)));
-            // What it draws, finest and nearest first: what the compositor takes first. Sorted once it is known,
-            // as most cells picked are not drawn.
-            let mut placed = Vec::new();
-            for (cell, d) in picked {
+            let far = self.render_distance;
+            let key = (lod.shift, lod.q, far);
+            let pick = &mut self.picks[f];
+            if !pick.as_ref().is_some_and(|p| p.covers(key, eye, tangents)) {
+                let [t0, t1, t2, t3] = tangents;
+                let eyes = eye.map(|v| [v - DRIFT, v + DRIFT]);
+                // Within the face's rays: |x| + √2 |y| ≤ z.
+                let y = std::f64::consts::FRAC_1_SQRT_2;
+                let wide = [(t0 - TURN).max(-1.0), (t1 + TURN).min(1.0), (t2 - TURN).max(-y), (t3 + TURN).min(y)];
+                let mut old = pick.take();
+                *pick = Some(lod.pick(eyes, far, wide, old.as_mut()));
+                // What the new pick does not have is kept a while, as if just looked up.
+                let renders = self.renders;
+                old.into_iter().for_each(|old| {
+                    old.into_each(|cell, seen| {
+                        if !matches!(seen, Seen::Unknown) {
+                            self.cells.insert((f, cell), (seen, renders));
+                        }
+                    })
+                });
+            }
+            // What it draws comes finest first, and within a level layer by layer from the nearest (Lod::composed):
+            // what the compositor takes first.
+            lod.composed(pick.as_mut().expect("picked"), eye, tangents, |cell, seen| {
+                if matches!(seen, Seen::Empty) {
+                    return;
+                }
                 let level = cell.atoms as usize;
                 let g = (1i64 << cell.atoms) as f64;
                 // Its box, relative to the camera, in the face's coordinates.
@@ -191,26 +240,32 @@ impl Renderer {
                 let (y0, y1) = (b - half - local[1], b + half - local[1]);
                 let (z0, z1) = ((c - half) * LAYER - local[2], (c + half) * LAYER - local[2]);
                 if !in_face(closest_to_zero(x0, x1), closest_to_zero(y0, y1), z1) {
-                    continue;
+                    return;
                 }
                 let on_screen = |z: f64| boxes.of(x0, x1, y0, y1, z).is_some_and(|b| view.on_screen(&b));
                 if !on_screen(z0.max(1e-3)) && !on_screen(z1) {
-                    continue;
+                    return;
                 }
-                let heights = self.heights[level];
-                let known = self.cells.entry((f, cell)).or_insert_with(|| {
-                    let (_, min, max) = chunk_reads(&cell);
-                    Cell { tiles: box_tiles(lattice, heights, min, max), holds: None, chunk: None, used: 0 }
-                });
-                known.used = self.renders;
-                let Some(t) = known.tiles else { continue };
-                if known.holds == Some(false) {
-                    continue;
-                }
-                stats.levels[level] = true;
+                // What is known, brought up to date: looked up once, then as its tiles come (its chunk, receive).
                 let source = &self.levels[level];
-                if known.holds.is_none() {
-                    if !source.grids.has_all(t) {
+                if matches!(seen, Seen::Unknown) {
+                    let known = self.cells.entry((f, cell)).or_default();
+                    if matches!(known.0, Seen::Unknown) {
+                        let (_, min, max) = chunk_reads(&cell);
+                        known.0 = box_tiles(lattice, self.heights[level], min, max).map_or(Seen::Empty, Seen::Tiles);
+                    }
+                    (*seen, known.1) = (known.0.clone(), self.renders);
+                }
+                if let Seen::Tiles(t) = *seen
+                    && source.grids.has_all(t)
+                {
+                    *seen = if may_hold(&cell, lattice.f, source, t) { Seen::Bake(t) } else { Seen::Empty };
+                    self.cells.insert((f, cell), (seen.clone(), self.renders));
+                }
+                let d = distance(&cell, eye);
+                match seen {
+                    Seen::Unknown | Seen::Empty => return,
+                    &mut Seen::Tiles(t) => {
                         for k in t[1]..=t[3] {
                             for i in t[0]..=t[2] {
                                 if !source.grids.has(i, k) {
@@ -218,33 +273,24 @@ impl Renderer {
                                 }
                             }
                         }
-                        continue;
                     }
-                    known.holds = Some(may_hold(&cell, lattice.f, source, t));
-                    if known.holds == Some(false) {
-                        continue;
+                    &mut Seen::Bake(t) => {
+                        let block = crate::compositor::block(z1.max(1.0), view.focal);
+                        missing.push((Request { face: f, cell, tiles: t, block }, d));
+                    }
+                    Seen::Baked(chunk) => {
+                        // Its plane, through its site.
+                        let distance = c * LAYER - local[2];
+                        let (x, y) = (chunk.baked.origin[0] - local[0], chunk.baked.origin[1] - local[1]);
+                        let [width, height] = chunk.baked.extent;
+                        if distance > 0.0 && boxes.of(x, x + width, y - height, y, distance).is_some_and(|b| view.on_screen(&b)) {
+                            frame.farthest = frame.farthest.max(distance);
+                            frame.chunks.push(Placement { face: f, cell, distance, chunk: chunk.clone(), x, y });
+                        }
                     }
                 }
-                let Some(chunk) = known.chunk.clone() else {
-                    let block = crate::compositor::block(z1.max(1.0), view.focal);
-                    missing.push((Request { face: f, cell, tiles: t, block }, d));
-                    continue;
-                };
-                if chunk.baked.splats.is_empty() {
-                    continue;
-                }
-                // Its plane, through its site.
-                let distance = c * LAYER - local[2];
-                let (x, y) = (chunk.baked.origin[0] - local[0], chunk.baked.origin[1] - local[1]);
-                let [width, height] = chunk.baked.extent;
-                if distance <= 0.0 || !boxes.of(x, x + width, y - height, y, distance).is_some_and(|b| view.on_screen(&b)) {
-                    continue;
-                }
-                frame.farthest = frame.farthest.max(distance);
-                placed.push(((cell.level, d), Placement { face: f, cell, distance, chunk, x, y }));
-            }
-            placed.sort_by(|a, b| a.0.partial_cmp(&b.0).expect("distances"));
-            frame.chunks.extend(placed.into_iter().map(|p| p.1));
+                stats.levels[level] = true;
+            });
         }
         missing.sort_by(|a, b| a.1.total_cmp(&b.1));
         stats.wanted = missing.into_iter().map(|m| m.0).collect();
@@ -256,20 +302,23 @@ impl Renderer {
         (frame, stats)
     }
 
-    /** Keeps what the bakery delivered, unless its cell was dropped meanwhile. */
+    /** Keeps what the bakery delivered, where its face's pick has its cell, and a while for when it comes again. */
     fn receive(&mut self) {
         for (r, baked) in self.bakery.take() {
-            if let Some(known) = self.cells.get_mut(&(r.face, r.cell)) {
-                self.next_id += 1;
-                known.chunk = Some(Arc::new(Chunk { id: self.next_id, baked }));
+            self.next_id += 1;
+            let seen = if baked.splats.is_empty() { Seen::Empty } else { Seen::Baked(Arc::new(Chunk { id: self.next_id, baked })) };
+            if let Some(picked) = self.picks[r.face].as_mut().and_then(|p| p.at(&r.cell)) {
+                *picked = seen.clone();
             }
+            self.cells.insert((r.face, r.cell), (seen, self.renders));
         }
     }
 
+    /** Forgets cells not looked up or let go a while: the picks keep what they know of theirs. */
     fn evict(&mut self) {
-        if self.cells.len() > MAX_CELLS {
+        if self.cells.len() > MAX_CELLS && self.renders.is_multiple_of(EVICTS) {
             let renders = self.renders;
-            self.cells.retain(|_, cell| cell.used + UNUSED_RENDERS > renders);
+            self.cells.retain(|_, (_, used)| *used + UNUSED_RENDERS > renders);
         }
     }
 }

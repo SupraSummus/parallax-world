@@ -204,6 +204,15 @@ A face's rays cross a level's cells layer after layer,
 so they leave a level's claims at most once
 and never meet a finer level after a coarser one.
 Where they overlap, coarser voxels may show a little past the finer ones' edges.
+The renderer keeps a face's cells picked for the eye anywhere near it
+and the view turned a little (`Lod::pick`),
+each with what it knows of it (`Seen`): its chunk, that it holds nothing,
+or what it waits for;
+each frame finds those the face composes now among them
+(`Lod::composed`), without looking each up,
+and picks anew once the eye or view leaves them:
+what it knew of cells still picked moves to the new pick,
+of the rest it keeps a while.
 There is no coverage: every chunk in view is baked,
 and the compositor culls what is hidden (section 4).
 
