@@ -1131,7 +1131,9 @@ fn see(grid: &mut VoxelGrid, op: Op, share: u32, pick: u32, (id, faces): (u8, Op
     let coin = (pick as u64 * 40_503) % one;
     let now = exact / one + u64::from(exact % one > coin);
     grid.alpha[i] = now as u8;
-    if (pick as u64) * now < visible * all {
+    // As often as it makes up of what the site stops before that rounding: of `now`, a medium of a few
+    // SHARE-ths of a step was seen as seldom as rounded up, and nine in ten of its sites that stop rays showed nothing.
+    if (pick as u64) * exact < visible * all * one {
         grid.see(i, id, faces);
     }
     let glow = [0, 1, 2].map(|c| (old[c] as u64 * kept / one + visible * glow[c] as u64) as u32);
