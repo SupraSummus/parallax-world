@@ -25,6 +25,23 @@ pub trait Content {
     fn picture(&mut self) -> Option<(Arc<Frame>, compositor::View, egui::Rect)>;
     /** What it showed last, for a report. */
     fn describe(&self) -> String;
+    /** Where the last frame's time went. */
+    fn timed(&mut self, times: Times);
+}
+
+/**
+ * Where a frame's time went, in ms, on the main thread: the content's ui
+ * (Content::ui), the compositor's upload and its frame's commands, waiting
+ * for the window's next image (the GPU still on frames before), and the
+ * rest; and since the frame before began.
+ */
+#[derive(Clone, Copy, Default)]
+pub struct Times {
+    pub ui: f64,
+    pub upload: f64,
+    pub waiting: f64,
+    pub rest: f64,
+    pub since: f64,
 }
 
 /** Shows `content` in a window until it is closed. */
@@ -34,7 +51,7 @@ pub fn run(title: &str, size: [f64; 2], content: impl Content) {
         backends: compositor::BACKENDS,
         ..wgpu::InstanceDescriptor::new_without_display_handle()
     });
-    let mut windowed = Windowed { title: title.to_string(), size, content, instance, open: None, next: None };
+    let mut windowed = Windowed { title: title.to_string(), size, content, instance, open: None, next: None, last: None };
     event_loop.run_app(&mut windowed).expect("the event loop");
 }
 
@@ -46,6 +63,8 @@ struct Windowed<C> {
     open: Option<Open>,
     /** When egui wants the next frame. */
     next: Option<Instant>,
+    /** When the last frame began. */
+    last: Option<Instant>,
 }
 
 /** A window open: it, egui's state for it, and its GPU. */
@@ -116,8 +135,15 @@ impl Gpu {
         }
     }
 
-    /** Draws the content's picture, then egui's `output` over it, and shows them. */
-    fn draw(&mut self, window: &Window, content: &mut impl Content, output: egui::FullOutput, ctx: &egui::Context) -> Result<(), Lost> {
+    /** Draws the content's picture, then egui's `output` over it, and shows them: how long the upload and the wait for the window's image took. */
+    fn draw(
+        &mut self,
+        window: &Window,
+        content: &mut impl Content,
+        output: egui::FullOutput,
+        ctx: &egui::Context,
+    ) -> Result<[f64; 2], Lost> {
+        let start = Instant::now();
         let pixels_per_point = output.pixels_per_point;
         let screen = egui_wgpu::ScreenDescriptor { size_in_pixels: [self.config.width, self.config.height], pixels_per_point };
         self.check()?;
@@ -130,6 +156,7 @@ impl Gpu {
             compositor.render(&mut encoder);
             self.queue.submit([encoder.finish()]);
         }
+        let uploaded = Instant::now();
         // A lost device shows when used: here, before egui's renderer uses it (it panics on a lost one).
         self.check()?;
         for (id, images) in &output.textures_delta.set {
@@ -140,6 +167,7 @@ impl Gpu {
         let jobs = ctx.tessellate(output.shapes, pixels_per_point);
         let mut encoder = self.device.create_command_encoder(&Default::default());
         let commands = self.renderer.update_buffers(&self.device, &self.queue, &mut encoder, &jobs, &screen);
+        let asked = Instant::now();
         let texture = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(texture) | wgpu::CurrentSurfaceTexture::Suboptimal(texture) => Some(texture),
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
@@ -148,6 +176,7 @@ impl Gpu {
             }
             _ => None,
         };
+        let waiting = asked.elapsed();
         if let Some(texture) = &texture {
             let target = texture.texture.create_view(&Default::default());
             let mut pass = encoder
@@ -175,7 +204,8 @@ impl Gpu {
         for id in &output.textures_delta.free {
             self.renderer.free_texture(id);
         }
-        self.check()
+        self.check()?;
+        Ok([(uploaded - start).as_secs_f64() * 1000.0, waiting.as_secs_f64() * 1000.0])
     }
 }
 
@@ -190,21 +220,30 @@ impl<C: Content> Windowed<C> {
 
     fn redraw(&mut self) {
         let Some(open) = &mut self.open else { return };
+        let start = Instant::now();
+        let since = self.last.replace(start).map_or(0.0, |last| (start - last).as_secs_f64() * 1000.0);
         let input = open.egui.take_egui_input(&open.window);
         let ctx = open.egui.egui_ctx().clone();
         let content = &mut self.content;
         let mut output = ctx.run_ui(input, |ui| content.ui(ui));
         open.egui.handle_platform_output(&open.window, std::mem::take(&mut output.platform_output));
         self.next = output.viewport_output.get(&egui::ViewportId::ROOT).and_then(|v| Instant::now().checked_add(v.repaint_delay));
-        if let Err(Lost(message)) = open.gpu.draw(&open.window, &mut self.content, output, &ctx) {
-            eprintln!("\nThe GPU device was lost: {message}");
-            eprintln!("The driver may say why: journalctl -k (on Intel, a GPU HANG and its state in /sys/class/drm/card*/error).");
-            eprintln!("The last frame:\n{}\nMaking the device again.\n", self.content.describe());
-            let window = open.window.clone();
-            // The old surface goes before the new one is made for the same window.
-            self.open = None;
-            self.open = Some(self.make(window));
-            self.next = Some(Instant::now());
+        let ui = start.elapsed().as_secs_f64() * 1000.0;
+        match open.gpu.draw(&open.window, &mut self.content, output, &ctx) {
+            Ok([upload, waiting]) => {
+                let rest = start.elapsed().as_secs_f64() * 1000.0 - ui - upload - waiting;
+                self.content.timed(Times { ui, upload, waiting, rest, since });
+            }
+            Err(Lost(message)) => {
+                eprintln!("\nThe GPU device was lost: {message}");
+                eprintln!("The driver may say why: journalctl -k (on Intel, a GPU HANG and its state in /sys/class/drm/card*/error).");
+                eprintln!("The last frame:\n{}\nMaking the device again.\n", self.content.describe());
+                let window = open.window.clone();
+                // The old surface goes before the new one is made for the same window.
+                self.open = None;
+                self.open = Some(self.make(window));
+                self.next = Some(Instant::now());
+            }
         }
     }
 }
