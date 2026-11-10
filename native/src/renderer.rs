@@ -178,8 +178,9 @@ impl Renderer {
             let mut picked = Vec::new();
             let eye = [local[0] / LAYER, local[1], local[2] / LAYER];
             lod.select(eye, self.render_distance, tangents, |cell, d| picked.push((cell, d)));
-            // Finest and nearest first: what the compositor takes first.
-            picked.sort_by(|a, b| (a.0.level, a.1).partial_cmp(&(b.0.level, b.1)).expect("distances"));
+            // What it draws, finest and nearest first: what the compositor takes first. Sorted once it is known,
+            // as most cells picked are not drawn.
+            let mut placed = Vec::new();
             for (cell, d) in picked {
                 let level = cell.atoms as usize;
                 let g = (1i64 << cell.atoms) as f64;
@@ -240,8 +241,10 @@ impl Renderer {
                     continue;
                 }
                 frame.farthest = frame.farthest.max(distance);
-                frame.chunks.push(Placement { face: f, cell, distance, chunk, x, y });
+                placed.push(((cell.level, d), Placement { face: f, cell, distance, chunk, x, y }));
             }
+            placed.sort_by(|a, b| a.0.partial_cmp(&b.0).expect("distances"));
+            frame.chunks.extend(placed.into_iter().map(|p| p.1));
         }
         missing.sort_by(|a, b| a.1.total_cmp(&b.1));
         stats.wanted = missing.into_iter().map(|m| m.0).collect();

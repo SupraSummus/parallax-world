@@ -157,19 +157,19 @@ impl ScreenBoxes {
         let corners = [[left, bottom, distance], [right, bottom, distance], [right, top, distance], [left, top, distance]];
         let f = self.axes[2];
         let all_in_front = corners.iter().all(|&c| dot(c, f) > NEAR_PLANE);
-        let points: Vec<[f64; 2]> = if all_in_front {
-            corners.iter().filter_map(|&c| self.project(c)).collect()
-        } else {
-            clip(&corners, |p| dot(p, f) - NEAR_PLANE).into_iter().filter_map(|p| self.project(p)).collect()
-        };
-        if points.is_empty() {
-            return None;
-        }
+        // No allocation unless clipped: a frame asks for hundreds of thousands.
         let mut b = ScreenBox { min_x: f64::INFINITY, max_x: f64::NEG_INFINITY, min_y: f64::INFINITY, max_y: f64::NEG_INFINITY };
-        for [x, y] in points {
-            (b.min_x, b.max_x, b.min_y, b.max_y) = (b.min_x.min(x), b.max_x.max(x), b.min_y.min(y), b.max_y.max(y));
+        let mut add = |p: Vec3| {
+            if let Some([x, y]) = self.project(p) {
+                (b.min_x, b.max_x, b.min_y, b.max_y) = (b.min_x.min(x), b.max_x.max(x), b.min_y.min(y), b.max_y.max(y));
+            }
+        };
+        if all_in_front {
+            corners.into_iter().for_each(&mut add);
+        } else {
+            clip(&corners, |p| dot(p, f) - NEAR_PLANE).into_iter().for_each(&mut add);
         }
-        Some(b)
+        (b.min_x <= b.max_x).then_some(b)
     }
 }
 
