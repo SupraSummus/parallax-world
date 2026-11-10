@@ -35,7 +35,9 @@ pub struct Chunk {
 /**
  * A chunk in a frame: its face and cell, its plane `distance` ahead of the
  * camera along the face's axis, and the top-left corner of what it draws
- * there, relative to the camera, in the face's coordinates.
+ * there, relative to the camera, in the face's coordinates; how far its
+ * cell's site is from the camera, and the last layer of grid 0 whose
+ * cells the next finer level draws (Lod::finer_reach).
  */
 pub struct Placement {
     pub face: usize,
@@ -44,6 +46,8 @@ pub struct Placement {
     pub chunk: Arc<Chunk>,
     pub x: f64,
     pub y: f64,
+    pub from_eye: f64,
+    pub finer: Option<i64>,
 }
 
 /** What to draw: chunks face by face, finest and nearest first, as the compositor has room for them. */
@@ -285,7 +289,8 @@ impl Renderer {
                         let [width, height] = chunk.baked.extent;
                         if distance > 0.0 && boxes.of(x, x + width, y - height, y, distance).is_some_and(|b| view.on_screen(&b)) {
                             frame.farthest = frame.farthest.max(distance);
-                            frame.chunks.push(Placement { face: f, cell, distance, chunk: chunk.clone(), x, y });
+                            let finer = lod.finer_reach(cell.level, eye[2]);
+                            frame.chunks.push(Placement { face: f, cell, distance, chunk: chunk.clone(), x, y, from_eye: d, finer });
                         }
                     }
                 }

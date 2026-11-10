@@ -4,12 +4,14 @@
 // of the clusters that showed last frame, and splat_vertex draws them; their depth
 // is reduced to a pyramid of farthest depths (reduce_depth, reduce), and
 // cull_rest tests every cluster against it: those that showed are kept for
-// the next frame, and those newly showing drawn now.
+// the next frame, and those newly showing drawn now. Then the see-through
+// splats in front of them, nearest first (veil_fragment), over the picture.
 
 struct FaceView {
   // Columns: the camera's right, up and forward axes, in the face's coordinates.
   view: mat3x3f,
-  _pad: vec4f,
+  // Its axis in world coordinates, times √2: (±1, ±1, 0) in some order.
+  axis: vec4f,
 }
 
 struct Globals {
@@ -32,7 +34,7 @@ struct Chunk {
   level: f32, // see depth_of
   tint: u32, // RGBA to paint its splats in, shaded as their voxels are; 0 for their own
   half_layer: f32, // a half layer of its grid: the unit of its splats' depths
-  _pad: f32,
+  clip: f32, // see veil_vertex
 }
 
 // Splats of one chunk near each other on its plane: `first` and the next
@@ -68,38 +70,36 @@ struct DrawArgs {
 @group(0) @binding(6) var<storage, read_write> draws: array<DrawArgs>;
 @group(0) @binding(7) var<storage, read_write> drawn: atomic<u32>;
 @group(0) @binding(8) var farthest: texture_2d<f32>;
+// The see-through clusters: per chunk, finest level first and nearest first
+// in each, [first, first + count) and where their draws go.
+@group(0) @binding(9) var<storage, read> veiled: array<vec4u>;
+@group(0) @binding(16) var<storage, read_write> veil_draws: array<DrawArgs>;
 // The pyramid: level 0 from the depth buffer, each next from the last.
 @group(0) @binding(10) var depth_in: texture_depth_2d;
 @group(0) @binding(11) var level_in: texture_2d<f32>;
 @group(0) @binding(12) var level_out: texture_storage_2d<r32float, write>;
 // Showing the frame.
 @group(0) @binding(13) var picture: texture_2d<f32>;
-// Blended: the see-through splats' colours, weighted, and how much of what
-// is behind them they let through (see_through_fragment).
-@group(0) @binding(14) var blended: texture_2d<f32>;
-@group(0) @binding(15) var through: texture_2d<f32>;
+// The see-through splats over each other (veil_fragment).
+@group(0) @binding(14) var veil: texture_2d<f32>;
 
 // The depth of a splat of a chunk of `level`, its site `distance` from the
 // eye: finer levels in front (lod.rs), and within a level the nearer site,
 // which, voxels being the lattice's Voronoi cells, is the one a ray meets
 // first. Level L's depths are [2^(L - 64), 2^(L - 63)), HALFWAY halfway:
 // any distance in the view's scale keeps f32's steps far below a voxel.
-// Where faces overlap by a hair (splat_fragment), the first is in front.
 const HALFWAY = 1000.0;
-fn depth_of(level: f32, distance: f32, face: u32) -> f32 {
-  return exp2(level - 64.0) * (1.0 + distance / (distance + HALFWAY)) * (1.0 + f32(face) * exp2(-21.0));
+fn depth_of(level: f32, distance: f32) -> f32 {
+  return exp2(level - 64.0) * (1.0 + distance / (distance + HALFWAY));
 }
 
 struct Splat {
   @builtin(position) position: vec4f,
   @location(0) corner: vec2f,
-  // Where on its chunk's plane, over the plane's distance: the ray's tangents in face coordinates.
-  @location(1) ray: vec2f,
-  @location(2) @interpolate(flat) slant: f32,
+  @location(1) @interpolate(flat) slant: f32,
   // Its alpha its voxel's: of the rays through its site, how many it stops.
-  @location(3) @interpolate(flat) colour: vec4f,
-  @location(4) @interpolate(flat) splat: u32,
-  @location(5) @interpolate(flat) distance: f32,
+  @location(2) @interpolate(flat) colour: vec4f,
+  @location(3) @interpolate(flat) face: u32,
 }
 
 fn ray_of(view: mat3x3f, position: vec4f) -> vec3f {
@@ -113,100 +113,110 @@ fn ray_of(view: mat3x3f, position: vec4f) -> vec3f {
 // slants across (compositor.ts). Its chunk's slot comes as the first
 // vertex's index over 4.
 @vertex
-fn splat_vertex(
-  @builtin(vertex_index) vertex: u32,
-  @builtin(instance_index) instance: u32,
-  @location(0) splat: vec4f,
-  @location(1) paint: vec4f,
-) -> Splat {
+fn splat_vertex(@builtin(vertex_index) vertex: u32, @location(0) splat: vec4f, @location(1) paint: vec4f) -> Splat {
+  let site = splat_site(vertex, splat);
+  let size = vec2f(splat.z * (1.0 + abs(site.x / site.z)), splat.z * sqrt(2.0));
+  return placed(vertex, splat, paint, size);
+}
+
+// A see-through splat: its voxel's share of a field over its layer (see
+// veil_fragment), but none where the next finer level draws its cell
+// (`finer`: how far past the plane that cell's site is, in half layers;
+// lod.rs, Lod::finer_reach): in front, that level holds what it does.
+@vertex
+fn veil_vertex(@builtin(vertex_index) vertex: u32, @location(0) splat: vec4f, @location(1) paint: vec4f, @location(2) finer: f32) -> Splat {
+  var out = placed(vertex, splat, paint, 2.0 * splat.z * vec2f(1.0, sqrt(2.0)));
+  if finer <= chunks[vertex >> 2u].clip {
+    out.position = vec4f(2.0, 2.0, 2.0, 1.0);
+  }
+  return out;
+}
+
+// Its site relative to the camera, in its face's coordinates.
+fn splat_site(vertex: u32, splat: vec4f) -> vec3f {
+  let c = chunks[vertex >> 2u];
+  return vec3f(c.origin + splat.xy, c.distance + splat.w * c.half_layer);
+}
+
+// A splat drawn as a box `size` from its site each way.
+fn placed(vertex: u32, splat: vec4f, paint: vec4f, size: vec2f) -> Splat {
   let c = chunks[vertex >> 2u];
   let face = globals.faces[c.face];
   var out: Splat;
   out.corner = vec2f(f32(vertex & 1u), f32((vertex >> 1u) & 1u)) * 2.0 - 1.0;
-  let site = vec3f(c.origin + splat.xy, c.distance + splat.w * c.half_layer);
-  let size = vec2f(splat.z * (1.0 + abs(site.x / site.z)), splat.z * sqrt(2.0));
+  let site = splat_site(vertex, splat);
   out.slant = size.x / (sqrt(2.0) * size.y);
-  out.splat = instance;
-  out.distance = length(site);
+  out.face = c.face;
   let fog = 1.0 - exp(-c.distance / globals.fog_distance);
   let tinted = unpack4x8unorm(c.tint).rgb * (0.3 + 0.7 * dot(paint.rgb, vec3f(0.3, 0.59, 0.11)));
   out.colour = vec4f(mix(select(paint.rgb, tinted, c.tint != 0u), globals.horizon.rgb, fog), paint.a);
   let at = site + vec3f(out.corner * size, 0.0);
-  out.ray = at.xy / at.z;
   let p = transpose(face.view) * at;
-  out.position = vec4f(p.xy * globals.focal / (globals.viewport / 2.0), depth_of(c.level, length(site), c.face) * p.z, p.z);
+  out.position = vec4f(p.xy * globals.focal / (globals.viewport / 2.0), depth_of(c.level, length(site)) * p.z, p.z);
   return out;
 }
 
-// A number in [0, 1) as if at random, for pixel `p` and splat `s`.
-fn chance(p: vec2u, s: u32) -> f32 {
-  var h = p.x * 0x8da6b343u ^ p.y * 0xd8163841u ^ s * 0xcb1ab31fu;
-  h = (h ^ (h >> 16u)) * 0x7feb352du;
-  h = (h ^ (h >> 15u)) * 0x846ca68bu;
-  return f32((h ^ (h >> 16u)) >> 8u) / 16777216.0;
-}
-
-// Whether the pixel is in the splat's hexagon, and its face draws its ray,
-// by the ray each splat interpolates (working it out from the pixel costs
-// more). Rounding differs between splats, so faces overlap by a hair: no
-// pixel is left to neither.
+// Whether the pixel is in the splat's hexagon, and its face draws its ray.
 fn covers(in: Splat) -> bool {
-  let t = in.ray;
-  return abs(in.corner.x) * in.slant + abs(in.corner.y) < 1.0 && abs(t.x) + sqrt(2.0) * abs(t.y) <= 1.001;
+  return abs(in.corner.x) * in.slant + abs(in.corner.y) < 1.0 && owns(in.face, in.position);
 }
 
-// By chance: a pixel's ray stops at a splat as often as its voxel stops
-// rays, by a chance of the pixel and splat. The depth test leaves the
-// nearest it stops at, so it sees through each see-through voxel, by a
-// chance of its own, in whatever order they are drawn. A whole voxel's
-// alpha is 1: it always stops.
+// A whole voxel.
 @fragment
 fn splat_fragment(in: Splat) -> @location(0) vec4f {
-  if !covers(in) || chance(vec2u(in.position.xy), in.splat) >= in.colour.a {
+  if !covers(in) {
     discard;
   }
   return vec4f(in.colour.rgb, 1.0);
 }
 
-// Blended, first the whole voxels, with depth, as by chance.
+// Whether the pixel's ray is the face's, for one face only, so that no
+// pixel is left to none or drawn by two: its face is the neighbour
+// direction (±1, ±1, 0) along its two largest components, the smallest
+// left out (seams_fragment), ties to the last.
+fn owns(face: u32, position: vec4f) -> bool {
+  let axis = globals.faces[face].axis.xyz;
+  let ray = ray_of(globals.sky_view, position);
+  let a = abs(ray);
+  let least = select(select(2u, 1u, a.y < a.z), 0u, a.x < min(a.y, a.z));
+  return axis[least] == 0.0 && dot(axis, sign(ray)) == 2.0;
+}
+
+// A layer's depth along its face's axis, 1/√2, over a voxel's mean chord,
+// 4/(3√2) (worldgen's CHORD), both in units of its grid.
+const LAYER_OVER_CHORD = 0.75;
+
+// A see-through one, in front of the whole ones. A layer's sites are on a
+// grid twice their outlines' half width and height apart (half the plane
+// their outlines, the next layer's the rest), so a tent of twice that
+// over each sums to one across the layer: the layer a field, each of
+// its pixels as much of each site as it is near, the same along a ray
+// across seams and from any angle. A site's alpha is what it stops of
+// rays crossing it, along its voxel's mean chord (bake's alpha): the ray's
+// own path through the layer stops 1 − (1 − alpha)^(path / chord) of it.
+// Drawn nearest first, each under those before it, which let through
+// `a` of the ray, its colour as much as it stops, and the ray on through
+// it (the pipeline's blend). A face's rays meet its layers in order of
+// depth along its axis, and cells as their sites are near the eye
+// (Compositor::prepare), up to tents of neighbouring cells overlapping,
+// whose order then is the cells', a small error where alpha is small. Each
+// pixel is one face's only (owns), so seams count once.
 @fragment
-fn whole_fragment(in: Splat) -> @location(0) vec4f {
-  if !covers(in) || in.colour.a < 1.0 {
+fn veil_fragment(in: Splat) -> @location(0) vec4f {
+  if !owns(in.face, in.position) {
     discard;
   }
-  return vec4f(in.colour.rgb, 1.0);
+  let ray = ray_of(globals.faces[in.face].view, in.position);
+  let share = (1.0 - abs(in.corner.x)) * (1.0 - abs(in.corner.y));
+  let path = LAYER_OVER_CHORD * length(ray) / ray.z;
+  let a = 1.0 - pow(1.0 - in.colour.a, share * path);
+  return vec4f(in.colour.rgb * a, a);
 }
 
-struct Blended {
-  @location(0) colour: vec4f,
-  @location(1) through: vec4f,
-}
-
-// Then the see-through ones in front of them, in any order (weighted
-// blended order-independent transparency, McGuire and Bavoil 2013): what
-// they let through is exact, the product of 1 − alpha; the colour, each
-// one's weighted by its alpha and by how near it is, so that the nearer
-// show over the farther. The weight keeps the sum within a half float.
-@fragment
-fn see_through_fragment(in: Splat) -> Blended {
-  if !covers(in) || in.colour.a >= 1.0 {
-    discard;
-  }
-  let a = in.colour.a;
-  let weight = a * clamp(1e3 * pow(in.distance, -1.5), 1e-3, 1e3);
-  return Blended(vec4f(in.colour.rgb, 1.0) * weight, vec4f(a));
-}
-
-// Their colour over the picture, as much as they stop.
+// Over the picture: their colour, and as much of it as they let through.
 @fragment
 fn composite_fragment(in: Sky) -> @location(0) vec4f {
-  let p = vec2i(in.position.xy);
-  let through = textureLoad(through, p, 0).r;
-  if through >= 1.0 {
-    discard;
-  }
-  let sum = textureLoad(blended, p, 0);
-  return vec4f(sum.rgb / max(sum.a, 1e-6), 1.0 - through);
+  return textureLoad(veil, vec2i(in.position.xy), 0);
 }
 
 // |v| for the v in [lo, hi] nearest to 0.
@@ -215,7 +225,7 @@ fn closest_to_zero(lo: f32, hi: f32) -> f32 {
 }
 
 // Where a cluster may draw on screen, in pixels (left, top, right, bottom),
-// within its face's rays, a hair wider (splat_fragment); empty if it draws
+// within its face's rays, a hair wider (owns); empty if it draws
 // nowhere.
 fn screen_box(cluster: Cluster) -> vec4f {
   let c = chunks[cluster.slot_count >> 8u];
@@ -288,7 +298,7 @@ fn draws_cluster(at: u32, cluster: Cluster, phase: u32) -> bool {
   }
   let c = chunks[cluster.slot_count >> 8u];
   // Its nearest splat's distance is no less than how far ahead it is.
-  let depth = depth_of(c.level, max(c.distance + cluster.near, 0.0), c.face);
+  let depth = depth_of(c.level, max(c.distance + cluster.near, 0.0));
   let visible = shows(b) && !(culls && hidden(b, depth));
   clusters[at].visible = u32(visible);
   // The first phase drew those visible before and in view.
@@ -310,13 +320,28 @@ fn cull(chunk: u32, thread: u32, phase: u32) {
 }
 
 @compute @workgroup_size(64)
-fn cull_drawn(@builtin(workgroup_id) chunk: vec3u, @builtin(local_invocation_index) thread: u32) {
-  cull(chunk.x, thread, 0u);
+fn cull_drawn(@builtin(workgroup_id) id: vec3u, @builtin(num_workgroups) n: vec3u, @builtin(local_invocation_index) thread: u32) {
+  cull(id.y * n.x + id.x, thread, 0u);
 }
 
 @compute @workgroup_size(64)
-fn cull_rest(@builtin(workgroup_id) chunk: vec3u, @builtin(local_invocation_index) thread: u32) {
-  cull(chunk.x, thread, 1u);
+fn cull_rest(@builtin(workgroup_id) id: vec3u, @builtin(num_workgroups) n: vec3u, @builtin(local_invocation_index) thread: u32) {
+  cull(id.y * n.x + id.x, thread, 1u);
+}
+
+// A draw for each see-through cluster, in their order, of none of its
+// splats where it does not show: in front of what the first phase drew.
+@compute @workgroup_size(64)
+fn cull_see_through(@builtin(workgroup_id) id: vec3u, @builtin(num_workgroups) n: vec3u, @builtin(local_invocation_index) thread: u32) {
+  let range = veiled[id.y * n.x + id.x];
+  for (var k = thread; k < range.y; k += 64u) {
+    let cluster = clusters[range.x + k];
+    let b = screen_box(cluster);
+    let c = chunks[cluster.slot_count >> 8u];
+    let depth = depth_of(c.level, max(c.distance + cluster.near, 0.0));
+    let shows = shows(b) && !(culls && hidden(b, depth));
+    veil_draws[range.z + k] = DrawArgs(4u, select(0u, cluster.slot_count & 0xffu, shows), (cluster.slot_count >> 8u) * 4u, cluster.first);
+  }
 }
 
 // A texel of level 0 is the farthest of 2 × 2 pixels, one of a level the

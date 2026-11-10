@@ -429,7 +429,8 @@ towards the world axes (where 4 faces meet) and 1/√2 towards the cube's
 diagonals (where 3 meet). The faces tile the screen;
 the fragment shader discards the rest of their chunks,
 deciding by the pixel's ray, the same for all layers of a face,
-with a hair of overlap so no seam pixel falls to neither face.
+with a hair of overlap so no seam pixel falls to neither face;
+native's by the ray's two largest world components, one face a pixel (`owns`).
 Looking straight along a world axis, as the scenes' walls and streets
 invite, puts a corner of 4 faces in the middle of the screen.
 "Show Face Seams" draws the seams over the picture.
@@ -559,14 +560,41 @@ It draws into a picture of its own, which egui (or `--shot`) shows.
 
 **See-through.** A native splat's alpha is how much of the rays
 through its voxel's site the voxel stops,
-shown two ways, a switch of the panel and of `--see-through` (`SeeThrough`):
-- By chance: a pixel keeps a splat as often as its alpha,
-  and the depth test leaves the nearest kept;
-  so draws keep any order, and culling is as for whole voxels.
-- Blended (weighted blended order-independent transparency):
-  the whole splats are drawn and culled as by chance,
-  then the see-through ones in front of them are summed apart
-  and laid over the picture; what they let through is exact.
+along the voxel's mean chord (worldgen's `CHORD`).
+The bake workers put a chunk's see-through splats in clusters of their own,
+layer by layer from the nearest,
+and the compositor draws them after the whole ones,
+in front of them, into a picture of their own,
+nearest first, each under those before it;
+then lays that over the picture.
+That is the order a ray meets their sites in:
+a face's rays meet its levels finest first (`lod.rs`),
+a level's cells as their sites are near the eye
+(at the face between two, the nearer one's site is nearer: they are Voronoi cells),
+and a cell's splats layer by layer, its layers being planes across the face's axis.
+The cull lists a draw for each see-through cluster in that order,
+of none of its splats where it does not show.
+Each splat is its voxel's share of a field over its layer,
+a tent over twice its outline:
+a layer's sites are on a grid twice their outlines apart,
+so the tents sum to one across it,
+and a ray takes as much of a layer as its path through it is long;
+as outlines, half the plane each layer's, ray after ray along a seam
+met their edges together, and drew lines.
+A tent reaches past its cell, over a neighbour's pixels,
+and there the two cells' order is their sites', not the ray's:
+a small error where alpha is small, as in a medium.
+So that none counts twice,
+each pixel is one face's only,
+and a coarser chunk leaves out the see-through voxels
+whose cells of the next finer level that level draws
+(`Lod::finer_reach`; the baker gives each splat its finer cell's layer).
+They add up in 32-bit floats:
+hundreds of layers of a thin medium, each letting through 0.999,
+in 16 rounded every step one way, and stopped a tenth too much.
+A test holds a slab of medium to exp(−extinction · path),
+thin and thick, along the axis and slanted
+(`a_medium_lets_through_as_much_as_its_extinction_says`).
 
 **Fog.** A slice at distance d keeps `exp(−d / F)` of its own colour;
 the rest is the horizon colour, mixed in per pixel.
