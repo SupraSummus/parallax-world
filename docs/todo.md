@@ -5,7 +5,7 @@ Numbers are for the forest at 1280×800, as measured when written.
 
 - **worldgen still decides some things with floats.**
   Shapes are kept and tested in fixed point,
-  but they are given in floats, and their areas, fills and lathe radii are f64,
+  but they are given in floats, and their areas, fills and tubes' radii are f64,
   as is the forest's geometry (sin, cos, pow, exp, atan2, hypot, from `js.rs`).
   They should go to fixed point like the noise,
   the forest building each thing relative to its anchor.
@@ -522,8 +522,8 @@ Composing generators (section "Composing" of `docs/generators.md`), untried:
   and a tube's against each piece of the level drawn
   (bent, the forest's branches cost a few percent more at level 0).
   A span per row from the pieces' boxes would keep the test exact.
-- Trunks as tubes, bent where the birch's boxes step:
-  they want a radius changing along the tube, as a lathe's,
+- Trunks as tubes, bent where the birch's boxes step,
+  narrowing (`Radius`),
   and bark marks on round faces, not on boxes' faces.
 - Solve what a coarse cell decides (a block's lots, a room's furniture)
   with a small search whose boundaries the coarser band fixes:

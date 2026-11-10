@@ -6,8 +6,8 @@
 
 use crate::curve::Curve;
 use crate::generator::{
-    ANY_SIZE, Anchors, Cell, Child, Children, Far, Field, FieldValues, Kind, Line, Node, Op, Point, Population, SOLID, Shape, Shapes, Span,
-    ball, bounds_of_shapes, capsule, cuboid, ellipsoid, gable, lathe, tube,
+    ANY_SIZE, Anchors, Cell, Child, Children, Far, Field, FieldValues, Kind, Line, Node, Op, Point, Population, Radius, SOLID, Shape,
+    Shapes, Span, ball, bounds_of_shapes, capsule, cuboid, ellipsoid, gable, lathe, tube,
 };
 use crate::grid::Box3;
 use crate::noise::Rng;
@@ -163,15 +163,15 @@ impl Shape {
         ellipsoid(centre, radii, kind.into(), SOLID, Op::Fill)
     }
 
-    pub fn capsule(p: Point, q: Point, radius: f64, kind: impl Into<Kind>) -> Shape {
+    pub fn capsule(p: Point, q: Point, radius: impl Into<Radius>, kind: impl Into<Kind>) -> Shape {
         capsule(p, q, radius, kind.into(), SOLID, Op::Fill)
     }
 
-    pub fn tube(curve: &Curve<3>, p: Point, q: Point, radius: f64, kind: impl Into<Kind>) -> Shape {
+    pub fn tube(curve: &Curve<3>, p: Point, q: Point, radius: impl Into<Radius>, kind: impl Into<Kind>) -> Shape {
         tube(curve, p, q, radius, kind.into(), SOLID, Op::Fill)
     }
 
-    pub fn lathe(p: Point, q: Point, radius: impl Fn(f64) -> f64 + 'static, kind: impl Into<Kind>) -> Shape {
+    pub fn lathe(p: Point, q: Point, radius: impl Into<Radius>, kind: impl Into<Kind>) -> Shape {
         lathe(p, q, radius, kind.into(), SOLID, Op::Fill)
     }
 

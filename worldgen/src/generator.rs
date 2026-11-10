@@ -86,14 +86,44 @@ impl Fill {
 
 pub const SOLID: Fill = Fill::Const(1.0);
 
+/**
+ * A tube's radius: the same all along it, or by how far along it is, t
+ * from 0 at its start to 1 at its end (a trunk narrowing, a root's foot).
+ */
+#[derive(Clone)]
+pub enum Radius {
+    Const(f64),
+    Along(Rc<dyn Fn(f64) -> f64>),
+}
+
+impl Radius {
+    fn at(&self, t: f64) -> f64 {
+        match self {
+            Radius::Const(r) => *r,
+            Radius::Along(radius) => radius(t),
+        }
+    }
+}
+
+impl From<f64> for Radius {
+    fn from(r: f64) -> Radius {
+        Radius::Const(r)
+    }
+}
+
+impl<F: Fn(f64) -> f64 + 'static> From<F> for Radius {
+    fn from(radius: F) -> Radius {
+        Radius::Along(Rc::new(radius))
+    }
+}
+
 /** A point in lattice units, fixed point. */
 type At = [Fixed; 3];
 
 #[derive(Clone)]
 enum Solid {
     Ellipsoid { centre: At, radii: At },
-    Tube { pieces: Vec<Piece>, radius: Fixed },
-    Lathe { p: At, d: At, length: Fixed, widest: Fixed, radius: Rc<dyn Fn(f64) -> f64> },
+    Tube { pieces: Vec<Piece>, radius: Radius, widest: Fixed, length: Fixed },
     Cuboid { min: At, max: At },
     Gable { min: At, max: At, ridge: usize },
 }
@@ -534,17 +564,14 @@ pub fn ball(centre: Point, radius: f64, kind: Kind, fill: Fill, op: Op) -> Shape
     ellipsoid(centre, [radius, radius, radius], kind, fill, op)
 }
 
-/** The segment from p to q in fixed point: its start, direction and length. */
-fn segment(p: Point, q: Point) -> (At, At, Fixed) {
-    let (p, q) = (at(p), at(q));
-    let d = [0, 1, 2].map(|i| q[i] - p[i]);
-    (p, d, (dot(d, d) as u64).isqrt() as Fixed)
+/** The points within `radius` of the segment from p to q: twigs, logs, trunks; a straight tube, its ends round. */
+pub fn capsule(p: Point, q: Point, radius: impl Into<Radius>, kind: Kind, fill: Fill, op: Op) -> Shape {
+    swept(&straight(), p, q, radius.into(), false, kind, fill, op)
 }
 
-/** The points within `radius` of the segment from p to q: twigs, logs; a straight tube. */
-pub fn capsule(p: Point, q: Point, radius: f64, kind: Kind, fill: Fill, op: Op) -> Shape {
-    // A curve refined no times: the segment.
-    tube(&Curve::new(Vec::new(), |_, a, _| a), p, q, radius, kind, fill, op)
+/** A solid of revolution: a crown, a tower, a window's disc; a straight tube, its ends flat. */
+pub fn lathe(p: Point, q: Point, radius: impl Into<Radius>, kind: Kind, fill: Fill, op: Op) -> Shape {
+    swept(&straight(), p, q, radius.into(), true, kind, fill, op)
 }
 
 /**
@@ -553,10 +580,29 @@ pub fn capsule(p: Point, q: Point, radius: f64, kind: Kind, fill: Fill, op: Op) 
  * the curve strays from by s / 2 or less, so within half a site of
  * where it is.
  */
-pub fn tube(curve: &Curve<3>, p: Point, q: Point, radius: f64, kind: Kind, fill: Fill, op: Op) -> Shape {
+pub fn tube(curve: &Curve<3>, p: Point, q: Point, radius: impl Into<Radius>, kind: Kind, fill: Fill, op: Op) -> Shape {
+    swept(curve, p, q, radius.into(), false, kind, fill, op)
+}
+
+/** A curve refined no times: the segment. */
+fn straight() -> Curve<3> {
+    Curve::new(Vec::new(), |_, a, _| a)
+}
+
+/** A tube, its ends round, or `flat`: cut across the curve there. */
+#[allow(clippy::too_many_arguments)]
+fn swept(curve: &Curve<3>, p: Point, q: Point, radius: Radius, flat: bool, kind: Kind, fill: Fill, op: Op) -> Shape {
     let points: Vec<At> = curve.points([p, q].map(|e| at(e).map(Fx::from_bits))).into_iter().map(|e| e.map(Fx::to_bits)).collect();
     let n = points.len() - 1;
     let between = |i: usize, j: usize| [0, 1, 2].map(|k| points[j][k] - points[i][k]);
+    // How far along each point is, from its start.
+    let mut along: Vec<Fixed> = vec![0];
+    for i in 0..n {
+        let d = between(i, i + 1);
+        along.push(along[i] + (dot(d, d) as u64).isqrt() as Fixed);
+    }
+    let length = along[n];
+    let t = |i: usize| if length == 0 { 0 } else { ((i128::from(along[i]) << 16) / i128::from(length)) as Fixed };
     // Level by level, coarsest first, 1, 2, 4… pieces, in one allocation: capsules are many, twigs and leaves.
     let mut pieces = Vec::with_capacity(2 * n - 1);
     for (level, stray) in curve.corridors().enumerate() {
@@ -565,40 +611,59 @@ pub fn tube(curve: &Curve<3>, p: Point, q: Point, radius: f64, kind: Kind, fill:
             p: points[i],
             segment: Segment::new(between(i, i + step)),
             stray: stray.to_bits(),
+            t: [t(i), t(i + step)],
+            flat: [flat && i == 0, flat && i + step == n],
         }));
     }
-    let length: Fixed = (0..n)
-        .map(|i| {
-            let d = between(i, i + 1);
-            (dot(d, d) as u64).isqrt() as Fixed
-        })
-        .sum();
-    let (r, lengthf, rf) = (fixed(radius), float(length), radius);
-    let area = 2.0 * PI * rf * lengthf + 4.0 * PI * (rf * rf);
-    let volume = PI * (rf * rf) * lengthf + (4.0 / 3.0) * PI * js::pow(rf, 3.0);
+    let (area, volume, widest) = revolved(&radius, float(length), flat);
+    let w = fixed(widest);
+    // Around each of its points a ball, or at a flat end a disc across it.
+    let around = |i: usize| match (flat, i) {
+        (true, 0) => disc(between(0, 1), w),
+        (true, i) if i == n => disc(between(n - 1, n), w),
+        _ => [w; 3],
+    };
     Shape {
         kind,
         op,
         centre: at(mid(p, q)),
         bounds: sites_between(
-            [0, 1, 2].map(|k| points.iter().map(|e| e[k]).min().expect("ends") - r),
-            [0, 1, 2].map(|k| points.iter().map(|e| e[k]).max().expect("ends") + r),
+            [0, 1, 2].map(|k| (0..=n).map(|i| points[i][k] - around(i)[k]).min().expect("ends")),
+            [0, 1, 2].map(|k| (0..=n).map(|i| points[i][k] + around(i)[k]).max().expect("ends")),
         ),
-        extents: [length + 2 * r, 2 * r, 2 * r].map(Fx::from_bits),
+        extents: [length + if flat { 0 } else { 2 * w }, 2 * w, 2 * w].map(Fx::from_bits),
         area: effective_area(area, (4.0 * volume) / area, &fill, mid(p, q)),
         fill,
-        solid: Solid::Tube { pieces, radius: r },
+        solid: Solid::Tube { pieces, radius, widest: w, length },
     }
 }
 
-/** A solid of revolution: the points within `radius(t)` of the segment from p to q, t from 0 at p to 1 at q. */
-pub fn lathe(p: Point, q: Point, radius: impl Fn(f64) -> f64 + 'static, kind: Kind, fill: Fill, op: Op) -> Shape {
-    let (p_at, d, length_at) = segment(p, q);
-    let length = float(length_at);
-    // Area and volume by slices. The shadow it casts is its convex hull's, so the area is the hull's:
-    // a crown's whorls have undersides that cast no more shadow (Cauchy holds for convex bodies).
+/**
+ * How far a disc of radius w across direction d reaches along each axis:
+ * w · sin of the angle to it, sin² with 22 bits after the point
+ * (d · d < 2^40), rounded up.
+ */
+fn disc(d: At, w: Fixed) -> At {
+    let (d8, l2) = (d.map(|v| v >> 8), dot(d.map(|v| v >> 8), d.map(|v| v >> 8)));
+    d8.map(|v| {
+        if l2 == 0 {
+            return w;
+        }
+        let sin2 = (((l2 - v * v) << 22) + l2 - 1) / l2;
+        let sin = sin2.isqrt() + i64::from(sin2.isqrt().pow(2) < sin2);
+        (w * sin + 2047) >> 11
+    })
+}
+
+/**
+ * A solid of revolution `length` long, of `radius`, by slices: its area,
+ * volume and widest radius, its ends half balls, or `flat` discs. The area
+ * is its convex hull's, as is the shadow it casts: a crown's whorls have
+ * undersides that cast no more (Cauchy holds for convex bodies).
+ */
+fn revolved(radius: &Radius, length: f64, flat: bool) -> (f64, f64, f64) {
     let n = 8f64.max(length.ceil()) as usize;
-    let r: Vec<f64> = (0..=n).map(|i| radius(i as f64 / n as f64)).collect();
+    let r: Vec<f64> = (0..=n).map(|i| radius.at(i as f64 / n as f64)).collect();
     let mut hull: Vec<usize> = Vec::new();
     for i in 0..=n {
         let cross = |a: usize, b: usize| (b as f64 - a as f64) * (r[i] - r[a]) - (i as f64 - a as f64) * (r[b] - r[a]);
@@ -607,8 +672,9 @@ pub fn lathe(p: Point, q: Point, radius: impl Fn(f64) -> f64 + 'static, kind: Ki
         }
         hull.push(i);
     }
-    let mut area = PI * (r[0] * r[0] + r[n] * r[n]);
-    let mut volume = 0.0;
+    let caps = if flat { 1.0 } else { 2.0 };
+    let mut area = caps * PI * (r[0] * r[0] + r[n] * r[n]);
+    let mut volume = if flat { 0.0 } else { (2.0 / 3.0) * PI * (js::pow(r[0], 3.0) + js::pow(r[n], 3.0)) };
     for h in 0..hull.len().saturating_sub(1) {
         let (a, b) = (hull[h], hull[h + 1]);
         area += PI * (r[a] + r[b]) * js::hypot(&[((b - a) as f64 * length) / n as f64, r[b] - r[a]]);
@@ -616,29 +682,7 @@ pub fn lathe(p: Point, q: Point, radius: impl Fn(f64) -> f64 + 'static, kind: Ki
     for i in 0..n {
         volume += (PI * (r[i] * r[i] + r[i + 1] * r[i + 1]) / 2.0) * (length / n as f64);
     }
-    let widest = fixed(js::max(r.iter().copied()));
-    // How far the widest circle reaches along each axis: widest · sin of the
-    // angle to it, sin² with 22 bits after the point (l2 < 2^40), rounded up.
-    let (d8, l2) = (d.map(|v| v >> 8), dot(d.map(|v| v >> 8), d.map(|v| v >> 8)));
-    let out = d8.map(|v| {
-        if l2 == 0 {
-            return widest;
-        }
-        let sin2 = (((l2 - v * v) << 22) + l2 - 1) / l2;
-        let sin = sin2.isqrt() + i64::from(sin2.isqrt().pow(2) < sin2);
-        (widest * sin + 2047) >> 11
-    });
-    let q_at = [0, 1, 2].map(|i| p_at[i] + d[i]);
-    Shape {
-        kind,
-        op,
-        centre: at(mid(p, q)),
-        bounds: sites_between([0, 1, 2].map(|i| p_at[i].min(q_at[i]) - out[i]), [0, 1, 2].map(|i| p_at[i].max(q_at[i]) + out[i])),
-        extents: [length_at, 2 * widest, 2 * widest].map(Fx::from_bits),
-        area: effective_area(area, (4.0 * volume) / area, &fill, mid(p, q)),
-        fill,
-        solid: Solid::Lathe { p: p_at, d, length: length_at, widest, radius: Rc::new(radius) },
-    }
+    (area, volume, js::max(r.iter().copied()))
 }
 
 /** The points of [min, max): at level 0, the sites with min ≤ site < max. */
@@ -698,6 +742,8 @@ fn offset(x: At, p: At) -> At {
 struct Segment {
     d: At,
     l2: i64,
+    /** Its length, √l2. */
+    l: i64,
     inverse: i64,
 }
 
@@ -705,7 +751,7 @@ impl Segment {
     fn new(d: At) -> Segment {
         let d = d.map(|v| v >> 8);
         let l2 = dot(d, d);
-        Segment { d, l2, inverse: if l2 == 0 { 0 } else { (1 << 62) / l2 } }
+        Segment { d, l2, l: (l2 as u64).isqrt() as i64, inverse: if l2 == 0 { 0 } else { (1 << 62) / l2 } }
     }
 
     /** How far along the segment v's nearest point is, a fraction of ONE, given v · d. */
@@ -722,19 +768,51 @@ impl Segment {
     }
 }
 
-/** A tube's piece: from p along `segment`, of a level whose points the curve strays from by `stray`. */
+/**
+ * A tube's piece: from p along `segment`, of a level whose points the
+ * curve strays from by `stray`, from `t[0]` to `t[1]` along the tube
+ * (fractions of ONE), and whether the tube ends flat at its start or end.
+ */
 #[derive(Clone, Copy)]
 struct Piece {
     p: At,
     segment: Segment,
     stray: Fixed,
+    t: [Fixed; 2],
+    flat: [bool; 2],
+}
+
+/**
+ * How thick a tube is, tested at one `min`: within √r2 (its widest, at
+ * least half min), and where its radius changes, within `radius` (at
+ * least `half`) at the nearest point, so a piece is about a cone; `short`,
+ * how much shorter than min it is (8 bits after the point).
+ */
+#[derive(Clone, Copy)]
+struct Thick<'a> {
+    r2: i64,
+    radius: Option<&'a dyn Fn(f64) -> f64>,
+    half: Fixed,
+    short: i64,
 }
 
 impl Piece {
-    /** Whether x is within √r2 of it (8 bits after the point). */
-    fn holds(&self, x: At, r2: i64) -> bool {
+    fn holds(&self, x: At, thick: &Thick) -> bool {
         let v = offset(x, self.p);
-        self.segment.away(v, dot(v, self.segment.d)) <= r2
+        let vd = dot(v, self.segment.d);
+        // Nothing past a flat end, but by half what the tube is short of min (in units of v · d).
+        let reach = self.segment.l * thick.short / 2;
+        if (self.flat[0] && vd < -reach) || (self.flat[1] && vd > self.segment.l2 + reach) {
+            return false;
+        }
+        let away = self.segment.away(v, vd);
+        if away > thick.r2 {
+            return false;
+        }
+        let Some(radius) = thick.radius else { return true };
+        let [t0, t1] = self.t;
+        let r = fixed(radius(float(t0 + (((t1 - t0) * self.segment.along(vd)) >> 16)))).max(thick.half) >> 8;
+        away <= r * r
     }
 }
 
@@ -748,20 +826,12 @@ enum Inside<'a> {
     /** A tube drawn in one piece, as most are, by value: looping over one cost a few percent at level 0. */
     Piece {
         piece: Piece,
-        r2: i64,
+        thick: Thick<'a>,
     },
     /** The pieces of the level drawn. */
     Tube {
         pieces: &'a [Piece],
-        r2: i64,
-    },
-    Lathe {
-        p: At,
-        segment: Segment,
-        reach: i64,
-        widest2: i64,
-        half: Fixed,
-        radius: &'a dyn Fn(f64) -> f64,
+        thick: Thick<'a>,
     },
     Cuboid {
         lo: At,
@@ -787,17 +857,8 @@ impl Inside<'_> {
                 let u = offset(x, *centre);
                 (0..3).map(|i| ((u[i] * inverse[i]) >> 16).pow(2)).sum::<i64>() <= ONE * ONE
             }
-            Inside::Piece { piece, r2 } => piece.holds(x, *r2),
-            Inside::Tube { pieces, r2 } => pieces.iter().any(|piece| piece.holds(x, *r2)),
-            Inside::Lathe { p, segment, reach, widest2, half, radius } => {
-                let v = offset(x, *p);
-                let vd = dot(v, segment.d);
-                if vd < -reach || vd > segment.l2 + reach {
-                    return false;
-                }
-                let away = segment.away(v, vd);
-                away <= *widest2 && away <= (fixed(radius(float(segment.along(vd)))).max(*half) >> 8).pow(2)
-            }
+            Inside::Piece { piece, thick } => piece.holds(x, thick),
+            Inside::Tube { pieces, thick } => pieces.iter().any(|piece| piece.holds(x, thick)),
             Inside::Cuboid { lo, hi, min, tie } => (0..3).all(|i| {
                 if hi[i] - lo[i] >= *min { tie.within(i, x, lo[i], hi[i], ONE) } else { (2 * x[i] - lo[i] - hi[i]).abs() <= *min }
             }),
@@ -835,24 +896,19 @@ impl Shape {
                 }
                 Inside::Ellipsoid { centre: *centre, inverse: a.map(|a| (1 << 32) / a) }
             }
-            Solid::Tube { pieces, radius } => {
+            Solid::Tube { pieces, radius, widest, length } => {
                 // The coarsest level within half a site of the curve; level l is pieces 2^l − 1 to 2^(l+1) − 2.
                 let level = (0..).find(|&l| pieces[(1 << l) - 1].stray <= s * ONE / 2).expect("the finest strays nowhere");
-                let r2 = q8((*radius).max(half)).pow(2);
+                let radius = match radius {
+                    Radius::Const(_) => None,
+                    Radius::Along(radius) => Some(radius.as_ref()),
+                };
+                let thick = Thick { r2: q8((*widest).max(half)).pow(2), radius, half, short: q8(0.max(min - length)) };
                 match &pieces[(1 << level) - 1..(2 << level) - 1] {
-                    [piece] => Inside::Piece { piece: *piece, r2 },
-                    pieces => Inside::Tube { pieces, r2 },
+                    [piece] => Inside::Piece { piece: *piece, thick },
+                    pieces => Inside::Tube { pieces, thick },
                 }
             }
-            Solid::Lathe { p, d, length, widest, radius } => Inside::Lathe {
-                p: *p,
-                segment: Segment::new(*d),
-                // Ends reach on by up to half of min where the lathe is shorter than it, in units of v · d.
-                reach: q8(*length) * q8(0.max(min - length)) / 2,
-                widest2: q8((*widest).max(half)).pow(2),
-                half,
-                radius: radius.as_ref(),
-            },
             Solid::Cuboid { min: lo, max: hi } => Inside::Cuboid { lo: *lo, hi: *hi, min, tie: Tie::new(s) },
             Solid::Gable { min: lo, max: hi, ridge } => Inside::Gable { lo: *lo, hi: *hi, min, across: 2 - ridge, tie: Tie::new(s) },
         }

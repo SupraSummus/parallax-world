@@ -3,7 +3,7 @@
 //! offset, so boxes stay boxes and a part's sites land on its parent's.
 //! See "Model" in docs/generators.md.
 
-use crate::generator::{Fill, Kind, Op, Point, SOLID, Shape, ball, capsule, cuboid, ellipsoid, gable, lathe};
+use crate::generator::{Fill, Kind, Op, Point, Radius, SOLID, Shape, ball, capsule, cuboid, ellipsoid, gable, lathe};
 
 /**
  * Where a frame's coordinates are in its parent's: `axes[i]` is where
@@ -182,16 +182,8 @@ impl Part<'_> {
         self.shapes.last_mut().expect("one")
     }
 
-    /** A solid of revolution from p to q, radius(t) wide. */
-    pub fn lathe(
-        &mut self,
-        p: Point,
-        q: Point,
-        radius: impl Fn(f64) -> f64 + 'static,
-        kind: impl Into<Kind>,
-        fill: Fill,
-        op: Op,
-    ) -> &mut Shape {
+    /** A solid of revolution from p to q, `radius` wide. */
+    pub fn lathe(&mut self, p: Point, q: Point, radius: impl Into<Radius>, kind: impl Into<Kind>, fill: Fill, op: Op) -> &mut Shape {
         self.shapes.push(lathe(self.frame.point(p), self.frame.point(q), radius, kind.into(), fill, op));
         self.shapes.last_mut().expect("one")
     }
