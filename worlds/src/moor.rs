@@ -1,7 +1,8 @@
 //! The moor: rolling heath of heather and grass, a stream and pools in
-//! its hollows, scattered boulders, and steadings: a stone hut with a
-//! thatched roof, a ring of standing stones, and a path of cairns between
-//! them. Written from the engine's public API alone (docs/generators.md).
+//! its hollows, mist pooled in them, scattered boulders, and steadings: a
+//! stone hut with a thatched roof, a ring of standing stones, and a path
+//! of cairns between them. Written from the engine's public API alone
+//! (docs/generators.md).
 //!
 //! A domain too, like the forest: its layers lie on ground decided outside
 //! it, where it owns the land (`Ground`), and what it places, steadings and
@@ -40,6 +41,7 @@ kinds! {
     // What stands on the heath and the grass, in their colours: walked through, the ground not.
     heatherSprigs: 5, ["#6b3a5e", "#7a4569", "#84506f"], walk_through;
     grassBlades: 1, ["#8fa052", "#9aab5c"], walk_through;
+    mist: 8, ["#c9d0d4", "#c4cbd0", "#ced4d8"], walk_through;
 }
 
 /** The heights the moor alone has anything at (lattice units). */
@@ -83,6 +85,21 @@ const POOL_RADIUS: i64 = m(14.0);
 const _: () = assert!(2 * POOL_RADIUS <= POOLS_APART);
 /** How far the moor's bid leads the rest where it has room for a steading or a pool: the land's width and some. */
 const SURE: Fx = fx(0.2);
+/**
+ * Mist fills a hollow up to MIST_UNDER under the mean of the ground on a
+ * square MIST_RING round it, and lies up to MIST_OVER higher in patches;
+ * its top made every MIST_STEP. So little of it lies thin on slopes,
+ * where it would be thickened far away ("Thickened media spread",
+ * generators.md). As thick as some 15 m of it hide what is behind
+ * (Koschmieder: 3.9 over the distance seen).
+ */
+const MIST_RING: i64 = m(24.0);
+const MIST_UNDER: Units = Units::m(1.0);
+const MIST_OVER: Units = Units::m(3.0);
+const MIST_STEP: i64 = m(8.0);
+// The ring's points are samples' too: the ground is made once for each.
+const _: () = assert!(MIST_RING % MIST_STEP == 0);
+const MIST: f64 = 3.9 / m(15.0) as f64;
 const WALL: i64 = 3;
 
 /** A quantity of column (x, z) from position alone, with its fraction: the ground's height, a bid's lead. */
@@ -193,6 +210,8 @@ fn stream_distance(stream: &Plan<Fx>, x: i64, z: i64) -> (Units, Units) {
 pub struct Moorland {
     seed: u64,
     patches: Fbm<{ m(30.0) }, 2>,
+    /** Where mist lies deeper. */
+    mist: ValueNoise<{ m(48.0) }>,
     stream: Option<Stream>,
     steadings: Rc<Claims<Steading>>,
     water: Water,
@@ -263,7 +282,14 @@ impl Moorland {
                 }))
             }
         };
-        Moorland { seed: stream(seed, 8), patches: Fbm::new(stream(seed, 3)), stream: brook, steadings, water }
+        Moorland {
+            seed: stream(seed, 8),
+            patches: Fbm::new(stream(seed, 3)),
+            mist: ValueNoise::new(stream(seed, 9)),
+            stream: brook,
+            steadings,
+            water,
+        }
     }
 
     /** `ground` at (x, z), with its fraction, levelled under the hut of a steading there, hollowed under a pool. */
@@ -504,8 +530,44 @@ pub fn layers(moorland: Rc<Moorland>, ground: Ground) -> Vec<Layer> {
     if f.moorland.stream.is_some() {
         layers.push(Layer::Field(stream_bed(f.clone())));
     }
-    layers.extend([Layer::Field(water(f.clone())), Layer::Population(boulders(f.clone())), Layer::Population(steadings_population(f))]);
+    layers.extend([
+        Layer::Field(water(f.clone())),
+        Layer::Population(boulders(f.clone())),
+        Layer::Population(steadings_population(f.clone())),
+        Layer::Field(mist(f)),
+    ]);
     layers
+}
+
+/**
+ * Mist: cold air pooled in the hollows, its top level over each, and in
+ * patches over the rest; as deep as the moor's share, so it thins out
+ * where the moor gives way. Drawn after all else, into what is empty, so
+ * it stands among the heather, round the huts and over the water, and
+ * takes nothing's place.
+ */
+fn mist(f: Rc<Moor>) -> Field {
+    let lid = {
+        let ground = f.ground.ground.clone();
+        Plan::sampled("mist", MIST_STEP, MIST_STEP, move |x, z| {
+            let r = MIST_RING;
+            let ring = [(r, 0), (-r, 0), (0, r), (0, -r), (r, r), (r, -r), (-r, r), (-r, -r)];
+            Fx::mean(ring.map(|(dx, dz)| Units(ground.at(x + dx, z + dz)).to_fx()))
+        })
+    };
+    Field::columns("mist", 5.0, Op::Fill, move |x, z, spacing| {
+        let share = f.share(x, z);
+        if share == Fx::ZERO {
+            return Vec::new();
+        }
+        let h = f.height(x, z);
+        let top = lid.at(x, z) - MIST_UNDER.to_fx() + smoothstep(fx(0.35), fx(0.75), f.moorland.mist.at(x, z)) * MIST_OVER;
+        let depth = ((top - Units(h).to_fx()) * share).round_units().0;
+        if depth <= 0 {
+            return Vec::new();
+        }
+        vec![Span::medium(h + 1, depth, K::mist, MIST, spacing)]
+    })
 }
 
 /** The heath: heather, grass or bog over peat, a gravel path to each ring; heather and grass standing on it as media. */

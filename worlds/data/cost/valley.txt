@@ -20,6 +20,7 @@ spawn            0         0         0         0         0         0     16384  
 spawn            0         0         0         0         0         0     16384         0         0         0         0 railway's tunnels
 spawn            0         0         0         0         0         0     16384         0         0         0         0 railway
 spawn            0         0         0         0         0         0     16384     32768         0         0         0 water
+spawn            0         0         0         0         0         0     16384     16384         0         0         0 mist
 spawn            0         0         0         0         0         0         0       596       298       298         0 plan path
 spawn            0         0         0         0         0         0         0      4460        47        47         0 plan pools
 spawn            0         0         0         0         0         0         0       949        32        32         0 plan steadings
@@ -50,6 +51,7 @@ spawn            2         0         0         0         0         0     16384  
 spawn            2         0         0         0         0         0     16384         0         0         0         0 railway's tunnels
 spawn            2         0         0         0         0         0     16384         0         0         0         0 railway
 spawn            2         0         0         0         0         0     16384     32768         0         0         0 water
+spawn            2         0         0         0         0         0     16384     16384         0         0         0 mist
 spawn            2         0         0         0         0         0         0      1460       730       730         0 plan path
 spawn            2         0         0         0         0         0         0      9599       122       122         0 plan pools
 spawn            2         0         0         0         0         0         0      1879        79        79         0 plan steadings
@@ -81,6 +83,7 @@ spawn            4         0         0         0         0         0     16384  
 spawn            4         0         0      2743    612779         0         0         0         0         0         0 shadows
 spawn            4         0         0         0         0         0     16384     73806         0         0         0 trees
 spawn            4         0         0         0         0         0     16384     32768         0         0         0 water
+spawn            4         0         0         0         0         0     16384     16384         0         0         0 mist
 spawn            4         0         0         0         0         0         0      4622      2311      2311         0 plan path
 spawn            4         0         0         0         0         0         0     45065       189       189         0 plan landmarks
 spawn            4         0         0         0         0         0         0      5402       242       242         0 plan steadings
@@ -109,17 +112,19 @@ spawn            6         0         0         0         0         0     16384  
 spawn            6         0         0      2743    612779         0         0         0         0         0         0 shadows
 spawn            6         0         0         0         0         0     16384     79162         0         0         0 trees
 spawn            6         0         0         0         0         0     16384     32768         0         0         0 water
+spawn            6         0         0         0         0         0     16384     19816         0         0         0 mist
 spawn            6         0         0         0         0         0         0    109331      1092      1092         0 plan landmarks
-spawn            6         0         0         0         0         0         0     15385      8256      8256         0 plan path
-spawn            6         0         0         0         0         0         0     26722      1025      1025         0 plan steadings
-spawn            6         0         0         0         0         0         0    224330      5337      5337         0 plan pools
+spawn            6         0         0         0         0         0         0     15386      8257      8257         0 plan path
+spawn            6         0         0         0         0         0         0     26880      1029      1029         0 plan steadings
+spawn            6         0         0         0         0         0         0    226805      5355      5355         0 plan pools
 spawn            6         0         0         0         0         0         0       145        18        18         0 plan towns
-spawn            6         0         0         0         0         0         0    890271    148354    131980         0 plan ground
-spawn            6         0         0         0         0         0         0    391186     37142     23994         0 plan land
+spawn            6         0         0         0         0         0         0    890721    148436    132039         0 plan ground
+spawn            6         0         0         0         0         0         0    460351     43704     23994         0 plan land
 spawn            6         0         0         0         0         0         0       508       127       127         0 plan slope
 spawn            6         0         0         0         0         0         0     98362     16384     16384         0 plan forest columns
 spawn            6         0         0         0         0         0         0     30720     16384     16384         0 plan town spots
 spawn            6         0         0         0         0         0         0     18669     16384     16384         0 plan landmark spots
+spawn            6         0         0         0         0         0         0     23944      3851      3851         0 plan mist
 region1          0       361         0         0         0         0         0         0         0         0         0 trees
 region1          0        49        10         0         0         0         0        69         0         0         0 boulders
 region1          0       121        24         0         0         0         0       169         0         0         0 logs
@@ -140,6 +145,7 @@ region1          0         0         0         0         0         0     16384  
 region1          0         0         0         0         0         0     16384         0         0         0         0 railway's tunnels
 region1          0         0         0         0         0         0     16384         0         0         0         0 railway
 region1          0         0         0         0         0         0     16384     32768         0         0         0 water
+region1          0         0         0         0         0         0     16384     16384         0         0         0 mist
 region1          0         0         0         0         0         0         0       560       280       280         0 plan path
 region1          0         0         0         0         0         0         0      1183        67        67         0 plan steadings
 region1          0         0         0         0         0         0         0      3600        64        64         0 plan pools
@@ -170,6 +176,7 @@ region1          2         0         0         0         0         0     16384  
 region1          2         0         0         0         0         0     16384         0         0         0         0 railway's tunnels
 region1          2         0         0         0         0         0     16384         0         0         0         0 railway
 region1          2         0         0         0         0         0     16384     32768         0         0         0 water
+region1          2         0         0         0         0         0     16384     16384         0         0         0 mist
 region1          2         0         0         0         0         0         0      1378       689       689         0 plan path
 region1          2         0         0         0         0         0         0      2308       116       116         0 plan steadings
 region1          2         0         0         0         0         0         0      8657       129       129         0 plan pools
@@ -201,6 +208,7 @@ region1          4         0         0         0         0         0     16384  
 region1          4         0         0      2743    612779         0         0         0         0         0         0 shadows
 region1          4         0         0         0         0         0     16384     68891         0         0         0 trees
 region1          4         0         0         0         0         0     16384     32768         0         0         0 water
+region1          4         0         0         0         0         0     16384     16384         0         0         0 mist
 region1          4         0         0         0         0         0         0      4606      2303      2303         0 plan path
 region1          4         0         0         0         0         0         0     36601       538       538         0 plan pools
 region1          4         0         0         0         0         0         0    877661    131298    104778         0 plan ground
@@ -230,19 +238,21 @@ region1          6         0         0         0         0         0     16384  
 region1          6         0         0      2743    612779         0         0         0         0         0         0 shadows
 region1          6         0         0         0         0         0     16384     81038         0         0         0 trees
 region1          6         0         0         0         0         0     16384     32768         0         0         0 water
+region1          6         0         0         0         0         0     16384     17634         0         0         0 mist
 region1          6         0         0         0         0         0         0     75227      1058      1058         0 plan landmarks
 region1          6         0         0         0         0         0         0       568        85        85         0 plan towns
-region1          6         0         0         0         0         0         0     16496      8248      8248         0 plan path
-region1          6         0         0         0         0         0         0    272163      5355      5355         0 plan pools
-region1          6         0         0         0         0         0         0    950411    146641    128662         0 plan ground
-region1          6         0         0         0         0         0         0     37168      9292      9131         0 plan slope
-region1          6         0         0         0         0         0         0    427592     36891     24018         0 plan land
-region1          6         0         0         0         0         0         0     27077      1032      1032         0 plan steadings
+region1          6         0         0         0         0         0         0     16500      8250      8250         0 plan path
+region1          6         0         0         0         0         0         0    274072      5375      5375         0 plan pools
+region1          6         0         0         0         0         0         0    950964    146731    128723         0 plan ground
+region1          6         0         0         0         0         0         0     37448      9362      9131         0 plan slope
+region1          6         0         0         0         0         0         0    502403     43342     24018         0 plan land
+region1          6         0         0         0         0         0         0     27297      1037      1037         0 plan steadings
 region1          6         0         0         0         0         0         0      3398         1         1         0 plan railway's line
-region1          6         0         0         0         0         0         0     24909     22317     21175         0 plan railway
+region1          6         0         0         0         0         0         0     25050     22446     21175         0 plan railway
 region1          6         0         0         0         0         0         0     98376     16384     16384         0 plan forest columns
 region1          6         0         0         0         0         0         0     32768     16384     16384         0 plan town spots
 region1          6         0         0         0         0         0         0     21118     16384     16384         0 plan landmark spots
+region1          6         0         0         0         0         0         0      8340      1355      1355         0 plan mist
 region2          0       361         0         0         0         0         0         0         0         0         0 trees
 region2          0        49        10         0         0         0         0        69         0         0         0 boulders
 region2          0       121        26         0         0         0         0       173         0         0         0 logs
@@ -263,6 +273,7 @@ region2          0         0         0         0         0         0     16384  
 region2          0         0         0         0         0         0     16384         0         0         0         0 railway's tunnels
 region2          0         0         0         0         0         0     16384         0         0         0         0 railway
 region2          0         0         0         0         0         0     16384     32768         0         0         0 water
+region2          0         0         0         0         0         0     16384     16384         0         0         0 mist
 region2          0         0         0         0         0         0         0       544       272       272         0 plan path
 region2          0         0         0         0         0         0         0       941        74        74         0 plan steadings
 region2          0         0         0         0         0         0         0      5357        68        68         0 plan pools
@@ -293,6 +304,7 @@ region2          2         0         0         0         0         0     16384  
 region2          2         0         0         0         0         0     16384         0         0         0         0 railway's tunnels
 region2          2         0         0         0         0         0     16384         0         0         0         0 railway
 region2          2         0         0         0         0         0     16384     32768         0         0         0 water
+region2          2         0         0         0         0         0     16384     16384         0         0         0 mist
 region2          2         0         0         0         0         0         0      1300       650       650         0 plan path
 region2          2         0         0         0         0         0         0      2783       140       140         0 plan steadings
 region2          2         0         0         0         0         0         0     13148       143       143         0 plan pools
@@ -324,6 +336,7 @@ region3          0         0         0         0         0         0     16384  
 region3          0         0         0         0         0         0     16384         0         0         0         0 railway's tunnels
 region3          0         0         0         0         0         0     16384         0         0         0         0 railway
 region3          0         0         0         0         0         0     16384     32768         0         0         0 water
+region3          0         0         0         0         0         0     16384     16384         0         0         0 mist
 region3          0         0         0         0         0         0         0       616       308       308         0 plan path
 region3          0         0         0         0         0         0         0      5591        63        63         0 plan pools
 region3          0         0         0         0         0         0         0    211715     30245     30129         0 plan ground
@@ -354,6 +367,7 @@ region3          2         0         0         0         0         0     16384  
 region3          2         0         0         0         0         0     16384         0         0         0         0 railway's tunnels
 region3          2         0         0         0         0         0     16384         0         0         0         0 railway
 region3          2         0         0         0         0         0     16384     32768         0         0         0 water
+region3          2         0         0         0         0         0     16384     16384         0         0         0 mist
 region3          2         0         0         0         0         0         0      1470       735       735         0 plan path
 region3          2         0         0         0         0         0         0      9899       128       128         0 plan pools
 region3          2         0         0         0         0         0         0    701903    100299     90932         0 plan ground
@@ -385,6 +399,7 @@ region4          0         0         0         0         0         0     16384  
 region4          0         0         0         0         0         0     16384         0         0         0         0 railway's tunnels
 region4          0         0         0         0         0         0     16384         0         0         0         0 railway
 region4          0         0         0         0         0         0     16384     32768         0         0         0 water
+region4          0         0         0         0         0         0     16384     16384         0         0         0 mist
 region4          0         0         0         0         0         0         0       616       308       308         0 plan path
 region4          0         0         0         0         0         0         0      1798       103       103         0 plan steadings
 region4          0         0         0         0         0         0         0      9993        94        94         0 plan pools
@@ -415,6 +430,7 @@ region4          2         0         0         0         0         0     16384  
 region4          2         0         0         0         0         0     16384         0         0         0         0 railway's tunnels
 region4          2         0         0         0         0         0     16384         0         0         0         0 railway
 region4          2         0         0         0         0         0     16384     32768         0         0         0 water
+region4          2         0         0         0         0         0     16384     16384         0         0         0 mist
 region4          2         0         0         0         0         0         0      1432       716       716         0 plan path
 region4          2         0         0         0         0         0         0      2062       114       114         0 plan steadings
 region4          2         0         0         0         0         0         0     12252       153       153         0 plan pools
@@ -446,6 +462,7 @@ region4          4         0         0         0         0         0     16384  
 region4          4         0         0      2743    612779         0         0         0         0         0         0 shadows
 region4          4         0         0         0         0         0     16384     71852         0         0         0 trees
 region4          4         0         0         0         0         0     16384     32768         0         0         0 water
+region4          4         0         0         0         0         0     16384     16384         0         0         0 mist
 region4          4         0         0         0         0         0         0      4622      2311      2311         0 plan path
 region4          4         0         0         0         0         0         0      6468       275       275         0 plan steadings
 region4          4         0         0         0         0         0         0     42986       584       584         0 plan pools
@@ -478,6 +495,7 @@ region5          0         0         0         0         0         0     16384  
 region5          0         0         0         0         0         0     16384         0         0         0         0 railway's tunnels
 region5          0         0         0         0         0         0     16384         0         0         0         0 railway
 region5          0         0         0         0         0         0     16384     32768         0         0         0 water
+region5          0         0         0         0         0         0     16384     16384         0         0         0 mist
 region5          0         0         0         0         0         0         0      1085       170       170         0 plan towns
 region5          0         0         0         0         0         0         0       680       340       340         0 plan path
 region5          0         0         0         0         0         0         0      5791       259       259         0 plan steadings
@@ -509,6 +527,7 @@ region5          2         0         0         0         0         0     16384  
 region5          2         0         0         0         0         0     16384         0         0         0         0 railway's tunnels
 region5          2         0         0         0         0         0     16384         0         0         0         0 railway
 region5          2         0         0         0         0         0     16384     32768         0         0         0 water
+region5          2         0         0         0         0         0     16384     16384         0         0         0 mist
 region5          2         0         0         0         0         0         0      1085       170       170         0 plan towns
 region5          2         0         0         0         0         0         0      1328       664       664         0 plan path
 region5          2         0         0         0         0         0         0      6601       288       288         0 plan steadings
@@ -541,6 +560,7 @@ region5          4         0         0         0         0         0     16384  
 region5          4         0         0      2743    612779         0         0         0         0         0         0 shadows
 region5          4         0         0         0         0         0     16384     57600         0         0         0 trees
 region5          4         0         0         0         0         0     16384     32768         0         0         0 water
+region5          4         0         0         0         0         0     16384     16384         0         0         0 mist
 region5          4         0         0         0         0         0         0      1085       170       170         0 plan towns
 region5          4         0         0         0         0         0         0      4978      2282      2282         0 plan path
 region5          4         0         0         0         0         0         0    132652       440       440         0 plan landmarks
@@ -570,17 +590,19 @@ region5          6         0         0         0         0         0     16384  
 region5          6         0         0      2743    612779         0         0         0         0         0         0 shadows
 region5          6         0         0         0         0         0     16384     66218         0         0         0 trees
 region5          6         0         0         0         0         0     16384     32768         0         0         0 water
+region5          6         0         0         0         0         0     16384     17468         0         0         0 mist
 region5          6         0         0         0         0         0         0      1085       170       170         0 plan towns
 region5          6         0         0         0         0         0         0    211811      1408      1408         0 plan landmarks
 region5          6         0         0         0         0         0         0      9855         2         2         0 plan railway's line
-region5          6         0         0         0         0         0         0     18824      8222      8222         0 plan path
-region5          6         0         0         0         0         0         0     41075      1330      1330         0 plan steadings
-region5          6         0         0         0         0         0         0    301937      5471      5471         0 plan pools
-region5          6         0         0         0         0         0         0   1481998    235676    208865         0 plan ground
-region5          6         0         0         0         0         0         0    461415     37160     23922         0 plan land
+region5          6         0         0         0         0         0         0     18835      8226      8226         0 plan path
+region5          6         0         0         0         0         0         0     41392      1338      1338         0 plan steadings
+region5          6         0         0         0         0         0         0    306173      5540      5540         0 plan pools
+region5          6         0         0         0         0         0         0   1484389    236058    209158         0 plan ground
+region5          6         0         0         0         0         0         0    543499     43779     23922         0 plan land
 region5          6         0         0         0         0         0         0     98304     16384     16384         0 plan forest columns
 region5          6         0         0         0         0         0         0     37408     16384     16384         0 plan town spots
 region5          6         0         0         0         0         0         0     16384     16384     16384         0 plan landmark spots
+region5          6         0         0         0         0         0         0      7664      1229      1229         0 plan mist
 region6          0       361         0         0         0         0         0         0         0         0         0 trees
 region6          0        49        13         0         0         0         0        75         0         0         0 boulders
 region6          0       121        30         0         0         0         0       181         0         0         0 logs
@@ -601,19 +623,21 @@ region6          0         0         0         0         0         0     16384  
 region6          0         0         0         0         0         0     16384     13184         0         0         0 railway's tunnels
 region6          0         0         0         0         0         0     16384     13184         0         0         0 railway
 region6          0         0         0         0         0         0     16384     32768         0         0         0 water
+region6          0         0         0         0         0         0     16384     49152         0         0         0 mist
 region6          0         0         0         0         0         0         0       568        85        85         0 plan towns
-region6          0         0         0         0         0         0         0       560       280       280         0 plan path
+region6          0         0         0         0         0         0         0       564       282       282         0 plan path
 region6          0         0         0         0         0         0         0      8035       289       289         0 plan steadings
 region6          0         0         0         0         0         0         0     82173       372       372         0 plan landmarks
 region6          0         0         0         0         0         0         0      3398         1         1         0 plan railway's line
-region6          0         0         0         0         0         0         0     15894       109       109         0 plan pools
-region6          0         0         0         0         0         0         0    229359     29715     29609         0 plan ground
+region6          0         0         0         0         0         0         0     15928       110       110         0 plan pools
+region6          0         0         0         0         0         0         0    230046     29805     29641         0 plan ground
 region6          0         0         0         0         0         0         0    122400     20400     20400         0 plan forest columns
 region6          0         0         0         0         0         0         0    240494     20436     20436         0 plan land
 region6          0         0         0         0         0         0         0      1956       489       489         0 plan trees
-region6          0         0         0         0         0         0         0     21317     21317     21307         0 plan railway
+region6          0         0         0         0         0         0         0     21359     21359     21324         0 plan railway
 region6          0         0         0         0         0         0         0     32768     16384     16384         0 plan town spots
 region6          0         0         0         0         0         0         0     16384     16384     16384         0 plan landmark spots
+region6          0         0         0         0         0         0         0     65608     16393     16393         0 plan mist
 region6          2      1849         0         0         0         0         0         0         0         0         0 trees
 region6          2       361        88         0         0         0         0       537         0         0         0 boulders
 region6          2       529       131         0         0         0         0       791         0         0         0 logs
@@ -633,19 +657,21 @@ region6          2         0         0         0         0         0     16384  
 region6          2         0         0         0         0         0     16384      7296         0         0         0 railway's tunnels
 region6          2         0         0         0         0         0     16384      7296         0         0         0 railway
 region6          2         0         0         0         0         0     16384     32768         0         0         0 water
+region6          2         0         0         0         0         0     16384     49152         0         0         0 mist
 region6          2         0         0         0         0         0         0       568        85        85         0 plan towns
-region6          2         0         0         0         0         0         0      1300       650       650         0 plan path
-region6          2         0         0         0         0         0         0      8738       312       312         0 plan steadings
-region6          2         0         0         0         0         0         0     82533       382       382         0 plan landmarks
+region6          2         0         0         0         0         0         0      1304       652       652         0 plan path
+region6          2         0         0         0         0         0         0      8908       317       317         0 plan steadings
+region6          2         0         0         0         0         0         0     82624       385       385         0 plan landmarks
 region6          2         0         0         0         0         0         0      3398         1         1         0 plan railway's line
-region6          2         0         0         0         0         0         0     20651       176       176         0 plan pools
-region6          2         0         0         0         0         0         0    724598     97585     88608         0 plan ground
+region6          2         0         0         0         0         0         0     21037       179       179         0 plan pools
+region6          2         0         0         0         0         0         0    725955     97764     88664         0 plan ground
 region6          2         0         0         0         0         0         0    104886     17481     17481         0 plan forest columns
 region6          2         0         0         0         0         0         0    203029     17728     17720         0 plan land
 region6          2         0         0         0         0         0         0      8484      2121      2121         0 plan trees
-region6          2         0         0         0         0         0         0     40711     40711     39813         0 plan railway
+region6          2         0         0         0         0         0         0     40781     40781     39840         0 plan railway
 region6          2         0         0         0         0         0         0     32768     16384     16384         0 plan town spots
 region6          2         0         0         0         0         0         0     16384     16384     16384         0 plan landmark spots
+region6          2         0         0         0         0         0         0     66184     16465     16465         0 plan mist
 region6          4      4624      1130         0         0         0         0      6884         0         0         0 boulders
 region6          4      5184      1262         0         0         0         0      7708         0         0         0 logs
 region6          4        16         0         0         0         0         0        32         0         0         0 towns
@@ -666,19 +692,21 @@ region6          4         0         0         0         0         0     16384  
 region6          4         0         0      2743    612779         0         0         0         0         0         0 shadows
 region6          4         0         0         0         0         0     16384     57600         0         0         0 trees
 region6          4         0         0         0         0         0     16384     32768         0         0         0 water
+region6          4         0         0         0         0         0     16384     47938         0         0         0 mist
 region6          4         0         0         0         0         0         0       568        85        85         0 plan towns
-region6          4         0         0         0         0         0         0      4576      2288      2288         0 plan path
-region6          4         0         0         0         0         0         0     12028       433       433         0 plan steadings
-region6          4         0         0         0         0         0         0     87636       474       474         0 plan landmarks
+region6          4         0         0         0         0         0         0      4580      2290      2290         0 plan path
+region6          4         0         0         0         0         0         0     12955       457       457         0 plan steadings
+region6          4         0         0         0         0         0         0     87784       478       478         0 plan landmarks
 region6          4         0         0         0         0         0         0      3398         1         1         0 plan railway's line
-region6          4         0         0         0         0         0         0     36040       539       539         0 plan pools
-region6          4         0         0         0         0         0         0    843377    120570    103086         0 plan ground
+region6          4         0         0         0         0         0         0     40353       610       610         0 plan pools
+region6          4         0         0         0         0         0         0    845787    120917    103382         0 plan ground
 region6          4         0         0         0         0         0         0    241183     21036     20979         0 plan land
-region6          4         0         0         0         0         0         0     42221     42221     38376         0 plan railway
+region6          4         0         0         0         0         0         0     42370     42370     38506         0 plan railway
 region6          4         0         0         0         0         0         0    113063     18769     18769         0 plan forest columns
 region6          4         0         0         0         0         0         0     32768     16384     16384         0 plan town spots
 region6          4         0         0         0         0         0         0     17783     16384     16384         0 plan landmark spots
 region6          4         0         0         0         0         0         0     80020     19903     18769         0 plan trees
+region6          4         0         0         0         0         0         0     71820     16866     16866         0 plan mist
 region6          6        49         0         0         0         0         0        91         0         0         0 towns
 region6          6      4761         3         5       462       968         0      5146         0         0       226 landmarks
 region6          6     30625      7638       471       471         0         0     47178         0         0         1 moor boulders
@@ -696,18 +724,20 @@ region6          6         0         0         0         0         0     16384  
 region6          6         0         0      2743    612779         0         0         0         0         0         0 shadows
 region6          6         0         0         0         0         0     16384     69996         0         0         0 trees
 region6          6         0         0         0         0         0     16384     33013         0         0         0 water
+region6          6         0         0         0         0         0     16384     39586         0         0         0 mist
 region6          6         0         0         0         0         0         0      1085       170       170         0 plan towns
-region6          6         0         0         0         0         0         0    152006      1368      1368         0 plan landmarks
+region6          6         0         0         0         0         0         0    152041      1369      1369         0 plan landmarks
 region6          6         0         0         0         0         0         0      9855         2         2         0 plan railway's line
-region6          6         0         0         0         0         0         0     16586      8293      8293         0 plan path
-region6          6         0         0         0         0         0         0     37629      1285      1285         0 plan steadings
-region6          6         0         0         0         0         0         0    257720      5424      5424         0 plan pools
-region6          6         0         0         0         0         0         0    942952    145590    125610         0 plan ground
-region6          6         0         0         0         0         0         0    416051     37050     24021         0 plan land
-region6          6         0         0         0         0         0         0     19025     19025     18053         0 plan railway
+region6          6         0         0         0         0         0         0     16592      8296      8296         0 plan path
+region6          6         0         0         0         0         0         0     38497      1305      1305         0 plan steadings
+region6          6         0         0         0         0         0         0    270922      5584      5584         0 plan pools
+region6          6         0         0         0         0         0         0    949791    146597    126360         0 plan ground
+region6          6         0         0         0         0         0         0    489388     43581     24021         0 plan land
+region6          6         0         0         0         0         0         0     19288     19288     18132         0 plan railway
 region6          6         0         0         0         0         0         0     98395     16384     16384         0 plan forest columns
 region6          6         0         0         0         0         0         0     32768     16384     16384         0 plan town spots
 region6          6         0         0         0         0         0         0     17499     16384     16384         0 plan landmark spots
+region6          6         0         0         0         0         0         0    145108     23939     23939         0 plan mist
 region7          0       361        21        16    285565         0         0       219         0         0    155647 trees
 region7          0        49        13         1      1710         0         0        75         0         0      1710 boulders
 region7          0       121        26         0         0         0         0       173         0         0         0 logs
@@ -728,6 +758,7 @@ region7          0         0         0         0         0         0     16384  
 region7          0         0         0         0         0         0     16384     16384         0         0         0 railway's tunnels
 region7          0         0         0         0         0         0     16384     26418         0         0         0 railway
 region7          0         0         0         0         0         0     16384     32768         0         0         0 water
+region7          0         0         0         0         0         0     16384     16384         0         0         0 mist
 region7          0         0         0         0         0         0         0       596       298       298         0 plan path
 region7          0         0         0         0         0         0         0     66306     30088     29970         0 plan railway
 region7          0         0         0         0         0         0         0      2251       119       119         0 plan steadings
@@ -759,6 +790,7 @@ region7          2         0         0         0         0         0     16384  
 region7          2         0         0         0         0         0     16384     16384         0         0         0 railway's tunnels
 region7          2         0         0         0         0         0     16384     19008         0         0         0 railway
 region7          2         0         0         0         0         0     16384     32768         0         0         0 water
+region7          2         0         0         0         0         0     16384     16384         0         0         0 mist
 region7          2         0         0         0         0         0         0      1450       725       725         0 plan path
 region7          2         0         0         0         0         0         0    137943    100221     90915         0 plan railway
 region7          2         0         0         0         0         0         0      2998       138       138         0 plan steadings

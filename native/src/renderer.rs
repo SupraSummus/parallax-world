@@ -352,7 +352,7 @@ mod tests {
         let (frame, _) = crate::complete(&mut world, &mut renderer, camera, &view, false);
         let after = ids(&frame);
         let kept = after.intersection(&before).count();
-        // Level 0's cells, which change most, are half the frame's in the moor's heather, seen through.
-        assert!(kept * 10 > after.len() * 7, "{kept} of {} kept", after.len());
+        // Level 0's cells, which change most, are over half the frame's in the moor's heather and mist, seen through.
+        assert!(kept * 10 > after.len() * 6, "{kept} of {} kept", after.len());
     }
 }

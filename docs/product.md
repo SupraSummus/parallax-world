@@ -89,7 +89,7 @@ A spinner shows while a world generates.
   meadows, hedges), the forest thinning towards them.
   Moorland on the uplands under the treeline,
   and along stretches of the valley kilometres apart:
-  heather, grass and bog, pools in hollows, boulders,
+  heather, grass and bog, pools in hollows, mist pooled in them, boulders,
   and steadings of a drystone hut and a ring of standing stones.
   Landmarks standing alone: a ruined keep on a hilltop, a watchtower,
   wayside chapels, ponds, farmsteads and windmills.
@@ -101,7 +101,8 @@ A spinner shows while a world generates.
   and a station by each town it passes on the ground.
   Generated like the forest.
 - *Moor*: the valley's moorland alone: rolling heath, a stream and pools,
-  boulders, and steadings with a path of cairns between hut and ring.
+  mist in its hollows, boulders,
+  and steadings with a path of cairns between hut and ring.
   Generated like the forest.
 - *Learned*: the forest, with settlements along its path
   drawn by a split grammar learned from the valley's towns

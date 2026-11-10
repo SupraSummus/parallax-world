@@ -446,7 +446,8 @@ Numbers are for the forest at 1280×800, as measured when written.
 - Light along more directions at coarser levels, as radiance cascades do:
   near, light wants fine places and few directions; far, coarse places and many.
   Light keeps 12 at every level, too few far off (a lamp's lobes, blurred shadows).
-- Slices' splats that show alpha (the web's still show one coin per site):
+- Slices' splats that show alpha (the web's still show one coin per site,
+  so the moor's mist falls there as snow):
   a chunk keeps a column's voxels till their alpha adds up to whole,
   and splats that overlap in a slice may add up to an opaque one,
   the rest drawn see-through.
