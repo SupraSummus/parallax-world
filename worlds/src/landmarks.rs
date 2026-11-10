@@ -597,10 +597,10 @@ fn below(random: &mut Rng, n: i64) -> i64 {
 fn arch(wall: &mut Part, u: i64, v: i64, half: i64, tall: i64, deep: i64, kind: Option<Kind>) {
     let (uf, top, r) = (u as f64, (v + tall) as f64, half as f64);
     wall.cut([u - half, v, 0], [u + half, v + tall, deep]);
-    wall.lathe([uf, top, 0.0], [uf, top, deep as f64], move |_| r, 0, SOLID, Op::Carve);
+    wall.lathe([uf, top, 0.0], [uf, top, deep as f64], r, 0, SOLID, Op::Carve);
     if let Some(kind) = kind {
         wall.paint([u - half, v, deep], [u + half, v + tall, deep + 1], kind);
-        wall.lathe([uf, top, deep as f64], [uf, top, (deep + 1) as f64], move |_| r, kind, SOLID, Op::Paint);
+        wall.lathe([uf, top, deep as f64], [uf, top, (deep + 1) as f64], r, kind, SOLID, Op::Paint);
     }
 }
 
@@ -675,7 +675,7 @@ fn ruin(s: &Site, random: &mut Rng) -> Node {
                     wall.lathe(
                         [c as f64, m(2.2) as f64, 0.0],
                         [c as f64, m(2.2) as f64, t as f64],
-                        |_| m(1.2) as f64,
+                        m(1.2) as f64,
                         T::churchStone,
                         SOLID,
                         Op::Paint,
@@ -699,7 +699,7 @@ fn ruin(s: &Site, random: &mut Rng) -> Node {
         let (c, r) = ((keep - t / 2) as f64, m(2.4) as f64);
         let top = m(10.5) + below(random, m(3.0));
         k.lathe([c, -m(1.0) as f64, c], [c, top as f64, c], move |h| r + 3.0 * (1.0 - h), stone, SOLID, Op::Fill);
-        k.lathe([c, (top - 3) as f64, c], [c, top as f64, c], move |_| r + 1.0, moss, SOLID, Op::Paint);
+        k.lathe([c, (top - 3) as f64, c], [c, top as f64, c], r + 1.0, moss, SOLID, Op::Paint);
         for j in 0..8 {
             if !random.chance(fx(0.7)) {
                 continue;
@@ -723,7 +723,7 @@ fn ruin(s: &Site, random: &mut Rng) -> Node {
     part.add([u0, -m(0.8), w0], [u0 + pier, arch_top, w0 + 2 * pier + gap], stone);
     part.cut([u0, 0, w0 + pier], [u0 + pier, m(2.0), w0 + pier + gap]);
     let (head, mid) = (m(2.0) as f64, (w0 + pier + gap / 2) as f64);
-    part.lathe([u0 as f64, head, mid], [(u0 + pier) as f64, head, mid], move |_| (gap / 2) as f64, 0, SOLID, Op::Carve);
+    part.lathe([u0 as f64, head, mid], [(u0 + pier) as f64, head, mid], (gap / 2) as f64, 0, SOLID, Op::Carve);
     part.paint([u0, arch_top - 3, w0], [u0 + pier, arch_top, w0 + 2 * pier + gap], moss);
     // Rubble round the walls' feet, half sunk.
     for _ in 0..20 + below(random, 10) {
@@ -834,12 +834,12 @@ fn chapel(s: &Site, random: &mut Rng) -> Node {
         let mut wall = nave.within(front);
         // A door under a round arch of darker stone, steps before it, a round window over it.
         wall.paint([c - 7, 0, 0], [c + 7, m(2.0), 1], F::stone);
-        wall.lathe([c as f64, m(2.0) as f64, 0.0], [c as f64, m(2.0) as f64, 1.0], |_| 7.0, F::stone, SOLID, Op::Paint);
+        wall.lathe([c as f64, m(2.0) as f64, 0.0], [c as f64, m(2.0) as f64, 1.0], 7.0, F::stone, SOLID, Op::Paint);
         arch(&mut wall, c, 0, 5, m(2.0), 3, Some(T::door.into()));
         wall.add([c - 9, -3, -m(0.9)], [c + 9, 1, 0], F::stone);
         let v = (top + 7) as f64;
-        wall.lathe([c as f64, v, 0.0], [c as f64, v, 2.0], |_| 3.5, 0, SOLID, Op::Carve);
-        wall.lathe([c as f64, v, 2.0], [c as f64, v, 3.0], |_| 3.5, T::glass, SOLID, Op::Paint);
+        wall.lathe([c as f64, v, 0.0], [c as f64, v, 2.0], 3.5, 0, SOLID, Op::Carve);
+        wall.lathe([c as f64, v, 2.0], [c as f64, v, 3.0], 3.5, T::glass, SOLID, Op::Paint);
     }
     for frame in [right, left] {
         let mut wall = nave.within(frame);
@@ -850,7 +850,7 @@ fn chapel(s: &Site, random: &mut Rng) -> Node {
     // The apse: a half round at the back, lower, under a cone.
     let (cu, back, r) = (c as f64, (length - 1) as f64, (width / 2 - 3) as f64);
     let eaves = (top - m(0.6)) as f64;
-    nave.lathe([cu, -m(1.5) as f64, back], [cu, eaves, back], move |_| r, stone, SOLID, Op::Fill);
+    nave.lathe([cu, -m(1.5) as f64, back], [cu, eaves, back], r, stone, SOLID, Op::Fill);
     nave.lathe(
         [cu, eaves - 2.0, back],
         [cu, eaves + m(1.8) as f64, back],
@@ -904,7 +904,7 @@ fn pond(s: &Site, random: &mut Rng) -> Node {
         let (a, d) = (random.next() * 2.0 * std::f64::consts::PI, 0.2 + random.next() * 0.45);
         let (u, w) = (cu as f64 + ra * d * js::cos(a), (sw / 2) as f64 + rb * d * js::sin(a));
         let r = 2.0 + random.next() * 2.0;
-        part.lathe([u, water, w], [u, water + 2.0, w], move |_| r, K::lily, SOLID, Op::Paint);
+        part.lathe([u, water, w], [u, water + 2.0, w], r, K::lily, SOLID, Op::Paint);
     }
     Node::group(vec![Child::new("jetty", ANY_SIZE, Node::of(jetty)), Child::new("lilies", m(0.5), Node::of(lilies))])
 }
@@ -1005,9 +1005,9 @@ fn barn(part: &mut Part, length: i64, depth: i64, random: &mut Rng) {
 /** A well: a ring of stone with water down in it, two posts and a little roof. */
 fn well(part: &mut Part, random: &mut Rng) {
     let (r, rim) = (m(0.8) as f64, m(0.8));
-    part.lathe([0.0, -2.0, 0.0], [0.0, rim as f64, 0.0], move |_| r, F::stone, SOLID, Op::Fill);
-    part.lathe([0.0, m(0.4) as f64, 0.0], [0.0, (rim + 1) as f64, 0.0], move |_| r - 2.0, 0, SOLID, Op::Carve);
-    part.lathe([0.0, (m(0.4) - 2) as f64, 0.0], [0.0, m(0.4) as f64, 0.0], move |_| r - 2.0, T::water, SOLID, Op::Paint);
+    part.lathe([0.0, -2.0, 0.0], [0.0, rim as f64, 0.0], r, F::stone, SOLID, Op::Fill);
+    part.lathe([0.0, m(0.4) as f64, 0.0], [0.0, (rim + 1) as f64, 0.0], r - 2.0, 0, SOLID, Op::Carve);
+    part.lathe([0.0, (m(0.4) - 2) as f64, 0.0], [0.0, m(0.4) as f64, 0.0], r - 2.0, T::water, SOLID, Op::Paint);
     for u in [-m(0.9), m(0.9) - 2] {
         part.add([u, 0, -1], [u + 2, m(2.0), 1], F::deadwood);
     }
@@ -1029,9 +1029,9 @@ fn windmill(s: &Site, random: &mut Rng) -> Node {
     let (u, w) = (cu as f64, cw as f64);
     let (r0, r1) = (m(3.1) as f64, m(2.3) as f64);
     let h = m(10.0) + below(random, m(1.5));
-    part.lathe([u, -m(1.2) as f64, w], [u, m(1.0) as f64, w], move |_| r0 + 2.0, T::churchStone, SOLID, Op::Fill);
+    part.lathe([u, -m(1.2) as f64, w], [u, m(1.0) as f64, w], r0 + 2.0, T::churchStone, SOLID, Op::Fill);
     part.lathe([u, 0.0, w], [u, h as f64, w], move |t| r0 + (r1 - r0) * t, T::plasterWhite, SOLID, Op::Fill);
-    part.lathe([u, m(3.6) as f64, w], [u, (m(3.6) + 2) as f64, w], move |_| r0 + m(1.0) as f64, T::planks, SOLID, Op::Fill);
+    part.lathe([u, m(3.6) as f64, w], [u, (m(3.6) + 2) as f64, w], r0 + m(1.0) as f64, T::planks, SOLID, Op::Fill);
     // Its door to the front; windows round it at heights of their own.
     let front = cw - r0 as i64;
     part.cut([cu - 5, 0, front - 3], [cu + 5, m(2.1), front + 5]);

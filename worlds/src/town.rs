@@ -1108,11 +1108,11 @@ fn fountain(t: &Town) -> Node {
     let mut f = Part::new(Frame::at([t.x, t.level + 1, t.square_z()]), &mut shapes);
     let (stone, water) = (k(K::churchStone), k(K::water));
     let up = |y: f64| [0.0, y, 0.0];
-    f.lathe(up(-1.0), up(5.0), |_| m(3.0) as f64, stone, SOLID, Op::Fill);
-    f.lathe(up(3.0), up(5.0), |_| (m(3.0) - 3) as f64, water, SOLID, Op::Paint);
-    f.lathe(up(5.0), up(15.0), |_| 3.0, stone, SOLID, Op::Fill);
+    f.lathe(up(-1.0), up(5.0), m(3.0) as f64, stone, SOLID, Op::Fill);
+    f.lathe(up(3.0), up(5.0), (m(3.0) - 3) as f64, water, SOLID, Op::Paint);
+    f.lathe(up(5.0), up(15.0), 3.0, stone, SOLID, Op::Fill);
     f.lathe(up(14.0), up(18.0), |t| 4.0 + 6.0 * t, stone, SOLID, Op::Fill);
-    f.lathe(up(17.0), up(18.0), |_| 7.0, water, SOLID, Op::Paint);
+    f.lathe(up(17.0), up(18.0), 7.0, water, SOLID, Op::Paint);
     f.ball(up(20.0), 2.0, stone, Op::Fill);
     Node::of(shapes)
 }
@@ -1123,9 +1123,9 @@ fn well(t: &Town, [x, z]: [i64; 2]) -> Node {
     let mut f = Part::new(Frame::at([x, t.level + 1, z]), &mut shapes);
     let up = |y: i64| [0.0, y as f64, 0.0];
     let roof = k(t.style.palette().roofs[0]);
-    f.lathe(up(-1), up(m(0.9)), |_| m(1.1) as f64, k(K::churchStone), SOLID, Op::Fill);
-    f.lathe(up(m(0.4)), up(m(0.9) + 1), |_| m(0.8) as f64, 0, SOLID, Op::Carve);
-    f.lathe(up(m(0.4) - 1), up(m(0.4)), |_| m(0.8) as f64, k(K::water), SOLID, Op::Paint);
+    f.lathe(up(-1), up(m(0.9)), m(1.1) as f64, k(K::churchStone), SOLID, Op::Fill);
+    f.lathe(up(m(0.4)), up(m(0.9) + 1), m(0.8) as f64, 0, SOLID, Op::Carve);
+    f.lathe(up(m(0.4) - 1), up(m(0.4)), m(0.8) as f64, k(K::water), SOLID, Op::Paint);
     for u in [-m(1.0) - 1, m(1.0) - 1] {
         f.add([u, 0, -1], [u + 2, m(2.3), 1], k(K::timber));
     }
@@ -1278,7 +1278,7 @@ fn town_wall(t: &Town) -> Vec<(String, Node)> {
         let mut shapes = Vec::new();
         let mut part = Part::new(frame, &mut shapes);
         let (c, r, tall) = ((TOWN_WALL / 2) as f64, m(2.75) as f64, m(8.0) as f64);
-        part.lathe([c, -m(1.5) as f64, c], [c, tall, c], move |_| r, stone, SOLID, Op::Fill);
+        part.lathe([c, -m(1.5) as f64, c], [c, tall, c], r, stone, SOLID, Op::Fill);
         part.lathe([c, tall, c], [c, tall + m(4.0) as f64, c], move |t| (r + 3.0) * (1.0 - t) + 1.0, roof, SOLID, Op::Fill);
         pieces.push((format!("tower {side}"), thing(shapes)));
     }

@@ -1,5 +1,5 @@
-//! Each solid the engine draws (a tube's pieces are capsules) keeps the
-//! contract (worldgen::contract) to the levels its case names, wherever
+//! Each solid the engine draws (a tube's pieces are capsules, or cones
+//! where its radius changes) keeps the contract (worldgen::contract) to the levels its case names, wherever
 //! it falls against the sites: many of one case, of sizes and places
 //! drawn at random, on a ground.
 //! Bright on dark, as small shares of a bright colour differ the most in
@@ -7,11 +7,12 @@
 
 use worldgen::World;
 use worldgen::contract::{Measure, margins, whole_equals_parts};
+use worldgen::curve::Curve;
 use worldgen::generator::{
-    Field, Generator, KindDef, Layer, Node, Op, Point, Population, SOLID, Shape, Span, ball, capsule, cuboid, ellipsoid, gable, lathe,
+    Field, Generator, KindDef, Layer, Node, Op, Point, Population, SOLID, Shape, Span, ball, capsule, cuboid, ellipsoid, gable, lathe, tube,
 };
 use worldgen::grid::Box3;
-use worldgen::noise::Rng;
+use worldgen::noise::{Rng, fx};
 
 static KINDS: &[KindDef] = &[
     KindDef { name: "ground", kind_type: 1, colors: &["#222222"], walk_through: false, glows: false },
@@ -70,6 +71,17 @@ const CASES: &[(&str, i64, Make, u32, u32)] = &[
             let (l, turn, y) = (about(r, 12.0), r.next() * std::f64::consts::TAU, p[1] + about(r, 4.0));
             let q = [p[0] + l * turn.cos(), y + l * (r.next() - 0.5), p[2] + l * turn.sin()];
             capsule([p[0], y, p[2]], q, about(r, 0.5), BRIGHT, SOLID, Op::Fill)
+        },
+        5,
+        5,
+    ),
+    (
+        "bent cone",
+        24,
+        |p, r| {
+            let (h, w) = (about(r, 20.0), about(r, 2.0));
+            let bend = Curve::wandering(r.next_u64(), vec![fx(2.0), fx(1.0)]);
+            tube(&bend, [p[0], p[1] - 1.0, p[2]], [p[0], p[1] + h, p[2]], move |t| w * (1.0 - t * 2.0 / 3.0), BRIGHT, SOLID, Op::Fill)
         },
         5,
         5,

@@ -71,9 +71,9 @@ A world is **layers** of two kinds, drawn in `order`:
 
 A thing is a **node**: its **shapes**, and **children**,
 finer things it makes only for the area asked for (`Children::Reaching`).
-Shapes are analytic: `ball`, `ellipsoid`, `tube` (along a curve, below)
-and `capsule` (a straight one), `cuboid`, `lathe`
-(a solid of revolution, e.g. a crown).
+Shapes are analytic: `ball`, `ellipsoid`, `tube` (along a curve, below),
+`capsule` and `lathe` (straight tubes, their ends round or flat:
+a twig, a crown), `cuboid`.
 Each `fill`s empty sites, `paint`s over them, or `carve`s them empty,
 and may keep each site only with a chance (`fill` < 1: foliage, fog).
 Authors never write sites; the framework draws shapes and fields at the level asked.
@@ -112,6 +112,9 @@ A **tube** is the points within a radius of a curve: a branch, a root.
 At sites s apart it is drawn through the points of the coarsest level
 whose corridor is s / 2 or less,
 so far away it is the same curve, coarser, within half a site of where it is.
+Its radius is a parameter, as fill is:
+the same all along, or a function of how far along
+(`Radius`: a trunk narrowing, a crown's whorls).
 The forest's branches bend a little, along random curves (`Curve::wandering`).
 
 No direction is special;
