@@ -57,7 +57,9 @@ struct App {
     colours: Colours,
     see_through: SeeThrough,
     stats: String,
-    frame_ms: f64,
+    times: window::Times,
+    /** How long the renderer took to pick the last frame's chunks, ms. */
+    picking: f64,
     /** Walking on the ground (bake's walk.rs): the body the camera is the eye of; None flying. */
     walker: Option<Walker>,
     /** By material id, whether a walking body goes through it (KindDef::walk_through). */
@@ -79,8 +81,11 @@ impl window::Content for App {
         last_frame()
     }
 
+    fn timed(&mut self, times: window::Times) {
+        self.times = times;
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui) {
-        let start = Instant::now();
         egui::Panel::left("panel").show(ui, |ui| {
             ui.heading("Parallax (native spike)");
             ui.label(&self.stats);
@@ -115,7 +120,11 @@ impl window::Content for App {
                 "camera {:.0} {:.0} {:.0}  yaw {:.0}  pitch {:.0}",
                 self.camera[0], self.camera[1], self.camera[2], self.yaw, self.pitch
             ));
-            ui.label(format!("render {:.1} ms", self.frame_ms));
+            let t = self.times;
+            ui.label(format!(
+                "frame {:.1} ms: ui {:.1} (chunks picked {:.1}), upload {:.1}, waiting for the GPU {:.1}, the rest {:.1}",
+                t.since, t.ui, self.picking, t.upload, t.waiting, t.rest
+            ));
             ui.label("WASD, Space/Shift, arrows or drag\nWalking: Space jumps, Shift sneaks");
         });
         egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
@@ -154,7 +163,9 @@ impl window::Content for App {
             let (width, height) = (rect.width() as f64, rect.height() as f64);
             let focal = focal_length(self.fov, width, height);
             let view = view::View { yaw: self.yaw, pitch: self.pitch, width, height, focal };
+            let start = Instant::now();
             let (frame, stats) = self.renderer.render(self.camera, &view);
+            self.picking = start.elapsed().as_secs_f64() * 1000.0;
             // Drawn from the next frame on.
             // Walking, the ground's level too, whether drawn or not.
             let mut levels = stats.levels;
@@ -191,7 +202,6 @@ impl window::Content for App {
                 ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
             }
         });
-        self.frame_ms = start.elapsed().as_secs_f64() * 1000.0;
     }
 }
 
@@ -493,7 +503,8 @@ fn main() {
         colours: Colours::Voxels,
         see_through: SeeThrough::Chance,
         stats: String::new(),
-        frame_ms: 0.0,
+        times: window::Times::default(),
+        picking: 0.0,
         walker: None,
         walk_through: materials_of(&shown.generator).iter().map(|m| m.walk_through).collect(),
         sky,
