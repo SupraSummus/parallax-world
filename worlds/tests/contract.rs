@@ -15,12 +15,8 @@ const SEEDS: &[u64] = &[REGIONS_SEED, 1, 2, 3];
  * still break, so the list only shrinks; each is planned work in
  * docs/todo.md.
  */
-const KNOWN_BREAKS: &[(&str, u64, &str)] = &[
-    ("valley", 1, "landmarks sail"),
-    ("valley", 2, "landmarks sail"),
-    ("valley", 3, "landmarks sail"),
-    ("valley", 2, "towns › block › house plasterSage"),
-];
+const KNOWN_BREAKS: &[(&str, u64, &str)] =
+    &[("valley", 1, "landmarks sail"), ("valley", 2, "landmarks sail"), ("valley", 3, "landmarks sail")];
 
 /**
  * `entry`'s world keeps the contract at each of SEEDS, in regions

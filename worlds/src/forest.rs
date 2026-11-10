@@ -595,6 +595,104 @@ fn trunk(x: f64, ground: f64, z: f64, top: f64, width: f64, kind: K) -> Shape {
     Shape::cuboid([x, ground - 1.0, z], [x + width, top + 1.0, z + width], kind).paint()
 }
 
+/** A round trunk from `foot` up to `top`, narrowing from `radius[0]` to `radius[1]`. */
+#[derive(Clone, Copy)]
+struct Bole {
+    foot: Point,
+    top: Point,
+    radius: [f64; 2],
+}
+
+impl Bole {
+    /** From just below `ground` at (x, z) up to `top`, leaning by up to 0.4 m each way. */
+    fn standing(x: f64, ground: f64, z: f64, top: f64, radius: [f64; 2], random: &mut Rng) -> Bole {
+        let mut lean = || (random.next() - 0.5) * vox(0.8);
+        Bole { foot: [x, ground - 1.0, z], top: [x + lean(), top + 1.0, z + lean()], radius }
+    }
+
+    /** Its axis at height y, within its ends. */
+    fn axis(&self, y: f64) -> Point {
+        let t = ((y - self.foot[1]) / (self.top[1] - self.foot[1])).clamp(0.0, 1.0);
+        [0, 1, 2].map(|i| self.foot[i] + t * (self.top[i] - self.foot[i]))
+    }
+
+    /** Its radius along it, narrowing evenly. */
+    fn radius(&self) -> impl Fn(f64) -> f64 + 'static {
+        let [r0, r1] = self.radius;
+        move |t| r0 + t * (r1 - r0)
+    }
+
+    fn shape(&self, kind: K) -> Shape {
+        Shape::capsule(self.foot, self.top, self.radius(), kind).paint()
+    }
+
+    /**
+     * Furrows painted down it, by `seed`: one every `apart` units around
+     * its foot, in runs about a metre long, each a little to the side of
+     * the last, with gaps between.
+     */
+    fn furrows(self, apart: f64, kind: K, seed: u64) -> Shape {
+        let count = 3f64.max(round(2.0 * PI * self.radius[0] / apart));
+        let run = vox(1.0);
+        let furrow = move |x: f64, y: f64, z: f64| {
+            let [ax, _, az] = self.axis(y);
+            let u = (js::atan2(z - az, x - ax) / (2.0 * PI) + 0.5) * count;
+            let k = u.floor() as i64;
+            let along = y + unit(hash(seed, k, 0, 0)) * run;
+            let j = (along / run).floor() as i64;
+            let (shift, gap) = (unit(hash(seed, k, j, 1)) - 0.5, unit(hash(seed, k, j, 2)) * 0.3);
+            let within = (u - k as f64 - 0.5 - 0.4 * shift).abs() < 0.25 && js::wrap(along, run) < run * (1.0 - gap);
+            if within { 1.0 } else { 0.0 }
+        };
+        capsule(self.foot, self.top, self.radius(), k(kind), Fill::At(Rc::new(furrow)), Op::Paint)
+    }
+}
+
+/**
+ * A tree's branches and their tips, where its leaves grow. Between its
+ * leaves they show, from above too, so they are drawn with the tree.
+ */
+struct Crown {
+    kind: K,
+    forks: usize,
+    tubes: Vec<Shape>,
+    tips: Vec<Point>,
+}
+
+impl Crown {
+    fn new(kind: K, forks: usize) -> Crown {
+        Crown { kind, forks, tubes: Vec::new(), tips: Vec::new() }
+    }
+
+    /**
+     * A branch of `fork` from `start` to `end`, `radius` thick at its foot,
+     * forking at its tip into two, shorter and thinner, spreading apart and
+     * a little up, until the last fork.
+     */
+    fn grow(&mut self, start: Point, end: Point, radius: f64, fork: usize, random: &mut Rng) {
+        let tip = radius * 0.7;
+        self.tubes.push(Shape::tube(&branch(), start, end, move |t| radius - t * (radius - tip), self.kind).paint());
+        if fork == self.forks {
+            self.tips.push(end);
+            return;
+        }
+        let length = js::hypot(&[0, 1, 2].map(|i| end[i] - start[i]));
+        let d = [0, 1, 2].map(|i| (end[i] - start[i]) / length);
+        // Across it, at random.
+        let w = direction(random);
+        let wd: f64 = (0..3).map(|i| w[i] * d[i]).sum();
+        let u = [0, 1, 2].map(|i| w[i] - wd * d[i]);
+        let ul = js::hypot(&u).max(1e-9);
+        for side in [1.0, -1.0] {
+            let a = 0.4 + random.next() * 0.3;
+            let mut v = [0, 1, 2].map(|i| d[i] * js::cos(a) + side * u[i] / ul * js::sin(a));
+            v[1] += 0.2;
+            let reach = length * (0.5 + random.next() * 0.1) / js::hypot(&v);
+            self.grow(end, [0, 1, 2].map(|i| end[i] + v[i] * reach), tip, fork + 1, random);
+        }
+    }
+}
+
 /** A random direction, evenly over the sphere. */
 fn direction(random: &mut Rng) -> Point {
     let y = 2.0 * random.next() - 1.0;
@@ -715,7 +813,9 @@ fn roots(x: f64, ground: f64, z: f64, half: f64, kind: K, random: &mut Rng, grou
             let (ex, ez) = (x + c * out, z + s * out);
             let p = [x + c * half * 0.6, ground + vox(0.35), z + s * half * 0.6];
             let q = [ex, (ground_at(round(ex) as i64, round(ez) as i64) - 1) as f64, ez];
-            Shape::capsule(p, q, vox(0.15 + random.next() * 0.08), kind)
+            let r = vox(0.15 + random.next() * 0.08);
+            // Thicker at its foot.
+            Shape::capsule(p, q, move |t| r * (1.3 - 0.7 * t), kind)
         })
         .collect()
 }
@@ -842,42 +942,43 @@ fn birch_tree(x: f64, ground: f64, z: f64, random: &mut Rng) -> Node {
     tree(shapes, branches, vec![dashes], clusters)
 }
 
-/** Broad oak: thick trunk, a few branches each ending in a leaf cluster. */
+/** Broad oak: thick trunk, a few limbs forking twice, a leaf cluster at each tip. */
 fn oak_tree(x: f64, ground: f64, z: f64, random: &mut Rng, ground_at: GroundAt) -> Node {
     let height = vox(12.0 + random.next() * 8.0);
     let trunk_top = ground + round(height * (0.45 + random.next() * 0.1));
     let width = vox(1.0);
-    let mut shapes = vec![trunk(x, ground, z, trunk_top, width, K::bark)];
+    // The middle of `width` sites from x and z.
+    let (cx, cz) = (x + (width - 1.0) / 2.0, z + (width - 1.0) / 2.0);
+    let bole = Bole::standing(cx, ground, cz, trunk_top, [0.55 / UNIT_SIZE, 0.33 / UNIT_SIZE], random);
+    let mut shapes = vec![bole.shape(K::bark)];
     let foliage = foliage(Species::Oak, random.next());
     let turning = if foliage == K::oakGold { K::oakOrange } else { K::oakGold };
-    let cx = x + (width - 1.0) / 2.0;
-    let cz = z + (width - 1.0) / 2.0;
     shapes.extend(roots(cx, ground, cz, width / 2.0, K::bark, random, ground_at));
-    let branches = 4.0 + random.below(3) as f64;
-    let mut ends: Vec<Point> = vec![[cx, ground + height - vox(2.0), cz]];
-    let (mut hidden, bend) = (Vec::new(), branch());
-    for i in 0..branches as usize {
-        let angle = (i as f64 / branches) * PI * 2.0 + random.next() * 0.8;
-        let reach = vox(2.5 + random.next() * 2.5);
-        let start_y = trunk_top - (random.next() * vox(2.0)).floor();
-        let end_x = cx + js::cos(angle) * reach;
-        let end_y = (start_y + vox(2.0 + random.next() * 3.0)).min(ground + height - vox(1.5));
-        let end = [end_x, end_y, cz + js::sin(angle) * reach];
-        hidden.push(Shape::tube(&bend, [cx, start_y, cz], end, BRANCH_RADIUS * 1.5, K::bark).paint());
-        ends.push(end);
+    let mut crown = Crown::new(K::bark, 2);
+    // A leader up the middle and limbs around it; their forks reach about as far again.
+    let crest = bole.axis(ground + height - vox(5.0));
+    crown.grow(bole.axis(trunk_top - vox(0.5)), crest, BRANCH_RADIUS * 2.0, 0, random);
+    let limbs = 4.0 + random.below(3) as f64;
+    for i in 0..limbs as usize {
+        let angle = (i as f64 / limbs) * PI * 2.0 + random.next() * 0.8;
+        let reach = vox(1.5 + random.next());
+        let start = bole.axis(trunk_top - (random.next() * vox(2.0)).floor());
+        let end = [start[0] + js::cos(angle) * reach, start[1] + vox(1.0 + random.next() * 1.5), start[2] + js::sin(angle) * reach];
+        crown.grow(start, end, BRANCH_RADIUS * 2.0, 0, random);
     }
-    let clusters = ends
+    let clusters = crown
+        .tips
         .iter()
         .enumerate()
-        .map(|(i, end)| {
-            let radius = vox(1.8 + random.next() * 1.2);
-            leaf_cluster(format!("leaves {i}"), *end, radius, foliage, 0.4, random, 0.0, turning)
+        .map(|(i, tip)| {
+            let radius = vox(1.1 + random.next() * 0.6);
+            leaf_cluster(format!("leaves {i}"), *tip, radius, foliage, 0.4, random, 0.0, turning)
         })
         .collect();
-    let fine = vec![fine_child("bark", shapes[0].bounds, random, move |random| {
-        bark(x, z, width, ground, trunk_top, BarkStyle::Furrows, K::barkFurrow, random)
-    })];
-    tree(shapes, hidden, fine, clusters)
+    let seed = random.next_u64();
+    let fine = vec![fine_child("bark", shapes[0].bounds, random, move |_| vec![bole.furrows(3.0, K::barkFurrow, seed)])];
+    shapes.extend(crown.tubes);
+    tree(shapes, Vec::new(), fine, clusters)
 }
 
 // Undergrowth on the ground at (x, y, z): blades, stems and leaves a unit or two thick.

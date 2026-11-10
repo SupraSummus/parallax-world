@@ -115,7 +115,8 @@ so far away it is the same curve, coarser, within half a site of where it is.
 Its radius is a parameter, as fill is:
 the same all along, or a function of how far along
 (`Radius`: a trunk narrowing, a crown's whorls).
-The forest's branches bend a little, along random curves (`Curve::wandering`).
+The forest's branches bend a little, along random curves (`Curve::wandering`);
+its oaks' trunks lean and narrow, and their limbs fork twice (`Crown`).
 
 No direction is special;
 a world with a ground says so in its fields and anchors.

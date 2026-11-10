@@ -307,7 +307,8 @@ Numbers are for the forest at 1280×800, as measured when written.
   the wheat showed less but the stubble under it more.
 - **Measured houses show their walls from above at level 6**,
   which the contract does not check, and at level 4 in a region of houses alone
-  (seed 2: plaster 0.19 against 0.01 at level 0, 0.106 apart).
+  (seed 2: plaster 0.19 against 0.01 at level 0, 0.106 apart;
+  within the contract since the oaks among them are round, likely by chance).
   Around the valley's first town's centre (seed 42),
   level 6 shows 46 % houses from above against 25 % at level 0,
   and 16 % roofs against 24 %: the rest is walls, timber and stone
@@ -522,9 +523,9 @@ Composing generators (section "Composing" of `docs/generators.md`), untried:
   and a tube's against each piece of the level drawn
   (bent, the forest's branches cost a few percent more at level 0).
   A span per row from the pieces' boxes would keep the test exact.
-- Trunks as tubes, bent where the birch's boxes step,
-  narrowing (`Radius`),
-  and bark marks on round faces, not on boxes' faces.
+- More trees as the oak (`Bole` and `Crown` in `worlds/src/forest.rs`):
+  the birch's trunk round, bent where its boxes step, its branches forking;
+  the spruce's trunk round.
 - Solve what a coarse cell decides (a block's lots, a room's furniture)
   with a small search whose boundaries the coarser band fixes:
   constraint solving stays local and needs no backtracking across cells.
