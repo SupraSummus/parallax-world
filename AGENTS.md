@@ -64,7 +64,7 @@ bake/                        # Chunk baker, coverage and walking in Rust (no dep
     ├── tables.rs            # The voxel's faces in lattice coordinates, the materials shaded per view face
     ├── splats.rs            # Which voxels a chunk shows, each a hexagon at its site: of a slice, each column's nearest over its run; of a cell, each a ray can enter
     ├── light.rs             # The light from voxels' faces, as hosts that light a world hand it over
-    ├── lod.rs               # Native's chunks: whole cells of the lattice, each face's levels by depth along it
+    ├── lod.rs               # Native's chunks: whole cells of the lattice, each face's levels by depth along it, its cells kept picked
     ├── fill.rs              # Splats filled into a mask for every slant, solid blocks (for coverage)
     ├── layer_index.rs       # LayerIndex: where each face's layers hold voxels; its WebAssembly exports
     ├── walk.rs              # Walking: a body that falls, collides, steps and jumps; its WebAssembly exports

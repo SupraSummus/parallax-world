@@ -83,52 +83,103 @@ impl Lod {
     }
 
     /**
-     * The chunks a face composes: the cells each level draws, from the
-     * eye's layer to `far` (world units) ahead
-     * along the axis, whose rays have x / z and y / z within `tangents`
-     * (min x, max x, min y, max y; the face's coordinates, see view.ts),
-     * each with its site's distance from the eye, by which the nearest are
-     * baked first. `eye` is in the face's lattice coordinates, in units of
-     * grid 0.
+     * The layers of `level`'s sites, c / N, it claims for an eye in `eyes`
+     * (Eyes) and to `far` ahead: from the nearest eye's claims to the
+     * farthest's, as reach grows with the camera's layer; none, nor any
+     * coarser level's, if its first is past the farthest eye's far.
      */
-    pub fn select(&self, eye: [f64; 3], far: f64, tangents: [f64; 4], mut visit: impl FnMut(CellChunk, f64)) {
-        let [ea, eb, ec] = eye;
+    fn layers(&self, level: i32, eyes: &Eyes, far: f64) -> Option<std::ops::RangeInclusive<i64>> {
+        let n = 1i64 << level;
         // Any whole layer near the eye would do: the levels' order holds for any.
-        let camera = ec.floor() as i32;
-        let last = camera as i64 + (far / LAYER).ceil() as i64;
+        let (low, high) = (eyes[2][0].floor() as i32, eyes[2][1].floor() as i32);
+        let last = high as i64 + (far / LAYER).ceil() as i64;
+        // Claimed, and not all within the finer claims: its sites reach N layers past its own.
+        let first = if level == 0 { low as i64 + NEAR as i64 } else { self.reach(level - 1, low) - n + 1 };
+        let to = self.reach(level, high).min(last + n);
+        (first <= last).then(|| first.div_euclid(n) + i64::from(first.rem_euclid(n) != 0)..=to.div_euclid(n))
+    }
+
+    /**
+     * Of `level`'s layer of sites c = k · N, those whose cells may meet a
+     * ray within `tangents` from an eye in `eyes`: [a0, a1, b0, b1], in
+     * N's; none if all are behind every eye.
+     */
+    fn rows(level: i32, k: i64, eyes: &Eyes, tangents: [f64; 4]) -> Option<[i32; 4]> {
+        let nf = (1i64 << level) as f64;
+        let c = k as f64 * nf;
+        // The cell's depths ahead of the eye, along the axis, nearest and farthest.
+        let (z0, z1) = (((c - nf - eyes[2][1]) * LAYER).max(0.0), (c + nf - eyes[2][0]) * LAYER);
+        if z1 <= 0.0 {
+            return None;
+        }
+        let span = |lo: f64, hi: f64| (lo.min(lo * z0 / z1) * z1, hi.max(hi * z0 / z1) * z1);
+        let (x0, x1) = span(tangents[0], tangents[1]);
+        let (y0, y1) = span(tangents[2], tangents[3]);
+        let [[a_lo, a_hi], [b_lo, b_hi], _] = *eyes;
+        Some([
+            ((x0 / LAYER + a_lo) / nf - 1.0).floor() as i32,
+            ((x1 / LAYER + a_hi) / nf + 1.0).ceil() as i32,
+            ((y0 + b_lo) / nf - 1.0).floor() as i32,
+            ((y1 + b_hi) / nf + 1.0).ceil() as i32,
+        ])
+    }
+
+    /**
+     * The cells a face may compose (`composed`) from an eye anywhere in
+     * `eyes`, its rays within `tangents`, kept by layer and row, each with a
+     * `T` of the caller's: taken from the `old` pick where it had the cell,
+     * at the same level of detail, so that moving a little keeps what is
+     * known of most; what it does not take stays there.
+     */
+    pub fn pick<T: Default>(&self, eyes: Eyes, far: f64, tangents: [f64; 4], old: Option<&mut Picked<T>>) -> Picked<T> {
+        let lod = (self.shift, self.q, far);
+        let mut old = old.filter(|o| o.lod == lod);
+        let mut levels = Vec::new();
         for level in 0..=self.top() {
-            let n = 1i32 << level;
-            let nf = n as f64;
-            let atoms = (level - self.shift).max(0);
-            let g = 1 << atoms;
-            // Claimed, and not all within the finer claims: its sites reach N layers past its own.
-            let first = if level == 0 { camera as i64 + NEAR as i64 } else { self.reach(level - 1, camera) - n as i64 + 1 };
-            let to = self.reach(level, camera).min(last + n as i64);
-            if first > last {
-                break;
-            }
-            for k in first.div_euclid(n as i64) + i64::from(first.rem_euclid(n as i64) != 0)..=to.div_euclid(n as i64) {
-                let (k, c) = (k as i32, k as i32 * n);
-                // The cell's depths ahead of the eye, along the axis.
-                let (z0, z1) = ((((c - n) as f64 - ec) * LAYER).max(0.0), ((c + n) as f64 - ec) * LAYER);
-                if z1 <= 0.0 {
-                    continue;
-                }
-                let span = |lo: f64, hi: f64| (lo.min(lo * z0 / z1) * z1, hi.max(hi * z0 / z1) * z1);
-                let (x0, x1) = span(tangents[0], tangents[1]);
-                let (y0, y1) = span(tangents[2], tangents[3]);
-                let (a0, a1) = (((x0 / LAYER + ea) / nf - 1.0).floor() as i32, ((x1 / LAYER + ea) / nf + 1.0).ceil() as i32);
-                let (b0, b1) = (((y0 + eb) / nf - 1.0).floor() as i32, ((y1 + eb) / nf + 1.0).ceil() as i32);
-                for j in b0..=b1 {
+            let Some(ks) = self.layers(level, &eyes, far) else { break };
+            let first = *ks.start();
+            let layers = ks
+                .map(|k| {
+                    let Some([a0, a1, b0, b1]) = Lod::rows(level, k, &eyes, tangents) else { return Layer::default() };
                     // Sites of N·FCC: a / N, b / N, c / N of one parity.
-                    if (j ^ k) & 1 != 0 {
-                        continue;
-                    }
-                    for i in (a0 + ((a0 ^ k) & 1)..=a1).step_by(2) {
-                        let site = [i * n, j * n, c];
-                        let [a, b, c] = std::array::from_fn(|d| site[d] as f64 - eye[d]);
-                        let distance = ((a * a + c * c) / 2.0 + b * b).sqrt();
-                        visit(CellChunk { level, atoms, site: site.map(|v| v / g) }, distance);
+                    let parity = |v: i32| v + ((v ^ k as i32) & 1);
+                    let (a, b) = (parity(a0), parity(b0));
+                    let (across, rows) = (((a1 - a) / 2 + 1).max(0) as usize, ((b1 - b) / 2 + 1).max(0) as usize);
+                    let mut was = old.as_mut().and_then(|o| o.layer(level, k));
+                    let mut layer = Layer { a, b, across, rows, cells: Vec::new() };
+                    layer.cells = (0..rows * across)
+                        .map(|at| {
+                            let [i, j] = layer.site(at);
+                            was.as_mut().and_then(|w| w.at(i, j)).map(std::mem::take).unwrap_or_default()
+                        })
+                        .collect();
+                    layer
+                })
+                .collect();
+            levels.push((first, layers));
+        }
+        Picked { lod, eyes, tangents, levels }
+    }
+
+    /**
+     * The chunks a face composes from `eye`: the cells each level draws,
+     * from the eye's layer to the pick's `far` (world units) ahead along the
+     * axis, whose rays have x / z and y / z within `tangents` (min x, max x,
+     * min y, max y; the face's coordinates, see view.ts); each with its `T`
+     * in `picked`, which covers them (Picked::covers).
+     */
+    pub fn composed<T>(&self, picked: &mut Picked<T>, eye: [f64; 3], tangents: [f64; 4], mut visit: impl FnMut(CellChunk, &mut T)) {
+        let eyes = eye.map(|v| [v, v]);
+        for level in 0..=self.top() {
+            let Some(ks) = self.layers(level, &eyes, picked.lod.2) else { break };
+            for k in ks {
+                let Some([a0, a1, b0, b1]) = Lod::rows(level, k, &eyes, tangents) else { continue };
+                let layer = picked.layer(level, k).expect("covered");
+                for r in within(layer.b, layer.rows, b0, b1) {
+                    let j = layer.b + 2 * r as i32;
+                    for s in within(layer.a, layer.across, a0, a1) {
+                        let i = layer.a + 2 * s as i32;
+                        visit(cell(self.shift, level, [i, j, k as i32]), &mut layer.cells[r * layer.across + s]);
                     }
                 }
             }
@@ -136,19 +187,151 @@ impl Lod {
     }
 }
 
+/** The cell of `level` whose site is (i, j, k) · N, its voxels `shift` levels finer (Lod's). */
+fn cell(shift: i32, level: i32, site: [i32; 3]) -> CellChunk {
+    let atoms = (level - shift).max(0);
+    CellChunk { level, atoms, site: site.map(|v| (v << level) >> atoms) }
+}
+
+/** Of `len` sites from `first`, 2 apart, those in [lo, hi], by index. */
+fn within(first: i32, len: usize, lo: i32, hi: i32) -> std::ops::Range<usize> {
+    let index = |v: i32| v.clamp(0, len as i32) as usize;
+    index((lo - first + 1).div_euclid(2))..index((hi - first).div_euclid(2) + 1)
+}
+
+/** A layer of a level's sites picked: from (a, b), in N's, `rows` rows of `across` sites, both 2 apart, and theirs. */
+#[derive(Default)]
+struct Layer<T> {
+    a: i32,
+    b: i32,
+    across: usize,
+    rows: usize,
+    cells: Vec<T>,
+}
+
+impl<T> Layer<T> {
+    /** The site (i, j) of its `at`-th cell. */
+    fn site(&self, at: usize) -> [i32; 2] {
+        [self.a + 2 * (at % self.across) as i32, self.b + 2 * (at / self.across) as i32]
+    }
+
+    /** The site's (i, j), of the layer's parity, if it has it. */
+    fn at(&mut self, i: i32, j: i32) -> Option<&mut T> {
+        let (s, r) = (usize::try_from(i - self.a).ok()? / 2, usize::try_from(j - self.b).ok()? / 2);
+        (s < self.across && r < self.rows).then(|| &mut self.cells[r * self.across + s])
+    }
+}
+
+impl<T> Picked<T> {
+    /** Whether it holds all a face composes from `eye`, its rays within `tangents`, at `lod` (Picked's). */
+    pub fn covers(&self, lod: (i32, i32, f64), eye: [f64; 3], tangents: [f64; 4]) -> bool {
+        let [w0, w1, w2, w3] = self.tangents;
+        self.lod == lod
+            && (0..3).all(|d| (self.eyes[d][0]..=self.eyes[d][1]).contains(&eye[d]))
+            && tangents[0] >= w0
+            && tangents[1] <= w1
+            && tangents[2] >= w2
+            && tangents[3] <= w3
+    }
+
+    /** The `T` of `cell`, if it has it. */
+    pub fn at(&mut self, cell: &CellChunk) -> Option<&mut T> {
+        let [i, j, k] = cell.site.map(|v| (v << cell.atoms) >> cell.level);
+        self.layer(cell.level, k.into())?.at(i, j)
+    }
+
+    /** Each of its cells, with its `T`. */
+    pub fn into_each(self, mut visit: impl FnMut(CellChunk, T)) {
+        for (level, (first, layers)) in (0..).zip(self.levels) {
+            for (k, mut layer) in (first..).zip(layers) {
+                for (at, t) in std::mem::take(&mut layer.cells).into_iter().enumerate() {
+                    let [i, j] = layer.site(at);
+                    visit(cell(self.lod.0, level, [i, j, k as i32]), t);
+                }
+            }
+        }
+    }
+
+    /** Layer k = c / N of `level`, if it has it. */
+    fn layer(&mut self, level: i32, k: i64) -> Option<&mut Layer<T>> {
+        let (first, layers) = self.levels.get_mut(usize::try_from(level).ok()?)?;
+        layers.get_mut(usize::try_from(k - *first).ok()?)
+    }
+}
+
+/**
+ * A face's cells picked for an eye anywhere in `eyes` and rays within
+ * `tangents` (Lod::pick), at a level of detail (`lod`: Lod's shift and Q,
+ * and how far ahead): per level, its first layer, k = c / N, and its
+ * layers, each with a `T` per cell.
+ */
+pub struct Picked<T> {
+    lod: (i32, i32, f64),
+    eyes: Eyes,
+    tangents: [f64; 4],
+    levels: Vec<(i64, Vec<Layer<T>>)>,
+}
+
+/** The eye anywhere in a box: [low, high] of each of its lattice coordinates, in units of grid 0. */
+pub type Eyes = [[f64; 2]; 3];
+
+/** How far a cell's site is from `eye` (by which the nearest are baked first), both in a face's lattice coordinates, in units of grid 0. */
+pub fn distance(cell: &CellChunk, eye: [f64; 3]) -> f64 {
+    let [a, b, c] = std::array::from_fn(|d| (cell.site[d] << cell.atoms) as f64 - eye[d]);
+    ((a * a + c * c) / 2.0 + b * b).sqrt()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::cells::owner;
 
+    use std::collections::HashSet;
+
+    /** The cells a face composes from `eye`, its rays within `tangents`, of `picked`: each once. */
+    fn composed_of<T>(lod: &Lod, picked: &mut Picked<T>, eye: [f64; 3], tangents: [f64; 4]) -> HashSet<CellChunk> {
+        let mut cells = HashSet::new();
+        lod.composed(picked, eye, tangents, |cell, _| assert!(cells.insert(cell), "{cell:?} twice"));
+        cells
+    }
+
+    /** The cells a face composes from `eye`, its rays within `tangents`, picked there. */
+    fn composed_from(lod: &Lod, eye: [f64; 3], far: f64, tangents: [f64; 4]) -> HashSet<CellChunk> {
+        composed_of(lod, &mut lod.pick::<()>(eye.map(|v| [v, v]), far, tangents, None), eye, tangents)
+    }
+
     /** The chunks a face composes from `eye`, by level and site in units of grid 0. */
-    fn composed(lod: &Lod, eye: [f64; 3], far: f64) -> std::collections::HashSet<(i32, [i32; 3])> {
+    fn composed(lod: &Lod, eye: [f64; 3], far: f64) -> HashSet<(i32, [i32; 3])> {
         let rhombus = [-1.0, 1.0, -std::f64::consts::FRAC_1_SQRT_2, std::f64::consts::FRAC_1_SQRT_2];
-        let mut chunks = std::collections::HashSet::new();
-        lod.select(eye, far, rhombus, |chunk, _| {
-            assert!(chunks.insert((chunk.level, chunk.site.map(|v| v << chunk.atoms))), "{chunk:?} twice");
-        });
-        chunks
+        composed_from(lod, eye, far, rhombus).into_iter().map(|c| (c.level, c.site.map(|v| v << c.atoms))).collect()
+    }
+
+    #[test]
+    fn a_pick_composes_from_an_eye_in_its_box_what_one_made_there_would_and_keeps_what_it_knew() {
+        let (lod, far) = (Lod { shift: 3, q: 19 }, 300.0);
+        let (wide, tangents) = ([-0.6, 0.5, -0.3, 0.4], [-0.5, 0.45, -0.25, 0.3]);
+        let around = |centre: [f64; 3]| centre.map(|v| [v - 2.0, v + 2.0]);
+        let centre = [3.3, -1.2, 7.8];
+        let mut old: Picked<Option<CellChunk>> = lod.pick(around(centre), far, wide, None);
+        let mut known = HashSet::new();
+        for d in [[-2.0, 2.0, -2.0], [1.9, -0.4, 1.99], [0.0, 0.0, 0.0], [-1.1, -2.0, 0.6]] {
+            let eye = std::array::from_fn(|i| centre[i] + d[i]);
+            let there = composed_from(&lod, eye, far, tangents);
+            assert!(there.len() > 1000, "{}", there.len());
+            assert_eq!(composed_of(&lod, &mut old, eye, tangents), there, "eye {eye:?}");
+            lod.composed(&mut old, eye, tangents, |cell, seen| *seen = Some(cell));
+            known.extend(there);
+        }
+        // Picked again a little farther on: what it knew of a cell is the new pick's, where `at` finds it, or stays in the old.
+        let moved = centre.map(|v| v + 2.5);
+        assert!(!old.covers((lod.shift, lod.q, far), moved, tangents));
+        let mut new = lod.pick(around(moved), far, wide, Some(&mut old));
+        assert!(known.iter().all(|cell| new.at(cell).is_none_or(|seen| *seen == Some(*cell))));
+        let mut kept = HashSet::new();
+        new.into_each(|cell, seen| assert!(seen.is_none_or(|s| s == cell && kept.insert(cell)), "{cell:?} has {seen:?}"));
+        assert!(kept.len() * 2 > known.len(), "{} of {} kept", kept.len(), known.len());
+        old.into_each(|cell, seen| assert!(seen.is_none_or(|s| s == cell && kept.insert(cell)), "{cell:?} has {seen:?}"));
+        assert_eq!(kept, known);
     }
 
     /** Whether a point (a, b, c), in a face's lattice coordinates, is in its rays and within `far` of `eye`, well within. */
