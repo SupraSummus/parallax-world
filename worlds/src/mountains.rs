@@ -9,6 +9,10 @@
 //! paints what is there instead: alpine meadows, scree under cliffs, rock
 //! on crests and steep faces, snow on the peaks and in hollows above a
 //! snowline.
+//!
+//! The ranges are a belt: a few kilometres behind the first crest the
+//! land leaves them, west down to the sea, east up to an upland under the
+//! treeline. On the valley's relief, so the coast is ragged with islands.
 
 use std::rc::Rc;
 
@@ -20,6 +24,8 @@ use worldgen::plan::Plan;
 use worldgen::units::{Units, m};
 
 use crate::fields;
+use crate::landmarks::K as L;
+use crate::town::K as T;
 
 kinds! {
     base: fields::BASE + fields::KINDS.len() as u8;
@@ -29,8 +35,8 @@ kinds! {
     snow: 14, ["#f1f4f7", "#e3e9ef"];
 }
 
-/** The valley's heights with its mountains, lattice units: up to their highest peaks, and a little over. */
-pub const HEIGHTS: (i64, i64) = (m(-36.0), m(1000.0));
+/** The valley's heights with its mountains, lattice units: from the sea's floor up to their highest peaks, and a little over. */
+pub const HEIGHTS: (i64, i64) = (m(-90.0), m(1000.0));
 
 /** Where the foothills start off the path, at the nearest and the furthest. */
 const FOOT: (Fx, Fx) = (Fx::m(140.0), Fx::m(320.0));
@@ -38,6 +44,21 @@ const FOOT: (Fx, Fx) = (Fx::m(140.0), Fx::m(320.0));
 const CRESTS: (Units, Units) = (Units::m(230.0), Units::m(900.0));
 /** The highest the ranges raise the ground. */
 const TOP: Fx = Fx::m(960.0);
+/** The high country behind the first crest is this wide, at the narrowest and the widest; past it the land leaves the ranges over LEAVE. */
+const BELT: (Units, Units) = (Units::m(1000.0), Units::m(2200.0));
+const LEAVE: Units = Units::m(1500.0);
+/**
+ * The sea's level: under the valley's floor anywhere (its relief reaches
+ * 31 m under 0), so the sea is wherever the ground is under it, west past
+ * the ranges, where the lowland falls from LOWLAND, one in SHELF, to DEEP.
+ */
+pub const SEA: Units = Units::m(-40.0);
+const LOWLAND: Fx = Fx::m(10.0);
+const SHELF: i64 = 30;
+const DEEP: Fx = Fx::m(-75.0);
+/** East past the ranges, the upland's lowest, and how much higher its ridges rise. */
+const UPLAND: Fx = Fx::m(160.0);
+const UPLAND_RIDGES: Units = Units::m(90.0);
 /** Each side's noise is read this far off the other's. */
 const SIDE: i64 = m(40000.0);
 
@@ -65,8 +86,10 @@ pub struct Ranges {
     spurs: Fbm<{ m(700.0) }, 2>,
     /** Side valleys, cut across the ranges. */
     sides: ValueNoise<{ m(2800.0) }>,
-    /** The high country behind the first crest. */
+    /** The high country behind the first crest, and the upland's ridges past it. */
     behind: Fbm<{ m(1500.0) }, 2>,
+    /** How wide the high country is, along each side. */
+    belt: ValueNoise<{ m(5000.0) }>,
     /** Crags and ribs over everything. */
     crags: Fbm<{ m(260.0) }, 2>,
     /** The treeline and snowline, wavering over a slope. */
@@ -85,6 +108,7 @@ impl Ranges {
             spurs: Fbm::new(stream(seed, 64)),
             sides: ValueNoise::new(stream(seed, 65)),
             behind: Fbm::new(stream(seed, 66)),
+            belt: ValueNoise::new(stream(seed, 68)),
             crags: Fbm::new(stream(seed, 67)),
             lines: Fbm::new(stream(seed, 70)),
             patches: ValueNoise::new(stream(seed, 71)),
@@ -138,7 +162,14 @@ impl Ranges {
         // Crags and ribs, more where the ground is higher.
         let (tx, tz) = turned(x, z);
         h = h + (ridge(self.crags.at(tx, tz)) - Fx::HALF) * h * fx(0.08);
-        h.max(Fx::ZERO).min(TOP)
+        let h = h.max(Fx::ZERO).min(TOP);
+        // Past the high country, the land beyond: down to the sea west, an upland east.
+        let past = out - run - (BELT.0.to_fx() + self.belt.at(side, z) * (BELT.1 - BELT.0));
+        if past <= Fx::ZERO {
+            return h;
+        }
+        let beyond = if side == 0 { (LOWLAND - past / SHELF).max(DEEP) } else { UPLAND + ridge(self.behind.at(tx, tz)) * UPLAND_RIDGES };
+        h + (beyond - h) * smoothstep(Fx::ZERO, LEAVE.to_fx(), past)
     }
 
     /** Where trees end, by column, lattice units. */
@@ -166,6 +197,7 @@ impl Ranges {
  * they show.
  */
 pub fn layers(ranges: Rc<Ranges>, ground: Rc<Plan<i64>>) -> Vec<Layer> {
+    let sea = sea(ground.clone());
     let surface = Field::columns("mountains", 0.8, Op::Paint, move |x, z, spacing| {
         let h = ground.at(x, z);
         let height = Units(h).to_fx();
@@ -211,5 +243,21 @@ pub fn layers(ranges: Rc<Ranges>, ground: Rc<Plan<i64>>) -> Vec<Layer> {
         let under = if kind == K::alpine { K::scree } else { K::rock };
         Column::new(h, spacing).surface(kind, m(1.0)).fill_below_exactly(under, bottom).spans()
     });
-    vec![Layer::Field(surface)]
+    vec![Layer::Field(surface), Layer::Field(sea)]
+}
+
+/** How much of ground `height` units high is dry land: none under the sea, all from a little over it. */
+pub fn dry(height: i64) -> Fx {
+    smoothstep(SEA.to_fx() + Fx::m(0.5), SEA.to_fx() + Fx::m(2.0), Units(height).to_fx())
+}
+
+/** The sea: water up to its level on sand, and a beach of it a little over. */
+fn sea(ground: Rc<Plan<i64>>) -> Field {
+    Field::columns("sea", 0.85, Op::Paint, move |x, z, spacing| {
+        let h = ground.at(x, z);
+        if h > (SEA + Units::m(1.5)).0 {
+            return Vec::new();
+        }
+        Column::new(h, spacing).surface(L::sand, m(1.0)).water_to(T::water, SEA.0).spans()
+    })
 }
