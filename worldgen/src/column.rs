@@ -151,7 +151,14 @@ mod tests {
         // A field of columns draws them.
         let layers = vec![Layer::Field(Field::columns("ground", 0.0, Op::Fill, |_, _, s| Column::new(0, s).surface(0, 1)))];
         let world = Generator {
-            kinds: vec![crate::generator::KindDef { name: "stone", kind_type: 1, colors: &["#808080"], walk_through: false, glows: false }],
+            kinds: vec![crate::generator::KindDef {
+                name: "stone",
+                kind_type: 1,
+                colors: &["#808080"],
+                walk_through: false,
+                glows: false,
+                medium: false,
+            }],
             seed: 1,
             layers,
         };

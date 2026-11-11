@@ -296,7 +296,14 @@ mod tests {
 
     /** A world of ground up to `ground`, and walls 6 m high where `wall` says, at (x, z). */
     fn world(seed: u64, ground: impl Fn(f64, f64) -> f64 + 'static, wall: impl Fn(f64, f64) -> bool + 'static) -> World {
-        let kinds = ["ground", "wall"].map(|name| KindDef { name, kind_type: 1, colors: &["#808080"], walk_through: false, glows: false });
+        let kinds = ["ground", "wall"].map(|name| KindDef {
+            name,
+            kind_type: 1,
+            colors: &["#808080"],
+            walk_through: false,
+            glows: false,
+            medium: false,
+        });
         let field = Field::columns("land", 0.0, Op::Fill, move |x, z, _| {
             let (x, z) = (x as f64, z as f64);
             let top = ground(x, z).round() as i64;

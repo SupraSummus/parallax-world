@@ -207,17 +207,15 @@ Numbers are for the forest at 1280×800, as measured when written.
   and new tiles half as much again, why is open.
 - **Native's see-through voxels cost all of them, drawn.**
   Over each other in order (architecture.md, "See-through"),
-  nothing behind them is culled, and each is a tent four times its outline:
-  in the forest three in four splats are see-through,
-  and its GPU frame took 1.1 s against 0.18 s by chance (lavapipe), seed 42;
-  the valley's 0.7 s against 0.28 s.
+  nothing behind them is culled, and each is a tent four times its outline.
+  Only media are (`KindDef::medium`): the moor's mist.
   A see-through splat's sixth number (its finer cell's layer) is in every splat's,
   a fifth more memory where the buffers already meet lavapipe's limit (below).
   Leaving out what is behind pixels already all but covered
   (front to back, nothing after a ray is stopped matters) is not done.
-  - A site's colour is one of what is in it (see "Light sees each site's
-    alpha"): a coarse site of a crown and mist may show as mist.
-  - Near, a see-through voxel is as soft as its tent: leaves at level 0 blur.
+  - A site's pieces, where shown, hide its medium and what is behind:
+    right on average, but a coarse site of a crown in mist
+    is a whole voxel or mist, never the crown's grain seen through mist.
 - **Native's other engines are short of the chunks in places**
   (architecture.md, "Native: another engine").
   - Voxels: lit, every voxel of a tile a ray can meet is lit,
@@ -411,11 +409,13 @@ Numbers are for the forest at 1280×800, as measured when written.
   and light jumps a little there;
   every site within reach would leak light through walls one site thick.
 - **Light sees each site's alpha and glow (`VoxelGrid`), a prototype**:
-  - on the web, a site shows a voxel where a hash is under its alpha
-    (`VoxelGrid::show`): till its splats show the alpha itself,
-    measured houses' walls come out ragged;
-  - a site's colour is one of what is in it, picked as often as it is seen,
-    not the mean of what its faces see;
+  - a site's pieces show a voxel where a hash is under their alpha
+    (`VoxelGrid::show`), as leaves should,
+    but measured houses' walls come out ragged;
+  - a site's pieces' colour is one of theirs, picked as often as it is seen,
+    not the mean of what its faces see, and so its medium's;
+    a glowing thing's glow is hidden by its own, pieces or medium,
+    not by the other;
   - measured things are measured from fine voxels kept by chance,
     so their small lamps come and go;
   - a lamp glows from one site at each level:
@@ -450,15 +450,13 @@ Numbers are for the forest at 1280×800, as measured when written.
 - Light along more directions at coarser levels, as radiance cascades do:
   near, light wants fine places and few directions; far, coarse places and many.
   Light keeps 12 at every level, too few far off (a lamp's lobes, blurred shadows).
-- Slices' splats that show alpha (the web's still show one coin per site,
-  so the moor's mist falls there as snow):
+- Slices' splats that show alpha (the web's show no medium,
+  so the moor has no mist there):
   a chunk keeps a column's voxels till their alpha adds up to whole,
   and splats that overlap in a slice may add up to an opaque one,
   the rest drawn see-through.
   Alpha in steps of optical depth (−ln of what gets through),
   which add up where things are apart, might take fewer bits.
-  Then no host needs the coin:
-  `VoxelGrid`'s `cells` and `show`, and `into_grid`'s choice, go.
 - Report cost at the places worlds name (`World::points`),
   not at the spawn and the regions' centres (`cost::places`),
   once the forest, the moor and the city name some:

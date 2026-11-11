@@ -41,7 +41,7 @@ kinds! {
     // What stands on the heath and the grass, in their colours: walked through, the ground not.
     heatherSprigs: 5, ["#6b3a5e", "#7a4569", "#84506f"], walk_through;
     grassBlades: 1, ["#8fa052", "#9aab5c"], walk_through;
-    mist: 8, ["#c9d0d4", "#c4cbd0", "#ced4d8"], walk_through;
+    mist: 8, ["#c9d0d4", "#c4cbd0", "#ced4d8"], walk_through, medium;
 }
 
 /** The heights the moor alone has anything at (lattice units). */

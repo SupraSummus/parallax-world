@@ -15,8 +15,8 @@ use worldgen::grid::Box3;
 use worldgen::noise::{Rng, fx};
 
 static KINDS: &[KindDef] = &[
-    KindDef { name: "ground", kind_type: 1, colors: &["#222222"], walk_through: false, glows: false },
-    KindDef { name: "solid", kind_type: 3, colors: &["#eeeeee"], walk_through: false, glows: false },
+    KindDef { name: "ground", kind_type: 1, colors: &["#222222"], walk_through: false, glows: false, medium: false },
+    KindDef { name: "solid", kind_type: 3, colors: &["#eeeeee"], walk_through: false, glows: false, medium: false },
 ];
 const GROUND: u8 = 0;
 const BRIGHT: u8 = 1;

@@ -79,7 +79,7 @@ const FAR_TOLERANCE: f64 = 0.025;
 pub fn whole_equals_parts(generator: &Generator, region: &Box3, level: u32) {
     let whole = box_at(region, level);
     let grid = generate(generator, &whole, level);
-    assert!(grid.cells.iter().any(|id| *id != 0), "level {level} is empty");
+    assert!([&grid.pieces, &grid.medium].iter().any(|part| part.alpha.iter().any(|a| *a != 0)), "level {level} is empty");
     // Eight parts, split at random points (seeded, so failures reproduce).
     let mut random = Rng::new(7);
     let mut split = |axis: usize, even: bool| {
@@ -586,7 +586,8 @@ fn stopping(generator: &Generator, grid: &VoxelGrid, level: u32) -> Option<([i64
     let b = grid.clip();
     let full: Vec<_> = sites(&b).filter(|&(x, y, z)| grid.alpha(x, y, z) != 0).collect();
     let &(x, y, z) = full.first()?;
-    Some(([x, y, z].map(|v| v << level), kind_of(generator, grid.light(x, y, z, 0).1), full.len()))
+    let (_, id) = grid.light(x, y, z, 0).0.into_iter().find(|part| part.0 != 0)?;
+    Some(([x, y, z].map(|v| v << level), kind_of(generator, id), full.len()))
 }
 
 /**

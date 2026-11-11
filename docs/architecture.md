@@ -196,8 +196,8 @@ Like a slice's, a relief is off by an angle that detail bounds (section 2).
 Its see-through voxels a ray can enter are each one hexagon (`cell_splats`),
 drawn in the order a ray meets them (section 4, "See-through");
 the relief takes them for empty.
-Its tiles hold every site that stops rays, with how much it does,
-not the voxels the web's coin shows (`VoxelGrid::into_grid`):
+Its tiles hold the sites' media too, with how much each stops
+(`VoxelGrid::into_grid`):
 a face is open where its neighbour lets rays through,
 so a cell holds what shows through see-through voxels too.
 The compositor's depth decides between cells:
@@ -582,7 +582,10 @@ Draws are listed per tile on the GPU, roughly near to far,
 so nearer tiles mostly hide what is behind them early.
 It draws into a picture of its own, which egui (or `--shot`) shows.
 
-**See-through.** A native see-through splat's alpha is how much of the rays
+**See-through.** Native draws a site's medium see-through
+(`KindDef::medium`, as mist) where its pieces don't show;
+those come whole, as on the web.
+A see-through splat's alpha is how much of the rays
 through its voxel's site the voxel stops,
 along the voxel's mean chord (worldgen's `CHORD`).
 The bake workers put a chunk's see-through splats in clusters,

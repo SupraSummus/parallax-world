@@ -417,6 +417,13 @@ pub struct KindDef {
     pub walk_through: bool,
     /** Whether it gives light of its colour (light.rs), as a lamp does. */
     pub glows: bool,
+    /**
+     * Whether it stops a share of every ray, as mist does, and is drawn
+     * see-through; the rest are in pieces smaller than a site, as leaves
+     * are, which stop a share of the rays whole, and are drawn as grain
+     * (VoxelGrid).
+     */
+    pub medium: bool,
 }
 
 /**
@@ -424,7 +431,8 @@ pub struct KindDef {
  * docs/generators.md): `enum K` of their names, `KINDS` to append to a
  * generator's, and `k` for a name's Kind. A kind followed by `walk_through`
  * is one a body walks through (KindDef::walk_through), by `glows` one that
- * gives light (KindDef::glows).
+ * gives light (KindDef::glows), by `medium` one drawn see-through
+ * (KindDef::medium).
  */
 #[macro_export]
 macro_rules! kinds {
@@ -432,13 +440,14 @@ macro_rules! kinds {
     (@flag $flag:ident) => { false };
     (@flag walk_through walk_through $($rest:ident)*) => { true };
     (@flag glows glows $($rest:ident)*) => { true };
+    (@flag medium medium $($rest:ident)*) => { true };
     (@flag $flag:ident $other:ident $($rest:ident)*) => { $crate::kinds!(@flag $flag $($rest)*) };
     (base: $base:expr; $($name:ident: $type:expr, [$($color:expr),*] $(, $flags:ident)*;)*) => {
         #[allow(non_camel_case_types, clippy::upper_case_acronyms)]
         #[derive(Clone, Copy, PartialEq, Eq, Default)]
         #[repr(u8)]
         pub enum K { #[default] $($name),* }
-        pub const KINDS: &[$crate::generator::KindDef] = &[$($crate::generator::KindDef { name: stringify!($name), kind_type: $type, colors: &[$($color),*], walk_through: $crate::kinds!(@flag walk_through $($flags)*), glows: $crate::kinds!(@flag glows $($flags)*) }),*];
+        pub const KINDS: &[$crate::generator::KindDef] = &[$($crate::generator::KindDef { name: stringify!($name), kind_type: $type, colors: &[$($color),*], walk_through: $crate::kinds!(@flag walk_through $($flags)*), glows: $crate::kinds!(@flag glows $($flags)*), medium: $crate::kinds!(@flag medium $($flags)*) }),*];
         /** Kinds of the generator's before these. */
         pub const BASE: $crate::generator::Kind = $base;
         pub fn k(kind: K) -> $crate::generator::Kind {
@@ -991,6 +1000,8 @@ pub struct Material {
     pub walk_through: bool,
     /** Its kind's KindDef::glows. */
     pub glows: bool,
+    /** Its kind's KindDef::medium. */
+    pub medium: bool,
 }
 
 impl Material {
@@ -1011,14 +1022,20 @@ struct Palette {
 
 impl Palette {
     fn new(kinds: &[KindDef], seed: u64) -> Palette {
-        let mut materials = vec![Material { color: "", material_type: 0, walk_through: true, glows: false }];
+        let mut materials = vec![Material { color: "", material_type: 0, walk_through: true, glows: false, medium: false }];
         let shades = kinds
             .iter()
             .map(|k| {
                 k.colors
                     .iter()
                     .map(|color| {
-                        materials.push(Material { color, material_type: k.kind_type, walk_through: k.walk_through, glows: k.glows });
+                        materials.push(Material {
+                            color,
+                            material_type: k.kind_type,
+                            walk_through: k.walk_through,
+                            glows: k.glows,
+                            medium: k.medium,
+                        });
                         (materials.len() - 1) as u8
                     })
                     .collect()
@@ -1061,7 +1078,8 @@ pub fn generate(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
         let shade = |kind: Kind| palette.shade(kind, x * s, y * s, z * s);
         let id = shade(look.kind);
         let faces = look.faces.map(|faces| faces.map(shade));
-        see(&mut grid, op, share, pick, (id, faces), palette.glows[id as usize], x, y, z);
+        let medium = palette.materials[id as usize].medium;
+        see(&mut grid, op, share, pick, (id, faces, medium), palette.glows[id as usize], x, y, z);
     };
     let drawables = drawables_in(generator, &clip, s);
     let mut at = 0;
@@ -1092,27 +1110,39 @@ pub fn generate(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
         }
         cost::add(group[0].layer, work);
     }
-    // One coin per site: shown as often as it stops rays.
+    // One coin per site: its pieces shown as often as they stop rays.
     let coins = hash_text("shown", generator.seed);
     grid.show(|x, y, z| ((hash(coins, x * s, y * s, z * s) as u64 * ALPHA as u64) >> 32) as u8);
     grid
 }
 
 /**
- * Adds a thing's `share` of site (x, y, z) to it (VoxelGrid's `alpha`,
- * `seen`, `glow`), of material `id` (its faces' if they differ) glowing
+ * Adds a thing's `share` of site (x, y, z) to it (VoxelGrid's `pieces`,
+ * `medium`, `glow`), of material `id` (its faces' if they differ) glowing
  * `glow`: as a Fill behind what is there, a Paint in front of it, a Carve
- * taking it out. What the site shows is one of what is in it, each as
- * often as it is seen there: the thing replaces it as often as it makes
- * up of what the site now stops, by its pick.
+ * taking it out, of both. A `medium` joins the site's medium, the rest
+ * its pieces. What either shows is one of what is in it, each as often
+ * as it is seen there: the thing replaces it as often as it makes up of
+ * what they now stop, by its pick.
  */
 #[allow(clippy::too_many_arguments)]
-fn see(grid: &mut VoxelGrid, op: Op, share: u32, pick: u32, (id, faces): (u8, Option<Faces>), glow: [u32; 3], x: i64, y: i64, z: i64) {
+fn see(
+    grid: &mut VoxelGrid,
+    op: Op,
+    share: u32,
+    pick: u32,
+    (id, faces, medium): (u8, Option<Faces>, bool),
+    glow: [u32; 3],
+    x: i64,
+    y: i64,
+    z: i64,
+) {
     if share == 0 {
         return;
     }
     let Some(i) = grid.index(x, y, z) else { return };
-    let (alpha, share) = (grid.alpha[i] as u64, share.min(SHARE) as u64);
+    let part = if medium { &mut grid.medium } else { &mut grid.pieces };
+    let (alpha, share) = (part.alpha[i] as u64, share.min(SHARE) as u64);
     let (all, one) = (ALPHA as u64, SHARE as u64);
     let old = grid.glow.get(&i).copied().unwrap_or_default();
     // Of SHARE: how much of what was there is still seen, and how much of the site the thing is seen in.
@@ -1124,17 +1154,23 @@ fn see(grid: &mut VoxelGrid, op: Op, share: u32, pick: u32, (id, faces): (u8, Op
     // In SHARE-ths of a step of alpha, rounded up as often as the remainder,
     // by a coin from the pick (its bits scrambled by an odd factor):
     // cut off, all of a speck's share under one step was lost far away.
-    let exact = match op {
-        Op::Carve => alpha * kept,
-        _ => alpha * one + (all - alpha) * share,
-    };
     let coin = (pick as u64 * 40_503) % one;
-    let now = exact / one + u64::from(exact % one > coin);
-    grid.alpha[i] = now as u8;
+    let rounded = |exact: u64| (exact / one + u64::from(exact % one > coin)) as u8;
+    let exact = alpha * one + (all - alpha) * share;
+    if op == Op::Carve {
+        for part in [&mut grid.pieces, &mut grid.medium] {
+            part.alpha[i] = rounded(part.alpha[i] as u64 * kept);
+        }
+    } else {
+        part.alpha[i] = rounded(exact);
+    }
     // As often as it makes up of what the site stops before that rounding: of `now`, a medium of a few
     // SHARE-ths of a step was seen as seldom as rounded up, and nine in ten of its sites that stop rays showed nothing.
     if (pick as u64) * exact < visible * all * one {
-        grid.see(i, id, faces);
+        match medium {
+            true => grid.medium.seen[i] = id,
+            false => grid.see(i, id, faces),
+        }
     }
     let glow = [0, 1, 2].map(|c| (old[c] as u64 * kept / one + visible * glow[c] as u64) as u32);
     if glow != [0; 3] {
@@ -2265,7 +2301,7 @@ mod tests {
                 far: None,
             })
         };
-        let kinds = vec![KindDef { name: "stone", kind_type: 1, colors: &["#808080"], walk_through: false, glows: false }];
+        let kinds = vec![KindDef { name: "stone", kind_type: 1, colors: &["#808080"], walk_through: false, glows: false, medium: false }];
         let alone = |layer: Layer| Generator { kinds: kinds.clone(), seed: 1, layers: vec![layer] };
         let (ground, solid) = (alone(ground), alone(block(4096.0)));
         for level in 0..6 {
