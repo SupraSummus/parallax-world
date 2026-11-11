@@ -701,6 +701,9 @@ fn direction(random: &mut Rng) -> Point {
     [r * js::cos(a), y, r * js::sin(a)]
 }
 
+/** The share of a leaf cluster's sprays that are turning. */
+const TURNING: f64 = 0.25;
+
 /**
  * A cluster of leaves around `centre`, reaching `radius`: sprays of
  * leaves on twigs around a core as dense as `fill` at level 0, further a
@@ -722,7 +725,7 @@ fn leaf_cluster(name: String, centre: Point, radius: f64, kind: K, fill: f64, ra
             let d = [dx / length, (dy - droop) / length, dz / length];
             let tip = radius - spray;
             twigs.push(Shape::capsule(at(d, radius * 0.1), at(d, tip - spray / 2.0), FINE, K::twig));
-            let leaf = if random.chance(fx(0.25)) { turning } else { kind };
+            let leaf = if random.chance(fx(TURNING)) { turning } else { kind };
             leaves.push(capsule(at(d, inner), at(d, tip), spray, k(leaf), Fill::Const(LEAVES), Op::Fill));
         }
         twigs.push(ball(centre, core, k(kind), Fill::Const(fill), Op::Fill));
@@ -739,7 +742,9 @@ fn leaf_cluster(name: String, centre: Point, radius: f64, kind: K, fill: f64, ra
         let sprays = if r >= inner { LEAVES * (0.5 * count * spray * spray / (4.0 * r * r)).min(1.0) } else { 0.0 };
         1.0 - (1.0 - cored) * (1.0 - sprays)
     };
-    let far = ball(centre, radius, k(kind), Fill::At(Rc::new(density)), Op::Fill);
+    // The ball is of one kind, turning as often as a spray is: right on average over a tree's clusters, not in each.
+    let far_kind = if Rng::new(seed ^ 0x7475_726e).chance(fx(TURNING)) { turning } else { kind };
+    let far = ball(centre, radius, k(far_kind), Fill::At(Rc::new(density)), Op::Fill);
     Child::new(name, ANY_SIZE, Node::lazy(bounds, seed, sprays).with_far(Far::of(fx(FINE), vec![far])))
 }
 
