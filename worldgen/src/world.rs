@@ -23,12 +23,14 @@ pub struct World {
 impl World {
     /**
      * The heights it has anything at in units of `level`: the sites whose
-     * voxels reach into them. A site on the top's plane stands for the half
-     * of its voxel below it, and may be drawn ("Faces" in docs/generators.md).
+     * voxels reach into them, ends included. A site on the top's plane
+     * stands for the half of its voxel below it, and may be drawn ("Faces"
+     * in docs/generators.md); past level 0, one under the bottom's plane
+     * holds half of level 0's site on it (`slices` in generator.rs).
      */
     pub fn heights_at(&self, level: u32) -> (i64, i64) {
         let s = 1i64 << level;
-        (self.heights.0.div_euclid(s), self.heights.1.div_euclid(s) + 1)
+        ((self.heights.0 - s + 1).div_euclid(s), self.heights.1.div_euclid(s) + 1)
     }
 
     /** The place named `name`: "spawn", or one of its points. */

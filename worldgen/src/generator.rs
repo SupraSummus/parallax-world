@@ -3,6 +3,7 @@
 //! detail. See docs/generators.md.
 
 use std::cell::OnceCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::OnceLock;
 
@@ -44,9 +45,74 @@ impl From<Kind> for Look {
  * level. The shares add up to the site's alpha; the picks choose what
  * of it the site shows (`see`).
  */
-type Put<'a> = dyn FnMut(Look, Op, u32, u32, i64, i64, i64) + 'a;
+type Put<'a> = dyn FnMut(Look, Op, Share, u32, i64, i64, i64) + 'a;
 /** A whole site's share. */
 pub const SHARE: u32 = 1 << 16;
+
+/**
+ * Which of a site's heights a solid thing holds, as level 0 has them
+ * (`slices`), a bit each 64th of its height: ALL the whole site.
+ */
+type Slices = u64;
+const ALL: Slices = Slices::MAX;
+
+/** A thing's share of a site: a `chance` (of SHARE) of stopping each ray, in the `slices` of it the thing is in. */
+#[derive(Clone, Copy)]
+struct Share {
+    chance: u32,
+    slices: Slices,
+}
+
+impl Share {
+    fn whole(chance: u32) -> Share {
+        Share { chance, slices: ALL }
+    }
+
+    /** As a chance over the whole site. */
+    fn of_site(self) -> u32 {
+        (self.chance as u64 * self.slices.count_ones() as u64 / Slices::BITS as u64) as u32
+    }
+}
+
+/**
+ * The slices of the site at `p` (lattice units) of a level whose sites are
+ * `s` apart that hold the heights `held`: those across its voxel, from
+ * y − s to y + s, a unit apart (at most 33 evenly), the ends shared with
+ * the sites past them, half each. Level 0's sites are a unit apart along
+ * y across its columns, half of them at each height, so a solid's face
+ * along y is where level 0 has it on average, as a share of the site, not
+ * rounded to the sites. At level 0, the site itself.
+ */
+fn slices(p: [i64; 3], s: i64, held: impl Fn(i64) -> bool) -> Slices {
+    if s == 1 {
+        return if held(p[1]) { ALL } else { 0 };
+    }
+    // Held at both ends, and so between them: `held` is one run of heights.
+    if held(p[1] - s) && held(p[1] + s) {
+        return ALL;
+    }
+    // 2s intervals, at most 32, in as many bits each of 64, half at the ends.
+    let n = (2 * s).min(32);
+    let (step, bits) = (2 * s / n, Slices::BITS as i64 / n);
+    let mut out = 0;
+    let mut at = 0;
+    for k in 0..=n {
+        let width = if k == 0 || k == n { bits / 2 } else { bits };
+        if held(p[1] - s + k * step) {
+            out |= ((1u128 << width) - 1 << at) as Slices;
+        }
+        at += width;
+    }
+    out
+}
+
+/** How tall, in sites, a solid along y is measured by slices: thinner, a column could hold no whole site of it, and rays down it would get through. */
+const MEASURED: i64 = 2;
+
+/** Whether a solid along y from `lo` to `hi` (in units of `one`) is measured in slices at sites `s` apart. */
+fn measured(s: i64, lo: i64, hi: i64, one: i64) -> bool {
+    s > 1 && hi - lo >= MEASURED * s * one
+}
 
 /** A chance as a share (of SHARE). */
 fn share(chance: f64) -> u32 {
@@ -860,6 +926,38 @@ enum Inside<'a> {
 
 impl Inside<'_> {
     fn holds(&self, x: At) -> bool {
+        self.holds_as(x, false)
+    }
+
+    /**
+     * The slices of the site at `x`, sites `s` apart, it holds: a box
+     * MEASURED sites tall or more at level 0's heights (`slices`), its
+     * faces along y where level 0 has them; else whole.
+     */
+    fn slices(&self, x: At, s: i64) -> Slices {
+        match self {
+            Inside::Cuboid { lo, hi, .. } if measured(s, lo[1], hi[1], ONE) => {
+                if !self.holds_as([x[0], lo[1], x[2]], true) {
+                    return 0;
+                }
+                slices(x.map(|v| v / ONE), s, |y| lo[1] <= y * ONE && y * ONE < hi[1])
+            }
+            _ if self.holds(x) => ALL,
+            _ => 0,
+        }
+    }
+
+    /** Whether `x` is inside; with `level_0`, along y as at level 0, in [lo, hi). */
+    fn holds_as(&self, x: At, level_0: bool) -> bool {
+        let within = |i: usize, lo: &At, hi: &At, min: Fixed, tie: &Tie| {
+            if i == 1 && level_0 {
+                lo[1] <= x[1] && x[1] < hi[1]
+            } else if hi[i] - lo[i] >= min {
+                tie.within(i, x, lo[i], hi[i], ONE)
+            } else {
+                (2 * x[i] - lo[i] - hi[i]).abs() <= min
+            }
+        };
         match self {
             Inside::Nothing => false,
             Inside::Ellipsoid { centre, inverse } => {
@@ -868,15 +966,11 @@ impl Inside<'_> {
             }
             Inside::Piece { piece, thick } => piece.holds(x, thick),
             Inside::Tube { pieces, thick } => pieces.iter().any(|piece| piece.holds(x, thick)),
-            Inside::Cuboid { lo, hi, min, tie } => (0..3).all(|i| {
-                if hi[i] - lo[i] >= *min { tie.within(i, x, lo[i], hi[i], ONE) } else { (2 * x[i] - lo[i] - hi[i]).abs() <= *min }
-            }),
+            Inside::Cuboid { lo, hi, min, tie } => (0..3).all(|i| within(i, lo, hi, *min, tie)),
             Inside::Gable { lo, hi, min, across, tie } => {
                 let a = *across;
                 let ridge = 2 - a;
-                let side = |i: usize| {
-                    if hi[i] - lo[i] >= *min { tie.within(i, x, lo[i], hi[i], ONE) } else { (2 * x[i] - lo[i] - hi[i]).abs() <= *min }
-                };
+                let side = |i: usize| within(i, lo, hi, *min, tie);
                 if !side(ridge) || !side(1) || !side(a) {
                     return false;
                 }
@@ -928,7 +1022,7 @@ impl Shape {
  * Draws a shape at sites `s` apart, by how many of its sizes are under s;
  * returns how many sites it tested.
  */
-fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &mut dyn FnMut(u32, u32, i64, i64, i64)) -> u64 {
+fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &mut dyn FnMut(Share, u32, i64, i64, i64)) -> u64 {
     let s = si as f64;
     let spacing = si * ONE;
     let small = shape.extents.iter().filter(|e| e.to_bits() < spacing).count();
@@ -937,19 +1031,26 @@ fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &mut dyn FnMu
         let [x, y, z] = nearest_site(shape.centre, si);
         let chance = shape.area / (VOXEL_AREA * s * s);
         if clip.holds([x, y, z]) {
-            put(share(chance), picked(x, y, z), x, y, z);
+            put(Share::whole(share(chance)), picked(x, y, z), x, y, z);
         }
         return 1;
     }
     let min = [0, spacing, spacing * 8 / 5][small];
     let b = &shape.bounds;
-    // A box's sites on its top faces may count as under them (Tie), past its bounds but at level 0.
+    // A box's sites on its top faces may count as under them (Tie), past its bounds but at level 0; measured in
+    // slices, the sites whose voxels reach its faces along y.
     let past = if matches!(shape.solid, Solid::Cuboid { .. } | Solid::Gable { .. }) { 0 } else { ONE };
-    let [x0, y0, z0] = b.min.map(|v| -(-(v * ONE - min / 2)).div_euclid(spacing));
-    let [x1, y1, z1] = b.max.map(|v| (v * ONE - past + min / 2).div_euclid(spacing));
+    let measures = match shape.solid {
+        Solid::Cuboid { min: lo, max: hi } => measured(si, lo[1], hi[1], ONE),
+        _ => false,
+    };
+    let reach = [0, if measures { spacing } else { 0 }, 0];
+    let [x0, y0, z0] = [0, 1, 2].map(|i| -(-(b.min[i] * ONE - min / 2 - reach[i])).div_euclid(spacing));
+    let [x1, y1, z1] = [0, 1, 2].map(|i| (b.max[i] * ONE - past + min / 2 + reach[i]).div_euclid(spacing));
     let inside = shape.inside(min, si);
-    // Visits the sites within that are inside; returns about how many it tested (half of each row's points).
-    let sites = |within: &Box3, visit: &mut dyn FnMut(i64, i64, i64)| {
+    // Visits the sites within that are inside, with the slices of each; returns about how many it tested (half of
+    // each row's points).
+    let sites = |within: &Box3, visit: &mut dyn FnMut(i64, i64, i64, Slices)| {
         let (z_from, z_to) = (z0.max(within.min[2]), z1.min(within.max[2] - 1));
         let (y_from, y_to) = (y0.max(within.min[1]), y1.min(within.max[1] - 1));
         let (from, x_to) = (x0.max(within.min[0]), x1.min(within.max[0] - 1));
@@ -957,8 +1058,9 @@ fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &mut dyn FnMu
             for y in y_from..=y_to {
                 let mut x = from + ((from + y + z) & 1);
                 while x <= x_to {
-                    if inside.holds([x, y, z].map(|v| v * spacing)) {
-                        visit(x, y, z);
+                    let slices = inside.slices([x, y, z].map(|v| v * spacing), si);
+                    if slices != 0 {
+                        visit(x, y, z, slices);
                     }
                     x += 2;
                 }
@@ -968,23 +1070,23 @@ fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &mut dyn FnMu
     };
     let fill = |x: i64, y: i64, z: i64| shape.fill.at((x * si) as f64, (y * si) as f64, (z * si) as f64);
     match small {
-        0 => sites(clip, &mut |x, y, z| {
+        0 => sites(clip, &mut |x, y, z, slices| {
             let chance = 1.0 - js::pow(1.0 - fill(x, y, z), s);
-            put(share(chance), picked(x, y, z), x, y, z)
+            put(Share { chance: share(chance), slices }, picked(x, y, z), x, y, z)
         }),
         1 => {
             let thickness = shape.extents.into_iter().min().expect("three").to_f64();
-            sites(clip, &mut |x, y, z| {
+            sites(clip, &mut |x, y, z, slices| {
                 let chance = 1.0 - js::pow(1.0 - fill(x, y, z), thickness / CHORD);
-                put(share(chance), picked(x, y, z), x, y, z)
+                put(Share { chance: share(chance), slices }, picked(x, y, z), x, y, z)
             })
         }
         _ => {
             // Counted whole, so every box gets the same chance.
             let mut count = 0;
-            let tested = sites(&EVERYWHERE, &mut |_, _, _| count += 1);
+            let tested = sites(&EVERYWHERE, &mut |_, _, _, _| count += 1);
             let chance = shape.area / (count as f64 * VOXEL_AREA * s * s);
-            tested + sites(clip, &mut |x, y, z| put(share(chance), picked(x, y, z), x, y, z))
+            tested + sites(clip, &mut |x, y, z, _| put(Share::whole(share(chance)), picked(x, y, z), x, y, z))
         }
     }
 }
@@ -1074,12 +1176,18 @@ pub fn generate(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
     let palette = Palette::new(&generator.kinds, generator.seed);
     let mut grid = VoxelGrid::new(b);
     let clip = grid.clip();
-    let mut put = |look: Look, op: Op, share: u32, pick: u32, x: i64, y: i64, z: i64| {
+    // The slices of sites whose pieces fill only some, whole (see `see`), and of each column the one its sites
+    // show by: one coin per column.
+    let mut held = HashMap::new();
+    let coins = hash_text("shown", generator.seed);
+    let slice = |x: i64, z: i64| ((hash(coins, x * s, 0, z * s) as u64 * Slices::BITS as u64) >> 32) as u32;
+    let mut put = |look: Look, op: Op, share: Share, pick: u32, x: i64, y: i64, z: i64| {
         let shade = |kind: Kind| palette.shade(kind, x * s, y * s, z * s);
         let id = shade(look.kind);
         let faces = look.faces.map(|faces| faces.map(shade));
         let medium = palette.materials[id as usize].medium;
-        see(&mut grid, op, share, pick, (id, faces, medium), palette.glows[id as usize], x, y, z);
+        let picks = (pick, slice(x, z));
+        see(&mut grid, &mut held, op, share, picks, (id, faces, medium), palette.glows[id as usize], x, y, z);
     };
     let drawables = drawables_in(generator, &clip, s);
     let mut at = 0;
@@ -1110,9 +1218,14 @@ pub fn generate(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
         }
         cost::add(group[0].layer, work);
     }
-    // One coin per site: its pieces shown as often as they stop rays.
-    let coins = hash_text("shown", generator.seed);
-    grid.show(|x, y, z| ((hash(coins, x * s, y * s, z * s) as u64 * ALPHA as u64) >> 32) as u8);
+    // One coin per site: its pieces shown as often as they stop rays. Those in slices by their column's slice, the
+    // same in every site of it: as level 0 has the column, at heights a site's height apart, so a solid at least
+    // two sites tall shows at one site or more, and as often as its sites stop rays.
+    grid.show(|x, y, z| match held.get(&[x, y, z]) {
+        Some(slices) if slices >> slice(x, z) & 1 == 1 => 0,
+        Some(_) => ALPHA,
+        None => ((hash(coins, x * s, y * s, z * s) as u64 * ALPHA as u64) >> 32) as u8,
+    });
     grid
 }
 
@@ -1128,45 +1241,86 @@ pub fn generate(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
 #[allow(clippy::too_many_arguments)]
 fn see(
     grid: &mut VoxelGrid,
+    held: &mut HashMap<[i64; 3], Slices>,
     op: Op,
-    share: u32,
-    pick: u32,
+    share: Share,
+    (pick, slice): (u32, u32),
     (id, faces, medium): (u8, Option<Faces>, bool),
     glow: [u32; 3],
     x: i64,
     y: i64,
     z: i64,
 ) {
-    if share == 0 {
+    if share.of_site() == 0 {
         return;
     }
     let Some(i) = grid.index(x, y, z) else { return };
     let part = if medium { &mut grid.medium } else { &mut grid.pieces };
-    let (alpha, share) = (part.alpha[i] as u64, share.min(SHARE) as u64);
+    let alpha = part.alpha[i] as u64;
     let (all, one) = (ALPHA as u64, SHARE as u64);
     let old = grid.glow.get(&i).copied().unwrap_or_default();
-    // Of SHARE: how much of what was there is still seen, and how much of the site the thing is seen in.
-    let (kept, visible) = match op {
-        Op::Carve => (one - share, 0),
-        Op::Fill => (one, (all - alpha) * share / all),
-        Op::Paint => (one - share, share),
+    let of = |slices: Slices| slices.count_ones() as u64 * one / Slices::BITS as u64;
+    // The slices the site's pieces fill, if whole slices are all they are: none, every one, or those held.
+    let filled = match held.get(&[x, y, z]) {
+        _ if medium => None,
+        Some(&slices) => Some(slices),
+        None if alpha == 0 => Some(0),
+        None if alpha == all => Some(ALL),
+        None => None,
+    };
+    // Of SHARE: how much of what was there is still seen, and how much of the site the thing is seen in; of ALPHA
+    // times SHARE, what the part (both, carved) then stops.
+    let (kept, visible, exact, shows) = match filled {
+        // A solid thing's slices on pieces in whole slices: as level 0 has its sites, filled or not.
+        Some(before) if share.chance >= SHARE => {
+            let after = if op == Op::Carve { before & !share.slices } else { before | share.slices };
+            if after == 0 || after == ALL {
+                held.remove(&[x, y, z]);
+            } else {
+                held.insert([x, y, z], after);
+            }
+            let (kept, visible) = match op {
+                Op::Carve => (one - of(share.slices), 0),
+                Op::Fill => (one, of(share.slices & !before)),
+                Op::Paint => (one - of(share.slices), of(share.slices)),
+            };
+            // What the site is of is what its column's slice is of, as level 0 has its site there; if it holds
+            // nothing there, as often as each makes up of it, by its pick.
+            let new = if op == Op::Fill { share.slices & !before } else { share.slices };
+            let exact = of(after) * all;
+            let shows = if after >> slice & 1 == 1 { new >> slice & 1 == 1 } else { (pick as u64) * exact < visible * all * one };
+            (kept, visible, exact, op != Op::Carve && shows)
+        }
+        // Anything else by chance, what is there as likely anywhere in the site.
+        _ => {
+            if !medium {
+                held.remove(&[x, y, z]);
+            }
+            let share = share.of_site().min(SHARE) as u64;
+            let (kept, visible) = match op {
+                Op::Carve => (one - share, 0),
+                Op::Fill => (one, (all - alpha) * share / all),
+                Op::Paint => (one - share, share),
+            };
+            let exact = if op == Op::Carve { alpha * kept } else { alpha * one + (all - alpha) * share };
+            // As often as it makes up of what the site stops before that rounding: of `now`, a medium of a few
+            // SHARE-ths of a step was seen as seldom as rounded up, and nine in ten of its sites that stop rays
+            // showed nothing.
+            (kept, visible, exact, (pick as u64) * exact < visible * all * one)
+        }
     };
     // In SHARE-ths of a step of alpha, rounded up as often as the remainder,
     // by a coin from the pick (its bits scrambled by an odd factor):
     // cut off, all of a speck's share under one step was lost far away.
     let coin = (pick as u64 * 40_503) % one;
     let rounded = |exact: u64| (exact / one + u64::from(exact % one > coin)) as u8;
-    let exact = alpha * one + (all - alpha) * share;
     if op == Op::Carve {
-        for part in [&mut grid.pieces, &mut grid.medium] {
-            part.alpha[i] = rounded(part.alpha[i] as u64 * kept);
-        }
+        grid.pieces.alpha[i] = rounded(if medium { grid.pieces.alpha[i] as u64 * kept } else { exact });
+        grid.medium.alpha[i] = rounded(grid.medium.alpha[i] as u64 * kept);
     } else {
         part.alpha[i] = rounded(exact);
     }
-    // As often as it makes up of what the site stops before that rounding: of `now`, a medium of a few
-    // SHARE-ths of a step was seen as seldom as rounded up, and nine in ten of its sites that stop rays showed nothing.
-    if (pick as u64) * exact < visible * all * one {
+    if shows {
         match medium {
             true => grid.medium.seen[i] = id,
             false => grid.see(i, id, faces),
@@ -1191,7 +1345,7 @@ struct Own {
     /** By site, its last put in `puts`; NONE if none. */
     cells: Vec<u32>,
     /** Puts: each what it is of, how it meets the world, its share and pick (Put), and the site's put before it. */
-    puts: Vec<(Look, Op, u32, u32, u32)>,
+    puts: Vec<(Look, Op, Share, u32, u32)>,
 }
 
 const NONE: u32 = u32::MAX;
@@ -1210,10 +1364,10 @@ impl Own {
 
     /** Within the thing only: a Carve, where it keeps a voxel, takes out what the thing put there. */
     #[allow(clippy::too_many_arguments)]
-    fn put(&mut self, look: Look, op: Op, share: u32, pick: u32, x: i64, y: i64, z: i64) {
+    fn put(&mut self, look: Look, op: Op, share: Share, pick: u32, x: i64, y: i64, z: i64) {
         let i = self.index(x, y, z);
         if op == Op::Carve {
-            if pick < share {
+            if pick < share.of_site() {
                 self.cells[i] = NONE;
             }
             return;
@@ -1223,7 +1377,7 @@ impl Own {
     }
 
     /** The puts at index `i` of `cells`, last first. */
-    fn puts_at(&self, i: usize) -> impl Iterator<Item = &(Look, Op, u32, u32, u32)> {
+    fn puts_at(&self, i: usize) -> impl Iterator<Item = &(Look, Op, Share, u32, u32)> {
         std::iter::successors(self.puts.get(self.cells[i] as usize), |p| self.puts.get(p.4 as usize))
     }
 
@@ -1239,7 +1393,7 @@ impl Own {
     fn of(&self, i: usize) -> Option<(Kind, Op)> {
         // Last first: the last Paint kept, else the first Fill kept.
         let mut fill = None;
-        for &(look, op, ..) in self.puts_at(i).filter(|p| p.3 < p.2) {
+        for &(look, op, ..) in self.puts_at(i).filter(|p| p.3 < p.2.of_site()) {
             match op {
                 Op::Paint => return Some((look.kind, op)),
                 _ => fill = Some((look.kind, op)),
@@ -1297,7 +1451,7 @@ fn draw(drawable: &Drawable, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
         Draw::Sites(sites) => {
             for &([x, y, z], look, op, share, pick) in sites {
                 if clip.holds([x, y, z]) {
-                    put(look, op, share, pick, x, y, z);
+                    put(look, op, Share::whole(share), pick, x, y, z);
                 }
             }
             Work { nodes: 1, tests: sites.len() as u64, ..Work::default() }
@@ -1872,7 +2026,7 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
                     work.reads += 0.max((clip.max[0] - x + 1) / 2) as u64;
                     while x < clip.max[0] {
                         if let Some((kind, extinction)) = plan::footprint(s, offset(x, z), || at(x * s, y * s, z * s, s)) {
-                            put(kind.into(), op, share_of(extinction), picked(x, y, z), x, y, z);
+                            put(kind.into(), op, Share::whole(share_of(extinction)), picked(x, y, z), x, y, z);
                         }
                         x += 2;
                     }
@@ -1896,14 +2050,36 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
                         moved[axis / 2] = 0;
                     }
                     work.reads += 1;
-                    for span in plan::footprint(s, moved, || spans(u * s, v * s, s)) {
+                    let line = plan::footprint(s, moved, || spans(u * s, v * s, s));
+                    for span in &line {
+                        // Solid and on a run of spans (end to end) MEASURED sites tall, in slices past level 0, so
+                        // the sites under a face hold half a site's worth (`slices`).
+                        let (mut from, mut to) = (span.from, span.to);
+                        let solid = |o: &Span| o.extinction.is_none() && o.from < o.to;
+                        while let Some(o) = line.iter().find(|o| solid(o) && o.to == from) {
+                            from = o.from;
+                        }
+                        while let Some(o) = line.iter().find(|o| solid(o) && o.from == to) {
+                            to = o.to;
+                        }
+                        let sliced = axis == 1 && solid(span) && measured(s, from, to, 1);
+                        let reach = if sliced { s } else { 0 };
                         // s is a power of two: shifting is dividing, rounded down.
-                        let first = (-((-span.from) >> s.trailing_zeros())).max(lo[axis]);
+                        let first = (-((-(span.from - reach)) >> s.trailing_zeros())).max(lo[axis]);
                         let mut w = first + ((first + u + v) & 1);
                         let share = share_of(span.extinction);
-                        while w * s <= span.to && w < hi[axis] {
+                        while w * s <= span.to + reach && w < hi[axis] {
                             site[axis] = w;
-                            if tie.within(axis, site.map(|c| c * s), span.from, span.to, 1) {
+                            let at = site.map(|c| c * s);
+                            let slices = if sliced {
+                                slices(at, s, |y| span.from <= y && y < span.to)
+                            } else if tie.within(axis, at, span.from, span.to, 1) {
+                                ALL
+                            } else {
+                                0
+                            };
+                            if slices != 0 {
+                                let share = Share { chance: share, slices };
                                 put(span.kind.into(), op, share, picked(site[0], site[1], site[2]), site[0], site[1], site[2]);
                             }
                             w += 2;
