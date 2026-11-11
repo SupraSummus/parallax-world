@@ -22,11 +22,11 @@ pnpm exec vitest run bake       # files matching "bake"
 | `src/lib/relief.test.ts` | Slices drawn in relief against ray-cast perspective: what they leak by detail |
 | `src/lib/chunk-baker.test.ts`, `bake/src/splats.rs` | Baked chunks' splats against rays cast along the axis and, in relief, slanted |
 | `bake/src/fill.rs`, `bake/src/coverage.rs` | Splats filled into a mask; solid blocks and their sums |
-| `src/lib/occlusion.test.ts`, `native/src/main.rs` | Skipping covered chunks and clusters leaves the picture unchanged (natively, culling on the GPU) |
+| `src/lib/occlusion.test.ts`, `native/src/engine/chunks.rs` | Skipping covered chunks and clusters leaves the picture unchanged (natively, culling on the GPU) |
 | `src/lib/pillars.test.ts` | Each column a pillar over its run shows a lawn without the soil under it; without runs, stripes |
 | `src/lib/view.test.ts`, `native/src/view.rs` | Camera basis, faces, projection, culling |
-| `native/src/renderer.rs` | Moving keeps most chunks |
-| `native/src/main.rs` | What the GPU's buffers cannot hold is left out, the farthest first |
+| `native/src/engine/chunks.rs` | Moving keeps most chunks |
+| `native/src/engine/chunks.rs` | What the GPU's buffers cannot hold is left out, the farthest first |
 | `bake/src/walk.rs`, `worlds/tests/forest.rs` | Walking: the ground, steps, walls, jumps; the forest's path through its ferns |
 | `src/lib/voxel-grid.test.ts` | Storage on the lattice, `LayerIndex` |
 | `src/lib/renderer.test.ts` | Slices and chunks in view, placement, caching, stats (on a small world) |

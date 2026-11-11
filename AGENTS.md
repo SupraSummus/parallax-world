@@ -115,19 +115,23 @@ lab/                         # Experiment, not built by pnpm: split grammars wit
 native/                      # Spike of a native frontend (egui on winit and wgpu), linking bake/ and worlds/; see src/main.rs
 ├── .cargo/config.toml       # Builds for x86-64-v3: floor and ceil inline (see there)
 └── src/
-    ├── main.rs              # The camera (flying or walking, F), the panel, its engine (reliefs, splats, voxels or slabs) and lighting (shaded or computed); --shot, --bench, --stroll
-    ├── window.rs            # The window: egui on winit and wgpu, drawing either engine's picture, its GPU device made again when lost
-    ├── world.rs             # world.ts for generated worlds: a World's tiles, those the renderer wants first, made, indexed and (for the voxels) lit on threads
+    ├── main.rs              # The camera (flying or walking, F), the panel, its engine and lighting (shaded or computed); --shot, --bench, --stroll for any engine
+    ├── window.rs            # The window: egui on winit and wgpu, over the engine's picture, its GPU device made again when lost
+    ├── gpu.rs               # What a device must allow; an Easel: a device and the painter of the engine that drew on it, in the window or offscreen (saved as a PNG, timed)
+    ├── world.rs             # world.ts for generated worlds: a World's tiles, those the engine wants first, made, indexed and (for the voxels) lit on threads
     ├── view.rs              # view.ts: faces, which rays and screen boxes they draw
-    ├── renderer.rs          # Chunks in view: cells of the lattice (bake's lod.rs), not slices; cached, finest and nearest first
-    ├── bakery.rs            # Worker threads baking chunks, a baker each sharing the tiles (lit, with a Light each), and putting their reliefs' columns in tiles and their splats in clusters for the GPU
-    ├── compositor.rs        # compositor.ts with wgpu, for cells: reliefs' columns uploaded per chunk in tiles, each tile a quad whose pixels' rays find their column, or whole voxels as splats each, culled on the GPU against what showed; see-through splats over each other in the order rays meet them
-    ├── shot.rs              # --shot: one frame drawn offscreen on the GPU, saved as a PNG, no window
-    ├── march.rs             # The voxels engine: rays through the tiles' voxels, cell to cell, see-through ones added up in the order met; each level's bricks (and, lit, their light) in a window around the eye, a torus; no chunks or faces of the view
-    ├── march.wgsl
-    ├── trace.rs             # The slabs engine (a prototype): slabs along each face baked around the eye, a picture of their columns' first runs; rays for some pixels walk them, each pixel tests its own against what they met
-    ├── trace.wgsl
-    └── compositor.wgsl
+    ├── engine.rs            # What draws: Engine (on the main thread, a Frame of what a Look sees), Picture and Painter (on the GPU); Kind, the engines by name
+    └── engine/
+        ├── chunks.rs        # The chunks engine, as the web draws (reliefs or splats)
+        ├── chunks/
+        │   ├── renderer.rs  # Chunks in view: cells of the lattice (bake's lod.rs), not slices; cached, finest and nearest first
+        │   ├── bakery.rs    # Worker threads baking chunks, a baker each sharing the tiles (lit, with a Light each), and putting their reliefs' columns in tiles and their splats in clusters for the GPU
+        │   ├── compositor.rs # compositor.ts with wgpu, for cells: reliefs' columns uploaded per chunk in tiles, each tile a quad whose pixels' rays find their column, or whole voxels as splats each, culled on the GPU against what showed; see-through splats over each other in the order rays meet them
+        │   └── compositor.wgsl
+        ├── voxels.rs        # The voxels engine: rays through the tiles' voxels, cell to cell, see-through ones added up in the order met; each level's bricks (and, lit, their light) in a window around the eye, a torus; no chunks or faces of the view
+        ├── voxels.wgsl
+        ├── slabs.rs         # The slabs engine (a prototype): slabs along each face baked around the eye on a thread, a picture of their columns' first runs; rays for some pixels walk them, each pixel tests its own against what they met
+        └── slabs.wgsl
 ```
 
 ## Workflow

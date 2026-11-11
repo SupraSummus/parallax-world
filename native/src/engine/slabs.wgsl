@@ -1,4 +1,4 @@
-// trace.rs: a ray walks its face's slabs, near to far, and stops at the
+// slabs.rs: a ray walks its face's slabs, near to far, and stops at the
 // first column whose run it meets: one for every factor × factor pixels,
 // each pixel then testing its own ray against what they met (resolve_fragment).
 

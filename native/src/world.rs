@@ -1,18 +1,18 @@
 //! A generated world's tiles (World in world.ts): each level's voxels are
 //! tiles fixed in the world, TILE sites of the level wide along x and z,
 //! generated alone on the world's threads (a generator per thread) and
-//! indexed there. Which tiles, and in what order, is up to the renderer:
-//! every update hands over the tiles it misses for the cells in view, most
-//! wanted first, replacing the previous list; then the rest within reach
-//! of the camera of each level it reads (GRID_REACH, or as far as the
-//! voxels engine's rays read, march::REACH), so that turning finds them
-//! made. Tiles far from the camera are dropped. A tile never changes, so
-//! a chunk baked once all the tiles it reads are in stays right whatever
-//! comes after (bake's Tiles). Given light (worldgen's Shared),
+//! indexed there. Which tiles, and in what order, is up to the engine
+//! drawing them (Wants): every update hands over the tiles it misses for
+//! what is in view, most wanted first, replacing the previous list; then
+//! the rest within reach of the camera of each level it reads (GRID_REACH,
+//! or as far as the voxels engine's rays read, voxels::REACH), so that
+//! turning finds them made. Tiles far from the camera are dropped. A tile
+//! never changes, so a chunk baked once all the tiles it reads are in
+//! stays right whatever comes after (bake's Tiles). Given light (worldgen's Shared),
 //! the tiles are those the bakers' Lights read, made once. Asked for light,
 //! the light reads every level coarser than a voxel's: the tiles near the
 //! camera come first, the coarsest's before all; and, for the voxels engine
-//! (march.rs), each tile made of a level it reads is lit, its voxels'
+//! (voxels.rs), each tile made of a level it reads is lit, its voxels'
 //! light found, after every tile to make (lighting takes several times as
 //! long), nearest first in each level's own sites. A tile lit is a new
 //! tile, in the place of the one made.
@@ -21,12 +21,13 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Condvar, Mutex};
 
-use bake::slicing::{GRID_LEVELS, GRID_REACH};
+use bake::slicing::GRID_LEVELS;
 use bake::{Grid, LayerIndex, Tiles};
-use worldgen::generator::generate;
+use worldgen::generator::{generate, materials_of};
 use worldgen::grid::Box3;
 use worldgen::light::{Light, Shared};
 
+use crate::engine::voxels;
 use crate::view::Vec3;
 
 /** Tiles are 2^TILE_SHIFT sites of their level wide. */
@@ -42,19 +43,19 @@ pub type Make = fn(u64) -> worldgen::World;
 pub type Heights = [(i64, i64); GRID_LEVELS];
 
 /** The heights of `world` for each grid level. */
-pub fn heights(world: &worldgen::World) -> Heights {
+fn heights(world: &worldgen::World) -> Heights {
     std::array::from_fn(|level| world.heights_at(level as u32))
 }
 
 /** Tile (i, k) holds x in [i · TILE, (i + 1) · TILE), z likewise. */
 pub type TileId = (i32, i32);
 
-/** A generated tile: its voxels, where they are along each face's layers, and its bricks and, lit, their light as the GPU takes them (march.rs). */
+/** A generated tile: its voxels, where they are along each face's layers, and its bricks and, lit, their light as the GPU takes them (voxels.rs). */
 pub struct Tile {
     pub grid: Arc<Grid>,
     pub index: LayerIndex,
     pub words: Vec<u32>,
-    /** If lit, march::lights. */
+    /** If lit, voxels::lights. */
     pub lights: Option<Vec<u32>>,
 }
 
@@ -71,12 +72,24 @@ impl Level {
     }
 }
 
-/** How the tiles are lit: not, by what reads them (the bakers' Lights), or each tile here of a level read, once made (march's). */
+/** How the tiles are lit: not, by what reads them (the bakers' Lights), or each tile here of a level read, once made (the voxels'). */
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Lit {
     Not,
     Reading,
     Tiles,
+}
+
+/**
+ * What an engine reads of the world: the levels whose tiles it reads, as
+ * far around the camera as `reach`, in each level's sites, lit as `lit`
+ * says; and, first, the tiles it lacks for what is in view, most wanted first.
+ */
+pub struct Wants {
+    pub levels: [bool; GRID_LEVELS],
+    pub reach: f64,
+    pub lit: Lit,
+    pub tiles: Vec<(usize, TileId)>,
 }
 
 /** A tile to make, or one made to light. */
@@ -93,11 +106,17 @@ type Made = (usize, TileId, Arc<Tile>);
 
 pub struct World {
     tiles: Vec<HashMap<TileId, Arc<Tile>>>,
-    /** How the tiles are lit from the next update on: by the World's light only if it was given some. */
-    pub lit: Lit,
-    /** How far from the camera tiles are made from the next update on, in each level's sites (GRID_REACH at first). */
-    pub reach: f64,
-    lights: bool,
+    /** Per level, the tiles made so far, as engines read them. */
+    levels: Vec<Arc<Level>>,
+    /** By material id, its colour. */
+    pub palette: Arc<Vec<u32>>,
+    pub heights: Heights,
+    /** The threads it makes tiles on, which engines may take as many of. */
+    pub threads: usize,
+    /** The world and the light (if any) it is made into, for Lights of the bakers' own. */
+    make: Make,
+    seed: u64,
+    shared: Option<Shared>,
     queue: Arc<(Mutex<Queue>, Condvar)>,
     done: Receiver<Made>,
     /** Received by wait(), not taken yet. */
@@ -152,7 +171,7 @@ fn work(make: Make, seed: u64, shared: Option<Shared>, heights: &Heights, queue:
         let tile = match made {
             Some(tile) => {
                 let light = light.as_mut().expect("light to light tiles with");
-                let lights = Some(crate::march::lights(&tile.grid, level as u32, light));
+                let lights = Some(voxels::lights(&tile.grid, level as u32, light));
                 Tile { grid: tile.grid.clone(), index: tile.index.clone(), words: tile.words.clone(), lights }
             }
             None => {
@@ -162,7 +181,7 @@ fn work(make: Make, seed: u64, shared: Option<Shared>, heights: &Heights, queue:
                 }
                 .into_grid(true);
                 let index = LayerIndex::new(&grid);
-                let words = crate::march::words(&grid);
+                let words = voxels::words(&grid);
                 Tile { grid: Arc::new(grid), index, words, lights: None }
             }
         };
@@ -183,16 +202,46 @@ impl World {
             let (queue, send, shared) = (queue.clone(), send.clone(), shared.clone());
             std::thread::spawn(move || work(make, seed, shared, &heights, &queue, &send));
         }
-        let lights = shared.is_some();
         World {
             tiles: (0..GRID_LEVELS).map(|_| HashMap::new()).collect(),
-            lit: Lit::Not,
-            reach: GRID_REACH,
-            lights,
+            levels: (0..GRID_LEVELS).map(|_| Arc::new(Level::new(HashMap::new()))).collect(),
+            palette: Arc::new(materials_of(&world.generator).iter().map(|m| m.rgb()).collect()),
+            heights,
+            threads,
+            make,
+            seed,
+            shared,
             queue,
             done,
             early: Vec::new(),
         }
+    }
+
+    /** The tiles of `level` made so far. */
+    pub fn level(&self, level: usize) -> &Arc<Level> {
+        &self.levels[level]
+    }
+
+    /** A Light of the world for each who asks, if it was given light: it lights what they read from the tiles' light. */
+    pub fn light(&self) -> Option<impl Fn() -> Light + Send + Sync + 'static> {
+        let (make, seed) = (self.make, self.seed);
+        self.shared.clone().map(|shared| move || Light::new(make(seed), shared.clone()))
+    }
+
+    /**
+     * The tiles of the `levels` read within `reach` of the camera, in each
+     * level's sites, not made yet, or not lit yet if `lit` here: what an
+     * engine that reads all around the eye lacks, level by level, nearest
+     * first.
+     */
+    pub fn lacking(&self, levels: &[bool; GRID_LEVELS], camera: Vec3, reach: f64, lit: Lit) -> Vec<(usize, TileId)> {
+        let lacks = |level: usize, id: &TileId| self.tiles[level].get(id).is_none_or(|t| lit == Lit::Tiles && t.lights.is_none());
+        (0..GRID_LEVELS)
+            .filter(|&level| levels[level])
+            .flat_map(|level| {
+                around(level, camera, reach).into_iter().filter(move |(_, id)| lacks(level, id)).map(move |(_, id)| (level, id))
+            })
+            .collect()
     }
 
     /** Makes no more tiles but those being made. */
@@ -213,16 +262,17 @@ impl World {
 
     /**
      * Takes the tiles made or lit, drops those far from the camera (lattice
-     * units), and has the `wanted` ones made, most wanted first, then the
-     * rest within reach of each of the `levels` read, as `lit` wants them;
-     * then, lit here, has those of the levels read lit. Returns the levels
-     * whose tiles changed.
+     * units), and has the tiles `wants` names made, most wanted first, then
+     * the rest within its reach of each level it reads, lit as it wants
+     * them; then, lit here, has those of the levels read lit. Returns
+     * whether any level's tiles changed.
      */
-    pub fn update(&mut self, camera: Vec3, levels: &[bool; GRID_LEVELS], wanted: &[(usize, TileId)]) -> Vec<(usize, Arc<Level>)> {
-        let lit = self.lit;
-        assert!(lit == Lit::Not || self.lights, "a world lit with no light");
+    pub fn update(&mut self, camera: Vec3, wants: &Wants) -> bool {
+        let Wants { levels, reach, lit, tiles: wanted } = wants;
+        let (levels, reach, lit) = (*levels, *reach, *lit);
+        assert!(lit == Lit::Not || self.shared.is_some(), "a world lit with no light");
         // Tiles are made no farther from the camera than `keep` (in the level's sites), and dropped once a tile farther.
-        let (reach, keep) = (self.reach, self.reach + 2.0 * TILE as f64);
+        let keep = reach + 2.0 * TILE as f64;
         let mut changed = [false; GRID_LEVELS];
         let made: Vec<Made> = std::mem::take(&mut self.early).into_iter().chain(self.done.try_iter()).collect();
         {
@@ -263,7 +313,7 @@ impl World {
                 }
             }
         }
-        for &(level, id) in wanted {
+        for &(level, id) in wanted.iter() {
             add(&self.tiles[level], level, id);
         }
         for level in 0..GRID_LEVELS {
@@ -295,6 +345,9 @@ impl World {
             q.wanted = list;
         }
 
-        (0..GRID_LEVELS).filter(|&l| changed[l]).map(|l| (l, Arc::new(Level::new(self.tiles[l].clone())))).collect()
+        for level in (0..GRID_LEVELS).filter(|&l| changed[l]) {
+            self.levels[level] = Arc::new(Level::new(self.tiles[level].clone()));
+        }
+        changed.contains(&true)
     }
 }

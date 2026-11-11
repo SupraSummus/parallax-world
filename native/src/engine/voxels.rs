@@ -1,5 +1,5 @@
-//! The view as rays through the world's own tiles (march.wgsl): no chunks,
-//! nothing baked. A ray goes from voxel to voxel across their faces, each
+//! The voxels engine: the view as rays through the world's own tiles
+//! (voxels.wgsl), no chunks, nothing baked. A ray goes from voxel to voxel across their faces, each
 //! level up to REACH of its sites from the eye, then on in the next coarser
 //! one. One ray is traced for every FACTOR × FACTOR pixels; each pixel then
 //! takes the nearest of the voxels its four nearest samples met that its
@@ -23,16 +23,16 @@
 //! uploaded then.
 
 use std::sync::Arc;
-use std::time::Instant;
 
 use bake::light::{colour, linear_to_srgb, srgb_to_linear};
 use bake::slicing::GRID_LEVELS;
 use egui_wgpu::wgpu;
 use worldgen::light::Light;
 
-use crate::compositor::{BACKENDS, limits};
+use super::{Engine, Frame, Look, Painter, Picture};
+use crate::gpu::Easel;
 use crate::view::{Vec3, focal_length, view_basis};
-use crate::world::{Level, Tile};
+use crate::world::{Level, Lit, Tile, Wants, World};
 
 /** A level's window, in bricks a side (a power of two: the table is a torus). */
 const WINDOW: i32 = 64;
@@ -55,12 +55,10 @@ const POOL_BYTES: u64 = 256 << 20;
  * all around the eye, wherever in its brick the eye is.
  */
 pub const REACH: f64 = ((WINDOW / 2 - 1) * BRICK) as f64;
-/** The fog's distance, a share of the render distance (renderer.ts's). */
-pub const FOG_PER_FAR: f64 = 0.7;
 
 const TABLE: usize = (WINDOW * WINDOW * WINDOW) as usize;
 const BLOCKS: usize = TABLE / (BLOCK * BLOCK * BLOCK) as usize;
-/** A table's entries other than slots (march.wgsl's). */
+/** A table's entries other than slots (voxels.wgsl's). */
 const EMPTY: i32 = -1;
 const UNKNOWN: i32 = -3;
 
@@ -73,7 +71,7 @@ fn reach(level: usize, far: f64) -> f64 {
 }
 
 /** How many levels rays read to reach `far`: up to the first that does, or all. */
-pub fn levels(far: f64) -> usize {
+fn levels(far: f64) -> usize {
     (0..GRID_LEVELS).find(|&l| reach(l, far) >= far).map_or(GRID_LEVELS, |l| l + 1)
 }
 
@@ -112,39 +110,46 @@ pub fn lights(grid: &bake::Grid, level: u32, light: &mut Light) -> Vec<u32> {
     out
 }
 
-/** What to draw: each level's tiles, the materials' colours or, lit, the voxels' light, from where and how, how far, and how big. */
-pub struct Scene {
-    pub levels: Vec<Arc<Level>>,
-    pub palette: Arc<Vec<u32>>,
-    /** If the tiles carry their voxels' light (world.rs), how bright the sky is: 1 by day, less as --light dims it. */
-    pub lit: Option<f32>,
-    pub eye: Vec3,
-    /** Degrees, as view_basis takes them; the field of view across the longer side. */
-    pub yaw: f64,
-    pub pitch: f64,
-    pub fov: f64,
-    /** Rays reach this far (world units); the fog's distance. */
-    pub far: f64,
-    pub fog: f64,
-    pub pixels: [u32; 2],
-}
+/** The voxels engine: each frame, the tiles of the levels its rays read, as they are. */
+pub struct Voxels;
 
-impl Scene {
-    /** For `levels` and `palette` (or their light, if `lit`) and how far rays reach, `far`, with the fog it has. */
-    pub fn new(
-        levels: Vec<Arc<Level>>,
-        palette: Arc<Vec<u32>>,
-        lit: Option<f32>,
-        eye: Vec3,
-        [yaw, pitch, fov]: [f64; 3],
-        far: f64,
-        pixels: [u32; 2],
-    ) -> Scene {
-        Scene { levels, palette, lit, eye, yaw, pitch, fov, far, fog: far * FOG_PER_FAR, pixels }
+impl Engine for Voxels {
+    fn frame(&mut self, look: &Look, world: &World) -> Frame {
+        let count = levels(look.far);
+        let levels: Vec<_> = (0..count).map(|l| world.level(l).clone()).collect();
+        let tiles: usize = levels.iter().map(|l| l.tiles.len()).sum();
+        let lit = if look.sky.is_some() { Lit::Tiles } else { Lit::Not };
+        let read = std::array::from_fn(|l| l < count);
+        Frame {
+            picture: Box::new(Scene { levels, palette: world.palette.clone(), look: *look }),
+            // Rays read all around the eye.
+            wants: Wants { levels: read, reach: REACH, lit, tiles: world.lacking(&read, look.camera, REACH, lit) },
+            busy: false,
+            stats: format!("{tiles} tiles"),
+        }
     }
 }
 
-/** march.wgsl's Globals. */
+/** What to draw: each level's tiles, the materials' colours or, lit, the voxels' light, as `look` sees them. */
+struct Scene {
+    levels: Vec<Arc<Level>>,
+    palette: Arc<Vec<u32>>,
+    look: Look,
+}
+
+impl Picture for Scene {
+    fn draw(&self, easel: &mut Easel, encoder: &mut wgpu::CommandEncoder, pixels: [u32; 2]) {
+        let lit = self.look.sky.is_some();
+        // Lit or not, its pool is another.
+        if easel.held::<Marcher>().is_some_and(|m| m.lit != lit) {
+            easel.painter = None;
+        }
+        let (marcher, device, queue) = easel.painter(|device, format| Marcher::new(device, format, lit));
+        marcher.draw(device, queue, encoder, self, pixels);
+    }
+}
+
+/** voxels.wgsl's Globals. */
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct Globals {
@@ -163,12 +168,12 @@ struct Globals {
 }
 
 impl Globals {
-    fn of(scene: &Scene) -> Globals {
-        let [width, height] = scene.pixels.map(f64::from);
-        let focal = focal_length(scene.fov, width, height);
+    fn of(look: &Look, pixels: [u32; 2]) -> Globals {
+        let [width, height] = pixels.map(f64::from);
+        let focal = focal_length(look.fov, width, height);
         let column = |v: Vec3| [v[0] as f32, v[1] as f32, v[2] as f32, 0.0];
         // Dimmed in linear terms, as light adds up.
-        let sky = scene.lit.unwrap_or(1.0);
+        let sky = look.sky.unwrap_or(1.0);
         let rgba = |c: [f32; 3]| {
             let [r, g, b] = c.map(|c| linear_to_srgb(srgb_to_linear(c) * sky));
             [r, g, b, 1.0]
@@ -176,19 +181,19 @@ impl Globals {
         Globals {
             resolution: [width as f32, height as f32],
             extent: [(width / focal) as f32, (height / focal) as f32],
-            fog: scene.fog as f32,
+            fog: (look.far * look.fog) as f32,
             // What of the sky the fog hides, as of something at the far end.
-            sky_fog: (1.0 - (-scene.far / scene.fog).exp()) as f32,
-            lit: u32::from(scene.lit.is_some()),
+            sky_fog: (1.0 - (-1.0 / look.fog).exp()) as f32,
+            lit: u32::from(look.sky.is_some()),
             _pad: 0,
             sky_top: rgba(SKY_TOP),
             horizon: rgba(SKY_HORIZON),
-            view: view_basis(scene.yaw, scene.pitch).map(column),
+            view: view_basis(look.yaw, look.pitch).map(column),
         }
     }
 }
 
-/** A grid level (Level in march.wgsl). */
+/** A grid level (Level in voxels.wgsl). */
 #[repr(C)]
 #[derive(Clone, Copy, Default, bytemuck::Pod, bytemuck::Zeroable)]
 struct GpuLevel {
@@ -357,7 +362,7 @@ impl Window {
         Some(added)
     }
 
-    /** As march.wgsl reads it, the level drawn to `reach`, unless it holds nothing yet: rays read none past 0. */
+    /** As voxels.wgsl reads it, the level drawn to `reach`, unless it holds nothing yet: rays read none past 0. */
     fn gpu(&self, level: usize, reach: f64) -> GpuLevel {
         let corner = self.corner.unwrap_or_default();
         GpuLevel {
@@ -383,7 +388,7 @@ struct Targets {
     groups: [wgpu::BindGroup; 3],
 }
 
-/** The voxels on a device, drawn into a picture that egui (Shown) or a shot shows. */
+/** The voxels on a device, drawn into a picture that the window or a shot shows. */
 pub struct Marcher {
     /** Globals, levels, tables, the pool, the palette, the eye, block maps, and the pool's bricks' light (none unlit). */
     buffers: [wgpu::Buffer; 8],
@@ -393,23 +398,23 @@ pub struct Marcher {
     free: Vec<u32>,
     palette: Option<Arc<Vec<u32>>>,
     targets: Option<Targets>,
-    /** Whether it draws lit scenes (Scene's `lit`). */
+    /** Whether it draws lit scenes (Look's `sky`). */
     pub lit: bool,
 }
 
-/** march.wgsl, with the constants it shares with this file. */
+/** voxels.wgsl, with the constants it shares with this file. */
 fn shader() -> String {
     format!(
         "const WINDOW = {WINDOW};\nconst BLOCK = {BLOCK};\nconst BLOCK_SHIFT = {BLOCK_SHIFT}u;\nconst BRICK = {BRICK};\nconst BRICK_SHIFT = {BRICK_SHIFT}u;\nconst BRICK_WORDS = {BRICK_WORDS}u;\nconst BRICK_SITES = {BRICK_SITES}u;\nconst FACTOR = {FACTOR}u;\nconst EMPTY = {EMPTY};\nconst UNKNOWN = {UNKNOWN};\n{}",
-        include_str!("march.wgsl")
+        include_str!("voxels.wgsl")
     )
 }
 
 impl Marcher {
-    /** Draws onto targets of `format` when shown; voxels coloured by their light if `lit` (Scene's). */
+    /** Draws onto targets of `format` when shown; voxels coloured by their light if `lit` (Look's `sky`). */
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat, lit: bool) -> Marcher {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("march.wgsl"),
+            label: Some("voxels.wgsl"),
             source: wgpu::ShaderSource::Wgsl(shader().into()),
         });
         // Lit, a brick's light takes a word a site, beside its own words.
@@ -504,14 +509,9 @@ impl Marcher {
         }
     }
 
-    /** Bricks held, those left out for want of room, and the pool's slots. */
-    pub fn bricks(&self) -> [usize; 3] {
-        let held: usize = self.windows.iter().map(|w| w.bricks).sum();
-        [held, self.windows.iter().map(|w| w.lacking).sum(), held + self.free.len()]
-    }
-
-    /** Brings the voxels on the GPU up to date with `scene`, then draws it into the picture: the samples, then each pixel resolving its own. */
-    pub fn draw(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, scene: &Scene) {
+    /** Brings the voxels on the GPU up to date with `scene`, then draws it into a picture of `pixels`: the samples, then each pixel resolving its own. */
+    fn draw(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, scene: &Scene, pixels: [u32; 2]) {
+        let look = &scene.look;
         if !self.palette.as_ref().is_some_and(|p| Arc::ptr_eq(p, &scene.palette)) {
             let mut palette = scene.palette.to_vec();
             palette.resize(256, 0);
@@ -522,7 +522,7 @@ impl Marcher {
         for (level, gpu) in levels.iter_mut().enumerate() {
             let window = &mut self.windows[level];
             let Some(tiles) = scene.levels.get(level) else { continue };
-            if let Some(added) = window.sync(level, tiles, self.lit, scene.eye, &mut self.free) {
+            if let Some(added) = window.sync(level, tiles, self.lit, look.camera, &mut self.free) {
                 upload(queue, &self.buffers[3], &added, BRICK_WORDS, |tile, first| &tile.words[first * BRICK_WORDS..][..BRICK_WORDS]);
                 if self.lit {
                     upload(queue, &self.buffers[7], &added, BRICK_SITES, |tile, first| {
@@ -532,14 +532,14 @@ impl Marcher {
                 queue.write_buffer(&self.buffers[2], (level * TABLE * 4) as u64, bytemuck::cast_slice(&window.table));
                 queue.write_buffer(&self.buffers[6], (level * BLOCKS * 4) as u64, bytemuck::cast_slice(&window.counts));
             }
-            *gpu = window.gpu(level, reach(level, scene.far));
+            *gpu = window.gpu(level, reach(level, look.far));
         }
         queue.write_buffer(&self.buffers[1], 0, bytemuck::cast_slice(&levels));
-        queue.write_buffer(&self.buffers[0], 0, bytemuck::bytes_of(&Globals::of(scene)));
-        let eye = [scene.eye[0] as f32, scene.eye[1] as f32, scene.eye[2] as f32, 0.0];
-        queue.write_buffer(&self.buffers[5], 0, bytemuck::cast_slice(&eye));
-        if self.targets.as_ref().is_none_or(|t| t.pixels != scene.pixels) {
-            self.targets = Some(self.targets(device, scene.pixels));
+        queue.write_buffer(&self.buffers[0], 0, bytemuck::bytes_of(&Globals::of(look, pixels)));
+        let eye = look.camera.map(|v| v as f32);
+        queue.write_buffer(&self.buffers[5], 0, bytemuck::cast_slice(&[eye[0], eye[1], eye[2], 0.0]));
+        if self.targets.as_ref().is_none_or(|t| t.pixels != pixels) {
+            self.targets = Some(self.targets(device, pixels));
         }
         let targets = self.targets.as_ref().expect("targets");
         let passes = [(&targets.samples[..], &targets.groups[0]), (std::slice::from_ref(&targets.picture), &targets.groups[1])];
@@ -566,15 +566,6 @@ impl Marcher {
             });
             pass.set_pipeline(pipeline);
             pass.set_bind_group(0, group, &[]);
-            pass.draw(0..4, 0..1);
-        }
-    }
-
-    /** Draws the picture into egui's pass. */
-    pub fn show(&self, pass: &mut wgpu::RenderPass<'static>) {
-        if let Some(targets) = &self.targets {
-            pass.set_pipeline(&self.pipelines[2]);
-            pass.set_bind_group(0, &targets.groups[2], &[]);
             pass.draw(0..4, 0..1);
         }
     }
@@ -642,94 +633,24 @@ fn upload<'a>(
     }
 }
 
-/** Shows the Marcher's picture in egui. */
-pub struct Shown;
-
-impl egui_wgpu::CallbackTrait for Shown {
-    fn paint(&self, _info: egui::PaintCallbackInfo, pass: &mut wgpu::RenderPass<'static>, resources: &egui_wgpu::CallbackResources) {
-        let marcher: &Marcher = resources.get().expect("marcher");
-        marcher.show(pass);
-    }
-}
-
-/** A device of its own drawing a scene, for --shot, --bench, --stroll and tests. */
-pub struct Offscreen {
-    device: wgpu::Device,
-    queue: wgpu::Queue,
-    marcher: Marcher,
-}
-
-impl Offscreen {
-    /** Voxels coloured by their light if `lit` (Scene's). */
-    pub fn new(lit: bool) -> Offscreen {
-        let instance =
-            wgpu::Instance::new(wgpu::InstanceDescriptor { backends: BACKENDS, ..wgpu::InstanceDescriptor::new_without_display_handle() });
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())).expect("adapter");
-        let descriptor = wgpu::DeviceDescriptor { required_limits: limits(&adapter), ..Default::default() };
-        let (device, queue) = pollster::block_on(adapter.request_device(&descriptor)).expect("device");
-        Offscreen { marcher: Marcher::new(&device, PICTURE, lit), device, queue }
+impl Painter for Marcher {
+    fn picture(&self) -> &wgpu::Texture {
+        &self.targets.as_ref().expect("a picture").picture
     }
 
-    /** Bricks held, those left out for want of room, and the pool's slots. */
-    pub fn bricks(&self) -> [usize; 3] {
-        self.marcher.bricks()
-    }
-
-    /** Draws `scene`, without waiting for the GPU. */
-    pub fn render(&mut self, scene: &Scene) {
-        let mut encoder = self.device.create_command_encoder(&Default::default());
-        self.marcher.draw(&self.device, &self.queue, &mut encoder, scene);
-        self.queue.submit([encoder.finish()]);
-    }
-
-    /** Waits for the GPU to finish what it was given. */
-    pub fn wait(&self) {
-        self.device.poll(wgpu::PollType::wait_indefinitely()).expect("poll");
-    }
-
-    /** The time the GPU takes to draw `scene` again and again, in ms. */
-    pub fn time(&mut self, scene: &Scene, runs: usize) -> f64 {
-        for _ in 0..3 {
-            self.render(scene);
+    fn show(&self, pass: &mut wgpu::RenderPass<'_>) {
+        if let Some(targets) = &self.targets {
+            pass.set_pipeline(&self.pipelines[2]);
+            pass.set_bind_group(0, &targets.groups[2], &[]);
+            pass.draw(0..4, 0..1);
         }
-        self.wait();
-        let start = Instant::now();
-        for _ in 0..runs {
-            self.render(scene);
-        }
-        self.wait();
-        start.elapsed().as_secs_f64() * 1000.0 / runs as f64
     }
 
-    /** Draws `scene`: its width and height, and its pixels, RGBA, row by row. */
-    pub fn picture(&mut self, scene: &Scene) -> (u32, u32, Vec<u8>) {
-        self.render(scene);
-        let picture = &self.marcher.targets.as_ref().expect("a picture").picture;
-        let wgpu::Extent3d { width, height, .. } = picture.size();
-        let row = (width * 4).div_ceil(256) * 256;
-        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: None,
-            size: (row * height) as u64,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
-        let mut encoder = self.device.create_command_encoder(&Default::default());
-        let layout = wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: None };
-        encoder.copy_texture_to_buffer(picture.as_image_copy(), wgpu::TexelCopyBufferInfo { buffer: &buffer, layout }, picture.size());
-        self.queue.submit([encoder.finish()]);
-        buffer.slice(..).map_async(wgpu::MapMode::Read, |r| r.expect("map"));
-        self.wait();
-        let mapped = buffer.slice(..).get_mapped_range().expect("mapped").to_vec();
-        (width, height, mapped.chunks(row as usize).flat_map(|r| &r[..(width * 4) as usize]).copied().collect())
-    }
-
-    /** Draws `scene` and saves it as a PNG. */
-    pub fn save(&mut self, scene: &Scene, path: &str) {
-        let (width, height, pixels) = self.picture(scene);
-        let mut png = png::Encoder::new(std::io::BufWriter::new(std::fs::File::create(path).expect("shot file")), width, height);
-        png.set_color(png::ColorType::Rgba);
-        png.set_depth(png::BitDepth::Eight);
-        png.write_header().expect("png").write_image_data(&pixels).expect("png");
+    /** Bricks held, of the pool's slots, and those left out for want of room. */
+    fn describe(&self, _: &Easel) -> String {
+        let held: usize = self.windows.iter().map(|w| w.bricks).sum();
+        let lacking: usize = self.windows.iter().map(|w| w.lacking).sum();
+        format!(": {held} bricks of {} on the GPU, {lacking} lacking room", held + self.free.len())
     }
 }
 
@@ -738,20 +659,15 @@ mod tests {
     use std::collections::HashMap;
 
     use super::*;
-    use crate::world::World;
 
     /** The tiles of level 0 of the forest of seed 1 around `eye`. */
     fn forest_tiles(eye: Vec3) -> Arc<Level> {
         let mut world = World::new(worlds::by_name("forest").expect("forest").make, 1, None, 4);
-        let mut level = None;
-        let levels = std::array::from_fn(|l| l == 0);
+        let wants = Wants { levels: std::array::from_fn(|l| l == 0), reach: bake::slicing::GRID_REACH, lit: Lit::Not, tiles: Vec::new() };
         loop {
-            for (l, tiles) in world.update(eye, &levels, &[]) {
-                assert_eq!(l, 0);
-                level = Some(tiles);
-            }
+            world.update(eye, &wants);
             if !world.busy() {
-                return level.expect("tiles");
+                return world.level(0).clone();
             }
             world.wait();
         }

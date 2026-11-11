@@ -1,5 +1,5 @@
 //! Draws a frame's chunks with wgpu, as compositor.ts does with WebGL 2,
-//! into a picture of its own, which egui's render pass (or a shot) shows:
+//! into a picture of its own, which the window (or a shot) shows:
 //! cells' reliefs of whole voxels, a quad per tile of their columns whose
 //! pixels' rays find the column they meet first, or (Frame's `relief` off)
 //! their whole voxels as splats, each at its depth; only the tiles or
@@ -22,8 +22,10 @@ use bake::light::{linear_to_srgb, srgb_to_linear};
 use bake::slicing::{LAYER, half_layer};
 use egui_wgpu::wgpu;
 
-use crate::renderer::{Chunk, Frame};
-use crate::view::{Vec3, to_local, view_basis};
+use super::renderer::{Chunk, Frame};
+use crate::engine::{Colours, Look, Painter};
+use crate::gpu::Easel;
+use crate::view::{self, Vec3, to_local, view_basis};
 
 /** A chunk as the shader reads it (Chunk in compositor.wgsl). */
 #[repr(C)]
@@ -424,37 +426,6 @@ fn at_least(device: &wgpu::Device, buffer: &mut wgpu::Buffer, size: u64) {
     }
 }
 
-/**
- * The backend the compositor draws with: on DX12, wgpu's indirect draws
- * counted on the GPU leave their first instance out of the instance index,
- * which carries the tile, and their first vertex out of the vertex index,
- * which carries a splat's chunk's slot.
- */
-pub const BACKENDS: wgpu::Backends = wgpu::Backends::VULKAN;
-
-/**
- * What the compositor needs of a device: draws listed on the GPU, a tile
- * or a cluster's splats each; depth tested before tiles' pixels march,
- * though they write it (compositor.wgsl); and see-through splats added up
- * in 32-bit floats.
- */
-pub const FEATURES: wgpu::Features = wgpu::Features::INDIRECT_FIRST_INSTANCE
-    .union(wgpu::Features::MULTI_DRAW_INDIRECT_COUNT)
-    .union(wgpu::Features::SHADER_EARLY_DEPTH_TEST)
-    .union(wgpu::Features::FLOAT32_BLENDABLE);
-
-/** What the compositor needs of a device: buffers as large as the adapter allows, for the columns and splats in view. */
-pub fn limits(adapter: &wgpu::Adapter) -> wgpu::Limits {
-    let adapter = adapter.limits();
-    wgpu::Limits {
-        max_buffer_size: adapter.max_buffer_size,
-        max_storage_buffer_binding_size: adapter.max_storage_buffer_binding_size,
-        // egui's, for surfaces up to 8K.
-        max_texture_dimension_2d: 8192,
-        ..Default::default()
-    }
-}
-
 fn layout(device: &wgpu::Device, entries: &[(u32, wgpu::ShaderStages, wgpu::BindingType)]) -> wgpu::BindGroupLayout {
     let entries: Vec<_> =
         entries.iter().map(|&(binding, visibility, ty)| wgpu::BindGroupLayoutEntry { binding, visibility, ty, count: None }).collect();
@@ -697,14 +668,13 @@ impl Compositor {
         }
     }
 
-    /** The frame last drawn. */
-    pub fn picture(&self) -> &wgpu::Texture {
-        &self.targets.as_ref().expect("a frame").picture
-    }
-
-    /** By phase, the draws of tiles (one instance each) or of clusters (their splats' instances) and how many. */
-    pub fn draws(&self) -> (&[wgpu::Buffer; 2], &[wgpu::Buffer; 2]) {
-        (&self.draws, &self.drawn)
+    /** How many tiles (or whole splats) the frame drawn last drew in each phase, as `easel` reads them from the GPU. */
+    pub fn drawn(&self, easel: &Easel) -> [u32; 2] {
+        std::array::from_fn(|phase| {
+            let n = u32::from_le_bytes(easel.read_buffer(&self.drawn[phase], 4).try_into().expect("count")) as u64;
+            let draws = easel.read_buffer(&self.draws[phase], (n * 16).max(16));
+            draws.as_chunks::<16>().0[..n as usize].iter().map(|d| u32::from_le_bytes(d[4..8].try_into().expect("draw"))).sum()
+        })
     }
 
     /** Uploads `chunk`'s columns, splats and clusters (see tiles and cluster), unless the buffers can hold no more. */
@@ -952,14 +922,6 @@ impl Compositor {
             pass.draw(0..4, 0..1);
         }
     }
-
-    /** Shows the picture on the pass's viewport. */
-    pub fn show(&self, pass: &mut wgpu::RenderPass<'_>) {
-        let t = self.targets.as_ref().expect("prepared");
-        pass.set_pipeline(&self.pipelines.show_picture);
-        pass.set_bind_group(0, &t.show, &[]);
-        pass.draw(0..4, 0..1);
-    }
 }
 
 /** A render pass into `colours`, each cleared to its colour or else kept, tested against `depth`, cleared to its value or else kept. */
@@ -1016,19 +978,6 @@ pub struct View {
     pub sky: f32,
 }
 
-/** What voxels are painted in: their own colours, or to see how the picture is cut up, a colour per layer or per chunk. */
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Colours {
-    #[default]
-    Voxels,
-    Layers,
-    Chunks,
-}
-
-impl Colours {
-    pub const ALL: [(Colours, &str); 3] = [(Colours::Voxels, "Voxels"), (Colours::Layers, "Layers"), (Colours::Chunks, "Chunks")];
-}
-
 /** A number in [0, 1) from `numbers`, as if at random. */
 fn hash(numbers: &[u64]) -> f64 {
     let h = numbers.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, &n| (h ^ n).wrapping_mul(0x0100_0000_01b3).rotate_left(29));
@@ -1045,6 +994,23 @@ fn tint(hue: f64) -> u32 {
 }
 
 impl View {
+    /** As `look` sees, at its size in pixels. */
+    pub fn new(look: &Look) -> View {
+        let faces = view::faces();
+        View {
+            yaw: look.yaw,
+            pitch: look.pitch,
+            focal: look.view().focal,
+            fog_distance: look.far * look.fog,
+            faces: std::array::from_fn(|f| faces[f].axes),
+            size: look.size.map(|v| v as f32),
+            pixels: look.size.map(|v| v as u32),
+            seams: look.seams,
+            colours: look.colours,
+            sky: look.sky.unwrap_or(1.0),
+        }
+    }
+
     pub fn globals(&self, pixels: [u32; 2], sky_fog: f64) -> [f32; GLOBALS] {
         let mut g = [0.0f32; GLOBALS];
         g[0..2].copy_from_slice(&self.size);
@@ -1074,13 +1040,22 @@ impl View {
     }
 }
 
-/** egui's paint callback for where the window shows the picture drawn last. */
-pub struct Shown;
+impl Painter for Compositor {
+    fn picture(&self) -> &wgpu::Texture {
+        &self.targets.as_ref().expect("a frame").picture
+    }
 
-impl egui_wgpu::CallbackTrait for Shown {
-    fn paint(&self, _info: egui::PaintCallbackInfo, pass: &mut wgpu::RenderPass<'static>, resources: &egui_wgpu::CallbackResources) {
-        let compositor: &Compositor = resources.get().expect("compositor");
-        compositor.show(pass);
+    fn show(&self, pass: &mut wgpu::RenderPass<'_>) {
+        let t = self.targets.as_ref().expect("prepared");
+        pass.set_pipeline(&self.pipelines.show_picture);
+        pass.set_bind_group(0, &t.show, &[]);
+        pass.draw(0..4, 0..1);
+    }
+
+    fn describe(&self, easel: &Easel) -> String {
+        let [first, next] = self.drawn(easel);
+        let what = if self.relief { "tiles of columns" } else { "whole splats" };
+        format!(": {what}, {first} that showed before and {next} more")
     }
 }
 
