@@ -325,7 +325,7 @@ impl Renderer {
                 continue;
             }
             self.next_id += 1;
-            let seen = if baked.splats.is_empty() { Seen::Empty } else { Seen::Baked(Arc::new(Chunk { id: self.next_id, baked })) };
+            let seen = if baked.is_empty() { Seen::Empty } else { Seen::Baked(Arc::new(Chunk { id: self.next_id, baked })) };
             if let Some(picked) = self.picks[r.face].as_mut().and_then(|p| p.at(&r.cell)) {
                 *picked = seen.clone();
             }

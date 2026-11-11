@@ -1,6 +1,8 @@
 //! The voxels of a chunk the face's axis sees, each a hexagonal dab of
-//! paint (a splat) at its site, in relief over its chunk's plane;
-//! a slice's swept over its column's voxels behind it.
+//! paint (a splat) at its site, in relief over its chunk's plane:
+//! a slice's swept over its column's voxels behind it,
+//! a cell's whole ones one per column, as far as its side may show,
+//! its see-through ones each.
 
 use std::collections::HashMap;
 use std::f64::consts::FRAC_1_SQRT_2;
@@ -208,20 +210,76 @@ fn run_ends(splats: &mut Splats, geometry: &Geometry, surface: &[Voxel], order: 
     }
 }
 
-/** What paints a chunk's surface as splats: chunk_splats or cell_splats. */
-pub type SplatsOf = fn(&mut Splats, &Geometry, &mut dyn FnMut(&Voxel) -> u32, &[Voxel], i32);
+/**
+ * Fills `splats` with a relief of a cell's whole voxels (lod.rs), `centre`
+ * as chunk_splats takes it: a splat per column (a, b), its first voxel a
+ * ray of the face can enter (seen), a pillar from there as deep as its
+ * side may show: at most to the column's last voxel, and on as far as the
+ * solid behind it `runs_on` past the cell, as the next cell's relief
+ * starts at what a ray enters, not at its cut. A slanted ray sees the
+ * column as the axis does, wherever it meets the pillar. What is
+ * see-through is no part of it, as if empty: cell_splats.
+ */
+pub fn cell_relief(
+    splats: &mut Splats,
+    geometry: &Geometry,
+    colour: &mut dyn FnMut(&Voxel) -> u32,
+    whole: &[Voxel],
+    centre: i32,
+    runs_on: &dyn Fn([i32; 3]) -> i32,
+) {
+    splats.clear();
+    let mut order = std::mem::take(&mut splats.order);
+    order.clear();
+    // Column by column, near to far.
+    order.extend(whole.iter().enumerate().map(|(k, voxel)| (voxel.site[2], k)));
+    order.sort_unstable_by_key(|&(c, k)| (whole[k].site[0], whole[k].site[1], c));
+    // Each column's first voxel, its last, and its colour.
+    let mut reliefs = Vec::new();
+    for column in order.chunk_by(|&(_, j), &(_, k)| whole[j].site[..2] == whole[k].site[..2]) {
+        let mut voxels = column.iter().map(|&(_, k)| &whole[k]).skip_while(|v| !seen(geometry, v.open));
+        let Some(first) = voxels.next() else { continue };
+        reliefs.push((first.site, voxels.last().unwrap_or(first).site, colour(first)));
+    }
+    let mut fronts = std::mem::take(&mut splats.columns);
+    fronts.clear();
+    fronts.extend(reliefs.iter().enumerate().map(|(k, (site, ..))| ((site[0], site[1]), k)));
+    for &(site, last, paint) in &reliefs {
+        let [a, b, c] = site;
+        // A ray leaving the column's side enters a column of its voxels'
+        // neighbours, so it sees the side only before that one's front: the
+        // pillar reaches the farthest of theirs, or where one has none here,
+        // as far as its solid goes.
+        let farthest = geometry
+            .offsets
+            .iter()
+            .filter(|o| o[..2] != [0, 0])
+            .map(|o| fronts.get(&(a + o[0], b + o[1])).map_or(i32::MAX, |&k| reliefs[k].0[2]));
+        let reach = farthest.max().unwrap_or(i32::MAX);
+        let end = if reach <= last[2] { reach.max(c) } else { runs_on(last).min(reach) };
+        splats.push(Splat {
+            x: a as f64 * LAYER,
+            y: b as f64,
+            depth: 2 * c - centre,
+            run: 2 * (end - c),
+            width: FRAC_1_SQRT_2,
+            colour: paint,
+            site,
+        });
+    }
+    splats.columns = fronts;
+    splats.order = order;
+}
 
 /**
- * Fills `splats` with the voxels of a cell (lod.rs) a ray of the face can
- * enter, by an open face (seen), each a hexagon at its site, `centre` as
- * chunk_splats takes it. A ray's first voxel is entered so, and is in one
- * cell: its hexagon, holding its outline, meets the ray, and depth decides
- * between the cells' (the native compositor). So, unlike a slice's, a cell
- * needs no runs and no cut faces: its relief need not hold on its own.
+ * Fills `splats` with the see-through voxels of a cell (lod.rs) a ray of
+ * the face can enter, by an open face (seen), each a hexagon at its site,
+ * `centre` as chunk_splats takes it: a ray meets them one after another,
+ * so each is drawn in the order it does (the native compositor), no run.
  */
-pub fn cell_splats(splats: &mut Splats, geometry: &Geometry, colour: &mut dyn FnMut(&Voxel) -> u32, surface: &[Voxel], centre: i32) {
+pub fn cell_splats(splats: &mut Splats, geometry: &Geometry, colour: &mut dyn FnMut(&Voxel) -> u32, see_through: &[Voxel], centre: i32) {
     splats.clear();
-    for voxel in surface.iter().filter(|v| seen(geometry, v.open)) {
+    for voxel in see_through.iter().filter(|v| seen(geometry, v.open)) {
         let [a, b, c] = voxel.site;
         splats.push(Splat {
             x: a as f64 * LAYER,

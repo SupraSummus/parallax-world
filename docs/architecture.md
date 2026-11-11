@@ -182,18 +182,28 @@ A chunk is a whole cell of 2^L·FCC,
 drawn as the voxels of grid max(0, L − S) (`--shift S`)
 over the plane through its site;
 nothing else, the camera least of all, changes it.
-It holds the voxels of its cell a ray can enter by an open face,
-each one hexagon (`cell_splats`):
-no runs and no cut faces, as a slice has (section 3).
+Its whole voxels are the cell's relief (`cell_relief`), a pillar per column:
+from the first whole voxel a ray can enter by an open face,
+in its colour,
+as deep as its side may show:
+to the farthest front of the columns around it,
+a ray leaving its side entering one of them;
+where one has none in the cell, to the column's last voxel,
+and on through the solid behind it past the cell, a cell deep at most,
+as the next cell's relief starts at what a ray enters, not at its cut.
+Like a slice's, a relief is off by an angle that detail bounds (section 2).
+Its see-through voxels a ray can enter are each one hexagon (`cell_splats`),
+drawn in the order a ray meets them (section 4, "See-through");
+the relief takes them for empty.
 Its tiles hold every site that stops rays, with how much it does,
 not the voxels the web's coin shows (`VoxelGrid::into_grid`):
 a face is open where its neighbour lets rays through,
-so a cell holds what shows through see-through voxels too,
-and each splat its voxel's alpha (section 4, "See-through").
-A ray's first voxel is entered so and is in one cell,
-and the compositor's depth decides between cells:
-finer levels in front, and within a level the voxel whose site is nearer the eye,
-which, voxels being the lattice's Voronoi cells, is the one a ray meets first.
+so a cell holds what shows through see-through voxels too.
+The compositor's depth decides between cells:
+finer levels in front, and within a level the nearer site
+of the voxel of the column where a ray enters its pillar,
+which, voxels being the lattice's Voronoi cells, is the one it meets first
+where the pillar stands for whole voxels.
 The camera only picks the chunks a face composes,
 by its layer along the face's axis alone, in whole numbers:
 level L claims the cells up to 2Q · 2^L layers ahead,
@@ -540,32 +550,44 @@ where two of a cluster are as near, the one painted later shows.
 They are deleted when it leaves.
 No antialiasing, so voxel edges stay crisp.
 
-The native compositor (`native/src/compositor.rs`) draws only what may show:
-in the forest, under 2 % of the splats in view show a pixel.
-Its chunks are cells (section 1), and their splats have no runs:
-the depth is the level, then the distance from the eye to the splat's site
-(`depth_of`), so splats can be drawn in any order,
-and the bake workers put a chunk's in clusters of a few nearby on its plane,
-each with the box of their outlines along the axis,
-how far before and past the plane they are, and its nearest depth:
-the culling finds where the camera's rays draw them in relief.
-A chunk's slot in the table comes to the vertex shader as its draws' first vertex,
-so its splats are uploaded as the workers made them.
-Each frame it draws the clusters that showed in the last,
+The native compositor (`native/src/compositor.rs`) draws only what may show.
+Its chunks are cells' reliefs (section 1),
+and the bake workers put a chunk's columns in tiles of 4 × 4,
+empty columns too, so that a column's place says where it is,
+each tile with the box of its columns' outlines along the axis
+and how far before and past the plane they reach:
+the culling finds where the camera's rays draw them.
+A column's outline is here its centre's Voronoi cell among the columns',
+not its voxels', which interlock: these share out the plane.
+A tile is drawn as one quad holding its box, seen from the eye;
+each pixel's ray crosses its columns' cells one after another
+from where it enters the box,
+and stops at the first pillar it meets in the cell it crosses
+(`march` in `compositor.wgsl`),
+writing the depth of the site of that column's voxel there (`depth_of`),
+a hair farther the deeper it is past the pillar's front,
+so that where pillars of two cells meet one voxel,
+the column it is the front of shows,
+and tiles can be drawn in any order;
+never nearer than the quad, at the tile's nearest front,
+so the GPU still tests depth before the pixel marches
+(`early_depth_test`).
+Each frame it draws the tiles that showed in the last,
 reduces their depth to a pyramid of farthest depths,
-then tests every cluster in view against it on the GPU,
+then tests every tile in view against it on the GPU,
 draws those newly showing and keeps which show for the next frame
 (two-phase occlusion culling).
-Draws are listed per cluster on the GPU, roughly near to far,
-so nearer splats mostly hide what is behind them early.
+Draws are listed per tile on the GPU, roughly near to far,
+so nearer tiles mostly hide what is behind them early.
 It draws into a picture of its own, which egui (or `--shot`) shows.
 
-**See-through.** A native splat's alpha is how much of the rays
+**See-through.** A native see-through splat's alpha is how much of the rays
 through its voxel's site the voxel stops,
 along the voxel's mean chord (worldgen's `CHORD`).
-The bake workers put a chunk's see-through splats in clusters of their own,
+The bake workers put a chunk's see-through splats in clusters,
 layer by layer from the nearest,
-and the compositor draws them after the whole ones,
+culled against the reliefs as tiles are,
+and the compositor draws them after the reliefs,
 in front of them, into a picture of their own,
 nearest first, each under those before it;
 then lays that over the picture.
@@ -613,7 +635,7 @@ distance (or of the last slice, if farther).
 
 The native window switches at run time between engines (`Engine`),
 each drawing the same tiles its own way, with its own shaders:
-the splats above, rays through the tiles' voxels (`native/src/march.rs`),
+cells' reliefs and splats above, rays through the tiles' voxels (`native/src/march.rs`),
 with no chunks, slices, faces or baking, described here,
 or a prototype, rays through slabs along each face (`native/src/trace.rs`):
 per face and level, slabs of layers baked around the eye,

@@ -81,7 +81,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   though a face keeps its cells picked (`Lod::pick`);
   the render that picks them anew, every few units moved,
   takes a few times longer.
-  `surface` still finds a cell's cut faces, which `cell_splats` drops.
+  `surface` still finds a cell's cut faces, which `cell_relief` drops.
   Detail sets Q = max(4, ⌈2·detail⌉), so below 2 it changes nothing;
   Q itself, a whole number, would say what it does.
   The web still draws slices, with runs and cut faces:
@@ -214,7 +214,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   - A site's colour is one of what is in it (see "Light sees each site's
     alpha"): a coarse site of a crown and mist may show as mist.
   - Near, a see-through voxel is as soft as its tent: leaves at level 0 blur.
-- **Native's other engines are short of the splats in places**
+- **Native's other engines are short of the chunks in places**
   (architecture.md, "Native: another engine").
   - Voxels: the world makes tiles out to `GRID_REACH`, past what rays read
     (`march::REACH`).
@@ -237,9 +237,23 @@ Numbers are for the forest at 1280×800, as measured when written.
   `--engine splats --view 'seed=42&world=valley&camera=1200,100,36700&look=20,-12'`:
   sky shows through the ground in the bottom right, with or without culling,
   in straight edges like a cell's. Not looked into.
+- **Native's reliefs.**
+  - Thin things seen at a slant break at the default detail:
+    the city's road markings into combs, whole at twice the detail.
+  - Marched per pixel, a tile per quad, they are slower on lavapipe
+    than whole splats were, which lavapipe tests no earlier;
+    a real GPU is unmeasured.
+  - Tiles hold their empty columns: about half of those uploaded.
+  - A few pixels show what is under the ground at cells' edges
+    (7 in the forest at `seed=12345&camera=-14,40,-200&look=-25,6`):
+    columns' cells are not their voxels' outlines.
+  - Where pillars of two cells meet a voxel at one site,
+    the one whose front is nearer it shows (`shown` in `compositor.wgsl`);
+    as near, they tie, and the one drawn last shows, its front's colour.
+  - `chunk_reads` reads a cell deeper, for the solid behind a relief.
 - **The native compositor's buffers stop at the device's limit.**
   `Arena::grow` caps a buffer at what the device allows
-  (128 MB of splats on lavapipe), and `allocate` then hands out room past it:
+  (128 MB on lavapipe), and `allocate` then hands out room past it:
   wgpu panics in `Compositor::prepare`
   (the city at 1280×660 at detail 27 did, before `GRID_REACH`;
   the forest at its defaults does, `seed=42&world=forest&look=200,10`).

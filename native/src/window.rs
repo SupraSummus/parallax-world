@@ -34,7 +34,7 @@ pub trait Content {
 
 /**
  * What a frame draws, by the engine that draws it, each with GPU resources
- * of its own: splats of chunks (compositor.rs), as the web draws them;
+ * of its own: chunks, cells' reliefs and see-through splats (compositor.rs);
  * rays through the tiles' voxels (march.rs); or rays through slabs along
  * the faces (trace.rs): the slabs baked last if any, their version, the
  * eye, how they are seen and how much of the sky the fog hides.

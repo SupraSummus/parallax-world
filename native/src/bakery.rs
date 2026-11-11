@@ -13,10 +13,10 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Condvar, Mutex};
 
 use bake::lod::CellChunk;
-use bake::slicing::{GRID_LEVELS, half_layer};
+use bake::slicing::{GRID_LEVELS, LAYER, half_layer, spacing};
 use bake::{Baker, Tiles};
 
-use crate::compositor::{GpuCluster, GpuSplat, cluster};
+use crate::compositor::{GpuCluster, GpuColumn, GpuSplat, cluster, tiles};
 
 /** A chunk to bake: a cell of a face, reading tiles [i0, i1] × [k0, k1] of its grid level. */
 #[derive(Clone, Copy)]
@@ -24,23 +24,32 @@ pub struct Request {
     pub face: usize,
     pub cell: CellChunk,
     pub tiles: [i32; 4],
-    /** The size of the blocks its splats are clustered by (compositor::cluster). */
+    /** The size of the blocks its see-through splats are clustered by (compositor::cluster). */
     pub block: f64,
     /** Whether its voxels are lit, by the baker's light (Baker's `light`), or shaded by the way their faces face. */
     pub lit: bool,
 }
 
 /**
- * A baked chunk (ChunkSplats in chunk-baker.ts): its splats and their
- * clusters as the GPU takes them, and its first see-through cluster's
- * index (compositor::cluster).
+ * A baked chunk, as the GPU takes it, and where it may be drawn: its
+ * relief's columns (compositor::tiles) and its see-through splats
+ * (compositor::cluster), and their clusters, the tiles of columns first,
+ * then the see-through ones from `see_through`.
  */
 pub struct Baked {
     pub origin: [f64; 2],
     pub extent: [f64; 2],
+    pub columns: Vec<GpuColumn>,
     pub splats: Vec<GpuSplat>,
     pub clusters: Vec<GpuCluster>,
     pub see_through: usize,
+}
+
+impl Baked {
+    /** Whether it draws nothing. */
+    pub fn is_empty(&self) -> bool {
+        self.clusters.is_empty()
+    }
 }
 
 /** What a request bakes: face and cell. */
@@ -163,8 +172,17 @@ fn work(queue: &Queue, send: &Sender<(Request, Baked)>, grids: &Grids, mut baker
             std::mem::swap(&mut baker.light, &mut aside);
         }
         let b = baker.bake_cell(r.face, &r.cell);
-        let (splats, clusters, see_through) = cluster(&baker.numbers, half_layer(r.cell.atoms), r.block);
-        let baked = Baked { origin: [b.origin_x, b.origin_y], extent: [b.extent_width, b.extent_height], splats, clusters, see_through };
+        // Its column (0, 0): the least (a, b) of its cell's bounds, relative to its origin.
+        let unit = spacing(r.cell.atoms) as f64;
+        let [a, b0, _] = r.cell.bounds().0;
+        let base = [a as f64 * LAYER * unit - b.origin_x, b0 as f64 * unit - b.origin_y];
+        let half_layer = half_layer(r.cell.atoms);
+        let (columns, mut clusters) = tiles(&baker.columns, base, unit, half_layer);
+        let see_through = clusters.len();
+        let (splats, veils) = cluster(&baker.numbers, half_layer, r.block);
+        clusters.extend(veils);
+        let baked =
+            Baked { origin: [b.origin_x, b.origin_y], extent: [b.extent_width, b.extent_height], columns, splats, clusters, see_through };
         if send.send((request, baked)).is_err() {
             return;
         }
