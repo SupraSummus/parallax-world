@@ -15,13 +15,13 @@ use worldgen::plan::Plan;
 use worldgen::survey::survey;
 
 static KINDS: &[KindDef] = &[
-    KindDef { name: "fog", kind_type: 8, colors: &["#cccccc"], walk_through: false, glows: false },
-    KindDef { name: "rock", kind_type: 3, colors: &["#777777"], walk_through: false, glows: false },
-    KindDef { name: "wall", kind_type: 10, colors: &["#eeeeee"], walk_through: false, glows: false },
-    KindDef { name: "wood", kind_type: 4, colors: &["#664422"], walk_through: false, glows: false },
-    KindDef { name: "grass", kind_type: 1, colors: &["#44aa44"], walk_through: false, glows: false },
-    KindDef { name: "smoke", kind_type: 8, colors: &["#333333"], walk_through: false, glows: false },
-    KindDef { name: "glowing fog", kind_type: 8, colors: &["#cccccc"], walk_through: false, glows: true },
+    KindDef { name: "fog", kind_type: 8, colors: &["#cccccc"], walk_through: false, glows: false, medium: true },
+    KindDef { name: "rock", kind_type: 3, colors: &["#777777"], walk_through: false, glows: false, medium: false },
+    KindDef { name: "wall", kind_type: 10, colors: &["#eeeeee"], walk_through: false, glows: false, medium: false },
+    KindDef { name: "wood", kind_type: 4, colors: &["#664422"], walk_through: false, glows: false, medium: false },
+    KindDef { name: "grass", kind_type: 1, colors: &["#44aa44"], walk_through: false, glows: false, medium: false },
+    KindDef { name: "smoke", kind_type: 8, colors: &["#333333"], walk_through: false, glows: false, medium: true },
+    KindDef { name: "glowing fog", kind_type: 8, colors: &["#cccccc"], walk_through: false, glows: true, medium: true },
 ];
 const FOG: u8 = 0;
 const ROCK: u8 = 1;
@@ -326,7 +326,7 @@ fn finds_a_speck_too_small_to_show_outside_the_heights() {
     // A speck stops a few of a site's rays: it shows no voxel, but light and the composited rays see it.
     let speck = world(single(|_, _| Some(Node::of(vec![ball([64.0, 70.0, 64.0], 0.1, ROCK, SOLID, Op::Fill)])), 64));
     let grid = generate(&speck, &near(), 0);
-    assert!(grid.cells.iter().all(|id| *id == 0) && grid.alpha.iter().any(|a| *a > 0), "the speck shows");
+    assert!(grid.cells.iter().all(|id| *id == 0) && grid.pieces.alpha.iter().any(|a| *a > 0), "the speck shows");
     let broken = heights_hold(&world_of(speck, (-64, 64)), &[near()], 0);
     assert!(
         broken.iter().any(|b| b.contains("1 sites stopping light above the heights (-64, 64)") && b.contains("such as rock")),

@@ -76,7 +76,7 @@ impl Reference {
     /** One sample of the light from face `face` of the voxel at `site`: at a random point of it, from a random direction, `bounces` more to follow. */
     fn on_face(&self, site: [i64; 3], face: usize, random: &mut Random, bounces: usize) -> Rgb {
         let [x, y, z] = site;
-        let (alpha, id, glow) = self.grid.light(x, y, z, face);
+        let ([(alpha, id), _], glow) = self.grid.light(x, y, z, face);
         debug_assert_eq!(alpha, ALPHA, "voxels of the reference's scenes are whole");
         let normal = normalize(FACES[face].map(|v| v as f64));
         let point = add(rhombus(site, face, random), normal.map(|c| c * OFF));
@@ -94,7 +94,7 @@ impl Reference {
             None => [0.0; 3],
             Some((_, site, face)) if bounces > 0 => self.on_face(site, face, random, bounces - 1),
             // What it glows, and no more.
-            Some((_, [x, y, z], face)) => self.grid.light(x, y, z, face).2.map(|g| g as f32 * self.glow),
+            Some((_, [x, y, z], face)) => self.grid.light(x, y, z, face).1.map(|g| g as f32 * self.glow),
         }
     }
 }

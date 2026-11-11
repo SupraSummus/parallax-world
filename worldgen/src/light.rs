@@ -11,7 +11,7 @@
 //! coarser ones only, the coarsest's from the sky.
 //!
 //! The grids say how light sees each site, whether a voxel is shown there
-//! or not (VoxelGrid's `alpha`, `seen`, `glow`): a coarse site a small
+//! or not (VoxelGrid's `pieces`, `medium`, `glow`): a coarse site a small
 //! lamp is in stops little, and glows as bright as the lamp, on average
 //! over its faces.
 
@@ -229,14 +229,14 @@ impl Light {
         (heights.0..heights.1).contains(&y) && self.hold(i, x, z).get(x, y, z) != 0
     }
 
-    /** How light sees face `face` of `site` of level `i`: how much of it stops (alpha), its colour, what it glows. */
-    fn see(&mut self, i: usize, [x, y, z]: [i64; 3], face: usize) -> (f32, Rgb, Rgb) {
+    /** How light sees face `face` of `site` of level `i`: its pieces and its medium, each how much of it stops (alpha) and its colour; what it glows. */
+    fn see(&mut self, i: usize, [x, y, z]: [i64; 3], face: usize) -> ([(f32, Rgb); 2], Rgb) {
         let heights = self.levels[i].heights;
         if !(heights.0..heights.1).contains(&y) {
-            return (0.0, [0.0; 3], [0.0; 3]);
+            return ([(0.0, [0.0; 3]); 2], [0.0; 3]);
         }
-        let (alpha, id, glow) = self.hold(i, x, z).light(x, y, z, face);
-        (alpha as f32 / ALPHA as f32, self.albedo[id as usize], glow.map(|g| g as f32 * self.glow))
+        let (parts, glow) = self.hold(i, x, z).light(x, y, z, face);
+        (parts.map(|(alpha, id)| (alpha as f32 / ALPHA as f32, self.albedo[id as usize])), glow.map(|g| g as f32 * self.glow))
     }
 
     /** How much of what comes through `site` of level `i` it lets through. */
@@ -295,12 +295,13 @@ impl Light {
         for step in 1..=TOP_STEPS {
             let from = q;
             q = add(q, v);
-            let (alpha, colour, glow) = self.see(i, q, self.enters[d]);
+            let ([pieces, medium], glow) = self.see(i, q, self.enters[d]);
+            let alpha = pieces.0 + medium.0;
             let on = match near {
                 Some(near) if alpha > 0.0 => near.on[d],
                 _ => [0.0; 3],
             };
-            (0..3).for_each(|c| sum[c] += through * (glow[c] + alpha * colour[c] * on[c]));
+            (0..3).for_each(|c| sum[c] += through * (glow[c] + (pieces.0 * pieces.1[c] + medium.0 * medium.1[c]) * on[c]));
             through *= 1.0 - alpha;
             // Nothing more gets through, or nothing more is met: below every voxel and not going up, or above them and not going down.
             if through < 1.0 / ALPHA as f32 || q[1] < heights.0 - 1 && v[1] <= 0 {
@@ -456,9 +457,12 @@ impl Light {
     /** The light from each face of the voxel at `site` of level `i`, on its surface. */
     fn lit(&mut self, i: usize, site: [i64; 3]) -> FaceLight {
         let light = self.light(i, site);
+        let shown = self.shown(i, site);
         std::array::from_fn(|f| {
             let on = self.on_face(&light, f);
-            let (_, colour, glow) = self.see(i, site, f);
+            // The voxel is the site's pieces where they show, else its medium.
+            let (parts, glow) = self.see(i, site, f);
+            let (_, colour) = parts[usize::from(!shown)];
             std::array::from_fn(|c| colour[c] * on[c] + glow[c])
         })
     }
@@ -490,7 +494,7 @@ impl Light {
             } else {
                 let site = picture.sites[pixel];
                 let on = self.on_voxel(level, site);
-                let glow = self.see(level as usize, site, 0).2;
+                let glow = self.see(level as usize, site, 0).1;
                 std::array::from_fn(|c| self.albedo[id][c] * on[c] + glow[c])
             };
             for (c, value) in rgb.into_iter().enumerate() {
@@ -625,8 +629,8 @@ mod tests {
      */
     fn world(lamps: &[[f64; 3]], stone: impl Fn(i64, i64, i64, i64) -> bool + 'static) -> World {
         let kinds = vec![
-            KindDef { name: "stone", kind_type: 1, colors: &["#808080"], walk_through: false, glows: false },
-            KindDef { name: "lamp", kind_type: 6, colors: &["#ffffff"], walk_through: false, glows: true },
+            KindDef { name: "stone", kind_type: 1, colors: &["#808080"], walk_through: false, glows: false, medium: false },
+            KindDef { name: "lamp", kind_type: 6, colors: &["#ffffff"], walk_through: false, glows: true, medium: false },
         ];
         let shapes: Vec<_> =
             lamps.iter().map(|p| cuboid(p.map(|c| c - LAMP / 2.0), p.map(|c| c + LAMP / 2.0), LAMP_KIND, SOLID, Op::Fill)).collect();

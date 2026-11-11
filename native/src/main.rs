@@ -930,8 +930,8 @@ mod tests {
     fn wall<const MILLI: u32>(_: u64) -> worldgen::World {
         use worldgen::generator::{Field, Generator, KindDef, Layer, Op};
         let kinds = vec![
-            KindDef { name: "medium", kind_type: 8, colors: &["#000000"], walk_through: true, glows: false },
-            KindDef { name: "wall", kind_type: 10, colors: &["#ffffff"], walk_through: false, glows: false },
+            KindDef { name: "medium", kind_type: 8, colors: &["#000000"], walk_through: true, glows: false, medium: true },
+            KindDef { name: "wall", kind_type: 10, colors: &["#ffffff"], walk_through: false, glows: false, medium: false },
         ];
         let slab = Field::at("slab", 0.0, Op::Fill, |x, y, z, _| match x + z {
             _ if y.abs() >= 48 => None,

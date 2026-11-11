@@ -179,17 +179,18 @@ impl Seen {
 const OPAQUE: f64 = 1e-4;
 
 /**
- * What the site `ray` is in shows it, as light sees it: the material of
- * the face it entered by, how much of the ray it stops and what it glows
- * to it; the rest goes on (`through`).
+ * What the site `ray` is in shows it, as light sees it: its pieces (by
+ * the face it entered) and its medium, each its material and how much of
+ * the ray it stops, and what the site glows to it; the rest goes on
+ * (`through`).
  */
-fn composite(ray: &mut Ray, grid: &VoxelGrid) -> (u8, f64, [f64; 3]) {
+fn composite(ray: &mut Ray, grid: &VoxelGrid) -> ([(u8, f64); 2], [f64; 3]) {
     let [x, y, z] = ray.site;
-    let (alpha, id, glow) = grid.light(x, y, z, entered(ray));
-    let stopped = ray.through * alpha as f64 / ALPHA as f64;
-    let glow = glow.map(|g| ray.through * g as f64 / GLOW_ONE as f64);
-    ray.through -= stopped;
-    (id, stopped, glow)
+    let (parts, glow) = grid.light(x, y, z, entered(ray));
+    let through = ray.through;
+    let parts = parts.map(|(alpha, id)| (id, through * alpha as f64 / ALPHA as f64));
+    ray.through -= parts[0].1 + parts[1].1;
+    (parts, glow.map(|g| through * g as f64 / GLOW_ONE as f64))
 }
 
 #[derive(Clone, Copy)]
@@ -296,8 +297,10 @@ impl Tiles {
                 } else {
                     match tile.grid.get_or_empty_brick(x, y, z) {
                         Some(_) if seen.is_some() => {
-                            let (id, stopped, glow) = composite(ray, &tile.grid);
-                            seen.as_mut().expect("composited").add(id, stopped, glow);
+                            let (parts, glow) = composite(ray, &tile.grid);
+                            let seen = seen.as_mut().expect("composited");
+                            parts.into_iter().for_each(|(id, stopped)| seen.add(id, stopped, [0.0; 3]));
+                            seen.add(0, 0.0, glow);
                             if ray.through < OPAQUE {
                                 return Step::Miss;
                             }
@@ -343,9 +346,11 @@ pub(crate) fn composited(grid: &VoxelGrid, origin: [f64; 3], direction: [f64; 3]
     let mut seen = Vec::new();
     while ray.t <= end && ray.through >= OPAQUE {
         let t = ray.t;
-        let (id, stopped, glow) = composite(&mut ray, grid);
-        if stopped > 0.0 || glow != [0.0; 3] {
-            seen.push((t, id, stopped, glow));
+        let ([pieces, medium], glow) = composite(&mut ray, grid);
+        for (id, stopped, glow) in [(pieces.0, pieces.1, glow), (medium.0, medium.1, [0.0; 3])] {
+            if stopped > 0.0 || glow != [0.0; 3] {
+                seen.push((t, id, stopped, glow));
+            }
         }
         walk.cross(&mut ray, &mut planes);
     }
@@ -815,7 +820,7 @@ mod tests {
     /** A ball of radius 40 at the origin, on the corner of four tiles. */
     fn a_ball() -> Generator {
         Generator {
-            kinds: vec![KindDef { name: "red", kind_type: 1, colors: &["#c04030"], walk_through: false, glows: false }],
+            kinds: vec![KindDef { name: "red", kind_type: 1, colors: &["#c04030"], walk_through: false, glows: false, medium: false }],
             seed: 1,
             layers: vec![Layer::Population(Population {
                 name: "ball",

@@ -160,8 +160,7 @@ how many rays get how far, and what they stop on.
   counted against its shadow, a solid cell came out 0.83 at sites twice apart,
   and one house in six vanished.
   Each cell is drawn with its share, as alpha (see "Kinds and things").
-  Shown as often as covered, a house's walls come out ragged
-  where splats do not show alpha (the web's; native's do);
+  Shown as often as covered, a house's walls come out ragged;
   all held to one threshold, each house came out fatter or thinner by a site,
   and the few a camera sees often all one way
   (the valley's first town lost a third of its walls at level 4, 0.099 off);
@@ -654,10 +653,19 @@ even of one colour (the moor's `heather` and `heatherSprigs`).
 A kind marked `glows` gives light of its colour, as lamps do
 (`worldgen/src/light.rs`, for now only in look and native's computed lighting).
 Each site holds as much as what is in it stops rays
-(`VoxelGrid`'s `alpha`, `seen` and `glow`), each thing its share,
-and glows as its glowing things, in proportion to their shares;
-a host that draws alpha (native) shows it as see-through as that,
-the web a voxel as often (`VoxelGrid::show`).
+(`VoxelGrid`'s `pieces`, `medium` and `glow`), each thing its share,
+and glows as its glowing things, in proportion to their shares.
+Things are in a site in two ways, and it keeps a share for each:
+pieces smaller than the site, as leaves are,
+stop a share of its rays whole;
+a kind marked `medium`, as mist is,
+stops a share of every ray the pieces let through.
+So a coarse site of a crown in mist holds both, each as it is.
+The pieces show as grain, a whole voxel as often (`VoxelGrid::show`);
+where they don't, a host that draws alpha (native)
+shows the medium as see-through as it is.
+Drawn see-through, leaves are smoke; as grain, mist is snow.
+The web draws no alpha, and shows no medium.
 So a lamp too small for a coarse site
 is in it as a little glow, and stops a little light.
 A far form without its near form's lamps goes dark,

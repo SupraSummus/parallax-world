@@ -203,7 +203,14 @@ impl Scene {
             .map(|rgb| {
                 // Kinds' colours are static: a world lives as long as its host.
                 let colour: &'static str = Box::leak(format!("#{rgb:06x}").into_boxed_str());
-                KindDef { name: "scene", kind_type: 1, colors: Box::leak(Box::new([colour])), walk_through: false, glows: false }
+                KindDef {
+                    name: "scene",
+                    kind_type: 1,
+                    colors: Box::leak(Box::new([colour])),
+                    walk_through: false,
+                    glows: false,
+                    medium: false,
+                }
             })
             .collect();
         let (min, max) = self.bounds();
