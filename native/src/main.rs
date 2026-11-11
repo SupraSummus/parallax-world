@@ -44,7 +44,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use bake::Baker;
-use bake::slicing::GRID_LEVELS;
+use bake::slicing::{GRID_LEVELS, GRID_REACH};
 use bake::walk::{COLLISION_LEVEL, Ground, WalkInput, Walker};
 
 use bakery::Bakery;
@@ -68,6 +68,14 @@ enum Engine {
 
 impl Engine {
     const ALL: [(Engine, &str); 3] = [(Engine::Splats, "splats"), (Engine::Voxels, "voxels"), (Engine::Slabs, "slabs")];
+
+    /** How far around the camera it reads the world's tiles, in each level's sites. */
+    fn reach(self) -> f64 {
+        match self {
+            Engine::Voxels => march::REACH,
+            Engine::Splats | Engine::Slabs => GRID_REACH,
+        }
+    }
 
     /** How the world's tiles are lit for it, under `lighting`: the slabs show none. */
     fn lit(self, lighting: Lighting) -> Lit {
@@ -319,6 +327,7 @@ impl window::Content for App {
             let lit = self.engine.lit(self.lighting);
             self.renderer.lit = lit != Lit::Not;
             self.world.lit = lit;
+            self.world.reach = self.engine.reach();
             // The sky as bright as the light, if any.
             let lit_sky = (lit != Lit::Not).then_some(self.brightness.sky);
             let sky = lit_sky.unwrap_or(1.0);
@@ -702,6 +711,7 @@ fn main() {
     let lit = engine.lit(lighting);
     renderer.lit = lit != Lit::Not;
     world.lit = lit;
+    world.reach = engine.reach();
     let lit_sky = (lit != Lit::Not).then_some(brightness.sky);
     let sky = lit_sky.unwrap_or(1.0);
     if ["--bench", "--shot", "--stroll"].into_iter().any(flag) && engine == Engine::Voxels {

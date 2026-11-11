@@ -93,7 +93,8 @@ made in the order the renderer wants them:
 a cell is baked once the world has every tile it reads (`chunk_reads`),
 and until then it asks for them, nearest first.
 Then come the other tiles within `GRID_REACH` of each level the chunks read,
-so that turning finds them made, and far ones are dropped.
+so that turning finds them made, and far ones are dropped;
+for the voxels engine, those within `march::REACH`, as far as its rays read.
 A tile never changes once made,
 so no chunk or cell surface goes stale as tiles come.
 Tests' scenes of hand-made voxels are given a grid per level,
@@ -674,6 +675,7 @@ each engine only shows it its own way.
 The splats' bakers light the voxels they show, face by face;
 the slabs show none.
 For the voxels, the world's threads light each tile once made
+of the levels rays read
 (after every tile to make, as it takes several times as long):
 each voxel a ray can meet gets one colour, not knowing which face it meets,
 the mean of the light from its faces that light gets out by (`Light::seen`).

@@ -216,10 +216,10 @@ Numbers are for the forest at 1280×800, as measured when written.
   - Near, a see-through voxel is as soft as its tent: leaves at level 0 blur.
 - **Native's other engines are short of the chunks in places**
   (architecture.md, "Native: another engine").
-  - Voxels: the world makes tiles out to `GRID_REACH`, past what rays read
-    (`march::REACH`).
-    Lit, every voxel of a tile a ray can meet is lit, not only those that show:
-    lighting a view's tiles takes ten times as long as making them,
+  - Voxels: lit, every voxel of a tile a ray can meet is lit,
+    not only those that show:
+    lighting a view's tiles takes six times as long as making them,
+    much of it generating the tiles around them that the light reads,
     and the light takes twice the bricks' memory, so the pool holds a third as many.
     A voxel's light is one colour, its faces' mean, whichever face a ray meets.
   - Slabs are baked around the eye and baked again as it moves,

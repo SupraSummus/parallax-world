@@ -3,17 +3,18 @@
 //! generated alone on the world's threads (a generator per thread) and
 //! indexed there. Which tiles, and in what order, is up to the renderer:
 //! every update hands over the tiles it misses for the cells in view, most
-//! wanted first, replacing the previous list; then the rest within
-//! GRID_REACH of the camera of each level it reads, so that turning
-//! finds them made. Tiles far from the camera are dropped. A tile never
-//! changes, so a chunk baked once all the tiles it reads are in stays right
-//! whatever comes after (bake's Tiles). Given light (worldgen's Shared),
+//! wanted first, replacing the previous list; then the rest within reach
+//! of the camera of each level it reads (GRID_REACH, or as far as the
+//! voxels engine's rays read, march::REACH), so that turning finds them
+//! made. Tiles far from the camera are dropped. A tile never changes, so
+//! a chunk baked once all the tiles it reads are in stays right whatever
+//! comes after (bake's Tiles). Given light (worldgen's Shared),
 //! the tiles are those the bakers' Lights read, made once. Asked for light,
 //! the light reads every level coarser than a voxel's: the tiles near the
 //! camera come first, the coarsest's before all; and, for the voxels engine
-//! (march.rs), each tile made is lit, its voxels' light found, after every
-//! tile to make: lighting takes several times as long. A tile lit is a new
-//! tile, in the place of the one made.
+//! (march.rs), each tile made of a level it reads is lit, its voxels'
+//! light found, after every tile to make: lighting takes several times as
+//! long. A tile lit is a new tile, in the place of the one made.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -69,7 +70,7 @@ impl Level {
     }
 }
 
-/** How the tiles are lit: not, by what reads them (the bakers' Lights), or each tile here, once made (march's). */
+/** How the tiles are lit: not, by what reads them (the bakers' Lights), or each tile here of a level read, once made (march's). */
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Lit {
     Not,
@@ -93,6 +94,8 @@ pub struct World {
     tiles: Vec<HashMap<TileId, Arc<Tile>>>,
     /** How the tiles are lit from the next update on: by the World's light only if it was given some. */
     pub lit: Lit,
+    /** How far from the camera tiles are made from the next update on, in each level's sites (GRID_REACH at first). */
+    pub reach: f64,
     lights: bool,
     queue: Arc<(Mutex<Queue>, Condvar)>,
     done: Receiver<Made>,
@@ -180,7 +183,15 @@ impl World {
             std::thread::spawn(move || work(make, seed, shared, &heights, &queue, &send));
         }
         let lights = shared.is_some();
-        World { tiles: (0..GRID_LEVELS).map(|_| HashMap::new()).collect(), lit: Lit::Not, lights, queue, done, early: Vec::new() }
+        World {
+            tiles: (0..GRID_LEVELS).map(|_| HashMap::new()).collect(),
+            lit: Lit::Not,
+            reach: GRID_REACH,
+            lights,
+            queue,
+            done,
+            early: Vec::new(),
+        }
     }
 
     /** Makes no more tiles but those being made. */
@@ -209,7 +220,7 @@ impl World {
         let lit = self.lit;
         assert!(lit == Lit::Not || self.lights, "a world lit with no light");
         // Tiles are made no farther from the camera than `keep` (in the level's sites), and dropped once a tile farther.
-        let (reach, keep) = (GRID_REACH, GRID_REACH + 2.0 * TILE as f64);
+        let (reach, keep) = (self.reach, self.reach + 2.0 * TILE as f64);
         let mut changed = [false; GRID_LEVELS];
         let made: Vec<Made> = std::mem::take(&mut self.early).into_iter().chain(self.done.try_iter()).collect();
         {
@@ -234,7 +245,10 @@ impl World {
             if distance(level, camera, id) <= keep && listed.insert((level, id)) {
                 match tiles.get(&id) {
                     None => list.push_back((level, id, None)),
-                    Some(tile) if lit == Lit::Tiles && tile.lights.is_none() => lighting.push_back((level, id, Some(tile.clone()))),
+                    // Lit here, only those of the levels read: the Light reads coarser ones' voxels, not their light.
+                    Some(tile) if lit == Lit::Tiles && levels[level] && tile.lights.is_none() => {
+                        lighting.push_back((level, id, Some(tile.clone())))
+                    }
                     Some(_) => {}
                 }
             }
