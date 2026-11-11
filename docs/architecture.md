@@ -675,14 +675,17 @@ each engine only shows it its own way.
 The splats' bakers light the voxels they show, face by face;
 the slabs show none.
 For the voxels, the world's threads light each tile once made
-of the levels rays read
-(after every tile to make, as it takes several times as long):
+of the levels rays read,
+after every tile to make (as it takes several times as long),
+nearest first in each level's own sites, as rays read them:
 each voxel a ray can meet gets one colour, not knowing which face it meets,
 the mean of the light from its faces that light gets out by (`Light::seen`).
 It goes to the GPU beside the bricks, a word a site, in a pool of its own.
+Till a tile is lit, its bricks are not on the GPU, as if it were not made:
+rays take the next coarser level there,
+so what is not lit yet shows coarser, lit, never shaded by another light.
 A tile lit is a new tile in the place of the one made,
-so tiles still never change, and its bricks are uploaded again as any new tile's;
-till then its voxels show shaded.
+so tiles still never change, and its bricks are uploaded as any new tile's.
 
 ## 5. Caching
 

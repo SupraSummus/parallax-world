@@ -13,8 +13,9 @@
 //! the light reads every level coarser than a voxel's: the tiles near the
 //! camera come first, the coarsest's before all; and, for the voxels engine
 //! (march.rs), each tile made of a level it reads is lit, its voxels'
-//! light found, after every tile to make: lighting takes several times as
-//! long. A tile lit is a new tile, in the place of the one made.
+//! light found, after every tile to make (lighting takes several times as
+//! long), nearest first in each level's own sites. A tile lit is a new
+//! tile, in the place of the one made.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -214,7 +215,8 @@ impl World {
      * Takes the tiles made or lit, drops those far from the camera (lattice
      * units), and has the `wanted` ones made, most wanted first, then the
      * rest within reach of each of the `levels` read, as `lit` wants them;
-     * then, lit here, has those lit. Returns the levels whose tiles changed.
+     * then, lit here, has those of the levels read lit. Returns the levels
+     * whose tiles changed.
      */
     pub fn update(&mut self, camera: Vec3, levels: &[bool; GRID_LEVELS], wanted: &[(usize, TileId)]) -> Vec<(usize, Arc<Level>)> {
         let lit = self.lit;
@@ -239,18 +241,11 @@ impl World {
             changed[level] |= tiles.len() < before;
         }
 
-        let (mut list, mut lighting) = (VecDeque::new(), VecDeque::new());
+        let mut list = VecDeque::new();
         let mut listed = HashSet::new();
         let mut add = |tiles: &HashMap<TileId, Arc<Tile>>, level: usize, id: TileId| {
-            if distance(level, camera, id) <= keep && listed.insert((level, id)) {
-                match tiles.get(&id) {
-                    None => list.push_back((level, id, None)),
-                    // Lit here, only those of the levels read: the Light reads coarser ones' voxels, not their light.
-                    Some(tile) if lit == Lit::Tiles && levels[level] && tile.lights.is_none() => {
-                        lighting.push_back((level, id, Some(tile.clone())))
-                    }
-                    Some(_) => {}
-                }
+            if distance(level, camera, id) <= keep && !tiles.contains_key(&id) && listed.insert((level, id)) {
+                list.push_back((level, id, None));
             }
         };
         // Lit, every voxel's light comes from each coarser level's around it (worldgen's light.rs): the tiles of every
@@ -276,9 +271,23 @@ impl World {
                 add(&self.tiles[level], level, id);
             }
         }
+        // Lit here, after every tile to make, those of the levels read (the Light reads coarser ones' voxels, not their
+        // light), nearest first in each level's own sites, the finer first as near: as rays read the levels, so the
+        // picture is lit from the eye out, alike at every level. Rays take the next level where a tile is not lit yet.
+        if lit == Lit::Tiles {
+            let mut lighting: Vec<(f64, Job)> = (0..GRID_LEVELS)
+                .filter(|&level| levels[level])
+                .flat_map(|level| around(level, camera, reach).into_iter().map(move |(d, id)| (d, level, id)))
+                .filter_map(|(d, level, id)| {
+                    let tile = self.tiles[level].get(&id).filter(|t| t.lights.is_none())?;
+                    Some((d, (level, id, Some(tile.clone()))))
+                })
+                .collect();
+            lighting.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.0.cmp(&b.1.0)));
+            list.extend(lighting.into_iter().map(|(_, job)| job));
+        }
         {
             let mut q = self.queue.0.lock().expect("queue");
-            list.append(&mut lighting);
             list.retain(|job| !q.in_flight.contains(&(job.0, job.1)));
             if !list.is_empty() {
                 self.queue.1.notify_all();

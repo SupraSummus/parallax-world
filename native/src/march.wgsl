@@ -6,7 +6,8 @@
 // See-through voxels (a medium: fog, water, a far canopy) add up on the way,
 // in the order the ray meets them, each by its path through it.
 // Lit, a voxel shows the light its tile found for it (world.rs), not its
-// material's colour shaded by the way its faces face, once its tile is lit.
+// material's colour shaded by the way its faces face; a tile not lit yet
+// is not on the GPU (march.rs), as one not made: rays take the next level.
 // march.rs puts the constants it shares with this file before it.
 
 // The picture's size in pixels, and its sides over the focal length; the
@@ -140,13 +141,10 @@ fn light_at(level: u32, s: vec3i) -> u32 {
   return light_in(slot, (s - levels[level].min) & vec3i(BRICK - 1));
 }
 
-// The colour of the see-through voxel `v` at `r` in the brick at `slot`: lit, its light; else (or till its tile is lit) its material's, shaded as its faces are on average.
+// The colour of the see-through voxel `v` at `r` in the brick at `slot`: lit, its light; else its material's, shaded as its faces are on average.
 fn medium_colour(slot: i32, r: vec3i, v: u32) -> vec3f {
   if globals.lit != 0u {
-    let light = light_in(slot, r);
-    if light != 0u {
-      return unpack4x8unorm(light).rgb;
-    }
+    return unpack4x8unorm(light_in(slot, r)).rgb;
   }
   return rgb(v & 255u) * MEDIUM_SHADE;
 }
@@ -340,8 +338,7 @@ fn shaded(hit: Hit) -> vec3f {
   return rgb(hit.voxel & 255u) * select(1.0, shade / open, open > 0.0);
 }
 
-// Lit, the light of the voxel hit; one with none (met where levels meet, inside what is solid) takes the mean of its neighbours' that have;
-// if none has (its tile not lit yet), it shows shaded, as unlit.
+// Lit, the light of the voxel hit; one with none (met where levels meet, inside what is solid) takes the mean of its neighbours' that have, if any.
 fn lit(hit: Hit) -> vec3f {
   let own = light_at(hit.level, hit.site);
   if own != 0u {
@@ -357,10 +354,7 @@ fn lit(hit: Hit) -> vec3f {
       count += 1.0;
     }
   }
-  if count == 0.0 {
-    return shaded(hit);
-  }
-  return sum / count;
+  return sum / max(count, 1.0);
 }
 
 // What each sample met: its site, and level | voxel << 8 (NONE if

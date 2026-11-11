@@ -17,9 +17,10 @@
 //!
 //! Lit, the voxels show the light their tiles found for them (world.rs,
 //! worldgen's Light, as the splats' bakers find it), uploaded with their
-//! bricks to a pool of its own. A tile lit is a new tile in the place of
-//! the one made, so its bricks are uploaded again; till then its voxels
-//! show shaded, as unlit.
+//! bricks to a pool of its own. Till its tile is lit, a brick is unknown,
+//! as one of no tile yet: what is not lit yet shows coarser, lit. A tile
+//! lit is a new tile in the place of the one made, so its bricks are
+//! uploaded then.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -279,15 +280,23 @@ impl Window {
 
     /**
      * Holds the bricks of the window around `eye` (world units) of level
-     * `level` from `tiles`, taking slots from `free` and giving back those
-     * it no longer needs: what tiles gone or the window left becomes
-     * UNKNOWN, what tiles come (new ones in place of others too) or it
-     * gained their bricks'. The work is that of the bricks that came or
+     * `level` from `tiles` (if `lit`, those lit only), taking slots from
+     * `free` and giving back those it no longer needs: what tiles gone (or
+     * not held) or the window left becomes UNKNOWN, what tiles come (new
+     * ones in place of others too) or it gained their bricks'. The work is that of the bricks that came or
      * went. Returns the bricks to upload, each with its slot, its tile and
      * its place in the tile's words, or None if neither the tiles nor the
      * window moved.
      */
-    fn sync<'a>(&mut self, level: usize, tiles: &'a Arc<Level>, eye: Vec3, free: &mut Vec<u32>) -> Option<Vec<(u32, &'a Tile, usize)>> {
+    fn sync<'a>(
+        &mut self,
+        level: usize,
+        tiles: &'a Arc<Level>,
+        lit: bool,
+        eye: Vec3,
+        free: &mut Vec<u32>,
+    ) -> Option<Vec<(u32, &'a Tile, usize)>> {
+        let held = |tile: &Tile| !lit || tile.lights.is_some();
         // Where its bricks start, its tiles say; until it has any, it holds nothing and rays do not read it.
         let origin = match (tiles.tiles.values().next(), self.corner) {
             (Some(tile), _) => tile.grid.min.map(|v| v.rem_euclid(BRICK)),
@@ -304,7 +313,7 @@ impl Window {
         let (old, previous) = (self.corner, self.level.take());
         if let (Some(old), Some(previous)) = (old, &previous) {
             for (id, tile) in &previous.tiles {
-                if !tiles.tiles.contains_key(id) {
+                if held(tile) && tiles.tiles.get(id).is_none_or(|t| !held(t)) {
                     let (lo, hi) = in_window(tile_bricks(tile, origin), old);
                     for b in bricks_outside(lo, hi, None) {
                         self.set(b, UNKNOWN, free);
@@ -319,7 +328,7 @@ impl Window {
         }
         let mut added = Vec::new();
         self.lacking = 0;
-        for (id, tile) in &tiles.tiles {
+        for (id, tile) in tiles.tiles.iter().filter(|(_, t)| held(t)) {
             let new = previous.as_ref().is_none_or(|p| p.tiles.get(id).is_none_or(|was| !Arc::ptr_eq(was, tile)));
             let (base, top) = tile_bricks(tile, origin);
             let count: [i32; 3] = std::array::from_fn(|d| top[d] - base[d]);
@@ -513,13 +522,11 @@ impl Marcher {
         for (level, gpu) in levels.iter_mut().enumerate() {
             let window = &mut self.windows[level];
             let Some(tiles) = scene.levels.get(level) else { continue };
-            if let Some(added) = window.sync(level, tiles, scene.eye, &mut self.free) {
+            if let Some(added) = window.sync(level, tiles, self.lit, scene.eye, &mut self.free) {
                 upload(queue, &self.buffers[3], &added, BRICK_WORDS, |tile, first| &tile.words[first * BRICK_WORDS..][..BRICK_WORDS]);
                 if self.lit {
-                    // A tile not lit yet: none, so that its voxels show shaded, not what the slot held before.
-                    const NONE: [u32; BRICK_SITES] = [0; BRICK_SITES];
                     upload(queue, &self.buffers[7], &added, BRICK_SITES, |tile, first| {
-                        tile.lights.as_ref().map_or(&NONE[..], |l| &l[first * BRICK_SITES..][..BRICK_SITES])
+                        &tile.lights.as_ref().expect("a tile held lit")[first * BRICK_SITES..][..BRICK_SITES]
                     });
                 }
                 queue.write_buffer(&self.buffers[2], (level * TABLE * 4) as u64, bytemuck::cast_slice(&window.table));
@@ -768,20 +775,24 @@ mod tests {
             [(some(0), eye), (all.clone(), [13.0, 31.0, -9.0]), (some(1), [-140.0, 30.0, 70.0]), (all.clone(), [-130.0, 22.0, 75.0])];
         let (mut window, mut free, mut slots) = (Window::new(), (0..1 << 20).rev().collect::<Vec<u32>>(), HashMap::new());
         // No tiles yet: nothing held, nothing read.
-        assert!(window.sync(0, &Arc::new(Level::new(HashMap::new())), eye, &mut free).is_none());
+        assert!(window.sync(0, &Arc::new(Level::new(HashMap::new())), false, eye, &mut free).is_none());
         assert_eq!(window.gpu(0, REACH).reach, 0.0);
         for (tiles, eye) in &steps {
-            for (slot, tile, first) in window.sync(0, tiles, *eye, &mut free).expect("a change") {
+            for (slot, tile, first) in window.sync(0, tiles, false, *eye, &mut free).expect("a change") {
                 slots.insert(slot, &tile.words[first * BRICK_WORDS..(first + 1) * BRICK_WORDS]);
             }
             let (mut fresh, mut fresh_free, mut fresh_slots) = (Window::new(), (0..1 << 20).rev().collect::<Vec<u32>>(), HashMap::new());
-            for (slot, tile, first) in fresh.sync(0, tiles, *eye, &mut fresh_free).expect("a change") {
+            for (slot, tile, first) in fresh.sync(0, tiles, false, *eye, &mut fresh_free).expect("a change") {
                 fresh_slots.insert(slot, &tile.words[first * BRICK_WORDS..(first + 1) * BRICK_WORDS]);
             }
             assert!(held(&window, &slots) == held(&fresh, &fresh_slots), "at {eye:?}");
             assert_eq!(window.counts, fresh.counts, "at {eye:?}");
             assert_eq!((window.bricks, free.len()), (fresh.bricks, fresh_free.len()), "at {eye:?}");
-            assert!(window.sync(0, tiles, *eye, &mut free).is_none(), "nothing moved");
+            assert!(window.sync(0, tiles, false, *eye, &mut free).is_none(), "nothing moved");
         }
+        // Lit, tiles not lit yet are not held: rays take the next level there.
+        let mut lit = Window::new();
+        assert!(lit.sync(0, &all, true, eye, &mut free).expect("a change").is_empty());
+        assert!(lit.table.iter().all(|&e| e == UNKNOWN));
     }
 }
