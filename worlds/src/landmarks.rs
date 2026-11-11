@@ -56,6 +56,8 @@ const ACROSS: i64 = 12;
 /** A landmark's cell, and how far it reaches past it across, up and across: a farmstead's corners, a watchtower's pennant. */
 const CELL: i64 = m(16.0);
 const REACH: [i64; 3] = [m(20.0), m(30.0), m(20.0)];
+/** How tall the ponds' reeds stand. */
+const REED_HEIGHT: i64 = m(1.2);
 /** The first chapel's clearing: wider than a chapel's, so that the trees between it and the camera hide less of it. */
 const FIRST_CLEARING: Units = Units::m(16.0);
 /** Plan scale of what each column of a landmark's is. */
@@ -550,7 +552,8 @@ pub fn layers(landmarks: Rc<Landmarks>, land: Rc<Land>, me: usize, ground: Rc<Pl
             Column::new(ground.at(x, z), spacing).surface(kind, m(0.5)).spans()
         })
     };
-    // Ponds' water up to its level, reeds round their edges while sites are close enough to show them thin.
+    // Ponds' water up to its level, reeds round their edges while two sites are no taller than they:
+    // thickened, they would stand over the water beside them.
     let water = {
         let (landmarks, ground) = (landmarks.clone(), ground.clone());
         Field::columns("ponds", 0.7, Op::Paint, move |x, z, spacing| {
@@ -564,8 +567,8 @@ pub fn layers(landmarks: Rc<Landmarks>, land: Rc<Land>, me: usize, ground: Rc<Pl
             if bowl < Fx::ONE {
                 column = column.water_to(T::water, level);
             }
-            if bowl > fx(0.62) && landmarks.reeds.at(x, z) > fx(0.58) {
-                column = column.medium(K::reed, m(1.2), 0.6);
+            if 2 * spacing <= REED_HEIGHT && bowl > fx(0.62) && landmarks.reeds.at(x, z) > fx(0.58) {
+                column = column.medium(K::reed, REED_HEIGHT, 0.6);
             }
             column.spans()
         })

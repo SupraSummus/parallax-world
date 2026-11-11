@@ -45,7 +45,8 @@ Numbers are for the forest at 1280×800, as measured when written.
   Of the 15 fields in `worlds/`, 9 hand it to `Column`,
   and 7 write its rule out (`m(0.5).max(2 * spacing)`):
   a layer at least two sites thick.
-  The rest leave detail out by level (the moor's heather, the rails),
+  The rest leave detail out by level, each by a rule of its own
+  (the moor's heather, the ponds' reeds, the rails),
   dither by hand (the railway's ballast, in shares of iron and timber),
   or make their own far form (the forest's canopy, a scene's levels).
   A stack declared once (layers down from a height, media up,
@@ -53,8 +54,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   and patterns read through `Plan::dithered`
   would leave the spacing to the engine but in the canopy and scenes:
   a field's levels would be the engine's to keep, not each world's.
-  Found on the way: the ponds' reeds and the fields' crops are thickened
-  at every level, the reeds against their comment
+  Found on the way: the fields' crops are thickened at every level
   ("Fields stand taller at level 4", below);
   the town's kerbs (a unit) and the railway's tunnel lining never are.
 - **The native frontend is missing pieces.**
