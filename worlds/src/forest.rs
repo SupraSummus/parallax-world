@@ -817,7 +817,9 @@ fn roots(x: f64, ground: f64, z: f64, half: f64, kind: K, random: &mut Rng, grou
             let out = half + vox(0.5 + random.next() * 0.7);
             let (ex, ez) = (x + c * out, z + s * out);
             let p = [x + c * half * 0.6, ground + vox(0.35), z + s * half * 0.6];
-            let q = [ex, (ground_at(round(ex) as i64, round(ez) as i64) - 1) as f64, ez];
+            // Into the ground at its end, but down no further than it reaches out: past a cliff's or a
+            // cutting's edge, it ran down through the rock and out of its face, to the foot below.
+            let q = [ex, ((ground_at(round(ex) as i64, round(ez) as i64) - 1) as f64).max(ground - out), ez];
             let r = vox(0.15 + random.next() * 0.08);
             // Thicker at its foot.
             Shape::capsule(p, q, move |t| r * (1.3 - 0.7 * t), kind)

@@ -512,11 +512,19 @@ pub fn layers(railway: Rc<Railway>, land: Rc<Land>, me: usize, ground: Rc<Plan<i
                         spans.push(Span::solid(top - m(1.0), top + 1 + m(0.75).max(2 * spacing), T::brick));
                     }
                 }
-                // A lining round the bore: walls, then its vault.
+                // A floor as deep as the ballast, and a lining round the bore: walls on it, then its vault.
+                // The ground is far above: without a floor, the bore beside the ballast was open below.
                 Structure::Tunnel if within(BORE + LINING) => {
                     let e = e.floor_units().0;
-                    let from = if e < BORE { top + 1 + arch(e) } else { top + 1 };
-                    spans.push(Span::solid(from, top + 1 + arch(e.min(BORE - 1)) + LINING, T::brick));
+                    let floor = top + 1 - m(0.5).max(2 * spacing);
+                    if e >= BORE {
+                        spans.push(Span::solid(floor, top + 1 + arch(BORE - 1) + LINING, T::brick));
+                    } else {
+                        if !within(BALLAST) {
+                            spans.push(Span::solid(floor, top + 1, F::path));
+                        }
+                        spans.push(Span::solid(top + 1 + arch(e), top + 1 + arch(e) + LINING, T::brick));
+                    }
                 }
                 // The formation beside the ballast, or a platform at a station; where the railway owns it.
                 Structure::Earth if !within(BALLAST) && within(at.half) && land.owns(me, x, z) => {
