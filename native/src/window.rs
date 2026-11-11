@@ -17,6 +17,8 @@ use winit::window::{Window, WindowId};
 use crate::compositor::{self, Compositor};
 use crate::march::{self, Marcher};
 use crate::renderer::Frame;
+use crate::trace::{Slabs, TraceGpu};
+use crate::view::Vec3;
 
 /** What the window shows. */
 pub trait Content {
@@ -32,14 +34,17 @@ pub trait Content {
 
 /**
  * What a frame draws, by the engine that draws it, each with GPU resources
- * of its own: splats of chunks (compositor.rs), as the web draws them, or
- * rays through the tiles' voxels (march.rs).
+ * of its own: splats of chunks (compositor.rs), as the web draws them;
+ * rays through the tiles' voxels (march.rs); or rays through slabs along
+ * the faces (trace.rs): the slabs baked last if any, their version, the
+ * eye, how they are seen and how much of the sky the fog hides.
  */
 // One a frame: its size does not matter.
 #[allow(clippy::large_enum_variant)]
 pub enum Picture {
     Splats(Arc<Frame>, compositor::View),
     Voxels(march::Scene),
+    Slabs(Option<Arc<Slabs>>, u64, Vec3, compositor::View, f64),
 }
 
 /**
@@ -98,6 +103,16 @@ struct Gpu {
     lost: Arc<(AtomicBool, Mutex<String>)>,
 }
 
+/** Of the engines' GPU resources, only `T`'s, made by `make` unless there: only the engine drawing holds the GPU. */
+fn only<T: Send + Sync + 'static>(resources: &mut egui_wgpu::CallbackResources, make: impl FnOnce() -> T) -> &mut T {
+    let kept = resources.remove::<T>().unwrap_or_else(make);
+    resources.remove::<Compositor>();
+    resources.remove::<Marcher>();
+    resources.remove::<TraceGpu>();
+    resources.insert(kept);
+    resources.get_mut().expect("kept")
+}
+
 /** The device is lost, wgpu says why. */
 struct Lost(String);
 
@@ -129,8 +144,7 @@ impl Gpu {
             ..surface.get_default_config(&adapter, size.width.max(1), size.height.max(1)).expect("the surface on this adapter")
         };
         surface.configure(&device, &config);
-        let mut renderer = egui_wgpu::Renderer::new(&device, format, Default::default());
-        renderer.callback_resources.insert(Compositor::new(&device, format, true));
+        let renderer = egui_wgpu::Renderer::new(&device, format, Default::default());
         Gpu { device, queue, surface, config, renderer, lost }
     }
 
@@ -164,19 +178,24 @@ impl Gpu {
             let viewport = egui::epaint::ViewportInPixels::from_points(&rect, pixels_per_point, screen.size_in_pixels);
             let pixels = [viewport.width_px as u32, viewport.height_px as u32];
             let resources = &mut self.renderer.callback_resources;
+            let (device, format) = (&self.device, self.config.format);
             let mut encoder = self.device.create_command_encoder(&Default::default());
             match picture {
                 Picture::Splats(frame, view) => {
-                    let compositor: &mut Compositor = resources.get_mut().expect("compositor");
+                    let compositor = only(resources, || Compositor::new(device, format, true));
                     compositor.prepare(&self.device, &self.queue, &mut encoder, &frame, &compositor::View { pixels, ..view });
                     compositor.render(&mut encoder);
                 }
                 Picture::Voxels(scene) => {
-                    if resources.get::<Marcher>().is_none() {
-                        resources.insert(Marcher::new(&self.device, self.config.format));
-                    }
-                    let marcher: &mut Marcher = resources.get_mut().expect("marcher");
+                    let marcher = only(resources, || Marcher::new(device, format));
                     marcher.draw(&self.device, &self.queue, &mut encoder, &march::Scene { pixels, ..scene });
+                }
+                Picture::Slabs(slabs, version, eye, view, sky_fog) => {
+                    let gpu = only(resources, || TraceGpu::new(device, format));
+                    if let Some(slabs) = slabs {
+                        let globals = view.globals(pixels, sky_fog);
+                        gpu.draw(&self.device, &self.queue, &mut encoder, &slabs, version, eye, &globals, pixels);
+                    }
                 }
             }
             self.queue.submit([encoder.finish()]);

@@ -115,7 +115,7 @@ lab/                         # Experiment, not built by pnpm: split grammars wit
 native/                      # Spike of a native frontend (egui on winit and wgpu), linking bake/ and worlds/; see src/main.rs
 ├── .cargo/config.toml       # Builds for x86-64-v3: floor and ceil inline (see there)
 └── src/
-    ├── main.rs              # The camera (flying or walking, F), the panel and its engine (splats or voxels); --shot, --bench, --stroll
+    ├── main.rs              # The camera (flying or walking, F), the panel and its engine (splats, voxels or slabs); --shot, --bench, --stroll
     ├── window.rs            # The window: egui on winit and wgpu, drawing either engine's picture, its GPU device made again when lost
     ├── world.rs             # world.ts for generated worlds: a World's tiles, those the renderer wants first, made and indexed on threads
     ├── view.rs              # view.ts: faces, which rays and screen boxes they draw
@@ -125,6 +125,8 @@ native/                      # Spike of a native frontend (egui on winit and wgp
     ├── shot.rs              # --shot: one frame drawn offscreen on the GPU, saved as a PNG, no window
     ├── march.rs             # The voxels engine: rays through the tiles' voxels, cell to cell, see-through ones added up in the order met; each level's bricks in a window around the eye, a torus; no chunks or faces of the view
     ├── march.wgsl
+    ├── trace.rs             # The slabs engine (a prototype): slabs along each face baked around the eye, a picture of their columns' first runs; rays for some pixels walk them, each pixel tests its own against what they met
+    ├── trace.wgsl
     └── compositor.wgsl
 ```
 

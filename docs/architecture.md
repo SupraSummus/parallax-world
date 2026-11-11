@@ -611,8 +611,12 @@ distance (or of the last slice, if farther).
 
 The native window switches at run time between engines (`Engine`),
 each drawing the same tiles its own way, with its own shaders:
-the splats above, or rays through the tiles' voxels (`native/src/march.rs`),
-with no chunks, slices, faces or baking.
+the splats above, rays through the tiles' voxels (`native/src/march.rs`),
+with no chunks, slices, faces or baking, described here,
+or a prototype, rays through slabs along each face (`native/src/trace.rs`):
+per face and level, slabs of layers baked around the eye,
+each a picture of its columns' first voxel and run,
+baked again on a thread as the eye moves or turns.
 A ray goes from rhombic dodecahedron to dodecahedron across their faces;
 each level's voxels are read up to `REACH` of its own sites from the eye,
 then the next coarser level's, as far as the render distance.

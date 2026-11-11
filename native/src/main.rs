@@ -4,7 +4,7 @@
 //! baker in bake/, sharing the tiles, and wgpu drawing them in an egui window
 //! (window.rs).
 //!
-//! parallax-native [--engine splats|voxels] [--world NAME] [--threads N] [--seed S] [--view QUERY] [--light SKY,SUN,GLOW] [--detail D] [--shift S] [--shot out.png [--size WxH] [--seams] [--colour voxels|layers|chunks] | --bench] [--stroll S [--on-ground]]
+//! parallax-native [--engine splats|voxels|slabs] [--world NAME] [--threads N] [--seed S] [--view QUERY] [--light SKY,SUN,GLOW] [--detail D] [--shift S] [--shot out.png [--size WxH] [--seams] [--colour voxels|layers|chunks] | --bench] [--stroll S [--on-ground]]
 //!
 //! --view takes the web page's view query (parseViewQuery in renderer.ts),
 //! overriding --seed and --world.
@@ -21,13 +21,17 @@
 //! --seams and --colour draw as the panel's switches do.
 //! --engine picks what draws, as the panel does (Engine): rays through the
 //! tiles' voxels (march.rs, the default), which take no --light, --detail,
-//! --shift, --seams or --colour; or chunks of splats, as the web draws.
+//! --shift, --seams or --colour; chunks of splats, as the web draws; or rays
+//! through slabs baked along each face (trace.rs), for --shot and --bench
+//! as seen from where they are baked, which take no --light, --seams or
+//! --colour.
 
 mod bakery;
 mod compositor;
 mod march;
 mod renderer;
 mod shot;
+mod trace;
 mod view;
 mod window;
 mod world;
@@ -55,10 +59,97 @@ const WORLD: Make = worlds::valley::valley;
 enum Engine {
     Splats,
     Voxels,
+    Slabs,
 }
 
 impl Engine {
-    const ALL: [(Engine, &str); 2] = [(Engine::Splats, "splats"), (Engine::Voxels, "voxels")];
+    const ALL: [(Engine, &str); 3] = [(Engine::Splats, "splats"), (Engine::Voxels, "voxels"), (Engine::Slabs, "slabs")];
+}
+
+/**
+ * Drawing slabs (trace.rs): the slabs baked last and their version, and
+ * whether a bake is on its thread or the world has changed since. Slabs
+ * are baked again when the eye leaves their margin, the view their faces,
+ * or tiles come.
+ */
+struct Traced {
+    slabs: Option<Arc<trace::Slabs>>,
+    version: u64,
+    baking: bool,
+    dirty: bool,
+    ask: std::sync::mpsc::Sender<Bake>,
+    done: std::sync::mpsc::Receiver<trace::Slabs>,
+}
+
+/** What slabs to bake: around which eye, of which faces, from which tiles, how. */
+type Bake = (Vec3, Vec<(usize, [f64; 4])>, Vec<Arc<bake::Tiles>>, trace::Params);
+
+/** Layers of grid 0 around the eye slabs are baked with, in the window. */
+const TRACE_MARGIN: f64 = 64.0;
+
+impl Traced {
+    /** Bakes on a thread of its own, with `threads` bakers. */
+    fn new(colours: Vec<u32>, threads: usize) -> Traced {
+        let (ask, asked) = std::sync::mpsc::channel::<Bake>();
+        let (send, done) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            while let Ok(mut bake) = asked.recv() {
+                // Only the latest.
+                while let Ok(later) = asked.try_recv() {
+                    bake = later;
+                }
+                let (camera, faces, levels, params) = bake;
+                if send.send(trace::bake(&colours, &levels, camera, &faces, &params, threads)).is_err() {
+                    return;
+                }
+            }
+        });
+        Traced { slabs: None, version: 0, baking: false, dirty: false, ask, done }
+    }
+
+    /** Takes slabs baked, and asks for new ones if need be, for an eye at `camera` seeing `view` with `fov`. */
+    fn update(&mut self, arrived: bool, camera: Vec3, view: &view::View, fov: f64, renderer: &Renderer) {
+        if let Ok(slabs) = self.done.try_recv() {
+            (self.slabs, self.version, self.baking) = (Some(Arc::new(slabs)), self.version + 1, false);
+        }
+        self.dirty |= arrived;
+        let stale = self.slabs.as_ref().is_none_or(|s| {
+            let moved = (0..3).map(|d| (camera[d] - s.camera[d]).powi(2)).sum::<f64>().sqrt();
+            moved > TRACE_MARGIN * bake::slicing::LAYER / 2.0 || !s.hold(&trace::faces_in(view))
+        });
+        if !self.baking && (stale || self.dirty) {
+            // Room to turn.
+            let wide = view::View { focal: focal_length((fov + 40.0).min(170.0), view.width, view.height), ..*view };
+            let levels = (0..GRID_LEVELS).map(|l| renderer.level(l).grids.clone()).collect();
+            if self.ask.send((camera, trace::faces_in(&wide), levels, trace_params(renderer, TRACE_MARGIN))).is_ok() {
+                (self.baking, self.dirty) = (true, false);
+            }
+        }
+    }
+
+    fn describe(&self) -> String {
+        let size = self.slabs.as_ref().map_or(0.0, |s| s.bytes() as f64 / 1e6);
+        format!("slabs v{} ({size:.0} MB){}", self.version, if self.baking { ", baking" } else { "" })
+    }
+}
+
+/** How slabs are made for `renderer`'s level of detail and render distance, with `margin` layers around the eye. */
+fn trace_params(renderer: &Renderer, margin: f64) -> trace::Params {
+    let q = ((2.0 * renderer.detail).ceil() as i32).max(4);
+    trace::Params { shift: renderer.shift, q, far: renderer.render_distance, margin }
+}
+
+/** Has `world` make the tiles of `levels` around `camera`, and gives them to `renderer`, until none is left to make. */
+fn make_tiles(world: &mut World, renderer: &mut Renderer, camera: Vec3, levels: &[bool; GRID_LEVELS]) {
+    loop {
+        for (level, tiles) in world.update(camera, levels, &[]) {
+            renderer.set_tiles(level, tiles);
+        }
+        if !world.busy() {
+            return;
+        }
+        world.wait();
+    }
 }
 
 struct App {
@@ -86,8 +177,11 @@ struct App {
     sky: f32,
     /** What the ui drew last, for the window to draw (window::Content). */
     picture: Option<(window::Picture, egui::Rect)>,
-    /** By material id, its colour (the voxels'). */
+    /** By material id, its colour (the voxels' and the slabs'). */
     palette: Arc<Vec<u32>>,
+    /** Drawing slabs, while it does; and the threads it may bake on. */
+    traced: Option<Traced>,
+    threads: usize,
 }
 
 impl window::Content for App {
@@ -120,7 +214,7 @@ impl window::Content for App {
             if ui.checkbox(&mut walking, "Walk on Ground (F)").changed() {
                 self.walker = walking.then(|| Walker::at(self.camera));
             }
-            if self.engine == Engine::Splats {
+            if self.engine != Engine::Voxels {
                 // In quarter octaves, as the web's: dragging picks cells anew only at each step.
                 let mut octaves = self.renderer.detail.log2();
                 let detail =
@@ -129,6 +223,8 @@ impl window::Content for App {
                     self.renderer.detail = 2f64.powf(octaves);
                 }
                 ui.add(egui::Slider::new(&mut self.renderer.shift, 1..=5).text("Voxels Finer than Cells (levels)"));
+            }
+            if self.engine == Engine::Splats {
                 ui.checkbox(&mut self.seams, "Show Face Seams");
                 ui.horizontal(|ui| {
                     ui.label("Colour by");
@@ -185,8 +281,21 @@ impl window::Content for App {
             let focal = focal_length(self.fov, width, height);
             let view = view::View { yaw: self.yaw, pitch: self.pitch, width, height, focal };
             let far = self.renderer.render_distance;
+            // How the splats and the slabs are seen.
+            let faces_view = compositor::View {
+                yaw: self.yaw,
+                pitch: self.pitch,
+                focal,
+                fog_distance: far * FOG_PER_RENDER_DISTANCE,
+                faces: self.faces,
+                size: [rect.width(), rect.height()],
+                pixels: [0, 0],
+                seams: self.seams,
+                colours: self.colours,
+                sky: self.sky,
+            };
             // The tiles each engine reads, and what it draws: drawn from the next frame on.
-            // And whether chunks are baking, for frames until they are in.
+            // And whether chunks or slabs are baking, for frames until they are in.
             let (mut levels, wanted, baking, picture) = match self.engine {
                 Engine::Splats => {
                     let start = Instant::now();
@@ -194,19 +303,14 @@ impl window::Content for App {
                     self.picking = start.elapsed().as_secs_f64() * 1000.0;
                     self.stats =
                         format!("{} chunks\n{} baking, {} tiles wanted", frame.chunks.len(), stats.wanted.len(), stats.tiles.len());
-                    let view = compositor::View {
-                        yaw: self.yaw,
-                        pitch: self.pitch,
-                        focal,
-                        fog_distance: far * FOG_PER_RENDER_DISTANCE,
-                        faces: self.faces,
-                        size: [rect.width(), rect.height()],
-                        pixels: [0, 0],
-                        seams: self.seams,
-                        colours: self.colours,
-                        sky: self.sky,
-                    };
-                    (stats.levels, stats.tiles, !stats.wanted.is_empty(), window::Picture::Splats(Arc::new(frame), view))
+                    (stats.levels, stats.tiles, !stats.wanted.is_empty(), window::Picture::Splats(Arc::new(frame), faces_view))
+                }
+                Engine::Slabs => {
+                    let traced = self.traced.get_or_insert_with(|| Traced::new(self.palette.to_vec(), (self.threads / 2).max(1)));
+                    self.stats = traced.describe();
+                    let sky_fog = 1.0 - (-1.0 / FOG_PER_RENDER_DISTANCE).exp();
+                    let picture = window::Picture::Slabs(traced.slabs.clone(), traced.version, self.camera, faces_view, sky_fog);
+                    (trace_params(&self.renderer, TRACE_MARGIN).levels(), Vec::new(), traced.baking, picture)
                 }
                 Engine::Voxels => {
                     let levels = march::levels(far);
@@ -223,12 +327,18 @@ impl window::Content for App {
             for (level, tiles) in made {
                 self.renderer.set_tiles(level, tiles);
             }
+            match (self.engine, &mut self.traced) {
+                (Engine::Slabs, Some(traced)) => traced.update(arrived, self.camera, &view, self.fov, &self.renderer),
+                // Their slabs, and their thread, gone with them.
+                _ => self.traced = None,
+            }
             let pixels = ui.ctx().pixels_per_point();
             self.remember([rect.width() * pixels, rect.height() * pixels]);
             self.picture = Some((picture, rect));
             match self.engine {
                 Engine::Splats => ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, compositor::Shown)),
                 Engine::Voxels => ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, march::Shown)),
+                Engine::Slabs => ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, trace::Shown)),
             };
             // While moving, the view changes; until all is made and baked, tiles and chunks keep arriving, often enough for a frame now and then.
             // A walking body moves on while it falls or its eye catches up with a step.
@@ -541,22 +651,13 @@ fn main() {
     let faces: [[Vec3; 3]; 12] = std::array::from_fn(|f| view::faces()[f].axes);
     let fog_distance = render_distance * FOG_PER_RENDER_DISTANCE;
     let engine = value("--engine").map_or(Engine::Voxels, |v| {
-        Engine::ALL.into_iter().find(|(_, name)| name.eq_ignore_ascii_case(v)).expect("--engine splats or voxels").0
+        Engine::ALL.into_iter().find(|(_, name)| name.eq_ignore_ascii_case(v)).expect("--engine splats, voxels or slabs").0
     });
     let palette: Arc<Vec<u32>> = Arc::new(materials_of(&shown.generator).iter().map(|m| m.rgb()).collect());
     if ["--bench", "--shot", "--stroll"].into_iter().any(flag) && engine == Engine::Voxels {
         let levels = march::levels(render_distance);
-        let wanted = std::array::from_fn(|l| l < levels);
         let start = Instant::now();
-        loop {
-            for (level, tiles) in world.update(camera, &wanted, &[]) {
-                renderer.set_tiles(level, tiles);
-            }
-            if !world.busy() {
-                break;
-            }
-            world.wait();
-        }
+        make_tiles(&mut world, &mut renderer, camera, &std::array::from_fn(|l| l < levels));
         println!("tiles made in {:.2} s on {threads} threads", start.elapsed().as_secs_f64());
         let scene = |renderer: &Renderer, eye| {
             let tiles = (0..levels).map(|l| renderer.level(l).clone()).collect();
@@ -579,6 +680,36 @@ fn main() {
         }
         if let Some(v) = value("--shot") {
             offscreen.save(&first, v);
+            println!("saved {v}");
+        }
+        return;
+    }
+    if ["--bench", "--shot", "--stroll"].into_iter().any(flag) && engine == Engine::Slabs {
+        assert!(!flag("--stroll"), "--stroll draws splats or voxels");
+        let params = trace_params(&renderer, 0.0);
+        let start = Instant::now();
+        make_tiles(&mut world, &mut renderer, camera, &params.levels());
+        println!("tiles made in {:.2} s on {threads} threads", start.elapsed().as_secs_f64());
+        let levels: Vec<_> = (0..GRID_LEVELS).map(|l| renderer.level(l).grids.clone()).collect();
+        let slabs = trace::bake(&palette, &levels, camera, &trace::faces_in(&first), &params, threads);
+        let view = compositor::View {
+            yaw,
+            pitch,
+            focal,
+            fog_distance,
+            faces,
+            size: size.map(|v| v as f32),
+            pixels: size.map(|v| v as u32),
+            seams: false,
+            colours: Colours::Voxels,
+            sky,
+        };
+        let mut tracer = trace::Tracer::new(slabs, &view, 1.0 - (-1.0 / FOG_PER_RENDER_DISTANCE).exp());
+        if flag("--bench") {
+            println!("the GPU traces the frame in {:.1} ms", tracer.time(30));
+        }
+        if let Some(v) = value("--shot") {
+            tracer.save(v);
             println!("saved {v}");
         }
         return;
@@ -650,6 +781,8 @@ fn main() {
         world_query: format!("seed={seed}{}", world_name.map(|w| format!("&world={w}")).unwrap_or_default()),
         picture: None,
         palette,
+        traced: None,
+        threads,
     };
     let panic = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {

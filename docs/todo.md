@@ -214,6 +214,18 @@ Numbers are for the forest at 1280×800, as measured when written.
   - A site's colour is one of what is in it (see "Light sees each site's
     alpha"): a coarse site of a crown and mist may show as mist.
   - Near, a see-through voxel is as soft as its tent: leaves at level 0 blur.
+- **Native's other engines are short of the splats in places**
+  (architecture.md, "Native: another engine").
+  - Voxels: the world makes tiles out to `GRID_REACH`, past what rays read
+    (`march::REACH`), and nothing is lit (`--light`).
+  - Slabs are baked around the eye and baked again as it moves,
+    hundreds of MB every few seconds: walking, they stutter.
+    A column keeps only its first voxel, so a medium lets through
+    as much as that voxel does: 1‰ of extinction lets all through, not 93 %
+    (the voxels' medium test, run on slabs).
+    They read the compositor's globals, the faces' views.
+- **`culling_on_the_gpu_leaves_the_picture_unchanged` fails now and then**
+  on an Intel UHD (Mesa), at `b4c79ff` too; why is open.
 - **The native compositor's buffers stop at the device's limit.**
   `Arena::grow` caps a buffer at what the device allows
   (128 MB of splats on lavapipe), and `allocate` then hands out room past it:
