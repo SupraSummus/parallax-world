@@ -21,11 +21,32 @@ Numbers are for the forest at 1280×800, as measured when written.
   and roughen every surface.
   On a gentle slope the rounding is steps a site high,
   which computed light shows as contour lines from level 2 on.
-  Tried on spans' open ends past level 0, that share took the lines away,
-  but each of the layers painting one ground (forest, mountains)
-  had to cover the same part of its top site, not add up, by a flag on the share;
-  a ground declared once (see "Fields get the spacing", below)
-  would hold its top's share in one place.
+  The light is not at fault: the steps are opaque, and lit as steps.
+  Tried (branch `claude/ground-coverage-alpha`, not merged):
+  past level 0, a site holds along y the heights across its voxel
+  that level 0 fills, a unit apart, those at its ends half each,
+  as a mask; its alpha is their share.
+  A face is then where level 0 has it, at any height
+  (a ground's mass came out as `Tie`'s, without its chance),
+  and things meeting in a site combine as level 0's sites do:
+  a Fill takes the empty heights, a Paint its own, a Carve takes them out.
+  A partial site shows, and is of, what is at one height per column,
+  so a solid at least two sites tall shows at a site in every column.
+  The contour lines went, at levels 2 and 3, lit.
+  Found on the way: heights two units apart in the site's own column
+  see only even ones (level 0's sites there), half a unit low;
+  a partial site needs a kind even where its column's height is empty.
+  Left before it can go in:
+  under four sites tall, some columns hold no whole site,
+  and alpha sees through: the city's floors showed its rooms at level 1.
+  So only solids four sites tall can be measured,
+  and the grounds need to go four spacings deep, not two, to be.
+  A site has one kind, so a roof's eaves on a ground's partial top site
+  show the ground from above in some columns (`shapes.rs`'s roof):
+  each face of a site could be of the height it shows, as `Look` allows.
+  And a region of the contract cut at a surface's plane
+  holds, past level 0, the sites straddling it,
+  with what lies under it (the valley's lamps over a street).
 - **Sheets and rods stop too much seen along them.**
   Grown to a site and opaque ("Levels" in `docs/generators.md`),
   a wall stops every ray across it, as it should, and every ray down it:
