@@ -243,7 +243,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   - Thin things seen at a slant break at the default detail:
     the city's road markings into combs, whole at twice the detail.
   - Marched per pixel, a tile per quad, they are slower on lavapipe
-    than whole splats were, which lavapipe tests no earlier;
+    than whole splats (`--engine splats`), which lavapipe tests no earlier;
     a real GPU is unmeasured.
   - Tiles hold their empty columns: about half of those uploaded.
   - A few pixels show what is under the ground at cells' edges

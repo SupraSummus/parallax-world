@@ -2,7 +2,7 @@
 //! paint (a splat) at its site, in relief over its chunk's plane:
 //! a slice's swept over its column's voxels behind it,
 //! a cell's whole ones one per column, as far as its side may show,
-//! its see-through ones each.
+//! or each, and its see-through ones each.
 
 use std::collections::HashMap;
 use std::f64::consts::FRAC_1_SQRT_2;
@@ -272,14 +272,17 @@ pub fn cell_relief(
 }
 
 /**
- * Fills `splats` with the see-through voxels of a cell (lod.rs) a ray of
+ * Fills `splats` with the voxels of a cell (lod.rs), of `voxels`, a ray of
  * the face can enter, by an open face (seen), each a hexagon at its site,
- * `centre` as chunk_splats takes it: a ray meets them one after another,
- * so each is drawn in the order it does (the native compositor), no run.
+ * `centre` as chunk_splats takes it, no run: its see-through ones, which a
+ * ray meets one after another, so each is drawn in the order it does (the
+ * native compositor); or all of them, where its whole ones are no relief.
+ * A ray's first whole voxel is entered so and is in one cell: its hexagon,
+ * holding its outline, meets the ray, and depth decides between cells'.
  */
-pub fn cell_splats(splats: &mut Splats, geometry: &Geometry, colour: &mut dyn FnMut(&Voxel) -> u32, see_through: &[Voxel], centre: i32) {
+pub fn cell_splats(splats: &mut Splats, geometry: &Geometry, colour: &mut dyn FnMut(&Voxel) -> u32, voxels: &[Voxel], centre: i32) {
     splats.clear();
-    for voxel in see_through.iter().filter(|v| seen(geometry, v.open)) {
+    for voxel in voxels.iter().filter(|v| seen(geometry, v.open)) {
         let [a, b, c] = voxel.site;
         splats.push(Splat {
             x: a as f64 * LAYER,

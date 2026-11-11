@@ -1,15 +1,16 @@
 //! Draws a frame's chunks with wgpu, as compositor.ts does with WebGL 2,
 //! into a picture of its own, which egui's render pass (or a shot) shows:
 //! cells' reliefs of whole voxels, a quad per tile of their columns whose
-//! pixels' rays find the column they meet first, only the tiles that may
-//! show, culled on the GPU against the depth of what the last frame showed
-//! (compositor.wgsl), then the sky behind them. See-through voxels come
-//! after, as splats, nearest first, each over what is behind it as much as
-//! it stops rays, then over the picture.
+//! pixels' rays find the column they meet first, or (Frame's `relief` off)
+//! their whole voxels as splats, each at its depth; only the tiles or
+//! clusters of splats that may show, culled on the GPU against the depth of
+//! what the last frame showed (compositor.wgsl), then the sky behind them.
+//! See-through voxels come after, as splats, nearest first, each over what
+//! is behind it as much as it stops rays, then over the picture.
 //!
 //! A chunk's columns and splats are uploaded when it comes into view, into
-//! a buffer each for all, in clusters (tiles of columns, and see-through
-//! splats near each other on its plane), and dropped when it leaves; each
+//! a buffer each for all, in clusters (tiles of columns, and splats near
+//! each other on its plane), and dropped when it leaves; each
 //! frame rewrites only a table of the chunks' placements, relative to the
 //! camera, so precision does not fall off far from the origin, and the
 //! list of their clusters.
@@ -48,12 +49,12 @@ struct GpuChunk {
 /** A column of a chunk's relief (columns in compositor.wgsl): its front's depth and its run, in half layers, as i16s, and its colour; 0, none. */
 pub type GpuColumn = [u32; 2];
 
-/** A see-through splat (veil_vertex's instance in compositor.wgsl): its numbers as a cell's are baked (bake's bake_cell). */
+/** A splat (splat_vertex's and veil_vertex's instance in compositor.wgsl): its numbers as a cell's are baked (bake's bake_cell). */
 pub type GpuSplat = [u32; 6];
 
 /**
  * A cluster (Cluster in compositor.wgsl): a tile of a chunk's columns, or
- * see-through splats of it. Where they are along the axis, relative to the
+ * splats of it. Where they are along the axis, relative to the
  * chunk's origin, and how far past the plane, nearest and farthest; a
  * tile's first column's centre, and the splats' widest's half width;
  * its first column or splat, its chunk's slot and how many splats, and
@@ -152,37 +153,58 @@ pub fn block(distance: f64, focal: f64) -> f64 {
 }
 
 /**
- * A chunk's see-through splats as the GPU takes them, in clusters, nearest
- * first, layer by layer, the order a ray of its face meets them in, and
- * in a layer by blocks of size `block` on its plane. Their `first` counts
- * from the chunk's first splat, and their chunk's slot is not in them yet.
- * A cluster's box holds its splats' tents (veil_fragment) along the axis,
- * from `near` to `far` past the plane, `half_layer` per half layer of
- * their depth, and how wide the widest is: the GPU finds where they are
- * drawn for its camera. In the bake workers, so that a chunk's upload is a
- * copy.
+ * A chunk's splats as the GPU takes them, in clusters, and how many
+ * clusters its whole ones take, which come first. The whole ones (where
+ * its whole voxels are no relief) in clusters of the splats in each block
+ * of size `block` on its plane, nearest first in each, so that a block's
+ * first clusters are its front, the clusters nearest first, so that splats
+ * are mostly drawn near to far; then the see-through ones, nearest first,
+ * layer by layer, the order a ray of its face meets them in, and in a
+ * layer by blocks. Their `first` counts from the chunk's first splat, and
+ * their chunk's slot is not in them yet.
+ * A cluster's box holds its splats' outlines along the axis (a
+ * see-through one's tent, veil_fragment), from `near` to `far` past the
+ * plane, `half_layer` per half layer of their depth, and how wide the
+ * widest is: the GPU finds where they are drawn for its camera. In the
+ * bake workers, so that a chunk's upload is a copy.
  */
-pub fn cluster(numbers: &[f32], half_layer: f64, block: f64) -> (Vec<GpuSplat>, Vec<GpuCluster>) {
+pub fn cluster(numbers: &[f32], half_layer: f64, block: f64) -> (Vec<GpuSplat>, Vec<GpuCluster>, usize) {
     let numbers = numbers.as_chunks::<6>().0;
     let block_of = |s: usize| [1, 0].map(|d| (numbers[s][d] as f64 / block).floor() as i64);
-    let mut sorted: Vec<usize> = (0..numbers.len()).collect();
-    sorted.sort_by_key(|&s| (numbers[s][3] as i32, block_of(s)));
-    let clusters = sorted
-        .chunks(CLUSTER)
-        .enumerate()
-        .map(|(k, part)| {
-            let mut cluster = GpuCluster::new(k * CLUSTER, part.len(), [0.0; 2]);
-            for &s in part {
-                let [x, y, w, depth, ..] = numbers[s].map(f64::from);
-                // A tent reaches twice as far as its outline.
-                let w = 2.0 * w;
-                cluster.hold([x, y], [w, w * std::f64::consts::SQRT_2], [depth * half_layer; 2]);
-                cluster.wide = cluster.wide.max(w as f32);
-            }
-            cluster
-        })
-        .collect();
-    (sorted.iter().map(|&s| numbers[s].map(f32::to_bits)).collect(), clusters)
+    let depth = |s: usize| numbers[s][3] as i32;
+    let whole = |s: &usize| numbers[*s][4].to_bits() >> 24 == 255;
+    let (mut sorted, mut see_through): (Vec<usize>, Vec<usize>) = (0..numbers.len()).partition(whole);
+    sorted.sort_by_key(|&s| (block_of(s), depth(s)));
+    see_through.sort_by_key(|&s| (depth(s), block_of(s)));
+    // A see-through splat's tent reaches twice as far as its outline.
+    let of = |part: &[usize], first: usize, reach: f64| {
+        let mut cluster = GpuCluster::new(first, part.len(), [0.0; 2]);
+        for &s in part {
+            let [x, y, w, depth, ..] = numbers[s].map(f64::from);
+            let w = reach * w;
+            cluster.hold([x, y], [w, w * std::f64::consts::SQRT_2], [depth * half_layer; 2]);
+            cluster.wide = cluster.wide.max(w as f32);
+        }
+        cluster
+    };
+    let mut clusters = Vec::new();
+    let mut start = 0;
+    for run in sorted.chunk_by(|&a, &b| block_of(a) == block_of(b)) {
+        // Split evenly.
+        let parts = run.len().div_ceil(CLUSTER);
+        for p in 0..parts {
+            let first = run.len() * p / parts;
+            clusters.push(of(&run[first..run.len() * (p + 1) / parts], start + first, 1.0));
+        }
+        start += run.len();
+    }
+    clusters.sort_by(|a, b| a.near.total_cmp(&b.near));
+    let whole = clusters.len();
+    for (k, part) in see_through.chunks(CLUSTER).enumerate() {
+        clusters.push(of(part, start + k * CLUSTER, 2.0));
+    }
+    sorted.extend(see_through);
+    (sorted.iter().map(|&s| numbers[s].map(f32::to_bits)).collect(), clusters, whole)
 }
 
 /** A chunk's columns, splats and clusters on the GPU, and its slot in the table. */
@@ -309,8 +331,9 @@ struct Pipelines {
     reduce: wgpu::BindGroupLayout,
     show: wgpu::BindGroupLayout,
     composite: wgpu::BindGroupLayout,
-    /** The tiles of whole voxels, then the see-through splats over each other, and those over the picture. */
+    /** The tiles of whole voxels, or their splats; then the see-through splats over each other, and those over the picture. */
     tiles: wgpu::RenderPipeline,
+    splats: wgpu::RenderPipeline,
     veil: wgpu::RenderPipeline,
     composite_picture: wgpu::RenderPipeline,
     sky: wgpu::RenderPipeline,
@@ -354,6 +377,8 @@ pub struct Compositor {
     drawn: [wgpu::Buffer; 2],
     targets: Option<Targets>,
     seams: bool,
+    /** Whether the frame's whole voxels are reliefs, or splats (Frame's `relief`). */
+    relief: bool,
     /** What draws, by phase what culls, and what culls the see-through. */
     draw_group: Option<wgpu::BindGroup>,
     cull_groups: Vec<wgpu::BindGroup>,
@@ -362,8 +387,9 @@ pub struct Compositor {
 
 const SKY_TOP: [f32; 3] = [0x3f as f32 / 255.0, 0x73 as f32 / 255.0, 0xb8 as f32 / 255.0];
 const SKY_HORIZON: [f32; 3] = [0xb9 as f32 / 255.0, 0xd3 as f32 / 255.0, 0xe8 as f32 / 255.0];
-/** f32 in Globals (compositor.wgsl). */
+/** f32 in Globals (compositor.wgsl), and where its whole_splats is. */
 pub const GLOBALS: usize = 220;
+const WHOLE_SPLATS: usize = 6;
 const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const FARTHEST: wgpu::TextureFormat = wgpu::TextureFormat::R32Float;
 const VEIL: wgpu::TextureFormat = wgpu::TextureFormat::Rgba32Float;
@@ -402,7 +428,7 @@ fn at_least(device: &wgpu::Device, buffer: &mut wgpu::Buffer, size: u64) {
  * The backend the compositor draws with: on DX12, wgpu's indirect draws
  * counted on the GPU leave their first instance out of the instance index,
  * which carries the tile, and their first vertex out of the vertex index,
- * which carries a see-through splat's chunk's slot.
+ * which carries a splat's chunk's slot.
  */
 pub const BACKENDS: wgpu::Backends = wgpu::Backends::VULKAN;
 
@@ -552,6 +578,7 @@ impl Pipelines {
         };
         Pipelines {
             tiles: render(&draw, "tile_vertex", "tile_fragment", &[], tested.clone(), &[target(format, None)]),
+            splats: render(&draw, "splat_vertex", "splat_fragment", &[Some(splat.clone())], tested.clone(), &[target(format, None)]),
             veil: render(&draw, "veil_vertex", "veil_fragment", &[Some(splat)], behind, &[target(VEIL, Some(under))]),
             composite_picture: render(
                 &composite,
@@ -663,6 +690,7 @@ impl Compositor {
             drawn: [drawn("drawn first"), drawn("drawn next")],
             targets: None,
             seams: false,
+            relief: true,
             draw_group: None,
             cull_groups: Vec::new(),
             veil_group: None,
@@ -674,7 +702,7 @@ impl Compositor {
         &self.targets.as_ref().expect("a frame").picture
     }
 
-    /** By phase, the draws of tiles (one instance each) and how many. */
+    /** By phase, the draws of tiles (one instance each) or of clusters (their splats' instances) and how many. */
     pub fn draws(&self) -> (&[wgpu::Buffer; 2], &[wgpu::Buffer; 2]) {
         (&self.draws, &self.drawn)
     }
@@ -703,7 +731,8 @@ impl Compositor {
             .iter()
             .enumerate()
             .map(|(k, c)| {
-                let first = if k < baked.see_through { columns.start } else { splats.start };
+                // Its whole voxels' first: tiles of columns, if the frame's are reliefs.
+                let first = if k < baked.see_through && self.relief { columns.start } else { splats.start };
                 GpuCluster { first: first + c.first, slot_count: slot << 8 | c.slot_count, ..*c }
             })
             .collect();
@@ -717,7 +746,7 @@ impl Compositor {
     pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, frame: &Frame, view: &View) {
         (self.columns.grew, self.splats.grew, self.clusters.grew) = (false, false, false);
         let size = view.pixels.map(|v| v.max(1));
-        self.seams = view.seams;
+        (self.seams, self.relief) = (view.seams, frame.relief);
         if self.targets.as_ref().is_none_or(|t| t.size != size) {
             self.targets = Some(Targets::new(device, &self.pipelines, self.format, size));
         }
@@ -807,7 +836,9 @@ impl Compositor {
             at_least(device, draws, self.in_view.max(1) as u64 * 16);
         }
         let sky_fog = 1.0 - (-frame.farthest / view.fog_distance).exp();
-        queue.write_buffer(&self.globals, 0, bytemuck::cast_slice(&view.globals(size, sky_fog)));
+        let mut globals = view.globals(size, sky_fog);
+        globals[WHOLE_SPLATS] = if frame.relief { 0.0 } else { 1.0 };
+        queue.write_buffer(&self.globals, 0, bytemuck::cast_slice(&globals));
         self.bind_groups(device);
     }
 
@@ -848,8 +879,8 @@ impl Compositor {
     }
 
     /**
-     * Draws the frame prepared last into the picture: the tiles that
-     * showed last frame, then those that show now that did not, culled
+     * Draws the frame prepared last into the picture: the tiles (or
+     * clusters of whole splats) that showed last frame, then those that show now that did not, culled
      * against the farthest depths of the first; then the see-through ones
      * in front of them, nearest first, and those over the picture.
      */
@@ -884,7 +915,12 @@ impl Compositor {
         };
         let tiles = |pass: &mut wgpu::RenderPass<'_>, phase: usize| {
             pass.set_bind_group(0, self.draw_group.as_ref(), &[]);
-            pass.set_pipeline(&p.tiles);
+            if self.relief {
+                pass.set_pipeline(&p.tiles);
+            } else {
+                pass.set_pipeline(&p.splats);
+                pass.set_vertex_buffer(0, self.splats.buffer.slice(..));
+            }
             pass.multi_draw_indirect_count(&self.draws[phase], 0, &self.drawn[phase], 0, self.in_view);
         };
         cull(encoder, 0);

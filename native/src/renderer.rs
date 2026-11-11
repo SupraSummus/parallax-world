@@ -55,6 +55,8 @@ pub struct Frame {
     pub chunks: Vec<Placement>,
     /** The farthest chunk's distance, or the render distance if farther: the sky's fog. */
     pub farthest: f64,
+    /** Whether its chunks' whole voxels are reliefs, or splats each (Renderer's `relief`). */
+    pub relief: bool,
 }
 
 #[derive(Default)]
@@ -112,9 +114,14 @@ pub struct Renderer {
     pub render_distance: f64,
     /** How many levels finer than its cell a chunk's voxels are (Lod). */
     pub shift: i32,
-    /** Whether chunks are lit (Request's `lit`), and whether those it has are: when it changes, they are baked again. */
+    /**
+     * Whether chunks are lit (Request's `lit`), and whether their whole
+     * voxels are reliefs (Request's `relief`); and whether those it has are:
+     * when either changes, they are baked again.
+     */
     pub lit: bool,
-    cells_lit: bool,
+    pub relief: bool,
+    cells_as: (bool, bool),
 }
 
 /** |v| for the v in [lo, hi] nearest to 0. */
@@ -178,7 +185,8 @@ impl Renderer {
             render_distance,
             shift: 3,
             lit: false,
-            cells_lit: false,
+            relief: true,
+            cells_as: (false, true),
         }
     }
 
@@ -199,15 +207,15 @@ impl Renderer {
     }
 
     pub fn render(&mut self, camera: Vec3, view: &View) -> (Frame, Stats) {
-        if self.lit != self.cells_lit {
+        if (self.lit, self.relief) != self.cells_as {
             self.cells.clear();
             self.picks.iter_mut().for_each(|p| *p = None);
-            self.cells_lit = self.lit;
+            self.cells_as = (self.lit, self.relief);
         }
         self.receive();
         self.renders += 1;
         let lod = Lod::new(self.shift, self.detail);
-        let mut frame = Frame { chunks: Vec::new(), farthest: self.render_distance };
+        let mut frame = Frame { chunks: Vec::new(), farthest: self.render_distance, relief: self.relief };
         let mut stats = Stats::default();
         let mut missing: Vec<(Request, f64)> = Vec::new();
         let mut tiles: Vec<(usize, TileId, f64)> = Vec::new();
@@ -290,7 +298,7 @@ impl Renderer {
                     }
                     &mut Seen::Bake(t) => {
                         let block = crate::compositor::block(z1.max(1.0), view.focal);
-                        missing.push((Request { face: f, cell, tiles: t, block, lit: self.lit }, d));
+                        missing.push((Request { face: f, cell, tiles: t, block, lit: self.lit, relief: self.relief }, d));
                     }
                     Seen::Baked(chunk) => {
                         // Its plane, through its site.
@@ -320,8 +328,8 @@ impl Renderer {
     /** Keeps what the bakery delivered, where its face's pick has its cell, and a while for when it comes again. */
     fn receive(&mut self) {
         for (r, baked) in self.bakery.take() {
-            // Baked lit as it was before it changed.
-            if r.lit != self.lit {
+            // Baked as it was before it changed.
+            if (r.lit, r.relief) != self.cells_as {
                 continue;
             }
             self.next_id += 1;

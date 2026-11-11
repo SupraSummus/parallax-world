@@ -4,7 +4,7 @@
 //! baker in bake/, sharing the tiles, and wgpu drawing them in an egui window
 //! (window.rs).
 //!
-//! parallax-native [--engine splats|voxels|slabs] [--world NAME] [--threads N] [--seed S] [--view QUERY] [--light SKY,SUN,GLOW] [--detail D] [--shift S] [--shot out.png [--size WxH] [--seams] [--colour voxels|layers|chunks] | --bench] [--stroll S [--on-ground]]
+//! parallax-native [--engine reliefs|splats|voxels|slabs] [--world NAME] [--threads N] [--seed S] [--view QUERY] [--light SKY,SUN,GLOW] [--detail D] [--shift S] [--shot out.png [--size WxH] [--seams] [--colour voxels|layers|chunks] | --bench] [--stroll S [--on-ground]]
 //!
 //! --view takes the web page's view query (parseViewQuery in renderer.ts),
 //! overriding --seed and --world.
@@ -22,10 +22,11 @@
 //! --seams and --colour draw as the panel's switches do.
 //! --engine picks what draws, as the panel does (Engine): rays through the
 //! tiles' voxels (march.rs, the default), which take no --detail,
-//! --shift, --seams or --colour; chunks ("splats"), cells' reliefs and their
-//! see-through voxels as splats, as the web draws; or rays through slabs
-//! baked along each face (trace.rs), for --shot and --bench as seen from
-//! where they are baked, which take no --light, --seams or --colour.
+//! --shift, --seams or --colour; chunks, cells' reliefs and their
+//! see-through voxels as splats ("reliefs"), or all their voxels as splats
+//! ("splats"), as the web draws; or rays through slabs baked along each
+//! face (trace.rs), for --shot and --bench as seen from where they are
+//! baked, which take no --light, --seams or --colour.
 //! The panel picks the lighting apart from the engine (Lighting): voxels
 //! shaded by the way their faces face, or lit by light worked out across
 //! the world, as --light does; each engine shows it its own way.
@@ -58,22 +59,33 @@ use worldgen::light::{Brightness, Light, Shared};
 /** The world shown unless --world names another (worlds::WORLDS). */
 const WORLD: Make = worlds::valley::valley;
 
-/** What draws the world: each its own way, from the same tiles (window::Picture). */
+/**
+ * What draws the world: each its own way, from the same tiles
+ * (window::Picture). Reliefs and splats are both chunks (compositor.rs),
+ * their whole voxels reliefs or splats each (Renderer's `relief`).
+ */
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Engine {
+    Reliefs,
     Splats,
     Voxels,
     Slabs,
 }
 
 impl Engine {
-    const ALL: [(Engine, &str); 3] = [(Engine::Splats, "splats"), (Engine::Voxels, "voxels"), (Engine::Slabs, "slabs")];
+    const ALL: [(Engine, &str); 4] =
+        [(Engine::Reliefs, "reliefs"), (Engine::Splats, "splats"), (Engine::Voxels, "voxels"), (Engine::Slabs, "slabs")];
+
+    /** Whether it draws chunks (compositor.rs). */
+    fn chunks(self) -> bool {
+        matches!(self, Engine::Reliefs | Engine::Splats)
+    }
 
     /** How far around the camera it reads the world's tiles, in each level's sites. */
     fn reach(self) -> f64 {
         match self {
             Engine::Voxels => march::REACH,
-            Engine::Splats | Engine::Slabs => GRID_REACH,
+            Engine::Reliefs | Engine::Splats | Engine::Slabs => GRID_REACH,
         }
     }
 
@@ -81,7 +93,7 @@ impl Engine {
     fn lit(self, lighting: Lighting) -> Lit {
         match (lighting, self) {
             (Lighting::Shaded, _) | (_, Engine::Slabs) => Lit::Not,
-            (Lighting::Computed, Engine::Splats) => Lit::Reading,
+            (Lighting::Computed, Engine::Reliefs | Engine::Splats) => Lit::Reading,
             (Lighting::Computed, Engine::Voxels) => Lit::Tiles,
         }
     }
@@ -267,7 +279,7 @@ impl window::Content for App {
                 }
                 ui.add(egui::Slider::new(&mut self.renderer.shift, 1..=5).text("Voxels Finer than Cells (levels)"));
             }
-            if self.engine == Engine::Splats {
+            if self.engine.chunks() {
                 ui.checkbox(&mut self.seams, "Show Face Seams");
                 ui.horizontal(|ui| {
                     ui.label("Colour by");
@@ -326,6 +338,7 @@ impl window::Content for App {
             let far = self.renderer.render_distance;
             let lit = self.engine.lit(self.lighting);
             self.renderer.lit = lit != Lit::Not;
+            self.renderer.relief = self.engine != Engine::Splats;
             self.world.lit = lit;
             self.world.reach = self.engine.reach();
             // The sky as bright as the light, if any.
@@ -347,13 +360,13 @@ impl window::Content for App {
             // The tiles each engine reads, and what it draws: drawn from the next frame on.
             // And whether chunks or slabs are baking, for frames until they are in.
             let (mut levels, wanted, baking, picture) = match self.engine {
-                Engine::Splats => {
+                Engine::Reliefs | Engine::Splats => {
                     let start = Instant::now();
                     let (frame, stats) = self.renderer.render(self.camera, &view);
                     self.picking = start.elapsed().as_secs_f64() * 1000.0;
                     self.stats =
                         format!("{} chunks\n{} baking, {} tiles wanted", frame.chunks.len(), stats.wanted.len(), stats.tiles.len());
-                    (stats.levels, stats.tiles, !stats.wanted.is_empty(), window::Picture::Splats(Arc::new(frame), faces_view))
+                    (stats.levels, stats.tiles, !stats.wanted.is_empty(), window::Picture::Chunks(Arc::new(frame), faces_view))
                 }
                 Engine::Slabs => {
                     let traced = self.traced.get_or_insert_with(|| Traced::new(self.palette.to_vec(), (self.threads / 2).max(1)));
@@ -387,7 +400,7 @@ impl window::Content for App {
             self.remember([rect.width() * pixels, rect.height() * pixels]);
             self.picture = Some((picture, rect));
             match self.engine {
-                Engine::Splats => ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, compositor::Shown)),
+                Engine::Reliefs | Engine::Splats => ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, compositor::Shown)),
                 Engine::Voxels => ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, march::Shown)),
                 Engine::Slabs => ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, trace::Shown)),
             };
@@ -705,11 +718,12 @@ fn main() {
     let faces: [[Vec3; 3]; 12] = std::array::from_fn(|f| view::faces()[f].axes);
     let fog_distance = render_distance * FOG_PER_RENDER_DISTANCE;
     let engine = value("--engine").map_or(Engine::Voxels, |v| {
-        Engine::ALL.into_iter().find(|(_, name)| name.eq_ignore_ascii_case(v)).expect("--engine splats, voxels or slabs").0
+        Engine::ALL.into_iter().find(|(_, name)| name.eq_ignore_ascii_case(v)).expect("--engine reliefs, splats, voxels or slabs").0
     });
     let palette: Arc<Vec<u32>> = Arc::new(materials_of(&shown.generator).iter().map(|m| m.rgb()).collect());
     let lit = engine.lit(lighting);
     renderer.lit = lit != Lit::Not;
+    renderer.relief = engine != Engine::Splats;
     world.lit = lit;
     world.reach = engine.reach();
     let lit_sky = (lit != Lit::Not).then_some(brightness.sky);
@@ -745,7 +759,7 @@ fn main() {
         return;
     }
     if ["--bench", "--shot", "--stroll"].into_iter().any(flag) && engine == Engine::Slabs {
-        assert!(!flag("--stroll"), "--stroll draws splats or voxels");
+        assert!(!flag("--stroll"), "--stroll draws chunks or voxels");
         let params = trace_params(&renderer, 0.0);
         let start = Instant::now();
         make_tiles(&mut world, &mut renderer, camera, &params.levels());
@@ -809,9 +823,8 @@ fn main() {
             let columns: usize = frame.chunks.iter().map(|p| p.chunk.baked.columns.len()).sum();
             let splats: usize = frame.chunks.iter().map(|p| p.chunk.baked.splats.len()).sum();
             let (ms, [first, next]) = shot::time(&frame, &view, 30);
-            println!(
-                "the GPU draws the frame in {ms:.1} ms: of its {columns} columns' tiles, {first} that showed before and {next} more; {splats} see-through splats"
-            );
+            let drawn = if engine == Engine::Splats { format!("{splats} splats") } else { format!("{columns} columns' tiles") };
+            println!("the GPU draws the frame in {ms:.1} ms: of its {drawn}, {first} that showed before and {next} more");
         }
         if let Some(v) = value("--stroll") {
             let walk_through: Vec<bool> = materials_of(&shown.generator).iter().map(|m| m.walk_through).collect();
@@ -866,17 +879,19 @@ mod tests {
 
     /**
      * World `name` of seed 1 from its spawn, looking `yaw` and `pitch`,
-     * once the view is complete: the frame, and how it is seen.
+     * once the view is complete, its whole voxels reliefs or splats
+     * (Renderer's `relief`): the frame, and how it is seen.
      */
-    fn complete_view(name: &str, look: [f64; 2], detail: f64) -> (renderer::Frame, compositor::View) {
-        complete_view_of(worlds::by_name(name).expect("world").make, look, detail)
+    fn complete_view(name: &str, look: [f64; 2], detail: f64, relief: bool) -> (renderer::Frame, compositor::View) {
+        complete_view_of(worlds::by_name(name).expect("world").make, look, detail, relief)
     }
 
     /** complete_view of the world `make` makes. */
-    fn complete_view_of(make: world::Make, [yaw, pitch]: [f64; 2], detail: f64) -> (renderer::Frame, compositor::View) {
+    fn complete_view_of(make: world::Make, [yaw, pitch]: [f64; 2], detail: f64, relief: bool) -> (renderer::Frame, compositor::View) {
         let shown = make(1);
         let mut renderer = renderer(&shown, None, 4, 1000.0);
         renderer.detail = detail;
+        renderer.relief = relief;
         let mut world = World::new(make, 1, None, 4);
         let size = [320.0, 200.0];
         let focal = focal_length(FOV, size[0], size[1]);
@@ -905,14 +920,17 @@ mod tests {
     #[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
     fn culling_on_the_gpu_leaves_the_picture_unchanged() {
         for (name, look, octaves) in VIEWS {
-            let (frame, view) = complete_view(name, look, 2f64.powf(octaves));
-            let [culled, all] = [true, false].map(|culls| {
-                let mut gpu = shot::Offscreen::with(None, culls);
-                gpu.prepare(&frame, &view);
-                (gpu.picture().2, gpu.drawn().iter().sum::<u32>())
-            });
-            assert!(culled.0 == all.0, "{name} {look:?}");
-            assert!(culled.1 < all.1, "{name} {look:?}: culling drew {} tiles of {}", culled.1, all.1);
+            for relief in [true, false] {
+                let (frame, view) = complete_view(name, look, 2f64.powf(octaves), relief);
+                let [culled, all] = [true, false].map(|culls| {
+                    let mut gpu = shot::Offscreen::with(None, culls);
+                    gpu.prepare(&frame, &view);
+                    (gpu.picture().2, gpu.drawn().iter().sum::<u32>())
+                });
+                let drew = if relief { "tiles" } else { "splats" };
+                assert!(culled.0 == all.0, "{name} {look:?} {drew}");
+                assert!(culled.1 < all.1, "{name} {look:?}: culling drew {} {drew} of {}", culled.1, all.1);
+            }
         }
     }
 
@@ -945,7 +963,7 @@ mod tests {
 
     /** The splats of the world `make` makes, from its spawn, looking along the face (1, 0, 1), without fog: its width and pixels. */
     fn splats_along_a_face(make: world::Make) -> (u32, Vec<u8>) {
-        let (frame, view) = complete_view_of(make, [45.0, 0.0], 8.0);
+        let (frame, view) = complete_view_of(make, [45.0, 0.0], 8.0, true);
         let (width, _, pixels) = shot::picture(&frame, &compositor::View { fog_distance: f64::INFINITY, ..view });
         (width, pixels)
     }
@@ -1013,7 +1031,7 @@ mod tests {
     #[test]
     #[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
     fn what_the_buffers_cannot_hold_is_left_out_farthest_first() {
-        let (mut frame, view) = complete_view("moor", [-30.0, 10.0], 2f64.powf(3.25));
+        let (mut frame, view) = complete_view("moor", [-30.0, 10.0], 2f64.powf(3.25), true);
         let all = shot::picture(&frame, &view).2;
         // Room for about half of the frame's columns: the chunks that come first, as many as fit, of columns, splats and clusters.
         let bytes =
