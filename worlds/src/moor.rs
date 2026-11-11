@@ -24,7 +24,7 @@ use worldgen::units::{Units, m};
 
 use crate::forest::K as F;
 use crate::landmarks::{self, Landmarks};
-use crate::mountains::K as A;
+use crate::mountains::{self, K as A};
 use crate::path::Path;
 use crate::railway::Railway;
 use crate::town::K as T;
@@ -394,8 +394,9 @@ fn pool_at(spot: [i64; 2], ground: &dyn Fn(i64, i64) -> Fx, random: &mut Rng) ->
  * on the uplands under the treeline, and over stretches of the valley a
  * kilometre or so long and kilometres apart; patchy, so copses of the
  * forest stand in it and heath in the forest, its edges ragged. None
- * between `clear`'s two z, nor on the towns' farmland. Steadings and
- * pools keep off the towns, the landmarks, the path and the railway (`lead`).
+ * between `clear`'s two z within 2 km of the path, nor on the towns'
+ * farmland. Steadings and pools keep off the towns, the landmarks, the
+ * path and the railway (`lead`).
  */
 pub struct Uplands {
     terrain: Rc<Terrain>,
@@ -417,13 +418,15 @@ impl Uplands {
         let (ranges, units) = (&self.terrain.ranges, |d: i64| Units(d).to_fx());
         // From 65 m under the treeline, rising over 30 m; giving way to the mountains' meadows round the treeline, none above.
         let uplands = Fx::ONE - ranges.below_treeline(x, z, h + m(35.0));
-        let below = ranges.below_treeline(x, z, h - m(10.0));
+        let below = ranges.below_treeline(x, z, h - m(10.0)) * mountains::dry(h - m(1.0));
         // Stretches across the whole valley: their noise four times as long across it.
         let patches = self.patches.at(x, z) - Fx::HALF;
         let stretch = smoothstep(fx(0.76), fx(0.84), self.stretches.at(x / 4, z) + patches / 2);
         let moorish = uplands.max(stretch) * below;
         let [from, to] = self.clear;
-        let clear = Fx::ONE - smoothstep(Fx::ZERO, Fx::m(150.0), units((from - z).max(z - to)));
+        let from_path = (units(x) - self.terrain.path_x(z)).abs();
+        let clear = (Fx::ONE - smoothstep(Fx::ZERO, Fx::m(150.0), units((from - z).max(z - to))))
+            * (Fx::ONE - smoothstep(Fx::m(2000.0), Fx::m(3000.0), from_path));
         // The towns' farmland reaches 90 to 150 m out of them (fields.rs).
         let farmland = Fx::ONE - smoothstep(Fx::m(90.0), Fx::m(150.0), self.town_distance(x, z));
         (moorish - Fx::HALF) * 4 / 5 + patches * 6 / 5 - (clear + farmland + Fx::ONE - below) * 2

@@ -1,7 +1,7 @@
 //! The valley, the flagship world: the forest, with towns along its path,
 //! farmland around them, landmarks scattered through it, moorland on its
 //! uplands and along stretches of it, and a railway up one side, between
-//! mountain ranges.
+//! mountain ranges; past them the sea to the west, an upland to the east.
 //! Domains on one land (plan.rs) that never call each other: each reads
 //! only plans coarser than its own, bids for every column, and draws what
 //! it wins; the mountains raise the ground they all stand on. New
@@ -119,10 +119,13 @@ pub fn valley(seed: u64) -> World {
     ];
     let land = Rc::new(Land::new(town::BID_SCALE, fx(0.125), bids));
 
-    // Thinning out to the treeline.
+    // Thinning out to the treeline, and to the sea.
     let share = {
         let (land, ranges, ground) = (land.clone(), ranges.clone(), ground.clone());
-        Rc::new(move |x, z| land.share(FOREST, x, z) * ranges.below_treeline(x, z, ground.at(x, z)))
+        Rc::new(move |x, z| {
+            let h = ground.at(x, z);
+            land.share(FOREST, x, z) * ranges.below_treeline(x, z, h) * mountains::dry(h)
+        })
     };
     let forest_ground = Ground { ground: ground.clone(), path: path.clone(), share };
     let spawn = forest_ground.on_path(m(-31.0), m(3.0));
@@ -144,8 +147,8 @@ pub fn kinds() -> Vec<KindDef> {
 
 /**
  * Where its features are, at any seed: the first town, chapel and
- * windmill, a mountainside, a steading on the moor; the railway's first
- * station, bridge and tunnel.
+ * windmill, a mountainside, the coast, a steading on the moor; the
+ * railway's first station, bridge and tunnel.
  */
 fn points(terrain: &Rc<Terrain>, landmarks: &Rc<Landmarks>, moorland: &Rc<Moorland>, railway: &Rc<Railway>) -> Vec<(&'static str, Find)> {
     let site = |landmark| -> Find {
@@ -168,6 +171,10 @@ fn points(terrain: &Rc<Terrain>, landmarks: &Rc<Landmarks>, moorland: &Rc<Moorla
         ("chapel", site(Landmark::Chapel)),
         ("windmill", site(Landmark::Windmill)),
         ("mountainside", Box::new(move || mountainside(&range))),
+        ("coast", {
+            let terrain = terrain.clone();
+            Box::new(move || coast(&terrain))
+        }),
         ("steading", Box::new(move || steading(&floor, &moorland))),
         ("station", {
             let railway = railway.clone();
@@ -207,6 +214,16 @@ fn mountainside(terrain: &Terrain) -> [i64; 3] {
             behind.map(|&(x, h)| [x, h.round_units().0, z]).find(|p| Units(p[1]).to_fx() <= top - Fx::m(20.0))
         })
         .expect("a mountainside within 25 km along the valley")
+}
+
+/** The coast west of the start: the last dry ground going west along z = 0, every 8 m. */
+fn coast(terrain: &Terrain) -> [i64; 3] {
+    let ground = |x: i64| terrain.ground(x, 0).round_units().0;
+    (0..m(40_000.0) / m(8.0))
+        .map(|k| -k * m(8.0))
+        .find(|&x| ground(x - m(8.0)) <= mountains::SEA.0)
+        .map(|x| [x, ground(x), 0])
+        .expect("a coast within 40 km west of the start")
 }
 
 /**

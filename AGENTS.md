@@ -99,7 +99,7 @@ worlds/                      # The worlds, on worldgen's public API only; the we
 │   ├── town.rs, fields.rs   # Towns along the path, farmland around them: the valley's other domains
 │   ├── landmarks.rs         # The valley's fourth domain: a keep, a watchtower, chapels, ponds, farmsteads, windmills
 │   ├── valley.rs            # The valley: the six domains on one land
-│   ├── mountains.rs         # The valley's ranges: massifs, crests, peaks and passes, side valleys; treeline, meadows, scree, rock, snow
+│   ├── mountains.rs         # The valley's ranges: massifs, crests, peaks and passes, side valleys; treeline, meadows, scree, rock, snow; the sea west past them, an upland east
 │   ├── moor.rs              # The moor: heath, a stream or pools, mist in its hollows, steadings of a hut and a ring of stones; the valley's fifth domain
 │   ├── railway.rs           # The valley's railway: a line along it made by cost, cut, filled, bridged and tunnelled; stations by towns
 │   ├── city.rs              # The city: blocks of buildings whose rooms form a maze, boxes on a plan of quarter metres

@@ -440,6 +440,12 @@ Numbers are for the forest at 1280×800, as measured when written.
 
 ## Ideas
 
+- The valley's geography from water, not along one line:
+  rivers that drain the ranges to the sea, lakes in basins,
+  and the valley one of them;
+  then paths as curves between towns (`curve.rs`), not `path_x(z)`,
+  which towns, the railway, landmarks and the moor all read.
+  Now the ranges, the sea and the upland run along z for ever.
 - More scenes (`worlds/src/scene.rs`): Bistro, San Miguel.
   Not tried in them: walking, on walls a site thick.
   Lit (`--light 1,1,0`), Sponza's atrium is all but black; not looked into.

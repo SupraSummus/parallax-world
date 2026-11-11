@@ -95,6 +95,9 @@ A spinner shows while a world generates.
   wayside chapels, ponds, farmsteads and windmills.
   Mountain ranges along both sides: crests, peaks and passes,
   side valleys, meadows and scree above the treeline, snow on the peaks.
+  Past a few kilometres of them the land leaves the ranges:
+  west, a lowland falling to the sea, its coast ragged with bays and islands;
+  east, an upland under the treeline, moor and forest.
   A railway up one side of the valley:
   ballast, sleepers and rails in cuttings and on embankments,
   bridges on piers and lined tunnels where the ground is far from the track,
