@@ -89,7 +89,8 @@ impl Offscreen {
 /**
  * The time the GPU takes to draw `frame` again and again, in ms, as the
  * window does when moving (frames back to back, no vsync), once the
- * culling has settled; and how many tiles the last drew in each phase.
+ * culling has settled; and how many tiles (or whole splats) the last
+ * drew in each phase.
  */
 pub fn time(frame: &Frame, view: &View, runs: usize) -> (f64, [u32; 2]) {
     let o = offscreen(frame, view);
@@ -121,7 +122,7 @@ pub fn picture(frame: &Frame, view: &View) -> (u32, u32, Vec<u8>) {
 }
 
 impl Offscreen {
-    /** How many tiles the frame drawn last drew in each phase. */
+    /** How many tiles (or whole splats) the frame drawn last drew in each phase. */
     pub fn drawn(&self) -> [u32; 2] {
         let (draws, counts) = self.compositor.draws();
         std::array::from_fn(|phase| {

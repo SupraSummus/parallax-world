@@ -193,6 +193,11 @@ where one has none in the cell, to the column's last voxel,
 and on through the solid behind it past the cell, a cell deep at most,
 as the next cell's relief starts at what a ray enters, not at its cut.
 Like a slice's, a relief is off by an angle that detail bounds (section 2).
+Or, drawn by the `splats` engine (`Renderer::relief` off),
+its whole voxels a ray can enter are each one hexagon too:
+a ray's first voxel is entered so and is in one cell,
+so its hexagon, holding its outline, meets the ray;
+no runs and no cut faces.
 Its see-through voxels a ray can enter are each one hexagon (`cell_splats`),
 drawn in the order a ray meets them (section 4, "See-through");
 the relief takes them for empty.
@@ -581,6 +586,15 @@ draws those newly showing and keeps which show for the next frame
 Draws are listed per tile on the GPU, roughly near to far,
 so nearer tiles mostly hide what is behind them early.
 It draws into a picture of its own, which egui (or `--shot`) shows.
+Where whole voxels are splats (section 1),
+the bake workers put them in clusters of a few nearby on its plane instead,
+each with the box of their outlines,
+drawn and culled as the tiles are,
+each splat at the depth of its site,
+widened by the slant of the ray to it, as on the web;
+a chunk's slot in the table comes to the vertex shader
+as its draws' first vertex,
+so its splats are uploaded as the workers made them.
 
 **See-through.** Native draws a site's medium see-through
 (`KindDef::medium`, as mist) where its pieces don't show;
@@ -639,7 +653,8 @@ distance (or of the last slice, if farther).
 
 The native window switches at run time between engines (`Engine`),
 each drawing the same tiles its own way, with its own shaders:
-cells' reliefs and splats above, rays through the tiles' voxels (`native/src/march.rs`),
+chunks above, their whole voxels reliefs or splats (`reliefs`, `splats`),
+rays through the tiles' voxels (`native/src/march.rs`),
 with no chunks, slices, faces or baking, described here,
 or a prototype, rays through slabs along each face (`native/src/trace.rs`):
 per face and level, slabs of layers baked around the eye,

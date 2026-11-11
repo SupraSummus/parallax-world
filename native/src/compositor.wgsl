@@ -1,13 +1,14 @@
 // compositor.ts in WGSL, for cells' reliefs of whole voxels (bake's
-// cell_relief) and their see-through voxels as splats, drawing only the
-// clusters of them that may show: each cluster names its chunk's slot in
-// `chunks`, which gives its face and plane relative to the camera. Per
-// frame, cull_drawn lists draws of the tiles of columns that showed last
-// frame, and tile_vertex draws them; their depth is reduced to a pyramid
-// of farthest depths (reduce_depth, reduce), and cull_rest tests every
-// tile against it: those that showed are kept for the next frame, and
-// those newly showing drawn now. Then the see-through splats in front of
-// them, nearest first (veil_fragment), over the picture.
+// cell_relief), or their whole voxels as splats, and their see-through
+// voxels as splats, drawing only the clusters of them that may show: each
+// cluster names its chunk's slot in `chunks`, which gives its face and
+// plane relative to the camera. Per frame, cull_drawn lists draws of the
+// tiles of columns (or clusters of whole splats) that showed last frame,
+// and tile_vertex (splat_vertex) draws them; their depth is reduced to a
+// pyramid of farthest depths (reduce_depth, reduce), and cull_rest tests
+// every tile against it: those that showed are kept for the next frame,
+// and those newly showing drawn now. Then the see-through splats in front
+// of them, nearest first (veil_fragment), over the picture.
 
 struct FaceView {
   // Columns: the camera's right, up and forward axes, in the face's coordinates.
@@ -21,7 +22,7 @@ struct Globals {
   resolution: vec2f, // device pixels
   focal: f32,
   fog_distance: f32,
-  _pad: f32,
+  whole_splats: f32, // 1 if whole voxels are splats, not reliefs
   sky_fog: f32,
   sky_top: vec4f,
   horizon: vec4f,
@@ -60,7 +61,7 @@ struct Cluster {
 const TILE = 4;
 
 // A draw: a tile's quad, an instance of tile_vertex; or a cluster's
-// splats, instances of veil_vertex.
+// splats, instances of splat_vertex or veil_vertex.
 struct DrawArgs {
   vertices: u32,
   instances: u32,
@@ -117,6 +118,18 @@ struct Splat {
 fn ray_of(view: mat3x3f, position: vec4f) -> vec3f {
   let s = position.xy / globals.resolution - 0.5;
   return view * vec3f(vec2f(s.x, -s.y) * globals.viewport / globals.focal, 1.0);
+}
+
+// A splat instance (GpuSplat): its hexagon's centre relative to its chunk's
+// origin, half its width (its height √2 times that) and its depth past the
+// plane, and its colour; drawn at its depth, as much wider as the ray to it
+// slants across (compositor.ts). Its chunk's slot comes as the first
+// vertex's index over 4.
+@vertex
+fn splat_vertex(@builtin(vertex_index) vertex: u32, @location(0) splat: vec4f, @location(1) paint: vec4f) -> Splat {
+  let site = splat_site(vertex, splat);
+  let size = vec2f(splat.z * (1.0 + abs(site.x / site.z)), splat.z * sqrt(2.0));
+  return placed(vertex, splat, paint, size);
 }
 
 // A see-through splat: its voxel's share of a field over its layer (see
@@ -316,7 +329,17 @@ fn shown(in: Tile, hit: Hit) -> Drawn {
   return Drawn(vec4f(shade(c, hit.paint), 1.0), depth_of(c.level, distance));
 }
 
-// A whole voxel.
+// A whole voxel, as a splat: if the pixel is in its hexagon, and its face
+// draws its ray.
+@fragment
+fn splat_fragment(in: Splat) -> @location(0) vec4f {
+  if abs(in.corner.x) * in.slant + abs(in.corner.y) >= 1.0 || !owns(in.face, in.position) {
+    discard;
+  }
+  return vec4f(in.colour.rgb, 1.0);
+}
+
+// A whole voxel, of a relief.
 @fragment @early_depth_test(greater_equal)
 fn tile_fragment(in: Tile) -> Drawn {
   let hit = march(in);
@@ -386,8 +409,8 @@ fn closest_to_zero(lo: f32, hi: f32) -> f32 {
 fn screen_box(cluster: Cluster) -> vec4f {
   let c = chunks[cluster.slot_count >> 8u];
   // The rays through its box, as tangents, at most its corners', near and
-  // far; a see-through splat's widened as much as a splat's outline is by
-  // its slant across, to hold where its tent is drawn.
+  // far; a splat's widened by its slant across (splat_vertex), a
+  // see-through one's as much, to hold where its tent is drawn.
   let z = c.distance + vec2f(cluster.near, cluster.far);
   if z.x <= 0.0 {
     return vec4f(vec2f(0.0), globals.resolution);
@@ -454,7 +477,7 @@ fn draws_cluster(at: u32, cluster: Cluster, phase: u32) -> bool {
     return cluster.visible != 0u && shows(b);
   }
   let c = chunks[cluster.slot_count >> 8u];
-  // Its nearest column's distance is no less than how far ahead it is.
+  // Its nearest column's (or splat's) distance is no less than how far ahead it is.
   let depth = depth_of(c.level, max(c.distance + cluster.near, 0.0));
   let visible = shows(b) && !(culls && hidden(b, depth));
   clusters[at].visible = u32(visible);
@@ -462,16 +485,21 @@ fn draws_cluster(at: u32, cluster: Cluster, phase: u32) -> bool {
   return visible && cluster.visible == 0u;
 }
 
-// A workgroup per chunk in the frame, a thread per tile. Chunks come
-// near to far and their tiles nearest first (see tiles in compositor.rs),
-// and draws are listed about in that order, so that nearer columns are
-// mostly drawn first and hide what is behind them early.
+// A workgroup per chunk in the frame, a thread per tile (or cluster of
+// whole splats). Chunks come near to far and their tiles nearest first
+// (see tiles and cluster in compositor.rs), and draws are listed about in
+// that order, so that nearer voxels are mostly drawn first and hide what
+// is behind them early.
 fn cull(chunk: u32, thread: u32, phase: u32) {
   let range = candidates[chunk];
   for (var k = thread; k < range.y; k += 64u) {
     let cluster = clusters[range.x + k];
     if draws_cluster(range.x + k, cluster, phase) {
-      draws[atomicAdd(&drawn, 1u)] = DrawArgs(4u, 1u, 0u, range.x + k);
+      var draw = DrawArgs(4u, 1u, 0u, range.x + k);
+      if globals.whole_splats != 0.0 {
+        draw = DrawArgs(4u, cluster.slot_count & 0xffu, (cluster.slot_count >> 8u) * 4u, cluster.first);
+      }
+      draws[atomicAdd(&drawn, 1u)] = draw;
     }
   }
 }

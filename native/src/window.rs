@@ -34,7 +34,7 @@ pub trait Content {
 
 /**
  * What a frame draws, by the engine that draws it, each with GPU resources
- * of its own: chunks, cells' reliefs and see-through splats (compositor.rs);
+ * of its own: chunks, cells' reliefs or whole splats and see-through splats (compositor.rs);
  * rays through the tiles' voxels (march.rs); or rays through slabs along
  * the faces (trace.rs): the slabs baked last if any, their version, the
  * eye, how they are seen and how much of the sky the fog hides.
@@ -42,7 +42,7 @@ pub trait Content {
 // One a frame: its size does not matter.
 #[allow(clippy::large_enum_variant)]
 pub enum Picture {
-    Splats(Arc<Frame>, compositor::View),
+    Chunks(Arc<Frame>, compositor::View),
     Voxels(march::Scene),
     Slabs(Option<Arc<Slabs>>, u64, Vec3, compositor::View, f64),
 }
@@ -181,7 +181,7 @@ impl Gpu {
             let (device, format) = (&self.device, self.config.format);
             let mut encoder = self.device.create_command_encoder(&Default::default());
             match picture {
-                Picture::Splats(frame, view) => {
+                Picture::Chunks(frame, view) => {
                     let compositor = only(resources, || Compositor::new(device, format, true));
                     compositor.prepare(&self.device, &self.queue, &mut encoder, &frame, &compositor::View { pixels, ..view });
                     compositor.render(&mut encoder);

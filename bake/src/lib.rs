@@ -226,18 +226,19 @@ impl Baker {
 
     /**
      * Bakes a cell chunk (lod.rs) of view face `face` over the plane through
-     * its site: the relief of its whole voxels (cell_relief), as `columns`,
-     * and its see-through voxels a ray can enter (cell_splats), as splats,
+     * its site: if `relief`, the relief of its whole voxels (cell_relief), as
+     * `columns`, and its see-through voxels a ray can enter (cell_splats), as
+     * splats; else all it holds that a ray can enter as splats, no columns;
      * and where they may be drawn. Unclipped: no other chunk of its level
      * draws its voxels, and depth decides between them. No mask: what is
      * covered is left to the GPU.
-     * Its numbers are its see-through splats': depth past the plane in half
-     * layers, colour (its alpha its voxel's), and the layer of the cell of
-     * the next finer level holding each voxel, in half layers past the
-     * plane: where that level draws it too, the compositor leaves it out,
+     * Its numbers are its splats': depth past the plane in half layers,
+     * colour (its alpha its voxel's), and the layer of the cell of the next
+     * finer level holding each voxel, in half layers past the plane: where
+     * that level draws a see-through one too, the compositor leaves it out,
      * so that none counts twice.
      */
-    pub fn bake_cell(&mut self, face: usize, chunk: &CellChunk) -> Baked {
+    pub fn bake_cell(&mut self, face: usize, chunk: &CellChunk, relief: bool) -> Baked {
         let level = chunk.atoms as usize;
         self.reach(level);
         let m = chunk.spacing();
@@ -254,8 +255,9 @@ impl Baker {
         let tiles = Arc::clone(&self.grids[level]);
         let reader = Reader::new(&tiles, self.lattices[face]);
         let (from, to) = chunk.bounds();
-        let (whole, see_through): (Vec<_>, Vec<_>) =
-            surface(&reader, &self.geometry, from, to, holds).into_iter().partition(|v| v.alpha == ALPHA);
+        let surface = surface(&reader, &self.geometry, from, to, holds);
+        let (whole, hexagons): (Vec<_>, Vec<_>) =
+            if relief { surface.into_iter().partition(|v| v.alpha == ALPHA) } else { (Vec::new(), surface) };
         // From a site on along the axis, the last whole voxel before any that is not, a cell deep past the cell at most.
         let runs_on = |[a, b, mut c]: [i32; 3]| {
             let whole = |c| {
@@ -277,7 +279,7 @@ impl Baker {
         self.columns.clear();
         self.columns.extend(s.splats.iter().map(|s| [i16s(s.site[0] - a, s.site[1] - b), i16s(s.depth, s.run), s.colour]));
         let relief = [s.min_x, s.max_x, s.min_y, s.max_y];
-        self.paint(face, level, |splats, geometry, colour| cell_splats(splats, geometry, colour, &see_through, centre));
+        self.paint(face, level, |splats, geometry, colour| cell_splats(splats, geometry, colour, &hexagons, centre));
         let s = &self.splats;
         let (min_x, max_x, min_y, max_y) = (s.min_x.min(relief[0]), s.max_x.max(relief[1]), s.min_y.min(relief[2]), s.max_y.max(relief[3]));
         let extent = if min_x < max_x { [max_x - min_x, max_y - min_y] } else { [0.0; 2] };

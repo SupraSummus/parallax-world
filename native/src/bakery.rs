@@ -24,17 +24,20 @@ pub struct Request {
     pub face: usize,
     pub cell: CellChunk,
     pub tiles: [i32; 4],
-    /** The size of the blocks its see-through splats are clustered by (compositor::cluster). */
+    /** The size of the blocks its splats are clustered by (compositor::cluster). */
     pub block: f64,
     /** Whether its voxels are lit, by the baker's light (Baker's `light`), or shaded by the way their faces face. */
     pub lit: bool,
+    /** Whether its whole voxels are its cell's relief, or splats each (Baker::bake_cell). */
+    pub relief: bool,
 }
 
 /**
  * A baked chunk, as the GPU takes it, and where it may be drawn: its
- * relief's columns (compositor::tiles) and its see-through splats
- * (compositor::cluster), and their clusters, the tiles of columns first,
- * then the see-through ones from `see_through`.
+ * relief's columns (compositor::tiles), if it has one, and its splats
+ * (compositor::cluster), and their clusters: its whole voxels' first, the
+ * tiles of columns or else the whole splats', then the see-through ones
+ * from `see_through`.
  */
 pub struct Baked {
     pub origin: [f64; 2],
@@ -171,16 +174,16 @@ fn work(queue: &Queue, send: &Sender<(Request, Baked)>, grids: &Grids, mut baker
         if r.lit != baker.light.is_some() {
             std::mem::swap(&mut baker.light, &mut aside);
         }
-        let b = baker.bake_cell(r.face, &r.cell);
+        let b = baker.bake_cell(r.face, &r.cell, r.relief);
         // Its column (0, 0): the least (a, b) of its cell's bounds, relative to its origin.
         let unit = spacing(r.cell.atoms) as f64;
         let [a, b0, _] = r.cell.bounds().0;
         let base = [a as f64 * LAYER * unit - b.origin_x, b0 as f64 * unit - b.origin_y];
         let half_layer = half_layer(r.cell.atoms);
         let (columns, mut clusters) = tiles(&baker.columns, base, unit, half_layer);
-        let see_through = clusters.len();
-        let (splats, veils) = cluster(&baker.numbers, half_layer, r.block);
-        clusters.extend(veils);
+        let (splats, splat_clusters, whole) = cluster(&baker.numbers, half_layer, r.block);
+        let see_through = clusters.len() + whole;
+        clusters.extend(splat_clusters);
         let baked =
             Baked { origin: [b.origin_x, b.origin_y], extent: [b.extent_width, b.extent_height], columns, splats, clusters, see_through };
         if send.send((request, baked)).is_err() {

@@ -62,7 +62,7 @@ bake/                        # Chunk baker, coverage and walking in Rust (no dep
     ├── slicing.rs           # slice-selection.ts's slices' shapes and chunks, for the web's baker
     ├── surface.rs           # A cell's voxels that can show
     ├── tables.rs            # The voxel's faces in lattice coordinates, the materials shaded per view face
-    ├── splats.rs            # Which voxels a chunk shows, each a hexagon at its site: of a slice, each column's nearest over its run; of a cell, its whole ones' relief: a pillar per column, and each see-through one a ray can enter
+    ├── splats.rs            # Which voxels a chunk shows, each a hexagon at its site: of a slice, each column's nearest over its run; of a cell, its whole ones' relief: a pillar per column (or each a ray can enter), and each see-through one a ray can enter
     ├── light.rs             # The light from voxels' faces, as hosts that light a world hand it over
     ├── lod.rs               # Native's chunks: whole cells of the lattice, each face's levels by depth along it, its cells kept picked
     ├── fill.rs              # Splats filled into a mask for every slant, solid blocks (for coverage)
@@ -115,13 +115,13 @@ lab/                         # Experiment, not built by pnpm: split grammars wit
 native/                      # Spike of a native frontend (egui on winit and wgpu), linking bake/ and worlds/; see src/main.rs
 ├── .cargo/config.toml       # Builds for x86-64-v3: floor and ceil inline (see there)
 └── src/
-    ├── main.rs              # The camera (flying or walking, F), the panel, its engine (splats, voxels or slabs) and lighting (shaded or computed); --shot, --bench, --stroll
+    ├── main.rs              # The camera (flying or walking, F), the panel, its engine (reliefs, splats, voxels or slabs) and lighting (shaded or computed); --shot, --bench, --stroll
     ├── window.rs            # The window: egui on winit and wgpu, drawing either engine's picture, its GPU device made again when lost
     ├── world.rs             # world.ts for generated worlds: a World's tiles, those the renderer wants first, made, indexed and (for the voxels) lit on threads
     ├── view.rs              # view.ts: faces, which rays and screen boxes they draw
     ├── renderer.rs          # Chunks in view: cells of the lattice (bake's lod.rs), not slices; cached, finest and nearest first
     ├── bakery.rs            # Worker threads baking chunks, a baker each sharing the tiles (lit, with a Light each), and putting their reliefs' columns in tiles and their splats in clusters for the GPU
-    ├── compositor.rs        # compositor.ts with wgpu, for cells: reliefs' columns uploaded per chunk in tiles, each tile a quad whose pixels' rays find their column, culled on the GPU against what showed; see-through splats over each other in the order rays meet them
+    ├── compositor.rs        # compositor.ts with wgpu, for cells: reliefs' columns uploaded per chunk in tiles, each tile a quad whose pixels' rays find their column, or whole voxels as splats each, culled on the GPU against what showed; see-through splats over each other in the order rays meet them
     ├── shot.rs              # --shot: one frame drawn offscreen on the GPU, saved as a PNG, no window
     ├── march.rs             # The voxels engine: rays through the tiles' voxels, cell to cell, see-through ones added up in the order met; each level's bricks (and, lit, their light) in a window around the eye, a torus; no chunks or faces of the view
     ├── march.wgsl
