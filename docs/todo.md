@@ -226,6 +226,13 @@ Numbers are for the forest at 1280×800, as measured when written.
     They read the compositor's globals, the faces' views.
 - **`culling_on_the_gpu_leaves_the_picture_unchanged` fails now and then**
   on an Intel UHD (Mesa), at `b4c79ff` too; why is open.
+  Maybe as it failed on lavapipe by the moor's mist:
+  the depth pyramid's shorter side lost its last levels,
+  and clusters over the whole view were hidden (fixed since).
+- **Native's splats leave a hole by a hut.**
+  `--engine splats --view 'seed=42&world=valley&camera=1200,100,36700&look=20,-12'`:
+  sky shows through the ground in the bottom right, with or without culling,
+  in straight edges like a cell's. Not looked into.
 - **The native compositor's buffers stop at the device's limit.**
   `Arena::grow` caps a buffer at what the device allows
   (128 MB of splats on lavapipe), and `allocate` then hands out room past it:

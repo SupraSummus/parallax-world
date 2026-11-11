@@ -271,9 +271,9 @@ fn hidden(b: vec4f, depth: f32) -> bool {
   let size = max(b.z - b.x, b.w - b.y);
   let level = clamp(i32(ceil(log2(max(size, 1.0)))) - 1, 0, levels - 1);
   let texel = f32(2 << u32(level));
-  // Each level halves the last (Targets::new). Asked for one level per
-  // thread, Mesa's lavapipe gave some threads another level's size.
-  let last = (vec2i(textureDimensions(farthest)) >> vec2u(u32(level))) - 1;
+  // Each level halves the last, down to a texel (Targets::new). Asked for
+  // one level per thread, Mesa's lavapipe gave some threads another level's size.
+  let last = max(vec2i(textureDimensions(farthest)) >> vec2u(u32(level)), vec2i(1)) - 1;
   let start = min(vec2i(floor(b.xy / texel)), last);
   let end = min(vec2i(ceil(b.zw / texel)) - 1, last);
   var far = 0.0;
