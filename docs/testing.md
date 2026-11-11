@@ -35,7 +35,7 @@ pnpm exec vitest run bake       # files matching "bake"
 | `src/lib/world.test.ts` | The worlds listed; a generated world's grids put together from parts generated alone |
 | `worlds/tests/contract.rs`, `worldgen/tests/contract.rs`, `worldgen/tests/shapes.rs` | Every world, the engine's test worlds and each solid keep the contract (`worldgen/src/contract.rs`): generated in pieces equals generated whole, levels agree on what rays see, and seen from above with level 0 |
 | `worlds/tests/cost.rs` | What generating each world costs, counted, stays within a quarter of its baseline (`worlds/data/cost/`; "Cost" in `docs/generators.md`) |
-| `worlds/src/railway.rs` | The valley's railway keeps its grade and its side of the valley, out of towns; it has bridges and tunnels |
+| `worlds/src/railway.rs` | The valley's railway keeps its grade and its side of the valley, out of towns; it bends gently; it has bridges and tunnels, none a stub |
 | `worldgen/src/points.rs` | Points: a cell holds its children's, whichever is asked first; they stand where their mark has a chance, as often as it is; a blur is its cells' counts weighed, wherever its blocks fall |
 | `worlds/tests/places.rs` | No world's things prefer places on its grids (`worldgen/src/places.rs`), but those known to (`KNOWN`, docs/todo.md) |
 | `worlds/tests/directions.rs`, `worldgen/src/directions.rs` | No world's directions follow the lattice's, but around the places known to (`KNOWN`, docs/todo.md); walls along the axes or the diagonals do; hills, gentle or steep, rows along z, and walls turned any way a seed likes don't |

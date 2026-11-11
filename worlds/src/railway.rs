@@ -10,13 +10,16 @@
 //! points (x, y, z): at each level a point between two neighbours, x
 //! the one of a few within its wander that leaves the ground least, y the
 //! ground there as far as the grade lets it, so no stretch is steeper.
-//! Where the ground is far from the track the line tunnels or bridges,
-//! nearer it cuts or fills, by the same comparison everywhere.
+//! Seen from above that line turns at its points, so its x is averaged
+//! over SMOOTH_HALF points either side, across the pieces' ends, and it
+//! bends gently. Where the ground is far from the track the line tunnels
+//! or bridges, nearer it cuts or fills, by the same comparison at each
+//! point, and no run of bridge or tunnel is shorter than MIN_RUN points.
 
 use std::rc::Rc;
 
 use worldgen::column::Column;
-use worldgen::curve::{Curve, Near};
+use worldgen::curve::{self, Curve, Near};
 use worldgen::frame::{Frame, Part, facing};
 use worldgen::generator::{Field, Kind, Layer, Node, Op, Population, Span};
 use worldgen::kinds;
@@ -44,19 +47,25 @@ const FINEST: i64 = PIECE >> LEVELS;
  * sharply it turns); the finer stay at the middle.
  */
 const WANDER: [i64; 3] = [m(32.0), m(8.0), m(2.0)];
-/** Seen from above the line is straight between the points of those levels, STRAIGHT apart along z. */
-const STRAIGHT: i64 = PIECE >> WANDER.len();
+/** The line's x is the mean over this many points either side, which spreads the turn at each point that wanders (a window holds one at most). */
+const SMOOTH_HALF: i64 = 12;
+/**
+ * The most it runs across over a piece's length, at its steepest: its
+ * ends' offsets differ by at most OFF's range, and each level's point
+ * turns the halves either side by twice its wander over the level's segment.
+ */
+const DRIFT: i64 = (OFF.1 - OFF.0) + 2 * WANDER[0] + 4 * WANDER[1] + 8 * WANDER[2];
+/** How far smoothing moves the line across, at most: where it turns, by twice DRIFT over PIECE in slope at most, the turn times its window's mean distance past the turn. */
+const SMOOTH: i64 = 2 * DRIFT * FINEST * (SMOOTH_HALF * (SMOOTH_HALF + 1) / 2) / ((2 * SMOOTH_HALF + 1) * PIECE) + 1;
+/** The fewest points a bridge or a tunnel is carried over (32 m): shorter, the ground is cut or filled. */
+const MIN_RUN: i64 = 4;
 /** Places tried either side of the middle, evenly within the wander. */
 const TRIES: i64 = 4;
-/** How far the line can stand across from the segment between its piece's ends: the wanders, summed, and a unit for rounding. */
-const CORRIDOR: i64 = WANDER[0] + WANDER[1] + WANDER[2] + 1;
-/**
- * It runs across z at most 1 in ACROSS: its ends' offsets differ by
- * at most OFF's range over a piece, and each level's point turns the
- * halves either side by twice its wander over the level's segment.
- */
+/** How far the line can stand across from the segment between its piece's ends: the wanders, summed, smoothing and a unit for rounding. */
+const CORRIDOR: i64 = WANDER[0] + WANDER[1] + WANDER[2] + SMOOTH + 1;
+/** It runs across z at most 1 in ACROSS. */
 const ACROSS: i64 = 8;
-const _: () = assert!(ACROSS * ((OFF.1 - OFF.0) + 2 * WANDER[0] + 4 * WANDER[1] + 8 * WANDER[2]) < PIECE);
+const _: () = assert!(ACROSS * DRIFT < PIECE);
 /** The steepest it climbs: 3 in 256 (1.2 %), a whole number of Fx's least steps over half a segment of any level. */
 const GRADE: f64 = 3.0 / 256.0;
 /** Its pieces' ends stand this far off the valley's middle, by noise; the lowest they lie, and the highest a grade's rise over a piece above. */
@@ -128,26 +137,34 @@ fn structure(ground: Fx, top: Fx) -> Structure {
 
 /**
  * A piece of the line, made once: its points (x, y, z), FINEST apart
- * along z, the valley's ground under each, and the towns it may have
+ * along z, what carries the track at each, and the towns it may have
  * stations by.
  */
 struct Piece {
     points: Vec<[Fx; 3]>,
-    ground: Vec<Fx>,
+    structure: Vec<Structure>,
     towns: Vec<Town>,
-    /** Seen from above, x and z: a curve through its points of the levels that wander across, straight between them. */
-    view: Curve<2>,
+    /** Its points seen from above, x and z. */
+    xz: Vec<[Fx; 2]>,
 }
 
 impl Piece {
-    /** Where the track is `along` (finest segments, with the fraction) the piece: its x, its top, and the ground under it. */
-    fn at(&self, along: Fx) -> (Fx, Fx, Fx) {
+    /** Where the track is `along` (finest segments, with the fraction) the piece: its x, its top, and what carries it, as at the nearer point. */
+    fn at(&self, along: Fx) -> (Fx, Fx, Structure) {
         let i = (along.floor_units().0 as usize).min(self.points.len() - 2);
         let t = along - Units(i as i64).to_fx();
         let lerp = |a: Fx, b: Fx| a + (b - a) * t;
         let (p, q) = (self.points[i], self.points[i + 1]);
-        (lerp(p[0], q[0]), lerp(p[1], q[1]), lerp(self.ground[i], self.ground[i + 1]))
+        (lerp(p[0], q[0]), lerp(p[1], q[1]), self.structure[i + usize::from(t >= Fx::HALF)])
     }
+}
+
+/** What carries the track at each point, from the `ground` under it and its `top`: a bridge or tunnel fewer than MIN_RUN points long is cut or filled instead. */
+fn structures(ground: &[Fx], top: &[Fx]) -> Vec<Structure> {
+    let s: Vec<Structure> = ground.iter().zip(top).map(|(&g, &t)| structure(g, t)).collect();
+    s.chunk_by(|a, b| a == b)
+        .flat_map(|run| std::iter::repeat_n(if run.len() < MIN_RUN as usize { Structure::Earth } else { run[0] }, run.len()))
+        .collect()
 }
 
 /** Where the line's pieces end: from position alone. */
@@ -174,9 +191,9 @@ impl Ends {
         (z - self.phase).div_euclid(PIECE)
     }
 
-    /** Piece k's ends, x and z. */
-    fn of(&self, k: i64) -> [[Fx; 2]; 2] {
-        [k, k + 1].map(|k| [Units(self.x(k)).to_fx(), Units(self.z(k)).to_fx()])
+    /** Piece k's point at z or the last before it, if z is on the piece; else its first or last. */
+    fn point(&self, k: i64, z: i64) -> usize {
+        ((z - self.z(k)).clamp(0, PIECE) / FINEST) as usize
     }
 
     /** End k: on the ground, within the band a piece's grade can climb. */
@@ -296,7 +313,9 @@ impl Line {
                 let piece = self.piece(k);
                 let station = piece.towns.iter().any(|t| (z - t.z).abs() < STATION + EASE + REACH);
                 let r = if station { most } else { most - EXTRA };
-                let near = piece.view.near(self.ends.of(k), p, Units(r).to_fx())?;
+                // Only segments within r along z can be within r.
+                let segments = self.ends.point(k, z - r)..self.ends.point(k, z + r + FINEST).min(piece.xz.len() - 1);
+                let near = curve::nearest(&piece.xz, segments, p, Units(r).to_fx())?;
                 Some((k, piece, near))
             })
             .min_by_key(|(_, _, n)| n.distance)
@@ -305,7 +324,7 @@ impl Line {
     /** What column (x, z) is to the line, if within its reach. */
     fn at(&self, x: i64, z: i64) -> Option<At> {
         let (k, piece, near) = self.near(x, z, 0)?;
-        let (_, top, ground) = piece.at(near.along * (STRAIGHT / FINEST));
+        let (_, top, structure) = piece.at(near.along);
         let line_z = near.point[1].floor_units().0;
         let inner = (Units(x).to_fx() - near.point[0]).signum() == -self.ends.side;
         // A station's room on the side of the valley's middle.
@@ -317,9 +336,9 @@ impl Line {
         });
         Some(At {
             distance: near.distance,
-            along: k * PIECE + (near.along * Units(STRAIGHT)).floor_units().0,
+            along: k * PIECE + (near.along * Units(FINEST)).floor_units().0,
             top: top.round_units().0,
-            structure: structure(ground, top),
+            structure,
             half,
             platform,
         })
@@ -329,19 +348,16 @@ impl Line {
     fn track(&self, z: i64) -> ([i64; 2], i64, Structure) {
         let k = self.ends.piece(z);
         let along = Units(z - self.ends.z(k)).to_fx() / Units(FINEST);
-        let (x, top, ground) = self.piece(k).at(along);
-        ([x.round_units().0, z], top.round_units().0, structure(ground, top))
+        let (x, top, structure) = self.piece(k).at(along);
+        ([x.round_units().0, z], top.round_units().0, structure)
     }
 
     /** The station by `town`, if the line passes it on the ground all along its platform and the ease past it. */
     fn station(&self, town: &Town) -> Option<Station> {
         let (from, to) = (town.z - STATION - EASE, town.z + STATION + EASE);
         // Its points there, a piece at a time: between two on the ground, so is the track.
-        let on_ground = (self.ends.piece(from)..=self.ends.piece(to)).all(|k| {
-            let (piece, start) = (self.piece(k), self.ends.z(k));
-            let i = |z: i64| ((z - start).clamp(0, PIECE) / FINEST) as usize;
-            (i(from)..=i(to)).all(|i| structure(piece.ground[i], piece.points[i][1]) == Structure::Earth)
-        });
+        let on_ground = (self.ends.piece(from)..=self.ends.piece(to))
+            .all(|k| self.piece(k).structure[self.ends.point(k, from)..=self.ends.point(k, to)].iter().all(|&s| s == Structure::Earth));
         if !on_ground {
             return None;
         }
@@ -377,23 +393,39 @@ impl Railway {
         // Across and up, and a little for rounding a middle: the rule keeps within each.
         let wander = (0..LEVELS).map(|l| fx(across(l).hypot(rise(l)) + 0.001)).collect();
         let rule = Curve::new(wander, move |level, a, b| refine(&terrain, level, a, b));
-        let view: Vec<Fx> = WANDER.iter().map(|&w| fx(w as f64 + 0.001)).collect();
+        let raw = {
+            let ends = ends.clone();
+            Plan::new("railway's unsmoothed line", BAND, move |_, k| Some(Rc::new(rule.points([ends.at(k), ends.at(k + 1)]))))
+        };
         let pieces = {
             let ends = ends.clone();
             Plan::new("railway's line", BAND, move |_, k| {
-                let points = rule.points([ends.at(k), ends.at(k + 1)]);
-                let ground = points.iter().map(|p| ends.terrain.ground(p[0].round_units().0, p[2].floor_units().0)).collect();
+                let n = 1i64 << LEVELS;
+                let around: Vec<Rc<Vec<[Fx; 3]>>> = (k - 1..=k + 1).map(|k| raw.at(0, k).expect("a piece")).collect();
+                // Point i of this piece, past its ends those of its neighbours'.
+                let unsmoothed = |i: i64| around[(i.div_euclid(n) + 1) as usize][i.rem_euclid(n) as usize];
+                // MIN_RUN points past each end too, for the runs that cross it.
+                let window = 2 * SMOOTH_HALF + 1;
+                let all: Vec<[Fx; 3]> = (-MIN_RUN..=n + MIN_RUN)
+                    .map(|i| {
+                        let sum = (i - SMOOTH_HALF..=i + SMOOTH_HALF).map(|j| unsmoothed(j)[0]).fold(Fx::ZERO, |a, b| a + b);
+                        let [_, y, z] = unsmoothed(i);
+                        [sum / window, y, z]
+                    })
+                    .collect();
+                let ground: Vec<Fx> = all.iter().map(|p| ends.terrain.ground(p[0].round_units().0, p[2].floor_units().0)).collect();
+                let tops: Vec<Fx> = all.iter().map(|p| p[1]).collect();
+                let inside = MIN_RUN as usize..=(n + MIN_RUN) as usize;
+                let structure = structures(&ground, &tops)[inside.clone()].to_vec();
+                let points = all[inside].to_vec();
                 // Towns are further apart than twice the rows, and a row's nearest within them: each is some row's nearest.
                 let (from, to) = (ends.z(k) - STATION - EASE - REACH, ends.z(k + 1) + STATION + EASE + REACH);
                 let mut towns: Vec<Town> =
                     (from..to + TOWN_ROWS).step_by(TOWN_ROWS as usize).filter_map(|z| ends.terrain.towns.near(z)).collect();
                 towns.dedup_by_key(|t| t.z);
                 towns.retain(|t| (from..to).contains(&t.z));
-                let (xz, start): (Vec<[Fx; 2]>, i64) = (points.iter().map(|p| [p[0], p[2]]).collect(), ends.z(k));
-                let view = Curve::new(view.clone(), move |_, a: [Fx; 2], b: [Fx; 2]| {
-                    xz[((((a[1] + b[1]) / 2).floor_units().0 - start) / FINEST) as usize]
-                });
-                Some(Rc::new(Piece { points, ground, towns, view }))
+                let xz = points.iter().map(|p| [p[0], p[2]]).collect();
+                Some(Rc::new(Piece { points, structure, towns, xz }))
             })
         };
         let towns = ends.terrain.towns.clone();
@@ -561,10 +593,37 @@ mod tests {
                     assert!(rise <= fx(GRADE) * Units(FINEST), "seed {seed}: piece {k} rises {rise:?} over a segment");
                     let across = w[0][0].round_units().0.abs();
                     assert!((OFF.0 - CORRIDOR..=OFF.1 + CORRIDOR).contains(&across), "seed {seed}: piece {k} {across} across");
-                    seen[structure(piece.ground[i], w[0][1]) as usize] = true;
+                    seen[piece.structure[i] as usize] = true;
                 }
             }
             assert_eq!(seen, [true; 3], "seed {seed}: on the ground, bridged, tunnelled");
+        }
+    }
+
+    /**
+     * Seen from above the line bends gently (no point turns by a fifth of a
+     * degree, across the pieces' ends too), and no bridge or tunnel is
+     * shorter than MIN_RUN points.
+     */
+    #[test]
+    fn is_smooth_and_has_no_stubs() {
+        for seed in [42, 1, 2, 3] {
+            let line = Railway::new(seed, Rc::new(Terrain::new(seed))).line;
+            let mut points: Vec<[Fx; 3]> = Vec::new();
+            let mut structure: Vec<Structure> = Vec::new();
+            for k in 0..8 {
+                let piece = line.piece(k);
+                points.extend(&piece.points[usize::from(k > 0)..]);
+                structure.extend(&piece.structure[usize::from(k > 0)..]);
+            }
+            let direction = |w: &[[Fx; 3]]| (w[1][0] - w[0][0]).to_f64().atan2((w[1][2] - w[0][2]).to_f64());
+            let turn = points.windows(3).map(|w| (direction(&w[1..]) - direction(w)).abs().to_degrees()).fold(0.0, f64::max);
+            assert!(turn < 0.2, "seed {seed}: turns {turn}° at a point");
+            // The first and last runs may go on past the pieces looked at.
+            let runs: Vec<&[Structure]> = structure.chunk_by(|a, b| a == b).collect();
+            for run in &runs[1..runs.len() - 1] {
+                assert!(run[0] == Structure::Earth || run.len() >= MIN_RUN as usize, "seed {seed}: a run of {}", run.len());
+            }
         }
     }
 }
