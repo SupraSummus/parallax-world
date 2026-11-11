@@ -700,6 +700,11 @@ its y the ground there as far as the grade lets it from both neighbours.
 So no stretch is steeper than the grade,
 and each wander is a quarter of the one before,
 which bounds how sharply it turns at each point.
+The turns are then smoothed away:
+the line's x is the mean over 12 points either side,
+across the pieces' ends too
+(a piece reads its neighbours' unsmoothed points, a plan of their own),
+so seen from above it bends by a fifth of a degree per point at most.
 The line reads the ground as the towns level it (`valley::Terrain`),
 not as it cuts and fills it;
 it stands far enough across the valley
@@ -710,6 +715,9 @@ What carries the track comes from comparing it with the ground under it,
 the same everywhere:
 ground far above it is tunnelled, ground far below it bridged,
 and nearer it is cut or filled, sloping from the formation's edges.
+That is decided at each of the line's points, 8 m apart,
+and a bridge or tunnel shorter than four points (32 m) is cut or filled
+instead, so none is a stub where the ground just crosses a threshold.
 A station stands by each town the line passes on the ground.
 The railway bids for its formation and under its bridges, not over its tunnels.
 Seen from above, the line keeps within a corridor of the segment

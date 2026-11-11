@@ -364,16 +364,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   The valley's landmarks: 118 at eight seeds (not 686 as one per region),
   under ENOUGH a seed, so no seed is tested alone;
   its towns 57, its haystacks 2.
-- **The railway's line turns at points, and its bridges and tunnels can be short.**
-  A curve's rule reads only a point's two neighbours,
-  so a wander bounds the turn at the point it puts, not between points:
-  seen from above, the line is straight between them and turns at each,
-  up to 2.5°.
-  A rule reading the points beyond the neighbours too
-  (a four-point scheme) would make it smooth by construction.
-  What carries the track is decided point by point,
-  so where the ground just crosses a threshold
-  a bridge or a tunnel can be one segment long (8 m).
 - **The valley is still laid out along x, across the path's centre line.**
   The path is a curve (`worlds/src/path.rs`),
   but the ground's walls and dip, the ranges, the fields' plots

@@ -3,6 +3,8 @@
 //! within a corridor that narrows level by level, so a query looks only
 //! where the curve can be. See "Curves" in docs/generators.md.
 
+use std::ops::Range;
+
 use crate::noise::{Fixed, Fx, Rng, hash64};
 
 const DOCS: &str = "docs/generators.md";
@@ -136,11 +138,9 @@ impl<const D: usize> Curve<D> {
             return;
         }
         if level == self.wander.len() {
-            let to = to_segment(a, b, p);
-            let distance = (to.distance2 as u128).isqrt() as Fixed;
-            if distance < found.0 {
-                let near = Near { distance: Fx::from_bits(distance), along: Fx::from_bits((i << 16) + to.t), point: to.point };
-                *found = (distance, Some(near));
+            let near = on_segment(i, a, b, p);
+            if near.distance.to_bits() < found.0 {
+                *found = (near.distance.to_bits(), Some(near));
             }
             return;
         }
@@ -153,6 +153,21 @@ impl<const D: usize> Curve<D> {
             self.visit(level + 1, i, a, b, gap, p, found);
         }
     }
+}
+
+/**
+ * Where the line through `points` passes nearest `p`, if nearer than
+ * `within`, of its segments `segments` (segment i from point i to i + 1),
+ * as `Curve::near` says it of a curve's finest points.
+ */
+pub fn nearest<const D: usize>(points: &[[Fx; D]], segments: Range<usize>, p: [Fx; D], within: Fx) -> Option<Near<D>> {
+    segments.map(|i| on_segment(i as i64, points[i], points[i + 1], p)).filter(|n| n.distance < within).min_by_key(|n| n.distance)
+}
+
+/** Where segment `i`, from a to b, passes nearest p. */
+fn on_segment<const D: usize>(i: i64, a: [Fx; D], b: [Fx; D], p: [Fx; D]) -> Near<D> {
+    let to = to_segment(a, b, p);
+    Near { distance: Fx::from_bits((to.distance2 as u128).isqrt() as Fixed), along: Fx::from_bits((i << 16) + to.t), point: to.point }
 }
 
 /** How far p is from the box of a and b, squared, in Fx's least steps. */
@@ -190,8 +205,8 @@ mod tests {
 
     /**
      * Pruning by corridors loses nothing: whatever the point and range,
-     * `near` finds as near a point as every segment tried in turn, and
-     * its `along` and `point` say the same place, as near.
+     * `near` finds as near a point as every segment tried in turn
+     * (`nearest`), and its `along` and `point` say the same place, as near.
      */
     fn finds_the_nearest<const D: usize>() {
         let curve = wandering::<D>(7, 40.0);
@@ -202,12 +217,11 @@ mod tests {
         for _ in 0..3000 {
             let p: [Fx; D] = std::array::from_fn(|_| fx(random.next() * 160.0 - 48.0));
             let within = fx(random.next() * 60.0);
-            let brute = line.windows(2).map(|s| to_segment(s[0], s[1], p).distance2).min().expect("segments");
-            let brute = Fx::from_bits((brute as u128).isqrt() as Fixed);
+            let brute = nearest(&line, 0..line.len() - 1, p, within).map(|n| n.distance);
             match curve.near(ends, p, within) {
-                None => assert!(brute >= within, "missed one {brute:?} off, within {within:?}"),
+                None => assert_eq!(brute, None, "missed one, within {within:?}"),
                 Some(near) => {
-                    assert_eq!(near.distance, brute);
+                    assert_eq!(Some(near.distance), brute);
                     // `along` names a point of the curve, at that distance; a whole number, the end of a segment and the start of the next.
                     let i = ((near.along.to_bits() >> 16) as usize).min(line.len() - 2);
                     let t = i128::from(near.along.to_bits() - ((i as Fixed) << 16));
