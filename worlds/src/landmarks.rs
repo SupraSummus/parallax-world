@@ -1019,8 +1019,9 @@ fn well(part: &mut Part, random: &mut Rng) {
 /**
  * A windmill: a round whitewashed tower tapering on a stone footing, a
  * stage round it, a door and windows, a conical cap, and four sails on
- * its windshaft in front of the cap. The tower is measured far away; the
- * sails, boards, are drawn as they are.
+ * its windshaft in front of the cap. The tower and the sails are measured
+ * far away; the stage, a sheet too thin to measure, is drawn on its own,
+ * as sheets are, so that it keeps covering the tower from above.
  */
 fn windmill(s: &Site, random: &mut Rng) -> Node {
     let mut shapes = Vec::new();
@@ -1031,7 +1032,15 @@ fn windmill(s: &Site, random: &mut Rng) -> Node {
     let h = m(10.0) + below(random, m(1.5));
     part.lathe([u, -m(1.2) as f64, w], [u, m(1.0) as f64, w], r0 + 2.0, T::churchStone, SOLID, Op::Fill);
     part.lathe([u, 0.0, w], [u, h as f64, w], move |t| r0 + (r1 - r0) * t, T::plasterWhite, SOLID, Op::Fill);
-    part.lathe([u, m(3.6) as f64, w], [u, (m(3.6) + 2) as f64, w], r0 + m(1.0) as f64, T::planks, SOLID, Op::Fill);
+    let mut stage = Vec::new();
+    Part::new(s.frame(), &mut stage).lathe(
+        [u, m(3.6) as f64, w],
+        [u, (m(3.6) + 2) as f64, w],
+        r0 + m(1.0) as f64,
+        T::planks,
+        SOLID,
+        Op::Fill,
+    );
     // Its door to the front; windows round it at heights of their own.
     let front = cw - r0 as i64;
     part.cut([cu - 5, 0, front - 3], [cu + 5, m(2.1), front + 5]);
@@ -1085,5 +1094,9 @@ fn windmill(s: &Site, random: &mut Rng) -> Node {
         }
         rect(&mut part, at(inner, outer - 1), at(length, outer), (w0, w1), bars, true);
     }
-    Node::group(vec![Child::new("tower", ANY_SIZE, thing(shapes)), Child::new("sails", ANY_SIZE, Node::of(sails))])
+    Node::group(vec![
+        Child::new("tower", ANY_SIZE, thing(shapes)),
+        Child::new("stage", ANY_SIZE, Node::of(stage)),
+        Child::new("sails", ANY_SIZE, thing(sails)),
+    ])
 }

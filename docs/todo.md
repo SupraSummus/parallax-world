@@ -24,8 +24,12 @@ Numbers are for the forest at 1280×800, as measured when written.
   a wall stops every ray across it, as it should, and every ray down it:
   from above, walls a unit thick cover 8 times what they do at level 0
   at levels 3 and 4, posts 4 to 6 times from level 1 (`worldgen/tests/shapes.rs`).
-  A site stops rays alike from every direction;
-  the windmills' sails from above (below) are boards so drawn.
+  A site stops rays alike from every direction:
+  at levels 2 and 3 the windmills' sails, measured, are seen through,
+  rays from all round seeing about half as much of them as at level 0,
+  yet from above they take 0.02 to 0.05 of what rays straight down see,
+  against 0.002 to 0.02 at level 0, and the tower's plaster 0.03 to 0.04,
+  against none.
 - **Small things on a ground sink into it at coarse levels.**
   A solid under the sites is drawn at the site nearest it,
   which a few units over a ground on a plane of sites is the ground's,
@@ -293,12 +297,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   Learned again from today's, mostly hamlets and villages,
   it draws far less town: 235 houses in `learned.rs`'s test, not over 600.
   Learn it from the market towns alone, or let the learned town be sparser.
-- **Windmills show sails and plaster from above at levels 2 and 3.**
-  In a region of a windmill alone (the contract's since `worldgen::survey`),
-  at seeds 1, 2 and 3, sails and white plaster take 0.12 to 0.16
-  of what rays straight down see at level 3, against 0.01 at level 0,
-  in place of planks and grass: 0.10 to 0.12 apart.
-  The region around the first windmill, 48 m wide, blurred it under 0.1.
 - **Worlds share tables of kinds**, so the contract only prints
   the kinds nothing surveyed draws, and fails on silent layers alone:
   the moor's, the learned town's and the city's are the valley's.

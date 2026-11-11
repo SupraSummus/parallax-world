@@ -254,6 +254,8 @@ columns of sites step over a sheet thinner than two sites to what is under it,
 at whatever level it is measured.
 A roof is solid down to its eaves, its gables walls only at its ends
 (`gable_ends` in `town.rs`), so it is roof from above, not the walls under it.
+A sheet over nothing, such as a windmill's stage, is a child of its own,
+drawn as sheets are, not measured.
 
 ## Points
 
