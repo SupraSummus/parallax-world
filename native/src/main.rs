@@ -24,7 +24,8 @@
 //! switches do.
 //! The panel picks the lighting apart from the engine (Lighting): voxels
 //! shaded by the way their faces face, or lit by light worked out across
-//! the world, as --light does; each engine shows it its own way.
+//! the world, as --light does, as bright as its sliders say; each engine
+//! shows it its own way.
 
 mod engine;
 mod gpu;
@@ -67,7 +68,7 @@ struct App {
     world: World,
     look: Look,
     lighting: Lighting,
-    /** How bright the sky, the sun and what glows are, Computed. */
+    /** How bright the sky, the sun and what glows are, Computed, as the sliders say: the world is lit so once one is let go. */
     brightness: Brightness,
     stats: String,
     times: window::Times,
@@ -100,28 +101,38 @@ impl window::Content for App {
         egui::Panel::left("panel").show(ui, |ui| {
             ui.heading("Parallax (native spike)");
             ui.label(&self.stats);
-            ui.horizontal(|ui| {
-                ui.label("Engine");
-                for (kind, name) in Kind::ALL {
-                    if ui.radio_value(&mut self.kind, kind, name).changed() {
-                        self.engine = kind.make(&self.world);
+            ui.group(|ui| {
+                ui.set_width(ui.available_width());
+                ui.strong("Renderer");
+                ui.horizontal(|ui| {
+                    ui.label("Engine");
+                    for (kind, name) in Kind::ALL {
+                        if ui.radio_value(&mut self.kind, kind, name).changed() {
+                            self.engine = kind.make(&self.world);
+                        }
                     }
+                });
+                // The web's (App.tsx).
+                ui.add(egui::Slider::new(&mut self.look.fov, 5.0..=120.0).step_by(1.0).text("Field of View (°)"));
+                ui.add(egui::Slider::new(&mut self.look.far, 40.0..=40000.0).logarithmic(true).text("Render Distance"));
+                self.engine.panel(ui, &mut self.look);
+            });
+            ui.group(|ui| {
+                ui.set_width(ui.available_width());
+                ui.strong("Light");
+                ui.horizontal(|ui| {
+                    for (lighting, name) in Lighting::ALL {
+                        ui.radio_value(&mut self.lighting, lighting, name);
+                    }
+                });
+                if self.lighting == Lighting::Computed {
+                    self.brightness_sliders(ui);
                 }
             });
-            ui.horizontal(|ui| {
-                ui.label("Lighting");
-                for (lighting, name) in Lighting::ALL {
-                    ui.radio_value(&mut self.lighting, lighting, name);
-                }
-            });
-            // The web's (App.tsx).
-            ui.add(egui::Slider::new(&mut self.look.fov, 5.0..=120.0).step_by(1.0).text("Field of View (°)"));
-            ui.add(egui::Slider::new(&mut self.look.far, 40.0..=40000.0).logarithmic(true).text("Render Distance"));
             let mut walking = self.walker.is_some();
             if ui.checkbox(&mut walking, "Walk on Ground (F)").changed() {
                 self.walker = walking.then(|| Walker::at(self.look.camera));
             }
-            self.engine.panel(ui, &mut self.look);
             let Look { camera: [x, y, z], yaw, pitch, .. } = self.look;
             ui.label(format!("camera {x:.0} {y:.0} {z:.0}  yaw {yaw:.0}  pitch {pitch:.0}"));
             let t = self.times;
@@ -166,7 +177,7 @@ impl window::Content for App {
                 look.camera[1] += moving[2] * step;
             }
             look.size = [rect.width() as f64, rect.height() as f64];
-            look.sky = (self.lighting == Lighting::Computed).then_some(self.brightness.sky);
+            look.sky = self.world.brightness().filter(|_| self.lighting == Lighting::Computed).map(|b| b.sky);
             let start = Instant::now();
             let frame = self.engine.frame(look, &self.world);
             self.framing = start.elapsed().as_secs_f64() * 1000.0;
@@ -198,13 +209,28 @@ fn last_frame() -> String {
 }
 
 impl App {
+    /** Lit anew (World::relight) once a slider is let go: each step of a drag would start it over. */
+    fn brightness_sliders(&mut self, ui: &mut egui::Ui) {
+        let b = &mut self.brightness;
+        let mut done = false;
+        for (value, name) in [(&mut b.sky, "Sky"), (&mut b.sun, "Sun"), (&mut b.glow, "Glow")] {
+            let slider = egui::Slider::new(value, 0.0..=10.0).logarithmic(true).smallest_positive(0.01).text(name);
+            let response = ui.add(slider);
+            done |= response.drag_stopped() || (response.changed() && !response.dragged());
+        }
+        if done && self.world.brightness() != Some(self.brightness) {
+            self.world.relight(self.brightness);
+            self.engine = self.kind.make(&self.world);
+        }
+    }
+
     fn remember(&self, size: [f32; 2]) {
         let Look { camera: [x, y, z], yaw, pitch, fov, far, detail, shift, .. } = self.look;
         let frame = format!(
             "--engine {:?} --view '{}&camera={x},{y},{z}&look={yaw},{pitch}&fov={fov}&distance={far:.0}&detail={detail}' --shift {shift} --size {:.0}x{:.0}",
             self.kind, self.world_query, size[0], size[1],
         );
-        let b = self.brightness;
+        let b = self.world.brightness().expect("a world with light");
         let light = if self.lighting == Lighting::Computed { format!(" --light {},{},{}", b.sky, b.sun, b.glow) } else { String::new() };
         *LAST_FRAME.lock().unwrap_or_else(|e| e.into_inner()) = format!("{frame}{light}\n{}", self.stats);
     }
