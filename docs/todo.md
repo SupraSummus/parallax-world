@@ -321,10 +321,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   so the quarter of its sprays that are turning is gone from level 1:
   seen from above at seed 42, oakGold is 0.08 of what stops rays at level 0
   and 0.01 at level 1, within the contract's colours.
-- **The highest massifs end in broad rounded domes of snow.**
-  Behind the crest the high country is one smooth noise,
-  and wherever it stands over the snowline, all of it is snow.
-  It wants crags and cirques of its own, or less snow where it is broad.
 - **Towns and the city line up with the lattice.**
   `worlds/tests/directions.rs` lists them (`KNOWN`).
   The valley's first town lays out streets and blocks along x and z,

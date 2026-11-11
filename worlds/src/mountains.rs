@@ -7,8 +7,9 @@
 //! the valley's relief, not a domain: every domain stands on the ground
 //! they raise. Above a wavering treeline the forest thins out, and a field
 //! paints what is there instead: alpine meadows, scree under cliffs, rock
-//! on crests and steep faces, snow on the peaks and in hollows above a
-//! snowline.
+//! on crests and steep faces, snow above a snowline in hollows and on
+//! gentle ground, not on windswept tops. Behind the first crest the high
+//! country is cut into arêtes and cirques.
 //!
 //! The ranges are a belt: a few kilometres behind the first crest the
 //! land leaves them, west down to the sea, east up to an upland under the
@@ -159,9 +160,12 @@ impl Ranges {
         let across = (self.sides.at(side + lean * 2, z) - Fx::HALF).abs() * 2;
         let cut = Fx::ONE - smoothstep(Fx::ZERO, fx(0.5), across);
         h = h - h * cut * (fx(0.7) - up * fx(0.35));
-        // Crags and ribs, more where the ground is higher.
+        // Crags and ribs, more where the ground is higher: sharp ribs, rounded hollows between.
+        // Behind the first crest they grow, cutting the high country into arêtes and cirques.
         let (tx, tz) = turned(x, z);
-        h = h + (ridge(self.crags.at(tx, tz)) - Fx::HALF) * h * fx(0.08);
+        let inland = smoothstep(run, run + Fx::m(500.0), out);
+        let crag = ridge(self.crags.at(tx, tz));
+        h = h + (crag * crag * fx(1.5) - Fx::HALF) * h * (fx(0.08) + inland * fx(0.1));
         let h = h.max(Fx::ZERO).min(TOP);
         // Past the high country, the land beyond: down to the sea west, an upland east.
         let past = out - run - (BELT.0.to_fx() + self.belt.at(side, z) * (BELT.1 - BELT.0));
@@ -192,9 +196,9 @@ impl Ranges {
 /**
  * What covers the ground above the treeline: alpine meadows, then a belt
  * of scree and rock, snow above the snowline where it is not too steep to
- * lie (lower in hollows); rock on crests and steep faces, scree under
- * them; painted over whatever the domains under it drew, down the faces
- * they show.
+ * lie (lower in hollows, bared on tops); rock on crests and steep faces,
+ * scree under them; painted over whatever the domains under it drew, down
+ * the faces they show.
  */
 pub fn layers(ranges: Rc<Ranges>, ground: Rc<Plan<i64>>) -> Vec<Layer> {
     let sea = sea(ground.clone());
@@ -224,10 +228,13 @@ pub fn layers(ranges: Rc<Ranges>, ground: Rc<Plan<i64>>) -> Vec<Layer> {
         let above = height - treeline;
         // Scree gathers in hollows and gullies, rock shows on ribs, give or take a patch.
         let lie = hollow + (patch - Fx::HALF) * Units::m(3.0);
-        // Snow lies where it is not too steep, steeper in hollows; under it a belt of bare scree and rock, then meadows.
+        // Snow lies lower in hollows; under it a belt of bare scree and rock, then meadows.
         let snowline = ranges.snowline(x, z) + patch * Units::m(40.0) - hollow.max(Fx::ZERO) * 6;
         let bare = (snowline - Fx::m(100.0) + patch * Units::m(50.0)).min(treeline + Fx::m(230.0) + patch * Units::m(80.0));
-        let kind = if height >= snowline && steep < if hollow > Fx::ZERO { fx(0.95) } else { fx(0.75) } {
+        // The steepest it lies on: steeper in hollows, gentler the more the ground stands over what is around, so the wind
+        // bares tops.
+        let holds = if hollow > Fx::ZERO { fx(0.95) } else { fx(0.75) + hollow / Units::m(3.0) };
+        let kind = if height >= snowline && steep < holds {
             K::snow
         } else if steep >= fx(1.05) || (above > Fx::m(60.0) && hollow < -Fx::m(2.5)) {
             K::rock

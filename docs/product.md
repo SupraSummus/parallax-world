@@ -94,7 +94,8 @@ A spinner shows while a world generates.
   Landmarks standing alone: a ruined keep on a hilltop, a watchtower,
   wayside chapels, ponds, farmsteads and windmills.
   Mountain ranges along both sides: crests, peaks and passes,
-  side valleys, meadows and scree above the treeline, snow on the peaks.
+  side valleys, arêtes and cirques behind the crests,
+  meadows and scree above the treeline, snow in high hollows.
   Past a few kilometres of them the land leaves the ranges:
   west, a lowland falling to the sea, its coast ragged with bays and islands;
   east, an upland under the treeline, moor and forest.
