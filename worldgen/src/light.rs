@@ -415,13 +415,37 @@ impl Light {
             }
             std::array::from_fn(|f| std::array::from_fn(|c| lit.iter().map(|l| l[f][c]).sum::<f32>() / lit.len().max(1) as f32))
         };
-        // Forgets what grew too much, to find it again if asked.
+        self.forget();
+        out
+    }
+
+    /**
+     * The light from the voxel at `site` of `level` as rays from anywhere
+     * see it, not knowing which face they meet: the mean of its faces'
+     * (`lit`) that light gets out by, towards neighbours that let some
+     * through; of a see-through voxel, all of them. None if it has none:
+     * a ray meets it only where levels meet.
+     */
+    pub fn seen(&mut self, level: u32, site: [i64; 3]) -> Option<Rgb> {
+        let i = level as usize;
+        let through = self.open(i, site) > 0.0;
+        let out: [bool; N] = std::array::from_fn(|f| through || self.open(i, add(site, FACES[f])) > 0.0);
+        let count = out.iter().filter(|&&o| o).count();
+        let seen = (count > 0).then(|| {
+            let lit = self.lit(i, site);
+            std::array::from_fn(|c| (0..N).filter(|&f| out[f]).map(|f| lit[f][c]).sum::<f32>() / count as f32)
+        });
+        self.forget();
+        seen
+    }
+
+    /** Forgets the tiles of levels that grew too many, to find them again if asked. */
+    fn forget(&mut self) {
         for level in &mut self.levels {
             if level.tiles.len() > KEPT_TILES {
                 level.tiles.clear();
             }
         }
-        out
     }
 
     /** Whether the voxel at `site` of level `i` has an empty neighbour. */
