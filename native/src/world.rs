@@ -15,7 +15,8 @@
 //! (voxels.rs), each tile made of a level it reads is lit, its voxels'
 //! light found, after every tile to make (lighting takes several times as
 //! long), nearest first in each level's own sites. A tile lit is a new
-//! tile, in the place of the one made.
+//! tile, in the place of the one made. Lit anew (relight), the tiles are
+//! kept, their light found again.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -25,7 +26,7 @@ use bake::slicing::GRID_LEVELS;
 use bake::{Grid, LayerIndex, Tiles};
 use worldgen::generator::{generate, materials_of};
 use worldgen::grid::Box3;
-use worldgen::light::{Light, Shared};
+use worldgen::light::{Brightness, Light, Shared};
 
 use crate::engine::voxels;
 use crate::view::Vec3;
@@ -95,14 +96,17 @@ pub struct Wants {
 /** A tile to make, or one made to light. */
 type Job = (usize, TileId, Option<Arc<Tile>>);
 
-/** The tiles to make or light, most wanted first, and those being made or lit. */
+/** The tiles to make or light, most wanted first, those being made or lit, and the light they are lit by: how many times it changed. */
 #[derive(Default)]
 struct Queue {
     wanted: VecDeque<Job>,
     in_flight: HashSet<(usize, TileId)>,
+    shared: Option<Shared>,
+    lighting: u32,
 }
 
-type Made = (usize, TileId, Arc<Tile>);
+/** A tile made or lit, and the queue's `lighting` then. */
+type Made = (usize, TileId, u32, Arc<Tile>);
 
 pub struct World {
     tiles: Vec<HashMap<TileId, Arc<Tile>>>,
@@ -153,24 +157,27 @@ fn around(level: usize, camera: Vec3, reach: f64) -> Vec<(f64, TileId)> {
     around
 }
 
-fn work(make: Make, seed: u64, shared: Option<Shared>, heights: &Heights, queue: &(Mutex<Queue>, Condvar), send: &Sender<Made>) {
+fn work(make: Make, seed: u64, heights: &Heights, queue: &(Mutex<Queue>, Condvar), send: &Sender<Made>) {
     // Made on the thread: a generator is not Send.
     let generator = make(seed).generator;
-    let mut light = shared.clone().map(|shared| Light::new(make(seed), shared));
+    // Made once there are tiles to light, and again when the light changes.
+    let mut light: Option<(u32, Light)> = None;
     loop {
-        let (level, id, made) = {
+        let ((level, id, made), shared, lighting) = {
             let mut q = queue.0.lock().expect("queue");
             loop {
                 if let Some(job) = q.wanted.pop_front() {
                     q.in_flight.insert((job.0, job.1));
-                    break job;
+                    break (job, q.shared.clone(), q.lighting);
                 }
                 q = queue.1.wait(q).expect("queue");
             }
         };
         let tile = match made {
             Some(tile) => {
-                let light = light.as_mut().expect("light to light tiles with");
+                light.take_if(|(l, _)| *l != lighting);
+                let (_, light) =
+                    light.get_or_insert_with(|| (lighting, Light::new(make(seed), shared.expect("light to light tiles with"))));
                 let lights = Some(voxels::lights(&tile.grid, level as u32, light));
                 Tile { grid: tile.grid.clone(), index: tile.index.clone(), words: tile.words.clone(), lights }
             }
@@ -185,7 +192,7 @@ fn work(make: Make, seed: u64, shared: Option<Shared>, heights: &Heights, queue:
                 Tile { grid: Arc::new(grid), index, words, lights: None }
             }
         };
-        if send.send((level, id, Arc::new(tile))).is_err() {
+        if send.send((level, id, lighting, Arc::new(tile))).is_err() {
             return;
         }
     }
@@ -197,10 +204,10 @@ impl World {
         let world = make(seed);
         let heights = heights(&world);
         let (send, done) = channel();
-        let queue: Arc<(Mutex<Queue>, Condvar)> = Arc::default();
+        let queue = Arc::new((Mutex::new(Queue { shared: shared.clone(), ..Queue::default() }), Condvar::new()));
         for _ in 0..threads {
-            let (queue, send, shared) = (queue.clone(), send.clone(), shared.clone());
-            std::thread::spawn(move || work(make, seed, shared, &heights, &queue, &send));
+            let (queue, send) = (queue.clone(), send.clone());
+            std::thread::spawn(move || work(make, seed, &heights, &queue, &send));
         }
         World {
             tiles: (0..GRID_LEVELS).map(|_| HashMap::new()).collect(),
@@ -244,6 +251,33 @@ impl World {
             .collect()
     }
 
+    /** How bright the light it is lit by, if any. */
+    pub fn brightness(&self) -> Option<Brightness> {
+        self.shared.as_ref().map(Shared::brightness)
+    }
+
+    /**
+     * Lights the world anew under `brightness`: the tiles made are kept,
+     * those lit are to light again, and those being lit are dropped as they
+     * arrive. Engines that read its light (Lit) are to be made again.
+     */
+    pub fn relight(&mut self, brightness: Brightness) {
+        let shared = self.shared.as_ref().expect("a world with light").under(brightness);
+        self.shared = Some(shared.clone());
+        {
+            let mut q = self.queue.0.lock().expect("queue");
+            q.shared = Some(shared);
+            q.lighting += 1;
+        }
+        for (level, tiles) in self.tiles.iter_mut().enumerate() {
+            for tile in tiles.values_mut().filter(|t| t.lights.is_some()) {
+                let Tile { grid, index, words, .. } = &**tile;
+                *tile = Arc::new(Tile { grid: grid.clone(), index: index.clone(), words: words.clone(), lights: None });
+            }
+            self.levels[level] = Arc::new(Level::new(tiles.clone()));
+        }
+    }
+
     /** Makes no more tiles but those being made. */
     pub fn stop(&self) {
         self.queue.0.lock().expect("queue").wanted.clear();
@@ -275,13 +309,18 @@ impl World {
         let keep = reach + 2.0 * TILE as f64;
         let mut changed = [false; GRID_LEVELS];
         let made: Vec<Made> = std::mem::take(&mut self.early).into_iter().chain(self.done.try_iter()).collect();
-        {
+        let now = {
             let mut q = self.queue.0.lock().expect("queue");
-            for (level, id, _) in &made {
+            for (level, id, _, _) in &made {
                 q.in_flight.remove(&(*level, *id));
             }
-        }
-        for (level, id, tile) in made {
+            q.lighting
+        };
+        for (level, id, lighting, tile) in made {
+            // Lit before the light changed.
+            if tile.lights.is_some() && lighting != now {
+                continue;
+            }
             self.tiles[level].insert(id, tile);
             changed[level] = true;
         }
@@ -349,5 +388,38 @@ impl World {
             self.levels[level] = Arc::new(Level::new(self.tiles[level].clone()));
         }
         changed.contains(&true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /** The coarsest level's lights, by tile, of `world` lit around the origin. */
+    fn lit(world: &mut World) -> Vec<(TileId, Vec<u32>)> {
+        let coarsest = GRID_LEVELS - 1;
+        let wants = Wants { levels: std::array::from_fn(|l| l == coarsest), reach: TILE as f64, lit: Lit::Tiles, tiles: Vec::new() };
+        loop {
+            world.update([0.0; 3], &wants);
+            if !world.busy() {
+                break;
+            }
+            world.wait();
+        }
+        let mut lights: Vec<_> = world.level(coarsest).tiles.iter().map(|(&id, t)| (id, t.lights.clone().expect("lit"))).collect();
+        lights.sort();
+        lights
+    }
+
+    #[test]
+    fn a_world_lit_anew_is_as_one_made_under_that_brightness() {
+        let make = worlds::by_name("forest").expect("forest").make;
+        let (day, dusk) = (Brightness { sky: 1.0, sun: 1.0, glow: 0.0 }, Brightness { sky: 0.3, sun: 0.1, glow: 1.0 });
+        let mut world = World::new(make, 1, Some(Shared::new(day)), 4);
+        let before = lit(&mut world);
+        world.relight(dusk);
+        let after = lit(&mut world);
+        assert!(after != before, "the light changed");
+        assert!(after == lit(&mut World::new(make, 1, Some(Shared::new(dusk)), 4)));
     }
 }

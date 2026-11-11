@@ -78,6 +78,15 @@ impl Shared {
         Shared { brightness, tiles: Arc::default(), light: Arc::new(light) }
     }
 
+    pub fn brightness(&self) -> Brightness {
+        self.brightness
+    }
+
+    /** The same world under `brightness`: its tiles kept, its light to find again. */
+    pub fn under(&self, brightness: Brightness) -> Shared {
+        Shared { tiles: self.tiles.clone(), ..Shared::new(brightness) }
+    }
+
     /** Tile `key` of `level` of the world `generator` makes, `heights` tall (World::heights_at), as its Lights read it. */
     pub fn tile(&self, generator: &Generator, level: u32, heights: (i64, i64), key: (i64, i64)) -> VoxelGrid {
         let tile = self.get(level as usize, key, || generate(generator, &tile_box(heights, key), level));
@@ -122,7 +131,7 @@ impl Shared {
 }
 
 /** How bright the sky and the sun are, as multiples of a clear day's, and glowing kinds, of a street lamp's. */
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Brightness {
     pub sky: f32,
     pub sun: f32,

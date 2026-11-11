@@ -413,6 +413,11 @@ Numbers are for the forest at 1280×800, as measured when written.
   but a tile of the coarsest levels takes several times a fine one's work
   (the plans over its whole area),
   so the first chunks come seconds later than unlit.
+  Native's brightness sliders light the world anew (`World::relight`),
+  as slowly as at the start.
+  Light adds up, so it is the sum of the sky's, the sun's and the glow's;
+  kept apart, the sliders could only mix them,
+  but lighting and keeping that light would cost three times as much.
   The sun is one of the 12 directions.
   `Light::coarser` reads the nearest site and its 12 neighbours,
   so near a corner where six voxels meet it misses one within its reach,
