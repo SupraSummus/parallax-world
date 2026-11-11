@@ -19,6 +19,13 @@ Numbers are for the forest at 1280×800, as measured when written.
   would be even for any height,
   but would leave holes in boxes under two sites thick
   and roughen every surface.
+  On a gentle slope the rounding is steps a site high,
+  which computed light shows as contour lines from level 2 on.
+  Tried on spans' open ends past level 0, that share took the lines away,
+  but each of the layers painting one ground (forest, mountains)
+  had to cover the same part of its top site, not add up, by a flag on the share;
+  a ground declared once (see "Fields get the spacing", below)
+  would hold its top's share in one place.
 - **Sheets and rods stop too much seen along them.**
   Grown to a site and opaque ("Levels" in `docs/generators.md`),
   a wall stops every ray across it, as it should, and every ray down it:
