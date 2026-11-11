@@ -1,4 +1,4 @@
-// march.rs: rays through the world's own voxels, rhombic dodecahedra of the
+// voxels.rs: rays through the world's own voxels, rhombic dodecahedra of the
 // FCC lattice, from cell to cell across their faces, at a coarser grid the
 // farther they go. One ray for every FACTOR × FACTOR pixels (sample_fragment);
 // then each pixel tests its own ray against the voxels its four nearest
@@ -7,8 +7,8 @@
 // in the order the ray meets them, each by its path through it.
 // Lit, a voxel shows the light its tile found for it (world.rs), not its
 // material's colour shaded by the way its faces face; a tile not lit yet
-// is not on the GPU (march.rs), as one not made: rays take the next level.
-// march.rs puts the constants it shares with this file before it.
+// is not on the GPU (voxels.rs), as one not made: rays take the next level.
+// voxels.rs puts the constants it shares with this file before it.
 
 // The picture's size in pixels, and its sides over the focal length; the
 // fog's distance, and what of the sky it hides; whether voxels are lit; the

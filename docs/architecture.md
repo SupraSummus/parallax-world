@@ -94,7 +94,7 @@ a cell is baked once the world has every tile it reads (`chunk_reads`),
 and until then it asks for them, nearest first.
 Then come the other tiles within `GRID_REACH` of each level the chunks read,
 so that turning finds them made, and far ones are dropped;
-for the voxels engine, those within `march::REACH`, as far as its rays read.
+for the voxels engine, those within `voxels::REACH`, as far as its rays read.
 A tile never changes once made,
 so no chunk or cell surface goes stale as tiles come.
 Tests' scenes of hand-made voxels are given a grid per level,
@@ -178,7 +178,7 @@ but a few where levels change (section 5).
 
 ### Native: cells instead of slices
 
-The native spike has no slices (`bake/src/lod.rs`, `native/src/renderer.rs`).
+The native spike has no slices (`bake/src/lod.rs`, `native/src/engine/chunks/renderer.rs`).
 A chunk is a whole cell of 2^L·FCC,
 drawn as the voxels of grid max(0, L − S) (`--shift S`)
 over the plane through its site;
@@ -556,7 +556,7 @@ where two of a cluster are as near, the one painted later shows.
 They are deleted when it leaves.
 No antialiasing, so voxel edges stay crisp.
 
-The native compositor (`native/src/compositor.rs`) draws only what may show.
+The native compositor (`native/src/engine/chunks/compositor.rs`) draws only what may show.
 Its chunks are cells' reliefs (section 1),
 and the bake workers put a chunk's columns in tiles of 4 × 4,
 empty columns too, so that a column's place says where it is,
@@ -585,7 +585,7 @@ draws those newly showing and keeps which show for the next frame
 (two-phase occlusion culling).
 Draws are listed per tile on the GPU, roughly near to far,
 so nearer tiles mostly hide what is behind them early.
-It draws into a picture of its own, which egui (or `--shot`) shows.
+It draws into a picture of its own, which the window (or `--shot`) shows.
 Where whole voxels are splats (section 1),
 the bake workers put them in clusters of a few nearby on its plane instead,
 each with the box of their outlines,
@@ -651,16 +651,29 @@ distance (or of the last slice, if farther).
 
 ### Native: another engine, rays through the voxels
 
-The native window switches at run time between engines (`Engine`),
+The native window switches at run time between engines (`Kind`),
 each drawing the same tiles its own way, with its own shaders:
 chunks above, their whole voxels reliefs or splats (`reliefs`, `splats`),
-rays through the tiles' voxels (`native/src/march.rs`),
+rays through the tiles' voxels (`native/src/engine/voxels.rs`),
 with no chunks, slices, faces or baking, described here,
-or a prototype, rays through slabs along each face (`native/src/trace.rs`):
+or a prototype, rays through slabs along each face (`native/src/engine/slabs.rs`):
 per face and level, slabs of layers baked around the eye,
 each a picture of its columns' first voxel and run,
 baked again on a thread as the eye moves or turns.
-A ray goes from rhombic dodecahedron to dodecahedron across their faces;
+
+They share one interface (`native/src/engine.rs`), in two halves.
+On the main thread an `Engine` makes a `Frame` of what a `Look` sees:
+a `Picture`, and what it wants of the world (`Wants`);
+what it makes of the tiles, on threads of its own, is its own business.
+On the GPU its `Painter` keeps what it needs from frame to frame
+and draws its pictures into one of its own,
+which the window shows under egui's panel, or a shot saves.
+A device holds one painter at a time (`Easel`, `native/src/gpu.rs`).
+So the window, `--shot`, `--bench`, `--stroll` and the tests
+name no engine:
+a view is complete when its engine lacks no tile and makes nothing more.
+
+In the voxels engine a ray goes from rhombic dodecahedron to dodecahedron across their faces;
 each level's voxels are read up to `REACH` of its own sites from the eye,
 then the next coarser level's, as far as the render distance.
 The GPU holds of each level the bricks of a window around the eye,

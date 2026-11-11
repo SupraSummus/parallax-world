@@ -1,10 +1,14 @@
 //! The slabs engine (a prototype): the view as rays walking each face's
-//! slabs (trace.wgsl), not as splats. Per face in view and grid level, the band of depths the
-//! level draws (as Lod picks levels for cells) is cut into slabs of
+//! slabs (slabs.wgsl), not as splats. Per face in view and grid level,
+//! the band of depths the level draws (as Lod picks levels for cells) is cut into slabs of
 //! THICKNESS layers along the face's axis, and each slab is a picture of
 //! its columns (bake's bake_slab): the first voxel of each and where its
 //! run ends. Slabs are baked around a camera, with a margin, and drawn
-//! from wherever the eye is: moving a little needs no new ones.
+//! from wherever the eye is: moving a little needs no new ones. They are
+//! baked on a thread of their own, again when the eye leaves their margin,
+//! the view their faces, or tiles come; the slabs baked last are drawn
+//! meanwhile. Till the eye first moves or turns, they are baked for the
+//! view alone, with no margin: a third of the memory, and sooner.
 //!
 //! A ray is traced for every FACTOR × FACTOR pixels; each pixel then takes
 //! the nearest of the runs its four nearest samples met that its own ray
@@ -12,20 +16,144 @@
 //! covers takes its nearest sample's.
 
 use std::sync::Arc;
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Instant;
 
-use bake::slicing::{GRID_LEVELS, LAYER};
+use bake::slicing::{GRID_LEVELS, GRID_REACH, LAYER};
 use bake::{Baker, Tiles};
 use egui_wgpu::wgpu;
 
-use crate::view::{self, Vec3};
+use super::chunks::compositor::{GLOBALS, View};
+use super::{Engine, Frame, Look, Painter, Picture};
+use crate::gpu::Easel;
+use crate::view::{self, Vec3, focal_length};
+use crate::world::{Lit, Wants, World};
+
+/** Layers of grid 0 around the eye slabs are baked with, once it moves. */
+const MARGIN: f64 = 64.0;
+
+/** What slabs to bake: around which eye, of which faces, from which tiles, how. */
+type Bake = (Vec3, Vec<(usize, [f64; 4])>, Vec<Arc<Tiles>>, Params);
+
+/**
+ * The slabs engine: the slabs baked last and their version, the tiles and
+ * how they were asked for last, whether those are baking, and whether
+ * slabs are baked with room to move and turn.
+ */
+pub struct Slabs {
+    slabs: Option<Arc<Baked>>,
+    version: u64,
+    asked: Option<(Vec<Arc<Tiles>>, Params)>,
+    baking: bool,
+    roomy: bool,
+    ask: Sender<Bake>,
+    done: Receiver<Baked>,
+    /** Received by wait(), not taken yet. */
+    early: Option<Baked>,
+}
+
+impl Slabs {
+    /** Bakes `world`'s tiles on a thread of its own, with half as many bakers as the world has threads. */
+    pub fn new(world: &World) -> Slabs {
+        let (ask, asked) = channel::<Bake>();
+        let (send, done) = channel();
+        let (palette, threads) = (world.palette.clone(), (world.threads / 2).max(1));
+        std::thread::spawn(move || {
+            while let Ok(mut bake) = asked.recv() {
+                // Only the latest.
+                while let Ok(later) = asked.try_recv() {
+                    bake = later;
+                }
+                let (camera, faces, levels, params) = bake;
+                if send.send(self::bake(&palette, &levels, camera, &faces, &params, threads)).is_err() {
+                    return;
+                }
+            }
+        });
+        Slabs { slabs: None, version: 0, asked: None, baking: false, roomy: false, ask, done, early: None }
+    }
+}
+
+impl Engine for Slabs {
+    fn frame(&mut self, look: &Look, world: &World) -> Frame {
+        if let Some(slabs) = self.early.take().or_else(|| self.done.try_recv().ok()) {
+            (self.slabs, self.version, self.baking) = (Some(Arc::new(slabs)), self.version + 1, false);
+        }
+        let view = look.view();
+        let margin = |roomy| if roomy { MARGIN } else { 0.0 };
+        let stale = self.slabs.as_ref().is_none_or(|s| {
+            let moved = (0..3).map(|d| (look.camera[d] - s.camera[d]).powi(2)).sum::<f64>().sqrt();
+            moved > margin(self.roomy) * LAYER / 2.0 || !s.hold(&faces_in(&view))
+        });
+        self.roomy |= stale && self.slabs.is_some();
+        let params = Params::of(look, margin(self.roomy));
+        let levels: Vec<_> = (0..GRID_LEVELS).map(|l| world.level(l).grids.clone()).collect();
+        let changed =
+            self.asked.as_ref().is_none_or(|(asked, p)| *p != params || asked.iter().zip(&levels).any(|(a, b)| !Arc::ptr_eq(a, b)));
+        if !self.baking && (changed || stale) {
+            // Room to turn.
+            let wide = view::View { focal: focal_length((look.fov + 40.0).min(170.0), view.width, view.height), ..view };
+            let faces = faces_in(if self.roomy { &wide } else { &view });
+            if self.ask.send((look.camera, faces, levels.clone(), params)).is_ok() {
+                (self.baking, self.asked) = (true, Some((levels, params)));
+            }
+        }
+        let size = self.slabs.as_ref().map_or(0.0, |s| s.bytes() as f64 / 1e6);
+        // The slabs show no light.
+        let view = View { sky: 1.0, ..View::new(look) };
+        let read = params.levels();
+        Frame {
+            picture: Box::new(Traced {
+                slabs: self.slabs.clone(),
+                version: self.version,
+                eye: look.camera,
+                view,
+                // What of the sky the fog hides, as of something at the far end.
+                sky_fog: 1.0 - (-1.0 / look.fog).exp(),
+            }),
+            // Slabs are baked all around the eye.
+            wants: Wants { levels: read, reach: GRID_REACH, lit: Lit::Not, tiles: world.lacking(&read, look.camera, GRID_REACH, Lit::Not) },
+            busy: self.baking,
+            stats: format!("slabs v{} ({size:.0} MB){}", self.version, if self.baking { ", baking" } else { "" }),
+        }
+    }
+
+    fn wait(&mut self) -> bool {
+        if self.baking && self.early.is_none() {
+            self.early = self.done.recv().ok();
+        }
+        self.baking
+    }
+
+    fn panel(&mut self, ui: &mut egui::Ui, look: &mut Look) {
+        look.detail_panel(ui);
+    }
+}
+
+/** The slabs baked last, if any, and their version, as seen from `eye`, and how much of the sky the fog hides. */
+struct Traced {
+    slabs: Option<Arc<Baked>>,
+    version: u64,
+    eye: Vec3,
+    view: View,
+    sky_fog: f64,
+}
+
+impl Picture for Traced {
+    fn draw(&self, easel: &mut Easel, encoder: &mut wgpu::CommandEncoder, pixels: [u32; 2]) {
+        let (tracer, device, queue) = easel.painter(Tracer::new);
+        if let Some(slabs) = &self.slabs {
+            tracer.draw(device, queue, encoder, slabs, self.version, self.eye, &self.view.globals(pixels, self.sky_fog), pixels);
+        }
+    }
+}
 
 /** Layers of its grid a slab is thick: thicker are slower, crossing as many columns in more texels. */
 const THICKNESS: i32 = 16;
 /** Pixels each way per ray traced. */
 const FACTOR: u32 = 4;
 
-/** A band (Band in trace.wgsl). */
+/** A band (Band in slabs.wgsl). */
 #[repr(C)]
 #[derive(Clone, Copy, Default, bytemuck::Pod, bytemuck::Zeroable)]
 struct GpuBand {
@@ -41,7 +169,7 @@ struct GpuBand {
     offset: u32,
 }
 
-/** Columns across a block (BLOCK in trace.wgsl). */
+/** Columns across a block (BLOCK in slabs.wgsl). */
 const BLOCK: usize = 8;
 
 /**
@@ -77,8 +205,8 @@ fn blocks(texels: &[[u32; 2]], [columns, rows]: [usize; 2], slabs: usize) -> Vec
  * level ℓ + shift do, to `far`; and `margin` layers of grid 0 more around
  * the eye, behind it and to the sides, so that it may move that far.
  */
-#[derive(Clone, Copy)]
-pub struct Params {
+#[derive(Clone, Copy, PartialEq)]
+struct Params {
     pub shift: i32,
     pub q: i32,
     pub far: f64,
@@ -86,6 +214,12 @@ pub struct Params {
 }
 
 impl Params {
+    /** As `look`'s detail, shift and render distance say, with `margin` layers around the eye. */
+    fn of(look: &Look, margin: f64) -> Params {
+        let q = ((2.0 * look.detail).ceil() as i32).max(4);
+        Params { shift: look.shift, q, far: look.far, margin }
+    }
+
     /** The layers of grid 0 ahead from which, and to which, grid `level` draws; None if it draws nothing. */
     fn band(&self, level: usize) -> Option<(f64, f64)> {
         let reach = |l: i32| (2 * self.q) as f64 * 2f64.powi(l + self.shift);
@@ -99,18 +233,18 @@ impl Params {
     }
 
     /** The grid levels slabs read. */
-    pub fn levels(&self) -> [bool; GRID_LEVELS] {
+    fn levels(&self) -> [bool; GRID_LEVELS] {
         std::array::from_fn(|level| self.band(level).is_some())
     }
 }
 
 /** The faces a view shows, each with the bounds of x / z and y / z of its rays it shows (view::View::face_tangents). */
-pub fn faces_in(view: &view::View) -> Vec<(usize, [f64; 4])> {
+fn faces_in(view: &view::View) -> Vec<(usize, [f64; 4])> {
     view::faces().iter().enumerate().filter_map(|(f, face)| view.face_tangents(face).map(|t| (f, t))).collect()
 }
 
 /** The slabs of the faces around a camera: their bands, by face the first and how many, and all their texels. */
-pub struct Slabs {
+struct Baked {
     bands: Vec<GpuBand>,
     /** Per band, its face, its grid level and its first column and slab, (a, b, c) in its grid's units. */
     origins: Vec<(usize, usize, [i32; 3])>,
@@ -118,18 +252,21 @@ pub struct Slabs {
     texels: Vec<[u32; 2]>,
     blocks: Vec<u32>,
     /** Where they were baked around, and the faces and rays of each they hold. */
-    pub camera: Vec3,
-    pub faces: Vec<(usize, [f64; 4])>,
+    camera: Vec3,
+    faces: Vec<(usize, [f64; 4])>,
 }
 
-impl Slabs {
-    /** Whether they hold all a view shows, `faces`. */
-    pub fn hold(&self, faces: &[(usize, [f64; 4])]) -> bool {
-        faces.iter().all(|(f, t)| self.faces.iter().any(|(g, h)| g == f && t[0] >= h[0] && t[1] <= h[1] && t[2] >= h[2] && t[3] <= h[3]))
+impl Baked {
+    /** Whether they hold all a view shows, `faces`: as far as rounding tells, where both reach a face's edge. */
+    fn hold(&self, faces: &[(usize, [f64; 4])]) -> bool {
+        let e = 1e-9;
+        faces.iter().all(|(f, t)| {
+            self.faces.iter().any(|(g, h)| g == f && t[0] >= h[0] - e && t[1] <= h[1] + e && t[2] >= h[2] - e && t[3] <= h[3] + e)
+        })
     }
 
     /** Bytes they take. */
-    pub fn bytes(&self) -> usize {
+    fn bytes(&self) -> usize {
         self.texels.len() * 8 + self.blocks.len() * 4
     }
 
@@ -171,7 +308,7 @@ struct Plan {
 }
 
 /** The slabs of `faces` (each with the bounds of its rays to hold) around a camera at `camera`, on `threads` threads. */
-pub fn bake(colours: &[u32], levels: &[Arc<Tiles>], camera: Vec3, faces: &[(usize, [f64; 4])], params: &Params, threads: usize) -> Slabs {
+fn bake(colours: &[u32], levels: &[Arc<Tiles>], camera: Vec3, faces: &[(usize, [f64; 4])], params: &Params, threads: usize) -> Baked {
     let start = Instant::now();
     let all = view::faces();
     let mut plans = Vec::new();
@@ -242,7 +379,7 @@ pub fn bake(colours: &[u32], levels: &[Arc<Tiles>], camera: Vec3, faces: &[(usiz
         workers.into_iter().flat_map(|w| w.join().expect("baker")).collect()
     });
     baked.sort_by_key(|b| b.0);
-    let mut slabs = Slabs {
+    let mut slabs = Baked {
         bands: Vec::new(),
         origins: Vec::new(),
         face_bands: [[0, 0]; 12],
@@ -273,13 +410,13 @@ pub fn bake(colours: &[u32], levels: &[Arc<Tiles>], camera: Vec3, faces: &[(usiz
     slabs
 }
 
-/** Slabs on a GPU, and what draws them into a target of one format. */
-pub struct TraceGpu {
+/** Slabs on a GPU, and what draws them into a picture, shown on targets of one format. */
+struct Tracer {
     /** Sampling, then resolving. */
     sample: wgpu::RenderPipeline,
     resolve: wgpu::RenderPipeline,
     globals: wgpu::Buffer,
-    /** The picture drawn last, and what shows it in egui (Shown). */
+    /** The picture drawn last, and what shows it. */
     show: wgpu::RenderPipeline,
     picture: Option<(wgpu::Texture, wgpu::BindGroup)>,
     /**
@@ -289,16 +426,16 @@ pub struct TraceGpu {
      * for them all: wgpu uploads under a lock the window's thread needs too,
      * even from a thread of its own.
      */
-    data: Option<(u64, Arc<Slabs>, [wgpu::Buffer; 4])>,
-    uploading: Option<(u64, Arc<Slabs>, [wgpu::Buffer; 4], usize)>,
+    data: Option<(u64, Arc<Baked>, [wgpu::Buffer; 4])>,
+    uploading: Option<(u64, Arc<Baked>, [wgpu::Buffer; 4], usize)>,
     /** For a target's size: the samples' textures and the passes' bind groups. */
     passes: Option<([u32; 2], Vec<wgpu::Texture>, Vec<wgpu::BindGroup>)>,
 }
 
-impl TraceGpu {
+impl Tracer {
     /** Shows its picture on targets of `format`. */
-    pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> TraceGpu {
-        let shader = device.create_shader_module(wgpu::include_wgsl!("trace.wgsl"));
+    fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Tracer {
+        let shader = device.create_shader_module(wgpu::include_wgsl!("slabs.wgsl"));
         let constants = [("factor", f64::from(FACTOR))];
         let pipeline = |entry: &str, formats: &[wgpu::TextureFormat]| {
             let targets: Vec<_> = formats.iter().map(|&f| Some(f.into())).collect();
@@ -326,11 +463,11 @@ impl TraceGpu {
         };
         let globals = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("trace globals"),
-            size: (crate::compositor::GLOBALS * 4) as u64,
+            size: (GLOBALS * 4) as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        TraceGpu {
+        Tracer {
             sample: pipeline("sample_fragment", &[SAMPLE_RUNS, SAMPLE_HITS]),
             resolve: pipeline("resolve_fragment", &[FORMAT]),
             globals,
@@ -342,28 +479,14 @@ impl TraceGpu {
         }
     }
 
-    /** The picture drawn last. */
-    pub fn picture(&self) -> &wgpu::Texture {
-        &self.picture.as_ref().expect("a picture").0
-    }
-
-    /** Draws the picture into egui's pass. */
-    pub fn show(&self, pass: &mut wgpu::RenderPass<'static>) {
-        if let Some((_, group)) = &self.picture {
-            pass.set_pipeline(&self.show);
-            pass.set_bind_group(0, group, &[]);
-            pass.draw(0..4, 0..1);
-        }
-    }
-
     /** Draws `slabs` (uploaded anew when `version` changes) seen as `globals` says from `camera` into its picture of `pixels`. */
     #[allow(clippy::too_many_arguments)]
-    pub fn draw(
+    fn draw(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
-        slabs: &Arc<Slabs>,
+        slabs: &Arc<Baked>,
         version: u64,
         camera: Vec3,
         globals: &[f32],
@@ -481,7 +604,7 @@ impl TraceGpu {
 const UPLOAD: usize = 16 << 20;
 
 /** Buffers for slabs' bands, texels, faces' bands and blocks on the GPU, all but the texels written. */
-fn buffers(device: &wgpu::Device, queue: &wgpu::Queue, slabs: &Slabs) -> [wgpu::Buffer; 4] {
+fn buffers(device: &wgpu::Device, queue: &wgpu::Queue, slabs: &Baked) -> [wgpu::Buffer; 4] {
     let contents: [&[u8]; 4] = [
         bytemuck::cast_slice(&slabs.bands),
         bytemuck::cast_slice(&slabs.texels),
@@ -503,93 +626,23 @@ fn buffers(device: &wgpu::Device, queue: &wgpu::Queue, slabs: &Slabs) -> [wgpu::
     })
 }
 
-/** What samples keep (Sample in trace.wgsl): their runs, and what they met. */
+/** What samples keep (Sample in slabs.wgsl): their runs, and what they met. */
 const SAMPLE_RUNS: wgpu::TextureFormat = wgpu::TextureFormat::Rgba32Float;
 const SAMPLE_HITS: wgpu::TextureFormat = wgpu::TextureFormat::Rgba32Uint;
 
+/** The picture's, as egui's target. */
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
-/** A device drawing slabs offscreen, for --shot and --bench. */
-pub struct Tracer {
-    device: wgpu::Device,
-    queue: wgpu::Queue,
-    gpu: TraceGpu,
-    slabs: Arc<Slabs>,
-    globals: Vec<f32>,
-    pixels: [u32; 2],
-}
-
-impl Tracer {
-    pub fn new(slabs: Slabs, view: &crate::compositor::View, sky_fog: f64) -> Tracer {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: crate::compositor::BACKENDS,
-            ..wgpu::InstanceDescriptor::new_without_display_handle()
-        });
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())).expect("adapter");
-        let descriptor = wgpu::DeviceDescriptor { required_limits: crate::compositor::limits(&adapter), ..Default::default() };
-        let (device, queue) = pollster::block_on(adapter.request_device(&descriptor)).expect("device");
-        let gpu = TraceGpu::new(&device, FORMAT);
-        Tracer { gpu, slabs: Arc::new(slabs), globals: view.globals(view.pixels, sky_fog).to_vec(), pixels: view.pixels, device, queue }
+impl Painter for Tracer {
+    fn picture(&self) -> &wgpu::Texture {
+        &self.picture.as_ref().expect("a picture").0
     }
 
-    fn render(&mut self) {
-        let mut encoder = self.device.create_command_encoder(&Default::default());
-        let camera = self.slabs.camera;
-        self.gpu.draw(&self.device, &self.queue, &mut encoder, &self.slabs, 0, camera, &self.globals, self.pixels);
-        self.queue.submit([encoder.finish()]);
-    }
-
-    fn wait(&self) {
-        self.device.poll(wgpu::PollType::wait_indefinitely()).expect("poll");
-    }
-
-    /** The time the GPU takes to draw the frame again and again, in ms. */
-    pub fn time(&mut self, runs: usize) -> f64 {
-        for _ in 0..3 {
-            self.render();
+    fn show(&self, pass: &mut wgpu::RenderPass<'_>) {
+        if let Some((_, group)) = &self.picture {
+            pass.set_pipeline(&self.show);
+            pass.set_bind_group(0, group, &[]);
+            pass.draw(0..4, 0..1);
         }
-        self.wait();
-        let start = Instant::now();
-        for _ in 0..runs {
-            self.render();
-        }
-        self.wait();
-        start.elapsed().as_secs_f64() * 1000.0 / runs as f64
-    }
-
-    /** Draws the frame and saves it as a PNG. */
-    pub fn save(&mut self, path: &str) {
-        self.render();
-        let picture = self.gpu.picture();
-        let wgpu::Extent3d { width, height, .. } = picture.size();
-        let row = (width * 4).div_ceil(256) * 256;
-        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: None,
-            size: (row * height) as u64,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
-        let mut encoder = self.device.create_command_encoder(&Default::default());
-        let layout = wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: None };
-        encoder.copy_texture_to_buffer(picture.as_image_copy(), wgpu::TexelCopyBufferInfo { buffer: &buffer, layout }, picture.size());
-        self.queue.submit([encoder.finish()]);
-        buffer.slice(..).map_async(wgpu::MapMode::Read, |r| r.expect("map"));
-        self.wait();
-        let mapped = buffer.slice(..).get_mapped_range().expect("mapped").to_vec();
-        let pixels: Vec<u8> = mapped.chunks(row as usize).flat_map(|r| &r[..(width * 4) as usize]).copied().collect();
-        let mut png = png::Encoder::new(std::io::BufWriter::new(std::fs::File::create(path).expect("shot file")), width, height);
-        png.set_color(png::ColorType::Rgba);
-        png.set_depth(png::BitDepth::Eight);
-        png.write_header().expect("png").write_image_data(&pixels).expect("png");
-    }
-}
-
-/** Shows the slabs' picture in egui. */
-pub struct Shown;
-
-impl egui_wgpu::CallbackTrait for Shown {
-    fn paint(&self, _info: egui::PaintCallbackInfo, pass: &mut wgpu::RenderPass<'static>, resources: &egui_wgpu::CallbackResources) {
-        let gpu: &TraceGpu = resources.get().expect("slabs");
-        gpu.show(pass);
     }
 }

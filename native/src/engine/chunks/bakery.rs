@@ -5,7 +5,7 @@
 //! A chunk is in flight from when its worker takes it until take() hands it
 //! over, and is not queued again meanwhile. Workers bake from the latest
 //! tiles of each level; a chunk is only asked for once it has all the tiles
-//! it reads, so no bake goes stale.
+//! it reads, so no bake goes stale. Dropped, it stops its workers.
 
 use std::collections::{HashSet, VecDeque};
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -16,7 +16,7 @@ use bake::lod::CellChunk;
 use bake::slicing::{GRID_LEVELS, LAYER, half_layer, spacing};
 use bake::{Baker, Tiles};
 
-use crate::compositor::{GpuCluster, GpuColumn, GpuSplat, cluster, tiles};
+use super::compositor::{GpuCluster, GpuColumn, GpuSplat, cluster, tiles};
 
 /** A chunk to bake: a cell of a face, reading tiles [i0, i1] × [k0, k1] of its grid level. */
 #[derive(Clone, Copy)]
@@ -71,11 +71,12 @@ impl Request {
     }
 }
 
-/** A worker's requests to take, and those it has taken that take() has not handed over yet. */
+/** A worker's requests to take, those it has taken that take() has not handed over yet, and whether it is to stop. */
 #[derive(Default)]
 struct Work {
     queued: VecDeque<Request>,
     in_flight: HashSet<Key>,
+    stop: bool,
 }
 
 type Queue = (Mutex<Work>, Condvar);
@@ -143,6 +144,15 @@ impl Bakery {
     }
 }
 
+impl Drop for Bakery {
+    fn drop(&mut self) {
+        for queue in &self.queues {
+            queue.0.lock().expect("queue").stop = true;
+            queue.1.notify_one();
+        }
+    }
+}
+
 fn work(queue: &Queue, send: &Sender<(Request, Baked)>, grids: &Grids, mut baker: Baker) {
     // The baker's light while it bakes unlit.
     let mut aside = None;
@@ -152,6 +162,9 @@ fn work(queue: &Queue, send: &Sender<(Request, Baked)>, grids: &Grids, mut baker
         let request = {
             let mut work = queue.0.lock().expect("queue");
             loop {
+                if work.stop {
+                    return;
+                }
                 if let Some(r) = work.queued.pop_front() {
                     work.in_flight.insert(r.key());
                     break r;

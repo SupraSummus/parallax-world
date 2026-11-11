@@ -11,11 +11,12 @@ use std::sync::Arc;
 
 use bake::lod::{CellChunk, Lod, Picked, distance};
 use bake::slicing::{GRID_LEVELS, LAYER};
-use bake::{Lattice, chunk_reads};
+use bake::{Baker, Lattice, chunk_reads};
 
-use crate::bakery::{Baked, Bakery, Request};
-use crate::view::{Face, Vec3, View, in_face, to_local};
-use crate::world::{Level, TILE, TileId};
+use super::bakery::{Baked, Bakery, Request};
+use crate::engine::Look;
+use crate::view::{self, Face, in_face, to_local};
+use crate::world::{Heights, Level, TILE, TileId, World};
 
 /**
  * Cells known beyond the picks, before those not looked up or let go for
@@ -96,9 +97,8 @@ enum Seen {
 
 pub struct Renderer {
     faces: Vec<Face>,
-    /** Per grid level, its tiles made so far, and the y of its sites, [low, high). */
-    levels: Vec<Arc<Level>>,
-    heights: [(i64, i64); GRID_LEVELS],
+    /** Per grid level, the y of its sites, [low, high). */
+    heights: Heights,
     /**
      * By face, its cells picked last, each with what is known of it; and
      * by face and cell, what was known of those that came and went, and the
@@ -109,19 +109,10 @@ pub struct Renderer {
     bakery: Bakery,
     next_id: u32,
     renders: u64,
-    /** Viewing distance over a cell's thickness (Lod::new). */
-    pub detail: f64,
-    pub render_distance: f64,
-    /** How many levels finer than its cell a chunk's voxels are (Lod). */
-    pub shift: i32,
-    /**
-     * Whether chunks are lit (Request's `lit`), and whether their whole
-     * voxels are reliefs (Request's `relief`); and whether those it has are:
-     * when either changes, they are baked again.
-     */
-    pub lit: bool,
-    pub relief: bool,
-    cells_as: (bool, bool),
+    /** Whether its chunks' whole voxels are reliefs (Request's `relief`). */
+    relief: bool,
+    /** Whether the chunks it has are lit (Request's `lit`): when the look's lighting changes, they are baked again. */
+    lit: bool,
 }
 
 /** |v| for the v in [lo, hi] nearest to 0. */
@@ -169,36 +160,33 @@ fn may_hold(cell: &CellChunk, forward: [i32; 3], level: &Level, [i0, k0, i1, k1]
 }
 
 impl Renderer {
-    /** A renderer of a world whose sites of each grid level have y in [low, high) of `heights`. */
-    pub fn new(faces: Vec<Face>, bakery: Bakery, render_distance: f64, heights: [(i64, i64); GRID_LEVELS]) -> Renderer {
+    /**
+     * A renderer of `world`, its whole voxels reliefs or splats each, its
+     * bakers on as many threads as the world's; given light, each can light
+     * the voxels it shows (a Light each), as the look asks.
+     */
+    pub fn new(world: &World, relief: bool) -> Renderer {
+        let faces = view::faces();
+        let (palette, light) = (world.palette.clone(), world.light());
+        let bakery = Bakery::new(world.threads, move || {
+            let mut baker = Baker::new(&palette);
+            if let Some(light) = &light {
+                let mut light = light();
+                baker.light = Some(Box::new(move |level, site| light.faces(level as u32, site.map(i64::from))));
+            }
+            baker
+        });
         Renderer {
             picks: faces.iter().map(|_| None).collect(),
             faces,
-            levels: (0..GRID_LEVELS).map(|_| Arc::new(Level::new(HashMap::new()))).collect(),
-            heights,
+            heights: world.heights,
             cells: HashMap::new(),
             bakery,
             next_id: 0,
             renders: 0,
-            // DEFAULT_DETAIL in renderer.ts.
-            detail: 2f64.powf(3.25),
-            render_distance,
-            shift: 3,
+            relief,
             lit: false,
-            relief: true,
-            cells_as: (false, true),
         }
-    }
-
-    /** Draws the tiles of grid level `level` from now on: cells that lacked them can be baked. */
-    pub fn set_tiles(&mut self, level: usize, tiles: Arc<Level>) {
-        self.bakery.set_tiles(level, tiles.grids.clone());
-        self.levels[level] = tiles;
-    }
-
-    /** The tiles of `level` it has. */
-    pub fn level(&self, level: usize) -> &Arc<Level> {
-        &self.levels[level]
     }
 
     /** Waits until the bakery delivers a chunk. */
@@ -206,16 +194,22 @@ impl Renderer {
         self.bakery.wait();
     }
 
-    pub fn render(&mut self, camera: Vec3, view: &View) -> (Frame, Stats) {
-        if (self.lit, self.relief) != self.cells_as {
+    /** The chunks in view of `look` of `world`'s tiles, and what is missing for the rest. */
+    pub fn render(&mut self, look: &Look, world: &World) -> (Frame, Stats) {
+        if look.sky.is_some() != self.lit {
             self.cells.clear();
             self.picks.iter_mut().for_each(|p| *p = None);
-            self.cells_as = (self.lit, self.relief);
+            self.lit = look.sky.is_some();
+        }
+        // Cells that lacked tiles can be baked.
+        for level in 0..GRID_LEVELS {
+            self.bakery.set_tiles(level, world.level(level).grids.clone());
         }
         self.receive();
         self.renders += 1;
-        let lod = Lod::new(self.shift, self.detail);
-        let mut frame = Frame { chunks: Vec::new(), farthest: self.render_distance, relief: self.relief };
+        let (camera, view) = (look.camera, look.view());
+        let lod = Lod::new(look.shift, look.detail);
+        let mut frame = Frame { chunks: Vec::new(), farthest: look.far, relief: self.relief };
         let mut stats = Stats::default();
         let mut missing: Vec<(Request, f64)> = Vec::new();
         let mut tiles: Vec<(usize, TileId, f64)> = Vec::new();
@@ -226,7 +220,7 @@ impl Renderer {
             let local = to_local(&face.axes, camera);
             let boxes = view.screen_boxes(face);
             let eye = [local[0] / LAYER, local[1], local[2] / LAYER];
-            let far = self.render_distance;
+            let far = look.far;
             let key = (lod.shift, lod.q, far);
             let pick = &mut self.picks[f];
             if !pick.as_ref().is_some_and(|p| p.covers(key, eye, tangents)) {
@@ -269,7 +263,7 @@ impl Renderer {
                     return;
                 }
                 // What is known, brought up to date: looked up once, then as its tiles come (its chunk, receive).
-                let source = &self.levels[level];
+                let source = world.level(level);
                 if matches!(seen, Seen::Unknown) {
                     let known = self.cells.entry((f, cell)).or_default();
                     if matches!(known.0, Seen::Unknown) {
@@ -297,7 +291,7 @@ impl Renderer {
                         }
                     }
                     &mut Seen::Bake(t) => {
-                        let block = crate::compositor::block(z1.max(1.0), view.focal);
+                        let block = super::compositor::block(z1.max(1.0), view.focal);
                         missing.push((Request { face: f, cell, tiles: t, block, lit: self.lit, relief: self.relief }, d));
                     }
                     Seen::Baked(chunk) => {
@@ -329,7 +323,7 @@ impl Renderer {
     fn receive(&mut self) {
         for (r, baked) in self.bakery.take() {
             // Baked as it was before it changed.
-            if (r.lit, r.relief) != self.cells_as {
+            if r.lit != self.lit {
                 continue;
             }
             self.next_id += 1;
@@ -347,34 +341,5 @@ impl Renderer {
             let renders = self.renders;
             self.cells.retain(|_, (_, used)| *used + UNUSED_RENDERS > renders);
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::view::{focal_length, view_basis};
-    use crate::world::World;
-
-    #[test]
-    fn moving_keeps_most_chunks() {
-        let make = worlds::by_name("moor").expect("moor").make;
-        let shown = make(1);
-        let mut renderer = crate::renderer(&shown, None, 4, 400.0);
-        let mut world = World::new(make, 1, None, 4);
-        let [width, height] = [320.0, 200.0];
-        let view = View { yaw: 30.0, pitch: -10.0, width, height, focal: focal_length(90.0, width, height) };
-        let camera = shown.spawn.map(|v| v as f64);
-        let ids = |frame: &Frame| frame.chunks.iter().map(|p| p.chunk.id).collect::<std::collections::HashSet<_>>();
-        let (frame, _) = crate::complete(&mut world, &mut renderer, camera, &view, false);
-        let before = ids(&frame);
-        // A few units along the view: each face's levels claim cells a little farther on.
-        let forward = view_basis(view.yaw, view.pitch)[2];
-        let camera = [0, 1, 2].map(|i| camera[i] + forward[i] * 7.0);
-        let (frame, _) = crate::complete(&mut world, &mut renderer, camera, &view, false);
-        let after = ids(&frame);
-        let kept = after.intersection(&before).count();
-        // Level 0's cells, which change most, are over half the frame's in the moor's heather and mist, seen through.
-        assert!(kept * 10 > after.len() * 6, "{kept} of {} kept", after.len());
     }
 }

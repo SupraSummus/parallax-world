@@ -226,10 +226,13 @@ Numbers are for the forest at 1280×800, as measured when written.
     A voxel's light is one colour, its faces' mean, whichever face a ray meets.
   - Slabs are baked around the eye and baked again as it moves,
     hundreds of MB every few seconds: walking, they stutter.
+    Once the eye moves, they are more than lavapipe binds (128 MB).
     A column keeps only its first voxel, so a medium lets through
     as much as that voxel does: 1‰ of extinction lets all through, not 93 %
     (the voxels' medium test, run on slabs).
     They read the compositor's globals, the faces' views.
+  - The world packs every tile for the voxels' GPU (`voxels::words`),
+    whichever engine draws: the voxels could pack theirs as they upload.
 - **`culling_on_the_gpu_leaves_the_picture_unchanged` fails now and then**
   on an Intel UHD (Mesa), at `b4c79ff` too; why is open.
   Maybe as it failed on lavapipe by the moor's mist:
