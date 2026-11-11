@@ -22,10 +22,10 @@
 //! --seams and --colour draw as the panel's switches do.
 //! --engine picks what draws, as the panel does (Engine): rays through the
 //! tiles' voxels (march.rs, the default), which take no --detail,
-//! --shift, --seams or --colour; chunks of splats, as the web draws; or rays
-//! through slabs baked along each face (trace.rs), for --shot and --bench
-//! as seen from where they are baked, which take no --light, --seams or
-//! --colour.
+//! --shift, --seams or --colour; chunks ("splats"), cells' reliefs and their
+//! see-through voxels as splats, as the web draws; or rays through slabs
+//! baked along each face (trace.rs), for --shot and --bench as seen from
+//! where they are baked, which take no --light, --seams or --colour.
 //! The panel picks the lighting apart from the engine (Lighting): voxels
 //! shaded by the way their faces face, or lit by light worked out across
 //! the world, as --light does; each engine shows it its own way.
@@ -796,9 +796,12 @@ fn main() {
             sky,
         };
         if flag("--bench") {
+            let columns: usize = frame.chunks.iter().map(|p| p.chunk.baked.columns.len()).sum();
             let splats: usize = frame.chunks.iter().map(|p| p.chunk.baked.splats.len()).sum();
             let (ms, [first, next]) = shot::time(&frame, &view, 30);
-            println!("the GPU draws the frame in {ms:.1} ms: of its {splats} splats, {first} that showed before and {next} more");
+            println!(
+                "the GPU draws the frame in {ms:.1} ms: of its {columns} columns' tiles, {first} that showed before and {next} more; {splats} see-through splats"
+            );
         }
         if let Some(v) = value("--stroll") {
             let walk_through: Vec<bool> = materials_of(&shown.generator).iter().map(|m| m.walk_through).collect();
@@ -884,7 +887,7 @@ mod tests {
         (frame, view)
     }
 
-    /** World, look and detail as a power of two. The thickest cells too: in relief, their splats move most with the camera. */
+    /** World, look and detail as a power of two. The thickest cells too: in relief, their columns move most with the camera. */
     const VIEWS: [(&str, [f64; 2], f64); 3] =
         [("forest", [0.0, 0.0], 3.25), ("forest", [20.0, -25.0], 2.25), ("moor", [-30.0, 10.0], 3.25)];
 
@@ -899,7 +902,7 @@ mod tests {
                 (gpu.picture().2, gpu.drawn().iter().sum::<u32>())
             });
             assert!(culled.0 == all.0, "{name} {look:?}");
-            assert!(culled.1 < all.1, "{name} {look:?}: culling drew {} splats of {}", culled.1, all.1);
+            assert!(culled.1 < all.1, "{name} {look:?}: culling drew {} tiles of {}", culled.1, all.1);
         }
     }
 
@@ -1002,17 +1005,18 @@ mod tests {
     fn what_the_buffers_cannot_hold_is_left_out_farthest_first() {
         let (mut frame, view) = complete_view("moor", [-30.0, 10.0], 2f64.powf(3.25));
         let all = shot::picture(&frame, &view).2;
-        // Room for about half of the frame's splats: the chunks that come first, as many as fit.
-        let size = size_of::<compositor::GpuSplat>();
-        let room = frame.chunks.iter().map(|p| p.chunk.baked.splats.len()).sum::<usize>() / 2;
-        let mut gpu = shot::Offscreen::with(Some((room * size) as u64), true);
+        // Room for about half of the frame's columns: the chunks that come first, as many as fit, of columns, splats and clusters.
+        let bytes =
+            |b: &bakery::Baked| [size_of_val(&b.columns[..]), size_of_val(&b.splats[..]), size_of_val(&b.clusters[..])].map(|n| n as u64);
+        let room = frame.chunks.iter().map(|p| bytes(&p.chunk.baked)[0]).sum::<u64>() / 2;
+        let mut gpu = shot::Offscreen::with(Some(room), true);
         gpu.prepare(&frame, &view);
         let some = gpu.picture().2;
-        let sums = frame.chunks.iter().scan(0, |sum, p| {
-            *sum += p.chunk.baked.splats.len();
+        let sums = frame.chunks.iter().scan([0; 3], |sum, p| {
+            sum.iter_mut().zip(bytes(&p.chunk.baked)).for_each(|(s, b)| *s += b);
             Some(*sum)
         });
-        let fit = sums.take_while(|&sum| sum <= room).count();
+        let fit = sums.take_while(|sum| sum.iter().all(|&s| s <= room)).count();
         assert!(fit > 0 && fit < frame.chunks.len(), "{fit} of {} chunks fit", frame.chunks.len());
         frame.chunks.truncate(fit);
         let first = shot::picture(&frame, &view).2;

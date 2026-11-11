@@ -1,11 +1,13 @@
-// compositor.ts in WGSL, drawing only the clusters of splats that may show:
-// each splat names its chunk's slot in `chunks`, which gives its face and
-// plane relative to the camera. Per frame, cull_drawn lists draws
-// of the clusters that showed last frame, and splat_vertex draws them; their depth
-// is reduced to a pyramid of farthest depths (reduce_depth, reduce), and
-// cull_rest tests every cluster against it: those that showed are kept for
-// the next frame, and those newly showing drawn now. Then the see-through
-// splats in front of them, nearest first (veil_fragment), over the picture.
+// compositor.ts in WGSL, for cells' reliefs of whole voxels (bake's
+// cell_relief) and their see-through voxels as splats, drawing only the
+// clusters of them that may show: each cluster names its chunk's slot in
+// `chunks`, which gives its face and plane relative to the camera. Per
+// frame, cull_drawn lists draws of the tiles of columns that showed last
+// frame, and tile_vertex draws them; their depth is reduced to a pyramid
+// of farthest depths (reduce_depth, reduce), and cull_rest tests every
+// tile against it: those that showed are kept for the next frame, and
+// those newly showing drawn now. Then the see-through splats in front of
+// them, nearest first (veil_fragment), over the picture.
 
 struct FaceView {
   // Columns: the camera's right, up and forward axes, in the face's coordinates.
@@ -32,19 +34,22 @@ struct Chunk {
   distance: f32, // of the centre plane, along the face's axis
   face: u32,
   level: f32, // see depth_of
-  tint: u32, // RGBA to paint its splats in, shaded as their voxels are; 0 for their own
-  half_layer: f32, // a half layer of its grid: the unit of its splats' depths
+  tint: u32, // RGBA to paint its voxels in, shaded as they are; 0 for their own
+  half_layer: f32, // a half layer of its grid: the unit of its columns' and splats' depths
   clip: f32, // see veil_vertex
 }
 
-// Splats of one chunk near each other on its plane: `first` and the next
-// `count` (low byte of `slot_count`, its chunk's slot above), the box of
-// their outlines along the axis relative to the chunk's origin, whether
-// any showed in the last frame, how far past the plane they are, nearest
-// and farthest, and the widest's half width.
+// A tile of a chunk's relief (GpuCluster), TILE × TILE of its columns from
+// `first`, by rows, the centre of its first column `base`; or see-through
+// splats of it near each other on its plane, `first` and the next `count`
+// (low byte of `slot_count`), the widest's half width `wide`. Its chunk's
+// slot (`slot_count` above the low byte), the box of their outlines along
+// the axis relative to the chunk's origin, whether any showed in the last
+// frame, and how far past the plane they are, nearest and farthest.
 struct Cluster {
   min: vec2f,
   max: vec2f,
+  base: vec2f,
   first: u32,
   slot_count: u32,
   visible: u32,
@@ -52,8 +57,10 @@ struct Cluster {
   far: f32,
   wide: f32,
 }
+const TILE = 4;
 
-// A cluster's draw: its splats, instances of splat_vertex.
+// A draw: a tile's quad, an instance of tile_vertex; or a cluster's
+// splats, instances of veil_vertex.
 struct DrawArgs {
   vertices: u32,
   instances: u32,
@@ -63,6 +70,11 @@ struct DrawArgs {
 
 @group(0) @binding(0) var<uniform> globals: Globals;
 @group(0) @binding(1) var<storage, read> chunks: array<Chunk>;
+// Drawing: the tiles, and their columns (GpuColumn), each its front's depth
+// past the plane and its pillar's run, in half layers, as i16s, low first,
+// and its colour; 0, none.
+@group(0) @binding(2) var<storage, read> tiles: array<Cluster>;
+@group(0) @binding(3) var<storage, read> columns: array<vec2u>;
 // Culling: the frame's chunks' clusters, [first, first + count) each, and
 // a draw for each to draw.
 @group(0) @binding(4) var<storage, read_write> clusters: array<Cluster>;
@@ -83,7 +95,7 @@ struct DrawArgs {
 // The see-through splats over each other (veil_fragment).
 @group(0) @binding(14) var veil: texture_2d<f32>;
 
-// The depth of a splat of a chunk of `level`, its site `distance` from the
+// The depth of a voxel of a chunk of `level`, its site `distance` from the
 // eye: finer levels in front (lod.rs), and within a level the nearer site,
 // which, voxels being the lattice's Voronoi cells, is the one a ray meets
 // first. Level L's depths are [2^(L - 64), 2^(L - 63)), HALFWAY halfway:
@@ -105,18 +117,6 @@ struct Splat {
 fn ray_of(view: mat3x3f, position: vec4f) -> vec3f {
   let s = position.xy / globals.resolution - 0.5;
   return view * vec3f(vec2f(s.x, -s.y) * globals.viewport / globals.focal, 1.0);
-}
-
-// A splat instance (GpuSplat): its hexagon's centre relative to its chunk's
-// origin, half its width (its height √2 times that) and its depth past the
-// plane, and its colour; drawn at its depth, as much wider as the ray to it
-// slants across (compositor.ts). Its chunk's slot comes as the first
-// vertex's index over 4.
-@vertex
-fn splat_vertex(@builtin(vertex_index) vertex: u32, @location(0) splat: vec4f, @location(1) paint: vec4f) -> Splat {
-  let site = splat_site(vertex, splat);
-  let size = vec2f(splat.z * (1.0 + abs(site.x / site.z)), splat.z * sqrt(2.0));
-  return placed(vertex, splat, paint, size);
 }
 
 // A see-through splat: its voxel's share of a field over its layer (see
@@ -156,18 +156,174 @@ fn placed(vertex: u32, splat: vec4f, paint: vec4f, size: vec2f) -> Splat {
   return out;
 }
 
-// Whether the pixel is in the splat's hexagon, and its face draws its ray.
-fn covers(in: Splat) -> bool {
-  return abs(in.corner.x) * in.slant + abs(in.corner.y) < 1.0 && owns(in.face, in.position);
+struct Tile {
+  @builtin(position) position: vec4f,
+  // Where on the plane of its nearest column, over that plane's distance: the ray's tangents in face coordinates.
+  @location(0) ray: vec2f,
+  @location(1) @interpolate(flat) tile: u32,
+}
+
+// A tile (its instance): a quad on the plane of its nearest column,
+// holding its box's outline there and at its farthest, which march cuts to
+// what its columns show.
+@vertex
+fn tile_vertex(@builtin(vertex_index) vertex: u32, @builtin(instance_index) tile: u32) -> Tile {
+  let t = tiles[tile];
+  let c = chunks[t.slot_count >> 8u];
+  let near = max(c.distance + t.near, 1e-3);
+  // The far end's outline, on the near end's plane: nearer the axis, smaller.
+  let k = near / max(c.distance + t.far, near);
+  let lo = c.origin + t.min;
+  let hi = c.origin + t.max;
+  let at = vec3f(mix(min(lo, lo * k), max(hi, hi * k), vec2f(f32(vertex & 1u), f32(vertex >> 1u))), near);
+  let p = transpose(globals.faces[c.face].view) * at;
+  return Tile(vec4f(p.xy * globals.focal / (globals.viewport / 2.0), depth_of(c.level, near) * p.z, p.z), at.xy / at.z, tile);
+}
+
+// What a pixel's ray meets first of a tile's columns (march): how far
+// along the axis, the site of the column's voxel there, its colour, and
+// how many voxels that is past the column's front; z 0, none.
+struct Hit {
+  z: f32,
+  site: vec3f,
+  paint: vec4f,
+  past: f32,
+}
+
+// The index of a tile's column at (a, b) from its first, in its rows,
+// a row's columns 2 apart in a; TILE · TILE, none.
+fn column_at(d: vec2i) -> u32 {
+  let s = (d.x - (d.y & 1)) / 2;
+  if any(vec2i(s, d.y) < vec2i(0)) || any(vec2i(s, d.y) >= vec2i(TILE)) {
+    return u32(TILE * TILE);
+  }
+  return u32(d.y * TILE + s);
+}
+
+const LAYER = 0.70710678;
+
+// The first of a tile's columns the pixel's ray meets. A column is a
+// pillar along the axis over its cell, its centre's Voronoi cell among the
+// columns' centres (a LAYER, b), in units of the grid: |u| ≤ LAYER and
+// LAYER |u| + |v| ≤ 3/4. Unlike voxels' outlines, which interlock, these
+// share out the plane, so the ray crosses them one after another, from
+// where it enters the tile's box to where it leaves, and meets a pillar in
+// the cell it crosses it in. None if its face does not draw the ray (owns).
+fn march(in: Tile) -> Hit {
+  let none = Hit(0.0, vec3f(0.0), vec4f(0.0), 0.0);
+  let ray = in.ray;
+  let t = tiles[in.tile];
+  let c = chunks[t.slot_count >> 8u];
+  if !owns(c.face, in.position) {
+    return none;
+  }
+  // The grid's spacing, across and up: a half layer is LAYER / 2 of it.
+  let unit = c.half_layer * 2.0 / LAYER;
+  let spacing = vec2f(LAYER, 1.0) * unit;
+  let base = c.origin + t.base;
+  // Where along the axis the ray is in the tile's box.
+  let lo = c.origin + t.min;
+  let hi = c.origin + t.max;
+  var z = vec2f(max(c.distance + t.near, 1e-3), c.distance + t.far);
+  for (var i = 0; i < 2; i++) {
+    if ray[i] != 0.0 {
+      let ends = vec2f(lo[i], hi[i]) / ray[i];
+      z = vec2f(max(z.x, min(ends.x, ends.y)), min(z.y, max(ends.x, ends.y)));
+    } else if lo[i] > 0.0 || hi[i] < 0.0 {
+      return none;
+    }
+  }
+  if z.x > z.y {
+    return none;
+  }
+  // The cell it starts in: the nearest centre, of the rows about it.
+  let q = (z.x * ray - base) / spacing;
+  var cell = vec2i(0);
+  var best = 1e30;
+  for (var row = floor(q.y); row <= floor(q.y) + 1.0; row += 1.0) {
+    let a = 2.0 * round((q.x - row) / 2.0) + row;
+    let d = (q - vec2f(a, row)) * spacing;
+    if dot(d, d) < best {
+      best = dot(d, d);
+      cell = vec2i(i32(a), i32(row));
+    }
+  }
+  // The sides it may leave a cell past, n · (z · ray − centre) = d: those
+  // it heads towards (n · ray > 0), at most one of each opposite two.
+  let sides = select(vec3f(-1.0), vec3f(1.0), vec3f(ray.x, LAYER * ray.x + ray.y, LAYER * ray.x - ray.y) >= vec3f(0.0));
+  let n0 = vec2f(sides.x, 0.0);
+  let n1 = sides.y * vec2f(LAYER, 1.0);
+  let n2 = sides.z * vec2f(LAYER, -1.0);
+  let towards = vec3f(dot(n0, ray), dot(n1, ray), dot(n2, ray));
+  let heads = towards > vec3f(0.0);
+  let per = 1.0 / select(vec3f(1.0), towards, heads);
+  let d = vec3f(LAYER, 0.75, 0.75) * unit;
+  let steps = array(vec2i(2 * i32(sides.x), 0), vec2i(i32(sides.y)), vec2i(1, -1) * i32(sides.z));
+  var enter = z.x;
+  for (var crossed = 0; crossed < 4 * TILE; crossed++) {
+    let centre = base + vec2f(cell) * spacing;
+    let exits = select(vec3f(z.y), (d + vec3f(dot(n0, centre), dot(n1, centre), dot(n2, centre))) * per, heads);
+    let leave = min(z.y, min(exits.x, min(exits.y, exits.z)));
+    let next = cell + select(select(steps[2], steps[1], leave == exits.y), steps[0], leave == exits.x);
+    let k = column_at(cell);
+    if k < u32(TILE * TILE) {
+      let column = columns[t.first + k];
+      let paint = unpack4x8unorm(column.y);
+      let depth = bitcast<i32>(column.x << 16u) >> 16u;
+      let span = c.distance + vec2f(f32(depth), f32(depth + (bitcast<i32>(column.x) >> 16u))) * c.half_layer;
+      let at = max(enter, span.x);
+      if column.y != 0u && at <= min(leave, span.y) {
+        // Of the column's voxels, every two layers from its front.
+        let apart = 4.0 * c.half_layer;
+        let past = round((at - span.x) / apart);
+        return Hit(at, vec3f(centre, span.x + past * apart), paint, past);
+      }
+    }
+    if leave >= z.y {
+      break;
+    }
+    enter = leave;
+    cell = next;
+  }
+  return none;
+}
+
+// Its colour as the chunk paints it (Chunk's tint) and fogged.
+fn shade(c: Chunk, paint: vec4f) -> vec3f {
+  let fog = 1.0 - exp(-c.distance / globals.fog_distance);
+  let tinted = unpack4x8unorm(c.tint).rgb * (0.3 + 0.7 * dot(paint.rgb, vec3f(0.3, 0.59, 0.11)));
+  return mix(select(paint.rgb, tinted, c.tint != 0u), globals.horizon.rgb, fog);
+}
+
+struct Drawn {
+  @location(0) colour: vec4f,
+  @builtin(frag_depth) depth: f32,
+}
+
+// A hit, at the depth of the site of the column's voxel it is in, so that
+// where a pillar stands for whole voxels, the one a ray meets first is in
+// front (depth_of); no nearer than its tile's quad, at its nearest
+// column's front, so that what is drawn already hides the tile's pixels
+// before they march (early_depth_test). A pillar running on past its cell
+// meets voxels another cell's columns start at, at the same site: there
+// the one whose front is nearer the voxel, in a colour more its own, is a
+// hair nearer, so that the order they are drawn in mostly does not matter.
+fn shown(in: Tile, hit: Hit) -> Drawn {
+  let t = tiles[in.tile];
+  let c = chunks[t.slot_count >> 8u];
+  let hair = 0.01 * c.half_layer * hit.past;
+  let distance = max(length(hit.site) + hair, max(c.distance + t.near, 1e-3));
+  return Drawn(vec4f(shade(c, hit.paint), 1.0), depth_of(c.level, distance));
 }
 
 // A whole voxel.
-@fragment
-fn splat_fragment(in: Splat) -> @location(0) vec4f {
-  if !covers(in) {
+@fragment @early_depth_test(greater_equal)
+fn tile_fragment(in: Tile) -> Drawn {
+  let hit = march(in);
+  if hit.z == 0.0 {
     discard;
   }
-  return vec4f(in.colour.rgb, 1.0);
+  return shown(in, hit);
 }
 
 // Whether the pixel's ray is the face's, for one face only, so that no
@@ -229,8 +385,9 @@ fn closest_to_zero(lo: f32, hi: f32) -> f32 {
 // nowhere.
 fn screen_box(cluster: Cluster) -> vec4f {
   let c = chunks[cluster.slot_count >> 8u];
-  // The rays through its splats, as tangents: each is drawn at its depth,
-  // wider by its slant across (splat_vertex), at most the box's corners'.
+  // The rays through its box, as tangents, at most its corners', near and
+  // far; a see-through splat's widened as much as a splat's outline is by
+  // its slant across, to hold where its tent is drawn.
   let z = c.distance + vec2f(cluster.near, cluster.far);
   if z.x <= 0.0 {
     return vec4f(vec2f(0.0), globals.resolution);
@@ -297,7 +454,7 @@ fn draws_cluster(at: u32, cluster: Cluster, phase: u32) -> bool {
     return cluster.visible != 0u && shows(b);
   }
   let c = chunks[cluster.slot_count >> 8u];
-  // Its nearest splat's distance is no less than how far ahead it is.
+  // Its nearest column's distance is no less than how far ahead it is.
   let depth = depth_of(c.level, max(c.distance + cluster.near, 0.0));
   let visible = shows(b) && !(culls && hidden(b, depth));
   clusters[at].visible = u32(visible);
@@ -305,16 +462,16 @@ fn draws_cluster(at: u32, cluster: Cluster, phase: u32) -> bool {
   return visible && cluster.visible == 0u;
 }
 
-// A workgroup per chunk in the frame, a thread per cluster. Chunks come
-// near to far and their clusters nearest first (see Compositor::upload),
-// and draws are listed about in that order, so that nearer splats are
+// A workgroup per chunk in the frame, a thread per tile. Chunks come
+// near to far and their tiles nearest first (see tiles in compositor.rs),
+// and draws are listed about in that order, so that nearer columns are
 // mostly drawn first and hide what is behind them early.
 fn cull(chunk: u32, thread: u32, phase: u32) {
   let range = candidates[chunk];
   for (var k = thread; k < range.y; k += 64u) {
     let cluster = clusters[range.x + k];
     if draws_cluster(range.x + k, cluster, phase) {
-      draws[atomicAdd(&drawn, 1u)] = DrawArgs(4u, cluster.slot_count & 0xffu, (cluster.slot_count >> 8u) * 4u, cluster.first);
+      draws[atomicAdd(&drawn, 1u)] = DrawArgs(4u, 1u, 0u, range.x + k);
     }
   }
 }
