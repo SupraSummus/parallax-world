@@ -115,14 +115,16 @@ lab/                         # Experiment, not built by pnpm: split grammars wit
 native/                      # Spike of a native frontend (egui on winit and wgpu), linking bake/ and worlds/; see src/main.rs
 ├── .cargo/config.toml       # Builds for x86-64-v3: floor and ceil inline (see there)
 └── src/
-    ├── main.rs              # The camera (flying or walking, F) and panel; --shot, --bench, --stroll
-    ├── window.rs            # The window: egui on winit and wgpu, its GPU device made again when lost
+    ├── main.rs              # The camera (flying or walking, F), the panel and its engine (splats or voxels); --shot, --bench, --stroll
+    ├── window.rs            # The window: egui on winit and wgpu, drawing either engine's picture, its GPU device made again when lost
     ├── world.rs             # world.ts for generated worlds: a World's tiles, those the renderer wants first, made and indexed on threads
     ├── view.rs              # view.ts: faces, which rays and screen boxes they draw
     ├── renderer.rs          # Chunks in view: cells of the lattice (bake's lod.rs), not slices; cached, finest and nearest first
     ├── bakery.rs            # Worker threads baking chunks, a baker each sharing the tiles (lit, with a Light each), and clustering their splats for the GPU
     ├── compositor.rs        # compositor.ts with wgpu, for cells: splats uploaded per chunk in clusters, by depth, culled on the GPU against what showed; see-through ones over each other in the order rays meet them
     ├── shot.rs              # --shot: one frame drawn offscreen on the GPU, saved as a PNG, no window
+    ├── march.rs             # The voxels engine: rays through the tiles' voxels, cell to cell, see-through ones added up in the order met; each level's bricks in a window around the eye, a torus; no chunks or faces of the view
+    ├── march.wgsl
     └── compositor.wgsl
 ```
 

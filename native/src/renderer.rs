@@ -184,7 +184,7 @@ impl Renderer {
     }
 
     /** The tiles of `level` it has. */
-    pub fn level(&self, level: usize) -> &Level {
+    pub fn level(&self, level: usize) -> &Arc<Level> {
         &self.levels[level]
     }
 

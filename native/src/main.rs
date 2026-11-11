@@ -4,7 +4,7 @@
 //! baker in bake/, sharing the tiles, and wgpu drawing them in an egui window
 //! (window.rs).
 //!
-//! parallax-native [--world NAME] [--threads N] [--seed S] [--view QUERY] [--light SKY,SUN,GLOW] [--detail D] [--shift S] [--shot out.png [--size WxH] [--seams] [--colour voxels|layers|chunks] | --bench] [--stroll S [--on-ground]]
+//! parallax-native [--engine splats|voxels] [--world NAME] [--threads N] [--seed S] [--view QUERY] [--light SKY,SUN,GLOW] [--detail D] [--shift S] [--shot out.png [--size WxH] [--seams] [--colour voxels|layers|chunks] | --bench] [--stroll S [--on-ground]]
 //!
 //! --view takes the web page's view query (parseViewQuery in renderer.ts),
 //! overriding --seed and --world.
@@ -19,9 +19,13 @@
 //! --detail sets viewing distance over a cell's thickness, --shift how many
 //! levels finer than a cell its voxels are (bake's lod.rs), as the panel does.
 //! --seams and --colour draw as the panel's switches do.
+//! --engine picks what draws, as the panel does (Engine): rays through the
+//! tiles' voxels (march.rs, the default), which take no --light, --detail,
+//! --shift, --seams or --colour; or chunks of splats, as the web draws.
 
 mod bakery;
 mod compositor;
+mod march;
 mod renderer;
 mod shot;
 mod view;
@@ -32,6 +36,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use bake::Baker;
+use bake::slicing::GRID_LEVELS;
 use bake::walk::{COLLISION_LEVEL, Ground, WalkInput, Walker};
 
 use bakery::Bakery;
@@ -45,7 +50,19 @@ use worldgen::light::{Brightness, Light, Shared};
 /** The world shown unless --world names another (worlds::WORLDS). */
 const WORLD: Make = worlds::valley::valley;
 
+/** What draws the world: each its own way, from the same tiles (window::Picture). */
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Engine {
+    Splats,
+    Voxels,
+}
+
+impl Engine {
+    const ALL: [(Engine, &str); 2] = [(Engine::Splats, "splats"), (Engine::Voxels, "voxels")];
+}
+
 struct App {
+    engine: Engine,
     world: World,
     renderer: Renderer,
     faces: [[Vec3; 3]; 12],
@@ -67,12 +84,14 @@ struct App {
     world_query: String,
     /** How bright the sky is (compositor::View). */
     sky: f32,
-    /** The frame the ui drew last, for the window to draw (window::Content). */
-    picture: Option<(Arc<renderer::Frame>, compositor::View, egui::Rect)>,
+    /** What the ui drew last, for the window to draw (window::Content). */
+    picture: Option<(window::Picture, egui::Rect)>,
+    /** By material id, its colour (the voxels'). */
+    palette: Arc<Vec<u32>>,
 }
 
 impl window::Content for App {
-    fn picture(&mut self) -> Option<(Arc<renderer::Frame>, compositor::View, egui::Rect)> {
+    fn picture(&mut self) -> Option<(window::Picture, egui::Rect)> {
         self.picture.take()
     }
 
@@ -88,27 +107,36 @@ impl window::Content for App {
         egui::Panel::left("panel").show(ui, |ui| {
             ui.heading("Parallax (native spike)");
             ui.label(&self.stats);
+            ui.horizontal(|ui| {
+                ui.label("Engine");
+                for (engine, name) in Engine::ALL {
+                    ui.radio_value(&mut self.engine, engine, name);
+                }
+            });
             // The web's (App.tsx).
             ui.add(egui::Slider::new(&mut self.fov, 5.0..=120.0).step_by(1.0).text("Field of View (°)"));
             ui.add(egui::Slider::new(&mut self.renderer.render_distance, 40.0..=40000.0).logarithmic(true).text("Render Distance"));
-            // In quarter octaves, as the web's: dragging picks cells anew only at each step.
-            let mut octaves = self.renderer.detail.log2();
-            let detail = egui::Slider::new(&mut octaves, 0.0..=6.0).step_by(0.25).custom_formatter(|v, _| format!("{:.1}", 2f64.powf(v)));
-            if ui.add(detail.text("Detail")).changed() {
-                self.renderer.detail = 2f64.powf(octaves);
-            }
             let mut walking = self.walker.is_some();
             if ui.checkbox(&mut walking, "Walk on Ground (F)").changed() {
                 self.walker = walking.then(|| Walker::at(self.camera));
             }
-            ui.add(egui::Slider::new(&mut self.renderer.shift, 1..=5).text("Voxels Finer than Cells (levels)"));
-            ui.checkbox(&mut self.seams, "Show Face Seams");
-            ui.horizontal(|ui| {
-                ui.label("Colour by");
-                for (colours, name) in Colours::ALL {
-                    ui.radio_value(&mut self.colours, colours, name);
+            if self.engine == Engine::Splats {
+                // In quarter octaves, as the web's: dragging picks cells anew only at each step.
+                let mut octaves = self.renderer.detail.log2();
+                let detail =
+                    egui::Slider::new(&mut octaves, 0.0..=6.0).step_by(0.25).custom_formatter(|v, _| format!("{:.1}", 2f64.powf(v)));
+                if ui.add(detail.text("Detail")).changed() {
+                    self.renderer.detail = 2f64.powf(octaves);
                 }
-            });
+                ui.add(egui::Slider::new(&mut self.renderer.shift, 1..=5).text("Voxels Finer than Cells (levels)"));
+                ui.checkbox(&mut self.seams, "Show Face Seams");
+                ui.horizontal(|ui| {
+                    ui.label("Colour by");
+                    for (colours, name) in Colours::ALL {
+                        ui.radio_value(&mut self.colours, colours, name);
+                    }
+                });
+            }
             ui.label(format!(
                 "camera {:.0} {:.0} {:.0}  yaw {:.0}  pitch {:.0}",
                 self.camera[0], self.camera[1], self.camera[2], self.yaw, self.pitch
@@ -156,41 +184,58 @@ impl window::Content for App {
             let (width, height) = (rect.width() as f64, rect.height() as f64);
             let focal = focal_length(self.fov, width, height);
             let view = view::View { yaw: self.yaw, pitch: self.pitch, width, height, focal };
-            let start = Instant::now();
-            let (frame, stats) = self.renderer.render(self.camera, &view);
-            self.picking = start.elapsed().as_secs_f64() * 1000.0;
-            // Drawn from the next frame on.
+            let far = self.renderer.render_distance;
+            // The tiles each engine reads, and what it draws: drawn from the next frame on.
+            // And whether chunks are baking, for frames until they are in.
+            let (mut levels, wanted, baking, picture) = match self.engine {
+                Engine::Splats => {
+                    let start = Instant::now();
+                    let (frame, stats) = self.renderer.render(self.camera, &view);
+                    self.picking = start.elapsed().as_secs_f64() * 1000.0;
+                    self.stats =
+                        format!("{} chunks\n{} baking, {} tiles wanted", frame.chunks.len(), stats.wanted.len(), stats.tiles.len());
+                    let view = compositor::View {
+                        yaw: self.yaw,
+                        pitch: self.pitch,
+                        focal,
+                        fog_distance: far * FOG_PER_RENDER_DISTANCE,
+                        faces: self.faces,
+                        size: [rect.width(), rect.height()],
+                        pixels: [0, 0],
+                        seams: self.seams,
+                        colours: self.colours,
+                        sky: self.sky,
+                    };
+                    (stats.levels, stats.tiles, !stats.wanted.is_empty(), window::Picture::Splats(Arc::new(frame), view))
+                }
+                Engine::Voxels => {
+                    let levels = march::levels(far);
+                    let tiles: Vec<_> = (0..levels).map(|l| self.renderer.level(l).clone()).collect();
+                    self.stats = format!("{} tiles", tiles.iter().map(|l| l.tiles.len()).sum::<usize>());
+                    let scene = march::Scene::new(tiles, self.palette.clone(), self.camera, [self.yaw, self.pitch, self.fov], far, [0, 0]);
+                    (std::array::from_fn(|l| l < levels), Vec::new(), false, window::Picture::Voxels(scene))
+                }
+            };
             // Walking, the ground's level too, whether drawn or not.
-            let mut levels = stats.levels;
             levels[COLLISION_LEVEL as usize] |= self.walker.is_some();
-            let made = self.world.update(self.camera, &levels, &stats.tiles);
+            let made = self.world.update(self.camera, &levels, &wanted);
             let arrived = !made.is_empty();
             for (level, tiles) in made {
                 self.renderer.set_tiles(level, tiles);
             }
-            self.stats = format!("{} chunks\n{} baking, {} tiles wanted", frame.chunks.len(), stats.wanted.len(), stats.tiles.len());
-            let view = compositor::View {
-                yaw: self.yaw,
-                pitch: self.pitch,
-                focal,
-                fog_distance: self.renderer.render_distance * FOG_PER_RENDER_DISTANCE,
-                faces: self.faces,
-                size: [rect.width(), rect.height()],
-                pixels: [0, 0],
-                seams: self.seams,
-                colours: self.colours,
-                sky: self.sky,
-            };
             let pixels = ui.ctx().pixels_per_point();
             self.remember([rect.width() * pixels, rect.height() * pixels]);
-            self.picture = Some((Arc::new(frame), view, rect));
-            ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, compositor::Shown));
+            self.picture = Some((picture, rect));
+            match self.engine {
+                Engine::Splats => ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, compositor::Shown)),
+                Engine::Voxels => ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, march::Shown)),
+            };
             // While moving, the view changes; until all is made and baked, tiles and chunks keep arriving, often enough for a frame now and then.
             // A walking body moves on while it falls or its eye catches up with a step.
             let walking = self.walker.is_some_and(|w| !w.settled());
             if moving.iter().any(|m| *m != 0.0) || walking {
                 ui.ctx().request_repaint();
-            } else if arrived || !stats.wanted.is_empty() || self.world.busy() {
+            } else if arrived || baking || self.world.busy() {
                 ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
             }
         });
@@ -208,8 +253,8 @@ impl App {
     fn remember(&self, size: [f32; 2]) {
         let ([x, y, z], r) = (self.camera, &self.renderer);
         let frame = format!(
-            "--view '{}&camera={x},{y},{z}&look={},{}&fov={}&distance={:.0}&detail={}' --shift {} --size {:.0}x{:.0}",
-            self.world_query, self.yaw, self.pitch, self.fov, r.render_distance, r.detail, r.shift, size[0], size[1],
+            "--engine {:?} --view '{}&camera={x},{y},{z}&look={},{}&fov={}&distance={:.0}&detail={}' --shift {} --size {:.0}x{:.0}",
+            self.engine, self.world_query, self.yaw, self.pitch, self.fov, r.render_distance, r.detail, r.shift, size[0], size[1],
         );
         *LAST_FRAME.lock().unwrap_or_else(|e| e.into_inner()) = format!("{frame}\n{}", self.stats);
     }
@@ -344,6 +389,68 @@ fn stroll(
     }
 }
 
+/**
+ * As stroll, drawing the voxels: each frame's tiles taken, the voxels
+ * that came uploaded and the frame drawn and waited for.
+ */
+fn stroll_voxels(
+    seconds: f64,
+    walk_through: Option<&[bool]>,
+    world: &mut World,
+    renderer: &mut Renderer,
+    offscreen: &mut march::Offscreen,
+    first: march::Scene,
+) {
+    let mut scene = first;
+    let forward = view_basis(scene.yaw, 0.0)[2];
+    let mut wanted: [bool; GRID_LEVELS] = std::array::from_fn(|l| l < scene.levels.len());
+    wanted[COLLISION_LEVEL as usize] |= walk_through.is_some();
+    let ms = |a: Instant, b: Instant| (b - a).as_secs_f64() * 1000.0;
+    let (mut times, mut cameras) = (Vec::new(), Vec::new());
+    let mut walker = Walker::at(scene.eye);
+    offscreen.render(&scene);
+    for _ in 0..((seconds * 60.0) as usize).max(1) {
+        let camera = match walk_through {
+            Some(walk_through) => {
+                let ground = Ground { tiles: &renderer.level(COLLISION_LEVEL as usize).grids, walk_through };
+                let input = WalkInput { forward: 1.0, right: 0.0, yaw: scene.yaw, jump: false, sneak: false };
+                walker = walker.walk(input, 1.0 / 60.0, &ground);
+                walker.eye()
+            }
+            None => std::array::from_fn(|d| scene.eye[d] + forward[d] * SPEED / 60.0),
+        };
+        cameras.push(camera);
+        let start = Instant::now();
+        for (level, tiles) in world.update(camera, &wanted, &[]) {
+            renderer.set_tiles(level, tiles);
+        }
+        let updated = Instant::now();
+        scene.eye = camera;
+        for (l, tiles) in scene.levels.iter_mut().enumerate() {
+            *tiles = renderer.level(l).clone();
+        }
+        offscreen.render(&scene);
+        let drawn = Instant::now();
+        offscreen.wait();
+        let end = Instant::now();
+        times.push([ms(start, updated), ms(updated, drawn), ms(drawn, end), ms(start, end)]);
+    }
+    println!("{} frames; ms at the median, 90th and 99th percentile, and most:", times.len());
+    for (k, name) in ["world", "upload", "GPU", "frame"].iter().enumerate() {
+        let mut t: Vec<f64> = times.iter().map(|t| t[k]).collect();
+        t.sort_by(f64::total_cmp);
+        let at = |q: f64| t[((t.len() - 1) as f64 * q) as usize];
+        println!("  {name:>6}: {:6.1} {:6.1} {:6.1} {:6.1}", at(0.5), at(0.9), at(0.99), at(1.0));
+    }
+    let mut slowest: Vec<usize> = (0..times.len()).collect();
+    slowest.sort_by(|&a, &b| times[b][3].total_cmp(&times[a][3]));
+    for &k in slowest.iter().take(5) {
+        let [x, y, z] = cameras[k];
+        let [w, u, g, f] = times[k];
+        println!("  frame {k}: {f:.1} ms (world {w:.1}, upload {u:.1}, GPU {g:.1}) at camera={x},{y},{z}");
+    }
+}
+
 /** The view the TS renderer starts with (renderer.ts), at the size --shot draws unless --size. */
 const YAW: f64 = 0.0;
 const PITCH: f64 = 0.0;
@@ -433,6 +540,49 @@ fn main() {
     let camera = query.camera.unwrap_or(shown.spawn.map(|v| v as f64));
     let faces: [[Vec3; 3]; 12] = std::array::from_fn(|f| view::faces()[f].axes);
     let fog_distance = render_distance * FOG_PER_RENDER_DISTANCE;
+    let engine = value("--engine").map_or(Engine::Voxels, |v| {
+        Engine::ALL.into_iter().find(|(_, name)| name.eq_ignore_ascii_case(v)).expect("--engine splats or voxels").0
+    });
+    let palette: Arc<Vec<u32>> = Arc::new(materials_of(&shown.generator).iter().map(|m| m.rgb()).collect());
+    if ["--bench", "--shot", "--stroll"].into_iter().any(flag) && engine == Engine::Voxels {
+        let levels = march::levels(render_distance);
+        let wanted = std::array::from_fn(|l| l < levels);
+        let start = Instant::now();
+        loop {
+            for (level, tiles) in world.update(camera, &wanted, &[]) {
+                renderer.set_tiles(level, tiles);
+            }
+            if !world.busy() {
+                break;
+            }
+            world.wait();
+        }
+        println!("tiles made in {:.2} s on {threads} threads", start.elapsed().as_secs_f64());
+        let scene = |renderer: &Renderer, eye| {
+            let tiles = (0..levels).map(|l| renderer.level(l).clone()).collect();
+            march::Scene::new(tiles, palette.clone(), eye, [yaw, pitch, fov], render_distance, size.map(|v| v as u32))
+        };
+        let mut offscreen = march::Offscreen::new();
+        if let Some(v) = value("--stroll") {
+            let walk_through: Vec<bool> = materials_of(&shown.generator).iter().map(|m| m.walk_through).collect();
+            let on_ground = flag("--on-ground").then_some(walk_through.as_slice());
+            let first = scene(&renderer, camera);
+            stroll_voxels(v.parse().expect("seconds"), on_ground, &mut world, &mut renderer, &mut offscreen, first);
+            return;
+        }
+        let first = scene(&renderer, camera);
+        offscreen.render(&first);
+        let [held, lacking, pool] = offscreen.bricks();
+        println!("{held} bricks of {pool} on the GPU, {lacking} lacking room");
+        if flag("--bench") {
+            println!("the GPU marches the frame in {:.1} ms", offscreen.time(&first, 30));
+        }
+        if let Some(v) = value("--shot") {
+            offscreen.save(&first, v);
+            println!("saved {v}");
+        }
+        return;
+    }
     if ["--bench", "--shot", "--stroll"].into_iter().any(flag) {
         let start = Instant::now();
         // A shot alone needs only the view; the timings, all the world would make around it.
@@ -481,6 +631,7 @@ fn main() {
         return;
     }
     let app = App {
+        engine,
         world,
         renderer,
         faces,
@@ -498,6 +649,7 @@ fn main() {
         sky,
         world_query: format!("seed={seed}{}", world_name.map(|w| format!("&world={w}")).unwrap_or_default()),
         picture: None,
+        palette,
     };
     let panic = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
@@ -594,14 +746,53 @@ mod tests {
         worldgen::World { generator, spawn: [0, 0, 0], heights: (-64, 64), points: Vec::new() }
     }
 
+    /** The splats of the world `make` makes, from its spawn, looking along the face (1, 0, 1), without fog: its width and pixels. */
+    fn splats_along_a_face(make: world::Make) -> (u32, Vec<u8>) {
+        let (frame, view) = complete_view_of(make, [45.0, 0.0], 8.0);
+        let (width, _, pixels) = shot::picture(&frame, &compositor::View { fog_distance: f64::INFINITY, ..view });
+        (width, pixels)
+    }
+
+    /** splats_along_a_face, of its voxels (march.rs). */
+    fn voxels_along_a_face(make: world::Make) -> (u32, Vec<u8>) {
+        let shown = make(1);
+        let mut world = World::new(make, 1, None, 4);
+        let far = 1000.0;
+        let count = march::levels(far);
+        let mut levels: Vec<Arc<world::Level>> = (0..count).map(|_| Arc::new(world::Level::new(Default::default()))).collect();
+        let camera = shown.spawn.map(|v| v as f64);
+        loop {
+            for (level, tiles) in world.update(camera, &std::array::from_fn(|l| l < count), &[]) {
+                levels[level] = tiles;
+            }
+            if !world.busy() {
+                break;
+            }
+            world.wait();
+        }
+        let palette = Arc::new(materials_of(&shown.generator).iter().map(|m| m.rgb()).collect());
+        let scene = march::Scene { fog: f64::INFINITY, ..march::Scene::new(levels, palette, camera, [45.0, 0.0, FOV], far, [320, 200]) };
+        let (width, _, pixels) = march::Offscreen::new().picture(&scene);
+        (width, pixels)
+    }
+
     #[test]
     #[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
-    fn a_medium_lets_through_as_much_as_its_extinction_says() {
+    fn a_medium_of_splats_lets_through_as_much_as_its_extinction_says() {
+        medium_lets_through_as_much_as_its_extinction_says(splats_along_a_face);
+    }
+
+    #[test]
+    #[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
+    fn a_medium_of_voxels_lets_through_as_much_as_its_extinction_says() {
+        medium_lets_through_as_much_as_its_extinction_says(voxels_along_a_face);
+    }
+
+    /** A wall behind a slab of medium, as `picture` draws it, lets through exp(−extinction · path), thin and thick, along a face's axis and slanted. */
+    fn medium_lets_through_as_much_as_its_extinction_says(picture: fn(world::Make) -> (u32, Vec<u8>)) {
         // The mean of a box of 9 × 9 pixels around (x, y) of the wall, seen along the face's axis.
         let seen = |make: world::Make| {
-            let (frame, view) = complete_view_of(make, [45.0, 0.0], 8.0);
-            let view = compositor::View { fog_distance: f64::INFINITY, ..view };
-            let (width, _, pixels) = shot::picture(&frame, &view);
+            let (width, pixels) = picture(make);
             move |[x, y]: [usize; 2]| {
                 let at = |i: usize, j: usize| f64::from(pixels[4 * (j * width as usize + i)]);
                 (y - 4..=y + 4).flat_map(|j| (x - 4..=x + 4).map(move |i| (i, j))).map(|(i, j)| at(i, j)).sum::<f64>() / 81.0

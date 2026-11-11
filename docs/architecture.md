@@ -594,7 +594,7 @@ hundreds of layers of a thin medium, each letting through 0.999,
 in 16 rounded every step one way, and stopped a tenth too much.
 A test holds a slab of medium to exp(−extinction · path),
 thin and thick, along the axis and slanted
-(`a_medium_lets_through_as_much_as_its_extinction_says`).
+(`a_medium_of_splats_lets_through_as_much_as_its_extinction_says`).
 
 **Fog.** A slice at distance d keeps `exp(−d / F)` of its own colour;
 the rest is the horizon colour, mixed in per pixel.
@@ -606,6 +606,38 @@ but a little lighter towards a face's corners than true distance would make it.
 The sky fades from the horizon colour at eye level to blue
 higher up, along each pixel's ray, and gets the fog of the render
 distance (or of the last slice, if farther).
+
+### Native: another engine, rays through the voxels
+
+The native window switches at run time between engines (`Engine`),
+each drawing the same tiles its own way, with its own shaders:
+the splats above, or rays through the tiles' voxels (`native/src/march.rs`),
+with no chunks, slices, faces or baking.
+A ray goes from rhombic dodecahedron to dodecahedron across their faces;
+each level's voxels are read up to `REACH` of its own sites from the eye,
+then the next coarser level's, as far as the render distance.
+The GPU holds of each level the bricks of a window around the eye,
+`REACH` all around and a little more;
+its table of the bricks' slots in a pool is a torus,
+a brick's entry at its coordinates modulo the window's size,
+so the window moves a brick at a time
+and only the bricks that came into it or left are touched.
+Tiles never change once made, and are packed for the GPU where they are made,
+so a brick is uploaded once, when it comes into a window.
+A brick of a tile not made yet is unknown, not empty,
+and rays take the next coarser level there:
+what is missing shows coarser, never as a hole.
+One ray is traced for every 4 × 4 pixels;
+each pixel takes the nearest of the voxels its four nearest samples met
+that its own ray enters, so edges stay sharp.
+See-through voxels add up in the order the ray meets them,
+each stopping `1 − (1 − alpha)^(path / chord)` of what is left,
+its path the ray's through the voxel, until little is let through;
+a pixel takes the medium in front of what it sees
+from those of its samples that saw the same.
+Tests hold the window's table to a new one's after any moves and tiles
+(`a_window_moved_and_its_tiles_changed_holds_what_a_new_one_would`)
+and a slab of medium to exp(−extinction · path), as the splats' test does.
 
 ## 5. Caching
 

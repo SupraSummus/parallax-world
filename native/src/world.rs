@@ -44,10 +44,11 @@ pub fn heights(world: &worldgen::World) -> Heights {
 /** Tile (i, k) holds x in [i · TILE, (i + 1) · TILE), z likewise. */
 pub type TileId = (i32, i32);
 
-/** A generated tile: its voxels, and where they are along each face's layers. */
+/** A generated tile: its voxels, where they are along each face's layers, and its bricks as the GPU takes them (march.rs). */
 pub struct Tile {
     pub grid: Arc<Grid>,
     pub index: LayerIndex,
+    pub words: Vec<u32>,
 }
 
 /** A level's tiles made so far, and their voxels as the bakers read them. */
@@ -132,7 +133,8 @@ fn work(make: Make, seed: u64, shared: Option<Shared>, heights: &Heights, queue:
         }
         .into_grid(true);
         let index = LayerIndex::new(&grid);
-        if send.send((level, id, Tile { grid: Arc::new(grid), index })).is_err() {
+        let words = crate::march::words(&grid);
+        if send.send((level, id, Tile { grid: Arc::new(grid), index, words })).is_err() {
             return;
         }
     }

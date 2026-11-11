@@ -15,18 +15,31 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::{Window, WindowId};
 
 use crate::compositor::{self, Compositor};
+use crate::march::{self, Marcher};
 use crate::renderer::Frame;
 
 /** What the window shows. */
 pub trait Content {
     /** egui's ui for a frame. */
     fn ui(&mut self, ui: &mut egui::Ui);
-    /** The frame the ui last asked to draw (the picture compositor::Shown shows), its view, and where it shows. */
-    fn picture(&mut self) -> Option<(Arc<Frame>, compositor::View, egui::Rect)>;
+    /** What the ui last asked to draw (the picture its engine's Shown shows), and where it shows. */
+    fn picture(&mut self) -> Option<(Picture, egui::Rect)>;
     /** What it showed last, for a report. */
     fn describe(&self) -> String;
     /** Where the last frame's time went. */
     fn timed(&mut self, times: Times);
+}
+
+/**
+ * What a frame draws, by the engine that draws it, each with GPU resources
+ * of its own: splats of chunks (compositor.rs), as the web draws them, or
+ * rays through the tiles' voxels (march.rs).
+ */
+// One a frame: its size does not matter.
+#[allow(clippy::large_enum_variant)]
+pub enum Picture {
+    Splats(Arc<Frame>, compositor::View),
+    Voxels(march::Scene),
 }
 
 /**
@@ -147,13 +160,25 @@ impl Gpu {
         let pixels_per_point = output.pixels_per_point;
         let screen = egui_wgpu::ScreenDescriptor { size_in_pixels: [self.config.width, self.config.height], pixels_per_point };
         self.check()?;
-        if let Some((frame, view, rect)) = content.picture() {
+        if let Some((picture, rect)) = content.picture() {
             let viewport = egui::epaint::ViewportInPixels::from_points(&rect, pixels_per_point, screen.size_in_pixels);
-            let view = compositor::View { pixels: [viewport.width_px as u32, viewport.height_px as u32], ..view };
-            let compositor: &mut Compositor = self.renderer.callback_resources.get_mut().expect("compositor");
+            let pixels = [viewport.width_px as u32, viewport.height_px as u32];
+            let resources = &mut self.renderer.callback_resources;
             let mut encoder = self.device.create_command_encoder(&Default::default());
-            compositor.prepare(&self.device, &self.queue, &mut encoder, &frame, &view);
-            compositor.render(&mut encoder);
+            match picture {
+                Picture::Splats(frame, view) => {
+                    let compositor: &mut Compositor = resources.get_mut().expect("compositor");
+                    compositor.prepare(&self.device, &self.queue, &mut encoder, &frame, &compositor::View { pixels, ..view });
+                    compositor.render(&mut encoder);
+                }
+                Picture::Voxels(scene) => {
+                    if resources.get::<Marcher>().is_none() {
+                        resources.insert(Marcher::new(&self.device, self.config.format));
+                    }
+                    let marcher: &mut Marcher = resources.get_mut().expect("marcher");
+                    marcher.draw(&self.device, &self.queue, &mut encoder, &march::Scene { pixels, ..scene });
+                }
+            }
             self.queue.submit([encoder.finish()]);
         }
         let uploaded = Instant::now();
