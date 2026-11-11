@@ -14,12 +14,20 @@
 //! as the window moves, and its slot freed as it leaves. A brick of no tile
 //! yet (or none the pool had room for) is unknown, and rays take the next
 //! coarser level there: what is missing shows coarser, never as a hole.
+//!
+//! Lit, the voxels show the light their tiles found for them (world.rs,
+//! worldgen's Light, as the splats' bakers find it), uploaded with their
+//! bricks to a pool of its own. A tile lit is a new tile in the place of
+//! the one made, so its bricks are uploaded again; till then its voxels
+//! show shaded, as unlit.
 
 use std::sync::Arc;
 use std::time::Instant;
 
+use bake::light::{colour, linear_to_srgb, srgb_to_linear};
 use bake::slicing::GRID_LEVELS;
 use egui_wgpu::wgpu;
+use worldgen::light::Light;
 
 use crate::compositor::{BACKENDS, limits};
 use crate::view::{Vec3, focal_length, view_basis};
@@ -31,6 +39,8 @@ const WINDOW: i32 = 64;
 const BRICK_SHIFT: u32 = 3;
 const BRICK: i32 = 1 << BRICK_SHIFT;
 const BRICK_WORDS: usize = (BRICK * BRICK * BRICK / 4) as usize;
+/** Sites a brick holds: a word of light each, lit. */
+const BRICK_SITES: usize = (BRICK * BRICK * BRICK / 2) as usize;
 /** A block map's blocks, in bricks a side: rays skip blocks with no brick at once. */
 const BLOCK_SHIFT: u32 = 2;
 const BLOCK: i32 = 1 << BLOCK_SHIFT;
@@ -75,10 +85,38 @@ pub fn words(grid: &bake::Grid) -> Vec<u32> {
     (0..grid.cells.len()).step_by(2).map(|i| site(i) | site(i + 1) << 16).collect()
 }
 
-/** What to draw: each level's tiles, the materials' colours, from where and how, how far, and how big. */
+/**
+ * Per site of `grid`, of `level`, in the order of its cells, the light
+ * from its voxel that rays see (Light::seen) as an sRGB colour (bake's
+ * light::colour); 0 where it has none.
+ */
+pub fn lights(grid: &bake::Grid, level: u32, light: &mut Light) -> Vec<u32> {
+    let mut out = vec![0; grid.cells.len()];
+    let count = grid.n.map(|v| (v + BRICK - 1) / BRICK);
+    for (b, &first) in grid.bricks.iter().enumerate() {
+        if first < 0 {
+            continue;
+        }
+        let b = b as i32;
+        let corner = [b % count[0], b / count[0] % count[1], b / count[0] / count[1]].map(|v| v * BRICK);
+        for r in 0..BRICK * BRICK * BRICK {
+            let [x, y, z] = [r % BRICK, r / BRICK % BRICK, r / BRICK / BRICK];
+            let site: [i32; 3] = std::array::from_fn(|d| grid.min[d] + corner[d] + [x, y, z][d]);
+            let i = first as usize * BRICK_SITES + (r >> 1) as usize;
+            if (site[0] + site[1] + site[2]) & 1 == 0 && grid.cells[i] != 0 {
+                out[i] = light.seen(level, site.map(i64::from)).map_or(0, colour);
+            }
+        }
+    }
+    out
+}
+
+/** What to draw: each level's tiles, the materials' colours or, lit, the voxels' light, from where and how, how far, and how big. */
 pub struct Scene {
     pub levels: Vec<Arc<Level>>,
     pub palette: Arc<Vec<u32>>,
+    /** If the tiles carry their voxels' light (world.rs), how bright the sky is: 1 by day, less as --light dims it. */
+    pub lit: Option<f32>,
     pub eye: Vec3,
     /** Degrees, as view_basis takes them; the field of view across the longer side. */
     pub yaw: f64,
@@ -91,16 +129,17 @@ pub struct Scene {
 }
 
 impl Scene {
-    /** For `levels` and `palette` and how far rays reach, `far`, with the fog it has. */
+    /** For `levels` and `palette` (or their light, if `lit`) and how far rays reach, `far`, with the fog it has. */
     pub fn new(
         levels: Vec<Arc<Level>>,
         palette: Arc<Vec<u32>>,
+        lit: Option<f32>,
         eye: Vec3,
         [yaw, pitch, fov]: [f64; 3],
         far: f64,
         pixels: [u32; 2],
     ) -> Scene {
-        Scene { levels, palette, eye, yaw, pitch, fov, far, fog: far * FOG_PER_FAR, pixels }
+        Scene { levels, palette, lit, eye, yaw, pitch, fov, far, fog: far * FOG_PER_FAR, pixels }
     }
 }
 
@@ -113,7 +152,9 @@ struct Globals {
     extent: [f32; 2],
     fog: f32,
     sky_fog: f32,
-    _pad: [f32; 2],
+    /** 1 if voxels are coloured by their light, 0 by their material and the way their faces face. */
+    lit: u32,
+    _pad: u32,
     sky_top: [f32; 4],
     horizon: [f32; 4],
     /** Right, up, forward, in the world: columns of a mat3x3f. */
@@ -125,14 +166,20 @@ impl Globals {
         let [width, height] = scene.pixels.map(f64::from);
         let focal = focal_length(scene.fov, width, height);
         let column = |v: Vec3| [v[0] as f32, v[1] as f32, v[2] as f32, 0.0];
-        let rgba = |c: [f32; 3]| [c[0], c[1], c[2], 1.0];
+        // Dimmed in linear terms, as light adds up.
+        let sky = scene.lit.unwrap_or(1.0);
+        let rgba = |c: [f32; 3]| {
+            let [r, g, b] = c.map(|c| linear_to_srgb(srgb_to_linear(c) * sky));
+            [r, g, b, 1.0]
+        };
         Globals {
             resolution: [width as f32, height as f32],
             extent: [(width / focal) as f32, (height / focal) as f32],
             fog: scene.fog as f32,
             // What of the sky the fog hides, as of something at the far end.
             sky_fog: (1.0 - (-scene.far / scene.fog).exp()) as f32,
-            _pad: [0.0; 2],
+            lit: u32::from(scene.lit.is_some()),
+            _pad: 0,
             sky_top: rgba(SKY_TOP),
             horizon: rgba(SKY_HORIZON),
             view: view_basis(scene.yaw, scene.pitch).map(column),
@@ -234,10 +281,11 @@ impl Window {
      * Holds the bricks of the window around `eye` (world units) of level
      * `level` from `tiles`, taking slots from `free` and giving back those
      * it no longer needs: what tiles gone or the window left becomes
-     * UNKNOWN, what tiles come or it gained their bricks'. The work is that
-     * of the bricks that came or went. Returns the bricks to upload, each
-     * with its slot, its tile and its place in the tile's words, or None
-     * if neither the tiles nor the window moved.
+     * UNKNOWN, what tiles come (new ones in place of others too) or it
+     * gained their bricks'. The work is that of the bricks that came or
+     * went. Returns the bricks to upload, each with its slot, its tile and
+     * its place in the tile's words, or None if neither the tiles nor the
+     * window moved.
      */
     fn sync<'a>(&mut self, level: usize, tiles: &'a Arc<Level>, eye: Vec3, free: &mut Vec<u32>) -> Option<Vec<(u32, &'a Tile, usize)>> {
         // Where its bricks start, its tiles say; until it has any, it holds nothing and rays do not read it.
@@ -272,7 +320,7 @@ impl Window {
         let mut added = Vec::new();
         self.lacking = 0;
         for (id, tile) in &tiles.tiles {
-            let new = previous.as_ref().is_none_or(|p| !p.tiles.contains_key(id));
+            let new = previous.as_ref().is_none_or(|p| p.tiles.get(id).is_none_or(|was| !Arc::ptr_eq(was, tile)));
             let (base, top) = tile_bricks(tile, origin);
             let count: [i32; 3] = std::array::from_fn(|d| top[d] - base[d]);
             let (lo, hi) = in_window((base, top), corner);
@@ -328,32 +376,37 @@ struct Targets {
 
 /** The voxels on a device, drawn into a picture that egui (Shown) or a shot shows. */
 pub struct Marcher {
-    /** Globals, levels, tables, the pool, the palette, the eye, block maps. */
-    buffers: [wgpu::Buffer; 7],
+    /** Globals, levels, tables, the pool, the palette, the eye, block maps, and the pool's bricks' light (none unlit). */
+    buffers: [wgpu::Buffer; 8],
     layouts: [wgpu::BindGroupLayout; 3],
     pipelines: [wgpu::RenderPipeline; 3],
     windows: Vec<Window>,
     free: Vec<u32>,
     palette: Option<Arc<Vec<u32>>>,
     targets: Option<Targets>,
+    /** Whether it draws lit scenes (Scene's `lit`). */
+    pub lit: bool,
 }
 
 /** march.wgsl, with the constants it shares with this file. */
 fn shader() -> String {
     format!(
-        "const WINDOW = {WINDOW};\nconst BLOCK = {BLOCK};\nconst BLOCK_SHIFT = {BLOCK_SHIFT}u;\nconst BRICK = {BRICK};\nconst BRICK_SHIFT = {BRICK_SHIFT}u;\nconst BRICK_WORDS = {BRICK_WORDS}u;\nconst FACTOR = {FACTOR}u;\nconst EMPTY = {EMPTY};\nconst UNKNOWN = {UNKNOWN};\n{}",
+        "const WINDOW = {WINDOW};\nconst BLOCK = {BLOCK};\nconst BLOCK_SHIFT = {BLOCK_SHIFT}u;\nconst BRICK = {BRICK};\nconst BRICK_SHIFT = {BRICK_SHIFT}u;\nconst BRICK_WORDS = {BRICK_WORDS}u;\nconst BRICK_SITES = {BRICK_SITES}u;\nconst FACTOR = {FACTOR}u;\nconst EMPTY = {EMPTY};\nconst UNKNOWN = {UNKNOWN};\n{}",
         include_str!("march.wgsl")
     )
 }
 
 impl Marcher {
-    /** Draws onto targets of `format` when shown. */
-    pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Marcher {
+    /** Draws onto targets of `format` when shown; voxels coloured by their light if `lit` (Scene's). */
+    pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat, lit: bool) -> Marcher {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("march.wgsl"),
             source: wgpu::ShaderSource::Wgsl(shader().into()),
         });
-        let pool = POOL_BYTES.min(device.limits().max_storage_buffer_binding_size) / (BRICK_WORDS as u64 * 4);
+        // Lit, a brick's light takes a word a site, beside its own words.
+        let light_words = if lit { BRICK_SITES } else { 0 };
+        let largest = device.limits().max_storage_buffer_binding_size / (BRICK_WORDS.max(light_words) as u64 * 4);
+        let pool = (POOL_BYTES / ((BRICK_WORDS + light_words) as u64 * 4)).min(largest);
         let buffer = |label, size: usize, usage| {
             device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some(label),
@@ -371,6 +424,7 @@ impl Marcher {
             buffer("palette", 256 * 4, storage),
             buffer("eye", 16, uniform),
             buffer("blocks", GRID_LEVELS * BLOCKS * 4, storage),
+            buffer("lights", (pool as usize * light_words * 4).max(4), storage),
         ];
         let entry = |binding: u32, ty| wgpu::BindGroupLayoutEntry { binding, visibility: wgpu::ShaderStages::FRAGMENT, ty, count: None };
         let buffer_type = |ty| wgpu::BindingType::Buffer { ty, has_dynamic_offset: false, min_binding_size: None };
@@ -387,12 +441,13 @@ impl Marcher {
             entry(4, read),
             entry(5, uniform_type),
             entry(6, read),
-            entry(7, uint),
+            entry(7, read),
             entry(8, uint),
+            entry(9, uint),
         ];
-        let shown = [entry(9, texture(wgpu::TextureSampleType::Float { filterable: false }))];
+        let shown = [entry(10, texture(wgpu::TextureSampleType::Float { filterable: false }))];
         // The samples' pass draws into the textures the resolving one reads, which draws the picture shown.
-        let layouts = [&all[..7], &all[..], &shown[..]]
+        let layouts = [&all[..8], &all[..], &shown[..]]
             .map(|entries| device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: None, entries }));
         let pipeline = |entry: &str, layout: &wgpu::BindGroupLayout, formats: &[wgpu::TextureFormat]| {
             let targets: Vec<_> = formats.iter().map(|&f| Some(f.into())).collect();
@@ -436,6 +491,7 @@ impl Marcher {
             free: (0..pool as u32).rev().collect(),
             palette: None,
             targets: None,
+            lit,
         }
     }
 
@@ -458,7 +514,14 @@ impl Marcher {
             let window = &mut self.windows[level];
             let Some(tiles) = scene.levels.get(level) else { continue };
             if let Some(added) = window.sync(level, tiles, scene.eye, &mut self.free) {
-                upload(queue, &self.buffers[3], &added);
+                upload(queue, &self.buffers[3], &added, BRICK_WORDS, |tile, first| &tile.words[first * BRICK_WORDS..][..BRICK_WORDS]);
+                if self.lit {
+                    // A tile not lit yet: none, so that its voxels show shaded, not what the slot held before.
+                    const NONE: [u32; BRICK_SITES] = [0; BRICK_SITES];
+                    upload(queue, &self.buffers[7], &added, BRICK_SITES, |tile, first| {
+                        tile.lights.as_ref().map_or(&NONE[..], |l| &l[first * BRICK_SITES..][..BRICK_SITES])
+                    });
+                }
                 queue.write_buffer(&self.buffers[2], (level * TABLE * 4) as u64, bytemuck::cast_slice(&window.table));
                 queue.write_buffer(&self.buffers[6], (level * BLOCKS * 4) as u64, bytemuck::cast_slice(&window.counts));
             }
@@ -534,32 +597,38 @@ impl Marcher {
             .map(|(k, b)| wgpu::BindGroupEntry { binding: k as u32, resource: b.as_entire_binding() })
             .collect();
         for (k, view) in views.iter().enumerate() {
-            entries.push(wgpu::BindGroupEntry { binding: 7 + k as u32, resource: wgpu::BindingResource::TextureView(view) });
+            entries.push(wgpu::BindGroupEntry { binding: 8 + k as u32, resource: wgpu::BindingResource::TextureView(view) });
         }
-        let shown = [wgpu::BindGroupEntry { binding: 9, resource: wgpu::BindingResource::TextureView(&picture_view) }];
+        let shown = [wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::TextureView(&picture_view) }];
         let group = |layout, entries: &[wgpu::BindGroupEntry]| {
             device.create_bind_group(&wgpu::BindGroupDescriptor { label: None, layout, entries })
         };
-        let groups = [group(&self.layouts[0], &entries[..7]), group(&self.layouts[1], &entries), group(&self.layouts[2], &shown)];
+        let groups = [group(&self.layouts[0], &entries[..8]), group(&self.layouts[1], &entries), group(&self.layouts[2], &shown)];
         Targets { pixels, samples, picture, groups }
     }
 }
 
-/** Copies `added` bricks into `pool`, in runs of slots one after another. */
-fn upload(queue: &wgpu::Queue, pool: &wgpu::Buffer, added: &[(u32, &Tile, usize)]) {
+/** Copies `added` bricks into `pool`, `per` words a brick as `words` gives them, in runs of slots one after another. */
+fn upload<'a>(
+    queue: &wgpu::Queue,
+    pool: &wgpu::Buffer,
+    added: &[(u32, &'a Tile, usize)],
+    per: usize,
+    words: impl Fn(&'a Tile, usize) -> &'a [u32],
+) {
     let mut added = added.to_vec();
     added.sort_unstable_by_key(|a| a.0);
     let mut run: Vec<u32> = Vec::new();
     let write = |run: &[u32], end: u32| {
-        let start = end as usize - run.len() / BRICK_WORDS;
-        queue.write_buffer(pool, (start * BRICK_WORDS * 4) as u64, bytemuck::cast_slice(run));
+        let start = end as usize - run.len() / per;
+        queue.write_buffer(pool, (start * per * 4) as u64, bytemuck::cast_slice(run));
     };
     for (k, &(slot, tile, first)) in added.iter().enumerate() {
         if k > 0 && slot != added[k - 1].0 + 1 {
             write(&run, added[k - 1].0 + 1);
             run.clear();
         }
-        run.extend_from_slice(&tile.words[first * BRICK_WORDS..(first + 1) * BRICK_WORDS]);
+        run.extend_from_slice(words(tile, first));
     }
     if let Some(last) = added.last() {
         write(&run, last.0 + 1);
@@ -584,13 +653,14 @@ pub struct Offscreen {
 }
 
 impl Offscreen {
-    pub fn new() -> Offscreen {
+    /** Voxels coloured by their light if `lit` (Scene's). */
+    pub fn new(lit: bool) -> Offscreen {
         let instance =
             wgpu::Instance::new(wgpu::InstanceDescriptor { backends: BACKENDS, ..wgpu::InstanceDescriptor::new_without_display_handle() });
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())).expect("adapter");
         let descriptor = wgpu::DeviceDescriptor { required_limits: limits(&adapter), ..Default::default() };
         let (device, queue) = pollster::block_on(adapter.request_device(&descriptor)).expect("device");
-        Offscreen { marcher: Marcher::new(&device, PICTURE), device, queue }
+        Offscreen { marcher: Marcher::new(&device, PICTURE, lit), device, queue }
     }
 
     /** Bricks held, those left out for want of room, and the pool's slots. */

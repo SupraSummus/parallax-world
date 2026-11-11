@@ -217,7 +217,11 @@ Numbers are for the forest at 1280×800, as measured when written.
 - **Native's other engines are short of the splats in places**
   (architecture.md, "Native: another engine").
   - Voxels: the world makes tiles out to `GRID_REACH`, past what rays read
-    (`march::REACH`), and nothing is lit (`--light`).
+    (`march::REACH`).
+    Lit, every voxel of a tile a ray can meet is lit, not only those that show:
+    lighting a view's tiles takes ten times as long as making them,
+    and the light takes twice the bricks' memory, so the pool holds a third as many.
+    A voxel's light is one colour, its faces' mean, whichever face a ray meets.
   - Slabs are baked around the eye and baked again as it moves,
     hundreds of MB every few seconds: walking, they stutter.
     A column keeps only its first voxel, so a medium lets through
@@ -377,7 +381,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   what is far would read a coarser band of the curve, its mean.
   The moor's stream (`stream_distance` in `moor.rs`) is measured along x too;
   from a curve its banks would move where it bends, so it is left as it is.
-- **Light is a prototype, in look's pictures and native's `--light`**
+- **Light is a prototype, in look's pictures and native's computed lighting**
   (`worldgen/src/light.rs`); the web does not light its tiles.
   Light comes along the 12 neighbours' directions only,
   and each level takes one step (`STEPS`) before the coarser one takes over,

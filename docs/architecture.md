@@ -309,7 +309,9 @@ each by the axes its normal leans towards
 (`face_shade`, `voxel_colour`):
 a voxel is shaded by the way its surface faces,
 and coloured by what is seen of it along the face.
-A host that lights the world (native's `--light`) hands the baker instead
+A host that lights the world
+(native's computed lighting, `Lighting` in its panel, or `--light`)
+hands the baker instead
 the light each face of a voxel it shows sends out
 (`bake/src/light.rs`, found by `worldgen/src/light.rs`),
 so only what shows is lit:
@@ -642,6 +644,21 @@ from those of its samples that saw the same.
 Tests hold the window's table to a new one's after any moves and tiles
 (`a_window_moved_and_its_tiles_changed_holds_what_a_new_one_would`)
 and a slab of medium to exp(−extinction · path), as the splats' test does.
+
+The panel picks the lighting apart from the engine (`Lighting`):
+voxels shaded by the way their faces face, or computed,
+by worldgen's `Light`, one model and one cache of light (`Shared`) for every engine;
+each engine only shows it its own way.
+The splats' bakers light the voxels they show, face by face;
+the slabs show none.
+For the voxels, the world's threads light each tile once made
+(after every tile to make, as it takes several times as long):
+each voxel a ray can meet gets one colour, not knowing which face it meets,
+the mean of the light from its faces that light gets out by (`Light::seen`).
+It goes to the GPU beside the bricks, a word a site, in a pool of its own.
+A tile lit is a new tile in the place of the one made,
+so tiles still never change, and its bricks are uploaded again as any new tile's;
+till then its voxels show shaded.
 
 ## 5. Caching
 

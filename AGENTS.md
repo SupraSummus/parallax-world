@@ -83,7 +83,7 @@ worldgen/                    # The world-generation engine, moving to integers, 
 │   ├── frame.rs             # Things built in frames of their own: quarter turns, mirrors, walls
 │   ├── world.rs             # World: what a host needs to show one (generator, spawn, heights), the places it names
 │   ├── picture.rs           # Pictures of a world at one level: rays through its voxels, as PNGs, or through its sites' alpha
-│   ├── light.rs             # Light (a prototype, for look and native's --light): sky, sun and what glows, each level's from coarser levels'; held to light/reference.rs, rays traced through level 0
+│   ├── light.rs             # Light (a prototype, for look and native's computed lighting): sky, sun and what glows, each level's from coarser levels'; held to light/reference.rs, rays traced through level 0
 │   ├── cost.rs              # What generating costs: work counted by layer, reported for a world's tiles, against a baseline
 │   ├── places.rs            # Whether things prefer places: positions modulo periods, as on a grid, over seeds
 │   ├── directions.rs        # Whether a world's directions follow the lattice's: four-fold harmonics of pairs' directions, over seeds
@@ -115,15 +115,15 @@ lab/                         # Experiment, not built by pnpm: split grammars wit
 native/                      # Spike of a native frontend (egui on winit and wgpu), linking bake/ and worlds/; see src/main.rs
 ├── .cargo/config.toml       # Builds for x86-64-v3: floor and ceil inline (see there)
 └── src/
-    ├── main.rs              # The camera (flying or walking, F), the panel and its engine (splats, voxels or slabs); --shot, --bench, --stroll
+    ├── main.rs              # The camera (flying or walking, F), the panel, its engine (splats, voxels or slabs) and lighting (shaded or computed); --shot, --bench, --stroll
     ├── window.rs            # The window: egui on winit and wgpu, drawing either engine's picture, its GPU device made again when lost
-    ├── world.rs             # world.ts for generated worlds: a World's tiles, those the renderer wants first, made and indexed on threads
+    ├── world.rs             # world.ts for generated worlds: a World's tiles, those the renderer wants first, made, indexed and (for the voxels) lit on threads
     ├── view.rs              # view.ts: faces, which rays and screen boxes they draw
     ├── renderer.rs          # Chunks in view: cells of the lattice (bake's lod.rs), not slices; cached, finest and nearest first
     ├── bakery.rs            # Worker threads baking chunks, a baker each sharing the tiles (lit, with a Light each), and clustering their splats for the GPU
     ├── compositor.rs        # compositor.ts with wgpu, for cells: splats uploaded per chunk in clusters, by depth, culled on the GPU against what showed; see-through ones over each other in the order rays meet them
     ├── shot.rs              # --shot: one frame drawn offscreen on the GPU, saved as a PNG, no window
-    ├── march.rs             # The voxels engine: rays through the tiles' voxels, cell to cell, see-through ones added up in the order met; each level's bricks in a window around the eye, a torus; no chunks or faces of the view
+    ├── march.rs             # The voxels engine: rays through the tiles' voxels, cell to cell, see-through ones added up in the order met; each level's bricks (and, lit, their light) in a window around the eye, a torus; no chunks or faces of the view
     ├── march.wgsl
     ├── trace.rs             # The slabs engine (a prototype): slabs along each face baked around the eye, a picture of their columns' first runs; rays for some pixels walk them, each pixel tests its own against what they met
     ├── trace.wgsl

@@ -187,7 +187,11 @@ impl Gpu {
                     compositor.render(&mut encoder);
                 }
                 Picture::Voxels(scene) => {
-                    let marcher = only(resources, || Marcher::new(device, format));
+                    // Lit or not, its pool is another.
+                    if resources.get::<Marcher>().is_some_and(|m| m.lit != scene.lit.is_some()) {
+                        resources.remove::<Marcher>();
+                    }
+                    let marcher = only(resources, || Marcher::new(device, format, scene.lit.is_some()));
                     marcher.draw(&self.device, &self.queue, &mut encoder, &march::Scene { pixels, ..scene });
                 }
                 Picture::Slabs(slabs, version, eye, view, sky_fog) => {

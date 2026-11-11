@@ -13,6 +13,7 @@ use crate::world::{BRICK, Grid, lattices};
 const BLOCK: i64 = 8;
 
 /** The index for faces whose forward is `forward` or its opposite. */
+#[derive(Clone)]
 struct Table {
     forward: [i32; 3],
     c_min: i64,
@@ -24,6 +25,7 @@ struct Table {
     high: Vec<i16>,
 }
 
+#[derive(Clone)]
 pub struct LayerIndex {
     tables: Vec<Table>,
 }

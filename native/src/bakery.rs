@@ -26,6 +26,8 @@ pub struct Request {
     pub tiles: [i32; 4],
     /** The size of the blocks its splats are clustered by (compositor::cluster). */
     pub block: f64,
+    /** Whether its voxels are lit, by the baker's light (Baker's `light`), or shaded by the way their faces face. */
+    pub lit: bool,
 }
 
 /**
@@ -78,7 +80,7 @@ pub struct Bakery {
 }
 
 impl Bakery {
-    /** Starts `threads` workers, each baking with a baker from `baker`. */
+    /** Starts `threads` workers, each baking with a baker from `baker`, its light kept aside for requests not lit. */
     pub fn new(threads: usize, baker: impl Fn() -> Baker + Send + Sync + 'static) -> Bakery {
         let (send, baked) = channel();
         let baker = Arc::new(baker);
@@ -130,6 +132,8 @@ impl Bakery {
 }
 
 fn work(queue: &Queue, send: &Sender<(Request, Baked)>, grids: &Grids, mut baker: Baker) {
+    // The baker's light while it bakes unlit.
+    let mut aside = None;
     // The tiles of each level the baker has: none yet.
     let mut has: Vec<Arc<Tiles>> = (0..GRID_LEVELS).map(|_| Arc::new(Tiles::new(0, []))).collect();
     loop {
@@ -154,6 +158,9 @@ fn work(queue: &Queue, send: &Sender<(Request, Baked)>, grids: &Grids, mut baker
         if !has[level].has_all(r.tiles) {
             queue.0.lock().expect("queue").in_flight.remove(&r.key());
             continue;
+        }
+        if r.lit != baker.light.is_some() {
+            std::mem::swap(&mut baker.light, &mut aside);
         }
         let b = baker.bake_cell(r.face, &r.cell);
         let (splats, clusters, see_through) = cluster(&baker.numbers, half_layer(r.cell.atoms), r.block);

@@ -112,6 +112,9 @@ pub struct Renderer {
     pub render_distance: f64,
     /** How many levels finer than its cell a chunk's voxels are (Lod). */
     pub shift: i32,
+    /** Whether chunks are lit (Request's `lit`), and whether those it has are: when it changes, they are baked again. */
+    pub lit: bool,
+    cells_lit: bool,
 }
 
 /** |v| for the v in [lo, hi] nearest to 0. */
@@ -174,6 +177,8 @@ impl Renderer {
             detail: 2f64.powf(3.25),
             render_distance,
             shift: 3,
+            lit: false,
+            cells_lit: false,
         }
     }
 
@@ -194,6 +199,11 @@ impl Renderer {
     }
 
     pub fn render(&mut self, camera: Vec3, view: &View) -> (Frame, Stats) {
+        if self.lit != self.cells_lit {
+            self.cells.clear();
+            self.picks.iter_mut().for_each(|p| *p = None);
+            self.cells_lit = self.lit;
+        }
         self.receive();
         self.renders += 1;
         let lod = Lod::new(self.shift, self.detail);
@@ -280,7 +290,7 @@ impl Renderer {
                     }
                     &mut Seen::Bake(t) => {
                         let block = crate::compositor::block(z1.max(1.0), view.focal);
-                        missing.push((Request { face: f, cell, tiles: t, block }, d));
+                        missing.push((Request { face: f, cell, tiles: t, block, lit: self.lit }, d));
                     }
                     Seen::Baked(chunk) => {
                         // Its plane, through its site.
@@ -310,6 +320,10 @@ impl Renderer {
     /** Keeps what the bakery delivered, where its face's pick has its cell, and a while for when it comes again. */
     fn receive(&mut self) {
         for (r, baked) in self.bakery.take() {
+            // Baked lit as it was before it changed.
+            if r.lit != self.lit {
+                continue;
+            }
             self.next_id += 1;
             let seen = if baked.splats.is_empty() { Seen::Empty } else { Seen::Baked(Arc::new(Chunk { id: self.next_id, baked })) };
             if let Some(picked) = self.picks[r.face].as_mut().and_then(|p| p.at(&r.cell)) {

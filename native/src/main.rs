@@ -15,16 +15,20 @@
 //! (walks, --on-ground) as the window would, a frame every 60th, and times each frame's parts.
 //! When the window panics or loses its GPU device, it says what it showed as these arguments.
 //! --light lights the world (worldgen's light.rs), the sky, the sun and
-//! what glows this bright: 1,1,0 a clear day, 0.01,0,1 night.
+//! what glows this bright: 1,1,0 a clear day (as the panel's Computed
+//! lighting is unless --light), 0.01,0,1 night.
 //! --detail sets viewing distance over a cell's thickness, --shift how many
 //! levels finer than a cell its voxels are (bake's lod.rs), as the panel does.
 //! --seams and --colour draw as the panel's switches do.
 //! --engine picks what draws, as the panel does (Engine): rays through the
-//! tiles' voxels (march.rs, the default), which take no --light, --detail,
+//! tiles' voxels (march.rs, the default), which take no --detail,
 //! --shift, --seams or --colour; chunks of splats, as the web draws; or rays
 //! through slabs baked along each face (trace.rs), for --shot and --bench
 //! as seen from where they are baked, which take no --light, --seams or
 //! --colour.
+//! The panel picks the lighting apart from the engine (Lighting): voxels
+//! shaded by the way their faces face, or lit by light worked out across
+//! the world, as --light does; each engine shows it its own way.
 
 mod bakery;
 mod compositor;
@@ -47,7 +51,7 @@ use bakery::Bakery;
 use compositor::Colours;
 use renderer::Renderer;
 use view::{Vec3, focal_length, view_basis};
-use world::{Make, World};
+use world::{Lit, Make, World};
 use worldgen::generator::materials_of;
 use worldgen::light::{Brightness, Light, Shared};
 
@@ -64,6 +68,30 @@ enum Engine {
 
 impl Engine {
     const ALL: [(Engine, &str); 3] = [(Engine::Splats, "splats"), (Engine::Voxels, "voxels"), (Engine::Slabs, "slabs")];
+
+    /** How the world's tiles are lit for it, under `lighting`: the slabs show none. */
+    fn lit(self, lighting: Lighting) -> Lit {
+        match (lighting, self) {
+            (Lighting::Shaded, _) | (_, Engine::Slabs) => Lit::Not,
+            (Lighting::Computed, Engine::Splats) => Lit::Reading,
+            (Lighting::Computed, Engine::Voxels) => Lit::Tiles,
+        }
+    }
+}
+
+/**
+ * How voxels are lit, whatever draws them: shaded by the way their faces
+ * face, or by light worked out across the world (worldgen's Light), the
+ * same for every engine.
+ */
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Lighting {
+    Shaded,
+    Computed,
+}
+
+impl Lighting {
+    const ALL: [(Lighting, &str); 2] = [(Lighting::Shaded, "shaded"), (Lighting::Computed, "computed")];
 }
 
 /**
@@ -173,8 +201,9 @@ struct App {
     walk_through: Vec<bool>,
     /** The world, as --view gives it: `seed=…` and `&world=…` if given. */
     world_query: String,
-    /** How bright the sky is (compositor::View). */
-    sky: f32,
+    lighting: Lighting,
+    /** How bright the sky, the sun and what glows are, Computed. */
+    brightness: Brightness,
     /** What the ui drew last, for the window to draw (window::Content). */
     picture: Option<(window::Picture, egui::Rect)>,
     /** By material id, its colour (the voxels' and the slabs'). */
@@ -205,6 +234,12 @@ impl window::Content for App {
                 ui.label("Engine");
                 for (engine, name) in Engine::ALL {
                     ui.radio_value(&mut self.engine, engine, name);
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.label("Lighting");
+                for (lighting, name) in Lighting::ALL {
+                    ui.radio_value(&mut self.lighting, lighting, name);
                 }
             });
             // The web's (App.tsx).
@@ -281,6 +316,12 @@ impl window::Content for App {
             let focal = focal_length(self.fov, width, height);
             let view = view::View { yaw: self.yaw, pitch: self.pitch, width, height, focal };
             let far = self.renderer.render_distance;
+            let lit = self.engine.lit(self.lighting);
+            self.renderer.lit = lit != Lit::Not;
+            self.world.lit = lit;
+            // The sky as bright as the light, if any.
+            let lit_sky = (lit != Lit::Not).then_some(self.brightness.sky);
+            let sky = lit_sky.unwrap_or(1.0);
             // How the splats and the slabs are seen.
             let faces_view = compositor::View {
                 yaw: self.yaw,
@@ -292,7 +333,7 @@ impl window::Content for App {
                 pixels: [0, 0],
                 seams: self.seams,
                 colours: self.colours,
-                sky: self.sky,
+                sky,
             };
             // The tiles each engine reads, and what it draws: drawn from the next frame on.
             // And whether chunks or slabs are baking, for frames until they are in.
@@ -316,7 +357,8 @@ impl window::Content for App {
                     let levels = march::levels(far);
                     let tiles: Vec<_> = (0..levels).map(|l| self.renderer.level(l).clone()).collect();
                     self.stats = format!("{} tiles", tiles.iter().map(|l| l.tiles.len()).sum::<usize>());
-                    let scene = march::Scene::new(tiles, self.palette.clone(), self.camera, [self.yaw, self.pitch, self.fov], far, [0, 0]);
+                    let scene =
+                        march::Scene::new(tiles, self.palette.clone(), lit_sky, self.camera, [self.yaw, self.pitch, self.fov], far, [0, 0]);
                     (std::array::from_fn(|l| l < levels), Vec::new(), false, window::Picture::Voxels(scene))
                 }
             };
@@ -366,20 +408,22 @@ impl App {
             "--engine {:?} --view '{}&camera={x},{y},{z}&look={},{}&fov={}&distance={:.0}&detail={}' --shift {} --size {:.0}x{:.0}",
             self.engine, self.world_query, self.yaw, self.pitch, self.fov, r.render_distance, r.detail, r.shift, size[0], size[1],
         );
-        *LAST_FRAME.lock().unwrap_or_else(|e| e.into_inner()) = format!("{frame}\n{}", self.stats);
+        let b = self.brightness;
+        let light = if self.lighting == Lighting::Computed { format!(" --light {},{},{}", b.sky, b.sun, b.glow) } else { String::new() };
+        *LAST_FRAME.lock().unwrap_or_else(|e| e.into_inner()) = format!("{frame}{light}\n{}", self.stats);
     }
 }
 
 /** The world `make` makes of a seed, lit as `Shared` says, which holds its tiles. */
-type Lit = (Make, u64, Shared);
+type Lights = (Make, u64, Shared);
 
-/** The renderer and its bakery, for `world`; if `lit`, each baker lights the voxels it shows (a Light each). */
-fn renderer(world: &worldgen::World, lit: Option<Lit>, threads: usize, render_distance: f64) -> Renderer {
+/** The renderer and its bakery, for `world`; given `lights`, each baker can light the voxels it shows (a Light each), as the renderer's `lit` says. */
+fn renderer(world: &worldgen::World, lights: Option<Lights>, threads: usize, render_distance: f64) -> Renderer {
     let faces = view::faces();
     let colours: Vec<u32> = materials_of(&world.generator).iter().map(|m| m.rgb()).collect();
     let bakery = Bakery::new(threads, move || {
         let mut baker = Baker::new(&colours);
-        if let Some((make, seed, shared)) = lit.clone() {
+        if let Some((make, seed, shared)) = lights.clone() {
             let mut light = Light::new(make(seed), shared);
             baker.light = Some(Box::new(move |level, site| light.faces(level as u32, site.map(i64::from))));
         }
@@ -631,22 +675,23 @@ fn main() {
     let focal = focal_length(fov, size[0], size[1]);
     let first = view::View { yaw, pitch, width: size[0], height: size[1], focal };
     // Sky, sun and lamps, as in look's `light`: 1,1,0 a clear day, 0.01,0,1 night.
-    let brightness = value("--light").map(|v| {
+    let light = value("--light").map(|v| {
         let v: Vec<f32> = v.split(',').map(|v| v.parse().expect("--light SKY,SUN,GLOW")).collect();
         let [sky, sun, glow] = v.try_into().expect("--light SKY,SUN,GLOW");
         Brightness { sky, sun, glow }
     });
-    let lit = brightness.map(|b| (make, seed, Shared::new(b)));
+    let lighting = if light.is_some() { Lighting::Computed } else { Lighting::Shaded };
+    let brightness = light.unwrap_or(Brightness { sky: 1.0, sun: 1.0, glow: 0.0 });
+    let shared = Shared::new(brightness);
     let shown = make(seed);
-    let mut renderer = renderer(&shown, lit.clone(), threads, render_distance);
+    let mut renderer = renderer(&shown, Some((make, seed, shared.clone())), threads, render_distance);
     if let Some(v) = value("--detail").map(|v| v.parse().expect("detail")).or(query.detail) {
         renderer.detail = v;
     }
     if let Some(v) = value("--shift") {
         renderer.shift = v.parse().expect("--shift S");
     }
-    let sky = brightness.map_or(1.0, |b| b.sky);
-    let mut world = World::new(make, seed, lit.map(|(.., shared)| shared), threads);
+    let mut world = World::new(make, seed, Some(shared), threads);
     let camera = query.camera.unwrap_or(shown.spawn.map(|v| v as f64));
     let faces: [[Vec3; 3]; 12] = std::array::from_fn(|f| view::faces()[f].axes);
     let fog_distance = render_distance * FOG_PER_RENDER_DISTANCE;
@@ -654,6 +699,11 @@ fn main() {
         Engine::ALL.into_iter().find(|(_, name)| name.eq_ignore_ascii_case(v)).expect("--engine splats, voxels or slabs").0
     });
     let palette: Arc<Vec<u32>> = Arc::new(materials_of(&shown.generator).iter().map(|m| m.rgb()).collect());
+    let lit = engine.lit(lighting);
+    renderer.lit = lit != Lit::Not;
+    world.lit = lit;
+    let lit_sky = (lit != Lit::Not).then_some(brightness.sky);
+    let sky = lit_sky.unwrap_or(1.0);
     if ["--bench", "--shot", "--stroll"].into_iter().any(flag) && engine == Engine::Voxels {
         let levels = march::levels(render_distance);
         let start = Instant::now();
@@ -661,9 +711,9 @@ fn main() {
         println!("tiles made in {:.2} s on {threads} threads", start.elapsed().as_secs_f64());
         let scene = |renderer: &Renderer, eye| {
             let tiles = (0..levels).map(|l| renderer.level(l).clone()).collect();
-            march::Scene::new(tiles, palette.clone(), eye, [yaw, pitch, fov], render_distance, size.map(|v| v as u32))
+            march::Scene::new(tiles, palette.clone(), lit_sky, eye, [yaw, pitch, fov], render_distance, size.map(|v| v as u32))
         };
-        let mut offscreen = march::Offscreen::new();
+        let mut offscreen = march::Offscreen::new(lit_sky.is_some());
         if let Some(v) = value("--stroll") {
             let walk_through: Vec<bool> = materials_of(&shown.generator).iter().map(|m| m.walk_through).collect();
             let on_ground = flag("--on-ground").then_some(walk_through.as_slice());
@@ -777,7 +827,8 @@ fn main() {
         picking: 0.0,
         walker: None,
         walk_through: materials_of(&shown.generator).iter().map(|m| m.walk_through).collect(),
-        sky,
+        lighting,
+        brightness,
         world_query: format!("seed={seed}{}", world_name.map(|w| format!("&world={w}")).unwrap_or_default()),
         picture: None,
         palette,
@@ -904,8 +955,9 @@ mod tests {
             world.wait();
         }
         let palette = Arc::new(materials_of(&shown.generator).iter().map(|m| m.rgb()).collect());
-        let scene = march::Scene { fog: f64::INFINITY, ..march::Scene::new(levels, palette, camera, [45.0, 0.0, FOV], far, [320, 200]) };
-        let (width, _, pixels) = march::Offscreen::new().picture(&scene);
+        let scene =
+            march::Scene { fog: f64::INFINITY, ..march::Scene::new(levels, palette, None, camera, [45.0, 0.0, FOV], far, [320, 200]) };
+        let (width, _, pixels) = march::Offscreen::new(false).picture(&scene);
         (width, pixels)
     }
 

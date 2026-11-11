@@ -650,7 +650,7 @@ A kind marked `walk_through` is one a walking body goes through
 so ground and what stands on it are different kinds,
 even of one colour (the moor's `heather` and `heatherSprigs`).
 A kind marked `glows` gives light of its colour, as lamps do
-(`worldgen/src/light.rs`, for now only in look and native's `--light`).
+(`worldgen/src/light.rs`, for now only in look and native's computed lighting).
 Each site holds as much as what is in it stops rays
 (`VoxelGrid`'s `alpha`, `seen` and `glow`), each thing its share,
 and glows as its glowing things, in proportion to their shares;
