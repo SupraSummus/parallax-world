@@ -365,11 +365,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   paint its roof's ends.
   And a cell's share counts rays the cells behind it stop too,
   so a thing keeps more cells than it stops rays.
-- **The valley's ground promises no slope** (`Sloped::any`):
-  its cuttings, walls and levelled sites step by tens of units
-  between neighbouring columns (53 near spawn),
-  so its layers about it are drawn everywhere.
-  Bounded steps would let them be skipped as the forest's are.
 - **Layers that don't say where they are are drawn everywhere**
   (`Field::about`, `Population::on`):
   the railway's two fields (its track is a plan of heights too),
