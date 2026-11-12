@@ -80,8 +80,10 @@ const FORMATION: i64 = m(3.0);
 const EXTRA: i64 = m(14.0);
 const STATION: i64 = m(50.0);
 const EASE: i64 = m(30.0);
+/** How far a cutting's sides reach past the formation, and a fill's past a bridge's ends. */
+const SIDES: i64 = m(CUT.max(FILL) / SLOPE);
 /** How far round the line it shapes the ground at most: the formation, a station's room, and a cutting's sides. */
-const REACH: i64 = FORMATION + EXTRA + m(CUT.max(FILL) / SLOPE);
+const REACH: i64 = FORMATION + EXTRA + SIDES;
 // Never in a town: it stays further across than the furthest a town and its bid reach, by construction.
 const _: () = assert!(OFF.0 - CORRIDOR - REACH >= town::ACROSS + m(4.0));
 /** Plan scale of the line's pieces: under the towns' (the ground it reads is levelled under them), over the landmarks' and steadings' (which keep off it). */
@@ -240,6 +242,8 @@ struct At {
     /** The track's top, in units: the formation's under the ballast. */
     top: i64,
     structure: Structure,
+    /** How far along the line it is from where the ground carries the track: zero there, none in a tunnel or further along a bridge than SIDES. */
+    beyond: Option<Fx>,
     /** Half the formation's width there, wider at a station. */
     half: i64,
     /** By a station, on its side: its platform and building's yard. */
@@ -334,14 +338,34 @@ impl Line {
             let wide = Fx::ONE - smoothstep(Units(STATION).to_fx(), Units(STATION + EASE).to_fx(), Units(off).to_fx());
             (FORMATION + (wide * Units(EXTRA)).round_units().0, off < STATION)
         });
+        let beyond = match structure {
+            Structure::Earth => Some(Fx::ZERO),
+            Structure::Bridge => self.to_earth(k, near.along),
+            Structure::Tunnel => None,
+        };
         Some(At {
             distance: near.distance,
             along: k * PIECE + (near.along * Units(FINEST)).floor_units().0,
             top: top.round_units().0,
             structure,
+            beyond,
             half,
             platform,
         })
+    }
+
+    /**
+     * How far `along` piece k (segments) is from the nearest point that
+     * the ground carries the track at, within SIDES: from halfway to it,
+     * where `Piece::at` changes, across the pieces' ends.
+     */
+    fn to_earth(&self, k: i64, along: Fx) -> Option<Fx> {
+        let n = 1i64 << LEVELS;
+        let earth = |i: i64| self.piece(k + i.div_euclid(n)).structure[i.rem_euclid(n) as usize] == Structure::Earth;
+        let (p, most) = ((along + Fx::HALF).floor_units().0, SIDES / FINEST + 1);
+        let ahead = (p..=p + most).find(|&i| earth(i)).map(|i| Units(i).to_fx() - Fx::HALF - along);
+        let behind = (p - most..=p).rev().find(|&i| earth(i)).map(|i| along - Units(i).to_fx() - Fx::HALF);
+        [ahead, behind].into_iter().flatten().min().map(|d| d * Units(FINEST)).filter(|&d| d < Units(SIDES).to_fx())
     }
 
     /** The track at z: where it is, x and z, its top, and what carries it. */
@@ -450,12 +474,21 @@ impl Railway {
         self.line.near(x, z, margin).is_some()
     }
 
-    /** The ground at (x, z), `ground` before, cut or filled to the track: level with it across the formation, sloping from its edges. */
+    /**
+     * The ground at (x, z), `ground` before, cut or filled to the track:
+     * level with it across the formation, sloping from its edges, and
+     * round a bridge's ends under it as far as its sides reach, which
+     * meet the ground there, not end in a wall.
+     */
     pub fn shaped(&self, x: i64, z: i64, ground: Fx) -> Fx {
-        let Some(at) = self.at(x, z).filter(|a| a.structure == Structure::Earth) else { return ground };
+        let Some((at, beyond)) = self.at(x, z).and_then(|a| Some((a, a.beyond?))) else { return ground };
         let top = Units(at.top).to_fx();
-        let slope = (at.distance - Units(at.half).to_fx()).max(Fx::ZERO) * fx(SLOPE);
-        ground.clamp(top - slope, top + slope)
+        let out = (at.distance - Units(at.half).to_fx()).max(Fx::ZERO).hypot(beyond);
+        let slope = out * fx(SLOPE);
+        // Steeper over the last third of the sides, to meet the ground where they end.
+        let sides = Units(SIDES).to_fx();
+        let keep = Fx::ONE - smoothstep(sides * 2 / 3, sides, out);
+        ground + (ground.clamp(top - slope, top + slope) - ground) * keep
     }
 
     /** Its bid for column (x, z): ahead over its formation and a little either side, but over a tunnel. */
@@ -631,6 +664,43 @@ mod tests {
             let runs: Vec<&[Structure]> = structure.chunk_by(|a, b| a == b).collect();
             for run in &runs[1..runs.len() - 1] {
                 assert!(run[0] == Structure::Earth || run.len() >= MIN_RUN as usize, "seed {seed}: a run of {}", run.len());
+            }
+        }
+    }
+
+    /**
+     * Round the first few ends of bridges along the line, at each seed,
+     * the railway steepens the ground by under a metre a unit: no fill
+     * ends in a wall.
+     */
+    #[test]
+    fn ends_its_fills_in_no_wall() {
+        for seed in [42, 1, 2, 3] {
+            let terrain = Rc::new(Terrain::new(seed));
+            let railway = Railway::new(seed, terrain.clone());
+            let added = |x: i64, z: i64| {
+                let ground = terrain.ground(x, z);
+                railway.shaped(x, z, ground) - ground
+            };
+            let mut ends = 0;
+            for k in 0.. {
+                if ends >= 6 {
+                    break;
+                }
+                let piece = railway.line.piece(k);
+                for (i, w) in piece.structure.windows(2).enumerate() {
+                    if w[0] == w[1] || w.contains(&Structure::Tunnel) {
+                        continue;
+                    }
+                    ends += 1;
+                    let [x0, _, z0] = piece.points[i].map(|v| v.round_units().0);
+                    let r = FORMATION + SIDES + FINEST;
+                    for (x, z) in (x0 - r..x0 + r).flat_map(|x| (z0 - r..z0 + r).map(move |z| (x, z))) {
+                        let here = added(x, z);
+                        let step = (added(x + 1, z) - here).abs().max((added(x, z + 1) - here).abs());
+                        assert!(step < Fx::m(1.0), "seed {seed}: a step of {step:?} at ({x}, {z})");
+                    }
+                }
             }
         }
     }

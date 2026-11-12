@@ -107,6 +107,11 @@ impl Fx {
         float(self.0)
     }
 
+    /** √(self² + other²). */
+    pub fn hypot(self, other: Fx) -> Fx {
+        Fx(((self.0 as i128).pow(2) + (other.0 as i128).pow(2)).isqrt() as Fixed)
+    }
+
     pub const fn abs(self) -> Fx {
         Fx(self.0.abs())
     }

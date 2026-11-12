@@ -726,6 +726,9 @@ and nearer it is cut or filled, sloping from the formation's edges.
 That is decided at each of the line's points, 8 m apart,
 and a bridge or tunnel shorter than four points (32 m) is cut or filled
 instead, so none is a stub where the ground just crosses a threshold.
+Under a bridge's ends the fill rounds off as its sides slope,
+and near the edge of the railway's reach every side steepens to meet the ground:
+no earthwork ends in a wall but a tunnel's portal.
 A station stands by each town the line passes on the ground.
 The railway bids for its formation and under its bridges, not over its tunnels.
 Seen from above, the line keeps within a corridor of the segment
