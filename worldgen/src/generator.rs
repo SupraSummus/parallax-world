@@ -284,14 +284,20 @@ pub struct Field {
 /**
  * Where a field's spans along y are: from `below` under to `above` over
  * `of` at their column, give or take what a line of sites stands for
- * (`slack`). A rule, checked wherever it draws; so it is asked to draw
- * only where that may be (Sloped::range).
+ * (`slack`), and under that `under` if it says, down without end (a span
+ * from DEEP). A rule, checked wherever it draws; so it is asked to draw
+ * only where that may be (Sloped::range), and under it fills `under`.
  */
 pub struct About {
     pub of: Rc<Sloped>,
     pub below: i64,
     pub above: i64,
+    /** A solid kind under it all: the ground, solid to the bottom. */
+    pub under: Option<Kind>,
 }
+
+/** Where a span reaches down without end from: under everything (About's `under`). */
+pub const DEEP: i64 = i64::MIN / 4;
 
 impl About {
     /**
@@ -305,11 +311,28 @@ impl About {
         Some(2 * (1 + self.of.slope()?) * spacing)
     }
 
-    /** Whether spans of lines in [min, max] (x, z, lattice units, inclusive) may meet heights [y0, y1], at sites `spacing` apart. */
-    fn may_meet(&self, min: [i64; 2], max: [i64; 2], [y0, y1]: [i64; 2], spacing: i64) -> bool {
-        let (Some((lo, hi)), Some(slack)) = (self.of.range(min, max), self.slack(spacing)) else { return true };
-        y0 <= hi + self.above + slack && y1 >= lo - self.below - slack
+    /**
+     * What lines in [min, max] (x, z, lattice units, inclusive) draw in
+     * heights [y0, y1], at sites `spacing` apart: whatever they draw, all
+     * `under` (a kind), or nothing.
+     */
+    fn meets(&self, min: [i64; 2], max: [i64; 2], [y0, y1]: [i64; 2], spacing: i64) -> Meets {
+        let (Some((lo, hi)), Some(slack)) = (self.of.range(min, max), self.slack(spacing)) else { return Meets::Any };
+        match self.under {
+            _ if y0 > hi + self.above + slack => Meets::Nothing,
+            Some(kind) if y1 < lo - self.below - slack => Meets::All(kind),
+            None if y1 < lo - self.below - slack => Meets::Nothing,
+            _ => Meets::Any,
+        }
     }
+}
+
+/** What a field's lines draw in a box, by what they are `About`. */
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Meets {
+    Any,
+    All(Kind),
+    Nothing,
 }
 
 /**
@@ -1134,7 +1157,7 @@ pub fn generate(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
                 draw(drawable, generator.seed, s, &clip, &mut |_, _, share, _, x, y, z| drew = drew.or((share > 0).then_some([x, y, z])));
             }
             if let Some(site) = drew {
-                broke(&group[0].key, site, s, &clip);
+                broke(&group[0].key, site, s, &clip, "draws where it says it may not");
             }
             continue;
         }
@@ -2007,10 +2030,9 @@ fn checking() -> bool {
     CHECKING.with_borrow(Option::is_some)
 }
 
-/** Keeps, while checking, that what `key` names drew at `site`, sites `s` apart, in `clip`, which it said it may not. */
-fn broke(key: &str, site: [i64; 3], s: i64, clip: &Box3) {
-    let message =
-        format!("{key} draws at site {site:?}, sites {s} apart, in {:?} (lattice units), where it says it may not", units_of(clip, s));
+/** Keeps, while checking, that what `key` names, at `site`, sites `s` apart, in `clip`, does other than it says (`what`). */
+fn broke(key: &str, site: [i64; 3], s: i64, clip: &Box3, what: &str) {
+    let message = format!("{key} {what}: at site {site:?}, sites {s} apart, in {:?} (lattice units)", units_of(clip, s));
     CHECKING.with_borrow_mut(|broken| broken.as_mut().expect("checking").push(message));
 }
 
@@ -2083,35 +2105,45 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
             let mut site = [0i64; 3];
             assert!(axis == 1 || field.about.is_none(), "field {}: spans along y only are about a plan of heights", field.name);
             // Block by block of lines, those that may not meet the clip skipped; while checking, drawn to see they don't.
-            let mut drew = None;
+            let (mut drew, mut unlike) = (None, None);
             let mut record = |_: Look, _: Op, share: u32, _: u32, x: i64, y: i64, z: i64| drew = drew.or((share > 0).then_some([x, y, z]));
             for (bu, bv) in (lo[a]..hi[a]).step_by(LINES as usize).flat_map(|u| (lo[b]..hi[b]).step_by(LINES as usize).map(move |v| (u, v)))
             {
                 let (to_u, to_v) = ((bu + LINES).min(hi[a]), (bv + LINES).min(hi[b]));
-                let skipped = field.about.as_ref().is_some_and(|about| {
-                    let along = [lo[axis] * s, (hi[axis] - 1) * s];
-                    !about.may_meet([bu * s, bv * s], [(to_u - 1) * s, (to_v - 1) * s], along, s)
-                });
-                if skipped && !checking() {
+                let (bottom, top) = (lo[axis] * s, (hi[axis] - 1) * s);
+                let meets = field
+                    .about
+                    .as_ref()
+                    .map_or(Meets::Any, |about| about.meets([bu * s, bv * s], [(to_u - 1) * s, (to_v - 1) * s], [bottom, top], s));
+                if meets == Meets::Nothing && !checking() {
                     continue;
                 }
-                let put: &mut Put = if skipped { &mut record } else { &mut *put };
+                let put: &mut Put = if meets == Meets::Nothing { &mut record } else { &mut *put };
                 for u in bu..to_u {
                     for v in bv..to_v {
                         site[a] = u;
                         site[b] = v;
-                        // A line along x or z reads plans at one z or x: dithered across it only.
-                        let mut moved = offset(site[0], site[2]);
-                        if axis != 1 {
-                            moved[axis / 2] = 0;
-                        }
-                        work.reads += 1;
-                        let spans = plan::footprint(s, moved, || spans(u * s, v * s, s));
-                        if let Some((about, slack)) = field.about.as_ref().and_then(|about| Some((about, about.slack(s)?))) {
+                        let (spans, about) = match meets {
+                            // Under its ground: all of a kind, not asked.
+                            Meets::All(kind) if !checking() => (vec![Span::solid(DEEP, top + s, kind)], None),
+                            _ => {
+                                // A line along x or z reads plans at one z or x: dithered across it only.
+                                let mut moved = offset(site[0], site[2]);
+                                if axis != 1 {
+                                    moved[axis / 2] = 0;
+                                }
+                                work.reads += 1;
+                                (plan::footprint(s, moved, || spans(u * s, v * s, s)), field.about.as_ref())
+                            }
+                        };
+                        // What it is about, held to it where asked.
+                        if let Some((about, slack)) = about.and_then(|about| Some((about, about.slack(s)?))) {
                             let g = about.of.at(u * s, v * s);
+                            let (low, high) = (g - about.below - slack, g + about.above + slack);
+                            let under = |span: &Span| about.under == Some(span.kind) && span.extinction.is_none();
                             for span in spans.iter().filter(|span| span.from < span.to) {
                                 assert!(
-                                    span.from >= g - about.below - slack && span.to <= g + about.above + slack,
+                                    (span.from >= low || under(span)) && span.to <= high,
                                     "field {}: span [{}, {}) at column ({}, {}) reaches past {} under and {} over its ground {g}, \
                                  give or take {slack} at sites {s} apart (Field::about); see \"Rules\" in {DOCS}",
                                     field.name,
@@ -2122,6 +2154,31 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
                                     about.below,
                                     about.above
                                 );
+                            }
+                            assert!(
+                                about.under.is_none()
+                                    || bottom >= low
+                                    || spans.iter().any(|span| under(span) && span.from < bottom && span.to >= low),
+                                "field {}: at column ({}, {}), kind {:?} doesn't reach up from the bottom to {low}, {} under its ground {g}, \
+                                 give or take {slack} at sites {s} apart (Field::under); see \"Rules\" in {DOCS}",
+                                field.name,
+                                u * s,
+                                v * s,
+                                about.under,
+                                about.below,
+                            );
+                        }
+                        if let Meets::All(kind) = meets {
+                            // Checking: it is all `kind` as it says, a solid span of it through and nothing else in it.
+                            let through = spans
+                                .iter()
+                                .any(|span| span.kind == kind && span.extinction.is_none() && span.from < bottom && span.to > top);
+                            let alone = spans
+                                .iter()
+                                .all(|span| span.from >= span.to || span.from > top || (span.kind == kind && span.extinction.is_none()));
+                            if !(through && alone) && unlike.is_none() {
+                                site[axis] = lo[axis];
+                                unlike = Some((site, kind));
                             }
                         }
                         for span in spans {
@@ -2141,7 +2198,10 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
                 }
             }
             if let Some(site) = drew {
-                broke(field.name, site, s, clip);
+                broke(field.name, site, s, clip, "draws where it says it may not");
+            }
+            if let Some((site, kind)) = unlike {
+                broke(field.name, site, s, clip, &format!("isn't all kind {kind} under its ground, as it says"));
             }
         }
     }
@@ -2570,7 +2630,53 @@ mod tests {
         let b = Box3 { min: [0, 45, 0], max: [32, 55, 4] };
         assert!(generate(&spiked, &b, 2).pieces.alpha.iter().all(|&a| a == 0), "skipped");
         let (_, broken) = checking_skipped(|| generate(&spiked, &b, 2));
-        assert!(broken.len() == 1 && broken[0].starts_with("ground draws at site [3, 49, 0]"), "{broken:?}");
+        assert!(broken.len() == 1 && broken[0].starts_with("ground draws where it says it may not: at site [3, 49, 0]"), "{broken:?}");
+    }
+
+    /** Ground `height(x)` high, said to rise at most `slope` a column: a surface about it, stone under it. */
+    fn solid_ground(height: fn(i64) -> i64, slope: i64) -> Generator {
+        let of = Rc::new(Sloped::new(Rc::new(plan::Plan::new("ground", 1, move |x, _| height(x))), slope));
+        let field = Field::columns("ground", 0.0, Op::Fill, move |x, _, s| crate::column::Column::new(height(x), s).surface(0, 4).under(0));
+        layers(vec![Layer::Field(field.about(of, 4, 1).under(0))])
+    }
+
+    #[test]
+    fn a_field_under_its_ground_is_solid_to_the_bottom() {
+        let world = solid_ground(|x| x / 4, 1);
+        for level in 0..4 {
+            let s = 1 << level;
+            // Deep under it, filled without asking the field; and across it.
+            for (y, solid) in [(-4096, true), (-16, false)] {
+                let b = Box3 { min: [0, y / s, 0], max: [64, y / s + 32, 16] };
+                let (grid, broken) = checking_skipped(|| generate(&world, &b, level));
+                assert_eq!(broken, Vec::<String>::new(), "level {level}, at {y}: drawn as the field would");
+                let sites =
+                    (b.min[2]..b.max[2]).flat_map(|z| (b.min[1]..b.max[1]).flat_map(move |y| (b.min[0]..b.max[0]).map(move |x| [x, y, z])));
+                let full = sites.filter(|&[x, y, z]| crate::grid::is_site(x, y, z)).all(|[x, y, z]| grid.alpha(x, y, z) == ALPHA);
+                assert_eq!(full, solid, "level {level}, at {y}");
+                assert_eq!(generate(&world, &b, level).alpha(0, b.min[1], 0), grid.alpha(0, b.min[1], 0), "level {level}, at {y}");
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "field ground: at column (0, 0), kind Some(0) doesn't reach up from the bottom to -6, 4 under its ground 0")]
+    fn refuses_a_field_not_under_its_ground_as_it_says() {
+        let flat = Rc::new(Sloped::new(Rc::new(plan::Plan::new("flat", 1, |_, _| 0)), 0));
+        let field = Field::columns("ground", 0.0, Op::Fill, |_, _, _| vec![Span::solid(-4, 1, 0)]).about(flat, 4, 1).under(0);
+        generate(&layers(vec![Layer::Field(field)]), &Box3 { min: [0, -16, 0], max: [8, 16, 8] }, 0);
+    }
+
+    #[test]
+    fn checking_finds_a_field_not_under_its_ground_where_it_says() {
+        // A hole at x = 12 the slope's rule never sees, sampled every 8: filled under the ground all the same.
+        let holed = solid_ground(|x| if x == 12 { -200 } else { 0 }, 0);
+        let b = Box3 { min: [0, -55, 0], max: [32, -45, 4] };
+        let (_, broken) = checking_skipped(|| generate(&holed, &b, 2));
+        assert!(
+            broken.len() == 1 && broken[0].starts_with("ground isn't all kind 0 under its ground, as it says: at site [3, -55, 0]"),
+            "{broken:?}"
+        );
     }
 
     #[test]

@@ -141,7 +141,7 @@ pub fn valley(seed: u64) -> World {
     layers.extend(town::layers(towns, land.clone(), TOWN, ground.clone()));
     layers.extend(fields::layers(seed, land.clone(), FIELDS, ground.clone(), path.clone()));
     layers.extend(landmarks::layers(landmarks, land.clone(), LANDMARKS, ground.clone()));
-    let moor = moor::Ground { ground: ground.clone(), land: Some((land.clone(), MOOR)), path: Some(path), bottom: None };
+    let moor = moor::Ground { ground: ground.clone(), land: Some((land.clone(), MOOR)), path: Some(path), under: false };
     layers.extend(moor::layers(moorland, moor));
     layers.extend(mountains::layers(ranges, ground.clone()));
     layers.extend(railway::layers(railway, land, RAILWAY, ground));

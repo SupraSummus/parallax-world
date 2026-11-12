@@ -11,7 +11,7 @@
 //! reaching down past the columns around (`sides`). See "Writing a world"
 //! in docs/generators.md.
 
-use crate::generator::{Kind, Span};
+use crate::generator::{DEEP, Kind, Span};
 
 impl Span {
     /** Solid `kind` in [from, to). */
@@ -105,6 +105,11 @@ impl Column {
     pub fn sides(self, kind: impl Into<Kind>, lowest: i64, depth: i64) -> Column {
         let bottom = lowest.min(self.height - depth) - 2 * self.spacing;
         self.fill_below_exactly(kind, bottom)
+    }
+
+    /** `kind` under the layers so far, down without end: the ground solid to the bottom (`Field::under`). */
+    pub fn under(self, kind: impl Into<Kind>) -> Column {
+        self.fill_below_exactly(kind, DEEP)
     }
 
     /** A medium `height` tall on what stands on the ground so far, as `Span::medium`. */

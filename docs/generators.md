@@ -73,7 +73,9 @@ A layer may say **where it is**, about a plan of heights
 such as a world's ground (`plan::Sloped`):
 a field's spans along y lie from `below` under to `above` over it
 at their column (`Field::about`),
-a population's things stand on it (`Population::on`).
+a population's things stand on it (`Population::on`);
+the ground's field may say what it is under all that (`Field::under`),
+solid down without end.
 Each is a rule (below), checked wherever it draws;
 so the framework asks it to draw only where it may be:
 a field line by line in blocks (`LINES`), a population box by box,
@@ -82,7 +84,7 @@ which its slope bounds;
 a plan promising no slope (`Sloped::any`) leaves them drawn everywhere.
 So a host may ask for any box, in any order,
 and a field about the ground costs little in the air above it
-or the rock below it.
+or the rock below it, where it is not asked at all.
 A layer that says nothing is drawn everywhere.
 
 A thing is a **node**: its **shapes**, and **children**,
@@ -337,7 +339,8 @@ Broken rules panic, naming the thing and pointing here:
   what it is `about` at its column,
   give or take two sites (a span is at least two sites tall)
   and twice the slope times the spacing
-  (a line reaches down past the eight columns around it, `sides`).
+  (a line reaches down past the eight columns around it, `sides`);
+  under that, if it says, all its `under`, a solid span from `DEEP`.
 - **On.** A thing's anchor lies at most N (its cell) off
   the plan its population stands `on`.
 
@@ -436,15 +439,17 @@ in shares of material types.
   the learned town's its whole crop;
 - at each level up to one past the world's, in each region
   and a host tile's width around spawn,
-  a slab above and one below the world's `heights` stop no rays at all:
-  hosts generate only within them, and cut whatever is outside;
+  a slab above the world's `heights` stops no rays at all:
+  hosts generate only within them, and cut whatever is outside
+  (under them, the ground goes on, unseen);
 - the things of each population the survey found, of all heights,
   keep within its `reach`, which drawing checks only where it draws;
   and where a thing's bounds leave the heights, nothing is drawn outside;
 - at levels 0, 2 and one past the last checked, in each region
   cut into boxes 32 sites a side (`skips_hold`),
   what is skipped where it says it may not be draws nothing there:
-  it is drawn all the same, to see (`checking_skipped`).
+  it is drawn all the same, to see (`checking_skipped`),
+  and what a field fills under its ground unasked is what it would draw.
   The rules above hold wherever something is drawn;
   this finds what they can't see,
   as a plan steeper between columns no layer reads together.
@@ -838,7 +843,9 @@ The moor (`worlds/src/moor.rs`) is the shortest whole world to start from.
 `Node::group`, `Child::new`, and `Shape::ball` and the like,
 solid and filling unless told to `paint` or `carve`;
 `.about(ground, below, above)` on a field, `.on(ground)` on a population,
-says where it is ("Model").
+says where it is ("Model");
+the ground's field `.under(kind)`, its columns ending `Column::under(kind)`:
+a world is solid under its ground, not a shell over a hollow.
 A shape kept with a chance is made with the long form (`ball(…, fill, op)`,
 `Part::cells(…, fill, op)`):
 how many rays it stops is worked out from its fill when it is made,

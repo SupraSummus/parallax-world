@@ -15,7 +15,7 @@ use std::rc::Rc;
 use worldgen::World;
 use worldgen::column::Column;
 use worldgen::frame::{Frame, Part, facing, walls};
-use worldgen::generator::{ANY_SIZE, About, Child, Far, Field, Generator, Kind, Layer, Node, Op, Population, Shape, Span};
+use worldgen::generator::{ANY_SIZE, Child, Far, Field, Generator, Kind, Layer, Node, Op, Population, Shape, Span};
 use worldgen::js;
 use worldgen::kinds;
 use worldgen::noise::{Fbm, Fx, Rng, ValueNoise, ease_towards, fx, hash64, smoothstep, stream};
@@ -465,14 +465,14 @@ impl Uplands {
  * What the moor lies on, decided outside it when it shares its land:
  * the ground's height, the land and its index in it if it shares one (it
  * draws what it owns, and its boulders are as many as its share), a path
- * through it that others draw, and where its peat ends below if nothing
- * is under it.
+ * through it that others draw, and whether nothing is under it: its peat
+ * is the ground, down without end.
  */
 pub struct Ground {
     pub ground: Rc<Sloped>,
     pub land: Option<(Rc<Land>, usize)>,
     pub path: Option<Rc<Path>>,
-    pub bottom: Option<i64>,
+    pub under: bool,
 }
 
 /** The moor's layers' state: its moorland, and what it lies on. */
@@ -524,7 +524,7 @@ pub fn moor(seed: u64) -> World {
         let y = Units(ground.at(x, z)).max(WATER).0 + m(2.0);
         [x, y + ((x + y + z) & 1), z]
     };
-    let layers = layers(moorland, Ground { ground, land: None, path: None, bottom: Some(HEIGHTS.0) });
+    let layers = layers(moorland, Ground { ground, land: None, path: None, under: true });
     // The valley's kinds, its own last.
     World { generator: Generator { kinds: valley::kinds(), seed: stream(seed, 6), layers }, spawn, heights: HEIGHTS, points: Vec::new() }
 }
@@ -578,8 +578,8 @@ fn mist(f: Rc<Moor>) -> Field {
 
 /** The heath: heather, grass or bog over peat, a gravel path to each ring; heather and grass standing on it as media. */
 fn heath(f: Rc<Moor>) -> Field {
-    // Half a metre of its surface and of peat, heather on it; unless the peat goes down to the bottom.
-    let about = f.ground.bottom.is_none().then(|| About { of: f.ground.ground.clone(), below: m(1.0), above: m(0.4) });
+    // Half a metre of its surface and of peat, heather on it; or peat down without end.
+    let (of, under) = (f.ground.ground.clone(), f.ground.under);
     let field = Field::columns("heath", 0.7, Op::Paint, move |x, z, spacing| {
         if !f.owns(x, z) || f.by_path(x, z, Fx::m(1.6)) {
             return Vec::new();
@@ -596,12 +596,7 @@ fn heath(f: Rc<Moor>) -> Field {
             A::alpine.into()
         };
         let column = Column::new(h, spacing).surface(surface, m(0.5));
-        // Peat down to the world's bottom and no further, where hosts stop generating: the heath is solid, not a shell.
-        // On another's ground, half a metre of it.
-        let column = match f.ground.bottom {
-            Some(bottom) => column.fill_below_exactly(F::soil, bottom),
-            None => column.surface(F::soil, m(0.5)),
-        };
+        let column = if f.ground.under { column.under(F::soil) } else { column.surface(F::soil, m(0.5)) };
         // Thickened only while it is at most four units: taller, a medium stops rays skimming over the heath,
         // and stands over the patches beside it, whose edges it takes over seen from above.
         if spacing > 2 || wet {
@@ -615,7 +610,8 @@ fn heath(f: Rc<Moor>) -> Field {
         }
         .spans()
     });
-    Field { about, ..field }
+    let field = field.about(of, m(1.0), m(0.4));
+    if under { field.under(F::soil) } else { field }
 }
 
 /** The bottom of the stream's bed under ground `h` high: a metre deep, at least two sites, as a line of sites along y has one every two. */
