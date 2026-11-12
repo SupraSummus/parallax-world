@@ -74,6 +74,8 @@ struct App {
     times: window::Times,
     /** How long the engine took to make the last frame, ms. */
     framing: f64,
+    /** Units a second the camera flies at, as the panel's slider says (walking keeps walk.rs's own). */
+    speed: f64,
     /** Walking on the ground (bake's walk.rs): the body the camera is the eye of; None flying. */
     walker: Option<Walker>,
     /** By material id, whether a walking body goes through it (KindDef::walk_through). */
@@ -133,6 +135,10 @@ impl window::Content for App {
             if ui.checkbox(&mut walking, "Walk on Ground (F)").changed() {
                 self.walker = walking.then(|| Walker::at(self.look.camera));
             }
+            ui.add_enabled(
+                self.walker.is_none(),
+                egui::Slider::new(&mut self.speed, 1.0..=4000.0).logarithmic(true).text("Flying Speed (units/s)"),
+            );
             let Look { camera: [x, y, z], yaw, pitch, .. } = self.look;
             ui.label(format!("camera {x:.0} {y:.0} {z:.0}  yaw {yaw:.0}  pitch {pitch:.0}"));
             let t = self.times;
@@ -170,7 +176,7 @@ impl window::Content for App {
                 look.camera = walker.eye();
                 self.walker = Some(walker);
             } else {
-                let step = SPEED * dt;
+                let step = self.speed * dt;
                 for d in 0..3 {
                     look.camera[d] += (level[d] * moving[0] + right[d] * moving[1]) * step;
                 }
@@ -303,7 +309,7 @@ fn offscreen(
 }
 
 /**
- * Moves on along the view for `seconds` at the window's speed, flying, or
+ * Moves on along the view for `seconds` at SPEED, flying, or
  * walking on the ground with `walk_through`, a frame every 60th of a
  * second as the window draws it, the GPU a frame behind, and says what
  * the frames cost, and where the slowest were.
@@ -364,7 +370,7 @@ const FOV: f64 = 90.0;
 const RENDER_DISTANCE: f64 = 8000.0;
 const SHOT: [f64; 2] = [1280.0, 800.0];
 
-/** Units a second the window moves at. */
+/** Units a second the window flies at to begin with, and --stroll flies at. */
 const SPEED: f64 = 40.0;
 
 /** A view as the web's page query gives it (parseViewQuery in renderer.ts); what it leaves out or gets wrong is None. */
@@ -464,6 +470,7 @@ fn main() {
         stats: String::new(),
         times: window::Times::default(),
         framing: 0.0,
+        speed: SPEED,
         walker: None,
         walk_through,
         world_query: format!("seed={seed}{}", world_name.map(|w| format!("&world={w}")).unwrap_or_default()),

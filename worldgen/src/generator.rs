@@ -296,12 +296,13 @@ pub struct About {
 impl About {
     /**
      * How far past `below` and `above` a line's spans may reach, at sites
-     * `spacing` apart: spans are at least two sites tall (column.rs), and
-     * a line stands for the columns a spacing around it, which differ
-     * from it by up to the slope times that; without one, any way.
+     * `spacing` apart: spans are at least two sites tall, and a line
+     * reaches down past the eight columns a spacing around it (column.rs's
+     * `sides`), the diagonals' up to twice the slope times that off;
+     * without one, any way.
      */
     fn slack(&self, spacing: i64) -> Option<i64> {
-        Some((2 + self.of.slope()?) * spacing)
+        Some(2 * (1 + self.of.slope()?) * spacing)
     }
 
     /** Whether spans of lines in [min, max] (x, z, lattice units, inclusive) may meet heights [y0, y1], at sites `spacing` apart. */

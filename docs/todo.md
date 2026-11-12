@@ -402,6 +402,15 @@ Numbers are for the forest at 1280×800, as measured when written.
   Light comes along the 12 neighbours' directions only,
   and each level takes one step (`STEPS`) before the coarser one takes over,
   or more where the coarser fills what it leaves empty.
+  So light from D away comes from a level whose sites are about D across,
+  which keeps what a region stops on average (the contract),
+  not whether it is closed:
+  walls thinner than the space they close let light in,
+  openings smaller than it let none (the door and the window below).
+  A railway tunnel, lined 0.5 m with the ground's hollow behind,
+  is lit so from that hollow.
+  Rock filled round the tunnels kept them dark,
+  but bent a world to the light: not kept.
   Against the reference (`light/reference.rs`, test `against_the_reference`;
   the ignored test `maps` draws the scenes from above):
   a lamp lights the ground in four lobes, along the upward directions,

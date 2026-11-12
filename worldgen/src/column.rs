@@ -7,7 +7,9 @@
 //! and whatever it is (a pond, a layer of turf) vanishes at that level.
 //! So every span a `Column` makes is at least two spacings tall, those of
 //! `fill_below_exactly` aside, and a thinned medium keeps its density
-//! along a ray. See "Writing a world" in docs/generators.md.
+//! along a ray. A heightfield's columns close its slopes' sides by
+//! reaching down past the columns around (`sides`). See "Writing a world"
+//! in docs/generators.md.
 
 use crate::generator::{Kind, Span};
 
@@ -26,6 +28,17 @@ impl Span {
         let tall = height.max(2 * spacing);
         Span { from, to: from + tall, kind: kind.into(), extinction: Some(extinction * height as f64 / tall as f64) }
     }
+}
+
+/**
+ * A column's neighbours: along the axes, then the diagonals. A voxel shares
+ * faces with sites of all eight columns, the diagonals' at its own height.
+ */
+pub const AROUND: [(i64, i64); 8] = [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1)];
+
+/** The lowest top of the columns `spacing` around (x, z) (AROUND), `ground` giving a column's top. */
+pub fn lowest_around(ground: impl Fn(i64, i64) -> i64, x: i64, z: i64, spacing: i64) -> i64 {
+    AROUND.iter().map(|&(dx, dz)| ground(x + dx * spacing, z + dz * spacing)).min().expect("eight")
 }
 
 /**
@@ -79,6 +92,19 @@ impl Column {
             self.below.push(Span::solid(bottom, to, kind));
         }
         self
+    }
+
+    /**
+     * `kind` under the layers so far, at least `depth` under the top and
+     * two spacings past `lowest`, the lowest of the columns around
+     * (`lowest_around`): the sides a slope shows, closed. A span's ends
+     * round to its column's sites, up to a spacing each; with less, rays
+     * slipped through steep faces, and without the diagonals, past a
+     * cliff's corners into the hollow under the ground.
+     */
+    pub fn sides(self, kind: impl Into<Kind>, lowest: i64, depth: i64) -> Column {
+        let bottom = lowest.min(self.height - depth) - 2 * self.spacing;
+        self.fill_below_exactly(kind, bottom)
     }
 
     /** A medium `height` tall on what stands on the ground so far, as `Span::medium`. */
@@ -149,20 +175,46 @@ mod tests {
         assert_eq!(bounds, [(-20, -5), (-5, 3), (3, 11), (11, 19)]);
         assert_eq!(spans[3].extinction, Some(0.5 * 2.0 / 8.0));
         // A field of columns draws them.
-        let layers = vec![Layer::Field(Field::columns("ground", 0.0, Op::Fill, |_, _, s| Column::new(0, s).surface(0, 1)))];
-        let world = Generator {
-            kinds: vec![crate::generator::KindDef {
-                name: "stone",
-                kind_type: 1,
-                colors: &["#808080"],
-                walk_through: false,
-                glows: false,
-                medium: false,
-            }],
-            seed: 1,
-            layers,
-        };
+        let world = ground(|_, _, s| Column::new(0, s).surface(0, 1));
         let grid = generate(&world, &Box3 { min: [0, -4, 0], max: [4, 4, 4] }, 0);
         assert!((0..4).all(|x| (0..4).all(|z| (-1..=0).any(|y| grid.get(x, y, z) != 0))), "the turf is on every column");
+    }
+
+    #[test]
+    fn sides_close_any_heightfield() {
+        // Ground as rough as any: each column's top at random, steps, corners and pits of every height. From the air
+        // above, along the lattice's 12 neighbours (a voxel's faces), nothing under any column's top is reached.
+        let top = |x: i64, z: i64| i64::from(crate::noise::hash(7, x, 0, z) % 40);
+        let world = ground(move |x, z, s| Column::new(top(x, z), s).surface(0, 1).sides(0, lowest_around(top, x, z, s), 3));
+        for level in 0..4 {
+            let s = 1 << level;
+            let b = Box3 { min: [0, -48 / s, 0], max: [24, 48 / s, 24] };
+            let grid = generate(&world, &b, level);
+            let mut air: Vec<[i64; 3]> =
+                (0..24 * 24).map(|i| [i % 24, b.max[1] - 1, i / 24]).filter(|&[x, y, z]| crate::grid::is_site(x, y, z)).collect();
+            let mut seen: std::collections::HashSet<[i64; 3]> = air.iter().copied().collect();
+            while let Some([x, y, z]) = air.pop() {
+                assert!(y * s > top(x * s, z * s), "level {level}: ({x}, {y}, {z}) under the ground, reached from the air");
+                for [dx, dy, dz] in crate::picture::FACES {
+                    let p = [x + dx, y + dy, z + dz];
+                    if b.holds(p) && grid.get(p[0], p[1], p[2]) == 0 && seen.insert(p) {
+                        air.push(p);
+                    }
+                }
+            }
+        }
+    }
+
+    /** A world of one kind, a field of `columns` its ground. */
+    fn ground(columns: impl Fn(i64, i64, i64) -> Column + 'static) -> Generator {
+        let kinds = vec![crate::generator::KindDef {
+            name: "stone",
+            kind_type: 1,
+            colors: &["#808080"],
+            walk_through: false,
+            glows: false,
+            medium: false,
+        }];
+        Generator { kinds, seed: 1, layers: vec![Layer::Field(Field::columns("ground", 0.0, Op::Fill, columns))] }
     }
 }

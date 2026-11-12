@@ -336,7 +336,8 @@ Broken rules panic, naming the thing and pointing here:
 - **About.** A field's span lies within `below` under and `above` over
   what it is `about` at its column,
   give or take two sites (a span is at least two sites tall)
-  and the slope times the spacing (a line stands for the columns around it).
+  and twice the slope times the spacing
+  (a line reaches down past the eight columns around it, `sides`).
 - **On.** A thing's anchor lies at most N (its cell) off
   the plan its population stands `on`.
 
@@ -881,6 +882,11 @@ each at least two spacings tall:
 `.medium(kind, height, extinction)` on top, thickened but as dense along a ray,
 `.water_to(kind, level)` where the ground is lower.
 Carves along a line want the same margin.
+A heightfield is a shell, hollow under its sides:
+`.sides(kind, lowest_around(ground, x, z, spacing), depth)` reaches each column
+down past the lowest of the eight around it, so rays can't slip under a slope.
+The diagonals too: a voxel shares faces with their sites at its own height,
+and without them rays slipped in at a cliff's corners.
 
 ### Pitfalls
 

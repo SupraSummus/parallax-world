@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use worldgen::World;
-use worldgen::column;
+use worldgen::column::{self, lowest_around};
 use worldgen::curve::Curve;
 use worldgen::generator::{
     ANY_SIZE, Child, Far, Field, Fill, Generator, Layer, Line, Node, Op, Point, Population, Shadows, Shape, Span, ball, bounds_of_shapes,
@@ -231,6 +231,9 @@ struct Noise {
     floor: ValueNoise<20>,
 }
 
+/** The rise over a run of one from which ground is stone: of a column to its neighbours, of a slope's side to the spacing. */
+const STEEP: i64 = 3;
+
 /** Column (x, z), given the ground's height there and at its four neighbours. */
 fn column_of(n: &Noise, path: &Path, x: i64, z: i64, h: i64, neighbours: [i64; 4]) -> Column {
     let slope = neighbours.map(|n| (n - h).abs()).into_iter().max().expect("four");
@@ -240,7 +243,7 @@ fn column_of(n: &Noise, path: &Path, x: i64, z: i64, h: i64, neighbours: [i64; 4
     let floor = n.floor.at(x, z);
     let surface = if on_path {
         K::path
-    } else if slope >= 3 {
+    } else if slope >= STEEP {
         if floor < fx(0.5) { K::stone } else { K::mossyStone }
     } else if density < fx(0.2) {
         if floor < fx(0.75) { K::grass } else { K::moss }
@@ -370,13 +373,13 @@ pub fn layers(seed: u64, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
         let f = f.clone();
         Field::columns("terrain", 0.0, Op::Paint, move |x, z, spacing| {
             let h = f.ground(x, z);
-            let around = [f.ground(x - spacing, z), f.ground(x + spacing, z), f.ground(x, z - spacing), f.ground(x, z + spacing)];
+            let lowest = lowest_around(|x, z| f.ground(x, z), x, z, spacing);
             let surface = f.column(x, z).surface;
-            let below = if surface == K::stone || surface == K::mossyStone { K::stone } else { K::soil };
-            // Two spacings past the lowest neighbour, so a slope's sides are solid: a span's ends round
-            // to its column's sites, up to a spacing each; with less, rays slipped through the mountains' faces.
-            let bottom = around.into_iter().fold(h - vox(1.5) as i64, i64::min) - 2 * spacing;
-            column::Column::new(h, spacing).surface(surface, vox(1.0) as i64).fill_below_exactly(below, bottom)
+            // Stone under stone, and down a side as steep over the spacing as stone ground: a cliff's at any level,
+            // a corner's where only a diagonal falls away.
+            let cliff = h - lowest >= STEEP * spacing;
+            let below = if cliff || surface == K::stone || surface == K::mossyStone { K::stone } else { K::soil };
+            column::Column::new(h, spacing).surface(surface, vox(1.0) as i64).sides(below, lowest, vox(1.5) as i64)
         })
         .about(on.clone(), vox(1.5) as i64, 1)
     };

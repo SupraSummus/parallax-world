@@ -65,6 +65,27 @@ describe('LayerIndex', () => {
     expect(none).toBeGreaterThan(20)
   })
 
+  it('is the same wherever the grid is, far from the origin too', () => {
+    // A lattice vector past 2¹⁵ along x and z, the faces' up for eight of them.
+    const shift = { x: 40000, y: 0, z: -40000 }
+    const moved = new VoxelGrid(
+      { minX: grid.minX + shift.x, minY: grid.minY, minZ: grid.minZ + shift.z, maxX: grid.minX + grid.nx + shift.x, maxY: grid.minY + grid.ny, maxZ: grid.minZ + grid.nz + shift.z },
+      grid.materials,
+    )
+    for (const v of voxels) moved.set(v.x + shift.x, v.y, v.z + shift.z, grid.get(v.x, v.y, v.z))
+    const far = LayerIndex.of(moved)
+    for (const face of FACES) {
+      const [a, b, c] = [face.lattice.right, face.lattice.up, face.lattice.forward].map(v => dot(shift, v))
+      for (let c0 = -150; c0 < 150; c0 += 7) {
+        for (let a0 = -150; a0 < 150; a0 += 24) {
+          const range = index.range(face.lattice, c0, c0 + 7, a0, a0 + 24)
+          const moved = far.range(face.lattice, c0 + c, c0 + c + 7, a0 + a, a0 + a + 24)
+          expect(moved).toEqual(range && [range[0] + b, range[1] + b])
+        }
+      }
+    }
+  })
+
   it('is as large as the voxels, not the box: tiles span the world heights', () => {
     const tables = (maxY: number) => {
       const grid = new VoxelGrid({ minX: 0, minY: 0, minZ: 0, maxX: 32, maxY, maxZ: 32 }, [{ color: '' }, { color: '#ff0000' }])

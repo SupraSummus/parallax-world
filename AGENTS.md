@@ -76,7 +76,7 @@ worldgen/                    # The world-generation engine, moving to integers, 
 │   ├── units.rs             # UNIT_SIZE: metres per lattice unit; whole Units, typed apart from Fx
 │   ├── generator.rs         # The framework: shapes, nodes, fields, populations, drawing any box at any level
 │   ├── build.rs             # Short forms to write worlds with: constructors of fields, populations, nodes, solid shapes
-│   ├── column.rs            # A heightfield's spans, each tall enough to keep a site at every level
+│   ├── column.rs            # A heightfield's spans, each tall enough to keep a site at every level; its slopes' sides closed
 │   ├── plan.rs              # Plans by column, each from coarser ones only; heights with a slope, their range anywhere; land domains bid for; claims, things kept apart anywhere
 │   ├── curve.rs             # Curves: lines through space made top-down within narrowing corridors; where one passes nearest a point
 │   ├── points.rs            # Points: where things are, drawn top down, so a cell of any size knows how many it holds; blurs of their counts
