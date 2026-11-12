@@ -747,6 +747,8 @@ The panel picks the lighting apart from the engine (`Lighting`):
 voxels shaded by the way their faces face, or computed,
 by worldgen's `Light`, one model and one cache of light (`Shared`) for every engine;
 each engine only shows it its own way.
+Shaded, the world's tiles are made apart from that cache,
+not kept twice (`Lit` in `native/src/world.rs`).
 The splats' bakers light the voxels they show, face by face;
 the slabs show none.
 For the voxels, the world's threads light each tile once made
