@@ -15,7 +15,7 @@ use bake::{Baker, Lattice, chunk_reads};
 
 use super::bakery::{Baked, Bakery, Request};
 use crate::engine::Look;
-use crate::view::{self, Face, in_face, to_local};
+use crate::view::{self, Face, ScreenBoxes, View, in_face, to_local};
 use crate::world::{Heights, Level, TILE, TileId, World};
 
 /**
@@ -117,6 +117,33 @@ pub struct Renderer {
     flat: bool,
     /** Whether the chunks it has are lit (Request's `lit`): when the look's lighting changes, they are baked again. */
     lit: bool,
+}
+
+/** A cell's voxels' box, relative to the camera at `local`, in the face's coordinates: its sites' and a grid unit past. */
+fn voxels_box(cell: &CellChunk, local: [f64; 3]) -> [[f64; 2]; 3] {
+    let g = (1i64 << cell.atoms) as f64;
+    let half = (cell.spacing() + 1) as f64 * g;
+    let scale = [LAYER, 1.0, LAYER];
+    std::array::from_fn(|d| [-half, half].map(|h| (cell.site[d] as f64 * g + h) * scale[d] - local[d]))
+}
+
+/**
+ * Whether what is in box [x, y, z] of a face's coordinates relative to the
+ * camera may show: the rays through it, within the box of their tangents
+ * (x / z and y / z at its near and far ends, as screen_box in
+ * compositor.wgsl), in the face's and on screen; any, if it reaches the
+ * camera's plane.
+ */
+fn may_show(boxes: &ScreenBoxes, view: &View, [x, y, [near, far]]: [[f64; 2]; 3]) -> bool {
+    if far <= 0.0 {
+        return false;
+    }
+    if near <= 0.0 {
+        return true;
+    }
+    let tangents = |[lo, hi]: [f64; 2]| [(lo / near).min(lo / far), (hi / near).max(hi / far)];
+    let ([x0, x1], [y0, y1]) = (tangents(x), tangents(y));
+    in_face(closest_to_zero(x0, x1), closest_to_zero(y0, y1), 1.0) && boxes.of(x0, x1, y0, y1, 1.0).is_some_and(|b| view.on_screen(&b))
 }
 
 /** |v| for the v in [lo, hi] nearest to 0. */
@@ -259,20 +286,11 @@ impl Renderer {
                     return;
                 }
                 let level = cell.atoms as usize;
-                let g = (1i64 << cell.atoms) as f64;
-                // Its box, relative to the camera, in the face's coordinates.
-                let half = (cell.spacing() as f64) * g;
-                let [a, b, c] = cell.site.map(|v| v as f64 * g);
-                let (x0, x1) = ((a - half) * LAYER - local[0], (a + half) * LAYER - local[0]);
-                let (y0, y1) = (b - half - local[1], b + half - local[1]);
-                let (z0, z1) = ((c - half) * LAYER - local[2], (c + half) * LAYER - local[2]);
-                if !in_face(closest_to_zero(x0, x1), closest_to_zero(y0, y1), z1) {
+                let voxels = voxels_box(&cell, local);
+                if !may_show(&boxes, &view, voxels) {
                     return;
                 }
-                let on_screen = |z: f64| boxes.of(x0, x1, y0, y1, z).is_some_and(|b| view.on_screen(&b));
-                if !on_screen(z0.max(1e-3)) && !on_screen(z1) {
-                    return;
-                }
+                let depths = voxels[2];
                 // What is known, brought up to date: looked up once, then as its tiles come (its chunk, receive).
                 let source = world.level(level);
                 if matches!(seen, Seen::Unknown) {
@@ -296,15 +314,15 @@ impl Renderer {
                         tiles.extend(tiles_in(t).filter(|&id| !source.grids.has(id)).map(|id| (level, id, d)));
                     }
                     &mut Seen::Bake(t) => {
-                        let block = super::compositor::block(z1.max(1.0), view.focal);
+                        let block = super::compositor::block(depths[1].max(1.0), view.focal);
                         missing.push((Request { face: f, cell, tiles: t, block, lit: self.lit, relief: self.relief, flat: self.flat }, d));
                     }
                     Seen::Baked(chunk) => {
-                        // Its plane, through its site.
-                        let distance = c * LAYER - local[2];
+                        // Its plane, through its site; what it draws, as wide as its extent, as deep as its voxels.
+                        let distance = (depths[0] + depths[1]) / 2.0;
                         let (x, y) = (chunk.baked.origin[0] - local[0], chunk.baked.origin[1] - local[1]);
                         let [width, height] = chunk.baked.extent;
-                        if distance > 0.0 && boxes.of(x, x + width, y - height, y, distance).is_some_and(|b| view.on_screen(&b)) {
+                        if distance > 0.0 && may_show(&boxes, &view, [[x, x + width], [y - height, y], depths]) {
                             frame.farthest = frame.farthest.max(distance);
                             let finer = lod.finer_reach(cell.level, eye[2]);
                             frame.chunks.push(Placement { face: f, cell, distance, chunk: chunk.clone(), x, y, from_eye: d, finer });
@@ -346,5 +364,55 @@ impl Renderer {
             let renders = self.renders;
             self.cells.retain(|_, (_, used)| *used + UNUSED_RENDERS > renders);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_cell_may_show_wherever_a_voxel_of_its_sites_does() {
+        // Cells of 4 sites' spacing around cameras looking every way: no point of a voxel of a site in a cell's
+        // bounds, found in the world, is in its face's rays and on screen where the cell is culled.
+        let mut random = view::tests::sampler(7);
+        let (faces, (mut culled, mut seen)) = (view::faces(), (0, 0));
+        for trial in 0..48 {
+            let face = &faces[trial % faces.len()];
+            let view = View { yaw: random(-180.0, 180.0), pitch: random(-80.0, 80.0), width: 320.0, height: 200.0, focal: 160.0 };
+            let boxes = view.screen_boxes(face);
+            let camera = [random(-9.0, 9.0), random(-9.0, 9.0), random(-9.0, 9.0)];
+            let local = to_local(&face.axes, camera);
+            let (atoms, m) = (1, 4);
+            for [i, j, k] in (-3..=3).flat_map(|i| (-3..=3).flat_map(move |j| (0..=4).map(move |k| [i, j, k]))) {
+                if (i ^ k) & 1 != 0 || (j ^ k) & 1 != 0 {
+                    continue;
+                }
+                let cell = CellChunk { level: atoms + 2, atoms, site: [i, j, k].map(|v| v * m) };
+                if may_show(&boxes, &view, voxels_box(&cell, local)) {
+                    continue;
+                }
+                culled += 1;
+                let (lo, hi) = cell.bounds();
+                for [a, b, c] in (lo[0]..=hi[0]).flat_map(|a| (lo[1]..=hi[1]).flat_map(move |b| (lo[2]..=hi[2]).map(move |c| [a, b, c]))) {
+                    if (a ^ c) & 1 != 0 || (b ^ c) & 1 != 0 {
+                        continue;
+                    }
+                    let site = face.lattice.world([a, b, c]).map(f64::from);
+                    for _ in 0..4 {
+                        let w = [random(-1.0, 1.0), random(-1.0, 1.0), random(-1.0, 1.0)];
+                        if w[0].abs() + w[1].abs() > 1.0 || w[1].abs() + w[2].abs() > 1.0 || w[0].abs() + w[2].abs() > 1.0 {
+                            continue;
+                        }
+                        let point: [f64; 3] = std::array::from_fn(|d| (site[d] + w[d]) * f64::from(1 << atoms) - camera[d]);
+                        let [x, y, z] = to_local(&face.axes, point);
+                        let shows = in_face(x, y, z) && boxes.of(x, x, y, y, z).is_some_and(|b| view.on_screen(&b));
+                        assert!(!shows, "{cell:?} culled, but its site {:?} shows at {point:?}", [a, b, c]);
+                        seen += 1;
+                    }
+                }
+            }
+        }
+        assert!(culled > 1000 && seen > 100_000, "{culled} cells culled, {seen} points of theirs looked at");
     }
 }

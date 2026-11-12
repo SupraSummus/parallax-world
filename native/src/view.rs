@@ -174,11 +174,11 @@ impl ScreenBoxes {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /** Seeded uniform samples in [lo, hi), so failures reproduce (sampler in view.test.ts). */
-    fn sampler(seed: u64) -> impl FnMut(f64, f64) -> f64 {
+    pub(crate) fn sampler(seed: u64) -> impl FnMut(f64, f64) -> f64 {
         let mut state = seed;
         move |lo, hi| {
             state = (state * 1103515245 + 12345) % 2147483648;
