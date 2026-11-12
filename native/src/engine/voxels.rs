@@ -38,12 +38,24 @@ use crate::world::{Level, Lit, Tile, Wants, World};
 
 /** A level's window, in bricks a side (a power of two: the table is a torus). */
 const WINDOW: i32 = 64;
-/** Sites a brick is a side (bake's BRICK), and the words its sites take, two a word. */
+/** Sites a brick is a side (bake's BRICK). */
 const BRICK_SHIFT: u32 = 3;
 const BRICK: i32 = 1 << BRICK_SHIFT;
-const BRICK_WORDS: usize = (BRICK * BRICK * BRICK / 4) as usize;
 /** Sites a brick holds: a word of light each, lit. */
 const BRICK_SITES: usize = (BRICK * BRICK * BRICK / 2) as usize;
+/**
+ * A brick's words (`words`): its sites, two a word, then the lines each
+ * lets rays through along, four a word, each uploaded to a pool of its
+ * own: a pool's size is bounded by the device's for one buffer.
+ */
+const SITE_WORDS: usize = BRICK_SITES / 2;
+const OPEN_WORDS: usize = BRICK_SITES / 4;
+const BRICK_WORDS: usize = SITE_WORDS + OPEN_WORDS;
+/**
+ * The lines of neighbours, as voxels.wgsl's Ray has its pairs of faces:
+ * a voxel's faces along one let rays through, or not, both alike.
+ */
+const LINES: [[i32; 3]; 6] = [[1, 1, 0], [0, 1, 1], [1, 0, 1], [1, -1, 0], [0, 1, -1], [-1, 0, 1]];
 /** Pixels each way per ray traced. */
 const FACTOR: u32 = 4;
 /** Bytes of bricks the pool holds at most. */
@@ -150,13 +162,28 @@ pub fn meets(grid: &bake::Grid) -> Vec<u32> {
     out
 }
 
-/** `grid`'s bricks as the GPU takes them, in the grid's order, BRICK_WORDS a brick: each site material | alpha << 8, two a word. */
+/**
+ * `grid`'s bricks as the GPU takes them, in the grid's order, BRICK_WORDS
+ * a brick: each site's material | alpha << 8, two a word; then each one's
+ * lines that let rays through, bit l set if its faces along LINES[l] do
+ * (bake's Grid), four a word.
+ */
 pub fn words(grid: &bake::Grid) -> Vec<u32> {
+    let mut open = vec![0u8; grid.cells.len()];
+    let faces = LINES.map(|n| bake::VOXEL_FACES.iter().position(|&f| f == n).expect("a line's face"));
+    for (i, own) in grid.own_faces() {
+        open[i] = (0..LINES.len()).filter(|&l| own[faces[l]] == 0).map(|l| 1 << l).sum();
+    }
     let site = |i: usize| match grid.cells[i] {
         0 => 0,
-        m => u32::from(m) | u32::from(grid.alpha.get(i).copied().unwrap_or(bake::ALPHA)) << 8,
+        m => u32::from(m) | u32::from(grid.alpha_at(i)) << 8,
     };
-    (0..grid.cells.len()).step_by(2).map(|i| site(i) | site(i + 1) << 16).collect()
+    let mut words = Vec::with_capacity(grid.cells.len() / BRICK_SITES * BRICK_WORDS);
+    for first in (0..grid.cells.len()).step_by(BRICK_SITES) {
+        words.extend((first..first + BRICK_SITES).step_by(2).map(|i| site(i) | site(i + 1) << 16));
+        words.extend(open[first..first + BRICK_SITES].chunks(4).map(|four| u32::from_le_bytes(four.try_into().expect("four"))));
+    }
+    words
 }
 
 /**
@@ -476,8 +503,8 @@ struct Targets {
 
 /** The voxels on a device, drawn into a picture that the window or a shot shows. */
 pub struct Marcher {
-    /** Globals, levels, tables, the pool, the palette, the eye, cells' counts, and the pool's bricks' light (none unlit). */
-    buffers: [wgpu::Buffer; 8],
+    /** Globals, levels, tables, the pool, the palette, the eye, cells' counts, the pool's bricks' light (none unlit), and the lines their sites let rays through along. */
+    buffers: [wgpu::Buffer; 9],
     layouts: [wgpu::BindGroupLayout; 3],
     pipelines: [wgpu::RenderPipeline; 3],
     windows: Vec<Window>,
@@ -491,7 +518,7 @@ pub struct Marcher {
 /** voxels.wgsl, with the constants it shares with this file. */
 fn shader() -> String {
     format!(
-        "const WINDOW = {WINDOW};\nconst CELLS = {CELLS}u;\nconst BRICK = {BRICK};\nconst BRICK_SHIFT = {BRICK_SHIFT}u;\nconst BRICK_WORDS = {BRICK_WORDS}u;\nconst BRICK_SITES = {BRICK_SITES}u;\nconst FACTOR = {FACTOR}u;\nconst EMPTY = {EMPTY};\nconst UNKNOWN = {UNKNOWN};\n{}",
+        "const WINDOW = {WINDOW};\nconst CELLS = {CELLS}u;\nconst BRICK = {BRICK};\nconst BRICK_SHIFT = {BRICK_SHIFT}u;\nconst SITE_WORDS = {SITE_WORDS}u;\nconst OPEN_WORDS = {OPEN_WORDS}u;\nconst BRICK_SITES = {BRICK_SITES}u;\nconst FACTOR = {FACTOR}u;\nconst EMPTY = {EMPTY};\nconst UNKNOWN = {UNKNOWN};\n{}",
         include_str!("voxels.wgsl")
     )
 }
@@ -505,7 +532,7 @@ impl Marcher {
         });
         // Lit, a brick's light takes a word a site, beside its own words.
         let light_words = if lit { BRICK_SITES } else { 0 };
-        let largest = device.limits().max_storage_buffer_binding_size / (BRICK_WORDS.max(light_words) as u64 * 4);
+        let largest = device.limits().max_storage_buffer_binding_size / (SITE_WORDS.max(light_words) as u64 * 4);
         let pool = (POOL_BYTES / ((BRICK_WORDS + light_words) as u64 * 4)).min(largest);
         let buffer = |label, size: usize, usage| {
             device.create_buffer(&wgpu::BufferDescriptor {
@@ -520,11 +547,12 @@ impl Marcher {
             buffer("globals", size_of::<Globals>(), uniform),
             buffer("levels", GRID_LEVELS * size_of::<GpuLevel>(), storage),
             buffer("tables", GRID_LEVELS * TABLE * 4, storage),
-            buffer("pool", pool as usize * BRICK_WORDS * 4, storage),
+            buffer("pool", pool as usize * SITE_WORDS * 4, storage),
             buffer("palette", 256 * 4, storage),
             buffer("eye", 16, uniform),
             buffer("filled", GRID_LEVELS * COUNTS * 2, storage),
             buffer("lights", (pool as usize * light_words * 4).max(4), storage),
+            buffer("opens", pool as usize * OPEN_WORDS * 4, storage),
         ];
         let entry = |binding: u32, ty| wgpu::BindGroupLayoutEntry { binding, visibility: wgpu::ShaderStages::FRAGMENT, ty, count: None };
         let buffer_type = |ty| wgpu::BindingType::Buffer { ty, has_dynamic_offset: false, min_binding_size: None };
@@ -542,12 +570,13 @@ impl Marcher {
             entry(5, uniform_type),
             entry(6, read),
             entry(7, read),
-            entry(8, uint),
+            entry(8, read),
             entry(9, uint),
+            entry(10, uint),
         ];
-        let shown = [entry(10, texture(wgpu::TextureSampleType::Float { filterable: false }))];
+        let shown = [entry(11, texture(wgpu::TextureSampleType::Float { filterable: false }))];
         // The samples' pass draws into the textures the resolving one reads, which draws the picture shown.
-        let layouts = [&all[..8], &all[..], &shown[..]]
+        let layouts = [&all[..9], &all[..], &shown[..]]
             .map(|entries| device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: None, entries }));
         let pipeline = |entry: &str, layout: &wgpu::BindGroupLayout, formats: &[wgpu::TextureFormat]| {
             let targets: Vec<_> = formats.iter().map(|&f| Some(f.into())).collect();
@@ -609,7 +638,10 @@ impl Marcher {
             let window = &mut self.windows[level];
             let Some(tiles) = scene.levels.get(level) else { continue };
             if let Some(added) = window.sync(level, tiles, self.lit, look.camera, &mut self.free) {
-                upload(queue, &self.buffers[3], &added, BRICK_WORDS, |tile, first| &tile.words[first * BRICK_WORDS..][..BRICK_WORDS]);
+                upload(queue, &self.buffers[3], &added, SITE_WORDS, |tile, first| &tile.words[first * BRICK_WORDS..][..SITE_WORDS]);
+                upload(queue, &self.buffers[8], &added, OPEN_WORDS, |tile, first| {
+                    &tile.words[first * BRICK_WORDS + SITE_WORDS..][..OPEN_WORDS]
+                });
                 if self.lit {
                     upload(queue, &self.buffers[7], &added, BRICK_SITES, |tile, first| {
                         &tile.lights.as_ref().expect("a tile held lit")[first * BRICK_SITES..][..BRICK_SITES]
@@ -681,13 +713,13 @@ impl Marcher {
             .map(|(k, b)| wgpu::BindGroupEntry { binding: k as u32, resource: b.as_entire_binding() })
             .collect();
         for (k, view) in views.iter().enumerate() {
-            entries.push(wgpu::BindGroupEntry { binding: 8 + k as u32, resource: wgpu::BindingResource::TextureView(view) });
+            entries.push(wgpu::BindGroupEntry { binding: 9 + k as u32, resource: wgpu::BindingResource::TextureView(view) });
         }
-        let shown = [wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::TextureView(&picture_view) }];
+        let shown = [wgpu::BindGroupEntry { binding: 11, resource: wgpu::BindingResource::TextureView(&picture_view) }];
         let group = |layout, entries: &[wgpu::BindGroupEntry]| {
             device.create_bind_group(&wgpu::BindGroupDescriptor { label: None, layout, entries })
         };
-        let groups = [group(&self.layouts[0], &entries[..8]), group(&self.layouts[1], &entries), group(&self.layouts[2], &shown)];
+        let groups = [group(&self.layouts[0], &entries[..9]), group(&self.layouts[1], &entries), group(&self.layouts[2], &shown)];
         Targets { pixels, samples, picture, groups }
     }
 }

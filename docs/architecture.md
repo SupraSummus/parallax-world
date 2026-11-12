@@ -783,9 +783,13 @@ what is seen of it looking at that face:
 a coarse voxel stands for its cell, which may look different from each side.
 Mostly the faces are its site's material;
 the sites whose faces differ are listed apart (`faces`).
+A face of material 0 lets through the rays that enter by it,
+and the face opposite it is of 0 too:
+a coarse voxel may stop rays along some lines of neighbours and not others,
+as a wall seen across, not along.
 Each reader shows the faces it sees:
 the baker the face towards its slices' camera (section 3),
-rays (`worldgen/src/picture.rs`) the one they enter by.
+rays (`worldgen/src/picture.rs`, the voxels engine) the one they enter by.
 The box is cut into bricks 8 units wide, 256 sites,
 and only bricks with voxels are stored.
 A worker reads its copy of the grids for every face (`Reader` in `bake/`),

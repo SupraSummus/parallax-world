@@ -85,9 +85,12 @@ pub fn face_words(index: usize, faces: &Faces) -> [u32; FACE_WORDS] {
  * The sites of a box in bricks, BRICK units wide (see VoxelGrid).
  * A voxel has a material on each of its 12 faces: what is seen of it
  * looking at that face. Mostly they are one, its site's in `cells`;
- * the sites whose faces differ list them in `faces`. Its alpha is how much
- * of the rays through its site it stops: mostly all (ALPHA), and `alpha`
- * lists them only for a grid with some see-through ones.
+ * the sites whose faces differ list them in `faces`. A face of material 0
+ * lets through the rays that enter by it: seen that way, there is no
+ * voxel. Opposite faces are both 0 or neither, so a voxel stops rays along
+ * some lines of neighbours and not others. Its alpha is how much of the
+ * rays through its site it stops: mostly all (ALPHA), and `alpha` lists
+ * them only for a grid with some see-through ones.
  */
 pub struct Grid {
     pub min: [i32; 3],
@@ -100,6 +103,11 @@ pub struct Grid {
     pub faces: Vec<u32>,
     /** By index in `cells`: each voxel's alpha, 0 where there is none; empty if all are whole. */
     pub alpha: Vec<u8>,
+}
+
+/** A site's faces' materials from its words in `faces` after its index (face_words). */
+fn faces_of(words: &[u32]) -> Faces {
+    std::array::from_fn(|k| words[k / 4].to_le_bytes()[k % 4])
 }
 
 /** The words after site index `i` in `words`, `per` words a site, sorted by index; None if it has none. */
@@ -148,16 +156,18 @@ impl Grid {
         self.index(x, y, z).map_or((0, 0), |i| (self.cells[i], self.alpha_at(i)))
     }
 
-    /** The material of face `kind` (of VOXEL_FACES) of the voxel at site (x, y, z), and its alpha; (0, 0) if empty or outside. */
+    /** The material of face `kind` (of VOXEL_FACES) of the voxel at site (x, y, z), and its alpha; (0, 0) if empty, outside or that face lets rays through. */
     #[inline]
     pub fn face(&self, x: i32, y: i32, z: i32, kind: usize) -> (u8, u8) {
         let Some(i) = self.index(x, y, z) else { return (0, 0) };
-        let material = match self.cells[i] {
-            0 => 0,
-            material if self.faces.is_empty() => material,
-            material => self.faces_at(i).map_or(material, |faces| faces[kind]),
-        };
-        (material, self.alpha_at(i))
+        match self.cells[i] {
+            0 => (0, 0),
+            material if self.faces.is_empty() => (material, self.alpha_at(i)),
+            material => match self.faces_at(i).map_or(material, |faces| faces[kind]) {
+                0 => (0, 0),
+                material => (material, self.alpha_at(i)),
+            },
+        }
     }
 
     /** The alpha of the voxel at index `i` of `cells`: 0 if none. */
@@ -171,8 +181,12 @@ impl Grid {
 
     /** The faces' materials of the site at index `i` of `cells`, if they differ. */
     fn faces_at(&self, i: usize) -> Option<Faces> {
-        let words = words_of(&self.faces, FACE_WORDS, i)?;
-        Some(std::array::from_fn(|k| words[k / 4].to_le_bytes()[k % 4]))
+        words_of(&self.faces, FACE_WORDS, i).map(faces_of)
+    }
+
+    /** The sites whose faces differ, by index in `cells`, with their faces' materials. */
+    pub fn own_faces(&self) -> impl Iterator<Item = (usize, Faces)> + '_ {
+        self.faces.chunks(FACE_WORDS).map(|words| (words[0] as usize, faces_of(&words[1..])))
     }
 }
 
@@ -365,28 +379,33 @@ mod tests {
     }
 
     #[test]
-    fn each_face_reads_the_material_of_the_voxels_faces_towards_it() {
+    fn each_face_reads_the_material_of_the_voxels_faces_towards_it_none_through_one_of_0() {
         // Two voxels, one of material 1 all round, one whose faces are each of a material of their own.
         let mut grid = Grid::new([0, 0, 0], [8, 8, 8], 1);
         grid.bricks[0] = 0;
         let index = |[x, y, z]: [i32; 3]| (((z * BRICK + y) * BRICK + x) >> 1) as usize;
-        let (plain, painted) = ([2, 2, 2], [4, 4, 2]);
-        grid.cells[index(plain)] = 1;
-        grid.cells[index(painted)] = 1;
+        // A third, see-through along the line (1, 1, 0): its two faces there of material 0.
+        let (plain, painted, slit) = ([2, 2, 2], [4, 4, 2], [2, 4, 4]);
+        for site in [plain, painted, slit] {
+            grid.cells[index(site)] = 1;
+        }
         let faces: Faces = std::array::from_fn(|k| 10 + k as u8);
-        grid.faces = face_words(index(painted), &faces).to_vec();
+        let along = |n: [i32; 3]| n[0] == n[1] && n[2] == 0;
+        let slits: Faces = std::array::from_fn(|k| if along(VOXEL_FACES[k]) { 0 } else { 1 });
+        grid.faces = [face_words(index(painted), &faces), face_words(index(slit), &slits)].concat();
         let tiles = Tiles::one(grid);
         for lattice in lattices() {
             let reader = Reader::new(&tiles, lattice);
             let read = |[x, y, z]: [i32; 3]| {
                 let [a, b, c] = [lattice.r, lattice.u, lattice.f].map(|v| v[0] * x + v[1] * y + v[2] * z);
-                let mut material = None;
-                reader.row(a, b, c, 1, |_, m, _| material = Some(m));
-                material.expect("read")
+                let mut read = None;
+                reader.row(a, b, c, 1, |_, m, alpha| read = Some((m, alpha)));
+                read.expect("read")
             };
-            assert_eq!(read(plain), 1);
-            assert_eq!(read(painted), 10 + lattice.front() as u8, "seen along {:?}", lattice.f);
-            assert_eq!(read([6, 6, 2]), 0);
+            assert_eq!(read(plain), (1, ALPHA));
+            assert_eq!(read(painted), (10 + lattice.front() as u8, ALPHA), "seen along {:?}", lattice.f);
+            assert_eq!(read(slit), if along(lattice.f) { (0, 0) } else { (1, ALPHA) }, "seen along {:?}", lattice.f);
+            assert_eq!(read([6, 6, 2]), (0, 0));
         }
     }
 }

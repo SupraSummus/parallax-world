@@ -59,7 +59,9 @@ export const isSite = (x: number, y: number, z: number) => ((x + y + z) & 1) ===
  *
  * A voxel has a material on each of its faces (VOXEL_FACES in fcc.ts):
  * what is seen of it looking at that face. Mostly they are one, its
- * site's in `cells`; `faces` lists the sites whose faces differ.
+ * site's in `cells`; `faces` lists the sites whose faces differ. A face
+ * of material 0 lets through the rays that enter by it, and the one
+ * opposite it is of 0 too (bake's Grid).
  */
 export class VoxelGrid {
   readonly minX: number

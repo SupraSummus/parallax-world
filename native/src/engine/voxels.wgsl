@@ -67,6 +67,8 @@ fn hollow(l: Level, k: vec3i, j: u32) -> bool {
 @group(0) @binding(6) var<storage, read> filled: array<u32>;
 // Lit, per slot of the pool, its brick's sites' light as `cells` has them, one a word: sRGB, 0 if none.
 @group(0) @binding(7) var<storage, read> lights: array<u32>;
+// Per slot of the pool, of each site of its brick as `cells` has them, the lines of NORMALS its faces let rays through along: bit l, line l; four a word.
+@group(0) @binding(8) var<storage, read> opens: array<u32>;
 
 const NONE = 0xffffffffu;
 // A ray's steps at a level at most: more than any needs. One that runs out
@@ -74,9 +76,9 @@ const NONE = 0xffffffffu;
 // must not hide.
 const STEPS = 1024;
 const LOST = 0xfffffffeu;
-// Face pairs' normals: a voxel is where |n · (p − site)| ≤ 1 for each, its
-// neighbours at ±n.
-const NORMALS = array<vec3f, 6>(vec3f(1.0, 1.0, 0.0), vec3f(1.0, -1.0, 0.0), vec3f(0.0, 1.0, 1.0), vec3f(0.0, 1.0, -1.0), vec3f(1.0, 0.0, 1.0), vec3f(1.0, 0.0, -1.0));
+// Face pairs' normals, in Ray's order (voxels.rs's LINES): a voxel is where
+// |n · (p − site)| ≤ 1 for each, its neighbours at ±n.
+const NORMALS = array<vec3f, 6>(vec3f(1.0, 1.0, 0.0), vec3f(0.0, 1.0, 1.0), vec3f(1.0, 0.0, 1.0), vec3f(1.0, -1.0, 0.0), vec3f(0.0, 1.0, -1.0), vec3f(-1.0, 0.0, 1.0));
 
 // `at` is where in the target, (0, 0) its top left, (1, 1) its bottom right.
 struct Screen {
@@ -112,7 +114,7 @@ fn brick_of(level: u32, s: vec3i) -> i32 {
   return bricks[entry(l, b)];
 }
 
-// The voxel at site `s` of `level`: material | alpha << 8, 0 if none.
+// The voxel at site `s` of `level` (site_in), 0 if none.
 fn voxel(level: u32, s: vec3i) -> u32 {
   return in_brick(level, brick_of(level, s), s);
 }
@@ -130,10 +132,21 @@ fn site_index(r: vec3i) -> u32 {
   return u32(((r.z * BRICK + r.y) * BRICK + r.x) >> 1u);
 }
 
-// The voxel at `r` in the brick at `slot`, two a word.
+// The voxel at `r` in the brick at `slot`: material | alpha << 8 | the lines it lets rays through along << 16.
 fn site_in(slot: i32, r: vec3i) -> u32 {
   let i = site_index(r);
-  return (cells[u32(slot) * BRICK_WORDS + (i >> 1u)] >> ((i & 1u) * 16u)) & 0xffffu;
+  let site = (cells[u32(slot) * SITE_WORDS + (i >> 1u)] >> ((i & 1u) * 16u)) & 0xffffu;
+  return site | ((opens[u32(slot) * OPEN_WORDS + (i >> 2u)] >> ((i & 3u) * 8u)) & 255u) << 16u;
+}
+
+// Of 255, how much of the rays through its site voxel `v` stops.
+fn alpha(v: u32) -> u32 {
+  return (v >> 8u) & 255u;
+}
+
+// Whether voxel `v`'s faces along line `l` (of NORMALS) let rays through: seen that way, there is no voxel.
+fn open_along(v: u32, l: u32) -> bool {
+  return ((v >> 16u) & (1u << l)) != 0u;
 }
 
 // Lit, the light of the voxel at `r` in the brick at `slot`, 0 if none.
@@ -221,6 +234,24 @@ fn leaving(c: Crossings) -> f32 {
   return min(m.x, min(m.y, m.z));
 }
 
+// The pair of faces the ray enters by, as NORMALS has them: the last it comes between.
+fn entered(c: Crossings) -> u32 {
+  let e = entering(c);
+  for (var k = 0u; k < 2u; k++) {
+    for (var i = 0u; i < 3u; i++) {
+      if c.enter[k][i] == e {
+        return 3u * k + i;
+      }
+    }
+  }
+  return 0u;
+}
+
+// Voxel `v` as a ray crossing it as `c` sees it: none if the faces it enters by let it through.
+fn met(v: u32, c: Crossings) -> u32 {
+  return select(v, 0u, v >> 16u != 0u && open_along(v, entered(c)));
+}
+
 // What a ray met first: its level, site and voxel, how far (world units).
 struct Hit {
   level: u32,
@@ -295,10 +326,11 @@ fn march(d: vec3f) -> Hit {
       if slot == UNKNOWN {
         break;
       }
+      let c = crossings(ray, o - vec3f(s), 1.0);
       if slot >= 0 {
         let r = (s - l.min) & vec3i(BRICK - 1);
-        let v = site_in(slot, r);
-        if v >> 8u == 255u && !first {
+        let v = met(site_in(slot, r), c);
+        if alpha(v) == 255u && !first {
           return Hit(level, s, v, at * scale);
         }
         medium = v;
@@ -308,7 +340,6 @@ fn march(d: vec3f) -> Hit {
       }
       first = false;
       // Out across the nearest face it leaves by, into the neighbour there.
-      let c = crossings(ray, o - vec3f(s), 1.0);
       let plus = c.leave[0];
       let minus = c.leave[1];
       let leave = leaving(c);
@@ -322,7 +353,7 @@ fn march(d: vec3f) -> Hit {
       step[(k + 1) % 3] = i32(select(-way, way, by_plus));
       if medium != 0u {
         // Its path through the voxel: from where it entered (or the eye) to where it leaves.
-        let stops = 1.0 - pow(1.0 - f32(medium >> 8u) / 255.0, (leave - at) / CHORD);
+        let stops = 1.0 - pow(1.0 - f32(alpha(medium)) / 255.0, (leave - at) / CHORD);
         let fog = 1.0 - exp(-(at + leave) * 0.5 * scale / globals.fog);
         gathered += through * stops * mix(tint, globals.horizon.rgb, fog);
         through *= 1.0 - stops;
@@ -370,13 +401,15 @@ fn rgb(material: u32) -> vec3f {
   return vec3f(f32((c >> 16u) & 255u), f32((c >> 8u) & 255u), f32(c & 255u)) / 255.0;
 }
 
-// As the splats paint a voxel unlit: its material's colour times the mean of its open faces' shades.
+// As the splats paint a voxel unlit: its material's colour times the mean of its open faces' shades,
+// those whose neighbour lets rays through them.
 fn shaded(hit: Hit) -> vec3f {
   var shade = 0.0;
   var open = 0.0;
   for (var k = 0; k < 12; k++) {
     let n = NORMALS[k % 6] * select(1.0, -1.0, k >= 6);
-    if (voxel(hit.level, hit.site + vec3i(n)) >> 8u) < 255u {
+    let v = voxel(hit.level, hit.site + vec3i(n));
+    if alpha(v) < 255u || open_along(v, u32(k % 6)) {
       shade += face_shade(n);
       open += 1.0;
     }
@@ -406,8 +439,8 @@ fn lit(hit: Hit) -> vec3f {
 // What each sample met: its site, and level | voxel << 8 (NONE if
 // nothing); and the voxel's colour, the mean of its open faces' shades,
 // and what the see-through voxels in front gave (rgb) and let through (a).
-@group(0) @binding(8) var sample_hits: texture_2d<u32>;
-@group(0) @binding(9) var sample_colours: texture_2d<u32>;
+@group(0) @binding(9) var sample_hits: texture_2d<u32>;
+@group(0) @binding(10) var sample_colours: texture_2d<u32>;
 
 struct Sample {
   @location(0) hit: vec4u,
@@ -455,7 +488,7 @@ fn consider(c: Choice, hit: vec4u, k: i32, ray: Ray) -> Choice {
   let enter = entering(crossed);
   let leave = leaving(crossed);
   let t = enter * scale;
-  if enter < leave && leave > 0.0 && t < c.nearest {
+  if enter < leave && leave > 0.0 && t < c.nearest && met(hit.w >> 8u, crossed) != 0u {
     out = Choice(k, t, c.sky_seen);
   }
   return out;
@@ -526,7 +559,7 @@ fn resolve_fragment(in: Screen) -> @location(0) vec4f {
 }
 
 // The picture, shown where egui's pass puts it.
-@group(0) @binding(10) var picture: texture_2d<f32>;
+@group(0) @binding(11) var picture: texture_2d<f32>;
 
 @fragment
 fn show_fragment(in: Screen) -> @location(0) vec4f {
