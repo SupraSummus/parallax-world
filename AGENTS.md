@@ -114,6 +114,7 @@ worlds/                      # The worlds, on worldgen's public API only; the we
 lab/                         # Experiment, not built by pnpm: split grammars with shared splits, learned from the valley's towns; a masked model of any volume, flat, 3D or on the FCC lattice; synthesis by coordinates into examples; a critic and profiles that score any of them; real places (scripts/overture.py) drawn to a plan (see src/lib.rs); exports the learned town's rules
 native/                      # Spike of a native frontend (egui on winit and wgpu), linking bake/ and worlds/; see src/main.rs
 ├── .cargo/config.toml       # Builds for x86-64-v3: floor and ceil inline (see there)
+├── build.rs                 # The code's version (git's commit) for the panel's Reproduce
 └── src/
     ├── main.rs              # The camera (flying or walking, F), the panel, its engine and lighting (shaded or computed); --shot, --bench, --stroll for any engine
     ├── window.rs            # The window: egui on winit and wgpu, over the engine's picture, its GPU device made again when lost

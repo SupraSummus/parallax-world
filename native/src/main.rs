@@ -27,6 +27,8 @@
 //! shaded by the way their faces face, or lit by light worked out across
 //! the world, as --light does, as bright as its sliders say; each engine
 //! shows it its own way.
+//! Its Reproduce gives the command that draws the view again offscreen,
+//! and the code's version it needs (build.rs).
 
 mod engine;
 mod gpu;
@@ -85,7 +87,12 @@ struct App {
     world_query: String,
     /** What the ui drew last, for the window to draw (window::Content). */
     picture: Option<(Box<dyn Picture>, egui::Rect)>,
+    /** The arguments that draw the last frame again (--shot, --bench), at this version of the code (VERSION). */
+    arguments: String,
 }
+
+/** The code's version: git's commit, `-dirty` with changes not committed (build.rs). */
+const VERSION: &str = env!("PARALLAX_VERSION");
 
 impl window::Content for App {
     fn picture(&mut self) -> Option<(Box<dyn Picture>, egui::Rect)> {
@@ -148,6 +155,16 @@ impl window::Content for App {
                 t.since, t.ui, self.framing, t.upload, t.waiting, t.rest
             ));
             ui.label("WASD, Space/Shift, arrows or drag\nWalking: Space jumps, Shift sneaks");
+            ui.group(|ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    ui.strong("Reproduce");
+                    if ui.button("Copy").clicked() {
+                        ui.ctx().copy_text(self.reproduce());
+                    }
+                });
+                ui.label(egui::RichText::new(self.reproduce()).monospace());
+            });
         });
         egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
             let (rect, response) = ui.allocate_exact_size(ui.available_size(), egui::Sense::drag());
@@ -231,7 +248,12 @@ impl App {
         }
     }
 
-    fn remember(&self, size: [f32; 2]) {
+    /** The last frame, as a command that draws it again, and the code's version it needs. */
+    fn reproduce(&self) -> String {
+        format!("# code {VERSION}\npnpm shot:native {} --shot out.png", self.arguments)
+    }
+
+    fn remember(&mut self, size: [f32; 2]) {
         let Look { camera: [x, y, z], yaw, pitch, fov, far, detail, shift, .. } = self.look;
         let frame = format!(
             "--engine {:?} --view '{}&camera={x},{y},{z}&look={yaw},{pitch}&fov={fov}&distance={far:.0}&detail={detail}' --shift {shift} --size {:.0}x{:.0}",
@@ -239,7 +261,8 @@ impl App {
         );
         let b = self.world.brightness().expect("a world with light");
         let light = if self.lighting == Lighting::Computed { format!(" --light {},{},{}", b.sky, b.sun, b.glow) } else { String::new() };
-        *LAST_FRAME.lock().unwrap_or_else(|e| e.into_inner()) = format!("{frame}{light}\n{}", self.stats);
+        self.arguments = format!("{frame}{light}");
+        *LAST_FRAME.lock().unwrap_or_else(|e| e.into_inner()) = format!("{}\n{}", self.reproduce(), self.stats);
     }
 }
 
@@ -476,6 +499,7 @@ fn main() {
         walk_through,
         world_query: format!("seed={seed}{}", world_name.map(|w| format!("&world={w}")).unwrap_or_default()),
         picture: None,
+        arguments: String::new(),
     };
     let panic = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
