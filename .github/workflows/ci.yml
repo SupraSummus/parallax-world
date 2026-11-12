@@ -86,8 +86,8 @@ jobs:
   # on Mesa's software Vulkan: its tests that draw, and a view drawn.
   native-gpu:
     runs-on: ubuntu-latest
-    # llvmpipe compiles shaders for the runner's CPU, and on AMD's Zen 4 with
-    # AVX-512 draws the voxels engine wrong (docs/todo.md): none, on every runner.
+    # llvmpipe compiles shaders for the runner's CPU, and LLVM 21's AVX-512 code
+    # draws the voxels engine wrong (docs/todo.md): none, on every runner.
     env:
       GALLIUM_OVERRIDE_CPU_CAPS: avx
     steps:
