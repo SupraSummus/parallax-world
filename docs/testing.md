@@ -75,5 +75,7 @@ a no-op 2D canvas context
   They need Vulkan (Mesa's software one will do),
   so `pnpm test` skips them (`#[ignore]`) and CI's `native-gpu` job runs them
   (`cargo test` in `native/` with `-- --ignored`).
+  On AMD's Zen 4, give them `GALLIUM_OVERRIDE_CPU_CAPS=avx`, as CI does
+  ([docs/todo.md](todo.md)).
   Otherwise look in the browser (`pnpm dev`),
   or without a GPU with `pnpm shot` (see AGENTS.md).
