@@ -5,6 +5,7 @@
 
 use std::cell::RefCell;
 
+use crate::VOXEL_FACES;
 use crate::world::{ALPHA, Grid, Tiles};
 
 /** Lattice units per metre. */
@@ -31,10 +32,9 @@ const MAX_MOVE: f64 = 1.0;
  */
 pub const COLLISION_LEVEL: u32 = 1;
 
-/** What the body collides with. */
+/** What the body collides with: voxels of the lattice `scale()` units apart, those at the sites `solid` says. */
 pub trait Solid {
-    fn solid(&self, p: [f64; 3]) -> bool;
-    /** Lattice units between its sites: points this far apart catch every voxel. */
+    fn solid(&self, site: [i32; 3]) -> bool;
     fn scale(&self) -> f64;
 }
 
@@ -50,8 +50,7 @@ pub struct Ground<'a> {
 }
 
 impl Solid for Ground<'_> {
-    fn solid(&self, p: [f64; 3]) -> bool {
-        let [x, y, z] = nearest_site(p.map(|v| v / self.scale()));
+    fn solid(&self, [x, y, z]: [i32; 3]) -> bool {
         match self.tiles.at(x, y, z) {
             None => true,
             Some((id, alpha)) => alpha > ALPHA / 2 && !self.walk_through.get(id as usize).copied().unwrap_or(false),
@@ -61,17 +60,6 @@ impl Solid for Ground<'_> {
     fn scale(&self) -> f64 {
         (1 << COLLISION_LEVEL) as f64
     }
-}
-
-/** The FCC site nearest `p`, whose voxel holds it: rounded, and if that is not a site, the coordinate farthest from its rounding rounded the other way. */
-fn nearest_site(p: [f64; 3]) -> [i32; 3] {
-    let mut r = p.map(|v| v.round() as i32);
-    if (r[0] + r[1] + r[2]) & 1 != 0 {
-        let d: [f64; 3] = std::array::from_fn(|i| p[i] - r[i] as f64);
-        let far = (0..3).fold(0, |a, b| if d[b].abs() > d[a].abs() { b } else { a });
-        r[far] += if d[far] >= 0.0 { 1 } else { -1 };
-    }
-    r
 }
 
 /** Held keys: forward and right each −1, 0 or 1, along `yaw` (degrees, as the view's). */
@@ -196,22 +184,27 @@ impl Walker {
     }
 }
 
-/** Whether the body with its feet at `feet` is in anything solid: points through it, `scale` apart at most. */
-fn blocked(ground: &impl Solid, [x, y, z]: [f64; 3]) -> bool {
-    let spacing = 0.8 * ground.scale();
-    let across = (2.0 * HALF_WIDTH / spacing).ceil() as usize;
-    let up = (HEIGHT / spacing).ceil() as usize;
-    let at = |i: usize, n: usize, length: f64| i as f64 / n as f64 * length;
-    (0..=up).any(|j| {
-        (0..=across).any(|i| {
-            (0..=across).any(|k| {
-                ground.solid([
-                    x - HALF_WIDTH + at(i, across, 2.0 * HALF_WIDTH),
-                    y + at(j, up, HEIGHT),
-                    z - HALF_WIDTH + at(k, across, 2.0 * HALF_WIDTH),
-                ])
-            })
-        })
+/**
+ * Whether the body with its feet at `feet` overlaps a solid voxel. Two
+ * convex shapes are apart if and only if they are along one of their
+ * faces' normals or their edges' cross products: for the body, a box, and
+ * a voxel, the box's axes and the voxel's normals (VOXEL_FACES), along
+ * each of which the voxel reaches 1 from its site.
+ */
+fn blocked(ground: &impl Solid, feet: [f64; 3]) -> bool {
+    const AXES: [[i32; 3]; 3] = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+    let scale = ground.scale();
+    let centre = [feet[0], feet[1] + HEIGHT / 2.0, feet[2]].map(|v| v / scale);
+    let half = [HALF_WIDTH, HEIGHT / 2.0, HALF_WIDTH].map(|v| v / scale);
+    let range = |i: usize| (centre[i] - half[i] - 1.0).floor() as i32..=(centre[i] + half[i] + 1.0).ceil() as i32;
+    let sites = range(0).flat_map(|x| range(1).flat_map(move |y| range(2).map(move |z| [x, y, z])));
+    sites.filter(|[x, y, z]| (x + y + z) & 1 == 0).any(|site| {
+        let apart = AXES.iter().chain(&VOXEL_FACES).any(|n| {
+            let along: f64 = (0..3).map(|i| f64::from(n[i]) * (f64::from(site[i]) - centre[i])).sum();
+            let reach: f64 = (0..3).map(|i| f64::from(n[i].abs()) * half[i]).sum();
+            along.abs() >= 1.0 + reach
+        });
+        !apart && ground.solid(site)
     })
 }
 
@@ -305,11 +298,12 @@ pub extern "C" fn walk_step(forward: f64, right: f64, yaw: f64, jump: bool, snea
 mod tests {
     use super::*;
 
-    /** A floor whose top is at y = 0, and boxes [min, max) on it. */
+    /** Voxels 2 units apart: a floor, its top's tips at y = 0, and those at sites in boxes [min, max) on it. */
     struct Scene(&'static [([f64; 3], [f64; 3])]);
 
     impl Solid for Scene {
-        fn solid(&self, p: [f64; 3]) -> bool {
+        fn solid(&self, site: [i32; 3]) -> bool {
+            let p = site.map(|v| v as f64 * self.scale());
             p[1] < 0.0 || self.0.iter().any(|(lo, hi)| (0..3).all(|d| (lo[d]..hi[d]).contains(&p[d])))
         }
         fn scale(&self) -> f64 {
@@ -333,26 +327,25 @@ mod tests {
     }
 
     #[test]
-    fn finds_the_nearest_site() {
-        let neighbours = (0..3).flat_map(|i| {
-            [[1, 1], [1, -1], [-1, 1], [-1, -1]].map(|[a, b]| std::array::from_fn::<i32, 3, _>(|d| [a, b, 0][(d + 3 - i) % 3]))
-        });
-        let neighbours: Vec<[i32; 3]> = neighbours.collect();
-        for p in [[0.2, 0.1, 0.0], [0.9, 0.2, 0.1], [-0.6, -0.5, 0.05], [3.4, -2.6, 7.1], [0.5, 0.5, 0.49]] {
-            let s = nearest_site(p);
-            assert_eq!((s[0] + s[1] + s[2]) & 1, 0);
-            let distance = |s: [i32; 3]| (0..3).map(|i| (s[i] as f64 - p[i]).powi(2)).sum::<f64>();
-            assert!(neighbours.iter().all(|d| distance(std::array::from_fn(|i| s[i] + d[i])) >= distance(s) - 1e-9), "{p:?}");
-        }
-    }
-
-    #[test]
     fn stands_on_the_ground_and_walks_at_walking_speed() {
         let ground = Scene(&[]);
         let body = standing(&ground, 0.0);
         assert!(body.settled() && body.feet[1].abs() < 0.1, "{body:?}");
         let walked = run(&ground, body, FORWARD, 2.0);
         assert!((walked.feet[2] - 2.0 * WALK_SPEED).abs() < 1.0, "{walked:?}");
+    }
+
+    #[test]
+    fn keeps_its_feet_on_the_tips_of_the_floor_wherever_it_stands_and_walks() {
+        // The floor's top is its voxels' tips, the body always over some: the feet are at their height.
+        let ground = Scene(&[]);
+        for (x, yaw) in [(0.0, 0.0), (0.5, 30.0), (1.0, 45.0), (1.5, 90.0)] {
+            let mut body = run(&ground, Walker::at([x, 24.0 + EYE_HEIGHT, 0.7]), STILL, 2.0);
+            for _ in 0..60 {
+                assert!(body.held && body.feet[1].abs() < 0.1, "at x = {x}, walking {yaw}°: {body:?}");
+                body = body.walk(WalkInput { yaw, ..FORWARD }, 1.0 / 60.0, &ground);
+            }
+        }
     }
 
     #[test]
