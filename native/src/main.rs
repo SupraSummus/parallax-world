@@ -2,7 +2,7 @@
 //! generated in tiles, those in view first (world.rs), drawn by an engine
 //! (engine.rs) with wgpu in an egui window (window.rs), or offscreen (gpu.rs).
 //!
-//! parallax-native [--engine reliefs|splats|voxels|slabs] [--world NAME] [--threads N] [--seed S] [--view QUERY] [--light SKY,SUN,GLOW] [--detail D] [--shift S] [--seams] [--colour voxels|layers|chunks] [--shot out.png [--size WxH] | --bench] [--stroll S [--on-ground]]
+//! parallax-native [--engine reliefs|flat|splats|voxels|slabs] [--world NAME] [--threads N] [--seed S] [--view QUERY] [--light SKY,SUN,GLOW] [--detail D] [--shift S] [--seams] [--colour voxels|layers|chunks] [--shot out.png [--size WxH] | --bench] [--stroll S [--on-ground]]
 //!
 //! --view takes the web page's view query (parseViewQuery in renderer.ts),
 //! overriding --seed and --world.
@@ -17,7 +17,8 @@
 //! lighting is unless --light), 0.01,0,1 night.
 //! --engine picks what draws, as the panel does (Kind): rays through the
 //! tiles' voxels (the default), chunks of cells' reliefs or splats, as the
-//! web draws, or rays through slabs baked along each face.
+//! web draws, reliefs drawn flat (an experiment), or rays through slabs
+//! baked along each face.
 //! --detail sets viewing distance over a cell's thickness, --shift how many
 //! levels finer than a cell its voxels are (bake's lod.rs), for the
 //! engines that draw cells; --seams and --colour draw chunks as the panel's
@@ -451,7 +452,7 @@ fn main() {
             Colours::ALL.into_iter().find(|(_, name)| name.eq_ignore_ascii_case(v)).expect("--colour voxels, layers or chunks").0;
     }
     let kind = value("--engine").map_or(Kind::Voxels, |v| {
-        Kind::ALL.into_iter().find(|(_, name)| name.eq_ignore_ascii_case(v)).expect("--engine reliefs, splats, voxels or slabs").0
+        Kind::ALL.into_iter().find(|(_, name)| name.eq_ignore_ascii_case(v)).expect("--engine reliefs, flat, splats, voxels or slabs").0
     });
     let mut engine = kind.make(&world);
     let walk_through: Vec<bool> = materials_of(&shown.generator).iter().map(|m| m.walk_through).collect();
@@ -528,6 +529,51 @@ mod tests {
         let frame = complete(&mut *engine, &mut world, &look, false);
         let (width, _, pixels) = Easel::offscreen(None).pixels(&*frame.picture, [320, 200]);
         (width, pixels)
+    }
+
+    /** Red ground under y = 0, endless. */
+    fn ground(_: u64) -> worldgen::World {
+        use worldgen::generator::{Field, Generator, KindDef, Layer, Op};
+        let kinds = vec![KindDef { name: "ground", kind_type: 10, colors: &["#ff0000"], walk_through: false, glows: false, medium: false }];
+        let ground = Field::at("ground", 0.0, Op::Fill, |_, y, _, _| (y < 0).then_some((0, None)));
+        let generator = Generator { kinds, seed: 1, layers: vec![Layer::Field(ground)] };
+        worldgen::World { generator, spawn: [0, 16, 0], heights: (-64, 64), points: Vec::new() }
+    }
+
+    /**
+     * Flat ground seen nearly along the axis of a face, (1, 0, 1), parallel
+     * to it, where flat pictures of cells part most (engine::chunks's Flat),
+     * shows no sky between them: wherever a ray meets the ground near
+     * enough, the picture is the ground's red, not the sky's blue.
+     */
+    #[test]
+    #[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
+    fn ground_along_a_face_shows_no_gaps() {
+        const PIXELS: [u32; 2] = [320, 200];
+        for kind in [Kind::Reliefs, Kind::Flat] {
+            let mut world = World::new(ground, 1, None, 4);
+            let look = Look { fog: f64::INFINITY, ..Look::new([0.0, 16.0, 0.0], [45.0, -10.0], FOV, 1000.0, PIXELS.map(f64::from)) };
+            let frame = complete(&mut *kind.make(&world), &mut world, &look, false);
+            let (width, _, pixels) = Easel::offscreen(None).pixels(&*frame.picture, PIXELS);
+            let [right, up, forward] = view::view_basis(look.yaw, look.pitch);
+            let focal = look.view().focal;
+            let (mut ground, mut gaps) = (0, 0);
+            for j in 0..PIXELS[1] {
+                for i in 0..PIXELS[0] {
+                    let [x, y] = [(f64::from(i) + 0.5 - 160.0) / focal, (100.0 - f64::from(j) - 0.5) / focal];
+                    let ray: [f64; 3] = std::array::from_fn(|d| forward[d] + x * right[d] + y * up[d]);
+                    // Where it meets y = 0, if within a fifth of the render distance.
+                    let length = ray.iter().map(|v| v * v).sum::<f64>().sqrt();
+                    if ray[1] >= 0.0 || 16.0 / -ray[1] * length > 200.0 {
+                        continue;
+                    }
+                    let at = 4 * (j * width + i) as usize;
+                    ground += 1;
+                    gaps += usize::from(pixels[at + 2] >= pixels[at]);
+                }
+            }
+            assert!(ground > 10_000 && gaps == 0, "{kind:?}: {gaps} of {ground} pixels of the ground show the sky");
+        }
     }
 
     #[test]

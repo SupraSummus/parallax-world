@@ -58,6 +58,8 @@ pub struct Frame {
     pub farthest: f64,
     /** Whether its chunks' whole voxels are reliefs, or splats each (Renderer's `relief`). */
     pub relief: bool,
+    /** Whether its reliefs are drawn flat, a picture a cell (compositor::flatten). */
+    pub flat: bool,
 }
 
 #[derive(Default)]
@@ -111,6 +113,8 @@ pub struct Renderer {
     renders: u64,
     /** Whether its chunks' whole voxels are reliefs (Request's `relief`). */
     relief: bool,
+    /** Whether its reliefs are drawn flat (Request's `flat`). */
+    flat: bool,
     /** Whether the chunks it has are lit (Request's `lit`): when the look's lighting changes, they are baked again. */
     lit: bool,
 }
@@ -171,7 +175,7 @@ impl Renderer {
      * bakers on as many threads as the world's; given light, each can light
      * the voxels it shows (a Light each), as the look asks.
      */
-    pub fn new(world: &World, relief: bool) -> Renderer {
+    pub fn new(world: &World, relief: bool, flat: bool) -> Renderer {
         let faces = view::faces();
         let (palette, light) = (world.palette.clone(), world.light());
         let bakery = Bakery::new(world.threads, move || {
@@ -191,6 +195,7 @@ impl Renderer {
             next_id: 0,
             renders: 0,
             relief,
+            flat,
             lit: false,
         }
     }
@@ -215,7 +220,7 @@ impl Renderer {
         self.renders += 1;
         let (camera, view) = (look.camera, look.view());
         let lod = Lod::new(look.shift, look.detail);
-        let mut frame = Frame { chunks: Vec::new(), farthest: look.far, relief: self.relief };
+        let mut frame = Frame { chunks: Vec::new(), farthest: look.far, relief: self.relief, flat: self.flat };
         let mut stats = Stats::default();
         let mut missing: Vec<(Request, f64)> = Vec::new();
         let mut tiles: Vec<(usize, TileId, f64)> = Vec::new();
@@ -292,7 +297,7 @@ impl Renderer {
                     }
                     &mut Seen::Bake(t) => {
                         let block = super::compositor::block(z1.max(1.0), view.focal);
-                        missing.push((Request { face: f, cell, tiles: t, block, lit: self.lit, relief: self.relief }, d));
+                        missing.push((Request { face: f, cell, tiles: t, block, lit: self.lit, relief: self.relief, flat: self.flat }, d));
                     }
                     Seen::Baked(chunk) => {
                         // Its plane, through its site.

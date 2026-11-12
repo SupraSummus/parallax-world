@@ -26,9 +26,9 @@ pub struct Chunks {
 }
 
 impl Chunks {
-    /** Draws `world`, its whole voxels reliefs or splats each (Renderer's `relief`). */
-    pub fn new(world: &World, relief: bool) -> Chunks {
-        Chunks { renderer: Renderer::new(world, relief), baking: false }
+    /** Draws `world`, its whole voxels reliefs or splats each (Renderer's `relief`), reliefs flat if `flat`. */
+    pub fn new(world: &World, relief: bool, flat: bool) -> Chunks {
+        Chunks { renderer: Renderer::new(world, relief, flat), baking: false }
     }
 }
 
@@ -88,13 +88,13 @@ mod tests {
 
     /**
      * World `name` of seed 1 from its spawn, looking `look`, at `detail`,
-     * once the view is complete, its whole voxels reliefs or splats.
+     * once the view is complete, its whole voxels reliefs (flat if `flat`) or splats.
      */
-    fn complete_view(name: &str, look: [f64; 2], detail: f64, relief: bool) -> Composed {
+    fn complete_view(name: &str, look: [f64; 2], detail: f64, relief: bool, flat: bool) -> Composed {
         let make = worlds::by_name(name).expect("world").make;
         let mut world = World::new(make, 1, None, 4);
         let look = Look { detail, ..Look::new(make(1).spawn.map(|v| v as f64), look, 90.0, 1000.0, [320.0, 200.0]) };
-        complete(&mut Chunks::new(&world, relief), &mut world, &look)
+        complete(&mut Chunks::new(&world, relief, flat), &mut world, &look)
     }
 
     /** What `chunks` draws of `world` as `look` sees it, once complete. */
@@ -113,7 +113,7 @@ mod tests {
     fn moving_keeps_most_chunks() {
         let make = worlds::by_name("moor").expect("moor").make;
         let mut world = World::new(make, 1, None, 4);
-        let mut chunks = Chunks::new(&world, true);
+        let mut chunks = Chunks::new(&world, true, false);
         let look = Look::new(make(1).spawn.map(|v| v as f64), [30.0, -10.0], 90.0, 400.0, [320.0, 200.0]);
         let ids = |c: &Composed| c.frame.chunks.iter().map(|p| p.chunk.id).collect::<HashSet<_>>();
         let before = ids(&complete(&mut chunks, &mut world, &look));
@@ -130,15 +130,21 @@ mod tests {
     #[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
     fn culling_on_the_gpu_leaves_the_picture_unchanged() {
         for (name, look, octaves) in VIEWS {
-            for relief in [true, false] {
-                let composed = complete_view(name, look, 2f64.powf(octaves), relief);
+            for (relief, flat) in [(true, false), (true, true), (false, false)] {
+                let composed = complete_view(name, look, 2f64.powf(octaves), relief, flat);
                 let [culled, all] = [true, false].map(|culls| {
                     let mut easel = Easel::offscreen(None);
                     easel.painter = Some(Box::new(Compositor::new(&easel.device, easel.format, culls)));
                     let pixels = easel.pixels(&composed, PIXELS).2;
                     (pixels, easel.held::<Compositor>().expect("a compositor").drawn(&easel).iter().sum::<u32>())
                 });
-                let drew = if relief { "tiles" } else { "splats" };
+                let drew = if flat {
+                    "flat tiles"
+                } else if relief {
+                    "tiles"
+                } else {
+                    "splats"
+                };
                 assert!(culled.0 == all.0, "{name} {look:?} {drew}");
                 assert!(culled.1 < all.1, "{name} {look:?}: culling drew {} {drew} of {}", culled.1, all.1);
             }
@@ -148,7 +154,7 @@ mod tests {
     #[test]
     #[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
     fn what_the_buffers_cannot_hold_is_left_out_farthest_first() {
-        let mut composed = complete_view("moor", [-30.0, 10.0], 2f64.powf(3.25), true);
+        let mut composed = complete_view("moor", [-30.0, 10.0], 2f64.powf(3.25), true, false);
         let all = Easel::offscreen(None).pixels(&composed, PIXELS).2;
         // Room for about half of the frame's columns: the chunks that come first, as many as fit, of columns, splats and clusters.
         let bytes =
