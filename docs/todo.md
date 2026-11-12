@@ -270,6 +270,15 @@ Numbers are for the forest at 1280×800, as measured when written.
   Maybe as it failed on lavapipe by the moor's mist:
   the depth pyramid's shorter side lost its last levels,
   and clusters over the whole view were hidden (fixed since).
+- **Native's flat pictures** (`--engine flat`, architecture.md, section 1).
+  - Their depth is by w, ahead along the view (`flat_depth`),
+    the other engines' by distance from the eye (`depth_of`),
+    so culling and the see-through splats ask which the frame draws.
+  - Each frame the main thread works out every picture's enlarging
+    (`Flat::enlarged`); a run's ends are a picture's edges across,
+    so the vertex shader might move them out instead.
+  - The main thread, not the GPU, bounds their frames:
+    `Compositor::prepare` reads each chunk where it lies in memory.
 - **Native's splats leave a hole by a hut.**
   `--engine splats --view 'seed=42&world=valley&camera=1200,100,36700&look=20,-12'`:
   sky shows through the ground in the bottom right, with or without culling,

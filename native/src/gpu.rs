@@ -20,13 +20,14 @@ pub const BACKENDS: wgpu::Backends = wgpu::Backends::VULKAN;
 /**
  * What the chunks' compositor needs of a device: draws listed on the GPU,
  * a tile or a cluster's splats each; depth tested before tiles' pixels
- * march, though they write it (compositor.wgsl); and see-through splats
- * added up in 32-bit floats.
+ * march, though they write it (compositor.wgsl); see-through splats
+ * added up in 32-bit floats; and flat pictures cut to their faces' rays.
  */
 pub const FEATURES: wgpu::Features = wgpu::Features::INDIRECT_FIRST_INSTANCE
     .union(wgpu::Features::MULTI_DRAW_INDIRECT_COUNT)
     .union(wgpu::Features::SHADER_EARLY_DEPTH_TEST)
-    .union(wgpu::Features::FLOAT32_BLENDABLE);
+    .union(wgpu::Features::FLOAT32_BLENDABLE)
+    .union(wgpu::Features::CLIP_DISTANCES);
 
 /** What engines need of a device: buffers as large as the adapter allows, for what is in view. */
 pub fn limits(adapter: &wgpu::Adapter) -> wgpu::Limits {

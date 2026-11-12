@@ -203,9 +203,17 @@ no runs and no cut faces.
 Or, drawn flat (the `flat` engine, an experiment;
 `Flat` in `native/src/engine/chunks/compositor.rs`),
 its relief is a picture of its columns' colours without their depths,
-rows of them in a buffer (`flatten`),
-drawn as one quad on a plane fixed in the world:
+on a plane fixed in the world:
 the camera's perspective moves and scales it.
+A column is a brick of it, a row high, a row's bricks side by side,
+the next row's half a brick on, so that they fill the plane;
+the picture is drawn as its rows' runs of columns that show,
+a quad each (`flatten`),
+so that every pixel drawn shows and none works out its own depth,
+which keeps the GPU testing depth before the pixel is drawn
+(on Intel's, a pixel left out or its depth written by the shader does not);
+the depth is the plane's, by w, ahead along the view (`flat_depth`),
+and a quad holds to its face's rays by four planes through the eye.
 Where two cells' pictures meet, each on its own plane,
 a gap may open as wide as the rays' slant times
 how far the edge columns' pillars reach from the planes,

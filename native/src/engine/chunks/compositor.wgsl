@@ -10,6 +10,9 @@
 // and those newly showing drawn now. Then the see-through splats in front
 // of them, nearest first (veil_fragment), over the picture.
 
+// A face's own rays, for pictures drawn flat (flat_vertex).
+enable clip_distances;
+
 struct FaceView {
   // Columns: the camera's right, up and forward axes, in the face's coordinates.
   view: mat3x3f,
@@ -22,7 +25,7 @@ struct Globals {
   resolution: vec2f, // device pixels
   focal: f32,
   fog_distance: f32,
-  whole_splats: f32, // 1 if whole voxels are splats, not reliefs
+  whole: f32, // how whole voxels are drawn: 0 reliefs' tiles, 1 splats, 2 flat pictures (FLAT)
   sky_fog: f32,
   sky_top: vec4f,
   horizon: vec4f,
@@ -40,14 +43,12 @@ struct Chunk {
   clip: f32, // see veil_vertex
   // Drawn flat (compositor.rs's Flat): its picture's q from its origin at
   // scale · q + offset, its plane past its own, z0 + gx x + gy y at q =
-  // (x, y), and how far its edge columns reach from it, at most.
+  // (x, y) (w unused).
   scale: vec2f,
   offset: vec2f,
   plane: vec4f,
-  // Its picture's columns across and rows (flat_fragment).
-  picture: vec2u,
-  unused: vec2u,
 }
+const FLAT = 2.0;
 
 // A tile of a chunk's relief (GpuCluster), TILE × TILE of its columns from
 // `first`, by rows, the centre of its first column `base`; or see-through
@@ -148,6 +149,11 @@ fn splat_vertex(@builtin(vertex_index) vertex: u32, @location(0) splat: vec4f, @
 @vertex
 fn veil_vertex(@builtin(vertex_index) vertex: u32, @location(0) splat: vec4f, @location(1) paint: vec4f, @location(2) finer: f32) -> Splat {
   var out = placed(vertex, splat, paint, 2.0 * splat.z * vec2f(1.0, sqrt(2.0)));
+  if globals.whole == FLAT {
+    // In front of the pictures or behind them as their depths say (flat_depth).
+    let c = chunks[vertex >> 2u];
+    out.position.z = flat_depth(c.level, dot(globals.faces[c.face].view[2], splat_site(vertex, splat))) * out.position.w;
+  }
   if finer <= chunks[vertex >> 2u].clip {
     out.position = vec4f(2.0, 2.0, 2.0, 1.0);
   }
@@ -247,42 +253,67 @@ fn flat_at(c: Chunk, q: vec2f) -> vec3f {
   return vec3f(c.origin + c.scale * q + c.offset, c.distance + c.plane.x + dot(c.plane.yz, q));
 }
 
-// A chunk drawn flat: its picture's box (its one cluster), without the
-// margin the culling holds it in for its enlarging, a quad in the world;
-// `ray` carries where on the picture, which is affine on the quad, so the
-// GPU interpolates it exactly.
-@vertex
-fn flat_vertex(@builtin(vertex_index) vertex: u32, @builtin(instance_index) tile: u32) -> Tile {
-  let t = tiles[tile];
-  let c = chunks[t.slot_count >> 8u];
-  let margin = c.plane.w * vec2f(1.0, sqrt(0.5));
-  let q = mix(t.min + margin, t.max - margin, vec2f(f32(vertex & 1u), f32(vertex >> 1u)));
-  let p = transpose(globals.faces[c.face].view) * flat_at(c, q);
-  let near = max(c.distance + t.near, 1e-3);
-  return Tile(vec4f(p.xy * globals.focal / (globals.viewport / 2.0), depth_of(c.level, near) * p.z, p.z), q, tile);
+// Drawn flat, depths are those of points on the pictures' planes, which
+// the GPU interpolates across a quad, so that the pixels draw what is
+// nearest without working out their own (a fragment shader's depth would
+// keep this GPU from testing it before the shader): as depth_of, level
+// L's in [2^(L - 64), 2^(L - 63)), but of w, how far ahead along the view,
+// affine in 1 / w, from w = NEAR · 2^L: far nearer the eye than a cell of
+// L comes but at level 0, where it is near enough not to matter.
+const NEAR = 0.0625;
+fn flat_depth(level: f32, w: f32) -> f32 {
+  return exp2(level - 64.0) * max(2.0 - NEAR * exp2(level) / w, 0.0);
 }
 
-// The colour of the picture's column there (compositor.rs's flatten: rows
-// of `picture.x` colours from the cluster's first column, two to an item),
-// at the depth of where it is drawn; no nearer than its quad
-// (early_depth_test), whose nearest corner is no farther along the axis.
-@fragment @early_depth_test(greater_equal)
-fn flat_fragment(in: Tile) -> Drawn {
-  let t = tiles[in.tile];
-  let c = chunks[t.slot_count >> 8u];
-  let spacing = vec2f(LAYER, 1.0) * c.half_layer * 2.0 / LAYER;
-  let d = nearest((in.ray - t.base) / spacing, spacing);
-  let at = vec2i((d.x - (d.y & 1)) / 2, d.y);
-  if !owns(c.face, in.position) || any(at < vec2i(0)) || any(at >= vec2i(c.picture)) {
-    discard;
-  }
-  let k = u32(at.y) * c.picture.x + u32(at.x);
-  let colour = columns[t.first + k / 2u][k % 2u];
-  if colour == 0u {
-    discard;
-  }
-  let distance = max(length(flat_at(c, in.ray)), max(c.distance + t.near, 1e-3));
-  return Drawn(vec4f(shade(c, unpack4x8unorm(colour)), 1.0), depth_of(c.level, distance));
+// A run of a picture drawn flat (its instance: compositor.rs's flatten),
+// of the cluster whose index · 4 is its first vertex: its columns'
+// bricks, a quad on the picture's plane; how far into the run, and where
+// its colours are, how many, and its chunk's slot. Only the face's own
+// rays (owns): |x| + √2 |y| ≤ z in its coordinates (view.rs's in_face),
+// so the quad is cut by four planes through the eye.
+struct Run {
+  @builtin(position) position: vec4f,
+  @builtin(clip_distances) owned: array<f32, 4>,
+  @location(0) along: f32,
+  @location(1) @interpolate(flat) colours: vec3u,
+}
+
+// A run's pixel: Run less what only cuts its quad.
+struct RunPixel {
+  @location(0) along: f32,
+  @location(1) @interpolate(flat) colours: vec3u,
+}
+
+@vertex
+fn flat_vertex(@builtin(vertex_index) vertex: u32, @builtin(instance_index) instance: u32) -> Run {
+  let t = tiles[vertex >> 2u];
+  let slot = t.slot_count >> 8u;
+  let c = chunks[slot];
+  let run = columns[t.first + instance];
+  let row = f32(run.x & 0x3ffu);
+  let first = f32((run.x >> 10u) & 0x7ffu);
+  let length = run.x >> 21u;
+  let corner = vec2f(f32(vertex & 1u), f32((vertex >> 1u) & 1u));
+  // Rows alternate from the first, even: an odd row's bricks half a brick on.
+  let brick = vec2f(2.0 * (first + corner.x * f32(length)) + row % 2.0 - 1.0, row + corner.y - 0.5);
+  let q = t.base + brick * vec2f(LAYER, 1.0) * c.half_layer * 2.0 / LAYER;
+  let at = flat_at(c, q);
+  let p = transpose(globals.faces[c.face].view) * at;
+  var out: Run;
+  out.position = vec4f(p.xy * globals.focal / (globals.viewport / 2.0), flat_depth(c.level, p.z) * p.z, p.z);
+  let y = sqrt(2.0) * at.y;
+  out.owned = array(at.z - at.x - y, at.z - at.x + y, at.z + at.x - y, at.z + at.x + y);
+  out.along = corner.x * f32(length);
+  out.colours = vec3u(t.first * 2u + run.y, length, slot);
+  return out;
+}
+
+// The colour of the run's column there.
+@fragment
+fn flat_fragment(in: RunPixel) -> @location(0) vec4f {
+  let k = in.colours.x + min(u32(max(in.along, 0.0)), in.colours.y - 1u);
+  let colour = columns[k / 2u][k % 2u];
+  return vec4f(shade(chunks[in.colours.z], unpack4x8unorm(colour)), 1.0);
 }
 
 // The first of a tile's columns the pixel's ray meets. A column is a
@@ -526,6 +557,21 @@ fn hidden(b: vec4f, depth: f32) -> bool {
   return depth * (1.0 - exp2(-18.0)) > far;
 }
 
+// The least depth a cluster's columns or splats may be drawn at: of its
+// nearest column's (or splat's) distance, no less than how far ahead it
+// is; drawn flat, of the least w in its box.
+fn nearest_depth(cluster: Cluster) -> f32 {
+  let c = chunks[cluster.slot_count >> 8u];
+  if globals.whole == FLAT {
+    let ahead = globals.faces[c.face].view[2];
+    let lo = ahead * vec3f(c.origin + cluster.min, c.distance + cluster.near);
+    let hi = ahead * vec3f(c.origin + cluster.max, c.distance + cluster.far);
+    let w = dot(min(lo, hi), vec3f(1.0));
+    return select(0.0, flat_depth(c.level, w), w > 0.0);
+  }
+  return depth_of(c.level, max(c.distance + cluster.near, 0.0));
+}
+
 // Off, every cluster in view is drawn: for tests, as what culling must not change.
 override culls = true;
 
@@ -536,10 +582,7 @@ fn draws_cluster(at: u32, cluster: Cluster, phase: u32) -> bool {
   if phase == 0u {
     return cluster.visible != 0u && shows(b);
   }
-  let c = chunks[cluster.slot_count >> 8u];
-  // Its nearest column's (or splat's) distance is no less than how far ahead it is.
-  let depth = depth_of(c.level, max(c.distance + cluster.near, 0.0));
-  let visible = shows(b) && !(culls && hidden(b, depth));
+  let visible = shows(b) && !(culls && hidden(b, nearest_depth(cluster)));
   clusters[at].visible = u32(visible);
   // The first phase drew those visible before and in view.
   return visible && cluster.visible == 0u;
@@ -597,8 +640,10 @@ fn cull(k: u32, phase: u32) {
   let cluster = clusters[at];
   if draws_cluster(u32(at), cluster, phase) {
     var draw = DrawArgs(4u, 1u, 0u, u32(at));
-    if globals.whole_splats != 0.0 {
+    if globals.whole == 1.0 {
       draw = DrawArgs(4u, cluster.slot_count & 0xffu, (cluster.slot_count >> 8u) * 4u, cluster.first);
+    } else if globals.whole == FLAT {
+      draw = DrawArgs(4u, cluster.slot_count & 0xffu, u32(at) * 4u, 0u);
     }
     draws[atomicAdd(&drawn, 1u)] = draw;
   }
@@ -630,9 +675,7 @@ fn cull_see_through(@builtin(workgroup_id) id: vec3u, @builtin(num_workgroups) n
   }
   let cluster = clusters[at];
   let b = screen_box(cluster);
-  let c = chunks[cluster.slot_count >> 8u];
-  let depth = depth_of(c.level, max(c.distance + cluster.near, 0.0));
-  let shows = shows(b) && !(culls && hidden(b, depth));
+  let shows = shows(b) && !(culls && hidden(b, nearest_depth(cluster)));
   veil_draws[k] = DrawArgs(4u, select(0u, cluster.slot_count & 0xffu, shows), (cluster.slot_count >> 8u) * 4u, cluster.first);
 }
 
@@ -715,3 +758,4 @@ fn show_fragment(in: Shown) -> @location(0) vec4f {
   let size = vec2f(textureDimensions(picture));
   return textureLoad(picture, vec2i(min(in.at * size, size - 1.0)), 0);
 }
+
