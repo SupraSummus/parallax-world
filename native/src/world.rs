@@ -1,8 +1,10 @@
-//! A generated world's tiles (World in world.ts): each level's voxels are
-//! tiles fixed in the world, TILE sites of the level wide along x and z,
-//! generated alone on the world's threads (a generator per thread) and
-//! indexed there. Which tiles, and in what order, is up to the engine
-//! drawing them (Wants): every update hands over the tiles it misses for
+//! A generated world's tiles: each level's voxels are tiles fixed in the
+//! world, cubes TILE sites of the level a side (worldgen's tile_box), no
+//! axis apart from the others: asked for, made and dropped by how far they
+//! are from the camera, as the crow flies. A tile all above or below the
+//! world's heights is empty, nothing generated; the rest are generated
+//! alone on the world's threads (a generator per thread) and indexed there.
+//! Which tiles, and in what order, is up to the engine drawing them (Wants): every update hands over the tiles it misses for
 //! what is in view, most wanted first, replacing the previous list; then
 //! the rest within reach of the camera of each level it reads (GRID_REACH,
 //! or as far as the voxels engine's rays read, voxels::REACH), so that
@@ -22,11 +24,11 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Condvar, Mutex};
 
+pub use bake::TileId;
 use bake::slicing::GRID_LEVELS;
 use bake::{Grid, LayerIndex, Tiles};
 use worldgen::generator::{generate, materials_of};
-use worldgen::grid::Box3;
-use worldgen::light::{Brightness, Light, Shared};
+use worldgen::light::{Brightness, Light, Shared, tile_box};
 
 use crate::engine::voxels;
 use crate::view::Vec3;
@@ -47,9 +49,6 @@ pub type Heights = [(i64, i64); GRID_LEVELS];
 fn heights(world: &worldgen::World) -> Heights {
     std::array::from_fn(|level| world.heights_at(level as u32))
 }
-
-/** Tile (i, k) holds x in [i · TILE, (i + 1) · TILE), z likewise. */
-pub type TileId = (i32, i32);
 
 /** A generated tile: its voxels, where they are along each face's layers, and its bricks and, lit, their light as the GPU takes them (voxels.rs). */
 pub struct Tile {
@@ -127,29 +126,24 @@ pub struct World {
     early: Vec<Made>,
 }
 
-/** The box of tile `id` of `level`, of a world of `heights`. */
-fn tile_box(heights: &Heights, level: usize, (i, k): TileId) -> Box3 {
-    let (min_y, max_y) = heights[level];
-    let (i, k) = (i as i64, k as i64);
-    Box3 { min: [i * TILE, min_y, k * TILE], max: [(i + 1) * TILE, max_y, (k + 1) * TILE] }
-}
-
-/** How far tile `id` of `level` is from the camera (lattice units) along x and z, in the level's sites. */
-fn distance(level: usize, camera: Vec3, (i, k): TileId) -> f64 {
+/** How far tile `id` of `level` is from the camera (lattice units), in the level's sites. */
+fn distance(level: usize, camera: Vec3, id: TileId) -> f64 {
     let n = (1u64 << level) as f64;
-    let off = |v: f64, t: i32| {
-        let (lo, hi) = ((t as i64 * TILE) as f64, ((t as i64 + 1) * TILE) as f64);
-        (lo - v / n).max(v / n - hi).max(0.0)
+    let off = |d: usize| {
+        let (lo, hi) = ((id[d] as i64 * TILE) as f64, ((id[d] as i64 + 1) * TILE) as f64);
+        (lo - camera[d] / n).max(camera[d] / n - hi).max(0.0)
     };
-    off(camera[0], i).hypot(off(camera[2], k))
+    (0..3).map(|d| off(d).powi(2)).sum::<f64>().sqrt()
 }
 
 /** The tiles of `level` within `reach` of the camera (lattice units) in the level's sites, nearest first. */
 fn around(level: usize, camera: Vec3, reach: f64) -> Vec<(f64, TileId)> {
-    let tile = |v: f64| (v / (1u64 << level) as f64 / TILE as f64).floor() as i32;
-    let (ci, ck, r) = (tile(camera[0]), tile(camera[2]), (reach / TILE as f64).ceil() as i32);
-    let mut around: Vec<(f64, TileId)> = (ck - r..=ck + r)
-        .flat_map(|k| (ci - r..=ci + r).map(move |i| (i, k)))
+    // The first tile whose end is not short of `reach` below each way, and the last whose start is not past it above.
+    let at = camera.map(|v| v / (1u64 << level) as f64 / TILE as f64);
+    let r = reach / TILE as f64;
+    let (lo, hi) = (at.map(|v| (v - r).ceil() as i32 - 1), at.map(|v| (v + r).floor() as i32));
+    let mut around: Vec<(f64, TileId)> = (lo[2]..=hi[2])
+        .flat_map(|k| (lo[1]..=hi[1]).flat_map(move |j| (lo[0]..=hi[0]).map(move |i| [i, j, k])))
         .map(|id| (distance(level, camera, id), id))
         .filter(|(d, _)| *d <= reach)
         .collect();
@@ -182,11 +176,17 @@ fn work(make: Make, seed: u64, heights: &Heights, queue: &(Mutex<Queue>, Condvar
                 Tile { grid: tile.grid.clone(), index: tile.index.clone(), words: tile.words.clone(), lights }
             }
             None => {
-                let grid = match &shared {
-                    Some(shared) => shared.tile(&generator, level as u32, heights[level], (id.0 as i64, id.1 as i64)),
-                    None => generate(&generator, &tile_box(heights, level, id), level as u32),
-                }
-                .into_grid(true);
+                let (heights, key) = (heights[level], id.map(i64::from));
+                let b = tile_box(heights, key);
+                let grid = if b.min[1] == b.max[1] {
+                    Grid::new(b.min.map(|v| v as i32), [0; 3], 0)
+                } else {
+                    match &shared {
+                        Some(shared) => shared.tile(&generator, level as u32, heights, key),
+                        None => generate(&generator, &b, level as u32),
+                    }
+                    .into_grid(true)
+                };
                 let index = LayerIndex::new(&grid);
                 let words = voxels::words(&grid);
                 Tile { grid: Arc::new(grid), index, words, lights: None }
@@ -409,6 +409,23 @@ mod tests {
         let mut lights: Vec<_> = world.level(coarsest).tiles.iter().map(|(&id, t)| (id, t.lights.clone().expect("lit"))).collect();
         lights.sort();
         lights
+    }
+
+    #[test]
+    fn tiles_are_asked_for_alike_whichever_way_they_lie() {
+        // Around a corner of tiles, each tile's turns and mirrors (the cube's 48) are as far, so asked for alike.
+        let around = around(2, [0.0; 3], 3.0 * TILE as f64);
+        let at: HashMap<TileId, f64> = around.iter().map(|&(d, id)| (id, d)).collect();
+        assert!(around.windows(2).all(|w| w[0].0 <= w[1].0), "nearest first");
+        assert!(at.contains_key(&[0, 3, 0]) && at.contains_key(&[0, -4, 0]), "above and below as far as along x and z");
+        for (&id, &d) in &at {
+            for turn in [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]] {
+                for mirror in 0..8 {
+                    let other: TileId = std::array::from_fn(|a| if mirror >> a & 1 == 1 { -1 - id[turn[a]] } else { id[turn[a]] });
+                    assert_eq!(at.get(&other), Some(&d), "{id:?} and {other:?}");
+                }
+            }
+        }
     }
 
     #[test]

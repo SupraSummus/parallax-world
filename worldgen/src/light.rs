@@ -24,7 +24,7 @@ use bake::slicing::GRID_LEVELS;
 
 use crate::World;
 use crate::generator::{Generator, generate, materials_of};
-use crate::grid::{ALPHA, Box3, GLOW_ONE, VoxelGrid};
+use crate::grid::{ALPHA, BRICK, Box3, GLOW_ONE, VoxelGrid};
 use crate::picture::{FACES, Picture, nearest_site};
 
 type Rgb = [f32; 3];
@@ -37,7 +37,7 @@ const DIRECTIONS: [[i64; 3]; N] = FACES;
 /** Steps along a direction before the coarser level's light may take over, and at most: at the coarsest, before the sky's does. */
 const STEPS: usize = 1;
 const TOP_STEPS: usize = 64;
-/** Sites per tile in x and z, at each level, as native's; a tile spans the heights. */
+/** Sites a tile is a side, at each level, as native's (tile_box). */
 pub const TILE: i64 = 128;
 /**
  * Sites whose light a level keeps, in PARTS parts, each locked and
@@ -48,13 +48,13 @@ pub const TILE: i64 = 128;
 const KEPT_SITES: usize = 7 << 17;
 const PARTS: usize = 64;
 /** Tiles of a level a Light keeps, and that all keep in Shared, before forgetting them. */
-const KEPT_TILES: usize = 16;
-const SHARED_TILES: usize = 64;
+const KEPT_TILES: usize = 256;
+const SHARED_TILES: usize = 1024;
 
 /** A tile, made once: those that want it while it is made wait. */
 type Tile = Arc<OnceLock<VoxelGrid>>;
 /** Tiles by level and key. */
-type Tiles = Map<(usize, (i64, i64)), Tile>;
+type Tiles = Map<(usize, [i64; 3]), Tile>;
 /** The light coming to sites from each direction, as found: in half-precision floats (`half`), sites as the baker's (i32). */
 type Found = Map<[i32; 3], [[u16; 3]; N]>;
 
@@ -87,14 +87,14 @@ impl Shared {
         Shared { tiles: self.tiles.clone(), ..Shared::new(brightness) }
     }
 
-    /** Tile `key` of `level` of the world `generator` makes, `heights` tall (World::heights_at), as its Lights read it. */
-    pub fn tile(&self, generator: &Generator, level: u32, heights: (i64, i64), key: (i64, i64)) -> VoxelGrid {
+    /** Tile `key` of `level` of the world `generator` makes, of `heights` (World::heights_at), as its Lights read it. */
+    pub fn tile(&self, generator: &Generator, level: u32, heights: (i64, i64), key: [i64; 3]) -> VoxelGrid {
         let tile = self.get(level as usize, key, || generate(generator, &tile_box(heights, key), level));
         tile.get().expect("made").clone()
     }
 
     /** Tile `key` of level `i`, made by `make` if not yet. */
-    fn get(&self, i: usize, key: (i64, i64), make: impl FnOnce() -> VoxelGrid) -> Tile {
+    fn get(&self, i: usize, key: [i64; 3], make: impl FnOnce() -> VoxelGrid) -> Tile {
         let tile = {
             let mut tiles = self.tiles.lock().expect("tiles");
             if !tiles.contains_key(&(i, key)) && tiles.keys().filter(|(l, _)| *l == i).count() >= SHARED_TILES {
@@ -170,9 +170,9 @@ type Map<K, V> = HashMap<K, V, BuildHasherDefault<Fast>>;
 /** A level's voxels, generated in tiles as they are needed. */
 struct Level {
     heights: (i64, i64),
-    tiles: Map<(i64, i64), Tile>,
+    tiles: Map<[i64; 3], Tile>,
     /** The tile read last, and its key: most reads are in it. */
-    last: Option<((i64, i64), Tile)>,
+    last: Option<([i64; 3], Tile)>,
 }
 
 pub struct Light {
@@ -235,7 +235,7 @@ impl Light {
     /** Whether a voxel is shown at `site` of level `i`, its tile generated if not yet. */
     fn shown(&mut self, i: usize, [x, y, z]: [i64; 3]) -> bool {
         let heights = self.levels[i].heights;
-        (heights.0..heights.1).contains(&y) && self.hold(i, x, z).get(x, y, z) != 0
+        (heights.0..heights.1).contains(&y) && self.hold(i, [x, y, z]).get(x, y, z) != 0
     }
 
     /** How light sees face `face` of `site` of level `i`: its pieces and its medium, each how much of it stops (alpha) and its colour; what it glows. */
@@ -244,7 +244,7 @@ impl Light {
         if !(heights.0..heights.1).contains(&y) {
             return ([(0.0, [0.0; 3]); 2], [0.0; 3]);
         }
-        let (parts, glow) = self.hold(i, x, z).light(x, y, z, face);
+        let (parts, glow) = self.hold(i, [x, y, z]).light(x, y, z, face);
         (parts.map(|(alpha, id)| (alpha as f32 / ALPHA as f32, self.albedo[id as usize])), glow.map(|g| g as f32 * self.glow))
     }
 
@@ -254,12 +254,12 @@ impl Light {
         if !(heights.0..heights.1).contains(&y) {
             return 1.0;
         }
-        1.0 - self.hold(i, x, z).alpha(x, y, z) as f32 / ALPHA as f32
+        1.0 - self.hold(i, [x, y, z]).alpha(x, y, z) as f32 / ALPHA as f32
     }
 
-    /** The tile of level `i` that holds column (x, z), from those shared, generated if not yet. */
-    fn hold(&mut self, i: usize, x: i64, z: i64) -> &VoxelGrid {
-        let key = (x.div_euclid(TILE), z.div_euclid(TILE));
+    /** The tile of level `i` that holds `site`, from those shared, generated if not yet. */
+    fn hold(&mut self, i: usize, site: [i64; 3]) -> &VoxelGrid {
+        let key = site.map(|v| v.div_euclid(TILE));
         let level = &mut self.levels[i];
         if level.last.as_ref().is_none_or(|(k, _)| *k != key) {
             let tile = match level.tiles.get(&key) {
@@ -519,9 +519,18 @@ fn albedo(generator: &Generator) -> Vec<Rgb> {
     materials_of(generator).iter().map(|m| linear(m.rgb())).collect()
 }
 
-/** Tile `key`'s box, `heights` tall. */
-fn tile_box(heights: (i64, i64), key: (i64, i64)) -> Box3 {
-    Box3 { min: [key.0 * TILE, heights.0, key.1 * TILE], max: [(key.0 + 1) * TILE, heights.1, (key.1 + 1) * TILE] }
+/**
+ * Tile `key`'s box: a cube TILE sites a side, holding x in
+ * [key[0] · TILE, (key[0] + 1) · TILE), y and z likewise, cut to `heights`
+ * rounded out to whole bricks, so that every tile's bricks are on one
+ * grid; empty (no y) if it is all above or below them.
+ */
+pub fn tile_box((low, high): (i64, i64), key: [i64; 3]) -> Box3 {
+    let [x, y, z] = key.map(|k| k * TILE);
+    let low = low.div_euclid(BRICK) * BRICK;
+    let high = (high + BRICK - 1).div_euclid(BRICK) * BRICK;
+    let (y0, y1) = (low.clamp(y, y + TILE), high.clamp(y, y + TILE));
+    Box3 { min: [x, y0, z], max: [x + TILE, y1.max(y0), z + TILE] }
 }
 
 /** `x` as a half-precision float's bits, rounded; 0 below its normal numbers, its largest above them. */
@@ -625,6 +634,19 @@ mod tests {
     use super::*;
     use crate::generator::{Field, Generator, KindDef, Layer, Node, Op, Population, SOLID, cuboid};
     use bake::light::colour;
+
+    #[test]
+    fn tiles_are_cubes_cut_to_the_heights_at_bricks() {
+        let heights = (-70, 140);
+        let cube = |key: [i64; 3]| Box3 { min: key.map(|k| k * TILE), max: key.map(|k| (k + 1) * TILE) };
+        assert_eq!(tile_box(heights, [2, 1, -3]), Box3 { max: [3 * TILE, 144, -2 * TILE], ..cube([2, 1, -3]) });
+        assert_eq!(tile_box(heights, [0, -1, 0]), Box3 { min: [0, -72, 0], ..cube([0, -1, 0]) });
+        assert_eq!(tile_box((-500, 500), [1, 2, 3]), cube([1, 2, 3]), "whole within them");
+        for key in [[0, 2, 0], [0, -2, 0]] {
+            let b = tile_box(heights, key);
+            assert!(b.min[1] == b.max[1], "{key:?}: none of it in the heights");
+        }
+    }
 
     const STONE: u8 = 0;
     const LAMP_KIND: u8 = 1;

@@ -203,7 +203,7 @@ pub fn places(world: &World, regions: &[Box3]) -> Vec<(String, [i64; 3])> {
     [("spawn".to_string(), world.spawn)].into_iter().chain(centres).collect()
 }
 
-/** Sites of a host's tile along x and z (TILE in native/src/world.rs and src/lib/world.ts). */
+/** Sites of the web's tile along x and z (TILE in src/lib/world.ts; native's are cubes, light::tile_box). */
 const TILE: i64 = 128;
 
 /** The host tile of `level` holding `at` (lattice units): TILE sites of the level along x and z, the world's heights along y. */

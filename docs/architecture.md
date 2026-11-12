@@ -88,7 +88,9 @@ A level with no grid yet is no special case: its grid has no tiles.
 The bake workers generate the tiles, finest level first;
 a level's slices show once its grid is in,
 and a moved grid replaces the old one once all its tiles are.
-The native spike (`native/src/world.rs`) has no grids, only tiles,
+The native spike (`native/src/world.rs`) has no grids, only tiles:
+cubes, alike along every axis, so no direction is up to how they are asked for
+(`tile_box` in `worldgen/src/light.rs`; those outside the world's heights are empty),
 made in the order the renderer wants them:
 a cell is baked once the world has every tile it reads (`chunk_reads`),
 and until then it asks for them, nearest first.

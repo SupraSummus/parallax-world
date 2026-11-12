@@ -42,7 +42,7 @@ pub trait Solid {
  * The voxels of COLLISION_LEVEL's tiles that stop more than half the rays
  * through their sites, but those of materials `walk_through` marks
  * (plants, water: KindDef::walk_through), by id.
- * Columns no tile holds are solid: the body stops there rather than fall.
+ * Sites no tile has a grid for are solid: the body stops there rather than fall.
  */
 pub struct Ground<'a> {
     pub tiles: &'a Tiles,
