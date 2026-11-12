@@ -127,6 +127,98 @@ impl<T: Clone + Default> Plan<T> {
         self.slots.borrow_mut()[slot] = (x, z, value.clone());
         value
     }
+    /** Column (x, z), if kept: none is made. */
+    fn kept(&self, x: i64, z: i64) -> Option<T> {
+        let (kx, kz, value) = &self.slots.borrow()[(sum(x, z) >> SHIFT) as usize];
+        ((*kx, *kz) == (x, z)).then(|| value.clone())
+    }
+}
+
+/**
+ * A plan of heights, as a world's ground, maybe with a promise: no
+ * column's differs from a neighbour's along x or z by more than `slope`
+ * units, checked whenever one is read and a neighbour is kept (a rule:
+ * broken, it panics). So its least and greatest over a rectangle of
+ * columns are near those of a grid of samples of it: within the slope
+ * times how far a column may be from a sample. Layers drawn about it
+ * (Field::about, Population::on) are asked where they may draw from that;
+ * without a promise, everywhere.
+ */
+pub struct Sloped {
+    pub plan: Rc<Plan<i64>>,
+    slope: Option<i64>,
+    /** The rectangles asked last and their ranges: a box's layers ask for the same few. */
+    last: RefCell<Vec<Ranged>>,
+}
+
+/** A rectangle of columns, min x, min z, max x, max z, and the range of a plan over it. */
+type Ranged = ([i64; 4], (i64, i64));
+
+/** Samples a range takes along each axis, but one: more, the closer it is, and the costlier. */
+const SAMPLES: i64 = 16;
+/** Rectangles a Sloped keeps the range of: as many as a box's layers ask about, give or take. */
+const KEPT: usize = 16;
+
+impl Sloped {
+    pub fn new(plan: Rc<Plan<i64>>, slope: i64) -> Sloped {
+        Sloped { plan, slope: Some(slope), last: RefCell::new(Vec::new()) }
+    }
+
+    /** `plan`, promising no slope: as steep as it likes. */
+    pub fn any(plan: Rc<Plan<i64>>) -> Sloped {
+        Sloped { plan, slope: None, last: RefCell::new(Vec::new()) }
+    }
+
+    /** The plan at column (x, z), within its slope of its neighbours kept. */
+    pub fn at(&self, x: i64, z: i64) -> i64 {
+        let h = self.plan.at(x, z);
+        let Some(slope) = self.slope else { return h };
+        for (nx, nz) in [(x - 1, z), (x + 1, z), (x, z - 1), (x, z + 1)] {
+            if let Some(n) = self.plan.kept(nx, nz) {
+                assert!(
+                    (h - n).abs() <= slope,
+                    "plan {}: columns ({x}, {z}) and ({nx}, {nz}) differ by {}, more than its slope {}; see \"Rules\" in {DOCS}",
+                    self.plan.name,
+                    (h - n).abs(),
+                    slope
+                );
+            }
+        }
+        h
+    }
+
+    /** The most a column differs from a neighbour, in units, if it promises so. */
+    pub fn slope(&self) -> Option<i64> {
+        self.slope
+    }
+
+    /** The least and greatest it may be over columns `min` to `max` (x, z), inclusive, if it promises a slope. */
+    pub fn range(&self, min: [i64; 2], max: [i64; 2]) -> Option<(i64, i64)> {
+        let slope = self.slope?;
+        let key = [min[0], min[1], max[0], max[1]];
+        if let Some((_, range)) = self.last.borrow().iter().find(|(k, _)| *k == key) {
+            return Some(*range);
+        }
+        // Samples every `step` columns, a power of two, from below min to past max: on one grid for any rectangle, so
+        // rectangles side by side share theirs (the plan keeps them). A column is at most step / 2 from one along each.
+        let step = [0, 1].map(|a| (((max[a] - min[a]) / SAMPLES).max(1) as u64).next_power_of_two() as i64);
+        let along = |a: usize| (min[a].div_euclid(step[a])..=-(-max[a]).div_euclid(step[a])).map(move |i| i * step[a]);
+        let (mut lo, mut hi) = (i64::MAX, i64::MIN);
+        for x in along(0) {
+            for z in along(1) {
+                let h = self.plan.at(x, z);
+                (lo, hi) = (lo.min(h), hi.max(h));
+            }
+        }
+        let far = slope * (step[0] / 2 + step[1] / 2);
+        let range = (lo - far, hi + far);
+        let mut last = self.last.borrow_mut();
+        if last.len() == KEPT {
+            last.remove(0);
+        }
+        last.push((key, range));
+        Some(range)
+    }
 }
 
 impl Plan<Fx> {
@@ -336,6 +428,28 @@ mod tests {
     use super::*;
     use crate::noise::{ONE, fx};
     use crate::units::Units;
+
+    #[test]
+    fn a_sloped_plan_is_within_its_range_wherever_asked() {
+        // Hills rising a few units a column at most: their range over rectangles holds every column in them, not far past.
+        let hills = |x: i64, z: i64| ((x as f64 / 9.0).sin() * 30.0 + (z as f64 / 13.0).cos() * 50.0).round() as i64;
+        let sloped = Sloped::new(Rc::new(Plan::new("hills", 1, hills)), 9);
+        for (min, max) in [([0, 0], [0, 0]), ([-40, 7], [87, 300]), ([5, -5], [6, 1000])] {
+            let (lo, hi) = sloped.range(min, max).expect("a promise");
+            let columns = (min[0]..=max[0]).flat_map(|x| (min[1]..=max[1]).map(move |z| hills(x, z)));
+            let (least, most) = columns.fold((i64::MAX, i64::MIN), |(lo, hi), h| (lo.min(h), hi.max(h)));
+            assert!(lo <= least && most <= hi, "{min:?} to {max:?}: {least}..{most} in {lo}..{hi}");
+            assert!(least - lo <= 9 * 64 && hi - most <= 9 * 64, "{min:?} to {max:?}: {lo}..{hi} far past {least}..{most}");
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "plan steps: columns (1, 0) and (0, 0) differ by 5, more than its slope 2")]
+    fn refuses_a_sloped_plan_steeper_than_it_says() {
+        let steps = Sloped::new(Rc::new(Plan::new("steps", 1, |x, _| 5 * x)), 2);
+        steps.at(0, 0);
+        steps.at(1, 0);
+    }
 
     #[test]
     #[should_panic(expected = "plan coarse (scale 64) reads fine of the finer scale 1")]

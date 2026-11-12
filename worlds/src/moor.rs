@@ -15,11 +15,11 @@ use std::rc::Rc;
 use worldgen::World;
 use worldgen::column::Column;
 use worldgen::frame::{Frame, Part, facing, walls};
-use worldgen::generator::{ANY_SIZE, Child, Far, Field, Generator, Kind, Layer, Node, Op, Population, Shape, Span};
+use worldgen::generator::{ANY_SIZE, About, Child, Far, Field, Generator, Kind, Layer, Node, Op, Population, Shape, Span};
 use worldgen::js;
 use worldgen::kinds;
 use worldgen::noise::{Fbm, Fx, Rng, ValueNoise, ease_towards, fx, hash64, smoothstep, stream};
-use worldgen::plan::{Claims, Land, Plan};
+use worldgen::plan::{Claims, Land, Plan, Sloped};
 use worldgen::units::{Units, m};
 
 use crate::forest::K as F;
@@ -55,6 +55,8 @@ const BOG: Units = Units::m(0.25);
 const STREAM_SCALE: i64 = m(32.0);
 const BANK_SCALE: i64 = m(1.0);
 const GROUND_SCALE: i64 = 8;
+/** The most the moor's ground rises or falls from a column to the next, in units (Sloped): rolling heath, levelled under huts. */
+const SLOPE: i64 = 2;
 /**
  * Steadings' rings stand at least APART, claimed (Claims) from spots one
  * in each square CLAIM wide on average; a steading reaches NEAR from its
@@ -467,7 +469,7 @@ impl Uplands {
  * is under it.
  */
 pub struct Ground {
-    pub ground: Rc<Plan<i64>>,
+    pub ground: Rc<Sloped>,
     pub land: Option<(Rc<Land>, usize)>,
     pub path: Option<Rc<Path>>,
     pub bottom: Option<i64>,
@@ -513,7 +515,8 @@ pub fn moor(seed: u64) -> World {
     // The heath, levelled under each hut.
     let ground = {
         let moorland = moorland.clone();
-        Rc::new(Plan::new("ground", GROUND_SCALE, move |x, z| moorland.shaped(x, z, heath(x, z)).round_units().0))
+        let plan = Plan::new("ground", GROUND_SCALE, move |x, z| moorland.shaped(x, z, heath(x, z)).round_units().0);
+        Rc::new(Sloped::new(Rc::new(plan), SLOPE))
     };
     let spawn = {
         // Behind the first hut, or over the origin if there is none.
@@ -575,7 +578,9 @@ fn mist(f: Rc<Moor>) -> Field {
 
 /** The heath: heather, grass or bog over peat, a gravel path to each ring; heather and grass standing on it as media. */
 fn heath(f: Rc<Moor>) -> Field {
-    Field::columns("heath", 0.7, Op::Paint, move |x, z, spacing| {
+    // Half a metre of its surface and of peat, heather on it; unless the peat goes down to the bottom.
+    let about = f.ground.bottom.is_none().then(|| About { of: f.ground.ground.clone(), below: m(1.0), above: m(0.4) });
+    let field = Field::columns("heath", 0.7, Op::Paint, move |x, z, spacing| {
         if !f.owns(x, z) || f.by_path(x, z, Fx::m(1.6)) {
             return Vec::new();
         }
@@ -609,7 +614,8 @@ fn heath(f: Rc<Moor>) -> Field {
             column
         }
         .spans()
-    })
+    });
+    Field { about, ..field }
 }
 
 /** The bottom of the stream's bed under ground `h` high: a metre deep, at least two sites, as a line of sites along y has one every two. */
@@ -622,6 +628,7 @@ fn bed_bottom(h: i64, spacing: i64) -> i64 {
  * after, fills it from; on the faces they share, they keep the same sites.
  */
 fn stream_bed(f: Rc<Moor>) -> Field {
+    let f_ground = f.ground.ground.clone();
     Field::columns("stream bed", 1.0, Op::Carve, move |x, z, spacing| {
         if f.moorland.streamside(x, z) != Streamside::Bed {
             return Vec::new();
@@ -629,6 +636,7 @@ fn stream_bed(f: Rc<Moor>) -> Field {
         let h = f.height(x, z);
         vec![Span::solid(bed_bottom(h, spacing), h + 1, 0)]
     })
+    .about(f_ground, m(1.0), 1)
 }
 
 /**
@@ -654,6 +662,7 @@ fn boulders(f: Rc<Moor>) -> Population {
     let ground = f.clone();
     Population::new("moor boulders", 3.0, m(6.0))
         .reach(m(2.5))
+        .on(f.ground.ground.clone())
         .anchor_along(1, move |line| {
             let [i, k] = line.across;
             Some(line.pick(&mut Rng::new(hash64(ground.moorland.seed, i, 0, k)), |x, z| ground.height(x, z)))

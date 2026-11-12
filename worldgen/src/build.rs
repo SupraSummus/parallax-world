@@ -6,17 +6,20 @@
 
 use crate::curve::Curve;
 use crate::generator::{
-    ANY_SIZE, Anchors, Cell, Child, Children, Far, Field, FieldValues, Kind, Line, Node, Op, Point, Population, Radius, SOLID, Shape,
-    Shapes, Span, ball, bounds_of_shapes, capsule, cuboid, ellipsoid, gable, lathe, tube,
+    ANY_SIZE, About, Anchors, Cell, Child, Children, Far, Field, FieldValues, Kind, Line, Node, Op, Point, Population, Radius, SOLID,
+    Shape, Shapes, Span, ball, bounds_of_shapes, capsule, cuboid, ellipsoid, gable, lathe, tube,
 };
 use crate::grid::Box3;
+use std::rc::Rc;
+
 use crate::noise::Rng;
+use crate::plan::Sloped;
 use crate::points::{Points, Spot};
 
 impl Field {
     /** A kind, with a medium's extinction if it is one, at each site: `at(x, y, z, spacing)`, lattice units. */
     pub fn at(name: &'static str, order: f64, op: Op, at: impl Fn(i64, i64, i64, i64) -> Option<(Kind, Option<f64>)> + 'static) -> Field {
-        Field { name, order, op, values: FieldValues::At(Box::new(at)) }
+        Field { name, order, op, values: FieldValues::At(Box::new(at)), about: None }
     }
 
     /** Spans along each line of sites parallel to `axis`: `spans(u, v, spacing)`, the line's other coordinates in axis order. */
@@ -27,12 +30,17 @@ impl Field {
         axis: usize,
         spans: impl Fn(i64, i64, i64) -> S + 'static,
     ) -> Field {
-        Field { name, order, op, values: FieldValues::Spans { axis, spans: Box::new(move |u, v, s| spans(u, v, s).into()) } }
+        Field { name, order, op, values: FieldValues::Spans { axis, spans: Box::new(move |u, v, s| spans(u, v, s).into()) }, about: None }
     }
 
     /** Spans along each column, up y: `spans(x, z, spacing)`, lattice units; a `Column` or the spans. */
     pub fn columns<S: Into<Vec<Span>>>(name: &'static str, order: f64, op: Op, spans: impl Fn(i64, i64, i64) -> S + 'static) -> Field {
         Field::spans(name, order, op, 1, spans)
+    }
+
+    /** Its spans along y from `below` under to `above` over `of` at their column (About): a rule; drawn only where they may be. */
+    pub fn about(self, of: Rc<Sloped>, below: i64, above: i64) -> Field {
+        Field { about: Some(About { of, below, above }), ..self }
     }
 }
 
@@ -70,6 +78,7 @@ impl Population {
             anchor: Anchors::Cells(Box::new(|c| Some(c.centre.map(|v| v as f64)))),
             make: Box::new(|_, _| None),
             far: None,
+            on: None,
         }
     }
 
@@ -112,6 +121,11 @@ impl Population {
     }
 
     /** What it draws while its sites are further apart than its `size`: a medium as dense as its things. */
+    /** Its things standing on `ground`, each anchored at most N off it (Population::on): a rule; asked to draw only near it. */
+    pub fn on(self, ground: Rc<Sloped>) -> Population {
+        Population { on: Some(ground), ..self }
+    }
+
     pub fn far(self, far: Field) -> Population {
         Population { far: Some(far), ..self }
     }
