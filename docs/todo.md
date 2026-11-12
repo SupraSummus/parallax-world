@@ -502,16 +502,22 @@ Numbers are for the forest at 1280×800, as measured when written.
   - things in a site add up as if apart, and alpha has 255 steps,
     so at the coarsest levels a lamp stops nothing;
   - generating costs more, lit or not: every covered site is put for light.
-- **lavapipe draws the voxels engine wrong on AMD's Zen 4.**
-  On an EPYC 9V74 (Mesa 26.0.8, LLVM 21.1.8) most rays run out of steps
-  and media let too much through;
-  with LLVM's optimisations off (`GALLIVM_PERF=nopt`) or without AVX-512
-  (`GALLIUM_OVERRIDE_CPU_CAPS=avx`) they don't,
-  nor on Zen 3 or on Intel with AVX-512.
-  CI's `native-gpu` turns AVX-512 off, as its runners are of both kinds.
-  Either LLVM miscompiles for znver4,
-  or `voxels.wgsl` does something undefined that its optimisations exploit;
-  narrowing the shader down to the line would tell, and what to report upstream.
+- **LLVM 21 compiles AVX-512 code wrong (lavapipe).**
+  It may rematerialise a vector of all ones into a register past 15
+  in an encoding that cannot name one: the ones land in another register,
+  and that one keeps what it held
+  ([llvm/llvm-project#169009](https://github.com/llvm/llvm-project/pull/169009),
+  fixed in LLVM 22).
+  Where it strikes moves with the CPU LLVM tunes for and the shader's shape.
+  Ubuntu 26.04's Mesa 26.0.8 on LLVM 21.1.8, tuned for Zen 4
+  (CI's EPYC 9V74 runners), reads ymm29 in `voxels.wgsl`'s march unwritten,
+  and most rays run out of steps.
+  So CI's `native-gpu` runs without AVX-512, until its Mesa is on LLVM 22.
+  To reproduce on a CPU with Zen 4's AVX-512:
+  that Mesa (in a chroot will do),
+  `llvm::sys::getHostCPUName` made to return `znver4` by `LD_PRELOAD`,
+  and `MESA_SHADER_CACHE_DISABLE=true`,
+  else lavapipe reuses what it compiled for another CPU.
 
 ## Ideas
 
