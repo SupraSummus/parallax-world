@@ -295,9 +295,10 @@ const EXTENT_BLOCK = 8
 interface Table {
   cMin: number
   aMin: number
+  bMin: number
   layers: number
   blocks: number
-  /** By (c − cMin, block of a − aMin): the least and greatest b, or least > greatest if there is no voxel. */
+  /** By (c − cMin, block of a − aMin): the least and greatest b − bMin, or least > greatest if there is no voxel. */
   low: Int16Array
   high: Int16Array
 }
@@ -314,7 +315,7 @@ interface Indexer {
 }
 
 /** Numbers per table in index_build's result, and tables: a face and its opposite share one. */
-const TABLE = 9
+const TABLE = 10
 const TABLES = 6
 
 // An instance per thread, made on first use.
@@ -343,11 +344,11 @@ export class LayerIndex {
     const result = copyOut(wasm.memory, Float64Array, wasm.index_build(), TABLES * TABLE)
     const keys: string[] = []
     const tables = Array.from({ length: TABLES }, (_, t) => {
-      const [x, y, z, cMin, aMin, layers, blocks, low, high] = result.subarray(t * TABLE, (t + 1) * TABLE)
+      const [x, y, z, cMin, aMin, bMin, layers, blocks, low, high] = result.subarray(t * TABLE, (t + 1) * TABLE)
       keys.push(LayerIndex.key({ x, y, z }))
       // Copied out: the next grid frees them.
       const table = (from: number) => copyOut(wasm.memory, Int16Array, from, layers * blocks)
-      return { cMin, aMin, layers, blocks, low: table(low), high: table(high) }
+      return { cMin, aMin, bMin, layers, blocks, low: table(low), high: table(high) }
     })
     return new LayerIndex({ keys, tables })
   }
@@ -378,7 +379,7 @@ export class LayerIndex {
    * there are none.
    */
   range(lattice: { forward: Vec3 }, c0: number, c1: number, a0: number, a1: number): [number, number] | null {
-    const [{ cMin, aMin, layers, blocks, low, high }, cFrom, cTo, aFrom, aTo] = this.table(lattice, c0, c1, a0, a1)
+    const [{ cMin, aMin, bMin, layers, blocks, low, high }, cFrom, cTo, aFrom, aTo] = this.table(lattice, c0, c1, a0, a1)
     const k0 = Math.max(0, Math.floor((aFrom - aMin) / EXTENT_BLOCK))
     const k1 = Math.min(blocks - 1, Math.floor((aTo - 1 - aMin) / EXTENT_BLOCK))
     let [lo, hi] = [Infinity, -Infinity]
@@ -388,6 +389,6 @@ export class LayerIndex {
         if (high[k] > hi) hi = high[k]
       }
     }
-    return lo <= hi ? [lo, hi] : null
+    return lo <= hi ? [bMin + lo, bMin + hi] : null
   }
 }
