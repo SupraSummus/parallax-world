@@ -530,7 +530,7 @@ pub fn layers(railway: Rc<Railway>, land: Rc<Land>, me: usize, ground: Rc<Plan<i
         let railway = railway.clone();
         Field::columns("railway", 0.95, Op::Paint, move |x, z, spacing| {
             let Some(at) = railway.at(x, z) else { return Vec::new() };
-            let (top, e) = (at.top, at.distance);
+            let (top, e, floor) = (at.top, at.distance, bed(at.top, spacing));
             let within = |d: i64| e < Units(d).to_fx();
             let mut spans = Vec::new();
             match at.structure {
@@ -540,7 +540,7 @@ pub fn layers(railway: Rc<Railway>, land: Rc<Land>, me: usize, ground: Rc<Plan<i
                         spans.push(Span::solid(ground.at(x, z) - 2 * spacing, top - m(1.0), T::brick));
                     }
                     if within(DECK - 2) {
-                        spans.push(Span::solid(top - m(1.0), top + 1 - m(0.5).max(2 * spacing), T::brick));
+                        spans.push(Span::solid(top - m(1.0), floor, T::brick));
                     } else if within(DECK) {
                         spans.push(Span::solid(top - m(1.0), top + 1 + m(0.75).max(2 * spacing), T::brick));
                     }
@@ -549,7 +549,6 @@ pub fn layers(railway: Rc<Railway>, land: Rc<Land>, me: usize, ground: Rc<Plan<i
                 // The ground is far above: without a floor, the bore beside the ballast was open below.
                 Structure::Tunnel if within(BORE + LINING) => {
                     let e = e.floor_units().0;
-                    let floor = top + 1 - m(0.5).max(2 * spacing);
                     if e >= BORE {
                         spans.push(Span::solid(floor, top + 1 + arch(BORE - 1) + LINING, T::brick));
                     } else {
@@ -580,7 +579,7 @@ pub fn layers(railway: Rc<Railway>, land: Rc<Land>, me: usize, ground: Rc<Plan<i
                 (_, share) if share < fx(0.37) => T::timber.into(),
                 _ => K::ballast.into(),
             };
-            spans.push(Span::solid(top + 1 - m(0.5).max(2 * spacing), top + 1, surface));
+            spans.push(Span::solid(floor, top + 1, surface));
             if spacing == 1 && (e - RAIL).abs() < Fx::HALF {
                 spans.push(Span::solid(top + 1, top + 4, T::iron));
             } else if spacing == 1 && within(SLEEPERS) && at.along.rem_euclid(SLEEPER) < 2 {
@@ -598,6 +597,11 @@ pub fn layers(railway: Rc<Railway>, land: Rc<Land>, me: usize, ground: Rc<Plan<i
             .make(move |_, c| line.station_near(c.centre[0], c.centre[2]).map(|s| building(&s)))
     };
     vec![Layer::Field(bores), Layer::Field(track), Layer::Population(stations)]
+}
+
+/** The bottom of the ballast under a track `top` high, and of what it lies on: half a metre down, two sites at least. */
+fn bed(top: i64, spacing: i64) -> i64 {
+    top + 1 - m(0.5).max(2 * spacing)
 }
 
 /** How high a tunnel's bore is `e` across from its middle: walls, then a round vault. */
