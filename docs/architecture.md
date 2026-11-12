@@ -689,6 +689,14 @@ so a brick is uploaded once, when it comes into a window.
 A brick of a tile not made yet is unknown, not empty,
 and rays take the next coarser level there:
 what is missing shows coarser, never as a hole.
+Empty space is crossed on the lattice too, not by boxes:
+beside its bricks, a window counts for each cell of 8·FCC and of 32·FCC
+(rhombic dodecahedra about every other corner of its bricks, or of blocks of 4³ of them)
+the bricks around it whose voxels meet it, or that are unknown.
+A ray in a cell that none meets goes across it at once, face to face,
+as it goes across a voxel: whatever it met in the cell would meet the cell.
+A ray that runs out of steps shows magenta: a march must not stick,
+and if one does, it must not hide.
 One ray is traced for every 4 × 4 pixels;
 each pixel takes the nearest of the voxels its four nearest samples met
 that its own ray enters, so edges stay sharp.
@@ -698,7 +706,12 @@ its path the ray's through the voxel, until little is let through;
 a pixel takes the medium in front of what it sees
 from those of its samples that saw the same.
 Tests hold the window's table to a new one's after any moves and tiles
-(`a_window_moved_and_its_tiles_changed_holds_what_a_new_one_would`)
+(`a_window_moved_and_its_tiles_changed_holds_what_a_new_one_would`),
+its cells counted hollow, at its edge too, to ones no voxel it holds meets
+(`no_voxel_the_window_holds_meets_a_cell_counted_hollow`),
+its rays to their steps (`no_ray_of_the_voxels_runs_out_of_steps`),
+the picture to the same one with the world and the eye moved by a vector of the lattice
+that is not one of the bricks' (`voxels_look_the_same_wherever_the_bricks_fall`)
 and a slab of medium to exp(−extinction · path), as the splats' test does.
 
 The panel picks the lighting apart from the engine (`Lighting`):
