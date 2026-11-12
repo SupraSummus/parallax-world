@@ -1,7 +1,8 @@
 //! Pictures of a world at one level of detail, without the browser: for
 //! a world's author to look at, and for checks to measure. Rays cross the
 //! level's voxels exactly, one rhombic dodecahedron to the next; the tiles
-//! they cross are generated as they reach them.
+//! they cross are generated as they reach them, as hosts make them
+//! (generate_shown).
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::panic::AssertUnwindSafe;
@@ -10,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use bake::{FACE_KINDS, VOXEL_FACES};
 
-use crate::generator::{Generator, generate, materials_of};
+use crate::generator::{Generator, generate_shown, materials_of};
 use crate::grid::{ALPHA, BRICK, Box3, GLOW_ONE, VoxelGrid};
 
 /** Sites per tile in x and z, at the picture's level; a tile spans the heights. */
@@ -506,7 +507,7 @@ pub fn composite_in(generator: &Generator, camera: &Camera, tiles: &mut Tiles) -
 fn tiled(generator: &Generator, camera: &Camera, tiles: &mut Tiles, composite: bool) -> (Picture, Seen) {
     let colours: Vec<u32> = materials_of(generator).iter().map(|m| m.rgb()).collect();
     let (level, heights) = (tiles.level, tiles.heights);
-    let make = &mut |keys: &[(i64, i64)]| keys.iter().map(|key| generate(generator, &tile(*key, heights), level)).collect();
+    let make = &mut |keys: &[(i64, i64)]| keys.iter().map(|key| generate_shown(generator, &tile(*key, heights), level)).collect();
     picture_of_tiles(camera, tiles, &colours, make, composite)
 }
 
@@ -527,7 +528,7 @@ pub fn picture_on_threads(make: &(dyn Fn() -> Generator + Sync), camera: &Camera
                 loop {
                     let Ok((i, key)) = queue.lock().expect("no thread panicked").recv() else { break };
                     // A generator's panic, passed on to the picture's thread rather than leaving it waiting.
-                    let grid = std::panic::catch_unwind(AssertUnwindSafe(|| generate(&generator, &tile(key, heights), level)));
+                    let grid = std::panic::catch_unwind(AssertUnwindSafe(|| generate_shown(&generator, &tile(key, heights), level)));
                     done.send((i, grid)).expect("the picture waits for it");
                 }
             });

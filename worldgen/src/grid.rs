@@ -60,7 +60,7 @@ pub struct VoxelGrid {
     pub n: [i64; 3],
     bx: i64,
     by: i64,
-    /** Per brick, z-major, then y, then x: where its sites start in `cells`, in BRICK_SITES; −1 if empty. */
+    /** Per brick, z-major, then y, then x: where its sites start in `cells`, in BRICK_SITES; −1 if empty. Once buried (`bury`), bricks may share sites. */
     pub bricks: Vec<i32>,
     pub cells: Vec<u8>,
     /** By index in `cells`, the faces' materials of the sites whose faces are not all of their material there. */
@@ -238,6 +238,78 @@ impl VoxelGrid {
         }
     }
 
+    /**
+     * Keeps its buried bricks as one: those whose every site's pieces stop
+     * every ray, with the 26 around them so too. None of their voxels shows,
+     * nor lets light by, so they all hold one's sites (`bricks` shares it),
+     * its faces and glow dropped: rock is kept once, not by its volume.
+     * Not emptied, as a hollow's walls would be a surface to bake and
+     * light. Bricks on its sides are kept, whatever is past them unknown.
+     * Its bricks sharing sites, it is to be read or handed over, not changed.
+     */
+    pub fn bury(&mut self) {
+        // Every slot of a brick is a site; those past the box are 0, so a brick it cuts is not whole.
+        let whole: Vec<bool> = self
+            .bricks
+            .iter()
+            .map(|&at| usize::try_from(at).is_ok_and(|at| self.pieces.alpha[at * BRICK_SITES..][..BRICK_SITES].iter().all(|&a| a == ALPHA)))
+            .collect();
+        let count = [self.bx, self.by, self.bricks.len() as i64 / (self.bx * self.by).max(1)];
+        let buried = |brick: usize| {
+            let b = brick as i64;
+            let at = [b % self.bx, b / self.bx % self.by, b / (self.bx * self.by)];
+            (0..3).all(|c| at[c] > 0 && at[c] + 1 < count[c])
+                && (0..27).all(|d| {
+                    let [i, j, k] = [d % 3, d / 3 % 3, d / 9].map(|v| v - 1);
+                    whole[(b + (k * self.by + j) * self.bx + i) as usize]
+                })
+        };
+        let buried: Vec<usize> = (0..self.bricks.len()).filter(|&b| buried(b)).collect();
+        let Some(&first) = buried.first() else { return };
+        let one = self.bricks[first];
+        let sites = one as usize * BRICK_SITES..(one as usize + 1) * BRICK_SITES;
+        self.faces.retain(|i, _| !sites.contains(i));
+        self.glow.retain(|i, _| !sites.contains(i));
+        for brick in buried {
+            self.bricks[brick] = one;
+        }
+        self.hold(|_| true);
+    }
+
+    /**
+     * Holds the sites of only the bricks that are in `bricks` and `keep`
+     * (by their sites' materials), together in their order in `cells`;
+     * the others' bricks become empty.
+     */
+    fn hold(&mut self, keep: impl Fn(&[u8]) -> bool) {
+        let mut moved = vec![None; self.cells.len() / BRICK_SITES];
+        for &at in &self.bricks {
+            if let Ok(at) = usize::try_from(at) {
+                moved[at] = Some(0);
+            }
+        }
+        let held: Vec<usize> =
+            (0..moved.len()).filter(|&at| moved[at].is_some() && keep(&self.cells[at * BRICK_SITES..][..BRICK_SITES])).collect();
+        moved.fill(None);
+        for (to, &from) in held.iter().enumerate() {
+            moved[from] = Some(to);
+        }
+        for at in &mut self.bricks {
+            if let Ok(from) = usize::try_from(*at) {
+                *at = moved[from].map_or(-1, |to| to as i32);
+            }
+        }
+        let hold = |v: &mut Vec<u8>| *v = held.iter().flat_map(|&from| v[from * BRICK_SITES..][..BRICK_SITES].to_vec()).collect();
+        hold(&mut self.cells);
+        for part in [&mut self.pieces, &mut self.medium] {
+            hold(&mut part.alpha);
+            hold(&mut part.seen);
+        }
+        let to = |i: usize| moved[i / BRICK_SITES].map(|to| to * BRICK_SITES + i % BRICK_SITES);
+        self.faces = std::mem::take(&mut self.faces).into_iter().filter_map(|(i, f)| Some((to(i)?, f))).collect();
+        self.glow = std::mem::take(&mut self.glow).into_iter().filter_map(|(i, g)| Some((to(i)?, g))).collect();
+    }
+
     /** Of ALPHA, how much of its rays site `i` of `cells` stops: its pieces, and its medium of the rest. */
     fn stops(&self, i: usize) -> u8 {
         let (pieces, medium, all) = (self.pieces.alpha[i] as u32, self.medium.alpha[i] as u32, ALPHA as u32);
@@ -278,51 +350,29 @@ impl VoxelGrid {
      * site's pieces where shown (`show`), whole; and `see_through`, for a
      * host that draws alpha, elsewhere its medium, as much as it stops.
      */
-    pub fn into_grid(self, see_through: bool) -> Grid {
-        let VoxelGrid { min, n, mut bricks, cells: mut all, mut faces, medium, .. } = self;
-        faces.retain(|&i, _| all[i] != 0);
-        let alpha = if see_through {
-            let mut alpha = medium.alpha;
-            for ((cell, alpha), &seen) in all.iter_mut().zip(&mut alpha).zip(&medium.seen) {
+    pub fn into_grid(mut self, see_through: bool) -> Grid {
+        // Faces are the pieces': none where they don't show, though its medium may.
+        let cells = &self.cells;
+        self.faces.retain(|&i, _| cells[i] != 0);
+        if see_through {
+            let medium = &mut self.medium;
+            for ((cell, alpha), &seen) in self.cells.iter_mut().zip(&mut medium.alpha).zip(&medium.seen) {
                 match *cell {
                     0 if *alpha > 0 => *cell = seen,
                     0 => {}
                     _ => *alpha = ALPHA,
                 }
             }
-            alpha
-        } else {
-            Vec::new()
-        };
-        // By brick of `all`, where it is in `bricks`.
-        let mut slots = vec![usize::MAX; all.len() / BRICK_SITES];
-        for (slot, &at) in bricks.iter().enumerate() {
-            if at >= 0 {
-                slots[at as usize] = slot;
-            }
         }
-        let (mut cells, mut alphas) = (Vec::with_capacity(all.len()), Vec::with_capacity(alpha.len()));
-        let mut moved = vec![None; slots.len()];
-        for (at, brick) in all.chunks(BRICK_SITES).enumerate() {
-            if brick.iter().all(|&c| c == 0) {
-                bricks[slots[at]] = -1;
-            } else {
-                moved[at] = Some(cells.len());
-                bricks[slots[at]] = (cells.len() / BRICK_SITES) as i32;
-                cells.extend_from_slice(brick);
-                alphas.extend_from_slice(alpha.get(at * BRICK_SITES..(at + 1) * BRICK_SITES).unwrap_or_default());
-            }
-        }
-        let mut faces: Vec<_> =
-            faces.iter().filter_map(|(i, faces)| moved[i / BRICK_SITES].map(|to| (to + i % BRICK_SITES, faces))).collect();
-        faces.sort_unstable_by_key(|(i, _)| *i);
+        self.hold(|sites| sites.iter().any(|&c| c != 0));
+        let faces = self.faces.iter().flat_map(|(&i, faces)| face_words(i, faces));
         Grid {
-            min: min.map(|v| v as i32),
-            n: n.map(|v| v as i32),
-            bricks,
-            cells,
-            faces: faces.into_iter().flat_map(|(i, faces)| face_words(i, faces)).collect(),
-            alpha: alphas,
+            min: self.min.map(|v| v as i32),
+            n: self.n.map(|v| v as i32),
+            faces: faces.collect(),
+            bricks: self.bricks,
+            alpha: if see_through { self.medium.alpha } else { Vec::new() },
+            cells: self.cells,
         }
     }
 }
@@ -348,6 +398,40 @@ mod tests {
         let whole = grid.into_grid(false);
         assert_eq!((whole.cells.len(), whole.get(2, 2, 2)), (BRICK_SITES, (0, 0)));
         assert_eq!([0, 1].map(|k| whole.face(10, 2, 2, k)), [(2, ALPHA), (3, ALPHA)]);
+    }
+
+    #[test]
+    fn buried_bricks_are_kept_as_one_and_the_rest_as_they_were() {
+        // Solid but for a hole at (20, 20, 20), a lamp at (12, 12, 12) and odd faces at (44, 44, 44): 6 bricks a side.
+        let b = Box3 { min: [0; 3], max: [48; 3] };
+        let mut grid = VoxelGrid::new(&b);
+        let sites =
+            || (0..48).flat_map(|z| (0..48).flat_map(move |y| (0..48).map(move |x| [x, y, z]))).filter(|&[x, y, z]| is_site(x, y, z));
+        for [x, y, z] in sites() {
+            let i = grid.index(x, y, z).unwrap();
+            (grid.cells[i], grid.pieces.alpha[i], grid.pieces.seen[i]) = (1 + (x + y) as u8 % 3, ALPHA, 1);
+        }
+        let i = grid.index(20, 20, 20).unwrap();
+        (grid.cells[i], grid.pieces.alpha[i]) = (0, 0);
+        let lamp = grid.index(12, 12, 12).unwrap();
+        grid.glow.insert(lamp, [1, 2, 3]);
+        grid.set_faces(44, 44, 44, 1, std::array::from_fn(|k| 1 + (k % 2) as u8));
+        let before = grid.clone();
+        grid.bury();
+        // Of the inner 4³ bricks (1 to 4 each way), those not around the hole's (2, 2, 2): any 4 away, held once.
+        let buried = |p: [i64; 3]| p.iter().all(|&v| (8..40).contains(&v)) && p.iter().any(|&v| v >= 32);
+        assert_eq!(grid.cells.len(), (6 * 6 * 6 - (4 * 4 * 4 - 3 * 3 * 3) + 1) * BRICK_SITES);
+        let handed = grid.clone().into_grid(false);
+        for [x, y, z] in sites() {
+            if buried([x, y, z]) {
+                assert_eq!(grid.light(x, y, z, 1).0[0].0, ALPHA, "{x}, {y}, {z}");
+                assert_ne!(handed.get(x as i32, y as i32, z as i32).0, 0);
+            } else {
+                assert_eq!(grid.light(x, y, z, 1), before.light(x, y, z, 1), "{x}, {y}, {z}");
+                assert_eq!((grid.get(x, y, z), handed.get(x as i32, y as i32, z as i32).0), (before.get(x, y, z), before.get(x, y, z)));
+            }
+        }
+        assert_eq!(handed.face(44, 44, 44, 1), (2, ALPHA));
     }
 
     #[test]

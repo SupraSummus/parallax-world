@@ -2118,6 +2118,17 @@ pub fn shown(generator: &Generator, b: &Box3, level: u32) -> Box3 {
     Box3 { min: [b.min[0], at(low as i64), b.min[2]], max: [b.max[0], at(high as i64), b.max[2]] }
 }
 
+/**
+ * Box `b` of `level` as hosts make it: what may show of it (`shown`)
+ * generated, its buried bricks kept as one (VoxelGrid::bury). Not
+ * `generate`'s grid, so not for checking a box made whole against its parts.
+ */
+pub fn generate_shown(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
+    let mut grid = generate(generator, &shown(generator, b, level), level);
+    grid.bury();
+    grid
+}
+
 /** Lines of a field's spans a side that are asked together whether they may draw (About): a box's own would reach from the ground into the air. */
 const LINES: i64 = 32;
 
@@ -2725,6 +2736,28 @@ mod tests {
                 }
                 // Drawn as the field would, without asking it.
                 assert_eq!(generate(&world, &b, level).alpha(0, b.min[1], 0), grid.alpha(0, b.min[1], 0));
+            }
+        }
+    }
+
+    #[test]
+    fn a_tile_holds_its_ground_by_its_surface_not_its_volume() {
+        // Ground rising g sites a column: a column of bricks holds its surface and the ring of whole bricks under it,
+        // some 2 + 4g, whatever the tile's size; the rock under them, some g·t/16 more, is held once.
+        for g in [0, 1, 2, 4] {
+            let height: fn(i64) -> i64 = match g {
+                0 => |_| 0,
+                1 => |x| x,
+                2 => |x| 2 * x,
+                _ => |x| 4 * x,
+            };
+            let world = solid_ground(height, g);
+            for t in [64, 256] {
+                let b = Box3 { min: [0, -64, 0], max: [t, g * t + 64, t] };
+                let sites = (BRICK * BRICK * BRICK / 2) as usize;
+                let column = |grid: VoxelGrid| (grid.cells.len() / sites) as f64 / (t * t / BRICK / BRICK) as f64;
+                let held = column(generate_shown(&world, &b, 0));
+                assert!(held <= 2.0 + 4.5 * g as f64, "rising {g} a column, a tile {t} sites a side holds {held} bricks a column");
             }
         }
     }

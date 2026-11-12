@@ -92,7 +92,7 @@ pub fn face_words(index: usize, faces: &Faces) -> [u32; FACE_WORDS] {
 pub struct Grid {
     pub min: [i32; 3],
     pub n: [i32; 3],
-    /** Per brick, z-major, then y, then x: where its sites start in `cells`, in BRICK_SITES; −1 if empty. */
+    /** Per brick, z-major, then y, then x: where its sites start in `cells`, in BRICK_SITES; −1 if empty. Bricks may share sites (worldgen's VoxelGrid::bury). */
     pub bricks: Vec<i32>,
     /** Each brick's sites, z-major, then y, then every other x. */
     pub cells: Vec<u8>,
