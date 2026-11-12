@@ -559,6 +559,63 @@ mod tests {
         }
     }
 
+    /** A red plate 6 units wide and 2 thick at the origin, measured at levels from 2 on: alone, inside one site's cell at level 3. */
+    fn plate(seed: u64) -> worldgen::World {
+        use worldgen::generator::{ANY_SIZE, Anchors, Far, Generator, KindDef, Layer, Node, Op, Population, SOLID, cuboid};
+        let kinds = vec![KindDef { name: "plate", kind_type: 10, colors: &["#ff0000"], walk_through: false, glows: false, medium: false }];
+        let population = Population {
+            name: "plates",
+            order: 1.0,
+            cell: 1024,
+            reach: [0; 3],
+            size: ANY_SIZE,
+            anchor: Anchors::Cells(Box::new(|cell| (cell.i == 0 && cell.j == 0 && cell.k == 0).then_some([0.0; 3]))),
+            make: Box::new(|_, _| {
+                let plate = cuboid([-3.0, -1.0, -3.0], [3.0, 1.0, 3.0], 0, SOLID, Op::Fill);
+                Some(Node { far: Some(Far::measured(worldgen::noise::fx(2.0))), ..Node::of(vec![plate]) })
+            }),
+            far: None,
+        };
+        let generator = Generator { kinds, seed, layers: vec![Layer::Population(population)] };
+        // Tall enough for eyes far above and below it: the voxels engine takes what is past the heights as unknown.
+        worldgen::World { generator, spawn: [0, 0, 0], heights: (-2048, 2048), points: Vec::new() }
+    }
+
+    #[test]
+    #[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
+    fn a_coarse_voxel_shows_along_the_lines_it_is_shown_along_only() {
+        // A seed at which the plate's site at level 3 is shown along some lines and not others (worldgen's
+        // VoxelGrid::show), as a coin falls: its pieces stop more rays across the plate than along it.
+        const LEVEL: u32 = 3;
+        let (seed, open) = (1..64)
+            .find_map(|seed| {
+                let b = worldgen::grid::Box3 { min: [-4; 3], max: [4; 3] };
+                let grid = worldgen::generator::generate(&plate(seed).generator, &b, LEVEL);
+                assert!(grid.cells.iter().filter(|&&c| c != 0).count() <= 1, "one site at most");
+                grid.open.get(&grid.cells.iter().position(|&c| c != 0)?).map(|&open| (seed, open))
+            })
+            .expect("a seed showing the plate along some lines only");
+        // From far along each line, through the site's centre, in a narrow view: the rays there enter it by its
+        // faces across the line, so see it if it is shown along the line, else the sky behind.
+        for (l, line) in bake::LINES.iter().enumerate() {
+            let d = line.map(|v| f64::from(v) / std::f64::consts::SQRT_2);
+            // Level 3, as far as its voxels are read (voxels::REACH of each level's sites from the eye).
+            let distance = 1400.0;
+            let camera = d.map(|v| -v * distance);
+            let angles = [d[0].atan2(d[2]).to_degrees(), d[1].asin().to_degrees()];
+            let mut world = World::new(plate, seed, None, 4);
+            let look = Look { fog: f64::INFINITY, ..Look::new(camera, angles, 1.5, 4000.0, [64.0, 64.0]) };
+            let mut engine = Kind::Voxels.make(&world);
+            let frame = complete(&mut *engine, &mut world, &look, false);
+            let (width, _, pixels) = Easel::offscreen(None).pixels(&*frame.picture, [64, 64]);
+            let red = |p: &[u8]| p[0] > 2 * p[1].max(p[2]);
+            let centre = &pixels[4 * (32 * width as usize + 32)..][..3];
+            assert_eq!(red(centre), open >> l & 1 == 0, "along {line:?}, the plate's site open along {open:06b}: the centre {centre:?}");
+            // Off the centre, rays enter it by faces of other lines too: seen along every line.
+            assert!(pixels.chunks(4).filter(|p| red(p)).count() > 50, "along {line:?}, the plate's site's sides");
+        }
+    }
+
     /** A vector of the lattice, not of the bricks' (BRICK in voxels.rs) nor of their blocks'. */
     const SHIFT: [i64; 3] = [3, 2, 1];
 

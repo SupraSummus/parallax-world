@@ -4,10 +4,14 @@
 
 use std::collections::BTreeMap;
 
-use bake::{Faces, face_words};
+use bake::{FACE_KINDS, Faces, face_words, line_of};
 
-// The baker's grids, as worlds hand them over (worlds/src/wasm.rs), the voxel's faces, and a whole site's alpha: it stops every ray.
-pub use bake::{ALPHA, FACE_WORDS, Grid, VOXEL_FACES};
+// The baker's grids, as worlds hand them over (worlds/src/wasm.rs), the voxel's faces and their lines, and a whole site's alpha:
+// it stops every ray.
+pub use bake::{ALPHA, FACE_WORDS, Grid, LINES, VOXEL_FACES};
+
+/** Of ALPHA, how much a site stops of the rays along each of the LINES. */
+pub type Alphas = [u8; LINES.len()];
 
 pub const BRICK: i64 = 8;
 const BRICK_SITES: usize = (BRICK * BRICK * BRICK / 2) as usize;
@@ -45,13 +49,21 @@ pub fn is_site(x: i64, y: i64, z: i64) -> bool {
     (x + y + z) & 1 == 0
 }
 
+/** The mean of alphas, rounded. */
+fn mean(alphas: impl Iterator<Item = u8>) -> u8 {
+    let (sum, n) = alphas.fold((0u32, 0u32), |(sum, n), a| (sum + a as u32, n + 1));
+    ((sum + n / 2) / n.max(1)) as u8
+}
+
 /**
  * The sites of a box: see VoxelGrid in voxel-grid.ts. A voxel has a
  * material on each of its faces (bake's Grid): its site's in `cells`,
  * unless `faces` gives them. A site holds things in two ways: pieces
  * smaller than itself, which stop some of its rays whole, and a medium
  * (KindDef::medium), which stops some of each ray the pieces let
- * through. The voxels are its pieces, shown as often as they stop rays
+ * through. Each stops rays along some lines of neighbours more than
+ * along others, as a wall stops more across than along. The voxels are
+ * its pieces, shown along each line as often as they stop its rays
  * (`show`); light sees every site as it is (`light`).
  */
 #[derive(Clone)]
@@ -65,6 +77,8 @@ pub struct VoxelGrid {
     pub cells: Vec<u8>,
     /** By index in `cells`, the faces' materials of the sites whose faces are not all of their material there. */
     pub faces: BTreeMap<usize, Faces>,
+    /** By index in `cells`, of the voxels shown along some lines and not others (`show`): those not, bit l line l. */
+    pub open: BTreeMap<usize, u8>,
     /** What is in each site in pieces: how many of its rays they stop, whole; their faces' materials in `faces` if they differ. */
     pub pieces: Part,
     /** What is in each site as a medium: how much it stops of each ray the pieces let through. */
@@ -76,8 +90,8 @@ pub struct VoxelGrid {
 /** What the sites hold one way, as pieces or as a medium, by index in `cells`. */
 #[derive(Clone, Default)]
 pub struct Part {
-    /** Of ALPHA, how much they stop. */
-    pub alpha: Vec<u8>,
+    /** Of ALPHA, how much they stop along each line. */
+    pub alpha: Vec<Alphas>,
     /** The material they show, one of theirs. */
     pub seen: Vec<u8>,
 }
@@ -101,6 +115,7 @@ impl VoxelGrid {
             bricks: vec![-1; (bx * by * bz) as usize],
             cells: Vec::new(),
             faces: BTreeMap::new(),
+            open: BTreeMap::new(),
             pieces: Part::default(),
             medium: Part::default(),
             glow: BTreeMap::new(),
@@ -144,10 +159,16 @@ impl VoxelGrid {
         }
     }
 
-    /** The material of face `kind` (of bake's VOXEL_FACES) of the voxel at (x, y, z); 0 if empty, outside the box or not a site. */
+    /**
+     * The material of face `kind` (of bake's VOXEL_FACES) of the voxel at
+     * (x, y, z); 0 if empty, outside the box or not a site, or if it is not
+     * shown along that face's line: rays entering by it go through.
+     */
     pub fn face(&self, x: i64, y: i64, z: i64, kind: usize) -> u8 {
         match self.slot(x, y, z) {
-            Some(Ok(i)) if self.cells[i] != 0 => self.faces.get(&i).map_or(self.cells[i], |faces| faces[kind]),
+            Some(Ok(i)) if self.cells[i] != 0 && self.open.get(&i).is_none_or(|open| open >> line_of(kind) & 1 == 0) => {
+                self.faces.get(&i).map_or(self.cells[i], |faces| faces[kind])
+            }
             _ => 0,
         }
     }
@@ -187,6 +208,9 @@ impl VoxelGrid {
         if !self.faces.is_empty() {
             self.faces.remove(&i);
         }
+        if !self.open.is_empty() {
+            self.open.remove(&i);
+        }
     }
 
     /** Where site (x, y, z) is in `cells`, its brick added if empty; None outside the box or off the sites. */
@@ -198,7 +222,7 @@ impl VoxelGrid {
                 let len = self.cells.len() + BRICK_SITES;
                 self.cells.resize(len, 0);
                 for part in [&mut self.pieces, &mut self.medium] {
-                    part.alpha.resize(len, 0);
+                    part.alpha.resize(len, [0; LINES.len()]);
                     part.seen.resize(len, 0);
                 }
                 self.slot(x, y, z).and_then(Result::ok)
@@ -216,8 +240,13 @@ impl VoxelGrid {
         };
     }
 
-    /** Shows each site its pieces, a whole voxel, where their alpha is over `coin` of it (under ALPHA), else nothing. */
+    /**
+     * Shows each site its pieces, a whole voxel, along the lines their
+     * alpha is over `coin` of it (under ALPHA) along; along the others it
+     * lets rays through (`open`). Shown along none, nothing.
+     */
     pub fn show(&mut self, coin: impl Fn(i64, i64, i64) -> u8) {
+        self.open.clear();
         for (brick, &at) in self.bricks.iter().enumerate() {
             let Ok(at) = usize::try_from(at) else { continue };
             let b = brick as i64;
@@ -230,59 +259,70 @@ impl VoxelGrid {
                             continue;
                         }
                         let site = at * BRICK_SITES + (((k * BRICK + j) * BRICK + i) >> 1) as usize;
-                        let shown = self.pieces.alpha[site] > coin(x, y, z);
-                        self.cells[site] = if shown { self.pieces.seen[site] } else { 0 };
+                        let coin = coin(x, y, z);
+                        let open = (0..LINES.len()).filter(|&l| self.pieces.alpha[site][l] <= coin).fold(0u8, |open, l| open | 1 << l);
+                        self.cells[site] = if open == (1 << LINES.len()) - 1 { 0 } else { self.pieces.seen[site] };
+                        if open != 0 && self.cells[site] != 0 {
+                            self.open.insert(site, open);
+                        }
                     }
                 }
             }
         }
     }
 
-    /** Of ALPHA, how much of its rays site `i` of `cells` stops: its pieces, and its medium of the rest. */
-    fn stops(&self, i: usize) -> u8 {
-        let (pieces, medium, all) = (self.pieces.alpha[i] as u32, self.medium.alpha[i] as u32, ALPHA as u32);
+    /** Of ALPHA, how much of its rays along line `l` site `i` of `cells` stops: its pieces, and its medium of the rest. */
+    fn stops(&self, i: usize, l: usize) -> u8 {
+        let (pieces, medium, all) = (self.pieces.alpha[i][l] as u32, self.medium.alpha[i][l] as u32, ALPHA as u32);
         ((pieces * all + (all - pieces) * medium + all / 2) / all) as u8
     }
 
     /**
-     * How light sees site (x, y, z): what its pieces stop of its rays and
-     * its medium of the rest, each how much (of ALPHA; together, `alpha`)
-     * and of what material (the pieces', face `kind`'s); and its glow.
+     * How light entering site (x, y, z) by face `kind` sees it: what its
+     * pieces stop of its rays along that face's line and its medium of the
+     * rest, each how much (of ALPHA) and of what material (the pieces',
+     * face `kind`'s); and its glow.
      */
     pub fn light(&self, x: i64, y: i64, z: i64, kind: usize) -> ([(u8, u8); 2], [u32; 3]) {
         match self.slot(x, y, z) {
             Some(Ok(i)) => {
                 let glow = if self.glow.is_empty() { [0; 3] } else { self.glow.get(&i).copied().unwrap_or_default() };
-                let pieces = self.pieces.alpha[i];
+                let l = line_of(kind);
+                let pieces = self.pieces.alpha[i][l];
                 let material = if self.faces.is_empty() {
                     self.pieces.seen[i]
                 } else {
                     self.faces.get(&i).map_or(self.pieces.seen[i], |faces| faces[kind])
                 };
-                ([(pieces, material), (self.stops(i) - pieces, self.medium.seen[i])], glow)
+                ([(pieces, material), (self.stops(i, l) - pieces, self.medium.seen[i])], glow)
             }
             _ => ([(0, 0); 2], [0; 3]),
         }
     }
 
-    /** Of ALPHA, how much of the rays through site (x, y, z) it stops. */
+    /** Of ALPHA, how much of the rays through site (x, y, z) it stops, on average over the lines. */
     pub fn alpha(&self, x: i64, y: i64, z: i64) -> u8 {
         match self.slot(x, y, z) {
-            Some(Ok(i)) => self.stops(i),
+            Some(Ok(i)) => mean((0..LINES.len()).map(|l| self.stops(i, l))),
             _ => 0,
         }
     }
 
     /**
      * The voxels as the baker takes them, bricks with none left out: each
-     * site's pieces where shown (`show`), whole; and `see_through`, for a
-     * host that draws alpha, elsewhere its medium, as much as it stops.
+     * site's pieces where shown (`show`), whole, their faces of 0 along the
+     * lines they are not shown along; and `see_through`, for a host that
+     * draws alpha, elsewhere its medium, as much as it stops on average.
      */
     pub fn into_grid(self, see_through: bool) -> Grid {
-        let VoxelGrid { min, n, mut bricks, cells: mut all, mut faces, medium, .. } = self;
+        let VoxelGrid { min, n, mut bricks, cells: mut all, mut faces, open, medium, .. } = self;
         faces.retain(|&i, _| all[i] != 0);
+        for (&i, &open) in open.iter().filter(|&(&i, _)| all[i] != 0) {
+            let faces = faces.entry(i).or_insert([all[i]; FACE_KINDS]);
+            (0..FACE_KINDS).filter(|&k| open >> line_of(k) & 1 != 0).for_each(|k| faces[k] = 0);
+        }
         let alpha = if see_through {
-            let mut alpha = medium.alpha;
+            let mut alpha: Vec<u8> = medium.alpha.iter().map(|alphas| mean(alphas.iter().copied())).collect();
             for ((cell, alpha), &seen) in all.iter_mut().zip(&mut alpha).zip(&medium.seen) {
                 match *cell {
                     0 if *alpha > 0 => *cell = seen,
@@ -357,8 +397,8 @@ mod tests {
         let sites: [(i32, i32, u8, u8); 5] = [(0, 0, 40, 0), (2, 0, 200, 0), (0, 2, 0, 60), (2, 2, 40, 60), (4, 2, 200, 60)];
         for (x, y, pieces, medium) in sites {
             let i = grid.index(x.into(), y.into(), 0).unwrap();
-            (grid.pieces.alpha[i], grid.pieces.seen[i]) = (pieces, 2);
-            (grid.medium.alpha[i], grid.medium.seen[i]) = (medium, 1);
+            (grid.pieces.alpha[i], grid.pieces.seen[i]) = ([pieces; LINES.len()], 2);
+            (grid.medium.alpha[i], grid.medium.seen[i]) = ([medium; LINES.len()], 1);
         }
         grid.show(|_, _, _| 100);
         // Light sees all a site stops, each as it is: its pieces 40 of 255, its medium 60 of the rest.
@@ -366,5 +406,27 @@ mod tests {
         let handed = |grid: Grid| sites.map(|(x, y, ..)| grid.get(x, y, 0));
         assert_eq!(handed(grid.clone().into_grid(true)), [(0, 0), (2, ALPHA), (1, 60), (1, 60), (2, ALPHA)]);
         assert_eq!(handed(grid.into_grid(false)), [(0, 0), (2, ALPHA), (0, 0), (0, 0), (2, ALPHA)]);
+    }
+
+    #[test]
+    fn a_site_is_shown_along_the_lines_its_pieces_stop_more_than_its_coin_along() {
+        // Pieces of material 2 that stop most rays along the first two lines, few along the rest: over the coin
+        // along those, under it along these, so shown along those only, and seen through along these.
+        let mut grid = VoxelGrid::new(&Box3 { min: [0; 3], max: [8, 8, 8] });
+        let i = grid.index(2, 2, 2).unwrap();
+        let alphas = [200, 200, 40, 40, 40, 40];
+        (grid.pieces.alpha[i], grid.pieces.seen[i]) = (alphas, 2);
+        grid.show(|_, _, _| 100);
+        let shown = |l: usize| l < 2;
+        for kind in 0..FACE_KINDS {
+            let l = line_of(kind);
+            assert_eq!(grid.face(2, 2, 2, kind), if shown(l) { 2 } else { 0 }, "face {kind}, of line {l}");
+            // Light sees what it stops along each line, shown or not.
+            assert_eq!(grid.light(2, 2, 2, kind).0[0], (alphas[l], 2), "face {kind}, of line {l}");
+        }
+        let handed = grid.into_grid(false);
+        for kind in 0..FACE_KINDS {
+            assert_eq!(handed.face(2, 2, 2, kind), if shown(line_of(kind)) { (2, ALPHA) } else { (0, 0) }, "face {kind}");
+        }
     }
 }

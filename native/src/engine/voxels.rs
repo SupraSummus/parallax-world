@@ -28,6 +28,7 @@ use std::sync::Arc;
 
 use bake::light::{colour, linear_to_srgb, srgb_to_linear};
 use bake::slicing::GRID_LEVELS;
+use bake::{FACE_KINDS, line_of};
 use egui_wgpu::wgpu;
 use worldgen::light::Light;
 
@@ -51,11 +52,6 @@ const BRICK_SITES: usize = (BRICK * BRICK * BRICK / 2) as usize;
 const SITE_WORDS: usize = BRICK_SITES / 2;
 const OPEN_WORDS: usize = BRICK_SITES / 4;
 const BRICK_WORDS: usize = SITE_WORDS + OPEN_WORDS;
-/**
- * The lines of neighbours, as voxels.wgsl's Ray has its pairs of faces:
- * a voxel's faces along one let rays through, or not, both alike.
- */
-const LINES: [[i32; 3]; 6] = [[1, 1, 0], [0, 1, 1], [1, 0, 1], [1, -1, 0], [0, 1, -1], [-1, 0, 1]];
 /** Pixels each way per ray traced. */
 const FACTOR: u32 = 4;
 /** Bytes of bricks the pool holds at most. */
@@ -165,14 +161,13 @@ pub fn meets(grid: &bake::Grid) -> Vec<u32> {
 /**
  * `grid`'s bricks as the GPU takes them, in the grid's order, BRICK_WORDS
  * a brick: each site's material | alpha << 8, two a word; then each one's
- * lines that let rays through, bit l set if its faces along LINES[l] do
+ * lines that let rays through, bit l set if its faces along bake's LINES[l] do
  * (bake's Grid), four a word.
  */
 pub fn words(grid: &bake::Grid) -> Vec<u32> {
     let mut open = vec![0u8; grid.cells.len()];
-    let faces = LINES.map(|n| bake::VOXEL_FACES.iter().position(|&f| f == n).expect("a line's face"));
     for (i, own) in grid.own_faces() {
-        open[i] = (0..LINES.len()).filter(|&l| own[faces[l]] == 0).map(|l| 1 << l).sum();
+        open[i] = (0..FACE_KINDS).filter(|&k| own[k] == 0).fold(0, |open, k| open | 1 << line_of(k));
     }
     let site = |i: usize| match grid.cells[i] {
         0 => 0,

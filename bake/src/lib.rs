@@ -39,7 +39,7 @@ use world::{Geometry, Reader};
 pub use coverage::Coverage;
 pub use layer_index::LayerIndex;
 pub use surface::Slice;
-pub use tables::VOXEL_FACES;
+pub use tables::{LINES, VOXEL_FACES, line_of};
 pub use world::{ALPHA, FACE_KINDS, FACE_WORDS, Faces, Grid, Lattice, TileId, Tiles, VIEW_FACES, face_words, lattices};
 
 /**

@@ -326,7 +326,7 @@ fn finds_a_speck_too_small_to_show_outside_the_heights() {
     // A speck stops a few of a site's rays: it shows no voxel, but light and the composited rays see it.
     let speck = world(single(|_, _| Some(Node::of(vec![ball([64.0, 70.0, 64.0], 0.1, ROCK, SOLID, Op::Fill)])), 64));
     let grid = generate(&speck, &near(), 0);
-    assert!(grid.cells.iter().all(|id| *id == 0) && grid.pieces.alpha.iter().any(|a| *a > 0), "the speck shows");
+    assert!(grid.cells.iter().all(|id| *id == 0) && grid.pieces.alpha.iter().flatten().any(|a| *a > 0), "the speck shows");
     let broken = heights_hold(&world_of(speck, (-64, 64)), &[near()], 0);
     assert!(
         broken.iter().any(|b| b.contains("1 sites stopping light above the heights (-64, 64)") && b.contains("such as rock")),

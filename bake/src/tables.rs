@@ -25,6 +25,27 @@ pub const VOXEL_FACES: [[i32; 3]; FACE_KINDS] = [
     [1, 0, 1],
 ];
 
+/**
+ * The lines of nearest neighbours, each a pair of opposite faces: a
+ * voxel's opacity seen along each (worldgen's measure, bake's Grid), in
+ * the order native's voxels.wgsl has them.
+ */
+pub const LINES: [[i32; 3]; 6] = [[1, 1, 0], [0, 1, 1], [1, 0, 1], [1, -1, 0], [0, 1, -1], [-1, 0, 1]];
+
+/** The line (of LINES) of face kind `kind` (of VOXEL_FACES). */
+pub const fn line_of(kind: usize) -> usize {
+    let [x, y, z] = VOXEL_FACES[kind];
+    let mut l = 0;
+    while l < LINES.len() {
+        let [a, b, c] = LINES[l];
+        if (x == a && y == b && z == c) || (x == -a && y == -b && z == -c) {
+            return l;
+        }
+        l += 1;
+    }
+    panic!("a face is on a line")
+}
+
 /** A world vector in a face's lattice coordinates (a, b, c) = (v · R, v · U, v · F). */
 fn lattice_of(Lattice { r, u, f }: &Lattice, v: [i32; 3]) -> [i32; 3] {
     [r, u, f].map(|axis| axis[0] * v[0] + axis[1] * v[1] + axis[2] * v[2])

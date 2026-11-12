@@ -151,17 +151,22 @@ how many rays get how far, and what they stop on.
   drawn whole two levels finer than it is drawn at,
   but no finer than the coarsest level its near form is drawn at,
   then coarsened.
-  Seen along an axis, a voxel is a square turned 45° round its column,
-  twice a column's area:
-  the even columns' voxels cover the plane once, the odd ones' once more,
-  so a ray along an axis meets the voxels of two neighbouring columns (`pairs`).
-  A ray crossing a coarse site's cell is stopped
-  as often as the pairs holding a fine site of the cell hold one of the thing,
-  on average over the axes.
-  Counted by columns, a sheet one site thick stopped half what it does,
-  and sparse content a third less
-  (0.18 against 0.27, traced through the voxels, in a cell four sites wide).
-  Each cell is drawn with its share, as alpha (see "Kinds and things").
+  Seen along a line of nearest neighbours (a pair of a voxel's opposite faces),
+  a voxel is a hexagon half again a column's area:
+  half a column's area is its own column's alone,
+  the rest lies on the columns of the rows beside it (`column`),
+  so a ray along the line meets the voxels of one column or of two.
+  A ray crossing a coarse site's cell along a line is stopped
+  as often as those columns hold a fine site of the thing in the cell,
+  of all the cell's: its share along that line.
+  Each cell is drawn with its six shares, as alpha (see "Kinds and things"),
+  so a wall stops more rays across it than along it.
+  A ray takes the share of the line it enters a voxel across:
+  over random directions, nearer what a wall or a rod stops than one share was;
+  but along an axis, as from straight above,
+  a ray enters by the faces of four lines,
+  two of them slanted to a wall across another axis,
+  and sees as much of it as with one share.
   Shown as often as covered, a house's walls come out ragged;
   all held to one threshold, each house came out fatter or thinner by a site,
   and the few a camera sees often all one way
@@ -199,7 +204,7 @@ how many rays get how far, and what they stop on.
   a medium as dense as their things, by the theory of Boolean models
   (extinction = things per volume · their mean shadow).
   `Shadows` measures it from sample things drawn alone at a level,
-  their shadows by pairs of columns, as above,
+  their shadows by pairs of neighbouring columns along an axis (`pairs`),
   slab by slab across an axis, each slab a medium of its own:
   seen across, what the slab adds to the shadow of the rest of the thing,
   from either side, as a tree's slabs overlap
@@ -664,7 +669,9 @@ stop a share of its rays whole;
 a kind marked `medium`, as mist is,
 stops a share of every ray the pieces let through.
 So a coarse site of a crown in mist holds both, each as it is.
-The pieces show as grain, a whole voxel as often (`VoxelGrid::show`);
+The pieces show as grain, a whole voxel as often (`VoxelGrid::show`),
+along each line as often as they stop rays along it,
+and along the others its faces let rays through;
 where they don't, a host that draws alpha (native)
 shows the medium as see-through as it is.
 Drawn see-through, leaves are smoke; as grain, mist is snow.

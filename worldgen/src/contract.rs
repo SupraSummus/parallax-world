@@ -79,7 +79,7 @@ const FAR_TOLERANCE: f64 = 0.025;
 pub fn whole_equals_parts(generator: &Generator, region: &Box3, level: u32) {
     let whole = box_at(region, level);
     let grid = generate(generator, &whole, level);
-    assert!([&grid.pieces, &grid.medium].iter().any(|part| part.alpha.iter().any(|a| *a != 0)), "level {level} is empty");
+    assert!([&grid.pieces, &grid.medium].iter().any(|part| part.alpha.iter().flatten().any(|a| *a != 0)), "level {level} is empty");
     // Eight parts, split at random points (seeded, so failures reproduce).
     let mut random = Rng::new(7);
     let mut split = |axis: usize, even: bool| {

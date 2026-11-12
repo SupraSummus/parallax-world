@@ -76,7 +76,7 @@ const NONE = 0xffffffffu;
 // must not hide.
 const STEPS = 1024;
 const LOST = 0xfffffffeu;
-// Face pairs' normals, in Ray's order (voxels.rs's LINES): a voxel is where
+// Face pairs' normals, in Ray's order (bake's LINES): a voxel is where
 // |n · (p − site)| ≤ 1 for each, its neighbours at ±n.
 const NORMALS = array<vec3f, 6>(vec3f(1.0, 1.0, 0.0), vec3f(0.0, 1.0, 1.0), vec3f(1.0, 0.0, 1.0), vec3f(1.0, -1.0, 0.0), vec3f(0.0, 1.0, -1.0), vec3f(-1.0, 0.0, 1.0));
 

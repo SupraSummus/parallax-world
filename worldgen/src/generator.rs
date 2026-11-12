@@ -7,7 +7,7 @@ use std::rc::Rc;
 use std::sync::OnceLock;
 
 use bake::light::srgb_to_linear;
-use bake::{FACE_KINDS, Faces, VOXEL_FACES};
+use bake::{FACE_KINDS, Faces, LINES, VOXEL_FACES};
 
 use crate::cost::{self, Work};
 use crate::curve::Curve;
@@ -39,18 +39,27 @@ impl From<Kind> for Look {
 
 /**
  * Where drawing puts a site: what it is of, how it meets the world, its
- * share of the site (of SHARE: how much of the site's rays it stops) and
- * its pick (of SHARE, the thing's own hash there), at (x, y, z) of the
- * level. The shares add up to the site's alpha; the picks choose what
- * of it the site shows (`see`).
+ * shares of the site (`Shares`) and its pick (of SHARE, the thing's own
+ * hash there), at (x, y, z) of the level. The shares add up to the
+ * site's alpha; the picks choose what of it the site shows (`see`).
  */
-type Put<'a> = dyn FnMut(Look, Op, u32, u32, i64, i64, i64) + 'a;
+type Put<'a> = dyn FnMut(Look, Op, Shares, u32, i64, i64, i64) + 'a;
 /** A whole site's share. */
 pub const SHARE: u32 = 1 << 16;
+/**
+ * A thing's shares of a site, of SHARE: how much of the site's rays
+ * along each of the LINES it stops. Alike but where measured (`measure`).
+ */
+pub type Shares = [u32; LINES.len()];
 
 /** A chance as a share (of SHARE). */
 fn share(chance: f64) -> u32 {
     (chance.clamp(0.0, 1.0) * SHARE as f64) as u32
+}
+
+/** Whether a pick keeps a site of `shares` whole: as often as it is seen along some line. */
+fn kept(pick: u32, shares: Shares) -> bool {
+    shares.into_iter().any(|share| pick < share)
 }
 
 /** A hash as a pick: uniform, under SHARE. */
@@ -1074,7 +1083,7 @@ pub fn generate(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
     let palette = Palette::new(&generator.kinds, generator.seed);
     let mut grid = VoxelGrid::new(b);
     let clip = grid.clip();
-    let mut put = |look: Look, op: Op, share: u32, pick: u32, x: i64, y: i64, z: i64| {
+    let mut put = |look: Look, op: Op, share: Shares, pick: u32, x: i64, y: i64, z: i64| {
         let shade = |kind: Kind| palette.shade(kind, x * s, y * s, z * s);
         let id = shade(look.kind);
         let faces = look.faces.map(|faces| faces.map(shade));
@@ -1117,19 +1126,20 @@ pub fn generate(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
 }
 
 /**
- * Adds a thing's `share` of site (x, y, z) to it (VoxelGrid's `pieces`,
+ * Adds a thing's `shares` of site (x, y, z) to it (VoxelGrid's `pieces`,
  * `medium`, `glow`), of material `id` (its faces' if they differ) glowing
  * `glow`: as a Fill behind what is there, a Paint in front of it, a Carve
- * taking it out, of both. A `medium` joins the site's medium, the rest
- * its pieces. What either shows is one of what is in it, each as often
- * as it is seen there: the thing replaces it as often as it makes up of
- * what they now stop, by its pick.
+ * taking it out, of both; along each line by its share there. A `medium`
+ * joins the site's medium, the rest its pieces. What either shows is one
+ * of what is in it, each as often as it is seen there: the thing replaces
+ * it as often as it makes up of what they now stop, by its pick, on
+ * average over the lines; and so it glows.
  */
 #[allow(clippy::too_many_arguments)]
 fn see(
     grid: &mut VoxelGrid,
     op: Op,
-    share: u32,
+    shares: Shares,
     pick: u32,
     (id, faces, medium): (u8, Option<Faces>, bool),
     glow: [u32; 3],
@@ -1137,33 +1147,41 @@ fn see(
     y: i64,
     z: i64,
 ) {
-    if share == 0 {
+    if shares == [0; LINES.len()] {
         return;
     }
     let Some(i) = grid.index(x, y, z) else { return };
-    let part = if medium { &mut grid.medium } else { &mut grid.pieces };
-    let (alpha, share) = (part.alpha[i] as u64, share.min(SHARE) as u64);
     let (all, one) = (ALPHA as u64, SHARE as u64);
     let old = grid.glow.get(&i).copied().unwrap_or_default();
-    // Of SHARE: how much of what was there is still seen, and how much of the site the thing is seen in.
-    let (kept, visible) = match op {
-        Op::Carve => (one - share, 0),
-        Op::Fill => (one, (all - alpha) * share / all),
-        Op::Paint => (one - share, share),
-    };
     // In SHARE-ths of a step of alpha, rounded up as often as the remainder,
     // by a coin from the pick (its bits scrambled by an odd factor):
     // cut off, all of a speck's share under one step was lost far away.
     let coin = (pick as u64 * 40_503) % one;
     let rounded = |exact: u64| (exact / one + u64::from(exact % one > coin)) as u8;
-    let exact = alpha * one + (all - alpha) * share;
-    if op == Op::Carve {
-        for part in [&mut grid.pieces, &mut grid.medium] {
-            part.alpha[i] = rounded(part.alpha[i] as u64 * kept);
+    // Of SHARE, summed over the lines: how much of what was there is still seen, how much of the site the thing is
+    // seen in, and what the site stops before rounding.
+    let (mut kept, mut visible, mut exact) = (0, 0, 0);
+    for (l, &share) in shares.iter().enumerate() {
+        let part = if medium { &grid.medium } else { &grid.pieces };
+        let (alpha, share) = (part.alpha[i][l] as u64, share.min(SHARE) as u64);
+        let (k, v) = match op {
+            Op::Carve => (one - share, 0),
+            Op::Fill => (one, (all - alpha) * share / all),
+            Op::Paint => (one - share, share),
+        };
+        let stops = alpha * one + (all - alpha) * share;
+        if op == Op::Carve {
+            for part in [&mut grid.pieces, &mut grid.medium] {
+                part.alpha[i][l] = rounded(part.alpha[i][l] as u64 * k);
+            }
+        } else {
+            let part = if medium { &mut grid.medium } else { &mut grid.pieces };
+            part.alpha[i][l] = rounded(stops);
         }
-    } else {
-        part.alpha[i] = rounded(exact);
+        (kept, visible, exact) = (kept + k, visible + v, exact + stops);
     }
+    let lines = LINES.len() as u64;
+    let (kept, visible, exact) = (kept / lines, visible / lines, exact / lines);
     // As often as it makes up of what the site stops before that rounding: of `now`, a medium of a few
     // SHARE-ths of a step was seen as seldom as rounded up, and nine in ten of its sites that stop rays showed nothing.
     if (pick as u64) * exact < visible * all * one {
@@ -1191,7 +1209,7 @@ struct Own {
     /** By site, its last put in `puts`; NONE if none. */
     cells: Vec<u32>,
     /** Puts: each what it is of, how it meets the world, its share and pick (Put), and the site's put before it. */
-    puts: Vec<(Look, Op, u32, u32, u32)>,
+    puts: Vec<(Look, Op, Shares, u32, u32)>,
 }
 
 const NONE: u32 = u32::MAX;
@@ -1210,10 +1228,10 @@ impl Own {
 
     /** Within the thing only: a Carve, where it keeps a voxel, takes out what the thing put there. */
     #[allow(clippy::too_many_arguments)]
-    fn put(&mut self, look: Look, op: Op, share: u32, pick: u32, x: i64, y: i64, z: i64) {
+    fn put(&mut self, look: Look, op: Op, share: Shares, pick: u32, x: i64, y: i64, z: i64) {
         let i = self.index(x, y, z);
         if op == Op::Carve {
-            if pick < share {
+            if kept(pick, share) {
                 self.cells[i] = NONE;
             }
             return;
@@ -1223,7 +1241,7 @@ impl Own {
     }
 
     /** The puts at index `i` of `cells`, last first. */
-    fn puts_at(&self, i: usize) -> impl Iterator<Item = &(Look, Op, u32, u32, u32)> {
+    fn puts_at(&self, i: usize) -> impl Iterator<Item = &(Look, Op, Shares, u32, u32)> {
         std::iter::successors(self.puts.get(self.cells[i] as usize), |p| self.puts.get(p.4 as usize))
     }
 
@@ -1239,7 +1257,7 @@ impl Own {
     fn of(&self, i: usize) -> Option<(Kind, Op)> {
         // Last first: the last Paint kept, else the first Fill kept.
         let mut fill = None;
-        for &(look, op, ..) in self.puts_at(i).filter(|p| p.3 < p.2) {
+        for &(look, op, ..) in self.puts_at(i).filter(|p| kept(p.3, p.2)) {
             match op {
                 Op::Paint => return Some((look.kind, op)),
                 _ => fill = Some((look.kind, op)),
@@ -1289,8 +1307,9 @@ fn draw(drawable: &Drawable, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
             let mut tests = 0;
             for (i, shape) in shapes.iter().enumerate() {
                 let seed = hash_text(&format!("{}#{}{i}", drawable.key, if *far { "far" } else { "" }), seed);
-                tests +=
-                    draw_shape(shape, seed, s, clip, &mut |share, pick, x, y, z| put(shape.kind.into(), shape.op, share, pick, x, y, z));
+                tests += draw_shape(shape, seed, s, clip, &mut |share, pick, x, y, z| {
+                    put(shape.kind.into(), shape.op, [share; LINES.len()], pick, x, y, z)
+                });
             }
             Work { nodes: 1, tests, ..Work::default() }
         }
@@ -1382,8 +1401,8 @@ fn past_reach(key: &str, bounds: &Box3, reach: &Box3, n: i64, population: [i64; 
     )
 }
 
-/** A thing's sites of a level: each what it is of, how it meets the world, its share and pick (Put). */
-type Sites = Vec<([i64; 3], Look, Op, u32, u32)>;
+/** A thing's sites of a level: each what it is of, how it meets the world, its shares and pick (Put). */
+type Sites = Vec<([i64; 3], Look, Op, Shares, u32)>;
 
 /** Where a node is drawn: at sites `s` apart, for the lattice units `units`, in its layer's `order`, as part of `thing`. */
 struct Visit<'u> {
@@ -1706,35 +1725,61 @@ impl Shadows {
 }
 
 /**
- * How many pairs of neighbouring columns along each axis (`pairs`) of the
- * sites `r` times finer than a cell hold one of them in the cell, either
- * of the two: by halves of a column's area, about the 2 r² columns' area
- * of its shadow (a cell's are 2 r² wide), and unevenly by axis, as
- * nearest_site breaks ties one way. Cells of a level are congruent, ties
- * and all (they differ by an even number of cells along the axes), so the
- * count depends on r only.
+ * The column of fine sites along line `l` (of LINES) that site `p` is in:
+ * its coordinates (i, j) across the line, along the axis the line runs
+ * across and the line's normal in the other two. Seen along the line, a
+ * voxel is a hexagon: the rhombus of its face across the line, and a
+ * triangle off each of the rhombus's sides, half again a column's area.
+ * Half a column's area of it is its own column's alone; each triangle
+ * lies on a neighbour's rhombus, those of the columns (i ± 1, j ± 1), and
+ * theirs on its. So a ray along the line meets the voxels of one column,
+ * or of two such neighbours, each half the time: what a thing hides
+ * along it is two quarters of a column's area for each column holding one
+ * of its sites, and a quarter for each pair of neighbours either of which
+ * does (`line_pairs`).
  */
-fn pairs_of_cell(r: i64) -> [u32; 3] {
-    static PAIRS: [OnceLock<[u32; 3]>; 64] = [const { OnceLock::new() }; 64];
-    *PAIRS[r.trailing_zeros() as usize].get_or_init(|| {
-        std::array::from_fn(|axis| {
-            let (a, b) = ((axis + 1) % 3, (axis + 2) % 3);
-            // The columns from (−r, −r), as the cell reaches r along the axes.
-            let mut cell = Columns::new([2 * r + 1; 2]);
-            for [i, j] in (-r..=r).flat_map(|i| (-r..=r).map(move |j| [i, j])) {
-                // The cell is symmetric about its centre's plane across the column, and where a column runs
-                // in one of its faces, ties go one way all along it: if the column has a site in the cell,
-                // it has one within 2 of that plane (checked by a_cells_pairs_of_columns_are_counted).
-                let holds = (-2..=2i64).filter(|k| (i + j + k) & 1 == 0).any(|k| {
-                    let mut p = [0; 3];
-                    (p[axis], p[a], p[b]) = (k, i, j);
-                    nearest_site(p.map(|v| v * ONE), r) == [0; 3]
-                });
-                if holds {
-                    cell.set([i + r, j + r]);
-                }
-            }
-            cell.pairs_held()
+fn column(l: usize, p: [i64; 3]) -> [i64; 2] {
+    let d = LINES[l].map(i64::from);
+    let c = (0..3).find(|&c| d[c] == 0).expect("a line runs across an axis");
+    let (a, b) = ((c + 1) % 3, (c + 2) % 3);
+    [p[c], p[a] * d[b] - p[b] * d[a]]
+}
+
+/** The pairs of neighbouring columns along a line (`column`) that meet an n[0] × n[1] box of them from (0, 0), to `pair`. */
+fn line_pairs(n: [i64; 2], mut pair: impl FnMut([i64; 2], [i64; 2])) {
+    for i in -1..n[0] {
+        for j in -1..=n[1] {
+            pair([i, j], [i + 1, j + 1]);
+            pair([i, j], [i + 1, j - 1]);
+        }
+    }
+}
+
+/**
+ * What a cell hides along each line (`column`), in quarters of a column's
+ * area, as all the sites `r` times finer than it in it would: about 6 r²
+ * columns' area of its shadow, give or take its ties. Cells of a level are
+ * congruent, ties and all (they differ by an even number of cells along
+ * the axes), so it depends on r only.
+ */
+fn lines_of_cell(r: i64) -> [u32; LINES.len()] {
+    static LINES_OF: [OnceLock<[u32; LINES.len()]>; 64] = [const { OnceLock::new() }; 64];
+    *LINES_OF[r.trailing_zeros() as usize].get_or_init(|| {
+        // The cell reaches r along the axes; nearest_site breaks ties one way.
+        let near = || -r - 2..=r + 2;
+        let sites: Vec<[i64; 3]> = near()
+            .flat_map(|x| near().flat_map(move |y| near().map(move |z| [x, y, z])))
+            .filter(|&[x, y, z]| (x + y + z) & 1 == 0 && nearest_site([x, y, z].map(|v| v * ONE), r) == [0; 3])
+            .collect();
+        std::array::from_fn(|l| {
+            let held: std::collections::HashSet<[i64; 2]> = sites.iter().map(|&p| column(l, p)).collect();
+            let pairs: std::collections::HashSet<[[i64; 2]; 2]> = held
+                .iter()
+                .flat_map(|&[i, j]| {
+                    [[1, 1], [1, -1], [-1, 1], [-1, -1]].map(|[u, v]| [i + u, j + v]).map(move |m| [[i, j].min(m), [i, j].max(m)])
+                })
+                .collect();
+            (2 * held.len() + pairs.len()) as u32
         })
     })
 }
@@ -1744,16 +1789,15 @@ fn pairs_of_cell(r: i64) -> [u32; 3] {
  * drawn whole two levels finer (spacing f), or at the coarsest level it
  * is drawn at (at most `detail`) if that is coarser, then coarsened.
  * A coarse site stands for the fine sites in its cell (those nearest
- * it). A ray crossing the cell along an axis meets the voxels of two
- * neighbouring columns (`pairs`): it is stopped as often as the pairs that
- * hold a fine site of the cell hold one of the thing, on average over the
- * axes: its share, with which it is drawn.
+ * it). Along each line of nearest neighbours, a ray crossing the cell
+ * meets the voxels of one column of fine sites or of two (`column`): it
+ * is stopped as often as they hold one of the thing in the cell, of all
+ * those of the cell: its shares, with which it is drawn.
  * Each of its faces is of a kind of what rays through it see: along the
- * face's normal, a line of nearest neighbours, each such column's first
- * fine site from the face's end is credited to that face of every cell
- * the column crosses, in proportion (a ray that gets to the cell sees
- * that). The site is of a kind of all its faces see, for whatever does
- * not look at faces.
+ * face's line, each column's first fine site from the face's end is
+ * credited to that face of every cell the column crosses, in proportion
+ * (a ray that gets to the cell sees that). The site is of a kind of all
+ * its faces see, for whatever does not look at faces.
  */
 fn measure(node: &Node, key: &str, layer: &'static str, bounds: Box3, detail: Fixed, s: i64, seed: u64) -> Sites {
     // Two levels finer, its cells hold enough fine sites to measure, and a tile's things cost less a level coarser.
@@ -1762,11 +1806,11 @@ fn measure(node: &Node, key: &str, layer: &'static str, bounds: Box3, detail: Fi
     cost::add(layer, Work { measured: own.cells.len() as u64, ..Work::default() });
     // Kinds counted, each with how it meets the world.
     type Counts = Vec<(Kind, Op, u32)>;
-    // By coarse site: per axis, how many pairs of neighbouring columns hold a fine site of it; per face, what rays
-    // through it see first of all, counted by kind.
+    // By coarse site: per line, what it hides along it, in quarters of a column's area (`column`); per face, what
+    // rays through it see first of all, counted by kind.
     #[derive(Default)]
     struct Stats {
-        pairs: [u32; 3],
+        hidden: [u32; LINES.len()],
         seen: [Counts; FACE_KINDS],
     }
     let count = |kinds: &mut Counts, kind: Kind, op: Op| match kinds.iter_mut().find(|e| e.0 == kind) {
@@ -1789,55 +1833,36 @@ fn measure(node: &Node, key: &str, layer: &'static str, bounds: Box3, detail: Fi
     };
     let mut cells: Vec<Stats> = (0..m[0] * m[1] * m[2]).map(|_| Stats::default()).collect();
     // Fine points by their index in `own` (x first): steps along each axis, and the cell of each fine site
-    // (x + y + z even), found once for all the passes.
+    // (x + y + z even), found once for all the passes; which cells hold one of the thing.
     let stride = [1, n[0], n[0] * n[1]];
     let parity = own.b.min.iter().sum::<i64>();
     let units: [Vec<Fixed>; 3] = std::array::from_fn(|c| (0..n[c]).map(|v| scaled(c, v)).collect());
     let mut cell_at = vec![u32::MAX; own.cells.len()];
+    let mut held = vec![false; cells.len()];
     for z in 0..n[2] {
         for y in 0..n[1] {
             let row = (y * stride[1] + z * stride[2]) as usize;
             for x in ((y + z + parity) & 1..n[0]).step_by(2) {
                 let v = [units[0][x as usize], units[1][y as usize], units[2][z as usize]];
-                cell_at[row + x as usize] = index(nearest_unit_site(v)) as u32;
+                let cell = index(nearest_unit_site(v));
+                cell_at[row + x as usize] = cell as u32;
+                held[cell] |= own.of(row + x as usize).is_some();
             }
         }
     }
-    // Along each axis, the cells each column holds a fine site in (a column crosses each cell once: they are
-    // convex), then for each pair of neighbouring columns, the cells either holds one in.
-    for axis in 0..3 {
-        let (a, b) = ((axis + 1) % 3, (axis + 2) % 3);
-        let mut held: Vec<Vec<u32>> = vec![Vec::new(); (n[a] * n[b]) as usize];
-        for i in 0..n[a] {
-            for j in 0..n[b] {
-                let column = &mut held[(i * n[b] + j) as usize];
-                for k in 0..n[axis] {
-                    let p = (i * stride[a] + j * stride[b] + k * stride[axis]) as usize;
-                    if own.of(p).is_some() && column.last() != Some(&cell_at[p]) {
-                        column.push(cell_at[p]);
-                    }
-                }
-            }
-        }
-        let none = Vec::new();
-        let at = |[i, j]: [i64; 2]| if (0..n[a]).contains(&i) && (0..n[b]).contains(&j) { &held[(i * n[b] + j) as usize] } else { &none };
-        pairs([n[a], n[b]], |p, q| {
-            let (p, q) = (at(p), at(q));
-            for &c in p.iter().chain(q.iter().filter(|c| !p.contains(c))) {
-                cells[c as usize].pairs[axis] += 1;
-            }
-        });
-    }
-    // Each pair counted against those holding one of the cell's fine sites at all.
-    let all = pairs_of_cell(s / f);
-    let picks = hash_text(&format!("{key}#measured"), seed);
-    let shares: Vec<f64> = cells.iter().map(|stats| (0..3).map(|i| stats.pairs[i] as f64 / all[i] as f64).sum::<f64>() / 3.0).collect();
     // Columns along each line of nearest neighbours d, from its start on the side of −d to its end on the side of
     // d: rays coming from either end see the faces towards it.
     for (from_end, d) in VOXEL_FACES.iter().enumerate().filter(|(_, d)| d.iter().find(|v| **v != 0) == Some(&-1)) {
+        let l = bake::line_of(from_end);
         let d = d.map(i64::from);
         let from_start = VOXEL_FACES.iter().position(|e| e.map(i64::from) == d.map(|v| -v)).expect("−d is a face");
         let step: i64 = (0..3).map(|c| d[c] * stride[c]).sum();
+        // By column (`column`, from the least of the box's), the cells it holds one of the thing in.
+        let corners = (0..8).map(|k| column(l, [0, 1, 2].map(|c| (k >> c & 1) * (n[c] - 1))));
+        let least = corners.clone().fold([i64::MAX; 2], |a, b| [a[0].min(b[0]), a[1].min(b[1])]);
+        let most = corners.fold([i64::MIN; 2], |a, b| [a[0].max(b[0]), a[1].max(b[1])]);
+        let across = [most[0] - least[0] + 1, most[1] - least[1] + 1];
+        let mut columns: Vec<Vec<u32>> = vec![Vec::new(); (across[0] * across[1]) as usize];
         // Columns of sites start where a step back leaves the box: on its side of −d along an axis d moves on.
         let edge = |c: usize, v: i64| d[c] != 0 && v == if d[c] < 0 { n[c] - 1 } else { 0 };
         // In order of x, y, z, as counts keep the first way a kind meets the world they are given.
@@ -1856,17 +1881,22 @@ fn measure(node: &Node, key: &str, layer: &'static str, bounds: Box3, detail: Fi
                 let origin = x + y * stride[1] + z * stride[2];
                 let length =
                     (0..3).filter(|c| d[*c] != 0).map(|c| if d[c] > 0 { n[c] - start[c] } else { start[c] + 1 }).min().expect("d moves");
-                // What it holds first and last, and the cells it crosses that the thing is in.
+                // What it holds first and last, the cells it holds one of the thing in, and those it crosses that do.
                 let (mut first, mut last) = (None, None);
+                let [i, j] = column(l, start);
+                let holds = &mut columns[((i - least[0]) * across[1] + j - least[1]) as usize];
                 let mut crossed: Vec<usize> = Vec::new();
                 for p in (0..length).map(|t| (origin + t * step) as usize) {
                     let cell = cell_at[p] as usize;
-                    if shares[cell] > 0.0 && crossed.last() != Some(&cell) {
+                    if held[cell] && crossed.last() != Some(&cell) {
                         crossed.push(cell);
                     }
                     if let Some(at) = own.of(p) {
                         first.get_or_insert(at);
                         last = Some(at);
+                        if holds.last() != Some(&(cell as u32)) {
+                            holds.push(cell as u32);
+                        }
                     }
                 }
                 let (Some(first), Some(last)) = (first, last) else { continue };
@@ -1878,9 +1908,29 @@ fn measure(node: &Node, key: &str, layer: &'static str, bounds: Box3, detail: Fi
                 }
             }
         }
+        // What the thing hides along the line in each cell: two quarters for each column, one for each pair of
+        // neighbours (a column crosses each cell once: they are convex).
+        let none = Vec::new();
+        let at = |[i, j]: [i64; 2]| {
+            if (0..across[0]).contains(&i) && (0..across[1]).contains(&j) { &columns[(i * across[1] + j) as usize] } else { &none }
+        };
+        for column in &columns {
+            column.iter().for_each(|&c| cells[c as usize].hidden[l] += 2);
+        }
+        line_pairs(across, |p, q| {
+            let (p, q) = (at(p), at(q));
+            for &c in p.iter().chain(q.iter().filter(|c| !p.contains(c))) {
+                cells[c as usize].hidden[l] += 1;
+            }
+        });
     }
+    // Of what the cell hides whole.
+    let all = lines_of_cell(s / f);
+    let picks = hash_text(&format!("{key}#measured"), seed);
+    let shares: Vec<[f64; LINES.len()]> =
+        cells.iter().map(|stats| std::array::from_fn(|l| stats.hidden[l] as f64 / all[l] as f64)).collect();
     let mut sites = Vec::new();
-    for (i, stats) in cells.into_iter().enumerate().filter(|(i, _)| shares[*i] > 0.0) {
+    for (i, stats) in cells.into_iter().enumerate().filter(|(i, _)| held[*i]) {
         let site = site_of(i);
         let [x, y, z] = site;
         let faces = stats.seen;
@@ -1911,16 +1961,16 @@ fn measure(node: &Node, key: &str, layer: &'static str, bounds: Box3, detail: Fi
             }
         }
         // Its share, of each kind as much as its faces see of it, each kind's of what the ones before leave, so that
-        // together they stop as much as the cell's share; each with the faces seen.
+        // together they stop as much as the cell's shares; each with the faces seen.
         let faces = faces.map(|counts| pick(&counts).0);
         let total = all.iter().map(|e| e.2).sum::<u32>().max(1) as f64;
-        let mut before = 0.0f64;
+        let mut before = [0.0f64; LINES.len()];
         for &(kind, op, n) in &all {
-            let part = shares[i] * n as f64 / total;
+            let parts: [f64; LINES.len()] = std::array::from_fn(|l| shares[i][l] * n as f64 / total);
             let look = Look { kind, faces: faces.iter().any(|k| *k != kind).then_some(faces) };
             let picked = to_pick(hash(picks.wrapping_add(kind as u64 + 1), x * s, y * s, z * s));
-            sites.push((site, look, op, share(part / (1.0 - before).max(f64::EPSILON)), picked));
-            before += part;
+            sites.push((site, look, op, std::array::from_fn(|l| share(parts[l] / (1.0 - before[l]).max(f64::EPSILON))), picked));
+            (0..LINES.len()).for_each(|l| before[l] += parts[l]);
         }
     }
     // In an order of their own, as sites are put in it.
@@ -1959,7 +2009,7 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
                     work.reads += 0.max((clip.max[0] - x + 1) / 2) as u64;
                     while x < clip.max[0] {
                         if let Some((kind, extinction)) = plan::footprint(s, offset(x, z), || at(x * s, y * s, z * s, s)) {
-                            put(kind.into(), op, share_of(extinction), picked(x, y, z), x, y, z);
+                            put(kind.into(), op, [share_of(extinction); LINES.len()], picked(x, y, z), x, y, z);
                         }
                         x += 2;
                     }
@@ -1987,7 +2037,7 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
                         // s is a power of two: shifting is dividing, rounded down.
                         let first = (-((-span.from) >> s.trailing_zeros())).max(lo[axis]);
                         let mut w = first + ((first + u + v) & 1);
-                        let share = share_of(span.extinction);
+                        let share = [share_of(span.extinction); LINES.len()];
                         while w * s <= span.to && w < hi[axis] {
                             site[axis] = w;
                             if tie.within(axis, site.map(|c| c * s), span.from, span.to, 1) {
@@ -2288,43 +2338,156 @@ mod tests {
         let kept: Vec<f64> = on_threads(16, |i| {
             let cloud = cloud();
             let sites = measure(&cloud, &format!("cloud {i}"), "clouds", bounds_of(&cloud), fixed(2.0), 16, 1);
-            sites.iter().map(|s| s.3 as f64 / SHARE as f64).sum()
+            sites.iter().map(|s| s.3.iter().sum::<u32>() as f64 / (LINES.len() as u32 * SHARE) as f64).sum()
         });
         assert!(kept.iter().all(|n| (26.0..38.0).contains(n)), "sparse clouds keep {kept:?} of their about 134 cells");
     }
 
+    /** What `sites` hide along line `l`, by `column`'s rule: two quarters of a column's area each column, one each pair. */
+    fn hidden(l: usize, sites: &[[i64; 3]]) -> u32 {
+        let held: std::collections::HashSet<[i64; 2]> = sites.iter().map(|&p| column(l, p)).collect();
+        let pairs: std::collections::HashSet<[[i64; 2]; 2]> = held
+            .iter()
+            .flat_map(|&[i, j]| {
+                [[1, 1], [1, -1], [-1, 1], [-1, -1]].map(|[u, v]| [i + u, j + v]).map(move |m| [[i, j].min(m), [i, j].max(m)])
+            })
+            .collect();
+        (2 * held.len() + pairs.len()) as u32
+    }
+
+    /**
+     * Of `rays` rays along line `l` through a square 2·`reach` wide around `centre` across it, how many meet a
+     * voxel of `sites` (theirs, 1 wide).
+     */
+    fn traced(l: usize, sites: &[[i64; 3]], centre: [f64; 3], reach: f64, rays: u32) -> u32 {
+        let normals = LINES.map(|n| n.map(f64::from));
+        let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+        let d = normals[l].map(|v| v / 2f64.sqrt());
+        // Across the line: an axis it runs across, and the line's normal in the plane of the other two.
+        let c = (0..3).find(|&c| d[c] == 0.0).expect("across an axis");
+        let mut u = [0.0; 3];
+        u[c] = 1.0;
+        let w = [d[1] * u[2] - d[2] * u[1], d[2] * u[0] - d[0] * u[2], d[0] * u[1] - d[1] * u[0]];
+        let mut rng = Rng::new(7 + l as u64);
+        (0..rays)
+            .filter(|_| {
+                let (a, b) = (rng.next() * 2.0 - 1.0, rng.next() * 2.0 - 1.0);
+                let q: [f64; 3] = std::array::from_fn(|k| centre[k] + reach * (a * u[k] + b * w[k]));
+                sites.iter().any(|p| {
+                    // A voxel is within 1 of its site.
+                    let off: [f64; 3] = std::array::from_fn(|k| p[k] as f64 - q[k]);
+                    if dot(off, off) - dot(off, d).powi(2) > 1.0 + 1e-9 {
+                        return false;
+                    }
+                    let (mut enter, mut leave) = (f64::NEG_INFINITY, f64::INFINITY);
+                    for n in normals {
+                        let (along, at) = (dot(n, d), dot(n, std::array::from_fn(|k| q[k] - p[k] as f64)));
+                        if along.abs() < 1e-12 {
+                            if at.abs() > 1.0 {
+                                return false;
+                            }
+                        } else {
+                            let (t0, t1) = ((-1.0 - at) / along, (1.0 - at) / along);
+                            (enter, leave) = (enter.max(t0.min(t1)), leave.min(t0.max(t1)));
+                        }
+                    }
+                    enter <= leave
+                })
+            })
+            .count() as u32
+    }
+
     #[test]
-    fn a_cells_pairs_of_columns_are_counted() {
-        // Every fine site near a few cells of a level, assigned to its nearest: each cell's columns holding one,
-        // per axis, and the pairs of neighbours either of which does, as pairs_of_cell counts them for any cell.
+    fn a_column_hides_two_quarters_along_its_line_and_a_pair_one() {
+        // Some of a cell's sites, by chance and as a sheet or a rod across it: what they hide along each line, by
+        // columns and pairs, of what the cell's do, as rays traced through their voxels find it.
+        let r = 4;
+        let near = || -r - 2..=r + 2;
+        let cell: Vec<[i64; 3]> = near()
+            .flat_map(|x| near().flat_map(move |y| near().map(move |z| [x, y, z])))
+            .filter(|&p| p.iter().sum::<i64>() & 1 == 0 && nearest_site(p.map(|v| v * ONE), r) == [0; 3])
+            .collect();
+        let mut rng = Rng::new(3);
+        let some: Vec<[i64; 3]> = cell.iter().copied().filter(|_| rng.next() < 0.15).collect();
+        let sheet: Vec<[i64; 3]> = cell.iter().copied().filter(|p| p[1] == 0).collect();
+        let rod: Vec<[i64; 3]> = cell.iter().copied().filter(|p| p[0] == 0 && p[2] <= 1 && p[2] >= 0).collect();
+        for (l, line) in LINES.iter().enumerate() {
+            assert_eq!(hidden(l, &cell), lines_of_cell(r)[l], "the cell along {line:?}");
+            // A cell reaches r along the axes, so its shadow along a line is within 2 r + 1 of its centre.
+            let reach = (2 * r + 2) as f64;
+            let all = traced(l, &cell, [0.0; 3], reach, 100_000) as f64;
+            for (name, part) in [("some", &some), ("a sheet", &sheet), ("a rod", &rod)] {
+                let counted = hidden(l, part) as f64 / hidden(l, &cell) as f64;
+                let seen = traced(l, part, [0.0; 3], reach, 100_000) as f64 / all;
+                assert!((counted - seen).abs() < 0.015, "{name} along {line:?} hides {counted:.3}, rays find {seen:.3}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_cells_lines_are_counted_alike_wherever_it_is() {
+        // Every fine site near a few cells of a level, assigned to its nearest: what each cell's hide along each
+        // line, as lines_of_cell counts it for any cell.
         for r in [2i64, 4, 8, 16] {
             for centre in [[0, 0, 0], [1, 1, 0], [-1, 0, 1], [0, 2, 0], [3, -1, 2]] {
-                let mut columns: [std::collections::HashSet<(i64, i64)>; 3] = Default::default();
                 let c = centre.map(|v| v * r);
-                for x in c[0] - r..=c[0] + r {
-                    for y in c[1] - r..=c[1] + r {
-                        for z in c[2] - r..=c[2] + r {
-                            if (x + y + z) & 1 == 0 && nearest_site([x, y, z].map(|v| v * ONE), r) == centre {
-                                columns[0].insert((y, z));
-                                columns[1].insert((z, x));
-                                columns[2].insert((x, y));
-                            }
-                        }
-                    }
-                }
-                let pairs = columns.map(|held| {
-                    let mut pairs = std::collections::HashSet::new();
-                    for &(i, j) in &held {
-                        for (u, v) in [(i - 1, j), (i + 1, j), (i, j - 1), (i, j + 1)] {
-                            pairs.insert(if (i, j) < (u, v) { ((i, j), (u, v)) } else { ((u, v), (i, j)) });
-                        }
-                    }
-                    pairs.len() as u32
-                });
-                assert_eq!(pairs, pairs_of_cell(r), "cells {r} sites wide, at {centre:?}");
+                let near = |k: usize| c[k] - r - 2..=c[k] + r + 2;
+                let sites: Vec<[i64; 3]> = near(0)
+                    .flat_map(|x| near(1).flat_map(move |y| near(2).map(move |z| [x, y, z])))
+                    .filter(|&p| p.iter().sum::<i64>() & 1 == 0 && nearest_site(p.map(|v| v * ONE), r) == centre)
+                    .collect();
+                let lines: [u32; LINES.len()] = std::array::from_fn(|l| hidden(l, &sites));
+                assert_eq!(lines, lines_of_cell(r), "cells {r} sites wide, at {centre:?}");
             }
-            println!("{r}: {:?} halves of a column, of a shadow of {}", pairs_of_cell(r), 4 * r * r);
         }
+    }
+
+    #[test]
+    fn a_measured_wall_hides_along_each_line_what_its_voxels_do() {
+        // A wall across z, a fine site thick, measured at sites 16 apart from sites 4 apart: each cell inside it
+        // stops rays along each line as often as rays traced through its fine voxels in the cell are stopped,
+        // of those through the cell's. Along the lines in its plane, seldom; across, mostly.
+        let wall = Node {
+            far: Some(Far::measured(fx(2.0))),
+            ..Node::of(vec![cuboid([0.0, 0.0, 30.0], [128.0, 128.0, 34.0], 1, SOLID, Op::Fill)])
+        };
+        let (s, f) = (16, 4);
+        let sites = measure(&wall, "wall", "walls", bounds_of(&wall), fixed(2.0), s, 1);
+        let own = alone(&wall, "wall", "walls", bounds_of(&wall), f, 1, near);
+        let fine: Vec<[i64; 3]> = (0..own.cells.len())
+            .filter(|&i| own.of(i).is_some())
+            .map(|i| {
+                let i = i as i64;
+                let p = [i % own.n[0], i / own.n[0] % own.n[1], i / (own.n[0] * own.n[1])];
+                [0, 1, 2].map(|k| p[k] + own.b.min[k])
+            })
+            .collect();
+        let r = s / f;
+        let (mut checked, mut along, mut across) = (0, 0.0f64, 0.0f64);
+        for (site, _, _, shares, _) in sites.iter().filter(|e| (2..6).contains(&e.0[0]) && (2..6).contains(&e.0[1])) {
+            let centre = site.map(|v| v * r);
+            let near = |k: usize| centre[k] - r - 2..=centre[k] + r + 2;
+            let cell: Vec<[i64; 3]> = near(0)
+                .flat_map(|x| near(1).flat_map(move |y| near(2).map(move |z| [x, y, z])))
+                .filter(|&p| p.iter().sum::<i64>() & 1 == 0 && nearest_site(p.map(|v| v * ONE), r) == *site)
+                .collect();
+            let held: Vec<[i64; 3]> = cell.iter().copied().filter(|p| fine.contains(p)).collect();
+            for l in 0..LINES.len() {
+                let (centre, reach) = (centre.map(|v| v as f64), (2 * r + 2) as f64);
+                let seen = traced(l, &held, centre, reach, 100_000) as f64 / traced(l, &cell, centre, reach, 100_000) as f64;
+                let share = shares[l] as f64 / SHARE as f64;
+                assert!((share - seen).abs() < 0.015, "the cell of {site:?} along {:?} stops {share:.3}, rays find {seen:.3}", LINES[l]);
+                if LINES[l][2] == 0 {
+                    along = along.max(share);
+                } else {
+                    across += share;
+                }
+            }
+            checked += 1;
+        }
+        assert!(checked >= 8, "{checked} cells checked");
+        let across = across / (4.0 * checked as f64);
+        assert!(along < 0.4 && across > 0.6, "along the wall at most {along:.3}, across {across:.3} on average");
     }
 
     /**

@@ -307,13 +307,16 @@ impl Tiles {
                             None
                         }
                         Some(0) => None,
-                        Some(_) => {
-                            let id = tile.grid.face(x, y, z, entered(ray));
-                            return match self.normal(ray.site, &tile.grid) {
-                                Ok(normal) => Step::Hit(id, normal),
-                                Err(key) => Step::Needs(key),
-                            };
-                        }
+                        // Not shown along the line of the face it enters by: on through it.
+                        Some(_) => match tile.grid.face(x, y, z, entered(ray)) {
+                            0 => None,
+                            id => {
+                                return match self.normal(ray.site, &tile.grid) {
+                                    Ok(normal) => Step::Hit(id, normal),
+                                    Err(key) => Step::Needs(key),
+                                };
+                            }
+                        },
                         None => {
                             let corner = [0, 1, 2].map(|i| tile.grid.min[i] + (ray.site[i] - tile.grid.min[i]).div_euclid(BRICK) * BRICK);
                             leaves(ray, corner.map(|v| v as f64), corner.map(|v| (v + BRICK - 1) as f64))
@@ -365,7 +368,7 @@ pub(crate) fn first_hit(grid: &VoxelGrid, origin: [f64; 3], direction: [f64; 3],
     let mut planes = walk.planes(&ray);
     while ray.t <= end {
         let [x, y, z] = ray.site;
-        if grid.get(x, y, z) != 0 {
+        if grid.face(x, y, z, entered(&ray)) != 0 {
             return Some((ray.t, ray.site, entered(&ray)));
         }
         walk.cross(&mut ray, &mut planes);
