@@ -176,19 +176,22 @@ impl Grid {
     }
 }
 
+/** A tile's (i, j, k): it holds x in [i · 2^shift, (i + 1) · 2^shift), y by j and z by k likewise. */
+pub type TileId = [i32; 3];
+
 /**
- * A level's sites as grids on a tiling of x and z: tile (i, k) holds x in
- * [i · 2^shift, (i + 1) · 2^shift), z likewise, and reads as empty until it
- * has a grid. The grids are shared, so tiles are cheap to add.
+ * A level's sites as grids on a tiling of space by cubes, 2^shift sites a
+ * side: a site no tile has a grid for is unknown; one a tile's grid does
+ * not hold, empty. The grids are shared, so tiles are cheap to add.
  */
 #[derive(Clone)]
 pub struct Tiles {
     shift: u32,
-    /** The table's first tile, the site of its corner along x and z, and its tiles along each. */
-    from: [i32; 2],
-    origin: [i32; 2],
-    size: [i32; 2],
-    /** Tile by tile, z-major. */
+    /** The table's first tile, the site of its corner, and its tiles along each axis. */
+    from: TileId,
+    origin: [i64; 3],
+    size: [i32; 3],
+    /** Tile by tile, z-major, then y. */
     grids: Vec<Option<Arc<Grid>>>,
     /** Bounds of the grids' sites, inclusive (min > max if none). */
     min: [i32; 3],
@@ -196,60 +199,50 @@ pub struct Tiles {
 }
 
 impl Tiles {
-    /** The tiles 2^shift sites wide that have a grid: `tiles` holds each one's (i, k) and grid, its box within the tile. */
-    pub fn new(shift: u32, tiles: impl IntoIterator<Item = ((i32, i32), Arc<Grid>)>) -> Tiles {
+    /** The tiles 2^shift sites a side that have a grid: `tiles` holds each one's id and grid, its box within the tile. */
+    pub fn new(shift: u32, tiles: impl IntoIterator<Item = (TileId, Arc<Grid>)>) -> Tiles {
         let tiles: Vec<_> = tiles.into_iter().collect();
-        let (mut from, mut to) = ([i32::MAX; 2], [i32::MIN; 2]);
+        let (mut from, mut to) = ([i32::MAX; 3], [i32::MIN; 3]);
         let (mut min, mut max) = ([i32::MAX; 3], [i32::MIN; 3]);
-        for ((i, k), grid) in &tiles {
-            from = [from[0].min(*i), from[1].min(*k)];
-            to = [to[0].max(*i), to[1].max(*k)];
-            for d in 0..3 {
-                min[d] = min[d].min(grid.min[d]);
-                max[d] = max[d].max(grid.min[d] + grid.n[d] - 1);
+        for (id, grid) in &tiles {
+            from = std::array::from_fn(|d| from[d].min(id[d]));
+            to = std::array::from_fn(|d| to[d].max(id[d]));
+            if grid.n.iter().all(|&n| n > 0) {
+                min = std::array::from_fn(|d| min[d].min(grid.min[d]));
+                max = std::array::from_fn(|d| max[d].max(grid.min[d] + grid.n[d] - 1));
             }
         }
         if tiles.is_empty() {
-            (from, to) = ([0, 0], [-1, -1]);
+            (from, to) = ([0; 3], [-1; 3]);
         }
-        let size = [to[0] - from[0] + 1, to[1] - from[1] + 1];
-        let mut grids = vec![None; (size[0] * size[1]) as usize];
-        for ((i, k), grid) in tiles {
-            grids[((k - from[1]) * size[0] + i - from[0]) as usize] = Some(grid);
+        let size = std::array::from_fn(|d| to[d] - from[d] + 1);
+        let mut grids = vec![None; size.iter().map(|&n| n as usize).product()];
+        for (id, grid) in tiles {
+            let [i, j, k] = std::array::from_fn(|d| id[d] - from[d]);
+            grids[((k * size[1] + j) * size[0] + i) as usize] = Some(grid);
         }
-        Tiles { shift, from, origin: [from[0] << shift, from[1] << shift], size, grids, min, max }
+        Tiles { shift, from, origin: from.map(|v| (v as i64) << shift), size, grids, min, max }
     }
 
-    /** A grid as the only tile: one as wide as any box. */
+    /** A grid as the only tile: one holding all space, 2^32 sites a side from the least i32. */
     pub fn one(grid: Grid) -> Tiles {
         let (min, max) = (grid.min, std::array::from_fn(|d| grid.min[d] + grid.n[d] - 1));
-        Tiles {
-            shift: i32::BITS - 1,
-            from: [0, 0],
-            origin: [grid.min[0], grid.min[2]],
-            size: [1, 1],
-            grids: vec![Some(Arc::new(grid))],
-            min,
-            max,
-        }
+        Tiles { shift: 32, from: [0; 3], origin: [i32::MIN as i64; 3], size: [1; 3], grids: vec![Some(Arc::new(grid))], min, max }
     }
 
-    /** The material at site (x, y, z) and its alpha, (0, 0) if empty; None if no tile's grid holds its column. */
+    /** The material at site (x, y, z) and its alpha, (0, 0) if empty; None if no tile has a grid there. */
     pub fn at(&self, x: i32, y: i32, z: i32) -> Option<(u8, u8)> {
-        let grid = self.grid(self.tile(x, z))?;
-        let holds = |v: i32, d: usize| (grid.min[d]..grid.min[d] + grid.n[d]).contains(&v);
-        (holds(x, 0) && holds(z, 2)).then(|| grid.get(x, y, z))
+        Some(self.grid(self.tile(x, y, z))?.get(x, y, z))
     }
 
-    /** Whether tile (i, k) has a grid. */
-    pub fn has(&self, i: i32, k: i32) -> bool {
-        let (i, k) = (i - self.from[0], k - self.from[1]);
-        (0..self.size[0]).contains(&i) && (0..self.size[1]).contains(&k) && self.grids[(k * self.size[0] + i) as usize].is_some()
+    /** Whether tile `id` has a grid. */
+    pub fn has(&self, id: TileId) -> bool {
+        self.grid(std::array::from_fn(|d| id[d] - self.from[d])).is_some()
     }
 
-    /** Whether tiles (i0, k0) to (i1, k1), inclusive, all have grids: those a chunk reads (chunk_reads). */
-    pub fn has_all(&self, [i0, k0, i1, k1]: [i32; 4]) -> bool {
-        (k0..=k1).all(|k| (i0..=i1).all(|i| self.has(i, k)))
+    /** Whether the tiles from `lo` to `hi`, inclusive, all have grids: those a chunk reads (chunk_reads). */
+    pub fn has_all(&self, [lo, hi]: [TileId; 2]) -> bool {
+        (lo[2]..=hi[2]).all(|k| (lo[1]..=hi[1]).all(|j| (lo[0]..=hi[0]).all(|i| self.has([i, j, k]))))
     }
 
     /** The grid of the only tile, if no other bakers share it (see one). */
@@ -260,19 +253,21 @@ impl Tiles {
         }
     }
 
-    /** The tile (i, k) column (x, z) is in, relative to the table's first. */
+    /** The tile site (x, y, z) is in, relative to the table's first. */
     #[inline]
-    fn tile(&self, x: i32, z: i32) -> [i32; 2] {
-        [(x - self.origin[0]) >> self.shift, (z - self.origin[1]) >> self.shift]
+    fn tile(&self, x: i32, y: i32, z: i32) -> TileId {
+        let o = self.origin;
+        [((x as i64 - o[0]) >> self.shift) as i32, ((y as i64 - o[1]) >> self.shift) as i32, ((z as i64 - o[2]) >> self.shift) as i32]
     }
 
-    /** Tile (i, k)'s grid, if it has one. */
+    /** The grid of tile `t`, relative to the table's first, if it has one. */
     #[inline]
-    fn grid(&self, [i, k]: [i32; 2]) -> Option<&Grid> {
-        if i < 0 || i >= self.size[0] || k < 0 || k >= self.size[1] {
+    fn grid(&self, [i, j, k]: TileId) -> Option<&Grid> {
+        let [nx, ny, nz] = self.size;
+        if i < 0 || i >= nx || j < 0 || j >= ny || k < 0 || k >= nz {
             return None;
         }
-        self.grids[(k * self.size[0] + i) as usize].as_deref()
+        self.grids[((k * ny + j) * nx + i) as usize].as_deref()
     }
 }
 
@@ -324,10 +319,10 @@ impl<'a> Reader<'a> {
         debug_assert!(((a ^ c) | (b ^ c)) & 1 == 0, "not a site");
         let r = self.lattice.r;
         let [mut x, mut y, mut z] = self.lattice.world([a, b, c]);
-        let mut tile = self.tiles.tile(x, z);
+        let mut tile = self.tiles.tile(x, y, z);
         let mut grid = self.tiles.grid(tile);
         for i in 0..count {
-            let here = self.tiles.tile(x, z);
+            let here = self.tiles.tile(x, y, z);
             if here != tile {
                 tile = here;
                 grid = self.tiles.grid(tile);
@@ -344,6 +339,30 @@ impl<'a> Reader<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tiles_hold_their_cubes_alike_along_every_axis() {
+        // A voxel in each of two tiles, one above the other, as shift 3 makes them: a brick each.
+        let tile = |min: [i32; 3]| {
+            let mut grid = Grid::new(min, [8, 8, 8], 1);
+            grid.bricks[0] = 0;
+            grid.cells[0] = 1 + min[1] as u8 / 8;
+            Arc::new(grid)
+        };
+        let tiles = Tiles::new(
+            3,
+            [([0, 0, 0], tile([0, 0, 0])), ([0, 1, 0], tile([0, 8, 0])), ([1, 0, 0], Arc::new(Grid::new([8, 0, 0], [0; 3], 0)))],
+        );
+        assert_eq!(tiles.at(0, 0, 0), Some((1, ALPHA)));
+        assert_eq!(tiles.at(0, 8, 0), Some((2, ALPHA)));
+        assert_eq!(tiles.at(2, 0, 0), Some((0, 0)), "empty in its tile");
+        assert_eq!(tiles.at(8, 0, 0), Some((0, 0)), "a tile whose grid holds nothing is empty");
+        for unknown in [[0, 16, 0], [0, -1, 0], [0, 0, 8], [-1, 0, 0]] {
+            assert_eq!(tiles.at(unknown[0], unknown[1], unknown[2]), None, "{unknown:?}: no tile there");
+        }
+        assert!(tiles.has_all([[0, 0, 0], [1, 0, 0]]) && tiles.has_all([[0, 0, 0], [0, 1, 0]]));
+        assert!(!tiles.has_all([[0, 0, 0], [1, 1, 0]]) && !tiles.has([0, 0, 1]));
+    }
 
     #[test]
     fn each_face_reads_the_material_of_the_voxels_faces_towards_it() {

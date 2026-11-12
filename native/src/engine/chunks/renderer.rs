@@ -82,16 +82,16 @@ const TURN: f64 = 0.15;
 /**
  * What is known of a cell of a face: nothing yet; that it holds nothing
  * (all above or below the world, outside its grid's index, or baked
- * empty); that it waits for the tiles it reads, [i0, k0, i1, k1], or for
- * its bake; or its chunk.
+ * empty); that it waits for the tiles it reads (box_tiles), or for its
+ * bake; or its chunk.
  */
 #[derive(Clone, Default)]
 enum Seen {
     #[default]
     Unknown,
     Empty,
-    Tiles([i32; 4]),
-    Bake([i32; 4]),
+    Tiles([TileId; 2]),
+    Bake([TileId; 2]),
     Baked(Arc<Chunk>),
 }
 
@@ -127,11 +127,12 @@ fn closest_to_zero(lo: f64, hi: f64) -> f64 {
 }
 
 /**
- * The tiles a box of (a, b, c) of a face's lattice coordinates meets,
- * [i0, k0, i1, k1], in a grid's units; None if it is all above or below
- * the world, its sites' y in [low, high) of `heights`.
+ * The tiles a box of (a, b, c) of a face's lattice coordinates meets
+ * within the world, its sites' y in [low, high) of `heights`, in a grid's
+ * units: the first and the last, each way; None if it is all above or
+ * below the world.
  */
-fn box_tiles(Lattice { r, u, f }: Lattice, heights: (i64, i64), min: [i32; 3], max: [i32; 3]) -> Option<[i32; 4]> {
+fn box_tiles(Lattice { r, u, f }: Lattice, heights: (i64, i64), min: [i32; 3], max: [i32; 3]) -> Option<[TileId; 2]> {
     // x, y, z at (a, b, c) as bake's Reader has it, over the box's corners.
     let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
     for corner in 0..8 {
@@ -145,16 +146,21 @@ fn box_tiles(Lattice { r, u, f }: Lattice, heights: (i64, i64), min: [i32; 3], m
     if hi[1] < heights.0 as f64 || lo[1] >= heights.1 as f64 {
         return None;
     }
+    (lo[1], hi[1]) = (lo[1].max(heights.0 as f64), hi[1].min((heights.1 - 1) as f64));
     let tile = |v: f64| (v / TILE as f64).floor() as i32;
-    Some([tile(lo[0]), tile(lo[2]), tile(hi[0]), tile(hi[2])])
+    Some([lo.map(tile), hi.map(tile)])
+}
+
+/** The tiles from `lo` to `hi`, inclusive. */
+fn tiles_in([lo, hi]: [TileId; 2]) -> impl Iterator<Item = TileId> {
+    (lo[2]..=hi[2]).flat_map(move |k| (lo[1]..=hi[1]).flat_map(move |j| (lo[0]..=hi[0]).map(move |i| [i, j, k])))
 }
 
 /** Whether a cell may hold voxels: its grid's index has some in its layers and columns, within its rows. Once it has its tiles. */
-fn may_hold(cell: &CellChunk, forward: [i32; 3], level: &Level, [i0, k0, i1, k1]: [i32; 4]) -> bool {
+fn may_hold(cell: &CellChunk, forward: [i32; 3], level: &Level, tiles: [TileId; 2]) -> bool {
     let (min, max) = cell.bounds();
     let (c0, c1, a0, a1) = (min[2] as i64, max[2] as i64 + 1, min[0] as i64, max[0] as i64 + 1);
-    (k0..=k1)
-        .flat_map(|k| (i0..=i1).map(move |i| (i, k)))
+    tiles_in(tiles)
         .filter_map(|t| level.tiles.get(&t)?.index.range(forward, c0, c1, a0, a1))
         .any(|(lo, hi)| lo <= max[1] as i64 && hi >= min[1] as i64)
 }
@@ -282,13 +288,7 @@ impl Renderer {
                 match seen {
                     Seen::Unknown | Seen::Empty => return,
                     &mut Seen::Tiles(t) => {
-                        for k in t[1]..=t[3] {
-                            for i in t[0]..=t[2] {
-                                if !source.grids.has(i, k) {
-                                    tiles.push((level, (i, k), d));
-                                }
-                            }
-                        }
+                        tiles.extend(tiles_in(t).filter(|&id| !source.grids.has(id)).map(|id| (level, id, d)));
                     }
                     &mut Seen::Bake(t) => {
                         let block = super::compositor::block(z1.max(1.0), view.focal);

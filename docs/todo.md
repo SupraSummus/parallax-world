@@ -360,7 +360,13 @@ Numbers are for the forest at 1280×800, as measured when written.
   And a cell's share counts rays the cells behind it stop too,
   so a thing keeps more cells than it stops rays.
 - **A field reads every column of a tile, even where it draws nothing:**
-  the railway's two, away from its line.
+  the railway's two, away from its line;
+  and the valley's ground, ponds, water and fields
+  over a cube all in the air or the rock.
+  Native's tiles are cubes, so a column's work is done again in each over it:
+  its views took up to twice as long to complete
+  as with tiles of whole columns,
+  the voxels engine's most, as it asks for every cube around the eye.
   A field could say which boxes it may draw in, and be skipped elsewhere.
 - **Cost weighs every plan lookup alike** (`NS` in `worldgen/src/cost.rs`),
   though one of a column just read costs a fraction
@@ -476,11 +482,11 @@ Numbers are for the forest at 1280×800, as measured when written.
   not at the spawn and the regions' centres (`cost::places`),
   once the forest, the moor and the city name some:
   they would be measured at their spawn alone.
-- Drop y as up from hosts and checks.
+- Drop y as up from the web and the checks.
   A world is bounded along y by its `heights`,
-  hosts tile x and z over them,
+  the web tiles x and z over them (native's tiles are cubes),
   and the checks look from above down y;
-  an endless holey cheese wants tiles along y too, and no heights.
+  an endless holey cheese wants no heights.
 - Lay out towns at any angle?
   Walls along the lattice's axes look crisp on FCC;
   at other angles they jag.
