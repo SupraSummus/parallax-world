@@ -12,13 +12,13 @@ use std::rc::Rc;
 
 use worldgen::frame::{Frame, Part, U, V, W, back, walls};
 use worldgen::generator::{
-    ANY_SIZE, Anchors, Child, Children, Far, Field, FieldValues, Fill, Kind, Layer, Node, Op, Population, SOLID, Shape, Shapes, Span,
-    bounds_of_shapes,
+    ANY_SIZE, About, Anchors, Child, Children, Far, Field, FieldValues, Fill, Kind, Layer, Node, Op, Population, SOLID, Shape, Shapes,
+    Span, bounds_of_shapes,
 };
 use worldgen::grid::Box3;
 use worldgen::kinds;
 use worldgen::noise::{Fx, Rng, ease_towards, fx, hash64, stream};
-use worldgen::plan::{Claims, Land, Plan};
+use worldgen::plan::{Claims, Land, Plan, Sloped};
 use worldgen::units::{Units, m};
 
 use crate::forest::{self, K as F, Relief, Species, make_tree};
@@ -458,9 +458,9 @@ impl Towns {
 }
 
 /** The town's layers: its streets' surface, and the towns, both only where it owns the land (domain `me` of `land`). */
-pub fn layers(towns: Rc<Towns>, land: Rc<Land>, me: usize, ground: Rc<Plan<i64>>) -> Vec<Layer> {
+pub fn layers(towns: Rc<Towns>, land: Rc<Land>, me: usize, ground: Rc<Sloped>) -> Vec<Layer> {
     let surface = {
-        let towns = towns.clone();
+        let (towns, surface_ground) = (towns.clone(), ground.clone());
         Field {
             name: "streets",
             order: 0.5,
@@ -472,7 +472,7 @@ pub fn layers(towns: Rc<Towns>, land: Rc<Land>, me: usize, ground: Rc<Plan<i64>>
                     if spot == Spot::Outside || !land.owns(me, x, z) {
                         return Vec::new();
                     }
-                    let h = ground.at(x, z);
+                    let h = surface_ground.at(x, z);
                     let top = h + 1 - m(0.5).max(2 * spacing);
                     let surface = |kind| Span { from: top, to: h + 1, kind, extinction: None };
                     match spot {
@@ -485,6 +485,7 @@ pub fn layers(towns: Rc<Towns>, land: Rc<Land>, me: usize, ground: Rc<Plan<i64>>
                     }
                 }),
             },
+            about: Some(About { of: ground.clone(), below: m(0.5), above: 2 }),
         }
     };
     let built = Population {
@@ -503,6 +504,7 @@ pub fn layers(towns: Rc<Towns>, land: Rc<Land>, me: usize, ground: Rc<Plan<i64>>
         },
         make: Box::new(move |_, cell| towns.near(cell.centre[2]).map(town)),
         far: None,
+        on: None,
     };
     vec![Layer::Field(surface), Layer::Population(built)]
 }

@@ -21,7 +21,7 @@ use worldgen::column::Column;
 use worldgen::generator::{Field, Layer, Op};
 use worldgen::kinds;
 use worldgen::noise::{Fbm, Fx, ValueNoise, fx, smoothstep, stream};
-use worldgen::plan::Plan;
+use worldgen::plan::Sloped;
 use worldgen::units::{Units, m};
 
 use crate::fields;
@@ -200,7 +200,8 @@ impl Ranges {
  * scree under them; painted over whatever the domains under it drew, down
  * the faces they show.
  */
-pub fn layers(ranges: Rc<Ranges>, ground: Rc<Plan<i64>>) -> Vec<Layer> {
+pub fn layers(ranges: Rc<Ranges>, ground: Rc<Sloped>) -> Vec<Layer> {
+    let bounds = ground.clone();
     let sea = sea(ground.clone());
     let surface = Field::columns("mountains", 0.8, Op::Paint, move |x, z, spacing| {
         let h = ground.at(x, z);
@@ -249,7 +250,9 @@ pub fn layers(ranges: Rc<Ranges>, ground: Rc<Plan<i64>>) -> Vec<Layer> {
         };
         let under = if kind == K::alpine { K::scree } else { K::rock };
         Column::new(h, spacing).surface(kind, m(1.0)).fill_below_exactly(under, bottom).spans()
-    });
+    })
+    // Down past its neighbours a metre off.
+    .about(bounds.clone(), m(1.5) + bounds.slope() * m(1.0), 1);
     vec![Layer::Field(surface), Layer::Field(sea)]
 }
 
@@ -259,7 +262,7 @@ pub fn dry(height: i64) -> Fx {
 }
 
 /** The sea: water up to its level on sand, and a beach of it a little over. */
-fn sea(ground: Rc<Plan<i64>>) -> Field {
+fn sea(ground: Rc<Sloped>) -> Field {
     Field::columns("sea", 0.85, Op::Paint, move |x, z, spacing| {
         let h = ground.at(x, z);
         if h > (SEA + Units::m(1.5)).0 {

@@ -16,7 +16,7 @@ use worldgen::grid::Box3;
 use worldgen::js::{self, round};
 use worldgen::kinds;
 use worldgen::noise::{Fbm, Fx, Rng, ValueNoise, fx, hash, hash64, smoothstep, stream, unit};
-use worldgen::plan::Plan;
+use worldgen::plan::{Plan, Sloped};
 use worldgen::points::{Blur, MARKS, Points, Weights};
 use worldgen::units::{UNIT_SIZE, Units, m};
 
@@ -137,6 +137,12 @@ struct Column {
 /** Plan scales (see "Bands" in docs/generators.md): the path's bends, the ground's bumps, a column. */
 pub const PATH_SCALE: i64 = 256;
 pub const GROUND_SCALE: i64 = 8;
+/**
+ * The most the forest's ground rises or falls from a column to the next,
+ * in units (Sloped): its hills and the path's dip are gentle; the
+ * learned town's terraces ease into them.
+ */
+pub const SLOPE: i64 = 2;
 const COLUMN_SCALE: i64 = 1;
 
 /** The valley's relief: hills kilometres wide, and a winding path along z that the ground dips along. */
@@ -181,7 +187,7 @@ impl Relief {
  * fraction), which thins whatever it grows.
  */
 pub struct Ground {
-    pub ground: Rc<Plan<i64>>,
+    pub ground: Rc<Sloped>,
     pub path: Rc<Path>,
     pub share: Rc<dyn Fn(i64, i64) -> Fx>,
 }
@@ -195,7 +201,8 @@ impl Ground {
         };
         let ground = {
             let path = path.clone();
-            Rc::new(Plan::new("ground", GROUND_SCALE, move |x, z| relief.ground(x, z, path.across(x, z)).round_units().0))
+            let plan = Plan::new("ground", GROUND_SCALE, move |x, z| relief.ground(x, z, path.across(x, z)).round_units().0);
+            Rc::new(Sloped::new(Rc::new(plan), SLOPE))
         };
         Ground { ground, path, share: Rc::new(|_, _| Fx::ONE) }
     }
@@ -355,6 +362,7 @@ pub fn layers(seed: u64, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
             column_of(&noise, &path, x, z, h(x, z), [h(x - 1, z), h(x + 1, z), h(x, z - 1), h(x, z + 1)])
         })
     };
+    let on = ground.ground.clone();
     let f = Rc::new(Forest { seed, spawn, ground, columns });
 
     // The ground: along each column, soil or stone under a layer of its surface.
@@ -370,6 +378,7 @@ pub fn layers(seed: u64, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
             let bottom = around.into_iter().fold(h - vox(1.5) as i64, i64::min) - 2 * spacing;
             column::Column::new(h, spacing).surface(surface, vox(1.0) as i64).fill_below_exactly(below, bottom)
         })
+        .about(on.clone(), vox(1.5) as i64, 1)
     };
 
     // Trees, at the trees' points (worldgen's Points), of their marks' species: leaves 2 m wide, each holding one
@@ -485,14 +494,19 @@ pub fn layers(seed: u64, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
                 Some([x as f64, ground.ground(x, z) as f64, z as f64])
             })
             .make(move |[x, y, z], cell| Some(make_tree(SPECIES[cell.mark], x, y, z, &mut cell.random("tree"), &|x, z| f.ground(x, z))))
-            .far(canopy)
+            .on(on.clone())
+            .far(canopy.about(on.clone(), 0, tree_top))
     };
 
     // Boulders and fallen logs.
     let rock_cell = vox(4.0) as i64;
     let on_ground = |name, reach| {
         let anchor = f.clone();
-        Population::new(name, 2.0, rock_cell).reach(reach).size(vox(2.0) as i64).anchor_along(1, move |line| Some(anchor.spot(line)))
+        Population::new(name, 2.0, rock_cell)
+            .reach(reach)
+            .size(vox(2.0) as i64)
+            .on(on.clone())
+            .anchor_along(1, move |line| Some(anchor.spot(line)))
     };
     let boulders = {
         let f = f.clone();
@@ -521,6 +535,7 @@ pub fn layers(seed: u64, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
     let plants = Population::new("plants", 3.0, PLANTS)
         .reach([0, vox(10.0) as i64, 0])
         .size(column_width)
+        .on(on.clone())
         .anchor_along(1, move |line| {
             let [cx, cz] = line.centre;
             Some([cx as f64, anchor.ground(cx, cz) as f64 + 0.5, cz as f64])

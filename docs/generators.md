@@ -69,6 +69,21 @@ A world is **layers** of two kinds, drawn in `order`:
   Or a population makes a thing at each point of `Points`
   (`anchor_points`; see "Points").
 
+A layer may say **where it is**, about a plan of heights
+such as a world's ground (`plan::Sloped`):
+a field's spans along y lie from `below` under to `above` over it
+at their column (`Field::about`),
+a population's things stand on it (`Population::on`).
+Each is a rule (below), checked wherever it draws;
+so the framework asks it to draw only where it may be:
+a field line by line in blocks (`LINES`), a population box by box,
+from the plan's range over their columns (`Sloped::range`),
+which its slope bounds.
+So a host may ask for any box, in any order,
+and a field about the ground costs little in the air above it
+or the rock below it.
+A layer that says nothing is drawn everywhere.
+
 A thing is a **node**: its **shapes**, and **children**,
 finer things it makes only for the area asked for (`Children::Reaching`).
 Shapes are analytic: `ball`, `ellipsoid`, `tube` (along a curve, below),
@@ -315,6 +330,14 @@ Broken rules panic, naming the thing and pointing here:
   only points a query looks at are checked,
   so derive `wander` from the most a rule can stray.
 - **Kinds.** A world has at most 255 materials: ids are bytes.
+- **Slopes.** A `Sloped` plan's column differs from a neighbour's
+  by at most its `slope`, whenever one is read and the other is kept.
+- **About.** A field's span lies within `below` under and `above` over
+  what it is `about` at its column,
+  give or take two sites (a span is at least two sites tall)
+  and the slope times the spacing (a line stands for the columns around it).
+- **On.** A thing's anchor lies at most N (its cell) off
+  the plan its population stands `on`.
 
 Not checked, but caught by the tests:
 draw from position, seeds and named random sequences only
@@ -415,7 +438,14 @@ in shares of material types.
   hosts generate only within them, and cut whatever is outside;
 - the things of each population the survey found, of all heights,
   keep within its `reach`, which drawing checks only where it draws;
-  and where a thing's bounds leave the heights, nothing is drawn outside.
+  and where a thing's bounds leave the heights, nothing is drawn outside;
+- at levels 0, 2 and one past the last checked, in each region
+  cut into boxes 32 sites a side (`skips_hold`),
+  what is skipped where it says it may not be draws nothing there:
+  it is drawn all the same, to see (`checking_skipped`).
+  The rules above hold wherever something is drawn;
+  this finds what they can't see,
+  as a plan steeper between columns no layer reads together.
 
 A world's layout must not follow the grids it is generated on:
 a town placed once per region, kept inside it,
@@ -804,7 +834,9 @@ The moor (`worlds/src/moor.rs`) is the shortest whole world to start from.
 `Field::columns` and `Field::at`,
 `Population::new(…).reach(…).anchor(…)`, `.anchor_along(axis, …)` or `.anchor_points(…)`, `.make(…)`,
 `Node::group`, `Child::new`, and `Shape::ball` and the like,
-solid and filling unless told to `paint` or `carve`.
+solid and filling unless told to `paint` or `carve`;
+`.about(ground, below, above)` on a field, `.on(ground)` on a population,
+says where it is ("Model").
 A shape kept with a chance is made with the long form (`ball(…, fill, op)`,
 `Part::cells(…, fill, op)`):
 how many rays it stops is worked out from its fill when it is made,

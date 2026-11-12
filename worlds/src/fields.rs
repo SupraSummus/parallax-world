@@ -10,7 +10,7 @@ use worldgen::column::Column;
 use worldgen::generator::{Field, Layer, Node, Op, Population, Shape, stripe};
 use worldgen::kinds;
 use worldgen::noise::{Fbm, Fx, Rng, ValueNoise, fx, hash, hash64, smoothstep, stream};
-use worldgen::plan::{Land, Plan};
+use worldgen::plan::{Land, Plan, Sloped};
 use worldgen::units::{Units, m};
 
 use crate::forest::K as F;
@@ -96,10 +96,11 @@ impl Fields {
 }
 
 /** The fields' layers on `ground`, along `path`, where domain `me` of `land` owns the land. */
-pub fn layers(seed: u64, land: Rc<Land>, me: usize, ground: Rc<Plan<i64>>, path: Rc<Path>) -> Vec<Layer> {
+pub fn layers(seed: u64, land: Rc<Land>, me: usize, ground: Rc<Sloped>, path: Rc<Path>) -> Vec<Layer> {
     let f = Rc::new(Fields { seed, land, me, path, warp: ValueNoise::new(stream(seed, 42)) });
     let plots = {
         let (f, ground) = (f.clone(), ground.clone());
+        let on = ground.clone();
         Field::columns("fields", 0.6, Op::Paint, move |x, z, spacing| {
             let Some(crop) = f.crop(x, z) else { return Vec::new() };
             let dither = hash(stream(f.seed, 43), x, z, 0);
@@ -117,6 +118,7 @@ pub fn layers(seed: u64, land: Rc<Land>, me: usize, ground: Rc<Plan<i64>>, path:
             }
             .spans()
         })
+        .about(on, m(0.5), m(1.4))
     };
     // Haystacks on the stubble.
     let haystacks = {
@@ -124,6 +126,7 @@ pub fn layers(seed: u64, land: Rc<Land>, me: usize, ground: Rc<Plan<i64>>, path:
         Population::new("haystacks", 3.0, m(6.0))
             .reach(m(2.0))
             .size(m(4.0))
+            .on(ground.clone())
             .anchor_along(1, move |line| {
                 let [i, k] = line.across;
                 Some(line.pick(&mut Rng::new(hash64(seed, i, 0, k)), |x, z| ground.at(x, z)))

@@ -2,7 +2,7 @@
 //! shapes; the framework draws any box of it alone, at any level of
 //! detail. See docs/generators.md.
 
-use std::cell::OnceCell;
+use std::cell::{OnceCell, RefCell};
 use std::rc::Rc;
 use std::sync::OnceLock;
 
@@ -14,7 +14,7 @@ use crate::curve::Curve;
 use crate::grid::{ALPHA, Box3, VoxelGrid};
 use crate::js;
 use crate::noise::{Fixed, Fx, ONE, Rng, fixed, float, hash, hash_text, hash64};
-use crate::plan;
+use crate::plan::{self, Sloped};
 use crate::points::{Points, Spot};
 
 /** A material kind: its index in Generator::kinds. */
@@ -277,6 +277,38 @@ pub struct Field {
     pub order: f64,
     pub op: Op,
     pub values: FieldValues,
+    /** Spans along y only about a plan of heights; None: anywhere. */
+    pub about: Option<About>,
+}
+
+/**
+ * Where a field's spans along y are: from `below` under to `above` over
+ * `of` at their column, give or take what a line of sites stands for
+ * (`slack`). A rule, checked wherever it draws; so it is asked to draw
+ * only where that may be (Sloped::range).
+ */
+pub struct About {
+    pub of: Rc<Sloped>,
+    pub below: i64,
+    pub above: i64,
+}
+
+impl About {
+    /**
+     * How far past `below` and `above` a line's spans may reach, at sites
+     * `spacing` apart: spans are at least two sites tall (column.rs), and
+     * a line stands for the columns a spacing around it, which differ
+     * from it by up to the slope times that.
+     */
+    fn slack(&self, spacing: i64) -> i64 {
+        (2 + self.of.slope()) * spacing
+    }
+
+    /** Whether spans of lines in [min, max] (x, z, lattice units, inclusive) may meet heights [y0, y1], at sites `spacing` apart. */
+    fn may_meet(&self, min: [i64; 2], max: [i64; 2], [y0, y1]: [i64; 2], spacing: i64) -> bool {
+        let ((lo, hi), slack) = (self.of.range(min, max), self.slack(spacing));
+        y0 <= hi + self.above + slack && y1 >= lo - self.below - slack
+    }
 }
 
 /**
@@ -375,6 +407,12 @@ pub struct Population {
     pub anchor: Anchors,
     pub make: Box<Make>,
     pub far: Option<Field>,
+    /**
+     * Its things stand on a plan of heights: each anchored at most N over
+     * or under it (a rule, checked wherever one is made); so it is asked
+     * to draw only near it. None: anywhere.
+     */
+    pub on: Option<Rc<Sloped>>,
 }
 
 /** Where a population's things are, each owned by the cell it is in, if asked there. */
@@ -1089,6 +1127,16 @@ pub fn generate(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
         let end = if thing == 0 { at + 1 } else { (at..drawables.len()).find(|i| drawables[*i].thing != thing).unwrap_or(drawables.len()) };
         let group = &drawables[at..end];
         at = end;
+        if group[0].checked {
+            let mut drew = None;
+            for drawable in group {
+                draw(drawable, generator.seed, s, &clip, &mut |_, _, share, _, x, y, z| drew = drew.or((share > 0).then_some([x, y, z])));
+            }
+            if let Some(site) = drew {
+                broke(&group[0].key, site, s, &clip);
+            }
+            continue;
+        }
         let carves = group.iter().any(|d| matches!(&d.draw, Draw::Shapes(shapes, _) if shapes.iter().any(|s| s.op == Op::Carve)));
         let mut work = Work::default();
         if !carves {
@@ -1321,28 +1369,36 @@ struct Drawable<'a> {
     /** The thing it is part of, numbered from 1; 0 for fields. */
     thing: u32,
     draw: Draw<'a>,
+    /** Drawn only to see it draws nothing: its population said it stands elsewhere (`checking_skipped`). */
+    checked: bool,
 }
 
 /** What draws into `clip` (sites s apart), in drawing order: by layer, then key. */
 fn drawables_in<'a>(generator: &'a Generator, clip: &Box3, s: i64) -> Vec<Drawable<'a>> {
     // The lattice units the sites of `clip` cover, with what a shape may grow by at this level.
-    let units = Box3 { min: clip.min.map(|v| v * s), max: clip.max.map(|v| (v - 1) * s + 1) }.widen(s);
+    let sites = units_of(clip, s);
+    let units = sites.widen(s);
     let mut drawables = Vec::new();
     let mut things = 0;
     for layer in &generator.layers {
         let population = match layer {
             Layer::Field(field) => {
-                let layer = field.name;
-                drawables.push(Drawable { order: field.order, key: field.name.to_string(), layer, thing: 0, draw: Draw::Field(field) });
+                // Asked where it may draw line by line (draw_field).
+                let (order, key, layer) = (field.order, field.name.to_string(), field.name);
+                drawables.push(Drawable { order, key, layer, thing: 0, draw: Draw::Field(field), checked: false });
                 continue;
             }
             Layer::Population(p) => p,
         };
+        let checked = !stands_within(population, &sites);
+        if checked && !checking() {
+            continue;
+        }
         if s > population.size {
             if let Some(far) = &population.far {
                 let (order, layer) = (population.order, population.name);
                 let (key, draw) = (population.name.to_string(), Draw::Field(far));
-                drawables.push(Drawable { order, key, layer, thing: 0, draw });
+                drawables.push(Drawable { order, key, layer, thing: 0, draw, checked });
             }
             continue;
         }
@@ -1357,7 +1413,7 @@ fn drawables_in<'a>(generator: &'a Generator, clip: &Box3, s: i64) -> Vec<Drawab
             assert!(bounds.inside(&reach), "{}", past_reach(&key, &bounds, &reach, n, population.reach));
             things += 1;
             let (order, layer, seed) = (population.order, population.name, generator.seed);
-            let at = Visit { s, units: &units, order, layer, thing: things, seed };
+            let at = Visit { s, units: &units, order, layer, thing: things, seed, checked };
             visit(&node, key, bounds, &at, &mut drawables);
         });
         cost::add(population.name, work);
@@ -1393,11 +1449,12 @@ struct Visit<'u> {
     layer: &'static str,
     thing: u32,
     seed: u64,
+    checked: bool,
 }
 
 /** Adds a node's drawables and its children's, as far as they reach `at.units` and are drawn at its spacing. */
 fn visit(node: &Node, key: String, bounds: Box3, at: &Visit, drawables: &mut Vec<Drawable<'_>>) {
-    let Visit { s, units, order, layer, thing, seed } = *at;
+    let Visit { s, units, order, layer, thing, seed, checked } = *at;
     if !bounds.overlaps(units) {
         return;
     }
@@ -1406,13 +1463,13 @@ fn visit(node: &Node, key: String, bounds: Box3, at: &Visit, drawables: &mut Vec
         Some(Far { form: FarForm::Shapes(shapes), .. }) => Draw::Shapes(shapes.to_vec(), true),
         None => return near(node, key, bounds, at, drawables),
     };
-    drawables.push(Drawable { order, key, layer, thing, draw });
+    drawables.push(Drawable { order, key, layer, thing, draw, checked });
 }
 
 /** Adds a node's near form, whatever the spacing: its shapes, and its children's drawables (`visit`). */
 fn near(node: &Node, key: String, bounds: Box3, at: &Visit, drawables: &mut Vec<Drawable<'_>>) {
-    let Visit { s, units, order, layer, thing, .. } = *at;
-    drawables.push(Drawable { order, key: key.clone(), layer, thing, draw: Draw::Shapes(node.shapes.get().to_vec(), false) });
+    let Visit { s, units, order, layer, thing, checked, .. } = *at;
+    drawables.push(Drawable { order, key: key.clone(), layer, thing, draw: Draw::Shapes(node.shapes.get().to_vec(), false), checked });
     let reaching;
     let children: &[Child] = match &node.children {
         None => &[],
@@ -1440,7 +1497,7 @@ type Form = fn(&Node, String, Box3, &Visit, &mut Vec<Drawable>);
 fn alone(node: &Node, key: &str, layer: &'static str, bounds: Box3, f: i64, seed: u64, form: Form) -> Own {
     let units = bounds.widen(f);
     let mut drawables = Vec::new();
-    form(node, key.to_string(), bounds, &Visit { s: f, units: &units, order: 0.0, layer, thing: 1, seed }, &mut drawables);
+    form(node, key.to_string(), bounds, &Visit { s: f, units: &units, order: 0.0, layer, thing: 1, seed, checked: false }, &mut drawables);
     let fine = Box3 { min: bounds.min.map(|v| v.div_euclid(f) - 2), max: bounds.max.map(|v| -(-v).div_euclid(f) + 2) };
     let mut own = Own::new(&fine);
     let mut work = Work::default();
@@ -1928,6 +1985,56 @@ fn measure(node: &Node, key: &str, layer: &'static str, bounds: Box3, detail: Fi
     sites
 }
 
+thread_local! {
+    /** While `checking_skipped` runs: what drew where it said it may not. */
+    static CHECKING: RefCell<Option<Vec<String>>> = const { RefCell::new(None) };
+}
+
+/**
+ * Runs `f`, what it generates that says it may not draw in a box (a
+ * field's lines about their ground, a population standing elsewhere)
+ * drawn there all the same: returns where it drew.
+ */
+pub fn checking_skipped<R>(f: impl FnOnce() -> R) -> (R, Vec<String>) {
+    let outer = CHECKING.replace(Some(Vec::new()));
+    let value = f();
+    (value, CHECKING.replace(outer).unwrap_or_default())
+}
+
+/** Whether `checking_skipped` runs. */
+fn checking() -> bool {
+    CHECKING.with_borrow(Option::is_some)
+}
+
+/** Keeps, while checking, that what `key` names drew at `site`, sites `s` apart, in `clip`, which it said it may not. */
+fn broke(key: &str, site: [i64; 3], s: i64, clip: &Box3) {
+    let message =
+        format!("{key} draws at site {site:?}, sites {s} apart, in {:?} (lattice units), where it says it may not", units_of(clip, s));
+    CHECKING.with_borrow_mut(|broken| broken.as_mut().expect("checking").push(message));
+}
+
+/** The lattice units of the sites `s` apart of `clip`. */
+fn units_of(clip: &Box3, s: i64) -> Box3 {
+    Box3 { min: clip.min.map(|v| v * s), max: clip.max.map(|v| (v - 1) * s + 1) }
+}
+
+/**
+ * Whether a population's things may draw in `b` (lattice units): anywhere,
+ * unless they stand on a plan of heights (Population::on): each within N
+ * and its reach of its cell's centre, its anchor in the cell and at most
+ * N off the plan, so within 2N and its reach of where it stands.
+ */
+fn stands_within(population: &Population, b: &Box3) -> bool {
+    let Some(ground) = &population.on else { return true };
+    let (n, [rx, ry, rz]) = (population.cell, population.reach);
+    let (around, along) = (2 * n + rx.max(rz), 3 * n + ry);
+    let (lo, hi) = ground.range([b.min[0] - around, b.min[2] - around], [b.max[0] + around, b.max[2] + around]);
+    b.min[1] <= hi + along && b.max[1] > lo - along
+}
+
+/** Lines of a field's spans a side that are asked together whether they may draw (About): a box's own would reach from the ground into the air. */
+const LINES: i64 = 32;
+
 /** Draws a field into `clip`, a medium keeping a site with the chance a ray crossing it is stopped; returns the work. */
 fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> Work {
     let mut work = Work::default();
@@ -1973,30 +2080,67 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
             let (a, b) = (others[0], others[1]);
             let tie = Tie::new(s);
             let mut site = [0i64; 3];
-            for u in lo[a]..hi[a] {
-                for v in lo[b]..hi[b] {
-                    site[a] = u;
-                    site[b] = v;
-                    // A line along x or z reads plans at one z or x: dithered across it only.
-                    let mut moved = offset(site[0], site[2]);
-                    if axis != 1 {
-                        moved[axis / 2] = 0;
-                    }
-                    work.reads += 1;
-                    for span in plan::footprint(s, moved, || spans(u * s, v * s, s)) {
-                        // s is a power of two: shifting is dividing, rounded down.
-                        let first = (-((-span.from) >> s.trailing_zeros())).max(lo[axis]);
-                        let mut w = first + ((first + u + v) & 1);
-                        let share = share_of(span.extinction);
-                        while w * s <= span.to && w < hi[axis] {
-                            site[axis] = w;
-                            if tie.within(axis, site.map(|c| c * s), span.from, span.to, 1) {
-                                put(span.kind.into(), op, share, picked(site[0], site[1], site[2]), site[0], site[1], site[2]);
+            assert!(axis == 1 || field.about.is_none(), "field {}: spans along y only are about a plan of heights", field.name);
+            // Block by block of lines, those that may not meet the clip skipped; while checking, drawn to see they don't.
+            let mut drew = None;
+            let mut record = |_: Look, _: Op, share: u32, _: u32, x: i64, y: i64, z: i64| drew = drew.or((share > 0).then_some([x, y, z]));
+            for (bu, bv) in (lo[a]..hi[a]).step_by(LINES as usize).flat_map(|u| (lo[b]..hi[b]).step_by(LINES as usize).map(move |v| (u, v)))
+            {
+                let (to_u, to_v) = ((bu + LINES).min(hi[a]), (bv + LINES).min(hi[b]));
+                let skipped = field.about.as_ref().is_some_and(|about| {
+                    let along = [lo[axis] * s, (hi[axis] - 1) * s];
+                    !about.may_meet([bu * s, bv * s], [(to_u - 1) * s, (to_v - 1) * s], along, s)
+                });
+                if skipped && !checking() {
+                    continue;
+                }
+                let put: &mut Put = if skipped { &mut record } else { &mut *put };
+                for u in bu..to_u {
+                    for v in bv..to_v {
+                        site[a] = u;
+                        site[b] = v;
+                        // A line along x or z reads plans at one z or x: dithered across it only.
+                        let mut moved = offset(site[0], site[2]);
+                        if axis != 1 {
+                            moved[axis / 2] = 0;
+                        }
+                        work.reads += 1;
+                        let spans = plan::footprint(s, moved, || spans(u * s, v * s, s));
+                        if let Some(about) = &field.about {
+                            let (g, slack) = (about.of.at(u * s, v * s), about.slack(s));
+                            for span in spans.iter().filter(|span| span.from < span.to) {
+                                assert!(
+                                    span.from >= g - about.below - slack && span.to <= g + about.above + slack,
+                                    "field {}: span [{}, {}) at column ({}, {}) reaches past {} under and {} over its ground {g}, \
+                                 give or take {slack} at sites {s} apart (Field::about); see \"Rules\" in {DOCS}",
+                                    field.name,
+                                    span.from,
+                                    span.to,
+                                    u * s,
+                                    v * s,
+                                    about.below,
+                                    about.above
+                                );
                             }
-                            w += 2;
+                        }
+                        for span in spans {
+                            // s is a power of two: shifting is dividing, rounded down.
+                            let first = (-((-span.from) >> s.trailing_zeros())).max(lo[axis]);
+                            let mut w = first + ((first + u + v) & 1);
+                            let share = share_of(span.extinction);
+                            while w * s <= span.to && w < hi[axis] {
+                                site[axis] = w;
+                                if tie.within(axis, site.map(|c| c * s), span.from, span.to, 1) {
+                                    put(span.kind.into(), op, share, picked(site[0], site[1], site[2]), site[0], site[1], site[2]);
+                                }
+                                w += 2;
+                            }
                         }
                     }
                 }
+            }
+            if let Some(site) = drew {
+                broke(field.name, site, s, clip);
             }
         }
     }
@@ -2052,6 +2196,16 @@ fn each_thing(generator: &Generator, population: &Population, cells: [(i64, i64)
     let n = population.cell;
     let cell = |c: [i64; 3]| Cell::fcc(population, generator.seed, c);
     let mut make = |cell: &Cell, anchor: Point| {
+        if let Some(ground) = &population.on {
+            let [x, y, z] = anchor;
+            let g = ground.at(x.round() as i64, z.round() as i64);
+            assert!(
+                (y - g as f64).abs() <= n as f64,
+                "{} is anchored at {anchor:?}, {:.0} units off the ground it stands on (Population::on), more than its cell's width {n}; see \"Rules\" in {DOCS}",
+                cell.key(),
+                y - g as f64
+            );
+        }
         if let Some(node) = (population.make)(anchor, cell) {
             each(cell, anchor, node);
         }
@@ -2375,6 +2529,61 @@ mod tests {
         assert!(!holds(1, 3) && !holds(8, 0) && !holds(4, 4) && !holds(7, 2));
     }
 
+    /** A generator of `layers`, of one kind. */
+    fn layers(layers: Vec<Layer>) -> Generator {
+        Generator {
+            kinds: vec![KindDef { name: "stone", kind_type: 0, colors: &["#808080"], walk_through: false, glows: false, medium: false }],
+            seed: 1,
+            layers,
+        }
+    }
+
+    /** Ground `height(x)` high, said to rise at most `slope` a column: eight units of it about it. */
+    fn ground(height: fn(i64) -> i64, slope: i64) -> Generator {
+        let of = Rc::new(Sloped::new(Rc::new(plan::Plan::new("ground", 1, move |x, _| height(x))), slope));
+        let field = Field::columns("ground", 0.0, Op::Fill, move |x, _, _| vec![Span::solid(height(x) - 8, height(x) + 1, 0)]);
+        layers(vec![Layer::Field(field.about(of, 8, 1))])
+    }
+
+    #[test]
+    fn a_field_about_its_ground_is_drawn_only_where_its_lines_may_be() {
+        let flat = ground(|_| 0, 0);
+        let (across, above) = (Box3 { min: [0, -16, 0], max: [64, 16, 8] }, Box3 { min: [0, 16, 0], max: [64, 48, 8] });
+        let drawn = |b: &Box3| checking_skipped(|| generate(&flat, b, 0).pieces.alpha.iter().any(|&a| a > 0));
+        assert_eq!(drawn(&across), (true, Vec::new()));
+        assert_eq!(drawn(&above), (false, Vec::new()), "skipped above it, and nothing would be drawn there");
+    }
+
+    #[test]
+    #[should_panic(expected = "field ground: span [-8, 1) at column (0, 0) reaches past 2 under and 1 over its ground 0")]
+    fn refuses_a_field_reaching_past_what_it_says() {
+        let flat = Rc::new(Sloped::new(Rc::new(plan::Plan::new("flat", 1, |_, _| 0)), 0));
+        let field = Field::columns("ground", 0.0, Op::Fill, |_, _, _| vec![Span::solid(-8, 1, 0)]).about(flat, 2, 1);
+        generate(&layers(vec![Layer::Field(field)]), &Box3 { min: [0, -16, 0], max: [8, 16, 8] }, 0);
+    }
+
+    #[test]
+    fn checking_finds_what_a_broken_promise_skips() {
+        // A spike at x = 12 the slope's rule never sees (no neighbour of it is read): sampled every 8, it is skipped.
+        let spiked = ground(|x| if x == 12 { 200 } else { 0 }, 0);
+        let b = Box3 { min: [0, 45, 0], max: [32, 55, 4] };
+        assert!(generate(&spiked, &b, 2).pieces.alpha.iter().all(|&a| a == 0), "skipped");
+        let (_, broken) = checking_skipped(|| generate(&spiked, &b, 2));
+        assert!(broken.len() == 1 && broken[0].starts_with("ground draws at site [3, 49, 0]"), "{broken:?}");
+    }
+
+    #[test]
+    #[should_panic(expected = "rocks 0,0,0 is anchored at [0.0, 0.0, 0.0], 100 units off the ground it stands on (Population::on)")]
+    fn refuses_a_thing_anchored_off_the_ground_it_stands_on() {
+        // In its cell, but the ground is 100 units under it.
+        let low = Rc::new(Sloped::new(Rc::new(plan::Plan::new("low", 1, |_, _| -100)), 0));
+        let rocks = Population::new("rocks", 1.0, 16)
+            .on(low)
+            .anchor(|cell| (cell.centre == [0; 3]).then_some([0.0; 3]))
+            .make(|p, _| Some(Node::of(vec![ball(p, 2.0, 0, SOLID, Op::Fill)])));
+        generate(&layers(vec![Layer::Population(rocks)]), &Box3 { min: [-8, -100, -8], max: [8, 8, 8] }, 0);
+    }
+
     #[test]
     fn faces_on_a_plane_of_sites_stay_where_level_0_has_them() {
         // Ground up to y = 0 and boxes from y = 0 up, on a plane of sites at every level, each drawn alone.
@@ -2383,6 +2592,7 @@ mod tests {
             order: 0.0,
             op: Op::Fill,
             values: FieldValues::Spans { axis: 1, spans: Box::new(|_, _, _| vec![Span { from: -4096, to: 0, kind: 0, extinction: None }]) },
+            about: None,
         });
         let n = 1 << 14;
         let block = |top: f64| {
@@ -2397,6 +2607,7 @@ mod tests {
                     Some(Node::of(vec![cuboid([-8192.0, 0.0, -8192.0], [8192.0, top, 8192.0], 0, SOLID, Op::Fill)]))
                 }),
                 far: None,
+                on: None,
             })
         };
         let kinds = vec![KindDef { name: "stone", kind_type: 1, colors: &["#808080"], walk_through: false, glows: false, medium: false }];
