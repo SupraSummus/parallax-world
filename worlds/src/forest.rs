@@ -287,9 +287,11 @@ impl Forest {
         if c.surface == K::stone || self.ground.path.by(x, z, Fx::m(2.8)) {
             return Fx::ZERO;
         }
-        // Keep the view from the spawn point clear of low branches.
+        // Keep the view from the spawn point clear of low branches: within 7 m of the 40 m ahead along +z, where the
+        // camera starts looking.
         let (dx, dz) = (x - self.spawn[0], z - self.spawn[2]);
-        if dx * dx + dz * dz < (vox(7.0) as i64).pow(2) {
+        let beyond = dz - dz.clamp(0, vox(40.0) as i64);
+        if dx * dx + beyond * beyond < (vox(7.0) as i64).pow(2) {
             return Fx::ZERO;
         }
         self.thinned(fx(0.15) + c.density * 3 / 4, x, z)

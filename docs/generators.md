@@ -297,7 +297,7 @@ read where asked, as a plan's columns are made:
 read dithered, a cell's count would hang on the layer asking.
 A root holds a Poisson number of each mark;
 a cell's points go to its children one by one,
-by the chances at their corners times their leaves still free;
+by the chances at their leaves' corners times their leaves still free;
 a leaf's points stand where their mark has a chance.
 So a cell's counts are its children's added, by construction,
 and a far form reading them shows the things that stand.
@@ -306,14 +306,12 @@ reading a block of cells at a time:
 the forest's canopy at levels 4 and 5
 is the trees standing in the cells a column meets,
 and the crowns reaching over it from those around.
-A cell costs the chances at its corners,
-sites of every level at least as fine,
-so roots should be no wider than the chances vary over:
-the forest's are 8 m wide
-(32 m wide, its trees in 32 m squares varied in number
-three times as much as chance has them).
-But a cell as wide as the roots costs a column a Poisson draw and a corner,
-and wider ones the corners of their roots, sites the level doesn't read:
+A cell costs the chances at its leaves' corners,
+sites of the levels at least as fine as the leaves,
+so leaves should be no wider than the chances vary over.
+A cell as wide as the roots (the forest's are 8 m wide)
+costs a column a Poisson draw and those corners,
+and wider ones their roots', sites the level doesn't read:
 from level 6 the forest's canopy is the trees expected,
 whose shadow there falls mostly on their own column.
 Weighing cells by their chances filtered to their size doesn't avoid it:
