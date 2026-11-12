@@ -98,7 +98,7 @@ a cell is baked once the world has every tile it reads (`chunk_reads`),
 and until then it asks for them, nearest first.
 Then come the other tiles within `GRID_REACH` of each level the chunks read,
 so that turning finds them made, and far ones are dropped;
-for the voxels engine, those within `voxels::REACH`, as far as its rays read.
+for the voxels engine, those within `voxels::READ`, as far as its rays read.
 A tile never changes once made,
 so no chunk or cell surface goes stale as tiles come.
 Tests' scenes of hand-made voxels are given a grid per level,

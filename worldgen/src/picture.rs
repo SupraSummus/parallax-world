@@ -457,7 +457,7 @@ fn normalize(v: [f64; 3]) -> [f64; 3] {
 }
 
 /** The site whose voxel holds p, in a level's units. */
-pub(crate) fn nearest_site(p: [f64; 3]) -> [i64; 3] {
+pub fn nearest_site(p: [f64; 3]) -> [i64; 3] {
     let mut r = p.map(|v| v.round());
     if (r[0] + r[1] + r[2]) as i64 & 1 != 0 {
         // Off by one in the coordinate rounded the furthest.

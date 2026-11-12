@@ -8,7 +8,7 @@
 //! Which tiles, and in what order, is up to the engine drawing them (Wants): every update hands over the tiles it misses for
 //! what is in view, most wanted first, replacing the previous list; then
 //! the rest within reach of the camera of each level it reads (GRID_REACH,
-//! or as far as the voxels engine's rays read, voxels::REACH), so that
+//! or as far as the voxels engine's rays read, voxels::READ), so that
 //! turning finds them made. Tiles far from the camera are dropped. A tile
 //! never changes, so a chunk baked once all the tiles it reads are in
 //! stays right whatever comes after (bake's Tiles). Given light (worldgen's Shared),
