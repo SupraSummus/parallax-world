@@ -130,15 +130,22 @@ impl Grid {
         }
     }
 
+    /** The brick holding site (x, y, z): where its sites start in `cells`, in bricks; −1 if it is empty or outside. */
+    #[inline]
+    pub fn brick(&self, x: i32, y: i32, z: i32) -> i32 {
+        let (x, y, z) = (x - self.min[0], y - self.min[1], z - self.min[2]);
+        if x < 0 || x >= self.n[0] || y < 0 || y >= self.n[1] || z < 0 || z >= self.n[2] {
+            return -1;
+        }
+        let bricks = [(self.n[0] + BRICK - 1) / BRICK, (self.n[1] + BRICK - 1) / BRICK];
+        self.bricks[(((z >> 3) * bricks[1] + (y >> 3)) * bricks[0] + (x >> 3)) as usize]
+    }
+
     /** Site (x, y, z)'s index in `cells`; None if its brick is empty or it is outside. */
     #[inline]
     fn index(&self, x: i32, y: i32, z: i32) -> Option<usize> {
+        let at = self.brick(x, y, z);
         let (x, y, z) = (x - self.min[0], y - self.min[1], z - self.min[2]);
-        if x < 0 || x >= self.n[0] || y < 0 || y >= self.n[1] || z < 0 || z >= self.n[2] {
-            return None;
-        }
-        let bricks = [(self.n[0] + BRICK - 1) / BRICK, (self.n[1] + BRICK - 1) / BRICK];
-        let at = self.bricks[(((z >> 3) * bricks[1] + (y >> 3)) * bricks[0] + (x >> 3)) as usize];
         (at >= 0).then(|| at as usize * BRICK_SITES + ((((z & 7) * BRICK + (y & 7)) * BRICK + (x & 7)) >> 1) as usize)
     }
 
