@@ -85,15 +85,15 @@ struct DrawArgs {
 // and its colour; 0, none.
 @group(0) @binding(2) var<storage, read> tiles: array<Cluster>;
 @group(0) @binding(3) var<storage, read> columns: array<vec2u>;
-// Culling: the frame's chunks' clusters, [first, first + count) each, and
-// a draw for each to draw.
+// Culling: the frame's chunks' clusters (candidate), and a draw for each
+// to draw.
 @group(0) @binding(4) var<storage, read_write> clusters: array<Cluster>;
-@group(0) @binding(5) var<storage, read> candidates: array<vec2u>;
+@group(0) @binding(5) var<storage, read> candidates: array<vec4u>;
 @group(0) @binding(6) var<storage, read_write> draws: array<DrawArgs>;
 @group(0) @binding(7) var<storage, read_write> drawn: atomic<u32>;
 @group(0) @binding(8) var farthest: texture_2d<f32>;
-// The see-through clusters: per chunk, finest level first and nearest first
-// in each, [first, first + count) and where their draws go.
+// The see-through clusters, as candidates: per chunk, finest level first and
+// nearest first in each, their draws in that order.
 @group(0) @binding(9) var<storage, read> veiled: array<vec4u>;
 @group(0) @binding(16) var<storage, read_write> veil_draws: array<DrawArgs>;
 // The pyramid: level 0 from the depth buffer, each next from the last.
@@ -545,48 +545,95 @@ fn draws_cluster(at: u32, cluster: Cluster, phase: u32) -> bool {
   return visible && cluster.visible == 0u;
 }
 
-// A workgroup per chunk in the frame, a thread per tile (or cluster of
-// whole splats). Chunks come near to far and their tiles nearest first
-// (see tiles and cluster in compositor.rs), and draws are listed about in
-// that order, so that nearer voxels are mostly drawn first and hide what
-// is behind them early.
-fn cull(chunk: u32, thread: u32, phase: u32) {
-  let range = candidates[chunk];
-  for (var k = thread; k < range.y; k += 64u) {
-    let cluster = clusters[range.x + k];
-    if draws_cluster(range.x + k, cluster, phase) {
-      var draw = DrawArgs(4u, 1u, 0u, range.x + k);
-      if globals.whole_splats != 0.0 {
-        draw = DrawArgs(4u, cluster.slot_count & 0xffu, (cluster.slot_count >> 8u) * 4u, cluster.first);
-      }
-      draws[atomicAdd(&drawn, 1u)] = draw;
+// The frame's `k`-th cluster, of a chunk of `chunks` after the first item,
+// which holds how many chunks and clusters there are: each chunk's
+// [first, first + count) of `clusters`, and how many of the frame's come
+// before (so, which chunk's: the last whose come no later); none past the
+// last.
+fn candidate(k: u32) -> i32 {
+  if k >= candidates[0].y {
+    return -1;
+  }
+  var lo = 1u;
+  var hi = candidates[0].x + 1u;
+  while hi - lo > 1u {
+    let mid = (lo + hi) / 2u;
+    if candidates[mid].z <= k {
+      lo = mid;
+    } else {
+      hi = mid;
     }
   }
+  return i32(candidates[lo].x + k - candidates[lo].z);
+}
+
+// The see-through ones, as `candidate`.
+fn veiled_candidate(k: u32) -> i32 {
+  if k >= veiled[0].y {
+    return -1;
+  }
+  var lo = 1u;
+  var hi = veiled[0].x + 1u;
+  while hi - lo > 1u {
+    let mid = (lo + hi) / 2u;
+    if veiled[mid].z <= k {
+      lo = mid;
+    } else {
+      hi = mid;
+    }
+  }
+  return i32(veiled[lo].x + k - veiled[lo].z);
+}
+
+// A thread per cluster (a tile, or whole splats) of the frame. Chunks come
+// near to far and their tiles nearest first (see tiles and cluster in
+// compositor.rs), and draws are listed about in that order, so that
+// nearer voxels are mostly drawn first and hide what is behind them early.
+fn cull(k: u32, phase: u32) {
+  let at = candidate(k);
+  if at < 0 {
+    return;
+  }
+  let cluster = clusters[at];
+  if draws_cluster(u32(at), cluster, phase) {
+    var draw = DrawArgs(4u, 1u, 0u, u32(at));
+    if globals.whole_splats != 0.0 {
+      draw = DrawArgs(4u, cluster.slot_count & 0xffu, (cluster.slot_count >> 8u) * 4u, cluster.first);
+    }
+    draws[atomicAdd(&drawn, 1u)] = draw;
+  }
+}
+
+// The thread's place among those of its dispatch (compositor.rs's groups).
+fn thread_of(id: vec3u, n: vec3u, thread: u32) -> u32 {
+  return (id.y * n.x + id.x) * 64u + thread;
 }
 
 @compute @workgroup_size(64)
 fn cull_drawn(@builtin(workgroup_id) id: vec3u, @builtin(num_workgroups) n: vec3u, @builtin(local_invocation_index) thread: u32) {
-  cull(id.y * n.x + id.x, thread, 0u);
+  cull(thread_of(id, n, thread), 0u);
 }
 
 @compute @workgroup_size(64)
 fn cull_rest(@builtin(workgroup_id) id: vec3u, @builtin(num_workgroups) n: vec3u, @builtin(local_invocation_index) thread: u32) {
-  cull(id.y * n.x + id.x, thread, 1u);
+  cull(thread_of(id, n, thread), 1u);
 }
 
 // A draw for each see-through cluster, in their order, of none of its
 // splats where it does not show: in front of what the first phase drew.
 @compute @workgroup_size(64)
 fn cull_see_through(@builtin(workgroup_id) id: vec3u, @builtin(num_workgroups) n: vec3u, @builtin(local_invocation_index) thread: u32) {
-  let range = veiled[id.y * n.x + id.x];
-  for (var k = thread; k < range.y; k += 64u) {
-    let cluster = clusters[range.x + k];
-    let b = screen_box(cluster);
-    let c = chunks[cluster.slot_count >> 8u];
-    let depth = depth_of(c.level, max(c.distance + cluster.near, 0.0));
-    let shows = shows(b) && !(culls && hidden(b, depth));
-    veil_draws[range.z + k] = DrawArgs(4u, select(0u, cluster.slot_count & 0xffu, shows), (cluster.slot_count >> 8u) * 4u, cluster.first);
+  let k = thread_of(id, n, thread);
+  let at = veiled_candidate(k);
+  if at < 0 {
+    return;
   }
+  let cluster = clusters[at];
+  let b = screen_box(cluster);
+  let c = chunks[cluster.slot_count >> 8u];
+  let depth = depth_of(c.level, max(c.distance + cluster.near, 0.0));
+  let shows = shows(b) && !(culls && hidden(b, depth));
+  veil_draws[k] = DrawArgs(4u, select(0u, cluster.slot_count & 0xffu, shows), (cluster.slot_count >> 8u) * 4u, cluster.first);
 }
 
 // A texel of level 0 is the farthest of 2 × 2 pixels, one of a level the

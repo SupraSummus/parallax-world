@@ -600,7 +600,7 @@ so the GPU still tests depth before the pixel marches
 (`early_depth_test`).
 Each frame it draws the tiles that showed in the last,
 reduces their depth to a pyramid of farthest depths,
-then tests every tile in view against it on the GPU,
+then tests every tile in view against it on the GPU, a thread each,
 draws those newly showing and keeps which show for the next frame
 (two-phase occlusion culling).
 Draws are listed per tile on the GPU, roughly near to far,

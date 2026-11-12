@@ -536,16 +536,18 @@ pub struct Compositor {
     splats: Arena,
     clusters: Arena,
     resident: HashMap<u32, Resident>,
-    /** The frame's chunks' clusters, [first, first + count) each. */
-    candidates: wgpu::Buffer,
-    chunks: u32,
     /**
-     * The frame's chunks' see-through clusters, [first, first + count) and
-     * where their draws go, each a draw in that order: finest level first,
-     * and within a level nearest first; how many chunks and draws.
+     * The frame's chunks' clusters, [first, first + count) each and how
+     * many of the frame's come before, after how many chunks and clusters
+     * (compositor.wgsl's `candidate`).
+     */
+    candidates: wgpu::Buffer,
+    /**
+     * The frame's chunks' see-through clusters, as `candidates`, each a draw
+     * in that order: finest level first, and within a level nearest first;
+     * and how many draws.
      */
     veiled: wgpu::Buffer,
-    veiled_chunks: u32,
     veil_draws: wgpu::Buffer,
     veils: u32,
     /** The clusters in view. */
@@ -581,9 +583,12 @@ fn storage(device: &wgpu::Device, label: &str, size: u64) -> wgpu::Buffer {
     buffer(device, label, size, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST)
 }
 
+/** Threads a workgroup that culls has, a cluster each (compositor.wgsl). */
+const CULL_THREADS: u32 = 64;
+
 /**
- * Workgroups for `n` chunks, a workgroup each: in as many rows as it takes
- * of at most as many as a dispatch may have along an axis.
+ * Workgroups for `n`: in as many rows as it takes of at most as many as a
+ * dispatch may have along an axis.
  */
 fn groups(n: u32) -> [u32; 2] {
     let most = wgpu::Limits::default().max_compute_workgroups_per_dimension;
@@ -829,10 +834,8 @@ impl Compositor {
             splats: Arena::new(device, "splats", size_of::<GpuSplat>() as u64, wgpu::BufferUsages::VERTEX, 1 << 20),
             clusters: Arena::new(device, "clusters", size_of::<GpuCluster>() as u64, wgpu::BufferUsages::STORAGE, 1 << 15),
             resident: HashMap::new(),
-            candidates: storage(device, "candidates", 1024 * 8),
-            chunks: 0,
+            candidates: storage(device, "candidates", 1024 * 16),
             veiled: storage(device, "see-through candidates", 1024 * 16),
-            veiled_chunks: 0,
             veil_draws: buffer(device, "see-through draws", 1 << 16, U::STORAGE | U::INDIRECT),
             veils: 0,
             in_view: 0,
@@ -916,7 +919,7 @@ impl Compositor {
         self.columns.room(device, encoder, chunks().map(|b| b.columns.len() as u32).sum());
         self.splats.room(device, encoder, chunks().map(|b| b.splats.len() as u32).sum());
         self.clusters.room(device, encoder, chunks().map(|b| b.clusters.len() as u32).sum());
-        let mut candidates: Vec<[u32; 2]> = Vec::new();
+        let mut candidates: Vec<[u32; 4]> = vec![[0; 4]];
         // Each with its level and how far its site is from the eye.
         let mut veiled: Vec<([u32; 4], (i32, f64))> = Vec::new();
         let mut full = false;
@@ -957,7 +960,8 @@ impl Compositor {
                 unused: [0; 2],
             };
             let Resident { clusters, see_through, .. } = resident;
-            candidates.push([clusters.start, see_through - clusters.start]);
+            let before = candidates.last().map_or(0, |c| c[1] + c[2]);
+            candidates.push([clusters.start, see_through - clusters.start, before, 0]);
             if *see_through < clusters.end {
                 veiled.push(([*see_through, clusters.end - see_through, 0, 0], (cell.level, p.from_eye)));
             }
@@ -966,27 +970,24 @@ impl Compositor {
         // cells nearer the eye: at a face between two, the nearer one's site is nearer.
         veiled.sort_by(|a, b| a.1.0.cmp(&b.1.0).then(a.1.1.total_cmp(&b.1.1)));
         let mut veils = 0;
-        let mut veiled: Vec<[u32; 4]> = veiled
+        let mut veiled: Vec<[u32; 4]> = [[0; 4]]
             .into_iter()
-            .map(|([first, count, ..], _)| {
+            .chain(veiled.into_iter().map(|([first, count, ..], _)| {
                 veils += count;
                 [first, count, veils - count, 0]
-            })
+            }))
             .collect();
         at_least(device, &mut self.table, self.slots as u64 * size_of::<GpuChunk>() as u64);
         if !table.is_empty() {
             queue.write_buffer(&self.table, 0, bytemuck::cast_slice(&table));
         }
-        (self.chunks, self.veiled_chunks, self.veils) = (candidates.len() as u32, veiled.len() as u32, veils);
         self.in_view = candidates.iter().map(|c| c[1]).sum();
-        // A workgroup each, and those of the last row past the end none.
-        let [across, rows] = groups(self.chunks);
-        candidates.resize((across * rows) as usize, [0; 2]);
-        let [across, rows] = groups(self.veiled_chunks);
-        veiled.resize((across * rows) as usize, [0; 4]);
-        at_least(device, &mut self.candidates, candidates.len().max(1) as u64 * 8);
+        self.veils = veils;
+        candidates[0] = [candidates.len() as u32 - 1, self.in_view, 0, 0];
+        veiled[0] = [veiled.len() as u32 - 1, veils, 0, 0];
+        at_least(device, &mut self.candidates, candidates.len() as u64 * 16);
         queue.write_buffer(&self.candidates, 0, bytemuck::cast_slice(&candidates));
-        at_least(device, &mut self.veiled, veiled.len().max(1) as u64 * 16);
+        at_least(device, &mut self.veiled, veiled.len() as u64 * 16);
         queue.write_buffer(&self.veiled, 0, bytemuck::cast_slice(&veiled));
         at_least(device, &mut self.veil_draws, veils.max(1) as u64 * 16);
         for draws in &mut self.draws {
@@ -1057,16 +1058,16 @@ impl Compositor {
                     pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
                 }
             }
-            if self.chunks > 0 {
+            if self.in_view > 0 {
                 pass.set_pipeline(if phase == 0 { &p.cull_drawn } else { &p.cull_rest });
                 pass.set_bind_group(0, &self.cull_groups[phase], &[]);
-                let [across, rows] = groups(self.chunks);
+                let [across, rows] = groups(self.in_view.div_ceil(CULL_THREADS));
                 pass.dispatch_workgroups(across, rows, 1);
             }
-            if phase == 1 && self.veiled_chunks > 0 {
+            if phase == 1 && self.veils > 0 {
                 pass.set_pipeline(&p.cull_see_through);
                 pass.set_bind_group(0, self.veil_group.as_ref(), &[]);
-                let [across, rows] = groups(self.veiled_chunks);
+                let [across, rows] = groups(self.veils.div_ceil(CULL_THREADS));
                 pass.dispatch_workgroups(across, rows, 1);
             }
         };
