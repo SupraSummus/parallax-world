@@ -19,7 +19,7 @@ use worldgen::generator::{ANY_SIZE, Child, Field, Fill, Kind, Layer, Node, Op, P
 use worldgen::js;
 use worldgen::kinds;
 use worldgen::noise::{Fx, Rng, ValueNoise, ease_towards, fx, hash64, stream};
-use worldgen::plan::{Claims, Land, Plan};
+use worldgen::plan::{Claims, Land, Plan, Sloped};
 use worldgen::units::{Units, m};
 
 use crate::forest::K as F;
@@ -530,13 +530,14 @@ impl Landmarks {
 }
 
 /** The landmarks' layers on `ground`, where domain `me` of `land` owns the land: their surface, ponds' water, the landmarks. */
-pub fn layers(landmarks: Rc<Landmarks>, land: Rc<Land>, me: usize, ground: Rc<Plan<i64>>) -> Vec<Layer> {
+pub fn layers(landmarks: Rc<Landmarks>, land: Rc<Land>, me: usize, ground: Rc<Sloped>) -> Vec<Layer> {
     let spots = {
         let landmarks = landmarks.clone();
         Rc::new(Plan::dithered("landmark spots", SPOT_SCALE, move |x, z| landmarks.spot(x, z)))
     };
     let surface = {
         let ground = ground.clone();
+        let on = ground.clone();
         Field::columns("landmarks' ground", 0.55, Op::Paint, move |x, z, spacing| {
             let spot = spots.at(x, z);
             if spot == Spot::Off || !land.owns(me, x, z) {
@@ -551,11 +552,13 @@ pub fn layers(landmarks: Rc<Landmarks>, land: Rc<Land>, me: usize, ground: Rc<Pl
             };
             Column::new(ground.at(x, z), spacing).surface(kind, m(0.5)).spans()
         })
+        .about(on, m(0.5), 1)
     };
     // Ponds' water up to its level, reeds round their edges while two sites are no taller than they:
     // thickened, they would stand over the water beside them.
     let water = {
         let (landmarks, ground) = (landmarks.clone(), ground.clone());
+        let on = ground.clone();
         Field::columns("ponds", 0.7, Op::Paint, move |x, z, spacing| {
             let Some(s) = landmarks.site(x, z) else { return Vec::new() };
             let Some(level) = s.water() else { return Vec::new() };
@@ -572,6 +575,8 @@ pub fn layers(landmarks: Rc<Landmarks>, land: Rc<Land>, me: usize, ground: Rc<Pl
             }
             column.spans()
         })
+        // A pond's water no deeper than its bowl; the reeds round it no taller.
+        .about(on, 0, POND_DEPTH.max(REED_HEIGHT))
     };
     let built = {
         let anchor = landmarks.clone();

@@ -28,7 +28,7 @@ use worldgen::frame::{Frame, Part, U, V, W, back};
 use worldgen::generator::{ANY_SIZE, Child, Children, Field, Generator, Layer, Node, Op, Population, Shapes, Span};
 use worldgen::grid::Box3;
 use worldgen::noise::{Fx, Rng, ease_towards, fx, hash64, stream};
-use worldgen::plan::{Bid, Claims, Land, Plan};
+use worldgen::plan::{Bid, Claims, Land, Plan, Sloped};
 use worldgen::units::{Units, m};
 use worldgen::world::{Find, World};
 
@@ -501,9 +501,10 @@ pub fn learned(seed: u64) -> World {
     };
     let ground = {
         let (settlements, path) = (settlements.clone(), path.clone());
-        Rc::new(Plan::new("ground", GROUND_SCALE, move |x, z| {
+        let plan = Plan::new("ground", GROUND_SCALE, move |x, z| {
             settlements.terraced(x, z, relief.ground(x, z, path.across(x, z))).round_units().0
-        }))
+        });
+        Rc::new(Sloped::new(Rc::new(plan), forest::SLOPE))
     };
     // What the grammar drew bids for each column, outright: the forest bids nothing.
     let bid = |wins: fn(Spot) -> bool| -> Bid {
@@ -533,9 +534,10 @@ pub fn learned(seed: u64) -> World {
 }
 
 /** The town's layers: its streets, paving and yards where it owns the land, and its settlements' houses. */
-fn town_layers(settlements: Rc<Settlements>, land: Rc<Land>, ground: Rc<Plan<i64>>) -> Vec<Layer> {
+fn town_layers(settlements: Rc<Settlements>, land: Rc<Land>, ground: Rc<Sloped>) -> Vec<Layer> {
     let surface = {
         let (settlements, ground) = (settlements.clone(), ground.clone());
+        let on = ground.clone();
         Field::columns("learned streets", 0.5, Op::Paint, move |x, z, spacing| {
             let spot = settlements.spot(x, z);
             if !spot.town() || !land.owns(TOWN, x, z) {
@@ -551,6 +553,7 @@ fn town_layers(settlements: Rc<Settlements>, land: Rc<Land>, ground: Rc<Plan<i64
             };
             vec![Span::solid(h + 1 - m(0.5).max(2 * spacing), h + 1, kind)]
         })
+        .about(on, m(0.5), 1)
     };
     let crop = grammar().crop as i64;
     let built = {

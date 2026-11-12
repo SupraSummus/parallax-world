@@ -24,7 +24,7 @@ use worldgen::frame::{Frame, Part, facing};
 use worldgen::generator::{Field, Kind, Layer, Node, Op, Population, Span};
 use worldgen::kinds;
 use worldgen::noise::{Fx, Rng, ValueNoise, fx, hash, hash64, smoothstep, stream};
-use worldgen::plan::{Land, Plan};
+use worldgen::plan::{Land, Plan, Sloped};
 use worldgen::units::{Units, m};
 
 use crate::forest::K as F;
@@ -515,7 +515,7 @@ impl Railway {
 }
 
 /** The railway's layers on `ground`, where domain `me` of `land` owns it: its tunnels' bores, its track, bridges and platforms, its stations. */
-pub fn layers(railway: Rc<Railway>, land: Rc<Land>, me: usize, ground: Rc<Plan<i64>>) -> Vec<Layer> {
+pub fn layers(railway: Rc<Railway>, land: Rc<Land>, me: usize, ground: Rc<Sloped>) -> Vec<Layer> {
     let bores = {
         let railway = railway.clone();
         Field::columns("railway's tunnels", 0.9, Op::Carve, move |x, z, _| {
