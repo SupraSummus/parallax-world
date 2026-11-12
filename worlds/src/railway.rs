@@ -242,7 +242,7 @@ struct At {
     /** The track's top, in units: the formation's under the ballast. */
     top: i64,
     structure: Structure,
-    /** How far along the line it is from where the ground carries the track: zero there, none in a tunnel or further along a bridge than SIDES. */
+    /** How far along the line it is from where the ground carries the track: zero there, none further along a bridge or a tunnel than SIDES. */
     beyond: Option<Fx>,
     /** Half the formation's width there, wider at a station. */
     half: i64,
@@ -340,8 +340,8 @@ impl Line {
         });
         let beyond = match structure {
             Structure::Earth => Some(Fx::ZERO),
-            Structure::Bridge => self.to_earth(k, near.along),
-            Structure::Tunnel => None,
+            // Easing out past a bridge's ends and into a tunnel's hill: cut off at a portal, the ground stepped by metres.
+            Structure::Bridge | Structure::Tunnel => self.to_earth(k, near.along),
         };
         Some(At {
             distance: near.distance,
