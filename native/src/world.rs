@@ -56,6 +56,8 @@ pub struct Tile {
     pub grid: Arc<Grid>,
     pub index: LayerIndex,
     pub words: Vec<u32>,
+    /** voxels::meets. */
+    pub meets: Vec<u32>,
     /** If lit, voxels::lights. */
     pub lights: Option<Vec<u32>>,
 }
@@ -179,7 +181,7 @@ fn work(make: Make, seed: u64, heights: &Heights, queue: &(Mutex<Queue>, Condvar
                 let (_, light) =
                     light.get_or_insert_with(|| (lighting, Light::new(make(seed), shared.expect("light to light tiles with"))));
                 let lights = Some(voxels::lights(&tile.grid, level as u32, light));
-                Tile { grid: tile.grid.clone(), index: tile.index.clone(), words: tile.words.clone(), lights }
+                Tile { grid: tile.grid.clone(), index: tile.index.clone(), words: tile.words.clone(), meets: tile.meets.clone(), lights }
             }
             None => {
                 let grid = match &shared {
@@ -188,8 +190,8 @@ fn work(make: Make, seed: u64, heights: &Heights, queue: &(Mutex<Queue>, Condvar
                 }
                 .into_grid(true);
                 let index = LayerIndex::new(&grid);
-                let words = voxels::words(&grid);
-                Tile { grid: Arc::new(grid), index, words, lights: None }
+                let (words, meets) = (voxels::words(&grid), voxels::meets(&grid));
+                Tile { grid: Arc::new(grid), index, words, meets, lights: None }
             }
         };
         if send.send((level, id, lighting, Arc::new(tile))).is_err() {
@@ -271,8 +273,9 @@ impl World {
         }
         for (level, tiles) in self.tiles.iter_mut().enumerate() {
             for tile in tiles.values_mut().filter(|t| t.lights.is_some()) {
-                let Tile { grid, index, words, .. } = &**tile;
-                *tile = Arc::new(Tile { grid: grid.clone(), index: index.clone(), words: words.clone(), lights: None });
+                let Tile { grid, index, words, meets, .. } = &**tile;
+                *tile =
+                    Arc::new(Tile { grid: grid.clone(), index: index.clone(), words: words.clone(), meets: meets.clone(), lights: None });
             }
             self.levels[level] = Arc::new(Level::new(tiles.clone()));
         }
