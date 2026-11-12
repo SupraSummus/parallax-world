@@ -1666,35 +1666,31 @@ impl Shadows {
      * in a cell `size` wide (of `Points`, cornered at multiples of it): its
      * mean area (lattice units²) over the column of sites `size` apart at
      * (0, 0), by the cell's offset from it in cells (zero along the axis).
-     * A column reaches half its width round its site, so a cell meets four,
-     * and a part of the shadow covers each column as often as the thing's
-     * place in the cell puts it there.
+     * A part of the shadow covers the column as much as rays along the axis
+     * through it pass through the column's voxels (`through_column`), on
+     * average over the thing's places in the cell.
      */
     pub fn spread(&self, size: i64) -> Vec<([i64; 3], f64)> {
         let (f, axis) = (self.f, self.axis);
         let (a, b) = ((axis + 1) % 3, (axis + 2) % 3);
-        // The cells a part p from the thing's foot (given as 2p) covers the column from, with how often: the overlap
-        // of the column with the part's places, the cell's corner plus [0, size).
-        let cells = |p2: i64| {
-            let (r2, size2) = (p2 + size, 2 * size);
-            let first = -(r2 + size2 - 1).div_euclid(size2);
-            (first..=first + 1).filter_map(move |o| {
-                let w = 1.0 - (o * size2 + r2).abs() as f64 / size2 as f64;
-                (w > 0.0).then_some((o, w))
-            })
-        };
         let mut areas = std::collections::BTreeMap::<[i64; 3], f64>::new();
         for (min, layers) in &self.things {
             // Half a column's area at the middle of each pair of neighbouring columns holding a site (`pairs`), its
-            // place in halves of the sites' spacing.
+            // place from the thing's foot in cells.
             let plane = Columns::union(layers.iter().map(|s| &s.across));
             pairs(plane.n, |p, q| {
                 if plane.holds(p) || plane.holds(q) {
-                    for (oa, wa) in cells((p[0] + q[0] + 2 * min[a]) * f) {
-                        for (ob, wb) in cells((p[1] + q[1] + 2 * min[b]) * f) {
-                            let mut offset = [0; 3];
-                            (offset[a], offset[b]) = (oa, ob);
-                            *areas.entry(offset).or_insert(0.0) += wa * wb * (f * f) as f64 / 2.0;
+                    let at = [0, 1].map(|k| ((p[k] + q[k] + 2 * min[[a, b][k]]) * f) as f64 / (2 * size) as f64);
+                    // The column's voxels reach a cell from its site, so the part meets them from three cells each way.
+                    let first = at.map(|v| (-v).floor() as i64 - 1);
+                    for oa in first[0]..first[0] + 3 {
+                        for ob in first[1]..first[1] + 3 {
+                            let share = through_column([at[0] + oa as f64, at[1] + ob as f64]);
+                            if share > 0.0 {
+                                let mut offset = [0; 3];
+                                (offset[a], offset[b]) = (oa, ob);
+                                *areas.entry(offset).or_insert(0.0) += share * (f * f) as f64 / 2.0;
+                            }
                         }
                     }
                 }
@@ -1703,6 +1699,58 @@ impl Shadows {
         let things = self.things.len() as f64;
         areas.into_iter().map(|(o, area)| (o, area / things)).collect()
     }
+}
+
+/**
+ * The mean share of their way that rays along an axis, through the unit
+ * square from `lo` (in sites' spacings from a column's site), run through
+ * the column's voxels. Seen along the axis, those are the square
+ * |u| + |v| ≤ 1 turned 45° (`pairs`), and a ray at (u, v) runs
+ * 1 − max(|u|, |v|) of its way through them: linear on each quarter of
+ * the square, towards one of its corners.
+ */
+fn through_column(lo: [f64; 2]) -> f64 {
+    let mut sum = 0.0;
+    for [x, y] in [[1.0, 0.0], [0.0, 1.0], [-1.0, 0.0], [0.0, -1.0]] {
+        // The quarter towards corner (x, y), where max(|u|, |v|) is (x, y)·(u, v); counter-clockwise.
+        let mut quarter = vec![[0.0, 0.0], [(x + y) / 2.0, (y - x) / 2.0], [x, y], [(x - y) / 2.0, (x + y) / 2.0]];
+        for k in 0..2 {
+            quarter = clip(&quarter, |p| lo[k] - p[k]);
+            quarter = clip(&quarter, |p| p[k] - lo[k] - 1.0);
+        }
+        let (area, moment) = moments(&quarter);
+        sum += area - (x * moment[0] + y * moment[1]);
+    }
+    sum
+}
+
+/** Convex polygon `poly` cut to where linear `outside` is at most 0. */
+fn clip(poly: &[[f64; 2]], outside: impl Fn([f64; 2]) -> f64) -> Vec<[f64; 2]> {
+    let mut out = Vec::new();
+    for (i, &p) in poly.iter().enumerate() {
+        let q = poly[(i + 1) % poly.len()];
+        let (dp, dq) = (outside(p), outside(q));
+        if dp <= 0.0 {
+            out.push(p);
+        }
+        if (dp <= 0.0) != (dq <= 0.0) {
+            let t = dp / (dp - dq);
+            out.push([p[0] + t * (q[0] - p[0]), p[1] + t * (q[1] - p[1])]);
+        }
+    }
+    out
+}
+
+/** A counter-clockwise polygon's area and the integral of (u, v) over it (the shoelace formula's). */
+fn moments(poly: &[[f64; 2]]) -> (f64, [f64; 2]) {
+    let (mut area, mut moment) = (0.0, [0.0; 2]);
+    for (i, &p) in poly.iter().enumerate() {
+        let q = poly[(i + 1) % poly.len()];
+        let cross = p[0] * q[1] - q[0] * p[1];
+        area += cross / 2.0;
+        moment = [0, 1].map(|k| moment[k] + (p[k] + q[k]) * cross / 6.0);
+    }
+    (area, moment)
 }
 
 /**
@@ -2291,6 +2339,48 @@ mod tests {
             sites.iter().map(|s| s.3 as f64 / SHARE as f64).sum()
         });
         assert!(kept.iter().all(|n| (26.0..38.0).contains(n)), "sparse clouds keep {kept:?} of their about 134 cells");
+    }
+
+    #[test]
+    fn a_things_shadow_falls_on_a_column_as_rays_along_the_axis_pass_through_its_voxels() {
+        // A thing of a few columns of sites 1 apart, seen along y, spread over columns 8 apart, against rays
+        // sampled through each part of its shadow (`pairs`), the thing anywhere in its cell: the share of each
+        // ray's steps whose nearest site is on column (0, 0).
+        let size = 8;
+        let mut across = Columns::new([3, 4]);
+        [[0, 0], [2, 1], [1, 3], [2, 3]].into_iter().for_each(|p| across.set(p));
+        let min = [3, 0, -5];
+        let slice = Slice { across: across.clone(), along: [[1, 4], [1, 3]].map(Columns::new), kinds: Vec::new() };
+        let spread = Shadows { f: 1, axis: 1, things: vec![(min, vec![slice])] }.spread(size);
+        // Across y, (z, x): Shadows takes the axes after it.
+        let mut parts = Vec::new();
+        pairs(across.n, |p, q| {
+            if across.holds(p) || across.holds(q) {
+                parts.push([p[1] + q[1] + 2 * min[0], p[0] + q[0] + 2 * min[2]].map(|v| v as f64 / 2.0));
+            }
+        });
+        let n = 64;
+        let samples = || (0..n).map(|i| (i as f64 + 0.37) / n as f64 * size as f64);
+        let through = |x: f64, z: f64| {
+            let on = samples().filter(|&y| {
+                let site = nearest_site([x, 2.0 * y, z].map(|v| (v * ONE as f64) as i64), size);
+                site[0] == 0 && site[2] == 0
+            });
+            on.count() as f64 / n as f64
+        };
+        let mut total = 0.0;
+        for [ox, oz] in (-3..3).flat_map(|ox| (-3..3).map(move |oz| [ox, oz])) {
+            let mut expected = 0.0;
+            for [x, z] in &parts {
+                for (tx, tz) in samples().flat_map(|tx| samples().map(move |tz| (tx, tz))) {
+                    expected += through(x + (ox * size) as f64 + tx, z + (oz * size) as f64 + tz) / 2.0 / (n * n) as f64;
+                }
+            }
+            let got = spread.iter().find(|(o, _)| *o == [ox, 0, oz]).map_or(0.0, |(_, area)| *area);
+            assert!((got - expected).abs() < 0.02, "cell {ox}, {oz}: {got:.3} of the shadow, rays say {expected:.3}");
+            total += got;
+        }
+        assert!((total - parts.len() as f64 / 2.0).abs() < 1e-9, "all of the shadow, {total}");
     }
 
     #[test]
