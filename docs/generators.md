@@ -78,7 +78,8 @@ Each is a rule (below), checked wherever it draws;
 so the framework asks it to draw only where it may be:
 a field line by line in blocks (`LINES`), a population box by box,
 from the plan's range over their columns (`Sloped::range`),
-which its slope bounds.
+which its slope bounds;
+a plan promising no slope (`Sloped::any`) leaves them drawn everywhere.
 So a host may ask for any box, in any order,
 and a field about the ground costs little in the air above it
 or the rock below it.

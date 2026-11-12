@@ -34,13 +34,6 @@ const MOOR: usize = 4;
 const RAILWAY: usize = 5;
 
 /**
- * The most the valley's ground rises or falls from a column to the next,
- * in units (Sloped): the mountains' faces, the railway's cuttings and the
- * terraces' edges are its steepest, a few units.
- */
-const SLOPE: i64 = 8;
-
-/**
  * The valley's lie of the land before landmarks shape it: the relief
  * and the ranges along the path, levelled under the towns. Functions of
  * position, read by its plans and by coarse plans that can't read the
@@ -93,11 +86,12 @@ pub fn valley(seed: u64) -> World {
     // shaped by landmarks and the moor.
     let ground = {
         let (path, landmarks, moorland, railway) = (path.clone(), landmarks.clone(), moorland.clone(), railway.clone());
+        // Promising no slope: cuttings, walls and levelled sites step by tens of units between columns.
         let plan = Plan::new("ground", GROUND_SCALE, move |x, z| {
             let ground = railway.shaped(x, z, terrain.ground_by(x, z, path.across(x, z)));
             landmarks.shaped(x, z, moorland.shaped(x, z, ground)).round_units().0
         });
-        Rc::new(Sloped::new(Rc::new(plan), SLOPE))
+        Rc::new(Sloped::any(Rc::new(plan)))
     };
     let slope = {
         let ground = ground.clone();

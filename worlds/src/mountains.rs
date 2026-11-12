@@ -252,7 +252,7 @@ pub fn layers(ranges: Rc<Ranges>, ground: Rc<Sloped>) -> Vec<Layer> {
         Column::new(h, spacing).surface(kind, m(1.0)).fill_below_exactly(under, bottom).spans()
     })
     // Down past its neighbours a metre off.
-    .about(bounds.clone(), m(1.5) + bounds.slope() * m(1.0), 1);
+    .about(bounds.clone(), m(1.5) + bounds.slope().unwrap_or(0) * m(1.0), 1);
     vec![Layer::Field(surface), Layer::Field(sea)]
 }
 

@@ -298,15 +298,15 @@ impl About {
      * How far past `below` and `above` a line's spans may reach, at sites
      * `spacing` apart: spans are at least two sites tall (column.rs), and
      * a line stands for the columns a spacing around it, which differ
-     * from it by up to the slope times that.
+     * from it by up to the slope times that; without one, any way.
      */
-    fn slack(&self, spacing: i64) -> i64 {
-        (2 + self.of.slope()) * spacing
+    fn slack(&self, spacing: i64) -> Option<i64> {
+        Some((2 + self.of.slope()?) * spacing)
     }
 
     /** Whether spans of lines in [min, max] (x, z, lattice units, inclusive) may meet heights [y0, y1], at sites `spacing` apart. */
     fn may_meet(&self, min: [i64; 2], max: [i64; 2], [y0, y1]: [i64; 2], spacing: i64) -> bool {
-        let ((lo, hi), slack) = (self.of.range(min, max), self.slack(spacing));
+        let (Some((lo, hi)), Some(slack)) = (self.of.range(min, max), self.slack(spacing)) else { return true };
         y0 <= hi + self.above + slack && y1 >= lo - self.below - slack
     }
 }
@@ -2028,7 +2028,7 @@ fn stands_within(population: &Population, b: &Box3) -> bool {
     let Some(ground) = &population.on else { return true };
     let (n, [rx, ry, rz]) = (population.cell, population.reach);
     let (around, along) = (2 * n + rx.max(rz), 3 * n + ry);
-    let (lo, hi) = ground.range([b.min[0] - around, b.min[2] - around], [b.max[0] + around, b.max[2] + around]);
+    let Some((lo, hi)) = ground.range([b.min[0] - around, b.min[2] - around], [b.max[0] + around, b.max[2] + around]) else { return true };
     b.min[1] <= hi + along && b.max[1] > lo - along
 }
 
@@ -2106,8 +2106,8 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
                         }
                         work.reads += 1;
                         let spans = plan::footprint(s, moved, || spans(u * s, v * s, s));
-                        if let Some(about) = &field.about {
-                            let (g, slack) = (about.of.at(u * s, v * s), about.slack(s));
+                        if let Some((about, slack)) = field.about.as_ref().and_then(|about| Some((about, about.slack(s)?))) {
+                            let g = about.of.at(u * s, v * s);
                             for span in spans.iter().filter(|span| span.from < span.to) {
                                 assert!(
                                     span.from >= g - about.below - slack && span.to <= g + about.above + slack,
