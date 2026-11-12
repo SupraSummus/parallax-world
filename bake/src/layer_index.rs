@@ -43,7 +43,7 @@ impl LayerIndex {
     /** The index of `grid` for the view's faces (lattices). */
     pub fn new(grid: &Grid) -> LayerIndex {
         // Bounds of v · p over the corners of the bricks with voxels, not of the grid's box:
-        // a tile's box spans all the world's heights, and tables over it grow with their square.
+        // the web's tiles span all the world's heights, and tables over a box grow with its square.
         let full: Vec<[i64; 3]> = bricks(grid).filter(|(_, sites)| sites.iter().any(|&s| s != 0)).map(|(p, _)| p).collect();
         let along = |v: [i32; 3]| {
             let corners = full.iter().flat_map(|p| (0..8).map(move |k| std::array::from_fn(|i| p[i] + (k >> i & 1) * (BRICK as i64 - 1))));

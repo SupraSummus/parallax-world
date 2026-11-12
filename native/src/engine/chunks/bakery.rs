@@ -14,16 +14,16 @@ use std::sync::{Arc, Condvar, Mutex};
 
 use bake::lod::CellChunk;
 use bake::slicing::{GRID_LEVELS, LAYER, half_layer, spacing};
-use bake::{Baker, Tiles};
+use bake::{Baker, TileId, Tiles};
 
 use super::compositor::{GpuCluster, GpuColumn, GpuSplat, cluster, tiles};
 
-/** A chunk to bake: a cell of a face, reading tiles [i0, i1] × [k0, k1] of its grid level. */
+/** A chunk to bake: a cell of a face, reading the tiles of its grid level from the first to the last, each way. */
 #[derive(Clone, Copy)]
 pub struct Request {
     pub face: usize,
     pub cell: CellChunk,
-    pub tiles: [i32; 4],
+    pub tiles: [TileId; 2],
     /** The size of the blocks its splats are clustered by (compositor::cluster). */
     pub block: f64,
     /** Whether its voxels are lit, by the baker's light (Baker's `light`), or shaded by the way their faces face. */

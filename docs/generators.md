@@ -870,7 +870,8 @@ Carves along a line want the same margin.
 - **Things on a surface.** Anchor them along the axis across it
   (`anchor_along(1, …)` with `Line::pick` for a ground under columns),
   or at points of the axes across it (`anchor_points`), not per cell:
-  a host's tiles span the world's heights,
+  a host's tiles span the world's heights (the web's)
+  or are cubes over one another (native's),
   and asked per cell, a population reads the ground in every cell over each column,
   most of them in the air or under it;
   under the valley's mountains that was most of a tile's time.
