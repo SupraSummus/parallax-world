@@ -10,7 +10,7 @@ use worldgen::column::Column;
 use worldgen::generator::{Field, Layer, Node, Op, Population, Shape, stripe};
 use worldgen::kinds;
 use worldgen::noise::{Fbm, Fx, Rng, ValueNoise, fx, hash, hash64, smoothstep, stream};
-use worldgen::plan::{Land, Plan};
+use worldgen::plan::{Land, Plan, Sloped};
 use worldgen::units::{Units, m};
 
 use crate::forest::K as F;
@@ -96,7 +96,8 @@ impl Fields {
 }
 
 /** The fields' layers on `ground`, along `path`, where domain `me` of `land` owns the land. */
-pub fn layers(seed: u64, land: Rc<Land>, me: usize, ground: Rc<Plan<i64>>, path: Rc<Path>) -> Vec<Layer> {
+pub fn layers(seed: u64, land: Rc<Land>, me: usize, ground: Rc<Sloped>, path: Rc<Path>) -> Vec<Layer> {
+    let bounds = ground.clone();
     let f = Rc::new(Fields { seed, land, me, path, warp: ValueNoise::new(stream(seed, 42)) });
     let plots = {
         let (f, ground) = (f.clone(), ground.clone());
@@ -124,6 +125,7 @@ pub fn layers(seed: u64, land: Rc<Land>, me: usize, ground: Rc<Plan<i64>>, path:
         Population::new("haystacks", 3.0, m(6.0))
             .reach(m(2.0))
             .size(m(4.0))
+            .on(bounds.clone())
             .anchor_along(1, move |line| {
                 let [i, k] = line.across;
                 Some(line.pick(&mut Rng::new(hash64(seed, i, 0, k)), |x, z| ground.at(x, z)))
@@ -137,5 +139,7 @@ pub fn layers(seed: u64, land: Rc<Land>, me: usize, ground: Rc<Plan<i64>>, path:
                 Some(Node::of(vec![Shape::ball([x, y + r * 0.5, z], r, F::hay)]))
             })
     };
+    // Half a metre of soil, and a hedge on it at most.
+    let plots = plots.within(move |b, spacing| bounds.about(b, spacing, 0, m(0.5), m(1.4)));
     vec![Layer::Field(plots), Layer::Population(haystacks)]
 }

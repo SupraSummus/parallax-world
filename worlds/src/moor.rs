@@ -16,10 +16,11 @@ use worldgen::World;
 use worldgen::column::Column;
 use worldgen::frame::{Frame, Part, facing, walls};
 use worldgen::generator::{ANY_SIZE, Child, Far, Field, Generator, Kind, Layer, Node, Op, Population, Shape, Span};
+use worldgen::grid::Box3;
 use worldgen::js;
 use worldgen::kinds;
 use worldgen::noise::{Fbm, Fx, Rng, ValueNoise, ease_towards, fx, hash64, smoothstep, stream};
-use worldgen::plan::{Claims, Land, Plan};
+use worldgen::plan::{Claims, Land, Plan, Sloped};
 use worldgen::units::{Units, m};
 
 use crate::forest::K as F;
@@ -55,6 +56,8 @@ const BOG: Units = Units::m(0.25);
 const STREAM_SCALE: i64 = m(32.0);
 const BANK_SCALE: i64 = m(1.0);
 const GROUND_SCALE: i64 = 8;
+/** The most the moor's ground rises or falls from a column to the next, in units (Sloped): rolling heath, levelled under huts. */
+const SLOPE: i64 = 2;
 /**
  * Steadings' rings stand at least APART, claimed (Claims) from spots one
  * in each square CLAIM wide on average; a steading reaches NEAR from its
@@ -327,6 +330,14 @@ impl Moorland {
         })
     }
 
+    /** The level water stands to wherever the ground is under it, if not in pools. */
+    fn level(&self) -> Option<Units> {
+        match &self.water {
+            Water::Level(level) => Some(*level),
+            Water::Pools(_) => None,
+        }
+    }
+
     /** The level water stands to in column (x, z), where it is under it. */
     fn water(&self, x: i64, z: i64) -> Option<Units> {
         match &self.water {
@@ -467,7 +478,7 @@ impl Uplands {
  * is under it.
  */
 pub struct Ground {
-    pub ground: Rc<Plan<i64>>,
+    pub ground: Rc<Sloped>,
     pub land: Option<(Rc<Land>, usize)>,
     pub path: Option<Rc<Path>>,
     pub bottom: Option<i64>,
@@ -513,7 +524,8 @@ pub fn moor(seed: u64) -> World {
     // The heath, levelled under each hut.
     let ground = {
         let moorland = moorland.clone();
-        Rc::new(Plan::new("ground", GROUND_SCALE, move |x, z| moorland.shaped(x, z, heath(x, z)).round_units().0))
+        let plan = Plan::new("ground", GROUND_SCALE, move |x, z| moorland.shaped(x, z, heath(x, z)).round_units().0);
+        Rc::new(Sloped::new(Rc::new(plan), SLOPE))
     };
     let spawn = {
         // Behind the first hut, or over the origin if there is none.
@@ -550,6 +562,13 @@ pub fn layers(moorland: Rc<Moorland>, ground: Ground) -> Vec<Layer> {
  * takes nothing's place.
  */
 fn mist(f: Rc<Moor>) -> Field {
+    let within = {
+        // Over the ground, up to its lid over the hollows around: the ground a ring and a step of the lid's samples away.
+        let ground = f.ground.ground.clone();
+        move |b: &Box3, spacing: i64| {
+            ground.about(b, spacing, 0, 0, i64::MAX / 4) && ground.about(b, spacing, MIST_RING + MIST_STEP, i64::MAX / 4, MIST_OVER.0)
+        }
+    };
     let lid = {
         let ground = f.ground.ground.clone();
         Plan::sampled("mist", MIST_STEP, MIST_STEP, move |x, z| {
@@ -571,10 +590,16 @@ fn mist(f: Rc<Moor>) -> Field {
         }
         vec![Span::medium(h + 1, depth, K::mist, MIST, spacing)]
     })
+    .within(within)
 }
 
 /** The heath: heather, grass or bog over peat, a gravel path to each ring; heather and grass standing on it as media. */
 fn heath(f: Rc<Moor>) -> Field {
+    let within = {
+        // Half a metre of its surface and of peat, or peat down to the bottom; heather on it.
+        let (ground, below) = (f.ground.ground.clone(), if f.ground.bottom.is_some() { i64::MAX } else { m(1.0) });
+        move |b: &Box3, spacing: i64| ground.about(b, spacing, 0, below, m(0.4))
+    };
     Field::columns("heath", 0.7, Op::Paint, move |x, z, spacing| {
         if !f.owns(x, z) || f.by_path(x, z, Fx::m(1.6)) {
             return Vec::new();
@@ -610,6 +635,7 @@ fn heath(f: Rc<Moor>) -> Field {
         }
         .spans()
     })
+    .within(within)
 }
 
 /** The bottom of the stream's bed under ground `h` high: a metre deep, at least two sites, as a line of sites along y has one every two. */
@@ -622,6 +648,10 @@ fn bed_bottom(h: i64, spacing: i64) -> i64 {
  * after, fills it from; on the faces they share, they keep the same sites.
  */
 fn stream_bed(f: Rc<Moor>) -> Field {
+    let within = {
+        let ground = f.ground.ground.clone();
+        move |b: &Box3, spacing: i64| ground.about(b, spacing, 0, m(1.0), 1)
+    };
     Field::columns("stream bed", 1.0, Op::Carve, move |x, z, spacing| {
         if f.moorland.streamside(x, z) != Streamside::Bed {
             return Vec::new();
@@ -629,6 +659,7 @@ fn stream_bed(f: Rc<Moor>) -> Field {
         let h = f.height(x, z);
         vec![Span::solid(bed_bottom(h, spacing), h + 1, 0)]
     })
+    .within(within)
 }
 
 /**
@@ -637,6 +668,16 @@ fn stream_bed(f: Rc<Moor>) -> Field {
  * two sites thick, its top site is water, not lost under it.
  */
 fn water(f: Rc<Moor>) -> Field {
+    let within = {
+        // In the stream's bed; in a pool, up to its level under the lowest of its rim, a pool's width from any column in it;
+        // or up to the moor's level.
+        let (ground, level) = (f.ground.ground.clone(), f.moorland.level());
+        move |b: &Box3, spacing: i64| {
+            ground.about(b, spacing, 0, m(1.0), i64::MAX / 4)
+                && (ground.about(b, spacing, 2 * POOL_RADIUS, i64::MAX / 4, 1)
+                    || level.is_some_and(|level| b.min[1] <= level.0 + 1 + 4 * spacing))
+        }
+    };
     Field::columns("water", 2.0, Op::Paint, move |x, z, spacing| {
         let h = f.height(x, z);
         if f.moorland.streamside(x, z) == Streamside::Bed {
@@ -647,6 +688,7 @@ fn water(f: Rc<Moor>) -> Field {
             _ => Vec::new(),
         }
     })
+    .within(within)
 }
 
 /** Boulders half sunk in the heath, granite or lichened, off the water and the paths; as many as the moor's share. */
@@ -654,6 +696,7 @@ fn boulders(f: Rc<Moor>) -> Population {
     let ground = f.clone();
     Population::new("moor boulders", 3.0, m(6.0))
         .reach(m(2.5))
+        .on(f.ground.ground.clone())
         .anchor_along(1, move |line| {
             let [i, k] = line.across;
             Some(line.pick(&mut Rng::new(hash64(ground.moorland.seed, i, 0, k)), |x, z| ground.height(x, z)))

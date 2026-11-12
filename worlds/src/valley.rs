@@ -12,7 +12,7 @@ use std::rc::Rc;
 
 use worldgen::generator::{Generator, KindDef};
 use worldgen::noise::{Fx, fx, stream};
-use worldgen::plan::{Bid, Land, Plan};
+use worldgen::plan::{Bid, Land, Plan, Sloped};
 use worldgen::units::{Units, m};
 use worldgen::world::{Find, World};
 
@@ -32,6 +32,13 @@ const FIELDS: usize = 2;
 const LANDMARKS: usize = 3;
 const MOOR: usize = 4;
 const RAILWAY: usize = 5;
+
+/**
+ * The most the valley's ground rises or falls from a column to the next,
+ * in units (Sloped): the mountains' faces, the railway's cuttings and the
+ * terraces' edges are its steepest, a few units.
+ */
+const SLOPE: i64 = 8;
 
 /**
  * The valley's lie of the land before landmarks shape it: the relief
@@ -86,10 +93,11 @@ pub fn valley(seed: u64) -> World {
     // shaped by landmarks and the moor.
     let ground = {
         let (path, landmarks, moorland, railway) = (path.clone(), landmarks.clone(), moorland.clone(), railway.clone());
-        Rc::new(Plan::new("ground", GROUND_SCALE, move |x, z| {
+        let plan = Plan::new("ground", GROUND_SCALE, move |x, z| {
             let ground = railway.shaped(x, z, terrain.ground_by(x, z, path.across(x, z)));
             landmarks.shaped(x, z, moorland.shaped(x, z, ground)).round_units().0
-        }))
+        });
+        Rc::new(Sloped::new(Rc::new(plan), SLOPE))
     };
     let slope = {
         let ground = ground.clone();

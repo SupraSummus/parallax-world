@@ -2,7 +2,8 @@
 //! in tests: a box generated in parts, alone and in any order, equals it
 //! generated whole; each level shows rays from where a camera could be
 //! what the level two finer shows; seen from above, what level 0 shows;
-//! nothing lies outside its heights, and things keep their reach. Rays
+//! nothing lies outside its heights, things keep their reach, and fields
+//! draw nowhere they say they may not (Field::within). Rays
 //! see each site by its alpha, through what is in front of it: its
 //! colour and its glow, which average, as a coarse site stands for finer
 //! ones; not its material, which doesn't.
@@ -14,7 +15,7 @@ use bake::FACE_KINDS;
 use bake::light::{linear_to_srgb, srgb_to_linear};
 
 use crate::World;
-use crate::generator::{Generator, Layer, generate, materials_of};
+use crate::generator::{Generator, Layer, checking_within, generate, materials_of};
 use crate::grid::{Box3, VoxelGrid, is_site};
 use crate::noise::Rng;
 use crate::picture::{Camera, FACES, Seen, Tiles, composite_in, composited, nearest_site};
@@ -622,6 +623,37 @@ pub fn heights_hold(world: &World, regions: &[Box3], levels: u32) -> Vec<String>
     broken
 }
 
+/** Sites a side of the boxes `fields_hold` asks fields about: small, so they are asked close to what they draw. */
+const ASKED: i64 = 32;
+
+/**
+ * Each field draws nothing in a box it says it may not draw in
+ * (Field::within): in each region, at the levels `whole_equals_parts`
+ * checks, cut into boxes ASKED sites a side, those it says so of are
+ * drawn all the same. Returns where they drew.
+ */
+pub fn fields_hold(world: &World, regions: &[Box3], levels: u32) -> Vec<String> {
+    let mut broken = Vec::new();
+    for level in [0, 2, levels + 1] {
+        for region in regions {
+            let b = box_at(region, level);
+            let starts = |a: usize| (b.min[a]..b.max[a]).step_by(ASKED as usize);
+            for z in starts(2) {
+                for y in starts(1) {
+                    for x in starts(0) {
+                        let part = Box3 { min: [x, y, z], max: [x + ASKED, y + ASKED, z + ASKED] }.intersect(&b);
+                        let (_, drew) = checking_within(|| generate(&world.generator, &part, level));
+                        broken.extend(drew.into_iter().map(|d| format!("level {level}: {d}")));
+                    }
+                }
+            }
+        }
+    }
+    broken.sort();
+    broken.dedup();
+    broken
+}
+
 /**
  * The things of each population of `world` that `survey` found, of all
  * heights: each keeps within its population's reach (which `generate`
@@ -773,7 +805,9 @@ pub fn check(name: &str, world: &World, levels: u32, from_above: u32, parts: boo
     let heights = start.elapsed().as_secs_f64() - rays;
     broken.extend(things_hold(world, &survey));
     let things = start.elapsed().as_secs_f64() - rays - heights;
-    println!("{report}{name}: margins {rays:.1} s, heights {heights:.1} s, things {things:.1} s");
+    broken.extend(fields_hold(world, &boxes, levels));
+    let fields = start.elapsed().as_secs_f64() - rays - heights - things;
+    println!("{report}{name}: margins {rays:.1} s, heights {heights:.1} s, things {things:.1} s, fields {fields:.1} s");
     let regions = regions
         .into_iter()
         .map(|(b, strata)| {

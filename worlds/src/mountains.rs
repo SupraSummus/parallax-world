@@ -19,9 +19,10 @@ use std::rc::Rc;
 
 use worldgen::column::Column;
 use worldgen::generator::{Field, Layer, Op};
+use worldgen::grid::Box3;
 use worldgen::kinds;
 use worldgen::noise::{Fbm, Fx, ValueNoise, fx, smoothstep, stream};
-use worldgen::plan::Plan;
+use worldgen::plan::Sloped;
 use worldgen::units::{Units, m};
 
 use crate::fields;
@@ -200,7 +201,8 @@ impl Ranges {
  * scree under them; painted over whatever the domains under it drew, down
  * the faces they show.
  */
-pub fn layers(ranges: Rc<Ranges>, ground: Rc<Plan<i64>>) -> Vec<Layer> {
+pub fn layers(ranges: Rc<Ranges>, ground: Rc<Sloped>) -> Vec<Layer> {
+    let bounds = ground.clone();
     let sea = sea(ground.clone());
     let surface = Field::columns("mountains", 0.8, Op::Paint, move |x, z, spacing| {
         let h = ground.at(x, z);
@@ -250,6 +252,8 @@ pub fn layers(ranges: Rc<Ranges>, ground: Rc<Plan<i64>>) -> Vec<Layer> {
         let under = if kind == K::alpine { K::scree } else { K::rock };
         Column::new(h, spacing).surface(kind, m(1.0)).fill_below_exactly(under, bottom).spans()
     });
+    // What covers the ground, down past its neighbours a metre off (the forest's terrain).
+    let surface = surface.within(move |b, spacing| bounds.about(b, spacing, m(1.0), m(1.5), 1));
     vec![Layer::Field(surface), Layer::Field(sea)]
 }
 
@@ -259,7 +263,12 @@ pub fn dry(height: i64) -> Fx {
 }
 
 /** The sea: water up to its level on sand, and a beach of it a little over. */
-fn sea(ground: Rc<Plan<i64>>) -> Field {
+fn sea(ground: Rc<Sloped>) -> Field {
+    // A metre of sand under the ground, the water up to its level: where the ground is at most a little over it.
+    let within = {
+        let ground = ground.clone();
+        move |b: &Box3, spacing| b.min[1] <= (SEA + Units::m(1.5)).0 + 1 + 4 * spacing && ground.about(b, spacing, 0, m(1.0), i64::MAX / 4)
+    };
     Field::columns("sea", 0.85, Op::Paint, move |x, z, spacing| {
         let h = ground.at(x, z);
         if h > (SEA + Units::m(1.5)).0 {
@@ -267,4 +276,5 @@ fn sea(ground: Rc<Plan<i64>>) -> Field {
         }
         Column::new(h, spacing).surface(L::sand, m(1.0)).water_to(T::water, SEA.0).spans()
     })
+    .within(within)
 }

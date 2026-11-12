@@ -18,7 +18,7 @@ use worldgen::generator::{
 use worldgen::grid::Box3;
 use worldgen::kinds;
 use worldgen::noise::{Fx, Rng, ease_towards, fx, hash64, stream};
-use worldgen::plan::{Claims, Land, Plan};
+use worldgen::plan::{Claims, Land, Plan, Sloped};
 use worldgen::units::{Units, m};
 
 use crate::forest::{self, K as F, Relief, Species, make_tree};
@@ -458,7 +458,8 @@ impl Towns {
 }
 
 /** The town's layers: its streets' surface, and the towns, both only where it owns the land (domain `me` of `land`). */
-pub fn layers(towns: Rc<Towns>, land: Rc<Land>, me: usize, ground: Rc<Plan<i64>>) -> Vec<Layer> {
+pub fn layers(towns: Rc<Towns>, land: Rc<Land>, me: usize, ground: Rc<Sloped>) -> Vec<Layer> {
+    let bounds = ground.clone();
     let surface = {
         let towns = towns.clone();
         Field {
@@ -485,6 +486,7 @@ pub fn layers(towns: Rc<Towns>, land: Rc<Land>, me: usize, ground: Rc<Plan<i64>>
                     }
                 }),
             },
+            within: None,
         }
     };
     let built = Population {
@@ -503,7 +505,10 @@ pub fn layers(towns: Rc<Towns>, land: Rc<Land>, me: usize, ground: Rc<Plan<i64>>
         },
         make: Box::new(move |_, cell| towns.near(cell.centre[2]).map(town)),
         far: None,
+        within: None,
     };
+    // Half a metre of paving, and kerbs on it.
+    let surface = surface.within(move |b, spacing| bounds.about(b, spacing, 0, m(0.5), 2));
     vec![Layer::Field(surface), Layer::Population(built)]
 }
 

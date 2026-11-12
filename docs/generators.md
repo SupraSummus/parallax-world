@@ -69,6 +69,20 @@ A world is **layers** of two kinds, drawn in `order`:
   Or a population makes a thing at each point of `Points`
   (`anchor_points`; see "Points").
 
+A layer may say **where it may draw** (`within`, the type `Within`):
+whether anything of it can be in a box, at sites a spacing apart.
+Where it says not, it is skipped:
+a field's values aren't asked there, line by line in blocks (`LINES`),
+nor a population's anchors and things in the box.
+So a host may ask for any box, of any shape, in any order,
+and a field over the ground costs nothing in the air above it
+or the rock below it.
+How a layer knows is its own business:
+a world's ground can promise how steep it is at most (`plan::Sloped`),
+and its fields say how far under and over it they reach
+(`Sloped::about`; `Population::on` for things standing on it).
+The contract checks every layer that says so draws nothing there.
+
 A thing is a **node**: its **shapes**, and **children**,
 finer things it makes only for the area asked for (`Children::Reaching`).
 Shapes are analytic: `ball`, `ellipsoid`, `tube` (along a curve, below),
@@ -412,7 +426,14 @@ in shares of material types.
   hosts generate only within them, and cut whatever is outside;
 - the things of each population the survey found, of all heights,
   keep within its `reach`, which drawing checks only where it draws;
-  and where a thing's bounds leave the heights, nothing is drawn outside.
+  and where a thing's bounds leave the heights, nothing is drawn outside;
+- at levels 0, 2 and one past the last checked, in each region
+  cut into boxes 32 sites a side (`fields_hold`),
+  every layer draws nothing where it says it may not (`within`):
+  there it is drawn all the same, to see.
+  A world checks its own promises so:
+  a ground steeper than its `Sloped` says shows as a field
+  drawing where it said it would not.
 
 A world's layout must not follow the grids it is generated on:
 a town placed once per region, kept inside it,
@@ -801,7 +822,9 @@ The moor (`worlds/src/moor.rs`) is the shortest whole world to start from.
 `Field::columns` and `Field::at`,
 `Population::new(…).reach(…).anchor(…)`, `.anchor_along(axis, …)` or `.anchor_points(…)`, `.make(…)`,
 `Node::group`, `Child::new`, and `Shape::ball` and the like,
-solid and filling unless told to `paint` or `carve`.
+solid and filling unless told to `paint` or `carve`;
+`.within(…)` on a field or population, or `.on(ground)`,
+says where it may draw ("Model").
 A shape kept with a chance is made with the long form (`ball(…, fill, op)`,
 `Part::cells(…, fill, op)`):
 how many rays it stops is worked out from its fill when it is made,

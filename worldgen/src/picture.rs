@@ -831,6 +831,7 @@ mod tests {
                 anchor: Anchors::Cells(Box::new(|cell| if cell.i == 0 && cell.j == 0 && cell.k == 0 { Some([0.0; 3]) } else { None })),
                 make: Box::new(|at, _| Some(Node::of(vec![ball(at, 40.0, 0, SOLID, Op::Fill)]))),
                 far: None,
+                within: None,
             })],
         }
     }

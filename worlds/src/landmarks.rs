@@ -19,7 +19,7 @@ use worldgen::generator::{ANY_SIZE, Child, Field, Fill, Kind, Layer, Node, Op, P
 use worldgen::js;
 use worldgen::kinds;
 use worldgen::noise::{Fx, Rng, ValueNoise, ease_towards, fx, hash64, stream};
-use worldgen::plan::{Claims, Land, Plan};
+use worldgen::plan::{Claims, Land, Plan, Sloped};
 use worldgen::units::{Units, m};
 
 use crate::forest::K as F;
@@ -530,7 +530,7 @@ impl Landmarks {
 }
 
 /** The landmarks' layers on `ground`, where domain `me` of `land` owns the land: their surface, ponds' water, the landmarks. */
-pub fn layers(landmarks: Rc<Landmarks>, land: Rc<Land>, me: usize, ground: Rc<Plan<i64>>) -> Vec<Layer> {
+pub fn layers(landmarks: Rc<Landmarks>, land: Rc<Land>, me: usize, ground: Rc<Sloped>) -> Vec<Layer> {
     let spots = {
         let landmarks = landmarks.clone();
         Rc::new(Plan::dithered("landmark spots", SPOT_SCALE, move |x, z| landmarks.spot(x, z)))
@@ -582,6 +582,12 @@ pub fn layers(landmarks: Rc<Landmarks>, land: Rc<Land>, me: usize, ground: Rc<Pl
             })
             .make(move |_, c| landmarks.site(c.centre[0], c.centre[2]).map(|s| (s.landmark.spec().build)(&s, &mut Rng::new(s.seed))))
     };
+    // Half a metre of their surface; a pond's water no deeper than its bowl, the reeds round it no taller.
+    let surface = surface.within({
+        let ground = ground.clone();
+        move |b, spacing| ground.about(b, spacing, 0, m(0.5), 1)
+    });
+    let water = water.within(move |b, spacing| ground.about(b, spacing, 0, 0, POND_DEPTH.max(REED_HEIGHT)));
     vec![Layer::Field(surface), Layer::Field(water), Layer::Population(built)]
 }
 

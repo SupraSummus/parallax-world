@@ -10,13 +10,16 @@ use crate::generator::{
     Shapes, Span, ball, bounds_of_shapes, capsule, cuboid, ellipsoid, gable, lathe, tube,
 };
 use crate::grid::Box3;
+use std::rc::Rc;
+
 use crate::noise::Rng;
+use crate::plan::Sloped;
 use crate::points::{Points, Spot};
 
 impl Field {
     /** A kind, with a medium's extinction if it is one, at each site: `at(x, y, z, spacing)`, lattice units. */
     pub fn at(name: &'static str, order: f64, op: Op, at: impl Fn(i64, i64, i64, i64) -> Option<(Kind, Option<f64>)> + 'static) -> Field {
-        Field { name, order, op, values: FieldValues::At(Box::new(at)) }
+        Field { name, order, op, values: FieldValues::At(Box::new(at)), within: None }
     }
 
     /** Spans along each line of sites parallel to `axis`: `spans(u, v, spacing)`, the line's other coordinates in axis order. */
@@ -27,12 +30,17 @@ impl Field {
         axis: usize,
         spans: impl Fn(i64, i64, i64) -> S + 'static,
     ) -> Field {
-        Field { name, order, op, values: FieldValues::Spans { axis, spans: Box::new(move |u, v, s| spans(u, v, s).into()) } }
+        Field { name, order, op, values: FieldValues::Spans { axis, spans: Box::new(move |u, v, s| spans(u, v, s).into()) }, within: None }
     }
 
     /** Spans along each column, up y: `spans(x, z, spacing)`, lattice units; a `Column` or the spans. */
     pub fn columns<S: Into<Vec<Span>>>(name: &'static str, order: f64, op: Op, spans: impl Fn(i64, i64, i64) -> S + 'static) -> Field {
         Field::spans(name, order, op, 1, spans)
+    }
+
+    /** Drawn only in the boxes `within(box, spacing)` says it may draw in (Within), lattice units. */
+    pub fn within(self, within: impl Fn(&Box3, i64) -> bool + 'static) -> Field {
+        Field { within: Some(Box::new(within)), ..self }
     }
 }
 
@@ -70,6 +78,7 @@ impl Population {
             anchor: Anchors::Cells(Box::new(|c| Some(c.centre.map(|v| v as f64)))),
             make: Box::new(|_, _| None),
             far: None,
+            within: None,
         }
     }
 
@@ -112,6 +121,23 @@ impl Population {
     }
 
     /** What it draws while its sites are further apart than its `size`: a medium as dense as its things. */
+    /**
+     * Its things standing on `ground`: each anchored on it, in the cell
+     * that owns it, and so within its cell's width (N) and N and its reach
+     * of where it stands; drawn only near the ground there (Within).
+     * Given its cell and reach first.
+     */
+    pub fn on(self, ground: Rc<Sloped>) -> Population {
+        let ([x, y, z], n) = (self.reach, self.cell);
+        let (around, along) = (2 * n + x.max(z), 2 * n + y);
+        self.within(move |b, spacing| ground.about(b, spacing, around, along, along))
+    }
+
+    /** Its things drawn only in the boxes `within(box, spacing)` says they may draw in (Within), lattice units. */
+    pub fn within(self, within: impl Fn(&Box3, i64) -> bool + 'static) -> Population {
+        Population { within: Some(Box::new(within)), ..self }
+    }
+
     pub fn far(self, far: Field) -> Population {
         Population { far: Some(far), ..self }
     }

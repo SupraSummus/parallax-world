@@ -2,7 +2,7 @@
 //! shapes; the framework draws any box of it alone, at any level of
 //! detail. See docs/generators.md.
 
-use std::cell::OnceCell;
+use std::cell::{OnceCell, RefCell};
 use std::rc::Rc;
 use std::sync::OnceLock;
 
@@ -216,6 +216,13 @@ type ChildrenReaching = dyn Fn(&Box3) -> Vec<Child>;
 type MakeShapes = dyn Fn(&mut Rng) -> Vec<Shape>;
 type FieldAt = dyn Fn(i64, i64, i64, i64) -> Option<(Kind, Option<f64>)>;
 type FieldSpans = dyn Fn(i64, i64, i64) -> Vec<Span>;
+/**
+ * Whether a layer may draw in a box (lattice units) at sites a spacing
+ * apart. Where it says not, it is skipped: neither its values nor its
+ * things are asked for. The contract checks it draws nothing there
+ * (`checking_within`).
+ */
+type Within = dyn Fn(&Box3, i64) -> bool;
 type CellAnchor = dyn Fn(&Cell) -> Option<Point>;
 type LineAnchor = dyn Fn(&Line) -> Option<Point>;
 type SpotAnchor = dyn Fn(&Spot) -> Option<Point>;
@@ -277,6 +284,8 @@ pub struct Field {
     pub order: f64,
     pub op: Op,
     pub values: FieldValues,
+    /** Where it may draw (Within); None: anywhere. */
+    pub within: Option<Box<Within>>,
 }
 
 /**
@@ -375,6 +384,8 @@ pub struct Population {
     pub anchor: Anchors,
     pub make: Box<Make>,
     pub far: Option<Field>,
+    /** Where its things may draw (Within), near or far; None: anywhere. */
+    pub within: Option<Box<Within>>,
 }
 
 /** Where a population's things are, each owned by the cell it is in, if asked there. */
@@ -1089,6 +1100,21 @@ pub fn generate(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
         let end = if thing == 0 { at + 1 } else { (at..drawables.len()).find(|i| drawables[*i].thing != thing).unwrap_or(drawables.len()) };
         let group = &drawables[at..end];
         at = end;
+        if group[0].checked {
+            // Its layer said it may not draw here: nothing may come of it.
+            let mut drew = None;
+            for drawable in group {
+                draw(drawable, generator.seed, s, &clip, &mut |_, _, share, _, x, y, z| {
+                    if share > 0 {
+                        drew.get_or_insert([x, y, z]);
+                    }
+                });
+            }
+            if let Some(site) = drew {
+                broke(&group[0].key, site, s, &clip);
+            }
+            continue;
+        }
         let carves = group.iter().any(|d| matches!(&d.draw, Draw::Shapes(shapes, _) if shapes.iter().any(|s| s.op == Op::Carve)));
         let mut work = Work::default();
         if !carves {
@@ -1321,28 +1347,39 @@ struct Drawable<'a> {
     /** The thing it is part of, numbered from 1; 0 for fields. */
     thing: u32,
     draw: Draw<'a>,
+    /** Drawn only to check: its layer said it may not draw here (`checking_within`). */
+    checked: bool,
 }
 
 /** What draws into `clip` (sites s apart), in drawing order: by layer, then key. */
 fn drawables_in<'a>(generator: &'a Generator, clip: &Box3, s: i64) -> Vec<Drawable<'a>> {
-    // The lattice units the sites of `clip` cover, with what a shape may grow by at this level.
-    let units = Box3 { min: clip.min.map(|v| v * s), max: clip.max.map(|v| (v - 1) * s + 1) }.widen(s);
+    // The lattice units the sites of `clip` cover, and with what a shape may grow by at this level.
+    let sites = units_of(clip, s);
+    let units = sites.widen(s);
+    // Whether a population that may draw `within` is drawn here: if so, whether only to check it draws nothing.
+    let checking = CHECKING.with_borrow(Option::is_some);
+    let asked = |within: &Option<Box<Within>>| match within {
+        Some(within) if !within(&sites, s) => checking.then_some(true),
+        _ => Some(false),
+    };
     let mut drawables = Vec::new();
     let mut things = 0;
     for layer in &generator.layers {
         let population = match layer {
             Layer::Field(field) => {
-                let layer = field.name;
-                drawables.push(Drawable { order: field.order, key: field.name.to_string(), layer, thing: 0, draw: Draw::Field(field) });
+                // Asked where it may draw line by line (draw_field).
+                let (order, key, layer) = (field.order, field.name.to_string(), field.name);
+                drawables.push(Drawable { order, key, layer, thing: 0, draw: Draw::Field(field), checked: false });
                 continue;
             }
             Layer::Population(p) => p,
         };
+        let Some(checked) = asked(&population.within) else { continue };
         if s > population.size {
             if let Some(far) = &population.far {
                 let (order, layer) = (population.order, population.name);
                 let (key, draw) = (population.name.to_string(), Draw::Field(far));
-                drawables.push(Drawable { order, key, layer, thing: 0, draw });
+                drawables.push(Drawable { order, key, layer, thing: 0, draw, checked });
             }
             continue;
         }
@@ -1357,7 +1394,7 @@ fn drawables_in<'a>(generator: &'a Generator, clip: &Box3, s: i64) -> Vec<Drawab
             assert!(bounds.inside(&reach), "{}", past_reach(&key, &bounds, &reach, n, population.reach));
             things += 1;
             let (order, layer, seed) = (population.order, population.name, generator.seed);
-            let at = Visit { s, units: &units, order, layer, thing: things, seed };
+            let at = Visit { s, units: &units, order, layer, thing: things, seed, checked };
             visit(&node, key, bounds, &at, &mut drawables);
         });
         cost::add(population.name, work);
@@ -1393,11 +1430,12 @@ struct Visit<'u> {
     layer: &'static str,
     thing: u32,
     seed: u64,
+    checked: bool,
 }
 
 /** Adds a node's drawables and its children's, as far as they reach `at.units` and are drawn at its spacing. */
 fn visit(node: &Node, key: String, bounds: Box3, at: &Visit, drawables: &mut Vec<Drawable<'_>>) {
-    let Visit { s, units, order, layer, thing, seed } = *at;
+    let Visit { s, units, order, layer, thing, seed, checked } = *at;
     if !bounds.overlaps(units) {
         return;
     }
@@ -1406,13 +1444,13 @@ fn visit(node: &Node, key: String, bounds: Box3, at: &Visit, drawables: &mut Vec
         Some(Far { form: FarForm::Shapes(shapes), .. }) => Draw::Shapes(shapes.to_vec(), true),
         None => return near(node, key, bounds, at, drawables),
     };
-    drawables.push(Drawable { order, key, layer, thing, draw });
+    drawables.push(Drawable { order, key, layer, thing, draw, checked });
 }
 
 /** Adds a node's near form, whatever the spacing: its shapes, and its children's drawables (`visit`). */
 fn near(node: &Node, key: String, bounds: Box3, at: &Visit, drawables: &mut Vec<Drawable<'_>>) {
-    let Visit { s, units, order, layer, thing, .. } = *at;
-    drawables.push(Drawable { order, key: key.clone(), layer, thing, draw: Draw::Shapes(node.shapes.get().to_vec(), false) });
+    let Visit { s, units, order, layer, thing, checked, .. } = *at;
+    drawables.push(Drawable { order, key: key.clone(), layer, thing, draw: Draw::Shapes(node.shapes.get().to_vec(), false), checked });
     let reaching;
     let children: &[Child] = match &node.children {
         None => &[],
@@ -1440,7 +1478,7 @@ type Form = fn(&Node, String, Box3, &Visit, &mut Vec<Drawable>);
 fn alone(node: &Node, key: &str, layer: &'static str, bounds: Box3, f: i64, seed: u64, form: Form) -> Own {
     let units = bounds.widen(f);
     let mut drawables = Vec::new();
-    form(node, key.to_string(), bounds, &Visit { s: f, units: &units, order: 0.0, layer, thing: 1, seed }, &mut drawables);
+    form(node, key.to_string(), bounds, &Visit { s: f, units: &units, order: 0.0, layer, thing: 1, seed, checked: false }, &mut drawables);
     let fine = Box3 { min: bounds.min.map(|v| v.div_euclid(f) - 2), max: bounds.max.map(|v| -(-v).div_euclid(f) + 2) };
     let mut own = Own::new(&fine);
     let mut work = Work::default();
@@ -1841,6 +1879,36 @@ fn measure(node: &Node, key: &str, layer: &'static str, bounds: Box3, detail: Fi
     sites
 }
 
+thread_local! {
+    /** While `checking_within` runs: where layers drew in boxes they said they may not. */
+    static CHECKING: RefCell<Option<Vec<String>>> = const { RefCell::new(None) };
+}
+
+/**
+ * Runs `f`, the layers it generates that say they may not draw in a box
+ * (Within) drawn there all the same: returns where they drew.
+ */
+pub fn checking_within<R>(f: impl FnOnce() -> R) -> (R, Vec<String>) {
+    let outer = CHECKING.replace(Some(Vec::new()));
+    let value = f();
+    (value, CHECKING.replace(outer).unwrap_or_default())
+}
+
+/** Keeps, while checking, that what `key` names drew at `site`, sites `s` apart, in `clip`, which it said it may not. */
+fn broke(key: &str, site: [i64; 3], s: i64, clip: &Box3) {
+    let units = units_of(clip, s);
+    let message = format!("{key} draws at site {site:?}, sites {s} apart, in {units:?} (lattice units), where it says it may not (Within)");
+    CHECKING.with_borrow_mut(|broken| broken.as_mut().expect("checking").push(message));
+}
+
+/** The lattice units of the sites `s` apart of `clip`. */
+fn units_of(clip: &Box3, s: i64) -> Box3 {
+    Box3 { min: clip.min.map(|v| v * s), max: clip.max.map(|v| (v - 1) * s + 1) }
+}
+
+/** Lines of a field's spans a side that it is asked about together (Within): a box's own lines would cut through the ground. */
+const LINES: i64 = 32;
+
 /** Draws a field into `clip`, a medium keeping a site with the chance a ray crossing it is stopped; returns the work. */
 fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> Work {
     let mut work = Work::default();
@@ -1864,8 +1932,22 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
         };
         [weyl(j, i, 0), weyl(i, j, 2)]
     };
+    // Where it says it may not draw (Within), skipped, or while checking drawn to see it does not.
+    let said_not = |b: &Box3| field.within.as_ref().is_some_and(|within| !within(&units_of(b, s), s));
+    let checking = CHECKING.with_borrow(Option::is_some);
+    let mut drew = None;
+    let mut record = |_: Look, _: Op, share: u32, _: u32, x: i64, y: i64, z: i64| {
+        if share > 0 {
+            drew.get_or_insert([x, y, z]);
+        }
+    };
     match &field.values {
         FieldValues::At(at) => {
+            let said_not = said_not(clip);
+            if said_not && !checking {
+                return work;
+            }
+            let put: &mut Put = if said_not { &mut record } else { &mut *put };
             for z in clip.min[2]..clip.max[2] {
                 for y in clip.min[1]..clip.max[1] {
                     let mut x = clip.min[0] + ((clip.min[0] + y + z) & 1);
@@ -1886,32 +1968,46 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
             let (a, b) = (others[0], others[1]);
             let tie = Tie::new(s);
             let mut site = [0i64; 3];
-            for u in lo[a]..hi[a] {
-                for v in lo[b]..hi[b] {
-                    site[a] = u;
-                    site[b] = v;
-                    // A line along x or z reads plans at one z or x: dithered across it only.
-                    let mut moved = offset(site[0], site[2]);
-                    if axis != 1 {
-                        moved[axis / 2] = 0;
-                    }
-                    work.reads += 1;
-                    for span in plan::footprint(s, moved, || spans(u * s, v * s, s)) {
-                        // s is a power of two: shifting is dividing, rounded down.
-                        let first = (-((-span.from) >> s.trailing_zeros())).max(lo[axis]);
-                        let mut w = first + ((first + u + v) & 1);
-                        let share = share_of(span.extinction);
-                        while w * s <= span.to && w < hi[axis] {
-                            site[axis] = w;
-                            if tie.within(axis, site.map(|c| c * s), span.from, span.to, 1) {
-                                put(span.kind.into(), op, share, picked(site[0], site[1], site[2]), site[0], site[1], site[2]);
+            // Block by block of lines: a box's own would reach from the ground into the air.
+            for (bu, bv) in (lo[a]..hi[a]).step_by(LINES as usize).flat_map(|u| (lo[b]..hi[b]).step_by(LINES as usize).map(move |v| (u, v)))
+            {
+                let mut block = *clip;
+                (block.min[a], block.max[a], block.min[b], block.max[b]) = (bu, (bu + LINES).min(hi[a]), bv, (bv + LINES).min(hi[b]));
+                let said_not = said_not(&block);
+                if said_not && !checking {
+                    continue;
+                }
+                let put: &mut Put = if said_not { &mut record } else { &mut *put };
+                for u in block.min[a]..block.max[a] {
+                    for v in block.min[b]..block.max[b] {
+                        site[a] = u;
+                        site[b] = v;
+                        // A line along x or z reads plans at one z or x: dithered across it only.
+                        let mut moved = offset(site[0], site[2]);
+                        if axis != 1 {
+                            moved[axis / 2] = 0;
+                        }
+                        work.reads += 1;
+                        for span in plan::footprint(s, moved, || spans(u * s, v * s, s)) {
+                            // s is a power of two: shifting is dividing, rounded down.
+                            let first = (-((-span.from) >> s.trailing_zeros())).max(lo[axis]);
+                            let mut w = first + ((first + u + v) & 1);
+                            let share = share_of(span.extinction);
+                            while w * s <= span.to && w < hi[axis] {
+                                site[axis] = w;
+                                if tie.within(axis, site.map(|c| c * s), span.from, span.to, 1) {
+                                    put(span.kind.into(), op, share, picked(site[0], site[1], site[2]), site[0], site[1], site[2]);
+                                }
+                                w += 2;
                             }
-                            w += 2;
                         }
                     }
                 }
             }
         }
+    }
+    if let Some(site) = drew {
+        broke(field.name, site, s, clip);
     }
     work
 }
@@ -2278,6 +2374,25 @@ mod tests {
     }
 
     #[test]
+    fn a_field_is_drawn_only_where_it_says_it_may_be_and_checked_elsewhere() {
+        // Ground under y = 0, saying it may be under y = 16: true, then under y = -16, false.
+        let ground = |top: i64| Generator {
+            kinds: vec![KindDef { name: "stone", kind_type: 0, colors: &["#808080"], walk_through: false, glows: false, medium: false }],
+            seed: 1,
+            layers: vec![Layer::Field(
+                Field::columns("ground", 0.0, Op::Fill, |_, _, _| vec![Span::solid(-64, 0, 0)]).within(move |b, _| b.min[1] < top),
+            )],
+        };
+        let (above, across) = (Box3 { min: [0, 8, 0], max: [8, 24, 8] }, Box3 { min: [0, -8, 0], max: [8, 8, 8] });
+        let drawn = |g: &Generator, b: &Box3| checking_within(|| generate(g, b, 0).pieces.alpha.iter().any(|&a| a > 0));
+        assert_eq!(drawn(&ground(16), &across), (true, Vec::new()));
+        assert_eq!(drawn(&ground(16), &above), (false, Vec::new()));
+        let (shown, broken) = drawn(&ground(-16), &across);
+        assert!(!shown, "skipped where it says it may not be");
+        assert!(broken.len() == 1 && broken[0].starts_with("ground draws at site"), "{broken:?}");
+    }
+
+    #[test]
     fn faces_on_a_plane_of_sites_stay_where_level_0_has_them() {
         // Ground up to y = 0 and boxes from y = 0 up, on a plane of sites at every level, each drawn alone.
         let ground = Layer::Field(Field {
@@ -2285,6 +2400,7 @@ mod tests {
             order: 0.0,
             op: Op::Fill,
             values: FieldValues::Spans { axis: 1, spans: Box::new(|_, _, _| vec![Span { from: -4096, to: 0, kind: 0, extinction: None }]) },
+            within: None,
         });
         let n = 1 << 14;
         let block = |top: f64| {
@@ -2299,6 +2415,7 @@ mod tests {
                     Some(Node::of(vec![cuboid([-8192.0, 0.0, -8192.0], [8192.0, top, 8192.0], 0, SOLID, Op::Fill)]))
                 }),
                 far: None,
+                within: None,
             })
         };
         let kinds = vec![KindDef { name: "stone", kind_type: 1, colors: &["#808080"], walk_through: false, glows: false, medium: false }];

@@ -5,6 +5,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
+use crate::grid::Box3;
 use crate::noise::{Fixed, Fx, Rng, hash64, smoothstep};
 
 const DOCS: &str = "docs/generators.md";
@@ -126,6 +127,80 @@ impl<T: Clone + Default> Plan<T> {
         MAKING.set(outer);
         self.slots.borrow_mut()[slot] = (x, z, value.clone());
         value
+    }
+}
+
+/**
+ * A plan of heights, as a world's ground, with a promise: no column's
+ * differs from a neighbour's along x or z by more than `slope` units.
+ * So its least and greatest over a rectangle of columns are near those
+ * of a grid of samples of it: within the slope times how far a column
+ * may be from a sample. What its layers say of where they may draw
+ * (Field::within) can rest on that; where the promise breaks, they draw
+ * where they said they would not, and the contract says so.
+ */
+pub struct Sloped {
+    pub plan: Rc<Plan<i64>>,
+    slope: i64,
+    /** The rectangles asked last and their ranges: a box's layers ask for the same few. */
+    last: RefCell<Vec<Ranged>>,
+}
+
+/** A rectangle of columns, min x, min z, max x, max z, and the range of a plan over it. */
+type Ranged = ([i64; 4], (i64, i64));
+
+/** Samples a range takes along each axis, but one: more, the closer it is, and the costlier. */
+const SAMPLES: i64 = 16;
+/** Rectangles a Sloped keeps the range of: as many as a box's layers ask about, give or take. */
+const KEPT: usize = 16;
+
+impl Sloped {
+    pub fn new(plan: Rc<Plan<i64>>, slope: i64) -> Sloped {
+        Sloped { plan, slope, last: RefCell::new(Vec::new()) }
+    }
+
+    /** The plan at column (x, z). */
+    pub fn at(&self, x: i64, z: i64) -> i64 {
+        self.plan.at(x, z)
+    }
+
+    /** The least and greatest it may be over columns `min` to `max` (x, z), inclusive. */
+    pub fn range(&self, min: [i64; 2], max: [i64; 2]) -> (i64, i64) {
+        let key = [min[0], min[1], max[0], max[1]];
+        if let Some((_, range)) = self.last.borrow().iter().find(|(k, _)| *k == key) {
+            return *range;
+        }
+        // Samples from min to max, at most `step` apart: a column is at most step / 2, rounded up, from one along each.
+        let step = [0, 1].map(|a| ((max[a] - min[a] + SAMPLES - 1) / SAMPLES).max(1));
+        let along = |a: usize| (0..).map(move |i| (min[a] + i * step[a]).min(max[a])).take_while(move |&v| v < max[a]).chain([max[a]]);
+        let (mut lo, mut hi) = (i64::MAX, i64::MIN);
+        for x in along(0) {
+            for z in along(1) {
+                let h = self.plan.at(x, z);
+                (lo, hi) = (lo.min(h), hi.max(h));
+            }
+        }
+        let far = self.slope * ((step[0] + 1) / 2 + (step[1] + 1) / 2);
+        let range = (lo - far, hi + far);
+        let mut last = self.last.borrow_mut();
+        if last.len() == KEPT {
+            last.remove(0);
+        }
+        last.push((key, range));
+        range
+    }
+
+    /**
+     * Whether box `b` (lattice units) may meet what stands about it: from
+     * `below` under its least over the box's columns and `around` more
+     * each way, to `above` over its greatest; each grown by four of
+     * `spacing`, as a column's spans are at least two sites tall and end
+     * at its sites.
+     */
+    pub fn about(&self, b: &Box3, spacing: i64, around: i64, below: i64, above: i64) -> bool {
+        let grow = around + spacing;
+        let (lo, hi) = self.range([b.min[0] - grow, b.min[2] - grow], [b.max[0] + grow, b.max[2] + grow]);
+        b.min[1] <= hi.saturating_add(above) + 4 * spacing && b.max[1] > lo.saturating_sub(below).saturating_sub(4 * spacing)
     }
 }
 
@@ -336,6 +411,20 @@ mod tests {
     use super::*;
     use crate::noise::{ONE, fx};
     use crate::units::Units;
+
+    #[test]
+    fn a_sloped_plan_is_within_its_range_wherever_asked() {
+        // Hills rising one unit a column at most: their range over rectangles holds every column in them, not far past.
+        let hills = |x: i64, z: i64| ((x as f64 / 9.0).sin() * 30.0 + (z as f64 / 13.0).cos() * 50.0).round() as i64;
+        let sloped = Sloped::new(Rc::new(Plan::new("hills", 1, hills)), 9);
+        for (min, max) in [([0, 0], [0, 0]), ([-40, 7], [87, 300]), ([5, -5], [6, 1000])] {
+            let (lo, hi) = sloped.range(min, max);
+            let columns = (min[0]..=max[0]).flat_map(|x| (min[1]..=max[1]).map(move |z| hills(x, z)));
+            let (least, most) = columns.fold((i64::MAX, i64::MIN), |(lo, hi), h| (lo.min(h), hi.max(h)));
+            assert!(lo <= least && most <= hi, "{min:?} to {max:?}: {least}..{most} in {lo}..{hi}");
+            assert!(least - lo <= 9 * 64 && hi - most <= 9 * 64, "{min:?} to {max:?}: {lo}..{hi} far past {least}..{most}");
+        }
+    }
 
     #[test]
     #[should_panic(expected = "plan coarse (scale 64) reads fine of the finer scale 1")]
