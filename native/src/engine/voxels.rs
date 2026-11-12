@@ -9,7 +9,9 @@
 //! The GPU holds, of each level, the bricks of a window of WINDOW³ bricks
 //! around the eye, moved brick by brick: a table of their slots in a pool,
 //! a torus (a brick's entry is at its coordinates modulo WINDOW), so that
-//! the window moves without moving the rest. Tiles never change once made,
+//! the window moves without moving the rest. Beside it, which cells of
+//! coarser FCC lattices no voxel meets (CELLS): rays go across those at
+//! once, as across a voxel. Tiles never change once made,
 //! so a brick is uploaded once as it comes into a window, with its tile or
 //! as the window moves, and its slot freed as it leaves. A brick of no tile
 //! yet (or none the pool had room for) is unknown, and rays take the next
@@ -42,9 +44,6 @@ const BRICK: i32 = 1 << BRICK_SHIFT;
 const BRICK_WORDS: usize = (BRICK * BRICK * BRICK / 4) as usize;
 /** Sites a brick holds: a word of light each, lit. */
 const BRICK_SITES: usize = (BRICK * BRICK * BRICK / 2) as usize;
-/** A block map's blocks, in bricks a side: rays skip blocks with no brick at once. */
-const BLOCK_SHIFT: u32 = 2;
-const BLOCK: i32 = 1 << BLOCK_SHIFT;
 /** Pixels each way per ray traced. */
 const FACTOR: u32 = 4;
 /** Bytes of bricks the pool holds at most. */
@@ -57,7 +56,30 @@ const POOL_BYTES: u64 = 256 << 20;
 pub const REACH: f64 = ((WINDOW / 2 - 1) * BRICK) as f64;
 
 const TABLE: usize = (WINDOW * WINDOW * WINDOW) as usize;
-const BLOCKS: usize = TABLE / (BLOCK * BLOCK * BLOCK) as usize;
+/**
+ * Cells of S·FCC, at SCALES sizes S = BRICK · 4^j: rhombic dodecahedra S
+ * times a voxel, about every other corner of blocks of 4^j bricks a side,
+ * those whose coordinates (in blocks) add up to an even number. A ray goes
+ * across one that no voxel meets from face to face at once, as it goes
+ * across a voxel. A window holds, per cell, how many of the bricks around
+ * it have voxels that meet it or are unknown, a torus as its table:
+ * CELLS of the finer scale, then the coarser's (voxels.wgsl's fine and coarse).
+ *
+ * A cell at the window's edge reaches past it, where the window holds no
+ * bricks, and its entry in the torus is also that of the cell a window
+ * away, whose bricks in the window only add to its count. So a cell
+ * counted hollow holds no voxel the window holds, as a ray stepping voxel
+ * by voxel would find: and the window holds all the rays read (REACH).
+ */
+const SCALES: usize = 2;
+const CELLS: usize = TABLE / 2;
+const COUNTS: usize = CELLS + (CELLS >> 6);
+/**
+ * The cells of a scale about the corners of a brick's block and of its
+ * neighbours, whose corner is e ∈ {−1, 0, 1}³ blocks from the block's: a
+ * bit each, (e.z + 1) · 9 + (e.y + 1) · 3 + e.x + 1. Its voxels meet no others.
+ */
+const AROUND: u32 = (1 << 27) - 1;
 /** A table's entries other than slots (voxels.wgsl's). */
 const EMPTY: i32 = -1;
 const UNKNOWN: i32 = -3;
@@ -73,6 +95,59 @@ fn reach(level: usize, far: f64) -> f64 {
 /** How many levels rays read to reach `far`: up to the first that does, or all. */
 fn levels(far: f64) -> usize {
     (0..GRID_LEVELS).find(|&l| reach(l, far) >= far).map_or(GRID_LEVELS, |l| l + 1)
+}
+
+/** The corner, in blocks of scale `j`, of the cell bit `e` of AROUND names around brick `b`. */
+fn around(b: [i32; 3], j: usize, e: u32) -> [i32; 3] {
+    let e = e as i32;
+    let q = b.map(|v| v >> (2 * j));
+    [q[0] + e % 3 - 1, q[1] + e / 3 % 3 - 1, q[2] + e / 9 - 1]
+}
+
+/** Where cell `k` of scale `j` (its coordinates adding up to an even number) is in a window's counts. */
+fn cell_entry(k: [i32; 3], j: usize) -> usize {
+    let across = WINDOW >> (2 * j);
+    let w = k.map(|v| v.rem_euclid(across));
+    j * CELLS + (((w[2] * across + w[1]) * across + w[0]) / 2) as usize
+}
+
+/**
+ * Per brick of `grid` with voxels, in its order in the grid's cells, the
+ * cells of each scale around it (AROUND's bits) that its voxels meet,
+ * SCALES words a brick. Voxel and cell are both rhombic dodecahedra, of
+ * 1 and of S, so they meet where the site is less than 1 + S from the
+ * cell's centre across each pair of faces.
+ */
+pub fn meets(grid: &bake::Grid) -> Vec<u32> {
+    let mut out = vec![0; grid.cells.len() / BRICK_SITES * SCALES];
+    let count = grid.n.map(|v| (v + BRICK - 1) / BRICK);
+    for (b, &first) in grid.bricks.iter().enumerate() {
+        if first < 0 {
+            continue;
+        }
+        let b = b as i32;
+        // The brick, in the level's bricks (whose sites start where the grid's bricks do, modulo BRICK).
+        let brick: [i32; 3] =
+            std::array::from_fn(|d| grid.min[d].div_euclid(BRICK) + [b % count[0], b / count[0] % count[1], b / count[0] / count[1]][d]);
+        for r in 0..BRICK * BRICK * BRICK {
+            let p = [r % BRICK, r / BRICK % BRICK, r / BRICK / BRICK];
+            let site: [i32; 3] = std::array::from_fn(|d| grid.min[d].rem_euclid(BRICK) + brick[d] * BRICK + p[d]);
+            if (site[0] + site[1] + site[2]) & 1 != 0 || grid.cells[first as usize * BRICK_SITES + (r >> 1) as usize] == 0 {
+                continue;
+            }
+            for j in 0..SCALES {
+                let size = BRICK << (2 * j);
+                for e in 0..27 {
+                    let cell = around(brick, j, e);
+                    let [x, y, z]: [i32; 3] = std::array::from_fn(|d| (brick[d] * BRICK + p[d] - cell[d] * size).abs());
+                    if x + y <= size && y + z <= size && x + z <= size {
+                        out[first as usize * SCALES + j] |= 1 << e;
+                    }
+                }
+            }
+        }
+    }
+    out
 }
 
 /** `grid`'s bricks as the GPU takes them, in the grid's order, BRICK_WORDS a brick: each site material | alpha << 8, two a word. */
@@ -201,16 +276,14 @@ struct GpuLevel {
     offset: u32,
     corner: [i32; 3],
     reach: f32,
-    blocks: u32,
+    filled: u32,
     _pad: [u32; 3],
 }
 
-/** Where brick `b` (of a window holding it) is in a window's table and block map. */
-fn entries(b: [i32; 3]) -> (usize, usize) {
+/** Where brick `b` (of a window holding it) is in a window's table. */
+fn entry(b: [i32; 3]) -> usize {
     let w = b.map(|v| v.rem_euclid(WINDOW));
-    let q = w.map(|v| v / BLOCK);
-    let across = WINDOW / BLOCK;
-    (((w[2] * WINDOW + w[1]) * WINDOW + w[0]) as usize, ((q[2] * across + q[1]) * across + q[0]) as usize)
+    ((w[2] * WINDOW + w[1]) * WINDOW + w[0]) as usize
 }
 
 /** The bricks of box [lo, hi) outside the window at `corner`, row by row: as many steps as bricks and rows. */
@@ -243,7 +316,8 @@ fn in_window((lo, hi): ([i32; 3], [i32; 3]), corner: [i32; 3]) -> ([i32; 3], [i3
 /**
  * A level's window as the GPU holds it: from which tiles, where (its
  * corner, in bricks), its table (per brick a slot, EMPTY or UNKNOWN) and,
- * per block, how many of its bricks are not EMPTY.
+ * per cell of each scale, how many bricks around it have voxels that meet
+ * it or are unknown.
  */
 struct Window {
     level: Option<Arc<Level>>,
@@ -251,7 +325,9 @@ struct Window {
     /** Sites of the level's bricks start at origin + BRICK · b. */
     origin: [i32; 3],
     table: Vec<i32>,
-    counts: Vec<u32>,
+    /** Per entry of the table, the cells of each scale around its brick it counts in (AROUND's bits): those its voxels meet, all if UNKNOWN. */
+    meets: Vec<[u32; SCALES]>,
+    counts: Vec<u16>,
     /** Bricks it holds slots for, and left UNKNOWN for want of one, at the last sync. */
     bricks: usize,
     lacking: usize,
@@ -259,28 +335,38 @@ struct Window {
 
 impl Window {
     fn new() -> Window {
-        let block = (BLOCK * BLOCK * BLOCK) as u32;
         Window {
             level: None,
             corner: None,
             origin: [0; 3],
             table: vec![UNKNOWN; TABLE],
-            counts: vec![block; BLOCKS],
+            meets: vec![[AROUND; SCALES]; TABLE],
+            // Every brick around each cell unknown: 27 blocks of 64^j bricks.
+            counts: (0..COUNTS).map(|i| (AROUND.count_ones() as u16) << (6 * (i / CELLS))).collect(),
             bricks: 0,
             lacking: 0,
         }
     }
 
-    /** Sets brick `b`'s entry, freeing the slot it had. */
-    fn set(&mut self, b: [i32; 3], entry: i32, free: &mut Vec<u32>) {
-        let (at, block) = entries(b);
+    /** Sets brick `b`'s entry, and the cells around it that it counts in, freeing the slot it had. */
+    fn set(&mut self, b: [i32; 3], (entry, meets): (i32, [u32; SCALES]), free: &mut Vec<u32>) {
+        let at = self::entry(b);
         let was = std::mem::replace(&mut self.table[at], entry);
         if was >= 0 {
             free.push(was as u32);
             self.bricks -= 1;
         }
         self.bricks += usize::from(entry >= 0);
-        self.counts[block] = self.counts[block] - u32::from(was != EMPTY) + u32::from(entry != EMPTY);
+        let had = std::mem::replace(&mut self.meets[at], meets);
+        for j in 0..SCALES {
+            for e in (0..27).filter(|e| (had[j] ^ meets[j]) >> e & 1 != 0) {
+                let cell = around(b, j, e);
+                if (cell[0] + cell[1] + cell[2]) & 1 == 0 {
+                    let count = &mut self.counts[cell_entry(cell, j)];
+                    *count = if meets[j] >> e & 1 != 0 { *count + 1 } else { *count - 1 };
+                }
+            }
+        }
     }
 
     /**
@@ -321,13 +407,13 @@ impl Window {
                 if held(tile) && tiles.tiles.get(id).is_none_or(|t| !held(t)) {
                     let (lo, hi) = in_window(tile_bricks(tile, origin), old);
                     for b in bricks_outside(lo, hi, None) {
-                        self.set(b, UNKNOWN, free);
+                        self.set(b, (UNKNOWN, [AROUND; SCALES]), free);
                     }
                 }
             }
             if old != corner {
                 for b in bricks_outside(old, old.map(|v| v + WINDOW), Some(corner)) {
-                    self.set(b, UNKNOWN, free);
+                    self.set(b, (UNKNOWN, [AROUND; SCALES]), free);
                 }
             }
         }
@@ -344,15 +430,15 @@ impl Window {
                 let entry = match (first, free.pop()) {
                     (..0, slot) => {
                         free.extend(slot);
-                        EMPTY
+                        (EMPTY, [0; SCALES])
                     }
                     (_, Some(slot)) => {
                         added.push((slot, tile.as_ref(), first as usize));
-                        slot as i32
+                        (slot as i32, std::array::from_fn(|j| tile.meets[first as usize * SCALES + j]))
                     }
                     (_, None) => {
                         self.lacking += 1;
-                        UNKNOWN
+                        (UNKNOWN, [AROUND; SCALES])
                     }
                 };
                 self.set(b, entry, free);
@@ -370,7 +456,7 @@ impl Window {
             offset: (level * TABLE) as u32,
             corner,
             reach: if self.corner.is_some() { reach as f32 } else { 0.0 },
-            blocks: (level * BLOCKS) as u32,
+            filled: (level * COUNTS) as u32,
             _pad: [0; 3],
         }
     }
@@ -390,7 +476,7 @@ struct Targets {
 
 /** The voxels on a device, drawn into a picture that the window or a shot shows. */
 pub struct Marcher {
-    /** Globals, levels, tables, the pool, the palette, the eye, block maps, and the pool's bricks' light (none unlit). */
+    /** Globals, levels, tables, the pool, the palette, the eye, cells' counts, and the pool's bricks' light (none unlit). */
     buffers: [wgpu::Buffer; 8],
     layouts: [wgpu::BindGroupLayout; 3],
     pipelines: [wgpu::RenderPipeline; 3],
@@ -405,7 +491,7 @@ pub struct Marcher {
 /** voxels.wgsl, with the constants it shares with this file. */
 fn shader() -> String {
     format!(
-        "const WINDOW = {WINDOW};\nconst BLOCK = {BLOCK};\nconst BLOCK_SHIFT = {BLOCK_SHIFT}u;\nconst BRICK = {BRICK};\nconst BRICK_SHIFT = {BRICK_SHIFT}u;\nconst BRICK_WORDS = {BRICK_WORDS}u;\nconst BRICK_SITES = {BRICK_SITES}u;\nconst FACTOR = {FACTOR}u;\nconst EMPTY = {EMPTY};\nconst UNKNOWN = {UNKNOWN};\n{}",
+        "const WINDOW = {WINDOW};\nconst CELLS = {CELLS}u;\nconst BRICK = {BRICK};\nconst BRICK_SHIFT = {BRICK_SHIFT}u;\nconst BRICK_WORDS = {BRICK_WORDS}u;\nconst BRICK_SITES = {BRICK_SITES}u;\nconst FACTOR = {FACTOR}u;\nconst EMPTY = {EMPTY};\nconst UNKNOWN = {UNKNOWN};\n{}",
         include_str!("voxels.wgsl")
     )
 }
@@ -437,7 +523,7 @@ impl Marcher {
             buffer("pool", pool as usize * BRICK_WORDS * 4, storage),
             buffer("palette", 256 * 4, storage),
             buffer("eye", 16, uniform),
-            buffer("blocks", GRID_LEVELS * BLOCKS * 4, storage),
+            buffer("filled", GRID_LEVELS * COUNTS * 2, storage),
             buffer("lights", (pool as usize * light_words * 4).max(4), storage),
         ];
         let entry = |binding: u32, ty| wgpu::BindGroupLayoutEntry { binding, visibility: wgpu::ShaderStages::FRAGMENT, ty, count: None };
@@ -530,7 +616,7 @@ impl Marcher {
                     });
                 }
                 queue.write_buffer(&self.buffers[2], (level * TABLE * 4) as u64, bytemuck::cast_slice(&window.table));
-                queue.write_buffer(&self.buffers[6], (level * BLOCKS * 4) as u64, bytemuck::cast_slice(&window.counts));
+                queue.write_buffer(&self.buffers[6], (level * COUNTS * 2) as u64, bytemuck::cast_slice(&window.counts));
             }
             *gpu = window.gpu(level, reach(level, look.far));
         }
@@ -710,5 +796,42 @@ mod tests {
         let mut lit = Window::new();
         assert!(lit.sync(0, &all, true, eye, &mut free).expect("a change").is_empty());
         assert!(lit.table.iter().all(|&e| e == UNKNOWN));
+    }
+
+    #[test]
+    fn no_voxel_the_window_holds_meets_a_cell_counted_hollow() {
+        let eye = [10.0, 30.0, -20.0];
+        let tiles = forest_tiles(eye);
+        // Moved, so that bricks of both sides of the torus have been in it.
+        let (mut window, mut free) = (Window::new(), (0..1 << 20).rev().collect());
+        window.sync(0, &tiles, false, [eye[0] - 300.0, eye[1], eye[2] + 200.0], &mut free).expect("a change");
+        window.sync(0, &tiles, false, eye, &mut free).expect("a change");
+        let (corner, origin) = (window.corner.expect("a corner"), window.origin);
+        let (lo, hi) = (corner.map(|v| v * BRICK), corner.map(|v| (v + WINDOW) * BRICK));
+        // Every voxel the window holds, and every cell of each scale it meets, at the window's edge too.
+        let mut voxels = 0;
+        for z in lo[2]..hi[2] {
+            for y in lo[1]..hi[1] {
+                for x in (lo[0] + (lo[0] + y + z + origin.iter().sum::<i32>()).rem_euclid(2)..hi[0]).step_by(2) {
+                    let p = [x + origin[0], y + origin[1], z + origin[2]];
+                    if tiles.grids.at(p[0], p[1], p[2]).is_none_or(|v| v.0 == 0) {
+                        continue;
+                    }
+                    voxels += 1;
+                    for j in 0..SCALES {
+                        let size = BRICK << (2 * j);
+                        // The cells' centres origin + size · k, k's coordinates adding up to an even number, within size + 1 of p.
+                        let near = |d: usize| ([x, y, z][d] - size).div_euclid(size)..=([x, y, z][d] + size).div_euclid(size);
+                        for k in near(2).flat_map(|kz| near(1).flat_map(move |ky| near(0).map(move |kx| [kx, ky, kz]))) {
+                            let [ax, ay, az] = std::array::from_fn(|d| ([x, y, z][d] - k[d] * size).abs());
+                            if (k[0] + k[1] + k[2]) & 1 == 0 && ax + ay <= size && ay + az <= size && ax + az <= size {
+                                assert_ne!(window.counts[cell_entry(k, j)], 0, "a voxel at {p:?} meets the cell of scale {j} about {k:?}");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(voxels > 100_000, "{voxels} voxels");
     }
 }

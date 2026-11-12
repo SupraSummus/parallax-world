@@ -558,4 +558,68 @@ mod tests {
             }
         }
     }
+
+    /** A vector of the lattice, not of the bricks' (BRICK in voxels.rs) nor of their blocks'. */
+    const SHIFT: [i64; 3] = [3, 2, 1];
+
+    /**
+     * Specks of a few colours, few enough that cells of each scale lie
+     * empty between them, over a ground sloping across the lattice's axes,
+     * which rays come to through the cells at every slant. Moved by SHIFT
+     * if `MOVED`.
+     */
+    fn specks<const MOVED: bool>(_: u64) -> worldgen::World {
+        use worldgen::generator::{Field, Generator, KindDef, Layer, Op};
+        let kind = |colors| KindDef { name: "speck", kind_type: 10, colors, walk_through: false, glows: false, medium: false };
+        let kinds = vec![kind(&["#ff0000"]), kind(&["#00ff00"]), kind(&["#0000ff"]), kind(&["#ffff00"])];
+        let by = if MOVED { SHIFT } else { [0; 3] };
+        let field = Field::at("specks", 0.0, Op::Fill, move |x, y, z, _| {
+            let [x, y, z] = [x - by[0], y - by[1], z - by[2]];
+            let h = worldgen::noise::hash(1, x, y, z);
+            let ground = 10 * y < 3 * x + 2 * z - 300;
+            (ground || h.is_multiple_of(20000)).then_some(((h % 4) as u8, None))
+        });
+        let generator = Generator { kinds, seed: 1, layers: vec![Layer::Field(field)] };
+        worldgen::World { generator, spawn: by, heights: (-200, 200), points: Vec::new() }
+    }
+
+    /** What the voxels engine draws of `make`'s world from `eye` past its spawn, within level 0's reach: its pixels. */
+    fn specks_from(make: Make, eye: Vec3, angles: [f64; 2]) -> Vec<u8> {
+        let mut world = World::new(make, 1, None, 4);
+        let spawn = make(1).spawn.map(|v| v as f64);
+        let camera = std::array::from_fn(|i| spawn[i] + eye[i]);
+        let look = Look { fog: f64::INFINITY, ..Look::new(camera, angles, FOV, 200.0, [320.0, 200.0]) };
+        let mut engine = Kind::Voxels.make(&world);
+        let frame = complete(&mut *engine, &mut world, &look, false);
+        Easel::offscreen(None).pixels(&*frame.picture, [320, 200]).2
+    }
+
+    #[test]
+    #[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
+    fn no_ray_of_the_voxels_runs_out_of_steps() {
+        // As a shot looks, from the spawn, where rays once stuck crossing cells.
+        for make in [WORLD, worlds::by_name("forest").expect("forest").make] {
+            let mut world = World::new(make, 1, None, 4);
+            let spawn = make(1).spawn.map(|v| v as f64);
+            let look = Look::new(spawn, [YAW, PITCH], FOV, RENDER_DISTANCE, SHOT);
+            let mut engine = Kind::Voxels.make(&world);
+            let frame = complete(&mut *engine, &mut world, &look, false);
+            let pixels = Easel::offscreen(None).pixels(&*frame.picture, SHOT.map(|v| v as u32)).2;
+            // Lost rays show magenta (voxels.wgsl's LOST).
+            let lost = pixels.chunks(4).filter(|p| p[..3] == [255, 0, 255]).count();
+            assert_eq!(lost, 0, "pixels of rays that ran out of steps");
+        }
+    }
+
+    #[test]
+    #[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
+    fn voxels_look_the_same_wherever_the_bricks_fall() {
+        // Eyes on dyadic fractions, so that moved by whole units they stay exact.
+        for (eye, angles) in [([0.25, 0.625, 0.125], [30.0, -10.0]), ([-3.5, 1.75, 2.375], [-100.0, -25.0])] {
+            let (here, there) = (specks_from(specks::<false>, eye, angles), specks_from(specks::<true>, eye, angles));
+            assert!(here.chunks(4).any(|p| p[..3] != here[..3]), "something seen from {eye:?}");
+            let differ = here.chunks(4).zip(there.chunks(4)).filter(|(a, b)| a != b).count();
+            assert_eq!(differ, 0, "pixels that differ moved by {SHIFT:?}, from {eye:?}");
+        }
+    }
 }
