@@ -34,7 +34,7 @@ use worldgen::light::Light;
 use super::{Engine, Frame, Look, Painter, Picture};
 use crate::gpu::Easel;
 use crate::view::{Vec3, focal_length, view_basis};
-use crate::world::{Level, Lit, Tile, Wants, World};
+use crate::world::{Level, Lit, TILE, Tile, TileId, Wants, World};
 
 /** A level's window, in bricks a side (a power of two: the table is a torus). */
 const WINDOW: i32 = 64;
@@ -300,12 +300,10 @@ fn bricks_outside(lo: [i32; 3], hi: [i32; 3], corner: Option<[i32; 3]>) -> impl 
     })
 }
 
-/** A tile's box of bricks, [lo, hi), and its count each way, for a level whose bricks start at `origin`. */
-fn tile_bricks(tile: &Tile, origin: [i32; 3]) -> ([i32; 3], [i32; 3]) {
-    let grid = &tile.grid;
-    assert!((0..3).all(|d| grid.min[d].rem_euclid(BRICK) == origin[d]), "a tile off its level's bricks");
-    let lo = std::array::from_fn(|d| (grid.min[d] - origin[d]).div_euclid(BRICK));
-    (lo, std::array::from_fn(|d| lo[d] + (grid.n[d] + BRICK - 1) / BRICK))
+/** Tile `id`'s box of bricks, [lo, hi), for a level whose bricks start at `origin`: its whole cube, its grid empty outside its box. */
+fn tile_bricks(id: TileId, origin: [i32; 3]) -> ([i32; 3], [i32; 3]) {
+    let lo = std::array::from_fn(|d| (id[d] * TILE as i32 - origin[d]).div_euclid(BRICK));
+    (lo, lo.map(|v| v + TILE as i32 / BRICK))
 }
 
 /** The part of box [lo, hi) in the window at `corner`. */
@@ -405,7 +403,7 @@ impl Window {
         if let (Some(old), Some(previous)) = (old, &previous) {
             for (id, tile) in &previous.tiles {
                 if held(tile) && tiles.tiles.get(id).is_none_or(|t| !held(t)) {
-                    let (lo, hi) = in_window(tile_bricks(tile, origin), old);
+                    let (lo, hi) = in_window(tile_bricks(*id, origin), old);
                     for b in bricks_outside(lo, hi, None) {
                         self.set(b, (UNKNOWN, [AROUND; SCALES]), free);
                     }
@@ -421,12 +419,11 @@ impl Window {
         self.lacking = 0;
         for (id, tile) in tiles.tiles.iter().filter(|(_, t)| held(t)) {
             let new = previous.as_ref().is_none_or(|p| p.tiles.get(id).is_none_or(|was| !Arc::ptr_eq(was, tile)));
-            let (base, top) = tile_bricks(tile, origin);
-            let count: [i32; 3] = std::array::from_fn(|d| top[d] - base[d]);
-            let (lo, hi) = in_window((base, top), corner);
+            assert!((0..3).all(|d| tile.grid.min[d].rem_euclid(BRICK) == origin[d]), "a tile off its level's bricks");
+            let (lo, hi) = in_window(tile_bricks(*id, origin), corner);
             for b in bricks_outside(lo, hi, if new { None } else { old }) {
-                let r: [i32; 3] = std::array::from_fn(|d| b[d] - base[d]);
-                let first = tile.grid.bricks[((r[2] * count[1] + r[1]) * count[0] + r[0]) as usize];
+                let [x, y, z] = std::array::from_fn(|d| origin[d] + b[d] * BRICK);
+                let first = tile.grid.brick(x, y, z);
                 let entry = match (first, free.pop()) {
                     (..0, slot) => {
                         free.extend(slot);
@@ -796,6 +793,33 @@ mod tests {
         let mut lit = Window::new();
         assert!(lit.sync(0, &all, true, eye, &mut free).expect("a change").is_empty());
         assert!(lit.table.iter().all(|&e| e == UNKNOWN));
+    }
+
+    #[test]
+    fn a_window_holds_the_bricks_of_every_tile_made_past_the_heights_too() {
+        // Over the forest's heights, where its tiles are made empty (world.rs): each brick of a tile made is held,
+        // as empty or with voxels, not unknown, so rays read on through it, not the next level. Those over
+        // the heights are empty.
+        let tall = World::new(worlds::by_name("forest").expect("forest").make, 1, None, 1).heights[0].1 as f64;
+        let eye = [10.0, tall + 100.0, -20.0];
+        let tiles = forest_tiles(eye);
+        let (mut window, mut free) = (Window::new(), (0..1 << 20).rev().collect());
+        window.sync(0, &tiles, false, eye, &mut free).expect("a change");
+        let (corner, origin) = (window.corner.expect("a corner"), window.origin);
+        let (mut made, mut over) = (0, 0);
+        for b in bricks_outside(corner, corner.map(|v| v + WINDOW), None) {
+            let site: [i32; 3] = std::array::from_fn(|d| origin[d] + b[d] * BRICK);
+            if !tiles.tiles.contains_key(&site.map(|v| v.div_euclid(TILE as i32))) {
+                continue;
+            }
+            made += 1;
+            assert_ne!(window.table[entry(b)], UNKNOWN, "brick {b:?} of a tile made");
+            if f64::from(site[1]) >= tall {
+                over += 1;
+                assert_eq!(window.table[entry(b)], EMPTY, "brick {b:?}, over the heights");
+            }
+        }
+        assert!(made > 10_000 && over > 1000, "{made} bricks of tiles made, {over} over the heights");
     }
 
     #[test]
