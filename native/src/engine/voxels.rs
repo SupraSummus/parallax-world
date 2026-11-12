@@ -50,10 +50,14 @@ const FACTOR: u32 = 4;
 const POOL_BYTES: u64 = 256 << 20;
 
 /**
- * How far rays read a level, in its sites: as far as its window holds
- * all around the eye, wherever in its brick the eye is.
+ * How far rays go through a level, in its sites, so that its window holds
+ * all they read, wherever in its brick the eye is: past where a ray is,
+ * the site of the voxel it is in, up to 1 farther each way, and that
+ * site's neighbours, 1 farther again, whose faces shade it.
  */
-pub const REACH: f64 = ((WINDOW / 2 - 1) * BRICK) as f64;
+const REACH: f64 = ((WINDOW / 2 - 1) * BRICK - 2) as f64;
+/** How far around the eye rays read: REACH, then up to 1 to a voxel's site and √2 to its neighbours. */
+const READ: f64 = REACH + 1.0 + std::f64::consts::SQRT_2;
 
 const TABLE: usize = (WINDOW * WINDOW * WINDOW) as usize;
 /**
@@ -82,7 +86,7 @@ const COUNTS: usize = CELLS + (CELLS >> 6);
 const AROUND: u32 = (1 << 27) - 1;
 /** A table's entries other than slots (voxels.wgsl's). */
 const EMPTY: i32 = -1;
-const UNKNOWN: i32 = -3;
+const UNKNOWN: i32 = -2;
 
 const SKY_TOP: [f32; 3] = [0x3f as f32 / 255.0, 0x73 as f32 / 255.0, 0xb8 as f32 / 255.0];
 const SKY_HORIZON: [f32; 3] = [0xb9 as f32 / 255.0, 0xd3 as f32 / 255.0, 0xe8 as f32 / 255.0];
@@ -198,7 +202,7 @@ impl Engine for Voxels {
         Frame {
             picture: Box::new(Scene { levels, palette: world.palette.clone(), look: *look }),
             // Rays read all around the eye.
-            wants: Wants { levels: read, reach: REACH, lit, tiles: world.lacking(&read, look.camera, REACH, lit) },
+            wants: Wants { levels: read, reach: READ, lit, tiles: world.lacking(&read, look.camera, READ, lit) },
             busy: false,
             stats: format!("{tiles} tiles"),
         }
@@ -284,6 +288,12 @@ struct GpuLevel {
 fn entry(b: [i32; 3]) -> usize {
     let w = b.map(|v| v.rem_euclid(WINDOW));
     ((w[2] * WINDOW + w[1]) * WINDOW + w[0]) as usize
+}
+
+/** The corner, in bricks, of the window of `level` around `eye`, the level's bricks starting at `origin`. */
+fn window_corner(level: usize, eye: Vec3, origin: [i32; 3]) -> [i32; 3] {
+    let scale = (1u64 << level) as f64;
+    std::array::from_fn(|d| ((eye[d] / scale - origin[d] as f64) / BRICK as f64).floor() as i32 - WINDOW / 2)
 }
 
 /** The bricks of box [lo, hi) outside the window at `corner`, row by row: as many steps as bricks and rows. */
@@ -392,8 +402,7 @@ impl Window {
             (None, Some(_)) => self.origin,
             (None, None) => return None,
         };
-        let scale = (1u64 << level) as f64;
-        let corner: [i32; 3] = std::array::from_fn(|d| ((eye[d] / scale - origin[d] as f64) / BRICK as f64).floor() as i32 - WINDOW / 2);
+        let corner = window_corner(level, eye, origin);
         if self.level.as_ref().is_some_and(|l| Arc::ptr_eq(l, tiles)) && self.corner == Some(corner) {
             return None;
         }
@@ -739,7 +748,7 @@ impl Painter for Marcher {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
 
     use super::*;
 
@@ -820,6 +829,30 @@ mod tests {
             }
         }
         assert!(made > 10_000 && over > 1000, "{made} bricks of tiles made, {over} over the heights");
+    }
+
+    #[test]
+    fn the_window_and_the_tiles_wanted_hold_all_a_ray_reads_of_what_it_meets() {
+        // The voxel a ray is in, wherever it is up to REACH, and that voxel's neighbours, whose faces shade it:
+        // eyes along a line across a tile, rays every way.
+        let world = World::new(worlds::by_name("forest").expect("forest").make, 1, None, 1);
+        let read = std::array::from_fn(|l| l == 0);
+        let ways = (0..125).map(|i| [i % 5 - 2, i / 5 % 5 - 2, i / 25 - 2].map(f64::from)).filter(|w| w != &[0.0; 3]);
+        for step in 0..TILE * 4 / 3 {
+            let t = step as f64 * 0.75;
+            let eye = [t, 0.6 * t + 31.3, 0.3 * t - 17.9];
+            let corner = window_corner(0, eye, [0; 3]);
+            let tiles: HashSet<_> = world.lacking(&read, eye, READ, Lit::Not).into_iter().map(|(_, id)| id).collect();
+            for way in ways.clone() {
+                let length = way.iter().map(|v| v * v).sum::<f64>().sqrt();
+                let site = worldgen::picture::nearest_site(std::array::from_fn(|d| eye[d] + way[d] / length * REACH));
+                for s in std::iter::once([0; 3]).chain(bake::VOXEL_FACES).map(|n| std::array::from_fn(|d| site[d] as i32 + n[d])) {
+                    let b: [i32; 3] = std::array::from_fn(|d| s[d].div_euclid(BRICK) - corner[d]);
+                    assert!(b.iter().all(|v| (0..WINDOW).contains(v)), "eye {eye:?}: site {s:?} out of the window");
+                    assert!(tiles.contains(&s.map(|v| v.div_euclid(TILE as i32))), "eye {eye:?}: site {s:?} in no tile wanted");
+                }
+            }
+        }
     }
 
     #[test]

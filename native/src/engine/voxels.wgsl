@@ -102,12 +102,12 @@ fn sky(ray: vec3f) -> vec3f {
   return mix(rgb, globals.horizon.rgb, globals.sky_fog);
 }
 
-// The slot of the brick of `level` holding site `s`: −1 if it is empty, −2 if outside.
+// The slot of the brick of `level` holding site `s`, EMPTY or UNKNOWN (also off the window).
 fn brick_of(level: u32, s: vec3i) -> i32 {
   let l = levels[level];
   let b = (s - l.min) >> vec3u(BRICK_SHIFT);
   if any(b < vec3i(0)) || any(b >= vec3i(WINDOW)) {
-    return -2;
+    return UNKNOWN;
   }
   return bricks[entry(l, b)];
 }
@@ -273,7 +273,7 @@ fn march(d: vec3f) -> Hit {
     var at = t / scale;
     var s = site_at(o + d * at);
     var brick = vec3i(-1 << 30);
-    var slot = -2;
+    var slot = UNKNOWN;
     var medium = 0u;
     var tint = vec3f(0.0);
     // Of the cells of the two scales, fine and coarse, till where the ray is in one some voxel meets.
@@ -284,14 +284,9 @@ fn march(d: vec3f) -> Hit {
       let b = (s - l.min) >> vec3u(BRICK_SHIFT);
       if any(b != brick) {
         brick = b;
-        let inside = all(b >= vec3i(0)) && all(b < vec3i(WINDOW));
-        slot = select(-2, bricks[entry(l, b)], inside);
-        // Off the level's window and going away from it: nothing more at this level.
-        if !inside && any((b < vec3i(0) & d <= vec3f(0.0)) | (b >= vec3i(WINDOW) & d >= vec3f(0.0))) {
-          break;
-        }
+        slot = brick_of(level, s);
       }
-      // No tile here yet: the next coarser level from here on.
+      // No tile here yet, or off the window: the next coarser level from here on.
       if slot == UNKNOWN {
         break;
       }
