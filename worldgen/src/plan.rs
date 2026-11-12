@@ -170,9 +170,10 @@ impl Sloped {
         if let Some((_, range)) = self.last.borrow().iter().find(|(k, _)| *k == key) {
             return *range;
         }
-        // Samples from min to max, at most `step` apart: a column is at most step / 2, rounded up, from one along each.
-        let step = [0, 1].map(|a| ((max[a] - min[a] + SAMPLES - 1) / SAMPLES).max(1));
-        let along = |a: usize| (0..).map(move |i| (min[a] + i * step[a]).min(max[a])).take_while(move |&v| v < max[a]).chain([max[a]]);
+        // Samples every `step` columns, a power of two, from below min to past max: on one grid for any rectangle, so
+        // rectangles side by side share theirs (the plan keeps them). A column is at most step / 2 from one along each.
+        let step = [0, 1].map(|a| (((max[a] - min[a]) / SAMPLES).max(1) as u64).next_power_of_two() as i64);
+        let along = |a: usize| (min[a].div_euclid(step[a])..=-(-max[a]).div_euclid(step[a])).map(move |i| i * step[a]);
         let (mut lo, mut hi) = (i64::MAX, i64::MIN);
         for x in along(0) {
             for z in along(1) {
@@ -180,7 +181,7 @@ impl Sloped {
                 (lo, hi) = (lo.min(h), hi.max(h));
             }
         }
-        let far = self.slope * ((step[0] + 1) / 2 + (step[1] + 1) / 2);
+        let far = self.slope * (step[0] / 2 + step[1] / 2);
         let range = (lo - far, hi + far);
         let mut last = self.last.borrow_mut();
         if last.len() == KEPT {
