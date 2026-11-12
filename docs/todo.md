@@ -43,6 +43,25 @@ Numbers are for the forest at 1280×800, as measured when written.
   which offset this: since, at level 4 against level 2,
   rays get through about 0.005 less often around houses
   and 0.01 less around the railway, on average.
+  An opacity per line of nearest neighbours
+  (a share per pair of a voxel's opposite faces, measured as rays meet columns along it,
+  each ray taking the share of the line it enters a voxel across)
+  was tried and not kept
+  ([SupraSummus/parallax-world#205](https://github.com/SupraSummus/parallax-world/pull/205)
+  and its branch `claude/measured-by-line`).
+  Over random directions it is nearer what a thin thing stops:
+  in a cell four fine sites wide,
+  0.15 off for a wall a fine site thick, against 0.23 with one share,
+  0.06 for a rod, against 0.12.
+  But the contract barely moved
+  (of 4104 margins, 68 closer and 31 farther, none by more than 0.01),
+  as measured houses fill their cells but at their edges;
+  and along an axis, as from above, a ray enters by the faces of four lines,
+  two of them slanted to a wall across another axis,
+  so it sees as much of the wall as with one share, and no six shares do better.
+  What would: a voxel holding where in it its content lies,
+  between two planes (contours, as in Laine and Karras' sparse voxel octrees),
+  so that a wall is thin from every side and need not grow to a site.
 - **Small things on a ground sink into it at coarse levels.**
   A solid under the sites is drawn at the site nearest it,
   which a few units over a ground on a plane of sites is the ground's,

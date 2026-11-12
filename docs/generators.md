@@ -959,7 +959,7 @@ and without them rays slipped in at a cliff's corners.
   0.007 at level 0.
 - **Media are isotropic.** A site stops rays from every direction alike;
   vertical trunks seen from above and from the side cannot both be right.
-  (Opacity per direction, tried in a prototype, made things worse.)
+  (Opacity per direction, tried twice, did not pay: see "Sheets and rods" in `docs/todo.md`.)
   What they show needn't be: measured far forms give each face its kind,
   and at level 4 (sites 2 m apart) the valley's town edge from above
   came from 0.105 to 0.071 off, the learned town's from 0.099 to 0.062 (seed 42),
