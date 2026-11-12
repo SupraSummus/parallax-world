@@ -37,6 +37,12 @@ Numbers are for the forest at 1280×800, as measured when written.
   yet from above they take 0.02 to 0.05 of what rays straight down see,
   against 0.002 to 0.02 at level 0, and the tower's plaster 0.03 to 0.04,
   against none.
+  Measured far forms count what a thing hides along each axis
+  by pairs of neighbouring columns, as rays meet voxels (`pairs` in `generator.rs`);
+  counted by columns, walls and rails hid a half to two thirds as much,
+  which offset this: since, at level 4 against level 2,
+  rays get through about 0.005 less often around houses
+  and 0.01 less around the railway, on average.
 - **Small things on a ground sink into it at coarse levels.**
   A solid under the sites is drawn at the site nearest it,
   which a few units over a ground on a plane of sites is the ground's,
