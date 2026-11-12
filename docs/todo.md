@@ -502,6 +502,16 @@ Numbers are for the forest at 1280×800, as measured when written.
   - things in a site add up as if apart, and alpha has 255 steps,
     so at the coarsest levels a lamp stops nothing;
   - generating costs more, lit or not: every covered site is put for light.
+- **lavapipe draws the voxels engine wrong on AMD's Zen 4.**
+  On an EPYC 9V74 (Mesa 26.0.8, LLVM 21.1.8) most rays run out of steps
+  and media let too much through;
+  with LLVM's optimisations off (`GALLIVM_PERF=nopt`) or without AVX-512
+  (`GALLIUM_OVERRIDE_CPU_CAPS=avx`) they don't,
+  nor on Zen 3 or on Intel with AVX-512.
+  CI's `native-gpu` turns AVX-512 off, as its runners are of both kinds.
+  Either LLVM miscompiles for znver4,
+  or `voxels.wgsl` does something undefined that its optimisations exploit;
+  narrowing the shader down to the line would tell, and what to report upstream.
 
 ## Ideas
 

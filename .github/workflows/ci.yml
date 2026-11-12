@@ -86,12 +86,22 @@ jobs:
   # on Mesa's software Vulkan: its tests that draw, and a view drawn.
   native-gpu:
     runs-on: ubuntu-latest
+    # llvmpipe compiles shaders for the runner's CPU, and on AMD's Zen 4 with
+    # AVX-512 draws the voxels engine wrong (docs/todo.md): none, on every runner.
+    env:
+      GALLIUM_OVERRIDE_CPU_CAPS: avx
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
 
       - name: Install software Vulkan
-        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers
+        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers vulkan-tools
+
+      # Which CPU and llvmpipe the job got, to tell failures that follow the hardware.
+      - name: Describe the runner
+        run: |
+          lscpu | grep -E '^(Model name|CPU\(s\)|Flags)'
+          vulkaninfo --summary 2>/dev/null | grep -E 'deviceName|driverInfo|apiVersion' || true
 
       - name: Test what draws
         run: cargo test --release --config native/.cargo/config.toml --manifest-path native/Cargo.toml -- --ignored
