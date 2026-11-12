@@ -23,7 +23,7 @@ use bake::light::{FaceLight, linear_to_srgb, srgb_to_linear};
 use bake::slicing::GRID_LEVELS;
 
 use crate::World;
-use crate::generator::{Generator, generate, materials_of};
+use crate::generator::{Generator, generate, materials_of, shown};
 use crate::grid::{ALPHA, BRICK, Box3, GLOW_ONE, VoxelGrid};
 use crate::picture::{FACES, Picture, nearest_site};
 
@@ -89,7 +89,7 @@ impl Shared {
 
     /** Tile `key` of `level` of the world `generator` makes, of `heights` (World::heights_at), as its Lights read it. */
     pub fn tile(&self, generator: &Generator, level: u32, heights: (i64, i64), key: [i64; 3]) -> VoxelGrid {
-        let tile = self.get(level as usize, key, || generate(generator, &tile_box(heights, key), level));
+        let tile = self.get(level as usize, key, || make_tile(generator, level, heights, key));
         tile.get().expect("made").clone()
     }
 
@@ -265,9 +265,8 @@ impl Light {
             let tile = match level.tiles.get(&key) {
                 Some(tile) => tile.clone(),
                 None => {
-                    let b = tile_box(level.heights, key);
-                    let generator = &self.world.generator;
-                    let tile = self.shared.get(i, key, || generate(generator, &b, i as u32));
+                    let (generator, heights) = (&self.world.generator, level.heights);
+                    let tile = self.shared.get(i, key, || make_tile(generator, i as u32, heights, key));
                     level.tiles.insert(key, tile.clone());
                     tile
                 }
@@ -531,6 +530,11 @@ pub fn tile_box((low, high): (i64, i64), key: [i64; 3]) -> Box3 {
     let high = (high + BRICK - 1).div_euclid(BRICK) * BRICK;
     let (y0, y1) = (low.clamp(y, y + TILE), high.clamp(y, y + TILE));
     Box3 { min: [x, y0, z], max: [x + TILE, y1.max(y0), z + TILE] }
+}
+
+/** Tile `key` of `level` of the world `generator` makes, of `heights`, as hosts make it: what may show of its box (shown). */
+pub fn make_tile(generator: &Generator, level: u32, heights: (i64, i64), key: [i64; 3]) -> VoxelGrid {
+    generate(generator, &shown(generator, &tile_box(heights, key), level), level)
 }
 
 /** `x` as a half-precision float's bits, rounded; 0 below its normal numbers, its largest above them. */

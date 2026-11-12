@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::World;
-use crate::generator::generate;
+use crate::generator::{generate, shown};
 use crate::grid::Box3;
 
 thread_local! {
@@ -206,11 +206,11 @@ pub fn places(world: &World, regions: &[Box3]) -> Vec<(String, [i64; 3])> {
 /** Sites of the web's tile along x and z (TILE in src/lib/world.ts; native's are cubes, light::tile_box). */
 const TILE: i64 = 128;
 
-/** The host tile of `level` holding `at` (lattice units): TILE sites of the level along x and z, the world's heights along y. */
+/** The host tile of `level` holding `at` (lattice units): TILE sites of the level along x and z, the world's heights along y, what may show of it (shown). */
 fn tile(world: &World, at: [i64; 3], level: u32) -> Box3 {
     let (size, (y0, y1)) = (TILE << level, world.heights_at(level));
     let [x, _, z] = at.map(|v| v.div_euclid(size) * TILE);
-    Box3 { min: [x, y0, z], max: [x + TILE, y1, z + TILE] }
+    shown(&world.generator, &Box3 { min: [x, y0, z], max: [x + TILE, y1, z + TILE] }, level)
 }
 
 /** A tile of a report: where and at what level, its work, and how long it took here. */
