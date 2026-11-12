@@ -567,7 +567,7 @@ pub fn check_far(name: &str, world: World, regions: &[Box3]) {
     assert!(broken.margins.is_empty(), "{name} breaks the contract far away:\n{broken}");
 }
 
-/** Sites of each level above and below a world's heights that `heights_hold` generates. */
+/** Sites of each level above a world's heights that `heights_hold` generates. */
 const BEYOND: i64 = 16;
 
 /** The kind of material `id` of `generator`, for messages. */
@@ -593,30 +593,29 @@ fn stopping(generator: &Generator, grid: &VoxelGrid, level: u32) -> Option<([i64
 
 /**
  * Hosts generate a world only within its heights, so nothing may lie
- * outside them: at each level up to one past `levels`, in each region
- * and a host tile's width around spawn, BEYOND sites above and below
- * the heights are empty. Returns where they are not.
+ * over them: at each level up to one past `levels`, in each region and a
+ * host tile's width around spawn, BEYOND sites above the heights are
+ * empty. Under them the ground may go on (Field::under), unseen. Returns
+ * where they are not.
  */
 pub fn heights_hold(world: &World, regions: &[Box3], levels: u32) -> Vec<String> {
     let mut broken = Vec::new();
     for level in 0..=levels + 1 {
-        let (low, high) = world.heights_at(level);
+        let high = world.heights_at(level).1;
         // A host's tile: 128 sites wide.
         let half = 64 << level;
         let [x, _, z] = world.spawn;
         let spawn = Box3 { min: [x - half, 0, z - half], max: [x + half, 0, z + half] };
         for (i, area) in regions.iter().chain([&spawn]).enumerate() {
             let b = box_at(area, level);
-            for (from, to, side) in [(high, high + BEYOND, "above"), (low - BEYOND, low, "below")] {
-                let slab = Box3 { min: [b.min[0], from, b.min[2]], max: [b.max[0], to, b.max[2]] };
-                if let Some((at, kind, n)) = stopping(&world.generator, &generate(&world.generator, &slab, level), level) {
-                    let place = if i == regions.len() { "around spawn".to_string() } else { format!("in {area:?}") };
-                    broken.push(format!(
-                        "level {level}, {place}: {n} sites stopping light {side} the heights {:?} (World::heights), which hosts don't generate, \
-                         such as {kind} at {at:?} lattice units",
-                        world.heights
-                    ));
-                }
+            let slab = Box3 { min: [b.min[0], high, b.min[2]], max: [b.max[0], high + BEYOND, b.max[2]] };
+            if let Some((at, kind, n)) = stopping(&world.generator, &generate(&world.generator, &slab, level), level) {
+                let place = if i == regions.len() { "around spawn".to_string() } else { format!("in {area:?}") };
+                broken.push(format!(
+                    "level {level}, {place}: {n} sites stopping light above the heights {:?} (World::heights), which hosts don't generate, \
+                     such as {kind} at {at:?} lattice units",
+                    world.heights
+                ));
             }
         }
     }
@@ -628,10 +627,11 @@ const SKIPPED: i64 = 32;
 
 /**
  * What is skipped where it says it may not draw (a field's lines about
- * their ground, a population standing on it) draws nothing there: in each
- * region, at the levels `whole_equals_parts` checks, cut into boxes
- * SKIPPED sites a side, each generated with what it skips drawn all the
- * same (`checking_skipped`). Returns where it drew.
+ * their ground, a population standing on it) draws nothing there, and
+ * what a field fills under its ground without asking is what it draws:
+ * in each region, at the levels `whole_equals_parts` checks, cut into
+ * boxes SKIPPED sites a side, each generated with what it skips drawn all
+ * the same (`checking_skipped`). Returns where they do not.
  */
 pub fn skips_hold(world: &World, regions: &[Box3], levels: u32) -> Vec<String> {
     let mut broken = Vec::new();

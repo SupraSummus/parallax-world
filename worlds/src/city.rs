@@ -15,7 +15,7 @@ use worldgen::generator::{ANY_SIZE, Child, Children, Far, Field, Generator, Laye
 use worldgen::grid::Box3;
 use worldgen::kinds;
 use worldgen::noise::{Rng, fx, hash, hash64, stream};
-use worldgen::plan::Plan;
+use worldgen::plan::{Plan, Sloped};
 use worldgen::units::m;
 
 kinds! {
@@ -869,7 +869,7 @@ fn cell_of(v: i64) -> i64 {
     (v + 1).div_euclid(PLAN)
 }
 
-/** The ground: roads a step below pavements and lawns, all on soil down to the world's bottom. */
+/** The ground: roads a step below pavements and lawns, all on soil down without end. */
 fn ground(seed: u64) -> Field {
     // A plan of categories finer than far sites (markings, kerbs, slabs): dithered, so each shows as often as it covers.
     let spots = Plan::dithered("ground", PLAN, move |x, z| spot(seed, cell_of(x), cell_of(z)));
@@ -887,8 +887,11 @@ fn ground(seed: u64) -> Field {
         let column = Column::new(PLAN * top, spacing).surface(surface, PLAN);
         // Pavements on a cell of concrete, where sites are as fine.
         let column = if paved { column.fill_below_exactly(K::concrete, PLAN * MIN_Y - 1) } else { column };
-        column.fill_below_exactly(K::soil, HEIGHTS.0)
+        column.under(K::soil)
     })
+    // Flat, a plan cell over it at most.
+    .about(Rc::new(Sloped::new(Rc::new(Plan::new("ground", 1 << 20, |_, _| PLAN * MIN_Y)), 0)), 1, PLAN + 1)
+    .under(K::soil)
 }
 
 /** A street lamp on the pavement at (x, z), its arm reaching over the road along (dx, dz). */

@@ -279,10 +279,11 @@ fn a_rare_thing_far_from_spawn_gets_a_region() {
 }
 
 #[test]
-fn finds_voxels_outside_the_heights() {
+fn finds_voxels_over_the_heights() {
     let broken = heights_hold(&world_of(world(spans("rock", -256, 256, ROCK)), (-64, 64)), &[near()], 1);
     assert!(broken.iter().any(|b| b.contains("above the heights (-64, 64)") && b.contains("such as rock")), "{broken:?}");
-    assert!(broken.iter().any(|b| b.contains("below the heights")), "{broken:?}");
+    // Under them, the ground goes on.
+    assert!(!broken.iter().any(|b| b.contains("below the heights")), "{broken:?}");
 }
 
 /** Fog in a layer from y = `from` to `to`, its kind and its extinction per lattice unit given the sites' spacing. */

@@ -485,7 +485,7 @@ pub fn layers(towns: Rc<Towns>, land: Rc<Land>, me: usize, ground: Rc<Sloped>) -
                     }
                 }),
             },
-            about: Some(About { of: ground.clone(), below: m(0.5), above: 2 }),
+            about: Some(About { of: ground.clone(), below: m(0.5), above: 2, under: None }),
         }
     };
     let built = Population {

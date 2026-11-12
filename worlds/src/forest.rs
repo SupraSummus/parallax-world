@@ -368,7 +368,7 @@ pub fn layers(seed: u64, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
     let on = ground.ground.clone();
     let f = Rc::new(Forest { seed, spawn, ground, columns });
 
-    // The ground: along each column, soil or stone under a layer of its surface.
+    // The ground: along each column, soil or stone under a layer of its surface, and stone down to the bottom.
     let terrain = {
         let f = f.clone();
         Field::columns("terrain", 0.0, Op::Paint, move |x, z, spacing| {
@@ -379,9 +379,10 @@ pub fn layers(seed: u64, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
             // a corner's where only a diagonal falls away.
             let cliff = h - lowest >= STEEP * spacing;
             let below = if cliff || surface == K::stone || surface == K::mossyStone { K::stone } else { K::soil };
-            column::Column::new(h, spacing).surface(surface, vox(1.0) as i64).sides(below, lowest, vox(1.5) as i64)
+            column::Column::new(h, spacing).surface(surface, vox(1.0) as i64).sides(below, lowest, vox(1.5) as i64).under(K::stone)
         })
         .about(on.clone(), vox(1.5) as i64, 1)
+        .under(K::stone)
     };
 
     // Trees, at the trees' points (worldgen's Points), of their marks' species: leaves 2 m wide, each holding one

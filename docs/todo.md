@@ -387,14 +387,16 @@ Numbers are for the forest at 1280×800, as measured when written.
 - **Layers that don't say where they are are drawn everywhere**
   (`Field::about`, `Population::on`):
   the railway's two fields (its track is a plan of heights too),
-  the sea, the moor's water, mist and its heath down to the bottom,
-  the city's ground, and the towns', landmarks', settlements' and steadings' things.
+  the sea, the moor's water and mist,
+  the city's buildings, and the towns', landmarks', settlements' and steadings' things.
   Native's tiles are cubes, so what a column needs is made again
   in each cube the ground passes through (a plan's columns, per thread);
   its views take up to twice as long to complete
   as with tiles of whole columns,
   the voxels engine's most, as it asks for every cube around the eye.
-  Once every layer says where it is, the world's `heights` can go.
+  Once every layer says where it is, the world's `heights` can go:
+  a box could be answered from what its layers say alone,
+  nothing in it, or ground so deep none of it shows.
 - **Cost weighs every plan lookup alike** (`NS` in `worldgen/src/cost.rs`),
   though one of a column just read costs a fraction
   of one among claims making their keys.

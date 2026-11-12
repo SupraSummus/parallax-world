@@ -40,7 +40,13 @@ impl Field {
 
     /** Its spans along y from `below` under to `above` over `of` at their column (About): a rule; drawn only where they may be. */
     pub fn about(self, of: Rc<Sloped>, below: i64, above: i64) -> Field {
-        Field { about: Some(About { of, below, above }), ..self }
+        Field { about: Some(About { of, below, above, under: None }), ..self }
+    }
+
+    /** Solid `kind` under what it is about, down without end (About's `under`): the ground, solid to the bottom. */
+    pub fn under(self, kind: impl Into<Kind>) -> Field {
+        let about = self.about.expect("a field is under what it is about");
+        Field { about: Some(About { under: Some(kind.into()), ..about }), ..self }
     }
 }
 
