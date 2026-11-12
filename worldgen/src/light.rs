@@ -23,7 +23,7 @@ use bake::light::{FaceLight, linear_to_srgb, srgb_to_linear};
 use bake::slicing::GRID_LEVELS;
 
 use crate::World;
-use crate::generator::{Generator, generate, materials_of, shown};
+use crate::generator::{Generator, generate_shown, materials_of};
 use crate::grid::{ALPHA, BRICK, Box3, GLOW_ONE, VoxelGrid};
 use crate::picture::{FACES, Picture, nearest_site};
 
@@ -532,9 +532,9 @@ pub fn tile_box((low, high): (i64, i64), key: [i64; 3]) -> Box3 {
     Box3 { min: [x, y0, z], max: [x + TILE, y1.max(y0), z + TILE] }
 }
 
-/** Tile `key` of `level` of the world `generator` makes, of `heights`, as hosts make it: what may show of its box (shown). */
+/** Tile `key` of `level` of the world `generator` makes, of `heights`, as hosts make it (generate_shown). */
 pub fn make_tile(generator: &Generator, level: u32, heights: (i64, i64), key: [i64; 3]) -> VoxelGrid {
-    generate(generator, &shown(generator, &tile_box(heights, key), level), level)
+    generate_shown(generator, &tile_box(heights, key), level)
 }
 
 /** `x` as a half-precision float's bits, rounded; 0 below its normal numbers, its largest above them. */
@@ -711,7 +711,7 @@ mod tests {
         let world = world(&[[5.0, 31.0, 6.0]], |_, _, _, _| false);
         let glows: Vec<f64> = (3..=8)
             .map(|level| {
-                let grid = generate(&world.generator, &Box3 { min: [-8; 3], max: [8; 3] }, level);
+                let grid = crate::generator::generate(&world.generator, &Box3 { min: [-8; 3], max: [8; 3] }, level);
                 grid.glow.values().map(|g| g[0] as f64).sum::<f64>() * (1u64 << (2 * level)) as f64
             })
             .collect();

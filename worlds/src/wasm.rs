@@ -8,7 +8,7 @@
 use std::cell::RefCell;
 
 use worldgen::World;
-use worldgen::generator::{generate, materials_of, shown};
+use worldgen::generator::{generate_shown, materials_of};
 use worldgen::grid::{Box3, FACE_WORDS, Grid};
 
 use crate::WORLDS;
@@ -74,20 +74,17 @@ pub extern "C" fn worldgen_heights(level: u32) -> *const f64 {
 
 /**
  * Generates the box from (min_x, min_y, min_z) to (max_x, max_y, max_z)
- * (exclusive) at `level` (see generate), what may show of it (shown, in
- * bricks from its bottom); returns RESULT: the grid's min x,
- * y, z, nx, ny, nz, a pointer to its bricks (i32), their count, a pointer
- * to its sites (u8) and their count, a pointer to the faces of the sites
- * whose faces differ (u32, FACE_WORDS each) and their count. Null before
- * worldgen_start.
+ * (exclusive) at `level` as hosts make it (see generate_shown); returns RESULT: the grid's min x, y, z, nx, ny, nz, a pointer to its
+ * bricks (i32), their count, a pointer to its sites (u8) and their count,
+ * a pointer to the faces of the sites whose faces differ (u32, FACE_WORDS
+ * each) and their count. Null before worldgen_start.
  */
 #[unsafe(no_mangle)]
 pub extern "C" fn worldgen_generate(level: u32, min_x: f64, min_y: f64, min_z: f64, max_x: f64, max_y: f64, max_z: f64) -> *const f64 {
     STATE.with_borrow_mut(|state| {
         let Some(state) = state else { return std::ptr::null() };
         let b = Box3 { min: [min_x as i64, min_y as i64, min_z as i64], max: [max_x as i64, max_y as i64, max_z as i64] };
-        let generator = &state.world.generator;
-        let grid = state.grid.insert(generate(generator, &shown(generator, &b, level), level).into_grid(false));
+        let grid = state.grid.insert(generate_shown(&state.world.generator, &b, level).into_grid(false));
         result(&[
             grid.min[0] as f64,
             grid.min[1] as f64,
