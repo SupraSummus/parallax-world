@@ -122,11 +122,11 @@ native/                      # Spike of a native frontend (egui on winit and wgp
     ├── view.rs              # view.ts: faces, which rays and screen boxes they draw
     ├── engine.rs            # What draws: Engine (on the main thread, a Frame of what a Look sees), Picture and Painter (on the GPU); Kind, the engines by name
     └── engine/
-        ├── chunks.rs        # The chunks engine, as the web draws (reliefs or splats)
+        ├── chunks.rs        # The chunks engine, as the web draws (reliefs or splats), or reliefs flat (an experiment)
         ├── chunks/
         │   ├── renderer.rs  # Chunks in view: cells of the lattice (bake's lod.rs), not slices; cached, finest and nearest first
         │   ├── bakery.rs    # Worker threads baking chunks, a baker each sharing the tiles (lit, with a Light each), and putting their reliefs' columns in tiles and their splats in clusters for the GPU
-        │   ├── compositor.rs # compositor.ts with wgpu, for cells: reliefs' columns uploaded per chunk in tiles, each tile a quad whose pixels' rays find their column, or whole voxels as splats each, culled on the GPU against what showed; see-through splats over each other in the order rays meet them
+        │   ├── compositor.rs # compositor.ts with wgpu, for cells: reliefs' columns uploaded per chunk in tiles, each tile a quad whose pixels' rays find their column, or a picture a cell, one quad on a plane, enlarged to close the gaps, or whole voxels as splats each, culled on the GPU against what showed; see-through splats over each other in the order rays meet them
         │   └── compositor.wgsl
         ├── voxels.rs        # The voxels engine: rays through the tiles' voxels, cell to cell, see-through ones added up in the order met; each level's bricks (and, lit, their light) in a window around the eye, a torus, and which cells of 8·FCC and 32·FCC no voxel meets, crossed at once; no chunks or faces of the view
         ├── voxels.wgsl

@@ -38,6 +38,15 @@ struct Chunk {
   tint: u32, // RGBA to paint its voxels in, shaded as they are; 0 for their own
   half_layer: f32, // a half layer of its grid: the unit of its columns' and splats' depths
   clip: f32, // see veil_vertex
+  // Drawn flat (compositor.rs's Flat): its picture's q from its origin at
+  // scale · q + offset, its plane past its own, z0 + gx x + gy y at q =
+  // (x, y), and how far its edge columns reach from it, at most.
+  scale: vec2f,
+  offset: vec2f,
+  plane: vec4f,
+  // Its picture's columns across and rows (flat_fragment).
+  picture: vec2u,
+  unused: vec2u,
 }
 
 // A tile of a chunk's relief (GpuCluster), TILE × TILE of its columns from
@@ -215,6 +224,67 @@ fn column_at(d: vec2i) -> u32 {
 
 const LAYER = 0.70710678;
 
+// The column whose cell holds q, in units of the grid's `spacing` from a
+// column's centre: the nearest centre, of the rows about it.
+fn nearest(q: vec2f, spacing: vec2f) -> vec2i {
+  var cell = vec2i(0);
+  var best = 1e30;
+  for (var row = floor(q.y); row <= floor(q.y) + 1.0; row += 1.0) {
+    let a = 2.0 * round((q.x - row) / 2.0) + row;
+    let d = (q - vec2f(a, row)) * spacing;
+    if dot(d, d) < best {
+      best = dot(d, d);
+      cell = vec2i(i32(a), i32(row));
+    }
+  }
+  return cell;
+}
+
+// The point of a chunk's picture drawn flat at q from its origin, relative
+// to the camera: on its plane, moved across it as it is enlarged
+// (compositor.rs's Flat).
+fn flat_at(c: Chunk, q: vec2f) -> vec3f {
+  return vec3f(c.origin + c.scale * q + c.offset, c.distance + c.plane.x + dot(c.plane.yz, q));
+}
+
+// A chunk drawn flat: its picture's box (its one cluster), without the
+// margin the culling holds it in for its enlarging, a quad in the world;
+// `ray` carries where on the picture, which is affine on the quad, so the
+// GPU interpolates it exactly.
+@vertex
+fn flat_vertex(@builtin(vertex_index) vertex: u32, @builtin(instance_index) tile: u32) -> Tile {
+  let t = tiles[tile];
+  let c = chunks[t.slot_count >> 8u];
+  let margin = c.plane.w * vec2f(1.0, sqrt(0.5));
+  let q = mix(t.min + margin, t.max - margin, vec2f(f32(vertex & 1u), f32(vertex >> 1u)));
+  let p = transpose(globals.faces[c.face].view) * flat_at(c, q);
+  let near = max(c.distance + t.near, 1e-3);
+  return Tile(vec4f(p.xy * globals.focal / (globals.viewport / 2.0), depth_of(c.level, near) * p.z, p.z), q, tile);
+}
+
+// The colour of the picture's column there (compositor.rs's flatten: rows
+// of `picture.x` colours from the cluster's first column, two to an item),
+// at the depth of where it is drawn; no nearer than its quad
+// (early_depth_test), whose nearest corner is no farther along the axis.
+@fragment @early_depth_test(greater_equal)
+fn flat_fragment(in: Tile) -> Drawn {
+  let t = tiles[in.tile];
+  let c = chunks[t.slot_count >> 8u];
+  let spacing = vec2f(LAYER, 1.0) * c.half_layer * 2.0 / LAYER;
+  let d = nearest((in.ray - t.base) / spacing, spacing);
+  let at = vec2i((d.x - (d.y & 1)) / 2, d.y);
+  if !owns(c.face, in.position) || any(at < vec2i(0)) || any(at >= vec2i(c.picture)) {
+    discard;
+  }
+  let k = u32(at.y) * c.picture.x + u32(at.x);
+  let colour = columns[t.first + k / 2u][k % 2u];
+  if colour == 0u {
+    discard;
+  }
+  let distance = max(length(flat_at(c, in.ray)), max(c.distance + t.near, 1e-3));
+  return Drawn(vec4f(shade(c, unpack4x8unorm(colour)), 1.0), depth_of(c.level, distance));
+}
+
 // The first of a tile's columns the pixel's ray meets. A column is a
 // pillar along the axis over its cell, its centre's Voronoi cell among the
 // columns' centres (a LAYER, b), in units of the grid: |u| ≤ LAYER and
@@ -249,18 +319,8 @@ fn march(in: Tile) -> Hit {
   if z.x > z.y {
     return none;
   }
-  // The cell it starts in: the nearest centre, of the rows about it.
-  let q = (z.x * ray - base) / spacing;
-  var cell = vec2i(0);
-  var best = 1e30;
-  for (var row = floor(q.y); row <= floor(q.y) + 1.0; row += 1.0) {
-    let a = 2.0 * round((q.x - row) / 2.0) + row;
-    let d = (q - vec2f(a, row)) * spacing;
-    if dot(d, d) < best {
-      best = dot(d, d);
-      cell = vec2i(i32(a), i32(row));
-    }
-  }
+  // The cell it starts in.
+  var cell = nearest((z.x * ray - base) / spacing, spacing);
   // The sides it may leave a cell past, n · (z · ray − centre) = d: those
   // it heads towards (n · ray > 0), at most one of each opposite two.
   let sides = select(vec3f(-1.0), vec3f(1.0), vec3f(ray.x, LAYER * ray.x + ray.y, LAYER * ray.x - ray.y) >= vec3f(0.0));

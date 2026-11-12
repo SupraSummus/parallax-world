@@ -200,6 +200,24 @@ its whole voxels a ray can enter are each one hexagon too:
 a ray's first voxel is entered so and is in one cell,
 so its hexagon, holding its outline, meets the ray;
 no runs and no cut faces.
+Or, drawn flat (the `flat` engine, an experiment;
+`Flat` in `native/src/engine/chunks/compositor.rs`),
+its relief is a picture of its columns' colours without their depths,
+rows of them in a buffer (`flatten`),
+drawn as one quad on a plane fixed in the world:
+the camera's perspective moves and scales it.
+Where two cells' pictures meet, each on its own plane,
+a gap may open as wide as the rays' slant times
+how far the edge columns' pillars reach from the planes,
+widest along a surface parallel to the axis,
+where a picture is a row or two of columns
+and their pillars run through the cell.
+So the plane is the one they reach least from,
+and each frame each edge of a picture moves out by that reach
+times the slant of the rays to it;
+depth decides where neighbours overlap.
+No gaps (`ground_along_a_face_shows_no_gaps`),
+but what a deep pillar at an edge holds is smeared.
 Its see-through voxels a ray can enter are each one hexagon (`cell_splats`),
 drawn in the order a ray meets them (section 4, "See-through");
 the relief takes them for empty.

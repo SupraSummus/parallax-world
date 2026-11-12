@@ -5,7 +5,8 @@
 //! which the window shows or a shot saves (gpu.rs).
 //!
 //! - chunks: cells of the lattice baked into chunks, as the web draws them,
-//!   their whole voxels reliefs or splats (Kind's Reliefs, Splats);
+//!   their whole voxels reliefs or splats (Kind's Reliefs, Splats), or
+//!   reliefs drawn flat, a picture a cell (Flat, an experiment);
 //! - voxels: rays through the tiles' voxels, nothing baked;
 //! - slabs: a prototype, rays through slabs baked along each face.
 
@@ -26,20 +27,22 @@ use crate::world::{Wants, World};
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Kind {
     Reliefs,
+    Flat,
     Splats,
     Voxels,
     Slabs,
 }
 
 impl Kind {
-    pub const ALL: [(Kind, &str); 4] =
-        [(Kind::Reliefs, "reliefs"), (Kind::Splats, "splats"), (Kind::Voxels, "voxels"), (Kind::Slabs, "slabs")];
+    pub const ALL: [(Kind, &str); 5] =
+        [(Kind::Reliefs, "reliefs"), (Kind::Flat, "flat"), (Kind::Splats, "splats"), (Kind::Voxels, "voxels"), (Kind::Slabs, "slabs")];
 
     /** An engine of this kind, drawing `world`. */
     pub fn make(self, world: &World) -> Box<dyn Engine> {
         match self {
-            Kind::Reliefs => Box::new(chunks::Chunks::new(world, true)),
-            Kind::Splats => Box::new(chunks::Chunks::new(world, false)),
+            Kind::Reliefs => Box::new(chunks::Chunks::new(world, true, false)),
+            Kind::Flat => Box::new(chunks::Chunks::new(world, true, true)),
+            Kind::Splats => Box::new(chunks::Chunks::new(world, false, false)),
             Kind::Voxels => Box::new(voxels::Voxels),
             Kind::Slabs => Box::new(slabs::Slabs::new(world)),
         }

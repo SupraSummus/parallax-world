@@ -46,6 +46,14 @@ struct GpuChunk {
      * this far past its plane, in half layers, that level draws: left out.
      */
     clip: f32,
+    /** Drawn flat (Flat): its picture's q from its origin is drawn at scale · q + offset. */
+    scale: [f32; 2],
+    offset: [f32; 2],
+    /** Its picture's plane past its own, z0 + gx x + gy y at (x, y) from its origin: z0, gx, gy; and Flat's `reach`. */
+    plane: [f32; 4],
+    /** Flat's `picture`, and room to keep the table's items 16 bytes apart. */
+    picture: [u32; 2],
+    unused: [u32; 2],
 }
 
 /** A column of a chunk's relief (columns in compositor.wgsl): its front's depth and its run, in half layers, as i16s, and its colour; 0, none. */
@@ -139,6 +147,173 @@ pub fn tiles(baked: &[[u32; 3]], base: [f64; 2], unit: f64, half_layer: f64) -> 
     }
     tiles.sort_by(|a, b| a.near.total_cmp(&b.near));
     (columns, tiles)
+}
+
+/**
+ * A chunk's relief drawn flat (an experiment): a picture of its columns'
+ * colours, without their depths, on a plane fixed in the world, which the
+ * camera's perspective moves and scales.
+ * A column's pillar is what the relief shows of it: a ray slanting σ off
+ * the axis sees it over σ times its length across. On the plane a column
+ * shows at one depth instead, so where two cells' pictures meet, on planes
+ * of their own, a gap may open, at most σ times how far the edge columns'
+ * pillars (those beside an empty column) reach from their planes: along a
+ * surface parallel to the axis most, where a picture is a row or two of
+ * columns and their pillars run through the cell.
+ * So the plane is the one they reach least from (`flatten`), and each
+ * frame the picture is drawn enlarged, each edge out by that reach times
+ * the slant of the rays to it (`enlarged`), at most the face's
+ * (`MAX_SLANT`): neighbours overlap where their pillars would, and depth
+ * decides between them.
+ */
+#[derive(Clone, Copy, Default)]
+pub struct Flat {
+    /** Its plane: past the chunk's plane by z0 + gx x + gy y at (x, y) from its origin, all in world units. */
+    pub plane: [f64; 3],
+    /** How far along the axis its edge columns' pillars reach from the plane, at most. */
+    pub reach: f64,
+    /** The box its columns' cells fill, from its origin. */
+    pub min: [f64; 2],
+    pub max: [f64; 2],
+    /** Its picture's columns across and rows (flatten). */
+    pub picture: [u32; 2],
+}
+
+/** The face's rays' tangents across and up, at most (|x| + √2 |y| ≤ z). */
+const MAX_SLANT: [f64; 2] = [1.0, std::f64::consts::FRAC_1_SQRT_2];
+
+/**
+ * A chunk's relief drawn flat (Flat), from its columns as tiles() takes
+ * them, as the GPU takes it: its picture, rows of colours (0, none), from
+ * its columns' least even row and least column in a row, a row's columns
+ * 2 apart in a, two colours to an item; and one cluster, a quad holding
+ * the picture's box as far past the plane as the picture's plane is over
+ * it, and as wide as it may be enlarged, which flat_vertex takes off again.
+ * Of planes of slope g, the one the edge pillars reach least from runs
+ * midway through the thinnest slab of that slope holding them, and they
+ * reach half its thickness from it: a convex function of g, least within
+ * the slopes no steeper than the face's rays (so that none goes along the
+ * plane but at the face's edge), found by golden sections.
+ */
+pub fn flatten(baked: &[[u32; 3]], base: [f64; 2], unit: f64, half_layer: f64) -> (Vec<GpuColumn>, Vec<GpuCluster>, Flat) {
+    let i16s = |v: u32| [v as u16, (v >> 16) as u16].map(|v| i32::from(v as i16));
+    // Each column's place (a, b), centre, and its pillar's ends past the chunk's plane.
+    let columns: Vec<([i32; 2], [f64; 2], [f64; 2])> = baked
+        .iter()
+        .map(|c| {
+            let [a, b] = i16s(c[0]);
+            let [depth, run] = i16s(c[1]);
+            ([a, b], [base[0] + a as f64 * LAYER * unit, base[1] + b as f64 * unit], [depth, depth + run].map(|d| d as f64 * half_layer))
+        })
+        .collect();
+    if columns.is_empty() {
+        return (Vec::new(), Vec::new(), Flat::default());
+    }
+    // The edges: a, b of one parity, six neighbours.
+    let places: HashSet<[i32; 2]> = columns.iter().map(|c| c.0).collect();
+    let edges: Vec<([f64; 2], [f64; 2])> = columns
+        .iter()
+        .filter(|(ab, ..)| {
+            [[2, 0], [-2, 0], [1, 1], [-1, 1], [1, -1], [-1, -1]].iter().any(|d| !places.contains(&[ab[0] + d[0], ab[1] + d[1]]))
+        })
+        .map(|&(_, centre, ends)| (centre, ends))
+        .collect();
+    // The slab of slope g holding the edge pillars: its middle at (0, 0), and half its thickness.
+    let slab = |[gx, gy]: [f64; 2]| {
+        let (lo, hi) = edges.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), ([x, y], [front, back])| {
+            let s = gx * x + gy * y;
+            (lo.min(front - s), hi.max(back - s))
+        });
+        ((lo + hi) / 2.0, (hi - lo) / 2.0)
+    };
+    let [most_x, most_y] = MAX_SLANT.map(|s| 1.0 / s);
+    let gy_for = |gx: f64| least(|gy| slab([gx, gy]).1, most_y);
+    let gx = least(|gx| slab([gx, gy_for(gx)]).1, most_x);
+    let g = [gx, gy_for(gx)];
+    let (z0, reach) = slab(g);
+    let cell = [LAYER * unit, 0.75 * unit];
+    let (mut min, mut max) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+    for (_, centre, _) in &columns {
+        for d in 0..2 {
+            (min[d], max[d]) = (min[d].min(centre[d] - cell[d]), max[d].max(centre[d] + cell[d]));
+        }
+    }
+    // Its picture: a column (a, b) is in row b, a's of its row 2 apart; the first row even, so that rows alternate as from (0, 0).
+    let place = |[a, b]: [i32; 2]| [(a - (b & 1)).div_euclid(2), b];
+    let (mut least, mut most) = ([i32::MAX; 2], [i32::MIN; 2]);
+    for c in &columns {
+        let p = place(c.0);
+        (least, most) = ([0, 1].map(|d| least[d].min(p[d])), [0, 1].map(|d| most[d].max(p[d])));
+    }
+    least[1] &= !1;
+    let [across, rows] = [0, 1].map(|d| (most[d] - least[d] + 1) as u32);
+    let mut picture = vec![[0u32; 2]; (across * rows).div_ceil(2) as usize];
+    for (c, (ab, ..)) in baked.iter().zip(&columns) {
+        let [s, r] = place(*ab);
+        let k = (r - least[1]) as usize * across as usize + (s - least[0]) as usize;
+        picture[k / 2][k % 2] = c[2];
+    }
+    let flat = Flat { plane: [z0, g[0], g[1]], reach, min, max, picture: [across, rows] };
+    let margin = MAX_SLANT.map(|s| s * reach);
+    let first = [base[0] + (2 * least[0]) as f64 * LAYER * unit, base[1] + least[1] as f64 * unit];
+    let mut quad = GpuCluster::new(0, 0, first);
+    let depths = corners(min, max).map(|q| flat.depth(q));
+    let centre = [0, 1].map(|d| (min[d] + max[d]) / 2.0);
+    let half = [0, 1].map(|d| (max[d] - min[d]) / 2.0 + margin[d]);
+    quad.hold(centre, half, [depths.into_iter().fold(f64::INFINITY, f64::min), depths.into_iter().fold(f64::NEG_INFINITY, f64::max)]);
+    (picture, vec![quad], flat)
+}
+
+/** The corners of a box. */
+fn corners(min: [f64; 2], max: [f64; 2]) -> [[f64; 2]; 4] {
+    [min, [max[0], min[1]], [min[0], max[1]], max]
+}
+
+impl Flat {
+    /** How far its plane is past its chunk's at (x, y) from its origin. */
+    fn depth(&self, [x, y]: [f64; 2]) -> f64 {
+        let [z0, gx, gy] = self.plane;
+        z0 + gx * x + gy * y
+    }
+
+    /**
+     * How it is enlarged, its origin (x, y) and its chunk's plane
+     * `distance` from the camera: its picture's (x, y) is drawn at
+     * scale · (x, y) + offset, each edge of its box out by reach times the
+     * most the rays to the box slant at its nearest, at most the face's.
+     */
+    fn enlarged(&self, origin: [f64; 2], distance: f64) -> ([f64; 2], [f64; 2]) {
+        let z = distance + corners(self.min, self.max).map(|q| self.depth(q)).into_iter().fold(f64::INFINITY, f64::min) - self.reach;
+        let fit = |d: usize| {
+            let far = (origin[d] + self.min[d]).abs().max((origin[d] + self.max[d]).abs());
+            let slant = if z > 0.0 { (far / z).min(MAX_SLANT[d]) } else { MAX_SLANT[d] };
+            let (centre, half) = ((self.min[d] + self.max[d]) / 2.0, (self.max[d] - self.min[d]) / 2.0);
+            let scale = if half > 0.0 { 1.0 + slant * self.reach / half } else { 1.0 };
+            (scale, centre * (1.0 - scale))
+        };
+        let [(sx, ox), (sy, oy)] = [fit(0), fit(1)];
+        ([sx, sy], [ox, oy])
+    }
+}
+
+/** Where in [−most, most] the convex `f` is least, by golden sections, to a ten-thousandth of `most`. */
+fn least(f: impl Fn(f64) -> f64, most: f64) -> f64 {
+    let r = (5f64.sqrt() - 1.0) / 2.0;
+    let (mut lo, mut hi) = (-most, most);
+    let (mut a, mut b) = (hi - r * (hi - lo), lo + r * (hi - lo));
+    let (mut fa, mut fb) = (f(a), f(b));
+    while hi - lo > 1e-4 * most {
+        if fa <= fb {
+            (hi, b, fb) = (b, a, fa);
+            a = hi - r * (hi - lo);
+            fa = f(a);
+        } else {
+            (lo, a, fa) = (a, b, fb);
+            b = lo + r * (hi - lo);
+            fb = f(b);
+        }
+    }
+    (lo + hi) / 2.0
 }
 
 /**
@@ -335,6 +510,7 @@ struct Pipelines {
     composite: wgpu::BindGroupLayout,
     /** The tiles of whole voxels, or their splats; then the see-through splats over each other, and those over the picture. */
     tiles: wgpu::RenderPipeline,
+    flat: wgpu::RenderPipeline,
     splats: wgpu::RenderPipeline,
     veil: wgpu::RenderPipeline,
     composite_picture: wgpu::RenderPipeline,
@@ -379,8 +555,9 @@ pub struct Compositor {
     drawn: [wgpu::Buffer; 2],
     targets: Option<Targets>,
     seams: bool,
-    /** Whether the frame's whole voxels are reliefs, or splats (Frame's `relief`). */
+    /** Whether the frame's whole voxels are reliefs, or splats (Frame's `relief`), and its reliefs flat (Frame's `flat`). */
     relief: bool,
+    flat: bool,
     /** What draws, by phase what culls, and what culls the see-through. */
     draw_group: Option<wgpu::BindGroup>,
     cull_groups: Vec<wgpu::BindGroup>,
@@ -419,7 +596,8 @@ fn at_least(device: &wgpu::Device, buffer: &mut wgpu::Buffer, size: u64) {
     if buffer.size() < size {
         *buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
-            size: size.next_power_of_two(),
+            // Room to grow, as far as the device allows.
+            size: size.next_power_of_two().min(device.limits().max_buffer_size).max(size),
             usage: buffer.usage(),
             mapped_at_creation: false,
         });
@@ -549,6 +727,7 @@ impl Pipelines {
         };
         Pipelines {
             tiles: render(&draw, "tile_vertex", "tile_fragment", &[], tested.clone(), &[target(format, None)]),
+            flat: render(&draw, "flat_vertex", "flat_fragment", &[], tested.clone(), &[target(format, None)]),
             splats: render(&draw, "splat_vertex", "splat_fragment", &[Some(splat.clone())], tested.clone(), &[target(format, None)]),
             veil: render(&draw, "veil_vertex", "veil_fragment", &[Some(splat)], behind, &[target(VEIL, Some(under))]),
             composite_picture: render(
@@ -662,6 +841,7 @@ impl Compositor {
             targets: None,
             seams: false,
             relief: true,
+            flat: false,
             draw_group: None,
             cull_groups: Vec::new(),
             veil_group: None,
@@ -716,7 +896,7 @@ impl Compositor {
     pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, frame: &Frame, view: &View) {
         (self.columns.grew, self.splats.grew, self.clusters.grew) = (false, false, false);
         let size = view.pixels.map(|v| v.max(1));
-        (self.seams, self.relief) = (view.seams, frame.relief);
+        (self.seams, self.relief, self.flat) = (view.seams, frame.relief, frame.flat);
         if self.targets.as_ref().is_none_or(|t| t.size != size) {
             self.targets = Some(Targets::new(device, &self.pipelines, self.format, size));
         }
@@ -755,6 +935,8 @@ impl Compositor {
             if table.len() <= slot {
                 table.resize(slot + 1, GpuChunk::default());
             }
+            let flat = &chunk.baked.flat;
+            let (scale, offset) = flat.enlarged([p.x, p.y], p.distance);
             table[slot] = GpuChunk {
                 origin: [p.x as f32, p.y as f32],
                 distance: p.distance as f32,
@@ -768,6 +950,11 @@ impl Compositor {
                 half_layer: half_layer(cell.atoms) as f32,
                 // In its grid's units, of which reach's layers are 2^atoms.
                 clip: p.finer.map_or(f32::NEG_INFINITY, |r| (2 * ((r >> cell.atoms) - cell.site[2] as i64)) as f32),
+                scale: scale.map(|v| v as f32),
+                offset: offset.map(|v| v as f32),
+                plane: [flat.plane[0], flat.plane[1], flat.plane[2], flat.reach].map(|v| v as f32),
+                picture: flat.picture,
+                unused: [0; 2],
             };
             let Resident { clusters, see_through, .. } = resident;
             candidates.push([clusters.start, see_through - clusters.start]);
@@ -885,7 +1072,9 @@ impl Compositor {
         };
         let tiles = |pass: &mut wgpu::RenderPass<'_>, phase: usize| {
             pass.set_bind_group(0, self.draw_group.as_ref(), &[]);
-            if self.relief {
+            if self.flat {
+                pass.set_pipeline(&p.flat);
+            } else if self.relief {
                 pass.set_pipeline(&p.tiles);
             } else {
                 pass.set_pipeline(&p.splats);
@@ -1054,7 +1243,13 @@ impl Painter for Compositor {
 
     fn describe(&self, easel: &Easel) -> String {
         let [first, next] = self.drawn(easel);
-        let what = if self.relief { "tiles of columns" } else { "whole splats" };
+        let what = if self.flat {
+            "flat pictures"
+        } else if self.relief {
+            "tiles of columns"
+        } else {
+            "whole splats"
+        };
         format!(": {what}, {first} that showed before and {next} more")
     }
 }
