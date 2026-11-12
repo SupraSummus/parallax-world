@@ -9,13 +9,13 @@
 //! a child's weight times its leaves still free, so leaves take one each
 //! while there is room; a leaf's stand where their mark has a chance.
 //!
-//! A cell weighs the chances at its corners: their mean times the leaves
-//! it holds. So a cell with a point has a corner with a chance, and the
-//! child at that corner has it too, down to a leaf: a point never comes
-//! down to where its mark has none. And a cell's counts are its
-//! children's, added, by construction: far forms read the things that
-//! stand. It costs a cell its corners, which are sites of every level
-//! whose sites are at most as far apart.
+//! A leaf weighs the chances at its corners, a cell its leaves. So a cell
+//! with a point has a leaf with a corner with a chance, as has the child
+//! holding that leaf, down to it: a point never comes down to where its
+//! mark has none. And a cell's counts are its children's, added, by
+//! construction: far forms read the things that stand. It costs a cell
+//! its leaves' corners, sites of the levels whose sites are at most a
+//! leaf apart.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -103,8 +103,8 @@ impl Points {
      * Points of `marks` marks in cells on `axes`, from leaves `leaf` wide
      * to roots `root` wide, with `chances` at each point (lattice units;
      * 0 along the other axes): by mark, the chance a leaf there holds a
-     * point of it. Where they vary within a root, the points follow its
-     * cells' corners, so roots want to be no wider than they vary over.
+     * point of it. Where they vary within a leaf, the points follow its
+     * corners, so leaves want to be no wider than they vary over.
      */
     pub fn new(
         name: &'static str,
@@ -182,15 +182,16 @@ impl Points {
         self.corners.get(self.slot(self.leaf, at), at, || cost::plan(self.name, self, at, || self.chances(at)))
     }
 
-    /** By mark, the weight of the cell `size` wide at `corner`: its corners' chances, added (fixed point), times the leaves it holds. */
+    /** By mark, the weight of the cell `size` wide at `corner`: its leaves' corners' chances, added (fixed point). */
     fn weights(&self, size: i64, corner: [i64; 3]) -> [Fixed; MARKS] {
-        let leaves = (size / self.leaf).pow(self.dims);
         let mut sum = [0; MARKS];
-        for at in self.corners_of(size, corner) {
-            let chances = self.chances_at(at);
-            (0..self.marks).for_each(|m| sum[m] += chances[m].max(Fx::ZERO).to_bits());
+        for leaf in self.cells_in(self.leaf, corner, corner.map(|v| v + size)) {
+            for at in self.corners_of(self.leaf, leaf) {
+                let chances = self.chances_at(at);
+                (0..self.marks).for_each(|m| sum[m] += chances[m].max(Fx::ZERO).to_bits());
+            }
         }
-        sum.map(|w| w * leaves)
+        sum
     }
 
     /**
@@ -453,6 +454,30 @@ mod tests {
         let (f, d) = (expect(4096.0 * 4096.0 - pi * 9e4, 0.125), expect(pi * 8e4, 0.25));
         assert!((field as f64 / f - 1.0).abs() < 0.02, "{field} in the field, expected {f}");
         assert!((disc as f64 / d - 1.0).abs() < 0.1, "{disc} on the disc, expected {d}");
+    }
+
+    #[test]
+    fn a_strip_narrower_than_a_root_holds_points_as_its_chance_has_them_wherever_it_lies() {
+        // Three leaves wide, along an axis and a diagonal, slid across the roots: to within a leaf at its edges.
+        // Chances read at roots' corners alone, it held none or nearly three times as many.
+        let (leaf, root, width, half) = (16, 64, 48.0, 4096);
+        for diagonal in [false, true] {
+            for from in (0..root).step_by(8) {
+                let p = Points::new("strip", 1, &[0, 2], leaf, root, 1, move |[x, _, z]| {
+                    let across = if diagonal { (x - z) as f64 / std::f64::consts::SQRT_2 } else { x as f64 };
+                    let mut c = [Fx::ZERO; MARKS];
+                    c[0] = if (from as f64..from as f64 + width).contains(&across) { fx(0.5) } else { Fx::ZERO };
+                    c
+                });
+                let length = 2.0 * half as f64 * if diagonal { std::f64::consts::SQRT_2 } else { 1.0 };
+                let expected = 0.5 * width * length / (leaf * leaf) as f64;
+                let held = p.points_in([-half, 0, -half], [half, 1, half]).len() as f64;
+                assert!(
+                    (held / expected - 1.0).abs() < leaf as f64 / width,
+                    "{held} points, expected {expected}, diagonally {diagonal}, from {from}"
+                );
+            }
+        }
     }
 
     #[test]
