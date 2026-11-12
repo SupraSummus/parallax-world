@@ -848,6 +848,11 @@ each at least two spacings tall:
 `.medium(kind, height, extinction)` on top, thickened but as dense along a ray,
 `.water_to(kind, level)` where the ground is lower.
 Carves along a line want the same margin.
+A heightfield is a shell, hollow under its sides:
+`.sides(kind, lowest_around(ground, x, z, spacing), depth)` reaches each column
+down past the lowest of the eight around it, so rays can't slip under a slope.
+The diagonals too: a voxel shares faces with their sites at its own height,
+and without them rays slipped in at a cliff's corners.
 
 ### Pitfalls
 

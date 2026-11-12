@@ -17,7 +17,7 @@
 
 use std::rc::Rc;
 
-use worldgen::column::Column;
+use worldgen::column::{Column, lowest_around};
 use worldgen::generator::{Field, Layer, Op};
 use worldgen::kinds;
 use worldgen::noise::{Fbm, Fx, ValueNoise, fx, smoothstep, stream};
@@ -213,8 +213,6 @@ pub fn layers(ranges: Rc<Ranges>, ground: Rc<Plan<i64>>) -> Vec<Layer> {
         // far away; and to the ground further off, for cliffs nearby.
         let around = |step: i64| [(step, 0), (-step, 0), (0, step), (0, -step)].map(|(dx, dz)| ground.at(x + dx, z + dz));
         let near = around(m(1.0));
-        // Filled down to the sites around, and as deep under them as the ground there (the forest's terrain).
-        let bottom = if spacing > m(1.0) { around(spacing) } else { near }.into_iter().fold(h - m(1.5), i64::min) - 2 * spacing;
         let slope =
             |heights: [i64; 4], step: i64| Units(heights.map(|n| (n - h).abs()).into_iter().max().unwrap_or(0)).to_fx() / Units(step);
         let steep = slope(near, m(1.0));
@@ -248,7 +246,8 @@ pub fn layers(ranges: Rc<Ranges>, ground: Rc<Plan<i64>>) -> Vec<Layer> {
             return Vec::new();
         };
         let under = if kind == K::alpine { K::scree } else { K::rock };
-        Column::new(h, spacing).surface(kind, m(1.0)).fill_below_exactly(under, bottom).spans()
+        // As deep as the ground under it (the forest's terrain), so it paints all the sides that shows.
+        Column::new(h, spacing).surface(kind, m(1.0)).sides(under, lowest_around(|x, z| ground.at(x, z), x, z, spacing), m(1.5)).spans()
     });
     vec![Layer::Field(surface), Layer::Field(sea)]
 }
