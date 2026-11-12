@@ -18,9 +18,13 @@ struct Table {
     forward: [i32; 3],
     c_min: i64,
     a_min: i64,
+    b_min: i64,
     layers: i64,
     blocks: i64,
-    /** By (c − c_min, block of a − a_min): the least and greatest b, or least > greatest where there is no voxel. */
+    /**
+     * By (c − c_min, block of a − a_min): the least and greatest b − b_min, or least > greatest where there is no
+     * voxel. Like a and c, b is taken from its least: b is a world axis, and a tile is narrow along it, not the world.
+     */
     low: Vec<i16>,
     high: Vec<i16>,
 }
@@ -58,17 +62,18 @@ impl LayerIndex {
         }
         let mut tables: Vec<Table> = shapes
             .iter()
-            .map(|&[r, _, f]| {
-                let ((a_min, a_max), (c_min, c_max)) = (along(r), along(f));
+            .map(|&[r, u, f]| {
+                let ((a_min, a_max), (b_min, b_max), (c_min, c_max)) = (along(r), along(u), along(f));
+                assert!(b_max - b_min <= i16::MAX as i64, "a grid's voxels span {} along a face's up", b_max - b_min);
                 let (layers, blocks) = (c_max - c_min + 1, (a_max - a_min) / BLOCK + 1);
                 let (low, high) = (vec![i16::MAX; (layers * blocks) as usize], vec![i16::MIN; (layers * blocks) as usize]);
-                Table { forward: f, c_min, a_min, layers, blocks, low, high }
+                Table { forward: f, c_min, a_min, b_min, layers, blocks, low, high }
             })
             .collect();
         // One pass for all the faces: the voxels are read once.
         each_site(grid, |p| {
             for (t, &[r, u, f]) in tables.iter_mut().zip(&shapes) {
-                let (a, b, c) = (dot(r, p) - t.a_min, dot(u, p) as i16, dot(f, p) - t.c_min);
+                let (a, b, c) = (dot(r, p) - t.a_min, (dot(u, p) - t.b_min) as i16, dot(f, p) - t.c_min);
                 let at = (c * t.blocks + a / BLOCK) as usize;
                 t.low[at] = t.low[at].min(b);
                 t.high[at] = t.high[at].max(b);
@@ -96,7 +101,7 @@ impl LayerIndex {
                 hi = hi.max(t.high[k as usize]);
             }
         }
-        (lo <= hi).then_some((lo as i64, hi as i64))
+        (lo <= hi).then_some((t.b_min + lo as i64, t.b_min + hi as i64))
     }
 }
 
@@ -134,7 +139,7 @@ fn each_site(grid: &Grid, mut visit: impl FnMut([i64; 3])) {
 // from what index_build returns, until the next grid.
 
 /** Numbers per table in index_build's result. */
-const TABLE: usize = 9;
+const TABLE: usize = 10;
 /** Tables of an index: a face and its opposite share one. */
 const TABLES: usize = 6;
 
@@ -159,8 +164,8 @@ pub extern "C" fn index_cells() -> *mut u8 {
 
 /**
  * Indexes the grid index_grid started; returns RESULT: per table, its
- * forward (x, y, z), c min, a min, layers, blocks, and pointers to its
- * low and high (i16, layers × blocks each). Null without a grid.
+ * forward (x, y, z), c min, a min, b min, layers, blocks, and pointers
+ * to its low and high (i16, layers × blocks each). Null without a grid.
  */
 #[unsafe(no_mangle)]
 pub extern "C" fn index_build() -> *const f64 {
@@ -170,7 +175,7 @@ pub extern "C" fn index_build() -> *const f64 {
         RESULT.with_borrow_mut(|result| {
             for (t, out) in index.tables.iter().zip(result.chunks_mut(TABLE)) {
                 let [x, y, z] = t.forward.map(f64::from);
-                let numbers = [t.c_min as f64, t.a_min as f64, t.layers as f64, t.blocks as f64];
+                let numbers = [t.c_min as f64, t.a_min as f64, t.b_min as f64, t.layers as f64, t.blocks as f64];
                 let pointers = [t.low.as_ptr() as usize as f64, t.high.as_ptr() as usize as f64];
                 out.copy_from_slice(&[[x, y, z].as_slice(), &numbers, &pointers].concat());
             }
