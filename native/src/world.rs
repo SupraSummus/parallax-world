@@ -1,9 +1,10 @@
 //! A generated world's tiles: each level's voxels are tiles fixed in the
 //! world, cubes TILE sites of the level a side (worldgen's tile_box), no
 //! axis apart from the others: asked for, made and dropped by how far they
-//! are from the camera, as the crow flies. A tile all above or below the
-//! world's heights is empty, nothing generated; the rest are generated
-//! alone on the world's threads (a generator per thread) and indexed there.
+//! are from the camera, as the crow flies. Of each, only what may show is
+//! generated (worldgen's make_tile): none of it above or below the world's
+//! heights, nor where its layers say it is empty or buried; alone on the
+//! world's threads (a generator per thread) and indexed there.
 //! Which tiles, and in what order, is up to the engine drawing them (Wants): every update hands over the tiles it misses for
 //! what is in view, most wanted first, replacing the previous list; then
 //! the rest within reach of the camera of each level it reads (GRID_REACH,
@@ -27,8 +28,8 @@ use std::sync::{Arc, Condvar, Mutex};
 pub use bake::TileId;
 use bake::slicing::GRID_LEVELS;
 use bake::{Grid, LayerIndex, Tiles};
-use worldgen::generator::{generate, materials_of};
-use worldgen::light::{Brightness, Light, Shared, tile_box};
+use worldgen::generator::materials_of;
+use worldgen::light::{Brightness, Light, Shared, make_tile};
 
 use crate::engine::voxels;
 use crate::view::Vec3;
@@ -179,16 +180,11 @@ fn work(make: Make, seed: u64, heights: &Heights, queue: &(Mutex<Queue>, Condvar
             }
             None => {
                 let (heights, key) = (heights[level], id.map(i64::from));
-                let b = tile_box(heights, key);
-                let grid = if (0..3).any(|d| b.min[d] == b.max[d]) {
-                    Grid::new(b.min.map(|v| v as i32), [0; 3], 0)
-                } else {
-                    match &shared {
-                        Some(shared) => shared.tile(&generator, level as u32, heights, key),
-                        None => generate(&generator, &b, level as u32),
-                    }
-                    .into_grid(true)
-                };
+                let grid = match &shared {
+                    Some(shared) => shared.tile(&generator, level as u32, heights, key),
+                    None => make_tile(&generator, level as u32, heights, key),
+                }
+                .into_grid(true);
                 let index = LayerIndex::new(&grid);
                 let (words, meets) = (voxels::words(&grid), voxels::meets(&grid));
                 Tile { grid: Arc::new(grid), index, words, meets, lights: None }

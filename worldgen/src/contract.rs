@@ -15,8 +15,8 @@ use bake::FACE_KINDS;
 use bake::light::{linear_to_srgb, srgb_to_linear};
 
 use crate::World;
-use crate::generator::{Generator, Layer, checking_skipped, generate, materials_of};
-use crate::grid::{Box3, VoxelGrid, is_site};
+use crate::generator::{Generator, Layer, Whole, checking_skipped, generate, materials_of, whole};
+use crate::grid::{ALPHA, Box3, VoxelGrid, is_site};
 use crate::noise::Rng;
 use crate::picture::{Camera, FACES, Seen, Tiles, composite_in, composited, nearest_site};
 use crate::survey::{Survey, survey};
@@ -631,7 +631,9 @@ const SKIPPED: i64 = 32;
  * what a field fills under its ground without asking is what it draws:
  * in each region, at the levels `whole_equals_parts` checks, cut into
  * boxes SKIPPED sites a side, each generated with what it skips drawn all
- * the same (`checking_skipped`). Returns where they do not.
+ * the same (`checking_skipped`). And a box `whole` says holds nothing
+ * holds nothing, one it says is buried is solid, a site around it too.
+ * Returns where they do not.
  */
 pub fn skips_hold(world: &World, regions: &[Box3], levels: u32) -> Vec<String> {
     let mut broken = Vec::new();
@@ -643,8 +645,22 @@ pub fn skips_hold(world: &World, regions: &[Box3], levels: u32) -> Vec<String> {
                 for y in starts(1) {
                     for x in starts(0) {
                         let part = Box3 { min: [x, y, z], max: [x + SKIPPED, y + SKIPPED, z + SKIPPED] }.intersect(&b);
-                        let (_, drew) = checking_skipped(|| generate(&world.generator, &part, level));
+                        let (grid, drew) = checking_skipped(|| generate(&world.generator, &part.widen(1), level));
                         broken.extend(drew.into_iter().map(|d| format!("level {level}: {d}")));
+                        let Some(whole) = whole(&world.generator, &part, level) else { continue };
+                        let sites = part.widen(1);
+                        let sites = (sites.min[2]..sites.max[2])
+                            .flat_map(|z| {
+                                (sites.min[1]..sites.max[1]).flat_map(move |y| (sites.min[0]..sites.max[0]).map(move |x| [x, y, z]))
+                            })
+                            .filter(|&[x, y, z]| is_site(x, y, z));
+                        let unlike = match whole {
+                            Whole::Empty => sites.filter(|&p| part.holds(p)).find(|&[x, y, z]| grid.alpha(x, y, z) > 0),
+                            Whole::Buried => sites.into_iter().find(|&[x, y, z]| grid.alpha(x, y, z) < ALPHA),
+                        };
+                        if let Some(site) = unlike {
+                            broken.push(format!("level {level}: {part:?} is {whole:?}, as its layers say, but not at site {site:?}"));
+                        }
                     }
                 }
             }

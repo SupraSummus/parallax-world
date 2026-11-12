@@ -3,10 +3,10 @@
 //! cargo run --release --example bench -- valley 12345 0 0
 //!
 //! for world (the forest if none), seed, and where, off spawn along x and z (lattice units):
-//! at levels 0, 4 and 6, the four tiles of 128 sites around there, over the world's heights.
+//! at levels 0, 4 and 6, the four tiles of 128 sites around there, over the world's heights, what may show of them (shown).
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::time::Instant;
-use worldgen::generator::generate;
+use worldgen::generator::{generate, shown};
 use worldgen::grid::Box3;
 use worlds::by_name;
 
@@ -27,7 +27,8 @@ fn main() {
         let (mut voxels, mut hash) = (0, DefaultHasher::new());
         for i in 0..4 {
             let (x, z) = (cx + 128 * (i % 2), cz + 128 * (i / 2));
-            let grid = generate(generator, &Box3 { min: [x, min_y, z], max: [x + 128, max_y, z + 128] }, level).into_grid(false);
+            let b = shown(generator, &Box3 { min: [x, min_y, z], max: [x + 128, max_y, z + 128] }, level);
+            let grid = generate(generator, &b, level).into_grid(false);
             voxels += grid.cells.len();
             (&grid.bricks, &grid.cells).hash(&mut hash);
         }

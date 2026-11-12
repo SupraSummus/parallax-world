@@ -85,6 +85,14 @@ a plan promising no slope (`Sloped::any`) leaves them drawn everywhere.
 So a host may ask for any box, in any order,
 and a field about the ground costs little in the air above it
 or the rock below it, where it is not asked at all.
+And what a box holds throughout follows from what they say (`whole`):
+nothing, or ground so deep that none of it shows.
+The last field drawing all of a box decides it;
+a layer drawing in it after keeps only that:
+a carve what is empty, a fill or paint what is buried
+(a thing's carves cut only it).
+A host need not make either (`shown`):
+it generates a box less its whole bottom and top.
 A layer that says nothing is drawn everywhere.
 
 A thing is a **node**: its **shapes**, and **children**,
@@ -449,7 +457,8 @@ in shares of material types.
   cut into boxes 32 sites a side (`skips_hold`),
   what is skipped where it says it may not be draws nothing there:
   it is drawn all the same, to see (`checking_skipped`),
-  and what a field fills under its ground unasked is what it would draw.
+  and what a field fills under its ground unasked is what it would draw;
+  and a box `whole` says is empty or buried is.
   The rules above hold wherever something is drawn;
   this finds what they can't see,
   as a plan steeper between columns no layer reads together.

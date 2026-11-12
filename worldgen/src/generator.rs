@@ -11,7 +11,7 @@ use bake::{FACE_KINDS, Faces, VOXEL_FACES};
 
 use crate::cost::{self, Work};
 use crate::curve::Curve;
-use crate::grid::{ALPHA, Box3, VoxelGrid};
+use crate::grid::{ALPHA, BRICK, Box3, VoxelGrid};
 use crate::js;
 use crate::noise::{Fixed, Fx, ONE, Rng, fixed, float, hash, hash_text, hash64};
 use crate::plan::{self, Sloped};
@@ -1133,8 +1133,12 @@ pub fn materials_of(generator: &Generator) -> Vec<Material> {
  */
 pub fn generate(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
     let s = 1i64 << level;
-    let palette = Palette::new(&generator.kinds, generator.seed);
     let mut grid = VoxelGrid::new(b);
+    if (0..3).any(|d| b.max[d] <= b.min[d]) {
+        // No sites, so nothing to make, not even things near.
+        return grid;
+    }
+    let palette = Palette::new(&generator.kinds, generator.seed);
     let clip = grid.clip();
     let mut put = |look: Look, op: Op, share: u32, pick: u32, x: i64, y: i64, z: i64| {
         let shade = |kind: Kind| palette.shade(kind, x * s, y * s, z * s);
@@ -2055,6 +2059,65 @@ fn stands_within(population: &Population, b: &Box3) -> bool {
     b.min[1] <= hi + along && b.max[1] > lo - along
 }
 
+/** What a box holds throughout, if one thing (`whole`). */
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Whole {
+    /** Nothing. */
+    Empty,
+    /** Solid, and the sites around it too: none of its voxels shows. */
+    Buried,
+}
+
+/**
+ * What box `b` of `level` holds throughout (sites as `generate`'s), as
+ * its layers say (About, Population::on): nothing, or solid wherever a ray
+ * could see it from. The last field drawing all of it decides; a layer
+ * drawing in it after keeps only that: a carve what is empty, a fill or
+ * paint what is buried (as a thing's: its carves cut only itself). None
+ * if not so.
+ */
+pub fn whole(generator: &Generator, b: &Box3, level: u32) -> Option<Whole> {
+    let s = 1i64 << level;
+    let units = units_of(&b.widen(1), s);
+    let (min, max, ys) = ([units.min[0], units.min[2]], [units.max[0] - 1, units.max[2] - 1], [units.min[1], units.max[1] - 1]);
+    // What each draws in it, and whether that carves, in the order they draw (drawables_in).
+    let mut layers: Vec<(f64, &str, Meets, bool)> = generator
+        .layers
+        .iter()
+        .map(|layer| match layer {
+            Layer::Field(f) => (f.order, f.name, f.about.as_ref().map_or(Meets::Any, |a| a.meets(min, max, ys, s)), f.op == Op::Carve),
+            Layer::Population(p) => {
+                let meets = if stands_within(p, &units) { Meets::Any } else { Meets::Nothing };
+                (p.order, p.name, meets, p.far.as_ref().is_some_and(|far| far.op == Op::Carve))
+            }
+        })
+        .collect();
+    layers.sort_by(|a, b| a.0.total_cmp(&b.0).then_with(|| a.1.cmp(b.1)));
+    let kept = |carves: bool| if carves { Whole::Empty } else { Whole::Buried };
+    let last = layers.iter().rposition(|&(.., meets, _)| matches!(meets, Meets::All(kind) if !generator.kinds[kind as usize].medium));
+    let whole = last.map_or(Whole::Empty, |i| kept(layers[i].3));
+    let after = &layers[last.map_or(0, |i| i + 1)..];
+    after.iter().all(|&(.., meets, carves)| meets == Meets::Nothing || kept(carves) == whole).then_some(whole)
+}
+
+/**
+ * Box `b` of `level` less its bottom and its top that are `whole`, in
+ * bricks up from its bottom: the part of it whose voxels may show, all a
+ * host need generate. What is whole of a box is of every part of it, so
+ * each end is found by halving.
+ */
+pub fn shown(generator: &Generator, b: &Box3, level: u32) -> Box3 {
+    let (bottom, top) = (b.min[1], b.max[1]);
+    let at = |k: i64| (bottom + k * BRICK).min(top);
+    let whole_in = |y0: i64, y1: i64| {
+        y0 >= y1 || whole(generator, &Box3 { min: [b.min[0], y0, b.min[2]], max: [b.max[0], y1, b.max[2]] }, level).is_some()
+    };
+    let bricks: Vec<i64> = (0..=(top - bottom + BRICK - 1).div_euclid(BRICK).max(0)).collect();
+    let low = bricks[1..].partition_point(|&k| whole_in(bottom, at(k)));
+    let high = low + bricks[low..].partition_point(|&k| !whole_in(at(k), top));
+    Box3 { min: [b.min[0], at(low as i64), b.min[2]], max: [b.max[0], at(high as i64), b.max[2]] }
+}
+
 /** Lines of a field's spans a side that are asked together whether they may draw (About): a box's own would reach from the ground into the air. */
 const LINES: i64 = 32;
 
@@ -2641,22 +2704,46 @@ mod tests {
     }
 
     #[test]
-    fn a_field_under_its_ground_is_solid_to_the_bottom() {
+    fn a_field_under_its_ground_is_solid_to_the_bottom_and_says_so() {
         let world = solid_ground(|x| x / 4, 1);
         for level in 0..4 {
             let s = 1 << level;
-            // Deep under it, filled without asking the field; and across it.
-            for (y, solid) in [(-4096, true), (-16, false)] {
+            // Deep under it, across it, over it.
+            for (y, whole) in [(-4096, Some(Whole::Buried)), (-16, None), (1024, Some(Whole::Empty))] {
                 let b = Box3 { min: [0, y / s, 0], max: [64, y / s + 32, 16] };
-                let (grid, broken) = checking_skipped(|| generate(&world, &b, level));
-                assert_eq!(broken, Vec::<String>::new(), "level {level}, at {y}: drawn as the field would");
-                let sites =
-                    (b.min[2]..b.max[2]).flat_map(|z| (b.min[1]..b.max[1]).flat_map(move |y| (b.min[0]..b.max[0]).map(move |x| [x, y, z])));
-                let full = sites.filter(|&[x, y, z]| crate::grid::is_site(x, y, z)).all(|[x, y, z]| grid.alpha(x, y, z) == ALPHA);
-                assert_eq!(full, solid, "level {level}, at {y}");
-                assert_eq!(generate(&world, &b, level).alpha(0, b.min[1], 0), grid.alpha(0, b.min[1], 0), "level {level}, at {y}");
+                assert_eq!(super::whole(&world, &b, level), whole, "level {level}, at {y}");
+                let (grid, broken) = checking_skipped(|| generate(&world, &b.widen(1), level));
+                assert_eq!(broken, Vec::<String>::new());
+                let sites = || {
+                    (b.min[2]..b.max[2]).flat_map(|z| (b.min[1]..b.max[1]).flat_map(move |y| (b.min[0]..b.max[0]).map(move |x| [x, y, z])))
+                };
+                let alpha = |[x, y, z]: [i64; 3]| grid.alpha(x, y, z);
+                match whole {
+                    Some(Whole::Buried) => assert!(sites().filter(|&[x, y, z]| crate::grid::is_site(x, y, z)).all(|p| alpha(p) == ALPHA)),
+                    Some(Whole::Empty) => assert!(sites().all(|p| alpha(p) == 0)),
+                    None => {}
+                }
+                // Drawn as the field would, without asking it.
+                assert_eq!(generate(&world, &b, level).alpha(0, b.min[1], 0), grid.alpha(0, b.min[1], 0));
             }
         }
+    }
+
+    #[test]
+    fn what_shows_of_a_box_is_all_but_its_whole_bottom_and_top() {
+        // Ground from 0 to 16 high.
+        let world = solid_ground(|x| x / 4, 1);
+        let b = Box3 { min: [0, -509, 0], max: [64, 509, 16] };
+        let part = shown(&world, &b, 0);
+        assert!(part.min[1] < 0 && part.min[1] > -64 && part.max[1] > 16 && part.max[1] < 64, "{part:?}");
+        assert_eq!((part.min[1] - b.min[1]) % BRICK, 0, "in bricks from the bottom");
+        assert_eq!(whole(&world, &Box3 { max: [64, part.min[1], 16], ..b }, 0), Some(Whole::Buried));
+        assert_eq!(whole(&world, &Box3 { min: [0, part.max[1], 0], ..b }, 0), Some(Whole::Empty));
+        // A brick more of either is not.
+        assert_eq!(whole(&world, &Box3 { max: [64, part.min[1] + BRICK, 16], ..b }, 0), None);
+        assert_eq!(whole(&world, &Box3 { min: [0, part.max[1] - BRICK, 0], ..b }, 0), None);
+        let buried = shown(&world, &Box3 { max: [64, -100, 16], ..b }, 0);
+        assert_eq!(buried.min[1], buried.max[1], "all buried");
     }
 
     #[test]

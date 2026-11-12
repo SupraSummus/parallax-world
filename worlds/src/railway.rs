@@ -517,6 +517,9 @@ impl Railway {
 /** The railway's layers on `ground`, where domain `me` of `land` owns it: its tunnels' bores, its track, bridges and platforms, its stations. */
 pub fn layers(railway: Rc<Railway>, land: Rc<Land>, me: usize, ground: Rc<Sloped>) -> Vec<Layer> {
     let bores = {
+        // The track's top by row, rising under a unit a column (GRADE): a bore is over it, within BORE across.
+        let line = railway.line.clone();
+        let top = Rc::new(Sloped::new(Rc::new(Plan::new("railway's top", SCALE, move |_, z| line.track(z).1)), 1));
         let railway = railway.clone();
         Field::columns("railway's tunnels", 0.9, Op::Carve, move |x, z, _| {
             let Some(at) = railway.at(x, z).filter(|a| a.structure == Structure::Tunnel && a.distance < Units(BORE).to_fx()) else {
@@ -524,6 +527,7 @@ pub fn layers(railway: Rc<Railway>, land: Rc<Land>, me: usize, ground: Rc<Sloped
             };
             vec![Span::solid(at.top + 1, at.top + 1 + arch(at.distance.floor_units().0), 0)]
         })
+        .about(top, m(1.0), arch(0) + m(1.0))
     };
     let seed = railway.line.seed;
     let track = {
