@@ -39,52 +39,38 @@ const STEPS: usize = 1;
 const TOP_STEPS: usize = 64;
 /** Sites a tile is a side, at each level, as native's (tile_box). */
 pub const TILE: i64 = 128;
-/**
- * Sites whose light a level keeps, in PARTS parts, each locked and
- * forgotten on its own: walking, light found once is read again long
- * after. A hash map fills up to 7/8 of its slots, so a part's 2^14, some
- * 1.4 MB.
- */
-const KEPT_SITES: usize = 7 << 17;
-const PARTS: usize = 64;
-/** Tiles of a level a Light keeps, and that all keep in Shared, before forgetting them. */
-const KEPT_TILES: usize = 256;
-const SHARED_TILES: usize = 1024;
+/** Sites whose light a Light keeps at each level, all forgotten once full: the finer sites around read it soon after it is found, seldom later. */
+const KEPT_SITES: usize = 1 << 13;
 
 /** A tile, made once: those that want it while it is made wait. */
 type Tile = Arc<OnceLock<VoxelGrid>>;
 /** Tiles by level and key. */
 type Tiles = Map<(usize, [i64; 3]), Tile>;
-/** The light coming to sites from each direction, as found: in half-precision floats (`half`), sites as the baker's (i32). */
-type Found = Map<[i32; 3], [[u16; 3]; N]>;
 
 /**
  * What the Lights of one world under one brightness share (a thread's
  * each), and with its host: tiles of every level, generated once, by
- * whichever needs one first, and the light at sites, found once.
+ * whichever needs one first, kept till the host forgets them (`forget`).
  */
 #[derive(Clone)]
 pub struct Shared {
     brightness: Brightness,
     tiles: Arc<Mutex<Tiles>>,
-    /** By level, its parts (PARTS). */
-    light: Arc<Vec<Vec<Mutex<Found>>>>,
 }
 
 impl Shared {
-    /** Nothing made or found yet, for a world under `brightness`. */
+    /** Nothing made yet, for a world under `brightness`. */
     pub fn new(brightness: Brightness) -> Shared {
-        let light = (0..GRID_LEVELS).map(|_| (0..PARTS).map(|_| Mutex::default()).collect()).collect();
-        Shared { brightness, tiles: Arc::default(), light: Arc::new(light) }
+        Shared { brightness, tiles: Arc::default() }
     }
 
     pub fn brightness(&self) -> Brightness {
         self.brightness
     }
 
-    /** The same world under `brightness`: its tiles kept, its light to find again. */
+    /** The same world under `brightness`: its tiles kept. */
     pub fn under(&self, brightness: Brightness) -> Shared {
-        Shared { tiles: self.tiles.clone(), ..Shared::new(brightness) }
+        Shared { brightness, tiles: self.tiles.clone() }
     }
 
     /** Tile `key` of `level` of the world `generator` makes, of `heights` (World::heights_at), as its Lights read it. */
@@ -95,38 +81,14 @@ impl Shared {
 
     /** Tile `key` of level `i`, made by `make` if not yet. */
     fn get(&self, i: usize, key: [i64; 3], make: impl FnOnce() -> VoxelGrid) -> Tile {
-        let tile = {
-            let mut tiles = self.tiles.lock().expect("tiles");
-            if !tiles.contains_key(&(i, key)) && tiles.keys().filter(|(l, _)| *l == i).count() >= SHARED_TILES {
-                tiles.retain(|(l, _), _| *l != i);
-            }
-            tiles.entry((i, key)).or_default().clone()
-        };
+        let tile = self.tiles.lock().expect("tiles").entry((i, key)).or_default().clone();
         tile.get_or_init(make);
         tile
     }
 
-    /** The part of level `i`'s light that `site`'s is kept in. */
-    fn part(&self, i: usize, site: [i64; 3]) -> &Mutex<Found> {
-        let mut hasher = Fast::default();
-        site.iter().for_each(|&c| hasher.write_u64(c as u64));
-        // Bits that the parts' maps do not place keys by.
-        &self.light[i][(hasher.finish() >> 32) as usize % PARTS]
-    }
-
-    /** The light found at `site` of level `i`, if it was. */
-    fn found(&self, i: usize, site: [i64; 3]) -> Option<[Rgb; N]> {
-        let light = *self.part(i, site).lock().expect("light").get(&site.map(|c| c as i32))?;
-        Some(light.map(|rgb| rgb.map(full)))
-    }
-
-    /** Keeps the light found at `site` of level `i`, its part forgotten first if full. */
-    fn keep(&self, i: usize, site: [i64; 3], light: [Rgb; N]) {
-        let mut part = self.part(i, site).lock().expect("light");
-        if part.len() >= KEPT_SITES / PARTS {
-            part.clear();
-        }
-        part.insert(site.map(|c| c as i32), light.map(|rgb| rgb.map(half)));
+    /** Forgets the tiles `far` says are far, by level and key, to make again if asked. */
+    pub fn forget(&self, far: impl Fn(usize, [i64; 3]) -> bool) {
+        self.tiles.lock().expect("tiles").retain(|&(level, key), _| !far(level, key));
     }
 }
 
@@ -167,12 +129,13 @@ impl Hasher for Fast {
 
 type Map<K, V> = HashMap<K, V, BuildHasherDefault<Fast>>;
 
-/** A level's voxels, generated in tiles as they are needed. */
+/** A level's voxels, generated in tiles as they are needed, and the light found at its sites. */
 struct Level {
     heights: (i64, i64),
-    tiles: Map<[i64; 3], Tile>,
     /** The tile read last, and its key: most reads are in it. */
     last: Option<([i64; 3], Tile)>,
+    /** The light coming to sites from each direction, as found (KEPT_SITES). */
+    found: Map<[i64; 3], [Rgb; N]>,
 }
 
 pub struct Light {
@@ -206,7 +169,7 @@ impl Light {
     pub fn new(world: World, shared: Shared) -> Light {
         let Brightness { sky, sun, glow } = shared.brightness;
         let coarsest = GRID_LEVELS as u32 - 1;
-        let levels = (0..=coarsest).map(|level| Level { heights: world.heights_at(level), tiles: Map::default(), last: None }).collect();
+        let levels = (0..=coarsest).map(|level| Level { heights: world.heights_at(level), last: None, found: Map::default() }).collect();
         let unit = DIRECTIONS.map(|d| normalize(d.map(|v| v as f64)));
         let cosines = unit.map(|normal| {
             let weights = unit.map(|u| dot(u, normal).max(0.0));
@@ -262,28 +225,24 @@ impl Light {
         let key = site.map(|v| v.div_euclid(TILE));
         let level = &mut self.levels[i];
         if level.last.as_ref().is_none_or(|(k, _)| *k != key) {
-            let tile = match level.tiles.get(&key) {
-                Some(tile) => tile.clone(),
-                None => {
-                    let (generator, heights) = (&self.world.generator, level.heights);
-                    let tile = self.shared.get(i, key, || make_tile(generator, i as u32, heights, key));
-                    level.tiles.insert(key, tile.clone());
-                    tile
-                }
-            };
-            level.last = Some((key, tile));
+            let (generator, heights) = (&self.world.generator, level.heights);
+            level.last = Some((key, self.shared.get(i, key, || make_tile(generator, i as u32, heights, key))));
         }
         level.last.as_ref().expect("held").1.get().expect("made")
     }
 
     /** The light coming to site `p` of level `i` from every direction (`along`). */
     fn light(&mut self, i: usize, p: [i64; 3]) -> [Rgb; N] {
-        if let Some(light) = self.shared.found(i, p) {
-            return light;
+        if let Some(light) = self.levels[i].found.get(&p) {
+            return *light;
         }
         let near = (i + 1 < self.levels.len()).then(|| self.near(i + 1, p));
         let light = std::array::from_fn(|d| self.along(i, p, d, near.as_ref()));
-        self.shared.keep(i, p, light);
+        let found = &mut self.levels[i].found;
+        if found.len() == KEPT_SITES {
+            found.clear();
+        }
+        found.insert(p, light);
         light
     }
 
@@ -413,19 +372,16 @@ impl Light {
      */
     pub fn faces(&mut self, level: u32, site: [i64; 3]) -> FaceLight {
         let i = level as usize;
-        let out = if self.surface(i, site) {
-            self.lit(i, site)
-        } else {
-            let mut lit = Vec::new();
-            for n in FACES.map(|f| add(site, f)) {
-                if self.shown(i, n) && self.surface(i, n) {
-                    lit.push(self.lit(i, n));
-                }
+        if self.surface(i, site) {
+            return self.lit(i, site);
+        }
+        let mut lit = Vec::new();
+        for n in FACES.map(|f| add(site, f)) {
+            if self.shown(i, n) && self.surface(i, n) {
+                lit.push(self.lit(i, n));
             }
-            std::array::from_fn(|f| std::array::from_fn(|c| lit.iter().map(|l| l[f][c]).sum::<f32>() / lit.len().max(1) as f32))
-        };
-        self.forget();
-        out
+        }
+        std::array::from_fn(|f| std::array::from_fn(|c| lit.iter().map(|l| l[f][c]).sum::<f32>() / lit.len().max(1) as f32))
     }
 
     /**
@@ -440,21 +396,10 @@ impl Light {
         let through = self.open(i, site) > 0.0;
         let out: [bool; N] = std::array::from_fn(|f| through || self.open(i, add(site, FACES[f])) > 0.0);
         let count = out.iter().filter(|&&o| o).count();
-        let seen = (count > 0).then(|| {
+        (count > 0).then(|| {
             let lit = self.lit(i, site);
             std::array::from_fn(|c| (0..N).filter(|&f| out[f]).map(|f| lit[f][c]).sum::<f32>() / count as f32)
-        });
-        self.forget();
-        seen
-    }
-
-    /** Forgets the tiles of levels that grew too many, to find them again if asked. */
-    fn forget(&mut self) {
-        for level in &mut self.levels {
-            if level.tiles.len() > KEPT_TILES {
-                level.tiles.clear();
-            }
-        }
+        })
     }
 
     /** Whether the voxel at `site` of level `i` has an empty neighbour. */
@@ -535,22 +480,6 @@ pub fn tile_box((low, high): (i64, i64), key: [i64; 3]) -> Box3 {
 /** Tile `key` of `level` of the world `generator` makes, of `heights`, as hosts make it (generate_shown). */
 pub fn make_tile(generator: &Generator, level: u32, heights: (i64, i64), key: [i64; 3]) -> VoxelGrid {
     generate_shown(generator, &tile_box(heights, key), level)
-}
-
-/** `x` as a half-precision float's bits, rounded; 0 below its normal numbers, its largest above them. */
-fn half(x: f32) -> u16 {
-    let bits = x.to_bits();
-    let exponent = (bits >> 23) as i32 - 127 + 15;
-    if x <= 0.0 || exponent <= 0 {
-        return 0;
-    }
-    let rounded = (exponent as u32) << 10 | (bits >> 13) & 0x3ff;
-    (rounded + (bits >> 12 & 1)).min(0x7bff) as u16
-}
-
-/** The float whose bits `half` gave. */
-fn full(h: u16) -> f32 {
-    if h == 0 { 0.0 } else { f32::from_bits((u32::from(h >> 10) + 112) << 23 | u32::from(h & 0x3ff) << 13) }
 }
 
 fn add(a: [i64; 3], b: [i64; 3]) -> [i64; 3] {
@@ -682,14 +611,6 @@ mod tests {
     fn ground(x: i64, z: i64) -> [i64; 3] {
         assert!((x + z) % 2 != 0, "({x}, {z}) is not on top");
         [x, -1, z]
-    }
-
-    #[test]
-    fn halves_keep_three_digits() {
-        for x in [0.0, 1e-4, 0.5, 1.0, 1.9995, 3.0, 250.0, 6e4] {
-            let y = full(half(x));
-            assert!((y - x).abs() <= x / 2048.0, "{x} came back as {y}");
-        }
     }
 
     #[test]

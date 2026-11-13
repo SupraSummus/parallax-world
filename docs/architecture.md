@@ -751,7 +751,8 @@ and a slab of medium to exp(−extinction · path), as the splats' test does.
 
 The panel picks the lighting apart from the engine (`Lighting`):
 voxels shaded by the way their faces face, or computed,
-by worldgen's `Light`, one model and one cache of light (`Shared`) for every engine;
+by worldgen's `Light`, one model and one cache of tiles (`Shared`) for every engine,
+kept as far around the camera as the world keeps its own;
 each engine only shows it its own way.
 Shaded, the world's tiles are made apart from that cache,
 not kept twice (`Lit` in `native/src/world.rs`).

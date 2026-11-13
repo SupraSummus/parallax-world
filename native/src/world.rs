@@ -9,7 +9,8 @@
 //! what is in view, most wanted first, replacing the previous list; then
 //! the rest within reach of the camera of each level it reads (GRID_REACH,
 //! or as far as the voxels engine's rays read, voxels::READ), so that
-//! turning finds them made. Tiles far from the camera are dropped. A tile
+//! turning finds them made. Tiles far from the camera are dropped, from
+//! the light's (Shared) too. A tile
 //! never changes, so a chunk baked once all the tiles it reads are in
 //! stays right whatever comes after (bake's Tiles). Given light (worldgen's Shared),
 //! and wanted lit, the tiles are those the bakers' Lights read, made once;
@@ -333,10 +334,14 @@ impl World {
             self.tiles[level].insert(id, tile);
             changed[level] = true;
         }
+        let far = |level: usize, id: TileId| distance(level, camera, id) > keep + TILE as f64;
         for (level, tiles) in self.tiles.iter_mut().enumerate() {
             let before = tiles.len();
-            tiles.retain(|&id, _| distance(level, camera, id) <= keep + TILE as f64);
+            tiles.retain(|&id, _| !far(level, id));
             changed[level] |= tiles.len() < before;
+        }
+        if let Some(shared) = &self.shared {
+            shared.forget(|level, key| far(level, key.map(|k| k as i32)));
         }
 
         let mut list = VecDeque::new();
