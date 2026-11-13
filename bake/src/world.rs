@@ -74,6 +74,8 @@ pub type Faces = [u8; FACE_KINDS];
  * faces' materials, four to a word, the first in the lowest byte.
  */
 pub const FACE_WORDS: usize = 4;
+/** Words per site in a grid's `glow`: its index in `cells`, then what it glows per channel. */
+pub const GLOW_WORDS: usize = 4;
 
 /** A site's words in `faces`: its index in `cells` and its faces' materials. */
 pub fn face_words(index: usize, faces: &Faces) -> [u32; FACE_WORDS] {
@@ -100,6 +102,8 @@ pub struct Grid {
     pub faces: Vec<u32>,
     /** By index in `cells`: each voxel's alpha, 0 where there is none; empty if all are whole. */
     pub alpha: Vec<u8>,
+    /** The sites that glow, shown or not, by index in `cells`: GLOW_WORDS each, for the light (worldgen's light.rs). */
+    pub glow: Vec<u32>,
 }
 
 /** The words after site index `i` in `words`, `per` words a site, sorted by index; None if it has none. */
@@ -127,6 +131,7 @@ impl Grid {
             cells: vec![0; used * BRICK_SITES],
             faces: Vec::new(),
             alpha: Vec::new(),
+            glow: Vec::new(),
         }
     }
 
@@ -173,6 +178,14 @@ impl Grid {
         match self.cells[i] {
             0 => 0,
             _ => self.alpha.get(i).copied().unwrap_or(ALPHA),
+        }
+    }
+
+    /** What site (x, y, z) glows per channel (worldgen's GLOW_ONE), shown or not; nothing outside. */
+    pub fn glow(&self, x: i32, y: i32, z: i32) -> [u32; 3] {
+        match self.index(x, y, z).and_then(|i| words_of(&self.glow, GLOW_WORDS, i)) {
+            Some(&[r, g, b]) => [r, g, b],
+            _ => [0; 3],
         }
     }
 

@@ -10,10 +10,11 @@
 //! what comes from past it gets through. So each level's light comes from
 //! coarser ones only, the coarsest's from the sky.
 //!
-//! The grids say how light sees each site, whether a voxel is shown there
-//! or not (VoxelGrid's `pieces`, `medium`, `glow`): a coarse site a small
-//! lamp is in stops little, and glows as bright as the lamp, on average
-//! over its faces.
+//! Light sees the voxels as the eye does, in the grids hosts draw (Grid):
+//! a coarse site its pieces fill in part shows a whole voxel, or nothing,
+//! as often (VoxelGrid::show). What glows glows shown or not: a coarse
+//! site a small lamp is in glows as bright as the lamp, on average over
+//! its faces.
 
 use std::collections::{BTreeMap, HashMap};
 use std::hash::{BuildHasherDefault, Hasher};
@@ -24,7 +25,7 @@ use bake::slicing::GRID_LEVELS;
 
 use crate::World;
 use crate::generator::{Generator, generate_shown, materials_of};
-use crate::grid::{ALPHA, BRICK, Box3, GLOW_ONE, VoxelGrid};
+use crate::grid::{ALPHA, BRICK, Box3, GLOW_ONE, Grid};
 use crate::picture::{FACES, Picture, nearest_site};
 
 type Rgb = [f32; 3];
@@ -43,14 +44,15 @@ pub const TILE: i64 = 128;
 const KEPT_SITES: usize = 1 << 13;
 
 /** A tile, made once: those that want it while it is made wait. */
-type Tile = Arc<OnceLock<VoxelGrid>>;
+type Tile = Arc<OnceLock<Arc<Grid>>>;
 /** Tiles by level and key. */
 type Tiles = Map<(usize, [i64; 3]), Tile>;
 
 /**
  * What the Lights of one world under one brightness share (a thread's
  * each), and with its host: tiles of every level, generated once, by
- * whichever needs one first, kept till the host forgets them (`forget`).
+ * whichever needs one first, kept till the host forgets them (`forget`);
+ * the host draws them too.
  */
 #[derive(Clone)]
 pub struct Shared {
@@ -73,17 +75,10 @@ impl Shared {
         Shared { brightness, tiles: self.tiles.clone() }
     }
 
-    /** Tile `key` of `level` of the world `generator` makes, of `heights` (World::heights_at), as its Lights read it. */
-    pub fn tile(&self, generator: &Generator, level: u32, heights: (i64, i64), key: [i64; 3]) -> VoxelGrid {
-        let tile = self.get(level as usize, key, || make_tile(generator, level, heights, key));
-        tile.get().expect("made").clone()
-    }
-
-    /** Tile `key` of level `i`, made by `make` if not yet. */
-    fn get(&self, i: usize, key: [i64; 3], make: impl FnOnce() -> VoxelGrid) -> Tile {
-        let tile = self.tiles.lock().expect("tiles").entry((i, key)).or_default().clone();
-        tile.get_or_init(make);
-        tile
+    /** Tile `key` of `level` of the world `generator` makes, of `heights` (World::heights_at). */
+    pub fn tile(&self, generator: &Generator, level: u32, heights: (i64, i64), key: [i64; 3]) -> Arc<Grid> {
+        let tile = self.tiles.lock().expect("tiles").entry((level as usize, key)).or_default().clone();
+        tile.get_or_init(|| Arc::new(make_tile(generator, level, heights, key))).clone()
     }
 
     /** Forgets the tiles `far` says are far, by level and key, to make again if asked. */
@@ -133,7 +128,7 @@ type Map<K, V> = HashMap<K, V, BuildHasherDefault<Fast>>;
 struct Level {
     heights: (i64, i64),
     /** The tile read last, and its key: most reads are in it. */
-    last: Option<([i64; 3], Tile)>,
+    last: Option<([i64; 3], Arc<Grid>)>,
     /** The light coming to sites from each direction, as found (KEPT_SITES). */
     found: Map<[i64; 3], [Rgb; N]>,
 }
@@ -195,40 +190,35 @@ impl Light {
         Light { world, shared, levels, unit, cosines, enters, albedo, glow, sky: skies, background }
     }
 
-    /** Whether a voxel is shown at `site` of level `i`, its tile generated if not yet. */
-    fn shown(&mut self, i: usize, [x, y, z]: [i64; 3]) -> bool {
-        let heights = self.levels[i].heights;
-        (heights.0..heights.1).contains(&y) && self.hold(i, [x, y, z]).get(x, y, z) != 0
+    /** Whether a whole voxel, one that lets nothing through, is at `site` of level `i`. */
+    fn whole(&mut self, i: usize, site: [i64; 3]) -> bool {
+        self.open(i, site) <= 0.0
     }
 
-    /** How light sees face `face` of `site` of level `i`: its pieces and its medium, each how much of it stops (alpha) and its colour; what it glows. */
-    fn see(&mut self, i: usize, [x, y, z]: [i64; 3], face: usize) -> ([(f32, Rgb); 2], Rgb) {
-        let heights = self.levels[i].heights;
-        if !(heights.0..heights.1).contains(&y) {
-            return ([(0.0, [0.0; 3]); 2], [0.0; 3]);
-        }
-        let (parts, glow) = self.hold(i, [x, y, z]).light(x, y, z, face);
-        (parts.map(|(alpha, id)| (alpha as f32 / ALPHA as f32, self.albedo[id as usize])), glow.map(|g| g as f32 * self.glow))
+    /** How light sees face `face` of `site` of level `i`: how much of it stops (alpha) and its colour; what it glows. */
+    fn see(&mut self, i: usize, site: [i64; 3], face: usize) -> ((f32, Rgb), Rgb) {
+        let Some(([x, y, z], grid)) = self.hold(i, site) else { return ((0.0, [0.0; 3]), [0.0; 3]) };
+        let ((id, alpha), glow) = (grid.face(x, y, z, face), grid.glow(x, y, z));
+        ((alpha as f32 / ALPHA as f32, self.albedo[id as usize]), glow.map(|g| g as f32 * self.glow))
     }
 
     /** How much of what comes through `site` of level `i` it lets through. */
-    fn open(&mut self, i: usize, [x, y, z]: [i64; 3]) -> f32 {
-        let heights = self.levels[i].heights;
-        if !(heights.0..heights.1).contains(&y) {
-            return 1.0;
-        }
-        1.0 - self.hold(i, [x, y, z]).alpha(x, y, z) as f32 / ALPHA as f32
+    fn open(&mut self, i: usize, site: [i64; 3]) -> f32 {
+        let Some(([x, y, z], grid)) = self.hold(i, site) else { return 1.0 };
+        1.0 - grid.get(x, y, z).1 as f32 / ALPHA as f32
     }
 
-    /** The tile of level `i` that holds `site`, from those shared, generated if not yet. */
-    fn hold(&mut self, i: usize, site: [i64; 3]) -> &VoxelGrid {
-        let key = site.map(|v| v.div_euclid(TILE));
+    /** The tile of level `i` that holds `site`, from those shared, generated if not yet, and `site` as it takes it; none above or below every voxel. */
+    fn hold(&mut self, i: usize, site: [i64; 3]) -> Option<([i32; 3], &Grid)> {
         let level = &mut self.levels[i];
-        if level.last.as_ref().is_none_or(|(k, _)| *k != key) {
-            let (generator, heights) = (&self.world.generator, level.heights);
-            level.last = Some((key, self.shared.get(i, key, || make_tile(generator, i as u32, heights, key))));
+        if !(level.heights.0..level.heights.1).contains(&site[1]) {
+            return None;
         }
-        level.last.as_ref().expect("held").1.get().expect("made")
+        let key = site.map(|v| v.div_euclid(TILE));
+        if level.last.as_ref().is_none_or(|(k, _)| *k != key) {
+            level.last = Some((key, self.shared.tile(&self.world.generator, i as u32, level.heights, key)));
+        }
+        Some((site.map(|v| v as i32), &level.last.as_ref().expect("held").1))
     }
 
     /** The light coming to site `p` of level `i` from every direction (`along`). */
@@ -262,13 +252,12 @@ impl Light {
         for step in 1..=TOP_STEPS {
             let from = q;
             q = add(q, v);
-            let ([pieces, medium], glow) = self.see(i, q, self.enters[d]);
-            let alpha = pieces.0 + medium.0;
+            let ((alpha, colour), glow) = self.see(i, q, self.enters[d]);
             let on = match near {
                 Some(near) if alpha > 0.0 => near.on[d],
                 _ => [0.0; 3],
             };
-            (0..3).for_each(|c| sum[c] += through * (glow[c] + (pieces.0 * pieces.1[c] + medium.0 * medium.1[c]) * on[c]));
+            (0..3).for_each(|c| sum[c] += through * (glow[c] + alpha * colour[c] * on[c]));
             through *= 1.0 - alpha;
             // Nothing more gets through, or nothing more is met: below every voxel and not going up, or above them and not going down.
             if through < 1.0 / ALPHA as f32 || q[1] < heights.0 - 1 && v[1] <= 0 {
@@ -367,8 +356,8 @@ impl Light {
     /**
      * The light from each face of the voxel at `site` of `level`: its
      * colour times the light on it, and what it glows. A voxel with no
-     * empty neighbour (shown where a slice cuts it) takes the mean of its
-     * neighbours' that have one, or none.
+     * neighbour light gets through (shown where a slice cuts it) takes the
+     * mean of its neighbours' that have one, or none.
      */
     pub fn faces(&mut self, level: u32, site: [i64; 3]) -> FaceLight {
         let i = level as usize;
@@ -377,7 +366,7 @@ impl Light {
         }
         let mut lit = Vec::new();
         for n in FACES.map(|f| add(site, f)) {
-            if self.shown(i, n) && self.surface(i, n) {
+            if self.whole(i, n) && self.surface(i, n) {
                 lit.push(self.lit(i, n));
             }
         }
@@ -402,20 +391,17 @@ impl Light {
         })
     }
 
-    /** Whether the voxel at `site` of level `i` has an empty neighbour. */
+    /** Whether the voxel at `site` of level `i` has a neighbour light gets through. */
     fn surface(&mut self, i: usize, site: [i64; 3]) -> bool {
-        FACES.iter().any(|f| !self.shown(i, add(site, *f)))
+        FACES.iter().any(|f| !self.whole(i, add(site, *f)))
     }
 
     /** The light from each face of the voxel at `site` of level `i`, on its surface. */
     fn lit(&mut self, i: usize, site: [i64; 3]) -> FaceLight {
         let light = self.light(i, site);
-        let shown = self.shown(i, site);
         std::array::from_fn(|f| {
             let on = self.on_face(&light, f);
-            // The voxel is the site's pieces where they show, else its medium.
-            let (parts, glow) = self.see(i, site, f);
-            let (_, colour) = parts[usize::from(!shown)];
+            let ((_, colour), glow) = self.see(i, site, f);
             std::array::from_fn(|c| colour[c] * on[c] + glow[c])
         })
     }
@@ -425,7 +411,7 @@ impl Light {
         let i = level as usize;
         let mut normal = [0.0; 3];
         for face in FACES {
-            if !self.shown(i, add(site, face)) {
+            if !self.whole(i, add(site, face)) {
                 (0..3).for_each(|c| normal[c] += face[c] as f64);
             }
         }
@@ -477,9 +463,9 @@ pub fn tile_box((low, high): (i64, i64), key: [i64; 3]) -> Box3 {
     Box3 { min: [x, y0, z], max: [x + TILE, y1.max(y0), z + TILE] }
 }
 
-/** Tile `key` of `level` of the world `generator` makes, of `heights`, as hosts make it (generate_shown). */
-pub fn make_tile(generator: &Generator, level: u32, heights: (i64, i64), key: [i64; 3]) -> VoxelGrid {
-    generate_shown(generator, &tile_box(heights, key), level)
+/** Tile `key` of `level` of the world `generator` makes, of `heights`, as hosts make and draw it (generate_shown), see-through ones too. */
+pub fn make_tile(generator: &Generator, level: u32, heights: (i64, i64), key: [i64; 3]) -> Grid {
+    generate_shown(generator, &tile_box(heights, key), level).into_grid(true)
 }
 
 fn add(a: [i64; 3], b: [i64; 3]) -> [i64; 3] {
@@ -730,7 +716,7 @@ mod tests {
 
     /** What the open faces of the voxel at `site` (level 0) send out by Light, on average. */
     fn lit(light: &mut Light, site: [i64; 3]) -> Rgb {
-        let open: Vec<usize> = (0..N).filter(|&f| !light.shown(0, add(site, FACES[f]))).collect();
+        let open: Vec<usize> = (0..N).filter(|&f| !light.whole(0, add(site, FACES[f]))).collect();
         let faces = light.faces(0, site);
         std::array::from_fn(|c| open.iter().map(|&f| faces[f][c]).sum::<f32>() / open.len().max(1) as f32)
     }

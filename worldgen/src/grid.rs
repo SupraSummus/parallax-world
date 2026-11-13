@@ -278,18 +278,17 @@ impl VoxelGrid {
 
     /**
      * Holds the sites of only the bricks that are in `bricks` and `keep`
-     * (by their sites' materials), together in their order in `cells`;
-     * the others' bricks become empty.
+     * (by where their sites start in `cells`, in bricks), together in
+     * their order in `cells`; the others' bricks become empty.
      */
-    fn hold(&mut self, keep: impl Fn(&[u8]) -> bool) {
+    fn hold(&mut self, keep: impl Fn(usize) -> bool) {
         let mut moved = vec![None; self.cells.len() / BRICK_SITES];
         for &at in &self.bricks {
             if let Ok(at) = usize::try_from(at) {
                 moved[at] = Some(0);
             }
         }
-        let held: Vec<usize> =
-            (0..moved.len()).filter(|&at| moved[at].is_some() && keep(&self.cells[at * BRICK_SITES..][..BRICK_SITES])).collect();
+        let held: Vec<usize> = (0..moved.len()).filter(|&at| moved[at].is_some() && keep(at)).collect();
         moved.fill(None);
         for (to, &from) in held.iter().enumerate() {
             moved[from] = Some(to);
@@ -349,6 +348,7 @@ impl VoxelGrid {
      * The voxels as the baker takes them, bricks with none left out: each
      * site's pieces where shown (`show`), whole; and `see_through`, for a
      * host that draws alpha, elsewhere its medium, as much as it stops.
+     * What glows, shown or not, for the light: its bricks are kept too.
      */
     pub fn into_grid(mut self, see_through: bool) -> Grid {
         // Faces are the pieces': none where they don't show, though its medium may.
@@ -364,12 +364,20 @@ impl VoxelGrid {
                 }
             }
         }
-        self.hold(|sites| sites.iter().any(|&c| c != 0));
+        let keep: Vec<bool> = (0..self.cells.len() / BRICK_SITES)
+            .map(|at| {
+                let sites = at * BRICK_SITES..(at + 1) * BRICK_SITES;
+                self.cells[sites.clone()].iter().any(|&c| c != 0) || self.glow.range(sites).next().is_some()
+            })
+            .collect();
+        self.hold(|at| keep[at]);
         let faces = self.faces.iter().flat_map(|(&i, faces)| face_words(i, faces));
+        let glow = self.glow.iter().flat_map(|(&i, &[r, g, b])| [i as u32, r, g, b]);
         Grid {
             min: self.min.map(|v| v as i32),
             n: self.n.map(|v| v as i32),
             faces: faces.collect(),
+            glow: glow.collect(),
             bricks: self.bricks,
             alpha: if see_through { self.medium.alpha } else { Vec::new() },
             cells: self.cells,
@@ -383,7 +391,7 @@ mod tests {
 
     #[test]
     fn faces_are_set_with_their_site_and_go_with_it() {
-        let mut grid = VoxelGrid::new(&Box3 { min: [0; 3], max: [16, 8, 8] });
+        let mut grid = VoxelGrid::new(&Box3 { min: [0; 3], max: [24, 8, 8] });
         let faces: Faces = std::array::from_fn(|k| 2 + (k % 2) as u8);
         grid.set_faces(2, 2, 2, 2, faces);
         grid.set_faces(4, 2, 2, 2, [2; 12]);
@@ -393,11 +401,15 @@ mod tests {
         assert_eq!((grid.faces.len(), grid.face(2, 2, 2, 1)), (1, 5));
 
         // Handed over with its first brick emptied, that brick is left out, and the next moves with its sites' faces.
+        // The last, with no voxel but a site that glows, is kept for its glow.
         grid.set(2, 2, 2, 0);
         grid.set(4, 2, 2, 0);
+        let lamp = grid.index(18, 2, 2).unwrap();
+        grid.glow.insert(lamp, [1, 2, 3]);
         let whole = grid.into_grid(false);
-        assert_eq!((whole.cells.len(), whole.get(2, 2, 2)), (BRICK_SITES, (0, 0)));
+        assert_eq!((whole.cells.len(), whole.get(2, 2, 2)), (2 * BRICK_SITES, (0, 0)));
         assert_eq!([0, 1].map(|k| whole.face(10, 2, 2, k)), [(2, ALPHA), (3, ALPHA)]);
+        assert_eq!((whole.get(18, 2, 2), whole.glow(18, 2, 2), whole.glow(10, 2, 2)), ((0, 0), [1, 2, 3], [0; 3]));
     }
 
     #[test]
