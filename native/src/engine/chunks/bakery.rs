@@ -157,6 +157,7 @@ impl Drop for Bakery {
 }
 
 fn work(queue: &Queue, send: &Sender<(Request, Baked)>, grids: &Grids, mut baker: Baker, delivered: &dyn Fn()) {
+    crate::world::behind_drawing();
     // The baker's light while it bakes unlit.
     let mut aside = None;
     // The tiles of each level the baker has: none yet.

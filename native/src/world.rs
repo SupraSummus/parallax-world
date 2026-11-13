@@ -154,13 +154,20 @@ fn around(level: usize, camera: Vec3, reach: f64) -> Vec<(f64, TileId)> {
     around
 }
 
-fn work(make: Make, seed: u64, heights: &Heights, queue: &(Mutex<Queue>, Condvar), send: &Sender<Made>) {
-    // Behind the thread that draws, which waits for no tile: as many of these as cores would else keep it from its own.
+/**
+ * Puts the calling thread, a worker, behind the thread that draws, which
+ * waits for none: as many workers as cores would else keep it from its own.
+ */
+pub fn behind_drawing() {
     // SAFETY: setpriority only reads its arguments; on Linux, who 0 is this thread alone.
     #[cfg(target_os = "linux")]
     unsafe {
         libc::setpriority(libc::PRIO_PROCESS, 0, 10);
     }
+}
+
+fn work(make: Make, seed: u64, heights: &Heights, queue: &(Mutex<Queue>, Condvar), send: &Sender<Made>) {
+    behind_drawing();
     // Made on the thread: a generator is not Send.
     let generator = make(seed).generator;
     // Made once there are tiles to light, and again when the light changes.

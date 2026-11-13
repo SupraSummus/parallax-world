@@ -244,7 +244,7 @@ mod tests {
         let look = Look { camera: std::array::from_fn(|i| look.camera[i] + forward[i] * 7.0), ..look };
         let after = ids(&complete(&mut chunks, &mut world, &look));
         let kept = after.intersection(&before).count();
-        // Level 0's cells, which change most, are over half the frame's in the moor's heather and mist, seen through.
+        // Level 0's cells, which change most, are many of the frame's in the moor's heather.
         assert!(kept * 10 > after.len() * 6, "{kept} of {} kept", after.len());
     }
 

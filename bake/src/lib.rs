@@ -241,12 +241,12 @@ impl Baker {
 
     /**
      * Bakes a cell chunk (lod.rs) of view face `face` over the plane through
-     * its site: if `relief`, the relief of its whole voxels (cell_relief), as
-     * `columns`, else its whole voxels a ray can enter as splats
-     * (cell_splats), no columns; its see-through ones as `medium`
-     * (cell_medium); and where they may be drawn. Unclipped: no other chunk
-     * of its level draws its voxels, and depth decides between them. No
-     * mask: what is covered is left to the GPU.
+     * its site: of its whole voxels, if `relief`, their relief
+     * (cell_relief), as `columns`, else those a ray can enter as splats
+     * (cell_splats), no columns; or, its medium's chunk, its see-through
+     * ones as `medium` (cell_medium); and where they may be drawn.
+     * Unclipped: no other chunk of its level draws its voxels, and depth
+     * decides between them. No mask: what is covered is left to the GPU.
      * Its numbers are its splats': depth past the plane in half layers, and
      * colour.
      * Its medium is by slabs of its columns (slab_layers), whose halves'
@@ -266,10 +266,11 @@ impl Baker {
         let tiles = Arc::clone(&self.grids[level]);
         let reader = Reader::new(&tiles, self.lattices[face]);
         let (from, to) = chunk.bounds();
-        // Its medium's slabs, those of whose middle sites it holds, and their neighbours.
-        let around =
-            surface(&reader, &self.geometry, [from[0] - 2, from[1] - 1, from[2] - m], [to[0] + 2, to[1] + 1, to[2] + m], |_, _, _| true);
-        let whole: Vec<_> = surface(&reader, &self.geometry, from, to, holds).into_iter().filter(|v| v.alpha == ALPHA).collect();
+        let whole: Vec<_> = if chunk.medium {
+            Vec::new()
+        } else {
+            surface(&reader, &self.geometry, from, to, holds).into_iter().filter(|v| v.alpha == ALPHA).collect()
+        };
         let (whole, hexagons) = if relief { (whole, Vec::new()) } else { (Vec::new(), whole) };
         // From a site on along the axis, the last whole voxel before any that is not, a cell deep past the cell at most.
         let runs_on = |[a, b, mut c]: [i32; 3]| {
@@ -301,10 +302,16 @@ impl Baker {
         self.blocks.clear();
         let numbers = |s: &Splat| [s.depth as f32, f32::from_bits(s.colour)];
         let baked = self.numbers(level, min_x, max_y, extent, [0, 0], 1.0, numbers);
-        let slab = slab_layers(m);
         let mut parts = std::mem::take(&mut self.medium);
-        self.paint(face, level, |_, geometry, colour| cell_medium(&mut parts, geometry, colour, &around, centre, slab, &holds));
-        parts.iter_mut().for_each(|p| p.column = [p.column[0] - a, p.column[1] - b]);
+        parts.clear();
+        if chunk.medium {
+            // Its slabs, those of whose middle sites it holds, and their neighbours.
+            let (lo, hi) = ([from[0] - 2, from[1] - 1, from[2] - m], [to[0] + 2, to[1] + 1, to[2] + m]);
+            let around = surface(&reader, &self.geometry, lo, hi, |_, _, _| true);
+            let slab = slab_layers(m);
+            self.paint(face, level, |_, geometry, colour| cell_medium(&mut parts, geometry, colour, &around, centre, slab, &holds));
+            parts.iter_mut().for_each(|p| p.column = [p.column[0] - a, p.column[1] - b]);
+        }
         self.medium = parts;
         self.owners = owners;
         baked

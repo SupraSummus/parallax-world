@@ -18,7 +18,7 @@
 //! (`place`), and culls the clusters, all there are, that its eye does not
 //! draw.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::ops::Range;
 
 use bake::Medium;
@@ -517,7 +517,16 @@ struct Resident {
     /** Its record, and its tint for each of Colours, by Colours::ALL. */
     record: GpuRecord,
     tints: [u32; 3],
+    /** Whether the frame no longer draws it: it is to be dropped. */
+    going: bool,
 }
+
+/**
+ * Chunks a frame uploads or drops at most when it follows the frame's
+ * changes: a face picked anew brings thousands, tens of milliseconds of
+ * the main thread's at once. Those that came go first.
+ */
+const CHANGES: usize = 1024;
 
 /**
  * A buffer of items `stride` bytes long, ranges of them allocated and
@@ -530,10 +539,10 @@ struct Arena {
     stride: u64,
     usage: wgpu::BufferUsages,
     buffer: wgpu::Buffer,
-    /** Items the buffer holds, the end of those in use, and free ranges below it. */
+    /** Items the buffer holds, the end of those in use, and the free ranges below it. */
     capacity: u32,
     top: u32,
-    free: Vec<Range<u32>>,
+    free: Free,
     /** Bytes to write, by the item they start at: a later write there replaces an earlier. */
     writes: BTreeMap<u32, Vec<u8>>,
     /** The words of the writes staged last, and their runs (`scatter` in compositor.wgsl). */
@@ -547,7 +556,7 @@ impl Arena {
         let capacity = capacity.min(Arena::most(device, stride, usage));
         let buffer = buffer(device, label, capacity as u64 * stride, usage);
         let (words, runs) = (storage(device, label, 1 << 16), storage(device, label, 1 << 12));
-        Arena { label, stride, usage, buffer, capacity, top: 0, free: Vec::new(), writes: BTreeMap::new(), words, runs }
+        Arena { label, stride, usage, buffer, capacity, top: 0, free: Free::default(), writes: BTreeMap::new(), words, runs }
     }
 
     /** Writes `bytes` from item `at` on, once staged. */
@@ -624,14 +633,8 @@ impl Arena {
         if count == 0 {
             return Some(0..0);
         }
-        if let Some(k) = self.free.iter().position(|r| r.len() >= count as usize) {
-            let r = self.free[k].clone();
-            if r.len() == count as usize {
-                self.free.remove(k);
-            } else {
-                self.free[k].start += count;
-            }
-            return Some(r.start..r.start + count);
+        if let Some(r) = self.free.take(count) {
+            return Some(r);
         }
         if self.top + count > self.capacity {
             self.grow(device, encoder, (self.capacity * 2).max(self.top + count));
@@ -648,17 +651,64 @@ impl Arena {
             return;
         }
         self.writes.remove(&r.start);
-        let at = self.free.partition_point(|f| f.start < r.start);
-        self.free.insert(at, r);
-        if at + 1 < self.free.len() && self.free[at].end == self.free[at + 1].start {
-            self.free[at].end = self.free.remove(at + 1).end;
+        let r = self.free.give(r);
+        if r.end == self.top {
+            self.free.remove(r.clone());
+            self.top = r.start;
         }
-        if at > 0 && self.free[at - 1].end == self.free[at].start {
-            self.free[at - 1].end = self.free.remove(at).end;
+    }
+}
+
+/**
+ * Free ranges, none touching another: by start, and by length, so that
+ * taking the least that fits and giving one back, merged with its
+ * neighbours, cost a logarithm of how many there are (thousands).
+ */
+#[derive(Default)]
+struct Free {
+    /** By start, each's end. */
+    ends: BTreeMap<u32, u32>,
+    /** Each's (length, start). */
+    lengths: BTreeSet<(u32, u32)>,
+}
+
+impl Free {
+    /** `count` items of the least range that holds them, if any does. */
+    fn take(&mut self, count: u32) -> Option<Range<u32>> {
+        let &(_, start) = self.lengths.range((count, 0)..).next()?;
+        let end = self.ends[&start];
+        self.remove(start..end);
+        if end - start > count {
+            self.add(start + count..end);
         }
-        if let Some(last) = self.free.pop_if(|f| f.end == self.top) {
-            self.top = last.start;
+        Some(start..start + count)
+    }
+
+    /** Adds `r`, merged with the free ranges either side: the range it is now part of. */
+    fn give(&mut self, mut r: Range<u32>) -> Range<u32> {
+        if let Some(end) = self.ends.get(&r.end).copied() {
+            self.remove(r.end..end);
+            r.end = end;
         }
+        if let Some((&start, &end)) = self.ends.range(..r.start).next_back()
+            && end == r.start
+        {
+            self.remove(start..end);
+            r.start = start;
+        }
+        self.add(r.clone());
+        r
+    }
+
+    fn add(&mut self, r: Range<u32>) {
+        self.ends.insert(r.start, r.end);
+        self.lengths.insert((r.end - r.start, r.start));
+    }
+
+    /** Removes free range `r`. */
+    fn remove(&mut self, r: Range<u32>) {
+        self.ends.remove(&r.start);
+        self.lengths.remove(&(r.end - r.start, r.start));
     }
 }
 
@@ -723,8 +773,13 @@ pub struct Compositor {
     belt: wgpu::util::StagingBelt,
     /** The number of the frame prepared last, and the colours: until they change, a frame is its globals. */
     prepared: Option<(u64, Colours)>,
-    /** The frame's chunks the buffers had no room for, in its order: they come first once there is. */
-    waiting: Vec<Placement>,
+    /**
+     * The frame's chunks to upload yet, in its order, and to drop (those
+     * resident that it no longer draws), as CHANGES and the buffers' room
+     * allow.
+     */
+    coming: VecDeque<Placement>,
+    going: Vec<u32>,
     /** How many clusters of pictures of medium the chunks it has hold. */
     veils: u32,
     /** By phase, the draws of clusters the culling lists, and how many; then the pictures of medium's (VEILS). */
@@ -1021,7 +1076,8 @@ impl Compositor {
             resident: FastMap::default(),
             belt: wgpu::util::StagingBelt::new(device.clone(), BELT),
             prepared: None,
-            waiting: Vec::new(),
+            coming: VecDeque::new(),
+            going: Vec::new(),
             veils: 0,
             draws: [draws("draws first"), draws("draws next"), draws("veils")],
             drawn: [drawn("drawn first"), drawn("drawn next"), drawn("veils drawn")],
@@ -1095,7 +1151,7 @@ impl Compositor {
         };
         self.records.write(slot, bytemuck::bytes_of(&record));
         self.veils += range.end - veils;
-        self.resident.insert(p.chunk.id, Resident { columns, splats, clusters: range, slot, record, tints });
+        self.resident.insert(p.chunk.id, Resident { columns, splats, clusters: range, slot, record, tints, going: false });
         true
     }
 
@@ -1113,8 +1169,9 @@ impl Compositor {
     /**
      * Uploads what `frame` draws that is not on the GPU yet, and drops what
      * it no longer draws, once its chunks or the colours change: as its
-     * changes since the frame prepared last say, if it keeps them, else
-     * taking it whole; and every frame, writes the globals.
+     * changes since the frame prepared last say, if it keeps them, CHANGES
+     * a frame, else taking it whole at once; and every frame, writes the
+     * globals.
      */
     pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, frame: &Frame, view: &View) {
         let size = view.pixels.map(|v| v.max(1));
@@ -1126,13 +1183,19 @@ impl Compositor {
         let same = self.prepared == Some((frame.number, view.colours));
         if !same {
             match self.prepared.filter(|p| p.1 == view.colours).and_then(|p| frame.since(p.0)) {
-                Some(changes) => changes.iter().for_each(|c| self.apply(device, encoder, &c.went, &c.came, view.colours)),
+                Some(changes) => changes.iter().for_each(|c| self.follow(&c.went, &c.came)),
                 None => self.rebuild(device, encoder, frame, view.colours),
             }
-            self.flush(device, encoder);
             self.prepared = Some((frame.number, view.colours));
         }
-        if !same || resized {
+        let pending = !self.coming.is_empty() || !self.going.is_empty();
+        if pending {
+            self.apply(device, encoder, view.colours, CHANGES);
+        }
+        if !same || pending {
+            self.flush(device, encoder);
+        }
+        if !same || pending || resized {
             self.bind_groups(device);
         }
         let sky_fog = 1.0 - (-frame.farthest / view.fog_distance).exp();
@@ -1147,23 +1210,51 @@ impl Compositor {
         queue.write_buffer(&self.globals, 0, bytemuck::cast_slice(&globals));
     }
 
-    /**
-     * A change of the frame's chunks: what `went` makes room first, then what
-     * waited for room and what `came`, in the frame's order (finest and
-     * nearest first), as far as there is room; what is farther waits.
-     */
-    fn apply(&mut self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, went: &[u32], came: &[Placement], colours: Colours) {
-        went.iter().for_each(|&id| self.release(id));
-        if !self.waiting.is_empty() {
-            let went: FastSet<u32> = went.iter().copied().collect();
-            self.waiting.retain(|p| !went.contains(&p.chunk.id));
-        }
-        let mut full = false;
-        for p in std::mem::take(&mut self.waiting).into_iter().chain(came.iter().cloned()) {
-            if full || !self.upload(device, encoder, &p, colours) {
-                full = true;
-                self.waiting.push(p);
+    /** A change of the frame's chunks, to apply: those that `came`, after what is still to come, and those that `went`. */
+    fn follow(&mut self, went: &[u32], came: &[Placement]) {
+        let mut gone = FastSet::default();
+        for &id in went {
+            match self.resident.get_mut(&id) {
+                Some(r) => {
+                    r.going = true;
+                    self.going.push(id);
+                }
+                None => _ = gone.insert(id),
             }
+        }
+        if !gone.is_empty() {
+            self.coming.retain(|p| !gone.contains(&p.chunk.id));
+        }
+        for p in came {
+            // Back before it was dropped, it stays.
+            match self.resident.get_mut(&p.chunk.id) {
+                Some(r) => r.going = false,
+                None => self.coming.push_back(p.clone()),
+            }
+        }
+    }
+
+    /**
+     * Uploads what is to come and drops what is to go, `most` of them: what
+     * comes first, in the frame's order (finest and nearest first), as far
+     * as there is room, dropping what goes to make some; what is farther
+     * waits.
+     */
+    fn apply(&mut self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, colours: Colours, mut most: usize) {
+        while most > 0 {
+            if let Some(p) = self.coming.front().cloned()
+                && self.upload(device, encoder, &p, colours)
+            {
+                self.coming.pop_front();
+            } else if let Some(id) = self.going.pop() {
+                if !self.resident.get(&id).is_some_and(|r| r.going) {
+                    continue;
+                }
+                self.release(id);
+            } else {
+                break;
+            }
+            most -= 1;
         }
     }
 
@@ -1177,9 +1268,12 @@ impl Compositor {
         }
         let ids: FastSet<u32> = frame.chunks.iter().map(|p| p.chunk.id).collect();
         let went: Vec<u32> = self.resident.keys().filter(|id| !ids.contains(id)).copied().collect();
-        self.waiting.clear();
+        self.coming.clear();
+        self.going.clear();
+        self.resident.values_mut().for_each(|r| r.going = false);
         let came: Vec<Placement> = frame.chunks.iter().filter(|p| !self.resident.contains_key(&p.chunk.id)).cloned().collect();
-        self.apply(device, encoder, &went, &came, colours);
+        self.follow(&went, &came);
+        self.apply(device, encoder, colours, usize::MAX);
     }
 
     /** Stages what the changes wrote; makes room for what the GPU makes of them. */
@@ -1360,8 +1454,8 @@ pub struct View {
     /** How bright the sky is: 1 by day, less as --light dims it. */
     pub sky: f32,
     pub camera: Vec3,
-    /** Which cells each level claims (Lod::layers): Lod's Q, layers of grid 0 to the render distance, and the coarsest level. */
-    pub lod: [f32; 3],
+    /** Which cells each level claims (Lod::layers): Lod's Q, layers of grid 0 to the render distance, the coarsest level, and the finest that draws medium. */
+    pub lod: [f32; 4],
 }
 
 /** A number in [0, 1) from `numbers`, as if at random. */
@@ -1396,7 +1490,7 @@ impl View {
             colours: look.colours,
             sky: look.sky.unwrap_or(1.0),
             camera: look.camera,
-            lod: [lod.q as f32, (look.far / LAYER).ceil() as f32, lod.top() as f32],
+            lod: [lod.q as f32, (look.far / LAYER).ceil() as f32, lod.top() as f32, lod.medium_level() as f32],
         }
     }
 
@@ -1426,7 +1520,7 @@ impl View {
             g[at + 12..at + 15].copy_from_slice(&face[2].map(|v| (v * std::f64::consts::SQRT_2).round() as f32));
             g[at + 16..at + 19].copy_from_slice(&to_local(face, self.camera).map(|v| v as f32));
         }
-        g[268..271].copy_from_slice(&self.lod);
+        g[268..272].copy_from_slice(&self.lod);
         g
     }
 }
@@ -1459,6 +1553,21 @@ impl Painter for Compositor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn free_ranges_merge_and_give_the_least_that_fits() {
+        let mut free = Free::default();
+        for r in [0..4, 10..12, 20..30, 4..6] {
+            free.give(r);
+        }
+        assert_eq!(free.ends.iter().map(|(&s, &e)| s..e).collect::<Vec<_>>(), [0..6, 10..12, 20..30]);
+        assert_eq!(free.take(2), Some(10..12));
+        assert_eq!(free.take(3), Some(0..3));
+        assert_eq!(free.take(11), None);
+        assert_eq!(free.give(6..20), 3..30);
+        assert_eq!(free.take(27), Some(3..30));
+        assert!(free.ends.is_empty() && free.lengths.is_empty());
+    }
 
     #[test]
     fn groups_hold_every_chunk_in_rows_a_dispatch_allows() {

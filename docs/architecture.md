@@ -278,6 +278,7 @@ which of them the eye draws from where it is, the GPU finds (section 4).
 So the eye moving within a pick finds its chunks baked,
 and the renderer can run on a thread of its own
 (`native/src/engine/chunks.rs`): a frame draws the last it rendered.
+Its bake workers, as the world's tile workers, run behind the thread that draws.
 What the eye composed when its face was picked is waited for;
 the rest of the pick is baked after.
 There is no coverage: every chunk in view is baked,
@@ -656,8 +657,10 @@ so there is no list of the frame's clusters to keep.
 A frame comes with its last changes, the chunks that came and went
 (`Change` in `renderer.rs`):
 the compositor applies those since the frame it prepared last,
-or takes the frame whole if it missed some,
-so that a change costs the main thread what changed, not the frame.
+at most `CHANGES` chunks a frame, those that came first,
+or takes the frame whole at once if it missed some,
+so that a change costs the main thread what changed, not the frame,
+and a face picked anew, thousands of chunks, is spread over a few frames.
 What a change writes, anywhere in a buffer,
 goes up as one copy of its words, which the GPU scatters (`scatter`):
 a copy command costs the GPU microseconds,
@@ -700,6 +703,13 @@ and a column keeps an optical depth per half.
 A slab of a column may be a cell's that holds none of it,
 so a level picks a layer of cells more each way than it claims,
 whose medium alone it draws (`Lod::layers`, `medium_claims`).
+A cell's medium is a chunk of its own, apart from its whole voxels,
+and no level finer than `Lod::medium_level` has one:
+its cells, 8 voxels across, draw it from the near plane on,
+not the finest cells, a chunk per voxel.
+So a picture of medium takes the depths of the level
+whose whole voxels are drawn where it is (`level_ahead`),
+or finer levels' voxels behind it would hide it.
 A test holds a slab of medium to exp(−extinction · path),
 thin and thick, along the axis and slanted
 (`a_medium_of_splats_lets_through_as_much_as_its_extinction_says`).

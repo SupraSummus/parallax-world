@@ -36,7 +36,8 @@ struct Globals {
   sky_view: mat3x3f, // the camera's axes in world coordinates
   faces: array<FaceView, 12>,
   // Which cells each level claims (claims): Lod's Q, the layers of grid 0
-  // to the render distance, and the coarsest level (w unused).
+  // to the render distance, the coarsest level, and the finest that draws
+  // medium (Lod::medium_level).
   lod: vec4f,
 }
 
@@ -365,8 +366,9 @@ fn flat_fragment(in: RunPixel) -> @location(0) vec4f {
 
 // A run of a picture of medium (compositor.rs's veils), its own columns'
 // bricks on its slab's plane, `near` past its chunk's, at the depth of a
-// voxel there, as the whole voxels' are drawn: so medium behind them is
-// not drawn, and where their level is coarser, it is in front. Where on
+// voxel there, of the level whose whole voxels are drawn there
+// (level_ahead): so medium behind them is not drawn, and where their
+// level is coarser, it is in front. Where on
 // the picture, in halves of a brick across and rows up from its first
 // place's centre; where its picture is, how many columns its rows are and
 // how deep its slab's halves are, its chunk's slot, and its slab's first
@@ -392,9 +394,10 @@ fn veil_vertex(@builtin(vertex_index) vertex: u32, @builtin(instance_index) inst
   let run = columns[t.first + instance];
   let corner = run_corner(run.x, vertex);
   let at = vec3f(c.origin + run_at(t, c, corner), c.distance + t.near);
-  var depth = depth_of(c.level, length(at));
+  let level = level_ahead(c.face, at.z);
+  var depth = depth_of(level, length(at));
   if globals.whole == FLAT {
-    depth = flat_depth(c.level, dot(globals.faces[c.face].view[2], at));
+    depth = flat_depth(level, dot(globals.faces[c.face].view[2], at));
   }
   var out: Veil;
   out.position = quad_position(c, at, depth);
@@ -671,19 +674,34 @@ fn hidden(b: vec4f, depth: f32) -> bool {
   return depth * (1.0 - exp2(-18.0)) > far;
 }
 
-// The least depth a cluster's columns or splats may be drawn at: of its
-// nearest column's (or splat's) distance, no less than how far ahead it
-// is; drawn flat, of the least w in its box.
-fn nearest_depth(cluster: Cluster) -> f32 {
+// The least depth a cluster's columns or splats may be drawn at, as of
+// `level`: of its nearest column's (or splat's) distance, no less than how
+// far ahead it is; drawn flat, of the least w in its box.
+fn nearest_depth(cluster: Cluster, level: f32) -> f32 {
   let c = chunks[cluster.slot_count >> 8u];
   if globals.whole == FLAT {
     let ahead = globals.faces[c.face].view[2];
     let lo = ahead * vec3f(c.origin + cluster.min, c.distance + cluster.near);
     let hi = ahead * vec3f(c.origin + cluster.max, c.distance + cluster.far);
     let w = dot(min(lo, hi), vec3f(1.0));
-    return select(0.0, flat_depth(c.level, w), w > 0.0);
+    return select(0.0, flat_depth(level, w), w > 0.0);
   }
-  return depth_of(c.level, max(c.distance + cluster.near, 0.0));
+  return depth_of(level, max(c.distance + cluster.near, 0.0));
+}
+
+// The level whose whole voxels a face draws `ahead` along its axis from the
+// eye (claims): the finest whose reach holds that layer. A picture of
+// medium there takes its depths, as its whole voxels would be: finer than
+// Lod::medium_level, a coarser level's cells draw the medium.
+fn level_ahead(face: u32, ahead: f32) -> f32 {
+  let eye = globals.faces[face].eye.z;
+  let layer = i32(floor((eye + ahead) / LAYER));
+  let at = i32(floor(eye / LAYER));
+  var level = 0;
+  while level < i32(globals.lod.z) && layer > reach(level, at) {
+    level++;
+  }
+  return f32(level);
 }
 
 // Off, every cluster in view is drawn: for tests, as what culling must not change.
@@ -697,7 +715,7 @@ fn draws_cluster(at: u32, cluster: Cluster, phase: u32) -> bool {
   if phase == 0u {
     return cluster.visible != 0u && shows(b);
   }
-  let visible = shows(b) && !(culls && hidden(b, nearest_depth(cluster)));
+  let visible = shows(b) && !(culls && hidden(b, nearest_depth(cluster, chunks[cluster.slot_count >> 8u].level)));
   clusters[at].visible = u32(visible);
   // The first phase drew those visible before and in view.
   return visible && cluster.visible == 0u;
@@ -721,7 +739,8 @@ fn cull(at: u32, phase: u32) {
   if at >= c.whole.y && at < c.veils {
     let b = screen_box(cluster);
     let drawn = cluster.layer + cluster.half > c.clip && cluster.layer <= c.reach;
-    if phase == 1u && drawn && shows(b) && !(culls && hidden(b, nearest_depth(cluster))) {
+    let level = level_ahead(c.face, c.distance + cluster.near);
+    if phase == 1u && drawn && shows(b) && !(culls && hidden(b, nearest_depth(cluster, level))) {
       veil_draws[atomicAdd(&veils_drawn, 1u)] = DrawArgs(4u, cluster.slot_count & 0xffu, at * 4u, 0u);
     }
     return;
@@ -783,16 +802,20 @@ fn claims(level: i32, c: i32, eye: i32) -> bool {
   return first <= last && first <= c && c <= min(reach(level, eye), last + n);
 }
 
+// The layer of grid 0 past which `level` draws medium (Lod::layers): the
+// finer level's reach, or the near plane, if it is the finest that draws
+// it.
+fn medium_from(level: i32, eye: i32) -> i32 {
+  return select(reach(level - 1, eye), eye + NEAR_LAYERS, level <= i32(globals.lod.w));
+}
+
 // Whether `level` draws the medium of its cell whose site is in layer `c`
 // of grid 0 (Lod::layers): a layer of cells more each way than it claims,
 // which may hold what it draws of a slab of a column (bake's Medium).
 fn medium_claims(level: i32, c: i32, eye: i32) -> bool {
   let n = 1 << u32(level);
   let last = eye + i32(globals.lod.y);
-  var first = eye + NEAR_LAYERS;
-  if level > 0 {
-    first = reach(level - 1, eye) - 2 * n + 1;
-  }
+  let first = medium_from(level, eye) - 2 * n + 1;
   var to = last + n;
   if level < i32(globals.lod.z) {
     to = min(reach(level, eye) + n, to);
@@ -804,7 +827,8 @@ fn medium_claims(level: i32, c: i32, eye: i32) -> bool {
 // plane and origin relative to the eye; its clusters; whether its level
 // claims its cell; between which layers past its plane it draws medium,
 // none if its level does not pick its cell for it (medium_claims): past
-// the finer level's reach, to its own (veil_fragment); and drawn
+// the finer level's reach (or the near plane), to its own
+// (veil_fragment); and drawn
 // flat, its picture enlarged, each edge out by how far its edge pillars
 // reach from its plane times the slant of the rays to it at its nearest, at
 // most the face's (compositor.rs's Flat).
@@ -824,10 +848,7 @@ fn place(@builtin(workgroup_id) id: vec3u, @builtin(num_workgroups) n: vec3u, @b
   c.level = f32(r.level);
   c.tint = r.tint;
   c.half_layer = r.half_layer;
-  c.clip = -3.0e38;
-  if r.level > 0 {
-    c.clip = f32(2 * ((reach(r.level - 1, layer) >> u32(r.atoms)) - r.site));
-  }
+  c.clip = f32(2 * ((medium_from(r.level, layer) >> u32(r.atoms)) - r.site));
   let reach_out = r.plane.w;
   let nearest = r.plane.x + min(r.plane.y * r.min.x, r.plane.y * r.max.x) + min(r.plane.z * r.min.y, r.plane.z * r.max.y);
   let z = c.distance + nearest - reach_out;

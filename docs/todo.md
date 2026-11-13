@@ -240,8 +240,8 @@ Numbers are for the forest at 1280×800, as measured when written.
   pictures added up in any order, nothing after a ray is all but stopped is left out.
   Only media are (`KindDef::medium`): the moor's mist.
   - Where a medium's colour changes along a ray, its colours mix without their order.
-  - The cells a level picks a layer more each way, for their medium alone,
-    are baked and uploaded whole.
+  - The medium starts at the first half slab past the near plane:
+    right by the eye, mist is a little thin.
   - A site's pieces, where shown, hide its medium and what is behind:
     right on average, but a coarse site of a crown in mist
     is a whole voxel or mist, never the crown's grain seen through mist.
@@ -275,8 +275,12 @@ Numbers are for the forest at 1280×800, as measured when written.
     so `--stroll` counts nearly every frame as one whose content is still coming:
     it no longer tells holes from that.
   - A pick moved composes its every chunk again, on the renderer's thread,
-    and a thousand or two chunks come and go at once:
-    the main thread takes milliseconds for them, much of it in the kernel.
+    and thousands of chunks come and go at once,
+    most of them the finest cells', a voxel or two each:
+    the compositor spreads them over frames (`CHANGES`),
+    a few microseconds each on the main thread.
+    Fewer, larger chunks near the eye
+    (a chunk holding a cell's finer cells' pictures too) would cost less.
   - A shot differs from run to run in about 0.3 % of its pixels (flat, the valley):
     ties between chunks fall in the order they came, which timing decides.
 - **Native's splats leave a hole by a hut.**
