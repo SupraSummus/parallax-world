@@ -3,27 +3,17 @@
 //! colour per view face.
 
 use crate::slicing::LAYER;
-use crate::world::{FACE_KINDS, Geometry, Lattice, VIEW_FACES};
+use fcc::{FACE_KINDS, Lattice, VIEW_FACES, VOXEL_FACES};
 
 /**
- * The voxel's 12 faces' normals in the world, the offsets of the
- * neighbours across them; a face's index is its kind (VOXEL_FACES in
- * fcc.ts, in the same order).
+ * The voxel's faces in a face's lattice coordinates, the same for every
+ * face (`geometry`): kind k's neighbour offset (a, b, c) and its normal in
+ * face coordinates.
  */
-pub const VOXEL_FACES: [[i32; 3]; FACE_KINDS] = [
-    [-1, -1, 0],
-    [-1, 1, 0],
-    [1, -1, 0],
-    [1, 1, 0],
-    [0, -1, -1],
-    [0, -1, 1],
-    [0, 1, -1],
-    [0, 1, 1],
-    [-1, 0, -1],
-    [-1, 0, 1],
-    [1, 0, -1],
-    [1, 0, 1],
-];
+pub struct Geometry {
+    pub offsets: [[i32; 3]; FACE_KINDS],
+    pub normals: [[f64; 3]; FACE_KINDS],
+}
 
 /** A world vector in a face's lattice coordinates (a, b, c) = (v · R, v · U, v · F). */
 fn lattice_of(Lattice { r, u, f }: &Lattice, v: [i32; 3]) -> [i32; 3] {

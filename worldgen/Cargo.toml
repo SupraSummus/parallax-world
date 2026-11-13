@@ -5,6 +5,6 @@ edition = "2024"
 publish = false
 
 [dependencies]
-bake = { path = "../bake" }
+fcc = { path = "../fcc" }
 # Math functions with the same bits on every target (js.rs).
 libm = "0.2"

@@ -7,11 +7,12 @@
 use std::collections::HashMap;
 use std::f64::consts::FRAC_1_SQRT_2;
 
-use crate::light::{FaceLight, colour};
 use crate::slicing::{LAYER, MAX_SLANT};
 use crate::surface::Voxel;
-use crate::tables::VOXEL_FACES;
-use crate::world::{FACE_KINDS, Geometry};
+use fcc::light::{FaceLight, colour};
+use fcc::{FACE_KINDS, VOXEL_FACES};
+
+use crate::tables::Geometry;
 
 /**
  * A voxel painted as a hexagon across the face's axis, at its site:
@@ -354,7 +355,7 @@ mod tests {
     use crate::slicing::slice_centre;
     use crate::surface::Slice;
     use crate::tables::geometry;
-    use crate::world::{ALPHA, lattices};
+    use fcc::{ALPHA, lattices};
 
     /** Twice a slice's centre plane's depth in layers, as chunk_splats takes it. */
     fn centre(slice: &Slice) -> i32 {

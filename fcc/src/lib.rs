@@ -1,24 +1,37 @@
-//! The voxel grid (voxel-grid.ts) as the TS side hands it over, tiles of
-//! grids, and the voxel's faces (tables.rs).
+//! The face-centred cubic lattice and the voxels on it, as every crate
+//! sees them: the voxel's faces, the view faces' lattices, the levels of
+//! detail a world is held at, the grids of sites generators make and
+//! bakers read (voxel-grid.ts on the web), tiles of grids, the light from
+//! voxels' faces (light.rs). See fcc.ts and docs/architecture.md.
+
+pub mod light;
 
 use std::sync::Arc;
 
-use crate::tables::VOXEL_FACES;
+/**
+ * The voxel's 12 faces' normals in the world, the offsets of the
+ * neighbours across them; a face's index is its kind (VOXEL_FACES in
+ * fcc.ts, in the same order).
+ */
+pub const VOXEL_FACES: [[i32; 3]; FACE_KINDS] = [
+    [-1, -1, 0],
+    [-1, 1, 0],
+    [1, -1, 0],
+    [1, 1, 0],
+    [0, -1, -1],
+    [0, -1, 1],
+    [0, 1, -1],
+    [0, 1, 1],
+    [-1, 0, -1],
+    [-1, 0, 1],
+    [1, 0, -1],
+    [1, 0, 1],
+];
 
 /** Kinds of voxel faces. */
 pub const FACE_KINDS: usize = 12;
 /** Faces of the view (FACES in view.ts). */
 pub const VIEW_FACES: usize = 12;
-
-/**
- * The voxel's faces in a face's lattice coordinates, the same for every
- * face (tables.rs): kind k's neighbour offset (a, b, c) and its normal in
- * face coordinates.
- */
-pub struct Geometry {
-    pub offsets: [[i32; 3]; FACE_KINDS],
-    pub normals: [[f64; 3]; FACE_KINDS],
-}
 
 /** A face's lattice vectors R, U, F (integer, see Face in view.ts). */
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -58,6 +71,12 @@ pub fn lattices() -> [Lattice; VIEW_FACES] {
         Lattice { r, u, f }
     })
 }
+
+/** Levels of a world's grids: one per atom level up to MAX_LEVEL's at the largest shift (bake's slicing.rs). */
+pub const GRID_LEVELS: usize = 9;
+
+/** How far around the camera each grid holds the world, in its units, and slices read it (GRID_REACH in slice-selection.ts). */
+pub const GRID_REACH: f64 = 400.0;
 
 /** Bricks of the sites of a box (see VoxelGrid in voxel-grid.ts). */
 pub const BRICK: i32 = 8;

@@ -10,8 +10,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use bake::lod::{CellChunk, Lod, Picked, distance};
-use bake::slicing::{GRID_LEVELS, LAYER};
-use bake::{Baker, Lattice, chunk_reads};
+use bake::slicing::LAYER;
+use bake::{Baker, chunk_reads};
+use fcc::GRID_LEVELS;
+use fcc::Lattice;
 
 use super::bakery::{Baked, Bakery, Request};
 use crate::engine::Look;

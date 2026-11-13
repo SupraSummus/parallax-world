@@ -16,7 +16,7 @@
 /**
  * The 12 faces of a voxel by their outward normals, which are also the
  * offsets of the neighbours across them; a face's index is its kind
- * (VOXEL_FACES in bake/src/tables.rs, in the same order).
+ * (VOXEL_FACES in fcc/src/lib.rs, in the same order).
  */
 export const VOXEL_FACES: readonly (readonly [number, number, number])[] = [
   [-1, -1, 0], [-1, 1, 0], [1, -1, 0], [1, 1, 0],

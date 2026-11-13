@@ -3,8 +3,8 @@
 # (`-p lab` builds it).
 [workspace]
 resolver = "3"
-members = ["bake", "worldgen", "worlds", "native", "lab"]
-default-members = ["bake", "worldgen", "worlds", "native"]
+members = ["fcc", "bake", "worldgen", "worlds", "native", "lab"]
+default-members = ["fcc", "bake", "worldgen", "worlds", "native"]
 
 # The tests bake whole cells and generate whole tiles, several times faster
 # optimised. Debug assertions stay on.

@@ -7,6 +7,9 @@
 
 use std::cell::RefCell;
 
+// Linked for its exports, which nothing here calls.
+use bake as _;
+
 use worldgen::World;
 use worldgen::generator::{generate_shown, materials_of};
 use worldgen::grid::{Box3, FACE_WORDS, Grid};

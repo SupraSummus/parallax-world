@@ -1,13 +1,13 @@
 //! What generating each world costs (worldgen::cost) stays within
 //! TOLERANCE of its baseline, worlds/data/cost/<world>.txt: counts of
 //! work, the same on every machine, at REGIONS_SEED in the host tiles of
-//! its places at every level a host makes (bake's GRID_LEVELS), odd ones
+//! its places at every level a host makes (fcc's GRID_LEVELS), odd ones
 //! too. `COST_BLESS=1 cargo test --release --test cost`
 //! in worlds/ writes the baselines anew. And no tile is over the budget
 //! (cost::BUDGET, estimated) but those of OVER_BUDGET, which only shrinks,
 //! and no plan makes a tile's columns over cost::REMADE times each.
 
-use bake::slicing::GRID_LEVELS;
+use fcc::GRID_LEVELS;
 use worldgen::cost::{BUDGET, REMADE, Tile, places, report};
 use worlds::{REGIONS_SEED, WORLDS};
 

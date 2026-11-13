@@ -1,6 +1,6 @@
 //! Light on the lattices 2^k·FCC: a prototype, for look's pictures and
 //! native's `--light`, whose bakers ask for the light from the faces of
-//! the voxels they show (bake's light.rs).
+//! the voxels they show (fcc's light.rs).
 //!
 //! Light comes to a site from its 12 neighbours' directions: along each,
 //! from the sites of its level, till the next coarser level can take over:
@@ -20,8 +20,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::hash::{BuildHasherDefault, Hasher};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use bake::light::{FaceLight, linear_to_srgb, srgb_to_linear};
-use bake::slicing::GRID_LEVELS;
+use fcc::GRID_LEVELS;
+use fcc::light::{FaceLight, linear_to_srgb, srgb_to_linear};
 
 use crate::World;
 use crate::generator::{Generator, generate_shown, materials_of};
@@ -552,7 +552,7 @@ mod reference;
 mod tests {
     use super::*;
     use crate::generator::{Field, Generator, KindDef, Layer, Node, Op, Population, SOLID, cuboid};
-    use bake::light::colour;
+    use fcc::light::colour;
 
     #[test]
     fn tiles_are_cubes_cut_to_the_heights_at_bricks() {

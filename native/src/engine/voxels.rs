@@ -28,9 +28,9 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use bake::light::{colour, linear_to_srgb, srgb_to_linear};
-use bake::slicing::GRID_LEVELS;
 use egui_wgpu::wgpu;
+use fcc::GRID_LEVELS;
+use fcc::light::{colour, linear_to_srgb, srgb_to_linear};
 use worldgen::light::Light;
 
 use super::{Engine, Frame, Look, Painter, Picture};
@@ -128,7 +128,7 @@ fn cell_entry(k: [i32; 3], j: usize) -> usize {
  * cells of each scale around it (AROUND's bits) that its voxels meet,
  * SCALES words a brick: those its sites meet (MEETING).
  */
-pub fn meets(grid: &bake::Grid) -> Vec<u32> {
+pub fn meets(grid: &fcc::Grid) -> Vec<u32> {
     let mut out = vec![0; grid.cells.len() / BRICK_SITES * SCALES];
     let count = grid.n.map(|v| (v + BRICK - 1) / BRICK);
     for (b, &first) in grid.bricks.iter().enumerate() {
@@ -182,20 +182,20 @@ static MEETING: std::sync::LazyLock<[Vec<u32>; SCALES]> = std::sync::LazyLock::n
 });
 
 /** The brick whose sites start at `first` in `grid`'s cells (in bricks) as the GPU takes it, BRICK_WORDS words: each site material | alpha << 8, two a word. */
-fn words(grid: &bake::Grid, first: usize) -> impl Iterator<Item = u32> + '_ {
+fn words(grid: &fcc::Grid, first: usize) -> impl Iterator<Item = u32> + '_ {
     let site = |i: usize| match grid.cells[i] {
         0 => 0,
-        m => u32::from(m) | u32::from(grid.alpha.get(i).copied().unwrap_or(bake::ALPHA)) << 8,
+        m => u32::from(m) | u32::from(grid.alpha.get(i).copied().unwrap_or(fcc::ALPHA)) << 8,
     };
     (first * BRICK_SITES..(first + 1) * BRICK_SITES).step_by(2).map(move |i| site(i) | site(i + 1) << 16)
 }
 
 /**
  * Per site of `grid`, of `level`, in the order of its cells, the light
- * from its voxel that rays see (Light::seen) as an sRGB colour (bake's
+ * from its voxel that rays see (Light::seen) as an sRGB colour (fcc's
  * light::colour); 0 where it has none.
  */
-pub fn lights(grid: &bake::Grid, level: u32, light: &mut Light) -> Vec<u32> {
+pub fn lights(grid: &fcc::Grid, level: u32, light: &mut Light) -> Vec<u32> {
     let mut out = vec![0; grid.cells.len()];
     let count = grid.n.map(|v| (v + BRICK - 1) / BRICK);
     for (b, &first) in grid.bricks.iter().enumerate() {
@@ -972,8 +972,7 @@ mod tests {
     /** The tiles of level 0 of the forest of seed 1 around `eye`. */
     fn forest_tiles(eye: Vec3) -> Arc<Level> {
         let mut world = World::new(worlds::by_name("forest").expect("forest").make, 1, None, 4);
-        let wants =
-            Wants { reach: std::array::from_fn(|l| (l == 0).then_some(bake::slicing::GRID_REACH)), lit: Lit::Not, tiles: Vec::new() };
+        let wants = Wants { reach: std::array::from_fn(|l| (l == 0).then_some(fcc::GRID_REACH)), lit: Lit::Not, tiles: Vec::new() };
         loop {
             world.update(eye, &wants);
             if !world.busy() {
@@ -1137,7 +1136,7 @@ mod tests {
                 for way in ways.clone() {
                     let length = way.iter().map(|v| v * v).sum::<f64>().sqrt();
                     let site = worldgen::picture::nearest_site(std::array::from_fn(|d| eye[d] + way[d] / length * reach_of(radius)));
-                    for s in std::iter::once([0; 3]).chain(bake::VOXEL_FACES).map(|n| std::array::from_fn(|d| site[d] as i32 + n[d])) {
+                    for s in std::iter::once([0; 3]).chain(fcc::VOXEL_FACES).map(|n| std::array::from_fn(|d| site[d] as i32 + n[d])) {
                         let b = s.map(|v: i32| v.div_euclid(BRICK));
                         assert!(ball.contains(b), "eye {eye:?}: site {s:?} out of the ball of {radius}");
                         assert!(tiles.contains(&s.map(|v| v.div_euclid(TILE as i32))), "eye {eye:?}: site {s:?} in no tile wanted");

@@ -18,9 +18,9 @@
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
-use bake::light::{linear_to_srgb, srgb_to_linear};
 use bake::slicing::{LAYER, half_layer};
 use egui_wgpu::wgpu;
+use fcc::light::{linear_to_srgb, srgb_to_linear};
 
 use super::renderer::{Chunk, Frame};
 use crate::engine::{Colours, Look, Painter};

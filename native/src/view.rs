@@ -2,8 +2,8 @@
 //! own chunks and draws the rays closer to its axis than to any
 //! other's. See docs/architecture.md, section 4.
 
-use bake::Lattice;
 use bake::slicing::LAYER;
+use fcc::Lattice;
 
 pub type Vec3 = [f64; 3];
 
@@ -36,10 +36,10 @@ pub struct Face {
     pub lattice: Lattice,
 }
 
-/** One face per neighbour direction F, in the order of FACES in view.ts (bake's lattices). */
+/** One face per neighbour direction F, in the order of FACES in view.ts (fcc's lattices). */
 pub fn faces() -> Vec<Face> {
     let scaled = |v: [i32; 3], s: f64| v.map(|c| c as f64 * s);
-    bake::lattices()
+    fcc::lattices()
         .iter()
         .map(|&lattice @ Lattice { r, u, f }| Face { axes: [scaled(r, LAYER), scaled(u, 1.0), scaled(f, LAYER)], lattice })
         .collect()

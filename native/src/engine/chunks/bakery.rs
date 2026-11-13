@@ -12,9 +12,11 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Condvar, Mutex};
 
+use bake::Baker;
 use bake::lod::CellChunk;
-use bake::slicing::{GRID_LEVELS, LAYER, half_layer, spacing};
-use bake::{Baker, TileId, Tiles};
+use bake::slicing::{LAYER, half_layer, spacing};
+use fcc::GRID_LEVELS;
+use fcc::{TileId, Tiles};
 
 use super::compositor::{Flat, GpuCluster, GpuColumn, GpuSplat, cluster, flatten, tiles};
 

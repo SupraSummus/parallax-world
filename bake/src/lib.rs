@@ -14,33 +14,30 @@ mod cells;
 mod coverage;
 mod fill;
 mod layer_index;
-pub mod light;
 pub mod lod;
 pub mod slicing;
 mod splats;
 mod surface;
 mod tables;
 pub mod walk;
-mod world;
 
 use std::cell::RefCell;
 use std::sync::Arc;
 
 use cells::Cells;
+use fcc::light::Lighting;
+use fcc::{ALPHA, FACE_KINDS, FACE_WORDS, Grid, Lattice, Reader, Tiles, VIEW_FACES, lattices};
 use fill::{fill_mask, solid_blocks};
-use light::Lighting;
 use lod::CellChunk;
 use slicing::{LAYER, chunk_cell, slice_centre, spacing, thickness};
 use splats::{Splat, Splats, cell_relief, cell_splats, chunk_splats, lit_voxel_colour, voxel_colour};
 use surface::{cell_surface, surface};
-use world::{Geometry, Reader};
+use tables::Geometry;
 
 // For native frontends, which link the baker instead of loading its WebAssembly.
 pub use coverage::Coverage;
 pub use layer_index::LayerIndex;
 pub use surface::Slice;
-pub use tables::VOXEL_FACES;
-pub use world::{ALPHA, FACE_KINDS, FACE_WORDS, Faces, Grid, Lattice, TileId, Tiles, VIEW_FACES, face_words, lattices};
 
 /**
  * Mask pixels per unit of its grid for a slice of `level` as the grid

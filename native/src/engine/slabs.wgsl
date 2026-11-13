@@ -100,7 +100,7 @@ fn ray_through(pixel: vec2f) -> Ray {
   let s = pixel / globals.resolution - 0.5;
   let camera = vec3f(vec2f(s.x, -s.y) * globals.viewport / globals.focal, 1.0);
   // The face whose axis is nearest the ray: the neighbour direction
-  // (±1, ±1, 0) along its two largest components (bake's lattices: faces
+  // (±1, ±1, 0) along its two largest components (fcc's lattices: faces
   // 4m to 4m + 3 leave out component [1, 0, 2][m], and their signs s, t
   // of the next two are (+, +), (−, +), (+, −), (−, −)).
   let world = globals.sky_view * camera;

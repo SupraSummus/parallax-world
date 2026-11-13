@@ -9,7 +9,7 @@ use std::panic::AssertUnwindSafe;
 use std::sync::{Mutex, mpsc};
 use std::time::{Duration, Instant};
 
-use bake::{FACE_KINDS, VOXEL_FACES};
+use fcc::{FACE_KINDS, VOXEL_FACES};
 
 use crate::generator::{Generator, generate_shown, materials_of};
 use crate::grid::{ALPHA, BRICK, Box3, GLOW_ONE, VoxelGrid};
@@ -17,7 +17,7 @@ use crate::grid::{ALPHA, BRICK, Box3, GLOW_ONE, VoxelGrid};
 /** Sites per tile in x and z, at the picture's level; a tile spans the heights. */
 const TILE: i64 = 64;
 
-/** The voxel's faces: towards its 12 neighbours, (p − site) · face ≤ 1 inside, in a level's units (bake's VOXEL_FACES). */
+/** The voxel's faces: towards its 12 neighbours, (p − site) · face ≤ 1 inside, in a level's units (fcc's VOXEL_FACES). */
 pub(crate) const FACES: [[i64; 3]; FACE_KINDS] = {
     let mut faces = [[0; 3]; FACE_KINDS];
     let mut k = 0;

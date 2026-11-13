@@ -42,7 +42,7 @@ fn main() {
         i += 1;
     }
     if levels.is_empty() {
-        levels = (0..bake::slicing::GRID_LEVELS as u32).collect();
+        levels = (0..fcc::GRID_LEVELS as u32).collect();
     }
     if at.is_empty() {
         let world = (entry.make)(seed);

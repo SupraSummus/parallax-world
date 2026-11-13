@@ -5,8 +5,7 @@
 
 use std::cell::RefCell;
 
-use crate::VOXEL_FACES;
-use crate::world::{ALPHA, Grid, Tiles};
+use fcc::{ALPHA, Grid, Tiles, VOXEL_FACES};
 
 /** Lattice units per metre. */
 const M: f64 = 8.0;

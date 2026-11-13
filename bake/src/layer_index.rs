@@ -7,7 +7,7 @@
 
 use std::cell::RefCell;
 
-use crate::world::{BRICK, Grid, lattices};
+use fcc::{BRICK, Grid, lattices};
 
 /** Width of a column block, in lattice units along a. */
 const BLOCK: i64 = 8;

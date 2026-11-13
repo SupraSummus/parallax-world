@@ -19,9 +19,11 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Instant;
 
-use bake::slicing::{GRID_LEVELS, GRID_REACH, LAYER};
-use bake::{Baker, Tiles};
+use bake::Baker;
+use bake::slicing::LAYER;
 use egui_wgpu::wgpu;
+use fcc::Tiles;
+use fcc::{GRID_LEVELS, GRID_REACH};
 
 use super::chunks::compositor::{GLOBALS, View};
 use super::{Engine, Frame, Look, Painter, Picture};
