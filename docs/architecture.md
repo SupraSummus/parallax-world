@@ -1,5 +1,16 @@
 # Rendering Architecture
 
+Two frontends draw the same worlds (section 6) with the same Rust:
+the web's (`web/`), which this document follows,
+and the native one (`native/`), whose engines differ
+where the "Native" subsections say.
+The Rust is a workspace of crates (`Cargo.toml`):
+`fcc/` under all of them
+(the lattice, grids and tiles of them, the light from voxels' faces),
+`bake/` (chunks baked) and `worldgen/` (the generator framework) on it,
+`worlds/` on `worldgen/`;
+`web/wasm/` makes the web's WebAssembly of them, `native/` links them.
+
 The world is cut into slices, each a slab between two layers of a
 coarser FCC lattice made of whole cells of a finer one,
 and each slice into chunks, bricks of the lattice seen along its axis;
@@ -90,7 +101,7 @@ A level with no grid yet is no special case: its grid has no tiles.
 The bake workers generate the tiles, finest level first;
 a level's slices show once its grid is in,
 and a moved grid replaces the old one once all its tiles are.
-The native spike (`native/src/world.rs`) has no grids, only tiles:
+The native frontend (`native/src/world.rs`) has no grids, only tiles:
 cubes, alike along every axis, so no direction is up to how they are asked for
 (`make_tile` in `worldgen/src/light.rs`: `generate_shown` of each;
 those outside the world's heights are empty),
@@ -186,7 +197,7 @@ but a few where levels change (section 5).
 
 ### Native: cells instead of slices
 
-The native spike has no slices (`bake/src/lod.rs`, `native/src/engine/chunks/renderer.rs`).
+The native frontend has no slices (`bake/src/lod.rs`, `native/src/engine/chunks/renderer.rs`).
 A chunk is a whole cell of 2^L·FCC,
 drawn as the voxels of grid max(0, L − S) (`--shift S`)
 over the plane through its site;
@@ -415,9 +426,9 @@ Then each chunk is one call,
 and its splats are copied out of the WebAssembly memory.
 A chunk's voxels are those of its cell and a margin around it
 as wide as its splats may be drawn (`Splat::reach`, `cell_surface`).
-The native spike (`native/`) links the baker instead,
+The native frontend (`native/`) links the baker instead,
 a baker per worker thread sharing one copy of the tiles (`share_tiles`),
-and has the renderer, slice selection and coverage in Rust too.
+and has its own renderer in Rust.
 
 Each chunk is clipped to its cell, by where pixels' rays cross its
 centre plane: splats that may not be drawn in it are dropped,

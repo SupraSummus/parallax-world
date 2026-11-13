@@ -570,7 +570,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   A middle way: streets and plots at any angle, the buildings on the axes.
   The buildings' walls would still show to `directions.rs`.
 - Keep the fit of `cost::NS` in the repo, to refit it on a quiet machine.
-- Generate the web's tiles as the native spike does:
+- Generate the web's tiles as the native frontend does:
   those the chunks in view read, nearest first,
   instead of every tile within `GRID_REACH` of the camera.
 - Keep the view in the address bar as the camera moves,

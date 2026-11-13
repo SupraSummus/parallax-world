@@ -3,6 +3,10 @@
 A proof of concept for rendering a 3D voxel world as a stack of cached 2D
 depth slices composited with parallax, instead of rasterising the scene in 3D
 every frame. The demo exists to show (and measure) that idea.
+It has two frontends on the same worlds:
+the web page, which this document describes,
+and a native one (`native/`), which draws them by other engines too,
+rays through the voxels by default (its options in `native/src/main.rs`).
 Voxels are rhombic dodecahedra on the face-centred cubic (FCC) lattice,
 not cubes; scenes keep their shapes (flat walls along the axes,
 rectangular buildings), only their surfaces are made of rhombi.
