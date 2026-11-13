@@ -181,13 +181,13 @@ static MEETING: std::sync::LazyLock<[Vec<u32>; SCALES]> = std::sync::LazyLock::n
     })
 });
 
-/** `grid`'s bricks as the GPU takes them, in the grid's order, BRICK_WORDS a brick: each site material | alpha << 8, two a word. */
-pub fn words(grid: &bake::Grid) -> Vec<u32> {
+/** The brick whose sites start at `first` in `grid`'s cells (in bricks) as the GPU takes it, BRICK_WORDS words: each site material | alpha << 8, two a word. */
+fn words(grid: &bake::Grid, first: usize) -> impl Iterator<Item = u32> + '_ {
     let site = |i: usize| match grid.cells[i] {
         0 => 0,
         m => u32::from(m) | u32::from(grid.alpha.get(i).copied().unwrap_or(bake::ALPHA)) << 8,
     };
-    (0..grid.cells.len()).step_by(2).map(|i| site(i) | site(i + 1) << 16).collect()
+    (first * BRICK_SITES..(first + 1) * BRICK_SITES).step_by(2).map(move |i| site(i) | site(i + 1) << 16)
 }
 
 /**
@@ -827,10 +827,10 @@ impl Marcher {
         }
         let mut levels = [GpuLevel::default(); GRID_LEVELS];
         let (added, changed) = self.windows.sync(&scene.levels, self.lit, look.camera);
-        upload(queue, &self.buffers[3], &added, BRICK_WORDS, |tile, first| &tile.words[first * BRICK_WORDS..][..BRICK_WORDS]);
+        upload(queue, &self.buffers[3], &added, BRICK_WORDS, |tile, first| words(&tile.grid, first));
         if self.lit {
             upload(queue, &self.buffers[7], &added, BRICK_SITES, |tile, first| {
-                &tile.lights.as_ref().expect("a tile held lit")[first * BRICK_SITES..][..BRICK_SITES]
+                tile.lights.as_ref().expect("a tile held lit")[first * BRICK_SITES..][..BRICK_SITES].iter().copied()
             });
         }
         for (level, gpu) in levels.iter_mut().enumerate() {
@@ -916,7 +916,13 @@ impl Marcher {
 }
 
 /** Copies `added` bricks into `pool`, `per` words a brick as `words` gives them, in runs of slots one after another. */
-fn upload<'a>(queue: &wgpu::Queue, pool: &wgpu::Buffer, added: &'a [Added], per: usize, words: impl Fn(&'a Tile, usize) -> &'a [u32]) {
+fn upload<'a, W: IntoIterator<Item = u32>>(
+    queue: &wgpu::Queue,
+    pool: &wgpu::Buffer,
+    added: &'a [Added],
+    per: usize,
+    words: impl Fn(&'a Tile, usize) -> W,
+) {
     let mut added: Vec<_> = added.iter().map(|(slot, tile, first)| (*slot, tile.as_ref(), *first)).collect();
     added.sort_unstable_by_key(|a| a.0);
     let mut run: Vec<u32> = Vec::new();
@@ -929,7 +935,7 @@ fn upload<'a>(queue: &wgpu::Queue, pool: &wgpu::Buffer, added: &'a [Added], per:
             write(&run, added[k - 1].0 + 1);
             run.clear();
         }
-        run.extend_from_slice(words(tile, first));
+        run.extend(words(tile, first));
     }
     if let Some(last) = added.last() {
         write(&run, last.0 + 1);
@@ -980,7 +986,7 @@ mod tests {
     fn sync(windows: &mut Windows, tiles: &Arc<Level>, eye: Vec3, slots: &mut HashMap<u32, Vec<u32>>) -> bool {
         let (added, changed) = windows.sync(std::slice::from_ref(tiles), false, eye);
         for (slot, tile, first) in added {
-            slots.insert(slot, tile.words[first * BRICK_WORDS..][..BRICK_WORDS].to_vec());
+            slots.insert(slot, words(&tile.grid, first).collect());
         }
         changed.contains(&true)
     }
