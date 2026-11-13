@@ -11,6 +11,17 @@ spawn            0         0         0         0         0         0         0  
 spawn            0         0         0         0         0         0         0         0       133       133         0 plan stream
 spawn            0         0         0         0         0         0         0     16384     16384     16384         0 plan streamside
 spawn            0         0         0         0         0         0         0     65608     16393     16393         0 plan mist
+spawn            1        64        23         3       741         0         0       408         0         0       396 moor boulders
+spawn            1        36         1         3      7076         0         0       117         0         0      7076 steadings
+spawn            1         0         0         0         0         0     16384    102928         0         0         0 heath
+spawn            1         0         0         0         0         0     16384     32768         0         0         0 stream bed
+spawn            1         0         0         0         0         0     16384     32768         0         0         0 water
+spawn            1         0         0         0         0         0     16384     32768         0         0         0 mist
+spawn            1         0         0         0         0         0         0       878        26        26         0 plan steadings
+spawn            1         0         0         0         0         0         0     50489     16888     16832         0 plan ground
+spawn            1         0         0         0         0         0         0         0       140       140         0 plan stream
+spawn            1         0         0         0         0         0         0     16384     16384     16384         0 plan streamside
+spawn            1         0         0         0         0         0         0     65736     16409     16409         0 plan mist
 spawn            2       196        55         5       136         0         0       495         0         0        45 moor boulders
 spawn            2        49         1         3       733         0         0       154         0         0       733 steadings
 spawn            2         0         0         0         0         0     16384    101392         0         0         0 heath
@@ -22,6 +33,17 @@ spawn            2         0         0         0         0         0         0  
 spawn            2         0         0         0         0         0         0         0       175       175         0 plan stream
 spawn            2         0         0         0         0         0         0     16384     16384     16384         0 plan streamside
 spawn            2         0         0         0         0         0         0     66184     16465     16465         0 plan mist
+spawn            3       576       140        11        67         0         0      1013         0         0        12 moor boulders
+spawn            3        81         2         3        99         0         0       261         0         0        99 steadings
+spawn            3         0         0         0         0         0     16384    102928         0         0         0 heath
+spawn            3         0         0         0         0         0     16384     32768         0         0         0 stream bed
+spawn            3         0         0         0         0         0     16384     32768         0         0         0 water
+spawn            3         0         0         0         0         0     16384     32768         0         0         0 mist
+spawn            3         0         0         0         0         0         0      2304        86        86         0 plan steadings
+spawn            3         0         0         0         0         0         0     51897     17362     17350         0 plan ground
+spawn            3         0         0         0         0         0         0         0       244       244         0 plan stream
+spawn            3         0         0         0         0         0         0     16384     16384     16384         0 plan streamside
+spawn            3         0         0         0         0         0         0     67848     16673     16673         0 plan mist
 spawn            4      2116       547        43       218         0         0      3494         0         0        36 moor boulders
 spawn            4       169         3        33       338         0         0       542         0         0       165 steadings
 spawn            4         0         0         0         0         0     16384    103296         0         0         0 heath
@@ -33,6 +55,17 @@ spawn            4         0         0         0         0         0         0  
 spawn            4         0         0         0         0         0         0         0      2083      2083         0 plan stream
 spawn            4         0         0         0         0         0         0     29688     29688     16384         0 plan streamside
 spawn            4         0         0         0         0         0         0     74248     17473     17473         0 plan mist
+spawn            5      7921      2040       185       185         0         0     12691         0         0         1 moor boulders
+spawn            5       441        12       119       206         0         0      1470         0         0        36 steadings
+spawn            5         0         0         0         0         0     16384    101438         0         0         0 heath
+spawn            5         0         0         0         0         0     16384     32768         0         0         0 stream bed
+spawn            5         0         0         0         0         0     16384     32768         0         0         0 water
+spawn            5         0         0         0         0         0     16384     32768         0         0         0 mist
+spawn            5         0         0         0         0         0         0     10823       345       345         0 plan steadings
+spawn            5         0         0         0         0         0         0     74755     25478     25459         0 plan ground
+spawn            5         0         0         0         0         0         0         0      4163      4163         0 plan stream
+spawn            5         0         0         0         0         0         0     29195     29195     16384         0 plan streamside
+spawn            5         0         0         0         0         0         0     99336     20609     20609         0 plan mist
 spawn            6     30625      7757       757       757         0         0     48345         0         0         1 moor boulders
 spawn            6      1369        32       379       350         0         0      4229         0         0        15 steadings
 spawn            6         0         0         0         0         0     16384     96832         0         0         0 heath
@@ -44,6 +77,26 @@ spawn            6         0         0         0         0         0         0  
 spawn            6         0         0         0         0         0         0         0      8321      8321         0 plan stream
 spawn            6         0         0         0         0         0         0     29465     29465     16384         0 plan streamside
 spawn            6         0         0         0         0         0         0    198664     33025     33025         0 plan mist
+spawn            7      4761        97      1254      1163         0         0     13640         0         0        15 steadings
+spawn            7         0         0         0         0         0     16384     89625         0         0         0 heath
+spawn            7         0         0         0         0         0     16384     32768         0         0         0 stream bed
+spawn            7         0         0         0         0         0     16384     32768         0         0         0 water
+spawn            7         0         0         0         0         0     16384     32768         0         0         0 mist
+spawn            7         0         0         0         0         0         0     92195      3006      3006         0 plan steadings
+spawn            7         0         0         0         0         0         0    205647     81804     70020         0 plan ground
+spawn            7         0         0         0         0         0         0         0     14588     14588         0 plan stream
+spawn            7         0         0         0         0         0         0     28134     28134     16384         0 plan streamside
+spawn            7         0         0         0         0         0         0    589824     81920     81920         0 plan mist
+spawn            8     17956       336      4421      4100         0         0     48412         0         0        15 steadings
+spawn            8         0         0         0         0         0     16384     86920         0         0         0 heath
+spawn            8         0         0         0         0         0     16384     32768         0         0         0 stream bed
+spawn            8         0         0         0         0         0     16384     32768         0         0         0 water
+spawn            8         0         0         0         0         0     16384     32768         0         0         0 mist
+spawn            8         0         0         0         0         0         0    343484      9660      9656         0 plan steadings
+spawn            8         0         0         0         0         0         0    679685    286251    268865         0 plan ground
+spawn            8         0         0         0         0         0         0         0     16740     16384         0 plan stream
+spawn            8         0         0         0         0         0         0     28240     28240     16384         0 plan streamside
+spawn            8         0         0         0         0         0         0    589824     81920     81920         0 plan mist
 region1          0        36        10         0         0         0         0       225         0         0         0 moor boulders
 region1          0        25         1        13      6949         0         0        84         0         0      6949 steadings
 region1          0         0         0         0         0         0     16384     98304         0         0         0 heath
@@ -55,6 +108,17 @@ region1          0         0         0         0         0         0         0  
 region1          0         0         0         0         0         0         0         0       134       134         0 plan stream
 region1          0         0         0         0         0         0         0     16384     16384     16384         0 plan streamside
 region1          0         0         0         0         0         0         0     65608     16393     16393         0 plan mist
+region1          1        64        19         0         0         0         0       396         0         0         0 moor boulders
+region1          1        36         1        15      1130         0         0       109         0         0      1130 steadings
+region1          1         0         0         0         0         0     16384     86544         0         0         0 heath
+region1          1         0         0         0         0         0     16384     32768         0         0         0 stream bed
+region1          1         0         0         0         0         0     16384     32768         0         0         0 water
+region1          1         0         0         0         0         0     16384     32768         0         0         0 mist
+region1          1         0         0         0         0         0         0       878        26        26         0 plan steadings
+region1          1         0         0         0         0         0         0     33949     16885     16829         0 plan ground
+region1          1         0         0         0         0         0         0         0       141       141         0 plan stream
+region1          1         0         0         0         0         0         0     16384     16384     16384         0 plan streamside
+region1          1         0         0         0         0         0         0     65736     16409     16409         0 plan mist
 region1          2       196        50         4        25         0         0       476         0         0        12 moor boulders
 region1          2        49         1        16       144         0         0       142         0         0       144 steadings
 region1          2         0         0         0         0         0     16384     86544         0         0         0 heath
@@ -66,6 +130,17 @@ region1          2         0         0         0         0         0         0  
 region1          2         0         0         0         0         0         0         0       167       167         0 plan stream
 region1          2         0         0         0         0         0         0     16384     16384     16384         0 plan streamside
 region1          2         0         0         0         0         0         0     66184     16465     16465         0 plan mist
+region1          3       576       142         7        46         0         0      1007         0         0        24 moor boulders
+region1          3        81         1        16       365         0         0       220         0         0       365 steadings
+region1          3         0         0         0         0         0     16384     89232         0         0         0 heath
+region1          3         0         0         0         0         0     16384     32768         0         0         0 stream bed
+region1          3         0         0         0         0         0     16384     32768         0         0         0 water
+region1          3         0         0         0         0         0     16384     32768         0         0         0 mist
+region1          3         0         0         0         0         0         0      2247        71        71         0 plan steadings
+region1          3         0         0         0         0         0         0     37744     17346     17336         0 plan ground
+region1          3         0         0         0         0         0         0         0       243       243         0 plan stream
+region1          3         0         0         0         0         0         0     16384     16384     16384         0 plan streamside
+region1          3         0         0         0         0         0         0     67848     16673     16673         0 plan mist
 region1          4      2116       488        37       198         0         0      3336         0         0        24 moor boulders
 region1          4       169         4        31       308         0         0       543         0         0       171 steadings
 region1          4         0         0         0         0         0     16384     94003         0         0         0 heath
@@ -77,6 +152,17 @@ region1          4         0         0         0         0         0         0  
 region1          4         0         0         0         0         0         0         0      2080      2080         0 plan stream
 region1          4         0         0         0         0         0         0     29295     29295     16384         0 plan streamside
 region1          4         0         0         0         0         0         0     74248     17473     17473         0 plan mist
+region1          5      7921      2006       177       177         0         0     12594         0         0         1 moor boulders
+region1          5       441        10       103       152         0         0      1357         0         0        37 steadings
+region1          5         0         0         0         0         0     16384     99347         0         0         0 heath
+region1          5         0         0         0         0         0     16384     32768         0         0         0 stream bed
+region1          5         0         0         0         0         0     16384     32768         0         0         0 water
+region1          5         0         0         0         0         0     16384     32768         0         0         0 mist
+region1          5         0         0         0         0         0         0     10866       328       328         0 plan steadings
+region1          5         0         0         0         0         0         0     71667     25438     25425         0 plan ground
+region1          5         0         0         0         0         0         0         0      4158      4158         0 plan stream
+region1          5         0         0         0         0         0         0     29350     29350     16384         0 plan streamside
+region1          5         0         0         0         0         0         0     99336     20609     20609         0 plan mist
 region1          6     30625      7620       711       711         0         0     47690         0         0         1 moor boulders
 region1          6      1369        26       255       236         0         0      3618         0         0        15 steadings
 region1          6         0         0         0         0         0     16384     89456         0         0         0 heath
@@ -88,3 +174,23 @@ region1          6         0         0         0         0         0         0  
 region1          6         0         0         0         0         0         0         0      8321      8321         0 plan stream
 region1          6         0         0         0         0         0         0     29091     29091     16384         0 plan streamside
 region1          6         0         0         0         0         0         0    198664     33025     33025         0 plan mist
+region1          7      4761        78       929       859         0         0     11721         0         0        15 steadings
+region1          7         0         0         0         0         0     16384     84700         0         0         0 heath
+region1          7         0         0         0         0         0     16384     32768         0         0         0 stream bed
+region1          7         0         0         0         0         0     16384     32768         0         0         0 water
+region1          7         0         0         0         0         0     16384     32768         0         0         0 mist
+region1          7         0         0         0         0         0         0     84912      2905      2905         0 plan steadings
+region1          7         0         0         0         0         0         0    177481     81491     69708         0 plan ground
+region1          7         0         0         0         0         0         0         0     14615     14615         0 plan stream
+region1          7         0         0         0         0         0         0     28069     28069     16384         0 plan streamside
+region1          7         0         0         0         0         0         0    589824     81920     81920         0 plan mist
+region1          8     17956       312      4011      3719         0         0     46142         0         0        15 steadings
+region1          8         0         0         0         0         0     16384     85356         0         0         0 heath
+region1          8         0         0         0         0         0     16384     32768         0         0         0 stream bed
+region1          8         0         0         0         0         0     16384     32768         0         0         0 water
+region1          8         0         0         0         0         0     16384     32768         0         0         0 mist
+region1          8         0         0         0         0         0         0    325692      9556      9553         0 plan steadings
+region1          8         0         0         0         0         0         0    646825    285857    268469         0 plan ground
+region1          8         0         0         0         0         0         0         0     16797     16384         0 plan stream
+region1          8         0         0         0         0         0         0     28285     28285     16384         0 plan streamside
+region1          8         0         0         0         0         0         0    589824     81920     81920         0 plan mist

@@ -593,7 +593,8 @@ as a failing cache does (each plan's row shows its times made).
 `cargo run --release --example cost -- <world>` in `worlds/` prints it
 (arguments in the file).
 
-`worlds/tests/cost.rs` holds each world in `WORLDS`
+`worlds/tests/cost.rs` holds each world in `WORLDS`,
+at every level a host makes, odd ones too,
 to its baseline, `worlds/data/cost/<world>.txt`:
 it fails when a count rises or falls by more than a quarter
 and the change weighs a hundredth of its tile or more.

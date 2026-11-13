@@ -333,6 +333,13 @@ Numbers are for the forest at 1280×800, as measured when written.
   worldgen's, counted ("Cost" in `docs/generators.md`),
   goes mostly to the trees at levels 0 to 2
   and to measuring their shadows from level 4.
+- **Some of the valley's tiles are over the cost budget**
+  (`OVER_BUDGET` in `worlds/tests/cost.rs`), each by a thing done one by one
+  where a tile holds four times as many each level:
+  at level 5 the forest's canopy by its trees' rooms,
+  read in `Points`' cells as wide as the sites, whose counts cost their leaves';
+  at level 3 the towns' things drawn whole to be measured;
+  at level 8 the moor's pools, each claimed by reading the ground around it.
 - **The learned town's rules are from the old towns.**
   `worlds/data/town-grammar.bin` was learned when the valley's towns
   were all market towns alike, so lab's `export -- --check` says it differs.

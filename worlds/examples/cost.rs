@@ -4,7 +4,7 @@
 //! cargo run --release --example cost -- valley
 //! cargo run --release --example cost -- moor 7 levels 0 1 2 3 at 0 0 0 at 512 0 512 all
 //!
-//! for world, then optionally seed (REGIONS_SEED), `levels` (0 2 4 6), places to
+//! for world, then optionally seed (REGIONS_SEED), `levels` (all a host makes), places to
 //! look at with `at` (lattice units; the spawn and the centres of the
 //! world's regions there, around the places it names), and `all` for
 //! every count of every tile.
@@ -42,7 +42,7 @@ fn main() {
         i += 1;
     }
     if levels.is_empty() {
-        levels = vec![0, 2, 4, 6];
+        levels = (0..bake::slicing::GRID_LEVELS as u32).collect();
     }
     if at.is_empty() {
         let world = (entry.make)(seed);
