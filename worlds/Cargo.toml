@@ -17,12 +17,3 @@ sponza = []
 [dev-dependencies]
 bake = { path = "../bake" }
 
-[profile.test]
-opt-level = 2
-
-# The web's WebAssembly (pnpm wasm): small and fast, however long it takes to build.
-[profile.wasm]
-inherits = "release"
-lto = true
-codegen-units = 1
-panic = "abort"

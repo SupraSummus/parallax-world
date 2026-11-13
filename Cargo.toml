@@ -1,0 +1,19 @@
+# The Rust crates, built and checked together with one lock and one target.
+# lab/ is a member, for the lock, but no default one: pnpm check leaves it out
+# (`-p lab` builds it).
+[workspace]
+resolver = "3"
+members = ["bake", "worldgen", "worlds", "native", "lab"]
+default-members = ["bake", "worldgen", "worlds", "native"]
+
+# The tests bake whole cells and generate whole tiles, several times faster
+# optimised. Debug assertions stay on.
+[profile.test]
+opt-level = 2
+
+# The web's WebAssembly (pnpm wasm): small and fast, however long it takes to build.
+[profile.wasm]
+inherits = "release"
+lto = true
+codegen-units = 1
+panic = "abort"

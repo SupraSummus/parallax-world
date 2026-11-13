@@ -872,7 +872,7 @@ pnpm wasm --features sponza && pnpm exec vite
 ```
 
 ```bash
-cargo run --release --config native/.cargo/config.toml --manifest-path native/Cargo.toml --features worlds/sponza -- --view 'world=sponza&look=90,5' --shot out.png
+cargo run --release -p parallax-native --features worlds/sponza -- --view 'world=sponza&look=90,5' --shot out.png
 ```
 
 ## Writing a world

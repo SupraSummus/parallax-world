@@ -52,6 +52,8 @@ src/
     ├── bake.worker.ts       # Bake worker entry
     ├── compositor.ts        # Draws the renderer's frames with WebGL 2: chunks' splats as instanced prisms
     └── utils.ts             # cn() for class names
+Cargo.toml                   # The Rust crates' workspace: one lock, one target; lab/ a member built only when named
+.cargo/config.toml           # Builds for x86-64-v3: floor and ceil inline (see there)
 scripts/shot.mjs             # pnpm shot: a view in headless Chromium, saved once complete
 scripts/voxelize.py          # A glTF scene as voxels of the FCC lattice, for worlds/src/scene.rs (numpy, Pillow)
 bake/                        # Chunk baker, coverage and walking in Rust (no dependencies), in worlds/' WebAssembly
@@ -113,7 +115,6 @@ worlds/                      # The worlds, on worldgen's public API only; the we
 └── examples/                # map: a world from above; look: a picture of it, of any place it names (picture.rs), lit (light.rs); cost: what its tiles cost (cost.rs); bench: timing a world's tiles
 lab/                         # Experiment, not built by pnpm: split grammars with shared splits, learned from the valley's towns; a masked model of any volume, flat, 3D or on the FCC lattice; synthesis by coordinates into examples; a critic and profiles that score any of them; real places (scripts/overture.py) drawn to a plan (see src/lib.rs); exports the learned town's rules
 native/                      # Spike of a native frontend (egui on winit and wgpu), linking bake/ and worlds/; see src/main.rs
-├── .cargo/config.toml       # Builds for x86-64-v3: floor and ceil inline (see there)
 └── src/
     ├── main.rs              # The camera (flying or walking, F), the panel, its engine and lighting (shaded or computed); --shot, --bench, --stroll for any engine
     ├── window.rs            # The window: egui on winit and wgpu, over the engine's picture, its GPU device made again when lost

@@ -1,6 +1,7 @@
 # x86-64-v3 (AVX2, 2013 on): without SSE4.1, floor and ceil are calls to
 # libm, which the renderer's coverage makes in its inner loops; a frame's
 # main-thread time drops by over a third. They are exact (and nothing is
-# fused into FMAs unasked), so the world and the picture stay the same.
+# fused into FMAs unasked), so the world and the picture stay the same:
+# every crate built for the host takes it, so they share one build.
 [target.x86_64-unknown-linux-gnu]
 rustflags = ["-C", "target-cpu=x86-64-v3"]
