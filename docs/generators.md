@@ -376,7 +376,8 @@ Broken rules panic, naming the thing and pointing here:
   so derive `wander` from the most a rule can stray.
 - **Kinds.** A world has at most 255 materials: ids are bytes.
 - **Slopes.** A `Sloped` plan's column differs from a neighbour's
-  by at most its `slope`, whenever one is read and the other is kept.
+  by at most its `slope`, checked as one is made and the other is kept:
+  so every two ever kept together.
 - **About.** A field's span lies within `below` under and `above` over
   what it is `about` at its column,
   give or take two sites (a span is at least two sites tall)

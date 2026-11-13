@@ -105,11 +105,6 @@ impl Own {
         std::iter::successors(self.puts.get(self.cells[i] as usize), |p| self.puts.get(p.4 as usize))
     }
 
-    /** What the thing has at (x, y, z), as `of`. */
-    fn at(&self, x: i64, y: i64, z: i64) -> Option<(Kind, Op)> {
-        self.of(self.index(x, y, z))
-    }
-
     /**
      * What the thing has at index `i` of `cells`, its voxels kept by chance:
      * its site's kind (measured, its faces are measured anew) and how it meets the world.
@@ -126,13 +121,22 @@ impl Own {
         fill
     }
 
+    /** The site at index `i` of `cells`. */
+    fn site(&self, i: usize) -> [i64; 3] {
+        let i = i as i64;
+        [i % self.n[0] + self.b.min[0], (i / self.n[0]) % self.n[1] + self.b.min[1], i / (self.n[0] * self.n[1]) + self.b.min[2]]
+    }
+
+    /** The sites where the thing has something, with what (`of`), in the order of `cells`. */
+    fn held(&self) -> impl Iterator<Item = ([i64; 3], Kind)> + '_ {
+        (0..self.cells.len()).filter(|&i| self.cells[i] != NONE).filter_map(|i| Some((self.site(i), self.of(i)?.0)))
+    }
+
     /** Puts what the thing put, as it came. */
     pub(super) fn each(&self, visit: &mut Put) {
         for i in 0..self.cells.len() {
             let puts: Vec<_> = self.puts_at(i).collect();
-            let j = i as i64;
-            let (x, y, z) =
-                (j % self.n[0] + self.b.min[0], (j / self.n[0]) % self.n[1] + self.b.min[1], j / (self.n[0] * self.n[1]) + self.b.min[2]);
+            let [x, y, z] = self.site(i);
             for &&(look, op, share, pick, _) in puts.iter().rev() {
                 visit(look, op, share, pick, x, y, z);
             }
@@ -204,6 +208,24 @@ impl Columns {
         self.held[(p[0] * self.n[1] + p[1]) as usize] = true;
     }
 
+    /**
+     * Those `plane` holds too (a box as large); returns how many more pairs
+     * (`pairs`) it holds: each column is in four, so one newly held adds
+     * those whose other column isn't.
+     */
+    fn add(&mut self, plane: &Columns) -> u32 {
+        let mut added = 0;
+        for i in 0..self.held.len() {
+            if !plane.held[i] || self.held[i] {
+                continue;
+            }
+            self.held[i] = true;
+            let p = [i as i64 / self.n[1], i as i64 % self.n[1]];
+            added += [[-1, 0], [1, 0], [0, -1], [0, 1]].iter().filter(|d| !self.holds([p[0] + d[0], p[1] + d[1]])).count() as u32;
+        }
+        added
+    }
+
     /** Those any of `planes` holds, of the box of the first (none if there are none). */
     fn union<'a>(planes: impl IntoIterator<Item = &'a Columns>) -> Columns {
         let mut planes = planes.into_iter();
@@ -254,8 +276,37 @@ struct Slice {
 pub struct Shadows {
     f: i64,
     axis: usize,
-    /** By thing, its first site along each axis, and its layers across the axis from the first. */
-    things: Vec<([i64; 3], Vec<Slice>)>,
+    things: Vec<Thing>,
+}
+
+/** A thing measured: its first site along each axis, and its layers across the axis from the first. */
+struct Thing {
+    min: [i64; 3],
+    layers: Vec<Slice>,
+    /**
+     * By k, the pairs (`pairs`) its layers before the kth hold seen across
+     * the axis, and those from it on: what any slab adds, read off them.
+     */
+    before: Vec<u32>,
+    after: Vec<u32>,
+}
+
+impl Thing {
+    fn new(min: [i64; 3], layers: Vec<Slice>) -> Thing {
+        let n = layers.len();
+        let (mut before, mut after) = (vec![0; n + 1], vec![0; n + 1]);
+        if let Some(first) = layers.first() {
+            let mut seen = Columns::new(first.across.n);
+            for (k, layer) in layers.iter().enumerate() {
+                before[k + 1] = before[k] + seen.add(&layer.across);
+            }
+            seen = Columns::new(first.across.n);
+            for (k, layer) in layers.iter().enumerate().rev() {
+                after[k] = after[k + 1] + seen.add(&layer.across);
+            }
+        }
+        Thing { min, layers, before, after }
+    }
 }
 
 /**
@@ -280,32 +331,24 @@ impl Shadows {
             .map(|(i, node)| {
                 let own = alone(node, &format!("sample {i}"), cost::SHADOWS, bounds_of(node), f, 0, visit);
                 let (n, min) = (own.n, own.b.min);
-                let layers = (0..n[axis])
-                    .map(|l| {
-                        let mut slice = Slice {
-                            across: Columns::new([n[a], n[b]]),
-                            along: [[1, n[b]], [1, n[a]]].map(Columns::new),
-                            kinds: Vec::new(),
-                        };
-                        for i in 0..n[a] {
-                            for j in 0..n[b] {
-                                let mut p = [0; 3];
-                                (p[axis], p[a], p[b]) = (l + min[axis], i + min[a], j + min[b]);
-                                if let Some((kind, _)) = own.at(p[0], p[1], p[2]) {
-                                    match slice.kinds.iter_mut().find(|k| k.0 == kind) {
-                                        Some(k) => k.1 += 1,
-                                        None => slice.kinds.push((kind, 1)),
-                                    }
-                                    slice.across.set([i, j]);
-                                    slice.along[0].set([0, j]);
-                                    slice.along[1].set([0, i]);
-                                }
-                            }
-                        }
-                        slice
+                let mut layers: Vec<Slice> = (0..n[axis])
+                    .map(|_| Slice {
+                        across: Columns::new([n[a], n[b]]),
+                        along: [[1, n[b]], [1, n[a]]].map(Columns::new),
+                        kinds: Vec::new(),
                     })
                     .collect();
-                (min, layers)
+                for (p, kind) in own.held() {
+                    let (slice, i, j) = (&mut layers[(p[axis] - min[axis]) as usize], p[a] - min[a], p[b] - min[b]);
+                    match slice.kinds.iter_mut().find(|k| k.0 == kind) {
+                        Some(k) => k.1 += 1,
+                        None => slice.kinds.push((kind, 1)),
+                    }
+                    slice.across.set([i, j]);
+                    slice.along[0].set([0, j]);
+                    slice.along[1].set([0, i]);
+                }
+                Thing::new(min, layers)
             })
             .collect();
         Shadows { f, axis, things }
@@ -314,7 +357,7 @@ impl Shadows {
     /** The share of the things' sites in the slab from `from` to `to` (exclusive) along the axis whose kinds `of` holds. */
     pub fn share(&self, from: i64, to: i64, of: impl Fn(Kind) -> bool) -> f64 {
         let (mut sum, mut all) = (0u64, 0u64);
-        for (min, layers) in &self.things {
+        for Thing { min, layers, .. } in &self.things {
             let ceil = |v: i64| (-(-v).div_euclid(self.f) - min[self.axis]).clamp(0, layers.len() as i64) as usize;
             for slice in &layers[ceil(from)..ceil(to)] {
                 for &(kind, n) in &slice.kinds {
@@ -349,15 +392,14 @@ impl Shadows {
     /** The mean over the things of `of`(what their slab adds to their shadow across the axis, its own shadow along the other two). */
     fn mean(&self, from: i64, to: i64, of: impl Fn(f64, f64) -> f64) -> f64 {
         let (f, mut sum) = (self.f, 0.0);
-        for (min, layers) in &self.things {
+        for Thing { min, layers, before, after } in &self.things {
             let ceil = |v: i64| -(-v).div_euclid(f) - min[self.axis];
             let (lo, hi) = (ceil(from).clamp(0, layers.len() as i64) as usize, ceil(to).clamp(0, layers.len() as i64) as usize);
             if lo >= hi {
                 continue;
             }
-            let across = |range: std::ops::Range<usize>| Columns::union(layers[range].iter().map(|s| &s.across)).shadow();
-            let n = layers.len();
-            let adds = (across(lo..n) - across(hi..n) + across(0..hi) - across(0..lo)) / 2.0;
+            // What it adds seen from each side, of pairs: half a column's area each.
+            let adds = (after[lo] - after[hi] + before[hi] - before[lo]) as f64 / 4.0;
             // Along each of the other two, the slab's layers stacked: a plane of the axis and the third.
             let along: f64 = (0..2).map(|k| Columns::stacked(layers[lo..hi].iter().map(|s| &s.along[k])).shadow()).sum();
             sum += of(adds, along) * (f * f) as f64;
@@ -388,7 +430,7 @@ impl Shadows {
             })
         };
         let mut areas = std::collections::BTreeMap::<[i64; 3], f64>::new();
-        for (min, layers) in &self.things {
+        for Thing { min, layers, .. } in &self.things {
             // Half a column's area at the middle of each pair of neighbouring columns holding a site (`pairs`), its
             // place in halves of the sites' spacing.
             let plane = Columns::union(layers.iter().map(|s| &s.across));
@@ -630,4 +672,23 @@ pub(super) fn measure(node: &Node, key: &str, layer: &'static str, bounds: Box3,
     // In an order of their own, as sites are put in it.
     sites.sort_by_key(|e| e.0);
     sites
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn columns_added_count_the_pairs_their_union_holds() {
+        // Shadows reads slabs off running counts, not unions counted anew.
+        let mut random = Rng::new(7);
+        let mut seen = Columns::new([9, 13]);
+        let mut count = 0;
+        for _ in 0..12 {
+            let mut plane = Columns::new([9, 13]);
+            plane.held.iter_mut().for_each(|h| *h = random.below(5) == 0);
+            count += seen.add(&plane);
+            assert_eq!(count, seen.pairs_held());
+        }
+    }
 }

@@ -33,8 +33,8 @@ fn main() {
             (&grid.bricks, &grid.cells).hash(&mut hash);
         }
         println!(
-            "level {level}: 4 tiles in {:.2} s ({voxels} bytes of bricks, hash {:016x})",
-            start.elapsed().as_secs_f64(),
+            "level {level}: 4 tiles in {:.1} ms ({voxels} bytes of bricks, hash {:016x})",
+            start.elapsed().as_secs_f64() * 1000.0,
             hash.finish()
         );
     }

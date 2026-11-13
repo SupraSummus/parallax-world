@@ -245,30 +245,36 @@ fn lerp(a: Fixed, b: Fixed, t: Fixed) -> Fixed {
     a + (((b - a) * t) >> 16)
 }
 
+/** Cells a ValueNoise keeps the corners of, each in a slot by its index. */
+const CELLS: usize = 4;
+
 /**
  * Lattice noise in [0, ONE) at (x, y) / PERIOD: random values at multiples
  * of PERIOD, eased between. A constant, so dividing by it is multiplying.
- * The corners of the cell it was last asked in are kept, as neighbouring
- * columns mostly ask in the same.
+ * The corners of the cells it was last asked in are kept, a few: as
+ * neighbouring columns mostly ask in the same, and a world may read one
+ * noise at a few places far apart in turn (both sides of a valley).
  */
 pub struct ValueNoise<const PERIOD: i64> {
     seed: u64,
-    cell: Cell<(i64, i64, [Fixed; 4])>,
+    cells: [Cell<(i64, i64, [Fixed; 4])>; CELLS],
 }
 
 impl<const PERIOD: i64> ValueNoise<PERIOD> {
     pub fn new(seed: u64) -> Self {
-        ValueNoise { seed, cell: Cell::new((i64::MIN, i64::MIN, [0; 4])) }
+        ValueNoise { seed, cells: std::array::from_fn(|_| Cell::new((i64::MIN, i64::MIN, [0; 4]))) }
     }
 
     #[inline(always)]
     fn bits(&self, x: i64, y: i64) -> Fixed {
         let (ix, iy) = (x.div_euclid(PERIOD), y.div_euclid(PERIOD));
-        let (kx, ky, mut c) = self.cell.get();
+        let key = (ix as u64).wrapping_mul(0x9e3779b97f4a7c15) ^ (iy as u64).wrapping_mul(0xc2b2ae3d27d4eb4f);
+        let slot = &self.cells[(key >> (64 - CELLS.trailing_zeros())) as usize];
+        let (kx, ky, mut c) = slot.get();
         if (kx, ky) != (ix, iy) {
             let at = |i, j| fraction(hash(self.seed, i, j, 0));
             c = [at(ix, iy), at(ix + 1, iy), at(ix, iy + 1), at(ix + 1, iy + 1)];
-            self.cell.set((ix, iy, c));
+            slot.set((ix, iy, c));
         }
         let u = ease((x.rem_euclid(PERIOD) << 16) / PERIOD);
         let v = ease((y.rem_euclid(PERIOD) << 16) / PERIOD);

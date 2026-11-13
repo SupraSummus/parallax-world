@@ -281,19 +281,18 @@ struct Noise {
     floor: ValueNoise<20>,
 }
 
-/** The rise over a run of one from which ground is stone: of a column to its neighbours, of a slope's side to the spacing. */
+/** The rise over a run of one from which ground is stone: of a column to the next along x or z, of a slope's side to the spacing. */
 const STEEP: i64 = 3;
 
-/** Column (x, z), given the ground's height there and at its four neighbours. */
-fn column_of(n: &Noise, path: &Path, x: i64, z: i64, h: i64, neighbours: [i64; 4]) -> Column {
-    let slope = neighbours.map(|n| (n - h).abs()).into_iter().max().expect("four");
+/** Column (x, z), given the ground's height there and whether it is steep. */
+fn column_of(n: &Noise, path: &Path, x: i64, z: i64, h: i64, steep: bool) -> Column {
     let conifer = smoothstep(fx(0.4), fx(0.6), n.conifer.at(x, z)) * 3 / 4 + smoothstep(Fx::m(6.0), Fx::m(16.0), Units(h).to_fx()) / 4;
     let density = smoothstep(fx(0.3), fx(0.48), n.density.at(x, z));
     let on_path = path.by(x, z, Fx::m(1.1) + n.path_edge.at(z, 0) * Units::m(0.5));
     let floor = n.floor.at(x, z);
     let surface = if on_path {
         K::path
-    } else if slope >= STEEP {
+    } else if steep {
         if floor < fx(0.5) { K::stone } else { K::mossyStone }
     } else if density < fx(0.2) {
         if floor < fx(0.75) { K::grass } else { K::moss }
@@ -428,8 +427,11 @@ pub fn layers(seed: u64, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
     let columns = {
         let (heights, path) = (ground.ground.clone(), ground.path.clone());
         Plan::new("forest columns", COLUMN_SCALE, move |x, z| {
-            let h = |x, z| heights.at(x, z);
-            column_of(&noise, &path, x, z, h(x, z), [h(x - 1, z), h(x + 1, z), h(x, z - 1), h(x, z + 1)])
+            let h = heights.at(x, z);
+            // Neighbours read only where the ground may be steep: past level 0 each is a ground made for one column.
+            let rise = |x, z| (heights.at(x, z) - h).abs() >= STEEP;
+            let steep = heights.slope().is_none_or(|slope| slope >= STEEP) && (rise(x + 1, z) || rise(x, z + 1));
+            column_of(&noise, &path, x, z, h, steep)
         })
     };
     let on = ground.ground.clone();
