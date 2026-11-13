@@ -32,7 +32,7 @@ and what the checks below measure
 would follow from how the parts are built, not be tested.
 Points are a first step:
 a far form can read the things that stand, by construction
-(the forest's canopy at levels 4 and 5).
+(the forest's canopy at level 4).
 
 ## Model
 
@@ -244,7 +244,7 @@ how many rays get how far, and what they stop on.
   The forest's medium is as dense as the trees that stand ("Points").
   Things reach past their cells, crowns over a clearing:
   `Shadows::spread` measures where around a cell its things' shadow falls,
-  and at levels 4 and 5 the forest's canopy over a column hides, from above,
+  and at level 4 the forest's canopy over a column hides, from above,
   at least what the crown of the tree whose room it is in would
   (one crown, as they keep to their rooms: "Rooms").
 - **Fields** are evaluated once per site or line of sites,
@@ -308,17 +308,21 @@ So a cell's counts are its children's added, by construction,
 and a far form reading them shows the things that stand.
 A `Blur` weighs the counts of the cells around a column by their offset,
 reading a block of cells at a time:
-the forest's canopy at levels 4 and 5
+the forest's canopy at level 4
 is the trees standing in the cells a column meets,
 and the crown of the tree whose room it is in ("Rooms", below).
+Finding whose room a column is in makes every tree near it,
+so a tile makes all the trees standing in it:
+no more than it has columns only while a column is no wider than a leaf
+(at level 5, two leaves wide, a tile took four times as long as at level 4).
+From level 5 the forest's canopy is the trees expected,
+whose shadow there falls mostly on their own column.
 A cell costs the chances at its leaves' corners,
 sites of the levels at least as fine as the leaves,
 so leaves should be no wider than the chances vary over.
 A cell as wide as the roots (the forest's are 8 m wide)
 costs a column a Poisson draw and those corners,
-and wider ones their roots', sites the level doesn't read:
-from level 6 the forest's canopy is the trees expected,
-whose shadow there falls mostly on their own column.
+and wider ones their roots', sites the level doesn't read.
 Weighing cells by their chances filtered to their size doesn't avoid it:
 the trees keep to chance only with chances read every 16 m or closer,
 so a wide cell still reads sites its level doesn't

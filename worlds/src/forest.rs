@@ -528,7 +528,7 @@ pub fn layers(seed: u64, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
     // at level 4, 0.14 apart in the forest).
     let rooms = Rc::new(f.rooms(points.clone()));
     let canopy = {
-        let (f, points, rooms) = (f.clone(), points.clone(), rooms.clone());
+        let (f, rooms) = (f.clone(), rooms.clone());
         Field::columns("canopy", 1.0, Op::Fill, move |x, z, spacing| {
             let measured = measured_at(spacing);
             let Measured { slabs, above, wood, shadow, own, over } = &*measured;
@@ -543,7 +543,9 @@ pub fn layers(seed: u64, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
             });
             // The trees standing in the column, by species, and how densely the crown over it hides it from above:
             // its owner's, the tree's whose room it is in, as it would alone, as rooms cut crowns at their walls.
-            let (own, over): ([f64; 3], [f64; 3]) = if spacing < points.root {
+            // Finding the owner makes every tree near the column, so only while a column is no wider than a leaf: a
+            // tile then makes no more trees than it has columns (two leaves wide, level 5 took 4 times level 4).
+            let (own, over): ([f64; 3], [f64; 3]) = if spacing <= tree_leaf {
                 let own = own.at([x, z]);
                 let mut hides = [0.0; 3];
                 if let Some(owner) = rooms.owner([x, 0, z]) {
@@ -553,8 +555,7 @@ pub fn layers(seed: u64, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
                 }
                 ([own[0], own[1], own[2]], hides)
             } else {
-                // As wide as the roots, a cell's count costs a Poisson draw and a corner, and wider the corners of
-                // its roots, sites of finer levels only: the trees expected over the column, by the chances at its site.
+                // The trees expected over the column, by the chances at its site.
                 let leaves = ((spacing / tree_leaf) as f64).powi(2);
                 let own = [0, 1, 2].map(|sp| chances[sp].to_f64() * leaves);
                 (own, [0, 1, 2].map(|sp| own[sp] * shadow[sp]))

@@ -21,10 +21,6 @@ const TOLERANCE: f64 = 0.25;
  */
 const OVER_BUDGET: &[(&str, &str, u32)] = &[
     // Why: docs/todo.md, "Some of the valley's tiles are over the cost budget".
-    ("valley", "spawn", 5),
-    ("valley", "region1", 5),
-    ("valley", "region5", 5),
-    ("valley", "region6", 5),
     ("valley", "region2", 3),
     ("valley", "spawn", 8),
     ("valley", "region1", 8),
