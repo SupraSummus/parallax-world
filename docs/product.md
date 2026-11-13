@@ -70,6 +70,8 @@ A spinner shows while a world generates.
 - *Forest*: an endless autumn forest valley on hills kilometres
   wide: a winding path, spruces, birches and oaks, ferns, bushes, boulders
   and fallen logs.
+  Trees of about one height keep their crowns apart, with gaps of sky between
+  (crown shyness), now and then touching; a taller tree's crown spreads further.
   Its finest voxels, 0.125 m, show what is lost further away:
   leaves on twigs, bark and roots, blades of grass,
   berries, mushrooms, cones, pebbles and fallen leaves.

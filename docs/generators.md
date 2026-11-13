@@ -241,7 +241,8 @@ how many rays get how far, and what they stop on.
   Things reach past their cells, crowns over a clearing:
   `Shadows::spread` measures where around a cell its things' shadow falls,
   and at levels 4 and 5 the forest's canopy over a column hides, from above,
-  at least what the crowns reaching over it from around would.
+  at least what the crown of the tree whose room it is in would
+  (one crown, as they keep to their rooms: "Rooms").
 - **Fields** are evaluated once per site or line of sites,
   and get the spacing, to smooth themselves to it.
 - **Plans** they read hold numbers, read where the line is,
@@ -305,7 +306,7 @@ A `Blur` weighs the counts of the cells around a column by their offset,
 reading a block of cells at a time:
 the forest's canopy at levels 4 and 5
 is the trees standing in the cells a column meets,
-and the crowns reaching over it from those around.
+and the crown of the tree whose room it is in ("Rooms", below).
 A cell costs the chances at its leaves' corners,
 sites of the levels at least as fine as the leaves,
 so leaves should be no wider than the chances vary over.
@@ -322,6 +323,33 @@ and counting the trees that stand at levels 6 and 7
 did little for the windmill there (0.099 to 0.089 over 16 seeds).
 Points keep no distance between things, as `Claims` do:
 a hard core would make a cell's count hang on its neighbours' points.
+But a thing at a point can see those around it,
+as points are a function of position.
+
+### Rooms
+
+`Rooms` (`points.rs`) split the plane among the things at a process's points:
+its power diagram.
+A place is the room of the thing whose power there,
+squared distance less weight, is least, if that thing reaches it;
+each wall loses half a gap to either side.
+Weights are of a point alone and the framework draws each pair's gap,
+so both sides of a wall agree on it:
+rooms never meet where gaps are positive,
+by construction, and counts stay as they are.
+Whose room a place is (`owner`) is exact, in whole units,
+and needs only the points within √(reach² + most weight) of it.
+So a thing's near form keeps to its `room`,
+and a far form reads the same rule:
+the forest's canopy over a column is its owner's crown,
+not the overlap of the crowns around
+(summed as if they overlapped, level 4 showed 0.26 more canopy from above).
+Its crowns keep to their rooms (crown shyness):
+a taller tree weighs more, a crowded crown is squeezed,
+a quarter of pairs meet a little, by their gaps,
+and a tree with no room, under a taller one, stands bare.
+What crowded trees hide from the side
+is measured in sample stands, `Points` of constant chance.
 
 ## Rules
 
@@ -349,6 +377,7 @@ Broken rules panic, naming the thing and pointing here:
   under that, if it says, all its `under`, a solid span from `DEEP`.
 - **On.** A thing's anchor lies at most N (its cell) off
   the plan its population stands `on`.
+- **Rooms.** A thing's weight lies from 0 to the rooms' `most`.
 
 Not checked, but caught by the tests:
 draw from position, seeds and named random sequences only
@@ -1001,5 +1030,6 @@ and without them rays slipped in at a cliff's corners.
 - **Things of one band can't see each other.** Bands order what decides where,
   but two populations of one scale ("no tree on a boulder") still can't
   exclude each other.
-  `Claims` keep things of one plan apart ("Claims" in "Composing");
+  `Claims` keep things of one plan apart ("Claims" in "Composing"),
+  and rooms things of one `Points` ("Rooms");
   populations' anchors could claim the same way, against each other's.

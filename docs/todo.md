@@ -354,6 +354,12 @@ Numbers are for the forest at 1280×800, as measured when written.
   are checked in one region between them.
   Naming a landmark's node by its variant, as towns name their children,
   would part them; or the survey could count which code drew each part.
+- **The forest's canopy measures crowded trees in sample stands.**
+  From above it reads each column's owner (`Rooms`),
+  but what the trees standing in a column hide from the side
+  comes from stands at four densities, read by the trees' chance.
+  A crown alone measured by offset and slab (`Shadows`),
+  read for each column's owner, would leave rooms the one rule.
 - **The forest on steep slopes breaks the contract at level 4.**
   A region on a wooded mountainside of the valley,
   where the trees thin out to the treeline,
