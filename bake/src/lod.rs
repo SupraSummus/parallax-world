@@ -183,10 +183,12 @@ impl Lod {
         for level in 0..=self.top() {
             let Some(ks) = self.layers(level, &eyes, picked.lod.2) else { break };
             for k in ks {
-                let Some([a0, a1, b0, b1]) = Lod::rows(level, k, &eyes, tangents) else { continue };
+                let Some([_, _, b0, b1]) = Lod::rows(level, k, &eyes, tangents) else { continue };
                 let layer = picked.layer(level, k).expect("covered");
                 for r in within(layer.b, layer.rows, b0, b1) {
                     let j = layer.b + 2 * r as i32;
+                    let row = in_face(cell(self.shift, level, [layer.a, j, k as i32]), eye, tangents);
+                    let Some([a0, a1, _, _]) = row.and_then(|t| Lod::rows(level, k, &eyes, t)) else { continue };
                     for s in within(layer.a, layer.across, a0, a1) {
                         let i = layer.a + 2 * s as i32;
                         visit(cell(self.shift, level, [i, j, k as i32]), &mut layer.cells[r * layer.across + s]);
@@ -195,6 +197,25 @@ impl Lod {
             }
         }
     }
+}
+
+/**
+ * Of `tangents`, those the face's rays (|x| + √2 |y| ≤ z) may have
+ * through the voxels of the cells in `row`'s row (its j and k) from `eye`:
+ * x / z within ±(1 − √2 |y| / z) for their least |y| / z (their sites
+ * within N of the cells', the voxels a voxel past); none if no ray of the
+ * face meets them. A rectangle of tangents (Lod::rows) holds the face's
+ * rhombus, and its corners, cells none of its rays meets.
+ */
+fn in_face(row: CellChunk, eye: [f64; 3], [x0, x1, y0, y1]: [f64; 4]) -> Option<[f64; 4]> {
+    let (g, n) = ((1i64 << row.atoms) as f64, (1i64 << row.level) as f64);
+    let [_, j, k] = row.site.map(|v| f64::from(v) * g);
+    let far = (k + n + g - eye[2]) * LAYER;
+    let (low, high) = (j - n - g - eye[1], j + n + g - eye[1]);
+    let least = if low > 0.0 { low } else { (-high).max(0.0) };
+    let w = 1.0 - std::f64::consts::SQRT_2 * least / far;
+    let (x0, x1) = (x0.max(-w), x1.min(w));
+    (far > 0.0 && x0 <= x1).then_some([x0, x1, y0, y1])
 }
 
 /** The cell of `level` whose site is (i, j, k) · N, its voxels `shift` levels finer (Lod's). */
