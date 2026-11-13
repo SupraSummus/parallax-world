@@ -198,6 +198,9 @@ fn see(
             false => grid.see(i, id, faces),
         }
     }
+    if old == [0; 3] && glow == [0; 3] {
+        return;
+    }
     let glow = [0, 1, 2].map(|c| (old[c] as u64 * kept / one + visible * glow[c] as u64) as u32);
     if glow != [0; 3] {
         grid.glow.insert(i, glow);

@@ -96,6 +96,8 @@ pub struct Points {
     corners: Slots<[i64; 3], Chances>,
     /** By cell, its counts. */
     counted: Slots<(i64, [i64; 3]), Counts>,
+    /** By leaf holding any, its points, placed: each costs reading its chances up to TRIES times. */
+    placed: Slots<[i64; 3], Rc<[Spot]>>,
 }
 
 impl Points {
@@ -133,6 +135,7 @@ impl Points {
             chances: Box::new(chances),
             corners: Slots::new(SLOTS),
             counted: Slots::new(SLOTS),
+            placed: Slots::new(SLOTS),
         }
     }
 
@@ -299,21 +302,30 @@ impl Points {
         let mut spots = Vec::new();
         for leaf in self.cells_in(self.leaf, min, max) {
             let counts = self.kept(self.leaf, leaf);
-            for (mark, &count) in counts.iter().enumerate() {
-                for nth in 0..count {
-                    let mut random = Rng::new(hash64(self.seed ^ ((mark as u64) << 40 | nth as u64), leaf[0], leaf[1], leaf[2]));
-                    let tried = (0..TRIES).find_map(|_| {
-                        let at = [0, 1, 2].map(|a| if self.spans[a] { leaf[a] + random.below(self.leaf as u32) as i64 } else { 0 });
-                        (self.chances(at)[mark] > Fx::ZERO).then_some(at)
-                    });
-                    let at = tried.unwrap_or_else(|| {
-                        self.corners_of(self.leaf, leaf).find(|c| self.chances_at(*c)[mark] > Fx::ZERO).expect("a corner let it in")
-                    });
-                    spots.push(Spot { at, mark, leaf, nth });
-                }
+            if counts != [0; MARKS] {
+                spots.extend_from_slice(&self.placed.get(self.slot(self.leaf, leaf), leaf, || self.place(leaf, counts)));
             }
         }
         spots
+    }
+
+    /** The points of the leaf at `leaf`, `counts` of them by mark, placed. */
+    fn place(&self, leaf: [i64; 3], counts: Counts) -> Rc<[Spot]> {
+        let mut spots = Vec::new();
+        for (mark, &count) in counts.iter().enumerate() {
+            for nth in 0..count {
+                let mut random = Rng::new(hash64(self.seed ^ ((mark as u64) << 40 | nth as u64), leaf[0], leaf[1], leaf[2]));
+                let tried = (0..TRIES).find_map(|_| {
+                    let at = [0, 1, 2].map(|a| if self.spans[a] { leaf[a] + random.below(self.leaf as u32) as i64 } else { 0 });
+                    (self.chances(at)[mark] > Fx::ZERO).then_some(at)
+                });
+                let at = tried.unwrap_or_else(|| {
+                    self.corners_of(self.leaf, leaf).find(|c| self.chances_at(*c)[mark] > Fx::ZERO).expect("a corner let it in")
+                });
+                spots.push(Spot { at, mark, leaf, nth });
+            }
+        }
+        spots.into()
     }
 }
 
@@ -400,6 +412,8 @@ pub struct Rooms {
     weight: Box<dyn Fn(&Spot) -> i64>,
     /** By block `reach` wide, the points that may own its places: BLOCKS along each axis spanned, as a host tile's. */
     near: Slots<[i64; 3], Rc<[Spot]>>,
+    /** By block, the points in it, for `within`: twice as many blocks along each axis, as it reads those 3 around. */
+    blocks: Slots<[i64; 3], Rc<[Spot]>>,
 }
 
 impl Rooms {
@@ -408,7 +422,8 @@ impl Rooms {
         assert!(reach > 0 && most >= 0 && gaps[0] <= gaps[1], "points {}: rooms reach somewhere, weights and gaps are ranges", points.name);
         let seed = hash_text("rooms", points.seed);
         let slots = BLOCKS.pow(points.dims) as usize;
-        Rooms { points, reach, most, gaps, seed, weight: Box::new(weight), near: Slots::new(slots) }
+        let blocks = Slots::new((2 * BLOCKS).pow(points.dims) as usize);
+        Rooms { points, reach, most, gaps, seed, weight: Box::new(weight), near: Slots::new(slots), blocks }
     }
 
     /** How far a thing beating another within reach of a place may stand from it: √(reach² + most), rounded up. */
@@ -432,12 +447,28 @@ impl Rooms {
         [0, 1, 2].map(|a| if self.points.spans[a] { at[a] } else { 0 })
     }
 
-    /** The points within `within` of `at`. */
+    /** The points within `within` of `at` (on the axes), of the blocks `reach` wide they may be in. */
     fn within(&self, at: [i64; 3], within: i64) -> Vec<Spot> {
-        let (min, max) = (at.map(|v| v - within), at.map(|v| v + within + 1));
-        let mut spots = self.points.points_in(min, max);
-        spots.retain(|s| squared(s.at, at) <= within * within);
+        let range =
+            |a: usize| if self.points.spans[a] { [at[a] - within, at[a] + within].map(|v| v.div_euclid(self.reach)) } else { [0, 0] };
+        let [i, j, k] = [0, 1, 2].map(range);
+        let mut spots = Vec::new();
+        for block in (i[0]..=i[1]).flat_map(|i| (j[0]..=j[1]).flat_map(move |j| (k[0]..=k[1]).map(move |k| [i, j, k]))) {
+            spots.extend(self.block(block).iter().filter(|s| squared(s.at, at) <= within * within));
+        }
         spots
+    }
+
+    /** The points in a block, kept: of the leaves meeting it or a leaf below, as a point may stand at its leaf's far corner. */
+    fn block(&self, block: [i64; 3]) -> Rc<[Spot]> {
+        let axes = &self.points.axes[..self.points.dims as usize];
+        let slot = axes.iter().fold(0, |slot, &a| slot * 2 * BLOCKS + block[a].rem_euclid(2 * BLOCKS)) as usize;
+        self.blocks.get(slot, block, || {
+            let (min, max) = (block.map(|b| b * self.reach), block.map(|b| (b + 1) * self.reach));
+            let mut spots = self.points.points_in(min.map(|v| v - self.points.leaf), max);
+            spots.retain(|s| (0..3).all(|a| !self.points.spans[a] || (min[a]..max[a]).contains(&s.at[a])));
+            spots.into()
+        })
     }
 
     /** The gap between the rooms of `a` and `b`, `distance` apart: drawn from the pair, in either order; at most half their distance, so their walls stay between them. */
@@ -458,7 +489,8 @@ impl Rooms {
         let others = self.within(at, self.reach + self.rival());
         let own = *others
             .iter()
-            .find(|s| s.at == at && s.mark == mark)
+            .filter(|s| s.at == at && s.mark == mark)
+            .min_by_key(|s| (s.leaf, s.nth))
             .unwrap_or_else(|| panic!("points {}: none of mark {mark} at {at:?}", self.points.name));
         let w = self.weight(&own);
         let mut room = Room { at: at.map(|v| v as f64), walls: Vec::new() };

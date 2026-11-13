@@ -338,6 +338,17 @@ Numbers are for the forest at 1280×800, as measured when written.
   where a tile holds four times as many each level:
   at level 3 the towns' things drawn whole to be measured;
   at level 8 the moor's pools, each claimed by reading the ground around it.
+- **Plans are made at every column read, whatever their scale.**
+  The valley's land, decided at 4 m, makes its six domains' bids
+  (the ground among them) at each column of a tile at level 0.
+  Bids made every scale's width and interpolated would cost a column
+  a share of a sample, up to the level whose sites are that far apart;
+  past it, dithered reads would want their offsets on the samples.
+  Domains' edges would move a little.
+- **Hashing is the forest's largest single cost.**
+  Each site hashes three times (shade, pick, `shown`'s coin),
+  each `hash64` mixing three times, as do noise corners.
+  A cheaper hash would change every world.
 - **The learned town's rules are from the old towns.**
   `worlds/data/town-grammar.bin` was learned when the valley's towns
   were all market towns alike, so lab's `export -- --check` says it differs.

@@ -491,18 +491,23 @@ pub(super) fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &m
         }
         [z_to - z_from, y_to - y_from, (x_to - from).div_euclid(2)].iter().map(|n| (n + 1).max(0) as u64).product::<u64>()
     };
-    let fill = |x: i64, y: i64, z: i64| shape.fill.at((x * si) as f64, (y * si) as f64, (z * si) as f64);
+    // A site's share: its fill over `chords` of the level-0 voxel's chord, once a shape if its fill is constant.
+    let filled = |chords: f64| {
+        let of = move |fill: f64| share(1.0 - js::pow(1.0 - fill, chords));
+        let constant = match shape.fill {
+            Fill::Const(fill) => Some(of(fill)),
+            Fill::At(_) => None,
+        };
+        move |x: i64, y: i64, z: i64| constant.unwrap_or_else(|| of(shape.fill.at((x * si) as f64, (y * si) as f64, (z * si) as f64)))
+    };
     match small {
-        0 => sites(clip, &mut |x, y, z| {
-            let chance = 1.0 - js::pow(1.0 - fill(x, y, z), s);
-            put(share(chance), picked(x, y, z), x, y, z)
-        }),
+        0 => {
+            let share = filled(s);
+            sites(clip, &mut |x, y, z| put(share(x, y, z), picked(x, y, z), x, y, z))
+        }
         1 => {
-            let thickness = shape.extents.into_iter().min().expect("three").to_f64();
-            sites(clip, &mut |x, y, z| {
-                let chance = 1.0 - js::pow(1.0 - fill(x, y, z), thickness / CHORD);
-                put(share(chance), picked(x, y, z), x, y, z)
-            })
+            let share = filled(shape.extents.into_iter().min().expect("three").to_f64() / CHORD);
+            sites(clip, &mut |x, y, z| put(share(x, y, z), picked(x, y, z), x, y, z))
         }
         _ => {
             // Counted whole, so every box gets the same chance.

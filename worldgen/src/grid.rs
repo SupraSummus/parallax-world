@@ -298,7 +298,13 @@ impl VoxelGrid {
                 *at = moved[from].map_or(-1, |to| to as i32);
             }
         }
-        let hold = |v: &mut Vec<u8>| *v = held.iter().flat_map(|&from| v[from * BRICK_SITES..][..BRICK_SITES].to_vec()).collect();
+        let hold = |v: &mut Vec<u8>| {
+            let mut kept = Vec::with_capacity(held.len() * BRICK_SITES);
+            for &from in &held {
+                kept.extend_from_slice(&v[from * BRICK_SITES..][..BRICK_SITES]);
+            }
+            *v = kept;
+        };
         hold(&mut self.cells);
         for part in [&mut self.pieces, &mut self.medium] {
             hold(&mut part.alpha);

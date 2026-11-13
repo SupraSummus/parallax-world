@@ -102,14 +102,17 @@ impl<T: Clone + Default> Plan<T> {
     }
 
     pub fn at(&self, x: i64, z: i64) -> T {
+        self.fetch(x, z).0
+    }
+
+    /** Column (x, z), and whether it was made now. Making is out of line, so a kept column costs a few instructions. */
+    #[inline]
+    fn fetch(&self, x: i64, z: i64) -> (T, bool) {
         crate::cost::lookup();
-        let (reader, finest) = MAKING.get();
-        assert!(
-            self.scale >= finest,
-            "plan {reader} (scale {finest}) reads {} of the finer scale {}; see \"Bands\" in {DOCS}",
-            self.name,
-            self.scale
-        );
+        let finest = MAKING.get().1;
+        if self.scale < finest {
+            self.refuse();
+        }
         let (x, z) = match FOOTPRINT.get() {
             Some((spacing, [dx, dz])) if self.dithered && spacing > self.scale => (x + dx, z + dz),
             _ => (x, z),
@@ -118,8 +121,15 @@ impl<T: Clone + Default> Plan<T> {
         if let (kx, kz, value) = &self.slots.borrow()[slot]
             && (*kx, *kz) == (x, z)
         {
-            return value.clone();
+            return (value.clone(), false);
         }
+        (self.make(x, z, slot), true)
+    }
+
+    /** Makes column (x, z) and keeps it in `slot`. */
+    #[cold]
+    #[inline(never)]
+    fn make(&self, x: i64, z: i64, slot: usize) -> T {
         let outer = MAKING.replace(if self.filter { ("", 0) } else { (self.name, self.scale) });
         // What a plan decides for a column is the same whoever reads it.
         let value = where_asked(|| crate::cost::plan(self.name, self, [x, 0, z], || (self.make)(x, z)));
@@ -127,6 +137,15 @@ impl<T: Clone + Default> Plan<T> {
         self.slots.borrow_mut()[slot] = (x, z, value.clone());
         value
     }
+
+    /** Panics: the plan being made reads this one, of a finer scale. */
+    #[cold]
+    #[inline(never)]
+    fn refuse(&self) -> ! {
+        let (reader, finest) = MAKING.get();
+        panic!("plan {reader} (scale {finest}) reads {} of the finer scale {}; see \"Bands\" in {DOCS}", self.name, self.scale)
+    }
+
     /** Column (x, z), if kept: none is made. */
     fn kept(&self, x: i64, z: i64) -> Option<T> {
         let (kx, kz, value) = &self.slots.borrow()[(sum(x, z) >> SHIFT) as usize];
@@ -137,7 +156,7 @@ impl<T: Clone + Default> Plan<T> {
 /**
  * A plan of heights, as a world's ground, maybe with a promise: no
  * column's differs from a neighbour's along x or z by more than `slope`
- * units, checked whenever one is read and a neighbour is kept (a rule:
+ * units, checked whenever one is made and a neighbour is kept (a rule:
  * broken, it panics). So its least and greatest over a rectangle of
  * columns are near those of a grid of samples of it: within the slope
  * times how far a column may be from a sample. Layers drawn about it
@@ -169,10 +188,13 @@ impl Sloped {
         Sloped { plan, slope: None, last: RefCell::new(Vec::new()) }
     }
 
-    /** The plan at column (x, z), within its slope of its neighbours kept. */
+    /**
+     * The plan at column (x, z), within its slope of its neighbours kept:
+     * checked as it is made, so every two neighbours ever kept together are.
+     */
     pub fn at(&self, x: i64, z: i64) -> i64 {
-        let h = self.plan.at(x, z);
-        let Some(slope) = self.slope else { return h };
+        let (h, made) = self.plan.fetch(x, z);
+        let Some(slope) = self.slope.filter(|_| made) else { return h };
         for (nx, nz) in [(x - 1, z), (x + 1, z), (x, z - 1), (x, z + 1)] {
             if let Some(n) = self.plan.kept(nx, nz) {
                 assert!(
@@ -206,7 +228,7 @@ impl Sloped {
         let (mut lo, mut hi) = (i64::MAX, i64::MIN);
         for x in along(0) {
             for z in along(1) {
-                let h = self.plan.at(x, z);
+                let h = self.at(x, z);
                 (lo, hi) = (lo.min(h), hi.max(h));
             }
         }
