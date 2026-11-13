@@ -1003,6 +1003,8 @@ fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &mut dyn FnMu
         }
         return 1;
     }
+    // A sheet a site thick holds a plane of sites: shapes' sheets lie across an axis, where planes of sites are a site
+    // apart (across (1, 1, 1), 2/√3).
     let min = [0, spacing, spacing * 8 / 5][small];
     let b = &shape.bounds;
     // A box's sites on its top faces may count as under them (Tie), past its bounds but at level 0.
