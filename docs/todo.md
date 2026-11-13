@@ -274,9 +274,9 @@ Numbers are for the forest at 1280×800, as measured when written.
   - Their renderer composes a frame behind (`chunks.rs`),
     so `--stroll` counts nearly every frame as one whose content is still coming:
     it no longer tells holes from that.
-  - A pick moved composes its every chunk again, and the compositor
-    goes over every chunk of the frame when one comes (`Compositor::take_chunks`):
-    milliseconds a frame while chunks keep coming.
+  - A pick moved composes its every chunk again, on the renderer's thread,
+    and a thousand or two chunks come and go at once:
+    the main thread takes milliseconds for them, much of it in the kernel.
   - A shot differs from run to run in about 0.3 % of its pixels (flat, the valley):
     ties between chunks fall in the order they came, which timing decides.
 - **Native's splats leave a hole by a hut.**

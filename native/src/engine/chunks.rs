@@ -245,6 +245,30 @@ mod tests {
 
     #[test]
     #[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
+    fn a_compositor_following_changes_draws_as_one_taking_the_frame_whole() {
+        let make = worlds::by_name("moor").expect("moor").make;
+        let mut world = World::new(make, 1, None, 4);
+        let look = Look::new(make(1).spawn.map(|v| v as f64), [30.0, -10.0], 90.0, 400.0, [320.0, 200.0]);
+        let forward = view_basis(look.yaw, look.pitch)[2];
+        let moved = Look { camera: std::array::from_fn(|i| look.camera[i] + forward[i] * 7.0), ..look };
+        // Not flat: two compositors taking a frame whole differ there already, as the chunks' ties fall (docs/todo.md).
+        for relief in [true, false] {
+            let mut chunks = Chunks::new(&world, relief, false);
+            let first = complete(&mut chunks, &mut world, &look);
+            let second = complete(&mut chunks, &mut world, &moved);
+            assert!(second.frame.since(first.frame.number).is_some(), "the changes since the first frame kept");
+            let mut easel = Easel::offscreen(None);
+            easel.pixels(&first, PIXELS);
+            let followed = easel.pixels(&second, PIXELS).2;
+            let whole = Easel::offscreen(None).pixels(&second, PIXELS).2;
+            // The see-through splats blended in another order (Veiled) round differently.
+            let most = followed.iter().zip(&whole).map(|(a, b)| a.abs_diff(*b)).max();
+            assert!(most <= Some(1), "relief {relief}: a channel off by {most:?}");
+        }
+    }
+
+    #[test]
+    #[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
     fn culling_on_the_gpu_leaves_the_picture_unchanged() {
         for (name, look, octaves) in VIEWS {
             for (relief, flat) in [(true, false), (true, true), (false, false)] {

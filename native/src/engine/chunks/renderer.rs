@@ -6,9 +6,13 @@
 //! A frame is every chunk its faces' picks compose for an eye anywhere in
 //! them, found as a face is picked and added to as chunks come; which of
 //! them the eye draws from where it is, the GPU finds (compositor.wgsl).
+//! With it come the last frames' changes, the chunks that came and went,
+//! so that the compositor's work follows what changed.
 //! See docs/architecture.md, sections 1 to 5.
 
+use std::collections::VecDeque;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use bake::lod::{CellChunk, Lod, Picked, distance};
 use bake::slicing::LAYER;
@@ -45,17 +49,52 @@ pub struct Placement {
     pub from_eye: f64,
 }
 
-/** What to draw: chunks face by face, finest and nearest first as they were picked, as the compositor has room for them. */
+/**
+ * What to draw: chunks face by face, finest and nearest first as they were
+ * picked, as the compositor has room for them; and how they came to be.
+ */
 #[derive(Clone)]
 pub struct Frame {
-    /** The same from frame to frame until a chunk comes or goes. */
+    /** The same from frame to frame until a chunk comes or goes, and then its number. */
     pub chunks: Arc<Vec<Placement>>,
+    pub number: u64,
+    /** The last changes that led to it, oldest first, each from the frame before. */
+    pub changes: Arc<[Arc<Change>]>,
     /** The farthest chunk's distance, or the render distance if farther: the sky's fog. */
     pub farthest: f64,
     /** Whether its chunks' whole voxels are reliefs, or splats each (Renderer's `relief`). */
     pub relief: bool,
     /** Whether its reliefs are drawn flat, a picture a cell (compositor::flatten). */
     pub flat: bool,
+}
+
+/**
+ * What changed since frame `base`: the chunks that came, in the frame's
+ * order, and the ids of those that went. Frames are numbered across all
+ * renderers, so that a compositor that drew another's applies none of its
+ * changes.
+ */
+pub struct Change {
+    pub base: u64,
+    pub came: Vec<Placement>,
+    pub went: Vec<u32>,
+}
+
+/** Changes a frame keeps: a compositor that missed more takes the frame whole. */
+const CHANGES: usize = 64;
+
+/** The next frame's number, of all renderers'. */
+fn number() -> u64 {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    NEXT.fetch_add(1, Ordering::Relaxed)
+}
+
+impl Frame {
+    /** Its changes from frame `number` on, if it keeps them all. */
+    pub fn since(&self, number: u64) -> Option<&[Arc<Change>]> {
+        let first = self.changes.iter().position(|c| c.base == number)?;
+        Some(&self.changes[first..])
+    }
 }
 
 #[derive(Clone)]
@@ -145,6 +184,9 @@ pub struct Renderer {
     shown: Vec<bool>,
     frame: Frame,
     stats: Stats,
+    /** The frame's chunks' ids, and the changes it keeps. */
+    ids: FastSet<u32>,
+    changes: VecDeque<Arc<Change>>,
 }
 
 /** A cell's voxels' depths along the axis, relative to the camera at `local`, in the face's coordinates: its sites' and a grid unit past. */
@@ -224,8 +266,10 @@ impl Renderer {
             flat,
             lit: false,
             tiles: (0..GRID_LEVELS).map(|_| Arc::new(Tiles::new(0, []))).collect(),
-            frame: Frame { chunks: Arc::default(), farthest: 0.0, relief, flat },
+            frame: Frame { chunks: Arc::default(), number: number(), changes: Arc::new([]), farthest: 0.0, relief, flat },
             stats: Stats { baking: 0, tiles: Vec::new() },
+            ids: FastSet::default(),
+            changes: VecDeque::new(),
         }
     }
 
@@ -398,7 +442,19 @@ impl Renderer {
                 (near + far) / 2.0
             })
             .fold(look.far, f64::max);
-        self.frame = Frame { chunks: Arc::new(chunks), farthest, relief: self.relief, flat: self.flat };
+        self.frame.farthest = farthest;
+        let ids: FastSet<u32> = chunks.iter().map(|p| p.chunk.id).collect();
+        let came: Vec<Placement> = chunks.iter().filter(|p| !self.ids.contains(&p.chunk.id)).cloned().collect();
+        let went: Vec<u32> = self.ids.iter().filter(|id| !ids.contains(id)).copied().collect();
+        if !came.is_empty() || !went.is_empty() {
+            if self.changes.len() == CHANGES {
+                self.changes.pop_front();
+            }
+            self.changes.push_back(Arc::new(Change { base: self.frame.number, came, went }));
+            (self.frame.chunks, self.frame.number) = (Arc::new(chunks), number());
+            self.frame.changes = self.changes.iter().cloned().collect();
+            self.ids = ids;
+        }
         let mut baking: Vec<&(Request, Wanted)> = picks().flat_map(|p| p.baking.values()).collect();
         baking.sort_by(|a, b| a.1.order().partial_cmp(&b.1.order()).expect("distances"));
         let wanted: Vec<Request> = baking.iter().map(|b| b.0).collect();

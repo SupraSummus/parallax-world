@@ -44,7 +44,8 @@ struct Globals {
 // plane's depth; its face; its cell's level, its grid's, and its site's c in
 // its grid's units; its tint; drawn flat, the box its columns fill from its
 // origin, and its picture's plane past its own (z0, gx, gy) and how far its
-// edge pillars reach from it; a half layer of its grid.
+// edge pillars reach from it; its clusters of whole voxels, [first, end) of
+// `clusters`, none if its slot is free; a half layer of its grid.
 struct Record {
   origin: vec2f,
   depth: f32,
@@ -56,6 +57,7 @@ struct Record {
   min: vec2f,
   max: vec2f,
   plane: vec4f,
+  whole: vec2u,
   half_layer: f32,
 }
 
@@ -75,6 +77,7 @@ struct Chunk {
   scale: vec2f,
   offset: vec2f,
   plane: vec4f,
+  whole: vec2u, // its record's
 }
 const FLAT = 2.0;
 
@@ -114,20 +117,27 @@ struct DrawArgs {
 // and its colour; 0, none.
 @group(0) @binding(2) var<storage, read> tiles: array<Cluster>;
 @group(0) @binding(3) var<storage, read> columns: array<vec2u>;
-// Culling: the frame's chunks' clusters (candidate), and a draw for each
-// to draw.
+// Culling: all the clusters, some left where chunks were (cull), and a draw
+// for each to draw.
 @group(0) @binding(4) var<storage, read_write> clusters: array<Cluster>;
-@group(0) @binding(5) var<storage, read> candidates: array<vec4u>;
 @group(0) @binding(6) var<storage, read_write> draws: array<DrawArgs>;
 @group(0) @binding(7) var<storage, read_write> drawn: atomic<u32>;
 @group(0) @binding(8) var farthest: texture_2d<f32>;
-// The see-through clusters, as candidates: per chunk, finest level first and
-// nearest first in each, their draws in that order.
+// The see-through clusters: after how many chunks and clusters, per chunk,
+// finest level first and nearest first in each, its [first, first + count)
+// of `clusters` and how many come before (so, which chunk's: the last
+// whose come no later); their draws in that order.
 @group(0) @binding(9) var<storage, read> veiled: array<vec4u>;
 @group(0) @binding(16) var<storage, read_write> veil_draws: array<DrawArgs>;
 // The chunks' records, by slot, and the chunks place makes of them.
 @group(0) @binding(17) var<storage, read> records: array<Record>;
 @group(0) @binding(18) var<storage, read_write> made: array<Chunk>;
+// Writing into a buffer (compositor.rs's Arena::stage): the words written,
+// one after another, and their runs, each [where its first goes, in words,
+// its first in `written`, how many], after how many runs and words in all.
+@group(0) @binding(19) var<storage, read_write> into: array<u32>;
+@group(0) @binding(20) var<storage, read> written: array<u32>;
+@group(0) @binding(21) var<storage, read> runs: array<vec4u>;
 // The pyramid: level 0 from the depth buffer, each next from the last.
 @group(0) @binding(10) var depth_in: texture_depth_2d;
 @group(0) @binding(11) var level_in: texture_2d<f32>;
@@ -622,29 +632,7 @@ fn draws_cluster(at: u32, cluster: Cluster, phase: u32) -> bool {
   return visible && cluster.visible == 0u;
 }
 
-// The frame's `k`-th cluster, of a chunk of `chunks` after the first item,
-// which holds how many chunks and clusters there are: each chunk's
-// [first, first + count) of `clusters`, and how many of the frame's come
-// before (so, which chunk's: the last whose come no later); none past the
-// last.
-fn candidate(k: u32) -> i32 {
-  if k >= candidates[0].y {
-    return -1;
-  }
-  var lo = 1u;
-  var hi = candidates[0].x + 1u;
-  while hi - lo > 1u {
-    let mid = (lo + hi) / 2u;
-    if candidates[mid].z <= k {
-      lo = mid;
-    } else {
-      hi = mid;
-    }
-  }
-  return i32(candidates[lo].x + k - candidates[lo].z);
-}
-
-// The see-through ones, as `candidate`.
+// The `k`-th see-through cluster; none past the last.
 fn veiled_candidate(k: u32) -> i32 {
   if k >= veiled[0].y {
     return -1;
@@ -662,22 +650,27 @@ fn veiled_candidate(k: u32) -> i32 {
   return i32(veiled[lo].x + k - veiled[lo].z);
 }
 
-// A thread per cluster (a tile, or whole splats) of the frame. Chunks come
-// near to far and their tiles nearest first (see tiles and cluster in
-// compositor.rs), and draws are listed about in that order, so that
-// nearer voxels are mostly drawn first and hide what is behind them early.
-fn cull(k: u32, phase: u32) {
-  let at = candidate(k);
-  if at < 0 {
+// A thread per cluster of all, whole voxels' (a tile, or whole splats) of
+// a chunk the frame draws; those left where chunks were, which their slot's
+// chunk does not hold, are none. Chunks were uploaded near to far, at first,
+// and their tiles nearest first (see tiles and cluster in compositor.rs),
+// and draws are listed about in that order, so that nearer voxels are
+// mostly drawn first and hide what is behind them early.
+fn cull(at: u32, phase: u32) {
+  if at >= arrayLength(&clusters) {
     return;
   }
   let cluster = clusters[at];
-  if draws_cluster(u32(at), cluster, phase) {
-    var draw = DrawArgs(4u, 1u, 0u, u32(at));
+  let whole = chunks[cluster.slot_count >> 8u].whole;
+  if at < whole.x || at >= whole.y {
+    return;
+  }
+  if draws_cluster(at, cluster, phase) {
+    var draw = DrawArgs(4u, 1u, 0u, at);
     if globals.whole == 1.0 {
       draw = DrawArgs(4u, cluster.slot_count & 0xffu, (cluster.slot_count >> 8u) * 4u, cluster.first);
     } else if globals.whole == FLAT {
-      draw = DrawArgs(4u, cluster.slot_count & 0xffu, u32(at) * 4u, 0u);
+      draw = DrawArgs(4u, cluster.slot_count & 0xffu, at * 4u, 0u);
     }
     draws[atomicAdd(&drawn, 1u)] = draw;
   }
@@ -742,12 +735,12 @@ fn claims(level: i32, c: i32, eye: i32) -> bool {
 }
 
 // A thread per slot: its chunk as the frame draws it, from the camera. Its
-// plane and origin relative to the eye; whether its level claims its cell;
-// how far past its plane its see-through splats are left out for the
-// finer level's (veil_vertex; Lod::finer_reach); and drawn flat, its
-// picture enlarged, each edge out by how far its edge pillars reach from
-// its plane times the slant of the rays to it at its nearest, at most the
-// face's (compositor.rs's Flat).
+// plane and origin relative to the eye; its clusters; whether its level
+// claims its cell; how far past its plane its see-through splats are left
+// out for the finer level's (veil_vertex; Lod::finer_reach); and drawn
+// flat, its picture enlarged, each edge out by how far its edge pillars
+// reach from its plane times the slant of the rays to it at its nearest, at
+// most the face's (compositor.rs's Flat).
 @compute @workgroup_size(64)
 fn place(@builtin(workgroup_id) id: vec3u, @builtin(num_workgroups) n: vec3u, @builtin(local_invocation_index) thread: u32) {
   let slot = thread_of(id, n, thread);
@@ -777,7 +770,29 @@ fn place(@builtin(workgroup_id) id: vec3u, @builtin(num_workgroups) n: vec3u, @b
   c.scale = select(vec2f(1.0), 1.0 + slant * reach_out / half, half > vec2f(0.0));
   c.offset = (r.min + r.max) / 2.0 * (1.0 - c.scale);
   c.plane = vec4f(r.plane.xyz, select(0.0, 1.0, claims(r.level, r.site << u32(r.atoms), layer)));
+  c.whole = r.whole;
   made[slot] = c;
+}
+
+// A thread per word written: where its run puts it (the last run whose
+// words come no later).
+@compute @workgroup_size(64)
+fn scatter(@builtin(workgroup_id) id: vec3u, @builtin(num_workgroups) n: vec3u, @builtin(local_invocation_index) thread: u32) {
+  let k = thread_of(id, n, thread);
+  if k >= runs[0].y {
+    return;
+  }
+  var lo = 1u;
+  var hi = runs[0].x + 1u;
+  while hi - lo > 1u {
+    let mid = (lo + hi) / 2u;
+    if runs[mid].y <= k {
+      lo = mid;
+    } else {
+      hi = mid;
+    }
+  }
+  into[runs[lo].x + k - runs[lo].y] = written[k];
 }
 
 // A texel of level 0 is the farthest of 2 × 2 pixels, one of a level the

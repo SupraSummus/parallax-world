@@ -646,11 +646,23 @@ widened by the slant of the ray to it, as on the web;
 a chunk's slot in the table comes to the vertex shader
 as its draws' first vertex,
 so its splats are uploaded as the workers made them.
-A chunk's record, where it is whatever the camera, is uploaded with it;
+A chunk's record, where it is whatever the camera
+and which clusters are its, is uploaded with it;
 each frame the GPU places every chunk from the camera (`place`),
 and keeps those whose level claims their cell (`Lod::layers`, mirrored there).
-The list of clusters is written only when the frame's chunks change:
-otherwise a frame writes its globals alone.
+The culling goes over every cluster in the buffer,
+those left where chunks were too, which their slot's record disowns,
+so there is no list of the frame's clusters to keep.
+A frame comes with its last changes, the chunks that came and went
+(`Change` in `renderer.rs`):
+the compositor applies those since the frame it prepared last,
+or takes the frame whole if it missed some,
+so that a change costs the main thread what changed, not the frame.
+What a change writes, anywhere in a buffer,
+goes up as one copy of its words, which the GPU scatters (`scatter`):
+a copy command costs the GPU microseconds,
+and a face picked anew writes thousands of places.
+Otherwise a frame writes its globals alone.
 
 **See-through.** Native draws a site's medium see-through
 (`KindDef::medium`, as mist) where its pieces don't show;
