@@ -467,9 +467,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   but each finds light again where another found it,
   and makes a generator, whose plans' caches take tens of MB;
   each of the world's threads makes two, its own and its Light's.
-  Lit, every tile is kept twice, as the Lights read it (`VoxelGrid`)
-  and as the world's (`Grid`), which lacks what the light reads
-  of pieces not shown, and what glows.
   Lit, the world's threads make each level's tiles near the camera first,
   the coarsest's before all,
   but a tile of the coarsest levels takes several times a fine one's work
@@ -485,12 +482,15 @@ Numbers are for the forest at 1280×800, as measured when written.
   so near a corner where six voxels meet it misses one within its reach,
   and light jumps a little there;
   every site within reach would leak light through walls one site thick.
-- **Light sees each site's alpha and glow (`VoxelGrid`), a prototype**:
+- **Light sees each site as hosts draw it (`Grid`), and what glows, a prototype**:
   - a site's pieces show a voxel where a hash is under their alpha
     (`VoxelGrid::show`), as leaves should,
     but measured houses' walls come out ragged;
+    at the coarse levels light reads few sites,
+    so a voxel there shown or not moves a lamp's light (the city at night);
   - a site's pieces' colour is one of theirs, picked as often as it is seen,
-    not the mean of what its faces see, and so its medium's;
+    not the mean of what its faces see;
+    where they show, its medium is not seen;
     a glowing thing's glow is hidden by its own, pieces or medium,
     not by the other;
   - measured things are measured from fine voxels kept by chance,

@@ -428,7 +428,7 @@ The checks do take y as up, as hosts do:
 a world's heights are along it, and "from above" looks down it
 (see `docs/todo.md`).
 
-Rays see each site by its alpha (`VoxelGrid`'s), as light does:
+Rays see each site by its alpha (`VoxelGrid`'s):
 each stops its share of what gets to it, and shows that much of its colour,
 and what it glows (`composited` in `picture.rs`).
 What they see is compared as under a white light all round (`colour`),

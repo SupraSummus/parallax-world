@@ -13,9 +13,7 @@
 //! the light's (Shared) too. A tile
 //! never changes, so a chunk baked once all the tiles it reads are in
 //! stays right whatever comes after (bake's Tiles). Given light (worldgen's Shared),
-//! and wanted lit, the tiles are those the bakers' Lights read, made once;
-//! not wanted lit, they are made apart, not kept in Shared too (made again
-//! there if lit after). Asked for light,
+//! the tiles are those the bakers' Lights read, made once. Asked for light,
 //! the light reads every level coarser than a voxel's: the tiles near the
 //! camera come first, the coarsest's before all; and, for the voxels engine
 //! (voxels.rs), each tile made of a level it reads is lit, its voxels'
@@ -79,9 +77,8 @@ impl Level {
 }
 
 /** How the tiles are lit: not, by what reads them (the bakers' Lights), or each tile here of a level read, once made (the voxels'). */
-#[derive(Clone, Copy, PartialEq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Lit {
-    #[default]
     Not,
     Reading,
     Tiles,
@@ -102,12 +99,11 @@ pub struct Wants {
 /** A tile to make, or one made to light. */
 type Job = (usize, TileId, Option<Arc<Tile>>);
 
-/** The tiles to make or light, most wanted first, those being made or lit, how they are wanted lit, and the light they are lit by: how many times it changed. */
+/** The tiles to make or light, most wanted first, those being made or lit, and the light they are lit by: how many times it changed. */
 #[derive(Default)]
 struct Queue {
     wanted: VecDeque<Job>,
     in_flight: HashSet<(usize, TileId)>,
-    lit: Lit,
     shared: Option<Shared>,
     lighting: u32,
 }
@@ -171,12 +167,12 @@ fn work(make: Make, seed: u64, heights: &Heights, queue: &(Mutex<Queue>, Condvar
     // Made once there are tiles to light, and again when the light changes.
     let mut light: Option<(u32, Light)> = None;
     loop {
-        let ((level, id, made), shared, lighting, lit) = {
+        let ((level, id, made), shared, lighting) = {
             let mut q = queue.0.lock().expect("queue");
             loop {
                 if let Some(job) = q.wanted.pop_front() {
                     q.in_flight.insert((job.0, job.1));
-                    break (job, q.shared.clone(), q.lighting, q.lit);
+                    break (job, q.shared.clone(), q.lighting);
                 }
                 q = queue.1.wait(q).expect("queue");
             }
@@ -191,14 +187,13 @@ fn work(make: Make, seed: u64, heights: &Heights, queue: &(Mutex<Queue>, Condvar
             }
             None => {
                 let (heights, key) = (heights[level], id.map(i64::from));
-                let grid = match shared.as_ref().filter(|_| lit != Lit::Not) {
+                let grid = match &shared {
                     Some(shared) => shared.tile(&generator, level as u32, heights, key),
-                    None => make_tile(&generator, level as u32, heights, key),
-                }
-                .into_grid(true);
+                    None => Arc::new(make_tile(&generator, level as u32, heights, key)),
+                };
                 let index = LayerIndex::new(&grid);
                 let (words, meets) = (voxels::words(&grid), voxels::meets(&grid));
-                Tile { grid: Arc::new(grid), index, words, meets, lights: None }
+                Tile { grid, index, words, meets, lights: None }
             }
         };
         if send.send((level, id, lighting, Arc::new(tile))).is_err() {
@@ -392,7 +387,6 @@ impl World {
         {
             let mut q = self.queue.0.lock().expect("queue");
             list.retain(|job| !q.in_flight.contains(&(job.0, job.1)));
-            q.lit = lit;
             if !list.is_empty() {
                 self.queue.1.notify_all();
             }
