@@ -8,7 +8,7 @@ Entry point for AI agents working on this codebase. Read this first.
 |----------|---------|-----------|
 | [README.md](README.md) | Overview and quick start | First |
 | [docs/product.md](docs/product.md) | What the product does and doesn't do | Adding or changing features |
-| [docs/architecture.md](docs/architecture.md) | Slicing, caching and compositing architecture | Touching `src/lib` |
+| [docs/architecture.md](docs/architecture.md) | Slicing, caching and compositing architecture; the crates | Touching `web/src/lib` or the Rust |
 | [docs/testing.md](docs/testing.md) | Test layout and conventions | Writing tests |
 | [docs/todo.md](docs/todo.md) | Planned work: known problems and open ideas | Looking for what to do next |
 | [docs/generators.md](docs/generators.md) | Generating worlds in pieces: layers, things, rules | Writing or changing a world generator |
@@ -126,7 +126,7 @@ worlds/                      # The worlds, on worldgen's public API only
 ├── tests/                   # Every world in WORLDS keeps the contract and its cost baseline; the scenes' contents
 └── examples/                # map: a world from above; look: a picture of it, of any place it names (picture.rs), lit (light.rs); cost: what its tiles cost (cost.rs); bench: timing a world's tiles
 lab/                         # Experiment, not built by pnpm: split grammars with shared splits, learned from the valley's towns; a masked model of any volume, flat, 3D or on the FCC lattice; synthesis by coordinates into examples; a critic and profiles that score any of them; real places (scripts/overture.py) drawn to a plan (see src/lib.rs); exports the learned town's rules
-native/                      # Spike of a native frontend (egui on winit and wgpu), linking bake/ and worlds/; see src/main.rs
+native/                      # The native frontend (egui on winit and wgpu), linking fcc/, bake/, worldgen/ and worlds/; see src/main.rs
 └── src/
     ├── main.rs              # The camera (flying or walking, F), the panel, its engine and lighting (shaded or computed); --shot, --bench, --stroll for any engine
     ├── window.rs            # The window: egui on winit and wgpu, over the engine's picture, its GPU device made again when lost

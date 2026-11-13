@@ -1,4 +1,4 @@
-//! Spike of a native frontend: a world of worlds/ (the valley, or --world)
+//! The native frontend: a world of worlds/ (the valley, or --world)
 //! generated in tiles, those in view first (world.rs), drawn by an engine
 //! (engine.rs) with wgpu in an egui window (window.rs), or offscreen (gpu.rs).
 //!
@@ -102,7 +102,7 @@ impl window::Content for App {
 
     fn ui(&mut self, ui: &mut egui::Ui) {
         egui::Panel::left("panel").show(ui, |ui| {
-            ui.heading("Parallax (native spike)");
+            ui.heading("Parallax (native)");
             ui.label(&self.stats);
             ui.group(|ui| {
                 ui.set_width(ui.available_width());
