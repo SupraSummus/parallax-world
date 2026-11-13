@@ -17,7 +17,7 @@ use worldgen::js::{self, round};
 use worldgen::kinds;
 use worldgen::noise::{Fbm, Fx, Rng, ValueNoise, fx, hash, hash64, smoothstep, stream, unit};
 use worldgen::plan::{Plan, Sloped};
-use worldgen::points::{Blur, MARKS, Points, Weights};
+use worldgen::points::{Blur, MARKS, Points, Room, Rooms, Spot};
 use worldgen::units::{UNIT_SIZE, Units, m};
 
 use crate::path::Path;
@@ -95,11 +95,28 @@ const SPECIES: [Species; 3] = [Species::Spruce, Species::Birch, Species::Oak];
 
 pub type GroundAt<'a> = &'a dyn Fn(i64, i64) -> i64;
 
+/** A tree standing alone, its height picked by `random` too. */
 pub fn make_tree(species: Species, x: f64, ground: f64, z: f64, random: &mut Rng, ground_at: GroundAt) -> Node {
+    let height = height(species, random.next());
+    grow(species, x, ground, z, height, Rc::new(Room::everywhere()), random, ground_at)
+}
+
+/** A tree `height` tall (units) whose crown keeps to its `room` (only across: its walls are upright). */
+#[allow(clippy::too_many_arguments)]
+fn grow(species: Species, x: f64, ground: f64, z: f64, height: f64, room: Rc<Room>, random: &mut Rng, ground_at: GroundAt) -> Node {
     match species {
-        Species::Spruce => spruce_tree(x, ground, z, random, ground_at),
-        Species::Birch => birch_tree(x, ground, z, random),
-        Species::Oak => oak_tree(x, ground, z, random, ground_at),
+        Species::Spruce => spruce_tree(x, ground, z, height, room, random, ground_at),
+        Species::Birch => birch_tree(x, ground, z, height, room, random),
+        Species::Oak => oak_tree(x, ground, z, height, room, random, ground_at),
+    }
+}
+
+/** How tall a tree of `species` grows (units), by a fraction `pick`. */
+fn height(species: Species, pick: f64) -> f64 {
+    match species {
+        Species::Spruce => vox(14.0 + pick * 10.0),
+        Species::Birch => vox(12.0 + pick * 7.0),
+        Species::Oak => vox(12.0 + pick * 8.0),
     }
 }
 
@@ -144,6 +161,39 @@ pub const GROUND_SCALE: i64 = 8;
  */
 pub const SLOPE: i64 = 2;
 const COLUMN_SCALE: i64 = 1;
+/** The furthest a tree reaches from its foot across, in units: its population's reach. */
+const TREE_REACH: i64 = m(9.0);
+/** The most a tree weighs in its rooms (Rooms, units²): its rooms' walls move by up to that over twice their distance. */
+const MOST: i64 = m(2.5) * m(2.5);
+/** The gaps between neighbours' crowns: from half a metre of overlap to a metre and a half apart, a quarter of pairs meeting. */
+const GAPS: [i64; 2] = [m(-0.5), m(1.5)];
+
+/** A tree's weight in its rooms: none for the shortest, MOST for the tallest, as light favours it. */
+fn weight(height: f64) -> i64 {
+    (MOST as f64 * ((height - vox(12.0)) / vox(12.0)).clamp(0.0, 1.0)) as i64
+}
+
+/**
+ * 64 trees of `species` in a stand of them as dense as `chance` (of one in
+ * a square 4 m wide), each in its room, the nearest the origin; alone, if
+ * the chance is none. For the canopy's measures.
+ */
+fn stand_of(species: Species, chance: f64, seed: u64) -> Vec<Node> {
+    if chance == 0.0 {
+        return (0..64).map(|i| make_tree(species, 0.0, 0.0, 0.0, &mut Rng::new(hash64(seed, i, 0, 0)), &|_, _| 0)).collect();
+    }
+    let tall = move |s: &Spot| height(species, unit(hash(seed, s.at[0], s.at[2], 0)));
+    let points = Rc::new(Points::new("stand", seed, &[0, 2], m(2.0), m(8.0), 1, move |_| [fx(chance / 4.0), Fx::ZERO, Fx::ZERO, Fx::ZERO]));
+    let rooms = Rooms::new(points.clone(), TREE_REACH, MOST, GAPS, move |s| weight(tall(s)));
+    let half = m(64.0);
+    let mut spots = points.points_in([-half, 0, -half], [half, 1, half]);
+    spots.sort_by_key(|s| (s.at[0] * s.at[0] + s.at[2] * s.at[2], s.at, s.nth));
+    let grown = |s: &Spot| {
+        let ([x, _, z], random) = (s.at, &mut Rng::new(hash64(seed, s.at[0], s.at[2], 1)));
+        grow(species, x as f64, 0.0, z as f64, tall(s), Rc::new(rooms.room(s.at, 0)), random, &|_, _| 0)
+    };
+    spots.iter().take(64).map(grown).collect()
+}
 
 /** The valley's relief: hills kilometres wide, and a winding path along z that the ground dips along. */
 pub struct Relief {
@@ -294,7 +344,18 @@ impl Forest {
         if dx * dx + beyond * beyond < (vox(7.0) as i64).pow(2) {
             return Fx::ZERO;
         }
-        self.thinned(fx(0.15) + c.density * 3 / 4, x, z)
+        self.thinned(fx(0.12) + c.density / 2, x, z)
+    }
+
+    /** How tall the tree at a point grows (units): of the point alone, so its neighbours know it too. */
+    fn height(&self, x: i64, z: i64, mark: usize) -> f64 {
+        height(SPECIES[mark], unit(hash(self.s(23), x, z, mark as i64)))
+    }
+
+    /** The rooms of the trees at `points`: by their heights, as light favours the taller (`weight`). */
+    fn rooms(self: &Rc<Forest>, points: Rc<Points>) -> Rooms {
+        let f = self.clone();
+        Rooms::new(points, TREE_REACH, MOST, GAPS, move |s| weight(f.height(s.at[0], s.at[2], s.mark)))
     }
 
     /** The share of each species, fractions that add up to one. */
@@ -324,8 +385,11 @@ fn pick_species(mut pick: Fx, chances: &[Fx; 3]) -> Species {
 
 /** The trees measured for the canopy at a spacing, by species. */
 struct Measured {
-    /** What each slab of a tree adds to its shadow over directions (lattice units²), from its foot up, a spacing each. */
-    slabs: [Vec<f64>; 3],
+    /**
+     * What each slab of a tree adds to its shadow over directions (lattice units²), from its foot up, a
+     * spacing each, by STANDS: in a room among trees as dense as that.
+     */
+    slabs: Vec<[Vec<f64>; 3]>,
     /** The share of a tree's shadow from above each slab adds. */
     above: [Vec<f64>; 3],
     /** The share of each slab's sites that are wood. */
@@ -335,13 +399,14 @@ struct Measured {
     /** The trees standing in a column, by species: a quarter of those of each of the four cells it meets. */
     own: Blur,
     /**
-     * How densely the crowns of the trees around hide a column from above, as an area. A crown covers a
-     * share f of it (Shadows::spread) and leaves 1 − f open, so trees together leave the product: as dense
-     * as −ln(1 − f) each, not f, which would leave more open under them (from above at level 4, 0.02 to
-     * 0.05 less canopy than level 0 at two seeds).
+     * By the offset of a crown's cell from a column's, how densely the crown alone hides it from above, as an
+     * area: it covers a share f of it (Shadows::spread), and leaves 1 − f open, as dense as −ln(1 − f).
      */
-    over: Blur,
+    over: HashMap<[i64; 2], [f64; 3]>,
 }
+
+/** The stands trees are measured in for the canopy: as dense as the chance of a tree in a square 4 m wide. */
+const STANDS: [f64; 4] = [0.0, 0.2, 0.4, 0.6];
 
 /** The forest of `seed`. */
 pub fn forest(seed: u64) -> World {
@@ -409,59 +474,88 @@ pub fn layers(seed: u64, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
             .borrow_mut()
             .entry(spacing)
             .or_insert_with(|| {
-                let shadows: &[Shadows; 3] = shadows.get_or_init(|| {
-                    SPECIES.map(|species| {
-                        let samples: Vec<Node> = (0..64)
-                            .map(|i| make_tree(species, 0.0, 0.0, 0.0, &mut Rng::new(hash64(sample_seed, i, 0, 0)), &|_, _| 0))
-                            .collect();
-                        Shadows::new(&samples, 2, 1)
-                    })
+                let shadows: &Vec<[Shadows; 3]> = shadows.get_or_init(|| {
+                    (0..STANDS.len())
+                        .map(|stand| {
+                            SPECIES.map(|species| {
+                                let seed = hash64(sample_seed, stand as i64, species as i64, 0);
+                                Shadows::new(&stand_of(species, STANDS[stand], seed), 2, 1)
+                            })
+                        })
+                        .collect()
                 });
+                let (stands, shadows) = (shadows, &shadows[0]);
                 let slabs_of = |of: &dyn Fn(&Shadows, i64, i64) -> f64| {
                     [0, 1, 2].map(|sp| {
                         (0..tree_top).step_by(spacing as usize).map(|from| of(&shadows[sp], from, (from + spacing).min(tree_top))).collect()
                     })
                 };
-                let slabs = slabs_of(&|s, from, to| s.slab(from, to));
+                let slabs = stands
+                    .iter()
+                    .map(|shadows| {
+                        [0, 1, 2].map(|sp| {
+                            (0..tree_top)
+                                .step_by(spacing as usize)
+                                .map(|from| shadows[sp].slab(from, (from + spacing).min(tree_top)))
+                                .collect()
+                        })
+                    })
+                    .collect();
                 let wood = slabs_of(&|s, from, to| s.share(from, to, |kind| KINDS[kind as usize].kind_type == 4));
                 let above: [Vec<f64>; 3] = slabs_of(&|s, from, to| s.across(from, to));
                 let above = above.map(|slabs| {
                     let sum: f64 = slabs.iter().sum();
                     slabs.iter().map(|s| s / sum).collect()
                 });
-                let (mut shadow, mut dense) = ([0.0; 3], std::collections::BTreeMap::<[i64; 2], Weights>::new());
+                let (mut shadow, mut over) = ([0.0; 3], HashMap::<[i64; 2], [f64; 3]>::new());
                 let column = (spacing * spacing) as f64;
                 for (sp, shadows) in shadows.iter().enumerate() {
                     for ([x, _, z], area) in shadows.spread(spacing) {
                         shadow[sp] += area;
-                        dense.entry([x, z]).or_default()[sp] = -js::log(1.0 - (area / column).min(0.99)) * column;
+                        over.entry([x, z]).or_default()[sp] = -js::log(1.0 - (area / column).min(0.99)) * column;
                     }
                 }
                 let feet = [[-1, -1], [-1, 0], [0, -1], [0, 0]].map(|o| (o, [0.25; MARKS])).to_vec();
-                let (own, over) =
-                    (Blur::new(blurred.clone(), spacing, feet), Blur::new(blurred.clone(), spacing, dense.into_iter().collect()));
+                let own = Blur::new(blurred.clone(), spacing, feet);
                 Rc::new(Measured { slabs, above, wood, shadow, own, over })
             })
             .clone()
     };
-    // A medium as dense as the trees standing in each column, their area per volume. Where the crowns of the
-    // trees around reaching over it hide more from above than that (over a clearing, a path, a street), it
-    // hides the rest too, slab by slab as they do. Not their whole medium spread around: denser from above
+    // A medium as dense as the trees standing in each column, their area per volume. Where the crown over it
+    // (its owner's: Rooms) hides more from above than that (over a clearing, a path, a street), it hides the
+    // rest too, slab by slab as they do. Not their whole medium spread around: denser from above
     // than the trees ("Media are isotropic" in docs/generators.md), it filled the gaps among them (from above
     // at level 4, 0.14 apart in the forest).
+    let rooms = Rc::new(f.rooms(points.clone()));
     let canopy = {
-        let (f, points) = (f.clone(), points.clone());
+        let (f, points, rooms) = (f.clone(), points.clone(), rooms.clone());
         Field::columns("canopy", 1.0, Op::Fill, move |x, z, spacing| {
             let measured = measured_at(spacing);
             let Measured { slabs, above, wood, shadow, own, over } = &*measured;
-            // The trees standing in the column, by species, and how densely their crowns hide it from above.
+            // Its trees as measured in stands as dense as they are there, between the two nearest.
+            let chances = f.leaf_chances(x, z);
+            let at = chances.iter().fold(0.0, |sum, c| sum + 4.0 * c.to_f64()) / STANDS[1];
+            let below = (at as usize).min(STANDS.len() - 2);
+            let t = (at - below as f64).min(1.0);
+            let slabs: [Vec<f64>; 3] = [0, 1, 2].map(|sp| {
+                let (a, b) = (&slabs[below][sp], &slabs[below + 1][sp]);
+                a.iter().zip(b).map(|(a, b)| a + t * (b - a)).collect()
+            });
+            // The trees standing in the column, by species, and how densely the crown over it hides it from above:
+            // its owner's, the tree's whose room it is in, as it would alone, as rooms cut crowns at their walls.
             let (own, over): ([f64; 3], [f64; 3]) = if spacing < points.root {
-                let (own, over) = (own.at([x, z]), over.at([x, z]));
-                ([own[0], own[1], own[2]], [over[0], over[1], over[2]])
+                let own = own.at([x, z]);
+                let mut hides = [0.0; 3];
+                if let Some(owner) = rooms.owner([x, 0, z]) {
+                    let offset =
+                        [owner.at[0].div_euclid(spacing) - x.div_euclid(spacing), owner.at[2].div_euclid(spacing) - z.div_euclid(spacing)];
+                    hides[owner.mark] = over.get(&offset).map_or(0.0, |o| o[owner.mark]);
+                }
+                ([own[0], own[1], own[2]], hides)
             } else {
                 // As wide as the roots, a cell's count costs a Poisson draw and a corner, and wider the corners of
                 // its roots, sites of finer levels only: the trees expected over the column, by the chances at its site.
-                let (chances, leaves) = (f.leaf_chances(x, z), ((spacing / tree_leaf) as f64).powi(2));
+                let leaves = ((spacing / tree_leaf) as f64).powi(2);
                 let own = [0, 1, 2].map(|sp| chances[sp].to_f64() * leaves);
                 (own, [0, 1, 2].map(|sp| own[sp] * shadow[sp]))
             };
@@ -493,13 +587,17 @@ pub fn layers(seed: u64, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
     let trees = {
         let (f, ground) = (f.clone(), f.clone());
         Population::new("trees", 1.0, tree_leaf)
-            .reach([vox(9.0) as i64, tree_top, vox(9.0) as i64])
+            .reach([TREE_REACH, tree_top, TREE_REACH])
             .size(vox(1.0) as i64)
             .anchor_points(points, move |spot| {
                 let [x, _, z] = spot.at;
                 Some([x as f64, ground.ground(x, z) as f64, z as f64])
             })
-            .make(move |[x, y, z], cell| Some(make_tree(SPECIES[cell.mark], x, y, z, &mut cell.random("tree"), &|x, z| f.ground(x, z))))
+            .make(move |[x, y, z], cell| {
+                let (at, mark) = ([x as i64, 0, z as i64], cell.mark);
+                let (height, room) = (f.height(at[0], at[2], mark), Rc::new(rooms.room(at, mark)));
+                Some(grow(SPECIES[cell.mark], x, y, z, height, room, &mut cell.random("tree"), &|x, z| f.ground(x, z)))
+            })
             .on(on.clone())
             .far(canopy.about(on.clone(), 0, tree_top))
     };
@@ -670,34 +768,49 @@ impl Bole {
 }
 
 /**
- * A tree's branches and their tips, where its leaves grow. Between its
- * leaves they show, from above too, so they are drawn with the tree.
+ * A tree's branches and their tips, where its leaves grow, in its room.
+ * Between its leaves they show, from above too, so they are drawn with
+ * the tree.
  */
 struct Crown {
     kind: K,
     forks: usize,
+    room: Rc<Room>,
     tubes: Vec<Shape>,
     tips: Vec<Point>,
 }
 
 impl Crown {
-    fn new(kind: K, forks: usize) -> Crown {
-        Crown { kind, forks, tubes: Vec::new(), tips: Vec::new() }
+    fn new(kind: K, forks: usize, room: Rc<Room>) -> Crown {
+        Crown { kind, forks, room, tubes: Vec::new(), tips: Vec::new() }
     }
 
     /**
      * A branch of `fork` from `start` to `end`, `radius` thick at its foot,
      * forking at its tip into two, shorter and thinner, spreading apart and
-     * a little up, until the last fork.
+     * a little up, until the last fork. It stops short of its room's walls
+     * by a leaf cluster's room, or as far as it starts if nearer: a branch
+     * doesn't grow into its neighbours' crowns, but forks on.
      */
     fn grow(&mut self, start: Point, end: Point, radius: f64, fork: usize, random: &mut Rng) {
-        let tip = radius * 0.7;
-        self.tubes.push(Shape::tube(&branch(), start, end, move |t| radius - t * (radius - tip), self.kind).paint());
-        if fork == self.forks {
-            self.tips.push(end);
+        let t = self.room.reach(start, end, cluster_room().min(self.room.margin(start)));
+        let end = [0, 1, 2].map(|i| start[i] + t * (end[i] - start[i]));
+        let (tip, length) = (radius * 0.7, js::hypot(&[0, 1, 2].map(|i| end[i] - start[i])));
+        // Cut back to nothing, its leaves grow where it would have started, once.
+        if length < 1.0 {
+            if !self.tips.contains(&start) {
+                self.tips.push(start);
+            }
             return;
         }
-        let length = js::hypot(&[0, 1, 2].map(|i| end[i] - start[i]));
+        self.tubes.push(Shape::tube(&branch(), start, end, move |t| radius - t * (radius - tip), self.kind).paint());
+        // Leaves at the forks' ends but the limbs': on the tips alone, the limbs showed between them from above.
+        if fork > 0 {
+            self.tips.push(end);
+        }
+        if fork == self.forks {
+            return;
+        }
         let d = [0, 1, 2].map(|i| (end[i] - start[i]) / length);
         // Across it, at random.
         let w = direction(random);
@@ -720,6 +833,16 @@ fn direction(random: &mut Rng) -> Point {
     let a = 2.0 * PI * random.next();
     let r = (1.0 - y * y).sqrt();
     [r * js::cos(a), y, r * js::sin(a)]
+}
+
+/** The least room around a leaf cluster's centre: with less, it doesn't grow there. */
+fn cluster_room() -> f64 {
+    vox(0.6)
+}
+
+/** The smallest leaf cluster: with less room, none grows. */
+fn least_cluster() -> f64 {
+    vox(0.3)
 }
 
 /** The share of a leaf cluster's sprays that are turning. */
@@ -848,9 +971,8 @@ fn roots(x: f64, ground: f64, z: f64, half: f64, kind: K, random: &mut Rng, grou
         .collect()
 }
 
-/** Conical spruce with drooping whorls of branches. */
-fn spruce_tree(x: f64, ground: f64, z: f64, random: &mut Rng, ground_at: GroundAt) -> Node {
-    let height = vox(14.0 + random.next() * 10.0);
+/** Conical spruce with drooping whorls of branches, its crown cut where its room ends. */
+fn spruce_tree(x: f64, ground: f64, z: f64, height: f64, room: Rc<Room>, random: &mut Rng, ground_at: GroundAt) -> Node {
     let width = if height >= vox(20.0) { vox(1.0) } else { vox(0.5) };
     let top = ground + height;
     let base = ground + round(height * (0.15 + random.next() * 0.15));
@@ -872,13 +994,18 @@ fn spruce_tree(x: f64, ground: f64, z: f64, random: &mut Rng, ground_at: GroundA
     let hidden = vec![Shape::cuboid([x, base + 1.0, z], [x + width, hidden_top, z + width], K::spruceBark).paint()];
     let (from, to) = (base - 0.5, crown_top + 0.5);
     let density = move |distance: f64, py: f64| 0.75 - 0.3 * js::pow(distance / r(py), 3.0);
+    let roomy = move |px: f64, pz: f64| room.margin([px, 0.0, pz]) >= 0.0;
     let spokes = 6.0 + random.below(3) as f64;
     let sector = (2.0 * PI) / spokes;
     let twist = random.next() * sector;
     let half_width = |distance: f64| vox(0.15) + 0.07 * distance;
     let covered = move |distance: f64| if distance < core { 1.0 } else { 1f64.min((2.0 * half_width(distance)) / (distance * sector)) };
+    let near_room = roomy.clone();
     let fans = move |px: f64, py: f64, pz: f64| {
         let distance = js::hypot(&[px - cx, pz - cz]);
+        if !near_room(px, pz) {
+            return 0.0;
+        }
         if distance < core {
             return density(distance, py);
         }
@@ -900,15 +1027,14 @@ fn spruce_tree(x: f64, ground: f64, z: f64, random: &mut Rng, ground_at: GroundA
     far.extend(foot);
     far.push(crown(Fill::At(Rc::new(move |px, py, pz| {
         let distance = js::hypot(&[px - cx, pz - cz]);
-        density(distance, py) * covered(distance)
+        if roomy(px, pz) { density(distance, py) * covered(distance) } else { 0.0 }
     }))));
     near.far = Some(Far::of(fx(FINE), far));
     near
 }
 
-/** Slender white birch with a wavy trunk and a loose, clumpy crown of drooping twigs. */
-fn birch_tree(x: f64, ground: f64, z: f64, random: &mut Rng) -> Node {
-    let height = vox(12.0 + random.next() * 7.0);
+/** Slender white birch with a wavy trunk and a loose, clumpy crown of drooping twigs, in its room. */
+fn birch_tree(x: f64, ground: f64, z: f64, height: f64, room: Rc<Room>, random: &mut Rng) -> Node {
     let width = vox(0.375);
     let (mut shapes, mut marks) = (Vec::new(), Vec::new());
     let mut segments: Vec<[f64; 4]> = Vec::new();
@@ -943,25 +1069,30 @@ fn birch_tree(x: f64, ground: f64, z: f64, random: &mut Rng) -> Node {
     let crown_top = ground + height + vox(1.0);
     let cy = (crown_bottom + crown_top) / 2.0;
     let ry = (crown_top - crown_bottom) / 2.0;
-    let rx = vox(2.0 + random.next() * 1.2);
-    let count = 12.0 + random.below(6) as f64;
+    let rx = vox(2.2 + random.next() * 1.6);
+    let count = 16.0 + random.below(8) as f64;
     let mid = (width - 1.0) / 2.0;
     let bend = branch();
     let (mut branches, mut clusters) = (Vec::new(), Vec::new());
     for i in 0..count as usize {
         // Uniform point in the crown ellipsoid.
-        let (mut ox, mut oy, mut oz);
-        loop {
-            ox = random.next() * 2.0 - 1.0;
-            oy = random.next() * 2.0 - 1.0;
-            oz = random.next() * 2.0 - 1.0;
-            if ox * ox + oy * oy + oz * oz <= 1.0 {
-                break;
+        let o = loop {
+            let o = [0, 1, 2].map(|_| random.next() * 2.0 - 1.0);
+            if o.iter().map(|v| v * v).sum::<f64>() <= 1.0 {
+                break o;
             }
+        };
+        // Squeezed into its room: drawn in towards the trunk as far as the crown's edge that way is.
+        let (axis, out) = ([tx + mid, cy + o[1] * ry, tz + mid], js::hypot(&[o[0], o[2]]).max(1e-9));
+        let edge = [axis[0] + o[0] / out * rx, axis[1], axis[2] + o[2] / out * rx];
+        let squeeze = room.reach(axis, edge, cluster_room().min(room.margin(axis)));
+        let p = [axis[0] + o[0] * rx * squeeze, axis[1], axis[2] + o[2] * rx * squeeze];
+        // None where there is no room: a tree a taller one stands over has none, and stands bare.
+        if room.margin(p) < least_cluster() {
+            continue;
         }
-        let p = [tx + ox * rx, cy + oy * ry, tz + oz * rx];
         branches.push(Shape::tube(&bend, [tx + mid, p[1] - vox(0.5), tz + mid], p, BRANCH_RADIUS, K::birchBark).paint());
-        let radius = vox(0.8 + random.next() * 0.6);
+        let radius = vox(1.0 + random.next() * 0.6).min(room.margin(p));
         clusters.push(leaf_cluster(format!("leaves {i}"), p, radius, foliage, 0.35, random, 0.6, turning));
     }
     let dashes = fine_child("bark", bounds_of_shapes(shapes.iter().map(|s| &s.bounds)), random, move |random| {
@@ -970,9 +1101,8 @@ fn birch_tree(x: f64, ground: f64, z: f64, random: &mut Rng) -> Node {
     tree(shapes, branches, vec![dashes], clusters)
 }
 
-/** Broad oak: thick trunk, a few limbs forking twice, a leaf cluster at each tip. */
-fn oak_tree(x: f64, ground: f64, z: f64, random: &mut Rng, ground_at: GroundAt) -> Node {
-    let height = vox(12.0 + random.next() * 8.0);
+/** Broad oak: thick trunk, a few limbs forking twice, a leaf cluster at each tip, as far as its room lets them. */
+fn oak_tree(x: f64, ground: f64, z: f64, height: f64, room: Rc<Room>, random: &mut Rng, ground_at: GroundAt) -> Node {
     let trunk_top = ground + round(height * (0.45 + random.next() * 0.1));
     let width = vox(1.0);
     // The middle of `width` sites from x and z.
@@ -982,25 +1112,28 @@ fn oak_tree(x: f64, ground: f64, z: f64, random: &mut Rng, ground_at: GroundAt) 
     let foliage = foliage(Species::Oak, random.next());
     let turning = if foliage == K::oakGold { K::oakOrange } else { K::oakGold };
     shapes.extend(roots(cx, ground, cz, width / 2.0, K::bark, random, ground_at));
-    let mut crown = Crown::new(K::bark, 2);
+    let mut crown = Crown::new(K::bark, 2, room.clone());
     // A leader up the middle and limbs around it; their forks reach about as far again.
     let crest = bole.axis(ground + height - vox(5.0));
     crown.grow(bole.axis(trunk_top - vox(0.5)), crest, BRANCH_RADIUS * 2.0, 0, random);
     let limbs = 4.0 + random.below(3) as f64;
     for i in 0..limbs as usize {
         let angle = (i as f64 / limbs) * PI * 2.0 + random.next() * 0.8;
-        let reach = vox(1.5 + random.next());
-        let start = bole.axis(trunk_top - (random.next() * vox(2.0)).floor());
-        let end = [start[0] + js::cos(angle) * reach, start[1] + vox(1.0 + random.next() * 1.5), start[2] + js::sin(angle) * reach];
+        let (reach, start) = (vox(2.0 + random.next() * 1.2), bole.axis(trunk_top - (random.next() * vox(2.0)).floor()));
+        let (rise, out) = (vox(1.0 + random.next() * 1.5), [js::cos(angle), 0.0, js::sin(angle)]);
+        // Smaller, forks and all, as far as its room is narrower than the crown it would grow that way.
+        let edge = [0, 1, 2].map(|i| start[i] + out[i] * (2.0 * reach + vox(1.4)));
+        let squeeze = room.reach(start, edge, cluster_room().min(room.margin(start)));
+        let end = [start[0] + out[0] * reach * squeeze, start[1] + rise * squeeze, start[2] + out[2] * reach * squeeze];
         crown.grow(start, end, BRANCH_RADIUS * 2.0, 0, random);
     }
     let clusters = crown
         .tips
         .iter()
         .enumerate()
-        .map(|(i, tip)| {
-            let radius = vox(1.1 + random.next() * 0.6);
-            leaf_cluster(format!("leaves {i}"), *tip, radius, foliage, 0.4, random, 0.0, turning)
+        .filter_map(|(i, tip)| {
+            let radius = vox(1.1 + random.next() * 0.6).min(room.margin(*tip));
+            (radius >= least_cluster()).then(|| leaf_cluster(format!("leaves {i}"), *tip, radius, foliage, 0.4, random, 0.0, turning))
         })
         .collect();
     let seed = random.next_u64();

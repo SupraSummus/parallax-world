@@ -79,7 +79,7 @@ worldgen/                    # The world-generation engine, moving to integers, 
 │   ├── column.rs            # A heightfield's spans, each tall enough to keep a site at every level; its slopes' sides closed
 │   ├── plan.rs              # Plans by column, each from coarser ones only; heights with a slope, their range anywhere; land domains bid for; claims, things kept apart anywhere
 │   ├── curve.rs             # Curves: lines through space made top-down within narrowing corridors; where one passes nearest a point
-│   ├── points.rs            # Points: where things are, drawn top down, so a cell of any size knows how many it holds; blurs of their counts
+│   ├── points.rs            # Points: where things are, drawn top down, so a cell of any size knows how many it holds; blurs of their counts; rooms: their power diagram, which things keep to near and far forms read
 │   ├── frame.rs             # Things built in frames of their own: quarter turns, mirrors, walls
 │   ├── world.rs             # World: what a host needs to show one (generator, spawn, heights), the places it names
 │   ├── picture.rs           # Pictures of a world at one level: rays through its voxels, as PNGs, or through its sites' alpha
@@ -94,7 +94,7 @@ worldgen/                    # The world-generation engine, moving to integers, 
 worlds/                      # The worlds, on worldgen's public API only; the web's WebAssembly
 ├── src/
 │   ├── lib.rs               # WORLDS: the registry hosts start worlds from by name, with the regions checked around their places
-│   ├── forest.rs            # The forest, on ground it may share
+│   ├── forest.rs            # The forest, on ground it may share, its trees' crowns kept to their rooms
 │   ├── path.rs              # The forest's path along the valley: its centre line by z, and a curve through it
 │   ├── town.rs, fields.rs   # Towns along the path, farmland around them: the valley's other domains
 │   ├── landmarks.rs         # The valley's fourth domain: a keep, a watchtower, chapels, ponds, farmsteads, windmills

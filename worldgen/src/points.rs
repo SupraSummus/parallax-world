@@ -381,6 +381,152 @@ impl Blur {
     }
 }
 
+/**
+ * The rooms of the things at a process's points: its power diagram
+ * (Aurenhammer). A place is the room of the thing whose power there,
+ * |p − a|² − weight, is least, if it reaches it; each wall loses half a
+ * gap to either side. Weights are of a point alone and each pair's gap is
+ * drawn from the pair, so both sides of a wall agree on it. Whose room a
+ * place is needs only the points within √(reach² + most) of it: one
+ * whose power beats a thing within reach stands that near.
+ */
+pub struct Rooms {
+    points: Rc<Points>,
+    reach: i64,
+    most: i64,
+    /** The least and most gap between two rooms (units), each pair's drawn between. */
+    gaps: [i64; 2],
+    seed: u64,
+    weight: Box<dyn Fn(&Spot) -> i64>,
+    /** By block `reach` wide, the points that may own its places: BLOCKS along each axis spanned, as a host tile's. */
+    near: Slots<[i64; 3], Rc<[Spot]>>,
+}
+
+impl Rooms {
+    /** The rooms of `points`' things, reaching `reach`, weighed by `weight`, 0 to `most`, `gaps` apart. */
+    pub fn new(points: Rc<Points>, reach: i64, most: i64, gaps: [i64; 2], weight: impl Fn(&Spot) -> i64 + 'static) -> Rooms {
+        assert!(reach > 0 && most >= 0 && gaps[0] <= gaps[1], "points {}: rooms reach somewhere, weights and gaps are ranges", points.name);
+        let seed = hash_text("rooms", points.seed);
+        let slots = BLOCKS.pow(points.dims) as usize;
+        Rooms { points, reach, most, gaps, seed, weight: Box::new(weight), near: Slots::new(slots) }
+    }
+
+    /** How far a thing beating another within reach of a place may stand from it: √(reach² + most), rounded up. */
+    fn rival(&self) -> i64 {
+        (self.reach * self.reach + self.most).isqrt() + 1
+    }
+
+    fn weight(&self, spot: &Spot) -> i64 {
+        let w = (self.weight)(spot);
+        assert!(
+            (0..=self.most).contains(&w),
+            "points {}: a weight of {w}, not 0 to {}; see \"Rooms\" in {DOCS}",
+            self.points.name,
+            self.most
+        );
+        w
+    }
+
+    /** `at` on the axes the points span, 0 on the others. */
+    fn on_axes(&self, at: [i64; 3]) -> [i64; 3] {
+        [0, 1, 2].map(|a| if self.points.spans[a] { at[a] } else { 0 })
+    }
+
+    /** The points within `within` of `at`. */
+    fn within(&self, at: [i64; 3], within: i64) -> Vec<Spot> {
+        let (min, max) = (at.map(|v| v - within), at.map(|v| v + within + 1));
+        let mut spots = self.points.points_in(min, max);
+        spots.retain(|s| squared(s.at, at) <= within * within);
+        spots
+    }
+
+    /** The gap between the rooms of `a` and `b`, `distance` apart: drawn from the pair, in either order; at most half their distance, so their walls stay between them. */
+    fn gap(&self, a: &Spot, b: &Spot, distance: f64) -> f64 {
+        let key = |s: &Spot| (s.at, s.mark, s.nth);
+        let (a, b) = if key(a) <= key(b) { (a, b) } else { (b, a) };
+        let h = hash64(self.seed, a.at[0], a.at[1], a.at[2] ^ ((a.mark as i64) << 40 | (a.nth as i64) << 48));
+        let u = unit(hash64(h, b.at[0], b.at[1], b.at[2] ^ ((b.mark as i64) << 40 | (b.nth as i64) << 48)) as u32);
+        (self.gaps[0] as f64 + u * (self.gaps[1] - self.gaps[0]) as f64).min(distance / 2.0)
+    }
+
+    /**
+     * The room of the thing of `mark` at `at`: walled off from each that
+     * may beat it within its reach. Things at one point share its room.
+     */
+    pub fn room(&self, at: [i64; 3], mark: usize) -> Room {
+        let at = self.on_axes(at);
+        let others = self.within(at, self.reach + self.rival());
+        let own = *others
+            .iter()
+            .find(|s| s.at == at && s.mark == mark)
+            .unwrap_or_else(|| panic!("points {}: none of mark {mark} at {at:?}", self.points.name));
+        let w = self.weight(&own);
+        let mut room = Room { at: at.map(|v| v as f64), walls: Vec::new() };
+        for other in others.iter().filter(|s| s.at != at) {
+            let d = [0, 1, 2].map(|i| (other.at[i] - at[i]) as f64);
+            let distance = js::hypot(&d);
+            // Where the two powers are equal, along the line between them.
+            let equal = (distance * distance + (w - self.weight(other)) as f64) / (2.0 * distance);
+            room.walls.push((d.map(|v| v / distance), equal - self.gap(&own, other, distance) / 2.0));
+        }
+        room
+    }
+
+    /** The thing whose room `at` is in, gaps aside, if one reaches it; of equal powers, the first point. */
+    pub fn owner(&self, at: [i64; 3]) -> Option<Spot> {
+        let at = self.on_axes(at);
+        let block = at.map(|v| v.div_euclid(self.reach));
+        let axes = &self.points.axes[..self.points.dims as usize];
+        let slot = axes.iter().fold(0, |slot, &a| slot * BLOCKS + block[a].rem_euclid(BLOCKS)) as usize;
+        let near = self.near.get(slot, block, || {
+            let (centre, half) = (block.map(|b| b * self.reach + self.reach / 2), self.reach / 2 + 1);
+            self.within(self.on_axes(centre), half * 2 + self.rival()).into()
+        });
+        let power = |s: &Spot| squared(s.at, at) - self.weight(s);
+        let owner = near.iter().min_by_key(|s| (power(s), s.at, s.mark, s.nth))?;
+        (squared(owner.at, at) <= self.reach * self.reach).then_some(*owner)
+    }
+}
+
+/** The squared distance between two points. */
+fn squared(a: [i64; 3], b: [i64; 3]) -> i64 {
+    (0..3).map(|i| (a[i] - b[i]) * (a[i] - b[i])).sum()
+}
+
+/** A thing's room (`Rooms`): on its side of a wall between it and each thing that may beat it. */
+pub struct Room {
+    at: [f64; 3],
+    /** Unit normals towards each neighbour, and how far along it from `at` its wall stands. */
+    walls: Vec<([f64; 3], f64)>,
+}
+
+impl Room {
+    /** The room of a thing alone: everywhere. */
+    pub fn everywhere() -> Room {
+        Room { at: [0.0; 3], walls: Vec::new() }
+    }
+
+    /** How far `p` is inside the room: from the nearest wall, negative outside. */
+    pub fn margin(&self, p: [f64; 3]) -> f64 {
+        let along = |n: &[f64; 3]| (0..3).map(|i| n[i] * (p[i] - self.at[i])).sum::<f64>();
+        self.walls.iter().map(|(n, wall)| wall - along(n)).fold(f64::INFINITY, f64::min)
+    }
+
+    /** How much of the way from `from` to `to` keeps at least `margin` inside the room: a fraction, 0 if `from` doesn't. */
+    pub fn reach(&self, from: [f64; 3], to: [f64; 3], margin: f64) -> f64 {
+        let step = [0, 1, 2].map(|i| to[i] - from[i]);
+        let mut t: f64 = 1.0;
+        for (n, wall) in &self.walls {
+            let towards: f64 = (0..3).map(|i| n[i] * step[i]).sum();
+            let left = wall - margin - (0..3).map(|i| n[i] * (from[i] - self.at[i])).sum::<f64>();
+            if towards > 0.0 {
+                t = t.min(left / towards);
+            }
+        }
+        t.max(0.0)
+    }
+}
+
 /** A Poisson number of `mean` at `u`, a fraction of 1: the least k whose cumulative chance passes it. */
 fn poisson(mean: f64, u: f64) -> u32 {
     let (mut k, mut p) = (0, js::exp(-mean));
@@ -396,7 +542,7 @@ fn poisson(mean: f64, u: f64) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::noise::fx;
+    use crate::noise::{fx, hash};
 
     /** Points in a square 4096 wide of a disc of chance ¼ in a field of ⅛, a mark each, a clearing round the origin. */
     fn points(seed: u64) -> Points {
@@ -477,6 +623,50 @@ mod tests {
                     "{held} points, expected {expected}, diagonally {diagonal}, from {from}"
                 );
             }
+        }
+    }
+
+    /** Rooms of `points(7)`'s things reaching 100, weighed by where they are, `gaps` apart. */
+    fn rooms(gaps: [i64; 2]) -> Rooms {
+        Rooms::new(Rc::new(points(7)), 100, 2000, gaps, |s| (hash(9, s.at[0], s.at[2], s.mark as i64) % 2001) as i64)
+    }
+
+    #[test]
+    fn rooms_never_meet_and_each_place_is_its_owners() {
+        let (apart, tiled) = (rooms([4, 12]), rooms([0, 0]));
+        let spots = apart.points.points_in([-512, 0, -512], [512, 1, 512]);
+        let at = |s: &Spot| s.at.map(|v| v as f64);
+        let (apart_rooms, tiled_rooms): (Vec<Room>, Vec<Room>) =
+            spots.iter().map(|s| (apart.room(s.at, s.mark), tiled.room(s.at, s.mark))).unzip();
+        let reaches = |s: &Spot, q: [i64; 3]| squared(s.at, q) <= 100 * 100;
+        let mut random = Rng::new(3);
+        for _ in 0..20_000 {
+            let q = [random.below(600) as i64 - 300, 0, random.below(600) as i64 - 300];
+            let qf = q.map(|v| v as f64);
+            // Apart, no place is in two rooms of things reaching it (things at one point share theirs).
+            let mut inside: Vec<_> =
+                spots.iter().zip(&apart_rooms).filter(|(s, r)| reaches(s, q) && r.margin(qf) >= 0.0).map(|(s, _)| s.at).collect();
+            inside.dedup();
+            assert!(inside.len() <= 1, "{q:?} is in the rooms of {inside:?}");
+            // Tiled, a place reached is in its owner's room, and no other's beyond it.
+            let owner = tiled.owner(q);
+            for (s, room) in spots.iter().zip(&tiled_rooms).filter(|(s, _)| reaches(s, q)) {
+                if owner.is_some_and(|o| o.at == s.at) {
+                    assert!(room.margin(qf) >= -1e-9, "{q:?} is {s:?}'s, outside its room");
+                } else {
+                    assert!(room.margin(qf) <= 1e-9, "{q:?} is {owner:?}'s, inside {s:?}'s room");
+                }
+            }
+            // Owned only by a thing reaching it: a place may be in the room of one that doesn't, and so no one's.
+            assert!(owner.is_none_or(|o| reaches(&o, q)), "{q:?} owned by {owner:?}, which doesn't reach it");
+        }
+        // As far as `reach` says, a segment keeps its margin; a little further, it doesn't.
+        for (s, room) in spots.iter().zip(&apart_rooms).take(200) {
+            let to = [s.at[0] as f64 + 90.0, 7.0, s.at[2] as f64 - 60.0];
+            let t = room.reach(at(s), to, 4.0);
+            let along = |t: f64| [0, 1, 2].map(|i| at(s)[i] + t * (to[i] - at(s)[i]));
+            assert!(room.margin(at(s)) < 4.0 || room.margin(along(t)) >= 4.0 - 1e-9, "{s:?} short of its margin at {t}");
+            assert!(t >= 1.0 || room.margin(along(t + 0.01)) < 4.0, "{s:?} could reach past {t}");
         }
     }
 
