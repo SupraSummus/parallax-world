@@ -762,7 +762,7 @@ impl Checked {
         let mut broken = self.broken.clone();
         if self.complete && !self.silent.is_empty() {
             broken.push(format!(
-                "{} draw nothing around spawn (worldgen::checks::survey): too far from it, or not at all",
+                "{} draw nothing around spawn or the places it names (worldgen::checks::survey): too far from them, or not at all",
                 self.silent.join(", ")
             ));
         }

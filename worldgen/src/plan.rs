@@ -295,7 +295,7 @@ pub struct Land {
 }
 
 impl Land {
-    /** Land of the domains bidding `bids`, in that order (their indices), decided at `scale`. */
+    /** Land of the domains bidding `bids`, in that order (their indices, see `holding`), decided at `scale`. */
     pub fn new(scale: i64, width: Fx, bids: Vec<Bid>) -> Land {
         assert!(bids.len() <= DOMAINS, "a land holds at most {DOMAINS} domains; see \"Composing\" in {DOCS}");
         Land {
@@ -319,13 +319,39 @@ impl Land {
     }
 
     /** Domain `d`'s share of column (x, z), a fraction. */
-    pub fn share(&self, d: usize, x: i64, z: i64) -> Fx {
+    fn share(&self, d: usize, x: i64, z: i64) -> Fx {
         Fx::from_bits(self.shares.at(x, z).share[d].into())
     }
 
     /** Whether domain `d` has the most of column (x, z): the first of those with the most. */
-    pub fn owns(&self, d: usize, x: i64, z: i64) -> bool {
+    fn owns(&self, d: usize, x: i64, z: i64) -> bool {
         self.shares.at(x, z).winner as usize == d
+    }
+
+    /** Domain `d`'s hold on it. */
+    pub fn holding(self: &Rc<Self>, d: usize) -> Holding {
+        Holding(Some((self.clone(), d)))
+    }
+}
+
+/** A domain's hold on land: its share of each column, and whether it owns it; or all of every column, holding none shared. */
+#[derive(Clone)]
+pub struct Holding(Option<(Rc<Land>, usize)>);
+
+impl Holding {
+    /** All of every column. */
+    pub fn all() -> Holding {
+        Holding(None)
+    }
+
+    /** Its share of column (x, z), a fraction. */
+    pub fn share(&self, x: i64, z: i64) -> Fx {
+        self.0.as_ref().map_or(Fx::ONE, |(land, d)| land.share(*d, x, z))
+    }
+
+    /** Whether it has the most of column (x, z). */
+    pub fn owns(&self, x: i64, z: i64) -> bool {
+        self.0.as_ref().is_none_or(|(land, d)| land.owns(*d, x, z))
     }
 }
 

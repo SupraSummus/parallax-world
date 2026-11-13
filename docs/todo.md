@@ -359,6 +359,17 @@ Numbers are for the forest at 1280×800, as measured when written.
   Learned again from today's, mostly hamlets and villages,
   it draws far less town: 235 houses in `learned.rs`'s test, not over 600.
   Learn it from the market towns alone, or let the learned town be sparser.
+- **The first town's lamps break the contract at level 1 at some seeds**
+  (`KNOWN_BREAKS` in `worlds/tests/contract.rs`):
+  rays among them hit lamp less, iron more.
+  Their parts are a site or less at level 1 (a pole 2 units wide, a cap 1 thick),
+  so what shows depends on the town's height against the sites.
+  A cap 2 units thick broke another seed instead.
+- **A domain can't stand in a world twice.**
+  Its populations seed their cells by layer name and the generator's seed
+  (`Cell::random`), not its `Scope`: two forests would grow the same trees.
+  And its kinds' ids are its place in a table every world concatenates
+  in one order (`kinds!`'s `base`); named, the world would number them.
 - **Worlds share tables of kinds**, so the contract only prints
   the kinds nothing surveyed draws, and fails on silent layers alone:
   the moor's, the learned town's and the city's are the valley's.

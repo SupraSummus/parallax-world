@@ -2,6 +2,7 @@
 
 use std::rc::Rc;
 
+use worldgen::domain::Scope;
 use worldgen::generator::{Generator, generate, materials_of};
 use worldgen::grid::{Box3, is_site};
 use worldgen::picture::{Camera, picture};
@@ -18,7 +19,7 @@ fn unit(metres: f64) -> i64 {
 fn the_forest_keeps_off_the_first_towns_main_street() {
     let world = valley(42);
     let spawn = world.spawn;
-    let town = Terrain::new(42).towns.near(spawn[2] + unit(200.0)).expect("a town ahead");
+    let town = Terrain::new(&Scope::new(42)).towns.near(spawn[2] + unit(200.0)).expect("a town ahead");
     assert!(town.z - spawn[2] > unit(100.0), "the camera starts outside the town");
     // Along the main street's middle, 20 m into the town: nothing from a metre above it to the sky.
     let street =
@@ -32,8 +33,10 @@ fn the_forest_keeps_off_the_first_towns_main_street() {
  * the terrain they stand on.
  */
 fn landmarks(seed: u64) -> (Vec<Site>, Rc<Terrain>) {
-    let terrain = Rc::new(Terrain::new(seed));
-    let landmarks = &Landmarks::new(seed, terrain.clone(), Rc::new(Railway::new(seed, terrain.clone())));
+    let world = Scope::new(seed);
+    let terrain = Rc::new(Terrain::new(&world));
+    let railway = Rc::new(Railway::new(&world.of("railway"), terrain.clone()));
+    let landmarks = &Landmarks::new(&world.of("landmarks"), terrain.clone(), railway);
     let points = |from: f64, to: f64| (unit(from)..=unit(to)).step_by(NEAR as usize);
     let mut sites: Vec<Site> =
         points(-500.0, 8000.0).flat_map(|z| points(-500.0, 500.0).filter_map(move |x| landmarks.site(x, z))).collect();
@@ -51,8 +54,10 @@ fn landmarks_of_every_kind_stand_out_of_towns_and_off_the_path() {
             kinds.push(s.landmark);
             let ([hx, hz], [cx, cz], reach) = (s.half(), s.centre, s.clearing.0);
             let metres = |from: i64, to: i64| (from..=to).step_by(unit(1.0) as usize);
+            // Its clearing: within its reach of the footprint, as it bids.
+            let cleared = |x: i64, z: i64| ((x - cx).abs() - hx).max(0).pow(2) + ((z - cz).abs() - hz).max(0).pow(2) <= reach * reach;
             let in_town = metres(cz - hz - reach, cz + hz + reach)
-                .any(|z| metres(cx - hx - reach, cx + hx + reach).any(|x| terrain.towns.distance(x, z).0 <= 0));
+                .any(|z| metres(cx - hx - reach, cx + hx + reach).any(|x| cleared(x, z) && terrain.towns.distance(x, z).0 <= 0));
             assert!(!in_town, "seed {seed}: the {:?} at {:?} or its clearing is in a town", s.landmark, s.centre);
             let on_path = metres(cz - hz, cz + hz).any(|z| (terrain.path_x(z).round_units().0 - cx).abs() - hx < unit(3.0));
             assert!(!on_path, "seed {seed}: the {:?} at {:?} stands on the path", s.landmark, s.centre);

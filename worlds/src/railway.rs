@@ -20,11 +20,12 @@ use std::rc::Rc;
 
 use worldgen::column::Column;
 use worldgen::curve::{self, Curve, Near};
+use worldgen::domain::{Domain, Scope};
 use worldgen::frame::{Frame, Part, facing};
 use worldgen::generator::{Field, Kind, Layer, Node, Op, Population, Span};
 use worldgen::kinds;
-use worldgen::noise::{Fx, Rng, ValueNoise, fx, hash, hash64, smoothstep, stream};
-use worldgen::plan::{Land, Plan, Sloped};
+use worldgen::noise::{Fx, Rng, ValueNoise, fx, hash, hash64, smoothstep};
+use worldgen::plan::{Holding, Plan, Sloped};
 use worldgen::units::{Units, m};
 
 use crate::forest::K as F;
@@ -279,7 +280,9 @@ struct Line {
     ends: Rc<Ends>,
     pieces: Plan<Option<Rc<Piece>>>,
     towns: Rc<Towns>,
-    seed: u64,
+    /** Its stations' seed, and its surfaces'. */
+    stations: u64,
+    surfaces: u64,
 }
 
 impl Line {
@@ -386,7 +389,7 @@ impl Line {
             return None;
         }
         let (at, top, _) = self.track(town.z);
-        Some(Station { at, top, inner: -self.ends.side, seed: hash64(stream(self.seed, 92), town.x, town.z, 0) })
+        Some(Station { at, top, inner: -self.ends.side, seed: hash64(self.stations, town.x, town.z, 0) })
     }
 
     /** The station whose building's cell column (x, z) is in, if any. */
@@ -404,12 +407,12 @@ pub struct Railway {
 }
 
 impl Railway {
-    pub fn new(seed: u64, terrain: Rc<Terrain>) -> Railway {
-        let s = stream(seed, 90);
+    pub fn new(scope: &Scope, terrain: Rc<Terrain>) -> Railway {
+        let s = scope.seed("ends");
         let ends = Rc::new(Ends {
             phase: (hash64(s, 0, 0, 0) % PIECE as u64) as i64,
             side: if hash64(s, 1, 0, 0) & 1 == 0 { 1 } else { -1 },
-            offsets: ValueNoise::new(stream(seed, 91)),
+            offsets: ValueNoise::new(scope.seed("offsets")),
             terrain: terrain.clone(),
         });
         let rise = |level: usize| GRADE * (PIECE >> (level + 1)) as f64;
@@ -453,7 +456,7 @@ impl Railway {
             })
         };
         let towns = ends.terrain.towns.clone();
-        let line = Rc::new(Line { ends, pieces, towns, seed });
+        let line = Rc::new(Line { ends, pieces, towns, stations: scope.seed("stations"), surfaces: scope.seed("surfaces") });
         let at = {
             let line = line.clone();
             Plan::new("railway", SCALE, move |x, z| line.at(x, z))
@@ -474,30 +477,6 @@ impl Railway {
         self.line.near(x, z, margin).is_some()
     }
 
-    /**
-     * The ground at (x, z), `ground` before, cut or filled to the track:
-     * level with it across the formation, sloping from its edges, and
-     * round a bridge's ends under it as far as its sides reach, which
-     * meet the ground there, not end in a wall.
-     */
-    pub fn shaped(&self, x: i64, z: i64, ground: Fx) -> Fx {
-        let Some((at, beyond)) = self.at(x, z).and_then(|a| Some((a, a.beyond?))) else { return ground };
-        let top = Units(at.top).to_fx();
-        let out = (at.distance - Units(at.half).to_fx()).max(Fx::ZERO).hypot(beyond);
-        let slope = out * fx(SLOPE);
-        // Steeper over the last third of the sides, to meet the ground where they end.
-        let sides = Units(SIDES).to_fx();
-        let keep = Fx::ONE - smoothstep(sides * 2 / 3, sides, out);
-        ground + (ground.clamp(top - slope, top + slope) - ground) * keep
-    }
-
-    /** Its bid for column (x, z): ahead over its formation and a little either side, but over a tunnel. */
-    pub fn bid(&self, x: i64, z: i64) -> Fx {
-        let most = fx(4.0);
-        let Some(a) = self.at(x, z).filter(|a| a.structure != Structure::Tunnel) else { return -most };
-        ((Units(a.half + m(2.0)).to_fx() - a.distance) * most / Units::m(2.0)).clamp(-most, most)
-    }
-
     /** The first station from the start, ahead and behind in turn: the track by it. */
     pub fn first_station(&self) -> [i64; 3] {
         let line = &self.line;
@@ -514,8 +493,36 @@ impl Railway {
     }
 }
 
-/** The railway's layers on `ground`, where domain `me` of `land` owns it: its tunnels' bores, its track, bridges and platforms, its stations. */
-pub fn layers(railway: Rc<Railway>, land: Rc<Land>, me: usize, ground: Rc<Sloped>) -> Vec<Layer> {
+impl Domain for Railway {
+    /** Ahead over its formation and a little either side, but over a tunnel. */
+    fn bid(&self, x: i64, z: i64) -> Fx {
+        let most = fx(4.0);
+        let Some(a) = self.at(x, z).filter(|a| a.structure != Structure::Tunnel) else { return -most };
+        ((Units(a.half + m(2.0)).to_fx() - a.distance) * most / Units::m(2.0)).clamp(-most, most)
+    }
+
+    /**
+     * Cut or filled to the track: level with it across the formation,
+     * sloping from its edges, and round a bridge's ends under it as far as
+     * its sides reach, which meet the ground there, not end in a wall.
+     */
+    fn shape(&self, x: i64, z: i64, ground: Fx) -> Option<(Fx, Fx)> {
+        let (at, beyond) = self.at(x, z).and_then(|a| Some((a, a.beyond?)))?;
+        let top = Units(at.top).to_fx();
+        let out = (at.distance - Units(at.half).to_fx()).max(Fx::ZERO).hypot(beyond);
+        let slope = out * fx(SLOPE);
+        // Steeper over the last third of the sides, to meet the ground where they end.
+        let sides = Units(SIDES).to_fx();
+        Some((ground.clamp(top - slope, top + slope), Fx::ONE - smoothstep(sides * 2 / 3, sides, out)))
+    }
+
+    /** Its tunnels' bores, its track, bridges and platforms where it owns the land, its stations. */
+    fn layers(self: Rc<Self>, ground: &Rc<Sloped>, hold: Holding) -> Vec<Layer> {
+        layers(self, hold, ground.clone())
+    }
+}
+
+fn layers(railway: Rc<Railway>, hold: Holding, ground: Rc<Sloped>) -> Vec<Layer> {
     let bores = {
         // The track's top by row, rising under a unit a column (GRADE): a bore is over it, within BORE across.
         let line = railway.line.clone();
@@ -529,7 +536,7 @@ pub fn layers(railway: Rc<Railway>, land: Rc<Land>, me: usize, ground: Rc<Sloped
         })
         .about(top, m(1.0), arch(0) + m(1.0))
     };
-    let seed = railway.line.seed;
+    let seed = railway.line.surfaces;
     let track = {
         let railway = railway.clone();
         Field::columns("railway", 0.95, Op::Paint, move |x, z, spacing| {
@@ -563,7 +570,7 @@ pub fn layers(railway: Rc<Railway>, land: Rc<Land>, me: usize, ground: Rc<Sloped
                     }
                 }
                 // The formation beside the ballast, or a platform at a station; where the railway owns it.
-                Structure::Earth if !within(BALLAST) && within(at.half) && land.owns(me, x, z) => {
+                Structure::Earth if !within(BALLAST) && within(at.half) && hold.owns(x, z) => {
                     if at.platform && !within(PLATFORM) && within(BUILDING_FROM) {
                         spans.extend(Column::new(top, spacing).surface(T::slab, m(0.5)).spans());
                         spans.push(Span::solid(top + 1, top + 1 + PLATFORM_HIGH.max(2 * spacing), T::slab));
@@ -624,6 +631,13 @@ fn building(s: &Station) -> Node {
 mod tests {
     use super::*;
 
+    /** The railway of `seed`, and the terrain it is on. */
+    fn railway(seed: u64) -> (Railway, Rc<Terrain>) {
+        let world = Scope::new(seed);
+        let terrain = Rc::new(Terrain::new(&world));
+        (Railway::new(&world.of("railway"), terrain.clone()), terrain)
+    }
+
     /**
      * Along its first 32 km at each seed: no segment climbs steeper than
      * the grade, the line keeps across from the valley's middle within its
@@ -633,7 +647,7 @@ mod tests {
     #[test]
     fn keeps_its_grade_and_its_side() {
         for seed in [42, 1, 2, 3] {
-            let line = Railway::new(seed, Rc::new(Terrain::new(seed))).line;
+            let line = railway(seed).0.line;
             let mut seen = [false; 3];
             for k in 0..8 {
                 let piece = line.piece(k);
@@ -657,7 +671,7 @@ mod tests {
     #[test]
     fn is_smooth_and_has_no_stubs() {
         for seed in [42, 1, 2, 3] {
-            let line = Railway::new(seed, Rc::new(Terrain::new(seed))).line;
+            let line = railway(seed).0.line;
             let mut points: Vec<[Fx; 3]> = Vec::new();
             let mut structure: Vec<Structure> = Vec::new();
             for k in 0..8 {
@@ -684,12 +698,9 @@ mod tests {
     #[test]
     fn ends_its_fills_in_no_wall() {
         for seed in [42, 1, 2, 3] {
-            let terrain = Rc::new(Terrain::new(seed));
-            let railway = Railway::new(seed, terrain.clone());
-            let added = |x: i64, z: i64| {
-                let ground = terrain.ground(x, z);
-                railway.shaped(x, z, ground) - ground
-            };
+            let (railway, terrain) = railway(seed);
+            let added =
+                |x: i64, z: i64| railway.shape(x, z, terrain.ground(x, z)).map_or(Fx::ZERO, |(to, w)| (to - terrain.ground(x, z)) * w);
             let mut ends = 0;
             for k in 0.. {
                 if ends >= 6 {

@@ -1,5 +1,6 @@
 //! What a world is made of, found by looking rather than listed: every
-//! layer of its generator asked over a square around spawn, things taken
+//! layer of its generator asked over a square around spawn (or, drawing
+//! nothing there, around each place the world names), things taken
 //! apart into parts no wider than a region, sorted into strata: a part or
 //! a field, with a kind it draws. The contract checks a place of every
 //! stratum found (worldgen::checks::contract), however rare, without a list.
@@ -28,6 +29,15 @@ const PARTS: usize = 20_000;
  * proportion ("Plans" in docs/generators.md), so a narrow one shows.
  */
 const FIELD_LEVEL: u32 = 7;
+
+/**
+ * Around a place the world names, a field is asked at the columns of a
+ * finer level over a smaller square: sites a metre apart, 128 m. Where the
+ * world says a feature is, one narrower than FIELD_LEVEL's sites that it
+ * doesn't keep far away (a tunnel's bore) is found there, at any seed.
+ */
+const PLACE_LEVEL: u32 = 3;
+const PLACE_SIDE: i64 = m(128.0);
 
 /** Things whose bounds leave the heights that the survey keeps, at most, of each population. */
 const LEAVING: usize = 16;
@@ -89,12 +99,12 @@ pub fn survey(world: &World, region: i64, wanted: impl Fn(&str) -> bool) -> Surv
         let start = Instant::now();
         match layer {
             Layer::Population(population) => {
-                let (half, seen) = survey_things(world, population, region, &mut found);
+                let (half, seen) = around(world, |centre, _| survey_things(world, centre, population, region, &mut found), |s| s.1.made);
                 layers.push(Surveyed { layer: population.name, half, found: seen.made, seconds: start.elapsed().as_secs_f64() });
                 things.push(seen);
             }
             Layer::Field(field) => {
-                let drawn = survey_field(world, field, region, &mut found);
+                let drawn = around(world, |centre, square| survey_field(world, centre, square, field, region, &mut found), |d| *d);
                 layers.push(Surveyed { layer: field.name, half: SIDE / 2, found: drawn, seconds: start.elapsed().as_secs_f64() });
             }
         }
@@ -104,17 +114,34 @@ pub fn survey(world: &World, region: i64, wanted: impl Fn(&str) -> bool) -> Surv
 }
 
 /**
- * Where `field` draws around spawn, asked at every column of sites of
- * FIELD_LEVEL over the square, into `found`; returns at how many.
+ * `survey` around spawn over the whole square, or, finding nothing there
+ * (`found` is 0), around each place the world names in turn, finer:
+ * a feature too rare to be near spawn at every seed (the valley's
+ * tunnels) is where the world says it is.
  */
-fn survey_field(world: &World, field: &Field, region: i64, found: &mut Found) -> usize {
+fn around<T>(world: &World, mut survey: impl FnMut([i64; 3], (u32, i64)) -> T, found: impl Fn(&T) -> usize) -> T {
+    let mut done = survey(world.spawn, (FIELD_LEVEL, SIDE));
+    for (_, find) in &world.points {
+        if found(&done) > 0 {
+            break;
+        }
+        done = survey(find(), (PLACE_LEVEL, PLACE_SIDE));
+    }
+    done
+}
+
+/**
+ * Where `field` draws around `centre`, asked at every column of sites of
+ * `level` over a square `side` wide, into `found`; returns at how many.
+ */
+fn survey_field(world: &World, centre: [i64; 3], (level, side): (u32, i64), field: &Field, region: i64, found: &mut Found) -> usize {
     let mut random = Rng::new(hash_text(field.name, world.generator.seed));
-    let ((h0, h1), half, s) = (world.heights, region / 2, 1i64 << FIELD_LEVEL);
-    let side = SIDE / s;
+    let ((h0, h1), half, s) = (world.heights, region / 2, 1i64 << level);
+    let side = side / s;
     let mut drawn = 0;
     for c in 0..side * side {
         // A site's column of FIELD_LEVEL, as generating it asks: at any height, for a field of sites.
-        let [x, z] = [(c % side, world.spawn[0]), (c / side, world.spawn[2])].map(|(i, o)| (o.div_euclid(s) + i - side / 2) * s);
+        let [x, z] = [(c % side, centre[0]), (c / side, centre[2])].map(|(i, o)| (o.div_euclid(s) + i - side / 2) * s);
         let p = [x, h0 + random.below((h1 - h0) as u32) as i64, z];
         // What it draws there, along an axis from..to: the place is around the top of what fills, the middle of what carves.
         let (kinds, along, from, to): (Vec<Kind>, usize, i64, i64) = match &field.values {
@@ -155,14 +182,14 @@ fn across(axis: usize) -> [usize; 2] {
 }
 
 /**
- * The things of `population` in a square around spawn, from 16 cells
+ * The things of `population` in a square around `centre`, from 16 cells
  * wide, twice as wide each time while they are taken apart into fewer
  * than PARTS / 4 parts, up to SIDE; their parts, into `found`. Returns
  * half the square's side, and the things.
  */
-fn survey_things(world: &World, population: &Population, region: i64, found: &mut Found) -> (i64, Things) {
+fn survey_things(world: &World, centre: [i64; 3], population: &Population, region: i64, found: &mut Found) -> (i64, Things) {
     let (n, reach, (h0, h1)) = (population.cell, population.reach, world.heights);
-    let [ci, _, ck] = world.spawn.map(|v| v.div_euclid(n));
+    let [ci, _, ck] = centre.map(|v| v.div_euclid(n));
     // Cells whose reach meets the heights.
     let (j0, j1) = ((h0 - n - reach[1]).div_euclid(n), (h1 + n + reach[1]).div_euclid(n) + 1);
     let mut half = 8;

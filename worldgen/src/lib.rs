@@ -8,6 +8,7 @@ pub mod checks;
 pub mod column;
 pub mod cost;
 pub mod curve;
+pub mod domain;
 pub mod frame;
 pub mod generator;
 pub mod grid;

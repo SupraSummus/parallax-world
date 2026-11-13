@@ -18,10 +18,11 @@
 use std::rc::Rc;
 
 use worldgen::column::{Column, lowest_around};
+use worldgen::domain::{Domain, Scope};
 use worldgen::generator::{Field, Layer, Op};
 use worldgen::kinds;
-use worldgen::noise::{Fbm, Fx, ValueNoise, fx, smoothstep, stream};
-use worldgen::plan::Sloped;
+use worldgen::noise::{Fbm, Fx, ValueNoise, fx, smoothstep};
+use worldgen::plan::{Holding, Sloped};
 use worldgen::units::{Units, m};
 
 use crate::fields;
@@ -100,19 +101,19 @@ pub struct Ranges {
 }
 
 impl Ranges {
-    pub fn new(seed: u64) -> Ranges {
+    pub fn new(scope: &Scope) -> Ranges {
         Ranges {
-            feet: ValueNoise::new(stream(seed, 60)),
-            massifs: Fbm::new(stream(seed, 61)),
-            reach: ValueNoise::new(stream(seed, 62)),
-            peaks: Fbm::new(stream(seed, 63)),
-            spurs: Fbm::new(stream(seed, 64)),
-            sides: ValueNoise::new(stream(seed, 65)),
-            behind: Fbm::new(stream(seed, 66)),
-            belt: ValueNoise::new(stream(seed, 68)),
-            crags: Fbm::new(stream(seed, 67)),
-            lines: Fbm::new(stream(seed, 70)),
-            patches: ValueNoise::new(stream(seed, 71)),
+            feet: ValueNoise::new(scope.seed("feet")),
+            massifs: Fbm::new(scope.seed("massifs")),
+            reach: ValueNoise::new(scope.seed("reach")),
+            peaks: Fbm::new(scope.seed("peaks")),
+            spurs: Fbm::new(scope.seed("spurs")),
+            sides: ValueNoise::new(scope.seed("sides")),
+            behind: Fbm::new(scope.seed("behind")),
+            belt: ValueNoise::new(scope.seed("belt")),
+            crags: Fbm::new(scope.seed("crags")),
+            lines: Fbm::new(scope.seed("lines")),
+            patches: ValueNoise::new(scope.seed("patches")),
         }
     }
 
@@ -193,6 +194,17 @@ impl Ranges {
     }
 }
 
+/** Part of the relief, so holding no land: drawn over all of it. */
+impl Domain for Ranges {
+    fn holds_land(&self) -> bool {
+        false
+    }
+
+    fn layers(self: Rc<Self>, ground: &Rc<Sloped>, _: Holding) -> Vec<Layer> {
+        layers(self, ground.clone())
+    }
+}
+
 /**
  * What covers the ground above the treeline: alpine meadows, then a belt
  * of scree and rock, snow above the snowline where it is not too steep to
@@ -200,7 +212,7 @@ impl Ranges {
  * scree under them; painted over whatever the domains under it drew, down
  * the faces they show.
  */
-pub fn layers(ranges: Rc<Ranges>, ground: Rc<Sloped>) -> Vec<Layer> {
+fn layers(ranges: Rc<Ranges>, ground: Rc<Sloped>) -> Vec<Layer> {
     let bounds = ground.clone();
     let sea = sea(ground.clone());
     let surface = Field::columns("mountains", 0.8, Op::Paint, move |x, z, spacing| {
