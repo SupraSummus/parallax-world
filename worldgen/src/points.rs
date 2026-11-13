@@ -261,7 +261,9 @@ impl Points {
                     "points {}: the cell {size} wide at {corner:?} holds a point of mark {m}, but its children weigh nothing",
                     self.name
                 );
-                let h = hash64(self.seed, corner[0] ^ size, corner[1] ^ ((m as i64) << 48), corner[2] ^ ((j as i64) << 32));
+                // Its own hash: keyed by its corner XOR its width, the first pick of a root's child shared the root's count's,
+                // and sent the child's first point to its last leaf wherever the root held any.
+                let h = hash64(hash64(self.seed, size, m as i64, j as i64), corner[0], corner[1], corner[2]);
                 let mut pick = ((h as u128 * total as u128) >> 64) as Fixed;
                 let child = weight.iter().position(|w| {
                     pick -= w;
@@ -632,6 +634,20 @@ mod tests {
         let (f, d) = (expect(4096.0 * 4096.0 - pi * 9e4, 0.125), expect(pi * 8e4, 0.25));
         assert!((field as f64 / f - 1.0).abs() < 0.02, "{field} in the field, expected {f}");
         assert!((disc as f64 / d - 1.0).abs() < 0.1, "{disc} on the disc, expected {d}");
+    }
+
+    #[test]
+    fn a_roots_leaves_hold_alike_where_their_chances_are() {
+        // Every leaf of a root a chance of ⅛, over 4096² at four seeds: about 2048 points at each leaf's place in its root.
+        let mut at = [0.0; 16];
+        for seed in 0..4 {
+            let p = Points::new("even", seed, &[0, 2], 16, 64, 1, |_| [fx(0.125), Fx::ZERO, Fx::ZERO, Fx::ZERO]);
+            for spot in p.points_in([0, 0, 0], [4096, 1, 4096]) {
+                at[(spot.leaf[0].rem_euclid(64) / 16 + spot.leaf[2].rem_euclid(64) / 16 * 4) as usize] += 1.0;
+            }
+        }
+        let mean = at.iter().sum::<f64>() / 16.0;
+        assert!(at.iter().all(|n| (n / mean - 1.0).abs() < 0.08), "{at:?}");
     }
 
     #[test]

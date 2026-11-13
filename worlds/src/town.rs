@@ -10,6 +10,7 @@
 
 use std::rc::Rc;
 
+use worldgen::domain::{Domain, Scope, eased};
 use worldgen::frame::{Frame, Part, U, V, W, back, walls};
 use worldgen::generator::{
     ANY_SIZE, About, Anchors, Child, Children, Far, Field, FieldValues, Fill, Kind, Layer, Node, Op, Population, SOLID, Shape, Shapes,
@@ -17,8 +18,8 @@ use worldgen::generator::{
 };
 use worldgen::grid::Box3;
 use worldgen::kinds;
-use worldgen::noise::{Fx, Rng, ease_towards, fx, hash64, stream};
-use worldgen::plan::{Claims, Land, Plan, Sloped};
+use worldgen::noise::{Fx, Rng, ease_towards, fx, hash64};
+use worldgen::plan::{Claims, Holding, Plan, Sloped};
 use worldgen::units::{Units, m};
 
 use crate::forest::{self, K as F, Relief, Species, make_tree};
@@ -388,8 +389,8 @@ impl Towns {
      * from spots within half a cell of it, at the mean height of the
      * valley floor under it.
      */
-    pub fn new(seed: u64, relief: Rc<Relief>) -> Towns {
-        let s = stream(seed, 30);
+    pub fn new(scope: &Scope, relief: Rc<Relief>) -> Towns {
+        let s = scope.seed("towns");
         let plan = Rc::new(Claims::new("towns", s, CLAIM, APART, Some([0, FIRST]), move |[x, z], random| {
             let mut town = if [x, z] == [0, FIRST] {
                 // The first, which the contract's regions look at: two blocks a side, four rows, a fountain, its church east.
@@ -439,26 +440,31 @@ impl Towns {
         ease_towards(route, Units(t.x).to_fx(), Units::m(60.0), Units((z - t.z).abs() - t.half_z() - t.ring()))
     }
 
-    /** The town's bid for column (x, z): ahead inside its streets, behind a few metres out. */
-    pub fn bid(&self, x: i64, z: i64) -> Fx {
-        let most = fx(4.0);
-        self.near(z).map_or(-most, |t| ((Units::m(4.0) - t.distance(x, z)).to_fx() / Units::m(8.0)).clamp(-most, most))
-    }
-
-    /** `ground`, with its fraction, levelled to the town's streets, all the way under it and easing back over TERRACE. */
-    pub fn terraced(&self, x: i64, z: i64, ground: Fx) -> Fx {
-        let Some(t) = self.near(z) else { return ground };
-        ease_towards(ground, Units(t.level).to_fx(), TERRACE, t.distance(x, z))
-    }
-
     /** How far column (x, z) is from the nearest town (negative inside); far if none. */
     pub fn distance(&self, x: i64, z: i64) -> Units {
         self.near(z).map_or(Units(i64::MAX / 4), |t| t.distance(x, z))
     }
 }
 
-/** The town's layers: its streets' surface, and the towns, both only where it owns the land (domain `me` of `land`). */
-pub fn layers(towns: Rc<Towns>, land: Rc<Land>, me: usize, ground: Rc<Sloped>) -> Vec<Layer> {
+impl Domain for Towns {
+    /** Ahead inside its streets, behind a few metres out. */
+    fn bid(&self, x: i64, z: i64) -> Fx {
+        let most = fx(4.0);
+        self.near(z).map_or(-most, |t| ((Units::m(4.0) - t.distance(x, z)).to_fx() / Units::m(8.0)).clamp(-most, most))
+    }
+
+    /** To the town's streets, all the way under it and easing back over TERRACE. */
+    fn shape(&self, x: i64, z: i64, _: Fx) -> Option<(Fx, Fx)> {
+        self.near(z).and_then(|t| eased(Units(t.level).to_fx(), TERRACE, t.distance(x, z)))
+    }
+
+    /** Its streets' surface, and the towns, both only where it owns the land. */
+    fn layers(self: Rc<Self>, ground: &Rc<Sloped>, hold: Holding) -> Vec<Layer> {
+        layers(self, hold, ground.clone())
+    }
+}
+
+fn layers(towns: Rc<Towns>, hold: Holding, ground: Rc<Sloped>) -> Vec<Layer> {
     let surface = {
         let (towns, surface_ground) = (towns.clone(), ground.clone());
         Field {
@@ -469,7 +475,7 @@ pub fn layers(towns: Rc<Towns>, land: Rc<Land>, me: usize, ground: Rc<Sloped>) -
                 axis: 1,
                 spans: Box::new(move |x, z, spacing| {
                     let spot = towns.spot(x, z);
-                    if spot == Spot::Outside || !land.owns(me, x, z) {
+                    if spot == Spot::Outside || !hold.owns(x, z) {
                         return Vec::new();
                     }
                     let h = surface_ground.at(x, z);

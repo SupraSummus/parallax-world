@@ -8,6 +8,7 @@ use std::rc::Rc;
 use worldgen::World;
 use worldgen::column::{self, lowest_around};
 use worldgen::curve::Curve;
+use worldgen::domain::{Domain, Lie, Scope, compose};
 use worldgen::generator::{
     ANY_SIZE, Child, Far, Field, Fill, Generator, Layer, Line, Node, Op, Point, Population, Shadows, Shape, Span, ball, bounds_of_shapes,
     capsule, ellipsoid, lathe,
@@ -15,8 +16,8 @@ use worldgen::generator::{
 use worldgen::grid::Box3;
 use worldgen::js::{self, round};
 use worldgen::kinds;
-use worldgen::noise::{Fbm, Fx, Rng, ValueNoise, fx, hash, hash64, smoothstep, stream, unit};
-use worldgen::plan::{Plan, Sloped};
+use worldgen::noise::{Fbm, Fx, Rng, ValueNoise, fx, hash, hash64, smoothstep, unit};
+use worldgen::plan::{Holding, Plan, Sloped};
 use worldgen::points::{Blur, MARKS, Points, Room, Rooms, Spot};
 use worldgen::units::{UNIT_SIZE, Units, m};
 
@@ -204,12 +205,12 @@ pub struct Relief {
 }
 
 impl Relief {
-    pub fn new(seed: u64) -> Relief {
+    pub fn new(scope: &Scope) -> Relief {
         Relief {
-            phase: unit(hash(stream(seed, 1), 0, 0, 0)) * 100.0,
-            hills: Fbm::new(stream(seed, 2)),
-            bumps: ValueNoise::new(stream(seed, 3)),
-            far: Fbm::new(stream(seed, 9)),
+            phase: unit(hash(scope.seed("phase"), 0, 0, 0)) * 100.0,
+            hills: Fbm::new(scope.seed("hills")),
+            bumps: ValueNoise::new(scope.seed("bumps")),
+            far: Fbm::new(scope.seed("far")),
         }
     }
 
@@ -232,42 +233,53 @@ impl Relief {
 }
 
 /**
- * What the forest grows on, decided outside it when it shares its land:
- * the ground's height, the path, and its share of each column (a
- * fraction), which thins whatever it grows.
+ * The forest, a domain on ground decided outside it: it grows along
+ * `path`, kept clear around `spawn`, thinned by its share of each column
+ * and by `thinning` (a fraction, none by default).
  */
-pub struct Ground {
-    pub ground: Rc<Sloped>,
-    pub path: Rc<Path>,
-    pub share: Rc<dyn Fn(i64, i64) -> Fx>,
+pub struct Forest {
+    scope: Scope,
+    path: Rc<Path>,
+    spawn: [i64; 3],
+    thinning: Rc<dyn Fn(i64, i64) -> Fx>,
 }
 
-impl Ground {
-    /** The valley alone: the relief along its own path, all of it the forest's. */
-    pub fn alone(relief: Rc<Relief>) -> Ground {
-        let path = {
-            let relief = relief.clone();
-            Rc::new(Path::new(move |z| relief.path_x(z)))
-        };
-        let ground = {
-            let path = path.clone();
-            let plan = Plan::new("ground", GROUND_SCALE, move |x, z| relief.ground(x, z, path.across(x, z)).round_units().0);
-            Rc::new(Sloped::new(Rc::new(plan), SLOPE))
-        };
-        Ground { ground, path, share: Rc::new(|_, _| Fx::ONE) }
+impl Forest {
+    pub fn new(scope: Scope, path: Rc<Path>, spawn: [i64; 3]) -> Forest {
+        Forest { scope, path, spawn, thinning: Rc::new(|_, _| Fx::ONE) }
     }
 
-    /** On the path at z, `above` units over the ground, on a site. */
-    pub fn on_path(&self, z: i64, above: i64) -> [i64; 3] {
-        let x = self.path.x(z).round_units().0;
-        let y = self.ground.at(x, z) + above;
-        [x, y + ((x + y + z) & 1), z]
+    /** Thinned by `thinning` too, a fraction kept: at the treeline, by the sea. */
+    pub fn thinned(self, thinning: impl Fn(i64, i64) -> Fx + 'static) -> Forest {
+        Forest { thinning: Rc::new(thinning), ..self }
     }
+}
+
+impl Domain for Forest {
+    fn layers(self: Rc<Self>, ground: &Rc<Sloped>, hold: Holding) -> Vec<Layer> {
+        let thinning = self.thinning.clone();
+        let share = Rc::new(move |x, z| hold.share(x, z) * thinning(x, z));
+        layers(&self.scope, Ground { ground: ground.clone(), path: self.path.clone(), share }, self.spawn)
+    }
+}
+
+/** On `path` at z, `above` units over `ground`, on a site: where a camera starts. */
+pub fn on_path(ground: &Sloped, path: &Path, z: i64, above: i64) -> [i64; 3] {
+    let x = path.x(z).round_units().0;
+    let y = ground.at(x, z) + above;
+    [x, y + ((x + y + z) & 1), z]
+}
+
+/** What the forest grows on: the ground's height, the path, and its share of each column (a fraction), which thins whatever it grows. */
+struct Ground {
+    ground: Rc<Sloped>,
+    path: Rc<Path>,
+    share: Rc<dyn Fn(i64, i64) -> Fx>,
 }
 
 /** The forest's state shared by its layers: what it knows about any column, from the seed and its ground alone. */
-struct Forest {
-    seed: u64,
+struct Woods {
+    scope: Scope,
     spawn: [i64; 3],
     ground: Ground,
     columns: Plan<Column>,
@@ -306,9 +318,9 @@ fn column_of(n: &Noise, path: &Path, x: i64, z: i64, h: i64, steep: bool) -> Col
     Column { height: h, surface, conifer, density, on_path }
 }
 
-impl Forest {
-    fn s(&self, k: u64) -> u64 {
-        stream(self.seed, k)
+impl Woods {
+    fn s(&self, what: &str) -> u64 {
+        self.scope.seed(what)
     }
 
     /** Ground height in units. */
@@ -328,7 +340,7 @@ impl Forest {
     /** A spot on the ground picked evenly under a column of cells, the same for every population of its N. */
     fn spot(&self, line: &Line) -> Point {
         let [i, k] = line.across;
-        line.pick(&mut Rng::new(hash64(self.s(19), line.n, i, k)), |x, z| self.ground(x, z))
+        line.pick(&mut Rng::new(hash64(self.s("spots"), line.n, i, k)), |x, z| self.ground(x, z))
     }
 
     /** The chance a square 4 m wide around column (x, z) holds a tree. */
@@ -348,11 +360,11 @@ impl Forest {
 
     /** How tall the tree at a point grows (units): of the point alone, so its neighbours know it too. */
     fn height(&self, x: i64, z: i64, mark: usize) -> f64 {
-        height(SPECIES[mark], unit(hash(self.s(23), x, z, mark as i64)))
+        height(SPECIES[mark], unit(hash(self.s("heights"), x, z, mark as i64)))
     }
 
     /** The rooms of the trees at `points`: by their heights, as light favours the taller (`weight`). */
-    fn rooms(self: &Rc<Forest>, points: Rc<Points>) -> Rooms {
+    fn rooms(self: &Rc<Woods>, points: Rc<Points>) -> Rooms {
         let f = self.clone();
         Rooms::new(points, TREE_REACH, MOST, GAPS, move |s| weight(f.height(s.at[0], s.at[2], s.mark)))
     }
@@ -367,7 +379,7 @@ impl Forest {
     fn leaf_chances(&self, x: i64, z: i64) -> [Fx; 3] {
         let c = self.column(x, z);
         let chance = self.tree_chance(x, z, &c) / 4;
-        Forest::species_chances(&c).map(|sp| chance * sp)
+        Woods::species_chances(&c).map(|sp| chance * sp)
     }
 }
 
@@ -407,22 +419,34 @@ struct Measured {
 /** The stands trees are measured in for the canopy: as dense as the chance of a tree in a square 4 m wide. */
 const STANDS: [f64; 4] = [0.0, 0.2, 0.4, 0.6];
 
-/** The forest of `seed`. */
+/** The forest of `seed`, alone on the relief, all of it its own. */
 pub fn forest(seed: u64) -> World {
-    let ground = Ground::alone(Rc::new(Relief::new(seed)));
+    let world = Scope::new(seed);
+    let relief = Rc::new(Relief::new(&world.of("relief")));
+    let path = {
+        let relief = relief.clone();
+        Rc::new(Path::new(move |z| relief.path_x(z)))
+    };
+    let ground = Lie::new(move |x, z| relief.ground(x, z, (Units(x).to_fx() - relief.path_x(z)).abs())).ground(GROUND_SCALE, SLOPE);
     // Start on the path at the near end, at about the height of a tall shrub.
-    let spawn = ground.on_path(vox(-31.0) as i64, vox(3.0) as i64);
-    let generator = Generator { kinds: KINDS.to_vec(), seed: stream(seed, 4), layers: layers(seed, ground, spawn) };
-    World { generator, spawn, heights: HEIGHTS, points: Vec::new() }
+    let spawn = on_path(&ground, &path, vox(-31.0) as i64, vox(3.0) as i64);
+    let forest: Rc<dyn Domain> = Rc::new(Forest::new(world.of("forest"), path, spawn));
+    let layers = compose(&[forest], &ground, GROUND_SCALE, Fx::ONE);
+    World {
+        generator: Generator { kinds: KINDS.to_vec(), seed: world.seed("layers"), layers },
+        spawn,
+        heights: HEIGHTS,
+        points: Vec::new(),
+    }
 }
 
 /** The forest's layers on `ground`, kept clear around `spawn`; their kinds are KINDS, first in the generator's. */
-pub fn layers(seed: u64, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
+fn layers(scope: &Scope, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
     let noise = Noise {
-        conifer: Fbm::new(stream(seed, 5)),
-        density: Fbm::new(stream(seed, 6)),
-        path_edge: ValueNoise::new(stream(seed, 7)),
-        floor: ValueNoise::new(stream(seed, 8)),
+        conifer: Fbm::new(scope.seed("conifer")),
+        density: Fbm::new(scope.seed("density")),
+        path_edge: ValueNoise::new(scope.seed("path's edge")),
+        floor: ValueNoise::new(scope.seed("floor")),
     };
     let columns = {
         let (heights, path) = (ground.ground.clone(), ground.path.clone());
@@ -435,7 +459,7 @@ pub fn layers(seed: u64, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
         })
     };
     let on = ground.ground.clone();
-    let f = Rc::new(Forest { seed, spawn, ground, columns });
+    let f = Rc::new(Woods { scope: scope.clone(), spawn, ground, columns });
 
     // The ground: along each column, soil or stone under a layer of its surface, and stone down to the bottom.
     let terrain = {
@@ -460,14 +484,14 @@ pub fn layers(seed: u64, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
     let tree_top = vox(26.0) as i64;
     let points = {
         let f = f.clone();
-        Rc::new(Points::new("trees", f.s(20), &[0, 2], tree_leaf, vox(8.0) as i64, 3, move |[x, _, z]| {
+        Rc::new(Points::new("trees", f.s("trees"), &[0, 2], tree_leaf, vox(8.0) as i64, 3, move |[x, _, z]| {
             let [spruce, birch, oak] = f.leaf_chances(x, z);
             [spruce, birch, oak, Fx::ZERO]
         }))
     };
     // What each slab of each species' trees adds to their shadow, and where around their cells they hide what
     // from above, measured from samples drawn at level 2 (the canopy's from level 4 on), by spacing.
-    let sample_seed = f.s(17);
+    let sample_seed = f.s("stands");
     let shadows = Rc::new(OnceCell::new());
     let measured = Rc::new(RefCell::new(HashMap::<i64, Rc<Measured>>::new()));
     let blurred = points.clone();
@@ -571,7 +595,7 @@ pub fn layers(seed: u64, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
             // Of a species picked by how much their crowns hide from above, each slab its bark as often as the
             // sites of its trees' slab are wood, and else one of its foliage's colours, as often as its trees have
             // it: of one colour, all oaks were orange from afar.
-            let species = pick_species(Fx::fraction(hash(f.s(18), x, z, 0)), &over.map(|o| fx(o / hidden)));
+            let species = pick_species(Fx::fraction(hash(f.s("canopy species"), x, z, 0)), &over.map(|o| fx(o / hidden)));
             let sp = SPECIES.iter().position(|s| *s == species).expect("a species");
             let height = f.column(x, z).height;
             let mut spans = Vec::new();
@@ -579,8 +603,8 @@ pub fn layers(seed: u64, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
                 let shadow = (0..3).fold(0.0, |sum, sp| sum + own[sp] * slabs[sp][i] + rest * over[sp] / hidden * above[sp][i]);
                 if shadow > 0.0 {
                     let (from, to) = (height + from, height + from + spacing);
-                    let bark = unit(hash(f.s(21), x, i as i64, z)) < wood[sp][i];
-                    let kind = k(if bark { bark_of(species) } else { foliage(species, unit(hash(f.s(22), x, i as i64, z))) });
+                    let bark = unit(hash(f.s("canopy bark"), x, i as i64, z)) < wood[sp][i];
+                    let kind = k(if bark { bark_of(species) } else { foliage(species, unit(hash(f.s("canopy foliage"), x, i as i64, z))) });
                     spans.push(Span { from, to, kind, extinction: Some(per_area * shadow / spacing as f64) });
                 }
             }
@@ -658,9 +682,9 @@ pub fn layers(seed: u64, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
                     let c = f.column(xi, zi);
                     let (x, y, z) = (xi as f64, (c.height + 1) as f64, zi as f64);
                     // Rarer as the forest's share falls: as dense as it is.
-                    let r = Fx::fraction(hash(f.s(15), xi, zi, 0));
+                    let r = Fx::fraction(hash(f.s("plants"), xi, zi, 0));
                     let r = if share >= Fx::ONE { r } else { r / share.max(Fx::EPSILON) };
-                    let random = &mut Rng::new(hash64(f.s(16), xi, zi, 0));
+                    let random = &mut Rng::new(hash64(f.s("plants, randomly"), xi, zi, 0));
                     if c.on_path {
                         if r < fx(0.05) {
                             shapes.push(Shape::cuboid([x, y, z], [x + 2.0, y + 1.0, z + 1.0], K::stone));

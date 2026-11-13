@@ -10,28 +10,21 @@
 
 use std::rc::Rc;
 
+use worldgen::domain::{Domain, Lie, Scope, compose};
 use worldgen::generator::{Generator, KindDef};
-use worldgen::noise::{Fx, fx, stream};
-use worldgen::plan::{Bid, Land, Plan, Sloped};
+use worldgen::noise::{Fx, fx};
+use worldgen::plan::Plan;
 use worldgen::units::{Units, m};
 use worldgen::world::{Find, World};
 
-use crate::fields;
-use crate::forest::{self, GROUND_SCALE, Ground, Relief};
+use crate::fields::{self, Fields};
+use crate::forest::{self, Forest, GROUND_SCALE, Relief};
 use crate::landmarks::{self, Landmark, Landmarks};
-use crate::moor::{self, Moorland, Uplands};
+use crate::moor::{self, Moor, Moorland, Uplands};
 use crate::mountains::{self, Ranges};
 use crate::path::Path;
 use crate::railway::{self, Railway, Structure};
 use crate::town::{self, Towns};
-
-/** The domains, by their index in the land. */
-const FOREST: usize = 0;
-const TOWN: usize = 1;
-const FIELDS: usize = 2;
-const LANDMARKS: usize = 3;
-const MOOR: usize = 4;
-const RAILWAY: usize = 5;
 
 /**
  * The most the valley's ground rises or falls from a column to the next,
@@ -41,22 +34,32 @@ const RAILWAY: usize = 5;
 const SLOPE: i64 = 8;
 
 /**
- * The valley's lie of the land before landmarks shape it: the relief
- * and the ranges along the path, levelled under the towns. Functions of
- * position, read by its plans and by coarse plans that can't read the
- * fine ground plan (where landmarks stand).
+ * The valley's lie of the land before what is built on it shapes it: its
+ * first two bands, the relief and the ranges along the path, then
+ * levelled under the towns. A function of position, read by the plans of
+ * what is built, coarse ones too, which can't read the fine ground plan.
  */
 pub struct Terrain {
-    pub relief: Rc<Relief>,
+    lie: Lie,
+    relief: Rc<Relief>,
     pub ranges: Rc<Ranges>,
     pub towns: Rc<Towns>,
 }
 
 impl Terrain {
-    pub fn new(seed: u64) -> Terrain {
-        let relief = Rc::new(Relief::new(seed));
-        let towns = Rc::new(Towns::new(seed, relief.clone()));
-        Terrain { relief, ranges: Rc::new(Ranges::new(seed)), towns }
+    /** The terrain of the valley `world`. */
+    pub fn new(world: &Scope) -> Terrain {
+        let relief = Rc::new(Relief::new(&world.of("relief")));
+        let ranges = Rc::new(Ranges::new(&world.of("mountains")));
+        let towns = Rc::new(Towns::new(&world.of("towns"), relief.clone()));
+        let lie = {
+            let (relief, ranges, towns) = (relief.clone(), ranges.clone(), towns.clone());
+            Lie::new(move |x, z| {
+                let from_path = (Units(x).to_fx() - towns.street_x(z, relief.path_x(z))).abs();
+                relief.ground(x, z, from_path) + ranges.height(x, z, from_path)
+            })
+        };
+        Terrain { lie: lie.shaped(vec![towns.clone()]), relief, ranges, towns }
     }
 
     /** The path's centre line at z, with its fraction, bent onto each town's main street. */
@@ -64,41 +67,35 @@ impl Terrain {
         self.towns.street_x(z, self.relief.path_x(z))
     }
 
-    /** The ground at (x, z), with its fraction, `from_path` off the path's centre line. */
-    pub fn ground_by(&self, x: i64, z: i64, from_path: Fx) -> Fx {
-        self.towns.terraced(x, z, self.relief.ground(x, z, from_path) + self.ranges.height(x, z, from_path))
-    }
-
     /** The ground at (x, z), with its fraction. */
     pub fn ground(&self, x: i64, z: i64) -> Fx {
-        self.ground_by(x, z, (Units(x).to_fx() - self.path_x(z)).abs())
+        self.lie.at(x, z)
     }
 }
 
-/** The valley of `seed`; the camera starts in the forest, on the path to the first town. */
+/**
+ * The valley of `seed`, its domains in bands: the relief and the ranges,
+ * then the towns, which level it; then the railway, the landmarks and
+ * the moor, which shape what the towns left; then those that only draw
+ * on it, the forest and the fields. The camera starts in the forest, on
+ * the path to the first town.
+ */
 pub fn valley(seed: u64) -> World {
-    let terrain = Rc::new(Terrain::new(seed));
+    let world = Scope::new(seed);
+    let terrain = Rc::new(Terrain::new(&world));
     let (ranges, towns) = (terrain.ranges.clone(), terrain.towns.clone());
-    let railway = Rc::new(Railway::new(seed, terrain.clone()));
-    let landmarks = Rc::new(Landmarks::new(seed, terrain.clone(), railway.clone()));
+    let railway = Rc::new(Railway::new(&world.of("railway"), terrain.clone()));
+    let landmarks = Rc::new(Landmarks::new(&world.of("landmarks"), terrain.clone(), railway.clone()));
     // No moor from behind the spawn to past the first town: the contract's regions are there.
-    let uplands = Rc::new(Uplands::new(seed, terrain.clone(), landmarks.clone(), railway.clone(), [m(-200.0), m(500.0)]));
-    let moorland = Rc::new(uplands.moorland(stream(seed, 82)));
+    let uplands = Rc::new(Uplands::new(&world.of("uplands"), terrain.clone(), landmarks.clone(), railway.clone(), [m(-200.0), m(500.0)]));
+    let moorland = Rc::new(uplands.moorland(&world.of("moor")));
     let points = points(&terrain, &landmarks, &moorland, &railway);
     let path = {
         let terrain = terrain.clone();
         Rc::new(Path::new(move |z| terrain.path_x(z)))
     };
-    // The valley's ground along the path, rising into the ranges, levelled under the towns, cut and filled by the railway,
-    // shaped by landmarks and the moor.
-    let ground = {
-        let (path, landmarks, moorland, railway) = (path.clone(), landmarks.clone(), moorland.clone(), railway.clone());
-        let plan = Plan::new("ground", GROUND_SCALE, move |x, z| {
-            let ground = railway.shaped(x, z, terrain.ground_by(x, z, path.across(x, z)));
-            landmarks.shaped(x, z, moorland.shaped(x, z, ground)).round_units().0
-        });
-        Rc::new(Sloped::new(Rc::new(plan), SLOPE))
-    };
+    let moor = Rc::new(Moor::on(uplands, moorland, path.clone()));
+    let ground = terrain.lie.shaped(vec![railway.clone(), landmarks.clone(), moor.clone()]).ground(GROUND_SCALE, SLOPE);
     let slope = {
         let ground = ground.clone();
         let step = 16;
@@ -107,45 +104,23 @@ pub fn valley(seed: u64) -> World {
             Units(rise).to_fx() / Units(2 * step)
         }))
     };
-    // The forest bids nothing: it has what the others don't outbid it for.
-    let bids: Vec<Bid> = vec![
-        Box::new(|_, _| Fx::ZERO),
-        {
-            let towns = towns.clone();
-            Box::new(move |x, z| towns.bid(x, z))
-        },
-        Box::new(fields::bid(seed, towns.clone(), slope)),
-        {
-            let landmarks = landmarks.clone();
-            Box::new(move |x, z| landmarks.bid(x, z))
-        },
-        Box::new(move |x, z| uplands.bid(x, z)),
-        {
-            let railway = railway.clone();
-            Box::new(move |x, z| railway.bid(x, z))
-        },
-    ];
-    let land = Rc::new(Land::new(town::BID_SCALE, fx(0.125), bids));
-
+    let spawn = forest::on_path(&ground, &path, m(-31.0), m(3.0));
     // Thinning out to the treeline, and to the sea.
-    let share = {
-        let (land, ranges, ground) = (land.clone(), ranges.clone(), ground.clone());
-        Rc::new(move |x, z| {
+    let forest = {
+        let (ranges, ground) = (ranges.clone(), ground.clone());
+        Forest::new(world.of("forest"), path.clone(), spawn).thinned(move |x, z| {
             let h = ground.at(x, z);
-            land.share(FOREST, x, z) * ranges.below_treeline(x, z, h) * mountains::dry(h)
+            ranges.below_treeline(x, z, h) * mountains::dry(h)
         })
     };
-    let forest_ground = Ground { ground: ground.clone(), path: path.clone(), share };
-    let spawn = forest_ground.on_path(m(-31.0), m(3.0));
-    let mut layers = forest::layers(seed, forest_ground, spawn);
-    layers.extend(town::layers(towns, land.clone(), TOWN, ground.clone()));
-    layers.extend(fields::layers(seed, land.clone(), FIELDS, ground.clone(), path.clone()));
-    layers.extend(landmarks::layers(landmarks, land.clone(), LANDMARKS, ground.clone()));
-    let moor = moor::Ground { ground: ground.clone(), land: Some((land.clone(), MOOR)), path: Some(path), under: false };
-    layers.extend(moor::layers(moorland, moor));
-    layers.extend(mountains::layers(ranges, ground.clone()));
-    layers.extend(railway::layers(railway, land, RAILWAY, ground));
-    World { generator: Generator { kinds: kinds(), seed: stream(seed, 4), layers }, spawn, heights: mountains::HEIGHTS, points }
+    let fields = {
+        let scope = world.of("fields");
+        let bid = fields::round_towns(&scope, towns.clone(), slope);
+        Fields::new(scope, path, bid)
+    };
+    let domains: [Rc<dyn Domain>; 7] = [Rc::new(forest), towns, Rc::new(fields), landmarks, moor, ranges, railway];
+    let layers = compose(&domains, &ground, town::BID_SCALE, fx(0.125));
+    World { generator: Generator { kinds: kinds(), seed: world.seed("layers"), layers }, spawn, heights: mountains::HEIGHTS, points }
 }
 
 /** The valley's kinds, each domain's after those of the domains it draws from; the moor alone has them too. */

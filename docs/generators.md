@@ -371,6 +371,7 @@ Broken rules panic, naming the thing and pointing here:
   siblings have unique names;
   a measured far form starts at a `detail` of a unit or more.
 - **Plans.** A plan reads only plans at least as coarse (see "Bands").
+- **Pulls.** A band's pulls on a column add up to all of it at most (see "Ground").
 - **Curves.** A curve's point stays within its level's `wander`;
   only points a query looks at are checked,
   so derive `wander` from the most a rule can stray.
@@ -411,7 +412,11 @@ bright on dark, the palette that hides the least:
 a world's colours can only hide what breaks there.
 
 The survey asks every layer of the generator around spawn,
-drawing no voxels.
+drawing no voxels;
+one drawing nothing there is asked around each place the world names, in turn,
+so a feature too rare to be near spawn at every seed
+(the valley's tunnels) is checked where the world says it is,
+and only a layer drawing nowhere is silent.
 Things come apart into parts no wider than a region (`REGION`),
 named by their children's names, numbers left out (`towns › block › house`);
 a dense population is surveyed over a smaller square than a sparse one (`PARTS`).
@@ -621,11 +626,24 @@ show a change leaves generation as it was.
 ## Composing
 
 A world as large as the valley is **domains**
-(the forest, `town.rs`, `fields.rs`, `landmarks.rs`, `moor.rs`, `railway.rs`):
-modules of plans and layers that never call each other.
+(the forest, `town.rs`, `fields.rs`, `landmarks.rs`, `moor.rs`, `railway.rs`,
+the mountains): blocks of plans and layers that never call each other.
 They meet only through plans coarser than their own,
-through the land they bid for, and through things they share.
+through the land they bid for, the ground they shape,
+and through things they share.
 Each part below is an experiment in how far that goes.
+
+A domain is a `Domain` (`worldgen/src/domain.rs`),
+made with what it reads, all of it coarser than itself.
+It bids for each column (`bid`, "Land"),
+pulls the ground there (`shape`, "Ground"),
+and draws its layers by its hold on the land (`layers`).
+A world is a list of domains and the bands of ground they shape;
+`compose` makes their land and layers.
+So one domain serves several worlds:
+the forest grows alone, in the valley and in the learned town.
+Each part draws its seeds from its name (`Scope`: `forest:conifer`),
+so no two share one by chance, whatever is added.
 
 ### Bands
 
@@ -664,15 +682,17 @@ and the towns and fields draw only the columns they own.
 The forest bids nothing: it has what no one outbids it for.
 A domain added later is seen by the others only as a smaller share:
 adding the fields changed neither the forest nor the towns.
-Relief is not a domain:
+`compose` hands each domain its hold (`Holding`):
+its share and whether it owns a column, never an index into the land.
+Relief holds no land (`holds_land`):
 the valley's mountains (`mountains.rs`) raise the ground all of them stand on,
 massifs and passes along it, crests, spurs and side valleys across,
-and end the forest by its share at a treeline,
+and end the forest at a treeline (`Forest::thinned`),
 where a field paints meadows, scree, rock and snow by height, slope and hollows.
 Quantities want blends of their own, though.
 A town levels the ground 120 m past its streets,
 far beyond the metres in which it gives way to fields,
-so the ground blends by the town's own terrace weight, not by shares.
+so the ground blends by the town's own pull, not by shares ("Ground").
 
 A domain can't place what it builds whole, a hut or a pool, by the shares:
 they are a finer band than its places,
@@ -681,6 +701,24 @@ So the moor bids from position alone,
 and places its steadings and pools only where it surely owns the land:
 where its bid leads the most any other may bid there
 by more than the land's width.
+
+### Ground
+
+The ground is made in **bands** (`Lie`), coarse to fine,
+each a function of the column, kept nowhere,
+so plans of any scale may read it.
+A band is the one before pulled by its domains (`Lie::shaped`):
+each towards a height of its own, which may depend on the band under it,
+as hard as it says, a fraction (`Domain::shape`).
+A rule: the pulls on a column add up to all of it at most,
+so the band is the same in any order and no domain undoes another's work.
+So domains of one band keep apart
+(the landmarks and the moor's pools keep off the railway and each other).
+A domain reads only the bands it was made with.
+The valley's are the relief and the ranges,
+then the towns' terraces (`valley::Terrain`),
+then the railway, the landmarks and the moor;
+the last, kept by plan, is the ground layers stand on (`Lie::ground`).
 
 ### Claims
 
@@ -1043,3 +1081,5 @@ and without them rays slipped in at a cliff's corners.
   `Claims` keep things of one plan apart ("Claims" in "Composing"),
   and rooms things of one `Points` ("Rooms");
   populations' anchors could claim the same way, against each other's.
+  So could domains' things: towns, landmarks and steadings
+  claim apart and keep off each other by asking (`fits`, `Uplands::lead`).

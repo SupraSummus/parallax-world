@@ -14,12 +14,13 @@
 use std::rc::Rc;
 
 use worldgen::column::Column;
+use worldgen::domain::{Domain, Scope, eased};
 use worldgen::frame::{Frame, Part, facing, walls};
 use worldgen::generator::{ANY_SIZE, Child, Field, Fill, Kind, Layer, Node, Op, Population, SOLID};
 use worldgen::js;
 use worldgen::kinds;
-use worldgen::noise::{Fx, Rng, ValueNoise, ease_towards, fx, hash64, stream};
-use worldgen::plan::{Claims, Land, Plan, Sloped};
+use worldgen::noise::{Fx, Rng, ValueNoise, fx, hash64};
+use worldgen::plan::{Claims, Holding, Plan, Sloped};
 use worldgen::units::{Units, m};
 
 use crate::forest::K as F;
@@ -216,8 +217,7 @@ impl Landmark {
  * falling off past that, whichever is further.
  */
 const fn within_near(most: [i64; 2], clearing: Units) -> bool {
-    let past = if TERRACE.0 > clearing.0 + FADE.0 { TERRACE.0 } else { clearing.0 + FADE.0 };
-    let r = NEAR - past;
+    let r = NEAR - past(clearing);
     r >= 0 && (most[0] / 2).pow(2) + (most[1] / 2).pow(2) <= r * r
 }
 
@@ -231,6 +231,11 @@ const _: () = {
     }
     assert!(within_near(Landmark::Chapel.spec().most, FIRST_CLEARING) && CELL <= NEAR && 2 * NEAR <= APART);
 };
+
+/** How far past its footprint a landmark's ground reaches: the ground it eases back, or its clearing and its bid falling off. */
+const fn past(clearing: Units) -> i64 {
+    if TERRACE.0 > clearing.0 + FADE.0 { TERRACE.0 } else { clearing.0 + FADE.0 }
+}
 
 /** A landmark where it stands: its centre (x, z), the top of the ground under it, its footprint and quarter turns. */
 #[derive(Clone, Copy, Default, Debug)]
@@ -296,9 +301,13 @@ fn fits(terrain: &Terrain, railway: &Railway, site: &Site) -> bool {
         let path = terrain.path_x(z).round_units().0;
         (path - cx).abs() - hx >= m(3.5)
     });
-    // Its footprint's edge, every 2 m, and its middle.
+    // Its footprint's edge, every 2 m along each of its four sides, and its middle.
     let (nx, nz) = (hx / m(1.0), hz / m(1.0));
-    let edge = (-nx..=nx).flat_map(|i| [(i, -nz), (i, nz)]).chain((-nz..=nz).flat_map(|j| [(-nx, j), (nx, j)])).step_by(2).chain([(0, 0)]);
+    let edge = (-nx..=nx)
+        .step_by(2)
+        .flat_map(|i| [(i, -nz), (i, nz)])
+        .chain((-nz..=nz).step_by(2).flat_map(|j| [(-nx, j), (nx, j)]))
+        .chain([(0, 0)]);
     let mut points = edge.map(|(i, j)| (cx + i * m(1.0), cz + j * m(1.0)));
     let clear = site.clearing + Units::m(4.0);
     off_path
@@ -432,10 +441,10 @@ pub struct Landmarks {
 }
 
 impl Landmarks {
-    /** The landmarks of `seed` on `terrain`, clear of `railway`, the first a chapel by the path ahead of the camera. */
-    pub fn new(seed: u64, terrain: Rc<Terrain>, railway: Rc<Railway>) -> Landmarks {
+    /** The landmarks on `terrain`, clear of `railway`, the first a chapel by the path ahead of the camera. */
+    pub fn new(scope: &Scope, terrain: Rc<Terrain>, railway: Rc<Railway>) -> Landmarks {
         let sites = {
-            let (terrain, s) = (terrain.clone(), stream(seed, 70));
+            let (terrain, s) = (terrain.clone(), scope.seed("sites"));
             let first = levelled(&terrain, first(&terrain, &mut Rng::new(hash64(s, 0, 0, 0))));
             Claims::new("landmarks", s, CLAIM, APART, Some(first.centre), move |spot, random| {
                 if spot == first.centre {
@@ -444,7 +453,7 @@ impl Landmarks {
                 claim(&terrain, &railway, spot, random).map(|site| (site.centre, site))
             })
         };
-        Landmarks { terrain, sites, patches: ValueNoise::new(stream(seed, 71)), reeds: ValueNoise::new(stream(seed, 72)) }
+        Landmarks { terrain, sites, patches: ValueNoise::new(scope.seed("patches")), reeds: ValueNoise::new(scope.seed("reeds")) }
     }
 
     /**
@@ -463,33 +472,14 @@ impl Landmarks {
         .unwrap_or_else(|| panic!("no {landmark:?} within {ROWS} rows either way"))
     }
 
+    /** Whether the ground of the landmark nearest column (x, z) reaches within `margin` of it: what keeps off them asks. */
+    pub fn reaches(&self, x: i64, z: i64, margin: i64) -> bool {
+        self.sites.near(x, z, NEAR + margin).is_some_and(|(_, s)| s.outside(x, z).0 < past(s.clearing) + margin)
+    }
+
     /** The landmark reaching column (x, z), if any: its centre within NEAR. */
     pub fn site(&self, x: i64, z: i64) -> Option<Site> {
         self.sites.near(x, z, NEAR).map(|(_, s)| s)
-    }
-
-    /** The valley's `ground` at (x, z), with its fraction, shaped by the landmark there: levelled under it, easing back over TERRACE. */
-    pub fn shaped(&self, x: i64, z: i64, ground: Fx) -> Fx {
-        let Some(s) = self.site(x, z) else { return ground };
-        let d = s.outside(x, z);
-        if d >= TERRACE {
-            return ground;
-        }
-        let level = ease_towards(ground, Units(s.level).to_fx(), TERRACE, d);
-        match s.landmark.spec().shaping {
-            Shaping::Bowl => level - (Fx::ONE - s.bowl(x, z)).max(Fx::ZERO) * Units(POND_DEPTH),
-            Shaping::Level(_) => level,
-        }
-    }
-
-    /** Its bid for column (x, z): ahead over a landmark's footprint and clearing, never on the path. */
-    pub fn bid(&self, x: i64, z: i64) -> Fx {
-        let most = fx(4.0);
-        let Some(s) = self.site(x, z) else { return -most };
-        if (Units(x).to_fx() - self.terrain.path_x(z)).abs() < Fx::m(2.4) {
-            return -most;
-        }
-        ((s.clearing - s.outside(x, z)).to_fx() * most / FADE).clamp(-most, most)
     }
 
     /** What column (x, z) is of the landmark there. */
@@ -529,8 +519,35 @@ impl Landmarks {
     }
 }
 
-/** The landmarks' layers on `ground`, where domain `me` of `land` owns the land: their surface, ponds' water, the landmarks. */
-pub fn layers(landmarks: Rc<Landmarks>, land: Rc<Land>, me: usize, ground: Rc<Sloped>) -> Vec<Layer> {
+impl Domain for Landmarks {
+    /** Ahead over a landmark's footprint and clearing, never on the path. */
+    fn bid(&self, x: i64, z: i64) -> Fx {
+        let most = fx(4.0);
+        let Some(s) = self.site(x, z) else { return -most };
+        if (Units(x).to_fx() - self.terrain.path_x(z)).abs() < Fx::m(2.4) {
+            return -most;
+        }
+        ((s.clearing - s.outside(x, z)).to_fx() * most / FADE).clamp(-most, most)
+    }
+
+    /** To the landmark there: level under it, easing back over TERRACE, a pond's bowl dug into it. */
+    fn shape(&self, x: i64, z: i64, _: Fx) -> Option<(Fx, Fx)> {
+        let s = self.site(x, z)?;
+        let (level, how_hard) = eased(Units(s.level).to_fx(), TERRACE, s.outside(x, z))?;
+        let dug = match s.landmark.spec().shaping {
+            Shaping::Bowl => (Fx::ONE - s.bowl(x, z)).max(Fx::ZERO) * Units(POND_DEPTH),
+            Shaping::Level(_) => Fx::ZERO,
+        };
+        Some((level - dug, how_hard))
+    }
+
+    /** Their surface where they own the land, ponds' water, the landmarks. */
+    fn layers(self: Rc<Self>, ground: &Rc<Sloped>, hold: Holding) -> Vec<Layer> {
+        layers(self, hold, ground.clone())
+    }
+}
+
+fn layers(landmarks: Rc<Landmarks>, hold: Holding, ground: Rc<Sloped>) -> Vec<Layer> {
     let spots = {
         let landmarks = landmarks.clone();
         Rc::new(Plan::dithered("landmark spots", SPOT_SCALE, move |x, z| landmarks.spot(x, z)))
@@ -540,7 +557,7 @@ pub fn layers(landmarks: Rc<Landmarks>, land: Rc<Land>, me: usize, ground: Rc<Sl
         let on = ground.clone();
         Field::columns("landmarks' ground", 0.55, Op::Paint, move |x, z, spacing| {
             let spot = spots.at(x, z);
-            if spot == Spot::Off || !land.owns(me, x, z) {
+            if spot == Spot::Off || !hold.owns(x, z) {
                 return Vec::new();
             }
             let kind: Kind = match spot {

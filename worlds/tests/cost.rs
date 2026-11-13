@@ -24,6 +24,7 @@ const OVER_BUDGET: &[(&str, &str, u32)] = &[
     ("valley", "region2", 3),
     ("valley", "spawn", 8),
     ("valley", "region1", 8),
+    ("valley", "region4", 8),
     ("valley", "region5", 8),
 ];
 
