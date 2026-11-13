@@ -1,12 +1,12 @@
 //! Each solid the engine draws (a tube's pieces are capsules, or cones
-//! where its radius changes) keeps the contract (worldgen::contract) to the levels its case names, wherever
+//! where its radius changes) keeps the contract (worldgen::checks::contract) to the levels its case names, wherever
 //! it falls against the sites: many of one case, of sizes and places
 //! drawn at random, on a ground.
 //! Bright on dark, as small shares of a bright colour differ the most in
 //! sRGB, so a world's palette can only hide what breaks here.
 
 use worldgen::World;
-use worldgen::contract::{Measure, margins, whole_equals_parts};
+use worldgen::checks::contract::{Measure, margins, whole_equals_parts};
 use worldgen::curve::Curve;
 use worldgen::generator::{
     ANY_SIZE, Field, Generator, KindDef, Layer, Node, Op, Point, Population, SOLID, Shape, Span, ball, capsule, cuboid, ellipsoid, gable,

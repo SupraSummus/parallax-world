@@ -390,9 +390,9 @@ and fields from position alone.
 
 ## Checks
 
-`worldgen::contract` (`worldgen/src/contract.rs`) checks a world
+`worldgen::checks::contract` (`worldgen/src/checks/contract.rs`) checks a world
 in regions holding everything it is made of around spawn,
-which it finds itself (`worldgen::survey`, `survey.rs`), not from a list:
+which it finds itself (`worldgen::checks::survey`, `survey.rs`), not from a list:
 `worlds/tests/contract.rs` runs it for each world in `WORLDS`
 at seed 42 and three more, a thread each,
 and `worldgen/tests/contract.rs` for test worlds of fog, caves,
@@ -497,7 +497,7 @@ in shares of material types.
 A world's layout must not follow the grids it is generated on:
 a town placed once per region, kept inside it,
 is never where two regions meet.
-`worldgen::places` (`places.rs`) checks that things prefer no places.
+`worldgen::checks::places` (`places.rs`) checks that things prefer no places.
 It gathers each population's things over 16 km around spawn at eight seeds,
 from columns of cells in patches anywhere
 (a cell's anchor finds the thing of the cell it is in,
@@ -526,7 +526,7 @@ Its own may be anything: up, a heading, a valley along z.
 But about the vertical the lattice, square noise and tiles are four-fold,
 and leave a four-fold harmonic of horizontal directions
 at the lattice's phase, the same at every seed.
-`worldgen::directions` (`directions.rs`) measures it
+`worldgen::checks::directions` (`directions.rs`) measures it
 in pairs of points a few metres apart, in random directions,
 from how often the two differ in kind;
 seeds are the samples (Student's t, its chance over all the tests under 10⁻³).

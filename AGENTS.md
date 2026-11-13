@@ -76,7 +76,8 @@ worldgen/                    # The world-generation engine, moving to integers, 
 │   ├── js.rs                # Float math the same on every target (libm), named after JS's Math
 │   ├── noise.rs, grid.rs    # Integer hashes, random numbers, fixed point (Fx) and noise; voxel-grid.ts's bricks, each site's alpha, and the voxels it shows
 │   ├── units.rs             # UNIT_SIZE: metres per lattice unit; whole Units, typed apart from Fx
-│   ├── generator.rs         # The framework: shapes, nodes, fields, populations, drawing any box at any level
+│   ├── generator.rs         # The framework: nodes, fields, populations, the model worlds are written in
+│   ├── generator/           # generate.rs: any box at any level, of forms.rs: a node's near and far forms (measured), of drawables.rs: fields, shapes (shapes.rs, the solids) or sites drawn; things.rs: the things populations make
 │   ├── build.rs             # Short forms to write worlds with: constructors of fields, populations, nodes, solid shapes
 │   ├── column.rs            # A heightfield's spans, each tall enough to keep a site at every level; its slopes' sides closed
 │   ├── plan.rs              # Plans by column, each from coarser ones only; heights with a slope, their range anywhere; land domains bid for; claims, things kept apart anywhere
@@ -87,10 +88,11 @@ worldgen/                    # The world-generation engine, moving to integers, 
 │   ├── picture.rs           # Pictures of a world at one level: rays through its voxels, as PNGs, or through its sites' alpha
 │   ├── light.rs             # Light (a prototype, for look and native's computed lighting): sky, sun and what glows, each level's from coarser levels'; held to light/reference.rs, rays traced through level 0
 │   ├── cost.rs              # What generating costs: work counted by layer, reported for a world's tiles, against a baseline
-│   ├── places.rs            # Whether things prefer places: positions modulo periods, as on a grid, over seeds
-│   ├── directions.rs        # Whether a world's directions follow the lattice's: four-fold harmonics of pairs' directions, over seeds
-│   ├── survey.rs            # What a world is made of: its layers asked around spawn, things taken apart, strata to check
-│   └── contract.rs          # The contract every world keeps, as checks for tests, in regions holding every stratum: rays see each site by its alpha, its colour and glow
+│   └── checks/              # Checks of worlds, for tests
+│       ├── contract.rs      # The contract every world keeps, in regions holding every stratum: rays see each site by its alpha, its colour and glow
+│       ├── survey.rs        # What a world is made of: its layers asked around spawn, things taken apart, strata to check
+│       ├── places.rs        # Whether things prefer places: positions modulo periods, as on a grid, over seeds
+│       └── directions.rs    # Whether a world's directions follow the lattice's: four-fold harmonics of pairs' directions, over seeds
 ├── data/light-reference.txt # The reference's light in light.rs's test scenes, written by its test reference_values
 └── tests/                  # contract.rs: the engine on test worlds (fog, caves, a village, knobs on a wall), what it refuses; shapes.rs: each solid, to the levels it keeps the contract
 worlds/                      # The worlds, on worldgen's public API only; the web's WebAssembly

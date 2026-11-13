@@ -19,7 +19,7 @@ use crate::generator::{Generator, Layer, Whole, checking_skipped, generate, mate
 use crate::grid::{ALPHA, Box3, VoxelGrid, is_site};
 use crate::noise::Rng;
 use crate::picture::{Camera, FACES, Seen, Tiles, composite_in, composited, nearest_site};
-use crate::survey::{Survey, survey};
+use crate::checks::survey::{Survey, survey};
 use crate::units::m;
 
 fn b(min_x: i64, min_y: i64, min_z: i64, max_x: i64, max_y: i64, max_z: i64) -> Box3 {
@@ -720,7 +720,7 @@ fn fields_of(mut world: World) -> World {
 
 /**
  * The widest region the contract checks in (32 m), along any axis: each
- * holds places of strata (worldgen::survey), as many as fit.
+ * holds places of strata (worldgen::checks::survey), as many as fit.
  */
 pub const REGION: i64 = m(32.0);
 
@@ -761,7 +761,7 @@ impl Checked {
         let holds = |strata: &[String], k: &str| strata.iter().any(|s| s.contains(k));
         let mut broken = self.broken.clone();
         if self.complete && !self.silent.is_empty() {
-            broken.push(format!("{} draw nothing around spawn (worldgen::survey): too far from it, or not at all", self.silent.join(", ")));
+            broken.push(format!("{} draw nothing around spawn (worldgen::checks::survey): too far from it, or not at all", self.silent.join(", ")));
         }
         for (_, strata, breaks) in &self.regions {
             if !breaks.is_empty() && !known.iter().any(|k| holds(strata, k)) {

@@ -1,7 +1,7 @@
 //! No world's things prefer places on the grids it is generated on
-//! (worldgen::places): a test each world, its seeds on threads.
+//! (worldgen::checks::places): a test each world, its seeds on threads.
 
-use worldgen::places::preferences;
+use worldgen::checks::places::preferences;
 use worlds::WORLDS;
 
 /** The seeds things are gathered at. */

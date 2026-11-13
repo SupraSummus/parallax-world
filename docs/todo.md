@@ -38,7 +38,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   against 0.002 to 0.02 at level 0, and the tower's plaster 0.03 to 0.04,
   against none.
   Measured far forms count what a thing hides along each axis
-  by pairs of neighbouring columns, as rays meet voxels (`pairs` in `generator.rs`);
+  by pairs of neighbouring columns, as rays meet voxels (`pairs` in `generator/forms.rs`);
   counted by columns, walls and rails hid a half to two thirds as much,
   which offset this: since, at level 4 against level 2,
   rays get through about 0.005 less often around houses
@@ -355,7 +355,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   the places of the costliest strata.
   Then `Region` would go.
 - **Things' variants of one part, drawing the same kinds, are one stratum**
-  (`worldgen::survey`): a ruin and a watchtower, both of stone,
+  (`worldgen::checks::survey`): a ruin and a watchtower, both of stone,
   are checked in one region between them.
   Naming a landmark's node by its variant, as towns name their children,
   would part them; or the survey could count which code drew each part.
@@ -420,7 +420,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   though one of a column just read costs a fraction
   of one among claims making their keys.
 - **The places check finds few things of sparse populations**
-  (`worldgen/src/places.rs`):
+  (`worldgen/src/checks/places.rs`):
   it asks COLUMNS cells at most,
   and finds a claimed thing only from those within its reach.
   The valley's landmarks: 118 at eight seeds (not 686 as one per region),
