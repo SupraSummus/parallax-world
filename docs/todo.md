@@ -263,8 +263,6 @@ Numbers are for the forest at 1280×800, as measured when written.
     as much as that voxel does: 1‰ of extinction lets all through, not 93 %
     (the voxels' medium test, run on slabs).
     They read the compositor's globals, the faces' views.
-  - The world packs every tile for the voxels' GPU (`voxels::words`),
-    whichever engine draws: the voxels could pack theirs as they upload.
 - **`culling_on_the_gpu_leaves_the_picture_unchanged` fails now and then**
   on an Intel UHD (Mesa), at `b4c79ff` too; why is open.
   Maybe as it failed on lavapipe by the moor's mist:

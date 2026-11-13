@@ -52,11 +52,10 @@ fn heights(world: &worldgen::World) -> Heights {
     std::array::from_fn(|level| world.heights_at(level as u32))
 }
 
-/** A generated tile: its voxels, where they are along each face's layers, and its bricks and, lit, their light as the GPU takes them (voxels.rs). */
+/** A generated tile: its voxels, where they are along each face's layers, and for the voxels engine (voxels.rs), the cells its bricks meet and, lit, their light as the GPU takes it. */
 pub struct Tile {
     pub grid: Arc<Grid>,
     pub index: LayerIndex,
-    pub words: Vec<u32>,
     /** voxels::meets. */
     pub meets: Vec<u32>,
     /** If lit, voxels::lights. */
@@ -183,7 +182,7 @@ fn work(make: Make, seed: u64, heights: &Heights, queue: &(Mutex<Queue>, Condvar
                 let (_, light) =
                     light.get_or_insert_with(|| (lighting, Light::new(make(seed), shared.expect("light to light tiles with"))));
                 let lights = Some(voxels::lights(&tile.grid, level as u32, light));
-                Tile { grid: tile.grid.clone(), index: tile.index.clone(), words: tile.words.clone(), meets: tile.meets.clone(), lights }
+                Tile { grid: tile.grid.clone(), index: tile.index.clone(), meets: tile.meets.clone(), lights }
             }
             None => {
                 let (heights, key) = (heights[level], id.map(i64::from));
@@ -192,8 +191,8 @@ fn work(make: Make, seed: u64, heights: &Heights, queue: &(Mutex<Queue>, Condvar
                     None => Arc::new(make_tile(&generator, level as u32, heights, key)),
                 };
                 let index = LayerIndex::new(&grid);
-                let (words, meets) = (voxels::words(&grid), voxels::meets(&grid));
-                Tile { grid, index, words, meets, lights: None }
+                let meets = voxels::meets(&grid);
+                Tile { grid, index, meets, lights: None }
             }
         };
         if send.send((level, id, lighting, Arc::new(tile))).is_err() {
@@ -275,9 +274,8 @@ impl World {
         }
         for (level, tiles) in self.tiles.iter_mut().enumerate() {
             for tile in tiles.values_mut().filter(|t| t.lights.is_some()) {
-                let Tile { grid, index, words, meets, .. } = &**tile;
-                *tile =
-                    Arc::new(Tile { grid: grid.clone(), index: index.clone(), words: words.clone(), meets: meets.clone(), lights: None });
+                let Tile { grid, index, meets, .. } = &**tile;
+                *tile = Arc::new(Tile { grid: grid.clone(), index: index.clone(), meets: meets.clone(), lights: None });
             }
             self.levels[level] = Arc::new(Level::new(tiles.clone()));
         }
