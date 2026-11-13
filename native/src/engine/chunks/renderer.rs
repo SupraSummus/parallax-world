@@ -66,8 +66,6 @@ pub struct Frame {
 pub struct Stats {
     /** Chunks in view to bake, nearest first. */
     pub wanted: Vec<Request>,
-    /** The grid levels the frame's chunks read, whether they have tiles yet or not. */
-    pub levels: [bool; GRID_LEVELS],
     /** Tiles that cells in view read and the world has not made, by grid level, most wanted first. */
     pub tiles: Vec<(usize, TileId)>,
 }
@@ -309,7 +307,7 @@ impl Renderer {
                 }
                 let d = distance(&cell, eye);
                 match seen {
-                    Seen::Unknown | Seen::Empty => return,
+                    Seen::Unknown | Seen::Empty => (),
                     &mut Seen::Tiles(t) => {
                         tiles.extend(tiles_in(t).filter(|&id| !source.grids.has(id)).map(|id| (level, id, d)));
                     }
@@ -329,7 +327,6 @@ impl Renderer {
                         }
                     }
                 }
-                stats.levels[level] = true;
             });
         }
         missing.sort_by(|a, b| a.1.total_cmp(&b.1));

@@ -83,6 +83,28 @@ impl Lod {
     }
 
     /**
+     * How far from the eye, in grid `grid`'s sites, the chunks drawn of it
+     * to `far` (world units) ahead read it, whichever way the eye turns; none
+     * if no level draws from it. A ray of a face meets each cell drawn, and
+     * all the chunk reads (chunk_reads) is ahead of the eye no deeper than
+     * its far side, and off the ray no more than its width across. A point
+     * of a ray, or ahead of one, is at most √2 times as far as it is ahead:
+     * as many sites as layers (LAYER).
+     */
+    pub fn grid_reach(&self, grid: usize, far: f64) -> Option<f64> {
+        // An eye in the layer before a site of every level, or there: where claims begin nearest, and where they go farthest.
+        let eyes = [[0.0; 2], [0.0; 2], [-1.0, 0.0]];
+        (0..=self.top())
+            .filter(|&level| (level - self.shift).max(0) as usize == grid)
+            .filter_map(|level| {
+                let k = *self.layers(level, &eyes, far)?.end() as i32;
+                let (_, min, max) = crate::chunk_reads(&cell(self.shift, level, [k & 1, k & 1, k]));
+                Some(f64::from(max[2]) + (f64::from(max[0] - min[0]) * LAYER).hypot(f64::from(max[1] - min[1])))
+            })
+            .reduce(f64::max)
+    }
+
+    /**
      * The last layer whose cells the level finer than `level` draws, for an
      * eye in layer `eye` (composed's); none at level 0. Its cells hold all
      * that `level`'s cells meeting them hold there: what they hold of cells
@@ -454,6 +476,39 @@ mod tests {
             (met, wrong) = (met + m, wrong + w);
         }
         assert!(met > 1000 && wrong == 0, "{wrong} of {met} crossings to a finer level");
+    }
+
+    #[test]
+    fn the_chunks_of_each_grid_read_it_within_its_reach_and_nearly_as_far() {
+        let rhombus = [-1.0, 1.0, -std::f64::consts::FRAC_1_SQRT_2, std::f64::consts::FRAC_1_SQRT_2];
+        // Some reaching every level as far as Q allows, the coarsest to `far`; some short of the coarser levels.
+        for (shift, q, far) in [(3, 20, 40000.0), (3, 4, 10000.0), (2, 7, 10000.0), (3, 20, 8000.0), (3, 20, 2000.0), (1, 5, 300.0)] {
+            let lod = Lod { shift, q };
+            let mut most = [0.0f64; GRID_LEVELS];
+            for e in 0..6 {
+                let eye = [0.37 * e as f64 - 2.0, 0.21 * (e % 5) as f64 - 0.4, 3.29 * e as f64 - 1.0];
+                let mut picked = lod.pick::<()>(eye.map(|v| [v, v]), far, rhombus, None);
+                lod.composed(&mut picked, eye, rhombus, |cell, _| {
+                    let (g, min, max) = crate::chunk_reads(&cell);
+                    let s = (1i64 << g) as f64;
+                    for corner in 0..8 {
+                        let [a, b, c]: [f64; 3] =
+                            std::array::from_fn(|d| if corner >> d & 1 == 0 { min[d] } else { max[d] } as f64 * s - eye[d]);
+                        most[g] = most[g].max(((a * a + c * c) / 2.0 + b * b).sqrt() / s);
+                    }
+                });
+            }
+            let m = f64::from(1 << shift);
+            for (g, most) in most.into_iter().enumerate() {
+                let reach = lod.grid_reach(g, far);
+                // Short of it by less than the reads' width across, which it adds whole off the ray.
+                let near = reach.is_some_and(|r| most <= r && most > r - 4.0 * m);
+                assert!(
+                    near || reach.is_none() && most == 0.0,
+                    "shift {shift}, Q {q}, far {far}: grid {g} read {most:.0} sites far, its reach {reach:?}"
+                );
+            }
+        }
     }
 
     /** The site of N·FCC nearest point x, in a face's lattice coordinates. */

@@ -7,9 +7,8 @@
 //! world's threads (a generator per thread) and indexed there.
 //! Which tiles, and in what order, is up to the engine drawing them (Wants): every update hands over the tiles it misses for
 //! what is in view, most wanted first, replacing the previous list; then
-//! the rest within reach of the camera of each level it reads (GRID_REACH,
-//! or as far as the voxels engine's rays read, voxels::READ), so that
-//! turning finds them made. Tiles far from the camera are dropped, from
+//! the rest of each level it reads, as far around the camera as it reads
+//! it whichever way it looks (Wants's reach), so that turning finds them made. Tiles far from the camera are dropped, from
 //! the light's (Shared) too. A tile
 //! never changes, so a chunk baked once all the tiles it reads are in
 //! stays right whatever comes after (bake's Tiles). Given light (worldgen's Shared),
@@ -84,13 +83,13 @@ pub enum Lit {
 }
 
 /**
- * What an engine reads of the world: the levels whose tiles it reads, as
- * far around the camera as `reach`, in each level's sites, lit as `lit`
- * says; and, first, the tiles it lacks for what is in view, most wanted first.
+ * What an engine reads of the world: each level's tiles as far around the
+ * camera as it reads them whichever way it looks, `reach`, in the level's
+ * sites (none if it reads none), lit as `lit` says; and, first, the tiles
+ * it lacks for what is in view, most wanted first.
  */
 pub struct Wants {
-    pub levels: [bool; GRID_LEVELS],
-    pub reach: f64,
+    pub reach: [Option<f64>; GRID_LEVELS],
     pub lit: Lit,
     pub tiles: Vec<(usize, TileId)>,
 }
@@ -239,18 +238,15 @@ impl World {
     }
 
     /**
-     * The tiles of the `levels` read within `reach` of the camera, in each
-     * level's sites, not made yet, or not lit yet if `lit` here: what an
-     * engine that reads all around the eye lacks, level by level, nearest
-     * first.
+     * The tiles of each level within its `reach` of the camera, in its
+     * sites, not made yet, or not lit yet if `lit` here: what an engine that
+     * reads all around the eye lacks, level by level, nearest first.
      */
-    pub fn lacking(&self, levels: &[bool; GRID_LEVELS], camera: Vec3, reach: f64, lit: Lit) -> Vec<(usize, TileId)> {
+    pub fn lacking(&self, reach: &[Option<f64>; GRID_LEVELS], camera: Vec3, lit: Lit) -> Vec<(usize, TileId)> {
         let lacks = |level: usize, id: &TileId| self.tiles[level].get(id).is_none_or(|t| lit == Lit::Tiles && t.lights.is_none());
         (0..GRID_LEVELS)
-            .filter(|&level| levels[level])
-            .flat_map(|level| {
-                around(level, camera, reach).into_iter().filter(move |(_, id)| lacks(level, id)).map(move |(_, id)| (level, id))
-            })
+            .flat_map(|level| reach[level].map(|r| (level, around(level, camera, r))))
+            .flat_map(|(level, around)| around.into_iter().filter(move |(_, id)| lacks(level, id)).map(move |(_, id)| (level, id)))
             .collect()
     }
 
@@ -300,16 +296,24 @@ impl World {
     /**
      * Takes the tiles made or lit, drops those far from the camera (lattice
      * units), and has the tiles `wants` names made, most wanted first, then
-     * the rest within its reach of each level it reads, lit as it wants
+     * the rest within its reach of each level, lit as it wants
      * them; then, lit here, has those of the levels read lit. Returns
      * whether any level's tiles changed.
      */
     pub fn update(&mut self, camera: Vec3, wants: &Wants) -> bool {
-        let Wants { levels, reach, lit, tiles: wanted } = wants;
-        let (levels, reach, lit) = (*levels, *reach, *lit);
+        let Wants { reach, lit, tiles: wanted } = wants;
+        let lit = *lit;
         assert!(lit == Lit::Not || self.shared.is_some(), "a world lit with no light");
+        // Lit, every voxel's light comes from each coarser level's around it (worldgen's light.rs): the tiles of every
+        // level near the camera first, the coarsest's, which take longest, before all; then those of the levels coarser
+        // than any read as far as the coarsest read reaches, at their sites' size.
+        let coarsest = (0..GRID_LEVELS).rev().find(|&l| reach[l].is_some());
+        let reach_of = |level: usize| match coarsest {
+            Some(c) if lit != Lit::Not && level > c => reach[c].map(|r| r / (1u64 << (level - c)) as f64),
+            _ => reach[level],
+        };
         // Tiles are made no farther from the camera than `keep` (in the level's sites), and dropped once a tile farther.
-        let keep = reach + 2.0 * TILE as f64;
+        let keep = |level: usize| reach_of(level).unwrap_or(0.0) + 2.0 * TILE as f64;
         let mut changed = [false; GRID_LEVELS];
         let made: Vec<Made> = std::mem::take(&mut self.early).into_iter().chain(self.done.try_iter()).collect();
         let now = {
@@ -327,7 +331,7 @@ impl World {
             self.tiles[level].insert(id, tile);
             changed[level] = true;
         }
-        let far = |level: usize, id: TileId| distance(level, camera, id) > keep + TILE as f64;
+        let far = |level: usize, id: TileId| distance(level, camera, id) > keep(level) + TILE as f64;
         for (level, tiles) in self.tiles.iter_mut().enumerate() {
             let before = tiles.len();
             tiles.retain(|&id, _| !far(level, id));
@@ -340,17 +344,9 @@ impl World {
         let mut list = VecDeque::new();
         let mut listed = HashSet::new();
         let mut add = |tiles: &HashMap<TileId, Arc<Tile>>, level: usize, id: TileId| {
-            if distance(level, camera, id) <= keep && !tiles.contains_key(&id) && listed.insert((level, id)) {
+            if distance(level, camera, id) <= keep(level) && !tiles.contains_key(&id) && listed.insert((level, id)) {
                 list.push_back((level, id, None));
             }
-        };
-        // Lit, every voxel's light comes from each coarser level's around it (worldgen's light.rs): the tiles of every
-        // level near the camera first, the coarsest's, which take longest, before all; then those of the levels coarser
-        // than any read as far as the coarsest read reaches, at their sites' size.
-        let coarsest = (0..GRID_LEVELS).rev().find(|&l| levels[l]);
-        let reach_of = |level: usize| match coarsest {
-            Some(c) if lit != Lit::Not && level > c => Some(reach / (1u64 << (level - c)) as f64),
-            _ => levels[level].then_some(reach),
         };
         if lit != Lit::Not {
             for level in (0..GRID_LEVELS).rev() {
@@ -372,8 +368,9 @@ impl World {
         // picture is lit from the eye out, alike at every level. Rays take the next level where a tile is not lit yet.
         if lit == Lit::Tiles {
             let mut lighting: Vec<(f64, Job)> = (0..GRID_LEVELS)
-                .filter(|&level| levels[level])
-                .flat_map(|level| around(level, camera, reach).into_iter().map(move |(d, id)| (d, level, id)))
+                .flat_map(|level| {
+                    reach[level].map(|r| around(level, camera, r)).unwrap_or_default().into_iter().map(move |(d, id)| (d, level, id))
+                })
                 .filter_map(|(d, level, id)| {
                     let tile = self.tiles[level].get(&id).filter(|t| t.lights.is_none())?;
                     Some((d, (level, id, Some(tile.clone()))))
@@ -405,7 +402,7 @@ mod tests {
     /** The coarsest level's lights, by tile, of `world` lit around the origin. */
     fn lit(world: &mut World) -> Vec<(TileId, Vec<u32>)> {
         let coarsest = GRID_LEVELS - 1;
-        let wants = Wants { levels: std::array::from_fn(|l| l == coarsest), reach: TILE as f64, lit: Lit::Tiles, tiles: Vec::new() };
+        let wants = Wants { reach: std::array::from_fn(|l| (l == coarsest).then_some(TILE as f64)), lit: Lit::Tiles, tiles: Vec::new() };
         loop {
             world.update([0.0; 3], &wants);
             if !world.busy() {

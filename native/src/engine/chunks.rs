@@ -9,7 +9,7 @@ mod bakery;
 pub(super) mod compositor;
 mod renderer;
 
-use bake::slicing::GRID_REACH;
+use bake::lod::Lod;
 use egui_wgpu::wgpu;
 
 use compositor::{Compositor, View};
@@ -37,10 +37,12 @@ impl Engine for Chunks {
         let (frame, stats) = self.renderer.render(look, world);
         self.baking = !stats.wanted.is_empty();
         let lit = if look.sky.is_some() { Lit::Reading } else { Lit::Not };
+        let lod = Lod::new(look.shift, look.detail);
         Frame {
             stats: format!("{} chunks\n{} baking, {} tiles wanted", frame.chunks.len(), stats.wanted.len(), stats.tiles.len()),
             picture: Box::new(Composed { frame, view: View::new(look) }),
-            wants: Wants { levels: stats.levels, reach: GRID_REACH, lit, tiles: stats.tiles },
+            // Whichever way the eye turns.
+            wants: Wants { reach: std::array::from_fn(|g| lod.grid_reach(g, look.far)), lit, tiles: stats.tiles },
             busy: self.baking,
         }
     }

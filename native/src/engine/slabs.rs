@@ -101,7 +101,7 @@ impl Engine for Slabs {
         let size = self.slabs.as_ref().map_or(0.0, |s| s.bytes() as f64 / 1e6);
         // The slabs show no light.
         let view = View { sky: 1.0, ..View::new(look) };
-        let read = params.levels();
+        let reach = params.levels().map(|read| read.then_some(GRID_REACH));
         Frame {
             picture: Box::new(Traced {
                 slabs: self.slabs.clone(),
@@ -112,7 +112,7 @@ impl Engine for Slabs {
                 sky_fog: 1.0 - (-1.0 / look.fog).exp(),
             }),
             // Slabs are baked all around the eye.
-            wants: Wants { levels: read, reach: GRID_REACH, lit: Lit::Not, tiles: world.lacking(&read, look.camera, GRID_REACH, Lit::Not) },
+            wants: Wants { reach, lit: Lit::Not, tiles: world.lacking(&reach, look.camera, Lit::Not) },
             busy: self.baking,
             stats: format!("slabs v{} ({size:.0} MB){}", self.version, if self.baking { ", baking" } else { "" }),
         }

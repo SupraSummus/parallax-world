@@ -41,7 +41,7 @@ use bake::walk::{COLLISION_LEVEL, Ground, WalkInput, Walker};
 use engine::{Colours, Engine, Frame, Kind, Look, Picture};
 use gpu::Easel;
 use view::{Vec3, view_basis};
-use world::{Make, World};
+use world::{Make, TILE, World};
 use worldgen::generator::materials_of;
 use worldgen::light::{Brightness, Shared};
 
@@ -189,9 +189,10 @@ impl window::Content for App {
             let frame = self.engine.frame(look, &self.world);
             self.framing = start.elapsed().as_secs_f64() * 1000.0;
             self.stats = frame.stats;
-            // Drawn from the next frame on. Walking, the ground's level too, whether drawn or not.
+            // Drawn from the next frame on. Walking, the ground's level too, whether drawn or not, a tile around at least.
             let mut wants = frame.wants;
-            wants.levels[COLLISION_LEVEL as usize] |= self.walker.is_some();
+            let ground = &mut wants.reach[COLLISION_LEVEL as usize];
+            *ground = ground.or(self.walker.is_some().then_some(TILE as f64));
             let arrived = self.world.update(look.camera, &wants);
             let pixels = ui.ctx().pixels_per_point();
             self.remember([rect.width() * pixels, rect.height() * pixels]);
@@ -338,7 +339,8 @@ fn stroll(seconds: f64, walk_through: Option<&[bool]>, engine: &mut dyn Engine, 
         let frame = engine.frame(&look, world);
         let framed = Instant::now();
         let mut wants = frame.wants;
-        wants.levels[COLLISION_LEVEL as usize] |= walk_through.is_some();
+        let ground = &mut wants.reach[COLLISION_LEVEL as usize];
+        *ground = ground.or(walk_through.is_some().then_some(TILE as f64));
         world.update(look.camera, &wants);
         let updated = Instant::now();
         let next = easel.draw(&*frame.picture, pixels);

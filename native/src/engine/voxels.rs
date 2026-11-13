@@ -225,11 +225,11 @@ impl Engine for Voxels {
         let levels: Vec<_> = (0..count).map(|l| world.level(l).clone()).collect();
         let tiles: usize = levels.iter().map(|l| l.tiles.len()).sum();
         let lit = if look.sky.is_some() { Lit::Tiles } else { Lit::Not };
-        let read = std::array::from_fn(|l| l < count);
+        let reach = std::array::from_fn(|l| (l < count).then_some(READ));
         Frame {
             picture: Box::new(Scene { levels, palette: world.palette.clone(), look: *look }),
             // Rays read all around the eye.
-            wants: Wants { levels: read, reach: READ, lit, tiles: world.lacking(&read, look.camera, READ, lit) },
+            wants: Wants { reach, lit, tiles: world.lacking(&reach, look.camera, lit) },
             busy: false,
             stats: format!("{tiles} tiles"),
         }
@@ -972,7 +972,8 @@ mod tests {
     /** The tiles of level 0 of the forest of seed 1 around `eye`. */
     fn forest_tiles(eye: Vec3) -> Arc<Level> {
         let mut world = World::new(worlds::by_name("forest").expect("forest").make, 1, None, 4);
-        let wants = Wants { levels: std::array::from_fn(|l| l == 0), reach: bake::slicing::GRID_REACH, lit: Lit::Not, tiles: Vec::new() };
+        let wants =
+            Wants { reach: std::array::from_fn(|l| (l == 0).then_some(bake::slicing::GRID_REACH)), lit: Lit::Not, tiles: Vec::new() };
         loop {
             world.update(eye, &wants);
             if !world.busy() {
@@ -1125,12 +1126,12 @@ mod tests {
         // The voxel a ray is in, wherever it is up to its level's reach, and that voxel's neighbours, whose faces
         // shade it: eyes along a line across a tile, rays every way, balls of any radius.
         let world = World::new(worlds::by_name("forest").expect("forest").make, 1, None, 1);
-        let read = std::array::from_fn(|l| l == 0);
+        let reach = std::array::from_fn(|l| (l == 0).then_some(READ));
         let ways = (0..125).map(|i| [i % 5 - 2, i / 5 % 5 - 2, i / 25 - 2].map(f64::from)).filter(|w| w != &[0.0; 3]);
         for step in 0..TILE * 4 / 3 {
             let t = step as f64 * 0.75;
             let eye = [t, 0.6 * t + 31.3, 0.3 * t - 17.9];
-            let tiles: HashSet<_> = world.lacking(&read, eye, READ, Lit::Not).into_iter().map(|(_, id)| id).collect();
+            let tiles: HashSet<_> = world.lacking(&reach, eye, Lit::Not).into_iter().map(|(_, id)| id).collect();
             for radius in [0, 1, 13, RADIUS] {
                 let ball = Ball { middle: eye_brick(0, eye, [0; 3]), radius };
                 for way in ways.clone() {
