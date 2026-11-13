@@ -1,10 +1,10 @@
 //! The engine on small test worlds: they keep the contract
-//! (worldgen::contract), and the framework refuses what breaks it.
+//! (worldgen::checks::contract), and the framework refuses what breaks it.
 
 use std::rc::Rc;
 
 use worldgen::World;
-use worldgen::contract::{Measure, REGION, Report, check, heights_hold, margins, regions, things_hold, whole_equals_parts};
+use worldgen::checks::contract::{Measure, REGION, Report, check, heights_hold, margins, regions, things_hold, whole_equals_parts};
 use worldgen::generator::{
     ANY_SIZE, Anchors, Child, Children, Field, FieldValues, Generator, KindDef, Layer, Node, Op, Population, SOLID, Shapes, Span, ball,
     cuboid, generate, materials_of, things_in,
@@ -12,7 +12,7 @@ use worldgen::generator::{
 use worldgen::generator::{Cell, Fill, Point};
 use worldgen::grid::Box3;
 use worldgen::plan::Plan;
-use worldgen::survey::survey;
+use worldgen::checks::survey::survey;
 
 static KINDS: &[KindDef] = &[
     KindDef { name: "fog", kind_type: 8, colors: &["#cccccc"], walk_through: false, glows: false, medium: true },

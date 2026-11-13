@@ -1,7 +1,7 @@
-//! No world's directions follow the lattice's (worldgen::directions):
+//! No world's directions follow the lattice's (worldgen::checks::directions):
 //! a test each world, its seeds on threads.
 
-use worldgen::directions::directions;
+use worldgen::checks::directions::directions;
 use worlds::WORLDS;
 
 /** The seeds pairs are sampled at: the samples, so enough for the KNOWN to show. */

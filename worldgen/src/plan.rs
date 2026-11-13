@@ -93,7 +93,7 @@ impl<T: Clone + Default> Plan<T> {
      * is: street, pavement, yard). A line of sites further apart than
      * `scale` reads it at one point of the columns it stands for, the
      * same for every such plan it reads (spread evenly along rows of
-     * lines: generator.rs, draw_field), so each category shows as often
+     * lines: generator/drawables.rs, draw_field), so each category shows as often
      * as it covers, its edges dithered; read where the line is, it would
      * alias. Things read it where they ask.
      */
@@ -501,7 +501,7 @@ mod tests {
         use std::collections::BTreeSet;
 
         use crate::grid::Box3;
-        use crate::places::{SIDE, preference};
+        use crate::checks::places::{SIDE, preference};
         // Things at least 100 apart, where x + z is even (a ground they suit), the first at (5, 5); in cells 64 wide.
         let claims = |seed| Claims::new("claims", seed, 64, 100, Some([5, 5]), |[x, z], _| ((x + z) & 1 == 0).then_some(([x, z], ())));
         let area = Box3 { min: [-SIDE / 2, 0, -SIDE / 2], max: [SIDE / 2, 1, SIDE / 2] };

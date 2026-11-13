@@ -1,9 +1,9 @@
-//! Every world keeps the contract (worldgen::contract) in regions holding
+//! Every world keeps the contract (worldgen::checks::contract) in regions holding
 //! everything it is made of around spawn, at several seeds, and far away
 //! in its registry entry's far regions: a test each, so they run in
 //! parallel, and a thread each seed.
 
-use worldgen::contract::{check, check_far};
+use worldgen::checks::contract::{check, check_far};
 use worlds::{Entry, REGIONS_SEED, WORLDS};
 
 /** The seeds each world is checked at. */
@@ -11,7 +11,7 @@ const SEEDS: &[u64] = &[REGIONS_SEED, 1, 2, 3];
 
 /**
  * Where a world is known to break the contract at a seed: in regions
- * holding a stratum whose name holds this (worldgen::survey). They must
+ * holding a stratum whose name holds this (worldgen::checks::survey). They must
  * still break, so the list only shrinks; each is planned work in
  * docs/todo.md.
  */
@@ -19,7 +19,7 @@ const KNOWN_BREAKS: &[(&str, u64, &str)] = &[];
 
 /**
  * `entry`'s world keeps the contract at each of SEEDS, in regions
- * holding everything it is made of around spawn (worldgen::contract::
+ * holding everything it is made of around spawn (worldgen::checks::contract::
  * regions), generated in parts too at REGIONS_SEED, but KNOWN_BREAKS;
  * and in its far regions at REGIONS_SEED. CONTRACT_ONLY, names of
  * strata separated by commas ("towns › church,railway"), checks only

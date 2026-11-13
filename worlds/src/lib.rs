@@ -47,14 +47,14 @@ pub struct Entry {
     /**
      * Regions with, between them, the costliest of it: where
      * worldgen::cost measures its tiles (tests/cost.rs). The contract
-     * finds its own (worldgen::contract::regions).
+     * finds its own (worldgen::checks::contract::regions).
      */
     pub regions: &'static [Region],
     /** The level up to which it keeps what a camera sees. */
     pub levels: u32,
     /**
      * Wide regions whose fields are seen from above at coarse levels
-     * (worldgen::contract::check_far); only their x and z count.
+     * (worldgen::checks::contract::check_far); only their x and z count.
      */
     pub far: &'static [Region],
     /** The level up to which it keeps what is seen from above, against level 0: at most `levels`. */

@@ -2,7 +2,7 @@
 //! layer of its generator asked over a square around spawn, things taken
 //! apart into parts no wider than a region, sorted into strata: a part or
 //! a field, with a kind it draws. The contract checks a place of every
-//! stratum found (worldgen::contract), however rare, without a list.
+//! stratum found (worldgen::checks::contract), however rare, without a list.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;

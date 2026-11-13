@@ -4,11 +4,10 @@
 //! keeps. The worlds themselves are in worlds/.
 
 pub mod build;
+pub mod checks;
 pub mod column;
-pub mod contract;
 pub mod cost;
 pub mod curve;
-pub mod directions;
 pub mod frame;
 pub mod generator;
 pub mod grid;
@@ -16,10 +15,8 @@ pub mod js;
 pub mod light;
 pub mod noise;
 pub mod picture;
-pub mod places;
 pub mod plan;
 pub mod points;
-pub mod survey;
 pub mod units;
 pub mod world;
 
