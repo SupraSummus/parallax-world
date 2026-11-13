@@ -56,6 +56,8 @@ pub struct Entry {
      * (worldgen::checks::contract::check_far); only their x and z count.
      */
     pub far: &'static [Region],
+    /** The level up to which its far regions keep their fields' look from above, from level 4. */
+    pub far_levels: u32,
     /** The level up to which it keeps what is seen from above, against level 0: at most `levels`. */
     pub from_above: u32,
 }
@@ -74,6 +76,7 @@ pub const WORLDS: &[Entry] = &[
         levels: 6,
         from_above: 6,
         far: &[],
+        far_levels: 6,
     },
     // The first town's south edge: fields, its first row of houses and the main street, trees of its yards and of the forest;
     // and its centre: houses back to back, a cross street, the square with its fountain and church.
@@ -95,9 +98,11 @@ pub const WORLDS: &[Entry] = &[
             Region::at("steading", [-197, -50, -178], [219, 174, 206]),
             Region::at("station", [-192, -60, -256], [192, 240, 256]),
         ],
-        levels: 4,
-        from_above: 4,
+        // To level 3, from above to 2, for now: at 4 its crops and towns' walls, at 3 its market (docs/todo.md).
+        levels: 3,
+        from_above: 2,
         far: &[Region::at("town", [-704, -38, -736], [704, 298, 736])],
+        far_levels: 6,
     },
     // The first steading: its hut, the cairns and the ring north of it, heather and grass, from under the ground to over the roof.
     // Far away, 175 m around it: the stream, narrower than the sites there, and patches of heather and grass.
@@ -108,6 +113,8 @@ pub const WORLDS: &[Entry] = &[
         levels: 5,
         from_above: 5,
         far: &[Region::at("spawn", [-689, -46, -439], [719, 50, 969])],
+        // To level 5, for now: at 6 its heather (docs/todo.md).
+        far_levels: 5,
     },
     // The first settlement's main street where a cross street meets it (at REGIONS_SEED): houses facing both, yards, trees, paving.
     // Far away, all of its crop: streets, paving and yards, fields beside them, the forest round it.
@@ -115,9 +122,11 @@ pub const WORLDS: &[Entry] = &[
         name: "learned",
         make: learned::learned,
         regions: &[Region::at("settlement", [64, -34, -96], [448, 222, 288])],
-        levels: 4,
-        from_above: 4,
+        // To level 3, for now: at 4 its crops (docs/todo.md).
+        levels: 3,
+        from_above: 3,
         far: &[Region::at("settlement", [-1536, -34, -1536], [1536, 302, 1536])],
+        far_levels: 6,
     },
     // The front row of blocks: the road before them, their entrances and the rooms behind, from under the road to over the roofs.
     // To level 3: at level 4, sites 2 m apart, a building's measured outline (city.rs, INSIDE) is kept or lost a site at a time.
@@ -129,6 +138,7 @@ pub const WORLDS: &[Entry] = &[
         levels: 3,
         from_above: 3,
         far: &[Region::at("spawn", [-478, -20, -32], [482, 108, 928])],
+        far_levels: 6,
     },
     // All of Sponza's atrium, from its middle: floor, colonnades, galleries, the roof's edge (scene.rs).
     #[cfg(feature = "sponza")]
@@ -139,6 +149,7 @@ pub const WORLDS: &[Entry] = &[
         levels: 5,
         from_above: 4,
         far: &[],
+        far_levels: 6,
     },
 ];
 

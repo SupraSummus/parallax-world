@@ -154,12 +154,13 @@ struct Ray {
  * What rays see composited, each site by its alpha through what is in
  * front of it, as light does: by material id (of the face a ray enters
  * by), how much of them it stops, 0 what gets through everything; and
- * what glowing sites send them (linear, of a site all of a glowing white).
+ * by material id too, what glowing sites send them (linear, of a site all
+ * of a glowing white).
  */
 #[derive(Clone, Debug, Default)]
 pub struct Seen {
     pub stopped: BTreeMap<u8, f64>,
-    pub glow: [f64; 3],
+    pub glow: BTreeMap<u8, [f64; 3]>,
 }
 
 impl Seen {
@@ -167,12 +168,15 @@ impl Seen {
         if stopped > 0.0 {
             *self.stopped.entry(id).or_default() += stopped;
         }
-        (0..3).for_each(|c| self.glow[c] += glow[c]);
+        if glow != [0.0; 3] {
+            let sum = self.glow.entry(id).or_default();
+            (0..3).for_each(|c| sum[c] += glow[c]);
+        }
     }
 
     fn merge(&mut self, other: Seen) {
         other.stopped.into_iter().for_each(|(id, stopped)| self.add(id, stopped, [0.0; 3]));
-        self.add(0, 0.0, other.glow);
+        other.glow.into_iter().for_each(|(id, glow)| self.add(id, 0.0, glow));
     }
 }
 
@@ -300,8 +304,9 @@ impl Tiles {
                         Some(_) if seen.is_some() => {
                             let (parts, glow) = composite(ray, &tile.grid);
                             let seen = seen.as_mut().expect("composited");
+                            // What glows is the pieces' (as `composited` has it).
+                            seen.add(parts[0].0, 0.0, glow);
                             parts.into_iter().for_each(|(id, stopped)| seen.add(id, stopped, [0.0; 3]));
-                            seen.add(0, 0.0, glow);
                             if ray.through < OPAQUE {
                                 return Step::Miss;
                             }
@@ -501,7 +506,10 @@ pub fn picture_in(generator: &Generator, camera: &Camera, tiles: &mut Tiles) -> 
 pub fn composite_in(generator: &Generator, camera: &Camera, tiles: &mut Tiles) -> Seen {
     let Seen { stopped, glow } = tiled(generator, camera, tiles, true).1;
     let pixels = (camera.width * camera.height) as f64;
-    Seen { stopped: stopped.into_iter().map(|(id, sum)| (id, sum / pixels)).collect(), glow: glow.map(|g| g / pixels) }
+    Seen {
+        stopped: stopped.into_iter().map(|(id, sum)| (id, sum / pixels)).collect(),
+        glow: glow.into_iter().map(|(id, sum)| (id, sum.map(|g| g / pixels))).collect(),
+    }
 }
 
 fn tiled(generator: &Generator, camera: &Camera, tiles: &mut Tiles, composite: bool) -> (Picture, Seen) {

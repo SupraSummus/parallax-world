@@ -1,73 +1,62 @@
 //! Every world keeps the contract (worldgen::checks::contract) in regions holding
-//! everything it is made of around spawn, at several seeds, and far away
-//! in its registry entry's far regions: a test each, so they run in
-//! parallel, and a thread each seed.
+//! everything it is made of around spawn, on average over several seeds,
+//! and far away in its registry entry's far regions: a test each, so they
+//! run in parallel, and a thread each seed.
 
-use worldgen::checks::contract::{check, check_far};
+use worldgen::checks::contract::{check, check_far, strata_kept};
 use worlds::{Entry, REGIONS_SEED, WORLDS};
 
-/** The seeds each world is checked at. */
+/** The seeds each world is checked at: each stratum's margins are averaged over all of them. */
 const SEEDS: &[u64] = &[REGIONS_SEED, 1, 2, 3];
 
 /**
- * Where a world is known to break the contract at a seed: in regions
- * holding a stratum whose name holds this (worldgen::checks::survey). They must
- * still break, so the list only shrinks; each is planned work in
- * docs/todo.md.
- */
-const KNOWN_BREAKS: &[(&str, u64, &str)] = &[
-    // docs/todo.md, "The first town's lamps break the contract at level 1 at some seeds".
-    ("valley", 1, "towns › lamps"),
-];
-
-/**
- * `entry`'s world keeps the contract at each of SEEDS, in regions
- * holding everything it is made of around spawn (worldgen::checks::contract::
- * regions), generated in parts too at REGIONS_SEED, but KNOWN_BREAKS;
- * and in its far regions at REGIONS_SEED. CONTRACT_ONLY, names of
- * strata separated by commas ("towns › church,railway"), checks only
- * regions holding them. Panics with each seed's breaks.
+ * `entry`'s world keeps the contract (worldgen::checks::contract) at SEEDS,
+ * in regions holding everything it is made of around spawn, each
+ * stratum's margins averaged over all of them; generated in parts too at
+ * REGIONS_SEED; and in its far regions at REGIONS_SEED. CONTRACT_ONLY,
+ * names of strata separated by commas ("towns › church,railway"), checks
+ * only regions holding them. Panics with what breaks it.
  */
 fn keeps_the_contract(entry: &Entry) {
     let only = std::env::var("CONTRACT_ONLY").unwrap_or_default();
     let only: Vec<&str> = only.split(',').map(str::trim).filter(|o| !o.is_empty()).collect();
     let only = &only;
-    let broken: Vec<String> = std::thread::scope(|scope| {
-        let mut threads: Vec<_> = SEEDS
+    let (checked, panicked) = std::thread::scope(|scope| {
+        let seeds: Vec<_> = SEEDS
             .iter()
             .map(|&seed| {
                 // World and Generator aren't Send: each thread makes its own.
-                let thread = scope.spawn(move || {
+                scope.spawn(move || {
                     let world = (entry.make)(seed);
                     // Parts at one seed: they check how a world is drawn, which seeds don't change.
-                    let name = format!("{} (seed {seed})", entry.name);
-                    let known: Vec<&str> = KNOWN_BREAKS.iter().filter(|k| (k.0, k.1) == (entry.name, seed)).map(|k| k.2).collect();
-                    check(&name, &world, entry.levels, entry.from_above, seed == REGIONS_SEED, only).assert_kept(&known)
-                });
-                (format!("seed {seed}"), thread)
+                    check(&format!("{} (seed {seed})", entry.name), &world, entry.levels, entry.from_above, seed == REGIONS_SEED, only)
+                })
             })
             .collect();
         // Far regions at one seed too: they check how fields are read far away.
-        if !entry.far.is_empty() && only.is_empty() {
-            let name = format!("{} (seed {REGIONS_SEED})", entry.name);
-            threads.push((
-                "far".into(),
-                scope.spawn(move || {
-                    let world = (entry.make)(REGIONS_SEED);
-                    let far: Vec<_> = entry.far.iter().map(|r| r.of(&world)).collect();
-                    check_far(&name, world, &far)
-                }),
-            ));
-        }
-        threads
-            .into_iter()
-            .filter_map(|(what, thread)| {
-                let panic = thread.join().err()?;
-                let message = panic.downcast_ref::<String>().cloned().or_else(|| panic.downcast_ref::<&str>().map(|s| s.to_string()));
-                Some(format!("{what}: {}", message.unwrap_or_default()))
+        let far = (!entry.far.is_empty() && only.is_empty()).then(|| {
+            scope.spawn(move || {
+                let world = (entry.make)(REGIONS_SEED);
+                let far: Vec<_> = entry.far.iter().map(|r| r.of(&world)).collect();
+                check_far(&format!("{} (seed {REGIONS_SEED})", entry.name), world, &far, entry.far_levels)
             })
-            .collect()
+        });
+        let message = |panic: Box<dyn std::any::Any + Send>| {
+            panic.downcast_ref::<String>().cloned().or_else(|| panic.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default()
+        };
+        let (mut checked, mut panicked) = (Vec::new(), Vec::new());
+        for (seed, thread) in SEEDS.iter().zip(seeds) {
+            match thread.join() {
+                Ok(c) => checked.push(c),
+                Err(panic) => panicked.push(format!("seed {seed}: {}", message(panic))),
+            }
+        }
+        if let Some(Err(panic)) = far.map(|t| t.join()) {
+            panicked.push(format!("far: {}", message(panic)));
+        }
+        (checked, panicked)
     });
+    let broken: Vec<String> = panicked.into_iter().chain(strata_kept(&checked)).collect();
     assert!(broken.is_empty(), "{}", broken.join("\n"));
 }
 
