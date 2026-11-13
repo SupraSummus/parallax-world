@@ -6,8 +6,8 @@
 
 use crate::curve::Curve;
 use crate::generator::{
-    ANY_SIZE, About, Anchors, Cell, Child, Children, Far, Field, FieldValues, Kind, Line, Node, Op, Point, Population, Radius, SOLID,
-    Shape, Shapes, Span, ball, bounds_of_shapes, capsule, cuboid, ellipsoid, gable, lathe, tube,
+    About, Anchors, Cell, Child, Children, Far, Field, FieldValues, Kind, Line, Node, Op, Point, Population, Radius, SOLID, Shape, Shapes,
+    Span, ball, bounds_of_shapes, capsule, cuboid, ellipsoid, gable, lathe, tube,
 };
 use crate::grid::Box3;
 use std::rc::Rc;
@@ -71,8 +71,8 @@ impl Population {
     /**
      * Things in the cells of `cell`·FCC: none until it is given `make`.
      * Each is anchored at its cell's centre unless given an anchor,
-     * reaches nowhere past its cell unless given `reach`, and is made at
-     * every level unless given a `size`.
+     * reaches nowhere past its cell unless given `reach`, and is made
+     * while its cells are at least a site wide (2N) unless given a `size`.
      */
     pub fn new(name: &'static str, order: f64, cell: i64) -> Population {
         Population {
@@ -80,7 +80,7 @@ impl Population {
             order,
             cell,
             reach: [0; 3],
-            size: ANY_SIZE,
+            size: 2 * cell,
             anchor: Anchors::Cells(Box::new(|c| Some(c.centre.map(|v| v as f64)))),
             make: Box::new(|_, _| None),
             far: None,

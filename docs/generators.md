@@ -220,8 +220,12 @@ how many rays get how far, and what they stop on.
   Parts a thing hides, like branches inside a crown, are children with a small `size`:
   drawn on their own, far away they would show.
 - **Populations** make things while sites are at most `size` apart,
-  so a box visits a bounded number of cells at any level;
-  beyond, they draw their `far` field instead:
+  by default as far apart as their cells are wide (2N),
+  so a box visits a bounded number of cells at any level:
+  a tile no more lines of cells than it has columns.
+  Past that, a tile holds four times the cells each level;
+  `ANY_SIZE` draws them there all the same.
+  Beyond `size`, they draw their `far` field instead:
   a medium as dense as their things, by the theory of Boolean models
   (extinction = things per volume · their mean shadow).
   `Shadows` measures it from sample things drawn alone at a level,

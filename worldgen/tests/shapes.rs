@@ -9,7 +9,8 @@ use worldgen::World;
 use worldgen::contract::{Measure, margins, whole_equals_parts};
 use worldgen::curve::Curve;
 use worldgen::generator::{
-    Field, Generator, KindDef, Layer, Node, Op, Point, Population, SOLID, Shape, Span, ball, capsule, cuboid, ellipsoid, gable, lathe, tube,
+    ANY_SIZE, Field, Generator, KindDef, Layer, Node, Op, Point, Population, SOLID, Shape, Span, ball, capsule, cuboid, ellipsoid, gable,
+    lathe, tube,
 };
 use worldgen::grid::Box3;
 use worldgen::noise::{Rng, fx};
@@ -112,8 +113,10 @@ const CASES: &[(&str, i64, Make, u32, u32)] = &[
 /** Many of a case on a ground at y = 0, one anywhere in each cell it stands in. */
 fn world(make: Make, cell: i64) -> World {
     let ground = Field::columns("ground", 0.0, Op::Fill, |_, _, _| [Span { from: -64, to: 0, kind: GROUND, extinction: None }]);
+    // At every level, though cells narrower than the sites cost fourfold a level: how shapes are drawn, to the coarsest.
     let things = Population::new("things", 1.0, cell)
         .reach(32)
+        .size(ANY_SIZE)
         .anchor(|cell| {
             let mut random = cell.random("where");
             let mut at = |c: i64| c as f64 + cell.n as f64 * (random.next() - 0.5);
