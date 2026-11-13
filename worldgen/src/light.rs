@@ -16,8 +16,7 @@
 //! site a small lamp is in glows as bright as the lamp, on average over
 //! its faces.
 
-use std::collections::{BTreeMap, HashMap};
-use std::hash::{BuildHasherDefault, Hasher};
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use fcc::GRID_LEVELS;
@@ -102,27 +101,7 @@ const SUN_DIRECTION: [i64; 3] = [-1, 1, 0];
 /** Radiance of a glowing kind at glow 1, times its colour. */
 const GLOW: f32 = 250.0;
 
-/** A hasher for sites and tiles' keys, as FxHash: a rotate, a xor and a multiply per word; SipHash took much of the light's time. */
-#[derive(Default)]
-struct Fast(u64);
-
-impl Hasher for Fast {
-    fn finish(&self) -> u64 {
-        self.0
-    }
-    fn write(&mut self, bytes: &[u8]) {
-        for chunk in bytes.chunks(8) {
-            let mut word = [0; 8];
-            word[..chunk.len()].copy_from_slice(chunk);
-            self.write_u64(u64::from_le_bytes(word));
-        }
-    }
-    fn write_u64(&mut self, v: u64) {
-        self.0 = (self.0.rotate_left(5) ^ v).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
-    }
-}
-
-type Map<K, V> = HashMap<K, V, BuildHasherDefault<Fast>>;
+type Map<K, V> = fcc::FastMap<K, V>;
 
 /** A level's voxels, generated in tiles as they are needed, and the light found at its sites. */
 struct Level {

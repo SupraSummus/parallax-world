@@ -2,11 +2,41 @@
 //! sees them: the voxel's faces, the view faces' lattices, the levels of
 //! detail a world is held at, the grids of sites generators make and
 //! bakers read (voxel-grid.ts on the web), tiles of grids, the light from
-//! voxels' faces (light.rs). See fcc.ts and docs/architecture.md.
+//! voxels' faces (light.rs); and maps keyed by sites, cells and tiles.
+//! See fcc.ts and docs/architecture.md.
 
 pub mod light;
 
+use std::collections::{HashMap, HashSet};
+use std::hash::{BuildHasherDefault, Hasher};
 use std::sync::Arc;
+
+/**
+ * A hasher for keys of a few integers, sites', cells' and tiles', as
+ * FxHash: a rotate, a xor and a multiply per word; SipHash, the standard
+ * one, took much of the light's time, and of frames' with many cells.
+ */
+#[derive(Default)]
+pub struct Fast(u64);
+
+impl Hasher for Fast {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+    fn write(&mut self, bytes: &[u8]) {
+        for chunk in bytes.chunks(8) {
+            let mut word = [0; 8];
+            word[..chunk.len()].copy_from_slice(chunk);
+            self.write_u64(u64::from_le_bytes(word));
+        }
+    }
+    fn write_u64(&mut self, v: u64) {
+        self.0 = (self.0.rotate_left(5) ^ v).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
+    }
+}
+
+pub type FastMap<K, V> = HashMap<K, V, BuildHasherDefault<Fast>>;
+pub type FastSet<K> = HashSet<K, BuildHasherDefault<Fast>>;
 
 /**
  * The voxel's 12 faces' normals in the world, the offsets of the
