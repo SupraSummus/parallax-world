@@ -1,20 +1,21 @@
 //! The voxels engine: the view as rays through the world's own tiles
 //! (voxels.wgsl), no chunks, nothing baked. A ray goes from voxel to voxel across their faces, each
-//! level up to REACH of its sites from the eye, then on in the next coarser
+//! level as far as its window holds (reach), then on in the next coarser
 //! one. One ray is traced for every FACTOR × FACTOR pixels; each pixel then
 //! takes the nearest of the voxels its four nearest samples met that its
 //! own ray enters. See-through voxels add up along the samples' rays, in
 //! the order met, each by the ray's path through it.
 //!
-//! The GPU holds, of each level, the bricks of a window of WINDOW³ bricks
-//! around the eye, moved brick by brick: a table of their slots in a pool,
-//! a torus (a brick's entry is at its coordinates modulo WINDOW), so that
-//! the window moves without moving the rest. Beside it, which cells of
-//! coarser FCC lattices no voxel meets (CELLS): rays go across those at
-//! once, as across a voxel. Tiles never change once made,
-//! so a brick is uploaded once as it comes into a window, with its tile or
-//! as the window moves, and its slot freed as it leaves. A brick of no tile
-//! yet (or none the pool had room for) is unknown, and rays take the next
+//! The GPU holds, of each level, the bricks of a ball around the eye's
+//! brick (Ball) in a window of WINDOW³ bricks, moved brick by brick: a
+//! table of their slots in a pool, a torus (a brick's entry is at its
+//! coordinates modulo WINDOW), so that the window moves without moving the
+//! rest. The levels' balls share a radius, as large as the pool holds
+//! (Windows). Beside it, which cells of coarser FCC lattices no voxel
+//! meets (CELLS): rays go across those at once, as across a voxel. Tiles
+//! never change once made, so a brick is uploaded once as it comes into a
+//! ball, with its tile or as the ball moves, and its slot freed as it
+//! leaves. A brick of no tile yet is unknown, and rays take the next
 //! coarser level there: what is missing shows coarser, never as a hole.
 //!
 //! Lit, the voxels show the light their tiles found for them (world.rs,
@@ -24,6 +25,7 @@
 //! lit is a new tile in the place of the one made, so its bricks are
 //! uploaded then.
 
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use bake::light::{colour, linear_to_srgb, srgb_to_linear};
@@ -49,15 +51,10 @@ const FACTOR: u32 = 4;
 /** Bytes of bricks the pool holds at most. */
 const POOL_BYTES: u64 = 256 << 20;
 
-/**
- * How far rays go through a level, in its sites, so that its window holds
- * all they read, wherever in its brick the eye is: past where a ray is,
- * the site of the voxel it is in, up to 1 farther each way, and that
- * site's neighbours, 1 farther again, whose faces shade it.
- */
-const REACH: f64 = ((WINDOW / 2 - 1) * BRICK - 2) as f64;
-/** How far around the eye rays read: REACH, then up to 1 to a voxel's site and √2 to its neighbours. */
-const READ: f64 = REACH + 1.0 + std::f64::consts::SQRT_2;
+/** The largest radius of a window's ball (Ball): its bricks, at most RADIUS + 1 from the middle each way, within the window. */
+const RADIUS: i32 = WINDOW / 2 - 2;
+/** How far around the eye rays read, in a level's sites, at most: as far as a ball of RADIUS holds (reach_of). */
+const READ: f64 = (RADIUS * BRICK) as f64;
 
 const TABLE: usize = (WINDOW * WINDOW * WINDOW) as usize;
 /**
@@ -69,11 +66,11 @@ const TABLE: usize = (WINDOW * WINDOW * WINDOW) as usize;
  * it have voxels that meet it or are unknown, a torus as its table:
  * CELLS of the finer scale, then the coarser's (voxels.wgsl's fine and coarse).
  *
- * A cell at the window's edge reaches past it, where the window holds no
- * bricks, and its entry in the torus is also that of the cell a window
- * away, whose bricks in the window only add to its count. So a cell
- * counted hollow holds no voxel the window holds, as a ray stepping voxel
- * by voxel would find: and the window holds all the rays read (REACH).
+ * A cell at the ball's edge reaches past it, where the window's entries
+ * count as their bricks last did, and its entry in the torus is also that
+ * of the cell a window away, whose bricks only add to its count. So a
+ * cell counted hollow holds no voxel the ball holds, as a ray stepping
+ * voxel by voxel would find: and the ball holds all the rays read (reach).
  */
 const SCALES: usize = 2;
 const CELLS: usize = TABLE / 2;
@@ -91,14 +88,25 @@ const UNKNOWN: i32 = -2;
 const SKY_TOP: [f32; 3] = [0x3f as f32 / 255.0, 0x73 as f32 / 255.0, 0xb8 as f32 / 255.0];
 const SKY_HORIZON: [f32; 3] = [0xb9 as f32 / 255.0, 0xd3 as f32 / 255.0, 0xe8 as f32 / 255.0];
 
-/** How far rays read level `level`, in world units, if they reach `far` in all. */
-fn reach(level: usize, far: f64) -> f64 {
-    (REACH * (1u64 << level) as f64).min(far)
+/**
+ * How far rays go through a level, in its sites, so that a window's ball
+ * of `radius` holds all they read, wherever in its brick the eye is: past
+ * where a ray is, the site of the voxel it is in, up to 1 farther each
+ * way, and that site's neighbours, √2 farther again, whose faces shade
+ * it; all within `radius` bricks of the eye's brick, box to box.
+ */
+fn reach_of(radius: i32) -> f64 {
+    ((radius * BRICK) as f64 - 1.0 - std::f64::consts::SQRT_2).max(0.0)
+}
+
+/** How far rays read level `level`, in world units, its window's ball of `radius`, if they reach `far` in all. */
+fn reach(level: usize, radius: i32, far: f64) -> f64 {
+    (reach_of(radius) * (1u64 << level) as f64).min(far)
 }
 
 /** How many levels rays read to reach `far`: up to the first that does, or all. */
 fn levels(far: f64) -> usize {
-    (0..GRID_LEVELS).find(|&l| reach(l, far) >= far).map_or(GRID_LEVELS, |l| l + 1)
+    (0..GRID_LEVELS).find(|&l| reach(l, RADIUS, far) >= far).map_or(GRID_LEVELS, |l| l + 1)
 }
 
 /** The corner, in blocks of scale `j`, of the cell bit `e` of AROUND names around brick `b`. */
@@ -290,22 +298,57 @@ fn entry(b: [i32; 3]) -> usize {
     ((w[2] * WINDOW + w[1]) * WINDOW + w[0]) as usize
 }
 
-/** The corner, in bricks, of the window of `level` around `eye`, the level's bricks starting at `origin`. */
-fn window_corner(level: usize, eye: Vec3, origin: [i32; 3]) -> [i32; 3] {
+/** The brick of a level, its bricks starting at `origin`, that `eye` is in. */
+fn eye_brick(level: usize, eye: Vec3, origin: [i32; 3]) -> [i32; 3] {
     let scale = (1u64 << level) as f64;
-    std::array::from_fn(|d| ((eye[d] / scale - origin[d] as f64) / BRICK as f64).floor() as i32 - WINDOW / 2)
+    std::array::from_fn(|d| ((eye[d] / scale - origin[d] as f64) / BRICK as f64).floor() as i32)
 }
 
-/** The bricks of box [lo, hi) outside the window at `corner`, row by row: as many steps as bricks and rows. */
-fn bricks_outside(lo: [i32; 3], hi: [i32; 3], corner: Option<[i32; 3]>) -> impl Iterator<Item = [i32; 3]> {
+/** How far apart, along an axis, two bricks `d` apart are, box to box, in bricks: squared. */
+fn gap(d: i32) -> i32 {
+    (d.abs() - 1).max(0).pow(2)
+}
+
+/**
+ * The bricks a window holds: those no farther from its middle (the eye's
+ * brick) than its radius, box to box. Up to RADIUS, inside the window
+ * around the middle.
+ */
+#[derive(Clone, Copy, PartialEq, Debug)]
+struct Ball {
+    middle: [i32; 3],
+    radius: i32,
+}
+
+impl Ball {
+    fn contains(&self, b: [i32; 3]) -> bool {
+        (0..3).map(|d| gap(b[d] - self.middle[d])).sum::<i32>() <= self.radius * self.radius
+    }
+
+    /** Its row at `y`, `z`: [from, to), empty if none. */
+    fn row(&self, y: i32, z: i32) -> (i32, i32) {
+        let left = self.radius * self.radius - gap(y - self.middle[1]) - gap(z - self.middle[2]);
+        let w = if left < 0 { return (self.middle[0], self.middle[0]) } else { left.isqrt() + 1 };
+        (self.middle[0] - w, self.middle[0] + w + 1)
+    }
+
+    /** The box [lo, hi) around it. */
+    fn bounds(&self) -> ([i32; 3], [i32; 3]) {
+        (self.middle.map(|v| v - self.radius - 1), self.middle.map(|v| v + self.radius + 2))
+    }
+}
+
+/** The bricks of box [lo, hi) in `ball` and not in `except`, row by row: as many steps as bricks and rows. */
+fn in_ball((lo, hi): ([i32; 3], [i32; 3]), ball: Ball, except: Option<Ball>) -> impl Iterator<Item = [i32; 3]> {
+    let (around, past) = ball.bounds();
+    let (lo, hi): ([i32; 3], [i32; 3]) = (std::array::from_fn(|d| lo[d].max(around[d])), std::array::from_fn(|d| hi[d].min(past[d])));
     (lo[2]..hi[2]).flat_map(move |z| {
         (lo[1]..hi[1]).flat_map(move |y| {
-            // The row's run in the window, skipped.
-            let (from, to) = match corner {
-                Some(c) if (c[2]..c[2] + WINDOW).contains(&z) && (c[1]..c[1] + WINDOW).contains(&y) => (c[0], c[0] + WINDOW),
-                _ => (hi[0], hi[0]),
-            };
-            (lo[0]..from.clamp(lo[0], hi[0].max(lo[0]))).chain(to.clamp(lo[0], hi[0].max(lo[0]))..hi[0]).map(move |x| [x, y, z])
+            let (from, to) = ball.row(y, z);
+            let (from, to) = (from.max(lo[0]), to.min(hi[0]));
+            // The row's run in `except`, skipped.
+            let (a, b) = except.map_or((to, to), |e| e.row(y, z));
+            (from..a.clamp(from, to.max(from))).chain(b.clamp(from, to.max(from))..to).map(move |x| [x, y, z])
         })
     })
 }
@@ -316,55 +359,64 @@ fn tile_bricks(id: TileId, origin: [i32; 3]) -> ([i32; 3], [i32; 3]) {
     (lo, lo.map(|v| v + TILE as i32 / BRICK))
 }
 
-/** The part of box [lo, hi) in the window at `corner`. */
-fn in_window((lo, hi): ([i32; 3], [i32; 3]), corner: [i32; 3]) -> ([i32; 3], [i32; 3]) {
-    (std::array::from_fn(|d| lo[d].max(corner[d])), std::array::from_fn(|d| hi[d].min(corner[d] + WINDOW)))
+/** A brick of a tile to upload: the slot it goes in, the tile, and its place in the tile's grid's cells. */
+type Added = (u32, Arc<Tile>, usize);
+
+/** A tile a window holds bricks of; per brick of its grid (in its cells, its buried ones one: worldgen's VoxelGrid::bury), its slot (EMPTY if none) and how many entries hold it. */
+struct Held {
+    tile: Arc<Tile>,
+    slots: Vec<(i32, u32)>,
 }
 
 /**
- * A level's window as the GPU holds it: from which tiles, where (its
- * corner, in bricks), its table (per brick a slot, EMPTY or UNKNOWN) and,
- * per cell of each scale, how many bricks around it have voxels that meet
- * it or are unknown.
+ * A level's window as the GPU holds it: from which tiles, the ball of
+ * bricks it holds of them, its table (per brick a slot, EMPTY or UNKNOWN:
+ * every brick outside the ball), and, per cell of each scale, how many
+ * bricks around it have voxels that meet it or are unknown. Rays read the
+ * ball only (reach_of), so the counts are right for its bricks: one that
+ * leaves it keeps counting as it did, till another takes its entry (and
+ * empty air coming in where empty air was changes none). Bricks of a tile
+ * that share their sites share a slot: the ground's rock, buried, a slot
+ * a tile.
  */
 struct Window {
     level: Option<Arc<Level>>,
-    corner: Option<[i32; 3]>,
+    tiles: HashMap<TileId, Held>,
+    ball: Option<Ball>,
     /** Sites of the level's bricks start at origin + BRICK · b. */
     origin: [i32; 3],
     table: Vec<i32>,
     /** Per entry of the table, the cells of each scale around its brick it counts in (AROUND's bits): those its voxels meet, all if UNKNOWN. */
     meets: Vec<[u32; SCALES]>,
     counts: Vec<u16>,
-    /** Bricks it holds slots for, and left UNKNOWN for want of one, at the last sync. */
+    /** Slots it holds. */
     bricks: usize,
-    lacking: usize,
 }
 
 impl Window {
     fn new() -> Window {
         Window {
             level: None,
-            corner: None,
+            tiles: HashMap::new(),
+            ball: None,
             origin: [0; 3],
             table: vec![UNKNOWN; TABLE],
             meets: vec![[AROUND; SCALES]; TABLE],
             // Every brick around each cell unknown: 27 blocks of 64^j bricks.
             counts: (0..COUNTS).map(|i| (AROUND.count_ones() as u16) << (6 * (i / CELLS))).collect(),
             bricks: 0,
-            lacking: 0,
         }
     }
 
-    /** Sets brick `b`'s entry, and the cells around it that it counts in, freeing the slot it had. */
-    fn set(&mut self, b: [i32; 3], (entry, meets): (i32, [u32; SCALES]), free: &mut Vec<u32>) {
+    /** Where brick `b` starts, and the tile it is of. */
+    fn site(&self, b: [i32; 3]) -> ([i32; 3], TileId) {
+        let site: [i32; 3] = std::array::from_fn(|d| self.origin[d] + b[d] * BRICK);
+        (site, site.map(|v| v.div_euclid(TILE as i32)))
+    }
+
+    /** Sets brick `b`'s entry, and the cells around it that it counts in; returns the entry it had. */
+    fn set(&mut self, b: [i32; 3], (entry, meets): (i32, [u32; SCALES])) -> i32 {
         let at = self::entry(b);
-        let was = std::mem::replace(&mut self.table[at], entry);
-        if was >= 0 {
-            free.push(was as u32);
-            self.bricks -= 1;
-        }
-        self.bricks += usize::from(entry >= 0);
         let had = std::mem::replace(&mut self.meets[at], meets);
         for j in 0..SCALES {
             for e in (0..27).filter(|e| (had[j] ^ meets[j]) >> e & 1 != 0) {
@@ -375,96 +427,250 @@ impl Window {
                 }
             }
         }
+        std::mem::replace(&mut self.table[at], entry)
+    }
+
+    /** Makes brick `b` UNKNOWN to rays, its slot freed once no entry holds it; the cells around it are as they were (to place it again, or out of the ball). */
+    fn release(&mut self, b: [i32; 3], free: &mut Vec<u32>) {
+        if std::mem::replace(&mut self.table[entry(b)], UNKNOWN) < 0 {
+            return;
+        }
+        let ([x, y, z], id) = self.site(b);
+        let held = self.tiles.get_mut(&id).expect("a slot's tile");
+        let (slot, uses) = &mut held.slots[held.tile.grid.brick(x, y, z) as usize];
+        *uses -= 1;
+        if *uses == 0 {
+            free.push(*slot as u32);
+            *slot = EMPTY;
+            self.bricks -= 1;
+        }
     }
 
     /**
-     * Holds the bricks of the window around `eye` (world units) of level
-     * `level` from `tiles` (if `lit`, those lit only), taking slots from
-     * `free` and giving back those it no longer needs: what tiles gone (or
-     * not held) or the window left becomes UNKNOWN, what tiles come (new
-     * ones in place of others too) or it gained their bricks'. The work is that of the bricks that came or
-     * went. Returns the bricks to upload, each with its slot, its tile and
-     * its place in the tile's words, or None if neither the tiles nor the
-     * window moved.
+     * Sets brick `b` of the ball, unless set already, from its tile: EMPTY,
+     * or the slot its sites are in, one from `free` if none is yet (to
+     * upload, in `added`: as many as `needs` says); UNKNOWN if no tile is
+     * held there.
      */
-    fn sync<'a>(
+    fn place(&mut self, b: [i32; 3], free: &mut Vec<u32>, added: &mut Vec<Added>) {
+        if self.table[entry(b)] != UNKNOWN {
+            return;
+        }
+        let ([x, y, z], id) = self.site(b);
+        let Some(held) = self.tiles.get_mut(&id) else {
+            self.set(b, (UNKNOWN, [AROUND; SCALES]));
+            return;
+        };
+        let Ok(first) = usize::try_from(held.tile.grid.brick(x, y, z)) else {
+            self.set(b, (EMPTY, [0; SCALES]));
+            return;
+        };
+        let (slot, uses) = &mut held.slots[first];
+        if *slot < 0 {
+            let new = free.pop().expect("slots for the bricks counted");
+            *slot = new as i32;
+            added.push((new, held.tile.clone(), first));
+            self.bricks += 1;
+        }
+        *uses += 1;
+        let entry = (*slot, std::array::from_fn(|j| held.tile.meets[first * SCALES + j]));
+        self.set(b, entry);
+    }
+
+    /**
+     * Moves the window to the ball of `radius` about `eye`'s brick of
+     * `level`, and to `tiles` (if `lit`, those lit only): what tiles gone
+     * (new ones in place of others too) or the ball left becomes UNKNOWN.
+     * Returns the bricks to place: those of tiles gone or new, and those
+     * the ball gained; None if neither the tiles nor the ball moved.
+     */
+    fn retarget(
         &mut self,
         level: usize,
-        tiles: &'a Arc<Level>,
+        tiles: &Arc<Level>,
         lit: bool,
         eye: Vec3,
+        radius: i32,
         free: &mut Vec<u32>,
-    ) -> Option<Vec<(u32, &'a Tile, usize)>> {
+    ) -> Option<Vec<[i32; 3]>> {
         let held = |tile: &Tile| !lit || tile.lights.is_some();
         // Where its bricks start, its tiles say; until it has any, it holds nothing and rays do not read it.
-        let origin = match (tiles.tiles.values().next(), self.corner) {
+        let origin = match (tiles.tiles.values().next(), self.ball) {
             (Some(tile), _) => tile.grid.min.map(|v| v.rem_euclid(BRICK)),
             (None, Some(_)) => self.origin,
             (None, None) => return None,
         };
-        let corner = window_corner(level, eye, origin);
-        if self.level.as_ref().is_some_and(|l| Arc::ptr_eq(l, tiles)) && self.corner == Some(corner) {
+        let ball = Ball { middle: eye_brick(level, eye, origin), radius };
+        if self.level.as_ref().is_some_and(|l| Arc::ptr_eq(l, tiles)) && self.ball == Some(ball) {
             return None;
         }
-        assert!(self.corner.is_none() || self.origin == origin, "a level's bricks moved");
+        assert!(self.ball.is_none() || self.origin == origin, "a level's bricks moved");
         self.origin = origin;
-        let (old, previous) = (self.corner, self.level.take());
-        if let (Some(old), Some(previous)) = (old, &previous) {
-            for (id, tile) in &previous.tiles {
-                if held(tile) && tiles.tiles.get(id).is_none_or(|t| !held(t)) {
-                    let (lo, hi) = in_window(tile_bricks(*id, origin), old);
-                    for b in bricks_outside(lo, hi, None) {
-                        self.set(b, (UNKNOWN, [AROUND; SCALES]), free);
+        let mut pending: Vec<[i32; 3]> = match self.ball {
+            Some(old) => {
+                let gone: Vec<TileId> = (self.tiles.iter())
+                    .filter(|&(id, h)| tiles.tiles.get(id).is_none_or(|t| !held(t) || !Arc::ptr_eq(t, &h.tile)))
+                    .map(|(id, _)| *id)
+                    .collect();
+                for b in in_ball(old.bounds(), old, Some(ball)) {
+                    self.release(b, free);
+                }
+                let mut pending: Vec<_> = in_ball(ball.bounds(), ball, Some(old)).collect();
+                for id in gone {
+                    for b in in_ball(tile_bricks(id, origin), ball, None) {
+                        self.release(b, free);
+                        pending.push(b);
                     }
+                    self.tiles.remove(&id);
                 }
+                pending
             }
-            if old != corner {
-                for b in bricks_outside(old, old.map(|v| v + WINDOW), Some(corner)) {
-                    self.set(b, (UNKNOWN, [AROUND; SCALES]), free);
-                }
-            }
-        }
-        let mut added = Vec::new();
-        self.lacking = 0;
+            None => in_ball(ball.bounds(), ball, None).collect(),
+        };
         for (id, tile) in tiles.tiles.iter().filter(|(_, t)| held(t)) {
-            let new = previous.as_ref().is_none_or(|p| p.tiles.get(id).is_none_or(|was| !Arc::ptr_eq(was, tile)));
             assert!((0..3).all(|d| tile.grid.min[d].rem_euclid(BRICK) == origin[d]), "a tile off its level's bricks");
-            let (lo, hi) = in_window(tile_bricks(*id, origin), corner);
-            for b in bricks_outside(lo, hi, if new { None } else { old }) {
-                let [x, y, z] = std::array::from_fn(|d| origin[d] + b[d] * BRICK);
-                let first = tile.grid.brick(x, y, z);
-                let entry = match (first, free.pop()) {
-                    (..0, slot) => {
-                        free.extend(slot);
-                        (EMPTY, [0; SCALES])
-                    }
-                    (_, Some(slot)) => {
-                        added.push((slot, tile.as_ref(), first as usize));
-                        (slot as i32, std::array::from_fn(|j| tile.meets[first as usize * SCALES + j]))
-                    }
-                    (_, None) => {
-                        self.lacking += 1;
-                        (UNKNOWN, [AROUND; SCALES])
-                    }
-                };
-                self.set(b, entry, free);
+            if !self.tiles.contains_key(id) {
+                self.tiles.insert(*id, Held { tile: tile.clone(), slots: vec![(EMPTY, 0); tile.grid.cells.len() / BRICK_SITES] });
+                pending.extend(in_ball(tile_bricks(*id, origin), ball, None));
             }
         }
-        (self.level, self.corner) = (Some(tiles.clone()), Some(corner));
-        Some(added)
+        (self.level, self.ball) = (Some(tiles.clone()), Some(ball));
+        Some(pending)
     }
 
-    /** As voxels.wgsl reads it, the level drawn to `reach`, unless it holds nothing yet: rays read none past 0. */
-    fn gpu(&self, level: usize, reach: f64) -> GpuLevel {
-        let corner = self.corner.unwrap_or_default();
+    /** Its ball of `radius` instead, what it leaves UNKNOWN; and of `pending`, those still in it. */
+    fn resize(&mut self, radius: i32, pending: &mut Vec<[i32; 3]>, free: &mut Vec<u32>) {
+        let Some(old) = self.ball else { return };
+        let ball = Ball { radius, ..old };
+        for b in in_ball(old.bounds(), old, Some(ball)) {
+            self.release(b, free);
+        }
+        self.ball = Some(ball);
+        pending.retain(|&b| ball.contains(b));
+    }
+
+    /** The bricks a ball of `radius` would hold that its own does not. */
+    fn shell(&self, radius: i32) -> Vec<[i32; 3]> {
+        let Some(ball) = self.ball else { return Vec::new() };
+        let grown = Ball { radius, ..ball };
+        in_ball(grown.bounds(), grown, Some(ball)).collect()
+    }
+
+    /** The slots placing `bricks` would take from the pool. */
+    fn needs(&self, bricks: &[[i32; 3]]) -> usize {
+        let mut new = HashSet::new();
+        for &b in bricks {
+            let ([x, y, z], id) = self.site(b);
+            let Some(held) = self.tiles.get(&id) else { continue };
+            if let Ok(first) = usize::try_from(held.tile.grid.brick(x, y, z))
+                && held.slots[first].0 < 0
+            {
+                new.insert((id, first));
+            }
+        }
+        new.len()
+    }
+
+    /** As voxels.wgsl reads it, the level drawn as far as `far` (world units) or its ball holds, unless it holds nothing yet: rays read none past 0. */
+    fn gpu(&self, level: usize, far: f64) -> GpuLevel {
+        let corner = self.ball.map_or([0; 3], |b| b.middle.map(|v| v - WINDOW / 2));
         GpuLevel {
             min: std::array::from_fn(|d| self.origin[d] + corner[d] * BRICK),
             offset: (level * TABLE) as u32,
             corner,
-            reach: if self.corner.is_some() { reach as f32 } else { 0.0 },
+            reach: self.ball.map_or(0.0, |b| reach(level, b.radius, far) as f32),
             filled: (level * COUNTS) as u32,
             _pad: [0; 3],
         }
+    }
+}
+
+/**
+ * The levels' windows and the pool of slots they share. The windows are
+ * balls of one radius, each in its own level's bricks, as large as the
+ * pool holds, up to RADIUS: short of slots, all shrink a brick, each level
+ * read as much less far, its rays taking the next coarser one sooner. With
+ * room to spare (an eighth of the pool), they grow a brick a sync, if
+ * the bricks that gains fit.
+ */
+struct Windows {
+    windows: Vec<Window>,
+    free: Vec<u32>,
+    radius: i32,
+    /** Slots free that growing takes, as last found (0: to find). */
+    growing: usize,
+    margin: usize,
+    /** The tiles of a level not read. */
+    none: Arc<Level>,
+}
+
+impl Windows {
+    fn new(pool: usize) -> Windows {
+        // Balls of radius 0, of 27 bricks each, always fit.
+        assert!(pool >= GRID_LEVELS * 27, "a pool of {pool} slots");
+        Windows {
+            windows: (0..GRID_LEVELS).map(|_| Window::new()).collect(),
+            free: (0..pool as u32).rev().collect(),
+            radius: RADIUS,
+            growing: 0,
+            margin: pool / 8,
+            none: Arc::new(Level::new(HashMap::new())),
+        }
+    }
+
+    /** The slots placing each window's `pending` bricks would take. */
+    fn needs(&self, pending: &[Vec<[i32; 3]>]) -> usize {
+        self.windows.iter().zip(pending).map(|(w, bricks)| w.needs(bricks)).sum()
+    }
+
+    /** Places each window's `pending` bricks, which fit. */
+    fn place(&mut self, pending: Vec<Vec<[i32; 3]>>, added: &mut Vec<Added>) {
+        for (window, bricks) in self.windows.iter_mut().zip(pending) {
+            for b in bricks {
+                window.place(b, &mut self.free, added);
+            }
+        }
+    }
+
+    /**
+     * Brings each level's window to its tiles in `levels` (if `lit`, those
+     * lit only; none past them) around `eye`, first deciding the radius,
+     * then placing what that holds. Returns the bricks to upload (every
+     * slot freed before any is taken: each once) and which windows changed.
+     */
+    fn sync(&mut self, levels: &[Arc<Level>], lit: bool, eye: Vec3) -> (Vec<Added>, [bool; GRID_LEVELS]) {
+        let free = &mut self.free;
+        let pending: Vec<Option<Vec<[i32; 3]>>> = (self.windows.iter_mut().enumerate())
+            .map(|(level, w)| w.retarget(level, levels.get(level).unwrap_or(&self.none), lit, eye, self.radius, free))
+            .collect();
+        let mut changed = std::array::from_fn(|level| pending[level].is_some());
+        let mut pending: Vec<Vec<[i32; 3]>> = pending.into_iter().map(Option::unwrap_or_default).collect();
+        // Short of slots: every window a brick less, till what is to place fits.
+        while self.needs(&pending) > self.free.len() {
+            self.radius -= 1;
+            for (window, bricks) in self.windows.iter_mut().zip(&mut pending) {
+                window.resize(self.radius, bricks, &mut self.free);
+            }
+            (self.growing, changed) = (0, [true; GRID_LEVELS]);
+        }
+        let mut added = Vec::new();
+        self.place(pending, &mut added);
+        // Room to spare: every window a brick more, if what that gains fits with room still.
+        if self.radius < RADIUS && self.free.len() >= self.growing.max(self.margin) {
+            let radius = self.radius + 1;
+            let shells: Vec<_> = self.windows.iter().map(|w| w.shell(radius)).collect();
+            let needs = self.needs(&shells);
+            if needs + self.margin <= self.free.len() {
+                for window in &mut self.windows {
+                    window.resize(radius, &mut Vec::new(), &mut self.free);
+                }
+                self.place(shells, &mut added);
+                (self.radius, self.growing, changed) = (radius, 0, [true; GRID_LEVELS]);
+            } else {
+                self.growing = needs + self.margin;
+            }
+        }
+        (added, changed)
     }
 }
 
@@ -486,8 +692,7 @@ pub struct Marcher {
     buffers: [wgpu::Buffer; 8],
     layouts: [wgpu::BindGroupLayout; 3],
     pipelines: [wgpu::RenderPipeline; 3],
-    windows: Vec<Window>,
-    free: Vec<u32>,
+    windows: Windows,
     palette: Option<Arc<Vec<u32>>>,
     targets: Option<Targets>,
     /** Whether it draws lit scenes (Look's `sky`). */
@@ -589,16 +794,7 @@ impl Marcher {
             pipeline("resolve_fragment", &layouts[1], &[PICTURE]),
             pipeline("show_fragment", &layouts[2], &[format]),
         ];
-        Marcher {
-            buffers,
-            layouts,
-            pipelines,
-            windows: (0..GRID_LEVELS).map(|_| Window::new()).collect(),
-            free: (0..pool as u32).rev().collect(),
-            palette: None,
-            targets: None,
-            lit,
-        }
+        Marcher { buffers, layouts, pipelines, windows: Windows::new(pool as usize), palette: None, targets: None, lit }
     }
 
     /** Brings the voxels on the GPU up to date with `scene`, then draws it into a picture of `pixels`: the samples, then each pixel resolving its own. */
@@ -611,20 +807,22 @@ impl Marcher {
             self.palette = Some(scene.palette.clone());
         }
         let mut levels = [GpuLevel::default(); GRID_LEVELS];
+        let (added, changed) = self.windows.sync(&scene.levels, self.lit, look.camera);
+        upload(queue, &self.buffers[3], &added, BRICK_WORDS, |tile, first| &tile.words[first * BRICK_WORDS..][..BRICK_WORDS]);
+        if self.lit {
+            upload(queue, &self.buffers[7], &added, BRICK_SITES, |tile, first| {
+                &tile.lights.as_ref().expect("a tile held lit")[first * BRICK_SITES..][..BRICK_SITES]
+            });
+        }
         for (level, gpu) in levels.iter_mut().enumerate() {
-            let window = &mut self.windows[level];
-            let Some(tiles) = scene.levels.get(level) else { continue };
-            if let Some(added) = window.sync(level, tiles, self.lit, look.camera, &mut self.free) {
-                upload(queue, &self.buffers[3], &added, BRICK_WORDS, |tile, first| &tile.words[first * BRICK_WORDS..][..BRICK_WORDS]);
-                if self.lit {
-                    upload(queue, &self.buffers[7], &added, BRICK_SITES, |tile, first| {
-                        &tile.lights.as_ref().expect("a tile held lit")[first * BRICK_SITES..][..BRICK_SITES]
-                    });
-                }
+            let window = &self.windows.windows[level];
+            if changed[level] {
                 queue.write_buffer(&self.buffers[2], (level * TABLE * 4) as u64, bytemuck::cast_slice(&window.table));
                 queue.write_buffer(&self.buffers[6], (level * COUNTS * 2) as u64, bytemuck::cast_slice(&window.counts));
             }
-            *gpu = window.gpu(level, reach(level, look.far));
+            if level < scene.levels.len() {
+                *gpu = window.gpu(level, look.far);
+            }
         }
         queue.write_buffer(&self.buffers[1], 0, bytemuck::cast_slice(&levels));
         queue.write_buffer(&self.buffers[0], 0, bytemuck::bytes_of(&Globals::of(look, pixels)));
@@ -699,14 +897,8 @@ impl Marcher {
 }
 
 /** Copies `added` bricks into `pool`, `per` words a brick as `words` gives them, in runs of slots one after another. */
-fn upload<'a>(
-    queue: &wgpu::Queue,
-    pool: &wgpu::Buffer,
-    added: &[(u32, &'a Tile, usize)],
-    per: usize,
-    words: impl Fn(&'a Tile, usize) -> &'a [u32],
-) {
-    let mut added = added.to_vec();
+fn upload<'a>(queue: &wgpu::Queue, pool: &wgpu::Buffer, added: &'a [Added], per: usize, words: impl Fn(&'a Tile, usize) -> &'a [u32]) {
+    let mut added: Vec<_> = added.iter().map(|(slot, tile, first)| (*slot, tile.as_ref(), *first)).collect();
     added.sort_unstable_by_key(|a| a.0);
     let mut run: Vec<u32> = Vec::new();
     let write = |run: &[u32], end: u32| {
@@ -740,9 +932,9 @@ impl Painter for Marcher {
 
     /** Bricks held, of the pool's slots, and those left out for want of room. */
     fn describe(&self, _: &Easel) -> String {
-        let held: usize = self.windows.iter().map(|w| w.bricks).sum();
-        let lacking: usize = self.windows.iter().map(|w| w.lacking).sum();
-        format!(": {held} bricks of {} on the GPU, {lacking} lacking room", held + self.free.len())
+        let Windows { windows, free, radius, .. } = &self.windows;
+        let held: usize = windows.iter().map(|w| w.bricks).sum();
+        format!(": {held} bricks of {} on the GPU, windows {radius} bricks of {RADIUS} round", held + free.len())
     }
 }
 
@@ -765,9 +957,56 @@ mod tests {
         }
     }
 
-    /** What `window` holds: per entry EMPTY, UNKNOWN or a slot's words, as `slots` say they were uploaded. */
-    fn held<'a>(window: &Window, slots: &HashMap<u32, &'a [u32]>) -> Vec<Result<&'a [u32], i32>> {
-        window.table.iter().map(|&e| if e >= 0 { Ok(slots[&(e as u32)]) } else { Err(e) }).collect()
+    /** Syncs `windows` to level 0's `tiles` around `eye`, keeping what they upload in `slots`; whether any window changed. */
+    fn sync(windows: &mut Windows, tiles: &Arc<Level>, eye: Vec3, slots: &mut HashMap<u32, Vec<u32>>) -> bool {
+        let (added, changed) = windows.sync(std::slice::from_ref(tiles), false, eye);
+        for (slot, tile, first) in added {
+            slots.insert(slot, tile.words[first * BRICK_WORDS..][..BRICK_WORDS].to_vec());
+        }
+        changed.contains(&true)
+    }
+
+    /**
+     * What level 0's window holds, per entry of its ball: EMPTY, UNKNOWN or
+     * a slot's words, as `slots` say they were uploaded, and the cells it
+     * counts in; and the slots it takes. Its counts are as its entries say.
+     */
+    type Holds = (Vec<Option<(Result<Vec<u32>, i32>, [u32; SCALES])>>, usize);
+
+    fn holds(windows: &Windows, slots: &HashMap<u32, Vec<u32>>) -> Holds {
+        let w = &windows.windows[0];
+        let mut counts = vec![0u16; COUNTS];
+        for b in window_bricks([WINDOW / 2; 3]) {
+            for j in 0..SCALES {
+                for e in (0..27).filter(|e| w.meets[entry(b)][j] >> e & 1 != 0) {
+                    let cell = around(b, j, e);
+                    if (cell[0] + cell[1] + cell[2]) & 1 == 0 {
+                        counts[cell_entry(cell, j)] += 1;
+                    }
+                }
+            }
+        }
+        assert!(w.counts == counts, "counts as the entries say");
+        let mut held = vec![None; TABLE];
+        for b in w.ball.map(|ball| in_ball(ball.bounds(), ball, None)).into_iter().flatten() {
+            let e = w.table[entry(b)];
+            held[entry(b)] = Some((if e >= 0 { Ok(slots[&(e as u32)].clone()) } else { Err(e) }, w.meets[entry(b)]));
+        }
+        (held, w.bricks)
+    }
+
+    /** What windows made anew, of `radius` and room for all, hold of `tiles` around `eye`. */
+    fn anew(radius: i32, tiles: &Arc<Level>, eye: Vec3) -> Holds {
+        let (mut windows, mut slots) = (Windows::new(1 << 20), HashMap::new());
+        (windows.radius, windows.growing) = (radius, usize::MAX);
+        sync(&mut windows, tiles, eye, &mut slots);
+        holds(&windows, &slots)
+    }
+
+    /** The bricks of the window about `middle`. */
+    fn window_bricks(middle: [i32; 3]) -> impl Iterator<Item = [i32; 3]> {
+        let (lo, hi) = (middle.map(|v| v - WINDOW / 2), middle.map(|v| v + WINDOW / 2));
+        (lo[2]..hi[2]).flat_map(move |z| (lo[1]..hi[1]).flat_map(move |y| (lo[0]..hi[0]).map(move |x| [x, y, z])))
     }
 
     #[test]
@@ -781,27 +1020,51 @@ mod tests {
         let some = |skip: usize| Arc::new(Level::new(ids.iter().skip(skip).step_by(2).map(|id| (*id, all.tiles[id].clone())).collect()));
         let steps =
             [(some(0), eye), (all.clone(), [13.0, 31.0, -9.0]), (some(1), [-140.0, 30.0, 70.0]), (all.clone(), [-130.0, 22.0, 75.0])];
-        let (mut window, mut free, mut slots) = (Window::new(), (0..1 << 20).rev().collect::<Vec<u32>>(), HashMap::new());
+        let (mut windows, mut slots) = (Windows::new(1 << 20), HashMap::new());
         // No tiles yet: nothing held, nothing read.
-        assert!(window.sync(0, &Arc::new(Level::new(HashMap::new())), false, eye, &mut free).is_none());
-        assert_eq!(window.gpu(0, REACH).reach, 0.0);
+        assert!(!sync(&mut windows, &Arc::new(Level::new(HashMap::new())), eye, &mut slots));
+        assert_eq!(windows.windows[0].gpu(0, f64::MAX).reach, 0.0);
         for (tiles, eye) in &steps {
-            for (slot, tile, first) in window.sync(0, tiles, false, *eye, &mut free).expect("a change") {
-                slots.insert(slot, &tile.words[first * BRICK_WORDS..(first + 1) * BRICK_WORDS]);
-            }
-            let (mut fresh, mut fresh_free, mut fresh_slots) = (Window::new(), (0..1 << 20).rev().collect::<Vec<u32>>(), HashMap::new());
-            for (slot, tile, first) in fresh.sync(0, tiles, false, *eye, &mut fresh_free).expect("a change") {
-                fresh_slots.insert(slot, &tile.words[first * BRICK_WORDS..(first + 1) * BRICK_WORDS]);
-            }
-            assert!(held(&window, &slots) == held(&fresh, &fresh_slots), "at {eye:?}");
-            assert_eq!(window.counts, fresh.counts, "at {eye:?}");
-            assert_eq!((window.bricks, free.len()), (fresh.bricks, fresh_free.len()), "at {eye:?}");
-            assert!(window.sync(0, tiles, false, *eye, &mut free).is_none(), "nothing moved");
+            assert!(sync(&mut windows, tiles, *eye, &mut slots), "a change");
+            assert_eq!(windows.radius, RADIUS, "room for all");
+            assert!(holds(&windows, &slots) == anew(RADIUS, tiles, *eye), "at {eye:?}");
+            assert!(!sync(&mut windows, tiles, *eye, &mut slots), "nothing moved");
         }
         // Lit, tiles not lit yet are not held: rays take the next level there.
-        let mut lit = Window::new();
-        assert!(lit.sync(0, &all, true, eye, &mut free).expect("a change").is_empty());
-        assert!(lit.table.iter().all(|&e| e == UNKNOWN));
+        let mut lit = Windows::new(1 << 20);
+        lit.sync(std::slice::from_ref(&all), true, eye);
+        assert!(lit.windows[0].table.iter().all(|&e| e == UNKNOWN));
+    }
+
+    #[test]
+    fn windows_short_of_slots_hold_as_large_a_ball_as_fits() {
+        let eye = [10.0, 30.0, -20.0];
+        let tiles = forest_tiles(eye);
+        let (all, wanted) = anew(RADIUS, &tiles, eye);
+        // Buried bricks of a tile share a slot: fewer slots than bricks held.
+        let entries = all.iter().flatten().filter(|(e, _)| e.is_ok()).count();
+        assert!(wanted < entries, "{wanted} slots for {entries} bricks");
+        let pool = wanted / 3;
+        let (mut windows, mut slots) = (Windows::new(pool), HashMap::new());
+        for eye in [eye, [13.0, 31.0, -9.0], [21.0, 33.0, -3.0], eye] {
+            sync(&mut windows, &tiles, eye, &mut slots);
+            let w = &windows.windows[0];
+            let ball = w.ball.expect("a ball");
+            assert!(ball.radius == windows.radius && windows.radius < RADIUS && w.bricks <= pool, "at {eye:?}");
+            // Every brick of a tile made in the ball held, every other unknown.
+            for b in window_bricks(ball.middle) {
+                let inside = ball.contains(b) && tiles.tiles.contains_key(&w.site(b).1);
+                assert_eq!(w.table[entry(b)] != UNKNOWN, inside, "brick {b:?}, at {eye:?}");
+            }
+            assert!(holds(&windows, &slots) == anew(windows.radius, &tiles, eye), "at {eye:?}");
+        }
+        // More room: they grow, a brick at a sync, to all.
+        windows.free.extend(pool as u32..2 * wanted as u32);
+        for _ in 0..RADIUS {
+            sync(&mut windows, &tiles, eye, &mut slots);
+        }
+        assert_eq!(windows.radius, RADIUS);
+        assert!(holds(&windows, &slots) == anew(RADIUS, &tiles, eye));
     }
 
     #[test]
@@ -812,20 +1075,21 @@ mod tests {
         let tall = World::new(worlds::by_name("forest").expect("forest").make, 1, None, 1).heights[0].1 as f64;
         let eye = [10.0, tall + 100.0, -20.0];
         let tiles = forest_tiles(eye);
-        let (mut window, mut free) = (Window::new(), (0..1 << 20).rev().collect());
-        window.sync(0, &tiles, false, eye, &mut free).expect("a change");
-        let (corner, origin) = (window.corner.expect("a corner"), window.origin);
+        let mut windows = Windows::new(1 << 20);
+        sync(&mut windows, &tiles, eye, &mut HashMap::new());
+        let w = &windows.windows[0];
+        let ball = w.ball.expect("a ball");
         let (mut made, mut over) = (0, 0);
-        for b in bricks_outside(corner, corner.map(|v| v + WINDOW), None) {
-            let site: [i32; 3] = std::array::from_fn(|d| origin[d] + b[d] * BRICK);
-            if !tiles.tiles.contains_key(&site.map(|v| v.div_euclid(TILE as i32))) {
+        for b in window_bricks(ball.middle).filter(|&b| ball.contains(b)) {
+            let (site, id) = w.site(b);
+            if !tiles.tiles.contains_key(&id) {
                 continue;
             }
             made += 1;
-            assert_ne!(window.table[entry(b)], UNKNOWN, "brick {b:?} of a tile made");
+            assert_ne!(w.table[entry(b)], UNKNOWN, "brick {b:?} of a tile made");
             if f64::from(site[1]) >= tall {
                 over += 1;
-                assert_eq!(window.table[entry(b)], EMPTY, "brick {b:?}, over the heights");
+                assert_eq!(w.table[entry(b)], EMPTY, "brick {b:?}, over the heights");
             }
         }
         assert!(made > 10_000 && over > 1000, "{made} bricks of tiles made, {over} over the heights");
@@ -833,23 +1097,25 @@ mod tests {
 
     #[test]
     fn the_window_and_the_tiles_wanted_hold_all_a_ray_reads_of_what_it_meets() {
-        // The voxel a ray is in, wherever it is up to REACH, and that voxel's neighbours, whose faces shade it:
-        // eyes along a line across a tile, rays every way.
+        // The voxel a ray is in, wherever it is up to its level's reach, and that voxel's neighbours, whose faces
+        // shade it: eyes along a line across a tile, rays every way, balls of any radius.
         let world = World::new(worlds::by_name("forest").expect("forest").make, 1, None, 1);
         let read = std::array::from_fn(|l| l == 0);
         let ways = (0..125).map(|i| [i % 5 - 2, i / 5 % 5 - 2, i / 25 - 2].map(f64::from)).filter(|w| w != &[0.0; 3]);
         for step in 0..TILE * 4 / 3 {
             let t = step as f64 * 0.75;
             let eye = [t, 0.6 * t + 31.3, 0.3 * t - 17.9];
-            let corner = window_corner(0, eye, [0; 3]);
             let tiles: HashSet<_> = world.lacking(&read, eye, READ, Lit::Not).into_iter().map(|(_, id)| id).collect();
-            for way in ways.clone() {
-                let length = way.iter().map(|v| v * v).sum::<f64>().sqrt();
-                let site = worldgen::picture::nearest_site(std::array::from_fn(|d| eye[d] + way[d] / length * REACH));
-                for s in std::iter::once([0; 3]).chain(bake::VOXEL_FACES).map(|n| std::array::from_fn(|d| site[d] as i32 + n[d])) {
-                    let b: [i32; 3] = std::array::from_fn(|d| s[d].div_euclid(BRICK) - corner[d]);
-                    assert!(b.iter().all(|v| (0..WINDOW).contains(v)), "eye {eye:?}: site {s:?} out of the window");
-                    assert!(tiles.contains(&s.map(|v| v.div_euclid(TILE as i32))), "eye {eye:?}: site {s:?} in no tile wanted");
+            for radius in [0, 1, 13, RADIUS] {
+                let ball = Ball { middle: eye_brick(0, eye, [0; 3]), radius };
+                for way in ways.clone() {
+                    let length = way.iter().map(|v| v * v).sum::<f64>().sqrt();
+                    let site = worldgen::picture::nearest_site(std::array::from_fn(|d| eye[d] + way[d] / length * reach_of(radius)));
+                    for s in std::iter::once([0; 3]).chain(bake::VOXEL_FACES).map(|n| std::array::from_fn(|d| site[d] as i32 + n[d])) {
+                        let b = s.map(|v: i32| v.div_euclid(BRICK));
+                        assert!(ball.contains(b), "eye {eye:?}: site {s:?} out of the ball of {radius}");
+                        assert!(tiles.contains(&s.map(|v| v.div_euclid(TILE as i32))), "eye {eye:?}: site {s:?} in no tile wanted");
+                    }
                 }
             }
         }
@@ -860,18 +1126,20 @@ mod tests {
         let eye = [10.0, 30.0, -20.0];
         let tiles = forest_tiles(eye);
         // Moved, so that bricks of both sides of the torus have been in it.
-        let (mut window, mut free) = (Window::new(), (0..1 << 20).rev().collect());
-        window.sync(0, &tiles, false, [eye[0] - 300.0, eye[1], eye[2] + 200.0], &mut free).expect("a change");
-        window.sync(0, &tiles, false, eye, &mut free).expect("a change");
-        let (corner, origin) = (window.corner.expect("a corner"), window.origin);
-        let (lo, hi) = (corner.map(|v| v * BRICK), corner.map(|v| (v + WINDOW) * BRICK));
-        // Every voxel the window holds, and every cell of each scale it meets, at the window's edge too.
+        let mut windows = Windows::new(1 << 20);
+        sync(&mut windows, &tiles, [eye[0] - 300.0, eye[1], eye[2] + 200.0], &mut HashMap::new());
+        sync(&mut windows, &tiles, eye, &mut HashMap::new());
+        let window = &windows.windows[0];
+        let (ball, origin) = (window.ball.expect("a ball"), window.origin);
+        let (lo, hi) = ball.bounds();
+        let (lo, hi) = (lo.map(|v| v * BRICK), hi.map(|v| v * BRICK));
+        // Every voxel of the ball, and every cell of each scale it meets, at the ball's edge too.
         let mut voxels = 0;
         for z in lo[2]..hi[2] {
             for y in lo[1]..hi[1] {
                 for x in (lo[0] + (lo[0] + y + z + origin.iter().sum::<i32>()).rem_euclid(2)..hi[0]).step_by(2) {
                     let p = [x + origin[0], y + origin[1], z + origin[2]];
-                    if tiles.grids.at(p[0], p[1], p[2]).is_none_or(|v| v.0 == 0) {
+                    if !ball.contains([x, y, z].map(|v| v.div_euclid(BRICK))) || tiles.grids.at(p[0], p[1], p[2]).is_none_or(|v| v.0 == 0) {
                         continue;
                     }
                     voxels += 1;

@@ -705,16 +705,22 @@ name no engine:
 a view is complete when its engine lacks no tile and makes nothing more.
 
 In the voxels engine a ray goes from rhombic dodecahedron to dodecahedron across their faces;
-each level's voxels are read up to `REACH` of its own sites from the eye,
+each level's voxels are read as far from the eye as its window holds,
 then the next coarser level's, as far as the render distance.
-The GPU holds of each level the bricks of a window around the eye,
-`REACH` all around and a little more;
+The GPU holds of each level a ball of bricks around the eye's
+in a window a little larger;
 its table of the bricks' slots in a pool is a torus,
 a brick's entry at its coordinates modulo the window's size,
-so the window moves a brick at a time
+so the ball moves a brick at a time
 and only the bricks that came into it or left are touched.
+The levels' balls share one radius, in each level's own bricks,
+as large as the pool holds:
+short of slots, all shrink, every level read less far,
+and with room to spare they grow back.
+The pool is bounded; what does not fit shows coarser, sooner.
 Tiles never change once made, and are packed for the GPU where they are made,
-so a brick is uploaded once, when it comes into a window.
+so a brick is uploaded once, when it comes into a ball,
+and bricks of a tile holding the same sites (its buried rock) share a slot.
 A brick of a tile not made yet is unknown, not empty,
 and rays take the next coarser level there:
 what is missing shows coarser, never as a hole.
