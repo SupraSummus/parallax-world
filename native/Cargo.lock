@@ -1575,6 +1575,7 @@ dependencies = [
  "egui",
  "egui-wgpu",
  "egui-winit",
+ "libc",
  "png",
  "pollster",
  "winit",
