@@ -56,16 +56,18 @@ Cargo.toml                   # The Rust crates' workspace: one lock, one target;
 .cargo/config.toml           # Builds for x86-64-v3: floor and ceil inline (see there)
 scripts/shot.mjs             # pnpm shot: a view in headless Chromium, saved once complete
 scripts/voxelize.py          # A glTF scene as voxels of the FCC lattice, for worlds/src/scene.rs (numpy, Pillow)
-bake/                        # Chunk baker, coverage and walking in Rust (no dependencies), in worlds/' WebAssembly
+fcc/                         # The FCC lattice and its voxels as every crate sees them (no dependencies)
+└── src/
+    ├── lib.rs               # The voxel's faces, the view faces' lattices, the grids' levels, Grid, tiles of grids, voxels read per face
+    └── light.rs             # The light from voxels' faces, as hosts that light a world hand it over
+bake/                        # Chunk baker, coverage and walking in Rust, on fcc/, in worlds/' WebAssembly
 └── src/
     ├── lib.rs               # Baker: one chunk per call; the WebAssembly exports
-    ├── world.rs             # Grid, tiles of grids, the view's faces' lattices, voxels read per face
     ├── cells.rs             # cells.ts, with a table per level
     ├── slicing.rs           # slice-selection.ts's slices' shapes and chunks, for the web's baker
     ├── surface.rs           # A cell's voxels that can show
-    ├── tables.rs            # The voxel's faces in lattice coordinates, the materials shaded per view face
+    ├── tables.rs            # The voxel's faces in a view face's lattice coordinates, the materials shaded per view face
     ├── splats.rs            # Which voxels a chunk shows, each a hexagon at its site: of a slice, each column's nearest over its run; of a cell, its whole ones' relief: a pillar per column (or each a ray can enter), and each see-through one a ray can enter
-    ├── light.rs             # The light from voxels' faces, as hosts that light a world hand it over
     ├── lod.rs               # Native's chunks: whole cells of the lattice, each face's levels by depth along it, its cells kept picked
     ├── fill.rs              # Splats filled into a mask for every slant, solid blocks (for coverage)
     ├── layer_index.rs       # LayerIndex: where each face's layers hold voxels; its WebAssembly exports

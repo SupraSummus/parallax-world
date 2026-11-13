@@ -11,7 +11,7 @@
 //! it whichever way it looks (Wants's reach), so that turning finds them made. Tiles far from the camera are dropped, from
 //! the light's (Shared) too. A tile
 //! never changes, so a chunk baked once all the tiles it reads are in
-//! stays right whatever comes after (bake's Tiles). Given light (worldgen's Shared),
+//! stays right whatever comes after (fcc's Tiles). Given light (worldgen's Shared),
 //! the tiles are those the bakers' Lights read, made once. Asked for light,
 //! the light reads every level coarser than a voxel's: the tiles near the
 //! camera come first, the coarsest's before all; and, for the voxels engine
@@ -25,9 +25,10 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Condvar, Mutex};
 
-pub use bake::TileId;
-use bake::slicing::GRID_LEVELS;
-use bake::{Grid, LayerIndex, Tiles};
+use bake::LayerIndex;
+use fcc::GRID_LEVELS;
+pub use fcc::TileId;
+use fcc::{Grid, Tiles};
 use worldgen::generator::materials_of;
 use worldgen::light::{Brightness, Light, Shared, make_tile};
 

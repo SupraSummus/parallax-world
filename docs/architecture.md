@@ -352,7 +352,7 @@ the compositor widens it so,
 and the splats of a surface leave no gaps from any ray of the face,
 within a slice or across slices.
 A splat's colour is that of the voxel's face towards the camera, −F
-(the face a slice seen along F shows; `Reader` in `bake/` reads it),
+(the face a slice seen along F shows; `Reader` in `fcc/` reads it),
 shaded as the mean of its open faces' shades
 (of its cut faces' where it has none),
 each by the axes its normal leans towards
@@ -363,7 +363,7 @@ A host that lights the world
 (native's computed lighting, `Lighting` in its panel, or `--light`)
 hands the baker instead
 the light each face of a voxel it shows sends out
-(`bake/src/light.rs`, found by `worldgen/src/light.rs`),
+(`fcc/src/light.rs`, found by `worldgen/src/light.rs`),
 so only what shows is lit:
 a splat shows the mean of its open faces',
 each as much as it faces the camera.
@@ -472,7 +472,7 @@ site p is at lattice coordinates (a, b, c) = (p · √2·right, p · up, p · F)
 all even or all odd, placed at (a·LAYER, b, c·LAYER);
 layer c is a rectangular grid of sites, √2 by 2 apart,
 and the next layer is the same grid shifted by half a cell.
-The world is read in these coordinates (`Reader` in `bake/`), with faces
+The world is read in these coordinates (`Reader` in `fcc/`), with faces
 shaded by the way they face in the world (`palettes` in `bake/`).
 
 Each face draws the rays closer to its axis than to any other face's
@@ -801,7 +801,7 @@ excludes baking in workers.
 
 ## 6. Worlds (`world.ts`, `worldgen.ts`)
 
-**The lattice** (`fcc.ts`). Voxels sit on the face-centred cubic lattice:
+**The lattice** (`fcc.ts`, `fcc/` in Rust). Voxels sit on the face-centred cubic lattice:
 the integer points (x, y, z) with x + y + z even.
 A voxel is a site's Voronoi cell, a rhombic dodecahedron,
 the points within |dx| + |dy|, |dy| + |dz| and |dx| + |dz| ≤ 1 of it,
@@ -827,7 +827,7 @@ the baker the face towards its slices' camera (section 3),
 rays (`worldgen/src/picture.rs`) the one they enter by.
 The box is cut into bricks 8 units wide, 256 sites,
 and only bricks with voxels are stored.
-A worker reads its copy of the grids for every face (`Reader` in `bake/`),
+A worker reads its copy of the grids for every face (`Reader` in `fcc/`),
 without turned copies.
 Renderer distances are in world units.
 

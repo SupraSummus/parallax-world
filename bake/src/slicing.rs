@@ -6,6 +6,8 @@
 //! single voxels, in the grid's units. Functions of a slice's shape take
 //! its level and its atoms' (see Slice).
 
+use fcc::GRID_LEVELS;
+
 use crate::surface::Slice;
 
 /** Spacing of a face's layers, and of its lattice along `right`: see LAYER in view.ts. */
@@ -19,11 +21,8 @@ const ATOM_SHIFT: i32 = 4;
 // A splat's depth in half layers of its grid, within ±2^ATOM_SHIFT, rides in a byte (Splat).
 const _: () = assert!(1 << ATOM_SHIFT < 128);
 
-/** Levels of a world's grids: one per atom level up to MAX_LEVEL's at the largest shift. */
-pub const GRID_LEVELS: usize = (MAX_LEVEL - ATOM_SHIFT + 1) as usize;
-
-/** How far around the camera each grid holds the world, in its units, and slices read it (GRID_REACH in slice-selection.ts). */
-pub const GRID_REACH: f64 = 400.0;
+// The grids' levels (fcc's GRID_LEVELS) are those of the atoms up to MAX_LEVEL's at the largest shift.
+const _: () = assert!(GRID_LEVELS == (MAX_LEVEL - ATOM_SHIFT + 1) as usize);
 
 /** N = 2^level, the spacing in layers of the sites of cells of `level`: see spacing in cells.ts. */
 pub fn spacing(level: i32) -> i32 {

@@ -500,8 +500,8 @@ mod tests {
     fn claims_are_apart_and_prefer_no_places() {
         use std::collections::BTreeSet;
 
-        use crate::grid::Box3;
         use crate::checks::places::{SIDE, preference};
+        use crate::grid::Box3;
         // Things at least 100 apart, where x + z is even (a ground they suit), the first at (5, 5); in cells 64 wide.
         let claims = |seed| Claims::new("claims", seed, 64, 100, Some([5, 5]), |[x, z], _| ((x + z) & 1 == 0).then_some(([x, z], ())));
         let area = Box3 { min: [-SIDE / 2, 0, -SIDE / 2], max: [SIDE / 2, 1, SIDE / 2] };
@@ -534,7 +534,7 @@ mod tests {
         let apart = |w: i64, h: i64, s: i64| {
             (1 - w..w).all(|dx| (1 - h..h).all(|dz| (dx, dz) == (0, 0) || (sum(dx * s, dz * s) as i64).unsigned_abs() >> SHIFT > 0))
         };
-        // A host's tile of 128 by 128 sites, at each level it draws (GRID_LEVELS in bake/src/slicing.rs).
+        // A host's tile of 128 by 128 sites, at each level it draws (fcc's GRID_LEVELS).
         for level in 0..9 {
             assert!(apart(128, 128, 1 << level), "a tile at level {level}");
         }

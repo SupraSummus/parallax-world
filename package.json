@@ -13,7 +13,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint . && cargo clippy --all-targets -- -D warnings && cargo fmt --check",
     "test": "pnpm test:rust && pnpm test:web",
-    "test:rust": "cargo test -p bake && cargo test --release -p parallax-native -p worldgen -p worlds",
+    "test:rust": "cargo test -p fcc -p bake && cargo test --release -p parallax-native -p worldgen -p worlds",
     "test:web": "pnpm wasm && vitest run",
     "knip": "knip",
     "knip:production": "knip --production",

@@ -41,7 +41,7 @@ const MAX_MATERIALS = 256
 export const BRICK = 8
 const BRICK_SITES = BRICK ** 3 / 2
 
-/** Words per site in a grid's `faces`: its index in `cells`, then its faces' materials, four to a word (bake's FACE_WORDS). */
+/** Words per site in a grid's `faces`: its index in `cells`, then its faces' materials, four to a word (fcc's FACE_WORDS). */
 export const FACE_WORDS = 4
 
 /**

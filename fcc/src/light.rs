@@ -3,7 +3,7 @@
 //! light it sends out, what it reflects and what it glows, linear. It is
 //! the face's colour as seen.
 
-use crate::world::FACE_KINDS;
+use crate::FACE_KINDS;
 
 /** The light each face of a voxel sends out, by kind, linear: 1 is white. */
 pub type FaceLight = [[f32; 3]; FACE_KINDS];

@@ -24,7 +24,9 @@
 //! along a ray of the face, a level's cells come layer after layer, and once
 //! it leaves a level's claims it is never back.
 
-use crate::slicing::{GRID_LEVELS, LAYER};
+use fcc::GRID_LEVELS;
+
+use crate::slicing::LAYER;
 
 /** Layers ahead of the camera's layer that the nearest voxels drawn are in: nearer, one would fill the screen. */
 const NEAR: i32 = 4;

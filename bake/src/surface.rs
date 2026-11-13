@@ -2,7 +2,9 @@
 
 use crate::cells::Cells;
 use crate::slicing::{cell_margin, chunk_cell, site_layers};
-use crate::world::{ALPHA, FACE_KINDS, Geometry, Reader};
+use fcc::{ALPHA, FACE_KINDS, Reader};
+
+use crate::tables::Geometry;
 
 /** A voxel of a cell's surface. Bit k of `open` and `cut` is face kind k. */
 pub struct Voxel {

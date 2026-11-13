@@ -4,10 +4,10 @@
 
 use std::collections::BTreeMap;
 
-use bake::{Faces, face_words};
+use fcc::{Faces, face_words};
 
 // The baker's grids, as worlds hand them over (worlds/src/wasm.rs), the voxel's faces, and a whole site's alpha: it stops every ray.
-pub use bake::{ALPHA, FACE_WORDS, Grid, VOXEL_FACES};
+pub use fcc::{ALPHA, FACE_WORDS, Grid, VOXEL_FACES};
 
 pub const BRICK: i64 = 8;
 const BRICK_SITES: usize = (BRICK * BRICK * BRICK / 2) as usize;
@@ -47,7 +47,7 @@ pub fn is_site(x: i64, y: i64, z: i64) -> bool {
 
 /**
  * The sites of a box: see VoxelGrid in voxel-grid.ts. A voxel has a
- * material on each of its faces (bake's Grid): its site's in `cells`,
+ * material on each of its faces (fcc's Grid): its site's in `cells`,
  * unless `faces` gives them. A site holds things in two ways: pieces
  * smaller than itself, which stop some of its rays whole, and a medium
  * (KindDef::medium), which stops some of each ray the pieces let
@@ -144,7 +144,7 @@ impl VoxelGrid {
         }
     }
 
-    /** The material of face `kind` (of bake's VOXEL_FACES) of the voxel at (x, y, z); 0 if empty, outside the box or not a site. */
+    /** The material of face `kind` (of fcc's VOXEL_FACES) of the voxel at (x, y, z); 0 if empty, outside the box or not a site. */
     pub fn face(&self, x: i64, y: i64, z: i64, kind: usize) -> u8 {
         match self.slot(x, y, z) {
             Some(Ok(i)) if self.cells[i] != 0 => self.faces.get(&i).map_or(self.cells[i], |faces| faces[kind]),
