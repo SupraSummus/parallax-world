@@ -23,6 +23,10 @@
 //! be m − F or −F for one of them, m, and v · n = v · m − v · F ≤ 0. So
 //! along a ray of the face, a level's cells come layer after layer, and once
 //! it leaves a level's claims it is never back.
+//!
+//! A level's medium (bake's Medium) it draws between two planes across the
+//! axis instead, the finer level's reach and its own, from a layer of cells
+//! more each way than it claims (Lod::layers).
 
 use fcc::GRID_LEVELS;
 
@@ -107,29 +111,23 @@ impl Lod {
     }
 
     /**
-     * The last layer whose cells the level finer than `level` draws, for an
-     * eye in layer `eye` (composed's); none at level 0. Its cells hold all
-     * that `level`'s cells meeting them hold there: what they hold of cells
-     * of the finer level up to it, `level` draws again.
-     */
-    pub fn finer_reach(&self, level: i32, eye: f64) -> Option<i64> {
-        (level > 0).then(|| self.reach(level - 1, eye.floor() as i32))
-    }
-
-    /**
      * The layers of `level`'s sites, c / N, it claims for an eye in `eyes`
-     * (Eyes) and to `far` ahead: from the nearest eye's claims to the
-     * farthest's, as reach grows with the camera's layer; none, nor any
-     * coarser level's, if its first is past the farthest eye's far.
+     * (Eyes) and to `far` ahead, and a layer more each way, whose cells'
+     * medium it draws: from the nearest eye's claims to the farthest's, as
+     * reach grows with the camera's layer; none, nor any coarser level's, if
+     * its first is past the farthest eye's far.
+     * It draws medium past the finer level's reach to its own, by slabs of
+     * columns (bake's Medium), each the cell's holding its middle: up to N
+     * layers and half a slab from a voxel drawn, a layer of cells off.
      */
     fn layers(&self, level: i32, eyes: &Eyes, far: f64) -> Option<std::ops::RangeInclusive<i64>> {
         let n = 1i64 << level;
         // Any whole layer near the eye would do: the levels' order holds for any.
         let (low, high) = (eyes[2][0].floor() as i32, eyes[2][1].floor() as i32);
         let last = high as i64 + (far / LAYER).ceil() as i64;
-        // Claimed, and not all within the finer claims: its sites reach N layers past its own.
-        let first = if level == 0 { low as i64 + NEAR as i64 } else { self.reach(level - 1, low) - n + 1 };
-        let to = self.reach(level, high).min(last + n);
+        // Claimed, and not all within the finer claims: its sites reach N layers past its own; and a layer more each way, for its medium.
+        let first = if level == 0 { low as i64 + NEAR as i64 } else { self.reach(level - 1, low) - 2 * n + 1 };
+        let to = self.reach(level, high).saturating_add(n).min(last + n);
         (first <= last).then(|| first.div_euclid(n) + i64::from(first.rem_euclid(n) != 0)..=to.div_euclid(n))
     }
 
@@ -440,7 +438,7 @@ mod tests {
     }
 
     #[test]
-    fn every_site_ahead_is_drawn_first_at_the_finest_level_claiming_it_and_seen_through_only_there() {
+    fn every_site_ahead_is_drawn_first_at_the_finest_level_claiming_it_and_its_medium_by_a_cell_composed() {
         let far = 150.0;
         for (k, shift) in [(0, 1), (1, 2), (2, 3)] {
             let lod = Lod { shift, q: 4 + k };
@@ -450,6 +448,8 @@ mod tests {
             let chunks = composed(&lod, eye, far);
             let levels: std::collections::BTreeSet<i32> = chunks.iter().map(|k| k.0).collect();
             assert!(levels.len() >= 3, "levels {levels:?}");
+            // Where a level's medium is, past the finer level's reach to its own.
+            let medium = |l: i32, c: i64| (l == 0 || c > lod.reach(l - 1, camera)) && c <= lod.reach(l, camera);
             let mut ahead = 0;
             for a in -90..=90 {
                 for b in -24..=24 {
@@ -458,21 +458,31 @@ mod tests {
                         if (a ^ c) & 1 != 0 || (b ^ c) & 1 != 0 || !in_view(eye, p.map(f64::from), far) {
                             continue;
                         }
-                        // The chunks holding it, finest first.
-                        let holding: Vec<i32> = levels.iter().copied().filter(|&l| chunks.contains(&(l, owner(1 << l, p)))).collect();
+                        // The chunks holding it whose whole voxels are drawn, finest first: claimed, not those a layer more each way, whose medium alone is.
+                        let claims = |l: i32| {
+                            let c = i64::from(owner(1 << l, p)[2]);
+                            (l == 0 || c > lod.reach(l - 1, camera) - (1 << l)) && c <= lod.reach(l, camera)
+                        };
+                        let holding: Vec<i32> =
+                            levels.iter().copied().filter(|&l| claims(l) && chunks.contains(&(l, owner(1 << l, p)))).collect();
                         if c < near {
                             assert!(holding.is_empty(), "shift {shift}: {p:?}, before the near plane, in {holding:?}");
                             continue;
                         }
                         let finest = (0..).find(|&l| owner(1 << l, p)[2] as i64 <= lod.reach(l, camera));
                         assert_eq!(holding.first().copied(), finest, "shift {shift} site {p:?}");
-                        // Where it is see-through, only there: coarser chunks leave out what the next finer level's draw.
-                        let see_through: Vec<i32> = holding
-                            .iter()
-                            .copied()
-                            .filter(|&l| lod.finer_reach(l, eye[2]).is_none_or(|r| owner(1 << (l - 1), p)[2] as i64 > r))
-                            .collect();
-                        assert_eq!(see_through, Vec::from_iter(finest), "shift {shift} site {p:?}");
+                        // Where it is a site of a level's grid within its medium, its slab of its column is a cell's composed (bake's Medium).
+                        for &l in &levels {
+                            let atoms = (l - shift).max(0);
+                            let s = 1 << atoms;
+                            if owner(s, p) != p || !medium(l, i64::from(c)) {
+                                continue;
+                            }
+                            let [a, b, c] = p.map(|v| v / s);
+                            let middle = crate::splats::slab_middle(c, b, crate::slab_layers(1 << (l - atoms)));
+                            let held = (l, owner(1 << l, [a * s, b * s, middle * s]));
+                            assert!(chunks.contains(&held), "shift {shift} site {p:?}: its slab of level {l} in {held:?}");
+                        }
                         ahead += 1;
                     }
                 }
@@ -544,11 +554,12 @@ mod tests {
                     }
                 });
             }
-            let m = f64::from(1 << shift);
             for (g, most) in most.into_iter().enumerate() {
                 let reach = lod.grid_reach(g, far);
                 // Short of it by less than the reads' width across, which it adds whole off the ray.
-                let near = reach.is_some_and(|r| most <= r && most > r - 4.0 * m);
+                let (_, min, max) = crate::chunk_reads(&cell(shift, g as i32 + shift, [0; 3]));
+                let across = (f64::from(max[0] - min[0]) * LAYER).hypot(f64::from(max[1] - min[1]));
+                let near = reach.is_some_and(|r| most <= r && most > r - across);
                 assert!(
                     near || reach.is_none() && most == 0.0,
                     "shift {shift}, Q {q}, far {far}: grid {g} read {most:.0} sites far, its reach {reach:?}"

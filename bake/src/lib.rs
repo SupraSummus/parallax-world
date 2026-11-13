@@ -27,7 +27,8 @@ use fcc::{ALPHA, FACE_KINDS, Grid, Lattice, Reader, Tiles, VIEW_FACES, lattices}
 use fill::{fill_mask, solid_blocks};
 use lod::CellChunk;
 use slicing::{LAYER, chunk_cell, slice_centre, spacing, thickness};
-use splats::{Splat, Splats, cell_relief, cell_splats, chunk_splats, lit_voxel_colour, voxel_colour};
+pub use splats::Medium;
+use splats::{Splat, Splats, cell_medium, cell_relief, cell_splats, chunk_splats, lit_voxel_colour, voxel_colour};
 use surface::{cell_surface, surface};
 use tables::Geometry;
 
@@ -64,11 +65,25 @@ fn in_grid(slice: &Slice) -> (usize, Slice) {
  * The grid a cell chunk reads, and the sites of it it reads, a box of
  * (a, b, c) in the face's lattice coordinates, in that grid's units,
  * inclusive: a chunk is the same whatever else the grid holds. A cell deep
- * past its cell, where its relief's solid may run on (Baker::bake_cell).
+ * past its cell, where its relief's solid may run on, and half a cell
+ * before it and a column or two around it, where its medium's slabs and
+ * their neighbours are (Baker::bake_cell).
  */
 pub fn chunk_reads(chunk: &CellChunk) -> (usize, [i32; 3], [i32; 3]) {
     let (min, max) = chunk.bounds();
-    (chunk.atoms as usize, [min[0] - 2, min[1] - 1, min[2] - 2], [max[0] + 2, max[1] + 1, max[2] + 2 * chunk.spacing()])
+    let m = chunk.spacing();
+    (chunk.atoms as usize, [min[0] - 4, min[1] - 2, min[2] - m - 2], [max[0] + 4, max[1] + 2, max[2] + 2 * m])
+}
+
+/**
+ * Layers of a slab of a cell's medium (Medium) of cells m apart: m, as
+ * deep as a cell's spacing, but 2 at least, so that a slab of each column
+ * holds a site. From layer 1, so that its halves end where a level's and
+ * the next finer one's claims of the medium do (Lod::layers), on layers
+ * of grid 0 that are whole numbers of half spacings.
+ */
+pub fn slab_layers(m: i32) -> i32 {
+    m.max(2)
 }
 
 /** A baked chunk: see ChunkSplats. Its numbers and blocks stay in the baker until the next bake. */
@@ -119,6 +134,8 @@ pub struct Baker {
      * first, and its colour.
      */
     pub columns: Vec<[u32; 3]>,
+    /** A cell chunk's medium (bake_cell), by slab and row. */
+    pub medium: Vec<Medium>,
     /** The spacing of the grid the last chunk's splats were read from. */
     spacing: i32,
 }
@@ -142,6 +159,7 @@ impl Baker {
             blocks: Vec::new(),
             numbers: Vec::new(),
             columns: Vec::new(),
+            medium: Vec::new(),
             spacing: 1,
         }
     }
@@ -224,37 +242,35 @@ impl Baker {
     /**
      * Bakes a cell chunk (lod.rs) of view face `face` over the plane through
      * its site: if `relief`, the relief of its whole voxels (cell_relief), as
-     * `columns`, and its see-through voxels a ray can enter (cell_splats), as
-     * splats; else all it holds that a ray can enter as splats, no columns;
-     * and where they may be drawn. Unclipped: no other chunk of its level
-     * draws its voxels, and depth decides between them. No mask: what is
-     * covered is left to the GPU.
-     * Its numbers are its splats': depth past the plane in half layers,
-     * colour (its alpha its voxel's), and the layer of the cell of the next
-     * finer level holding each voxel, in half layers past the plane: where
-     * that level draws a see-through one too, the compositor leaves it out,
-     * so that none counts twice.
+     * `columns`, else its whole voxels a ray can enter as splats
+     * (cell_splats), no columns; its see-through ones as `medium`
+     * (cell_medium); and where they may be drawn. Unclipped: no other chunk
+     * of its level draws its voxels, and depth decides between them. No
+     * mask: what is covered is left to the GPU.
+     * Its numbers are its splats': depth past the plane in half layers, and
+     * colour.
+     * Its medium is by slabs of its columns (slab_layers), whose halves'
+     * ends are where a level's claims of the medium end (lod.rs), so that
+     * the compositor draws a half or not, where a level's medium ends.
      */
     pub fn bake_cell(&mut self, face: usize, chunk: &CellChunk, relief: bool) -> Baked {
         let level = chunk.atoms as usize;
         self.reach(level);
         let m = chunk.spacing();
-        // At level 0, none finer: its own.
-        let finer = if chunk.level > 0 { m / 2 } else { m };
         let mut owners = std::mem::take(&mut self.owners);
-        for n in [m, finer] {
-            if !owners.iter().any(|(k, _)| *k == n) {
-                owners.push((n, Cells::new(n)));
-            }
+        if !owners.iter().any(|(k, _)| *k == m) {
+            owners.push((m, Cells::new(m)));
         }
-        let own = |n: i32| &owners.iter().find(|(k, _)| *k == n).expect("made").1;
-        let holds = |a: i32, b: i32, c: i32| own(m).owner(a, b, c) == chunk.site;
+        let cells = &owners.iter().find(|(k, _)| *k == m).expect("made").1;
+        let holds = |a: i32, b: i32, c: i32| cells.owner(a, b, c) == chunk.site;
         let tiles = Arc::clone(&self.grids[level]);
         let reader = Reader::new(&tiles, self.lattices[face]);
         let (from, to) = chunk.bounds();
-        let surface = surface(&reader, &self.geometry, from, to, holds);
-        let (whole, hexagons): (Vec<_>, Vec<_>) =
-            if relief { surface.into_iter().partition(|v| v.alpha == ALPHA) } else { (Vec::new(), surface) };
+        // Its medium's slabs, those of whose middle sites it holds, and their neighbours.
+        let around =
+            surface(&reader, &self.geometry, [from[0] - 2, from[1] - 1, from[2] - m], [to[0] + 2, to[1] + 1, to[2] + m], |_, _, _| true);
+        let whole: Vec<_> = surface(&reader, &self.geometry, from, to, holds).into_iter().filter(|v| v.alpha == ALPHA).collect();
+        let (whole, hexagons) = if relief { (whole, Vec::new()) } else { (Vec::new(), whole) };
         // From a site on along the axis, the last whole voxel before any that is not, a cell deep past the cell at most.
         let runs_on = |[a, b, mut c]: [i32; 3]| {
             let whole = |c| {
@@ -279,14 +295,17 @@ impl Baker {
         self.paint(face, level, |splats, geometry, colour| cell_splats(splats, geometry, colour, &hexagons, centre));
         let s = &self.splats;
         let (min_x, max_x, min_y, max_y) = (s.min_x.min(relief[0]), s.max_x.max(relief[1]), s.min_y.min(relief[2]), s.max_y.max(relief[3]));
-        let extent = if min_x < max_x { [max_x - min_x, max_y - min_y] } else { [0.0; 2] };
+        // None, but maybe medium: from its least column.
+        let (extent, min_x, max_y) =
+            if min_x < max_x { ([max_x - min_x, max_y - min_y], min_x, max_y) } else { ([0.0; 2], a as f64 * LAYER, b as f64) };
         self.blocks.clear();
-        let finer = own(finer);
-        let numbers = |s: &Splat| {
-            let [a, b, c] = s.site;
-            [s.depth as f32, f32::from_bits(s.colour), (2 * finer.owner(a, b, c)[2] - centre) as f32]
-        };
+        let numbers = |s: &Splat| [s.depth as f32, f32::from_bits(s.colour)];
         let baked = self.numbers(level, min_x, max_y, extent, [0, 0], 1.0, numbers);
+        let slab = slab_layers(m);
+        let mut parts = std::mem::take(&mut self.medium);
+        self.paint(face, level, |_, geometry, colour| cell_medium(&mut parts, geometry, colour, &around, centre, slab, &holds));
+        parts.iter_mut().for_each(|p| p.column = [p.column[0] - a, p.column[1] - b]);
+        self.medium = parts;
         self.owners = owners;
         baked
     }

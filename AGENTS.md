@@ -77,7 +77,7 @@ bake/                        # Chunk baker, layer index and walking in Rust, on 
     ├── slicing.rs           # slice-selection.ts's slices' shapes and chunks, for the web's baker
     ├── surface.rs           # A cell's voxels that can show
     ├── tables.rs            # The voxel's faces in a view face's lattice coordinates, the materials shaded per view face
-    ├── splats.rs            # Which voxels a chunk shows, each a hexagon at its site: of a slice, each column's nearest over its run; of a cell, its whole ones' relief: a pillar per column (or each a ray can enter), and each see-through one a ray can enter
+    ├── splats.rs            # Which voxels a chunk shows, each a hexagon at its site: of a slice, each column's nearest over its run; of a cell, its whole ones' relief: a pillar per column (or each a ray can enter), and its medium, a picture per slab of its columns' optical depths
     ├── lod.rs               # Native's chunks: whole cells of the lattice, each face's levels by depth along it, its cells kept picked
     ├── fill.rs              # Splats filled into a mask for every slant, solid blocks (for coverage)
     ├── layer_index.rs       # LayerIndex: where each face's layers hold voxels
@@ -139,7 +139,7 @@ native/                      # The native frontend (egui on winit and wgpu), lin
         ├── chunks/
         │   ├── renderer.rs  # Chunks in view: cells of the lattice (bake's lod.rs), not slices, all a face's pick composes; cached, finest and nearest first
         │   ├── bakery.rs    # Worker threads baking chunks, a baker each sharing the tiles (lit, with a Light each), and putting their reliefs' columns in tiles and their splats in clusters for the GPU
-        │   ├── compositor.rs # compositor.ts with wgpu, for cells, placed from the camera on the GPU: reliefs' columns uploaded per chunk in tiles, each tile a quad whose pixels' rays find their column, or a picture a cell on a plane, a quad per run of a row of its columns, enlarged to close the gaps, or whole voxels as splats each, culled on the GPU against what showed; see-through splats over each other in the order rays meet them
+        │   ├── compositor.rs # compositor.ts with wgpu, for cells, placed from the camera on the GPU: reliefs' columns uploaded per chunk in tiles, each tile a quad whose pixels' rays find their column, or a picture a cell on a plane, a quad per run of a row of its columns, enlarged to close the gaps, or whole voxels as splats each, culled on the GPU against what showed; see-through voxels as pictures of each cell's medium slab by slab, added up in any order
         │   └── compositor.wgsl
         ├── voxels.rs        # The voxels engine: rays through the tiles' voxels, cell to cell, see-through ones added up in the order met; each level's bricks (and, lit, their light) in a ball around the eye, one radius for all as large as the pool holds, in a window, a torus, and which cells of 8·FCC and 32·FCC no voxel meets, crossed at once; no chunks or faces of the view
         ├── voxels.wgsl

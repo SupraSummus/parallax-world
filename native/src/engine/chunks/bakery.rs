@@ -18,7 +18,7 @@ use bake::slicing::{LAYER, half_layer, spacing};
 use fcc::GRID_LEVELS;
 use fcc::{TileId, Tiles};
 
-use super::compositor::{Flat, GpuCluster, GpuColumn, GpuSplat, cluster, flatten, tiles};
+use super::compositor::{Flat, GpuCluster, GpuColumn, GpuSplat, cluster, flatten, tiles, veils};
 
 /** A chunk to bake: a cell of a face, reading the tiles of its grid level from the first to the last, each way. */
 #[derive(Clone, Copy)]
@@ -38,18 +38,18 @@ pub struct Request {
 
 /**
  * A baked chunk, as the GPU takes it, and where it may be drawn: its
- * relief's columns (compositor::tiles), if it has one, and its splats
- * (compositor::cluster), and their clusters: its whole voxels' first, the
+ * relief's columns (compositor::tiles), if it has one, or its whole
+ * voxels' splats (compositor::cluster), then its medium's pictures
+ * (compositor::veils), and their clusters: its whole voxels' first, the
  * tiles of columns (or, drawn flat, its picture: compositor::flatten) or
- * else the whole splats', then the see-through ones
- * from `see_through`.
+ * else the splats', then the medium's from `veils`.
  */
 pub struct Baked {
     pub origin: [f64; 2],
     pub columns: Vec<GpuColumn>,
     pub splats: Vec<GpuSplat>,
     pub clusters: Vec<GpuCluster>,
-    pub see_through: usize,
+    pub veils: usize,
     /** Its relief drawn flat, if its request's is (compositor::flatten). */
     pub flat: Flat,
 }
@@ -196,16 +196,19 @@ fn work(queue: &Queue, send: &Sender<(Request, Baked)>, grids: &Grids, mut baker
         let [a, b0, _] = r.cell.bounds().0;
         let base = [a as f64 * LAYER * unit - b.origin_x, b0 as f64 * unit - b.origin_y];
         let half_layer = half_layer(r.cell.atoms);
-        let (columns, mut clusters, flat) = if r.flat {
+        let (mut columns, mut clusters, flat) = if r.flat {
             flatten(&baker.columns, base, unit, half_layer)
         } else {
             let (columns, clusters) = tiles(&baker.columns, base, unit, half_layer);
             (columns, clusters, Flat::default())
         };
-        let (splats, splat_clusters, whole) = cluster(&baker.numbers, half_layer, r.block);
-        let see_through = clusters.len() + whole;
+        let (splats, splat_clusters) = cluster(&baker.numbers, half_layer, r.block);
         clusters.extend(splat_clusters);
-        let baked = Baked { origin: [b.origin_x, b.origin_y], columns, splats, clusters, see_through, flat };
+        let veils_at = clusters.len();
+        let (medium, medium_clusters) = veils(&baker.medium, base, unit, half_layer, bake::slab_layers(r.cell.spacing()), columns.len());
+        columns.extend(medium);
+        clusters.extend(medium_clusters);
+        let baked = Baked { origin: [b.origin_x, b.origin_y], columns, splats, clusters, veils: veils_at, flat };
         if send.send((request, baked)).is_err() {
             return;
         }

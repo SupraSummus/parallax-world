@@ -226,6 +226,11 @@ mod tests {
 
     const PIXELS: [u32; 2] = [320, 200];
 
+    /** Whether two pictures are the same but for the pictures of medium added up in another order, which rounds differently. */
+    fn alike(a: &[u8], b: &[u8]) -> bool {
+        a.iter().zip(b).all(|(a, b)| a.abs_diff(*b) <= 1)
+    }
+
     #[test]
     fn moving_keeps_most_chunks() {
         let make = worlds::by_name("moor").expect("moor").make;
@@ -261,9 +266,7 @@ mod tests {
             easel.pixels(&first, PIXELS);
             let followed = easel.pixels(&second, PIXELS).2;
             let whole = Easel::offscreen(None).pixels(&second, PIXELS).2;
-            // The see-through splats blended in another order (Veiled) round differently.
-            let most = followed.iter().zip(&whole).map(|(a, b)| a.abs_diff(*b)).max();
-            assert!(most <= Some(1), "relief {relief}: a channel off by {most:?}");
+            assert!(alike(&followed, &whole), "relief {relief}");
         }
     }
 
@@ -286,7 +289,7 @@ mod tests {
                 } else {
                     "splats"
                 };
-                assert!(culled.0 == all.0, "{name} {look:?} {drew}");
+                assert!(alike(&culled.0, &all.0), "{name} {look:?} {drew}");
                 assert!(culled.1 < all.1, "{name} {look:?}: culling drew {} {drew} of {}", culled.1, all.1);
             }
         }
@@ -314,6 +317,6 @@ mod tests {
         Arc::make_mut(&mut composed.frame.chunks).truncate(fit);
         let first = Easel::offscreen(None).pixels(&composed, PIXELS).2;
         assert!(some != all, "some left out");
-        assert!(some == first, "what is drawn shows as it would alone");
+        assert!(alike(&some, &first), "what is drawn shows as it would alone");
     }
 }

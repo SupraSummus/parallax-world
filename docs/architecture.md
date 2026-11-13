@@ -243,8 +243,8 @@ times the slant of the rays to it;
 depth decides where neighbours overlap.
 No gaps (`ground_along_a_face_shows_no_gaps`),
 but what a deep pillar at an edge holds is smeared.
-Its see-through voxels a ray can enter are each one hexagon (`cell_splats`),
-drawn in the order a ray meets them (section 4, "See-through");
+Its see-through voxels are pictures of its medium, slab by slab
+(section 4, "See-through");
 the relief takes them for empty.
 Its tiles hold the sites' media too, with how much each stops
 (`VoxelGrid::into_grid`):
@@ -667,41 +667,39 @@ Otherwise a frame writes its globals alone.
 **See-through.** Native draws a site's medium see-through
 (`KindDef::medium`, as mist) where its pieces don't show;
 those come whole, as on the web.
-A see-through splat's alpha is how much of the rays
-through its voxel's site the voxel stops,
-along the voxel's mean chord (worldgen's `CHORD`).
-The bake workers put a chunk's see-through splats in clusters,
-layer by layer from the nearest,
-culled against the reliefs as tiles are,
-and the compositor draws them after the reliefs,
-in front of them, into a picture of their own,
-nearest first, each under those before it;
-then lays that over the picture.
-That is the order a ray meets their sites in:
-a face's rays meet its levels finest first (`lod.rs`),
-a level's cells as their sites are near the eye
-(at the face between two, the nearer one's site is nearer: they are Voronoi cells),
-and a cell's splats layer by layer, its layers being planes across the face's axis.
-The cull lists a draw for each see-through cluster in that order,
-of none of its splats where it does not show.
-Each splat is its voxel's share of a field over its layer,
-a tent over twice its outline:
-a layer's sites are on a grid twice their outlines apart,
-so the tents sum to one across it,
-and a ray takes as much of a layer as its path through it is long;
-as outlines, half the plane each layer's, ray after ray along a seam
-met their edges together, and drew lines.
-A tent reaches past its cell, over a neighbour's pixels,
-and there the two cells' order is their sites', not the ray's:
-a small error where alpha is small, as in a medium.
+Like a relief drawn flat, a cell's medium is pictures:
+one per slab of its columns, as deep as its cells' spacing
+(`bake::Medium`, `cell_medium`),
+on the slab's middle plane, which every cell's slab there shares,
+each column's colour and optical depth:
+−ln of what each voxel lets through along its mean chord
+(worldgen's `CHORD`), added up.
+A ray takes the slab where it crosses that plane,
+so where it slants it takes it a little aside,
+which blurs where the medium ends by about a slab's depth times the slant.
+Optical depths add up in any order:
+the compositor adds the pictures as they come
+into a picture of their own, colours weighted by them,
+in front of what the reliefs drew,
+and lays that over the picture, as much as it stops.
+Right where the medium's colour is the same all along a ray, as mist's is;
+where it is not, its colours mix without their order.
+Each slab of a column is one cell's, the one holding its middle site,
+so a slab's pictures tile its plane once;
+and a pixel takes the columns around it as a field,
+each a tent over twice its brick, so that they sum to one,
+from its picture, which holds its own columns' neighbours too,
+whichever cells they are:
+bricks alone showed their edges.
 So that none counts twice,
 each pixel is one face's only,
-and a coarser chunk leaves out the see-through voxels
-whose cells of the next finer level that level draws
-(`Lod::finer_reach`; the baker gives each splat its finer cell's layer).
-They add up in 32-bit floats:
-hundreds of layers of a thin medium, each letting through 0.999,
-in 16 rounded every step one way, and stopped a tenth too much.
+and a level draws the medium between two planes across its axis:
+past the next finer level's reach, and up to its own (`place`).
+Its slabs start a layer on, so that those planes fall between their halves,
+and a column keeps an optical depth per half.
+A slab of a column may be a cell's that holds none of it,
+so a level picks a layer of cells more each way than it claims,
+whose medium alone it draws (`Lod::layers`, `medium_claims`).
 A test holds a slab of medium to exp(−extinction · path),
 thin and thick, along the axis and slanted
 (`a_medium_of_splats_lets_through_as_much_as_its_extinction_says`).

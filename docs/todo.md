@@ -235,14 +235,13 @@ Numbers are for the forest at 1280×800, as measured when written.
   measured when it drew slices: new tiles took about a third.
   Lit, about 1.6 times that: the light itself (`Light::light` most),
   and new tiles half as much again, why is open.
-- **Native's see-through voxels cost all of them, drawn.**
-  Over each other in order (architecture.md, "See-through"),
-  nothing behind them is culled, and each is a tent four times its outline.
+- **Native's medium costs a fragment per slab a ray crosses**
+  (architecture.md, "See-through"), as far as the view goes:
+  pictures added up in any order, nothing after a ray is all but stopped is left out.
   Only media are (`KindDef::medium`): the moor's mist.
-  A see-through splat's sixth number (its finer cell's layer) is in every splat's,
-  a fifth more memory where the buffers already meet lavapipe's limit (below).
-  Leaving out what is behind pixels already all but covered
-  (front to back, nothing after a ray is stopped matters) is not done.
+  - Where a medium's colour changes along a ray, its colours mix without their order.
+  - The cells a level picks a layer more each way, for their medium alone,
+    are baked and uploaded whole.
   - A site's pieces, where shown, hide its medium and what is behind:
     right on average, but a coarse site of a crown in mist
     is a whole voxel or mist, never the crown's grain seen through mist.
@@ -263,13 +262,14 @@ Numbers are for the forest at 1280×800, as measured when written.
     They read the compositor's globals, the faces' views.
 - **`culling_on_the_gpu_leaves_the_picture_unchanged` fails now and then**
   on an Intel UHD (Mesa), at `b4c79ff` too; why is open.
+  Drawn flat, every time: the forest from its spawn.
   Maybe as it failed on lavapipe by the moor's mist:
   the depth pyramid's shorter side lost its last levels,
   and clusters over the whole view were hidden (fixed since).
 - **Native's flat pictures** (`--engine flat`, architecture.md, section 1).
   - Their depth is by w, ahead along the view (`flat_depth`),
     the other engines' by distance from the eye (`depth_of`),
-    so culling and the see-through splats ask which the frame draws.
+    so culling and the pictures of medium ask which the frame draws.
 - **Native's chunk engines while the eye moves.**
   - Their renderer composes a frame behind (`chunks.rs`),
     so `--stroll` counts nearly every frame as one whose content is still coming:

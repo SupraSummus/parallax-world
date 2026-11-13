@@ -40,13 +40,12 @@ pub struct Chunk {
     pub baked: Baked,
 }
 
-/** A chunk in a frame: its face and cell, and how far its cell's site was from the eye when it came (by which see-through ones are drawn). */
+/** A chunk in a frame: its face and cell. */
 #[derive(Clone)]
 pub struct Placement {
     pub face: usize,
     pub cell: CellChunk,
     pub chunk: Arc<Chunk>,
-    pub from_eye: f64,
 }
 
 /**
@@ -388,7 +387,7 @@ impl Renderer {
                 Seen::Unknown | Seen::Empty => (),
                 &mut Seen::Tiles(t) => waiting.push((cell, t, wanted)),
                 &mut Seen::Bake(t) => _ = baking.insert(cell, (request(cell, t), wanted)),
-                Seen::Baked(chunk) => chunks.push(Placement { face: f, cell, chunk: chunk.clone(), from_eye: wanted.distance }),
+                Seen::Baked(chunk) => chunks.push(Placement { face: f, cell, chunk: chunk.clone() }),
             }
         });
         self.picks[f] = Some(Pick { picked, chunks, waiting, baking });
@@ -489,9 +488,9 @@ impl Renderer {
                 && let Some(picked) = pick.picked.at(&r.cell)
             {
                 *picked = seen.clone();
-                if let Some((_, wanted)) = pick.baking.remove(&r.cell) {
+                if pick.baking.remove(&r.cell).is_some() {
                     if let Seen::Baked(chunk) = &seen {
-                        pick.chunks.push(Placement { face: r.face, cell: r.cell, chunk: chunk.clone(), from_eye: wanted.distance });
+                        pick.chunks.push(Placement { face: r.face, cell: r.cell, chunk: chunk.clone() });
                     }
                     any = true;
                 }

@@ -20,7 +20,7 @@ pub const BACKENDS: wgpu::Backends = wgpu::Backends::VULKAN;
 /**
  * What the chunks' compositor needs of a device: draws listed on the GPU,
  * a tile or a cluster's splats each; depth tested before tiles' pixels
- * march, though they write it (compositor.wgsl); see-through splats
+ * march, though they write it (compositor.wgsl); pictures of medium
  * added up in 32-bit floats; and flat pictures cut to their faces' rays.
  */
 pub const FEATURES: wgpu::Features = wgpu::Features::INDIRECT_FIRST_INSTANCE

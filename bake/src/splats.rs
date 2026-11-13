@@ -2,7 +2,8 @@
 //! paint (a splat) at its site, in relief over its chunk's plane:
 //! a slice's swept over its column's voxels behind it,
 //! a cell's whole ones one per column, as far as its side may show,
-//! or each, and its see-through ones each.
+//! or each; and a cell's see-through ones as pictures of its medium,
+//! a column's slab by slab.
 
 use std::collections::HashMap;
 use std::f64::consts::FRAC_1_SQRT_2;
@@ -10,7 +11,7 @@ use std::f64::consts::FRAC_1_SQRT_2;
 use crate::slicing::{LAYER, MAX_SLANT};
 use crate::surface::Voxel;
 use fcc::light::{FaceLight, colour};
-use fcc::{FACE_KINDS, VOXEL_FACES};
+use fcc::{ALPHA, FACE_KINDS, VOXEL_FACES};
 
 use crate::tables::Geometry;
 
@@ -293,6 +294,93 @@ pub fn cell_splats(splats: &mut Splats, geometry: &Geometry, colour: &mut dyn Fn
             width: FRAC_1_SQRT_2,
             colour: colour(voxel),
             site: voxel.site,
+        });
+    }
+}
+
+/**
+ * A column of a picture of a cell's medium (Baker::bake_cell): a slab of
+ * a column of its grid, its voxels in `slab` layers of it, drawn on the
+ * slab's middle plane see-through, as much as they stop.
+ * Each slab of a column is one cell's, the one holding its middle, so that
+ * a slab's pictures, one per cell, tile its plane once; a picture holds
+ * its neighbours around its own too, so that its pixels may take each
+ * column's and its neighbours' by how near they are, across cells.
+ */
+pub struct Medium {
+    /** Its column (a, b), from the least of its cell's bounds. */
+    pub column: [i32; 2],
+    /** Its slab's first layer, past the cell's plane, in half layers: every cell's slab there starts there. */
+    pub first: i32,
+    /** Whether the cell's own, or its neighbour's. */
+    pub own: bool,
+    /**
+     * How much its voxels stop of a ray crossing each along its mean
+     * chord (worldgen's CHORD), as optical depth: −ln of what gets through
+     * each, added up; of those in its slab's nearer half and its farther.
+     */
+    pub depth: [f32; 2],
+    /** Its voxels' colour, their mean by how much each stops (RGBA, see voxel_colour, its alpha whole). */
+    pub colour: u32,
+}
+
+/** The middle site of the slab of `slab` layers holding layer c of a column of row b, whose sites are c of b's parity. */
+pub(crate) fn slab_middle(c: i32, b: i32, slab: i32) -> i32 {
+    let c = (c - 1).div_euclid(slab) * slab + slab / 2;
+    c + ((c - b) & 1)
+}
+
+/**
+ * Fills `medium` with the see-through voxels of `voxels` a ray of the face
+ * can enter (seen), their slabs of `slab` layers by column, the first from
+ * layer 1, those whose middle site `owns` says is the cell's, and their
+ * neighbours, `centre` as cell_splats takes it; by slab, row b and a.
+ */
+pub fn cell_medium(
+    medium: &mut Vec<Medium>,
+    geometry: &Geometry,
+    colour: &mut dyn FnMut(&Voxel) -> u32,
+    voxels: &[Voxel],
+    centre: i32,
+    slab: i32,
+    owns: &dyn Fn(i32, i32, i32) -> bool,
+) {
+    medium.clear();
+    // By slab and column: the optical depths of its halves, and the colours times them.
+    let mut slabs: HashMap<[i32; 3], ([f64; 2], [f64; 3])> = HashMap::new();
+    for v in voxels.iter().filter(|v| v.alpha != ALPHA && v.alpha != 0 && seen(geometry, v.open)) {
+        let [a, b, c] = v.site;
+        let depth = -(1.0 - f64::from(v.alpha) / f64::from(ALPHA)).ln();
+        let rgb = colour(v);
+        let (k, into) = ((c - 1).div_euclid(slab), (c - 1).rem_euclid(slab));
+        let (depths, colours) = slabs.entry([k, b, a]).or_default();
+        depths[usize::from(2 * into >= slab)] += depth;
+        for (k, sum) in colours.iter_mut().enumerate() {
+            *sum += depth * f64::from((rgb >> (8 * k)) & 0xff);
+        }
+    }
+    let own = |[k, b, a]: [i32; 3]| owns(a, b, slab_middle(k * slab + 1, b, slab));
+    // Its own slabs of columns where the field is: by any with medium, which reaches as far as their neighbours' middles (veil_fragment); their neighbours, for their pixels' field.
+    const NEIGHBOURS: [[i32; 2]; 6] = [[2, 0], [-2, 0], [1, 1], [-1, 1], [1, -1], [-1, -1]];
+    let near = |[k, b, a]: [i32; 3]| std::iter::once([k, b, a]).chain(NEIGHBOURS.map(|[da, db]| [k, b + db, a + da]));
+    let mut kept: Vec<([i32; 3], bool)> = slabs.keys().flat_map(|&key| near(key)).filter(|&key| own(key)).map(|key| (key, true)).collect();
+    kept.sort_unstable();
+    kept.dedup();
+    let owned: Vec<[i32; 3]> = kept.iter().map(|k| k.0).collect();
+    kept.extend(owned.into_iter().flat_map(near).filter(|key| slabs.contains_key(key) && !own(*key)).map(|key| (key, false)));
+    // By slab, row and column.
+    kept.sort_unstable();
+    kept.dedup();
+    for ([k, b, a], own) in kept {
+        let (depths, colours) = slabs.get(&[k, b, a]).copied().unwrap_or_default();
+        let all: f64 = depths.iter().sum();
+        let channel = |k: usize| ((colours[k] / all.max(f64::MIN_POSITIVE)).round() as u32).min(255) << (8 * k);
+        medium.push(Medium {
+            column: [a, b],
+            first: 2 * (k * slab + 1) - centre,
+            own,
+            depth: depths.map(|d| d as f32),
+            colour: channel(0) | channel(1) | channel(2) | 0xff << 24,
         });
     }
 }
