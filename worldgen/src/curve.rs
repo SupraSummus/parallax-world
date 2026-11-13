@@ -61,16 +61,22 @@ impl<const D: usize> Curve<D> {
 
     /**
      * A curve that wanders at random, by `seed`: each point off its
-     * neighbours' middle by a random offset, within its level's wander,
-     * that depends only on them.
+     * neighbours' middle by a random offset that depends only on them,
+     * anywhere within its level's wander, alike every way.
      */
     pub fn wandering(seed: u64, wander: Vec<Fx>) -> Curve<D> {
-        // Offsets in a cube inside the ball of the wander.
-        let half: Vec<Fixed> = wander.iter().map(|w| w.to_bits() / (D.isqrt() as Fixed + 1)).collect();
+        let radius: Vec<Fixed> = wander.iter().map(|w| w.to_bits()).collect();
         Curve::new(wander, move |level, a, b| {
             let key = a.iter().chain(&b).fold(hash64(seed, level as i64, 0, 0), |h, c| hash64(h, c.to_bits(), 0, 0));
-            let (mut random, h) = (Rng::new(key), half[level]);
-            std::array::from_fn(|k| Fx::from_bits(((a[k].to_bits() + b[k].to_bits()) >> 1) + i64::from(random.below(2 * h as u32 + 1)) - h))
+            let (mut random, r) = (Rng::new(key), radius[level]);
+            // The first offset of the cube around the ball of the wander that is in the ball.
+            let off: [Fixed; D] = loop {
+                let off = std::array::from_fn(|_| i64::from(random.below(2 * r as u32 + 1)) - r);
+                if off.iter().map(|o| o * o).sum::<Fixed>() <= r * r {
+                    break off;
+                }
+            };
+            std::array::from_fn(|k| Fx::from_bits(((a[k].to_bits() + b[k].to_bits()) >> 1) + off[k]))
         })
     }
 
@@ -234,6 +240,28 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn a_wandering_curve_strays_as_far_every_way() {
+        // Points between ends in many places: the farthest any strays from its ends' middle along an axis,
+        // a diagonal of a face, and one of the cube.
+        let curve = Curve::<3>::wandering(7, vec![fx(4.0)]);
+        let offsets: Vec<[f64; 3]> = (0..20_000)
+            .map(|i| {
+                let ends = [[i, 0, 0], [i, 64, 0]].map(|e| e.map(|v| fx(f64::from(v))));
+                let point = curve.points(ends)[1];
+                std::array::from_fn(|k| (point[k] - (ends[0][k] + ends[1][k]) / 2).to_f64())
+            })
+            .collect();
+        let farthest = [[1.0, 0.0, 0.0], [0.0, -1.0, 1.0], [1.0, 1.0, -1.0]].map(|u: [f64; 3]| {
+            let length = u.iter().map(|v| v * v).sum::<f64>().sqrt();
+            offsets.iter().map(|o| (0..3).map(|k| o[k] * u[k]).sum::<f64>() / length).fold(f64::MIN, f64::max)
+        });
+        assert!(
+            farthest.iter().all(|f| (f - farthest[0]).abs() < 0.05 * farthest[0]),
+            "along an axis, a face's diagonal, a cube's: {farthest:?}"
+        );
     }
 
     #[test]
