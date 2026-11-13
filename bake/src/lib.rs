@@ -1,18 +1,16 @@
-//! Chunk baking, compiled to WebAssembly (in the worlds' module) for the
-//! bake workers: the voxels of a chunk cell that can show, as splats
+//! Chunk baking, compiled to WebAssembly (in the web's module, web/wasm/)
+//! for the bake workers: the voxels of a chunk cell that can show, as splats
 //! (hexagons of one colour) on its slice's centre plane, seen along the
 //! face's axis, and a mask of what they cover.
 //! A world is a grid per level of detail, or tiles of grids;
 //! each slice reads the one its atoms are the voxels of (in_grid).
-//! chunk-baker.ts drives it through the
-//! exports at the bottom. See docs/architecture.md, section 3.
-//! The same module finds what nearer layers cover on the main thread
-//! (coverage.rs), where a grid's voxels are along the faces' layers
+//! chunk-baker.ts drives it through web/wasm's baker.rs.
+//! See docs/architecture.md, section 3.
+//! It also finds where a grid's voxels are along the faces' layers
 //! (layer_index.rs), and walks a body on the ground (walk.rs).
 
 mod cells;
-mod coverage;
-mod fill;
+pub mod fill;
 mod layer_index;
 pub mod lod;
 pub mod slicing;
@@ -21,12 +19,11 @@ mod surface;
 mod tables;
 pub mod walk;
 
-use std::cell::RefCell;
 use std::sync::Arc;
 
 use cells::Cells;
 use fcc::light::Lighting;
-use fcc::{ALPHA, FACE_KINDS, FACE_WORDS, Grid, Lattice, Reader, Tiles, VIEW_FACES, lattices};
+use fcc::{ALPHA, FACE_KINDS, Grid, Lattice, Reader, Tiles, VIEW_FACES, lattices};
 use fill::{fill_mask, solid_blocks};
 use lod::CellChunk;
 use slicing::{LAYER, chunk_cell, slice_centre, spacing, thickness};
@@ -35,7 +32,6 @@ use surface::{cell_surface, surface};
 use tables::Geometry;
 
 // For native frontends, which link the baker instead of loading its WebAssembly.
-pub use coverage::Coverage;
 pub use layer_index::LayerIndex;
 pub use surface::Slice;
 
@@ -123,8 +119,7 @@ pub struct Baker {
      * first, and its colour.
      */
     pub columns: Vec<[u32; 3]>,
-    /** Their sites, filled by sites(), and the spacing of the grid they were read from. */
-    sites: Vec<i32>,
+    /** The spacing of the grid the last chunk's splats were read from. */
     spacing: i32,
 }
 
@@ -147,7 +142,6 @@ impl Baker {
             blocks: Vec::new(),
             numbers: Vec::new(),
             columns: Vec::new(),
-            sites: Vec::new(),
             spacing: 1,
         }
     }
@@ -177,8 +171,14 @@ impl Baker {
         }
     }
 
-    fn last_grid(&mut self) -> Option<&mut Grid> {
+    /** The grid set_grid set last, to write its sites, while no other baker shares it. */
+    pub fn last_grid(&mut self) -> Option<&mut Grid> {
         self.grids.get_mut(self.last).and_then(Arc::get_mut).and_then(Tiles::only_mut)
+    }
+
+    /** The sites of the last baked chunk's splats, in world units (for tests). */
+    pub fn splat_sites(&self) -> impl Iterator<Item = [i32; 3]> + '_ {
+        self.splats.splats.iter().map(|s| s.site.map(|v| v * self.spacing))
     }
 
     /**
@@ -408,126 +408,4 @@ impl Baker {
  */
 fn slice_numbers(s: &Splat) -> [f32; 2] {
     [s.run as f32, f32::from_bits(s.colour & 0x00ff_ffff | ((128 + s.depth) as u32) << 24)]
-}
-
-// The WebAssembly interface: chunk-baker.ts writes a world's colours and
-// grids through the pointers these return, then bakes chunk after chunk,
-// reading each result from RESULT and the splat and block buffers it
-// points to.
-
-/** A world being handed over, then baking it. */
-enum State {
-    None,
-    Loading { colours: Vec<u32> },
-    Ready(Box<Baker>),
-}
-
-thread_local! {
-    static STATE: RefCell<State> = const { RefCell::new(State::None) };
-    static RESULT: RefCell<[f64; 11]> = const { RefCell::new([0.0; 11]) };
-}
-
-/** Starts a world of `materials` materials; returns where to write their colours (u32, 0xrrggbb by id), then call world_ready. */
-#[unsafe(no_mangle)]
-pub extern "C" fn world_start(materials: usize) -> *mut u32 {
-    STATE.with_borrow_mut(|state| {
-        let mut colours = vec![0; materials];
-        let at = colours.as_mut_ptr();
-        *state = State::Loading { colours };
-        at
-    })
-}
-
-/**
- * Sets the ready world's grid of `level`, of the box given and `used`
- * bricks of sites; returns where to write its bricks (i32), then its sites
- * at world_cells(). Chunks of a level are baked only once it has a grid.
- */
-#[unsafe(no_mangle)]
-#[allow(clippy::too_many_arguments)]
-pub extern "C" fn world_grid(level: usize, min_x: i32, min_y: i32, min_z: i32, nx: i32, ny: i32, nz: i32, used: usize) -> *mut u8 {
-    STATE.with_borrow_mut(|state| match state {
-        State::Ready(baker) => baker.set_grid(level, Grid::new([min_x, min_y, min_z], [nx, ny, nz], used)).bricks.as_mut_ptr() as *mut u8,
-        _ => std::ptr::null_mut(),
-    })
-}
-
-/** Where to write the sites of the grid world_grid set last. */
-#[unsafe(no_mangle)]
-pub extern "C" fn world_cells() -> *mut u8 {
-    STATE.with_borrow_mut(|state| match state {
-        State::Ready(baker) => baker.last_grid().map_or(std::ptr::null_mut(), |g| g.cells.as_mut_ptr()),
-        _ => std::ptr::null_mut(),
-    })
-}
-
-/**
- * Where to write the faces (Grid::faces) of the grid world_grid set
- * last: FACE_WORDS words (u32) for each of `sites` sites, by index.
- */
-#[unsafe(no_mangle)]
-pub extern "C" fn world_faces(sites: usize) -> *mut u32 {
-    STATE.with_borrow_mut(|state| match state {
-        State::Ready(baker) => baker.last_grid().map_or(std::ptr::null_mut(), |g| {
-            g.faces = vec![0; sites * FACE_WORDS];
-            g.faces.as_mut_ptr()
-        }),
-        _ => std::ptr::null_mut(),
-    })
-}
-
-/** Finishes loading. */
-#[unsafe(no_mangle)]
-pub extern "C" fn world_ready() {
-    STATE.with_borrow_mut(|state| {
-        if let State::Loading { colours } = std::mem::replace(state, State::None) {
-            *state = State::Ready(Box::new(Baker::new(&colours)));
-        }
-    })
-}
-
-/**
- * Bakes a chunk (see Baker::bake); returns RESULT: mask width, height,
- * origin x, origin y, extent width, height, mask scale, splats, splats
- * pointer (f32, 5 each), blocks pointer, blocks length.
- */
-#[unsafe(no_mangle)]
-pub extern "C" fn bake(face: u32, level: i32, atoms: i32, layer: i32, cutoff: f64, i: i32, j: i32) -> *const f64 {
-    STATE.with_borrow_mut(|state| {
-        let State::Ready(baker) = state else { return std::ptr::null() };
-        let baked = baker.bake(face as usize, &Slice { level, atoms, layer, cutoff }, i, j);
-        RESULT.with_borrow_mut(|result| {
-            *result = [
-                baked.width as f64,
-                baked.height as f64,
-                baked.origin_x,
-                baked.origin_y,
-                baked.extent_width,
-                baked.extent_height,
-                baked.scale,
-                baked.count as f64,
-                baker.numbers.as_ptr() as usize as f64,
-                baker.blocks.as_ptr() as usize as f64,
-                baker.blocks.len() as f64,
-            ];
-            result.as_ptr()
-        })
-    })
-}
-
-/**
- * The sites of the last baked chunk's splats, for
- * tests: a, b, c (i32) each, in world units.
- */
-#[unsafe(no_mangle)]
-pub extern "C" fn sites() -> *const i32 {
-    STATE.with_borrow_mut(|state| match state {
-        State::Ready(baker) => {
-            let Baker { splats, sites, spacing, .. } = &mut **baker;
-            sites.clear();
-            sites.extend(splats.splats.iter().flat_map(|s| s.site.map(|v| v * *spacing)));
-            sites.as_ptr()
-        }
-        _ => std::ptr::null(),
-    })
 }

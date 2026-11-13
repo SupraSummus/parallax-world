@@ -2,7 +2,7 @@
  * pnpm shot [out.png] [view query] [--ui] [--size WxH] [--timeout S]
  *
  * The app in headless Chromium at the view the query gives
- * (parseViewQuery in src/lib/renderer.ts, e.g. 'seed=1&look=30,-10'),
+ * (parseViewQuery in web/src/lib/renderer.ts, e.g. 'seed=1&look=30,-10'),
  * saved once nothing is left to bake, by default without its panels:
  * to check a change without a GPU.
  * Exits with 1 if the view did not complete in time (it saves it anyway).
@@ -34,7 +34,7 @@ const { chromium } = createRequire(import.meta.url)('playwright')
 const start = performance.now()
 const log = message => { console.log(`${((performance.now() - start) / 1000).toFixed(1)} s: ${message}`) }
 
-const server = await createServer({ server: { port: 0 }, logLevel: 'warn' })
+const server = await createServer({ root: 'web', server: { port: 0 }, logLevel: 'warn' })
 await server.listen()
 const browser = await chromium.launch({
   args: lavapipe ? ['--use-angle=vulkan', '--enable-features=Vulkan,VulkanFromANGLE,DefaultANGLEVulkan', '--ignore-gpu-blocklist'] : [],

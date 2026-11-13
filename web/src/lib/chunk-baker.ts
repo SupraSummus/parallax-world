@@ -87,7 +87,7 @@ interface Mask {
   scale: number
 }
 
-/** The baker's exports (bake/src/lib.rs). */
+/** The baker's exports (web/wasm/src/baker.rs). */
 interface Baker {
   memory: WebAssembly.Memory
   world_start: (materials: number) => number

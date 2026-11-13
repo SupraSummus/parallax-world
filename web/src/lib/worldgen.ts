@@ -1,5 +1,5 @@
 /**
- * The worlds of worlds/ (Rust, worlds/src/wasm.rs), as WORLDS lists
+ * The worlds of worlds/ (Rust, web/wasm/src/lib.rs), as WORLDS lists
  * them (the forest, the valley: the forest with a town and fields, ...),
  * generated in any box alone, at any level of detail, in a WebAssembly
  * instance of their own. See docs/generators.md. No DOM.
@@ -8,7 +8,7 @@ import { wasmInstance } from './wasm'
 import { FACE_WORDS, type Box, type Material, type VoxelData } from './voxel-grid'
 import type { Generated } from './world'
 
-/** The worlds' exports (worlds/src/wasm.rs). */
+/** The worlds' exports (web/wasm/src/lib.rs). */
 interface Exports {
   memory: WebAssembly.Memory
   worldgen_worlds: () => number

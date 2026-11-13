@@ -402,7 +402,7 @@ fn parse_view_query(query: &str) -> ViewQuery {
         v.try_into().ok().filter(|v: &[f64; N]| v.iter().all(|x| x.is_finite()))
     }
     ViewQuery {
-        // As worlds' WebAssembly takes the web's.
+        // As the web's WebAssembly takes it.
         seed: numbers::<1>(get("seed")).map(|[v]| v as i64 as u64),
         world: get("world").filter(|w| worlds::by_name(w).is_some()).map(str::to_string),
         camera: numbers::<3>(get("camera")),

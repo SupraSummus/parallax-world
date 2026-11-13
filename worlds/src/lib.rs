@@ -1,7 +1,7 @@
 //! The worlds, built on worldgen's engine with its public API only, and
 //! the registry hosts start them from by name (docs/generators.md). The
 //! native frontend links them; the web generates them as WebAssembly
-//! (wasm.rs, src/lib/worldgen.ts).
+//! (web/wasm/, web/src/lib/worldgen.ts).
 
 pub mod city;
 pub mod fields;
@@ -15,7 +15,6 @@ pub mod railway;
 pub mod scene;
 pub mod town;
 pub mod valley;
-pub mod wasm;
 
 use worldgen::World;
 use worldgen::grid::Box3;

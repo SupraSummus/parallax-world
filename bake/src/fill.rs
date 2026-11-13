@@ -1,5 +1,5 @@
 //! Which pixels of a chunk's mask its splats cover, and which blocks of
-//! them are solid: what coverage.rs knows of a chunk.
+//! them are solid: what the web's coverage (web/wasm/src/coverage.rs) knows of a chunk.
 
 use crate::slicing::{LAYER, MAX_SLANT};
 use crate::splats::Splats;
@@ -60,7 +60,7 @@ pub const DRAWN: u8 = 2;
  * Which BLOCK × BLOCK blocks of a mask are drawn all over seen along every
  * ray (SOLID) and which may have a pixel drawn (DRAWN), a byte of bits per
  * block, in rows, for finding what a chunk hides and whether it is hidden
- * (coverage.rs). A block reaching past the mask's edge counts its pixels
+ * (coverage.rs, web/wasm/). A block reaching past the mask's edge counts its pixels
  * in the mask. SOLID looks along the axis and the rhombus's corners only:
  * a block covered from each may still open between them (docs/todo.md);
  * occlusion.test.ts finds the pictures the same with and without skipping.

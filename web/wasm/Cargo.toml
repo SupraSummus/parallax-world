@@ -1,0 +1,15 @@
+[package]
+name = "parallax-web"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# The web's WebAssembly module (pnpm wasm).
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+bake = { path = "../../bake" }
+fcc = { path = "../../fcc" }
+worldgen = { path = "../../worldgen" }
+worlds = { path = "../../worlds" }

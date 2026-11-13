@@ -16,7 +16,7 @@ and the city (`city.rs`), boxes on a plan of quarter metres;
 a host starts either by name from `WORLDS` (`worlds/src/lib.rs`),
 as a `World`: its generator, spawn and heights,
 and the places it names (`points`);
-the web lists and generates them all as WebAssembly (`src/lib/worldgen.ts`).
+the web lists and generates them all as WebAssembly (`web/src/lib/worldgen.ts`).
 Integers and fixed point (`noise.rs`) decide wherever they can,
 so a world is the same on every machine and as fine far from the origin.
 

@@ -3,15 +3,15 @@
 # (`-p lab` builds it).
 [workspace]
 resolver = "3"
-members = ["fcc", "bake", "worldgen", "worlds", "native", "lab"]
-default-members = ["fcc", "bake", "worldgen", "worlds", "native"]
+members = ["fcc", "bake", "worldgen", "worlds", "native", "web/wasm", "lab"]
+default-members = ["fcc", "bake", "worldgen", "worlds", "native", "web/wasm"]
 
 # The tests bake whole cells and generate whole tiles, several times faster
 # optimised. Debug assertions stay on.
 [profile.test]
 opt-level = 2
 
-# The web's WebAssembly (pnpm wasm): small and fast, however long it takes to build.
+# The web's WebAssembly (pnpm wasm, web/wasm/): small and fast, however long it takes to build.
 [profile.wasm]
 inherits = "release"
 lto = true
