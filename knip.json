@@ -1,4 +1,7 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "project": ["**/*.{ts,tsx,css}!", "!src/**/*.test-helper.ts!"]
+  "entry": ["web/src/main.tsx!"],
+  "project": ["**/*.{ts,tsx,css}!", "!web/src/**/*.test-helper.ts!"],
+  "vite": { "config": ["web/vite.config.ts"] },
+  "vitest": { "config": ["web/vite.config.ts"] }
 }

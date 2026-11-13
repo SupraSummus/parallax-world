@@ -28,30 +28,40 @@ only conventional files (README, AGENTS, LICENSE) stay at the root.
 ## Source layout
 
 ```
-src/
-├── main.tsx                 # Entry: error boundary + App
-├── App.tsx                  # UI panels, keyboard movement loop
-├── ErrorFallback.tsx
-├── main.css                 # Tailwind + design tokens
-├── components/
-│   └── ui/                  # shadcn/ui primitives (generated; CLI config in components.json)
-└── lib/
-    ├── fcc.ts               # Voxel geometry: rhombic dodecahedra of the FCC lattice
-    ├── voxel-grid.ts        # Voxel storage on the FCC lattice, in bricks (typed arrays), a material per voxel face; LayerIndex, made by bake/
-    ├── world.ts             # World: voxel grids by level of detail (generated in tiles around the camera), spawn; tests' scenes, a grid per level given
-    ├── worldgen.ts          # The worlds of worlds/ (WebAssembly), any box at any level
-    ├── cells.ts             # Cells of the coarser lattices N·FCC that slices are made of
-    ├── slice-selection.ts   # Slices and chunks (pure functions)
-    ├── view.ts              # Camera orientation, the 12 faces (FCC directions), projection
-    ├── walk.ts              # Walking on the ground with bake/src/walk.rs (WebAssembly)
-    ├── renderer.ts          # Slices and chunks in view, caching, screen placement (no DOM)
-    ├── occlusion.ts         # Which screen cells nearer layers cover (bake/src/coverage.rs), to skip chunks behind them
-    ├── chunk-baker.ts       # Bakes whole chunks with bake/ (WebAssembly); the bake worker's message protocol
-    ├── wasm.ts              # The WebAssembly module (worlds/ with worldgen/ and bake/), inlined; an instance per use
-    ├── worker-bakery.ts     # Pool of bake workers the renderer sends missing chunks to
-    ├── bake.worker.ts       # Bake worker entry
-    ├── compositor.ts        # Draws the renderer's frames with WebGL 2: chunks' splats as instanced prisms
-    └── utils.ts             # cn() for class names
+web/                         # The web frontend: React and WebGL 2, its Rust in WebAssembly
+├── index.html, vite.config.ts, tsconfig.json
+├── components.json          # shadcn/ui's CLI config
+├── wasm/                    # The web's WebAssembly module: bake/, worldgen/ and worlds/, and the exports the page calls
+│   └── src/
+│       ├── worlds.rs        # The worlds' exports, for worldgen.ts
+│       ├── baker.rs         # The baker's, for chunk-baker.ts
+│       ├── index.rs         # The layer index's, for voxel-grid.ts
+│       ├── walk.rs          # Walking's, for walk.ts
+│       └── coverage.rs      # Which screen cells nearer layers cover, on the main thread; its exports, for occlusion.ts
+└── src/
+    ├── main.tsx             # Entry: error boundary + App
+    ├── App.tsx              # UI panels, keyboard movement loop
+    ├── ErrorFallback.tsx
+    ├── main.css             # Tailwind + design tokens
+    ├── components/
+    │   └── ui/              # shadcn/ui primitives (generated)
+    └── lib/
+        ├── fcc.ts           # Voxel geometry: rhombic dodecahedra of the FCC lattice
+        ├── voxel-grid.ts    # Voxel storage on the FCC lattice, in bricks (typed arrays), a material per voxel face; LayerIndex, made by bake/
+        ├── world.ts         # World: voxel grids by level of detail (generated in tiles around the camera), spawn; tests' scenes, a grid per level given
+        ├── worldgen.ts      # The worlds of worlds/ (WebAssembly), any box at any level
+        ├── cells.ts         # Cells of the coarser lattices N·FCC that slices are made of
+        ├── slice-selection.ts # Slices and chunks (pure functions)
+        ├── view.ts          # Camera orientation, the 12 faces (FCC directions), projection
+        ├── walk.ts          # Walking on the ground with bake/src/walk.rs (WebAssembly)
+        ├── renderer.ts      # Slices and chunks in view, caching, screen placement (no DOM)
+        ├── occlusion.ts     # Which screen cells nearer layers cover (wasm/src/coverage.rs), to skip chunks behind them
+        ├── chunk-baker.ts   # Bakes whole chunks with bake/ (WebAssembly); the bake worker's message protocol
+        ├── wasm.ts          # The WebAssembly module (wasm/), inlined; an instance per use
+        ├── worker-bakery.ts # Pool of bake workers the renderer sends missing chunks to
+        ├── bake.worker.ts   # Bake worker entry
+        ├── compositor.ts    # Draws the renderer's frames with WebGL 2: chunks' splats as instanced prisms
+        └── utils.ts         # cn() for class names
 Cargo.toml                   # The Rust crates' workspace: one lock, one target; lab/ a member built only when named
 .cargo/config.toml           # Builds for x86-64-v3: floor and ceil inline (see there)
 scripts/shot.mjs             # pnpm shot: a view in headless Chromium, saved once complete
@@ -60,9 +70,9 @@ fcc/                         # The FCC lattice and its voxels as every crate see
 └── src/
     ├── lib.rs               # The voxel's faces, the view faces' lattices, the grids' levels, Grid, tiles of grids, voxels read per face
     └── light.rs             # The light from voxels' faces, as hosts that light a world hand it over
-bake/                        # Chunk baker, coverage and walking in Rust, on fcc/, in worlds/' WebAssembly
+bake/                        # Chunk baker, layer index and walking in Rust, on fcc/: native links it, web/wasm/ exports it
 └── src/
-    ├── lib.rs               # Baker: one chunk per call; the WebAssembly exports
+    ├── lib.rs               # Baker: one chunk per call
     ├── cells.rs             # cells.ts, with a table per level
     ├── slicing.rs           # slice-selection.ts's slices' shapes and chunks, for the web's baker
     ├── surface.rs           # A cell's voxels that can show
@@ -70,9 +80,8 @@ bake/                        # Chunk baker, coverage and walking in Rust, on fcc
     ├── splats.rs            # Which voxels a chunk shows, each a hexagon at its site: of a slice, each column's nearest over its run; of a cell, its whole ones' relief: a pillar per column (or each a ray can enter), and each see-through one a ray can enter
     ├── lod.rs               # Native's chunks: whole cells of the lattice, each face's levels by depth along it, its cells kept picked
     ├── fill.rs              # Splats filled into a mask for every slant, solid blocks (for coverage)
-    ├── layer_index.rs       # LayerIndex: where each face's layers hold voxels; its WebAssembly exports
-    ├── walk.rs              # Walking: a body that falls, collides, steps and jumps; its WebAssembly exports
-    └── coverage.rs          # Which screen cells nearer layers cover, on the main thread; its WebAssembly exports
+    ├── layer_index.rs       # LayerIndex: where each face's layers hold voxels
+    └── walk.rs              # Walking: a body that falls, collides, steps and jumps
 worldgen/                    # The world-generation engine, moving to integers, into the baker's grids; no worlds
 ├── src/
 │   ├── js.rs                # Float math the same on every target (libm), named after JS's Math
@@ -97,7 +106,7 @@ worldgen/                    # The world-generation engine, moving to integers, 
 │       └── directions.rs    # Whether a world's directions follow the lattice's: four-fold harmonics of pairs' directions, over seeds
 ├── data/light-reference.txt # The reference's light in light.rs's test scenes, written by its test reference_values
 └── tests/                  # contract.rs: the engine on test worlds (fog, caves, a village, knobs on a wall), what it refuses; shapes.rs: each solid, to the levels it keeps the contract
-worlds/                      # The worlds, on worldgen's public API only; the web's WebAssembly
+worlds/                      # The worlds, on worldgen's public API only
 ├── src/
 │   ├── lib.rs               # WORLDS: the registry hosts start worlds from by name, with the regions checked around their places
 │   ├── forest.rs            # The forest, on ground it may share, its trees' crowns kept to their rooms
@@ -110,8 +119,7 @@ worlds/                      # The worlds, on worldgen's public API only; the we
 │   ├── railway.rs           # The valley's railway: a line along it made by cost, cut, filled, bridged and tunnelled; stations by towns
 │   ├── city.rs              # The city: blocks of buildings whose rooms form a maze, boxes on a plan of quarter metres
 │   ├── learned.rs           # The learned town: settlements drawn by a split grammar learned in lab/, on the forest's land
-│   ├── scene.rs             # Scenes made elsewhere: voxels read from a file (scripts/voxelize.py); lib.rs adds Sponza, with its feature
-│   └── wasm.rs              # Its WebAssembly exports (the module holds bake/'s too)
+│   └── scene.rs             # Scenes made elsewhere: voxels read from a file (scripts/voxelize.py); lib.rs adds Sponza, with its feature
 ├── data/town-grammar.bin    # learned.rs's rule table, written by lab's export example
 ├── data/scenes/             # Scenes' voxels, not in git (their licences): see docs/generators.md, "Scenes"
 ├── data/cost/               # Each world's cost baseline, which tests/cost.rs holds it to
@@ -154,7 +162,7 @@ While iterating, run only the affected test files
 run `pnpm check` again only after changing code.
 
 `pnpm lint` and `pnpm test` cover the Rust
-in `bake/`, `worldgen/`, `worlds/` and `native/` too
+in `fcc/`, `bake/`, `worldgen/`, `worlds/`, `native/` and `web/wasm/` too
 (clippy with warnings as errors, rustfmt, `cargo test`);
 `pnpm dev`, `pnpm build` and `pnpm test:web` rebuild its WebAssembly first.
 CI runs the same scripts plus `pnpm build`, in jobs side by side,

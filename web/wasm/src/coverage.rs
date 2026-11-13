@@ -7,7 +7,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::f64::consts::SQRT_2;
 
-use crate::fill::{BLOCK, DRAWN, SOLID};
+use bake::fill::{BLOCK, DRAWN, SOLID};
 
 /** Side of a coverage cell, in CSS pixels. */
 const CELL: usize = 16;

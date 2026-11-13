@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 use fcc::{Faces, face_words};
 
-// The baker's grids, as worlds hand them over (worlds/src/wasm.rs), the voxel's faces, and a whole site's alpha: it stops every ray.
+// The baker's grids, as worlds hand them over (web/wasm/src/lib.rs), the voxel's faces, and a whole site's alpha: it stops every ray.
 pub use fcc::{ALPHA, FACE_WORDS, Grid, VOXEL_FACES};
 
 pub const BRICK: i64 = 8;

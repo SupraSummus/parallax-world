@@ -140,8 +140,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   The contract's survey asks every cell of a sparse population's square:
   the valley's haystacks' anchors cost most of it.
   Caching Rust's builds would spare little: `libm` is their one dependency.
-  Not tried: one Cargo target for `bake/`, `worldgen/` and `worlds/`,
-  each of which now builds the ones before it again.
 - **Slice detail sets both thickness and level of detail.**
   "Slice Detail" sets how thick slices are,
   and so their level of detail (atoms of 2^(k−s) at level k,
@@ -226,7 +224,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   and covering with them (`coverage_cover`).
 - **Turning, finding covered chunks is slow.**
   About 11 ms of a render (forest, 1920×1080, Node),
-  mostly testing sub-blocks one by one in `cover` (`bake/src/coverage.rs`):
+  mostly testing sub-blocks one by one in `cover` (`web/wasm/src/coverage.rs`):
   about 270,000 tests a frame, three in four failing,
   as the forest covers the screen in fine pieces.
   Testing quarters of a cell first would not help (two in three are mixed),
@@ -322,7 +320,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   (Shared memory needs cross-origin isolation,
   which GitHub Pages can only get through a service worker.)
 - **Generating the forest's grids takes 3–8 s of worker time per level**
-  (the WebAssembly of `worlds/`, in Node; the TS forest took twice that),
+  (the web's WebAssembly, in Node; the TS forest took twice that),
   most at levels 0 to 4 (a moved grid, a seventh of that).
   In the TS forest it was mostly the ground's noise,
   which the terrain and the canopy compute about 14 times per column

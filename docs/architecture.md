@@ -106,7 +106,7 @@ for the voxels engine, `voxels::READ`, as far as its rays read.
 A tile never changes once made,
 so no chunk or cell surface goes stale as tiles come.
 Tests' scenes of hand-made voxels are given a grid per level,
-the coarser ones sampled at their sites (`src/lib/scene.test-helper.ts`).
+the coarser ones sampled at their sites (`web/src/lib/scene.test-helper.ts`).
 A slice is about 1/detail of its distance thick (section 2),
 so from level s on, a slab of 2^s atoms,
 a voxel stays about the same size on screen,
@@ -282,7 +282,7 @@ and for what a column hides behind a gap in it
 and farther slices show through).
 The thicker the slice, the more of such a column it holds:
 against rays cast in perspective,
-[`src/lib/relief.test.ts`](../src/lib/relief.test.ts)
+[`web/src/lib/relief.test.ts`](../web/src/lib/relief.test.ts)
 finds no leak at the most detail
 and leaks from slices as thick as their distance;
 at the default, a few pixels zoomed in.
@@ -376,7 +376,7 @@ and a ray looking down would pass over its nearest voxel
 into the next slice, under the surface: stripes.
 So a kept voxel stands for its run (`run_ends`),
 the solid voxels behind it in its column up to the last a ray may see,
-and is drawn as a prism over them (section 4; `src/lib/pillars.test.ts`).
+and is drawn as a prism over them (section 4; `web/src/lib/pillars.test.ts`).
 A run shows its first voxel's colour,
 so a lawn's shades or a road's markings stretch along the axis,
 unless no ray sees that voxel by an open face,
@@ -396,15 +396,15 @@ widened, their hexagons overlap,
 and which shows there is the same for every ray,
 so near a slant's extremes a voxel's neighbour in its layer may show
 on up to |σx| of its width.
-`src/lib/chunk-baker.test.ts` checks against rays cast along the axis
+`web/src/lib/chunk-baker.test.ts` checks against rays cast along the axis
 that every voxel one meets first is painted,
 and `bake/src/splats.rs` that a slanted ray enters first
 the pillar of the column it meets first, or its neighbour so.
 
 **The baker** is Rust (`bake/`), compiled to WebAssembly
-with the worlds and their engine, which depend on it
-(`worlds/`, `worldgen/`, section 6)
-and inlined into the app (`wasm.ts`), so it compiles synchronously
+with the worlds and their engine (`worlds/`, `worldgen/`, section 6)
+into the web's one module (`web/wasm/`),
+inlined into the app (`wasm.ts`), so it compiles synchronously
 in a worker, on the main thread (for coverage, section 4) or in Node,
 with no files to fetch.
 `ChunkBaker` hands it a world once:
@@ -517,7 +517,7 @@ a cell, then its chunk's content, is kept
 if its projected corners' bounding box (`screenBox`) overlaps the viewport.
 
 **Covered chunks.** Near layers cover most of what is behind them.
-`Coverage` (`bake/src/coverage.rs`, run on the main thread
+`Coverage` (`web/wasm/src/coverage.rs`, run on the main thread
 in its own instance of the baker's WebAssembly)
 marks which small square sub-blocks of the screen
 the face's layers drawn so far cover;

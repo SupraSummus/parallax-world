@@ -2,10 +2,8 @@
 //! block of BLOCK columns a, the least and greatest b of its voxels, from
 //! one pass over the grid, so a renderer can tell which chunk cells are
 //! empty and how high their content reaches. Opposite faces share a table.
-//! The web indexes grids through the exports at the bottom, and reads the
+//! The web indexes grids through web/wasm's index.rs, and reads the
 //! tables in voxel-grid.ts (LayerIndex there, tested there).
-
-use std::cell::RefCell;
 
 use fcc::{BRICK, Grid, lattices};
 
@@ -14,24 +12,24 @@ const BLOCK: i64 = 8;
 
 /** The index for faces whose forward is `forward` or its opposite. */
 #[derive(Clone)]
-struct Table {
-    forward: [i32; 3],
-    c_min: i64,
-    a_min: i64,
-    b_min: i64,
-    layers: i64,
-    blocks: i64,
+pub struct Table {
+    pub forward: [i32; 3],
+    pub c_min: i64,
+    pub a_min: i64,
+    pub b_min: i64,
+    pub layers: i64,
+    pub blocks: i64,
     /**
      * By (c − c_min, block of a − a_min): the least and greatest b − b_min, or least > greatest where there is no
      * voxel. Like a and c, b is taken from its least: b is a world axis, and a tile is narrow along it, not the world.
      */
-    low: Vec<i16>,
-    high: Vec<i16>,
+    pub low: Vec<i16>,
+    pub high: Vec<i16>,
 }
 
 #[derive(Clone)]
 pub struct LayerIndex {
-    tables: Vec<Table>,
+    pub tables: Vec<Table>,
 }
 
 /** Whether a face's forward is the opposite of one with its first non-zero component positive. */
@@ -132,54 +130,4 @@ fn each_site(grid: &Grid, mut visit: impl FnMut([i64; 3])) {
             }
         }
     }
-}
-
-// The WebAssembly interface: voxel-grid.ts writes a grid through the
-// pointers index_grid and index_cells return, then reads its index's tables
-// from what index_build returns, until the next grid.
-
-/** Numbers per table in index_build's result. */
-const TABLE: usize = 10;
-/** Tables of an index: a face and its opposite share one. */
-const TABLES: usize = 6;
-
-thread_local! {
-    static GRID: RefCell<Option<Grid>> = const { RefCell::new(None) };
-    static INDEX: RefCell<Option<LayerIndex>> = const { RefCell::new(None) };
-    static RESULT: RefCell<[f64; TABLES * TABLE]> = const { RefCell::new([0.0; TABLES * TABLE]) };
-}
-
-/** Starts a grid of the box given and `used` bricks of sites to index; returns where to write its bricks (i32), then its sites at index_cells(). */
-#[unsafe(no_mangle)]
-pub extern "C" fn index_grid(min_x: i32, min_y: i32, min_z: i32, nx: i32, ny: i32, nz: i32, used: usize) -> *mut u8 {
-    INDEX.set(None);
-    GRID.with_borrow_mut(|grid| grid.insert(Grid::new([min_x, min_y, min_z], [nx, ny, nz], used)).bricks.as_mut_ptr() as *mut u8)
-}
-
-/** Where to write the sites of the grid index_grid started. */
-#[unsafe(no_mangle)]
-pub extern "C" fn index_cells() -> *mut u8 {
-    GRID.with_borrow_mut(|grid| grid.as_mut().map_or(std::ptr::null_mut(), |g| g.cells.as_mut_ptr()))
-}
-
-/**
- * Indexes the grid index_grid started; returns RESULT: per table, its
- * forward (x, y, z), c min, a min, b min, layers, blocks, and pointers
- * to its low and high (i16, layers × blocks each). Null without a grid.
- */
-#[unsafe(no_mangle)]
-pub extern "C" fn index_build() -> *const f64 {
-    let Some(grid) = GRID.take() else { return std::ptr::null() };
-    INDEX.with_borrow_mut(|index| {
-        let index = index.insert(LayerIndex::new(&grid));
-        RESULT.with_borrow_mut(|result| {
-            for (t, out) in index.tables.iter().zip(result.chunks_mut(TABLE)) {
-                let [x, y, z] = t.forward.map(f64::from);
-                let numbers = [t.c_min as f64, t.a_min as f64, t.b_min as f64, t.layers as f64, t.blocks as f64];
-                let pointers = [t.low.as_ptr() as usize as f64, t.high.as_ptr() as usize as f64];
-                out.copy_from_slice(&[[x, y, z].as_slice(), &numbers, &pointers].concat());
-            }
-            result.as_ptr()
-        })
-    })
 }

@@ -306,7 +306,7 @@ interface Table {
 /** A LayerIndex's fields, as posted to or from a worker (a class's methods do not survive posting). */
 export type LayerIndexData = Pick<LayerIndex, 'keys' | 'tables'>
 
-/** The indexing exports (bake/src/layer_index.rs). */
+/** The indexing exports (web/wasm/src/index.rs). */
 interface Indexer {
   memory: WebAssembly.Memory
   index_grid: (minX: number, minY: number, minZ: number, nx: number, ny: number, nz: number, used: number) => number

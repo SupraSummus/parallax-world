@@ -4,12 +4,7 @@ version = "0.0.0"
 edition = "2024"
 publish = false
 
-[lib]
-crate-type = ["cdylib", "rlib"]
-
 [dependencies]
-# The baker, whose exports the module holds too (wasm.rs).
-bake = { path = "../bake" }
 worldgen = { path = "../worldgen" }
 
 [features]
@@ -17,5 +12,6 @@ worldgen = { path = "../worldgen" }
 sponza = []
 
 [dev-dependencies]
+bake = { path = "../bake" }
 fcc = { path = "../fcc" }
 

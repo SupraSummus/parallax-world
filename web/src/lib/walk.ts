@@ -1,7 +1,7 @@
 /**
- * Walking on the ground (bake/src/walk.rs), on this thread's own
- * WebAssembly instance: a body the camera is the eye of, on its world's
- * grid of one level, copied in whenever the world replaces it.
+ * Walking on the ground (bake/src/walk.rs, web/wasm/src/walk.rs), on this
+ * thread's own WebAssembly instance: a body the camera is the eye of, on
+ * its world's grid of one level, copied in whenever the world replaces it.
  */
 import { writeGrid, type VoxelGrid } from './voxel-grid'
 import { copyIn, copyOut, wasmInstance } from './wasm'

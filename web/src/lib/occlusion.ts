@@ -8,7 +8,7 @@ import { CLUSTER } from './chunk-baker'
 import { chunkCell } from './slice-selection'
 import { copyIn, copyOut, wasmInstance } from './wasm'
 
-/** The coverage exports (bake/src/coverage.rs). */
+/** The coverage exports (web/wasm/src/coverage.rs). */
 interface Exports {
   memory: WebAssembly.Memory
   coverage_view: (width: number, height: number, focal: number) => void
@@ -27,7 +27,7 @@ interface Exports {
 
 /**
  * The screen in cells, each covered or not by the layers drawn so far, for
- * the face being drawn: Coverage in bake/src/coverage.rs, in its own
+ * the face being drawn: Coverage in web/wasm/src/coverage.rs, in its own
  * WebAssembly instance. Faces come one by one, each with its layers near
  * to far.
  */
