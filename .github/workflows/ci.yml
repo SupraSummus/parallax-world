@@ -63,7 +63,7 @@ jobs:
       - name: Set up environment
         uses: ./.github/actions/setup
 
-      # pnpm hands what follows `--` to test:rust's last command, worlds' cargo test.
+      # pnpm hands what follows `--` to test:rust's last command, the release tests'.
       - name: Test, but the valley's contract
         run: pnpm test:rust -- --skip keeps_the_contract::valley
 
@@ -75,12 +75,12 @@ jobs:
 
       # Only Cargo, which the runner has.
       - name: Test the valley's contract
-        run: cargo test --release --manifest-path worlds/Cargo.toml --test contract keeps_the_contract::valley
+        run: cargo test --release -p worlds --test contract keeps_the_contract::valley
 
       # lab/ is no part of pnpm check, but on worldgen's and worlds' API:
       # built here, so a change to them that breaks it shows.
       - name: Build the lab
-        run: cargo build --release --all-targets --manifest-path lab/Cargo.toml
+        run: cargo build --release --all-targets -p lab
 
   # The native frontend's GPU half, which the other jobs do not run,
   # on Mesa's software Vulkan: its tests that draw, and a view drawn.
@@ -104,7 +104,7 @@ jobs:
           vulkaninfo --summary 2>/dev/null | grep -E 'deviceName|driverInfo|apiVersion' || true
 
       - name: Test what draws
-        run: cargo test --release --config native/.cargo/config.toml --manifest-path native/Cargo.toml -- --ignored
+        run: cargo test --release -p parallax-native -- --ignored
 
       - name: Draw a view
-        run: cargo run --release --config native/.cargo/config.toml --manifest-path native/Cargo.toml -- --view 'seed=1&world=moor&look=30,-10' --size 320x200 --shot shot.png
+        run: cargo run --release -p parallax-native -- --view 'seed=1&world=moor&look=30,-10' --size 320x200 --shot shot.png

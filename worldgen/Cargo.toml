@@ -8,6 +8,3 @@ publish = false
 bake = { path = "../bake" }
 # Math functions with the same bits on every target (js.rs).
 libm = "0.2"
-
-[profile.test]
-opt-level = 2

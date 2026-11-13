@@ -74,7 +74,7 @@ a no-op 2D canvas context
 - Pixels are checked only by native tests that draw on the GPU.
   They need Vulkan (Mesa's software one will do),
   so `pnpm test` skips them (`#[ignore]`) and CI's `native-gpu` job runs them
-  (`cargo test` in `native/` with `-- --ignored`).
+  (`cargo test --release -p parallax-native -- --ignored`).
   With Mesa 26 (LLVM 21) on a CPU with AVX-512,
   give them `GALLIUM_OVERRIDE_CPU_CAPS=avx`, as CI does
   ([docs/todo.md](todo.md)).

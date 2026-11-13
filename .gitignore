@@ -1,6 +1,6 @@
 node_modules
 dist
-bake/target
+target
 coverage
 *.local
 *.log
@@ -11,10 +11,6 @@ coverage
 !.vscode/extensions.json
 .idea
 .DS_Store
-native/target
-worldgen/target
-worlds/target
-lab/target
 lab/out
 # Agents' git worktrees
 .claude/worktrees

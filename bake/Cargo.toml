@@ -3,7 +3,3 @@ name = "bake"
 version = "0.0.0"
 edition = "2024"
 publish = false
-
-# The tests bake whole cells, 7× faster optimised. Debug assertions stay on.
-[profile.test]
-opt-level = 1
