@@ -412,6 +412,13 @@ fn parse_view_query(query: &str) -> ViewQuery {
 }
 
 fn main() {
+    // Tiles come and go, in blocks of MBs. glibc maps blocks that large apart, to give back once freed, but raises that
+    // threshold past each it frees: later ones would stay in its heap.
+    // SAFETY: mallopt only sets a parameter, before any thread starts.
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    unsafe {
+        libc::mallopt(libc::M_MMAP_THRESHOLD, 128 << 10);
+    }
     let args: Vec<String> = std::env::args().collect();
     let flag = |name: &str| args.iter().any(|a| a == name);
     let value = |name: &str| args.iter().position(|a| a == name).map(|i| args[i + 1].as_str());
