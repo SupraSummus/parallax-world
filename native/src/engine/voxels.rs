@@ -126,9 +126,7 @@ fn cell_entry(k: [i32; 3], j: usize) -> usize {
 /**
  * Per brick of `grid` with voxels, in its order in the grid's cells, the
  * cells of each scale around it (AROUND's bits) that its voxels meet,
- * SCALES words a brick. Voxel and cell are both rhombic dodecahedra, of
- * 1 and of S, so they meet where the site is less than 1 + S from the
- * cell's centre across each pair of faces.
+ * SCALES words a brick: those its sites meet (MEETING).
  */
 pub fn meets(grid: &bake::Grid) -> Vec<u32> {
     let mut out = vec![0; grid.cells.len() / BRICK_SITES * SCALES];
@@ -147,20 +145,41 @@ pub fn meets(grid: &bake::Grid) -> Vec<u32> {
             if (site[0] + site[1] + site[2]) & 1 != 0 || grid.cells[first as usize * BRICK_SITES + (r >> 1) as usize] == 0 {
                 continue;
             }
-            for j in 0..SCALES {
+            for (j, meeting) in MEETING.iter().enumerate() {
                 let size = BRICK << (2 * j);
-                for e in 0..27 {
-                    let cell = around(brick, j, e);
-                    let [x, y, z]: [i32; 3] = std::array::from_fn(|d| (brick[d] * BRICK + p[d] - cell[d] * size).abs());
-                    if x + y <= size && y + z <= size && x + z <= size {
-                        out[first as usize * SCALES + j] |= 1 << e;
-                    }
-                }
+                let [x, y, z] = std::array::from_fn(|d| brick[d].rem_euclid(1 << (2 * j)) * BRICK + p[d]);
+                out[first as usize * SCALES + j] |= meeting[((z * size + y) * size + x) as usize];
             }
         }
     }
     out
 }
+
+/**
+ * Per scale, per site of a block (S a side) from its corner, the cells
+ * around the block (AROUND's bits) that its voxel meets: a site's depend
+ * on where in its block it is alone. Voxel and cell are both rhombic
+ * dodecahedra, of 1 and of S, so they meet where the site is less than
+ * 1 + S from the cell's centre across each pair of faces.
+ */
+static MEETING: std::sync::LazyLock<[Vec<u32>; SCALES]> = std::sync::LazyLock::new(|| {
+    std::array::from_fn(|j| {
+        let size = BRICK << (2 * j);
+        (0..size * size * size)
+            .map(|i| {
+                let site = [i % size, i / size % size, i / size / size];
+                (0..27)
+                    .filter(|e| {
+                        // The cell's centre, from the block's corner: around()'s, in sites.
+                        let corner = [e % 3 - 1, e / 3 % 3 - 1, e / 9 - 1];
+                        let [x, y, z]: [i32; 3] = std::array::from_fn(|d| (site[d] - corner[d] * size).abs());
+                        x + y <= size && y + z <= size && x + z <= size
+                    })
+                    .fold(0, |bits, e| bits | 1 << e)
+            })
+            .collect()
+    })
+});
 
 /** `grid`'s bricks as the GPU takes them, in the grid's order, BRICK_WORDS a brick: each site material | alpha << 8, two a word. */
 pub fn words(grid: &bake::Grid) -> Vec<u32> {
