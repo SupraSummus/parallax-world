@@ -46,15 +46,15 @@ fn block(p: Point, size: [f64; 3], lift: f64, random: &mut Rng) -> Shape {
  */
 const CASES: &[(&str, i64, Make, u32, u32)] = &[
     ("speck", 4, |p, r| block(p, [1.0, 1.0, 1.0], 4.0, r), 5, 5),
-    ("block", 16, |p, r| block(p, [6.0, 6.0, 6.0], 0.0, r), 3, 5),
-    ("big block", 48, |p, r| block(p, [24.0, 24.0, 24.0], 0.0, r), 4, 5),
-    ("wall", 24, |p, r| block(p, [16.0, 20.0, 1.0], 0.0, r), 4, 1),
-    ("thick wall", 24, |p, r| block(p, [16.0, 20.0, 3.0], 0.0, r), 4, 2),
-    ("plate", 24, |p, r| block(p, [16.0, 1.0, 16.0], 12.0, r), 4, 4),
-    ("post", 8, |p, r| block(p, [1.0, 16.0, 1.0], 0.0, r), 4, 0),
+    ("block", 16, |p, r| block(p, [6.0, 6.0, 6.0], 0.0, r), 5, 5),
+    ("big block", 48, |p, r| block(p, [24.0, 24.0, 24.0], 0.0, r), 5, 3),
+    ("wall", 24, |p, r| block(p, [16.0, 20.0, 1.0], 0.0, r), 5, 1),
+    ("thick wall", 24, |p, r| block(p, [16.0, 20.0, 3.0], 0.0, r), 5, 2),
+    ("plate", 24, |p, r| block(p, [16.0, 1.0, 16.0], 12.0, r), 5, 3),
+    ("post", 8, |p, r| block(p, [1.0, 16.0, 1.0], 0.0, r), 5, 1),
     ("beam", 16, |p, r| block(p, [16.0, 1.0, 1.0], 8.0, r), 5, 5),
-    ("ball", 8, |p, r| ball([p[0], p[1] + about(r, 3.0), p[2]], about(r, 1.5), BRIGHT, SOLID, Op::Fill), 2, 5),
-    ("big ball", 24, |p, r| ball([p[0], p[1] + about(r, 8.0), p[2]], about(r, 8.0), BRIGHT, SOLID, Op::Fill), 3, 3),
+    ("ball", 8, |p, r| ball([p[0], p[1] + about(r, 3.0), p[2]], about(r, 1.5), BRIGHT, SOLID, Op::Fill), 5, 5),
+    ("big ball", 24, |p, r| ball([p[0], p[1] + about(r, 8.0), p[2]], about(r, 8.0), BRIGHT, SOLID, Op::Fill), 5, 3),
     (
         "disc",
         24,
@@ -62,7 +62,7 @@ const CASES: &[(&str, i64, Make, u32, u32)] = &[
             let (a, b) = (about(r, 8.0), about(r, 1.0));
             ellipsoid([p[0], p[1] + about(r, 10.0), p[2]], [a, b, a], BRIGHT, SOLID, Op::Fill)
         },
-        4,
+        5,
         3,
     ),
     (
@@ -94,7 +94,7 @@ const CASES: &[(&str, i64, Make, u32, u32)] = &[
             let (h, w) = (about(r, 24.0), about(r, 4.0));
             lathe(p, [p[0], p[1] + h, p[2]], move |t| w * (1.0 - t), BRIGHT, SOLID, Op::Fill)
         },
-        2,
+        5,
         5,
     ),
     (
@@ -105,7 +105,7 @@ const CASES: &[(&str, i64, Make, u32, u32)] = &[
             let min = [p[0] - l / 2.0, p[1], p[2] - w / 2.0];
             gable(min, [min[0] + l, min[1] + h, min[2] + w], 0, BRIGHT, SOLID, Op::Fill)
         },
-        2,
+        5,
         3,
     ),
 ];

@@ -434,34 +434,53 @@ the kinds nothing draws are only printed,
 as worlds share tables of kinds (the moor's is the valley's).
 `CONTRACT_ONLY='towns › church,railway'` checks only the regions
 of strata so named, and surveys only their layers.
-Where a world is known to break the contract at a seed,
-in the regions holding a stratum (`KNOWN_BREAKS` in `worlds/tests/contract.rs`),
-they must still break, so the list only shrinks;
-each is planned work in `docs/todo.md`.
 The checks do take y as up, as hosts do:
 a world's heights are along it, and "from above" looks down it
 (see `docs/todo.md`).
 
+The contract says three things.
+A world is a function of position:
+a box generated in parts is the box generated whole.
+What a layer says of itself holds:
+what it skips, where it is whole, its things' reach, the world's heights.
+And a coarse site stands for finer ones:
+what a camera sees at a level is, on average, what it sees at a finer one.
+That is a claim about averages, so it is checked as one:
+each stratum's margins averaged over its regions at every seed,
+within `TOLERANCE` (0.05), not each region's.
+A mean settles as seeds are added; the largest of many only grows.
+A region holding several strata counts for each.
+The worst case is each solid's alone (`shapes.rs`),
+though its scenes ask little of it (`docs/todo.md`).
+
 Rays see each site by its alpha (`VoxelGrid`'s):
 each stops its share of what gets to it, and shows that much of its colour,
 and what it glows (`composited` in `picture.rs`).
-What they see is compared as under a white light all round (`colour`),
-in the sRGB channel that differs the most:
-colours, alpha and glow average as a coarse site stands for finer ones;
-materials don't (by type, the canopy's oaks could all turn orange).
+What a ray sees, its `Look`, is how much of it stops
+within 4 of the level's sites past where it is looked at from and further,
+and what it shows: each site's colour, linear, by how much of it the site stops,
+and what glows, as in compositing (premultiplied).
+Linear, as a coarse site averages finer ones;
+with no ratio, so a few rays of many change it by no more than their share;
+with no sky behind, as over any sky
+it differs by no more than its colour and how much it stops do.
+A region's look is the mean of its rays', compared channel by channel.
+It is the sum of each kind's (`Looks`), which tell what changed
+but aren't compared: a coarse level may draw one kind for another,
+as the moor's heather for its sprigs.
 The voxels a site's coin shows (`VoxelGrid::show`) are as often, but noisy,
 and a site too thin to show one still stops light.
 Margins quoted elsewhere in this document are older ones,
-in shares of material types.
+in shares of material types or in sRGB.
 
 - a box against eight parts generated alone, in reverse order,
   at levels 0, 2 and one past the last checked below:
   any seam, order dependence or hidden state shows up as a differing site,
   in its voxels, its alpha, its faces' materials or its glow;
 - at each level up to the world's, 20,000 rays in random directions
-  from where a camera could be, against the level two finer:
-  of what of the rays gets 2 sites far, the share that gets 4 more,
-  and what they see past those 2, must agree within 0.1.
+  from where a camera could be: the level two finer to 2 of the level's sites,
+  and the level past them, as hosts draw a coarse level behind a finer one,
+  against the level two finer all the way.
   A camera could be at the sites of the finer level that show no voxel
   it could fly to from above,
   through such sites from the top of the box (it collides with voxels shown):
@@ -469,7 +488,7 @@ in shares of material types.
 - at each level up to the entry's `from_above`,
   what rays straight down see,
   over the region grown to at least 16 sites of the level across,
-  against level 0, within 0.1:
+  against level 0:
   levels two apart miss what drifts a little at every level,
   like a town's walls taking over from its roofs.
   Rays see the faces they enter by, from above the ones up.
@@ -477,8 +496,10 @@ in shares of material types.
   the forest to 6, its canopy seen over 128 m there,
   which takes most of its test's time;
 - in an entry's `far` regions, wide ones (only x and z count),
-  what its fields alone show from above at levels 4 to 6, against level 0,
-  within 0.025: fields come from position alone,
+  what its fields alone show from above from level 4 to its `far_levels`,
+  against level 0,
+  each region within a quarter of `TOLERANCE`:
+  fields come from position alone,
   and hundreds of lines of sites average out,
   so what is finer than the sites must show in proportion ("Plans" in "Levels").
   Things are left out, with their far fields,
@@ -552,10 +573,10 @@ Parts and far regions are checked at seed 42 only:
 they check how a world is drawn, not what a seed puts in it.
 With `--nocapture` it prints each level's margins;
 `contract::margins` returns them as a `Report` to print,
-which breaks a margin of colours down by material type, and each type by kind
-(what changed, not what is checked),
-largest differences first (`{}` the broken ones, `{:#}` all),
-as a broken contract's message does, naming the world, seed, region and level.
+which breaks a margin down by kind (what changed, not what is checked),
+largest differences first (`{}` those past `TOLERANCE`, `{:#}` all).
+A broken mean (`contract::strata_kept`) names the stratum, level and measure,
+and each region it was averaged over, at its seed.
 The engine's tests also check that a thing's carves cut only the thing.
 A new world is an entry in `WORLDS`
 with `far` regions where its fields have patterns finer than the far sites,

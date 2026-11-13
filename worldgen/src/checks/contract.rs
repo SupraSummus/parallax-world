@@ -1,18 +1,19 @@
 //! The contract every world keeps (docs/generators.md, "Checks"), to run
 //! in tests: a box generated in parts, alone and in any order, equals it
-//! generated whole; each level shows rays from where a camera could be
-//! what the level two finer shows; seen from above, what level 0 shows;
-//! nothing lies outside its heights, things keep their reach, and what
-//! is skipped where it says it may not draw draws nothing there. Rays
-//! see each site by its alpha, through what is in front of it: its
-//! colour and its glow, which average, as a coarse site stands for finer
-//! ones; not its material, which doesn't.
+//! generated whole; nothing lies outside its heights, things keep their
+//! reach, and what is skipped where it says it may not draw draws nothing
+//! there; and on average over each stratum's regions, each level shows
+//! rays from where a camera could be what the level two finer shows,
+//! and seen from above, what level 0 shows. What a ray sees is a `Look`:
+//! linear, as a coarse site averages finer ones, so the sum of each
+//! kind's, which tell what changed.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::ops::Range;
 use std::time::Instant;
 
 use fcc::FACE_KINDS;
-use fcc::light::{linear_to_srgb, srgb_to_linear};
+use fcc::light::srgb_to_linear;
 
 use crate::World;
 use crate::checks::survey::{Survey, survey};
@@ -41,14 +42,13 @@ fn sites(b: &Box3) -> impl Iterator<Item = (i64, i64, i64)> + '_ {
     })
 }
 
-/** How far a level may stray from the one two finer in the share of rays through (docs/generators.md). */
-const THROUGH_TOLERANCE: f64 = 0.1;
-
 /**
- * How far a level's colours may stray, from the one two finer and from
- * level 0 seen from above: in any channel of what rays see (`colour`).
+ * How far a level's look may stray, from the one two finer and from
+ * level 0 seen from above, in any channel: a twentieth of the light.
+ * On average over a stratum's regions (`strata_kept`); a solid alone,
+ * in a region of many (worldgen/tests/shapes.rs).
  */
-const COLOUR_TOLERANCE: f64 = 0.1;
+pub const TOLERANCE: f64 = 0.05;
 
 /** Rays cast at each level, from as many origins. */
 const RAYS: usize = 20_000;
@@ -60,21 +60,20 @@ fn around(region: &Box3, level: u32) -> Box3 {
 }
 
 /**
- * Levels FAR_FROM to FAR see the fields of far regions from above
- * (sites 2 to 8 m apart), against level 0, within FAR_TOLERANCE.
+ * Levels from FAR_FROM see the fields of far regions from above (sites
+ * 2 m apart and more), against level 0, within FAR_TOLERANCE.
  */
 const FAR_FROM: u32 = 4;
-const FAR: u32 = 6;
 
 /**
  * How far the fields of a far region may stray from level 0 seen from
- * above. A field is drawn from position alone, and a wide region has
- * hundreds of lines of sites at level 6, so it keeps closer than
- * COLOUR_TOLERANCE, which allows for things' far forms and their
- * surfaces; a plan finer than the sites read where each line is aliases
- * ("Plans" in "Levels" in docs/generators.md).
+ * above, each region. A field is drawn from position alone, and a wide
+ * region has hundreds of lines of sites at level 6, so it keeps closer
+ * than TOLERANCE, which allows for things' far forms and their surfaces;
+ * a plan finer than the sites read where each line is aliases ("Plans"
+ * in "Levels" in docs/generators.md).
  */
-const FAR_TOLERANCE: f64 = 0.025;
+const FAR_TOLERANCE: f64 = TOLERANCE / 4.0;
 
 /** A box of `region` at `level` generated in eight parts, alone and in any order, equals it generated whole. */
 pub fn whole_equals_parts(generator: &Generator, region: &Box3, level: u32) {
@@ -205,10 +204,20 @@ fn rays_from_open(area: &Box3, reference: &VoxelGrid, level: u32) -> (Vec<Ray>, 
 /** What a ray sees of a grid (`composited`), its distances along it in lattice units. */
 type Path = Vec<(f64, u8, f64, [f64; 3])>;
 
-/** Each ray's path through `grid` (at `level`), till it leaves its area. */
-fn paths(grid: &VoxelGrid, level: u32, rays: &[Ray]) -> Vec<Path> {
+/**
+ * Each ray's path through `grid` (at `level`), from `from` along it till
+ * it leaves its area, its distances from there (lattice units): all of
+ * what gets to `from` taken as the ray.
+ */
+fn paths(grid: &VoxelGrid, level: u32, rays: &[Ray], from: f64) -> Vec<Path> {
     let s = (1i64 << level) as f64;
-    let path = |ray: &Ray| composited(grid, ray.origin.map(|v| v / s), ray.direction, ray.end / s);
+    let path = |ray: &Ray| {
+        if ray.end <= from {
+            return Vec::new();
+        }
+        let origin: [f64; 3] = std::array::from_fn(|i| (ray.origin[i] + from * ray.direction[i]) / s);
+        composited(grid, origin, ray.direction, (ray.end - from) / s)
+    };
     rays.iter().map(|ray| path(ray).into_iter().map(|(t, id, stopped, glow)| (t * s, id, stopped, glow)).collect()).collect()
 }
 
@@ -217,63 +226,87 @@ fn through_to(path: &Path, t: f64) -> f64 {
     1.0 - path.iter().take_while(|(at, ..)| *at <= t).map(|(_, _, stopped, _)| stopped).sum::<f64>()
 }
 
-/** Each material id's colour, linear. */
-fn linear_colours(generator: &Generator) -> Vec<[f64; 3]> {
-    materials_of(generator)
-        .iter()
-        .map(|m| [16, 8, 0].map(|shift| srgb_to_linear(((m.rgb() >> shift) & 255) as f32 / 255.0) as f64))
-        .collect()
+/** By material id, its kind (index in Generator::kinds; none for id 0) and its colour, linear. */
+struct Palette {
+    kinds: Vec<Option<usize>>,
+    colours: Vec<[f64; 3]>,
+}
+
+impl Palette {
+    fn of(generator: &Generator) -> Palette {
+        // Kinds have consecutive material ids, one per colour, after 0 (none): see materials_of.
+        let mut kinds = vec![None];
+        for (i, kind) in generator.kinds.iter().enumerate() {
+            kinds.extend(kind.colors.iter().map(|_| Some(i)));
+        }
+        let colours = materials_of(generator)
+            .iter()
+            .map(|m| [16, 8, 0].map(|shift| srgb_to_linear(((m.rgb() >> shift) & 255) as f32 / 255.0) as f64))
+            .collect();
+        Palette { kinds, colours }
+    }
+
+    /** Adds to `looks` what id `id` stops of a ray (`stopped`), near or not, and what it glows to it. */
+    fn add(&self, looks: &mut Looks, id: u8, near: bool, stopped: f64, glow: [f64; 3]) {
+        let look = looks.entry(self.kinds[id as usize]).or_default();
+        look[if near { 0 } else { 1 }] += stopped;
+        let colour = if id == 0 { [0.0; 3] } else { self.colours[id as usize] };
+        (0..3).for_each(|c| look[SHOWN.start + c] += stopped * colour[c] + glow[c]);
+    }
 }
 
 /**
- * What rays see, as under a white light all round, sRGB: of each site
- * its colour (`linear_colours`) by how much of them it stops, and what it
- * glows to them; for as much light as stops, so that what gets through
- * does not count (Through does).
+ * What rays see, a mean over them, linear, as under a white light all
+ * round: how much of them stops near (`STOPPED`'s first channel) and
+ * further (its second), and what shows (`SHOWN`): each site's colour by
+ * how much of them it stops, and what glows to them, premultiplied as
+ * compositing has it. With no ratio, a few rays of many change it by no
+ * more than their share; with no sky behind, over any sky it differs by
+ * no more than its channels do. Linear, it is the sum of what each kind
+ * stops and shows (`Looks`).
  */
-fn colour(seen: &Seen, colours: &[[f64; 3]]) -> [f64; 3] {
-    let (mut sum, mut total) = (seen.glow, 0.0);
-    for (&id, &stopped) in seen.stopped.iter().filter(|(id, _)| **id != 0) {
-        (0..3).for_each(|c| sum[c] += stopped * colours[id as usize][c]);
-        total += stopped;
+pub type Look = [f64; 5];
+
+/** A look by kind: its index in Generator::kinds, none for what stops with no material. */
+pub type Looks = BTreeMap<Option<usize>, Look>;
+
+/** The channels of a `Look` that say how much stops: near, and further. */
+pub const STOPPED: Range<usize> = 0..2;
+
+/** The channels of a `Look` that say what shows: red, green and blue. */
+pub const SHOWN: Range<usize> = 2..5;
+
+/** How far a camera's rays stop "near", past where a level is looked at from: in the level's sites. */
+const NEAR: f64 = 4.0;
+
+/**
+ * Adds to `looks` what a ray sees along `path`, by `weight` (the light
+ * that gets to its start): stopping within `near` of its start (lattice
+ * units) in the first channel.
+ */
+fn add(looks: &mut Looks, path: &[(f64, u8, f64, [f64; 3])], near: f64, weight: f64, palette: &Palette) {
+    for &(t, id, stopped, glow) in path {
+        palette.add(looks, id, t <= near, weight * stopped, glow.map(|g| weight * g));
     }
-    sum.map(|v| if total > 0.0 { srgb(v / total) } else { 0.0 })
 }
 
-/** Of what stops rays, the share of each material id. */
-fn materials(seen: &Seen) -> BTreeMap<u8, f64> {
-    shares(seen.stopped.iter().filter(|(id, _)| **id != 0).map(|(&id, &stopped)| (id, stopped)))
-}
-
-/** A linear channel, sRGB. */
-fn srgb(linear: f64) -> f64 {
-    linear_to_srgb(linear as f32) as f64
-}
-
-/** How far apart two colours are: in the channel they differ the most in. */
-fn colour_difference(a: [f64; 3], c: [f64; 3]) -> f64 {
-    (0..3).map(|i| (a[i] - c[i]).abs()).fold(0.0, f64::max)
-}
-
-/** Shares of the keys in the total of their weights. */
-fn shares(weights: impl IntoIterator<Item = (u8, f64)>) -> BTreeMap<u8, f64> {
-    let mut shares = BTreeMap::new();
-    let mut total = 0.0;
-    for (key, weight) in weights {
-        *shares.entry(key).or_insert(0.0) += weight;
-        total += weight;
+/** The looks of what pixels see (a mean over them): what stops, all of it near. */
+fn looks_of(seen: &Seen, palette: &Palette) -> Looks {
+    let mut looks = Looks::new();
+    for (&id, &stopped) in &seen.stopped {
+        palette.add(&mut looks, id, true, stopped, [0.0; 3]);
     }
-    shares.values_mut().for_each(|v| *v /= total);
-    shares
+    for (&id, &glow) in &seen.glow {
+        palette.add(&mut looks, id, true, 0.0, glow);
+    }
+    looks
 }
 
 /** What a margin measures. */
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Measure {
-    /** Of what of the rays gets 2 sites of the level far, the share that gets 4 more. */
-    Through,
-    /** What they see past those 2 sites (`colour`). */
-    Colour,
+    /** What rays from where a camera could be see past 2 sites of the level. */
+    Cameras,
     /** What rays straight down see. */
     FromAbove,
     /** What rays straight down see of the fields alone. */
@@ -288,35 +321,52 @@ pub struct Margin {
     pub level: u32,
     /** The level it is measured against: two finer, or 0 from above. */
     pub against: u32,
-    /** How far apart: in the share through, or in a channel of the colours (sRGB). */
-    pub difference: f64,
-    /** What is measured, at `against` and at `level`: the share through (in the first channel), or a colour (sRGB). */
-    pub values: [[f64; 3]; 2],
-    /** Of what stops rays, the share of each material id, at `against` and at `level`: to tell what changed, not checked. */
-    pub materials: [BTreeMap<u8, f64>; 2],
+    /** What rays see, by kind, at `against` and at `level`. */
+    pub looks: [Looks; 2],
 }
 
 impl Margin {
+    /** What rays see of every kind, at `against` and at `level`. */
+    pub fn values(&self) -> [Look; 2] {
+        self.looks.each_ref().map(|looks| looks.values().fold([0.0; 5], |sum, l| std::array::from_fn(|i| sum[i] + l[i])))
+    }
+
+    /** The kinds rays see, at either level: to tell what changed, not checked, as levels may draw a kind for another. */
+    fn kinds(&self) -> BTreeSet<Option<usize>> {
+        self.looks.iter().flat_map(|looks| looks.keys().copied()).collect()
+    }
+
+    /** How far `kind`'s look at `level` is from its look at `against`, channel by channel. */
+    fn change(&self, kind: Option<usize>) -> Look {
+        let [a, c] = self.looks.each_ref().map(|looks| looks.get(&kind).copied().unwrap_or_default());
+        std::array::from_fn(|i| c[i] - a[i])
+    }
+
+    /** How far apart the looks are in `channels`: in the one they differ the most in. */
+    pub fn apart(&self, channels: Range<usize>) -> f64 {
+        let [a, c] = self.values();
+        channels.map(|i| (c[i] - a[i]).abs()).fold(0.0, f64::max)
+    }
+
+    /** How far apart the looks are, in any channel. */
+    pub fn difference(&self) -> f64 {
+        self.apart(0..5)
+    }
+
+    /** Whether this region alone is as far apart as a stratum may be on average, or more. */
     pub fn broken(&self) -> bool {
-        self.difference >= self.tolerance()
+        self.difference() >= self.tolerance()
     }
 
     /** How far it may be apart. */
     pub fn tolerance(&self) -> f64 {
-        match self.measure {
-            Measure::Through => THROUGH_TOLERANCE,
-            Measure::FieldsFromAbove => FAR_TOLERANCE,
-            _ => COLOUR_TOLERANCE,
-        }
+        if self.measure == Measure::FieldsFromAbove { FAR_TOLERANCE } else { TOLERANCE }
     }
 }
 
-/** Shares by kind: its type, its index in Generator::kinds and its name. */
-pub type KindShares = BTreeMap<(u8, usize, &'static str), f64>;
-
 /**
  * A world's margins in its regions, to print: `{}` breaks down the broken
- * ones by material type and kind, `{:#}` all of them.
+ * ones by kind, `{:#}` all of them.
  */
 #[derive(Clone)]
 pub struct Report {
@@ -324,18 +374,13 @@ pub struct Report {
     pub margins: Vec<Margin>,
     /** What regions hold, to print after them: the strata `check` made them for. */
     pub held: Vec<(Box3, String)>,
-    /** Each material id's kind (index in Generator::kinds), its name and type; none for id 0. */
-    materials: Vec<Option<(usize, &'static str, u8)>>,
+    /** The kinds' names, by index in Generator::kinds. */
+    kinds: Vec<&'static str>,
 }
 
 impl Report {
     fn new(name: &str, generator: &Generator) -> Report {
-        // Kinds have consecutive material ids, one per colour, after 0 (none): see materials_of.
-        let mut materials = vec![None];
-        for (i, kind) in generator.kinds.iter().enumerate() {
-            materials.extend(kind.colors.iter().map(|_| Some((i, kind.name, kind.kind_type))));
-        }
-        Report { name: name.to_string(), margins: Vec::new(), held: Vec::new(), materials }
+        Report { name: name.to_string(), margins: Vec::new(), held: Vec::new(), kinds: generator.kinds.iter().map(|k| k.name).collect() }
     }
 
     /** Only the broken margins. */
@@ -343,40 +388,29 @@ impl Report {
         Report { margins: self.margins.iter().filter(|m| m.broken()).cloned().collect(), ..self.clone() }
     }
 
-    /** Shares by material type, and by kind, from shares by material id. */
-    pub fn by_type_and_kind(&self, shares: &BTreeMap<u8, f64>) -> (BTreeMap<u8, f64>, KindShares) {
-        let (mut types, mut kinds) = (BTreeMap::new(), BTreeMap::new());
-        for (&id, &share) in shares {
-            let Some(Some((kind, name, kind_type))) = self.materials.get(id as usize) else { continue };
-            *types.entry(*kind_type).or_insert(0.0) += share;
-            *kinds.entry((*kind_type, *kind, *name)).or_insert(0.0) += share;
-        }
-        (types, kinds)
+    /** A kind's name; "none" for what stops with no material. */
+    fn kind(&self, kind: Option<usize>) -> &'static str {
+        kind.map_or("none", |k| self.kinds[k])
     }
 
-    /** The shares of a margin's materials by type, then within each by kind, largest differences first. */
+    /** A margin's looks by kind, largest changes first, but those under 0.005 at both levels. */
     fn breakdown(&self, f: &mut std::fmt::Formatter, m: &Margin) -> std::fmt::Result {
-        let [(ta, ka), (tc, kc)] = [&m.materials[0], &m.materials[1]].map(|s| self.by_type_and_kind(s));
-        let get = |map: &BTreeMap<u8, f64>, t: u8| map.get(&t).copied().unwrap_or(0.0);
-        let mut types: Vec<u8> = ta.keys().chain(tc.keys()).copied().collect::<BTreeSet<_>>().into_iter().collect();
-        types.sort_by(|a, b| (get(&tc, *b) - get(&ta, *b)).abs().total_cmp(&(get(&tc, *a) - get(&ta, *a)).abs()));
-        for t in types {
-            let (a, c) = (get(&ta, t), get(&tc, t));
-            if a.max(c) < 0.005 {
-                continue;
+        let largest = |l: Look| l.iter().fold(0.0, |a: f64, v| a.max(v.abs()));
+        let mut kinds: Vec<_> = m.kinds().into_iter().collect();
+        kinds.sort_by(|a, b| largest(m.change(*b)).total_cmp(&largest(m.change(*a))));
+        for kind in kinds {
+            let [a, c] = m.looks.each_ref().map(|looks| looks.get(&kind).copied().unwrap_or_default());
+            if largest(a).max(largest(c)) >= 0.005 {
+                writeln!(f, "      {}: {} -> {}: {:.3} apart", self.kind(kind), look(&a), look(&c), largest(m.change(kind)))?;
             }
-            let mut kinds: Vec<_> = ka.keys().chain(kc.keys()).filter(|k| k.0 == t).copied().collect::<BTreeSet<_>>().into_iter().collect();
-            let kget = |map: &KindShares, k| map.get(&k).copied().unwrap_or(0.0);
-            kinds.sort_by(|x, y| (kget(&kc, *y) - kget(&ka, *y)).abs().total_cmp(&(kget(&kc, *x) - kget(&ka, *x)).abs()));
-            let kinds: Vec<String> = kinds
-                .iter()
-                .filter(|k| kget(&ka, **k).max(kget(&kc, **k)) >= 0.005)
-                .map(|k| format!("{} {:.3} -> {:.3}", k.2, kget(&ka, *k), kget(&kc, *k)))
-                .collect();
-            writeln!(f, "      type {t:>3}: {a:.3} -> {c:.3} ({:+.3}): {}", c - a, kinds.join(", "))?;
         }
         Ok(())
     }
+}
+
+/** A look, to print: how much stops, near + further, and what shows. */
+fn look(l: &Look) -> String {
+    format!("stops {:.3} + {:.3}, shows {:.3} {:.3} {:.3}", l[0], l[1], l[2], l[3], l[4])
 }
 
 impl std::fmt::Display for Report {
@@ -394,19 +428,14 @@ impl std::fmt::Display for Report {
                 region = Some(r);
             }
             let what = match m.measure {
-                Measure::Through => "rays through",
-                Measure::Colour => "colour",
-                Measure::FromAbove => "colour from above",
-                Measure::FieldsFromAbove => "fields' colour from above",
+                Measure::Cameras => "cameras",
+                Measure::FromAbove => "from above",
+                Measure::FieldsFromAbove => "fields from above",
             };
-            let [a, c] = m.values;
-            let values = match m.measure {
-                Measure::Through => format!("{:.3} -> {:.3}", a[0], c[0]),
-                _ => format!("{:.3} {:.3} {:.3} -> {:.3} {:.3} {:.3}", a[0], a[1], a[2], c[0], c[1], c[2]),
-            };
-            let broken = if m.broken() { format!(", breaks {}", m.tolerance()) } else { String::new() };
-            writeln!(f, "  level {} against {}, {what}: {values}: {:.3} apart{broken}", m.level, m.against, m.difference)?;
-            if !m.materials[0].is_empty() && (m.broken() || f.alternate()) {
+            let [a, c] = m.values().map(|v| look(&v));
+            let broken = if m.broken() { format!(", over {}", m.tolerance()) } else { String::new() };
+            writeln!(f, "  level {} against {}, {what}: {a} -> {c}: {:.3} apart{broken}", m.level, m.against, m.difference())?;
+            if m.broken() || f.alternate() {
                 self.breakdown(f, m)?;
             }
         }
@@ -416,12 +445,12 @@ impl std::fmt::Display for Report {
 
 /**
  * What rays from where a camera could be see of `region` at each level
- * from 1 to `levels`: as much gets through, and of what stops, as much
- * that they see of the same colour, as at the level two finer, within
- * THROUGH_TOLERANCE and COLOUR_TOLERANCE.
+ * from 1 to `levels` (a `Look`): the level two finer near, to 2 of the
+ * level's sites, and the level past them, as hosts draw a coarse level
+ * behind a finer one; against the level two finer all the way.
  */
 fn levels_against_finer(generator: &Generator, region: &Box3, levels: u32, report: &mut Report) {
-    let colours = linear_colours(generator);
+    let palette = Palette::of(generator);
     // Grids generated, by level and box: a level's is the reference of the level two coarser.
     let mut grids: Vec<(u32, Box3, VoxelGrid)> = Vec::new();
     let grid = |grids: &mut Vec<(u32, Box3, VoxelGrid)>, level: u32, area: &Box3| -> usize {
@@ -445,45 +474,19 @@ fn levels_against_finer(generator: &Generator, region: &Box3, levels: u32, repor
             origins = Some((finer, area, rays));
         }
         let rays = &origins.as_ref().expect("made").2;
-        let fine = paths(&grids[reference].2, finer, rays);
+        let from = 2.0 * s;
+        let fine = paths(&grids[reference].2, finer, rays, 0.0);
         let coarse_grid = grid(&mut grids, level, &area);
-        let coarse = paths(&grids[coarse_grid].2, level, rays);
-        // A level is seen from afar: of the light of rays that got 2 of its sites far, how much gets 4 more,
-        // and what stops the rest. Not counted: what leaves the area before it could get the 4 more.
-        let (from, d) = (2.0 * s, 4.0 * s);
-        let through = |paths: &[Path]| {
-            let (mut seen, mut through) = (0.0, 0.0);
-            for (path, ray) in paths.iter().zip(rays) {
-                if ray.end > from + d {
-                    seen += through_to(path, from);
-                    through += through_to(path, from + d);
-                } else if ray.end > from {
-                    seen += through_to(path, from) - through_to(path, ray.end);
-                }
-            }
-            through / seen
-        };
-        let seen = |paths: &[Path]| {
-            let mut seen = Seen::default();
-            paths.iter().flatten().filter(|(t, ..)| *t > from).for_each(|&(_, id, stopped, glow)| seen.add(id, stopped, glow));
-            seen
-        };
-        let margin = |measure, values: [[f64; 3]; 2], materials| Margin {
-            region: *region,
-            measure,
-            level,
-            against: finer,
-            difference: if measure == Measure::Through {
-                (values[1][0] - values[0][0]).abs()
-            } else {
-                colour_difference(values[0], values[1])
-            },
-            values,
-            materials,
-        };
-        report.margins.push(margin(Measure::Through, [through(&fine), through(&coarse)].map(|t| [t, 0.0, 0.0]), Default::default()));
-        let seen = [seen(&fine), seen(&coarse)];
-        report.margins.push(margin(Measure::Colour, seen.each_ref().map(|s| colour(s, &colours)), seen.each_ref().map(materials)));
+        let coarse = paths(&grids[coarse_grid].2, level, rays, from);
+        let mut looks = [Looks::new(), Looks::new()];
+        for (fine, coarse) in fine.iter().zip(&coarse) {
+            // Past `from`, at each level, of the light that gets there at the finer.
+            let past: Path = fine.iter().filter(|(t, ..)| *t > from).map(|&(t, id, stopped, glow)| (t - from, id, stopped, glow)).collect();
+            add(&mut looks[0], &past, NEAR * s, 1.0, &palette);
+            add(&mut looks[1], coarse, NEAR * s, through_to(fine, from), &palette);
+        }
+        let looks = looks.map(|looks| looks.into_iter().map(|(k, l)| (k, l.map(|v| v / rays.len() as f64))).collect());
+        report.margins.push(Margin { region: *region, measure: Measure::Cameras, level, against: finer, looks });
         // Only the grids the coming levels read: the coarse one, and the one after it.
         grids.retain(|(l, ..)| *l + 1 >= level);
     }
@@ -492,9 +495,9 @@ fn levels_against_finer(generator: &Generator, region: &Box3, levels: u32, repor
 /**
  * What a camera straight above `region`, grown to at least 16 sites of
  * the level across around its centre, sees at each level from 1 to
- * `levels`: what rays down see (`colour`), as at level 0, within
- * COLOUR_TOLERANCE. Unlike levels two apart, level 0 catches a drift,
- * a little a level, such as walls taking over from roofs.
+ * `levels`: what rays down see (a `Look`), as at level 0. Unlike levels
+ * two apart, level 0 catches a drift, a little a level, such as walls
+ * taking over from roofs.
  */
 fn from_above_against_level_0(world: &World, region: &Box3, levels: u32, report: &mut Report) {
     from_above(world, region, 1..=levels, Measure::FromAbove, report);
@@ -502,7 +505,7 @@ fn from_above_against_level_0(world: &World, region: &Box3, levels: u32, report:
 
 /** What rays straight down over `region` see at each of `levels`, against level 0, as `measure`. */
 fn from_above(world: &World, region: &Box3, levels: impl Iterator<Item = u32>, measure: Measure, report: &mut Report) {
-    let colours = linear_colours(&world.generator);
+    let palette = Palette::of(&world.generator);
     let seen = |tiles: &mut Tiles, area: &Box3| {
         // A ray every 2 units.
         let width = ((area.max[0] - area.min[0]) / 2).clamp(16, 1024) as usize;
@@ -520,10 +523,8 @@ fn from_above(world: &World, region: &Box3, levels: impl Iterator<Item = u32>, m
         }
         let reference = &reference.as_ref().expect("made").1;
         let here = seen(&mut Tiles::new(level, world.heights_at(level)), &area);
-        let values = [colour(reference, &colours), colour(&here, &colours)];
-        let difference = colour_difference(values[0], values[1]);
-        let materials = [materials(reference), materials(&here)];
-        report.margins.push(Margin { region: *region, measure, level, against: 0, difference, values, materials });
+        let looks = [looks_of(reference, &palette), looks_of(&here, &palette)];
+        report.margins.push(Margin { region: *region, measure, level, against: 0, looks });
     }
 }
 
@@ -544,24 +545,24 @@ pub fn margins(name: &str, world: &World, regions: &[Box3], levels: u32, from_ab
 
 /**
  * What `world`'s fields show from above over each of `regions`, wide
- * ones (only x and z count), at levels FAR_FROM to FAR,
- * against level 0. Its things are left out, and with them their far
+ * ones (only x and z count), at levels FAR_FROM to `levels`, against
+ * level 0. Its things are left out, and with them their far
  * fields: their far forms keep what rays see around them, not from
  * above ("Media are isotropic" in docs/generators.md).
  */
-pub fn far_margins(name: &str, world: World, regions: &[Box3]) -> Report {
+pub fn far_margins(name: &str, world: World, regions: &[Box3], levels: u32) -> Report {
     let world = fields_of(world);
     let mut report = Report::new(name, &world.generator);
     for region in regions {
-        from_above(&world, region, FAR_FROM..=FAR, Measure::FieldsFromAbove, &mut report);
+        from_above(&world, region, FAR_FROM..=levels, Measure::FieldsFromAbove, &mut report);
     }
     report
 }
 
 /** `far_margins`, printed; panics where one breaks FAR_TOLERANCE. */
-pub fn check_far(name: &str, world: World, regions: &[Box3]) {
+pub fn check_far(name: &str, world: World, regions: &[Box3], levels: u32) {
     let start = Instant::now();
-    let report = far_margins(name, world, regions);
+    let report = far_margins(name, world, regions, levels);
     println!("{report}{name}: far {:.1} s", start.elapsed().as_secs_f64());
     let broken = report.broken();
     assert!(broken.margins.is_empty(), "{name} breaks the contract far away:\n{broken}");
@@ -738,12 +739,14 @@ pub fn regions(world: &World, only: &[&str]) -> (Survey, Vec<(Box3, Vec<String>)
     (survey, regions)
 }
 
-/** What `check` found: where `world` breaks the contract. */
+/** What `check` found of a world at one seed. */
 pub struct Checked {
     pub name: String,
-    /** Each region, the strata it holds, and how it breaks the contract there (its margins), if it does. */
-    pub regions: Vec<(Box3, Vec<String>, String)>,
-    /** How it breaks it elsewhere: its heights, things' reach. */
+    /** Each region and the strata it holds. */
+    pub regions: Vec<(Box3, Vec<String>)>,
+    /** The margins of every region. */
+    pub report: Report,
+    /** Where it breaks the rules that hold exactly: its heights, things' reach, what is skipped. */
     pub broken: Vec<String>,
     /** The layers of its generator that draw nothing surveyed, by name: none checked, if `complete`. */
     pub silent: Vec<&'static str>,
@@ -751,34 +754,71 @@ pub struct Checked {
     pub complete: bool,
 }
 
-impl Checked {
-    /**
-     * Panics where it breaks the contract, but in regions holding a
-     * stratum whose name holds one of `known`; and where one of `known`
-     * no longer breaks it, to be taken off the list.
-     */
-    pub fn assert_kept(&self, known: &[&str]) {
-        let holds = |strata: &[String], k: &str| strata.iter().any(|s| s.contains(k));
-        let mut broken = self.broken.clone();
-        if self.complete && !self.silent.is_empty() {
+/** A margin, and the world checked it is of. */
+type Held<'a> = (&'a Checked, &'a Margin);
+
+/**
+ * Where worlds checked (at several seeds, say) break the contract: the
+ * rules that hold exactly, layers that draw nothing, and each stratum's
+ * margins (by measure and level) averaged over the regions holding it
+ * at every seed, if they are TOLERANCE apart or more in any channel.
+ * Each broken mean names the regions it was averaged over, and the
+ * worst of them broken down by kind.
+ */
+pub fn strata_kept(checked: &[Checked]) -> Vec<String> {
+    let mut broken = Vec::new();
+    for c in checked {
+        broken.extend(c.broken.iter().map(|b| format!("{}: {b}", c.name)));
+        if c.complete && !c.silent.is_empty() {
             broken.push(format!(
-                "{} draw nothing around spawn or the places it names (worldgen::checks::survey): too far from them, or not at all",
-                self.silent.join(", ")
+                "{}: {} draw nothing around spawn or the places it names (worldgen::checks::survey): too far from them, or not at all",
+                c.name,
+                c.silent.join(", ")
             ));
         }
-        for (_, strata, breaks) in &self.regions {
-            if !breaks.is_empty() && !known.iter().any(|k| holds(strata, k)) {
-                broken.push(breaks.clone());
-            }
-        }
-        for k in known {
-            let held: Vec<_> = self.regions.iter().filter(|(_, strata, _)| holds(strata, k)).collect();
-            if (self.complete || !held.is_empty()) && held.iter().all(|(.., breaks)| breaks.is_empty()) {
-                broken.push(format!("{} keeps the contract around {k}: take it off the known breaks", self.name));
-            }
-        }
-        assert!(broken.is_empty(), "{} breaks the contract:\n{}", self.name, broken.join("\n"));
     }
+    // Each stratum's margins, by measure and level, from every world checked.
+    let mut means: BTreeMap<(&str, Measure, u32), Vec<Held>> = BTreeMap::new();
+    for c in checked {
+        for m in &c.report.margins {
+            let Some((_, strata)) = c.regions.iter().find(|(b, _)| *b == m.region) else { continue };
+            strata.iter().for_each(|s| means.entry((s, m.measure, m.level)).or_default().push((c, m)));
+        }
+    }
+    for ((stratum, measure, level), margins) in means {
+        let n = margins.len() as f64;
+        let changes = margins.iter().map(|(_, m)| {
+            let [a, c] = m.values();
+            std::array::from_fn::<f64, 5, _>(|i| c[i] - a[i])
+        });
+        let mean = changes.fold([0.0; 5], |sum, c| std::array::from_fn(|i| sum[i] + c[i] / n));
+        let apart = mean.iter().fold(0.0, |a: f64, v| a.max(v.abs()));
+        if apart < TOLERANCE {
+            continue;
+        }
+        let mut message = format!(
+            "{stratum}, level {level}, {measure:?}: {apart:.3} apart on average over {} regions (stops {:+.3} + {:+.3}, shows {:+.3} {:+.3} {:+.3}):",
+            margins.len(),
+            mean[0],
+            mean[1],
+            mean[2],
+            mean[3],
+            mean[4]
+        );
+        for (c, m) in &margins {
+            message += &format!("\n  {} in {:?}: {:.3}", c.name, m.region, m.difference());
+        }
+        let (c, worst) = margins.iter().max_by(|a, b| a.1.difference().total_cmp(&b.1.difference())).expect("a margin");
+        message += &format!("\n{:#}", Report { margins: vec![(*worst).clone()], ..c.report.clone() });
+        broken.push(message);
+    }
+    broken
+}
+
+/** Panics where worlds checked (at several seeds, say) break the contract (`strata_kept`). */
+pub fn assert_kept(checked: &[Checked]) {
+    let broken = strata_kept(checked);
+    assert!(broken.is_empty(), "the contract is broken:\n{}", broken.join("\n"));
 }
 
 /**
@@ -828,13 +868,6 @@ pub fn check(name: &str, world: &World, levels: u32, from_above: u32, parts: boo
     broken.extend(skips_hold(world, &boxes, levels));
     let skips = start.elapsed().as_secs_f64() - rays - heights - things;
     println!("{report}{name}: margins {rays:.1} s, heights {heights:.1} s, things {things:.1} s, skips {skips:.1} s");
-    let regions = regions
-        .into_iter()
-        .map(|(b, strata)| {
-            let breaks = Report { margins: report.broken().margins.into_iter().filter(|m| m.region == b).collect(), ..report.clone() };
-            (b, strata, if breaks.margins.is_empty() { String::new() } else { breaks.to_string() })
-        })
-        .collect();
     let silent = survey.layers.iter().filter(|l| l.found == 0).map(|l| l.layer).collect();
-    Checked { name: name.to_string(), regions, broken, silent, complete: only.is_empty() }
+    Checked { name: name.to_string(), regions, report, broken, silent, complete: only.is_empty() }
 }

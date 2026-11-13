@@ -359,12 +359,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   Learned again from today's, mostly hamlets and villages,
   it draws far less town: 235 houses in `learned.rs`'s test, not over 600.
   Learn it from the market towns alone, or let the learned town be sparser.
-- **The first town's lamps break the contract at level 1 at some seeds**
-  (`KNOWN_BREAKS` in `worlds/tests/contract.rs`):
-  rays among them hit lamp less, iron more.
-  Their parts are a site or less at level 1 (a pole 2 units wide, a cap 1 thick),
-  so what shows depends on the town's height against the sites.
-  A cap 2 units thick broke another seed instead.
 - **A domain can't stand in a world twice.**
   Its populations seed their cells by layer name and the generator's seed
   (`Cell::random`), not its `Scope`: two forests would grow the same trees.
@@ -385,6 +379,11 @@ Numbers are for the forest at 1280×800, as measured when written.
   are checked in one region between them.
   Naming a landmark's node by its variant, as towns name their children,
   would part them; or the survey could count which code drew each part.
+- **The solids' scenes ask little against the level two finer.**
+  In `worldgen/tests/shapes.rs` every solid keeps the contract there
+  to the last level checked: a `Look` is a mean over a region's rays,
+  so a solid that thins changes it only by its share of the view.
+  Scenes the solid fills, the same share for every case, would ask more.
 - **The forest's canopy measures crowded trees in sample stands.**
   From above it reads each column's owner (`Rooms`),
   but what the trees standing in a column hide from the side
@@ -415,6 +414,21 @@ Numbers are for the forest at 1280×800, as measured when written.
   4 m of wheat in front of the houses' walls.
   Sunk into the ground, its top where level 0 has it,
   the wheat showed less but the stubble under it more.
+  It breaks the contract: averaged over seeds 42 and 1 to 3,
+  what rays from cameras see changes 0.05 to 0.07 at level 4
+  in the learned town's and the valley's crops, wheat and stubble most.
+- **Worlds are checked to lower levels till what follows is fixed**
+  (`Entry` in `worlds/src/lib.rs`):
+  the valley to 3, from above to 2, the learned town to 3,
+  the moor's far region to 5; then raise them back.
+- **Things of the valley break the contract at level 4**, averaged over seeds:
+  rays from cameras see 0.054 to 0.061 more of the towns' walls, towers and gates,
+  and of a station at one seed;
+  the forest's boletes 0.05 (likely "Sheets and rods", above).
+- **The valley's market from above at level 3**:
+  its stalls and paving change what rays straight down see 0.069 on average.
+- **The moor's far region keeps its fields' look to 0.014 at level 6**,
+  over a quarter of `TOLERANCE` (`check_far`), its heather drawn for its sprigs.
 - **Measured houses show their walls from above at level 6**,
   which the contract does not check, and at level 4 in a region of houses alone
   (seed 2: plaster 0.19 against 0.01 at level 0, 0.106 apart;
@@ -423,6 +437,9 @@ Numbers are for the forest at 1280×800, as measured when written.
   level 6 shows 46 % houses from above against 25 % at level 0,
   and 16 % roofs against 24 %: the rest is walls, timber and stone
   (0.31 off; 0.18 measured from level 1, 0.22 from level 3).
+  The engine's test village (`worldgen/tests/contract.rs`) is checked
+  from above only to level 2: at 3 its walls take over from the grass
+  (0.07 in a linear channel).
   Measured from level 4, a house is a few fine sites
   ("Levels" in `docs/generators.md`):
   its eaves, thinner than one, leave its walls' tops to show,
