@@ -1,7 +1,7 @@
 //! The chunks engine, as the web draws: the renderer picks the cells of the
-//! lattice in view (renderer.rs), worker threads bake them into chunks
-//! (bakery.rs), their whole voxels reliefs or splats each, and the
-//! compositor draws them (compositor.rs).
+//! lattice in view (renderer.rs), on a thread of its own, worker threads
+//! bake them into chunks (bakery.rs), their whole voxels reliefs or splats
+//! each, and the compositor draws them (compositor.rs).
 //! See docs/architecture.md, sections 1 to 5.
 
 mod bakery;
@@ -9,49 +9,163 @@ mod bakery;
 pub(super) mod compositor;
 mod renderer;
 
+use std::sync::{Arc, Condvar, Mutex};
+
 use bake::lod::Lod;
 use egui_wgpu::wgpu;
+use fcc::GRID_LEVELS;
 
 use compositor::{Compositor, View};
 use renderer::Renderer;
 
 use super::{Colours, Engine, Frame, Look, Picture};
 use crate::gpu::Easel;
-use crate::world::{Lit, Wants, World};
+use crate::world::{Level, Lit, Wants, World};
 
+/** What passes between the renderer's thread and the one that draws. */
+#[derive(Default)]
+struct Mailbox {
+    /** The look to render next, with the world's levels then, and how many looks were handed over. */
+    next: Option<(Look, Vec<Arc<Level>>)>,
+    asked: u64,
+    /** The last frame rendered, and for how many looks; how many frames were. */
+    rendered: Option<(renderer::Frame, renderer::Stats, u64)>,
+    published: u64,
+    /** Whether a chunk was baked since the last render began. */
+    baked: bool,
+    /** Whether the renderer's thread is to stop, or has. */
+    stop: bool,
+}
+
+type Shared = Arc<(Mutex<Mailbox>, Condvar)>;
+
+/**
+ * Chunks, rendered on a thread of its own (picking a face's cells anew
+ * takes many milliseconds at once): a frame draws the last rendered, which
+ * the GPU places from where the eye is now (compositor.wgsl's `place`).
+ */
 pub struct Chunks {
-    renderer: Renderer,
-    /** Whether chunks in view were baking at the last frame. */
-    baking: bool,
+    shared: Shared,
+    /** The look and levels the last frame handed over. */
+    asked: Option<(Look, Vec<Arc<Level>>)>,
+    /** Whether what the last frame showed was still coming, and the renderer's frames then (Mailbox's `published`). */
+    busy: bool,
+    published: u64,
 }
 
 impl Chunks {
     /** Draws `world`, its whole voxels reliefs or splats each (Renderer's `relief`), reliefs flat if `flat`. */
     pub fn new(world: &World, relief: bool, flat: bool) -> Chunks {
-        Chunks { renderer: Renderer::new(world, relief, flat), baking: false }
+        let shared: Shared = Arc::default();
+        let baked = {
+            let shared = shared.clone();
+            move || {
+                shared.0.lock().expect("mailbox").baked = true;
+                shared.1.notify_all();
+            }
+        };
+        let renderer = Renderer::new(world, relief, flat, baked);
+        let mailbox = shared.clone();
+        std::thread::spawn(move || render_on(renderer, &mailbox));
+        Chunks { shared, asked: None, busy: false, published: 0 }
+    }
+}
+
+/** The renderer's thread: it renders the latest look handed over, and the last again as chunks are baked, till told to stop. */
+fn render_on(mut renderer: Renderer, shared: &(Mutex<Mailbox>, Condvar)) {
+    // Stopped, even by a panic: the thread that draws waits for nothing more.
+    struct Stopped<'a>(&'a (Mutex<Mailbox>, Condvar));
+    impl Drop for Stopped<'_> {
+        fn drop(&mut self) {
+            self.0.0.lock().unwrap_or_else(|e| e.into_inner()).stop = true;
+            self.0.1.notify_all();
+        }
+    }
+    let _stopped = Stopped(shared);
+    let mut last: Option<(Look, Vec<Arc<Level>>, u64)> = None;
+    loop {
+        let (look, levels, asked) = {
+            let mut m = shared.0.lock().expect("mailbox");
+            let job = loop {
+                if m.stop {
+                    return;
+                }
+                if let Some((look, levels)) = m.next.take() {
+                    break (look, levels, m.asked);
+                }
+                if m.baked
+                    && let Some(last) = &last
+                {
+                    break last.clone();
+                }
+                m = shared.1.wait(m).expect("mailbox");
+            };
+            m.baked = false;
+            job
+        };
+        let (frame, stats) = renderer.render(&look, &levels);
+        let rendered = (frame, stats.clone(), asked);
+        {
+            let mut m = shared.0.lock().expect("mailbox");
+            m.rendered = Some(rendered);
+            m.published += 1;
+        }
+        shared.1.notify_all();
+        last = Some((look, levels, asked));
+    }
+}
+
+impl Drop for Chunks {
+    fn drop(&mut self) {
+        self.shared.0.lock().expect("mailbox").stop = true;
+        self.shared.1.notify_all();
     }
 }
 
 impl Engine for Chunks {
     fn frame(&mut self, look: &Look, world: &World) -> Frame {
-        let (frame, stats) = self.renderer.render(look, world);
-        self.baking = !stats.wanted.is_empty();
+        let levels: Vec<Arc<Level>> = (0..GRID_LEVELS).map(|l| world.level(l).clone()).collect();
+        let (frame, stats, answered, asked) = {
+            let mut m = self.shared.0.lock().expect("mailbox");
+            // Handed over only if it changed, or the renderer would be ever behind.
+            let same = self.asked.as_ref().is_some_and(|(l, ls)| l == look && ls.iter().zip(&levels).all(|(a, b)| Arc::ptr_eq(a, b)));
+            if !same {
+                m.next = Some((*look, levels.clone()));
+                m.asked += 1;
+                self.asked = Some((*look, levels));
+                self.shared.1.notify_all();
+            }
+            // The first frame waits for something to draw.
+            while !m.stop && m.rendered.is_none() {
+                m = self.shared.1.wait(m).expect("mailbox");
+            }
+            assert!(!m.stop, "the chunks' renderer stopped");
+            self.published = m.published;
+            let (frame, stats, answered) = m.rendered.clone().expect("rendered");
+            (frame, stats, answered, m.asked)
+        };
+        // Until rendered for this look and these tiles, what it wants is not known: while the eye moves, never quite.
+        self.busy = stats.baking > 0 || answered < asked;
         let lit = if look.sky.is_some() { Lit::Reading } else { Lit::Not };
         let lod = Lod::new(look.shift, look.detail);
         Frame {
-            stats: format!("{} chunks\n{} baking, {} tiles wanted", frame.chunks.len(), stats.wanted.len(), stats.tiles.len()),
+            stats: format!("{} chunks\n{} baking, {} tiles wanted", frame.chunks.len(), stats.baking, stats.tiles.len()),
             picture: Box::new(Composed { frame, view: View::new(look) }),
             // Whichever way the eye turns.
             wants: Wants { reach: std::array::from_fn(|g| lod.grid_reach(g, look.far)), lit, tiles: stats.tiles },
-            busy: self.baking,
+            busy: self.busy,
         }
     }
 
+    /** Waits, if what it shows was still coming at the last frame, until the renderer renders again. */
     fn wait(&mut self) -> bool {
-        if self.baking {
-            self.renderer.wait();
+        if self.busy {
+            let mut m = self.shared.0.lock().expect("mailbox");
+            while m.published == self.published && !m.stop {
+                m = self.shared.1.wait(m).expect("mailbox");
+            }
         }
-        self.baking
+        self.busy
     }
 
     fn panel(&mut self, ui: &mut egui::Ui, look: &mut Look) {
@@ -84,6 +198,7 @@ impl Picture for Composed {
 mod tests {
     use std::any::Any;
     use std::collections::HashSet;
+    use std::sync::Arc;
 
     use super::*;
     use crate::view::view_basis;
@@ -158,19 +273,21 @@ mod tests {
     fn what_the_buffers_cannot_hold_is_left_out_farthest_first() {
         let mut composed = complete_view("moor", [-30.0, 10.0], 2f64.powf(3.25), true, false);
         let all = Easel::offscreen(None).pixels(&composed, PIXELS).2;
-        // Room for about half of the frame's columns: the chunks that come first, as many as fit, of columns, splats and clusters.
-        let bytes =
-            |b: &bakery::Baked| [size_of_val(&b.columns[..]), size_of_val(&b.splats[..]), size_of_val(&b.clusters[..])].map(|n| n as u64);
+        // Room for about half of the frame's columns: the chunks that come first, as many as fit, of columns, splats and
+        // clusters, and records.
+        let bytes = |b: &bakery::Baked| {
+            [size_of_val(&b.columns[..]) as u64, size_of_val(&b.splats[..]) as u64, size_of_val(&b.clusters[..]) as u64, compositor::RECORD]
+        };
         let chunks = &composed.frame.chunks;
         let room = chunks.iter().map(|p| bytes(&p.chunk.baked)[0]).sum::<u64>() / 2;
         let some = Easel::offscreen(Some(room)).pixels(&composed, PIXELS).2;
-        let sums = chunks.iter().scan([0; 3], |sum, p| {
+        let sums = chunks.iter().scan([0; 4], |sum, p| {
             sum.iter_mut().zip(bytes(&p.chunk.baked)).for_each(|(s, b)| *s += b);
             Some(*sum)
         });
         let fit = sums.take_while(|sum| sum.iter().all(|&s| s <= room)).count();
         assert!(fit > 0 && fit < chunks.len(), "{fit} of {} chunks fit", chunks.len());
-        composed.frame.chunks.truncate(fit);
+        Arc::make_mut(&mut composed.frame.chunks).truncate(fit);
         let first = Easel::offscreen(None).pixels(&composed, PIXELS).2;
         assert!(some != all, "some left out");
         assert!(some == first, "what is drawn shows as it would alone");

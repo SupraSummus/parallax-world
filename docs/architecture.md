@@ -268,12 +268,18 @@ Where they overlap, coarser voxels may show a little past the finer ones' edges.
 The renderer keeps a face's cells picked for the eye anywhere near it
 and the view turned a little (`Lod::pick`),
 each with what it knows of it (`Seen`): its chunk, that it holds nothing,
-or what it waits for;
-each frame finds those the face composes now among them,
-row by row within the face's rays (`Lod::composed`), without looking each up,
+or what it waits for,
 and picks anew once the eye or view leaves them:
 what it knew of cells still picked moves to the new pick,
 of the rest it keeps a while.
+A frame is every chunk the picks compose for an eye anywhere in them
+(`Lod::composed`), found as a face is picked and added to as chunks come;
+which of them the eye draws from where it is, the GPU finds (section 4).
+So the eye moving within a pick finds its chunks baked,
+and the renderer can run on a thread of its own
+(`native/src/engine/chunks.rs`): a frame draws the last it rendered.
+What the eye composed when its face was picked is waited for;
+the rest of the pick is baked after.
 There is no coverage: every chunk in view is baked,
 and the compositor culls what is hidden (section 4).
 
@@ -640,6 +646,11 @@ widened by the slant of the ray to it, as on the web;
 a chunk's slot in the table comes to the vertex shader
 as its draws' first vertex,
 so its splats are uploaded as the workers made them.
+A chunk's record, where it is whatever the camera, is uploaded with it;
+each frame the GPU places every chunk from the camera (`place`),
+and keeps those whose level claims their cell (`Lod::layers`, mirrored there).
+The list of clusters is written only when the frame's chunks change:
+otherwise a frame writes its globals alone.
 
 **See-through.** Native draws a site's medium see-through
 (`KindDef::medium`, as mist) where its pieces don't show;

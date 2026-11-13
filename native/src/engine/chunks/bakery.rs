@@ -46,7 +46,6 @@ pub struct Request {
  */
 pub struct Baked {
     pub origin: [f64; 2],
-    pub extent: [f64; 2],
     pub columns: Vec<GpuColumn>,
     pub splats: Vec<GpuSplat>,
     pub clusters: Vec<GpuCluster>,
@@ -95,25 +94,28 @@ pub struct Bakery {
     queues: Vec<Arc<Queue>>,
     grids: Grids,
     baked: Receiver<(Request, Baked)>,
-    /** Received by wait(), not taken yet. */
-    early: Vec<(Request, Baked)>,
 }
 
 impl Bakery {
-    /** Starts `threads` workers, each baking with a baker from `baker`, its light kept aside for requests not lit. */
-    pub fn new(threads: usize, baker: impl Fn() -> Baker + Send + Sync + 'static) -> Bakery {
+    /**
+     * Starts `threads` workers, each baking with a baker from `baker`, its
+     * light kept aside for requests not lit, and calling `delivered` after
+     * each chunk it hands over.
+     */
+    pub fn new(threads: usize, delivered: impl Fn() + Send + Sync + 'static, baker: impl Fn() -> Baker + Send + Sync + 'static) -> Bakery {
         let (send, baked) = channel();
-        let baker = Arc::new(baker);
+        let (baker, delivered) = (Arc::new(baker), Arc::new(delivered));
         let grids: Grids = Arc::new(Mutex::new((0..GRID_LEVELS).map(|_| Arc::new(Tiles::new(0, []))).collect()));
         let queues = (0..threads)
             .map(|_| {
                 let queue: Arc<Queue> = Arc::default();
-                let (queue2, send, baker, grids) = (queue.clone(), send.clone(), baker.clone(), grids.clone());
-                std::thread::spawn(move || work(&queue2, &send, &grids, baker()));
+                let (queue2, send, baker, grids, delivered) =
+                    (queue.clone(), send.clone(), baker.clone(), grids.clone(), delivered.clone());
+                std::thread::spawn(move || work(&queue2, &send, &grids, baker(), &*delivered));
                 queue
             })
             .collect();
-        Bakery { queues, grids, baked, early: Vec::new() }
+        Bakery { queues, grids, baked }
     }
 
     /** The tiles of `level` from now on. */
@@ -137,17 +139,11 @@ impl Bakery {
 
     /** The chunks baked since the last call. */
     pub fn take(&mut self) -> Vec<(Request, Baked)> {
-        let mut baked = std::mem::take(&mut self.early);
-        baked.extend(self.baked.try_iter());
+        let baked: Vec<(Request, Baked)> = self.baked.try_iter().collect();
         for (r, _) in &baked {
             self.queues[r.worker(self.queues.len())].0.lock().expect("queue").in_flight.remove(&r.key());
         }
         baked
-    }
-
-    /** Waits until a chunk is baked. */
-    pub fn wait(&mut self) {
-        self.early.extend(self.baked.recv());
     }
 }
 
@@ -160,7 +156,7 @@ impl Drop for Bakery {
     }
 }
 
-fn work(queue: &Queue, send: &Sender<(Request, Baked)>, grids: &Grids, mut baker: Baker) {
+fn work(queue: &Queue, send: &Sender<(Request, Baked)>, grids: &Grids, mut baker: Baker, delivered: &dyn Fn()) {
     // The baker's light while it bakes unlit.
     let mut aside = None;
     // The tiles of each level the baker has: none yet.
@@ -209,17 +205,10 @@ fn work(queue: &Queue, send: &Sender<(Request, Baked)>, grids: &Grids, mut baker
         let (splats, splat_clusters, whole) = cluster(&baker.numbers, half_layer, r.block);
         let see_through = clusters.len() + whole;
         clusters.extend(splat_clusters);
-        let baked = Baked {
-            origin: [b.origin_x, b.origin_y],
-            extent: [b.extent_width, b.extent_height],
-            columns,
-            splats,
-            clusters,
-            see_through,
-            flat,
-        };
+        let baked = Baked { origin: [b.origin_x, b.origin_y], columns, splats, clusters, see_through, flat };
         if send.send((request, baked)).is_err() {
             return;
         }
+        delivered();
     }
 }

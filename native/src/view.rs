@@ -45,11 +45,6 @@ pub fn faces() -> Vec<Face> {
         .collect()
 }
 
-/** Whether a ray (x, y, z) in face coordinates is the face's: |x| + √2 · |y| ≤ z. */
-pub fn in_face(x: f64, y: f64, z: f64) -> bool {
-    x.abs() + std::f64::consts::SQRT_2 * y.abs() <= z
-}
-
 /** A view: orientation in degrees, viewport in pixels and focal length. */
 #[derive(Clone, Copy, PartialEq)]
 pub struct View {
@@ -60,23 +55,10 @@ pub struct View {
     pub focal: f64,
 }
 
-/** A rectangle on screen, pixels from the top-left. */
-#[derive(Clone, Copy)]
-pub struct ScreenBox {
-    pub min_x: f64,
-    pub max_x: f64,
-    pub min_y: f64,
-    pub max_y: f64,
-}
-
 impl View {
     /** The camera's axes in a face's coordinates. */
     pub fn face_basis(&self, face: &Face) -> [Vec3; 3] {
         view_basis(self.yaw, self.pitch).map(|axis| to_local(&face.axes, axis))
-    }
-
-    pub fn on_screen(&self, b: &ScreenBox) -> bool {
-        b.min_x < self.width && b.max_x > 0.0 && b.min_y < self.height && b.max_y > 0.0
     }
 
     /** Bounds of x / z and y / z of the face's rays the screen shows ([min x, max x, min y, max y]), or None if it shows none. */
@@ -111,15 +93,7 @@ impl View {
         };
         Some([fold(0, true), fold(0, false), fold(1, true), fold(1, false)])
     }
-
-    /** For a face: the screen box of the part in front of the camera of a camera-relative rectangle on the plane z = distance. */
-    pub fn screen_boxes(&self, face: &Face) -> ScreenBoxes {
-        ScreenBoxes { axes: self.face_basis(face), centre: [self.width / 2.0, self.height / 2.0], focal: self.focal }
-    }
 }
-
-/** Points nearer the camera plane than this are cut off before projecting. */
-const NEAR_PLANE: f64 = 1e-3;
 
 /** Clips a convex polygon to distance(p) ≥ 0 (Sutherland–Hodgman), for a linear `distance`. */
 fn clip(polygon: &[Vec3], distance: impl Fn(Vec3) -> f64) -> Vec<Vec3> {
@@ -138,47 +112,17 @@ fn clip(polygon: &[Vec3], distance: impl Fn(Vec3) -> f64) -> Vec<Vec3> {
     out
 }
 
-/** screenBox in view.ts, for one view and face. */
-pub struct ScreenBoxes {
-    axes: [Vec3; 3],
-    centre: [f64; 2],
-    focal: f64,
-}
-
-impl ScreenBoxes {
-    fn project(&self, p: Vec3) -> Option<[f64; 2]> {
-        let [r, u, f] = self.axes;
-        let z = dot(p, f);
-        (z > 0.0).then(|| [self.centre[0] + dot(p, r) * self.focal / z, self.centre[1] - dot(p, u) * self.focal / z])
-    }
-
-    /** The box of [left, right] × [bottom, top] on the plane z = distance, camera-relative face coordinates. */
-    pub fn of(&self, left: f64, right: f64, bottom: f64, top: f64, distance: f64) -> Option<ScreenBox> {
-        let corners = [[left, bottom, distance], [right, bottom, distance], [right, top, distance], [left, top, distance]];
-        let f = self.axes[2];
-        let all_in_front = corners.iter().all(|&c| dot(c, f) > NEAR_PLANE);
-        // No allocation unless clipped: a frame asks for hundreds of thousands.
-        let mut b = ScreenBox { min_x: f64::INFINITY, max_x: f64::NEG_INFINITY, min_y: f64::INFINITY, max_y: f64::NEG_INFINITY };
-        let mut add = |p: Vec3| {
-            if let Some([x, y]) = self.project(p) {
-                (b.min_x, b.max_x, b.min_y, b.max_y) = (b.min_x.min(x), b.max_x.max(x), b.min_y.min(y), b.max_y.max(y));
-            }
-        };
-        if all_in_front {
-            corners.into_iter().for_each(&mut add);
-        } else {
-            clip(&corners, |p| dot(p, f) - NEAR_PLANE).into_iter().for_each(&mut add);
-        }
-        (b.min_x <= b.max_x).then_some(b)
-    }
-}
-
 #[cfg(test)]
-pub(crate) mod tests {
+mod tests {
     use super::*;
 
+    /** Whether a ray (x, y, z) in face coordinates is the face's: |x| + √2 · |y| ≤ z (owns in compositor.wgsl). */
+    fn in_face(x: f64, y: f64, z: f64) -> bool {
+        x.abs() + std::f64::consts::SQRT_2 * y.abs() <= z
+    }
+
     /** Seeded uniform samples in [lo, hi), so failures reproduce (sampler in view.test.ts). */
-    pub(crate) fn sampler(seed: u64) -> impl FnMut(f64, f64) -> f64 {
+    fn sampler(seed: u64) -> impl FnMut(f64, f64) -> f64 {
         let mut state = seed;
         move |lo, hi| {
             state = (state * 1103515245 + 12345) % 2147483648;
@@ -194,23 +138,11 @@ pub(crate) mod tests {
         View { yaw, pitch, width: 800.0, height: 600.0, focal }
     }
 
-    /** Not a face of the renderer: face coordinates are world coordinates. */
-    fn identity() -> Face {
-        Face { axes: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], lattice: Lattice { r: [1, 0, 0], u: [0, 1, 0], f: [0, 0, 1] } }
-    }
-
     /** The world ray through pixel (sx, sy). */
     fn screen_ray(v: &View, sx: f64, sy: f64) -> Vec3 {
         let [r, u, f] = view_basis(v.yaw, v.pitch);
         let (a, b) = (sx - v.width / 2.0, v.height / 2.0 - sy);
         [0, 1, 2].map(|i| f[i] * v.focal + r[i] * a + u[i] * b)
-    }
-
-    /** Where point p, camera-relative in a face's coordinates, is on screen, if in front of the camera. */
-    fn project(v: &View, face: &Face, p: Vec3) -> Option<[f64; 2]> {
-        let world = [0, 1, 2].map(|i| face.axes[0][i] * p[0] + face.axes[1][i] * p[1] + face.axes[2][i] * p[2]);
-        let [r, u, f] = view_basis(v.yaw, v.pitch).map(|axis| dot(world, axis));
-        (f > 0.0).then(|| [v.width / 2.0 + r * v.focal / f, v.height / 2.0 - u * v.focal / f])
     }
 
     #[test]
@@ -293,43 +225,5 @@ pub(crate) mod tests {
             assert!(x / z >= min_x - 1e-9 && x / z <= max_x + 1e-9);
             assert!(y / z >= min_y - 1e-9 && y / z <= max_y + 1e-9);
         }
-    }
-
-    fn visible(v: &View, left: f64, right: f64, bottom: f64, top: f64, distance: f64) -> bool {
-        v.screen_boxes(&identity()).of(left, right, bottom, top, distance).is_some_and(|b| v.on_screen(&b))
-    }
-
-    #[test]
-    fn screen_boxes_show_a_rectangle_around_the_view_direction_not_one_to_the_side_or_behind() {
-        // The view direction meets z = 10 at about (1.76, -1.79).
-        assert!(visible(&view(10.0, -10.0, 400.0), 1.0, 2.0, -2.0, -1.0, 10.0));
-        assert!(!visible(&view(10.0, -10.0, 400.0), -30.0, -20.0, -2.0, -1.0, 10.0));
-        assert!(!visible(&view(180.0, 0.0, 400.0), 1.0, 2.0, -2.0, -1.0, 10.0));
-        // Looking along +x; the rectangle on z = 10 spans x from -50 to 50: from behind the camera into view.
-        assert!(visible(&view(90.0, 0.0, 400.0), -50.0, 50.0, -1.0, 1.0, 10.0));
-    }
-
-    #[test]
-    fn screen_boxes_bound_the_projected_corners_of_a_rectangle_in_front_of_the_camera() {
-        let faces = faces();
-        let mut random = sampler(5);
-        let mut checked = 0;
-        for _ in 0..300 {
-            let v = view(random(-180.0, 180.0), random(-90.0, 90.0), 400.0);
-            let face = &faces[random(0.0, 12.0) as usize];
-            let (x, y, d) = (random(-20.0, 20.0), random(-20.0, 20.0), random(1.0, 30.0));
-            let corners: Option<Vec<[f64; 2]>> =
-                [[x, y], [x + 3.0, y], [x + 3.0, y + 2.0], [x, y + 2.0]].iter().map(|&[cx, cy]| project(&v, face, [cx, cy, d])).collect();
-            let Some(corners) = corners else { continue };
-            let b = v.screen_boxes(face).of(x, x + 3.0, y, y + 2.0, d).unwrap();
-            let bound = |axis: usize, min: bool| corners.iter().map(|c| c[axis]).reduce(if min { f64::min } else { f64::max }).unwrap();
-            for (got, want) in
-                [(b.min_x, bound(0, true)), (b.max_x, bound(0, false)), (b.min_y, bound(1, true)), (b.max_y, bound(1, false))]
-            {
-                assert!((got - want).abs() < 1e-6, "{got} {want}");
-            }
-            checked += 1;
-        }
-        assert!(checked > 50);
     }
 }

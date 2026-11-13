@@ -270,11 +270,15 @@ Numbers are for the forest at 1280×800, as measured when written.
   - Their depth is by w, ahead along the view (`flat_depth`),
     the other engines' by distance from the eye (`depth_of`),
     so culling and the see-through splats ask which the frame draws.
-  - Each frame the main thread works out every picture's enlarging
-    (`Flat::enlarged`); a run's ends are a picture's edges across,
-    so the vertex shader might move them out instead.
-  - The main thread, not the GPU, bounds their frames:
-    `Compositor::prepare` reads each chunk where it lies in memory.
+- **Native's chunk engines while the eye moves.**
+  - Their renderer composes a frame behind (`chunks.rs`),
+    so `--stroll` counts nearly every frame as one whose content is still coming:
+    it no longer tells holes from that.
+  - A pick moved composes its every chunk again, and the compositor
+    goes over every chunk of the frame when one comes (`Compositor::take_chunks`):
+    milliseconds a frame while chunks keep coming.
+  - A shot differs from run to run in about 0.3 % of its pixels (flat, the valley):
+    ties between chunks fall in the order they came, which timing decides.
 - **Native's splats leave a hole by a hut.**
   `--engine splats --view 'seed=42&world=valley&camera=1200,100,36700&look=20,-12'`:
   sky shows through the ground in the bottom right, with or without culling,

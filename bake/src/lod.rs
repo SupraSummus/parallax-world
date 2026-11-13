@@ -70,7 +70,7 @@ impl Lod {
     }
 
     /** The coarsest level: cells of the coarsest grid. */
-    fn top(&self) -> i32 {
+    pub fn top(&self) -> i32 {
         GRID_LEVELS as i32 - 1 + self.shift
     }
 
@@ -196,14 +196,30 @@ impl Lod {
     }
 
     /**
-     * The chunks a face composes from `eye`: the cells each level draws,
-     * from the eye's layer to the pick's `far` (world units) ahead along the
-     * axis, whose rays have x / z and y / z within `tangents` (min x, max x,
-     * min y, max y; the face's coordinates, see view.ts); each with its `T`
-     * in `picked`, which covers them (Picked::covers).
+     * Whether a face composes `cell` from `eye`, its rays within
+     * `tangents`, to `far` ahead (world units): whether `composed` from
+     * that eye alone visits it, at once.
      */
-    pub fn composed<T>(&self, picked: &mut Picked<T>, eye: [f64; 3], tangents: [f64; 4], mut visit: impl FnMut(CellChunk, &mut T)) {
+    pub fn composes(&self, cell: &CellChunk, eye: [f64; 3], far: f64, tangents: [f64; 4]) -> bool {
         let eyes = eye.map(|v| [v, v]);
+        let level = cell.level;
+        // Its site (i, j, k) in N's.
+        let [i, j, k] = cell.site.map(|v| (v << cell.atoms) >> level);
+        let in_rows = |rows: Option<[i32; 4]>, d: usize, v: i32| rows.is_some_and(|r| (r[2 * d]..=r[2 * d + 1]).contains(&v));
+        self.layers(level, &eyes, far).is_some_and(|ks| ks.contains(&i64::from(k)))
+            && in_rows(Lod::rows(level, k.into(), &eyes, tangents), 1, j)
+            && in_rows(in_face(*cell, &eyes, tangents).and_then(|t| Lod::rows(level, k.into(), &eyes, t)), 0, i)
+    }
+
+    /**
+     * The chunks a face composes from an eye anywhere in `eyes` (Eyes): the
+     * cells each level draws for one of them, from its layer to the pick's
+     * `far` (world units) ahead along the axis, whose rays have x / z and
+     * y / z within `tangents` (min x, max x, min y, max y; the face's
+     * coordinates, see view.ts); each with its `T` in `picked`, which covers
+     * them (Picked::covers).
+     */
+    pub fn composed<T>(&self, picked: &mut Picked<T>, eyes: Eyes, tangents: [f64; 4], mut visit: impl FnMut(CellChunk, &mut T)) {
         for level in 0..=self.top() {
             let Some(ks) = self.layers(level, &eyes, picked.lod.2) else { break };
             for k in ks {
@@ -211,7 +227,7 @@ impl Lod {
                 let layer = picked.layer(level, k).expect("covered");
                 for r in within(layer.b, layer.rows, b0, b1) {
                     let j = layer.b + 2 * r as i32;
-                    let row = in_face(cell(self.shift, level, [layer.a, j, k as i32]), eye, tangents);
+                    let row = in_face(cell(self.shift, level, [layer.a, j, k as i32]), &eyes, tangents);
                     let Some([a0, a1, _, _]) = row.and_then(|t| Lod::rows(level, k, &eyes, t)) else { continue };
                     for s in within(layer.a, layer.across, a0, a1) {
                         let i = layer.a + 2 * s as i32;
@@ -225,17 +241,17 @@ impl Lod {
 
 /**
  * Of `tangents`, those the face's rays (|x| + √2 |y| ≤ z) may have
- * through the voxels of the cells in `row`'s row (its j and k) from `eye`:
- * x / z within ±(1 − √2 |y| / z) for their least |y| / z (their sites
- * within N of the cells', the voxels a voxel past); none if no ray of the
- * face meets them. A rectangle of tangents (Lod::rows) holds the face's
- * rhombus, and its corners, cells none of its rays meets.
+ * through the voxels of the cells in `row`'s row (its j and k) from an eye
+ * in `eyes`: x / z within ±(1 − √2 |y| / z) for their least |y| / z (their
+ * sites within N of the cells', the voxels a voxel past); none if no ray
+ * of the face meets them. A rectangle of tangents (Lod::rows) holds the
+ * face's rhombus, and its corners, cells none of its rays meets.
  */
-fn in_face(row: CellChunk, eye: [f64; 3], [x0, x1, y0, y1]: [f64; 4]) -> Option<[f64; 4]> {
+fn in_face(row: CellChunk, eyes: &Eyes, [x0, x1, y0, y1]: [f64; 4]) -> Option<[f64; 4]> {
     let (g, n) = ((1i64 << row.atoms) as f64, (1i64 << row.level) as f64);
     let [_, j, k] = row.site.map(|v| f64::from(v) * g);
-    let far = (k + n + g - eye[2]) * LAYER;
-    let (low, high) = (j - n - g - eye[1], j + n + g - eye[1]);
+    let far = (k + n + g - eyes[2][0]) * LAYER;
+    let (low, high) = (j - n - g - eyes[1][1], j + n + g - eyes[1][0]);
     let least = if low > 0.0 { low } else { (-high).max(0.0) };
     let w = 1.0 - std::f64::consts::SQRT_2 * least / far;
     let (x0, x1) = (x0.max(-w), x1.min(w));
@@ -287,6 +303,11 @@ impl<T> Picked<T> {
             && tangents[1] <= w1
             && tangents[2] >= w2
             && tangents[3] <= w3
+    }
+
+    /** The eyes and tangents it was picked for: those it composes all of. */
+    pub fn bounds(&self) -> (Eyes, [f64; 4]) {
+        (self.eyes, self.tangents)
     }
 
     /** The `T` of `cell`, if it has it. */
@@ -346,7 +367,7 @@ mod tests {
     /** The cells a face composes from `eye`, its rays within `tangents`, of `picked`: each once. */
     fn composed_of<T>(lod: &Lod, picked: &mut Picked<T>, eye: [f64; 3], tangents: [f64; 4]) -> HashSet<CellChunk> {
         let mut cells = HashSet::new();
-        lod.composed(picked, eye, tangents, |cell, _| assert!(cells.insert(cell), "{cell:?} twice"));
+        lod.composed(picked, eye.map(|v| [v, v]), tangents, |cell, _| assert!(cells.insert(cell), "{cell:?} twice"));
         cells
     }
 
@@ -374,7 +395,7 @@ mod tests {
             let there = composed_from(&lod, eye, far, tangents);
             assert!(there.len() > 1000, "{}", there.len());
             assert_eq!(composed_of(&lod, &mut old, eye, tangents), there, "eye {eye:?}");
-            lod.composed(&mut old, eye, tangents, |cell, seen| *seen = Some(cell));
+            lod.composed(&mut old, eye.map(|v| [v, v]), tangents, |cell, seen| *seen = Some(cell));
             known.extend(there);
         }
         // Picked again a little farther on: what it knew of a cell is the new pick's, where `at` finds it, or stays in the old.
@@ -387,6 +408,29 @@ mod tests {
         assert!(kept.len() * 2 > known.len(), "{} of {} kept", kept.len(), known.len());
         old.into_each(|cell, seen| assert!(seen.is_none_or(|s| s == cell && kept.insert(cell)), "{cell:?} has {seen:?}"));
         assert_eq!(kept, known);
+    }
+
+    #[test]
+    fn a_pick_composes_for_its_whole_box_all_that_an_eye_in_it_composes_cell_by_cell() {
+        let (lod, far) = (Lod { shift: 3, q: 8 }, 300.0);
+        let (wide, tangents) = ([-0.8, 0.7, -0.5, 0.6], [-0.65, 0.55, -0.35, 0.45]);
+        let centre = [-4.1, 2.3, 11.6];
+        let mut picked: Picked<()> = lod.pick(centre.map(|v| [v - 3.0, v + 3.0]), far, wide, None);
+        let (eyes, bounds) = picked.bounds();
+        let mut all = HashSet::new();
+        lod.composed(&mut picked, eyes, bounds, |cell, _| assert!(all.insert(cell), "{cell:?} twice"));
+        for d in [[-3.0, 3.0, -3.0], [2.9, -1.4, 2.99], [0.0, 0.0, 0.0], [-1.7, -3.0, 0.4]] {
+            let eye = std::array::from_fn(|i| centre[i] + d[i]);
+            let there = composed_of(&lod, &mut picked, eye, tangents);
+            let composes: HashSet<CellChunk> = all.iter().copied().filter(|cell| lod.composes(cell, eye, far, tangents)).collect();
+            assert_eq!(composes, there, "eye {eye:?}: composes, cell by cell, as composed");
+            assert!(
+                there.len() > 1000 && there.is_subset(&all),
+                "eye {eye:?}: {} of {} not in the box's",
+                there.difference(&all).count(),
+                there.len()
+            );
+        }
     }
 
     /** Whether a point (a, b, c), in a face's lattice coordinates, is in its rays and within `far` of `eye`, well within. */
@@ -490,7 +534,7 @@ mod tests {
             for e in 0..6 {
                 let eye = [0.37 * e as f64 - 2.0, 0.21 * (e % 5) as f64 - 0.4, 3.29 * e as f64 - 1.0];
                 let mut picked = lod.pick::<()>(eye.map(|v| [v, v]), far, rhombus, None);
-                lod.composed(&mut picked, eye, rhombus, |cell, _| {
+                lod.composed(&mut picked, eye.map(|v| [v, v]), rhombus, |cell, _| {
                     let (g, min, max) = crate::chunk_reads(&cell);
                     let s = (1i64 << g) as f64;
                     for corner in 0..8 {

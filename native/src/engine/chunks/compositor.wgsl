@@ -2,8 +2,9 @@
 // cell_relief), or their whole voxels as splats, and their see-through
 // voxels as splats, drawing only the clusters of them that may show: each
 // cluster names its chunk's slot in `chunks`, which gives its face and
-// plane relative to the camera. Per frame, cull_drawn lists draws of the
-// tiles of columns (or clusters of whole splats) that showed last frame,
+// plane relative to the camera, as `place` makes it each frame of the
+// chunk's record. Then cull_drawn lists draws of the tiles of columns (or
+// clusters of whole splats) that showed last frame,
 // and tile_vertex (splat_vertex) draws them; their depth is reduced to a
 // pyramid of farthest depths (reduce_depth, reduce), and cull_rest tests
 // every tile against it: those that showed are kept for the next frame,
@@ -18,6 +19,8 @@ struct FaceView {
   view: mat3x3f,
   // Its axis in world coordinates, times √2: (±1, ±1, 0) in some order.
   axis: vec4f,
+  // The camera, in the face's coordinates (w unused).
+  eye: vec4f,
 }
 
 struct Globals {
@@ -31,8 +34,32 @@ struct Globals {
   horizon: vec4f,
   sky_view: mat3x3f, // the camera's axes in world coordinates
   faces: array<FaceView, 12>,
+  // Which cells each level claims (claims): Lod's Q, the layers of grid 0
+  // to the render distance, and the coarsest level (w unused).
+  lod: vec4f,
 }
 
+// A chunk where it is, wherever the camera (compositor.rs's GpuRecord):
+// in its face's coordinates, the top-left corner of what it draws, and its
+// plane's depth; its face; its cell's level, its grid's, and its site's c in
+// its grid's units; its tint; drawn flat, the box its columns fill from its
+// origin, and its picture's plane past its own (z0, gx, gy) and how far its
+// edge pillars reach from it; a half layer of its grid.
+struct Record {
+  origin: vec2f,
+  depth: f32,
+  face: u32,
+  level: i32,
+  atoms: i32,
+  site: i32,
+  tint: u32,
+  min: vec2f,
+  max: vec2f,
+  plane: vec4f,
+  half_layer: f32,
+}
+
+// A chunk as the frame draws it, from the camera (place).
 struct Chunk {
   origin: vec2f, // top-left corner of what is drawn, relative to the camera, face coordinates
   distance: f32, // of the centre plane, along the face's axis
@@ -43,7 +70,8 @@ struct Chunk {
   clip: f32, // see veil_vertex
   // Drawn flat (compositor.rs's Flat): its picture's q from its origin at
   // scale · q + offset, its plane past its own, z0 + gx x + gy y at q =
-  // (x, y) (w unused).
+  // (x, y); and w, 1 if its level claims its cell from where the eye is,
+  // else 0: not drawn.
   scale: vec2f,
   offset: vec2f,
   plane: vec4f,
@@ -97,6 +125,9 @@ struct DrawArgs {
 // nearest first in each, their draws in that order.
 @group(0) @binding(9) var<storage, read> veiled: array<vec4u>;
 @group(0) @binding(16) var<storage, read_write> veil_draws: array<DrawArgs>;
+// The chunks' records, by slot, and the chunks place makes of them.
+@group(0) @binding(17) var<storage, read> records: array<Record>;
+@group(0) @binding(18) var<storage, read_write> made: array<Chunk>;
 // The pyramid: level 0 from the depth buffer, each next from the last.
 @group(0) @binding(10) var depth_in: texture_depth_2d;
 @group(0) @binding(11) var level_in: texture_2d<f32>;
@@ -496,13 +527,16 @@ fn closest_to_zero(lo: f32, hi: f32) -> f32 {
 
 // Where a cluster may draw on screen, in pixels (left, top, right, bottom),
 // within its face's rays, a hair wider (owns); empty if it draws
-// nowhere.
+// nowhere: its chunk's cell not claimed (place), or all behind the eye.
 fn screen_box(cluster: Cluster) -> vec4f {
   let c = chunks[cluster.slot_count >> 8u];
   // The rays through its box, as tangents, at most its corners', near and
   // far; a splat's widened by its slant across (splat_vertex), a
   // see-through one's as much, to hold where its tent is drawn.
   let z = c.distance + vec2f(cluster.near, cluster.far);
+  if c.plane.w == 0.0 || z.y <= 0.0 {
+    return vec4f(0.0);
+  }
   if z.x <= 0.0 {
     return vec4f(vec2f(0.0), globals.resolution);
   }
@@ -677,6 +711,73 @@ fn cull_see_through(@builtin(workgroup_id) id: vec3u, @builtin(num_workgroups) n
   let b = screen_box(cluster);
   let shows = shows(b) && !(culls && hidden(b, nearest_depth(cluster)));
   veil_draws[k] = DrawArgs(4u, select(0u, cluster.slot_count & 0xffu, shows), (cluster.slot_count >> 8u) * 4u, cluster.first);
+}
+
+// Level 0 draws from NEAR_LAYERS of grid 0 ahead of the eye's (lod.rs's NEAR).
+const NEAR_LAYERS = 4;
+// The face's rays' tangents across and up, at most (compositor.rs's MAX_SLANT).
+const MAX_SLANT = vec2f(1.0, 0.7071067811865476);
+
+// The last layer of grid 0 whose cells `level` claims, for an eye in layer
+// `eye` (Lod::reach): 2Q · N layers past the last of its own layers of
+// sites not past the eye's; all, for the coarsest.
+fn reach(level: i32, eye: i32) -> i32 {
+  if level >= i32(globals.lod.z) {
+    return 0x7fffffff;
+  }
+  return ((eye >> u32(level)) + 2 * i32(globals.lod.x)) << u32(level);
+}
+
+// Whether `level` draws its cell whose site is in layer `c` of grid 0, for
+// an eye in layer `eye` (Lod::layers): claimed, and not all within the
+// finer level's claims; not past the render distance.
+fn claims(level: i32, c: i32, eye: i32) -> bool {
+  let n = 1 << u32(level);
+  let last = eye + i32(globals.lod.y);
+  var first = eye + NEAR_LAYERS;
+  if level > 0 {
+    first = reach(level - 1, eye) - n + 1;
+  }
+  return first <= last && first <= c && c <= min(reach(level, eye), last + n);
+}
+
+// A thread per slot: its chunk as the frame draws it, from the camera. Its
+// plane and origin relative to the eye; whether its level claims its cell;
+// how far past its plane its see-through splats are left out for the
+// finer level's (veil_vertex; Lod::finer_reach); and drawn flat, its
+// picture enlarged, each edge out by how far its edge pillars reach from
+// its plane times the slant of the rays to it at its nearest, at most the
+// face's (compositor.rs's Flat).
+@compute @workgroup_size(64)
+fn place(@builtin(workgroup_id) id: vec3u, @builtin(num_workgroups) n: vec3u, @builtin(local_invocation_index) thread: u32) {
+  let slot = thread_of(id, n, thread);
+  if slot >= arrayLength(&records) {
+    return;
+  }
+  let r = records[slot];
+  let eye = globals.faces[r.face].eye.xyz;
+  let layer = i32(floor(eye.z / LAYER));
+  var c: Chunk;
+  c.origin = r.origin - eye.xy;
+  c.distance = r.depth - eye.z;
+  c.face = r.face;
+  c.level = f32(r.level);
+  c.tint = r.tint;
+  c.half_layer = r.half_layer;
+  c.clip = -3.0e38;
+  if r.level > 0 {
+    c.clip = f32(2 * ((reach(r.level - 1, layer) >> u32(r.atoms)) - r.site));
+  }
+  let reach_out = r.plane.w;
+  let nearest = r.plane.x + min(r.plane.y * r.min.x, r.plane.y * r.max.x) + min(r.plane.z * r.min.y, r.plane.z * r.max.y);
+  let z = c.distance + nearest - reach_out;
+  let far = max(abs(c.origin + r.min), abs(c.origin + r.max));
+  let slant = select(MAX_SLANT, min(far / z, MAX_SLANT), z > 0.0);
+  let half = (r.max - r.min) / 2.0;
+  c.scale = select(vec2f(1.0), 1.0 + slant * reach_out / half, half > vec2f(0.0));
+  c.offset = (r.min + r.max) / 2.0 * (1.0 - c.scale);
+  c.plane = vec4f(r.plane.xyz, select(0.0, 1.0, claims(r.level, r.site << u32(r.atoms), layer)));
+  made[slot] = c;
 }
 
 // A texel of level 0 is the farthest of 2 × 2 pixels, one of a level the

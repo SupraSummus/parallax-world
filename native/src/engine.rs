@@ -96,7 +96,7 @@ pub trait Painter: Any {
  * the longer side) and how far, at what size (points), lit or not; and
  * what engines that draw cells, or chunks, read besides.
  */
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct Look {
     pub camera: Vec3,
     pub yaw: f64,

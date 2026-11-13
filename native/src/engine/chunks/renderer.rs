@@ -2,26 +2,27 @@
 //! lod.rs): per face, the cells lod.rs picks, relative to the camera,
 //! finest and nearest first. A chunk is a whole cell, whatever the camera: baked once the
 //! world has all the tiles it reads, it is kept while its face's pick holds
-//! it, and a while after; until then, the tiles are what it wants. Every chunk in view is baked: drawing what
-//! is in view, and culling what of it is hidden, is the compositor's job.
+//! it, and a while after; until then, the tiles are what it wants.
+//! A frame is every chunk its faces' picks compose for an eye anywhere in
+//! them, found as a face is picked and added to as chunks come; which of
+//! them the eye draws from where it is, the GPU finds (compositor.wgsl).
 //! See docs/architecture.md, sections 1 to 5.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use bake::lod::{CellChunk, Lod, Picked, distance};
 use bake::slicing::LAYER;
 use bake::{Baker, chunk_reads};
-use fcc::GRID_LEVELS;
 use fcc::Lattice;
+use fcc::{FastMap, FastSet, GRID_LEVELS, Tiles};
 
 use super::bakery::{Baked, Bakery, Request};
 use crate::engine::Look;
-use crate::view::{self, Face, ScreenBoxes, View, in_face, to_local};
+use crate::view::{self, Face, to_local};
 use crate::world::{Heights, Level, TILE, TileId, World};
 
 /**
- * Cells known beyond the picks, before those not looked up or let go for
+ * Chunks kept beyond the picks, before those not looked up or let go for
  * UNUSED_RENDERS are forgotten, looked for every EVICTS renders: each
  * time, all are.
  */
@@ -35,27 +36,20 @@ pub struct Chunk {
     pub baked: Baked,
 }
 
-/**
- * A chunk in a frame: its face and cell, its plane `distance` ahead of the
- * camera along the face's axis, and the top-left corner of what it draws
- * there, relative to the camera, in the face's coordinates; how far its
- * cell's site is from the camera, and the last layer of grid 0 whose
- * cells the next finer level draws (Lod::finer_reach).
- */
+/** A chunk in a frame: its face and cell, and how far its cell's site was from the eye when it came (by which see-through ones are drawn). */
+#[derive(Clone)]
 pub struct Placement {
     pub face: usize,
     pub cell: CellChunk,
-    pub distance: f64,
     pub chunk: Arc<Chunk>,
-    pub x: f64,
-    pub y: f64,
     pub from_eye: f64,
-    pub finer: Option<i64>,
 }
 
-/** What to draw: chunks face by face, finest and nearest first, as the compositor has room for them. */
+/** What to draw: chunks face by face, finest and nearest first as they were picked, as the compositor has room for them. */
+#[derive(Clone)]
 pub struct Frame {
-    pub chunks: Vec<Placement>,
+    /** The same from frame to frame until a chunk comes or goes. */
+    pub chunks: Arc<Vec<Placement>>,
     /** The farthest chunk's distance, or the render distance if farther: the sky's fog. */
     pub farthest: f64,
     /** Whether its chunks' whole voxels are reliefs, or splats each (Renderer's `relief`). */
@@ -64,10 +58,10 @@ pub struct Frame {
     pub flat: bool,
 }
 
-#[derive(Default)]
+#[derive(Clone)]
 pub struct Stats {
-    /** Chunks in view to bake, nearest first. */
-    pub wanted: Vec<Request>,
+    /** Chunks in view to bake. */
+    pub baking: usize,
     /** Tiles that cells in view read and the world has not made, by grid level, most wanted first. */
     pub tiles: Vec<(usize, TileId)>,
 }
@@ -75,7 +69,7 @@ pub struct Stats {
 /**
  * How far the eye may move from where a face's cells were picked, in units
  * of grid 0, and how far its tangents may turn, before they are picked
- * anew: each frame finds which of them it composes now, rather than pick
+ * anew: until then, a frame draws what they compose, rather than pick
  * hundreds of thousands of cells, and knows what it knew of them.
  */
 const DRIFT: f64 = 8.0;
@@ -97,17 +91,45 @@ enum Seen {
     Baked(Arc<Chunk>),
 }
 
+/** A face's cells picked, each with what is known of it, and of those it composes: the chunks, the cells that wait for tiles, and those to bake. */
+struct Pick {
+    picked: Picked<Seen>,
+    chunks: Vec<Placement>,
+    waiting: Vec<(CellChunk, [TileId; 2], Wanted)>,
+    baking: FastMap<CellChunk, (Request, Wanted)>,
+}
+
+/**
+ * How far a cell was from the eye when its face was picked, and whether
+ * the eye composed it then: the frame waits for those, their tiles asked
+ * for; the rest of the pick is baked after, as its tiles come, for the eye
+ * to find as it moves.
+ */
+#[derive(Clone, Copy)]
+struct Wanted {
+    distance: f64,
+    in_view: bool,
+}
+
+impl Wanted {
+    /** In view first, then nearest first. */
+    fn order(&self) -> (bool, f64) {
+        (!self.in_view, self.distance)
+    }
+}
+
 pub struct Renderer {
     faces: Vec<Face>,
     /** Per grid level, the y of its sites, [low, high). */
     heights: Heights,
     /**
-     * By face, its cells picked last, each with what is known of it; and
-     * by face and cell, what was known of those that came and went, and the
-     * render that last looked them up or let them go, kept a while.
+     * By face, its cells picked last; and by face and cell, the chunks of
+     * those that came and went, or that a bake found empty, and the render
+     * that last looked them up or let them go, kept a while: what else was
+     * known of a cell is found again at less cost than kept.
      */
-    picks: Vec<Option<Picked<Seen>>>,
-    cells: HashMap<(usize, CellChunk), (Seen, u64)>,
+    picks: Vec<Option<Pick>>,
+    cells: FastMap<(usize, CellChunk), (Seen, u64)>,
     bakery: Bakery,
     next_id: u32,
     renders: u64,
@@ -117,44 +139,19 @@ pub struct Renderer {
     flat: bool,
     /** Whether the chunks it has are lit (Request's `lit`): when the look's lighting changes, they are baked again. */
     lit: bool,
+    /** Per level, the world's tiles the cells waiting for tiles were last looked up in. */
+    tiles: Vec<Arc<Tiles>>,
+    /** The faces in view last, and what their picks composed then: the frame, and what it wants. */
+    shown: Vec<bool>,
+    frame: Frame,
+    stats: Stats,
 }
 
-/** A cell's voxels' box, relative to the camera at `local`, in the face's coordinates: its sites' and a grid unit past. */
-fn voxels_box(cell: &CellChunk, local: [f64; 3]) -> [[f64; 2]; 3] {
+/** A cell's voxels' depths along the axis, relative to the camera at `local`, in the face's coordinates: its sites' and a grid unit past. */
+fn depths(cell: &CellChunk, local: [f64; 3]) -> [f64; 2] {
     let g = (1i64 << cell.atoms) as f64;
     let half = (cell.spacing() + 1) as f64 * g;
-    let scale = [LAYER, 1.0, LAYER];
-    std::array::from_fn(|d| [-half, half].map(|h| (cell.site[d] as f64 * g + h) * scale[d] - local[d]))
-}
-
-/**
- * Whether what is in box [x, y, z] of a face's coordinates relative to the
- * camera may show: the rays through it, within the box of their tangents
- * (x / z and y / z at its near and far ends, as screen_box in
- * compositor.wgsl), in the face's and on screen; any, if it reaches the
- * camera's plane.
- */
-fn may_show(boxes: &ScreenBoxes, view: &View, [x, y, [near, far]]: [[f64; 2]; 3]) -> bool {
-    if far <= 0.0 {
-        return false;
-    }
-    if near <= 0.0 {
-        return true;
-    }
-    let tangents = |[lo, hi]: [f64; 2]| [(lo / near).min(lo / far), (hi / near).max(hi / far)];
-    let ([x0, x1], [y0, y1]) = (tangents(x), tangents(y));
-    in_face(closest_to_zero(x0, x1), closest_to_zero(y0, y1), 1.0) && boxes.of(x0, x1, y0, y1, 1.0).is_some_and(|b| view.on_screen(&b))
-}
-
-/** |v| for the v in [lo, hi] nearest to 0. */
-fn closest_to_zero(lo: f64, hi: f64) -> f64 {
-    if lo > 0.0 {
-        lo
-    } else if hi < 0.0 {
-        -hi
-    } else {
-        0.0
-    }
+    [-half, half].map(|h| (cell.site[2] as f64 * g + h) * LAYER - local[2])
 }
 
 /**
@@ -199,13 +196,14 @@ fn may_hold(cell: &CellChunk, forward: [i32; 3], level: &Level, tiles: [TileId; 
 impl Renderer {
     /**
      * A renderer of `world`, its whole voxels reliefs or splats each, its
-     * bakers on as many threads as the world's; given light, each can light
-     * the voxels it shows (a Light each), as the look asks.
+     * bakers on as many threads as the world's, which call `baked` as each
+     * chunk is; given light, each can light the voxels it shows (a Light
+     * each), as the look asks.
      */
-    pub fn new(world: &World, relief: bool, flat: bool) -> Renderer {
+    pub fn new(world: &World, relief: bool, flat: bool, baked: impl Fn() + Send + Sync + 'static) -> Renderer {
         let faces = view::faces();
         let (palette, light) = (world.palette.clone(), world.light());
-        let bakery = Bakery::new(world.threads, move || {
+        let bakery = Bakery::new(world.threads, baked, move || {
             let mut baker = Baker::new(&palette);
             if let Some(light) = &light {
                 let mut light = light();
@@ -215,134 +213,215 @@ impl Renderer {
         });
         Renderer {
             picks: faces.iter().map(|_| None).collect(),
+            shown: vec![false; faces.len()],
             faces,
             heights: world.heights,
-            cells: HashMap::new(),
+            cells: FastMap::default(),
             bakery,
             next_id: 0,
             renders: 0,
             relief,
             flat,
             lit: false,
+            tiles: (0..GRID_LEVELS).map(|_| Arc::new(Tiles::new(0, []))).collect(),
+            frame: Frame { chunks: Arc::default(), farthest: 0.0, relief, flat },
+            stats: Stats { baking: 0, tiles: Vec::new() },
         }
     }
 
-    /** Waits until the bakery delivers a chunk. */
-    pub fn wait(&mut self) {
-        self.bakery.wait();
-    }
-
-    /** The chunks in view of `look` of `world`'s tiles, and what is missing for the rest. */
-    pub fn render(&mut self, look: &Look, world: &World) -> (Frame, Stats) {
+    /** The chunks the picks of `look` compose of the world's tiles, each level's in `levels`, and what is missing for the rest. */
+    pub fn render(&mut self, look: &Look, levels: &[Arc<Level>]) -> (Frame, &Stats) {
+        let mut changed = false;
         if look.sky.is_some() != self.lit {
             self.cells.clear();
             self.picks.iter_mut().for_each(|p| *p = None);
             self.lit = look.sky.is_some();
+            changed = true;
         }
         // Cells that lacked tiles can be baked.
-        for level in 0..GRID_LEVELS {
-            self.bakery.set_tiles(level, world.level(level).grids.clone());
+        let mut arrived = [false; GRID_LEVELS];
+        for (level, arrived) in arrived.iter_mut().enumerate() {
+            let tiles = &levels[level].grids;
+            *arrived = !Arc::ptr_eq(tiles, &self.tiles[level]);
+            if *arrived {
+                self.tiles[level] = tiles.clone();
+                self.bakery.set_tiles(level, tiles.clone());
+            }
         }
-        self.receive();
+        changed |= self.receive();
         self.renders += 1;
         let (camera, view) = (look.camera, look.view());
         let lod = Lod::new(look.shift, look.detail);
-        let mut frame = Frame { chunks: Vec::new(), farthest: look.far, relief: self.relief, flat: self.flat };
-        let mut stats = Stats::default();
-        let mut missing: Vec<(Request, f64)> = Vec::new();
-        let mut tiles: Vec<(usize, TileId, f64)> = Vec::new();
         for f in 0..self.faces.len() {
-            let face = &self.faces[f];
-            let Some(tangents) = view.face_tangents(face) else { continue };
-            let lattice = face.lattice;
-            let local = to_local(&face.axes, camera);
-            let boxes = view.screen_boxes(face);
+            let tangents = view.face_tangents(&self.faces[f]);
+            // Back in view, its cells look for every tile that came meanwhile.
+            let back = tangents.is_some() && !self.shown[f];
+            changed |= tangents.is_some() != self.shown[f];
+            self.shown[f] = tangents.is_some();
+            let Some(tangents) = tangents else { continue };
+            let local = to_local(&self.faces[f].axes, camera);
             let eye = [local[0] / LAYER, local[1], local[2] / LAYER];
-            let far = look.far;
-            let key = (lod.shift, lod.q, far);
-            let pick = &mut self.picks[f];
-            if !pick.as_ref().is_some_and(|p| p.covers(key, eye, tangents)) {
-                let [t0, t1, t2, t3] = tangents;
-                let eyes = eye.map(|v| [v - DRIFT, v + DRIFT]);
-                // Within the face's rays: |x| + √2 |y| ≤ z.
-                let y = std::f64::consts::FRAC_1_SQRT_2;
-                let wide = [(t0 - TURN).max(-1.0), (t1 + TURN).min(1.0), (t2 - TURN).max(-y), (t3 + TURN).min(y)];
-                let mut old = pick.take();
-                *pick = Some(lod.pick(eyes, far, wide, old.as_mut()));
-                // What the new pick does not have is kept a while, as if just looked up.
-                let renders = self.renders;
-                old.into_iter().for_each(|old| {
-                    old.into_each(|cell, seen| {
-                        if !matches!(seen, Seen::Unknown) {
-                            self.cells.insert((f, cell), (seen, renders));
-                        }
-                    })
-                });
+            let key = (lod.shift, lod.q, look.far);
+            if self.picks[f].as_ref().is_some_and(|p| p.picked.covers(key, eye, tangents)) {
+                changed |= self.look_up(f, if back { &[true; GRID_LEVELS] } else { &arrived }, levels, view.focal, local);
+                continue;
             }
-            // What it draws comes finest first, and within a level layer by layer from the nearest (Lod::composed):
-            // what the compositor takes first.
-            lod.composed(pick.as_mut().expect("picked"), eye, tangents, |cell, seen| {
-                if matches!(seen, Seen::Empty) {
-                    return;
-                }
-                let level = cell.atoms as usize;
-                let voxels = voxels_box(&cell, local);
-                if !may_show(&boxes, &view, voxels) {
-                    return;
-                }
-                let depths = voxels[2];
-                // What is known, brought up to date: looked up once, then as its tiles come (its chunk, receive).
-                let source = world.level(level);
-                if matches!(seen, Seen::Unknown) {
-                    let known = self.cells.entry((f, cell)).or_default();
-                    if matches!(known.0, Seen::Unknown) {
-                        let (_, min, max) = chunk_reads(&cell);
-                        known.0 = box_tiles(lattice, self.heights[level], min, max).map_or(Seen::Empty, Seen::Tiles);
+            let [t0, t1, t2, t3] = tangents;
+            let eyes = eye.map(|v| [v - DRIFT, v + DRIFT]);
+            // Within the face's rays: |x| + √2 |y| ≤ z.
+            let y = std::f64::consts::FRAC_1_SQRT_2;
+            let wide = [(t0 - TURN).max(-1.0), (t1 + TURN).min(1.0), (t2 - TURN).max(-y), (t3 + TURN).min(y)];
+            let mut old = self.picks[f].take().map(|p| p.picked);
+            let picked = lod.pick(eyes, look.far, wide, old.as_mut());
+            // The chunks the new pick does not have are kept a while, as if just looked up.
+            let renders = self.renders;
+            old.into_iter().for_each(|old| {
+                old.into_each(|cell, seen| {
+                    if matches!(seen, Seen::Baked(_)) {
+                        self.cells.insert((f, cell), (seen, renders));
                     }
-                    (*seen, known.1) = (known.0.clone(), self.renders);
-                }
-                if let Seen::Tiles(t) = *seen
-                    && source.grids.has_all(t)
-                {
-                    *seen = if may_hold(&cell, lattice.f, source, t) { Seen::Bake(t) } else { Seen::Empty };
-                    self.cells.insert((f, cell), (seen.clone(), self.renders));
-                }
-                let d = distance(&cell, eye);
-                match seen {
-                    Seen::Unknown | Seen::Empty => (),
-                    &mut Seen::Tiles(t) => {
-                        tiles.extend(tiles_in(t).filter(|&id| !source.grids.has(id)).map(|id| (level, id, d)));
-                    }
-                    &mut Seen::Bake(t) => {
-                        let block = super::compositor::block(depths[1].max(1.0), view.focal);
-                        missing.push((Request { face: f, cell, tiles: t, block, lit: self.lit, relief: self.relief, flat: self.flat }, d));
-                    }
-                    Seen::Baked(chunk) => {
-                        // Its plane, through its site; what it draws, as wide as its extent, as deep as its voxels.
-                        let distance = (depths[0] + depths[1]) / 2.0;
-                        let (x, y) = (chunk.baked.origin[0] - local[0], chunk.baked.origin[1] - local[1]);
-                        let [width, height] = chunk.baked.extent;
-                        if distance > 0.0 && may_show(&boxes, &view, [[x, x + width], [y - height, y], depths]) {
-                            frame.farthest = frame.farthest.max(distance);
-                            let finer = lod.finer_reach(cell.level, eye[2]);
-                            frame.chunks.push(Placement { face: f, cell, distance, chunk: chunk.clone(), x, y, from_eye: d, finer });
-                        }
-                    }
-                }
+                })
             });
+            self.compose(f, picked, tangents, &lod, look.far, levels, view.focal, local);
+            changed = true;
         }
-        missing.sort_by(|a, b| a.1.total_cmp(&b.1));
-        stats.wanted = missing.into_iter().map(|m| m.0).collect();
-        tiles.sort_by(|a, b| a.2.total_cmp(&b.2));
-        let mut listed = std::collections::HashSet::new();
-        stats.tiles = tiles.into_iter().filter(|t| listed.insert((t.0, t.1))).map(|t| (t.0, t.1)).collect();
-        self.bakery.want(&stats.wanted);
+        if changed {
+            self.gather(look);
+        }
         self.evict();
-        (frame, stats)
+        (self.frame.clone(), &self.stats)
     }
 
-    /** Keeps what the bakery delivered, where its face's pick has its cell, and a while for when it comes again. */
-    fn receive(&mut self) {
+    /**
+     * What face `f`'s `picked` composes, the eye at `local` in its
+     * coordinates, its rays within `tangents`, found finest first, and
+     * within a level layer by layer from the nearest (Lod::composed): what
+     * the compositor takes first.
+     */
+    #[allow(clippy::too_many_arguments)]
+    fn compose(
+        &mut self,
+        f: usize,
+        mut picked: Picked<Seen>,
+        tangents: [f64; 4],
+        lod: &Lod,
+        far: f64,
+        levels: &[Arc<Level>],
+        focal: f64,
+        local: [f64; 3],
+    ) {
+        let (lattice, request) = (self.faces[f].lattice, self.request(f, focal, local));
+        let eye = [local[0] / LAYER, local[1], local[2] / LAYER];
+        let (mut chunks, mut waiting, mut baking) = (Vec::new(), Vec::new(), FastMap::default());
+        let (eyes, wide) = picked.bounds();
+        lod.composed(&mut picked, eyes, wide, |cell, seen| {
+            if matches!(seen, Seen::Empty) {
+                return;
+            }
+            let level = cell.atoms as usize;
+            // What is known, brought up to date: its chunk kept, or what tiles it reads; then as its tiles come
+            // (look_up) and its chunk (receive).
+            if matches!(seen, Seen::Unknown) {
+                *seen = match self.cells.get_mut(&(f, cell)) {
+                    Some(known) => {
+                        known.1 = self.renders;
+                        known.0.clone()
+                    }
+                    None => {
+                        let (_, min, max) = chunk_reads(&cell);
+                        box_tiles(lattice, self.heights[level], min, max).map_or(Seen::Empty, Seen::Tiles)
+                    }
+                };
+            }
+            let source = &levels[level];
+            if let Seen::Tiles(t) = *seen
+                && source.grids.has_all(t)
+            {
+                *seen = if may_hold(&cell, lattice.f, source, t) { Seen::Bake(t) } else { Seen::Empty };
+            }
+            let wanted = Wanted { distance: distance(&cell, eye), in_view: lod.composes(&cell, eye, far, tangents) };
+            match seen {
+                Seen::Unknown | Seen::Empty => (),
+                &mut Seen::Tiles(t) => waiting.push((cell, t, wanted)),
+                &mut Seen::Bake(t) => _ = baking.insert(cell, (request(cell, t), wanted)),
+                Seen::Baked(chunk) => chunks.push(Placement { face: f, cell, chunk: chunk.clone(), from_eye: wanted.distance }),
+            }
+        });
+        self.picks[f] = Some(Pick { picked, chunks, waiting, baking });
+    }
+
+    /** Requests to bake a cell of face `f` that reads given tiles, the eye at `local` seeing at `focal`. */
+    fn request(&self, f: usize, focal: f64, local: [f64; 3]) -> impl Fn(CellChunk, [TileId; 2]) -> Request + use<> {
+        let (lit, relief, flat) = (self.lit, self.relief, self.flat);
+        move |cell, tiles| {
+            let block = super::compositor::block(depths(&cell, local)[1].max(1.0), focal);
+            Request { face: f, cell, tiles, block, lit, relief, flat }
+        }
+    }
+
+    /** Of face `f`'s cells that wait for tiles, those whose tiles arrived (by level, `arrived`) are to bake, or hold nothing. Whether any were. */
+    fn look_up(&mut self, f: usize, arrived: &[bool; GRID_LEVELS], levels: &[Arc<Level>], focal: f64, local: [f64; 3]) -> bool {
+        let Some(mut pick) = self.picks[f].take() else { return false };
+        let (lattice, request) = (self.faces[f].lattice, self.request(f, focal, local));
+        let before = pick.waiting.len();
+        pick.waiting.retain(|&(cell, t, wanted)| {
+            let level = cell.atoms as usize;
+            let source = &levels[level];
+            if !arrived[level] || !source.grids.has_all(t) {
+                return true;
+            }
+            let seen = if may_hold(&cell, lattice.f, source, t) {
+                pick.baking.insert(cell, (request(cell, t), wanted));
+                Seen::Bake(t)
+            } else {
+                Seen::Empty
+            };
+            if let Some(picked) = pick.picked.at(&cell) {
+                *picked = seen;
+            }
+            false
+        });
+        let changed = pick.waiting.len() < before;
+        self.picks[f] = Some(pick);
+        changed
+    }
+
+    /** The frame of what the faces in view composed, and what they want: the chunks to bake, and the tiles, nearest first. */
+    fn gather(&mut self, look: &Look) {
+        let picks = || self.picks.iter().zip(&self.shown).filter(|p| *p.1).filter_map(|p| p.0.as_ref());
+        let chunks: Vec<Placement> = picks().flat_map(|p| p.chunks.iter().cloned()).collect();
+        // Their planes through their sites.
+        let farthest = chunks
+            .iter()
+            .map(|p| {
+                let [near, far] = depths(&p.cell, to_local(&self.faces[p.face].axes, look.camera));
+                (near + far) / 2.0
+            })
+            .fold(look.far, f64::max);
+        self.frame = Frame { chunks: Arc::new(chunks), farthest, relief: self.relief, flat: self.flat };
+        let mut baking: Vec<&(Request, Wanted)> = picks().flat_map(|p| p.baking.values()).collect();
+        baking.sort_by(|a, b| a.1.order().partial_cmp(&b.1.order()).expect("distances"));
+        let wanted: Vec<Request> = baking.iter().map(|b| b.0).collect();
+        self.bakery.want(&wanted);
+        let mut tiles: Vec<(usize, TileId, f64)> = picks()
+            .flat_map(|p| &p.waiting)
+            .filter(|w| w.2.in_view)
+            .flat_map(|&(cell, t, wanted)| {
+                let (level, source) = (cell.atoms as usize, &self.tiles[cell.atoms as usize]);
+                tiles_in(t).filter(|&id| !source.has(id)).map(move |id| (level, id, wanted.distance))
+            })
+            .collect();
+        tiles.sort_by(|a, b| a.2.total_cmp(&b.2));
+        let mut listed = FastSet::default();
+        self.stats = Stats {
+            baking: baking.iter().filter(|b| b.1.in_view).count(),
+            tiles: tiles.into_iter().filter(|t| listed.insert((t.0, t.1))).map(|t| (t.0, t.1)).collect(),
+        };
+    }
+
+    /** Keeps what the bakery delivered, where its face's pick has its cell, and a while for when it comes again. Whether any came. */
+    fn receive(&mut self) -> bool {
+        let mut any = false;
         for (r, baked) in self.bakery.take() {
             // Baked as it was before it changed.
             if r.lit != self.lit {
@@ -350,11 +429,20 @@ impl Renderer {
             }
             self.next_id += 1;
             let seen = if baked.is_empty() { Seen::Empty } else { Seen::Baked(Arc::new(Chunk { id: self.next_id, baked })) };
-            if let Some(picked) = self.picks[r.face].as_mut().and_then(|p| p.at(&r.cell)) {
+            if let Some(pick) = self.picks[r.face].as_mut()
+                && let Some(picked) = pick.picked.at(&r.cell)
+            {
                 *picked = seen.clone();
+                if let Some((_, wanted)) = pick.baking.remove(&r.cell) {
+                    if let Seen::Baked(chunk) = &seen {
+                        pick.chunks.push(Placement { face: r.face, cell: r.cell, chunk: chunk.clone(), from_eye: wanted.distance });
+                    }
+                    any = true;
+                }
             }
             self.cells.insert((r.face, r.cell), (seen, self.renders));
         }
+        any
     }
 
     /** Forgets cells not looked up or let go a while: the picks keep what they know of theirs. */
@@ -363,55 +451,5 @@ impl Renderer {
             let renders = self.renders;
             self.cells.retain(|_, (_, used)| *used + UNUSED_RENDERS > renders);
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_cell_may_show_wherever_a_voxel_of_its_sites_does() {
-        // Cells of 4 sites' spacing around cameras looking every way: no point of a voxel of a site in a cell's
-        // bounds, found in the world, is in its face's rays and on screen where the cell is culled.
-        let mut random = view::tests::sampler(7);
-        let (faces, (mut culled, mut seen)) = (view::faces(), (0, 0));
-        for trial in 0..48 {
-            let face = &faces[trial % faces.len()];
-            let view = View { yaw: random(-180.0, 180.0), pitch: random(-80.0, 80.0), width: 320.0, height: 200.0, focal: 160.0 };
-            let boxes = view.screen_boxes(face);
-            let camera = [random(-9.0, 9.0), random(-9.0, 9.0), random(-9.0, 9.0)];
-            let local = to_local(&face.axes, camera);
-            let (atoms, m) = (1, 4);
-            for [i, j, k] in (-3..=3).flat_map(|i| (-3..=3).flat_map(move |j| (0..=4).map(move |k| [i, j, k]))) {
-                if (i ^ k) & 1 != 0 || (j ^ k) & 1 != 0 {
-                    continue;
-                }
-                let cell = CellChunk { level: atoms + 2, atoms, site: [i, j, k].map(|v| v * m) };
-                if may_show(&boxes, &view, voxels_box(&cell, local)) {
-                    continue;
-                }
-                culled += 1;
-                let (lo, hi) = cell.bounds();
-                for [a, b, c] in (lo[0]..=hi[0]).flat_map(|a| (lo[1]..=hi[1]).flat_map(move |b| (lo[2]..=hi[2]).map(move |c| [a, b, c]))) {
-                    if (a ^ c) & 1 != 0 || (b ^ c) & 1 != 0 {
-                        continue;
-                    }
-                    let site = face.lattice.world([a, b, c]).map(f64::from);
-                    for _ in 0..4 {
-                        let w = [random(-1.0, 1.0), random(-1.0, 1.0), random(-1.0, 1.0)];
-                        if w[0].abs() + w[1].abs() > 1.0 || w[1].abs() + w[2].abs() > 1.0 || w[0].abs() + w[2].abs() > 1.0 {
-                            continue;
-                        }
-                        let point: [f64; 3] = std::array::from_fn(|d| (site[d] + w[d]) * f64::from(1 << atoms) - camera[d]);
-                        let [x, y, z] = to_local(&face.axes, point);
-                        let shows = in_face(x, y, z) && boxes.of(x, x, y, y, z).is_some_and(|b| view.on_screen(&b));
-                        assert!(!shows, "{cell:?} culled, but its site {:?} shows at {point:?}", [a, b, c]);
-                        seen += 1;
-                    }
-                }
-            }
-        }
-        assert!(culled > 1000 && seen > 100_000, "{culled} cells culled, {seen} points of theirs looked at");
     }
 }

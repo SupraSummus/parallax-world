@@ -4,7 +4,8 @@
 
 struct FaceView {
   view: mat3x3f,
-  _pad: vec4f,
+  _axis: vec4f,
+  _eye: vec4f,
 }
 
 // compositor.wgsl's.
@@ -19,6 +20,7 @@ struct Globals {
   horizon: vec4f,
   sky_view: mat3x3f,
   faces: array<FaceView, 12>,
+  _lod: vec4f,
 }
 
 // A band of a face's slabs, all of one grid: the eye in its lattice

@@ -10,48 +10,58 @@
 //!
 //! A chunk's columns and splats are uploaded when it comes into view, into
 //! a buffer each for all, in clusters (tiles of columns, and splats near
-//! each other on its plane), and dropped when it leaves; each
-//! frame rewrites only a table of the chunks' placements, relative to the
-//! camera, so precision does not fall off far from the origin, and the
-//! list of their clusters.
+//! each other on its plane), with its record (where it is, wherever the
+//! camera), and dropped when it leaves; the list of their clusters is
+//! written when the frame's chunks change. Each frame writes only the
+//! globals: the GPU places the chunks relative to the camera (`place`), and
+//! culls what of them its eye does not draw.
 
-use std::collections::{HashMap, HashSet};
 use std::ops::Range;
+use std::sync::Arc;
 
+use bake::lod::Lod;
 use bake::slicing::{LAYER, half_layer};
 use egui_wgpu::wgpu;
 use fcc::light::{linear_to_srgb, srgb_to_linear};
+use fcc::{FastMap, FastSet};
 
-use super::renderer::{Chunk, Frame};
+use super::renderer::{Frame, Placement};
 use crate::engine::{Colours, Look, Painter};
 use crate::gpu::Easel;
 use crate::view::{self, Vec3, to_local, view_basis};
 
-/** A chunk as the shader reads it (Chunk in compositor.wgsl). */
+/**
+ * A chunk as it is, wherever the camera (Record in compositor.wgsl), which
+ * `place` makes the chunk the shaders read (Chunk) of each frame, from the
+ * camera: written once, when the chunk comes. Its face's coordinates, in
+ * world units.
+ */
 #[repr(C)]
 #[derive(Clone, Copy, Default, bytemuck::Pod, bytemuck::Zeroable)]
-struct GpuChunk {
-    /** Top-left corner of what it draws, relative to the camera, face coordinates. */
+struct GpuRecord {
+    /** Top-left corner of what it draws. */
     origin: [f32; 2],
-    distance: f32,
+    /** Its plane's depth along the axis: its cell's site's. */
+    depth: f32,
     face: u32,
-    /** Its level (depth_of in compositor.wgsl). */
-    level: f32,
+    /** Its cell's level, and its grid's, and its site's c in its grid's units (CellChunk). */
+    level: i32,
+    atoms: i32,
+    site: i32,
     /** RGBA to paint its voxels, shaded as they are (Colours); 0 for their own colours. */
     tint: u32,
+    /** Drawn flat (Flat): the box its columns fill, from its origin; its plane past its own, z0, gx, gy, and how far its edge pillars reach from it. */
+    min: [f32; 2],
+    max: [f32; 2],
+    plane: [f32; 4],
     /** A half layer of its grid: the unit of its columns' and splats' depths. */
     half_layer: f32,
-    /**
-     * Its see-through splats whose cell of the next finer level is at most
-     * this far past its plane, in half layers, that level draws: left out.
-     */
-    clip: f32,
-    /** Drawn flat (Flat): its picture's q from its origin is drawn at scale · q + offset. */
-    scale: [f32; 2],
-    offset: [f32; 2],
-    /** Its picture's plane past its own, z0 + gx x + gy y at (x, y) from its origin: z0, gx, gy; and room to keep the table's items 16 bytes apart. */
-    plane: [f32; 4],
+    pad: [f32; 3],
 }
+
+/** Bytes of a chunk's record, and of a chunk as the shaders read it, from the camera (Chunk in compositor.wgsl). */
+pub const RECORD: u64 = size_of::<GpuRecord>() as u64;
+const CHUNK: u64 = 80;
 
 /**
  * A column of a chunk's relief (columns in compositor.wgsl): its front's
@@ -163,7 +173,7 @@ pub fn tiles(baked: &[[u32; 3]], base: [f64; 2], unit: f64, half_layer: f64) -> 
  * columns and their pillars run through the cell.
  * So the plane is the one they reach least from (`flatten`), and each
  * frame the picture is drawn enlarged, each edge out by that reach times
- * the slant of the rays to it (`enlarged`), at most the face's
+ * the slant of the rays to it (`place` in compositor.wgsl), at most the face's
  * (`MAX_SLANT`): neighbours overlap where their pillars would, and depth
  * decides between them.
  */
@@ -218,7 +228,7 @@ pub fn flatten(baked: &[[u32; 3]], base: [f64; 2], unit: f64, half_layer: f64) -
         return (Vec::new(), Vec::new(), Flat::default());
     }
     // The edges: a, b of one parity, six neighbours.
-    let places: HashSet<[i32; 2]> = columns.iter().map(|c| c.0).collect();
+    let places: FastSet<[i32; 2]> = columns.iter().map(|c| c.0).collect();
     let edges: Vec<([f64; 2], [f64; 2])> = columns
         .iter()
         .filter(|(ab, ..)| {
@@ -306,25 +316,6 @@ impl Flat {
     fn depth(&self, [x, y]: [f64; 2]) -> f64 {
         let [z0, gx, gy] = self.plane;
         z0 + gx * x + gy * y
-    }
-
-    /**
-     * How it is enlarged, its origin (x, y) and its chunk's plane
-     * `distance` from the camera: its picture's (x, y) is drawn at
-     * scale · (x, y) + offset, each edge of its box out by reach times the
-     * most the rays to the box slant at its nearest, at most the face's.
-     */
-    fn enlarged(&self, origin: [f64; 2], distance: f64) -> ([f64; 2], [f64; 2]) {
-        let z = distance + corners(self.min, self.max).map(|q| self.depth(q)).into_iter().fold(f64::INFINITY, f64::min) - self.reach;
-        let fit = |d: usize| {
-            let far = (origin[d] + self.min[d]).abs().max((origin[d] + self.max[d]).abs());
-            let slant = if z > 0.0 { (far / z).min(MAX_SLANT[d]) } else { MAX_SLANT[d] };
-            let (centre, half) = ((self.min[d] + self.max[d]) / 2.0, (self.max[d] - self.min[d]) / 2.0);
-            let scale = if half > 0.0 { 1.0 + slant * self.reach / half } else { 1.0 };
-            (scale, centre * (1.0 - scale))
-        };
-        let [(sx, ox), (sy, oy)] = [fit(0), fit(1)];
-        ([sx, sy], [ox, oy])
     }
 }
 
@@ -424,6 +415,9 @@ struct Resident {
     /** Its first see-through cluster's. */
     see_through: u32,
     slot: u32,
+    /** Its record, and its tint for each of Colours, by Colours::ALL. */
+    record: GpuRecord,
+    tints: [u32; 3],
 }
 
 /** A buffer of items `stride` bytes long, ranges of them allocated and freed. */
@@ -436,8 +430,6 @@ struct Arena {
     capacity: u32,
     top: u32,
     free: Vec<Range<u32>>,
-    /** Whether the buffer grew this frame: its copy runs after the frame's writes, so free ranges below it wait. */
-    grew: bool,
 }
 
 impl Arena {
@@ -445,7 +437,7 @@ impl Arena {
         let usage = usage | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC;
         let capacity = capacity.min(Arena::most(device, stride, usage));
         let buffer = buffer(device, label, capacity as u64 * stride, usage);
-        Arena { label, stride, usage, buffer, capacity, top: 0, free: Vec::new(), grew: false }
+        Arena { label, stride, usage, buffer, capacity, top: 0, free: Vec::new() }
     }
 
     /** The most items of `stride` bytes a buffer of `usage` may hold on the device. */
@@ -471,7 +463,7 @@ impl Arena {
         if capacity > self.capacity {
             let grown = buffer(device, self.label, capacity as u64 * self.stride, self.usage);
             encoder.copy_buffer_to_buffer(&self.buffer, 0, &grown, 0, self.top as u64 * self.stride);
-            (self.buffer, self.capacity, self.grew) = (grown, capacity, true);
+            (self.buffer, self.capacity) = (grown, capacity);
         }
     }
 
@@ -480,7 +472,7 @@ impl Arena {
         if count == 0 {
             return Some(0..0);
         }
-        if let Some(k) = self.free.iter().position(|r| r.len() >= count as usize).filter(|_| !self.grew) {
+        if let Some(k) = self.free.iter().position(|r| r.len() >= count as usize) {
             let r = self.free[k].clone();
             if r.len() == count as usize {
                 self.free.remove(k);
@@ -540,6 +532,7 @@ struct Pipelines {
     reduce: wgpu::BindGroupLayout,
     show: wgpu::BindGroupLayout,
     composite: wgpu::BindGroupLayout,
+    place: wgpu::BindGroupLayout,
     /** The tiles of whole voxels, or their splats; then the see-through splats over each other, and those over the picture. */
     tiles: wgpu::RenderPipeline,
     flat: wgpu::RenderPipeline,
@@ -554,20 +547,31 @@ struct Pipelines {
     cull_see_through: wgpu::ComputePipeline,
     reduce_depth_level: wgpu::ComputePipeline,
     reduce_level: wgpu::ComputePipeline,
+    place_chunks: wgpu::ComputePipeline,
 }
 
 pub struct Compositor {
     format: wgpu::TextureFormat,
     pipelines: Pipelines,
     globals: wgpu::Buffer,
-    /** The chunk table, by slot. */
+    /** By slot, the chunks' records, and the chunks `place` makes of them each frame. */
+    records: wgpu::Buffer,
     table: wgpu::Buffer,
     slots: u32,
     free_slots: Vec<u32>,
     columns: Arena,
     splats: Arena,
     clusters: Arena,
-    resident: HashMap<u32, Resident>,
+    resident: FastMap<u32, Resident>,
+    /**
+     * What it writes into its buffers but the globals, staged in buffers it
+     * keeps mapped, copied as the frame's commands run: a chunk's upload a
+     * copy into memory, not a write of its own (Queue::write_buffer makes
+     * a buffer for each).
+     */
+    belt: wgpu::util::StagingBelt,
+    /** The frame's chunks and colours as prepared last: until they change, a frame is its globals. */
+    prepared: Option<(Arc<Vec<Placement>>, Colours)>,
     /**
      * The frame's chunks' clusters, [first, first + count) each and how
      * many of the frame's come before, after how many chunks and clusters
@@ -596,12 +600,13 @@ pub struct Compositor {
     draw_group: Option<wgpu::BindGroup>,
     cull_groups: Vec<wgpu::BindGroup>,
     veil_group: Option<wgpu::BindGroup>,
+    place_group: Option<wgpu::BindGroup>,
 }
 
 const SKY_TOP: [f32; 3] = [0x3f as f32 / 255.0, 0x73 as f32 / 255.0, 0xb8 as f32 / 255.0];
 const SKY_HORIZON: [f32; 3] = [0xb9 as f32 / 255.0, 0xd3 as f32 / 255.0, 0xe8 as f32 / 255.0];
 /** f32 in Globals (compositor.wgsl), and where its `whole` is. */
-pub const GLOBALS: usize = 220;
+pub const GLOBALS: usize = 272;
 const WHOLE: usize = 6;
 const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const FARTHEST: wgpu::TextureFormat = wgpu::TextureFormat::R32Float;
@@ -613,6 +618,16 @@ fn buffer(device: &wgpu::Device, label: &str, size: u64, usage: wgpu::BufferUsag
 
 fn storage(device: &wgpu::Device, label: &str, size: u64) -> wgpu::Buffer {
     buffer(device, label, size, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST)
+}
+
+/** Bytes of each of the belt's buffers: a few frames of chunks coming into view. */
+const BELT: u64 = 1 << 21;
+
+/** Stages `bytes` on `belt` to be written into `target` at `offset` as `encoder` runs. */
+fn stage(belt: &mut wgpu::util::StagingBelt, encoder: &mut wgpu::CommandEncoder, target: &wgpu::Buffer, offset: u64, bytes: &[u8]) {
+    if let Some(size) = wgpu::BufferSize::new(bytes.len() as u64) {
+        belt.write_buffer(encoder, target, offset, size).copy_from_slice(bytes);
+    }
 }
 
 /** Threads a workgroup that culls has, a cluster each (compositor.wgsl). */
@@ -705,6 +720,7 @@ impl Pipelines {
         let reduce = layout(device, &[(11, S::COMPUTE, float), (12, S::COMPUTE, level_out)]);
         let show = layout(device, &[(13, S::FRAGMENT, float)]);
         let composite = layout(device, &[(14, S::FRAGMENT, float)]);
+        let place = layout(device, &[(0, S::COMPUTE, uniform), (17, S::COMPUTE, read), (18, S::COMPUTE, write)]);
         let pipeline_layout = |layout: &wgpu::BindGroupLayout| {
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: None,
@@ -788,6 +804,7 @@ impl Pipelines {
             cull_see_through: compute(&cull_veil, "cull_see_through", &[("culls", f64::from(culls))]),
             reduce_depth_level: compute(&reduce_depth, "reduce_depth", &[]),
             reduce_level: compute(&reduce, "reduce", &[]),
+            place_chunks: compute(&place, "place", &[]),
             draw,
             cull,
             cull_veil,
@@ -795,6 +812,7 @@ impl Pipelines {
             reduce,
             show,
             composite,
+            place,
         }
     }
 }
@@ -864,13 +882,16 @@ impl Compositor {
             format,
             pipelines: Pipelines::new(device, format, culls),
             globals: buffer(device, "globals", (GLOBALS * 4) as u64, wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST),
-            table: storage(device, "chunks", 1024 * size_of::<GpuChunk>() as u64),
+            records: storage(device, "records", 1024 * RECORD),
+            table: buffer(device, "chunks", 1024 * CHUNK, U::STORAGE),
             slots: 0,
             free_slots: Vec::new(),
             columns: Arena::new(device, "columns", size_of::<GpuColumn>() as u64, wgpu::BufferUsages::STORAGE, 1 << 20),
             splats: Arena::new(device, "splats", size_of::<GpuSplat>() as u64, wgpu::BufferUsages::VERTEX, 1 << 20),
             clusters: Arena::new(device, "clusters", size_of::<GpuCluster>() as u64, wgpu::BufferUsages::STORAGE, 1 << 15),
-            resident: HashMap::new(),
+            resident: FastMap::default(),
+            belt: wgpu::util::StagingBelt::new(device.clone(), BELT),
+            prepared: None,
             candidates: storage(device, "candidates", 1024 * 16),
             veiled: storage(device, "see-through candidates", 1024 * 16),
             veil_draws: buffer(device, "see-through draws", 1 << 16, U::STORAGE | U::INDIRECT),
@@ -885,6 +906,7 @@ impl Compositor {
             draw_group: None,
             cull_groups: Vec::new(),
             veil_group: None,
+            place_group: None,
         }
     }
 
@@ -897,9 +919,12 @@ impl Compositor {
         })
     }
 
-    /** Uploads `chunk`'s columns, splats and clusters (see tiles and cluster), unless the buffers can hold no more. */
-    fn upload(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, chunk: &Chunk) -> bool {
-        let baked = &chunk.baked;
+    /** Uploads `p`'s chunk's columns, splats and clusters (see tiles and cluster), and its record, unless the buffers can hold no more. */
+    fn upload(&mut self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, p: &Placement, colours: Colours) -> bool {
+        let baked = &p.chunk.baked;
+        if self.free_slots.is_empty() && u64::from(self.slots + 1) * RECORD > self.records.size() {
+            return false;
+        }
         let Some(columns) = self.columns.allocate(device, encoder, baked.columns.len() as u32) else { return false };
         let Some(splats) = self.splats.allocate(device, encoder, baked.splats.len() as u32) else {
             self.columns.release(columns);
@@ -914,8 +939,9 @@ impl Compositor {
             self.slots += 1;
             self.slots - 1
         });
-        queue.write_buffer(&self.columns.buffer, columns.start as u64 * self.columns.stride, bytemuck::cast_slice(&baked.columns));
-        queue.write_buffer(&self.splats.buffer, splats.start as u64 * self.splats.stride, bytemuck::cast_slice(&baked.splats));
+        let belt = &mut self.belt;
+        stage(belt, encoder, &self.columns.buffer, columns.start as u64 * self.columns.stride, bytemuck::cast_slice(&baked.columns));
+        stage(belt, encoder, &self.splats.buffer, splats.start as u64 * self.splats.stride, bytemuck::cast_slice(&baked.splats));
         let clusters: Vec<GpuCluster> = baked
             .clusters
             .iter()
@@ -926,23 +952,69 @@ impl Compositor {
                 GpuCluster { first: first + c.first, slot_count: slot << 8 | c.slot_count, ..*c }
             })
             .collect();
-        queue.write_buffer(&self.clusters.buffer, range.start as u64 * self.clusters.stride, bytemuck::cast_slice(&clusters));
+        stage(belt, encoder, &self.clusters.buffer, range.start as u64 * self.clusters.stride, bytemuck::cast_slice(&clusters));
+        // A hue per layer of a level's cells (Colours), neighbours in a stack far apart.
+        let cell = &p.cell;
+        let hue = hash(&[p.face as u64, cell.level as u64]) + 0.618 * (cell.site[2] / cell.spacing()) as f64;
+        let tints = [0, tint(hue), tint(hash(&[hue.to_bits(), cell.site[0] as u64, cell.site[1] as u64]))];
+        let flat = &baked.flat;
+        let record = GpuRecord {
+            origin: baked.origin.map(|v| v as f32),
+            depth: (f64::from(cell.site[2] << cell.atoms) * LAYER) as f32,
+            face: p.face as u32,
+            level: cell.level,
+            atoms: cell.atoms,
+            site: cell.site[2],
+            tint: tints[colours as usize],
+            min: flat.min.map(|v| v as f32),
+            max: flat.max.map(|v| v as f32),
+            plane: [flat.plane[0], flat.plane[1], flat.plane[2], flat.reach].map(|v| v as f32),
+            half_layer: half_layer(cell.atoms) as f32,
+            ..GpuRecord::default()
+        };
+        stage(belt, encoder, &self.records, slot as u64 * RECORD, bytemuck::bytes_of(&record));
         let see_through = range.start + baked.see_through as u32;
-        self.resident.insert(chunk.id, Resident { columns, splats, see_through, clusters: range, slot });
+        self.resident.insert(p.chunk.id, Resident { columns, splats, see_through, clusters: range, slot, record, tints });
         true
     }
 
-    /** Uploads what `frame` draws that is not on the GPU yet, drops what it no longer draws, and writes the chunk table, the clusters to cull and globals. */
+    /**
+     * Uploads what `frame` draws that is not on the GPU yet, drops what it
+     * no longer draws, and writes the clusters to cull, once its chunks or
+     * colours change; and every frame, the globals.
+     */
     pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, frame: &Frame, view: &View) {
-        (self.columns.grew, self.splats.grew, self.clusters.grew) = (false, false, false);
         let size = view.pixels.map(|v| v.max(1));
         (self.seams, self.relief, self.flat) = (view.seams, frame.relief, frame.flat);
-        if self.targets.as_ref().is_none_or(|t| t.size != size) {
+        let resized = self.targets.as_ref().is_none_or(|t| t.size != size);
+        if resized {
             self.targets = Some(Targets::new(device, &self.pipelines, self.format, size));
         }
-        let mut table = Vec::new();
+        let same = self.prepared.as_ref().is_some_and(|(chunks, colours)| Arc::ptr_eq(chunks, &frame.chunks) && *colours == view.colours);
+        if !same {
+            self.take_chunks(device, encoder, frame, view.colours);
+            // Its writes copied over as the encoder runs.
+            self.belt.finish_and_recall_on_submit(encoder);
+        }
+        if !same || resized {
+            self.bind_groups(device);
+        }
+        let sky_fog = 1.0 - (-frame.farthest / view.fog_distance).exp();
+        let mut globals = view.globals(size, sky_fog);
+        globals[WHOLE] = if frame.flat {
+            2.0
+        } else if frame.relief {
+            0.0
+        } else {
+            1.0
+        };
+        queue.write_buffer(&self.globals, 0, bytemuck::cast_slice(&globals));
+    }
+
+    /** What `prepare` does once `frame`'s chunks, or the `colours` they are painted in, change. */
+    fn take_chunks(&mut self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, frame: &Frame, colours: Colours) {
         // What the frame no longer draws makes room first.
-        let wanted: HashSet<u32> = frame.chunks.iter().map(|p| p.chunk.id).collect();
+        let wanted: FastSet<u32> = frame.chunks.iter().map(|p| p.chunk.id).collect();
         let gone: Vec<u32> = self.resident.keys().filter(|id| !wanted.contains(id)).copied().collect();
         for id in gone {
             let r = self.resident.remove(&id).expect("resident");
@@ -951,54 +1023,44 @@ impl Compositor {
             self.splats.release(r.splats);
             self.clusters.release(r.clusters);
         }
+        // Room for a record of each, as far as the device allows, written anew, as they are painted now, if it grew or
+        // they changed colours.
+        let slots = self.slots + frame.chunks.iter().filter(|p| !self.resident.contains_key(&p.chunk.id)).count() as u32;
+        let most = Arena::most(device, RECORD, wgpu::BufferUsages::STORAGE);
+        let room = slots.next_power_of_two().min(most);
+        let grown = u64::from(room) * RECORD > self.records.size();
+        if grown {
+            self.records = storage(device, "records", u64::from(room) * RECORD);
+            self.table = buffer(device, "chunks", u64::from(room) * CHUNK, wgpu::BufferUsages::STORAGE);
+        }
+        if grown || self.prepared.as_ref().is_some_and(|p| p.1 != colours) {
+            let mut records = vec![GpuRecord::default(); self.slots as usize];
+            for r in self.resident.values_mut() {
+                r.record.tint = r.tints[colours as usize];
+                records[r.slot as usize] = r.record;
+            }
+            stage(&mut self.belt, encoder, &self.records, 0, bytemuck::cast_slice(&records));
+        }
         // Growing copies all a buffer holds, so grow seldom.
         let chunks = || frame.chunks.iter().map(|p| &p.chunk.baked);
         self.columns.room(device, encoder, chunks().map(|b| b.columns.len() as u32).sum());
         self.splats.room(device, encoder, chunks().map(|b| b.splats.len() as u32).sum());
         self.clusters.room(device, encoder, chunks().map(|b| b.clusters.len() as u32).sum());
         let mut candidates: Vec<[u32; 4]> = vec![[0; 4]];
-        // Each with its level and how far its site is from the eye.
+        // Each with its level and how far its site was from the eye.
         let mut veiled: Vec<([u32; 4], (i32, f64))> = Vec::new();
         let mut full = false;
-        for p in &frame.chunks {
-            // A hue per layer of a level's cells (Colours), neighbours in a stack far apart.
-            let cell = &p.cell;
-            let hue = hash(&[p.face as u64, cell.level as u64]) + 0.618 * (cell.site[2] / cell.spacing()) as f64;
-            let chunk = &p.chunk;
+        for p in frame.chunks.iter() {
             // Chunks come finest and nearest first: once the buffers are full, what is farther waits.
-            if !self.resident.contains_key(&chunk.id) && (full || !self.upload(device, queue, encoder, chunk)) {
+            if !self.resident.contains_key(&p.chunk.id) && (full || !self.upload(device, encoder, p, colours)) {
                 full = true;
                 continue;
             }
-            let resident = &self.resident[&chunk.id];
-            let slot = resident.slot as usize;
-            if table.len() <= slot {
-                table.resize(slot + 1, GpuChunk::default());
-            }
-            let flat = &chunk.baked.flat;
-            let (scale, offset) = flat.enlarged([p.x, p.y], p.distance);
-            table[slot] = GpuChunk {
-                origin: [p.x as f32, p.y as f32],
-                distance: p.distance as f32,
-                face: p.face as u32,
-                level: cell.level as f32,
-                tint: match view.colours {
-                    Colours::Voxels => 0,
-                    Colours::Layers => tint(hue),
-                    Colours::Chunks => tint(hash(&[hue.to_bits(), cell.site[0] as u64, cell.site[1] as u64])),
-                },
-                half_layer: half_layer(cell.atoms) as f32,
-                // In its grid's units, of which reach's layers are 2^atoms.
-                clip: p.finer.map_or(f32::NEG_INFINITY, |r| (2 * ((r >> cell.atoms) - cell.site[2] as i64)) as f32),
-                scale: scale.map(|v| v as f32),
-                offset: offset.map(|v| v as f32),
-                plane: [flat.plane[0], flat.plane[1], flat.plane[2], 0.0].map(|v| v as f32),
-            };
-            let Resident { clusters, see_through, .. } = resident;
+            let Resident { clusters, see_through, .. } = &self.resident[&p.chunk.id];
             let before = candidates.last().map_or(0, |c| c[1] + c[2]);
             candidates.push([clusters.start, see_through - clusters.start, before, 0]);
             if *see_through < clusters.end {
-                veiled.push(([*see_through, clusters.end - see_through, 0, 0], (cell.level, p.from_eye)));
+                veiled.push(([*see_through, clusters.end - see_through, 0, 0], (p.cell.level, p.from_eye)));
             }
         }
         // A ray of a face meets finer levels first (lod.rs), and within a level the cells of the lattice's Voronoi
@@ -1012,33 +1074,19 @@ impl Compositor {
                 [first, count, veils - count, 0]
             }))
             .collect();
-        at_least(device, &mut self.table, self.slots as u64 * size_of::<GpuChunk>() as u64);
-        if !table.is_empty() {
-            queue.write_buffer(&self.table, 0, bytemuck::cast_slice(&table));
-        }
         self.in_view = candidates.iter().map(|c| c[1]).sum();
         self.veils = veils;
         candidates[0] = [candidates.len() as u32 - 1, self.in_view, 0, 0];
         veiled[0] = [veiled.len() as u32 - 1, veils, 0, 0];
         at_least(device, &mut self.candidates, candidates.len() as u64 * 16);
-        queue.write_buffer(&self.candidates, 0, bytemuck::cast_slice(&candidates));
+        stage(&mut self.belt, encoder, &self.candidates, 0, bytemuck::cast_slice(&candidates));
         at_least(device, &mut self.veiled, veiled.len() as u64 * 16);
-        queue.write_buffer(&self.veiled, 0, bytemuck::cast_slice(&veiled));
+        stage(&mut self.belt, encoder, &self.veiled, 0, bytemuck::cast_slice(&veiled));
         at_least(device, &mut self.veil_draws, veils.max(1) as u64 * 16);
         for draws in &mut self.draws {
             at_least(device, draws, self.in_view.max(1) as u64 * 16);
         }
-        let sky_fog = 1.0 - (-frame.farthest / view.fog_distance).exp();
-        let mut globals = view.globals(size, sky_fog);
-        globals[WHOLE] = if frame.flat {
-            2.0
-        } else if frame.relief {
-            0.0
-        } else {
-            1.0
-        };
-        queue.write_buffer(&self.globals, 0, bytemuck::cast_slice(&globals));
-        self.bind_groups(device);
+        self.prepared = Some((frame.chunks.clone(), colours));
     }
 
     fn bind_groups(&mut self, device: &wgpu::Device) {
@@ -1075,10 +1123,13 @@ impl Compositor {
             (16, self.veil_draws.as_entire_binding()),
         ];
         self.veil_group = Some(bind(device, &self.pipelines.cull_veil, &entries));
+        let entries = [(0, self.globals.as_entire_binding()), (17, self.records.as_entire_binding()), (18, self.table.as_entire_binding())];
+        self.place_group = Some(bind(device, &self.pipelines.place, &entries));
     }
 
     /**
-     * Draws the frame prepared last into the picture: the tiles (or
+     * Draws the frame prepared last into the picture: its chunks placed
+     * from the camera (place in compositor.wgsl); the tiles (or
      * clusters of whole splats) that showed last frame, then those that show now that did not, culled
      * against the farthest depths of the first; then the see-through ones
      * in front of them, nearest first, and those over the picture.
@@ -1088,6 +1139,13 @@ impl Compositor {
         let p = &self.pipelines;
         for drawn in &self.drawn {
             encoder.clear_buffer(drawn, 0, None);
+        }
+        if self.slots > 0 {
+            let mut pass = encoder.begin_compute_pass(&Default::default());
+            pass.set_pipeline(&p.place_chunks);
+            pass.set_bind_group(0, self.place_group.as_ref(), &[]);
+            let [across, rows] = groups(self.slots.div_ceil(CULL_THREADS));
+            pass.dispatch_workgroups(across, rows, 1);
         }
         let cull = |encoder: &mut wgpu::CommandEncoder, phase: usize| {
             let mut pass = encoder.begin_compute_pass(&Default::default());
@@ -1207,6 +1265,9 @@ pub struct View {
     pub colours: Colours,
     /** How bright the sky is: 1 by day, less as --light dims it. */
     pub sky: f32,
+    pub camera: Vec3,
+    /** Which cells each level claims (Lod::layers): Lod's Q, layers of grid 0 to the render distance, and the coarsest level. */
+    pub lod: [f32; 3],
 }
 
 /** A number in [0, 1) from `numbers`, as if at random. */
@@ -1228,6 +1289,7 @@ impl View {
     /** As `look` sees, at its size in pixels. */
     pub fn new(look: &Look) -> View {
         let faces = view::faces();
+        let lod = Lod::new(look.shift, look.detail);
         View {
             yaw: look.yaw,
             pitch: look.pitch,
@@ -1239,6 +1301,8 @@ impl View {
             seams: look.seams,
             colours: look.colours,
             sky: look.sky.unwrap_or(1.0),
+            camera: look.camera,
+            lod: [lod.q as f32, (look.far / LAYER).ceil() as f32, lod.top() as f32],
         }
     }
 
@@ -1263,10 +1327,12 @@ impl View {
         };
         columns(&mut g[16..28], axes);
         for (f, face) in self.faces.iter().enumerate() {
-            let at = 28 + f * 16;
+            let at = 28 + f * 20;
             columns(&mut g[at..at + 12], axes.map(|axis| to_local(face, axis)));
             g[at + 12..at + 15].copy_from_slice(&face[2].map(|v| (v * std::f64::consts::SQRT_2).round() as f32));
+            g[at + 16..at + 19].copy_from_slice(&to_local(face, self.camera).map(|v| v as f32));
         }
+        g[268..271].copy_from_slice(&self.lod);
         g
     }
 }
