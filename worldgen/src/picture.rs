@@ -13,6 +13,7 @@ use fcc::{FACE_KINDS, VOXEL_FACES};
 
 use crate::generator::{Generator, generate_shown, materials_of};
 use crate::grid::{ALPHA, BRICK, Box3, GLOW_ONE, VoxelGrid};
+use crate::noise::hash;
 
 /** Sites per tile in x and z, at the picture's level; a tile spans the heights. */
 const TILE: i64 = 64;
@@ -76,6 +77,8 @@ pub struct Camera {
     pub height: usize,
     /** How far rays go, lattice units; fog thickens towards it. */
     pub far: f64,
+    /** If some, the seed of a random point of each pixel its ray goes through (`jittered`); else its middle. */
+    pub jitter: Option<u64>,
 }
 
 impl Camera {
@@ -84,7 +87,7 @@ impl Camera {
         let d = [0, 1, 2].map(|i| target[i] - eye[i]);
         let yaw = d[0].atan2(d[2]);
         let pitch = d[1].atan2(d[0].hypot(d[2]));
-        Camera { eye, yaw, pitch, projection: Projection::Perspective { fov }, width, height, far }
+        Camera { eye, yaw, pitch, projection: Projection::Perspective { fov }, width, height, far, jitter: None }
     }
 
     /** Looking straight down at the area from (x0, z0) to (x1, z1), `width` pixels across. */
@@ -92,12 +95,21 @@ impl Camera {
         let across = max[0] - min[0];
         let height = ((max[1] - min[1]) / across * width as f64).round().max(1.0) as usize;
         let eye = [(min[0] + max[0]) / 2.0, 0.0, (min[1] + max[1]) / 2.0];
-        Camera { eye, yaw: 0.0, pitch: 0.0, projection: Projection::Top { width: across }, width, height, far: f64::INFINITY }
+        Camera { eye, yaw: 0.0, pitch: 0.0, projection: Projection::Top { width: across }, width, height, far: f64::INFINITY, jitter: None }
+    }
+
+    /**
+     * Each pixel's ray through a random point of it, by `seed`: rays all at
+     * their pixels' middles meet a pattern as fine as them at one phase.
+     */
+    pub fn jittered(self, seed: u64) -> Camera {
+        Camera { jitter: Some(seed), ..self }
     }
 
     /** Pixel (i, j)'s ray: from where, which way (unit), lattice units; from above `top` looking down. */
     fn ray(&self, i: usize, j: usize, top: f64) -> ([f64; 3], [f64; 3]) {
-        let (u, v) = ((i as f64 + 0.5) / self.width as f64 - 0.5, 0.5 - (j as f64 + 0.5) / self.height as f64);
+        let within = |axis: i64| self.jitter.map_or(0.5, |seed| hash(seed, i as i64, j as i64, axis) as f64 / 2f64.powi(32));
+        let (u, v) = ((i as f64 + within(0)) / self.width as f64 - 0.5, 0.5 - (j as f64 + within(1)) / self.height as f64);
         let aspect = self.height as f64 / self.width as f64;
         match self.projection {
             Projection::Top { width } => ([self.eye[0] + u * width, top, self.eye[2] + v * width * aspect], [0.0, -1.0, 0.0]),
@@ -187,12 +199,16 @@ const OPAQUE: f64 = 1e-4;
  * What the site `ray` is in shows it, as light sees it: its pieces (by
  * the face it entered) and its medium, each its material and how much of
  * the ray it stops, and what the site glows to it; the rest goes on
- * (`through`).
+ * (`through`). A site stops its alpha of a ray crossing its voxel; one
+ * crossing `part` of the voxel's chord along it (starting or ending in
+ * it) stops as a medium would: 1 − (1 − alpha)^part.
  */
-fn composite(ray: &mut Ray, grid: &VoxelGrid) -> ([(u8, f64); 2], [f64; 3]) {
+fn composite(ray: &mut Ray, grid: &VoxelGrid, part: f64) -> ([(u8, f64); 2], [f64; 3]) {
     let [x, y, z] = ray.site;
     let (parts, glow) = grid.light(x, y, z, entered(ray));
-    let through = ray.through;
+    let alpha = (parts[0].0 as f64 + parts[1].0 as f64) / ALPHA as f64;
+    let scale = if alpha > 0.0 && part < 1.0 { (1.0 - (1.0 - alpha).powf(part)) / alpha } else { part };
+    let through = ray.through * scale;
     let parts = parts.map(|(alpha, id)| (id, through * alpha as f64 / ALPHA as f64));
     ray.through -= parts[0].1 + parts[1].1;
     (parts, glow.map(|g| through * g as f64 / GLOW_ONE as f64))
@@ -302,7 +318,7 @@ impl Tiles {
                 } else {
                     match tile.grid.get_or_empty_brick(x, y, z) {
                         Some(_) if seen.is_some() => {
-                            let (parts, glow) = composite(ray, &tile.grid);
+                            let (parts, glow) = composite(ray, &tile.grid, walk.part(ray, &planes));
                             let seen = seen.as_mut().expect("composited");
                             // What glows is the pieces' (as `composited` has it).
                             seen.add(parts[0].0, 0.0, glow);
@@ -352,7 +368,8 @@ pub(crate) fn composited(grid: &VoxelGrid, origin: [f64; 3], direction: [f64; 3]
     let mut seen = Vec::new();
     while ray.t <= end && ray.through >= OPAQUE {
         let t = ray.t;
-        let ([pieces, medium], glow) = composite(&mut ray, grid);
+        let part = walk.part(&ray, &planes);
+        let ([pieces, medium], glow) = composite(&mut ray, grid, part);
         for (id, stopped, glow) in [(pieces.0, pieces.1, glow), (medium.0, medium.1, [0.0; 3])] {
             if stopped > 0.0 || glow != [0.0; 3] {
                 seen.push((t, id, stopped, glow));
@@ -441,6 +458,19 @@ impl Walk {
         for (plane, after) in planes.iter_mut().zip(self.after[k]) {
             *plane += after;
         }
+    }
+
+    /**
+     * The share of its voxel's chord the ray crosses, from where it is to
+     * where it leaves the voxel or ends. The line enters the voxel at the
+     * last of the planes opposite those it may leave by, (p − site) · face
+     * = −1, and leaves at the first it leaves by.
+     */
+    fn part(&self, ray: &Ray, planes: &[f64; 6]) -> f64 {
+        let leaves = planes.iter().fold(f64::INFINITY, |a, &p| a.min(p));
+        let enters = planes.iter().zip(self.inverse).filter(|(p, _)| p.is_finite()).fold(f64::NEG_INFINITY, |a, (p, i)| a.max(p - 2.0 * i));
+        let chord = leaves - enters;
+        if chord > 0.0 { ((leaves.min(ray.end) - ray.t) / chord).clamp(0.0, 1.0) } else { 0.0 }
     }
 
     /** When the ray reaches each face's plane of its voxel's: (p − site) · face = 1. */
@@ -856,6 +886,27 @@ mod tests {
         assert_eq!(seen([0.1, 3.0, 0.2], [0.0, -1.0, 0.0]), Some(2));
         assert_eq!(seen([-3.0, 0.1, 0.2], [1.0, 0.0, 0.0]), Some(1));
         assert_eq!(seen([-3.0, 3.2, 0.1], [1.0, -1.0, 0.0]), Some(2));
+    }
+
+    #[test]
+    fn a_ray_cut_in_two_stops_what_it_stops_whole() {
+        // A medium all through: what gets through a stretch is what gets through its two parts, wherever it is cut,
+        // the voxel cut in two counted by the part of it each crosses.
+        let mut grid = VoxelGrid::new(&Box3 { min: [-8; 3], max: [8; 3] });
+        for (x, y, z) in (-8..8).flat_map(|z| (-8..8).flat_map(move |y| (-8..8).map(move |x| (x, y, z)))) {
+            if let Some(i) = grid.index(x, y, z) {
+                (grid.medium.alpha[i], grid.medium.seen[i]) = (ALPHA / 2, 1);
+            }
+        }
+        let (origin, direction) = ([-3.1, -2.3, -1.7], normalize([0.8, 0.5, 0.3]));
+        let through = |from: f64, to: f64| {
+            let start = [0, 1, 2].map(|i| origin[i] + from * direction[i]);
+            1.0 - composited(&grid, start, direction, to - from).iter().map(|(_, _, stopped, _)| stopped).sum::<f64>()
+        };
+        for cut in [0.3, 1.1, 2.5, 3.7, 4.9] {
+            let (whole, parts) = (through(0.0, 6.0), through(0.0, cut) * through(cut, 6.0));
+            assert!((whole - parts).abs() < 1e-9, "cut at {cut}: {whole} whole, {parts} in parts");
+        }
     }
 
     #[test]

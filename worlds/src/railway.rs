@@ -553,7 +553,9 @@ fn layers(railway: Rc<Railway>, hold: Holding, ground: Rc<Sloped>) -> Vec<Layer>
                     if within(DECK - 2) {
                         spans.push(Span::solid(top - m(1.0), floor, T::brick));
                     } else if within(DECK) {
-                        spans.push(Span::solid(top - m(1.0), top + 1 + m(0.75).max(2 * spacing), T::brick));
+                        // Its top where it is at every level: at least two sites, grown down, not up.
+                        let parapet = top + 1 + m(0.75);
+                        spans.push(Span::solid((top - m(1.0)).min(parapet - 2 * spacing), parapet, T::brick));
                     }
                 }
                 // A floor as deep as the ballast, and a lining round the bore: walls on it, then its vault.
@@ -572,8 +574,7 @@ fn layers(railway: Rc<Railway>, hold: Holding, ground: Rc<Sloped>) -> Vec<Layer>
                 // The formation beside the ballast, or a platform at a station; where the railway owns it.
                 Structure::Earth if !within(BALLAST) && within(at.half) && hold.owns(x, z) => {
                     if at.platform && !within(PLATFORM) && within(BUILDING_FROM) {
-                        spans.extend(Column::new(top, spacing).surface(T::slab, m(0.5)).spans());
-                        spans.push(Span::solid(top + 1, top + 1 + PLATFORM_HIGH.max(2 * spacing), T::slab));
+                        spans.extend(Column::new(top + PLATFORM_HIGH, spacing).surface(T::slab, PLATFORM_HIGH + m(0.5)).spans());
                     } else if within(FORMATION) || at.platform {
                         spans.extend(Column::new(top, spacing).surface(F::path, m(0.5)).spans());
                     }

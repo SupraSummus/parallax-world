@@ -112,7 +112,7 @@ const CASES: &[(&str, i64, Make, u32, u32)] = &[
 
 /** Many of a case on a ground at y = 0, one anywhere in each cell it stands in. */
 fn world(make: Make, cell: i64) -> World {
-    let ground = Field::columns("ground", 0.0, Op::Fill, |_, _, _| [Span { from: -64, to: 0, kind: GROUND, extinction: None }]);
+    let ground = Field::columns("ground", 0.0, Op::Fill, |_, _, _| [Span::solid(-64, 0, GROUND)]);
     // At every level, though cells narrower than the sites cost fourfold a level: how shapes are drawn, to the coarsest.
     let things = Population::new("things", 1.0, cell)
         .reach(32)

@@ -307,9 +307,9 @@ mod tests {
         let field = Field::columns("land", 0.0, Op::Fill, move |x, z, _| {
             let (x, z) = (x as f64, z as f64);
             let top = ground(x, z).round() as i64;
-            let mut spans = vec![Span { from: -64, to: top, kind: GROUND, extinction: None }];
+            let mut spans = vec![Span::solid(-64, top, GROUND)];
             if wall(x, z) {
-                spans.push(Span { from: top, to: top + 48, kind: WALL, extinction: None });
+                spans.push(Span::solid(top, top + 48, WALL));
             }
             spans
         });

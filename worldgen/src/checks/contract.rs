@@ -43,12 +43,19 @@ fn sites(b: &Box3) -> impl Iterator<Item = (i64, i64, i64)> + '_ {
 }
 
 /**
- * How far a level's look may stray, from the one two finer and from
- * level 0 seen from above, in any channel: a twentieth of the light.
- * On average over a stratum's regions (`strata_kept`); a solid alone,
- * in a region of many (worldgen/tests/shapes.rs).
+ * How far a level's look may stray from the one two finer, in any
+ * channel. On average over a stratum's regions (`strata_kept`); a solid
+ * alone, in a region of many (worldgen/tests/shapes.rs).
  */
-pub const TOLERANCE: f64 = 0.05;
+pub const TOLERANCE: f64 = 0.045;
+
+/**
+ * How far a level's look may stray from level 0 seen from above: a
+ * twentieth of the light, more than TOLERANCE, as a sheet grown to a
+ * site hides more seen down it than across ("Sheets and rods" in
+ * docs/todo.md).
+ */
+pub const FROM_ABOVE: f64 = 0.05;
 
 /** Rays cast at each level, from as many origins. */
 const RAYS: usize = 20_000;
@@ -69,11 +76,11 @@ const FAR_FROM: u32 = 4;
  * How far the fields of a far region may stray from level 0 seen from
  * above, each region. A field is drawn from position alone, and a wide
  * region has hundreds of lines of sites at level 6, so it keeps closer
- * than TOLERANCE, which allows for things' far forms and their surfaces;
+ * than FROM_ABOVE, which allows for things' far forms and their surfaces;
  * a plan finer than the sites read where each line is aliases ("Plans"
  * in "Levels" in docs/generators.md).
  */
-const FAR_TOLERANCE: f64 = TOLERANCE / 4.0;
+const FAR_TOLERANCE: f64 = FROM_ABOVE / 4.0;
 
 /** A box of `region` at `level` generated in eight parts, alone and in any order, equals it generated whole. */
 pub fn whole_equals_parts(generator: &Generator, region: &Box3, level: u32) {
@@ -205,25 +212,21 @@ fn rays_from_open(area: &Box3, reference: &VoxelGrid, level: u32) -> (Vec<Ray>, 
 type Path = Vec<(f64, u8, f64, [f64; 3])>;
 
 /**
- * Each ray's path through `grid` (at `level`), from `from` along it till
- * it leaves its area, its distances from there (lattice units): all of
- * what gets to `from` taken as the ray.
+ * Each ray's path through `grid` (at `level`) from `from` along it to
+ * `to` or where it leaves its area, its distances from `from` (lattice
+ * units): all of what gets to `from` taken as the ray.
  */
-fn paths(grid: &VoxelGrid, level: u32, rays: &[Ray], from: f64) -> Vec<Path> {
+fn paths(grid: &VoxelGrid, level: u32, rays: &[Ray], from: f64, to: f64) -> Vec<Path> {
     let s = (1i64 << level) as f64;
     let path = |ray: &Ray| {
-        if ray.end <= from {
+        let to = to.min(ray.end);
+        if to <= from {
             return Vec::new();
         }
         let origin: [f64; 3] = std::array::from_fn(|i| (ray.origin[i] + from * ray.direction[i]) / s);
-        composited(grid, origin, ray.direction, (ray.end - from) / s)
+        composited(grid, origin, ray.direction, (to - from) / s)
     };
     rays.iter().map(|ray| path(ray).into_iter().map(|(t, id, stopped, glow)| (t * s, id, stopped, glow)).collect()).collect()
-}
-
-/** How much of a ray gets past `t` along `path` (lattice units). */
-fn through_to(path: &Path, t: f64) -> f64 {
-    1.0 - path.iter().take_while(|(at, ..)| *at <= t).map(|(_, _, stopped, _)| stopped).sum::<f64>()
 }
 
 /** By material id, its kind (index in Generator::kinds; none for id 0) and its colour, linear. */
@@ -313,6 +316,17 @@ pub enum Measure {
     FieldsFromAbove,
 }
 
+impl Measure {
+    /** How far a level may stray by it. */
+    pub fn tolerance(self) -> f64 {
+        match self {
+            Measure::Cameras => TOLERANCE,
+            Measure::FromAbove => FROM_ABOVE,
+            Measure::FieldsFromAbove => FAR_TOLERANCE,
+        }
+    }
+}
+
 /** How far a level of a world strays from another in a region, by one measure. */
 #[derive(Clone, Debug)]
 pub struct Margin {
@@ -355,12 +369,7 @@ impl Margin {
 
     /** Whether this region alone is as far apart as a stratum may be on average, or more. */
     pub fn broken(&self) -> bool {
-        self.difference() >= self.tolerance()
-    }
-
-    /** How far it may be apart. */
-    pub fn tolerance(&self) -> f64 {
-        if self.measure == Measure::FieldsFromAbove { FAR_TOLERANCE } else { TOLERANCE }
+        self.difference() >= self.measure.tolerance()
     }
 }
 
@@ -433,7 +442,7 @@ impl std::fmt::Display for Report {
                 Measure::FieldsFromAbove => "fields from above",
             };
             let [a, c] = m.values().map(|v| look(&v));
-            let broken = if m.broken() { format!(", over {}", m.tolerance()) } else { String::new() };
+            let broken = if m.broken() { format!(", over {}", m.measure.tolerance()) } else { String::new() };
             writeln!(f, "  level {} against {}, {what}: {a} -> {c}: {:.3} apart{broken}", m.level, m.against, m.difference())?;
             if m.broken() || f.alternate() {
                 self.breakdown(f, m)?;
@@ -475,15 +484,16 @@ fn levels_against_finer(generator: &Generator, region: &Box3, levels: u32, repor
         }
         let rays = &origins.as_ref().expect("made").2;
         let from = 2.0 * s;
-        let fine = paths(&grids[reference].2, finer, rays, 0.0);
+        let near = paths(&grids[reference].2, finer, rays, 0.0, from);
+        let fine = paths(&grids[reference].2, finer, rays, from, f64::INFINITY);
         let coarse_grid = grid(&mut grids, level, &area);
-        let coarse = paths(&grids[coarse_grid].2, level, rays, from);
+        let coarse = paths(&grids[coarse_grid].2, level, rays, from, f64::INFINITY);
         let mut looks = [Looks::new(), Looks::new()];
-        for (fine, coarse) in fine.iter().zip(&coarse) {
+        for ((near, fine), coarse) in near.iter().zip(&fine).zip(&coarse) {
             // Past `from`, at each level, of the light that gets there at the finer.
-            let past: Path = fine.iter().filter(|(t, ..)| *t > from).map(|&(t, id, stopped, glow)| (t - from, id, stopped, glow)).collect();
-            add(&mut looks[0], &past, NEAR * s, 1.0, &palette);
-            add(&mut looks[1], coarse, NEAR * s, through_to(fine, from), &palette);
+            let through = 1.0 - near.iter().map(|(_, _, stopped, _)| stopped).sum::<f64>();
+            add(&mut looks[0], fine, NEAR * s, through, &palette);
+            add(&mut looks[1], coarse, NEAR * s, through, &palette);
         }
         let looks = looks.map(|looks| looks.into_iter().map(|(k, l)| (k, l.map(|v| v / rays.len() as f64))).collect());
         report.margins.push(Margin { region: *region, measure: Measure::Cameras, level, against: finer, looks });
@@ -507,9 +517,11 @@ fn from_above_against_level_0(world: &World, region: &Box3, levels: u32, report:
 fn from_above(world: &World, region: &Box3, levels: impl Iterator<Item = u32>, measure: Measure, report: &mut Report) {
     let palette = Palette::of(&world.generator);
     let seen = |tiles: &mut Tiles, area: &Box3| {
-        // A ray every 2 units.
+        // A ray every 2 units, through a random point of each 2 × 2: through their middles, rays meet plans of whole
+        // units at one phase, and the lattice's vertices, where a ray goes on into a voxel by its side.
         let width = ((area.max[0] - area.min[0]) / 2).clamp(16, 1024) as usize;
         let camera = Camera::top([area.min[0] as f64, area.min[2] as f64], [area.max[0] as f64, area.max[2] as f64], width);
+        let camera = camera.jittered(13);
         composite_in(&world.generator, &camera, tiles)
     };
     // Level 0 over the area of the levels since it last grew; the areas
@@ -761,7 +773,8 @@ type Held<'a> = (&'a Checked, &'a Margin);
  * Where worlds checked (at several seeds, say) break the contract: the
  * rules that hold exactly, layers that draw nothing, and each stratum's
  * margins (by measure and level) averaged over the regions holding it
- * at every seed, if they are TOLERANCE apart or more in any channel.
+ * at every seed, if they are as far apart as the measure allows
+ * (`Measure::tolerance`) or more in any channel.
  * Each broken mean names the regions it was averaged over, and the
  * worst of them broken down by kind.
  */
@@ -793,7 +806,7 @@ pub fn strata_kept(checked: &[Checked]) -> Vec<String> {
         });
         let mean = changes.fold([0.0; 5], |sum, c| std::array::from_fn(|i| sum[i] + c[i] / n));
         let apart = mean.iter().fold(0.0, |a: f64, v| a.max(v.abs()));
-        if apart < TOLERANCE {
+        if apart < measure.tolerance() {
             continue;
         }
         let mut message = format!(

@@ -11,12 +11,13 @@
 //! reaching down past the columns around (`sides`). See "Writing a world"
 //! in docs/generators.md.
 
-use crate::generator::{DEEP, Kind, Span};
+use crate::generator::{DEEP, Holds, Kind, Span};
+use crate::js;
 
 impl Span {
     /** Solid `kind` in [from, to). */
     pub fn solid(from: i64, to: i64, kind: impl Into<Kind>) -> Span {
-        Span { from, to, kind: kind.into(), extinction: None }
+        Span { from, to, kind: kind.into(), holds: Holds::Solid }
     }
 
     /**
@@ -26,7 +27,7 @@ impl Span {
      */
     pub fn medium(from: i64, height: i64, kind: impl Into<Kind>, extinction: f64, spacing: i64) -> Span {
         let tall = height.max(2 * spacing);
-        Span { from, to: from + tall, kind: kind.into(), extinction: Some(extinction * height as f64 / tall as f64) }
+        Span { from, to: from + tall, kind: kind.into(), holds: Holds::Medium(extinction * height as f64 / tall as f64) }
     }
 }
 
@@ -112,9 +113,22 @@ impl Column {
         self.fill_below_exactly(kind, DEEP)
     }
 
-    /** A medium `height` tall on what stands on the ground so far, as `Span::medium`. */
+    /**
+     * A medium `height` tall on what stands on the ground so far, as
+     * `Span::medium`. Thinner than a spacing, a coat on what it stands on
+     * instead: the site under its top shows it as often as all of it
+     * stops a ray down through it. Grown to two sites, its top would
+     * stand a spacing or more over where it is, and rays look down on it
+     * that much nearer.
+     */
     pub fn medium(mut self, kind: impl Into<Kind>, height: i64, extinction: f64) -> Column {
-        let medium = Span::medium(self.ceiling(), height, kind, extinction, self.spacing);
+        let (from, s) = (self.ceiling(), self.spacing);
+        let medium = if height < s {
+            let to = from + height;
+            Span { from: to - 2 * s, to, kind: kind.into(), holds: Holds::Coat(1.0 - js::exp(-extinction * height as f64)) }
+        } else {
+            Span::medium(from, height, kind, extinction, s)
+        };
         self.above.push(medium);
         self
     }
@@ -175,12 +189,12 @@ mod tests {
 
     #[test]
     fn spans_come_out_bottom_up_and_media_keep_their_density() {
-        let spans = Column::new(10, 4).surface(1, 3).surface(2, 1).fill_below(3, -20).medium(4, 2, 0.5).spans();
+        let spans = Column::new(10, 4).surface(1, 3).surface(2, 1).fill_below(3, -20).medium(4, 6, 0.5).spans();
         let bounds: Vec<(i64, i64)> = spans.iter().map(|s| (s.from, s.to)).collect();
         assert_eq!(bounds, [(-20, -5), (-5, 3), (3, 11), (11, 19)]);
-        assert_eq!(spans[3].extinction, Some(0.5 * 2.0 / 8.0));
+        assert_eq!(spans[3].holds, Holds::Medium(0.5 * 6.0 / 8.0));
         // A field of columns draws them.
-        let world = ground(|_, _, s| Column::new(0, s).surface(0, 1));
+        let world = ground(Op::Fill, |_, _, s| Column::new(0, s).surface(0, 1));
         let grid = generate(&world, &Box3 { min: [0, -4, 0], max: [4, 4, 4] }, 0);
         assert!((0..4).all(|x| (0..4).all(|z| (-1..=0).any(|y| grid.get(x, y, z) != 0))), "the turf is on every column");
     }
@@ -190,7 +204,7 @@ mod tests {
         // Ground as rough as any: each column's top at random, steps, corners and pits of every height. From the air
         // above, along the lattice's 12 neighbours (a voxel's faces), nothing under any column's top is reached.
         let top = |x: i64, z: i64| i64::from(crate::noise::hash(7, x, 0, z) % 40);
-        let world = ground(move |x, z, s| Column::new(top(x, z), s).surface(0, 1).sides(0, lowest_around(top, x, z, s), 3));
+        let world = ground(Op::Fill, move |x, z, s| Column::new(top(x, z), s).surface(0, 1).sides(0, lowest_around(top, x, z, s), 3));
         for level in 0..4 {
             let s = 1 << level;
             let b = Box3 { min: [0, -48 / s, 0], max: [24, 48 / s, 24] };
@@ -210,16 +224,33 @@ mod tests {
         }
     }
 
-    /** A world of one kind, a field of `columns` its ground. */
-    fn ground(columns: impl Fn(i64, i64, i64) -> Column + 'static) -> Generator {
-        let kinds = vec![crate::generator::KindDef {
-            name: "stone",
+    #[test]
+    fn a_thin_medium_shows_on_its_ground_as_often_as_it_stops_rays_down_it() {
+        // Stopping half of what comes down, on flat ground: half its top sites show it, whatever the field's op, at
+        // every level whose sites are further apart than it is tall.
+        for op in [Op::Fill, Op::Paint] {
+            let world = ground(op, |_, _, s| Column::new(0, s).surface(0, 1).medium(1, 2, std::f64::consts::LN_2 / 2.0));
+            for level in 2..6 {
+                let grid = generate(&world, &Box3 { min: [0, -4, 0], max: [96, 4, 96] }, level);
+                let tops: Vec<u8> =
+                    (0..96 * 96).filter_map(|i| (-4..4).rev().map(|y| grid.get(i % 96, y, i / 96)).find(|id| *id != 0)).collect();
+                let shown = tops.iter().filter(|id| **id == 2).count() as f64 / tops.len() as f64;
+                assert!((shown - 0.5).abs() < 0.03, "level {level}: {shown} of the top sites show it");
+            }
+        }
+    }
+
+    /** A world of stone, and moss (material 2), a field of `columns` its ground, drawn by `op`. */
+    fn ground(op: Op, columns: impl Fn(i64, i64, i64) -> Column + 'static) -> Generator {
+        let kind = |name, colour| crate::generator::KindDef {
+            name,
             kind_type: 1,
-            colors: &["#808080"],
+            colors: std::slice::from_ref(colour),
             walk_through: false,
             glows: false,
             medium: false,
-        }];
-        Generator { kinds, seed: 1, layers: vec![Layer::Field(Field::columns("ground", 0.0, Op::Fill, columns))] }
+        };
+        let kinds = vec![kind("stone", &"#808080"), kind("moss", &"#408040")];
+        Generator { kinds, seed: 1, layers: vec![Layer::Field(Field::columns("ground", 0.0, op, columns))] }
     }
 }

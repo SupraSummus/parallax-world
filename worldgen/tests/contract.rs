@@ -53,7 +53,7 @@ fn spans(name: &'static str, from: i64, to: i64, kind: u8) -> Layer {
         name,
         order: 0.0,
         op: Op::Paint,
-        values: FieldValues::Spans { axis: 1, spans: Box::new(move |_, _, _| vec![Span { from, to, kind, extinction: None }]) },
+        values: FieldValues::Spans { axis: 1, spans: Box::new(move |_, _, _| vec![Span::solid(from, to, kind)]) },
         about: None,
     })
 }
@@ -151,9 +151,7 @@ fn wall(y: i64, z: i64) -> i64 {
 
 /** The wall, and `knobs` on its face: a unit of wood at each anchor. */
 fn knobbly_wall(knobs: Population) -> Generator {
-    let rock = Field::spans("rock", 0.0, Op::Fill, 0, |y, z, _| {
-        vec![Span { from: wall(y, z) - 64, to: wall(y, z), kind: ROCK, extinction: None }]
-    });
+    let rock = Field::spans("rock", 0.0, Op::Fill, 0, |y, z, _| vec![Span::solid(wall(y, z) - 64, wall(y, z), ROCK)]);
     let knobs = knobs.reach(2).make(|p, _| Some(Node::of(vec![cuboid(p, p.map(|v| v + 1.0), WOOD, SOLID, Op::Fill)])));
     Generator { kinds: KINDS.to_vec(), seed: 4, layers: vec![Layer::Field(rock), Layer::Population(knobs)] }
 }
@@ -213,8 +211,7 @@ fn village_keeps_the_contract() {
 fn stripes(dithered: bool, level: u32) -> (f64, Vec<u8>) {
     let make = |x: i64, _| if x.rem_euclid(8) == 0 { ROCK } else { GRASS };
     let plan = Rc::new(if dithered { Plan::dithered("stripes", 1, make) } else { Plan::new("stripes", 1, make) });
-    let ground =
-        Field::columns("ground", 0.0, Op::Fill, move |x, z, _| vec![Span { from: -8, to: 0, kind: plan.at(x, z), extinction: None }]);
+    let ground = Field::columns("ground", 0.0, Op::Fill, move |x, z, _| vec![Span::solid(-8, 0, plan.at(x, z))]);
     let grid = generate(&world(Layer::Field(ground)), &Box3 { min: [0, -8 >> level, 0], max: [4096 >> level, 0, 64] }, level);
     let count = |kind: u8| grid.cells.iter().filter(|id| **id == kind + 1).count() as f64;
     (count(ROCK) / (count(ROCK) + count(GRASS)), grid.cells)

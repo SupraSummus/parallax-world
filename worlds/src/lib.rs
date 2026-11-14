@@ -98,9 +98,9 @@ pub const WORLDS: &[Entry] = &[
             Region::at("steading", [-197, -50, -178], [219, 174, 206]),
             Region::at("station", [-192, -60, -256], [192, 240, 256]),
         ],
-        // To level 3, from above to 2, for now: at 4 its crops and towns' walls, at 3 its market (docs/todo.md).
-        levels: 3,
-        from_above: 2,
+        // From above to 3: at 4 its houses show their walls (docs/todo.md).
+        levels: 4,
+        from_above: 3,
         far: &[Region::at("town", [-704, -38, -736], [704, 298, 736])],
         far_levels: 6,
     },
@@ -113,8 +113,7 @@ pub const WORLDS: &[Entry] = &[
         levels: 5,
         from_above: 5,
         far: &[Region::at("spawn", [-689, -46, -439], [719, 50, 969])],
-        // To level 5, for now: at 6 its heather (docs/todo.md).
-        far_levels: 5,
+        far_levels: 6,
     },
     // The first settlement's main street where a cross street meets it (at REGIONS_SEED): houses facing both, yards, trees, paving.
     // Far away, all of its crop: streets, paving and yards, fields beside them, the forest round it.
@@ -122,9 +121,8 @@ pub const WORLDS: &[Entry] = &[
         name: "learned",
         make: learned::learned,
         regions: &[Region::at("settlement", [64, -34, -96], [448, 222, 288])],
-        // To level 3, for now: at 4 its crops (docs/todo.md).
-        levels: 3,
-        from_above: 3,
+        levels: 4,
+        from_above: 4,
         far: &[Region::at("settlement", [-1536, -34, -1536], [1536, 302, 1536])],
         far_levels: 6,
     },

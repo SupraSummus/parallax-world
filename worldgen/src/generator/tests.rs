@@ -314,7 +314,7 @@ fn faces_on_a_plane_of_sites_stay_where_level_0_has_them() {
         name: "ground",
         order: 0.0,
         op: Op::Fill,
-        values: FieldValues::Spans { axis: 1, spans: Box::new(|_, _, _| vec![Span { from: -4096, to: 0, kind: 0, extinction: None }]) },
+        values: FieldValues::Spans { axis: 1, spans: Box::new(|_, _, _| vec![Span::solid(-4096, 0, 0)]) },
         about: None,
     });
     let n = 1 << 14;

@@ -648,9 +648,7 @@ fn heath(f: Rc<Heath>) -> Field {
         };
         let column = Column::new(h, spacing).surface(surface, m(0.5));
         let column = if f.ground.under { column.under(F::soil) } else { column.surface(F::soil, m(0.5)) };
-        // Thickened only while it is at most four units: taller, a medium stops rays skimming over the heath,
-        // and stands over the patches beside it, whose edges it takes over seen from above.
-        if spacing > 2 || wet {
+        if wet {
             column
         } else if surface == K::heather.into() {
             column.medium(K::heatherSprigs, m(0.4), 0.5)

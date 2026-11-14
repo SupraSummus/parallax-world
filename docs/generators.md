@@ -456,7 +456,11 @@ And a coarse site stands for finer ones:
 what a camera sees at a level is, on average, what it sees at a finer one.
 That is a claim about averages, so it is checked as one:
 each stratum's margins averaged over its regions at every seed,
-within `TOLERANCE` (0.05), not each region's.
+not each region's:
+what cameras see within `TOLERANCE` (0.045),
+what is seen from above within `FROM_ABOVE` (0.05),
+looser while walls grown to a site hide more seen down them than across
+("Sheets and rods" in `docs/todo.md`).
 A mean settles as seeds are added; the largest of many only grows.
 A region holding several strata counts for each.
 The worst case is each solid's alone (`shapes.rs`),
@@ -465,6 +469,10 @@ though its scenes ask little of it (`docs/todo.md`).
 Rays see each site by its alpha (`VoxelGrid`'s):
 each stops its share of what gets to it, and shows that much of its colour,
 and what it glows (`composited` in `picture.rs`).
+A ray that starts or ends inside a voxel stops as a medium would
+over the part of its chord it crosses, 1 − (1 − alpha)^part:
+counted whole, the voxel a coarse level is first looked at in
+made coarse levels look denser near.
 What a ray sees, its `Look`, is how much of it stops
 within 4 of the level's sites past where it is looked at from and further,
 and what it shows: each site's colour, linear, by how much of it the site stops,
@@ -501,13 +509,16 @@ in shares of material types or in sRGB.
   levels two apart miss what drifts a little at every level,
   like a town's walls taking over from its roofs.
   Rays see the faces they enter by, from above the ones up.
+  Each goes through a random point of its 2 × 2 units (`Camera::jittered`):
+  through their middles, rays meet plans of whole units at one phase,
+  and the lattice's vertices.
   Each world goes as far as it keeps what a camera sees;
   the forest to 6, its canopy seen over 128 m there,
   which takes most of its test's time;
 - in an entry's `far` regions, wide ones (only x and z count),
   what its fields alone show from above from level 4 to its `far_levels`,
   against level 0,
-  each region within a quarter of `TOLERANCE`:
+  each region within a quarter of `FROM_ABOVE`:
   fields come from position alone,
   and hundreds of lines of sites average out,
   so what is finer than the sites must show in proportion ("Plans" in "Levels").
@@ -583,7 +594,7 @@ they check how a world is drawn, not what a seed puts in it.
 With `--nocapture` it prints each level's margins;
 `contract::margins` returns them as a `Report` to print,
 which breaks a margin down by kind (what changed, not what is checked),
-largest differences first (`{}` those past `TOLERANCE`, `{:#}` all).
+largest differences first (`{}` those past their measure's tolerance, `{:#}` all).
 A broken mean (`contract::strata_kept`) names the stratum, level and measure,
 and each region it was averaged over, at its seed.
 The engine's tests also check that a thing's carves cut only the thing.
@@ -786,7 +797,7 @@ What is drawn far away keeps what is near on average, not its outline:
 the towns' things and the forest's canopy are measured ("Levels"),
 patterns finer than the sites draw their parts in proportion (`stripe`),
 and media too thin for the sites are thickened, as dense along a ray
-(`Span::medium`, `column.rs`).
+(`Span::medium`), or a coat on the ground they stand on (`Column::medium`, `Holds::Coat`).
 
 ### Kinds and things
 
@@ -978,7 +989,8 @@ so its fill is given only then, and can't be set afterwards.
 | Noise (`at`), fractions, `smoothstep`, `Rng::chance`, `Land` | `Fx` | `Fx::ONE` is 1 |
 | Lengths with their fraction: `Fx::m(metres)`, a path's centre line | `Fx` | lattice units: `fx(2.0)` is 2 |
 | `Far` detail, a shape's `extents` | `Fx` | lattice units |
-| A span's `extinction` | `f64` | per lattice unit of a ray's path |
+| A span's `Holds::Medium` | `f64` | per lattice unit of a ray's path |
+| A span's `Holds::Coat` | `f64` | a share of each site |
 
 `Fx` is fixed point, 16 bits after the point:
 a fraction, or a length in units with its fraction kept.
@@ -1001,7 +1013,10 @@ a pond, a layer of turf, a hedge.
 `Column` (`column.rs`) builds a column's spans from its ground's top,
 each at least two spacings tall:
 `Column::new(height, spacing).surface(grass, m(0.5)).fill_below(soil, bottom)`,
-`.medium(kind, height, extinction)` on top, thickened but as dense along a ray,
+`.medium(kind, height, extinction)` on top, thickened but as dense along a ray;
+thinner than a spacing, a coat on what it stands on (`Holds::Coat`),
+as much as all of it stops a ray from above
+(grown to two sites, its top would stand a spacing or more too high),
 `.water_to(kind, level)` where the ground is lower.
 Carves along a line want the same margin.
 A heightfield is a shell, hollow under its sides:
@@ -1030,7 +1045,12 @@ and without them rays slipped in at a cliff's corners.
   stands over the columns beside it, and takes over their edges from above
   (the moor's grass over its heather, 0.03 at level 6),
   and stops rays skimming over it.
-  Give a thin medium only while sites are close.
+  `Column::medium` makes one thinner than a spacing a coat on its ground;
+  `Span::medium` still thickens it, for media that fill what is empty (mist).
+- **Keep the top where it is.** Whatever has to be two sites tall
+  grows down, not up, as `Column::surface` does
+  (the railway's platform; its bridges' parapets):
+  cameras look down on the top.
 - **Things on a surface.** Anchor them along the axis across it
   (`anchor_along(1, …)` with `Line::pick` for a ground under columns),
   or at points of the axes across it (`anchor_points`), not per cell:
@@ -1103,7 +1123,9 @@ and without them rays slipped in at a cliff's corners.
   (the fields' crops, the forest's columns, which hold its heights too),
   are read where each line is as well:
   even where their edges are irregular, aliased where they follow the sites' grid,
-  as the town's square's checker of metres did (all light from level 4).
+  as the town's square's checker of metres did (all light or all dark at level 3,
+  where a flat ground shows the top sites of every other column from above:
+  its flags are light or dark at random now).
   Over the forest at level 6 such reads of its floor came within 0.042 (seed 42)
   of level 0, likely by chance: too close to the far check's tolerance to add it.
 - **Things of one band can't see each other.** Bands order what decides where,

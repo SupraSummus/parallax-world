@@ -90,7 +90,7 @@ worldgen/                    # The world-generation engine, moving to integers, 
 │   ├── generator.rs         # The framework: nodes, fields, populations, the model worlds are written in
 │   ├── generator/           # generate.rs: any box at any level, of forms.rs: a node's near and far forms (measured), of drawables.rs: fields, shapes (shapes.rs, the solids) or sites drawn; things.rs: the things populations make
 │   ├── build.rs             # Short forms to write worlds with: constructors of fields, populations, nodes, solid shapes
-│   ├── column.rs            # A heightfield's spans, each tall enough to keep a site at every level; its slopes' sides closed
+│   ├── column.rs            # A heightfield's spans, each tall enough to keep a site at every level, thin media a coat on it; its slopes' sides closed
 │   ├── plan.rs              # Plans by column, each from coarser ones only; heights with a slope, their range anywhere; land domains bid for, each's hold on it; claims, things kept apart anywhere
 │   ├── domain.rs            # Domains a world is composed of: named (seeds from names), bidding, pulling the ground in bands, drawing by their hold
 │   ├── curve.rs             # Curves: lines through space made top-down within narrowing corridors; where one passes nearest a point

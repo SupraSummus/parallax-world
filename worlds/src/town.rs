@@ -233,7 +233,7 @@ enum Spot {
     #[default]
     Outside,
     Street,
-    /** The square's paving, light and dark by turns. */
+    /** The square's paving, light and dark flags at random. */
     Square,
     SquareDark,
     Pavement,
@@ -356,9 +356,14 @@ impl Town {
         if along_street && self.size != Size::Hamlet { Spot::Pavement } else { Spot::Yard }
     }
 
-    /** The square's paving at column (x, z). */
+    /**
+     * The square's paving at column (x, z): flags a metre square, light or
+     * dark at random. Not a checker: from above, a flat ground shows the
+     * top sites of every other column, which at sites a metre apart would
+     * all be its light flags or all its dark.
+     */
     fn paving(&self, x: i64, z: i64) -> Spot {
-        let light = ((x - self.x).div_euclid(m(1.0)) + (z - self.z).div_euclid(m(1.0))) & 1 == 0;
+        let light = hash64(self.seed, (x - self.x).div_euclid(m(1.0)), (z - self.z).div_euclid(m(1.0)), 7) & 1 == 0;
         if light { Spot::Square } else { Spot::SquareDark }
     }
 
@@ -480,13 +485,13 @@ fn layers(towns: Rc<Towns>, hold: Holding, ground: Rc<Sloped>) -> Vec<Layer> {
                     }
                     let h = surface_ground.at(x, z);
                     let top = h + 1 - m(0.5).max(2 * spacing);
-                    let surface = |kind| Span { from: top, to: h + 1, kind, extinction: None };
+                    let surface = |kind| Span::solid(top, h + 1, kind);
                     match spot {
                         Spot::Street => vec![surface(k(K::cobble))],
                         Spot::Square => vec![surface(k(K::paving))],
                         Spot::SquareDark => vec![surface(k(K::pavingDark))],
                         // A kerb's height above the street.
-                        Spot::Pavement => vec![surface(k(K::slab)), Span { from: h + 1, to: h + 2, kind: k(K::slab), extinction: None }],
+                        Spot::Pavement => vec![surface(k(K::slab)), Span::solid(h + 1, h + 2, k(K::slab))],
                         _ => vec![surface(forest::k(F::grass))],
                     }
                 }),
