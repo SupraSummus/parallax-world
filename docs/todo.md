@@ -343,7 +343,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   and at levels 0 and 1 the undergrowth's many small shapes;
   worldgen's, counted ("Cost" in `docs/generators.md`),
   goes mostly to the trees at levels 0 to 2
-  and to measuring their shadows from level 4.
+  and to measuring their shadows from level 4 (once a worker).
 - **One of the valley's tiles is over the cost budget**
   (`OVER_BUDGET` in `worlds/tests/cost.rs`), by things done one by one
   where a tile holds four times as many each level:

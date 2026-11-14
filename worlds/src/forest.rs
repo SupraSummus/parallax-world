@@ -1,12 +1,14 @@
 //! The forest: an autumn forest valley, endless, on the generator
 //! framework. Its numbers are moving to integers (docs/generators.md).
 
-use std::cell::{OnceCell, RefCell};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::OnceLock;
 
 use worldgen::World;
 use worldgen::column::{self, lowest_around};
+use worldgen::cost;
 use worldgen::curve::Curve;
 use worldgen::domain::{Domain, Lie, Scope, compose};
 use worldgen::generator::{
@@ -444,6 +446,28 @@ struct Measured {
 /** The stands trees are measured in for the canopy: as dense as the chance of a tree in a square 4 m wide. */
 const STANDS: [f64; 4] = [0.0, 0.2, 0.4, 0.6];
 
+/**
+ * What the trees of each of STANDS hide, by species, measured from
+ * samples drawn at level 2 (the canopy's from level 4 on): the species'
+ * own, the same in every world, so measured once a process, uncounted.
+ */
+fn stands() -> &'static [[Shadows; 3]] {
+    static MEASURED: OnceLock<Vec<[Shadows; 3]>> = OnceLock::new();
+    MEASURED.get_or_init(|| {
+        let samples = Scope::new(0).of("forest").seed("stands");
+        cost::aside(|| {
+            (0..STANDS.len())
+                .map(|stand| {
+                    SPECIES.map(|species| {
+                        let seed = hash64(samples, stand as i64, species as i64, 0);
+                        Shadows::new(&stand_of(species, STANDS[stand], seed), 2, 1)
+                    })
+                })
+                .collect()
+        })
+    })
+}
+
 /** The forest of `seed`, alone on the relief, all of it its own. */
 pub fn forest(seed: u64) -> World {
     let world = Scope::new(seed);
@@ -513,9 +537,7 @@ fn layers(scope: &Scope, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
         }))
     };
     // What each slab of each species' trees adds to their shadow, and where around their cells they hide what
-    // from above, measured from samples drawn at level 2 (the canopy's from level 4 on), by spacing.
-    let sample_seed = f.s("stands");
-    let shadows = Rc::new(OnceCell::new());
+    // from above, from the sample stands (`stands`), by spacing.
     let measured = Rc::new(RefCell::new(HashMap::<i64, Rc<Measured>>::new()));
     let blurred = points.clone();
     let measured_at = move |spacing: i64| {
@@ -523,17 +545,8 @@ fn layers(scope: &Scope, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
             .borrow_mut()
             .entry(spacing)
             .or_insert_with(|| {
-                let shadows: &Vec<[Shadows; 3]> = shadows.get_or_init(|| {
-                    (0..STANDS.len())
-                        .map(|stand| {
-                            SPECIES.map(|species| {
-                                let seed = hash64(sample_seed, stand as i64, species as i64, 0);
-                                Shadows::new(&stand_of(species, STANDS[stand], seed), 2, 1)
-                            })
-                        })
-                        .collect()
-                });
-                let (stands, shadows) = (shadows, &shadows[0]);
+                let stands = stands();
+                let shadows = &stands[0];
                 let slabs_of = |of: &dyn Fn(&Shadows, i64, i64) -> f64| {
                     [0, 1, 2].map(|sp| {
                         (0..tree_top).step_by(spacing as usize).map(|from| of(&shadows[sp], from, (from + spacing).min(tree_top))).collect()

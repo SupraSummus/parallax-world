@@ -118,10 +118,10 @@ pub struct Counts {
 }
 
 impl Counts {
-    /** All of it but what is done once a world (SHADOWS). */
+    /** All of it. */
     pub fn total(&self) -> Work {
         let mut total = Work::default();
-        self.rows().filter(|(name, _)| name != SHADOWS).for_each(|(_, w)| total.add(w));
+        self.rows().for_each(|(_, w)| total.add(w));
         total
     }
 
@@ -188,8 +188,17 @@ pub(crate) fn plan<T, P>(plan: &'static str, of: &P, at: [i64; 3], make: impl Fn
     value
 }
 
-/** What `Shadows` draws counts to: things measured once a world, not per tile. */
-pub(crate) const SHADOWS: &str = "shadows";
+/**
+ * Runs `f` uncounted: work done once a process, such as the forest's
+ * sample stands, not by the tile that happens to ask first.
+ */
+pub fn aside<R>(f: impl FnOnce() -> R) -> R {
+    let outer = (COUNTING.replace(false), LOOKUPS.take());
+    let value = f();
+    COUNTING.set(outer.0);
+    LOOKUPS.set(outer.1);
+    value
+}
 
 // ---------------------------------------------------------------------------
 // Reports
@@ -325,7 +334,7 @@ impl Report {
                 flags.push(format!("{at}: plan {plan} makes each column {times:.1} times"));
             }
             let [x, y, z] = [0, 1, 2].map(|i| (t.b.max[i] - t.b.min[i]) as u64);
-            for (layer, w) in t.counts.rows().filter(|(name, _)| name != SHADOWS) {
+            for (layer, w) in t.counts.rows() {
                 if w.cells > CELLS_PER_ANCHOR * w.owned.max(1) {
                     let what = format!("{layer} asks {} cells for {} anchors in them", w.cells, w.owned);
                     flag(&mut flags, Work { cells: w.cells, ..Work::default() }.ns(), SHARE, what);
@@ -392,7 +401,7 @@ impl Report {
         };
         let total = |rows: &[(String, String, Work)], tile: &str| {
             let mut total = Work::default();
-            rows.iter().filter(|r| r.0 == tile && r.1 != SHADOWS).for_each(|r| total.add(&r.2));
+            rows.iter().filter(|r| r.0 == tile).for_each(|r| total.add(&r.2));
             total.ns()
         };
         // What a difference of `n` in count `i` weighs: the largest thing's sites are tests.
@@ -460,12 +469,11 @@ impl std::fmt::Display for Report {
                 writeln!(f, "    {row:<22}{values}{after}")
             };
             for row in rows.iter().filter(|row| most(row) >= least) {
-                let name = if row == SHADOWS { format!("{row} (once a world)") } else { row.clone() };
                 let times = tiles.iter().map(|t| work(t, row).times_made()).fold(0.0, f64::max);
                 let made = if times > 0.0 { format!(" {times:>11.2}") } else { String::new() };
-                line(f, &name, &|t| ms(ns(t, row)), &made)?;
+                line(f, row, &|t| ms(ns(t, row)), &made)?;
             }
-            line(f, "total (no shadows)", &|t| ms(t.counts.total().ns()), "")?;
+            line(f, "total", &|t| ms(t.counts.total().ns()), "")?;
             line(f, "took here", &|t| t.took.as_secs_f64() * 1e3, "")?;
         }
         for flag in self.flags() {

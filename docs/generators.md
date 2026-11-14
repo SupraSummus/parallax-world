@@ -371,7 +371,9 @@ a taller tree weighs more, a crowded crown is squeezed,
 a quarter of pairs meet a little, by their gaps,
 and a tree with no room, under a taller one, stands bare.
 What crowded trees hide from the side
-is measured in sample stands, `Points` of constant chance.
+is measured in sample stands, `Points` of constant chance:
+the species' own, the same in every world,
+so measured once a process, not by every world made.
 
 ## Rules
 
