@@ -641,8 +641,10 @@ reduces their depth to a pyramid of farthest depths,
 then tests every tile in view against it on the GPU, a thread each,
 draws those newly showing and keeps which show for the next frame
 (two-phase occlusion culling).
-Draws are listed per tile on the GPU, roughly near to far,
-so nearer tiles mostly hide what is behind them early.
+Each tile has a draw of its own on the GPU, empty if culled,
+drawn in the tiles' order: roughly near to far,
+so nearer tiles mostly hide what is behind them early,
+and where depths tie, the same tile shows every frame, culled or not.
 It draws into a picture of its own, which the window (or `--shot`) shows.
 Where whole voxels are splats (section 1),
 the bake workers put them in clusters of a few nearby on its plane instead,

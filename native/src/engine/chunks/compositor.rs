@@ -786,9 +786,12 @@ pub struct Compositor {
     held_back: bool,
     /** How many clusters of pictures of medium the chunks it has hold. */
     veils: u32,
-    /** By phase, the draws of clusters the culling lists, and how many; then the pictures of medium's (VEILS). */
+    /**
+     * By phase, a draw for each cluster, in their order, none for those the
+     * culling leaves out; then the pictures of medium's (VEILS), and how many.
+     */
     draws: [wgpu::Buffer; 3],
-    drawn: [wgpu::Buffer; 3],
+    veils_drawn: wgpu::Buffer,
     /** How many pictures of medium the culling counts at each place along the rays, then where the next of each is listed (order_veils). */
     veil_places: wgpu::Buffer,
     targets: Option<Targets>,
@@ -810,7 +813,7 @@ const WHOLE: usize = 6;
 const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const FARTHEST: wgpu::TextureFormat = wgpu::TextureFormat::R32Float;
 const VEIL: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
-/** Where in `draws` and `drawn` the pictures of medium's are. */
+/** Where in `draws` the pictures of medium's are. */
 const VEILS: usize = 2;
 
 fn buffer(device: &wgpu::Device, label: &str, size: u64, usage: wgpu::BufferUsages) -> wgpu::Buffer {
@@ -901,7 +904,6 @@ impl Pipelines {
                 (1, S::COMPUTE, read),
                 (4, S::COMPUTE, write),
                 (6, S::COMPUTE, write),
-                (7, S::COMPUTE, write),
                 (8, S::COMPUTE, float),
                 (9, S::COMPUTE, write),
                 (16, S::COMPUTE, write),
@@ -1072,7 +1074,6 @@ impl Compositor {
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat, culls: bool) -> Compositor {
         use wgpu::BufferUsages as U;
         let draws = |label| buffer(device, label, (1 << 20).min(device.limits().max_buffer_size), U::STORAGE | U::INDIRECT | U::COPY_SRC);
-        let drawn = |label| buffer(device, label, 4, U::STORAGE | U::INDIRECT | U::COPY_DST | U::COPY_SRC);
         Compositor {
             format,
             pipelines: Pipelines::new(device, format, culls),
@@ -1090,7 +1091,7 @@ impl Compositor {
             going: Vec::new(),
             veils: 0,
             draws: [draws("draws first"), draws("draws next"), draws("veils")],
-            drawn: [drawn("drawn first"), drawn("drawn next"), drawn("veils drawn")],
+            veils_drawn: buffer(device, "veils drawn", 4, U::STORAGE | U::INDIRECT | U::COPY_DST),
             veil_places: buffer(device, "veil places", 4, U::STORAGE | U::COPY_DST),
             targets: None,
             seams: false,
@@ -1105,9 +1106,9 @@ impl Compositor {
     /** How many tiles (or whole splats) the frame drawn last drew in each phase, as `easel` reads them from the GPU. */
     pub fn drawn(&self, easel: &Easel) -> [u32; 2] {
         std::array::from_fn(|phase| {
-            let n = u32::from_le_bytes(easel.read_buffer(&self.drawn[phase], 4).try_into().expect("count")) as u64;
-            let draws = easel.read_buffer(&self.draws[phase], (n * 16).max(16));
-            draws.as_chunks::<16>().0[..n as usize].iter().map(|d| u32::from_le_bytes(d[4..8].try_into().expect("draw"))).sum()
+            let top = self.clusters.top as usize;
+            let draws = easel.read_buffer(&self.draws[phase], (top.max(1) * 16) as u64);
+            draws.as_chunks::<16>().0[..top].iter().map(|d| u32::from_le_bytes(d[4..8].try_into().expect("draw"))).sum()
         })
     }
 
@@ -1320,9 +1321,8 @@ impl Compositor {
                     (1, self.table.as_entire_binding()),
                     (4, self.clusters.buffer.as_entire_binding()),
                     (6, self.draws[k].as_entire_binding()),
-                    (7, self.drawn[k].as_entire_binding()),
                     (8, R::TextureView(&farthest)),
-                    (9, self.drawn[VEILS].as_entire_binding()),
+                    (9, self.veils_drawn.as_entire_binding()),
                     (16, self.draws[VEILS].as_entire_binding()),
                     (22, self.veil_places.as_entire_binding()),
                 ];
@@ -1344,9 +1344,7 @@ impl Compositor {
     pub fn render(&self, encoder: &mut wgpu::CommandEncoder) {
         let t = self.targets.as_ref().expect("prepared");
         let p = &self.pipelines;
-        for drawn in &self.drawn {
-            encoder.clear_buffer(drawn, 0, None);
-        }
+        encoder.clear_buffer(&self.veils_drawn, 0, None);
         encoder.clear_buffer(&self.veil_places, 0, None);
         // Every slot, those freed too, so that the clusters left where their chunks were are none of theirs.
         {
@@ -1390,7 +1388,7 @@ impl Compositor {
                 pass.set_pipeline(&p.splats);
                 pass.set_vertex_buffer(0, self.splats.buffer.slice(..));
             }
-            pass.multi_draw_indirect_count(&self.draws[phase], 0, &self.drawn[phase], 0, self.clusters.top);
+            pass.multi_draw_indirect(&self.draws[phase], 0, self.clusters.top);
         };
         cull(encoder, 0);
         tiles(&mut pass(encoder, &[(&t.picture, Some(wgpu::Color::BLACK))], (&t.depth, Some(1.0))), 0);
@@ -1406,7 +1404,7 @@ impl Compositor {
             let mut veil = pass(encoder, &[(&t.veil, Some(wgpu::Color::TRANSPARENT))], (&t.depth, None));
             veil.set_bind_group(0, self.draw_group.as_ref(), &[]);
             veil.set_pipeline(&p.veil);
-            veil.multi_draw_indirect_count(&self.draws[VEILS], 0, &self.drawn[VEILS], 0, self.clusters.top);
+            veil.multi_draw_indirect_count(&self.draws[VEILS], 0, &self.veils_drawn, 0, self.clusters.top);
         }
         let mut pass = pass(encoder, &[(&t.picture, None)], (&t.depth, None));
         if self.veils > 0 {

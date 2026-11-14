@@ -257,14 +257,10 @@ Numbers are for the forest at 1280×800, as measured when written.
   Lighting a view's tiles takes six times as long as making them,
   much of it generating the tiles around them that the light reads,
   and the light takes twice the bricks' memory, so the pool holds a third as many.
-- **`culling_on_the_gpu_leaves_the_picture_unchanged` fails now and then**
-  on an Intel UHD (Mesa), at `b4c79ff` too; why is open.
-  Drawn flat, every time: the forest from its spawn;
-  on lavapipe too, about one run in ten, a few pixels.
-  Maybe by ties in depth (below, "A shot differs"), as on lavapipe,
-  or as it failed on lavapipe by the moor's mist:
-  the depth pyramid's shorter side lost its last levels,
-  and clusters over the whole view were hidden (fixed since).
+- **`culling_on_the_gpu_leaves_the_picture_unchanged` failed on an Intel UHD** (Mesa),
+  drawn flat, every time: the forest from its spawn.
+  Likely by ties in depth drawn in no set order, fixed since:
+  lavapipe fails there too with the draws reversed. Untried on Intel.
 - **Native's flat pictures** (`--engine flat`, architecture.md, section 1).
   - Their depth is by w, ahead along the view (`flat_depth`),
     the other engines' by distance from the eye (`depth_of`),
@@ -272,7 +268,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   - Their runs are cut to their face's rays by clip planes,
     which cost Intel's GPU about as much as all else they do
     (the valley's frame 5.2 ms, 3.6 without).
-    Uncut, faces' pictures overlap past their seams, and tie there (below, "A shot differs").
+    Uncut, faces' pictures overlap past their seams, and tie there (below, "A shot may differ").
 - **Native's chunk engines while the eye moves.**
   - Their renderer composes a frame behind (`chunks.rs`),
     so `--stroll` counts nearly every frame as one whose content is still coming:
@@ -284,11 +280,9 @@ Numbers are for the forest at 1280×800, as measured when written.
     a few microseconds each on the main thread.
     Fewer, larger chunks near the eye
     (a chunk holding a cell's finer cells' pictures too) would cost less.
-  - A shot differs from run to run in about 0.3 % of its pixels (flat, the valley):
+  - A shot may differ from run to run (flat, the valley):
     where depths tie exactly, the one drawn last shows,
-    in the order chunks came, which timing decides,
-    and culling lists draws (`atomicAdd`), which is no set order.
-    Lists in the clusters' order (a prefix sum) would draw a frame alike each time.
+    in the clusters' order: the order chunks came in, which timing decides.
 - **Native's splats may go too.**
   Each whole voxel a hexagon is the voxels engine's idea, rasterized.
   They are worth keeping only if faster than reliefs on some GPU,
