@@ -264,7 +264,8 @@ mod tests {
         let look = Look::new(make(1).spawn.map(|v| v as f64), [30.0, -10.0], 90.0, 400.0, [320.0, 200.0]);
         let forward = view_basis(look.yaw, look.pitch)[2];
         let moved = Look { camera: std::array::from_fn(|i| look.camera[i] + forward[i] * 7.0), ..look };
-        // Not flat: two compositors taking a frame whole differ there already, as the chunks' ties fall (docs/todo.md).
+        // Not flat: following changes lays the clusters out in another order than taking the frame whole, and ties
+        // fall by it (docs/todo.md).
         for relief in [true, false] {
             let mut chunks = Chunks::new(&world, relief, false);
             let first = complete(&mut chunks, &mut world, &look);

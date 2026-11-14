@@ -8,7 +8,9 @@
 // and tile_vertex (splat_vertex) draws them; their depth is reduced to a
 // pyramid of farthest depths (reduce_depth, reduce), and cull_rest tests
 // every tile against it: those that showed are kept for the next frame,
-// and those newly showing drawn now; and counts the pictures of medium in
+// and those newly showing drawn now. A phase's draws are the clusters',
+// in their order, none for those it leaves out, so that where depths tie,
+// the same shows every time. cull_rest also counts the pictures of medium in
 // front of them by their place along the rays, which scan_veils and
 // order_veils list far to near, to be laid one over another
 // (veil_fragment) and over the picture.
@@ -130,11 +132,10 @@ struct DrawArgs {
 // and its colour; 0, none.
 @group(0) @binding(2) var<storage, read> tiles: array<Cluster>;
 @group(0) @binding(3) var<storage, read> columns: array<vec2u>;
-// Culling: all the clusters, some left where chunks were (cull), and a draw
-// for each to draw.
+// Culling: all the clusters, some left where chunks were (cull), and a
+// draw for each.
 @group(0) @binding(4) var<storage, read_write> clusters: array<Cluster>;
 @group(0) @binding(6) var<storage, read_write> draws: array<DrawArgs>;
-@group(0) @binding(7) var<storage, read_write> drawn: atomic<u32>;
 @group(0) @binding(8) var farthest: texture_2d<f32>;
 // The pictures of medium to draw, far to near, and how many; in two
 // halves, how many at each place (veil_place), then where in veil_draws
@@ -744,18 +745,19 @@ fn draws_cluster(at: u32, cluster: Cluster, phase: u32) -> bool {
 
 // A thread per cluster of all, of a chunk the frame draws; those left
 // where chunks were, which their slot's chunk does not hold, are none.
-// Whole voxels' (a tile, whole splats or runs of a picture): chunks were
-// uploaded near to far, at first, and their tiles nearest first (see tiles
-// and cluster in compositor.rs), and draws are listed about in that order,
-// so that nearer voxels are mostly drawn first and hide what is behind
-// them early. A picture of medium's, in the second phase, counted in its
-// place (veil_place), for order_veils to list.
+// Whole voxels' (a tile, whole splats or runs of a picture), its draw:
+// chunks were uploaded near to far, at first, and their tiles nearest
+// first (see tiles and cluster in compositor.rs), so that nearer voxels
+// are mostly drawn first and hide what is behind them early. A picture of
+// medium's, none, but in the second phase counted in its place
+// (veil_place), for order_veils to list.
 fn cull(at: u32, phase: u32) {
-  if at >= arrayLength(&clusters) {
+  if at >= arrayLength(&clusters) || at >= arrayLength(&draws) {
     return;
   }
   let cluster = clusters[at];
   let c = chunks[cluster.slot_count >> 8u];
+  var draw = DrawArgs(0u, 0u, 0u, 0u);
   if at >= c.whole.y && at < c.veils {
     if phase == 1u {
       let place = veil_place(cluster, c);
@@ -763,20 +765,15 @@ fn cull(at: u32, phase: u32) {
         atomicAdd(&veil_places[place], 1u);
       }
     }
-    return;
-  }
-  if at < c.whole.x || at >= c.whole.y {
-    return;
-  }
-  if draws_cluster(at, cluster, phase) {
-    var draw = DrawArgs(4u, 1u, 0u, at);
+  } else if at >= c.whole.x && at < c.whole.y && draws_cluster(at, cluster, phase) {
+    draw = DrawArgs(4u, 1u, 0u, at);
     if globals.whole == 1.0 {
       draw = DrawArgs(4u, cluster.slot_count & 0xffu, (cluster.slot_count >> 8u) * 4u, cluster.first);
     } else if globals.whole == FLAT {
       draw = DrawArgs(4u, cluster.slot_count & 0xffu, at * 4u, 0u);
     }
-    draws[atomicAdd(&drawn, 1u)] = draw;
   }
+  draws[at] = draw;
 }
 
 // Which of the half slabs a ray of its face crosses a picture of medium's
