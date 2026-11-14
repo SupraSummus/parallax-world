@@ -22,7 +22,7 @@ use worldgen::domain::{Domain, Scope};
 use worldgen::generator::{Field, Layer, Op};
 use worldgen::kinds;
 use worldgen::noise::{Fbm, Fx, ValueNoise, fx, smoothstep};
-use worldgen::plan::{Holding, Sloped};
+use worldgen::plan::{self, Holding, Sloped};
 use worldgen::units::{Units, m};
 
 use crate::fields;
@@ -215,7 +215,7 @@ impl Domain for Ranges {
 fn layers(ranges: Rc<Ranges>, ground: Rc<Sloped>) -> Vec<Layer> {
     let bounds = ground.clone();
     let sea = sea(ground.clone());
-    let surface = Field::columns("mountains", 0.8, Op::Paint, move |x, z, spacing| {
+    let surface = Field::columns("mountains", 0.8, Op::Paint, move |x, z| {
         let h = ground.at(x, z);
         let height = Units(h).to_fx();
         let treeline = ranges.treeline(x, z);
@@ -229,7 +229,7 @@ fn layers(ranges: Rc<Ranges>, ground: Rc<Sloped>) -> Vec<Layer> {
         let slope =
             |heights: [i64; 4], step: i64| Units(heights.map(|n| (n - h).abs()).into_iter().max().unwrap_or(0)).to_fx() / Units(step);
         let steep = slope(near, m(1.0));
-        let far = spacing.max(m(12.0));
+        let far = plan::spacing().max(m(12.0));
         let wide = around(far);
         let cliffs = slope(wide, far);
         // How far the ground around lies over this column: snow stays in hollows and gullies, crests are bare.
@@ -260,7 +260,7 @@ fn layers(ranges: Rc<Ranges>, ground: Rc<Sloped>) -> Vec<Layer> {
         };
         let under = if kind == K::alpine { K::scree } else { K::rock };
         // As deep as the ground under it (the forest's terrain), so it paints all the sides that shows.
-        Column::new(h, spacing).surface(kind, m(1.0)).sides(under, lowest_around(|x, z| ground.at(x, z), x, z, spacing), m(1.5)).spans()
+        Column::new(h).surface(kind, m(1.0)).sides(under, lowest_around(|x, z| ground.at(x, z), x, z), m(1.5)).spans()
     })
     .about(bounds, m(1.5), 1);
     vec![Layer::Field(surface), Layer::Field(sea)]
@@ -273,11 +273,11 @@ pub fn dry(height: i64) -> Fx {
 
 /** The sea: water up to its level on sand, and a beach of it a little over. */
 fn sea(ground: Rc<Sloped>) -> Field {
-    Field::columns("sea", 0.85, Op::Paint, move |x, z, spacing| {
+    Field::columns("sea", 0.85, Op::Paint, move |x, z| {
         let h = ground.at(x, z);
         if h > (SEA + Units::m(1.5)).0 {
             return Vec::new();
         }
-        Column::new(h, spacing).surface(L::sand, m(1.0)).water_to(T::water, SEA.0).spans()
+        Column::new(h).surface(L::sand, m(1.0)).water_to(T::water, SEA.0).spans()
     })
 }

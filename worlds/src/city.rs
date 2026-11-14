@@ -15,7 +15,7 @@ use worldgen::generator::{ANY_SIZE, Child, Children, Far, Field, Generator, Laye
 use worldgen::grid::Box3;
 use worldgen::kinds;
 use worldgen::noise::{Rng, fx, hash, hash64, stream};
-use worldgen::plan::{Plan, Sloped};
+use worldgen::plan::{self, Plan, Sloped};
 use worldgen::units::m;
 
 kinds! {
@@ -873,7 +873,7 @@ fn cell_of(v: i64) -> i64 {
 fn ground(seed: u64) -> Field {
     // A plan of categories finer than far sites (markings, kerbs, slabs): dithered, so each shows as often as it covers.
     let spots = Plan::dithered("ground", PLAN, move |x, z| spot(seed, cell_of(x), cell_of(z)));
-    Field::columns("ground", 0.0, Op::Paint, move |x, z, spacing| {
+    Field::columns("ground", 0.0, Op::Paint, move |x, z| {
         let (surface, road, paved) = match spots.at(x, z) {
             Spot::Asphalt => (K::asphalt, true, false),
             Spot::Mark => (K::roadMark, true, false),
@@ -883,8 +883,8 @@ fn ground(seed: u64) -> Field {
         };
         // The top plan cell: MIN_Y for roads, a cell higher elsewhere. Only where sites are as close as plan cells:
         // further apart, roads a step lower than the sites are fine would be hidden from above by the kerbs beside them.
-        let top = if road && spacing <= PLAN { MIN_Y } else { MIN_Y + 1 };
-        let column = Column::new(PLAN * top, spacing).surface(surface, PLAN);
+        let top = if road && plan::spacing() <= PLAN { MIN_Y } else { MIN_Y + 1 };
+        let column = Column::new(PLAN * top).surface(surface, PLAN);
         // Pavements on a cell of concrete, where sites are as fine.
         let column = if paved { column.fill_below_exactly(K::concrete, PLAN * MIN_Y - 1) } else { column };
         column.under(K::soil)

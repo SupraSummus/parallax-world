@@ -13,6 +13,7 @@ use std::rc::Rc;
 
 use worldgen::World;
 use worldgen::generator::{Field, Generator, KindDef, Layer, Op};
+use worldgen::plan;
 use worldgen::units::m;
 
 /** One level's sites, of any lattice point of its box: 0 none, else 1 + the palette's index. */
@@ -219,7 +220,7 @@ impl Scene {
         let heights = (0..self.levels.len()).filter_map(|k| self.levels[k].heights(1 << k));
         let heights = heights.reduce(|a, b| (a.0.min(b.0), a.1.max(b.1))).unwrap_or((min[1], min[1]));
         let scene = Rc::new(self);
-        let field = Field::at("scene", 0.0, Op::Fill, move |x, y, z, s| match scene.at(x, y, z, s) {
+        let field = Field::at("scene", 0.0, Op::Fill, move |x, y, z| match scene.at(x, y, z, plan::spacing()) {
             0 => None,
             id => Some((id - 1, None)),
         });

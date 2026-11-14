@@ -14,7 +14,7 @@ use worldgen::generator::{
 };
 use worldgen::generator::{Cell, Fill, Point};
 use worldgen::grid::Box3;
-use worldgen::plan::Plan;
+use worldgen::plan::{Plan, spacing};
 
 static KINDS: &[KindDef] = &[
     KindDef { name: "fog", kind_type: 8, colors: &["#cccccc"], walk_through: false, glows: false, medium: true },
@@ -53,7 +53,7 @@ fn spans(name: &'static str, from: i64, to: i64, kind: u8) -> Layer {
         name,
         order: 0.0,
         op: Op::Paint,
-        values: FieldValues::Spans { axis: 1, spans: Box::new(move |_, _, _| vec![Span::solid(from, to, kind)]) },
+        values: FieldValues::Spans { axis: 1, spans: Box::new(move |_, _| vec![Span::solid(from, to, kind)]) },
         about: None,
     })
 }
@@ -73,7 +73,7 @@ fn caves() -> Generator {
         name: "tunnels",
         order: 1.0,
         op: Op::Carve,
-        values: FieldValues::At(Box::new(|x, y, z, _| {
+        values: FieldValues::At(Box::new(|x, y, z| {
             let (x, y, z) = (x as f64, y as f64, z as f64);
             let v = (x / 23.0).sin() + (y / 17.0).sin() + (z / 29.0).sin() + ((x + z) / 31.0).sin();
             if v > 1.4 { Some((ROCK, None)) } else { None }
@@ -151,7 +151,7 @@ fn wall(y: i64, z: i64) -> i64 {
 
 /** The wall, and `knobs` on its face: a unit of wood at each anchor. */
 fn knobbly_wall(knobs: Population) -> Generator {
-    let rock = Field::spans("rock", 0.0, Op::Fill, 0, |y, z, _| vec![Span::solid(wall(y, z) - 64, wall(y, z), ROCK)]);
+    let rock = Field::spans("rock", 0.0, Op::Fill, 0, |y, z| vec![Span::solid(wall(y, z) - 64, wall(y, z), ROCK)]);
     let knobs = knobs.reach(2).make(|p, _| Some(Node::of(vec![cuboid(p, p.map(|v| v + 1.0), WOOD, SOLID, Op::Fill)])));
     Generator { kinds: KINDS.to_vec(), seed: 4, layers: vec![Layer::Field(rock), Layer::Population(knobs)] }
 }
@@ -211,7 +211,7 @@ fn village_keeps_the_contract() {
 fn stripes(dithered: bool, level: u32) -> (f64, Vec<u8>) {
     let make = |x: i64, _| if x.rem_euclid(8) == 0 { ROCK } else { GRASS };
     let plan = Rc::new(if dithered { Plan::dithered("stripes", 1, make) } else { Plan::new("stripes", 1, make) });
-    let ground = Field::columns("ground", 0.0, Op::Fill, move |x, z, _| vec![Span::solid(-8, 0, plan.at(x, z))]);
+    let ground = Field::columns("ground", 0.0, Op::Fill, move |x, z| vec![Span::solid(-8, 0, plan.at(x, z))]);
     let grid = generate(&world(Layer::Field(ground)), &Box3 { min: [0, -8 >> level, 0], max: [4096 >> level, 0, 64] }, level);
     let count = |kind: u8| grid.cells.iter().filter(|id| **id == kind + 1).count() as f64;
     (count(ROCK) / (count(ROCK) + count(GRASS)), grid.cells)
@@ -292,7 +292,8 @@ fn fog_layer(from: i64, to: i64, kind: fn(i64) -> u8, extinction: fn(i64) -> f64
         name: "fog",
         order: 0.0,
         op: Op::Fill,
-        values: FieldValues::At(Box::new(move |_, y, _, spacing| {
+        values: FieldValues::At(Box::new(move |_, y, _| {
+            let spacing = spacing();
             (from..to).contains(&y).then(|| (kind(spacing), Some(extinction(spacing))))
         })),
         about: None,

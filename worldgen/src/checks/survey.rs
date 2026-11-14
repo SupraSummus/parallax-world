@@ -12,6 +12,7 @@ use crate::World;
 use crate::generator::{Children, Field, FieldValues, Generator, Kind, Layer, Node, Op, Population, Shape, bounds_of_shapes, each_made};
 use crate::grid::Box3;
 use crate::noise::{Rng, hash_text};
+use crate::plan::footprint;
 use crate::units::m;
 
 /** The side of the square around spawn layers are surveyed over (16 km), lattice units. */
@@ -145,19 +146,21 @@ fn survey_field(world: &World, centre: [i64; 3], (level, side): (u32, i64), fiel
         let p = [x, h0 + random.below((h1 - h0) as u32) as i64, z];
         // What it draws there, along an axis from..to: the place is around the top of what fills, the middle of what carves.
         let (kinds, along, from, to): (Vec<Kind>, usize, i64, i64) = match &field.values {
-            FieldValues::At(at) => match at(x, p[1], z, s) {
-                Some((kind, _)) => (at(x, p[1], z, 1).into_iter().map(|(k, _)| k).chain([kind]).collect(), 1, p[1], p[1] + 1),
-                None => continue,
-            },
+            FieldValues::At(at) => {
+                let at = |s| footprint(s, [0, 0], || at(x, p[1], z));
+                let Some((kind, _)) = at(s) else { continue };
+                (at(1).into_iter().map(|(k, _)| k).chain([kind]).collect(), 1, p[1], p[1] + 1)
+            }
             FieldValues::Spans { axis, spans } => {
                 let [a, b] = across(*axis);
-                let coarse = spans(p[a], p[b], s);
+                let spans = |s| footprint(s, [0, 0], || spans(p[a], p[b]));
+                let coarse = spans(s);
                 if coarse.is_empty() {
                     continue;
                 }
                 // And what it draws finer than these sites, at level 0, where the place is: a coarse
                 // site's span is stretched to keep a site (column.rs), so its top may be far from the ground's.
-                let fine = spans(p[a], p[b], 1);
+                let fine = spans(1);
                 let at = if fine.is_empty() { &coarse } else { &fine };
                 let (from, to) = (at.iter().map(|s| s.from).min().expect("spans"), at.iter().map(|s| s.to).max().expect("spans"));
                 (coarse.iter().chain(&fine).map(|s| s.kind).collect(), *axis, from, to)

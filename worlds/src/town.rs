@@ -10,11 +10,11 @@
 
 use std::rc::Rc;
 
+use worldgen::column::Column;
 use worldgen::domain::{Domain, Scope, eased};
 use worldgen::frame::{Frame, Part, U, V, W, back, walls};
 use worldgen::generator::{
-    ANY_SIZE, About, Anchors, Child, Children, Far, Field, FieldValues, Fill, Kind, Layer, Node, Op, Population, SOLID, Shape, Shapes,
-    Span, bounds_of_shapes,
+    ANY_SIZE, Anchors, Child, Children, Far, Field, Fill, Kind, Layer, Node, Op, Population, SOLID, Shape, Shapes, Span, bounds_of_shapes,
 };
 use worldgen::grid::Box3;
 use worldgen::kinds;
@@ -472,32 +472,27 @@ impl Domain for Towns {
 fn layers(towns: Rc<Towns>, hold: Holding, ground: Rc<Sloped>) -> Vec<Layer> {
     let surface = {
         let (towns, surface_ground) = (towns.clone(), ground.clone());
-        Field {
-            name: "streets",
-            order: 0.5,
-            op: Op::Paint,
-            values: FieldValues::Spans {
-                axis: 1,
-                spans: Box::new(move |x, z, spacing| {
-                    let spot = towns.spot(x, z);
-                    if spot == Spot::Outside || !hold.owns(x, z) {
-                        return Vec::new();
-                    }
-                    let h = surface_ground.at(x, z);
-                    let top = h + 1 - m(0.5).max(2 * spacing);
-                    let surface = |kind| Span::solid(top, h + 1, kind);
-                    match spot {
-                        Spot::Street => vec![surface(k(K::cobble))],
-                        Spot::Square => vec![surface(k(K::paving))],
-                        Spot::SquareDark => vec![surface(k(K::pavingDark))],
-                        // A kerb's height above the street.
-                        Spot::Pavement => vec![surface(k(K::slab)), Span::solid(h + 1, h + 2, k(K::slab))],
-                        _ => vec![surface(forest::k(F::grass))],
-                    }
-                }),
-            },
-            about: Some(About { of: ground.clone(), below: m(0.5), above: 2, under: None }),
-        }
+        Field::columns("streets", 0.5, Op::Paint, move |x, z| {
+            let spot = towns.spot(x, z);
+            if spot == Spot::Outside || !hold.owns(x, z) {
+                return Vec::new();
+            }
+            let h = surface_ground.at(x, z);
+            let surface = |kind| Column::new(h).surface(kind, m(0.5)).spans();
+            match spot {
+                Spot::Street => surface(k(K::cobble)),
+                Spot::Square => surface(k(K::paving)),
+                Spot::SquareDark => surface(k(K::pavingDark)),
+                // A kerb's height above the street.
+                Spot::Pavement => {
+                    let mut spans = surface(k(K::slab));
+                    spans.push(Span::solid(h + 1, h + 2, k(K::slab)));
+                    spans
+                }
+                _ => surface(forest::k(F::grass)),
+            }
+        })
+        .about(ground.clone(), m(0.5), 2)
     };
     let built = Population {
         name: "towns",

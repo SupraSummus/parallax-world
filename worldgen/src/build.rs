@@ -17,24 +17,24 @@ use crate::plan::Sloped;
 use crate::points::{Points, Spot};
 
 impl Field {
-    /** A kind, with a medium's extinction if it is one, at each site: `at(x, y, z, spacing)`, lattice units. */
-    pub fn at(name: &'static str, order: f64, op: Op, at: impl Fn(i64, i64, i64, i64) -> Option<(Kind, Option<f64>)> + 'static) -> Field {
+    /** A kind, with a medium's extinction if it is one, at each site: `at(x, y, z)`, lattice units. */
+    pub fn at(name: &'static str, order: f64, op: Op, at: impl Fn(i64, i64, i64) -> Option<(Kind, Option<f64>)> + 'static) -> Field {
         Field { name, order, op, values: FieldValues::At(Box::new(at)), about: None }
     }
 
-    /** Spans along each line of sites parallel to `axis`: `spans(u, v, spacing)`, the line's other coordinates in axis order. */
+    /** Spans along each line of sites parallel to `axis`: `spans(u, v)`, the line's other coordinates in axis order. */
     pub fn spans<S: Into<Vec<Span>>>(
         name: &'static str,
         order: f64,
         op: Op,
         axis: usize,
-        spans: impl Fn(i64, i64, i64) -> S + 'static,
+        spans: impl Fn(i64, i64) -> S + 'static,
     ) -> Field {
-        Field { name, order, op, values: FieldValues::Spans { axis, spans: Box::new(move |u, v, s| spans(u, v, s).into()) }, about: None }
+        Field { name, order, op, values: FieldValues::Spans { axis, spans: Box::new(move |u, v| spans(u, v).into()) }, about: None }
     }
 
-    /** Spans along each column, up y: `spans(x, z, spacing)`, lattice units; a `Column` or the spans. */
-    pub fn columns<S: Into<Vec<Span>>>(name: &'static str, order: f64, op: Op, spans: impl Fn(i64, i64, i64) -> S + 'static) -> Field {
+    /** Spans along each column, up y: `spans(x, z)`, lattice units; a `Column` or the spans. */
+    pub fn columns<S: Into<Vec<Span>>>(name: &'static str, order: f64, op: Op, spans: impl Fn(i64, i64) -> S + 'static) -> Field {
         Field::spans(name, order, op, 1, spans)
     }
 

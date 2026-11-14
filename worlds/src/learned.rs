@@ -24,9 +24,10 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::OnceLock;
 
+use worldgen::column::Column;
 use worldgen::domain::{Domain, Lie, Scope, compose, eased};
 use worldgen::frame::{Frame, Part, U, V, W, back};
-use worldgen::generator::{ANY_SIZE, Child, Children, Field, Generator, Layer, Node, Op, Population, Shapes, Span};
+use worldgen::generator::{ANY_SIZE, Child, Children, Field, Generator, Layer, Node, Op, Population, Shapes};
 use worldgen::grid::Box3;
 use worldgen::noise::{Fx, Rng, ease_towards, fx, hash64};
 use worldgen::plan::{Claims, Holding, Plan, Sloped};
@@ -539,7 +540,7 @@ fn town_layers(settlements: Rc<Settlements>, hold: Holding, ground: Rc<Sloped>) 
     let surface = {
         let (settlements, ground) = (settlements.clone(), ground.clone());
         let on = ground.clone();
-        Field::columns("learned streets", 0.5, Op::Paint, move |x, z, spacing| {
+        Field::columns("learned streets", 0.5, Op::Paint, move |x, z| {
             let spot = settlements.spot(x, z);
             if !spot.town() || !hold.owns(x, z) {
                 return Vec::new();
@@ -552,7 +553,7 @@ fn town_layers(settlements: Rc<Settlements>, hold: Holding, ground: Rc<Sloped>) 
                 Spot::House => town::k(T::slab),
                 _ => forest::k(F::grass),
             };
-            vec![Span::solid(h + 1 - m(0.5).max(2 * spacing), h + 1, kind)]
+            Column::new(h).surface(kind, m(0.5)).spans()
         })
         .about(on, m(0.5), 1)
     };

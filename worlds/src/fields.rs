@@ -126,17 +126,17 @@ fn layers(scope: &Scope, hold: Holding, ground: Rc<Sloped>, path: Rc<Path>) -> V
     let plots = {
         let (f, ground) = (f.clone(), ground.clone());
         let on = ground.clone();
-        Field::columns("fields", 0.6, Op::Paint, move |x, z, spacing| {
+        Field::columns("fields", 0.6, Op::Paint, move |x, z| {
             let Some(crop) = f.crop(x, z) else { return Vec::new() };
             let dither = hash(dithers, x, z, 0);
             // Half a metre of soil (or stubble) under each, and what grows on it.
             let h = ground.at(x, z);
-            let soil = |kind: K| Column::new(h, spacing).surface(kind, m(0.5));
+            let soil = |kind: K| Column::new(h).surface(kind, m(0.5));
             match crop {
                 Crop::Wheat => soil(K::stubble).medium(K::wheat, m(0.9), 0.35),
                 Crop::Stubble => soil(K::stubble),
-                Crop::Ploughed => soil(if stripe(z, 8, spacing, dither) { K::furrow } else { K::tilth }),
-                Crop::Rows if stripe(z, 12, spacing, dither) => soil(K::furrow).medium(K::crop, 2, 0.6),
+                Crop::Ploughed => soil(if stripe(z, 8, dither) { K::furrow } else { K::tilth }),
+                Crop::Rows if stripe(z, 12, dither) => soil(K::furrow).medium(K::crop, 2, 0.6),
                 Crop::Rows => soil(K::furrow),
                 Crop::Meadow => soil(K::meadow).medium(K::meadowGrass, 2, 0.2),
                 Crop::Hedge => soil(K::meadow).medium(F::bush, m(1.4), 0.45),

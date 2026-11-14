@@ -85,7 +85,7 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
                     let mut x = clip.min[0] + ((clip.min[0] + y + z) & 1);
                     work.reads += 0.max((clip.max[0] - x + 1) / 2) as u64;
                     while x < clip.max[0] {
-                        if let Some((kind, extinction)) = plan::footprint(s, offset(x, z), || at(x * s, y * s, z * s, s)) {
+                        if let Some((kind, extinction)) = plan::footprint(s, offset(x, z), || at(x * s, y * s, z * s)) {
                             put(kind.into(), op, share_of(extinction), picked(x, y, z), x, y, z);
                         }
                         x += 2;
@@ -130,7 +130,7 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
                                     moved[axis / 2] = 0;
                                 }
                                 work.reads += 1;
-                                (plan::footprint(s, moved, || spans(u * s, v * s, s)), field.about.as_ref())
+                                (plan::footprint(s, moved, || spans(u * s, v * s)), field.about.as_ref())
                             }
                         };
                         // What it is about, held to it where asked.

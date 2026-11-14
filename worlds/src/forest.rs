@@ -487,15 +487,15 @@ fn layers(scope: &Scope, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
     // The ground: along each column, soil or stone under a layer of its surface, and stone down to the bottom.
     let terrain = {
         let f = f.clone();
-        Field::columns("terrain", 0.0, Op::Paint, move |x, z, spacing| {
+        Field::columns("terrain", 0.0, Op::Paint, move |x, z| {
             let h = f.ground(x, z);
-            let lowest = lowest_around(|x, z| f.ground(x, z), x, z, spacing);
+            let lowest = lowest_around(|x, z| f.ground(x, z), x, z);
             let surface = f.column(x, z).surface;
             // Stone under stone, and down a side as steep over the spacing as stone ground: a cliff's at any level,
             // a corner's where only a diagonal falls away.
-            let cliff = h - lowest >= STEEP * spacing;
+            let cliff = h - lowest >= STEEP * plan::spacing();
             let below = if cliff || surface == K::stone || surface == K::mossyStone { K::stone } else { K::soil };
-            column::Column::new(h, spacing).surface(surface, vox(1.0) as i64).sides(below, lowest, vox(1.5) as i64).under(K::stone)
+            column::Column::new(h).surface(surface, vox(1.0) as i64).sides(below, lowest, vox(1.5) as i64).under(K::stone)
         })
         .about(on.clone(), vox(1.5) as i64, 1)
         .under(K::stone)
@@ -578,7 +578,9 @@ fn layers(scope: &Scope, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
     let rooms = Rc::new(f.rooms(points.clone()));
     let canopy = {
         let (f, rooms) = (f.clone(), rooms.clone());
-        Field::columns("canopy", 1.0, Op::Fill, move |x, z, spacing| {
+        Field::columns("canopy", 1.0, Op::Fill, move |x, z| {
+            // Its own far form, measured by the sites' spacing.
+            let spacing = plan::spacing();
             let measured = measured_at(spacing);
             let Measured { slabs, above, wood, shadow, own, over } = &*measured;
             // Its trees as measured in stands as dense as they are there, between the two nearest.
