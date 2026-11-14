@@ -168,6 +168,8 @@ pub const SLOPE: i64 = 2;
 const COLUMN_SCALE: i64 = 1;
 /** The furthest a tree reaches from its foot across, in units: its population's reach. */
 const TREE_REACH: i64 = m(9.0);
+/** A leaf of the trees' points: a square that holds a tree by its chance. */
+const TREE_LEAF: i64 = m(2.0);
 /** The most a tree weighs in its rooms (Rooms, units²): its rooms' walls move by up to that over twice their distance. */
 const MOST: i64 = m(2.5) * m(2.5);
 /** The gaps between neighbours' crowns: from half a metre of overlap to a metre and a half apart, a quarter of pairs meeting. */
@@ -348,11 +350,16 @@ impl Woods {
 
     /** Column (x, z): rock where the ground is `steep` over the spacing read for (plan::spacing), as the terrain's cliffs. */
     fn column(&self, x: i64, z: i64) -> Column {
+        self.column_over(x, z, plan::spacing())
+    }
+
+    /** Column (x, z): rock where the ground is `steep` over `s`. */
+    fn column_over(&self, x: i64, z: i64, s: i64) -> Column {
         let column = self.columns.at(x, z);
         if self.ground.ground.slope().is_some_and(|slope| slope < STEEP) {
             return column;
         }
-        let steep = match plan::spacing() {
+        let steep = match s {
             1 => self.steep.at(x, z),
             s => steep(&self.ground.ground, x, z, s),
         };
@@ -402,9 +409,12 @@ impl Woods {
         [c.conifer, broad * 45 / 100, broad - broad * 45 / 100]
     }
 
-    /** By species, the chance a square 2 m wide around column (x, z) holds a tree of it. */
+    /**
+     * By species, the chance a square 2 m wide around column (x, z) holds a tree of it: none on rock, steep
+     * over the square at least, so the trees' points read the ground only at their leaves' corners.
+     */
     fn leaf_chances(&self, x: i64, z: i64) -> [Fx; 3] {
-        let c = self.column(x, z);
+        let c = self.column_over(x, z, plan::spacing().max(TREE_LEAF));
         let chance = self.tree_chance(x, z, &c) / 4;
         Woods::species_chances(&c).map(|sp| chance * sp)
     }
@@ -527,11 +537,10 @@ fn layers(scope: &Scope, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
 
     // Trees, at the trees' points (worldgen's Points), of their marks' species: leaves 2 m wide, each holding one
     // by its share of tree_chance, a square 4 m wide's; roots 8 m wide, as wide as the chances follow.
-    let tree_leaf = vox(2.0) as i64;
     let tree_top = vox(26.0) as i64;
     let points = {
         let f = f.clone();
-        Rc::new(Points::new("trees", f.s("trees"), &[0, 2], tree_leaf, vox(8.0) as i64, 3, move |[x, _, z]| {
+        Rc::new(Points::new("trees", f.s("trees"), &[0, 2], TREE_LEAF, vox(8.0) as i64, 3, move |[x, _, z]| {
             let [spruce, birch, oak] = f.leaf_chances(x, z);
             [spruce, birch, oak, Fx::ZERO]
         }))
@@ -609,7 +618,7 @@ fn layers(scope: &Scope, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
             // its owner's, the tree's whose room it is in, as it would alone, as rooms cut crowns at their walls.
             // Finding the owner makes every tree near the column, so only while a column is no wider than a leaf: a
             // tile then makes no more trees than it has columns (two leaves wide, level 5 took 4 times level 4).
-            let (own, over): ([f64; 3], [f64; 3]) = if spacing <= tree_leaf {
+            let (own, over): ([f64; 3], [f64; 3]) = if spacing <= TREE_LEAF {
                 let own = own.at([x, z]);
                 let mut hides = [0.0; 3];
                 if let Some(owner) = rooms.owner([x, 0, z]) {
@@ -620,7 +629,7 @@ fn layers(scope: &Scope, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
                 ([own[0], own[1], own[2]], hides)
             } else {
                 // The trees expected over the column, by the chances at its site.
-                let leaves = ((spacing / tree_leaf) as f64).powi(2);
+                let leaves = ((spacing / TREE_LEAF) as f64).powi(2);
                 let own = [0, 1, 2].map(|sp| chances[sp].to_f64() * leaves);
                 (own, [0, 1, 2].map(|sp| own[sp] * shadow[sp]))
             };
@@ -651,7 +660,7 @@ fn layers(scope: &Scope, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
     };
     let trees = {
         let (f, ground) = (f.clone(), f.clone());
-        Population::new("trees", 1.0, tree_leaf)
+        Population::new("trees", 1.0, TREE_LEAF)
             .reach([TREE_REACH, tree_top, TREE_REACH])
             .size(vox(1.0) as i64)
             .anchor_points(points, move |spot| {
@@ -699,6 +708,8 @@ fn layers(scope: &Scope, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
 
     // Undergrowth, per column of (0.25 m)², in square patches N wide around each cell's centre.
     const PLANTS: i64 = 16;
+    // The most of a column's roll any plant takes, fallen leaves': a column rolling more draws nothing, whatever the share.
+    const LITTER: Fx = fx(0.4);
     let column_width = vox(0.25) as i64;
     let anchor = f.clone();
     let plants = Population::new("plants", 3.0, PLANTS)
@@ -712,50 +723,48 @@ fn layers(scope: &Scope, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
         .make(move |_, cell| {
             let [cx, _, cz] = cell.centre;
             let mut shapes = Vec::new();
-            let mut xi = cx - PLANTS / 2;
-            while xi < cx + PLANTS / 2 {
-                let mut zi = cz - PLANTS / 2;
-                while zi < cz + PLANTS / 2 {
-                    let share = (f.ground.share)(xi, zi);
-                    let c = f.column(xi, zi);
-                    let (x, y, z) = (xi as f64, (c.height + 1) as f64, zi as f64);
-                    // Rarer as the forest's share falls: as dense as it is.
-                    let r = Fx::fraction(hash(f.s("plants"), xi, zi, 0));
-                    let r = if share >= Fx::ONE { r } else { r / share.max(Fx::EPSILON) };
-                    let random = &mut Rng::new(hash64(f.s("plants, randomly"), xi, zi, 0));
-                    if c.on_path {
-                        if r < fx(0.05) {
-                            shapes.push(Shape::cuboid([x, y, z], [x + 2.0, y + 1.0, z + 1.0], K::stone));
-                        }
-                    } else if c.surface == K::grass {
-                        if r < fx(0.02) {
-                            let count = 3.0 + random.below(3) as f64;
-                            let kind = if random.chance(fx(0.3)) { K::hay } else { K::tallGrass };
-                            shapes.extend(tuft(x, y, z, count, vox(0.3), kind, random));
-                        } else if r < fx(0.0275) {
-                            shapes.extend(flower(x, y, z, random));
-                        } else if r < fx(0.2) {
-                            let count = 1.0 + random.below(2) as f64;
-                            shapes.extend(tuft(x, y, z, count, vox(0.12), K::grass, random));
-                        }
-                    } else if c.surface != K::stone && c.surface != K::mossyStone {
-                        if r < fx(0.00625) {
-                            shapes.extend(fern(x, y, z, if c.conifer > Fx::HALF { K::fern } else { K::bracken }, random));
-                        } else if r < fx(0.008) {
-                            shapes.extend(bush(x, y, z, random));
-                        } else if r < fx(0.0085) {
-                            shapes.extend(flower(x, y, z, random));
-                        } else if r < fx(0.011) && c.density > fx(0.3) {
-                            shapes.extend(mushrooms(x, y, z, if c.conifer > Fx::HALF { K::amanita } else { K::bolete }, random));
-                        } else if c.surface == K::needles && r < fx(0.04) {
-                            shapes.push(Shape::cuboid([x, y, z], [x + 2.0, y + 2.0, z + 1.0], K::cone));
-                        } else if c.surface == K::litter && r < fx(0.4) {
-                            shapes.push(Shape::cuboid([x - 1.0, y - 1.0, z - 1.0], [x + 1.0, y, z + 1.0], K::fallenLeaf).paint());
-                        }
-                    }
-                    zi += column_width;
+            let span = |c: i64| (c - PLANTS / 2..c + PLANTS / 2).step_by(column_width as usize);
+            for (xi, zi) in span(cx).flat_map(|xi| span(cz).map(move |zi| (xi, zi))) {
+                let r = Fx::fraction(hash(f.s("plants"), xi, zi, 0));
+                if r >= LITTER {
+                    continue;
                 }
-                xi += column_width;
+                // Rarer as the forest's share falls: as dense as it is.
+                let share = (f.ground.share)(xi, zi);
+                let r = if share >= Fx::ONE { r } else { r / share.max(Fx::EPSILON) };
+                let c = f.column(xi, zi);
+                let (x, y, z) = (xi as f64, (c.height + 1) as f64, zi as f64);
+                let random = &mut Rng::new(hash64(f.s("plants, randomly"), xi, zi, 0));
+                if c.on_path {
+                    if r < fx(0.05) {
+                        shapes.push(Shape::cuboid([x, y, z], [x + 2.0, y + 1.0, z + 1.0], K::stone));
+                    }
+                } else if c.surface == K::grass {
+                    if r < fx(0.02) {
+                        let count = 3.0 + random.below(3) as f64;
+                        let kind = if random.chance(fx(0.3)) { K::hay } else { K::tallGrass };
+                        shapes.extend(tuft(x, y, z, count, vox(0.3), kind, random));
+                    } else if r < fx(0.0275) {
+                        shapes.extend(flower(x, y, z, random));
+                    } else if r < fx(0.2) {
+                        let count = 1.0 + random.below(2) as f64;
+                        shapes.extend(tuft(x, y, z, count, vox(0.12), K::grass, random));
+                    }
+                } else if c.surface != K::stone && c.surface != K::mossyStone {
+                    if r < fx(0.00625) {
+                        shapes.extend(fern(x, y, z, if c.conifer > Fx::HALF { K::fern } else { K::bracken }, random));
+                    } else if r < fx(0.008) {
+                        shapes.extend(bush(x, y, z, random));
+                    } else if r < fx(0.0085) {
+                        shapes.extend(flower(x, y, z, random));
+                    } else if r < fx(0.011) && c.density > fx(0.3) {
+                        shapes.extend(mushrooms(x, y, z, if c.conifer > Fx::HALF { K::amanita } else { K::bolete }, random));
+                    } else if c.surface == K::needles && r < fx(0.04) {
+                        shapes.push(Shape::cuboid([x, y, z], [x + 2.0, y + 2.0, z + 1.0], K::cone));
+                    } else if c.surface == K::litter && r < LITTER {
+                        shapes.push(Shape::cuboid([x - 1.0, y - 1.0, z - 1.0], [x + 1.0, y, z + 1.0], K::fallenLeaf).paint());
+                    }
+                }
             }
             if shapes.is_empty() { None } else { Some(Node::of(shapes)) }
         });

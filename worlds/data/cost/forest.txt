@@ -3,20 +3,20 @@ place        level     cells     owned     nodes     tests  measured     reads  
 spawn            0       361        21        35    544009         0         0       747         0         0    319667 trees
 spawn            0        49        12         1      4550         0         0       182         0         0      4550 boulders
 spawn            0       121        30         1       704         0         0       428         0         0       704 logs
-spawn            0       121       121        65     22823         0         0      8155         0         0      3023 plants
+spawn            0       121       121        65     22823         0         0      3513         0         0      3023 plants
 spawn            0         0         0         0         0         0     16384    196608         0         0         0 terrain
-spawn            0         0         0         0         0         0         0         0     23041     23039         0 plan ground
+spawn            0         0         0         0         0         0         0         0     20966     20964         0 plan ground
 spawn            0         0         0         0         0         0         0         0       347       347         0 plan path
-spawn            0         0         0         0         0         0         0     55223     22461     22460         0 plan forest columns
+spawn            0         0         0         0         0         0         0     50357     20310     20309         0 plan forest columns
 spawn            0         0         0         0         0         0         0      5156      2321      2321         0 plan trees
 spawn            1       729        55       284    225890         0         0      1876         0         0     39242 trees
 spawn            1       121        29         4      4200         0         0       687         0         0      1408 boulders
 spawn            1       225        54         1      1656         0         0      1181         0         0      1656 logs
-spawn            1       361       361       262     40925         0         0     23947         0         0       668 plants
+spawn            1       361       361       262     40925         0         0     10121         0         0       668 plants
 spawn            1         0         0         0         0         0     16384    184848         0         0         0 terrain
-spawn            1         0         0         0         0         0         0         0     26837     26787         0 plan ground
+spawn            1         0         0         0         0         0         0         0     23298     23255         0 plan ground
 spawn            1         0         0         0         0         0         0         0       404       404         0 plan path
-spawn            1         0         0         0         0         0         0     57659     25934     25931         0 plan forest columns
+spawn            1         0         0         0         0         0         0     49216     21997     21995         0 plan forest columns
 spawn            1         0         0         0         0         0         0      6360      2893      2893         0 plan trees
 spawn            2      1849       165      1142    281976         0         0      4981         0         0      7890 trees
 spawn            2       361        87        12      2058         0         0      1853         0         0       384 boulders
@@ -65,9 +65,9 @@ spawn            8         0         0         0         0         0         0  
 region1          0       361        30       115    596151         0         0       700         0         0    145844 trees
 region1          0        49        12         2     12558         0         0       182         0         0      8008 boulders
 region1          0       121        27         1      2056         0         0       425         0         0      2056 logs
-region1          0       121       121        72     29413         0         0      8155         0         0      2793 plants
+region1          0       121       121        72     29413         0         0      3450         0         0      2793 plants
 region1          0         0         0         0         0         0     16384    196608         0         0         0 terrain
-region1          0         0         0         0         0         0         0         0     22695     22687         0 plan ground
+region1          0         0         0         0         0         0         0         0     20579     20571         0 plan ground
 region1          0         0         0         0         0         0         0         0       328       328         0 plan path
-region1          0         0         0         0         0         0         0     45298     22109     22108         0 plan forest columns
+region1          0         0         0         0         0         0         0     40309     19917     19916         0 plan forest columns
 region1          0         0         0         0         0         0         0      4572      2029      2029         0 plan trees
