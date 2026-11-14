@@ -183,7 +183,7 @@ impl window::Content for App {
                 look.camera[1] += moving[2] * step;
             }
             look.size = [rect.width() as f64, rect.height() as f64];
-            look.sky = self.world.brightness().filter(|_| self.lighting == Lighting::Computed).map(|b| b.sky);
+            look.light = self.world.brightness().filter(|_| self.lighting == Lighting::Computed);
             let start = Instant::now();
             let frame = self.engine.frame(look, &self.world);
             self.framing = start.elapsed().as_secs_f64() * 1000.0;
@@ -447,7 +447,7 @@ fn main() {
     let camera = query.camera.unwrap_or(shown.spawn.map(|v| v as f64));
     let far = query.distance.unwrap_or(RENDER_DISTANCE);
     let mut look = Look::new(camera, query.look.unwrap_or([YAW, PITCH]), query.fov.unwrap_or(FOV), far, size);
-    look.sky = light.map(|b| b.sky);
+    look.light = light;
     if let Some(v) = value("--detail").map(|v| v.parse().expect("--detail D")).or(query.detail) {
         look.detail = v;
     }
@@ -623,11 +623,12 @@ mod tests {
     /**
      * A white block with a red sheet on top, drawn measured from afar
      * (Far::measured): its coarse voxels are red on the faces that look up,
-     * through it to the sheet, and white on the others.
+     * through it to the sheet, and white on the others. Both glow, so that
+     * lit from below, where no light comes, they show.
      */
     fn sheeted_block(_: u64) -> worldgen::World {
         use worldgen::generator::{Far, Generator, KindDef, Layer, Node, Population, Shape};
-        let kind = |colors| KindDef { name: "block", kind_type: 10, colors, walk_through: false, glows: false, medium: false };
+        let kind = |colors| KindDef { name: "block", kind_type: 10, colors, walk_through: false, glows: true, medium: false };
         let block = Population::new("block", 1.0, 4096).anchor(|cell| (cell.centre == [0; 3]).then_some([0.0; 3])).make(|_, _| {
             let shapes = vec![
                 Shape::cuboid([-256.0, 0.0, -256.0], [256.0, 256.0, 256.0], 0),
@@ -644,16 +645,19 @@ mod tests {
     fn voxels_show_the_faces_rays_enter_by() {
         // From below, near and far: rays enter its voxels by faces that look down or sideways, white, never by
         // those that look up, red. Most of its coarse voxels have both, and their sites' own material is either.
-        for distance in [400.0, 1500.0, 2500.0] {
-            let mut world = World::new(sheeted_block, 1, None, 4);
-            let look = Look { fog: f64::INFINITY, ..Look::new([0.0, -distance, 0.0], [0.0, 80.0], FOV, 8000.0, [320.0, 200.0]) };
+        // Lit, near: only the light differs.
+        let lit = Some(Brightness { sky: 0.0, sun: 0.0, glow: 1.0 });
+        for (light, distance) in [(None, 400.0), (None, 1500.0), (None, 2500.0), (lit, 400.0)] {
+            let mut world = World::new(sheeted_block, 1, light.map(Shared::new), 4);
+            let at = Look::new([0.0, -distance, 0.0], [0.0, 80.0], FOV, 8000.0, [320.0, 200.0]);
+            let look = Look { fog: f64::INFINITY, light, ..at };
             let frame = complete(&mut *Kind::Voxels.make(&world), &mut world, &look, false);
             let pixels = Easel::offscreen(None).pixels(&*frame.picture, [320, 200]).2;
             let (white, red) = pixels.chunks(4).fold((0, 0), |(w, r), p| {
                 let [red, green, blue] = [p[0], p[1], p[2]].map(i32::from);
                 (w + usize::from(red > 100 && (red - green).abs() < 8 && (red - blue).abs() < 8), r + usize::from(red > green + 60))
             });
-            assert!(white > 500 && red == 0, "from {distance} below: {white} pixels of it white, {red} red");
+            assert!(white > 500 && red == 0, "from {distance} below, lit {light:?}: {white} pixels of it white, {red} red");
         }
     }
 

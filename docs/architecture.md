@@ -781,8 +781,9 @@ and bricks of a tile holding the same sites (its buried rock) share a slot.
 A brick of a tile not made yet is unknown, not empty,
 and rays take the next coarser level there:
 what is missing shows coarser, never as a hole.
-Shaded, a voxel shows the material of the face a ray enters it by,
-as worldgen's rays do (`picture.rs`):
+A voxel shows the material of the face a ray enters it by,
+as worldgen's rays do (`picture.rs`),
+times the light on it (below):
 a coarse voxel of a house may show its wall from the side and its roof from above,
 and its site's own material is only one of them.
 So a brick whose voxels' faces differ takes six more slots of the pool,
@@ -823,9 +824,12 @@ For the voxels, the world's threads light each tile once made
 of the levels rays read,
 after every tile to make (as it takes several times as long),
 nearest first in each level's own sites, as rays read them:
-each voxel a ray can meet gets one colour, not knowing which face it meets,
-the mean of the light from its faces that light gets out by (`Light::seen`).
-It goes to the GPU beside the bricks, a word a site, in a pool of its own.
+each voxel a ray can meet gets the light on it, by the way its surface faces
+(`Light::on_seen`),
+and shows its material's colour times that, and its glow if its material glows,
+as worldgen's lit pictures do (`Light::relight`);
+shaded, the light is the mean of its open faces' shades.
+The light goes to the GPU beside the bricks, a word a site (RGB9E5), in a pool of its own.
 Till a tile is lit, its bricks are not on the GPU, as if it were not made:
 rays take the next coarser level there,
 so what is not lit yet shows coarser, lit, never shaded by another light.

@@ -276,10 +276,10 @@ impl Renderer {
     /** The chunks the picks of `look` compose of the world's tiles, each level's in `levels`, and what is missing for the rest. */
     pub fn render(&mut self, look: &Look, levels: &[Arc<Level>]) -> (Frame, &Stats) {
         let mut changed = false;
-        if look.sky.is_some() != self.lit {
+        if look.light.is_some() != self.lit {
             self.cells.clear();
             self.picks.iter_mut().for_each(|p| *p = [None, None]);
-            self.lit = look.sky.is_some();
+            self.lit = look.light.is_some();
             changed = true;
         }
         // Cells that lacked tiles can be baked.

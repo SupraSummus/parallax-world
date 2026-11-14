@@ -5,21 +5,22 @@
 // samples met, and takes the nearest it enters (resolve_fragment).
 // See-through voxels (a medium: fog, water, a far canopy) add up on the way,
 // in the order the ray meets them, each by its path through it.
-// Unlit, a voxel shows the material of the face a ray enters it by, shaded
-// by the way its faces face. Lit, it shows the light its tile found for it
-// (world.rs); a tile not lit yet is not on the GPU (voxels.rs), as one not
-// made: rays take the next level.
+// A voxel shows the material of the face a ray enters it by, times the
+// light on it: shaded, by the way its surface faces; lit, the light its tile
+// found for it (world.rs), and its glow if its material glows. A tile not
+// lit yet is not on the GPU (voxels.rs), as one not made: rays take the next level.
 // voxels.rs puts the constants it shares with this file before it.
 
 // The picture's size in pixels, and its sides over the focal length; the
-// fog's distance, and what of the sky it hides; whether voxels are lit; the
-// sky's colours; right, up and forward in the world.
+// fog's distance, and what of the sky it hides; whether voxels are lit, and
+// how bright what glows is then; the sky's colours; right, up and forward in the world.
 struct Globals {
   resolution: vec2f,
   extent: vec2f,
   fog: f32,
   sky_fog: f32,
   lit: u32,
+  glow: f32,
   sky_top: vec4f,
   horizon: vec4f,
   view: mat3x3f,
@@ -66,9 +67,9 @@ fn hollow(l: Level, k: vec3i, j: u32) -> bool {
 @group(0) @binding(5) var<uniform> eye: vec4f;
 // Per level, per cell of each scale in its window, how many bricks around it have voxels that meet it or are unknown (a torus, as `bricks`), two a word.
 @group(0) @binding(6) var<storage, read> filled: array<u32>;
-// Lit, per slot of the pool, its brick's sites' light as `cells` has them, one a word: sRGB, 0 if none.
+// Lit, per slot of the pool, the light on its brick's voxels as `cells` has them, one a word: RGB9E5, 0 if none.
 @group(0) @binding(7) var<storage, read> lights: array<u32>;
-// Unlit, per slot of the pool, the next of its brick's (voxels.rs's Pool), EMPTY if none: a brick whose
+// Per slot of the pool, the next of its brick's (voxels.rs's Pool), EMPTY if none: a brick whose
 // voxels' faces differ has more, each its sites' faces two by two, as `cells` has them.
 @group(0) @binding(8) var<storage, read> next: array<i32>;
 
@@ -153,12 +154,12 @@ fn light_at(level: u32, s: vec3i) -> u32 {
   return light_in(slot, (s - levels[level].min) & vec3i(BRICK - 1));
 }
 
-// The colour of the see-through voxel `v` at `r` in the brick at `slot`: lit, its light; else its material's, shaded as its faces are on average.
+// The colour of the see-through voxel `v` at `r` in the brick at `slot`: its material under the light on it, shaded as its faces are on average.
 fn medium_colour(slot: i32, r: vec3i, v: u32) -> vec3f {
   if globals.lit != 0u {
-    return unpack4x8unorm(light_in(slot, r)).rgb;
+    return coloured(v & 255u, rgb9e5(light_in(slot, r)));
   }
-  return rgb(v & 255u) * MEDIUM_SHADE;
+  return coloured(v & 255u, vec3f(MEDIUM_SHADE));
 }
 
 // The site of the FCC lattice (x + y + z even) whose voxel holds `p`.
@@ -368,6 +369,28 @@ fn rgb(material: u32) -> vec3f {
   return vec3f(f32((c >> 16u) & 255u), f32((c >> 8u) & 255u), f32(c & 255u)) / 255.0;
 }
 
+fn rgb9e5(w: u32) -> vec3f {
+  return vec3f(vec3u(w, w >> 9u, w >> 18u) & vec3u(511u)) * exp2(f32(w >> 27u) - 24.0);
+}
+
+fn to_linear(c: vec3f) -> vec3f {
+  return select(pow((c + 0.055) / 1.055, vec3f(2.4)), c / 12.92, c <= vec3f(0.04045));
+}
+
+fn to_srgb(c: vec3f) -> vec3f {
+  return select(1.055 * pow(c, vec3f(1.0 / 2.4)) - 0.055, c * 12.92, c <= vec3f(0.0031308));
+}
+
+// Material `m` under `light`: shaded, its colour times a shade, as the splats paint it; lit, its colour
+// (linear) times the light, its glow added if it glows, as worldgen's Light::relight shows it.
+fn coloured(m: u32, light: vec3f) -> vec3f {
+  if globals.lit == 0u {
+    return rgb(m) * light;
+  }
+  let glow = select(0.0, globals.glow, (palette[m] >> 24u) != 0u);
+  return to_srgb(min(to_linear(rgb(m)) * (light + glow), vec3f(1.0)));
+}
+
 // The material of face `k` (of FACES) of the voxel hit: its brick's next slots hold its faces', if they differ.
 fn face_material(hit: Hit, k: u32) -> u32 {
   var faces = next[brick_of(hit.level, hit.site)];
@@ -380,43 +403,50 @@ fn face_material(hit: Hit, k: u32) -> u32 {
   return (site_in(faces, (hit.site - levels[hit.level].min) & vec3i(BRICK - 1)) >> (8u * (k & 1u))) & 255u;
 }
 
-// Unlit, a voxel met by a ray along `d`: the colour of the face it enters by (as worldgen's
-// picture.rs sees it), times the mean of its open faces' shades, as the splats paint it.
-fn shaded(hit: Hit, d: vec3f) -> vec3f {
+// The face (of FACES) a ray along `d` enters the voxel hit by, as worldgen's picture.rs finds it:
+// of those it comes in across, the one whose plane it crosses last ((p − site) · n ≤ 1 inside).
+fn entered(hit: Hit, d: vec3f) -> u32 {
   let q = eye.xyz / exp2(f32(hit.level)) - vec3f(hit.site);
-  var shade = 0.0;
-  var open = 0.0;
-  // Of the faces it comes in across, the one whose plane it crosses last ((p − site) · n ≤ 1 inside).
-  var entered = 0u;
+  var face = 0u;
   var last = -1e30;
   for (var k = 0u; k < 12u; k++) {
-    let n = FACES[k];
-    if (voxel(hit.level, hit.site + vec3i(n)) >> 8u) < 255u {
-      shade += face_shade(n);
-      open += 1.0;
-    }
-    let along = dot(n, d);
-    if along < 0.0 && (1.0 - dot(q, n)) / along > last {
-      last = (1.0 - dot(q, n)) / along;
-      entered = k;
+    let along = dot(FACES[k], d);
+    if along < 0.0 && (1.0 - dot(q, FACES[k])) / along > last {
+      last = (1.0 - dot(q, FACES[k])) / along;
+      face = k;
     }
   }
-  return rgb(face_material(hit, entered)) * select(1.0, shade / open, open > 0.0);
+  return face;
 }
 
-// Lit, the light of the voxel hit; one with none (met where levels meet, inside what is solid) takes the mean of its neighbours' that have, if any.
+// The light on the voxel hit: shaded, the mean of its open faces' shades; lit, its tile's (lit).
+fn light_on(hit: Hit) -> vec3f {
+  if globals.lit != 0u {
+    return lit(hit);
+  }
+  var shade = 0.0;
+  var open = 0.0;
+  for (var k = 0; k < 12; k++) {
+    if (voxel(hit.level, hit.site + vec3i(FACES[k])) >> 8u) < 255u {
+      shade += face_shade(FACES[k]);
+      open += 1.0;
+    }
+  }
+  return vec3f(select(1.0, shade / open, open > 0.0));
+}
+
+// Lit, the light on the voxel hit; one with none (met where levels meet, inside what is solid) takes the mean of its neighbours' that have, if any.
 fn lit(hit: Hit) -> vec3f {
   let own = light_at(hit.level, hit.site);
   if own != 0u {
-    return unpack4x8unorm(own).rgb;
+    return rgb9e5(own);
   }
   var sum = vec3f(0.0);
   var count = 0.0;
   for (var k = 0; k < 12; k++) {
-    let n = FACES[k];
-    let light = light_at(hit.level, hit.site + vec3i(n));
+    let light = light_at(hit.level, hit.site + vec3i(FACES[k]));
     if light != 0u {
-      sum += unpack4x8unorm(light).rgb;
+      sum += rgb9e5(light);
       count += 1.0;
     }
   }
@@ -424,8 +454,7 @@ fn lit(hit: Hit) -> vec3f {
 }
 
 // What each sample met: its site, and level | voxel << 8 (NONE if
-// nothing); and the voxel's colour, the mean of its open faces' shades,
-// and what the see-through voxels in front gave (rgb) and let through (a).
+// nothing); and the voxel's colour, and what the see-through voxels in front gave (rgb) and let through (a).
 @group(0) @binding(9) var sample_hits: texture_2d<u32>;
 @group(0) @binding(10) var sample_colours: texture_2d<u32>;
 
@@ -443,12 +472,7 @@ fn sample_fragment(in: Screen) -> Sample {
   if hit.level >= LOST {
     return Sample(vec4u(0u, 0u, 0u, hit.level), vec2u(0u, medium));
   }
-  var colour: vec3f;
-  if globals.lit != 0u {
-    colour = lit(hit);
-  } else {
-    colour = shaded(hit, d);
-  }
+  let colour = coloured(face_material(hit, entered(hit, d)), light_on(hit));
   return Sample(vec4u(bitcast<vec3u>(hit.site), hit.level | hit.voxel << 8u), vec2u(pack4x8unorm(vec4f(colour, 1.0)), medium));
 }
 
