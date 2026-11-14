@@ -380,7 +380,8 @@ fn flat_fragment(in: RunPixel) -> @location(0) vec4f {
 // the picture, in halves of a brick across and rows up from its first
 // place's centre; where its picture is, and how many columns its rows are;
 // which halves of its slab its level draws (veil_fragment); where it is
-// from the eye; and its chunk's tint and fog (shade).
+// from the eye; and how its chunk shades (Shading), worked out here:
+// reading the globals for it in every fragment is slow.
 struct Veil {
   @builtin(position) position: vec4f,
   @builtin(clip_distances) owned: array<f32, 4>,
@@ -388,8 +389,8 @@ struct Veil {
   @location(1) @interpolate(flat) picture: vec2u,
   @location(2) @interpolate(flat) drawn: vec2f,
   @location(3) at: vec3f,
-  @location(4) @interpolate(flat) tint: u32,
-  @location(5) @interpolate(flat) fog: f32,
+  @location(4) @interpolate(flat) grey: vec4f,
+  @location(5) @interpolate(flat) weight: vec3f,
 }
 
 struct VeilPixel {
@@ -397,8 +398,8 @@ struct VeilPixel {
   @location(1) @interpolate(flat) picture: vec2u,
   @location(2) @interpolate(flat) drawn: vec2f,
   @location(3) at: vec3f,
-  @location(4) @interpolate(flat) tint: u32,
-  @location(5) @interpolate(flat) fog: f32,
+  @location(4) @interpolate(flat) grey: vec4f,
+  @location(5) @interpolate(flat) weight: vec3f,
 }
 
 @vertex
@@ -422,8 +423,9 @@ fn veil_vertex(@builtin(vertex_index) vertex: u32, @builtin(instance_index) inst
   let first = t.layer + vec2f(0.0, t.half);
   out.drawn = select(vec2f(0.0), vec2f(1.0), first > vec2f(c.clip) & first <= vec2f(c.reach));
   out.at = at;
-  out.tint = c.tint;
-  out.fog = fog_of(c);
+  let shading = shading_of(c);
+  out.grey = shading.grey;
+  out.weight = shading.weight;
   return out;
 }
 
@@ -469,7 +471,7 @@ fn veil_fragment(in: VeilPixel) -> @location(0) vec4f {
   let field = mix(medium_row(in.picture, q, in.place.x, in.drawn), medium_row(in.picture, q + 1, in.place.x, in.drawn), y);
   let along = 2.0 * LAYER_OVER_CHORD * length(in.at) / in.at.z;
   let stops = 1.0 - exp(-field.a * along);
-  return vec4f(shaded(in.tint, in.fog, field / max(field.a, 1e-30)), 1.0) * stops;
+  return vec4f(shaded(Shading(in.grey, in.weight), field) * (stops / max(field.a, 1e-30)), stops);
 }
 
 // The first of a tile's columns the pixel's ray meets. A column is a
@@ -550,7 +552,7 @@ fn march(in: Tile) -> Hit {
 
 // Its colour as the chunk paints it (Chunk's tint) and fogged.
 fn shade(c: Chunk, paint: vec4f) -> vec3f {
-  return shaded(c.tint, fog_of(c), vec4f(paint.rgb, 1.0));
+  return shaded(shading_of(c), vec4f(paint.rgb, 1.0));
 }
 
 // How much a chunk's colours are fogged, by its distance.
@@ -558,11 +560,29 @@ fn fog_of(c: Chunk) -> f32 {
   return 1.0 - exp(-c.distance / globals.fog_distance);
 }
 
-// As shade, a colour weighted by `paint.a`: shading is affine in the
-// colour, so a weighted sum of colours shades as one.
-fn shaded(tint: u32, fog: f32, paint: vec4f) -> vec3f {
-  let tinted = unpack4x8unorm(tint).rgb * (0.3 * paint.a + 0.7 * dot(paint.rgb, vec3f(0.3, 0.59, 0.11)));
-  return mix(select(paint.rgb, tinted, tint != 0u), globals.horizon.rgb * paint.a, fog);
+// How a chunk shades a colour weighted by its alpha: its grey in the
+// chunk's tint, or the colour as it is, fogged toward the horizon.
+// It is linear in the colour (shaded), so a weighted sum of colours
+// shades as one.
+struct Shading {
+  // Times the colour's grey, and (a) times the colour;
+  grey: vec4f,
+  // times its weight.
+  weight: vec3f,
+}
+
+fn shading_of(c: Chunk) -> Shading {
+  let fog = fog_of(c);
+  let horizon = fog * globals.horizon.rgb;
+  if c.tint == 0u {
+    return Shading(vec4f(vec3f(0.0), 1.0 - fog), horizon);
+  }
+  let tint = (1.0 - fog) * unpack4x8unorm(c.tint).rgb;
+  return Shading(vec4f(0.7 * tint, 0.0), 0.3 * tint + horizon);
+}
+
+fn shaded(s: Shading, paint: vec4f) -> vec3f {
+  return s.grey.a * paint.rgb + s.grey.rgb * dot(paint.rgb, vec3f(0.3, 0.59, 0.11)) + s.weight * paint.a;
 }
 
 struct Drawn {
