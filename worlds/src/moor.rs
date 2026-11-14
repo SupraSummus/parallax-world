@@ -91,16 +91,14 @@ const _: () = assert!(2 * POOL_RADIUS <= POOLS_APART);
 const SURE: Fx = fx(0.2);
 /**
  * Mist fills a hollow up to 1 m under the mean of the ground on a
- * square MIST_RING round it, and lies up to 3 m higher in patches;
- * its top made every MIST_STEP. So little of it lies thin on slopes,
- * where it would be thickened far away ("Thickened media spread",
- * generators.md). As thick as some 15 m of it hide what is behind
- * (Koschmieder: 3.9 over the distance seen).
+ * square MIST_RING round it, and lies up to 3 m higher in patches.
+ * So little of it lies thin on slopes, where it would be thickened far
+ * away ("Thickened media spread", generators.md). As thick as some 15 m
+ * of it hide what is behind (Koschmieder: 3.9 over the distance seen).
+ * Its top is made every MIST_RING, so the ring's points are samples'
+ * too: the ground is made once for each.
  */
 const MIST_RING: i64 = m(24.0);
-const MIST_STEP: i64 = m(8.0);
-// The ring's points are samples' too: the ground is made once for each.
-const _: () = assert!(MIST_RING % MIST_STEP == 0);
 const MIST: Mist = Mist { under: Units::m(1.0), over: Units::m(3.0), extinction: 3.9 / m(15.0) as f64 };
 /** Fog: mist lying 8 m over the mean of the ground round it, 6 m more in patches, some 60 m seen through. */
 const FOG: Mist = Mist { under: Units::m(-8.0), over: Units::m(6.0), extinction: 3.9 / m(60.0) as f64 };
@@ -290,12 +288,12 @@ impl Moorland {
             None => {
                 let steadings = steadings.clone();
                 Water::Pools(Claims::new("pools", scope.seed("pools"), POOL_CLAIM, POOLS_APART, None, move |spot, random| {
-                    if !random.chance(fx(0.35)) {
+                    // Where the moor leads, which few spots pass: asked before the ground is measured.
+                    if !random.chance(fx(0.35)) || lead(spot[0], spot[1]) < SURE {
                         return None;
                     }
                     let ground = |x, z| terraced(&steadings, x, z, height(x, z));
-                    // Its room (below) needs the moor to lead at its centre, which few spots pass: asked before the rim is measured.
-                    let pool = pool_at(spot, &ground, &|[x, z]| lead(x, z) >= SURE, random)?;
+                    let pool = pool_at(spot, &ground, random)?;
                     let [x, z] = pool.centre;
                     // Its centre and eight points 4 m past its rim: every column of it is within 7.4 m of one, and the lead
                     // keeps 8 m off the landmarks and the railway.
@@ -392,14 +390,14 @@ fn steading_at(ring: [i64; 2], first: bool, random: &mut Rng, height: &dyn Fn(i6
 
 /**
  * The pool claimed from `spot`, if the ground lets it: in the lowest of a
- * few points within 16 m of it, if `may` stand there, as wide as the
- * ground round it is level enough, up to POOL_RADIUS; water up to half a
- * metre under the lowest of that ground, so it and its boggy shore stay
- * inside it, the hollow dug deeper where it is shallow.
+ * few points within 16 m of it, as wide as the ground round it is level
+ * enough, up to POOL_RADIUS; water up to half a metre under the lowest of
+ * that ground, so it and its boggy shore stay inside it, the hollow dug
+ * deeper where it is shallow.
  */
-fn pool_at(spot: [i64; 2], ground: &dyn Fn(i64, i64) -> Fx, may: &dyn Fn([i64; 2]) -> bool, random: &mut Rng) -> Option<Pool> {
+fn pool_at(spot: [i64; 2], ground: &dyn Fn(i64, i64) -> Fx, random: &mut Rng) -> Option<Pool> {
     let points = (-2..=2).flat_map(|a| (-2..=2).map(move |b| [spot[0] + a * m(8.0), spot[1] + b * m(8.0)]));
-    let centre = points.min_by_key(|[x, z]| ground(*x, *z)).filter(|c| may(*c))?;
+    let centre = points.min_by_key(|[x, z]| ground(*x, *z))?;
     let bottom = ground(centre[0], centre[1]);
     let smallest = m(4.0) + random.below(m(4.0) as u32) as i64;
     (0..4).map(|n| POOL_RADIUS - n * (POOL_RADIUS - smallest) / 3).find_map(|radius| {
@@ -631,7 +629,7 @@ fn layers(moorland: Rc<Moorland>, ground: Ground) -> Vec<Layer> {
 fn mist(f: Rc<Heath>) -> Field {
     let lid = {
         let ground = f.ground.ground.clone();
-        Plan::sampled("mist", MIST_STEP, MIST_STEP, move |x, z| {
+        Plan::sampled("mist", MIST_RING, MIST_RING, move |x, z| {
             let r = MIST_RING;
             let ring = [(r, 0), (-r, 0), (0, r), (0, -r), (r, r), (r, -r), (-r, r), (-r, -r)];
             Fx::mean(ring.map(|(dx, dz)| Units(ground.at(x + dx, z + dz)).to_fx()))
