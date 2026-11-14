@@ -25,7 +25,6 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Condvar, Mutex};
 
-use bake::LayerIndex;
 use fcc::GRID_LEVELS;
 pub use fcc::TileId;
 use fcc::{Grid, Tiles};
@@ -52,12 +51,12 @@ fn heights(world: &worldgen::World) -> Heights {
     std::array::from_fn(|level| world.heights_at(level as u32))
 }
 
-/** A generated tile: its voxels, where they are along each face's layers, and for the voxels engine (voxels.rs), the cells its bricks meet and, lit, their light as the GPU takes it. */
+/** A generated tile: its voxels, the cells of the lattice they meet (voxels.rs), by brick and in all, and, lit, their light as the voxels engine takes it. */
 pub struct Tile {
     pub grid: Arc<Grid>,
-    pub index: LayerIndex,
     /** voxels::meets. */
     pub meets: Vec<u32>,
+    pub met: voxels::Met,
     /** If lit, voxels::lights. */
     pub lights: Option<Vec<u32>>,
 }
@@ -68,11 +67,54 @@ pub struct Level {
     pub grids: Arc<Tiles>,
 }
 
+impl Tile {
+    /** Tile `id`, unlit. */
+    pub fn new(id: TileId, grid: Arc<Grid>) -> Tile {
+        let meets = voxels::meets(&grid);
+        let met = voxels::Met::new(id, &grid, &meets);
+        Tile { grid, meets, met, lights: None }
+    }
+}
+
 impl Level {
     pub fn new(tiles: HashMap<TileId, Arc<Tile>>) -> Level {
         let grids = Arc::new(Tiles::new(TILE_SHIFT, tiles.iter().map(|(&id, t)| (id, t.grid.clone()))));
         Level { tiles, grids }
     }
+
+    /**
+     * Whether a voxel of its tiles meets the cell of `radius`·FCC about
+     * `centre`, a rhombic dodecahedron as a voxel is of radius 1.
+     * A cell smaller than those of 8·FCC is read site by site;
+     * a larger one asks the cells of 8·FCC or 32·FCC that meet it (voxels::Met),
+     * so of those sizes it is exact, and of the others it may say yes wrongly.
+     */
+    pub fn meets(&self, centre: [i32; 3], radius: i32) -> bool {
+        if radius < voxels::cell_size(0) {
+            return meeting(centre, radius, 1).any(|q| self.grids.at(q[0], q[1], q[2]).is_some_and(|(material, _)| material != 0));
+        }
+        let j = usize::from(radius >= voxels::cell_size(1));
+        meeting(centre, radius, voxels::cell_size(j))
+            .any(|k| within(voxels::Met::tiles(j, k)).any(|t| self.tiles.get(&t).is_some_and(|tile| tile.met.has(t, j, k))))
+    }
+}
+
+/**
+ * The cells of `s`·FCC (about k · s, k's coordinates adding up to an even
+ * number) that meet the cell of `radius`·FCC about `centre`: rhombic
+ * dodecahedra meet where their centres are nearer than the sum of their
+ * radii across each pair of faces. Of 1·FCC, the sites in it.
+ */
+fn meeting(centre: [i32; 3], radius: i32, s: i32) -> impl Iterator<Item = [i32; 3]> {
+    let r = s + radius;
+    let apart = move |k: [i32; 3], d: usize| (k[d] * s - centre[d]).abs();
+    let near = [centre.map(|v| (v - r).div_euclid(s) + 1), centre.map(|v| (v + r - 1).div_euclid(s))];
+    within(near).filter(move |k| (k[0] + k[1] + k[2]) & 1 == 0 && (0..3).all(|d| apart(*k, d) + apart(*k, (d + 1) % 3) < r))
+}
+
+/** The points from `lo` to `hi`, inclusive: tiles, or cells. */
+pub fn within([lo, hi]: [[i32; 3]; 2]) -> impl Iterator<Item = [i32; 3]> {
+    (lo[2]..=hi[2]).flat_map(move |k| (lo[1]..=hi[1]).flat_map(move |j| (lo[0]..=hi[0]).map(move |i| [i, j, k])))
 }
 
 /** How the tiles are lit: not, by what reads them (the bakers' Lights), or each tile here of a level read, once made (the voxels'). */
@@ -146,11 +188,8 @@ fn around(level: usize, camera: Vec3, reach: f64) -> Vec<(f64, TileId)> {
     let at = camera.map(|v| v / (1u64 << level) as f64 / TILE as f64);
     let r = reach / TILE as f64;
     let (lo, hi) = (at.map(|v| (v - r).ceil() as i32 - 1), at.map(|v| (v + r).floor() as i32));
-    let mut around: Vec<(f64, TileId)> = (lo[2]..=hi[2])
-        .flat_map(|k| (lo[1]..=hi[1]).flat_map(move |j| (lo[0]..=hi[0]).map(move |i| [i, j, k])))
-        .map(|id| (distance(level, camera, id), id))
-        .filter(|(d, _)| *d <= reach)
-        .collect();
+    let mut around: Vec<(f64, TileId)> =
+        within([lo, hi]).map(|id| (distance(level, camera, id), id)).filter(|(d, _)| *d <= reach).collect();
     around.sort_by(|a, b| a.0.total_cmp(&b.0));
     around
 }
@@ -190,7 +229,7 @@ fn work(make: Make, seed: u64, heights: &Heights, queue: &(Mutex<Queue>, Condvar
                 let (_, light) =
                     light.get_or_insert_with(|| (lighting, Light::new(make(seed), shared.expect("light to light tiles with"))));
                 let lights = Some(voxels::lights(&tile.grid, level as u32, light));
-                Tile { grid: tile.grid.clone(), index: tile.index.clone(), meets: tile.meets.clone(), lights }
+                Tile { grid: tile.grid.clone(), meets: tile.meets.clone(), met: tile.met.clone(), lights }
             }
             None => {
                 let (heights, key) = (heights[level], id.map(i64::from));
@@ -198,9 +237,7 @@ fn work(make: Make, seed: u64, heights: &Heights, queue: &(Mutex<Queue>, Condvar
                     Some(shared) => shared.tile(&generator, level as u32, heights, key),
                     None => Arc::new(make_tile(&generator, level as u32, heights, key)),
                 };
-                let index = LayerIndex::new(&grid);
-                let meets = voxels::meets(&grid);
-                Tile { grid, index, meets, lights: None }
+                Tile::new(id, grid)
             }
         };
         if send.send((level, id, lighting, Arc::new(tile))).is_err() {
@@ -280,8 +317,8 @@ impl World {
         }
         for (level, tiles) in self.tiles.iter_mut().enumerate() {
             for tile in tiles.values_mut().filter(|t| t.lights.is_some()) {
-                let Tile { grid, index, meets, .. } = &**tile;
-                *tile = Arc::new(Tile { grid: grid.clone(), index: index.clone(), meets: meets.clone(), lights: None });
+                let Tile { grid, meets, met, .. } = &**tile;
+                *tile = Arc::new(Tile { grid: grid.clone(), meets: meets.clone(), met: met.clone(), lights: None });
             }
             self.levels[level] = Arc::new(Level::new(tiles.clone()));
         }
@@ -438,6 +475,42 @@ mod tests {
                     let other: TileId = std::array::from_fn(|a| if mirror >> a & 1 == 1 { -1 - id[turn[a]] } else { id[turn[a]] });
                     assert_eq!(at.get(&other), Some(&d), "{id:?} and {other:?}");
                 }
+            }
+        }
+    }
+
+    /**
+     * Level::meets answers as reading each site would, about a world's spawn
+     * at a level: yes for each cell holding a voxel, and no for each other of
+     * 8·FCC, 32·FCC or smaller.
+     */
+    #[test]
+    fn cells_meet_the_voxels_they_hold() {
+        for (name, level) in [("city", 0), ("moor", 0), ("forest", 2)] {
+            let world = (worlds::by_name(name).expect("world").make)(1);
+            let spawn = world.spawn.map(|v| (v >> level) as i32);
+            let corner = spawn.map(|v| (v as f64 / TILE as f64).round() as i32);
+            let make = |id: TileId| Tile::new(id, Arc::new(make_tile(&world.generator, level, world.heights_at(level), id.map(i64::from))));
+            let tiles = within([corner.map(|v| v - 1), corner]);
+            let level = Level::new(tiles.map(|id| (id, Arc::new(make(id)))).collect());
+            let held = |q: [i32; 3]| (q[0] + q[1] + q[2]) & 1 == 0 && level.grids.at(q[0], q[1], q[2]).is_some_and(|(m, _)| m != 0);
+            for radius in [1, 2, 4, 8, 16, 32] {
+                // Each cell within a tile of the spawn (to the next multiple of 64, a site of each), or 8 cells, the nearer.
+                let n = (TILE as i32 / radius).min(8);
+                let cells: Vec<[i32; 3]> = within([[-n; 3], [n; 3]])
+                    .filter(|p| (p[0] + p[1] + p[2]) & 1 == 0)
+                    .map(|p| std::array::from_fn(|d| (spawn[d] + 32).div_euclid(64) * 64 + p[d] * radius))
+                    .collect();
+                let mut holding = 0;
+                for &c in &cells {
+                    let inside = |q: [i32; 3]| (0..3).all(|d| (q[d] - c[d]).abs() + (q[(d + 1) % 3] - c[(d + 1) % 3]).abs() <= radius);
+                    let holds = within([c.map(|v| v - radius), c.map(|v| v + radius)]).any(|q| inside(q) && held(q));
+                    let meets = level.meets(c, radius);
+                    assert!(meets || !holds, "{name}: a cell of {radius} about {c:?} holds a voxel");
+                    assert!(!meets || holds || radius == 16, "{name}: a cell of {radius} about {c:?} holds none");
+                    holding += usize::from(holds);
+                }
+                assert!(holding > 0 && holding < cells.len(), "{name}, cells of {radius}: {holding} of {} hold voxels", cells.len());
             }
         }
     }

@@ -35,7 +35,7 @@ web/                         # The web frontend: React and WebGL 2, its Rust in 
 │   └── src/
 │       ├── worlds.rs        # The worlds' exports, for worldgen.ts
 │       ├── baker.rs         # The baker's, for chunk-baker.ts
-│       ├── index.rs         # The layer index's, for voxel-grid.ts
+│       ├── index.rs         # The layer index: where each face's layers hold voxels; its exports, for voxel-grid.ts
 │       ├── walk.rs          # Walking's, for walk.ts
 │       └── coverage.rs      # Which screen cells nearer layers cover, on the main thread; its exports, for occlusion.ts
 └── src/
@@ -47,7 +47,7 @@ web/                         # The web frontend: React and WebGL 2, its Rust in 
     │   └── ui/              # shadcn/ui primitives (generated)
     └── lib/
         ├── fcc.ts           # Voxel geometry: rhombic dodecahedra of the FCC lattice
-        ├── voxel-grid.ts    # Voxel storage on the FCC lattice, in bricks (typed arrays), a material per voxel face; LayerIndex, made by bake/
+        ├── voxel-grid.ts    # Voxel storage on the FCC lattice, in bricks (typed arrays), a material per voxel face; LayerIndex, made by wasm/
         ├── world.ts         # World: voxel grids by level of detail (generated in tiles around the camera), spawn; tests' scenes, a grid per level given
         ├── worldgen.ts      # The worlds of worlds/ (WebAssembly), any box at any level
         ├── cells.ts         # Cells of the coarser lattices N·FCC that slices are made of
@@ -70,7 +70,7 @@ fcc/                         # The FCC lattice and its voxels as every crate see
 └── src/
     ├── lib.rs               # The voxel's faces, the view faces' lattices, the grids' levels, Grid, tiles of grids, voxels read per face
     └── light.rs             # The light from voxels' faces, as hosts that light a world hand it over
-bake/                        # Chunk baker, layer index and walking in Rust, on fcc/: native links it, web/wasm/ exports it
+bake/                        # Chunk baker and walking in Rust, on fcc/: native links it, web/wasm/ exports it
 └── src/
     ├── lib.rs               # Baker: one chunk per call
     ├── cells.rs             # cells.ts, with a table per level
@@ -80,7 +80,6 @@ bake/                        # Chunk baker, layer index and walking in Rust, on 
     ├── splats.rs            # Which voxels a chunk shows, each a hexagon at its site: of a slice, each column's nearest over its run; of a cell, its whole ones' relief: a pillar per column (or each a ray can enter), and its medium, a picture per slab of its columns' optical depths
     ├── lod.rs               # Native's chunks: whole cells of the lattice, each face's levels by depth along it, its cells kept picked
     ├── fill.rs              # Splats filled into a mask for every slant, solid blocks (for coverage)
-    ├── layer_index.rs       # LayerIndex: where each face's layers hold voxels
     └── walk.rs              # Walking: a body that falls, collides, steps and jumps
 worldgen/                    # The world-generation engine, moving to integers, into the baker's grids; no worlds
 ├── src/
@@ -132,7 +131,7 @@ native/                      # The native frontend (egui on winit and wgpu), lin
     ├── main.rs              # The camera (flying or walking, F), the panel, its engine and lighting (shaded or computed); --shot, --bench, --stroll for any engine
     ├── window.rs            # The window: egui on winit and wgpu, over the engine's picture, its GPU device made again when lost
     ├── gpu.rs               # What a device must allow; an Easel: a device and the painter of the engine that drew on it, in the window or offscreen (saved as a PNG, timed)
-    ├── world.rs             # world.ts for generated worlds: a World's tiles, those the engine wants first, made, indexed and (for the voxels) lit on threads
+    ├── world.rs             # world.ts for generated worlds: a World's tiles, those the engine wants first, made, indexed (which cells of the lattice their voxels meet) and (for the voxels) lit on threads
     ├── view.rs              # view.ts: faces, which rays and screen boxes they draw
     ├── engine.rs            # What draws: Engine (on the main thread, a Frame of what a Look sees), Picture and Painter (on the GPU); Kind, the engines by name
     └── engine/

@@ -126,35 +126,97 @@ fn cell_entry(k: [i32; 3], j: usize) -> usize {
 }
 
 /**
- * Per brick of `grid` with voxels, in its order in the grid's cells, the
- * cells of each scale around it (AROUND's bits) that its voxels meet,
- * SCALES words a brick: those its sites meet (MEETING).
+ * Each brick of `grid` with voxels: its place in the grid's bricks, where
+ * it is in the level's bricks (whose sites start where the grid's bricks
+ * do, modulo BRICK), and where its sites start in the grid's cells, in
+ * bricks.
+ */
+fn bricks(grid: &fcc::Grid) -> impl Iterator<Item = (usize, [i32; 3], usize)> + '_ {
+    let count = grid.n.map(|v| (v + BRICK - 1) / BRICK);
+    grid.bricks.iter().enumerate().filter(|b| *b.1 >= 0).map(move |(place, &first)| {
+        let b = place as i32;
+        let at = [b % count[0], b / count[0] % count[1], b / count[0] / count[1]];
+        (place, std::array::from_fn(|d| grid.min[d].div_euclid(BRICK) + at[d]), first as usize)
+    })
+}
+
+/**
+ * Per brick of `grid`, by its place in the grid's bricks, the cells of
+ * each scale around it (AROUND's bits) that its voxels meet, SCALES words
+ * a brick: those its sites meet (MEETING). By place, as buried bricks
+ * share their sites but not where they are.
  */
 pub fn meets(grid: &fcc::Grid) -> Vec<u32> {
-    let mut out = vec![0; grid.cells.len() / BRICK_SITES * SCALES];
-    let count = grid.n.map(|v| (v + BRICK - 1) / BRICK);
-    for (b, &first) in grid.bricks.iter().enumerate() {
-        if first < 0 {
-            continue;
-        }
-        let b = b as i32;
-        // The brick, in the level's bricks (whose sites start where the grid's bricks do, modulo BRICK).
-        let brick: [i32; 3] =
-            std::array::from_fn(|d| grid.min[d].div_euclid(BRICK) + [b % count[0], b / count[0] % count[1], b / count[0] / count[1]][d]);
+    let mut out = vec![0; grid.bricks.len() * SCALES];
+    for (place, brick, first) in bricks(grid) {
         for r in 0..BRICK * BRICK * BRICK {
             let p = [r % BRICK, r / BRICK % BRICK, r / BRICK / BRICK];
             let site: [i32; 3] = std::array::from_fn(|d| grid.min[d].rem_euclid(BRICK) + brick[d] * BRICK + p[d]);
-            if (site[0] + site[1] + site[2]) & 1 != 0 || grid.cells[first as usize * BRICK_SITES + (r >> 1) as usize] == 0 {
+            if (site[0] + site[1] + site[2]) & 1 != 0 || grid.cells[first * BRICK_SITES + (r >> 1) as usize] == 0 {
                 continue;
             }
             for (j, meeting) in MEETING.iter().enumerate() {
                 let size = BRICK << (2 * j);
                 let [x, y, z] = std::array::from_fn(|d| brick[d].rem_euclid(1 << (2 * j)) * BRICK + p[d]);
-                out[first as usize * SCALES + j] |= meeting[((z * size + y) * size + x) as usize];
+                out[place * SCALES + j] |= meeting[((z * size + y) * size + x) as usize];
             }
         }
     }
     out
+}
+
+/** S: how many sites a side the blocks of scale `j` are, whose corners its cells are about. */
+pub fn cell_size(j: usize) -> i32 {
+    BRICK << (2 * j)
+}
+
+/** How many blocks of scale `j` a tile is a side. */
+fn blocks(j: usize) -> i32 {
+    TILE as i32 / cell_size(j)
+}
+
+/**
+ * Which cells of each scale a tile's voxels meet, from its bricks' `meets`:
+ * a bit per corner of its blocks, and one more each way. For world.rs's
+ * Level::meets.
+ */
+#[derive(Clone)]
+pub struct Met([Vec<u64>; SCALES]);
+
+impl Met {
+    /** Of tile `id`, its grid and its bricks' `meets`. */
+    pub fn new(id: TileId, grid: &fcc::Grid, meets: &[u32]) -> Met {
+        let mut met = Met(std::array::from_fn(|j| vec![0; ((blocks(j) + 2).pow(3) as usize).div_ceil(64)]));
+        for (place, brick, _) in bricks(grid) {
+            for (j, bits) in met.0.iter_mut().enumerate() {
+                for e in (0..27).filter(|e| meets[place * SCALES + j] >> e & 1 != 0) {
+                    let k = around(brick, j, e);
+                    if (k[0] + k[1] + k[2]) & 1 == 0 {
+                        let i = Met::bit(id, j, k).expect("a cell about a corner of the tile's blocks");
+                        bits[i / 64] |= 1 << (i % 64);
+                    }
+                }
+            }
+        }
+        met
+    }
+
+    /** Where cell `k` of scale `j` is in tile `id`'s bits, if about a corner of its blocks or one more each way. */
+    fn bit(id: TileId, j: usize, k: [i32; 3]) -> Option<usize> {
+        let (n, w) = (blocks(j), blocks(j) + 2);
+        let at: [i32; 3] = std::array::from_fn(|d| k[d] - id[d] * n + 1);
+        at.iter().all(|v| (0..w).contains(v)).then(|| ((at[2] * w + at[1]) * w + at[0]) as usize)
+    }
+
+    /** Whether tile `id`'s voxels meet cell `k` of scale `j`. */
+    pub fn has(&self, id: TileId, j: usize, k: [i32; 3]) -> bool {
+        Met::bit(id, j, k).is_some_and(|i| self.0[j][i / 64] >> (i % 64) & 1 != 0)
+    }
+
+    /** The tiles whose voxels may meet cell `k` of scale `j`: those of the blocks around its centre. */
+    pub fn tiles(j: usize, k: [i32; 3]) -> [TileId; 2] {
+        [-1, 1].map(|d| k.map(|v| (v + d).div_euclid(blocks(j))))
+    }
 }
 
 /**
@@ -546,10 +608,12 @@ impl Window {
             self.set(b, (UNKNOWN, [AROUND; SCALES]));
             return;
         };
-        let Ok(first) = usize::try_from(held.tile.grid.brick(x, y, z)) else {
+        let grid = &held.tile.grid;
+        let Some(place) = grid.place(x, y, z).filter(|&at| grid.bricks[at] >= 0) else {
             self.set(b, (EMPTY, [0; SCALES]));
             return;
         };
+        let first = grid.bricks[place] as usize;
         let (slot, uses) = &mut held.slots[first];
         if *slot < 0 {
             let count = slots(&held.tile.grid, first);
@@ -557,7 +621,7 @@ impl Window {
             self.slots += count;
         }
         *uses += 1;
-        let entry = (*slot, std::array::from_fn(|j| held.tile.meets[first * SCALES + j]));
+        let entry = (*slot, std::array::from_fn(|j| held.tile.meets[place * SCALES + j]));
         self.set(b, entry);
     }
 
@@ -1054,12 +1118,7 @@ mod tests {
             let firsts = (0..g.cells.len() / BRICK_SITES).step_by(64);
             let sites = firsts.filter_map(|first| sites(first).find(|&i| g.cells[i] != 0));
             let faces = sites.flat_map(|i| fcc::face_words(i, &std::array::from_fn(|k| g.cells[i] + k as u8))).collect();
-            Tile {
-                grid: Arc::new(fcc::Grid { faces, ..(**g).clone() }),
-                index: tile.index.clone(),
-                meets: tile.meets.clone(),
-                lights: None,
-            }
+            Tile { grid: Arc::new(fcc::Grid { faces, ..(**g).clone() }), meets: tile.meets.clone(), met: tile.met.clone(), lights: None }
         };
         Arc::new(Level::new(world.level(0).tiles.iter().map(|(id, tile)| (*id, Arc::new(faced(tile)))).collect()))
     }

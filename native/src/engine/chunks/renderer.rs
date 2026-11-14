@@ -23,7 +23,7 @@ use fcc::{FastMap, FastSet, GRID_LEVELS, Tiles};
 use super::bakery::{Baked, Bakery, Request};
 use crate::engine::Look;
 use crate::view::{self, Face, to_local};
-use crate::world::{Heights, Level, TILE, TileId, World};
+use crate::world::{Heights, Level, TILE, TileId, World, within};
 
 /**
  * Chunks kept beyond the picks, before those not looked up or let go for
@@ -115,8 +115,8 @@ const TURN: f64 = 0.15;
 
 /**
  * What is known of a cell of a face: nothing yet; that it holds nothing
- * (all above or below the world, outside its grid's index, or baked
- * empty); that it waits for the tiles it reads (box_tiles), or for its
+ * (all above or below the world, meeting none of its level's voxels,
+ * or baked empty); that it waits for the tiles it reads (box_tiles), or for its
  * bake; or its chunk.
  */
 #[derive(Clone, Default)]
@@ -221,18 +221,9 @@ fn box_tiles(Lattice { r, u, f }: Lattice, heights: (i64, i64), min: [i32; 3], m
     Some([lo.map(tile), hi.map(tile)])
 }
 
-/** The tiles from `lo` to `hi`, inclusive. */
-fn tiles_in([lo, hi]: [TileId; 2]) -> impl Iterator<Item = TileId> {
-    (lo[2]..=hi[2]).flat_map(move |k| (lo[1]..=hi[1]).flat_map(move |j| (lo[0]..=hi[0]).map(move |i| [i, j, k])))
-}
-
-/** Whether a cell may hold voxels: its grid's index has some in its layers and columns, within its rows. Once it has its tiles. */
-fn may_hold(cell: &CellChunk, forward: [i32; 3], level: &Level, tiles: [TileId; 2]) -> bool {
-    let (min, max) = cell.bounds();
-    let (c0, c1, a0, a1) = (min[2] as i64, max[2] as i64 + 1, min[0] as i64, max[0] as i64 + 1);
-    tiles_in(tiles)
-        .filter_map(|t| level.tiles.get(&t)?.index.range(forward, c0, c1, a0, a1))
-        .any(|(lo, hi)| lo <= max[1] as i64 && hi >= min[1] as i64)
+/** Whether a cell may hold voxels: whether any of its level's meet it (Level::meets). Once it has its tiles. */
+fn may_hold(cell: &CellChunk, lattice: Lattice, level: &Level) -> bool {
+    level.meets(lattice.world(cell.site), cell.spacing())
 }
 
 impl Renderer {
@@ -383,7 +374,7 @@ impl Renderer {
             if let Seen::Tiles(t) = *seen
                 && source.grids.has_all(t)
             {
-                *seen = if may_hold(&cell, lattice.f, source, t) { Seen::Bake(t) } else { Seen::Empty };
+                *seen = if may_hold(&cell, lattice, source) { Seen::Bake(t) } else { Seen::Empty };
             }
             let wanted = Wanted { distance: distance(&cell, eye), in_view: lod.composes(&cell, eye, far, tangents) };
             match seen {
@@ -428,7 +419,7 @@ impl Renderer {
             if !arrived[level] || !source.grids.has_all(t) {
                 return true;
             }
-            let seen = if may_hold(&cell, lattice.f, source, t) {
+            let seen = if may_hold(&cell, lattice, source) {
                 pick.baking.insert(cell, (request(cell, t), wanted));
                 Seen::Bake(t)
             } else {
@@ -478,7 +469,7 @@ impl Renderer {
             .filter(|w| w.2.in_view)
             .flat_map(|&(cell, t, wanted)| {
                 let (level, source) = (cell.atoms as usize, &self.tiles[cell.atoms as usize]);
-                tiles_in(t).filter(|&id| !source.has(id)).map(move |id| (level, id, wanted.distance))
+                within(t).filter(|&id| !source.has(id)).map(move |id| (level, id, wanted.distance))
             })
             .collect();
         tiles.sort_by(|a, b| a.2.total_cmp(&b.2));

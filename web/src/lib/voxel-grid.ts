@@ -325,7 +325,7 @@ let indexer: Indexer | null = null
  * Where a grid's voxels are along each face's layers (in a face's lattice
  * coordinates (a, b, c), see Face in view.ts): for each layer c and block
  * of EXTENT_BLOCK columns a, the range of b of its voxels. Made by
- * bake/src/layer_index.rs, so the renderer can tell which chunk cells are
+ * web/wasm/src/index.rs, so the renderer can tell which chunk cells are
  * empty and how high their content reaches, without walking or baking them.
  */
 export class LayerIndex {
