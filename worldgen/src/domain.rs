@@ -10,7 +10,7 @@ use std::rc::Rc;
 
 use crate::generator::Layer;
 use crate::noise::{Fx, Text, smoothstep, stream};
-use crate::plan::{Bid, Holding, Kept, Land, Plan, Sloped};
+use crate::plan::{Bid, Holding, Kept, Land, Plan, Sloped, slot};
 use crate::units::Units;
 
 const DOCS: &str = "docs/generators.md";
@@ -110,9 +110,10 @@ impl Lie {
 
     /** The height at column (x, z), with its fraction. */
     pub fn at(&self, x: i64, z: i64) -> Fx {
-        self.0.kept.get(x, z).unwrap_or_else(|| {
+        let slot = slot(x, z);
+        self.0.kept.get(slot, x, z).unwrap_or_else(|| {
             let h = (self.0.height)(x, z);
-            self.0.kept.keep(x, z, h);
+            self.0.kept.keep(slot, x, z, h);
             h
         })
     }

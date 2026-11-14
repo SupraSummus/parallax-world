@@ -73,16 +73,22 @@ impl<T: Clone + Default> Kept<T> {
         Kept(RefCell::new(vec![(i64::MIN, 0, T::default()); SLOTS]))
     }
 
-    /** Column (x, z), if kept. */
+    /** Column (x, z), if kept in `slot`: its own (`slot`), or, read dithered, its column's (Plan::fetch). */
     #[inline]
-    pub(crate) fn get(&self, x: i64, z: i64) -> Option<T> {
-        let (kx, kz, value) = &self.0.borrow()[(sum(x, z) >> SHIFT) as usize];
+    pub(crate) fn get(&self, slot: usize, x: i64, z: i64) -> Option<T> {
+        let (kx, kz, value) = &self.0.borrow()[slot];
         ((*kx, *kz) == (x, z)).then(|| value.clone())
     }
 
-    pub(crate) fn keep(&self, x: i64, z: i64, value: T) {
-        self.0.borrow_mut()[(sum(x, z) >> SHIFT) as usize] = (x, z, value);
+    pub(crate) fn keep(&self, slot: usize, x: i64, z: i64, value: T) {
+        self.0.borrow_mut()[slot] = (x, z, value);
     }
+}
+
+/** The slot of column (x, z). */
+#[inline]
+pub(crate) fn slot(x: i64, z: i64) -> usize {
+    (sum(x, z) >> SHIFT) as usize
 }
 
 /**
@@ -133,25 +139,27 @@ impl<T: Clone + Default> Plan<T> {
         if self.scale < finest {
             self.refuse();
         }
+        // A dithered read keeps its point in the slot of the column it is read for: those of a tile's never share one.
+        let at = slot(x, z);
         let (x, z) = match FOOTPRINT.get() {
             Some((spacing, [dx, dz])) if self.dithered && spacing > self.scale => (x + dx, z + dz),
             _ => (x, z),
         };
-        match self.kept.get(x, z) {
+        match self.kept.get(at, x, z) {
             Some(value) => (value, false),
-            None => (self.make(x, z), true),
+            None => (self.make(at, x, z), true),
         }
     }
 
     /** Makes column (x, z) and keeps it. */
     #[cold]
     #[inline(never)]
-    fn make(&self, x: i64, z: i64) -> T {
+    fn make(&self, slot: usize, x: i64, z: i64) -> T {
         let outer = MAKING.replace(if self.filter { ("", 0) } else { (self.name, self.scale) });
         // What a plan decides for a column is the same whoever reads it.
         let value = where_asked(|| crate::cost::plan(self.name, self, [x, 0, z], || (self.make)(x, z)));
         MAKING.set(outer);
-        self.kept.keep(x, z, value.clone());
+        self.kept.keep(slot, x, z, value.clone());
         value
     }
 
@@ -165,7 +173,7 @@ impl<T: Clone + Default> Plan<T> {
 
     /** Column (x, z), if kept: none is made. */
     fn kept(&self, x: i64, z: i64) -> Option<T> {
-        self.kept.get(x, z)
+        self.kept.get(slot(x, z), x, z)
     }
 }
 
