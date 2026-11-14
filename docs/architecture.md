@@ -182,11 +182,13 @@ A level's last slices may have their centre planes up to two layers
 farther than the next level's first,
 but hold sites before that level begins, so they are drawn first.
 
-From camera z = 0 with detail 1 (`level:slab`, `|cutoff`):
+From camera z = 0 with detail 1, out to 2000 (`level:slab`, `|cutoff`;
+`slice-selection.test.ts` holds it to this):
 
 ```
-0:1 0:2 0:3  1:2 1:3  2:2 2:3  3:2 3:3  4:2 4:3  5:2 5:3
-6:2 6:3|256 6:4|256  7:2 7:3|512 7:4|512  8:2 8:3|1024 8:4|1024  9:2 9:3
+0:1 0:2 0:3  1:2 1:3  2:2 2:3  3:2 3:3  4:2 4:3|64 4:4|64  5:2 5:3|128 5:4|128
+6:2 6:3|256 6:4|256  7:2 7:3|512 7:4|512  8:2 8:3|1024 8:4|1024
+9:2 9:3|2048 9:4|2048  10:2
 ```
 
 Covering distance n takes O(detail · log n) slices,

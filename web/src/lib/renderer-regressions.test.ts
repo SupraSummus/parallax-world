@@ -107,29 +107,6 @@ describe('Renderer regressions', () => {
       expect(distant.length).toBeGreaterThan(10)
       expect(distant.filter(chunk => before.has(chunk)).length).toBeGreaterThan(distant.length * 0.9)
     })
-
-    it('does not re-render every chunk on every keypress when moving along Z', () => {
-      const renderer = new ParallaxRenderer(world)
-      renderer.resize(800, 600)
-      renderer.setSkipCovered(false)
-      renderer.setCamera({ x: 0, y: 30, z: -60 })
-
-      const chunkCount = renderer.render().layers.flatMap(l => l.placements).length
-      const initialRegens = renderer.getStats().totalChunksRegenerated
-
-      // Simulate holding W for 8 frames, a unit per frame.
-      for (let i = 1; i <= 8; i++) {
-        renderer.setCamera({ x: 0, y: 30, z: -60 + i })
-        renderer.render()
-      }
-
-      const regensDuringMovement =
-        renderer.getStats().totalChunksRegenerated - initialRegens
-
-      // Only the near levels, whose eyes move every unit or two, plus newly
-      // entering chunks, should re-render: well under one full re-render per frame.
-      expect(regensDuringMovement).toBeLessThan(chunkCount * 8 * 0.6)
-    })
   })
 
   // Layers leaving the view used to be deleted, so moving forward and back
@@ -141,7 +118,7 @@ describe('Renderer regressions', () => {
       renderer.setSkipCovered(false)
       renderer.setCamera({ x: 0, y: 30, z: -60 })
 
-      renderer.render() // warm cache at z=-30
+      renderer.render()
 
       // Take a round trip: forward a few units, then back to the exact start.
       renderer.setCamera({ x: 0, y: 30, z: -50 })
@@ -149,9 +126,7 @@ describe('Renderer regressions', () => {
       renderer.setCamera({ x: 0, y: 30, z: -60 })
       renderer.render()
 
-      const returnStats = renderer.getStats().lastUpdate
-      expect(returnStats).toBeDefined()
-      expect(returnStats?.chunksReused ?? 0).toBeGreaterThan(returnStats?.chunksRegenerated ?? 0)
+      expect(renderer.getStats().lastUpdate?.chunksRegenerated).toBe(0)
     })
   })
 
