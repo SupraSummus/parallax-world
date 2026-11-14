@@ -260,7 +260,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   Lighting a view's tiles takes six times as long as making them,
   much of it generating the tiles around them that the light reads,
   and the light takes twice the bricks' memory, so the pool holds a third as many.
-  A voxel's light is one colour, its faces' mean, whichever face a ray meets.
 - **`culling_on_the_gpu_leaves_the_picture_unchanged` fails now and then**
   on an Intel UHD (Mesa), at `b4c79ff` too; why is open.
   Drawn flat, every time: the forest from its spawn.

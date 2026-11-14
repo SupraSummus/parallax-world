@@ -1492,7 +1492,7 @@ impl View {
             pixels: look.size.map(|v| v as u32),
             seams: look.seams,
             colours: look.colours,
-            sky: look.sky.unwrap_or(1.0),
+            sky: look.light.map_or(1.0, |b| b.sky),
             camera: look.camera,
             lod: lod(whole),
             medium: lod(whole.for_medium()),

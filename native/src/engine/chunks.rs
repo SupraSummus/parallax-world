@@ -145,7 +145,7 @@ impl Engine for Chunks {
         };
         // Until rendered for this look and these tiles, what it wants is not known: while the eye moves, never quite.
         self.busy = stats.baking > 0 || answered < asked;
-        let lit = if look.sky.is_some() { Lit::Reading } else { Lit::Not };
+        let lit = if look.light.is_some() { Lit::Reading } else { Lit::Not };
         let whole = Lod::new(look.shift, look.detail);
         // As far as either Lod's chunks read each grid.
         let reach = |g| [whole, whole.for_medium()].iter().filter_map(|lod| lod.grid_reach(g, look.far)).reduce(f64::max);

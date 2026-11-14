@@ -94,6 +94,13 @@ pub struct Brightness {
     pub glow: f32,
 }
 
+impl Brightness {
+    /** The radiance of what glows, as a multiple of its colour (linear). */
+    pub fn glowing(&self) -> f32 {
+        GLOW * self.glow
+    }
+}
+
 /** A clear day's sky: its radiance (1 would light a surface facing up to its colour), and the sun's, high in the south-west. */
 const SKY: Rgb = [0.55, 0.62, 0.75];
 const SUN: Rgb = [2.6, 2.4, 2.1];
@@ -141,7 +148,7 @@ struct Near {
 impl Light {
     /** The light of `world`, found only where asked, its tiles and light in `shared`. */
     pub fn new(world: World, shared: Shared) -> Light {
-        let Brightness { sky, sun, glow } = shared.brightness;
+        let Brightness { sky, sun, .. } = shared.brightness;
         let coarsest = GRID_LEVELS as u32 - 1;
         let levels = (0..=coarsest).map(|level| Level { heights: world.heights_at(level), last: None, found: Map::default() }).collect();
         let unit = DIRECTIONS.map(|d| normalize(d.map(|v| v as f64)));
@@ -165,7 +172,7 @@ impl Light {
             std::array::from_fn(|c| open * SKY[c] * sky + if d == sun_at { SUN[c] * sun } else { 0.0 })
         });
         let background = SKY.map(|c| c * sky);
-        let glow = GLOW * glow / GLOW_ONE as f32;
+        let glow = shared.brightness.glowing() / GLOW_ONE as f32;
         Light { world, shared, levels, unit, cosines, enters, albedo, glow, sky: skies, background }
     }
 
@@ -352,22 +359,10 @@ impl Light {
         std::array::from_fn(|f| std::array::from_fn(|c| lit.iter().map(|l| l[f][c]).sum::<f32>() / lit.len().max(1) as f32))
     }
 
-    /**
-     * The light from the voxel at `site` of `level` as rays from anywhere
-     * see it, not knowing which face they meet: the mean of its faces'
-     * (`lit`) that light gets out by, towards neighbours that let some
-     * through; of a see-through voxel, all of them. None if it has none:
-     * a ray meets it only where levels meet.
-     */
-    pub fn seen(&mut self, level: u32, site: [i64; 3]) -> Option<Rgb> {
+    /** What lights the voxel at `site` of `level` (on_voxel), if light gets out of it: none if a ray meets it only where levels meet. */
+    pub fn on_seen(&mut self, level: u32, site: [i64; 3]) -> Option<Rgb> {
         let i = level as usize;
-        let through = self.open(i, site) > 0.0;
-        let out: [bool; N] = std::array::from_fn(|f| through || self.open(i, add(site, FACES[f])) > 0.0);
-        let count = out.iter().filter(|&&o| o).count();
-        (count > 0).then(|| {
-            let lit = self.lit(i, site);
-            std::array::from_fn(|c| (0..N).filter(|&f| out[f]).map(|f| lit[f][c]).sum::<f32>() / count as f32)
-        })
+        (self.open(i, site) > 0.0 || self.surface(i, site)).then(|| self.on_voxel(level, site))
     }
 
     /** Whether the voxel at `site` of level `i` has a neighbour light gets through. */

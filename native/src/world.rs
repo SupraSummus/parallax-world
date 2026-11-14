@@ -114,8 +114,9 @@ pub struct World {
     tiles: Vec<HashMap<TileId, Arc<Tile>>>,
     /** Per level, the tiles made so far, as engines read them. */
     levels: Vec<Arc<Level>>,
-    /** By material id, its colour. */
+    /** By material id, its colour, and whether it glows. */
     pub palette: Arc<Vec<u32>>,
+    pub glows: Arc<Vec<bool>>,
     pub heights: Heights,
     /** The threads it makes tiles on, which engines may take as many of. */
     pub threads: usize,
@@ -223,6 +224,7 @@ impl World {
             tiles: (0..GRID_LEVELS).map(|_| HashMap::new()).collect(),
             levels: (0..GRID_LEVELS).map(|_| Arc::new(Level::new(HashMap::new()))).collect(),
             palette: Arc::new(materials_of(&world.generator).iter().map(|m| m.rgb()).collect()),
+            glows: Arc::new(materials_of(&world.generator).iter().map(|m| m.glows).collect()),
             heights,
             threads,
             make,
