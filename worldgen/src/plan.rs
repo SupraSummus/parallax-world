@@ -58,6 +58,26 @@ fn sum(x: i64, z: i64) -> u64 {
     (x as u64).wrapping_mul(0xd548ecfaef79b2e7).wrapping_add((z as u64).wrapping_mul(0xf0d62a6465469d21))
 }
 
+/** Values by column, the last kept in each of SLOTS. */
+pub(crate) struct Kept<T>(RefCell<Vec<(i64, i64, T)>>);
+
+impl<T: Clone + Default> Kept<T> {
+    pub(crate) fn new() -> Kept<T> {
+        Kept(RefCell::new(vec![(i64::MIN, 0, T::default()); SLOTS]))
+    }
+
+    /** Column (x, z), if kept. */
+    #[inline]
+    pub(crate) fn get(&self, x: i64, z: i64) -> Option<T> {
+        let (kx, kz, value) = &self.0.borrow()[(sum(x, z) >> SHIFT) as usize];
+        ((*kx, *kz) == (x, z)).then(|| value.clone())
+    }
+
+    pub(crate) fn keep(&self, x: i64, z: i64, value: T) {
+        self.0.borrow_mut()[(sum(x, z) >> SHIFT) as usize] = (x, z, value);
+    }
+}
+
 /**
  * A decision for any column, made on demand and kept (the last made in
  * each slot; a large one, such as a curve's points, as an `Rc`). Its
@@ -72,20 +92,13 @@ pub struct Plan<T> {
     filter: bool,
     /** Read by layers at a point of their sites' footprint where they are further apart than `scale`. */
     dithered: bool,
-    slots: RefCell<Vec<(i64, i64, T)>>,
+    kept: Kept<T>,
     make: Box<dyn Fn(i64, i64) -> T>,
 }
 
 impl<T: Clone + Default> Plan<T> {
     pub fn new(name: &'static str, scale: i64, make: impl Fn(i64, i64) -> T + 'static) -> Plan<T> {
-        Plan {
-            name,
-            scale,
-            filter: false,
-            dithered: false,
-            slots: RefCell::new(vec![(i64::MIN, 0, T::default()); SLOTS]),
-            make: Box::new(make),
-        }
+        Plan { name, scale, filter: false, dithered: false, kept: Kept::new(), make: Box::new(make) }
     }
 
     /**
@@ -117,24 +130,21 @@ impl<T: Clone + Default> Plan<T> {
             Some((spacing, [dx, dz])) if self.dithered && spacing > self.scale => (x + dx, z + dz),
             _ => (x, z),
         };
-        let slot = (sum(x, z) >> SHIFT) as usize;
-        if let (kx, kz, value) = &self.slots.borrow()[slot]
-            && (*kx, *kz) == (x, z)
-        {
-            return (value.clone(), false);
+        match self.kept.get(x, z) {
+            Some(value) => (value, false),
+            None => (self.make(x, z), true),
         }
-        (self.make(x, z, slot), true)
     }
 
-    /** Makes column (x, z) and keeps it in `slot`. */
+    /** Makes column (x, z) and keeps it. */
     #[cold]
     #[inline(never)]
-    fn make(&self, x: i64, z: i64, slot: usize) -> T {
+    fn make(&self, x: i64, z: i64) -> T {
         let outer = MAKING.replace(if self.filter { ("", 0) } else { (self.name, self.scale) });
         // What a plan decides for a column is the same whoever reads it.
         let value = where_asked(|| crate::cost::plan(self.name, self, [x, 0, z], || (self.make)(x, z)));
         MAKING.set(outer);
-        self.slots.borrow_mut()[slot] = (x, z, value.clone());
+        self.kept.keep(x, z, value.clone());
         value
     }
 
@@ -148,8 +158,7 @@ impl<T: Clone + Default> Plan<T> {
 
     /** Column (x, z), if kept: none is made. */
     fn kept(&self, x: i64, z: i64) -> Option<T> {
-        let (kx, kz, value) = &self.slots.borrow()[(sum(x, z) >> SHIFT) as usize];
-        ((*kx, *kz) == (x, z)).then(|| value.clone())
+        self.kept.get(x, z)
     }
 }
 

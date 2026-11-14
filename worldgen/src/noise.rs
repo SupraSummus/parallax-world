@@ -33,11 +33,32 @@ pub fn stream(seed: u64, n: u64) -> u64 {
 
 /** A seed from a text and a seed (FNV-1a, then mixed). */
 pub fn hash_text(text: &str, seed: u64) -> u64 {
-    let mut h = 0xcbf29ce484222325u64;
-    for byte in text.bytes() {
-        h = (h ^ byte as u64).wrapping_mul(0x100000001b3);
+    mix(Text::default().then(text).0 ^ seed)
+}
+
+/**
+ * A text being hashed as `hash_text` does (FNV-1a), so far: as it reads a
+ * byte at a time, texts that share a start hash it once (`Scope`).
+ */
+#[derive(Clone, Copy, Debug)]
+pub struct Text(u64);
+
+impl Default for Text {
+    fn default() -> Text {
+        Text(0xcbf29ce484222325)
     }
-    mix(h ^ seed)
+}
+
+impl Text {
+    /** The text so far, then `more`. */
+    pub fn then(self, more: &str) -> Text {
+        Text(more.bytes().fold(self.0, |h, byte| (h ^ byte as u64).wrapping_mul(0x100000001b3)))
+    }
+
+    /** `hash_text` of the text and `seed`. */
+    pub fn hash(self, seed: u64) -> u64 {
+        mix(self.0 ^ seed)
+    }
 }
 
 /** A 32-bit hash as a fraction of 1, in [0, 1): exact in an f64. */

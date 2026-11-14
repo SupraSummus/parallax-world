@@ -9,8 +9,8 @@
 use std::rc::Rc;
 
 use crate::generator::Layer;
-use crate::noise::{Fx, hash_text, smoothstep, stream};
-use crate::plan::{Bid, Holding, Land, Plan, Sloped};
+use crate::noise::{Fx, Text, smoothstep, stream};
+use crate::plan::{Bid, Holding, Kept, Land, Plan, Sloped};
 use crate::units::Units;
 
 const DOCS: &str = "docs/generators.md";
@@ -24,24 +24,27 @@ const DOCS: &str = "docs/generators.md";
 #[derive(Clone)]
 pub struct Scope {
     seed: u64,
-    name: String,
+    /** Its name, as a path of its parts' names joined by '/', hashed: none for the world. */
+    name: Option<Text>,
 }
 
 impl Scope {
     /** The world of `seed`, which names its parts. */
     pub fn new(seed: u64) -> Scope {
-        Scope { seed, name: String::new() }
+        Scope { seed, name: None }
     }
 
     /** Its part named `name`. */
     pub fn of(&self, name: &str) -> Scope {
-        let name = if self.name.is_empty() { name.to_string() } else { format!("{}/{name}", self.name) };
-        Scope { seed: self.seed, name }
+        Scope { seed: self.seed, name: Some(self.name.map_or_else(Text::default, |path| path.then("/")).then(name)) }
     }
 
-    /** The seed of its `what`: a noise, a plan's claims, a stream of random numbers. */
+    /**
+     * The seed of its `what`: a noise, a plan's claims, a stream of random
+     * numbers. Cheap: worlds ask in their inner loops.
+     */
     pub fn seed(&self, what: &str) -> u64 {
-        stream(self.seed, hash_text(&format!("{}:{what}", self.name), 0))
+        stream(self.seed, self.name.unwrap_or_default().then(":").then(what).hash(0))
     }
 }
 
@@ -88,21 +91,30 @@ pub fn eased(to: Fx, over: Units, d: Units) -> Option<(Fx, Fx)> {
  * The lie of the land: the ground's height at each column, with its
  * fraction, made band by band. A band is the one before shaped by its
  * domains (`shaped`), which read only bands before it: those they were
- * made with. A function of position, kept nowhere, so plans of any scale
- * may read it; the ground layers stand on is its last band, kept
- * (`ground`).
+ * made with. A function of position, not a plan, so plans of any scale
+ * may read it; kept by column, as several read each column. The ground
+ * layers stand on is its last band, a plan (`ground`).
  */
 #[derive(Clone)]
-pub struct Lie(Rc<dyn Fn(i64, i64) -> Fx>);
+pub struct Lie(Rc<Band>);
+
+struct Band {
+    height: Box<dyn Fn(i64, i64) -> Fx>,
+    kept: Kept<Fx>,
+}
 
 impl Lie {
     pub fn new(height: impl Fn(i64, i64) -> Fx + 'static) -> Lie {
-        Lie(Rc::new(height))
+        Lie(Rc::new(Band { height: Box::new(height), kept: Kept::new() }))
     }
 
     /** The height at column (x, z), with its fraction. */
     pub fn at(&self, x: i64, z: i64) -> Fx {
-        (self.0)(x, z)
+        self.0.kept.get(x, z).unwrap_or_else(|| {
+            let h = (self.0.height)(x, z);
+            self.0.kept.keep(x, z, h);
+            h
+        })
     }
 
     /**
@@ -179,6 +191,15 @@ mod tests {
 
     fn pull(from: i64, to: f64, how_hard: f64) -> Rc<dyn Domain> {
         Rc::new(Pull { from, to: fx(to), how_hard: fx(how_hard) })
+    }
+
+    #[test]
+    fn a_parts_seeds_hash_its_path_of_names() {
+        // Its name hashed as it grows, as every world's seeds were from the text "forest/trees:what".
+        let seed = |path: &str| stream(7, crate::noise::hash_text(path, 0));
+        let world = Scope::new(7);
+        assert_eq!(world.seed("relief"), seed(":relief"));
+        assert_eq!(world.of("valley").of("forest").seed("heights"), seed("valley/forest:heights"));
     }
 
     #[test]
