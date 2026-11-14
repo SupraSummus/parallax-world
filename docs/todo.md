@@ -234,18 +234,17 @@ Numbers are for the forest at 1280×800, as measured when written.
   and new tiles half as much again, why is open.
 - **Native's medium costs a fragment per slab a ray crosses**
   (architecture.md, "See-through"), as far as the view goes:
-  pictures added up in any order, nothing after a ray is all but stopped is left out.
+  pictures laid far to near, nothing behind what all but stops a ray is left out.
   Only media are (`KindDef::medium`): the moor's mist, and the fog's (`world=fog`),
   where a pixel takes some 10 slabs on average and up to 40.
   - Most of what a fragment costs is reading its four columns from storage:
     two columns an item, or the pictures in a texture the GPU filters,
     would read half as often.
   - Its deep slabs (`Lod::for_medium`) show mist on the ground above and below it
-    in faces with tilted axes: a V at their seams near the horizon.
+    in faces with tilted axes: a V at their seams near the horizon,
+    and a column of smoke, as wide as a slab is deep, cut across at a seam.
     Taking each half slab at its own middle plane halved the V at no cost,
     but needs four columns of neighbours round a picture, not one.
-  - Where a medium's colour changes along a ray, its colours mix without their order;
-    so it is not fogged by distance, and far mist does not fade to the horizon.
   - The medium starts at the first half slab past the near plane:
     right by the eye, mist is a little thin.
   - A site's pieces, where shown, hide its medium and what is behind:
@@ -260,7 +259,8 @@ Numbers are for the forest at 1280×800, as measured when written.
   and the light takes twice the bricks' memory, so the pool holds a third as many.
 - **`culling_on_the_gpu_leaves_the_picture_unchanged` fails now and then**
   on an Intel UHD (Mesa), at `b4c79ff` too; why is open.
-  Drawn flat, every time: the forest from its spawn.
+  Drawn flat, every time: the forest from its spawn;
+  on lavapipe too, about one run in ten, a few pixels.
   Maybe by ties in depth (below, "A shot differs"), as on lavapipe,
   or as it failed on lavapipe by the moor's mist:
   the depth pyramid's shorter side lost its last levels,

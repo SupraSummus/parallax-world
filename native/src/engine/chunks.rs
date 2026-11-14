@@ -227,14 +227,9 @@ mod tests {
 
     const PIXELS: [u32; 2] = [320, 200];
 
-    /** Whether two pictures are the same but for the pictures of medium added up in another order, which rounds differently. */
-    fn alike(a: &[u8], b: &[u8]) -> bool {
-        a.iter().zip(b).all(|(a, b)| a.abs_diff(*b) <= 1)
-    }
-
     /** How two pictures differ: in how many pixels, by how much at most, and where the first is. */
     fn differ(a: &[u8], b: &[u8]) -> String {
-        let pixels = a.chunks(4).zip(b.chunks(4)).enumerate().filter(|(_, (a, b))| !alike(a, b));
+        let pixels = a.chunks(4).zip(b.chunks(4)).enumerate().filter(|(_, (a, b))| a != b);
         let (mut count, mut most, mut first) = (0, 0, None);
         for (i, (a, b)) in pixels {
             count += 1;
@@ -279,7 +274,7 @@ mod tests {
             easel.pixels(&first, PIXELS);
             let followed = easel.pixels(&second, PIXELS).2;
             let whole = Easel::offscreen(None).pixels(&second, PIXELS).2;
-            assert!(alike(&followed, &whole), "relief {relief}: {}", differ(&followed, &whole));
+            assert!(followed == whole, "relief {relief}: {}", differ(&followed, &whole));
         }
     }
 
@@ -302,7 +297,7 @@ mod tests {
                 } else {
                     "splats"
                 };
-                assert!(alike(&culled.0, &all.0), "{name} {look:?} {drew}: {}", differ(&culled.0, &all.0));
+                assert!(culled.0 == all.0, "{name} {look:?} {drew}: {}", differ(&culled.0, &all.0));
                 assert!(culled.1 < all.1, "{name} {look:?}: culling drew {} {drew} of {}", culled.1, all.1);
             }
         }
@@ -330,6 +325,6 @@ mod tests {
         Arc::make_mut(&mut composed.frame.chunks).truncate(fit);
         let first = Easel::offscreen(None).pixels(&composed, PIXELS).2;
         assert!(some != all, "some left out");
-        assert!(alike(&some, &first), "what is drawn shows as it would alone: {}", differ(&some, &first));
+        assert!(some == first, "what is drawn shows as it would alone: {}", differ(&some, &first));
     }
 }
