@@ -118,14 +118,25 @@ impl Easel {
     }
 
     /**
+     * Draws `picture` as the window does when still, till what it draws has
+     * settled: a few frames (the chunks' culling), and as many more as the
+     * painter leaves some of it to (Painter::settled).
+     */
+    fn settle(&mut self, picture: &dyn Picture, pixels: [u32; 2]) {
+        let mut frames = 0;
+        while frames < 3 || !self.painter.as_ref().is_none_or(|p| p.settled()) {
+            self.draw(picture, pixels);
+            frames += 1;
+        }
+    }
+
+    /**
      * The time `picture` takes to draw again and again, in ms, uploads and
      * all, as the window draws it when still (frames back to back, no
-     * vsync), once what it draws has settled (the chunks' culling).
+     * vsync), once what it draws has settled.
      */
     pub fn time(&mut self, picture: &dyn Picture, pixels: [u32; 2], runs: usize) -> f64 {
-        for _ in 0..3 {
-            self.draw(picture, pixels);
-        }
+        self.settle(picture, pixels);
         self.wait();
         let start = Instant::now();
         for _ in 0..runs {
@@ -135,11 +146,9 @@ impl Easel {
         start.elapsed().as_secs_f64() * 1000.0 / runs as f64
     }
 
-    /** `picture` drawn as the window shows it after a few frames still: its width, height and RGBA pixels, row by row from the top. */
+    /** `picture` drawn as the window shows it once settled, still: its width, height and RGBA pixels, row by row from the top. */
     pub fn pixels(&mut self, picture: &dyn Picture, pixels: [u32; 2]) -> (u32, u32, Vec<u8>) {
-        for _ in 0..3 {
-            self.draw(picture, pixels);
-        }
+        self.settle(picture, pixels);
         let texture = self.painter.as_ref().expect("a painter").picture();
         let wgpu::Extent3d { width, height, .. } = texture.size();
         // Rows of the copy are padded to 256 bytes.

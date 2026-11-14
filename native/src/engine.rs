@@ -89,6 +89,11 @@ pub trait Painter: Any {
     fn describe(&self, _easel: &Easel) -> String {
         String::new()
     }
+
+    /** Whether the frame it drew last showed all it was given (the chunks' compositor spreads changes over frames). */
+    fn settled(&self) -> bool {
+        true
+    }
 }
 
 /**
