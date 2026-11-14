@@ -269,6 +269,10 @@ Numbers are for the forest at 1280×800, as measured when written.
     which cost Intel's GPU about as much as all else they do
     (the valley's frame 5.2 ms, 3.6 without).
     Uncut, faces' pictures overlap past their seams, and tie there (below, "A shot may differ").
+  - Neighbours in a layer of cells often lie on one plane,
+    and enlarged (`Flat`), one shows over much of the other's picture
+    where the ground runs along the axis, its pillars through the cell:
+    they tie, and the one drawn last shows.
 - **Native's chunk engines while the eye moves.**
   - Their renderer composes a frame behind (`chunks.rs`),
     so `--stroll` counts nearly every frame as one whose content is still coming:
