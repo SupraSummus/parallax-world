@@ -48,8 +48,7 @@ pub struct Times {
 /** Shows `content` in a window until it is closed. */
 pub fn run(title: &str, size: [f64; 2], content: impl Content) {
     let event_loop = EventLoop::new().expect("an event loop");
-    let instance =
-        wgpu::Instance::new(wgpu::InstanceDescriptor { backends: gpu::BACKENDS, ..wgpu::InstanceDescriptor::new_without_display_handle() });
+    let instance = gpu::instance();
     let mut windowed = Windowed { title: title.to_string(), size, content, instance, open: None, next: None, last: None };
     event_loop.run_app(&mut windowed).expect("the event loop");
 }

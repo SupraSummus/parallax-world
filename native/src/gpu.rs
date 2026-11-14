@@ -15,7 +15,18 @@ use crate::engine::{Painter, Picture};
  * carries the tile, and their first vertex out of the vertex index, which
  * carries a splat's chunk's slot (chunks' compositor.rs).
  */
-pub const BACKENDS: wgpu::Backends = wgpu::Backends::VULKAN;
+const BACKENDS: wgpu::Backends = wgpu::Backends::VULKAN;
+
+/**
+ * The instance engines draw with, its backends; without wgpu's checks of
+ * indirect draws' arguments, which release builds keep by default: each
+ * costs the main thread, and the chunks' compositor draws one per cluster,
+ * hundreds of thousands, whose arguments its own culling writes.
+ */
+pub fn instance() -> wgpu::Instance {
+    let flags = wgpu::InstanceFlags::from_build_config() - wgpu::InstanceFlags::VALIDATION_INDIRECT_CALL;
+    wgpu::Instance::new(wgpu::InstanceDescriptor { backends: BACKENDS, flags, ..wgpu::InstanceDescriptor::new_without_display_handle() })
+}
 
 /**
  * What the chunks' compositor needs of a device: draws listed on the GPU,
@@ -58,8 +69,7 @@ impl Easel {
 
     /** One of its own, offscreen, with buffers as large as its device allows, or `most` bytes. */
     pub fn offscreen(most: Option<u64>) -> Easel {
-        let instance =
-            wgpu::Instance::new(wgpu::InstanceDescriptor { backends: BACKENDS, ..wgpu::InstanceDescriptor::new_without_display_handle() });
+        let instance = instance();
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())).expect("adapter");
         let mut limits = limits(&adapter);
         if let Some(most) = most {
