@@ -1,18 +1,19 @@
 //! The data: the valley seen from above, each column's topmost voxel as a
-//! class of kinds; and its towns, rebuilt from the public API as
-//! worlds/src/valley.rs builds them.
+//! class of kinds; and its towns, as worlds/src/valley.rs builds them.
 
 use std::rc::Rc;
 
+use worldgen::domain::Scope;
 use worldgen::generator::{Kind, generate};
 use worldgen::grid::Box3;
 use worlds::fields;
-use worlds::forest::{self, K as F, Relief};
+use worlds::forest::{self, K as F};
 use worlds::landmarks::{self, K as L};
 use worlds::moor::{self, K as M};
 use worlds::mountains::{self, K as A};
 use worlds::railway::{self, K as R};
 use worlds::town::{self, K as T, Towns};
+use worlds::valley::Terrain;
 
 use crate::image::Image;
 
@@ -109,9 +110,9 @@ pub fn class_of_kind(kinds: usize) -> Vec<u8> {
     class
 }
 
-/** The valley's towns, built as worlds/src/valley.rs builds them (it keeps them private). */
+/** The valley's towns, on its terrain. */
 pub fn towns(seed: u64) -> Rc<Towns> {
-    Rc::new(Towns::new(seed, Rc::new(Relief::new(seed))))
+    Terrain::new(&Scope::new(seed)).towns
 }
 
 /** An area of columns at a level: its first column (level units) and size. */
