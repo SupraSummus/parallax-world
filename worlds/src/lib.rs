@@ -116,6 +116,17 @@ pub const WORLDS: &[Entry] = &[
         // To level 5, for now: at 6 its heather (docs/todo.md).
         far_levels: 5,
     },
+    // The moor in fog (moor.rs's FOG), mist over all of it: where see-through voxels cost a host most.
+    // Its land is the moor's, checked far away there.
+    Entry {
+        name: "fog",
+        make: moor::fog,
+        regions: &[Region::at("spawn", [-113, -46, 9], [143, 50, 393])],
+        levels: 5,
+        from_above: 5,
+        far: &[],
+        far_levels: 5,
+    },
     // The first settlement's main street where a cross street meets it (at REGIONS_SEED): houses facing both, yards, trees, paving.
     // Far away, all of its crop: streets, paving and yards, fields beside them, the forest round it.
     Entry {

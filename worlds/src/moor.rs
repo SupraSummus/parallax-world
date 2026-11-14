@@ -8,7 +8,8 @@
 //! outside it, where it owns the land, and what it places, steadings and
 //! pools, only where it surely will (`Moorland`). The valley (valley.rs)
 //! has it on its uplands and along stretches of its floor (`Uplands`);
-//! `moor` is the moor alone, all of its land, with its own stream.
+//! `moor` is the moor alone, all of its land, with its own stream; `fog`
+//! the same in fog, mist over all of it.
 
 use std::rc::Rc;
 
@@ -89,21 +90,29 @@ const _: () = assert!(2 * POOL_RADIUS <= POOLS_APART);
 /** How far the moor's bid leads the rest where it has room for a steading or a pool: the land's width and some. */
 const SURE: Fx = fx(0.2);
 /**
- * Mist fills a hollow up to MIST_UNDER under the mean of the ground on a
- * square MIST_RING round it, and lies up to MIST_OVER higher in patches;
+ * Mist fills a hollow up to 1 m under the mean of the ground on a
+ * square MIST_RING round it, and lies up to 3 m higher in patches;
  * its top made every MIST_STEP. So little of it lies thin on slopes,
  * where it would be thickened far away ("Thickened media spread",
  * generators.md). As thick as some 15 m of it hide what is behind
  * (Koschmieder: 3.9 over the distance seen).
  */
 const MIST_RING: i64 = m(24.0);
-const MIST_UNDER: Units = Units::m(1.0);
-const MIST_OVER: Units = Units::m(3.0);
 const MIST_STEP: i64 = m(8.0);
 // The ring's points are samples' too: the ground is made once for each.
 const _: () = assert!(MIST_RING % MIST_STEP == 0);
-const MIST: f64 = 3.9 / m(15.0) as f64;
+const MIST: Mist = Mist { under: Units::m(1.0), over: Units::m(3.0), extinction: 3.9 / m(15.0) as f64 };
+/** Fog: mist lying 8 m over the mean of the ground round it, 6 m more in patches, some 60 m seen through. */
+const FOG: Mist = Mist { under: Units::m(-8.0), over: Units::m(6.0), extinction: 3.9 / m(60.0) as f64 };
 const WALL: i64 = 3;
+
+/** How mist lies: its top under the mean of the ground round it, how much higher in patches, and how thick it is per unit. */
+#[derive(Clone, Copy)]
+struct Mist {
+    under: Units,
+    over: Units,
+    extinction: f64,
+}
 
 /** A quantity of column (x, z) from position alone, with its fraction: the ground's height, a bid's lead. */
 type ByColumn = Rc<dyn Fn(i64, i64) -> Fx>;
@@ -213,8 +222,9 @@ pub struct Moorland {
     /** Its steadings' seed. */
     seed: u64,
     patches: Fbm<{ m(30.0) }, 2>,
-    /** Where mist lies deeper. */
+    /** Where mist lies deeper, and how it lies. */
     mist: ValueNoise<{ m(48.0) }>,
+    lies: Mist,
     stream: Option<Stream>,
     steadings: Rc<Claims<Steading>>,
     water: Water,
@@ -226,7 +236,8 @@ impl Moorland {
      * it), with steadings and pools where `lead`, by how much its bid
      * leads every other domain's at least, is SURE: their columns are its.
      * Steadings claimed from spots by `chance`; a stream along `line`, if
-     * any; water in every hollow up to `level`, or without one, in pools.
+     * any; water in every hollow up to `level`, or without one, in pools;
+     * mist as `lies` says.
      */
     fn new(
         scope: &Scope,
@@ -235,6 +246,7 @@ impl Moorland {
         chance: Fx,
         line: Option<Rc<dyn Fn(i64) -> Fx>>,
         level: Option<Units>,
+        lies: Mist,
     ) -> Moorland {
         let brook = line.clone().map(|line| {
             let line = Rc::new(Plan::new("stream", STREAM_SCALE, move |_, z| line(z)));
@@ -300,6 +312,7 @@ impl Moorland {
             seed: scope.seed("steadings' things"),
             patches: Fbm::new(scope.seed("patches")),
             mist: ValueNoise::new(scope.seed("mist")),
+            lies,
             stream: brook,
             steadings,
             water,
@@ -474,7 +487,7 @@ impl Uplands {
     /** The moorland on them: steadings, fewer than on the moor alone, and pools where it leads; no stream. */
     pub fn moorland(self: &Rc<Self>, scope: &Scope) -> Moorland {
         let (terrain, lead) = (self.terrain.clone(), self.clone());
-        Moorland::new(scope, Rc::new(move |x, z| terrain.ground(x, z)), Rc::new(move |x, z| lead.lead(x, z)), fx(0.225), None, None)
+        Moorland::new(scope, Rc::new(move |x, z| terrain.ground(x, z)), Rc::new(move |x, z| lead.lead(x, z)), fx(0.225), None, None, MIST)
     }
 }
 
@@ -549,6 +562,16 @@ impl Heath {
 
 /** The moor of `seed`, all of it; the camera starts behind the first steading's hut, looking past it to the ring. */
 pub fn moor(seed: u64) -> World {
+    moor_in(seed, MIST)
+}
+
+/** The moor of `seed` in fog (FOG): mist over all of it, as thick as the moor's is in its hollows. */
+pub fn fog(seed: u64) -> World {
+    moor_in(seed, FOG)
+}
+
+/** The moor of `seed`, its mist lying as `lies` says. */
+fn moor_in(seed: u64, lies: Mist) -> World {
     let world = Scope::new(seed);
     let relief = world.of("heath");
     let hills = Fbm::<{ m(240.0) }, 4>::new(relief.seed("hills"));
@@ -560,7 +583,8 @@ pub fn moor(seed: u64) -> World {
         let zm = z as f64 / m(1.0) as f64;
         fx(m(-40.0) as f64 + m(1.0) as f64 * (12.0 * js::sin(zm / 37.0 + phase) + 4.0 * js::sin(zm / 11.0 + 2.0 * phase)))
     });
-    let moorland = Rc::new(Moorland::new(&world.of("moor"), heath.clone(), Rc::new(|_, _| Fx::ONE), fx(0.65), Some(line), Some(WATER)));
+    let moorland =
+        Rc::new(Moorland::new(&world.of("moor"), heath.clone(), Rc::new(|_, _| Fx::ONE), fx(0.65), Some(line), Some(WATER), lies));
     let moor: Rc<dyn Domain> = Rc::new(Moor { moorland: moorland.clone(), uplands: None, path: None, under: true });
     // The heath, levelled under each hut.
     let ground = Lie::new(move |x, z| heath(x, z)).shaped(vec![moor.clone()]).ground(GROUND_SCALE, SLOPE);
@@ -618,12 +642,13 @@ fn mist(f: Rc<Heath>) -> Field {
             return Vec::new();
         }
         let h = f.height(x, z);
-        let top = lid.at(x, z) - MIST_UNDER.to_fx() + smoothstep(fx(0.35), fx(0.75), f.moorland.mist.at(x, z)) * MIST_OVER;
+        let lies = f.moorland.lies;
+        let top = lid.at(x, z) - lies.under.to_fx() + smoothstep(fx(0.35), fx(0.75), f.moorland.mist.at(x, z)) * lies.over;
         let depth = ((top - Units(h).to_fx()) * share).round_units().0;
         if depth <= 0 {
             return Vec::new();
         }
-        vec![Span::medium(h + 1, depth, K::mist, MIST, spacing)]
+        vec![Span::medium(h + 1, depth, K::mist, lies.extinction, spacing)]
     })
 }
 
