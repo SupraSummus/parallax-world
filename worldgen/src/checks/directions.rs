@@ -2,7 +2,8 @@
 //! sibling of `places` (docs/generators.md, "Checks"). About the vertical
 //! the lattice, square noise and tiles are four-fold, so their mark is a
 //! four-fold harmonic of horizontal directions at the lattice's phase,
-//! the same at every seed.
+//! the same at every seed. Only about y, a ground's vertical: about x and
+//! z too, for worlds with no ground, is in docs/todo.md.
 //!
 //! The measure: pairs of points a few metres apart, at random places and
 //! in continuous random directions φ, and whether the two differ in kind
@@ -38,11 +39,15 @@ use crate::picture::nearest_site;
 const LEVEL: u32 = 3;
 /** How far apart pairs are, sites of LEVEL: well over one, and short of the gaps between a world's rows. */
 const DISTANCES: [i64; 3] = [4, 8, 16];
-/** Boxes are this many sites a side in x and z, over the heights. */
+/** Boxes are cubes this many sites a side, cut to the world's heights. */
 const SIDE: i64 = 128;
-/** Boxes are around the spawn, each place the world names, and this many anywhere, at each seed. */
+/**
+ * Boxes are around the spawn, each place the world names, and this many
+ * anywhere it has a surface (pairs part), of at most TRIES, at each seed.
+ */
 const ANYWHERE: usize = 4;
-/** How wide a square around spawn boxes anywhere are in, lattice units (4 km). */
+const TRIES: usize = 64;
+/** How wide a cube around spawn boxes anywhere are in, lattice units (4 km). */
 const AROUND: i64 = 32_000;
 /** Points sampled in each box at each distance, each with DIRECTIONS pairs. */
 const POINTS: usize = 32_768;
@@ -92,10 +97,14 @@ fn kinds(generator: &Generator) -> Vec<u16> {
     kinds
 }
 
-/** Pairs at each of DISTANCES in a box around `at` (x and z, lattice units, at a random place in the box), over the world's heights. */
+/** Pairs at each of DISTANCES in a box around `at` (lattice units, at a random place in the box), into `sums`. */
 fn sample(world: &World, kinds: &[u16], at: [i64; 3], random: &mut Rng, sums: &mut [Sums; DISTANCES.len()]) {
-    let (y0, y1) = world.heights_at(LEVEL);
-    let [x0, z0] = [at[0], at[2]].map(|v| (v >> LEVEL) - random.below(SIDE as u32) as i64);
+    let [x0, y0, z0] = at.map(|v| (v >> LEVEL) - random.below(SIDE as u32) as i64);
+    let (h0, h1) = world.heights_at(LEVEL);
+    let (y0, y1) = (y0.max(h0), (y0 + SIDE).min(h1));
+    if y0 >= y1 {
+        return;
+    }
     let grid = generate(&world.generator, &Box3 { min: [x0, y0, z0], max: [x0 + SIDE, y1, z0 + SIDE] }, LEVEL);
     // Over the highest brick with voxels, pairs never part.
     let [bx, by] = [0, 1].map(|i| (grid.n[i] + BRICK - 1) / BRICK);
@@ -134,30 +143,37 @@ fn sample(world: &World, kinds: &[u16], at: [i64; 3], random: &mut Rng, sums: &m
 
 /**
  * Pairs at each of DISTANCES in `world` around each of its places: a box
- * around its spawn, around each place it names, and ANYWHERE in a square
- * AROUND its spawn wide (together, as "anywhere"), each box picked by the
- * world's seed.
+ * around its spawn, around each place it names, and ANYWHERE it has a
+ * surface in a cube AROUND its spawn wide (together, as "anywhere"), each
+ * box picked by the world's seed.
  */
 fn sums(world: &World) -> Vec<(&'static str, [Sums; DISTANCES.len()])> {
     let mut random = Rng::new(hash_text("directions", world.generator.seed));
-    let anywhere: Vec<[i64; 3]> = (0..ANYWHERE)
-        .map(|_| {
-            let mut off = || random.below(AROUND as u32) as i64 - AROUND / 2;
-            [world.spawn[0] + off(), world.spawn[1], world.spawn[2] + off()]
-        })
-        .collect();
-    let named = std::iter::once(("spawn", vec![world.spawn])).chain(world.points.iter().map(|(name, find)| (*name, vec![find()])));
     let kinds = kinds(&world.generator);
-    named
-        .chain(std::iter::once(("anywhere", anywhere)))
-        .map(|(name, boxes)| {
+    let mut named: Vec<(&'static str, [Sums; DISTANCES.len()])> = std::iter::once(("spawn", world.spawn))
+        .chain(world.points.iter().map(|(name, find)| (*name, find())))
+        .map(|(name, at)| {
             let mut sums = [Sums::default(); DISTANCES.len()];
-            for at in boxes {
-                sample(world, &kinds, at, &mut random, &mut sums);
-            }
+            sample(world, &kinds, at, &mut random, &mut sums);
             (name, sums)
         })
-        .collect()
+        .collect();
+    let (mut anywhere, mut found) = ([Sums::default(); DISTANCES.len()], 0);
+    let cube = world.within(Box3::around(world.spawn, AROUND / 2));
+    for _ in 0..TRIES {
+        if found == ANYWHERE {
+            break;
+        }
+        let at: [i64; 3] = std::array::from_fn(|i| cube.min[i] + random.below((cube.max[i] - cube.min[i]) as u32) as i64);
+        let mut sums = [Sums::default(); DISTANCES.len()];
+        sample(world, &kinds, at, &mut random, &mut sums);
+        if sums[0].parted > 0.0 {
+            anywhere.iter_mut().zip(&sums).for_each(|(all, one)| all.add(one));
+            found += 1;
+        }
+    }
+    named.push(("anywhere", anywhere));
+    named
 }
 
 /** A world's four-fold harmonic beyond its two-fold one, around a place, at the distance and the phase where it is least likely by chance. */

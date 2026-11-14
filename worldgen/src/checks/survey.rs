@@ -1,5 +1,5 @@
 //! What a world is made of, found by looking rather than listed: every
-//! layer of its generator asked over a square around spawn (or, drawing
+//! layer of its generator asked in a cube around spawn (or, drawing
 //! nothing there, around each place the world names), things taken
 //! apart into parts no wider than a region, sorted into strata: a part or
 //! a field, with a kind it draws. The contract checks a place of every
@@ -12,28 +12,28 @@ use crate::World;
 use crate::generator::{Children, Field, FieldValues, Generator, Kind, Layer, Node, Op, Population, Shape, bounds_of_shapes, each_made};
 use crate::grid::Box3;
 use crate::noise::{Rng, hash_text};
-use crate::plan::footprint;
+use crate::plan::{self, footprint};
 use crate::units::m;
 
-/** The side of the square around spawn layers are surveyed over (16 km), lattice units. */
+/** The side of the cube around spawn layers are surveyed in (16 km), lattice units, cut to the world's heights. */
 const SIDE: i64 = m(16_000.0);
 
 /**
  * Parts a population's things are taken apart into, about, at most:
- * past it, the square it is surveyed over stops growing.
+ * past it, the cube it is surveyed in stops growing.
  */
 const PARTS: usize = 20_000;
 
 /**
- * The level whose columns of sites each field is asked for, over the
- * square: sites 16 m apart. Fields keep what is finer than the sites in
+ * The level whose columns of sites each field is asked for, in the
+ * cube: sites 16 m apart. Fields keep what is finer than the sites in
  * proportion ("Plans" in docs/generators.md), so a narrow one shows.
  */
 const FIELD_LEVEL: u32 = 7;
 
 /**
  * Around a place the world names, a field is asked at the columns of a
- * finer level over a smaller square: sites a metre apart, 128 m. Where the
+ * finer level in a smaller cube: sites a metre apart, 128 m. Where the
  * world says a feature is, one narrower than FIELD_LEVEL's sites that it
  * doesn't keep far away (a tunnel's bore) is found there, at any seed.
  */
@@ -56,7 +56,7 @@ pub struct Stratum {
 /** How far a layer was surveyed. */
 pub struct Surveyed {
     pub layer: &'static str,
-    /** Half the side of the square around spawn, lattice units. */
+    /** Half the side of the cube around spawn, lattice units. */
     pub half: i64,
     /** Things found, or places a field draws at of those asked. */
     pub found: usize,
@@ -105,7 +105,7 @@ pub fn survey(world: &World, region: i64, wanted: impl Fn(&str) -> bool) -> Surv
                 things.push(seen);
             }
             Layer::Field(field) => {
-                let drawn = around(world, |centre, square| survey_field(world, centre, square, field, region, &mut found), |d| *d);
+                let drawn = around(world, |centre, cube| survey_field(world, centre, cube, field, region, &mut found), |d| *d);
                 layers.push(Surveyed { layer: field.name, half: SIDE / 2, found: drawn, seconds: start.elapsed().as_secs_f64() });
             }
         }
@@ -115,7 +115,7 @@ pub fn survey(world: &World, region: i64, wanted: impl Fn(&str) -> bool) -> Surv
 }
 
 /**
- * `survey` around spawn over the whole square, or, finding nothing there
+ * `survey` around spawn in the whole cube, or, finding nothing there
  * (`found` is 0), around each place the world names in turn, finer:
  * a feature too rare to be near spawn at every seed (the valley's
  * tunnels) is where the world says it is.
@@ -133,17 +133,22 @@ fn around<T>(world: &World, mut survey: impl FnMut([i64; 3], (u32, i64)) -> T, f
 
 /**
  * Where `field` draws around `centre`, asked at every column of sites of
- * `level` over a square `side` wide, into `found`; returns at how many.
+ * `level` in a cube `side` wide, at a height in it, into `found`; returns
+ * at how many.
  */
 fn survey_field(world: &World, centre: [i64; 3], (level, side): (u32, i64), field: &Field, region: i64, found: &mut Found) -> usize {
     let mut random = Rng::new(hash_text(field.name, world.generator.seed));
-    let ((h0, h1), half, s) = (world.heights, region / 2, 1i64 << level);
+    let (half, s) = (region / 2, 1i64 << level);
+    let cube = world.within(Box3::around(centre, side / 2));
+    let (h0, h1) = (cube.min[1], cube.max[1]);
     let side = side / s;
     let mut drawn = 0;
     for c in 0..side * side {
         // A site's column of FIELD_LEVEL, as generating it asks: at any height, for a field of sites.
         let [x, z] = [(c % side, centre[0]), (c / side, centre[2])].map(|(i, o)| (o.div_euclid(s) + i - side / 2) * s);
         let p = [x, h0 + random.below((h1 - h0) as u32) as i64, z];
+        // Its spans asked for a region's width along the line (plan::along): a field endless along it makes no more.
+        let stretch = |axis: usize| (p[axis] - half, p[axis] + half);
         // What it draws there, along an axis from..to: the place is around the top of what fills, the middle of what carves.
         let (kinds, along, from, to): (Vec<Kind>, usize, i64, i64) = match &field.values {
             FieldValues::At(at) => {
@@ -153,7 +158,7 @@ fn survey_field(world: &World, centre: [i64; 3], (level, side): (u32, i64), fiel
             }
             FieldValues::Spans { axis, spans } => {
                 let [a, b] = across(*axis);
-                let spans = |s| footprint(s, [0, 0], || spans(p[a], p[b]));
+                let spans = |s| footprint(s, [0, 0], || plan::stretch(stretch(*axis), || spans(p[a], p[b])));
                 let coarse = spans(s);
                 if coarse.is_empty() {
                     continue;
@@ -185,20 +190,21 @@ fn across(axis: usize) -> [usize; 2] {
 }
 
 /**
- * The things of `population` in a square around `centre`, from 16 cells
+ * The things of `population` in a cube around `centre`, from 16 cells
  * wide, twice as wide each time while they are taken apart into fewer
  * than PARTS / 4 parts, up to SIDE; their parts, into `found`. Returns
- * half the square's side, and the things.
+ * half the cube's side, and the things.
  */
 fn survey_things(world: &World, centre: [i64; 3], population: &Population, region: i64, found: &mut Found) -> (i64, Things) {
     let (n, reach, (h0, h1)) = (population.cell, population.reach, world.heights);
     let [ci, _, ck] = centre.map(|v| v.div_euclid(n));
-    // Cells whose reach meets the heights.
-    let (j0, j1) = ((h0 - n - reach[1]).div_euclid(n), (h1 + n + reach[1]).div_euclid(n) + 1);
     let mut half = 8;
     loop {
         let (mut parts, mut count) = (Found::new(), 0);
         let mut seen = Things { population: population.name, reach, made: 0, past: Vec::new(), leaving: Vec::new() };
+        // Along y, the cells whose reach meets the cube within the heights.
+        let cube = world.within(Box3::around(centre, half * n));
+        let (j0, j1) = ((cube.min[1] - n - reach[1]).div_euclid(n), (cube.max[1] + n + reach[1]).div_euclid(n) + 1);
         let cells = [(ci - half, ci + half), (j0, j1), (ck - half, ck + half)];
         each_made(&world.generator, population, cells, |key, bounds, allowed, node| {
             seen.made += 1;

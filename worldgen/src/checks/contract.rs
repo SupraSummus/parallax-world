@@ -117,11 +117,11 @@ pub fn whole_equals_parts(generator: &Generator, region: &Box3, level: u32) {
 
 /**
  * The empty sites of a grid a camera could be at: those it could fly to
- * from above, connected to the top of the grid's box through empty sites
+ * from outside the grid's box, connected to it through empty sites
  * (voxels sharing a face): empty as shown, as a camera collides with the
  * voxels shown, not with what stops some rays. Under the ground's shell,
  * inside a closed house or a boulder are not; under a canopy, open to
- * the sky somewhere, is.
+ * the sky somewhere, or a cave the box cuts, is.
  */
 struct Open {
     b: Box3,
@@ -140,15 +140,13 @@ impl Open {
                 state[at([x, y, z])] = 0;
             }
         }
+        // From the empty sites next to the outside.
         let mut stack = Vec::new();
-        for z in b.min[2]..b.max[2] {
-            for x in b.min[0]..b.max[0] {
-                // The top site of the column (x, z): in one of the top two layers.
-                let y = b.max[1] - 1 - (x + b.max[1] - 1 + z).rem_euclid(2);
-                if y >= b.min[1] && state[at([x, y, z])] == 0 {
-                    state[at([x, y, z])] = 1;
-                    stack.push(at([x, y, z]));
-                }
+        for (x, y, z) in sites(&b) {
+            let outside = FACES.iter().any(|f| !b.holds([x + f[0], y + f[1], z + f[2]]));
+            if outside && state[at([x, y, z])] == 0 {
+                state[at([x, y, z])] = 1;
+                stack.push(at([x, y, z]));
             }
         }
         // Neighbours by their offset in `state`: the points outside the box are full.
@@ -505,7 +503,7 @@ fn levels_against_finer(generator: &Generator, region: &Box3, levels: u32, repor
 /**
  * What a camera straight above `region`, grown to at least 16 sites of
  * the level across around its centre, sees at each level from 1 to
- * `levels`: what rays down see (a `Look`), as at level 0. Unlike levels
+ * `levels`: what rays down from its sky see (a `Look`), as at level 0. Unlike levels
  * two apart, level 0 catches a drift, a little a level, such as walls
  * taking over from roofs.
  */
@@ -525,8 +523,9 @@ fn from_above(world: &World, region: &Box3, levels: impl Iterator<Item = u32>, m
         composite_in(&world.generator, &camera, tiles)
     };
     // Level 0 over the area of the levels since it last grew; the areas
-    // nest, so its tiles are kept for the next.
-    let mut level_0 = Tiles::new(0, world.heights_at(0));
+    // nest, so its tiles are kept for the next. Rays come down from the
+    // world's sky, over its heights, cutting nothing.
+    let mut level_0 = Tiles::down(0, world.heights_at(0));
     let mut reference: Option<(Box3, Seen)> = None;
     for level in levels {
         let area = around(region, level);
@@ -534,7 +533,7 @@ fn from_above(world: &World, region: &Box3, levels: impl Iterator<Item = u32>, m
             reference = Some((area, seen(&mut level_0, &area)));
         }
         let reference = &reference.as_ref().expect("made").1;
-        let here = seen(&mut Tiles::new(level, world.heights_at(level)), &area);
+        let here = seen(&mut Tiles::down(level, world.heights_at(level)), &area);
         let looks = [looks_of(reference, &palette), looks_of(&here, &palette)];
         report.margins.push(Margin { region: *region, measure, level, against: 0, looks });
     }
@@ -557,7 +556,7 @@ pub fn margins(name: &str, world: &World, regions: &[Box3], levels: u32, from_ab
 
 /**
  * What `world`'s fields show from above over each of `regions`, wide
- * ones (only x and z count), at levels FAR_FROM to `levels`, against
+ * ones, at levels FAR_FROM to `levels`, against
  * level 0. Its things are left out, and with them their far
  * fields: their far forms keep what rays see around them, not from
  * above ("Media are isotropic" in docs/generators.md).

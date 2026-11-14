@@ -22,14 +22,20 @@ use std::fmt;
 use crate::World;
 use crate::generator::{Anchors, Generator, Layer, Population, anchor_in, anchors_in, made_in};
 use crate::grid::Box3;
-use crate::noise::{Rng, hash_text};
+use crate::noise::{Rng, hash_text, hash64};
 
-/** How wide a square around spawn things are gathered in, lattice units (16 km): periods up to 2 km. */
+/** How wide a cube around spawn things are gathered in, lattice units (16 km), cut to the world's heights: periods up to 2 km. */
 pub const SIDE: i64 = 128_000;
 /** Columns of cells gathered in per population and seed, at most, picked at random. */
 const COLUMNS: usize = 16_384;
 /** Things gathered per population and seed: columns are picked until there are as many. */
 const THINGS: usize = 2048;
+/**
+ * Things gathered per column at most, from a cell of it picked at random:
+ * a column of a world on a ground holds fewer, one through an endless
+ * world (the cheese) as many as it is tall.
+ */
+const PER_COLUMN: usize = 4;
 /** Columns are picked in patches this many a side: neighbours read plans their neighbours made. */
 const PATCH: i64 = 2;
 /** Stretches each axis is cut into, about: whole periods each, at least one. */
@@ -75,15 +81,19 @@ pub fn places(generator: &Generator, population: &Population, area: &Box3) -> Ve
         Box::new(columns.filter(move |&c| seen.insert(c)).take(COLUMNS))
     };
     let (mut found, mut asked) = (Vec::new(), HashSet::new());
+    let (seed, tall) = (hash_text(population.name, generator.seed), j1 - j0 + 1);
     for (i, k) in columns {
+        let first = (hash64(seed, i, 0, k) % tall as u64) as i64;
         let anchors = match population.anchor {
             // A leaf's points are its own: they are found from it.
             Anchors::Points { .. } => anchors_in(generator, population, [(i, i), (j0, j1), (k, k)]),
-            _ => (j0..=j1)
+            _ => (0..tall)
+                .map(|n| j0 + (first + n) % tall)
                 .filter(|j| (i + j + k) & 1 == 0)
                 .filter_map(|j| anchor_in(generator, population, i, j, k))
                 .filter(|(_, owner)| asked.insert(*owner))
                 .filter_map(|(_, [i, j, k])| made_in(generator, population, i, j, k).map(|(anchor, _)| anchor))
+                .take(PER_COLUMN)
                 .collect(),
         };
         found.extend(anchors.iter().map(|a| a.map(|v| v.round() as i64)).filter(|p| area.holds(*p)));
@@ -247,16 +257,15 @@ pub fn preference(population: &'static str, cell: i64, area: &Box3, places: &[(u
 
 /**
  * Each population's strongest preference for places in a period, its
- * things gathered at each of `seeds` (a thread each) in a square SIDE
- * wide around the first seed's spawn, over the world's heights.
+ * things gathered at each of `seeds` (a thread each) in a cube SIDE
+ * wide around the first seed's spawn, cut to its heights.
  */
 pub fn preferences(make: impl Fn(u64) -> World + Sync, seeds: &[u64]) -> Vec<Preference> {
     fn populations(world: &World) -> impl Iterator<Item = &Population> {
         world.generator.layers.iter().filter_map(|layer| if let Layer::Population(p) = layer { Some(p) } else { None })
     }
     let world = make(seeds[0]);
-    let [x, _, z] = world.spawn;
-    let area = Box3 { min: [x - SIDE / 2, world.heights.0, z - SIDE / 2], max: [x + SIDE / 2, world.heights.1, z + SIDE / 2] };
+    let area = world.within(Box3::around(world.spawn, SIDE / 2));
     let make = &make;
     std::thread::scope(|scope| {
         let gathering: Vec<_> = seeds

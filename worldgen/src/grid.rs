@@ -39,6 +39,11 @@ impl Box3 {
     pub fn widen(&self, m: i64) -> Box3 {
         Box3 { min: self.min.map(|v| v - m), max: self.max.map(|v| v + m) }
     }
+
+    /** The cube reaching `half` from `centre` along each axis. */
+    pub fn around(centre: [i64; 3], half: i64) -> Box3 {
+        Box3 { min: centre.map(|v| v - half), max: centre.map(|v| v + half) }
+    }
 }
 
 pub fn is_site(x: i64, y: i64, z: i64) -> bool {

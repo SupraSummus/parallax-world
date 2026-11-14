@@ -1,9 +1,9 @@
 # city (seed 42): work by tile and layer (worldgen::cost)
 place        level     cells     owned     nodes     tests  measured     reads   lookups     plans  distinct   largest layer
-spawn            0        13         1         4    687192         0         0         0         0         0    687192 district
+spawn            0        13         1         4    670760         0         0         0         0         0    670760 district
 spawn            0         0         0         0         0         0     16384     49152         0         0         0 ground
 spawn            0         0         0         0         0         0         0         0     32768     32768         0 plan ground
-spawn            1        13         1         7    393936         0         0         0         0         0    393936 district
+spawn            1        13         1         7    389328         0         0         0         0         0    389328 district
 spawn            1         0         0         0         0         0     16384     37392         0         0         0 ground
 spawn            1         0         0         0         0         0         0         0     32897     32897         0 plan ground
 spawn            2        13         1        13    491484         0         0         0         0         0    491484 district
@@ -24,13 +24,13 @@ spawn            6         0         0         0         0         0         0  
 spawn            7       181         1        19      4983      7776         0         0         0         0       559 district
 spawn            7         0         0         0         0         0     16384     37392         0         0         0 ground
 spawn            7         0         0         0         0         0         0         0     32897     32897         0 plan ground
-spawn            8       541         1        19      3263      3094         0         0         0         0       445 district
+spawn            8       722         1        19      3263      3094         0         0         0         0       445 district
 spawn            8         0         0         0         0         0     16384     37392         0         0         0 ground
 spawn            8         0         0         0         0         0         0         0     32897     32897         0 plan ground
-region1          0         9         1         4   1204174         0         0         0         0         0   1204174 district
+region1          0         9         1         4   1174124         0         0         0         0         0   1174124 district
 region1          0         0         0         0         0         0     16384     49152         0         0         0 ground
 region1          0         0         0         0         0         0         0         0     32768     32768         0 plan ground
-region1          1        13         1         7    375237         0         0         0         0         0    375237 district
+region1          1        13         1         7    370629         0         0         0         0         0    370629 district
 region1          1         0         0         0         0         0     16384     37392         0         0         0 ground
 region1          1         0         0         0         0         0         0         0     32897     32897         0 plan ground
 region1          2        13         1        13    480417         0         0         0         0         0    480417 district
@@ -51,6 +51,6 @@ region1          6         0         0         0         0         0         0  
 region1          7       181         1        19      4889      7776         0         0         0         0       572 district
 region1          7         0         0         0         0         0     16384     37392         0         0         0 ground
 region1          7         0         0         0         0         0         0         0     32897     32897         0 plan ground
-region1          8       541         1        28      5027      4732         0         0         0         0       664 district
+region1          8       722         1        28      5027      4732         0         0         0         0       664 district
 region1          8         0         0         0         0         0     16384     37392         0         0         0 ground
 region1          8         0         0         0         0         0         0         0     32897     32897         0 plan ground

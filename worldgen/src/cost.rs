@@ -212,14 +212,14 @@ pub fn places(world: &World, regions: &[Box3]) -> Vec<(String, [i64; 3])> {
     [("spawn".to_string(), world.spawn)].into_iter().chain(centres).collect()
 }
 
-/** Sites of the web's tile along x and z (TILE in web/src/lib/world.ts; native's are cubes, light::tile_box). */
-const TILE: i64 = 128;
-
-/** The host tile of `level` holding `at` (lattice units): TILE sites of the level along x and z, the world's heights along y, what may show of it (shown). */
+/**
+ * The host tile of `level` holding `at` (lattice units), what may show
+ * of it (shown): a cube of the lattice, cut to the world's heights, as
+ * native's (light::tile_box).
+ */
 fn tile(world: &World, at: [i64; 3], level: u32) -> Box3 {
-    let (size, (y0, y1)) = (TILE << level, world.heights_at(level));
-    let [x, _, z] = at.map(|v| v.div_euclid(size) * TILE);
-    shown(&world.generator, &Box3 { min: [x, y0, z], max: [x + TILE, y1, z + TILE] }, level)
+    let key = at.map(|v| v.div_euclid(crate::light::TILE << level));
+    shown(&world.generator, &crate::light::tile_box(world.heights_at(level), key), level)
 }
 
 /** A tile of a report: where and at what level, its work, and how long it took here. */

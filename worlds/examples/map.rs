@@ -1,5 +1,6 @@
-//! A world from above, to see its layout at a glance: each column's
-//! topmost voxel as its faces up show it, lighter the higher it is, +z up.
+//! A world on a ground from above, to see its layout at a glance: each
+//! column's topmost voxel as its faces up show it, lighter the higher it
+//! is, +z up. Over all its heights: an endless world has no top.
 //! Writes a PPM:
 //!
 //! cargo run --release --example map -- valley 42 2 -1600 -400 3200 4000 map.ppm

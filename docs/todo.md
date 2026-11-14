@@ -679,11 +679,32 @@ Numbers are for the forest at 1280×800, as measured when written.
   not at the spawn and the regions' centres (`cost::places`),
   once the forest, the moor and the city name some:
   they would be measured at their spawn alone.
-- Drop y as up from the web and the checks.
-  A world is bounded along y by its `heights`,
-  the web tiles x and z over them (native's tiles are cubes),
-  and the checks look from above down y;
-  an endless holey cheese wants no heights.
+- Drop y as up.
+  The checks look in cubes around places,
+  but y is still special where a world has no say in it:
+  - `World::heights` is along y, with a sky over and rock under
+    (light's too); the cheese, which has neither, fakes them (`ENDLESS`).
+    Heights a world may lack (`Option`), and light with no sky without them.
+  - Pictures down a world's heights tile them in columns (`Tiling` in `picture.rs`):
+    in cubes, the valley's from above took three times as long,
+    each cube of its sky generated alone,
+    as most of its layers don't say where they are (`whole` can't skip them).
+    With every layer saying so (towns, landmarks, water, mist, the sea,
+    the railway, stations, steadings; the city's district, learned settlements),
+    cubes alone would do.
+  - Places and the survey sample lines of cells along y,
+    the cheese's capped (`PER_COLUMN`);
+    `directions` looks for boxes with a surface (`TRIES`),
+    and measures the four-fold harmonic about y alone:
+    a world without a ground wants it about x and z too,
+    but a ground's slopes, stepped along the axes, might show there.
+  - The web tiles x and z over a world's heights (native's tiles are cubes),
+    so it can't show the cheese.
+- Far forms for what fills space: the cheese's holes are carved line by line,
+  so a line costs as many cells as it crosses,
+  and a coarser host cube holds eight times the caverns;
+  its grottoes (pillars, stairs, crystals) stop at level 3,
+  and its lights with them.
 - Lay out towns at any angle?
   Walls along the lattice's axes look crisp on FCC;
   at other angles they jag.

@@ -3,6 +3,7 @@
 //! native frontend links them; the web generates them as WebAssembly
 //! (web/wasm/, web/src/lib/worldgen.ts).
 
+pub mod cheese;
 pub mod city;
 pub mod fields;
 pub mod forest;
@@ -58,7 +59,7 @@ pub struct Entry {
     pub far: &'static [Region],
     /** The level up to which its far regions keep their fields' look from above, from level 4. */
     pub far_levels: u32,
-    /** The level up to which it keeps what is seen from above, against level 0: at most `levels`. */
+    /** The level up to which it keeps what is seen from above, against level 0: at most `levels`; 0 for a world with no sky. */
     pub from_above: u32,
 }
 
@@ -147,6 +148,18 @@ pub const WORLDS: &[Entry] = &[
         levels: 3,
         from_above: 3,
         far: &[Region::at("spawn", [-478, -20, -32], [482, 108, 928])],
+        far_levels: 6,
+    },
+    // The cavern the camera starts in, the caverns, tunnels and eyes around it, their pillars, stairs and crystals.
+    // To level 3: from level 4 on, caves have no pillars, stairs or crystals (cheese.rs, SIZE).
+    // Endless, it has no sky to be seen from.
+    Entry {
+        name: "cheese",
+        make: cheese::cheese,
+        regions: &[Region::at("spawn", [-128, -128, -128], [128, 128, 128])],
+        levels: 3,
+        from_above: 0,
+        far: &[],
         far_levels: 6,
     },
     // All of Sponza's atrium, from its middle: floor, colonnades, galleries, the roof's edge (scene.rs).
