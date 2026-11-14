@@ -91,6 +91,11 @@ pub trait Painter: Any {
     fn settled(&self) -> bool {
         true
     }
+
+    /** Whether, settled, it found the engine had left out what shows, and told it (the chunks' compositor: probes). */
+    fn asked(&self) -> bool {
+        false
+    }
 }
 
 /**
@@ -116,6 +121,12 @@ pub struct Look {
     /** Whether to draw the seams between faces over the picture, and what to paint voxels in. */
     pub seams: bool,
     pub colours: Colours,
+    /**
+     * Whether engines that draw chunks leave out, unbaked, the cells that
+     * what is in front of them hides (renderer.rs's Hiding), for the GPU to
+     * find and ask for those that show after all.
+     */
+    pub hides: bool,
 }
 
 impl Look {
@@ -135,6 +146,7 @@ impl Look {
             shift: 3,
             seams: false,
             colours: Colours::Voxels,
+            hides: true,
         }
     }
 

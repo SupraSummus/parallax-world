@@ -6,6 +6,7 @@
 
 mod bakery;
 mod compositor;
+mod occlusion;
 mod renderer;
 
 use std::sync::{Arc, Condvar, Mutex};
@@ -144,18 +145,21 @@ impl Engine for Chunks {
             (frame, stats, answered, m.asked)
         };
         // Until rendered for this look and these tiles, what it wants is not known: while the eye moves, never quite.
-        self.busy = stats.baking > 0 || answered < asked;
+        // Or till the cells the compositor found showing after all are rendered.
+        self.busy = stats.baking > 0 || answered < asked || frame.feedback.reports() > frame.heard;
         let lit = if look.light.is_some() { Lit::Reading } else { Lit::Not };
         let whole = Lod::new(look.shift, look.detail);
         // As far as either Lod's chunks read each grid.
         let reach = |g| [whole, whole.for_medium()].iter().filter_map(|lod| lod.grid_reach(g, look.far)).reduce(f64::max);
         Frame {
             stats: format!(
-                "{} chunks\n{} baking, {} in all, {} tiles wanted",
-                frame.chunks.len(),
+                "{} chunks\n{} baking, {} in all, {} tiles wanted\n{} cells hidden, {} found showing",
+                frame.chunks.len() - stats.hidden,
                 stats.baking,
                 stats.queued,
-                stats.tiles.len()
+                stats.tiles.len(),
+                stats.hidden,
+                stats.found
             ),
             picture: Box::new(Composed { frame, view: View::new(look) }),
             // Whichever way the eye turns.
@@ -178,6 +182,7 @@ impl Engine for Chunks {
     fn panel(&mut self, ui: &mut egui::Ui, look: &mut Look) {
         look.detail_panel(ui);
         ui.checkbox(&mut look.seams, "Show Face Seams");
+        ui.checkbox(&mut look.hides, "Leave Out Hidden Cells");
         ui.horizontal(|ui| {
             ui.label("Colour by");
             for (colours, name) in Colours::ALL {
@@ -309,6 +314,43 @@ mod tests {
             };
             assert!(culled.0 == all.0, "{name} {angles:?} {drew}: {}", differ(&culled.0, &all.0));
             assert!(culled.1 < all.1, "{name} {angles:?}: culling drew {} {drew} of {}", culled.1, all.1);
+        }
+    }
+
+    /**
+     * Hiding cells on the CPU (renderer.rs's Hiding) draws fewer chunks of
+     * the forest from its spawn, and once all its probes asked for is drawn
+     * (drawn_complete), leaves it unchanged in relief, there and moved on
+     * within its pick. (As splats, and flat, a pixel or two falls by the
+     * order of their chunks, hiding or not.)
+     */
+    #[test]
+    #[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
+    fn hiding_leaves_the_picture_unchanged() {
+        let forward = |look: &Look, by: f64| {
+            let f = view_basis(look.yaw, look.pitch)[2];
+            Look { camera: std::array::from_fn(|i| look.camera[i] + f[i] * by), ..*look }
+        };
+        // Each from a world of its own: how many chunks a frame has when complete depends on the tiles made before.
+        let [hidden, all] = [true, false].map(|hides| {
+            let (mut world, look) = world_and_look("forest", [0.0, 0.0], 2f64.powf(3.25));
+            let look = Look { hides, ..look };
+            let (mut chunks, mut easel) = (Chunks::new(&world, true, false), Easel::offscreen(None));
+            let mut drawn = |look: &Look| {
+                let frame = crate::drawn_complete(&mut chunks, &mut world, look, false, &mut easel);
+                let pixels = easel.pixels(&*frame.picture, PIXELS).2;
+                let composed: Box<dyn Any> = frame.picture;
+                let composed: Box<Composed> = composed.downcast().expect("chunks");
+                // Its chunks that draw: not probes, which have nothing to (compositor::probe).
+                (pixels, composed.frame.chunks.iter().filter(|p| !p.chunk.baked.columns.is_empty()).count())
+            };
+            [drawn(&look), drawn(&forward(&look, 1.5))]
+        });
+        for (moved, (hidden, all)) in hidden.iter().zip(&all).enumerate() {
+            assert!(hidden.1 < all.1, "moved {moved}: {} chunks of {}", hidden.1, all.1);
+            // The sky's fog follows the farthest chunk (Frame's `farthest`), which may be hidden.
+            let most = hidden.0.iter().zip(&all.0).map(|(a, b)| a.abs_diff(*b)).max().unwrap_or(0);
+            assert!(most <= 1, "moved {moved}: {}", differ(&hidden.0, &all.0));
         }
     }
 

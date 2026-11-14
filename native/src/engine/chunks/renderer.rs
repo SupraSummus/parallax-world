@@ -11,8 +11,8 @@
 //! See docs/architecture.md, sections 1 to 5.
 
 use std::collections::VecDeque;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use bake::lod::{CellChunk, Lod, Picked, distance};
 use bake::slicing::LAYER;
@@ -21,6 +21,8 @@ use fcc::Lattice;
 use fcc::{FastMap, FastSet, GRID_LEVELS, Tiles};
 
 use super::bakery::{Baked, Bakery, Request};
+use super::compositor::{Flat, probe};
+use super::occlusion::{Box3, Occlusion};
 use crate::engine::Look;
 use crate::view::{self, Face, to_local};
 use crate::world::{Heights, Level, TILE, TileId, World, within};
@@ -65,6 +67,45 @@ pub struct Frame {
     pub relief: bool,
     /** Whether its reliefs are drawn flat, a picture a cell (compositor::flatten). */
     pub flat: bool,
+    /** Where the compositor tells which of its probes show, and how many times it had told when this frame was rendered. */
+    pub feedback: Arc<Feedback>,
+    pub heard: u64,
+}
+
+/**
+ * What the compositor found of the frames' probes (compositor::probe): the
+ * chunk ids of those that show, and how many times it found any; and how
+ * to wake the renderer, so that it bakes their cells.
+ */
+pub struct Feedback {
+    found: Mutex<(Vec<u32>, u64)>,
+    wake: Box<dyn Fn() + Send + Sync>,
+}
+
+impl Feedback {
+    /** Tells the renderer that the probes of chunk ids `ids` show, if any do. */
+    pub fn report(&self, ids: Vec<u32>) {
+        if ids.is_empty() {
+            return;
+        }
+        {
+            let mut found = self.found.lock().expect("feedback");
+            found.0.extend(ids);
+            found.1 += 1;
+        }
+        (self.wake)();
+    }
+
+    /** How many times it was told of probes that show. */
+    pub fn reports(&self) -> u64 {
+        self.found.lock().expect("feedback").1
+    }
+
+    /** The ids it was told of since the last call, and how many times it was told in all. */
+    fn take(&self) -> (Vec<u32>, u64) {
+        let mut found = self.found.lock().expect("feedback");
+        (std::mem::take(&mut found.0), found.1)
+    }
 }
 
 /**
@@ -104,6 +145,9 @@ pub struct Stats {
     pub queued: usize,
     /** Tiles that cells in view read and the world has not made, by grid level, most wanted first. */
     pub tiles: Vec<(usize, TileId)>,
+    /** Cells hidden in the faces in view (Hiding), each a probe among the frame's chunks, and how many the GPU found showing after all, of all hidden. */
+    pub hidden: usize,
+    pub found: usize,
 }
 
 /**
@@ -118,7 +162,8 @@ const TURN: f64 = 0.15;
 /**
  * What is known of a cell of a face: nothing yet; that it holds nothing
  * (all above or below the world, meeting none of its level's voxels,
- * or baked empty); that it waits for the tiles it reads (box_tiles), or for its
+ * or baked empty); that it is hidden (Hiding), so not baked while that
+ * holds; that it waits for the tiles it reads (box_tiles), or for its
  * bake; or its chunk.
  */
 #[derive(Clone, Default)]
@@ -126,17 +171,188 @@ enum Seen {
     #[default]
     Unknown,
     Empty,
+    Hidden,
     Tiles([TileId; 2]),
     Bake([TileId; 2]),
     Baked(Arc<Chunk>),
 }
 
-/** A face's cells picked, each with what is known of it, and of those it composes: the chunks, the cells that wait for tiles, and those to bake. */
+/**
+ * A face's cells picked, each with what is known of it, and of those it
+ * composes: the chunks, the cells that wait for tiles, and those to bake;
+ * and, of whole voxels, what hides cells, and those it hid.
+ */
 struct Pick {
     picked: Picked<Seen>,
     chunks: Vec<Placement>,
     waiting: Vec<(CellChunk, [TileId; 2], Wanted)>,
     baking: FastMap<CellChunk, (Request, Wanted)>,
+    hiding: Option<Hiding>,
+    hidden: Vec<Hidden>,
+    /** The cells the GPU found showing after all: not hidden again while picked. */
+    showing: FastSet<CellChunk>,
+}
+
+/**
+ * A cell hidden (Hiding): the tiles it reads, how it is wanted, its request
+ * if it was to bake, and its probe, which asks the GPU whether it shows
+ * after all (compositor::probe).
+ */
+struct Hidden {
+    cell: CellChunk,
+    tiles: [TileId; 2],
+    wanted: Wanted,
+    request: Option<Request>,
+    probe: Arc<Chunk>,
+}
+
+/** The probes of face `face`'s hidden cells: their chunks' ids, from the renderer's, and by id, each's face and cell. */
+struct Asking<'a> {
+    face: usize,
+    next_id: &'a mut u32,
+    probes: &'a mut FastMap<u32, (usize, CellChunk)>,
+}
+
+impl Asking<'_> {
+    /** A probe of `cell`, whose box is `shown`. */
+    fn probe(&mut self, cell: CellChunk, shown: Box3) -> Arc<Chunk> {
+        *self.next_id += 1;
+        let (origin, clusters) = probe(shown, f64::from(cell.site[2] << cell.atoms) * LAYER);
+        let baked = Baked { origin, columns: Vec::new(), splats: Vec::new(), clusters, veils: 1, flat: Flat::default() };
+        self.probes.insert(*self.next_id, (self.face, cell));
+        Arc::new(Chunk { id: *self.next_id, baked })
+    }
+}
+
+/**
+ * What hides a face's cells (occlusion.rs): rays cast from where the eye
+ * was when the face was picked through the voxels drawn along them, the grid of the level claiming
+ * each layer (Lod::claiming), each stopped at the first whole voxel it
+ * meets. So ground, walls, trunks and leaves (shown as grain, as often as
+ * they cover: worldgen's VoxelGrid::show) hide what is behind them, and a
+ * wood what is deep enough in it; see-through voxels, mist, hide nothing,
+ * as the GPU, which sees no mist in its depths, would ask for it all.
+ * A cell is hidden if all it may draw (`shown`) is behind where the rays
+ * round it stop.
+ * Between rays, or from where the eye has moved since (DRIFT), it may
+ * show: so each cell hidden asks the GPU whether it does after all.
+ */
+struct Hiding {
+    occlusion: Occlusion,
+    /** Where the eye was, its rays cast from, in a face's lattice coordinates. */
+    centre: [f64; 3],
+    far: f64,
+    lod: Lod,
+    lattice: Lattice,
+    /** Whether cells are drawn flat (Request's `flat`). */
+    flat: bool,
+    /** Each grid level's heights, past which rays meet nothing; the tiles rays went through last, by level. */
+    heights: Heights,
+    cast: Vec<Arc<Tiles>>,
+    /** Whether some rays met tiles not made, and may yet stop nearer. */
+    open: bool,
+}
+
+impl Hiding {
+    /** From the eye at `eye`. */
+    fn new(eye: [f64; 3], far: f64, lod: Lod, lattice: Lattice, flat: bool, heights: Heights) -> Hiding {
+        let occlusion = Occlusion::new([eye[0] * LAYER, eye[1], eye[2] * LAYER]);
+        Hiding { occlusion, centre: eye, far, lod, lattice, flat, heights, cast: Vec::new(), open: true }
+    }
+
+    /**
+     * Where what is drawn of `cell` may be: its box, a cell deeper, its
+     * pillars running on, and half a cell nearer (without, the GPU missed
+     * some that showed); drawn flat, its picture's plane and its edges
+     * enlarged as far as its pillars reach from it (compositor.rs's Flat),
+     * the cell's depth (2N layers) at most, a little more, across and along.
+     */
+    fn shown(&self, cell: &CellChunk) -> Box3 {
+        let n = f64::from(1 << cell.level);
+        let reach = if self.flat { 1.5 * n } else { 0.0 };
+        let mut shown = centred(cell, [n * LAYER + reach, n + reach, n * LAYER]);
+        shown[2] = [shown[2][0] - n * LAYER / 2.0 - reach, shown[2][1] + 2.0 * n * LAYER];
+        shown
+    }
+
+    /** Whether nothing of `cell` shows: all it may draw (`shown`) is behind where the rays stop. */
+    fn hides(&self, cell: &CellChunk) -> bool {
+        self.occlusion.hides(self.shown(cell))
+    }
+
+    /** Whether to cast rays: never cast, or some met tiles not made, and tiles came since. */
+    fn stale(&self, levels: &[Arc<Level>]) -> bool {
+        self.open && (self.cast.len() != levels.len() || self.cast.iter().zip(levels).any(|(c, l)| !Arc::ptr_eq(c, &l.grids)))
+    }
+
+    /**
+     * Casts on its rays that may yet stop nearer (occlusion.rs), through the
+     * tiles of `levels`: half a voxel at a time, stopping where the nearest
+     * site's voxel is whole; across a brick holding none, half a brick at a
+     * time. Never, past the render distance, or out of the world's heights
+     * going away. Where a tile is not made, it waits to go on from there.
+     */
+    fn cast(&mut self, levels: &[Arc<Level>]) {
+        self.cast = levels.iter().map(|l| l.grids.clone()).collect();
+        let eye = [self.centre[0] * LAYER, self.centre[1], self.centre[2] * LAYER];
+        let Lattice { r, u, f } = self.lattice;
+        let (lod, far, heights, layer) = (self.lod, self.far, self.heights, self.centre[2].floor() as i32);
+        // Of a face's coordinates in units of grid 0, the world's: (a R + c F) / 2 + b U, a = x / LAYER, b = y, c = z / LAYER.
+        let world = |p: [f64; 3]| -> [f64; 3] {
+            std::array::from_fn(|d| (p[0] / LAYER * f64::from(r[d]) + p[2] / LAYER * f64::from(f[d])) / 2.0 + p[1] * f64::from(u[d]))
+        };
+        self.open = self.occlusion.cast(|[tx, ty], from| {
+            let rising = world([tx, ty, 1.0])[1];
+            let mut t = from.max(LAYER);
+            // The tile read last, of its grid.
+            let mut last: Option<(i32, TileId, &fcc::Grid)> = None;
+            while t < far {
+                let at = world([eye[0] + tx * t, eye[1] + ty * t, eye[2] + t]);
+                let grid = lod.grid(lod.claiming((eye[2] + t) / LAYER, layer));
+                let unit = f64::from(1 << grid);
+                let (low, high) = heights[grid as usize];
+                let q = at.map(|v| v / unit);
+                if (q[1] >= high as f64 && rising >= 0.0) || (q[1] < low as f64 && rising <= 0.0) {
+                    break;
+                }
+                let site = nearest_site(q);
+                let id = site.map(|v| (v as i64).div_euclid(TILE) as i32);
+                if last.is_none_or(|(g, i, _)| g != grid || i != id) {
+                    last = levels[grid as usize].tiles.get(&id).map(|t| (grid, id, &*t.grid));
+                }
+                let mut step = f64::from(fcc::BRICK) / 2.0 * unit;
+                match last {
+                    None => return (f64::INFINITY, Some(t)),
+                    Some((.., g)) if g.brick(site[0], site[1], site[2]) >= 0 => {
+                        if g.get(site[0], site[1], site[2]).1 == fcc::ALPHA {
+                            return (eye[2] + t, None);
+                        }
+                        step = unit / 2.0;
+                    }
+                    Some(_) => (),
+                }
+                t += step;
+            }
+            (f64::INFINITY, None)
+        });
+    }
+}
+
+/** The site of the FCC lattice (coordinates adding up to an even number) nearest point `q`. */
+fn nearest_site(q: [f64; 3]) -> [i32; 3] {
+    let mut s = q.map(f64::round);
+    if (s[0] + s[1] + s[2]) as i64 & 1 != 0 {
+        let d = (0..3).max_by(|&a, &b| (q[a] - s[a]).abs().total_cmp(&(q[b] - s[b]).abs())).expect("three");
+        s[d] += if q[d] > s[d] { 1.0 } else { -1.0 };
+    }
+    s.map(|v| v as i32)
+}
+
+/** The box of half widths `half` about a cell's site, in a face's coordinates in units of grid 0 (occlusion's Box3). */
+fn centred(cell: &CellChunk, half: [f64; 3]) -> Box3 {
+    let s = cell.site.map(|v| f64::from(v << cell.atoms));
+    let at = [s[0] * LAYER, s[1], s[2] * LAYER];
+    std::array::from_fn(|d| [at[d] - half[d], at[d] + half[d]])
 }
 
 /**
@@ -180,6 +396,12 @@ pub struct Renderer {
     flat: bool,
     /** Whether the chunks it has are lit (Request's `lit`): when the look's lighting changes, they are baked again. */
     lit: bool,
+    /** Whether its picks hide cells (Look's `hides`): when that changes, they are picked again. */
+    hides: bool,
+    /** What the compositor finds of the probes; by their ids, each's face and cell; how many it found showing. */
+    feedback: Arc<Feedback>,
+    probes: FastMap<u32, (usize, CellChunk)>,
+    found: usize,
     /** Per level, the world's tiles the cells waiting for tiles were last looked up in. */
     tiles: Vec<Arc<Tiles>>,
     /** The faces in view last, and what their picks composed then: the frame, and what it wants. */
@@ -245,6 +467,54 @@ fn may_hold(cell: &CellChunk, lattice: Lattice, level: &Level) -> bool {
     level.meets(centre, radius.max().expect("corners") + 1, true)
 }
 
+/**
+ * Casts `pick`'s hiding's rays, if it hides and they are to be cast; then,
+ * if they were or there are `fresh` cells to bake, those it hides of the
+ * cells that wait for tiles or bakes are hidden, neither baked nor their
+ * tiles asked for, each with a probe. Whether any were.
+ */
+fn hide(pick: &mut Pick, fresh: bool, levels: &[Arc<Level>], asking: &mut Asking) -> bool {
+    let Some(hiding) = &mut pick.hiding else { return false };
+    let cast = hiding.stale(levels);
+    if cast {
+        hiding.cast(levels);
+    }
+    if !cast && !fresh {
+        return false;
+    }
+    let showing = &pick.showing;
+    let hides = |cell: &CellChunk| !showing.contains(cell) && hiding.hides(cell);
+    let mut hidden = Vec::new();
+    pick.waiting.retain(|&(cell, tiles, wanted)| !hides(&cell) || (hidden.push((cell, tiles, wanted, None)), false).1);
+    pick.baking.retain(|&cell, &mut (r, wanted)| !hides(&cell) || (hidden.push((cell, r.tiles, wanted, Some(r))), false).1);
+    let any = !hidden.is_empty();
+    for (cell, tiles, wanted, request) in hidden {
+        if let Some(seen) = pick.picked.at(&cell) {
+            *seen = Seen::Hidden;
+        }
+        let probe = asking.probe(cell, hiding.shown(&cell));
+        pick.hidden.push(Hidden { cell, tiles, wanted, request, probe });
+    }
+    any
+}
+
+/** Takes cell `h` of face `f`'s `pick` out of hiding: it waits for tiles or its bake again, or, baked meanwhile, is drawn. */
+fn unhide(f: usize, pick: &mut Pick, h: Hidden) {
+    let Some(seen) = pick.picked.at(&h.cell) else { return };
+    match (&*seen, h.request) {
+        (Seen::Hidden, Some(r)) => {
+            *seen = Seen::Bake(h.tiles);
+            pick.baking.insert(h.cell, (r, h.wanted));
+        }
+        (Seen::Hidden, None) => {
+            *seen = Seen::Tiles(h.tiles);
+            pick.waiting.push((h.cell, h.tiles, h.wanted));
+        }
+        (Seen::Baked(chunk), _) => pick.chunks.push(Placement { face: f, cell: h.cell, chunk: chunk.clone() }),
+        _ => (),
+    }
+}
+
 impl Renderer {
     /**
      * A renderer of `world`, its whole voxels reliefs or splats each, its
@@ -255,14 +525,21 @@ impl Renderer {
     pub fn new(world: &World, relief: bool, flat: bool, baked: impl Fn() + Send + Sync + 'static) -> Renderer {
         let faces = view::faces();
         let (palette, light) = (world.palette.clone(), world.light());
-        let bakery = Bakery::new(world.threads, baked, move || {
-            let mut baker = Baker::new(&palette);
-            if let Some(light) = &light {
-                let mut light = light();
-                baker.light = Some(Box::new(move |level, site| light.faces(level as u32, site.map(i64::from))));
-            }
-            baker
-        });
+        let baked = Arc::new(baked);
+        let wake = baked.clone();
+        let feedback = Arc::new(Feedback { found: Mutex::default(), wake: Box::new(move || wake()) });
+        let bakery = Bakery::new(
+            world.threads,
+            move || baked(),
+            move || {
+                let mut baker = Baker::new(&palette);
+                if let Some(light) = &light {
+                    let mut light = light();
+                    baker.light = Some(Box::new(move |level, site| light.faces(level as u32, site.map(i64::from))));
+                }
+                baker
+            },
+        );
         Renderer {
             picks: faces.iter().map(|_| [None, None]).collect(),
             shown: vec![false; faces.len()],
@@ -275,9 +552,22 @@ impl Renderer {
             relief,
             flat,
             lit: false,
+            hides: true,
+            feedback: feedback.clone(),
+            probes: FastMap::default(),
+            found: 0,
             tiles: (0..GRID_LEVELS).map(|_| Arc::new(Tiles::new(0, []))).collect(),
-            frame: Frame { chunks: Arc::default(), number: number(), changes: Arc::new([]), farthest: 0.0, relief, flat },
-            stats: Stats { baking: 0, queued: 0, tiles: Vec::new() },
+            frame: Frame {
+                chunks: Arc::default(),
+                number: number(),
+                changes: Arc::new([]),
+                farthest: 0.0,
+                relief,
+                flat,
+                feedback,
+                heard: 0,
+            },
+            stats: Stats { baking: 0, queued: 0, tiles: Vec::new(), hidden: 0, found: 0 },
             ids: FastSet::default(),
             changes: VecDeque::new(),
         }
@@ -292,6 +582,25 @@ impl Renderer {
             self.lit = look.light.is_some();
             changed = true;
         }
+        if look.hides != self.hides {
+            self.picks.iter_mut().for_each(|p| *p = [None, None]);
+            self.probes.clear();
+            self.hides = look.hides;
+            changed = true;
+        }
+        // Cells whose probes the GPU found showing are unhidden, and not hidden again while picked.
+        let (found, heard) = self.feedback.take();
+        let mut asked = vec![false; self.faces.len()];
+        for id in found {
+            let Some((f, _)) = self.probes.remove(&id) else { continue };
+            let Some(pick) = self.picks[f][0].as_mut() else { continue };
+            let Some(k) = pick.hidden.iter().position(|h| h.probe.id == id) else { continue };
+            let h = pick.hidden.swap_remove(k);
+            pick.showing.insert(h.cell);
+            unhide(f, pick, h);
+            (asked[f], changed, self.found) = (true, true, self.found + 1);
+        }
+        self.frame.heard = heard;
         // Cells that lacked tiles can be baked.
         let mut arrived = [false; GRID_LEVELS];
         for (level, arrived) in arrived.iter_mut().enumerate() {
@@ -306,7 +615,7 @@ impl Renderer {
         self.renders += 1;
         let (camera, view) = (look.camera, look.view());
         let whole = Lod::new(look.shift, look.detail);
-        for f in 0..self.faces.len() {
+        for (f, asked) in asked.into_iter().enumerate() {
             let tangents = view.face_tangents(&self.faces[f]);
             // Back in view, its cells look for every tile that came meanwhile.
             let back = tangents.is_some() && !self.shown[f];
@@ -318,7 +627,9 @@ impl Renderer {
             for lod in [whole, whole.for_medium()] {
                 let part = usize::from(lod.medium);
                 if self.picks[f][part].as_ref().is_some_and(|p| p.picked.covers(&lod, look.far, eye, tangents)) {
-                    changed |= self.look_up(f, part, if back { &[true; GRID_LEVELS] } else { &arrived }, levels, view.focal, local);
+                    // Unhidden, what waits for tiles looks for those that came meanwhile, as back in view.
+                    let all = back || asked;
+                    changed |= self.look_up(f, part, if all { &[true; GRID_LEVELS] } else { &arrived }, levels, view.focal, local);
                     continue;
                 }
                 let [t0, t1, t2, t3] = tangents;
@@ -326,7 +637,10 @@ impl Renderer {
                 // Within the face's rays: |x| + √2 |y| ≤ z.
                 let y = std::f64::consts::FRAC_1_SQRT_2;
                 let wide = [(t0 - TURN).max(-1.0), (t1 + TURN).min(1.0), (t2 - TURN).max(-y), (t3 + TURN).min(y)];
-                let mut old = self.picks[f][part].take().map(|p| p.picked);
+                let mut old = self.picks[f][part].take().map(|p| {
+                    p.hidden.iter().for_each(|h| _ = self.probes.remove(&h.probe.id));
+                    p.picked
+                });
                 let picked = lod.pick(eyes, look.far, wide, old.as_mut());
                 // The chunks the new pick does not have are kept a while, as if just looked up.
                 let renders = self.renders;
@@ -371,6 +685,10 @@ impl Renderer {
         let (mut chunks, mut waiting, mut baking) = (Vec::new(), Vec::new(), FastMap::default());
         let (eyes, wide) = picked.bounds();
         lod.composed(&mut picked, eyes, wide, |cell, seen| {
+            // Hidden from where the eye was at the last pick, maybe not from where it is.
+            if matches!(seen, Seen::Hidden) {
+                *seen = Seen::Unknown;
+            }
             if matches!(seen, Seen::Empty) {
                 return;
             }
@@ -397,13 +715,16 @@ impl Renderer {
             }
             let wanted = Wanted { distance: distance(&cell, eye), in_view: lod.composes(&cell, eye, far, tangents) };
             match seen {
-                Seen::Unknown | Seen::Empty => (),
+                Seen::Unknown | Seen::Hidden | Seen::Empty => (),
                 &mut Seen::Tiles(t) => waiting.push((cell, t, wanted)),
                 &mut Seen::Bake(t) => _ = baking.insert(cell, (request(cell, t), wanted)),
                 Seen::Baked(chunk) => chunks.push(Placement { face: f, cell, chunk: chunk.clone() }),
             }
         });
-        self.picks[f][usize::from(lod.medium)] = Some(Pick { picked, chunks, waiting, baking });
+        let hiding = (!lod.medium && self.hides).then(|| Hiding::new(eye, far, *lod, lattice, self.flat, self.heights));
+        let mut pick = Pick { picked, chunks, waiting, baking, hiding, hidden: Vec::new(), showing: FastSet::default() };
+        _ = hide(&mut pick, true, levels, &mut Asking { face: f, next_id: &mut self.next_id, probes: &mut self.probes });
+        self.picks[f][usize::from(lod.medium)] = Some(pick);
     }
 
     /** Requests to bake a cell of face `f` that reads given tiles, the eye at `local` seeing at `focal`. */
@@ -450,14 +771,15 @@ impl Renderer {
             false
         });
         let changed = pick.waiting.len() < before;
+        let hid = hide(&mut pick, changed, levels, &mut Asking { face: f, next_id: &mut self.next_id, probes: &mut self.probes });
         self.picks[f][part] = Some(pick);
-        changed
+        changed || hid
     }
 
     /** The frame of what the faces in view composed, and what they want: the chunks to bake, and the tiles, nearest first. */
     fn gather(&mut self, look: &Look) {
         let picks = || self.picks.iter().zip(&self.shown).filter(|p| *p.1).flat_map(|p| p.0.iter().flatten());
-        let chunks: Vec<Placement> = picks().flat_map(|p| p.chunks.iter().cloned()).collect();
+        let mut chunks: Vec<Placement> = picks().flat_map(|p| p.chunks.iter().cloned()).collect();
         // Their planes through their sites.
         let farthest = chunks
             .iter()
@@ -467,6 +789,10 @@ impl Renderer {
             })
             .fold(look.far, f64::max);
         self.frame.farthest = farthest;
+        // The probes, after all that draws.
+        let shown =
+            self.picks.iter().enumerate().zip(&self.shown).filter(|p| *p.1).flat_map(|((f, p), _)| p.iter().flatten().map(move |p| (f, p)));
+        chunks.extend(shown.flat_map(|(face, p)| p.hidden.iter().map(move |h| Placement { face, cell: h.cell, chunk: h.probe.clone() })));
         let ids: FastSet<u32> = chunks.iter().map(|p| p.chunk.id).collect();
         let came: Vec<Placement> = chunks.iter().filter(|p| !self.ids.contains(&p.chunk.id)).cloned().collect();
         let went: Vec<u32> = self.ids.iter().filter(|id| !ids.contains(id)).copied().collect();
@@ -497,6 +823,8 @@ impl Renderer {
             baking: baking.iter().filter(|b| b.1.in_view).count(),
             queued: baking.len(),
             tiles: tiles.into_iter().filter(|t| listed.insert((t.0, t.1))).map(|t| (t.0, t.1)).collect(),
+            hidden: picks().map(|p| p.hidden.len()).sum(),
+            found: self.found,
         };
     }
 

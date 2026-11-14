@@ -97,7 +97,8 @@ const FLAT = 2.0;
 // (low byte of `slot_count`), the widest's half width `wide`; or `count`
 // runs of a picture from `first`, its first column's centre `base`, of
 // medium, its slab's first layer `layer` and how deep its halves are,
-// `half`, in half layers (see veil_fragment). Its chunk's slot
+// `half`, in half layers (see veil_fragment); or, `wide` below 0, a probe
+// (is_probe), a box with nothing to draw. Its chunk's slot
 // (`slot_count` above the low byte), the box of their outlines along the
 // axis relative to the chunk's origin, whether any showed in the last
 // frame, and how far past the plane they are, nearest and farthest.
@@ -143,6 +144,8 @@ struct DrawArgs {
 @group(0) @binding(9) var<storage, read_write> veils_drawn: atomic<u32>;
 @group(0) @binding(16) var<storage, read_write> veil_draws: array<DrawArgs>;
 @group(0) @binding(22) var<storage, read_write> veil_places: array<atomic<u32>>;
+// The probes that show (probe_shows), by cluster: how many, then which.
+@group(0) @binding(23) var<storage, read_write> found: array<atomic<u32>>;
 // The chunks' records, by slot, and the chunks place makes of them.
 @group(0) @binding(17) var<storage, read> records: array<Record>;
 @group(0) @binding(18) var<storage, read_write> made: array<Chunk>;
@@ -651,41 +654,76 @@ fn closest_to_zero(lo: f32, hi: f32) -> f32 {
   return select(select(0.0, -hi, hi < 0.0), lo, lo > 0.0);
 }
 
-// Where a cluster may draw on screen, in pixels (left, top, right, bottom),
-// within its face's rays, a hair wider (owns); empty if it draws
-// nowhere: all behind the eye.
-fn screen_box(cluster: Cluster) -> vec4f {
+// The rays through a cluster's box, as a rectangle of its face's tangents,
+// at most its corners', near and far; a splat's widened by its slant
+// across (splat_vertex). `ahead`: NOWHERE if it is all behind the eye or
+// past its face's rays, a hair wider (owns); BEHIND if it reaches behind
+// the eye's plane; else AHEAD.
+const NOWHERE = 0u;
+const BEHIND = 1u;
+const AHEAD = 2u;
+struct Rays {
+  lo: vec2f,
+  hi: vec2f,
+  ahead: u32,
+}
+fn rays_of(cluster: Cluster) -> Rays {
   let c = chunks[cluster.slot_count >> 8u];
-  // The rays through its box, as tangents, at most its corners', near and
-  // far; a splat's widened by its slant across (splat_vertex).
   let z = c.distance + vec2f(cluster.near, cluster.far);
+  var r = Rays(c.origin + cluster.min, c.origin + cluster.max, AHEAD);
   if z.y <= 0.0 {
-    return vec4f(0.0);
+    r.ahead = NOWHERE;
+    return r;
   }
   if z.x <= 0.0 {
-    return vec4f(vec2f(0.0), globals.resolution);
+    r.ahead = BEHIND;
+    return r;
   }
-  var lo = c.origin + cluster.min;
-  var hi = c.origin + cluster.max;
-  let slant = max(max(abs(lo.x) / z.x, abs(hi.x) / z.x), max(abs(lo.x) / z.y, abs(hi.x) / z.y));
-  lo.x -= cluster.wide * slant;
-  hi.x += cluster.wide * slant;
-  lo = min(lo / z.x, lo / z.y);
-  hi = max(hi / z.x, hi / z.y);
-  if closest_to_zero(lo.x, hi.x) + sqrt(2.0) * closest_to_zero(lo.y, hi.y) > 1.001 {
+  let wide = max(cluster.wide, 0.0);
+  let slant = max(max(abs(r.lo.x) / z.x, abs(r.hi.x) / z.x), max(abs(r.lo.x) / z.y, abs(r.hi.x) / z.y));
+  r.lo.x -= wide * slant;
+  r.hi.x += wide * slant;
+  r.lo = min(r.lo / z.x, r.lo / z.y);
+  r.hi = max(r.hi / z.x, r.hi / z.y);
+  if closest_to_zero(r.lo.x, r.hi.x) + sqrt(2.0) * closest_to_zero(r.lo.y, r.hi.y) > 1.001 {
+    r.ahead = NOWHERE;
+  }
+  return r;
+}
+
+// A rectangle of face `face`'s tangents on screen, in pixels: its corners
+// round it, from (lo, lo), (hi, lo), (hi, hi), (lo, hi); `behind` if one
+// is behind the camera, so that it goes off the screen.
+struct Quad {
+  corners: array<vec2f, 4>,
+  behind: bool,
+}
+fn quad_of(face: u32, lo: vec2f, hi: vec2f) -> Quad {
+  let view = transpose(globals.faces[face].view);
+  var q: Quad;
+  q.behind = false;
+  for (var k = 0u; k < 4u; k++) {
+    let p = view * vec3f(select(lo.x, hi.x, k == 1u || k == 2u), select(lo.y, hi.y, k >= 2u), 1.0);
+    q.behind = q.behind || p.z <= 0.0;
+    q.corners[k] = (p.xy * globals.focal / (globals.viewport / 2.0) / p.z * vec2f(0.5, -0.5) + 0.5) * globals.resolution;
+  }
+  return q;
+}
+
+// Where a cluster may draw on screen, in pixels (left, top, right, bottom):
+// its rays' quad's box; empty if it draws nowhere, all the screen if it
+// reaches behind the eye.
+fn screen_box(cluster: Cluster) -> vec4f {
+  let r = rays_of(cluster);
+  if r.ahead == NOWHERE {
     return vec4f(0.0);
   }
-  let view = transpose(globals.faces[c.face].view);
-  var b = vec4f(globals.resolution, vec2f(0.0));
-  for (var k = 0u; k < 4u; k++) {
-    let p = view * vec3f(select(lo.x, hi.x, (k & 1u) != 0u), select(lo.y, hi.y, k >= 2u), 1.0);
-    // A corner behind the camera: the box goes off the screen, so take all of it.
-    if p.z <= 0.0 {
-      return vec4f(vec2f(0.0), globals.resolution);
-    }
-    let s = (p.xy * globals.focal / (globals.viewport / 2.0) / p.z * vec2f(0.5, -0.5) + 0.5) * globals.resolution;
-    b = vec4f(min(b.xy, s), max(b.zw, s));
+  let q = quad_of(chunks[cluster.slot_count >> 8u].face, r.lo, r.hi);
+  if r.ahead == BEHIND || q.behind {
+    return vec4f(vec2f(0.0), globals.resolution);
   }
+  let c = q.corners;
+  let b = vec4f(min(min(c[0], c[1]), min(c[2], c[3])), max(max(c[0], c[1]), max(c[2], c[3])));
   return clamp(b, vec4f(0.0), globals.resolution.xyxy);
 }
 
@@ -763,6 +801,61 @@ fn draws_cluster(at: u32, cluster: Cluster, phase: u32) -> bool {
   return visible && cluster.visible == 0u;
 }
 
+// Whether a probe's box (compositor.rs's probe), of a cell hidden, may
+// show: its cell claimed from where the eye is, in view, and not behind
+// what is drawn, all of it (find_probes). A probe's box borders what
+// shows, so it is tested more finely than a cluster: of the pyramid's
+// level at which its quad on screen (screen_box's) spans at most
+// PROBE_TEXELS each way, every texel the quad meets. Its draw is none.
+const PROBE_TEXELS = 8.0;
+fn is_probe(cluster: Cluster) -> bool {
+  return cluster.wide < 0.0;
+}
+fn probe_shows(cluster: Cluster, c: Chunk) -> bool {
+  let r = rays_of(cluster);
+  if c.plane.w == 0.0 || r.ahead == NOWHERE {
+    return false;
+  }
+  let q = quad_of(c.face, r.lo, r.hi);
+  if r.ahead == BEHIND || q.behind || !culls {
+    return true;
+  }
+  let quad = q.corners;
+  let b = screen_box(cluster);
+  if !shows(b) {
+    return false;
+  }
+  let depth = nearest_depth(cluster, c.level) * (1.0 - exp2(-18.0));
+  let turn = sign((quad[1].x - quad[0].x) * (quad[2].y - quad[0].y) - (quad[1].y - quad[0].y) * (quad[2].x - quad[0].x));
+  let levels = i32(textureNumLevels(farthest));
+  let level = clamp(i32(ceil(log2(max(max(b.z - b.x, b.w - b.y) / PROBE_TEXELS, 1.0)))) - 1, 0, levels - 1);
+  let texel = f32(2 << u32(level));
+  let last = max(vec2i(textureDimensions(farthest)) >> vec2u(u32(level)), vec2i(1)) - 1;
+  let start = min(vec2i(floor(b.xy / texel)), last);
+  let end = min(vec2i(ceil(b.zw / texel)) - 1, last);
+  for (var y = start.y; y <= end.y; y++) {
+    for (var x = start.x; x <= end.x; x++) {
+      // The texel meets the quad unless all its corners are outside one edge.
+      let corner = vec2f(f32(x), f32(y)) * texel;
+      var meets = true;
+      for (var e = 0u; e < 4u; e++) {
+        let a = quad[e];
+        let d = quad[(e + 1u) % 4u] - a;
+        var inside = false;
+        for (var k = 0u; k < 4u; k++) {
+          let q = corner + vec2f(f32(k & 1u), f32(k >> 1u)) * texel - a;
+          inside = inside || turn * (d.x * q.y - d.y * q.x) >= 0.0;
+        }
+        meets = meets && inside;
+      }
+      if meets && textureLoad(farthest, vec2i(x, y), level).r >= depth {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 // A thread per cluster of all, of a chunk the frame draws; those left
 // where chunks were, which their slot's chunk does not hold, are none.
 // Whole voxels' (a tile, whole splats or runs of a picture), its draw:
@@ -785,6 +878,8 @@ fn cull(at: u32, phase: u32) {
         atomicAdd(&veil_places[place], 1u);
       }
     }
+  } else if at >= c.whole.x && at < c.whole.y && is_probe(cluster) {
+    // A probe: find_probes tests it.
   } else if at >= c.whole.x && at < c.whole.y && draws_cluster(at, cluster, phase) {
     draw = DrawArgs(4u, 1u, 0u, at);
     if globals.whole == 1.0 {
@@ -854,6 +949,25 @@ fn order_veils(@builtin(workgroup_id) id: vec3u, @builtin(num_workgroups) n: vec
 // The thread's place among those of its dispatch (compositor.rs's groups).
 fn thread_of(id: vec3u, n: vec3u, thread: u32) -> u32 {
   return (id.y * n.x + id.x) * 64u + thread;
+}
+
+// A thread per cluster of all: of the probes, those that show listed in
+// `found`, once the frame's whole voxels are all drawn and the pyramid made
+// of them anew: the first phase's pyramid lacks what showed only now.
+@compute @workgroup_size(64)
+fn find_probes(@builtin(workgroup_id) id: vec3u, @builtin(num_workgroups) n: vec3u, @builtin(local_invocation_index) thread: u32) {
+  let at = thread_of(id, n, thread);
+  if at >= arrayLength(&clusters) {
+    return;
+  }
+  let cluster = clusters[at];
+  let c = chunks[cluster.slot_count >> 8u];
+  if at >= c.whole.x && at < c.whole.y && is_probe(cluster) && probe_shows(cluster, c) {
+    let k = atomicAdd(&found[0], 1u) + 1u;
+    if k < arrayLength(&found) {
+      atomicStore(&found[k], at);
+    }
+  }
 }
 
 @compute @workgroup_size(64)
