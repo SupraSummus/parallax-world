@@ -807,9 +807,42 @@ pub struct Compositor {
 
 const SKY_TOP: [f32; 3] = [0x3f as f32 / 255.0, 0x73 as f32 / 255.0, 0xb8 as f32 / 255.0];
 const SKY_HORIZON: [f32; 3] = [0xb9 as f32 / 255.0, 0xd3 as f32 / 255.0, 0xe8 as f32 / 255.0];
-/** f32 in Globals (compositor.wgsl), and where its `whole` is. */
-const GLOBALS: usize = 276;
-const WHOLE: usize = 6;
+
+/** Globals in compositor.wgsl. */
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct Globals {
+    /** CSS pixels (points). */
+    viewport: [f32; 2],
+    /** Device pixels. */
+    resolution: [f32; 2],
+    focal: f32,
+    fog_distance: f32,
+    /** How whole voxels are drawn: 0 reliefs' tiles, 1 splats, 2 flat pictures. */
+    whole: f32,
+    sky_fog: f32,
+    sky_top: [f32; 4],
+    horizon: [f32; 4],
+    /** The camera's axes in world coordinates: columns of a mat3x3f. */
+    sky_view: [[f32; 4]; 3],
+    faces: [FaceView; 12],
+    /** The Lods of whole voxels and of the medium (View's). */
+    lod: [f32; 4],
+    medium: [f32; 4],
+}
+
+/** FaceView in compositor.wgsl. */
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct FaceView {
+    /** The camera's axes in the face's coordinates: columns of a mat3x3f. */
+    view: [[f32; 4]; 3],
+    /** Its axis in world coordinates, times √2. */
+    axis: [f32; 4],
+    /** The camera, in the face's coordinates. */
+    eye: [f32; 4],
+}
+
 const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const FARTHEST: wgpu::TextureFormat = wgpu::TextureFormat::R32Float;
 const VEIL: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
@@ -1077,7 +1110,7 @@ impl Compositor {
         Compositor {
             format,
             pipelines: Pipelines::new(device, format, culls),
-            globals: buffer(device, "globals", (GLOBALS * 4) as u64, wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST),
+            globals: buffer(device, "globals", size_of::<Globals>() as u64, wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST),
             records: Arena::new(device, "records", RECORD, U::STORAGE, 1024),
             table: buffer(device, "chunks", 1024 * CHUNK, U::STORAGE),
             columns: Arena::new(device, "columns", size_of::<GpuColumn>() as u64, wgpu::BufferUsages::STORAGE, 1 << 20),
@@ -1212,15 +1245,14 @@ impl Compositor {
             self.bind_groups(device);
         }
         let sky_fog = 1.0 - (-frame.farthest / view.fog_distance).exp();
-        let mut globals = view.globals(size, sky_fog);
-        globals[WHOLE] = if frame.flat {
+        let whole = if frame.flat {
             2.0
         } else if frame.relief {
             0.0
         } else {
             1.0
         };
-        queue.write_buffer(&self.globals, 0, bytemuck::cast_slice(&globals));
+        queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&view.globals(size, sky_fog, whole)));
     }
 
     /** A change of the frame's chunks, to apply: those that `came`, after what is still to come, and those that `went`. */
@@ -1527,35 +1559,32 @@ impl View {
         ((top - finest) * (4.0 * q + 3.0) + layers / 2f64.powf(top - 1.0) + 6.0).ceil() as u64
     }
 
-    fn globals(&self, pixels: [u32; 2], sky_fog: f64) -> [f32; GLOBALS] {
-        let mut g = [0.0f32; GLOBALS];
-        g[0..2].copy_from_slice(&self.size);
-        g[2..4].copy_from_slice(&pixels.map(|v| v as f32));
-        g[4] = self.focal as f32;
-        g[5] = self.fog_distance as f32;
-        g[7] = sky_fog as f32;
+    fn globals(&self, pixels: [u32; 2], sky_fog: f64, whole: f32) -> Globals {
         // Dimmed in linear terms, as light adds up.
-        let dim = |colour: [f32; 3]| colour.map(|c| linear_to_srgb(srgb_to_linear(c) * self.sky));
-        g[8..11].copy_from_slice(&dim(SKY_TOP));
-        g[12..15].copy_from_slice(&dim(SKY_HORIZON));
-        let axes = view_basis(self.yaw, self.pitch);
-        let columns = |g: &mut [f32], axes: [Vec3; 3]| {
-            for (c, axis) in axes.iter().enumerate() {
-                for d in 0..3 {
-                    g[c * 4 + d] = axis[d] as f32;
-                }
-            }
+        let rgba = |c: [f32; 3]| {
+            let [r, g, b] = c.map(|c| linear_to_srgb(srgb_to_linear(c) * self.sky));
+            [r, g, b, 1.0]
         };
-        columns(&mut g[16..28], axes);
-        for (f, face) in self.faces.iter().enumerate() {
-            let at = 28 + f * 20;
-            columns(&mut g[at..at + 12], axes.map(|axis| to_local(face, axis)));
-            g[at + 12..at + 15].copy_from_slice(&face[2].map(|v| (v * std::f64::consts::SQRT_2).round() as f32));
-            g[at + 16..at + 19].copy_from_slice(&to_local(face, self.camera).map(|v| v as f32));
+        let column = |v: Vec3| [v[0] as f32, v[1] as f32, v[2] as f32, 0.0];
+        let axes = view_basis(self.yaw, self.pitch);
+        Globals {
+            viewport: self.size,
+            resolution: pixels.map(|v| v as f32),
+            focal: self.focal as f32,
+            fog_distance: self.fog_distance as f32,
+            whole,
+            sky_fog: sky_fog as f32,
+            sky_top: rgba(SKY_TOP),
+            horizon: rgba(SKY_HORIZON),
+            sky_view: axes.map(column),
+            faces: self.faces.map(|face| FaceView {
+                view: axes.map(|axis| column(to_local(&face, axis))),
+                axis: column(face[2].map(|v| (v * std::f64::consts::SQRT_2).round())),
+                eye: column(to_local(&face, self.camera)),
+            }),
+            lod: self.lod,
+            medium: self.medium,
         }
-        g[268..272].copy_from_slice(&self.lod);
-        g[272..276].copy_from_slice(&self.medium);
-        g
     }
 }
 
@@ -1591,6 +1620,7 @@ impl Painter for Compositor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::gpu::wgsl;
 
     #[test]
     fn free_ranges_merge_and_give_the_least_that_fits() {
@@ -1615,5 +1645,23 @@ mod tests {
             // Within the limit, all of them, and at most a workgroup a row to spare.
             assert!(across <= most && across * rows >= n && across * rows < n + rows, "{n}: {across} × {rows}");
         }
+    }
+
+    #[test]
+    fn the_shader_is_valid_and_lays_out_what_this_file_writes() {
+        let module = wgsl::shader(include_str!("compositor.wgsl"));
+        wgsl::assert_layout!(
+            &module,
+            "Record",
+            GpuRecord { origin, depth, face, level, atoms, site, tint, min, max, plane, whole, half_layer, veils }
+        );
+        wgsl::assert_layout!(&module, "Cluster", GpuCluster { min, max, base, first, slot_count, visible, near, far, wide, layer, half });
+        assert_eq!(u64::from(wgsl::layout(&module, "Chunk").1), CHUNK);
+        wgsl::assert_layout!(
+            &module,
+            "Globals",
+            Globals { viewport, resolution, focal, fog_distance, whole, sky_fog, sky_top, horizon, sky_view, faces, lod, medium }
+        );
+        wgsl::assert_layout!(&module, "FaceView", FaceView { view, axis, eye });
     }
 }

@@ -17,3 +17,7 @@ pollster = "1"
 worldgen = { path = "../worldgen" }
 winit = { version = "0.30.13", default-features = false, features = ["rwh_06", "wayland", "x11"] }
 worlds = { path = "../worlds" }
+
+[dev-dependencies]
+naga = { version = "30", features = ["wgsl-in"] }
+wgpu-naga-bridge = "30"

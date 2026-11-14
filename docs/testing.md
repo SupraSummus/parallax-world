@@ -28,6 +28,7 @@ pnpm exec vitest run bake       # files matching "bake"
 | `native/src/engine/chunks.rs` | Moving keeps most chunks |
 | `native/src/world.rs` | `Level::meets`: every cell holding a voxel, and of 8·FCC, 32·FCC and smaller no other |
 | `native/src/engine/chunks.rs` | What the GPU's buffers cannot hold is left out, the farthest first |
+| `native/src/engine/chunks/compositor.rs`, `native/src/engine/voxels.rs` | Their shaders valid as wgpu would find them, without a GPU (naga); the structs they share laid out alike in WGSL and Rust |
 | `bake/src/walk.rs`, `worlds/tests/forest.rs` | Walking: the ground, steps, walls, jumps; the forest's path through its ferns |
 | `web/src/lib/voxel-grid.test.ts` | Storage on the lattice, `LayerIndex` |
 | `web/src/lib/renderer.test.ts` | Slices and chunks in view, placement, caching, stats (on a small world) |

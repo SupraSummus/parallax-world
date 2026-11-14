@@ -598,6 +598,9 @@ Numbers are for the forest at 1280×800, as measured when written.
   the rest drawn see-through.
   Alpha in steps of optical depth (−ln of what gets through),
   which add up where things are apart, might take fewer bits.
+- WGSL formatted in `pnpm lint`, as rustfmt does the Rust.
+  wgslfmt 0.1 (wgsl-analyzer's) pads compound assignments (`x   += 1`)
+  and joins long expressions into one line; try a later one.
 - Report cost at the places worlds name (`World::points`),
   not at the spawn and the regions' centres (`cost::places`),
   once the forest, the moor and the city name some:
