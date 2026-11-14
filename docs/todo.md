@@ -123,16 +123,18 @@ Numbers are for the forest at 1280×800, as measured when written.
   Tests too: cells' and view's are in both;
   relief's, pillars', the renderer's and its regressions' only in TS.
 - **Tests take most of CI's time.**
-  Most of it is the worlds' contract, bound by the CPU:
-  pictures from above generate level 0 over all of a world's heights.
-  CI runs it in jobs of its own, the valley's alone, its longest job.
-  Its threads are busy till the end, so only less work,
-  or its seeds on several runners, would shorten it;
-  `--nocapture` shows how long each part takes.
+  Most of it is the worlds' contract, bound by the CPU, in jobs of its own;
+  the valley's, alone, is CI's longest job.
+  Its threads end together, so only less work would shorten it,
+  or its seeds on several runners (`--nocapture` shows each part's time).
+  A seed's survey and its pictures from above take longest.
+  The survey asks every cell of a sparse population's square
+  (the valley's haystacks' anchors most).
+  Pictures from above generate level 0 over all of a world's heights,
+  region by region: sharing tiles between regions spares nothing,
+  as they hardly overlap.
   If CI is still too slow, the contract at seeds but `REGIONS_SEED`
   (`worlds/tests/contract.rs`) could run only on main.
-  The contract's survey asks every cell of a sparse population's square:
-  the valley's haystacks' anchors cost most of it.
 - **Slice detail sets both thickness and level of detail.**
   "Slice Detail" sets how thick slices are,
   and so their level of detail (atoms of 2^(k−s) at level k,
