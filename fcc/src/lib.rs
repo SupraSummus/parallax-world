@@ -110,7 +110,8 @@ pub const GRID_REACH: f64 = 400.0;
 
 /** Bricks of the sites of a box (see VoxelGrid in voxel-grid.ts). */
 pub const BRICK: i32 = 8;
-const BRICK_SITES: usize = (BRICK * BRICK * BRICK / 2) as usize;
+/** Sites a brick holds: every other one of its BRICK³ points. */
+pub const BRICK_SITES: usize = (BRICK * BRICK * BRICK / 2) as usize;
 
 /** A whole voxel's alpha: it stops every ray through its site. */
 pub const ALPHA: u8 = 255;

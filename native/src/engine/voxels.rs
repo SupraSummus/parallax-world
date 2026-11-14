@@ -1165,7 +1165,7 @@ mod tests {
             let firsts = (0..g.cells.len() / BRICK_SITES).step_by(64);
             let sites = firsts.filter_map(|first| sites(first).find(|&i| g.cells[i] != 0));
             let faces = sites.flat_map(|i| fcc::face_words(i, &std::array::from_fn(|k| g.cells[i] + k as u8))).collect();
-            Tile { grid: Arc::new(fcc::Grid { faces, ..(**g).clone() }), meets: tile.meets.clone(), met: tile.met.clone(), lights: None }
+            Tile { grid: Arc::new(fcc::Grid { faces, ..(**g).clone() }), ..tile.lit(None) }
         };
         Arc::new(Level::new(world.level(0).tiles.iter().map(|(id, tile)| (*id, Arc::new(faced(tile)))).collect()))
     }
