@@ -412,8 +412,8 @@ pub struct Rooms {
     gaps: [i64; 2],
     seed: u64,
     weight: Box<dyn Fn(&Spot) -> i64>,
-    /** By block `reach` wide, the points that may own its places: BLOCKS along each axis spanned, as a host tile's. */
-    near: Slots<[i64; 3], Rc<[Spot]>>,
+    /** By block `reach` wide, the points that may own its places, each with its weight: BLOCKS along each axis spanned, as a host tile's. */
+    near: Slots<[i64; 3], Rc<[(Spot, i64)]>>,
     /** By block, the points in it, for `within`: twice as many blocks along each axis, as it reads those 3 around. */
     blocks: Slots<[i64; 3], Rc<[Spot]>>,
 }
@@ -514,10 +514,9 @@ impl Rooms {
         let slot = axes.iter().fold(0, |slot, &a| slot * BLOCKS + block[a].rem_euclid(BLOCKS)) as usize;
         let near = self.near.get(slot, block, || {
             let (centre, half) = (block.map(|b| b * self.reach + self.reach / 2), self.reach / 2 + 1);
-            self.within(self.on_axes(centre), half * 2 + self.rival()).into()
+            self.within(self.on_axes(centre), half * 2 + self.rival()).into_iter().map(|s| (s, self.weight(&s))).collect()
         });
-        let power = |s: &Spot| squared(s.at, at) - self.weight(s);
-        let owner = near.iter().min_by_key(|s| (power(s), s.at, s.mark, s.nth))?;
+        let (owner, _) = near.iter().min_by_key(|(s, w)| (squared(s.at, at) - w, s.at, s.mark, s.nth))?;
         (squared(owner.at, at) <= self.reach * self.reach).then_some(*owner)
     }
 }

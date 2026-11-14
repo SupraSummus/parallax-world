@@ -726,8 +726,9 @@ by more than the land's width.
 ### Ground
 
 The ground is made in **bands** (`Lie`), coarse to fine,
-each a function of the column, kept nowhere,
-so plans of any scale may read it.
+each a function of the column, not a plan,
+so plans of any scale may read it;
+kept by column, as several read each column.
 A band is the one before pulled by its domains (`Lie::shaped`):
 each towards a height of its own, which may depend on the band under it,
 as hard as it says, a fraction (`Domain::shape`).
