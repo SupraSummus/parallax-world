@@ -269,8 +269,13 @@ The renderer keeps a face's cells picked for the eye anywhere near it
 and the view turned a little (`Lod::pick`),
 those of whole voxels and of medium apart, each by its own Lod,
 each with what it knows of it (`Seen`): its chunk, that it holds nothing,
-or what it waits for,
-and picks anew once the eye or view leaves them:
+or what it waits for.
+A cell holds nothing if none of its level's voxels meets it (`Level::meets`),
+the same for every face.
+Each tile keeps which cells of 8·FCC and 32·FCC its voxels meet,
+the voxels engine's cells (below);
+the default cells are of those sizes, and smaller ones are read site by site.
+It picks anew once the eye or view leaves its cells:
 what it knew of cells still picked moves to the new pick,
 of the rest it keeps a while.
 A frame is every chunk the picks compose for an eye anywhere in them
@@ -333,7 +338,7 @@ their cells are not searched again, but not shown.
 **Empty cells.** A chunk draws the voxels of its cell and a margin around it
 (`cellMargin`), within a few units of their b.
 The renderer looks them up in the layers the slice's sites span.
-`LayerIndex` (`voxel-grid.ts`, made by `bake/src/layer_index.rs`)
+`LayerIndex` (`voxel-grid.ts`, made by `web/wasm/src/index.rs`)
 holds, per face, layer c and block of 8 columns a,
 the least and greatest b of its voxels.
 A cell with no voxels it can draw is never baked.

@@ -26,6 +26,7 @@ pnpm exec vitest run bake       # files matching "bake"
 | `web/src/lib/pillars.test.ts` | Each column a pillar over its run shows a lawn without the soil under it; without runs, stripes |
 | `web/src/lib/view.test.ts`, `native/src/view.rs` | Camera basis, faces, projection, culling |
 | `native/src/engine/chunks.rs` | Moving keeps most chunks |
+| `native/src/world.rs` | `Level::meets`: every cell holding a voxel, and of 8·FCC, 32·FCC and smaller no other |
 | `native/src/engine/chunks.rs` | What the GPU's buffers cannot hold is left out, the farthest first |
 | `bake/src/walk.rs`, `worlds/tests/forest.rs` | Walking: the ground, steps, walls, jumps; the forest's path through its ferns |
 | `web/src/lib/voxel-grid.test.ts` | Storage on the lattice, `LayerIndex` |

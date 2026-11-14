@@ -6,12 +6,10 @@
 //! each slice reads the one its atoms are the voxels of (in_grid).
 //! chunk-baker.ts drives it through web/wasm's baker.rs.
 //! See docs/architecture.md, section 3.
-//! It also finds where a grid's voxels are along the faces' layers
-//! (layer_index.rs), and walks a body on the ground (walk.rs).
+//! It also walks a body on the ground (walk.rs).
 
 mod cells;
 pub mod fill;
-mod layer_index;
 pub mod lod;
 pub mod slicing;
 mod splats;
@@ -33,7 +31,6 @@ use surface::{cell_surface, surface};
 use tables::Geometry;
 
 // For native frontends, which link the baker instead of loading its WebAssembly.
-pub use layer_index::LayerIndex;
 pub use surface::Slice;
 
 /**

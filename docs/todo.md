@@ -105,9 +105,8 @@ Numbers are for the forest at 1280×800, as measured when written.
   Why is open: the same views and paths, drawn headless, take milliseconds.
 - **Native's cells could be simpler and cheaper**
   (section 1 of `docs/architecture.md`).
-  Which cells may hold voxels is asked of `LayerIndex`, per face, layer and block of columns;
-  the cells of each level are the same lattice for every face,
-  so a set of the cells holding voxels, per level, would do for all twelve.
+  Most cells baked come back empty, about two in three at the forest's spawn:
+  they hold voxels (`Level::meets`), but none a ray can enter.
   Nothing skips cells behind nearer ones: every cell in view is baked,
   and the compositor's culling hides them;
   the depth pyramid it culls clusters with could cull cells not yet baked too.
@@ -124,8 +123,7 @@ Numbers are for the forest at 1280×800, as measured when written.
 
 - **TS and Rust still say much the same twice.**
   The tiles around the camera (`world.ts`) are `native/src/world.rs`,
-  and faces are in `native/src` too, though its renderer draws cells, not slices;
-  `LayerIndex.range` (`voxel-grid.ts`) is `bake/src/layer_index.rs`'s.
+  and faces are in `native/src` too, though its renderer draws cells, not slices.
   The renderer is the large step.
   Tests too: cells' and view's are in both;
   relief's, pillars', the renderer's and its regressions' only in TS.
