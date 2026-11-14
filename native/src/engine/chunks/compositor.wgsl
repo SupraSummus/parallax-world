@@ -363,20 +363,27 @@ fn flat_fragment(in: Run) -> @location(0) vec4f {
 // (level_ahead): so medium behind them is not drawn, and where their
 // level is coarser, it is in front. Where on
 // the picture, in halves of a brick across and rows up from its first
-// place's centre; where its picture is, how many columns its rows are and
-// how deep its slab's halves are, its chunk's slot, and its slab's first
-// layer.
+// place's centre; where its picture is, and how many columns its rows are;
+// which halves of its slab its level draws (veil_fragment); where it is
+// from the eye; and its chunk's tint and fog (shade).
 struct Veil {
   @builtin(position) position: vec4f,
   @builtin(clip_distances) owned: array<f32, 4>,
   @location(0) place: vec2f,
-  @location(1) @interpolate(flat) picture: vec4u,
+  @location(1) @interpolate(flat) picture: vec2u,
+  @location(2) @interpolate(flat) drawn: vec2f,
+  @location(3) at: vec3f,
+  @location(4) @interpolate(flat) tint: u32,
+  @location(5) @interpolate(flat) fog: f32,
 }
 
 struct VeilPixel {
-  @builtin(position) position: vec4f,
   @location(0) place: vec2f,
-  @location(1) @interpolate(flat) picture: vec4u,
+  @location(1) @interpolate(flat) picture: vec2u,
+  @location(2) @interpolate(flat) drawn: vec2f,
+  @location(3) at: vec3f,
+  @location(4) @interpolate(flat) tint: u32,
+  @location(5) @interpolate(flat) fog: f32,
 }
 
 @vertex
@@ -396,7 +403,12 @@ fn veil_vertex(@builtin(vertex_index) vertex: u32, @builtin(instance_index) inst
   out.position = quad_position(c, at, depth);
   out.owned = in_face(at);
   out.place = corner;
-  out.picture = vec4u(t.first + instance - (run.y & 0xfffffu), run.y >> 20u | u32(t.half) << 16u, slot, bitcast<u32>(t.layer));
+  out.picture = vec2u(t.first + instance - (run.y & 0xfffffu), run.y >> 20u);
+  let first = t.layer + vec2f(0.0, t.half);
+  out.drawn = select(vec2f(0.0), vec2f(1.0), first > vec2f(c.clip) & first <= vec2f(c.reach));
+  out.at = at;
+  out.tint = c.tint;
+  out.fog = fog_of(c);
   return out;
 }
 
@@ -407,15 +419,15 @@ const LAYER_OVER_CHORD = 0.75;
 // A column of a picture of medium, row q, column s: its colour times its
 // optical depth, and that depth, of the halves of its slab `drawn` says
 // its level draws.
-fn medium_at(picture: vec4u, q: i32, s: i32, drawn: vec2f) -> vec4f {
-  let column = columns[picture.x + u32(q) * (picture.y & 0xffffu) + u32(s)];
+fn medium_at(picture: vec2u, q: i32, s: i32, drawn: vec2f) -> vec4f {
+  let column = columns[picture.x + u32(q) * picture.y + u32(s)];
   let depth = dot(unpack2x16float(column.y), drawn);
   return vec4f(unpack4x8unorm(column.x).rgb * depth, depth);
 }
 
 // A row of a picture of medium at x, in halves of a brick: between the
 // two columns around x, each as much as x is near it.
-fn medium_row(picture: vec4u, q: i32, x: f32, drawn: vec2f) -> vec4f {
+fn medium_row(picture: vec2u, q: i32, x: f32, drawn: vec2f) -> vec4f {
   let u = (x - f32(q & 1)) / 2.0;
   let s = i32(floor(u));
   return mix(medium_at(picture, q, s, drawn), medium_at(picture, q, s + 1, drawn), u - f32(s));
@@ -436,18 +448,11 @@ fn medium_row(picture: vec4u, q: i32, x: f32, drawn: vec2f) -> vec4f {
 // between halves (bake's slab_layers).
 @fragment
 fn veil_fragment(in: VeilPixel) -> @location(0) vec4f {
-  let c = chunks[in.picture.z];
-  let first = bitcast<f32>(in.picture.w) + vec2f(0.0, f32(in.picture.y >> 16u));
-  let drawn = select(vec2f(0.0), vec2f(1.0), first > vec2f(c.clip) & first <= vec2f(c.reach));
   let q = i32(floor(in.place.y));
   let y = in.place.y - f32(q);
-  let field = mix(medium_row(in.picture, q, in.place.x, drawn), medium_row(in.picture, q + 1, in.place.x, drawn), y);
-  if field.a <= 0.0 {
-    return vec4f(0.0);
-  }
-  let ray = ray_of(globals.faces[c.face].view, in.position);
-  let depth = field.a * 2.0 * LAYER_OVER_CHORD * length(ray) / ray.z;
-  return vec4f(shade(c, vec4f(field.rgb / field.a, 1.0)) * depth, depth);
+  let field = mix(medium_row(in.picture, q, in.place.x, in.drawn), medium_row(in.picture, q + 1, in.place.x, in.drawn), y);
+  let along = 2.0 * LAYER_OVER_CHORD * length(in.at) / in.at.z;
+  return vec4f(shaded(in.tint, in.fog, field), field.a) * along;
 }
 
 // The first of a tile's columns the pixel's ray meets. A column is a
@@ -528,9 +533,19 @@ fn march(in: Tile) -> Hit {
 
 // Its colour as the chunk paints it (Chunk's tint) and fogged.
 fn shade(c: Chunk, paint: vec4f) -> vec3f {
-  let fog = 1.0 - exp(-c.distance / globals.fog_distance);
-  let tinted = unpack4x8unorm(c.tint).rgb * (0.3 + 0.7 * dot(paint.rgb, vec3f(0.3, 0.59, 0.11)));
-  return mix(select(paint.rgb, tinted, c.tint != 0u), globals.horizon.rgb, fog);
+  return shaded(c.tint, fog_of(c), vec4f(paint.rgb, 1.0));
+}
+
+// How much a chunk's colours are fogged, by its distance.
+fn fog_of(c: Chunk) -> f32 {
+  return 1.0 - exp(-c.distance / globals.fog_distance);
+}
+
+// As shade, a colour weighted by `paint.a`: shading is affine in the
+// colour, so a weighted sum of colours shades as one.
+fn shaded(tint: u32, fog: f32, paint: vec4f) -> vec3f {
+  let tinted = unpack4x8unorm(tint).rgb * (0.3 * paint.a + 0.7 * dot(paint.rgb, vec3f(0.3, 0.59, 0.11)));
+  return mix(select(paint.rgb, tinted, tint != 0u), globals.horizon.rgb * paint.a, fog);
 }
 
 struct Drawn {

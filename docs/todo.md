@@ -239,6 +239,11 @@ Numbers are for the forest at 1280×800, as measured when written.
   (architecture.md, "See-through"), as far as the view goes:
   pictures added up in any order, nothing after a ray is all but stopped is left out.
   Only media are (`KindDef::medium`): the moor's mist.
+  - Most of what a fragment costs is reading its four columns from storage:
+    two columns an item, or the pictures in a texture the GPU filters,
+    would read half as often.
+    Thicker slabs (fewer a ray, by a Q of their own) cost less,
+    but lift the mist over the horizon.
   - Where a medium's colour changes along a ray, its colours mix without their order.
   - The medium starts at the first half slab past the near plane:
     right by the eye, mist is a little thin.
