@@ -294,7 +294,8 @@ impl Moorland {
                         return None;
                     }
                     let ground = |x, z| terraced(&steadings, x, z, height(x, z));
-                    let pool = pool_at(spot, &ground, random)?;
+                    // Its room (below) needs the moor to lead at its centre, which few spots pass: asked before the rim is measured.
+                    let pool = pool_at(spot, &ground, &|[x, z]| lead(x, z) >= SURE, random)?;
                     let [x, z] = pool.centre;
                     // Its centre and eight points 4 m past its rim: every column of it is within 7.4 m of one, and the lead
                     // keeps 8 m off the landmarks and the railway.
@@ -391,14 +392,14 @@ fn steading_at(ring: [i64; 2], first: bool, random: &mut Rng, height: &dyn Fn(i6
 
 /**
  * The pool claimed from `spot`, if the ground lets it: in the lowest of a
- * few points within 16 m of it, as wide as the ground round it is level
- * enough, up to POOL_RADIUS; water up to half a metre under the lowest of
- * that ground, so it and its boggy shore stay inside it, the hollow dug
- * deeper where it is shallow.
+ * few points within 16 m of it, if `may` stand there, as wide as the
+ * ground round it is level enough, up to POOL_RADIUS; water up to half a
+ * metre under the lowest of that ground, so it and its boggy shore stay
+ * inside it, the hollow dug deeper where it is shallow.
  */
-fn pool_at(spot: [i64; 2], ground: &dyn Fn(i64, i64) -> Fx, random: &mut Rng) -> Option<Pool> {
+fn pool_at(spot: [i64; 2], ground: &dyn Fn(i64, i64) -> Fx, may: &dyn Fn([i64; 2]) -> bool, random: &mut Rng) -> Option<Pool> {
     let points = (-2..=2).flat_map(|a| (-2..=2).map(move |b| [spot[0] + a * m(8.0), spot[1] + b * m(8.0)]));
-    let centre = points.min_by_key(|[x, z]| ground(*x, *z))?;
+    let centre = points.min_by_key(|[x, z]| ground(*x, *z)).filter(|c| may(*c))?;
     let bottom = ground(centre[0], centre[1]);
     let smallest = m(4.0) + random.below(m(4.0) as u32) as i64;
     (0..4).map(|n| POOL_RADIUS - n * (POOL_RADIUS - smallest) / 3).find_map(|radius| {

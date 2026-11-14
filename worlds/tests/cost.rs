@@ -20,11 +20,8 @@ const TOLERANCE: f64 = 0.25;
  * be taken off: a ratchet, blessing does not move it.
  */
 const OVER_BUDGET: &[(&str, &str, u32)] = &[
-    // Why: docs/todo.md, "Some of the valley's tiles are over the cost budget".
+    // Why: docs/todo.md, "One of the valley's tiles is over the cost budget".
     ("valley", "region2", 3),
-    ("valley", "region1", 8),
-    ("valley", "region4", 8),
-    ("valley", "region5", 8),
 ];
 
 #[test]
