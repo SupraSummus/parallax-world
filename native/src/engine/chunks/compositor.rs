@@ -20,6 +20,8 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::ops::Range;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use bake::Medium;
 use bake::lod::Lod;
@@ -28,7 +30,7 @@ use egui_wgpu::wgpu;
 use fcc::light::{linear_to_srgb, srgb_to_linear};
 use fcc::{FastMap, FastSet};
 
-use super::renderer::{Frame, Placement};
+use super::renderer::{Feedback, Frame, Placement};
 use crate::engine::{Colours, Look, Painter};
 use crate::gpu::Easel;
 use crate::view::{self, Vec3, to_local, view_basis};
@@ -508,6 +510,38 @@ pub fn cluster(numbers: &[f32], half_layer: f64, block: f64) -> (Vec<GpuSplat>, 
     (sorted.iter().map(|&s| numbers[s].map(f32::to_bits)).collect(), clusters)
 }
 
+/**
+ * A probe (renderer.rs's Hidden) as the GPU takes it: of a cell hidden, it
+ * draws nothing, but the culling tests its box `shown` (a face's
+ * coordinates, as occlusion.rs's Box3) as it does a tile's, and lists it
+ * if it shows (`probe_shows` in compositor.wgsl). Its chunk's origin, the
+ * box's corner, and its one cluster, as far past `depth`, its plane's, as
+ * the box is, its `wide` PROBE_WIDE.
+ */
+pub fn probe(shown: [[f64; 2]; 3], depth: f64) -> ([f64; 2], Vec<GpuCluster>) {
+    let half = [0, 1].map(|d| (shown[d][1] - shown[d][0]) / 2.0);
+    let mut cluster = GpuCluster::new(0, 0, [0.0; 2]);
+    cluster.hold(half, half, shown[2].map(|z| z - depth));
+    cluster.wide = PROBE_WIDE;
+    ([shown[0][0], shown[1][0]], vec![cluster])
+}
+
+/** A probe's cluster's `wide`, as no other's is (is_probe in compositor.wgsl). */
+const PROBE_WIDE: f32 = -1.0;
+
+/** Probes' clusters the culling lists as showing, at most, a frame. */
+const FOUND: u64 = 4096;
+
+/**
+ * Where reading back which probes showed is: not, copied this frame, or
+ * mapping what was copied; with the probes' chunks' ids then, by cluster.
+ */
+enum Reading {
+    Idle,
+    Copied(FastMap<u32, u32>),
+    Mapping(FastMap<u32, u32>, Arc<AtomicBool>),
+}
+
 /** A chunk's columns, splats and clusters on the GPU, and its slot in the table (its record's place). */
 struct Resident {
     columns: Range<u32>,
@@ -747,6 +781,7 @@ struct Pipelines {
     show_picture: wgpu::RenderPipeline,
     cull_drawn: wgpu::ComputePipeline,
     cull_rest: wgpu::ComputePipeline,
+    find_probes: wgpu::ComputePipeline,
     scan_veils: wgpu::ComputePipeline,
     order_veils: wgpu::ComputePipeline,
     reduce_depth_level: wgpu::ComputePipeline,
@@ -803,6 +838,20 @@ pub struct Compositor {
     draw_group: Option<wgpu::BindGroup>,
     cull_groups: Vec<wgpu::BindGroup>,
     place_group: Option<wgpu::BindGroup>,
+    /**
+     * The probes' chunks' ids, by their clusters; the clusters of those the
+     * culling found showing (`found` in compositor.wgsl), how many first,
+     * and a buffer to read them back in; how far that is, whether this
+     * frame copies them, and whether the last read found any, which it told
+     * the frame's feedback.
+     */
+    probes: FastMap<u32, u32>,
+    found: wgpu::Buffer,
+    readback: wgpu::Buffer,
+    reading: Reading,
+    copying: bool,
+    asked: bool,
+    feedback: Option<Arc<Feedback>>,
 }
 
 const SKY_TOP: [f32; 3] = [0x3f as f32 / 255.0, 0x73 as f32 / 255.0, 0xb8 as f32 / 255.0];
@@ -941,6 +990,7 @@ impl Pipelines {
                 (9, S::COMPUTE, write),
                 (16, S::COMPUTE, write),
                 (22, S::COMPUTE, write),
+                (23, S::COMPUTE, write),
             ],
         );
         let reduce_depth = layout(device, &[(10, S::COMPUTE, texture(wgpu::TextureSampleType::Depth)), (12, S::COMPUTE, level_out)]);
@@ -1029,6 +1079,7 @@ impl Pipelines {
             show_picture: render(&show, "show_vertex", "show_fragment", &[], None, &[target(format, None)]),
             cull_drawn: compute(&cull, "cull_drawn", &[]),
             cull_rest: compute(&cull, "cull_rest", &[("culls", f64::from(culls))]),
+            find_probes: compute(&cull, "find_probes", &[("culls", f64::from(culls))]),
             scan_veils: compute(&cull, "scan_veils", &[]),
             order_veils: compute(&cull, "order_veils", &[("culls", f64::from(culls))]),
             reduce_depth_level: compute(&reduce_depth, "reduce_depth", &[]),
@@ -1133,6 +1184,13 @@ impl Compositor {
             draw_group: None,
             cull_groups: Vec::new(),
             place_group: None,
+            probes: FastMap::default(),
+            found: buffer(device, "found", (1 + FOUND) * 4, U::STORAGE | U::COPY_SRC | U::COPY_DST),
+            readback: buffer(device, "found read", (1 + FOUND) * 4, U::MAP_READ | U::COPY_DST),
+            reading: Reading::Idle,
+            copying: false,
+            asked: false,
+            feedback: None,
         }
     }
 
@@ -1195,6 +1253,9 @@ impl Compositor {
             veils: range.end,
         };
         self.records.write(slot, bytemuck::bytes_of(&record));
+        if baked.clusters.first().is_some_and(|c| c.wide == PROBE_WIDE) {
+            self.probes.insert(range.start, p.chunk.id);
+        }
         self.veils += range.end - veils;
         self.resident.insert(p.chunk.id, Resident { columns, splats, clusters: range, slot, record, tints, going: false });
         true
@@ -1203,6 +1264,7 @@ impl Compositor {
     /** Drops chunk `id`'s columns, splats and clusters, if it has them, and its record: its slot's clusters are none. */
     fn release(&mut self, id: u32) {
         let Some(r) = self.resident.remove(&id) else { return };
+        self.probes.remove(&r.clusters.start);
         self.columns.release(r.columns);
         self.splats.release(r.splats);
         self.clusters.release(r.clusters);
@@ -1219,6 +1281,8 @@ impl Compositor {
      * globals.
      */
     pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, frame: &Frame, view: &View) {
+        self.feedback = Some(frame.feedback.clone());
+        let read = self.read(device);
         let size = view.pixels.map(|v| v.max(1));
         (self.seams, self.relief, self.flat) = (view.seams, frame.relief, frame.flat);
         let resized = self.targets.as_ref().is_none_or(|t| t.size != size);
@@ -1253,6 +1317,47 @@ impl Compositor {
             1.0
         };
         queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&view.globals(size, sky_fog, whole)));
+        // Its probes as they are now, uploads and all; not in the frame that read the last, so that it settles.
+        self.copying = matches!(self.reading, Reading::Idle) && !read && !self.probes.is_empty();
+        if self.copying {
+            self.reading = Reading::Copied(self.probes.clone());
+        } else if self.probes.is_empty() {
+            self.asked = false;
+        }
+    }
+
+    /**
+     * Reads back which probes showed, as far as it can without waiting:
+     * maps what the last frame copied, or, once mapped, tells the frame's
+     * feedback which probes' chunks showed. Whether it read them.
+     */
+    fn read(&mut self, device: &wgpu::Device) -> bool {
+        // What it waits for, done: the map's callback.
+        _ = device.poll(wgpu::PollType::Poll);
+        match std::mem::replace(&mut self.reading, Reading::Idle) {
+            Reading::Copied(probes) => {
+                let done = Arc::new(AtomicBool::new(false));
+                let mapped = done.clone();
+                self.readback.slice(..).map_async(wgpu::MapMode::Read, move |r| mapped.store(r.is_ok(), Ordering::Release));
+                self.reading = Reading::Mapping(probes, done);
+            }
+            Reading::Mapping(probes, done) if done.load(Ordering::Acquire) => {
+                let ids: Vec<u32> = {
+                    let bytes = self.readback.slice(..).get_mapped_range().expect("mapped");
+                    let words: &[u32] = bytemuck::cast_slice(&bytes);
+                    let n = (words[0] as usize).min(words.len() - 1);
+                    words[1..=n].iter().filter_map(|at| probes.get(at)).copied().collect()
+                };
+                self.readback.unmap();
+                self.asked = !ids.is_empty();
+                if let Some(feedback) = &self.feedback {
+                    feedback.report(ids);
+                }
+                return true;
+            }
+            waiting => self.reading = waiting,
+        }
+        false
     }
 
     /** A change of the frame's chunks, to apply: those that `came`, after what is still to come, and those that `went`. */
@@ -1357,6 +1462,7 @@ impl Compositor {
                     (9, self.veils_drawn.as_entire_binding()),
                     (16, self.draws[VEILS].as_entire_binding()),
                     (22, self.veil_places.as_entire_binding()),
+                    (23, self.found.as_entire_binding()),
                 ];
                 bind(device, &self.pipelines.cull, &entries)
             })
@@ -1378,6 +1484,7 @@ impl Compositor {
         let p = &self.pipelines;
         encoder.clear_buffer(&self.veils_drawn, 0, None);
         encoder.clear_buffer(&self.veil_places, 0, None);
+        encoder.clear_buffer(&self.found, 0, None);
         // Every slot, those freed too, so that the clusters left where their chunks were are none of theirs.
         {
             let mut pass = encoder.begin_compute_pass(&Default::default());
@@ -1386,15 +1493,19 @@ impl Compositor {
             let [across, rows] = groups(self.records.capacity.div_ceil(CULL_THREADS));
             pass.dispatch_workgroups(across, rows, 1);
         }
+        // The pyramid of farthest depths of what is drawn.
+        let pyramid = |pass: &mut wgpu::ComputePass<'_>| {
+            for (k, (group, [width, height])) in t.levels.iter().enumerate() {
+                pass.set_pipeline(if k == 0 { &p.reduce_depth_level } else { &p.reduce_level });
+                pass.set_bind_group(0, group, &[]);
+                pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+            }
+        };
         let cull = |encoder: &mut wgpu::CommandEncoder, phase: usize| {
             let mut pass = encoder.begin_compute_pass(&Default::default());
             if phase == 1 {
-                // The pyramid of what the first phase drew.
-                for (k, (group, [width, height])) in t.levels.iter().enumerate() {
-                    pass.set_pipeline(if k == 0 { &p.reduce_depth_level } else { &p.reduce_level });
-                    pass.set_bind_group(0, group, &[]);
-                    pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
-                }
+                // Of what the first phase drew.
+                pyramid(&mut pass);
             }
             let clusters = self.clusters.top;
             if clusters > 0 {
@@ -1430,6 +1541,18 @@ impl Compositor {
             tiles(&mut pass, 1);
             pass.set_pipeline(&p.sky);
             pass.draw(0..4, 0..1);
+        }
+        if self.copying {
+            // The probes that show, against all the whole voxels drawn, to read back.
+            {
+                let mut pass = encoder.begin_compute_pass(&Default::default());
+                pyramid(&mut pass);
+                pass.set_pipeline(&p.find_probes);
+                pass.set_bind_group(0, &self.cull_groups[1], &[]);
+                let [across, rows] = groups(self.clusters.top.div_ceil(CULL_THREADS));
+                pass.dispatch_workgroups(across, rows, 1);
+            }
+            encoder.copy_buffer_to_buffer(&self.found, 0, &self.readback, 0, self.found.size());
         }
         if self.veils > 0 {
             // None yet.
@@ -1593,8 +1716,13 @@ impl Painter for Compositor {
         &self.targets.as_ref().expect("a frame").picture
     }
 
+    /** Its changes all applied, and no probes being read back. */
     fn settled(&self) -> bool {
-        !self.held_back
+        !self.held_back && matches!(self.reading, Reading::Idle)
+    }
+
+    fn asked(&self) -> bool {
+        self.asked
     }
 
     fn show(&self, pass: &mut wgpu::RenderPass<'_>) {

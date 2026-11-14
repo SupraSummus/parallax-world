@@ -131,7 +131,7 @@ impl Easel {
      * settled: a few frames (the chunks' culling), and as many more as the
      * painter leaves some of it to (Painter::settled).
      */
-    fn settle(&mut self, picture: &dyn Picture, pixels: [u32; 2]) {
+    pub fn settle(&mut self, picture: &dyn Picture, pixels: [u32; 2]) {
         let mut frames = 0;
         while frames < 3 || !self.painter.as_ref().is_none_or(|p| p.settled()) {
             self.draw(picture, pixels);

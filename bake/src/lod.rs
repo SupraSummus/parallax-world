@@ -117,7 +117,7 @@ impl Lod {
 
     /** The cell of `level` whose site is (i, j, k) · N, its voxels `shift` levels finer: its whole voxels, or its medium. */
     fn cell(&self, level: i32, site: [i32; 3]) -> CellChunk {
-        let atoms = (level - self.shift).max(0);
+        let atoms = self.grid(level);
         CellChunk { level, atoms, site: site.map(|v| (v << level) >> atoms), medium: self.medium }
     }
 
@@ -144,7 +144,7 @@ impl Lod {
         // An eye in the layer before a site of every level, or there: where claims begin nearest, and where they go farthest.
         let eyes = [[0.0; 2], [0.0; 2], [-1.0, 0.0]];
         (self.finest()..=self.top())
-            .filter(|&level| (level - self.shift).max(0) as usize == grid)
+            .filter(|&level| self.grid(level) as usize == grid)
             .filter_map(|level| {
                 let k = *self.layers(level, &eyes, far)?.end() as i32;
                 let (_, min, max) = crate::chunk_reads(&self.cell(level, [k & 1, k & 1, k]));
@@ -258,6 +258,16 @@ impl Lod {
         self.layers(level, &eyes, far).is_some_and(|ks| ks.contains(&i64::from(k)))
             && in_rows(Lod::rows(level, k.into(), &eyes, tangents), 1, j)
             && in_rows(in_face(*cell, &eyes, tangents).and_then(|t| Lod::rows(level, k.into(), &eyes, t)), 0, i)
+    }
+
+    /** The finest level claiming layer `layer` of grid 0 for an eye in layer `eye` (`reach`): the one drawing what is there. */
+    pub fn claiming(&self, layer: f64, eye: i32) -> i32 {
+        (self.finest()..self.top()).find(|&level| layer <= self.reach(level, eye) as f64).unwrap_or(self.top())
+    }
+
+    /** The grid `level` draws its cells as the voxels of. */
+    pub fn grid(&self, level: i32) -> i32 {
+        (level - self.shift).max(0)
     }
 
     /**

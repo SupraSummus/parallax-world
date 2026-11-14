@@ -2,7 +2,7 @@
 //! generated in tiles, those in view first (world.rs), drawn by an engine
 //! (engine.rs) with wgpu in an egui window (window.rs), or offscreen (gpu.rs).
 //!
-//! parallax-native [--engine reliefs|flat|splats|voxels] [--world NAME] [--threads N] [--seed S] [--view QUERY] [--light SKY,SUN,GLOW] [--detail D] [--shift S] [--seams] [--colour voxels|layers|chunks] [--shot out.png [--size WxH] | --bench] [--stroll S [--on-ground]] [--record FILE] [--replay FILE [--shots DIR]]
+//! parallax-native [--engine reliefs|flat|splats|voxels] [--world NAME] [--threads N] [--seed S] [--view QUERY] [--light SKY,SUN,GLOW] [--detail D] [--shift S] [--seams] [--colour voxels|layers|chunks] [--unhidden] [--shot out.png [--size WxH] | --bench] [--stroll S [--on-ground]] [--record FILE] [--replay FILE [--shots DIR]]
 //!
 //! --view takes the web page's view query (parseViewQuery in renderer.ts),
 //! overriding --seed and --world.
@@ -25,8 +25,8 @@
 //! web draws, or reliefs drawn flat (an experiment).
 //! --detail sets viewing distance over a cell's thickness, --shift how many
 //! levels finer than a cell its voxels are (bake's lod.rs), for the
-//! engines that draw cells; --seams and --colour draw chunks as the panel's
-//! switches do.
+//! engines that draw cells; --seams, --colour and --unhidden (bake the
+//! cells what is in front hides too) draw chunks as the panel's switches do.
 //! The panel picks the lighting apart from the engine (Lighting): voxels
 //! shaded by the way their faces face, or lit by light worked out across
 //! the world, as --light does, as bright as its sliders say; each engine
@@ -302,7 +302,7 @@ fn replay(
     for (t, look, picture) in &kept {
         let pixels = look.size.map(|v| v as u32);
         easel.save(&**picture, pixels, &format!("{dir}/{t:08.3}-shown.png"));
-        let whole = complete(&mut *engine, world, look, false);
+        let whole = drawn_complete(&mut *engine, world, look, false, &mut easel);
         easel.save(&*whole.picture, pixels, &format!("{dir}/{t:08.3}-complete.png"));
     }
 }
@@ -338,10 +338,14 @@ impl App {
     }
 
     fn remember(&self, size: [f32; 2]) {
-        let Look { camera: [x, y, z], yaw, pitch, fov, far, detail, shift, .. } = self.look;
+        let Look { camera: [x, y, z], yaw, pitch, fov, far, detail, shift, hides, .. } = self.look;
         let frame = format!(
-            "--engine {:?} --view '{}&camera={x},{y},{z}&look={yaw},{pitch}&fov={fov}&distance={far:.0}&detail={detail}' --shift {shift} --size {:.0}x{:.0}",
-            self.kind, self.world_query, size[0], size[1],
+            "--engine {:?} --view '{}&camera={x},{y},{z}&look={yaw},{pitch}&fov={fov}&distance={far:.0}&detail={detail}' --shift {shift} --size {:.0}x{:.0}{}",
+            self.kind,
+            self.world_query,
+            size[0],
+            size[1],
+            if hides { "" } else { " --unhidden" },
         );
         let b = self.world.brightness().expect("a world with light");
         let light = if self.lighting == Lighting::Computed { format!(" --light {},{},{}", b.sky, b.sun, b.glow) } else { String::new() };
@@ -376,6 +380,22 @@ fn complete(engine: &mut dyn Engine, world: &mut World, look: &Look, whole: bool
 }
 
 /**
+ * The view of `look` once complete, as `complete` makes it, drawn on
+ * `easel` till settled, and made complete and drawn again while its
+ * painter asks the engine for what it left out (the chunks' probes of
+ * cells hidden that show): so that all it shows is in.
+ */
+fn drawn_complete(engine: &mut dyn Engine, world: &mut World, look: &Look, whole: bool, easel: &mut Easel) -> Frame {
+    loop {
+        let frame = complete(engine, world, look, whole);
+        easel.settle(&*frame.picture, look.size.map(|v| v as u32));
+        if !easel.painter.as_ref().is_some_and(|p| p.asked()) {
+            return frame;
+        }
+    }
+}
+
+/**
  * --bench, --stroll and --shot: the view of `look` once complete (with all
  * the world would make around it, if timed), timed, strolled on from for
  * `seconds`, walking on the ground with `walk_through` if given, and saved.
@@ -388,11 +408,11 @@ fn offscreen(
     stroll: Option<(f64, Option<&[bool]>)>,
     shot: Option<&str>,
 ) {
+    let mut easel = Easel::offscreen(None);
     let start = Instant::now();
-    let frame = complete(engine, world, &look, bench || stroll.is_some());
+    let frame = drawn_complete(engine, world, &look, bench || stroll.is_some(), &mut easel);
     let (seconds, threads) = (start.elapsed().as_secs_f64(), world.threads);
     println!("first frame complete in {seconds:.2} s on {threads} threads: {}", frame.stats.replace('\n', ", "));
-    let mut easel = Easel::offscreen(None);
     let pixels = look.size.map(|v| v as u32);
     if bench {
         // What a frame costs the main thread once all is made, still and turning.
@@ -565,6 +585,7 @@ fn main() {
         look.shift = v.parse().expect("--shift S");
     }
     look.seams = flag("--seams");
+    look.hides = !flag("--unhidden");
     if let Some(v) = value("--colour") {
         look.colours =
             Colours::ALL.into_iter().find(|(_, name)| name.eq_ignore_ascii_case(v)).expect("--colour voxels, layers or chunks").0;

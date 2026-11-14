@@ -103,13 +103,20 @@ Numbers are for the forest at 1280×800, as measured when written.
   Nearly half the cells baked come back empty:
   they hold voxels (`Level::meets`) and are not buried by whole bricks
   (`Level::buried`), but hold none a ray of their face can enter.
-  Nothing skips cells behind nearer ones but buried ones:
-  every other cell in view is baked, and the compositor's culling hides them,
-  though from the eye about one in seven of a frame's chunks shows
-  (the valley's spawn, a colour per chunk).
-  The depth pyramid it culls clusters with could cull cells not yet baked too;
-  a test on the CPU, true for any eye in the pick,
-  would need what hides them, mostly leaves and trunks, fused.
+  From the eye about one in seven of a frame's chunks shows
+  (the valley's spawn, a colour per chunk);
+  the rays that hide cells before they are baked (`Hiding`)
+  leave about two in three of them at the spawns, in relief,
+  four in five drawn flat, whose pictures reach past their cells.
+  Of those they hide, about one in seven the GPU's probes find showing,
+  most because a probe's box shows where its voxels would not;
+  the first frame takes up to a third longer, waiting for probes.
+  The rays are cast once a pick, from where the eye was:
+  what the eye comes to see as it moves within it shows a few frames late.
+  Cast again as it moves, they cost tens of milliseconds a face;
+  cheaper rays (steps a voxel long, empty cells of 8·FCC crossed at once)
+  could follow the eye.
+  Mist hides nothing: the GPU's depths have none, so it would ask for it all.
   Cells straddling where a face's levels meet are drawn at both.
   Each render tests every cell a face composes against the screen,
   though a face keeps its cells picked (`Lod::pick`);

@@ -295,7 +295,28 @@ and the renderer can run on a thread of its own
 Its bake workers, as the world's tile workers, run behind the thread that draws.
 What the eye composed when its face was picked is waited for;
 the rest of the pick is baked after.
-There is no coverage: every chunk in view is baked,
+Nor is a cell baked that what is in front of it hides
+(`Hiding` in `renderer.rs`, `occlusion.rs`):
+from where the eye was when the face was picked,
+a ray through each corner of a buffer's pixels
+over the face goes through the voxels drawn along it,
+the grid of the level claiming each layer,
+half a voxel at a time, across empty bricks half a brick,
+and stops at the first whole voxel.
+So ground, walls and trunks hide what is behind them,
+and leaves (grain, as often as they cover) what is deep enough in a wood;
+see-through voxels hide nothing, as the GPU sees no mist in its depths.
+A cell whose box (drawn flat, grown by how far its picture reaches)
+lies behind where the rays round every pixel it covers stop is hidden.
+A ray that met a tile not made yet goes on from there once it comes.
+Between rays, or from where the eye has moved since, a hidden cell may show,
+so each is a probe in the frame,
+which the compositor tests against what it drew (section 4)
+and, if it may show, tells the renderer, which bakes it after all
+and hides it no more while picked: it may show a frame or few late.
+It depends on nothing the camera does but where the eye was,
+so a host could do it apart from what draws.
+Every other chunk in view is baked,
 and the compositor culls what is hidden (section 4).
 
 ## 2. Detail and leaks
@@ -590,7 +611,8 @@ The rays through each sub-block are kept per face while the camera only moves,
 and turning, found only in the cells the face crosses or holds
 (a face's side is a half-plane of the screen).
 The native renderer has no coverage (section 1):
-it bakes every chunk in view, and its GPU culling hides what is covered.
+it bakes every chunk in view but those rays from the eye find hidden,
+and its GPU culling hides what is covered.
 
 The `Compositor` draws a frame onto one opaque WebGL 2 canvas:
 per chunk the splats of its clusters that may show, instanced,
@@ -649,6 +671,11 @@ reduces their depth to a pyramid of farthest depths,
 then tests every tile in view against it on the GPU, a thread each,
 draws those newly showing and keeps which show for the next frame
 (two-phase occlusion culling).
+A probe, a hidden cell's box with nothing to draw (section 1),
+is tested once all is drawn, against the pyramid made of it anew,
+every texel its quad on screen meets, as its box borders what shows;
+those that may show are read back a few frames later
+and handed to the renderer (`Feedback`).
 Each tile has a draw of its own on the GPU, empty if culled,
 drawn in the tiles' order: roughly near to far,
 so nearer tiles mostly hide what is behind them early,

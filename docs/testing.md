@@ -28,6 +28,7 @@ pnpm exec vitest run bake       # files matching "bake"
 | `native/src/engine/chunks.rs` | Moving keeps most chunks |
 | `native/src/world.rs` | `Level::meets`: every cell holding a voxel, or a see-through one, and of 8·FCC, 32·FCC and smaller no other |
 | `native/src/engine/chunks/renderer.rs` | Cells said to hold nothing that shows, none of their voxels meeting them or all buried, bake empty |
+| `native/src/engine/chunks/occlusion.rs`, `native/src/engine/chunks.rs` | Rays hide what is wholly behind where they stop and nothing else, those that may stop nearer going on from where they were; hiding cells on the CPU draws fewer chunks, and once its probes' cells are in, leaves the picture unchanged |
 | `native/src/engine/chunks.rs` | What the GPU's buffers cannot hold is left out, the farthest first |
 | `native/src/engine/chunks/compositor.rs`, `native/src/engine/voxels.rs` | Their shaders valid as wgpu would find them, without a GPU (naga); the structs they share laid out alike in WGSL and Rust |
 | `bake/src/walk.rs`, `worlds/tests/forest.rs` | Walking: the ground, steps, walls, jumps; the forest's path through its ferns |
