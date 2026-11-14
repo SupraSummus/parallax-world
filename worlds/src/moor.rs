@@ -269,6 +269,10 @@ impl Moorland {
             Rc::new(Claims::new("steadings", s, CLAIM, APART, Some(FIRST), move |ring, random| {
                 // The stream's plan is finer than the steadings': its line is read here.
                 let off_stream = |c: [i64; 2]| line.as_ref().is_none_or(|l| (Units(c[0]).to_fx() - l(c[1])).abs() > Units::m(14.0).to_fx());
+                // No room where the moor doesn't lead (`around`, below): asked before the ground is measured.
+                if lead(ring[0], ring[1]) < SURE {
+                    return None;
+                }
                 let steading = if ring == FIRST {
                     steading_at(ring, true, &mut Rng::new(hash64(s, 0, 0, 0)), &*height)
                 } else if random.chance(chance) {
@@ -401,16 +405,19 @@ fn pool_at(spot: [i64; 2], ground: &dyn Fn(i64, i64) -> Fx, random: &mut Rng) ->
     let bottom = ground(centre[0], centre[1]);
     let smallest = m(4.0) + random.below(m(4.0) as u32) as i64;
     (0..4).map(|n| POOL_RADIUS - n * (POOL_RADIUS - smallest) / 3).find_map(|radius| {
-        let rim: Vec<Fx> = (0..32)
-            .map(|a| {
-                let angle = a as f64 * std::f64::consts::PI / 16.0;
-                ground(centre[0] + (radius as f64 * js::cos(angle)) as i64, centre[1] + (radius as f64 * js::sin(angle)) as i64)
-            })
-            .collect();
-        let (low, high) = (*rim.iter().min()?, *rim.iter().max()?);
+        // Its rim's 32 points, read only while they keep within 1.5 m: most rims don't.
+        let mut rim = (0..32).map(|a| {
+            let angle = a as f64 * std::f64::consts::PI / 16.0;
+            ground(centre[0] + (radius as f64 * js::cos(angle)) as i64, centre[1] + (radius as f64 * js::sin(angle)) as i64)
+        });
+        let first = rim.next()?;
+        let (low, _) = rim.try_fold((first, first), |(low, high), h| {
+            let (low, high) = (low.min(h), high.max(h));
+            (high - low < Fx::m(1.5)).then_some((low, high))
+        })?;
         let level = (low - Fx::m(0.5)).floor_units();
         let dig = (bottom - (level - Units::m(0.8)).to_fx()).max(Fx::ZERO).round_units();
-        (high - low < Fx::m(1.5) && dig < Units::m(1.5)).then_some(Pool { centre, radius, level, dig })
+        (dig < Units::m(1.5)).then_some(Pool { centre, radius, level, dig })
     })
 }
 
