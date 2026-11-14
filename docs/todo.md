@@ -78,7 +78,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   and 7 write its rule out (`m(0.5).max(2 * spacing)`):
   a layer at least two sites thick.
   The rest leave detail out by level, each by a rule of its own
-  (the moor's heather, the ponds' reeds, the rails),
+  (the ponds' reeds, the rails),
   dither by hand (the railway's ballast, in shares of iron and timber),
   or make their own far form (the forest's canopy, a scene's levels).
   A stack declared once (layers down from a height, media up,
@@ -86,9 +86,8 @@ Numbers are for the forest at 1280×800, as measured when written.
   and patterns read through `Plan::dithered`
   would leave the spacing to the engine but in the canopy and scenes:
   a field's levels would be the engine's to keep, not each world's.
-  Found on the way: the fields' crops are thickened at every level
-  ("Fields stand taller at level 4", below);
-  the town's kerbs (a unit) and the railway's tunnel lining never are.
+  Found on the way: the town's kerbs (a unit) and the railway's tunnel lining
+  are never thickened.
 - **The native frontend is missing pieces.**
   Its camera is f64, not fixed point (positions reach the GPU relative to it).
   Its compositor needs indirect draws counted on the GPU
@@ -416,28 +415,16 @@ Numbers are for the forest at 1280×800, as measured when written.
   `mountains.rs` turns its noise by 37° (`turned`),
   which leaves its four-fold harmonic mostly on the diagonals;
   22.6°, (12, 5)/13, would leave none there.
-- **Fields stand taller at level 4.**
-  At the valley's first town's edge, rays hit fields about 0.04 more often
-  at level 4 than at level 2 (seed 42), whatever the houses' far form:
-  a crop thinner than two sites is made two sites tall (`Span::medium`),
-  4 m of wheat in front of the houses' walls.
-  Sunk into the ground, its top where level 0 has it,
-  the wheat showed less but the stubble under it more.
-  It breaks the contract: averaged over seeds 42 and 1 to 3,
-  what rays from cameras see changes 0.05 to 0.07 at level 4
-  in the learned town's and the valley's crops, wheat and stubble most.
-- **Worlds are checked to lower levels till what follows is fixed**
-  (`Entry` in `worlds/src/lib.rs`):
-  the valley to 3, from above to 2, the learned town to 3,
-  the moor's far region to 5; then raise them back.
-- **Things of the valley break the contract at level 4**, averaged over seeds:
-  rays from cameras see 0.054 to 0.061 more of the towns' walls, towers and gates,
-  and of a station at one seed;
-  the forest's boletes 0.05 (likely "Sheets and rods", above).
-- **The valley's market from above at level 3**:
-  its stalls and paving change what rays straight down see 0.069 on average.
-- **The moor's far region keeps its fields' look to 0.014 at level 6**,
-  over a quarter of `TOLERANCE` (`check_far`), its heather drawn for its sprigs.
+- **Walls seen from above keep `FROM_ABOVE` looser than `TOLERANCE`**
+  (`worldgen/src/checks/contract.rs`).
+  Walls grown to a site show from above
+  ("Sheets and rods", above, and "Measured houses", below):
+  around the valley's towns 0.0496 apart at level 4, on average over seeds,
+  so the valley is checked from above to level 3;
+  the city's buildings keep within it at level 3 by 0.004,
+  the engine's village at level 2 by 0.01,
+  and several solids (`worldgen/tests/shapes.rs`) only within it.
+  With walls fixed, one tolerance would do.
 - **Measured houses show their walls from above at level 6**,
   which the contract does not check, and at level 4 in a region of houses alone
   (seed 2: plaster 0.19 against 0.01 at level 0, 0.106 apart;

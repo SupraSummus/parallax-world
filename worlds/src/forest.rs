@@ -10,8 +10,8 @@ use worldgen::column::{self, lowest_around};
 use worldgen::curve::Curve;
 use worldgen::domain::{Domain, Lie, Scope, compose};
 use worldgen::generator::{
-    ANY_SIZE, Child, Far, Field, Fill, Generator, Layer, Line, Node, Op, Point, Population, Shadows, Shape, Span, ball, bounds_of_shapes,
-    capsule, ellipsoid, lathe,
+    ANY_SIZE, Child, Far, Field, Fill, Generator, Holds, Layer, Line, Node, Op, Point, Population, Shadows, Shape, Span, ball,
+    bounds_of_shapes, capsule, ellipsoid, lathe,
 };
 use worldgen::grid::Box3;
 use worldgen::js::{self, round};
@@ -628,7 +628,7 @@ fn layers(scope: &Scope, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
                     let (from, to) = (height + from, height + from + spacing);
                     let bark = unit(hash(f.s("canopy bark"), x, i as i64, z)) < wood[sp][i];
                     let kind = k(if bark { bark_of(species) } else { foliage(species, unit(hash(f.s("canopy foliage"), x, i as i64, z))) });
-                    spans.push(Span { from, to, kind, extinction: Some(per_area * shadow / spacing as f64) });
+                    spans.push(Span { from, to, kind, holds: Holds::Medium(per_area * shadow / spacing as f64) });
                 }
             }
             spans

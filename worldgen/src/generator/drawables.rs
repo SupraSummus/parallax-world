@@ -60,7 +60,8 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
     let op = field.op;
     let field_seed = hash_text(field.name, seed);
     // A medium's share of a site, from its extinction.
-    let share_of = |extinction: Option<f64>| extinction.map_or(SHARE, |e| share(1.0 - js::exp(-e * CHORD * s as f64)));
+    let medium = |e: f64| share(1.0 - js::exp(-e * CHORD * s as f64));
+    let share_of = |extinction: Option<f64>| extinction.map_or(SHARE, medium);
     let picked = |x: i64, y: i64, z: i64| to_pick(hash(field_seed, x * s, y * s, z * s));
     // Where column (i, j) of sites reads dithered plans, in the s × s columns it stands for (Plan::dithered): the same
     // for every field, so a column's fields read one point. Along a row of columns the offsets across it are a Weyl
@@ -136,7 +137,7 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
                         if let Some((about, slack)) = about.and_then(|about| Some((about, about.slack(s)?))) {
                             let g = about.of.at(u * s, v * s);
                             let (low, high) = (g - about.below - slack, g + about.above + slack);
-                            let under = |span: &Span| about.under == Some(span.kind) && span.extinction.is_none();
+                            let under = |span: &Span| about.under == Some(span.kind) && span.holds == Holds::Solid;
                             for span in spans.iter().filter(|span| span.from < span.to) {
                                 assert!(
                                     (span.from >= low || under(span)) && span.to <= high,
@@ -168,10 +169,10 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
                             // Checking: it is all `kind` as it says, a solid span of it through and nothing else in it.
                             let through = spans
                                 .iter()
-                                .any(|span| span.kind == kind && span.extinction.is_none() && span.from < bottom && span.to > top);
+                                .any(|span| span.kind == kind && span.holds == Holds::Solid && span.from < bottom && span.to > top);
                             let alone = spans
                                 .iter()
-                                .all(|span| span.from >= span.to || span.from > top || (span.kind == kind && span.extinction.is_none()));
+                                .all(|span| span.from >= span.to || span.from > top || (span.kind == kind && span.holds == Holds::Solid));
                             if !(through && alone) && unlike.is_none() {
                                 site[axis] = lo[axis];
                                 unlike = Some((site, kind));
@@ -181,7 +182,11 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
                             // s is a power of two: shifting is dividing, rounded down.
                             let first = (-((-span.from) >> s.trailing_zeros())).max(lo[axis]);
                             let mut w = first + ((first + u + v) & 1);
-                            let share = share_of(span.extinction);
+                            let (op, share) = match span.holds {
+                                Holds::Solid => (op, SHARE),
+                                Holds::Medium(e) => (op, medium(e)),
+                                Holds::Coat(c) => (Op::Paint, share(c)),
+                            };
                             while w * s <= span.to && w < hi[axis] {
                                 site[axis] = w;
                                 if tie.within(axis, site.map(|c| c * s), span.from, span.to, 1) {
