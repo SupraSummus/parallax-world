@@ -16,7 +16,9 @@ concurrency:
   cancel-in-progress: true
 
 # pnpm check in jobs side by side, a runner each: the tests are bound by the CPU,
-# and the valley's contract alone takes as long as the rest of the Rust tests.
+# the worlds' contract most of all, so it has jobs of its own, the valley's one alone.
+# Jobs that test the native frontend cache its dependencies' builds (wgpu, egui),
+# saved from main only, so pull requests share one cache and don't evict it.
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -63,9 +65,25 @@ jobs:
       - name: Set up environment
         uses: ./.github/actions/setup
 
+      - name: Cache Rust's dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
       # pnpm hands what follows `--` to test:rust's last command, the release tests'.
-      - name: Test, but the valley's contract
-        run: pnpm test:rust -- --skip keeps_the_contract::valley
+      - name: Test, but the worlds' contract
+        run: pnpm test:rust -- --skip 'keeps_the_contract::'
+
+  # The worlds' contract, but the valley's: a test each, run side by side.
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      # Only Cargo, which the runner has.
+      - name: Test the worlds' contract, but the valley's
+        run: cargo test --release -p worlds --test contract -- --skip keeps_the_contract::valley
 
   valley-contract:
     runs-on: ubuntu-latest
@@ -94,6 +112,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
+      - name: Cache Rust's dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
       - name: Install software Vulkan
         run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers vulkan-tools
 
@@ -104,7 +127,7 @@ jobs:
           vulkaninfo --summary 2>/dev/null | grep -E 'deviceName|driverInfo|apiVersion' || true
 
       - name: Test what draws
-        run: cargo test --release -p parallax-native -- --ignored
+        run: cargo test --release --no-fail-fast -p parallax-native -- --ignored
 
       - name: Draw a view
         run: cargo run --release -p parallax-native -- --view 'seed=1&world=moor&look=30,-10' --size 320x200 --shot shot.png

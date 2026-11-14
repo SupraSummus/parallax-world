@@ -125,13 +125,14 @@ Numbers are for the forest at 1280×800, as measured when written.
 - **Tests take most of CI's time.**
   Most of it is the worlds' contract, bound by the CPU:
   pictures from above generate level 0 over all of a world's heights.
-  CI runs the valley's in a job of its own;
-  it and the rest of the Rust tests are CI's longest jobs.
+  CI runs it in jobs of its own, the valley's alone, its longest job.
+  Its threads are busy till the end, so only less work,
+  or its seeds on several runners, would shorten it;
+  `--nocapture` shows how long each part takes.
   If CI is still too slow, the contract at seeds but `REGIONS_SEED`
   (`worlds/tests/contract.rs`) could run only on main.
   The contract's survey asks every cell of a sparse population's square:
   the valley's haystacks' anchors cost most of it.
-  Caching Rust's builds would spare little: `libm` is their one dependency.
 - **Slice detail sets both thickness and level of detail.**
   "Slice Detail" sets how thick slices are,
   and so their level of detail (atoms of 2^(k−s) at level k,
