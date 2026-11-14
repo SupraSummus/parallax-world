@@ -3,11 +3,12 @@
 //! cargo run --release --example bench -- valley 12345 0 0
 //!
 //! for world (the forest if none), seed, and where, off spawn along x and z (lattice units):
-//! at levels 0, 4 and 6, the four tiles of 128 sites around there, over the world's heights, what may show of them (shown).
+//! at levels 0, 4 and 6, four tiles (native's cubes of 128 sites, light::tile_box) side by side there, at the spawn's height,
+//! what may show of them (shown).
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::time::Instant;
 use worldgen::generator::{generate, shown};
-use worldgen::grid::Box3;
+use worldgen::light::{TILE, tile_box};
 use worlds::by_name;
 
 fn main() {
@@ -21,13 +22,12 @@ fn main() {
     let (x, z) = (spawn[0] + number(2, 0), spawn[2] + number(3, 0));
     for level in [0u32, 4, 6] {
         let s = 1i64 << level;
-        let (min_y, max_y) = world.heights_at(level);
-        let (cx, cz) = (x.div_euclid(s * 128) * 128, z.div_euclid(s * 128) * 128);
+        let heights = world.heights_at(level);
+        let [cx, cy, cz] = [x, spawn[1], z].map(|v| v.div_euclid(s * TILE));
         let start = Instant::now();
         let (mut voxels, mut hash) = (0, DefaultHasher::new());
         for i in 0..4 {
-            let (x, z) = (cx + 128 * (i % 2), cz + 128 * (i / 2));
-            let b = shown(generator, &Box3 { min: [x, min_y, z], max: [x + 128, max_y, z + 128] }, level);
+            let b = shown(generator, &tile_box(heights, [cx + i % 2, cy, cz + i / 2]), level);
             let grid = generate(generator, &b, level).into_grid(false);
             voxels += grid.cells.len();
             (&grid.bricks, &grid.cells).hash(&mut hash);

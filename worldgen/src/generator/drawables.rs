@@ -130,7 +130,7 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
                                     moved[axis / 2] = 0;
                                 }
                                 work.reads += 1;
-                                (plan::footprint(s, moved, || spans(u * s, v * s)), field.about.as_ref())
+                                (plan::footprint(s, moved, || plan::stretch((bottom, top), || spans(u * s, v * s))), field.about.as_ref())
                             }
                         };
                         // What it is about, held to it where asked.

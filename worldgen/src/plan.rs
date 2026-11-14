@@ -18,6 +18,8 @@ thread_local! {
      * none while plans or things are made.
      */
     static FOOTPRINT: Cell<Option<(i64, [i64; 2])>> = const { Cell::new(None) };
+    /** The stretch of its line a field's spans are asked for (`along`). */
+    static ALONG: Cell<(i64, i64)> = const { Cell::new((i64::MIN, i64::MAX)) };
 }
 
 /**
@@ -38,6 +40,27 @@ pub(crate) fn footprint<R>(spacing: i64, offset: [i64; 2], read: impl FnOnce() -
 #[inline]
 pub fn spacing() -> i64 {
     FOOTPRINT.get().map_or(1, |(spacing, _)| spacing)
+}
+
+/** Runs `read`, a field's spans of a line, asked for the stretch [from, to] of it (`along`). */
+pub(crate) fn stretch<R>(along: (i64, i64), read: impl FnOnce() -> R) -> R {
+    let outer = ALONG.replace(along);
+    let value = read();
+    ALONG.set(outer);
+    value
+}
+
+/**
+ * The stretch [from, to] of the line of sites a field's spans are asked
+ * for now, lattice units along it; all of it where not said. Spans that
+ * can't reach into it may be left out: a field endless along its lines
+ * (a cheese endless along y) makes only what is there. What it makes of
+ * one stretch agrees with what it makes of another where they meet, as
+ * the contract checks: a box in parts is the box whole.
+ */
+#[inline]
+pub fn along() -> (i64, i64) {
+    ALONG.get()
 }
 
 /** Runs `read` with plans read where asked, whoever asks: as a plan's columns are made, and points' chances (points.rs). */

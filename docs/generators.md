@@ -12,9 +12,11 @@ The forest (`worlds/src/forest.rs`) is written this way,
 and so is the valley (`valley.rs`),
 the forest with towns, fields, landmarks, moorland and a railway
 between mountains, six domains composed as in "Composing",
-and the city (`city.rs`), boxes on a plan of quarter metres;
+the city (`city.rs`), boxes on a plan of quarter metres,
+and the cheese (`cheese.rs`), endless every way, no way up but for walking it;
 a host starts either by name from `WORLDS` (`worlds/src/lib.rs`),
-as a `World`: its generator, spawn and heights,
+as a `World`: its generator, spawn and heights
+(the bounds it has anything in, endless for the cheese: `ENDLESS`),
 and the places it names (`points`);
 the web lists and generates them all as WebAssembly (`web/src/lib/worldgen.ts`).
 Integers and fixed point (`noise.rs`) decide wherever they can,
@@ -40,7 +42,12 @@ A world is **layers** of two kinds, drawn in `order`:
 
 - **Fields:** something everywhere, from position alone: the ground, caves, fog.
   A field gives a kind (or a medium) at each site (`At`),
-  or `Spans` along each line of sites parallel to an `axis` (heightfields).
+  or `Spans` along each line of sites parallel to an `axis` (heightfields),
+  of which it may make only those reaching the stretch asked for (`plan::along`):
+  a field endless along its lines, as the cheese's, makes no more.
+  Boxes ask for different stretches of a line,
+  and the contract holds a box generated in parts to the box whole,
+  so what a field makes of a stretch agrees with what it makes of any other.
 - **Populations:** things in cells, at most one per cell.
   A population's cells are those of the lattice N times coarser, N·FCC
   (as the renderer's, `cells.ts`, when N is a power of two):
@@ -450,9 +457,16 @@ the kinds nothing draws are only printed,
 as worlds share tables of kinds (the moor's is the valley's).
 `CONTRACT_ONLY='towns › church,railway'` checks only the regions
 of strata so named, and surveys only their layers.
-The checks do take y as up, as hosts do:
-a world's heights are along it, and "from above" looks down it
-(see `docs/todo.md`).
+A world's heights are its own, a ground's sky and the rock under it;
+the checks look at it in cubes around places
+(regions, the survey's, places' and directions' around spawn),
+each within its heights (`World::within`),
+so a cube as wide as a ground's heights holds all of them,
+and an endless world's is a cube of it.
+A camera could be anywhere open to a region's outside.
+"From above" is a sky's view: rays down from the top of a world's heights,
+cutting nothing; a world with no sky is not seen from it.
+Some still take y as up ("Drop y as up" in `docs/todo.md`).
 
 The contract says three things.
 A world is a function of position:
@@ -506,13 +520,14 @@ in shares of material types or in sRGB.
   and the level past them, as hosts draw a coarse level behind a finer one,
   against the level two finer all the way.
   A camera could be at the sites of the finer level that show no voxel
-  it could fly to from above,
-  through such sites from the top of the box (it collides with voxels shown):
-  under a canopy (in the forest, all but 0.3 %), not under the ground's shell.
+  it could fly to from outside the box,
+  through such sites from any of its faces (it collides with voxels shown):
+  under a canopy (in the forest, all but 0.3 %), in a cave the box cuts,
+  not under the ground's shell.
 - at each level up to the entry's `from_above`,
-  what rays straight down see,
+  what rays straight down from the world's sky see,
   over the region grown to at least 16 sites of the level across,
-  against level 0:
+  against level 0 (a world with no sky, as the cheese, has none):
   levels two apart miss what drifts a little at every level,
   like a town's walls taking over from its roofs.
   Rays see the faces they enter by, from above the ones up.
@@ -636,7 +651,8 @@ weighed by rough times per count (`NS`),
 they show what takes the time.
 
 `cost::report` generates a world's host tiles at several levels
-around some places, each tile by a fresh world, as a host's first is.
+around some places, each tile by a fresh world, as a host's first is:
+cubes of the lattice, as native's (`light::tile_box`).
 It prints the estimate by layer and level, largest first,
 the time each tile took here,
 and flags what looks costly:
@@ -1062,8 +1078,7 @@ and without them rays slipped in at a cliff's corners.
 - **Things on a surface.** Anchor them along the axis across it
   (`anchor_along(1, …)` with `Line::pick` for a ground under columns),
   or at points of the axes across it (`anchor_points`), not per cell:
-  a host's tiles span the world's heights (the web's)
-  or are cubes over one another (native's),
+  a host's tiles are cubes over one another,
   and asked per cell, a population reads the ground in every cell over each column,
   most of them in the air or under it;
   under the valley's mountains that was most of a tile's time.

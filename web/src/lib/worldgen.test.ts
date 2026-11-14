@@ -10,8 +10,10 @@ describe('worlds', () => {
       const { spawn, heights, generate } = generated(name, 7)
       // Coarse: moments for any world.
       const level = 6
-      const [x, z] = [Math.floor(spawn.x / 2 ** level), Math.floor(spawn.z / 2 ** level)]
-      const box = { ...heights(level), minX: x - 8, minZ: z - 8, maxX: x + 8, maxZ: z + 8 }
+      const [x, y, z] = [spawn.x, spawn.y, spawn.z].map(v => Math.floor(v / 2 ** level))
+      // Within its heights, as far around the spawn point along y as along x and z: some are endless (the cheese).
+      const { minY, maxY } = heights(level)
+      const box = { minX: x - 8, minY: Math.max(minY, y - 8), minZ: z - 8, maxX: x + 8, maxY: Math.min(maxY, y + 8), maxZ: z + 8 }
       expect(generate(box, level).cells.some(id => id !== 0), name).toBe(true)
     }
   })
