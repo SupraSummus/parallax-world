@@ -1,6 +1,6 @@
 # The Rust crates, built and checked together with one lock and one target.
-# lab/ is a member, for the lock, but no default one: pnpm check leaves it out
-# (`-p lab` builds it).
+# lab/ is a member, for the lock, but no default one: cargo test leaves its
+# tests out, and pnpm lint checks it (--workspace).
 [workspace]
 resolver = "3"
 members = ["fcc", "bake", "worldgen", "worlds", "native", "web/wasm", "lab"]

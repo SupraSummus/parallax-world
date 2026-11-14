@@ -62,7 +62,7 @@ web/                         # The web frontend: React and WebGL 2, its Rust in 
         ├── bake.worker.ts   # Bake worker entry
         ├── compositor.ts    # Draws the renderer's frames with WebGL 2: chunks' splats as instanced prisms
         └── utils.ts         # cn() for class names
-Cargo.toml                   # The Rust crates' workspace: one lock, one target; lab/ a member built only when named
+Cargo.toml                   # The Rust crates' workspace: one lock, one target; lab/ a member, not a default one
 .cargo/config.toml           # Builds for x86-64-v3: floor and ceil inline (see there)
 scripts/shot.mjs             # pnpm shot: a view in headless Chromium, saved once complete
 scripts/voxelize.py          # A glTF scene as voxels of the FCC lattice, for worlds/src/scene.rs (numpy, Pillow)
@@ -125,7 +125,7 @@ worlds/                      # The worlds, on worldgen's public API only
 ├── data/cost/               # Each world's cost baseline, which tests/cost.rs holds it to
 ├── tests/                   # Every world in WORLDS keeps the contract and its cost baseline; the scenes' contents
 └── examples/                # map: a world from above; look: a picture of it, of any place it names (picture.rs), lit (light.rs); cost: what its tiles cost (cost.rs); bench: timing a world's tiles
-lab/                         # Experiment, not built by pnpm: split grammars with shared splits, learned from the valley's towns; a masked model of any volume, flat, 3D or on the FCC lattice; synthesis by coordinates into examples; a critic and profiles that score any of them; real places (scripts/overture.py) drawn to a plan (see src/lib.rs); exports the learned town's rules
+lab/                         # Experiment, linted but not tested by pnpm: split grammars with shared splits, learned from the valley's towns; a masked model of any volume, flat, 3D or on the FCC lattice; synthesis by coordinates into examples; a critic and profiles that score any of them; real places (scripts/overture.py) drawn to a plan (see src/lib.rs); exports the learned town's rules
 native/                      # The native frontend (egui on winit and wgpu), linking fcc/, bake/, worldgen/ and worlds/; see src/main.rs
 └── src/
     ├── main.rs              # The camera (flying or walking, F), the panel, its engine and lighting (shaded or computed); --shot, --bench, --stroll for any engine

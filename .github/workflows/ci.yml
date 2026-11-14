@@ -95,11 +95,6 @@ jobs:
       - name: Test the valley's contract
         run: cargo test --release -p worlds --test contract keeps_the_contract::valley
 
-      # lab/ is no part of pnpm check, but on worldgen's and worlds' API:
-      # built here, so a change to them that breaks it shows.
-      - name: Build the lab
-        run: cargo build --release --all-targets -p lab
-
   # The native frontend's GPU half, which the other jobs do not run,
   # on Mesa's software Vulkan: its tests that draw, and a view drawn.
   native-gpu:

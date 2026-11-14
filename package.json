@@ -11,7 +11,7 @@
     "shot:native": "cargo run --release -p parallax-native --",
     "wasm": "cargo build --profile wasm --target wasm32-unknown-unknown -p parallax-web",
     "typecheck": "tsc --noEmit -p web",
-    "lint": "eslint . && cargo clippy --all-targets -- -D warnings && cargo fmt --check",
+    "lint": "eslint . && cargo clippy --workspace --all-targets -- -D warnings && cargo fmt --check",
     "test": "pnpm test:rust && pnpm test:web",
     "test:rust": "cargo test --no-fail-fast -p fcc -p bake -p parallax-web && cargo test --release --no-fail-fast -p parallax-native -p worldgen -p worlds",
     "test:web": "pnpm wasm && vitest run --root web",
