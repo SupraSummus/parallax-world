@@ -233,6 +233,18 @@ mod tests {
         a.iter().zip(b).all(|(a, b)| a.abs_diff(*b) <= 1)
     }
 
+    /** How two pictures differ: in how many pixels, by how much at most, and where the first is. */
+    fn differ(a: &[u8], b: &[u8]) -> String {
+        let pixels = a.chunks(4).zip(b.chunks(4)).enumerate().filter(|(_, (a, b))| !alike(a, b));
+        let (mut count, mut most, mut first) = (0, 0, None);
+        for (i, (a, b)) in pixels {
+            count += 1;
+            most = most.max(a.iter().zip(b).map(|(a, b)| a.abs_diff(*b)).max().unwrap_or(0));
+            first = first.or(Some((i as u32 % PIXELS[0], i as u32 / PIXELS[0], [a, b])));
+        }
+        format!("{count} pixels differ, by {most} at most, the first {first:?}")
+    }
+
     #[test]
     fn moving_keeps_most_chunks() {
         let make = worlds::by_name("moor").expect("moor").make;
@@ -268,7 +280,7 @@ mod tests {
             easel.pixels(&first, PIXELS);
             let followed = easel.pixels(&second, PIXELS).2;
             let whole = Easel::offscreen(None).pixels(&second, PIXELS).2;
-            assert!(alike(&followed, &whole), "relief {relief}");
+            assert!(alike(&followed, &whole), "relief {relief}: {}", differ(&followed, &whole));
         }
     }
 
@@ -291,7 +303,7 @@ mod tests {
                 } else {
                     "splats"
                 };
-                assert!(alike(&culled.0, &all.0), "{name} {look:?} {drew}");
+                assert!(alike(&culled.0, &all.0), "{name} {look:?} {drew}: {}", differ(&culled.0, &all.0));
                 assert!(culled.1 < all.1, "{name} {look:?}: culling drew {} {drew} of {}", culled.1, all.1);
             }
         }
@@ -319,6 +331,6 @@ mod tests {
         Arc::make_mut(&mut composed.frame.chunks).truncate(fit);
         let first = Easel::offscreen(None).pixels(&composed, PIXELS).2;
         assert!(some != all, "some left out");
-        assert!(alike(&some, &first), "what is drawn shows as it would alone");
+        assert!(alike(&some, &first), "what is drawn shows as it would alone: {}", differ(&some, &first));
     }
 }
