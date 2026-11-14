@@ -17,7 +17,7 @@ use worldgen::grid::Box3;
 use worldgen::js::{self, round};
 use worldgen::kinds;
 use worldgen::noise::{Fbm, Fx, Rng, ValueNoise, fx, hash, hash64, smoothstep, unit};
-use worldgen::plan::{Holding, Plan, Sloped};
+use worldgen::plan::{self, Holding, Plan, Sloped};
 use worldgen::points::{Blur, MARKS, Points, Room, Rooms, Spot};
 use worldgen::units::{UNIT_SIZE, Units, m};
 
@@ -145,7 +145,9 @@ fn foliage(species: Species, pick: f64) -> K {
 #[derive(Clone, Copy, Default)]
 struct Column {
     height: i64,
+    /** Its surface, and where the ground is steep, its rock (Woods::column). */
     surface: K,
+    rock: K,
     /** How much the trees around are conifers, and how dense they are: fractions. */
     conifer: Fx,
     density: Fx,
@@ -283,6 +285,8 @@ struct Woods {
     spawn: [i64; 3],
     ground: Ground,
     columns: Plan<Column>,
+    /** `steep` over a run of one, kept: plans and points read it, at every level. */
+    steep: Plan<bool>,
 }
 
 /** The forest's own noise, by what it decides. */
@@ -296,16 +300,28 @@ struct Noise {
 /** The rise over a run of one from which ground is stone: of a column to the next along x or z, of a slope's side to the spacing. */
 const STEEP: i64 = 3;
 
-/** Column (x, z), given the ground's height there and whether it is steep. */
-fn column_of(n: &Noise, path: &Path, x: i64, z: i64, h: i64, steep: bool) -> Column {
+/** Whether `ground` rises or falls STEEP a run from column (x, z) to the next `s` along x or z. */
+fn steep(ground: &Sloped, x: i64, z: i64, s: i64) -> bool {
+    let h = ground.at(x, z);
+    let rises = |x, z| (ground.at(x, z) - h).abs() >= STEEP * s;
+    rises(x + s, z) || rises(x, z + s)
+}
+
+/** Column (x, z), given the ground's height there. */
+fn column_of(n: &Noise, path: &Path, x: i64, z: i64, h: i64) -> Column {
     let conifer = smoothstep(fx(0.4), fx(0.6), n.conifer.at(x, z)) * 3 / 4 + smoothstep(Fx::m(6.0), Fx::m(16.0), Units(h).to_fx()) / 4;
     let density = smoothstep(fx(0.3), fx(0.48), n.density.at(x, z));
     let on_path = path.by(x, z, Fx::m(1.1) + n.path_edge.at(z, 0) * Units::m(0.5));
     let floor = n.floor.at(x, z);
+    let rock = if on_path {
+        K::path
+    } else if floor < fx(0.5) {
+        K::stone
+    } else {
+        K::mossyStone
+    };
     let surface = if on_path {
         K::path
-    } else if steep {
-        if floor < fx(0.5) { K::stone } else { K::mossyStone }
     } else if density < fx(0.2) {
         if floor < fx(0.75) { K::grass } else { K::moss }
     } else if conifer > fx(0.5) {
@@ -315,7 +331,7 @@ fn column_of(n: &Noise, path: &Path, x: i64, z: i64, h: i64, steep: bool) -> Col
     } else {
         K::moss
     };
-    Column { height: h, surface, conifer, density, on_path }
+    Column { height: h, surface, rock, conifer, density, on_path }
 }
 
 impl Woods {
@@ -328,8 +344,17 @@ impl Woods {
         self.ground.ground.at(x, z)
     }
 
+    /** Column (x, z): rock where the ground is `steep` over the spacing read for (plan::spacing), as the terrain's cliffs. */
     fn column(&self, x: i64, z: i64) -> Column {
-        self.columns.at(x, z)
+        let column = self.columns.at(x, z);
+        if self.ground.ground.slope().is_some_and(|slope| slope < STEEP) {
+            return column;
+        }
+        let steep = match plan::spacing() {
+            1 => self.steep.at(x, z),
+            s => steep(&self.ground.ground, x, z, s),
+        };
+        Column { surface: if steep { column.rock } else { column.surface }, ..column }
     }
 
     /** `chance` times the forest's share of column (x, z). */
@@ -450,16 +475,14 @@ fn layers(scope: &Scope, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
     };
     let columns = {
         let (heights, path) = (ground.ground.clone(), ground.path.clone());
-        Plan::new("forest columns", COLUMN_SCALE, move |x, z| {
-            let h = heights.at(x, z);
-            // Neighbours read only where the ground may be steep: past level 0 each is a ground made for one column.
-            let rise = |x, z| (heights.at(x, z) - h).abs() >= STEEP;
-            let steep = heights.slope().is_none_or(|slope| slope >= STEEP) && (rise(x + 1, z) || rise(x, z + 1));
-            column_of(&noise, &path, x, z, h, steep)
-        })
+        Plan::new("forest columns", COLUMN_SCALE, move |x, z| column_of(&noise, &path, x, z, heights.at(x, z)))
     };
     let on = ground.ground.clone();
-    let f = Rc::new(Woods { scope: scope.clone(), spawn, ground, columns });
+    let steep = {
+        let heights = ground.ground.clone();
+        Plan::new("forest steep", COLUMN_SCALE, move |x, z| steep(&heights, x, z, 1))
+    };
+    let f = Rc::new(Woods { scope: scope.clone(), spawn, ground, columns, steep });
 
     // The ground: along each column, soil or stone under a layer of its surface, and stone down to the bottom.
     let terrain = {

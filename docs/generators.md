@@ -27,9 +27,9 @@ This is the second version of the contract (see "Open problems").
 The engine is moving towards worlds made of continuous parts only:
 fields, points and shapes, each given at any position.
 Only the engine would know the lattice, its cells, levels and caches,
-and what the checks below measure
-(levels that agree, cost, no preferred places or directions)
-would follow from how the parts are built, not be tested.
+and each level would read them on its own sites.
+What holds within a level follows from how the parts are built;
+that levels agree is what the checks below are for.
 Points are a first step:
 a far form can read the things that stand, by construction
 (the forest's canopy at level 4).
@@ -263,6 +263,15 @@ how many rays get how far, and what they stop on.
   Read where each line is, the town's streets aliased:
   its fields from above were 0.03 off at level 6, under 0.015 dithered.
   Numbers aren't dithered: heights would roughen by their slope times the spacing.
+- **The ground** a layer reads, in its fields and its things,
+  is the ground on its own sites (`Sloped::at`):
+  between their columns, interpolated from the four around.
+  Things stand on the ground their level draws,
+  and a level composes the ground at its own columns only;
+  read anywhere, each point was composed anew.
+  A slope is read over the spacing:
+  the forest's stone, as the terrain's cliffs.
+  Plans and points read the ground where asked, the same at every level.
   Things read plans where they ask,
   so a thing at a dithered edge may stand a site off what the fields show.
 - **Faces.** Boxes and spans keep the sites in [min, max) along each axis.

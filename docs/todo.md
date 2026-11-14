@@ -466,7 +466,10 @@ Numbers are for the forest at 1280×800, as measured when written.
   hosts would ask `whole` alone.
 - **Cost weighs every plan lookup alike** (`NS` in `worldgen/src/cost.rs`),
   though one of a column just read costs a fraction
-  of one among claims making their keys.
+  of one among claims making their keys,
+  and one making the valley's land, many times both:
+  the moor's boulders at `Points` counted 15 % less at level 6
+  and took as many instructions.
 - **The places check finds few things of sparse populations**
   (`worldgen/src/checks/places.rs`):
   it asks COLUMNS cells at most,
@@ -667,6 +670,9 @@ Composing generators (section "Composing" of `docs/generators.md`), untried:
 
 - More populations at `Points`, their far forms from what stands:
   the forest's boulders, logs and plants, the valley's haystacks.
+  Moved alone they cost as much:
+  their chances, read at every leaf's corners, read the land
+  as their refused anchors read the ground.
 - Bid per quantity: a land per channel (use, ground, wetness),
   each domain bidding in those it cares about, as the towns' terrace needs.
 - Place the houses as things of their own, from the plan of lots,
@@ -676,7 +682,8 @@ Composing generators (section "Composing" of `docs/generators.md`), untried:
   Counted as `Points` by kind, they could be drawn far away from their counts,
   not each drawn whole to be measured.
 - Let the framework filter plans of numbers finer than the level's sites
-  (`Plan::sampled` at the spacing), since plans declare their scale:
+  (`Plan::sampled` at the spacing, as the ground is read: `Sloped::at`),
+  since plans declare their scale:
   coarse levels would skip fine bands' cost as they skip their things.
   Plans of categories are read dithered already ("Plans" in "Levels").
 - More of the railway (`worlds/src/railway.rs`):
