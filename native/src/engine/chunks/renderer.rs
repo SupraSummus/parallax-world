@@ -161,12 +161,13 @@ pub struct Renderer {
     /** Per grid level, the y of its sites, [low, high). */
     heights: Heights,
     /**
-     * By face, its cells picked last; and by face and cell, the chunks of
+     * By face, its cells picked last, of whole voxels and of medium (each
+     * by its Lod, Lod::for_medium); and by face and cell, the chunks of
      * those that came and went, or that a bake found empty, and the render
      * that last looked them up or let them go, kept a while: what else was
      * known of a cell is found again at less cost than kept.
      */
-    picks: Vec<Option<Pick>>,
+    picks: Vec<[Option<Pick>; 2]>,
     cells: FastMap<(usize, CellChunk), (Seen, u64)>,
     bakery: Bakery,
     next_id: u32,
@@ -253,7 +254,7 @@ impl Renderer {
             baker
         });
         Renderer {
-            picks: faces.iter().map(|_| None).collect(),
+            picks: faces.iter().map(|_| [None, None]).collect(),
             shown: vec![false; faces.len()],
             faces,
             heights: world.heights,
@@ -277,7 +278,7 @@ impl Renderer {
         let mut changed = false;
         if look.sky.is_some() != self.lit {
             self.cells.clear();
-            self.picks.iter_mut().for_each(|p| *p = None);
+            self.picks.iter_mut().for_each(|p| *p = [None, None]);
             self.lit = look.sky.is_some();
             changed = true;
         }
@@ -294,7 +295,7 @@ impl Renderer {
         changed |= self.receive();
         self.renders += 1;
         let (camera, view) = (look.camera, look.view());
-        let lod = Lod::new(look.shift, look.detail);
+        let whole = Lod::new(look.shift, look.detail);
         for f in 0..self.faces.len() {
             let tangents = view.face_tangents(&self.faces[f]);
             // Back in view, its cells look for every tile that came meanwhile.
@@ -304,29 +305,31 @@ impl Renderer {
             let Some(tangents) = tangents else { continue };
             let local = to_local(&self.faces[f].axes, camera);
             let eye = [local[0] / LAYER, local[1], local[2] / LAYER];
-            let key = (lod.shift, lod.q, look.far);
-            if self.picks[f].as_ref().is_some_and(|p| p.picked.covers(key, eye, tangents)) {
-                changed |= self.look_up(f, if back { &[true; GRID_LEVELS] } else { &arrived }, levels, view.focal, local);
-                continue;
+            for lod in [whole, whole.for_medium()] {
+                let part = usize::from(lod.medium);
+                if self.picks[f][part].as_ref().is_some_and(|p| p.picked.covers(&lod, look.far, eye, tangents)) {
+                    changed |= self.look_up(f, part, if back { &[true; GRID_LEVELS] } else { &arrived }, levels, view.focal, local);
+                    continue;
+                }
+                let [t0, t1, t2, t3] = tangents;
+                let eyes = eye.map(|v| [v - DRIFT, v + DRIFT]);
+                // Within the face's rays: |x| + √2 |y| ≤ z.
+                let y = std::f64::consts::FRAC_1_SQRT_2;
+                let wide = [(t0 - TURN).max(-1.0), (t1 + TURN).min(1.0), (t2 - TURN).max(-y), (t3 + TURN).min(y)];
+                let mut old = self.picks[f][part].take().map(|p| p.picked);
+                let picked = lod.pick(eyes, look.far, wide, old.as_mut());
+                // The chunks the new pick does not have are kept a while, as if just looked up.
+                let renders = self.renders;
+                old.into_iter().for_each(|old| {
+                    old.into_each(|cell, seen| {
+                        if matches!(seen, Seen::Baked(_)) {
+                            self.cells.insert((f, cell), (seen, renders));
+                        }
+                    })
+                });
+                self.compose(f, picked, tangents, &lod, look.far, levels, view.focal, local);
+                changed = true;
             }
-            let [t0, t1, t2, t3] = tangents;
-            let eyes = eye.map(|v| [v - DRIFT, v + DRIFT]);
-            // Within the face's rays: |x| + √2 |y| ≤ z.
-            let y = std::f64::consts::FRAC_1_SQRT_2;
-            let wide = [(t0 - TURN).max(-1.0), (t1 + TURN).min(1.0), (t2 - TURN).max(-y), (t3 + TURN).min(y)];
-            let mut old = self.picks[f].take().map(|p| p.picked);
-            let picked = lod.pick(eyes, look.far, wide, old.as_mut());
-            // The chunks the new pick does not have are kept a while, as if just looked up.
-            let renders = self.renders;
-            old.into_iter().for_each(|old| {
-                old.into_each(|cell, seen| {
-                    if matches!(seen, Seen::Baked(_)) {
-                        self.cells.insert((f, cell), (seen, renders));
-                    }
-                })
-            });
-            self.compose(f, picked, tangents, &lod, look.far, levels, view.focal, local);
-            changed = true;
         }
         if changed {
             self.gather(look);
@@ -390,7 +393,7 @@ impl Renderer {
                 Seen::Baked(chunk) => chunks.push(Placement { face: f, cell, chunk: chunk.clone() }),
             }
         });
-        self.picks[f] = Some(Pick { picked, chunks, waiting, baking });
+        self.picks[f][usize::from(lod.medium)] = Some(Pick { picked, chunks, waiting, baking });
     }
 
     /** Requests to bake a cell of face `f` that reads given tiles, the eye at `local` seeing at `focal`. */
@@ -402,9 +405,21 @@ impl Renderer {
         }
     }
 
-    /** Of face `f`'s cells that wait for tiles, those whose tiles arrived (by level, `arrived`) are to bake, or hold nothing. Whether any were. */
-    fn look_up(&mut self, f: usize, arrived: &[bool; GRID_LEVELS], levels: &[Arc<Level>], focal: f64, local: [f64; 3]) -> bool {
-        let Some(mut pick) = self.picks[f].take() else { return false };
+    /**
+     * Of face `f`'s cells that wait for tiles, of whole voxels or medium
+     * (`part`, 1), those whose tiles arrived (by level, `arrived`) are to
+     * bake, or hold nothing. Whether any were.
+     */
+    fn look_up(
+        &mut self,
+        f: usize,
+        part: usize,
+        arrived: &[bool; GRID_LEVELS],
+        levels: &[Arc<Level>],
+        focal: f64,
+        local: [f64; 3],
+    ) -> bool {
+        let Some(mut pick) = self.picks[f][part].take() else { return false };
         let (lattice, request) = (self.faces[f].lattice, self.request(f, focal, local));
         let before = pick.waiting.len();
         pick.waiting.retain(|&(cell, t, wanted)| {
@@ -425,13 +440,13 @@ impl Renderer {
             false
         });
         let changed = pick.waiting.len() < before;
-        self.picks[f] = Some(pick);
+        self.picks[f][part] = Some(pick);
         changed
     }
 
     /** The frame of what the faces in view composed, and what they want: the chunks to bake, and the tiles, nearest first. */
     fn gather(&mut self, look: &Look) {
-        let picks = || self.picks.iter().zip(&self.shown).filter(|p| *p.1).filter_map(|p| p.0.as_ref());
+        let picks = || self.picks.iter().zip(&self.shown).filter(|p| *p.1).flat_map(|p| p.0.iter().flatten());
         let chunks: Vec<Placement> = picks().flat_map(|p| p.chunks.iter().cloned()).collect();
         // Their planes through their sites.
         let farthest = chunks
@@ -484,7 +499,7 @@ impl Renderer {
             }
             self.next_id += 1;
             let seen = if baked.is_empty() { Seen::Empty } else { Seen::Baked(Arc::new(Chunk { id: self.next_id, baked })) };
-            if let Some(pick) = self.picks[r.face].as_mut()
+            if let Some(pick) = self.picks[r.face][usize::from(r.cell.medium)].as_mut()
                 && let Some(picked) = pick.picked.at(&r.cell)
             {
                 *picked = seen.clone();

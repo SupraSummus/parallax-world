@@ -238,13 +238,17 @@ Numbers are for the forest at 1280×800, as measured when written.
 - **Native's medium costs a fragment per slab a ray crosses**
   (architecture.md, "See-through"), as far as the view goes:
   pictures added up in any order, nothing after a ray is all but stopped is left out.
-  Only media are (`KindDef::medium`): the moor's mist.
+  Only media are (`KindDef::medium`): the moor's mist, and the fog's (`world=fog`),
+  where a pixel takes some 10 slabs on average and up to 40.
   - Most of what a fragment costs is reading its four columns from storage:
     two columns an item, or the pictures in a texture the GPU filters,
     would read half as often.
-    Thicker slabs (fewer a ray, by a Q of their own) cost less,
-    but lift the mist over the horizon.
-  - Where a medium's colour changes along a ray, its colours mix without their order.
+  - Its deep slabs (`Lod::for_medium`) show mist on the ground above and below it
+    in faces with tilted axes: a V at their seams near the horizon.
+    Taking each half slab at its own middle plane halved the V at no cost,
+    but needs four columns of neighbours round a picture, not one.
+  - Where a medium's colour changes along a ray, its colours mix without their order;
+    so it is not fogged by distance, and far mist does not fade to the horizon.
   - The medium starts at the first half slab past the near plane:
     right by the eye, mist is a little thin.
   - A site's pieces, where shown, hide its medium and what is behind:

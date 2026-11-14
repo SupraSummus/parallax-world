@@ -269,6 +269,7 @@ and never meet a finer level after a coarser one.
 Where they overlap, coarser voxels may show a little past the finer ones' edges.
 The renderer keeps a face's cells picked for the eye anywhere near it
 and the view turned a little (`Lod::pick`),
+those of whole voxels and of medium apart, each by its own Lod,
 each with what it knows of it (`Seen`): its chunk, that it holds nothing,
 or what it waits for,
 and picks anew once the eye or view leaves them:
@@ -680,9 +681,19 @@ on the slab's middle plane, which every cell's slab there shares,
 each column's colour and optical depth:
 −ln of what each voxel lets through along its mean chord
 (worldgen's `CHORD`), added up.
+Its cells are its own (`Lod::for_medium`):
+the same grid as far away as whole voxels, but two levels coarser,
+so slabs four times as deep.
+A ray costs a fragment per slab it crosses, 2Q near the eye and Q a level after
+(of the medium's Q);
+deeper slabs lose nothing along the axis, as optical depths add up in any order.
 A ray takes the slab where it crosses that plane,
 so where it slants it takes it a little aside,
-which blurs where the medium ends by about a slab's depth times the slant.
+which blurs where the medium ends by about a slab's depth times the slant:
+where a face's axis is tilted, mist lying on the ground
+shows that much above and below it,
+and at a seam with a level face's rays, which take it where it is,
+the difference shows as a V.
 Optical depths add up in any order:
 the compositor adds the pictures as they come
 into a picture of their own, colours weighted by them,
@@ -690,6 +701,10 @@ in front of what the reliefs drew,
 and lays that over the picture, as much as it stops.
 Right where the medium's colour is the same all along a ray, as mist's is;
 where it is not, its colours mix without their order.
+So the medium is not fogged by distance (below):
+its colour would change along a ray,
+and at the horizon in fog, where most of a ray's medium is far,
+the horizon's colour would show through the fog that is near.
 Each slab of a column is one cell's, the one holding its middle site,
 so a slab's pictures tile its plane once;
 and a pixel takes the columns around it as a field,
@@ -707,8 +722,8 @@ A slab of a column may be a cell's that holds none of it,
 so a level picks a layer of cells more each way than it claims,
 whose medium alone it draws (`Lod::layers`, `medium_claims`).
 A cell's medium is a chunk of its own, apart from its whole voxels,
-and no level finer than `Lod::medium_level` has one:
-its cells, 8 voxels across, draw it from the near plane on,
+and no level finer than `MEDIUM_LEVEL` (`lod.rs`) has one:
+its cells, 32 voxels across, draw it from the near plane on,
 not the finest cells, a chunk per voxel.
 So a picture of medium takes the depths of the level
 whose whole voxels are drawn where it is (`level_ahead`),
@@ -718,7 +733,8 @@ thin and thick, along the axis and slanted
 (`a_medium_of_splats_lets_through_as_much_as_its_extinction_says`).
 
 **Fog.** A slice at distance d keeps `exp(−d / F)` of its own colour;
-the rest is the horizon colour, mixed in per pixel.
+the rest is the horizon colour, mixed in per pixel;
+native's medium is not fogged (see-through, above).
 F is a fixed share of the render distance (`FOG_PER_RENDER_DISTANCE`),
 so the far cut-off stays hazy.
 d is measured along the face's axis, not the ray:

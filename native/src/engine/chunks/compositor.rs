@@ -799,7 +799,7 @@ pub struct Compositor {
 const SKY_TOP: [f32; 3] = [0x3f as f32 / 255.0, 0x73 as f32 / 255.0, 0xb8 as f32 / 255.0];
 const SKY_HORIZON: [f32; 3] = [0xb9 as f32 / 255.0, 0xd3 as f32 / 255.0, 0xe8 as f32 / 255.0];
 /** f32 in Globals (compositor.wgsl), and where its `whole` is. */
-pub const GLOBALS: usize = 272;
+pub const GLOBALS: usize = 276;
 const WHOLE: usize = 6;
 const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const FARTHEST: wgpu::TextureFormat = wgpu::TextureFormat::R32Float;
@@ -1454,8 +1454,9 @@ pub struct View {
     /** How bright the sky is: 1 by day, less as --light dims it. */
     pub sky: f32,
     pub camera: Vec3,
-    /** Which cells each level claims (Lod::layers): Lod's Q, layers of grid 0 to the render distance, the coarsest level, and the finest that draws medium. */
+    /** Which cells each level claims (Lod::layers), and which the medium's, by their Lods (Lod::for_medium): each its Q, layers of grid 0 to the render distance, its coarsest level and its finest. */
     pub lod: [f32; 4],
+    pub medium: [f32; 4],
 }
 
 /** A number in [0, 1) from `numbers`, as if at random. */
@@ -1477,7 +1478,8 @@ impl View {
     /** As `look` sees, at its size in pixels. */
     pub fn new(look: &Look) -> View {
         let faces = view::faces();
-        let lod = Lod::new(look.shift, look.detail);
+        let whole = Lod::new(look.shift, look.detail);
+        let lod = |lod: Lod| [lod.q as f32, (look.far / LAYER).ceil() as f32, lod.top() as f32, lod.finest() as f32];
         View {
             yaw: look.yaw,
             pitch: look.pitch,
@@ -1490,7 +1492,8 @@ impl View {
             colours: look.colours,
             sky: look.sky.unwrap_or(1.0),
             camera: look.camera,
-            lod: [lod.q as f32, (look.far / LAYER).ceil() as f32, lod.top() as f32, lod.medium_level() as f32],
+            lod: lod(whole),
+            medium: lod(whole.for_medium()),
         }
     }
 
@@ -1521,6 +1524,7 @@ impl View {
             g[at + 16..at + 19].copy_from_slice(&to_local(face, self.camera).map(|v| v as f32));
         }
         g[268..272].copy_from_slice(&self.lod);
+        g[272..276].copy_from_slice(&self.medium);
         g
     }
 }

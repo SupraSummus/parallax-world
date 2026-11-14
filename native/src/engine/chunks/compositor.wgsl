@@ -35,10 +35,11 @@ struct Globals {
   horizon: vec4f,
   sky_view: mat3x3f, // the camera's axes in world coordinates
   faces: array<FaceView, 12>,
-  // Which cells each level claims (claims): Lod's Q, the layers of grid 0
-  // to the render distance, the coarsest level, and the finest that draws
-  // medium (Lod::medium_level).
+  // Which cells each level claims (claims), and which the medium's
+  // (medium_claims), by their Lods (Lod::for_medium): each its Q, the layers
+  // of grid 0 to the render distance, its coarsest level and its finest.
   lod: vec4f,
+  medium: vec4f,
 }
 
 // A chunk where it is, wherever the camera (compositor.rs's GpuRecord):
@@ -365,7 +366,10 @@ fn flat_fragment(in: Run) -> @location(0) vec4f {
 // the picture, in halves of a brick across and rows up from its first
 // place's centre; where its picture is, and how many columns its rows are;
 // which halves of its slab its level draws (veil_fragment); where it is
-// from the eye; and its chunk's tint and fog (shade).
+// from the eye; and its chunk's tint (shade). Not fogged by distance:
+// pictures added up in any order weigh a colour by its optical depth, not
+// by how much of it shows, and where a ray's medium is mostly far, as at
+// the horizon in fog, the fog's colour would show through what is near.
 struct Veil {
   @builtin(position) position: vec4f,
   @builtin(clip_distances) owned: array<f32, 4>,
@@ -374,7 +378,6 @@ struct Veil {
   @location(2) @interpolate(flat) drawn: vec2f,
   @location(3) at: vec3f,
   @location(4) @interpolate(flat) tint: u32,
-  @location(5) @interpolate(flat) fog: f32,
 }
 
 struct VeilPixel {
@@ -383,7 +386,6 @@ struct VeilPixel {
   @location(2) @interpolate(flat) drawn: vec2f,
   @location(3) at: vec3f,
   @location(4) @interpolate(flat) tint: u32,
-  @location(5) @interpolate(flat) fog: f32,
 }
 
 @vertex
@@ -408,7 +410,6 @@ fn veil_vertex(@builtin(vertex_index) vertex: u32, @builtin(instance_index) inst
   out.drawn = select(vec2f(0.0), vec2f(1.0), first > vec2f(c.clip) & first <= vec2f(c.reach));
   out.at = at;
   out.tint = c.tint;
-  out.fog = fog_of(c);
   return out;
 }
 
@@ -452,7 +453,7 @@ fn veil_fragment(in: VeilPixel) -> @location(0) vec4f {
   let y = in.place.y - f32(q);
   let field = mix(medium_row(in.picture, q, in.place.x, in.drawn), medium_row(in.picture, q + 1, in.place.x, in.drawn), y);
   let along = 2.0 * LAYER_OVER_CHORD * length(in.at) / in.at.z;
-  return vec4f(shaded(in.tint, in.fog, field), field.a) * along;
+  return vec4f(shaded(in.tint, 0.0, field), field.a) * along;
 }
 
 // The first of a tile's columns the pixel's ray meets. A column is a
@@ -699,8 +700,8 @@ fn nearest_depth(cluster: Cluster, level: f32) -> f32 {
 
 // The level whose whole voxels a face draws `ahead` along its axis from the
 // eye (claims): the finest whose reach holds that layer. A picture of
-// medium there takes its depths, as its whole voxels would be: finer than
-// Lod::medium_level, a coarser level's cells draw the medium.
+// medium there takes its depths, as its whole voxels would be: its cells
+// are coarser than the whole voxels' drawn there.
 fn level_ahead(face: u32, ahead: f32) -> f32 {
   let eye = globals.faces[face].eye.z;
   let layer = i32(floor((eye + ahead) / LAYER));
@@ -788,13 +789,19 @@ const NEAR_LAYERS = 4;
 const MAX_SLANT = vec2f(1.0, 0.7071067811865476);
 
 // The last layer of grid 0 whose cells `level` claims, for an eye in layer
-// `eye` (Lod::reach): 2Q · N layers past the last of its own layers of
-// sites not past the eye's; all, for the coarsest.
-fn reach(level: i32, eye: i32) -> i32 {
-  if level >= i32(globals.lod.z) {
+// `eye` (Lod::reach), of `lod`'s Q and coarsest level: 2Q · N layers past
+// the last of its own layers of sites not past the eye's; all, for the
+// coarsest.
+fn reach_of(lod: vec4f, level: i32, eye: i32) -> i32 {
+  if level >= i32(lod.z) {
     return 0x7fffffff;
   }
-  return ((eye >> u32(level)) + 2 * i32(globals.lod.x)) << u32(level);
+  return ((eye >> u32(level)) + 2 * i32(lod.x)) << u32(level);
+}
+
+// Of whole voxels' cells.
+fn reach(level: i32, eye: i32) -> i32 {
+  return reach_of(globals.lod, level, eye);
 }
 
 // Whether `level` draws its cell whose site is in layer `c` of grid 0, for
@@ -810,11 +817,11 @@ fn claims(level: i32, c: i32, eye: i32) -> bool {
   return first <= last && first <= c && c <= min(reach(level, eye), last + n);
 }
 
-// The layer of grid 0 past which `level` draws medium (Lod::layers): the
-// finer level's reach, or the near plane, if it is the finest that draws
-// it.
+// The layer of grid 0 past which `level` of the medium's cells draws
+// medium (Lod::layers): the finer level's reach, or the near plane, if it
+// is the finest that draws it.
 fn medium_from(level: i32, eye: i32) -> i32 {
-  return select(reach(level - 1, eye), eye + NEAR_LAYERS, level <= i32(globals.lod.w));
+  return select(reach_of(globals.medium, level - 1, eye), eye + NEAR_LAYERS, level <= i32(globals.medium.w));
 }
 
 // Whether `level` draws the medium of its cell whose site is in layer `c`
@@ -822,11 +829,11 @@ fn medium_from(level: i32, eye: i32) -> i32 {
 // which may hold what it draws of a slab of a column (bake's Medium).
 fn medium_claims(level: i32, c: i32, eye: i32) -> bool {
   let n = 1 << u32(level);
-  let last = eye + i32(globals.lod.y);
+  let last = eye + i32(globals.medium.y);
   let first = medium_from(level, eye) - 2 * n + 1;
   var to = last + n;
-  if level < i32(globals.lod.z) {
-    to = min(reach(level, eye) + n, to);
+  if level < i32(globals.medium.z) {
+    to = min(reach_of(globals.medium, level, eye) + n, to);
   }
   return first <= last && first <= c && c <= to;
 }
@@ -835,8 +842,8 @@ fn medium_claims(level: i32, c: i32, eye: i32) -> bool {
 // plane and origin relative to the eye; its clusters; whether its level
 // claims its cell; between which layers past its plane it draws medium,
 // none if its level does not pick its cell for it (medium_claims): past
-// the finer level's reach (or the near plane), to its own
-// (veil_fragment); and drawn
+// the finer level's reach (or the near plane), to its own, of the
+// medium's cells (veil_fragment); and drawn
 // flat, its picture enlarged, each edge out by how far its edge pillars
 // reach from its plane times the slant of the rays to it at its nearest, at
 // most the face's (compositor.rs's Flat).
@@ -869,8 +876,8 @@ fn place(@builtin(workgroup_id) id: vec3u, @builtin(num_workgroups) n: vec3u, @b
   c.whole = r.whole;
   c.veils = r.veils;
   c.reach = 3.0e38;
-  if r.level < i32(globals.lod.z) {
-    c.reach = f32(2 * ((reach(r.level, layer) >> u32(r.atoms)) - r.site));
+  if r.level < i32(globals.medium.z) {
+    c.reach = f32(2 * ((reach_of(globals.medium, r.level, layer) >> u32(r.atoms)) - r.site));
   }
   if !medium_claims(r.level, r.site << u32(r.atoms), layer) {
     c.clip = 3.0e38;

@@ -147,12 +147,14 @@ impl Engine for Chunks {
         // Until rendered for this look and these tiles, what it wants is not known: while the eye moves, never quite.
         self.busy = stats.baking > 0 || answered < asked;
         let lit = if look.sky.is_some() { Lit::Reading } else { Lit::Not };
-        let lod = Lod::new(look.shift, look.detail);
+        let whole = Lod::new(look.shift, look.detail);
+        // As far as either Lod's chunks read each grid.
+        let reach = |g| [whole, whole.for_medium()].iter().filter_map(|lod| lod.grid_reach(g, look.far)).reduce(f64::max);
         Frame {
             stats: format!("{} chunks\n{} baking, {} tiles wanted", frame.chunks.len(), stats.baking, stats.tiles.len()),
             picture: Box::new(Composed { frame, view: View::new(look) }),
             // Whichever way the eye turns.
-            wants: Wants { reach: std::array::from_fn(|g| lod.grid_reach(g, look.far)), lit, tiles: stats.tiles },
+            wants: Wants { reach: std::array::from_fn(reach), lit, tiles: stats.tiles },
             busy: self.busy,
         }
     }
