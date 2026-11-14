@@ -150,7 +150,13 @@ impl Engine for Chunks {
         // As far as either Lod's chunks read each grid.
         let reach = |g| [whole, whole.for_medium()].iter().filter_map(|lod| lod.grid_reach(g, look.far)).reduce(f64::max);
         Frame {
-            stats: format!("{} chunks\n{} baking, {} tiles wanted", frame.chunks.len(), stats.baking, stats.tiles.len()),
+            stats: format!(
+                "{} chunks\n{} baking, {} in all, {} tiles wanted",
+                frame.chunks.len(),
+                stats.baking,
+                stats.queued,
+                stats.tiles.len()
+            ),
             picture: Box::new(Composed { frame, view: View::new(look) }),
             // Whichever way the eye turns.
             wants: Wants { reach: std::array::from_fn(reach), lit, tiles: stats.tiles },

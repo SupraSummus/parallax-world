@@ -331,10 +331,10 @@ impl World {
         self.queue.0.lock().expect("queue").wanted.clear();
     }
 
-    /** Whether tiles are being made or wait to be. */
-    pub fn busy(&self) -> bool {
+    /** Tiles being made or lit, or waiting to be. */
+    pub fn making(&self) -> usize {
         let q = self.queue.0.lock().expect("queue");
-        !q.wanted.is_empty() || !q.in_flight.is_empty()
+        q.wanted.len() + q.in_flight.len()
     }
 
     /** Waits until a tile is made. */
@@ -454,7 +454,7 @@ mod tests {
         let wants = Wants { reach: std::array::from_fn(|l| (l == coarsest).then_some(TILE as f64)), lit: Lit::Tiles, tiles: Vec::new() };
         loop {
             world.update([0.0; 3], &wants);
-            if !world.busy() {
+            if world.making() == 0 {
                 break;
             }
             world.wait();

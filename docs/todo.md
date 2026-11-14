@@ -274,7 +274,16 @@ Numbers are for the forest at 1280×800, as measured when written.
 - **Native's chunk engines while the eye moves.**
   - Their renderer composes a frame behind (`chunks.rs`),
     so `--stroll` counts nearly every frame as one whose content is still coming:
-    it no longer tells holes from that.
+    it no longer tells holes from that;
+    `--replay --shots` does, from a walk the window recorded (`--record`).
+  - Turning leaves holes: a face out of view has no pick,
+    and one coming into view is baked from nothing,
+    tens of thousands of chunks, seconds of the bakers' work.
+    Picking faces out of view too would add to a queue
+    that walking already keeps from emptying.
+    Drawing coarser cells where finer ones are missing (from the near plane on)
+    filled the holes, but drawn flat, a coarse picture seen that near
+    stands into the sky.
   - A pick moved composes its every chunk again, on the renderer's thread,
     and thousands of chunks come and go at once,
     most of them the finest cells', a voxel or two each:

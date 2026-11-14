@@ -1124,7 +1124,7 @@ mod tests {
         let wants = Wants { reach: std::array::from_fn(|l| (l == 0).then_some(fcc::GRID_REACH)), lit: Lit::Not, tiles: Vec::new() };
         loop {
             world.update(eye, &wants);
-            if !world.busy() {
+            if world.making() == 0 {
                 break;
             }
             world.wait();

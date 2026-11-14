@@ -2,7 +2,7 @@
 //! generated in tiles, those in view first (world.rs), drawn by an engine
 //! (engine.rs) with wgpu in an egui window (window.rs), or offscreen (gpu.rs).
 //!
-//! parallax-native [--engine reliefs|flat|splats|voxels] [--world NAME] [--threads N] [--seed S] [--view QUERY] [--light SKY,SUN,GLOW] [--detail D] [--shift S] [--seams] [--colour voxels|layers|chunks] [--shot out.png [--size WxH] | --bench] [--stroll S [--on-ground]]
+//! parallax-native [--engine reliefs|flat|splats|voxels] [--world NAME] [--threads N] [--seed S] [--view QUERY] [--light SKY,SUN,GLOW] [--detail D] [--shift S] [--seams] [--colour voxels|layers|chunks] [--shot out.png [--size WxH] | --bench] [--stroll S [--on-ground]] [--record FILE] [--replay FILE [--shots DIR]]
 //!
 //! --view takes the web page's view query (parseViewQuery in renderer.ts),
 //! overriding --seed and --world.
@@ -12,6 +12,11 @@
 //! the GPU drawing the last. --stroll S then flies on for S seconds
 //! (walks, --on-ground) as the window would, a frame every 60th, and times each frame's parts.
 //! When the window panics or loses its GPU device, it says what it showed as these arguments.
+//! --record writes each of the window's frames to a file, and --replay
+//! draws them again offscreen, each at its time, with the world and threads
+//! the file names (replay); --shots saves pictures of some of them beside
+//! their views complete, to see what was missing; with --record, its own
+//! frames.
 //! --light lights the world (worldgen's light.rs), the sky, the sun and
 //! what glows this bright: 1,1,0 a clear day (as the panel's Computed
 //! lighting is unless --light), 0.01,0,1 night.
@@ -33,6 +38,7 @@ mod view;
 mod window;
 mod world;
 
+use std::io::Write;
 use std::time::Instant;
 
 use bake::walk::{COLLISION_LEVEL, Ground, WalkInput, Walker};
@@ -40,7 +46,7 @@ use bake::walk::{COLLISION_LEVEL, Ground, WalkInput, Walker};
 use engine::{Colours, Engine, Frame, Kind, Look, Picture};
 use gpu::Easel;
 use view::{Vec3, view_basis};
-use world::{Make, TILE, World};
+use world::{Make, TILE, Wants, World};
 use worldgen::generator::materials_of;
 use worldgen::light::{Brightness, Shared};
 
@@ -84,6 +90,8 @@ struct App {
     world_query: String,
     /** What the ui drew last, for the window to draw (window::Content). */
     picture: Option<(Box<dyn Picture>, egui::Rect)>,
+    /** --record: where each frame is written, and when the window began. */
+    recording: Option<(std::io::BufWriter<std::fs::File>, Instant)>,
 }
 
 impl window::Content for App {
@@ -103,6 +111,7 @@ impl window::Content for App {
         egui::Panel::left("panel").show(ui, |ui| {
             ui.heading("Parallax (native)");
             ui.label(&self.stats);
+            ui.label(format!("{} tiles being made", self.world.making()));
             ui.group(|ui| {
                 ui.set_width(ui.available_width());
                 ui.strong("Renderer");
@@ -188,11 +197,11 @@ impl window::Content for App {
             let frame = self.engine.frame(look, &self.world);
             self.framing = start.elapsed().as_secs_f64() * 1000.0;
             self.stats = frame.stats;
-            // Drawn from the next frame on. Walking, the ground's level too, whether drawn or not, a tile around at least.
-            let mut wants = frame.wants;
-            let ground = &mut wants.reach[COLLISION_LEVEL as usize];
-            *ground = ground.or(self.walker.is_some().then_some(TILE as f64));
-            let arrived = self.world.update(look.camera, &wants);
+            if let Some((file, start)) = &mut self.recording {
+                record(file, start.elapsed().as_secs_f64(), self.kind, look, self.walker.is_some(), &self.stats);
+            }
+            // Drawn from the next frame on.
+            let arrived = self.world.update(look.camera, &with_ground(frame.wants, self.walker.is_some()));
             let pixels = ui.ctx().pixels_per_point();
             self.remember([rect.width() * pixels, rect.height() * pixels]);
             self.picture = Some((frame.picture, rect));
@@ -201,11 +210,108 @@ impl window::Content for App {
             let walking = self.walker.is_some_and(|w| !w.settled());
             if moving.iter().any(|m| *m != 0.0) || walking {
                 ui.ctx().request_repaint();
-            } else if arrived || frame.busy || self.world.busy() {
+            } else if arrived || frame.busy || self.world.making() > 0 {
                 ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
             }
         });
     }
+}
+
+/**
+ * A frame of the window, for --replay: when, since the window began; the
+ * engine; the look; whether walking; and what the engine said of it (for
+ * the reader). A line of tab-separated fields.
+ */
+fn record(file: &mut impl Write, t: f64, kind: Kind, look: &Look, walking: bool, stats: &str) {
+    let Look { camera: [x, y, z], yaw, pitch, fov, far, detail, shift, size: [w, h], .. } = *look;
+    let light = look.light.map_or("-".to_string(), |b| format!("{},{},{}", b.sky, b.sun, b.glow));
+    let view = format!("camera={x},{y},{z}&look={yaw},{pitch}&fov={fov}&distance={far}&detail={detail}");
+    let line = format!("{t:.4}\t{kind:?}\t{view}\t{shift}\t{w}x{h}\t{light}\t{}\t{}", u8::from(walking), stats.replace('\n', ", "));
+    // Line by line, all there should the window panic.
+    writeln!(file, "{line}").and_then(|()| file.flush()).expect("--record file");
+}
+
+/** Pictures --replay keeps while what it shows is still coming, at most: as far apart as the recording is long for them. */
+const KEPT: usize = 60;
+
+/**
+ * --replay: the frames of a --record, each at its time from the start, as
+ * the window drew them (the engine, the lighting and the walking as they
+ * were), the GPU a frame behind; each written to `recording`, if given.
+ * Given `shots`, a picture is kept now and then while what it shows is
+ * still coming; at the end, each is saved there, with the view of its look
+ * complete beside it: where they differ, the frame showed holes, or chunks
+ * not yet as they will be.
+ */
+fn replay(
+    text: &str,
+    mut kind: Kind,
+    mut engine: Box<dyn Engine>,
+    world: &mut World,
+    mut look: Look,
+    shots: Option<&str>,
+    mut recording: Option<impl Write>,
+) {
+    let mut easel = Easel::offscreen(None);
+    let (mut last, mut kept) = (None, Vec::new());
+    let start = Instant::now();
+    let end = text.lines().last().and_then(|l| l.split('\t').next()?.parse::<f64>().ok()).unwrap_or(0.0);
+    for line in text.lines().filter(|l| !l.starts_with('#')) {
+        let [t, named, view, shift, size, light, walking, _stats] = line.split('\t').collect::<Vec<_>>()[..] else {
+            panic!("a recording's line: {line}")
+        };
+        let t: f64 = t.parse().expect("time");
+        let walking = walking == "1";
+        let numbers = |v: &str, by: char| v.split(by).map(|v| v.parse().expect("a number")).collect::<Vec<f64>>();
+        look.light = (light != "-").then(|| match numbers(light, ',')[..] {
+            [sky, sun, glow] => Brightness { sky: sky as f32, sun: sun as f32, glow: glow as f32 },
+            _ => panic!("light: {light}"),
+        });
+        let named = Kind::ALL.into_iter().find(|(_, n)| n.eq_ignore_ascii_case(named)).expect("engine").0;
+        if let Some(b) = look.light.filter(|&b| world.brightness() != Some(b)) {
+            world.relight(b);
+            engine = named.make(world);
+        } else if named != kind {
+            engine = named.make(world);
+        }
+        kind = named;
+        let q = parse_view_query(view);
+        (look.camera, [look.yaw, look.pitch]) = (q.camera.expect("camera"), q.look.expect("look"));
+        (look.fov, look.far, look.detail) = (q.fov.expect("fov"), q.distance.expect("distance"), q.detail.expect("detail"));
+        look.shift = shift.parse().expect("shift");
+        look.size = numbers(size, 'x').try_into().expect("size");
+        if let Some(wait) = std::time::Duration::from_secs_f64(t).checked_sub(start.elapsed()) {
+            std::thread::sleep(wait);
+        }
+        let frame = engine.frame(&look, world);
+        world.update(look.camera, &with_ground(frame.wants, walking));
+        let next = easel.draw(&*frame.picture, look.size.map(|v| v as u32));
+        if let Some(last) = last.replace(next) {
+            easel.wait_for(last);
+        }
+        if let Some(file) = &mut recording {
+            record(file, start.elapsed().as_secs_f64(), kind, &look, walking, &frame.stats);
+        }
+        let due = |k: &(f64, Look, Box<dyn Picture>)| t - k.0 >= end / KEPT as f64;
+        if shots.is_some() && frame.busy && kept.len() < KEPT && kept.last().is_none_or(due) {
+            kept.push((t, look, frame.picture));
+        }
+    }
+    println!("ended {:.2} s late", start.elapsed().as_secs_f64() - end);
+    let Some(dir) = shots else { return };
+    for (t, look, picture) in &kept {
+        let pixels = look.size.map(|v| v as u32);
+        easel.save(&**picture, pixels, &format!("{dir}/{t:08.3}-shown.png"));
+        let whole = complete(&mut *engine, world, look, false);
+        easel.save(&*whole.picture, pixels, &format!("{dir}/{t:08.3}-complete.png"));
+    }
+}
+
+/** What the world is to make for `wants`; walking, the ground's level too, whether drawn or not, a tile around at least. */
+fn with_ground(mut wants: Wants, walking: bool) -> Wants {
+    let ground = &mut wants.reach[COLLISION_LEVEL as usize];
+    *ground = ground.or(walking.then_some(TILE as f64));
+    wants
 }
 
 /** The last frame, as the arguments that draw it (--shot, --bench) and its stats: for a report, should the window panic or lose its GPU device. */
@@ -258,7 +364,7 @@ fn complete(engine: &mut dyn Engine, world: &mut World, look: &Look, whole: bool
             world.stop();
         } else if world.update(look.camera, &frame.wants) || engine.wait() {
             continue;
-        } else if world.busy() {
+        } else if world.making() > 0 {
             world.wait();
             continue;
         }
@@ -337,9 +443,7 @@ fn stroll(seconds: f64, walk_through: Option<&[bool]>, engine: &mut dyn Engine, 
         let start = Instant::now();
         let frame = engine.frame(&look, world);
         let framed = Instant::now();
-        let mut wants = frame.wants;
-        let ground = &mut wants.reach[COLLISION_LEVEL as usize];
-        *ground = ground.or(walk_through.is_some().then_some(TILE as f64));
+        let wants = with_ground(frame.wants, walk_through.is_some());
         world.update(look.camera, &wants);
         let updated = Instant::now();
         let next = easel.draw(&*frame.picture, pixels);
@@ -420,7 +524,13 @@ fn main() {
     unsafe {
         libc::mallopt(libc::M_MMAP_THRESHOLD, 128 << 10);
     }
-    let args: Vec<String> = std::env::args().collect();
+    let mut args: Vec<String> = std::env::args().collect();
+    // A recording's world and threads, its first line, unless given.
+    let replaying = args.iter().position(|a| a == "--replay").map(|i| std::fs::read_to_string(&args[i + 1]).expect("--replay file"));
+    if let Some(text) = &replaying {
+        let header = text.lines().next().and_then(|l| l.strip_prefix("# ")).expect("a recording");
+        args.extend(header.split_whitespace().map(str::to_string));
+    }
     let flag = |name: &str| args.iter().any(|a| a == name);
     let value = |name: &str| args.iter().position(|a| a == name).map(|i| args[i + 1].as_str());
     let threads = value("--threads").map_or_else(num_cpus, |v| v.parse().expect("threads"));
@@ -464,6 +574,17 @@ fn main() {
     });
     let mut engine = kind.make(&world);
     let walk_through: Vec<bool> = materials_of(&shown.generator).iter().map(|m| m.walk_through).collect();
+    let world_query = format!("seed={seed}{}", world_name.map(|w| format!("&world={w}")).unwrap_or_default());
+    // Its first line the world and threads, which --replay takes.
+    let recording = value("--record").map(|path| {
+        let mut file = std::io::BufWriter::new(std::fs::File::create(path).expect("--record file"));
+        writeln!(file, "# --view {world_query} --threads {threads}").expect("--record file");
+        file
+    });
+    if let Some(text) = &replaying {
+        replay(text, kind, engine, &mut world, look, value("--shots"), recording);
+        return;
+    }
     if ["--bench", "--shot", "--stroll"].into_iter().any(flag) {
         let stroll = value("--stroll").map(|v| (v.parse().expect("seconds"), flag("--on-ground").then_some(&walk_through[..])));
         offscreen(&mut *engine, &mut world, look, flag("--bench"), stroll, value("--shot"));
@@ -482,8 +603,9 @@ fn main() {
         speed: SPEED,
         walker: None,
         walk_through,
-        world_query: format!("seed={seed}{}", world_name.map(|w| format!("&world={w}")).unwrap_or_default()),
+        world_query,
         picture: None,
+        recording: recording.map(|file| (file, Instant::now())),
     };
     let panic = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {

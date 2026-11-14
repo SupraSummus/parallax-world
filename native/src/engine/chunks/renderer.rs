@@ -100,6 +100,8 @@ impl Frame {
 pub struct Stats {
     /** Chunks in view to bake. */
     pub baking: usize,
+    /** Chunks to bake, in view or not. */
+    pub queued: usize,
     /** Tiles that cells in view read and the world has not made, by grid level, most wanted first. */
     pub tiles: Vec<(usize, TileId)>,
 }
@@ -272,7 +274,7 @@ impl Renderer {
             lit: false,
             tiles: (0..GRID_LEVELS).map(|_| Arc::new(Tiles::new(0, []))).collect(),
             frame: Frame { chunks: Arc::default(), number: number(), changes: Arc::new([]), farthest: 0.0, relief, flat },
-            stats: Stats { baking: 0, tiles: Vec::new() },
+            stats: Stats { baking: 0, queued: 0, tiles: Vec::new() },
             ids: FastSet::default(),
             changes: VecDeque::new(),
         }
@@ -490,6 +492,7 @@ impl Renderer {
         let mut listed = FastSet::default();
         self.stats = Stats {
             baking: baking.iter().filter(|b| b.1.in_view).count(),
+            queued: baking.len(),
             tiles: tiles.into_iter().filter(|t| listed.insert((t.0, t.1))).map(|t| (t.0, t.1)).collect(),
         };
     }
