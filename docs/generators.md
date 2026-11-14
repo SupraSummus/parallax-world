@@ -373,7 +373,7 @@ and a tree with no room, under a taller one, stands bare.
 What crowded trees hide from the side
 is measured in sample stands, `Points` of constant chance:
 the species' own, the same in every world,
-so measured once a process, not by every world made.
+so measured once and kept (`worlds/data/forest-stands.txt`).
 
 ## Rules
 
