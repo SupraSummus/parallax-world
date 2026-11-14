@@ -263,13 +263,16 @@ fn drawables_in<'a>(generator: &'a Generator, clip: &Box3, s: i64) -> Vec<Drawab
             let reach = population.reach[axis];
             (-(-(units.min[axis] - n - reach)).div_euclid(n), (units.max[axis] - 1 + n + reach).div_euclid(n))
         });
-        let work = each_thing(generator, population, cells, |cell, _, node| {
-            let (key, bounds, reach) = (cell.key(), bounds_of(&node), reach_of(population, cell));
-            assert!(bounds.inside(&reach), "{}", past_reach(&key, &bounds, &reach, n, population.reach));
-            things += 1;
-            let (order, layer, seed) = (population.order, population.name, generator.seed);
-            let at = Visit { s, units: &units, order, layer, thing: things, seed, checked };
-            visit(&node, key, bounds, &at, &mut drawables);
+        // Its things read the ground on the level's sites, as its fields do (Sloped::at).
+        let work = plan::footprint(s, [0, 0], || {
+            each_thing(generator, population, cells, |cell, _, node| {
+                let (key, bounds, reach) = (cell.key(), bounds_of(&node), reach_of(population, cell));
+                assert!(bounds.inside(&reach), "{}", past_reach(&key, &bounds, &reach, n, population.reach));
+                things += 1;
+                let (order, layer, seed) = (population.order, population.name, generator.seed);
+                let at = Visit { s, units: &units, order, layer, thing: things, seed, checked };
+                visit(&node, key, bounds, &at, &mut drawables);
+            })
         });
         cost::add(population.name, work);
     }

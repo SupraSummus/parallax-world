@@ -95,7 +95,8 @@ pub(super) fn reach_of(population: &Population, cell: &Cell) -> Box3 {
 
 /**
  * The things `population` makes in the cells of N·FCC whose indices are
- * in `cells` ([first, last] along each axis), as `generate` makes them:
+ * in `cells` ([first, last] along each axis), as `generate` makes them
+ * at level 0 (coarser, they stand on the ground as their level draws it):
  * each one's key, its bounds and the box its population's reach allows
  * it. For checks that look at more things than a box draws
  * (worldgen::checks::contract).
@@ -118,7 +119,7 @@ pub fn each_made(
 
 /**
  * The anchor of the thing `population` makes in cell (i, j, k) of N·FCC
- * (i + j + k even), and the thing, as `generate` makes them; none if it
+ * (i + j + k even), and the thing, as `generate` makes them at level 0; none if it
  * makes none there.
  */
 pub fn made_in(generator: &Generator, population: &Population, i: i64, j: i64, k: i64) -> Option<(Point, Node)> {

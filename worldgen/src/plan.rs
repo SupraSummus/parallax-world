@@ -27,10 +27,17 @@ thread_local! {
  * (see Plan::dithered).
  */
 pub(crate) fn footprint<R>(spacing: i64, offset: [i64; 2], read: impl FnOnce() -> R) -> R {
+    debug_assert!((spacing as u64).is_power_of_two(), "sites are a power of two apart");
     let outer = FOOTPRINT.replace(Some((spacing, offset)));
     let value = read();
     FOOTPRINT.set(outer);
     value
+}
+
+/** The spacing of the sites a layer reads for now (`footprint`); 1 where asked, as plans and points are made. */
+#[inline]
+pub fn spacing() -> i64 {
+    FOOTPRINT.get().map_or(1, |(spacing, _)| spacing)
 }
 
 /** Runs `read` with plans read where asked, whoever asks: as a plan's columns are made, and points' chances (points.rs). */
@@ -198,10 +205,30 @@ impl Sloped {
     }
 
     /**
+     * The plan at column (x, z) on the sites read for now (`spacing`):
+     * between their columns, interpolated from the four around. So a
+     * layer composes only its own columns, and its things stand on the
+     * ground it draws. Where asked (plans, points), the column itself.
+     */
+    #[inline]
+    pub fn at(&self, x: i64, z: i64) -> i64 {
+        let s = spacing();
+        let (u, v) = (x & (s - 1), z & (s - 1));
+        if u | v == 0 {
+            return self.exact(x, z);
+        }
+        let (x0, z0) = (x - u, z - v);
+        let h = |dx: i64, dz: i64| self.exact(x0 + dx * s, z0 + dz * s);
+        let sum = h(0, 0) * (s - u) * (s - v) + h(1, 0) * u * (s - v) + h(0, 1) * (s - u) * v + h(1, 1) * u * v;
+        (sum + s * s / 2).div_euclid(s * s)
+    }
+
+    /**
      * The plan at column (x, z), within its slope of its neighbours kept:
      * checked as it is made, so every two neighbours ever kept together are.
      */
-    pub fn at(&self, x: i64, z: i64) -> i64 {
+    #[inline]
+    fn exact(&self, x: i64, z: i64) -> i64 {
         let (h, made) = self.plan.fetch(x, z);
         let Some(slope) = self.slope.filter(|_| made) else { return h };
         for (nx, nz) in [(x - 1, z), (x + 1, z), (x, z - 1), (x, z + 1)] {
@@ -237,7 +264,7 @@ impl Sloped {
         let (mut lo, mut hi) = (i64::MAX, i64::MIN);
         for x in along(0) {
             for z in along(1) {
-                let h = self.at(x, z);
+                let h = self.exact(x, z);
                 (lo, hi) = (lo.min(h), hi.max(h));
             }
         }

@@ -62,12 +62,6 @@ What the design is held to, beyond speed:
    This outranks nesting (a tree of cells) and ease of implementation.
 4. **Elegance is a criterion in its own right.**
    Results should be visible, not only measured.
-5. **Correct by construction, not by measurement.**
-   A property should follow from how a thing is built,
-   so that a whole class of mistakes can't be written.
-   Checks and their lists of known exceptions are a safety net,
-   not the design;
-   when one catches something, ask what would make it impossible.
    A fix that needs more special cases is a sign to step back.
 
 ## Key ideas
