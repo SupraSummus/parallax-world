@@ -185,3 +185,43 @@ impl Easel {
         self.read(size, |encoder, to| encoder.copy_buffer_to_buffer(buffer, 0, to, 0, size))
     }
 }
+
+/** Shaders checked by naga as wgpu would, without a GPU. */
+#[cfg(test)]
+pub mod wgsl {
+    use super::{FEATURES, wgpu};
+
+    /** `source` parsed and validated for a device with FEATURES (on Vulkan, all of WebGPU), or a panic showing where not. */
+    pub fn shader(source: &str) -> naga::Module {
+        let module = naga::front::wgsl::parse_str(source).unwrap_or_else(|e| panic!("{}", e.emit_to_string(source)));
+        let mut validator =
+            wgpu_naga_bridge::create_validator(FEATURES, wgpu::DownlevelFlags::compliant(), naga::valid::ValidationFlags::all());
+        if let Err(e) = validator.validate(&module) {
+            panic!("{}", e.emit_to_string(source));
+        }
+        module
+    }
+
+    /** The struct `name` of `module`: its members' names and offsets in bytes, and its size. */
+    pub fn layout(module: &naga::Module, name: &str) -> (Vec<(String, u32)>, u32) {
+        let found = module.types.iter().find(|(_, ty)| ty.name.as_deref() == Some(name));
+        let Some((_, naga::Type { inner: naga::TypeInner::Struct { members, span }, .. })) = found else {
+            panic!("no struct {name}");
+        };
+        (members.iter().map(|m| (m.name.clone().unwrap_or_default(), m.offset)).collect(), *span)
+    }
+
+    /** Asserts the struct `$name` of `$module` lays out as `$t` does, its members `$f` in order. */
+    macro_rules! assert_layout {
+        ($module:expr, $name:literal, $t:ty { $($f:ident),* $(,)? }) => {
+            assert_eq!(
+                $crate::gpu::wgsl::layout($module, $name),
+                (vec![$((stringify!($f).to_string(), std::mem::offset_of!($t, $f) as u32)),*], size_of::<$t>() as u32),
+                "{} and {}",
+                $name,
+                stringify!($t),
+            )
+        };
+    }
+    pub(crate) use assert_layout;
+}

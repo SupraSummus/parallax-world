@@ -130,7 +130,7 @@ native/                      # The native frontend (egui on winit and wgpu), lin
 └── src/
     ├── main.rs              # The camera (flying or walking, F), the panel, its engine and lighting (shaded or computed); --shot, --bench, --stroll for any engine
     ├── window.rs            # The window: egui on winit and wgpu, over the engine's picture, its GPU device made again when lost
-    ├── gpu.rs               # What a device must allow; an Easel: a device and the painter of the engine that drew on it, in the window or offscreen (saved as a PNG, timed)
+    ├── gpu.rs               # What a device must allow; an Easel: a device and the painter of the engine that drew on it, in the window or offscreen (saved as a PNG, timed); for tests, shaders checked as wgpu would, without a GPU
     ├── world.rs             # world.ts for generated worlds: a World's tiles, those the engine wants first, made, indexed (which cells of the lattice their voxels meet) and (for the voxels) lit on threads
     ├── view.rs              # view.ts: faces, which rays and screen boxes they draw
     ├── engine.rs            # What draws: Engine (on the main thread, a Frame of what a Look sees), Picture and Painter (on the GPU); Kind, the engines by name

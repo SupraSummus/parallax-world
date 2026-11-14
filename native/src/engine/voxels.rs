@@ -1335,4 +1335,12 @@ mod tests {
         }
         assert!(voxels > 100_000, "{voxels} voxels");
     }
+
+    #[test]
+    fn the_shader_is_valid_and_lays_out_what_this_file_writes() {
+        use crate::gpu::wgsl;
+        let module = wgsl::shader(&shader());
+        wgsl::assert_layout!(&module, "Globals", Globals { resolution, extent, fog, sky_fog, lit, glow, sky_top, horizon, view });
+        wgsl::assert_layout!(&module, "Level", GpuLevel { min, offset, corner, reach, filled });
+    }
 }
