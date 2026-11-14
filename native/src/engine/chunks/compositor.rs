@@ -780,6 +780,8 @@ pub struct Compositor {
      */
     coming: VecDeque<Placement>,
     going: Vec<u32>,
+    /** Whether the frame prepared last left some of them to later frames, CHANGES taken. */
+    held_back: bool,
     /** How many clusters of pictures of medium the chunks it has hold. */
     veils: u32,
     /** By phase, the draws of clusters the culling lists, and how many; then the pictures of medium's (VEILS). */
@@ -1077,6 +1079,7 @@ impl Compositor {
             belt: wgpu::util::StagingBelt::new(device.clone(), BELT),
             prepared: None,
             coming: VecDeque::new(),
+            held_back: false,
             going: Vec::new(),
             veils: 0,
             draws: [draws("draws first"), draws("draws next"), draws("veils")],
@@ -1189,9 +1192,7 @@ impl Compositor {
             self.prepared = Some((frame.number, view.colours));
         }
         let pending = !self.coming.is_empty() || !self.going.is_empty();
-        if pending {
-            self.apply(device, encoder, view.colours, CHANGES);
-        }
+        self.held_back = pending && self.apply(device, encoder, view.colours, CHANGES);
         if !same || pending {
             self.flush(device, encoder);
         }
@@ -1238,9 +1239,9 @@ impl Compositor {
      * Uploads what is to come and drops what is to go, `most` of them: what
      * comes first, in the frame's order (finest and nearest first), as far
      * as there is room, dropping what goes to make some; what is farther
-     * waits.
+     * waits. Whether `most` left some to a later frame.
      */
-    fn apply(&mut self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, colours: Colours, mut most: usize) {
+    fn apply(&mut self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, colours: Colours, mut most: usize) -> bool {
         while most > 0 {
             if let Some(p) = self.coming.front().cloned()
                 && self.upload(device, encoder, &p, colours)
@@ -1256,6 +1257,7 @@ impl Compositor {
             }
             most -= 1;
         }
+        most == 0 && (!self.coming.is_empty() || !self.going.is_empty())
     }
 
     /** Takes `frame` whole, painted in `colours`: drops what it does not draw, and uploads what it lacks. */
@@ -1532,6 +1534,10 @@ impl View {
 impl Painter for Compositor {
     fn picture(&self) -> &wgpu::Texture {
         &self.targets.as_ref().expect("a frame").picture
+    }
+
+    fn settled(&self) -> bool {
+        !self.held_back
     }
 
     fn show(&self, pass: &mut wgpu::RenderPass<'_>) {
