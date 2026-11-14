@@ -835,14 +835,31 @@ pub fn assert_kept(checked: &[Checked]) {
 }
 
 /**
+ * Each of `regions` of `world` generated in parts equals it generated
+ * whole (`whole_equals_parts`), up to one level past `levels`: where
+ * things may be drawn as media (a forest's trees). Prints how long it
+ * took, as `name`.
+ */
+pub fn parts_equal_whole(name: &str, world: &World, regions: &[Box3], levels: u32) {
+    let start = Instant::now();
+    for region in regions {
+        for level in [0, 2, levels + 1] {
+            whole_equals_parts(&world.generator, region, level);
+        }
+    }
+    println!("{name}: parts {:.1} s", start.elapsed().as_secs_f64());
+}
+
+/**
  * The whole contract for `world`, named `name` (with its seed, say), in
  * regions holding everything it is made of around spawn (`regions`),
  * `only` some if any, up to the level `levels` it keeps what a camera
- * sees to, and `from_above` what is seen from above; and with `parts`,
- * each region generated in parts. Prints its regions and margins (see
- * them with --nocapture); returns where it breaks it.
+ * sees to, and `from_above` what is seen from above. Hands `surveyed`
+ * the regions once found: to check them in parts (`parts_equal_whole`)
+ * meanwhile, on a thread of their own, say. Prints its regions and
+ * margins (see them with --nocapture); returns where it breaks it.
  */
-pub fn check(name: &str, world: &World, levels: u32, from_above: u32, parts: bool, only: &[&str]) -> Checked {
+pub fn check(name: &str, world: &World, levels: u32, from_above: u32, only: &[&str], surveyed: impl FnOnce(&[Box3])) -> Checked {
     let start = Instant::now();
     let (survey, regions) = regions(world, only);
     let layers: Vec<String> = survey
@@ -857,17 +874,8 @@ pub fn check(name: &str, world: &World, levels: u32, from_above: u32, parts: boo
         println!("{name}: kinds nothing surveyed draws: {}", survey.unseen(&world.generator).join(", "));
     }
     let boxes: Vec<Box3> = regions.iter().map(|(b, _)| *b).collect();
+    surveyed(&boxes);
     let mut broken = Vec::new();
-    if parts {
-        let start = Instant::now();
-        for region in &boxes {
-            // Up to one level past the checked ones: where things may be drawn as media (a forest's trees).
-            for level in [0, 2, levels + 1] {
-                whole_equals_parts(&world.generator, region, level);
-            }
-        }
-        println!("{name}: parts {:.1} s", start.elapsed().as_secs_f64());
-    }
     let start = Instant::now();
     let report = Report {
         held: regions.iter().map(|(b, strata)| (*b, strata.join(", "))).collect(),
