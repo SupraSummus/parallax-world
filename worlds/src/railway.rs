@@ -25,7 +25,7 @@ use worldgen::frame::{Frame, Part, facing};
 use worldgen::generator::{Field, Kind, Layer, Node, Op, Population, Span};
 use worldgen::kinds;
 use worldgen::noise::{Fx, Rng, ValueNoise, fx, hash, hash64, smoothstep};
-use worldgen::plan::{Holding, Plan, Sloped};
+use worldgen::plan::{self, Holding, Plan, Sloped};
 use worldgen::units::{Units, m};
 
 use crate::forest::K as F;
@@ -528,7 +528,7 @@ fn layers(railway: Rc<Railway>, hold: Holding, ground: Rc<Sloped>) -> Vec<Layer>
         let line = railway.line.clone();
         let top = Rc::new(Sloped::new(Rc::new(Plan::new("railway's top", SCALE, move |_, z| line.track(z).1)), 1));
         let railway = railway.clone();
-        Field::columns("railway's tunnels", 0.9, Op::Carve, move |x, z, _| {
+        Field::columns("railway's tunnels", 0.9, Op::Carve, move |x, z| {
             let Some(at) = railway.at(x, z).filter(|a| a.structure == Structure::Tunnel && a.distance < Units(BORE).to_fx()) else {
                 return Vec::new();
             };
@@ -539,9 +539,11 @@ fn layers(railway: Rc<Railway>, hold: Holding, ground: Rc<Sloped>) -> Vec<Layer>
     let seed = railway.line.surfaces;
     let track = {
         let railway = railway.clone();
-        Field::columns("railway", 0.95, Op::Paint, move |x, z, spacing| {
+        Field::columns("railway", 0.95, Op::Paint, move |x, z| {
             let Some(at) = railway.at(x, z) else { return Vec::new() };
-            let (top, e, floor) = (at.top, at.distance, bed(at.top, spacing));
+            // Its rails and sleepers only where the sites are a unit apart, its ballast dithered of them further.
+            let spacing = plan::spacing();
+            let (top, e, floor) = (at.top, at.distance, bed(at.top));
             let within = |d: i64| e < Units(d).to_fx();
             let mut spans = Vec::new();
             match at.structure {
@@ -574,9 +576,9 @@ fn layers(railway: Rc<Railway>, hold: Holding, ground: Rc<Sloped>) -> Vec<Layer>
                 // The formation beside the ballast, or a platform at a station; where the railway owns it.
                 Structure::Earth if !within(BALLAST) && within(at.half) && hold.owns(x, z) => {
                     if at.platform && !within(PLATFORM) && within(BUILDING_FROM) {
-                        spans.extend(Column::new(top + PLATFORM_HIGH, spacing).surface(T::slab, PLATFORM_HIGH + m(0.5)).spans());
+                        spans.extend(Column::new(top + PLATFORM_HIGH).surface(T::slab, PLATFORM_HIGH + m(0.5)).spans());
                     } else if within(FORMATION) || at.platform {
-                        spans.extend(Column::new(top, spacing).surface(F::path, m(0.5)).spans());
+                        spans.extend(Column::new(top).surface(F::path, m(0.5)).spans());
                     }
                 }
                 _ => {}
@@ -612,8 +614,8 @@ fn layers(railway: Rc<Railway>, hold: Holding, ground: Rc<Sloped>) -> Vec<Layer>
 }
 
 /** The bottom of the ballast under a track `top` high, and of what it lies on: half a metre down, two sites at least. */
-fn bed(top: i64, spacing: i64) -> i64 {
-    top + 1 - m(0.5).max(2 * spacing)
+fn bed(top: i64) -> i64 {
+    top + 1 - m(0.5).max(2 * plan::spacing())
 }
 
 /** How high a tunnel's bore is `e` across from its middle: walls, then a round vault. */

@@ -21,7 +21,7 @@ use worldgen::generator::{ANY_SIZE, Child, Far, Field, Generator, Kind, Layer, N
 use worldgen::js;
 use worldgen::kinds;
 use worldgen::noise::{Fbm, Fx, Rng, ValueNoise, fx, hash64, smoothstep};
-use worldgen::plan::{Claims, Holding, Plan, Sloped};
+use worldgen::plan::{self, Claims, Holding, Plan, Sloped};
 use worldgen::units::{Units, m};
 
 use crate::forest::K as F;
@@ -636,7 +636,7 @@ fn mist(f: Rc<Heath>) -> Field {
             Fx::mean(ring.map(|(dx, dz)| Units(ground.at(x + dx, z + dz)).to_fx()))
         })
     };
-    Field::columns("mist", 5.0, Op::Fill, move |x, z, spacing| {
+    Field::columns("mist", 5.0, Op::Fill, move |x, z| {
         let share = f.share(x, z);
         if share == Fx::ZERO {
             return Vec::new();
@@ -648,7 +648,7 @@ fn mist(f: Rc<Heath>) -> Field {
         if depth <= 0 {
             return Vec::new();
         }
-        vec![Span::medium(h + 1, depth, K::mist, lies.extinction, spacing)]
+        vec![Span::medium(h + 1, depth, K::mist, lies.extinction)]
     })
 }
 
@@ -656,7 +656,7 @@ fn mist(f: Rc<Heath>) -> Field {
 fn heath(f: Rc<Heath>) -> Field {
     // Half a metre of its surface and of peat, heather on it; or peat down without end.
     let (of, under) = (f.ground.ground.clone(), f.ground.under);
-    let field = Field::columns("heath", 0.7, Op::Paint, move |x, z, spacing| {
+    let field = Field::columns("heath", 0.7, Op::Paint, move |x, z| {
         if !f.owns(x, z) || f.by_path(x, z, Fx::m(1.6)) {
             return Vec::new();
         }
@@ -671,7 +671,7 @@ fn heath(f: Rc<Heath>) -> Field {
         } else {
             A::alpine.into()
         };
-        let column = Column::new(h, spacing).surface(surface, m(0.5));
+        let column = Column::new(h).surface(surface, m(0.5));
         let column = if f.ground.under { column.under(F::soil) } else { column.surface(F::soil, m(0.5)) };
         if wet {
             column
@@ -689,8 +689,8 @@ fn heath(f: Rc<Heath>) -> Field {
 }
 
 /** The bottom of the stream's bed under ground `h` high: a metre deep, at least two sites, as a line of sites along y has one every two. */
-fn bed_bottom(h: i64, spacing: i64) -> i64 {
-    h - m(1.0).max(2 * spacing)
+fn bed_bottom(h: i64) -> i64 {
+    h - m(1.0).max(2 * plan::spacing())
 }
 
 /**
@@ -699,12 +699,12 @@ fn bed_bottom(h: i64, spacing: i64) -> i64 {
  */
 fn stream_bed(f: Rc<Heath>) -> Field {
     let f_ground = f.ground.ground.clone();
-    Field::columns("stream bed", 1.0, Op::Carve, move |x, z, spacing| {
+    Field::columns("stream bed", 1.0, Op::Carve, move |x, z| {
         if f.moorland.streamside(x, z) != Streamside::Bed {
             return Vec::new();
         }
         let h = f.height(x, z);
-        vec![Span::solid(bed_bottom(h, spacing), h + 1, 0)]
+        vec![Span::solid(bed_bottom(h), h + 1, 0)]
     })
     .about(f_ground, m(1.0), 1)
 }
@@ -715,13 +715,13 @@ fn stream_bed(f: Rc<Heath>) -> Field {
  * two sites thick, its top site is water, not lost under it.
  */
 fn water(f: Rc<Heath>) -> Field {
-    Field::columns("water", 2.0, Op::Paint, move |x, z, spacing| {
+    Field::columns("water", 2.0, Op::Paint, move |x, z| {
         let h = f.height(x, z);
         if f.moorland.streamside(x, z) == Streamside::Bed {
-            return vec![Span::solid(bed_bottom(h, spacing), h - 1, T::water)];
+            return vec![Span::solid(bed_bottom(h), h - 1, T::water)];
         }
         match f.moorland.water(x, z) {
-            Some(level) if f.owns(x, z) => Column::new(h, spacing).water_to(T::water, level.0).spans(),
+            Some(level) if f.owns(x, z) => Column::new(h).water_to(T::water, level.0).spans(),
             _ => Vec::new(),
         }
     })

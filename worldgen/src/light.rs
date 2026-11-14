@@ -547,7 +547,7 @@ mod tests {
     const LAMP: f64 = 4.0;
 
     /**
-     * Stone where `stone(x, y, z, spacing)` says, and white lamps at
+     * Stone where `stone(x, y, z, spacing)` says (the sites' spacing), and white lamps at
      * `lamps`, as the towns' are; from y = −64 up to what the coarsest
      * levels' sites hold.
      */
@@ -562,7 +562,7 @@ mod tests {
             .reach(1024)
             .anchor(|cell| (cell.centre == [0; 3]).then_some([0.0; 3]))
             .make(move |_, _| Some(Node::of(shapes.clone())));
-        let ground = Field::at("stone", 0.0, Op::Fill, move |x, y, z, s| stone(x, y, z, s).then_some((STONE, None)));
+        let ground = Field::at("stone", 0.0, Op::Fill, move |x, y, z| stone(x, y, z, crate::plan::spacing()).then_some((STONE, None)));
         let layers = vec![Layer::Field(ground), Layer::Population(lamps)];
         World { generator: Generator { kinds, seed: 1, layers }, spawn: [0; 3], heights: (-64, 1024), points: Vec::new() }
     }

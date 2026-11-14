@@ -248,7 +248,12 @@ how many rays get how far, and what they stop on.
   at least what the crown of the tree whose room it is in would
   (one crown, as they keep to their rooms: "Rooms").
 - **Fields** are evaluated once per site or line of sites,
-  and get the spacing, to smooth themselves to it.
+  by position alone.
+  `Column` keeps their layers at every level ("Spans that stay");
+  a field that leaves detail out by level
+  (the railway's rails, the ponds' reeds, the city's roads)
+  or makes its own far form (the forest's canopy, a scene's levels)
+  asks for the spacing (`plan::spacing`).
 - **Plans** they read hold numbers, read where the line is,
   or categories, which can't be averaged (`Plan::dithered`:
   what a town's column is, who owns the land).
@@ -1002,7 +1007,7 @@ Products of `Fx` are floored, quotients truncated towards zero;
 times or over a whole number (`* 3 / 4`) it is scaled.
 `Units(x)` takes a coordinate as units, `.0` gives units to an `i64` argument.
 Fields get the coordinates of sites in lattice units
-(already times the spacing) and the spacing.
+(already times the spacing).
 
 ### Spans that stay
 
@@ -1012,7 +1017,8 @@ so a span shorter than that may hold none, and vanishes at that level:
 a pond, a layer of turf, a hedge.
 `Column` (`column.rs`) builds a column's spans from its ground's top,
 each at least two spacings tall:
-`Column::new(height, spacing).surface(grass, m(0.5)).fill_below(soil, bottom)`,
+`Column::new(height).surface(grass, m(0.5)).fill_below(soil, bottom)`,
+at the spacing of the sites drawn,
 `.medium(kind, height, extinction)` on top, thickened but as dense along a ray;
 thinner than a spacing, a coat on what it stands on (`Holds::Coat`),
 as much as all of it stops a ray from above
@@ -1020,7 +1026,7 @@ as much as all of it stops a ray from above
 `.water_to(kind, level)` where the ground is lower.
 Carves along a line want the same margin.
 A heightfield is a shell, hollow under its sides:
-`.sides(kind, lowest_around(ground, x, z, spacing), depth)` reaches each column
+`.sides(kind, lowest_around(ground, x, z), depth)` reaches each column
 down past the lowest of the eight around it, so rays can't slip under a slope.
 The diagonals too: a voxel shares faces with their sites at its own height,
 and without them rays slipped in at a cliff's corners.

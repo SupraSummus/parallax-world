@@ -304,7 +304,7 @@ mod tests {
             glows: false,
             medium: false,
         });
-        let field = Field::columns("land", 0.0, Op::Fill, move |x, z, _| {
+        let field = Field::columns("land", 0.0, Op::Fill, move |x, z| {
             let (x, z) = (x as f64, z as f64);
             let top = ground(x, z).round() as i64;
             let mut spans = vec![Span::solid(-64, top, GROUND)];

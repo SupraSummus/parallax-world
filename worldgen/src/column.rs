@@ -8,11 +8,13 @@
 //! So every span a `Column` makes is at least two spacings tall, those of
 //! `fill_below_exactly` aside, and a thinned medium keeps its density
 //! along a ray. A heightfield's columns close its slopes' sides by
-//! reaching down past the columns around (`sides`). See "Writing a world"
-//! in docs/generators.md.
+//! reaching down past the columns around (`sides`). The spacing is that
+//! of the sites read for (`plan::spacing`), so a world declares a column
+//! once, for every level. See "Writing a world" in docs/generators.md.
 
 use crate::generator::{DEEP, Holds, Kind, Span};
 use crate::js;
+use crate::plan::spacing;
 
 impl Span {
     /** Solid `kind` in [from, to). */
@@ -25,8 +27,8 @@ impl Span {
      * per unit of a ray's path (see Span): at least two sites tall, and
      * then as much thinner as it is taller, as dense along a ray through it.
      */
-    pub fn medium(from: i64, height: i64, kind: impl Into<Kind>, extinction: f64, spacing: i64) -> Span {
-        let tall = height.max(2 * spacing);
+    pub fn medium(from: i64, height: i64, kind: impl Into<Kind>, extinction: f64) -> Span {
+        let tall = height.max(2 * spacing());
         Span { from, to: from + tall, kind: kind.into(), holds: Holds::Medium(extinction * height as f64 / tall as f64) }
     }
 }
@@ -37,15 +39,16 @@ impl Span {
  */
 pub const AROUND: [(i64, i64); 8] = [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1)];
 
-/** The lowest top of the columns `spacing` around (x, z) (AROUND), `ground` giving a column's top. */
-pub fn lowest_around(ground: impl Fn(i64, i64) -> i64, x: i64, z: i64, spacing: i64) -> i64 {
-    AROUND.iter().map(|&(dx, dz)| ground(x + dx * spacing, z + dz * spacing)).min().expect("eight")
+/** The lowest top of the columns a spacing around (x, z) (AROUND), `ground` giving a column's top. */
+pub fn lowest_around(ground: impl Fn(i64, i64) -> i64, x: i64, z: i64) -> i64 {
+    let s = spacing();
+    AROUND.iter().map(|&(dx, dz)| ground(x + dx * s, z + dz * s)).min().expect("eight")
 }
 
 /**
- * The spans of a column whose ground's top unit is `height`, at sites
- * `spacing` apart, built from its top: layers stack down from it, media
- * up from it. Its spans come out bottom up, water last.
+ * The spans of a column whose ground's top unit is `height`, at the sites
+ * read for, built from its top: layers stack down from it, media up from
+ * it. Its spans come out bottom up, water last.
  */
 pub struct Column {
     height: i64,
@@ -56,8 +59,8 @@ pub struct Column {
 }
 
 impl Column {
-    pub fn new(height: i64, spacing: i64) -> Column {
-        Column { height, spacing, below: Vec::new(), above: Vec::new() }
+    pub fn new(height: i64) -> Column {
+        Column { height, spacing: spacing(), below: Vec::new(), above: Vec::new() }
     }
 
     /** Where the ground's layers end so far, going down: the top of the next. */
@@ -127,7 +130,7 @@ impl Column {
             let to = from + height;
             Span { from: to - 2 * s, to, kind: kind.into(), holds: Holds::Coat(1.0 - js::exp(-extinction * height as f64)) }
         } else {
-            Span::medium(from, height, kind, extinction, s)
+            Span::medium(from, height, kind, extinction)
         };
         self.above.push(medium);
         self
@@ -167,11 +170,14 @@ mod tests {
     use super::*;
     use crate::generator::{Field, Generator, Layer, Op, generate};
     use crate::grid::Box3;
+    use crate::plan::footprint;
 
     #[test]
     fn every_span_holds_a_site_at_every_level() {
         // A thin turf over soil, a thin medium on it, shallow water: each still on every line of sites, at every level.
-        let column = |h: i64, s: i64| Column::new(h, s).surface(1, 1).fill_below(2, h - 2).medium(3, 1, 0.5).water_to(4, h + 1).spans();
+        let column = |h: i64, s: i64| {
+            footprint(s, [0, 0], || Column::new(h).surface(1, 1).fill_below(2, h - 2).medium(3, 1, 0.5).water_to(4, h + 1).spans())
+        };
         for level in 0..6 {
             let s = 1 << level;
             for h in -40..40 {
@@ -189,12 +195,12 @@ mod tests {
 
     #[test]
     fn spans_come_out_bottom_up_and_media_keep_their_density() {
-        let spans = Column::new(10, 4).surface(1, 3).surface(2, 1).fill_below(3, -20).medium(4, 6, 0.5).spans();
+        let spans = footprint(4, [0, 0], || Column::new(10).surface(1, 3).surface(2, 1).fill_below(3, -20).medium(4, 6, 0.5).spans());
         let bounds: Vec<(i64, i64)> = spans.iter().map(|s| (s.from, s.to)).collect();
         assert_eq!(bounds, [(-20, -5), (-5, 3), (3, 11), (11, 19)]);
         assert_eq!(spans[3].holds, Holds::Medium(0.5 * 6.0 / 8.0));
         // A field of columns draws them.
-        let world = ground(Op::Fill, |_, _, s| Column::new(0, s).surface(0, 1));
+        let world = ground(Op::Fill, |_, _| Column::new(0).surface(0, 1));
         let grid = generate(&world, &Box3 { min: [0, -4, 0], max: [4, 4, 4] }, 0);
         assert!((0..4).all(|x| (0..4).all(|z| (-1..=0).any(|y| grid.get(x, y, z) != 0))), "the turf is on every column");
     }
@@ -204,7 +210,7 @@ mod tests {
         // Ground as rough as any: each column's top at random, steps, corners and pits of every height. From the air
         // above, along the lattice's 12 neighbours (a voxel's faces), nothing under any column's top is reached.
         let top = |x: i64, z: i64| i64::from(crate::noise::hash(7, x, 0, z) % 40);
-        let world = ground(Op::Fill, move |x, z, s| Column::new(top(x, z), s).surface(0, 1).sides(0, lowest_around(top, x, z, s), 3));
+        let world = ground(Op::Fill, move |x, z| Column::new(top(x, z)).surface(0, 1).sides(0, lowest_around(top, x, z), 3));
         for level in 0..4 {
             let s = 1 << level;
             let b = Box3 { min: [0, -48 / s, 0], max: [24, 48 / s, 24] };
@@ -229,7 +235,7 @@ mod tests {
         // Stopping half of what comes down, on flat ground: half its top sites show it, whatever the field's op, at
         // every level whose sites are further apart than it is tall.
         for op in [Op::Fill, Op::Paint] {
-            let world = ground(op, |_, _, s| Column::new(0, s).surface(0, 1).medium(1, 2, std::f64::consts::LN_2 / 2.0));
+            let world = ground(op, |_, _| Column::new(0).surface(0, 1).medium(1, 2, std::f64::consts::LN_2 / 2.0));
             for level in 2..6 {
                 let grid = generate(&world, &Box3 { min: [0, -4, 0], max: [96, 4, 96] }, level);
                 let tops: Vec<u8> =
@@ -241,7 +247,7 @@ mod tests {
     }
 
     /** A world of stone, and moss (material 2), a field of `columns` its ground, drawn by `op`. */
-    fn ground(op: Op, columns: impl Fn(i64, i64, i64) -> Column + 'static) -> Generator {
+    fn ground(op: Op, columns: impl Fn(i64, i64) -> Column + 'static) -> Generator {
         let kind = |name, colour| crate::generator::KindDef {
             name,
             kind_type: 1,

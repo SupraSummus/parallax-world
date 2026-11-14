@@ -20,7 +20,7 @@ use worldgen::generator::{ANY_SIZE, Child, Field, Fill, Kind, Layer, Node, Op, P
 use worldgen::js;
 use worldgen::kinds;
 use worldgen::noise::{Fx, Rng, ValueNoise, fx, hash64};
-use worldgen::plan::{Claims, Holding, Plan, Sloped};
+use worldgen::plan::{self, Claims, Holding, Plan, Sloped};
 use worldgen::units::{Units, m};
 
 use crate::forest::K as F;
@@ -555,7 +555,7 @@ fn layers(landmarks: Rc<Landmarks>, hold: Holding, ground: Rc<Sloped>) -> Vec<La
     let surface = {
         let ground = ground.clone();
         let on = ground.clone();
-        Field::columns("landmarks' ground", 0.55, Op::Paint, move |x, z, spacing| {
+        Field::columns("landmarks' ground", 0.55, Op::Paint, move |x, z| {
             let spot = spots.at(x, z);
             if spot == Spot::Off || !hold.owns(x, z) {
                 return Vec::new();
@@ -567,7 +567,7 @@ fn layers(landmarks: Rc<Landmarks>, hold: Holding, ground: Rc<Sloped>) -> Vec<La
                 Spot::Mud => F::soil.into(),
                 _ => F::grass.into(),
             };
-            Column::new(ground.at(x, z), spacing).surface(kind, m(0.5)).spans()
+            Column::new(ground.at(x, z)).surface(kind, m(0.5)).spans()
         })
         .about(on, m(0.5), 1)
     };
@@ -576,18 +576,18 @@ fn layers(landmarks: Rc<Landmarks>, hold: Holding, ground: Rc<Sloped>) -> Vec<La
     let water = {
         let (landmarks, ground) = (landmarks.clone(), ground.clone());
         let on = ground.clone();
-        Field::columns("ponds", 0.7, Op::Paint, move |x, z, spacing| {
+        Field::columns("ponds", 0.7, Op::Paint, move |x, z| {
             let Some(s) = landmarks.site(x, z) else { return Vec::new() };
             let Some(level) = s.water() else { return Vec::new() };
             let bowl = s.bowl(x, z);
             if bowl >= fx(1.3) {
                 return Vec::new();
             }
-            let mut column = Column::new(ground.at(x, z), spacing);
+            let mut column = Column::new(ground.at(x, z));
             if bowl < Fx::ONE {
                 column = column.water_to(T::water, level);
             }
-            if 2 * spacing <= REED_HEIGHT && bowl > fx(0.62) && landmarks.reeds.at(x, z) > fx(0.58) {
+            if 2 * plan::spacing() <= REED_HEIGHT && bowl > fx(0.62) && landmarks.reeds.at(x, z) > fx(0.58) {
                 column = column.medium(K::reed, REED_HEIGHT, 0.6);
             }
             column.spans()

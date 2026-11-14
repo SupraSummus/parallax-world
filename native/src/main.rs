@@ -518,7 +518,7 @@ mod tests {
             KindDef { name: "medium", kind_type: 8, colors: &["#000000"], walk_through: true, glows: false, medium: true },
             KindDef { name: "wall", kind_type: 10, colors: &["#ffffff"], walk_through: false, glows: false, medium: false },
         ];
-        let slab = Field::at("slab", 0.0, Op::Fill, |x, y, z, _| match x + z {
+        let slab = Field::at("slab", 0.0, Op::Fill, |x, y, z| match x + z {
             _ if y.abs() >= 48 => None,
             k if (NEAR..FAR).contains(&k) && MILLI > 0 => Some((MEDIUM, Some(f64::from(MILLI) / 1000.0))),
             k if (FAR..FAR + 16).contains(&k) => Some((WALL, None)),
@@ -543,7 +543,7 @@ mod tests {
     fn ground(_: u64) -> worldgen::World {
         use worldgen::generator::{Field, Generator, KindDef, Layer, Op};
         let kinds = vec![KindDef { name: "ground", kind_type: 10, colors: &["#ff0000"], walk_through: false, glows: false, medium: false }];
-        let ground = Field::at("ground", 0.0, Op::Fill, |_, y, _, _| (y < 0).then_some((0, None)));
+        let ground = Field::at("ground", 0.0, Op::Fill, |_, y, _| (y < 0).then_some((0, None)));
         let generator = Generator { kinds, seed: 1, layers: vec![Layer::Field(ground)] };
         worldgen::World { generator, spawn: [0, 16, 0], heights: (-64, 64), points: Vec::new() }
     }
@@ -630,7 +630,7 @@ mod tests {
             KindDef { name: "wall", kind_type: 10, colors: &["#ffffff"], walk_through: false, glows: false, medium: false },
         ];
         let middle = (NEAR + FAR) / 2;
-        let slab = Field::at("slabs", 0.0, Op::Fill, move |x, y, z, _| match x + z {
+        let slab = Field::at("slabs", 0.0, Op::Fill, move |x, y, z| match x + z {
             _ if y.abs() >= 48 => None,
             k if (NEAR..FAR).contains(&k) => Some((u8::from((k < middle) != RED_NEAR), Some(0.04))),
             k if (FAR..FAR + 16).contains(&k) => Some((2, None)),
@@ -711,7 +711,7 @@ mod tests {
         let kind = |colors| KindDef { name: "speck", kind_type: 10, colors, walk_through: false, glows: false, medium: false };
         let kinds = vec![kind(&["#ff0000"]), kind(&["#00ff00"]), kind(&["#0000ff"]), kind(&["#ffff00"])];
         let by = if MOVED { SHIFT } else { [0; 3] };
-        let field = Field::at("specks", 0.0, Op::Fill, move |x, y, z, _| {
+        let field = Field::at("specks", 0.0, Op::Fill, move |x, y, z| {
             let [x, y, z] = [x - by[0], y - by[1], z - by[2]];
             let h = worldgen::noise::hash(1, x, y, z);
             let ground = 10 * y < 3 * x + 2 * z - 300;

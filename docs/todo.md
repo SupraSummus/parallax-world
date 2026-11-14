@@ -24,7 +24,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   Tried on spans' open ends past level 0, that share took the lines away,
   but each of the layers painting one ground (forest, mountains)
   had to cover the same part of its top site, not add up, by a flag on the share;
-  a ground declared once (see "Fields get the spacing", below)
+  a ground declared once, not by each layer painting it,
   would hold its top's share in one place.
 - **Sheets and rods stop too much seen along them.**
   Grown to a site and opaque ("Levels" in `docs/generators.md`),
@@ -73,19 +73,14 @@ Numbers are for the forest at 1280×800, as measured when written.
   so centred between two planes it holds their sites only at a point:
   discs 2 units thick, each 10 units over the ground, were gone at level 2.
   Boxes keep the sites on their faces by `Tie`.
-- **Fields get the spacing, and mostly use it for one rule.**
-  Of the 15 fields in `worlds/`, 9 hand it to `Column`,
-  and 7 write its rule out (`m(0.5).max(2 * spacing)`):
-  a layer at least two sites thick.
-  The rest leave detail out by level, each by a rule of its own
-  (the ponds' reeds, the rails),
-  dither by hand (the railway's ballast, in shares of iron and timber),
-  or make their own far form (the forest's canopy, a scene's levels).
-  A stack declared once (layers down from a height, media up,
-  which end of each is fixed), sizes on spans as children have,
+- **Some fields still keep their levels by rules of their own** (`plan::spacing`):
+  the moor's stream bed and the railway write out
+  `Column`'s rule of two sites (`.max(2 * spacing)`);
+  the ponds' reeds, the rails and the city's roads leave detail out by level,
+  and the railway's ballast dithers by hand, in shares of iron and timber.
+  Sizes on spans, as children have,
   and patterns read through `Plan::dithered`
-  would leave the spacing to the engine but in the canopy and scenes:
-  a field's levels would be the engine's to keep, not each world's.
+  would leave the spacing to the engine but in the canopy and scenes.
   Found on the way: the town's kerbs (a unit) and the railway's tunnel lining
   are never thickened.
 - **The native frontend is missing pieces.**
@@ -454,8 +449,12 @@ Numbers are for the forest at 1280×800, as measured when written.
   its views take up to twice as long to complete
   as with tiles of whole columns,
   the voxels engine's most, as it asks for every cube around the eye.
-  Once every layer says where it is, the world's `heights` can go:
-  hosts would ask `whole` alone.
+  Saying so is for speed, not simplicity:
+  a promise per layer says again what `heights` says once.
+  The railway's piers can't yet: a bridge has no greatest height,
+  and `About` is a band around one plan.
+  Simpler would be a field of `Column`s on a plan knowing where it is,
+  with only what varies by column (water, mist, bridges) declared.
 - **Cost weighs every plan lookup alike** (`NS` in `worldgen/src/cost.rs`),
   though one of a column just read costs a fraction
   of one among claims making their keys,

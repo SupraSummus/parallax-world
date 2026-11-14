@@ -173,7 +173,7 @@ fn layers(layers: Vec<Layer>) -> Generator {
 /** Ground `height(x)` high, said to rise at most `slope` a column: eight units of it about it. */
 fn ground(height: fn(i64) -> i64, slope: i64) -> Generator {
     let of = Rc::new(Sloped::new(Rc::new(plan::Plan::new("ground", 1, move |x, _| height(x))), slope));
-    let field = Field::columns("ground", 0.0, Op::Fill, move |x, _, _| vec![Span::solid(height(x) - 8, height(x) + 1, 0)]);
+    let field = Field::columns("ground", 0.0, Op::Fill, move |x, _| vec![Span::solid(height(x) - 8, height(x) + 1, 0)]);
     layers(vec![Layer::Field(field.about(of, 8, 1))])
 }
 
@@ -190,7 +190,7 @@ fn a_field_about_its_ground_is_drawn_only_where_its_lines_may_be() {
 #[should_panic(expected = "field ground: span [-8, 1) at column (0, 0) reaches past 2 under and 1 over its ground 0")]
 fn refuses_a_field_reaching_past_what_it_says() {
     let flat = Rc::new(Sloped::new(Rc::new(plan::Plan::new("flat", 1, |_, _| 0)), 0));
-    let field = Field::columns("ground", 0.0, Op::Fill, |_, _, _| vec![Span::solid(-8, 1, 0)]).about(flat, 2, 1);
+    let field = Field::columns("ground", 0.0, Op::Fill, |_, _| vec![Span::solid(-8, 1, 0)]).about(flat, 2, 1);
     generate(&layers(vec![Layer::Field(field)]), &Box3 { min: [0, -16, 0], max: [8, 16, 8] }, 0);
 }
 
@@ -207,7 +207,7 @@ fn checking_finds_what_a_broken_promise_skips() {
 /** Ground `height(x)` high, said to rise at most `slope` a column: a surface about it, stone under it. */
 fn solid_ground(height: fn(i64) -> i64, slope: i64) -> Generator {
     let of = Rc::new(Sloped::new(Rc::new(plan::Plan::new("ground", 1, move |x, _| height(x))), slope));
-    let field = Field::columns("ground", 0.0, Op::Fill, move |x, _, s| crate::column::Column::new(height(x), s).surface(0, 4).under(0));
+    let field = Field::columns("ground", 0.0, Op::Fill, move |x, _| crate::column::Column::new(height(x)).surface(0, 4).under(0));
     layers(vec![Layer::Field(field.about(of, 4, 1).under(0))])
 }
 
@@ -279,7 +279,7 @@ fn what_shows_of_a_box_is_all_but_its_whole_bottom_and_top() {
 #[should_panic(expected = "field ground: at column (0, 0), kind Some(0) doesn't reach up from the bottom to -6, 4 under its ground 0")]
 fn refuses_a_field_not_under_its_ground_as_it_says() {
     let flat = Rc::new(Sloped::new(Rc::new(plan::Plan::new("flat", 1, |_, _| 0)), 0));
-    let field = Field::columns("ground", 0.0, Op::Fill, |_, _, _| vec![Span::solid(-4, 1, 0)]).about(flat, 4, 1).under(0);
+    let field = Field::columns("ground", 0.0, Op::Fill, |_, _| vec![Span::solid(-4, 1, 0)]).about(flat, 4, 1).under(0);
     generate(&layers(vec![Layer::Field(field)]), &Box3 { min: [0, -16, 0], max: [8, 16, 8] }, 0);
 }
 
@@ -314,7 +314,7 @@ fn faces_on_a_plane_of_sites_stay_where_level_0_has_them() {
         name: "ground",
         order: 0.0,
         op: Op::Fill,
-        values: FieldValues::Spans { axis: 1, spans: Box::new(|_, _, _| vec![Span::solid(-4096, 0, 0)]) },
+        values: FieldValues::Spans { axis: 1, spans: Box::new(|_, _| vec![Span::solid(-4096, 0, 0)]) },
         about: None,
     });
     let n = 1 << 14;

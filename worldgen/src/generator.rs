@@ -228,8 +228,8 @@ pub enum Shapes {
 
 type ChildrenReaching = dyn Fn(&Box3) -> Vec<Child>;
 type MakeShapes = dyn Fn(&mut Rng) -> Vec<Shape>;
-type FieldAt = dyn Fn(i64, i64, i64, i64) -> Option<(Kind, Option<f64>)>;
-type FieldSpans = dyn Fn(i64, i64, i64) -> Vec<Span>;
+type FieldAt = dyn Fn(i64, i64, i64) -> Option<(Kind, Option<f64>)>;
+type FieldSpans = dyn Fn(i64, i64) -> Vec<Span>;
 type CellAnchor = dyn Fn(&Cell) -> Option<Point>;
 type LineAnchor = dyn Fn(&Line) -> Option<Point>;
 type SpotAnchor = dyn Fn(&Spot) -> Option<Point>;
@@ -289,17 +289,17 @@ pub enum Holds {
 }
 
 pub enum FieldValues {
-    /** A kind, with a medium's extinction if it is one, at each site; given (x, y, z, spacing), all in lattice units. */
+    /** A kind, with a medium's extinction if it is one, at each site; given (x, y, z), lattice units. */
     At(Box<FieldAt>),
     /**
      * Spans along each line of sites parallel to `axis`, drawn in order;
-     * given (u, v, spacing): the line's other two coordinates in axis
-     * order and the sites' spacing, all in lattice units.
+     * given (u, v): the line's other two coordinates in axis order,
+     * lattice units.
      */
     Spans { axis: usize, spans: Box<FieldSpans> },
 }
 
-/** Something everywhere, given by position alone. */
+/** Something everywhere, given by position alone; what it leaves out by level, it asks the spacing for (`plan::spacing`). */
 pub struct Field {
     pub name: &'static str,
     pub order: f64,
@@ -572,12 +572,12 @@ const PI: f64 = std::f64::consts::PI;
 
 /**
  * Whether coordinate `at` is in the first half of a stripe `period` wide,
- * at sites `spacing` apart. Stripes finer than the sites would alias into
- * wider ones: they draw each half as often as it is, by `dither` (a hash
- * of the site).
+ * at the sites read for (`plan::spacing`). Stripes finer than the sites
+ * would alias into wider ones: they draw each half as often as it is, by
+ * `dither` (a hash of the site).
  */
-pub fn stripe(at: i64, period: i64, spacing: i64, dither: u32) -> bool {
-    if 2 * spacing <= period { at.rem_euclid(period) < period / 2 } else { dither < 1 << 31 }
+pub fn stripe(at: i64, period: i64, dither: u32) -> bool {
+    if 2 * plan::spacing() <= period { at.rem_euclid(period) < period / 2 } else { dither < 1 << 31 }
 }
 
 const EVERYWHERE: Box3 = Box3 { min: [i64::MIN / 4; 3], max: [i64::MAX / 4; 3] };
