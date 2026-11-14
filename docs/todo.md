@@ -362,20 +362,26 @@ Numbers are for the forest at 1280×800, as measured when written.
   and at levels 0 and 1 the undergrowth's many small shapes;
   worldgen's, counted ("Cost" in `docs/generators.md`),
   goes mostly to the trees at levels 0 to 2
-  and to measuring their shadows from level 4 (once a worker).
+  and to the canopy from level 4 (`Rooms::owner` making the trees near).
 - **One of the valley's tiles is over the cost budget**
   (`OVER_BUDGET` in `worlds/tests/cost.rs`), by things done one by one
   where a tile holds four times as many each level:
   at level 3 the towns' things drawn whole to be measured.
 - **Plans are made at every column read, whatever their scale.**
   The valley's land, decided at 4 m, makes its six domains' bids
-  (the ground among them) at each column of a tile at level 0.
-  Bids made every scale's width and interpolated would cost a column
-  a share of a sample, up to the level whose sites are that far apart;
-  past it, dithered reads would want their offsets on the samples.
-  Domains' edges would move a little,
-  and the landmarks keep off the path by a strip narrower than a sample:
-  its edges would come out ragged, unless kept off column by column.
+  at each column of a tile at level 0.
+  Bids made every 4 m and interpolated (tried) cost as many instructions:
+  most of a bid is the terrain, which the ground makes there anyway;
+  level 0 took a tenth less, level 6 a quarter more,
+  as things read the land at a point, four samples each.
+- **Claims cost coarse tiles most.**
+  At level 8 a column's ground costs some 24,000 instructions,
+  mostly the moor's pools and steadings near it:
+  columns 32 m apart each ask their own stretch (`Claims::near`),
+  and each new claim reads the ground dozens of times.
+  Asked per column without stretches (tried), every level took twice as long.
+  Claims reading the ground at their own scale (a band sampled every 8 m)
+  would spare about a tenth of the tile, and move pools and steadings.
 - **Plans lose columns at coarse levels.**
   A tile there reads more columns than a plan keeps (`SLOTS`):
   claims read the ground where they ask.
@@ -493,6 +499,10 @@ Numbers are for the forest at 1280×800, as measured when written.
   and `About` is a band around one plan.
   Simpler would be a field of `Column`s on a plan knowing where it is,
   with only what varies by column (water, mist, bridges) declared.
+- **Cost counts a shape's tests by its box**,
+  though the time is in the sites inside it:
+  a slanting twig's box is mostly empty,
+  but testing only each row's span of it (tried) took as long.
 - **Cost weighs every plan lookup alike** (`NS` in `worldgen/src/cost.rs`),
   though one of a column just read costs a fraction
   of one among claims making their keys,
