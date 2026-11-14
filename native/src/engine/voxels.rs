@@ -147,12 +147,17 @@ fn bricks(grid: &fcc::Grid) -> impl Iterator<Item = (usize, [i32; 3], usize)> + 
  * share their sites but not where they are.
  */
 pub fn meets(grid: &fcc::Grid) -> Vec<u32> {
+    meets_of(grid, |i| grid.cells[i] != 0)
+}
+
+/** As `meets`, of the voxels `kept` keeps, by index in the grid's cells. */
+fn meets_of(grid: &fcc::Grid, kept: impl Fn(usize) -> bool) -> Vec<u32> {
     let mut out = vec![0; grid.bricks.len() * SCALES];
     for (place, brick, first) in bricks(grid) {
         for r in 0..BRICK * BRICK * BRICK {
             let p = [r % BRICK, r / BRICK % BRICK, r / BRICK / BRICK];
             let site: [i32; 3] = std::array::from_fn(|d| grid.min[d].rem_euclid(BRICK) + brick[d] * BRICK + p[d]);
-            if (site[0] + site[1] + site[2]) & 1 != 0 || grid.cells[first * BRICK_SITES + (r >> 1) as usize] == 0 {
+            if (site[0] + site[1] + site[2]) & 1 != 0 || !kept(first * BRICK_SITES + (r >> 1) as usize) {
                 continue;
             }
             for (j, meeting) in MEETING.iter().enumerate() {
@@ -177,18 +182,28 @@ fn blocks(j: usize) -> i32 {
 
 /**
  * Which cells of each scale a tile's voxels meet, from its bricks' `meets`:
- * a bit per corner of its blocks, and one more each way. For world.rs's
- * Level::meets.
+ * a bit per corner of its blocks, and one more each way; and which its
+ * see-through voxels meet, if it has any. For world.rs's Level::meets.
  */
 #[derive(Clone)]
-pub struct Met([Vec<u64>; SCALES]);
+pub struct Met {
+    all: [Vec<u64>; SCALES],
+    see_through: Option<[Vec<u64>; SCALES]>,
+}
 
 impl Met {
     /** Of tile `id`, its grid and its bricks' `meets`. */
     pub fn new(id: TileId, grid: &fcc::Grid, meets: &[u32]) -> Met {
-        let mut met = Met(std::array::from_fn(|j| vec![0; ((blocks(j) + 2).pow(3) as usize).div_ceil(64)]));
+        let see_through = |i| !matches!(grid.alpha_at(i), 0 | fcc::ALPHA);
+        let see_through = (!grid.alpha.is_empty()).then(|| Met::bits(id, grid, &meets_of(grid, see_through)));
+        Met { all: Met::bits(id, grid, meets), see_through }
+    }
+
+    /** By scale, the bits of the cells `meets` says tile `id`'s bricks meet. */
+    fn bits(id: TileId, grid: &fcc::Grid, meets: &[u32]) -> [Vec<u64>; SCALES] {
+        let mut bits: [Vec<u64>; SCALES] = std::array::from_fn(|j| vec![0; ((blocks(j) + 2).pow(3) as usize).div_ceil(64)]);
         for (place, brick, _) in bricks(grid) {
-            for (j, bits) in met.0.iter_mut().enumerate() {
+            for (j, bits) in bits.iter_mut().enumerate() {
                 for e in (0..27).filter(|e| meets[place * SCALES + j] >> e & 1 != 0) {
                     let k = around(brick, j, e);
                     if (k[0] + k[1] + k[2]) & 1 == 0 {
@@ -198,7 +213,7 @@ impl Met {
                 }
             }
         }
-        met
+        bits
     }
 
     /** Where cell `k` of scale `j` is in tile `id`'s bits, if about a corner of its blocks or one more each way. */
@@ -208,9 +223,10 @@ impl Met {
         at.iter().all(|v| (0..w).contains(v)).then(|| ((at[2] * w + at[1]) * w + at[0]) as usize)
     }
 
-    /** Whether tile `id`'s voxels meet cell `k` of scale `j`. */
-    pub fn has(&self, id: TileId, j: usize, k: [i32; 3]) -> bool {
-        Met::bit(id, j, k).is_some_and(|i| self.0[j][i / 64] >> (i % 64) & 1 != 0)
+    /** Whether tile `id`'s voxels meet cell `k` of scale `j`, or (`see_through`) its see-through ones. */
+    pub fn has(&self, id: TileId, j: usize, k: [i32; 3], see_through: bool) -> bool {
+        let bits = if see_through { self.see_through.as_ref() } else { Some(&self.all) };
+        bits.is_some_and(|bits| Met::bit(id, j, k).is_some_and(|i| bits[j][i / 64] >> (i % 64) & 1 != 0))
     }
 
     /** The tiles whose voxels may meet cell `k` of scale `j`: those of the blocks around its centre. */

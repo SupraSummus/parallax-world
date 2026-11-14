@@ -273,8 +273,10 @@ those of whole voxels and of medium apart, each by its own Lod,
 each with what it knows of it (`Seen`): its chunk, that it holds nothing,
 or what it waits for.
 A cell holds nothing if none of its level's voxels meets it (`Level::meets`),
-the same for every face.
+the same for every face;
+its medium holds nothing if no see-through voxel meets what it reads.
 Each tile keeps which cells of 8·FCC and 32·FCC its voxels meet,
+and its see-through ones, if it has any,
 the voxels engine's cells (below);
 the default cells are of those sizes, and smaller ones are read site by site.
 It picks anew once the eye or view leaves its cells:

@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use bake::lod::{CellChunk, Lod, Picked, distance};
 use bake::slicing::LAYER;
-use bake::{Baker, chunk_reads};
+use bake::{Baker, chunk_reads, medium_reads};
 use fcc::Lattice;
 use fcc::{FastMap, FastSet, GRID_LEVELS, Tiles};
 
@@ -221,9 +221,23 @@ fn box_tiles(Lattice { r, u, f }: Lattice, heights: (i64, i64), min: [i32; 3], m
     Some([lo.map(tile), hi.map(tile)])
 }
 
-/** Whether a cell may hold voxels: whether any of its level's meet it (Level::meets). Once it has its tiles. */
+/**
+ * Whether a cell may hold voxels: whether any of its level's meet it
+ * (Level::meets); of its medium, whether any see-through ones meet the
+ * least cell about its site that holds all its medium reads (medium_reads),
+ * its neighbours' slabs too, beside which it draws its own. Once it has its
+ * tiles.
+ */
 fn may_hold(cell: &CellChunk, lattice: Lattice, level: &Level) -> bool {
-    level.meets(lattice.world(cell.site), cell.spacing())
+    let centre = lattice.world(cell.site);
+    if !cell.medium {
+        return level.meets(centre, cell.spacing(), false);
+    }
+    // A cell of radius r holds |x| + |y| ≤ r of each pair of axes; of a box, its corners, a unit more for world()'s halves.
+    let (min, max) = medium_reads(cell);
+    let corners = (0..8).map(|k| lattice.world(std::array::from_fn(|d| if k >> d & 1 == 0 { min[d] } else { max[d] })));
+    let radius = corners.flat_map(|w| (0..3).map(move |d| (w[d] - centre[d]).abs() + (w[(d + 1) % 3] - centre[(d + 1) % 3]).abs()));
+    level.meets(centre, radius.max().expect("corners") + 1, true)
 }
 
 impl Renderer {

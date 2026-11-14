@@ -73,6 +73,16 @@ pub fn chunk_reads(chunk: &CellChunk) -> (usize, [i32; 3], [i32; 3]) {
 }
 
 /**
+ * The sites a cell chunk's medium reads, a box as chunk_reads has it: the
+ * slabs of its columns whose middle sites it holds, and their neighbours
+ * (cell_medium), half a cell deeper each way and a column or two around.
+ */
+pub fn medium_reads(chunk: &CellChunk) -> ([i32; 3], [i32; 3]) {
+    let ((from, to), m) = (chunk.bounds(), chunk.spacing());
+    ([from[0] - 2, from[1] - 1, from[2] - m], [to[0] + 2, to[1] + 1, to[2] + m])
+}
+
+/**
  * Layers of a slab of a cell's medium (Medium) of cells m apart: m, as
  * deep as a cell's spacing, but 2 at least, so that a slab of each column
  * holds a site. From layer 1, so that its halves end where a level's and
@@ -302,8 +312,7 @@ impl Baker {
         let mut parts = std::mem::take(&mut self.medium);
         parts.clear();
         if chunk.medium {
-            // Its slabs, those of whose middle sites it holds, and their neighbours.
-            let (lo, hi) = ([from[0] - 2, from[1] - 1, from[2] - m], [to[0] + 2, to[1] + 1, to[2] + m]);
+            let (lo, hi) = medium_reads(chunk);
             let around = surface(&reader, &self.geometry, lo, hi, |_, _, _| true);
             let slab = slab_layers(m);
             self.paint(face, level, |_, geometry, colour| cell_medium(&mut parts, geometry, colour, &around, centre, slab, &holds));

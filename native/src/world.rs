@@ -83,19 +83,21 @@ impl Level {
     }
 
     /**
-     * Whether a voxel of its tiles meets the cell of `radius`·FCC about
-     * `centre`, a rhombic dodecahedron as a voxel is of radius 1.
+     * Whether a voxel of its tiles, or (`see_through`) a see-through one,
+     * meets the cell of `radius`·FCC about `centre`, a rhombic dodecahedron
+     * as a voxel is of radius 1.
      * A cell smaller than those of 8·FCC is read site by site;
      * a larger one asks the cells of 8·FCC or 32·FCC that meet it (voxels::Met),
      * so of those sizes it is exact, and of the others it may say yes wrongly.
      */
-    pub fn meets(&self, centre: [i32; 3], radius: i32) -> bool {
+    pub fn meets(&self, centre: [i32; 3], radius: i32, see_through: bool) -> bool {
         if radius < voxels::cell_size(0) {
-            return meeting(centre, radius, 1).any(|q| self.grids.at(q[0], q[1], q[2]).is_some_and(|(material, _)| material != 0));
+            let kept = |(material, alpha)| if see_through { !matches!(alpha, 0 | fcc::ALPHA) } else { material != 0 };
+            return meeting(centre, radius, 1).any(|q| self.grids.at(q[0], q[1], q[2]).is_some_and(kept));
         }
         let j = usize::from(radius >= voxels::cell_size(1));
         meeting(centre, radius, voxels::cell_size(j))
-            .any(|k| within(voxels::Met::tiles(j, k)).any(|t| self.tiles.get(&t).is_some_and(|tile| tile.met.has(t, j, k))))
+            .any(|k| within(voxels::Met::tiles(j, k)).any(|t| self.tiles.get(&t).is_some_and(|tile| tile.met.has(t, j, k, see_through))))
     }
 }
 
@@ -481,11 +483,12 @@ mod tests {
 
     /**
      * Level::meets answers as reading each site would, about a world's spawn
-     * at a level: yes for each cell holding a voxel, and no for each other of
-     * 8·FCC, 32·FCC or smaller.
+     * at a level: yes for each cell holding a voxel, or a see-through one,
+     * and no for each other of 8·FCC, 32·FCC or smaller.
      */
     #[test]
     fn cells_meet_the_voxels_they_hold() {
+        let mut see_through = 0;
         for (name, level) in [("city", 0), ("moor", 0), ("forest", 2)] {
             let world = (worlds::by_name(name).expect("world").make)(1);
             let spawn = world.spawn.map(|v| (v >> level) as i32);
@@ -493,26 +496,38 @@ mod tests {
             let make = |id: TileId| Tile::new(id, Arc::new(make_tile(&world.generator, level, world.heights_at(level), id.map(i64::from))));
             let tiles = within([corner.map(|v| v - 1), corner]);
             let level = Level::new(tiles.map(|id| (id, Arc::new(make(id)))).collect());
-            let held = |q: [i32; 3]| (q[0] + q[1] + q[2]) & 1 == 0 && level.grids.at(q[0], q[1], q[2]).is_some_and(|(m, _)| m != 0);
-            for radius in [1, 2, 4, 8, 16, 32] {
-                // Each cell within a tile of the spawn (to the next multiple of 64, a site of each), or 8 cells, the nearer.
-                let n = (TILE as i32 / radius).min(8);
-                let cells: Vec<[i32; 3]> = within([[-n; 3], [n; 3]])
-                    .filter(|p| (p[0] + p[1] + p[2]) & 1 == 0)
-                    .map(|p| std::array::from_fn(|d| (spawn[d] + 32).div_euclid(64) * 64 + p[d] * radius))
-                    .collect();
-                let mut holding = 0;
-                for &c in &cells {
-                    let inside = |q: [i32; 3]| (0..3).all(|d| (q[d] - c[d]).abs() + (q[(d + 1) % 3] - c[(d + 1) % 3]).abs() <= radius);
-                    let holds = within([c.map(|v| v - radius), c.map(|v| v + radius)]).any(|q| inside(q) && held(q));
-                    let meets = level.meets(c, radius);
-                    assert!(meets || !holds, "{name}: a cell of {radius} about {c:?} holds a voxel");
-                    assert!(!meets || holds || radius == 16, "{name}: a cell of {radius} about {c:?} holds none");
-                    holding += usize::from(holds);
+            for kept in [false, true] {
+                let voxel = |(m, alpha): (u8, u8)| if kept { !matches!(alpha, 0 | fcc::ALPHA) } else { m != 0 };
+                let held = |q: [i32; 3]| (q[0] + q[1] + q[2]) & 1 == 0 && level.grids.at(q[0], q[1], q[2]).is_some_and(voxel);
+                for radius in [1, 2, 4, 8, 16, 32] {
+                    // Each cell within a tile of the spawn (to the next multiple of 64, a site of each), or 8 cells, the nearer.
+                    let n = (TILE as i32 / radius).min(8);
+                    let cells: Vec<[i32; 3]> = within([[-n; 3], [n; 3]])
+                        .filter(|p| (p[0] + p[1] + p[2]) & 1 == 0)
+                        .map(|p| std::array::from_fn(|d| (spawn[d] + 32).div_euclid(64) * 64 + p[d] * radius))
+                        .collect();
+                    let mut holding = 0;
+                    for &c in &cells {
+                        let inside = |q: [i32; 3]| (0..3).all(|d| (q[d] - c[d]).abs() + (q[(d + 1) % 3] - c[(d + 1) % 3]).abs() <= radius);
+                        let holds = within([c.map(|v| v - radius), c.map(|v| v + radius)]).any(|q| inside(q) && held(q));
+                        let meets = level.meets(c, radius, kept);
+                        assert!(meets || !holds, "{name}: a cell of {radius} about {c:?} holds a voxel (see-through: {kept})");
+                        assert!(!meets || holds || radius == 16, "{name}: a cell of {radius} about {c:?} holds none (see-through: {kept})");
+                        holding += usize::from(holds);
+                    }
+                    if kept {
+                        see_through += holding;
+                    } else {
+                        assert!(
+                            holding > 0 && holding < cells.len(),
+                            "{name}, cells of {radius}: {holding} of {} hold voxels",
+                            cells.len()
+                        );
+                    }
                 }
-                assert!(holding > 0 && holding < cells.len(), "{name}, cells of {radius}: {holding} of {} hold voxels", cells.len());
             }
         }
+        assert!(see_through > 0, "some cells hold see-through voxels");
     }
 
     #[test]
