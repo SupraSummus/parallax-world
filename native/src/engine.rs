@@ -7,11 +7,9 @@
 //! - chunks: cells of the lattice baked into chunks, as the web draws them,
 //!   their whole voxels reliefs or splats (Kind's Reliefs, Splats), or
 //!   reliefs drawn flat, a picture a cell (Flat, an experiment);
-//! - voxels: rays through the tiles' voxels, nothing baked;
-//! - slabs: a prototype, rays through slabs baked along each face.
+//! - voxels: rays through the tiles' voxels, nothing baked.
 
 mod chunks;
-mod slabs;
 // The world packs its tiles for the voxels' GPU as it makes them.
 pub mod voxels;
 
@@ -30,12 +28,11 @@ pub enum Kind {
     Flat,
     Splats,
     Voxels,
-    Slabs,
 }
 
 impl Kind {
-    pub const ALL: [(Kind, &str); 5] =
-        [(Kind::Reliefs, "reliefs"), (Kind::Flat, "flat"), (Kind::Splats, "splats"), (Kind::Voxels, "voxels"), (Kind::Slabs, "slabs")];
+    pub const ALL: [(Kind, &str); 4] =
+        [(Kind::Reliefs, "reliefs"), (Kind::Flat, "flat"), (Kind::Splats, "splats"), (Kind::Voxels, "voxels")];
 
     /** An engine of this kind, drawing `world`. */
     pub fn make(self, world: &World) -> Box<dyn Engine> {
@@ -44,7 +41,6 @@ impl Kind {
             Kind::Flat => Box::new(chunks::Chunks::new(world, true, true)),
             Kind::Splats => Box::new(chunks::Chunks::new(world, false, false)),
             Kind::Voxels => Box::new(voxels::Voxels),
-            Kind::Slabs => Box::new(slabs::Slabs::new(world)),
         }
     }
 }

@@ -317,58 +317,6 @@ impl Baker {
         baked
     }
 
-    /**
-     * A slab of grid `level` along view face `face` from layer c0: its
-     * layers `layers` of a box of columns (a, b) a, b of one parity, `columns` across from
-     * a0 (2 apart, the odd rows' one further on) and `rows` up from b0 (a0
-     * and b0 even). Per column, row by row: the colour of its first voxel
-     * in the slab (its alpha the voxel's) and where its run of voxels
-     * from there ends, both layers past c0 (first | last << 16);
-     * [0, u32::MAX] where the column is empty.
-     */
-    pub fn bake_slab(
-        &mut self,
-        face: usize,
-        level: usize,
-        [a0, b0, c0]: [i32; 3],
-        [columns, rows]: [usize; 2],
-        layers: std::ops::Range<i32>,
-    ) -> Vec<[u32; 2]> {
-        debug_assert!(a0 & 1 == 0 && b0 & 1 == 0);
-        self.reach(level);
-        let mut texels = vec![[0, u32::MAX]; columns * rows];
-        let reader = Reader::new(&self.grids[level], self.lattices[face]);
-        let to = [a0 + 2 * columns as i32, b0 + rows as i32 - 1, layers.end - 1];
-        let voxels = surface(&reader, &self.geometry, [a0, b0, layers.start], to, |_, _, c| layers.contains(&c));
-        let behind = self.geometry.offsets.iter().position(|&o| o == [0, 0, 2]).expect("+F");
-        let lattice = self.lattices[face];
-        let palettes = self.palettes.len() / VIEW_FACES;
-        let palette = &self.palettes[face * palettes..(face + 1) * palettes];
-        let (light, kinds) = (&mut self.light, &self.world_kinds[face]);
-        // Near to far within the slab: surface reads them far to near.
-        for voxel in voxels.iter().rev() {
-            let [a, b, c] = voxel.site;
-            let (i, j) = (((a - a0 - ((b - b0) & 1)) / 2) as usize, (b - b0) as usize);
-            if i >= columns || j >= rows {
-                continue;
-            }
-            let texel = &mut texels[j * columns + i];
-            let at = (c - c0) as u32;
-            if texel[1] == u32::MAX {
-                let rgb = match light {
-                    Some(light) => lit_voxel_colour(voxel, &light(level, lattice.world(voxel.site)), kinds, lattice.f.map(|v| -v)),
-                    None => voxel_colour(voxel, palette),
-                };
-                // Its run ends at it until a voxel behind it says otherwise.
-                *texel = [rgb & 0x00ff_ffff | u32::from(voxel.alpha) << 24, at | 0xffff << 16];
-            }
-            if (voxel.open | voxel.cut) & (1 << behind) != 0 && texel[1] >> 16 == 0xffff {
-                texel[1] = texel[1] & 0xffff | at << 16;
-            }
-        }
-        texels
-    }
-
     /** The splats `splats` makes of voxels read from grid `level` along view face `face`, given their colours. */
     fn paint(&mut self, face: usize, level: usize, splats: impl FnOnce(&mut Splats, &Geometry, &mut dyn FnMut(&surface::Voxel) -> u32)) {
         let lattice = self.lattices[face];
