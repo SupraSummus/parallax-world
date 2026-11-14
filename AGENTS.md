@@ -121,6 +121,7 @@ worlds/                      # The worlds, on worldgen's public API only
 │   ├── learned.rs           # The learned town: settlements drawn by a split grammar learned in lab/, on the forest's land
 │   └── scene.rs             # Scenes made elsewhere: voxels read from a file (scripts/voxelize.py); lib.rs adds Sponza, with its feature
 ├── data/town-grammar.bin    # learned.rs's rule table, written by lab's export example
+├── data/forest-stands.txt   # What forest.rs's sample stands hide, by spacing, written by its test keep_samples
 ├── data/scenes/             # Scenes' voxels, not in git (their licences): see docs/generators.md, "Scenes"
 ├── data/cost/               # Each world's cost baseline, which tests/cost.rs holds it to
 ├── tests/                   # Every world in WORLDS keeps the contract and its cost baseline; the scenes' contents

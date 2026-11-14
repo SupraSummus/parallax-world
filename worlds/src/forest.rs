@@ -8,19 +8,18 @@ use std::sync::OnceLock;
 
 use worldgen::World;
 use worldgen::column::{self, lowest_around};
-use worldgen::cost;
 use worldgen::curve::Curve;
 use worldgen::domain::{Domain, Lie, Scope, compose};
 use worldgen::generator::{
-    ANY_SIZE, Child, Far, Field, Fill, Generator, Holds, Layer, Line, Node, Op, Point, Population, Shadows, Shape, Span, ball,
-    bounds_of_shapes, capsule, ellipsoid, lathe,
+    ANY_SIZE, Child, Far, Field, Fill, Generator, Holds, Layer, Line, Node, Op, Point, Population, Shape, Span, ball, bounds_of_shapes,
+    capsule, ellipsoid, lathe,
 };
 use worldgen::grid::Box3;
 use worldgen::js::{self, round};
 use worldgen::kinds;
 use worldgen::noise::{Fbm, Fx, Rng, ValueNoise, fx, hash, hash64, smoothstep, unit};
 use worldgen::plan::{self, Holding, Plan, Sloped};
-use worldgen::points::{Blur, MARKS, Points, Room, Rooms, Spot};
+use worldgen::points::{Blur, MARKS, Points, Room, Rooms};
 use worldgen::units::{UNIT_SIZE, Units, m};
 
 use crate::path::Path;
@@ -178,28 +177,6 @@ const GAPS: [i64; 2] = [m(-0.5), m(1.5)];
 /** A tree's weight in its rooms: none for the shortest, MOST for the tallest, as light favours it. */
 fn weight(height: f64) -> i64 {
     (MOST as f64 * ((height - vox(12.0)) / vox(12.0)).clamp(0.0, 1.0)) as i64
-}
-
-/**
- * 64 trees of `species` in a stand of them as dense as `chance` (of one in
- * a square 4 m wide), each in its room, the nearest the origin; alone, if
- * the chance is none. For the canopy's measures.
- */
-fn stand_of(species: Species, chance: f64, seed: u64) -> Vec<Node> {
-    if chance == 0.0 {
-        return (0..64).map(|i| make_tree(species, 0.0, 0.0, 0.0, &mut Rng::new(hash64(seed, i, 0, 0)), &|_, _| 0)).collect();
-    }
-    let tall = move |s: &Spot| height(species, unit(hash(seed, s.at[0], s.at[2], 0)));
-    let points = Rc::new(Points::new("stand", seed, &[0, 2], m(2.0), m(8.0), 1, move |_| [fx(chance / 4.0), Fx::ZERO, Fx::ZERO, Fx::ZERO]));
-    let rooms = Rooms::new(points.clone(), TREE_REACH, MOST, GAPS, move |s| weight(tall(s)));
-    let half = m(64.0);
-    let mut spots = points.points_in([-half, 0, -half], [half, 1, half]);
-    spots.sort_by_key(|s| (s.at[0] * s.at[0] + s.at[2] * s.at[2], s.at, s.nth));
-    let grown = |s: &Spot| {
-        let ([x, _, z], random) = (s.at, &mut Rng::new(hash64(seed, s.at[0], s.at[2], 1)));
-        grow(species, x as f64, 0.0, z as f64, tall(s), Rc::new(rooms.room(s.at, 0)), random, &|_, _| 0)
-    };
-    spots.iter().take(64).map(grown).collect()
 }
 
 /** The valley's relief: hills kilometres wide, and a winding path along z that the ground dips along. */
@@ -456,26 +433,45 @@ struct Measured {
 /** The stands trees are measured in for the canopy: as dense as the chance of a tree in a square 4 m wide. */
 const STANDS: [f64; 4] = [0.0, 0.2, 0.4, 0.6];
 
+/** How tall a tree grows at most (units): the canopy's top over the ground. */
+const TREE_TOP: i64 = m(26.0);
+
 /**
- * What the trees of each of STANDS hide, by species, measured from
- * samples drawn at level 2 (the canopy's from level 4 on): the species'
- * own, the same in every world, so measured once a process, uncounted.
+ * The sample stands at a spacing, by species, slab by slab: what each
+ * adds to a tree's shadow (by STANDS), and in the sparsest, its share of
+ * wood and what it adds from above; and where that falls around a cell.
  */
-fn stands() -> &'static [[Shadows; 3]] {
-    static MEASURED: OnceLock<Vec<[Shadows; 3]>> = OnceLock::new();
-    MEASURED.get_or_init(|| {
-        let samples = Scope::new(0).of("forest").seed("stands");
-        cost::aside(|| {
-            (0..STANDS.len())
-                .map(|stand| {
-                    SPECIES.map(|species| {
-                        let seed = hash64(samples, stand as i64, species as i64, 0);
-                        Shadows::new(&stand_of(species, STANDS[stand], seed), 2, 1)
-                    })
-                })
-                .collect()
-        })
-    })
+#[derive(Clone, Debug, PartialEq)]
+struct Sampled {
+    slabs: Vec<[Vec<f64>; 3]>,
+    wood: [Vec<f64>; 3],
+    across: [Vec<f64>; 3],
+    spread: [Vec<([i64; 2], f64)>; 3],
+}
+
+/** The sample stands at each spacing the canopy is drawn at, as the test `keep_samples` wrote them. */
+const SAMPLES: &str = include_str!("../data/forest-stands.txt");
+
+/** The stands at `spacing`, as kept (SAMPLES). */
+fn sampled_at(spacing: i64) -> Sampled {
+    static KEPT: OnceLock<HashMap<i64, Sampled>> = OnceLock::new();
+    let kept = KEPT.get_or_init(|| read_samples(SAMPLES));
+    kept.get(&spacing).cloned().unwrap_or_else(|| panic!("no sample stands kept at spacing {spacing}: see keep_samples"))
+}
+
+/** What `write_samples` wrote, by spacing. */
+fn read_samples(text: &str) -> HashMap<i64, Sampled> {
+    let mut lines = text.lines();
+    let mut samples = HashMap::new();
+    while let Some(spacing) = lines.next() {
+        let mut series =
+            || -> Vec<f64> { lines.next().expect("a series").split_whitespace().map(|n| n.parse().expect("a number")).collect() };
+        let slabs = STANDS.map(|_| [(); 3].map(|_| series())).to_vec();
+        let [wood, across] = [(); 2].map(|_| [(); 3].map(|_| series()));
+        let spread = [(); 3].map(|_| series().chunks(3).map(|c| ([c[0] as i64, c[1] as i64], c[2])).collect());
+        samples.insert(spacing.parse().expect("a spacing"), Sampled { slabs, wood, across, spread });
+    }
+    samples
 }
 
 /** The forest of `seed`, alone on the relief, all of it its own. */
@@ -537,7 +533,6 @@ fn layers(scope: &Scope, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
 
     // Trees, at the trees' points (worldgen's Points), of their marks' species: leaves 2 m wide, each holding one
     // by its share of tree_chance, a square 4 m wide's; roots 8 m wide, as wide as the chances follow.
-    let tree_top = vox(26.0) as i64;
     let points = {
         let f = f.clone();
         Rc::new(Points::new("trees", f.s("trees"), &[0, 2], TREE_LEAF, vox(8.0) as i64, 3, move |[x, _, z]| {
@@ -554,34 +549,15 @@ fn layers(scope: &Scope, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
             .borrow_mut()
             .entry(spacing)
             .or_insert_with(|| {
-                let stands = stands();
-                let shadows = &stands[0];
-                let slabs_of = |of: &dyn Fn(&Shadows, i64, i64) -> f64| {
-                    [0, 1, 2].map(|sp| {
-                        (0..tree_top).step_by(spacing as usize).map(|from| of(&shadows[sp], from, (from + spacing).min(tree_top))).collect()
-                    })
-                };
-                let slabs = stands
-                    .iter()
-                    .map(|shadows| {
-                        [0, 1, 2].map(|sp| {
-                            (0..tree_top)
-                                .step_by(spacing as usize)
-                                .map(|from| shadows[sp].slab(from, (from + spacing).min(tree_top)))
-                                .collect()
-                        })
-                    })
-                    .collect();
-                let wood = slabs_of(&|s, from, to| s.share(from, to, |kind| KINDS[kind as usize].kind_type == 4));
-                let above: [Vec<f64>; 3] = slabs_of(&|s, from, to| s.across(from, to));
-                let above = above.map(|slabs| {
+                let Sampled { slabs, wood, across, spread } = sampled_at(spacing);
+                let above = across.map(|slabs| {
                     let sum: f64 = slabs.iter().sum();
                     slabs.iter().map(|s| s / sum).collect()
                 });
                 let (mut shadow, mut over) = ([0.0; 3], HashMap::<[i64; 2], [f64; 3]>::new());
                 let column = (spacing * spacing) as f64;
-                for (sp, shadows) in shadows.iter().enumerate() {
-                    for ([x, _, z], area) in shadows.spread(spacing) {
+                for (sp, spread) in spread.into_iter().enumerate() {
+                    for &([x, z], area) in &spread {
                         shadow[sp] += area;
                         over.entry([x, z]).or_default()[sp] = -js::log(1.0 - (area / column).min(0.99)) * column;
                     }
@@ -646,7 +622,7 @@ fn layers(scope: &Scope, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
             let sp = SPECIES.iter().position(|s| *s == species).expect("a species");
             let height = f.column(x, z).height;
             let mut spans = Vec::new();
-            for (i, from) in (0..tree_top).step_by(spacing as usize).enumerate() {
+            for (i, from) in (0..TREE_TOP).step_by(spacing as usize).enumerate() {
                 let shadow = (0..3).fold(0.0, |sum, sp| sum + own[sp] * slabs[sp][i] + rest * over[sp] / hidden * above[sp][i]);
                 if shadow > 0.0 {
                     let (from, to) = (height + from, height + from + spacing);
@@ -661,7 +637,7 @@ fn layers(scope: &Scope, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
     let trees = {
         let (f, ground) = (f.clone(), f.clone());
         Population::new("trees", 1.0, TREE_LEAF)
-            .reach([TREE_REACH, tree_top, TREE_REACH])
+            .reach([TREE_REACH, TREE_TOP, TREE_REACH])
             .size(vox(1.0) as i64)
             .anchor_points(points, move |spot| {
                 let [x, _, z] = spot.at;
@@ -673,7 +649,7 @@ fn layers(scope: &Scope, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
                 Some(grow(SPECIES[cell.mark], x, y, z, height, room, &mut cell.random("tree"), &|x, z| f.ground(x, z)))
             })
             .on(on.clone())
-            .far(canopy.about(on.clone(), 0, tree_top))
+            .far(canopy.about(on.clone(), 0, TREE_TOP))
     };
 
     // Boulders and fallen logs.
@@ -1354,4 +1330,109 @@ fn fallen_log(x: f64, z: f64, ground: GroundAt, random: &mut Rng) -> Option<Vec<
         i += vox(0.5);
     }
     Some(shapes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use worldgen::cost;
+    use worldgen::generator::Shadows;
+    use worldgen::points::Spot;
+
+    /** The spacings SAMPLES holds: those of levels 4 to 12, past any a host draws. */
+    const SAMPLED: std::ops::RangeInclusive<u32> = 4..=12;
+
+    /**
+     * 64 trees of `species` in a stand of them as dense as `chance` (of one in
+     * a square 4 m wide), each in its room, the nearest the origin; alone, if
+     * the chance is none.
+     */
+    fn stand_of(species: Species, chance: f64, seed: u64) -> Vec<Node> {
+        if chance == 0.0 {
+            return (0..64).map(|i| make_tree(species, 0.0, 0.0, 0.0, &mut Rng::new(hash64(seed, i, 0, 0)), &|_, _| 0)).collect();
+        }
+        let tall = move |s: &Spot| height(species, unit(hash(seed, s.at[0], s.at[2], 0)));
+        let points =
+            Rc::new(Points::new("stand", seed, &[0, 2], m(2.0), m(8.0), 1, move |_| [fx(chance / 4.0), Fx::ZERO, Fx::ZERO, Fx::ZERO]));
+        let rooms = Rooms::new(points.clone(), TREE_REACH, MOST, GAPS, move |s| weight(tall(s)));
+        let half = m(64.0);
+        let mut spots = points.points_in([-half, 0, -half], [half, 1, half]);
+        spots.sort_by_key(|s| (s.at[0] * s.at[0] + s.at[2] * s.at[2], s.at, s.nth));
+        let grown = |s: &Spot| {
+            let ([x, _, z], random) = (s.at, &mut Rng::new(hash64(seed, s.at[0], s.at[2], 1)));
+            grow(species, x as f64, 0.0, z as f64, tall(s), Rc::new(rooms.room(s.at, 0)), random, &|_, _| 0)
+        };
+        spots.iter().take(64).map(grown).collect()
+    }
+
+    /**
+     * What the trees of each of STANDS hide, by species, measured from
+     * samples drawn at level 2 (the canopy's from level 4 on): the species'
+     * own, the same in every world.
+     */
+    fn stands() -> Vec<[Shadows; 3]> {
+        let samples = Scope::new(0).of("forest").seed("stands");
+        cost::aside(|| {
+            (0..STANDS.len())
+                .map(|stand| {
+                    SPECIES.map(|species| {
+                        let seed = hash64(samples, stand as i64, species as i64, 0);
+                        Shadows::new(&stand_of(species, STANDS[stand], seed), 2, 1)
+                    })
+                })
+                .collect()
+        })
+    }
+
+    /** The stands measured at each spacing SAMPLED holds. */
+    fn measured() -> Vec<(i64, Sampled)> {
+        let stands = stands();
+        SAMPLED
+            .map(|level| {
+                let spacing = 1i64 << level;
+                let slabs_of = |shadows: &[Shadows; 3], of: &dyn Fn(&Shadows, i64, i64) -> f64| {
+                    [0, 1, 2].map(|sp| {
+                        (0..TREE_TOP).step_by(spacing as usize).map(|from| of(&shadows[sp], from, (from + spacing).min(TREE_TOP))).collect()
+                    })
+                };
+                let sampled = Sampled {
+                    slabs: stands.iter().map(|shadows| slabs_of(shadows, &|s, from, to| s.slab(from, to))).collect(),
+                    wood: slabs_of(&stands[0], &|s, from, to| s.share(from, to, |kind| KINDS[kind as usize].kind_type == 4)),
+                    across: slabs_of(&stands[0], &|s, from, to| s.across(from, to)),
+                    spread: [0, 1, 2].map(|sp| stands[0][sp].spread(spacing).into_iter().map(|([x, _, z], area)| ([x, z], area)).collect()),
+                };
+                (spacing, sampled)
+            })
+            .collect()
+    }
+
+    /** As SAMPLES says (`{:?}` writes each number exactly). */
+    fn write_samples(samples: &[(i64, Sampled)]) -> String {
+        let line = |values: &[f64]| values.iter().map(|v| format!("{v:?}")).collect::<Vec<_>>().join(" ") + "\n";
+        let mut text = String::new();
+        for (spacing, Sampled { slabs, wood, across, spread }) in samples {
+            text += &format!("{spacing}\n");
+            for series in slabs.iter().flatten().chain(wood).chain(across) {
+                text += &line(series);
+            }
+            for spread in spread {
+                text += &line(&spread.iter().flat_map(|([x, z], area)| [*x as f64, *z as f64, *area]).collect::<Vec<_>>());
+            }
+        }
+        text
+    }
+
+    /** If not, `cargo test --release keep_samples -- --ignored` in worlds/ writes them anew. */
+    #[test]
+    fn kept_samples_are_measured() {
+        let measured = measured();
+        assert!(read_samples(SAMPLES) == measured.into_iter().collect(), "the sample stands aren't as kept; see keep_samples");
+    }
+
+    /** Writes SAMPLES' file. */
+    #[test]
+    #[ignore]
+    fn keep_samples() {
+        std::fs::write(concat!(env!("CARGO_MANIFEST_DIR"), "/data/forest-stands.txt"), write_samples(&measured())).expect("written");
+    }
 }
