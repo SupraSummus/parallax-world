@@ -230,7 +230,9 @@ so that every pixel drawn shows and none works out its own depth,
 which keeps the GPU testing depth before the pixel is drawn
 (on Intel's, a pixel left out or its depth written by the shader does not);
 the depth is the plane's, by w, ahead along the view (`flat_depth`),
-and a quad holds to its face's rays by four planes through the eye.
+and a quad is not held to its face's rays:
+near a seam, where two faces' pictures overlap, depth decides,
+as between cells.
 Where two cells' pictures meet, each on its own plane,
 a gap may open as wide as the rays' slant times
 how far the edge columns' pillars reach from the planes,
@@ -500,7 +502,8 @@ diagonals (where 3 meet). The faces tile the screen;
 the fragment shader discards the rest of their chunks,
 deciding by the pixel's ray, the same for all layers of a face,
 with a hair of overlap so no seam pixel falls to neither face;
-native's by the ray's two largest world components, one face a pixel (`owns`).
+native's by the ray's two largest world components, one face a pixel (`owns`),
+but for pictures drawn flat (section 1).
 Looking straight along a world axis, as the scenes' walls and streets
 invite, puts a corner of 4 faces in the middle of the screen.
 "Show Face Seams" draws the seams over the picture.

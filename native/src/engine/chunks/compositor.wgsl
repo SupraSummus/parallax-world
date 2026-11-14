@@ -12,7 +12,7 @@
 // front of them, which are added up (veil_fragment) and laid over the
 // picture.
 
-// A face's own rays, for pictures drawn flat (flat_vertex).
+// A face's own rays, for pictures of medium (veil_vertex).
 enable clip_distances;
 
 struct FaceView {
@@ -296,18 +296,12 @@ fn flat_depth(level: f32, w: f32) -> f32 {
 // A run of a picture drawn flat (its instance: compositor.rs's flatten),
 // of the cluster whose index · 4 is its first vertex: its columns'
 // bricks, a quad on the picture's plane; how far into the run, and where
-// its colours are, how many, and its chunk's slot. Only the face's own
-// rays (owns): |x| + √2 |y| ≤ z in its coordinates (view.rs's in_face),
-// so the quad is cut by four planes through the eye.
+// its colours are, how many, and its chunk's slot. Not held to its face's
+// rays: near a seam, where two faces' pictures overlap, depth decides, as
+// between cells; clip planes cutting each quad to them cost Intel's GPU
+// dearly.
 struct Run {
   @builtin(position) position: vec4f,
-  @builtin(clip_distances) owned: array<f32, 4>,
-  @location(0) along: f32,
-  @location(1) @interpolate(flat) colours: vec3u,
-}
-
-// A run's pixel: Run less what only cuts its quad.
-struct RunPixel {
   @location(0) along: f32,
   @location(1) @interpolate(flat) colours: vec3u,
 }
@@ -350,7 +344,6 @@ fn flat_vertex(@builtin(vertex_index) vertex: u32, @builtin(instance_index) inst
   let w = dot(globals.faces[c.face].view[2], at);
   var out: Run;
   out.position = quad_position(c, at, flat_depth(c.level, w));
-  out.owned = in_face(at);
   out.along = f32(vertex & 1u) * f32(run.x >> 21u);
   out.colours = vec3u(t.first * 2u + run.y, run.x >> 21u, slot);
   return out;
@@ -358,7 +351,7 @@ fn flat_vertex(@builtin(vertex_index) vertex: u32, @builtin(instance_index) inst
 
 // The colour of the run's column there.
 @fragment
-fn flat_fragment(in: RunPixel) -> @location(0) vec4f {
+fn flat_fragment(in: Run) -> @location(0) vec4f {
   let k = in.colours.x + min(u32(max(in.along, 0.0)), in.colours.y - 1u);
   let colour = columns[k / 2u][k % 2u];
   return vec4f(shade(chunks[in.colours.z], unpack4x8unorm(colour)), 1.0);
