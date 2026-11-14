@@ -209,10 +209,15 @@ mod tests {
      * once the view is complete, its whole voxels reliefs (flat if `flat`) or splats.
      */
     fn complete_view(name: &str, look: [f64; 2], detail: f64, relief: bool, flat: bool) -> Composed {
-        let make = worlds::by_name(name).expect("world").make;
-        let mut world = World::new(make, 1, None, 4);
-        let look = Look { detail, ..Look::new(make(1).spawn.map(|v| v as f64), look, 90.0, 1000.0, [320.0, 200.0]) };
+        let (mut world, look) = world_and_look(name, look, detail);
         complete(&mut Chunks::new(&world, relief, flat), &mut world, &look)
+    }
+
+    /** World `name` of seed 1, and the look from its spawn, looking `look`, at `detail`. */
+    fn world_and_look(name: &str, look: [f64; 2], detail: f64) -> (World, Look) {
+        let make = worlds::by_name(name).expect("world").make;
+        let look = Look { detail, ..Look::new(make(1).spawn.map(|v| v as f64), look, 90.0, 1000.0, [320.0, 200.0]) };
+        (World::new(make, 1, None, 4), look)
     }
 
     /** What `chunks` draws of `world` as `look` sees it, once complete. */
@@ -220,10 +225,6 @@ mod tests {
         let picture: Box<dyn Any> = crate::complete(chunks, world, look, false).picture;
         *picture.downcast().expect("chunks")
     }
-
-    /** World, look and detail as a power of two. The thickest cells too: in relief, their columns move most with the camera. */
-    const VIEWS: [(&str, [f64; 2], f64); 3] =
-        [("forest", [0.0, 0.0], 3.25), ("forest", [20.0, -25.0], 2.25), ("moor", [-30.0, 10.0], 3.25)];
 
     const PIXELS: [u32; 2] = [320, 200];
 
@@ -279,28 +280,52 @@ mod tests {
         }
     }
 
-    #[test]
-    #[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
-    fn culling_on_the_gpu_leaves_the_picture_unchanged() {
-        for (name, look, octaves) in VIEWS {
-            for (relief, flat) in [(true, false), (true, true), (false, false)] {
-                let composed = complete_view(name, look, 2f64.powf(octaves), relief, flat);
-                let [culled, all] = [true, false].map(|culls| {
-                    let mut easel = Easel::offscreen(None);
-                    easel.painter = Some(Box::new(Compositor::new(&easel.device, easel.format, culls)));
-                    let pixels = easel.pixels(&composed, PIXELS).2;
-                    (pixels, easel.held::<Compositor>().expect("a compositor").drawn(&easel).iter().sum::<u32>())
-                });
-                let drew = if flat {
-                    "flat tiles"
-                } else if relief {
-                    "tiles"
-                } else {
-                    "splats"
-                };
-                assert!(culled.0 == all.0, "{name} {look:?} {drew}: {}", differ(&culled.0, &all.0));
-                assert!(culled.1 < all.1, "{name} {look:?}: culling drew {} {drew} of {}", culled.1, all.1);
-            }
+    /**
+     * Culling on the GPU leaves world `name` from its spawn, looking `angles`, at detail 2^`octaves`, unchanged, drawn
+     * every way, and draws less. A test per view, side by side.
+     */
+    fn culling_leaves_the_picture_unchanged(name: &str, angles: [f64; 2], octaves: f64) {
+        let (mut world, look) = world_and_look(name, angles, 2f64.powf(octaves));
+        for (relief, flat) in [(true, false), (true, true), (false, false)] {
+            let composed = complete(&mut Chunks::new(&world, relief, flat), &mut world, &look);
+            let [culled, all] = [true, false].map(|culls| {
+                let mut easel = Easel::offscreen(None);
+                easel.painter = Some(Box::new(Compositor::new(&easel.device, easel.format, culls)));
+                let pixels = easel.pixels(&composed, PIXELS).2;
+                (pixels, easel.held::<Compositor>().expect("a compositor").drawn(&easel).iter().sum::<u32>())
+            });
+            let drew = if flat {
+                "flat tiles"
+            } else if relief {
+                "tiles"
+            } else {
+                "splats"
+            };
+            assert!(culled.0 == all.0, "{name} {angles:?} {drew}: {}", differ(&culled.0, &all.0));
+            assert!(culled.1 < all.1, "{name} {angles:?}: culling drew {} {drew} of {}", culled.1, all.1);
+        }
+    }
+
+    /** The thickest cells too: in relief, their columns move most with the camera. */
+    mod culling_on_the_gpu_leaves_the_picture_unchanged {
+        use super::culling_leaves_the_picture_unchanged as unchanged;
+
+        #[test]
+        #[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
+        fn forest() {
+            unchanged("forest", [0.0, 0.0], 3.25);
+        }
+
+        #[test]
+        #[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
+        fn forest_turned() {
+            unchanged("forest", [20.0, -25.0], 2.25);
+        }
+
+        #[test]
+        #[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
+        fn moor() {
+            unchanged("moor", [-30.0, 10.0], 3.25);
         }
     }
 
