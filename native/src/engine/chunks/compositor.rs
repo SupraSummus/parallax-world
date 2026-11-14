@@ -747,6 +747,8 @@ struct Pipelines {
     show_picture: wgpu::RenderPipeline,
     cull_drawn: wgpu::ComputePipeline,
     cull_rest: wgpu::ComputePipeline,
+    scan_draws: wgpu::ComputePipeline,
+    list_draws: wgpu::ComputePipeline,
     scan_veils: wgpu::ComputePipeline,
     order_veils: wgpu::ComputePipeline,
     reduce_depth_level: wgpu::ComputePipeline,
@@ -789,6 +791,8 @@ pub struct Compositor {
     /** By phase, the draws of clusters the culling lists, and how many; then the pictures of medium's (VEILS). */
     draws: [wgpu::Buffer; 3],
     drawn: [wgpu::Buffer; 3],
+    /** For each 64 clusters, where the first the culling draws is listed, and a bit for each it draws (list_draws). */
+    blocks: wgpu::Buffer,
     /** How many pictures of medium the culling counts at each place along the rays, then where the next of each is listed (order_veils). */
     veil_places: wgpu::Buffer,
     targets: Option<Targets>,
@@ -906,6 +910,7 @@ impl Pipelines {
                 (9, S::COMPUTE, write),
                 (16, S::COMPUTE, write),
                 (22, S::COMPUTE, write),
+                (23, S::COMPUTE, write),
             ],
         );
         let reduce_depth = layout(device, &[(10, S::COMPUTE, texture(wgpu::TextureSampleType::Depth)), (12, S::COMPUTE, level_out)]);
@@ -994,6 +999,8 @@ impl Pipelines {
             show_picture: render(&show, "show_vertex", "show_fragment", &[], None, &[target(format, None)]),
             cull_drawn: compute(&cull, "cull_drawn", &[]),
             cull_rest: compute(&cull, "cull_rest", &[("culls", f64::from(culls))]),
+            scan_draws: compute(&cull, "scan_draws", &[]),
+            list_draws: compute(&cull, "list_draws", &[]),
             scan_veils: compute(&cull, "scan_veils", &[]),
             order_veils: compute(&cull, "order_veils", &[("culls", f64::from(culls))]),
             reduce_depth_level: compute(&reduce_depth, "reduce_depth", &[]),
@@ -1091,6 +1098,7 @@ impl Compositor {
             veils: 0,
             draws: [draws("draws first"), draws("draws next"), draws("veils")],
             drawn: [drawn("drawn first"), drawn("drawn next"), drawn("veils drawn")],
+            blocks: buffer(device, "blocks", 4, U::STORAGE | U::COPY_DST),
             veil_places: buffer(device, "veil places", 4, U::STORAGE | U::COPY_DST),
             targets: None,
             seams: false,
@@ -1104,10 +1112,16 @@ impl Compositor {
 
     /** How many tiles (or whole splats) the frame drawn last drew in each phase, as `easel` reads them from the GPU. */
     pub fn drawn(&self, easel: &Easel) -> [u32; 2] {
+        self.draws(easel).map(|draws| draws.iter().map(|d| d[1]).sum())
+    }
+
+    /** The draws of the frame drawn last in each phase (DrawArgs in compositor.wgsl), as `easel` reads them from the GPU. */
+    pub fn draws(&self, easel: &Easel) -> [Vec<[u32; 4]>; 2] {
         std::array::from_fn(|phase| {
             let n = u32::from_le_bytes(easel.read_buffer(&self.drawn[phase], 4).try_into().expect("count")) as u64;
             let draws = easel.read_buffer(&self.draws[phase], (n * 16).max(16));
-            draws.as_chunks::<16>().0[..n as usize].iter().map(|d| u32::from_le_bytes(d[4..8].try_into().expect("draw"))).sum()
+            let draws: &[u32] = bytemuck::cast_slice(&draws);
+            draws.as_chunks::<4>().0[..n as usize].to_vec()
         })
     }
 
@@ -1298,6 +1312,7 @@ impl Compositor {
         for draws in &mut self.draws {
             at_least(device, draws, u64::from(self.clusters.top.max(1)) * 16);
         }
+        at_least(device, &mut self.blocks, u64::from(self.clusters.top.div_ceil(64).max(1)) * 12);
         // Its writes copied over as the encoder runs.
         self.belt.finish_and_recall_on_submit(encoder);
     }
@@ -1325,6 +1340,7 @@ impl Compositor {
                     (9, self.drawn[VEILS].as_entire_binding()),
                     (16, self.draws[VEILS].as_entire_binding()),
                     (22, self.veil_places.as_entire_binding()),
+                    (23, self.blocks.as_entire_binding()),
                 ];
                 bind(device, &self.pipelines.cull, &entries)
             })
@@ -1357,6 +1373,7 @@ impl Compositor {
             pass.dispatch_workgroups(across, rows, 1);
         }
         let cull = |encoder: &mut wgpu::CommandEncoder, phase: usize| {
+            encoder.clear_buffer(&self.blocks, 0, None);
             let mut pass = encoder.begin_compute_pass(&Default::default());
             if phase == 1 {
                 // The pyramid of what the first phase drew.
@@ -1371,6 +1388,10 @@ impl Compositor {
                 pass.set_pipeline(if phase == 0 { &p.cull_drawn } else { &p.cull_rest });
                 pass.set_bind_group(0, &self.cull_groups[phase], &[]);
                 let [across, rows] = groups(clusters.div_ceil(CULL_THREADS));
+                pass.dispatch_workgroups(across, rows, 1);
+                pass.set_pipeline(&p.scan_draws);
+                pass.dispatch_workgroups(1, 1, 1);
+                pass.set_pipeline(&p.list_draws);
                 pass.dispatch_workgroups(across, rows, 1);
                 if phase == 1 {
                     pass.set_pipeline(&p.scan_veils);

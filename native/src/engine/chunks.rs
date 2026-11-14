@@ -278,6 +278,23 @@ mod tests {
         }
     }
 
+    /** So that a still view draws alike frame after frame, where depths tie too, as flat pictures' do. */
+    #[test]
+    #[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
+    fn draws_are_listed_in_the_clusters_order() {
+        let (name, look, octaves) = VIEWS[0];
+        for flat in [false, true] {
+            let composed = complete_view(name, look, 2f64.powf(octaves), true, flat);
+            let mut easel = Easel::offscreen(None);
+            easel.pixels(&composed, PIXELS);
+            for draws in easel.held::<Compositor>().expect("a compositor").draws(&easel) {
+                // A tile's cluster is its draw's first instance; a flat picture's cluster's runs', its first vertex over 4.
+                let clusters: Vec<u32> = draws.iter().map(|d| if flat { d[2] / 4 } else { d[3] }).collect();
+                assert!(clusters.is_sorted_by(|a, b| a < b), "flat {flat}: {clusters:?}");
+            }
+        }
+    }
+
     #[test]
     #[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
     fn culling_on_the_gpu_leaves_the_picture_unchanged() {

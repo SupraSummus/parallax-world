@@ -3,8 +3,9 @@
 // medium, drawing only the clusters of them that may show: each
 // cluster names its chunk's slot in `chunks`, which gives its face and
 // plane relative to the camera, as `place` makes it each frame of the
-// chunk's record. Then cull_drawn lists draws of the tiles of columns (or
-// clusters of whole splats) that showed last frame,
+// chunk's record. Then cull_drawn marks the tiles of columns (or
+// clusters of whole splats) that showed last frame, scan_draws and
+// list_draws list draws of them in the clusters' order,
 // and tile_vertex (splat_vertex) draws them; their depth is reduced to a
 // pyramid of farthest depths (reduce_depth, reduce), and cull_rest tests
 // every tile against it: those that showed are kept for the next frame,
@@ -131,10 +132,13 @@ struct DrawArgs {
 @group(0) @binding(2) var<storage, read> tiles: array<Cluster>;
 @group(0) @binding(3) var<storage, read> columns: array<vec2u>;
 // Culling: all the clusters, some left where chunks were (cull), and a draw
-// for each to draw.
+// for each to draw, and how many; for each 64 clusters, a workgroup's,
+// where the first it draws is listed and a bit for each it draws, cleared
+// each phase.
 @group(0) @binding(4) var<storage, read_write> clusters: array<Cluster>;
 @group(0) @binding(6) var<storage, read_write> draws: array<DrawArgs>;
 @group(0) @binding(7) var<storage, read_write> drawn: atomic<u32>;
+@group(0) @binding(23) var<storage, read_write> blocks: array<atomic<u32>>;
 @group(0) @binding(8) var farthest: texture_2d<f32>;
 // The pictures of medium to draw, far to near, and how many; in two
 // halves, how many at each place (veil_place), then where in veil_draws
@@ -305,7 +309,7 @@ fn flat_depth(level: f32, w: f32) -> f32 {
 // rays (owns): |x| + √2 |y| ≤ z in its coordinates (view.rs's in_face),
 // so the quad is cut by four planes through the eye: overlapping past a
 // seam, faces' fragments tie in depth by chance, and the one drawn last
-// would show, in no set order.
+// would show.
 struct Run {
   @builtin(position) position: vec4f,
   @builtin(clip_distances) owned: array<f32, 4>,
@@ -744,12 +748,9 @@ fn draws_cluster(at: u32, cluster: Cluster, phase: u32) -> bool {
 
 // A thread per cluster of all, of a chunk the frame draws; those left
 // where chunks were, which their slot's chunk does not hold, are none.
-// Whole voxels' (a tile, whole splats or runs of a picture): chunks were
-// uploaded near to far, at first, and their tiles nearest first (see tiles
-// and cluster in compositor.rs), and draws are listed about in that order,
-// so that nearer voxels are mostly drawn first and hide what is behind
-// them early. A picture of medium's, in the second phase, counted in its
-// place (veil_place), for order_veils to list.
+// Whole voxels' (a tile, whole splats or runs of a picture) marked, if
+// drawn, for list_draws to list. A picture of medium's, in the second
+// phase, counted in its place (veil_place), for order_veils to list.
 fn cull(at: u32, phase: u32) {
   if at >= arrayLength(&clusters) {
     return;
@@ -769,14 +770,73 @@ fn cull(at: u32, phase: u32) {
     return;
   }
   if draws_cluster(at, cluster, phase) {
-    var draw = DrawArgs(4u, 1u, 0u, at);
-    if globals.whole == 1.0 {
-      draw = DrawArgs(4u, cluster.slot_count & 0xffu, (cluster.slot_count >> 8u) * 4u, cluster.first);
-    } else if globals.whole == FLAT {
-      draw = DrawArgs(4u, cluster.slot_count & 0xffu, at * 4u, 0u);
-    }
-    draws[atomicAdd(&drawn, 1u)] = draw;
+    atomicOr(&blocks[at / 64u * 3u + 1u + at % 64u / 32u], 1u << (at % 32u));
   }
+}
+
+// How many of the first n of 64 clusters, `block`, cull marked.
+fn marked(block: u32, n: u32) -> u32 {
+  let low = atomicLoad(&blocks[block * 3u + 1u]) & bits_below(min(n, 32u));
+  let high = atomicLoad(&blocks[block * 3u + 2u]) & bits_below(max(n, 32u) - 32u);
+  return countOneBits(low) + countOneBits(high);
+}
+
+// A word's bits below the n-th, n up to 32.
+fn bits_below(n: u32) -> u32 {
+  return select((1u << n) - 1u, ~0u, n == 32u);
+}
+
+// Where in `draws` each 64 clusters' first marked is listed, after all those
+// before them: a prefix sum, SCANNED threads each summing a run of them;
+// and how many in all.
+const SCANNED = 256u;
+var<workgroup> sums: array<u32, SCANNED>;
+@compute @workgroup_size(SCANNED)
+fn scan_draws(@builtin(local_invocation_index) thread: u32) {
+  let n = arrayLength(&blocks) / 3u;
+  let first = min(thread * ((n + SCANNED - 1u) / SCANNED), n);
+  let end = min(first + (n + SCANNED - 1u) / SCANNED, n);
+  var sum = 0u;
+  for (var k = first; k < end; k++) {
+    sum += marked(k, 64u);
+  }
+  sums[thread] = sum;
+  workgroupBarrier();
+  var at = 0u;
+  for (var k = 0u; k < thread; k++) {
+    at += sums[k];
+  }
+  for (var k = first; k < end; k++) {
+    atomicStore(&blocks[k * 3u], at);
+    at += marked(k, 64u);
+  }
+  if thread == SCANNED - 1u {
+    atomicStore(&drawn, at);
+  }
+}
+
+// Lists a draw of each cluster cull marked, in the clusters' order, so that
+// a frame is drawn alike each time: where depths tie, as flat pictures'
+// do, the one drawn last shows. Chunks were uploaded near to far, at
+// first, and their tiles nearest first (see tiles and cluster in
+// compositor.rs), so nearer voxels are mostly drawn first and hide what
+// is behind them early.
+@compute @workgroup_size(64)
+fn list_draws(@builtin(workgroup_id) id: vec3u, @builtin(num_workgroups) n: vec3u, @builtin(local_invocation_index) thread: u32) {
+  let at = thread_of(id, n, thread);
+  let block = at / 64u;
+  if block * 3u + 2u >= arrayLength(&blocks) || marked(block, thread + 1u) == marked(block, thread) {
+    return;
+  }
+  let listed = atomicLoad(&blocks[block * 3u]) + marked(block, thread);
+  let cluster = clusters[at];
+  var draw = DrawArgs(4u, 1u, 0u, at);
+  if globals.whole == 1.0 {
+    draw = DrawArgs(4u, cluster.slot_count & 0xffu, (cluster.slot_count >> 8u) * 4u, cluster.first);
+  } else if globals.whole == FLAT {
+    draw = DrawArgs(4u, cluster.slot_count & 0xffu, at * 4u, 0u);
+  }
+  draws[listed] = draw;
 }
 
 // Which of the half slabs a ray of its face crosses a picture of medium's

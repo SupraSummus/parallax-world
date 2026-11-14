@@ -273,6 +273,10 @@ Numbers are for the forest at 1280×800, as measured when written.
     which cost Intel's GPU about as much as all else they do
     (the valley's frame 5.2 ms, 3.6 without).
     Uncut, faces' pictures overlap past their seams, and tie there (below, "A shot differs").
+  - Neighbours in a layer of cells often lie on one plane,
+    and enlarged (`Flat`) one shows over much of the other's picture
+    where the ground runs along the axis, its pillars through the cell:
+    they tie, and the one listed last shows.
 - **Native's chunk engines while the eye moves.**
   - Their renderer composes a frame behind (`chunks.rs`),
     so `--stroll` counts nearly every frame as one whose content is still coming:
@@ -286,9 +290,8 @@ Numbers are for the forest at 1280×800, as measured when written.
     (a chunk holding a cell's finer cells' pictures too) would cost less.
   - A shot differs from run to run in about 0.3 % of its pixels (flat, the valley):
     where depths tie exactly, the one drawn last shows,
-    in the order chunks came, which timing decides,
-    and culling lists draws (`atomicAdd`), which is no set order.
-    Lists in the clusters' order (a prefix sum) would draw a frame alike each time.
+    in the clusters' order, so as chunks came, which timing decides.
+    Pictures of medium at one place along the rays are listed by `atomicAdd` still.
 - **Native's splats may go too.**
   Each whole voxel a hexagon is the voxels engine's idea, rasterized.
   They are worth keeping only if faster than reliefs on some GPU,
