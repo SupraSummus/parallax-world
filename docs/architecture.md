@@ -273,6 +273,10 @@ those of whole voxels and of medium apart, each by its own Lod,
 each with what it knows of it (`Seen`): its chunk, that it holds nothing,
 or what it waits for.
 A cell holds nothing if none of its level's voxels meets it (`Level::meets`),
+or if they are buried, as far underground most cells are:
+every brick of its grid holding them and their neighbours is whole
+(`Level::buried`, by each tile's whole bricks),
+so no ray from anywhere enters one;
 the same for every face;
 its medium holds nothing if no see-through voxel meets what it reads.
 Each tile keeps which cells of 8·FCC and 32·FCC its voxels meet,

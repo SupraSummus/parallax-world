@@ -224,16 +224,19 @@ fn box_tiles(Lattice { r, u, f }: Lattice, heights: (i64, i64), min: [i32; 3], m
 }
 
 /**
- * Whether a cell may hold voxels: whether any of its level's meet it
- * (Level::meets); of its medium, whether any see-through ones meet the
- * least cell about its site that holds all its medium reads (medium_reads),
- * its neighbours' slabs too, beside which it draws its own. Once it has its
- * tiles.
+ * Whether a cell may hold voxels that show: whether any of its level's
+ * meet it (Level::meets), and not all are buried, every voxel's neighbours
+ * whole (Level::buried), so that no ray from anywhere enters one; of its
+ * medium, whether any see-through ones meet the least cell about its site
+ * that holds all its medium reads (medium_reads), its neighbours' slabs
+ * too, beside which it draws its own. Once it has its tiles.
  */
 fn may_hold(cell: &CellChunk, lattice: Lattice, level: &Level) -> bool {
     let centre = lattice.world(cell.site);
     if !cell.medium {
-        return level.meets(centre, cell.spacing(), false);
+        // Its voxels' sites are within its spacing of its centre along each axis, their neighbours one more.
+        let r = cell.spacing() + 1;
+        return level.meets(centre, cell.spacing(), false) && !level.buried(centre.map(|v| v - r), centre.map(|v| v + r));
     }
     // A cell of radius r holds |x| + |y| ≤ r of each pair of axes; of a box, its corners, a unit more for world()'s halves.
     let (min, max) = medium_reads(cell);
@@ -528,6 +531,62 @@ impl Renderer {
         if self.cells.len() > MAX_CELLS && self.renders.is_multiple_of(EVICTS) {
             let renders = self.renders;
             self.cells.retain(|_, (_, used)| *used + UNUSED_RENDERS > renders);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use worldgen::generator::materials_of;
+    use worldgen::light::make_tile;
+
+    use super::*;
+    use crate::world::Tile;
+
+    /**
+     * The cells may_hold says hold nothing that shows bake empty, of every
+     * face, in relief and as splats: a world's cells of 8·FCC of a grid
+     * (level 3 over it) around its spawn, all whose reads its tiles there
+     * hold; and some cells meeting voxels are buried.
+     */
+    #[test]
+    fn cells_said_to_hold_nothing_bake_empty() {
+        for (name, grid) in [("forest", 0), ("moor", 0), ("valley", 2)] {
+            let world = (worlds::by_name(name).expect("world").make)(1);
+            let spawn = world.spawn.map(|v| (v >> grid) as i32);
+            let corner = spawn.map(|v| (v as f64 / TILE as f64).round() as i32);
+            let heights = world.heights_at(grid);
+            let tiles: HashMap<TileId, Arc<Tile>> = within([corner.map(|v| v - 1), corner])
+                .map(|id| (id, Arc::new(Tile::new(id, Arc::new(make_tile(&world.generator, grid, heights, id.map(i64::from)))))))
+                .collect();
+            let level = Level::new(tiles);
+            let mut baker = Baker::new(&materials_of(&world.generator).iter().map(|m| m.rgb()).collect::<Vec<_>>());
+            baker.share_tiles(grid as usize, level.grids.clone());
+            let (mut buried, mut empty) = (0, 0);
+            for (face, &lattice) in fcc::lattices().iter().enumerate() {
+                // The spawn in the face's coordinates: R·p, U·p, F·p.
+                let dot = |v: [i32; 3]| (0..3).map(|d| v[d] * spawn[d]).sum::<i32>();
+                let middle = [lattice.r, lattice.u, lattice.f].map(|v| dot(v).div_euclid(16) * 2);
+                // Sites of 8·FCC, in 8's: of one parity.
+                let sites =
+                    within([middle.map(|v| v - 10), middle.map(|v| v + 10)]).filter(|p| (p[0] ^ p[2]) & 1 == 0 && (p[1] ^ p[2]) & 1 == 0);
+                for at in sites {
+                    let cell = CellChunk { level: grid as i32 + 3, atoms: grid as i32, site: at.map(|v| v * 8), medium: false };
+                    let (_, min, max) = chunk_reads(&cell);
+                    if !box_tiles(lattice, heights, min, max).is_some_and(|t| level.grids.has_all(t)) || may_hold(&cell, lattice, &level) {
+                        continue;
+                    }
+                    empty += 1;
+                    buried += usize::from(level.meets(lattice.world(cell.site), cell.spacing(), false));
+                    for relief in [true, false] {
+                        let baked = baker.bake_cell(face, &cell, relief);
+                        assert!(baked.count == 0 && baker.columns.is_empty(), "{name}: face {face}'s {cell:?} shows (relief: {relief})");
+                    }
+                }
+            }
+            assert!(buried > 0 && buried < empty, "{name}: of {empty} cells holding nothing that shows, {buried} buried");
         }
     }
 }

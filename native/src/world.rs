@@ -51,12 +51,14 @@ fn heights(world: &worldgen::World) -> Heights {
     std::array::from_fn(|level| world.heights_at(level as u32))
 }
 
-/** A generated tile: its voxels, the cells of the lattice they meet (voxels.rs), by brick and in all, and, lit, their light as the voxels engine takes it. */
+/** A generated tile: its voxels, the cells of the lattice they meet (voxels.rs), by brick and in all, its whole bricks, and, lit, their light as the voxels engine takes it. */
 pub struct Tile {
     pub grid: Arc<Grid>,
     /** voxels::meets. */
     pub meets: Vec<u32>,
     pub met: voxels::Met,
+    /** By place in the grid's bricks, a bit each: whether all its sites are whole voxels (whole). */
+    pub whole: Arc<[u64]>,
     /** If lit, voxels::lights. */
     pub lights: Option<Vec<u32>>,
 }
@@ -72,8 +74,29 @@ impl Tile {
     pub fn new(id: TileId, grid: Arc<Grid>) -> Tile {
         let meets = voxels::meets(&grid);
         let met = voxels::Met::new(id, &grid, &meets);
-        Tile { grid, meets, met, lights: None }
+        Tile { whole: whole(&grid), grid, meets, met, lights: None }
     }
+
+    /** Tile `self` with `lights`. */
+    pub fn lit(&self, lights: Option<Vec<u32>>) -> Tile {
+        Tile { grid: self.grid.clone(), meets: self.meets.clone(), met: self.met.clone(), whole: self.whole.clone(), lights }
+    }
+}
+
+/**
+ * By place in `grid`'s bricks, a bit each: whether every site of the
+ * brick holds a whole voxel. Slots past the grid's box hold none, so a
+ * brick it cuts is not whole.
+ */
+fn whole(grid: &Grid) -> Arc<[u64]> {
+    let mut bits = vec![0; grid.bricks.len().div_ceil(64)];
+    for (place, &at) in grid.bricks.iter().enumerate() {
+        let sites = usize::try_from(at).map(|at| at * fcc::BRICK_SITES..(at + 1) * fcc::BRICK_SITES);
+        if sites.is_ok_and(|mut sites| sites.all(|i| grid.alpha_at(i) == fcc::ALPHA)) {
+            bits[place / 64] |= 1 << (place % 64);
+        }
+    }
+    bits.into()
 }
 
 impl Level {
@@ -98,6 +121,30 @@ impl Level {
         let j = usize::from(radius >= voxels::cell_size(1));
         meeting(centre, radius, voxels::cell_size(j))
             .any(|k| within(voxels::Met::tiles(j, k)).any(|t| self.tiles.get(&t).is_some_and(|tile| tile.met.has(t, j, k, see_through))))
+    }
+
+    /**
+     * Whether every site from `lo` to `hi`, inclusive, holds a whole voxel:
+     * whether all the bricks holding them are whole (Tile's `whole`), all
+     * their tiles made. So it may say no wrongly, never yes.
+     */
+    pub fn buried(&self, lo: [i32; 3], hi: [i32; 3]) -> bool {
+        let tile = |v: i32| (v as i64).div_euclid(TILE) as i32;
+        within([lo.map(tile), hi.map(tile)]).all(|id| {
+            let Some(t) = self.tiles.get(&id) else { return false };
+            let g = &t.grid;
+            // The box within the tile, by brick of its grid, whose box is to hold it.
+            let (from, to): ([i32; 3], [i32; 3]) = (
+                std::array::from_fn(|d| lo[d].max((id[d] as i64 * TILE) as i32) - g.min[d]),
+                std::array::from_fn(|d| hi[d].min(((id[d] as i64 + 1) * TILE) as i32 - 1) - g.min[d]),
+            );
+            let bricks = g.n.map(|v| (v + fcc::BRICK - 1) / fcc::BRICK);
+            (0..3).all(|d| from[d] >= 0 && to[d] < g.n[d])
+                && within([from.map(|v| v / fcc::BRICK), to.map(|v| v / fcc::BRICK)]).all(|[i, j, k]| {
+                    let place = ((k * bricks[1] + j) * bricks[0] + i) as usize;
+                    t.whole[place / 64] >> (place % 64) & 1 != 0
+                })
+        })
     }
 }
 
@@ -231,7 +278,7 @@ fn work(make: Make, seed: u64, heights: &Heights, queue: &(Mutex<Queue>, Condvar
                 let (_, light) =
                     light.get_or_insert_with(|| (lighting, Light::new(make(seed), shared.expect("light to light tiles with"))));
                 let lights = Some(voxels::lights(&tile.grid, level as u32, light));
-                Tile { grid: tile.grid.clone(), meets: tile.meets.clone(), met: tile.met.clone(), lights }
+                tile.lit(lights)
             }
             None => {
                 let (heights, key) = (heights[level], id.map(i64::from));
@@ -319,8 +366,7 @@ impl World {
         }
         for (level, tiles) in self.tiles.iter_mut().enumerate() {
             for tile in tiles.values_mut().filter(|t| t.lights.is_some()) {
-                let Tile { grid, meets, met, .. } = &**tile;
-                *tile = Arc::new(Tile { grid: grid.clone(), meets: meets.clone(), met: met.clone(), lights: None });
+                *tile = Arc::new(tile.lit(None));
             }
             self.levels[level] = Arc::new(Level::new(tiles.clone()));
         }

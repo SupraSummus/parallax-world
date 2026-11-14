@@ -100,11 +100,16 @@ Numbers are for the forest at 1280×800, as measured when written.
   Why is open: the same views and paths, drawn headless, take milliseconds.
 - **Native's cells could be simpler and cheaper**
   (section 1 of `docs/architecture.md`).
-  Most cells baked come back empty, about two in three at the forest's spawn:
-  they hold voxels (`Level::meets`), but none a ray can enter.
-  Nothing skips cells behind nearer ones: every cell in view is baked,
-  and the compositor's culling hides them;
-  the depth pyramid it culls clusters with could cull cells not yet baked too.
+  Nearly half the cells baked come back empty:
+  they hold voxels (`Level::meets`) and are not buried by whole bricks
+  (`Level::buried`), but hold none a ray of their face can enter.
+  Nothing skips cells behind nearer ones but buried ones:
+  every other cell in view is baked, and the compositor's culling hides them,
+  though from the eye about one in seven of a frame's chunks shows
+  (the valley's spawn, a colour per chunk).
+  The depth pyramid it culls clusters with could cull cells not yet baked too;
+  a test on the CPU, true for any eye in the pick,
+  would need what hides them, mostly leaves and trunks, fused.
   Cells straddling where a face's levels meet are drawn at both.
   Each render tests every cell a face composes against the screen,
   though a face keeps its cells picked (`Lod::pick`);
