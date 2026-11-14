@@ -688,7 +688,8 @@ the same grid as far away as whole voxels, but two levels coarser,
 so slabs four times as deep.
 A ray costs a fragment per slab it crosses, 2Q near the eye and Q a level after
 (of the medium's Q);
-deeper slabs lose nothing along the axis, as optical depths add up in any order.
+deeper slabs lose little along the axis, as optical depths add up in any order,
+though within a slab colours mix without their order.
 A ray takes the slab where it crosses that plane,
 so where it slants it takes it a little aside,
 which blurs where the medium ends by about a slab's depth times the slant:
@@ -696,17 +697,24 @@ where a face's axis is tilted, mist lying on the ground
 shows that much above and below it,
 and at a seam with a level face's rays, which take it where it is,
 the difference shows as a V.
-Optical depths add up in any order:
-the compositor adds the pictures as they come
-into a picture of their own, colours weighted by them,
-in front of what the reliefs drew,
-and lays that over the picture, as much as it stops.
-Right where the medium's colour is the same all along a ray, as mist's is;
-where it is not, its colours mix without their order.
-So the medium is not fogged by distance (below):
-its colour would change along a ray,
-and at the horizon in fog, where most of a ray's medium is far,
-the horizon's colour would show through the fog that is near.
+The compositor lays the pictures one over another, far to near,
+each as much as it stops, fogged by its distance as whole voxels are,
+into a picture of their own, in front of what the reliefs drew,
+and lays that over the picture.
+Every ray of a face meets the planes across its axis in the same order,
+so the culling lists the pictures by their place
+among the half slabs the face's rays cross (`veil_place`):
+each level's medium lies between two planes, finer levels nearer,
+and its halves, 2^(L − 1) layers of grid 0 deep, follow one another,
+so they are numbered from the near plane on, level by level.
+It counts the pictures at each place
+and lists each after those at farther places
+(a counting sort, `scan_veils` and `order_veils`).
+A face's pictures at one place are on one plane, which they tile once,
+so their order there makes no difference.
+So media of different colours, smoke in fog say,
+mix in their order along a ray (`a_nearer_medium_shows_over_one_behind`),
+and far mist fades to the horizon.
 Each slab of a column is one cell's, the one holding its middle site,
 so a slab's pictures tile its plane once;
 and a pixel takes the columns around it as a field,
@@ -736,7 +744,7 @@ thin and thick, along the axis and slanted
 
 **Fog.** A slice at distance d keeps `exp(−d / F)` of its own colour;
 the rest is the horizon colour, mixed in per pixel;
-native's medium is not fogged (see-through, above).
+native's medium too, picture by picture (see-through, above).
 F is a fixed share of the render distance (`FOG_PER_RENDER_DISTANCE`),
 so the far cut-off stays hazy.
 d is measured along the face's axis, not the ray:

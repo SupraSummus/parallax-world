@@ -6,7 +6,7 @@
 //! clusters of splats that may show, culled on the GPU against the depth of
 //! what the last frame showed (compositor.wgsl), then the sky behind them.
 //! See-through voxels come after, as pictures of each cell's medium slab
-//! by slab, added up in any order, then over the picture.
+//! by slab, far to near, each over those behind, then over the picture.
 //!
 //! A chunk's columns and splats are uploaded when it comes into view, into
 //! a buffer each for all, in clusters (tiles of columns, and splats near
@@ -717,7 +717,7 @@ struct Targets {
     size: [u32; 2],
     picture: wgpu::Texture,
     depth: wgpu::Texture,
-    /** The pictures of medium added up: their colour times their optical depth, and that depth (veil_fragment). */
+    /** The pictures of medium, one over another: their colour as much as they stop, and how much (veil_fragment). */
     veil: wgpu::Texture,
     composite: wgpu::BindGroup,
     /** The pyramid of farthest depths, and per level a bind group to make it and its size. */
@@ -736,7 +736,7 @@ struct Pipelines {
     composite: wgpu::BindGroupLayout,
     place: wgpu::BindGroupLayout,
     scatter: wgpu::BindGroupLayout,
-    /** The tiles of whole voxels, or their splats; then the pictures of medium added up, and those over the picture. */
+    /** The tiles of whole voxels, or their splats; then the pictures of medium one over another, and those over the picture. */
     tiles: wgpu::RenderPipeline,
     flat: wgpu::RenderPipeline,
     splats: wgpu::RenderPipeline,
@@ -747,6 +747,8 @@ struct Pipelines {
     show_picture: wgpu::RenderPipeline,
     cull_drawn: wgpu::ComputePipeline,
     cull_rest: wgpu::ComputePipeline,
+    scan_veils: wgpu::ComputePipeline,
+    order_veils: wgpu::ComputePipeline,
     reduce_depth_level: wgpu::ComputePipeline,
     reduce_level: wgpu::ComputePipeline,
     place_chunks: wgpu::ComputePipeline,
@@ -787,6 +789,8 @@ pub struct Compositor {
     /** By phase, the draws of clusters the culling lists, and how many; then the pictures of medium's (VEILS). */
     draws: [wgpu::Buffer; 3],
     drawn: [wgpu::Buffer; 3],
+    /** How many pictures of medium the culling counts at each place along the rays, then where the next of each is listed (order_veils). */
+    veil_places: wgpu::Buffer,
     targets: Option<Targets>,
     seams: bool,
     /** Whether the frame's whole voxels are reliefs, or splats (Frame's `relief`), and its reliefs flat (Frame's `flat`). */
@@ -805,7 +809,7 @@ const GLOBALS: usize = 276;
 const WHOLE: usize = 6;
 const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const FARTHEST: wgpu::TextureFormat = wgpu::TextureFormat::R32Float;
-const VEIL: wgpu::TextureFormat = wgpu::TextureFormat::Rgba32Float;
+const VEIL: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 /** Where in `draws` and `drawn` the pictures of medium's are. */
 const VEILS: usize = 2;
 
@@ -901,6 +905,7 @@ impl Pipelines {
                 (8, S::COMPUTE, float),
                 (9, S::COMPUTE, write),
                 (16, S::COMPUTE, write),
+                (22, S::COMPUTE, write),
             ],
         );
         let reduce_depth = layout(device, &[(10, S::COMPUTE, texture(wgpu::TextureSampleType::Depth)), (12, S::COMPUTE, level_out)]);
@@ -934,8 +939,8 @@ impl Pipelines {
         let target = |format, blend| Some(wgpu::ColorTargetState { format, blend, write_mask: wgpu::ColorWrites::ALL });
         let blend = |src_factor, dst_factor| wgpu::BlendComponent { src_factor, dst_factor, operation: wgpu::BlendOperation::Add };
         use wgpu::BlendFactor as F;
-        // Added up, in any order.
-        let added = wgpu::BlendState { color: blend(F::One, F::One), alpha: blend(F::One, F::One) };
+        // Over what is drawn before, as much as it stops: its colour premultiplied by that.
+        let over_veils = wgpu::BlendState { color: blend(F::One, F::OneMinusSrcAlpha), alpha: blend(F::One, F::OneMinusSrcAlpha) };
         // Over the picture: their colour, and the picture as much as they let through.
         let over_picture = wgpu::BlendState { color: blend(F::One, F::SrcAlpha), alpha: blend(F::Zero, F::One) };
         let render = |layout: &wgpu::BindGroupLayout,
@@ -975,7 +980,7 @@ impl Pipelines {
             tiles: render(&draw, "tile_vertex", "tile_fragment", &[], tested.clone(), &[target(format, None)]),
             flat: render(&draw, "flat_vertex", "flat_fragment", &[], tested.clone(), &[target(format, None)]),
             splats: render(&draw, "splat_vertex", "splat_fragment", &[Some(splat)], tested.clone(), &[target(format, None)]),
-            veil: render(&draw, "veil_vertex", "veil_fragment", &[], behind, &[target(VEIL, Some(added))]),
+            veil: render(&draw, "veil_vertex", "veil_fragment", &[], behind, &[target(VEIL, Some(over_veils))]),
             composite_picture: render(
                 &composite,
                 "sky_vertex",
@@ -989,6 +994,8 @@ impl Pipelines {
             show_picture: render(&show, "show_vertex", "show_fragment", &[], None, &[target(format, None)]),
             cull_drawn: compute(&cull, "cull_drawn", &[]),
             cull_rest: compute(&cull, "cull_rest", &[("culls", f64::from(culls))]),
+            scan_veils: compute(&cull, "scan_veils", &[]),
+            order_veils: compute(&cull, "order_veils", &[("culls", f64::from(culls))]),
             reduce_depth_level: compute(&reduce_depth, "reduce_depth", &[]),
             reduce_level: compute(&reduce, "reduce", &[]),
             place_chunks: compute(&place, "place", &[]),
@@ -1084,6 +1091,7 @@ impl Compositor {
             veils: 0,
             draws: [draws("draws first"), draws("draws next"), draws("veils")],
             drawn: [drawn("drawn first"), drawn("drawn next"), drawn("veils drawn")],
+            veil_places: buffer(device, "veil places", 4, U::STORAGE | U::COPY_DST),
             targets: None,
             seams: false,
             relief: true,
@@ -1196,7 +1204,10 @@ impl Compositor {
         if !same || pending {
             self.flush(device, encoder);
         }
-        if !same || pending || resized {
+        let places = 2 * 4 * view.medium_halves();
+        let grown = self.veil_places.size() < places;
+        at_least(device, &mut self.veil_places, places);
+        if !same || pending || resized || grown {
             self.bind_groups(device);
         }
         let sky_fog = 1.0 - (-frame.farthest / view.fog_distance).exp();
@@ -1313,6 +1324,7 @@ impl Compositor {
                     (8, R::TextureView(&farthest)),
                     (9, self.drawn[VEILS].as_entire_binding()),
                     (16, self.draws[VEILS].as_entire_binding()),
+                    (22, self.veil_places.as_entire_binding()),
                 ];
                 bind(device, &self.pipelines.cull, &entries)
             })
@@ -1327,7 +1339,7 @@ impl Compositor {
      * from the camera (place in compositor.wgsl); the tiles (or
      * clusters of whole splats) that showed last frame, then those that show now that did not, culled
      * against the farthest depths of the first; then the pictures of
-     * medium in front of them, added up, and those over the picture.
+     * medium in front of them, far to near, and those over the picture.
      */
     pub fn render(&self, encoder: &mut wgpu::CommandEncoder) {
         let t = self.targets.as_ref().expect("prepared");
@@ -1335,6 +1347,7 @@ impl Compositor {
         for drawn in &self.drawn {
             encoder.clear_buffer(drawn, 0, None);
         }
+        encoder.clear_buffer(&self.veil_places, 0, None);
         // Every slot, those freed too, so that the clusters left where their chunks were are none of theirs.
         {
             let mut pass = encoder.begin_compute_pass(&Default::default());
@@ -1359,6 +1372,12 @@ impl Compositor {
                 pass.set_bind_group(0, &self.cull_groups[phase], &[]);
                 let [across, rows] = groups(clusters.div_ceil(CULL_THREADS));
                 pass.dispatch_workgroups(across, rows, 1);
+                if phase == 1 {
+                    pass.set_pipeline(&p.scan_veils);
+                    pass.dispatch_workgroups(1, 1, 1);
+                    pass.set_pipeline(&p.order_veils);
+                    pass.dispatch_workgroups(across, rows, 1);
+                }
             }
         };
         let tiles = |pass: &mut wgpu::RenderPass<'_>, phase: usize| {
@@ -1497,6 +1516,17 @@ impl View {
             lod: lod(whole),
             medium: lod(whole.for_medium()),
         }
+    }
+
+    /**
+     * How many half slabs of medium a ray of a face may cross (veil_place):
+     * of every level but the coarsest, as many as fit between its planes,
+     * 2Q + 1 at most, or the finest's, 4Q + 1, and two more; of the
+     * coarsest, to a cell past the render distance, a slab past that.
+     */
+    fn medium_halves(&self) -> u64 {
+        let [q, layers, top, finest] = self.medium.map(f64::from);
+        ((top - finest) * (4.0 * q + 3.0) + layers / 2f64.powf(top - 1.0) + 6.0).ceil() as u64
     }
 
     fn globals(&self, pixels: [u32; 2], sky_fog: f64) -> [f32; GLOBALS] {

@@ -620,6 +620,42 @@ mod tests {
         }
     }
 
+    /** A white wall behind two slabs of medium, a red one and a green one, the red nearer if `RED_NEAR`. */
+    fn red_and_green<const RED_NEAR: bool>(_: u64) -> worldgen::World {
+        use worldgen::generator::{Field, Generator, KindDef, Layer, Op};
+        let medium = |name, colour| KindDef { name, kind_type: 8, colors: colour, walk_through: true, glows: false, medium: true };
+        let kinds = vec![
+            medium("red", &["#ff0000"]),
+            medium("green", &["#00ff00"]),
+            KindDef { name: "wall", kind_type: 10, colors: &["#ffffff"], walk_through: false, glows: false, medium: false },
+        ];
+        let middle = (NEAR + FAR) / 2;
+        let slab = Field::at("slabs", 0.0, Op::Fill, move |x, y, z, _| match x + z {
+            _ if y.abs() >= 48 => None,
+            k if (NEAR..FAR).contains(&k) => Some((u8::from((k < middle) != RED_NEAR), Some(0.04))),
+            k if (FAR..FAR + 16).contains(&k) => Some((2, None)),
+            _ => None,
+        });
+        let generator = Generator { kinds, seed: 1, layers: vec![Layer::Field(slab)] };
+        worldgen::World { generator, spawn: [0, 0, 0], heights: (-64, 64), points: Vec::new() }
+    }
+
+    /** The nearer of two media shows over the other, not mixed with it as if in any order. */
+    #[test]
+    #[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
+    fn a_nearer_medium_shows_over_one_behind() {
+        for kind in [Kind::Reliefs, Kind::Voxels] {
+            // Red less green in the middle of the picture, with red nearer and with green nearer.
+            let [red_near, green_near] = [red_and_green::<true> as Make, red_and_green::<false>].map(|make| {
+                let (width, pixels) = along_a_face(kind, make);
+                let at = 4 * (100 * width as usize + 160);
+                i32::from(pixels[at]) - i32::from(pixels[at + 1])
+            });
+            // Each slab stops 76 %, so the nearer shows 0.76 of its colour, the one behind 0.24 · 0.76 = 0.18.
+            assert!(red_near > 60 && green_near < -60, "{kind:?}: red less green {red_near} with red nearer, {green_near} with green");
+        }
+    }
+
     /**
      * A white block with a red sheet on top, drawn measured from afar
      * (Far::measured): its coarse voxels are red on the faces that look up,
