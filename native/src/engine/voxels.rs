@@ -404,8 +404,10 @@ struct GpuLevel {
     offset: u32,
     corner: [i32; 3],
     reach: f32,
+    low: [f32; 3],
     filled: u32,
-    _pad: [u32; 3],
+    high: [f32; 3],
+    _pad: u32,
 }
 
 /** Where brick `b` (of a window holding it) is in a window's table. */
@@ -552,6 +554,8 @@ struct Window {
     /** Per entry of the table, the cells of each scale around its brick it counts in (AROUND's bits): those its voxels meet, all if UNKNOWN in the ball, none out of it. */
     meets: Vec<[u32; SCALES]>,
     counts: Vec<u32>,
+    /** Per axis, per brick coordinate along it (modulo WINDOW, as the table), how many of the ball's bricks count in a cell. */
+    rows: [[u32; WINDOW as usize]; 3],
     /** Slots it holds. */
     slots: usize,
 }
@@ -566,6 +570,7 @@ impl Window {
             table: vec![UNKNOWN; TABLE],
             meets: vec![[0; SCALES]; TABLE],
             counts: vec![0; COUNTS],
+            rows: [[0; WINDOW as usize]; 3],
             slots: 0,
         }
     }
@@ -580,6 +585,12 @@ impl Window {
     fn set(&mut self, b: [i32; 3], (entry, meets): (i32, [u32; SCALES])) -> i32 {
         let at = self::entry(b);
         let had = std::mem::replace(&mut self.meets[at], meets);
+        if (had == [0; SCALES]) != (meets == [0; SCALES]) {
+            for (rows, v) in self.rows.iter_mut().zip(b) {
+                let count = &mut rows[v.rem_euclid(WINDOW) as usize];
+                *count = if meets == [0; SCALES] { *count - 1 } else { *count + 1 };
+            }
+        }
         for j in 0..SCALES {
             for e in (0..27).filter(|e| (had[j] ^ meets[j]) >> e & 1 != 0) {
                 let cell = around(b, j, e);
@@ -727,14 +738,37 @@ impl Window {
     /** As voxels.wgsl reads it, the level drawn as far as `far` (world units) or its ball holds, unless it holds nothing yet: rays read none past 0. */
     fn gpu(&self, level: usize, far: f64) -> GpuLevel {
         let corner = self.ball.map_or([0; 3], |b| b.middle.map(|v| v - WINDOW / 2));
+        let (low, high) = self.bounds();
         GpuLevel {
             min: std::array::from_fn(|d| self.origin[d] + corner[d] * BRICK),
             offset: (level * TABLE) as u32,
             corner,
             reach: self.ball.map_or(0.0, |b| reach(level, b.radius, far) as f32),
+            low,
             filled: (level * COUNTS) as u32,
-            _pad: [0; 3],
+            high,
+            _pad: 0,
         }
+    }
+
+    /**
+     * The box, in the level's sites, that the voxels of its ball's bricks
+     * and its unknown bricks are in: past it, rays meet nothing of the
+     * level. Far off if none.
+     */
+    fn bounds(&self) -> ([f32; 3], [f32; 3]) {
+        let Some(ball) = self.ball else { return ([1e30; 3], [1e30; 3]) };
+        let (lo, hi) = ball.bounds();
+        let mut out = ([1e30; 3], [1e30; 3]);
+        for d in 0..3 {
+            let mut held = (lo[d]..hi[d]).filter(|v| self.rows[d][v.rem_euclid(WINDOW) as usize] != 0);
+            if let (Some(first), last) = (held.next(), held.next_back()) {
+                // A brick's voxels: its sites, and 1 farther each way.
+                let site = |b: i32| (self.origin[d] + b * BRICK) as f32;
+                (out.0[d], out.1[d]) = (site(first) - 1.0, site(last.unwrap_or(first)) + BRICK as f32);
+            }
+        }
+        out
     }
 }
 
@@ -1154,8 +1188,11 @@ mod tests {
 
     fn holds(windows: &Windows, slots: &HashMap<u32, Vec<u32>>) -> Holds {
         let w = &windows.windows[0];
-        let mut counts = vec![0u32; COUNTS];
+        let (mut counts, mut rows) = (vec![0u32; COUNTS], [[0; WINDOW as usize]; 3]);
         for b in window_bricks([WINDOW / 2; 3]) {
+            if w.meets[entry(b)] != [0; SCALES] {
+                (0..3).for_each(|d| rows[d][b[d] as usize] += 1);
+            }
             for j in 0..SCALES {
                 for e in (0..27).filter(|e| w.meets[entry(b)][j] >> e & 1 != 0) {
                     let cell = around(b, j, e);
@@ -1165,7 +1202,7 @@ mod tests {
                 }
             }
         }
-        assert!(w.counts == counts, "counts as the entries say");
+        assert!(w.counts == counts && w.rows == rows, "counts and rows as the entries say");
         // A slot's words, and those of the slots after it (its faces').
         let words = |mut slot: i32| {
             let mut words = Vec::new();
@@ -1311,7 +1348,7 @@ mod tests {
     }
 
     #[test]
-    fn no_voxel_the_window_holds_meets_a_cell_counted_hollow() {
+    fn no_voxel_the_window_holds_is_out_of_its_box_or_meets_a_cell_counted_hollow() {
         let eye = [10.0, 30.0, -20.0];
         let tiles = forest_tiles(eye);
         // Moved, so that bricks of both sides of the torus have been in it.
@@ -1319,7 +1356,7 @@ mod tests {
         sync(&mut windows, &tiles, [eye[0] - 300.0, eye[1], eye[2] + 200.0], &mut HashMap::new());
         sync(&mut windows, &tiles, eye, &mut HashMap::new());
         let window = &windows.windows[0];
-        let (ball, origin) = (window.ball.expect("a ball"), window.origin);
+        let (ball, origin, (low, high)) = (window.ball.expect("a ball"), window.origin, window.bounds());
         let (lo, hi) = ball.bounds();
         let (lo, hi) = (lo.map(|v| v * BRICK), hi.map(|v| v * BRICK));
         // Every voxel of the ball, and every cell of each scale it meets, at the ball's edge too.
@@ -1332,6 +1369,7 @@ mod tests {
                         continue;
                     }
                     voxels += 1;
+                    assert!((0..3).all(|d| low[d] < p[d] as f32 && (p[d] as f32) < high[d]), "a voxel at {p:?} out of {low:?}..{high:?}");
                     for j in 0..SCALES {
                         let size = BRICK << (2 * j);
                         // The cells' centres origin + size · k, k's coordinates adding up to an even number, within size + 1 of p.
@@ -1354,6 +1392,6 @@ mod tests {
         use crate::gpu::wgsl;
         let module = wgsl::shader(&shader());
         wgsl::assert_layout!(&module, "Globals", Globals { resolution, extent, fog, sky_fog, lit, glow, sky_top, horizon, view });
-        wgsl::assert_layout!(&module, "Level", GpuLevel { min, offset, corner, reach, filled });
+        wgsl::assert_layout!(&module, "Level", GpuLevel { min, offset, corner, reach, low, filled, high });
     }
 }

@@ -264,7 +264,9 @@ Numbers are for the forest at 1280×800, as measured when written.
   cells of 128·FCC (a window's torus is 4 of them a side,
   so cells a window apart share a count: the sky the ground's);
   each empty voxel saying how clear around it is
-  (a third fewer voxel steps, most turned into jumps: 2%, tiles twice as slow to make).
+  (a third fewer voxel steps, most turned into jumps: 2%, tiles twice as slow to make);
+  a rhombic dodecahedron about what a window holds, for its box or with it
+  (its faces slant across ground that lies flat in the lattice's axes).
 - **`culling_on_the_gpu_leaves_the_picture_unchanged` failed on an Intel UHD** (Mesa),
   drawn flat, every time: the forest from its spawn.
   Likely by ties in depth drawn in no set order, fixed since:

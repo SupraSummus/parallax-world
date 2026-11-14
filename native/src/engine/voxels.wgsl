@@ -29,7 +29,8 @@ struct Globals {
 // A grid level's window of WINDOW³ bricks: the site it starts at, in the
 // level's units; where its table starts in `bricks`; its corner, in bricks
 // of the level; how far from the eye (world units) rays read it; where its
-// cells' counts start in `filled`. The table is a torus:
+// cells' counts start in `filled`; the box, in its sites, that what rays meet
+// of it is in (voxels.rs's bounds). The table is a torus:
 // a brick's entry is at its coordinates modulo WINDOW, so the window moves
 // without moving the rest.
 struct Level {
@@ -37,7 +38,9 @@ struct Level {
   offset: u32,
   corner: vec3i,
   reach: f32,
+  low: vec3f,
   filled: u32,
+  high: vec3f,
 }
 
 // The entry of the brick `b` bricks from the window's corner.
@@ -260,10 +263,24 @@ fn across(l: Level, j: u32, ray: Ray, o: vec3f, d: vec3f, mid: f32, held: ptr<fu
   return out;
 }
 
+// Where the ray from `o` along `d` enters level `l`'s box (Level's) and leaves it.
+fn within(l: Level, o: vec3f, d: vec3f) -> vec2f {
+  var span = vec2f(0.0, 1e30);
+  for (var k = 0; k < 3; k++) {
+    if d[k] != 0.0 {
+      let a = (l.low[k] - o[k]) / d[k];
+      let b = (l.high[k] - o[k]) / d[k];
+      span = vec2f(max(span.x, min(a, b)), min(span.y, max(a, b)));
+    } else if o[k] < l.low[k] || o[k] > l.high[k] {
+      span.y = -1.0;
+    }
+  }
+  return span;
+}
+
 fn march(d: vec3f) -> Hit {
   let ray = ray_of(d);
   var t = 0.0;
-  var first = true;
   let count = arrayLength(&levels);
   for (var level = 0u; level < count; level++) {
     let l = levels[level];
@@ -273,7 +290,10 @@ fn march(d: vec3f) -> Hit {
     let scale = exp2(f32(level));
     let o = eye.xyz / scale;
     let end = l.reach / scale;
-    var at = t / scale;
+    // Only in the level's box: out of it, the ray meets nothing of the level.
+    let span = within(l, o, d);
+    let stop = min(end, span.y);
+    var at = min(max(t / scale, span.x), stop);
     var s = site_at(o + d * at);
     var brick = vec3i(-1 << 30);
     var slot = UNKNOWN;
@@ -283,7 +303,7 @@ fn march(d: vec3f) -> Hit {
     var fine = -1.0;
     var coarse = -1.0;
     var steps = 0;
-    for (; steps < STEPS && at < end; steps++) {
+    for (; steps < STEPS && at < stop; steps++) {
       let b = (s - l.min) >> vec3u(BRICK_SHIFT);
       if any(b != brick) {
         brick = b;
@@ -296,7 +316,8 @@ fn march(d: vec3f) -> Hit {
       if slot >= 0 {
         let r = (s - l.min) & vec3i(BRICK - 1);
         let v = site_in(slot, r);
-        if v >> 8u == 255u && !first {
+        // Opaque, unless the eye is in it.
+        if v >> 8u == 255u && (steps > 0 || at > 0.0) {
           return Hit(level, s, v, at * scale);
         }
         medium = v;
@@ -304,7 +325,6 @@ fn march(d: vec3f) -> Hit {
           tint = medium_colour(slot, r, v);
         }
       }
-      first = false;
       // Out across the nearest face it leaves by, into the neighbour there.
       let c = crossings(ray, o - vec3f(s), 1.0);
       let plus = c.leave[0];
@@ -351,6 +371,10 @@ fn march(d: vec3f) -> Hit {
     }
     if steps == STEPS {
       return Hit(LOST, vec3i(0), 0u, 0.0);
+    }
+    // Out of the box, on to the next level from where it would have taken it.
+    if at >= stop {
+      at = max(at, end);
     }
     t = max(t, at * scale);
   }

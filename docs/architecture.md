@@ -814,6 +814,10 @@ the bricks of its ball around it whose voxels meet it, or that are unknown:
 rays read none past the ball.
 A ray in a cell that none meets goes across it at once, face to face,
 as it goes across a voxel: whatever it met in the cell would meet the cell.
+A window also keeps the box, in the level's axes as its bricks are,
+that the voxels of its ball and its unknown bricks are in:
+out of it, a ray takes the next level, from where it would have,
+so open sky costs a ray a few steps a level.
 A ray that runs out of steps shows magenta: a march must not stick,
 and if one does, it must not hide.
 One ray is traced for every 4 × 4 pixels;
@@ -826,8 +830,8 @@ a pixel takes the medium in front of what it sees
 from those of its samples that saw the same.
 Tests hold the window's table to a new one's after any moves and tiles
 (`a_window_moved_and_its_tiles_changed_holds_what_a_new_one_would`),
-its cells counted hollow, at its edge too, to ones no voxel it holds meets
-(`no_voxel_the_window_holds_meets_a_cell_counted_hollow`),
+its box and its cells counted hollow, at its edge too, to ones no voxel it holds is out of or meets
+(`no_voxel_the_window_holds_is_out_of_its_box_or_meets_a_cell_counted_hollow`),
 its rays to their steps (`no_ray_of_the_voxels_runs_out_of_steps`),
 a block's coarse voxels to the faces rays enter them by (`voxels_show_the_faces_rays_enter_by`),
 the picture to the same one with the world and the eye moved by a vector of the lattice
