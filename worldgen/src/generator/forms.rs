@@ -329,7 +329,7 @@ impl Shadows {
             .iter()
             .enumerate()
             .map(|(i, node)| {
-                let own = alone(node, &format!("sample {i}"), cost::SHADOWS, bounds_of(node), f, 0, visit);
+                let own = alone(node, &format!("sample {i}"), "shadows", bounds_of(node), f, 0, visit);
                 let (n, min) = (own.n, own.b.min);
                 let mut layers: Vec<Slice> = (0..n[axis])
                     .map(|_| Slice {
