@@ -17,6 +17,8 @@
 //! ball, with its tile or as the ball moves, and its slot freed as it
 //! leaves. A brick of no tile yet is unknown, and rays take the next
 //! coarser level there: what is missing shows coarser, never as a hole.
+//! Shaded, a voxel shows the face a ray enters it by: a brick whose
+//! voxels' faces differ takes PARTS more slots for them (Pool).
 //!
 //! Lit, the voxels show the light their tiles found for them (world.rs,
 //! worldgen's Light, as the splats' bakers find it), uploaded with their
@@ -25,7 +27,7 @@
 //! lit is a new tile in the place of the one made, so its bricks are
 //! uploaded then.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use egui_wgpu::wgpu;
@@ -181,13 +183,35 @@ static MEETING: std::sync::LazyLock<[Vec<u32>; SCALES]> = std::sync::LazyLock::n
     })
 });
 
-/** The brick whose sites start at `first` in `grid`'s cells (in bricks) as the GPU takes it, BRICK_WORDS words: each site material | alpha << 8, two a word. */
-fn words(grid: &fcc::Grid, first: usize) -> impl Iterator<Item = u32> + '_ {
-    let site = |i: usize| match grid.cells[i] {
+/** The sites of the brick whose sites start at `first` in `grid`'s cells (in bricks), by index in them. */
+fn sites(first: usize) -> std::ops::Range<usize> {
+    first * BRICK_SITES..(first + 1) * BRICK_SITES
+}
+
+/**
+ * Slots a brick of `grid` whose sites start at `first` takes, shaded if
+ * `faces`: one, and PARTS more if its voxels' faces differ.
+ */
+fn slots(grid: &fcc::Grid, first: usize, faces: bool) -> usize {
+    1 + if faces && grid.has_faces(sites(first)) { PARTS } else { 0 }
+}
+
+/**
+ * Part `part` of the brick whose sites start at `first` in `grid`'s cells
+ * (in bricks) as the GPU takes it, BRICK_WORDS words, two sites a word:
+ * part 0, each site material | alpha << 8; part 1 + j, the materials of its
+ * faces 2j | 2j + 1 << 8 (of VOXEL_FACES), its site's where they do not differ.
+ */
+fn words(grid: &fcc::Grid, first: usize, part: usize) -> impl Iterator<Item = u32> + '_ {
+    let site = move |i: usize| match grid.cells[i] {
         0 => 0,
-        m => u32::from(m) | u32::from(grid.alpha.get(i).copied().unwrap_or(fcc::ALPHA)) << 8,
+        m if part == 0 => u32::from(m) | u32::from(grid.alpha.get(i).copied().unwrap_or(fcc::ALPHA)) << 8,
+        m => {
+            let [a, b] = grid.faces_at(i).map_or([m; 2], |f| [f[2 * part - 2], f[2 * part - 1]]);
+            u32::from(a) | u32::from(b) << 8
+        }
     };
-    (first * BRICK_SITES..(first + 1) * BRICK_SITES).step_by(2).map(move |i| site(i) | site(i + 1) << 16)
+    sites(first).step_by(2).map(move |i| site(i) | site(i + 1) << 16)
 }
 
 /**
@@ -378,8 +402,57 @@ fn tile_bricks(id: TileId, origin: [i32; 3]) -> ([i32; 3], [i32; 3]) {
     (lo, lo.map(|v| v + TILE as i32 / BRICK))
 }
 
-/** A brick of a tile to upload: the slot it goes in, the tile, and its place in the tile's grid's cells. */
-type Added = (u32, Arc<Tile>, usize);
+/** A brick of a tile to upload: the slot it goes in, the tile, its place in the tile's grid's cells (in bricks), and which part of it (words). */
+struct Added {
+    slot: u32,
+    tile: Arc<Tile>,
+    first: usize,
+    part: usize,
+}
+
+/** Slots a brick takes beyond its own if its voxels' faces differ: its faces' materials, two a site in each. */
+const PARTS: usize = fcc::FACE_KINDS / 2;
+
+/**
+ * The pool's slots: those free, and per slot, the next of its brick's
+ * (EMPTY if none): a brick whose voxels' faces differ, shaded, takes
+ * PARTS more, its faces' materials two by two (words' parts), in a chain.
+ */
+struct Pool {
+    free: Vec<u32>,
+    next: Vec<i32>,
+}
+
+impl Pool {
+    fn new(slots: usize) -> Pool {
+        Pool { free: (0..slots as u32).rev().collect(), next: vec![EMPTY; slots] }
+    }
+
+    /** Takes slots for the brick at `first` of `tile`, `count` (slots), to upload in `added`; returns its own. */
+    fn take(&mut self, tile: &Arc<Tile>, first: usize, count: usize, added: &mut Vec<Added>) -> u32 {
+        let mut chain = Vec::with_capacity(count);
+        for part in 0..count {
+            let slot = self.free.pop().expect("slots for the bricks counted");
+            added.push(Added { slot, tile: tile.clone(), first, part });
+            chain.push(slot);
+        }
+        for pair in chain.windows(2) {
+            self.next[pair[0] as usize] = pair[1] as i32;
+        }
+        chain[0]
+    }
+
+    /** Frees `slot` and those after it. */
+    fn give(&mut self, slot: u32) -> usize {
+        let (mut slot, mut count) = (slot as i32, 0);
+        while slot >= 0 {
+            self.free.push(slot as u32);
+            slot = std::mem::replace(&mut self.next[slot as usize], EMPTY);
+            count += 1;
+        }
+        count
+    }
+}
 
 /** A tile a window holds bricks of; per brick of its grid (in its cells, its buried ones one: worldgen's VoxelGrid::bury), its slot (EMPTY if none) and how many entries hold it. */
 struct Held {
@@ -409,7 +482,7 @@ struct Window {
     meets: Vec<[u32; SCALES]>,
     counts: Vec<u16>,
     /** Slots it holds. */
-    bricks: usize,
+    slots: usize,
 }
 
 impl Window {
@@ -423,7 +496,7 @@ impl Window {
             meets: vec![[AROUND; SCALES]; TABLE],
             // Every brick around each cell unknown: 27 blocks of 64^j bricks.
             counts: (0..COUNTS).map(|i| (AROUND.count_ones() as u16) << (6 * (i / CELLS))).collect(),
-            bricks: 0,
+            slots: 0,
         }
     }
 
@@ -449,8 +522,8 @@ impl Window {
         std::mem::replace(&mut self.table[at], entry)
     }
 
-    /** Makes brick `b` UNKNOWN to rays, its slot freed once no entry holds it; the cells around it are as they were (to place it again, or out of the ball). */
-    fn release(&mut self, b: [i32; 3], free: &mut Vec<u32>) {
+    /** Makes brick `b` UNKNOWN to rays, its slots freed once no entry holds it; the cells around it are as they were (to place it again, or out of the ball). */
+    fn release(&mut self, b: [i32; 3], pool: &mut Pool) {
         if std::mem::replace(&mut self.table[entry(b)], UNKNOWN) < 0 {
             return;
         }
@@ -459,19 +532,18 @@ impl Window {
         let (slot, uses) = &mut held.slots[held.tile.grid.brick(x, y, z) as usize];
         *uses -= 1;
         if *uses == 0 {
-            free.push(*slot as u32);
+            self.slots -= pool.give(*slot as u32);
             *slot = EMPTY;
-            self.bricks -= 1;
         }
     }
 
     /**
      * Sets brick `b` of the ball, unless set already, from its tile: EMPTY,
-     * or the slot its sites are in, one from `free` if none is yet (to
-     * upload, in `added`: as many as `needs` says); UNKNOWN if no tile is
-     * held there.
+     * or the slot its sites are in, from `pool` if none is yet (to upload,
+     * in `added`: as many as `needs` says, faces' too if `faces`); UNKNOWN
+     * if no tile is held there.
      */
-    fn place(&mut self, b: [i32; 3], free: &mut Vec<u32>, added: &mut Vec<Added>) {
+    fn place(&mut self, b: [i32; 3], pool: &mut Pool, faces: bool, added: &mut Vec<Added>) {
         if self.table[entry(b)] != UNKNOWN {
             return;
         }
@@ -486,10 +558,9 @@ impl Window {
         };
         let (slot, uses) = &mut held.slots[first];
         if *slot < 0 {
-            let new = free.pop().expect("slots for the bricks counted");
-            *slot = new as i32;
-            added.push((new, held.tile.clone(), first));
-            self.bricks += 1;
+            let count = slots(&held.tile.grid, first, faces);
+            *slot = pool.take(&held.tile, first, count, added) as i32;
+            self.slots += count;
         }
         *uses += 1;
         let entry = (*slot, std::array::from_fn(|j| held.tile.meets[first * SCALES + j]));
@@ -503,15 +574,7 @@ impl Window {
      * Returns the bricks to place: those of tiles gone or new, and those
      * the ball gained; None if neither the tiles nor the ball moved.
      */
-    fn retarget(
-        &mut self,
-        level: usize,
-        tiles: &Arc<Level>,
-        lit: bool,
-        eye: Vec3,
-        radius: i32,
-        free: &mut Vec<u32>,
-    ) -> Option<Vec<[i32; 3]>> {
+    fn retarget(&mut self, level: usize, tiles: &Arc<Level>, lit: bool, eye: Vec3, radius: i32, pool: &mut Pool) -> Option<Vec<[i32; 3]>> {
         let held = |tile: &Tile| !lit || tile.lights.is_some();
         // Where its bricks start, its tiles say; until it has any, it holds nothing and rays do not read it.
         let origin = match (tiles.tiles.values().next(), self.ball) {
@@ -532,12 +595,12 @@ impl Window {
                     .map(|(id, _)| *id)
                     .collect();
                 for b in in_ball(old.bounds(), old, Some(ball)) {
-                    self.release(b, free);
+                    self.release(b, pool);
                 }
                 let mut pending: Vec<_> = in_ball(ball.bounds(), ball, Some(old)).collect();
                 for id in gone {
                     for b in in_ball(tile_bricks(id, origin), ball, None) {
-                        self.release(b, free);
+                        self.release(b, pool);
                         pending.push(b);
                     }
                     self.tiles.remove(&id);
@@ -558,11 +621,11 @@ impl Window {
     }
 
     /** Its ball of `radius` instead, what it leaves UNKNOWN; and of `pending`, those still in it. */
-    fn resize(&mut self, radius: i32, pending: &mut Vec<[i32; 3]>, free: &mut Vec<u32>) {
+    fn resize(&mut self, radius: i32, pending: &mut Vec<[i32; 3]>, pool: &mut Pool) {
         let Some(old) = self.ball else { return };
         let ball = Ball { radius, ..old };
         for b in in_ball(old.bounds(), old, Some(ball)) {
-            self.release(b, free);
+            self.release(b, pool);
         }
         self.ball = Some(ball);
         pending.retain(|&b| ball.contains(b));
@@ -575,19 +638,19 @@ impl Window {
         in_ball(grown.bounds(), grown, Some(ball)).collect()
     }
 
-    /** The slots placing `bricks` would take from the pool. */
-    fn needs(&self, bricks: &[[i32; 3]]) -> usize {
-        let mut new = HashSet::new();
+    /** The slots placing `bricks` would take from the pool, faces' too if `faces`. */
+    fn needs(&self, bricks: &[[i32; 3]], faces: bool) -> usize {
+        let mut new = HashMap::new();
         for &b in bricks {
             let ([x, y, z], id) = self.site(b);
             let Some(held) = self.tiles.get(&id) else { continue };
             if let Ok(first) = usize::try_from(held.tile.grid.brick(x, y, z))
                 && held.slots[first].0 < 0
             {
-                new.insert((id, first));
+                new.entry((id, first)).or_insert_with(|| slots(&held.tile.grid, first, faces));
             }
         }
-        new.len()
+        new.values().sum()
     }
 
     /** As voxels.wgsl reads it, the level drawn as far as `far` (world units) or its ball holds, unless it holds nothing yet: rays read none past 0. */
@@ -614,7 +677,7 @@ impl Window {
  */
 struct Windows {
     windows: Vec<Window>,
-    free: Vec<u32>,
+    pool: Pool,
     radius: i32,
     /** Slots free that growing takes, as last found (0: to find). */
     growing: usize,
@@ -629,7 +692,7 @@ impl Windows {
         assert!(pool >= GRID_LEVELS * 27, "a pool of {pool} slots");
         Windows {
             windows: (0..GRID_LEVELS).map(|_| Window::new()).collect(),
-            free: (0..pool as u32).rev().collect(),
+            pool: Pool::new(pool),
             radius: RADIUS,
             growing: 0,
             margin: pool / 8,
@@ -637,16 +700,16 @@ impl Windows {
         }
     }
 
-    /** The slots placing each window's `pending` bricks would take. */
-    fn needs(&self, pending: &[Vec<[i32; 3]>]) -> usize {
-        self.windows.iter().zip(pending).map(|(w, bricks)| w.needs(bricks)).sum()
+    /** The slots placing each window's `pending` bricks would take, faces' too if `faces`. */
+    fn needs(&self, pending: &[Vec<[i32; 3]>], faces: bool) -> usize {
+        self.windows.iter().zip(pending).map(|(w, bricks)| w.needs(bricks, faces)).sum()
     }
 
-    /** Places each window's `pending` bricks, which fit. */
-    fn place(&mut self, pending: Vec<Vec<[i32; 3]>>, added: &mut Vec<Added>) {
+    /** Places each window's `pending` bricks, which fit, faces' too if `faces`. */
+    fn place(&mut self, pending: Vec<Vec<[i32; 3]>>, faces: bool, added: &mut Vec<Added>) {
         for (window, bricks) in self.windows.iter_mut().zip(pending) {
             for b in bricks {
-                window.place(b, &mut self.free, added);
+                window.place(b, &mut self.pool, faces, added);
             }
         }
     }
@@ -654,36 +717,37 @@ impl Windows {
     /**
      * Brings each level's window to its tiles in `levels` (if `lit`, those
      * lit only; none past them) around `eye`, first deciding the radius,
-     * then placing what that holds. Returns the bricks to upload (every
-     * slot freed before any is taken: each once) and which windows changed.
+     * then placing what that holds, shaded (not `lit`) with their faces.
+     * Returns the bricks to upload (every slot freed before any is taken:
+     * each once) and which windows changed.
      */
     fn sync(&mut self, levels: &[Arc<Level>], lit: bool, eye: Vec3) -> (Vec<Added>, [bool; GRID_LEVELS]) {
-        let free = &mut self.free;
+        let (pool, faces) = (&mut self.pool, !lit);
         let pending: Vec<Option<Vec<[i32; 3]>>> = (self.windows.iter_mut().enumerate())
-            .map(|(level, w)| w.retarget(level, levels.get(level).unwrap_or(&self.none), lit, eye, self.radius, free))
+            .map(|(level, w)| w.retarget(level, levels.get(level).unwrap_or(&self.none), lit, eye, self.radius, pool))
             .collect();
         let mut changed = std::array::from_fn(|level| pending[level].is_some());
         let mut pending: Vec<Vec<[i32; 3]>> = pending.into_iter().map(Option::unwrap_or_default).collect();
         // Short of slots: every window a brick less, till what is to place fits.
-        while self.needs(&pending) > self.free.len() {
+        while self.needs(&pending, faces) > self.pool.free.len() {
             self.radius -= 1;
             for (window, bricks) in self.windows.iter_mut().zip(&mut pending) {
-                window.resize(self.radius, bricks, &mut self.free);
+                window.resize(self.radius, bricks, &mut self.pool);
             }
             (self.growing, changed) = (0, [true; GRID_LEVELS]);
         }
         let mut added = Vec::new();
-        self.place(pending, &mut added);
+        self.place(pending, faces, &mut added);
         // Room to spare: every window a brick more, if what that gains fits with room still.
-        if self.radius < RADIUS && self.free.len() >= self.growing.max(self.margin) {
+        if self.radius < RADIUS && self.pool.free.len() >= self.growing.max(self.margin) {
             let radius = self.radius + 1;
             let shells: Vec<_> = self.windows.iter().map(|w| w.shell(radius)).collect();
-            let needs = self.needs(&shells);
-            if needs + self.margin <= self.free.len() {
+            let needs = self.needs(&shells, faces);
+            if needs + self.margin <= self.pool.free.len() {
                 for window in &mut self.windows {
-                    window.resize(radius, &mut Vec::new(), &mut self.free);
+                    window.resize(radius, &mut Vec::new(), &mut self.pool);
                 }
-                self.place(shells, &mut added);
+                self.place(shells, faces, &mut added);
                 (self.radius, self.growing, changed) = (radius, 0, [true; GRID_LEVELS]);
             } else {
                 self.growing = needs + self.margin;
@@ -707,8 +771,8 @@ struct Targets {
 
 /** The voxels on a device, drawn into a picture that the window or a shot shows. */
 pub struct Marcher {
-    /** Globals, levels, tables, the pool, the palette, the eye, cells' counts, and the pool's bricks' light (none unlit). */
-    buffers: [wgpu::Buffer; 8],
+    /** Globals, levels, tables, the pool, the palette, the eye, cells' counts, the pool's bricks' light (none unlit), and its slots' next (Pool's; none lit). */
+    buffers: [wgpu::Buffer; 9],
     layouts: [wgpu::BindGroupLayout; 3],
     pipelines: [wgpu::RenderPipeline; 3],
     windows: Windows,
@@ -721,7 +785,9 @@ pub struct Marcher {
 /** voxels.wgsl, with the constants it shares with this file. */
 fn shader() -> String {
     format!(
-        "const WINDOW = {WINDOW};\nconst CELLS = {CELLS}u;\nconst BRICK = {BRICK};\nconst BRICK_SHIFT = {BRICK_SHIFT}u;\nconst BRICK_WORDS = {BRICK_WORDS}u;\nconst BRICK_SITES = {BRICK_SITES}u;\nconst FACTOR = {FACTOR}u;\nconst EMPTY = {EMPTY};\nconst UNKNOWN = {UNKNOWN};\n{}",
+        "const WINDOW = {WINDOW};\nconst CELLS = {CELLS}u;\nconst BRICK = {BRICK};\nconst BRICK_SHIFT = {BRICK_SHIFT}u;\nconst BRICK_WORDS = {BRICK_WORDS}u;\nconst BRICK_SITES = {BRICK_SITES}u;\nconst FACTOR = {FACTOR}u;\nconst EMPTY = {EMPTY};\nconst UNKNOWN = {UNKNOWN};\nconst FACES = array<vec3f, {}>({});\n{}",
+        fcc::FACE_KINDS,
+        fcc::VOXEL_FACES.map(|[x, y, z]| format!("vec3f({x}.0, {y}.0, {z}.0)")).join(", "),
         include_str!("voxels.wgsl")
     )
 }
@@ -755,6 +821,7 @@ impl Marcher {
             buffer("eye", 16, uniform),
             buffer("filled", GRID_LEVELS * COUNTS * 2, storage),
             buffer("lights", (pool as usize * light_words * 4).max(4), storage),
+            buffer("next", if lit { 4 } else { pool as usize * 4 }, storage),
         ];
         let entry = |binding: u32, ty| wgpu::BindGroupLayoutEntry { binding, visibility: wgpu::ShaderStages::FRAGMENT, ty, count: None };
         let buffer_type = |ty| wgpu::BindingType::Buffer { ty, has_dynamic_offset: false, min_binding_size: None };
@@ -772,12 +839,13 @@ impl Marcher {
             entry(5, uniform_type),
             entry(6, read),
             entry(7, read),
-            entry(8, uint),
+            entry(8, read),
             entry(9, uint),
+            entry(10, uint),
         ];
-        let shown = [entry(10, texture(wgpu::TextureSampleType::Float { filterable: false }))];
+        let shown = [entry(11, texture(wgpu::TextureSampleType::Float { filterable: false }))];
         // The samples' pass draws into the textures the resolving one reads, which draws the picture shown.
-        let layouts = [&all[..8], &all[..], &shown[..]]
+        let layouts = [&all[..9], &all[..], &shown[..]]
             .map(|entries| device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: None, entries }));
         let pipeline = |entry: &str, layout: &wgpu::BindGroupLayout, formats: &[wgpu::TextureFormat]| {
             let targets: Vec<_> = formats.iter().map(|&f| Some(f.into())).collect();
@@ -827,11 +895,14 @@ impl Marcher {
         }
         let mut levels = [GpuLevel::default(); GRID_LEVELS];
         let (added, changed) = self.windows.sync(&scene.levels, self.lit, look.camera);
-        upload(queue, &self.buffers[3], &added, BRICK_WORDS, |tile, first| words(&tile.grid, first));
+        upload(queue, &self.buffers[3], &added, BRICK_WORDS, |a| words(&a.tile.grid, a.first, a.part));
         if self.lit {
-            upload(queue, &self.buffers[7], &added, BRICK_SITES, |tile, first| {
-                tile.lights.as_ref().expect("a tile held lit")[first * BRICK_SITES..][..BRICK_SITES].iter().copied()
+            upload(queue, &self.buffers[7], &added, BRICK_SITES, |a| {
+                a.tile.lights.as_ref().expect("a tile held lit")[a.first * BRICK_SITES..][..BRICK_SITES].iter().copied()
             });
+        } else {
+            let next = &self.windows.pool.next;
+            upload(queue, &self.buffers[8], &added, 1, |a| [next[a.slot as usize] as u32]);
         }
         for (level, gpu) in levels.iter_mut().enumerate() {
             let window = &self.windows.windows[level];
@@ -904,41 +975,41 @@ impl Marcher {
             .map(|(k, b)| wgpu::BindGroupEntry { binding: k as u32, resource: b.as_entire_binding() })
             .collect();
         for (k, view) in views.iter().enumerate() {
-            entries.push(wgpu::BindGroupEntry { binding: 8 + k as u32, resource: wgpu::BindingResource::TextureView(view) });
+            entries.push(wgpu::BindGroupEntry { binding: 9 + k as u32, resource: wgpu::BindingResource::TextureView(view) });
         }
-        let shown = [wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::TextureView(&picture_view) }];
+        let shown = [wgpu::BindGroupEntry { binding: 11, resource: wgpu::BindingResource::TextureView(&picture_view) }];
         let group = |layout, entries: &[wgpu::BindGroupEntry]| {
             device.create_bind_group(&wgpu::BindGroupDescriptor { label: None, layout, entries })
         };
-        let groups = [group(&self.layouts[0], &entries[..8]), group(&self.layouts[1], &entries), group(&self.layouts[2], &shown)];
+        let groups = [group(&self.layouts[0], &entries[..9]), group(&self.layouts[1], &entries), group(&self.layouts[2], &shown)];
         Targets { pixels, samples, picture, groups }
     }
 }
 
-/** Copies `added` bricks into `pool`, `per` words a brick as `words` gives them, in runs of slots one after another. */
+/** Copies `added` slots into `pool`, `per` words a slot as `words` gives them, in runs of slots one after another. */
 fn upload<'a, W: IntoIterator<Item = u32>>(
     queue: &wgpu::Queue,
     pool: &wgpu::Buffer,
     added: &'a [Added],
     per: usize,
-    words: impl Fn(&'a Tile, usize) -> W,
+    words: impl Fn(&'a Added) -> W,
 ) {
-    let mut added: Vec<_> = added.iter().map(|(slot, tile, first)| (*slot, tile.as_ref(), *first)).collect();
-    added.sort_unstable_by_key(|a| a.0);
+    let mut added: Vec<_> = added.iter().collect();
+    added.sort_unstable_by_key(|a| a.slot);
     let mut run: Vec<u32> = Vec::new();
     let write = |run: &[u32], end: u32| {
         let start = end as usize - run.len() / per;
         queue.write_buffer(pool, (start * per * 4) as u64, bytemuck::cast_slice(run));
     };
-    for (k, &(slot, tile, first)) in added.iter().enumerate() {
-        if k > 0 && slot != added[k - 1].0 + 1 {
-            write(&run, added[k - 1].0 + 1);
+    for (k, a) in added.iter().enumerate() {
+        if k > 0 && a.slot != added[k - 1].slot + 1 {
+            write(&run, added[k - 1].slot + 1);
             run.clear();
         }
-        run.extend(words(tile, first));
+        run.extend(words(a));
     }
     if let Some(last) = added.last() {
-        write(&run, last.0 + 1);
+        write(&run, last.slot + 1);
     }
 }
 
@@ -955,11 +1026,11 @@ impl Painter for Marcher {
         }
     }
 
-    /** Bricks held, of the pool's slots, and those left out for want of room. */
+    /** Slots held, of the pool's, and the windows' radius. */
     fn describe(&self, _: &Easel) -> String {
-        let Windows { windows, free, radius, .. } = &self.windows;
-        let held: usize = windows.iter().map(|w| w.bricks).sum();
-        format!(": {held} bricks of {} on the GPU, windows {radius} bricks of {RADIUS} round", held + free.len())
+        let Windows { windows, pool, radius, .. } = &self.windows;
+        let held: usize = windows.iter().map(|w| w.slots).sum();
+        format!(": {held} slots of {} on the GPU, windows {radius} bricks of {RADIUS} round", held + pool.free.len())
     }
 }
 
@@ -969,31 +1040,48 @@ mod tests {
 
     use super::*;
 
-    /** The tiles of level 0 of the forest of seed 1 around `eye`. */
+    /**
+     * The tiles of level 0 of the forest of seed 1 around `eye`; in every
+     * 64th brick of each, its first voxel's faces made to differ, so that
+     * windows hold their faces too.
+     */
     fn forest_tiles(eye: Vec3) -> Arc<Level> {
         let mut world = World::new(worlds::by_name("forest").expect("forest").make, 1, None, 4);
         let wants = Wants { reach: std::array::from_fn(|l| (l == 0).then_some(fcc::GRID_REACH)), lit: Lit::Not, tiles: Vec::new() };
         loop {
             world.update(eye, &wants);
             if !world.busy() {
-                return world.level(0).clone();
+                break;
             }
             world.wait();
         }
+        let faced = |tile: &Tile| {
+            let g = &tile.grid;
+            let firsts = (0..g.cells.len() / BRICK_SITES).step_by(64);
+            let sites = firsts.filter_map(|first| sites(first).find(|&i| g.cells[i] != 0));
+            let faces = sites.flat_map(|i| fcc::face_words(i, &std::array::from_fn(|k| g.cells[i] + k as u8))).collect();
+            Tile {
+                grid: Arc::new(fcc::Grid { faces, ..(**g).clone() }),
+                index: tile.index.clone(),
+                meets: tile.meets.clone(),
+                lights: None,
+            }
+        };
+        Arc::new(Level::new(world.level(0).tiles.iter().map(|(id, tile)| (*id, Arc::new(faced(tile)))).collect()))
     }
 
     /** Syncs `windows` to level 0's `tiles` around `eye`, keeping what they upload in `slots`; whether any window changed. */
     fn sync(windows: &mut Windows, tiles: &Arc<Level>, eye: Vec3, slots: &mut HashMap<u32, Vec<u32>>) -> bool {
         let (added, changed) = windows.sync(std::slice::from_ref(tiles), false, eye);
-        for (slot, tile, first) in added {
-            slots.insert(slot, words(&tile.grid, first).collect());
+        for a in added {
+            slots.insert(a.slot, words(&a.tile.grid, a.first, a.part).collect());
         }
         changed.contains(&true)
     }
 
     /**
      * What level 0's window holds, per entry of its ball: EMPTY, UNKNOWN or
-     * a slot's words, as `slots` say they were uploaded, and the cells it
+     * its slots' words, as `slots` say they were uploaded, and the cells it
      * counts in; and the slots it takes. Its counts are as its entries say.
      */
     type Holds = (Vec<Option<(Result<Vec<u32>, i32>, [u32; SCALES])>>, usize);
@@ -1012,12 +1100,21 @@ mod tests {
             }
         }
         assert!(w.counts == counts, "counts as the entries say");
+        // A slot's words, and those of the slots after it (its faces').
+        let words = |mut slot: i32| {
+            let mut words = Vec::new();
+            while slot >= 0 {
+                words.extend(&slots[&(slot as u32)]);
+                slot = windows.pool.next[slot as usize];
+            }
+            words
+        };
         let mut held = vec![None; TABLE];
         for b in w.ball.map(|ball| in_ball(ball.bounds(), ball, None)).into_iter().flatten() {
             let e = w.table[entry(b)];
-            held[entry(b)] = Some((if e >= 0 { Ok(slots[&(e as u32)].clone()) } else { Err(e) }, w.meets[entry(b)]));
+            held[entry(b)] = Some((if e >= 0 { Ok(words(e)) } else { Err(e) }, w.meets[entry(b)]));
         }
-        (held, w.bricks)
+        (held, w.slots)
     }
 
     /** What windows made anew, of `radius` and room for all, hold of `tiles` around `eye`. */
@@ -1075,7 +1172,7 @@ mod tests {
             sync(&mut windows, &tiles, eye, &mut slots);
             let w = &windows.windows[0];
             let ball = w.ball.expect("a ball");
-            assert!(ball.radius == windows.radius && windows.radius < RADIUS && w.bricks <= pool, "at {eye:?}");
+            assert!(ball.radius == windows.radius && windows.radius < RADIUS && w.slots <= pool, "at {eye:?}");
             // Every brick of a tile made in the ball held, every other unknown.
             for b in window_bricks(ball.middle) {
                 let inside = ball.contains(b) && tiles.tiles.contains_key(&w.site(b).1);
@@ -1084,7 +1181,8 @@ mod tests {
             assert!(holds(&windows, &slots) == anew(windows.radius, &tiles, eye), "at {eye:?}");
         }
         // More room: they grow, a brick at a sync, to all.
-        windows.free.extend(pool as u32..2 * wanted as u32);
+        windows.pool.free.extend(pool as u32..2 * wanted as u32);
+        windows.pool.next.resize(2 * wanted, EMPTY);
         for _ in 0..RADIUS {
             sync(&mut windows, &tiles, eye, &mut slots);
         }

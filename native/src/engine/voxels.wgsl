@@ -5,9 +5,10 @@
 // samples met, and takes the nearest it enters (resolve_fragment).
 // See-through voxels (a medium: fog, water, a far canopy) add up on the way,
 // in the order the ray meets them, each by its path through it.
-// Lit, a voxel shows the light its tile found for it (world.rs), not its
-// material's colour shaded by the way its faces face; a tile not lit yet
-// is not on the GPU (voxels.rs), as one not made: rays take the next level.
+// Unlit, a voxel shows the material of the face a ray enters it by, shaded
+// by the way its faces face. Lit, it shows the light its tile found for it
+// (world.rs); a tile not lit yet is not on the GPU (voxels.rs), as one not
+// made: rays take the next level.
 // voxels.rs puts the constants it shares with this file before it.
 
 // The picture's size in pixels, and its sides over the focal length; the
@@ -67,6 +68,9 @@ fn hollow(l: Level, k: vec3i, j: u32) -> bool {
 @group(0) @binding(6) var<storage, read> filled: array<u32>;
 // Lit, per slot of the pool, its brick's sites' light as `cells` has them, one a word: sRGB, 0 if none.
 @group(0) @binding(7) var<storage, read> lights: array<u32>;
+// Unlit, per slot of the pool, the next of its brick's (voxels.rs's Pool), EMPTY if none: a brick whose
+// voxels' faces differ has more, each its sites' faces two by two, as `cells` has them.
+@group(0) @binding(8) var<storage, read> next: array<i32>;
 
 const NONE = 0xffffffffu;
 // A ray's steps at a level at most: more than any needs. One that runs out
@@ -74,9 +78,8 @@ const NONE = 0xffffffffu;
 // must not hide.
 const STEPS = 1024;
 const LOST = 0xfffffffeu;
-// Face pairs' normals: a voxel is where |n · (p − site)| ≤ 1 for each, its
-// neighbours at ±n.
-const NORMALS = array<vec3f, 6>(vec3f(1.0, 1.0, 0.0), vec3f(1.0, -1.0, 0.0), vec3f(0.0, 1.0, 1.0), vec3f(0.0, 1.0, -1.0), vec3f(1.0, 0.0, 1.0), vec3f(1.0, 0.0, -1.0));
+// FACES (voxels.rs puts them before this file, fcc's VOXEL_FACES): a voxel
+// is where n · (p − site) ≤ 1 for each, its neighbours at n.
 
 // `at` is where in the target, (0, 0) its top left, (1, 1) its bottom right.
 struct Screen {
@@ -365,18 +368,40 @@ fn rgb(material: u32) -> vec3f {
   return vec3f(f32((c >> 16u) & 255u), f32((c >> 8u) & 255u), f32(c & 255u)) / 255.0;
 }
 
-// As the splats paint a voxel unlit: its material's colour times the mean of its open faces' shades.
-fn shaded(hit: Hit) -> vec3f {
+// The material of face `k` (of FACES) of the voxel hit: its brick's next slots hold its faces', if they differ.
+fn face_material(hit: Hit, k: u32) -> u32 {
+  var faces = next[brick_of(hit.level, hit.site)];
+  if faces < 0 {
+    return hit.voxel & 255u;
+  }
+  for (var j = 0u; j < k / 2u; j++) {
+    faces = next[faces];
+  }
+  return (site_in(faces, (hit.site - levels[hit.level].min) & vec3i(BRICK - 1)) >> (8u * (k & 1u))) & 255u;
+}
+
+// Unlit, a voxel met by a ray along `d`: the colour of the face it enters by (as worldgen's
+// picture.rs sees it), times the mean of its open faces' shades, as the splats paint it.
+fn shaded(hit: Hit, d: vec3f) -> vec3f {
+  let q = eye.xyz / exp2(f32(hit.level)) - vec3f(hit.site);
   var shade = 0.0;
   var open = 0.0;
-  for (var k = 0; k < 12; k++) {
-    let n = NORMALS[k % 6] * select(1.0, -1.0, k >= 6);
+  // Of the faces it comes in across, the one whose plane it crosses last ((p − site) · n ≤ 1 inside).
+  var entered = 0u;
+  var last = -1e30;
+  for (var k = 0u; k < 12u; k++) {
+    let n = FACES[k];
     if (voxel(hit.level, hit.site + vec3i(n)) >> 8u) < 255u {
       shade += face_shade(n);
       open += 1.0;
     }
+    let along = dot(n, d);
+    if along < 0.0 && (1.0 - dot(q, n)) / along > last {
+      last = (1.0 - dot(q, n)) / along;
+      entered = k;
+    }
   }
-  return rgb(hit.voxel & 255u) * select(1.0, shade / open, open > 0.0);
+  return rgb(face_material(hit, entered)) * select(1.0, shade / open, open > 0.0);
 }
 
 // Lit, the light of the voxel hit; one with none (met where levels meet, inside what is solid) takes the mean of its neighbours' that have, if any.
@@ -388,7 +413,7 @@ fn lit(hit: Hit) -> vec3f {
   var sum = vec3f(0.0);
   var count = 0.0;
   for (var k = 0; k < 12; k++) {
-    let n = NORMALS[k % 6] * select(1.0, -1.0, k >= 6);
+    let n = FACES[k];
     let light = light_at(hit.level, hit.site + vec3i(n));
     if light != 0u {
       sum += unpack4x8unorm(light).rgb;
@@ -401,8 +426,8 @@ fn lit(hit: Hit) -> vec3f {
 // What each sample met: its site, and level | voxel << 8 (NONE if
 // nothing); and the voxel's colour, the mean of its open faces' shades,
 // and what the see-through voxels in front gave (rgb) and let through (a).
-@group(0) @binding(8) var sample_hits: texture_2d<u32>;
-@group(0) @binding(9) var sample_colours: texture_2d<u32>;
+@group(0) @binding(9) var sample_hits: texture_2d<u32>;
+@group(0) @binding(10) var sample_colours: texture_2d<u32>;
 
 struct Sample {
   @location(0) hit: vec4u,
@@ -412,7 +437,8 @@ struct Sample {
 @fragment
 fn sample_fragment(in: Screen) -> Sample {
   let p = (floor(in.position.xy) + 0.5) * f32(FACTOR);
-  let hit = march(ray_at(p));
+  let d = ray_at(p);
+  let hit = march(d);
   let medium = pack4x8unorm(vec4f(gathered, through));
   if hit.level >= LOST {
     return Sample(vec4u(0u, 0u, 0u, hit.level), vec2u(0u, medium));
@@ -421,7 +447,7 @@ fn sample_fragment(in: Screen) -> Sample {
   if globals.lit != 0u {
     colour = lit(hit);
   } else {
-    colour = shaded(hit);
+    colour = shaded(hit, d);
   }
   return Sample(vec4u(bitcast<vec3u>(hit.site), hit.level | hit.voxel << 8u), vec2u(pack4x8unorm(vec4f(colour, 1.0)), medium));
 }
@@ -521,7 +547,7 @@ fn resolve_fragment(in: Screen) -> @location(0) vec4f {
 }
 
 // The picture, shown where egui's pass puts it.
-@group(0) @binding(10) var picture: texture_2d<f32>;
+@group(0) @binding(11) var picture: texture_2d<f32>;
 
 @fragment
 fn show_fragment(in: Screen) -> @location(0) vec4f {

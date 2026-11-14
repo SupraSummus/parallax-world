@@ -785,6 +785,12 @@ and bricks of a tile holding the same sites (its buried rock) share a slot.
 A brick of a tile not made yet is unknown, not empty,
 and rays take the next coarser level there:
 what is missing shows coarser, never as a hole.
+Shaded, a voxel shows the material of the face a ray enters it by,
+as worldgen's rays do (`picture.rs`):
+a coarse voxel of a house may show its wall from the side and its roof from above,
+and its site's own material is only one of them.
+So a brick whose voxels' faces differ takes six more slots of the pool,
+its sites' faces two by two, each slot naming the next.
 Empty space is crossed on the lattice too, not by boxes:
 beside its bricks, a window counts for each cell of 8·FCC and of 32·FCC
 (rhombic dodecahedra about every other corner of its bricks, or of blocks of 4³ of them)
@@ -806,6 +812,7 @@ Tests hold the window's table to a new one's after any moves and tiles
 its cells counted hollow, at its edge too, to ones no voxel it holds meets
 (`no_voxel_the_window_holds_meets_a_cell_counted_hollow`),
 its rays to their steps (`no_ray_of_the_voxels_runs_out_of_steps`),
+a block's coarse voxels to the faces rays enter them by (`voxels_show_the_faces_rays_enter_by`),
 the picture to the same one with the world and the eye moved by a vector of the lattice
 that is not one of the bricks' (`voxels_look_the_same_wherever_the_bricks_fall`)
 and a slab of medium to exp(−extinction · path), as the splats' test does.

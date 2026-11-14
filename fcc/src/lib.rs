@@ -140,6 +140,7 @@ pub fn face_words(index: usize, faces: &Faces) -> [u32; FACE_WORDS] {
  * of the rays through its site it stops: mostly all (ALPHA), and `alpha`
  * lists them only for a grid with some see-through ones.
  */
+#[derive(Clone)]
 pub struct Grid {
     pub min: [i32; 3],
     pub n: [i32; 3],
@@ -155,18 +156,24 @@ pub struct Grid {
     pub glow: Vec<u32>,
 }
 
-/** The words after site index `i` in `words`, `per` words a site, sorted by index; None if it has none. */
-fn words_of(words: &[u32], per: usize, i: usize) -> Option<&[u32]> {
+/** Of the sites in `words`, `per` words a site, sorted by index: where the first of index `i` or more is (in sites). */
+fn first_from(words: &[u32], per: usize, i: usize) -> usize {
     let (mut lo, mut hi) = (0, words.len() / per);
     while lo < hi {
         let mid = (lo + hi) / 2;
-        match (words[mid * per] as usize).cmp(&i) {
-            std::cmp::Ordering::Less => lo = mid + 1,
-            std::cmp::Ordering::Greater => hi = mid,
-            std::cmp::Ordering::Equal => return Some(&words[mid * per + 1..(mid + 1) * per]),
+        if (words[mid * per] as usize) < i {
+            lo = mid + 1;
+        } else {
+            hi = mid;
         }
     }
-    None
+    lo
+}
+
+/** The words after site index `i` in `words`, `per` words a site, sorted by index; None if it has none. */
+fn words_of(words: &[u32], per: usize, i: usize) -> Option<&[u32]> {
+    let at = first_from(words, per, i) * per;
+    words.get(at..at + per).filter(|w| w[0] as usize == i).map(|w| &w[1..])
 }
 
 impl Grid {
@@ -239,9 +246,15 @@ impl Grid {
     }
 
     /** The faces' materials of the site at index `i` of `cells`, if they differ. */
-    fn faces_at(&self, i: usize) -> Option<Faces> {
+    pub fn faces_at(&self, i: usize) -> Option<Faces> {
         let words = words_of(&self.faces, FACE_WORDS, i)?;
         Some(std::array::from_fn(|k| words[k / 4].to_le_bytes()[k % 4]))
+    }
+
+    /** Whether any site at `sites` (indices in `cells`) has faces of materials of their own. */
+    pub fn has_faces(&self, sites: std::ops::Range<usize>) -> bool {
+        let at = first_from(&self.faces, FACE_WORDS, sites.start) * FACE_WORDS;
+        self.faces.get(at).is_some_and(|&i| sites.contains(&(i as usize)))
     }
 }
 
