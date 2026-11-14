@@ -344,18 +344,26 @@ Numbers are for the forest at 1280×800, as measured when written.
   worldgen's, counted ("Cost" in `docs/generators.md`),
   goes mostly to the trees at levels 0 to 2
   and to measuring their shadows from level 4.
-- **Some of the valley's tiles are over the cost budget**
-  (`OVER_BUDGET` in `worlds/tests/cost.rs`), each by a thing done one by one
+- **One of the valley's tiles is over the cost budget**
+  (`OVER_BUDGET` in `worlds/tests/cost.rs`), by things done one by one
   where a tile holds four times as many each level:
-  at level 3 the towns' things drawn whole to be measured;
-  at level 8 the moor's pools, each claimed by reading the ground around it.
+  at level 3 the towns' things drawn whole to be measured.
 - **Plans are made at every column read, whatever their scale.**
   The valley's land, decided at 4 m, makes its six domains' bids
   (the ground among them) at each column of a tile at level 0.
   Bids made every scale's width and interpolated would cost a column
   a share of a sample, up to the level whose sites are that far apart;
   past it, dithered reads would want their offsets on the samples.
-  Domains' edges would move a little.
+  Domains' edges would move a little,
+  and the landmarks keep off the path by a strip narrower than a sample:
+  its edges would come out ragged, unless kept off column by column.
+- **Plans lose columns at coarse levels.**
+  A tile there reads more columns than a plan keeps (`SLOTS`):
+  claims read the ground where they ask, lines at a point of their footprint.
+  The valley makes its land twice a column at level 8,
+  its ground 1.4 times at level 4.
+  With eight times the slots, each was made once;
+  pairs or fours of slots per column cost more than they saved.
 - **Hashing is the forest's largest single cost.**
   Each site hashes three times (shade, pick, `shown`'s coin),
   each `hash64` mixing three times, as do noise corners.

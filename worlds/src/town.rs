@@ -374,14 +374,10 @@ impl Town {
     }
 }
 
-/** The town of `towns` nearest z along the path, if it has one. */
-fn nearest(towns: &Claims<Town>, z: i64) -> Option<Town> {
-    towns.near(0, z, WITHIN).map(|(_, town)| town)
-}
-
 /** The towns along the valley's path, by where they are. */
 pub struct Towns {
-    plan: Rc<Claims<Town>>,
+    /** The town nearest each z along the path, if it has one: kept, as a column asks several times. */
+    nearest: Rc<Plan<Option<Town>>>,
     /** What each column is, a plan of categories: dithered far away, so streets show as often as they are. */
     spots: Plan<Spot>,
 }
@@ -396,7 +392,7 @@ impl Towns {
      */
     pub fn new(scope: &Scope, relief: Rc<Relief>) -> Towns {
         let s = scope.seed("towns");
-        let plan = Rc::new(Claims::new("towns", s, CLAIM, APART, Some([0, FIRST]), move |[x, z], random| {
+        let claims = Claims::new("towns", s, CLAIM, APART, Some([0, FIRST]), move |[x, z], random| {
             let mut town = if [x, z] == [0, FIRST] {
                 // The first, which the contract's regions look at: two blocks a side, four rows, a fountain, its church east.
                 let town = Town::of(Size::Market, FIRST, &mut Rng::new(hash64(s, 0, 0, 0)));
@@ -416,12 +412,13 @@ impl Towns {
             let around = (-1..=1).flat_map(|i| (-1..=1).map(move |j| (i, j)));
             town.level = Fx::mean(around.map(|(i, j)| relief.ground(i * hx, z + j * hz, Fx::ZERO))).round_units().0;
             Some(([town.x, town.z], town))
-        }));
+        });
+        let nearest = Rc::new(Plan::new("nearest town", CLAIM, move |_, z| claims.near(0, z, WITHIN).map(|(_, town)| town)));
         let spots = {
-            let plan = plan.clone();
-            Plan::dithered("town spots", SPOT_SCALE, move |x, z| nearest(&plan, z).map_or(Spot::Outside, |t| t.spot(x, z)))
+            let nearest = nearest.clone();
+            Plan::dithered("town spots", SPOT_SCALE, move |x, z| nearest.at(0, z).map_or(Spot::Outside, |t| t.spot(x, z)))
         };
-        Towns { plan, spots }
+        Towns { nearest, spots }
     }
 
     /** The first town, near the start: every seed has it. */
@@ -431,7 +428,7 @@ impl Towns {
 
     /** The town nearest z along the path, if it has one. */
     pub fn near(&self, z: i64) -> Option<Town> {
-        nearest(&self.plan, z)
+        self.nearest.at(0, z)
     }
 
     /** What column (x, z) is of the town nearest it. */
