@@ -801,7 +801,7 @@ pub struct Compositor {
 const SKY_TOP: [f32; 3] = [0x3f as f32 / 255.0, 0x73 as f32 / 255.0, 0xb8 as f32 / 255.0];
 const SKY_HORIZON: [f32; 3] = [0xb9 as f32 / 255.0, 0xd3 as f32 / 255.0, 0xe8 as f32 / 255.0];
 /** f32 in Globals (compositor.wgsl), and where its `whole` is. */
-pub const GLOBALS: usize = 276;
+const GLOBALS: usize = 276;
 const WHOLE: usize = 6;
 const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const FARTHEST: wgpu::TextureFormat = wgpu::TextureFormat::R32Float;
@@ -1499,7 +1499,7 @@ impl View {
         }
     }
 
-    pub fn globals(&self, pixels: [u32; 2], sky_fog: f64) -> [f32; GLOBALS] {
+    fn globals(&self, pixels: [u32; 2], sky_fog: f64) -> [f32; GLOBALS] {
         let mut g = [0.0f32; GLOBALS];
         g[0..2].copy_from_slice(&self.size);
         g[2..4].copy_from_slice(&pixels.map(|v| v as f32));

@@ -253,21 +253,14 @@ Numbers are for the forest at 1280×800, as measured when written.
   - A site's pieces, where shown, hide its medium and what is behind:
     right on average, but a coarse site of a crown in mist
     is a whole voxel or mist, never the crown's grain seen through mist.
-- **Native's other engines are short of the chunks in places**
-  (architecture.md, "Native: another engine").
-  - Voxels: lit, every voxel of a tile a ray can meet is lit,
-    not only those that show:
-    lighting a view's tiles takes six times as long as making them,
-    much of it generating the tiles around them that the light reads,
-    and the light takes twice the bricks' memory, so the pool holds a third as many.
-    A voxel's light is one colour, its faces' mean, whichever face a ray meets.
-  - Slabs are baked around the eye and baked again as it moves,
-    hundreds of MB every few seconds: walking, they stutter.
-    Once the eye moves, they are more than lavapipe binds (128 MB).
-    A column keeps only its first voxel, so a medium lets through
-    as much as that voxel does: 1‰ of extinction lets all through, not 93 %
-    (the voxels' medium test, run on slabs).
-    They read the compositor's globals, the faces' views.
+- **Native's voxels, lit, light more than shows**
+  (architecture.md, "Native: another engine"):
+  every voxel of a tile a ray can meet is lit,
+  not only those that show.
+  Lighting a view's tiles takes six times as long as making them,
+  much of it generating the tiles around them that the light reads,
+  and the light takes twice the bricks' memory, so the pool holds a third as many.
+  A voxel's light is one colour, its faces' mean, whichever face a ray meets.
 - **`culling_on_the_gpu_leaves_the_picture_unchanged` fails now and then**
   on an Intel UHD (Mesa), at `b4c79ff` too; why is open.
   Drawn flat, every time: the forest from its spawn.
@@ -299,6 +292,11 @@ Numbers are for the forest at 1280×800, as measured when written.
     in the order chunks came, which timing decides,
     and culling lists draws (`atomicAdd`), which is no set order.
     Lists in the clusters' order (a prefix sum) would draw a frame alike each time.
+- **Native's splats may go too.**
+  Each whole voxel a hexagon is the voxels engine's idea, rasterized.
+  They are worth keeping only if faster than reliefs on some GPU,
+  as on Intel's, which tests depth only after a relief's pixel writes its own.
+  Gone, `Chunks::new` takes `flat` alone, and the hole below goes with them.
 - **Native's splats leave a hole by a hut.**
   `--engine splats --view 'seed=42&world=valley&camera=1200,100,36700&look=20,-12'`:
   sky shows through the ground in the bottom right, with or without culling,

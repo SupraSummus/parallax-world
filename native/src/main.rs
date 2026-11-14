@@ -2,7 +2,7 @@
 //! generated in tiles, those in view first (world.rs), drawn by an engine
 //! (engine.rs) with wgpu in an egui window (window.rs), or offscreen (gpu.rs).
 //!
-//! parallax-native [--engine reliefs|flat|splats|voxels|slabs] [--world NAME] [--threads N] [--seed S] [--view QUERY] [--light SKY,SUN,GLOW] [--detail D] [--shift S] [--seams] [--colour voxels|layers|chunks] [--shot out.png [--size WxH] | --bench] [--stroll S [--on-ground]]
+//! parallax-native [--engine reliefs|flat|splats|voxels] [--world NAME] [--threads N] [--seed S] [--view QUERY] [--light SKY,SUN,GLOW] [--detail D] [--shift S] [--seams] [--colour voxels|layers|chunks] [--shot out.png [--size WxH] | --bench] [--stroll S [--on-ground]]
 //!
 //! --view takes the web page's view query (parseViewQuery in renderer.ts),
 //! overriding --seed and --world.
@@ -17,8 +17,7 @@
 //! lighting is unless --light), 0.01,0,1 night.
 //! --engine picks what draws, as the panel does (Kind): rays through the
 //! tiles' voxels (the default), chunks of cells' reliefs or splats, as the
-//! web draws, reliefs drawn flat (an experiment), or rays through slabs
-//! baked along each face.
+//! web draws, or reliefs drawn flat (an experiment).
 //! --detail sets viewing distance over a cell's thickness, --shift how many
 //! levels finer than a cell its voxels are (bake's lod.rs), for the
 //! engines that draw cells; --seams and --colour draw chunks as the panel's
@@ -461,7 +460,7 @@ fn main() {
             Colours::ALL.into_iter().find(|(_, name)| name.eq_ignore_ascii_case(v)).expect("--colour voxels, layers or chunks").0;
     }
     let kind = value("--engine").map_or(Kind::Voxels, |v| {
-        Kind::ALL.into_iter().find(|(_, name)| name.eq_ignore_ascii_case(v)).expect("--engine reliefs, flat, splats, voxels or slabs").0
+        Kind::ALL.into_iter().find(|(_, name)| name.eq_ignore_ascii_case(v)).expect("--engine reliefs, flat, splats or voxels").0
     });
     let mut engine = kind.make(&world);
     let walk_through: Vec<bool> = materials_of(&shown.generator).iter().map(|m| m.walk_through).collect();

@@ -143,9 +143,7 @@ native/                      # The native frontend (egui on winit and wgpu), lin
         │   ├── compositor.rs # compositor.ts with wgpu, for cells, placed from the camera on the GPU: reliefs' columns uploaded per chunk in tiles, each tile a quad whose pixels' rays find their column, or a picture a cell on a plane, a quad per run of a row of its columns, enlarged to close the gaps, or whole voxels as splats each, culled on the GPU against what showed; see-through voxels as pictures of each cell's medium slab by slab, added up in any order
         │   └── compositor.wgsl
         ├── voxels.rs        # The voxels engine: rays through the tiles' voxels, cell to cell, see-through ones added up in the order met; each level's bricks (and, lit, their light) in a ball around the eye, one radius for all as large as the pool holds, in a window, a torus, and which cells of 8·FCC and 32·FCC no voxel meets, crossed at once; no chunks or faces of the view
-        ├── voxels.wgsl
-        ├── slabs.rs         # The slabs engine (a prototype): slabs along each face baked around the eye on a thread, a picture of their columns' first runs; rays for some pixels walk them, each pixel tests its own against what they met
-        └── slabs.wgsl
+        └── voxels.wgsl
 ```
 
 ## Workflow

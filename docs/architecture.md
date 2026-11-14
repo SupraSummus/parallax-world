@@ -746,12 +746,8 @@ distance (or of the last slice, if farther).
 The native window switches at run time between engines (`Kind`),
 each drawing the same tiles its own way, with its own shaders:
 chunks above, their whole voxels reliefs or splats (`reliefs`, `splats`),
-rays through the tiles' voxels (`native/src/engine/voxels.rs`),
-with no chunks, slices, faces or baking, described here,
-or a prototype, rays through slabs along each face (`native/src/engine/slabs.rs`):
-per face and level, slabs of layers baked around the eye,
-each a picture of its columns' first voxel and run,
-baked again on a thread as the eye moves or turns.
+or rays through the tiles' voxels (`native/src/engine/voxels.rs`),
+with no chunks, slices, faces or baking, described here.
 
 They share one interface (`native/src/engine.rs`), in two halves.
 On the main thread an `Engine` makes a `Frame` of what a `Look` sees:
@@ -822,8 +818,7 @@ voxels shaded by the way their faces face, or computed,
 by worldgen's `Light`, one model and one cache of tiles (`Shared`) for every engine,
 the tiles the world draws, kept as far around the camera as it keeps its own;
 each engine only shows it its own way.
-The splats' bakers light the voxels they show, face by face;
-the slabs show none.
+The splats' bakers light the voxels they show, face by face.
 For the voxels, the world's threads light each tile once made
 of the levels rays read,
 after every tile to make (as it takes several times as long),

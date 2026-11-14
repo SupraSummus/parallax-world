@@ -5,8 +5,7 @@
 //! See docs/architecture.md, sections 1 to 5.
 
 mod bakery;
-// The slabs draw with its globals.
-pub(super) mod compositor;
+mod compositor;
 mod renderer;
 
 use std::sync::{Arc, Condvar, Mutex};
