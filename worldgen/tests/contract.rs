@@ -5,7 +5,8 @@ use std::rc::Rc;
 
 use worldgen::World;
 use worldgen::checks::contract::{
-    Measure, REGION, Report, SHOWN, STOPPED, TOLERANCE, assert_kept, check, heights_hold, margins, regions, things_hold, whole_equals_parts,
+    Measure, REGION, Report, SHOWN, STOPPED, TOLERANCE, assert_kept, check, heights_hold, margins, parts_equal_whole, regions, things_hold,
+    whole_equals_parts,
 };
 use worldgen::checks::survey::survey;
 use worldgen::generator::{
@@ -184,7 +185,10 @@ fn anchors_along_an_axis_are_one_per_square_across_it() {
 
 /** `world` keeps the contract up to `levels`, seen from above to `from_above`. */
 fn keeps_the_contract(name: &str, world: &World, levels: u32, from_above: u32) {
-    assert_kept(&[check(name, world, levels, from_above, true, &[])]);
+    let mut found = Vec::new();
+    let checked = check(name, world, levels, from_above, &[], |boxes| found = boxes.to_vec());
+    parts_equal_whole(name, world, &found, levels);
+    assert_kept(&[checked]);
 }
 
 #[test]

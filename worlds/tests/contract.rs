@@ -1,9 +1,11 @@
 //! Every world keeps the contract (worldgen::checks::contract) in regions holding
 //! everything it is made of around spawn, on average over several seeds,
 //! and far away in its registry entry's far regions: a test each, so they
-//! run in parallel, and a thread each seed.
+//! run in parallel, and a thread each seed, and for the parts and far regions.
 
-use worldgen::checks::contract::{check, check_far, strata_kept};
+use std::sync::mpsc;
+
+use worldgen::checks::contract::{check, check_far, parts_equal_whole, strata_kept};
 use worlds::{Entry, REGIONS_SEED, WORLDS};
 
 /** The seeds each world is checked at: each stratum's margins are averaged over all of them. */
@@ -22,17 +24,33 @@ fn keeps_the_contract(entry: &Entry) {
     let only: Vec<&str> = only.split(',').map(str::trim).filter(|o| !o.is_empty()).collect();
     let only = &only;
     let (checked, panicked) = std::thread::scope(|scope| {
+        // Parts at one seed: they check how a world is drawn, which seeds don't change. On a thread of their own, in the
+        // regions that seed's thread finds, while it goes on with the rest.
+        let (to_parts, regions) = mpsc::channel();
         let seeds: Vec<_> = SEEDS
             .iter()
             .map(|&seed| {
+                let to_parts = (seed == REGIONS_SEED).then(|| to_parts.clone());
                 // World and Generator aren't Send: each thread makes its own.
                 scope.spawn(move || {
                     let world = (entry.make)(seed);
-                    // Parts at one seed: they check how a world is drawn, which seeds don't change.
-                    check(&format!("{} (seed {seed})", entry.name), &world, entry.levels, entry.from_above, seed == REGIONS_SEED, only)
+                    let surveyed = |boxes: &[_]| {
+                        if let Some(to_parts) = to_parts {
+                            to_parts.send(boxes.to_vec()).expect("the parts' thread waiting");
+                        }
+                    };
+                    check(&format!("{} (seed {seed})", entry.name), &world, entry.levels, entry.from_above, only, surveyed)
                 })
             })
             .collect();
+        drop(to_parts);
+        // No regions if their seed's thread panicked before it found them: that thread says why.
+        let parts = scope.spawn(move || {
+            if let Ok(boxes) = regions.recv() {
+                let name = format!("{} (seed {REGIONS_SEED})", entry.name);
+                parts_equal_whole(&name, &(entry.make)(REGIONS_SEED), &boxes, entry.levels);
+            }
+        });
         // Far regions at one seed too: they check how fields are read far away.
         let far = (!entry.far.is_empty() && only.is_empty()).then(|| {
             scope.spawn(move || {
@@ -50,6 +68,9 @@ fn keeps_the_contract(entry: &Entry) {
                 Ok(c) => checked.push(c),
                 Err(panic) => panicked.push(format!("seed {seed}: {}", message(panic))),
             }
+        }
+        if let Err(panic) = parts.join() {
+            panicked.push(format!("parts: {}", message(panic)));
         }
         if let Some(Err(panic)) = far.map(|t| t.join()) {
             panicked.push(format!("far: {}", message(panic)));
