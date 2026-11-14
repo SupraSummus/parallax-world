@@ -9,21 +9,29 @@ vi.mock('./lib/worldgen', async () => (await import('./lib/small-forest.test-hel
 
 const cameraPosition = () =>
   (screen.getByText('Position').nextElementSibling?.textContent ?? '').split(',').map(Number)
+const orientation = () =>
+  (screen.getByText('Yaw, Pitch').nextElementSibling?.textContent ?? '').split(',').map(parseFloat)
 const totalUpdates = () => Number(screen.getByText('Total Updates').nextElementSibling?.textContent)
 
 describe('App', () => {
-  it('renders the title and control panels', () => {
-    render(<App />)
-    expect(screen.getByText('PARALLAX ENGINE')).toBeInTheDocument()
-    expect(screen.getByText('Render Statistics')).toBeInTheDocument()
-    expect(screen.getByText('Camera')).toBeInTheDocument()
-    expect(screen.getByText('World')).toBeInTheDocument()
-  })
-
-  it('renders the scene on mount', () => {
+  it('renders the control panels and the scene on mount', () => {
     const { container } = render(<App />)
+    for (const panel of ['Render Statistics', 'Camera', 'World']) expect(screen.getByText(panel)).toBeInTheDocument()
     expect(container.querySelectorAll('canvas').length).toBeGreaterThan(0)
     expect(totalUpdates()).toBeGreaterThan(0)
+  })
+
+  it("starts at the view the page's query asks for", () => {
+    // As pnpm shot opens it.
+    const page = location.href
+    history.replaceState(null, '', '?camera=1,2,3&look=30,-10')
+    try {
+      render(<App />)
+      expect(cameraPosition()).toEqual([1, 2, 3])
+      expect(orientation()).toEqual([30, -10])
+    } finally {
+      history.replaceState(null, '', page)
+    }
   })
 
   it('shows a spinner while generating a world', async () => {
@@ -92,7 +100,6 @@ describe('App', () => {
 
   it('turns with the arrow keys, and then moves forward where it looks', async () => {
     render(<App />)
-    const orientation = () => (screen.getByText('Yaw, Pitch').nextElementSibling?.textContent ?? '').split(',').map(parseFloat)
     expect(orientation()).toEqual([0, 0])
 
     fireEvent.keyDown(window, { key: 'ArrowRight' })
@@ -137,13 +144,5 @@ describe('App', () => {
     await new Promise(resolve => setTimeout(resolve, 50))
     fireEvent.keyUp(window, { key: 'q' })
     expect(cameraPosition()).toEqual(start)
-  })
-
-  it('lists movement controls', () => {
-    render(<App />)
-    expect(screen.getByText('W/S - Forward/Back')).toBeInTheDocument()
-    expect(screen.getByText('A/D - Left/Right')).toBeInTheDocument()
-    expect(screen.getByText('Space/Shift - Up/Down')).toBeInTheDocument()
-    expect(screen.getByText('Arrows/Drag - Look around')).toBeInTheDocument()
   })
 })

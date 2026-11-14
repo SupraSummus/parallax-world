@@ -128,6 +128,7 @@ describe('ParallaxRenderer', () => {
       const kept = [...shown()].filter(([key]) => before.has(key))
       expect(kept.length).toBeGreaterThan(10)
       for (const [key, chunk] of kept) expect(chunk).toBe(before.get(key))
+      expect(lastUpdate().chunksReused).toBeGreaterThan(lastUpdate().chunksRegenerated * 4)
     })
 
     it('masks farther, thicker slices more coarsely', () => {
@@ -264,13 +265,6 @@ describe('ParallaxRenderer', () => {
   })
 
   describe('cache', () => {
-    it('reuses the chunks still in view when the camera moves in x/y', () => {
-      render()
-      renderer.setCamera({ x: renderer.getCamera().x + 2, y: renderer.getCamera().y + 1 })
-      render()
-      expect(lastUpdate().chunksReused).toBeGreaterThan(lastUpdate().chunksRegenerated * 4)
-    })
-
     it('bakes nothing when the camera returns to where it was', () => {
       render()
       const start = renderer.getCamera()

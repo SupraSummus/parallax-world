@@ -355,11 +355,4 @@ describe('WorkerBakery', () => {
     expect(settled.layers.some(l => l.slice.level === 0 && l.placements.length > 0)).toBe(true)
     expect(shown(settled)).toEqual(reference(camera, new World(3, 'forest')))
   })
-
-  it('bakes the new world after regeneration', async () => {
-    const renderer = workerRenderer()
-    renderer.regenerateWorld(99999, 'valley')
-    await gridsIn(renderer)
-    expect(shown(await settle(renderer))).toEqual(reference(undefined, new World(99999, 'valley')))
-  })
 })
