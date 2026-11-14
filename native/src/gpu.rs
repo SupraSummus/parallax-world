@@ -126,6 +126,11 @@ impl Easel {
         self.device.poll(wgpu::PollType::Wait { submission_index: Some(submission), timeout: None }).expect("poll");
     }
 
+    /** Whether the picture it drew last showed all it was given (Painter::settled), or it has drawn none. */
+    pub fn settled(&self) -> bool {
+        self.painter.as_ref().is_none_or(|p| p.settled())
+    }
+
     /**
      * Draws `picture` as the window does when still, till what it draws has
      * settled: a few frames (the chunks' culling), and as many more as the
@@ -133,7 +138,7 @@ impl Easel {
      */
     pub fn settle(&mut self, picture: &dyn Picture, pixels: [u32; 2]) {
         let mut frames = 0;
-        while frames < 3 || !self.painter.as_ref().is_none_or(|p| p.settled()) {
+        while frames < 3 || !self.settled() {
             self.draw(picture, pixels);
             frames += 1;
         }

@@ -231,6 +231,10 @@ impl<C: Content> Windowed<C> {
             Ok([upload, waiting]) => {
                 let rest = start.elapsed().as_secs_f64() * 1000.0 - ui - upload - waiting;
                 self.content.timed(Times { ui, upload, waiting, rest, since });
+                // A painter that left work for later frames gets them, even if nothing moves.
+                if !open.gpu.easel.settled() {
+                    self.next = Some(Instant::now());
+                }
             }
             Err(Lost(message)) => {
                 eprintln!("\nThe GPU device was lost: {message}");

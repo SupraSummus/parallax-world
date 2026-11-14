@@ -820,6 +820,12 @@ its table of the bricks' slots in a pool is a torus,
 a brick's entry at its coordinates modulo the window's size,
 so the ball moves a brick at a time
 and only the bricks that came into it or left are touched.
+A frame steps one window, each in turn:
+its ball a brick along an axis toward the eye's,
+and one tile in it, gone or new,
+so what a frame costs is bounded however fast the eye or many the tiles;
+a window behind is read only as far as it holds around the eye,
+and one holding nothing around it starts anew there.
 The levels' balls share one radius, in each level's own bricks,
 as large as the pool holds:
 short of slots, all shrink, every level read less far,
@@ -841,8 +847,10 @@ its sites' faces two by two, each slot naming the next.
 Empty space is crossed on the lattice too, not by boxes:
 beside its bricks, a window counts for each cell of 8·FCC and of 32·FCC
 (rhombic dodecahedra about every other corner of its bricks, or of blocks of 4³ of them)
-the bricks of its ball around it whose voxels meet it, or that are unknown:
-rays read none past the ball.
+the bricks around it whose voxels meet it, or that are unknown,
+as is every brick out of its ball, which rays do not read:
+counts start full, and only bricks of tiles change them,
+so a ball moves through what is unknown at no cost to them.
 A ray in a cell that none meets goes across it at once, face to face,
 as it goes across a voxel: whatever it met in the cell would meet the cell.
 A window also keeps the box, in the level's axes as its bricks are,

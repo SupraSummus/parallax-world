@@ -279,6 +279,19 @@ Numbers are for the forest at 1280×800, as measured when written.
   (a third fewer voxel steps, most turned into jumps: 2%, tiles twice as slow to make);
   a rhombic dodecahedron about what a window holds, for its box or with it
   (its faces slant across ground that lies flat in the lattice's axes).
+- **Native's voxels while the eye moves** (`Windows::sync`).
+  - A frame steps one window, each in turn,
+    so level 0's ball moves a brick every ninth frame:
+    flying faster, it lags, read less far, till it starts anew.
+    Stepping first the window that holds least of what it should around the eye
+    (`Ball::about` against its radius), not each in turn, may do better.
+  - Walking, frames come every 33 ms:
+    CPU and GPU together take a little more than the 16.7 ms
+    the compositor paces frames by.
+  - Making the uploaded bricks' words (`words`) varies tenfold from frame to frame,
+    by memory, not work.
+  - Shots and tests wait for the windows a tile at a time,
+    a whole picture drawn each, so the voxels' GPU tests take twice as long.
 - **`culling_on_the_gpu_leaves_the_picture_unchanged` failed on an Intel UHD** (Mesa),
   drawn flat, every time: the forest from its spawn.
   Likely by ties in depth drawn in no set order, fixed since:
