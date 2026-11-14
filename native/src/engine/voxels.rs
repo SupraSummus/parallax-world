@@ -68,11 +68,11 @@ const TABLE: usize = (WINDOW * WINDOW * WINDOW) as usize;
  * it have voxels that meet it or are unknown, a torus as its table:
  * CELLS of the finer scale, then the coarser's (voxels.wgsl's fine and coarse).
  *
- * A cell at the ball's edge reaches past it, where the window's entries
- * count as their bricks last did, and its entry in the torus is also that
- * of the cell a window away, whose bricks only add to its count. So a
+ * Only the ball's bricks count: a cell at its edge reaches past it, but
+ * rays read nothing past it (reach). A cell's entry in the torus is also
+ * that of the cell a window away, whose bricks only add to its count. So a
  * cell counted hollow holds no voxel the ball holds, as a ray stepping
- * voxel by voxel would find: and the ball holds all the rays read (reach).
+ * voxel by voxel would find.
  */
 const SCALES: usize = 2;
 const CELLS: usize = TABLE / 2;
@@ -537,10 +537,8 @@ struct Held {
  * A level's window as the GPU holds it: from which tiles, the ball of
  * bricks it holds of them, its table (per brick a slot, EMPTY or UNKNOWN:
  * every brick outside the ball), and, per cell of each scale, how many
- * bricks around it have voxels that meet it or are unknown. Rays read the
- * ball only (reach_of), so the counts are right for its bricks: one that
- * leaves it keeps counting as it did, till another takes its entry (and
- * empty air coming in where empty air was changes none). Bricks of a tile
+ * bricks of the ball around it have voxels that meet it or are unknown
+ * (rays read the ball only: reach_of). Bricks of a tile
  * that share their sites share a slot: the ground's rock, buried, a slot
  * a tile.
  */
@@ -551,9 +549,9 @@ struct Window {
     /** Sites of the level's bricks start at origin + BRICK · b. */
     origin: [i32; 3],
     table: Vec<i32>,
-    /** Per entry of the table, the cells of each scale around its brick it counts in (AROUND's bits): those its voxels meet, all if UNKNOWN. */
+    /** Per entry of the table, the cells of each scale around its brick it counts in (AROUND's bits): those its voxels meet, all if UNKNOWN in the ball, none out of it. */
     meets: Vec<[u32; SCALES]>,
-    counts: Vec<u16>,
+    counts: Vec<u32>,
     /** Slots it holds. */
     slots: usize,
 }
@@ -566,9 +564,8 @@ impl Window {
             ball: None,
             origin: [0; 3],
             table: vec![UNKNOWN; TABLE],
-            meets: vec![[AROUND; SCALES]; TABLE],
-            // Every brick around each cell unknown: 27 blocks of 64^j bricks.
-            counts: (0..COUNTS).map(|i| (AROUND.count_ones() as u16) << (6 * (i / CELLS))).collect(),
+            meets: vec![[0; SCALES]; TABLE],
+            counts: vec![0; COUNTS],
             slots: 0,
         }
     }
@@ -595,9 +592,9 @@ impl Window {
         std::mem::replace(&mut self.table[at], entry)
     }
 
-    /** Makes brick `b` UNKNOWN to rays, its slots freed once no entry holds it; the cells around it are as they were (to place it again, or out of the ball). */
+    /** Makes brick `b` UNKNOWN to rays and meeting no cell (out of the ball, or to place again), its slots freed once no entry holds it. */
     fn release(&mut self, b: [i32; 3], pool: &mut Pool) {
-        if std::mem::replace(&mut self.table[entry(b)], UNKNOWN) < 0 {
+        if self.set(b, (UNKNOWN, [0; SCALES])) < 0 {
             return;
         }
         let ([x, y, z], id) = self.site(b);
@@ -892,7 +889,7 @@ impl Marcher {
             buffer("pool", pool as usize * BRICK_WORDS * 4, storage),
             buffer("palette", 256 * 4, storage),
             buffer("eye", 16, uniform),
-            buffer("filled", GRID_LEVELS * COUNTS * 2, storage),
+            buffer("filled", GRID_LEVELS * COUNTS * 4, storage),
             buffer("lights", (pool as usize * light_words * 4).max(4), storage),
             buffer("next", pool as usize * 4, storage),
         ];
@@ -982,7 +979,7 @@ impl Marcher {
             let window = &self.windows.windows[level];
             if changed[level] {
                 queue.write_buffer(&self.buffers[2], (level * TABLE * 4) as u64, bytemuck::cast_slice(&window.table));
-                queue.write_buffer(&self.buffers[6], (level * COUNTS * 2) as u64, bytemuck::cast_slice(&window.counts));
+                queue.write_buffer(&self.buffers[6], (level * COUNTS * 4) as u64, bytemuck::cast_slice(&window.counts));
             }
             if level < scene.levels.len() {
                 *gpu = window.gpu(level, look.far);
@@ -1151,13 +1148,13 @@ mod tests {
     /**
      * What level 0's window holds, per entry of its ball: EMPTY, UNKNOWN or
      * its slots' words, as `slots` say they were uploaded, and the cells it
-     * counts in; and the slots it takes. Its counts are as its entries say.
+     * counts in; the slots it takes; and its counts, as its entries say.
      */
-    type Holds = (Vec<Option<(Result<Vec<u32>, i32>, [u32; SCALES])>>, usize);
+    type Holds = (Vec<Option<(Result<Vec<u32>, i32>, [u32; SCALES])>>, usize, Vec<u32>);
 
     fn holds(windows: &Windows, slots: &HashMap<u32, Vec<u32>>) -> Holds {
         let w = &windows.windows[0];
-        let mut counts = vec![0u16; COUNTS];
+        let mut counts = vec![0u32; COUNTS];
         for b in window_bricks([WINDOW / 2; 3]) {
             for j in 0..SCALES {
                 for e in (0..27).filter(|e| w.meets[entry(b)][j] >> e & 1 != 0) {
@@ -1183,7 +1180,7 @@ mod tests {
             let e = w.table[entry(b)];
             held[entry(b)] = Some((if e >= 0 { Ok(words(e)) } else { Err(e) }, w.meets[entry(b)]));
         }
-        (held, w.slots)
+        (held, w.slots, counts)
     }
 
     /** What windows made anew, of `radius` and room for all, hold of `tiles` around `eye`. */
@@ -1231,7 +1228,7 @@ mod tests {
     fn windows_short_of_slots_hold_as_large_a_ball_as_fits() {
         let eye = [10.0, 30.0, -20.0];
         let tiles = forest_tiles(eye);
-        let (all, wanted) = anew(RADIUS, &tiles, eye);
+        let (all, wanted, _) = anew(RADIUS, &tiles, eye);
         // Buried bricks of a tile share a slot: fewer slots than bricks held.
         let entries = all.iter().flatten().filter(|(e, _)| e.is_ok()).count();
         assert!(wanted < entries, "{wanted} slots for {entries} bricks");

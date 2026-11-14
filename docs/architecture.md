@@ -810,7 +810,8 @@ its sites' faces two by two, each slot naming the next.
 Empty space is crossed on the lattice too, not by boxes:
 beside its bricks, a window counts for each cell of 8·FCC and of 32·FCC
 (rhombic dodecahedra about every other corner of its bricks, or of blocks of 4³ of them)
-the bricks around it whose voxels meet it, or that are unknown.
+the bricks of its ball around it whose voxels meet it, or that are unknown:
+rays read none past the ball.
 A ray in a cell that none meets goes across it at once, face to face,
 as it goes across a voxel: whatever it met in the cell would meet the cell.
 A ray that runs out of steps shows magenta: a march must not stick,

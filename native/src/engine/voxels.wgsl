@@ -29,7 +29,7 @@ struct Globals {
 // A grid level's window of WINDOW³ bricks: the site it starts at, in the
 // level's units; where its table starts in `bricks`; its corner, in bricks
 // of the level; how far from the eye (world units) rays read it; where its
-// cells' counts start in `filled`, in halves of words. The table is a torus:
+// cells' counts start in `filled`. The table is a torus:
 // a brick's entry is at its coordinates modulo WINDOW, so the window moves
 // without moving the rest.
 struct Level {
@@ -51,8 +51,7 @@ fn entry(l: Level, b: vec3i) -> u32 {
 fn hollow(l: Level, k: vec3i, j: u32) -> bool {
   let side = WINDOW >> (2u * j);
   let w = k & vec3i(side - 1);
-  let i = l.filled + j * CELLS + u32(((w.z * side + w.y) * side + w.x) >> 1);
-  return ((filled[i >> 1u] >> ((i & 1u) * 16u)) & 0xffffu) == 0u;
+  return filled[l.filled + j * CELLS + u32(((w.z * side + w.y) * side + w.x) >> 1)] == 0u;
 }
 
 @group(0) @binding(0) var<uniform> globals: Globals;
@@ -65,7 +64,7 @@ fn hollow(l: Level, k: vec3i, j: u32) -> bool {
 @group(0) @binding(4) var<storage, read> palette: array<u32>;
 // The eye in the world (grid 0's units).
 @group(0) @binding(5) var<uniform> eye: vec4f;
-// Per level, per cell of each scale in its window, how many bricks around it have voxels that meet it or are unknown (a torus, as `bricks`), two a word.
+// Per level, per cell of each scale in its window, how many bricks around it have voxels that meet it or are unknown (a torus, as `bricks`).
 @group(0) @binding(6) var<storage, read> filled: array<u32>;
 // Lit, per slot of the pool, the light on its brick's voxels as `cells` has them, one a word: RGB9E5, 0 if none.
 @group(0) @binding(7) var<storage, read> lights: array<u32>;

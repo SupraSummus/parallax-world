@@ -255,6 +255,16 @@ Numbers are for the forest at 1280×800, as measured when written.
   Lighting a view's tiles takes six times as long as making them,
   much of it generating the tiles around them that the light reads,
   and the light takes twice the bricks' memory, so the pool holds a third as many.
+- **Native's voxels wait on memory** (`march` in `voxels.wgsl`):
+  most of a frame is its samples' rays, some 50 steps each,
+  and a step costs its reads one after another (a brick's slot, then its site),
+  not its arithmetic.
+  On Intel's GPU (Mesa) the shader runs 8 pixels a thread, not 16: too many registers.
+  Tried, and no better: stepping by increments;
+  cells of 128·FCC (a window's torus is 4 of them a side,
+  so cells a window apart share a count: the sky the ground's);
+  each empty voxel saying how clear around it is
+  (a third fewer voxel steps, most turned into jumps: 2%, tiles twice as slow to make).
 - **`culling_on_the_gpu_leaves_the_picture_unchanged` failed on an Intel UHD** (Mesa),
   drawn flat, every time: the forest from its spawn.
   Likely by ties in depth drawn in no set order, fixed since:
