@@ -22,8 +22,8 @@
 //! it (fcc's `facing`; a brick whose voxels look unlike through some faces
 //! takes PARTS more slots for them: Pool), times the light on it: shaded,
 //! by the way its surface faces; lit, the light its tile found for it
-//! (world.rs, worldgen's Light), its own glow counted in, uploaded with its
-//! brick to a pool of its own.
+//! (world.rs, worldgen's Light), and its own glow, uploaded with its brick
+//! to a pool of its own.
 //!
 //! Lit, only what rays meet is lit: a brick with voxels and no light yet
 //! is unknown, as one of no tile yet, so rays take the next coarser level
@@ -291,14 +291,17 @@ fn words(grid: &fcc::Grid, first: usize, part: usize) -> impl Iterator<Item = u3
     })
 }
 
+/** Words a site's light takes: the light on it, and what it glows. */
+const LIGHT_WORDS: usize = 2;
+
 /**
  * The light on the voxels of the brick of `grid`, of `level`, whose sites
- * start at `corner`, by site in the order of its cells: Light::on_seen,
- * and its own glow as light on its colour, as RGB9E5; 0 where none.
- * So that, times its colour, it is what the voxel sends out.
+ * start at `corner`, by site in the order of its cells, LIGHT_WORDS each:
+ * Light::on_seen, and its own glow, as RGB9E5; 0 where none. What a voxel
+ * sends out is its colour times the one, and the other.
  */
 pub fn light(grid: &fcc::Grid, level: u32, corner: [i32; 3], light: &mut Light) -> Box<[u32]> {
-    let mut out = vec![0; BRICK_SITES];
+    let mut out = vec![0; BRICK_SITES * LIGHT_WORDS];
     for r in 0..BRICK * BRICK * BRICK {
         let site: [i32; 3] = std::array::from_fn(|d| corner[d] + [r % BRICK, r / BRICK % BRICK, r / BRICK / BRICK][d]);
         let look = grid.get(site[0], site[1], site[2]);
@@ -306,10 +309,10 @@ pub fn light(grid: &fcc::Grid, level: u32, corner: [i32; 3], light: &mut Light) 
             continue;
         }
         let at = site.map(i64::from);
-        out[(r >> 1) as usize] = light.on_seen(level, at).map_or(0, |on| {
-            let (glow, colour) = (light.glow(level, at), look.to_le_bytes().map(|c| srgb_to_linear(c as f32 / 255.0)));
-            rgb9e5(std::array::from_fn(|c| on[c] + if colour[c] > 0.0 { glow[c] / colour[c] } else { 0.0 }))
-        });
+        if let Some(on) = light.on_seen(level, at) {
+            let i = (r >> 1) as usize * LIGHT_WORDS;
+            out[i..i + LIGHT_WORDS].copy_from_slice(&[rgb9e5(on), rgb9e5(light.glow(level, at))]);
+        }
     }
     out.into()
 }
@@ -1078,7 +1081,7 @@ pub struct Marcher {
 /** voxels.wgsl, with the constants it shares with this file. */
 fn shader() -> String {
     format!(
-        "const WINDOW = {WINDOW};\nconst CELLS = {CELLS}u;\nconst BRICK = {BRICK};\nconst BRICK_SHIFT = {BRICK_SHIFT}u;\nconst BRICK_SITES = {BRICK_SITES}u;\nconst FACTOR = {FACTOR}u;\nconst EMPTY = {EMPTY};\nconst UNKNOWN = {UNKNOWN};\nconst FACES = array<vec3f, {}>({});\n{}",
+        "const WINDOW = {WINDOW};\nconst CELLS = {CELLS}u;\nconst BRICK = {BRICK};\nconst BRICK_SHIFT = {BRICK_SHIFT}u;\nconst BRICK_SITES = {BRICK_SITES}u;\nconst LIGHT_WORDS = {LIGHT_WORDS}u;\nconst FACTOR = {FACTOR}u;\nconst EMPTY = {EMPTY};\nconst UNKNOWN = {UNKNOWN};\nconst FACES = array<vec3f, {}>({});\n{}",
         fcc::FACE_KINDS,
         fcc::VOXEL_FACES.map(|[x, y, z]| format!("vec3f({x}.0, {y}.0, {z}.0)")).join(", "),
         include_str!("voxels.wgsl")
@@ -1092,9 +1095,9 @@ impl Marcher {
             label: Some("voxels.wgsl"),
             source: wgpu::ShaderSource::Wgsl(shader().into()),
         });
-        // Lit, a brick's light takes a word a site, beside its own words.
-        let light_words = if lit { BRICK_SITES } else { 0 };
-        let largest = device.limits().max_storage_buffer_binding_size / (BRICK_SITES as u64 * 4);
+        // Lit, a brick's light takes LIGHT_WORDS a site, beside its own words.
+        let light_words = if lit { BRICK_SITES * LIGHT_WORDS } else { 0 };
+        let largest = device.limits().max_storage_buffer_binding_size / (BRICK_SITES.max(light_words) as u64 * 4);
         let pool = (POOL_BYTES / ((BRICK_SITES + light_words) as u64 * 4)).min(largest);
         let buffer = |label, size: usize, usage| {
             device.create_buffer(&wgpu::BufferDescriptor {
@@ -1204,7 +1207,7 @@ impl Marcher {
         upload(device, encoder, &self.buffers[7], &added, 1, |a| [next[a.slot as usize] as u32]);
         if self.lit {
             // A brick's own slot only: those of its faces have no light.
-            upload(device, encoder, &self.buffers[6], added.iter().filter(|a| a.part == 0), BRICK_SITES, |a| {
+            upload(device, encoder, &self.buffers[6], added.iter().filter(|a| a.part == 0), BRICK_SITES * LIGHT_WORDS, |a| {
                 a.tile.light(a.first).expect("a brick placed lit").iter().copied()
             });
         }

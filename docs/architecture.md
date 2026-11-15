@@ -894,11 +894,11 @@ before any tile to make,
 nearest first in each level's own sites, as rays read them:
 each voxel of the brick a ray can meet gets the light on it,
 by the way its surface faces (`Light::on_seen`),
-its own glow added as light on its colour,
-and shows its colour times that,
+and what it glows,
+and shows its colour times the one, and the other,
 as worldgen's lit pictures do (`Light::relight`);
 shaded, the light is the mean of its open faces' shades.
-The light goes to the GPU beside the bricks, a word a site (RGB9E5), in a pool of its own.
+The light goes to the GPU beside the bricks, two words a site (RGB9E5), in a pool of its own.
 Till a brick with voxels is lit, it is not on the GPU, as if its tile were not made:
 rays take the next coarser level there,
 so what is not lit yet shows coarser, lit, never shaded by another light;
