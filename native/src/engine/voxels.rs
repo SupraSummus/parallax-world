@@ -18,12 +18,12 @@
 //! leaves. A brick of no tile yet is unknown, and rays take the next
 //! coarser level there: what is missing shows coarser, never as a hole.
 //!
-//! A voxel shows its look through the face a ray enters it by (a brick
-//! whose voxels look unlike through some faces takes PARTS more slots for
-//! them: Pool), times the light on it: shaded, by the way its surface
-//! faces; lit, the light its tile found for it (world.rs, worldgen's
-//! Light), its own glow counted in, uploaded with its brick to a pool of
-//! its own.
+//! A voxel shows how it looks along the ray, through the faces turned to
+//! it (fcc's `facing`; a brick whose voxels look unlike through some faces
+//! takes PARTS more slots for them: Pool), times the light on it: shaded,
+//! by the way its surface faces; lit, the light its tile found for it
+//! (world.rs, worldgen's Light), its own glow counted in, uploaded with its
+//! brick to a pool of its own.
 //!
 //! Lit, only what rays meet is lit: a brick with voxels and no light yet
 //! is unknown, as one of no tile yet, so rays take the next coarser level

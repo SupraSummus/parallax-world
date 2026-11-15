@@ -840,7 +840,9 @@ and bricks of a tile holding the same sites (its buried rock) share a slot.
 A brick of a tile not made yet is unknown, not empty,
 and rays take the next coarser level there:
 what is missing shows coarser, never as a hole.
-A voxel shows its look through the face a ray enters it by,
+A voxel shows how it looks along the ray,
+the mean of its looks through the faces turned most against it
+(fcc's `facing`, the one rule every host and check reads by),
 times the light on it (below):
 a coarse voxel of a house may show its wall from the side and its roof from above.
 So a brick whose voxels look unlike through some faces takes twelve more slots of the pool,

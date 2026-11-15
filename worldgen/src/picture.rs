@@ -50,23 +50,6 @@ pub(crate) const FACES: [[i64; 3]; FACE_KINDS] = {
     faces
 };
 
-/**
- * The face a ray enters its voxel by: the one opposite the face it left
- * the voxel before by, or, if it came from elsewhere, the face whose plane
- * it crosses last on its way in ((p − site) · face ≤ 1 inside).
- */
-fn entered(ray: &Ray) -> usize {
-    if ray.face < FACE_KINDS {
-        return FACES.iter().position(|f| *f == FACES[ray.face].map(|v| -v)).expect("faces come in pairs");
-    }
-    let r = [0, 1, 2].map(|i| ray.origin[i] - ray.site[i] as f64);
-    let enters = |f: &[i64; 3]| {
-        let (f, along) = (f.map(|v| v as f64), dot(f.map(|v| v as f64), ray.direction));
-        if along < 0.0 { (1.0 - dot(r, f)) / along } else { f64::NEG_INFINITY }
-    };
-    (0..FACE_KINDS).max_by(|&a, &b| enters(&FACES[a]).total_cmp(&enters(&FACES[b]))).expect("faces")
-}
-
 /** Where the sun is, and how much light comes from the sky and from it. */
 const SUN: [f64; 3] = [-0.48, 0.74, -0.47];
 const AMBIENT: f64 = 0.36;
@@ -211,20 +194,8 @@ impl Seen {
 const OPAQUE: f64 = 1e-4;
 
 /**
- * The faces a ray along `direction` sees a voxel by: those turned most
- * against it, alike (as a ray straight down sees four). What a site shows
- * along a direction is what rays along it see of it, whichever face each
- * enters by, as hosts read a face turned to the view.
- */
-fn facing(direction: [f64; 3]) -> impl Iterator<Item = usize> {
-    let against = move |k: usize| dot(FACES[k].map(|v| v as f64), direction);
-    let least = (0..FACE_KINDS).map(against).fold(f64::INFINITY, f64::min);
-    (0..FACE_KINDS).filter(move |&k| against(k) <= least + 1e-9)
-}
-
-/**
  * What the site `ray` is in shows it, as light sees it: its pieces (as
- * seen along the ray, `facing`) and its medium, each how much of the ray
+ * seen along the ray, fcc's `facing`) and its medium, each how much of the ray
  * it stops and what that shows (linear, premultiplied), and what the
  * site glows to it; the rest goes on (`through`). A site stops its alpha
  * of a ray crossing its voxel; one crossing `part` of the voxel's chord
@@ -234,7 +205,7 @@ fn facing(direction: [f64; 3]) -> impl Iterator<Item = usize> {
 fn composite(ray: &mut Ray, grid: &VoxelGrid, part: f64) -> ([(f64, [f64; 3]); 2], [f64; 3]) {
     let [x, y, z] = ray.site;
     let (mut parts, mut glow, mut faces) = ([(0.0, [0.0; 3]); 2], [0.0; 3], 0.0);
-    for k in facing(ray.direction) {
+    for k in fcc::facing(ray.direction) {
         let (seen, glows) = grid.light(x, y, z, k);
         for (sum, (alpha, colour)) in parts.iter_mut().zip(seen) {
             sum.0 += alpha as f64 / ALPHA as f64;
@@ -370,7 +341,7 @@ impl Tiles {
                         }
                         Some(0) => None,
                         Some(_) => {
-                            let look = tile.grid.face(x, y, z, entered(ray));
+                            let look = tile.grid.along(x, y, z, ray.direction);
                             return match self.normal(ray.site, &tile.grid) {
                                 Ok(normal) => Step::Hit(look, normal),
                                 Err(key) => Step::Needs(key),
@@ -417,6 +388,26 @@ pub(crate) fn composited(grid: &VoxelGrid, origin: [f64; 3], direction: [f64; 3]
         walk.cross(&mut ray, &mut planes);
     }
     seen
+}
+
+/**
+ * The face a ray enters its voxel by: the one opposite the face it left
+ * the voxel before by, or, if it came from elsewhere, the face whose plane
+ * it crosses last on its way in ((p − site) · face ≤ 1 inside). Where it
+ * lands, as light does (light/reference.rs); what it sees there is along
+ * its direction, whichever face it enters by (fcc's `facing`).
+ */
+#[cfg(test)]
+fn entered(ray: &Ray) -> usize {
+    if ray.face < FACE_KINDS {
+        return FACES.iter().position(|f| *f == FACES[ray.face].map(|v| -v)).expect("faces come in pairs");
+    }
+    let r = [0, 1, 2].map(|i| ray.origin[i] - ray.site[i] as f64);
+    let enters = |f: &[i64; 3]| {
+        let (f, along) = (f.map(|v| v as f64), dot(f.map(|v| v as f64), ray.direction));
+        if along < 0.0 { (1.0 - dot(r, f)) / along } else { f64::NEG_INFINITY }
+    };
+    (0..FACE_KINDS).max_by(|&a, &b| enters(&FACES[a]).total_cmp(&enters(&FACES[b]))).expect("faces")
 }
 
 /** Where a ray from `origin` along `direction` (a level's units) first enters a voxel of `grid`, if before `end`: how far, the voxel's site and the face it enters by. */
@@ -850,6 +841,7 @@ fn adler32(bytes: &[u8]) -> u32 {
 mod tests {
     use super::*;
     use crate::generator::{ANY_SIZE, Anchors, KindDef, Layer, Node, Op, Population, SOLID, ball};
+    use fcc::light::linear_to_srgb;
 
     #[test]
     fn checksums_are_zlib_and_png_ones() {
@@ -939,17 +931,27 @@ mod tests {
     }
 
     #[test]
-    fn a_ray_sees_the_face_it_enters_by() {
+    fn a_ray_sees_a_voxel_along_its_direction_wherever_it_enters() {
         // A voxel white through its faces up, black through the others.
         let mut grid = VoxelGrid::new(&Box3 { min: [-4; 3], max: [4; 3] });
         let white = |k: usize| if FACES[k][1] > 0 { COLOUR_ONE } else { 0 };
         grid.put_whole(0, 0, 0, std::array::from_fn(|k| [white(k); 3]));
         let seen = |origin: [f64; 3], direction: [f64; 3]| {
-            first_hit(&grid, origin, normalize(direction), 8.0).map(|(_, [x, y, z], face)| grid.face(x, y, z, face) & 255)
+            let direction = normalize(direction);
+            first_hit(&grid, origin, direction, 8.0).map(|(_, [x, y, z], face)| (grid.along(x, y, z, direction) & 255, FACES[face][1]))
         };
-        assert_eq!(seen([0.1, 3.0, 0.2], [0.0, -1.0, 0.0]), Some(255));
-        assert_eq!(seen([-3.0, 0.1, 0.2], [1.0, 0.0, 0.0]), Some(0));
-        assert_eq!(seen([-3.0, 3.2, 0.1], [1.0, -1.0, 0.0]), Some(255));
+        assert_eq!(seen([0.1, 3.0, 0.2], [0.0, -1.0, 0.0]), Some((255, 1)));
+        // Along +x, by its four faces towards −x, one of them up: a quarter of it.
+        let srgb = |linear: f32| (255.0 * linear_to_srgb(linear)).round() as u32;
+        assert_eq!(seen([-3.0, 0.1, 0.2], [1.0, 0.0, 0.0]), Some((srgb(0.25), 0)));
+        // A little down, it enters by a face down and sees it by the face turned most against it, up.
+        assert_eq!(seen([-3.0, -0.2, 0.1], [1.0, -0.1, 0.0]), Some((255, -1)));
+        // Straight down onto a ridge of two faces up, as much of each.
+        let mut ridge = VoxelGrid::new(&Box3 { min: [-4; 3], max: [4; 3] });
+        let half = |k: usize| if FACES[k] == [1, 1, 0] || FACES[k] == [0, 1, 1] { COLOUR_ONE } else { 0 };
+        ridge.put_whole(0, 0, 0, std::array::from_fn(|k| [half(k); 3]));
+        let grey = ridge.along(0, 0, 0, [0.0, -1.0, 0.0]) & 255;
+        assert_eq!(grey, srgb(0.5));
     }
 
     #[test]

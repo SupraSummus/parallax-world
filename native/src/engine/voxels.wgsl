@@ -5,7 +5,7 @@
 // samples met, and takes the nearest it enters (resolve_fragment).
 // See-through voxels (a medium: fog, water, a far canopy) add up on the way,
 // in the order the ray meets them, each by its path through it.
-// A voxel shows its look through the face a ray enters it by, times the
+// A voxel shows how it looks along the ray (`seen`), times the
 // light on it: shaded, by the way its surface faces; lit, the light its tile
 // found for it (world.rs), its own glow counted in. A brick not
 // lit yet is not on the GPU (voxels.rs), as one of a tile not made: rays take
@@ -158,9 +158,9 @@ fn light_at(level: u32, s: vec3i) -> u32 {
 // The colour of the see-through voxel of look `v` at `r` in the brick at `slot`: under the light on it, shaded as its faces are on average.
 fn medium_colour(slot: i32, r: vec3i, v: u32) -> vec3f {
   if globals.lit != 0u {
-    return coloured(v, rgb9e5(light_in(slot, r)));
+    return coloured(unpack4x8unorm(v).rgb, rgb9e5(light_in(slot, r)));
   }
-  return coloured(v, vec3f(MEDIUM_SHADE));
+  return coloured(unpack4x8unorm(v).rgb, vec3f(MEDIUM_SHADE));
 }
 
 // The site of the FCC lattice (x + y + z even) whose voxel holds `p`.
@@ -402,10 +402,9 @@ fn to_srgb(c: vec3f) -> vec3f {
   return select(1.055 * pow(c, vec3f(1.0 / 2.4)) - 0.055, c * 12.92, c <= vec3f(0.0031308));
 }
 
-// Look `v` under `light`: shaded, its colour times a shade, as the splats paint it; lit, its colour
-// (linear) times the light, which counts its own glow (voxels.rs's `light`), as worldgen's Light::relight shows it.
-fn coloured(v: u32, light: vec3f) -> vec3f {
-  let rgb = unpack4x8unorm(v).rgb;
+// Colour `rgb` (sRGB) under `light`: shaded, times a shade, as the splats paint it; lit, linear times the
+// light, which counts its own glow (voxels.rs's `light`), as worldgen's Light::relight shows it.
+fn coloured(rgb: vec3f, light: vec3f) -> vec3f {
   if globals.lit == 0u {
     return rgb * light;
   }
@@ -424,20 +423,22 @@ fn face_look(hit: Hit, k: u32) -> u32 {
   return site_in(faces, (hit.site - levels[hit.level].min) & vec3i(BRICK - 1));
 }
 
-// The face (of FACES) a ray along `d` enters the voxel hit by, as worldgen's picture.rs finds it:
-// of those it comes in across, the one whose plane it crosses last ((p − site) · n ≤ 1 inside).
-fn entered(hit: Hit, d: vec3f) -> u32 {
-  let q = eye.xyz / exp2(f32(hit.level)) - vec3f(hit.site);
-  var face = 0u;
-  var last = -1e30;
+// What the voxel hit looks like along `d` (sRGB): the mean (linear) of its looks through the faces turned
+// most against `d`, alike (fcc's `facing`), wherever the ray enters it.
+fn seen(hit: Hit, d: vec3f) -> vec3f {
+  var least = 1e30;
   for (var k = 0u; k < 12u; k++) {
-    let along = dot(FACES[k], d);
-    if along < 0.0 && (1.0 - dot(q, FACES[k])) / along > last {
-      last = (1.0 - dot(q, FACES[k])) / along;
-      face = k;
+    least = min(least, dot(FACES[k], d));
+  }
+  var sum = vec3f(0.0);
+  var faces = 0.0;
+  for (var k = 0u; k < 12u; k++) {
+    if dot(FACES[k], d) <= least + 1e-6 {
+      sum += to_linear(unpack4x8unorm(face_look(hit, k)).rgb);
+      faces += 1.0;
     }
   }
-  return face;
+  return to_srgb(sum / faces);
 }
 
 // The light on the voxel hit: shaded, the mean of its open faces' shades; lit, its tile's (lit).
@@ -493,7 +494,7 @@ fn sample_fragment(in: Screen) -> Sample {
   if hit.level >= LOST {
     return Sample(vec4u(0u, 0u, 0u, hit.level), vec2u(0u, medium));
   }
-  let colour = coloured(face_look(hit, entered(hit, d)), light_on(hit));
+  let colour = coloured(seen(hit, d), light_on(hit));
   return Sample(vec4u(bitcast<vec3u>(hit.site), hit.level), vec2u(pack4x8unorm(vec4f(colour, 1.0)), medium));
 }
 
