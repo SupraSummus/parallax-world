@@ -68,6 +68,15 @@ Numbers are for the forest at 1280×800, as measured when written.
   full already: what the solid stops is lost.
   From level 4, small blocks, balls and specks on the ground
   keep 0.4 to 0.6 of what they stop from above; lifted clear of it, 0.8.
+- **The railway's track is too bright seen low from level 2.**
+  At level 0 its sleepers and rails hide the ballast from a ray coming in low;
+  at level 1 a medium of them over it does (`railway.rs`, as `Column::medium`);
+  from level 2, shorter than a spacing, they are its top's dithered shares,
+  as seen from above, and the grey ballast shows from every side.
+  A field giving its sites a material per face, as a thing's far form does
+  (`Look`'s faces, measured in `generator/forms.rs`),
+  would keep the ballast's shares on the faces looking up
+  and the sleepers and rails on the others.
 - **A thin ellipsoid between two planes of sites can vanish.**
   Its thickness grows to half a site either way of its centre,
   so centred between two planes it holds their sites only at a point:
@@ -77,7 +86,8 @@ Numbers are for the forest at 1280×800, as measured when written.
   the moor's stream bed and the railway write out
   `Column`'s rule of two sites (`.max(2 * spacing)`);
   the ponds' reeds, the rails and the city's roads leave detail out by level,
-  and the railway's ballast dithers by hand, in shares of iron and timber.
+  and the railway's ballast dithers by hand, in shares of iron and timber,
+  or, where the rails are as tall as a spacing, bears a medium of them.
   Sizes on spans, as children have,
   and patterns read through `Plan::dithered`
   would leave the spacing to the engine but in the canopy and scenes.
