@@ -106,6 +106,8 @@ const DECK: i64 = m(2.5);
 const BORE: i64 = m(2.5);
 const WALLS: i64 = m(2.5);
 const LINING: i64 = m(0.5);
+/** The bores' order: after every other layer of the valley. */
+const BORES: f64 = 9.0;
 /** A platform from PLATFORM to its building, PLATFORM_HIGH over the track; the building behind it, on the formation. */
 const PLATFORM: i64 = m(2.25);
 const PLATFORM_HIGH: i64 = 6;
@@ -528,7 +530,8 @@ fn layers(railway: Rc<Railway>, hold: Holding, ground: Rc<Sloped>) -> Vec<Layer>
         let line = railway.line.clone();
         let top = Rc::new(Sloped::new(Rc::new(Plan::new("railway's top", SCALE, move |_, z| line.track(z).1)), 1));
         let railway = railway.clone();
-        Field::columns("railway's tunnels", 0.9, Op::Carve, move |x, z| {
+        // Last: nothing standing over a tunnel (trees and plants at a portal, mist) reaches into its bore.
+        Field::columns("railway's tunnels", BORES, Op::Carve, move |x, z| {
             let Some(at) = railway.at(x, z).filter(|a| a.structure == Structure::Tunnel && a.distance < Units(BORE).to_fx()) else {
                 return Vec::new();
             };
@@ -537,10 +540,12 @@ fn layers(railway: Rc<Railway>, hold: Holding, ground: Rc<Sloped>) -> Vec<Layer>
         .about(top, m(1.0), arch(0) + m(1.0))
     };
     let seed = railway.line.surfaces;
-    let track = {
+    // The track, and what carries it: in a tunnel, drawn after its bore.
+    let track = |name, order, tunnel: bool| {
         let railway = railway.clone();
-        Field::columns("railway", 0.95, Op::Paint, move |x, z| {
-            let Some(at) = railway.at(x, z) else { return Vec::new() };
+        let (ground, hold) = (ground.clone(), hold.clone());
+        Field::columns(name, order, Op::Paint, move |x, z| {
+            let Some(at) = railway.at(x, z).filter(|a| (a.structure == Structure::Tunnel) == tunnel) else { return Vec::new() };
             // Its rails and sleepers only where the sites are a unit apart, its ballast dithered of them further.
             let spacing = plan::spacing();
             let (top, e, floor) = (at.top, at.distance, bed(at.top));
@@ -610,7 +615,12 @@ fn layers(railway: Rc<Railway>, hold: Holding, ground: Rc<Sloped>) -> Vec<Layer>
             .anchor_along(1, move |cells| anchor.station_near(cells.centre[0], cells.centre[1]).map(|s| s.centre().map(|v| v as f64)))
             .make(move |_, c| line.station_near(c.centre[0], c.centre[2]).map(|s| building(&s)))
     };
-    vec![Layer::Field(bores), Layer::Field(track), Layer::Population(stations)]
+    vec![
+        Layer::Field(bores),
+        Layer::Field(track("railway", 0.95, false)),
+        Layer::Field(track("railway in its tunnels", BORES + 0.05, true)),
+        Layer::Population(stations),
+    ]
 }
 
 /** The bottom of the ballast under a track `top` high, and of what it lies on: half a metre down, two sites at least. */
