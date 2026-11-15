@@ -276,13 +276,14 @@ Numbers are for the forest at 1280×800, as measured when written.
   - A site's pieces, where shown, hide its medium and what is behind:
     right on average, but a coarse site of a crown in mist
     is a whole voxel or mist, never the crown's grain seen through mist.
-- **Native's voxels, lit, light more than shows**
+- **Native's voxels, lit, light what rays ask for a frame or two late**
   (architecture.md, "Native: another engine"):
-  every voxel of a tile a ray can meet is lit,
-  not only those that show.
-  Lighting a view's tiles takes six times as long as making them,
-  much of it generating the tiles around them that the light reads,
-  and the light takes twice the bricks' memory, so the pool holds a third as many.
+  turning, what comes into view shows coarser first,
+  as every ray past the window's edge does, till its bricks are lit.
+  The light takes twice the bricks' memory, so the pool holds a third as many.
+- **Native's voxels make every tile of their balls**, lit or not:
+  in the cheese, hundreds for a view whose walls hide all but a few.
+  Rays could ask for tiles as they ask for bricks to light.
 - **Native's voxels wait on memory** (`march` in `voxels.wgsl`):
   most of a frame is its samples' rays, some 50 steps each,
   and a step costs its reads one after another (a brick's slot, then its site),

@@ -41,7 +41,7 @@ impl Kind {
             Kind::Reliefs => Box::new(chunks::Chunks::new(world, true, false)),
             Kind::Flat => Box::new(chunks::Chunks::new(world, true, true)),
             Kind::Splats => Box::new(chunks::Chunks::new(world, false, false)),
-            Kind::Voxels => Box::new(voxels::Voxels),
+            Kind::Voxels => Box::new(voxels::Voxels::default()),
         }
     }
 }
