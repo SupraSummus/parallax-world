@@ -85,7 +85,7 @@ pub struct VoxelGrid {
 /**
  * What a site's pieces stop of the rays along each of the lattice's
  * directions, show and glow to them: by the face of VOXEL_FACES they head
- * into, along the opposite of its normal (`picture.rs`'s `facing`).
+ * into, along the opposite of its normal (fcc's `facing`).
  */
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Views {
@@ -213,6 +213,28 @@ impl VoxelGrid {
     }
 
     /**
+     * What the voxel at (x, y, z) looks like to a ray along `direction`:
+     * the mean of its looks through the faces turned most against it
+     * (fcc's `facing`); 0 if none, outside the box or not a site.
+     */
+    pub fn along(&self, x: i64, y: i64, z: i64, direction: [f64; 3]) -> Look {
+        match self.slot(x, y, z) {
+            Some(Ok(i)) if self.shown[i] => {
+                let (mut alpha, mut colour, mut faces) = (0, [0; 3], 0);
+                for k in fcc::facing(direction) {
+                    let (a, c) = self.part(i, k);
+                    alpha += a as u32;
+                    (0..3).for_each(|j| colour[j] += c[j] as u32);
+                    faces += 1;
+                }
+                let mean = |v: u32| (v + faces / 2) / faces;
+                look_of(colour.map(|c| mean(c) as u16), mean(alpha) as u8, ALPHA)
+            }
+            _ => 0,
+        }
+    }
+
+    /**
      * What is in site (x, y, z) looks like, shown or not: its pieces if
      * any, else its medium, each as much as it stops; 0 if nothing.
      */
@@ -246,9 +268,15 @@ impl VoxelGrid {
 
     /** What site `i`'s shown pieces look like to hosts through face `kind`: as along its direction, where they stop any of it, else as a whole. */
     fn view(&self, i: usize, kind: usize) -> Look {
+        let (alpha, colour) = self.part(i, kind);
+        if self.shown[i] { look_of(colour, alpha, ALPHA) } else { 0 }
+    }
+
+    /** Site `i`'s pieces along face `kind`'s direction: what they stop of it and show (premultiplied), where they stop any of it, else as a whole. */
+    fn part(&self, i: usize, kind: usize) -> (u8, [u16; 3]) {
         match self.views.get(&i) {
-            Some(v) if self.shown[i] && v.alpha[kind] > 0 => look_of(v.colour[kind], v.alpha[kind], ALPHA),
-            _ => self.look(i, false),
+            Some(v) if v.alpha[kind] > 0 => (v.alpha[kind], v.colour[kind]),
+            _ => (self.pieces.alpha[i], self.pieces.colour[i]),
         }
     }
 

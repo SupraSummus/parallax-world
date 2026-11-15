@@ -60,6 +60,19 @@ pub const VOXEL_FACES: [[i32; 3]; FACE_KINDS] = [
 
 /** Kinds of voxel faces. */
 pub const FACE_KINDS: usize = 12;
+
+/**
+ * The faces (kinds of VOXEL_FACES) a ray along `direction` sees a voxel
+ * by: those turned most against it, alike (a ray straight down sees
+ * four). What a site looks like along a direction is the mean of how it
+ * looks through them, wherever the ray enters it: one rule for every
+ * host and check (voxels.wgsl's `seen`, worldgen's pictures).
+ */
+pub fn facing(direction: [f64; 3]) -> impl Iterator<Item = usize> {
+    let against = move |k: usize| (0..3).map(|i| VOXEL_FACES[k][i] as f64 * direction[i]).sum::<f64>();
+    let least = (0..FACE_KINDS).map(against).fold(f64::INFINITY, f64::min);
+    (0..FACE_KINDS).filter(move |&k| against(k) <= least + 1e-9)
+}
 /** Faces of the view (FACES in view.ts). */
 pub const VIEW_FACES: usize = 12;
 
@@ -72,9 +85,9 @@ pub struct Lattice {
 }
 
 impl Lattice {
-    /** The kind (of VOXEL_FACES) of a voxel's face towards a camera looking along F: −F's. */
+    /** The kind (of VOXEL_FACES) of the one face a camera looking along F sees voxels by (`facing`): −F's. */
     pub fn front(&self) -> usize {
-        VOXEL_FACES.iter().position(|&n| n == self.f.map(|v| -v)).expect("−F is a face")
+        facing(self.f.map(f64::from)).next().expect("a face")
     }
 
     /** Lattice coordinates (a, b, c) in the world: (a·R + c·F) / 2 + b·U. */
@@ -453,6 +466,16 @@ mod tests {
         }
         assert!(tiles.has_all([[0, 0, 0], [1, 0, 0]]) && tiles.has_all([[0, 0, 0], [0, 1, 0]]));
         assert!(!tiles.has_all([[0, 0, 0], [1, 1, 0]]) && !tiles.has([0, 0, 1]));
+    }
+
+    #[test]
+    fn a_ray_sees_a_voxel_by_the_faces_turned_most_against_it() {
+        let seen = |d: [f64; 3]| facing(d).map(|k| VOXEL_FACES[k]).collect::<Vec<_>>();
+        assert_eq!(seen([0.0, -1.0, 0.0]), [[-1, 1, 0], [1, 1, 0], [0, 1, -1], [0, 1, 1]]);
+        assert_eq!(seen([0.3, -1.0, 0.1]), [[-1, 1, 0]]);
+        for lattice in lattices() {
+            assert_eq!(seen(lattice.f.map(f64::from)), [lattice.f.map(|v| -v)]);
+        }
     }
 
     #[test]
