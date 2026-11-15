@@ -76,11 +76,15 @@ pub struct VoxelGrid {
     pub medium: Part,
     /** By index in `cells`, of the sites that glow: how much, per channel, of GLOW_ONE. */
     pub glow: BTreeMap<usize, [u32; 3]>,
-    /** By index in `cells`, the sites whose pieces look unlike through each face: what they stop, show and glow per face. */
+    /** By index in `cells`, the sites whose pieces look unlike along each direction: what they stop, show and glow along each. */
     pub views: BTreeMap<usize, Views>,
 }
 
-/** What a site's pieces stop of the rays entering it by each face (of VOXEL_FACES), show and glow to them. */
+/**
+ * What a site's pieces stop of the rays along each of the lattice's
+ * directions, show and glow to them: by the face of VOXEL_FACES they head
+ * into, along the opposite of its normal (`picture.rs`'s `facing`).
+ */
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Views {
     pub alpha: [u8; FACE_KINDS],

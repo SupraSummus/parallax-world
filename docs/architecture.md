@@ -961,7 +961,7 @@ Mostly the faces are its site's material;
 the sites whose faces differ are listed apart (`faces`).
 Each reader shows the faces it sees:
 the baker the face towards its slices' camera (section 3),
-rays (`worldgen/src/picture.rs`) the one they enter by.
+rays (`worldgen/src/picture.rs`) those turned most against them.
 The box is cut into bricks 8 units wide, 256 sites,
 and only bricks with voxels are stored.
 A worker reads its copy of the grids for every face (`Reader` in `fcc/`),

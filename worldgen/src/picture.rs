@@ -212,23 +212,44 @@ impl Seen {
 const OPAQUE: f64 = 1e-4;
 
 /**
- * What the site `ray` is in shows it, as light sees it: its pieces (by
- * the face it entered) and its medium, each how much of the ray it stops
- * and what that shows (linear, premultiplied), and what the site glows to
- * it; the rest goes on (`through`). A site stops its alpha of a ray crossing its voxel; one
- * crossing `part` of the voxel's chord along it (starting or ending in
- * it) stops as a medium would: 1 − (1 − alpha)^part.
+ * The faces a ray along `direction` sees a voxel by: those turned most
+ * against it, alike (as a ray straight down sees four). What a site shows
+ * along a direction is what rays along it see of it, whichever face each
+ * enters by, as hosts read a face turned to the view.
+ */
+fn facing(direction: [f64; 3]) -> impl Iterator<Item = usize> {
+    let against = move |k: usize| dot(FACES[k].map(|v| v as f64), direction);
+    let least = (0..FACE_KINDS).map(against).fold(f64::INFINITY, f64::min);
+    (0..FACE_KINDS).filter(move |&k| against(k) <= least + 1e-9)
+}
+
+/**
+ * What the site `ray` is in shows it, as light sees it: its pieces (as
+ * seen along the ray, `facing`) and its medium, each how much of the ray
+ * it stops and what that shows (linear, premultiplied), and what the
+ * site glows to it; the rest goes on (`through`). A site stops its alpha
+ * of a ray crossing its voxel; one crossing `part` of the voxel's chord
+ * along it (starting or ending in it) stops as a medium would:
+ * 1 − (1 − alpha)^part.
  */
 fn composite(ray: &mut Ray, grid: &VoxelGrid, part: f64) -> ([(f64, [f64; 3]); 2], [f64; 3]) {
     let [x, y, z] = ray.site;
-    let (parts, glow) = grid.light(x, y, z, entered(ray));
-    let alpha = (parts[0].0 as f64 + parts[1].0 as f64) / ALPHA as f64;
+    let (mut parts, mut glow, mut faces) = ([(0.0, [0.0; 3]); 2], [0.0; 3], 0.0);
+    for k in facing(ray.direction) {
+        let (seen, glows) = grid.light(x, y, z, k);
+        for (sum, (alpha, colour)) in parts.iter_mut().zip(seen) {
+            sum.0 += alpha as f64 / ALPHA as f64;
+            (0..3).for_each(|c| sum.1[c] += colour[c] as f64 / COLOUR_ONE as f64);
+        }
+        (0..3).for_each(|c| glow[c] += glows[c] as f64 / GLOW_ONE as f64);
+        faces += 1.0;
+    }
+    let alpha = (parts[0].0 + parts[1].0) / faces;
     let scale = if alpha > 0.0 && part < 1.0 { (1.0 - (1.0 - alpha).powf(part)) / alpha } else { part };
-    let through = ray.through * scale;
-    let parts =
-        parts.map(|(alpha, colour)| (through * alpha as f64 / ALPHA as f64, colour.map(|c| through * c as f64 / COLOUR_ONE as f64)));
+    let through = ray.through * scale / faces;
+    let parts = parts.map(|(alpha, colour)| (through * alpha, colour.map(|c| through * c)));
     ray.through -= parts[0].0 + parts[1].0;
-    (parts, glow.map(|g| through * g as f64 / GLOW_ONE as f64))
+    (parts, glow.map(|g| through * g))
 }
 
 #[derive(Clone, Copy)]

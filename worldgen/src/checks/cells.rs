@@ -19,7 +19,7 @@ use crate::noise::Rng;
 use crate::picture::{composited, nearest_site};
 
 /** How many levels finer a level's cells are held to: more costs more, and loses less (a finer cell's mean forgets which of its rays it stops). */
-pub const FINER_BY: u32 = 1;
+pub const FINER_BY: u32 = 2;
 
 /** Cells checked at each level of a region, at most: more costs more, and tells more surely. */
 pub const SAMPLES: usize = 2000;
@@ -59,6 +59,11 @@ pub struct Cells {
 }
 
 impl Cells {
+    /** Whether every cell, along every direction, is within TOLERANCE of what is in it. */
+    pub fn kept(&self) -> bool {
+        self.cells.iter().all(|c| c.deviation() <= TOLERANCE)
+    }
+
     /** The share of the cells (each along each direction) further than `tolerance` from what is in them. */
     pub fn over(&self, tolerance: f64) -> f64 {
         self.cells.iter().filter(|c| c.deviation() > tolerance).count() as f64 / self.cells.len().max(1) as f64
@@ -100,7 +105,8 @@ impl std::fmt::Display for Cells {
         let n = self.cells.len().max(1) as f64;
         let buckets: Vec<String> = BUCKETS.iter().zip(counts).map(|(top, k)| format!("≤{top}: {:.1}%", 100.0 * k as f64 / n)).collect();
         writeln!(f, "  apart {}", buckets.join(", "))?;
-        writeln!(f, "  over {TOLERANCE}: {:.1}%; on average {}", 100.0 * self.over(TOLERANCE), look(&self.bias()))?;
+        let kept = if self.kept() { "kept" } else { "broken" };
+        writeln!(f, "  {kept}: over {TOLERANCE} {:.1}%; on average {}", 100.0 * self.over(TOLERANCE), look(&self.bias()))?;
         let mut worst: Vec<&Cell> = self.cells.iter().collect();
         worst.sort_by(|a, b| b.deviation().total_cmp(&a.deviation()));
         for cell in worst.iter().take(3) {
