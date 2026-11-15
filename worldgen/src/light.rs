@@ -740,6 +740,11 @@ mod tests {
         });
         let probes = [-48.0, -24.0, 32.0, 44.0, 56.0].map(|x| ground_near(x, 0.0)).to_vec();
         scenes.push(scene("yard, past a wall", yard, sky, probes, 1 << 16, 1.8));
+        // A tunnel 40 wide and high through a hill 384 long, under a roof 16 thick at every level, thinner than the coarse
+        // levels' sites: probed along its floor, from its middle out past a portal. The sun is side on: none of its light comes in.
+        let tunnel = world(&[], |x, y, z, _| y < 0 || z.abs() < 192 && y < 56 && !(x.abs() < 20 && y < 40));
+        let probes = [0.0, 96.0, 160.0, 224.0].map(|z| ground_near(0.0, z)).to_vec();
+        scenes.push(scene("tunnel under a thin roof", tunnel, day, probes, 1 << 16, 4.0));
         scenes
     }
 
