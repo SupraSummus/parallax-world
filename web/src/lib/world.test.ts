@@ -15,7 +15,7 @@ describe('World', () => {
     if (!grid) return false
     const { minX, minY, minZ, nx, ny, nz } = grid
     const box = { minX, minY, minZ, maxX: minX + nx, maxY: minY + ny, maxZ: minZ + nz }
-    const whole = VoxelGrid.compose(box, grid.materials, [generated('forest', 7).generate(box, level)])
+    const whole = VoxelGrid.compose(box, [generated('forest', 7).generate(box, level)])
     const within = near(camera, level)
     let [voxels, wrong] = [0, 0]
     whole.forEach((x, y, z, id) => {

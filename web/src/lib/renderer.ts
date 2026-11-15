@@ -1,7 +1,7 @@
 import { selectSlices, sliceCentre, chunkCell, chunkCells, cellMargin, matchTilings, sliceKey as sliceName, siteLayers, GRID_LEVELS, atomSpacing, type SliceId } from './slice-selection'
 import { ChunkBaker, type ChunkSplats, type ChunkRequest } from './chunk-baker'
 import { generatePart, World, worldTypes, type GridPart, type Vec3, type WorldType } from './world'
-import { LayerIndex, type LayerIndexData, type Material, type VoxelData } from './voxel-grid'
+import { LayerIndex, type LayerIndexData, type VoxelData } from './voxel-grid'
 import { Coverage } from './occlusion'
 import { FACES, LAYER, faceTangents, inFace, focalLength, onScreen, screenBox, toLocal, type Face, type Orientation, type ScreenBox, type TangentBox, type View } from './view'
 
@@ -220,10 +220,10 @@ export interface Bakery {
   /** Takes the callbacks for baked chunks, and for generated parts of grids with their LayerIndex. */
   connect(deliver: (request: ChunkRequest, chunk: ChunkSplats) => void, generated: (part: GridPart, grid: VoxelData, index: LayerIndexData) => void): void
   /**
-   * Replaces the world: its materials and its grids so far, by level
+   * Replaces the world: its grids so far, by level
    * (World.level); chunks of the previous one are no longer delivered.
    */
-  setWorld(materials: readonly Material[], levels: readonly (VoxelData | undefined)[]): void
+  setWorld(levels: readonly (VoxelData | undefined)[]): void
   /** Adds the grid of a level to the world, or replaces it. */
   addGrid(level: number, grid: VoxelData): void
   /** Generates parts of the world's grids (World.missingParts), each passed to the `generated` callback. */
@@ -588,10 +588,10 @@ export class ParallaxRenderer {
   private useWorld() {
     const { world, bakery } = this
     if (!bakery) {
-      this.baker = new ChunkBaker(world.materials, Array.from({ length: GRID_LEVELS }, (_, level) => world.levelAround(level, this.camera)))
+      this.baker = new ChunkBaker(Array.from({ length: GRID_LEVELS }, (_, level) => world.levelAround(level, this.camera)))
       return
     }
-    bakery.setWorld(world.materials, Array.from({ length: GRID_LEVELS }, (_, level) => world.level(level)))
+    bakery.setWorld(Array.from({ length: GRID_LEVELS }, (_, level) => world.level(level)))
     this.generateAround()
   }
 

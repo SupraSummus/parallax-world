@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { FACES } from './view'
 import { LayerIndex, VoxelGrid, isSite } from './voxel-grid'
 import { hills } from './hills.test-helper'
+import { lookOf } from './look.test-helper'
 import { voxelsOf } from './scene.test-helper'
 
 const grid = hills(7).levelAround(0, { x: 0, y: 0, z: 0 })
@@ -9,7 +10,7 @@ const voxels = voxelsOf(grid)
 
 describe('VoxelGrid', () => {
   it('stores the sites of its box, in bricks of those it has voxels in, and nothing else', () => {
-    const grid = new VoxelGrid({ minX: -3, minY: 0, minZ: 0, maxX: 20, maxY: 3, maxZ: 2 }, [])
+    const grid = new VoxelGrid({ minX: -3, minY: 0, minZ: 0, maxX: 20, maxY: 3, maxZ: 2 })
     // Widened to start and end on an even x.
     expect([grid.minX, grid.nx]).toEqual([-4, 24])
     const sites: [number, number, number][] = []
@@ -18,16 +19,19 @@ describe('VoxelGrid', () => {
         for (let x = -5; x < 21; x++) sites.push([x, y, z])
       }
     }
-    sites.forEach(([x, y, z], n) => { grid.set(x, y, z, 1 + (n % 200)) })
+    // Looks of every alpha, the odd ones solid.
+    const look = (n: number) => (((n % 255) + 1) << 24 | n) >>> 0
+    sites.forEach(([x, y, z], n) => { grid.set(x, y, z, look(n), (n & 1) === 1) })
     sites.forEach(([x, y, z], n) => {
       const inside = x >= -4 && x < 20 && y >= 0 && y < 3 && z >= 0 && z < 2 && isSite(x, y, z)
-      expect(grid.get(x, y, z)).toBe(inside ? 1 + (n % 200) : 0)
+      expect(grid.get(x, y, z)).toBe(inside ? look(n) : 0)
+      expect(grid.isSolid(x, y, z)).toBe(inside && (n & 1) === 1)
     })
     // Three bricks along x, all with voxels; clearing one site keeps its brick.
     expect([...grid.bricks]).toEqual([0, 1, 2])
     grid.set(0, 0, 0, 0)
     expect(grid.get(0, 0, 0)).toBe(0)
-    expect(new VoxelGrid({ minX: 0, minY: 0, minZ: 0, maxX: 64, maxY: 64, maxZ: 64 }, []).bricks.every(b => b === -1)).toBe(true)
+    expect(new VoxelGrid({ minX: 0, minY: 0, minZ: 0, maxX: 64, maxY: 64, maxZ: 64 }).bricks.every(b => b === -1)).toBe(true)
   })
 })
 
@@ -70,7 +74,6 @@ describe('LayerIndex', () => {
     const shift = { x: 40000, y: 0, z: -40000 }
     const moved = new VoxelGrid(
       { minX: grid.minX + shift.x, minY: grid.minY, minZ: grid.minZ + shift.z, maxX: grid.minX + grid.nx + shift.x, maxY: grid.minY + grid.ny, maxZ: grid.minZ + grid.nz + shift.z },
-      grid.materials,
     )
     for (const v of voxels) moved.set(v.x + shift.x, v.y, v.z + shift.z, grid.get(v.x, v.y, v.z))
     const far = LayerIndex.of(moved)
@@ -88,9 +91,9 @@ describe('LayerIndex', () => {
 
   it('is as large as the voxels, not the box: tiles span the world heights', () => {
     const tables = (maxY: number) => {
-      const grid = new VoxelGrid({ minX: 0, minY: 0, minZ: 0, maxX: 32, maxY, maxZ: 32 }, [{ color: '' }, { color: '#ff0000' }])
+      const grid = new VoxelGrid({ minX: 0, minY: 0, minZ: 0, maxX: 32, maxY, maxZ: 32 })
       for (let x = 0; x < 32; x++) {
-        for (let z = 0; z < 32; z++) grid.set(x, (x + z) % 2, z, 1)
+        for (let z = 0; z < 32; z++) grid.set(x, (x + z) % 2, z, lookOf('#ff0000'))
       }
       return LayerIndex.of(grid).tables
     }

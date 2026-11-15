@@ -1,17 +1,16 @@
-//! The baker's exports (bake/), for chunk-baker.ts: it writes a world's
-//! colours and grids through the pointers these return, then bakes chunk
+//! The baker's exports (bake/), for chunk-baker.ts: it starts a world,
+//! writes its grids through the pointers these return, then bakes chunk
 //! after chunk, reading each result from RESULT and the splat and block
 //! buffers it points to.
 
 use std::cell::RefCell;
 
 use bake::{Baker, Slice};
-use fcc::{FACE_WORDS, Grid};
+use fcc::{Grid, VIEW_WORDS};
 
-/** A world being handed over, then baking it. */
+/** Baking a world, once started. */
 enum State {
     None,
-    Loading { colours: Vec<u32> },
     Ready(Box<Baker>),
 }
 
@@ -22,15 +21,10 @@ thread_local! {
     static SITES: RefCell<Vec<i32>> = const { RefCell::new(Vec::new()) };
 }
 
-/** Starts a world of `materials` materials; returns where to write their colours (u32, 0xrrggbb by id), then call world_ready. */
+/** Starts a world, with no grids yet. */
 #[unsafe(no_mangle)]
-pub extern "C" fn world_start(materials: usize) -> *mut u32 {
-    STATE.with_borrow_mut(|state| {
-        let mut colours = vec![0; materials];
-        let at = colours.as_mut_ptr();
-        *state = State::Loading { colours };
-        at
-    })
+pub extern "C" fn world_start() {
+    STATE.set(State::Ready(Box::default()));
 }
 
 /**
@@ -49,7 +43,7 @@ pub extern "C" fn world_grid(level: usize, min_x: i32, min_y: i32, min_z: i32, n
 
 /** Where to write the sites of the grid world_grid set last. */
 #[unsafe(no_mangle)]
-pub extern "C" fn world_cells() -> *mut u8 {
+pub extern "C" fn world_cells() -> *mut u32 {
     STATE.with_borrow_mut(|state| match state {
         State::Ready(baker) => baker.last_grid().map_or(std::ptr::null_mut(), |g| g.cells.as_mut_ptr()),
         _ => std::ptr::null_mut(),
@@ -57,27 +51,17 @@ pub extern "C" fn world_cells() -> *mut u8 {
 }
 
 /**
- * Where to write the faces (Grid::faces) of the grid world_grid set
- * last: FACE_WORDS words (u32) for each of `sites` sites, by index.
+ * Where to write the views (Grid::views) of the grid world_grid set
+ * last: VIEW_WORDS words (u32) for each of `sites` sites, by index.
  */
 #[unsafe(no_mangle)]
-pub extern "C" fn world_faces(sites: usize) -> *mut u32 {
+pub extern "C" fn world_views(sites: usize) -> *mut u32 {
     STATE.with_borrow_mut(|state| match state {
         State::Ready(baker) => baker.last_grid().map_or(std::ptr::null_mut(), |g| {
-            g.faces = vec![0; sites * FACE_WORDS];
-            g.faces.as_mut_ptr()
+            g.views = vec![0; sites * VIEW_WORDS];
+            g.views.as_mut_ptr()
         }),
         _ => std::ptr::null_mut(),
-    })
-}
-
-/** Finishes loading. */
-#[unsafe(no_mangle)]
-pub extern "C" fn world_ready() {
-    STATE.with_borrow_mut(|state| {
-        if let State::Loading { colours } = std::mem::replace(state, State::None) {
-            *state = State::Ready(Box::new(Baker::new(&colours)));
-        }
     })
 }
 

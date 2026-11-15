@@ -537,9 +537,9 @@ each the sum of what is in it (`see` in `generate.rs`),
 a coarse site's colour its kinds' mean shades;
 so a coarse level may draw one kind for another,
 as the moor's heather for its sprigs, if it looks alike.
-Hosts still take materials (docs/todo.md, "Cells hold what they look like"):
-a site's coin shows one of those in it as often as it is seen there
-(`VoxelGrid::show`), noisy, and a site too thin to show one still stops light.
+Hosts take what a site's pieces look like, through each face where it differs,
+whole as often as they are seen there, by a site's coin
+(`VoxelGrid::show`): noisy, and a site too thin to show still stops light.
 Margins quoted elsewhere in this document are older ones,
 in shares of material types or in sRGB.
 

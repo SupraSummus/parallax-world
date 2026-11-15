@@ -6,8 +6,8 @@
  */
 import { halfLayer, MAX_SLANT, type SliceId } from './slice-selection'
 import { FACES } from './view'
-import { LayerIndex, writeGrid, type LayerIndexData, type Material, type VoxelData } from './voxel-grid'
-import { copyIn, copyOut, wasmInstance } from './wasm'
+import { LayerIndex, writeGrid, type LayerIndexData, type VoxelData } from './voxel-grid'
+import { copyOut, wasmInstance } from './wasm'
 import { generatePart, type GridPart, type WorldType } from './world'
 
 /**
@@ -90,11 +90,10 @@ interface Mask {
 /** The baker's exports (web/wasm/src/baker.rs). */
 interface Baker {
   memory: WebAssembly.Memory
-  world_start: (materials: number) => number
+  world_start: () => void
   world_grid: (level: number, minX: number, minY: number, minZ: number, nx: number, ny: number, nz: number, used: number) => number
   world_cells: () => number
-  world_faces: (sites: number) => number
-  world_ready: () => void
+  world_views: (sites: number) => number
   bake: Call
   sites: () => number
 }
@@ -104,26 +103,25 @@ const faceIndex = new Map(FACES.map((face, index) => [face.name, index]))
 
 /**
  * Bakes chunks of one world: a WebAssembly instance holding a copy of its
- * grids, the palette of each face (it shades the materials' colours per
- * face itself, bake/src/tables.rs). `levels` are the world's grids by level of detail so far
- * (World.level), all of `materials`; the rest come with addGrid.
+ * grids (it shades their looks per face itself, bake/src/tables.rs).
+ * `levels` are the world's grids by level of detail so far (World.level);
+ * the rest come with addGrid.
  */
 export class ChunkBaker {
   private baker: Baker
   /** How many splats the chunk baked last has. */
   private count = 0
 
-  constructor(materials: readonly Material[], levels: readonly (VoxelData | undefined)[]) {
+  constructor(levels: readonly (VoxelData | undefined)[]) {
     const baker = wasmInstance() as unknown as Baker
     this.baker = baker
-    copyIn(baker.memory, baker.world_start(materials.length), Uint32Array.from(materials, ({ color }) => parseInt(color.slice(1), 16) || 0))
-    baker.world_ready()
+    baker.world_start()
     levels.forEach((grid, level) => { if (grid) this.addGrid(level, grid) })
   }
 
   /** Sets the grid of `level`; until then, its chunks are empty. */
   addGrid(level: number, grid: VoxelData) {
-    writeGrid(this.baker.memory, grid, (...box) => this.baker.world_grid(level, ...box), this.baker.world_cells, this.baker.world_faces)
+    writeGrid(this.baker.memory, grid, (...box) => this.baker.world_grid(level, ...box), this.baker.world_cells, this.baker.world_views)
   }
 
   /**
@@ -236,7 +234,7 @@ const requestKey = ({ face, level, atoms, layer, cutoff, i, j, grid }: ChunkRequ
  * the worker's last result the main thread had taken when it listed them.
  */
 export type BakeMessage =
-  | { type: 'world'; generation: number; materials: readonly Material[]; levels: readonly (VoxelData | undefined)[] }
+  | { type: 'world'; generation: number; levels: readonly (VoxelData | undefined)[] }
   | { type: 'grid'; generation: number; level: number; grid: VoxelData }
   | { type: 'generate'; generation: number; seed: number; worldType: WorldType; parts: GridPart[] }
   | { type: 'want'; requests: Float64Array; received: number }
@@ -297,8 +295,8 @@ export function bakeHandler(
     // Where its voxels are, so the main thread need not find out.
     const { keys, tables } = LayerIndex.of(grid)
     // Just the fields: a class's methods would not survive posting.
-    const { minX, minY, minZ, nx, ny, nz, bricks, cells, faces, materials } = grid
-    post({ type: 'part', generation, part, grid: { minX, minY, minZ, nx, ny, nz, bricks, cells, faces, materials }, index: { keys, tables } }, [bricks.buffer, cells.buffer, faces.buffer, ...tables.flatMap(t => [t.low.buffer, t.high.buffer])])
+    const { minX, minY, minZ, nx, ny, nz, bricks, cells, views, solid } = grid
+    post({ type: 'part', generation, part, grid: { minX, minY, minZ, nx, ny, nz, bricks, cells, views, solid }, index: { keys, tables } }, [bricks.buffer, cells.buffer, views.buffer, solid.buffer, ...tables.flatMap(t => [t.low.buffer, t.high.buffer])])
   }
   const step = () => {
     scheduled = false
@@ -316,7 +314,7 @@ export function bakeHandler(
   }
   return message => {
     if (message.type === 'world') {
-      baker = new ChunkBaker(message.materials, message.levels)
+      baker = new ChunkBaker(message.levels)
       generation = message.generation
       queue = new Float64Array(0)
       posted.clear()

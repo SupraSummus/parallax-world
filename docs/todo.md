@@ -65,8 +65,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   A site's pieces now may stop and glow unlike along each of the 12 directions
   (`VoxelGrid`'s `views`), so far only for a box's or an ellipsoid's sheet;
   straight down is none of them ("Cells hold what they look like", below).
-  Still to do: hosts (`into_grid` hands over no views),
-  rods, measured far forms,
+  Still to do: rods, measured far forms,
   and fields, whose sites are wholly in a span or out:
   a site on a span's end covering the share of each face's rays it crosses
   broke a column's closed sides, what `About` promises and planes of sites.
@@ -505,11 +504,12 @@ Numbers are for the forest at 1280×800, as measured when written.
   A site of `VoxelGrid` holds how much it stops, what that shows and what it glows,
   along each direction where they differ; worldgen reads only that
   (pictures, the contract, the light's reference), along a ray's direction.
+  Hosts take what a site looks like too, through each face where it differs (fcc's `Look`),
+  each site whole or not by a coin (`VoxelGrid::show`).
   Still to do:
   coverage by direction where sites are filled in part
   (fields' sites are wholly in a span or out, solids' views only for sheets);
-  hosts taking colours, not materials (`into_grid` hands over a material by a coin);
-  then no materials in grids at all.
+  then no materials in worldgen's grids at all (`seen`, `faces`, pictures by material).
   `checks::cells` (an experiment) holds each cell, one by one,
   to what is in it `FINER_BY` levels finer,
   along each of the 12 directions, by the rows of the finer level's sites in it.

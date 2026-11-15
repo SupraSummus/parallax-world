@@ -4,15 +4,15 @@
  * its world's grid of one level, copied in whenever the world replaces it.
  */
 import { writeGrid, type VoxelGrid } from './voxel-grid'
-import { copyIn, copyOut, wasmInstance } from './wasm'
+import { copyOut, wasmInstance } from './wasm'
 import type { Vec3, World } from './world'
 
 interface Exports {
   memory: WebAssembly.Memory
   walk_start: (x: number, y: number, z: number) => number
-  walk_materials: (count: number) => number
   walk_grid: (minX: number, minY: number, minZ: number, nx: number, ny: number, nz: number, used: number) => number
   walk_cells: () => number
+  walk_solid: () => number
   walk_step: (forward: number, right: number, yaw: number, jump: boolean, sneak: boolean, dt: number) => number
 }
 
@@ -43,8 +43,7 @@ export class Walker {
     const grid = world.level(this.level)
     if (grid && grid !== this.grid) {
       this.grid = grid
-      copyIn(wasm.memory, wasm.walk_materials(grid.materials.length) >>> 0, Uint8Array.from(grid.materials, m => (m.walkThrough ? 1 : 0)))
-      writeGrid(wasm.memory, grid, (...box) => wasm.walk_grid(...box) >>> 0, () => wasm.walk_cells() >>> 0)
+      writeGrid(wasm.memory, grid, (...box) => wasm.walk_grid(...box) >>> 0, () => wasm.walk_cells() >>> 0, undefined, () => wasm.walk_solid() >>> 0)
     }
     const { forward, right, yaw, jump, sneak } = input
     const [x, y, z, settled] = copyOut(wasm.memory, Float64Array, wasm.walk_step(forward, right, yaw, jump, sneak, dt) >>> 0, 4)

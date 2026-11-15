@@ -1,5 +1,5 @@
 import { GRID_LEVELS, GRID_REACH } from './slice-selection'
-import { BRICK, LayerIndex, VoxelGrid, type Box, type Material, type VoxelData } from './voxel-grid'
+import { BRICK, LayerIndex, VoxelGrid, type Box, type VoxelData } from './voxel-grid'
 import { generated, worlds } from './worldgen'
 
 export interface Vec3 {
@@ -18,11 +18,10 @@ export function worldTypes(): { value: WorldType; label: string }[] {
 
 /**
  * A world generated at each level, in any box (worldgen.ts): the voxels of
- * a box at a level, all of `materials`; the y its grid of each level spans;
- * and where the camera starts.
+ * a box at a level; the y its grid of each level spans; and where the
+ * camera starts.
  */
 export interface Generated {
-  materials: readonly Material[]
   generate: (box: Box, level: number) => VoxelData
   spawn: Vec3
   heights: (level: number) => { minY: number; maxY: number }
@@ -114,11 +113,6 @@ export class World {
     // Generated level by level, in parts.
     this.source = generated(worldType, seed)
     this.spawn = this.source.spawn
-  }
-
-  /** The materials of every grid's ids. */
-  get materials(): readonly Material[] {
-    return this.source ? this.source.materials : this.level(0)?.materials ?? []
   }
 
   /**
@@ -235,7 +229,7 @@ export class World {
     const parts = [...received.values()]
     // The old grid's tiles that this one does not hold are left out.
     const keeps = (x: number, z: number) => this.holds(centre, [Math.floor(x / TILE), Math.floor(z / TILE)])
-    const grid = VoxelGrid.compose(box, this.materials, [...(old ? [old] : []), ...parts.map(p => p.data)], keeps)
+    const grid = VoxelGrid.compose(box, [...(old ? [old] : []), ...parts.map(p => p.data)], keeps)
     // Each tile's LayerIndex, while the workers made them all.
     const kept = old ? this.tileIndices[level]?.filter(t => this.holds(centre, t.tile)) : []
     const fresh = parts.flatMap(({ tile, index }) => (index ? [{ tile, index }] : []))

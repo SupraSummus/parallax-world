@@ -19,8 +19,8 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use fcc::GRID_LEVELS;
 use fcc::light::{FaceLight, linear_to_srgb, srgb_to_linear};
+use fcc::{GRID_LEVELS, alpha_of};
 
 use crate::World;
 use crate::generator::{Generator, generate_shown, materials_of};
@@ -148,7 +148,7 @@ pub struct Light {
     cosines: [[f32; N]; N],
     /** Per direction, the face of the voxel it meets that it enters by. */
     enters: [usize; N],
-    /** Per material id: its colour as a share of the light on it. */
+    /** Per material id: its colour as a share of the light on it, for pictures (`relight`). */
     albedo: Vec<Rgb>,
     /** The radiance of a glow of GLOW_ONE. */
     glow: f32,
@@ -205,14 +205,15 @@ impl Light {
     /** How light sees face `face` of `site` of level `i`: how much of it stops (alpha) and its colour; what it glows. */
     fn see(&mut self, i: usize, site: [i64; 3], face: usize) -> ((f32, Rgb), Rgb) {
         let Some(([x, y, z], grid)) = self.hold(i, site) else { return ((0.0, [0.0; 3]), [0.0; 3]) };
-        let ((id, alpha), glow) = (grid.face(x, y, z, face), grid.glow(x, y, z));
-        ((alpha as f32 / ALPHA as f32, self.albedo[id as usize]), glow.map(|g| g as f32 * self.glow))
+        let (look, glow) = (grid.face(x, y, z, face), grid.glow(x, y, z));
+        let [r, g, b, alpha] = look.to_le_bytes().map(|c| c as f32 / 255.0);
+        ((alpha, [r, g, b].map(srgb_to_linear)), glow.map(|g| g as f32 * self.glow))
     }
 
     /** How much of what comes through `site` of level `i` it lets through. */
     fn open(&mut self, i: usize, site: [i64; 3]) -> f32 {
         let Some(([x, y, z], grid)) = self.hold(i, site) else { return 1.0 };
-        1.0 - grid.get(x, y, z).1 as f32 / ALPHA as f32
+        1.0 - alpha_of(grid.get(x, y, z)) as f32 / ALPHA as f32
     }
 
     /** The grid of level `i` that holds `site`, from those shared (Shared::holding), and `site` as it takes it; none above or below every voxel. */
@@ -377,6 +378,11 @@ impl Light {
             }
         }
         std::array::from_fn(|f| std::array::from_fn(|c| lit.iter().map(|l| l[f][c]).sum::<f32>() / lit.len().max(1) as f32))
+    }
+
+    /** What the voxel at `site` of `level` glows. */
+    pub fn glow(&mut self, level: u32, site: [i64; 3]) -> Rgb {
+        self.see(level as usize, site, 0).1
     }
 
     /** What lights the voxel at `site` of `level` (on_voxel), if light gets out of it: none if a ray meets it only where levels meet. */

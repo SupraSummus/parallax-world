@@ -4,10 +4,14 @@
 
 use std::collections::BTreeMap;
 
-use fcc::{FACE_KINDS, Faces, face_words};
+use fcc::light::linear_to_srgb;
+use fcc::{FACE_KINDS, Look};
 
 // The baker's grids, as worlds hand them over (web/wasm/src/lib.rs), the voxel's faces, and a whole site's alpha: it stops every ray.
-pub use fcc::{ALPHA, FACE_WORDS, Grid, VOXEL_FACES};
+pub use fcc::{ALPHA, Grid, VOXEL_FACES};
+
+/** A voxel's material on each of its faces, by kind (VOXEL_FACES). */
+pub type Faces = [u8; FACE_KINDS];
 
 pub const BRICK: i64 = 8;
 const BRICK_SITES: usize = (BRICK * BRICK * BRICK / 2) as usize;
@@ -101,6 +105,8 @@ pub struct Part {
     pub colour: Vec<[u16; 3]>,
     /** The material hosts show them as, one of theirs (`show`, `into_grid`). */
     pub seen: Vec<u8>,
+    /** Whether what hosts show of them stops a walking body (KindDef::walk_through, not). */
+    pub solid: Vec<bool>,
 }
 
 /** The glow of a site all of a glowing white: 255 per channel (linear), of a whole share (generator's SHARE). */
@@ -161,9 +167,11 @@ impl VoxelGrid {
         pieces.alpha.extend([ALPHA; BRICK_SITES]);
         pieces.colour.extend([colour; BRICK_SITES]);
         pieces.seen.extend([id; BRICK_SITES]);
+        pieces.solid.extend([true; BRICK_SITES]);
         medium.alpha.extend([0; BRICK_SITES]);
         medium.colour.extend([[0; 3]; BRICK_SITES]);
         medium.seen.extend([0; BRICK_SITES]);
+        medium.solid.extend([false; BRICK_SITES]);
         VoxelGrid { cells, faces, pieces, medium, glow, views, ..grid }
     }
 
@@ -264,15 +272,16 @@ impl VoxelGrid {
                     part.alpha.resize(len, 0);
                     part.colour.resize(len, [0; 3]);
                     part.seen.resize(len, 0);
+                    part.solid.resize(len, false);
                 }
                 self.slot(x, y, z).and_then(Result::ok)
             }
         }
     }
 
-    /** Sets what site `i`'s pieces show: material `id`, its faces' if they differ. */
-    pub fn see(&mut self, i: usize, id: u8, faces: Option<Faces>) {
-        self.pieces.seen[i] = id;
+    /** Sets what site `i`'s pieces show: material `id`, its faces' if they differ, and whether that stops a walking body. */
+    pub fn see(&mut self, i: usize, id: u8, faces: Option<Faces>, solid: bool) {
+        (self.pieces.seen[i], self.pieces.solid[i]) = (id, solid);
         match faces.filter(|faces| faces.iter().any(|&m| m != id)) {
             Some(faces) => self.faces.insert(i, faces),
             None if !self.faces.is_empty() => self.faces.remove(&i),
@@ -375,6 +384,7 @@ impl VoxelGrid {
             hold(&mut part.alpha, &held);
             hold(&mut part.colour, &held);
             hold(&mut part.seen, &held);
+            hold(&mut part.solid, &held);
         }
         let to = |i: usize| moved[i / BRICK_SITES].map(|to| to * BRICK_SITES + i % BRICK_SITES);
         self.faces = std::mem::take(&mut self.faces).into_iter().filter_map(|(i, f)| Some((to(i)?, f))).collect();
@@ -421,43 +431,68 @@ impl VoxelGrid {
 
     /**
      * The voxels as the baker takes them, bricks with none left out: each
-     * site's pieces where shown (`show`), whole; and `see_through`, for a
-     * host that draws alpha, elsewhere its medium, as much as it stops.
-     * What glows, shown or not, for the light: its bricks are kept too.
+     * site's pieces where shown (`show`), whole, as they look through each
+     * face; and `see_through`, for a host that draws alpha, elsewhere its
+     * medium, as much as it stops. What glows, shown or not, for the light:
+     * its bricks are kept too.
      */
     pub fn into_grid(mut self, see_through: bool) -> Grid {
-        // Faces are the pieces': none where they don't show, though its medium may.
-        let cells = &self.cells;
-        self.faces.retain(|&i, _| cells[i] != 0);
-        if see_through {
-            let medium = &mut self.medium;
-            for ((cell, alpha), &seen) in self.cells.iter_mut().zip(&mut medium.alpha).zip(&medium.seen) {
-                match *cell {
-                    0 if *alpha > 0 => *cell = seen,
-                    0 => {}
-                    _ => *alpha = ALPHA,
-                }
-            }
-        }
+        let looks: Vec<Look> = (0..self.cells.len())
+            .map(|i| match self.cells[i] {
+                0 if see_through && self.medium.alpha[i] > 0 => look_of(self.medium.colour[i], self.medium.alpha[i], self.medium.alpha[i]),
+                0 => 0,
+                _ => look_of(self.pieces.colour[i], self.pieces.alpha[i], ALPHA),
+            })
+            .collect();
+        let views: Vec<(usize, [Look; FACE_KINDS])> = std::mem::take(&mut self.views)
+            .into_iter()
+            .filter(|&(i, _)| self.cells[i] != 0)
+            .map(|(i, v)| (i, std::array::from_fn(|k| if v.alpha[k] == 0 { looks[i] } else { look_of(v.colour[k], v.alpha[k], ALPHA) })))
+            .collect();
+        let solid: Vec<bool> = (0..self.cells.len()).map(|i| self.cells[i] != 0 && self.pieces.solid[i]).collect();
         let keep: Vec<bool> = (0..self.cells.len() / BRICK_SITES)
             .map(|at| {
                 let sites = at * BRICK_SITES..(at + 1) * BRICK_SITES;
-                self.cells[sites.clone()].iter().any(|&c| c != 0) || self.glow.range(sites).next().is_some()
+                looks[sites.clone()].iter().any(|&c| c != 0) || self.glow.range(sites).next().is_some()
             })
             .collect();
-        self.hold(|at| keep[at]);
-        let faces = self.faces.iter().flat_map(|(&i, faces)| face_words(i, faces));
-        let glow = self.glow.iter().flat_map(|(&i, &[r, g, b])| [i as u32, r, g, b]);
-        Grid {
-            min: self.min.map(|v| v as i32),
-            n: self.n.map(|v| v as i32),
-            faces: faces.collect(),
-            glow: glow.collect(),
-            bricks: self.bricks,
-            alpha: if see_through { self.medium.alpha } else { Vec::new() },
-            cells: self.cells,
+        let mut moved = vec![None; keep.len()];
+        let mut grid = Grid::new(self.min.map(|v| v as i32), self.n.map(|v| v as i32), 0);
+        for (place, &at) in self.bricks.iter().enumerate() {
+            let Ok(at) = usize::try_from(at) else { continue };
+            if !keep[at] {
+                continue;
+            }
+            let to = *moved[at].get_or_insert_with(|| {
+                let to = grid.cells.len() / BRICK_SITES;
+                grid.cells.extend_from_slice(&looks[at * BRICK_SITES..][..BRICK_SITES]);
+                grid.solid.extend(
+                    (0..BRICK_SITES / 32)
+                        .map(|w| (0..32).filter(|b| solid[at * BRICK_SITES + 32 * w + b]).fold(0, |word, b| word | 1 << b)),
+                );
+                to
+            });
+            grid.bricks[place] = to as i32;
         }
+        let to = |i: usize| moved[i / BRICK_SITES].map(|to| (to * BRICK_SITES + i % BRICK_SITES) as u32);
+        let sorted = |words: &mut dyn Iterator<Item = Vec<u32>>| -> Vec<u32> {
+            let mut sites: Vec<Vec<u32>> = words.collect();
+            sites.sort_unstable_by_key(|w| w[0]);
+            sites.concat()
+        };
+        grid.views = sorted(&mut views.iter().filter_map(|(i, v)| Some([&[to(*i)?][..], v].concat())));
+        grid.glow = sorted(&mut self.glow.iter().filter_map(|(&i, g)| Some([&[to(i)?][..], g].concat())));
+        grid
     }
+}
+
+/**
+ * A look of colour `colour` (linear, premultiplied by `alpha`, of
+ * COLOUR_ONE): its colour unpremultiplied, sRGB, and `shown` its alpha.
+ */
+fn look_of(colour: [u16; 3], alpha: u8, shown: u8) -> Look {
+    let of = alpha.max(1) as f32 / ALPHA as f32 * COLOUR_ONE as f32;
+    fcc::look(colour.map(|c| (255.0 * linear_to_srgb((c as f32 / of).min(1.0))).round() as u8), shown)
 }
 
 #[cfg(test)]
@@ -474,17 +509,28 @@ mod tests {
         assert_eq!((grid.faces.len(), grid.face(2, 2, 2, 1), grid.face(4, 2, 2, 1), grid.get(2, 2, 2)), (2, 3, 2, 2));
         grid.set(2, 2, 2, 5);
         assert_eq!((grid.faces.len(), grid.face(2, 2, 2, 1)), (1, 5));
+    }
 
-        // Handed over with its first brick emptied, that brick is left out, and the next moves with its sites' faces.
-        // The last, with no voxel but a site that glows, is kept for its glow.
+    #[test]
+    fn a_site_is_handed_over_as_it_looks_through_each_face_and_moves_with_its_brick() {
+        // Pieces in the second brick, a grey through every face but one; a lamp, nothing shown, in the third.
+        let mut grid = VoxelGrid::new(&Box3 { min: [0; 3], max: [24, 8, 8] });
+        grid.set(2, 2, 2, 1);
         grid.set(2, 2, 2, 0);
-        grid.set(4, 2, 2, 0);
+        let i = grid.index(10, 2, 2).unwrap();
+        let grey = |c: u16| [c; 3];
+        (grid.cells[i], grid.pieces.alpha[i], grid.pieces.colour[i]) = (1, ALPHA, grey(COLOUR_ONE / 5));
+        let mut colour = [grey(COLOUR_ONE / 5); FACE_KINDS];
+        colour[3] = grey(COLOUR_ONE);
+        grid.views.insert(i, Views { alpha: [ALPHA; FACE_KINDS], colour, glow: [[0; 3]; FACE_KINDS] });
         let lamp = grid.index(18, 2, 2).unwrap();
         grid.glow.insert(lamp, [1, 2, 3]);
         let whole = grid.into_grid(false);
-        assert_eq!((whole.cells.len(), whole.get(2, 2, 2)), (2 * BRICK_SITES, (0, 0)));
-        assert_eq!([0, 1].map(|k| whole.face(10, 2, 2, k)), [(2, ALPHA), (3, ALPHA)]);
-        assert_eq!((whole.get(18, 2, 2), whole.glow(18, 2, 2), whole.glow(10, 2, 2)), ((0, 0), [1, 2, 3], [0; 3]));
+        // A fifth of white, linear, is 124 of 255 in sRGB.
+        let (dim, white) = (fcc::look([124; 3], ALPHA), fcc::look([255; 3], ALPHA));
+        assert_eq!((whole.cells.len(), whole.get(2, 2, 2), whole.get(10, 2, 2)), (2 * BRICK_SITES, 0, dim));
+        assert_eq!([2, 3].map(|k| whole.face(10, 2, 2, k)), [dim, white]);
+        assert_eq!((whole.get(18, 2, 2), whole.glow(18, 2, 2), whole.glow(10, 2, 2)), (0, [1, 2, 3], [0; 3]));
     }
 
     #[test]
@@ -512,30 +558,32 @@ mod tests {
         for [x, y, z] in sites() {
             if buried([x, y, z]) {
                 assert_eq!(grid.light(x, y, z, 1).0[0].0, ALPHA, "{x}, {y}, {z}");
-                assert_ne!(handed.get(x as i32, y as i32, z as i32).0, 0);
+                assert_ne!(handed.get(x as i32, y as i32, z as i32), 0);
             } else {
                 assert_eq!(grid.light(x, y, z, 1), before.light(x, y, z, 1), "{x}, {y}, {z}");
-                assert_eq!((grid.get(x, y, z), handed.get(x as i32, y as i32, z as i32).0), (before.get(x, y, z), before.get(x, y, z)));
+                assert_eq!(grid.get(x, y, z), before.get(x, y, z));
+                assert_eq!(handed.get(x as i32, y as i32, z as i32) != 0, before.get(x, y, z) != 0);
             }
         }
-        assert_eq!(handed.face(44, 44, 44, 1), (2, ALPHA));
     }
 
     #[test]
     fn a_site_is_handed_over_as_its_pieces_where_shown_and_elsewhere_its_medium() {
         let mut grid = VoxelGrid::new(&Box3 { min: [0; 3], max: [8, 8, 8] });
-        // Pieces of material 2, under the coin and over it, without a medium of material 1 and in one.
+        // White pieces that stop a walking body, under the coin and over it, without a black medium and in one.
         let sites: [(i32, i32, u8, u8); 5] = [(0, 0, 40, 0), (2, 0, 200, 0), (0, 2, 0, 60), (2, 2, 40, 60), (4, 2, 200, 60)];
         for (x, y, pieces, medium) in sites {
             let i = grid.index(x.into(), y.into(), 0).unwrap();
-            (grid.pieces.alpha[i], grid.pieces.seen[i]) = (pieces, 2);
+            let white = (COLOUR_ONE as u32 * pieces as u32 / ALPHA as u32) as u16;
+            (grid.pieces.alpha[i], grid.pieces.colour[i], grid.pieces.seen[i], grid.pieces.solid[i]) = (pieces, [white; 3], 2, true);
             (grid.medium.alpha[i], grid.medium.seen[i]) = (medium, 1);
         }
         grid.show(|_, _, _| 100);
         // Light sees all a site stops, each as it is: its pieces 40 of 255, its medium 60 of the rest.
         assert_eq!((grid.alpha(2, 2, 0), grid.light(2, 2, 0, 0).0.map(|part| part.0)), (91, [40, 51]));
-        let handed = |grid: Grid| sites.map(|(x, y, ..)| grid.get(x, y, 0));
-        assert_eq!(handed(grid.clone().into_grid(true)), [(0, 0), (2, ALPHA), (1, 60), (1, 60), (2, ALPHA)]);
-        assert_eq!(handed(grid.into_grid(false)), [(0, 0), (2, ALPHA), (0, 0), (0, 0), (2, ALPHA)]);
+        let handed = |grid: Grid| sites.map(|(x, y, ..)| (grid.get(x, y, 0), grid.solid(x, y, 0)));
+        let (pieces, medium) = ((fcc::look([255; 3], ALPHA), true), (fcc::look([0; 3], 60), false));
+        assert_eq!(handed(grid.clone().into_grid(true)), [(0, false), pieces, medium, medium, pieces]);
+        assert_eq!(handed(grid.into_grid(false)), [(0, false), pieces, (0, false), (0, false), pieces]);
     }
 }

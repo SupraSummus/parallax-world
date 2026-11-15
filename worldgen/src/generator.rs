@@ -6,8 +6,9 @@ use std::cell::{OnceCell, RefCell};
 use std::rc::Rc;
 use std::sync::OnceLock;
 
+use crate::grid::Faces;
 use fcc::light::srgb_to_linear;
-use fcc::{FACE_KINDS, Faces, VOXEL_FACES};
+use fcc::{FACE_KINDS, VOXEL_FACES};
 
 use crate::cost::{self, Work};
 use crate::curve::Curve;

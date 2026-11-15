@@ -1,24 +1,17 @@
 /**
- * Voxel storage on the face-centred cubic (FCC) lattice: one material id
- * per site of a box (0 = empty), in bricks, only the bricks with voxels
+ * Voxel storage on the face-centred cubic (FCC) lattice: what each site
+ * of a box looks like (0 = empty), in bricks, only the bricks with voxels
  * stored. Sites are the integer points with x + y + z even; each is the
  * centre of a rhombic dodecahedron (fcc.ts).
- * Plain typed arrays and integer ids, the same layout in TS or Rust/WASM.
+ * Plain typed arrays, the same layout in TS or Rust/WASM (fcc's Grid).
  */
 
 import { VOXEL_FACES } from './fcc'
 import { copyIn, copyOut, wasmInstance } from './wasm'
 import type { Vec3 } from './world'
 
-export interface Material {
-  /** '#rrggbb'; '' for id 0, empty. */
-  color: string
-  /** Whether a walking body goes through it, as through plants and water (walk.ts); scenes of voxels' are solid. */
-  walkThrough?: boolean
-}
-
 /** A grid's fields without its methods: what a worker receives from postMessage. */
-export type VoxelData = Pick<VoxelGrid, 'minX' | 'minY' | 'minZ' | 'nx' | 'ny' | 'nz' | 'bricks' | 'cells' | 'faces' | 'materials'>
+export type VoxelData = Pick<VoxelGrid, 'minX' | 'minY' | 'minZ' | 'nx' | 'ny' | 'nz' | 'bricks' | 'cells' | 'views' | 'solid'>
 
 /** Half-open integer box: x in [minX, maxX), y and z likewise. */
 export interface Box {
@@ -30,9 +23,6 @@ export interface Box {
   maxZ: number
 }
 
-/** Material ids are bytes. */
-const MAX_MATERIALS = 256
-
 /**
  * Bricks are BRICK lattice units wide along each axis, BRICK_SITES sites.
  * In the forest about a fifth of them hold voxels (the ground, the trees),
@@ -40,9 +30,11 @@ const MAX_MATERIALS = 256
  */
 export const BRICK = 8
 const BRICK_SITES = BRICK ** 3 / 2
+/** Words of `solid` per brick: a bit a site. */
+const SOLID_WORDS = BRICK_SITES / 32
 
-/** Words per site in a grid's `faces`: its index in `cells`, then its faces' materials, four to a word (fcc's FACE_WORDS). */
-export const FACE_WORDS = 4
+/** Words per site in a grid's `views`: its index in `cells`, then its look through each face (fcc's VIEW_WORDS). */
+export const VIEW_WORDS = 1 + VOXEL_FACES.length
 
 /**
  * Whether (x, y, z) is a site of the lattice.
@@ -53,13 +45,13 @@ export const isSite = (x: number, y: number, z: number) => ((x + y + z) & 1) ===
 /**
  * The box is cut into bricks BRICK units wide, from (minX, minY, minZ),
  * laid out z-major, then y, then x. A brick with voxels has BRICK_SITES
- * bytes of `cells`, its sites z-major, then y, then x, a row (y, z)
+ * words of `cells`, its sites z-major, then y, then x, a row (y, z)
  * holding every other x: those with x + y + z even. minX and nx are even,
  * so x − minX and its row's other sites share x div 2.
  *
- * A voxel has a material on each of its faces (VOXEL_FACES in fcc.ts):
- * what is seen of it looking at that face. Mostly they are one, its
- * site's in `cells`; `faces` lists the sites whose faces differ.
+ * A voxel looks as its site's word in `cells` says, unless `views` gives
+ * it a look of its own through a face (VOXEL_FACES in fcc.ts): what is
+ * seen of it looking at that face. Walking is stopped by those `solid` marks.
  */
 export class VoxelGrid {
   readonly minX: number
@@ -70,16 +62,12 @@ export class VoxelGrid {
   readonly nz: number
   /** Per brick, where its sites start in `cells`, in BRICK_SITES; −1 if it is empty. */
   readonly bricks: Int32Array
-  /** Material id per site of the bricks with voxels (0 is empty), and room for more bricks. */
-  cells: Uint8Array
-  /**
-   * The sites whose faces are not all of their material in `cells`, by
-   * index in `cells`, FACE_WORDS words each: the index, then the faces'
-   * materials, four to a word, the first in the lowest byte.
-   */
-  faces: Uint32Array = new Uint32Array(0)
-  /** Material of each id; entry 0 (empty) is unused. */
-  readonly materials: readonly Material[]
+  /** The look of each site of the bricks with voxels (0 is empty), and room for more bricks. */
+  cells: Uint32Array
+  /** The sites that look unlike through some faces, by index in `cells`, VIEW_WORDS words each: the index, then the look through each face. */
+  views: Uint32Array = new Uint32Array(0)
+  /** Bit i % 32 of word i / 32: whether the voxel at index i of `cells` stops a walking body (walk.ts). */
+  solid: Uint32Array
   // Bricks along x and y.
   private readonly bx: number
   private readonly by: number
@@ -87,8 +75,7 @@ export class VoxelGrid {
   private used = 0
 
   /** A grid of the sites in `box`, widened by one in x if needed to start and end on an even x. */
-  constructor(box: Box, materials: readonly Material[]) {
-    if (materials.length > MAX_MATERIALS) throw new RangeError(`at most ${String(MAX_MATERIALS)} materials`)
+  constructor(box: Box) {
     this.minX = Math.floor(box.minX / 2) * 2
     this.minY = box.minY
     this.minZ = box.minZ
@@ -98,8 +85,8 @@ export class VoxelGrid {
     this.bx = Math.ceil(this.nx / BRICK)
     this.by = Math.ceil(this.ny / BRICK)
     this.bricks = new Int32Array(this.bx * this.by * Math.ceil(this.nz / BRICK)).fill(-1)
-    this.cells = new Uint8Array(0)
-    this.materials = materials
+    this.cells = new Uint32Array(0)
+    this.solid = new Uint32Array(0)
   }
 
   /** Where site (x, y, z) is in `cells`: −1 outside the box or if it is not a site, −2 − its brick's index if that is empty. */
@@ -113,74 +100,89 @@ export class VoxelGrid {
     return at < 0 ? -2 - brick : at * BRICK_SITES + ((((k & 7) * BRICK + (j & 7)) * BRICK + (i & 7)) >> 1)
   }
 
-  /** Material id at (x, y, z); 0 if empty, outside the box or not a site. */
+  /** The look at (x, y, z); 0 if empty, outside the box or not a site. */
   get(x: number, y: number, z: number): number {
     const i = this.slot(x, y, z)
     return i < 0 ? 0 : this.cells[i]
   }
 
-  /** Where the site at `i` in `cells` is in `faces`, or −1 if its faces are its material. */
-  private faceRecord(i: number): number {
-    let [lo, hi] = [0, this.faces.length / FACE_WORDS]
+  /** Whether the voxel at (x, y, z) stops a walking body. */
+  isSolid(x: number, y: number, z: number): boolean {
+    const i = this.slot(x, y, z)
+    return i >= 0 && ((this.solid[i >> 5] >>> (i & 31)) & 1) === 1
+  }
+
+  /** Where the site at `i` in `cells` is in `views`, or −1 if it looks alike through every face. */
+  private viewRecord(i: number): number {
+    let [lo, hi] = [0, this.views.length / VIEW_WORDS]
     while (lo < hi) {
       const mid = (lo + hi) >> 1
-      const at = this.faces[mid * FACE_WORDS]
-      if (at === i) return mid * FACE_WORDS
+      const at = this.views[mid * VIEW_WORDS]
+      if (at === i) return mid * VIEW_WORDS
       if (at < i) lo = mid + 1
       else hi = mid
     }
     return -1
   }
 
-  /** The material of face `kind` (of VOXEL_FACES) of the voxel at (x, y, z); 0 if empty, outside the box or not a site. */
+  /** The look through face `kind` (of VOXEL_FACES) of the voxel at (x, y, z); 0 if empty, outside the box or not a site. */
   face(x: number, y: number, z: number, kind: number): number {
     const i = this.slot(x, y, z)
     if (i < 0 || this.cells[i] === 0) return 0
-    const at = this.faces.length > 0 ? this.faceRecord(i) : -1
-    return at < 0 ? this.cells[i] : (this.faces[at + 1 + (kind >> 2)] >>> (8 * (kind & 3))) & 255
+    const at = this.views.length > 0 ? this.viewRecord(i) : -1
+    return at < 0 ? this.cells[i] : this.views[at + 1 + kind]
   }
 
   /**
-   * Sets the faces of the voxels `sites` holds, each its position and
-   * its faces' materials (by VOXEL_FACES), as the only ones whose faces
-   * differ from their site's material. Sites not set yet are left out.
+   * Sets the views of the voxels `sites` holds, each its position and
+   * its look through each face (by VOXEL_FACES), as the only ones that
+   * look unlike through some faces. Sites not set yet are left out.
    * @internal
    */
-  setFaces(sites: Iterable<readonly [number, number, number, ArrayLike<number>]>) {
-    const faces: Uint32Array[] = []
-    for (const [x, y, z, materials] of sites) {
+  setViews(sites: Iterable<readonly [number, number, number, ArrayLike<number>]>) {
+    const views: Uint32Array[] = []
+    for (const [x, y, z, looks] of sites) {
       const i = this.slot(x, y, z)
-      if (i >= 0 && this.cells[i] !== 0) faces.push(faceWords(i, materials))
+      if (i >= 0 && this.cells[i] !== 0) views.push(Uint32Array.of(i, ...Array.from(looks)))
     }
-    this.faces = facesOf(faces)
+    this.views = viewsOf(views)
   }
 
-  /** Sets site (x, y, z) to material `id` (0 clears), all its faces; outside the box or off the sites, nothing. */
-  set(x: number, y: number, z: number, id: number) {
+  /**
+   * Sets site (x, y, z) to look `look` (0 clears) through every face,
+   * stopping a walking body if `solid`; outside the box or off the sites, nothing.
+   */
+  set(x: number, y: number, z: number, look: number, solid = look !== 0) {
     let i = this.slot(x, y, z)
-    const at = i >= 0 && this.faces.length > 0 ? this.faceRecord(i) : -1
+    const at = i >= 0 && this.views.length > 0 ? this.viewRecord(i) : -1
     if (at >= 0) {
-      const faces = new Uint32Array(this.faces.length - FACE_WORDS)
-      faces.set(this.faces.subarray(0, at))
-      faces.set(this.faces.subarray(at + FACE_WORDS), at)
-      this.faces = faces
+      const views = new Uint32Array(this.views.length - VIEW_WORDS)
+      views.set(this.views.subarray(0, at))
+      views.set(this.views.subarray(at + VIEW_WORDS), at)
+      this.views = views
     }
-    if (i === -1 || (i < 0 && id === 0)) return
+    if (i === -1 || (i < 0 && look === 0)) return
     if (i < 0) {
       const brick = -2 - i
       if (this.used * BRICK_SITES === this.cells.length) {
-        const grown = new Uint8Array(Math.max(16, Math.ceil(this.used * 1.25)) * BRICK_SITES)
+        const bricks = Math.max(16, Math.ceil(this.used * 1.25))
+        const grown = new Uint32Array(bricks * BRICK_SITES)
         grown.set(this.cells)
         this.cells = grown
+        const solid = new Uint32Array(bricks * SOLID_WORDS)
+        solid.set(this.solid)
+        this.solid = solid
       }
       this.bricks[brick] = this.used++
       i = this.slot(x, y, z)
     }
-    this.cells[i] = id
+    this.cells[i] = look
+    const bit = 1 << (i & 31)
+    this.solid[i >> 5] = solid && look !== 0 ? this.solid[i >> 5] | bit : this.solid[i >> 5] & ~bit
   }
 
-  /** Calls `visit` with every voxel's position and material id, ordered by z, then y, then x. */
-  forEach(visit: (x: number, y: number, z: number, id: number) => void) {
+  /** Calls `visit` with every voxel's position and look, ordered by z, then y, then x. */
+  forEach(visit: (x: number, y: number, z: number, look: number) => void) {
     const { minX, minY, minZ, nx, ny, nz } = this
     for (let z = minZ; z < minZ + nz; z++) {
       for (let y = minY; y < minY + ny; y++) {
@@ -199,13 +201,13 @@ export class VoxelGrid {
   }
 
   /**
-   * The grid of `box`, its bricks copied from `parts`, grids of the same
-   * materials: each a whole number of bricks from the box's corner, no two
-   * with voxels in one brick of it, but only the bricks whose corner
-   * (x, z) it `keeps`. The rest of the box is empty.
+   * The grid of `box`, its bricks copied from `parts`: each a whole number
+   * of bricks from the box's corner, no two with voxels in one brick of
+   * it, but only the bricks whose corner (x, z) it `keeps`. The rest of
+   * the box is empty.
    */
-  static compose(box: Box, materials: readonly Material[], parts: readonly VoxelData[], keeps: (x: number, z: number) => boolean = () => true): VoxelGrid {
-    const grid = new VoxelGrid(box, materials)
+  static compose(box: Box, parts: readonly VoxelData[], keeps: (x: number, z: number) => boolean = () => true): VoxelGrid {
+    const grid = new VoxelGrid(box)
     const bz = Math.ceil(grid.nz / BRICK)
     // Calls `visit` with each of a part's bricks with voxels in the box: its index in the grid, and where its sites are in the part.
     const inBox = ({ minX, minY, minZ, nx, ny, nz, bricks }: VoxelData, visit: (brick: number, at: number) => void) => {
@@ -224,68 +226,60 @@ export class VoxelGrid {
     }
     let count = 0
     for (const part of parts) inBox(part, () => { count++ })
-    grid.cells = new Uint8Array(count * BRICK_SITES)
-    const faces: Uint32Array[] = []
+    grid.cells = new Uint32Array(count * BRICK_SITES)
+    grid.solid = new Uint32Array(count * SOLID_WORDS)
+    const views: Uint32Array[] = []
     for (const part of parts) {
       // Where each of the part's bricks of sites went, if it did.
       const moved = new Map<number, number>()
       inBox(part, (brick, at) => {
         moved.set(at, grid.used)
         grid.bricks[brick] = grid.used
-        grid.cells.set(part.cells.subarray(at * BRICK_SITES, (at + 1) * BRICK_SITES), grid.used++ * BRICK_SITES)
+        grid.cells.set(part.cells.subarray(at * BRICK_SITES, (at + 1) * BRICK_SITES), grid.used * BRICK_SITES)
+        grid.solid.set(part.solid.subarray(at * SOLID_WORDS, (at + 1) * SOLID_WORDS), grid.used++ * SOLID_WORDS)
       })
-      for (let k = 0; k < part.faces.length; k += FACE_WORDS) {
-        const to = moved.get(Math.floor(part.faces[k] / BRICK_SITES))
+      for (let k = 0; k < part.views.length; k += VIEW_WORDS) {
+        const to = moved.get(Math.floor(part.views[k] / BRICK_SITES))
         if (to === undefined) continue
-        const site = part.faces.slice(k, k + FACE_WORDS)
-        site[0] = to * BRICK_SITES + (part.faces[k] % BRICK_SITES)
-        faces.push(site)
+        const site = part.views.slice(k, k + VIEW_WORDS)
+        site[0] = to * BRICK_SITES + (part.views[k] % BRICK_SITES)
+        views.push(site)
       }
     }
-    grid.faces = facesOf(faces)
+    grid.views = viewsOf(views)
     return grid
   }
 }
 
-/** A grid's `faces` of sites' words (FACE_WORDS each), ordered by index. */
-function facesOf(sites: Uint32Array[]): Uint32Array {
+/** A grid's `views` of sites' words (VIEW_WORDS each), ordered by index. */
+function viewsOf(sites: Uint32Array[]): Uint32Array {
   sites.sort((a, b) => a[0] - b[0])
-  const faces = new Uint32Array(sites.length * FACE_WORDS)
-  sites.forEach((site, k) => { faces.set(site, k * FACE_WORDS) })
-  return faces
-}
-
-/** Site `index`'s words in `faces`, of its faces' materials. */
-function faceWords(index: number, materials: ArrayLike<number>): Uint32Array {
-  const site = new Uint32Array(FACE_WORDS)
-  site[0] = index
-  for (let k = 0; k < VOXEL_FACES.length; k++) site[1 + (k >> 2)] |= materials[k] << (8 * (k & 3))
-  return site
+  const views = new Uint32Array(sites.length * VIEW_WORDS)
+  sites.forEach((site, k) => { views.set(site, k * VIEW_WORDS) })
+  return views
 }
 
 /**
  * Hands a grid to a WebAssembly instance (bake/): `start` takes its box
  * and how many bricks of sites it uses and returns where to write its
- * bricks, then `cells` where to write those sites, and `faces`, if given,
- * where to write how many sites' faces.
+ * bricks, then `cells` where to write those sites, `views`, if given,
+ * where to write how many sites' views, and `solid`, if given, where to
+ * write its solid bits.
  */
 export function writeGrid(
   memory: WebAssembly.Memory,
   grid: VoxelData,
   start: (minX: number, minY: number, minZ: number, nx: number, ny: number, nz: number, used: number) => number,
-  sites: () => number,
-  faces?: (sites: number) => number,
+  cells: () => number,
+  views?: (sites: number) => number,
+  solid?: () => number,
 ) {
   const { minX, minY, minZ, nx, ny, nz, bricks } = grid
-  const used = usedCells(grid)
-  copyIn(memory, start(minX, minY, minZ, nx, ny, nz, used.length / BRICK_SITES), bricks)
-  copyIn(memory, sites(), used)
-  if (faces && grid.faces.length > 0) copyIn(memory, faces(grid.faces.length / FACE_WORDS), grid.faces)
-}
-
-/** The sites of a grid's bricks in use, without the room `cells` has for more. */
-function usedCells({ bricks, cells }: VoxelData): Uint8Array {
-  return cells.subarray(0, bricks.reduce((n, at) => Math.max(n, at + 1), 0) * BRICK_SITES)
+  const used = bricks.reduce((n, at) => Math.max(n, at + 1), 0)
+  copyIn(memory, start(minX, minY, minZ, nx, ny, nz, used), bricks)
+  copyIn(memory, cells(), grid.cells.subarray(0, used * BRICK_SITES))
+  if (views && grid.views.length > 0) copyIn(memory, views(grid.views.length / VIEW_WORDS), grid.views)
+  if (solid) copyIn(memory, solid(), grid.solid.subarray(0, used * SOLID_WORDS))
 }
 
 /** Width of a column block of LayerIndex, in lattice units along a. */

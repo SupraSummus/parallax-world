@@ -47,7 +47,6 @@ use engine::{Colours, Engine, Frame, Kind, Look, Picture};
 use gpu::Easel;
 use view::{Vec3, view_basis};
 use world::{Make, TILE, Wants, World};
-use worldgen::generator::materials_of;
 use worldgen::light::{Brightness, Shared};
 
 /** The world shown unless --world names another (worlds::WORLDS). */
@@ -84,8 +83,6 @@ struct App {
     speed: f64,
     /** Walking on the ground (bake's walk.rs): the body the camera is the eye of; None flying. */
     walker: Option<Walker>,
-    /** By material id, whether a walking body goes through it (KindDef::walk_through). */
-    walk_through: Vec<bool>,
     /** The world, as --view gives it: `seed=…` and `&world=…` if given. */
     world_query: String,
     /** What the ui drew last, for the window to draw (window::Content). */
@@ -178,7 +175,7 @@ impl window::Content for App {
             let [right, _, _] = view_basis(look.yaw, 0.0);
             let level = [-right[2], 0.0, right[0]];
             if let Some(walker) = self.walker {
-                let ground = Ground { tiles: &self.world.level(COLLISION_LEVEL as usize).grids, walk_through: &self.walk_through };
+                let ground = Ground { tiles: &self.world.level(COLLISION_LEVEL as usize).grids };
                 let input =
                     WalkInput { forward: moving[0], right: moving[1], yaw: look.yaw, jump: moving[5] > 0.0, sneak: moving[6] > 0.0 };
                 let walker = walker.walk(input, dt, &ground);
@@ -398,16 +395,9 @@ fn drawn_complete(engine: &mut dyn Engine, world: &mut World, look: &Look, whole
 /**
  * --bench, --stroll and --shot: the view of `look` once complete (with all
  * the world would make around it, if timed), timed, strolled on from for
- * `seconds`, walking on the ground with `walk_through` if given, and saved.
+ * `seconds`, walking on the ground if `on_ground`, and saved.
  */
-fn offscreen(
-    engine: &mut dyn Engine,
-    world: &mut World,
-    look: Look,
-    bench: bool,
-    stroll: Option<(f64, Option<&[bool]>)>,
-    shot: Option<&str>,
-) {
+fn offscreen(engine: &mut dyn Engine, world: &mut World, look: Look, bench: bool, stroll: Option<(f64, bool)>, shot: Option<&str>) {
     let mut easel = Easel::offscreen(None);
     let start = Instant::now();
     let frame = drawn_complete(engine, world, &look, bench || stroll.is_some(), &mut easel);
@@ -426,8 +416,8 @@ fn offscreen(
         let ms = easel.time(&*frame.picture, pixels, 30);
         println!("drawn again and again, the frame takes {ms:.1} ms{}", easel.describe());
     }
-    if let Some((seconds, walk_through)) = stroll {
-        self::stroll(seconds, walk_through, engine, world, look, &mut easel);
+    if let Some((seconds, on_ground)) = stroll {
+        self::stroll(seconds, on_ground, engine, world, look, &mut easel);
     }
     if let Some(path) = shot {
         easel.save(&*frame.picture, pixels, path);
@@ -437,11 +427,11 @@ fn offscreen(
 
 /**
  * Moves on along the view for `seconds` at SPEED, flying, or
- * walking on the ground with `walk_through`, a frame every 60th of a
+ * walking on the ground if `on_ground`, a frame every 60th of a
  * second as the window draws it, the GPU a frame behind, and says what
  * the frames cost, and where the slowest were.
  */
-fn stroll(seconds: f64, walk_through: Option<&[bool]>, engine: &mut dyn Engine, world: &mut World, mut look: Look, easel: &mut Easel) {
+fn stroll(seconds: f64, on_ground: bool, engine: &mut dyn Engine, world: &mut World, mut look: Look, easel: &mut Easel) {
     let pixels = look.size.map(|v| v as u32);
     // All of the first frame is new to this GPU.
     let mut last = easel.draw(&*engine.frame(&look, world).picture, pixels);
@@ -450,20 +440,19 @@ fn stroll(seconds: f64, walk_through: Option<&[bool]>, engine: &mut dyn Engine, 
     let ms = |a: Instant, b: Instant| (b - a).as_secs_f64() * 1000.0;
     let (mut times, mut cameras, mut short) = (Vec::new(), Vec::new(), 0);
     for _ in 0..((seconds * 60.0) as usize).max(1) {
-        look.camera = match walk_through {
-            Some(walk_through) => {
-                let ground = Ground { tiles: &world.level(COLLISION_LEVEL as usize).grids, walk_through };
-                let input = WalkInput { forward: 1.0, right: 0.0, yaw: look.yaw, jump: false, sneak: false };
-                walker = walker.walk(input, 1.0 / 60.0, &ground);
-                walker.eye()
-            }
-            None => std::array::from_fn(|d| look.camera[d] + forward[d] * SPEED / 60.0),
+        look.camera = if on_ground {
+            let ground = Ground { tiles: &world.level(COLLISION_LEVEL as usize).grids };
+            let input = WalkInput { forward: 1.0, right: 0.0, yaw: look.yaw, jump: false, sneak: false };
+            walker = walker.walk(input, 1.0 / 60.0, &ground);
+            walker.eye()
+        } else {
+            std::array::from_fn(|d| look.camera[d] + forward[d] * SPEED / 60.0)
         };
         cameras.push(look.camera);
         let start = Instant::now();
         let frame = engine.frame(&look, world);
         let framed = Instant::now();
-        let wants = with_ground(frame.wants, walk_through.is_some());
+        let wants = with_ground(frame.wants, on_ground);
         world.update(look.camera, &wants);
         let updated = Instant::now();
         let next = easel.draw(&*frame.picture, pixels);
@@ -594,7 +583,6 @@ fn main() {
         Kind::ALL.into_iter().find(|(_, name)| name.eq_ignore_ascii_case(v)).expect("--engine reliefs, flat, splats or voxels").0
     });
     let mut engine = kind.make(&world);
-    let walk_through: Vec<bool> = materials_of(&shown.generator).iter().map(|m| m.walk_through).collect();
     let world_query = format!("seed={seed}{}", world_name.map(|w| format!("&world={w}")).unwrap_or_default());
     // Its first line the world and threads, which --replay takes.
     let recording = value("--record").map(|path| {
@@ -607,7 +595,7 @@ fn main() {
         return;
     }
     if ["--bench", "--shot", "--stroll"].into_iter().any(flag) {
-        let stroll = value("--stroll").map(|v| (v.parse().expect("seconds"), flag("--on-ground").then_some(&walk_through[..])));
+        let stroll = value("--stroll").map(|v| (v.parse().expect("seconds"), flag("--on-ground")));
         offscreen(&mut *engine, &mut world, look, flag("--bench"), stroll, value("--shot"));
         return;
     }
@@ -623,7 +611,6 @@ fn main() {
         framing: 0.0,
         speed: SPEED,
         walker: None,
-        walk_through,
         world_query,
         picture: None,
         recording: recording.map(|file| (file, Instant::now())),

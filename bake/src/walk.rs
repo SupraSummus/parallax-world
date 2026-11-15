@@ -3,7 +3,7 @@
 //! from) what is low enough as it walks, and jumps.
 //! Lattice units throughout, 0.125 m (worldgen's UNIT_SIZE).
 
-use fcc::{ALPHA, Tiles, VOXEL_FACES};
+use fcc::{Tiles, VOXEL_FACES};
 
 /** Lattice units per metre. */
 const M: f64 = 8.0;
@@ -36,22 +36,17 @@ pub trait Solid {
 }
 
 /**
- * The voxels of COLLISION_LEVEL's tiles that stop more than half the rays
- * through their sites, but those of materials `walk_through` marks
- * (plants, water: KindDef::walk_through), by id.
- * Sites no tile has a grid for are solid: the body stops there rather than fall.
+ * The voxels of COLLISION_LEVEL's tiles that stop a walking body (fcc's
+ * Grid::solid). Sites no tile has a grid for are solid: the body stops
+ * there rather than fall.
  */
 pub struct Ground<'a> {
     pub tiles: &'a Tiles,
-    pub walk_through: &'a [bool],
 }
 
 impl Solid for Ground<'_> {
     fn solid(&self, [x, y, z]: [i32; 3]) -> bool {
-        match self.tiles.at(x, y, z) {
-            None => true,
-            Some((id, alpha)) => alpha > ALPHA / 2 && !self.walk_through.get(id as usize).copied().unwrap_or(false),
-        }
+        self.tiles.solid(x, y, z).unwrap_or(true)
     }
 
     fn scale(&self) -> f64 {
@@ -298,7 +293,7 @@ mod tests {
     #[test]
     fn is_held_where_no_tile_is_yet_and_walks_level() {
         let none = Tiles::new(0, []);
-        let ground = Ground { tiles: &none, walk_through: &[] };
+        let ground = Ground { tiles: &none };
         let body = run(&ground, Walker::at([0.0, 50.0, 0.0]), FORWARD, 1.0);
         assert!(body.settled() && body.eye()[1] == 50.0 && body.feet[2] > 30.0, "{body:?}");
     }
