@@ -4,7 +4,7 @@
 //! they cross are generated as they reach them, as hosts make them
 //! (generate_shown).
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap};
 use std::panic::AssertUnwindSafe;
 use std::sync::{Mutex, mpsc};
 use std::time::{Duration, Instant};
@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use fcc::{FACE_KINDS, VOXEL_FACES};
 
 use crate::generator::{Generator, generate_shown, materials_of, shown};
-use crate::grid::{ALPHA, BRICK, Box3, GLOW_ONE, VoxelGrid};
+use crate::grid::{ALPHA, BRICK, Box3, COLOUR_ONE, GLOW_ONE, VoxelGrid};
 use crate::noise::hash;
 
 /** Sites a tile is wide, at the picture's level. */
@@ -192,24 +192,19 @@ struct Ray {
  */
 #[derive(Clone, Debug, Default)]
 pub struct Seen {
-    pub stopped: BTreeMap<u8, f64>,
-    pub glow: BTreeMap<u8, [f64; 3]>,
+    pub stopped: f64,
+    pub shown: [f64; 3],
+    pub glow: [f64; 3],
 }
 
 impl Seen {
-    pub(crate) fn add(&mut self, id: u8, stopped: f64, glow: [f64; 3]) {
-        if stopped > 0.0 {
-            *self.stopped.entry(id).or_default() += stopped;
-        }
-        if glow != [0.0; 3] {
-            let sum = self.glow.entry(id).or_default();
-            (0..3).for_each(|c| sum[c] += glow[c]);
-        }
+    pub(crate) fn add(&mut self, stopped: f64, shown: [f64; 3], glow: [f64; 3]) {
+        self.stopped += stopped;
+        (0..3).for_each(|c| (self.shown[c], self.glow[c]) = (self.shown[c] + shown[c], self.glow[c] + glow[c]));
     }
 
     fn merge(&mut self, other: Seen) {
-        other.stopped.into_iter().for_each(|(id, stopped)| self.add(id, stopped, [0.0; 3]));
-        other.glow.into_iter().for_each(|(id, glow)| self.add(id, 0.0, glow));
+        self.add(other.stopped, other.shown, other.glow);
     }
 }
 
@@ -218,20 +213,21 @@ const OPAQUE: f64 = 1e-4;
 
 /**
  * What the site `ray` is in shows it, as light sees it: its pieces (by
- * the face it entered) and its medium, each its material and how much of
- * the ray it stops, and what the site glows to it; the rest goes on
- * (`through`). A site stops its alpha of a ray crossing its voxel; one
+ * the face it entered) and its medium, each how much of the ray it stops
+ * and what that shows (linear, premultiplied), and what the site glows to
+ * it; the rest goes on (`through`). A site stops its alpha of a ray crossing its voxel; one
  * crossing `part` of the voxel's chord along it (starting or ending in
  * it) stops as a medium would: 1 − (1 − alpha)^part.
  */
-fn composite(ray: &mut Ray, grid: &VoxelGrid, part: f64) -> ([(u8, f64); 2], [f64; 3]) {
+fn composite(ray: &mut Ray, grid: &VoxelGrid, part: f64) -> ([(f64, [f64; 3]); 2], [f64; 3]) {
     let [x, y, z] = ray.site;
     let (parts, glow) = grid.light(x, y, z, entered(ray));
     let alpha = (parts[0].0 as f64 + parts[1].0 as f64) / ALPHA as f64;
     let scale = if alpha > 0.0 && part < 1.0 { (1.0 - (1.0 - alpha).powf(part)) / alpha } else { part };
     let through = ray.through * scale;
-    let parts = parts.map(|(alpha, id)| (id, through * alpha as f64 / ALPHA as f64));
-    ray.through -= parts[0].1 + parts[1].1;
+    let parts =
+        parts.map(|(alpha, colour)| (through * alpha as f64 / ALPHA as f64, colour.map(|c| through * c as f64 / COLOUR_ONE as f64)));
+    ray.through -= parts[0].0 + parts[1].0;
     (parts, glow.map(|g| through * g as f64 / GLOW_ONE as f64))
 }
 
@@ -340,9 +336,7 @@ impl Tiles {
                         Some(_) if seen.is_some() => {
                             let (parts, glow) = composite(ray, &tile.grid, walk.part(ray, &planes));
                             let seen = seen.as_mut().expect("composited");
-                            // What glows is the pieces' (as `composited` has it).
-                            seen.add(parts[0].0, 0.0, glow);
-                            parts.into_iter().for_each(|(id, stopped)| seen.add(id, stopped, [0.0; 3]));
+                            seen.add(parts[0].0 + parts[1].0, [0, 1, 2].map(|c| parts[0].1[c] + parts[1].1[c]), glow);
                             if ray.through < OPAQUE {
                                 return Step::Miss;
                             }
@@ -378,10 +372,10 @@ impl Tiles {
 /**
  * What a ray from `origin` along `direction` (a level's units) sees of
  * `grid` before `end`, site by site, as `composite`: how far along it
- * enters each that stops some of it or glows, and what that shows it;
- * till next to none of it gets through.
+ * enters each that stops some of it or glows, how much it stops, what
+ * that shows and what it glows; till next to none of it gets through.
  */
-pub(crate) fn composited(grid: &VoxelGrid, origin: [f64; 3], direction: [f64; 3], end: f64) -> Vec<(f64, u8, f64, [f64; 3])> {
+pub(crate) fn composited(grid: &VoxelGrid, origin: [f64; 3], direction: [f64; 3], end: f64) -> Vec<(f64, Seen)> {
     let mut ray = Ray { pixel: 0, origin, direction, t: 0.0, end, site: nearest_site(origin), face: FACES.len(), through: 1.0 };
     let walk = Walk::new(direction);
     let mut planes = walk.planes(&ray);
@@ -390,10 +384,9 @@ pub(crate) fn composited(grid: &VoxelGrid, origin: [f64; 3], direction: [f64; 3]
         let t = ray.t;
         let part = walk.part(&ray, &planes);
         let ([pieces, medium], glow) = composite(&mut ray, grid, part);
-        for (id, stopped, glow) in [(pieces.0, pieces.1, glow), (medium.0, medium.1, [0.0; 3])] {
-            if stopped > 0.0 || glow != [0.0; 3] {
-                seen.push((t, id, stopped, glow));
-            }
+        let stopped = pieces.0 + medium.0;
+        if stopped > 0.0 || glow != [0.0; 3] {
+            seen.push((t, Seen { stopped, shown: [0, 1, 2].map(|c| pieces.1[c] + medium.1[c]), glow }));
         }
         walk.cross(&mut ray, &mut planes);
     }
@@ -554,12 +547,9 @@ pub fn picture_in(generator: &Generator, camera: &Camera, tiles: &mut Tiles) -> 
  * each site by its alpha, not as one of the voxels it shows by chance.
  */
 pub fn composite_in(generator: &Generator, camera: &Camera, tiles: &mut Tiles) -> Seen {
-    let Seen { stopped, glow } = tiled(generator, camera, tiles, true).1;
+    let Seen { stopped, shown, glow } = tiled(generator, camera, tiles, true).1;
     let pixels = (camera.width * camera.height) as f64;
-    Seen {
-        stopped: stopped.into_iter().map(|(id, sum)| (id, sum / pixels)).collect(),
-        glow: glow.into_iter().map(|(id, sum)| (id, sum.map(|g| g / pixels))).collect(),
-    }
+    Seen { stopped: stopped / pixels, shown: shown.map(|c| c / pixels), glow: glow.map(|g| g / pixels) }
 }
 
 fn tiled(generator: &Generator, camera: &Camera, tiles: &mut Tiles, composite: bool) -> (Picture, Seen) {
@@ -699,7 +689,7 @@ fn picture_of_tiles(
         }
         if t > end {
             picture.set(pixel, 0, f64::INFINITY, sky(direction));
-            seen.add(0, 1.0, [0.0; 3]);
+            seen.add(1.0, [0.0; 3], [0.0; 3]);
             continue;
         }
         let site = nearest_site([0, 1, 2].map(|i| origin[i] + t * direction[i]));
@@ -743,7 +733,7 @@ fn picture_of_tiles(
                 }
                 Step::Miss => {
                     picture.set(ray.pixel, 0, f64::INFINITY, sky(ray.direction));
-                    seen.add(0, ray.through, [0.0; 3]);
+                    seen.add(ray.through, [0.0; 3], [0.0; 3]);
                 }
                 Step::Hit(id, normal) => {
                     let entered = match FACES.get(ray.face) {
@@ -959,7 +949,7 @@ mod tests {
         let (origin, direction) = ([-3.1, -2.3, -1.7], normalize([0.8, 0.5, 0.3]));
         let through = |from: f64, to: f64| {
             let start = [0, 1, 2].map(|i| origin[i] + from * direction[i]);
-            1.0 - composited(&grid, start, direction, to - from).iter().map(|(_, _, stopped, _)| stopped).sum::<f64>()
+            1.0 - composited(&grid, start, direction, to - from).iter().map(|(_, seen)| seen.stopped).sum::<f64>()
         };
         for cut in [0.3, 1.1, 2.5, 3.7, 4.9] {
             let (whole, parts) = (through(0.0, 6.0), through(0.0, cut) * through(cut, 6.0));

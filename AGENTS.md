@@ -100,6 +100,7 @@ worldgen/                    # The world-generation engine, moving to integers, 
 │   ├── light.rs             # Light (a prototype, for look and native's computed lighting): sky, sun and what glows, each level's from coarser levels'; held to light/reference.rs, rays traced through level 0
 │   ├── cost.rs              # What generating costs: work counted by layer, reported for a world's tiles, against a baseline
 │   └── checks/              # Checks of worlds, for tests
+│       ├── cells.rs         # Each cell against what is in it a level finer, one by one, along the 12 directions (an experiment)
 │       ├── contract.rs      # The contract every world keeps, in regions holding every stratum: rays see each site by its alpha, its colour and glow
 │       ├── survey.rs        # What a world is made of: its layers asked around spawn, things taken apart, strata to check
 │       ├── places.rs        # Whether things prefer places: positions modulo periods, as on a grid, over seeds

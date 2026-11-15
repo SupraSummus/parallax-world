@@ -531,11 +531,15 @@ with no ratio, so a few rays of many change it by no more than their share;
 with no sky behind, as over any sky
 it differs by no more than its colour and how much it stops do.
 A region's look is the mean of its rays', compared channel by channel.
-It is the sum of each kind's (`Looks`), which tell what changed
-but aren't compared: a coarse level may draw one kind for another,
-as the moor's heather for its sprigs.
-The voxels a site's coin shows (`VoxelGrid::show`) are as often, but noisy,
-and a site too thin to show one still stops light.
+A site holds what it looks like, not what it is made of:
+how much of a ray it stops, what that shows and what it glows,
+each the sum of what is in it (`see` in `generate.rs`),
+a coarse site's colour its kinds' mean shades;
+so a coarse level may draw one kind for another,
+as the moor's heather for its sprigs, if it looks alike.
+Hosts still take materials (docs/todo.md, "Cells hold what they look like"):
+a site's coin shows one of those in it as often as it is seen there
+(`VoxelGrid::show`), noisy, and a site too thin to show one still stops light.
 Margins quoted elsewhere in this document are older ones,
 in shares of material types or in sRGB.
 
@@ -643,8 +647,7 @@ Parts and far regions are checked at seed 42 only:
 they check how a world is drawn, not what a seed puts in it.
 With `--nocapture` it prints each level's margins;
 `contract::margins` returns them as a `Report` to print,
-which breaks a margin down by kind (what changed, not what is checked),
-largest differences first (`{}` those past their measure's tolerance, `{:#}` all).
+each margin's looks at both levels.
 A broken mean (`contract::strata_kept`) names the stratum, level and measure,
 and each region it was averaged over, at its seed.
 The engine's tests also check that a thing's carves cut only the thing.

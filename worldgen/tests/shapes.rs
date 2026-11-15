@@ -6,7 +6,7 @@
 //! sRGB, so a world's palette can only hide what breaks here.
 
 use worldgen::World;
-use worldgen::checks::contract::{Measure, face_margins, margins, whole_equals_parts};
+use worldgen::checks::contract::{Measure, margins, whole_equals_parts};
 use worldgen::curve::Curve;
 use worldgen::generator::{
     ANY_SIZE, Field, Generator, KindDef, Layer, Node, Op, Point, Population, SOLID, Shape, Span, ball, capsule, cuboid, ellipsoid, gable,
@@ -155,16 +155,4 @@ fn each_solid_keeps_the_contract_to_its_levels() {
         runs.into_iter().filter_map(|run| run.join().expect("ran")).collect()
     });
     assert!(failed.is_empty(), "levels against the level two finer and from above:\n{}", failed.join("\n"));
-}
-
-/** An experiment ("Each face of a cell against the level one finer" in docs/todo.md): the level each solid keeps it to. */
-#[test]
-#[ignore]
-fn each_solid_against_faces_one_finer() {
-    let region = Box3 { min: [-128, -16, -128], max: [128, 48, 128] };
-    for &(name, cell, make, ..) in CASES {
-        let report = face_margins(name, &world(make, cell), &[region], LEVELS);
-        let kept = report.margins.iter().filter(|m| m.broken()).map(|m| m.level - 1).min().unwrap_or(LEVELS);
-        println!("{name} keeps it to {kept}:\n{}", report.broken());
-    }
 }

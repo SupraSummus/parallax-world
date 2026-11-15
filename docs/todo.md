@@ -485,19 +485,23 @@ Numbers are for the forest at 1280×800, as measured when written.
   to the last level checked: a `Look` is a mean over a region's rays,
   so a solid that thins changes it only by its share of the view.
   Scenes the solid fills, the same share for every case, would ask more.
-- **Each face of a cell against the level one finer** (an experiment:
-  `face_margins` in `worldgen/src/checks/contract.rs`, outside the contract,
-  printed by ignored tests in `worldgen/tests/`).
-  A cell seen along each of the lattice's 12 directions, rays inside it only,
-  at the level and the one finer: all they see compared, summed over cells near a surface.
-  It finds a dark plate gone at a coarse level (0.35 at level 1),
-  and the railway's sleepers given as the ballast's shares (0.21).
-  But it holds each site to stopping a face's rays as their mean does,
-  so it asks for views (above) and finds what they don't yet hold:
-  every solid on a ground breaks at level 1, the ground stopping 0.57 at level 0
-  against 0.45 at level 1, a field's sites wholly in a span or out.
-  With fields' ends covering each face's rays (reverted, above) it came within 0.05:
-  a site's mean over its rays can't keep which of them a site before it stopped.
+- **Cells hold what they look like** (begun).
+  A site of `VoxelGrid` holds how much it stops, what that shows and what it glows,
+  each face's where they differ; worldgen reads only that
+  (pictures, the contract, the light's reference).
+  Still to do:
+  coverage by direction where sites are filled in part
+  (fields' sites are wholly in a span or out, solids' views only for sheets);
+  hosts taking colours, not materials (`into_grid` hands over a material by a coin);
+  then no materials in grids at all.
+  `checks::cells` (an experiment) holds each cell, one by one,
+  to what is in it a level finer (`FINER_BY`),
+  along each of the 12 directions, by the rows of the finer level's sites in it.
+  On a flat ground a cell at level 1 is a whole site or none,
+  where what is in it stops a third of the rays along it, or more:
+  58 % of cells are further than `TOLERANCE`, as many on a slope.
+  Region means hid that; a cell checked alone does not,
+  and a track's sleepers, or a ground's sides swapped, are its cells too.
 - **The forest's canopy measures crowded trees in sample stands.**
   From above it reads each column's owner (`Rooms`),
   but what the trees standing in a column hide from the side
