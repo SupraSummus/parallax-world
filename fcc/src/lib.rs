@@ -116,30 +116,34 @@ pub const BRICK_SITES: usize = (BRICK * BRICK * BRICK / 2) as usize;
 /** A whole voxel's alpha: it stops every ray through its site. */
 pub const ALPHA: u8 = 255;
 
-/** A voxel's material on each of its faces, by kind (VOXEL_FACES). */
-pub type Faces = [u8; FACE_KINDS];
-
 /**
- * Words per site in a grid's `faces`: its index in `cells`, then its
- * faces' materials, four to a word, the first in the lowest byte.
+ * What a voxel looks like, in a word: its colour, sRGB, a byte a channel
+ * from red in the lowest, and in the highest its alpha, how much of the
+ * rays through its site it stops. 0 is none: what is there stops some.
  */
-pub const FACE_WORDS: usize = 4;
+pub type Look = u32;
+
+/** A look of colour `rgb` (sRGB) and `alpha`. */
+pub const fn look([r, g, b]: [u8; 3], alpha: u8) -> Look {
+    u32::from_le_bytes([r, g, b, alpha])
+}
+
+/** The alpha of a look. */
+#[inline]
+pub const fn alpha_of(look: Look) -> u8 {
+    (look >> 24) as u8
+}
+
+/** Words per site in a grid's `views`: its index in `cells`, then its look along each face kind (VOXEL_FACES). */
+pub const VIEW_WORDS: usize = 1 + FACE_KINDS;
 /** Words per site in a grid's `glow`: its index in `cells`, then what it glows per channel. */
 pub const GLOW_WORDS: usize = 4;
 
-/** A site's words in `faces`: its index in `cells` and its faces' materials. */
-pub fn face_words(index: usize, faces: &Faces) -> [u32; FACE_WORDS] {
-    let word = |w: usize| u32::from_le_bytes(std::array::from_fn(|i| faces[4 * w + i]));
-    [index as u32, word(0), word(1), word(2)]
-}
-
 /**
  * The sites of a box in bricks, BRICK units wide (see VoxelGrid).
- * A voxel has a material on each of its 12 faces: what is seen of it
- * looking at that face. Mostly they are one, its site's in `cells`;
- * the sites whose faces differ list them in `faces`. Its alpha is how much
- * of the rays through its site it stops: mostly all (ALPHA), and `alpha`
- * lists them only for a grid with some see-through ones.
+ * A voxel looks as its site's in `cells` says, unless seen through a face
+ * `views` gives a look of its own: what is seen of it looking at that face.
+ * Walking is stopped by those `solid` marks.
  */
 #[derive(Clone)]
 pub struct Grid {
@@ -147,14 +151,14 @@ pub struct Grid {
     pub n: [i32; 3],
     /** Per brick, z-major, then y, then x: where its sites start in `cells`, in BRICK_SITES; −1 if empty. Bricks may share sites (worldgen's VoxelGrid::bury). */
     pub bricks: Vec<i32>,
-    /** Each brick's sites, z-major, then y, then every other x. */
-    pub cells: Vec<u8>,
-    /** The sites whose faces are not all of their material in `cells`, by index in `cells`: FACE_WORDS each (face_words). */
-    pub faces: Vec<u32>,
-    /** By index in `cells`: each voxel's alpha, 0 where there is none; empty if all are whole. */
-    pub alpha: Vec<u8>,
+    /** Each brick's sites, z-major, then y, then every other x: each voxel's look, 0 if there is none. */
+    pub cells: Vec<Look>,
+    /** The sites that do not look alike through every face, by index in `cells`: VIEW_WORDS each. */
+    pub views: Vec<u32>,
     /** The sites that glow, shown or not, by index in `cells`: GLOW_WORDS each, for the light (worldgen's light.rs). */
     pub glow: Vec<u32>,
+    /** Bit i % 32 of word i / 32: whether the voxel at index i of `cells` stops a walking body (bake's walk.rs). */
+    pub solid: Vec<u32>,
 }
 
 /** Of the sites in `words`, `per` words a site, sorted by index: where the first of index `i` or more is (in sites). */
@@ -186,9 +190,9 @@ impl Grid {
             n,
             bricks: vec![-1; (count[0] * count[1] * count[2]) as usize],
             cells: vec![0; used * BRICK_SITES],
-            faces: Vec::new(),
-            alpha: Vec::new(),
+            views: Vec::new(),
             glow: Vec::new(),
+            solid: vec![0; used * BRICK_SITES / 32],
         }
     }
 
@@ -217,31 +221,25 @@ impl Grid {
         (at >= 0).then(|| at as usize * BRICK_SITES + ((((z & 7) * BRICK + (y & 7)) * BRICK + (x & 7)) >> 1) as usize)
     }
 
-    /** The material of the voxel at site (x, y, z), as stored in `cells`, and its alpha; (0, 0) if empty or outside. */
+    /** The look of the voxel at site (x, y, z); 0 if empty or outside. */
     #[inline]
-    pub fn get(&self, x: i32, y: i32, z: i32) -> (u8, u8) {
-        self.index(x, y, z).map_or((0, 0), |i| (self.cells[i], self.alpha_at(i)))
+    pub fn get(&self, x: i32, y: i32, z: i32) -> Look {
+        self.index(x, y, z).map_or(0, |i| self.cells[i])
     }
 
-    /** The material of face `kind` (of VOXEL_FACES) of the voxel at site (x, y, z), and its alpha; (0, 0) if empty or outside. */
+    /** The look of the voxel at site (x, y, z) through face `kind` (of VOXEL_FACES); 0 if empty or outside. */
     #[inline]
-    pub fn face(&self, x: i32, y: i32, z: i32, kind: usize) -> (u8, u8) {
-        let Some(i) = self.index(x, y, z) else { return (0, 0) };
-        let material = match self.cells[i] {
-            0 => 0,
-            material if self.faces.is_empty() => material,
-            material => self.faces_at(i).map_or(material, |faces| faces[kind]),
-        };
-        (material, self.alpha_at(i))
-    }
-
-    /** The alpha of the voxel at index `i` of `cells`: 0 if none. */
-    #[inline]
-    pub fn alpha_at(&self, i: usize) -> u8 {
+    pub fn face(&self, x: i32, y: i32, z: i32, kind: usize) -> Look {
+        let Some(i) = self.index(x, y, z) else { return 0 };
         match self.cells[i] {
-            0 => 0,
-            _ => self.alpha.get(i).copied().unwrap_or(ALPHA),
+            look if look == 0 || self.views.is_empty() => look,
+            look => self.views_at(i).map_or(look, |views| views[kind]),
         }
+    }
+
+    /** Whether the voxel at site (x, y, z) stops a walking body; not if empty or outside. */
+    pub fn solid(&self, x: i32, y: i32, z: i32) -> bool {
+        self.index(x, y, z).is_some_and(|i| self.solid[i / 32] >> (i % 32) & 1 != 0)
     }
 
     /** What site (x, y, z) glows per channel (worldgen's GLOW_ONE), shown or not; nothing outside. */
@@ -252,16 +250,15 @@ impl Grid {
         }
     }
 
-    /** The faces' materials of the site at index `i` of `cells`, if they differ. */
-    pub fn faces_at(&self, i: usize) -> Option<Faces> {
-        let words = words_of(&self.faces, FACE_WORDS, i)?;
-        Some(std::array::from_fn(|k| words[k / 4].to_le_bytes()[k % 4]))
+    /** The looks through each face of the site at index `i` of `cells`, if they differ. */
+    pub fn views_at(&self, i: usize) -> Option<&[Look]> {
+        words_of(&self.views, VIEW_WORDS, i)
     }
 
-    /** Whether any site at `sites` (indices in `cells`) has faces of materials of their own. */
-    pub fn has_faces(&self, sites: std::ops::Range<usize>) -> bool {
-        let at = first_from(&self.faces, FACE_WORDS, sites.start) * FACE_WORDS;
-        self.faces.get(at).is_some_and(|&i| sites.contains(&(i as usize)))
+    /** Whether any site at `sites` (indices in `cells`) looks unlike through some faces. */
+    pub fn has_views(&self, sites: std::ops::Range<usize>) -> bool {
+        let at = first_from(&self.views, VIEW_WORDS, sites.start) * VIEW_WORDS;
+        self.views.get(at).is_some_and(|&i| sites.contains(&(i as usize)))
     }
 }
 
@@ -319,9 +316,14 @@ impl Tiles {
         Tiles { shift: 32, from: [0; 3], origin: [i32::MIN as i64; 3], size: [1; 3], grids: vec![Some(Arc::new(grid))], min, max }
     }
 
-    /** The material at site (x, y, z) and its alpha, (0, 0) if empty; None if no tile has a grid there. */
-    pub fn at(&self, x: i32, y: i32, z: i32) -> Option<(u8, u8)> {
+    /** The look at site (x, y, z), 0 if empty; None if no tile has a grid there. */
+    pub fn at(&self, x: i32, y: i32, z: i32) -> Option<Look> {
         Some(self.grid(self.tile(x, y, z))?.get(x, y, z))
+    }
+
+    /** Whether the voxel at site (x, y, z) stops a walking body (Grid::solid); None if no tile has a grid there. */
+    pub fn solid(&self, x: i32, y: i32, z: i32) -> Option<bool> {
+        Some(self.grid(self.tile(x, y, z))?.solid(x, y, z))
     }
 
     /** Whether tile `id` has a grid. */
@@ -362,7 +364,7 @@ impl Tiles {
 
 /**
  * The sites read in a face's lattice coordinates (a, b, c) (see Face in
- * view.ts), each voxel's material the one of its face towards the
+ * view.ts), each voxel's look the one through its face towards the
  * camera, −F: a slice is drawn as seen along F, so that is the face its
  * voxels show (docs/architecture.md, section 3).
  */
@@ -398,13 +400,12 @@ impl<'a> Reader<'a> {
     }
 
     /**
-     * Material ids at (a + 2i, b, c) for i in [0, count), those of the
-     * faces towards the camera, and their alpha, (0, 0) where empty or
-     * outside, to `visit` with each i, for a site (a, b, c): stepping a by
+     * The looks at (a + 2i, b, c) for i in [0, count), through the faces
+     * towards the camera, 0 where empty or outside, to `visit` with each i, for a site (a, b, c): stepping a by
      * 2 steps (x, y, z) by R, and the grid only changes at a tile's edge.
      */
     #[inline]
-    pub fn row(&self, a: i32, b: i32, c: i32, count: i32, mut visit: impl FnMut(i32, u8, u8)) {
+    pub fn row(&self, a: i32, b: i32, c: i32, count: i32, mut visit: impl FnMut(i32, Look)) {
         debug_assert!(((a ^ c) | (b ^ c)) & 1 == 0, "not a site");
         let r = self.lattice.r;
         let [mut x, mut y, mut z] = self.lattice.world([a, b, c]);
@@ -416,8 +417,7 @@ impl<'a> Reader<'a> {
                 tile = here;
                 grid = self.tiles.grid(tile);
             }
-            let (material, alpha) = grid.map_or((0, 0), |grid| grid.face(x, y, z, self.front));
-            visit(i, material, alpha);
+            visit(i, grid.map_or(0, |grid| grid.face(x, y, z, self.front)));
             x += r[0];
             y += r[1];
             z += r[2];
@@ -435,17 +435,19 @@ mod tests {
         let tile = |min: [i32; 3]| {
             let mut grid = Grid::new(min, [8, 8, 8], 1);
             grid.bricks[0] = 0;
-            grid.cells[0] = 1 + min[1] as u8 / 8;
+            grid.cells[0] = 1 + min[1] as u32 / 8;
+            grid.solid[0] = min[1] as u32 / 8;
             Arc::new(grid)
         };
         let tiles = Tiles::new(
             3,
             [([0, 0, 0], tile([0, 0, 0])), ([0, 1, 0], tile([0, 8, 0])), ([1, 0, 0], Arc::new(Grid::new([8, 0, 0], [0; 3], 0)))],
         );
-        assert_eq!(tiles.at(0, 0, 0), Some((1, ALPHA)));
-        assert_eq!(tiles.at(0, 8, 0), Some((2, ALPHA)));
-        assert_eq!(tiles.at(2, 0, 0), Some((0, 0)), "empty in its tile");
-        assert_eq!(tiles.at(8, 0, 0), Some((0, 0)), "a tile whose grid holds nothing is empty");
+        assert_eq!(tiles.at(0, 0, 0), Some(1));
+        assert_eq!(tiles.at(0, 8, 0), Some(2));
+        assert_eq!((tiles.solid(0, 0, 0), tiles.solid(0, 8, 0)), (Some(false), Some(true)));
+        assert_eq!(tiles.at(2, 0, 0), Some(0), "empty in its tile");
+        assert_eq!(tiles.at(8, 0, 0), Some(0), "a tile whose grid holds nothing is empty");
         for unknown in [[0, 16, 0], [0, -1, 0], [0, 0, 8], [-1, 0, 0]] {
             assert_eq!(tiles.at(unknown[0], unknown[1], unknown[2]), None, "{unknown:?}: no tile there");
         }
@@ -454,27 +456,26 @@ mod tests {
     }
 
     #[test]
-    fn each_face_reads_the_material_of_the_voxels_faces_towards_it() {
-        // Two voxels, one of material 1 all round, one whose faces are each of a material of their own.
+    fn each_face_reads_the_look_through_the_voxels_faces_towards_it() {
+        // Two voxels, one of look 1 through every face, one with a look of its own through each.
         let mut grid = Grid::new([0, 0, 0], [8, 8, 8], 1);
         grid.bricks[0] = 0;
         let index = |[x, y, z]: [i32; 3]| (((z * BRICK + y) * BRICK + x) >> 1) as usize;
         let (plain, painted) = ([2, 2, 2], [4, 4, 2]);
         grid.cells[index(plain)] = 1;
         grid.cells[index(painted)] = 1;
-        let faces: Faces = std::array::from_fn(|k| 10 + k as u8);
-        grid.faces = face_words(index(painted), &faces).to_vec();
+        grid.views = [index(painted) as u32].into_iter().chain((0..FACE_KINDS as u32).map(|k| 10 + k)).collect();
         let tiles = Tiles::one(grid);
         for lattice in lattices() {
             let reader = Reader::new(&tiles, lattice);
             let read = |[x, y, z]: [i32; 3]| {
                 let [a, b, c] = [lattice.r, lattice.u, lattice.f].map(|v| v[0] * x + v[1] * y + v[2] * z);
-                let mut material = None;
-                reader.row(a, b, c, 1, |_, m, _| material = Some(m));
-                material.expect("read")
+                let mut look = None;
+                reader.row(a, b, c, 1, |_, l| look = Some(l));
+                look.expect("read")
             };
             assert_eq!(read(plain), 1);
-            assert_eq!(read(painted), 10 + lattice.front() as u8, "seen along {:?}", lattice.f);
+            assert_eq!(read(painted), 10 + lattice.front() as u32, "seen along {:?}", lattice.f);
             assert_eq!(read([6, 6, 2]), 0);
         }
     }

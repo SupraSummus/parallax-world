@@ -5,23 +5,22 @@
 // samples met, and takes the nearest it enters (resolve_fragment).
 // See-through voxels (a medium: fog, water, a far canopy) add up on the way,
 // in the order the ray meets them, each by its path through it.
-// A voxel shows the material of the face a ray enters it by, times the
+// A voxel shows its look through the face a ray enters it by, times the
 // light on it: shaded, by the way its surface faces; lit, the light its tile
-// found for it (world.rs), and its glow if its material glows. A brick not
+// found for it (world.rs), its own glow counted in. A brick not
 // lit yet is not on the GPU (voxels.rs), as one of a tile not made: rays take
 // the next level, and ask for it (`asked`).
 // voxels.rs puts the constants it shares with this file before it.
 
 // The picture's size in pixels, and its sides over the focal length; the
-// fog's distance, and what of the sky it hides; whether voxels are lit, and
-// how bright what glows is then; the sky's colours; right, up and forward in the world.
+// fog's distance, and what of the sky it hides; whether voxels are lit; the
+// sky's colours; right, up and forward in the world.
 struct Globals {
   resolution: vec2f,
   extent: vec2f,
   fog: f32,
   sky_fog: f32,
   lit: u32,
-  glow: f32,
   sky_top: vec4f,
   horizon: vec4f,
   view: mat3x3f,
@@ -62,21 +61,19 @@ fn hollow(l: Level, k: vec3i, j: u32) -> bool {
 @group(0) @binding(1) var<storage, read> levels: array<Level>;
 // Per level, its window's bricks' slots in `cells`, EMPTY or UNKNOWN (no tile yet: rays take the next level).
 @group(0) @binding(2) var<storage, read> bricks: array<i32>;
-// Per slot of the pool, its brick's 256 sites (Grid's order), each material | alpha << 8, two a word.
+// Per slot of the pool, its brick's 256 sites (Grid's order), each its look (fcc's Look), a word each.
 @group(0) @binding(3) var<storage, read> cells: array<u32>;
-// Per material, 0xrrggbb.
-@group(0) @binding(4) var<storage, read> palette: array<u32>;
 // The eye in the world (grid 0's units).
-@group(0) @binding(5) var<uniform> eye: vec4f;
+@group(0) @binding(4) var<uniform> eye: vec4f;
 // Per level, per cell of each scale in its window, how many bricks around it have voxels that meet it or are unknown (a torus, as `bricks`).
-@group(0) @binding(6) var<storage, read> filled: array<u32>;
+@group(0) @binding(5) var<storage, read> filled: array<u32>;
 // Lit, per slot of the pool, the light on its brick's voxels as `cells` has them, one a word: RGB9E5, 0 if none.
-@group(0) @binding(7) var<storage, read> lights: array<u32>;
+@group(0) @binding(6) var<storage, read> lights: array<u32>;
 // Per slot of the pool, the next of its brick's (voxels.rs's Pool), EMPTY if none: a brick whose
 // voxels' faces differ has more, each its sites' faces two by two, as `cells` has them.
-@group(0) @binding(8) var<storage, read> next: array<i32>;
+@group(0) @binding(7) var<storage, read> next: array<i32>;
 // Lit, a bit per entry of the levels' tables (as `bricks`): whether a ray took the next level at its brick, unknown.
-@group(0) @binding(12) var<storage, read_write> asked: array<atomic<u32>>;
+@group(0) @binding(11) var<storage, read_write> asked: array<atomic<u32>>;
 
 const NONE = 0xffffffffu;
 // A ray's steps at a level at most: more than any needs. One that runs out
@@ -121,7 +118,7 @@ fn brick_of(level: u32, s: vec3i) -> i32 {
   return bricks[entry(l, b)];
 }
 
-// The voxel at site `s` of `level`: material | alpha << 8, 0 if none.
+// The look of the voxel at site `s` of `level`, 0 if none.
 fn voxel(level: u32, s: vec3i) -> u32 {
   return in_brick(level, brick_of(level, s), s);
 }
@@ -139,10 +136,9 @@ fn site_index(r: vec3i) -> u32 {
   return u32(((r.z * BRICK + r.y) * BRICK + r.x) >> 1u);
 }
 
-// The voxel at `r` in the brick at `slot`, two a word.
+// The look of the voxel at `r` in the brick at `slot`.
 fn site_in(slot: i32, r: vec3i) -> u32 {
-  let i = site_index(r);
-  return (cells[u32(slot) * BRICK_WORDS + (i >> 1u)] >> ((i & 1u) * 16u)) & 0xffffu;
+  return cells[u32(slot) * BRICK_SITES + site_index(r)];
 }
 
 // Lit, the light of the voxel at `r` in the brick at `slot`, 0 if none.
@@ -159,12 +155,12 @@ fn light_at(level: u32, s: vec3i) -> u32 {
   return light_in(slot, (s - levels[level].min) & vec3i(BRICK - 1));
 }
 
-// The colour of the see-through voxel `v` at `r` in the brick at `slot`: its material under the light on it, shaded as its faces are on average.
+// The colour of the see-through voxel of look `v` at `r` in the brick at `slot`: under the light on it, shaded as its faces are on average.
 fn medium_colour(slot: i32, r: vec3i, v: u32) -> vec3f {
   if globals.lit != 0u {
-    return coloured(v & 255u, rgb9e5(light_in(slot, r)));
+    return coloured(v, rgb9e5(light_in(slot, r)));
   }
-  return coloured(v & 255u, vec3f(MEDIUM_SHADE));
+  return coloured(v, vec3f(MEDIUM_SHADE));
 }
 
 // The site of the FCC lattice (x + y + z even) whose voxel holds `p`.
@@ -324,7 +320,7 @@ fn march(d: vec3f) -> Hit {
         let r = (s - l.min) & vec3i(BRICK - 1);
         let v = site_in(slot, r);
         // Opaque, unless the eye is in it.
-        if v >> 8u == 255u && (steps > 0 || at > 0.0) {
+        if v >> 24u == 255u && (steps > 0 || at > 0.0) {
           return Hit(level, s, v, at * scale);
         }
         medium = v;
@@ -347,7 +343,7 @@ fn march(d: vec3f) -> Hit {
       step[(k + 1) % 3] = i32(select(-way, way, by_plus));
       if medium != 0u {
         // Its path through the voxel: from where it entered (or the eye) to where it leaves.
-        let stops = 1.0 - pow(1.0 - f32(medium >> 8u) / 255.0, (leave - at) / CHORD);
+        let stops = 1.0 - pow(1.0 - f32(medium >> 24u) / 255.0, (leave - at) / CHORD);
         let fog = 1.0 - exp(-(at + leave) * 0.5 * scale / globals.fog);
         gathered += through * stops * mix(tint, globals.horizon.rgb, fog);
         through *= 1.0 - stops;
@@ -394,11 +390,6 @@ fn face_shade(n: vec3f) -> f32 {
   return dot(n * n, sides) / dot(n, n);
 }
 
-fn rgb(material: u32) -> vec3f {
-  let c = palette[material];
-  return vec3f(f32((c >> 16u) & 255u), f32((c >> 8u) & 255u), f32(c & 255u)) / 255.0;
-}
-
 fn rgb9e5(w: u32) -> vec3f {
   return vec3f(vec3u(w, w >> 9u, w >> 18u) & vec3u(511u)) * exp2(f32(w >> 27u) - 24.0);
 }
@@ -411,26 +402,26 @@ fn to_srgb(c: vec3f) -> vec3f {
   return select(1.055 * pow(c, vec3f(1.0 / 2.4)) - 0.055, c * 12.92, c <= vec3f(0.0031308));
 }
 
-// Material `m` under `light`: shaded, its colour times a shade, as the splats paint it; lit, its colour
-// (linear) times the light, its glow added if it glows, as worldgen's Light::relight shows it.
-fn coloured(m: u32, light: vec3f) -> vec3f {
+// Look `v` under `light`: shaded, its colour times a shade, as the splats paint it; lit, its colour
+// (linear) times the light, which counts its own glow (voxels.rs's `light`), as worldgen's Light::relight shows it.
+fn coloured(v: u32, light: vec3f) -> vec3f {
+  let rgb = unpack4x8unorm(v).rgb;
   if globals.lit == 0u {
-    return rgb(m) * light;
+    return rgb * light;
   }
-  let glow = select(0.0, globals.glow, (palette[m] >> 24u) != 0u);
-  return to_srgb(min(to_linear(rgb(m)) * (light + glow), vec3f(1.0)));
+  return to_srgb(min(to_linear(rgb) * light, vec3f(1.0)));
 }
 
-// The material of face `k` (of FACES) of the voxel hit: its brick's next slots hold its faces', if they differ.
-fn face_material(hit: Hit, k: u32) -> u32 {
+// The look through face `k` (of FACES) of the voxel hit: its brick's next slots hold its faces', one a slot, if they differ.
+fn face_look(hit: Hit, k: u32) -> u32 {
   var faces = next[brick_of(hit.level, hit.site)];
   if faces < 0 {
-    return hit.voxel & 255u;
+    return hit.voxel;
   }
-  for (var j = 0u; j < k / 2u; j++) {
+  for (var j = 0u; j < k; j++) {
     faces = next[faces];
   }
-  return (site_in(faces, (hit.site - levels[hit.level].min) & vec3i(BRICK - 1)) >> (8u * (k & 1u))) & 255u;
+  return site_in(faces, (hit.site - levels[hit.level].min) & vec3i(BRICK - 1));
 }
 
 // The face (of FACES) a ray along `d` enters the voxel hit by, as worldgen's picture.rs finds it:
@@ -457,7 +448,7 @@ fn light_on(hit: Hit) -> vec3f {
   var shade = 0.0;
   var open = 0.0;
   for (var k = 0; k < 12; k++) {
-    if (voxel(hit.level, hit.site + vec3i(FACES[k])) >> 8u) < 255u {
+    if (voxel(hit.level, hit.site + vec3i(FACES[k])) >> 24u) < 255u {
       shade += face_shade(FACES[k]);
       open += 1.0;
     }
@@ -485,8 +476,8 @@ fn lit(hit: Hit) -> vec3f {
 
 // What each sample met: its site, and level | voxel << 8 (NONE if
 // nothing); and the voxel's colour, and what the see-through voxels in front gave (rgb) and let through (a).
-@group(0) @binding(9) var sample_hits: texture_2d<u32>;
-@group(0) @binding(10) var sample_colours: texture_2d<u32>;
+@group(0) @binding(8) var sample_hits: texture_2d<u32>;
+@group(0) @binding(9) var sample_colours: texture_2d<u32>;
 
 struct Sample {
   @location(0) hit: vec4u,
@@ -502,8 +493,8 @@ fn sample_fragment(in: Screen) -> Sample {
   if hit.level >= LOST {
     return Sample(vec4u(0u, 0u, 0u, hit.level), vec2u(0u, medium));
   }
-  let colour = coloured(face_material(hit, entered(hit, d)), light_on(hit));
-  return Sample(vec4u(bitcast<vec3u>(hit.site), hit.level | hit.voxel << 8u), vec2u(pack4x8unorm(vec4f(colour, 1.0)), medium));
+  let colour = coloured(face_look(hit, entered(hit, d)), light_on(hit));
+  return Sample(vec4u(bitcast<vec3u>(hit.site), hit.level), vec2u(pack4x8unorm(vec4f(colour, 1.0)), medium));
 }
 
 // Each pixel: the nearest voxel its own ray enters of those its four nearest
@@ -601,7 +592,7 @@ fn resolve_fragment(in: Screen) -> @location(0) vec4f {
 }
 
 // The picture, shown where egui's pass puts it.
-@group(0) @binding(11) var picture: texture_2d<f32>;
+@group(0) @binding(10) var picture: texture_2d<f32>;
 
 @fragment
 fn show_fragment(in: Screen) -> @location(0) vec4f {

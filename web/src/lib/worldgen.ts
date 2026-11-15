@@ -5,7 +5,7 @@
  * instance of their own. See docs/generators.md. No DOM.
  */
 import { wasmInstance } from './wasm'
-import { FACE_WORDS, type Box, type Material, type VoxelData } from './voxel-grid'
+import { VIEW_WORDS, type Box, type VoxelData } from './voxel-grid'
 import type { Generated } from './world'
 
 /** The worlds' exports (web/wasm/src/lib.rs). */
@@ -39,28 +39,23 @@ export function generated(name: string, seed: number): Generated {
   const exports = wasmInstance() as unknown as Exports
   // Before reading memory.buffer: each call may grow (and so replace) it.
   const result = (at: number, count: number) => new Float64Array(exports.memory.buffer, at, count)
-  const [x, y, z, count, colours] = result(exports.worldgen_start(world, seed), 5)
-  const materials: Material[] = Array.from(new Uint32Array(exports.memory.buffer, colours, count), (word, id) => ({
-    color: id === 0 ? '' : `#${(word & 0xffffff).toString(16).padStart(6, '0')}`,
-    walkThrough: (word & (1 << 24)) !== 0,
-  }))
+  const [x, y, z] = result(exports.worldgen_start(world, seed), 3)
   return {
     spawn: { x, y, z },
-    materials,
     heights: level => {
       const [minY, maxY] = result(exports.worldgen_heights(level), 2)
       return { minY, maxY }
     },
     generate: ({ minX, minY, minZ, maxX, maxY, maxZ }: Box, level: number): VoxelData => {
-      const [gx, gy, gz, nx, ny, nz, bricks, brickCount, cells, cellCount, faces, faceCount] = result(exports.worldgen_generate(level, minX, minY, minZ, maxX, maxY, maxZ), 12)
+      const [gx, gy, gz, nx, ny, nz, bricks, brickCount, cells, cellCount, views, viewCount, solid, solidCount] = result(exports.worldgen_generate(level, minX, minY, minZ, maxX, maxY, maxZ), 14)
       const { buffer } = exports.memory
       // Copied out: the next call reuses the buffers.
       return {
         minX: gx, minY: gy, minZ: gz, nx, ny, nz,
         bricks: new Int32Array(buffer, bricks, brickCount).slice(),
-        cells: new Uint8Array(buffer, cells, cellCount).slice(),
-        faces: new Uint32Array(buffer, faces, faceCount * FACE_WORDS).slice(),
-        materials,
+        cells: new Uint32Array(buffer, cells, cellCount).slice(),
+        views: new Uint32Array(buffer, views, viewCount * VIEW_WORDS).slice(),
+        solid: new Uint32Array(buffer, solid, solidCount).slice(),
       }
     },
   }

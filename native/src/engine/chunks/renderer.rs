@@ -324,7 +324,7 @@ impl Hiding {
                 match last {
                     None => return (f64::INFINITY, Some(t)),
                     Some((.., g)) if g.brick(site[0], site[1], site[2]) >= 0 => {
-                        if g.get(site[0], site[1], site[2]).1 == fcc::ALPHA {
+                        if fcc::alpha_of(g.get(site[0], site[1], site[2])) == fcc::ALPHA {
                             return (eye[2] + t, None);
                         }
                         step = unit / 2.0;
@@ -524,7 +524,7 @@ impl Renderer {
      */
     pub fn new(world: &World, relief: bool, flat: bool, baked: impl Fn() + Send + Sync + 'static) -> Renderer {
         let faces = view::faces();
-        let (palette, light) = (world.palette.clone(), world.light());
+        let light = world.light();
         let baked = Arc::new(baked);
         let wake = baked.clone();
         let feedback = Arc::new(Feedback { found: Mutex::default(), wake: Box::new(move || wake()) });
@@ -532,7 +532,7 @@ impl Renderer {
             world.threads,
             move || baked(),
             move || {
-                let mut baker = Baker::new(&palette);
+                let mut baker = Baker::new();
                 if let Some(light) = &light {
                     let mut light = light();
                     baker.light = Some(Box::new(move |level, site| light.faces(level as u32, site.map(i64::from))));
@@ -868,7 +868,6 @@ impl Renderer {
 mod tests {
     use std::collections::HashMap;
 
-    use worldgen::generator::materials_of;
     use worldgen::light::make_tile;
 
     use super::*;
@@ -891,7 +890,7 @@ mod tests {
                 .map(|id| (id, Arc::new(Tile::new(id, Arc::new(make_tile(&world.generator, grid, heights, id.map(i64::from)))))))
                 .collect();
             let level = Level::new(tiles);
-            let mut baker = Baker::new(&materials_of(&world.generator).iter().map(|m| m.rgb()).collect::<Vec<_>>());
+            let mut baker = Baker::new();
             baker.share_tiles(grid as usize, level.grids.clone());
             let (mut buried, mut empty) = (0, 0);
             for (face, &lattice) in fcc::lattices().iter().enumerate() {

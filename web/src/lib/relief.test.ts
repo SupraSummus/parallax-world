@@ -96,7 +96,7 @@ describe.each([1, 0.5, 0.25])('ray-cast leaks with tan(fov / 2) = %s', TAN_HALF_
    * first showing (the later painted where they tie).
    */
   function parallaxOwners({ cells, levels }: { cells: Cell[]; levels: VoxelGrid[] }, cu: number, cz: number, slices: SliceId[]): number[] {
-    const baker = new ChunkBaker(levels[0].materials, levels)
+    const baker = new ChunkBaker(levels)
     const cellAt = new Map(cells.map(({ u, z, n }, cell) => [`${String(n)}:${String(u)},${String(z)}`, cell]))
     const owner = rays.map(() => -1)
     for (const slice of [...slices].reverse()) {

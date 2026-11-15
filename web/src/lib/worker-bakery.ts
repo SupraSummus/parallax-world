@@ -1,6 +1,6 @@
 import { encodeRequests, type BakeMessage, type BakeResult, type ChunkSplats, type ChunkRequest } from './chunk-baker'
 import type { Bakery } from './renderer'
-import type { LayerIndexData, Material, VoxelData } from './voxel-grid'
+import type { LayerIndexData, VoxelData } from './voxel-grid'
 import type { GridPart, WorldType } from './world'
 
 /** The part of a Worker a WorkerBakery uses. */
@@ -56,11 +56,11 @@ export class WorkerBakery implements Bakery {
     this.generated = generated
   }
 
-  setWorld(materials: readonly Material[], levels: readonly (VoxelData | undefined)[]) {
+  setWorld(levels: readonly (VoxelData | undefined)[]) {
     this.generation++
     for (const entry of this.workers) {
       entry.sent = null
-      entry.worker.postMessage({ type: 'world', generation: this.generation, materials, levels })
+      entry.worker.postMessage({ type: 'world', generation: this.generation, levels })
     }
   }
 

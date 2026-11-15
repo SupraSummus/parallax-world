@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 use cells::Cells;
 use fcc::light::Lighting;
-use fcc::{ALPHA, FACE_KINDS, Grid, Lattice, Reader, Tiles, VIEW_FACES, lattices};
+use fcc::{ALPHA, FACE_KINDS, Grid, Lattice, Reader, Tiles, VIEW_FACES, alpha_of, lattices};
 use fill::{fill_mask, solid_blocks};
 use lod::CellChunk;
 use slicing::{LAYER, chunk_cell, slice_centre, spacing, thickness};
@@ -108,10 +108,10 @@ pub struct Baked {
     pub count: usize,
 }
 
-/** One world's grids, palettes and lattices, and the buffers reused across bakes. */
+/** One world's grids, shades and lattices, and the buffers reused across bakes. */
 pub struct Baker {
     /**
-     * By level: grid ℓ has the sites of 2^ℓ·FCC, in its own units, once set. They share materials.
+     * By level: grid ℓ has the sites of 2^ℓ·FCC, in its own units, once set.
      * Shared: native threads bake from one copy.
      */
     grids: Vec<Arc<Tiles>>,
@@ -119,8 +119,8 @@ pub struct Baker {
     last: usize,
     geometry: Geometry,
     lattices: [Lattice; VIEW_FACES],
-    /** Per view face: material · FACE_KINDS + kind → RGBA. */
-    palettes: Vec<u32>,
+    /** Per view face, its face kinds' shades (tables::shades). */
+    shades: [[f32; FACE_KINDS]; VIEW_FACES],
     /** Per view face, its face kinds' in the world (tables::world_kinds), as `light` has them. */
     world_kinds: [[usize; FACE_KINDS]; VIEW_FACES],
     /** If the host lights the world, its light; else voxels are shaded by the way their faces face (voxel_colour). */
@@ -147,16 +147,21 @@ pub struct Baker {
     spacing: i32,
 }
 
+impl Default for Baker {
+    fn default() -> Baker {
+        Baker::new()
+    }
+}
+
 impl Baker {
-    /** A baker for the world's materials' colours, 0xrrggbb by id. */
-    pub fn new(colours: &[u32]) -> Baker {
+    pub fn new() -> Baker {
         let lattices = lattices();
         Baker {
             grids: Vec::new(),
             last: 0,
             geometry: tables::geometry(&lattices[0]),
             lattices,
-            palettes: tables::palettes(&lattices, colours),
+            shades: tables::shades(&lattices),
             world_kinds: tables::world_kinds(&lattices),
             light: None,
             pairs: Cells::new(2),
@@ -276,14 +281,14 @@ impl Baker {
         let whole: Vec<_> = if chunk.medium {
             Vec::new()
         } else {
-            surface(&reader, &self.geometry, from, to, holds).into_iter().filter(|v| v.alpha == ALPHA).collect()
+            surface(&reader, &self.geometry, from, to, holds).into_iter().filter(|v| v.alpha() == ALPHA).collect()
         };
         let (whole, hexagons) = if relief { (whole, Vec::new()) } else { (Vec::new(), whole) };
         // From a site on along the axis, the last whole voxel before any that is not, a cell deep past the cell at most.
         let runs_on = |[a, b, mut c]: [i32; 3]| {
             let whole = |c| {
                 let mut whole = false;
-                reader.row(a, b, c, 1, |_, material, alpha| whole = material != 0 && alpha == ALPHA);
+                reader.row(a, b, c, 1, |_, look| whole = alpha_of(look) == ALPHA);
                 whole
             };
             while c + 2 <= to[2] + 2 * m && whole(c + 2) {
@@ -326,15 +331,14 @@ impl Baker {
     /** The splats `splats` makes of voxels read from grid `level` along view face `face`, given their colours. */
     fn paint(&mut self, face: usize, level: usize, splats: impl FnOnce(&mut Splats, &Geometry, &mut dyn FnMut(&surface::Voxel) -> u32)) {
         let lattice = self.lattices[face];
-        let palettes = self.palettes.len() / VIEW_FACES;
-        let palette = &self.palettes[face * palettes..(face + 1) * palettes];
+        let shades = &self.shades[face];
         let (light, kinds) = (&mut self.light, &self.world_kinds[face]);
         let mut colour = |voxel: &surface::Voxel| {
             let rgb = match light {
                 Some(light) => lit_voxel_colour(voxel, &light(level, lattice.world(voxel.site)), kinds, lattice.f.map(|v| -v)),
-                None => voxel_colour(voxel, palette),
+                None => voxel_colour(voxel, shades),
             };
-            rgb & 0x00ff_ffff | u32::from(voxel.alpha) << 24
+            rgb & 0x00ff_ffff | voxel.look & 0xff00_0000
         };
         splats(&mut self.splats, &self.geometry, &mut colour);
     }

@@ -461,10 +461,9 @@ into the web's one module (`web/wasm/`),
 inlined into the app (`wasm.ts`), so it compiles synchronously
 in a worker, on the main thread (for coverage, section 4) or in Node,
 with no files to fetch.
-`ChunkBaker` hands it a world once:
-the grid and the materials' colours.
+`ChunkBaker` hands it a world once, its grids.
 It knows the faces itself (`lattices`, in the order of `FACES`),
-and shades the colours per face (`tables.rs`).
+and shades the voxels' colours per face (`tables.rs`).
 Then each chunk is one call,
 and its splats are copied out of the WebAssembly memory.
 A chunk's voxels are those of its cell and a margin around it
@@ -527,7 +526,7 @@ all even or all odd, placed at (a·LAYER, b, c·LAYER);
 layer c is a rectangular grid of sites, √2 by 2 apart,
 and the next layer is the same grid shifted by half a cell.
 The world is read in these coordinates (`Reader` in `fcc/`), with faces
-shaded by the way they face in the world (`palettes` in `bake/`).
+shaded by the way they face in the world (`shades` in `bake/`).
 
 Each face draws the rays closer to its axis than to any other face's
 (`inFace`): |x| + √2·|y| ≤ z, a rhombus of tangents reaching 1
@@ -840,13 +839,11 @@ and bricks of a tile holding the same sites (its buried rock) share a slot.
 A brick of a tile not made yet is unknown, not empty,
 and rays take the next coarser level there:
 what is missing shows coarser, never as a hole.
-A voxel shows the material of the face a ray enters it by,
-as worldgen's rays do (`picture.rs`),
+A voxel shows its look through the face a ray enters it by,
 times the light on it (below):
-a coarse voxel of a house may show its wall from the side and its roof from above,
-and its site's own material is only one of them.
-So a brick whose voxels' faces differ takes six more slots of the pool,
-its sites' faces two by two, each slot naming the next.
+a coarse voxel of a house may show its wall from the side and its roof from above.
+So a brick whose voxels look unlike through some faces takes twelve more slots of the pool,
+its sites' looks through one face each, each slot naming the next.
 Empty space is crossed on the lattice too, not by boxes:
 beside its bricks, a window counts for each cell of 8·FCC and of 32·FCC
 (rhombic dodecahedra about every other corner of its bricks, or of blocks of 4³ of them)
@@ -894,7 +891,8 @@ before any tile to make,
 nearest first in each level's own sites, as rays read them:
 each voxel of the brick a ray can meet gets the light on it,
 by the way its surface faces (`Light::on_seen`),
-and shows its material's colour times that, and its glow if its material glows,
+its own glow added as light on its colour,
+and shows its colour times that,
 as worldgen's lit pictures do (`Light::relight`);
 shaded, the light is the mean of its open faces' shades.
 The light goes to the GPU beside the bricks, a word a site (RGB9E5), in a pool of its own.
@@ -952,13 +950,17 @@ So walls and floors along the axes look alike in every direction,
 and the 12 faces of section 4 map sites to sites.
 
 **Storage** (`voxel-grid.ts`). A world is a voxel grid per level of
-detail (section 1) plus a spawn point: one material id byte per site of a
-box, 0 for empty.
-A voxel has a material on each of its 12 faces (`VOXEL_FACES` in `fcc.ts`),
+detail (section 1) plus a spawn point: a word per site of a box,
+what its voxel looks like (`Look` in `fcc/`):
+its colour, sRGB, and how much of the rays through it it stops; 0 for empty.
+Grids hold colours, not materials:
+a coarse voxel holds the mean of what is in it.
+A voxel may look different through each of its 12 faces (`VOXEL_FACES` in `fcc.ts`),
 what is seen of it looking at that face:
 a coarse voxel stands for its cell, which may look different from each side.
-Mostly the faces are its site's material;
-the sites whose faces differ are listed apart (`faces`).
+Mostly it looks alike through all;
+the sites that do not are listed apart (`views`).
+What stops a walking body is a bit a site apart (`solid`).
 Each reader shows the faces it sees:
 the baker the face towards its slices' camera (section 3),
 rays (`worldgen/src/picture.rs`) those turned most against them.
@@ -993,7 +995,7 @@ The renderer only draws faces that no neighbour covers.
   front (section 3).
 - A voxel is painted as one hexagon of one colour holding its outline,
   that of its face towards the camera:
-  its other faces' shapes, shades and materials are lost,
+  its other faces' shapes, shades and looks are lost,
   and a silhouette is a row of hexagons.
 - Within `NEAR_DEPTH` of the camera along a face's axis nothing is
   drawn, and near voxels seen at a steep angle are the least accurate.

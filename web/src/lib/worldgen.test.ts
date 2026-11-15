@@ -25,7 +25,7 @@ describe('worlds', () => {
 
 describe('forest', () => {
   const forest = (seed: number) => generated('forest', seed)
-  const { spawn, materials, heights, generate } = forest(7)
+  const { spawn, heights, generate } = forest(7)
   // A coarse level: the ground around the spawn point in moments.
   const level = 4
   const s = 2 ** level
@@ -33,15 +33,15 @@ describe('forest', () => {
   const [x, z] = [Math.floor(spawn.x / s), Math.floor(spawn.z / s)]
   const box = { minX: x - 16, minY, minZ: z - 16, maxX: x + 16, maxY, maxZ: z + 16 }
 
-  it('gives its materials as colours, whether walked through, and the spawn point on a site above its ground', () => {
-    expect(materials[0]).toEqual({ color: '', walkThrough: true })
-    // Ground is stood on, plants are walked through.
-    expect(materials.some(m => m.walkThrough === false)).toBe(true)
-    expect(materials.slice(1).some(m => m.walkThrough === true)).toBe(true)
-    for (const { color } of materials.slice(1)) expect(color).toMatch(/^#[0-9a-f]{6}$/)
+  it('gives the spawn point on a site above its ground, which is stood on, its plants walked through', () => {
     expect((spawn.x + spawn.y + spawn.z) & 1).toBe(0)
     let top = -Infinity
-    VoxelGrid.compose(box, materials, [generate(box, level)]).forEach((x, y, z) => {
+    const grid = VoxelGrid.compose(box, [generate(box, level)])
+    let [solid, through] = [0, 0]
+    grid.forEach((x, y, z) => { if (grid.isSolid(x, y, z)) solid++; else through++ })
+    expect(solid).toBeGreaterThan(0)
+    expect(through).toBeGreaterThan(0)
+    grid.forEach((x, y, z) => {
       if (Math.abs(x * s - spawn.x) <= s && Math.abs(z * s - spawn.z) <= s) top = Math.max(top, y * s)
     })
     expect(top).toBeGreaterThan(-Infinity)

@@ -75,7 +75,7 @@ where the sections below are too).
 1. **Rhombic dodecahedra on the FCC lattice.**
    A voxel meets its 12 nearest neighbours face to face, all equally far,
    and walls and floors along the axes stay flat (section 6).
-   Each face may show a material of its own,
+   Each face may show a colour of its own,
    and the 12 faces are the 12 directions slices are seen along.
 2. **One hierarchy of cells for everything.**
    The cells of N·FCC, N = 1, 2, 4, …,

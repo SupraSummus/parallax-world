@@ -26,7 +26,6 @@ use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use fcc::GRID_LEVELS;
 pub use fcc::TileId;
 use fcc::{Grid, Tiles};
-use worldgen::generator::materials_of;
 use worldgen::light::{Brightness, Light, Shared, make_tile};
 
 use crate::engine::voxels;
@@ -111,7 +110,7 @@ fn whole(grid: &Grid) -> Arc<[u64]> {
     let mut bits = vec![0; grid.bricks.len().div_ceil(64)];
     for (place, &at) in grid.bricks.iter().enumerate() {
         let sites = usize::try_from(at).map(|at| at * fcc::BRICK_SITES..(at + 1) * fcc::BRICK_SITES);
-        if sites.is_ok_and(|mut sites| sites.all(|i| grid.alpha_at(i) == fcc::ALPHA)) {
+        if sites.is_ok_and(|mut sites| sites.all(|i| fcc::alpha_of(grid.cells[i]) == fcc::ALPHA)) {
             bits[place / 64] |= 1 << (place % 64);
         }
     }
@@ -134,7 +133,7 @@ impl Level {
      */
     pub fn meets(&self, centre: [i32; 3], radius: i32, see_through: bool) -> bool {
         if radius < voxels::cell_size(0) {
-            let kept = |(material, alpha)| if see_through { !matches!(alpha, 0 | fcc::ALPHA) } else { material != 0 };
+            let kept = |look| if see_through { !matches!(fcc::alpha_of(look), 0 | fcc::ALPHA) } else { look != 0 };
             return meeting(centre, radius, 1).any(|q| self.grids.at(q[0], q[1], q[2]).is_some_and(kept));
         }
         let j = usize::from(radius >= voxels::cell_size(1));
@@ -236,9 +235,6 @@ pub struct World {
     tiles: Vec<HashMap<TileId, Arc<Tile>>>,
     /** Per level, the tiles made so far, as engines read them. */
     levels: Vec<Arc<Level>>,
-    /** By material id, its colour, and whether it glows. */
-    pub palette: Arc<Vec<u32>>,
-    pub glows: Arc<Vec<bool>>,
     pub heights: Heights,
     /** The threads it makes tiles on, which engines may take as many of. */
     pub threads: usize,
@@ -341,8 +337,6 @@ impl World {
         World {
             tiles: (0..GRID_LEVELS).map(|_| HashMap::new()).collect(),
             levels: (0..GRID_LEVELS).map(|_| Arc::new(Level::new(HashMap::new()))).collect(),
-            palette: Arc::new(materials_of(&world.generator).iter().map(|m| m.rgb()).collect()),
-            glows: Arc::new(materials_of(&world.generator).iter().map(|m| m.glows).collect()),
             heights,
             threads,
             make,
@@ -572,7 +566,7 @@ mod tests {
             let tiles = within([corner.map(|v| v - 1), corner]);
             let level = Level::new(tiles.map(|id| (id, Arc::new(make(id)))).collect());
             for kept in [false, true] {
-                let voxel = |(m, alpha): (u8, u8)| if kept { !matches!(alpha, 0 | fcc::ALPHA) } else { m != 0 };
+                let voxel = |look: fcc::Look| if kept { !matches!(fcc::alpha_of(look), 0 | fcc::ALPHA) } else { look != 0 };
                 let held = |q: [i32; 3]| (q[0] + q[1] + q[2]) & 1 == 0 && level.grids.at(q[0], q[1], q[2]).is_some_and(voxel);
                 for radius in [1, 2, 4, 8, 16, 32] {
                     // Each cell within a tile of the spawn (to the next multiple of 64, a site of each), or 8 cells, the nearer.

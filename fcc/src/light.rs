@@ -11,7 +11,7 @@ pub type FaceLight = [[f32; 3]; FACE_KINDS];
 /** A host's light: that from the faces of the voxel at a site of a grid level, in its units, as tiles have it. */
 pub type Lighting = Box<dyn FnMut(usize, [i32; 3]) -> FaceLight>;
 
-/** Light (linear) as a colour: opaque little-endian sRGB RGBA, as palettes are; what is brighter than white, white. */
+/** Light (linear) as a colour: opaque little-endian sRGB RGBA, as looks are (Look); what is brighter than white, white. */
 pub fn colour(light: [f32; 3]) -> u32 {
     let [r, g, b] = light.map(|c| (255.0 * linear_to_srgb(c.clamp(0.0, 1.0))).round() as u32);
     255 << 24 | b << 16 | g << 8 | r

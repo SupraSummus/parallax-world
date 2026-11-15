@@ -108,8 +108,9 @@ pub fn generate(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
             (Some(kinds), Some(ids)) => std::array::from_fn(|k| colour(kinds[k], ids[k])),
             _ => [colour(look.kind, id); FACE_KINDS],
         };
-        let (medium, glow) = (palette.materials[id as usize].medium, palette.glows[id as usize]);
-        let added = Added { op, pick, id, faces, colours, glow, cover: look.cover, medium };
+        let material = &palette.materials[id as usize];
+        let (medium, solid, glow) = (material.medium, !material.walk_through, palette.glows[id as usize]);
+        let added = Added { op, pick, id, faces, colours, glow, cover: look.cover, medium, solid };
         see(&mut grid, &added, share, x, y, z);
     };
     let drawables = drawables_in(generator, &clip, s);
@@ -192,14 +193,14 @@ fn see(grid: &mut VoxelGrid, added: &Added, share: u32, x: i64, y: i64, z: i64) 
         if seen {
             match medium {
                 true => grid.medium.seen[i] = added.id,
-                false => grid.see(i, added.id, added.faces),
+                false => grid.see(i, added.id, added.faces, added.solid),
             }
         }
         set_glow(grid, i, glow);
         return;
     }
     // Face by face, from what each saw so far; the site as a whole shows what the share as a whole would.
-    let (was, was_colour, was_seen) = (grid.pieces.alpha[i], grid.pieces.colour[i], grid.pieces.seen[i]);
+    let (was, was_colour, was_seen, was_solid) = (grid.pieces.alpha[i], grid.pieces.colour[i], grid.pieces.seen[i], grid.pieces.solid[i]);
     let mut views = grid.views.remove(&i).unwrap_or(crate::grid::Views {
         alpha: [was; FACE_KINDS],
         colour: [was_colour; FACE_KINDS],
@@ -220,7 +221,8 @@ fn see(grid: &mut VoxelGrid, added: &Added, share: u32, x: i64, y: i64, z: i64) 
     grid.pieces.alpha[i] = views.alpha.into_iter().max().expect("faces");
     grid.pieces.colour[i] = most(&views.colour);
     let (_, _, _, seen) = added.to((was, was_colour, old), share, 0);
-    grid.see(i, if seen { added.id } else { was_seen }, Some(shown));
+    let (id, solid) = if seen { (added.id, added.solid) } else { (was_seen, was_solid) };
+    grid.see(i, id, Some(shown), solid);
     let alike = |k: usize| views.alpha[k] == views.alpha[0] && views.colour[k] == views.colour[0] && views.glow[k] == views.glow[0];
     if (0..FACE_KINDS).all(alike) {
         (grid.pieces.alpha[i], grid.pieces.colour[i]) = (views.alpha[0], views.colour[0]);
@@ -243,6 +245,8 @@ struct Added {
     /** How much of each face's rays it covers, if not its share. */
     cover: Option<[u32; FACE_KINDS]>,
     medium: bool,
+    /** Whether it stops a walking body. */
+    solid: bool,
 }
 
 impl Added {

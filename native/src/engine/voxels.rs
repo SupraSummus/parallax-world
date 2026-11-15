@@ -18,11 +18,12 @@
 //! leaves. A brick of no tile yet is unknown, and rays take the next
 //! coarser level there: what is missing shows coarser, never as a hole.
 //!
-//! A voxel shows the material of the face a ray enters it by (a brick
-//! whose voxels' faces differ takes PARTS more slots for them: Pool),
-//! times the light on it: shaded, by the way its surface faces; lit, the
-//! light its tile found for it (world.rs, worldgen's Light), uploaded with
-//! its brick to a pool of its own, and its glow if its material glows.
+//! A voxel shows its look through the face a ray enters it by (a brick
+//! whose voxels look unlike through some faces takes PARTS more slots for
+//! them: Pool), times the light on it: shaded, by the way its surface
+//! faces; lit, the light its tile found for it (world.rs, worldgen's
+//! Light), its own glow counted in, uploaded with its brick to a pool of
+//! its own.
 //!
 //! Lit, only what rays meet is lit: a brick with voxels and no light yet
 //! is unknown, as one of no tile yet, so rays take the next coarser level
@@ -47,11 +48,10 @@ use crate::world::{Bricks, Level, Lit, TILE, Tile, TileId, Wants, World};
 
 /** A level's window, in bricks a side (a power of two: the table is a torus). */
 const WINDOW: i32 = 64;
-/** Sites a brick is a side (bake's BRICK), and the words its sites take, two a word. */
+/** Sites a brick is a side (bake's BRICK). */
 const BRICK_SHIFT: u32 = 3;
 const BRICK: i32 = 1 << BRICK_SHIFT;
-const BRICK_WORDS: usize = (BRICK * BRICK * BRICK / 4) as usize;
-/** Sites a brick holds: a word of light each, lit. */
+/** Sites a brick holds: a word each, of its look, and lit, of its light. */
 const BRICK_SITES: usize = (BRICK * BRICK * BRICK / 2) as usize;
 /** Pixels each way per ray traced. */
 const FACTOR: u32 = 4;
@@ -201,8 +201,8 @@ pub struct Met {
 impl Met {
     /** Of tile `id`, its grid and its bricks' `meets`. */
     pub fn new(id: TileId, grid: &fcc::Grid, meets: &[u32]) -> Met {
-        let see_through = |i| !matches!(grid.alpha_at(i), 0 | fcc::ALPHA);
-        let see_through = (!grid.alpha.is_empty()).then(|| Met::bits(id, grid, &meets_of(grid, see_through)));
+        let see_through = |i: usize| !matches!(fcc::alpha_of(grid.cells[i]), 0 | fcc::ALPHA);
+        let see_through = (0..grid.cells.len()).any(see_through).then(|| Met::bits(id, grid, &meets_of(grid, see_through)));
         Met { all: Met::bits(id, grid, meets), see_through }
     }
 
@@ -273,41 +273,43 @@ fn sites(first: usize) -> std::ops::Range<usize> {
     first * BRICK_SITES..(first + 1) * BRICK_SITES
 }
 
-/** Slots the brick of `grid` whose sites start at `first` takes: one, and PARTS more if its voxels' faces differ. */
+/** Slots the brick of `grid` whose sites start at `first` takes: one, and PARTS more if its voxels look unlike through some faces. */
 fn slots(grid: &fcc::Grid, first: usize) -> usize {
-    1 + if grid.has_faces(sites(first)) { PARTS } else { 0 }
+    1 + if grid.has_views(sites(first)) { PARTS } else { 0 }
 }
 
 /**
  * Part `part` of the brick whose sites start at `first` in `grid`'s cells
- * (in bricks) as the GPU takes it, BRICK_WORDS words, two sites a word:
- * part 0, each site material | alpha << 8; part 1 + j, the materials of its
- * faces 2j | 2j + 1 << 8 (of VOXEL_FACES), its site's where they do not differ.
+ * (in bricks) as the GPU takes it, a word a site: part 0, each site's
+ * look; part 1 + k, its look through face k (of VOXEL_FACES), its site's
+ * where they do not differ.
  */
 fn words(grid: &fcc::Grid, first: usize, part: usize) -> impl Iterator<Item = u32> + '_ {
-    let site = move |i: usize| match grid.cells[i] {
-        0 => 0,
-        m if part == 0 => u32::from(m) | u32::from(grid.alpha.get(i).copied().unwrap_or(fcc::ALPHA)) << 8,
-        m => {
-            let [a, b] = grid.faces_at(i).map_or([m; 2], |f| [f[2 * part - 2], f[2 * part - 1]]);
-            u32::from(a) | u32::from(b) << 8
-        }
-    };
-    sites(first).step_by(2).map(move |i| site(i) | site(i + 1) << 16)
+    sites(first).map(move |i| match grid.cells[i] {
+        look if part == 0 || look == 0 => look,
+        look => grid.views_at(i).map_or(look, |views| views[part - 1]),
+    })
 }
 
 /**
  * The light on the voxels of the brick of `grid`, of `level`, whose sites
  * start at `corner`, by site in the order of its cells: Light::on_seen,
- * as RGB9E5; 0 where none.
+ * and its own glow as light on its colour, as RGB9E5; 0 where none.
+ * So that, times its colour, it is what the voxel sends out.
  */
 pub fn light(grid: &fcc::Grid, level: u32, corner: [i32; 3], light: &mut Light) -> Box<[u32]> {
     let mut out = vec![0; BRICK_SITES];
     for r in 0..BRICK * BRICK * BRICK {
         let site: [i32; 3] = std::array::from_fn(|d| corner[d] + [r % BRICK, r / BRICK % BRICK, r / BRICK / BRICK][d]);
-        if (site[0] + site[1] + site[2]) & 1 == 0 && grid.get(site[0], site[1], site[2]).0 != 0 {
-            out[(r >> 1) as usize] = light.on_seen(level, site.map(i64::from)).map_or(0, rgb9e5);
+        let look = grid.get(site[0], site[1], site[2]);
+        if (site[0] + site[1] + site[2]) & 1 != 0 || look == 0 {
+            continue;
         }
+        let at = site.map(i64::from);
+        out[(r >> 1) as usize] = light.on_seen(level, at).map_or(0, |on| {
+            let (glow, colour) = (light.glow(level, at), look.to_le_bytes().map(|c| srgb_to_linear(c as f32 / 255.0)));
+            rgb9e5(std::array::from_fn(|c| on[c] + if colour[c] > 0.0 { glow[c] / colour[c] } else { 0.0 }))
+        });
     }
     out.into()
 }
@@ -348,7 +350,7 @@ impl Engine for Voxels {
         };
         let asked = self.asked.clone();
         Frame {
-            picture: Box::new(Scene { levels, palette: world.palette.clone(), glows: world.glows.clone(), look: *look, asked }),
+            picture: Box::new(Scene { levels, look: *look, asked }),
             // Rays read all around the eye.
             wants: Wants { reach, lit, tiles: world.lacking(&reach, look.camera), bricks: self.bricks.clone() },
             busy,
@@ -357,11 +359,9 @@ impl Engine for Voxels {
     }
 }
 
-/** What to draw: each level's tiles and the materials (World's palette and glows), as `look` sees them; where to tell what rays ask for. */
+/** What to draw: each level's tiles, as `look` sees them; where to tell what rays ask for. */
 struct Scene {
     levels: Vec<Arc<Level>>,
-    palette: Arc<Vec<u32>>,
-    glows: Arc<Vec<bool>>,
     look: Look,
     asked: Arc<Mutex<Asked>>,
 }
@@ -389,8 +389,7 @@ struct Globals {
     sky_fog: f32,
     /** 1 if voxels are lit by their tiles' light, 0 shaded by the way their surface faces. */
     lit: u32,
-    /** Lit, the radiance of what glows, as a multiple of its colour (Brightness::glowing). */
-    glow: f32,
+    _pad: u32,
     sky_top: [f32; 4],
     horizon: [f32; 4],
     /** Right, up, forward, in the world: columns of a mat3x3f. */
@@ -415,7 +414,7 @@ impl Globals {
             // What of the sky the fog hides, as of something at the far end.
             sky_fog: (1.0 - (-1.0 / look.fog).exp()) as f32,
             lit: u32::from(look.light.is_some()),
-            glow: look.light.map_or(0.0, |b| b.glowing()),
+            _pad: 0,
             sky_top: rgba(SKY_TOP),
             horizon: rgba(SKY_HORIZON),
             view: view_basis(look.yaw, look.pitch).map(column),
@@ -519,13 +518,13 @@ struct Added {
     part: usize,
 }
 
-/** Slots a brick takes beyond its own if its voxels' faces differ: its faces' materials, two a site in each. */
-const PARTS: usize = fcc::FACE_KINDS / 2;
+/** Slots a brick takes beyond its own if its voxels look unlike through some faces: its looks through each face, one a slot. */
+const PARTS: usize = fcc::FACE_KINDS;
 
 /**
  * The pool's slots: those free, and per slot, the next of its brick's
- * (EMPTY if none): a brick whose voxels' faces differ takes PARTS more,
- * its faces' materials two by two (words' parts), in a chain.
+ * (EMPTY if none): a brick whose voxels look unlike through some faces
+ * takes PARTS more, its looks through each face (words' parts), in a chain.
  */
 struct Pool {
     free: Vec<u32>,
@@ -1049,18 +1048,17 @@ enum Reading {
 /** The voxels on a device, drawn into a picture that the window or a shot shows. */
 pub struct Marcher {
     /**
-     * Globals, levels, tables, the pool, the palette, the eye, cells'
+     * Globals, levels, tables, the pool, the eye, cells'
      * counts, the pool's bricks' light (none unlit), its slots' next
      * (Pool's), and, lit, the bricks rays asked for (ASKED_WORDS).
      */
-    buffers: [wgpu::Buffer; 10],
+    buffers: [wgpu::Buffer; 9],
     /** What the asked were copied to, to read. */
     readback: wgpu::Buffer,
     reading: Reading,
     layouts: [wgpu::BindGroupLayout; 3],
     pipelines: [wgpu::RenderPipeline; 3],
     windows: Windows,
-    palette: Option<Arc<Vec<u32>>>,
     targets: Option<Targets>,
     /** Whether it draws lit scenes (Look's `sky`). */
     pub lit: bool,
@@ -1074,7 +1072,7 @@ pub struct Marcher {
 /** voxels.wgsl, with the constants it shares with this file. */
 fn shader() -> String {
     format!(
-        "const WINDOW = {WINDOW};\nconst CELLS = {CELLS}u;\nconst BRICK = {BRICK};\nconst BRICK_SHIFT = {BRICK_SHIFT}u;\nconst BRICK_WORDS = {BRICK_WORDS}u;\nconst BRICK_SITES = {BRICK_SITES}u;\nconst FACTOR = {FACTOR}u;\nconst EMPTY = {EMPTY};\nconst UNKNOWN = {UNKNOWN};\nconst FACES = array<vec3f, {}>({});\n{}",
+        "const WINDOW = {WINDOW};\nconst CELLS = {CELLS}u;\nconst BRICK = {BRICK};\nconst BRICK_SHIFT = {BRICK_SHIFT}u;\nconst BRICK_SITES = {BRICK_SITES}u;\nconst FACTOR = {FACTOR}u;\nconst EMPTY = {EMPTY};\nconst UNKNOWN = {UNKNOWN};\nconst FACES = array<vec3f, {}>({});\n{}",
         fcc::FACE_KINDS,
         fcc::VOXEL_FACES.map(|[x, y, z]| format!("vec3f({x}.0, {y}.0, {z}.0)")).join(", "),
         include_str!("voxels.wgsl")
@@ -1090,8 +1088,8 @@ impl Marcher {
         });
         // Lit, a brick's light takes a word a site, beside its own words.
         let light_words = if lit { BRICK_SITES } else { 0 };
-        let largest = device.limits().max_storage_buffer_binding_size / (BRICK_WORDS.max(light_words) as u64 * 4);
-        let pool = (POOL_BYTES / ((BRICK_WORDS + light_words) as u64 * 4)).min(largest);
+        let largest = device.limits().max_storage_buffer_binding_size / (BRICK_SITES as u64 * 4);
+        let pool = (POOL_BYTES / ((BRICK_SITES + light_words) as u64 * 4)).min(largest);
         let buffer = |label, size: usize, usage| {
             device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some(label),
@@ -1105,8 +1103,7 @@ impl Marcher {
             buffer("globals", size_of::<Globals>(), uniform),
             buffer("levels", GRID_LEVELS * size_of::<GpuLevel>(), storage),
             buffer("tables", GRID_LEVELS * TABLE * 4, storage),
-            buffer("pool", pool as usize * BRICK_WORDS * 4, storage),
-            buffer("palette", 256 * 4, storage),
+            buffer("pool", pool as usize * BRICK_SITES * 4, storage),
             buffer("eye", 16, uniform),
             buffer("filled", GRID_LEVELS * COUNTS * 4, storage),
             buffer("lights", (pool as usize * light_words * 4).max(4), storage),
@@ -1127,20 +1124,19 @@ impl Marcher {
             entry(1, read),
             entry(2, read),
             entry(3, read),
-            entry(4, read),
-            entry(5, uniform_type),
+            entry(4, uniform_type),
+            entry(5, read),
             entry(6, read),
             entry(7, read),
-            entry(8, read),
+            entry(8, uint),
             entry(9, uint),
-            entry(10, uint),
-            entry(12, write),
+            entry(11, write),
         ];
-        let samples = [&all[..9], &all[11..]].concat();
-        let shown = [entry(11, texture(wgpu::TextureSampleType::Float { filterable: false }))];
+        let samples = [&all[..8], &all[10..]].concat();
+        let shown = [entry(10, texture(wgpu::TextureSampleType::Float { filterable: false }))];
         // The samples' pass draws into the textures the resolving one reads, which draws the picture shown; the
         // samples' rays ask for bricks.
-        let layouts = [&samples[..], &all[..11], &shown[..]]
+        let layouts = [&samples[..], &all[..10], &shown[..]]
             .map(|entries| device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: None, entries }));
         let pipeline = |entry: &str, layout: &wgpu::BindGroupLayout, formats: &[wgpu::TextureFormat]| {
             let targets: Vec<_> = formats.iter().map(|&f| Some(f.into())).collect();
@@ -1177,8 +1173,8 @@ impl Marcher {
             pipeline("show_fragment", &layouts[2], &[format]),
         ];
         let (windows, reading) = (Windows::new(pool as usize, lit), Reading::Idle);
-        let (palette, targets, read) = (None, None, (u64::MAX, false));
-        Marcher { buffers, readback, reading, layouts, pipelines, windows, palette, targets, lit, settled: true, changes: 0, read }
+        let (targets, read) = (None, (u64::MAX, false));
+        Marcher { buffers, readback, reading, layouts, pipelines, windows, targets, lit, settled: true, changes: 0, read }
     }
 
     /**
@@ -1192,24 +1188,17 @@ impl Marcher {
         if self.lit {
             self.ask(device, &scene.asked);
         }
-        if !self.palette.as_ref().is_some_and(|p| Arc::ptr_eq(p, &scene.palette)) {
-            let mut palette: Vec<u32> =
-                scene.palette.iter().zip(scene.glows.iter()).map(|(&rgb, &glows)| rgb | u32::from(glows) << 24).collect();
-            palette.resize(256, 0);
-            queue.write_buffer(&self.buffers[4], 0, bytemuck::cast_slice(&palette));
-            self.palette = Some(scene.palette.clone());
-        }
         let mut levels = [GpuLevel::default(); GRID_LEVELS];
         let (added, changed) = self.windows.sync(&scene.levels, look.camera);
         self.changes += u64::from(changed.contains(&true));
         // Lit, settled once a frame of the windows as they are has asked for nothing.
         self.settled = self.windows.next(&scene.levels, look.camera).is_none() && (!self.lit || self.read.0 == self.changes);
-        upload(device, encoder, &self.buffers[3], &added, BRICK_WORDS, |a| words(&a.tile.grid, a.first, a.part));
+        upload(device, encoder, &self.buffers[3], &added, BRICK_SITES, |a| words(&a.tile.grid, a.first, a.part));
         let next = &self.windows.pool.next;
-        upload(device, encoder, &self.buffers[8], &added, 1, |a| [next[a.slot as usize] as u32]);
+        upload(device, encoder, &self.buffers[7], &added, 1, |a| [next[a.slot as usize] as u32]);
         if self.lit {
             // A brick's own slot only: those of its faces have no light.
-            upload(device, encoder, &self.buffers[7], added.iter().filter(|a| a.part == 0), BRICK_SITES, |a| {
+            upload(device, encoder, &self.buffers[6], added.iter().filter(|a| a.part == 0), BRICK_SITES, |a| {
                 a.tile.light(a.first).expect("a brick placed lit").iter().copied()
             });
         }
@@ -1217,7 +1206,7 @@ impl Marcher {
             let window = &self.windows.windows[level];
             if changed[level] {
                 queue.write_buffer(&self.buffers[2], (level * TABLE * 4) as u64, bytemuck::cast_slice(&window.table));
-                queue.write_buffer(&self.buffers[6], (level * COUNTS * 4) as u64, bytemuck::cast_slice(&window.counts));
+                queue.write_buffer(&self.buffers[5], (level * COUNTS * 4) as u64, bytemuck::cast_slice(&window.counts));
             }
             if level < scene.levels.len() {
                 *gpu = window.gpu(level, look.camera, look.far);
@@ -1226,7 +1215,7 @@ impl Marcher {
         queue.write_buffer(&self.buffers[1], 0, bytemuck::cast_slice(&levels));
         queue.write_buffer(&self.buffers[0], 0, bytemuck::bytes_of(&Globals::of(look, pixels)));
         let eye = look.camera.map(|v| v as f32);
-        queue.write_buffer(&self.buffers[5], 0, bytemuck::cast_slice(&[eye[0], eye[1], eye[2], 0.0]));
+        queue.write_buffer(&self.buffers[4], 0, bytemuck::cast_slice(&[eye[0], eye[1], eye[2], 0.0]));
         if self.targets.as_ref().is_none_or(|t| t.pixels != pixels) {
             self.targets = Some(self.targets(device, pixels));
         }
@@ -1258,8 +1247,8 @@ impl Marcher {
             pass.draw(0..4, 0..1);
         }
         if self.lit && matches!(self.reading, Reading::Idle) {
-            encoder.copy_buffer_to_buffer(&self.buffers[9], 0, &self.readback, 0, self.readback.size());
-            encoder.clear_buffer(&self.buffers[9], 0, None);
+            encoder.copy_buffer_to_buffer(&self.buffers[8], 0, &self.readback, 0, self.readback.size());
+            encoder.clear_buffer(&self.buffers[8], 0, None);
             self.reading = Reading::Copied(self.changes);
         }
         let busy = !self.settled || self.read.1;
@@ -1326,22 +1315,22 @@ impl Marcher {
             [SAMPLE_HITS, SAMPLE_COLOURS].map(|f| target("samples", pixels.map(|v| v.div_ceil(FACTOR)), f, wgpu::TextureUsages::empty()));
         let views = samples.each_ref().map(|t| t.create_view(&Default::default()));
         let picture_view = picture.create_view(&Default::default());
-        // Bound as numbered, the asked at 12.
-        let mut entries: Vec<_> = self.buffers[..9]
+        // Bound as numbered, the asked at 11.
+        let mut entries: Vec<_> = self.buffers[..8]
             .iter()
             .enumerate()
             .map(|(k, b)| wgpu::BindGroupEntry { binding: k as u32, resource: b.as_entire_binding() })
             .collect();
         for (k, view) in views.iter().enumerate() {
-            entries.push(wgpu::BindGroupEntry { binding: 9 + k as u32, resource: wgpu::BindingResource::TextureView(view) });
+            entries.push(wgpu::BindGroupEntry { binding: 8 + k as u32, resource: wgpu::BindingResource::TextureView(view) });
         }
-        entries.push(wgpu::BindGroupEntry { binding: 12, resource: self.buffers[9].as_entire_binding() });
-        let shown = [wgpu::BindGroupEntry { binding: 11, resource: wgpu::BindingResource::TextureView(&picture_view) }];
+        entries.push(wgpu::BindGroupEntry { binding: 11, resource: self.buffers[8].as_entire_binding() });
+        let shown = [wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::TextureView(&picture_view) }];
         let group = |layout, entries: &[wgpu::BindGroupEntry]| {
             device.create_bind_group(&wgpu::BindGroupDescriptor { label: None, layout, entries })
         };
-        let sampling = [&entries[..9], &entries[11..]].concat();
-        let groups = [group(&self.layouts[0], &sampling), group(&self.layouts[1], &entries[..11]), group(&self.layouts[2], &shown)];
+        let sampling = [&entries[..8], &entries[10..]].concat();
+        let groups = [group(&self.layouts[0], &sampling), group(&self.layouts[1], &entries[..10]), group(&self.layouts[2], &shown)];
         Targets { pixels, samples, picture, groups }
     }
 }
@@ -1419,8 +1408,8 @@ mod tests {
 
     /**
      * The tiles of level 0 of the forest of seed 1 around `eye`; in every
-     * 64th brick of each, its first voxel's faces made to differ, so that
-     * windows hold their faces too.
+     * 64th brick of each, its first voxel made to look unlike through each
+     * face, so that windows hold their views too.
      */
     fn forest_tiles(eye: Vec3) -> Arc<Level> {
         let mut world = World::new(worlds::by_name("forest").expect("forest").make, 1, None, 4);
@@ -1437,8 +1426,9 @@ mod tests {
             let g = &tile.grid;
             let firsts = (0..g.cells.len() / BRICK_SITES).step_by(64);
             let sites = firsts.filter_map(|first| sites(first).find(|&i| g.cells[i] != 0));
-            let faces = sites.flat_map(|i| fcc::face_words(i, &std::array::from_fn(|k| g.cells[i] + k as u8))).collect();
-            Tile::new(id, Arc::new(fcc::Grid { faces, ..(**g).clone() }))
+            let views =
+                sites.flat_map(|i| std::iter::once(i as u32).chain((0..fcc::FACE_KINDS as u32).map(move |k| g.cells[i] + k))).collect();
+            Tile::new(id, Arc::new(fcc::Grid { views, ..(**g).clone() }))
         };
         Arc::new(Level::new(world.level(0).tiles.iter().map(|(&id, tile)| (id, Arc::new(faced(id, tile)))).collect()))
     }
@@ -1705,7 +1695,7 @@ mod tests {
             for y in lo[1]..hi[1] {
                 for x in (lo[0] + (lo[0] + y + z + origin.iter().sum::<i32>()).rem_euclid(2)..hi[0]).step_by(2) {
                     let p = [x + origin[0], y + origin[1], z + origin[2]];
-                    if !ball.contains([x, y, z].map(|v| v.div_euclid(BRICK))) || tiles.grids.at(p[0], p[1], p[2]).is_none_or(|v| v.0 == 0) {
+                    if !ball.contains([x, y, z].map(|v| v.div_euclid(BRICK))) || tiles.grids.at(p[0], p[1], p[2]).is_none_or(|v| v == 0) {
                         continue;
                     }
                     voxels += 1;
@@ -1731,7 +1721,7 @@ mod tests {
     fn the_shader_is_valid_and_lays_out_what_this_file_writes() {
         use crate::gpu::wgsl;
         let module = wgsl::shader(&shader());
-        wgsl::assert_layout!(&module, "Globals", Globals { resolution, extent, fog, sky_fog, lit, glow, sky_top, horizon, view });
+        wgsl::assert_layout!(&module, "Globals", Globals { resolution, extent, fog, sky_fog, lit, sky_top, horizon, view });
         wgsl::assert_layout!(&module, "Level", GpuLevel { min, offset, corner, reach, low, filled, high });
     }
 }

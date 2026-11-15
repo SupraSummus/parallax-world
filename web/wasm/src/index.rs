@@ -84,7 +84,7 @@ impl LayerIndex {
 }
 
 /** The grid's bricks that hold sites: each one's least corner, in world coordinates, and its sites. */
-fn bricks(grid: &Grid) -> impl Iterator<Item = ([i64; 3], &[u8])> {
+fn bricks(grid: &Grid) -> impl Iterator<Item = ([i64; 3], &[u32])> {
     let [bx, by] = [0, 1].map(|i| (grid.n[i] + BRICK - 1) / BRICK);
     let count = (BRICK * BRICK * BRICK / 2) as usize;
     grid.bricks.iter().enumerate().filter(|(_, at)| **at >= 0).map(move |(b, &at)| {
@@ -132,7 +132,7 @@ pub extern "C" fn index_grid(min_x: i32, min_y: i32, min_z: i32, nx: i32, ny: i3
 
 /** Where to write the sites of the grid index_grid started. */
 #[unsafe(no_mangle)]
-pub extern "C" fn index_cells() -> *mut u8 {
+pub extern "C" fn index_cells() -> *mut u32 {
     GRID.with_borrow_mut(|grid| grid.as_mut().map_or(std::ptr::null_mut(), |g| g.cells.as_mut_ptr()))
 }
 

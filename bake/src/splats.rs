@@ -116,26 +116,17 @@ impl Splats {
 }
 
 /**
- * A voxel's colour: its material (that of its face towards the camera,
- * as Reader reads it) shaded as the mean of its open faces' shades (or
- * of its cut faces', if it has none), so a splat is shaded by the way its
- * surface faces. `palette` is a view face's (material · FACE_KINDS + kind
- * → RGBA); every view face's shades alike, by the way a face faces in the
- * world.
+ * A voxel's colour: its look (through its face towards the camera, as
+ * Reader reads it) shaded as the mean of its open faces' shades (or of
+ * its cut faces', if it has none), so a splat is shaded by the way its
+ * surface faces; `shades` are a view face's (tables::shades). Opaque.
  */
-pub fn voxel_colour(voxel: &Voxel, palette: &[u32]) -> u32 {
+pub fn voxel_colour(voxel: &Voxel, shades: &[f32; FACE_KINDS]) -> u32 {
     let faces = if voxel.open != 0 { voxel.open } else { voxel.cut };
-    let base = voxel.material as usize * FACE_KINDS;
-    let mut sum = [0u32; 3];
-    for kind in (0..FACE_KINDS).filter(|k| faces & (1 << k) != 0) {
-        let colour = palette[base + kind];
-        for (channel, total) in sum.iter_mut().enumerate() {
-            *total += (colour >> (8 * channel)) & 255;
-        }
-    }
-    let n = faces.count_ones().max(1);
-    let [r, g, b] = sum.map(|total| (total + n / 2) / n);
-    0xff00_0000 | (b << 16) | (g << 8) | r
+    let kinds = (0..FACE_KINDS).filter(|k| faces & (1 << k) != 0);
+    let shade = kinds.clone().map(|k| shades[k]).sum::<f32>() / kinds.count().max(1) as f32;
+    let [r, g, b, _] = voxel.look.to_le_bytes().map(|c| (c as f32 * shade).round() as u8);
+    u32::from_le_bytes([r, g, b, 255])
 }
 
 /**
@@ -348,9 +339,9 @@ pub fn cell_medium(
     medium.clear();
     // By slab and column: the optical depths of its halves, and the colours times them.
     let mut slabs: HashMap<[i32; 3], ([f64; 2], [f64; 3])> = HashMap::new();
-    for v in voxels.iter().filter(|v| v.alpha != ALPHA && v.alpha != 0 && seen(geometry, v.open)) {
+    for v in voxels.iter().filter(|v| v.alpha() != ALPHA && v.alpha() != 0 && seen(geometry, v.open)) {
         let [a, b, c] = v.site;
-        let depth = -(1.0 - f64::from(v.alpha) / f64::from(ALPHA)).ln();
+        let depth = -(1.0 - f64::from(v.alpha()) / f64::from(ALPHA)).ln();
         let rgb = colour(v);
         let (k, into) = ((c - 1).div_euclid(slab), (c - 1).rem_euclid(slab));
         let (depths, colours) = slabs.entry([k, b, a]).or_default();
@@ -443,7 +434,7 @@ mod tests {
     use crate::slicing::slice_centre;
     use crate::surface::Slice;
     use crate::tables::geometry;
-    use fcc::{ALPHA, lattices};
+    use fcc::lattices;
 
     /** Twice a slice's centre plane's depth in layers, as chunk_splats takes it. */
     fn centre(slice: &Slice) -> i32 {
@@ -462,7 +453,7 @@ mod tests {
                 let open = (0..FACE_KINDS)
                     .filter(|&k| !solid(std::array::from_fn(|d| site[d] + geometry.offsets[k][d])))
                     .fold(0, |o, k| o | 1 << k);
-                Voxel { site, material: 0, alpha: ALPHA, open, cut: 0 }
+                Voxel { site, look: 0xff00_0000, open, cut: 0 }
             })
             .filter(|v| v.open != 0)
             .collect();
@@ -478,7 +469,7 @@ mod tests {
         let (sites, surface) = blob(&geometry, 0..4, |[a, b, c]| (0..4).contains(&c) && a.abs() <= 12 && b.abs() <= 12 && a + c >= 0);
         let slice = Slice { level: 2, atoms: 0, layer: 0, cutoff: f64::INFINITY };
         let mut splats = Splats::new();
-        chunk_splats(&mut splats, &geometry, &mut |v| voxel_colour(v, &[0; FACE_KINDS]), &surface, centre(&slice));
+        chunk_splats(&mut splats, &geometry, &mut |v| voxel_colour(v, &[0.0; FACE_KINDS]), &surface, centre(&slice));
         let centre = slice_centre(&slice);
 
         let at = |[a, b, c]: [i32; 3]| [a as f64 * LAYER, b as f64, c as f64 * LAYER];
@@ -539,7 +530,7 @@ mod tests {
         let (_, surface) = blob(&geometry, 0..8, |site| (0..8).contains(&site[2]) && hash(site) % 3 == 0);
         let slice = Slice { level: 3, atoms: 0, layer: 0, cutoff: f64::INFINITY };
         let mut splats = Splats::new();
-        chunk_splats(&mut splats, &geometry, &mut |v| voxel_colour(v, &[0; FACE_KINDS]), &surface, centre(&slice));
+        chunk_splats(&mut splats, &geometry, &mut |v| voxel_colour(v, &[0.0; FACE_KINDS]), &surface, centre(&slice));
         let kept = splats.splats;
         // Every voxel a ray may meet, far to near.
         let mut all: Vec<[i32; 3]> = surface.iter().filter(|v| seen(&geometry, v.open | v.cut)).map(|v| v.site).collect();
@@ -561,15 +552,15 @@ mod tests {
 
     #[test]
     fn a_pillar_whose_voxel_is_cut_shows_the_first_of_its_run_a_ray_sees() {
-        // Columns of voxels cut by the slice's near side (material 1), each
-        // in its own material behind: 2 open across the axis, a ray sees;
+        // Columns of voxels cut by the slice's near side (look 1), each
+        // of a look of its own behind: 2 open across the axis, a ray sees;
         // 3 open only away from the camera, no ray sees, its run going on to
         // 4, which a ray sees; 5 cut by the far side, no ray sees, so the
         // column has no run and its voxel shows itself.
         let geometry = geometry(&lattices()[0]);
         let kind = |offset: [i32; 3]| 1 << geometry.offsets.iter().position(|&o| o == offset).expect("a face");
         let (near, far, across, away) = (kind([0, 0, -2]), kind([0, 0, 2]), kind([-2, 0, 0]), kind([1, 1, 1]));
-        let voxel = |site: [i32; 3], material: u8, open: u16, cut: u16| Voxel { site, material, alpha: ALPHA, open, cut };
+        let voxel = |site: [i32; 3], look: u32, open: u16, cut: u16| Voxel { site, look: 0xff00_0000 | look, open, cut };
         let surface = [
             voxel([0, 0, 0], 1, 0, near),
             voxel([0, 0, 4], 2, across, 0),
@@ -581,7 +572,7 @@ mod tests {
         ];
         let slice = Slice { level: 3, atoms: 0, layer: 0, cutoff: f64::INFINITY };
         let mut splats = Splats::new();
-        chunk_splats(&mut splats, &geometry, &mut |v| 0xff00_0000 | v.material as u32, &surface, centre(&slice));
+        chunk_splats(&mut splats, &geometry, &mut |v| v.look, &surface, centre(&slice));
         let mut pillars: Vec<_> = splats.splats.iter().map(|s| (s.site, s.run, s.colour & 255)).collect();
         pillars.sort_unstable();
         assert_eq!(pillars, [([0, 0, 0], 8, 2), ([2, 0, 0], 12, 4), ([4, 0, 0], 0, 1)]);
@@ -589,10 +580,10 @@ mod tests {
 
     #[test]
     fn colours_a_voxel_by_its_open_faces_or_else_its_cut_ones() {
-        // Material 1's kinds: kind k is grey k · 10.
-        let palette: Vec<u32> = (0..2 * FACE_KINDS as u32).map(|i| 0xff00_0000 | ((i % 12 * 10) * 0x0001_0101)).collect();
-        let voxel = |open: u16, cut: u16| Voxel { site: [0; 3], material: 1, alpha: ALPHA, open, cut };
-        assert_eq!(voxel_colour(&voxel(0b1000_0100, 0b1), &palette), 0xff00_0000 | (45 * 0x0001_0101));
-        assert_eq!(voxel_colour(&voxel(0, 0b11), &palette), 0xff00_0000 | (5 * 0x0001_0101));
+        // Kind k shades by k / 10, a grey of 100.
+        let shades: [f32; FACE_KINDS] = std::array::from_fn(|k| k as f32 / 10.0);
+        let voxel = |open: u16, cut: u16| Voxel { site: [0; 3], look: 0xff00_0000 | (100 * 0x0001_0101), open, cut };
+        assert_eq!(voxel_colour(&voxel(0b1000_0100, 0b1), &shades), 0xff00_0000 | (45 * 0x0001_0101));
+        assert_eq!(voxel_colour(&voxel(0, 0b11), &shades), 0xff00_0000 | (5 * 0x0001_0101));
     }
 }

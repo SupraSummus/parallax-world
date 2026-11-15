@@ -47,7 +47,7 @@ web/                         # The web frontend: React and WebGL 2, its Rust in 
     │   └── ui/              # shadcn/ui primitives (generated)
     └── lib/
         ├── fcc.ts           # Voxel geometry: rhombic dodecahedra of the FCC lattice
-        ├── voxel-grid.ts    # Voxel storage on the FCC lattice, in bricks (typed arrays), a material per voxel face; LayerIndex, made by wasm/
+        ├── voxel-grid.ts    # Voxel storage on the FCC lattice, in bricks (typed arrays), each site's look (colour and alpha), through each face where they differ; LayerIndex, made by wasm/
         ├── world.ts         # World: voxel grids by level of detail (generated in tiles around the camera), spawn; tests' scenes, a grid per level given
         ├── worldgen.ts      # The worlds of worlds/ (WebAssembly), any box at any level
         ├── cells.ts         # Cells of the coarser lattices N·FCC that slices are made of
@@ -76,7 +76,7 @@ bake/                        # Chunk baker and walking in Rust, on fcc/: native 
     ├── cells.rs             # cells.ts, with a table per level
     ├── slicing.rs           # slice-selection.ts's slices' shapes and chunks, for the web's baker
     ├── surface.rs           # A cell's voxels that can show
-    ├── tables.rs            # The voxel's faces in a view face's lattice coordinates, the materials shaded per view face
+    ├── tables.rs            # The voxel's faces in a view face's lattice coordinates, their shades per view face
     ├── splats.rs            # Which voxels a chunk shows, each a hexagon at its site: of a slice, each column's nearest over its run; of a cell, its whole ones' relief: a pillar per column (or each a ray can enter), and its medium, a picture per slab of its columns' optical depths
     ├── lod.rs               # Native's chunks: whole cells of the lattice, each face's levels by depth along it, its cells kept picked
     ├── fill.rs              # Splats filled into a mask for every slant, solid blocks (for coverage)

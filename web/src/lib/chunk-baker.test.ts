@@ -4,6 +4,7 @@ import { VOXEL_FACES } from './fcc'
 import { sliceCentre, holds, halfLayer, atomLevel, atomSpacing, ATOM_SHIFT } from './slice-selection'
 import { FACES, LAYER, toLocal, type Face } from './view'
 import { VoxelGrid } from './voxel-grid'
+import { colorOf, lookOf } from './look.test-helper'
 import { gridOf, levelsOf, voxelsOf, type Voxel } from './scene.test-helper'
 import type { Vec3 } from './world'
 
@@ -73,7 +74,7 @@ describe('ChunkBaker', () => {
   }
   const grid = gridOf(voxels)
   const levels = levelsOf(grid)
-  const baker = new ChunkBaker(grid.materials, levels)
+  const baker = new ChunkBaker(levels)
 
   // Slices with sites above the blob's bottom show cut faces; the blob is
   // within one slab of level 3, of level 4, and of level 5, made of the
@@ -88,7 +89,7 @@ describe('ChunkBaker', () => {
     const n = atomSpacing(slice)
     const read = levels[slice.atoms]
     const voxels = voxelsOf(read)
-      .map(v => ({ ...toLattice(face, { x: n * v.x, y: n * v.y, z: n * v.z }), color: read.materials[read.face(v.x, v.y, v.z, frontOf(face))].color }))
+      .map(v => ({ ...toLattice(face, { x: n * v.x, y: n * v.y, z: n * v.z }), color: colorOf(read.face(v.x, v.y, v.z, frontOf(face))) }))
       .filter(v => holds(slice, [v.a, v.b, v.c]))
     const sites = voxels.map(v => ({ x: v.a * LAYER, y: v.b, z: v.c * LAYER }))
     expect(sites.length).toBeGreaterThan(20)
@@ -99,14 +100,14 @@ describe('ChunkBaker', () => {
     // half layers of the grid in its alpha, its voxel's colour shaded (so
     // the channels it lacks stay 0).
     const lattice = baker.sites()
-    const colorOf = new Map(voxels.map(v => [[v.a, v.b, v.c].join(), parseInt(v.color.slice(1), 16)]))
+    const rgbOf = new Map(voxels.map(v => [[v.a, v.b, v.c].join(), parseInt(v.color.slice(1), 16)]))
     const rgba = new Uint32Array(splats.buffer)
     const channels = (rgb: number, ...shifts: number[]) => shifts.map(s => ((rgb >> s) & 255) > 0)
     const splatOf = new Map<string, number>()
     for (let k = 0; k < splats.length / SPLAT; k++) {
       const [a, b, c] = lattice.subarray(3 * k, 3 * k + 3)
       splatOf.set([a, b, c].join(), k)
-      expect(channels(rgba[k * SPLAT + 4], 0, 8, 16)).toEqual(channels(colorOf.get([a, b, c].join()) ?? 0, 16, 8, 0))
+      expect(channels(rgba[k * SPLAT + 4], 0, 8, 16)).toEqual(channels(rgbOf.get([a, b, c].join()) ?? 0, 16, 8, 0))
       expect(originX + splats[k * SPLAT]).toBeCloseTo(a * LAYER, 3)
       expect(originY + splats[k * SPLAT + 1]).toBeCloseTo(b, 3)
       expect(centre + ((rgba[k * SPLAT + 4] >>> 24) - 128) * halfLayer(slice)).toBeCloseTo(c * LAYER, 9)
@@ -142,7 +143,7 @@ describe('ChunkBaker', () => {
   it('knows the faces as view.ts orders them: the blob turned to face each bakes the same splats', () => {
     const sitesOn = (face: Face) => {
       const turned = gridOf(voxels.map(({ a, b, c, color }) => ({ ...toWorld(face, a, b, c), color })))
-      const turnedBaker = new ChunkBaker(turned.materials, [turned])
+      const turnedBaker = new ChunkBaker([turned])
       turnedBaker.bake({ face: face.name, level: 0, atoms: 0, layer: 3, cutoff: Infinity, i: 0, j: 0 })
       return turnedBaker.sites()
     }
@@ -151,13 +152,14 @@ describe('ChunkBaker', () => {
     for (const other of FACES) expect(sitesOn(other)).toEqual(sites)
   })
 
-  it('paints a voxel in the material of its face towards the camera', () => {
+  it('paints a voxel as it looks through its face towards the camera', () => {
     for (const face of FACES) {
-      // A voxel at the origin, red but for its face towards the camera, which is blue.
-      const one = new VoxelGrid({ minX: -2, minY: -2, minZ: -2, maxX: 2, maxY: 2, maxZ: 2 }, [{ color: '' }, { color: '#ff0000' }, { color: '#0000ff' }])
-      one.set(0, 0, 0, 1)
-      one.setFaces([[0, 0, 0, VOXEL_FACES.map((_, k) => (k === frontOf(face) ? 2 : 1))]])
-      const { splats } = new ChunkBaker(one.materials, [one]).bake({ face: face.name, level: 0, atoms: 0, layer: 0, cutoff: Infinity, i: 0, j: 0 })
+      // A voxel at the origin, red but through its face towards the camera, blue.
+      const one = new VoxelGrid({ minX: -2, minY: -2, minZ: -2, maxX: 2, maxY: 2, maxZ: 2 })
+      const [red, blue] = [lookOf('#ff0000'), lookOf('#0000ff')]
+      one.set(0, 0, 0, red)
+      one.setViews([[0, 0, 0, VOXEL_FACES.map((_, k) => (k === frontOf(face) ? blue : red))]])
+      const { splats } = new ChunkBaker([one]).bake({ face: face.name, level: 0, atoms: 0, layer: 0, cutoff: Infinity, i: 0, j: 0 })
       expect(splats.length).toBe(SPLAT)
       const rgb = new Uint32Array(splats.buffer)[4]
       expect([rgb & 255, (rgb >> 16) & 255].map(c => c > 0), face.name).toEqual([false, true])

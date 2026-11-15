@@ -1,6 +1,5 @@
-//! What the baker makes of the view's faces and the world's colours: the
-//! voxel's faces in lattice coordinates, and each face kind's shaded
-//! colour per view face.
+//! What the baker makes of the view's faces: the voxel's faces in lattice
+//! coordinates, and each face kind's shade per view face.
 
 use crate::slicing::LAYER;
 use fcc::{FACE_KINDS, Lattice, VIEW_FACES, VOXEL_FACES};
@@ -55,26 +54,16 @@ pub fn world_kinds(lattices: &[Lattice; VIEW_FACES]) -> [[usize; FACE_KINDS]; VI
 }
 
 /**
- * Per view face, the colour of each (material, face kind) at index
- * material · FACE_KINDS + kind: the material's colour (0xrrggbb) times the
- * kind's shade the way it faces in the world, as opaque little-endian RGBA.
+ * Per view face, each face kind's shade (of the voxels it reads, see
+ * geometry): by the way it faces in the world.
  */
-pub fn palettes(lattices: &[Lattice], colours: &[u32]) -> Vec<u32> {
-    let mut all = Vec::with_capacity(lattices.len() * colours.len() * FACE_KINDS);
-    for Lattice { r, u, f } in lattices {
-        let shades = VOXEL_FACES.map(|n| {
+pub fn shades(lattices: &[Lattice; VIEW_FACES]) -> [[f32; FACE_KINDS]; VIEW_FACES] {
+    lattices.map(|Lattice { r, u, f }| {
+        VOXEL_FACES.map(|n| {
             let [a, b, c] = lattice_of(&lattices[0], n).map(f64::from);
-            face_shade(std::array::from_fn(|d| (a * r[d] as f64 + c * f[d] as f64) / 2.0 + b * u[d] as f64))
-        });
-        for rgb in colours {
-            for shade in shades {
-                // Halves rounded up.
-                let channel = |shift: u32| (((rgb >> shift) & 255) as f64 * shade + 0.5).floor() as u32;
-                all.push(255 << 24 | channel(0) << 16 | channel(8) << 8 | channel(16));
-            }
-        }
-    }
-    all
+            face_shade(std::array::from_fn(|d| (a * r[d] as f64 + c * f[d] as f64) / 2.0 + b * u[d] as f64)) as f32
+        })
+    })
 }
 
 #[cfg(test)]
@@ -88,10 +77,10 @@ mod tests {
         // kind faces −x and −z; the kind a step up, right and towards the
         // camera faces up and −z.
         let lattice = Lattice { r: [1, 0, -1], u: [0, 1, 0], f: [1, 0, 1] };
-        let palette = palettes(&[lattice], &[0, 0xff0000]);
+        let shades = shades(&[lattice; VIEW_FACES])[0];
         let kind = |offset: [i32; 3]| VOXEL_FACES.iter().position(|&n| lattice_of(&lattice, n) == offset).expect("a kind");
-        let red = |k: usize| palette[FACE_KINDS + k] & 255;
-        assert_eq!(red(kind([0, 0, -2])), (255.0 * (left + front) / 2.0 + 0.5).floor() as u32);
-        assert_eq!(red(kind([1, 1, -1])), (255.0 * (top + front) / 2.0 + 0.5).floor() as u32);
+        let near = |a: f32, b: f64| (a as f64 - b).abs() < 1e-6;
+        assert!(near(shades[kind([0, 0, -2])], (left + front) / 2.0));
+        assert!(near(shades[kind([1, 1, -1])], (top + front) / 2.0));
     }
 }
