@@ -8,7 +8,8 @@ The Rust is a workspace of crates (`Cargo.toml`):
 `fcc/` under all of them
 (the lattice, grids and tiles of them, the light from voxels' faces),
 `bake/` (chunks baked) and `worldgen/` (the generator framework) on it,
-`worlds/` on `worldgen/`;
+`worlds/` on `worldgen/`
+(the registry, and worlds in crates of their own inside it);
 `web/wasm/` makes the web's WebAssembly of them, `native/` links them.
 
 The world is cut into slices, each a slab between two layers of a

@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 worldgen = { path = "../worldgen" }
+cheese = { path = "cheese" }
 
 [features]
 # Sponza's atrium (lib.rs), from a file scripts/voxelize.py makes.
