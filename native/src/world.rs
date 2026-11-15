@@ -12,9 +12,8 @@
 //! the light's (Shared) too. A tile
 //! never changes, so a chunk baked once all the tiles it reads are in
 //! stays right whatever comes after (fcc's Tiles). Given light (worldgen's Shared),
-//! the tiles are those the bakers' Lights read, made once. Asked for light,
-//! the light reads every level coarser than a voxel's: the tiles near the
-//! camera come first, the coarsest's before all; and, for the voxels engine
+//! the tiles are those the bakers' Lights read, made once, and blocks of
+//! the rest around them where the Lights read them. Asked for light, for the voxels engine
 //! (voxels.rs), each tile made of a level it reads is lit, its voxels'
 //! light found, after every tile to make (lighting takes several times as
 //! long), nearest first in each level's own sites. A tile lit is a new
@@ -399,16 +398,8 @@ impl World {
         let Wants { reach, lit, tiles: wanted } = wants;
         let lit = *lit;
         assert!(lit == Lit::Not || self.shared.is_some(), "a world lit with no light");
-        // Lit, every voxel's light comes from each coarser level's around it (worldgen's light.rs): the tiles of every
-        // level near the camera first, the coarsest's, which take longest, before all; then those of the levels coarser
-        // than any read as far as the coarsest read reaches, at their sites' size.
-        let coarsest = (0..GRID_LEVELS).rev().find(|&l| reach[l].is_some());
-        let reach_of = |level: usize| match coarsest {
-            Some(c) if lit != Lit::Not && level > c => reach[c].map(|r| r / (1u64 << (level - c)) as f64),
-            _ => reach[level],
-        };
         // Tiles are made no farther from the camera than `keep` (in the level's sites), and dropped once a tile farther.
-        let keep = |level: usize| reach_of(level).unwrap_or(0.0) + 2.0 * TILE as f64;
+        let keep = |level: usize| reach[level].unwrap_or(0.0) + 2.0 * TILE as f64;
         let mut changed = [false; GRID_LEVELS];
         let made: Vec<Made> = std::mem::take(&mut self.early).into_iter().chain(self.done.try_iter()).collect();
         let now = {
@@ -443,18 +434,11 @@ impl World {
                 list.push_back((level, id, None));
             }
         };
-        if lit != Lit::Not {
-            for level in (0..GRID_LEVELS).rev() {
-                for (_, id) in around(level, camera, TILE as f64 / 2.0) {
-                    add(&self.tiles[level], level, id);
-                }
-            }
-        }
         for &(level, id) in wanted.iter() {
             add(&self.tiles[level], level, id);
         }
-        for level in 0..GRID_LEVELS {
-            for (_, id) in reach_of(level).map(|r| around(level, camera, r)).unwrap_or_default() {
+        for (level, reach) in reach.iter().enumerate() {
+            for (_, id) in reach.map(|r| around(level, camera, r)).unwrap_or_default() {
                 add(&self.tiles[level], level, id);
             }
         }

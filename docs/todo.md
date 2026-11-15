@@ -612,15 +612,13 @@ Numbers are for the forest at 1280×800, as measured when written.
   (they close the room), so a room lit by its windows is black.
   Native's bakers each light what they show with a `Light` of their own
   (a generator is not `Send`):
-  they share tiles (`Shared`) with each other and the world's threads,
+  they share tiles and blocks (`Shared`) with each other and the world's threads,
   but each finds light again where another found it,
   and makes a generator, whose plans' caches take tens of MB;
   each of the world's threads makes two, its own and its Light's.
-  Lit, the world's threads make each level's tiles near the camera first,
-  the coarsest's before all,
-  but a tile of the coarsest levels takes several times a fine one's work
-  (the plans over its whole area),
-  so the first chunks come seconds later than unlit.
+  A site of a block costs a few times one of a tile at the finest levels
+  (the cheese's holes, the valley's plans, asked again per block),
+  so a tile read all round its edges costs about as much in blocks.
   Native's brightness sliders light the world anew (`World::relight`),
   as slowly as at the start.
   Light adds up, so it is the sum of the sky's, the sun's and the glow's;
