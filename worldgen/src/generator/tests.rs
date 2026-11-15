@@ -274,7 +274,7 @@ fn a_field_says_where_it_is_along_any_axis() {
             }
             // All buried, it is made as one brick, every site of it whole.
             let buried = generate_shown(&world, &behind, level);
-            assert_eq!(buried.cells.len(), (BRICK * BRICK * BRICK / 2) as usize);
+            assert_eq!(buried.shown.len(), (BRICK * BRICK * BRICK / 2) as usize);
             assert!(buried.bricks.iter().all(|&at| at == 0) && buried.pieces.alpha.iter().all(|&a| a == ALPHA));
         }
     }
@@ -313,7 +313,7 @@ fn a_tile_holds_its_ground_by_its_surface_not_its_volume() {
         for t in [64, 256] {
             let b = Box3 { min: [0, -64, 0], max: [t, g * t + 64, t] };
             let sites = (BRICK * BRICK * BRICK / 2) as usize;
-            let column = |grid: VoxelGrid| (grid.cells.len() / sites - 1) as f64 / (t * t / BRICK / BRICK) as f64;
+            let column = |grid: VoxelGrid| (grid.shown.len() / sites - 1) as f64 / (t * t / BRICK / BRICK) as f64;
             let held = column(generate_shown(&world, &b, 0));
             assert!(held <= 2.0 + 4.5 * g as f64, "rising {g} a column, a tile {t} sites a side holds {held} bricks a column");
         }

@@ -6,13 +6,12 @@ use std::cell::{OnceCell, RefCell};
 use std::rc::Rc;
 use std::sync::OnceLock;
 
-use crate::grid::Faces;
 use fcc::light::srgb_to_linear;
 use fcc::{FACE_KINDS, VOXEL_FACES};
 
 use crate::cost::{self, Work};
 use crate::curve::Curve;
-use crate::grid::{ALPHA, BRICK, Box3, COLOUR_ONE, VoxelGrid};
+use crate::grid::{ALPHA, BRICK, Box3, COLOUR_ONE, VoxelGrid, look_of};
 use crate::js;
 use crate::noise::{Fixed, Fx, ONE, Rng, fixed, float, hash, hash_text, hash64};
 use crate::plan;
@@ -32,7 +31,7 @@ pub use generate::*;
 pub use shapes::*;
 pub use things::*;
 
-/** A material kind: its index in Generator::kinds. */
+/** A kind of what is in a world: its index in Generator::kinds. */
 pub type Kind = u8;
 
 /**
@@ -491,9 +490,8 @@ pub struct KindDef {
     /** For messages (worldgen::checks::contract's margins). */
     pub name: &'static str,
     /**
-     * Its class of material, shared by kinds that may stand in for each
-     * other far away: the contract compares what rays hit by type, not
-     * kind, and look's stats count by it. Not a colour or a behaviour.
+     * Its class, shared by kinds that may stand in for each other far
+     * away: look's stats count by it. Not a colour or a behaviour.
      */
     pub kind_type: u8,
     pub colors: &'static [&'static str],

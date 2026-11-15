@@ -6,8 +6,8 @@
 //! z too, for worlds with no ground, is in docs/todo.md.
 //!
 //! The measure: pairs of points a few metres apart, at random places and
-//! in continuous random directions φ, and whether the two differ in kind
-//! (nothing being a kind too). Over the pairs that do, the mean of cos 4φ
+//! in continuous random directions φ, and whether the two look unlike
+//! (nothing being a look too). Over the pairs that do, the mean of cos 4φ
 //! is the harmonic: positive if pairs part most along the axes, negative
 //! along the diagonals (as across walls along the axes). Points are
 //! anywhere on a plane of sites, not on the sites, so that rounding to
@@ -30,7 +30,7 @@ use std::f64::consts::{PI, SQRT_2, TAU};
 use std::fmt;
 
 use crate::World;
-use crate::generator::{Generator, generate};
+use crate::generator::generate;
 use crate::grid::{BRICK, Box3};
 use crate::noise::{Rng, hash_text};
 use crate::picture::nearest_site;
@@ -88,17 +88,8 @@ impl Sums {
     }
 }
 
-/** Each material id's kind, plus one; 0 for none. */
-fn kinds(generator: &Generator) -> Vec<u16> {
-    let mut kinds = vec![0];
-    for (i, kind) in generator.kinds.iter().enumerate() {
-        kinds.extend(kind.colors.iter().map(|_| i as u16 + 1));
-    }
-    kinds
-}
-
 /** Pairs at each of DISTANCES in a box around `at` (lattice units, at a random place in the box), into `sums`. */
-fn sample(world: &World, kinds: &[u16], at: [i64; 3], random: &mut Rng, sums: &mut [Sums; DISTANCES.len()]) {
+fn sample(world: &World, at: [i64; 3], random: &mut Rng, sums: &mut [Sums; DISTANCES.len()]) {
     let [x0, y0, z0] = at.map(|v| (v >> LEVEL) - random.below(SIDE as u32) as i64);
     let (h0, h1) = world.heights_at(LEVEL);
     let (y0, y1) = (y0.max(h0), (y0 + SIDE).min(h1));
@@ -110,9 +101,9 @@ fn sample(world: &World, kinds: &[u16], at: [i64; 3], random: &mut Rng, sums: &m
     let [bx, by] = [0, 1].map(|i| (grid.n[i] + BRICK - 1) / BRICK);
     let highest = grid.bricks.iter().enumerate().filter(|(_, at)| **at >= 0).map(|(i, _)| (i as i64 / bx) % by).max();
     let Some(top) = highest.map(|j| (grid.min[1] + (j + 1) * BRICK).min(y1)) else { return };
-    let kind = |p: [f64; 3]| {
+    let look = |p: [f64; 3]| {
         let [x, y, z] = nearest_site(p);
-        kinds[grid.get(x, y, z) as usize]
+        grid.get(x, y, z)
     };
     let spread: [[f64; 2]; DIRECTIONS] = std::array::from_fn(|k| {
         let a = PI * k as f64 / DIRECTIONS as f64;
@@ -124,13 +115,13 @@ fn sample(world: &World, kinds: &[u16], at: [i64; 3], random: &mut Rng, sums: &m
             // On a plane of sites, a whole y, so both of a pair round to its sites (see above).
             let (x, y) = (x0 as f64 + d + 1.0 + random.next() * inside, (y0 + random.below((top - y0) as u32) as i64) as f64);
             let p = [x, y, z0 as f64 + d + 1.0 + random.next() * inside];
-            let (here, turn) = (kind(p), random.next() * TAU);
+            let (here, turn) = (look(p), random.next() * TAU);
             let (c0, s0) = (turn.cos(), turn.sin());
             for [ck, sk] in spread {
                 // cos φ and sin φ, φ the turn and the k-th direction; then of 2φ and 4φ.
                 let (c, s) = (c0 * ck - s0 * sk, s0 * ck + c0 * sk);
                 sums.pairs += 1.0;
-                if kind([p[0] + d * c, p[1], p[2] + d * s]) != here {
+                if look([p[0] + d * c, p[1], p[2] + d * s]) != here {
                     let (c2, s2) = (c * c - s * s, 2.0 * s * c);
                     sums.parted += 1.0;
                     sums.four += c2 * c2 - s2 * s2;
@@ -149,12 +140,11 @@ fn sample(world: &World, kinds: &[u16], at: [i64; 3], random: &mut Rng, sums: &m
  */
 fn sums(world: &World) -> Vec<(&'static str, [Sums; DISTANCES.len()])> {
     let mut random = Rng::new(hash_text("directions", world.generator.seed));
-    let kinds = kinds(&world.generator);
     let mut named: Vec<(&'static str, [Sums; DISTANCES.len()])> = std::iter::once(("spawn", world.spawn))
         .chain(world.points.iter().map(|(name, find)| (*name, find())))
         .map(|(name, at)| {
             let mut sums = [Sums::default(); DISTANCES.len()];
-            sample(world, &kinds, at, &mut random, &mut sums);
+            sample(world, at, &mut random, &mut sums);
             (name, sums)
         })
         .collect();
@@ -166,7 +156,7 @@ fn sums(world: &World) -> Vec<(&'static str, [Sums; DISTANCES.len()])> {
         }
         let at: [i64; 3] = std::array::from_fn(|i| cube.min[i] + random.below((cube.max[i] - cube.min[i]) as u32) as i64);
         let mut sums = [Sums::default(); DISTANCES.len()];
-        sample(world, &kinds, at, &mut random, &mut sums);
+        sample(world, at, &mut random, &mut sums);
         if sums[0].parted > 0.0 {
             anywhere.iter_mut().zip(&sums).for_each(|(all, one)| all.add(one));
             found += 1;
@@ -299,7 +289,7 @@ pub fn directions(make: impl Fn(u64) -> World + Sync, seeds: &[u64]) -> Vec<Leak
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::generator::{Field, KindDef, Layer, Op, Span};
+    use crate::generator::{Field, Generator, KindDef, Layer, Op, Span};
 
     const SEEDS: &[u64] = &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
     const GROUND: u8 = 0;

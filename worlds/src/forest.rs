@@ -44,7 +44,7 @@ const PI: f64 = std::f64::consts::PI;
 /** The heights it has anything at, in units. */
 pub const HEIGHTS: (i64, i64) = (m(-36.0), m(80.0));
 
-// A kind's materials follow it, in this order. The forest's are first in any world it grows in.
+// The forest's kinds are first in any world it grows in.
 kinds! {
     base: 0;
     moss: 1, ["#4f7a2a", "#5a8a30", "#466e26", "#628f37"];

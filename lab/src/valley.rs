@@ -4,7 +4,7 @@
 use std::rc::Rc;
 
 use worldgen::domain::Scope;
-use worldgen::generator::{Kind, generate};
+use worldgen::generator::{Generator, Kind, generate};
 use worldgen::grid::Box3;
 use worlds::fields;
 use worlds::forest::{self, K as F};
@@ -22,6 +22,23 @@ use crate::image::Image;
  * coarser than its kinds. 21 classes: the forest's below 10, the town's
  * below 16, then the fields'.
  */
+/**
+ * The kind of `generator` one of whose colours is nearest a look's (sRGB,
+ * fcc's Look), by index; None for nothing. Grids hold what sites look
+ * like, not what they are made of: a site of kinds mixed reads as the nearest.
+ */
+pub fn kind_near(generator: &Generator) -> impl Fn(u32) -> Option<usize> + '_ {
+    let rgb = |c: &str| u32::from_str_radix(&c[1..], 16).expect("#rrggbb");
+    let colours: Vec<(usize, [i32; 3])> = (generator.kinds.iter().enumerate())
+        .flat_map(|(k, def)| def.colors.iter().map(move |c| (k, [16, 8, 0].map(|s| (rgb(c) >> s & 255) as i32))))
+        .collect();
+    move |look| {
+        let at = [0, 8, 16].map(|s| (look >> s & 255) as i32);
+        let far = |c: &[i32; 3]| (0..3).map(|i| (c[i] - at[i]).pow(2)).sum::<i32>();
+        (look != 0).then(|| colours.iter().min_by_key(|(_, c)| far(c)).expect("a kind").0)
+    }
+}
+
 pub fn class_of_kind(kinds: usize) -> Vec<u8> {
     use worlds::fields::K as P;
     let forest: [(&[F], u8); 10] = [
@@ -136,10 +153,7 @@ pub fn valley(seed: u64, area: Area, cache: &str) -> Image {
     let world = worlds::valley::valley(seed);
     let generator = &world.generator;
     let class = class_of_kind(generator.kinds.len());
-    let mut material_class = vec![0u8];
-    for (kind, def) in generator.kinds.iter().enumerate() {
-        material_class.extend(def.colors.iter().map(|_| class[kind]));
-    }
+    let kind = kind_near(generator);
     let (min_y, max_y) = world.heights_at(area.level);
     let mut out = vec![0u8; area.nx * area.nz];
     for tz in (0..area.nz).step_by(TILE) {
@@ -150,8 +164,8 @@ pub fn valley(seed: u64, area: Area, cache: &str) -> Image {
             for j in tz..(tz + TILE).min(area.nz) {
                 for i in tx..(tx + TILE).min(area.nx) {
                     let (x, z) = (area.x0 + i as i64, area.z0 + j as i64);
-                    let id = (min_y..max_y).rev().filter(|y| (x + y + z) & 1 == 0).map(|y| grid.get(x, y, z)).find(|id| *id != 0);
-                    out[j * area.nx + i] = material_class[id.unwrap_or(0) as usize];
+                    let look = (min_y..max_y).rev().filter(|y| (x + y + z) & 1 == 0).map(|y| grid.get(x, y, z)).find(|l| *l != 0);
+                    out[j * area.nx + i] = look.and_then(&kind).map_or(0, |k| class[k]);
                 }
             }
         }

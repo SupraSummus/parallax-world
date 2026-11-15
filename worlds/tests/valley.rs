@@ -3,8 +3,8 @@
 use std::rc::Rc;
 
 use worldgen::domain::Scope;
-use worldgen::generator::{Generator, Layer, generate, materials_of};
-use worldgen::grid::{Box3, is_site};
+use worldgen::generator::{Layer, generate, kind_of};
+use worldgen::grid::{ALPHA, Box3, is_site};
 use worldgen::picture::{Camera, picture};
 use worldgen::units::UNIT_SIZE;
 use worlds::landmarks::{LANDMARKS, Landmark, Landmarks, NEAR, Site};
@@ -24,7 +24,7 @@ fn the_forest_keeps_off_the_first_towns_main_street() {
     // Along the main street's middle, 20 m into the town: nothing from a metre above it to the sky.
     let street =
         Box3 { min: [town.x - 2, town.level + 8, town.z - unit(60.0)], max: [town.x + 2, town.level + unit(30.0), town.z - unit(40.0)] };
-    assert!(generate(&world.generator, &street, 0).cells.iter().all(|id| *id == 0), "something stands on the main street");
+    assert!(generate(&world.generator, &street, 0).shown.iter().all(|shown| !shown), "something stands on the main street");
 }
 
 /** Nothing standing over a tunnel reaches into its bore: the railway's bores are carved last, the track in them drawn after. */
@@ -86,13 +86,6 @@ fn landmarks_of_every_kind_stand_out_of_towns_and_off_the_path() {
     }
 }
 
-/** The material ids of the kind `name` of `generator` (as worldgen::generator::materials_of numbers them). */
-fn materials_of_kind(generator: &Generator, name: &str) -> std::ops::Range<u8> {
-    let at = generator.kinds.iter().position(|k| k.name == name).expect("a kind of that name");
-    let first = 1 + generator.kinds[..at].iter().map(|k| k.colors.len()).sum::<usize>();
-    first as u8..(first + generator.kinds[at].colors.len()) as u8
-}
-
 #[test]
 fn ponds_hold_their_water_below_the_ground_round_them() {
     for seed in [42, 1] {
@@ -100,22 +93,21 @@ fn ponds_hold_their_water_below_the_ground_round_them() {
         let pond =
             sites.iter().filter(|s| s.landmark == Landmark::Pond).min_by_key(|s| s.centre[0].abs() + s.centre[1].abs()).expect("a pond");
         let world = valley(seed);
-        let (materials, water) = (materials_of(&world.generator), materials_of_kind(&world.generator, "water"));
+        let kind = kind_of(&world.generator);
         let ([hx, hz], [cx, cz], out) = (pond.half(), pond.centre, unit(1.0));
         // Grids start on an even x.
         let x0 = 2 * (cx - hx - out).div_euclid(2);
         let area = Box3 { min: [x0, pond.level - unit(4.0), cz - hz - out], max: [cx + hx + out, pond.level + unit(3.0), cz + hz + out] };
         let grid = generate(&world.generator, &area, 0);
-        // The top of the water, and the lowest top of the ground (anything solid) in the ring a metre round its footprint.
+        // The top of the water, and the lowest top of the ground (what one stands on) in the ring a metre round its footprint.
         let (mut top, mut rim, mut wet) = (i64::MIN, i64::MAX, 0);
         for z in area.min[2]..area.max[2] {
             for x in area.min[0]..area.max[0] {
-                let column = (area.min[1]..area.max[1]).filter(|&y| is_site(x, y, z)).map(|y| (y, grid.get(x, y, z)));
                 let (mut ground, mut surface) = (i64::MIN, None);
-                for (y, id) in column {
-                    if water.contains(&id) {
+                for y in (area.min[1]..area.max[1]).filter(|&y| is_site(x, y, z)) {
+                    if kind(grid.get(x, y, z)).is_some_and(|k| k.name == "water") {
                         surface = Some(y);
-                    } else if !materials[id as usize].walk_through {
+                    } else if grid.solid(x, y, z) > ALPHA / 2 {
                         ground = y;
                     }
                 }
@@ -140,9 +132,9 @@ fn the_camera_starts_with_a_chapel_in_view() {
         // The chapel stands about 35 m ahead.
         let camera = Camera::looking_at(eye, [eye[0], eye[1], eye[2] + 1.0], 70f64.to_radians(), 192, 120, unit(50.0) as f64);
         let shot = picture(&world.generator, &camera, 0, world.heights_at(0));
-        let stone = materials_of_kind(&world.generator, "churchStone");
-        let seen = shot.material.iter().filter(|m| stone.contains(m)).count();
+        let kind = kind_of(&world.generator);
+        let seen = shot.looks.iter().filter(|&&look| kind(look).is_some_and(|k| k.name == "churchStone")).count();
         // Seen past the trees: at least a patch of 12 by 12 pixels of its walls.
-        assert!(seen >= 144, "seed {seed}: the first chapel covers {seen} of {} pixels", shot.material.len());
+        assert!(seen >= 144, "seed {seed}: the first chapel covers {seen} of {} pixels", shot.looks.len());
     }
 }

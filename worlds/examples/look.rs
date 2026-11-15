@@ -17,9 +17,9 @@
 //! x y z (lattice units), or a place the world names (`World::point`:
 //! spawn, a town, a windmill…) and, optionally, x y z from it; `top`
 //! takes one and how far around it.
-//! It prints the time taken and the share of pixels of each material type.
+//! It prints the time taken and the share of pixels of each kind type.
 
-use worldgen::generator::materials_of;
+use worldgen::generator::kind_of;
 use worldgen::light::{Brightness, Light, Shared};
 use worldgen::picture::{Camera, picture_on_threads};
 use worlds::{WORLDS, by_name};
@@ -136,13 +136,14 @@ fn main() {
         picture.casting.as_secs_f64(),
         picture.depth[middle]
     );
-    // What the pixels show, by material type (0: nothing).
-    let types: Vec<u8> = materials_of(&world.generator).iter().map(|m| m.material_type).collect();
-    let mut counts = [0usize; 256];
-    for id in &picture.material {
-        counts[types[*id as usize] as usize] += 1;
+    // What the pixels show, by kind type (none: nothing, or a mix of kinds).
+    let kind = kind_of(&world.generator);
+    let mut counts = std::collections::BTreeMap::new();
+    for &look in &picture.looks {
+        *counts.entry(kind(look).map(|k| k.kind_type)).or_insert(0usize) += 1;
     }
-    let share = |n: usize| 100.0 * n as f64 / picture.material.len() as f64;
-    let shares: Vec<String> = (0..256).filter(|t| counts[*t] > 0).map(|t| format!("{t}: {:.1}%", share(counts[t]))).collect();
-    println!("pixels by material type: {}", shares.join(", "));
+    let share = |n: usize| 100.0 * n as f64 / picture.looks.len() as f64;
+    let shares: Vec<String> =
+        counts.iter().map(|(t, &n)| format!("{}: {:.1}%", t.map_or("none".into(), |t| t.to_string()), share(n))).collect();
+    println!("pixels by kind type: {}", shares.join(", "));
 }

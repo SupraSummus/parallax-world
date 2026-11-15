@@ -16,7 +16,7 @@ use fcc::FACE_KINDS;
 
 use crate::World;
 use crate::checks::survey::{Survey, survey};
-use crate::generator::{Generator, Layer, Whole, checking_skipped, generate, whole};
+use crate::generator::{Generator, Layer, Whole, checking_skipped, generate, kind_of, whole};
 use crate::grid::{ALPHA, Box3, VoxelGrid, is_site};
 use crate::noise::Rng;
 use crate::picture::{Camera, FACES, Seen, Tiles, composite_in, composited, nearest_site};
@@ -105,9 +105,10 @@ pub fn whole_equals_parts(generator: &Generator, region: &Box3, level: u32) {
     for part in parts.iter().rev() {
         let alone = generate(generator, part, level);
         for (x, y, z) in sites(part) {
-            // What shows, and what rays and light see: its alpha, each face's material, its glow.
+            // What shows through each face and what rays and light see there, and what stops a walking body.
             let look = |g: &VoxelGrid| {
-                (g.get(x, y, z), g.faces_at(x, y, z).copied(), std::array::from_fn::<_, FACE_KINDS, _>(|face| g.light(x, y, z, face)))
+                let faces = std::array::from_fn::<_, FACE_KINDS, _>(|face| (g.face(x, y, z, face), g.light(x, y, z, face)));
+                (faces, g.solid(x, y, z))
             };
             assert_eq!(look(&alone), look(&grid), "level {level}: part {part:?} differs at ({x}, {y}, {z})");
         }
@@ -509,26 +510,13 @@ pub fn check_far(name: &str, world: World, regions: &[Box3], levels: u32) {
 /** Sites of each level above a world's heights that `heights_hold` generates. */
 const BEYOND: i64 = 16;
 
-/** The kind of material `id` of `generator`, for messages. */
-fn kind_of(generator: &Generator, id: u8) -> &'static str {
-    let mut first = 1;
-    for kind in &generator.kinds {
-        first += kind.colors.len();
-        if (id as usize) < first {
-            return kind.name;
-        }
-    }
-    "none"
-}
-
 /** Where a level `level` box of `grid` has a site that stops any light (its alpha), in lattice units, and its kind; how many it has. */
-fn stopping(generator: &Generator, mut grid: VoxelGrid, level: u32) -> Option<([i64; 3], &'static str, usize)> {
+fn stopping(generator: &Generator, grid: VoxelGrid, level: u32) -> Option<([i64; 3], &'static str, usize)> {
     let b = grid.clip();
     let full: Vec<_> = sites(&b).filter(|&(x, y, z)| grid.alpha(x, y, z) != 0).collect();
     let &(x, y, z) = full.first()?;
-    let i = grid.index(x, y, z)?;
-    let id = if grid.pieces.alpha[i] != 0 { grid.pieces.seen[i] } else { grid.medium.seen[i] };
-    Some(([x, y, z].map(|v| v << level), kind_of(generator, id), full.len()))
+    let kind = kind_of(generator)(grid.inside(x, y, z)).map_or("a mix", |k| k.name);
+    Some(([x, y, z].map(|v| v << level), kind, full.len()))
 }
 
 /**

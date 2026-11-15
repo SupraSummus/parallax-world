@@ -80,7 +80,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   at level 1 a medium of them over it does (`railway.rs`, as `Column::medium`);
   from level 2, shorter than a spacing, they are its top's dithered shares,
   as seen from above, and the grey ballast shows from every side.
-  A field giving its sites a material per face, as a thing's far form does
+  A field giving its sites a kind per face, as a thing's far form does
   (`Look`'s faces, measured in `generator/forms.rs`),
   would keep the ballast's shares on the faces looking up
   and the sleepers and rails on the others.
@@ -508,8 +508,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   each site whole or not by a coin (`VoxelGrid::show`).
   Still to do:
   coverage by direction where sites are filled in part
-  (fields' sites are wholly in a span or out, solids' views only for sheets);
-  then no materials in worldgen's grids at all (`seen`, `faces`, pictures by material).
+  (fields' sites are wholly in a span or out, solids' views only for sheets).
   `checks::cells` (an experiment) holds each cell, one by one,
   to what is in it `FINER_BY` levels finer,
   along each of the 12 directions, by the rows of the finer level's sites in it.
