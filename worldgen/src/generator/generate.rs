@@ -55,12 +55,15 @@ pub fn kind_of<'a>(generator: &'a Generator) -> impl Fn(fcc::Look) -> Option<&'a
         .flat_map(|k| palette.shades[k].iter().chain([&palette.means[k]]).map(move |c| (k, c)).collect::<Vec<_>>())
         .map(|(k, c)| (k, rgb(c)))
         .collect();
-    move |look| {
+    let of = move |look: fcc::Look| {
         let at = look.to_le_bytes();
         let far = |c: &[u8; 4]| (0..3).map(|i| c[i].abs_diff(at[i])).max().expect("channels");
         let (k, c) = colours.iter().min_by_key(|(_, c)| far(c))?;
-        (look != 0 && far(c) <= KIND_STEPS).then(|| &generator.kinds[*k])
-    }
+        (look != 0 && far(c) <= KIND_STEPS).then_some(*k)
+    };
+    // Many sites share a look: each is matched once.
+    let known = RefCell::new(std::collections::HashMap::new());
+    move |look| known.borrow_mut().entry(look).or_insert_with(|| of(look)).map(|k| &generator.kinds[k])
 }
 
 /** How many steps of sRGB a look may be from a kind's colour and still be of it (`kind_of`). */

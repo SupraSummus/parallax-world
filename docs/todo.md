@@ -166,8 +166,8 @@ Numbers are for the forest at 1280×800, as measured when written.
   The survey asks every cell of a sparse population's square
   (the valley's haystacks' anchors most).
   Pictures from above generate level 0 over all of a world's heights,
-  region by region: sharing tiles between regions spares nothing,
-  as they hardly overlap.
+  region by region, keeping the tiles a region shares with the one before:
+  the forest's regions overlap, the valley's hardly.
   If CI is still too slow, the contract at seeds but `REGIONS_SEED`
   (`worlds/tests/contract.rs`) could run only on main.
 - **Slice detail sets both thickness and level of detail.**
@@ -632,12 +632,22 @@ Numbers are for the forest at 1280×800, as measured when written.
   walls thinner than the space they close let light in,
   openings smaller than it let none (the door and the window below).
   A railway tunnel, under 1 to 4 m of rock where its hill is low,
-  is lit through it from the sky:
-  at the coarsest level with room in its bore 5 m across (sites 4 m apart),
-  a site of the bore and one over the ground are neighbours,
-  the rock shared between them, and both show nothing (`VoxelGrid::show`).
-  Three steps a level keep it dark,
-  but also 7 m in from a portal, where light should come.
+  is lit through it from the sky,
+  as the reference's tunnel under a thin roof is,
+  its middle hundreds of times too bright.
+  Columns put a whole site where its middle is in a span (`drawables.rs`),
+  so the coarse levels lose a roof thinner than their spacing
+  along some directions;
+  and taking over, a coarser level's light comes to the middle of its site,
+  what lies between there and where it took over unread.
+  Three steps a level leave the tunnel ten times too bright, not hundreds,
+  but the lamp several times further off.
+  Where light is to go, a step at a time, each measured on these scenes:
+  sites hold what they stop along each direction, a share, columns' too,
+  and light reads that, not the coin hosts are shown by;
+  then each level lights its stretch of a ray, from where the finer one's ends,
+  in place of the steps and `past`'s room;
+  then coarser levels take more directions (in Ideas).
   Rock filled round the tunnels kept them dark,
   but bent a world to the light: not kept.
   Against the reference (`light/reference.rs`, test `against_the_reference`;

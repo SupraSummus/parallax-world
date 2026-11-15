@@ -15,7 +15,7 @@ concurrency:
   group: ci-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 
-# pnpm check in jobs side by side, a runner each: the tests are bound by the CPU,
+# pnpm check and pnpm test:worlds in jobs side by side, a runner each: the tests are bound by the CPU,
 # the worlds' contract most of all, so it has jobs of its own, the valley's one alone.
 # Jobs that test the native frontend cache its dependencies' builds (wgpu, egui),
 # saved from main only, so pull requests share one cache and don't evict it.
@@ -70,9 +70,12 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      # pnpm hands what follows `--` to test:rust's last command, the release tests'.
-      - name: Test, but the worlds' contract
-        run: pnpm test:rust -- --skip 'keeps_the_contract::'
+      - name: Test
+        run: pnpm test:rust
+
+      # pnpm hands what follows `--` to test:worlds' command.
+      - name: Test the worlds' directions and places
+        run: pnpm test:worlds -- --skip 'keeps_the_contract::'
 
   # The worlds' contract, but the valley's: a test each, run side by side.
   contract:
