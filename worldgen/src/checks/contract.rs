@@ -441,7 +441,7 @@ impl std::fmt::Display for Report {
                 Measure::Cameras => "cameras".to_string(),
                 Measure::FromAbove => "from above".to_string(),
                 Measure::FieldsFromAbove => "fields from above".to_string(),
-                Measure::Face(k) => format!("faces seen along {:?}", VOXEL_FACES[k].map(|v| -v)),
+                Measure::Face(k) => format!("cells seen along {:?}", VOXEL_FACES[k]),
             };
             let [a, c] = m.values().map(|v| look(&v));
             let broken = if m.broken() { format!(", over {}", m.measure.tolerance()) } else { String::new() };
@@ -533,17 +533,16 @@ fn near_surfaces(grids: &[VoxelGrid; 2]) -> BTreeSet<[i64; 3]> {
 }
 
 /**
- * What each face of the level's cells shows, from 1 to `levels`, against
- * what the level one finer shows through it: by induction, what level 0
- * shows. A ray through a random point of each face of each cell near a
- * surface (`near_surfaces`) crosses the neighbour across the face, then
- * the cell, at both levels; the light the cell stops of what the neighbour
- * lets through, by kind, summed over the cells, for each of the 12 faces.
- * Only its colour is compared, where both levels see something, as much
- * as the one seeing less: a site stops light alike from every side, so
- * how much it stops through each face can't match (cameras see that);
- * what it shows through each, it holds (Faces).
+ * Each cell of the level, seen along each of the 12 directions of the
+ * lattice, against the cells of the level one finer in it: by induction,
+ * level 0. Along a direction, RAYS_PER_CELL parallel rays through random
+ * points of the cell, at both levels, inside the cell only: how
+ * much each stops, its colour and its glow (a `Look`), summed over the
+ * cells near a surface (`near_surfaces`), for each direction.
  */
+/** Rays through each cell along each direction (`faces_against_finer`). */
+const RAYS_PER_CELL: usize = 7;
+
 fn faces_against_finer(generator: &Generator, region: &Box3, levels: u32, report: &mut Report) {
     let palette = Palette::of(generator);
     for level in 1..=levels {
@@ -552,66 +551,56 @@ fn faces_against_finer(generator: &Generator, region: &Box3, levels: u32, report
         let grow = 0.max((8i64 << level) - (region.max[1] - region.min[1]) / 2);
         (area.min[1], area.max[1]) = (region.min[1] - grow, region.max[1] + grow);
         let grids = [level - 1, level].map(|l| generate(generator, &box_at(&area, l), l));
-        // A cell, in the level's sites, all within the area.
-        let within = |c: [f64; 3]| (0..3).all(|i| area.min[i] as f64 <= c[i] * s - s && c[i] * s + s <= area.max[i] as f64);
-        let mut random = Rng::new(17);
         let mut looks: Vec<[Looks; 2]> = vec![[Looks::new(), Looks::new()]; FACE_KINDS];
+        let mut rays = [0usize; FACE_KINDS];
+        let mut random = Rng::new(17);
         for cell in near_surfaces(&grids) {
-            let cell = cell.map(|v| v as f64);
+            // Its centre, lattice units; within the area.
+            let centre = cell.map(|v| v as f64 * s);
+            if (0..3).any(|i| centre[i] - s < area.min[i] as f64 || centre[i] + s > area.max[i] as f64) {
+                continue;
+            }
             for (k, n) in VOXEL_FACES.iter().enumerate() {
-                let n = n.map(|v| v as f64);
-                let behind: [f64; 3] = std::array::from_fn(|i| cell[i] + n[i]);
-                if !within(cell) || !within(behind) {
-                    continue;
-                }
-                // A random point of the neighbour's face k, a rhombus: between the axes' corners and the octants'.
-                let (i, j) = match (0..3).filter(|&a| n[a] != 0.0).collect::<Vec<_>>()[..] {
-                    [i, j] => (i, j),
-                    _ => unreachable!("a face's normal is along two axes"),
-                };
-                let m = 3 - i - j;
-                let corner = |a: usize| -> [f64; 3] { std::array::from_fn(|b| if b == a { n[a] } else { 0.0 }) };
-                let octant = |side: f64| -> [f64; 3] { std::array::from_fn(|b| if b == m { side / 2.0 } else { n[b] / 2.0 }) };
-                let (u, v, from) = (random.next(), random.next(), octant(-1.0));
-                let on: [f64; 3] =
-                    std::array::from_fn(|b| behind[b] + from[b] + u * (corner(i)[b] - from[b]) + v * (corner(j)[b] - from[b]));
-                // Along the face's inward normal, a cell's chord at a time, a hair inside each.
-                let d = n.map(|v| -v / std::f64::consts::SQRT_2);
-                let (chord, hair) = (std::f64::consts::SQRT_2, 1e-6);
-                let start = |t: f64| -> [f64; 3] { std::array::from_fn(|b| (on[b] + (t + hair) * d[b]) * s) };
-                let seen = [0, 1].map(|finer| {
-                    let scale = if finer == 0 { s / 2.0 } else { s };
-                    let length = (chord - 2.0 * hair) * s / scale;
-                    let at = |t: f64| start(t).map(|v| v / scale);
-                    let through = 1.0 - composited(&grids[finer], at(0.0), d, length).iter().map(|p| p.2).sum::<f64>();
-                    let mut seen = Looks::new();
-                    for (_, id, stopped, glow) in composited(&grids[finer], at(chord), d, length) {
-                        palette.add(&mut seen, id, true, through * stopped, glow.map(|g| through * g));
+                let d = n.map(|v| v as f64 / std::f64::consts::SQRT_2);
+                // Rays along d through random points of the cell's box, as many as cross the cell.
+                let mut crossing = 0;
+                while crossing < RAYS_PER_CELL {
+                    let q: [f64; 3] = std::array::from_fn(|i| centre[i] + s * (2.0 * random.next() - 1.0));
+                    // Where it crosses the cell, |m · (x − centre)| ≤ s for each face's m: from u0 to u1, lattice units.
+                    let (mut u0, mut u1) = (f64::NEG_INFINITY, f64::INFINITY);
+                    for m in VOXEL_FACES {
+                        let along: f64 = (0..3).map(|i| m[i] as f64 * d[i]).sum();
+                        let off: f64 = (0..3).map(|i| m[i] as f64 * (q[i] - centre[i])).sum();
+                        if along.abs() < 1e-12 {
+                            if off > s {
+                                u1 = f64::NEG_INFINITY;
+                            }
+                        } else if along > 0.0 {
+                            u1 = u1.min((s - off) / along);
+                        } else {
+                            u0 = u0.max((s - off) / along);
+                        }
                     }
-                    seen
-                });
-                // Its colour where both levels see something: as much as the one seeing less.
-                let stopped = |l: &Looks| l.values().map(|v| v[0] + v[1]).sum::<f64>();
-                let weight = stopped(&seen[0]).min(stopped(&seen[1]));
-                if weight > 0.0 {
-                    for (seen, looks) in seen.iter().zip(&mut looks[k]) {
-                        for (kind, v) in seen {
-                            let sum = looks.entry(*kind).or_default();
-                            (0..5).for_each(|c| sum[c] += v[c] * weight / stopped(seen));
+                    let hair = 1e-6;
+                    if u1 - u0 <= 2.0 * hair {
+                        continue;
+                    }
+                    crossing += 1;
+                    rays[k] += 1;
+                    for (grid, (looks, scale)) in grids.iter().zip(looks[k].iter_mut().zip([s / 2.0, s])) {
+                        let from: [f64; 3] = std::array::from_fn(|i| (q[i] + (u0 + hair) * d[i]) / scale);
+                        for (_, id, stopped, glow) in composited(grid, from, d, (u1 - u0 - 2.0 * hair) / scale) {
+                            palette.add(looks, id, true, stopped, glow);
                         }
                     }
                 }
             }
         }
         for (k, looks) in looks.into_iter().enumerate() {
-            let stopped = |l: &Looks| l.values().map(|v| v[0] + v[1]).sum::<f64>();
-            if looks.iter().any(|l| stopped(l) < 1e-9) {
+            if rays[k] == 0 {
                 continue;
             }
-            let looks = looks.map(|l| {
-                let total = stopped(&l);
-                l.into_iter().map(|(kind, v)| (kind, v.map(|c| c / total))).collect()
-            });
+            let looks = looks.map(|l| l.into_iter().map(|(kind, v)| (kind, v.map(|c| c / rays[k] as f64))).collect());
             report.margins.push(Margin { region: *region, measure: Measure::Face(k), level, against: level - 1, looks });
         }
     }

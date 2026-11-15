@@ -663,7 +663,7 @@ pub(super) fn measure(node: &Node, key: &str, layer: &'static str, bounds: Box3,
         let mut before = 0.0f64;
         for &(kind, op, n) in &all {
             let part = shares[i] * n as f64 / total;
-            let look = Look { kind, faces: faces.iter().any(|k| *k != kind).then_some(faces) };
+            let look = Look { kind, faces: faces.iter().any(|k| *k != kind).then_some(faces), cover: None };
             let picked = to_pick(hash(picks.wrapping_add(kind as u64 + 1), x * s, y * s, z * s));
             sites.push((site, look, op, share(part / (1.0 - before).max(f64::EPSILON)), picked));
             before += part;

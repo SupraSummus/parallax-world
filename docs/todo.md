@@ -62,6 +62,15 @@ Numbers are for the forest at 1280×800, as measured when written.
   What would: a voxel holding where in it its content lies,
   between two planes (contours, as in Laine and Karras' sparse voxel octrees),
   so that a wall is thin from every side and need not grow to a site.
+  A site's pieces now may stop and glow unlike through each of its 12 faces
+  (`VoxelGrid`'s `views`, rays reading the face they enter by),
+  so far only for a box's or an ellipsoid's sheet:
+  from above, a wall in `shapes.rs` keeps the contract to level 2, not 1.
+  Still to do: hosts (`into_grid` hands over no views),
+  rods, measured far forms,
+  and fields, whose sites are wholly in a span or out:
+  a site on a span's end covering the share of each face's rays it crosses
+  broke a column's closed sides, what `About` promises and planes of sites.
 - **Small things on a ground sink into it at coarse levels.**
   A solid under the sites is drawn at the site nearest it,
   which a few units over a ground on a plane of sites is the ground's,
@@ -479,14 +488,16 @@ Numbers are for the forest at 1280×800, as measured when written.
 - **Each face of a cell against the level one finer** (an experiment:
   `face_margins` in `worldgen/src/checks/contract.rs`, outside the contract,
   printed by ignored tests in `worldgen/tests/`).
-  Rays through each of a coarse cell's 12 faces, after the neighbour across it,
-  at both levels; the colour of what the cell stops is compared
-  where both levels see something.
-  It finds solids' bases seen across showing the ground at level 1
-  (a site picks one material for all its faces),
-  but not the railway's sleepers: they hide the ballast across cells, not within one.
-  Weighed by all each level stops, it finds the track,
-  and every ground seen edge on too: a site stops alike from every side.
+  A cell seen along each of the lattice's 12 directions, rays inside it only,
+  at the level and the one finer: all they see compared, summed over cells near a surface.
+  It finds a dark plate gone at a coarse level (0.35 at level 1),
+  and the railway's sleepers given as the ballast's shares (0.21).
+  But it holds each site to stopping a face's rays as their mean does,
+  so it asks for views (above) and finds what they don't yet hold:
+  every solid on a ground breaks at level 1, the ground stopping 0.57 at level 0
+  against 0.45 at level 1, a field's sites wholly in a span or out.
+  With fields' ends covering each face's rays (reverted, above) it came within 0.05:
+  a site's mean over its rays can't keep which of them a site before it stopped.
 - **The forest's canopy measures crowded trees in sample stands.**
   From above it reads each column's owner (`Rooms`),
   but what the trees standing in a column hide from the side

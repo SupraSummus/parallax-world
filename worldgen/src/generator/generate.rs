@@ -95,7 +95,7 @@ pub fn generate(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
         let id = shade(look.kind);
         let faces = look.faces.map(|faces| faces.map(shade));
         let medium = palette.materials[id as usize].medium;
-        see(&mut grid, op, share, pick, (id, faces, medium), palette.glows[id as usize], x, y, z);
+        see(&mut grid, op, share, pick, (id, faces, look.cover, medium), palette.glows[id as usize], x, y, z);
     };
     let drawables = drawables_in(generator, &clip, s);
     let mut at = 0;
@@ -149,7 +149,10 @@ pub fn generate(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
  * taking it out, of both. A `medium` joins the site's medium, the rest
  * its pieces. What either shows is one of what is in it, each as often
  * as it is seen there: the thing replaces it as often as it makes up of
- * what they now stop, by its pick.
+ * what they now stop, by its pick. Pieces covering some faces' rays more
+ * than others' (`cover`), or put where some did, are added face by face
+ * (VoxelGrid's `views`); the site as a whole, to what sees no faces (a
+ * host's voxels, a camera colliding), stops and glows as its most.
  */
 #[allow(clippy::too_many_arguments)]
 fn see(
@@ -157,54 +160,108 @@ fn see(
     op: Op,
     share: u32,
     pick: u32,
-    (id, faces, medium): (u8, Option<Faces>, bool),
+    (id, faces, cover, medium): (u8, Option<Faces>, Option<[u32; FACE_KINDS]>, bool),
     glow: [u32; 3],
     x: i64,
     y: i64,
     z: i64,
 ) {
-    if share == 0 {
+    if share == 0 && cover.is_none_or(|cover| cover == [0; FACE_KINDS]) {
         return;
     }
     let Some(i) = grid.index(x, y, z) else { return };
-    let part = if medium { &mut grid.medium } else { &mut grid.pieces };
-    let (alpha, share) = (part.alpha[i] as u64, share.min(SHARE) as u64);
-    let (all, one) = (ALPHA as u64, SHARE as u64);
+    // A carve takes out pieces and medium alike: the medium here, the pieces as any.
+    let medium = medium && op != Op::Carve;
+    let added = Added { op, pick, glow };
     let old = grid.glow.get(&i).copied().unwrap_or_default();
-    // Of SHARE: how much of what was there is still seen, and how much of the site the thing is seen in.
-    let (kept, visible) = match op {
-        Op::Carve => (one - share, 0),
-        Op::Fill => (one, (all - alpha) * share / all),
-        Op::Paint => (one - share, share),
-    };
-    // In SHARE-ths of a step of alpha, rounded up as often as the remainder,
-    // by a coin from the pick (its bits scrambled by an odd factor):
-    // cut off, all of a speck's share under one step was lost far away.
-    let coin = (pick as u64 * 40_503) % one;
-    let rounded = |exact: u64| (exact / one + u64::from(exact % one > coin)) as u8;
-    let exact = alpha * one + (all - alpha) * share;
+    let part = if medium { &mut grid.medium } else { &mut grid.pieces };
+    let (alpha, now, seen) = added.to(part.alpha[i], old, share);
     if op == Op::Carve {
-        for part in [&mut grid.pieces, &mut grid.medium] {
-            part.alpha[i] = rounded(part.alpha[i] as u64 * kept);
-        }
-    } else {
-        part.alpha[i] = rounded(exact);
+        let kept = (SHARE - share.min(SHARE)) as u64;
+        grid.medium.alpha[i] = added.rounded(grid.medium.alpha[i] as u64 * kept);
     }
-    // As often as it makes up of what the site stops before that rounding: of `now`, a medium of a few
-    // SHARE-ths of a step was seen as seldom as rounded up, and nine in ten of its sites that stop rays showed nothing.
-    if (pick as u64) * exact < visible * all * one {
-        match medium {
-            true => grid.medium.seen[i] = id,
-            false => grid.see(i, id, faces),
+    let by_face = !medium && (cover.is_some() || grid.views.contains_key(&i));
+    if !by_face {
+        let part = if medium { &mut grid.medium } else { &mut grid.pieces };
+        part.alpha[i] = alpha;
+        if seen {
+            match medium {
+                true => grid.medium.seen[i] = id,
+                false => grid.see(i, id, faces),
+            }
         }
-    }
-    if old == [0; 3] && glow == [0; 3] {
+        set_glow(grid, i, now);
         return;
     }
-    let glow = [0, 1, 2].map(|c| (old[c] as u64 * kept / one + visible * glow[c] as u64) as u32);
+    // Face by face, from what each saw so far; the site as a whole shows what the share as a whole would.
+    let (was, was_seen) = (grid.pieces.alpha[i], grid.pieces.seen[i]);
+    let mut views = grid.views.remove(&i).unwrap_or(crate::grid::Views { alpha: [was; FACE_KINDS], glow: [old; FACE_KINDS] });
+    let mut shown = grid.faces.get(&i).copied().unwrap_or([was_seen; FACE_KINDS]);
+    for k in 0..FACE_KINDS {
+        let (alpha, glow, seen) = added.to(views.alpha[k], views.glow[k], cover.map_or(share, |cover| cover[k]));
+        (views.alpha[k], views.glow[k]) = (alpha, glow);
+        if seen {
+            shown[k] = faces.map_or(id, |faces| faces[k]);
+        }
+    }
+    grid.pieces.alpha[i] = views.alpha.into_iter().max().expect("faces");
+    let glow = [0, 1, 2].map(|c| views.glow.iter().map(|g| g[c]).max().expect("faces"));
+    grid.see(i, if seen { id } else { was_seen }, Some(shown));
+    if views.alpha.iter().all(|&a| a == views.alpha[0]) && views.glow.iter().all(|&g| g == views.glow[0]) {
+        set_glow(grid, i, views.glow[0]);
+    } else {
+        set_glow(grid, i, glow);
+        grid.views.insert(i, views);
+    }
+}
+
+/** What `see` adds to a site, or to a face of it. */
+struct Added {
+    op: Op,
+    pick: u32,
+    glow: [u32; 3],
+}
+
+impl Added {
+    /**
+     * Of `alpha` (of ALPHA) and `glow` there, `share` of it (of SHARE)
+     * added: what it stops after, what glows, and whether it is seen.
+     */
+    fn to(&self, alpha: u8, glow: [u32; 3], share: u32) -> (u8, [u32; 3], bool) {
+        let (alpha, share) = (alpha as u64, share.min(SHARE) as u64);
+        let (all, one) = (ALPHA as u64, SHARE as u64);
+        // Of SHARE: how much of what was there is still seen, and how much of the site the thing is seen in.
+        let (kept, visible) = match self.op {
+            Op::Carve => (one - share, 0),
+            Op::Fill => (one, (all - alpha) * share / all),
+            Op::Paint => (one - share, share),
+        };
+        let exact = alpha * one + (all - alpha) * share;
+        let after = if self.op == Op::Carve { self.rounded(alpha * kept) } else { self.rounded(exact) };
+        // As often as it makes up of what the site stops before that rounding: of `now`, a medium of a few
+        // SHARE-ths of a step was seen as seldom as rounded up, and nine in ten of its sites that stop rays showed nothing.
+        let seen = (self.pick as u64) * exact < visible * all * one;
+        let glow = [0, 1, 2].map(|c| (glow[c] as u64 * kept / one + visible * self.glow[c] as u64) as u32);
+        (after, glow, seen)
+    }
+
+    /**
+     * `exact`, in SHARE-ths of a step of alpha, rounded up as often as the
+     * remainder, by a coin from the pick (its bits scrambled by an odd
+     * factor): cut off, all of a speck's share under one step was lost far away.
+     */
+    fn rounded(&self, exact: u64) -> u8 {
+        let one = SHARE as u64;
+        let coin = (self.pick as u64 * 40_503) % one;
+        (exact / one + u64::from(exact % one > coin)) as u8
+    }
+}
+
+/** Sets site `i`'s glow, none if it glows nothing. */
+fn set_glow(grid: &mut VoxelGrid, i: usize, glow: [u32; 3]) {
     if glow != [0; 3] {
         grid.glow.insert(i, glow);
-    } else if old != [0; 3] {
+    } else if !grid.glow.is_empty() {
         grid.glow.remove(&i);
     }
 }

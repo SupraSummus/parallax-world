@@ -35,8 +35,9 @@ pub(super) fn draw(drawable: &Drawable, seed: u64, s: i64, clip: &Box3, put: &mu
             let mut tests = 0;
             for (i, shape) in shapes.iter().enumerate() {
                 let seed = hash_text(&format!("{}#{}{i}", drawable.key, if *far { "far" } else { "" }), seed);
-                tests +=
-                    draw_shape(shape, seed, s, clip, &mut |share, pick, x, y, z| put(shape.kind.into(), shape.op, share, pick, x, y, z));
+                tests += draw_shape(shape, seed, s, clip, &mut |share, cover, pick, x, y, z| {
+                    put(Look { cover, ..shape.kind.into() }, shape.op, share, pick, x, y, z)
+                });
             }
             Work { nodes: 1, tests, ..Work::default() }
         }
