@@ -163,6 +163,8 @@ pnpm check   # lint, typecheck, knip, knip:production, then test
 While iterating, run only the affected test files
 ([docs/testing.md](docs/testing.md));
 run `pnpm check` again only after changing code.
+After changing `worldgen/`, `worlds/` or `fcc/`, also run `pnpm test:worlds`:
+the worlds' checks over seeds, which `pnpm test` leaves out.
 
 `pnpm lint` and `pnpm test` cover the Rust
 in `fcc/`, `bake/`, `worldgen/`, `worlds/`, `native/` and `web/wasm/` too
