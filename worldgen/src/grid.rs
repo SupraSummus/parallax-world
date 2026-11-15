@@ -113,21 +113,36 @@ impl VoxelGrid {
     }
 
     /**
-     * The sites of `b` all buried in material `id`, as `bury` keeps them:
-     * every brick holds one's sites, each a whole voxel. Not emptied, for
-     * the same reason: a host shows it as rock, which rays from a finer
-     * level's hollows meet and light doesn't pass.
+     * It on box `under`, the same columns right below it, all buried in
+     * material `id`, as `bury` keeps it: each brick of it one's sites, each
+     * a whole voxel. Not emptied: a host shows it as rock, which rays from
+     * a finer level's hollows meet and light doesn't pass. `under` is a
+     * whole number of bricks tall, unless it has no sites itself.
      */
-    pub fn buried(b: &Box3, id: u8) -> VoxelGrid {
-        let mut grid = VoxelGrid::new(b);
-        if grid.bricks.is_empty() {
-            return grid;
+    pub fn on_buried(self, under: &Box3, id: u8) -> VoxelGrid {
+        let below = (self.min[1] - under.min[1] + BRICK - 1).div_euclid(BRICK);
+        if below <= 0 {
+            return self;
         }
-        grid.bricks.fill(0);
-        grid.cells = vec![id; BRICK_SITES];
-        grid.pieces = Part { alpha: vec![ALPHA; BRICK_SITES], seen: vec![id; BRICK_SITES] };
-        grid.medium = Part { alpha: vec![0; BRICK_SITES], seen: vec![0; BRICK_SITES] };
-        grid
+        assert!(self.n[1] == 0 || (self.min[1] - under.min[1]) % BRICK == 0, "{under:?} under {:?} is not of whole bricks", self.clip());
+        let top = if self.n[1] == 0 { under.max[1] } else { self.min[1] + self.n[1] };
+        let mut grid = VoxelGrid::new(&Box3 {
+            min: [self.min[0], under.min[1], self.min[2]],
+            max: [self.min[0] + self.n[0], top, self.min[2] + self.n[2]],
+        });
+        let at = (self.cells.len() / BRICK_SITES) as i32;
+        let (bx, by) = (grid.bx, grid.by);
+        for (i, brick) in grid.bricks.iter_mut().enumerate() {
+            let [x, y, z] = [i as i64 % bx, i as i64 / bx % by, i as i64 / (bx * by)];
+            *brick = if y < below { at } else { self.bricks[((z * self.by + y - below) * bx + x) as usize] };
+        }
+        let VoxelGrid { mut cells, faces, mut pieces, mut medium, glow, .. } = self;
+        cells.extend([id; BRICK_SITES]);
+        pieces.alpha.extend([ALPHA; BRICK_SITES]);
+        pieces.seen.extend([id; BRICK_SITES]);
+        medium.alpha.extend([0; BRICK_SITES]);
+        medium.seen.extend([0; BRICK_SITES]);
+        VoxelGrid { cells, faces, pieces, medium, glow, ..grid }
     }
 
     /** The box of its sites. */
@@ -288,8 +303,8 @@ impl VoxelGrid {
                 })
         };
         let buried: Vec<usize> = (0..self.bricks.len()).filter(|&b| buried(b)).collect();
-        let Some(&first) = buried.first() else { return };
-        let one = self.bricks[first];
+        // The last of their sites: on_buried's rock, if they are of it, so it is kept once.
+        let Some(one) = buried.iter().map(|&b| self.bricks[b]).max() else { return };
         let sites = one as usize * BRICK_SITES..(one as usize + 1) * BRICK_SITES;
         self.faces.retain(|i, _| !sites.contains(i));
         self.glow.retain(|i, _| !sites.contains(i));

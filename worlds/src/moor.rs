@@ -667,11 +667,11 @@ fn mist(f: Rc<Heath>) -> Field {
         }
         vec![Span::medium(h + 1, depth, K::mist, lies.extinction)]
     })
-    // Its top under the most the ground is a lid's samples away, two rings, or two sites over the ground.
-    .meets(move |b, s| {
+    // Its top under the most the ground is a lid's samples away, two rings.
+    .meets(move |b, _| {
         let r = 2 * MIST_RING;
         let Some((_, high)) = ground.range([b.min[0] - r, b.min[2] - r], [b.max[0] - 1 + r, b.max[2] - 1 + r]) else { return Meets::Any };
-        Meets::under(high + 1 + (lies.over - lies.under).0.max(0), b, s)
+        Meets::under(high + 1 + (lies.over - lies.under).0.max(0), b)
     })
 }
 
@@ -707,8 +707,7 @@ fn heath(f: Rc<Heath>) -> Field {
         }
         .spans()
     });
-    let field = field.about(of, m(1.0), m(0.4));
-    if under { field.under(F::soil) } else { field }
+    if under { field.ground(of, m(1.0), m(0.4), F::soil) } else { field.about(of, m(1.0), m(0.4)) }
 }
 
 /** The bottom of the stream's bed under ground `h` high: a metre deep, at least two sites, as a line of sites along y has one every two. */
@@ -756,7 +755,7 @@ fn water(f: Rc<Heath>) -> Field {
         let Some((_, high)) = ground.range(min, max).filter(|_| s < POOLS_APART / 2) else { return Meets::Any };
         let water = moorland.highest_water(min, max).map(|level| level.0 + 1);
         match water.max(moorland.stream.as_ref().map(|_| high)) {
-            Some(top) => Meets::under(top, b, s),
+            Some(top) => Meets::under(top, b),
             None => Meets::Nothing,
         }
     })

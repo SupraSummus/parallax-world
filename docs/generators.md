@@ -77,39 +77,44 @@ A world is **layers** of two kinds, drawn in `order`:
   Or a population makes a thing at each point of `Points`
   (`anchor_points`; see "Points").
 
-A field may say **where it is**: what it draws in any box
-(`Field::meets`, a `Meets`):
-anything, nothing, or all of it solid of one kind, along any axis.
+A layer may say **where it is**, along any axis;
+the framework knows nothing else of where anything is.
+A field says what it draws in any box (`Field::meets`, a `Meets`):
+anything, nothing, or all of it solid of one kind.
 The cheese is all cheese, its holes nothing where none of them reaches;
 the sea nothing over its level (`Meets::under`).
-A field on a ground says it about a plan of heights (`plan::Sloped`):
-its spans along y lie from `below` under to `above` over it
-at their column (`Field::about`), a rule checked on each span,
-and what it meets follows, from the plan's range over the box's columns
-(`Sloped::range`), which its slope bounds;
-a plan promising no slope (`Sloped::any`) says nothing.
-The ground's field may say what it is under all that (`Field::under`),
-solid down without end.
-A population's things may stand on such a plan (`Population::on`), a rule too.
+A population says where its things' anchors may lie (`Population::stands`).
 Each is a rule (below),
 so the framework asks it to draw only where it may be:
 a field in blocks of lines (`LINES`), a population box by box.
+On a ground, `build.rs` says both for a layer
+about a plan of heights (`plan::Sloped`):
+a field's spans along y lie from `below` under to `above` over it
+at their column (`Field::about`), held to it as they are made,
+and what it meets follows, from the plan's range over the box's columns
+(`Sloped::range`), which its slope bounds;
+a plan promising no slope (`Sloped::any`) says nothing.
+The ground's own field also says what it is under all that (`Field::ground`),
+solid down without end.
+A population's things may stand on such a plan (`Population::on`),
+each anchored at most N (its cell) off it.
 So a host may ask for any box, in any order,
 and a field about the ground costs little in the air above it
 or the rock below it, where it is not asked at all.
 And what a box holds throughout follows from what they say (`whole`):
 nothing, or solid so deep that none of it shows.
-The last field drawing all of a box decides it;
-a layer drawing in it after keeps only that:
+Its layers decide it in the order they draw, from nothing:
+one drawing all of a box solid makes it that (a carve, empty);
+one that may draw in it keeps only what it can't change,
 a carve what is empty, a fill or paint what is buried
 (a thing's carves cut only it).
 A population draws in it if a thing of the cells reaching it,
 made as drawing makes it, reaches it by its bounds
-(asked only where the fields alone would leave it whole);
+(asked only where the rest would leave it whole);
 past their size, its far form, if any.
 A host need not make either (`shown`):
-it generates a box less its whole bottom and top;
-a box all buried it keeps as rock, a brick of it for all (`generate_shown`),
+it generates a box less its whole bottom and top,
+and keeps a buried bottom as rock, a brick of it for all (`generate_shown`),
 not emptied, as rays from a finer level's hollows and light meet it.
 A layer that says nothing is drawn everywhere.
 
@@ -123,7 +128,8 @@ and may keep each site only with a chance (`fill` < 1: foliage, fog).
 Authors never write sites; the framework draws shapes and fields at the level asked.
 A thing is drawn whole, then over the world:
 its carves cut only it, never the ground or other things
-(dig the ground with a field),
+(dig the ground with a field, line by line:
+as things, the cheese's holes cost many times as much, `docs/todo.md`),
 and each of its sites meets the world as it was last drawn, filling or painting.
 
 Things are built in **frames** (`frame.rs`):
@@ -413,18 +419,21 @@ Broken rules panic, naming the thing and pointing here:
 - **Slopes.** A `Sloped` plan's column differs from a neighbour's
   by at most its `slope`, checked as one is made and the other is kept:
   so every two ever kept together.
+- **Stands.** A thing's anchor lies where its population `stands`:
+  on a plan (`on`), at most N (its cell) off it.
+- **Meets.** A field draws in a box what it `meets` there:
+  nothing where it says nothing, solid of its kind where it says all.
+  It is asked of the box two sites wider each way than the sites drawn,
+  as a site stands for its voxel and a span or shape grows to keep one:
+  it says where it is, not where its sites are.
+  Only the contract checks it (`skips_hold`),
+  so derive it from what bounds the spans, as `about` does.
 - **About.** A field's span lies within `below` under and `above` over
   what it is `about` at its column,
   give or take two sites (a span is at least two sites tall)
   and twice the slope times the spacing
   (a line reaches down past the eight columns around it, `sides`);
-  under that, if it says, all its `under`, a solid span from `DEEP`.
-- **On.** A thing's anchor lies at most N (its cell) off
-  the plan its population stands `on`.
-- **Meets.** A field draws in a box what it `meets` there:
-  nothing where it says nothing, solid of its kind where it says all.
-  Only the contract checks it (`skips_hold`),
-  so derive it from what bounds the spans, as `About` does.
+  under that, a `ground`'s kind, a solid span from `DEEP`.
 - **Rooms.** A thing's weight lies from 0 to the rooms' `most`.
 
 Not checked, but caught by the tests:
@@ -1010,9 +1019,9 @@ The moor (`worlds/src/moor.rs`) is the shortest whole world to start from.
 `Population::new(…).reach(…).anchor(…)`, `.anchor_along(axis, …)` or `.anchor_points(…)`, `.make(…)`,
 `Node::group`, `Child::new`, and `Shape::ball` and the like,
 solid and filling unless told to `paint` or `carve`;
-`.meets(…)` or `.about(ground, below, above)` on a field, `.on(ground)` on a population,
+`.meets(…)` or `.about(ground, below, above)` on a field, `.stands(…)` or `.on(ground)` on a population,
 says where it is ("Model");
-the ground's field `.under(kind)`, its columns ending `Column::under(kind)`:
+the ground's field `.ground(plan, below, above, kind)`, its columns ending `Column::under(kind)`:
 a world is solid under its ground, not a shell over a hollow.
 A shape kept with a chance is made with the long form (`ball(…, fill, op)`,
 `Part::cells(…, fill, op)`):

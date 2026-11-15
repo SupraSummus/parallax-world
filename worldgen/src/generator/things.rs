@@ -20,14 +20,12 @@ pub(super) fn each_thing(
     let n = population.cell;
     let cell = |c: [i64; 3]| Cell::fcc(population, generator.seed, c);
     let mut make = |cell: &Cell, anchor: Point| {
-        if let Some(ground) = &population.on {
-            let [x, y, z] = anchor;
-            let g = ground.at(x.round() as i64, z.round() as i64);
+        if let Some(stands) = &population.stands {
+            let at = anchor.map(|v| v.round() as i64);
             assert!(
-                (y - g as f64).abs() <= n as f64,
-                "{} is anchored at {anchor:?}, {:.0} units off the ground it stands on (Population::on), more than its cell's width {n}; see \"Rules\" in {DOCS}",
-                cell.key(),
-                y - g as f64
+                stands(&Box3 { min: at, max: at.map(|v| v + 1) }),
+                "{} is anchored at {anchor:?}, where its population says none stand (Population::stands); see \"Rules\" in {DOCS}",
+                cell.key()
             );
         }
         if let Some(node) = (population.make)(anchor, cell) {

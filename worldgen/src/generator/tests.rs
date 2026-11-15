@@ -1,5 +1,6 @@
 use super::*;
 use crate::noise::fx;
+use crate::plan::Sloped;
 
 #[test]
 fn a_long_lathe_reaches_its_widest_circle() {
@@ -208,7 +209,7 @@ fn checking_finds_what_a_broken_promise_skips() {
 fn solid_ground(height: fn(i64) -> i64, slope: i64) -> Generator {
     let of = Rc::new(Sloped::new(Rc::new(plan::Plan::new("ground", 1, move |x, _| height(x))), slope));
     let field = Field::columns("ground", 0.0, Op::Fill, move |x, _| crate::column::Column::new(height(x)).surface(0, 4).under(0));
-    layers(vec![Layer::Field(field.about(of, 4, 1).under(0))])
+    layers(vec![Layer::Field(field.ground(of, 4, 1, 0))])
 }
 
 #[test]
@@ -236,9 +237,16 @@ fn a_field_under_its_ground_is_solid_to_the_bottom_and_says_so() {
     }
 }
 
-/** Solid where x < 0, as spans along x, saying so if it `says`: nothing from x = 0 on, all solid under x = -8. */
-fn wall(says: bool) -> Generator {
-    let field = Field::spans("wall", 0.0, Op::Fill, 0, |_, _, _| vec![Span::solid(-(1 << 20), 0, 0)]);
+/**
+ * Solid where x < 0, as spans along x or, `at` each site, by x alone,
+ * saying so if it `says`: nothing from x = 0 on, all solid under x = -8.
+ */
+fn wall(at: bool, says: bool) -> Generator {
+    let field = if at {
+        Field::at("wall", 0.0, Op::Fill, |x, _, _| (x < 0).then_some((0, None)))
+    } else {
+        Field::spans("wall", 0.0, Op::Fill, 0, |_, _, _| vec![Span::solid(-(1 << 20), 0, 0)])
+    };
     let meets = |b: &Box3, _: i64| match b {
         _ if b.min[0] >= 0 => Meets::Nothing,
         _ if b.max[0] <= -8 => Meets::All(0),
@@ -249,31 +257,51 @@ fn wall(says: bool) -> Generator {
 
 #[test]
 fn a_field_says_where_it_is_along_any_axis() {
-    let world = wall(true);
-    for level in 0..4 {
-        let s = 1 << level;
-        let box_at = |x: i64| Box3 { min: [x / s, -16, -16], max: [x / s + 32, 16, 16] };
-        let (past, across, behind) = (box_at(256), box_at(-16 * s), box_at(-512));
-        assert_eq!(whole(&world, &past, level), Some(Whole::Empty), "level {level}");
-        assert_eq!(whole(&world, &across, level), None, "level {level}");
-        assert_eq!(whole(&world, &behind, level), Some(Whole::Buried(0)), "level {level}");
-        for b in [past, across, behind] {
-            // Drawn as it would be without asking it.
-            let (grid, broken) = checking_skipped(|| generate(&world, &b, level));
-            assert_eq!(broken, Vec::<String>::new());
-            assert_eq!(grid.pieces.alpha, generate(&wall(false), &b, level).pieces.alpha, "level {level}, {b:?}");
+    for at in [false, true] {
+        let world = wall(at, true);
+        for level in 0..4 {
+            let s = 1 << level;
+            let box_at = |x: i64| Box3 { min: [x / s, -16, -16], max: [x / s + 32, 16, 16] };
+            let (past, across, behind) = (box_at(256), box_at(-16 * s), box_at(-512));
+            assert_eq!(whole(&world, &past, level), Some(Whole::Empty), "level {level}");
+            assert_eq!(whole(&world, &across, level), None, "level {level}");
+            assert_eq!(whole(&world, &behind, level), Some(Whole::Buried(0)), "level {level}");
+            for b in [past, across, behind] {
+                // Drawn as it would be without asking it.
+                let (grid, broken) = checking_skipped(|| generate(&world, &b, level));
+                assert_eq!(broken, Vec::<String>::new());
+                assert_eq!(grid.pieces.alpha, generate(&wall(at, false), &b, level).pieces.alpha, "level {level}, {b:?}");
+            }
+            // All buried, it is made as one brick, every site of it whole.
+            let buried = generate_shown(&world, &behind, level);
+            assert_eq!(buried.cells.len(), (BRICK * BRICK * BRICK / 2) as usize);
+            assert!(buried.bricks.iter().all(|&at| at == 0) && buried.pieces.alpha.iter().all(|&a| a == ALPHA));
         }
-        // All buried, it is made as one brick, every site of it whole.
-        let buried = generate_shown(&world, &behind, level);
-        assert_eq!(buried.cells.len(), (BRICK * BRICK * BRICK / 2) as usize);
-        assert!(buried.bricks.iter().all(|&at| at == 0) && buried.pieces.alpha.iter().all(|&a| a == ALPHA));
     }
+}
+
+#[test]
+fn a_field_at_each_site_is_drawn_only_where_it_says_and_held_to_it() {
+    // Solid where x < 0, saying the opposite: nothing there, all solid from x = 0 on (a box is asked two sites wider).
+    let meets = |b: &Box3, _: i64| match b {
+        _ if b.max[0] <= 2 => Meets::Nothing,
+        _ if b.min[0] >= -2 => Meets::All(0),
+        _ => Meets::Any,
+    };
+    let world = layers(vec![Layer::Field(Field::at("wall", 0.0, Op::Fill, |x, _, _| (x < 0).then_some((0, None))).meets(meets))]);
+    let (behind, past) = (Box3 { min: [-32, -4, -4], max: [0, 4, 4] }, Box3 { min: [0, -4, -4], max: [32, 4, 4] });
+    assert!(generate(&world, &behind, 0).pieces.alpha.iter().all(|&a| a == 0), "skipped where it says nothing");
+    assert!(generate(&world, &past, 0).pieces.alpha.contains(&ALPHA), "filled where it says all, not asked");
+    let (_, broken) = checking_skipped(|| generate(&world, &behind, 0));
+    assert!(broken.len() == 1 && broken[0].starts_with("wall draws where it says it may not"), "{broken:?}");
+    let (_, broken) = checking_skipped(|| generate(&world, &past, 0));
+    assert!(broken.len() == 1 && broken[0].starts_with("wall isn't all kind 0, as it says"), "{broken:?}");
 }
 
 #[test]
 fn a_tile_holds_its_ground_by_its_surface_not_its_volume() {
     // Ground rising g sites a column: a column of bricks holds its surface and the ring of whole bricks under it,
-    // some 2 + 4g, whatever the tile's size; the rock under them, some g·t/16 more, is held once.
+    // some 2 + 4g, whatever the tile's size; the rock under them, some g·t/16 more, is held once, a brick.
     for g in [0, 1, 2, 4] {
         let height: fn(i64) -> i64 = match g {
             0 => |_| 0,
@@ -285,7 +313,7 @@ fn a_tile_holds_its_ground_by_its_surface_not_its_volume() {
         for t in [64, 256] {
             let b = Box3 { min: [0, -64, 0], max: [t, g * t + 64, t] };
             let sites = (BRICK * BRICK * BRICK / 2) as usize;
-            let column = |grid: VoxelGrid| (grid.cells.len() / sites) as f64 / (t * t / BRICK / BRICK) as f64;
+            let column = |grid: VoxelGrid| (grid.cells.len() / sites - 1) as f64 / (t * t / BRICK / BRICK) as f64;
             let held = column(generate_shown(&world, &b, 0));
             assert!(held <= 2.0 + 4.5 * g as f64, "rising {g} a column, a tile {t} sites a side holds {held} bricks a column");
         }
@@ -307,13 +335,16 @@ fn what_shows_of_a_box_is_all_but_its_whole_bottom_and_top() {
     assert_eq!(whole(&world, &Box3 { min: [0, part.max[1] - BRICK, 0], ..b }, 0), None);
     let buried = shown(&world, &Box3 { max: [64, -100, 16], ..b }, 0);
     assert_eq!(buried.min[1], buried.max[1], "all buried");
+    // Hosts keep its whole bottom as rock, not a hollow rays from a finer level's tunnels would see through.
+    let grid = generate_shown(&world, &b, 0);
+    assert_eq!((grid.clip().min[1], grid.alpha(1, b.min[1], 0)), (b.min[1], ALPHA));
 }
 
 #[test]
-#[should_panic(expected = "field ground: at column (0, 0), kind Some(0) doesn't reach up from the bottom to -6, 4 under its ground 0")]
+#[should_panic(expected = "field ground: at column (0, 0), kind Some(0) doesn't reach up from DEEP to -6, 4 under its ground 0")]
 fn refuses_a_field_not_under_its_ground_as_it_says() {
     let flat = Rc::new(Sloped::new(Rc::new(plan::Plan::new("flat", 1, |_, _| 0)), 0));
-    let field = Field::columns("ground", 0.0, Op::Fill, |_, _| vec![Span::solid(-4, 1, 0)]).about(flat, 4, 1).under(0);
+    let field = Field::columns("ground", 0.0, Op::Fill, |_, _| vec![Span::solid(-4, 1, 0)]).ground(flat, 4, 1, 0);
     generate(&layers(vec![Layer::Field(field)]), &Box3 { min: [0, -16, 0], max: [8, 16, 8] }, 0);
 }
 
@@ -327,7 +358,7 @@ fn checking_finds_a_field_not_under_its_ground_where_it_says() {
 }
 
 #[test]
-#[should_panic(expected = "rocks 0,0,0 is anchored at [0.0, 0.0, 0.0], 100 units off the ground it stands on (Population::on)")]
+#[should_panic(expected = "rocks 0,0,0 is anchored at [0.0, 0.0, 0.0], where its population says none stand (Population::stands)")]
 fn refuses_a_thing_anchored_off_the_ground_it_stands_on() {
     // In its cell, but the ground is 100 units under it.
     let low = Rc::new(Sloped::new(Rc::new(plan::Plan::new("low", 1, |_, _| -100)), 0));
@@ -346,7 +377,6 @@ fn faces_on_a_plane_of_sites_stay_where_level_0_has_them() {
         order: 0.0,
         op: Op::Fill,
         values: FieldValues::Spans { axis: 1, spans: Box::new(|_, _, _| vec![Span::solid(-4096, 0, 0)]) },
-        about: None,
         meets: None,
     });
     let n = 1 << 14;
@@ -360,7 +390,7 @@ fn faces_on_a_plane_of_sites_stay_where_level_0_has_them() {
             anchor: Anchors::Cells(Box::new(|cell| (cell.centre == [0; 3]).then_some([0.0; 3]))),
             make: Box::new(move |_, _| Some(Node::of(vec![cuboid([-8192.0, 0.0, -8192.0], [8192.0, top, 8192.0], 0, SOLID, Op::Fill)]))),
             far: None,
-            on: None,
+            stands: None,
         })
     };
     let kinds = vec![KindDef { name: "stone", kind_type: 1, colors: &["#808080"], walk_through: false, glows: false, medium: false }];

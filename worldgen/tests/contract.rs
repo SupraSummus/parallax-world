@@ -45,7 +45,7 @@ fn single(make: impl Fn(Point, &Cell) -> Option<Node> + 'static, reach: i64) -> 
         anchor: Anchors::Cells(Box::new(|cell| if cell.i == 0 && cell.j == 0 && cell.k == 0 { Some([64.0, 64.0, 64.0]) } else { None })),
         make: Box::new(make),
         far: None,
-        on: None,
+        stands: None,
     })
 }
 
@@ -55,7 +55,6 @@ fn spans(name: &'static str, from: i64, to: i64, kind: u8) -> Layer {
         order: 0.0,
         op: Op::Paint,
         values: FieldValues::Spans { axis: 1, spans: Box::new(move |_, _, _| vec![Span::solid(from, to, kind)]) },
-        about: None,
         meets: None,
     })
 }
@@ -80,7 +79,6 @@ fn caves() -> Generator {
             let v = (x / 23.0).sin() + (y / 17.0).sin() + (z / 29.0).sin() + ((x + z) / 31.0).sin();
             if v > 1.4 { Some((ROCK, None)) } else { None }
         })),
-        about: None,
         meets: None,
     };
     Generator { kinds: KINDS.to_vec(), seed: 2, layers: vec![spans("rock", -256, 256, ROCK), Layer::Field(tunnels)] }
@@ -133,7 +131,7 @@ fn village() -> Generator {
             })
         }),
         far: None,
-        on: None,
+        stands: None,
     };
     Generator { kinds: KINDS.to_vec(), seed: 3, layers: vec![spans("ground", -64, 0, GRASS), Layer::Population(houses)] }
 }
@@ -273,7 +271,7 @@ fn finds_a_far_thing_reaching_past_its_populations_reach() {
         anchor: Anchors::Cells(Box::new(|cell| (cell.i >= 30 && cell.j == 0).then_some(cell.centre.map(|v| v as f64)))),
         make: Box::new(|[x, y, z], _| Some(Node::of(vec![ball([x, y, z], 100.0, ROCK, SOLID, Op::Fill)]))),
         far: None,
-        on: None,
+        stands: None,
     });
     let world = world_of(world(far), (-256, 256));
     let broken = things_hold(&world, &survey(&world, REGION, |_| true));
@@ -316,7 +314,6 @@ fn fog_layer(from: i64, to: i64, kind: fn(i64) -> u8, extinction: fn(i64) -> f64
             let spacing = spacing();
             (from..to).contains(&y).then(|| (kind(spacing), Some(extinction(spacing))))
         })),
-        about: None,
         meets: None,
     }))
 }

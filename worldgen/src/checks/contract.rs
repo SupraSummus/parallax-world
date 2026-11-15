@@ -743,7 +743,7 @@ fn stopping(generator: &Generator, grid: &VoxelGrid, level: u32) -> Option<([i64
  * Hosts generate a world only within its heights, so nothing may lie
  * over them: at each level up to one past `levels`, in each region and a
  * host tile's width around spawn, BEYOND sites above the heights are
- * empty. Under them the ground may go on (Field::under), unseen. Returns
+ * empty. Under them the ground may go on (Field::ground), unseen. Returns
  * where they are not.
  */
 pub fn heights_hold(world: &World, regions: &[Box3], levels: u32) -> Vec<String> {

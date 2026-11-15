@@ -14,7 +14,7 @@ use crate::curve::Curve;
 use crate::grid::{ALPHA, BRICK, Box3, VoxelGrid};
 use crate::js;
 use crate::noise::{Fixed, Fx, ONE, Rng, fixed, float, hash, hash_text, hash64};
-use crate::plan::{self, Sloped};
+use crate::plan;
 use crate::points::{Points, Spot};
 
 mod drawables;
@@ -231,6 +231,7 @@ type MakeShapes = dyn Fn(&mut Rng) -> Vec<Shape>;
 type FieldAt = dyn Fn(i64, i64, i64) -> Option<(Kind, Option<f64>)>;
 type FieldSpans = dyn Fn(i64, i64, (i64, i64)) -> Vec<Span>;
 type FieldMeets = dyn Fn(&Box3, i64) -> Meets;
+type Stands = dyn Fn(&Box3) -> bool;
 type CellAnchor = dyn Fn(&Cell) -> Option<Point>;
 type LineAnchor = dyn Fn(&Line) -> Option<Point>;
 type SpotAnchor = dyn Fn(&Spot) -> Option<Point>;
@@ -314,70 +315,29 @@ pub struct Field {
     /**
      * What it draws in a box (lattice units) at sites a spacing apart, as
      * it says (`Meets`), along any axis: a rule, checked where it skips
-     * (`checking_skipped`). None: anything.
+     * (`checking_skipped`); asked of more than the sites (`meets_in`).
+     * None: anything.
      */
     pub meets: Option<Box<FieldMeets>>,
-    /**
-     * Its spans along y about a plan of heights, a rule checked on each
-     * span drawn; what it `meets` follows from it (`Field::about`).
-     */
-    pub about: Option<About>,
 }
 
 impl Field {
-    /** What it draws in box `b` (lattice units) at sites `spacing` apart, as it says. */
+    /**
+     * What it draws in box `b` (lattice units) at sites `spacing` apart, as
+     * it says: asked of the box two sites wider each way, as a site stands
+     * for its voxel, a site past it, and a span or a shape may grow by a
+     * site to keep one. So a field says where it is, not where its sites are.
+     */
     pub(crate) fn meets_in(&self, b: &Box3, spacing: i64) -> Meets {
-        self.meets.as_ref().map_or(Meets::Any, |meets| meets(b, spacing))
+        self.meets.as_ref().map_or(Meets::Any, |meets| meets(&b.widen(2 * spacing), spacing))
     }
 }
 
-/**
- * Where a field's spans along y are: from `below` under to `above` over
- * `of` at their column, give or take what a line of sites stands for
- * (`slack`), and under that `under` if it says, down without end (a span
- * from DEEP). A rule, checked wherever it draws; so it is asked to draw
- * only where that may be (Sloped::range), and under it fills `under`.
- */
-#[derive(Clone)]
-pub struct About {
-    pub of: Rc<Sloped>,
-    pub below: i64,
-    pub above: i64,
-    /** A solid kind under it all: the ground, solid to the bottom. */
-    pub under: Option<Kind>,
-}
-
-/** Where a span reaches down without end from: under everything (About's `under`). */
+/** Where a span reaches from without end: past everything. */
 pub const DEEP: i64 = i64::MIN / 4;
 
-impl About {
-    /**
-     * How far past `below` and `above` a line's spans may reach, at sites
-     * `spacing` apart: spans are at least two sites tall, and a line
-     * reaches down past the eight columns a spacing around it (column.rs's
-     * `sides`), the diagonals' up to twice the slope times that off;
-     * without one, any way.
-     */
-    fn slack(&self, spacing: i64) -> Option<i64> {
-        Some(2 * (1 + self.of.slope()?) * spacing)
-    }
-
-    /** What its lines draw in box `b` (lattice units), at sites `spacing` apart: whatever they draw, all `under` (a kind), or nothing. */
-    pub(crate) fn meets(&self, b: &Box3, spacing: i64) -> Meets {
-        let range = self.of.range([b.min[0], b.min[2]], [b.max[0] - 1, b.max[2] - 1]);
-        let (Some((lo, hi)), Some(slack)) = (range, self.slack(spacing)) else { return Meets::Any };
-        let (y0, y1) = (b.min[1], b.max[1] - 1);
-        match self.under {
-            _ if y0 > hi + self.above + slack => Meets::Nothing,
-            Some(kind) if y1 < lo - self.below - slack => Meets::All(kind),
-            None if y1 < lo - self.below - slack => Meets::Nothing,
-            _ => Meets::Any,
-        }
-    }
-}
-
 /**
- * What a field draws in a box, as it says (`About`, `Field::meets`):
+ * What a field draws in a box, as it says (`Field::meets`):
  * anything, every site of it solid of one kind, or nothing. A box
  * all of a kind is drawn without asking, one of nothing not at all.
  */
@@ -467,7 +427,7 @@ impl Line<'_> {
 }
 
 /** The axes across `axis`, in order. */
-fn across(axis: usize) -> [usize; 2] {
+pub(crate) fn across(axis: usize) -> [usize; 2] {
     [(axis == 0) as usize, 2 - (axis == 2) as usize]
 }
 
@@ -485,11 +445,11 @@ pub struct Population {
     pub make: Box<Make>,
     pub far: Option<Field>,
     /**
-     * Its things stand on a plan of heights: each anchored at most N over
-     * or under it (a rule, checked wherever one is made); so it is asked
-     * to draw only near it. None: anywhere.
+     * Whether an anchor of its things may lie in a box (lattice units),
+     * as it says: a rule, checked on each one made; so it is asked to draw
+     * only where its things may reach (`Population::on`). None: anywhere.
      */
-    pub on: Option<Rc<Sloped>>,
+    pub stands: Option<Box<Stands>>,
 }
 
 /** Where a population's things are, each owned by the cell it is in, if asked there. */
@@ -584,7 +544,7 @@ pub struct Generator {
     pub layers: Vec<Layer>,
 }
 
-const DOCS: &str = "docs/generators.md";
+pub(crate) const DOCS: &str = "docs/generators.md";
 /** A size no spacing exceeds. */
 pub const ANY_SIZE: i64 = i64::MAX;
 /** A voxel's surface area at level 0, and its mean chord (Cauchy: 4 · volume / area). */
