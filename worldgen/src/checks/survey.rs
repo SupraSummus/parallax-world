@@ -147,8 +147,6 @@ fn survey_field(world: &World, centre: [i64; 3], (level, side): (u32, i64), fiel
         // A site's column of FIELD_LEVEL, as generating it asks: at any height, for a field of sites.
         let [x, z] = [(c % side, centre[0]), (c / side, centre[2])].map(|(i, o)| (o.div_euclid(s) + i - side / 2) * s);
         let p = [x, h0 + random.below((h1 - h0) as u32) as i64, z];
-        // Its spans asked for a region's width along the line: a field endless along it makes no more.
-        let stretch = |axis: usize| (p[axis] - half, p[axis] + half);
         // What it draws there, along an axis from..to: the place is around the top of what fills, the middle of what carves.
         let (kinds, along, from, to): (Vec<Kind>, usize, i64, i64) = match &field.values {
             FieldValues::At(at) => {
@@ -156,9 +154,16 @@ fn survey_field(world: &World, centre: [i64; 3], (level, side): (u32, i64), fiel
                 let Some((kind, _)) = at(s) else { continue };
                 (at(1).into_iter().map(|(k, _)| k).chain([kind]).collect(), 1, p[1], p[1] + 1)
             }
+            FieldValues::Shapes(near) => {
+                // A shape reaching the site's voxel, from its bottom to its top.
+                let b = Box3::around(p, s);
+                let shapes = footprint(s, [0, 0], || near(&b));
+                let Some(shape) = shapes.iter().find(|shape| shape.bounds.overlaps(&b)) else { continue };
+                (vec![shape.kind], 1, shape.bounds.min[1], shape.bounds.max[1])
+            }
             FieldValues::Spans { axis, spans } => {
                 let [a, b] = across(*axis);
-                let spans = |s| footprint(s, [0, 0], || spans(p[a], p[b], stretch(*axis)));
+                let spans = |s| footprint(s, [0, 0], || spans(p[a], p[b]));
                 let coarse = spans(s);
                 if coarse.is_empty() {
                     continue;

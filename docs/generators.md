@@ -43,12 +43,11 @@ A world is **layers** of two kinds, drawn in `order`:
 - **Fields:** something everywhere, from position alone: the ground, caves, fog.
   A field gives a kind (or a medium) at each site (`At`),
   or `Spans` along each line of sites parallel to an `axis` (heightfields),
-  given the stretch of the line asked for,
-  of which it may make only those reaching it (`Field::spans`):
-  a field endless along its lines, as the cheese's, makes no more.
-  Boxes ask for different stretches of a line,
-  and the contract holds a box generated in parts to the box whole,
-  so what a field makes of a stretch agrees with what it makes of any other.
+  all of a line's wherever a box asks along it (`Field::spans`).
+  Or a field gives `Shapes`, those that may reach the box asked for
+  (`Field::shapes`), each of the field's op, in an order the same for any box,
+  drawn as a thing's are but cutting the world:
+  the cheese's holes, balls and capsules.
 - **Populations:** things in cells, at most one per cell.
   A population's cells are those of the lattice N times coarser, N·FCC
   (as the renderer's, `cells.ts`, when N is a power of two):
@@ -128,7 +127,7 @@ and may keep each site only with a chance (`fill` < 1: foliage, fog).
 Authors never write sites; the framework draws shapes and fields at the level asked.
 A thing is drawn whole, then over the world:
 its carves cut only it, never the ground or other things
-(dig the ground with a field, line by line:
+(dig with a field, of spans or of shapes:
 as things, the cheese's holes cost many times as much, `docs/todo.md`),
 and each of its sites meets the world as it was last drawn, filling or painting.
 
@@ -494,7 +493,8 @@ A camera could be anywhere open to a region's outside.
 "From above" is a sky's view: rays down from over what may show,
 through cubes as any picture's;
 a world with no heights has no sky, and is not seen from it.
-Some still take y as up ("Drop y as up" in `docs/todo.md`).
+y stays up, but some of the engine still takes a ground
+("Assume no ground" in `docs/todo.md`).
 
 The contract says three things.
 A world is a function of position:

@@ -5,8 +5,11 @@ use super::*;
 
 /** The area of an opaque body stopping as many rays as one of `area` and mean chord `chord`, filled with chance `fill`. */
 fn effective_area(area: f64, chord: f64, fill: &Fill, centre: Point) -> f64 {
-    let f = fill.at(centre[0], centre[1], centre[2]);
-    area * (1.0 - js::pow(1.0 - f, chord / CHORD))
+    match fill.at(centre[0], centre[1], centre[2]) {
+        // Opaque: the power of nothing is nothing.
+        1.0 => area,
+        f => area * (1.0 - js::pow(1.0 - f, chord / CHORD)),
+    }
 }
 
 pub(super) fn at(p: Point) -> At {
@@ -77,8 +80,12 @@ fn dot(a: At, b: At) -> i64 {
 
 pub fn ellipsoid(centre: Point, radii: Point, kind: Kind, fill: Fill, op: Op) -> Shape {
     let [a, b, c] = radii;
-    let p = 1.6075; // Knud Thomsen's approximation of the surface area
-    let area = 4.0 * PI * js::pow((js::pow(a * b, p) + js::pow(a * c, p) + js::pow(b * c, p)) / 3.0, 1.0 / p);
+    let p = 1.6075; // Knud Thomsen's approximation of the surface area, exact for a ball
+    let area = if a == b && b == c {
+        4.0 * PI * a * a
+    } else {
+        4.0 * PI * js::pow((js::pow(a * b, p) + js::pow(a * c, p) + js::pow(b * c, p)) / 3.0, 1.0 / p)
+    };
     let (centre_at, radii) = (at(centre), at(radii));
     Shape {
         kind,
@@ -194,6 +201,12 @@ fn disc(d: At, w: Fixed) -> At {
  * undersides that cast no more (Cauchy holds for convex bodies).
  */
 fn revolved(radius: &Radius, length: f64, flat: bool) -> (f64, f64, f64) {
+    let caps = if flat { 1.0 } else { 2.0 };
+    if let Radius::Const(r) = *radius {
+        // A cylinder and its ends: what the slices add up to, without them.
+        let ends = if flat { 0.0 } else { (2.0 / 3.0) * PI * 2.0 * js::pow(r, 3.0) };
+        return (caps * PI * (r * r + r * r) + PI * (r + r) * length, ends + PI * r * r * length, r);
+    }
     let n = 8f64.max(length.ceil()) as usize;
     let r: Vec<f64> = (0..=n).map(|i| radius.at(i as f64 / n as f64)).collect();
     let mut hull: Vec<usize> = Vec::new();
@@ -204,7 +217,6 @@ fn revolved(radius: &Radius, length: f64, flat: bool) -> (f64, f64, f64) {
         }
         hull.push(i);
     }
-    let caps = if flat { 1.0 } else { 2.0 };
     let mut area = caps * PI * (r[0] * r[0] + r[n] * r[n]);
     let mut volume = if flat { 0.0 } else { (2.0 / 3.0) * PI * (js::pow(r[0], 3.0) + js::pow(r[n], 3.0)) };
     for h in 0..hull.len().saturating_sub(1) {
@@ -415,6 +427,13 @@ impl Inside<'_> {
 }
 
 impl Shape {
+    /** Whether point `p` (lattice units) is inside it, as level 0 draws it. */
+    pub fn holds(&self, p: Point) -> bool {
+        // Its bounds hold its sites: a point between them, a unit past.
+        let near = self.bounds.widen(1);
+        (0..3).all(|i| near.min[i] as f64 <= p[i] && p[i] < near.max[i] as f64) && self.inside(0, 1).holds(at(p))
+    }
+
     /** Whether a point is inside the shape with each of its sizes made at least `min`, at sites `s` apart. */
     pub(super) fn inside(&self, min: Fixed, s: i64) -> Inside<'_> {
         let half = min / 2;

@@ -118,7 +118,7 @@ worlds/                      # The worlds, on worldgen's public API only
 │   ├── mountains.rs         # The valley's ranges: massifs, crests, peaks and passes, side valleys; treeline, meadows, scree, rock, snow; the sea west past them, an upland east
 │   ├── moor.rs              # The moor: heath, a stream or pools, mist in its hollows (or, the fog, over all of it), steadings of a hut and a ring of stones; the valley's fifth domain
 │   ├── railway.rs           # The valley's railway: a line along it made by cost, cut, filled, bridged and tunnelled; stations by towns
-│   ├── cheese.rs            # The cheese: endless every way, caverns, tunnels and eyes carved line by line, stairs up each cavern, lit by glowing crystals
+│   ├── cheese.rs            # The cheese: endless every way, caverns, tunnels and eyes carved by a field of shapes, stairs up each cavern, lit by glowing crystals
 │   ├── city.rs              # The city: blocks of buildings whose rooms form a maze, boxes on a plan of quarter metres
 │   ├── learned.rs           # The learned town: settlements drawn by a split grammar learned in lab/, on the forest's land
 │   └── scene.rs             # Scenes made elsewhere: voxels read from a file (scripts/voxelize.py); lib.rs adds Sponza, with its feature

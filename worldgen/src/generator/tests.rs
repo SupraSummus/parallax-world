@@ -245,7 +245,7 @@ fn wall(at: bool, says: bool) -> Generator {
     let field = if at {
         Field::at("wall", 0.0, Op::Fill, |x, _, _| (x < 0).then_some((0, None)))
     } else {
-        Field::spans("wall", 0.0, Op::Fill, 0, |_, _, _| vec![Span::solid(-(1 << 20), 0, 0)])
+        Field::spans("wall", 0.0, Op::Fill, 0, |_, _| vec![Span::solid(-(1 << 20), 0, 0)])
     };
     let meets = |b: &Box3, _: i64| match b {
         _ if b.min[0] >= 0 => Meets::Nothing,
@@ -376,7 +376,7 @@ fn faces_on_a_plane_of_sites_stay_where_level_0_has_them() {
         name: "ground",
         order: 0.0,
         op: Op::Fill,
-        values: FieldValues::Spans { axis: 1, spans: Box::new(|_, _, _| vec![Span::solid(-4096, 0, 0)]) },
+        values: FieldValues::Spans { axis: 1, spans: Box::new(|_, _| vec![Span::solid(-4096, 0, 0)]) },
         meets: None,
     });
     let n = 1 << 14;

@@ -81,9 +81,15 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
     };
     // Block by block of lines along an axis (a field's spans', or y for one given at each site), those it says it
     // draws nothing in skipped; while checking, drawn to see they don't.
-    let axis = match &field.values {
-        FieldValues::Spans { axis, .. } => *axis,
-        FieldValues::At(_) => 1,
+    /** What a field gives along its lines. */
+    enum Lines<'a> {
+        At(&'a FieldAt),
+        Spans(&'a FieldSpans),
+    }
+    let (axis, lines) = match &field.values {
+        FieldValues::At(at) => (1, Lines::At(at)),
+        FieldValues::Spans { axis, spans } => (*axis, Lines::Spans(spans)),
+        FieldValues::Shapes(near) => return draw_field_shapes(field, near, seed, s, clip, put),
     };
     let ([a, b], (lo, hi)) = (across(axis), (clip.min, clip.max));
     let (bottom, top) = (lo[axis] * s, (hi[axis] - 1) * s);
@@ -110,8 +116,8 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
             for v in bv..to_v {
                 site[a] = u;
                 site[b] = v;
-                match &field.values {
-                    FieldValues::At(at) => {
+                match lines {
+                    Lines::At(at) => {
                         let mut w = lo[axis] + ((lo[axis] + u + v) & 1);
                         while w < hi[axis] {
                             site[axis] = w;
@@ -131,7 +137,7 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
                             w += 2;
                         }
                     }
-                    FieldValues::Spans { spans, .. } => {
+                    Lines::Spans(spans) => {
                         let spans = match all {
                             Some(kind) => vec![Span::solid(DEEP, top + s, kind)],
                             None => {
@@ -141,7 +147,7 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
                                     moved[axis / 2] = 0;
                                 }
                                 work.reads += 1;
-                                plan::footprint(s, moved, || spans(u * s, v * s, (bottom, top)))
+                                plan::footprint(s, moved, || spans(u * s, v * s))
                             }
                         };
                         if let Meets::All(kind) = meets {
@@ -184,6 +190,33 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
     }
     if let Some((site, kind)) = unlike {
         broke(field.name, site, s, clip, &format!("isn't all kind {kind}, as it says"));
+    }
+    work
+}
+
+/**
+ * Draws a field's shapes into `clip` (sites s apart), each as a thing's
+ * shape is drawn (draw_shape), but over the world, in the order `near`
+ * gives them, with picks of their own (from their bounds), so whichever
+ * box asked; returns the work.
+ */
+fn draw_field_shapes(field: &Field, near: &FieldShapes, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> Work {
+    // Asked as what it meets is (Field::meets_in): two sites wider each way.
+    let units = units_of(clip, s).widen(2 * s);
+    let field_seed = hash_text(field.name, seed);
+    let mut work = Work::default();
+    for shape in plan::footprint(s, [0, 0], || near(&units)).iter().filter(|shape| shape.bounds.overlaps(&units)) {
+        assert!(
+            shape.op == field.op,
+            "field {}: a shape drawn other than by its field's op (Field::shapes); see \"Model\" in {DOCS}",
+            field.name
+        );
+        let b = &shape.bounds;
+        let picks = hash64(hash64(field_seed, b.min[0], b.min[1], b.min[2]), b.max[0], b.max[1], b.max[2]);
+        work.shapes += 1;
+        work.tests += draw_shape(shape, picks, s, clip, &mut |share, cover, pick, x, y, z| {
+            put(Look { cover, ..shape.kind.into() }, shape.op, share, pick, x, y, z)
+        });
     }
     work
 }

@@ -60,6 +60,8 @@ work! {
     owned,
     /** Nodes drawn: things and their children, near or far. */
     nodes,
+    /** A field's shapes, made and drawn (`FieldValues::Shapes`). */
+    shapes,
     /** Sites tested against a shape: the inner loop of drawing things. */
     tests,
     /** Sites of the boxes things are drawn in whole, to be measured (`Far::measured`). */
@@ -84,13 +86,25 @@ work! {
  * `lookups` set since between what one took in two changes that added
  * many (claims making their keys afresh for every column, a canopy
  * reading a plan around each), as it varies with what it finds, and
- * `plans` refitted with it. They rank work more than they time it; a
- * report's "took here" shows how far off they are elsewhere. `distinct`
- * is among `plans` and `largest` among `tests`, so weigh nothing of
- * their own.
+ * `plans` refitted with it; `shapes` fitted to the cheese's tiles at
+ * levels 4 to 7, where they are most of the work. They rank work more
+ * than they time it; a report's "took here" shows how far off they are
+ * elsewhere. `distinct` is among `plans` and `largest` among `tests`,
+ * so weigh nothing of their own.
  */
-const NS: Work =
-    Work { cells: 100, owned: 1300, nodes: 1800, tests: 50, measured: 35, reads: 20, lookups: 25, plans: 45, distinct: 0, largest: 0 };
+const NS: Work = Work {
+    cells: 100,
+    owned: 1300,
+    nodes: 1800,
+    shapes: 350,
+    tests: 50,
+    measured: 35,
+    reads: 20,
+    lookups: 25,
+    plans: 45,
+    distinct: 0,
+    largest: 0,
+};
 
 impl Work {
     /** Adds `w`'s counts, but for the largest, the larger. */
