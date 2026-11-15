@@ -102,9 +102,7 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
         let (to_u, to_v) = ((bu + LINES).min(hi[a]), (bv + LINES).min(hi[b]));
         let mut block = Box3 { min: [0; 3], max: [0; 3] };
         (block.min[a], block.max[a], block.min[b], block.max[b]) = (bu * s, (to_u - 1) * s + 1, bv * s, (to_v - 1) * s + 1);
-        // Covered, spans a site's voxel and half a unit past it meet it in part (`cover`).
-        let past = if covers { s + 1 } else { 0 };
-        (block.min[axis], block.max[axis]) = (bottom - past, top + 1 + past);
+        (block.min[axis], block.max[axis]) = (bottom, top + 1);
         let meets = field.meets_in(&block, s);
         if meets == Meets::Nothing && !checking() {
             continue;
@@ -210,9 +208,9 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
 /**
  * Puts a line of sites `s` apart along `axis`, at `line` across it, within
  * [lo, hi), as its `solid` spans cover each: through each face, the share
- * of the voxel's chords along its direction that meet them (`within`), or
- * for a carve, that lie wholly in them; each face seeing the span its rays
- * meet first, those across the axis the span that fills most of the site.
+ * of the voxel's chords along its direction they stop (`slabs`); each face
+ * seeing the span its rays meet first, those across the axis the span
+ * that fills most of the site.
  * A span's ends are where level 0 has them on average, half a unit down
  * (`Tie`). Sites whole of one span are put as before; the others' share
  * is their most.
@@ -242,29 +240,14 @@ fn cover(solid: &[&Span], axis: usize, line: [i64; 2], (lo, hi): (i64, i64), s: 
             _ => most,
         });
         let faces = faces.iter().any(|&k| k != faces[0]).then_some(faces);
-        // What lies outside the spans, between them and past them: chords wholly there meet none.
-        let mut gaps = Vec::new();
-        let mut at = -1.0;
-        for &(a, b, _) in &parts {
-            if a > at {
-                gaps.push((at, a));
-            }
-            at = at.max(b);
-        }
-        gaps.push((at, 1.0));
-        let whole = gaps.iter().all(|(a, b)| b <= a);
-        let share_of = |across: bool| {
-            let within = |list: &mut dyn Iterator<Item = (f64, f64)>| list.map(|(a, b)| within(across, a, b)).sum::<f64>();
-            let stops =
-                if op == Op::Carve { within(&mut parts.iter().map(|p| (p.0, p.1))) } else { 1.0 - within(&mut gaps.iter().copied()) };
-            share(stops.clamp(0.0, 1.0))
-        };
+        let ends: Vec<(f64, f64)> = parts.iter().map(|p| (p.0, p.1)).collect();
         let look = Look { kind: most, faces, cover: None };
-        if whole {
+        let reach = ends.iter().try_fold(-1.0, |at: f64, &(a, b)| (a <= at).then(|| at.max(b)));
+        if reach.is_some_and(|at| at >= 1.0) {
             put(look, op, SHARE, w_now);
             continue;
         }
-        let (across, along) = (share_of(true), share_of(false));
+        let [across, along] = [true, false].map(|across| share(slabs(across, &ends, op == Op::Carve)));
         let cover = (across != along).then(|| std::array::from_fn(|k| if VOXEL_FACES[k][axis] == 0 { along } else { across }));
         put(Look { cover, ..look }, op, across.max(along), w_now);
     }

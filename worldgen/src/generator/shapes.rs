@@ -579,9 +579,8 @@ pub(super) fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &m
 
 /**
  * A box's sites `s` apart (coarser than level 0) within `clip`, each with
- * the share of the voxel's chords along each face's direction that meet
- * the box (`within`), or for a carve, that lie wholly in it: along each
- * axis the box cuts the voxel, as a column's span does (`cover`), the axes
+ * the share of the voxel's chords along each face's direction it stops
+ * (`slabs`): along each axis, as a column's span does (`cover`), the axes
  * as if apart. Its faces are where level 0 has them on average, half a
  * unit down (`Tie`). Returns how many sites it tested.
  */
@@ -608,21 +607,34 @@ fn cover_box(box_: [At; 2], op: Op, s: i64, clip: &Box3, put: &mut dyn FnMut(i64
                     continue;
                 }
                 let cover = std::array::from_fn(|k| {
-                    parts
-                        .iter()
-                        .enumerate()
-                        .map(|(axis, &(a, b))| {
-                            let across = VOXEL_FACES[k][axis] != 0;
-                            if op == Op::Carve { within(across, a, b) } else { 1.0 - within(across, -1.0, a) - within(across, b, 1.0) }
-                        })
-                        .product::<f64>()
-                        .clamp(0.0, 1.0)
+                    let along = |(axis, part): (usize, &(f64, f64))| slabs(VOXEL_FACES[k][axis] != 0, &[*part], op == Op::Carve);
+                    parts.iter().enumerate().map(along).product::<f64>()
                 });
                 put(p[0], p[1], p[2], cover);
             }
         }
     }
     tested
+}
+
+/**
+ * Of a voxel's chords along a face's direction (`within`'s `across`), the
+ * share that meets `parts`, slabs of its extent along an axis in order: what
+ * they stop of a voxel otherwise empty. A carve frees those wholly in one,
+ * of a voxel otherwise whole.
+ */
+pub(super) fn slabs(across: bool, parts: &[(f64, f64)], carve: bool) -> f64 {
+    if carve {
+        return parts.iter().map(|&(a, b)| within(across, a, b)).sum();
+    }
+    // Chords wholly between the slabs or past them meet none.
+    let mut at = -1.0;
+    let mut free = 0.0;
+    for &(a, b) in parts {
+        free += within(across, at, a);
+        at = f64::max(at, b);
+    }
+    (1.0 - free - within(across, at, 1.0)).clamp(0.0, 1.0)
 }
 
 /** Steps the chords' table takes across a voxel's extent along an axis, −1 to 1. */
@@ -635,11 +647,9 @@ type Chords = [Box<[[f32; CHORD_STEPS + 1]; CHORD_STEPS + 1]>; 2];
  * Of a voxel's chords along a face's direction, crossing planes across an
  * axis (`across`, as eight of the twelve do) or within one (the other
  * four): the share that lies wholly within [a, b), a slab of the voxel's
- * extent along the axis, from −1 to 1 (its sites' spacing). A slab of a
- * column stops the chords that meet it, and a carve frees those wholly
- * in it, of a voxel otherwise whole (`cover`).
+ * extent along the axis, from −1 to 1 (its sites' spacing).
  */
-pub(super) fn within(across: bool, a: f64, b: f64) -> f64 {
+fn within(across: bool, a: f64, b: f64) -> f64 {
     static CHORDS: OnceLock<Chords> = OnceLock::new();
     let table = &CHORDS.get_or_init(|| [true, false].map(chords))[usize::from(!across)];
     let at = |v: f64| {

@@ -79,14 +79,14 @@ impl Column {
         self.above.last().map_or(self.height + 1, |s| s.to)
     }
 
-    /** A layer of `kind` `depth` deep, under the layers so far (the first is the ground's top), at least two sites. */
+    /** A layer of `kind` `depth` deep, under the layers so far (the first is the ground's top), at least `least`. */
     pub fn surface(mut self, kind: impl Into<Kind>, depth: i64) -> Column {
         let to = self.floor();
         self.below.push(Span::solid(to - depth.max(self.least), to, kind));
         self
     }
 
-    /** `kind` under the layers so far, down to `bottom`, or two sites if that is less. */
+    /** `kind` under the layers so far, down to `bottom`, or `least` if that is less. */
     pub fn fill_below(self, kind: impl Into<Kind>, bottom: i64) -> Column {
         let bottom = bottom.min(self.floor() - self.least);
         self.fill_below_exactly(kind, bottom)

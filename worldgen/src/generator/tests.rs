@@ -427,19 +427,18 @@ fn faces_on_a_plane_of_sites_stay_where_level_0_has_them() {
 }
 
 #[test]
-fn a_voxels_chords_lie_within_slabs_of_it_as_its_shape_says() {
+fn slabs_of_a_voxel_stop_the_chords_that_meet_them() {
+    let near = |a: f64, b: f64| (a - b).abs() < 1e-3;
     for across in [true, false] {
-        assert!((within(across, -1.0, 1.0) - 1.0).abs() < 1e-6, "all within the whole");
-        assert_eq!(within(across, 0.5, 0.5), 0.0, "none within nothing");
-        // Either half alike, by symmetry; more within a wider slab.
-        let (below, above) = (within(across, -1.0, 0.0), within(across, 0.0, 1.0));
-        assert!((below - above).abs() < 1e-3, "{across}: {below} below, {above} above");
-        assert!(within(across, -1.0, 0.5) > below);
+        // All of it stops all; its halves, by symmetry, alike; a carve of both halves frees what lies wholly in either.
+        assert!(near(slabs(across, &[(-1.0, 1.0)], false), 1.0));
+        assert!(near(slabs(across, &[(-1.0, 0.0)], false), slabs(across, &[(0.0, 1.0)], false)));
+        let halves = slabs(across, &[(-1.0, 0.0), (0.0, 1.0)], true);
+        assert!(near(halves, 2.0 * slabs(across, &[(-1.0, 0.0)], true)));
     }
-    // Chords along a plane across the axis each lie at one height: half of them below the middle. Those crossing such
-    // planes span heights: fewer lie wholly in either half, and a thin slab across the middle meets most of them.
-    assert!((within(false, -1.0, 0.0) - 0.5).abs() < 1e-3);
-    assert!(within(true, -1.0, 0.0) < 0.4);
-    let meets = |across| 1.0 - within(across, -1.0, -0.1) - within(across, 0.1, 1.0);
-    assert!(meets(true) > 0.5 && meets(false) < 0.2, "{} across, {} along", meets(true), meets(false));
+    // Chords along a plane across the axis lie at one height each, half of them below the middle; those crossing such
+    // planes span heights, so a thin slab across the middle stops most of them and few of the others.
+    assert!(near(slabs(false, &[(-1.0, 0.0)], true), 0.5));
+    let thin = |across| slabs(across, &[(-0.1, 0.1)], false);
+    assert!(thin(true) > 0.5 && thin(false) < 0.2, "{} across, {} along", thin(true), thin(false));
 }

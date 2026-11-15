@@ -130,7 +130,7 @@ const GLOW: f32 = 250.0;
 
 type Map<K, V> = fcc::FastMap<K, V>;
 
-/** A level's voxels, generated in tiles as they are needed, and the light found at its sites. */
+/** A level's blocks, as they are needed, and the light found at its sites. */
 struct Level {
     heights: (i64, i64),
     /** The block read last, and the box it holds: most reads are in it. */
@@ -210,7 +210,7 @@ impl Light {
         let Some(([x, y, z], grid)) = self.hold(i, site) else { return ((0.0, [0.0; 3]), [0.0; 3]) };
         let ([(pieces, p), (medium, m)], glow) = grid.light(x, y, z, face);
         let alpha = (u32::from(pieces) + u32::from(medium)) as f32 / ALPHA as f32;
-        // Premultiplied, of COLOUR_ONE: as a share of the light on what it stops.
+        // Their colours come premultiplied, of COLOUR_ONE: as a share of the light on what it stops.
         let colour = std::array::from_fn(|c| if alpha > 0.0 { ((p[c] + m[c]) as f32 / COLOUR_ONE as f32 / alpha).min(1.0) } else { 0.0 });
         ((alpha, colour), glow.map(|g| g as f32 * glowing))
     }

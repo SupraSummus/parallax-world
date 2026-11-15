@@ -635,10 +635,8 @@ Numbers are for the forest at 1280×800, as measured when written.
   is lit through it from the sky,
   as the reference's tunnel under a thin roof is,
   its middle hundreds of times too bright.
-  Hosts' columns put a whole site where its middle is in a span,
-  so their coarse levels lose a roof thinner than their spacing;
-  light reads the world covered (`covered`), columns and boxes in part,
-  which keeps the roof, and the reference's tunnel a third as bright,
+  Light reads the world covered (below), so it keeps the roof,
+  and the reference's tunnel is a third as bright,
   still tens of times too bright:
   taking over, a coarser level's light comes to the middle of its site,
   what lies between there and where it took over unread.
@@ -648,15 +646,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   each level lights its stretch of a ray, from where the finer one's ends,
   in place of the steps and `past`'s room;
   then coarser levels take more directions (in Ideas).
-  Covered, the other solids (balls, tubes, gables) still keep sites by their middles,
-  and media too.
-  Hosts are not shown covered sites: drawn whole by a coin each,
-  a slab split between two rows of sites, each covered in part,
-  would show holes where neither is drawn.
-  Media should show soft (as they do), pieces hard, as leaves;
-  a solid's edge is neither: its sites' shares are not apart.
-  So light makes blocks of its own, covered, apart from the world's tiles,
-  each generated twice where it is lit.
   Rock filled round the tunnels kept them dark,
   but bent a world to the light: not kept.
   Against the reference (`light/reference.rs`, test `against_the_reference`;
@@ -693,12 +682,24 @@ Numbers are for the forest at 1280×800, as measured when written.
   so near a corner where six voxels meet it misses one within its reach,
   and light jumps a little there;
   every site within reach would leak light through walls one site thick.
-- **Light sees each site as hosts draw it (`Grid`), and what glows, a prototype**:
+- **Covered sites are light's only** (`covered` in `drawables.rs`).
+  Covered, columns and boxes stop a share of a coarse site's rays,
+  along each direction;
+  hosts keep sites whole by their middles,
+  so their coarse levels lose a roof thinner than a site.
+  Shown whole by a coin each, as pieces are,
+  a slab split between two rows of covered sites
+  would show holes where neither is drawn:
+  media show soft, pieces hard (leaves), but a solid's edge is neither,
+  its sites' shares are not apart.
+  So light makes blocks of its own, apart from the world's tiles,
+  each generated twice where it is lit.
+  Covered, other solids (balls, tubes, gables) and media
+  still keep sites by their middles.
+- **Sites, as hosts and light see them, and what glows, a prototype**:
   - a site's pieces show a voxel where a hash is under their alpha
     (`VoxelGrid::show`), as leaves should,
     but measured houses' walls come out ragged;
-    at the coarse levels light reads few sites,
-    so a voxel there shown or not moves a lamp's light (the city at night);
   - a site's pieces' colour is one of theirs, picked as often as it is seen,
     not the mean of what its faces see;
     where they show, its medium is not seen;
