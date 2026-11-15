@@ -920,6 +920,8 @@ and near the edge of the railway's reach every side steepens to meet the ground:
 no earthwork ends in a wall but a tunnel's portal.
 A station stands by each town the line passes on the ground.
 The railway bids for its formation and under its bridges, not over its tunnels.
+Its bores are carved after every other layer, and the track in them drawn after,
+so nothing standing over a tunnel (trees and plants at a portal) reaches into it.
 Seen from above, the line keeps within a corridor of the segment
 between its piece's ends,
 so it turns away columns further across before reading any plan.

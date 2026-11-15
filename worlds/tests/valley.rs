@@ -3,7 +3,7 @@
 use std::rc::Rc;
 
 use worldgen::domain::Scope;
-use worldgen::generator::{Generator, generate, materials_of};
+use worldgen::generator::{Generator, Layer, generate, materials_of};
 use worldgen::grid::{Box3, is_site};
 use worldgen::picture::{Camera, picture};
 use worldgen::units::UNIT_SIZE;
@@ -25,6 +25,24 @@ fn the_forest_keeps_off_the_first_towns_main_street() {
     let street =
         Box3 { min: [town.x - 2, town.level + 8, town.z - unit(60.0)], max: [town.x + 2, town.level + unit(30.0), town.z - unit(40.0)] };
     assert!(generate(&world.generator, &street, 0).cells.iter().all(|id| *id == 0), "something stands on the main street");
+}
+
+/** Nothing standing over a tunnel reaches into its bore: the railway's bores are carved last, the track in them drawn after. */
+#[test]
+fn the_railways_bores_are_carved_last() {
+    let world = valley(42);
+    let mut layers: Vec<(f64, &str)> = world
+        .generator
+        .layers
+        .iter()
+        .map(|layer| match layer {
+            Layer::Field(f) => (f.order, f.name),
+            Layer::Population(p) => (p.order, p.name),
+        })
+        .collect();
+    layers.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let last: Vec<&str> = layers[layers.len() - 2..].iter().map(|l| l.1).collect();
+    assert_eq!(last, ["railway's tunnels", "railway in its tunnels"]);
 }
 
 /**
