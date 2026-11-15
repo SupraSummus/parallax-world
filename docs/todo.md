@@ -469,6 +469,17 @@ Numbers are for the forest at 1280×800, as measured when written.
   to the last level checked: a `Look` is a mean over a region's rays,
   so a solid that thins changes it only by its share of the view.
   Scenes the solid fills, the same share for every case, would ask more.
+- **Each face of a cell against the level one finer** (an experiment:
+  `face_margins` in `worldgen/src/checks/contract.rs`, outside the contract,
+  printed by ignored tests in `worldgen/tests/`).
+  Rays through each of a coarse cell's 12 faces, after the neighbour across it,
+  at both levels; the colour of what the cell stops is compared
+  where both levels see something.
+  It finds solids' bases seen across showing the ground at level 1
+  (a site picks one material for all its faces),
+  but not the railway's sleepers: they hide the ballast across cells, not within one.
+  Weighed by all each level stops, it finds the track,
+  and every ground seen edge on too: a site stops alike from every side.
 - **The forest's canopy measures crowded trees in sample stands.**
   From above it reads each column's owner (`Rooms`),
   but what the trees standing in a column hide from the side
