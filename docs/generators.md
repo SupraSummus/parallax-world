@@ -184,6 +184,8 @@ how many rays get how far, and what they stop on.
   of level 0 it stands for along a ray is kept, 1 − (1 − fill)^s.
   One, a sheet such as a wall: grown to one site thick and kept opaque,
   since a ray crossing it crosses it once; it looks up to half a site thicker.
+  A box's or an ellipsoid's stops only 2t/3s of the rays along it,
+  those entering by the four faces parallel to it (a site's `views`).
   Two or three, a rod or a speck: the sites near it, kept with a chance
   that stops as many rays as it does on average over directions
   (Cauchy: a convex body's mean shadow is a quarter of its area).
@@ -1139,9 +1141,10 @@ and without them rays slipped in at a cliff's corners.
   so from above, where the crowns are thin, rays reach bark that crowns hide:
   over the forest's spawn at seed 4, 0.03 of what level 4 shows from above,
   0.007 at level 0.
-- **Media are isotropic.** A site stops rays from every direction alike;
-  vertical trunks seen from above and from the side cannot both be right.
-  (Opacity per direction, tried twice, did not pay: see "Sheets and rods" in `docs/todo.md`.)
+- **Media are isotropic.** A site stops rays from every direction alike,
+  but a sheet's (above);
+  vertical trunks seen from above and from the side cannot both be right
+  ("Sheets and rods" in `docs/todo.md`).
   What they show needn't be: measured far forms give each face its kind,
   and at level 4 (sites 2 m apart) the valley's town edge from above
   came from 0.105 to 0.071 off, the learned town's from 0.099 to 0.062 (seed 42),

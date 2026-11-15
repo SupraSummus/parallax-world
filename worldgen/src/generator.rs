@@ -43,11 +43,13 @@ pub type Kind = u8;
 pub struct Look {
     pub kind: Kind,
     pub faces: Option<[Kind; FACE_KINDS]>,
+    /** Its share (of SHARE) of the rays entering by each face, where they differ: a wall stops those across it, few along it. */
+    pub cover: Option<[u32; FACE_KINDS]>,
 }
 
 impl From<Kind> for Look {
     fn from(kind: Kind) -> Look {
-        Look { kind, faces: None }
+        Look { kind, faces: None, cover: None }
     }
 }
 

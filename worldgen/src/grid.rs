@@ -4,7 +4,7 @@
 
 use std::collections::BTreeMap;
 
-use fcc::{Faces, face_words};
+use fcc::{FACE_KINDS, Faces, face_words};
 
 // The baker's grids, as worlds hand them over (web/wasm/src/lib.rs), the voxel's faces, and a whole site's alpha: it stops every ray.
 pub use fcc::{ALPHA, FACE_WORDS, Grid, VOXEL_FACES};
@@ -76,6 +76,15 @@ pub struct VoxelGrid {
     pub medium: Part,
     /** By index in `cells`, of the sites that glow: how much, per channel, of GLOW_ONE. */
     pub glow: BTreeMap<usize, [u32; 3]>,
+    /** By index in `cells`, the sites whose pieces stop or glow unlike through each face: their alpha and glow per face. */
+    pub views: BTreeMap<usize, Views>,
+}
+
+/** What a site's pieces stop of the rays entering it by each face (of VOXEL_FACES), and glow to them. */
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Views {
+    pub alpha: [u8; FACE_KINDS],
+    pub glow: [[u32; 3]; FACE_KINDS],
 }
 
 /** What the sites hold one way, as pieces or as a medium, by index in `cells`. */
@@ -109,6 +118,7 @@ impl VoxelGrid {
             pieces: Part::default(),
             medium: Part::default(),
             glow: BTreeMap::new(),
+            views: BTreeMap::new(),
         }
     }
 
@@ -225,6 +235,9 @@ impl VoxelGrid {
         if !self.faces.is_empty() {
             self.faces.remove(&i);
         }
+        if !self.views.is_empty() {
+            self.views.remove(&i);
+        }
     }
 
     /** Where site (x, y, z) is in `cells`, its brick added if empty; None outside the box or off the sites. */
@@ -308,6 +321,7 @@ impl VoxelGrid {
         let sites = one as usize * BRICK_SITES..(one as usize + 1) * BRICK_SITES;
         self.faces.retain(|i, _| !sites.contains(i));
         self.glow.retain(|i, _| !sites.contains(i));
+        self.views.retain(|i, _| !sites.contains(i));
         for brick in buried {
             self.bricks[brick] = one;
         }
@@ -351,6 +365,7 @@ impl VoxelGrid {
         let to = |i: usize| moved[i / BRICK_SITES].map(|to| to * BRICK_SITES + i % BRICK_SITES);
         self.faces = std::mem::take(&mut self.faces).into_iter().filter_map(|(i, f)| Some((to(i)?, f))).collect();
         self.glow = std::mem::take(&mut self.glow).into_iter().filter_map(|(i, g)| Some((to(i)?, g))).collect();
+        self.views = std::mem::take(&mut self.views).into_iter().filter_map(|(i, v)| Some((to(i)?, v))).collect();
     }
 
     /** Of ALPHA, how much of its rays site `i` of `cells` stops: its pieces, and its medium of the rest. */
@@ -360,21 +375,27 @@ impl VoxelGrid {
     }
 
     /**
-     * How light sees site (x, y, z): what its pieces stop of its rays and
-     * its medium of the rest, each how much (of ALPHA; together, `alpha`)
-     * and of what material (the pieces', face `kind`'s); and its glow.
+     * How light entering site (x, y, z) by face `kind` sees it: what its
+     * pieces stop of its rays and its medium of the rest, each how much (of
+     * ALPHA) and of what material; and its glow. Each the face's, where
+     * they differ (`faces`, `views`).
      */
     pub fn light(&self, x: i64, y: i64, z: i64, kind: usize) -> ([(u8, u8); 2], [u32; 3]) {
         match self.slot(x, y, z) {
             Some(Ok(i)) => {
-                let glow = if self.glow.is_empty() { [0; 3] } else { self.glow.get(&i).copied().unwrap_or_default() };
-                let pieces = self.pieces.alpha[i];
+                let view = self.views.get(&i);
+                let glow = match view {
+                    Some(view) => view.glow[kind],
+                    None => self.glow.get(&i).copied().unwrap_or_default(),
+                };
+                let pieces = view.map_or(self.pieces.alpha[i], |view| view.alpha[kind]);
                 let material = if self.faces.is_empty() {
                     self.pieces.seen[i]
                 } else {
                     self.faces.get(&i).map_or(self.pieces.seen[i], |faces| faces[kind])
                 };
-                ([(pieces, material), (self.stops(i) - pieces, self.medium.seen[i])], glow)
+                let medium = (ALPHA - pieces) as u32 * self.medium.alpha[i] as u32;
+                ([(pieces, material), (((medium + ALPHA as u32 / 2) / ALPHA as u32) as u8, self.medium.seen[i])], glow)
             }
             _ => ([(0, 0); 2], [0; 3]),
         }
