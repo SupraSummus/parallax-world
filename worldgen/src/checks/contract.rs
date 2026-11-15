@@ -630,6 +630,11 @@ fn from_above_against_level_0(world: &World, region: &Box3, levels: u32, report:
 
 /** What rays straight down over `region` see at each of `levels`, against level 0, as `measure`. */
 fn from_above(world: &World, region: &Box3, levels: impl Iterator<Item = u32>, measure: Measure, report: &mut Report) {
+    let mut levels = levels.peekable();
+    if world.heights.is_none() {
+        assert!(levels.peek().is_none(), "a world with no heights has no sky to be seen from (World::heights): from_above 0");
+        return;
+    }
     let palette = Palette::of(&world.generator);
     let seen = |tiles: &mut Tiles, area: &Box3| {
         // A ray every 2 units, through a random point of each 2 × 2: through their middles, rays meet plans of whole
@@ -642,7 +647,7 @@ fn from_above(world: &World, region: &Box3, levels: impl Iterator<Item = u32>, m
     // Level 0 over the area of the levels since it last grew; the areas
     // nest, so its tiles are kept for the next. Rays come down from the
     // world's sky, over its heights, cutting nothing.
-    let mut level_0 = Tiles::down(0, world.heights_at(0));
+    let mut level_0 = Tiles::new(0, world.heights_at(0));
     let mut reference: Option<(Box3, Seen)> = None;
     for level in levels {
         let area = around(region, level);
@@ -650,7 +655,7 @@ fn from_above(world: &World, region: &Box3, levels: impl Iterator<Item = u32>, m
             reference = Some((area, seen(&mut level_0, &area)));
         }
         let reference = &reference.as_ref().expect("made").1;
-        let here = seen(&mut Tiles::down(level, world.heights_at(level)), &area);
+        let here = seen(&mut Tiles::new(level, world.heights_at(level)), &area);
         let looks = [looks_of(reference, &palette), looks_of(&here, &palette)];
         report.margins.push(Margin { region: *region, measure, level, against: 0, looks });
     }
@@ -743,6 +748,9 @@ fn stopping(generator: &Generator, grid: &VoxelGrid, level: u32) -> Option<([i64
  */
 pub fn heights_hold(world: &World, regions: &[Box3], levels: u32) -> Vec<String> {
     let mut broken = Vec::new();
+    if world.heights.is_none() {
+        return broken;
+    }
     for level in 0..=levels + 1 {
         let high = world.heights_at(level).1;
         // A host's tile: 128 sites wide.
@@ -757,7 +765,7 @@ pub fn heights_hold(world: &World, regions: &[Box3], levels: u32) -> Vec<String>
                 broken.push(format!(
                     "level {level}, {place}: {n} sites stopping light above the heights {:?} (World::heights), which hosts don't generate, \
                      such as {kind} at {at:?} lattice units",
-                    world.heights
+                    world.heights.expect("bounded")
                 ));
             }
         }
@@ -799,7 +807,7 @@ pub fn skips_hold(world: &World, regions: &[Box3], levels: u32) -> Vec<String> {
                             .filter(|&[x, y, z]| is_site(x, y, z));
                         let unlike = match whole {
                             Whole::Empty => sites.filter(|&p| part.holds(p)).find(|&[x, y, z]| grid.alpha(x, y, z) > 0),
-                            Whole::Buried => sites.into_iter().find(|&[x, y, z]| grid.alpha(x, y, z) < ALPHA),
+                            Whole::Buried(_) => sites.into_iter().find(|&[x, y, z]| grid.alpha(x, y, z) < ALPHA),
                         };
                         if let Some(site) = unlike {
                             broken.push(format!("level {level}: {part:?} is {whole:?}, as its layers say, but not at site {site:?}"));
@@ -823,9 +831,9 @@ pub fn skips_hold(world: &World, regions: &[Box3], levels: u32) -> Vec<String> {
  */
 pub fn things_hold(world: &World, survey: &Survey) -> Vec<String> {
     let mut broken = Vec::new();
-    let (h0, h1) = world.heights;
     for things in &survey.things {
         for (key, bounds) in &things.leaving {
+            let (h0, h1) = world.heights.expect("the survey keeps things leaving a world's heights, if it has them");
             for (from, to, side) in [(h1, bounds.max[1] + 2, "above"), (bounds.min[1] - 2, h0, "below")] {
                 if from >= to {
                     continue;
@@ -835,7 +843,7 @@ pub fn things_hold(world: &World, survey: &Survey) -> Vec<String> {
                     broken.push(format!(
                         "{key}: {n} sites stopping light {side} the heights {:?} (World::heights), which hosts don't generate, \
                          such as {kind} at {at:?} lattice units",
-                        world.heights
+                        (h0, h1)
                     ));
                 }
             }

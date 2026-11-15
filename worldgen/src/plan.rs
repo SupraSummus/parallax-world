@@ -18,8 +18,6 @@ thread_local! {
      * none while plans or things are made.
      */
     static FOOTPRINT: Cell<Option<(i64, [i64; 2])>> = const { Cell::new(None) };
-    /** The stretch of its line a field's spans are asked for (`along`). */
-    static ALONG: Cell<(i64, i64)> = const { Cell::new((i64::MIN, i64::MAX)) };
 }
 
 /**
@@ -40,27 +38,6 @@ pub(crate) fn footprint<R>(spacing: i64, offset: [i64; 2], read: impl FnOnce() -
 #[inline]
 pub fn spacing() -> i64 {
     FOOTPRINT.get().map_or(1, |(spacing, _)| spacing)
-}
-
-/** Runs `read`, a field's spans of a line, asked for the stretch [from, to] of it (`along`). */
-pub(crate) fn stretch<R>(along: (i64, i64), read: impl FnOnce() -> R) -> R {
-    let outer = ALONG.replace(along);
-    let value = read();
-    ALONG.set(outer);
-    value
-}
-
-/**
- * The stretch [from, to] of the line of sites a field's spans are asked
- * for now, lattice units along it; all of it where not said. Spans that
- * can't reach into it may be left out: a field endless along its lines
- * (a cheese endless along y) makes only what is there. What it makes of
- * one stretch agrees with what it makes of another where they meet, as
- * the contract checks: a box in parts is the box whole.
- */
-#[inline]
-pub fn along() -> (i64, i64) {
-    ALONG.get()
 }
 
 /** Runs `read` with plans read where asked, whoever asks: as a plan's columns are made, and points' chances (points.rs). */
@@ -510,6 +487,18 @@ impl<T: Copy + Default + 'static> Claims<T> {
         Claims { apart, proposed, nearby }
     }
 
+    /** The things kept that stand in columns `min` to `max` (x, z), inclusive: of those kept for the stretches of columns there. */
+    pub fn within(&self, min: [i64; 2], max: [i64; 2]) -> Vec<([i64; 2], T)> {
+        let stretch = (self.apart / 2).max(1);
+        let [lo, hi] = [min, max].map(|p| p.map(|v| v.div_euclid(stretch)));
+        let mut keys: Vec<(i32, i32)> =
+            (lo[0]..=hi[0]).flat_map(|a| (lo[1]..=hi[1]).flat_map(move |b| self.nearby.at(a, b))).filter(|k| k.0 != i32::MIN).collect();
+        keys.sort_unstable();
+        keys.dedup();
+        let holds = |at: [i64; 2]| (0..2).all(|a| (min[a]..=max[a]).contains(&at[a]));
+        keys.into_iter().filter_map(|(i, key)| self.proposed.at(i.into(), key.into())).filter(|(at, _)| holds(*at)).collect()
+    }
+
     /** The thing kept nearest (x, z) within `within`, at most `apart`, if any: of those kept for its stretch of columns. */
     pub fn near(&self, x: i64, z: i64, within: i64) -> Claim<T> {
         assert!(within <= self.apart, "claims are near within {} at most, not {within}", self.apart);
@@ -641,6 +630,24 @@ mod tests {
         // Periods from the cells' width up.
         let p = preference("claims", 16, &area, &places);
         assert!(!p.broken(), "{p}");
+    }
+
+    #[test]
+    fn claims_within_a_rectangle_are_those_near_its_columns() {
+        use std::collections::BTreeSet;
+        let claims = Claims::new("claims", 7, 64, 100, None, |[x, z], _| ((x + z) & 1 == 0).then_some(([x, z], ())));
+        for (min, max) in [([-300, -200], [400, 350]), ([17, 17], [40, 90]), ([-1000, 0], [-1000, 0])] {
+            let within: BTreeSet<[i64; 2]> = claims.within(min, max).into_iter().map(|(at, ())| at).collect();
+            assert!(within.iter().all(|at| (0..2).all(|a| (min[a]..=max[a]).contains(&at[a]))), "{within:?} in {min:?} to {max:?}");
+            // Each nearest to a column of a grid finer than they are apart, and standing in it.
+            let near: BTreeSet<[i64; 2]> = (min[0]..=max[0])
+                .step_by(10)
+                .flat_map(|x| (min[1]..=max[1]).step_by(10).map(move |z| [x, z]))
+                .filter_map(|[x, z]| claims.near(x, z, 100).map(|(at, ())| at))
+                .filter(|at| (0..2).all(|a| (min[a]..=max[a]).contains(&at[a])))
+                .collect();
+            assert!(near.is_subset(&within), "{near:?} not all in {within:?}");
+        }
     }
 
     #[test]

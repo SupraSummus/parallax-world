@@ -11,36 +11,30 @@ use std::time::{Duration, Instant};
 
 use fcc::{FACE_KINDS, VOXEL_FACES};
 
-use crate::generator::{Generator, generate_shown, materials_of};
+use crate::generator::{Generator, generate_shown, materials_of, shown};
 use crate::grid::{ALPHA, BRICK, Box3, GLOW_ONE, VoxelGrid};
 use crate::noise::hash;
 
 /** Sites a tile is wide, at the picture's level. */
 const TILE: i64 = 64;
 
-/** A tile: where along each axis, in tiles (along y 0, for a tile spanning the heights). */
+/** A tile: where along each axis, in tiles. */
 type Key = [i64; 3];
 
-/**
- * How a picture's tiles cut its slab of heights (in the level's units):
- * cubes, or, for a view down the heights (`Camera::top`), which sees
- * through all of them, columns spanning them, made at once.
- */
+/** A picture's tiles: cubes, cut to its slab of heights (in the level's units). */
 #[derive(Clone, Copy)]
 struct Tiling {
     heights: (i64, i64),
-    down: bool,
 }
 
 impl Tiling {
-    fn key(&self, [x, y, z]: [i64; 3]) -> Key {
-        [x.div_euclid(TILE), if self.down { 0 } else { y.div_euclid(TILE) }, z.div_euclid(TILE)]
+    fn key(&self, p: [i64; 3]) -> Key {
+        p.map(|v| v.div_euclid(TILE))
     }
 
     /** Tile `key`'s box: within the heights. */
     fn tile(&self, [i, j, k]: Key) -> Box3 {
-        let (y0, y1) = if self.down { self.heights } else { (j * TILE, (j + 1) * TILE) };
-        let (y0, y1) = (y0.clamp(self.heights.0, self.heights.1), y1.clamp(self.heights.0, self.heights.1));
+        let (y0, y1) = ((j * TILE).clamp(self.heights.0, self.heights.1), ((j + 1) * TILE).clamp(self.heights.0, self.heights.1));
         Box3 { min: [i * TILE, y0, k * TILE], max: [(i + 1) * TILE, y1, (k + 1) * TILE] }
     }
 }
@@ -275,22 +269,9 @@ pub struct Tiles {
 }
 
 impl Tiles {
-    /** None yet, of `level` between `heights` (in the level's units): cubes. */
+    /** None yet, of `level` between `heights` (in the level's units). */
     pub fn new(level: u32, heights: (i64, i64)) -> Tiles {
-        Tiles { tiles: HashMap::new(), level, tiling: Tiling { heights, down: false } }
-    }
-
-    /** As `new`, for views down the heights: columns spanning them (Tiling). */
-    pub fn down(level: u32, heights: (i64, i64)) -> Tiles {
-        Tiles { tiling: Tiling { heights, down: true }, ..Tiles::new(level, heights) }
-    }
-
-    /** As `new` or `down`, for `camera`'s view. */
-    fn of(camera: &Camera, level: u32, heights: (i64, i64)) -> Tiles {
-        match camera.projection {
-            Projection::Top { .. } => Tiles::down(level, heights),
-            Projection::Perspective { .. } => Tiles::new(level, heights),
-        }
+        Tiles { tiles: HashMap::new(), level, tiling: Tiling { heights } }
     }
 
     /** Site (x, y, z)'s material; Err if its tile is not generated. */
@@ -560,7 +541,7 @@ fn sky(direction: [f64; 3]) -> [f64; 3] {
  * reach are generated on this thread; the rays are cast on all.
  */
 pub fn picture(generator: &Generator, camera: &Camera, level: u32, heights: (i64, i64)) -> Picture {
-    picture_in(generator, camera, &mut Tiles::of(camera, level, heights))
+    picture_in(generator, camera, &mut Tiles::new(level, heights))
 }
 
 /** As `picture`, at `tiles`' level and heights, generating only the tiles it lacks, into it. */
@@ -584,8 +565,34 @@ pub fn composite_in(generator: &Generator, camera: &Camera, tiles: &mut Tiles) -
 fn tiled(generator: &Generator, camera: &Camera, tiles: &mut Tiles, composite: bool) -> (Picture, Seen) {
     let colours: Vec<u32> = materials_of(generator).iter().map(|m| m.rgb()).collect();
     let (level, tiling) = (tiles.level, tiles.tiling);
+    let tops = tops_of(generator, camera, level, tiling.heights);
     let make = &mut |keys: &[Key]| keys.iter().map(|key| generate_shown(generator, &tiling.tile(*key), level)).collect();
-    picture_of_tiles(camera, tiles, &colours, make, composite)
+    picture_of_tiles(camera, tiles, &tops, &colours, make, composite)
+}
+
+/** Where rays enter the slab of heights from above, by the tile they are over (x, z). */
+type Tops = HashMap<[i64; 2], i64>;
+
+/**
+ * Looking down, the top of what may show (`shown`) of each column of
+ * tiles under the camera, in the level's units: over it all is whole,
+ * and empty, as nothing is over a world's heights. So rays from above
+ * don't cross an empty sky tile by tile, each made alone. None looking
+ * any other way.
+ */
+fn tops_of(generator: &Generator, camera: &Camera, level: u32, heights: (i64, i64)) -> Tops {
+    let Projection::Top { width } = camera.projection else { return Tops::new() };
+    let (s, depth) = ((1i64 << level) as f64, width * camera.height as f64 / camera.width as f64);
+    let [i0, k0] =
+        [camera.eye[0] - width / 2.0, camera.eye[2] - depth / 2.0].map(|v| (v / s).floor() as i64 - 1).map(|v| v.div_euclid(TILE));
+    let [i1, k1] =
+        [camera.eye[0] + width / 2.0, camera.eye[2] + depth / 2.0].map(|v| (v / s).ceil() as i64 + 1).map(|v| v.div_euclid(TILE));
+    let tops = (i0..=i1).flat_map(|i| (k0..=k1).map(move |k| [i, k])).map(|[i, k]| {
+        // With a site more round it: a ray reads its neighbours.
+        let column = Box3 { min: [i * TILE - 1, heights.0, k * TILE - 1], max: [(i + 1) * TILE + 1, heights.1, (k + 1) * TILE + 1] };
+        ([i, k], shown(generator, &column, level).max[1])
+    });
+    tops.collect()
 }
 
 /**
@@ -593,8 +600,10 @@ fn tiled(generator: &Generator, camera: &Camera, tiles: &mut Tiles, composite: b
  * generators `make` makes (the same world: a generator is not Send).
  */
 pub fn picture_on_threads(make: &(dyn Fn() -> Generator + Sync), camera: &Camera, level: u32, heights: (i64, i64)) -> Picture {
-    let colours: Vec<u32> = materials_of(&make()).iter().map(|m| m.rgb()).collect();
-    let tiles = Tiles::of(camera, level, heights);
+    let generator = make();
+    let colours: Vec<u32> = materials_of(&generator).iter().map(|m| m.rgb()).collect();
+    let tops = tops_of(&generator, camera, level, heights);
+    let tiles = Tiles::new(level, heights);
     let tiling = tiles.tiling;
     let (jobs, queue) = mpsc::channel::<(usize, Key)>();
     let (done, results) = mpsc::channel();
@@ -616,6 +625,7 @@ pub fn picture_on_threads(make: &(dyn Fn() -> Generator + Sync), camera: &Camera
         let picture = picture_of_tiles(
             camera,
             &mut { tiles },
+            &tops,
             &colours,
             &mut |keys: &[Key]| {
                 for job in keys.iter().copied().enumerate() {
@@ -644,8 +654,19 @@ fn threads() -> usize {
 /** Generates the tiles of the keys it is given, in their order. */
 type MakeTiles<'a> = dyn FnMut(&[Key]) -> Vec<VoxelGrid> + 'a;
 
-/** The picture `camera` sees in `tiles`, generating those it lacks with `make`; composited, what its rays see summed over the pixels (Seen), else nothing. */
-fn picture_of_tiles(camera: &Camera, tiles: &mut Tiles, colours: &[u32], make: &mut MakeTiles, composite: bool) -> (Picture, Seen) {
+/**
+ * The picture `camera` sees in `tiles`, from above under `tops`, generating
+ * those it lacks with `make`; composited, what its rays see summed over
+ * the pixels (Seen), else nothing.
+ */
+fn picture_of_tiles(
+    camera: &Camera,
+    tiles: &mut Tiles,
+    tops: &Tops,
+    colours: &[u32],
+    make: &mut MakeTiles,
+    composite: bool,
+) -> (Picture, Seen) {
     let (level, heights) = (tiles.level, tiles.tiling.heights);
     let s = (1i64 << level) as f64;
     let pixels = camera.width * camera.height;
@@ -662,12 +683,13 @@ fn picture_of_tiles(camera: &Camera, tiles: &mut Tiles, colours: &[u32], make: &
     };
     let mut seen = Seen::default();
     // Each ray from where it enters the slab of heights (and a voxel's reach past them) to where it leaves it, or `far`.
-    let (low, high) = ((heights.0 - 1) as f64, (heights.1 + 1) as f64);
-    let top = high * s;
+    let (low, top) = ((heights.0 - 1) as f64, (heights.1 + 1) as f64);
     let mut rays = Vec::new();
     for pixel in 0..pixels {
-        let (from, direction) = camera.ray(pixel % camera.width, pixel / camera.width, top);
+        let (from, direction) = camera.ray(pixel % camera.width, pixel / camera.width, top * s);
         let origin = from.map(|v| v / s);
+        let column = [origin[0], origin[2]].map(|v| (v.floor() as i64).div_euclid(TILE));
+        let high = tops.get(&column).map_or(top, |&t| t.min(heights.1) as f64 + 1.0);
         let (mut t, mut end) = (0.0, camera.far / s);
         if direction[1] != 0.0 {
             let (a, b) = ((low - origin[1]) / direction[1], (high - origin[1]) / direction[1]);

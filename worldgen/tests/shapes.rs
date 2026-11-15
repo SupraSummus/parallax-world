@@ -124,7 +124,7 @@ fn world(make: Make, cell: i64) -> World {
         })
         .make(move |p, cell| Some(Node::of(vec![make(p, &mut cell.random("size"))])));
     let generator = Generator { kinds: KINDS.to_vec(), seed: 5, layers: vec![Layer::Field(ground), Layer::Population(things)] };
-    World { generator, spawn: [0; 3], heights: (-64, 64), points: Vec::new() }
+    World { generator, spawn: [0; 3], heights: Some((-64, 64)), points: Vec::new() }
 }
 
 const LEVELS: u32 = 5;

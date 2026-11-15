@@ -332,7 +332,7 @@ mod tests {
         World {
             generator: Generator { kinds: kinds.to_vec(), seed, layers: vec![Layer::Field(field)] },
             spawn: [0; 3],
-            heights: (-64, 128),
+            heights: Some((-64, 128)),
             points: Vec::new(),
         }
     }

@@ -172,6 +172,8 @@ impl Light {
             std::array::from_fn(|c| open * SKY[c] * sky + if d == sun_at { SUN[c] * sun } else { 0.0 })
         });
         let background = SKY.map(|c| c * sky);
+        // A world with no heights has no sky: what glows is all its light.
+        let (skies, background) = if world.heights.is_some() { (skies, background) } else { ([[0.0; 3]; N], [0.0; 3]) };
         let glow = shared.brightness.glowing() / GLOW_ONE as f32;
         Light { world, shared, levels, unit, cosines, enters, albedo, glow, sky: skies, background }
     }
@@ -564,7 +566,7 @@ mod tests {
             .make(move |_, _| Some(Node::of(shapes.clone())));
         let ground = Field::at("stone", 0.0, Op::Fill, move |x, y, z| stone(x, y, z, crate::plan::spacing()).then_some((STONE, None)));
         let layers = vec![Layer::Field(ground), Layer::Population(lamps)];
-        World { generator: Generator { kinds, seed: 1, layers }, spawn: [0; 3], heights: (-64, 1024), points: Vec::new() }
+        World { generator: Generator { kinds, seed: 1, layers }, spawn: [0; 3], heights: Some((-64, 1024)), points: Vec::new() }
     }
 
     /** A site on top of ground below y = 0: at y = −1, x + z odd. */

@@ -31,6 +31,7 @@ use worldgen::units::{Units, m};
 
 use crate::forest::K as F;
 use crate::moor;
+use crate::mountains;
 use crate::town::{self, House, K as T, Style, Town, Towns, thing};
 use crate::valley::Terrain;
 
@@ -532,11 +533,13 @@ impl Domain for Railway {
 }
 
 fn layers(railway: Rc<Railway>, hold: Holding, ground: Rc<Sloped>) -> Vec<Layer> {
-    let bores = {
-        // The track's top by row, rising under a unit a column (GRADE): a bore is over it, within BORE across.
+    // The track's top by row, rising under a unit a column (GRADE): a bore is over it, within BORE across.
+    let top = {
         let line = railway.line.clone();
-        let top = Rc::new(Sloped::new(Rc::new(Plan::new("railway's top", SCALE, move |_, z| line.track(z).1)), 1));
-        let railway = railway.clone();
+        Rc::new(Sloped::new(Rc::new(Plan::new("railway's top", SCALE, move |_, z| line.track(z).1)), 1))
+    };
+    let bores = {
+        let (railway, top) = (railway.clone(), top.clone());
         // Last: nothing standing over a tunnel (trees and plants at a portal, mist) reaches into its bore.
         Field::columns("railway's tunnels", BORES, Op::Carve, move |x, z| {
             let Some(at) = railway.at(x, z).filter(|a| a.structure == Structure::Tunnel && a.distance < Units(BORE).to_fx()) else {
@@ -549,7 +552,7 @@ fn layers(railway: Rc<Railway>, hold: Holding, ground: Rc<Sloped>) -> Vec<Layer>
     let seed = railway.line.surfaces;
     // The track, and what carries it: in a tunnel, drawn after its bore.
     let track = |name, order, tunnel: bool| {
-        let railway = railway.clone();
+        let (railway, top) = (railway.clone(), top.clone());
         let (ground, hold) = (ground.clone(), hold.clone());
         Field::columns(name, order, Op::Paint, move |x, z| {
             let Some(at) = railway.at(x, z).filter(|a| (a.structure == Structure::Tunnel) == tunnel) else { return Vec::new() };
@@ -619,6 +622,8 @@ fn layers(railway: Rc<Railway>, hold: Holding, ground: Rc<Sloped>) -> Vec<Layer>
             }
             spans
         })
+        // A tunnel's lining is the highest over the track; a bridge's piers stand on the ground, anywhere under it.
+        .about(top, mountains::HEIGHTS.1 - mountains::HEIGHTS.0, arch(0) + LINING + 2)
     };
     let stations = {
         let line = railway.line.clone();

@@ -19,7 +19,7 @@ use std::rc::Rc;
 
 use worldgen::column::{Column, lowest_around};
 use worldgen::domain::{Domain, Scope};
-use worldgen::generator::{Field, Layer, Op};
+use worldgen::generator::{Field, Layer, Meets, Op};
 use worldgen::kinds;
 use worldgen::noise::{Fbm, Fx, ValueNoise, fx, smoothstep};
 use worldgen::plan::{self, Holding, Sloped};
@@ -271,7 +271,7 @@ pub fn dry(height: i64) -> Fx {
     smoothstep(SEA.to_fx() + Fx::m(0.5), SEA.to_fx() + Fx::m(2.0), Units(height).to_fx())
 }
 
-/** The sea: water up to its level on sand, and a beach of it a little over. */
+/** The sea: water up to its level on sand, and a beach of it a little over; nothing higher. */
 fn sea(ground: Rc<Sloped>) -> Field {
     Field::columns("sea", 0.85, Op::Paint, move |x, z| {
         let h = ground.at(x, z);
@@ -280,4 +280,5 @@ fn sea(ground: Rc<Sloped>) -> Field {
         }
         Column::new(h).surface(L::sand, m(1.0)).water_to(T::water, SEA.0).spans()
     })
+    .meets(|b, s| Meets::under((SEA + Units::m(1.5)).0 + 1, b, s))
 }

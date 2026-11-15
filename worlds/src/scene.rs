@@ -12,7 +12,8 @@
 use std::rc::Rc;
 
 use worldgen::World;
-use worldgen::generator::{Field, Generator, KindDef, Layer, Op};
+use worldgen::generator::{Field, Generator, KindDef, Layer, Meets, Op};
+use worldgen::grid::Box3;
 use worldgen::plan;
 use worldgen::units::m;
 
@@ -223,8 +224,15 @@ impl Scene {
         let field = Field::at("scene", 0.0, Op::Fill, move |x, y, z| match scene.at(x, y, z, plan::spacing()) {
             0 => None,
             id => Some((id - 1, None)),
-        });
-        World { generator: Generator { kinds, seed: 0, layers: vec![Layer::Field(field)] }, spawn, heights, points: Vec::new() }
+        })
+        // Nothing past its box, coarse sites a little past it given.
+        .meets(move |b, s| if b.overlaps(&Box3 { min, max }.widen(2 * s)) { Meets::Any } else { Meets::Nothing });
+        World {
+            generator: Generator { kinds, seed: 0, layers: vec![Layer::Field(field)] },
+            spawn,
+            heights: Some(heights),
+            points: Vec::new(),
+        }
     }
 }
 

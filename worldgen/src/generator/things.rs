@@ -87,6 +87,22 @@ pub(super) fn each_thing(
     work
 }
 
+/** The cells of `population` whose reach meets box `b` (lattice units), [first, last] along each axis: those whose things may draw in it. */
+pub(super) fn cells_reaching(population: &Population, b: &Box3) -> [(i64, i64); 3] {
+    let n = population.cell;
+    [0, 1, 2].map(|axis| {
+        let reach = population.reach[axis];
+        (-(-(b.min[axis] - n - reach)).div_euclid(n), (b.max[axis] - 1 + n + reach).div_euclid(n))
+    })
+}
+
+/** Whether a thing of `population` reaches box `b` (lattice units): one made in the cells reaching it, as drawing makes them, whose bounds do. */
+pub(super) fn reaches(generator: &Generator, population: &Population, b: &Box3) -> bool {
+    let mut reached = false;
+    each_thing(generator, population, cells_reaching(population, b), |_, _, node| reached |= bounds_of(&node).overlaps(b));
+    reached
+}
+
 /** The box a thing of `population` in `cell` may reach: N and the population's reach from the cell's centre. */
 pub(super) fn reach_of(population: &Population, cell: &Cell) -> Box3 {
     let (c, n, r) = (cell.centre, cell.n, population.reach);

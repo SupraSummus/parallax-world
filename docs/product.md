@@ -127,7 +127,8 @@ A spinner shows while a world generates.
   Generated like the forest.
 - *Cheese*: cheese endless every way (native only: the web tiles columns),
   holed through with caverns a few metres wide, tunnels between them
-  and eyes in their walls, lit by glowing crystals on the caverns' walls.
+  and eyes in their walls, lit by glowing crystals on the caverns' walls
+  and by nothing else: it has no sky.
   Walkable: up the caverns' floors, along the tunnels,
   and up the winding stairs round a pillar in each cavern
   into the one over it.

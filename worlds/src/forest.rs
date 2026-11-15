@@ -490,7 +490,7 @@ pub fn forest(seed: u64) -> World {
     World {
         generator: Generator { kinds: KINDS.to_vec(), seed: world.seed("layers"), layers },
         spawn,
-        heights: HEIGHTS,
+        heights: Some(HEIGHTS),
         points: Vec::new(),
     }
 }

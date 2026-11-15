@@ -12,7 +12,7 @@ use crate::World;
 use crate::generator::{Children, Field, FieldValues, Generator, Kind, Layer, Node, Op, Population, Shape, bounds_of_shapes, each_made};
 use crate::grid::Box3;
 use crate::noise::{Rng, hash_text};
-use crate::plan::{self, footprint};
+use crate::plan::footprint;
 use crate::units::m;
 
 /** The side of the cube around spawn layers are surveyed in (16 km), lattice units, cut to the world's heights. */
@@ -147,7 +147,7 @@ fn survey_field(world: &World, centre: [i64; 3], (level, side): (u32, i64), fiel
         // A site's column of FIELD_LEVEL, as generating it asks: at any height, for a field of sites.
         let [x, z] = [(c % side, centre[0]), (c / side, centre[2])].map(|(i, o)| (o.div_euclid(s) + i - side / 2) * s);
         let p = [x, h0 + random.below((h1 - h0) as u32) as i64, z];
-        // Its spans asked for a region's width along the line (plan::along): a field endless along it makes no more.
+        // Its spans asked for a region's width along the line: a field endless along it makes no more.
         let stretch = |axis: usize| (p[axis] - half, p[axis] + half);
         // What it draws there, along an axis from..to: the place is around the top of what fills, the middle of what carves.
         let (kinds, along, from, to): (Vec<Kind>, usize, i64, i64) = match &field.values {
@@ -158,7 +158,7 @@ fn survey_field(world: &World, centre: [i64; 3], (level, side): (u32, i64), fiel
             }
             FieldValues::Spans { axis, spans } => {
                 let [a, b] = across(*axis);
-                let spans = |s| footprint(s, [0, 0], || plan::stretch(stretch(*axis), || spans(p[a], p[b])));
+                let spans = |s| footprint(s, [0, 0], || spans(p[a], p[b], stretch(*axis)));
                 let coarse = spans(s);
                 if coarse.is_empty() {
                     continue;
@@ -196,7 +196,7 @@ fn across(axis: usize) -> [usize; 2] {
  * half the cube's side, and the things.
  */
 fn survey_things(world: &World, centre: [i64; 3], population: &Population, region: i64, found: &mut Found) -> (i64, Things) {
-    let (n, reach, (h0, h1)) = (population.cell, population.reach, world.heights);
+    let (n, reach) = (population.cell, population.reach);
     let [ci, _, ck] = centre.map(|v| v.div_euclid(n));
     let mut half = 8;
     loop {
@@ -211,7 +211,8 @@ fn survey_things(world: &World, centre: [i64; 3], population: &Population, regio
             if !bounds.inside(&allowed) {
                 seen.past.push((key.clone(), bounds, allowed));
             }
-            if (bounds.min[1] < h0 || bounds.max[1] > h1) && seen.leaving.len() < LEAVING {
+            let leaves = world.heights.is_some_and(|(h0, h1)| bounds.min[1] < h0 || bounds.max[1] > h1);
+            if leaves && seen.leaving.len() < LEAVING {
                 seen.leaving.push((key, bounds));
             }
             count += take_apart(node, population.name.to_string(), region, &mut parts);

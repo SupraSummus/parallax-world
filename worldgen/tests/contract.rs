@@ -54,8 +54,9 @@ fn spans(name: &'static str, from: i64, to: i64, kind: u8) -> Layer {
         name,
         order: 0.0,
         op: Op::Paint,
-        values: FieldValues::Spans { axis: 1, spans: Box::new(move |_, _| vec![Span::solid(from, to, kind)]) },
+        values: FieldValues::Spans { axis: 1, spans: Box::new(move |_, _, _| vec![Span::solid(from, to, kind)]) },
         about: None,
+        meets: None,
     })
 }
 
@@ -80,6 +81,7 @@ fn caves() -> Generator {
             if v > 1.4 { Some((ROCK, None)) } else { None }
         })),
         about: None,
+        meets: None,
     };
     Generator { kinds: KINDS.to_vec(), seed: 2, layers: vec![spans("rock", -256, 256, ROCK), Layer::Field(tunnels)] }
 }
@@ -142,7 +144,7 @@ fn b(min_x: i64, min_y: i64, min_z: i64, max_x: i64, max_y: i64, max_z: i64) -> 
 
 /** A world of `generator`, which has nothing outside `heights`. */
 fn world_of(generator: Generator, heights: (i64, i64)) -> World {
-    World { generator, spawn: [0; 3], heights, points: Vec::new() }
+    World { generator, spawn: [0; 3], heights: Some(heights), points: Vec::new() }
 }
 
 /** The face of a wall of rock facing +x, at x = wall(y, z): a ground along x. */
@@ -152,7 +154,7 @@ fn wall(y: i64, z: i64) -> i64 {
 
 /** The wall, and `knobs` on its face: a unit of wood at each anchor. */
 fn knobbly_wall(knobs: Population) -> Generator {
-    let rock = Field::spans("rock", 0.0, Op::Fill, 0, |y, z| vec![Span::solid(wall(y, z) - 64, wall(y, z), ROCK)]);
+    let rock = Field::spans("rock", 0.0, Op::Fill, 0, |y, z, _| vec![Span::solid(wall(y, z) - 64, wall(y, z), ROCK)]);
     let knobs = knobs.reach(2).make(|p, _| Some(Node::of(vec![cuboid(p, p.map(|v| v + 1.0), WOOD, SOLID, Op::Fill)])));
     Generator { kinds: KINDS.to_vec(), seed: 4, layers: vec![Layer::Field(rock), Layer::Population(knobs)] }
 }
@@ -315,6 +317,7 @@ fn fog_layer(from: i64, to: i64, kind: fn(i64) -> u8, extinction: fn(i64) -> f64
             (from..to).contains(&y).then(|| (kind(spacing), Some(extinction(spacing))))
         })),
         about: None,
+        meets: None,
     }))
 }
 

@@ -120,7 +120,7 @@ pub fn valley(seed: u64) -> World {
     };
     let domains: [Rc<dyn Domain>; 7] = [Rc::new(forest), towns, Rc::new(fields), landmarks, moor, ranges, railway];
     let layers = compose(&domains, &ground, town::BID_SCALE, fx(0.125));
-    World { generator: Generator { kinds: kinds(), seed: world.seed("layers"), layers }, spawn, heights: mountains::HEIGHTS, points }
+    World { generator: Generator { kinds: kinds(), seed: world.seed("layers"), layers }, spawn, heights: Some(mountains::HEIGHTS), points }
 }
 
 /** The valley's kinds, each domain's after those of the domains it draws from; the moor alone has them too. */

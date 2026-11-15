@@ -51,7 +51,7 @@ pub(super) fn draw(drawable: &Drawable, seed: u64, s: i64, clip: &Box3, put: &mu
     }
 }
 
-/** Lines of a field's spans a side that are asked together whether they may draw (About): a box's own would reach from the ground into the air. */
+/** Lines of a field's spans a side that are asked together what they draw (Field::meets): a box's own would reach from the ground into the air. */
 const LINES: i64 = 32;
 
 /** Draws a field into `clip`, a medium keeping a site with the chance a ray crossing it is stopped; returns the work. */
@@ -108,10 +108,10 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
             {
                 let (to_u, to_v) = ((bu + LINES).min(hi[a]), (bv + LINES).min(hi[b]));
                 let (bottom, top) = (lo[axis] * s, (hi[axis] - 1) * s);
-                let meets = field
-                    .about
-                    .as_ref()
-                    .map_or(Meets::Any, |about| about.meets([bu * s, bv * s], [(to_u - 1) * s, (to_v - 1) * s], [bottom, top], s));
+                let mut block = Box3 { min: [0; 3], max: [0; 3] };
+                (block.min[a], block.max[a], block.min[b], block.max[b]) = (bu * s, (to_u - 1) * s + 1, bv * s, (to_v - 1) * s + 1);
+                (block.min[axis], block.max[axis]) = (bottom, top + 1);
+                let meets = field.meets_in(&block, s);
                 if meets == Meets::Nothing && !checking() {
                     continue;
                 }
@@ -130,7 +130,7 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
                                     moved[axis / 2] = 0;
                                 }
                                 work.reads += 1;
-                                (plan::footprint(s, moved, || plan::stretch((bottom, top), || spans(u * s, v * s))), field.about.as_ref())
+                                (plan::footprint(s, moved, || spans(u * s, v * s, (bottom, top))), field.about.as_ref())
                             }
                         };
                         // What it is about, held to it where asked.
@@ -202,7 +202,7 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
                 broke(field.name, site, s, clip, "draws where it says it may not");
             }
             if let Some((site, kind)) = unlike {
-                broke(field.name, site, s, clip, &format!("isn't all kind {kind} under its ground, as it says"));
+                broke(field.name, site, s, clip, &format!("isn't all kind {kind}, as it says"));
             }
         }
     }
