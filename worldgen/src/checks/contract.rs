@@ -12,8 +12,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 use std::time::Instant;
 
-use fcc::FACE_KINDS;
 use fcc::light::srgb_to_linear;
+use fcc::{FACE_KINDS, VOXEL_FACES};
 
 use crate::World;
 use crate::checks::survey::{Survey, survey};
@@ -312,6 +312,8 @@ pub enum Measure {
     FromAbove,
     /** What rays straight down see of the fields alone. */
     FieldsFromAbove,
+    /** The colour each cell shows through face `kind` (of VOXEL_FACES). */
+    Face(usize),
 }
 
 impl Measure {
@@ -321,6 +323,7 @@ impl Measure {
             Measure::Cameras => TOLERANCE,
             Measure::FromAbove => FROM_ABOVE,
             Measure::FieldsFromAbove => FAR_TOLERANCE,
+            Measure::Face(_) => TOLERANCE,
         }
     }
 }
@@ -435,9 +438,10 @@ impl std::fmt::Display for Report {
                 region = Some(r);
             }
             let what = match m.measure {
-                Measure::Cameras => "cameras",
-                Measure::FromAbove => "from above",
-                Measure::FieldsFromAbove => "fields from above",
+                Measure::Cameras => "cameras".to_string(),
+                Measure::FromAbove => "from above".to_string(),
+                Measure::FieldsFromAbove => "fields from above".to_string(),
+                Measure::Face(k) => format!("faces seen along {:?}", VOXEL_FACES[k].map(|v| -v)),
             };
             let [a, c] = m.values().map(|v| look(&v));
             let broken = if m.broken() { format!(", over {}", m.measure.tolerance()) } else { String::new() };
@@ -501,6 +505,119 @@ fn levels_against_finer(generator: &Generator, region: &Box3, levels: u32, repor
 }
 
 /**
+ * The level's cells near a surface at it or at the level one finer: of
+ * each site there that stops some light beside one that doesn't stop all
+ * of it, the cells the site's voxel reaches into (its centre's and its
+ * corners' along the axes).
+ */
+fn near_surfaces(grids: &[VoxelGrid; 2]) -> BTreeSet<[i64; 3]> {
+    let mut cells = BTreeSet::new();
+    for (grid, scale) in grids.iter().zip([0.5, 1.0]) {
+        for (x, y, z) in sites(&grid.clip()) {
+            let open = |f: &[i64; 3]| grid.alpha(x + f[0], y + f[1], z + f[2]) < ALPHA;
+            if grid.alpha(x, y, z) == 0 || !FACES.iter().any(open) {
+                continue;
+            }
+            let at = [x, y, z].map(|v| v as f64 * scale);
+            cells.insert(nearest_site(at));
+            for axis in 0..3 {
+                for side in [-0.5, 0.5] {
+                    let mut corner = at;
+                    corner[axis] += side * scale;
+                    cells.insert(nearest_site(corner));
+                }
+            }
+        }
+    }
+    cells
+}
+
+/**
+ * What each face of the level's cells shows, from 1 to `levels`, against
+ * what the level one finer shows through it: by induction, what level 0
+ * shows. A ray through a random point of each face of each cell near a
+ * surface (`near_surfaces`) crosses the neighbour across the face, then
+ * the cell, at both levels; the light the cell stops of what the neighbour
+ * lets through, by kind, summed over the cells, for each of the 12 faces.
+ * Only its colour is compared, where both levels see something, as much
+ * as the one seeing less: a site stops light alike from every side, so
+ * how much it stops through each face can't match (cameras see that);
+ * what it shows through each, it holds (Faces).
+ */
+fn faces_against_finer(generator: &Generator, region: &Box3, levels: u32, report: &mut Report) {
+    let palette = Palette::of(generator);
+    for level in 1..=levels {
+        let s = (1i64 << level) as f64;
+        let mut area = around(region, level);
+        let grow = 0.max((8i64 << level) - (region.max[1] - region.min[1]) / 2);
+        (area.min[1], area.max[1]) = (region.min[1] - grow, region.max[1] + grow);
+        let grids = [level - 1, level].map(|l| generate(generator, &box_at(&area, l), l));
+        // A cell, in the level's sites, all within the area.
+        let within = |c: [f64; 3]| (0..3).all(|i| area.min[i] as f64 <= c[i] * s - s && c[i] * s + s <= area.max[i] as f64);
+        let mut random = Rng::new(17);
+        let mut looks: Vec<[Looks; 2]> = vec![[Looks::new(), Looks::new()]; FACE_KINDS];
+        for cell in near_surfaces(&grids) {
+            let cell = cell.map(|v| v as f64);
+            for (k, n) in VOXEL_FACES.iter().enumerate() {
+                let n = n.map(|v| v as f64);
+                let behind: [f64; 3] = std::array::from_fn(|i| cell[i] + n[i]);
+                if !within(cell) || !within(behind) {
+                    continue;
+                }
+                // A random point of the neighbour's face k, a rhombus: between the axes' corners and the octants'.
+                let (i, j) = match (0..3).filter(|&a| n[a] != 0.0).collect::<Vec<_>>()[..] {
+                    [i, j] => (i, j),
+                    _ => unreachable!("a face's normal is along two axes"),
+                };
+                let m = 3 - i - j;
+                let corner = |a: usize| -> [f64; 3] { std::array::from_fn(|b| if b == a { n[a] } else { 0.0 }) };
+                let octant = |side: f64| -> [f64; 3] { std::array::from_fn(|b| if b == m { side / 2.0 } else { n[b] / 2.0 }) };
+                let (u, v, from) = (random.next(), random.next(), octant(-1.0));
+                let on: [f64; 3] =
+                    std::array::from_fn(|b| behind[b] + from[b] + u * (corner(i)[b] - from[b]) + v * (corner(j)[b] - from[b]));
+                // Along the face's inward normal, a cell's chord at a time, a hair inside each.
+                let d = n.map(|v| -v / std::f64::consts::SQRT_2);
+                let (chord, hair) = (std::f64::consts::SQRT_2, 1e-6);
+                let start = |t: f64| -> [f64; 3] { std::array::from_fn(|b| (on[b] + (t + hair) * d[b]) * s) };
+                let seen = [0, 1].map(|finer| {
+                    let scale = if finer == 0 { s / 2.0 } else { s };
+                    let length = (chord - 2.0 * hair) * s / scale;
+                    let at = |t: f64| start(t).map(|v| v / scale);
+                    let through = 1.0 - composited(&grids[finer], at(0.0), d, length).iter().map(|p| p.2).sum::<f64>();
+                    let mut seen = Looks::new();
+                    for (_, id, stopped, glow) in composited(&grids[finer], at(chord), d, length) {
+                        palette.add(&mut seen, id, true, through * stopped, glow.map(|g| through * g));
+                    }
+                    seen
+                });
+                // Its colour where both levels see something: as much as the one seeing less.
+                let stopped = |l: &Looks| l.values().map(|v| v[0] + v[1]).sum::<f64>();
+                let weight = stopped(&seen[0]).min(stopped(&seen[1]));
+                if weight > 0.0 {
+                    for (seen, looks) in seen.iter().zip(&mut looks[k]) {
+                        for (kind, v) in seen {
+                            let sum = looks.entry(*kind).or_default();
+                            (0..5).for_each(|c| sum[c] += v[c] * weight / stopped(seen));
+                        }
+                    }
+                }
+            }
+        }
+        for (k, looks) in looks.into_iter().enumerate() {
+            let stopped = |l: &Looks| l.values().map(|v| v[0] + v[1]).sum::<f64>();
+            if looks.iter().any(|l| stopped(l) < 1e-9) {
+                continue;
+            }
+            let looks = looks.map(|l| {
+                let total = stopped(&l);
+                l.into_iter().map(|(kind, v)| (kind, v.map(|c| c / total))).collect()
+            });
+            report.margins.push(Margin { region: *region, measure: Measure::Face(k), level, against: level - 1, looks });
+        }
+    }
+}
+
+/**
  * What a camera straight above `region`, grown to at least 16 sites of
  * the level across around its centre, sees at each level from 1 to
  * `levels`: what rays down from its sky see (a `Look`), as at level 0. Unlike levels
@@ -550,6 +667,20 @@ pub fn margins(name: &str, world: &World, regions: &[Box3], levels: u32, from_ab
     for region in regions {
         levels_against_finer(&world.generator, region, levels, &mut report);
         from_above_against_level_0(world, region, from_above, &mut report);
+    }
+    report
+}
+
+/**
+ * How far each face of the cells of `world`, named `name`, strays in each
+ * of `regions` from the level one finer, up to `levels`
+ * (`faces_against_finer`): an experiment, not in the contract
+ * ("Each face of a cell against the level one finer" in docs/todo.md).
+ */
+pub fn face_margins(name: &str, world: &World, regions: &[Box3], levels: u32) -> Report {
+    let mut report = Report::new(name, &world.generator);
+    for region in regions {
+        faces_against_finer(&world.generator, region, levels, &mut report);
     }
     report
 }
