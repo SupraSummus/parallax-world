@@ -535,6 +535,16 @@ pub(super) fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &m
     match small {
         0 => {
             let share = filled(s);
+            if let Solid::Cuboid { min, max } = shape.solid
+                && si > 1
+            {
+                return cover_box([min, max], shape.op, si, clip, &mut |x, y, z, cover| {
+                    let whole = share(x, y, z) as f64;
+                    let cover = cover.map(|c| (c * whole) as u32);
+                    let most = cover.into_iter().max().expect("faces");
+                    put(most, cover.iter().any(|&c| c != most).then_some(cover), picked(x, y, z), x, y, z)
+                });
+            }
             sites(clip, &mut |x, y, z| put(share(x, y, z), None, picked(x, y, z), x, y, z))
         }
         1 => {
@@ -564,6 +574,54 @@ pub(super) fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &m
             tested + sites(clip, &mut |x, y, z| put(share(chance), None, picked(x, y, z), x, y, z))
         }
     }
+}
+
+/**
+ * A box's sites `s` apart (coarser than level 0) within `clip`, each with
+ * the share of the voxel's chords along each face's direction that meet
+ * the box (`within`), or for a carve, that lie wholly in it: along each
+ * axis the box cuts the voxel, as a column's span does (`cover`), the axes
+ * as if apart. Its faces are where level 0 has them on average, half a
+ * unit down (`Tie`). Returns how many sites it tested.
+ */
+fn cover_box(box_: [At; 2], op: Op, s: i64, clip: &Box3, put: &mut dyn FnMut(i64, i64, i64, [f64; FACE_KINDS])) -> u64 {
+    let sf = s as f64;
+    let [lo, hi] = box_.map(|v| v.map(|c| c as f64 / ONE as f64 - 0.5));
+    // The sites whose voxels, s each way, meet the box.
+    let first: [i64; 3] = std::array::from_fn(|a| (((lo[a] - sf) / sf).floor() as i64 + 1).max(clip.min[a]));
+    let last: [i64; 3] = std::array::from_fn(|a| (((hi[a] + sf) / sf).ceil() as i64 - 1).min(clip.max[a] - 1));
+    let mut tested = 0;
+    for z in first[2]..=last[2] {
+        for y in first[1]..=last[1] {
+            let mut x = first[0] + ((first[0] + y + z) & 1);
+            while x <= last[0] {
+                let p = [x, y, z];
+                x += 2;
+                tested += 1;
+                // Along each axis, the box's part of the voxel, −1 to 1.
+                let parts: [(f64, f64); 3] = std::array::from_fn(|a| {
+                    let c = (p[a] * s) as f64;
+                    (((lo[a] - c) / sf).clamp(-1.0, 1.0), ((hi[a] - c) / sf).clamp(-1.0, 1.0))
+                });
+                if parts.iter().any(|(a, b)| b <= a) {
+                    continue;
+                }
+                let cover = std::array::from_fn(|k| {
+                    parts
+                        .iter()
+                        .enumerate()
+                        .map(|(axis, &(a, b))| {
+                            let across = VOXEL_FACES[k][axis] != 0;
+                            if op == Op::Carve { within(across, a, b) } else { 1.0 - within(across, -1.0, a) - within(across, b, 1.0) }
+                        })
+                        .product::<f64>()
+                        .clamp(0.0, 1.0)
+                });
+                put(p[0], p[1], p[2], cover);
+            }
+        }
+    }
+    tested
 }
 
 /** Steps the chords' table takes across a voxel's extent along an axis, −1 to 1. */

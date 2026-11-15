@@ -1,20 +1,24 @@
 //! Columns: the spans of a heightfield's line of sites (a field's
-//! `Spans` along y), built so that each stays visible at every level.
+//! `Spans` along y), the same at every level.
 //!
 //! A line of sites along an axis has a site only every two spacings: at
 //! a level's sites, x + y + z is even, so with x and z fixed, y keeps
-//! its parity. A span shorter than two spacings may hold no site at all,
-//! and whatever it is (a pond, a layer of turf) vanishes at that level.
-//! So every span a `Column` makes is at least two spacings tall, those of
-//! `fill_below_exactly` aside, and a thinned medium keeps its density
-//! along a ray. A heightfield's columns close its slopes' sides by
-//! reaching down past the columns around (`sides`). The spacing is that
-//! of the sites read for (`plan::spacing`), so a world declares a column
-//! once, for every level. See "Writing a world" in docs/generators.md.
+//! its parity. At level 0, a span shorter than two units may hold no site
+//! at all, and whatever it is (a pond, a layer of turf) would be missing.
+//! So every solid span a `Column` makes is at least two units tall, those
+//! of `fill_below_exactly` aside; coarser levels cover their sites with
+//! it in part (drawables.rs's `cover`). A medium is still read at each
+//! level's sites: it is at least two spacings tall, thinned to keep its
+//! density along a ray (`plan::spacing`). A heightfield's columns close
+//! its slopes' sides by reaching down past the columns around (`sides`).
+//! See "Writing a world" in docs/generators.md.
 
 use crate::generator::{DEEP, Holds, Kind, Span};
 use crate::js;
 use crate::plan::spacing;
+
+/** Units a solid span is at least: it holds a site on each line of level 0's. */
+const LEVEL_0: i64 = 2;
 
 impl Span {
     /** Solid `kind` in [from, to). */
@@ -72,22 +76,22 @@ impl Column {
         self.above.last().map_or(self.height + 1, |s| s.to)
     }
 
-    /** A layer of `kind` `depth` deep, under the layers so far (the first is the ground's top), at least two sites. */
+    /** A layer of `kind` `depth` deep, under the layers so far (the first is the ground's top), at least LEVEL_0. */
     pub fn surface(mut self, kind: impl Into<Kind>, depth: i64) -> Column {
         let to = self.floor();
-        self.below.push(Span::solid(to - depth.max(2 * self.spacing), to, kind));
+        self.below.push(Span::solid(to - depth.max(LEVEL_0), to, kind));
         self
     }
 
-    /** `kind` under the layers so far, down to `bottom`, or two sites if that is less. */
+    /** `kind` under the layers so far, down to `bottom`, or LEVEL_0 if that is less. */
     pub fn fill_below(self, kind: impl Into<Kind>, bottom: i64) -> Column {
-        let bottom = bottom.min(self.floor() - 2 * self.spacing);
+        let bottom = bottom.min(self.floor() - LEVEL_0);
         self.fill_below_exactly(kind, bottom)
     }
 
     /**
      * `kind` under the layers so far, down to `bottom` and no further:
-     * thinner than two sites, or nothing. For what shows only from the
+     * thinner than LEVEL_0, or nothing. For what shows only from the
      * side, such as soil down to a slope's lower neighbours.
      */
     pub fn fill_below_exactly(mut self, kind: impl Into<Kind>, bottom: i64) -> Column {
@@ -100,14 +104,14 @@ impl Column {
 
     /**
      * `kind` under the layers so far, at least `depth` under the top and
-     * two spacings past `lowest`, the lowest of the columns around
-     * (`lowest_around`): the sides a slope shows, closed. A span's ends
-     * round to its column's sites, up to a spacing each; with less, rays
-     * slipped through steep faces, and without the diagonals, past a
-     * cliff's corners into the hollow under the ground.
+     * LEVEL_0 past `lowest`, the lowest of the columns around
+     * (`lowest_around`): the sides a slope shows, closed. At level 0 a
+     * span's ends round to its column's sites, up to a unit each; with
+     * less, rays slipped through steep faces, and without the diagonals,
+     * past a cliff's corners into the hollow under the ground.
      */
     pub fn sides(self, kind: impl Into<Kind>, lowest: i64, depth: i64) -> Column {
-        let bottom = lowest.min(self.height - depth) - 2 * self.spacing;
+        let bottom = lowest.min(self.height - depth) - LEVEL_0;
         self.fill_below_exactly(kind, bottom)
     }
 
@@ -138,13 +142,13 @@ impl Column {
 
     /**
      * Water (or any `kind`) where the ground is under `level`, up to it
-     * (its top unit, as the ground's `height`). At least two sites deep:
+     * (its top unit, as the ground's `height`). At least LEVEL_0 deep:
      * where it is shallower, it reaches down over the ground's top, so
      * a field painting it keeps it there.
      */
     pub fn water_to(mut self, kind: impl Into<Kind>, level: i64) -> Column {
         if self.height < level {
-            let from = (self.height + 1).min(level + 1 - 2 * self.spacing);
+            let from = (self.height + 1).min(level + 1 - LEVEL_0);
             self.above.push(Span::solid(from, level + 1, kind));
         }
         self
