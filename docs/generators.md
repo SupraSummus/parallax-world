@@ -1082,6 +1082,11 @@ thinner than a spacing, a coat on what it stands on (`Holds::Coat`),
 as much as all of it stops a ray from above
 (grown to two sites, its top would stand a spacing or more too high),
 `.water_to(kind, level)` where the ground is lower.
+Generated covered, for the light (`covered` in `drawables.rs`),
+a column's solid spans and boxes stay as tall as they are, two units at least,
+and cover the coarser levels' sites they meet in part, along each direction
+(`cover`, `cover_box`):
+light reads a roof thinner than a site, which hosts would not be shown whole.
 Carves along a line want the same margin.
 A heightfield is a shell, hollow under its sides:
 `.sides(kind, lowest_around(ground, x, z), depth)` reaches each column

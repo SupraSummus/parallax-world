@@ -156,3 +156,17 @@ fn each_solid_keeps_the_contract_to_its_levels() {
     });
     assert!(failed.is_empty(), "levels against the level two finer and from above:\n{}", failed.join("\n"));
 }
+
+/** Covered (for light), each solid on its ground is the same generated in parts as whole. */
+#[test]
+fn covered_each_solid_is_the_same_in_parts() {
+    let region = Box3 { min: [-128, -16, -128], max: [128, 48, 128] };
+    std::thread::scope(|scope| {
+        for &(_, cell, make, _, _) in CASES {
+            scope.spawn(move || {
+                let world = world(make, cell);
+                worldgen::generator::covered(|| [1, 2, LEVELS].map(|level| whole_equals_parts(&world.generator, &region, level)));
+            });
+        }
+    });
+}

@@ -880,11 +880,13 @@ and a slab of medium to exp(−extinction · path), as the splats' test does.
 
 The panel picks the lighting apart from the engine (`Lighting`):
 voxels shaded by the way their faces face, or computed,
-by worldgen's `Light`, one model and one cache of tiles (`Shared`) for every engine,
-the tiles the world draws, kept as far around the camera as it keeps its own,
-and blocks, smaller (`BLOCK`), where the light reads around them and no tile is made:
-it reads a few sites past what it lights, at each coarser level,
-and in a world that is not flat every tile around has some;
+by worldgen's `Light`, one model and one cache (`Shared`) for every engine:
+blocks, smaller than tiles (`BLOCK`), where the light reads,
+generated covered (worldgen's `covered`):
+their coarse sites hold what they stop of each direction's rays, a share,
+where the tiles the world draws show them whole or not at all.
+It reads a few sites past what it lights, at each coarser level,
+kept as far around the camera as the world keeps its tiles;
 each engine only shows it its own way.
 The splats' bakers light the voxels they show, face by face.
 For the voxels, the world's threads light the bricks rays ask for,

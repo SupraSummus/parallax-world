@@ -94,6 +94,7 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
     let ([a, b], (lo, hi)) = (across(axis), (clip.min, clip.max));
     let (bottom, top) = (lo[axis] * s, (hi[axis] - 1) * s);
     let tie = Tie::new(s);
+    let covers = s > 1 && covering();
     let mut site = [0i64; 3];
     let (mut drew, mut unlike) = (None, None);
     let mut record = |_: Look, _: Op, share: u32, _: u32, x: i64, y: i64, z: i64| drew = drew.or((share > 0).then_some([x, y, z]));
@@ -101,7 +102,9 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
         let (to_u, to_v) = ((bu + LINES).min(hi[a]), (bv + LINES).min(hi[b]));
         let mut block = Box3 { min: [0; 3], max: [0; 3] };
         (block.min[a], block.max[a], block.min[b], block.max[b]) = (bu * s, (to_u - 1) * s + 1, bv * s, (to_v - 1) * s + 1);
-        (block.min[axis], block.max[axis]) = (bottom, top + 1);
+        // Covered, spans a site's voxel and half a unit past it meet it in part (`cover`).
+        let past = if covers { s + 1 } else { 0 };
+        (block.min[axis], block.max[axis]) = (bottom - past, top + 1 + past);
         let meets = field.meets_in(&block, s);
         if meets == Meets::Nothing && !checking() {
             continue;
@@ -139,7 +142,8 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
                     }
                     Lines::Spans(spans) => {
                         let spans = match all {
-                            Some(kind) => vec![Span::solid(DEEP, top + s, kind)],
+                            // Past the sites, so that covered, the top ones are whole too.
+                            Some(kind) => vec![Span::solid(DEEP, top + 2 * s, kind)],
                             None => {
                                 // A line along x or z reads plans at one z or x: dithered across it only.
                                 let mut moved = offset(site[0], site[2]);
@@ -163,9 +167,9 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
                                 unlike = Some((site, kind));
                             }
                         }
-                        // Coarser than level 0, solid spans cover each site they meet in part (`cover`).
-                        let by_centre = |span: &Span| s == 1 || span.holds != Holds::Solid;
-                        if s > 1 {
+                        // Coarser than level 0, covered, solid spans cover each site they meet in part (`cover`).
+                        let by_centre = |span: &Span| !covers || span.holds != Holds::Solid;
+                        if covers {
                             let solid: Vec<&Span> = spans.iter().filter(|span| !by_centre(span) && span.from < span.to).collect();
                             cover(&solid, axis, [u, v], (lo[axis], hi[axis]), s, op, &mut |look, op, share, w| {
                                 site[axis] = w;
@@ -296,6 +300,27 @@ fn draw_field_shapes(field: &Field, near: &FieldShapes, seed: u64, s: i64, clip:
 thread_local! {
     /** While `checking_skipped` runs: what drew where it said it may not. */
     static CHECKING: RefCell<Option<Vec<String>>> = const { RefCell::new(None) };
+    /** While `covered` runs. */
+    static COVERING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/**
+ * Runs `f`, what it generates covering the sites coarser than level 0 in
+ * part where columns and boxes meet them (`cover`, `cover_box`), their
+ * spans as tall as they are (Column): for light, which reads what a site
+ * stops of each ray. Hosts are shown sites whole by their centres, till it
+ * is known how to show covered ones (docs/todo.md).
+ */
+pub fn covered<R>(f: impl FnOnce() -> R) -> R {
+    let outer = COVERING.replace(true);
+    let value = f();
+    COVERING.set(outer);
+    value
+}
+
+/** Whether `covered` runs. */
+pub(crate) fn covering() -> bool {
+    COVERING.get()
 }
 
 /**

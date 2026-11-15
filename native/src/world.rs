@@ -8,12 +8,12 @@
 //! Which tiles, and in what order, is up to the engine drawing them (Wants): every update hands over the tiles it misses for
 //! what is in view, most wanted first, replacing the previous list; then
 //! the rest of each level it reads, as far around the camera as it reads
-//! it whichever way it looks (Wants's reach), so that turning finds them made. Tiles far from the camera are dropped, from
-//! the light's (Shared) too. A tile
+//! it whichever way it looks (Wants's reach), so that turning finds them made. Tiles far from the camera are dropped, and
+//! the light's blocks in them (worldgen's Shared). A tile
 //! never changes, so a chunk baked once all the tiles it reads are in
 //! stays right whatever comes after (fcc's Tiles). Given light (worldgen's Shared),
-//! the tiles are those the bakers' Lights read, made once, and blocks of
-//! the rest around them where the Lights read them. Asked for light, for the voxels engine
+//! the bakers' Lights read blocks of their own, covered, where they read
+//! them. Asked for light, for the voxels engine
 //! (voxels.rs), the bricks of tiles made that its rays asked for are lit,
 //! their voxels' light found, before any tile is made: only what shows,
 //! which in a world that is not flat is little of all a ball around the
@@ -310,11 +310,7 @@ fn work(make: Make, seed: u64, heights: &Heights, queue: &(Mutex<Queue>, Condvar
             }
             Piece::Tile(id) => {
                 let (heights, key) = (heights[level], id.map(i64::from));
-                let grid = match &shared {
-                    Some(shared) => shared.tile(&generator, level as u32, heights, key),
-                    None => Arc::new(make_tile(&generator, level as u32, heights, key)),
-                };
-                Some(Arc::new(Tile::new(id, grid)))
+                Some(Arc::new(Tile::new(id, Arc::new(make_tile(&generator, level as u32, heights, key)))))
             }
         };
         if send.send((level, piece, made)).is_err() {

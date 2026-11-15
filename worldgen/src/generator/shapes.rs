@@ -537,6 +537,7 @@ pub(super) fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &m
             let share = filled(s);
             if let Solid::Cuboid { min, max } = shape.solid
                 && si > 1
+                && covering()
             {
                 return cover_box([min, max], shape.op, si, clip, &mut |x, y, z, cover| {
                     let whole = share(x, y, z) as f64;

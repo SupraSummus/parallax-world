@@ -425,3 +425,21 @@ fn faces_on_a_plane_of_sites_stay_where_level_0_has_them() {
         assert!((0..128).all(|x| (0..128).all(|z| (x + z) & 1 != 0 || slab.get(x, 0, z) != 0)), "level {level}: the slab has holes");
     }
 }
+
+#[test]
+fn a_voxels_chords_lie_within_slabs_of_it_as_its_shape_says() {
+    for across in [true, false] {
+        assert!((within(across, -1.0, 1.0) - 1.0).abs() < 1e-6, "all within the whole");
+        assert_eq!(within(across, 0.5, 0.5), 0.0, "none within nothing");
+        // Either half alike, by symmetry; more within a wider slab.
+        let (below, above) = (within(across, -1.0, 0.0), within(across, 0.0, 1.0));
+        assert!((below - above).abs() < 1e-3, "{across}: {below} below, {above} above");
+        assert!(within(across, -1.0, 0.5) > below);
+    }
+    // Chords along a plane across the axis each lie at one height: half of them below the middle. Those crossing such
+    // planes span heights: fewer lie wholly in either half, and a thin slab across the middle meets most of them.
+    assert!((within(false, -1.0, 0.0) - 0.5).abs() < 1e-3);
+    assert!(within(true, -1.0, 0.0) < 0.4);
+    let meets = |across| 1.0 - within(across, -1.0, -0.1) - within(across, 0.1, 1.0);
+    assert!(meets(true) > 0.5 && meets(false) < 0.2, "{} across, {} along", meets(true), meets(false));
+}

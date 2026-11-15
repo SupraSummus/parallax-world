@@ -635,19 +635,28 @@ Numbers are for the forest at 1280×800, as measured when written.
   is lit through it from the sky,
   as the reference's tunnel under a thin roof is,
   its middle hundreds of times too bright.
-  Columns put a whole site where its middle is in a span (`drawables.rs`),
-  so the coarse levels lose a roof thinner than their spacing
-  along some directions;
-  and taking over, a coarser level's light comes to the middle of its site,
+  Hosts' columns put a whole site where its middle is in a span,
+  so their coarse levels lose a roof thinner than their spacing;
+  light reads the world covered (`covered`), columns and boxes in part,
+  which keeps the roof, and the reference's tunnel a third as bright,
+  still tens of times too bright:
+  taking over, a coarser level's light comes to the middle of its site,
   what lies between there and where it took over unread.
   Three steps a level leave the tunnel ten times too bright, not hundreds,
   but the lamp several times further off.
   Where light is to go, a step at a time, each measured on these scenes:
-  sites hold what they stop along each direction, a share, columns' too,
-  and light reads that, not the coin hosts are shown by;
-  then each level lights its stretch of a ray, from where the finer one's ends,
+  each level lights its stretch of a ray, from where the finer one's ends,
   in place of the steps and `past`'s room;
   then coarser levels take more directions (in Ideas).
+  Covered, the other solids (balls, tubes, gables) still keep sites by their middles,
+  and media too.
+  Hosts are not shown covered sites: drawn whole by a coin each,
+  a slab split between two rows of sites, each covered in part,
+  would show holes where neither is drawn.
+  Media should show soft (as they do), pieces hard, as leaves;
+  a solid's edge is neither: its sites' shares are not apart.
+  So light makes blocks of its own, covered, apart from the world's tiles,
+  each generated twice where it is lit.
   Rock filled round the tunnels kept them dark,
   but bent a world to the light: not kept.
   Against the reference (`light/reference.rs`, test `against_the_reference`;
@@ -667,7 +676,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   (they close the room), so a room lit by its windows is black.
   Native's bakers each light what they show with a `Light` of their own
   (a generator is not `Send`):
-  they share tiles and blocks (`Shared`) with each other and the world's threads,
+  they share blocks (`Shared`) with each other and the world's threads,
   but each finds light again where another found it,
   and makes a generator, whose plans' caches take tens of MB;
   each of the world's threads makes two, its own and its Light's.
