@@ -290,6 +290,12 @@ impl Tiles {
         Tiles { tiles: HashMap::new(), level, tiling: Tiling { heights } }
     }
 
+    /** Keeps only the tiles of the columns over `area` (x and z, the level's units) and those round them, which its rays may read. */
+    pub(crate) fn keep(&mut self, area: &Box3) {
+        let [lo, hi] = [area.min, area.max].map(|p| self.tiling.key(p));
+        self.tiles.retain(|k, _| (lo[0] - 1..=hi[0] + 1).contains(&k[0]) && (lo[2] - 1..=hi[2] + 1).contains(&k[2]));
+    }
+
     /** What site (x, y, z) looks like; Err if its tile is not generated. */
     fn get(&self, [x, y, z]: [i64; 3]) -> Result<Look, Key> {
         if y < self.tiling.heights.0 || y >= self.tiling.heights.1 {

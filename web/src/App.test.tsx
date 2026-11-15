@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import './dom.test-helper'
-import { describe, it, expect, vi } from 'vitest'
+import { beforeEach, describe, it, expect, vi } from 'vitest'
 import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import App from './App'
 
@@ -14,6 +14,9 @@ const orientation = () =>
 const totalUpdates = () => Number(screen.getByText('Total Updates').nextElementSibling?.textContent)
 
 describe('App', () => {
+  // The shortest view: without workers, the test's thread bakes all of it, and these tests look at the UI, not the picture.
+  beforeEach(() => { history.replaceState(null, '', '?distance=40') })
+
   it('renders the control panels and the scene on mount', () => {
     const { container } = render(<App />)
     for (const panel of ['Render Statistics', 'Camera', 'World']) expect(screen.getByText(panel)).toBeInTheDocument()
@@ -24,7 +27,7 @@ describe('App', () => {
   it("starts at the view the page's query asks for", () => {
     // As pnpm shot opens it.
     const page = location.href
-    history.replaceState(null, '', '?camera=1,2,3&look=30,-10')
+    history.replaceState(null, '', '?camera=1,2,3&look=30,-10&distance=40')
     try {
       render(<App />)
       expect(cameraPosition()).toEqual([1, 2, 3])

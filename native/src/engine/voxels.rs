@@ -1439,6 +1439,12 @@ mod tests {
         Arc::new(Level::new(world.level(0).tiles.iter().map(|(&id, tile)| (id, Arc::new(faced(id, tile)))).collect()))
     }
 
+    /** Where the forest's windows are looked at from. */
+    const EYE: Vec3 = [10.0, 30.0, -20.0];
+
+    /** `forest_tiles(EYE)`, made once: only lit windows read their light, and only one test lights them. */
+    static FOREST: std::sync::LazyLock<Arc<Level>> = std::sync::LazyLock::new(|| forest_tiles(EYE));
+
     /** Syncs `windows` to level 0's `tiles` around `eye`, keeping what they upload in `slots`; whether any window changed. */
     fn sync(windows: &mut Windows, tiles: &Arc<Level>, eye: Vec3, slots: &mut HashMap<u32, Vec<u32>>) -> bool {
         let (added, changed) = windows.sync(std::slice::from_ref(tiles), eye);
@@ -1530,8 +1536,8 @@ mod tests {
 
     #[test]
     fn a_window_moved_and_its_tiles_changed_holds_what_a_new_one_would() {
-        let eye = [10.0, 30.0, -20.0];
-        let all = forest_tiles(eye);
+        let eye = EYE;
+        let all = FOREST.clone();
         let mut ids: Vec<_> = all.tiles.keys().copied().collect();
         ids.sort();
         assert!(ids.len() > 4, "{} tiles", ids.len());
@@ -1553,8 +1559,8 @@ mod tests {
 
     #[test]
     fn lit_a_window_places_the_bricks_rays_asked_for_once_lit() {
-        let eye = [10.0, 30.0, -20.0];
-        let tiles = forest_tiles(eye);
+        let eye = EYE;
+        let tiles = FOREST.clone();
         let mut windows = Windows::new(1 << 20, true);
         let sync = |windows: &mut Windows| windows.sync(std::slice::from_ref(&tiles), eye).1.contains(&true);
         while sync(&mut windows) {}
@@ -1594,8 +1600,8 @@ mod tests {
 
     #[test]
     fn windows_short_of_slots_hold_as_large_a_ball_as_fits() {
-        let eye = [10.0, 30.0, -20.0];
-        let tiles = forest_tiles(eye);
+        let eye = EYE;
+        let tiles = FOREST.clone();
         let (all, wanted, _) = anew(RADIUS, &tiles, eye);
         // Buried bricks of a tile share a slot: fewer slots than bricks held.
         let entries = all.iter().flatten().filter(|(e, _)| e.is_ok()).count();
@@ -1685,8 +1691,8 @@ mod tests {
 
     #[test]
     fn no_voxel_the_window_holds_is_out_of_its_box_or_meets_a_cell_counted_hollow() {
-        let eye = [10.0, 30.0, -20.0];
-        let tiles = forest_tiles(eye);
+        let eye = EYE;
+        let tiles = FOREST.clone();
         // Moved, so that bricks of both sides of the torus have been in it.
         let mut windows = Windows::new(1 << 20, false);
         settle(&mut windows, &tiles, [eye[0] - 300.0, eye[1], eye[2] + 200.0], &mut HashMap::new());

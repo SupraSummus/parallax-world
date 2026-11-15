@@ -431,15 +431,19 @@ fn levels_against_finer(generator: &Generator, region: &Box3, levels: u32, repor
  * two apart, level 0 catches a drift, a little a level, such as walls
  * taking over from roofs.
  */
-fn from_above_against_level_0(world: &World, region: &Box3, levels: u32, report: &mut Report) {
-    from_above(world, region, 1..=levels, Measure::FromAbove, report);
+fn from_above_against_level_0(world: &World, region: &Box3, levels: u32, level_0: &mut Tiles, report: &mut Report) {
+    from_above(world, region, 1..=levels, Measure::FromAbove, level_0, report);
 }
 
-/** What rays straight down over `region` see at each of `levels`, against level 0, as `measure`. */
-fn from_above(world: &World, region: &Box3, levels: impl Iterator<Item = u32>, measure: Measure, report: &mut Report) {
-    let mut levels = levels.peekable();
+/**
+ * What rays straight down over `region` see at each of `levels`, against
+ * level 0, as `measure`: level 0's tiles in `level_0`, which keeps those
+ * this region shares with the one before.
+ */
+fn from_above(world: &World, region: &Box3, levels: impl Iterator<Item = u32>, measure: Measure, level_0: &mut Tiles, report: &mut Report) {
+    let levels: Vec<u32> = levels.collect();
     if world.heights.is_none() {
-        assert!(levels.peek().is_none(), "a world with no heights has no sky to be seen from (World::heights): from_above 0");
+        assert!(levels.is_empty(), "a world with no heights has no sky to be seen from (World::heights): from_above 0");
         return;
     }
     let seen = |tiles: &mut Tiles, area: &Box3| {
@@ -453,12 +457,14 @@ fn from_above(world: &World, region: &Box3, levels: impl Iterator<Item = u32>, m
     // Level 0 over the area of the levels since it last grew; the areas
     // nest, so its tiles are kept for the next. Rays come down from the
     // world's sky, over its heights, cutting nothing.
-    let mut level_0 = Tiles::new(0, world.heights_at(0));
+    if let Some(&widest) = levels.last() {
+        level_0.keep(&around(region, widest));
+    }
     let mut reference: Option<(Box3, Seen)> = None;
     for level in levels {
         let area = around(region, level);
         if reference.as_ref().is_none_or(|(a, _)| *a != area) {
-            reference = Some((area, seen(&mut level_0, &area)));
+            reference = Some((area, seen(level_0, &area)));
         }
         let reference = &reference.as_ref().expect("made").1;
         let here = seen(&mut Tiles::new(level, world.heights_at(level)), &area);
@@ -475,9 +481,10 @@ fn from_above(world: &World, region: &Box3, levels: impl Iterator<Item = u32>, m
  */
 pub fn margins(name: &str, world: &World, regions: &[Box3], levels: u32, from_above: u32) -> Report {
     let mut report = Report::new(name);
+    let mut level_0 = Tiles::new(0, world.heights_at(0));
     for region in regions {
         levels_against_finer(&world.generator, region, levels, &mut report);
-        from_above_against_level_0(world, region, from_above, &mut report);
+        from_above_against_level_0(world, region, from_above, &mut level_0, &mut report);
     }
     report
 }
@@ -492,8 +499,9 @@ pub fn margins(name: &str, world: &World, regions: &[Box3], levels: u32, from_ab
 pub fn far_margins(name: &str, world: World, regions: &[Box3], levels: u32) -> Report {
     let world = fields_of(world);
     let mut report = Report::new(name);
+    let mut level_0 = Tiles::new(0, world.heights_at(0));
     for region in regions {
-        from_above(&world, region, FAR_FROM..=levels, Measure::FieldsFromAbove, &mut report);
+        from_above(&world, region, FAR_FROM..=levels, Measure::FieldsFromAbove, &mut level_0, &mut report);
     }
     report
 }
