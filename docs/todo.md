@@ -166,8 +166,8 @@ Numbers are for the forest at 1280×800, as measured when written.
   The survey asks every cell of a sparse population's square
   (the valley's haystacks' anchors most).
   Pictures from above generate level 0 over all of a world's heights,
-  region by region: sharing tiles between regions spares nothing,
-  as they hardly overlap.
+  region by region, keeping the tiles a region shares with the one before:
+  the forest's regions overlap, the valley's hardly.
   If CI is still too slow, the contract at seeds but `REGIONS_SEED`
   (`worlds/tests/contract.rs`) could run only on main.
 - **Slice detail sets both thickness and level of detail.**
