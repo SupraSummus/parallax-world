@@ -22,25 +22,37 @@ impl Field {
         Field { name, order, op, values: FieldValues::At(Box::new(at)), meets: None }
     }
 
-    /**
-     * Spans along each line of sites parallel to `axis`: `spans(u, v, stretch)`,
-     * the line's other coordinates in axis order and the stretch of it
-     * asked for, which it may make only what reaches (FieldValues::Spans).
-     */
+    /** Spans along each line of sites parallel to `axis`: `spans(u, v)`, the line's other coordinates in axis order (FieldValues::Spans). */
     pub fn spans<S: Into<Vec<Span>>>(
         name: &'static str,
         order: f64,
         op: Op,
         axis: usize,
-        spans: impl Fn(i64, i64, (i64, i64)) -> S + 'static,
+        spans: impl Fn(i64, i64) -> S + 'static,
     ) -> Field {
-        let spans = Box::new(move |u, v, stretch| spans(u, v, stretch).into());
+        let spans = Box::new(move |u, v| spans(u, v).into());
         Field { name, order, op, values: FieldValues::Spans { axis, spans }, meets: None }
+    }
+
+    /**
+     * Shapes, each of `op`, cutting or filling the world, not a thing:
+     * `near(box)`, those that may reach the box (lattice units), each the
+     * same, in the same order, whichever box asks (FieldValues::Shapes).
+     * What it meets follows from their bounds, asked till one reaches the box.
+     */
+    pub fn shapes<S: IntoIterator<Item = Shape>>(name: &'static str, order: f64, op: Op, near: impl Fn(&Box3) -> S + 'static) -> Field {
+        let near = Rc::new(near);
+        let reaching = near.clone();
+        let values = FieldValues::Shapes(Box::new(move |b| near(b).into_iter().collect()));
+        Field { name, order, op, values, meets: None }.meets(move |b, spacing| {
+            let reaches = plan::footprint(spacing, [0, 0], || reaching(b).into_iter().any(|s| s.bounds.overlaps(b)));
+            if reaches { Meets::Any } else { Meets::Nothing }
+        })
     }
 
     /** Spans along each column, up y, all of them: `spans(x, z)`, lattice units; a `Column` or the spans. */
     pub fn columns<S: Into<Vec<Span>>>(name: &'static str, order: f64, op: Op, spans: impl Fn(i64, i64) -> S + 'static) -> Field {
-        Field::spans(name, order, op, 1, move |x, z, _| spans(x, z))
+        Field::spans(name, order, op, 1, spans)
     }
 
     /** Its spans along y from `below` under to `above` over `of` at their column (About): a rule; what it meets follows. */
@@ -64,8 +76,8 @@ impl Field {
         };
         let about = Rc::new(about);
         let held = about.clone();
-        let spans = Box::new(move |x, z, stretch| {
-            let spans = spans(x, z, stretch);
+        let spans = Box::new(move |x, z| {
+            let spans = spans(x, z);
             held.hold(name, x, z, &spans);
             spans
         });

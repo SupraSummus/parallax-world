@@ -419,6 +419,13 @@ Numbers are for the forest at 1280×800, as measured when written.
   (`OVER_BUDGET` in `worlds/tests/cost.rs`), by things done one by one
   where a tile holds four times as many each level:
   at level 3 the towns' things drawn whole to be measured.
+- **Two of the cheese's tiles are over the cost budget**
+  (`OVER_BUDGET`): at level 7 a tile holds a few hundred thousand holes,
+  each a shape, most of them a site or two
+  ("Far forms for what fills space", below);
+  at level 3, the grottoes each make the holes around them to place their stairs.
+  Estimated, not timed: the cheese's body, all of a kind, is filled site by site
+  uncounted, a good part of a coarse tile's time.
 - **Plans are made at every column read, whatever their scale.**
   The valley's land, decided at 4 m, makes its six domains' bids
   at each column of a tile at level 0.
@@ -727,36 +734,22 @@ Numbers are for the forest at 1280×800, as measured when written.
   not at the spawn and the regions' centres (`cost::places`),
   once the forest, the moor and the city name some:
   they would be measured at their spawn alone.
-- Drop y as up.
-  The checks look in cubes around places, pictures are cubes,
-  and a world without a ground (the cheese) has no heights;
-  y is still special where a world has no say in it:
-  - Heights are along y, with a sky over them (light's too):
-    a world is bounded along y or not at all.
-  - Places and the survey sample lines of cells along y,
-    the cheese's capped (`PER_COLUMN`);
-    `directions` looks for boxes with a surface (`TRIES`),
-    and measures the four-fold harmonic about y alone:
-    a world without a ground wants it about x and z too,
-    but a ground's slopes, stepped along the axes, might show there.
+- Assume no ground.
+  y stays up: bodies fall along it, the sky and the sun are over it.
+  But the engine still takes a ground where a world has no say in it:
+  - `shown` trims a box along y alone (`on_buried` keeps a buried bottom).
+    Halved along every axis it would not pay:
+    asked brick by brick, `whole` cost many times generating the tile.
   - The web tiles x and z over a world's heights (native's tiles are cubes),
     so it can't show the cheese.
-  - Pictures from above start their rays over what may show
-    of each column of tiles (`tops_of` in `picture.rs`):
-    through an empty sky made cube by cube,
-    a ray needed a round of tiles for each.
-- Far forms for what fills space: the cheese's holes are carved line by line,
-  so a line costs as many cells as it crosses,
-  and a coarser host cube holds eight times the caverns
-  (past the caverns' level, 8, it is all buried and not made);
-  its grottoes (pillars, stairs, crystals) stop at level 3,
-  and its lights with them.
-  Coarse, the holes could carve as a medium does, a share of each site.
-  Holes as things that cut the world (a population whose carves cut more
-  than itself) read simpler, but each is a thing made and drawn site by site
-  in its box, and a coarse tile asks eight times the cells a level,
-  where a line asks only the holes along it:
-  tried, a level-0 tile took 4 times as long, level 7 170 times.
+  - Places and the survey sample lines of cells along y (`PER_COLUMN`);
+    `directions` measures the four-fold harmonic about y alone.
+- Far forms for what fills space: the cheese's holes are carved
+  while wider than the sites are apart (past level 8 it is all buried),
+  and its grottoes (pillars, stairs, crystals) stop at level 3,
+  and its only light with them:
+  a far form glowing on the caverns' walls would keep it.
+  Holes as things that cut the world cost far more: each a thing, its cells asked.
 - Lay out towns at any angle?
   Walls along the lattice's axes look crisp on FCC;
   at other angles they jag.

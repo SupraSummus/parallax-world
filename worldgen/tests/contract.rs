@@ -55,7 +55,7 @@ fn spans(name: &'static str, from: i64, to: i64, kind: u8) -> Layer {
         name,
         order: 0.0,
         op: Op::Paint,
-        values: FieldValues::Spans { axis: 1, spans: Box::new(move |_, _, _| vec![Span::solid(from, to, kind)]) },
+        values: FieldValues::Spans { axis: 1, spans: Box::new(move |_, _| vec![Span::solid(from, to, kind)]) },
         meets: None,
     })
 }
@@ -153,7 +153,7 @@ fn wall(y: i64, z: i64) -> i64 {
 
 /** The wall, and `knobs` on its face: a unit of wood at each anchor. */
 fn knobbly_wall(knobs: Population) -> Generator {
-    let rock = Field::spans("rock", 0.0, Op::Fill, 0, |y, z, _| vec![Span::solid(wall(y, z) - 64, wall(y, z), ROCK)]);
+    let rock = Field::spans("rock", 0.0, Op::Fill, 0, |y, z| vec![Span::solid(wall(y, z) - 64, wall(y, z), ROCK)]);
     let knobs = knobs.reach(2).make(|p, _| Some(Node::of(vec![cuboid(p, p.map(|v| v + 1.0), WOOD, SOLID, Op::Fill)])));
     Generator { kinds: KINDS.to_vec(), seed: 4, layers: vec![Layer::Field(rock), Layer::Population(knobs)] }
 }

@@ -8,12 +8,11 @@
 //!
 //! Caverns and eyes are balls, one in each cell of a cubic grid of their
 //! own; tunnels capsules from low in a cavern to low in a neighbour's.
-//! A field carves them line by line of sites along y, each a chord along
-//! it, so at any level as many sites as the hole holds, on average; only
-//! those that reach the stretch of the line asked for.
+//! A field of them carves the world (Field::shapes): those that may reach
+//! the box asked for.
 
 use worldgen::World;
-use worldgen::generator::{Child, Field, Generator, Layer, Meets, Node, Op, Point, Population, Shape, Span};
+use worldgen::generator::{Child, Field, Generator, Layer, Meets, Node, Op, Point, Population, Shape};
 use worldgen::js;
 use worldgen::kinds;
 use worldgen::noise::{Rng, hash64, stream};
@@ -110,20 +109,13 @@ struct Seeds {
     tunnels: u64,
 }
 
-/** A tunnel: a capsule from `from` to `to`. */
-struct Tunnel {
-    from: Point,
-    to: Point,
-    radius: f64,
-}
-
 /** Where a tunnel starts in a cavern: half way down from its centre. */
 fn low((centre, radius): ([i64; 3], i64)) -> Point {
     [centre[0] as f64, (centre[1] - radius / 2) as f64, centre[2] as f64]
 }
 
-/** The tunnels that may reach the box [min, max]. */
-fn tunnels(seeds: Seeds, min: [i64; 3], max: [i64; 3]) -> impl Iterator<Item = Tunnel> {
+/** The tunnels that may reach the box [min, max], capsules carving, those wider than `spacing`. */
+fn tunnels(seeds: Seeds, min: [i64; 3], max: [i64; 3], spacing: i64) -> impl Iterator<Item = Shape> {
     TUNNELS.iter().enumerate().flat_map(move |(n, &(d, chance))| {
         // A tunnel lies in its caverns' cells, a radius past them, and along y half a cavern's under them (`low`).
         let [lo, hi] = [0, 1].map(|end| {
@@ -140,9 +132,8 @@ fn tunnels(seeds: Seeds, min: [i64; 3], max: [i64; 3]) -> impl Iterator<Item = T
             }
             let from = low(CAVERNS.ball(seeds.caverns, a)?);
             let to = low(CAVERNS.ball(seeds.caverns, [0, 1, 2].map(|i| a[i] + d[i]))?);
-            let radius = (TUNNEL_LEAST + (rng.next() * (TUNNEL_MOST - TUNNEL_LEAST + 1) as f64) as i64) as f64;
-            let reaches = (0..3).all(|i| from[i].min(to[i]) - radius <= max[i] as f64 && from[i].max(to[i]) + radius >= min[i] as f64);
-            reaches.then_some(Tunnel { from, to, radius })
+            let radius = TUNNEL_LEAST + (rng.next() * (TUNNEL_MOST - TUNNEL_LEAST + 1) as f64) as i64;
+            carved(radius, spacing).then(|| Shape::capsule(from, to, radius as f64, K::cheese).carve())
         })
     })
 }
@@ -167,73 +158,24 @@ fn outside(p: Point, (centre, radius): ([i64; 3], i64)) -> f64 {
     dot(d, d).sqrt() - radius as f64
 }
 
-impl Tunnel {
-    fn holds(&self, p: Point) -> bool {
-        let (d, w) = (minus(self.to, self.from), minus(p, self.from));
-        let t = (dot(w, d) / dot(d, d)).clamp(0.0, 1.0);
-        let off = minus(w, d.map(|v| v * t));
-        dot(off, off) < self.radius * self.radius
-    }
-
-    /**
-     * Where the line of sites along y at (x, z) is inside it: (lo, hi).
-     * It is convex, so one stretch: from the lowest to the highest of the
-     * balls round its ends' and the cylinder's between them.
-     */
-    fn chord(&self, x: f64, z: f64) -> Option<(f64, f64)> {
-        let r2 = self.radius * self.radius;
-        let mut chord = (f64::INFINITY, f64::NEG_INFINITY);
-        let mut add = |lo: f64, hi: f64| chord = (chord.0.min(lo), chord.1.max(hi));
-        for end in [self.from, self.to] {
-            let across = (x - end[0]).powi(2) + (z - end[2]).powi(2);
-            if across < r2 {
-                let half = (r2 - across).sqrt();
-                add(end[1] - half, end[1] + half);
-            }
-        }
-        // The cylinder: the point at height from + s is off its axis by a quadratic in s, along it by e + s·dy.
-        let d = minus(self.to, self.from);
-        let (dd, level) = (dot(d, d), d[0] * d[0] + d[2] * d[2]);
-        let (ax, az) = (x - self.from[0], z - self.from[2]);
-        let e = ax * d[0] + az * d[2];
-        let (a, b, c) = (level / dd, -2.0 * e * d[1] / dd, ax * ax + az * az - e * e / dd - r2);
-        let disc = b * b - 4.0 * a * c;
-        if level > 0.0 && disc > 0.0 {
-            let (mut lo, mut hi) = ((-b - disc.sqrt()) / (2.0 * a), (-b + disc.sqrt()) / (2.0 * a));
-            // Between its ends: 0 ≤ e + s·dy ≤ dd.
-            if d[1] != 0.0 {
-                let (s0, s1) = (-e / d[1], (dd - e) / d[1]);
-                (lo, hi) = (lo.max(s0.min(s1)), hi.min(s0.max(s1)));
-            } else if !(0.0..=dd).contains(&e) {
-                (lo, hi) = (0.0, -1.0);
-            }
-            if lo < hi {
-                add(self.from[1] + lo, self.from[1] + hi);
-            }
-        }
-        (chord.0 < chord.1).then_some(chord)
-    }
-}
-
 /** The holes that may reach a box: read once, for a thing that asks of many points in it. */
 struct Holes {
     caverns: Vec<([i64; 3], i64)>,
-    eyes: Vec<([i64; 3], i64)>,
-    tunnels: Vec<Tunnel>,
+    /** All of them, caverns too. */
+    shapes: Vec<Shape>,
 }
 
 impl Holes {
     fn near(seeds: Seeds, min: [i64; 3], max: [i64; 3]) -> Holes {
-        Holes {
-            caverns: CAVERNS.balls(seeds.caverns, min, max).collect(),
-            eyes: EYES.balls(seeds.eyes, min, max).collect(),
-            tunnels: tunnels(seeds, min, max).collect(),
-        }
+        let caverns: Vec<_> = CAVERNS.balls(seeds.caverns, min, max).collect();
+        let eyes = EYES.balls(seeds.eyes, min, max);
+        let shapes = caverns.iter().copied().chain(eyes).map(hole).chain(tunnels(seeds, min, max, 0)).collect();
+        Holes { caverns, shapes }
     }
 
     /** Whether `p` is in one. */
     fn open(&self, p: Point) -> bool {
-        self.caverns.iter().chain(&self.eyes).any(|ball| outside(p, *ball) < 0.0) || self.tunnels.iter().any(|t| t.holds(p))
+        self.shapes.iter().any(|shape| shape.holds(p))
     }
 
     /** If `p` is in the cheese, the centre of the cavern whose wall is nearest, if within NEAR. */
@@ -248,49 +190,31 @@ fn body() -> Field {
     Field::at("cheese", 0.0, Op::Fill, |_, _, _| Some((K::cheese.into(), None))).meets(|_, _| Meets::All(K::cheese.into()))
 }
 
-/** Whether holes of the widest `most` are carved at sites `spacing` apart: while wider than the sites are apart. */
-fn carved(most: i64, spacing: i64) -> bool {
-    spacing < 2 * most
+/** Whether a hole of `radius` is carved at sites `spacing` apart: while wider than the sites are apart. */
+fn carved(radius: i64, spacing: i64) -> bool {
+    spacing < 2 * radius
+}
+
+/** A ball's hole. */
+fn hole((centre, radius): ([i64; 3], i64)) -> Shape {
+    Shape::ball(centre.map(|v| v as f64), radius as f64, K::cheese).carve()
 }
 
 /**
- * The holes: each one's chord along each line of sites, carved; each kind
- * while its widest is wider than the sites are apart, finer detail left
- * out ("Fields" in "Levels", docs/generators.md): a host asks for cubes,
- * so a tile coarser by a level holds eight times the holes. Nothing
- * where none of those carved reaches, a site or two around it.
+ * The holes: each carved while wider than the sites are apart, finer
+ * detail left out ("Fields" in "Levels", docs/generators.md): a host
+ * asks for cubes, so a tile coarser by a level holds eight times the
+ * holes, and a kind none of which is that wide is not asked for.
  */
 fn holes(seeds: Seeds) -> Field {
-    Field::spans("holes", 1.0, Op::Carve, 1, move |x, z, stretch| {
-        let ((from, to), s) = (stretch, spacing());
-        let (low, high) = ([x, from, z], [x, to, z]);
-        let (fx, fz) = (x as f64, z as f64);
-        let carved = |most: i64| carved(most, s);
-        let caverns = carved(CAVERNS.most).then(|| CAVERNS.balls(seeds.caverns, low, high));
-        let eyes = carved(EYES.most).then(|| EYES.balls(seeds.eyes, low, high));
-        let tunnels = carved(TUNNEL_MOST).then(|| tunnels(seeds, low, high));
-        let chords = caverns
-            .into_iter()
-            .flatten()
-            .chain(eyes.into_iter().flatten())
-            .filter_map(|([cx, cy, cz], r)| {
-                let (across, r2) = (((x - cx).pow(2) + (z - cz).pow(2)) as f64, (r * r) as f64);
-                (across < r2).then(|| (cy as f64 - (r2 - across).sqrt(), cy as f64 + (r2 - across).sqrt()))
-            })
-            .chain(tunnels.into_iter().flatten().filter_map(|t| t.chord(fx, fz)));
-        chords
-            .filter_map(|(lo, hi)| {
-                let (from, to) = (lo.ceil() as i64, hi.floor() as i64 + 1);
-                (from < to).then(|| Span::solid(from, to, K::cheese))
-            })
-            .collect::<Vec<_>>()
-    })
-    .meets(move |b, s| {
-        let [min, max] = [b.min, b.max.map(|v| v - 1)];
-        let reaches = |(c, r): ([i64; 3], i64)| (0..3).all(|i| c[i] - r <= max[i] && c[i] + r >= min[i]);
-        let balls = |balls: &Balls, seed: u64| carved(balls.most, s) && balls.balls(seed, min, max).any(reaches);
-        let tunnels = carved(TUNNEL_MOST, s) && tunnels(seeds, min, max).next().is_some();
-        if balls(&CAVERNS, seeds.caverns) || balls(&EYES, seeds.eyes) || tunnels { Meets::Any } else { Meets::Nothing }
+    Field::shapes("holes", 1.0, Op::Carve, move |b| {
+        let ([min, max], s) = ([b.min, b.max.map(|v| v - 1)], spacing());
+        let balls = |balls: &'static Balls, seed| {
+            let wide = carved(balls.most, s).then(|| balls.balls(seed, min, max).filter(move |&(_, r)| carved(r, s)));
+            wide.into_iter().flatten().map(hole)
+        };
+        let tunnels = carved(TUNNEL_MOST, s).then(|| tunnels(seeds, min, max, s)).into_iter().flatten();
+        balls(&CAVERNS, seeds.caverns).chain(balls(&EYES, seeds.eyes)).chain(tunnels)
     })
 }
 
@@ -341,18 +265,6 @@ fn stairs(holes: &Holes, (centre, radius): ([i64; 3], i64), rng: &mut Rng) -> No
     Node::of(shapes)
 }
 
-/** The cell of N·FCC holding `p`: its centre's nearest site, i + j + k even (on a face, either). */
-fn fcc_cell(p: [i64; 3], n: i64) -> [i64; 3] {
-    let f = p.map(|v| v as f64 / n as f64);
-    let mut c = f.map(f64::round);
-    if c.iter().sum::<f64>().rem_euclid(2.0) != 0.0 {
-        // Of the even sites, the nearest moves the coordinate furthest from its rounding the other way.
-        let i = (0..3).max_by(|&a, &b| (f[a] - c[a]).abs().total_cmp(&(f[b] - c[b]).abs())).expect("three");
-        c[i] += if f[i] > c[i] { 1.0 } else { -1.0 };
-    }
-    c.map(|v| v as i64)
-}
-
 /**
  * What stands in the caverns: in each, the thing of the cell its centre
  * is in, its pillar and stairs, and clusters of crystals scattered on its
@@ -366,9 +278,8 @@ fn grottoes(seeds: Seeds) -> Population {
         .anchor(move |cell| {
             // The caverns' cells it meets: it reaches n from its centre, a cavern's cell is 2n wide.
             let [lo, hi] = [-n, n - 1].map(|d| cell.centre.map(|v| (v + d).div_euclid(CAVERNS.cell)));
-            let ijk = [cell.i, cell.j, cell.k];
-            let (centre, _) = cells(lo, hi).filter_map(|c| CAVERNS.ball(seeds.caverns, c)).find(|(c, _)| fcc_cell(*c, n) == ijk)?;
-            Some(centre.map(|v| v as f64))
+            // The cavern whose centre is in it: the cell owns its thing.
+            cells(lo, hi).filter_map(|c| CAVERNS.ball(seeds.caverns, c)).map(|(c, _)| c.map(|v| v as f64)).find(|&c| cell.owns(c))
         })
         .make(move |p, cell| {
             let at = p.map(|v| v as i64);
@@ -399,25 +310,4 @@ pub fn cheese(seed: u64) -> World {
     let spawn = [x, y - (x + y + z).rem_euclid(2), z];
     let layers = vec![Layer::Field(body()), Layer::Field(holes(seeds)), Layer::Population(grottoes(seeds))];
     World { generator: Generator { kinds: KINDS.to_vec(), seed: stream(seed, 4), layers }, spawn, heights: None, points: Vec::new() }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /** A tunnel's chord along a line of sites holds the points of the line the tunnel holds, and only them. */
-    #[test]
-    fn a_tunnels_chord_is_where_it_holds_a_line() {
-        let mut rng = Rng::new(7);
-        for _ in 0..200 {
-            let mut point = || [0; 3].map(|_| (rng.next() - 0.5) * 256.0);
-            let tunnel = Tunnel { from: point(), to: point(), radius: 4.0 + rng.next() * 12.0 };
-            let [x, _, z] = [0, 1, 2].map(|i| tunnel.from[i] + (rng.next() - 0.5) * 48.0);
-            let chord = tunnel.chord(x, z);
-            for y in (-200..200).map(|y| y as f64 + 0.5) {
-                let inside = chord.is_some_and(|(lo, hi)| (lo..=hi).contains(&y));
-                assert_eq!(inside, tunnel.holds([x, y, z]), "at ({x}, {y}, {z}): chord {chord:?}");
-            }
-        }
-    }
 }

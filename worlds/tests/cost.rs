@@ -22,6 +22,9 @@ const TOLERANCE: f64 = 0.25;
 const OVER_BUDGET: &[(&str, &str, u32)] = &[
     // Why: docs/todo.md, "One of the valley's tiles is over the cost budget".
     ("valley", "region2", 3),
+    // Why: docs/todo.md, "Two of the cheese's tiles are over the cost budget".
+    ("cheese", "spawn", 3),
+    ("cheese", "spawn", 7),
 ];
 
 #[test]

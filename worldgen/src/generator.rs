@@ -231,7 +231,8 @@ pub enum Shapes {
 type ChildrenReaching = dyn Fn(&Box3) -> Vec<Child>;
 type MakeShapes = dyn Fn(&mut Rng) -> Vec<Shape>;
 type FieldAt = dyn Fn(i64, i64, i64) -> Option<(Kind, Option<f64>)>;
-type FieldSpans = dyn Fn(i64, i64, (i64, i64)) -> Vec<Span>;
+type FieldSpans = dyn Fn(i64, i64) -> Vec<Span>;
+type FieldShapes = dyn Fn(&Box3) -> Vec<Shape>;
 type FieldMeets = dyn Fn(&Box3, i64) -> Meets;
 type Stands = dyn Fn(&Box3) -> bool;
 type CellAnchor = dyn Fn(&Cell) -> Option<Point>;
@@ -297,15 +298,18 @@ pub enum FieldValues {
     At(Box<FieldAt>),
     /**
      * Spans along each line of sites parallel to `axis`, drawn in order;
-     * given (u, v), the line's other two coordinates in axis order, and
-     * the stretch [from, to] of it asked for, lattice units along it.
-     * Spans that can't reach into the stretch may be left out: a field
-     * endless along its lines (the cheese's) makes only what is there.
-     * What it makes of one stretch agrees with what it makes of another
-     * where they meet, as the contract checks: a box in parts is the box
-     * whole.
+     * given (u, v), the line's other two coordinates in axis order,
+     * lattice units: all of them, wherever a box asks along the line.
      */
     Spans { axis: usize, spans: Box<FieldSpans> },
+    /**
+     * Shapes, each of the field's op, that may reach a box (lattice units)
+     * asked for, at the sites read for (`plan::spacing`): drawn as a
+     * thing's are, but cutting the world, as any field does (dig with
+     * them), in the order given. Each is the same, and in the same order,
+     * whichever box asked for it.
+     */
+    Shapes(Box<FieldShapes>),
 }
 
 /** Something everywhere, given by position alone; what it leaves out by level, it asks the spacing for (`plan::spacing`). */
@@ -374,6 +378,11 @@ impl Cell<'_> {
     fn fcc(population: &Population, seed: u64, [i, j, k]: [i64; 3]) -> Cell<'_> {
         let n = population.cell;
         Cell { i, j, k, centre: [i * n, j * n, k * n], n, mark: 0, nth: 0, population: population.name, seed }
+    }
+
+    /** Whether an anchor at `p` is in it, of N·FCC: the cell owns a thing anchored there, if asked. */
+    pub fn owns(&self, p: Point) -> bool {
+        nearest_site(shapes::at(p), self.n) == [self.i, self.j, self.k]
     }
 
     /** A random sequence that depends on the cell and `stream` only. */
