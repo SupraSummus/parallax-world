@@ -810,7 +810,7 @@ mod tests {
     #[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
     fn voxels_show_the_faces_rays_enter_by() {
         // From below, near and far: rays enter its voxels by faces that look down or sideways, white, never by
-        // those that look up, red. Most of its coarse voxels have both, and their sites' own material is either.
+        // those that look up, red. Most of its coarse voxels have both, and look as either as a whole.
         // Lit, near: only the light differs.
         let lit = Some(Brightness { sky: 0.0, sun: 0.0, glow: 1.0 });
         for (light, distance) in [(None, 400.0), (None, 1500.0), (None, 2500.0), (lit, 400.0)] {

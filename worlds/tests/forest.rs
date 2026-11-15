@@ -2,13 +2,13 @@
 
 use std::collections::HashSet;
 
-use worldgen::generator::{generate, materials_of};
+use worldgen::generator::{Generator, generate, kind_of};
 use worldgen::grid::{Box3, VoxelGrid, is_site};
 use worldgen::units::UNIT_SIZE;
 use worlds::forest::forest;
 
 /** 48 m × 80 m ahead of the spawn point, all heights, and the spawn point. */
-fn generated(seed: u64) -> (VoxelGrid, Vec<u8>, [i64; 3]) {
+fn generated(seed: u64) -> (VoxelGrid, Generator, [i64; 3]) {
     let world = forest(seed);
     let (min_y, max_y) = world.heights_at(0);
     let (generator, spawn) = (world.generator, world.spawn);
@@ -16,22 +16,22 @@ fn generated(seed: u64) -> (VoxelGrid, Vec<u8>, [i64; 3]) {
     // Grids start on an even x.
     let x = 2 * (spawn[0] - unit(24.0)).div_euclid(2);
     let area = Box3 { min: [x, min_y, spawn[2] - unit(1.0)], max: [x + unit(48.0), max_y, spawn[2] + unit(79.0)] };
-    let types = materials_of(&generator).iter().map(|m| m.material_type).collect();
-    (generate(&generator, &area, 0), types, spawn)
+    (generate(&generator, &area, 0), generator, spawn)
 }
 
-/** Every voxel: x, y, z and its material type. */
-fn voxels(grid: &VoxelGrid, types: &[u8]) -> Vec<(i64, i64, i64, u8)> {
+/** Every voxel: x, y, z and its kind's type. */
+fn voxels(grid: &VoxelGrid, generator: &Generator) -> Vec<(i64, i64, i64, u8)> {
     let [x0, y0, z0] = grid.min;
     let [nx, ny, nz] = grid.n;
-    let mut all = Vec::new();
+    let (kind, mut all) = (kind_of(generator), Vec::new());
     for z in z0..z0 + nz {
         for y in y0..y0 + ny {
             let mut x = x0 + ((x0 + y + z) & 1);
             while x < x0 + nx {
-                let id = grid.get(x, y, z);
-                if id != 0 {
-                    all.push((x, y, z, types[id as usize]));
+                let look = grid.get(x, y, z);
+                if look != 0 {
+                    // A mix of kinds is of none.
+                    all.push((x, y, z, kind(look).map_or(0, |k| k.kind_type)));
                 }
                 x += 2;
             }
@@ -42,13 +42,13 @@ fn voxels(grid: &VoxelGrid, types: &[u8]) -> Vec<(i64, i64, i64, u8)> {
 
 #[test]
 fn forest_is_deterministic_has_ground_trees_and_a_clear_spawn() {
-    let (grid, types, spawn) = generated(42);
-    let all = voxels(&grid, &types);
+    let (grid, generator, spawn) = generated(42);
+    let all = voxels(&grid, &generator);
 
     // Deterministic for a seed.
     let (again, _, again_spawn) = generated(42);
     assert_eq!(again_spawn, spawn);
-    assert!(again.cells == grid.cells && again.bricks == grid.bricks);
+    assert!(again.shown == grid.shown && again.pieces.colour == grid.pieces.colour && again.bricks == grid.bricks);
 
     // Ground under every column of the 48 m × 80 m area.
     let columns: HashSet<(i64, i64)> = all.iter().map(|&(x, _, z, _)| (x, z)).collect();

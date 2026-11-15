@@ -417,7 +417,7 @@ Broken rules panic, naming the thing and pointing here:
 - **Curves.** A curve's point stays within its level's `wander`;
   only points a query looks at are checked,
   so derive `wander` from the most a rule can stray.
-- **Kinds.** A world has at most 255 materials: ids are bytes.
+- **Kinds.** A world has at most 256 kinds: a kind is a byte.
 - **Slopes.** A `Sloped` plan's column differs from a neighbour's
   by at most its `slope`, checked as one is made and the other is kept:
   so every two ever kept together.
@@ -540,13 +540,18 @@ as the moor's heather for its sprigs, if it looks alike.
 Hosts take what a site's pieces look like, through each face where it differs,
 whole as often as they are seen there, by a site's coin
 (`VoxelGrid::show`): noisy, and a site too thin to show still stops light.
+What stops a walking body is apart from how a site looks:
+the share of its rays what stops one stops, wherever in it (`VoxelGrid`'s `solid`);
+a host's site stops a body where that is over half.
+Tests and stats that ask which kind a site is
+read it from its colour (`kind_of`): a mix of kinds is none.
 Margins quoted elsewhere in this document are older ones,
 in shares of material types or in sRGB.
 
 - a box against eight parts generated alone, in reverse order,
   at levels 0, 2 and one past the last checked below:
   any seam, order dependence or hidden state shows up as a differing site,
-  in its voxels, its alpha, its faces' materials or its glow;
+  in its voxels, its alpha, how it looks through each face, its glow or its solid share;
 - at each level up to the world's, 20,000 rays in random directions
   from where a camera could be: the level two finer to 2 of the level's sites,
   and the level past them, as hosts draw a coarse level behind a finer one,
@@ -865,8 +870,8 @@ A world of fewer domains may still have all their kinds:
 the moor alone has the valley's (`valley::kinds`), its own last,
 so its ids are the same in both,
 and it reuses the forest's stone and the town's thatch.
-A kind's type (`kind_type`) is its class of material,
-by which the contract's reports break down what rays see.
+A kind's type (`kind_type`) is its class,
+by which `look`'s stats count what rays see.
 A kind marked `walk_through` is one a walking body goes through
 (plants, water; see `bake/src/walk.rs`), the rest it stands on;
 so ground and what stands on it are different kinds,

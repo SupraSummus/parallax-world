@@ -12,7 +12,7 @@ use worldgen::checks::contract::{
 use worldgen::checks::survey::survey;
 use worldgen::generator::{
     ANY_SIZE, Anchors, Child, Children, Field, FieldValues, Generator, KindDef, Layer, Node, Op, Population, SOLID, Shapes, Span, ball,
-    cuboid, generate, materials_of, things_in,
+    cuboid, generate, kind_of, things_in,
 };
 use worldgen::generator::{Cell, Fill, Point};
 use worldgen::grid::Box3;
@@ -227,13 +227,17 @@ fn cells_against_what_is_in_them() {
  * of scale 1, dithered or not: the share of rock among the sites drawn at
  * `level`, and the grid.
  */
-fn stripes(dithered: bool, level: u32) -> (f64, Vec<u8>) {
+fn stripes(dithered: bool, level: u32) -> (f64, Vec<u32>) {
     let make = |x: i64, _| if x.rem_euclid(8) == 0 { ROCK } else { GRASS };
     let plan = Rc::new(if dithered { Plan::dithered("stripes", 1, make) } else { Plan::new("stripes", 1, make) });
     let ground = Field::columns("ground", 0.0, Op::Fill, move |x, z| vec![Span::solid(-8, 0, plan.at(x, z))]);
-    let grid = generate(&world(Layer::Field(ground)), &Box3 { min: [0, -8 >> level, 0], max: [4096 >> level, 0, 64] }, level);
-    let count = |kind: u8| grid.cells.iter().filter(|id| **id == kind + 1).count() as f64;
-    (count(ROCK) / (count(ROCK) + count(GRASS)), grid.cells)
+    let (generator, b) = (world(Layer::Field(ground)), Box3 { min: [0, -8 >> level, 0], max: [4096 >> level, 0, 64] });
+    let grid = generate(&generator, &b, level);
+    let sites = (b.min[2]..b.max[2]).flat_map(|z| (b.min[1]..b.max[1]).flat_map(move |y| (b.min[0]..b.max[0]).map(move |x| (x, y, z))));
+    let looks: Vec<u32> = sites.map(|(x, y, z)| grid.get(x, y, z)).collect();
+    let kind = kind_of(&generator);
+    let count = |of: u8| looks.iter().filter(|&&l| kind(l).is_some_and(|k| k.name == KINDS[of as usize].name)).count();
+    (count(ROCK) as f64 / (count(ROCK) + count(GRASS)) as f64, looks)
 }
 
 #[test]
@@ -353,7 +357,7 @@ fn finds_a_speck_too_small_to_show_outside_the_heights() {
     // A speck stops a few of a site's rays: it shows no voxel, but light and the composited rays see it.
     let speck = world(single(|_, _| Some(Node::of(vec![ball([64.0, 70.0, 64.0], 0.1, ROCK, SOLID, Op::Fill)])), 64));
     let grid = generate(&speck, &near(), 0);
-    assert!(grid.cells.iter().all(|id| *id == 0) && grid.pieces.alpha.iter().any(|a| *a > 0), "the speck shows");
+    assert!(grid.shown.iter().all(|shown| !shown) && grid.pieces.alpha.iter().any(|a| *a > 0), "the speck shows");
     let broken = heights_hold(&world_of(speck, (-64, 64)), &[near()], 0);
     assert!(
         broken.iter().any(|b| b.contains("1 sites stopping light above the heights (-64, 64)") && b.contains("such as rock")),
@@ -411,7 +415,11 @@ fn a_things_carve_cuts_only_the_thing() {
         ],
     };
     let grid = generate(&generator, &b(40, 40, 40, 90, 90, 90), 0);
-    let types: Vec<u8> = materials_of(&generator).iter().map(|m| m.material_type).collect();
-    let at = |x, y, z| types[grid.get(x, y, z) as usize];
-    assert_eq!((at(64, 70, 64), at(64, 44, 64), at(50, 70, 50)), (0, 3, 4), "carved, rock under it, wood beside it");
+    let kind = kind_of(&generator);
+    let at = |x, y, z| kind(grid.get(x, y, z)).map(|k| k.name);
+    assert_eq!(
+        (at(64, 70, 64), at(64, 44, 64), at(50, 70, 50)),
+        (None, Some("rock"), Some("wood")),
+        "carved, rock under it, wood beside it"
+    );
 }

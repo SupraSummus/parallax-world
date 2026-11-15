@@ -79,15 +79,12 @@ fn cached(path: &str, n: [usize; 3], make: impl FnOnce() -> Vol) -> Vol {
     v
 }
 
-/** Each material's label: the forest's kinds come first in the valley's, so the valley's classes serve both. */
-fn materials(world: &World) -> Vec<u16> {
+/** Each look's label, by its nearest kind: the forest's kinds come first in the valley's, so the valley's classes serve both. */
+fn materials(world: &World) -> impl Fn(u32) -> u16 + '_ {
     static VALLEY_KINDS: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
     let class = valley::class_of_kind(*VALLEY_KINDS.get_or_init(|| worlds::valley::valley(0).generator.kinds.len()));
-    let mut material = vec![AIR];
-    for (kind, def) in world.generator.kinds.iter().enumerate() {
-        material.extend(def.colors.iter().map(|_| label3_of_class(class[kind])));
-    }
-    material
+    let kind = valley::kind_near(&world.generator);
+    move |look| kind(look).map_or(AIR, |k| label3_of_class(class[k]))
 }
 
 /**
@@ -120,7 +117,7 @@ pub fn world_box(world: &World, (x0, z0): (i64, i64), n: [usize; 3], cache: &str
                             min[2] + 2 * z as i64 + ((d >> 2) & 1),
                         ];
                         if worldgen::grid::is_site(p[0], p[1], p[2]) {
-                            count[material[grid.get(p[0], p[1], p[2]) as usize] as usize] += 1;
+                            count[material(grid.get(p[0], p[1], p[2])) as usize] += 1;
                         }
                     }
                     let best = (1..LABELS3.len()).max_by_key(|l| (count[*l], std::cmp::Reverse(*l))).filter(|l| count[*l] > 0);
@@ -166,7 +163,7 @@ pub fn world_lattice(world: &World, (x0, z0): (i64, i64), e: [usize; 3], cache: 
                 for x in 0..tall[0] {
                     let p = [x0 + x as i64, lo + y as i64, z0 + z as i64];
                     if worldgen::grid::is_site(p[0], p[1], p[2]) {
-                        whole.set([x, y, z], material[grid.get(p[0], p[1], p[2]) as usize]);
+                        whole.set([x, y, z], material(grid.get(p[0], p[1], p[2])));
                     }
                 }
             }

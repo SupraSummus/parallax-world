@@ -20,10 +20,10 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use fcc::light::{FaceLight, linear_to_srgb, srgb_to_linear};
-use fcc::{GRID_LEVELS, alpha_of};
+use fcc::{GRID_LEVELS, Look, alpha_of};
 
 use crate::World;
-use crate::generator::{Generator, generate_shown, materials_of};
+use crate::generator::{Generator, generate_shown};
 use crate::grid::{ALPHA, BRICK, Box3, GLOW_ONE, Grid};
 use crate::picture::{FACES, Picture, nearest_site};
 
@@ -148,8 +148,6 @@ pub struct Light {
     cosines: [[f32; N]; N],
     /** Per direction, the face of the voxel it meets that it enters by. */
     enters: [usize; N],
-    /** Per material id: its colour as a share of the light on it, for pictures (`relight`). */
-    albedo: Vec<Rgb>,
     /** The radiance of a glow of GLOW_ONE. */
     glow: f32,
     /** The sky's radiance per direction (the sun's within it). */
@@ -177,7 +175,6 @@ impl Light {
             weights.map(|w| (w / total) as f32)
         });
         let enters = DIRECTIONS.map(|d| DIRECTIONS.iter().position(|f| *f == d.map(|c| -c)).expect("faces come in pairs"));
-        let albedo = albedo(&world.generator);
         let sun_at = DIRECTIONS.iter().position(|d| *d == SUN_DIRECTION).expect("the sun is in one of them");
         let skies = std::array::from_fn(|d| {
             let up = unit[d][1];
@@ -194,7 +191,7 @@ impl Light {
         // A world with no heights has no sky: what glows is all its light.
         let (skies, background) = if world.heights.is_some() { (skies, background) } else { ([[0.0; 3]; N], [0.0; 3]) };
         let glow = shared.brightness.glowing() / GLOW_ONE as f32;
-        Light { world, shared, levels, unit, cosines, enters, albedo, glow, sky: skies, background }
+        Light { world, shared, levels, unit, cosines, enters, glow, sky: skies, background }
     }
 
     /** Whether a whole voxel, one that lets nothing through, is at `site` of level `i`. */
@@ -205,9 +202,8 @@ impl Light {
     /** How light sees face `face` of `site` of level `i`: how much of it stops (alpha) and its colour; what it glows. */
     fn see(&mut self, i: usize, site: [i64; 3], face: usize) -> ((f32, Rgb), Rgb) {
         let Some(([x, y, z], grid)) = self.hold(i, site) else { return ((0.0, [0.0; 3]), [0.0; 3]) };
-        let (look, glow) = (grid.face(x, y, z, face), grid.glow(x, y, z));
-        let [r, g, b, alpha] = look.to_le_bytes().map(|c| c as f32 / 255.0);
-        ((alpha, [r, g, b].map(srgb_to_linear)), glow.map(|g| g as f32 * self.glow))
+        let look = grid.face(x, y, z, face);
+        ((alpha_of(look) as f32 / ALPHA as f32, linear(look)), grid.glow(x, y, z).map(|g| g as f32 * self.glow))
     }
 
     /** How much of what comes through `site` of level `i` it lets through. */
@@ -426,15 +422,16 @@ impl Light {
 
     /** `picture`, of `level`, lit: each voxel's colour times the light on it, glowing ones' own light added; the sky where it misses. */
     pub fn relight(&mut self, picture: &mut Picture, level: u32) {
-        for pixel in 0..picture.material.len() {
-            let id = picture.material[pixel] as usize;
-            let rgb = if id == 0 {
+        for pixel in 0..picture.looks.len() {
+            let look = picture.looks[pixel];
+            let rgb = if look == 0 {
                 self.background
             } else {
                 let site = picture.sites[pixel];
                 let on = self.on_voxel(level, site);
                 let glow = self.see(level as usize, site, 0).1;
-                std::array::from_fn(|c| self.albedo[id][c] * on[c] + glow[c])
+                let albedo = linear(look);
+                std::array::from_fn(|c| albedo[c] * on[c] + glow[c])
             };
             for (c, value) in rgb.into_iter().enumerate() {
                 picture.rgb[3 * pixel + c] = (255.0 * linear_to_srgb(value.clamp(0.0, 1.0))).round() as u8;
@@ -443,10 +440,9 @@ impl Light {
     }
 }
 
-/** Per material id: its colour as a share of the light on it, linear, as light adds up; colours are sRGB. */
-fn albedo(generator: &Generator) -> Vec<Rgb> {
-    let linear = |rgb: u32| [16, 8, 0].map(|shift| srgb_to_linear(((rgb >> shift) & 255) as f32 / 255.0));
-    materials_of(generator).iter().map(|m| linear(m.rgb())).collect()
+/** A look's colour as a share of the light on it, linear, as light adds up; looks are sRGB. */
+fn linear(look: Look) -> Rgb {
+    [0, 8, 16].map(|shift| srgb_to_linear(((look >> shift) & 255) as f32 / 255.0))
 }
 
 /**

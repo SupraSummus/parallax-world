@@ -8,7 +8,8 @@
 //! for world (by name, as in WORLDS), seed, level, the area's min x and z, width and depth (lattice
 //! units), and the file.
 
-use worldgen::generator::{generate, materials_of};
+use fcc::light::{linear_to_srgb, srgb_to_linear};
+use worldgen::generator::generate;
 use worldgen::grid::{Box3, VOXEL_FACES};
 use worlds::{WORLDS, by_name};
 
@@ -30,10 +31,9 @@ fn main() {
     let level = number(2) as u32;
     let s = 1i64 << level;
     let (x0, z0, nx, nz) = (2 * (number(3) / s).div_euclid(2), number(4) / s, number(5) / s, number(6) / s);
-    let colours: Vec<u32> = materials_of(generator).iter().map(|m| m.rgb()).collect();
     let (min_y, max_y) = world.heights_at(level);
     let mut image = vec![0u8; (nx * nz * 3) as usize];
-    // A ray straight down enters a voxel by one of its four faces up: what most of them show.
+    // A ray straight down sees a voxel through its four faces up alike (picture.rs's facing): their mean.
     let up: Vec<usize> = (0..VOXEL_FACES.len()).filter(|&k| VOXEL_FACES[k][1] > 0).collect();
     // In tiles, as the web generates it.
     const TILE: i64 = 64;
@@ -46,12 +46,12 @@ fn main() {
                     let Some(y) = (min_y..max_y).rev().filter(|y| (x + y + z) & 1 == 0).find(|&y| grid.get(x, y, z) != 0) else {
                         continue;
                     };
-                    let faces: Vec<u8> = up.iter().map(|&k| grid.face(x, y, z, k)).collect();
-                    let id = *faces.iter().max_by_key(|m| faces.iter().filter(|n| n == m).count()).expect("four");
-                    let (c, light) = (colours[id as usize], 0.75 + 0.25 * (y - min_y) as f64 / (max_y - min_y) as f64);
+                    let light = 0.75 + 0.25 * (y - min_y) as f64 / (max_y - min_y) as f64;
                     let at = ((nz - 1 - (z - z0)) * nx + (x - x0)) as usize * 3;
-                    for (i, shift) in [16, 8, 0].into_iter().enumerate() {
-                        image[at + i] = (((c >> shift) & 255) as f64 * light) as u8;
+                    for (i, shift) in [0, 8, 16].into_iter().enumerate() {
+                        let channel = |k: usize| srgb_to_linear(((grid.face(x, y, z, k) >> shift) & 255) as f32 / 255.0);
+                        let mean = up.iter().map(|&k| channel(k)).sum::<f32>() / up.len() as f32;
+                        image[at + i] = (255.0 * linear_to_srgb(mean) as f64 * light) as u8;
                     }
                 }
             }

@@ -232,21 +232,24 @@ mod tests {
 
     #[test]
     fn a_thin_medium_shows_on_its_ground_as_often_as_it_stops_rays_down_it() {
-        // Stopping half of what comes down, on flat ground: half its top sites show it, whatever the field's op, at
+        // Stopping half of what comes down, on flat ground: its top sites show it half, whatever the field's op, at
         // every level whose sites are further apart than it is tall.
         for op in [Op::Fill, Op::Paint] {
             let world = ground(op, |_, _| Column::new(0).surface(0, 1).medium(1, 2, std::f64::consts::LN_2 / 2.0));
             for level in 2..6 {
                 let grid = generate(&world, &Box3 { min: [0, -4, 0], max: [96, 4, 96] }, level);
-                let tops: Vec<u8> =
-                    (0..96 * 96).filter_map(|i| (-4..4).rev().map(|y| grid.get(i % 96, y, i / 96)).find(|id| *id != 0)).collect();
-                let shown = tops.iter().filter(|id| **id == 2).count() as f64 / tops.len() as f64;
+                let tops: Vec<fcc::Look> =
+                    (0..96 * 96).filter_map(|i| (-4..4).rev().map(|y| grid.get(i % 96, y, i / 96)).find(|&look| look != 0)).collect();
+                // How much of each top's red is moss's (0x40) rather than stone's (0x80), linear.
+                let red = |v: f64| fcc::light::srgb_to_linear((v / 255.0) as f32) as f64;
+                let moss = |look: &fcc::Look| (red(128.0) - red((look & 255) as f64)) / (red(128.0) - red(64.0));
+                let shown = tops.iter().map(moss).sum::<f64>() / tops.len() as f64;
                 assert!((shown - 0.5).abs() < 0.03, "level {level}: {shown} of the top sites show it");
             }
         }
     }
 
-    /** A world of stone, and moss (material 2), a field of `columns` its ground, drawn by `op`. */
+    /** A world of stone, and moss, a field of `columns` its ground, drawn by `op`. */
     fn ground(op: Op, columns: impl Fn(i64, i64) -> Column + 'static) -> Generator {
         let kind = |name, colour| crate::generator::KindDef {
             name,
