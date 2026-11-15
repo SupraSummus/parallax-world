@@ -8,10 +8,10 @@
 //! downwards are taken to meet nothing, which is close enough near the
 //! ground.
 
-use super::{ALPHA, Brightness, GLOW, GLOW_ONE, Rgb, SKY, SUN, SUN_DIRECTION, albedo};
+use super::{ALPHA, Brightness, GLOW, GLOW_ONE, Rgb, SKY, SUN, SUN_DIRECTION};
 use crate::World;
 use crate::generator::generate;
-use crate::grid::{Box3, VoxelGrid};
+use crate::grid::{Box3, COLOUR_ONE, VoxelGrid};
 use crate::picture::{FACES, first_hit};
 
 /** What the reference's voxels are generated over: the scenes' and enough ground around them. */
@@ -25,7 +25,6 @@ const BOUNCES: usize = 4;
 
 pub struct Reference {
     grid: VoxelGrid,
-    albedo: Vec<Rgb>,
     glow: f32,
     sky: Rgb,
     /** The sun's light on a surface facing it, over π, and where it is. */
@@ -38,7 +37,6 @@ impl Reference {
         let sun_direction = normalize(SUN_DIRECTION.map(|v| v as f64));
         Reference {
             grid: generate(&world.generator, &BOX, 0),
-            albedo: albedo(&world.generator),
             glow: GLOW * brightness.glow / GLOW_ONE as f32,
             sky: SKY.map(|c| c * brightness.sky),
             sun: SUN.map(|c| c * brightness.sun / 3.0),
@@ -76,7 +74,7 @@ impl Reference {
     /** One sample of the light from face `face` of the voxel at `site`: at a random point of it, from a random direction, `bounces` more to follow. */
     fn on_face(&self, site: [i64; 3], face: usize, random: &mut Random, bounces: usize) -> Rgb {
         let [x, y, z] = site;
-        let ([(alpha, id), _], glow) = self.grid.light(x, y, z, face);
+        let ([(alpha, colour), _], glow) = self.grid.light(x, y, z, face);
         debug_assert_eq!(alpha, ALPHA, "voxels of the reference's scenes are whole");
         let normal = normalize(FACES[face].map(|v| v as f64));
         let point = add(rhombus(site, face, random), normal.map(|c| c * OFF));
@@ -84,7 +82,7 @@ impl Reference {
         let cosine = dot(normal, self.sun_direction);
         let sun = if cosine > 0.0 && first_hit(&self.grid, point, self.sun_direction, FAR).is_none() { cosine as f32 } else { 0.0 };
         let incoming = self.incoming(point, cosine_weighted(normal, random), random, bounces);
-        std::array::from_fn(|c| self.albedo[id as usize][c] * (sun * self.sun[c] + incoming[c]) + glow[c] as f32 * self.glow)
+        std::array::from_fn(|c| colour[c] as f32 / COLOUR_ONE as f32 * (sun * self.sun[c] + incoming[c]) + glow[c] as f32 * self.glow)
     }
 
     /** One sample of the light coming to `point` from `direction`. */

@@ -8,16 +8,15 @@
 //! linear, as a coarse site averages finer ones, so the sum of each
 //! kind's, which tell what changed.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::ops::Range;
 use std::time::Instant;
 
-use fcc::light::srgb_to_linear;
-use fcc::{FACE_KINDS, VOXEL_FACES};
+use fcc::FACE_KINDS;
 
 use crate::World;
 use crate::checks::survey::{Survey, survey};
-use crate::generator::{Generator, Layer, Whole, checking_skipped, generate, materials_of, whole};
+use crate::generator::{Generator, Layer, Whole, checking_skipped, generate, whole};
 use crate::grid::{ALPHA, Box3, VoxelGrid, is_site};
 use crate::noise::Rng;
 use crate::picture::{Camera, FACES, Seen, Tiles, composite_in, composited, nearest_site};
@@ -28,12 +27,12 @@ fn b(min_x: i64, min_y: i64, min_z: i64, max_x: i64, max_y: i64, max_z: i64) -> 
 }
 
 /** The box of `level`'s sites covering `region` and a margin of two sites. */
-fn box_at(r: &Box3, level: u32) -> Box3 {
+pub(crate) fn box_at(r: &Box3, level: u32) -> Box3 {
     let s = 1i64 << level;
     Box3 { min: r.min.map(|v| v.div_euclid(s) - 2), max: r.max.map(|v| -(-v).div_euclid(s) + 2) }
 }
 
-fn sites(b: &Box3) -> impl Iterator<Item = (i64, i64, i64)> + '_ {
+pub(crate) fn sites(b: &Box3) -> impl Iterator<Item = (i64, i64, i64)> + '_ {
     (b.min[2]..b.max[2]).flat_map(move |z| {
         (b.min[1]..b.max[1]).flat_map(move |y| {
             let from = b.min[0] + ((b.min[0] + y + z) & 1);
@@ -61,7 +60,7 @@ pub const FROM_ABOVE: f64 = 0.05;
 const RAYS: usize = 20_000;
 
 /** `region` grown to at least 16 sites of `level` across around its centre, along x and z. */
-fn around(region: &Box3, level: u32) -> Box3 {
+pub(crate) fn around(region: &Box3, level: u32) -> Box3 {
     let grow = |i: usize| if i == 1 { 0 } else { 0.max((8i64 << level) - (region.max[i] - region.min[i]) / 2) };
     Box3 { min: [0, 1, 2].map(|i| region.min[i] - grow(i)), max: [0, 1, 2].map(|i| region.max[i] + grow(i)) }
 }
@@ -207,7 +206,7 @@ fn rays_from_open(area: &Box3, reference: &VoxelGrid, level: u32) -> (Vec<Ray>, 
 }
 
 /** What a ray sees of a grid (`composited`), its distances along it in lattice units. */
-type Path = Vec<(f64, u8, f64, [f64; 3])>;
+type Path = Vec<(f64, Seen)>;
 
 /**
  * Each ray's path through `grid` (at `level`) from `from` along it to
@@ -224,52 +223,19 @@ fn paths(grid: &VoxelGrid, level: u32, rays: &[Ray], from: f64, to: f64) -> Vec<
         let origin: [f64; 3] = std::array::from_fn(|i| (ray.origin[i] + from * ray.direction[i]) / s);
         composited(grid, origin, ray.direction, (to - from) / s)
     };
-    rays.iter().map(|ray| path(ray).into_iter().map(|(t, id, stopped, glow)| (t * s, id, stopped, glow)).collect()).collect()
-}
-
-/** By material id, its kind (index in Generator::kinds; none for id 0) and its colour, linear. */
-struct Palette {
-    kinds: Vec<Option<usize>>,
-    colours: Vec<[f64; 3]>,
-}
-
-impl Palette {
-    fn of(generator: &Generator) -> Palette {
-        // Kinds have consecutive material ids, one per colour, after 0 (none): see materials_of.
-        let mut kinds = vec![None];
-        for (i, kind) in generator.kinds.iter().enumerate() {
-            kinds.extend(kind.colors.iter().map(|_| Some(i)));
-        }
-        let colours = materials_of(generator)
-            .iter()
-            .map(|m| [16, 8, 0].map(|shift| srgb_to_linear(((m.rgb() >> shift) & 255) as f32 / 255.0) as f64))
-            .collect();
-        Palette { kinds, colours }
-    }
-
-    /** Adds to `looks` what id `id` stops of a ray (`stopped`), near or not, and what it glows to it. */
-    fn add(&self, looks: &mut Looks, id: u8, near: bool, stopped: f64, glow: [f64; 3]) {
-        let look = looks.entry(self.kinds[id as usize]).or_default();
-        look[if near { 0 } else { 1 }] += stopped;
-        let colour = if id == 0 { [0.0; 3] } else { self.colours[id as usize] };
-        (0..3).for_each(|c| look[SHOWN.start + c] += stopped * colour[c] + glow[c]);
-    }
+    rays.iter().map(|ray| path(ray).into_iter().map(|(t, seen)| (t * s, seen)).collect()).collect()
 }
 
 /**
  * What rays see, a mean over them, linear, as under a white light all
  * round: how much of them stops near (`STOPPED`'s first channel) and
- * further (its second), and what shows (`SHOWN`): each site's colour by
- * how much of them it stops, and what glows to them, premultiplied as
- * compositing has it. With no ratio, a few rays of many change it by no
- * more than their share; with no sky behind, over any sky it differs by
- * no more than its channels do. Linear, it is the sum of what each kind
- * stops and shows (`Looks`).
+ * further (its second), and what shows (`SHOWN`): what stops each by its
+ * colour, and what glows to them, premultiplied as compositing has it.
+ * With no ratio, a few rays of many change it by no more than their
+ * share; with no sky behind, over any sky it differs by no more than its
+ * channels do.
  */
 pub type Look = [f64; 5];
-
-/** A look by kind: its index in Generator::kinds, none for what stops with no material. */
-pub type Looks = BTreeMap<Option<usize>, Look>;
 
 /** The channels of a `Look` that say how much stops: near, and further. */
 pub const STOPPED: Range<usize> = 0..2;
@@ -280,27 +246,28 @@ pub const SHOWN: Range<usize> = 2..5;
 /** How far a camera's rays stop "near", past where a level is looked at from: in the level's sites. */
 const NEAR: f64 = 4.0;
 
+/** Adds `seen` to `look` by `weight`, stopping near or not. */
+fn add_seen(look: &mut Look, seen: &Seen, near: bool, weight: f64) {
+    look[if near { 0 } else { 1 }] += weight * seen.stopped;
+    (0..3).for_each(|c| look[SHOWN.start + c] += weight * (seen.shown[c] + seen.glow[c]));
+}
+
 /**
- * Adds to `looks` what a ray sees along `path`, by `weight` (the light
+ * Adds to `look` what a ray sees along `path`, by `weight` (the light
  * that gets to its start): stopping within `near` of its start (lattice
  * units) in the first channel.
  */
-fn add(looks: &mut Looks, path: &[(f64, u8, f64, [f64; 3])], near: f64, weight: f64, palette: &Palette) {
-    for &(t, id, stopped, glow) in path {
-        palette.add(looks, id, t <= near, weight * stopped, glow.map(|g| weight * g));
+fn add(look: &mut Look, path: &Path, near: f64, weight: f64) {
+    for (t, seen) in path {
+        add_seen(look, seen, *t <= near, weight);
     }
 }
 
-/** The looks of what pixels see (a mean over them): what stops, all of it near. */
-fn looks_of(seen: &Seen, palette: &Palette) -> Looks {
-    let mut looks = Looks::new();
-    for (&id, &stopped) in &seen.stopped {
-        palette.add(&mut looks, id, true, stopped, [0.0; 3]);
-    }
-    for (&id, &glow) in &seen.glow {
-        palette.add(&mut looks, id, true, 0.0, glow);
-    }
-    looks
+/** The look of what pixels see (a mean over them): what stops, all of it near. */
+fn look_of(seen: &Seen) -> Look {
+    let mut look = Look::default();
+    add_seen(&mut look, seen, true, 1.0);
+    look
 }
 
 /** What a margin measures. */
@@ -312,8 +279,6 @@ pub enum Measure {
     FromAbove,
     /** What rays straight down see of the fields alone. */
     FieldsFromAbove,
-    /** The colour each cell shows through face `kind` (of VOXEL_FACES). */
-    Face(usize),
 }
 
 impl Measure {
@@ -323,7 +288,6 @@ impl Measure {
             Measure::Cameras => TOLERANCE,
             Measure::FromAbove => FROM_ABOVE,
             Measure::FieldsFromAbove => FAR_TOLERANCE,
-            Measure::Face(_) => TOLERANCE,
         }
     }
 }
@@ -336,30 +300,14 @@ pub struct Margin {
     pub level: u32,
     /** The level it is measured against: two finer, or 0 from above. */
     pub against: u32,
-    /** What rays see, by kind, at `against` and at `level`. */
-    pub looks: [Looks; 2],
+    /** What rays see at `against` and at `level`. */
+    pub looks: [Look; 2],
 }
 
 impl Margin {
-    /** What rays see of every kind, at `against` and at `level`. */
-    pub fn values(&self) -> [Look; 2] {
-        self.looks.each_ref().map(|looks| looks.values().fold([0.0; 5], |sum, l| std::array::from_fn(|i| sum[i] + l[i])))
-    }
-
-    /** The kinds rays see, at either level: to tell what changed, not checked, as levels may draw a kind for another. */
-    fn kinds(&self) -> BTreeSet<Option<usize>> {
-        self.looks.iter().flat_map(|looks| looks.keys().copied()).collect()
-    }
-
-    /** How far `kind`'s look at `level` is from its look at `against`, channel by channel. */
-    fn change(&self, kind: Option<usize>) -> Look {
-        let [a, c] = self.looks.each_ref().map(|looks| looks.get(&kind).copied().unwrap_or_default());
-        std::array::from_fn(|i| c[i] - a[i])
-    }
-
     /** How far apart the looks are in `channels`: in the one they differ the most in. */
     pub fn apart(&self, channels: Range<usize>) -> f64 {
-        let [a, c] = self.values();
+        let [a, c] = self.looks;
         channels.map(|i| (c[i] - a[i]).abs()).fold(0.0, f64::max)
     }
 
@@ -374,47 +322,23 @@ impl Margin {
     }
 }
 
-/**
- * A world's margins in its regions, to print: `{}` breaks down the broken
- * ones by kind, `{:#}` all of them.
- */
+/** A world's margins in its regions, to print. */
 #[derive(Clone)]
 pub struct Report {
     pub name: String,
     pub margins: Vec<Margin>,
     /** What regions hold, to print after them: the strata `check` made them for. */
     pub held: Vec<(Box3, String)>,
-    /** The kinds' names, by index in Generator::kinds. */
-    kinds: Vec<&'static str>,
 }
 
 impl Report {
-    fn new(name: &str, generator: &Generator) -> Report {
-        Report { name: name.to_string(), margins: Vec::new(), held: Vec::new(), kinds: generator.kinds.iter().map(|k| k.name).collect() }
+    fn new(name: &str) -> Report {
+        Report { name: name.to_string(), margins: Vec::new(), held: Vec::new() }
     }
 
     /** Only the broken margins. */
     pub fn broken(&self) -> Report {
         Report { margins: self.margins.iter().filter(|m| m.broken()).cloned().collect(), ..self.clone() }
-    }
-
-    /** A kind's name; "none" for what stops with no material. */
-    fn kind(&self, kind: Option<usize>) -> &'static str {
-        kind.map_or("none", |k| self.kinds[k])
-    }
-
-    /** A margin's looks by kind, largest changes first, but those under 0.005 at both levels. */
-    fn breakdown(&self, f: &mut std::fmt::Formatter, m: &Margin) -> std::fmt::Result {
-        let largest = |l: Look| l.iter().fold(0.0, |a: f64, v| a.max(v.abs()));
-        let mut kinds: Vec<_> = m.kinds().into_iter().collect();
-        kinds.sort_by(|a, b| largest(m.change(*b)).total_cmp(&largest(m.change(*a))));
-        for kind in kinds {
-            let [a, c] = m.looks.each_ref().map(|looks| looks.get(&kind).copied().unwrap_or_default());
-            if largest(a).max(largest(c)) >= 0.005 {
-                writeln!(f, "      {}: {} -> {}: {:.3} apart", self.kind(kind), look(&a), look(&c), largest(m.change(kind)))?;
-            }
-        }
-        Ok(())
     }
 }
 
@@ -441,14 +365,10 @@ impl std::fmt::Display for Report {
                 Measure::Cameras => "cameras".to_string(),
                 Measure::FromAbove => "from above".to_string(),
                 Measure::FieldsFromAbove => "fields from above".to_string(),
-                Measure::Face(k) => format!("cells seen along {:?}", VOXEL_FACES[k]),
             };
-            let [a, c] = m.values().map(|v| look(&v));
+            let [a, c] = m.looks.map(|v| look(&v));
             let broken = if m.broken() { format!(", over {}", m.measure.tolerance()) } else { String::new() };
             writeln!(f, "  level {} against {}, {what}: {a} -> {c}: {:.3} apart{broken}", m.level, m.against, m.difference())?;
-            if m.broken() || f.alternate() {
-                self.breakdown(f, m)?;
-            }
         }
         Ok(())
     }
@@ -461,7 +381,6 @@ impl std::fmt::Display for Report {
  * behind a finer one; against the level two finer all the way.
  */
 fn levels_against_finer(generator: &Generator, region: &Box3, levels: u32, report: &mut Report) {
-    let palette = Palette::of(generator);
     // Grids generated, by level and box: a level's is the reference of the level two coarser.
     let mut grids: Vec<(u32, Box3, VoxelGrid)> = Vec::new();
     let grid = |grids: &mut Vec<(u32, Box3, VoxelGrid)>, level: u32, area: &Box3| -> usize {
@@ -490,119 +409,17 @@ fn levels_against_finer(generator: &Generator, region: &Box3, levels: u32, repor
         let fine = paths(&grids[reference].2, finer, rays, from, f64::INFINITY);
         let coarse_grid = grid(&mut grids, level, &area);
         let coarse = paths(&grids[coarse_grid].2, level, rays, from, f64::INFINITY);
-        let mut looks = [Looks::new(), Looks::new()];
+        let mut looks = [Look::default(); 2];
         for ((near, fine), coarse) in near.iter().zip(&fine).zip(&coarse) {
             // Past `from`, at each level, of the light that gets there at the finer.
-            let through = 1.0 - near.iter().map(|(_, _, stopped, _)| stopped).sum::<f64>();
-            add(&mut looks[0], fine, NEAR * s, through, &palette);
-            add(&mut looks[1], coarse, NEAR * s, through, &palette);
+            let through = 1.0 - near.iter().map(|(_, seen)| seen.stopped).sum::<f64>();
+            add(&mut looks[0], fine, NEAR * s, through);
+            add(&mut looks[1], coarse, NEAR * s, through);
         }
-        let looks = looks.map(|looks| looks.into_iter().map(|(k, l)| (k, l.map(|v| v / rays.len() as f64))).collect());
+        let looks = looks.map(|look| look.map(|v| v / rays.len() as f64));
         report.margins.push(Margin { region: *region, measure: Measure::Cameras, level, against: finer, looks });
         // Only the grids the coming levels read: the coarse one, and the one after it.
         grids.retain(|(l, ..)| *l + 1 >= level);
-    }
-}
-
-/**
- * The level's cells near a surface at it or at the level one finer: of
- * each site there that stops some light beside one that doesn't stop all
- * of it, the cells the site's voxel reaches into (its centre's and its
- * corners' along the axes).
- */
-fn near_surfaces(grids: &[VoxelGrid; 2]) -> BTreeSet<[i64; 3]> {
-    let mut cells = BTreeSet::new();
-    for (grid, scale) in grids.iter().zip([0.5, 1.0]) {
-        for (x, y, z) in sites(&grid.clip()) {
-            let open = |f: &[i64; 3]| grid.alpha(x + f[0], y + f[1], z + f[2]) < ALPHA;
-            if grid.alpha(x, y, z) == 0 || !FACES.iter().any(open) {
-                continue;
-            }
-            let at = [x, y, z].map(|v| v as f64 * scale);
-            cells.insert(nearest_site(at));
-            for axis in 0..3 {
-                for side in [-0.5, 0.5] {
-                    let mut corner = at;
-                    corner[axis] += side * scale;
-                    cells.insert(nearest_site(corner));
-                }
-            }
-        }
-    }
-    cells
-}
-
-/**
- * Each cell of the level, seen along each of the 12 directions of the
- * lattice, against the cells of the level one finer in it: by induction,
- * level 0. Along a direction, RAYS_PER_CELL parallel rays through random
- * points of the cell, at both levels, inside the cell only: how
- * much each stops, its colour and its glow (a `Look`), summed over the
- * cells near a surface (`near_surfaces`), for each direction.
- */
-/** Rays through each cell along each direction (`faces_against_finer`). */
-const RAYS_PER_CELL: usize = 7;
-
-fn faces_against_finer(generator: &Generator, region: &Box3, levels: u32, report: &mut Report) {
-    let palette = Palette::of(generator);
-    for level in 1..=levels {
-        let s = (1i64 << level) as f64;
-        let mut area = around(region, level);
-        let grow = 0.max((8i64 << level) - (region.max[1] - region.min[1]) / 2);
-        (area.min[1], area.max[1]) = (region.min[1] - grow, region.max[1] + grow);
-        let grids = [level - 1, level].map(|l| generate(generator, &box_at(&area, l), l));
-        let mut looks: Vec<[Looks; 2]> = vec![[Looks::new(), Looks::new()]; FACE_KINDS];
-        let mut rays = [0usize; FACE_KINDS];
-        let mut random = Rng::new(17);
-        for cell in near_surfaces(&grids) {
-            // Its centre, lattice units; within the area.
-            let centre = cell.map(|v| v as f64 * s);
-            if (0..3).any(|i| centre[i] - s < area.min[i] as f64 || centre[i] + s > area.max[i] as f64) {
-                continue;
-            }
-            for (k, n) in VOXEL_FACES.iter().enumerate() {
-                let d = n.map(|v| v as f64 / std::f64::consts::SQRT_2);
-                // Rays along d through random points of the cell's box, as many as cross the cell.
-                let mut crossing = 0;
-                while crossing < RAYS_PER_CELL {
-                    let q: [f64; 3] = std::array::from_fn(|i| centre[i] + s * (2.0 * random.next() - 1.0));
-                    // Where it crosses the cell, |m · (x − centre)| ≤ s for each face's m: from u0 to u1, lattice units.
-                    let (mut u0, mut u1) = (f64::NEG_INFINITY, f64::INFINITY);
-                    for m in VOXEL_FACES {
-                        let along: f64 = (0..3).map(|i| m[i] as f64 * d[i]).sum();
-                        let off: f64 = (0..3).map(|i| m[i] as f64 * (q[i] - centre[i])).sum();
-                        if along.abs() < 1e-12 {
-                            if off > s {
-                                u1 = f64::NEG_INFINITY;
-                            }
-                        } else if along > 0.0 {
-                            u1 = u1.min((s - off) / along);
-                        } else {
-                            u0 = u0.max((s - off) / along);
-                        }
-                    }
-                    let hair = 1e-6;
-                    if u1 - u0 <= 2.0 * hair {
-                        continue;
-                    }
-                    crossing += 1;
-                    rays[k] += 1;
-                    for (grid, (looks, scale)) in grids.iter().zip(looks[k].iter_mut().zip([s / 2.0, s])) {
-                        let from: [f64; 3] = std::array::from_fn(|i| (q[i] + (u0 + hair) * d[i]) / scale);
-                        for (_, id, stopped, glow) in composited(grid, from, d, (u1 - u0 - 2.0 * hair) / scale) {
-                            palette.add(looks, id, true, stopped, glow);
-                        }
-                    }
-                }
-            }
-        }
-        for (k, looks) in looks.into_iter().enumerate() {
-            if rays[k] == 0 {
-                continue;
-            }
-            let looks = looks.map(|l| l.into_iter().map(|(kind, v)| (kind, v.map(|c| c / rays[k] as f64))).collect());
-            report.margins.push(Margin { region: *region, measure: Measure::Face(k), level, against: level - 1, looks });
-        }
     }
 }
 
@@ -624,7 +441,6 @@ fn from_above(world: &World, region: &Box3, levels: impl Iterator<Item = u32>, m
         assert!(levels.peek().is_none(), "a world with no heights has no sky to be seen from (World::heights): from_above 0");
         return;
     }
-    let palette = Palette::of(&world.generator);
     let seen = |tiles: &mut Tiles, area: &Box3| {
         // A ray every 2 units, through a random point of each 2 × 2: through their middles, rays meet plans of whole
         // units at one phase, and the lattice's vertices, where a ray goes on into a voxel by its side.
@@ -645,7 +461,7 @@ fn from_above(world: &World, region: &Box3, levels: impl Iterator<Item = u32>, m
         }
         let reference = &reference.as_ref().expect("made").1;
         let here = seen(&mut Tiles::new(level, world.heights_at(level)), &area);
-        let looks = [looks_of(reference, &palette), looks_of(&here, &palette)];
+        let looks = [look_of(reference), look_of(&here)];
         report.margins.push(Margin { region: *region, measure, level, against: 0, looks });
     }
 }
@@ -657,24 +473,10 @@ fn from_above(world: &World, region: &Box3, levels: impl Iterator<Item = u32>, m
  * (seen from above).
  */
 pub fn margins(name: &str, world: &World, regions: &[Box3], levels: u32, from_above: u32) -> Report {
-    let mut report = Report::new(name, &world.generator);
+    let mut report = Report::new(name);
     for region in regions {
         levels_against_finer(&world.generator, region, levels, &mut report);
         from_above_against_level_0(world, region, from_above, &mut report);
-    }
-    report
-}
-
-/**
- * How far each face of the cells of `world`, named `name`, strays in each
- * of `regions` from the level one finer, up to `levels`
- * (`faces_against_finer`): an experiment, not in the contract
- * ("Each face of a cell against the level one finer" in docs/todo.md).
- */
-pub fn face_margins(name: &str, world: &World, regions: &[Box3], levels: u32) -> Report {
-    let mut report = Report::new(name, &world.generator);
-    for region in regions {
-        faces_against_finer(&world.generator, region, levels, &mut report);
     }
     report
 }
@@ -688,7 +490,7 @@ pub fn face_margins(name: &str, world: &World, regions: &[Box3], levels: u32) ->
  */
 pub fn far_margins(name: &str, world: World, regions: &[Box3], levels: u32) -> Report {
     let world = fields_of(world);
-    let mut report = Report::new(name, &world.generator);
+    let mut report = Report::new(name);
     for region in regions {
         from_above(&world, region, FAR_FROM..=levels, Measure::FieldsFromAbove, &mut report);
     }
@@ -720,11 +522,12 @@ fn kind_of(generator: &Generator, id: u8) -> &'static str {
 }
 
 /** Where a level `level` box of `grid` has a site that stops any light (its alpha), in lattice units, and its kind; how many it has. */
-fn stopping(generator: &Generator, grid: &VoxelGrid, level: u32) -> Option<([i64; 3], &'static str, usize)> {
+fn stopping(generator: &Generator, mut grid: VoxelGrid, level: u32) -> Option<([i64; 3], &'static str, usize)> {
     let b = grid.clip();
     let full: Vec<_> = sites(&b).filter(|&(x, y, z)| grid.alpha(x, y, z) != 0).collect();
     let &(x, y, z) = full.first()?;
-    let (_, id) = grid.light(x, y, z, 0).0.into_iter().find(|part| part.0 != 0)?;
+    let i = grid.index(x, y, z)?;
+    let id = if grid.pieces.alpha[i] != 0 { grid.pieces.seen[i] } else { grid.medium.seen[i] };
     Some(([x, y, z].map(|v| v << level), kind_of(generator, id), full.len()))
 }
 
@@ -749,7 +552,7 @@ pub fn heights_hold(world: &World, regions: &[Box3], levels: u32) -> Vec<String>
         for (i, area) in regions.iter().chain([&spawn]).enumerate() {
             let b = box_at(area, level);
             let slab = Box3 { min: [b.min[0], high, b.min[2]], max: [b.max[0], high + BEYOND, b.max[2]] };
-            if let Some((at, kind, n)) = stopping(&world.generator, &generate(&world.generator, &slab, level), level) {
+            if let Some((at, kind, n)) = stopping(&world.generator, generate(&world.generator, &slab, level), level) {
                 let place = if i == regions.len() { "around spawn".to_string() } else { format!("in {area:?}") };
                 broken.push(format!(
                     "level {level}, {place}: {n} sites stopping light above the heights {:?} (World::heights), which hosts don't generate, \
@@ -828,7 +631,7 @@ pub fn things_hold(world: &World, survey: &Survey) -> Vec<String> {
                     continue;
                 }
                 let b = Box3 { min: [bounds.min[0] - 2, from, bounds.min[2] - 2], max: [bounds.max[0] + 2, to, bounds.max[2] + 2] };
-                if let Some((at, kind, n)) = stopping(&world.generator, &generate(&world.generator, &b, 0), 0) {
+                if let Some((at, kind, n)) = stopping(&world.generator, generate(&world.generator, &b, 0), 0) {
                     broken.push(format!(
                         "{key}: {n} sites stopping light {side} the heights {:?} (World::heights), which hosts don't generate, \
                          such as {kind} at {at:?} lattice units",
@@ -928,7 +731,7 @@ pub fn strata_kept(checked: &[Checked]) -> Vec<String> {
     for ((stratum, measure, level), margins) in means {
         let n = margins.len() as f64;
         let changes = margins.iter().map(|(_, m)| {
-            let [a, c] = m.values();
+            let [a, c] = m.looks;
             std::array::from_fn::<f64, 5, _>(|i| c[i] - a[i])
         });
         let mean = changes.fold([0.0; 5], |sum, c| std::array::from_fn(|i| sum[i] + c[i] / n));

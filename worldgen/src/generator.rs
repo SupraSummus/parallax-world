@@ -11,7 +11,7 @@ use fcc::{FACE_KINDS, Faces, VOXEL_FACES};
 
 use crate::cost::{self, Work};
 use crate::curve::Curve;
-use crate::grid::{ALPHA, BRICK, Box3, VoxelGrid};
+use crate::grid::{ALPHA, BRICK, Box3, COLOUR_ONE, VoxelGrid};
 use crate::js;
 use crate::noise::{Fixed, Fx, ONE, Rng, fixed, float, hash, hash_text, hash64};
 use crate::plan;

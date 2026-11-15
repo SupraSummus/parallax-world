@@ -76,14 +76,15 @@ pub struct VoxelGrid {
     pub medium: Part,
     /** By index in `cells`, of the sites that glow: how much, per channel, of GLOW_ONE. */
     pub glow: BTreeMap<usize, [u32; 3]>,
-    /** By index in `cells`, the sites whose pieces stop or glow unlike through each face: their alpha and glow per face. */
+    /** By index in `cells`, the sites whose pieces look unlike through each face: what they stop, show and glow per face. */
     pub views: BTreeMap<usize, Views>,
 }
 
-/** What a site's pieces stop of the rays entering it by each face (of VOXEL_FACES), and glow to them. */
+/** What a site's pieces stop of the rays entering it by each face (of VOXEL_FACES), show and glow to them. */
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Views {
     pub alpha: [u8; FACE_KINDS],
+    pub colour: [[u16; 3]; FACE_KINDS],
     pub glow: [[u32; 3]; FACE_KINDS],
 }
 
@@ -92,12 +93,17 @@ pub struct Views {
 pub struct Part {
     /** Of ALPHA, how much they stop. */
     pub alpha: Vec<u8>,
-    /** The material they show, one of theirs. */
+    /** What they show of the rays they stop, premultiplied: per channel, linear, of COLOUR_ONE. */
+    pub colour: Vec<[u16; 3]>,
+    /** The material hosts show them as, one of theirs (`show`, `into_grid`). */
     pub seen: Vec<u8>,
 }
 
 /** The glow of a site all of a glowing white: 255 per channel (linear), of a whole share (generator's SHARE). */
 pub const GLOW_ONE: u32 = 255 << 16;
+
+/** The colour of a site all of a white that stops every ray, per channel (linear). */
+pub const COLOUR_ONE: u16 = u16::MAX;
 
 impl VoxelGrid {
     /** A grid of the sites in `b`, widened by one in x if needed to start and end on an even x. */
@@ -124,12 +130,12 @@ impl VoxelGrid {
 
     /**
      * It on box `under`, the same columns right below it, all buried in
-     * material `id`, as `bury` keeps it: each brick of it one's sites, each
+     * material `id` of `colour` (a whole site's, premultiplied), as `bury` keeps it: each brick of it one's sites, each
      * a whole voxel. Not emptied: a host shows it as rock, which rays from
      * a finer level's hollows meet and light doesn't pass. `under` is a
      * whole number of bricks tall, unless it has no sites itself.
      */
-    pub fn on_buried(self, under: &Box3, id: u8) -> VoxelGrid {
+    pub fn on_buried(self, under: &Box3, id: u8, colour: [u16; 3]) -> VoxelGrid {
         let below = (self.min[1] - under.min[1] + BRICK - 1).div_euclid(BRICK);
         if below <= 0 {
             return self;
@@ -146,13 +152,15 @@ impl VoxelGrid {
             let [x, y, z] = [i as i64 % bx, i as i64 / bx % by, i as i64 / (bx * by)];
             *brick = if y < below { at } else { self.bricks[((z * self.by + y - below) * bx + x) as usize] };
         }
-        let VoxelGrid { mut cells, faces, mut pieces, mut medium, glow, .. } = self;
+        let VoxelGrid { mut cells, faces, mut pieces, mut medium, glow, views, .. } = self;
         cells.extend([id; BRICK_SITES]);
         pieces.alpha.extend([ALPHA; BRICK_SITES]);
+        pieces.colour.extend([colour; BRICK_SITES]);
         pieces.seen.extend([id; BRICK_SITES]);
         medium.alpha.extend([0; BRICK_SITES]);
+        medium.colour.extend([[0; 3]; BRICK_SITES]);
         medium.seen.extend([0; BRICK_SITES]);
-        VoxelGrid { cells, faces, pieces, medium, glow, ..grid }
+        VoxelGrid { cells, faces, pieces, medium, glow, views, ..grid }
     }
 
     /** The box of its sites. */
@@ -250,6 +258,7 @@ impl VoxelGrid {
                 self.cells.resize(len, 0);
                 for part in [&mut self.pieces, &mut self.medium] {
                     part.alpha.resize(len, 0);
+                    part.colour.resize(len, [0; 3]);
                     part.seen.resize(len, 0);
                 }
                 self.slot(x, y, z).and_then(Result::ok)
@@ -350,17 +359,18 @@ impl VoxelGrid {
                 *at = moved[from].map_or(-1, |to| to as i32);
             }
         }
-        let hold = |v: &mut Vec<u8>| {
+        fn hold<T: Copy>(v: &mut Vec<T>, held: &[usize]) {
             let mut kept = Vec::with_capacity(held.len() * BRICK_SITES);
-            for &from in &held {
+            for &from in held {
                 kept.extend_from_slice(&v[from * BRICK_SITES..][..BRICK_SITES]);
             }
             *v = kept;
-        };
-        hold(&mut self.cells);
+        }
+        hold(&mut self.cells, &held);
         for part in [&mut self.pieces, &mut self.medium] {
-            hold(&mut part.alpha);
-            hold(&mut part.seen);
+            hold(&mut part.alpha, &held);
+            hold(&mut part.colour, &held);
+            hold(&mut part.seen, &held);
         }
         let to = |i: usize| moved[i / BRICK_SITES].map(|to| to * BRICK_SITES + i % BRICK_SITES);
         self.faces = std::mem::take(&mut self.faces).into_iter().filter_map(|(i, f)| Some((to(i)?, f))).collect();
@@ -377,27 +387,23 @@ impl VoxelGrid {
     /**
      * How light entering site (x, y, z) by face `kind` sees it: what its
      * pieces stop of its rays and its medium of the rest, each how much (of
-     * ALPHA) and of what material; and its glow. Each the face's, where
-     * they differ (`faces`, `views`).
+     * ALPHA) and what that shows (premultiplied, of COLOUR_ONE); and its
+     * glow. Each the face's, where they differ (`views`).
      */
-    pub fn light(&self, x: i64, y: i64, z: i64, kind: usize) -> ([(u8, u8); 2], [u32; 3]) {
+    pub fn light(&self, x: i64, y: i64, z: i64, kind: usize) -> ([(u8, [u32; 3]); 2], [u32; 3]) {
         match self.slot(x, y, z) {
             Some(Ok(i)) => {
-                let view = self.views.get(&i);
-                let glow = match view {
-                    Some(view) => view.glow[kind],
-                    None => self.glow.get(&i).copied().unwrap_or_default(),
+                let (pieces, colour, glow) = match self.views.get(&i) {
+                    Some(view) => (view.alpha[kind], view.colour[kind], view.glow[kind]),
+                    None => (self.pieces.alpha[i], self.pieces.colour[i], self.glow.get(&i).copied().unwrap_or_default()),
                 };
-                let pieces = view.map_or(self.pieces.alpha[i], |view| view.alpha[kind]);
-                let material = if self.faces.is_empty() {
-                    self.pieces.seen[i]
-                } else {
-                    self.faces.get(&i).map_or(self.pieces.seen[i], |faces| faces[kind])
-                };
-                let medium = (ALPHA - pieces) as u32 * self.medium.alpha[i] as u32;
-                ([(pieces, material), (((medium + ALPHA as u32 / 2) / ALPHA as u32) as u8, self.medium.seen[i])], glow)
+                let colour = colour.map(u32::from);
+                // The medium, of the rays the pieces let through.
+                let rest = |v: u32| ((ALPHA - pieces) as u64 * v as u64 + ALPHA as u64 / 2) / ALPHA as u64;
+                let medium = (rest(self.medium.alpha[i] as u32) as u8, self.medium.colour[i].map(|c| rest(c as u32) as u32));
+                ([(pieces, colour), medium], glow)
             }
-            _ => ([(0, 0); 2], [0; 3]),
+            _ => ([(0, [0; 3]); 2], [0; 3]),
         }
     }
 
@@ -523,7 +529,7 @@ mod tests {
         }
         grid.show(|_, _, _| 100);
         // Light sees all a site stops, each as it is: its pieces 40 of 255, its medium 60 of the rest.
-        assert_eq!((grid.alpha(2, 2, 0), grid.light(2, 2, 0, 0).0), (91, [(40, 2), (51, 1)]));
+        assert_eq!((grid.alpha(2, 2, 0), grid.light(2, 2, 0, 0).0.map(|part| part.0)), (91, [40, 51]));
         let handed = |grid: Grid| sites.map(|(x, y, ..)| grid.get(x, y, 0));
         assert_eq!(handed(grid.clone().into_grid(true)), [(0, 0), (2, ALPHA), (1, 60), (1, 60), (2, ALPHA)]);
         assert_eq!(handed(grid.into_grid(false)), [(0, 0), (2, ALPHA), (0, 0), (0, 0), (2, ALPHA)]);

@@ -4,9 +4,10 @@
 use std::rc::Rc;
 
 use worldgen::World;
+use worldgen::checks::cells::cells;
 use worldgen::checks::contract::{
-    Measure, REGION, Report, SHOWN, STOPPED, TOLERANCE, assert_kept, check, face_margins, heights_hold, margins, parts_equal_whole,
-    regions, things_hold, whole_equals_parts,
+    Measure, REGION, Report, SHOWN, STOPPED, TOLERANCE, assert_kept, check, heights_hold, margins, parts_equal_whole, regions, things_hold,
+    whole_equals_parts,
 };
 use worldgen::checks::survey::survey;
 use worldgen::generator::{
@@ -207,17 +208,17 @@ fn village_keeps_the_contract() {
     keeps_the_contract("village", &world_of(village(), (-64, 64)), 4, 2);
 }
 
-/** An experiment ("Each face of a cell against the level one finer" in docs/todo.md): where the test worlds break it. */
+/** An experiment ("Cells hold what they look like" in docs/todo.md): how far the test worlds' cells are from what is in them. */
 #[test]
 #[ignore]
-fn faces_against_finer() {
+fn cells_against_what_is_in_them() {
     for (name, world, levels) in [
         ("fog", world_of(fog(), (0, 128)), 4),
         ("caves", world_of(caves(), (-256, 256)), 3),
         ("village", world_of(village(), (-64, 64)), 4),
     ] {
         let boxes: Vec<Box3> = regions(&world, &[]).1.into_iter().map(|(b, _)| b).collect();
-        println!("{}", face_margins(name, &world, &boxes, levels).broken());
+        cells(name, &world, &boxes, levels).iter().for_each(|c| print!("{c}"));
     }
 }
 
