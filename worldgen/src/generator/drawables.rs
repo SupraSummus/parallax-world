@@ -163,7 +163,16 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
                                 unlike = Some((site, kind));
                             }
                         }
-                        for span in spans {
+                        // Coarser than level 0, solid spans cover each site they meet in part (`cover`).
+                        let by_centre = |span: &Span| s == 1 || span.holds != Holds::Solid;
+                        if s > 1 {
+                            let solid: Vec<&Span> = spans.iter().filter(|span| !by_centre(span) && span.from < span.to).collect();
+                            cover(&solid, axis, [u, v], (lo[axis], hi[axis]), s, op, &mut |look, op, share, w| {
+                                site[axis] = w;
+                                put(look, op, share, picked(site[0], site[1], site[2]), site[0], site[1], site[2]);
+                            });
+                        }
+                        for span in spans.iter().filter(|span| by_centre(span)) {
                             // s is a power of two: shifting is dividing, rounded down.
                             let first = (-((-span.from) >> s.trailing_zeros())).max(lo[axis]);
                             let mut w = first + ((first + u + v) & 1);
@@ -192,6 +201,69 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
         broke(field.name, site, s, clip, &format!("isn't all kind {kind}, as it says"));
     }
     work
+}
+
+/**
+ * Puts a line of sites `s` apart along `axis`, at `line` across it, within
+ * [lo, hi), as its `solid` spans cover each: through each face, the share
+ * of the voxel's chords along its direction that meet them (`within`), or
+ * for a carve, that lie wholly in them; each face seeing the span its rays
+ * meet first, those across the axis the span that fills most of the site.
+ * A span's ends are where level 0 has them on average, half a unit down
+ * (`Tie`). Sites whole of one span are put as before; the others' share
+ * is their most.
+ */
+fn cover(solid: &[&Span], axis: usize, line: [i64; 2], (lo, hi): (i64, i64), s: i64, op: Op, put: &mut dyn FnMut(Look, Op, u32, i64)) {
+    let (Some(from), Some(to)) = (solid.iter().map(|span| span.from).min(), solid.iter().map(|span| span.to).max()) else { return };
+    let sf = s as f64;
+    // The sites whose voxels, s each way along the axis, meet [from, to): s is a power of two.
+    let first = (-((-(from - s)) >> s.trailing_zeros())).max(lo);
+    let mut w = first + ((first + line[0] + line[1]) & 1);
+    while w * s < to + s && w < hi {
+        let centre = (w * s) as f64;
+        let (w_now, site_at) = (w, |y: i64| ((y as f64 - 0.5 - centre) / sf).clamp(-1.0, 1.0));
+        w += 2;
+        // Each span's part of the voxel, −1 to 1 along the axis, in order.
+        let mut parts: Vec<(f64, f64, Kind)> =
+            solid.iter().map(|span| (site_at(span.from), site_at(span.to), span.kind)).filter(|(a, b, _)| a < b).collect();
+        if parts.is_empty() {
+            continue;
+        }
+        parts.sort_by(|p, q| p.0.total_cmp(&q.0));
+        let most = parts.iter().max_by(|p, q| (p.1 - p.0).total_cmp(&(q.1 - q.0))).expect("a part").2;
+        let (bottom, top) = (parts[0].2, parts.iter().max_by(|p, q| p.1.total_cmp(&q.1)).expect("a part").2);
+        let faces: [Kind; FACE_KINDS] = std::array::from_fn(|k| match VOXEL_FACES[k][axis] {
+            1 => top,
+            -1 => bottom,
+            _ => most,
+        });
+        let faces = faces.iter().any(|&k| k != faces[0]).then_some(faces);
+        // What lies outside the spans, between them and past them: chords wholly there meet none.
+        let mut gaps = Vec::new();
+        let mut at = -1.0;
+        for &(a, b, _) in &parts {
+            if a > at {
+                gaps.push((at, a));
+            }
+            at = at.max(b);
+        }
+        gaps.push((at, 1.0));
+        let whole = gaps.iter().all(|(a, b)| b <= a);
+        let share_of = |across: bool| {
+            let within = |list: &mut dyn Iterator<Item = (f64, f64)>| list.map(|(a, b)| within(across, a, b)).sum::<f64>();
+            let stops =
+                if op == Op::Carve { within(&mut parts.iter().map(|p| (p.0, p.1))) } else { 1.0 - within(&mut gaps.iter().copied()) };
+            share(stops.clamp(0.0, 1.0))
+        };
+        let look = Look { kind: most, faces, cover: None };
+        if whole {
+            put(look, op, SHARE, w_now);
+            continue;
+        }
+        let (across, along) = (share_of(true), share_of(false));
+        let cover = (across != along).then(|| std::array::from_fn(|k| if VOXEL_FACES[k][axis] == 0 { along } else { across }));
+        put(Look { cover, ..look }, op, across.max(along), w_now);
+    }
 }
 
 /**
