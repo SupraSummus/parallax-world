@@ -1,9 +1,9 @@
 //! The worlds, built on worldgen's engine with its public API only, and
-//! the registry hosts start them from by name (docs/generators.md). The
-//! native frontend links them; the web generates them as WebAssembly
-//! (web/wasm/, web/src/lib/worldgen.ts).
+//! the registry hosts start them from by name (docs/generators.md): those
+//! here, and those in crates of their own (cheese/). The native frontend
+//! links them; the web generates them as WebAssembly (web/wasm/,
+//! web/src/lib/worldgen.ts).
 
-pub mod cheese;
 pub mod city;
 pub mod fields;
 pub mod forest;
@@ -151,7 +151,7 @@ pub const WORLDS: &[Entry] = &[
         far_levels: 6,
     },
     // The cavern the camera starts in, the caverns, tunnels and eyes around it, their pillars, stairs and crystals.
-    // To level 3: from level 4 on, caves have no pillars, stairs or crystals (cheese.rs, SIZE).
+    // To level 3: from level 4 on, caves have no pillars, stairs or crystals (cheese/src/lib.rs, SIZE).
     // Endless, it has no sky to be seen from.
     Entry {
         name: "cheese",

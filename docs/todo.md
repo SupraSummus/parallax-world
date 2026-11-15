@@ -476,6 +476,16 @@ Numbers are for the forest at 1280×800, as measured when written.
   the moor's, the learned town's and the city's are the valley's.
   With only the kinds it draws, a world could fail on a kind
   drawn only far from spawn, or never.
+- **Worlds are not yet crates of their own.**
+  One should be written without touching another world or the engine,
+  using others' pieces as crates.
+  Only the cheese is one (`worlds/cheese/`),
+  and it still needs its entry in `WORLDS`, its name in three tests' `worlds!`
+  and its cost baseline in `worlds/` (generators.md, "Checks").
+  With `Entry` and `Region` in `worldgen`,
+  each world's crate could give its entry and test itself
+  (one macro of `worldgen::checks`), `WORLDS` a line per crate.
+  Sharing pieces runs into the two items above.
 - **Far regions and cost's places are still listed by hand**
   (`Entry` in `worlds/src/lib.rs`).
   The survey could give both: wide boxes around fields' strata,

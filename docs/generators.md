@@ -13,8 +13,8 @@ and so is the valley (`valley.rs`),
 the forest with towns, fields, landmarks, moorland and a railway
 between mountains, six domains composed as in "Composing",
 the city (`city.rs`), boxes on a plan of quarter metres,
-and the cheese (`cheese.rs`), endless every way, no way up but for walking it;
-a host starts either by name from `WORLDS` (`worlds/src/lib.rs`),
+and the cheese (`worlds/cheese/`), endless every way, no way up but for walking it;
+a host starts any by name from `WORLDS` (`worlds/src/lib.rs`),
 as a `World`: its generator, spawn and heights
 (the bounds it has anything in, with a sky over them; the cheese has none),
 and the places it names (`points`);
@@ -652,7 +652,8 @@ each margin's looks at both levels.
 A broken mean (`contract::strata_kept`) names the stratum, level and measure,
 and each region it was averaged over, at its seed.
 The engine's tests also check that a thing's carves cut only the thing.
-A new world is an entry in `WORLDS`
+A new world is a crate of its own in `worlds/`, as the cheese is,
+an entry in `WORLDS`
 with `far` regions where its fields have patterns finer than the far sites,
 and its name in `worlds!` in `worlds/tests/contract.rs`,
 whose tests fail without it;
