@@ -562,7 +562,8 @@ in shares of material types or in sRGB.
   against level 0 (a world with no sky, as the cheese, has none):
   levels two apart miss what drifts a little at every level,
   like a town's walls taking over from its roofs.
-  Rays see the faces they enter by, from above the ones up.
+  Rays see a site as it looks along them, through the faces turned most against them:
+  from above, the four up, alike.
   Each goes through a random point of its 2 × 2 units (`Camera::jittered`):
   through their middles, rays meet plans of whole units at one phase,
   and the lattice's vertices.

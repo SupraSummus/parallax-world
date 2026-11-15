@@ -62,10 +62,9 @@ Numbers are for the forest at 1280×800, as measured when written.
   What would: a voxel holding where in it its content lies,
   between two planes (contours, as in Laine and Karras' sparse voxel octrees),
   so that a wall is thin from every side and need not grow to a site.
-  A site's pieces now may stop and glow unlike through each of its 12 faces
-  (`VoxelGrid`'s `views`, rays reading the face they enter by),
-  so far only for a box's or an ellipsoid's sheet:
-  from above, a wall in `shapes.rs` keeps the contract to level 2, not 1.
+  A site's pieces now may stop and glow unlike along each of the 12 directions
+  (`VoxelGrid`'s `views`), so far only for a box's or an ellipsoid's sheet;
+  straight down is none of them ("Cells hold what they look like", below).
   Still to do: hosts (`into_grid` hands over no views),
   rods, measured far forms,
   and fields, whose sites are wholly in a span or out:
@@ -487,21 +486,31 @@ Numbers are for the forest at 1280×800, as measured when written.
   Scenes the solid fills, the same share for every case, would ask more.
 - **Cells hold what they look like** (begun).
   A site of `VoxelGrid` holds how much it stops, what that shows and what it glows,
-  each face's where they differ; worldgen reads only that
-  (pictures, the contract, the light's reference).
+  along each direction where they differ; worldgen reads only that
+  (pictures, the contract, the light's reference), along a ray's direction.
   Still to do:
   coverage by direction where sites are filled in part
   (fields' sites are wholly in a span or out, solids' views only for sheets);
   hosts taking colours, not materials (`into_grid` hands over a material by a coin);
   then no materials in grids at all.
   `checks::cells` (an experiment) holds each cell, one by one,
-  to what is in it a level finer (`FINER_BY`),
+  to what is in it `FINER_BY` levels finer,
   along each of the 12 directions, by the rows of the finer level's sites in it.
   On a flat ground a cell at level 1 is a whole site or none,
   where what is in it stops a third of the rays along it, or more:
   58 % of cells are further than `TOLERANCE`, as many on a slope.
   Region means hid that; a cell checked alone does not,
   and a track's sleepers, or a ground's sides swapped, are its cells too.
+  A world keeps it if every cell checked, along every direction, is within `TOLERANCE`
+  (`Cells::kept`): the simplest rule, till we know what good enough is.
+  Once worlds keep it, it is to take the place of the contract's cameras and its looks from above.
+  A field's sites seen along each direction, as much of their rays as cross their spans
+  (tried, not kept), kept a flat ground's cells within it at level 2;
+  but layers sharing a site, each giving only what it covers,
+  leave it to guess how they lie: the valley's snow, painted over its ground, came out grey.
+  A ray along no direction of the lattice reads a site's nearest directions alike:
+  straight down, the four up, so a wall, along which straight down is, shows half as across it
+  (`worldgen/tests/shapes.rs` from above to level 1, not 2); the cells' check reads along the lattice's only.
 - **The forest's canopy measures crowded trees in sample stands.**
   From above it reads each column's owner (`Rooms`),
   but what the trees standing in a column hide from the side
