@@ -507,7 +507,7 @@ fn layers(towns: Rc<Towns>, hold: Holding, ground: Rc<Sloped>) -> Vec<Layer> {
         },
         make: Box::new(move |_, cell| towns.near(cell.centre[2]).map(town)),
         far: None,
-        on: None,
+        stands: None,
     };
     vec![Layer::Field(surface), Layer::Population(built)]
 }

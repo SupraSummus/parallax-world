@@ -6,20 +6,20 @@
 
 use crate::curve::Curve;
 use crate::generator::{
-    About, Anchors, Cell, Child, Children, Far, Field, FieldValues, Kind, Line, Meets, Node, Op, Point, Population, Radius, SOLID, Shape,
-    Shapes, Span, ball, bounds_of_shapes, capsule, cuboid, ellipsoid, gable, lathe, tube,
+    Anchors, Cell, Child, Children, DEEP, DOCS, Far, Field, FieldValues, Holds, Kind, Line, Meets, Node, Op, Point, Population, Radius,
+    SOLID, Shape, Shapes, Span, ball, bounds_of_shapes, capsule, cuboid, ellipsoid, gable, lathe, tube,
 };
 use crate::grid::Box3;
 use std::rc::Rc;
 
 use crate::noise::Rng;
-use crate::plan::Sloped;
+use crate::plan::{self, Sloped};
 use crate::points::{Points, Spot};
 
 impl Field {
     /** A kind, with a medium's extinction if it is one, at each site: `at(x, y, z)`, lattice units. */
     pub fn at(name: &'static str, order: f64, op: Op, at: impl Fn(i64, i64, i64) -> Option<(Kind, Option<f64>)> + 'static) -> Field {
-        Field { name, order, op, values: FieldValues::At(Box::new(at)), about: None, meets: None }
+        Field { name, order, op, values: FieldValues::At(Box::new(at)), meets: None }
     }
 
     /**
@@ -35,7 +35,7 @@ impl Field {
         spans: impl Fn(i64, i64, (i64, i64)) -> S + 'static,
     ) -> Field {
         let spans = Box::new(move |u, v, stretch| spans(u, v, stretch).into());
-        Field { name, order, op, values: FieldValues::Spans { axis, spans }, about: None, meets: None }
+        Field { name, order, op, values: FieldValues::Spans { axis, spans }, meets: None }
     }
 
     /** Spans along each column, up y, all of them: `spans(x, z)`, lattice units; a `Column` or the spans. */
@@ -48,15 +48,28 @@ impl Field {
         self.about_as(About { of, below, above, under: None })
     }
 
-    /** Solid `kind` under what it is about, down without end (About's `under`): the ground, solid to the bottom. */
-    pub fn under(self, kind: impl Into<Kind>) -> Field {
-        let about = self.about.clone().expect("a field is under what it is about");
-        self.about_as(About { under: Some(kind.into()), ..about })
+    /**
+     * A ground: its spans about `of` as `about` says, and solid `under`
+     * under them, down without end (About's `under`): solid to the bottom.
+     */
+    pub fn ground(self, of: Rc<Sloped>, below: i64, above: i64, under: impl Into<Kind>) -> Field {
+        self.about_as(About { of, below, above, under: Some(under.into()) })
     }
 
+    /** Its spans held to `about` as they are made, and what it meets following from it. */
     fn about_as(self, about: About) -> Field {
-        let meets = about.clone();
-        Field { about: Some(about), ..self }.meets(move |b, spacing| meets.meets(b, spacing))
+        let name = self.name;
+        let FieldValues::Spans { axis: 1, spans } = self.values else {
+            panic!("field {name}: spans along y only are about a plan of heights")
+        };
+        let about = Rc::new(about);
+        let held = about.clone();
+        let spans = Box::new(move |x, z, stretch| {
+            let spans = spans(x, z, stretch);
+            held.hold(name, x, z, &spans);
+            spans
+        });
+        Field { values: FieldValues::Spans { axis: 1, spans }, ..self }.meets(move |b, spacing| about.meets(b, spacing))
     }
 
     /**
@@ -69,14 +82,87 @@ impl Field {
     }
 }
 
-impl Meets {
+/**
+ * Where a field's spans along y are: from `below` under to `above` over
+ * `of` at their column, give or take what a line of sites stands for
+ * (`slack`), and under that `under` if it says, down without end (a span
+ * from DEEP). A rule, checked on each line's spans as they are made; what
+ * the field meets follows (Sloped::range).
+ */
+struct About {
+    of: Rc<Sloped>,
+    below: i64,
+    above: i64,
+    /** A solid kind under it all: the ground, solid to the bottom. */
+    under: Option<Kind>,
+}
+
+impl About {
     /**
-     * What a field drawing nothing over `top` along y (lattice units), a
-     * line's sites a spacing apart give or take, draws in box `b`: nothing
-     * over it, anything under (Field::meets).
+     * How far past `below` and `above` the ground a line reaches, at sites
+     * `spacing` apart: down past the eight columns a spacing around it
+     * (column.rs's `sides`), the diagonals' up to twice the slope times
+     * that off; without one, any way.
      */
-    pub fn under(top: i64, b: &Box3, spacing: i64) -> Meets {
-        if b.min[1] > top + 2 * spacing { Meets::Nothing } else { Meets::Any }
+    fn sides(&self, spacing: i64) -> Option<i64> {
+        Some(2 * self.of.slope()? * spacing)
+    }
+
+    /**
+     * How far past them a line's spans may reach: its `sides`, and two
+     * sites more, as spans are at least two sites tall. Asked of a box,
+     * the two sites are what it is widened by (Field::meets).
+     */
+    fn slack(&self, spacing: i64) -> Option<i64> {
+        Some(self.sides(spacing)? + 2 * spacing)
+    }
+
+    /** What its lines draw in box `b` (lattice units), at sites `spacing` apart: whatever they draw, all `under` (a kind), or nothing. */
+    fn meets(&self, b: &Box3, spacing: i64) -> Meets {
+        let range = self.of.range([b.min[0], b.min[2]], [b.max[0] - 1, b.max[2] - 1]);
+        let (Some((lo, hi)), Some(sides)) = (range, self.sides(spacing)) else { return Meets::Any };
+        let (y0, y1) = (b.min[1], b.max[1] - 1);
+        match self.under {
+            _ if y0 > hi + self.above + sides => Meets::Nothing,
+            Some(kind) if y1 < lo - self.below - sides => Meets::All(kind),
+            None if y1 < lo - self.below - sides => Meets::Nothing,
+            _ => Meets::Any,
+        }
+    }
+
+    /** Panics unless field `name`'s `spans` of column (x, z), at the spacing read for, lie where it says. */
+    fn hold(&self, name: &str, x: i64, z: i64, spans: &[Span]) {
+        let s = plan::spacing();
+        let Some(slack) = self.slack(s) else { return };
+        // The column itself, wherever the spans read the ground.
+        let g = plan::where_asked(|| self.of.at(x, z));
+        let (low, high) = (g - self.below - slack, g + self.above + slack);
+        let under = |span: &Span| self.under == Some(span.kind) && span.holds == Holds::Solid;
+        for span in spans.iter().filter(|span| span.from < span.to) {
+            assert!(
+                (span.from >= low || under(span)) && span.to <= high,
+                "field {name}: span [{}, {}) at column ({x}, {z}) reaches past {} under and {} over its ground {g}, \
+                 give or take {slack} at sites {s} apart (Field::about); see \"Rules\" in {DOCS}",
+                span.from,
+                span.to,
+                self.below,
+                self.above
+            );
+        }
+        assert!(
+            self.under.is_none() || spans.iter().any(|span| under(span) && span.from <= DEEP && span.to >= low),
+            "field {name}: at column ({x}, {z}), kind {:?} doesn't reach up from DEEP to {low}, {} under its ground {g}, \
+             give or take {slack} at sites {s} apart (Field::ground); see \"Rules\" in {DOCS}",
+            self.under,
+            self.below,
+        );
+    }
+}
+
+impl Meets {
+    /** What a field drawing nothing over `top` along y (lattice units) draws in box `b`: nothing over it, anything under (Field::meets). */
+    pub fn under(top: i64, b: &Box3) -> Meets {
+        if b.min[1] > top { Meets::Nothing } else { Meets::Any }
     }
 }
 
@@ -114,7 +200,7 @@ impl Population {
             anchor: Anchors::Cells(Box::new(|c| Some(c.centre.map(|v| v as f64)))),
             make: Box::new(|_, _| None),
             far: None,
-            on: None,
+            stands: None,
         }
     }
 
@@ -148,6 +234,11 @@ impl Population {
      * leaves, and its cell's `mark` the point's.
      */
     pub fn anchor_points(self, points: std::rc::Rc<Points>, anchor: impl Fn(&Spot) -> Option<Point> + 'static) -> Population {
+        assert!(
+            self.stands.is_none(),
+            "population {}: give its points before where it stands (`on`), whose N is their leaves' width",
+            self.name
+        );
         Population { cell: points.leaf, anchor: Anchors::Points { points, anchor: Box::new(anchor) }, ..self }
     }
 
@@ -156,12 +247,34 @@ impl Population {
         Population { make: Box::new(make), ..self }
     }
 
-    /** What it draws while its sites are further apart than its `size`: a medium as dense as its things. */
-    /** Its things standing on `ground`, each anchored at most N off it (Population::on): a rule; asked to draw only near it. */
-    pub fn on(self, ground: Rc<Sloped>) -> Population {
-        Population { on: Some(ground), ..self }
+    /**
+     * Whether an anchor of its things may lie in a box (lattice units),
+     * `stands(box)` (Population::stands): a rule; asked to draw only where
+     * they may reach.
+     */
+    pub fn stands(self, stands: impl Fn(&Box3) -> bool + 'static) -> Population {
+        Population { stands: Some(Box::new(stands)), ..self }
     }
 
+    /**
+     * Its things standing on `ground`, each anchored at most N (its cell,
+     * as now) off it: on the ground the level's sites read where one is,
+     * over a box its range (Population::stands).
+     */
+    pub fn on(self, ground: Rc<Sloped>) -> Population {
+        let n = self.cell;
+        self.stands(move |b| {
+            let column = b.max[0] - b.min[0] == 1 && b.max[2] - b.min[2] == 1;
+            let range = if column {
+                Some((ground.at(b.min[0], b.min[2]), ground.at(b.min[0], b.min[2])))
+            } else {
+                ground.range([b.min[0], b.min[2]], [b.max[0], b.max[2]])
+            };
+            range.is_none_or(|(lo, hi)| b.min[1] <= hi + n && b.max[1] > lo - n)
+        })
+    }
+
+    /** What it draws while its sites are further apart than its `size`: a medium as dense as its things. */
     pub fn far(self, far: Field) -> Population {
         Population { far: Some(far), ..self }
     }

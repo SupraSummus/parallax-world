@@ -539,9 +539,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   And a cell's share counts rays the cells behind it stop too,
   so a thing keeps more cells than it stops rays.
 - **Layers that don't say where they are are drawn everywhere**
-  (`Field::about`, `Population::on`):
-  the railway's track (a plan of heights too, as its tunnels are about),
-  the sea, the moor's water and mist,
+  (`Field::meets`, `Population::stands`):
   the city's buildings, and the towns', landmarks', settlements' and steadings' things.
   Native's tiles are cubes, so what a column needs is made again
   in each cube the ground passes through (a plan's columns, per thread);
@@ -723,10 +721,6 @@ Numbers are for the forest at 1280×800, as measured when written.
     of each column of tiles (`tops_of` in `picture.rs`):
     through an empty sky made cube by cube,
     a ray needed a round of tiles for each.
-- What is buried two ways: a host tile all buried is rock, a brick for all
-  (`generate_shown`), but one's buried bottom is cut off (`shown`), a hollow.
-  Rays from a finer level's hollows (a tunnel) would see through it.
-  Keeping it as rock without drawing it would make both one.
 - Far forms for what fills space: the cheese's holes are carved line by line,
   so a line costs as many cells as it crosses,
   and a coarser host cube holds eight times the caverns
@@ -734,6 +728,11 @@ Numbers are for the forest at 1280×800, as measured when written.
   its grottoes (pillars, stairs, crystals) stop at level 3,
   and its lights with them.
   Coarse, the holes could carve as a medium does, a share of each site.
+  Holes as things that cut the world (a population whose carves cut more
+  than itself) read simpler, but each is a thing made and drawn site by site
+  in its box, and a coarse tile asks eight times the cells a level,
+  where a line asks only the holes along it:
+  tried, a level-0 tile took 4 times as long, level 7 170 times.
 - Lay out towns at any angle?
   Walls along the lattice's axes look crisp on FCC;
   at other angles they jag.

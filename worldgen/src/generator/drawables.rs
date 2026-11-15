@@ -51,7 +51,7 @@ pub(super) fn draw(drawable: &Drawable, seed: u64, s: i64, clip: &Box3, put: &mu
     }
 }
 
-/** Lines of a field's spans a side that are asked together what they draw (Field::meets): a box's own would reach from the ground into the air. */
+/** Lines of a field a side that are asked together what they draw (Field::meets): a box's own would reach from the ground into the air. */
 const LINES: i64 = 32;
 
 /** Draws a field into `clip`, a medium keeping a site with the chance a ray crossing it is stopped; returns the work. */
@@ -78,93 +78,71 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
         };
         [weyl(j, i, 0), weyl(i, j, 2)]
     };
-    match &field.values {
-        FieldValues::At(at) => {
-            for z in clip.min[2]..clip.max[2] {
-                for y in clip.min[1]..clip.max[1] {
-                    let mut x = clip.min[0] + ((clip.min[0] + y + z) & 1);
-                    work.reads += 0.max((clip.max[0] - x + 1) / 2) as u64;
-                    while x < clip.max[0] {
-                        if let Some((kind, extinction)) = plan::footprint(s, offset(x, z), || at(x * s, y * s, z * s)) {
-                            put(kind.into(), op, share_of(extinction), picked(x, y, z), x, y, z);
-                        }
-                        x += 2;
-                    }
-                }
-            }
+    // Block by block of lines along an axis (a field's spans', or y for one given at each site), those it says it
+    // draws nothing in skipped; while checking, drawn to see they don't.
+    let axis = match &field.values {
+        FieldValues::Spans { axis, .. } => *axis,
+        FieldValues::At(_) => 1,
+    };
+    let ([a, b], (lo, hi)) = (across(axis), (clip.min, clip.max));
+    let (bottom, top) = (lo[axis] * s, (hi[axis] - 1) * s);
+    let tie = Tie::new(s);
+    let mut site = [0i64; 3];
+    let (mut drew, mut unlike) = (None, None);
+    let mut record = |_: Look, _: Op, share: u32, _: u32, x: i64, y: i64, z: i64| drew = drew.or((share > 0).then_some([x, y, z]));
+    for (bu, bv) in (lo[a]..hi[a]).step_by(LINES as usize).flat_map(|u| (lo[b]..hi[b]).step_by(LINES as usize).map(move |v| (u, v))) {
+        let (to_u, to_v) = ((bu + LINES).min(hi[a]), (bv + LINES).min(hi[b]));
+        let mut block = Box3 { min: [0; 3], max: [0; 3] };
+        (block.min[a], block.max[a], block.min[b], block.max[b]) = (bu * s, (to_u - 1) * s + 1, bv * s, (to_v - 1) * s + 1);
+        (block.min[axis], block.max[axis]) = (bottom, top + 1);
+        let meets = field.meets_in(&block, s);
+        if meets == Meets::Nothing && !checking() {
+            continue;
         }
-        FieldValues::Spans { axis, spans } => {
-            let axis = *axis;
-            let (lo, hi) = (clip.min, clip.max);
-            let others: Vec<usize> = (0..3).filter(|i| *i != axis).collect();
-            let (a, b) = (others[0], others[1]);
-            let tie = Tie::new(s);
-            let mut site = [0i64; 3];
-            assert!(axis == 1 || field.about.is_none(), "field {}: spans along y only are about a plan of heights", field.name);
-            // Block by block of lines, those that may not meet the clip skipped; while checking, drawn to see they don't.
-            let (mut drew, mut unlike) = (None, None);
-            let mut record = |_: Look, _: Op, share: u32, _: u32, x: i64, y: i64, z: i64| drew = drew.or((share > 0).then_some([x, y, z]));
-            for (bu, bv) in (lo[a]..hi[a]).step_by(LINES as usize).flat_map(|u| (lo[b]..hi[b]).step_by(LINES as usize).map(move |v| (u, v)))
-            {
-                let (to_u, to_v) = ((bu + LINES).min(hi[a]), (bv + LINES).min(hi[b]));
-                let (bottom, top) = (lo[axis] * s, (hi[axis] - 1) * s);
-                let mut block = Box3 { min: [0; 3], max: [0; 3] };
-                (block.min[a], block.max[a], block.min[b], block.max[b]) = (bu * s, (to_u - 1) * s + 1, bv * s, (to_v - 1) * s + 1);
-                (block.min[axis], block.max[axis]) = (bottom, top + 1);
-                let meets = field.meets_in(&block, s);
-                if meets == Meets::Nothing && !checking() {
-                    continue;
-                }
-                let put: &mut Put = if meets == Meets::Nothing { &mut record } else { &mut *put };
-                for u in bu..to_u {
-                    for v in bv..to_v {
-                        site[a] = u;
-                        site[b] = v;
-                        let (spans, about) = match meets {
-                            // Under its ground: all of a kind, not asked.
-                            Meets::All(kind) if !checking() => (vec![Span::solid(DEEP, top + s, kind)], None),
-                            _ => {
+        let put: &mut Put = if meets == Meets::Nothing { &mut record } else { &mut *put };
+        // All of a kind, not asked; while checking, asked and held to it.
+        let all = match meets {
+            Meets::All(kind) if !checking() => Some(kind),
+            _ => None,
+        };
+        for u in bu..to_u {
+            for v in bv..to_v {
+                site[a] = u;
+                site[b] = v;
+                match &field.values {
+                    FieldValues::At(at) => {
+                        let mut w = lo[axis] + ((lo[axis] + u + v) & 1);
+                        while w < hi[axis] {
+                            site[axis] = w;
+                            let [x, y, z] = site;
+                            let value = all.map(|kind| (kind, None)).or_else(|| {
+                                work.reads += 1;
+                                plan::footprint(s, offset(x, z), || at(x * s, y * s, z * s))
+                            });
+                            if let Meets::All(kind) = meets
+                                && value != Some((kind, None))
+                            {
+                                unlike = unlike.or(Some((site, kind)));
+                            }
+                            if let Some((kind, extinction)) = value {
+                                put(kind.into(), op, share_of(extinction), picked(x, y, z), x, y, z);
+                            }
+                            w += 2;
+                        }
+                    }
+                    FieldValues::Spans { spans, .. } => {
+                        let spans = match all {
+                            Some(kind) => vec![Span::solid(DEEP, top + s, kind)],
+                            None => {
                                 // A line along x or z reads plans at one z or x: dithered across it only.
                                 let mut moved = offset(site[0], site[2]);
                                 if axis != 1 {
                                     moved[axis / 2] = 0;
                                 }
                                 work.reads += 1;
-                                (plan::footprint(s, moved, || spans(u * s, v * s, (bottom, top))), field.about.as_ref())
+                                plan::footprint(s, moved, || spans(u * s, v * s, (bottom, top)))
                             }
                         };
-                        // What it is about, held to it where asked.
-                        if let Some((about, slack)) = about.and_then(|about| Some((about, about.slack(s)?))) {
-                            let g = about.of.at(u * s, v * s);
-                            let (low, high) = (g - about.below - slack, g + about.above + slack);
-                            let under = |span: &Span| about.under == Some(span.kind) && span.holds == Holds::Solid;
-                            for span in spans.iter().filter(|span| span.from < span.to) {
-                                assert!(
-                                    (span.from >= low || under(span)) && span.to <= high,
-                                    "field {}: span [{}, {}) at column ({}, {}) reaches past {} under and {} over its ground {g}, \
-                                 give or take {slack} at sites {s} apart (Field::about); see \"Rules\" in {DOCS}",
-                                    field.name,
-                                    span.from,
-                                    span.to,
-                                    u * s,
-                                    v * s,
-                                    about.below,
-                                    about.above
-                                );
-                            }
-                            assert!(
-                                about.under.is_none()
-                                    || bottom >= low
-                                    || spans.iter().any(|span| under(span) && span.from < bottom && span.to >= low),
-                                "field {}: at column ({}, {}), kind {:?} doesn't reach up from the bottom to {low}, {} under its ground {g}, \
-                                 give or take {slack} at sites {s} apart (Field::under); see \"Rules\" in {DOCS}",
-                                field.name,
-                                u * s,
-                                v * s,
-                                about.under,
-                                about.below,
-                            );
-                        }
                         if let Meets::All(kind) = meets {
                             // Checking: it is all `kind` as it says, a solid span of it through and nothing else in it.
                             let through = spans
@@ -198,13 +176,13 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
                     }
                 }
             }
-            if let Some(site) = drew {
-                broke(field.name, site, s, clip, "draws where it says it may not");
-            }
-            if let Some((site, kind)) = unlike {
-                broke(field.name, site, s, clip, &format!("isn't all kind {kind}, as it says"));
-            }
         }
+    }
+    if let Some(site) = drew {
+        broke(field.name, site, s, clip, "draws where it says it may not");
+    }
+    if let Some((site, kind)) = unlike {
+        broke(field.name, site, s, clip, &format!("isn't all kind {kind}, as it says"));
     }
     work
 }

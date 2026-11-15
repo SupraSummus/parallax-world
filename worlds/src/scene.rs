@@ -225,8 +225,8 @@ impl Scene {
             0 => None,
             id => Some((id - 1, None)),
         })
-        // Nothing past its box, coarse sites a little past it given.
-        .meets(move |b, s| if b.overlaps(&Box3 { min, max }.widen(2 * s)) { Meets::Any } else { Meets::Nothing });
+        // Nothing past its box.
+        .meets(move |b, _| if b.overlaps(&Box3 { min, max }) { Meets::Any } else { Meets::Nothing });
         World {
             generator: Generator { kinds, seed: 0, layers: vec![Layer::Field(field)] },
             spawn,

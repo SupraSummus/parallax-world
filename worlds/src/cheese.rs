@@ -28,9 +28,6 @@ kinds! {
     rose: 6, ["#ff86dc", "#f572cf"], glows;
 }
 
-/** Holes lie within this far of the origin along y: past it, solid cheese without end. */
-const HOLED: i64 = 1 << 34;
-
 /** Balls of one size: one in a cell CELL wide with the chance `chance`, its radius from `least` to `most`. */
 struct Balls {
     cell: i64,
@@ -85,7 +82,7 @@ impl Balls {
     /** The ball of cell (i, j, k), its centre and radius, if it has one. */
     fn ball(&self, seed: u64, [i, j, k]: [i64; 3]) -> Option<([i64; 3], i64)> {
         let mut rng = Rng::new(hash64(seed, i, j, k));
-        if j.abs() > HOLED / self.cell || rng.next() >= self.chance {
+        if rng.next() >= self.chance {
             return None;
         }
         let centre = [i, j, k].map(|c| c * self.cell + (rng.next() * self.cell as f64) as i64);
@@ -95,8 +92,7 @@ impl Balls {
 
     /** The balls that may reach the box [min, max]. */
     fn balls(&self, seed: u64, min: [i64; 3], max: [i64; 3]) -> impl Iterator<Item = ([i64; 3], i64)> + '_ {
-        let [lo, hi] =
-            [min.map(|v| v.max(-HOLED) - self.most), max.map(|v| v.min(HOLED) + self.most)].map(|p| p.map(|v| v.div_euclid(self.cell)));
+        let [lo, hi] = [min.map(|v| v - self.most), max.map(|v| v + self.most)].map(|p| p.map(|v| v.div_euclid(self.cell)));
         cells(lo, hi).filter_map(move |c| self.ball(seed, c))
     }
 }
@@ -133,7 +129,7 @@ fn tunnels(seeds: Seeds, min: [i64; 3], max: [i64; 3]) -> impl Iterator<Item = T
         let [lo, hi] = [0, 1].map(|end| {
             [0, 1, 2].map(|a| {
                 let pad = TUNNEL_MOST + if a == 1 { CAVERNS.most / 2 } else { 0 };
-                let v = if end == 0 { min[a].max(-HOLED) - pad } else { max[a].min(HOLED) + pad };
+                let v = if end == 0 { min[a] - pad } else { max[a] + pad };
                 v.div_euclid(CAVERNS.cell) - if end == 0 { d[a].max(0) } else { d[a].min(0) }
             })
         });
@@ -247,19 +243,9 @@ impl Holes {
     }
 }
 
-/** The stretch [from, to] of a line of sites asked for, a few sites more. */
-fn asked((from, to): (i64, i64)) -> (i64, i64) {
-    let more = 4 * spacing();
-    (from.saturating_sub(more), to.saturating_add(more))
-}
-
 /** The cheese, everywhere: all of any box. */
 fn body() -> Field {
-    Field::spans("cheese", 0.0, Op::Fill, 1, |_, _, stretch| {
-        let (from, to) = asked(stretch);
-        vec![Span::solid(from, to, K::cheese)]
-    })
-    .meets(|_, _| Meets::All(K::cheese.into()))
+    Field::at("cheese", 0.0, Op::Fill, |_, _, _| Some((K::cheese.into(), None))).meets(|_, _| Meets::All(K::cheese.into()))
 }
 
 /** Whether holes of the widest `most` are carved at sites `spacing` apart: while wider than the sites are apart. */
@@ -276,7 +262,7 @@ fn carved(most: i64, spacing: i64) -> bool {
  */
 fn holes(seeds: Seeds) -> Field {
     Field::spans("holes", 1.0, Op::Carve, 1, move |x, z, stretch| {
-        let ((from, to), s) = (asked(stretch), spacing());
+        let ((from, to), s) = (stretch, spacing());
         let (low, high) = ([x, from, z], [x, to, z]);
         let (fx, fz) = (x as f64, z as f64);
         let carved = |most: i64| carved(most, s);
@@ -300,8 +286,7 @@ fn holes(seeds: Seeds) -> Field {
             .collect::<Vec<_>>()
     })
     .meets(move |b, s| {
-        // The box, two sites more each way: a chord's ends are rounded out, and sites stand for their voxels.
-        let [min, max] = [b.min.map(|v| v - 2 * s), b.max.map(|v| v - 1 + 2 * s)];
+        let [min, max] = [b.min, b.max.map(|v| v - 1)];
         let reaches = |(c, r): ([i64; 3], i64)| (0..3).all(|i| c[i] - r <= max[i] && c[i] + r >= min[i]);
         let balls = |balls: &Balls, seed: u64| carved(balls.most, s) && balls.balls(seed, min, max).any(reaches);
         let tunnels = carved(TUNNEL_MOST, s) && tunnels(seeds, min, max).next().is_some();

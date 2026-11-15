@@ -280,5 +280,5 @@ fn sea(ground: Rc<Sloped>) -> Field {
         }
         Column::new(h).surface(L::sand, m(1.0)).water_to(T::water, SEA.0).spans()
     })
-    .meets(|b, s| Meets::under((SEA + Units::m(1.5)).0 + 1, b, s))
+    .meets(|b, _| Meets::under((SEA + Units::m(1.5)).0 + 1, b))
 }

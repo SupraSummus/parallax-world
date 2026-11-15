@@ -527,8 +527,7 @@ fn layers(scope: &Scope, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
             let below = if cliff || surface == K::stone || surface == K::mossyStone { K::stone } else { K::soil };
             column::Column::new(h).surface(surface, vox(1.0) as i64).sides(below, lowest, vox(1.5) as i64).under(K::stone)
         })
-        .about(on.clone(), vox(1.5) as i64, 1)
-        .under(K::stone)
+        .ground(on.clone(), vox(1.5) as i64, 1, K::stone)
     };
 
     // Trees, at the trees' points (worldgen's Points), of their marks' species: leaves 2 m wide, each holding one

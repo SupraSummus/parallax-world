@@ -111,7 +111,7 @@ impl Column {
         self.fill_below_exactly(kind, bottom)
     }
 
-    /** `kind` under the layers so far, down without end: the ground solid to the bottom (`Field::under`). */
+    /** `kind` under the layers so far, down without end: the ground solid to the bottom (`Field::ground`). */
     pub fn under(self, kind: impl Into<Kind>) -> Column {
         self.fill_below_exactly(kind, DEEP)
     }

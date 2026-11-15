@@ -890,8 +890,7 @@ fn ground(seed: u64) -> Field {
         column.under(K::soil)
     })
     // Flat, a plan cell over it at most.
-    .about(Rc::new(Sloped::new(Rc::new(Plan::new("ground", 1 << 20, |_, _| PLAN * MIN_Y)), 0)), 1, PLAN + 1)
-    .under(K::soil)
+    .ground(Rc::new(Sloped::new(Rc::new(Plan::new("ground", 1 << 20, |_, _| PLAN * MIN_Y)), 0)), 1, PLAN + 1, K::soil)
 }
 
 /** A street lamp on the pavement at (x, z), its arm reaching over the road along (dx, dz). */
