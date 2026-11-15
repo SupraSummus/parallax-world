@@ -21,7 +21,7 @@ use fcc::Lattice;
 use fcc::{FastMap, FastSet, GRID_LEVELS, Tiles};
 
 use super::bakery::{Baked, Bakery, Request};
-use super::compositor::{Flat, probe};
+use super::compositor::GpuProbe;
 use super::occlusion::{Box3, Occlusion};
 use crate::engine::Look;
 use crate::view::{self, Face, to_local};
@@ -67,14 +67,16 @@ pub struct Frame {
     pub relief: bool,
     /** Whether its reliefs are drawn flat, a picture a cell (compositor::flatten). */
     pub flat: bool,
+    /** The cells hidden in the faces in view (Hiding), for the compositor to ask the GPU whether they show after all. */
+    pub probes: Arc<[GpuProbe]>,
     /** Where the compositor tells which of its probes show, and how many times it had told when this frame was rendered. */
     pub feedback: Arc<Feedback>,
     pub heard: u64,
 }
 
 /**
- * What the compositor found of the frames' probes (compositor::probe): the
- * chunk ids of those that show, and how many times it found any; and how
+ * What the compositor found of the frames' probes (Frame's `probes`): the
+ * ids of those that show, and how many times it found any; and how
  * to wake the renderer, so that it bakes their cells.
  */
 pub struct Feedback {
@@ -83,7 +85,7 @@ pub struct Feedback {
 }
 
 impl Feedback {
-    /** Tells the renderer that the probes of chunk ids `ids` show, if any do. */
+    /** Tells the renderer that the probes `ids` show, if any do. */
     pub fn report(&self, ids: Vec<u32>) {
         if ids.is_empty() {
             return;
@@ -145,7 +147,7 @@ pub struct Stats {
     pub queued: usize,
     /** Tiles that cells in view read and the world has not made, by grid level, most wanted first. */
     pub tiles: Vec<(usize, TileId)>,
-    /** Cells hidden in the faces in view (Hiding), each a probe among the frame's chunks, and how many the GPU found showing after all, of all hidden. */
+    /** Cells hidden in the faces in view (Hiding), each a probe of the frame's, and how many the GPU found showing after all, of all hidden. */
     pub hidden: usize,
     pub found: usize,
 }
@@ -188,7 +190,7 @@ struct Pick {
     waiting: Vec<(CellChunk, [TileId; 2], Wanted)>,
     baking: FastMap<CellChunk, (Request, Wanted)>,
     hiding: Option<Hiding>,
-    hidden: Vec<Hidden>,
+    hidden: FastMap<CellChunk, Hidden>,
     /** The cells the GPU found showing after all: not hidden again while picked. */
     showing: FastSet<CellChunk>,
 }
@@ -196,17 +198,17 @@ struct Pick {
 /**
  * A cell hidden (Hiding): the tiles it reads, how it is wanted, its request
  * if it was to bake, and its probe, which asks the GPU whether it shows
- * after all (compositor::probe).
+ * after all (Frame's `probes`).
  */
 struct Hidden {
     cell: CellChunk,
     tiles: [TileId; 2],
     wanted: Wanted,
     request: Option<Request>,
-    probe: Arc<Chunk>,
+    probe: GpuProbe,
 }
 
-/** The probes of face `face`'s hidden cells: their chunks' ids, from the renderer's, and by id, each's face and cell. */
+/** The probes of face `face`'s hidden cells: their ids, from the renderer's, and by id, each's face and cell. */
 struct Asking<'a> {
     face: usize,
     next_id: &'a mut u32,
@@ -214,13 +216,11 @@ struct Asking<'a> {
 }
 
 impl Asking<'_> {
-    /** A probe of `cell`, whose box is `shown`. */
-    fn probe(&mut self, cell: CellChunk, shown: Box3) -> Arc<Chunk> {
+    /** A probe of `cell`, all it may draw within `shown`. */
+    fn probe(&mut self, cell: CellChunk, shown: Box3) -> GpuProbe {
         *self.next_id += 1;
-        let (origin, clusters) = probe(shown, f64::from(cell.site[2] << cell.atoms) * LAYER);
-        let baked = Baked { origin, columns: Vec::new(), splats: Vec::new(), clusters, veils: 1, flat: Flat::default() };
         self.probes.insert(*self.next_id, (self.face, cell));
-        Arc::new(Chunk { id: *self.next_id, baked })
+        GpuProbe::new(*self.next_id, self.face, &cell, shown)
     }
 }
 
@@ -493,7 +493,7 @@ fn hide(pick: &mut Pick, fresh: bool, levels: &[Arc<Level>], asking: &mut Asking
             *seen = Seen::Hidden;
         }
         let probe = asking.probe(cell, hiding.shown(&cell));
-        pick.hidden.push(Hidden { cell, tiles, wanted, request, probe });
+        pick.hidden.insert(cell, Hidden { cell, tiles, wanted, request, probe });
     }
     any
 }
@@ -564,6 +564,7 @@ impl Renderer {
                 farthest: 0.0,
                 relief,
                 flat,
+                probes: Arc::new([]),
                 feedback,
                 heard: 0,
             },
@@ -592,10 +593,9 @@ impl Renderer {
         let (found, heard) = self.feedback.take();
         let mut asked = vec![false; self.faces.len()];
         for id in found {
-            let Some((f, _)) = self.probes.remove(&id) else { continue };
+            let Some((f, cell)) = self.probes.remove(&id) else { continue };
             let Some(pick) = self.picks[f][0].as_mut() else { continue };
-            let Some(k) = pick.hidden.iter().position(|h| h.probe.id == id) else { continue };
-            let h = pick.hidden.swap_remove(k);
+            let Some(h) = pick.hidden.remove(&cell) else { continue };
             pick.showing.insert(h.cell);
             unhide(f, pick, h);
             (asked[f], changed, self.found) = (true, true, self.found + 1);
@@ -638,7 +638,7 @@ impl Renderer {
                 let y = std::f64::consts::FRAC_1_SQRT_2;
                 let wide = [(t0 - TURN).max(-1.0), (t1 + TURN).min(1.0), (t2 - TURN).max(-y), (t3 + TURN).min(y)];
                 let mut old = self.picks[f][part].take().map(|p| {
-                    p.hidden.iter().for_each(|h| _ = self.probes.remove(&h.probe.id));
+                    p.hidden.values().for_each(|h| _ = self.probes.remove(&h.probe.id()));
                     p.picked
                 });
                 let picked = lod.pick(eyes, look.far, wide, old.as_mut());
@@ -722,7 +722,7 @@ impl Renderer {
             }
         });
         let hiding = (!lod.medium && self.hides).then(|| Hiding::new(eye, far, *lod, lattice, self.flat, self.heights));
-        let mut pick = Pick { picked, chunks, waiting, baking, hiding, hidden: Vec::new(), showing: FastSet::default() };
+        let mut pick = Pick { picked, chunks, waiting, baking, hiding, hidden: FastMap::default(), showing: FastSet::default() };
         _ = hide(&mut pick, true, levels, &mut Asking { face: f, next_id: &mut self.next_id, probes: &mut self.probes });
         self.picks[f][usize::from(lod.medium)] = Some(pick);
     }
@@ -779,7 +779,7 @@ impl Renderer {
     /** The frame of what the faces in view composed, and what they want: the chunks to bake, and the tiles, nearest first. */
     fn gather(&mut self, look: &Look) {
         let picks = || self.picks.iter().zip(&self.shown).filter(|p| *p.1).flat_map(|p| p.0.iter().flatten());
-        let mut chunks: Vec<Placement> = picks().flat_map(|p| p.chunks.iter().cloned()).collect();
+        let chunks: Vec<Placement> = picks().flat_map(|p| p.chunks.iter().cloned()).collect();
         // Their planes through their sites.
         let farthest = chunks
             .iter()
@@ -789,10 +789,11 @@ impl Renderer {
             })
             .fold(look.far, f64::max);
         self.frame.farthest = farthest;
-        // The probes, after all that draws.
-        let shown =
-            self.picks.iter().enumerate().zip(&self.shown).filter(|p| *p.1).flat_map(|((f, p), _)| p.iter().flatten().map(move |p| (f, p)));
-        chunks.extend(shown.flat_map(|(face, p)| p.hidden.iter().map(move |h| Placement { face, cell: h.cell, chunk: h.probe.clone() })));
+        // The same, unless they changed: the compositor sends them to the GPU anew when they do.
+        let probes: Vec<GpuProbe> = picks().flat_map(|p| p.hidden.values().map(|h| h.probe)).collect();
+        if bytemuck::cast_slice::<_, u8>(&probes) != bytemuck::cast_slice::<_, u8>(&self.frame.probes) {
+            self.frame.probes = probes.into();
+        }
         let ids: FastSet<u32> = chunks.iter().map(|p| p.chunk.id).collect();
         let came: Vec<Placement> = chunks.iter().filter(|p| !self.ids.contains(&p.chunk.id)).cloned().collect();
         let went: Vec<u32> = self.ids.iter().filter(|id| !ids.contains(id)).copied().collect();

@@ -154,7 +154,7 @@ impl Engine for Chunks {
         Frame {
             stats: format!(
                 "{} chunks\n{} baking, {} in all, {} tiles wanted\n{} cells hidden, {} found showing",
-                frame.chunks.len() - stats.hidden,
+                frame.chunks.len(),
                 stats.baking,
                 stats.queued,
                 stats.tiles.len(),
@@ -341,8 +341,7 @@ mod tests {
                 let pixels = easel.pixels(&*frame.picture, PIXELS).2;
                 let composed: Box<dyn Any> = frame.picture;
                 let composed: Box<Composed> = composed.downcast().expect("chunks");
-                // Its chunks that draw: not probes, which have nothing to (compositor::probe).
-                (pixels, composed.frame.chunks.iter().filter(|p| !p.chunk.baked.columns.is_empty()).count())
+                (pixels, composed.frame.chunks.len())
             };
             [drawn(&look), drawn(&forward(&look, 1.5))]
         });

@@ -8,12 +8,12 @@
 // and tile_vertex (splat_vertex) draws them; their depth is reduced to a
 // pyramid of farthest depths (reduce_depth, reduce), and cull_rest tests
 // every tile against it: those that showed are kept for the next frame,
-// and those newly showing drawn now. A phase's draws are the clusters',
-// in their order, none for those it leaves out, so that where depths tie,
-// the same shows every time. cull_rest also counts the pictures of medium in
-// front of them by their place along the rays, which scan_veils and
-// order_veils list far to near, to be laid one over another
-// (veil_fragment) and over the picture.
+// and those newly showing drawn now. A phase's draws are listed in the
+// clusters' order, those it leaves out left out (list, scan_draws,
+// pack_draws), so that where depths tie, the same shows every time.
+// cull_rest also counts the pictures of medium in front of them by their
+// place along the rays, which scan_veils and order_veils list far to
+// near, to be laid one over another (veil_fragment) and over the picture.
 
 // A face's own rays, for pictures drawn flat and of medium (flat_vertex, veil_vertex).
 enable clip_distances;
@@ -97,8 +97,7 @@ const FLAT = 2.0;
 // (low byte of `slot_count`), the widest's half width `wide`; or `count`
 // runs of a picture from `first`, its first column's centre `base`, of
 // medium, its slab's first layer `layer` and how deep its halves are,
-// `half`, in half layers (see veil_fragment); or, `wide` below 0, a probe
-// (is_probe), a box with nothing to draw. Its chunk's slot
+// `half`, in half layers (see veil_fragment). Its chunk's slot
 // (`slot_count` above the low byte), the box of their outlines along the
 // axis relative to the chunk's origin, whether any showed in the last
 // frame, and how far past the plane they are, nearest and farthest.
@@ -117,6 +116,20 @@ struct Cluster {
 }
 const TILE = 4;
 
+// A hidden cell (compositor.rs's GpuProbe), which find_probes asks whether
+// it shows: its box in its face's coordinates, across and up from `min`
+// to `max`, and along the axis, `depth` near and far; its face, its
+// cell's level and its site's layer of grid 0 (claims), and its id.
+struct Probe {
+  min: vec2f,
+  max: vec2f,
+  depth: vec2f,
+  face: u32,
+  level: i32,
+  layer: i32,
+  id: u32,
+}
+
 // A draw: a tile's quad, an instance of tile_vertex; or a cluster's
 // splats or runs, instances of splat_vertex, flat_vertex or veil_vertex.
 struct DrawArgs {
@@ -133,10 +146,13 @@ struct DrawArgs {
 // and its colour; 0, none.
 @group(0) @binding(2) var<storage, read> tiles: array<Cluster>;
 @group(0) @binding(3) var<storage, read> columns: array<vec2u>;
-// Culling: all the clusters, some left where chunks were (cull), and a
-// draw for each.
+// Culling: all the clusters, some left where chunks were (cull), and the
+// draws of those drawn, in their order; listed by workgroup first, how
+// many each (list), and how many in all (scan_draws, pack_draws).
 @group(0) @binding(4) var<storage, read_write> clusters: array<Cluster>;
 @group(0) @binding(6) var<storage, read_write> draws: array<DrawArgs>;
+@group(0) @binding(24) var<storage, read_write> listed: array<DrawArgs>;
+@group(0) @binding(25) var<storage, read_write> blocks: array<u32>;
 @group(0) @binding(8) var farthest: texture_2d<f32>;
 // The pictures of medium to draw, far to near, and how many; in two
 // halves, how many at each place (veil_place), then where in veil_draws
@@ -144,7 +160,9 @@ struct DrawArgs {
 @group(0) @binding(9) var<storage, read_write> veils_drawn: atomic<u32>;
 @group(0) @binding(16) var<storage, read_write> veil_draws: array<DrawArgs>;
 @group(0) @binding(22) var<storage, read_write> veil_places: array<atomic<u32>>;
-// The probes that show (probe_shows), by cluster: how many, then which.
+// Hidden cells' probes (find_probes), and those that show: how many, how
+// many probes there are, then the ids of those that show.
+@group(0) @binding(26) var<storage, read> probes: array<Probe>;
 @group(0) @binding(23) var<storage, read_write> found: array<atomic<u32>>;
 // The chunks' records, by slot, and the chunks place makes of them.
 @group(0) @binding(17) var<storage, read> records: array<Record>;
@@ -654,9 +672,10 @@ fn closest_to_zero(lo: f32, hi: f32) -> f32 {
   return select(select(0.0, -hi, hi < 0.0), lo, lo > 0.0);
 }
 
-// The rays through a cluster's box, as a rectangle of its face's tangents,
-// at most its corners', near and far; a splat's widened by its slant
-// across (splat_vertex). `ahead`: NOWHERE if it is all behind the eye or
+// The rays through a box from the eye, `lo` to `hi` across and up, `z`
+// along the axis, as a rectangle of its face's tangents, at most its
+// corners', near and far; widened by `wide` times its slant across (a
+// splat's: splat_vertex). `ahead`: NOWHERE if it is all behind the eye or
 // past its face's rays, a hair wider (owns); BEHIND if it reaches behind
 // the eye's plane; else AHEAD.
 const NOWHERE = 0u;
@@ -667,10 +686,8 @@ struct Rays {
   hi: vec2f,
   ahead: u32,
 }
-fn rays_of(cluster: Cluster) -> Rays {
-  let c = chunks[cluster.slot_count >> 8u];
-  let z = c.distance + vec2f(cluster.near, cluster.far);
-  var r = Rays(c.origin + cluster.min, c.origin + cluster.max, AHEAD);
+fn rays_through(lo: vec2f, hi: vec2f, z: vec2f, wide: f32) -> Rays {
+  var r = Rays(lo, hi, AHEAD);
   if z.y <= 0.0 {
     r.ahead = NOWHERE;
     return r;
@@ -679,7 +696,6 @@ fn rays_of(cluster: Cluster) -> Rays {
     r.ahead = BEHIND;
     return r;
   }
-  let wide = max(cluster.wide, 0.0);
   let slant = max(max(abs(r.lo.x) / z.x, abs(r.hi.x) / z.x), max(abs(r.lo.x) / z.y, abs(r.hi.x) / z.y));
   r.lo.x -= wide * slant;
   r.hi.x += wide * slant;
@@ -689,6 +705,12 @@ fn rays_of(cluster: Cluster) -> Rays {
     r.ahead = NOWHERE;
   }
   return r;
+}
+
+// A cluster's, from its chunk's place.
+fn rays_of(cluster: Cluster) -> Rays {
+  let c = chunks[cluster.slot_count >> 8u];
+  return rays_through(c.origin + cluster.min, c.origin + cluster.max, c.distance + vec2f(cluster.near, cluster.far), cluster.wide);
 }
 
 // A rectangle of face `face`'s tangents on screen, in pixels: its corners
@@ -739,9 +761,7 @@ fn hidden(b: vec4f, depth: f32) -> bool {
   let size = max(b.z - b.x, b.w - b.y);
   let level = clamp(i32(ceil(log2(max(size, 1.0)))) - 1, 0, levels - 1);
   let texel = f32(2 << u32(level));
-  // Each level halves the last, down to a texel (Targets::new). Asked for
-  // one level per thread, Mesa's lavapipe gave some threads another level's size.
-  let last = max(vec2i(textureDimensions(farthest)) >> vec2u(u32(level)), vec2i(1)) - 1;
+  let last = level_last(level);
   let start = min(vec2i(floor(b.xy / texel)), last);
   let end = min(vec2i(ceil(b.zw / texel)) - 1, last);
   var far = 0.0;
@@ -759,14 +779,18 @@ fn hidden(b: vec4f, depth: f32) -> bool {
 // far ahead it is; drawn flat, of the least w in its box.
 fn nearest_depth(cluster: Cluster, level: f32) -> f32 {
   let c = chunks[cluster.slot_count >> 8u];
+  let lo = vec3f(c.origin + cluster.min, c.distance + cluster.near);
+  return box_depth(c.face, lo, vec3f(c.origin + cluster.max, c.distance + cluster.far), level);
+}
+
+// Of a box of face `face` from `lo` to `hi`, relative to the eye.
+fn box_depth(face: u32, lo: vec3f, hi: vec3f, level: f32) -> f32 {
   if globals.whole == FLAT {
-    let ahead = globals.faces[c.face].view[2];
-    let lo = ahead * vec3f(c.origin + cluster.min, c.distance + cluster.near);
-    let hi = ahead * vec3f(c.origin + cluster.max, c.distance + cluster.far);
-    let w = dot(min(lo, hi), vec3f(1.0));
+    let ahead = globals.faces[face].view[2];
+    let w = dot(min(ahead * lo, ahead * hi), vec3f(1.0));
     return select(0.0, flat_depth(level, w), w > 0.0);
   }
-  return depth_of(level, max(c.distance + cluster.near, 0.0));
+  return depth_of(level, max(lo.z, 0.0));
 }
 
 // The level whose whole voxels a face draws `ahead` along its axis from the
@@ -801,61 +825,6 @@ fn draws_cluster(at: u32, cluster: Cluster, phase: u32) -> bool {
   return visible && cluster.visible == 0u;
 }
 
-// Whether a probe's box (compositor.rs's probe), of a cell hidden, may
-// show: its cell claimed from where the eye is, in view, and not behind
-// what is drawn, all of it (find_probes). A probe's box borders what
-// shows, so it is tested more finely than a cluster: of the pyramid's
-// level at which its quad on screen (screen_box's) spans at most
-// PROBE_TEXELS each way, every texel the quad meets. Its draw is none.
-const PROBE_TEXELS = 8.0;
-fn is_probe(cluster: Cluster) -> bool {
-  return cluster.wide < 0.0;
-}
-fn probe_shows(cluster: Cluster, c: Chunk) -> bool {
-  let r = rays_of(cluster);
-  if c.plane.w == 0.0 || r.ahead == NOWHERE {
-    return false;
-  }
-  let q = quad_of(c.face, r.lo, r.hi);
-  if r.ahead == BEHIND || q.behind || !culls {
-    return true;
-  }
-  let quad = q.corners;
-  let b = screen_box(cluster);
-  if !shows(b) {
-    return false;
-  }
-  let depth = nearest_depth(cluster, c.level) * (1.0 - exp2(-18.0));
-  let turn = sign((quad[1].x - quad[0].x) * (quad[2].y - quad[0].y) - (quad[1].y - quad[0].y) * (quad[2].x - quad[0].x));
-  let levels = i32(textureNumLevels(farthest));
-  let level = clamp(i32(ceil(log2(max(max(b.z - b.x, b.w - b.y) / PROBE_TEXELS, 1.0)))) - 1, 0, levels - 1);
-  let texel = f32(2 << u32(level));
-  let last = max(vec2i(textureDimensions(farthest)) >> vec2u(u32(level)), vec2i(1)) - 1;
-  let start = min(vec2i(floor(b.xy / texel)), last);
-  let end = min(vec2i(ceil(b.zw / texel)) - 1, last);
-  for (var y = start.y; y <= end.y; y++) {
-    for (var x = start.x; x <= end.x; x++) {
-      // The texel meets the quad unless all its corners are outside one edge.
-      let corner = vec2f(f32(x), f32(y)) * texel;
-      var meets = true;
-      for (var e = 0u; e < 4u; e++) {
-        let a = quad[e];
-        let d = quad[(e + 1u) % 4u] - a;
-        var inside = false;
-        for (var k = 0u; k < 4u; k++) {
-          let q = corner + vec2f(f32(k & 1u), f32(k >> 1u)) * texel - a;
-          inside = inside || turn * (d.x * q.y - d.y * q.x) >= 0.0;
-        }
-        meets = meets && inside;
-      }
-      if meets && textureLoad(farthest, vec2i(x, y), level).r >= depth {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
 // A thread per cluster of all, of a chunk the frame draws; those left
 // where chunks were, which their slot's chunk does not hold, are none.
 // Whole voxels' (a tile, whole splats or runs of a picture), its draw:
@@ -863,14 +832,14 @@ fn probe_shows(cluster: Cluster, c: Chunk) -> bool {
 // first (see tiles and cluster in compositor.rs), so that nearer voxels
 // are mostly drawn first and hide what is behind them early. A picture of
 // medium's, none, but in the second phase counted in its place
-// (veil_place), for order_veils to list.
-fn cull(at: u32, phase: u32) {
-  if at >= arrayLength(&clusters) || at >= arrayLength(&draws) {
-    return;
+// (veil_place), for order_veils to list. None: no vertices.
+fn cull(at: u32, phase: u32) -> DrawArgs {
+  var draw = DrawArgs(0u, 0u, 0u, 0u);
+  if at >= arrayLength(&clusters) {
+    return draw;
   }
   let cluster = clusters[at];
   let c = chunks[cluster.slot_count >> 8u];
-  var draw = DrawArgs(0u, 0u, 0u, 0u);
   if at >= c.whole.y && at < c.veils {
     if phase == 1u {
       let place = veil_place(cluster, c);
@@ -878,8 +847,6 @@ fn cull(at: u32, phase: u32) {
         atomicAdd(&veil_places[place], 1u);
       }
     }
-  } else if at >= c.whole.x && at < c.whole.y && is_probe(cluster) {
-    // A probe: find_probes tests it.
   } else if at >= c.whole.x && at < c.whole.y && draws_cluster(at, cluster, phase) {
     draw = DrawArgs(4u, 1u, 0u, at);
     if globals.whole == 1.0 {
@@ -888,7 +855,81 @@ fn cull(at: u32, phase: u32) {
       draw = DrawArgs(4u, cluster.slot_count & 0xffu, at * 4u, 0u);
     }
   }
-  draws[at] = draw;
+  return draw;
+}
+
+// A workgroup's draws (cull's, a thread each), those with vertices, in
+// its threads' order, listed from its first place in `listed`, and how
+// many in `blocks`; scan_draws and pack_draws put them after those of the
+// workgroups before.
+var<workgroup> kept: array<u32, 64>;
+fn list(id: vec3u, n: vec3u, thread: u32, draw: DrawArgs) {
+  let group = id.y * n.x + id.x;
+  kept[thread] = u32(draw.vertices != 0u);
+  workgroupBarrier();
+  var rank = 0u;
+  for (var k = 0u; k < thread; k++) {
+    rank += kept[k];
+  }
+  if draw.vertices != 0u {
+    listed[group * 64u + rank] = draw;
+  }
+  if thread == 63u {
+    blocks[1u + group] = rank + kept[63];
+  }
+}
+
+// Where each workgroup's draws go (list): after all those of the
+// workgroups before, in place of how many it listed; and first, how many
+// in all. A thread per 256th of the workgroups, summing its own, then
+// the sums before it (Hillis and Steele's scan).
+var<workgroup> sums: array<u32, 256>;
+@compute @workgroup_size(256)
+fn scan_draws(@builtin(local_invocation_index) thread: u32) {
+  let groups = arrayLength(&blocks) - 1u;
+  let share = (groups + 255u) / 256u;
+  let first = min(thread * share, groups);
+  let end = min(first + share, groups);
+  var own = 0u;
+  for (var g = first; g < end; g++) {
+    own += blocks[1u + g];
+  }
+  sums[thread] = own;
+  workgroupBarrier();
+  for (var d = 1u; d < 256u; d <<= 1u) {
+    var before = 0u;
+    if thread >= d {
+      before = sums[thread - d];
+    }
+    workgroupBarrier();
+    sums[thread] += before;
+    workgroupBarrier();
+  }
+  var at = sums[thread] - own;
+  for (var g = first; g < end; g++) {
+    let count = blocks[1u + g];
+    blocks[1u + g] = at;
+    at += count;
+  }
+  if thread == 255u {
+    blocks[0] = sums[255];
+  }
+}
+
+// A thread per cluster, as cull's: the draws its workgroup listed, where
+// scan_draws put them.
+@compute @workgroup_size(64)
+fn pack_draws(@builtin(workgroup_id) id: vec3u, @builtin(num_workgroups) n: vec3u, @builtin(local_invocation_index) thread: u32) {
+  let group = id.y * n.x + id.x;
+  let groups = arrayLength(&blocks) - 1u;
+  if group >= groups {
+    return;
+  }
+  let first = blocks[1u + group];
+  let end = select(blocks[0], blocks[2u + group], group + 1u < groups);
+  if thread < end - first {
+    draws[first + thread] = listed[group * 64u + thread];
+  }
 }
 
 // Which of the half slabs a ray of its face crosses a picture of medium's
@@ -951,33 +992,171 @@ fn thread_of(id: vec3u, n: vec3u, thread: u32) -> u32 {
   return (id.y * n.x + id.x) * 64u + thread;
 }
 
-// A thread per cluster of all: of the probes, those that show listed in
-// `found`, once the frame's whole voxels are all drawn and the pyramid made
-// of them anew: the first phase's pyramid lacks what showed only now.
+// A thread per probe: those whose cell shows listed in `found`, once the
+// frame's whole voxels are all drawn and the pyramid made of them anew
+// (the second phase's lacks what showed only then).
 @compute @workgroup_size(64)
 fn find_probes(@builtin(workgroup_id) id: vec3u, @builtin(num_workgroups) n: vec3u, @builtin(local_invocation_index) thread: u32) {
-  let at = thread_of(id, n, thread);
-  if at >= arrayLength(&clusters) {
+  let k = thread_of(id, n, thread);
+  if k >= atomicLoad(&found[1]) || k >= arrayLength(&probes) {
     return;
   }
-  let cluster = clusters[at];
-  let c = chunks[cluster.slot_count >> 8u];
-  if at >= c.whole.x && at < c.whole.y && is_probe(cluster) && probe_shows(cluster, c) {
-    let k = atomicAdd(&found[0], 1u) + 1u;
-    if k < arrayLength(&found) {
-      atomicStore(&found[k], at);
+  let p = probes[k];
+  if probe_shows(p) {
+    let at = atomicAdd(&found[0], 1u) + 2u;
+    if at < arrayLength(&found) {
+      atomicStore(&found[at], p.id);
     }
   }
 }
 
+// Whether a hidden cell shows: claimed from where the eye is, and some
+// pixel's ray through its box goes past all that is drawn (sees); all
+// that may, if its box reaches behind the eye or culling is off.
+fn probe_shows(p: Probe) -> bool {
+  let eye = globals.faces[p.face].eye.xyz;
+  if !claims(p.level, p.layer, i32(floor(eye.z / LAYER))) {
+    return false;
+  }
+  let lo = vec3f(p.min - eye.xy, p.depth.x - eye.z);
+  let hi = vec3f(p.max - eye.xy, p.depth.y - eye.z);
+  let r = rays_through(lo.xy, hi.xy, vec2f(lo.z, hi.z), 0.0);
+  if r.ahead == NOWHERE {
+    return false;
+  }
+  let q = quad_of(p.face, r.lo, r.hi);
+  if r.ahead == BEHIND || q.behind || !culls {
+    return true;
+  }
+  // Rasterising rounds the depth a few ulps either way: ties show.
+  return sees(q.corners, box_depth(p.face, lo, hi, f32(p.level)) * (1.0 - exp2(-18.0)));
+}
+
+// Whether a pixel whose centre is within `quad` (its corners round it, on
+// screen, in pixels) is at least `depth` deep. Down the pyramid from the
+// level at which the quad's box spans two texels at most each way, into a
+// texel only if its farthest is as far and it meets the quad: one wholly
+// within has such a pixel, so it goes down only along the quad's edges.
+// Past LOOKS texels it says yes: a probe costs so much at most, and one
+// that would cost more is not asked about again.
+const LOOKS = 64;
+// Texels to look at yet: three more a level at most.
+const SEEN = 64;
+fn sees(quad: array<vec2f, 4>, depth: f32) -> bool {
+  let turn = sign(wedge(quad[1] - quad[0], quad[2] - quad[0]));
+  let b = clamp(
+    vec4f(min(min(quad[0], quad[1]), min(quad[2], quad[3])), max(max(quad[0], quad[1]), max(quad[2], quad[3]))),
+    vec4f(0.0),
+    globals.resolution.xyxy,
+  );
+  if turn == 0.0 || !shows(b) {
+    return false;
+  }
+  let levels = i32(textureNumLevels(farthest));
+  let top = clamp(i32(ceil(log2(max(max(b.z - b.x, b.w - b.y), 1.0)))) - 1, 0, levels - 1);
+  let texel = f32(2 << u32(top));
+  let last = level_last(top);
+  let start = min(vec2i(floor(b.xy / texel)), last);
+  let end = min(vec2i(ceil(b.zw / texel)) - 1, last);
+  var seen: array<vec3i, SEEN>;
+  var count = 0;
+  for (var y = start.y; y <= end.y; y++) {
+    for (var x = start.x; x <= end.x; x++) {
+      seen[count] = vec3i(x, y, top);
+      count++;
+    }
+  }
+  for (var looks = 0; count > 0; looks++) {
+    if looks == LOOKS {
+      return true;
+    }
+    count--;
+    let t = seen[count];
+    let size = f32(2 << u32(t.z));
+    let m = meets(quad, turn, vec2f(t.xy) * size, size);
+    if m == OUTSIDE || textureLoad(farthest, t.xy, t.z).r < depth {
+      continue;
+    }
+    if m == WITHIN {
+      return true;
+    }
+    if t.z == 0 {
+      for (var k = 0; k < 4; k++) {
+        let p = t.xy * 2 + vec2i(k & 1, k >> 1);
+        if all(vec2f(p) < globals.resolution) && within(quad, turn, vec2f(p) + 0.5) && textureLoad(depth_in, p, 0) >= depth {
+          return true;
+        }
+      }
+      continue;
+    }
+    let below = level_last(t.z - 1);
+    for (var k = 0; k < 4; k++) {
+      let c = t.xy * 2 + vec2i(k & 1, k >> 1);
+      if all(c <= below) {
+        if count == SEEN {
+          return true;
+        }
+        seen[count] = vec3i(c, t.z - 1);
+        count++;
+      }
+    }
+  }
+  return false;
+}
+
+// The last texel of the pyramid's `level`: each level halves the last,
+// down to a texel (Targets::new). Asked for one level per thread, Mesa's
+// lavapipe gave some threads another level's size.
+fn level_last(level: i32) -> vec2i {
+  return max(vec2i(textureDimensions(farthest)) >> vec2u(u32(level)), vec2i(1)) - 1;
+}
+
+// The z of the cross product of `a` and `b`: its sign, which way `b` turns from `a`.
+fn wedge(a: vec2f, b: vec2f) -> f32 {
+  return a.x * b.y - a.y * b.x;
+}
+
+// Whether point `p` is within `quad`, its corners round it `turn`-wise.
+fn within(quad: array<vec2f, 4>, turn: f32, p: vec2f) -> bool {
+  for (var e = 0u; e < 4u; e++) {
+    if turn * wedge(quad[(e + 1u) % 4u] - quad[e], p - quad[e]) < 0.0 {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Whether a square, from `corner` `size` each way, is OUTSIDE `quad`
+// (all its corners outside one edge), WITHIN it, or else MEETS it, as
+// far as that tells.
+const OUTSIDE = 0u;
+const MEETS = 1u;
+const WITHIN = 2u;
+fn meets(quad: array<vec2f, 4>, turn: f32, corner: vec2f, size: f32) -> u32 {
+  var all_within = true;
+  for (var e = 0u; e < 4u; e++) {
+    let d = quad[(e + 1u) % 4u] - quad[e];
+    var some = false;
+    for (var k = 0u; k < 4u; k++) {
+      let inside = turn * wedge(d, corner + vec2f(f32(k & 1u), f32(k >> 1u)) * size - quad[e]) >= 0.0;
+      some = some || inside;
+      all_within = all_within && inside;
+    }
+    if !some {
+      return OUTSIDE;
+    }
+  }
+  return select(MEETS, WITHIN, all_within);
+}
+
 @compute @workgroup_size(64)
 fn cull_drawn(@builtin(workgroup_id) id: vec3u, @builtin(num_workgroups) n: vec3u, @builtin(local_invocation_index) thread: u32) {
-  cull(thread_of(id, n, thread), 0u);
+  list(id, n, thread, cull(thread_of(id, n, thread), 0u));
 }
 
 @compute @workgroup_size(64)
 fn cull_rest(@builtin(workgroup_id) id: vec3u, @builtin(num_workgroups) n: vec3u, @builtin(local_invocation_index) thread: u32) {
-  cull(thread_of(id, n, thread), 1u);
+  list(id, n, thread, cull(thread_of(id, n, thread), 1u));
 }
 
 // Level 0 draws from NEAR_LAYERS of grid 0 ahead of the eye's (lod.rs's NEAR).

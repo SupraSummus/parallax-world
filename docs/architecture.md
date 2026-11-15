@@ -310,9 +310,9 @@ A cell whose box (drawn flat, grown by how far its picture reaches)
 lies behind where the rays round every pixel it covers stop is hidden.
 A ray that met a tile not made yet goes on from there once it comes.
 Between rays, or from where the eye has moved since, a hidden cell may show,
-so each is a probe in the frame,
-which the compositor tests against what it drew (section 4)
-and, if it may show, tells the renderer, which bakes it after all
+so its box is a probe in the frame (`Frame`'s `probes`):
+if a pixel's ray reaches it past all the compositor drew (section 4),
+the renderer bakes the cell after all
 and hides it no more while picked: it may show a frame or few late.
 It depends on nothing the camera does but where the eye was,
 so a host could do it apart from what draws.
@@ -671,13 +671,15 @@ reduces their depth to a pyramid of farthest depths,
 then tests every tile in view against it on the GPU, a thread each,
 draws those newly showing and keeps which show for the next frame
 (two-phase occlusion culling).
-A probe, a hidden cell's box with nothing to draw (section 1),
-is tested once all is drawn, against the pyramid made of it anew,
-every texel its quad on screen meets, as its box borders what shows;
-those that may show are read back a few frames later
+A probe, a hidden cell's box (section 1), is tested once all is drawn,
+against the pyramid made of it anew:
+it shows if a pixel within its quad on screen is as far as its box,
+looked for down the pyramid only where the farthest is,
+so only along the quad's edges, and a bounded number of texels (`sees`).
+Those that show are read back a few frames later
 and handed to the renderer (`Feedback`).
-Each tile has a draw of its own on the GPU, empty if culled,
-drawn in the tiles' order: roughly near to far,
+A phase draws only the tiles it keeps (an empty draw is not free),
+listed in their order (`scan_draws`, `pack_draws`): roughly near to far,
 so nearer tiles mostly hide what is behind them early,
 and where depths tie, the same tile shows every frame, culled or not.
 It draws into a picture of its own, which the window (or `--shot`) shows.

@@ -104,6 +104,8 @@ Numbers are for the forest at 1280×800, as measured when written.
   drawing those that show most of the rest.
   The first phase reads every cluster only to find those that showed;
   a list of them, kept from the last frame, would spare that.
+  The pyramid of farthest depths is made over all its texture,
+  each level a power of two: at 1280×800, twice the texels the screen needs.
   Walking in the window for minutes, a frame sometimes takes seconds
   until the driver resets the GPU (seen on Intel UHD with Mesa);
   the window then makes its device again (`window.rs`).
@@ -127,6 +129,10 @@ Numbers are for the forest at 1280×800, as measured when written.
   cheaper rays (steps a voxel long, empty cells of 8·FCC crossed at once)
   could follow the eye.
   Mist hides nothing: the GPU's depths have none, so it would ask for it all.
+  A server handing each player only the cells it may see
+  would need, for each probe a client says shows,
+  the pixel `sees` found, to check its ray through the voxels itself
+  (as `Hiding` casts them).
   Cells straddling where a face's levels meet are drawn at both.
   Each render tests every cell a face composes against the screen,
   though a face keeps its cells picked (`Lod::pick`);
