@@ -315,10 +315,16 @@ pub fn light(grid: &fcc::Grid, level: u32, corner: [i32; 3], light: &mut Light) 
 }
 
 /** What the painter tells the engine, lit: the bricks rays asked for, as last read back, not yet taken; and whether frames to come may ask for more, or place what was lit. */
-#[derive(Default)]
 struct Asked {
     bricks: Option<Bricks>,
     busy: bool,
+}
+
+/** Till its painter has drawn (an engine made anew, as when the world is lit anew), frames to come may ask for anything: busy, so that they come. */
+impl Default for Asked {
+    fn default() -> Asked {
+        Asked { bricks: None, busy: true }
+    }
 }
 
 /** The voxels engine: each frame, the tiles of the levels its rays read, as they are; lit, the bricks they asked for, as last read back. */

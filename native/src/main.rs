@@ -2,7 +2,7 @@
 //! generated in tiles, those in view first (world.rs), drawn by an engine
 //! (engine.rs) with wgpu in an egui window (window.rs), or offscreen (gpu.rs).
 //!
-//! parallax-native [--engine reliefs|flat|splats|voxels] [--world NAME] [--threads N] [--seed S] [--view QUERY] [--light SKY,SUN,GLOW] [--detail D] [--shift S] [--seams] [--colour voxels|layers|chunks] [--unhidden] [--shot out.png [--size WxH] | --bench] [--stroll S [--on-ground]] [--record FILE] [--replay FILE [--shots DIR]]
+//! parallax-native [--engine reliefs|flat|splats|voxels] [--world NAME] [--threads N] [--seed S] [--view QUERY] [--light SKY,SUN,GLOW[,STEPS]] [--detail D] [--shift S] [--seams] [--colour voxels|layers|chunks] [--unhidden] [--shot out.png [--size WxH] | --bench] [--stroll S [--on-ground]] [--record FILE] [--replay FILE [--shots DIR]]
 //!
 //! --view takes the web page's view query (parseViewQuery in renderer.ts),
 //! overriding --seed and --world.
@@ -19,7 +19,8 @@
 //! frames.
 //! --light lights the world (worldgen's light.rs), the sky, the sun and
 //! what glows this bright: 1,1,0 a clear day (as the panel's Computed
-//! lighting is unless --light), 0.01,0,1 night.
+//! lighting is unless --light), 0.01,0,1 night; a fourth number, the steps
+//! light takes along each level before the coarser one takes over.
 //! --engine picks what draws, as the panel does (Kind): rays through the
 //! tiles' voxels (the default), chunks of cells' reliefs or splats, as the
 //! web draws, or reliefs drawn flat (an experiment).
@@ -29,7 +30,7 @@
 //! cells what is in front hides too) draw chunks as the panel's switches do.
 //! The panel picks the lighting apart from the engine (Lighting): voxels
 //! shaded by the way their faces face, or lit by light worked out across
-//! the world, as --light does, as bright as its sliders say; each engine
+//! the world, as --light does, as its sliders say; each engine
 //! shows it its own way.
 
 mod engine;
@@ -73,8 +74,9 @@ struct App {
     world: World,
     look: Look,
     lighting: Lighting,
-    /** How bright the sky, the sun and what glows are, Computed, as the sliders say: the world is lit so once one is let go. */
+    /** How bright the sky, the sun and what glows are, Computed, and the steps light takes along each level, as the sliders say: the world is lit so once one is let go. */
     brightness: Brightness,
+    steps: usize,
     stats: String,
     times: window::Times,
     /** How long the engine took to make the last frame, ms. */
@@ -134,7 +136,7 @@ impl window::Content for App {
                     }
                 });
                 if self.lighting == Lighting::Computed {
-                    self.brightness_sliders(ui);
+                    self.light_sliders(ui);
                 }
             });
             let mut walking = self.walker.is_some();
@@ -189,13 +191,14 @@ impl window::Content for App {
                 look.camera[1] += moving[2] * step;
             }
             look.size = [rect.width() as f64, rect.height() as f64];
-            look.light = self.world.brightness().filter(|_| self.lighting == Lighting::Computed);
+            look.light = self.world.shared().map(Shared::brightness).filter(|_| self.lighting == Lighting::Computed);
             let start = Instant::now();
             let frame = self.engine.frame(look, &self.world);
             self.framing = start.elapsed().as_secs_f64() * 1000.0;
             self.stats = frame.stats;
             if let Some((file, start)) = &mut self.recording {
-                record(file, start.elapsed().as_secs_f64(), self.kind, look, self.walker.is_some(), &self.stats);
+                let steps = self.world.shared().map_or(0, Shared::steps);
+                record(file, start.elapsed().as_secs_f64(), self.kind, look, steps, self.walker.is_some(), &self.stats);
             }
             // Drawn from the next frame on.
             let arrived = self.world.update(look.camera, &with_ground(frame.wants, self.walker.is_some()));
@@ -216,12 +219,12 @@ impl window::Content for App {
 
 /**
  * A frame of the window, for --replay: when, since the window began; the
- * engine; the look; whether walking; and what the engine said of it (for
- * the reader). A line of tab-separated fields.
+ * engine; the look, its light taking `steps`; whether walking; and what
+ * the engine said of it (for the reader). A line of tab-separated fields.
  */
-fn record(file: &mut impl Write, t: f64, kind: Kind, look: &Look, walking: bool, stats: &str) {
+fn record(file: &mut impl Write, t: f64, kind: Kind, look: &Look, steps: usize, walking: bool, stats: &str) {
     let Look { camera: [x, y, z], yaw, pitch, fov, far, detail, shift, size: [w, h], .. } = *look;
-    let light = look.light.map_or("-".to_string(), |b| format!("{},{},{}", b.sky, b.sun, b.glow));
+    let light = look.light.map_or("-".to_string(), |b| format!("{},{},{},{steps}", b.sky, b.sun, b.glow));
     let view = format!("camera={x},{y},{z}&look={yaw},{pitch}&fov={fov}&distance={far}&detail={detail}");
     let line = format!("{t:.4}\t{kind:?}\t{view}\t{shift}\t{w}x{h}\t{light}\t{}\t{}", u8::from(walking), stats.replace('\n', ", "));
     // Line by line, all there should the window panic.
@@ -260,13 +263,13 @@ fn replay(
         let t: f64 = t.parse().expect("time");
         let walking = walking == "1";
         let numbers = |v: &str, by: char| v.split(by).map(|v| v.parse().expect("a number")).collect::<Vec<f64>>();
-        look.light = (light != "-").then(|| match numbers(light, ',')[..] {
-            [sky, sun, glow] => Brightness { sky: sky as f32, sun: sun as f32, glow: glow as f32 },
-            _ => panic!("light: {light}"),
-        });
+        let lit = (light != "-").then(|| parse_light(light));
+        look.light = lit.map(|(b, _)| b);
         let named = Kind::ALL.into_iter().find(|(_, n)| n.eq_ignore_ascii_case(named)).expect("engine").0;
-        if let Some(b) = look.light.filter(|&b| world.brightness() != Some(b)) {
-            world.relight(b);
+        let shared = world.shared().expect("a world with light");
+        let relit = lit.map(|(b, steps)| shared.under(b).stepping(steps.unwrap_or(shared.steps())));
+        if let Some(shared) = relit.filter(|s| s.brightness() != shared.brightness() || s.steps() != shared.steps()) {
+            world.relight(shared);
             engine = named.make(world);
         } else if named != kind {
             engine = named.make(world);
@@ -287,7 +290,8 @@ fn replay(
             easel.wait_for(last);
         }
         if let Some(file) = &mut recording {
-            record(file, start.elapsed().as_secs_f64(), kind, &look, walking, &frame.stats);
+            let steps = world.shared().map_or(0, Shared::steps);
+            record(file, start.elapsed().as_secs_f64(), kind, &look, steps, walking, &frame.stats);
         }
         let due = |k: &(f64, Look, Box<dyn Picture>)| t - k.0 >= end / KEPT as f64;
         if shots.is_some() && frame.busy && kept.len() < KEPT && kept.last().is_none_or(due) {
@@ -320,16 +324,18 @@ fn last_frame() -> String {
 
 impl App {
     /** Lit anew (World::relight) once a slider is let go: each step of a drag would start it over. */
-    fn brightness_sliders(&mut self, ui: &mut egui::Ui) {
+    fn light_sliders(&mut self, ui: &mut egui::Ui) {
         let b = &mut self.brightness;
-        let mut done = false;
+        let mut responses = Vec::new();
         for (value, name) in [(&mut b.sky, "Sky"), (&mut b.sun, "Sun"), (&mut b.glow, "Glow")] {
-            let slider = egui::Slider::new(value, 0.0..=10.0).logarithmic(true).smallest_positive(0.01).text(name);
-            let response = ui.add(slider);
-            done |= response.drag_stopped() || (response.changed() && !response.dragged());
+            responses.push(ui.add(egui::Slider::new(value, 0.0..=10.0).logarithmic(true).smallest_positive(0.01).text(name)));
         }
-        if done && self.world.brightness() != Some(self.brightness) {
-            self.world.relight(self.brightness);
+        // More steps a level, the thicker a wall must be to let light through: about its distance over them.
+        responses.push(ui.add(egui::Slider::new(&mut self.steps, 1..=8).text("Steps a Level")));
+        let done = responses.iter().any(|r| r.drag_stopped() || (r.changed() && !r.dragged()));
+        let shared = self.world.shared().expect("a world with light");
+        if done && (shared.brightness() != self.brightness || shared.steps() != self.steps) {
+            self.world.relight(shared.under(self.brightness).stepping(self.steps));
             self.engine = self.kind.make(&self.world);
         }
     }
@@ -344,8 +350,10 @@ impl App {
             size[1],
             if hides { "" } else { " --unhidden" },
         );
-        let b = self.world.brightness().expect("a world with light");
-        let light = if self.lighting == Lighting::Computed { format!(" --light {},{},{}", b.sky, b.sun, b.glow) } else { String::new() };
+        let shared = self.world.shared().expect("a world with light");
+        let (b, steps) = (shared.brightness(), shared.steps());
+        let light =
+            if self.lighting == Lighting::Computed { format!(" --light {},{},{},{steps}", b.sky, b.sun, b.glow) } else { String::new() };
         *LAST_FRAME.lock().unwrap_or_else(|e| e.into_inner()) = format!("{frame}{light}\n{}", self.stats);
     }
 }
@@ -555,13 +563,13 @@ fn main() {
         size.try_into().expect("--size WxH")
     });
     // Sky, sun and lamps, as in look's `light`: 1,1,0 a clear day, 0.01,0,1 night.
-    let light = value("--light").map(|v| {
-        let v: Vec<f32> = v.split(',').map(|v| v.parse().expect("--light SKY,SUN,GLOW")).collect();
-        let [sky, sun, glow] = v.try_into().expect("--light SKY,SUN,GLOW");
-        Brightness { sky, sun, glow }
-    });
+    let lit = value("--light").map(parse_light);
+    let light = lit.map(|(b, _)| b);
     let brightness = light.unwrap_or(Brightness { sky: 1.0, sun: 1.0, glow: 0.0 });
-    let mut world = World::new(make, seed, Some(Shared::new(brightness)), threads);
+    let shared = Shared::new(brightness);
+    let shared = shared.stepping(lit.and_then(|(_, steps)| steps).unwrap_or(shared.steps()));
+    let steps = shared.steps();
+    let mut world = World::new(make, seed, Some(shared), threads);
     let shown = make(seed);
     let camera = query.camera.unwrap_or(shown.spawn.map(|v| v as f64));
     let far = query.distance.unwrap_or(RENDER_DISTANCE);
@@ -606,6 +614,7 @@ fn main() {
         look,
         lighting: if light.is_some() { Lighting::Computed } else { Lighting::Shaded },
         brightness,
+        steps,
         stats: String::new(),
         times: window::Times::default(),
         framing: 0.0,
@@ -621,6 +630,17 @@ fn main() {
         panic(info);
     }));
     window::run("Parallax", [1580.0, 800.0], app);
+}
+
+/** --light's SKY,SUN,GLOW[,STEPS], as --record writes it. */
+fn parse_light(v: &str) -> (Brightness, Option<usize>) {
+    let usage = "--light SKY,SUN,GLOW[,STEPS]";
+    let v: Vec<f32> = v.split(',').map(|v| v.parse().expect(usage)).collect();
+    match v[..] {
+        [sky, sun, glow] => (Brightness { sky, sun, glow }, None),
+        [sky, sun, glow, steps] => (Brightness { sky, sun, glow }, Some(steps as usize)),
+        _ => panic!("{usage}"),
+    }
 }
 
 fn num_cpus() -> usize {
@@ -877,6 +897,45 @@ mod tests {
             // Lost rays show magenta (voxels.wgsl's LOST).
             let lost = pixels.chunks(4).filter(|p| p[..3] == [255, 0, 255]).count();
             assert_eq!(lost, 0, "pixels of rays that ran out of steps");
+        }
+    }
+
+    /**
+     * The window's frames, still, as App::ui asks for them: one after
+     * another while tiles arrive, the engine is busy or the world makes
+     * any, each drawn; then whether the painter showed all it was given.
+     */
+    fn frames_till_still(engine: &mut dyn Engine, world: &mut World, look: &Look, easel: &mut Easel) -> bool {
+        for _ in 0..10_000 {
+            let frame = engine.frame(look, world);
+            let arrived = world.update(look.camera, &frame.wants);
+            let drawn = easel.draw(&*frame.picture, look.size.map(|v| v as u32));
+            easel.wait_for(drawn);
+            if !arrived && !frame.busy {
+                if world.making() == 0 {
+                    return easel.settled();
+                }
+                world.wait();
+            }
+        }
+        panic!("frames never still");
+    }
+
+    /** Lit anew, as the panel's sliders do (light_sliders), the voxels' frames keep coming till they show it all. */
+    #[test]
+    #[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
+    fn frames_come_till_a_world_lit_anew_shows() {
+        let (day, dusk) = (Brightness { sky: 1.0, sun: 1.0, glow: 0.0 }, Brightness { sky: 0.2, sun: 0.0, glow: 0.0 });
+        let mut world = World::new(ground, 1, Some(Shared::new(day)), 4);
+        let mut look = Look::new([0.0, 16.0, 0.0], [0.0, -20.0], FOV, 1000.0, [160.0, 100.0]);
+        look.light = Some(day);
+        let (mut engine, mut easel) = (Kind::Voxels.make(&world), Easel::offscreen(None));
+        assert!(frames_till_still(&mut *engine, &mut world, &look, &mut easel), "lit at first");
+        for shared in [world.shared().expect("light").under(dusk), world.shared().expect("light").under(dusk).stepping(3)] {
+            look.light = Some(shared.brightness());
+            world.relight(shared);
+            engine = Kind::Voxels.make(&world);
+            assert!(frames_till_still(&mut *engine, &mut world, &look, &mut easel), "lit anew");
         }
     }
 

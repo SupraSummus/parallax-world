@@ -26,7 +26,7 @@ use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use fcc::GRID_LEVELS;
 pub use fcc::TileId;
 use fcc::{Grid, Tiles};
-use worldgen::light::{Brightness, Light, Shared, make_tile};
+use worldgen::light::{Light, Shared, make_tile};
 
 use crate::engine::voxels;
 use crate::view::Vec3;
@@ -373,18 +373,18 @@ impl World {
             .collect()
     }
 
-    /** How bright the light it is lit by, if any. */
-    pub fn brightness(&self) -> Option<Brightness> {
-        self.shared.as_ref().map(Shared::brightness)
+    /** The light it is lit by, if any. */
+    pub fn shared(&self) -> Option<&Shared> {
+        self.shared.as_ref()
     }
 
     /**
-     * Lights the world anew under `brightness`: the tiles made are kept,
-     * their light to find again, and what is being lit lights tiles let go.
-     * Engines that read its light (Lit) are to be made again.
+     * Lights the world anew by `shared`, its own light under another
+     * brightness or steps (Shared::under, Shared::stepping): the tiles made
+     * are kept, their light to find again, and what is being lit lights
+     * tiles let go. Engines that read its light (Lit) are to be made again.
      */
-    pub fn relight(&mut self, brightness: Brightness) {
-        let shared = self.shared.as_ref().expect("a world with light").under(brightness);
+    pub fn relight(&mut self, shared: Shared) {
         self.shared = Some(shared.clone());
         {
             let mut q = self.queue.0.lock().expect("queue");
@@ -600,14 +600,15 @@ mod tests {
     }
 
     #[test]
-    fn a_world_lit_anew_is_as_one_made_under_that_brightness() {
+    fn a_world_lit_anew_is_as_one_made_so() {
+        use worldgen::light::Brightness;
         let make = worlds::by_name("forest").expect("forest").make;
         let (day, dusk) = (Brightness { sky: 1.0, sun: 1.0, glow: 0.0 }, Brightness { sky: 0.3, sun: 0.1, glow: 1.0 });
         let mut world = World::new(make, 1, Some(Shared::new(day)), 4);
         let before = lit(&mut world);
-        world.relight(dusk);
+        world.relight(world.shared().expect("light").under(dusk).stepping(3));
         let after = lit(&mut world);
         assert!(after != before, "the light changed");
-        assert!(after == lit(&mut World::new(make, 1, Some(Shared::new(dusk)), 4)));
+        assert!(after == lit(&mut World::new(make, 1, Some(Shared::new(dusk).stepping(3)), 4)));
     }
 }

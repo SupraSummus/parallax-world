@@ -4,7 +4,9 @@
 //!
 //! Light comes to a site from its 12 neighbours' directions: along each,
 //! from the sites of its level, till the next coarser level can take over:
-//! from STEPS on, where the coarser level has room for light (`coarser`).
+//! after a few steps (Shared's, STEPS unless set), where the coarser level
+//! has room for light (`past`). So a wall thinner than about its distance
+//! over the steps lets light through: more steps, less leaks.
 //! Each site sends what it glows, and of what it stops (its alpha) its
 //! colour times the light on it, also from the coarser level; the rest of
 //! what comes from past it gets through. So each level's light comes from
@@ -34,7 +36,7 @@ const N: usize = 12;
 /** The directions light comes along: towards the neighbours, through the voxel's faces. */
 const DIRECTIONS: [[i64; 3]; N] = FACES;
 
-/** Steps along a direction before the coarser level's light may take over, and at most: at the coarsest, before the sky's does. */
+/** Steps along a direction before the coarser level's light may take over, unless set (Shared::stepping), and at most: at the coarsest, before the sky's does. */
 const STEPS: usize = 1;
 const TOP_STEPS: usize = 64;
 /** Sites a tile is a side, at each level, as native's (tile_box). */
@@ -50,8 +52,8 @@ type Made = Arc<OnceLock<Arc<Grid>>>;
 type Grids = Map<(usize, [i64; 3]), Made>;
 
 /**
- * What the Lights of one world under one brightness share (a thread's
- * each), and with its host: tiles of every level, generated once, by
+ * What the Lights of one world under one brightness, and taking as many
+ * steps along each level, share (a thread's each), and with its host: tiles of every level, generated once, by
  * whichever needs one first, kept till the host forgets them (`forget`);
  * the host draws them. Where no tile is made, a Light reads blocks, BLOCK
  * sites a side: light reads a few sites around what it lights, and in a
@@ -60,6 +62,7 @@ type Grids = Map<(usize, [i64; 3]), Made>;
 #[derive(Clone)]
 pub struct Shared {
     brightness: Brightness,
+    steps: usize,
     tiles: Arc<Mutex<Grids>>,
     blocks: Arc<Mutex<Grids>>,
 }
@@ -67,7 +70,7 @@ pub struct Shared {
 impl Shared {
     /** Nothing made yet, for a world under `brightness`. */
     pub fn new(brightness: Brightness) -> Shared {
-        Shared { brightness, tiles: Arc::default(), blocks: Arc::default() }
+        Shared { brightness, steps: STEPS, tiles: Arc::default(), blocks: Arc::default() }
     }
 
     pub fn brightness(&self) -> Brightness {
@@ -77,6 +80,17 @@ impl Shared {
     /** The same world under `brightness`: its tiles kept. */
     pub fn under(&self, brightness: Brightness) -> Shared {
         Shared { brightness, ..self.clone() }
+    }
+
+    /** Steps along a direction before the coarser level's light may take over. */
+    pub fn steps(&self) -> usize {
+        self.steps
+    }
+
+    /** The same world, light taking `steps` steps along each level before the coarser's: its tiles kept. */
+    pub fn stepping(&self, steps: usize) -> Shared {
+        assert!((1..=TOP_STEPS).contains(&steps), "{steps} steps");
+        Shared { steps, ..self.clone() }
     }
 
     /** Tile `key` of `level` of the world `generator` makes, of `heights` (World::heights_at). */
@@ -156,7 +170,7 @@ pub struct Light {
     background: Rgb,
 }
 
-/** The coarser level's light around a site, as `along` takes it, read at once (`near`): per direction, on the face of what a step meets that faces the site, and past STEPS steps, if the coarser level has room for it there (`past`). */
+/** The coarser level's light around a site, as `along` takes it, read at once (`near`): per direction, on the face of what a step meets that faces the site, and past the steps, if the coarser level has room for it there (`past`). */
 struct Near {
     on: [Rgb; N],
     past: [Option<Rgb>; N],
@@ -243,12 +257,12 @@ impl Light {
      * The light coming to `p`, a site of level `i`, from direction `d`:
      * from the sites that way, each sending what it glows and, of what it
      * stops, its colour times the light on it (the coarser level's at
-     * `p`); past them, the coarser level's light, from STEPS on, where it
+     * `p`); past them, the coarser level's light, from the steps on, where it
      * has room for it (`past`). At the coarsest level (no `near`), from
      * the next TOP_STEPS, and past them the sky.
      */
     fn along(&mut self, i: usize, p: [i64; 3], d: usize, near: Option<&Near>) -> Rgb {
-        let (v, heights) = (DIRECTIONS[d], self.levels[i].heights);
+        let (v, heights, steps) = (DIRECTIONS[d], self.levels[i].heights, self.shared.steps);
         // What has come so far, and how much of what comes from further on gets through.
         let (mut sum, mut through) = ([0.0f32; 3], 1.0f32);
         let mut q = p;
@@ -270,8 +284,8 @@ impl Light {
                 return std::array::from_fn(|c| sum[c] + through * self.sky[d][c]);
             }
             if let Some(near) = near
-                && step >= STEPS
-                && let Some(past) = if step == STEPS { near.past[d] } else { self.past(i + 1, middle(from, q), d) }
+                && step >= steps
+                && let Some(past) = if step == steps { near.past[d] } else { self.past(i + 1, middle(from, q), d) }
             {
                 return std::array::from_fn(|c| sum[c] + through * past[c]);
             }
@@ -307,7 +321,7 @@ impl Light {
     /** `along`'s readings of level `i` around `p`, a site of level `i − 1`, as `past` and the centre's light would give them, read at once from the sites around (`around`). */
     fn near(&mut self, i: usize, p: [i64; 3]) -> Near {
         let (class, base) = class(p);
-        let (sites, nearest) = &around()[class];
+        let (sites, nearest) = &around(self.shared.steps)[class];
         let (mut past, mut centre) = ([[0.0f32; 3]; N], [[0.0f32; 3]; N]);
         let mut totals = [0.0f32; N + 1];
         for (offset, weights) in sites {
@@ -490,7 +504,7 @@ fn reads(at: [f64; 3]) -> impl Iterator<Item = ([i64; 3], f32)> {
 /**
  * `reads` at the places `near` reads around a site, by its class: as
  * offsets from the class's base, each site's weights at the N places past
- * STEPS steps along each direction and at the centre (the last); and the
+ * the steps along each direction and at the centre (the last); and the
  * site nearest each of the N.
  */
 type Around = (Vec<([i64; 3], [f32; N + 1])>, [[i64; 3]; N]);
@@ -503,9 +517,10 @@ fn class(p: [i64; 3]) -> (usize, [i64; 3]) {
     (class as usize, base)
 }
 
-fn around() -> &'static [Around; 8] {
-    static AROUND: OnceLock<[Around; 8]> = OnceLock::new();
-    AROUND.get_or_init(|| {
+/** `Around` for each class, taking `steps` steps. */
+fn around(steps: usize) -> &'static [Around; 8] {
+    static AROUND: [OnceLock<[Around; 8]>; TOP_STEPS + 1] = [const { OnceLock::new() }; TOP_STEPS + 1];
+    AROUND[steps].get_or_init(|| {
         std::array::from_fn(|class| {
             let (c, b) = (class as i64 & 3, class as i64 >> 2);
             // A site of the class: its base (b, 0, 0), its parities those of the class.
@@ -514,7 +529,7 @@ fn around() -> &'static [Around; 8] {
             assert_eq!(self::class(p), (class, base));
             let along = |d: usize, steps: usize| add(p, DIRECTIONS[d].map(|v| v * steps as i64));
             let at: [[f64; 3]; N + 1] =
-                std::array::from_fn(|k| if k < N { middle(along(k, STEPS - 1), along(k, STEPS)) } else { middle(p, p) });
+                std::array::from_fn(|k| if k < N { middle(along(k, steps - 1), along(k, steps)) } else { middle(p, p) });
             let offset = |site: [i64; 3]| add(site, base.map(|c| -c));
             let mut sites = BTreeMap::new();
             for (k, at) in at.iter().enumerate() {

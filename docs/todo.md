@@ -623,15 +623,21 @@ Numbers are for the forest at 1280×800, as measured when written.
 - **Light is a prototype, in look's pictures and native's computed lighting**
   (`worldgen/src/light.rs`); the web does not light its tiles.
   Light comes along the 12 neighbours' directions only,
-  and each level takes one step (`STEPS`) before the coarser one takes over,
+  and each level takes one step (`STEPS`; native's panel sets more)
+  before the coarser one takes over,
   or more where the coarser fills what it leaves empty.
   So light from D away comes from a level whose sites are about D across,
   which keeps what a region stops on average (the contract),
   not whether it is closed:
   walls thinner than the space they close let light in,
   openings smaller than it let none (the door and the window below).
-  A railway tunnel, lined 0.5 m with the ground's hollow behind,
-  is lit so from that hollow.
+  A railway tunnel, under 1 to 4 m of rock where its hill is low,
+  is lit through it from the sky:
+  at the coarsest level with room in its bore 5 m across (sites 4 m apart),
+  a site of the bore and one over the ground are neighbours,
+  the rock shared between them, and both show nothing (`VoxelGrid::show`).
+  Three steps a level keep it dark,
+  but also 7 m in from a portal, where light should come.
   Rock filled round the tunnels kept them dark,
   but bent a world to the light: not kept.
   Against the reference (`light/reference.rs`, test `against_the_reference`;
@@ -658,7 +664,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   A site of a block costs a few times one of a tile at the finest levels
   (the cheese's holes, the valley's plans, asked again per block),
   so a tile read all round its edges costs about as much in blocks.
-  Native's brightness sliders light the world anew (`World::relight`),
+  Native's light sliders light the world anew (`World::relight`),
   as slowly as at the start.
   Light adds up, so it is the sum of the sky's, the sun's and the glow's;
   kept apart, the sliders could only mix them,
