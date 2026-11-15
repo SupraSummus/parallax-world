@@ -23,6 +23,7 @@ use worldgen::curve::{self, Curve, Near};
 use worldgen::domain::{Domain, Scope};
 use worldgen::frame::{Frame, Part, facing};
 use worldgen::generator::{Field, Kind, Layer, Node, Op, Population, Span};
+use worldgen::js;
 use worldgen::kinds;
 use worldgen::noise::{Fx, Rng, ValueNoise, fx, hash, hash64, smoothstep};
 use worldgen::plan::{self, Holding, Plan, Sloped};
@@ -97,8 +98,14 @@ const BALLAST: i64 = m(1.75);
 const SLEEPERS: i64 = m(1.25);
 /** Half the gauge (1.435 m), to the middle of a rail a unit wide. */
 const RAIL: Fx = fx(5.74);
-/** Sleepers every SLEEPER along the line, each a third as wide; piers every PIER, PIER_THICK thick. */
+/** The rails' height over the ballast. */
+const RAILS_HIGH: i64 = 3;
+/** Sleepers every SLEEPER along the line, SLEEPER_THICK of it; piers every PIER, PIER_THICK thick. */
 const SLEEPER: i64 = 5;
+const SLEEPER_THICK: i64 = 2;
+/** What covers the sleepers' strip seen from above: the rails, 2 units of its 20, and the sleepers of the rest. */
+const IRON: f64 = 0.1;
+const COVER: f64 = IRON + (1.0 - IRON) * SLEEPER_THICK as f64 / SLEEPER as f64;
 const PIER: i64 = m(20.0);
 const PIER_THICK: i64 = m(1.5);
 const PIERS: i64 = m(2.0);
@@ -546,7 +553,6 @@ fn layers(railway: Rc<Railway>, hold: Holding, ground: Rc<Sloped>) -> Vec<Layer>
         let (ground, hold) = (ground.clone(), hold.clone());
         Field::columns(name, order, Op::Paint, move |x, z| {
             let Some(at) = railway.at(x, z).filter(|a| (a.structure == Structure::Tunnel) == tunnel) else { return Vec::new() };
-            // Its rails and sleepers only where the sites are a unit apart, its ballast dithered of them further.
             let spacing = plan::spacing();
             let (top, e, floor) = (at.top, at.distance, bed(at.top));
             let within = |d: i64| e < Units(d).to_fx();
@@ -591,18 +597,25 @@ fn layers(railway: Rc<Railway>, hold: Holding, ground: Rc<Sloped>) -> Vec<Layer>
             if !within(BALLAST) {
                 return spans;
             }
-            // Ballast, sleepers and rails; far away its top as often of each as they cover.
-            let surface: Kind = match (spacing, Fx::fraction(hash(seed, x, z, 0))) {
-                (1, _) => K::ballast.into(),
-                (_, share) if share < fx(0.07) => T::iron.into(),
-                (_, share) if share < fx(0.37) => T::timber.into(),
+            // Ballast, sleepers and rails on it. Further, in the sleepers' strip, them as a medium over it as tall, as
+            // Column::medium: stopping as much of a ray down as they cover, more of one coming in low, as they hide the
+            // ballast; shorter than a spacing, its top as often of each as they cover (docs/todo.md).
+            let (strip, coin) = (spacing > 1 && within(SLEEPERS), Fx::fraction(hash(seed, x, z, 0)));
+            let thin = RAILS_HIGH < spacing;
+            let surface: Kind = match coin {
+                _ if !(strip && thin) => K::ballast.into(),
+                coin if coin < fx(IRON) => T::iron.into(),
+                coin if coin < fx(COVER) => T::timber.into(),
                 _ => K::ballast.into(),
             };
             spans.push(Span::solid(floor, top + 1, surface));
             if spacing == 1 && (e - RAIL).abs() < Fx::HALF {
-                spans.push(Span::solid(top + 1, top + 4, T::iron));
-            } else if spacing == 1 && within(SLEEPERS) && at.along.rem_euclid(SLEEPER) < 2 {
-                spans.push(Span::solid(top + 1, top + 3, T::timber));
+                spans.push(Span::solid(top + 1, top + 1 + RAILS_HIGH, T::iron));
+            } else if spacing == 1 && within(SLEEPERS) && at.along.rem_euclid(SLEEPER) < SLEEPER_THICK {
+                spans.push(Span::solid(top + 1, top + 1 + SLEEPER_THICK, T::timber));
+            } else if strip && !thin {
+                let kind = if coin < fx(IRON / COVER) { T::iron } else { T::timber };
+                spans.push(Span::medium(top + 1, RAILS_HIGH, kind, -js::log(1.0 - COVER) / RAILS_HIGH as f64));
             }
             spans
         })
