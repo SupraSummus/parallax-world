@@ -17,7 +17,7 @@ use worldgen::World;
 use worldgen::column::Column;
 use worldgen::domain::{Domain, Lie, Scope, compose, eased};
 use worldgen::frame::{Frame, Part, facing, walls};
-use worldgen::generator::{ANY_SIZE, Child, Far, Field, Generator, Kind, Layer, Node, Op, Population, Shape, Span};
+use worldgen::generator::{ANY_SIZE, Child, Far, Field, Generator, Kind, Layer, Meets, Node, Op, Population, Shape, Span};
 use worldgen::js;
 use worldgen::kinds;
 use worldgen::noise::{Fbm, Fx, Rng, ValueNoise, fx, hash64, smoothstep};
@@ -363,6 +363,16 @@ impl Moorland {
             Water::Pools(_) => self.pool(x, z).and_then(|pool| (pool.inside(x, z) > Fx::ZERO).then_some(pool.level)),
         }
     }
+
+    /** The highest `water` in columns `min` to `max` (x, z), inclusive, if any. */
+    fn highest_water(&self, min: [i64; 2], max: [i64; 2]) -> Option<Units> {
+        match &self.water {
+            Water::Level(level) => Some(*level),
+            Water::Pools(pools) => {
+                pools.within(min.map(|v| v - POOL_RADIUS), max.map(|v| v + POOL_RADIUS)).into_iter().map(|(_, pool)| pool.level).max()
+            }
+        }
+    }
 }
 
 /** `ground` at (x, z), levelled under the hut of the steading reaching it in `steadings`. */
@@ -605,7 +615,7 @@ fn moor_in(seed: u64, lies: Mist) -> World {
     World {
         generator: Generator { kinds: valley::kinds(), seed: world.seed("layers"), layers },
         spawn,
-        heights: HEIGHTS,
+        heights: Some(HEIGHTS),
         points: Vec::new(),
     }
 }
@@ -642,6 +652,7 @@ fn mist(f: Rc<Heath>) -> Field {
             Fx::mean(ring.map(|(dx, dz)| Units(ground.at(x + dx, z + dz)).to_fx()))
         })
     };
+    let (ground, lies) = (f.ground.ground.clone(), f.moorland.lies);
     Field::columns("mist", 5.0, Op::Fill, move |x, z| {
         let share = f.share(x, z);
         if share == Fx::ZERO {
@@ -655,6 +666,12 @@ fn mist(f: Rc<Heath>) -> Field {
             return Vec::new();
         }
         vec![Span::medium(h + 1, depth, K::mist, lies.extinction)]
+    })
+    // Its top under the most the ground is a lid's samples away, two rings, or two sites over the ground.
+    .meets(move |b, s| {
+        let r = 2 * MIST_RING;
+        let Some((_, high)) = ground.range([b.min[0] - r, b.min[2] - r], [b.max[0] - 1 + r, b.max[2] - 1 + r]) else { return Meets::Any };
+        Meets::under(high + 1 + (lies.over - lies.under).0.max(0), b, s)
     })
 }
 
@@ -721,6 +738,7 @@ fn stream_bed(f: Rc<Heath>) -> Field {
  * two sites thick, its top site is water, not lost under it.
  */
 fn water(f: Rc<Heath>) -> Field {
+    let (moorland, ground) = (f.moorland.clone(), f.ground.ground.clone());
     Field::columns("water", 2.0, Op::Paint, move |x, z| {
         let h = f.height(x, z);
         if f.moorland.streamside(x, z) == Streamside::Bed {
@@ -729,6 +747,17 @@ fn water(f: Rc<Heath>) -> Field {
         match f.moorland.water(x, z) {
             Some(level) if f.owns(x, z) => Column::new(h).water_to(T::water, level.0).spans(),
             _ => Vec::new(),
+        }
+    })
+    // Under the highest water's level or, the stream's, the ground; none, nothing. Nothing said where its lines are
+    // further apart than the stretches pools are kept by: finding them all would cost more than the lines.
+    .meets(move |b, s| {
+        let (min, max) = ([b.min[0], b.min[2]], [b.max[0] - 1, b.max[2] - 1]);
+        let Some((_, high)) = ground.range(min, max).filter(|_| s < POOLS_APART / 2) else { return Meets::Any };
+        let water = moorland.highest_water(min, max).map(|level| level.0 + 1);
+        match water.max(moorland.stream.as_ref().map(|_| high)) {
+            Some(top) => Meets::under(top, b, s),
+            None => Meets::Nothing,
         }
     })
 }

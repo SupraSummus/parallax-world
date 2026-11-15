@@ -16,7 +16,7 @@ the city (`city.rs`), boxes on a plan of quarter metres,
 and the cheese (`cheese.rs`), endless every way, no way up but for walking it;
 a host starts either by name from `WORLDS` (`worlds/src/lib.rs`),
 as a `World`: its generator, spawn and heights
-(the bounds it has anything in, endless for the cheese: `ENDLESS`),
+(the bounds it has anything in, with a sky over them; the cheese has none),
 and the places it names (`points`);
 the web lists and generates them all as WebAssembly (`web/src/lib/worldgen.ts`).
 Integers and fixed point (`noise.rs`) decide wherever they can,
@@ -43,7 +43,8 @@ A world is **layers** of two kinds, drawn in `order`:
 - **Fields:** something everywhere, from position alone: the ground, caves, fog.
   A field gives a kind (or a medium) at each site (`At`),
   or `Spans` along each line of sites parallel to an `axis` (heightfields),
-  of which it may make only those reaching the stretch asked for (`plan::along`):
+  given the stretch of the line asked for,
+  of which it may make only those reaching it (`Field::spans`):
   a field endless along its lines, as the cheese's, makes no more.
   Boxes ask for different stretches of a line,
   and the contract holds a box generated in parts to the box whole,
@@ -76,30 +77,40 @@ A world is **layers** of two kinds, drawn in `order`:
   Or a population makes a thing at each point of `Points`
   (`anchor_points`; see "Points").
 
-A layer may say **where it is**, about a plan of heights
-such as a world's ground (`plan::Sloped`):
-a field's spans along y lie from `below` under to `above` over it
-at their column (`Field::about`),
-a population's things stand on it (`Population::on`);
-the ground's field may say what it is under all that (`Field::under`),
+A field may say **where it is**: what it draws in any box
+(`Field::meets`, a `Meets`):
+anything, nothing, or all of it solid of one kind, along any axis.
+The cheese is all cheese, its holes nothing where none of them reaches;
+the sea nothing over its level (`Meets::under`).
+A field on a ground says it about a plan of heights (`plan::Sloped`):
+its spans along y lie from `below` under to `above` over it
+at their column (`Field::about`), a rule checked on each span,
+and what it meets follows, from the plan's range over the box's columns
+(`Sloped::range`), which its slope bounds;
+a plan promising no slope (`Sloped::any`) says nothing.
+The ground's field may say what it is under all that (`Field::under`),
 solid down without end.
-Each is a rule (below), checked wherever it draws;
+A population's things may stand on such a plan (`Population::on`), a rule too.
+Each is a rule (below),
 so the framework asks it to draw only where it may be:
-a field line by line in blocks (`LINES`), a population box by box,
-from the plan's range over their columns (`Sloped::range`),
-which its slope bounds;
-a plan promising no slope (`Sloped::any`) leaves them drawn everywhere.
+a field in blocks of lines (`LINES`), a population box by box.
 So a host may ask for any box, in any order,
 and a field about the ground costs little in the air above it
 or the rock below it, where it is not asked at all.
 And what a box holds throughout follows from what they say (`whole`):
-nothing, or ground so deep that none of it shows.
+nothing, or solid so deep that none of it shows.
 The last field drawing all of a box decides it;
 a layer drawing in it after keeps only that:
 a carve what is empty, a fill or paint what is buried
 (a thing's carves cut only it).
+A population draws in it if a thing of the cells reaching it,
+made as drawing makes it, reaches it by its bounds
+(asked only where the fields alone would leave it whole);
+past their size, its far form, if any.
 A host need not make either (`shown`):
-it generates a box less its whole bottom and top.
+it generates a box less its whole bottom and top;
+a box all buried it keeps as rock, a brick of it for all (`generate_shown`),
+not emptied, as rays from a finer level's hollows and light meet it.
 A layer that says nothing is drawn everywhere.
 
 A thing is a **node**: its **shapes**, and **children**,
@@ -410,6 +421,10 @@ Broken rules panic, naming the thing and pointing here:
   under that, if it says, all its `under`, a solid span from `DEEP`.
 - **On.** A thing's anchor lies at most N (its cell) off
   the plan its population stands `on`.
+- **Meets.** A field draws in a box what it `meets` there:
+  nothing where it says nothing, solid of its kind where it says all.
+  Only the contract checks it (`skips_hold`),
+  so derive it from what bounds the spans, as `About` does.
 - **Rooms.** A thing's weight lies from 0 to the rooms' `most`.
 
 Not checked, but caught by the tests:
@@ -457,15 +472,17 @@ the kinds nothing draws are only printed,
 as worlds share tables of kinds (the moor's is the valley's).
 `CONTRACT_ONLY='towns › church,railway'` checks only the regions
 of strata so named, and surveys only their layers.
-A world's heights are its own, a ground's sky and the rock under it;
+A world's heights are its own, a ground's sky and the rock under it,
+and an endless world has none;
 the checks look at it in cubes around places
 (regions, the survey's, places' and directions' around spawn),
-each within its heights (`World::within`),
+each within its heights if it has them (`World::within`),
 so a cube as wide as a ground's heights holds all of them,
 and an endless world's is a cube of it.
 A camera could be anywhere open to a region's outside.
-"From above" is a sky's view: rays down from the top of a world's heights,
-cutting nothing; a world with no sky is not seen from it.
+"From above" is a sky's view: rays down from over what may show,
+through cubes as any picture's;
+a world with no heights has no sky, and is not seen from it.
 Some still take y as up ("Drop y as up" in `docs/todo.md`).
 
 The contract says three things.
@@ -551,7 +568,7 @@ in shares of material types or in sRGB.
   the learned town's its whole crop;
 - at each level up to one past the world's, in each region
   and a host tile's width around spawn,
-  a slab above the world's `heights` stops no rays at all:
+  a slab above the world's `heights`, if it has them, stops no rays at all:
   hosts generate only within them, and cut whatever is outside
   (under them, the ground goes on, unseen);
 - the things of each population the survey found, of all heights,
@@ -561,7 +578,7 @@ in shares of material types or in sRGB.
   cut into boxes 32 sites a side (`skips_hold`),
   what is skipped where it says it may not be draws nothing there:
   it is drawn all the same, to see (`checking_skipped`),
-  and what a field fills under its ground unasked is what it would draw;
+  and what a field fills unasked, as all of a kind, is what it would draw;
   and a box `whole` says is empty or buried is.
   The rules above hold wherever something is drawn;
   this finds what they can't see,
@@ -993,7 +1010,7 @@ The moor (`worlds/src/moor.rs`) is the shortest whole world to start from.
 `Population::new(…).reach(…).anchor(…)`, `.anchor_along(axis, …)` or `.anchor_points(…)`, `.make(…)`,
 `Node::group`, `Child::new`, and `Shape::ball` and the like,
 solid and filling unless told to `paint` or `carve`;
-`.about(ground, below, above)` on a field, `.on(ground)` on a population,
+`.meets(…)` or `.about(ground, below, above)` on a field, `.on(ground)` on a population,
 says where it is ("Model");
 the ground's field `.under(kind)`, its columns ending `Column::under(kind)`:
 a world is solid under its ground, not a shell over a hollow.

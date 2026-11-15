@@ -112,6 +112,24 @@ impl VoxelGrid {
         }
     }
 
+    /**
+     * The sites of `b` all buried in material `id`, as `bury` keeps them:
+     * every brick holds one's sites, each a whole voxel. Not emptied, for
+     * the same reason: a host shows it as rock, which rays from a finer
+     * level's hollows meet and light doesn't pass.
+     */
+    pub fn buried(b: &Box3, id: u8) -> VoxelGrid {
+        let mut grid = VoxelGrid::new(b);
+        if grid.bricks.is_empty() {
+            return grid;
+        }
+        grid.bricks.fill(0);
+        grid.cells = vec![id; BRICK_SITES];
+        grid.pieces = Part { alpha: vec![ALPHA; BRICK_SITES], seen: vec![id; BRICK_SITES] };
+        grid.medium = Part { alpha: vec![0; BRICK_SITES], seen: vec![0; BRICK_SITES] };
+        grid
+    }
+
     /** The box of its sites. */
     pub fn clip(&self) -> Box3 {
         Box3 { min: self.min, max: [0, 1, 2].map(|i| self.min[i] + self.n[i]) }

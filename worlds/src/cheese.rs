@@ -10,16 +10,15 @@
 //! own; tunnels capsules from low in a cavern to low in a neighbour's.
 //! A field carves them line by line of sites along y, each a chord along
 //! it, so at any level as many sites as the hole holds, on average; only
-//! those that reach the stretch of the line asked for (plan::along).
+//! those that reach the stretch of the line asked for.
 
 use worldgen::World;
-use worldgen::generator::{Child, Field, Generator, Layer, Node, Op, Point, Population, Shape, Span};
+use worldgen::generator::{Child, Field, Generator, Layer, Meets, Node, Op, Point, Population, Shape, Span};
 use worldgen::js;
 use worldgen::kinds;
 use worldgen::noise::{Rng, hash64, stream};
-use worldgen::plan::{along, spacing};
+use worldgen::plan::spacing;
 use worldgen::units::m;
-use worldgen::world::ENDLESS;
 
 kinds! {
     base: 0;
@@ -29,7 +28,7 @@ kinds! {
     rose: 6, ["#ff86dc", "#f572cf"], glows;
 }
 
-/** Holes lie within this far of the origin along y, well inside the heights: past it, solid cheese to their ends. */
+/** Holes lie within this far of the origin along y: past it, solid cheese without end. */
 const HOLED: i64 = 1 << 34;
 
 /** Balls of one size: one in a cell CELL wide with the chance `chance`, its radius from `least` to `most`. */
@@ -248,35 +247,42 @@ impl Holes {
     }
 }
 
-/** The stretch of the line of sites asked for (plan::along), a few sites more, within the heights. */
-fn asked() -> (i64, i64) {
-    let ((from, to), more) = (along(), 4 * spacing());
-    (from.saturating_sub(more).max(ENDLESS.0), to.saturating_add(more).min(ENDLESS.1))
+/** The stretch [from, to] of a line of sites asked for, a few sites more. */
+fn asked((from, to): (i64, i64)) -> (i64, i64) {
+    let more = 4 * spacing();
+    (from.saturating_sub(more), to.saturating_add(more))
 }
 
-/** The cheese, through all the heights. */
+/** The cheese, everywhere: all of any box. */
 fn body() -> Field {
-    Field::columns("cheese", 0.0, Op::Fill, |_, _| {
-        let (from, to) = asked();
+    Field::spans("cheese", 0.0, Op::Fill, 1, |_, _, stretch| {
+        let (from, to) = asked(stretch);
         vec![Span::solid(from, to, K::cheese)]
     })
+    .meets(|_, _| Meets::All(K::cheese.into()))
+}
+
+/** Whether holes of the widest `most` are carved at sites `spacing` apart: while wider than the sites are apart. */
+fn carved(most: i64, spacing: i64) -> bool {
+    spacing < 2 * most
 }
 
 /**
  * The holes: each one's chord along each line of sites, carved; each kind
  * while its widest is wider than the sites are apart, finer detail left
  * out ("Fields" in "Levels", docs/generators.md): a host asks for cubes,
- * so a tile coarser by a level holds eight times the holes.
+ * so a tile coarser by a level holds eight times the holes. Nothing
+ * where none of those carved reaches, a site or two around it.
  */
 fn holes(seeds: Seeds) -> Field {
-    Field::columns("holes", 1.0, Op::Carve, move |x, z| {
-        let ((from, to), s) = (asked(), spacing());
+    Field::spans("holes", 1.0, Op::Carve, 1, move |x, z, stretch| {
+        let ((from, to), s) = (asked(stretch), spacing());
         let (low, high) = ([x, from, z], [x, to, z]);
         let (fx, fz) = (x as f64, z as f64);
-        let shown = |most: i64| s < 2 * most;
-        let caverns = shown(CAVERNS.most).then(|| CAVERNS.balls(seeds.caverns, low, high));
-        let eyes = shown(EYES.most).then(|| EYES.balls(seeds.eyes, low, high));
-        let tunnels = shown(TUNNEL_MOST).then(|| tunnels(seeds, low, high));
+        let carved = |most: i64| carved(most, s);
+        let caverns = carved(CAVERNS.most).then(|| CAVERNS.balls(seeds.caverns, low, high));
+        let eyes = carved(EYES.most).then(|| EYES.balls(seeds.eyes, low, high));
+        let tunnels = carved(TUNNEL_MOST).then(|| tunnels(seeds, low, high));
         let chords = caverns
             .into_iter()
             .flatten()
@@ -292,6 +298,14 @@ fn holes(seeds: Seeds) -> Field {
                 (from < to).then(|| Span::solid(from, to, K::cheese))
             })
             .collect::<Vec<_>>()
+    })
+    .meets(move |b, s| {
+        // The box, two sites more each way: a chord's ends are rounded out, and sites stand for their voxels.
+        let [min, max] = [b.min.map(|v| v - 2 * s), b.max.map(|v| v - 1 + 2 * s)];
+        let reaches = |(c, r): ([i64; 3], i64)| (0..3).all(|i| c[i] - r <= max[i] && c[i] + r >= min[i]);
+        let balls = |balls: &Balls, seed: u64| carved(balls.most, s) && balls.balls(seed, min, max).any(reaches);
+        let tunnels = carved(TUNNEL_MOST, s) && tunnels(seeds, min, max).next().is_some();
+        if balls(&CAVERNS, seeds.caverns) || balls(&EYES, seeds.eyes) || tunnels { Meets::Any } else { Meets::Nothing }
     })
 }
 
@@ -399,7 +413,7 @@ pub fn cheese(seed: u64) -> World {
     let x = x + m(3.5);
     let spawn = [x, y - (x + y + z).rem_euclid(2), z];
     let layers = vec![Layer::Field(body()), Layer::Field(holes(seeds)), Layer::Population(grottoes(seeds))];
-    World { generator: Generator { kinds: KINDS.to_vec(), seed: stream(seed, 4), layers }, spawn, heights: ENDLESS, points: Vec::new() }
+    World { generator: Generator { kinds: KINDS.to_vec(), seed: stream(seed, 4), layers }, spawn, heights: None, points: Vec::new() }
 }
 
 #[cfg(test)]

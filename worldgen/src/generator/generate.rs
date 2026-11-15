@@ -257,12 +257,7 @@ fn drawables_in<'a>(generator: &'a Generator, clip: &Box3, s: i64) -> Vec<Drawab
             }
             continue;
         }
-        let n = population.cell;
-        // Cells whose reach meets `units`: centres within N + reach of it.
-        let cells = [0, 1, 2].map(|axis| {
-            let reach = population.reach[axis];
-            (-(-(units.min[axis] - n - reach)).div_euclid(n), (units.max[axis] - 1 + n + reach).div_euclid(n))
-        });
+        let (n, cells) = (population.cell, cells_reaching(population, &units));
         // Its things read the ground on the level's sites, as its fields do (Sloped::at).
         let work = plan::footprint(s, [0, 0], || {
             each_thing(generator, population, cells, |cell, _, node| {
@@ -315,40 +310,58 @@ fn stands_within(population: &Population, b: &Box3) -> bool {
 pub enum Whole {
     /** Nothing. */
     Empty,
-    /** Solid, and the sites around it too: none of its voxels shows. */
-    Buried,
+    /** Solid, and the sites around it too: none of its voxels shows. Of the kind the last field drawing all of it fills. */
+    Buried(Kind),
 }
 
 /**
  * What box `b` of `level` holds throughout (sites as `generate`'s), as
- * its layers say (About, Population::on): nothing, or solid wherever a ray
- * could see it from. The last field drawing all of it decides; a layer
- * drawing in it after keeps only that: a carve what is empty, a fill or
- * paint what is buried (as a thing's: its carves cut only itself). None
- * if not so.
+ * its fields say (Field::meets) and its things are: nothing, or solid
+ * wherever a ray could see it from. The last field drawing all of it
+ * decides; a layer drawing in it after keeps only that: a carve what is
+ * empty, a fill or paint what is buried (as a thing's: its carves cut
+ * only itself). None if not so.
  */
 pub fn whole(generator: &Generator, b: &Box3, level: u32) -> Option<Whole> {
     let s = 1i64 << level;
     let units = units_of(&b.widen(1), s);
-    let (min, max, ys) = ([units.min[0], units.min[2]], [units.max[0] - 1, units.max[2] - 1], [units.min[1], units.max[1] - 1]);
-    // What each draws in it, and whether that carves, in the order they draw (drawables_in).
-    let mut layers: Vec<(f64, &str, Meets, bool)> = generator
-        .layers
-        .iter()
-        .map(|layer| match layer {
-            Layer::Field(f) => (f.order, f.name, f.about.as_ref().map_or(Meets::Any, |a| a.meets(min, max, ys, s)), f.op == Op::Carve),
-            Layer::Population(p) => {
-                let meets = if stands_within(p, &units) { Meets::Any } else { Meets::Nothing };
-                (p.order, p.name, meets, p.far.as_ref().is_some_and(|far| far.op == Op::Carve))
-            }
-        })
-        .collect();
-    layers.sort_by(|a, b| a.0.total_cmp(&b.0).then_with(|| a.1.cmp(b.1)));
-    let kept = |carves: bool| if carves { Whole::Empty } else { Whole::Buried };
-    let last = layers.iter().rposition(|&(.., meets, _)| matches!(meets, Meets::All(kind) if !generator.kinds[kind as usize].medium));
-    let whole = last.map_or(Whole::Empty, |i| kept(layers[i].3));
-    let after = &layers[last.map_or(0, |i| i + 1)..];
-    after.iter().all(|&(.., meets, carves)| meets == Meets::Nothing || kept(carves) == whole).then_some(whole)
+    // What each draws in it, and whether that carves, in the order they draw (drawables_in); with no `things`, as if
+    // there were none.
+    let layers = |things: bool| {
+        let mut layers: Vec<(f64, &str, Meets, bool)> = generator
+            .layers
+            .iter()
+            .map(|layer| match layer {
+                Layer::Field(f) => (f.order, f.name, f.meets_in(&units, s), f.op == Op::Carve),
+                Layer::Population(p) => {
+                    let meets = match &p.far {
+                        _ if !things || !stands_within(p, &units) => Meets::Nothing,
+                        Some(far) if s > p.size => far.meets_in(&units, s),
+                        None if s > p.size => Meets::Nothing,
+                        // As drawables_in makes them, with what a shape may grow by at this level.
+                        _ if !plan::footprint(s, [0, 0], || reaches(generator, p, &units.widen(2 * s))) => Meets::Nothing,
+                        _ => Meets::Any,
+                    };
+                    (p.order, p.name, meets, p.far.as_ref().is_some_and(|far| far.op == Op::Carve))
+                }
+            })
+            .collect();
+        layers.sort_by(|a, b| a.0.total_cmp(&b.0).then_with(|| a.1.cmp(b.1)));
+        layers
+    };
+    let decide = |layers: Vec<(f64, &str, Meets, bool)>| {
+        let last = layers.iter().rposition(|&(.., meets, _)| matches!(meets, Meets::All(kind) if !generator.kinds[kind as usize].medium));
+        // What it holds, and whether that is empty: a carve keeps only that, a fill or a paint only what is buried.
+        let (whole, empty) = match last.map(|i| layers[i]) {
+            Some((.., Meets::All(kind), false)) => (Whole::Buried(kind), false),
+            _ => (Whole::Empty, true),
+        };
+        let after = &layers[last.map_or(0, |i| i + 1)..];
+        after.iter().all(|&(.., meets, carves)| meets == Meets::Nothing || carves == empty).then_some(whole)
+    };
+    // Fields first, as if there were no things: things only take away from that, and are asked at more cost.
+    decide(layers(false))?;
+    decide(layers(true))
 }
 
 /**
@@ -359,6 +372,9 @@ pub fn whole(generator: &Generator, b: &Box3, level: u32) -> Option<Whole> {
  */
 pub fn shown(generator: &Generator, b: &Box3, level: u32) -> Box3 {
     let (bottom, top) = (b.min[1], b.max[1]);
+    if whole(generator, b, level).is_some() {
+        return Box3 { max: [b.max[0], bottom, b.max[2]], ..*b };
+    }
     let at = |k: i64| (bottom + k * BRICK).min(top);
     let whole_in = |y0: i64, y1: i64| {
         y0 >= y1 || whole(generator, &Box3 { min: [b.min[0], y0, b.min[2]], max: [b.max[0], y1, b.max[2]] }, level).is_some()
@@ -371,10 +387,21 @@ pub fn shown(generator: &Generator, b: &Box3, level: u32) -> Box3 {
 
 /**
  * Box `b` of `level` as hosts make it: what may show of it (`shown`)
- * generated, its buried bricks kept as one (VoxelGrid::bury). Not
+ * generated, its buried bricks kept as one (VoxelGrid::bury); all of it
+ * buried, nothing generated, its bricks one (VoxelGrid::buried). Not
  * `generate`'s grid, so not for checking a box made whole against its parts.
  */
 pub fn generate_shown(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
+    match whole(generator, b, level) {
+        Some(Whole::Empty) => return VoxelGrid::new(&Box3 { max: [b.max[0], b.min[1], b.max[2]], ..*b }),
+        Some(Whole::Buried(kind)) => {
+            // Not emptied: rays from a finer level's hollows, and light, would pass through it (VoxelGrid::buried).
+            let s = 1i64 << level;
+            let id = Palette::new(&generator.kinds, generator.seed).shade(kind, b.min[0] * s, b.min[1] * s, b.min[2] * s);
+            return VoxelGrid::buried(b, id);
+        }
+        None => {}
+    }
     let mut grid = generate(generator, &shown(generator, b, level), level);
     grid.bury();
     grid

@@ -4,20 +4,20 @@ spawn            0        36         9         0         0         0         0  
 spawn            0        25         1         0         0         0         0        79         0         0         0 steadings
 spawn            0         0         0         0         0         0      2048     26624         0         0         0 heath
 spawn            0         0         0         0         0         0         0         0         0         0         0 stream bed
-spawn            0         0         0         0         0         0     16384     32768         0         0         0 water
-spawn            0         0         0         0         0         0     16384     32768         0         0         0 mist
-spawn            0         0         0         0         0         0         0     33203     16600     16590         0 plan ground
+spawn            0         0         0         0         0         0         0         0         0         0         0 water
+spawn            0         0         0         0         0         0     16384     35904         0         0         0 mist
+spawn            0         0         0         0         0         0         0     34050     16982     16754         0 plan ground
 spawn            0         0         0         0         0         0         0       428        34        34         0 plan steadings
-spawn            0         0         0         0         0         0         0         0       132       132         0 plan stream
-spawn            0         0         0         0         0         0         0     16384     16384     16384         0 plan streamside
+spawn            0         0         0         0         0         0         0         0        40        40         0 plan stream
+spawn            0         0         0         0         0         0         0      2048      2048      2048         0 plan streamside
 spawn            0         0         0         0         0         0         0     65568     16388     16388         0 plan mist
 spawn            1        81        20         0         0         0         0       636         0         0         0 moor boulders
 spawn            1        36         1         0         0         0         0       125         0         0         0 steadings
 spawn            1         0         0         0         0         0     16384     86544         0         0         0 heath
 spawn            1         0         0         0         0         0     16384     32768         0         0         0 stream bed
-spawn            1         0         0         0         0         0     16384     32768         0         0         0 water
-spawn            1         0         0         0         0         0     16384     32768         0         0         0 mist
-spawn            1         0         0         0         0         0         0     33943     16967     16952         0 plan ground
+spawn            1         0         0         0         0         0     12288     24576         0         0         0 water
+spawn            1         0         0         0         0         0     16384     35904         0         0         0 mist
+spawn            1         0         0         0         0         0         0     34868     17383     17144         0 plan ground
 spawn            1         0         0         0         0         0         0       927        76        76         0 plan steadings
 spawn            1         0         0         0         0         0         0         0       141       141         0 plan stream
 spawn            1         0         0         0         0         0         0     16384     16384     16384         0 plan streamside
@@ -26,10 +26,10 @@ spawn            2       196        52         0         0         0         0  
 spawn            2        49         1         6       570         0         0       184         0         0       570 steadings
 spawn            2         0         0         0         0         0     16384     83793         0         0         0 heath
 spawn            2         0         0         0         0         0     16384     32768         0         0         0 stream bed
-spawn            2         0         0         0         0         0     16384     32768         0         0         0 water
-spawn            2         0         0         0         0         0     16384     32768         0         0         0 mist
+spawn            2         0         0         0         0         0     12288     24576         0         0         0 water
+spawn            2         0         0         0         0         0     16384     36368         0         0         0 mist
 spawn            2         0         0         0         0         0         0      1395        85        85         0 plan steadings
-spawn            2         0         0         0         0         0         0     34041     16941     16933         0 plan ground
+spawn            2         0         0         0         0         0         0     35077     17353     17185         0 plan ground
 spawn            2         0         0         0         0         0         0         0       171       171         0 plan stream
 spawn            2         0         0         0         0         0         0     16384     16384     16384         0 plan streamside
 spawn            2         0         0         0         0         0         0     65664     16400     16400         0 plan mist
@@ -38,9 +38,9 @@ spawn            3        81         1        10       209         0         0  
 spawn            3         0         0         0         0         0     16384     87625         0         0         0 heath
 spawn            3         0         0         0         0         0     16384     32768         0         0         0 stream bed
 spawn            3         0         0         0         0         0     16384     32768         0         0         0 water
-spawn            3         0         0         0         0         0     16384     32768         0         0         0 mist
+spawn            3         0         0         0         0         0     16384     37392         0         0         0 mist
 spawn            3         0         0         0         0         0         0      1942        96        96         0 plan steadings
-spawn            3         0         0         0         0         0         0     36374     17066     17063         0 plan ground
+spawn            3         0         0         0         0         0         0     37899     17622     17531         0 plan ground
 spawn            3         0         0         0         0         0         0         0       246       246         0 plan stream
 spawn            3         0         0         0         0         0         0     16384     16384     16384         0 plan streamside
 spawn            3         0         0         0         0         0         0     65928     16433     16433         0 plan mist
@@ -49,9 +49,9 @@ spawn            4       169         4        17       115         0         0  
 spawn            4         0         0         0         0         0     16384     92857         0         0         0 heath
 spawn            4         0         0         0         0         0     16384     32768         0         0         0 stream bed
 spawn            4         0         0         0         0         0     16384     32768         0         0         0 water
-spawn            4         0         0         0         0         0     16384     32768         0         0         0 mist
+spawn            4         0         0         0         0         0     16384     34704         0         0         0 mist
 spawn            4         0         0         0         0         0         0      3450       151       151         0 plan steadings
-spawn            4         0         0         0         0         0         0     42909     17780     17780         0 plan ground
+spawn            4         0         0         0         0         0         0     43443     17981     17974         0 plan ground
 spawn            4         0         0         0         0         0         0         0      2081      2081         0 plan stream
 spawn            4         0         0         0         0         0         0     16384     16384     16384         0 plan streamside
 spawn            4         0         0         0         0         0         0     66688     16528     16528         0 plan mist
@@ -60,9 +60,9 @@ spawn            5       441         7        62        81         0         0  
 spawn            5         0         0         0         0         0     16384     88883         0         0         0 heath
 spawn            5         0         0         0         0         0     16384     32768         0         0         0 stream bed
 spawn            5         0         0         0         0         0     16384     32768         0         0         0 water
-spawn            5         0         0         0         0         0     16384     32768         0         0         0 mist
+spawn            5         0         0         0         0         0     16384     36368         0         0         0 mist
 spawn            5         0         0         0         0         0         0      8179       323       323         0 plan steadings
-spawn            5         0         0         0         0         0         0     39515     18191     18191         0 plan ground
+spawn            5         0         0         0         0         0         0     40373     18561     18561         0 plan ground
 spawn            5         0         0         0         0         0         0         0      4161      4161         0 plan stream
 spawn            5         0         0         0         0         0         0     16384     16384     16384         0 plan streamside
 spawn            5         0         0         0         0         0         0     69768     16913     16913         0 plan mist
@@ -71,9 +71,9 @@ spawn            6      1369        21       229       213         0         0  
 spawn            6         0         0         0         0         0     16384     81827         0         0         0 heath
 spawn            6         0         0         0         0         0     16384     32768         0         0         0 stream bed
 spawn            6         0         0         0         0         0     16384     32768         0         0         0 water
-spawn            6         0         0         0         0         0     16384     32768         0         0         0 mist
+spawn            6         0         0         0         0         0     16384     35472         0         0         0 mist
 spawn            6         0         0         0         0         0         0     24759      1011      1011         0 plan steadings
-spawn            6         0         0         0         0         0         0     38368     18004     18004         0 plan ground
+spawn            6         0         0         0         0         0         0     38961     18256     18256         0 plan ground
 spawn            6         0         0         0         0         0         0         0      8323      8323         0 plan stream
 spawn            6         0         0         0         0         0         0     16384     16384     16384         0 plan streamside
 spawn            6         0         0         0         0         0         0     81024     18320     18320         0 plan mist
@@ -81,9 +81,9 @@ spawn            7      4761        81       958       889         0         0  
 spawn            7         0         0         0         0         0     16384     83234         0         0         0 heath
 spawn            7         0         0         0         0         0     16384     32768         0         0         0 stream bed
 spawn            7         0         0         0         0         0     16384     32768         0         0         0 water
-spawn            7         0         0         0         0         0     16384     32768         0         0         0 mist
+spawn            7         0         0         0         0         0     16384     34704         0         0         0 mist
 spawn            7         0         0         0         0         0         0     81500      2944      2944         0 plan steadings
-spawn            7         0         0         0         0         0         0     52807     23976     22556         0 plan ground
+spawn            7         0         0         0         0         0         0     53169     24128     22687         0 plan ground
 spawn            7         0         0         0         0         0         0         0     14595     14595         0 plan stream
 spawn            7         0         0         0         0         0         0     16384     16384     16384         0 plan streamside
 spawn            7         0         0         0         0         0         0    124704     23780     23780         0 plan mist
@@ -91,9 +91,9 @@ spawn            8     17956       337      4349      4034         0         0  
 spawn            8         0         0         0         0         0     16384     86616         0         0         0 heath
 spawn            8         0         0         0         0         0     16384     32768         0         0         0 stream bed
 spawn            8         0         0         0         0         0     16384     32768         0         0         0 water
-spawn            8         0         0         0         0         0     16384     32768         0         0         0 mist
-spawn            8         0         0         0         0         0         0    319606      9484      9480         0 plan steadings
-spawn            8         0         0         0         0         0         0    120750     50919     44822         0 plan ground
+spawn            8         0         0         0         0         0     16384     34704         0         0         0 mist
+spawn            8         0         0         0         0         0         0    328141      9750      9741         0 plan steadings
+spawn            8         0         0         0         0         0         0    121205     51115     44955         0 plan ground
 spawn            8         0         0         0         0         0         0         0     16384     16384         0 plan stream
 spawn            8         0         0         0         0         0         0     16384     16384     16384         0 plan streamside
 spawn            8         0         0         0         0         0         0    299464     45625     45625         0 plan mist
@@ -101,9 +101,9 @@ region1          0        36         8         0         0         0         0  
 region1          0        25         1         0         0         0         0        84         0         0         0 steadings
 region1          0         0         0         0         0         0     16384     98304         0         0         0 heath
 region1          0         0         0         0         0         0     16384     32768         0         0         0 stream bed
-region1          0         0         0         0         0         0     16384     32768         0         0         0 water
-region1          0         0         0         0         0         0     16384     32768         0         0         0 mist
-region1          0         0         0         0         0         0         0     33241     16606     16596         0 plan ground
+region1          0         0         0         0         0         0     14336     28672         0         0         0 water
+region1          0         0         0         0         0         0     16384     35904         0         0         0 mist
+region1          0         0         0         0         0         0         0     34161     16983     16760         0 plan ground
 region1          0         0         0         0         0         0         0       428        34        34         0 plan steadings
 region1          0         0         0         0         0         0         0         0       135       135         0 plan stream
 region1          0         0         0         0         0         0         0     16384     16384     16384         0 plan streamside
@@ -113,8 +113,8 @@ region1          1        36         1         0         0         0         0  
 region1          1         0         0         0         0         0     16384     86544         0         0         0 heath
 region1          1         0         0         0         0         0     16384     32768         0         0         0 stream bed
 region1          1         0         0         0         0         0     16384     32768         0         0         0 water
-region1          1         0         0         0         0         0     16384     32768         0         0         0 mist
-region1          1         0         0         0         0         0         0     33915     16940     16917         0 plan ground
+region1          1         0         0         0         0         0     16384     35904         0         0         0 mist
+region1          1         0         0         0         0         0         0     34897     17350     17109         0 plan ground
 region1          1         0         0         0         0         0         0       646        47        47         0 plan steadings
 region1          1         0         0         0         0         0         0         0       137       137         0 plan stream
 region1          1         0         0         0         0         0         0     16384     16384     16384         0 plan streamside
@@ -124,9 +124,9 @@ region1          2        49         1         0         0         0         0  
 region1          2         0         0         0         0         0     16384     93712         0         0         0 heath
 region1          2         0         0         0         0         0     16384     32768         0         0         0 stream bed
 region1          2         0         0         0         0         0     16384     32768         0         0         0 water
-region1          2         0         0         0         0         0     16384     32768         0         0         0 mist
+region1          2         0         0         0         0         0     16384     36368         0         0         0 mist
 region1          2         0         0         0         0         0         0      1049        55        55         0 plan steadings
-region1          2         0         0         0         0         0         0     41518     16948     16939         0 plan ground
+region1          2         0         0         0         0         0         0     42647     17356     17189         0 plan ground
 region1          2         0         0         0         0         0         0         0       157       157         0 plan stream
 region1          2         0         0         0         0         0         0     16384     16384     16384         0 plan streamside
 region1          2         0         0         0         0         0         0     65696     16404     16404         0 plan mist

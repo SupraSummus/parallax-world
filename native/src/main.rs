@@ -668,7 +668,7 @@ mod tests {
             _ => None,
         });
         let generator = Generator { kinds, seed: 1, layers: vec![Layer::Field(slab)] };
-        worldgen::World { generator, spawn: [0, 0, 0], heights: (-64, 64), points: Vec::new() }
+        worldgen::World { generator, spawn: [0, 0, 0], heights: Some((-64, 64)), points: Vec::new() }
     }
 
     /** What `kind` draws of the world `make` makes, from its spawn, looking along the face (1, 0, 1), without fog: its width and pixels. */
@@ -688,7 +688,7 @@ mod tests {
         let kinds = vec![KindDef { name: "ground", kind_type: 10, colors: &["#ff0000"], walk_through: false, glows: false, medium: false }];
         let ground = Field::at("ground", 0.0, Op::Fill, |_, y, _| (y < 0).then_some((0, None)));
         let generator = Generator { kinds, seed: 1, layers: vec![Layer::Field(ground)] };
-        worldgen::World { generator, spawn: [0, 16, 0], heights: (-64, 64), points: Vec::new() }
+        worldgen::World { generator, spawn: [0, 16, 0], heights: Some((-64, 64)), points: Vec::new() }
     }
 
     /**
@@ -780,7 +780,7 @@ mod tests {
             _ => None,
         });
         let generator = Generator { kinds, seed: 1, layers: vec![Layer::Field(slab)] };
-        worldgen::World { generator, spawn: [0, 0, 0], heights: (-64, 64), points: Vec::new() }
+        worldgen::World { generator, spawn: [0, 0, 0], heights: Some((-64, 64)), points: Vec::new() }
     }
 
     /** The nearer of two media shows over the other, not mixed with it as if in any order. */
@@ -816,7 +816,7 @@ mod tests {
             Some(Node::of(shapes).with_far(Far::measured(worldgen::noise::fx(2.0))))
         });
         let generator = Generator { kinds: vec![kind(&["#ffffff"]), kind(&["#ff0000"])], seed: 1, layers: vec![Layer::Population(block)] };
-        worldgen::World { generator, spawn: [0, -400, 0], heights: (-64, 512), points: Vec::new() }
+        worldgen::World { generator, spawn: [0, -400, 0], heights: Some((-64, 512)), points: Vec::new() }
     }
 
     #[test]
@@ -861,7 +861,7 @@ mod tests {
             (ground || h.is_multiple_of(20000)).then_some(((h % 4) as u8, None))
         });
         let generator = Generator { kinds, seed: 1, layers: vec![Layer::Field(field)] };
-        worldgen::World { generator, spawn: by, heights: (-200, 200), points: Vec::new() }
+        worldgen::World { generator, spawn: by, heights: Some((-200, 200)), points: Vec::new() }
     }
 
     /** What the voxels engine draws of `make`'s world from `eye` past its spawn, within level 0's reach: its pixels. */

@@ -229,7 +229,8 @@ pub enum Shapes {
 type ChildrenReaching = dyn Fn(&Box3) -> Vec<Child>;
 type MakeShapes = dyn Fn(&mut Rng) -> Vec<Shape>;
 type FieldAt = dyn Fn(i64, i64, i64) -> Option<(Kind, Option<f64>)>;
-type FieldSpans = dyn Fn(i64, i64) -> Vec<Span>;
+type FieldSpans = dyn Fn(i64, i64, (i64, i64)) -> Vec<Span>;
+type FieldMeets = dyn Fn(&Box3, i64) -> Meets;
 type CellAnchor = dyn Fn(&Cell) -> Option<Point>;
 type LineAnchor = dyn Fn(&Line) -> Option<Point>;
 type SpotAnchor = dyn Fn(&Spot) -> Option<Point>;
@@ -293,8 +294,13 @@ pub enum FieldValues {
     At(Box<FieldAt>),
     /**
      * Spans along each line of sites parallel to `axis`, drawn in order;
-     * given (u, v): the line's other two coordinates in axis order,
-     * lattice units.
+     * given (u, v), the line's other two coordinates in axis order, and
+     * the stretch [from, to] of it asked for, lattice units along it.
+     * Spans that can't reach into the stretch may be left out: a field
+     * endless along its lines (the cheese's) makes only what is there.
+     * What it makes of one stretch agrees with what it makes of another
+     * where they meet, as the contract checks: a box in parts is the box
+     * whole.
      */
     Spans { axis: usize, spans: Box<FieldSpans> },
 }
@@ -305,8 +311,24 @@ pub struct Field {
     pub order: f64,
     pub op: Op,
     pub values: FieldValues,
-    /** Spans along y only about a plan of heights; None: anywhere. */
+    /**
+     * What it draws in a box (lattice units) at sites a spacing apart, as
+     * it says (`Meets`), along any axis: a rule, checked where it skips
+     * (`checking_skipped`). None: anything.
+     */
+    pub meets: Option<Box<FieldMeets>>,
+    /**
+     * Its spans along y about a plan of heights, a rule checked on each
+     * span drawn; what it `meets` follows from it (`Field::about`).
+     */
     pub about: Option<About>,
+}
+
+impl Field {
+    /** What it draws in box `b` (lattice units) at sites `spacing` apart, as it says. */
+    pub(crate) fn meets_in(&self, b: &Box3, spacing: i64) -> Meets {
+        self.meets.as_ref().map_or(Meets::Any, |meets| meets(b, spacing))
+    }
 }
 
 /**
@@ -316,6 +338,7 @@ pub struct Field {
  * from DEEP). A rule, checked wherever it draws; so it is asked to draw
  * only where that may be (Sloped::range), and under it fills `under`.
  */
+#[derive(Clone)]
 pub struct About {
     pub of: Rc<Sloped>,
     pub below: i64,
@@ -339,13 +362,11 @@ impl About {
         Some(2 * (1 + self.of.slope()?) * spacing)
     }
 
-    /**
-     * What lines in [min, max] (x, z, lattice units, inclusive) draw in
-     * heights [y0, y1], at sites `spacing` apart: whatever they draw, all
-     * `under` (a kind), or nothing.
-     */
-    fn meets(&self, min: [i64; 2], max: [i64; 2], [y0, y1]: [i64; 2], spacing: i64) -> Meets {
-        let (Some((lo, hi)), Some(slack)) = (self.of.range(min, max), self.slack(spacing)) else { return Meets::Any };
+    /** What its lines draw in box `b` (lattice units), at sites `spacing` apart: whatever they draw, all `under` (a kind), or nothing. */
+    pub(crate) fn meets(&self, b: &Box3, spacing: i64) -> Meets {
+        let range = self.of.range([b.min[0], b.min[2]], [b.max[0] - 1, b.max[2] - 1]);
+        let (Some((lo, hi)), Some(slack)) = (range, self.slack(spacing)) else { return Meets::Any };
+        let (y0, y1) = (b.min[1], b.max[1] - 1);
         match self.under {
             _ if y0 > hi + self.above + slack => Meets::Nothing,
             Some(kind) if y1 < lo - self.below - slack => Meets::All(kind),
@@ -355,9 +376,13 @@ impl About {
     }
 }
 
-/** What a field's lines draw in a box, by what they are `About`. */
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Meets {
+/**
+ * What a field draws in a box, as it says (`About`, `Field::meets`):
+ * anything, every site of it solid of one kind, or nothing. A box
+ * all of a kind is drawn without asking, one of nothing not at all.
+ */
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Meets {
     Any,
     All(Kind),
     Nothing,

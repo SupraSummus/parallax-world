@@ -217,7 +217,7 @@ fn a_field_under_its_ground_is_solid_to_the_bottom_and_says_so() {
     for level in 0..4 {
         let s = 1 << level;
         // Deep under it, across it, over it.
-        for (y, whole) in [(-4096, Some(Whole::Buried)), (-16, None), (1024, Some(Whole::Empty))] {
+        for (y, whole) in [(-4096, Some(Whole::Buried(0))), (-16, None), (1024, Some(Whole::Empty))] {
             let b = Box3 { min: [0, y / s, 0], max: [64, y / s + 32, 16] };
             assert_eq!(super::whole(&world, &b, level), whole, "level {level}, at {y}");
             let (grid, broken) = checking_skipped(|| generate(&world, &b.widen(1), level));
@@ -226,13 +226,47 @@ fn a_field_under_its_ground_is_solid_to_the_bottom_and_says_so() {
                 || (b.min[2]..b.max[2]).flat_map(|z| (b.min[1]..b.max[1]).flat_map(move |y| (b.min[0]..b.max[0]).map(move |x| [x, y, z])));
             let alpha = |[x, y, z]: [i64; 3]| grid.alpha(x, y, z);
             match whole {
-                Some(Whole::Buried) => assert!(sites().filter(|&[x, y, z]| crate::grid::is_site(x, y, z)).all(|p| alpha(p) == ALPHA)),
+                Some(Whole::Buried(_)) => assert!(sites().filter(|&[x, y, z]| crate::grid::is_site(x, y, z)).all(|p| alpha(p) == ALPHA)),
                 Some(Whole::Empty) => assert!(sites().all(|p| alpha(p) == 0)),
                 None => {}
             }
             // Drawn as the field would, without asking it.
             assert_eq!(generate(&world, &b, level).alpha(0, b.min[1], 0), grid.alpha(0, b.min[1], 0));
         }
+    }
+}
+
+/** Solid where x < 0, as spans along x, saying so if it `says`: nothing from x = 0 on, all solid under x = -8. */
+fn wall(says: bool) -> Generator {
+    let field = Field::spans("wall", 0.0, Op::Fill, 0, |_, _, _| vec![Span::solid(-(1 << 20), 0, 0)]);
+    let meets = |b: &Box3, _: i64| match b {
+        _ if b.min[0] >= 0 => Meets::Nothing,
+        _ if b.max[0] <= -8 => Meets::All(0),
+        _ => Meets::Any,
+    };
+    layers(vec![Layer::Field(if says { field.meets(meets) } else { field })])
+}
+
+#[test]
+fn a_field_says_where_it_is_along_any_axis() {
+    let world = wall(true);
+    for level in 0..4 {
+        let s = 1 << level;
+        let box_at = |x: i64| Box3 { min: [x / s, -16, -16], max: [x / s + 32, 16, 16] };
+        let (past, across, behind) = (box_at(256), box_at(-16 * s), box_at(-512));
+        assert_eq!(whole(&world, &past, level), Some(Whole::Empty), "level {level}");
+        assert_eq!(whole(&world, &across, level), None, "level {level}");
+        assert_eq!(whole(&world, &behind, level), Some(Whole::Buried(0)), "level {level}");
+        for b in [past, across, behind] {
+            // Drawn as it would be without asking it.
+            let (grid, broken) = checking_skipped(|| generate(&world, &b, level));
+            assert_eq!(broken, Vec::<String>::new());
+            assert_eq!(grid.pieces.alpha, generate(&wall(false), &b, level).pieces.alpha, "level {level}, {b:?}");
+        }
+        // All buried, it is made as one brick, every site of it whole.
+        let buried = generate_shown(&world, &behind, level);
+        assert_eq!(buried.cells.len(), (BRICK * BRICK * BRICK / 2) as usize);
+        assert!(buried.bricks.iter().all(|&at| at == 0) && buried.pieces.alpha.iter().all(|&a| a == ALPHA));
     }
 }
 
@@ -266,7 +300,7 @@ fn what_shows_of_a_box_is_all_but_its_whole_bottom_and_top() {
     let part = shown(&world, &b, 0);
     assert!(part.min[1] < 0 && part.min[1] > -64 && part.max[1] > 16 && part.max[1] < 64, "{part:?}");
     assert_eq!((part.min[1] - b.min[1]) % BRICK, 0, "in bricks from the bottom");
-    assert_eq!(whole(&world, &Box3 { max: [64, part.min[1], 16], ..b }, 0), Some(Whole::Buried));
+    assert_eq!(whole(&world, &Box3 { max: [64, part.min[1], 16], ..b }, 0), Some(Whole::Buried(0)));
     assert_eq!(whole(&world, &Box3 { min: [0, part.max[1], 0], ..b }, 0), Some(Whole::Empty));
     // A brick more of either is not.
     assert_eq!(whole(&world, &Box3 { max: [64, part.min[1] + BRICK, 16], ..b }, 0), None);
@@ -289,10 +323,7 @@ fn checking_finds_a_field_not_under_its_ground_where_it_says() {
     let holed = solid_ground(|x| if x == 12 { -200 } else { 0 }, 0);
     let b = Box3 { min: [0, -55, 0], max: [32, -45, 4] };
     let (_, broken) = checking_skipped(|| generate(&holed, &b, 2));
-    assert!(
-        broken.len() == 1 && broken[0].starts_with("ground isn't all kind 0 under its ground, as it says: at site [3, -55, 0]"),
-        "{broken:?}"
-    );
+    assert!(broken.len() == 1 && broken[0].starts_with("ground isn't all kind 0, as it says: at site [3, -55, 0]"), "{broken:?}");
 }
 
 #[test]
@@ -314,8 +345,9 @@ fn faces_on_a_plane_of_sites_stay_where_level_0_has_them() {
         name: "ground",
         order: 0.0,
         op: Op::Fill,
-        values: FieldValues::Spans { axis: 1, spans: Box::new(|_, _| vec![Span::solid(-4096, 0, 0)]) },
+        values: FieldValues::Spans { axis: 1, spans: Box::new(|_, _, _| vec![Span::solid(-4096, 0, 0)]) },
         about: None,
+        meets: None,
     });
     let n = 1 << 14;
     let block = |top: f64| {

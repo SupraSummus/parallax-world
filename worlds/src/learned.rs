@@ -530,7 +530,7 @@ pub fn learned(seed: u64) -> World {
     World {
         generator: Generator { kinds, seed: world.seed("layers"), layers },
         spawn,
-        heights: forest::HEIGHTS,
+        heights: Some(forest::HEIGHTS),
         points: vec![("settlement", first)],
     }
 }

@@ -1,6 +1,6 @@
 //! A world on a ground from above, to see its layout at a glance: each
 //! column's topmost voxel as its faces up show it, lighter the higher it
-//! is, +z up. Over all its heights: an endless world has no top.
+//! is, +z up. Over all its heights: a world with none (the cheese) has no top.
 //! Writes a PPM:
 //!
 //! cargo run --release --example map -- valley 42 2 -1600 -400 3200 4000 map.ppm
@@ -22,6 +22,10 @@ fn main() {
         std::process::exit(1);
     };
     let world = (entry.make)(seed);
+    if world.heights.is_none() {
+        eprintln!("{} has no heights, so no top to be seen from", args[0]);
+        std::process::exit(1);
+    }
     let generator = &world.generator;
     let level = number(2) as u32;
     let s = 1i64 << level;

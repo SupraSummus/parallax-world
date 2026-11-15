@@ -6,8 +6,8 @@
 
 use crate::curve::Curve;
 use crate::generator::{
-    About, Anchors, Cell, Child, Children, Far, Field, FieldValues, Kind, Line, Node, Op, Point, Population, Radius, SOLID, Shape, Shapes,
-    Span, ball, bounds_of_shapes, capsule, cuboid, ellipsoid, gable, lathe, tube,
+    About, Anchors, Cell, Child, Children, Far, Field, FieldValues, Kind, Line, Meets, Node, Op, Point, Population, Radius, SOLID, Shape,
+    Shapes, Span, ball, bounds_of_shapes, capsule, cuboid, ellipsoid, gable, lathe, tube,
 };
 use crate::grid::Box3;
 use std::rc::Rc;
@@ -19,34 +19,64 @@ use crate::points::{Points, Spot};
 impl Field {
     /** A kind, with a medium's extinction if it is one, at each site: `at(x, y, z)`, lattice units. */
     pub fn at(name: &'static str, order: f64, op: Op, at: impl Fn(i64, i64, i64) -> Option<(Kind, Option<f64>)> + 'static) -> Field {
-        Field { name, order, op, values: FieldValues::At(Box::new(at)), about: None }
+        Field { name, order, op, values: FieldValues::At(Box::new(at)), about: None, meets: None }
     }
 
-    /** Spans along each line of sites parallel to `axis`: `spans(u, v)`, the line's other coordinates in axis order. */
+    /**
+     * Spans along each line of sites parallel to `axis`: `spans(u, v, stretch)`,
+     * the line's other coordinates in axis order and the stretch of it
+     * asked for, which it may make only what reaches (FieldValues::Spans).
+     */
     pub fn spans<S: Into<Vec<Span>>>(
         name: &'static str,
         order: f64,
         op: Op,
         axis: usize,
-        spans: impl Fn(i64, i64) -> S + 'static,
+        spans: impl Fn(i64, i64, (i64, i64)) -> S + 'static,
     ) -> Field {
-        Field { name, order, op, values: FieldValues::Spans { axis, spans: Box::new(move |u, v| spans(u, v).into()) }, about: None }
+        let spans = Box::new(move |u, v, stretch| spans(u, v, stretch).into());
+        Field { name, order, op, values: FieldValues::Spans { axis, spans }, about: None, meets: None }
     }
 
-    /** Spans along each column, up y: `spans(x, z)`, lattice units; a `Column` or the spans. */
+    /** Spans along each column, up y, all of them: `spans(x, z)`, lattice units; a `Column` or the spans. */
     pub fn columns<S: Into<Vec<Span>>>(name: &'static str, order: f64, op: Op, spans: impl Fn(i64, i64) -> S + 'static) -> Field {
-        Field::spans(name, order, op, 1, spans)
+        Field::spans(name, order, op, 1, move |x, z, _| spans(x, z))
     }
 
-    /** Its spans along y from `below` under to `above` over `of` at their column (About): a rule; drawn only where they may be. */
+    /** Its spans along y from `below` under to `above` over `of` at their column (About): a rule; what it meets follows. */
     pub fn about(self, of: Rc<Sloped>, below: i64, above: i64) -> Field {
-        Field { about: Some(About { of, below, above, under: None }), ..self }
+        self.about_as(About { of, below, above, under: None })
     }
 
     /** Solid `kind` under what it is about, down without end (About's `under`): the ground, solid to the bottom. */
     pub fn under(self, kind: impl Into<Kind>) -> Field {
-        let about = self.about.expect("a field is under what it is about");
-        Field { about: Some(About { under: Some(kind.into()), ..about }), ..self }
+        let about = self.about.clone().expect("a field is under what it is about");
+        self.about_as(About { under: Some(kind.into()), ..about })
+    }
+
+    fn about_as(self, about: About) -> Field {
+        let meets = about.clone();
+        Field { about: Some(about), ..self }.meets(move |b, spacing| meets.meets(b, spacing))
+    }
+
+    /**
+     * What it draws in a box (lattice units) at sites a spacing apart,
+     * `meets(box, spacing)`, along any axis (Field::meets): a rule;
+     * drawn only where it may be, a box all of a kind without asking.
+     */
+    pub fn meets(self, meets: impl Fn(&Box3, i64) -> Meets + 'static) -> Field {
+        Field { meets: Some(Box::new(meets)), ..self }
+    }
+}
+
+impl Meets {
+    /**
+     * What a field drawing nothing over `top` along y (lattice units), a
+     * line's sites a spacing apart give or take, draws in box `b`: nothing
+     * over it, anything under (Field::meets).
+     */
+    pub fn under(top: i64, b: &Box3, spacing: i64) -> Meets {
+        if b.min[1] > top + 2 * spacing { Meets::Nothing } else { Meets::Any }
     }
 }
 
