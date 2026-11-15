@@ -830,8 +830,9 @@ mod tests {
             let mut world = World::new(sheeted_block, 1, light.map(Shared::new), 4);
             let at = Look::new([0.0, -distance, 0.0], [0.0, 80.0], FOV, 8000.0, [320.0, 200.0]);
             let look = Look { fog: f64::INFINITY, light, ..at };
-            let frame = complete(&mut *Kind::Voxels.make(&world), &mut world, &look, false);
-            let pixels = Easel::offscreen(None).pixels(&*frame.picture, [320, 200]).2;
+            let mut easel = Easel::offscreen(None);
+            let frame = drawn_complete(&mut *Kind::Voxels.make(&world), &mut world, &look, false, &mut easel);
+            let pixels = easel.pixels(&*frame.picture, [320, 200]).2;
             let (white, red) = pixels.chunks(4).fold((0, 0), |(w, r), p| {
                 let [red, green, blue] = [p[0], p[1], p[2]].map(i32::from);
                 (w + usize::from(red > 100 && (red - green).abs() < 8 && (red - blue).abs() < 8), r + usize::from(red > green + 60))

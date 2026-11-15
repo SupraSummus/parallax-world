@@ -889,21 +889,25 @@ it reads a few sites past what it lights, at each coarser level,
 and in a world that is not flat every tile around has some;
 each engine only shows it its own way.
 The splats' bakers light the voxels they show, face by face.
-For the voxels, the world's threads light each tile once made
-of the levels rays read,
-after every tile to make (as it takes several times as long),
+For the voxels, the world's threads light the bricks rays ask for,
+before any tile to make,
 nearest first in each level's own sites, as rays read them:
-each voxel a ray can meet gets the light on it, by the way its surface faces
-(`Light::on_seen`),
+each voxel of the brick a ray can meet gets the light on it,
+by the way its surface faces (`Light::on_seen`),
 and shows its material's colour times that, and its glow if its material glows,
 as worldgen's lit pictures do (`Light::relight`);
 shaded, the light is the mean of its open faces' shades.
 The light goes to the GPU beside the bricks, a word a site (RGB9E5), in a pool of its own.
-Till a tile is lit, its bricks are not on the GPU, as if it were not made:
+Till a brick with voxels is lit, it is not on the GPU, as if its tile were not made:
 rays take the next coarser level there,
-so what is not lit yet shows coarser, lit, never shaded by another light.
-A tile lit is a new tile in the place of the one made,
-so tiles still never change, and its bricks are uploaded as any new tile's.
+so what is not lit yet shows coarser, lit, never shaded by another light;
+and each such ray sets a bit for the brick, which the CPU reads back,
+a frame or two later, and hands the world (`Asked` in `voxels.rs`).
+A window places the bricks rays asked for once their light is found (`Window::ripe`),
+and is settled once a frame of its bricks as they are asks for nothing.
+A tile never changes but for its bricks' light, each found once.
+So what is lit is what shows, not every brick a window's ball holds:
+in a world that is not flat, walls hide most of what is near.
 
 ## 5. Caching
 
