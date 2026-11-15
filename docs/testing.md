@@ -7,10 +7,18 @@ Commands are in `package.json`:
 
 ```bash
 pnpm test                       # run both once: pnpm test:rust, then test:web
+pnpm test:worlds                # every world's contract, directions and places
 pnpm exec vitest                # watch mode (after pnpm wasm)
 pnpm exec vitest -t "cache"     # filter by test name
 pnpm exec vitest run bake       # files matching "bake"
 ```
+
+`pnpm test` leaves out the worlds' checks over seeds
+(`worlds/tests/contract.rs`, `directions.rs`, `places.rs`),
+most of the time testing takes;
+only `worldgen/`, `worlds/` and `fcc/` change what they check.
+`pnpm test:worlds` runs them, as CI always does;
+one world's: `cargo test --release -p worlds --test contract valley`.
 
 ## Layout
 
