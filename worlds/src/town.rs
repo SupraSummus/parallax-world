@@ -1178,8 +1178,8 @@ fn hall(t: &Town) -> Node {
             h.add([u, -3, w], [u + 4, FLOOR, w + 4], posts);
         }
     }
-    h.add([-2, FLOOR, -2], [WIDE + 2, FLOOR + 2, LONG + 2], k(K::timber));
-    h.add([0, FLOOR + 2, 0], [WIDE, TOP, LONG], walls_of);
+    // No timber floor under it: measured, that darkened its walls at levels 2 and 3.
+    h.add([0, FLOOR, 0], [WIDE, TOP, LONG], walls_of);
     if t.style == Style::Timbered {
         let mut upper = h.within(Frame::at([0, FLOOR + 2, 0]));
         timbers(&mut upper, WIDE, LONG, &[0, TOP - FLOOR - 2], (WIDE - m(1.0)) / m(2.4), None);
@@ -1221,7 +1221,8 @@ fn stall(part: &mut Part, random: &mut Rng) {
         part.add([u, 0, w], [u + 1, m(2.2), w + 1], k(K::timber));
     }
     let cloth = [K::roofRed, K::shutterGreen, K::trim, K::shutterBlue, K::plasterOchre][random.below(5) as usize];
-    part.gable([-2.0, m(2.2) as f64, -m(0.9) as f64], [(long + 2) as f64, m(2.7) as f64, (deep + 2) as f64], 0, k(cloth), Op::Fill);
+    // Flat: pitched, a wedge, its thin edges were lost from level 1.
+    part.add([-2, m(2.2), -m(0.9)], [long + 2, m(2.2) + 1, deep + 2], k(cloth));
 }
 
 /**

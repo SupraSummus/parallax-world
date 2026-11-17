@@ -211,19 +211,19 @@ moor boulders stone	2	0.028	0.113
 moor boulders stone	3	0.064	0.151
 moor boulders stone	4	0.072	0.164
 mountains alpine	1	0.020	0.186
-mountains alpine	2	0.018	0.190
-mountains alpine	3	0.047	0.183
+mountains alpine	2	0.019	0.189
+mountains alpine	3	0.047	0.174
 mountains alpine	4	0.080	0.158
 mountains rock	1	0.066	0.195
-mountains rock	2	0.079	0.197
-mountains rock	3	0.097	0.205
-mountains rock	4	0.108	0.215
+mountains rock	2	0.079	0.196
+mountains rock	3	0.097	0.200
+mountains rock	4	0.108	0.210
 mountains scree	1	0.014	0.181
-mountains scree	2	0.023	0.188
+mountains scree	2	0.023	0.185
 mountains scree	3	0.066	0.176
 mountains scree	4	0.092	0.173
 mountains snow	1	0.061	0.206
-mountains snow	2	0.071	0.202
+mountains snow	2	0.071	0.200
 mountains snow	3	0.098	0.206
 mountains snow	4	0.103	0.214
 plants amanita	1	0.021	0.189
@@ -470,14 +470,14 @@ streets grass	1	0.039	0.179
 streets grass	2	0.013	0.150
 streets grass	3	0.062	0.158
 streets grass	4	0.083	0.195
-streets paving	1	0.023	0.149
-streets paving	2	0.080	0.215
-streets paving	3	0.072	0.144
-streets paving	4	0.111	0.228
-streets pavingDark	1	0.012	0.119
-streets pavingDark	2	0.075	0.187
-streets pavingDark	3	0.057	0.127
-streets pavingDark	4	0.104	0.184
+streets paving	1	0.019	0.149
+streets paving	2	0.075	0.218
+streets paving	3	0.072	0.146
+streets paving	4	0.112	0.227
+streets pavingDark	1	0.008	0.120
+streets pavingDark	2	0.070	0.190
+streets pavingDark	3	0.056	0.129
+streets pavingDark	4	0.105	0.183
 streets slab	1	0.018	0.152
 streets slab	2	0.043	0.175
 streets slab	3	0.036	0.164
@@ -486,9 +486,9 @@ terrain grass	1	0.008	0.145
 terrain grass	2	0.024	0.148
 terrain grass	3	0.043	0.159
 terrain grass	4	0.062	0.158
-terrain litter	1	0.012	0.163
-terrain litter	2	0.020	0.173
-terrain litter	3	0.052	0.161
+terrain litter	1	0.011	0.162
+terrain litter	2	0.021	0.173
+terrain litter	3	0.052	0.162
 terrain litter	4	0.071	0.162
 terrain moss	1	0.042	0.186
 terrain moss	2	0.021	0.160
@@ -496,23 +496,23 @@ terrain moss	3	0.030	0.153
 terrain moss	4	0.055	0.163
 terrain mossyStone	1	0.054	0.170
 terrain mossyStone	2	0.071	0.179
-terrain mossyStone	3	0.088	0.184
-terrain mossyStone	4	0.096	0.188
+terrain mossyStone	3	0.088	0.179
+terrain mossyStone	4	0.096	0.185
 terrain needles	1	0.020	0.161
-terrain needles	2	0.024	0.166
+terrain needles	2	0.023	0.168
 terrain needles	3	0.029	0.148
-terrain needles	4	0.112	0.191
+terrain needles	4	0.111	0.191
 terrain path	1	0.019	0.161
-terrain path	2	0.058	0.190
+terrain path	2	0.057	0.192
 terrain path	3	0.041	0.151
-terrain path	4	0.089	0.173
-terrain soil	1	0.016	0.148
-terrain soil	2	0.028	0.131
-terrain soil	3	0.065	0.132
+terrain path	4	0.088	0.173
+terrain soil	1	0.014	0.146
+terrain soil	2	0.029	0.131
+terrain soil	3	0.065	0.133
 terrain soil	4	0.076	0.151
-terrain stone	1	0.016	0.148
-terrain stone	2	0.028	0.131
-terrain stone	3	0.065	0.132
+terrain stone	1	0.014	0.146
+terrain stone	2	0.029	0.131
+terrain stone	3	0.065	0.133
 terrain stone	4	0.076	0.151
 towns/block/avenue bark	1	0.018	0.155
 towns/block/avenue bark	2	0.039	0.181
@@ -775,38 +775,38 @@ towns/block/spruce spruceScale	1	0.046	0.176
 towns/block/spruce spruceScale	2	0.053	0.179
 towns/block/spruce spruceScale	3	0.020	0.137
 towns/block/spruce spruceScale	4	0.081	0.174
-towns/block/stall goods	1	0.027	0.146
-towns/block/stall goods	2	0.062	0.177
-towns/block/stall goods	3	0.088	0.139
-towns/block/stall goods	4	0.109	0.217
-towns/block/stall planks	1	0.027	0.146
-towns/block/stall planks	2	0.062	0.177
-towns/block/stall planks	3	0.088	0.139
-towns/block/stall planks	4	0.109	0.217
-towns/block/stall plasterOchre	1	0.062	0.206
-towns/block/stall plasterOchre	2	0.049	0.172
-towns/block/stall plasterOchre	3	0.048	0.138
-towns/block/stall plasterOchre	4	0.133	0.234
-towns/block/stall roofRed	1	0.043	0.173
-towns/block/stall roofRed	2	0.072	0.181
-towns/block/stall roofRed	3	0.071	0.128
-towns/block/stall roofRed	4	0.133	0.241
-towns/block/stall shutterBlue	1	0.027	0.146
-towns/block/stall shutterBlue	2	0.062	0.177
-towns/block/stall shutterBlue	3	0.088	0.139
-towns/block/stall shutterBlue	4	0.109	0.217
-towns/block/stall shutterGreen	1	0.082	0.238
-towns/block/stall shutterGreen	2	0.022	0.157
-towns/block/stall shutterGreen	3	0.047	0.140
-towns/block/stall shutterGreen	4	0.133	0.232
-towns/block/stall timber	1	0.027	0.146
-towns/block/stall timber	2	0.062	0.177
-towns/block/stall timber	3	0.088	0.139
-towns/block/stall timber	4	0.109	0.217
-towns/block/stall trim	1	0.027	0.146
-towns/block/stall trim	2	0.062	0.177
-towns/block/stall trim	3	0.088	0.139
-towns/block/stall trim	4	0.109	0.217
+towns/block/stall goods	1	0.018	0.141
+towns/block/stall goods	2	0.056	0.180
+towns/block/stall goods	3	0.088	0.141
+towns/block/stall goods	4	0.110	0.217
+towns/block/stall planks	1	0.018	0.141
+towns/block/stall planks	2	0.056	0.180
+towns/block/stall planks	3	0.088	0.141
+towns/block/stall planks	4	0.110	0.217
+towns/block/stall plasterOchre	1	0.063	0.199
+towns/block/stall plasterOchre	2	0.046	0.167
+towns/block/stall plasterOchre	3	0.056	0.130
+towns/block/stall plasterOchre	4	0.131	0.235
+towns/block/stall roofRed	1	0.037	0.168
+towns/block/stall roofRed	2	0.066	0.184
+towns/block/stall roofRed	3	0.071	0.131
+towns/block/stall roofRed	4	0.130	0.241
+towns/block/stall shutterBlue	1	0.018	0.141
+towns/block/stall shutterBlue	2	0.056	0.180
+towns/block/stall shutterBlue	3	0.088	0.141
+towns/block/stall shutterBlue	4	0.110	0.217
+towns/block/stall shutterGreen	1	0.084	0.226
+towns/block/stall shutterGreen	2	0.022	0.148
+towns/block/stall shutterGreen	3	0.057	0.128
+towns/block/stall shutterGreen	4	0.133	0.234
+towns/block/stall timber	1	0.018	0.141
+towns/block/stall timber	2	0.056	0.180
+towns/block/stall timber	3	0.088	0.141
+towns/block/stall timber	4	0.110	0.217
+towns/block/stall trim	1	0.018	0.141
+towns/block/stall trim	2	0.056	0.180
+towns/block/stall trim	3	0.088	0.141
+towns/block/stall trim	4	0.110	0.217
 towns/block/tree bark	1	0.041	0.180
 towns/block/tree bark	2	0.031	0.157
 towns/block/tree bark	3	0.067	0.157
@@ -815,46 +815,46 @@ towns/block/tree barkFurrow	1	0.041	0.180
 towns/block/tree barkFurrow	2	0.031	0.157
 towns/block/tree barkFurrow	3	0.067	0.157
 towns/block/tree barkFurrow	4	0.073	0.161
-towns/block/tree birchBark	1	0.024	0.145
-towns/block/tree birchBark	2	0.071	0.188
-towns/block/tree birchBark	3	0.043	0.132
-towns/block/tree birchBark	4	0.079	0.169
-towns/block/tree birchGold	1	0.024	0.145
-towns/block/tree birchGold	2	0.071	0.188
-towns/block/tree birchGold	3	0.043	0.132
-towns/block/tree birchGold	4	0.079	0.169
-towns/block/tree birchGreen	1	0.024	0.145
-towns/block/tree birchGreen	2	0.071	0.188
-towns/block/tree birchGreen	3	0.043	0.132
-towns/block/tree birchGreen	4	0.079	0.169
-towns/block/tree birchMark	1	0.024	0.145
-towns/block/tree birchMark	2	0.071	0.188
-towns/block/tree birchMark	3	0.043	0.132
-towns/block/tree birchMark	4	0.079	0.169
+towns/block/tree birchBark	1	0.020	0.145
+towns/block/tree birchBark	2	0.069	0.187
+towns/block/tree birchBark	3	0.044	0.129
+towns/block/tree birchBark	4	0.080	0.168
+towns/block/tree birchGold	1	0.020	0.145
+towns/block/tree birchGold	2	0.069	0.187
+towns/block/tree birchGold	3	0.044	0.129
+towns/block/tree birchGold	4	0.080	0.168
+towns/block/tree birchGreen	1	0.020	0.145
+towns/block/tree birchGreen	2	0.069	0.187
+towns/block/tree birchGreen	3	0.044	0.129
+towns/block/tree birchGreen	4	0.080	0.168
+towns/block/tree birchMark	1	0.020	0.145
+towns/block/tree birchMark	2	0.069	0.187
+towns/block/tree birchMark	3	0.044	0.129
+towns/block/tree birchMark	4	0.080	0.168
 towns/block/tree oakGold	1	0.041	0.180
 towns/block/tree oakGold	2	0.031	0.157
 towns/block/tree oakGold	3	0.067	0.157
 towns/block/tree oakGold	4	0.073	0.161
-towns/block/tree oakGreen	1	0.051	0.206
-towns/block/tree oakGreen	2	0.029	0.163
-towns/block/tree oakGreen	3	0.068	0.150
-towns/block/tree oakGreen	4	0.087	0.179
+towns/block/tree oakGreen	1	0.050	0.204
+towns/block/tree oakGreen	2	0.029	0.164
+towns/block/tree oakGreen	3	0.068	0.151
+towns/block/tree oakGreen	4	0.087	0.180
 towns/block/tree oakOrange	1	0.016	0.155
 towns/block/tree oakOrange	2	0.031	0.165
 towns/block/tree oakOrange	3	0.055	0.125
 towns/block/tree oakOrange	4	0.115	0.187
-towns/block/tree twig	1	0.032	0.156
-towns/block/tree twig	2	0.043	0.174
+towns/block/tree twig	1	0.031	0.157
+towns/block/tree twig	2	0.040	0.175
 towns/block/tree twig	3	0.064	0.136
 towns/block/tree twig	4	0.079	0.181
-towns/fountain churchStone	1	0.043	0.173
-towns/fountain churchStone	2	0.072	0.181
-towns/fountain churchStone	3	0.071	0.128
-towns/fountain churchStone	4	0.133	0.241
-towns/fountain water	1	0.043	0.173
-towns/fountain water	2	0.072	0.181
-towns/fountain water	3	0.071	0.128
-towns/fountain water	4	0.133	0.241
+towns/fountain churchStone	1	0.037	0.168
+towns/fountain churchStone	2	0.066	0.184
+towns/fountain churchStone	3	0.071	0.131
+towns/fountain churchStone	4	0.130	0.241
+towns/fountain water	1	0.037	0.168
+towns/fountain water	2	0.066	0.184
+towns/fountain water	3	0.071	0.131
+towns/fountain water	4	0.130	0.241
 towns/gate brick	1	0.072	0.169
 towns/gate brick	2	0.056	0.150
 towns/gate brick	4	0.055	0.145
@@ -889,46 +889,46 @@ towns/lamps lamp	1	0.077	0.206
 towns/lamps lamp	2	0.091	0.207
 towns/lamps lamp	3	0.035	0.138
 towns/lamps lamp	4	0.054	0.144
-towns/market hall brick	1	0.049	0.175
-towns/market hall brick	2	0.099	0.192
-towns/market hall brick	3	0.045	0.117
-towns/market hall brick	4	0.087	0.165
-towns/market hall glass	1	0.061	0.206
-towns/market hall glass	2	0.072	0.189
-towns/market hall glass	3	0.065	0.145
-towns/market hall glass	4	0.114	0.188
-towns/market hall plasterOchre	1	0.083	0.220
-towns/market hall plasterOchre	2	0.079	0.191
-towns/market hall plasterOchre	3	0.099	0.172
-towns/market hall plasterOchre	4	0.091	0.187
-towns/market hall plasterWhite	1	0.097	0.221
-towns/market hall plasterWhite	2	0.114	0.241
-towns/market hall plasterWhite	3	0.113	0.198
-towns/market hall plasterWhite	4	0.063	0.151
-towns/market hall roofBrown	1	0.090	0.224
-towns/market hall roofBrown	2	0.138	0.234
-towns/market hall roofBrown	3	0.125	0.210
-towns/market hall roofBrown	4	0.051	0.137
-towns/market hall roofRed	1	0.049	0.175
-towns/market hall roofRed	2	0.099	0.192
-towns/market hall roofRed	3	0.045	0.117
-towns/market hall roofRed	4	0.087	0.165
-towns/market hall roofTile	1	0.083	0.220
-towns/market hall roofTile	2	0.079	0.191
-towns/market hall roofTile	3	0.099	0.172
-towns/market hall roofTile	4	0.091	0.187
-towns/market hall slate	1	0.104	0.218
-towns/market hall slate	2	0.090	0.247
-towns/market hall slate	3	0.099	0.187
-towns/market hall slate	4	0.074	0.165
-towns/market hall timber	1	0.061	0.206
-towns/market hall timber	2	0.072	0.189
-towns/market hall timber	3	0.065	0.145
-towns/market hall timber	4	0.114	0.188
-towns/market hall trim	1	0.061	0.206
-towns/market hall trim	2	0.072	0.189
-towns/market hall trim	3	0.065	0.145
-towns/market hall trim	4	0.114	0.188
+towns/market hall brick	1	0.053	0.173
+towns/market hall brick	2	0.108	0.182
+towns/market hall brick	3	0.045	0.100
+towns/market hall brick	4	0.085	0.161
+towns/market hall glass	1	0.076	0.202
+towns/market hall glass	2	0.080	0.170
+towns/market hall glass	3	0.031	0.116
+towns/market hall glass	4	0.113	0.187
+towns/market hall plasterOchre	1	0.099	0.211
+towns/market hall plasterOchre	2	0.046	0.154
+towns/market hall plasterOchre	3	0.020	0.129
+towns/market hall plasterOchre	4	0.092	0.188
+towns/market hall plasterWhite	1	0.093	0.190
+towns/market hall plasterWhite	2	0.057	0.237
+towns/market hall plasterWhite	3	0.030	0.192
+towns/market hall plasterWhite	4	0.065	0.153
+towns/market hall roofBrown	1	0.084	0.204
+towns/market hall roofBrown	2	0.034	0.228
+towns/market hall roofBrown	3	0.033	0.195
+towns/market hall roofBrown	4	0.056	0.141
+towns/market hall roofRed	1	0.053	0.173
+towns/market hall roofRed	2	0.108	0.182
+towns/market hall roofRed	3	0.045	0.100
+towns/market hall roofRed	4	0.085	0.161
+towns/market hall roofTile	1	0.099	0.211
+towns/market hall roofTile	2	0.046	0.154
+towns/market hall roofTile	3	0.020	0.129
+towns/market hall roofTile	4	0.092	0.188
+towns/market hall slate	1	0.101	0.175
+towns/market hall slate	2	0.080	0.246
+towns/market hall slate	3	0.037	0.189
+towns/market hall slate	4	0.075	0.166
+towns/market hall timber	1	0.076	0.202
+towns/market hall timber	2	0.080	0.170
+towns/market hall timber	3	0.031	0.116
+towns/market hall timber	4	0.113	0.187
+towns/market hall trim	1	0.076	0.202
+towns/market hall trim	2	0.080	0.170
+towns/market hall trim	3	0.031	0.116
+towns/market hall trim	4	0.113	0.187
 towns/tower brick	1	0.085	0.160
 towns/tower brick	2	0.040	0.106
 towns/tower brick	4	0.108	0.171
