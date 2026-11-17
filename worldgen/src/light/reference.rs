@@ -1,6 +1,6 @@
 //! A reference for `Light`, for tests: the light on a voxel's face found
 //! by following random rays through the voxels of level 0 (picture.rs),
-//! bounce after bounce, with none of Light's shortcuts (its 12 directions,
+//! bounce after bounce till chance ends them, with none of Light's shortcuts (its 12 directions,
 //! its levels). Voxels are opaque and reflect evenly (Lambert); the sky is as
 //! bright everywhere above the horizon; the sun is a direction, as bright
 //! as Light's sun in its one of the 12 (which stands for a twelfth of the
@@ -20,8 +20,9 @@ const BOX: Box3 = Box3 { min: [-256, -2, -256], max: [256, 96, 256] };
 const FAR: f64 = 1024.0;
 /** How far off a face rays start, so as not to meet it again. */
 const OFF: f64 = 1e-6;
-/** Bounces followed: more add little where voxels are grey. */
+/** Bounces always followed; past them, each by chance (Russian roulette), as often as the voxel reflects, at most SURVIVES. */
 const BOUNCES: usize = 4;
+const SURVIVES: f32 = 0.95;
 
 pub struct Reference {
     grid: VoxelGrid,
@@ -91,8 +92,18 @@ impl Reference {
             None if direction[1] > 0.0 => self.sky,
             None => [0.0; 3],
             Some((_, site, face)) if bounces > 0 => self.on_face(site, face, random, bounces - 1),
-            // What it glows, and no more.
-            Some((_, [x, y, z], face)) => self.grid.light(x, y, z, face).1.map(|g| g as f32 * self.glow),
+            Some((_, [x, y, z], face)) => {
+                // Followed as often as it reflects, its light the more for it: on average, all of it.
+                let ([(_, colour), _], glow) = self.grid.light(x, y, z, face);
+                let survives = (colour.iter().copied().max().unwrap_or(0) as f32 / COLOUR_ONE as f32).min(SURVIVES);
+                let glow = glow.map(|g| g as f32 * self.glow);
+                if random.next() < survives as f64 {
+                    let light = self.on_face([x, y, z], face, random, 0);
+                    std::array::from_fn(|c| glow[c] + (light[c] - glow[c]) / survives)
+                } else {
+                    glow
+                }
+            }
         }
     }
 }

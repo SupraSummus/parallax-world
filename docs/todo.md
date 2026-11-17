@@ -667,12 +667,19 @@ Numbers are for the forest at 1280×800, as measured when written.
   the ignored test `maps` draws the scenes from above):
   a lamp lights the ground in four lobes, along the upward directions,
   and up to ten times too little right under it;
-  a roof shades as much as it should only along the lattice,
-  twice too little turned 45°;
+  under a roof turned off the lattice, light is off by up to 1.7 times;
+  along the lattice, its middle gets a third of what it should:
+  from there no direction meets the lit ground past its edge;
   a wall's shadow in the sun is short and blotchy,
   as the levels that carry it get coarser;
   past a door from a yard, where only bounced light comes,
-  a room is several times too bright, and the yard a third as bright.
+  a room is about as bright as it should be, and the yard a third as bright.
+  In a closed white room or the cheese, where light bounces many times,
+  the light on the floor is a few times too little,
+  as little as reaches it from the lamp.
+  A whole voxel touching a face is taken to be lit as the face is
+  (`weighed` in `light.rs`), as a flat floor's are;
+  where it is not, at a wall's edge or a corner, the face is lit wrong.
   A coarse site holding part of a door (as `Far::measured` draws one)
   lets light through in every direction alike:
   drawn so, the yard's door made the room tens of times too bright.
@@ -693,7 +700,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   kept apart, the sliders could only mix them,
   but lighting and keeping that light would cost three times as much.
   The sun is one of the 12 directions.
-  `Light::coarser` reads the nearest site and its 12 neighbours,
+  Light reads a coarser level at the nearest site and its 12 neighbours (`reads`),
   so near a corner where six voxels meet it misses one within its reach,
   and light jumps a little there;
   every site within reach would leak light through walls one site thick.
