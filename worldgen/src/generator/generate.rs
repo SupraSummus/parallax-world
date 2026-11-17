@@ -173,11 +173,12 @@ fn see(grid: &mut VoxelGrid, added: &Added, share: u32, x: i64, y: i64, z: i64) 
     // Where on the site's lines its pieces lie, while all that comes there says where (or fills it whole). Else as
     // shares, by how much of each face's rays each meets.
     let whole = share >= SHARE && added.cover.is_none();
-    let starts = added.rays.is_some()
+    let starts = false
+        && added.rays.is_some()
         && !medium
         && !grid.is_rays(i)
         && if grid.has_no_pieces(i) { added.op != Op::Carve } else { added.op != Op::Fill && grid.make_rays(i) };
-    if !medium && (added.rays.is_some() || whole) && (grid.is_rays(i) || starts) {
+    if false && !medium && (added.rays.is_some() || whole) && (grid.is_rays(i) || starts) {
         let part = (added.op != Op::Carve).then_some(RayPart { colours: added.colours, glow: added.glow, solid: added.solid });
         match added.rays {
             // Each put once: let go of its segments.
@@ -193,7 +194,11 @@ fn see(grid: &mut VoxelGrid, added: &Added, share: u32, x: i64, y: i64, z: i64) 
         grid.settle_site(i);
     }
     // Each put once: let go of its segments.
-    let met = added.rays.map(|id| grid::met(&SEGMENTS.with_borrow_mut(|kept| std::mem::take(&mut kept[id as usize]))));
+    // What it meets of each face's rays; a carve, what it takes out: those it holds all along.
+    let met = added.rays.map(|id| {
+        let segments = SEGMENTS.with_borrow_mut(|kept| std::mem::take(&mut kept[id as usize]));
+        if added.op == Op::Carve { grid::through(&segments) } else { grid::met(&segments) }
+    });
     let cover = added.cover.or(met.map(|met| met.map(super::share)));
     let (solid, all, one) = (grid.solid[i] as u64, ALPHA as u64, SHARE as u64);
     let share64 = share.min(SHARE) as u64;

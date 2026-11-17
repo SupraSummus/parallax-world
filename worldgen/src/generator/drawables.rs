@@ -297,9 +297,16 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
                                         None => break,
                                     },
                                     Err(()) => {
-                                        for (kind, segments) in span_segments(&around, site, s) {
-                                            let filled = share(grid::filled(&segments));
-                                            put(Look { rays: Some(keep(segments)), ..kind.into() }, op, filled, picked(x, y, z), x, y, z);
+                                        // Its kinds lie apart in the site: each covers the rays it meets first, put one behind
+                                        // another (a fill behind what is there covers its share of the rest).
+                                        let kinds = span_segments(&around, site, s);
+                                        let met = grid::first_met(&kinds.iter().map(|(_, segments)| segments).collect::<Vec<_>>());
+                                        let mut before = [0.0f64; FACE_KINDS];
+                                        for ((kind, segments), met) in kinds.iter().zip(met) {
+                                            let cover = std::array::from_fn(|k| share(met[k] / (1.0 - before[k]).max(1e-9)));
+                                            (0..FACE_KINDS).for_each(|k| before[k] += met[k]);
+                                            let filled = share(grid::filled(segments));
+                                            put(Look { cover: Some(cover), ..(*kind).into() }, op, filled, picked(x, y, z), x, y, z);
                                         }
                                     }
                                 }

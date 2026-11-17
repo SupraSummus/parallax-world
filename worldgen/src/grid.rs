@@ -237,6 +237,57 @@ pub(crate) fn met(segments: &Segments) -> [f64; FACE_KINDS] {
     })
 }
 
+/** Of each face's rays, the share whose lines `segments` hold all along their chords: what a carve takes out of a site whatever else is in it. */
+pub(crate) fn through(segments: &Segments) -> [f64; FACE_KINDS] {
+    let (lines, held) = (lines(), lengths(segments));
+    std::array::from_fn(|k| {
+        let of = lines.of_axis(axis_of(k).0);
+        let n = of.len() as f64;
+        of.filter(|&l| {
+            let [t0, t1] = lines.lines[l].2;
+            held[l] >= (t1 - t0) * (1.0 - 1e-3)
+        })
+        .count() as f64
+            / n
+    })
+}
+
+/**
+ * Of each face's rays, the share each of `parts` (one site's, apart) is
+ * the first of them to meet: entering by face k, a ray runs against its
+ * normal (as `settle_site` reads them).
+ */
+pub(crate) fn first_met(parts: &[&Segments]) -> Vec<[f64; FACE_KINDS]> {
+    let lines = lines();
+    // Each line's nearest start and furthest end, and whose.
+    let (mut low, mut high) =
+        (vec![(f32::INFINITY, usize::MAX); lines.lines.len()], vec![(f32::NEG_INFINITY, usize::MAX); lines.lines.len()]);
+    for (p, segments) in parts.iter().enumerate() {
+        for &(l, a, b) in segments.iter() {
+            let l = l as usize;
+            if a < low[l].0 {
+                low[l] = (a, p);
+            }
+            if b > high[l].0 {
+                high[l] = (b, p);
+            }
+        }
+    }
+    let mut met = vec![[0.0; FACE_KINDS]; parts.len()];
+    for k in 0..FACE_KINDS {
+        let (a, from_high) = axis_of(k);
+        let of = lines.of_axis(a);
+        let n = of.len() as f64;
+        for l in of {
+            let p = if from_high { high[l].1 } else { low[l].1 };
+            if p != usize::MAX {
+                met[p][k] += 1.0 / n;
+            }
+        }
+    }
+    met
+}
+
 /** The axis (of `lines`' six) face `k`'s normal runs along, and whether it is its face rather than its opposite. */
 fn axis_of(k: usize) -> (usize, bool) {
     let axes = lines().axes;
