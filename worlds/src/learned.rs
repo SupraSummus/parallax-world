@@ -36,7 +36,7 @@ use worldgen::world::{Find, World};
 
 use crate::fields::Fields;
 use crate::forest::{self, Forest, GROUND_SCALE, K as F, Relief};
-use crate::path::Path;
+use crate::path::{self, Path};
 use crate::town::{self, House, K as T, Style};
 
 /** The rule table, learned in lab/ (examples/export.rs) from 54 of the valley's towns. */
@@ -510,7 +510,7 @@ pub fn learned(seed: u64) -> World {
     };
     let path = {
         let line = line.clone();
-        Rc::new(Path::new(move |z| line(z)))
+        Rc::new(Path::new(move |z| line(z), path::SLOPE))
     };
     let ground = Lie::new(move |x, z| relief.ground(x, z, (Units(x).to_fx() - line(z)).abs()))
         .shaped(vec![settlements.clone()])

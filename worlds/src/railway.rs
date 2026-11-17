@@ -7,7 +7,8 @@
 //! docs/generators.md.
 //!
 //! The line is a curve (worldgen::curve) in pieces along the valley, its
-//! points (x, y, z): at each level a point between two neighbours, x
+//! points (x, y, z), x across from the valley's course (course.rs), so it
+//! winds with it: at each level a point between two neighbours, x
 //! the one of a few within its wander that leaves the ground least, y the
 //! ground there as far as the grade lets it, so no stretch is steeper.
 //! Seen from above that line turns at its points, so its x is averaged
@@ -29,6 +30,7 @@ use worldgen::noise::{Fx, Rng, ValueNoise, fx, hash, hash64, smoothstep};
 use worldgen::plan::{self, Holding, Plan, Sloped};
 use worldgen::units::{Units, m};
 
+use crate::course::COURSE_SLOPE;
 use crate::forest::K as F;
 use crate::moor;
 use crate::mountains;
@@ -66,13 +68,14 @@ const MIN_RUN: i64 = 4;
 const TRIES: i64 = 4;
 /** How far the line can stand across from the segment between its piece's ends: the wanders, summed, smoothing and a unit for rounding. */
 const CORRIDOR: i64 = WANDER[0] + WANDER[1] + WANDER[2] + SMOOTH + 1;
-/** It runs across z at most 1 in ACROSS. */
+/** It runs across the course at most 1 in ACROSS; with it, across z at most 3 in 5, so further than 1¼ times a distance across is further. */
 const ACROSS: i64 = 8;
 const _: () = assert!(ACROSS * DRIFT < PIECE);
+const _: () = assert!(1.0 / ACROSS as f64 + COURSE_SLOPE < 0.6);
 /** The steepest it climbs: 3 in 256 (1.2 %), a whole number of Fx's least steps over half a segment of any level. */
 const GRADE: f64 = 3.0 / 256.0;
-/** Its pieces' ends stand this far off the valley's middle, by noise; the lowest they lie, and the highest a grade's rise over a piece above. */
-const OFF: (i64, i64) = (m(208.0), m(256.0));
+/** Its pieces' ends stand this far off the valley's course, by noise; the lowest they lie, and the highest a grade's rise over a piece above. */
+const OFF: (i64, i64) = (m(264.0), m(312.0));
 const LOW: Fx = Fx::m(-6.0);
 /** Ground further above the track than CUT metres is tunnelled, further below than FILL bridged; nearer, cut or filled, its sides SLOPE (rise over run). */
 const CUT: f64 = 6.0;
@@ -87,8 +90,9 @@ const EASE: i64 = m(30.0);
 const SIDES: i64 = m(CUT.max(FILL) / SLOPE);
 /** How far round the line it shapes the ground at most: the formation, a station's room, and a cutting's sides. */
 const REACH: i64 = FORMATION + EXTRA + SIDES;
-// Never in a town: it stays further across than the furthest a town and its bid reach, by construction.
-const _: () = assert!(OFF.0 - CORRIDOR - REACH >= town::ACROSS + m(4.0));
+// Never in a town: it stays further across than the furthest a town and its bid reach, by construction, as far along the
+// town as the course runs across.
+const _: () = assert!(OFF.0 - CORRIDOR - REACH > town::ACROSS + m(4.0) + (COURSE_SLOPE * town::LONG as f64) as i64);
 /** Plan scale of the line's pieces: under the towns' (the ground it reads is levelled under them), over the landmarks' and steadings' (which keep off it). */
 const BAND: i64 = m(256.0);
 /** Plan scale of what it is at each column. */
@@ -209,12 +213,23 @@ impl Ends {
         ((z - self.z(k)).clamp(0, PIECE) / FINEST) as usize
     }
 
-    /** End k: on the ground, within the band a piece's grade can climb. */
+    /** End k, across from the course: on the ground, within the band a piece's grade can climb. */
     fn at(&self, k: i64) -> [Fx; 3] {
-        let (x, z) = (self.x(k), self.z(k));
+        let (x, z) = (Units(self.x(k)).to_fx(), Units(self.z(k)).to_fx());
         let top = LOW + fx(GRADE) * Units(PIECE);
-        [Units(x).to_fx(), self.terrain.ground(x, z).clamp(LOW, top), Units(z).to_fx()]
+        [x, ground(&self.terrain, x, z).clamp(LOW, top), z]
     }
+}
+
+/** The ground `across` from the course at z. */
+fn ground(terrain: &Terrain, across: Fx, z: Fx) -> Fx {
+    let z = z.floor_units().0;
+    terrain.ground((across + terrain.course_x(z)).round_units().0, z)
+}
+
+/** Point p, across from the course, in the world. */
+fn turned(terrain: &Terrain, p: [Fx; 3]) -> [Fx; 3] {
+    [p[0] + terrain.course_x(p[2].floor_units().0), p[1], p[2]]
 }
 
 /**
@@ -226,7 +241,7 @@ impl Ends {
  */
 fn refine(terrain: &Terrain, level: usize, a: [Fx; 3], b: [Fx; 3]) -> [Fx; 3] {
     let z = (a[2] + b[2]) / 2;
-    let ground = |x: Fx, z: Fx| terrain.ground(x.round_units().0, z.floor_units().0);
+    let ground = |x: Fx, z: Fx| ground(terrain, x, z);
     // A grade's rise over half a segment of the level.
     let rise = fx(GRADE) * Units(PIECE >> (level + 1));
     let (low, high) = (a[1].max(b[1]) - rise, a[1].min(b[1]) + rise);
@@ -302,15 +317,17 @@ impl Line {
 
     /**
      * Whether column (x, z) may be within `r` of the line, decided from
-     * its piece's ends alone: the line keeps within its corridor of the
-     * segment between them, and runs across at most 1 in ACROSS, so a
-     * column further across from that than the corridor, r and an
-     * ACROSS-th of r is further than r from it.
+     * its piece's ends alone: across from the course, the line keeps
+     * within its corridor of the segment between them, and runs across z
+     * at most 3 in 5, so a column further across from that than the
+     * corridor and 1¼ r (and a unit for rounding each) is further than r
+     * from it.
      */
     fn may_reach(&self, x: i64, z: i64, r: i64) -> bool {
         let k = self.ends.piece(z);
         let (a, b) = (self.ends.x(k), self.ends.x(k + 1));
-        (x - (a + (b - a) * (z - self.ends.z(k)) / PIECE)).abs() < CORRIDOR + r + r / ACROSS + 1
+        let across = x - self.ends.terrain.course_x(z).round_units().0;
+        (across - (a + (b - a) * (z - self.ends.z(k)) / PIECE)).abs() < CORRIDOR + r + r / 4 + 2
     }
 
     /**
@@ -450,6 +467,7 @@ impl Railway {
                         [sum / window, y, z]
                     })
                     .collect();
+                let all: Vec<[Fx; 3]> = all.into_iter().map(|p| turned(&ends.terrain, p)).collect();
                 let ground: Vec<Fx> = all.iter().map(|p| ends.terrain.ground(p[0].round_units().0, p[2].floor_units().0)).collect();
                 let tops: Vec<Fx> = all.iter().map(|p| p[1]).collect();
                 let inside = MIN_RUN as usize..=(n + MIN_RUN) as usize;
@@ -671,21 +689,22 @@ mod tests {
 
     /**
      * Along its first 32 km at each seed: no segment climbs steeper than
-     * the grade, the line keeps across from the valley's middle within its
+     * the grade, the line keeps across from the valley's course within its
      * pieces' ends and corridor (so out of towns), and it has stretches on
      * the ground, bridges and tunnels.
      */
     #[test]
     fn keeps_its_grade_and_its_side() {
         for seed in [42, 1, 2, 3] {
-            let line = railway(seed).0.line;
+            let (railway, terrain) = railway(seed);
+            let line = railway.line;
             let mut seen = [false; 3];
             for k in 0..8 {
                 let piece = line.piece(k);
                 for (i, w) in piece.points.windows(2).enumerate() {
                     let rise = (w[1][1] - w[0][1]).abs();
                     assert!(rise <= fx(GRADE) * Units(FINEST), "seed {seed}: piece {k} rises {rise:?} over a segment");
-                    let across = w[0][0].round_units().0.abs();
+                    let across = (w[0][0] - terrain.course_x(w[0][2].floor_units().0)).round_units().0.abs();
                     assert!((OFF.0 - CORRIDOR..=OFF.1 + CORRIDOR).contains(&across), "seed {seed}: piece {k} {across} across");
                     seen[piece.structure[i] as usize] = true;
                 }
@@ -696,13 +715,14 @@ mod tests {
 
     /**
      * Seen from above the line bends gently (no point turns by a fifth of a
-     * degree, across the pieces' ends too), and no bridge or tunnel is
-     * shorter than MIN_RUN points.
+     * degree from the course, across the pieces' ends too, and the course
+     * turns less), and no bridge or tunnel is shorter than MIN_RUN points.
      */
     #[test]
     fn is_smooth_and_has_no_stubs() {
         for seed in [42, 1, 2, 3] {
-            let line = railway(seed).0.line;
+            let (railway, terrain) = railway(seed);
+            let line = railway.line;
             let mut points: Vec<[Fx; 3]> = Vec::new();
             let mut structure: Vec<Structure> = Vec::new();
             for k in 0..8 {
@@ -710,7 +730,8 @@ mod tests {
                 points.extend(&piece.points[usize::from(k > 0)..]);
                 structure.extend(&piece.structure[usize::from(k > 0)..]);
             }
-            let direction = |w: &[[Fx; 3]]| (w[1][0] - w[0][0]).to_f64().atan2((w[1][2] - w[0][2]).to_f64());
+            let across = |p: [Fx; 3]| p[0] - terrain.course_x(p[2].floor_units().0);
+            let direction = |w: &[[Fx; 3]]| (across(w[1]) - across(w[0])).to_f64().atan2((w[1][2] - w[0][2]).to_f64());
             let turn = points.windows(3).map(|w| (direction(&w[1..]) - direction(w)).abs().to_degrees()).fold(0.0, f64::max);
             assert!(turn < 0.2, "seed {seed}: turns {turn}° at a point");
             // The first and last runs may go on past the pieces looked at.

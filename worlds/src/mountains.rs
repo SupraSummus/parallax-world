@@ -1,7 +1,8 @@
-//! Mountains: ranges along both sides of the valley, what the horizon
-//! shows from anywhere in it. Massifs kilometres long take turns along
-//! it, some low and wooded to their crests, some towering, snowy; where
-//! one side is low the other tends to tower. Each range's face steepens
+//! Mountains: ranges along both sides of the valley, winding with its
+//! course (course.rs), what the horizon shows from anywhere in it.
+//! Massifs kilometres long take turns along it, some low and wooded to
+//! their crests, some towering, snowy; where one side is low the other
+//! tends to tower. Each range's face steepens
 //! to a sharp crest of peaks and passes, spurs and gullies run down it,
 //! side valleys cut into it, and higher ranges may stand behind. Part of
 //! the valley's relief, not a domain: every domain stands on the ground
@@ -40,7 +41,7 @@ kinds! {
 /** The valley's heights with its mountains, lattice units: from the sea's floor up to their highest peaks, and a little over. */
 pub const HEIGHTS: (i64, i64) = (m(-90.0), m(1000.0));
 
-/** Where the foothills start off the path, at the nearest and the furthest. */
+/** Where the foothills start off the valley's course, at the nearest and the furthest. */
 const FOOT: (Fx, Fx) = (Fx::m(140.0), Fx::m(320.0));
 /** The crests' height where the massifs are lowest, and where highest. */
 const CRESTS: (Units, Units) = (Units::m(230.0), Units::m(900.0));
@@ -117,15 +118,15 @@ impl Ranges {
         }
     }
 
-    /** How much the ranges raise column (x, z), `from_path` off the valley's path; with its fraction. */
-    pub fn height(&self, x: i64, z: i64, from_path: Fx) -> Fx {
+    /** How much the ranges raise column (x, z), `across` from the valley's course (west less than 0); with its fraction. */
+    pub fn height(&self, x: i64, z: i64, across: Fx) -> Fx {
         // Each side's ranges are its own: their noise read far apart.
-        let side = if x < 0 { 0 } else { SIDE };
+        let side = if across < Fx::ZERO { 0 } else { SIDE };
         let foot = FOOT.0 + self.feet.at(z, side) * (FOOT.1 - FOOT.0);
-        if from_path <= foot {
+        if across.abs() <= foot {
             return Fx::ZERO;
         }
-        let out = from_path - foot;
+        let out = across.abs() - foot;
         // Along the valley the massifs rise and fall; the crests of the high ones stand further back.
         // Where one side is low the other tends to tower, so the valley is rarely low on both.
         let massif = |at: i64| {

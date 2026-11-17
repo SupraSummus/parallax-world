@@ -113,7 +113,8 @@ worlds/                      # The worlds, on worldgen's public API only
 ├── src/
 │   ├── lib.rs               # WORLDS: the registry hosts start worlds from by name, with the regions checked around their places
 │   ├── forest.rs            # The forest, on ground it may share, its trees' crowns kept to their rooms
-│   ├── path.rs              # The forest's path along the valley: its centre line by z, and a curve through it
+│   ├── path.rs              # A path along z (the forest's, the valley's): its centre line by z, and a curve through it
+│   ├── course.rs            # The valley's course, the line it winds along; the route its path takes along its floor, the lowest within reach
 │   ├── town.rs, fields.rs   # Towns along the path, farmland around them: the valley's other domains
 │   ├── landmarks.rs         # The valley's fourth domain: a keep, a watchtower, chapels, ponds, farmsteads, windmills
 │   ├── valley.rs            # The valley: the six domains on one land

@@ -47,7 +47,7 @@ fn the_railways_bores_are_carved_last() {
 
 /**
  * The landmarks of `seed` near points NEAR apart within 500 m of the
- * valley's middle along its first 8 km, so all those standing there, and
+ * valley's course along its first 8 km, so all those standing there, and
  * the terrain they stand on.
  */
 fn landmarks(seed: u64) -> (Vec<Site>, Rc<Terrain>) {
@@ -56,8 +56,9 @@ fn landmarks(seed: u64) -> (Vec<Site>, Rc<Terrain>) {
     let railway = Rc::new(Railway::new(&world.of("railway"), terrain.clone()));
     let landmarks = &Landmarks::new(&world.of("landmarks"), terrain.clone(), railway);
     let points = |from: f64, to: f64| (unit(from)..=unit(to)).step_by(NEAR as usize);
+    let course = |z: i64| terrain.course_x(z).round_units().0;
     let mut sites: Vec<Site> =
-        points(-500.0, 8000.0).flat_map(|z| points(-500.0, 500.0).filter_map(move |x| landmarks.site(x, z))).collect();
+        points(-500.0, 8000.0).flat_map(|z| points(-500.0, 500.0).filter_map(move |x| landmarks.site(x + course(z), z))).collect();
     sites.sort_by_key(|s| s.centre);
     sites.dedup_by_key(|s| s.centre);
     (sites, terrain)

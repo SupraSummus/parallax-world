@@ -22,6 +22,7 @@ use worldgen::noise::{Fx, Rng, ease_towards, fx, hash64};
 use worldgen::plan::{Claims, Holding, Plan, Sloped};
 use worldgen::units::{Units, m};
 
+use crate::course::Course;
 use crate::forest::{self, K as F, Relief, Species, make_tree};
 
 kinds! {
@@ -81,6 +82,12 @@ const APART: i64 = m(900.0);
 const CLAIM: i64 = m(800.0);
 const WITHIN: i64 = m(600.0);
 const FIRST: i64 = m(200.0);
+/**
+ * How far past a town's ends the path eases from its route onto the main
+ * street, which the route may be a hundred metres off and more: as far
+ * as the next town lets it.
+ */
+const EASE: Units = Units::m(300.0);
 /** Plan scale of the land they bid for. */
 pub const BID_SCALE: i64 = m(4.0);
 /** What a column of a town is: its finest parts the square's paving, a checker of metres. */
@@ -90,6 +97,10 @@ const TERRACE: Units = Units::m(120.0);
 /** The most blocks a side of the main street, and so the furthest a town reaches across from it, its wall included. */
 const COLS: i64 = 3;
 pub const ACROSS: i64 = MAIN / 2 + COLS * BLOCK_W + (COLS - 1) * STREET + RING;
+/** The most rows of blocks a town has, and how far along the valley it reaches from its middle, at most. */
+const ROWS: i64 = 5;
+pub const LONG: i64 = (ROWS * BLOCK_D + (ROWS - 1) * STREET) / 2 + RING;
+const _: () = assert!(APART / 2 - LONG >= EASE.0);
 
 /** How a town builds: its houses' walls, roofs and windows, its church, its fences and its wall. */
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
@@ -269,7 +280,7 @@ impl Town {
                 town.avenue = random.chance(fx(0.5));
             }
             Size::Market => {
-                (town.cols, town.rows) = (2 + random.below(COLS as u32 - 1) as i64, 4 + random.below(2) as i64);
+                (town.cols, town.rows) = (2 + random.below(COLS as u32 - 1) as i64, ROWS - 1 + random.below(2) as i64);
                 town.centre = if random.chance(fx(0.65)) { Centre::Hall } else { Centre::Fountain };
                 town.walled = random.chance(fx(0.6));
             }
@@ -385,12 +396,12 @@ pub struct Towns {
 impl Towns {
     /**
      * Towns along the path, anywhere at least APART, the first near the
-     * start: hamlets, villages and market towns. Each lies on the path's
-     * coarse band (its mean, x = 0: the path bends to meet it), claimed
-     * from spots within half a cell of it, at the mean height of the
-     * valley floor under it.
+     * start: hamlets, villages and market towns. Each lies on the valley's
+     * course (the path's coarse band, its mean: the path bends to meet
+     * it), claimed from spots within half a cell of x = 0, the course
+     * straightened, at the mean height of the valley floor under it.
      */
-    pub fn new(scope: &Scope, relief: Rc<Relief>) -> Towns {
+    pub fn new(scope: &Scope, relief: Rc<Relief>, course: Rc<Course>) -> Towns {
         let s = scope.seed("towns");
         let claims = Claims::new("towns", s, CLAIM, APART, Some([0, FIRST]), move |[x, z], random| {
             let mut town = if [x, z] == [0, FIRST] {
@@ -407,11 +418,13 @@ impl Towns {
             } else {
                 return None;
             };
+            town.x = course.x(town.z).round_units().0;
             // The floor's mean, not its bumps: a town's height is as coarse as the town.
-            let (hx, hz, z) = (town.half_x(), town.half_z(), town.z);
+            let (hx, hz, x, z) = (town.half_x(), town.half_z(), town.x, town.z);
             let around = (-1..=1).flat_map(|i| (-1..=1).map(move |j| (i, j)));
-            town.level = Fx::mean(around.map(|(i, j)| relief.ground(i * hx, z + j * hz, Fx::ZERO))).round_units().0;
-            Some(([town.x, town.z], town))
+            town.level = Fx::mean(around.map(|(i, j)| relief.ground(x + i * hx, z + j * hz, Fx::ZERO))).round_units().0;
+            // Kept apart along the course straightened, as they are claimed.
+            Some(([0, town.z], town))
         });
         let nearest = Rc::new(Plan::new("nearest town", CLAIM, move |_, z| claims.near(0, z, WITHIN).map(|(_, town)| town)));
         let spots = {
@@ -439,7 +452,7 @@ impl Towns {
     /** The path's centre line at z, with its fraction, bent from `route` onto the main street of the town there. */
     pub fn street_x(&self, z: i64, route: Fx) -> Fx {
         let Some(t) = self.near(z) else { return route };
-        ease_towards(route, Units(t.x).to_fx(), Units::m(60.0), Units((z - t.z).abs() - t.half_z() - t.ring()))
+        ease_towards(route, Units(t.x).to_fx(), EASE, Units((z - t.z).abs() - t.half_z() - t.ring()))
     }
 
     /** How far column (x, z) is from the nearest town (negative inside); far if none. */
