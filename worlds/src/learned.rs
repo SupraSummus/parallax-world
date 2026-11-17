@@ -36,7 +36,7 @@ use worldgen::world::{Find, World};
 
 use crate::fields::Fields;
 use crate::forest::{self, Forest, GROUND_SCALE, K as F, Relief};
-use crate::path::{self, Path};
+use crate::path::{Path, Spine};
 use crate::town::{self, House, K as T, Style};
 
 /** The rule table, learned in lab/ (examples/export.rs) from 54 of the valley's towns. */
@@ -504,15 +504,12 @@ pub fn learned(seed: u64) -> World {
     let relief = Rc::new(Relief::new(&world.of("relief")));
     let settlements = Settlements::new(&world.of("settlements"), relief.clone());
     let first = settlements.clone();
-    let line = {
+    let spine = {
         let (relief, settlements) = (relief.clone(), settlements.clone());
-        Rc::new(move |z| settlements.path_x(z, relief.path_x(z)))
+        Spine::new(move |z| settlements.path_x(z, relief.path_x(z)))
     };
-    let path = {
-        let line = line.clone();
-        Rc::new(Path::new(move |z| line(z), path::SLOPE))
-    };
-    let ground = Lie::new(move |x, z| relief.ground(x, z, (Units(x).to_fx() - line(z)).abs()))
+    let path = Rc::new(Path::new(spine.clone()));
+    let ground = Lie::new(move |x, z| relief.ground(x, z, spine.across(x, z).abs()))
         .shaped(vec![settlements.clone()])
         .ground(GROUND_SCALE, forest::SLOPE);
     let spawn = forest::on_path(&ground, &path, m(-31.0), m(3.0));

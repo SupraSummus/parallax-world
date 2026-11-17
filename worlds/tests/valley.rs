@@ -56,7 +56,7 @@ fn landmarks(seed: u64) -> (Vec<Site>, Rc<Terrain>) {
     let railway = Rc::new(Railway::new(&world.of("railway"), terrain.clone()));
     let landmarks = &Landmarks::new(&world.of("landmarks"), terrain.clone(), railway);
     let points = |from: f64, to: f64| (unit(from)..=unit(to)).step_by(NEAR as usize);
-    let course = |z: i64| terrain.course_x(z).round_units().0;
+    let course = |z: i64| terrain.course.x(z).round_units().0;
     let mut sites: Vec<Site> =
         points(-500.0, 8000.0).flat_map(|z| points(-500.0, 500.0).filter_map(move |x| landmarks.site(x + course(z), z))).collect();
     sites.sort_by_key(|s| s.centre);
@@ -78,7 +78,7 @@ fn landmarks_of_every_kind_stand_out_of_towns_and_off_the_path() {
             let in_town = metres(cz - hz - reach, cz + hz + reach)
                 .any(|z| metres(cx - hx - reach, cx + hx + reach).any(|x| cleared(x, z) && terrain.towns.distance(x, z).0 <= 0));
             assert!(!in_town, "seed {seed}: the {:?} at {:?} or its clearing is in a town", s.landmark, s.centre);
-            let on_path = metres(cz - hz, cz + hz).any(|z| (terrain.path_x(z).round_units().0 - cx).abs() - hx < unit(3.0));
+            let on_path = metres(cz - hz, cz + hz).any(|z| (terrain.path.x(z).round_units().0 - cx).abs() - hx < unit(3.0));
             assert!(!on_path, "seed {seed}: the {:?} at {:?} stands on the path", s.landmark, s.centre);
         }
     }

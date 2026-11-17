@@ -473,7 +473,7 @@ impl Uplands {
         let stretch = smoothstep(fx(0.76), fx(0.84), self.stretches.at(x / 4, z) + patches / 2);
         let moorish = uplands.max(stretch) * below;
         let [from, to] = self.clear;
-        let from_path = (units(x) - self.terrain.path_x(z)).abs();
+        let from_path = self.terrain.path.across(x, z).abs();
         let clear = (Fx::ONE - smoothstep(Fx::ZERO, Fx::m(150.0), units((from - z).max(z - to))))
             * (Fx::ONE - smoothstep(Fx::m(2000.0), Fx::m(3000.0), from_path));
         // The towns' farmland reaches 90 to 150 m out of them (fields.rs).
@@ -493,7 +493,7 @@ impl Uplands {
      * keep off.
      */
     fn lead(&self, x: i64, z: i64) -> Fx {
-        let from_path = (Units(x).to_fx() - self.terrain.path_x(z)).abs();
+        let from_path = self.terrain.path.across(x, z).abs();
         let towns = Fx::ONE - smoothstep(Fx::m(200.0), Fx::m(300.0), self.town_distance(x, z));
         let landmark = if self.landmarks.reaches(x, z, m(8.0)) { Fx::ONE } else { Fx::ZERO };
         let railway = if self.railway.reaches(x, z, m(8.0)) { Fx::ONE } else { Fx::ZERO };

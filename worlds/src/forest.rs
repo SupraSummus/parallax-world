@@ -22,7 +22,7 @@ use worldgen::plan::{self, Holding, Plan, Sloped};
 use worldgen::points::{Blur, MARKS, Points, Room, Rooms};
 use worldgen::units::{UNIT_SIZE, Units, m};
 
-use crate::path::{self, Path};
+use crate::path::{Path, Spine};
 
 /** Metres in units, rounded. */
 fn vox(metres: f64) -> f64 {
@@ -486,11 +486,12 @@ fn read_samples(text: &str) -> HashMap<i64, Sampled> {
 pub fn forest(seed: u64) -> World {
     let world = Scope::new(seed);
     let relief = Rc::new(Relief::new(&world.of("relief")));
-    let path = {
+    let spine = {
         let relief = relief.clone();
-        Rc::new(Path::new(move |z| relief.path_x(z), path::SLOPE))
+        Spine::new(move |z| relief.path_x(z))
     };
-    let ground = Lie::new(move |x, z| relief.ground(x, z, (Units(x).to_fx() - relief.path_x(z)).abs())).ground(GROUND_SCALE, SLOPE);
+    let path = Rc::new(Path::new(spine.clone()));
+    let ground = Lie::new(move |x, z| relief.ground(x, z, spine.across(x, z).abs())).ground(GROUND_SCALE, SLOPE);
     // Start on the path at the near end, at about the height of a tall shrub.
     let spawn = on_path(&ground, &path, vox(-31.0) as i64, vox(3.0) as i64);
     let forest: Rc<dyn Domain> = Rc::new(Forest::new(world.of("forest"), path, spawn));

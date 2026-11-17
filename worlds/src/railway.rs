@@ -224,12 +224,12 @@ impl Ends {
 /** The ground `across` from the course at z. */
 fn ground(terrain: &Terrain, across: Fx, z: Fx) -> Fx {
     let z = z.floor_units().0;
-    terrain.ground((across + terrain.course_x(z)).round_units().0, z)
+    terrain.ground((across + terrain.course.x(z)).round_units().0, z)
 }
 
 /** Point p, across from the course, in the world. */
 fn turned(terrain: &Terrain, p: [Fx; 3]) -> [Fx; 3] {
-    [p[0] + terrain.course_x(p[2].floor_units().0), p[1], p[2]]
+    [p[0] + terrain.course.x(p[2].floor_units().0), p[1], p[2]]
 }
 
 /**
@@ -326,7 +326,7 @@ impl Line {
     fn may_reach(&self, x: i64, z: i64, r: i64) -> bool {
         let k = self.ends.piece(z);
         let (a, b) = (self.ends.x(k), self.ends.x(k + 1));
-        let across = x - self.ends.terrain.course_x(z).round_units().0;
+        let across = self.ends.terrain.course.across(x, z).round_units().0;
         (across - (a + (b - a) * (z - self.ends.z(k)) / PIECE)).abs() < CORRIDOR + r + r / 4 + 2
     }
 
@@ -704,7 +704,7 @@ mod tests {
                 for (i, w) in piece.points.windows(2).enumerate() {
                     let rise = (w[1][1] - w[0][1]).abs();
                     assert!(rise <= fx(GRADE) * Units(FINEST), "seed {seed}: piece {k} rises {rise:?} over a segment");
-                    let across = (w[0][0] - terrain.course_x(w[0][2].floor_units().0)).round_units().0.abs();
+                    let across = (w[0][0] - terrain.course.x(w[0][2].floor_units().0)).round_units().0.abs();
                     assert!((OFF.0 - CORRIDOR..=OFF.1 + CORRIDOR).contains(&across), "seed {seed}: piece {k} {across} across");
                     seen[piece.structure[i] as usize] = true;
                 }
@@ -730,7 +730,7 @@ mod tests {
                 points.extend(&piece.points[usize::from(k > 0)..]);
                 structure.extend(&piece.structure[usize::from(k > 0)..]);
             }
-            let across = |p: [Fx; 3]| p[0] - terrain.course_x(p[2].floor_units().0);
+            let across = |p: [Fx; 3]| p[0] - terrain.course.x(p[2].floor_units().0);
             let direction = |w: &[[Fx; 3]]| (across(w[1]) - across(w[0])).to_f64().atan2((w[1][2] - w[0][2]).to_f64());
             let turn = points.windows(3).map(|w| (direction(&w[1..]) - direction(w)).abs().to_degrees()).fold(0.0, f64::max);
             assert!(turn < 0.2, "seed {seed}: turns {turn}° at a point");
