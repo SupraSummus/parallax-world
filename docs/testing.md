@@ -45,7 +45,7 @@ one world's: `cargo test --release -p worlds --test contract valley`.
 | `web/src/lib/worker-bakery.test.ts` | Baking in workers (simulated) gives the same frames; what is baked first, and when not at all |
 | `web/src/lib/renderer-regressions.test.ts` | Previously fixed rendering bugs |
 | `web/src/lib/world.test.ts` | The worlds listed; a generated world's grids put together from parts generated alone |
-| `worlds/tests/contract.rs`, `worldgen/tests/contract.rs`, `worldgen/tests/shapes.rs` | Every world, the engine's test worlds and each solid keep the contract (`worldgen/src/checks/contract.rs`): generated in pieces equals generated whole; each stratum's levels agree on average on what rays see, and seen from above with level 0; each solid in the worst case |
+| `worlds/tests/contract.rs`, `worldgen/tests/contract.rs`, `worldgen/tests/shapes.rs` | Every world, the engine's test worlds and each solid keep the contract (`worldgen/src/checks/contract.rs`): generated in pieces equals generated whole; each stratum's cells look on average as what is in them two levels finer, or as their baseline says they don't (`worlds/data/contract/`, `worldgen/data/contract/`; "Checks" in `docs/generators.md`); each solid in the worst case |
 | `worlds/tests/cost.rs` | What generating each world costs, counted, stays within a quarter of its baseline (`worlds/data/cost/`; "Cost" in `docs/generators.md`) |
 | `worlds/src/path.rs` | Whether a column is by a path agrees with its distance to the path's curve, round a steep, fast-bending spine |
 | `worlds/src/railway.rs` | The valley's railway keeps its grade and its side of the valley, out of towns; it bends gently; it has bridges and tunnels, none a stub |

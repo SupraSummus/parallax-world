@@ -5,7 +5,8 @@
 //! shows and what it glows. The rays are the rows of the finer level's
 //! sites through it, each two rays a hair to either side, half each (a
 //! row along a face between two cells is both's): nothing drawn by chance
-//! but which cells are checked, a sample of those near a surface.
+//! but which cells are checked, a sample of those near a surface. The
+//! contract holds levels to it (checks::contract's `margins`).
 
 use std::collections::BTreeSet;
 
@@ -17,6 +18,18 @@ use crate::generator::generate;
 use crate::grid::{ALPHA, Box3, VoxelGrid};
 use crate::noise::Rng;
 use crate::picture::{composited, nearest_site};
+
+/**
+ * How many of a ray's crossings of sites one along a row of a lattice
+ * stands for: a row runs through its sites' middles, along their longest
+ * chord, √2 spacings; a ray at any offset weaves through the teeth of
+ * neighbouring rows, more sites, each shorter: a voxel's mean chord along
+ * a face's direction is 2√2/3 spacings (its volume, 2, over its shadow, a
+ * hexagon of 3/√2), 2/3 of its middle's. Here, the rays run
+ * along the finer sites' rows, and only for media: pieces cover a share
+ * of a site's rays wherever they cross it.
+ */
+pub(crate) const CROSSING: f64 = 1.5;
 
 /** How many levels finer a level's cells are held to: more costs more, and loses less (a finer cell's mean forgets which of its rays it stops). */
 pub const FINER_BY: u32 = 2;
@@ -59,11 +72,6 @@ pub struct Cells {
 }
 
 impl Cells {
-    /** Whether every cell, along every direction, is within TOLERANCE of what is in it. */
-    pub fn kept(&self) -> bool {
-        self.cells.iter().all(|c| c.deviation() <= TOLERANCE)
-    }
-
     /** The share of the cells (each along each direction) further than `tolerance` from what is in them. */
     pub fn over(&self, tolerance: f64) -> f64 {
         self.cells.iter().filter(|c| c.deviation() > tolerance).count() as f64 / self.cells.len().max(1) as f64
@@ -105,8 +113,7 @@ impl std::fmt::Display for Cells {
         let n = self.cells.len().max(1) as f64;
         let buckets: Vec<String> = BUCKETS.iter().zip(counts).map(|(top, k)| format!("≤{top}: {:.1}%", 100.0 * k as f64 / n)).collect();
         writeln!(f, "  apart {}", buckets.join(", "))?;
-        let kept = if self.kept() { "kept" } else { "broken" };
-        writeln!(f, "  {kept}: over {TOLERANCE} {:.1}%; on average {}", 100.0 * self.over(TOLERANCE), look(&self.bias()))?;
+        writeln!(f, "  over {TOLERANCE} {:.1}%; on average {}", 100.0 * self.over(TOLERANCE), look(&self.bias()))?;
         let mut worst: Vec<&Cell> = self.cells.iter().collect();
         worst.sort_by(|a, b| b.deviation().total_cmp(&a.deviation()));
         for cell in worst.iter().take(3) {
@@ -117,18 +124,8 @@ impl std::fmt::Display for Cells {
     }
 }
 
-/** A sample of the cells of each level from 1 to `levels` in each of `regions` of `world`, named `name`, against what is in them. */
-pub fn cells(name: &str, world: &World, regions: &[Box3], levels: u32) -> Vec<Cells> {
-    let mut all = Vec::new();
-    for region in regions {
-        for level in 1..=levels {
-            all.push(cells_of(name, world, region, level));
-        }
-    }
-    all
-}
-
-fn cells_of(name: &str, world: &World, region: &Box3, level: u32) -> Cells {
+/** A sample of the cells of `level` in `region` of `world`, named `name`, against what is in them. */
+pub(crate) fn cells_of(name: &str, world: &World, region: &Box3, level: u32) -> Cells {
     let against = level.saturating_sub(FINER_BY);
     let (s, f) = ((1i64 << level) as f64, (1i64 << against) as f64);
     let mut area = around(region, level);
@@ -148,8 +145,9 @@ fn cells_of(name: &str, world: &World, region: &Box3, level: u32) -> Cells {
             let mut looks = [[0.0; 4]; 2];
             let rays = rays_through(centre, s, f, along);
             for (q, d, length) in &rays {
-                for ((grid, scale), look) in grids.iter().zip([f, s]).zip(&mut looks) {
-                    for (_, seen) in composited(grid, q.map(|v| v / scale), *d, length / scale) {
+                // The rays run along the finer sites' rows, through their middles: each crossing of one's medium stands for CROSSING.
+                for (((grid, scale), crossing), look) in grids.iter().zip([f, s]).zip([CROSSING, 1.0]).zip(&mut looks) {
+                    for (_, seen) in composited(grid, q.map(|v| v / scale), *d, length / scale, crossing) {
                         look[0] += seen.stopped;
                         (0..3).for_each(|c| look[1 + c] += seen.shown[c] + seen.glow[c]);
                     }

@@ -51,7 +51,7 @@ pub struct Entry {
      * finds its own (worldgen::checks::contract::regions).
      */
     pub regions: &'static [Region],
-    /** The level up to which it keeps what a camera sees. */
+    /** The level up to which its cells look as what is in them (worldgen::checks::contract). */
     pub levels: u32,
     /**
      * Wide regions whose fields are seen from above at coarse levels
@@ -60,8 +60,6 @@ pub struct Entry {
     pub far: &'static [Region],
     /** The level up to which its far regions keep their fields' look from above, from level 4. */
     pub far_levels: u32,
-    /** The level up to which it keeps what is seen from above, against level 0: at most `levels`; 0 for a world with no sky. */
-    pub from_above: u32,
 }
 
 /** The seed a world's regions were laid out at; its costs, parts and far regions are checked at it alone. */
@@ -69,14 +67,12 @@ pub const REGIONS_SEED: u64 = 42;
 
 /** Every world; the web lists them by itself (worldgen_worlds) and starts them by index (worldgen_start). */
 pub const WORLDS: &[Entry] = &[
-    // Near the spawn point: path, trees, undergrowth, from under the ground to above the crowns;
-    // seen from above at levels 5 and 6, 64 and 128 m of forest around it.
+    // Near the spawn point: path, trees, undergrowth, from under the ground to above the crowns.
     Entry {
         name: "forest",
         make: forest::forest,
         regions: &[Region::at("spawn", [-71, -115, -136], [185, 333, 120])],
         levels: 6,
-        from_above: 6,
         far: &[],
         far_levels: 6,
     },
@@ -100,9 +96,7 @@ pub const WORLDS: &[Entry] = &[
             Region::at("steading", [-197, -50, -178], [219, 174, 206]),
             Region::at("station", [-192, -60, -256], [192, 240, 256]),
         ],
-        // From above to 3: at 4 its houses show their walls (docs/todo.md).
         levels: 4,
-        from_above: 3,
         far: &[Region::at("town", [-704, -38, -736], [704, 298, 736])],
         far_levels: 6,
     },
@@ -113,7 +107,6 @@ pub const WORLDS: &[Entry] = &[
         make: moor::moor,
         regions: &[Region::at("spawn", [-113, -46, 9], [143, 50, 393])],
         levels: 5,
-        from_above: 5,
         far: &[Region::at("spawn", [-689, -46, -439], [719, 50, 969])],
         far_levels: 6,
     },
@@ -124,7 +117,6 @@ pub const WORLDS: &[Entry] = &[
         make: moor::fog,
         regions: &[Region::at("spawn", [-113, -46, 9], [143, 50, 393])],
         levels: 5,
-        from_above: 5,
         far: &[],
         far_levels: 5,
     },
@@ -135,7 +127,6 @@ pub const WORLDS: &[Entry] = &[
         make: learned::learned,
         regions: &[Region::at("settlement", [64, -34, -96], [448, 222, 288])],
         levels: 4,
-        from_above: 4,
         far: &[Region::at("settlement", [-1536, -34, -1536], [1536, 302, 1536])],
         far_levels: 6,
     },
@@ -147,7 +138,6 @@ pub const WORLDS: &[Entry] = &[
         make: city::city,
         regions: &[Region::at("spawn", [-478, -20, -16], [482, 108, 304])],
         levels: 3,
-        from_above: 3,
         far: &[Region::at("spawn", [-478, -20, -32], [482, 108, 928])],
         far_levels: 6,
     },
@@ -159,7 +149,6 @@ pub const WORLDS: &[Entry] = &[
         make: cheese::cheese,
         regions: &[Region::at("spawn", [-128, -128, -128], [128, 128, 128])],
         levels: 3,
-        from_above: 0,
         far: &[],
         far_levels: 6,
     },
@@ -170,7 +159,6 @@ pub const WORLDS: &[Entry] = &[
         make: sponza,
         regions: &[Region::at("spawn", [-242, -46, -150], [242, 160, 150])],
         levels: 5,
-        from_above: 4,
         far: &[],
         far_levels: 6,
     },

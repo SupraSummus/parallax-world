@@ -462,7 +462,7 @@ and a village of houses with doors and tables
 on y = 0, a plane of sites at every level ("Faces" in "Levels");
 and knobs anchored along x on a slanting wall,
 one per square 2N wide across x.
-`worldgen/tests/shapes.rs` holds each solid to the levels it keeps,
+`worldgen/tests/shapes.rs` checks each solid,
 as many of one kind, of sizes and places drawn at random, on a ground:
 bright on dark, the palette that hides the least:
 a world's colours can only hide what breaks there.
@@ -498,8 +498,7 @@ the checks look at it in cubes around places
 each within its heights if it has them (`World::within`),
 so a cube as wide as a ground's heights holds all of them,
 and an endless world's is a cube of it.
-A camera could be anywhere open to a region's outside.
-"From above" is a sky's view: rays down from over what may show,
+"From above" (a far region's fields) is a sky's view: rays down from over what may show,
 through cubes as any picture's;
 a world with no heights has no sky, and is not seen from it.
 y stays up, but some of the engine still takes a ground
@@ -511,16 +510,29 @@ a box generated in parts is the box generated whole.
 What a layer says of itself holds:
 what it skips, where it is whole, its things' reach, the world's heights.
 And a coarse site stands for finer ones:
-what a camera sees at a level is, on average, what it sees at a finer one.
-That is a claim about averages, so it is checked as one:
-each stratum's margins averaged over its regions at every seed,
-not each region's:
-what cameras see within `TOLERANCE` (0.045),
-what is seen from above within `FROM_ABOVE` (0.05),
-looser while walls grown to a site hide more seen down them than across
-("Sheets and rods" in `docs/todo.md`).
+each level's cells look, along each of the lattice's 12 directions,
+as what is in them does the level two finer (`checks::cells`; "Levels").
+Not what a ray through many cells sees:
+that differs by what is inherent to seeing each cell as a whole.
+A cell is one site, its look coarse,
+so it is checked on average:
+each stratum's cells, near a surface, a sample, over its regions at every seed,
+as far apart as `TOLERANCE` (0.045) in how much they stop,
+or in the colour of what they stop (so a thin medium's colour counts as a solid's),
+and each cell as far from what is in it as `SPREAD` (0.1), on average.
 A mean settles as seeds are added; the largest of many only grows.
 A region holding several strata counts for each.
+Where a world, a test world or a solid breaks it,
+its baseline says by how much, as lint baselines do:
+`worlds/data/contract/<world>.txt`, `worldgen/data/contract/`
+(`contract::hold_to_baseline`), a line per stratum and level that breaks it,
+how far apart and how spread on average.
+A test fails on a break not in it,
+and on one further apart or more spread, or nearer or less, by more than `SLACK`,
+or kept now: the baseline goes with the code it measures.
+`CONTRACT_BLESS=1` writes the baselines anew
+(`cargo test --release --test contract` in `worlds/`, or `--test contract --test shapes` in `worldgen/`).
+Breaks of the rules that hold exactly have no baseline.
 The worst case is each solid's alone (`shapes.rs`),
 though its scenes ask little of it (`docs/todo.md`).
 
@@ -531,15 +543,15 @@ A ray that starts or ends inside a voxel stops as a medium would
 over the part of its chord it crosses, 1 − (1 − alpha)^part:
 counted whole, the voxel a coarse level is first looked at in
 made coarse levels look denser near.
-What a ray sees, its `Look`, is how much of it stops
-within 4 of the level's sites past where it is looked at from and further,
-and what it shows: each site's colour, linear, by how much of it the site stops,
+What rays see, a `Look`, is how much of them stops,
+and what shows: each site's colour, linear, by how much of it the site stops,
 and what glows, as in compositing (premultiplied).
 Linear, as a coarse site averages finer ones;
-with no ratio, so a few rays of many change it by no more than their share;
 with no sky behind, as over any sky
 it differs by no more than its colour and how much it stops do.
-A region's look is the mean of its rays', compared channel by channel.
+A cell's rays run along the rows of the finer level's sites,
+each crossing of a finer site's medium counted as `CROSSING` (3/2):
+through a row's middles a ray crosses fewer sites, by longer chords, than one at any offset.
 A site holds what it looks like, not what it is made of:
 how much of a ray it stops, what that shows and what it glows,
 each the sum of what is in it (`see` in `generate.rs`),
@@ -561,33 +573,14 @@ in shares of material types or in sRGB.
   at levels 0, 2 and one past the last checked below:
   any seam, order dependence or hidden state shows up as a differing site,
   in its voxels, its alpha, how it looks through each face, its glow or its solid share;
-- at each level up to the world's, 20,000 rays in random directions
-  from where a camera could be: the level two finer to 2 of the level's sites,
-  and the level past them, as hosts draw a coarse level behind a finer one,
-  against the level two finer all the way.
-  A camera could be at the sites of the finer level that show no voxel
-  it could fly to from outside the box,
-  through such sites from any of its faces (it collides with voxels shown):
-  under a canopy (in the forest, all but 0.3 %), in a cave the box cuts,
-  not under the ground's shell.
-- at each level up to the entry's `from_above`,
-  what rays straight down from the world's sky see,
-  over the region grown to at least 16 sites of the level across,
-  against level 0 (a world with no sky, as the cheese, has none):
-  levels two apart miss what drifts a little at every level,
-  like a town's walls taking over from its roofs.
-  Rays see a site as it looks along them, through the faces turned most against them:
-  from above, the four up, alike.
-  Each goes through a random point of its 2 × 2 units (`Camera::jittered`):
-  through their middles, rays meet plans of whole units at one phase,
-  and the lattice's vertices.
-  Each world goes as far as it keeps what a camera sees;
-  the forest to 6, its canopy seen over 128 m there,
-  which takes most of its test's time;
+- at each level up to the world's, against the level two finer,
+  a sample of cells near a surface in each region (`checks::cells`),
+  the region grown to at least 16 sites of the level across,
+  each along each of the 12 directions, inside it only;
 - in an entry's `far` regions, wide ones (only x and z count),
   what its fields alone show from above from level 4 to its `far_levels`,
   against level 0,
-  each region within a quarter of `FROM_ABOVE`:
+  each region within 0.0125:
   fields come from position alone,
   and hundreds of lines of sites average out,
   so what is finer than the sites must show in proportion ("Plans" in "Levels").
@@ -663,7 +656,7 @@ they check how a world is drawn, not what a seed puts in it.
 With `--nocapture` it prints each level's margins;
 `contract::margins` returns them as a `Report` to print,
 each margin's looks at both levels.
-A broken mean (`contract::strata_kept`) names the stratum, level and measure,
+A broken mean (`contract::breaks`) names the stratum, level and measure,
 and each region it was averaged over, at its seed.
 The engine's tests also check that a thing's carves cut only the thing.
 A new world is a crate of its own in `worlds/`, as the cheese is,

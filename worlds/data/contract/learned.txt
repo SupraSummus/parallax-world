@@ -1,0 +1,300 @@
+boulders mossyStone	1	0.039	0.188
+boulders mossyStone	2	0.039	0.196
+boulders mossyStone	3	0.022	0.185
+boulders mossyStone	4	0.067	0.157
+boulders stone	1	0.039	0.188
+boulders stone	2	0.039	0.196
+boulders stone	3	0.022	0.185
+boulders stone	4	0.067	0.157
+fields bush	1	0.034	0.153
+fields bush	2	0.043	0.179
+fields bush	3	0.102	0.222
+fields bush	4	0.145	0.179
+fields crop	1	0.027	0.183
+fields crop	2	0.034	0.187
+fields crop	3	0.031	0.182
+fields crop	4	0.083	0.160
+fields furrow	1	0.005	0.178
+fields furrow	2	0.018	0.191
+fields furrow	3	0.057	0.196
+fields furrow	4	0.068	0.161
+fields meadow	1	0.015	0.177
+fields meadow	2	0.030	0.171
+fields meadow	3	0.091	0.199
+fields meadow	4	0.120	0.207
+fields meadowGrass	1	0.015	0.177
+fields meadowGrass	2	0.030	0.171
+fields meadowGrass	3	0.091	0.199
+fields meadowGrass	4	0.120	0.207
+fields stubble	1	0.050	0.170
+fields stubble	2	0.065	0.183
+fields stubble	3	0.098	0.204
+fields stubble	4	0.127	0.181
+fields tilth	1	0.009	0.185
+fields tilth	2	0.020	0.189
+fields tilth	3	0.085	0.198
+fields tilth	4	0.052	0.148
+fields wheat	1	0.050	0.170
+fields wheat	2	0.065	0.183
+fields wheat	3	0.098	0.204
+fields wheat	4	0.127	0.181
+haystacks hay	1	0.042	0.152
+haystacks hay	2	0.042	0.182
+haystacks hay	3	0.107	0.227
+haystacks hay	4	0.154	0.181
+learned streets cobble	1	0.008	0.166
+learned streets cobble	2	0.021	0.167
+learned streets cobble	3	0.044	0.157
+learned streets cobble	4	0.060	0.155
+learned streets grass	1	0.011	0.182
+learned streets grass	2	0.022	0.176
+learned streets grass	3	0.037	0.159
+learned streets grass	4	0.046	0.144
+learned streets paving	1	0.029	0.184
+learned streets paving	2	0.015	0.191
+learned streets paving	3	0.043	0.197
+learned streets paving	4	0.064	0.140
+learned streets slab	1	0.024	0.155
+learned streets slab	2	0.028	0.163
+learned streets slab	3	0.052	0.172
+learned streets slab	4	0.056	0.158
+logs deadwood	1	0.036	0.190
+logs deadwood	2	0.032	0.194
+logs deadwood	3	0.038	0.192
+logs deadwood	4	0.076	0.170
+logs moss	1	0.036	0.190
+logs moss	2	0.032	0.194
+logs moss	3	0.038	0.192
+logs moss	4	0.076	0.170
+plants amanita	1	0.029	0.190
+plants amanita	2	0.014	0.202
+plants amanita	3	0.027	0.176
+plants amanita	4	0.062	0.155
+plants amanitaSpot	1	0.029	0.190
+plants amanitaSpot	2	0.014	0.202
+plants amanitaSpot	3	0.027	0.176
+plants amanitaSpot	4	0.062	0.155
+plants berry	1	0.029	0.190
+plants berry	2	0.014	0.202
+plants berry	3	0.027	0.176
+plants berry	4	0.062	0.155
+plants bolete	1	0.031	0.192
+plants bolete	2	0.018	0.203
+plants bolete	3	0.025	0.181
+plants bolete	4	0.057	0.151
+plants bracken	1	0.031	0.192
+plants bracken	2	0.018	0.203
+plants bracken	3	0.025	0.181
+plants bracken	4	0.057	0.151
+plants bush	1	0.029	0.190
+plants bush	2	0.014	0.202
+plants bush	3	0.027	0.176
+plants bush	4	0.062	0.155
+plants cone	1	0.038	0.196
+plants cone	2	0.031	0.207
+plants cone	3	0.024	0.188
+plants cone	4	0.084	0.163
+plants fallenLeaf	1	0.031	0.192
+plants fallenLeaf	2	0.018	0.203
+plants fallenLeaf	3	0.025	0.181
+plants fallenLeaf	4	0.057	0.151
+plants fern	1	0.038	0.196
+plants fern	2	0.031	0.207
+plants fern	3	0.024	0.188
+plants fern	4	0.084	0.163
+plants flowerRed	1	0.038	0.196
+plants flowerRed	2	0.031	0.207
+plants flowerRed	3	0.024	0.188
+plants flowerRed	4	0.084	0.163
+plants flowerViolet	1	0.038	0.196
+plants flowerViolet	2	0.031	0.207
+plants flowerViolet	3	0.024	0.188
+plants flowerViolet	4	0.084	0.163
+plants flowerWhite	1	0.038	0.196
+plants flowerWhite	2	0.031	0.207
+plants flowerWhite	3	0.024	0.188
+plants flowerWhite	4	0.084	0.163
+plants flowerYellow	1	0.038	0.196
+plants flowerYellow	2	0.031	0.207
+plants flowerYellow	3	0.024	0.188
+plants flowerYellow	4	0.084	0.163
+plants grass	1	0.038	0.196
+plants grass	2	0.031	0.207
+plants grass	3	0.024	0.188
+plants grass	4	0.084	0.163
+plants hay	1	0.038	0.196
+plants hay	2	0.031	0.207
+plants hay	3	0.024	0.188
+plants hay	4	0.084	0.163
+plants mushroomStem	1	0.029	0.190
+plants mushroomStem	2	0.014	0.202
+plants mushroomStem	3	0.027	0.176
+plants mushroomStem	4	0.062	0.155
+plants stone	1	0.038	0.196
+plants stone	2	0.031	0.207
+plants stone	3	0.024	0.188
+plants stone	4	0.084	0.163
+plants tallGrass	1	0.038	0.196
+plants tallGrass	2	0.031	0.207
+plants tallGrass	3	0.024	0.188
+plants tallGrass	4	0.084	0.163
+settlements › house brick	1	0.010	0.177
+settlements › house brick	2	0.020	0.204
+settlements › house brick	3	0.065	0.201
+settlements › house brick	4	0.058	0.142
+settlements › house churchStone	1	0.010	0.177
+settlements › house churchStone	2	0.020	0.204
+settlements › house churchStone	3	0.065	0.201
+settlements › house churchStone	4	0.058	0.142
+settlements › house door	1	0.010	0.177
+settlements › house door	2	0.020	0.204
+settlements › house door	3	0.065	0.201
+settlements › house door	4	0.058	0.142
+settlements › house faluRed	1	0.026	0.177
+settlements › house faluRed	2	0.016	0.177
+settlements › house faluRed	3	0.037	0.170
+settlements › house faluRed	4	0.053	0.150
+settlements › house glass	1	0.010	0.177
+settlements › house glass	2	0.020	0.204
+settlements › house glass	3	0.065	0.201
+settlements › house glass	4	0.058	0.142
+settlements › house iron	1	0.030	0.183
+settlements › house iron	2	0.016	0.185
+settlements › house iron	3	0.030	0.156
+settlements › house iron	4	0.051	0.141
+settlements › house plasterBlue	1	0.016	0.172
+settlements › house plasterBlue	2	0.025	0.170
+settlements › house plasterBlue	3	0.047	0.164
+settlements › house plasterBlue	4	0.057	0.152
+settlements › house plasterGrey	1	0.037	0.185
+settlements › house plasterGrey	2	0.018	0.171
+settlements › house plasterGrey	3	0.043	0.168
+settlements › house plasterGrey	4	0.048	0.145
+settlements › house plasterOchre	1	0.035	0.180
+settlements › house plasterOchre	2	0.013	0.176
+settlements › house plasterOchre	3	0.031	0.158
+settlements › house plasterOchre	4	0.046	0.132
+settlements › house plasterPink	1	0.023	0.178
+settlements › house plasterPink	2	0.011	0.181
+settlements › house plasterPink	3	0.022	0.153
+settlements › house plasterPink	4	0.048	0.137
+settlements › house plasterSage	1	0.030	0.183
+settlements › house plasterSage	2	0.016	0.185
+settlements › house plasterSage	3	0.030	0.156
+settlements › house plasterSage	4	0.051	0.141
+settlements › house plasterWhite	1	0.026	0.187
+settlements › house plasterWhite	2	0.012	0.198
+settlements › house plasterWhite	3	0.046	0.187
+settlements › house plasterWhite	4	0.057	0.140
+settlements › house roofBrown	1	0.025	0.178
+settlements › house roofBrown	2	0.018	0.179
+settlements › house roofBrown	3	0.039	0.176
+settlements › house roofBrown	4	0.057	0.142
+settlements › house roofRed	1	0.009	0.182
+settlements › house roofRed	2	0.015	0.197
+settlements › house roofRed	3	0.060	0.192
+settlements › house roofRed	4	0.057	0.141
+settlements › house roofTile	1	0.030	0.183
+settlements › house roofTile	2	0.016	0.185
+settlements › house roofTile	3	0.030	0.156
+settlements › house roofTile	4	0.051	0.141
+settlements › house shutterBlue	1	0.038	0.186
+settlements › house shutterBlue	2	0.012	0.178
+settlements › house shutterBlue	3	0.047	0.169
+settlements › house shutterBlue	4	0.052	0.147
+settlements › house shutterGreen	1	0.019	0.170
+settlements › house shutterGreen	2	0.023	0.188
+settlements › house shutterGreen	3	0.053	0.173
+settlements › house shutterGreen	4	0.049	0.137
+settlements › house slate	1	0.022	0.170
+settlements › house slate	2	0.025	0.184
+settlements › house slate	3	0.068	0.190
+settlements › house slate	4	0.052	0.150
+settlements › house timber	1	0.027	0.185
+settlements › house timber	2	0.017	0.192
+settlements › house timber	3	0.046	0.193
+settlements › house timber	4	0.051	0.140
+settlements › house trim	1	0.010	0.177
+settlements › house trim	2	0.020	0.204
+settlements › house trim	3	0.065	0.201
+settlements › house trim	4	0.058	0.142
+terrain grass	1	0.017	0.197
+terrain grass	2	0.018	0.184
+terrain grass	3	0.067	0.186
+terrain grass	4	0.055	0.159
+terrain litter	1	0.014	0.176
+terrain litter	2	0.030	0.182
+terrain litter	3	0.051	0.171
+terrain litter	4	0.060	0.146
+terrain moss	1	0.014	0.183
+terrain moss	2	0.022	0.184
+terrain moss	3	0.041	0.174
+terrain moss	4	0.071	0.148
+terrain needles	1	0.009	0.172
+terrain needles	2	0.021	0.199
+terrain needles	3	0.065	0.199
+terrain needles	4	0.061	0.149
+terrain path	1	0.026	0.185
+terrain path	2	0.019	0.194
+terrain path	3	0.013	0.169
+terrain path	4	0.049	0.150
+terrain soil	1	0.015	0.171
+terrain soil	2	0.012	0.201
+terrain soil	3	0.057	0.199
+terrain soil	4	0.044	0.142
+terrain stone	1	0.015	0.171
+terrain stone	2	0.012	0.201
+terrain stone	3	0.057	0.199
+terrain stone	4	0.044	0.142
+trees bark	1	0.023	0.183
+trees bark	2	0.021	0.186
+trees bark	3	0.021	0.175
+trees bark	4	0.074	0.153
+trees barkFurrow	1	0.023	0.183
+trees barkFurrow	2	0.021	0.186
+trees barkFurrow	3	0.021	0.175
+trees barkFurrow	4	0.074	0.153
+trees birchBark	1	0.016	0.187
+trees birchBark	2	0.016	0.190
+trees birchBark	3	0.025	0.167
+trees birchBark	4	0.053	0.150
+trees birchGold	1	0.016	0.187
+trees birchGold	2	0.016	0.190
+trees birchGold	3	0.025	0.167
+trees birchGold	4	0.053	0.150
+trees birchGreen	1	0.016	0.187
+trees birchGreen	2	0.016	0.190
+trees birchGreen	3	0.025	0.167
+trees birchGreen	4	0.053	0.150
+trees birchMark	1	0.016	0.187
+trees birchMark	2	0.016	0.190
+trees birchMark	3	0.025	0.167
+trees birchMark	4	0.053	0.150
+trees oakGold	1	0.023	0.183
+trees oakGold	2	0.021	0.186
+trees oakGold	3	0.021	0.175
+trees oakGold	4	0.074	0.153
+trees oakGreen	1	0.029	0.184
+trees oakGreen	2	0.035	0.193
+trees oakGreen	3	0.054	0.191
+trees oakGreen	4	0.100	0.163
+trees oakOrange	1	0.016	0.187
+trees oakOrange	2	0.016	0.190
+trees oakOrange	3	0.025	0.167
+trees oakOrange	4	0.053	0.150
+trees spruce	1	0.041	0.194
+trees spruce	2	0.040	0.200
+trees spruce	3	0.031	0.196
+trees spruce	4	0.079	0.165
+trees spruceBark	1	0.041	0.194
+trees spruceBark	2	0.040	0.200
+trees spruceBark	3	0.031	0.196
+trees spruceBark	4	0.079	0.165
+trees spruceScale	1	0.041	0.194
+trees spruceScale	2	0.040	0.200
+trees spruceScale	3	0.031	0.196
+trees spruceScale	4	0.079	0.165
+trees twig	1	0.023	0.183
+trees twig	2	0.021	0.186
+trees twig	3	0.021	0.175
+trees twig	4	0.074	0.153

@@ -100,13 +100,14 @@ worldgen/                    # The world-generation engine, moving to integers, 
 │   ├── light.rs             # Light (a prototype, for look and native's computed lighting): sky, sun and what glows, each level's from coarser levels'; held to light/reference.rs, rays traced through level 0
 │   ├── cost.rs              # What generating costs: work counted by layer, reported for a world's tiles, against a baseline
 │   └── checks/              # Checks of worlds, for tests
-│       ├── cells.rs         # Each cell against what is in it a level finer, one by one, along the 12 directions (an experiment)
-│       ├── contract.rs      # The contract every world keeps, in regions holding every stratum: rays see each site by its alpha, its colour and glow
+│       ├── cells.rs         # Each cell against what is in it two levels finer, one by one, along the 12 directions: what the contract measures
+│       ├── contract.rs      # The contract every world keeps, in regions holding every stratum: each level's cells look as what is in them
 │       ├── survey.rs        # What a world is made of: its layers asked around spawn, things taken apart, strata to check
 │       ├── places.rs        # Whether things prefer places: positions modulo periods, as on a grid, over seeds
 │       └── directions.rs    # Whether a world's directions follow the lattice's: four-fold harmonics of pairs' directions, over seeds
 ├── data/light-reference.txt # The reference's light in light.rs's test scenes, written by its test reference_values
-└── tests/                  # contract.rs: the engine on test worlds (fog, caves, a village, knobs on a wall), what it refuses; shapes.rs: each solid, to the levels it keeps the contract
+├── data/contract/           # Where the test worlds and the solids of tests/ break the contract, and by how much: their baselines
+└── tests/                  # contract.rs: the engine on test worlds (fog, caves, a village, knobs on a wall), what it refuses; shapes.rs: each solid against its baseline
 worlds/                      # The worlds, on worldgen's public API only
 ├── cheese/                  # A world in a crate of its own (docs/todo.md, "Worlds are not yet crates of their own")
 │   └── src/lib.rs           # The cheese: endless every way, caverns, tunnels and eyes carved by a field of shapes, stairs up each cavern, lit by glowing crystals
@@ -128,6 +129,7 @@ worlds/                      # The worlds, on worldgen's public API only
 ├── data/forest-stands.txt   # What forest.rs's sample stands hide, by spacing, written by its test keep_samples
 ├── data/scenes/             # Scenes' voxels, not in git (their licences): see docs/generators.md, "Scenes"
 ├── data/cost/               # Each world's cost baseline, which tests/cost.rs holds it to
+├── data/contract/           # Where each world breaks the contract, and by how much: the baseline tests/contract.rs holds it to
 ├── tests/                   # Every world in WORLDS keeps the contract and its cost baseline; the scenes' contents
 └── examples/                # map: a world from above; look: a picture of it, of any place it names (picture.rs), lit (light.rs); cost: what its tiles cost (cost.rs); bench: timing a world's tiles
 lab/                         # Experiment, linted but not tested by pnpm: split grammars with shared splits, learned from the valley's towns; a masked model of any volume, flat, 3D or on the FCC lattice; synthesis by coordinates into examples; a critic and profiles that score any of them; real places (scripts/overture.py) drawn to a plan (see src/lib.rs); exports the learned town's rules
