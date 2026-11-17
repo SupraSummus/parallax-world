@@ -162,9 +162,8 @@ Numbers are for the forest at 1280×800, as measured when written.
   the valley's, alone, is CI's longest job.
   Its threads end together, so only less work would shorten it,
   or its seeds on several runners (`--nocapture` shows each part's time).
-  A seed's survey and its pictures from above take longest.
-  The survey asks every cell of a sparse population's square
-  (the valley's haystacks' anchors most).
+  A seed's margins (rays, and pictures from above) take longest,
+  then checking its regions in parts.
   Pictures from above generate level 0 over all of a world's heights,
   region by region, keeping the tiles a region shares with the one before:
   the forest's regions overlap, the valley's hardly.

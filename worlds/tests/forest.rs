@@ -42,11 +42,15 @@ fn voxels(grid: &VoxelGrid, generator: &Generator) -> Vec<(i64, i64, i64, u8)> {
 
 #[test]
 fn forest_is_deterministic_has_ground_trees_and_a_clear_spawn() {
-    let (grid, generator, spawn) = generated(42);
+    // Deterministic for a seed: generated twice, side by side, as generating is on one thread.
+    let ((grid, generator, spawn), (again, again_spawn)) = std::thread::scope(|scope| {
+        let again = scope.spawn(|| {
+            let (grid, _, spawn) = generated(42);
+            (grid, spawn)
+        });
+        (generated(42), again.join().expect("generated"))
+    });
     let all = voxels(&grid, &generator);
-
-    // Deterministic for a seed.
-    let (again, _, again_spawn) = generated(42);
     assert_eq!(again_spawn, spawn);
     assert!(again.shown == grid.shown && again.pieces.colour == grid.pieces.colour && again.bricks == grid.bricks);
 

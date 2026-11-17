@@ -25,6 +25,13 @@ const SIDE: i64 = m(16_000.0);
 const PARTS: usize = 20_000;
 
 /**
+ * Cells from a population's centre to its cube's side, at most: past
+ * it, the cube stops growing too. Each cell asked costs; small cells of
+ * rare things (the valley's haystacks) found nothing new past it.
+ */
+const HALF_CELLS: i64 = 512;
+
+/**
  * The level whose columns of sites each field is asked for, in the
  * cube: sites 16 m apart. Fields keep what is finer than the sites in
  * proportion ("Plans" in docs/generators.md), so a narrow one shows.
@@ -203,7 +210,7 @@ fn across(axis: usize) -> [usize; 2] {
 fn survey_things(world: &World, centre: [i64; 3], population: &Population, region: i64, found: &mut Found) -> (i64, Things) {
     let (n, reach) = (population.cell, population.reach);
     let [ci, _, ck] = centre.map(|v| v.div_euclid(n));
-    let mut half = 8;
+    let (mut half, most) = (8, (SIDE / 2 / n).min(HALF_CELLS));
     loop {
         let (mut parts, mut count) = (Found::new(), 0);
         let mut seen = Things { population: population.name, reach, made: 0, past: Vec::new(), leaving: Vec::new() };
@@ -222,13 +229,13 @@ fn survey_things(world: &World, centre: [i64; 3], population: &Population, regio
             }
             count += take_apart(node, population.name.to_string(), region, &mut parts);
         });
-        if count * 4 > PARTS || half >= SIDE / 2 / n {
+        if count * 4 > PARTS || half >= most {
             for (key, mut places) in parts {
                 found.entry(key).or_default().append(&mut places);
             }
             return (half * n, seen);
         }
-        half = (2 * half).min(SIDE / 2 / n);
+        half = (2 * half).min(most);
     }
 }
 

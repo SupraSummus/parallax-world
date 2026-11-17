@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "pnpm wasm && vite web",
-    "build": "pnpm wasm && vite build web",
+    "build": "pnpm wasm --config profile.wasm.lto=true --config profile.wasm.codegen-units=1 --config profile.wasm.incremental=false && vite build web",
     "preview": "vite preview web",
     "shot": "pnpm wasm && node scripts/shot.mjs",
     "shot:native": "cargo run --release -p parallax-native --",
