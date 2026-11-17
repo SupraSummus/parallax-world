@@ -75,6 +75,13 @@ Numbers are for the forest at 1280×800, as measured when written.
   full already: what the solid stops is lost.
   From level 4, small blocks, balls and specks on the ground
   keep 0.4 to 0.6 of what they stop from above; lifted clear of it, 0.8.
+- **Most surfaces are thinner than `SURFACE`.**
+  The valley's snow and landmarks' ground lie as deep as level 4 draws them;
+  the fields, towns, the learned town, the moor, the forest and the railway
+  still lay theirs half a metre to a metre deep on ground of another kind.
+  The depth that keeps a world's levels alike is that of its coarsest checked
+  (`levels` in `WORLDS`: the forest's is 6, so 16 m),
+  so `SURFACE` could be read from it, or `Column` could know it.
 - **The railway's track is too bright seen low from level 2.**
   At level 0 its sleepers and rails hide the ballast from a ray coming in low;
   at level 1 a medium of them over it does (`railway.rs`, as `Column::medium`);

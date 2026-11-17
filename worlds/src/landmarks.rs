@@ -23,6 +23,7 @@ use worldgen::noise::{Fx, Rng, ValueNoise, fx, hash64};
 use worldgen::plan::{self, Claims, Holding, Plan, Sloped};
 use worldgen::units::{Units, m};
 
+use crate::SURFACE;
 use crate::forest::K as F;
 use crate::mountains::{self, K as M};
 use crate::railway::Railway;
@@ -567,9 +568,9 @@ fn layers(landmarks: Rc<Landmarks>, hold: Holding, ground: Rc<Sloped>) -> Vec<La
                 Spot::Mud => F::soil.into(),
                 _ => F::grass.into(),
             };
-            Column::new(ground.at(x, z)).surface(kind, m(0.5)).spans()
+            Column::new(ground.at(x, z)).surface(kind, SURFACE).spans()
         })
-        .about(on, m(0.5), 1)
+        .about(on, SURFACE, 1)
     };
     // Ponds' water up to its level, reeds round their edges while two sites are no taller than they:
     // thickened, they would stand over the water beside them.

@@ -21,6 +21,14 @@ pub mod valley;
 use worldgen::World;
 use worldgen::checks::contract::Accuracy;
 use worldgen::grid::Box3;
+use worldgen::units::m;
+
+/**
+ * How deep a surface on ground of another kind lies (snow on rock):
+ * as deep as level 4, the valley's coarsest checked, draws it.
+ * Thinner, finer levels hold ground where level 4 holds the surface.
+ */
+pub const SURFACE: i64 = m(4.0);
 
 /** A box around a place a world names (worldgen::World::point), lattice units from it: the same feature at any seed. */
 pub struct Region {

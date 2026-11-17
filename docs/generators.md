@@ -1112,6 +1112,9 @@ as much as all of it stops a ray from above
 (grown to two sites, its top would stand a spacing or more too high),
 `.water_to(kind, level)` where the ground is lower.
 Carves along a line want the same margin.
+A surface on ground of another kind lies as deep
+as the coarsest level checked draws it (`SURFACE` in `worlds/src/lib.rs`),
+or finer levels hold ground where that one holds the surface.
 A heightfield is a shell, hollow under its sides:
 `.sides(kind, lowest_around(ground, x, z), depth)` reaches each column
 down past the lowest of the eight around it, so rays can't slip under a slope.

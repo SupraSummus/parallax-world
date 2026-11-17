@@ -26,6 +26,7 @@ use worldgen::noise::{Fbm, Fx, ValueNoise, fx, smoothstep};
 use worldgen::plan::{self, Holding, Sloped};
 use worldgen::units::{Units, m};
 
+use crate::SURFACE;
 use crate::fields;
 use crate::landmarks::K as L;
 use crate::town::K as T;
@@ -261,9 +262,9 @@ fn layers(ranges: Rc<Ranges>, ground: Rc<Sloped>) -> Vec<Layer> {
         };
         let under = if kind == K::alpine { K::scree } else { K::rock };
         // As deep as the ground under it (the forest's terrain), so it paints all the sides that shows.
-        Column::new(h).surface(kind, m(1.0)).sides(under, lowest_around(|x, z| ground.at(x, z), x, z), m(1.5)).spans()
+        Column::new(h).surface(kind, SURFACE).sides(under, lowest_around(|x, z| ground.at(x, z), x, z), m(1.5)).spans()
     })
-    .about(bounds, m(1.5), 1);
+    .about(bounds, SURFACE, 1);
     vec![Layer::Field(surface), Layer::Field(sea)]
 }
 
