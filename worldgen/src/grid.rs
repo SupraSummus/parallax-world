@@ -2,7 +2,8 @@
 //! looks like, in bricks BRICK units wide, only bricks with voxels stored.
 //! The same layout as the baker's Grid, which `into_grid` hands over.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::OnceLock;
 
 use fcc::light::linear_to_srgb;
 use fcc::{FACE_KINDS, Look};
@@ -74,12 +75,16 @@ pub struct VoxelGrid {
     pub pieces: Part,
     /** What is in each site as a medium: how much it stops of each ray the pieces let through. */
     pub medium: Part,
-    /** Of ALPHA, how much of each site's rays what stops a walking body stops (KindDef::walk_through, not). */
+    /** Of ALPHA, how much of each site's rays what stops a walking body stops (KindDef::walk_through, not); of a site holding where in it its pieces lie, how much of it they fill. */
     pub solid: Vec<u8>,
     /** By index in `shown`, of the sites that glow: how much, per channel, of GLOW_ONE. */
     pub glow: BTreeMap<usize, [u32; 3]>,
     /** By index in `shown`, the sites whose pieces look unlike along each direction: what they stop, show and glow along each. */
     pub views: BTreeMap<usize, Views>,
+    /** While generating, by index in `shown`, the sites holding where on their lines their pieces lie (`Rays`); none once `settle`d. */
+    rays: BTreeMap<usize, Rays>,
+    /** The parts sites' `Rays` hold, each once, and where each is. */
+    parts: (Vec<RayPart>, HashMap<RayPart, u32>),
 }
 
 /**
@@ -109,6 +114,274 @@ pub const GLOW_ONE: u32 = 255 << 16;
 /** The colour of a site all of a white that stops every ray, per channel (linear). */
 pub const COLOUR_ONE: u16 = u16::MAX;
 
+/**
+ * Lines through a site's voxel along each of the lattice's six axes (of
+ * each face of VOXEL_FACES and its opposite, the one whose first other
+ * than 0 is positive): a square grid of them across the axis, ACROSS a
+ * spacing, at an offset along no plane of the lattice, those
+ * meeting the voxel, each standing for as much of its shadow. While
+ * generating, a site's pieces are held as where on each line they lie
+ * (`Rays`); along each face's direction each line shows what it meets
+ * first, so a site looks as what is in it does to rays through it
+ * (docs/generators.md, "Levels").
+ */
+pub(crate) struct Lines {
+    /** Each axis's face (of VOXEL_FACES): its lines run along that face's normal. */
+    pub axes: [usize; 6],
+    /** Each axis's direction, unit. */
+    pub dirs: [[f64; 3]; 6],
+    /**
+     * Each line: its axis, its point where it crosses the plane through the
+     * site across its axis, and where along it, from there, it is in the
+     * voxel; sites 1 apart, the voxel's vertices 1 along the axes.
+     */
+    pub lines: Vec<(usize, [f64; 3], [f64; 2])>,
+    /** Where each axis's lines start in `lines`, and where they end: they are by axis. */
+    starts: [usize; 7],
+}
+
+impl Lines {
+    /** Axis `a`'s lines, of `lines`. */
+    pub fn of_axis(&self, a: usize) -> std::ops::Range<usize> {
+        self.starts[a]..self.starts[a + 1]
+    }
+}
+
+/** Lines across an axis, a spacing apart. */
+pub(crate) const ACROSS: i64 = 2;
+
+pub(crate) fn lines() -> &'static Lines {
+    static LINES: OnceLock<Lines> = OnceLock::new();
+    LINES.get_or_init(|| {
+        let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+        let faces: Vec<usize> = (0..FACE_KINDS).filter(|&k| VOXEL_FACES[k].iter().find(|&&v| v != 0) > Some(&0)).collect();
+        let axes: [usize; 6] = faces.try_into().expect("six axes");
+        let dirs = axes.map(|k| VOXEL_FACES[k].map(|v| v as f64 / std::f64::consts::SQRT_2));
+        let mut lines = Vec::new();
+        for (a, d) in dirs.iter().enumerate() {
+            // Across it: the axis its face's normal has none of, and the third.
+            let e1: [f64; 3] = std::array::from_fn(|i| f64::from(VOXEL_FACES[axes[a]][i] == 0));
+            let e2 = [d[1] * e1[2] - d[2] * e1[1], d[2] * e1[0] - d[0] * e1[2], d[0] * e1[1] - d[1] * e1[0]];
+            let n = 2 * ACROSS;
+            for i in -n..n {
+                for j in -n..n {
+                    let [u, v] = [(i as f64 + 0.5 + 0.137) / ACROSS as f64, (j as f64 + 0.5 + 0.291) / ACROSS as f64];
+                    let q: [f64; 3] = std::array::from_fn(|c| u * e1[c] + v * e2[c]);
+                    // Inside the voxel: |m · p| ≤ 1 for each face's normal m.
+                    let (mut t0, mut t1) = (f64::NEG_INFINITY, f64::INFINITY);
+                    for m in VOXEL_FACES {
+                        let m = m.map(f64::from);
+                        let (along, off) = (dot(m, *d), dot(m, q));
+                        if along.abs() < 1e-12 {
+                            if off.abs() > 1.0 {
+                                t1 = f64::NEG_INFINITY;
+                            }
+                        } else {
+                            let (u0, u1) = ((-1.0 - off) / along, (1.0 - off) / along);
+                            (t0, t1) = (t0.max(u0.min(u1)), t1.min(u0.max(u1)));
+                        }
+                    }
+                    if t1 > t0 {
+                        lines.push((a, q, [t0, t1]));
+                    }
+                }
+            }
+        }
+        // Each axis's chords alike, as the lattice's symmetry has them (medium_stops counts on it).
+        let chords = |a: usize| {
+            let mut of: Vec<f64> = lines.iter().filter(|line| line.0 == a).map(|(_, _, [t0, t1])| t1 - t0).collect();
+            of.sort_by(f64::total_cmp);
+            of
+        };
+        for a in 1..6 {
+            assert!(chords(a).iter().zip(chords(0)).all(|(u, v)| (u - v).abs() < 1e-9), "each axis's chords alike");
+        }
+        assert!(lines.len() <= 256, "a line's index in a byte (`Ray`)");
+        let starts = std::array::from_fn(|a| lines.partition_point(|line| line.0 < a));
+        Lines { axes, dirs, lines, starts }
+    })
+}
+
+/** Where on a site's lines (`lines`) something lies: segments, each its line's index, and from and to along it from its point, in sites; by line, each line's in order, apart. */
+pub(crate) type Segments = Vec<(u16, f32, f32)>;
+
+/** A site's lines whole: each's chord in the voxel. */
+fn chords() -> &'static Segments {
+    static CHORDS: OnceLock<Segments> = OnceLock::new();
+    CHORDS.get_or_init(|| lines().lines.iter().enumerate().map(|(l, (_, _, [t0, t1]))| (l as u16, *t0 as f32, *t1 as f32)).collect())
+}
+
+/** How much of each of a site's lines `segments` hold. */
+fn lengths(segments: &Segments) -> Vec<f64> {
+    let mut of = vec![0.0; lines().lines.len()];
+    segments.iter().for_each(|&(l, a, b)| of[l as usize] += f64::from(b - a));
+    of
+}
+
+/**
+ * Of a site's lines, how much of their chords in the voxel `segments`
+ * hold: the share of the voxel it fills.
+ */
+pub(crate) fn filled(segments: &Segments) -> f64 {
+    let lines = &lines().lines;
+    let held: f64 = segments.iter().map(|(_, a, b)| f64::from(b - a)).sum();
+    held / lines.iter().map(|(_, _, [t0, t1])| t1 - t0).sum::<f64>()
+}
+
+/** Along each face's direction, the share of a site's lines `segments` (all of its chords if none) hold some of. */
+pub(crate) fn met(segments: &Segments) -> [f64; FACE_KINDS] {
+    let (lines, held) = (lines(), lengths(segments));
+    std::array::from_fn(|k| {
+        let of = &held[lines.of_axis(axis_of(k).0)];
+        of.iter().filter(|h| **h > 0.0).count() as f64 / of.len() as f64
+    })
+}
+
+/** The axis (of `lines`' six) face `k`'s normal runs along, and whether it is its face rather than its opposite. */
+fn axis_of(k: usize) -> (usize, bool) {
+    let axes = lines().axes;
+    let n = VOXEL_FACES[k];
+    let a = (0..6).find(|&a| VOXEL_FACES[axes[a]] == n || VOXEL_FACES[axes[a]].map(|v| -v) == n).expect("an axis");
+    (a, VOXEL_FACES[axes[a]] == n)
+}
+
+/**
+ * What a medium stopping `e` per unit of a ray's path, where `segments`
+ * hold (all of its chords if none), stops of a site's rays, sites `s`
+ * apart: the mean over its lines of 1 − e^(−e · length), alike every way.
+ */
+pub(crate) fn medium_stops(e: f64, s: f64, segments: Option<&Segments>) -> f64 {
+    let lines = &lines().lines;
+    match segments.map(lengths) {
+        Some(held) => held.iter().filter(|h| **h > 0.0).map(|h| 1.0 - crate::js::exp(-e * s * h)).sum::<f64>() / lines.len() as f64,
+        // Whole: each axis's chords are alike (`lines`), so one's.
+        None => {
+            let of = &lines[self::lines().of_axis(0)];
+            of.iter().map(|(_, _, [t0, t1])| 1.0 - crate::js::exp(-e * s * (t1 - t0))).sum::<f64>() / of.len() as f64
+        }
+    }
+}
+
+/**
+ * Along each face's direction, what a medium stopping `e` per unit of a
+ * ray's path where `segments` hold stops of a site's rays, sites `s`
+ * apart: the mean over its axis's lines of 1 − e^(−e · length), the same
+ * both ways along it.
+ */
+pub(crate) fn medium_stops_along(e: f64, s: f64, segments: &Segments) -> [f64; FACE_KINDS] {
+    let (lines, held) = (lines(), lengths(segments));
+    let by_axis: [f64; 6] = std::array::from_fn(|a| {
+        let of = &held[lines.of_axis(a)];
+        // What a line misses stops none of it.
+        of.iter().filter(|h| **h > 0.0).map(|h| 1.0 - crate::js::exp(-e * s * h)).sum::<f64>() / of.len() as f64
+    });
+    std::array::from_fn(|k| by_axis[axis_of(k).0])
+}
+
+/**
+ * A site's pieces as where on its lines they lie: each line's segments,
+ * each with its part (one more than its index in `parts`), and the parts,
+ * each the grid's (`VoxelGrid::parts`).
+ */
+#[derive(Clone)]
+struct Rays {
+    /** Segments (`Ray`): by line, each line's in order, apart. */
+    segments: Vec<Ray>,
+    parts: Vec<u32>,
+}
+
+/**
+ * A segment of a site's line: the line's index (`lines`), from and to
+ * along its chord in the voxel, in STEPS of it, and its part:
+ * a few bytes, held for every site things cross in part till all is drawn.
+ */
+type Ray = [u8; 4];
+
+/** Where along its chord a line's segments end, in parts of it: ends a rounding apart are one. */
+const STEPS: f64 = 255.0;
+
+impl Rays {
+    /** Puts part `p` where `add` (by line, as `Segments`) holds, as `put_on`: one pass through what is there. */
+    fn put(&mut self, add: &[(u16, f32, f32)], p: u8, over: bool) {
+        let lines = &lines().lines;
+        let step = |l: u16, t: f32| {
+            let [t0, t1] = lines[l as usize].2;
+            ((f64::from(t) - t0) / (t1 - t0) * STEPS).round().clamp(0.0, STEPS) as u8
+        };
+        let add: Vec<Ray> = add.iter().map(|&(l, a, b)| [l as u8, step(l, a), step(l, b), p]).filter(|r| r[1] < r[2]).collect();
+        let old = std::mem::take(&mut self.segments);
+        let mut out = Vec::with_capacity(old.len() + add.len());
+        let (mut i, mut j) = (0, 0);
+        while j < add.len() {
+            let l = add[j][0];
+            while i < old.len() && old[i][0] < l {
+                out.push(old[i]);
+                i += 1;
+            }
+            let (from, to) = (i, j);
+            while i < old.len() && old[i][0] == l {
+                i += 1;
+            }
+            while j < add.len() && add[j][0] == l {
+                j += 1;
+            }
+            put_on(&old[from..i], &add[to..j], p, over, &mut out);
+        }
+        out.extend_from_slice(&old[i..]);
+        out.shrink_to_fit();
+        self.segments = out;
+    }
+}
+
+/** A part of a site: its colour through each face (linear, of COLOUR_ONE), what it glows (of GLOW_ONE for a whole site) and whether it stops a walking body. */
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct RayPart {
+    pub colours: [[u32; 3]; FACE_KINDS],
+    pub glow: [u32; 3],
+    pub solid: bool,
+}
+
+/**
+ * Onto `out`, a line's segments `old` (its own, in order, apart) with part
+ * `p` (0 for none) put where `add` (the same line's, as part p) holds: over
+ * what is there, or where nothing is; with none, taken out there. In
+ * order, apart.
+ */
+fn put_on(old: &[Ray], add: &[Ray], p: u8, over: bool, out: &mut Vec<Ray>) {
+    let start = out.len();
+    if p == 0 || over {
+        for &[l, x, y, q] in old {
+            outside([l, x, y, q], add.iter().map(|r| (r[1], r[2])), out);
+        }
+        if p != 0 {
+            out.extend_from_slice(add);
+        }
+    } else {
+        out.extend_from_slice(old);
+        for &ray in add {
+            outside(ray, old.iter().map(|r| (r[1], r[2])), out);
+        }
+    }
+    out[start..].sort_unstable_by_key(|r| r[1]);
+}
+
+/** Onto `out`, what of `ray` is outside every one of `cut` (in order). */
+fn outside([l, a, b, q]: Ray, cut: impl Iterator<Item = (u8, u8)>, out: &mut Vec<Ray>) {
+    let mut from = a;
+    for (x, y) in cut {
+        if y <= from || x >= b {
+            continue;
+        }
+        if x > from {
+            out.push([l, from, x, q]);
+        }
+        from = from.max(y);
+    }
+    if b > from {
+        out.push([l, from, b, q]);
+    }
+}
+
 impl VoxelGrid {
     /** A grid of the sites in `b`, widened by one in x if needed to start and end on an even x. */
     pub fn new(b: &Box3) -> VoxelGrid {
@@ -129,6 +402,8 @@ impl VoxelGrid {
             solid: Vec::new(),
             glow: BTreeMap::new(),
             views: BTreeMap::new(),
+            rays: BTreeMap::new(),
+            parts: Default::default(),
         }
     }
 
@@ -376,6 +651,7 @@ impl VoxelGrid {
      * their order in `shown`; the others' bricks become empty.
      */
     fn hold(&mut self, keep: impl Fn(usize) -> bool) {
+        assert!(self.rays.is_empty(), "sites settled");
         let mut moved = vec![None; self.shown.len() / BRICK_SITES];
         for &at in &self.bricks {
             if let Ok(at) = usize::try_from(at) {
@@ -408,6 +684,153 @@ impl VoxelGrid {
         let to = |i: usize| moved[i / BRICK_SITES].map(|to| to * BRICK_SITES + i % BRICK_SITES);
         self.glow = std::mem::take(&mut self.glow).into_iter().filter_map(|(i, g)| Some((to(i)?, g))).collect();
         self.views = std::mem::take(&mut self.views).into_iter().filter_map(|(i, v)| Some((to(i)?, v))).collect();
+    }
+
+    /** Whether site `i` of `shown` holds where on its lines its pieces lie (`Rays`). */
+    pub(crate) fn is_rays(&self, i: usize) -> bool {
+        self.rays.contains_key(&i)
+    }
+
+    /**
+     * Site `i` of `shown`, if its pieces fill it whole and look alike
+     * every way, as holding where they lie: all along its lines, so that
+     * what comes into some of it (a carve, a paint) keeps the rest.
+     * Whether it now does.
+     */
+    pub(crate) fn make_rays(&mut self, i: usize) -> bool {
+        if self.pieces.alpha[i] != ALPHA || self.views.contains_key(&i) {
+            return false;
+        }
+        let colour = self.pieces.colour[i].map(u32::from);
+        let glow = self.glow.get(&i).copied().unwrap_or_default();
+        let part = RayPart { colours: [colour; FACE_KINDS], glow, solid: self.solid[i] >= ALPHA / 2 };
+        self.put_rays(i, None, Some(part), true);
+        true
+    }
+
+    /** Whether site `i` of `shown` holds no pieces. */
+    pub(crate) fn has_no_pieces(&self, i: usize) -> bool {
+        self.pieces.alpha[i] == 0 && !self.views.contains_key(&i)
+    }
+
+    /**
+     * Puts `part` where `segments` hold on site `i` of `shown`'s lines (all
+     * along them if none): `over` what is there, else only where nothing
+     * is; with no part, takes them out.
+     */
+    pub(crate) fn put_rays(&mut self, i: usize, segments: Option<&Segments>, part: Option<RayPart>, over: bool) {
+        let (all, at) = &mut self.parts;
+        let part = part.map(|part| {
+            *at.entry(part).or_insert_with(|| {
+                all.push(part);
+                all.len() as u32 - 1
+            })
+        });
+        let rays = self.rays.entry(i).or_insert_with(|| Rays { segments: Vec::new(), parts: Vec::new() });
+        let p = match part {
+            None => 0,
+            Some(part) => match rays.parts.iter().position(|q| *q == part) {
+                Some(p) => p + 1,
+                None => {
+                    rays.parts.push(part);
+                    rays.parts.len()
+                }
+            },
+        };
+        let p = u8::try_from(p).expect("a site of fewer than 256 parts");
+        rays.put(segments.unwrap_or_else(|| chords()), p, over);
+    }
+
+    /**
+     * Site `i` of `shown`, if it holds where on its lines its pieces lie,
+     * as what they stop, show and glow along each face's direction (its
+     * axis's lines: each shows the part it meets first from that face), and
+     * as much as they fill of it that stops a walking body; it holds no
+     * more where they lie.
+     */
+    pub(crate) fn settle_site(&mut self, i: usize) {
+        let Some(rays) = self.rays.remove(&i) else { return };
+        let lines = lines();
+        // Each line's first part and last (one more than its index; 0 for none).
+        let mut ends = [(0u8, 0u8); 256];
+        for &[l, _, _, p] in &rays.segments {
+            let end = &mut ends[l as usize];
+            if end.0 == 0 {
+                end.0 = p;
+            }
+            end.1 = p;
+        }
+        let mut views = Views { alpha: [0; FACE_KINDS], colour: [[0; 3]; FACE_KINDS], glow: [[0; 3]; FACE_KINDS] };
+        for k in 0..FACE_KINDS {
+            let (a, from_high) = axis_of(k);
+            let (mut n, mut met, mut colour, mut glow) = (0u64, 0u64, [0u64; 3], [0u64; 3]);
+            for l in lines.of_axis(a) {
+                n += 1;
+                // Entering by face k, a ray runs against its normal: from the line's far end if the face is its axis's.
+                let p = if from_high { ends[l].1 } else { ends[l].0 };
+                if p == 0 {
+                    continue;
+                }
+                let part = &self.parts.0[rays.parts[p as usize - 1] as usize];
+                met += 1;
+                for c in 0..3 {
+                    colour[c] += part.colours[k][c] as u64;
+                    glow[c] += part.glow[c] as u64;
+                }
+            }
+            let of = |v: u64| (v + n / 2) / n;
+            views.alpha[k] = of(met * ALPHA as u64) as u8;
+            views.colour[k] = colour.map(|c| of(c).min(COLOUR_ONE as u64) as u16);
+            views.glow[k] = glow.map(|g| of(g * (GLOW_ONE / 255) as u64) as u32);
+        }
+        let chord = |l: u8| lines.lines[l as usize].2[1] - lines.lines[l as usize].2[0];
+        let chords: f64 = (0..lines.lines.len()).map(|l| chord(l as u8)).sum();
+        let solid: f64 = rays
+            .segments
+            .iter()
+            .filter(|r| self.parts.0[rays.parts[r[3] as usize - 1] as usize].solid)
+            .map(|r| f64::from(r[2] - r[1]) / STEPS * chord(r[0]))
+            .sum();
+        self.solid[i] = (solid / chords * ALPHA as f64).round() as u8;
+        self.set_views(i, views);
+    }
+
+    /** Every site, as `settle_site`. */
+    pub(crate) fn settle(&mut self) {
+        while let Some(&i) = self.rays.keys().next() {
+            self.settle_site(i);
+        }
+    }
+
+    /**
+     * Site `i`'s pieces as `views`: kept only where faces differ; the site
+     * as a whole, to what sees no faces (a host's voxels, a camera
+     * colliding), stops and glows as its most.
+     */
+    pub(crate) fn set_views(&mut self, i: usize, views: Views) {
+        fn most<T: Ord + Copy>(of: &[[T; 3]; FACE_KINDS]) -> [T; 3] {
+            [0, 1, 2].map(|c| of.iter().map(|v| v[c]).max().expect("faces"))
+        }
+        let alike = |k: usize| views.alpha[k] == views.alpha[0] && views.colour[k] == views.colour[0] && views.glow[k] == views.glow[0];
+        if (0..FACE_KINDS).all(alike) {
+            (self.pieces.alpha[i], self.pieces.colour[i]) = (views.alpha[0], views.colour[0]);
+            self.set_glow(i, views.glow[0]);
+            self.views.remove(&i);
+        } else {
+            self.pieces.alpha[i] = views.alpha.into_iter().max().expect("faces");
+            self.pieces.colour[i] = most(&views.colour);
+            self.set_glow(i, most(&views.glow));
+            self.views.insert(i, views);
+        }
+    }
+
+    /** Sets site `i`'s glow, none if it glows nothing. */
+    pub(crate) fn set_glow(&mut self, i: usize, glow: [u32; 3]) {
+        if glow != [0; 3] {
+            self.glow.insert(i, glow);
+        } else if !self.glow.is_empty() {
+            self.glow.remove(&i);
+        }
     }
 
     /** Of ALPHA, how much of its rays site `i` of `shown` stops: its pieces, and its medium of the rest. */

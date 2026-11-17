@@ -84,7 +84,7 @@ bake/                        # Chunk baker and walking in Rust, on fcc/: native 
 worldgen/                    # The world-generation engine, moving to integers, into the baker's grids; no worlds
 ├── src/
 │   ├── js.rs                # Float math the same on every target (libm), named after JS's Math
-│   ├── noise.rs, grid.rs    # Integer hashes, random numbers, fixed point (Fx) and noise; voxel-grid.ts's bricks, each site's alpha, and the voxels it shows
+│   ├── noise.rs, grid.rs    # Integer hashes, random numbers, fixed point (Fx) and noise; voxel-grid.ts's bricks, how each site looks (while generating, where in it its pieces lie), and the voxels it shows
 │   ├── units.rs             # UNIT_SIZE: metres per lattice unit; whole Units, typed apart from Fx
 │   ├── generator.rs         # The framework: nodes, fields, populations, the model worlds are written in
 │   ├── generator/           # generate.rs: any box at any level, of forms.rs: a node's near and far forms (measured), of drawables.rs: fields, shapes (shapes.rs, the solids) or sites drawn; things.rs: the things populations make

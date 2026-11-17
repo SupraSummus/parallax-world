@@ -10,22 +10,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   They should go to fixed point like the noise,
   the forest building each thing relative to its anchor.
   The fixed-point containment tests cost about 15% at level 0.
-- **A flat thing's faces round to the sites.**
-  Faces on a plane of a level's sites split its sites ("Faces" in
-  `docs/generators.md`); off those planes a face rounds to the sites,
-  up to half a site either way: even over a ground's many heights,
-  but a town's floors at one height all go one way.
-  Sites near a face kept with the share of their voxel inside it
-  would be even for any height,
-  but would leave holes in boxes under two sites thick
-  and roughen every surface.
-  On a gentle slope the rounding is steps a site high,
-  which computed light shows as contour lines from level 2 on.
-  Tried on spans' open ends past level 0, that share took the lines away,
-  but each of the layers painting one ground (forest, mountains)
-  had to cover the same part of its top site, not add up, by a flag on the share;
-  a ground declared once, not by each layer painting it,
-  would hold its top's share in one place.
 - **Sheets and rods stop too much seen along them.**
   Grown to a site and opaque ("Levels" in `docs/generators.md`),
   a wall stops every ray across it, as it should, and every ray down it:
@@ -84,11 +68,15 @@ Numbers are for the forest at 1280×800, as measured when written.
   (`Look`'s faces, measured in `generator/forms.rs`),
   would keep the ballast's shares on the faces looking up
   and the sleepers and rails on the others.
-- **A thin ellipsoid between two planes of sites can vanish.**
-  Its thickness grows to half a site either way of its centre,
-  so centred between two planes it holds their sites only at a point:
-  discs 2 units thick, each 10 units over the ground, were gone at level 2.
-  Boxes keep the sites on their faces by `Tie`.
+- **`Column` grows its layers to two sites**, a patch ("Levels" in `docs/generators.md`):
+  from before solid spans held where in their sites they lie,
+  when a span under two sites could hold none.
+  A layer of turf a unit thick is 16 units at level 3,
+  so a slope shows turf from the side where its soil is.
+  Spans now hold where on their sites' lines they lie, at every level;
+  one thinner than the lines are apart (half the spacing) would need to be drawn as a sheet,
+  covering its site's rays from above and few from the side,
+  and to sit on the ground under it in its site, not behind it, before the rule can go.
 - **Some fields still keep their levels by rules of their own** (`plan::spacing`):
   the moor's stream bed and the railway write out
   `Column`'s rule of two sites (`.max(2 * spacing)`);
@@ -499,33 +487,17 @@ Numbers are for the forest at 1280×800, as measured when written.
   to the last level checked: a `Look` is a mean over a region's rays,
   so a solid that thins changes it only by its share of the view.
   Scenes the solid fills, the same share for every case, would ask more.
-- **Cells hold what they look like** (begun).
-  A site of `VoxelGrid` holds how much it stops, what that shows and what it glows,
-  along each direction where they differ; worldgen reads only that
-  (pictures, the contract, the light's reference), along a ray's direction.
-  Hosts take what a site looks like too, through each face where it differs (fcc's `Look`),
-  each site whole or not by a coin (`VoxelGrid::show`).
-  Still to do:
-  coverage by direction where sites are filled in part
-  (fields' sites are wholly in a span or out, solids' views only for sheets).
-  The contract holds each cell to what is in it `FINER_BY` levels finer
-  (`checks::cells`), along each of the 12 directions, by the rows of the finer level's sites in it,
-  on average over a stratum's cells.
-  On a flat ground a cell at level 1 is a whole site or none,
-  where what is in it stops a third of the rays along it, or more:
-  so the worlds, the engine's test worlds and every solid break it from level 1,
-  their cells stopping less than what is in them and spread past `SPREAD`,
-  as their baselines say (`worlds/data/contract/`, `worldgen/data/contract/`).
-  Sites that look as what is in them do along each direction
-  would keep it; drawn so, by rays through each site's voxel, they did,
-  but generating took 4 to 100 times as long.
-  A field's sites seen along each direction, as much of their rays as cross their spans
-  (tried, not kept), kept a flat ground's cells within it at level 2;
-  but layers sharing a site, each giving only what it covers,
-  leave it to guess how they lie: the valley's snow, painted over its ground, came out grey.
-  A ray along no direction of the lattice reads a site's nearest directions alike:
-  straight down, the four up, so a wall, along which straight down is, shows half as across it;
-  the cells' check reads along the lattice's only.
+- **Cells look as what is in them, but slowly, and media not in hosts** ("Levels" in `docs/generators.md`).
+  Each site a shape or a solid span reaches into is read by its 54 lines (`lines` in `grid.rs`),
+  where on each its pieces lie, so it looks along each direction as they do (`checks::cells`).
+  Generating takes 3 to 55 times as long as with sites whole or empty:
+  a site partly filled is 54 line tests, against one point.
+  Analytic sites for simple cases (a box, a flat span), lines for the rest, would be cheaper.
+  A medium's site stops the mean over its lines, 1 − exp(−e·s·chord),
+  but hosts composite its alpha as one crossing,
+  so media look thinner there (native's tests).
+  Media's colour comes out brighter at coarser levels in fog and water: not found yet.
+  The baselines (`worlds/data/contract/`, `worldgen/data/contract/`) say where worlds still break it.
 - **The forest's canopy measures crowded trees in sample stands.**
   From above it reads each column's owner (`Rooms`),
   but what the trees standing in a column hide from the side

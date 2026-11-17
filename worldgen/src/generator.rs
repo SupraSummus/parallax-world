@@ -11,7 +11,7 @@ use fcc::{FACE_KINDS, VOXEL_FACES};
 
 use crate::cost::{self, Work};
 use crate::curve::Curve;
-use crate::grid::{ALPHA, BRICK, Box3, COLOUR_ONE, VoxelGrid, look_of};
+use crate::grid::{self, ALPHA, BRICK, Box3, COLOUR_ONE, RayPart, Segments, VoxelGrid, look_of};
 use crate::js;
 use crate::noise::{Fixed, Fx, ONE, Rng, fixed, float, hash, hash_text, hash64};
 use crate::plan;
@@ -45,11 +45,13 @@ pub struct Look {
     pub faces: Option<[Kind; FACE_KINDS]>,
     /** Its share (of SHARE) of the rays entering by each face, where they differ: a wall stops those across it, few along it. */
     pub cover: Option<[u32; FACE_KINDS]>,
+    /** Where on the site's lines (grid's `lines`) it lies, where a face of it crosses the site (`segments`); its share is what it fills. */
+    pub rays: Option<u32>,
 }
 
 impl From<Kind> for Look {
     fn from(kind: Kind) -> Look {
-        Look { kind, faces: None, cover: None }
+        Look { kind, faces: None, cover: None, rays: None }
     }
 }
 
@@ -63,6 +65,19 @@ impl From<Kind> for Look {
 type Put<'a> = dyn FnMut(Look, Op, u32, u32, i64, i64, i64) + 'a;
 /** A whole site's share. */
 pub const SHARE: u32 = 1 << 16;
+
+thread_local! {
+    /** While generating, where on their sites' lines the pieces drawn lie (`Look::rays`, an index in it). */
+    static SEGMENTS: RefCell<Vec<Segments>> = const { RefCell::new(Vec::new()) };
+}
+
+/** Keeps `segments` while generating; their index, for `Look::rays`. */
+fn keep(segments: Segments) -> u32 {
+    SEGMENTS.with_borrow_mut(|kept| {
+        kept.push(segments);
+        u32::try_from(kept.len() - 1).expect("fewer segments")
+    })
+}
 
 /** A chance as a share (of SHARE). */
 fn share(chance: f64) -> u32 {
@@ -270,6 +285,7 @@ impl Node {
  * span shorter than that may have none: `Column` (column.rs) makes spans
  * that keep one.
  */
+#[derive(Clone)]
 pub struct Span {
     pub from: i64,
     pub to: i64,

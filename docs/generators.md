@@ -183,18 +183,38 @@ a world with a ground says so in its fields and anchors.
 At level k the sites are those of the lattice scaled by 2^k,
 which is part of the lattice:
 site (x, y, z) of the level is at 2^k · (x, y, z).
-What has to stay the same across levels is what a camera sees:
-how many rays get how far, and what they stop on.
+A site is its voxel, its cell, seen as a whole:
+along each of the lattice's 12 directions
+it looks as what is in the cell looks along it,
+how much of the rays it stops, what that shows and what it glows
+(`checks::cells` holds each level to that, against the level two finer).
+Not where in the cell that lies:
+a ray through several cells meets each as if the others were not there.
+What a level shows unlike a finer one is then of three kinds.
 
-- **Shapes** are drawn by how many of their sizes are under the sites' spacing s.
-  None: the sites inside, each kept with the chance one of the s sites
-  of level 0 it stands for along a ray is kept, 1 − (1 − fill)^s.
-  One, a sheet such as a wall: grown to one site thick and kept opaque,
-  since a ray crossing it crosses it once; it looks up to half a site thicker.
-  A box's or an ellipsoid's stops only 2t/3s of the rays along it,
-  those entering by the four faces parallel to it (a site's `views`).
-  Two or three, a rod or a speck: the sites near it, kept with a chance
-  that stops as many rays as it does on average over directions
+- **Inherent** to that rule, so kept:
+  rays along a surface cross many cells it is part of, each stopping some,
+  so they see it higher, and walls from above wider;
+  a sheet a site thick, part of two sites, lets a little through (a tenth, at worst);
+  a ray along none of the directions reads the nearest (fcc's `facing`);
+  and a site is read by 9 lines along each axis (below), so its look is in steps of 1/9.
+- **Bugs**: a site not looking as its cell does, which `checks::cells` sees: fixed.
+- **Patches**: a rule making a site look other than its cell does,
+  to hide something inherent (sheets grown to a site, a slab kept whole): not made.
+
+What is drawn, kind by kind:
+
+- **Shapes**: each site its voxel reaches into is read by lines through the voxel
+  (`lines` in `grid.rs`): along each of its six axes, 9 half the spacing s apart,
+  at an offset along no plane of the lattice.
+  Each line holds where on it the shape lies (`Rays`),
+  and along each direction a site shows the share of its axis's lines that meet something,
+  each the colour of what it meets first.
+  A shape not opaque stops each line by its length in it,
+  with the chance one of the s sites of level 0 a site stands for along a ray is kept,
+  1 − (1 − fill)^s.
+  One smaller than the lines are apart every way is seen as a whole:
+  the share of its nearest site's rays its mean shadow is
   (Cauchy: a convex body's mean shadow is a quarter of its area).
   Chances are compared with a hash of the position in lattice units,
   so a site kept at one level stays kept where coarser levels give it as high a chance.
@@ -281,7 +301,11 @@ how many rays get how far, and what they stop on.
   at least what the crown of the tree whose room it is in would
   (one crown, as they keep to their rooms: "Rooms").
 - **Fields** are evaluated once per site or line of sites,
-  by position alone.
+  by position alone;
+  one given at each site, where it gives other than at a neighbour,
+  along each of the site's lines too, read half the spacing apart,
+  nearest a whole unit, halves to even,
+  each value holding the parts of the lines it is given at, as a shape's do.
   `Column` keeps their layers at every level ("Spans that stay");
   a field that leaves detail out by level
   (the railway's rails, the ponds' reeds, the city's roads)
@@ -312,20 +336,10 @@ how many rays get how far, and what they stop on.
   Plans and points read the ground where asked, the same at every level.
   Things read plans where they ask,
   so a thing at a dithered edge may stand a site off what the fields show.
-- **Faces.** Boxes and spans keep the sites in [min, max) along each axis.
-  On a plane of a level's sites (y = 0 is one at every level)
-  half the lines across a face have a site on it,
-  all kept at a bottom face and dropped at a top one,
-  so a ground and the houses on it would sink half a site, and more each level.
-  A site on a face counts as above it with the chance ½ + 1/(2s)
-  by a hash of its position and the axis (`Tie`):
-  always at level 0, about half the time far away,
-  so on average a face is where level 0 has it.
-  Boxes and spans meeting on a face share its sites;
-  a box one site thick keeps its bottom face whole, as at level 0,
-  as halves of two faces would let rays through.
-  Faces off those planes still round to the sites, up to half a site either way:
-  even over many heights, not for one flat thing.
+- **Faces.** Boxes and solid spans hold [min, max) along each axis, at every level, level 0 too:
+  the parts of their sites' lines within, so a ground's top is where its span ends,
+  and a box standing on it meets it there.
+  What else comes into a site a face crosses fills what of its lines is left, or paints over it.
 
 Build solids as one shape, not stacks of slices:
 a stack of discs a unit thick, each grown to a site, draws its outline, not its shape.
@@ -514,7 +528,7 @@ each level's cells look, along each of the lattice's 12 directions,
 as what is in them does the level two finer (`checks::cells`; "Levels").
 Not what a ray through many cells sees:
 that differs by what is inherent to seeing each cell as a whole.
-A cell is one site, its look coarse,
+A cell's look is in steps of one of its lines,
 so it is checked on average:
 each stratum's cells, near a surface, a sample, over its regions at every seed,
 as far apart as `TOLERANCE` (0.045) in how much they stop,

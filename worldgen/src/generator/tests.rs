@@ -136,7 +136,7 @@ fn a_tube_is_within_half_a_site_of_its_curve() {
     };
     let b = shape.bounds;
     for s in [1, 2, 4, 8, 16] {
-        let inside = shape.inside(0, s);
+        let inside = shape.inside(s * ONE, 0);
         // A hundredth of a unit for rounding.
         let slack = s as f64 / 2.0 + 0.01;
         for x in b.min[0].div_euclid(s)..=b.max[0].div_euclid(s) {
@@ -156,7 +156,7 @@ fn a_tube_is_within_half_a_site_of_its_curve() {
 fn a_gable_narrows_to_its_ridge() {
     // 8 wide across x, 4 high: at height h, the sites within 4 · (1 − h / 4) of x = 4.
     let shape = gable([0.0; 3], [8.0, 4.0, 6.0], 2, 1, SOLID, Op::Fill);
-    let inside = shape.inside(0, 1);
+    let inside = shape.inside(ONE, 0);
     let holds = |x: i64, y: i64| inside.holds([x, y, 2].map(|v| v * ONE));
     assert!(holds(0, 0) && holds(7, 0) && holds(4, 3) && holds(3, 2) && holds(6, 1));
     assert!(!holds(1, 3) && !holds(8, 0) && !holds(4, 4) && !holds(7, 2));
@@ -202,7 +202,7 @@ fn checking_finds_what_a_broken_promise_skips() {
     let b = Box3 { min: [0, 45, 0], max: [32, 55, 4] };
     assert!(generate(&spiked, &b, 2).pieces.alpha.iter().all(|&a| a == 0), "skipped");
     let (_, broken) = checking_skipped(|| generate(&spiked, &b, 2));
-    assert!(broken.len() == 1 && broken[0].starts_with("ground draws where it says it may not: at site [3, 49, 0]"), "{broken:?}");
+    assert!(broken.len() == 1 && broken[0].starts_with("ground draws where it says it may not: at site [2, 48, 0]"), "{broken:?}");
 }
 
 /** Ground `height(x)` high, said to rise at most `slope` a column: a surface about it, stone under it. */
@@ -301,7 +301,7 @@ fn a_field_at_each_site_is_drawn_only_where_it_says_and_held_to_it() {
 #[test]
 fn a_tile_holds_its_ground_by_its_surface_not_its_volume() {
     // Ground rising g sites a column: a column of bricks holds its surface and the ring of whole bricks under it,
-    // some 2 + 4g, whatever the tile's size; the rock under them, some g·t/16 more, is held once, a brick.
+    // some 2 + 5g, whatever the tile's size; the rock under them, some g·t/16 more, is held once, a brick.
     for g in [0, 1, 2, 4] {
         let height: fn(i64) -> i64 = match g {
             0 => |_| 0,
@@ -315,7 +315,7 @@ fn a_tile_holds_its_ground_by_its_surface_not_its_volume() {
             let sites = (BRICK * BRICK * BRICK / 2) as usize;
             let column = |grid: VoxelGrid| (grid.shown.len() / sites - 1) as f64 / (t * t / BRICK / BRICK) as f64;
             let held = column(generate_shown(&world, &b, 0));
-            assert!(held <= 2.0 + 4.5 * g as f64, "rising {g} a column, a tile {t} sites a side holds {held} bricks a column");
+            assert!(held <= 2.0 + 5.0 * g as f64, "rising {g} a column, a tile {t} sites a side holds {held} bricks a column");
         }
     }
 }
@@ -370,8 +370,9 @@ fn refuses_a_thing_anchored_off_the_ground_it_stands_on() {
 }
 
 #[test]
-fn faces_on_a_plane_of_sites_stay_where_level_0_has_them() {
-    // Ground up to y = 0 and boxes from y = 0 up, on a plane of sites at every level, each drawn alone.
+fn faces_on_a_plane_of_sites_stay_where_they_are() {
+    // Ground up to y = 0 and a block from y = 0 up, on a plane of sites at every level: a site the plane crosses holds
+    // each where it lies in it, at level 0 too.
     let ground = Layer::Field(Field {
         name: "ground",
         order: 0.0,
@@ -388,40 +389,51 @@ fn faces_on_a_plane_of_sites_stay_where_level_0_has_them() {
             reach: [0; 3],
             size: ANY_SIZE,
             anchor: Anchors::Cells(Box::new(|cell| (cell.centre == [0; 3]).then_some([0.0; 3]))),
-            make: Box::new(move |_, _| Some(Node::of(vec![cuboid([-8192.0, 0.0, -8192.0], [8192.0, top, 8192.0], 0, SOLID, Op::Fill)]))),
+            make: Box::new(move |_, _| Some(Node::of(vec![cuboid([-8192.0, 0.0, -8192.0], [8192.0, top, 8192.0], 1, SOLID, Op::Fill)]))),
             far: None,
             stands: None,
         })
     };
-    let kinds = vec![KindDef { name: "stone", kind_type: 1, colors: &["#808080"], walk_through: false, glows: false, medium: false }];
-    let alone = |layer: Layer| Generator { kinds: kinds.clone(), seed: 1, layers: vec![layer] };
-    let (ground, solid) = (alone(ground), alone(block(4096.0)));
+    let kinds = vec![
+        KindDef { name: "stone", kind_type: 1, colors: &["#ff0000"], walk_through: false, glows: false, medium: false },
+        KindDef { name: "block", kind_type: 1, colors: &["#0000ff"], walk_through: false, glows: false, medium: false },
+    ];
+    let with = |layers: Vec<Layer>| Generator { kinds: kinds.clone(), seed: 1, layers };
+    // Rays through points of the plane from `y` along a few directions (`way` 1 up, −1 down): what each stops, and shows.
+    let rays = |grid: &VoxelGrid, y: f64, way: f64| -> Vec<(f64, [f64; 3])> {
+        let ds =
+            [[0.0, 1.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, -1.0], [0.3, 1.0, 0.2]].map(|d| crate::picture::normalize(d.map(|v| v * way)));
+        let points = (4..28).step_by(3).flat_map(|x| (4..28).step_by(3).map(move |z| [x as f64 + 0.3, y, z as f64 + 0.6]));
+        let seen = points.flat_map(|p| ds.map(|d| crate::picture::composited(grid, p, d, 10.0, 1.0)));
+        seen.map(|seen| seen.iter().fold((0.0, [0.0; 3]), |(s, c), (_, a)| (s + a.stopped, std::array::from_fn(|i| c[i] + a.shown[i]))))
+            .collect()
+    };
+    let both = with(vec![ground, block(4096.0)]);
     for level in 0..6 {
         let s = 1i64 << level;
-        let b = Box3 { min: [0, -32 / s - 2, 0], max: [128, 32 / s + 2, 128] };
-        let (below, above) = (generate(&ground, &b, level), generate(&solid, &b, level));
-        let (mut tops, mut lines) = (0, 0);
-        for x in 0..128 {
-            for z in 0..128 {
-                let sites = (b.min[1]..b.max[1]).filter(|y| (x + y + z) & 1 == 0);
-                let (mut top, mut bottom) = (i64::MIN, i64::MAX);
-                for y in sites {
-                    let (g, h) = (below.get(x, y, z) != 0, above.get(x, y, z) != 0);
-                    assert!(g != h, "level {level}: ({x}, {y}, {z}) is in {} of the two", g as u8 + h as u8);
-                    if g { top = top.max(y) } else { bottom = bottom.min(y) }
-                }
-                assert_eq!(top + 2, bottom, "level {level}: the line at ({x}, {z}) is split once");
-                // A site's voxel reaches a site's spacing along the line.
-                tops += (top + 1) * s;
-                lines += 1;
+        let b = Box3 { min: [0, -32 / s - 2, 0], max: [32, 32 / s + 2, 32] };
+        let grid = generate(&both, &b, level);
+        // Together they fill every site, through every face; from the side, ground up to 0.
+        let mut red = 0.0;
+        for (x, y, z) in (0..32).flat_map(|x| (b.min[1]..b.max[1]).flat_map(move |y| (0..32).map(move |z| (x, y, z)))) {
+            for (k, face) in VOXEL_FACES.iter().enumerate().filter(|_| (x + y + z) & 1 == 0) {
+                let ([(alpha, [r, ..]), _], _) = grid.light(x, y, z, k);
+                assert_eq!(alpha, ALPHA, "level {level}: ({x}, {y}, {z}) along face {k} lets rays through");
+                red += if face[1] == 0 { r as f64 / COLOUR_ONE as f64 / 4.0 } else { 0.0 };
             }
         }
-        // Level 0's ground is half a unit low; a site on the plane counts as in it with chance ½ − 1/(2s), so
-        // the mean is within a few s / √lines of that, not (s − 1) / 2 lower.
-        let mean = tops as f64 / lines as f64;
-        assert!((mean + 0.5).abs() <= s as f64 / 16.0, "level {level}: the ground's top is at {mean} on average");
-        // A slab one site thick keeps the whole plane: half of it and half the next would let rays through.
-        let slab = generate(&alone(block(s as f64)), &b, level);
-        assert!((0..128).all(|x| (0..128).all(|z| (x + z) & 1 != 0 || slab.get(x, 0, z) != 0)), "level {level}: the slab has holes");
+        let top = red / (32.0 * 32.0) * 2.0 * s as f64 + (b.min[1] as f64 - 0.5) * s as f64;
+        assert!(top.abs() <= s as f64 / 16.0, "level {level}: the ground's top is at {top} on average");
+        // Rays from above see the block only, from below the ground only.
+        assert!(rays(&grid, 3.5, -1.0).iter().all(|(_, [ground, ..])| *ground < 1e-3), "level {level}: the ground shows from above");
+        assert!(rays(&grid, -3.5, 1.0).iter().all(|(_, [.., block])| *block < 1e-3), "level {level}: the block shows from below");
+        // A slab a site thick, parts of two sites, lets a little through, as each site is seen as a whole (its parts in
+        // each don't line up); one two sites thick, none.
+        for thick in [s, 2 * s] {
+            let slab = generate(&with(vec![block(thick as f64)]), &b, level);
+            let least = rays(&slab, 2.5, -1.0).iter().map(|(stopped, _)| *stopped).fold(1.0, f64::min);
+            let bound = if thick == s { 0.9 } else { 0.999 };
+            assert!(least > bound, "level {level}: a slab {thick} thick lets {} of a ray through", 1.0 - least);
+        }
     }
 }

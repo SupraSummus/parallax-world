@@ -25,55 +25,6 @@ fn sites_between(min: At, max: At) -> Box3 {
     Box3 { min: min.map(|v| -((-v) >> 16)), max: max.map(|v| (v >> 16) + 1) }
 }
 
-/**
- * Which side of a face a site on it counts as on. A box or span keeps the
- * sites whose centres are in [from, to); on a plane of a level's sites
- * (y = 0 at every level), half its lines of sites have one on each face,
- * kept at the bottom, dropped at the top, so it sinks half a site, more
- * the coarser the level. Level 0's sink, half a unit, is the reference:
- * a site on a face counts as above it, along `axis`, with the chance
- * ½ + 1/(2s), sites s apart: always at level 0, nearly half the time far
- * away, so a face is where level 0 has it on average (docs/generators.md,
- * "Levels"). By a hash of the position and axis alone, so boxes and
- * spans meeting on a face share its sites, and a site above at one level
- * is above at the finer ones.
- */
-#[derive(Clone, Copy)]
-pub(super) struct Tie {
-    s: i64,
-    /** Above when the hash is under this, of 2^32. */
-    under: u64,
-}
-
-impl Tie {
-    pub(super) fn new(s: i64) -> Tie {
-        Tie { s, under: (1 << 31) + (1 << 31) / s as u64 }
-    }
-
-    /**
-     * Whether coordinate `axis` of site `p` is in [lo, hi), all in units
-     * `one` to a lattice unit. A box one site thick keeps its bottom face's
-     * sites, as at level 0: each line across it has a site on one face
-     * only, and halves of both would let rays through.
-     */
-    pub(super) fn within(&self, axis: usize, p: [i64; 3], lo: i64, hi: i64, one: i64) -> bool {
-        let v = p[axis];
-        if lo < v && v < hi {
-            return true;
-        }
-        if v != lo && v != hi {
-            return false;
-        }
-        if hi - lo <= self.s * one {
-            return v == lo;
-        }
-        let [x, y, z] = p.map(|c| c.div_euclid(one));
-        ((hash(TIE_SEEDS[axis], x, y, z) as u64) < self.under) == (v == lo)
-    }
-}
-
-const TIE_SEEDS: [u64; 3] = [0x7a1e_0001, 0x7a1e_0002, 0x7a1e_0003];
-
 fn dot(a: At, b: At) -> i64 {
     (0..3).map(|i| a[i] * b[i]).sum()
 }
@@ -360,7 +311,7 @@ impl Piece {
     }
 }
 
-/** A shape's test for one `min`, with what does not depend on the point worked out. */
+/** A shape's test, with what does not depend on the point worked out. */
 pub(super) enum Inside<'a> {
     Nothing,
     Ellipsoid {
@@ -377,20 +328,24 @@ pub(super) enum Inside<'a> {
         pieces: &'a [Piece],
         thick: Thick<'a>,
     },
+    /** [lo, hi) along each axis at least `min` long, else within min / 2 of its middle. */
     Cuboid {
         lo: At,
         hi: At,
         min: Fixed,
-        tie: Tie,
     },
-    /** Under the slopes: |2u − lo − hi| · height ≤ width · (top − y), with 8 bits after the point. */
+    /** In its box, under the slopes: |2u − lo − hi| · height ≤ width · (top − y), with 8 bits after the point. */
     Gable {
         lo: At,
         hi: At,
         min: Fixed,
         across: usize,
-        tie: Tie,
     },
+}
+
+/** Whether `x` is in [lo, hi) if that is at least `min` long, else within min / 2 of its middle. */
+fn within(x: Fixed, lo: Fixed, hi: Fixed, min: Fixed) -> bool {
+    if hi - lo >= min { lo <= x && x < hi } else { (2 * x - lo - hi).abs() <= min }
 }
 
 impl Inside<'_> {
@@ -403,16 +358,10 @@ impl Inside<'_> {
             }
             Inside::Piece { piece, thick } => piece.holds(x, thick),
             Inside::Tube { pieces, thick } => pieces.iter().any(|piece| piece.holds(x, thick)),
-            Inside::Cuboid { lo, hi, min, tie } => (0..3).all(|i| {
-                if hi[i] - lo[i] >= *min { tie.within(i, x, lo[i], hi[i], ONE) } else { (2 * x[i] - lo[i] - hi[i]).abs() <= *min }
-            }),
-            Inside::Gable { lo, hi, min, across, tie } => {
+            Inside::Cuboid { lo, hi, min } => (0..3).all(|i| within(x[i], lo[i], hi[i], *min)),
+            Inside::Gable { lo, hi, min, across } => {
                 let a = *across;
-                let ridge = 2 - a;
-                let side = |i: usize| {
-                    if hi[i] - lo[i] >= *min { tie.within(i, x, lo[i], hi[i], ONE) } else { (2 * x[i] - lo[i] - hi[i]).abs() <= *min }
-                };
-                if !side(ridge) || !side(1) || !side(a) {
+                if !(0..3).all(|i| within(x[i], lo[i], hi[i], *min)) {
                     return false;
                 }
                 // Too low or narrow for its slopes to show: its box.
@@ -427,15 +376,19 @@ impl Inside<'_> {
 }
 
 impl Shape {
-    /** Whether point `p` (lattice units) is inside it, as level 0 draws it. */
+    /** Whether point `p` (lattice units) is inside it, as tested at points a quarter of a unit apart (level 0's fine sites). */
     pub fn holds(&self, p: Point) -> bool {
         // Its bounds hold its sites: a point between them, a unit past.
         let near = self.bounds.widen(1);
-        (0..3).all(|i| near.min[i] as f64 <= p[i] && p[i] < near.max[i] as f64) && self.inside(0, 1).holds(at(p))
+        (0..3).all(|i| near.min[i] as f64 <= p[i] && p[i] < near.max[i] as f64) && self.inside(ONE / 4, 0).holds(at(p))
     }
 
-    /** Whether a point is inside the shape with each of its sizes made at least `min`, at sites `s` apart. */
-    pub(super) fn inside(&self, min: Fixed, s: i64) -> Inside<'_> {
+    /**
+     * Whether a point is inside the shape with each of its sizes made at
+     * least `min`, tested at points `apart` (fixed point): a tube follows
+     * its curve to within half that.
+     */
+    pub(super) fn inside(&self, apart: Fixed, min: Fixed) -> Inside<'_> {
         let half = min / 2;
         let q8 = |v: Fixed| v >> 8;
         match &self.solid {
@@ -448,8 +401,8 @@ impl Shape {
                 Inside::Ellipsoid { centre: *centre, inverse: a.map(|a| (1 << 32) / a) }
             }
             Solid::Tube { pieces, radius, widest, length } => {
-                // The coarsest level within half a site of the curve; level l is pieces 2^l − 1 to 2^(l+1) − 2.
-                let level = (0..).find(|&l| pieces[(1 << l) - 1].stray <= s * ONE / 2).expect("the finest strays nowhere");
+                // The coarsest level within half the points' spacing of the curve; level l is pieces 2^l − 1 to 2^(l+1) − 2.
+                let level = (0..).find(|&l| pieces[(1 << l) - 1].stray <= apart / 2).expect("the finest strays nowhere");
                 let radius = match radius {
                     Radius::Const(_) => None,
                     Radius::Along(radius) => Some(radius.as_ref()),
@@ -460,108 +413,347 @@ impl Shape {
                     pieces => Inside::Tube { pieces, thick },
                 }
             }
-            Solid::Cuboid { min: lo, max: hi } => Inside::Cuboid { lo: *lo, hi: *hi, min, tie: Tie::new(s) },
-            Solid::Gable { min: lo, max: hi, ridge } => Inside::Gable { lo: *lo, hi: *hi, min, across: 2 - ridge, tie: Tie::new(s) },
+            Solid::Cuboid { min: lo, max: hi } => Inside::Cuboid { lo: *lo, hi: *hi, min },
+            Solid::Gable { min: lo, max: hi, ridge } => Inside::Gable { lo: *lo, hi: *hi, min, across: 2 - ridge },
         }
     }
 }
 
-/** Puts a site: its share, its share of each face's rays where they differ, its pick, and where it is. */
-type PutSite<'a> = dyn FnMut(u32, Option<[u32; FACE_KINDS]>, u32, i64, i64, i64) + 'a;
+/** Puts a site: its share, its share of each face's rays where they differ, where on its lines it lies (`Look::rays`), its pick, and where it is. */
+type PutSite<'a> = dyn FnMut(u32, Option<[u32; FACE_KINDS]>, Option<u32>, u32, i64, i64, i64) + 'a;
 
-/**
- * Of the rays through a voxel s across along a face's direction parallel
- * to a sheet t thick, across it near the voxel's centre: the share
- * within the sheet, 2t / 3s (the voxel's section across the face, its
- * width at the sheet over its area).
- */
-const ALONG: f64 = 2.0 / 3.0;
+type V3 = [f64; 3];
 
-/**
- * Draws a shape at sites `s` apart, by how many of its sizes are under s;
- * returns how many sites it tested. A sheet across an axis (a box's or an
- * ellipsoid's least size under s) stops the rays crossing it as its
- * thickness does, those along it as few as are within it.
- */
-pub(super) fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &mut PutSite) -> u64 {
-    let s = si as f64;
-    let spacing = si * ONE;
-    let small = shape.extents.iter().filter(|e| e.to_bits() < spacing).count();
-    let picked = |x: i64, y: i64, z: i64| to_pick(hash(seed, x * si, y * si, z * si));
-    if small == 3 {
-        let [x, y, z] = nearest_site(shape.centre, si);
-        let chance = shape.area / (VOXEL_AREA * s * s);
-        if clip.holds([x, y, z]) {
-            put(share(chance), None, picked(x, y, z), x, y, z);
-        }
-        return 1;
+fn v_dot(a: V3, b: V3) -> f64 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+fn v_sub(a: V3, b: V3) -> V3 {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+/** Where along the line o + t·u (u unit) `a`·t + `b` ≤ 0, within [t0, t1]. */
+fn half(a: f64, b: f64, [t0, t1]: [f64; 2]) -> [f64; 2] {
+    if a.abs() < 1e-12 {
+        return if b <= 0.0 { [t0, t1] } else { [1.0, 0.0] };
     }
-    // A sheet a site thick holds a plane of sites: shapes' sheets lie across an axis, where planes of sites are a site
-    // apart (across (1, 1, 1), 2/√3).
-    let min = [0, spacing, spacing * 8 / 5][small];
-    let b = &shape.bounds;
-    // A box's sites on its top faces may count as under them (Tie), past its bounds but at level 0.
-    let past = if matches!(shape.solid, Solid::Cuboid { .. } | Solid::Gable { .. }) { 0 } else { ONE };
-    let [x0, y0, z0] = b.min.map(|v| -(-(v * ONE - min / 2)).div_euclid(spacing));
-    let [x1, y1, z1] = b.max.map(|v| (v * ONE - past + min / 2).div_euclid(spacing));
-    let inside = shape.inside(min, si);
-    // Visits the sites within that are inside; returns about how many it tested (half of each row's points).
-    let sites = |within: &Box3, visit: &mut dyn FnMut(i64, i64, i64)| {
-        let (z_from, z_to) = (z0.max(within.min[2]), z1.min(within.max[2] - 1));
-        let (y_from, y_to) = (y0.max(within.min[1]), y1.min(within.max[1] - 1));
-        let (from, x_to) = (x0.max(within.min[0]), x1.min(within.max[0] - 1));
-        for z in z_from..=z_to {
-            for y in y_from..=y_to {
-                let mut x = from + ((from + y + z) & 1);
-                while x <= x_to {
-                    if inside.holds([x, y, z].map(|v| v * spacing)) {
-                        visit(x, y, z);
-                    }
-                    x += 2;
+    let t = -b / a;
+    if a > 0.0 { [t0, t1.min(t)] } else { [t0.max(t), t1] }
+}
+
+/** Where `a`·t² + `b`·t + `c` ≤ 0 (a ≥ 0), as an interval; empty if from > to. */
+fn within_quadratic(a: f64, b: f64, c: f64) -> [f64; 2] {
+    if a < 1e-12 {
+        return half(b, c, [f64::NEG_INFINITY, f64::INFINITY]);
+    }
+    let disc = b * b - 4.0 * a * c;
+    if disc < 0.0 {
+        return [1.0, 0.0];
+    }
+    let root = disc.sqrt();
+    [(-b - root) / (2.0 * a), (-b + root) / (2.0 * a)]
+}
+
+/**
+ * A tube's piece as lines meet it: the points within r of the segment
+ * from p, `length` along `axis` (unit), its ends round, or `flat` (cut
+ * across it); made once for the lines of a site.
+ */
+#[derive(Clone, Copy)]
+struct Capsule {
+    p: V3,
+    axis: V3,
+    length: f64,
+    r: f64,
+    flat: [bool; 2],
+}
+
+impl Capsule {
+    fn new(p: V3, d: V3, r: f64, flat: [bool; 2]) -> Capsule {
+        let length = v_dot(d, d).sqrt();
+        let axis = if length > 0.0 { d.map(|v| v / length) } else { [0.0; 3] };
+        Capsule { p, axis, length, r, flat }
+    }
+
+    /** Where the line o + t·u (u unit) is in it; empty if from > to. */
+    fn along(&self, o: V3, u: V3) -> [f64; 2] {
+        let (w, rr) = (v_sub(o, self.p), self.r * self.r);
+        let (wu, ww) = (v_dot(w, u), v_dot(w, w));
+        let ball = |wu: f64, ww: f64| within_quadratic(1.0, 2.0 * wu, ww - rr);
+        if self.length == 0.0 {
+            return ball(wu, ww);
+        }
+        // Across its axis: within r of the line it is on, which holds its ends' balls too.
+        let (ua, wa) = (v_dot(u, self.axis), v_dot(w, self.axis));
+        let [c0, c1] = within_quadratic(1.0 - ua * ua, 2.0 * (wu - ua * wa), ww - wa * wa - rr);
+        if c0 >= c1 {
+            return [1.0, 0.0];
+        }
+        // Along it: 0 ≤ wa + t·ua ≤ length.
+        let [s0, s1] = half(-ua, -wa, half(ua, wa - self.length, [f64::NEG_INFINITY, f64::INFINITY]));
+        let (mut from, mut to) = if c0.max(s0) < c1.min(s1) { (c0.max(s0), c1.min(s1)) } else { (f64::INFINITY, f64::NEG_INFINITY) };
+        // Its ends' balls, where the line runs past an end.
+        if c0 < s0 || c1 > s1 {
+            let l = self.length;
+            for (flat, wu, ww) in [(self.flat[0], wu, ww), (self.flat[1], wu - ua * l, ww - 2.0 * wa * l + l * l)] {
+                let [a, b] = ball(wu, ww);
+                if !flat && a < b {
+                    (from, to) = (from.min(a), to.max(b));
                 }
             }
         }
-        [z_to - z_from, y_to - y_from, (x_to - from).div_euclid(2)].iter().map(|n| (n + 1).max(0) as u64).product::<u64>()
-    };
-    // A site's share: its fill over `chords` of the level-0 voxel's chord, once a shape if its fill is constant.
-    let filled = |chords: f64| {
-        let of = move |fill: f64| share(1.0 - js::pow(1.0 - fill, chords));
-        let constant = match shape.fill {
-            Fill::Const(fill) => Some(of(fill)),
-            Fill::At(_) => None,
+        [from, to]
+    }
+}
+
+/** How far point `c` is from the segment from p to p + d, and where along d its nearest point is (0 to 1). */
+fn from_segment(c: V3, p: V3, d: V3) -> (f64, f64) {
+    let (w, dd) = (v_sub(c, p), v_dot(d, d));
+    let t = if dd > 0.0 { (v_dot(w, d) / dd).clamp(0.0, 1.0) } else { 0.0 };
+    let off: V3 = std::array::from_fn(|i| w[i] - t * d[i]);
+    (v_dot(off, off).sqrt(), t)
+}
+
+impl Shape {
+    /**
+     * Whether the ball of radius r about c is all inside the shape, drawn
+     * at points `apart` (fixed point), or all outside: Some(true) or
+     * Some(false); None if neither or not known, and then, of a tube, its
+     * pieces that reach into it (all its lines need look at, `Lined::along`), into `near`.
+     */
+    fn about(&self, c: V3, r: f64, apart: Fixed, near: &mut Vec<Capsule>) -> Option<bool> {
+        let in_box = |lo: &At, hi: &At| {
+            let (lo, hi) = (lo.map(float), hi.map(float));
+            if (0..3).any(|i| c[i] + r < lo[i] || c[i] - r >= hi[i]) {
+                Some(false)
+            } else {
+                (0..3).all(|i| c[i] - r >= lo[i] && c[i] + r < hi[i]).then_some(true)
+            }
         };
-        move |x: i64, y: i64, z: i64| constant.unwrap_or_else(|| of(shape.fill.at((x * si) as f64, (y * si) as f64, (z * si) as f64)))
-    };
-    match small {
-        0 => {
-            let share = filled(s);
-            sites(clip, &mut |x, y, z| put(share(x, y, z), None, picked(x, y, z), x, y, z))
-        }
-        1 => {
-            let thick = shape.extents.into_iter().min().expect("three").to_f64();
-            let axis = match shape.solid {
-                Solid::Ellipsoid { .. } | Solid::Cuboid { .. } => shape.extents.iter().position(|e| e.to_f64() == thick),
-                Solid::Tube { .. } | Solid::Gable { .. } => None,
-            };
-            let Some(axis) = axis else {
-                let share = filled(thick / CHORD);
-                return sites(clip, &mut |x, y, z| put(share(x, y, z), None, picked(x, y, z), x, y, z));
-            };
-            // Across it at 45° (every face's direction crossing it), as thick as √2 t; along it, a cell's chord through it.
-            let (across, along) = (filled(thick * std::f64::consts::SQRT_2 / CHORD), filled(s * std::f64::consts::SQRT_2 / CHORD));
-            let within = (ALONG * thick / s).min(1.0);
-            sites(clip, &mut |x, y, z| {
-                let (across, along) = (across(x, y, z), (along(x, y, z) as f64 * within) as u32);
-                let cover = std::array::from_fn(|k| if VOXEL_FACES[k][axis] == 0 { along } else { across });
-                put(across, Some(cover), picked(x, y, z), x, y, z)
-            })
-        }
-        _ => {
-            // Counted whole, so every box gets the same chance.
-            let mut count = 0;
-            let tested = sites(&EVERYWHERE, &mut |_, _, _| count += 1);
-            let chance = shape.area / (count as f64 * VOXEL_AREA * s * s);
-            tested + sites(clip, &mut |x, y, z| put(share(chance), None, picked(x, y, z), x, y, z))
+        match &self.solid {
+            Solid::Cuboid { min, max } => in_box(min, max),
+            Solid::Ellipsoid { centre, radii } => {
+                // Scaled by its radii, |c| ≤ ρ: the ellipsoid holds ρ's ellipsoid grown by (1 − ρ) of itself, a ball of
+                // (1 − ρ) of its least radius; grown by a ball of r, it is within (1 + r / least) of itself.
+                let (centre, radii) = (centre.map(float), radii.map(float));
+                let least = radii[0].min(radii[1]).min(radii[2]);
+                if least <= 0.0 {
+                    return Some(false);
+                }
+                let rho = (0..3).map(|i| ((c[i] - centre[i]) / radii[i]).powi(2)).sum::<f64>().sqrt();
+                if rho >= 1.0 + r / least { Some(false) } else { (rho <= 1.0 - r / least).then_some(true) }
+            }
+            Solid::Gable { min, max, ridge } => {
+                let a = 2 - ridge;
+                let (lo, hi) = (min.map(float), max.map(float));
+                let (height, width) = (hi[1] - lo[1], hi[a] - lo[a]);
+                // Under each slope: side·2·height·x + width·y + … ≤ 0, its normal's length `n`.
+                let n = (4.0 * height * height + width * width).sqrt();
+                let over = [1.0, -1.0].map(|side| side * (2.0 * c[a] - lo[a] - hi[a]) * height - width * (hi[1] - c[1]));
+                if over.iter().any(|f| *f > r * n) {
+                    return Some(false);
+                }
+                match in_box(min, max) {
+                    Some(true) => over.iter().all(|f| *f <= -r * n).then_some(true),
+                    other => other,
+                }
+            }
+            Solid::Tube { pieces, radius, widest, .. } => {
+                let level = (0..).find(|&l| pieces[(1 << l) - 1].stray <= apart / 2).expect("the finest strays nowhere");
+                let (mut pending, mut met) = (vec![(0usize, 0usize)], false);
+                while let Some((h, l)) = pending.pop() {
+                    let piece = &pieces[h];
+                    let (p, d) = (piece.p.map(float), piece.segment.d.map(|v| v as f64 / 256.0));
+                    let (far, t) = from_segment(c, p, d);
+                    if l < level {
+                        if far <= float(*widest + piece.stray) + 1e-3 + r {
+                            pending.extend([(2 * h + 1, l + 1), (2 * h + 2, l + 1)]);
+                        }
+                        continue;
+                    }
+                    let radius = (radius.at(float(piece.t[0])) + radius.at(float(piece.t[1]))) / 2.0;
+                    if far > radius + r {
+                        continue;
+                    }
+                    met = true;
+                    near.push(Capsule::new(p, d, radius, piece.flat));
+                    // All in its capsule: within its radius, and short of a flat end.
+                    let length = v_dot(d, d).sqrt();
+                    let ends = [piece.flat[0] && t * length < r, piece.flat[1] && (1.0 - t) * length < r];
+                    if far + r <= radius && !ends.contains(&true) {
+                        return Some(true);
+                    }
+                }
+                if met { None } else { Some(false) }
+            }
         }
     }
+}
+
+/** A shape's solid in floats, as lines meet it: made once for the lines of all its sites. */
+enum Lined {
+    Cuboid {
+        lo: V3,
+        hi: V3,
+    },
+    Ellipsoid {
+        centre: V3,
+        inverse: V3,
+    },
+    Gable {
+        lo: V3,
+        hi: V3,
+        across: usize,
+    },
+    /** By the pieces near each site (`Shape::about`). */
+    Tube,
+    Nothing,
+}
+
+impl Lined {
+    fn of(solid: &Solid) -> Lined {
+        match solid {
+            Solid::Cuboid { min, max } => Lined::Cuboid { lo: min.map(float), hi: max.map(float) },
+            Solid::Ellipsoid { centre, radii } if !radii.contains(&0) => {
+                Lined::Ellipsoid { centre: centre.map(float), inverse: radii.map(|r| 1.0 / float(r)) }
+            }
+            Solid::Ellipsoid { .. } => Lined::Nothing,
+            Solid::Gable { min, max, ridge } => Lined::Gable { lo: min.map(float), hi: max.map(float), across: 2 - ridge },
+            Solid::Tube { .. } => Lined::Tube,
+        }
+    }
+
+    /**
+     * Where the line o + t·u (u unit, lattice units) is inside the solid,
+     * in order, apart, into `out`; a tube by its pieces `near`.
+     */
+    fn along(&self, o: V3, u: V3, near: &[Capsule], out: &mut Vec<[f64; 2]>) {
+        out.clear();
+        let box_of = |lo: &V3, hi: &V3| {
+            (0..3).fold([f64::NEG_INFINITY, f64::INFINITY], |range, i| {
+                // lo ≤ o + t·u < hi along axis i.
+                half(-u[i], lo[i] - o[i], half(u[i], o[i] - hi[i], range))
+            })
+        };
+        let range = match self {
+            Lined::Cuboid { lo, hi } => box_of(lo, hi),
+            Lined::Ellipsoid { centre, inverse } => {
+                let (w, v): (V3, V3) =
+                    (std::array::from_fn(|i| (o[i] - centre[i]) * inverse[i]), std::array::from_fn(|i| u[i] * inverse[i]));
+                within_quadratic(v_dot(v, v), 2.0 * v_dot(w, v), v_dot(w, w) - 1.0)
+            }
+            Lined::Gable { lo, hi, across: a } => {
+                // In its box, under both slopes: ±(2x − lo − hi)·height ≤ width·(top − y) across it.
+                let a = *a;
+                let (height, width) = (hi[1] - lo[1], hi[a] - lo[a]);
+                [1.0, -1.0].into_iter().fold(box_of(lo, hi), |range, side| {
+                    half(
+                        side * 2.0 * u[a] * height + width * u[1],
+                        side * (2.0 * o[a] - lo[a] - hi[a]) * height - width * (hi[1] - o[1]),
+                        range,
+                    )
+                })
+            }
+            Lined::Tube => {
+                out.extend(near.iter().map(|capsule| capsule.along(o, u)).filter(|[a, b]| a < b));
+                out.sort_by(|a, b| a[0].total_cmp(&b[0]));
+                out.dedup_by(|next, kept| {
+                    let touch = next[0] <= kept[1];
+                    if touch {
+                        kept[1] = kept[1].max(next[1]);
+                    }
+                    touch
+                });
+                return;
+            }
+            Lined::Nothing => return,
+        };
+        if range[0] < range[1] {
+            out.push(range);
+        }
+    }
+}
+
+/**
+ * Draws a shape at sites `s` apart: each site its voxel reaches into, as
+ * what its lines (grid's `lines`) find of the shape, so the site looks as
+ * what of the shape is in it does to rays through it (docs/generators.md,
+ * "Levels"). Opaque, where on them it lies (`Look::rays`); not opaque, its
+ * chance per level-0 voxel's chord stopping each line by its length in
+ * the shape. A shape smaller than the lines are apart every way is seen
+ * as a whole: the share of its nearest site's rays its mean shadow is.
+ * Returns how many lines it tested.
+ */
+pub(super) fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &mut PutSite) -> u64 {
+    let s = si as f64;
+    let apart = si * ONE / grid::ACROSS;
+    let picked = |x: i64, y: i64, z: i64| to_pick(hash(seed, x * si, y * si, z * si));
+    if shape.extents.iter().all(|e| e.to_bits() < apart) {
+        let [x, y, z] = nearest_site(shape.centre, si);
+        let chance = shape.area / (VOXEL_AREA * s * s);
+        if clip.holds([x, y, z]) {
+            put(share(chance), None, None, picked(x, y, z), x, y, z);
+        }
+        return 1;
+    }
+    let lines = grid::lines();
+    // What it stops per lattice unit of a ray's path, if not opaque: its fill a chance per level-0 voxel's chord.
+    let extinction = |x: i64, y: i64, z: i64| match shape.fill {
+        Fill::Const(1.0) => None,
+        Fill::Const(fill) => Some(-js::log(1.0 - fill) / CHORD),
+        Fill::At(_) => Some(-js::log(1.0 - shape.fill.at((x * si) as f64, (y * si) as f64, (z * si) as f64)) / CHORD),
+    };
+    // The sites whose voxels reach into its bounds: a voxel reaches a spacing from its site along each axis.
+    let b = &shape.bounds;
+    let [x0, y0, z0] = [0, 1, 2].map(|i| (b.min[i].div_euclid(si) - 1).max(clip.min[i]));
+    let [x1, y1, z1] = [0, 1, 2].map(|i| (b.max[i].div_euclid(si) + 1).min(clip.max[i] - 1));
+    let (mut tested, mut near, mut along, lined) = (0, Vec::new(), Vec::new(), Lined::of(&shape.solid));
+    for z in z0..=z1 {
+        for y in y0..=y1 {
+            let mut x = x0 + ((x0 + y + z) & 1);
+            while x <= x1 {
+                // A voxel is within a spacing of its site: a ball all in or all out of the shape needs no lines.
+                let centre = [x, y, z].map(|v| (v * si) as f64);
+                near.clear();
+                let ball = shape.about(centre, s * (1.0 + 1e-9), apart, &mut near);
+                if ball == Some(false) || (ball == Some(true) && extinction(x, y, z).is_none()) {
+                    if ball == Some(true) {
+                        put(SHARE, None, None, picked(x, y, z), x, y, z);
+                    }
+                    x += 2;
+                    continue;
+                }
+                tested += lines.lines.len() as u64;
+                let mut full = true;
+                let mut segments: grid::Segments = Vec::new();
+                for (l, &(a, q, [t0, t1])) in lines.lines.iter().enumerate() {
+                    let o: V3 = std::array::from_fn(|i| centre[i] + s * q[i]);
+                    lined.along(o, lines.dirs[a], &near, &mut along);
+                    let held = segments.len();
+                    for &[a, b] in along.iter() {
+                        let (a, b) = ((a / s).max(t0), (b / s).min(t1));
+                        if a < b {
+                            segments.push((l as u16, a as f32, b as f32));
+                        }
+                    }
+                    full &=
+                        segments.len() == held + 1 && f64::from(segments[held].1) <= t0 + 1e-6 && f64::from(segments[held].2) >= t1 - 1e-6;
+                }
+                if !segments.is_empty() {
+                    let pick = picked(x, y, z);
+                    match extinction(x, y, z) {
+                        None if full => put(SHARE, None, None, pick, x, y, z),
+                        None => put(share(grid::filled(&segments)), None, Some(keep(segments)), pick, x, y, z),
+                        Some(e) => {
+                            let stops = grid::medium_stops_along(e, s, &segments).map(share);
+                            let cover = stops.iter().any(|c| *c != stops[0]).then_some(stops);
+                            put(stops.iter().sum::<u32>() / FACE_KINDS as u32, cover, None, pick, x, y, z);
+                        }
+                    }
+                }
+                x += 2;
+            }
+        }
+    }
+    tested
 }

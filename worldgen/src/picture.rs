@@ -528,7 +528,7 @@ fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 
-fn normalize(v: [f64; 3]) -> [f64; 3] {
+pub(crate) fn normalize(v: [f64; 3]) -> [f64; 3] {
     let length = dot(v, v).sqrt();
     if length > 0.0 { v.map(|c| c / length) } else { v }
 }

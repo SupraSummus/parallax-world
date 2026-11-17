@@ -170,6 +170,7 @@ mod tests {
     use super::*;
     use crate::generator::{Field, Generator, Layer, Op, generate};
     use crate::grid::Box3;
+    use crate::picture::composited;
     use crate::plan::footprint;
 
     #[test]
@@ -202,28 +203,40 @@ mod tests {
         // A field of columns draws them.
         let world = ground(Op::Fill, |_, _| Column::new(0).surface(0, 1));
         let grid = generate(&world, &Box3 { min: [0, -4, 0], max: [4, 4, 4] }, 0);
-        assert!((0..4).all(|x| (0..4).all(|z| (-1..=0).any(|y| grid.get(x, y, z) != 0))), "the turf is on every column");
+        assert!((0..4).all(|x| (0..4).all(|z| (-1..=0).any(|y| grid.alpha(x, y, z) != 0))), "the turf is on every column");
     }
 
     #[test]
     fn sides_close_any_heightfield() {
-        // Ground as rough as any: each column's top at random, steps, corners and pits of every height. From the air
-        // above, along the lattice's 12 neighbours (a voxel's faces), nothing under any column's top is reached.
+        // Ground as rough as any: each column's top at random, steps, corners and pits of every height. Light from the
+        // sky, along the lattice's directions up (a voxel's faces), reaches nothing two sites under the lowest top of
+        // the columns a site's voxel reaches into: not the hollow under the ground, past a cliff's corners or through a
+        // steep face. Nearer a cliff's face, the sky shows, as it would.
         let top = |x: i64, z: i64| i64::from(crate::noise::hash(7, x, 0, z) % 40);
         let world = ground(Op::Fill, move |x, z| Column::new(top(x, z)).surface(0, 1).sides(0, lowest_around(top, x, z), 3));
         for level in 0..4 {
             let s = 1 << level;
             let b = Box3 { min: [0, -48 / s, 0], max: [24, 48 / s, 24] };
             let grid = generate(&world, &b, level);
-            let mut air: Vec<[i64; 3]> =
-                (0..24 * 24).map(|i| [i % 24, b.max[1] - 1, i / 24]).filter(|&[x, y, z]| crate::grid::is_site(x, y, z)).collect();
-            let mut seen: std::collections::HashSet<[i64; 3]> = air.iter().copied().collect();
-            while let Some([x, y, z]) = air.pop() {
-                assert!(y * s > top(x * s, z * s), "level {level}: ({x}, {y}, {z}) under the ground, reached from the air");
-                for [dx, dy, dz] in crate::picture::FACES {
-                    let p = [x + dx, y + dy, z + dz];
-                    if b.holds(p) && grid.get(p[0], p[1], p[2]) == 0 && seen.insert(p) {
-                        air.push(p);
+            for (x, z) in (2..22).flat_map(|x| (2..22).map(move |z| (x, z))) {
+                let lowest = (-1..=1).flat_map(|i| (-1..=1).map(move |j| top((x + i) * s, (z + j) * s))).min().expect("nine");
+                for y in (b.min[1]..(lowest - 2 * s).div_euclid(s)).filter(|&y| crate::grid::is_site(x, y, z)) {
+                    for n in crate::picture::FACES.iter().filter(|n| n[1] > 0) {
+                        let (p, d) = ([x, y, z].map(|v| v as f64), n.map(|v| v as f64 / std::f64::consts::SQRT_2));
+                        let exits = |i: usize| match d[i] {
+                            v if v > 0.0 => (b.max[i] as f64 - p[i]) / v,
+                            v if v < 0.0 => (b.min[i] as f64 - p[i]) / v,
+                            _ => f64::INFINITY,
+                        };
+                        // Only rays out by the box's top: past its sides, what is there is not known.
+                        if exits(1) > exits(0).min(exits(2)) {
+                            continue;
+                        }
+                        let through = 1.0 - composited(&grid, p, d, exits(1), 1.0).iter().map(|(_, seen)| seen.stopped).sum::<f64>();
+                        assert!(
+                            through < 0.01,
+                            "level {level}: {through} of the sky reaches ({x}, {y}, {z}), under the ground, along {n:?}"
+                        );
                     }
                 }
             }
