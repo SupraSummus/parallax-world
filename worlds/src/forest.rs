@@ -22,7 +22,7 @@ use worldgen::plan::{self, Holding, Plan, Sloped};
 use worldgen::points::{Blur, MARKS, Points, Room, Rooms};
 use worldgen::units::{UNIT_SIZE, Units, m};
 
-use crate::path::Path;
+use crate::path::{self, Path};
 
 /** Metres in units, rounded. */
 fn vox(metres: f64) -> f64 {
@@ -179,7 +179,11 @@ fn weight(height: f64) -> i64 {
     (MOST as f64 * ((height - vox(12.0)) / vox(12.0)).clamp(0.0, 1.0)) as i64
 }
 
-/** The valley's relief: hills kilometres wide, and a winding path along z that the ground dips along. */
+/**
+ * The relief: hills kilometres wide, and a winding path along z that the
+ * ground dips along: the forest's; the valley finds its own on the floor
+ * (course.rs).
+ */
 pub struct Relief {
     phase: f64,
     hills: Fbm<360, 4>,
@@ -205,13 +209,17 @@ impl Relief {
 
     /** Ground height at (x, z), `from_path` from the path's centre line; with its fraction. */
     pub fn ground(&self, x: i64, z: i64, from_path: Fx) -> Fx {
+        let valley = smoothstep(Fx::m(8.0), Fx::m(42.0), from_path) * Units::m(18.0);
+        let path_dip = (Fx::ONE - smoothstep(Fx::m(1.0), Fx::m(2.2), from_path)) * Fx::m(0.3);
+        self.floor(x, z) + valley - path_dip
+    }
+
+    /** The ground at (x, z) without the dip along the path: its hills, near and far; with its fraction. */
+    pub fn floor(&self, x: i64, z: i64) -> Fx {
         // The bumps' product truncated towards zero, not floored, as it always was.
         let bumps = self.bumps.at(x, z) - Fx::HALF;
         let hills = (self.hills.at(x, z) - Fx::HALF) * Units::m(10.0) + bumps.abs() * Fx::m(0.8) * bumps.signum();
-        let valley = smoothstep(Fx::m(8.0), Fx::m(42.0), from_path) * Units::m(18.0);
-        let far = (self.far.at(x, z) - Fx::HALF) * Units::m(50.0);
-        let path_dip = (Fx::ONE - smoothstep(Fx::m(1.0), Fx::m(2.2), from_path)) * Fx::m(0.3);
-        hills + valley + far - path_dip
+        hills + (self.far.at(x, z) - Fx::HALF) * Units::m(50.0)
     }
 }
 
@@ -480,7 +488,7 @@ pub fn forest(seed: u64) -> World {
     let relief = Rc::new(Relief::new(&world.of("relief")));
     let path = {
         let relief = relief.clone();
-        Rc::new(Path::new(move |z| relief.path_x(z)))
+        Rc::new(Path::new(move |z| relief.path_x(z), path::SLOPE))
     };
     let ground = Lie::new(move |x, z| relief.ground(x, z, (Units(x).to_fx() - relief.path_x(z)).abs())).ground(GROUND_SCALE, SLOPE);
     // Start on the path at the near end, at about the height of a tall shrub.

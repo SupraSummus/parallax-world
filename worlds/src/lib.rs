@@ -5,6 +5,7 @@
 //! web/src/lib/worldgen.ts).
 
 pub mod city;
+pub mod course;
 pub mod fields;
 pub mod forest;
 pub mod landmarks;

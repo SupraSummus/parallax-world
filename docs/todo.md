@@ -609,10 +609,12 @@ Numbers are for the forest at 1280×800, as measured when written.
   The valley's landmarks: 118 at eight seeds (not 686 as one per region),
   under ENOUGH a seed, so no seed is tested alone;
   its towns 57, its haystacks 2.
-- **The valley is still laid out along x, across the path's centre line.**
+- **The valley is still laid out along x, across lines by z.**
   The path is a curve (`worlds/src/path.rs`),
-  but the ground's walls and dip, the ranges, the fields' plots
-  and the landmarks measure across its centre line.
+  but the ground's walls and dip, the fields' plots
+  and the landmarks measure across its centre line,
+  and the ranges across the valley's course (`worlds/src/course.rs`),
+  so the valley winds, but never turns back on itself.
   A curve's distance folds past a bend's radius
   (16 m at the tightest, where the path bends onto a street),
   which would crease the walls and the ranges,
@@ -730,15 +732,27 @@ Numbers are for the forest at 1280×800, as measured when written.
   `llvm::sys::getHostCPUName` made to return `znver4` by `LD_PRELOAD`,
   and `MESA_SHADER_CACHE_DISABLE=true`,
   else lavapipe reuses what it compiled for another CPU.
+- **README's valley shots predate the winding valley** (`docs/shots/`).
+  The view down it and the ranges were taken at fixed cameras
+  where the valley ran along x = 0; retake them (`pnpm shot`).
+- **A station stands along the axes, its track may not.**
+  Where the valley bends at a town,
+  the track runs up to 30° off z past a building along it
+  (`Station::frame` in `worlds/src/railway.rs`).
 
 ## Ideas
+
+- The forest's and the learned town's paths are still sines about x = 0
+  (`Relief::path_x` in `worlds/src/forest.rs`);
+  a route along their floor (`worlds/src/course.rs`) would serve them too.
 
 - The valley's geography from water, not along one line:
   rivers that drain the ranges to the sea, lakes in basins,
   and the valley one of them;
   then paths as curves between towns (`curve.rs`), not `path_x(z)`,
   which towns, the railway, landmarks and the moor all read.
-  Now the ranges, the sea and the upland run along z for ever.
+  Now the ranges, the sea and the upland wind with the valley's course,
+  along z for ever.
 - More scenes (`worlds/src/scene.rs`): Bistro, San Miguel.
   Not tried in them: walking, on walls a site thick.
   Lit (`--light 1,1,0`), Sponza's atrium is all but black; not looked into.

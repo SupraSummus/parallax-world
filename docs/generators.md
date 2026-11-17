@@ -152,9 +152,14 @@ It looks only into segments whose corridor reaches that near,
 so it costs little but close to the curve.
 One rule serves every piece of a curve too long to make whole,
 between ends the world finds near a point.
-The forest's path (`worlds/src/path.rs`) is one, in pieces 8 m long:
-what is on it or keeps off it measures from the curve;
-the valley is laid out across its centre line, along x.
+A path (`worlds/src/path.rs`) is one, in pieces 8 m long:
+what is on it or keeps off it measures from the curve,
+what is laid out beside it across its centre line, along x.
+The valley's path follows a route along its floor (`worlds/src/course.rs`),
+a curve in pieces 1 km long on the valley's course at their ends,
+each point the lowest of the floor within its level's wander,
+so it keeps to hollows and winds round rises,
+then smoothed (a B-spline through its points).
 The railway's line is another, its points chosen by cost ("Railway").
 
 A **tube** is the points within a radius of a curve: a branch, a root.
@@ -620,7 +625,7 @@ against how much they vary from stretch to stretch
 (Hotelling's T², its chance over all the tests under 10⁻³).
 Stretches, not things, are the samples:
 things that come in clusters, or bunch where a world has a feature
-(towns along a path at x = 0 at every seed),
+(towns along the valley's course),
 are a bias in one stretch, a place;
 the same bias in every stretch is a period.
 All seeds' things are tested together,
@@ -758,7 +763,8 @@ one at a place depends on a neighbourhood no wider than the bands it reads,
 and a coarse decision never wobbles with a fine one.
 The rule shapes designs.
 A town can't sit on the path's bends, which are finer than a town:
-it sits on the path's mean, and the path, a finer band, bends to its main street.
+it sits on the valley's course, the path's mean,
+and the path, a finer band, bends to its main street.
 Its height is the mean of the valley floor under it, not one sample of its bumps.
 Sampling is the exception (`Plan::sampled`):
 it is the filter that makes a coarse band of fine ones,
@@ -788,6 +794,8 @@ adding the fields changed neither the forest nor the towns.
 its share and whether it owns a column, never an index into the land.
 Relief holds no land (`holds_land`):
 the valley's mountains (`mountains.rs`) raise the ground all of them stand on,
+either side of its course (`course.rs`), the line it winds along,
+kilometres either way, smooth noise along z,
 massifs and passes along it, crests, spurs and side valleys across,
 and end the forest at a treeline (`Forest::thinned`),
 where a field paints meadows, scree, rock and snow by height, slope and hollows.
@@ -926,8 +934,10 @@ The first is a chapel beside the path, in the camera's view at spawn.
 
 The railway (`worlds/src/railway.rs`) is a domain built on curves.
 Its main line runs along one side of the valley,
-in pieces 4 km long whose ends stand off the middle by noise.
-Each piece is a curve in x, y and z, made top-down:
+in pieces 4 km long whose ends stand off the valley's course by noise.
+Each piece is a curve in x, y and z, x across from the course,
+turned to the world's when made, so it winds with the valley,
+made top-down:
 at each level a point between two neighbours,
 its x the one of a few within the level's wander
 whose track leaves the ground least,
@@ -939,7 +949,8 @@ The turns are then smoothed away:
 the line's x is the mean over 12 points either side,
 across the pieces' ends too
 (a piece reads its neighbours' unsmoothed points, a plan of their own),
-so seen from above it bends by a fifth of a degree per point at most.
+so seen from above it bends from the course by a fifth of a degree per point at most,
+and the course bends less.
 The line reads the ground as the towns level it (`valley::Terrain`),
 not as it cuts and fills it;
 it stands far enough across the valley

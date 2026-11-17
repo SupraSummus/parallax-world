@@ -17,6 +17,7 @@ use worldgen::plan::Plan;
 use worldgen::units::{Units, m};
 use worldgen::world::{Find, World};
 
+use crate::course::{Course, ROUTE_SLOPE, Route};
 use crate::fields::{self, Fields};
 use crate::forest::{self, Forest, GROUND_SCALE, Relief};
 use crate::landmarks::{self, Landmark, Landmarks};
@@ -34,6 +35,14 @@ use crate::town::{self, Towns};
 const SLOPE: i64 = 8;
 
 /**
+ * The most the path runs across z: its route's, bent onto a town's main
+ * street (town::Towns::street_x) from as far as the route strays. Worked
+ * out for a route under 0.84 (1.74 at most), and swept by the test below.
+ */
+const PATH_SLOPE: f64 = 1.8;
+const _: () = assert!(ROUTE_SLOPE < 0.84);
+
+/**
  * The valley's lie of the land before what is built on it shapes it: its
  * first two bands, the relief and the ranges along the path, then
  * levelled under the towns. A function of position, read by the plans of
@@ -41,7 +50,8 @@ const SLOPE: i64 = 8;
  */
 pub struct Terrain {
     lie: Lie,
-    relief: Rc<Relief>,
+    course: Rc<Course>,
+    route: Rc<Route>,
     pub ranges: Rc<Ranges>,
     pub towns: Rc<Towns>,
 }
@@ -49,22 +59,33 @@ pub struct Terrain {
 impl Terrain {
     /** The terrain of the valley `world`. */
     pub fn new(world: &Scope) -> Terrain {
+        let course = Rc::new(Course::new(&world.of("course")));
         let relief = Rc::new(Relief::new(&world.of("relief")));
         let ranges = Rc::new(Ranges::new(&world.of("mountains")));
-        let towns = Rc::new(Towns::new(&world.of("towns"), relief.clone()));
+        let route = {
+            let (course, relief, ranges) = (course.clone(), relief.clone(), ranges.clone());
+            Rc::new(Route::new(course.clone(), move |x, z| relief.floor(x, z) + ranges.height(x, z, Units(x).to_fx() - course.x(z))))
+        };
+        let towns = Rc::new(Towns::new(&world.of("towns"), relief.clone(), course.clone()));
         let lie = {
-            let (relief, ranges, towns) = (relief.clone(), ranges.clone(), towns.clone());
+            let (course, route, relief, ranges, towns) = (course.clone(), route.clone(), relief.clone(), ranges.clone(), towns.clone());
             Lie::new(move |x, z| {
-                let from_path = (Units(x).to_fx() - towns.street_x(z, relief.path_x(z))).abs();
-                relief.ground(x, z, from_path) + ranges.height(x, z, from_path)
+                let x_fx = Units(x).to_fx();
+                let from_path = (x_fx - towns.street_x(z, route.x(z))).abs();
+                relief.ground(x, z, from_path) + ranges.height(x, z, x_fx - course.x(z))
             })
         };
-        Terrain { lie: lie.shaped(vec![towns.clone()]), relief, ranges, towns }
+        Terrain { lie: lie.shaped(vec![towns.clone()]), course, route, ranges, towns }
     }
 
-    /** The path's centre line at z, with its fraction, bent onto each town's main street. */
+    /** The valley's course at z, with its fraction. */
+    pub fn course_x(&self, z: i64) -> Fx {
+        self.course.x(z)
+    }
+
+    /** The path's centre line at z, with its fraction: the route along the valley's floor, bent onto each town's main street. */
     pub fn path_x(&self, z: i64) -> Fx {
-        self.towns.street_x(z, self.relief.path_x(z))
+        self.towns.street_x(z, self.route.x(z))
     }
 
     /** The ground at (x, z), with its fraction. */
@@ -92,7 +113,7 @@ pub fn valley(seed: u64) -> World {
     let points = points(&terrain, &landmarks, &moorland, &railway);
     let path = {
         let terrain = terrain.clone();
-        Rc::new(Path::new(move |z| terrain.path_x(z)))
+        Rc::new(Path::new(move |z| terrain.path_x(z), PATH_SLOPE))
     };
     let moor = Rc::new(Moor::on(uplands, moorland, path.clone()));
     let ground = terrain.lie.shaped(vec![railway.clone(), landmarks.clone(), moor.clone()]).ground(GROUND_SCALE, SLOPE);
@@ -199,11 +220,12 @@ fn mountainside(terrain: &Terrain) -> [i64; 3] {
         .expect("a mountainside within 25 km along the valley")
 }
 
-/** The coast west of the start: the last dry ground going west along z = 0, every 8 m. */
+/** The coast west of the start: the last dry ground going west from the path along z = 0, every 8 m. */
 fn coast(terrain: &Terrain) -> [i64; 3] {
     let ground = |x: i64| terrain.ground(x, 0).round_units().0;
+    let path = terrain.path_x(0).round_units().0;
     (0..m(40_000.0) / m(8.0))
-        .map(|k| -k * m(8.0))
+        .map(|k| path - k * m(8.0))
         .find(|&x| ground(x - m(8.0)) <= mountains::SEA.0)
         .map(|x| [x, ground(x), 0])
         .expect("a coast within 40 km west of the start")
@@ -225,4 +247,22 @@ fn steading(terrain: &Terrain, moorland: &Moorland) -> [i64; 3] {
             near.filter(|(d, _)| *d < m(400.0)).min().map(|(_, p)| p)
         })
         .expect("a steading by the path within 160 km along the valley")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /** Along the first 100 km at each seed, through about fifty towns, the path runs no steeper than PATH_SLOPE. */
+    #[test]
+    fn the_path_keeps_to_its_slope() {
+        for seed in [42, 1, 2, 3] {
+            let terrain = Terrain::new(&Scope::new(seed));
+            let step = m(1.0);
+            for z in (0..m(100_000.0)).step_by(step as usize) {
+                let run = (terrain.path_x(z + step) - terrain.path_x(z)).abs() / Units(step);
+                assert!(run <= fx(PATH_SLOPE), "seed {seed}: the path runs {run:?} across at z = {z}");
+            }
+        }
+    }
 }

@@ -99,6 +99,7 @@ A spinner shows while a world generates.
   and steadings of a drystone hut and a ring of standing stones.
   Landmarks standing alone: a ruined keep on a hilltop, a watchtower,
   wayside chapels, ponds, farmsteads and windmills.
+  The valley winds, its path along the lowest of its floor.
   Mountain ranges along both sides: crests, peaks and passes,
   side valleys, arêtes and cirques behind the crests,
   meadows and scree above the treeline, snow in high hollows.
