@@ -79,7 +79,7 @@ fn keeps_the_contract(entry: &Entry) {
         (checked, panicked)
     });
     // What panicked has no baseline: it always breaks.
-    let mut breaks = breaks(&checked);
+    let mut breaks = breaks(&checked, entry.accuracy);
     breaks.extend(panicked.into_iter().map(|message| Break { of: None, message }));
     hold_to_baseline(&breaks, &format!("{}/data/contract/{}.txt", env!("CARGO_MANIFEST_DIR"), entry.name), only.is_empty());
 }

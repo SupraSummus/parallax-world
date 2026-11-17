@@ -5,8 +5,8 @@ use std::rc::Rc;
 
 use worldgen::World;
 use worldgen::checks::contract::{
-    REGION, Report, SHOWN, STOPPED, TOLERANCE, breaks, check, heights_hold, hold_to_baseline, margins, parts_equal_whole, regions,
-    things_hold, whole_equals_parts,
+    Accuracy, REGION, Report, SHOWN, STOPPED, TOLERANCE, breaks, check, heights_hold, hold_to_baseline, margins, parts_equal_whole,
+    regions, things_hold, whole_equals_parts,
 };
 use worldgen::checks::survey::survey;
 use worldgen::generator::{
@@ -192,7 +192,23 @@ fn keeps_the_contract(name: &str, world: &World, levels: u32) {
     let mut found = Vec::new();
     let checked = check(name, world, levels, &[], |boxes| found = boxes.to_vec());
     parts_equal_whole(name, world, &found, levels);
-    hold_to_baseline(&breaks(&[checked]), &format!("{}/data/contract/{name}.txt", env!("CARGO_MANIFEST_DIR")), true);
+    hold_to_baseline(&breaks(&[checked], &[]), &format!("{}/data/contract/{name}.txt", env!("CARGO_MANIFEST_DIR")), true);
+}
+
+#[test]
+fn a_declared_accuracy_covers_its_parts() {
+    let (loose, looser) = (Accuracy { apart: 0.1, spread: 0.2 }, Accuracy { apart: 0.2, spread: 0.3 });
+    let declared = [("towns", loose), ("towns › block › house", looser)];
+    assert_eq!(Accuracy::of(&declared, "towns › block › house wall"), looser);
+    assert_eq!(Accuracy::of(&declared, "towns › church stone"), loose);
+    assert_eq!(Accuracy::of(&declared, "townsfolk grass"), Accuracy::DEFAULT);
+}
+
+#[test]
+fn an_accuracy_declared_for_nothing_breaks() {
+    let checked = check("fog", &world_of(fog(), (0, 128)), 1, &[], |_| ());
+    let breaks = breaks(&[checked], &[("fgo", Accuracy::DEFAULT)]);
+    assert!(breaks.iter().any(|b| b.of.is_none() && b.message.contains("fgo")), "a declaration for no stratum passed");
 }
 
 #[test]
@@ -313,7 +329,7 @@ fn fog_layer(from: i64, to: i64, kind: fn(i64) -> u8, extinction: fn(i64) -> f64
 
 /** The broken margins of fog of `kind` and `extinction` (as `fog_layer`) at levels 1 and 2. */
 fn fog_breaks(kind: fn(i64) -> u8, extinction: fn(i64) -> f64) -> Report {
-    margins("fog", &world_of(fog_layer(-64, 64, kind, extinction), (-256, 256)), &[b(0, -32, 0, 128, 32, 128)], 2).broken()
+    margins("fog", &world_of(fog_layer(-64, 64, kind, extinction), (-256, 256)), &[b(0, -32, 0, 128, 32, 128)], 2).broken(Accuracy::DEFAULT)
 }
 
 #[test]

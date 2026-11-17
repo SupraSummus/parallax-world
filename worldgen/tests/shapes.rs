@@ -6,7 +6,7 @@
 //! sRGB, so a world's palette can only hide what breaks here.
 
 use worldgen::World;
-use worldgen::checks::contract::{Break, Margin, Report, hold_to_baseline, margins, whole_equals_parts};
+use worldgen::checks::contract::{Accuracy, Break, Margin, Report, hold_to_baseline, margins, whole_equals_parts};
 use worldgen::curve::Curve;
 use worldgen::generator::{
     ANY_SIZE, Field, Generator, KindDef, Layer, Node, Op, Point, Population, SOLID, Shape, Span, ball, capsule, cuboid, ellipsoid, gable,
@@ -113,7 +113,7 @@ fn each_solid_keeps_to_its_baseline() {
                         whole_equals_parts(&world.generator, &region, level);
                     }
                     let report = margins(name, &world, &[region], LEVELS);
-                    let broken = report.broken();
+                    let broken = report.broken(Accuracy::DEFAULT);
                     let message = |m: &Margin| format!("{name}: {}", Report { margins: vec![m.clone()], ..broken.clone() });
                     let of = |m: &Margin| Some((name.to_string(), m.level, m.difference(), m.spread));
                     broken.margins.iter().map(|m| Break { of: of(m), message: message(m) }).collect::<Vec<_>>()

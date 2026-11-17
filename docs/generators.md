@@ -520,6 +520,12 @@ each stratum's cells, near a surface, a sample, over its regions at every seed,
 as far apart as `TOLERANCE` (0.045) in how much they stop,
 or in the colour of what they stop (so a thin medium's colour counts as a solid's),
 and each cell as far from what is in it as `SPREAD` (0.1), on average.
+Those are the defaults (`Accuracy::DEFAULT`).
+A world's entry in `WORLDS` may declare others by stratum (`accuracy`),
+as it declares to which level it keeps it (`levels`):
+one for a thing or a layer covers its parts, unless a part has its own
+(`Accuracy::of`), and each is checked as closely as declared;
+a name that covers no stratum breaks it, so a misspelt one is not lost.
 A mean settles as seeds are added; the largest of many only grows.
 A region holding several strata counts for each.
 Where a world, a test world or a solid breaks it,

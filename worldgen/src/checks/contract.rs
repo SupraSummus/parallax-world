@@ -43,18 +43,46 @@ pub(crate) fn sites(b: &Box3) -> impl Iterator<Item = (i64, i64, i64)> + '_ {
 
 /**
  * How far a level's cells may look from what is in them, the level
- * FINER_BY finer (checks::cells), in any channel: what they add or lose
- * on average over a stratum's regions (`breaks`), or a solid's alone,
- * in a region of many (worldgen/tests/shapes.rs).
+ * FINER_BY finer (checks::cells), in any channel, unless a world says
+ * otherwise: what they add or lose on average over a stratum's regions
+ * (`breaks`), or a solid's alone, in a region of many
+ * (worldgen/tests/shapes.rs).
  */
 pub const TOLERANCE: f64 = 0.045;
 
 /**
  * How far a level's cells may be from what is in them, each in its
- * channel furthest, on average: a site seen as a whole looks as its cell
- * does to within the steps of what it holds (docs/generators.md, "Levels").
+ * channel furthest, on average, unless a world says otherwise: a site
+ * seen as a whole looks as its cell does to within the steps of what it
+ * holds (docs/generators.md, "Levels").
  */
 pub const SPREAD: f64 = 0.1;
+
+/** How closely a level's cells look as what is in them, on average: how far apart, and how spread. */
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Accuracy {
+    pub apart: f64,
+    pub spread: f64,
+}
+
+impl Accuracy {
+    pub const DEFAULT: Accuracy = Accuracy { apart: TOLERANCE, spread: SPREAD };
+
+    /**
+     * How closely `stratum` is to keep the contract, of those `declared`
+     * by name: the stratum named, or the nearest part of a thing or layer
+     * it is in ("towns" for "towns › block › house wall"); DEFAULT for one
+     * in none.
+     */
+    pub fn of(declared: &[(&str, Accuracy)], stratum: &str) -> Accuracy {
+        declared.iter().filter(|(name, _)| covers(name, stratum)).max_by_key(|(name, _)| name.len()).map_or(Accuracy::DEFAULT, |(_, a)| *a)
+    }
+}
+
+/** Whether `stratum` is the one named `name`, or a part or a kind of it. */
+fn covers(name: &str, stratum: &str) -> bool {
+    stratum == name || stratum.strip_prefix(name).is_some_and(|rest| rest.starts_with(' '))
+}
 
 /** `region` grown to at least 16 sites of `level` across around its centre, along x and z. */
 pub(crate) fn around(region: &Box3, level: u32) -> Box3 {
@@ -64,7 +92,7 @@ pub(crate) fn around(region: &Box3, level: u32) -> Box3 {
 
 /**
  * Levels from FAR_FROM see the fields of far regions from above (sites
- * 2 m apart and more), against level 0, within FAR_TOLERANCE.
+ * 2 m apart and more), against level 0, within FAR.
  */
 const FAR_FROM: u32 = 4;
 
@@ -75,7 +103,7 @@ const FAR_FROM: u32 = 4;
  * plan finer than the sites read where each line is aliases ("Plans" in
  * "Levels" in docs/generators.md).
  */
-const FAR_TOLERANCE: f64 = 0.0125;
+const FAR: Accuracy = Accuracy { apart: 0.0125, spread: f64::INFINITY };
 
 /** A box of `region` at `level` generated in eight parts, alone and in any order, equals it generated whole. */
 pub fn whole_equals_parts(generator: &Generator, region: &Box3, level: u32) {
@@ -156,16 +184,6 @@ pub enum Measure {
     FieldsFromAbove,
 }
 
-impl Measure {
-    /** How far a level may stray by it on average. */
-    pub fn tolerance(self) -> f64 {
-        match self {
-            Measure::Cells => TOLERANCE,
-            Measure::FieldsFromAbove => FAR_TOLERANCE,
-        }
-    }
-}
-
 /** How far a level of a world strays from another in a region, by one measure. */
 #[derive(Clone, Debug)]
 pub struct Margin {
@@ -191,9 +209,9 @@ impl Margin {
         self.apart(0..4)
     }
 
-    /** Whether this region alone is as far apart, or as spread, as a stratum may be on average, or more. */
-    pub fn broken(&self) -> bool {
-        self.difference() >= self.measure.tolerance() || self.spread >= SPREAD
+    /** Whether this region alone is as far apart, or as spread, as a stratum may be on average `within`, or more. */
+    pub fn broken(&self, within: Accuracy) -> bool {
+        self.difference() >= within.apart || self.spread >= within.spread
     }
 }
 
@@ -211,9 +229,9 @@ impl Report {
         Report { name: name.to_string(), margins: Vec::new(), held: Vec::new() }
     }
 
-    /** Only the broken margins. */
-    pub fn broken(&self) -> Report {
-        Report { margins: self.margins.iter().filter(|m| m.broken()).cloned().collect(), ..self.clone() }
+    /** Only the margins broken `within` (`Margin::broken`). */
+    pub fn broken(&self, within: Accuracy) -> Report {
+        Report { margins: self.margins.iter().filter(|m| m.broken(within)).cloned().collect(), ..self.clone() }
     }
 }
 
@@ -241,8 +259,7 @@ impl std::fmt::Display for Report {
                 Measure::FieldsFromAbove => "fields from above".to_string(),
             };
             let [a, c] = m.looks.map(|v| look(&v));
-            let broken = if m.broken() { format!(", over {} or {SPREAD}", m.measure.tolerance()) } else { String::new() };
-            writeln!(f, "  level {} against {}, {what}: {a} -> {c}: {:.3} apart{broken}", m.level, m.against, m.difference())?;
+            writeln!(f, "  level {} against {}, {what}: {a} -> {c}: {:.3} apart", m.level, m.against, m.difference())?;
         }
         Ok(())
     }
@@ -323,13 +340,13 @@ pub fn far_margins(name: &str, world: World, regions: &[Box3], levels: u32) -> R
     report
 }
 
-/** `far_margins`, printed; panics where one breaks FAR_TOLERANCE. */
+/** `far_margins`, printed; panics where one breaks FAR. */
 pub fn check_far(name: &str, world: World, regions: &[Box3], levels: u32) {
     let start = Instant::now();
     let report = far_margins(name, world, regions, levels);
     println!("{report}{name}: far {:.1} s", start.elapsed().as_secs_f64());
-    let broken = report.broken();
-    assert!(broken.margins.is_empty(), "{name} breaks the contract far away:\n{broken}");
+    let broken = report.broken(FAR);
+    assert!(broken.margins.is_empty(), "{name} breaks the contract far away, over {}:\n{broken}", FAR.apart);
 }
 
 /** Sites of each level above a world's heights that `heights_hold` generates. */
@@ -583,12 +600,13 @@ pub fn hold_to_baseline(breaks: &[Break], path: &str, all: bool) {
  * Where worlds checked (at several seeds, say) break the contract: the
  * rules that hold exactly, layers that draw nothing, and each stratum's
  * margins (by measure and level) averaged over the regions holding it
- * at every seed, if they are as far apart as the measure allows
- * (`Measure::tolerance`) or more in any channel, or as spread as SPREAD.
+ * at every seed, if they are as far apart or as spread as it is to keep
+ * it (as `declared` by name, `Accuracy::of`), or more; and, if every
+ * stratum was checked, a name declared that covers none.
  * Each broken mean names the regions it was averaged over, and the
  * worst of them broken down by kind. Each with what it is of.
  */
-pub fn breaks(checked: &[Checked]) -> Vec<Break> {
+pub fn breaks(checked: &[Checked], declared: &[(&str, Accuracy)]) -> Vec<Break> {
     let mut broken = Vec::new();
     let mut push = |of: Option<(String, u32, f64, f64)>, message: String| broken.push(Break { of, message });
     for c in checked {
@@ -612,6 +630,11 @@ pub fn breaks(checked: &[Checked]) -> Vec<Break> {
             strata.iter().for_each(|s| means.entry((s, m.measure, m.level)).or_default().push((c, m)));
         }
     }
+    if checked.iter().all(|c| c.complete) {
+        for (name, _) in declared.iter().filter(|(name, _)| !means.keys().any(|(s, ..)| covers(name, s))) {
+            push(None, format!("an accuracy is declared for {name}, which no stratum surveyed is or is in"));
+        }
+    }
     for ((stratum, measure, level), margins) in means {
         let n = margins.len() as f64;
         let mean = |i: usize| -> Look { std::array::from_fn(|k| margins.iter().map(|(_, m)| m.looks[i][k]).sum::<f64>() / n) };
@@ -619,11 +642,14 @@ pub fn breaks(checked: &[Checked]) -> Vec<Break> {
         let apart = apart(&means[0], &means[1], 0..4);
         let mean: Look = std::array::from_fn(|k| means[1][k] - means[0][k]);
         let spread = margins.iter().map(|(_, m)| m.spread).sum::<f64>() / n;
-        if apart < measure.tolerance() && spread < SPREAD {
+        let within = Accuracy::of(declared, stratum);
+        if apart < within.apart && spread < within.spread {
             continue;
         }
         let mut message = format!(
-            "{stratum}, level {level}, {measure:?}: {apart:.3} apart, spread {spread:.3}, on average over {} regions (stops {:+.3}, shows {:+.3} {:+.3} {:+.3}):",
+            "{stratum}, level {level}, {measure:?}: {apart:.3} apart, spread {spread:.3} (within {}, {}), on average over {} regions (stops {:+.3}, shows {:+.3} {:+.3} {:+.3}):",
+            within.apart,
+            within.spread,
             margins.len(),
             mean[0],
             mean[1],
