@@ -3,6 +3,7 @@
 
 use std::rc::Rc;
 
+use fcc::FACE_KINDS;
 use worldgen::World;
 use worldgen::checks::contract::{
     Accuracy, REGION, Report, SHOWN, STOPPED, TOLERANCE, breaks, check, heights_hold, hold_to_baseline, margins, parts_equal_whole,
@@ -14,7 +15,7 @@ use worldgen::generator::{
     cuboid, generate, kind_of, things_in,
 };
 use worldgen::generator::{Cell, Fill, Point};
-use worldgen::grid::Box3;
+use worldgen::grid::{ALPHA, Box3, COLOUR_ONE};
 use worldgen::plan::{Plan, spacing};
 
 static KINDS: &[KindDef] = &[
@@ -228,8 +229,9 @@ fn village_keeps_the_contract() {
 
 /**
  * Grass with a stripe of rock a unit wide every 8 along x, from a plan
- * of scale 1, dithered or not: the share of rock among the sites drawn at
- * `level`, and the grid.
+ * of scale 1, dithered or not: the share of rock in what the sites drawn
+ * at `level` show, by their red (a site over several columns mixes their
+ * kinds), and the grid's looks.
  */
 fn stripes(dithered: bool, level: u32) -> (f64, Vec<u32>) {
     let make = |x: i64, _| if x.rem_euclid(8) == 0 { ROCK } else { GRASS };
@@ -238,10 +240,18 @@ fn stripes(dithered: bool, level: u32) -> (f64, Vec<u32>) {
     let (generator, b) = (world(Layer::Field(ground)), Box3 { min: [0, -8 >> level, 0], max: [4096 >> level, 0, 64] });
     let grid = generate(&generator, &b, level);
     let sites = (b.min[2]..b.max[2]).flat_map(|z| (b.min[1]..b.max[1]).flat_map(move |y| (b.min[0]..b.max[0]).map(move |x| (x, y, z))));
-    let looks: Vec<u32> = sites.map(|(x, y, z)| grid.get(x, y, z)).collect();
-    let kind = kind_of(&generator);
-    let count = |of: u8| looks.iter().filter(|&&l| kind(l).is_some_and(|k| k.name == KINDS[of as usize].name)).count();
-    (count(ROCK) as f64 / (count(ROCK) + count(GRASS)) as f64, looks)
+    let sites: Vec<_> = sites.collect();
+    let looks: Vec<u32> = sites.iter().map(|&(x, y, z)| grid.get(x, y, z)).collect();
+    // Linear red, rock's #77 and grass's #44, of what each face of each site shows over how much it stops.
+    let (mut red, mut stopped) = (0.0, 0.0);
+    for &(x, y, z) in &sites {
+        for k in 0..FACE_KINDS {
+            let [(alpha, colour), _] = grid.light(x, y, z, k).0;
+            (red, stopped) = (red + colour[0] as f64 / COLOUR_ONE as f64, stopped + alpha as f64 / ALPHA as f64);
+        }
+    }
+    let [rock, grass] = [0x77, 0x44].map(|c: u8| fcc::light::srgb_to_linear(c as f32 / 255.0) as f64);
+    ((red / stopped - grass) / (rock - grass), looks)
 }
 
 #[test]
