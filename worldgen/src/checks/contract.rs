@@ -2,11 +2,10 @@
 //! in tests: a box generated in parts, alone and in any order, equals it
 //! generated whole; nothing lies outside its heights, things keep their
 //! reach, and what is skipped where it says it may not draw draws nothing
-//! there; and on average over each stratum's regions, each level shows
-//! rays from where a camera could be what the level two finer shows,
-//! and seen from above, what level 0 shows. What a ray sees is a `Look`:
-//! linear, as a coarse site averages finer ones, so the sum of each
-//! kind's, which tell what changed.
+//! there; and on average over each stratum's regions, each level's cells
+//! look as what is in them does, the level two finer (checks::cells). What
+//! is seen is a `Look`: linear, as a coarse site averages finer ones, so
+//! the sum of each kind's, which tell what changed.
 
 use std::collections::BTreeMap;
 use std::ops::Range;
@@ -15,11 +14,12 @@ use std::time::Instant;
 use fcc::FACE_KINDS;
 
 use crate::World;
+use crate::checks::cells;
 use crate::checks::survey::{Survey, survey};
 use crate::generator::{Generator, Layer, Whole, checking_skipped, generate, kind_of, whole};
 use crate::grid::{ALPHA, Box3, VoxelGrid, is_site};
 use crate::noise::Rng;
-use crate::picture::{Camera, FACES, Seen, Tiles, composite_in, composited, nearest_site};
+use crate::picture::{Camera, Seen, Tiles, composite_in};
 use crate::units::m;
 
 fn b(min_x: i64, min_y: i64, min_z: i64, max_x: i64, max_y: i64, max_z: i64) -> Box3 {
@@ -42,22 +42,19 @@ pub(crate) fn sites(b: &Box3) -> impl Iterator<Item = (i64, i64, i64)> + '_ {
 }
 
 /**
- * How far a level's look may stray from the one two finer, in any
- * channel. On average over a stratum's regions (`strata_kept`); a solid
- * alone, in a region of many (worldgen/tests/shapes.rs).
+ * How far a level's cells may look from what is in them, the level
+ * FINER_BY finer (checks::cells), in any channel: what they add or lose
+ * on average over a stratum's regions (`breaks`), or a solid's alone,
+ * in a region of many (worldgen/tests/shapes.rs).
  */
 pub const TOLERANCE: f64 = 0.045;
 
 /**
- * How far a level's look may stray from level 0 seen from above: a
- * twentieth of the light, more than TOLERANCE, as a sheet grown to a
- * site hides more seen down it than across ("Sheets and rods" in
- * docs/todo.md).
+ * How far a level's cells may be from what is in them, each in its
+ * channel furthest, on average: a site seen as a whole looks as its cell
+ * does to within the steps of what it holds (docs/generators.md, "Levels").
  */
-pub const FROM_ABOVE: f64 = 0.05;
-
-/** Rays cast at each level, from as many origins. */
-const RAYS: usize = 20_000;
+pub const SPREAD: f64 = 0.1;
 
 /** `region` grown to at least 16 sites of `level` across around its centre, along x and z. */
 pub(crate) fn around(region: &Box3, level: u32) -> Box3 {
@@ -74,12 +71,11 @@ const FAR_FROM: u32 = 4;
 /**
  * How far the fields of a far region may stray from level 0 seen from
  * above, each region. A field is drawn from position alone, and a wide
- * region has hundreds of lines of sites at level 6, so it keeps closer
- * than FROM_ABOVE, which allows for things' far forms and their surfaces;
- * a plan finer than the sites read where each line is aliases ("Plans"
- * in "Levels" in docs/generators.md).
+ * region has hundreds of lines of sites at level 6, so it keeps close; a
+ * plan finer than the sites read where each line is aliases ("Plans" in
+ * "Levels" in docs/generators.md).
  */
-const FAR_TOLERANCE: f64 = FROM_ABOVE / 4.0;
+const FAR_TOLERANCE: f64 = 0.0125;
 
 /** A box of `region` at `level` generated in eight parts, alone and in any order, equals it generated whole. */
 pub fn whole_equals_parts(generator: &Generator, region: &Box3, level: u32) {
@@ -116,178 +112,55 @@ pub fn whole_equals_parts(generator: &Generator, region: &Box3, level: u32) {
 }
 
 /**
- * The empty sites of a grid a camera could be at: those it could fly to
- * from outside the grid's box, connected to it through empty sites
- * (voxels sharing a face): empty as shown, as a camera collides with the
- * voxels shown, not with what stops some rays. Under the ground's shell,
- * inside a closed house or a boulder are not; under a canopy, open to
- * the sky somewhere, or a cave the box cuts, is.
- */
-struct Open {
-    b: Box3,
-    /** By point of `b` and a point more on each side, x fastest: 0 not reached yet, 1 open, 2 full or outside. */
-    state: Vec<u8>,
-}
-
-impl Open {
-    fn new(grid: &VoxelGrid) -> Open {
-        let b = grid.clip();
-        let n = [0, 1, 2].map(|i| b.max[i] - b.min[i] + 2);
-        let mut state = vec![2u8; (n[0] * n[1] * n[2]) as usize];
-        let at = |p: [i64; 3]| ((p[0] - b.min[0] + 1) + n[0] * ((p[1] - b.min[1] + 1) + n[1] * (p[2] - b.min[2] + 1))) as usize;
-        for (x, y, z) in sites(&b) {
-            if grid.get(x, y, z) == 0 {
-                state[at([x, y, z])] = 0;
-            }
-        }
-        // From the empty sites next to the outside.
-        let mut stack = Vec::new();
-        for (x, y, z) in sites(&b) {
-            let outside = FACES.iter().any(|f| !b.holds([x + f[0], y + f[1], z + f[2]]));
-            if outside && state[at([x, y, z])] == 0 {
-                state[at([x, y, z])] = 1;
-                stack.push(at([x, y, z]));
-            }
-        }
-        // Neighbours by their offset in `state`: the points outside the box are full.
-        let faces = FACES.map(|f| f[0] + n[0] * (f[1] + n[1] * f[2]));
-        while let Some(i) = stack.pop() {
-            for face in faces {
-                let q = (i as i64 + face) as usize;
-                if state[q] == 0 {
-                    state[q] = 1;
-                    stack.push(q);
-                }
-            }
-        }
-        Open { b, state }
-    }
-
-    fn holds(&self, p: [i64; 3]) -> bool {
-        let (b, n) = (&self.b, [0, 1, 2].map(|i| self.b.max[i] - self.b.min[i] + 2));
-        b.holds(p)
-            && is_site(p[0], p[1], p[2])
-            && self.state[((p[0] - b.min[0] + 1) + n[0] * ((p[1] - b.min[1] + 1) + n[1] * (p[2] - b.min[2] + 1))) as usize] == 1
-    }
-}
-
-struct Ray {
-    origin: [f64; 3],
-    direction: [f64; 3],
-    /** How far it goes in the area it is cast in, lattice units. */
-    end: f64,
-}
-
-/** RAYS rays in random directions from random sites of `area` a camera could be at in `reference` (at `level`), seeded so failures reproduce; and how many origins were tried for them. */
-fn rays_from_open(area: &Box3, reference: &VoxelGrid, level: u32) -> (Vec<Ray>, usize) {
-    let open = Open::new(reference);
-    let s = (1i64 << level) as f64;
-    let mut random = Rng::new(11);
-    let (mut rays, mut tried) = (Vec::with_capacity(RAYS), 0);
-    while rays.len() < RAYS && tried < 50 * RAYS {
-        tried += 1;
-        let origin: [f64; 3] = std::array::from_fn(|i| area.min[i] as f64 + random.next() * (area.max[i] - area.min[i]) as f64);
-        let z = 2.0 * random.next() - 1.0;
-        let a = 2.0 * std::f64::consts::PI * random.next();
-        let direction = [(1.0 - z * z).sqrt() * a.cos(), (1.0 - z * z).sqrt() * a.sin(), z];
-        if !open.holds(nearest_site(origin.map(|v| v / s))) {
-            continue;
-        }
-        // Where it leaves the area.
-        let end = (0..3)
-            .map(|i| match direction[i] {
-                d if d > 0.0 => (area.max[i] as f64 - origin[i]) / d,
-                d if d < 0.0 => (area.min[i] as f64 - origin[i]) / d,
-                _ => f64::INFINITY,
-            })
-            .fold(f64::INFINITY, f64::min);
-        rays.push(Ray { origin, direction, end });
-    }
-    (rays, tried)
-}
-
-/** What a ray sees of a grid (`composited`), its distances along it in lattice units. */
-type Path = Vec<(f64, Seen)>;
-
-/**
- * Each ray's path through `grid` (at `level`) from `from` along it to
- * `to` or where it leaves its area, its distances from `from` (lattice
- * units): all of what gets to `from` taken as the ray.
- */
-fn paths(grid: &VoxelGrid, level: u32, rays: &[Ray], from: f64, to: f64) -> Vec<Path> {
-    let s = (1i64 << level) as f64;
-    let path = |ray: &Ray| {
-        let to = to.min(ray.end);
-        if to <= from {
-            return Vec::new();
-        }
-        let origin: [f64; 3] = std::array::from_fn(|i| (ray.origin[i] + from * ray.direction[i]) / s);
-        composited(grid, origin, ray.direction, (to - from) / s)
-    };
-    rays.iter().map(|ray| path(ray).into_iter().map(|(t, seen)| (t * s, seen)).collect()).collect()
-}
-
-/**
  * What rays see, a mean over them, linear, as under a white light all
- * round: how much of them stops near (`STOPPED`'s first channel) and
- * further (its second), and what shows (`SHOWN`): what stops each by its
- * colour, and what glows to them, premultiplied as compositing has it.
- * With no ratio, a few rays of many change it by no more than their
- * share; with no sky behind, over any sky it differs by no more than its
- * channels do.
+ * round: how much of them stops (`STOPPED`), and what shows (`SHOWN`):
+ * what stops each by its colour, and what glows to them, premultiplied as
+ * compositing has it. With no ratio, a few rays of many change it by no
+ * more than their share; with no sky behind, over any sky it differs by
+ * no more than its channels do.
  */
-pub type Look = [f64; 5];
+pub type Look = cells::Look;
 
-/** The channels of a `Look` that say how much stops: near, and further. */
-pub const STOPPED: Range<usize> = 0..2;
+/** The channel of a `Look` that says how much stops. */
+pub const STOPPED: Range<usize> = 0..1;
 
 /** The channels of a `Look` that say what shows: red, green and blue. */
-pub const SHOWN: Range<usize> = 2..5;
+pub const SHOWN: Range<usize> = 1..4;
 
-/** How far a camera's rays stop "near", past where a level is looked at from: in the level's sites. */
-const NEAR: f64 = 4.0;
-
-/** Adds `seen` to `look` by `weight`, stopping near or not. */
-fn add_seen(look: &mut Look, seen: &Seen, near: bool, weight: f64) {
-    look[if near { 0 } else { 1 }] += weight * seen.stopped;
-    (0..3).for_each(|c| look[SHOWN.start + c] += weight * (seen.shown[c] + seen.glow[c]));
-}
+/** Less than this stopped, a look has no colour to compare. */
+const SEEN: f64 = 1e-3;
 
 /**
- * Adds to `look` what a ray sees along `path`, by `weight` (the light
- * that gets to its start): stopping within `near` of its start (lattice
- * units) in the first channel.
+ * How far apart two looks are in `channels`, in the one they differ the
+ * most in: how much stops, and the colour of what stops (what shows over
+ * how much stops), so a thin medium's colour or glow counts as much as a
+ * solid's.
  */
-fn add(look: &mut Look, path: &Path, near: f64, weight: f64) {
-    for (t, seen) in path {
-        add_seen(look, seen, *t <= near, weight);
-    }
+pub fn apart(a: &Look, c: &Look, channels: Range<usize>) -> f64 {
+    let colour = |l: &Look, i: usize| if i == 0 { l[0] } else { l[i] / l[0] };
+    let coloured = a[0] >= SEEN && c[0] >= SEEN;
+    channels.filter(|&i| i == 0 || coloured).map(|i| (colour(c, i) - colour(a, i)).abs()).fold(0.0, f64::max)
 }
 
-/** The look of what pixels see (a mean over them): what stops, all of it near. */
+/** The look of what pixels see (a mean over them). */
 fn look_of(seen: &Seen) -> Look {
-    let mut look = Look::default();
-    add_seen(&mut look, seen, true, 1.0);
-    look
+    [seen.stopped, seen.shown[0] + seen.glow[0], seen.shown[1] + seen.glow[1], seen.shown[2] + seen.glow[2]]
 }
 
 /** What a margin measures. */
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Measure {
-    /** What rays from where a camera could be see past 2 sites of the level. */
-    Cameras,
-    /** What rays straight down see. */
-    FromAbove,
-    /** What rays straight down see of the fields alone. */
+    /** What each of a sample of cells looks like along each of the lattice's directions, against what is in it (checks::cells). */
+    Cells,
+    /** What rays straight down see of the fields alone, against level 0. */
     FieldsFromAbove,
 }
 
 impl Measure {
-    /** How far a level may stray by it. */
+    /** How far a level may stray by it on average. */
     pub fn tolerance(self) -> f64 {
         match self {
-            Measure::Cameras => TOLERANCE,
-            Measure::FromAbove => FROM_ABOVE,
+            Measure::Cells => TOLERANCE,
             Measure::FieldsFromAbove => FAR_TOLERANCE,
         }
     }
@@ -299,27 +172,28 @@ pub struct Margin {
     pub region: Box3,
     pub measure: Measure,
     pub level: u32,
-    /** The level it is measured against: two finer, or 0 from above. */
+    /** The level it is measured against: FINER_BY finer, or 0 from above. */
     pub against: u32,
-    /** What rays see at `against` and at `level`. */
+    /** What is seen at `against` and at `level`, on average. */
     pub looks: [Look; 2],
+    /** How far, on average, each of its cells is from what is in it, in its channel furthest; none from above. */
+    pub spread: f64,
 }
 
 impl Margin {
-    /** How far apart the looks are in `channels`: in the one they differ the most in. */
+    /** How far apart the looks are in `channels` (`apart`). */
     pub fn apart(&self, channels: Range<usize>) -> f64 {
-        let [a, c] = self.looks;
-        channels.map(|i| (c[i] - a[i]).abs()).fold(0.0, f64::max)
+        apart(&self.looks[0], &self.looks[1], channels)
     }
 
     /** How far apart the looks are, in any channel. */
     pub fn difference(&self) -> f64 {
-        self.apart(0..5)
+        self.apart(0..4)
     }
 
-    /** Whether this region alone is as far apart as a stratum may be on average, or more. */
+    /** Whether this region alone is as far apart, or as spread, as a stratum may be on average, or more. */
     pub fn broken(&self) -> bool {
-        self.difference() >= self.measure.tolerance()
+        self.difference() >= self.measure.tolerance() || self.spread >= SPREAD
     }
 }
 
@@ -343,9 +217,9 @@ impl Report {
     }
 }
 
-/** A look, to print: how much stops, near + further, and what shows. */
+/** A look, to print: how much stops, and what shows. */
 fn look(l: &Look) -> String {
-    format!("stops {:.3} + {:.3}, shows {:.3} {:.3} {:.3}", l[0], l[1], l[2], l[3], l[4])
+    format!("stops {:.3}, shows {:.3} {:.3} {:.3}", l[0], l[1], l[2], l[3])
 }
 
 impl std::fmt::Display for Report {
@@ -363,12 +237,11 @@ impl std::fmt::Display for Report {
                 region = Some(r);
             }
             let what = match m.measure {
-                Measure::Cameras => "cameras".to_string(),
-                Measure::FromAbove => "from above".to_string(),
+                Measure::Cells => format!("cells, spread {:.3}", m.spread),
                 Measure::FieldsFromAbove => "fields from above".to_string(),
             };
             let [a, c] = m.looks.map(|v| look(&v));
-            let broken = if m.broken() { format!(", over {}", m.measure.tolerance()) } else { String::new() };
+            let broken = if m.broken() { format!(", over {} or {SPREAD}", m.measure.tolerance()) } else { String::new() };
             writeln!(f, "  level {} against {}, {what}: {a} -> {c}: {:.3} apart{broken}", m.level, m.against, m.difference())?;
         }
         Ok(())
@@ -376,74 +249,14 @@ impl std::fmt::Display for Report {
 }
 
 /**
- * What rays from where a camera could be see of `region` at each level
- * from 1 to `levels` (a `Look`): the level two finer near, to 2 of the
- * level's sites, and the level past them, as hosts draw a coarse level
- * behind a finer one; against the level two finer all the way.
- */
-fn levels_against_finer(generator: &Generator, region: &Box3, levels: u32, report: &mut Report) {
-    // Grids generated, by level and box: a level's is the reference of the level two coarser.
-    let mut grids: Vec<(u32, Box3, VoxelGrid)> = Vec::new();
-    let grid = |grids: &mut Vec<(u32, Box3, VoxelGrid)>, level: u32, area: &Box3| -> usize {
-        let b = box_at(area, level);
-        grids.iter().position(|(l, g, _)| *l == level && *g == b).unwrap_or_else(|| {
-            grids.push((level, b, generate(generator, &b, level)));
-            grids.len() - 1
-        })
-    };
-    let mut origins: Option<(u32, Box3, Vec<Ray>)> = None;
-    for level in 1..=levels {
-        let (s, finer) = ((1i64 << level) as f64, level.saturating_sub(2));
-        // At least 16 sites of the level across and tall, around the region's centre.
-        let mut area = around(region, level);
-        let grow = 0.max((8i64 << level) - (region.max[1] - region.min[1]) / 2);
-        (area.min[1], area.max[1]) = (region.min[1] - grow, region.max[1] + grow);
-        let reference = grid(&mut grids, finer, &area);
-        if origins.as_ref().is_none_or(|(l, a, _)| *l != finer || *a != area) {
-            let (rays, tried) = rays_from_open(&area, &grids[reference].2, finer);
-            assert!(rays.len() >= RAYS / 2, "level {level}: a camera could be at only {} of {tried} points", rays.len());
-            origins = Some((finer, area, rays));
-        }
-        let rays = &origins.as_ref().expect("made").2;
-        let from = 2.0 * s;
-        let near = paths(&grids[reference].2, finer, rays, 0.0, from);
-        let fine = paths(&grids[reference].2, finer, rays, from, f64::INFINITY);
-        let coarse_grid = grid(&mut grids, level, &area);
-        let coarse = paths(&grids[coarse_grid].2, level, rays, from, f64::INFINITY);
-        let mut looks = [Look::default(); 2];
-        for ((near, fine), coarse) in near.iter().zip(&fine).zip(&coarse) {
-            // Past `from`, at each level, of the light that gets there at the finer.
-            let through = 1.0 - near.iter().map(|(_, seen)| seen.stopped).sum::<f64>();
-            add(&mut looks[0], fine, NEAR * s, through);
-            add(&mut looks[1], coarse, NEAR * s, through);
-        }
-        let looks = looks.map(|look| look.map(|v| v / rays.len() as f64));
-        report.margins.push(Margin { region: *region, measure: Measure::Cameras, level, against: finer, looks });
-        // Only the grids the coming levels read: the coarse one, and the one after it.
-        grids.retain(|(l, ..)| *l + 1 >= level);
-    }
-}
-
-/**
- * What a camera straight above `region`, grown to at least 16 sites of
- * the level across around its centre, sees at each level from 1 to
- * `levels`: what rays down from its sky see (a `Look`), as at level 0. Unlike levels
- * two apart, level 0 catches a drift, a little a level, such as walls
- * taking over from roofs.
- */
-fn from_above_against_level_0(world: &World, region: &Box3, levels: u32, level_0: &mut Tiles, report: &mut Report) {
-    from_above(world, region, 1..=levels, Measure::FromAbove, level_0, report);
-}
-
-/**
  * What rays straight down over `region` see at each of `levels`, against
- * level 0, as `measure`: level 0's tiles in `level_0`, which keeps those
+ * level 0, as `Measure::FieldsFromAbove`: level 0's tiles in `level_0`, which keeps those
  * this region shares with the one before.
  */
-fn from_above(world: &World, region: &Box3, levels: impl Iterator<Item = u32>, measure: Measure, level_0: &mut Tiles, report: &mut Report) {
+fn from_above(world: &World, region: &Box3, levels: impl Iterator<Item = u32>, level_0: &mut Tiles, report: &mut Report) {
     let levels: Vec<u32> = levels.collect();
     if world.heights.is_none() {
-        assert!(levels.is_empty(), "a world with no heights has no sky to be seen from (World::heights): from_above 0");
+        assert!(levels.is_empty(), "a world with no heights has no sky to be seen from (World::heights)");
         return;
     }
     let seen = |tiles: &mut Tiles, area: &Box3| {
@@ -469,22 +282,26 @@ fn from_above(world: &World, region: &Box3, levels: impl Iterator<Item = u32>, m
         let reference = &reference.as_ref().expect("made").1;
         let here = seen(&mut Tiles::new(level, world.heights_at(level)), &area);
         let looks = [look_of(reference), look_of(&here)];
-        report.margins.push(Margin { region: *region, measure, level, against: 0, looks });
+        report.margins.push(Margin { region: *region, measure: Measure::FieldsFromAbove, level, against: 0, looks, spread: 0.0 });
     }
 }
 
 /**
- * How far each level of `world`, named `name` (with its seed, say), up
- * to `levels` strays in each of `regions` from the level two finer (rays
- * from where a camera could be), and up to `from_above` from level 0
- * (seen from above).
+ * How each level of `world`, named `name` (with its seed, say), up to
+ * `levels` looks in each of `regions` against what is in its cells, the
+ * level FINER_BY finer (checks::cells): its cells near a surface, a
+ * sample of them, each along each of the lattice's 12 directions.
  */
-pub fn margins(name: &str, world: &World, regions: &[Box3], levels: u32, from_above: u32) -> Report {
+pub fn margins(name: &str, world: &World, regions: &[Box3], levels: u32) -> Report {
     let mut report = Report::new(name);
-    let mut level_0 = Tiles::new(0, world.heights_at(0));
     for region in regions {
-        levels_against_finer(&world.generator, region, levels, &mut report);
-        from_above_against_level_0(world, region, from_above, &mut level_0, &mut report);
+        for level in 1..=levels {
+            let c = cells::cells_of(name, world, region, level);
+            let n = c.cells.len().max(1) as f64;
+            let looks = [0, 1].map(|i| std::array::from_fn(|k| c.cells.iter().map(|cell| cell.looks[i][k]).sum::<f64>() / n));
+            let spread = c.cells.iter().map(cells::Cell::deviation).sum::<f64>() / n;
+            report.margins.push(Margin { region: *region, measure: Measure::Cells, level, against: c.against, looks, spread });
+        }
     }
     report
 }
@@ -501,7 +318,7 @@ pub fn far_margins(name: &str, world: World, regions: &[Box3], levels: u32) -> R
     let mut report = Report::new(name);
     let mut level_0 = Tiles::new(0, world.heights_at(0));
     for region in regions {
-        from_above(&world, region, FAR_FROM..=levels, Measure::FieldsFromAbove, &mut level_0, &mut report);
+        from_above(&world, region, FAR_FROM..=levels, &mut level_0, &mut report);
     }
     report
 }
@@ -696,24 +513,95 @@ pub struct Checked {
 type Held<'a> = (&'a Checked, &'a Margin);
 
 /**
+ * Where the contract breaks: the stratum and level of a mean that breaks
+ * it, if one does, with how far apart and how spread it is; and what
+ * breaks.
+ */
+pub struct Break {
+    pub of: Option<(String, u32, f64, f64)>,
+    pub message: String,
+}
+
+/** How far a baseline's mean may move either way before it is to be written anew. */
+const SLACK: f64 = 0.01;
+
+/**
+ * Panics where `breaks` differ from the baseline at `path`, a line per
+ * stratum and level that breaks the contract, how far apart and how
+ * spread: what breaks it and isn't there, or is further apart or more
+ * spread by more than SLACK; and, if `all` were checked, what is there
+ * and now nearer or kept, by as much. CONTRACT_BLESS=1 (with `all`)
+ * writes the baseline anew instead.
+ */
+pub fn hold_to_baseline(breaks: &[Break], path: &str, all: bool) {
+    if all && std::env::var_os("CONTRACT_BLESS").is_some() {
+        let mut lines: Vec<String> = breaks
+            .iter()
+            .filter_map(|b| b.of.as_ref())
+            .map(|(s, l, apart, spread)| format!("{s}\t{l}\t{apart:.3}\t{spread:.3}\n"))
+            .collect();
+        lines.sort();
+        std::fs::write(path, lines.concat()).unwrap_or_else(|e| panic!("{path}: {e}"));
+    }
+    let baseline = std::fs::read_to_string(path).unwrap_or_default();
+    let listed: Vec<(&str, u32, f64, f64)> = baseline
+        .lines()
+        .map(|l| {
+            let f: Vec<&str> = l.split('\t').collect();
+            let number = |i: usize| f[i].parse::<f64>().unwrap_or_else(|_| panic!("{path}: {l}"));
+            (f[0], number(1) as u32, number(2), number(3))
+        })
+        .collect();
+    let mut changed = Vec::new();
+    for b in breaks {
+        let Some((stratum, level, apart, spread)) = &b.of else {
+            changed.push(b.message.clone());
+            continue;
+        };
+        match listed.iter().find(|l| l.0 == stratum && l.1 == *level) {
+            None => changed.push(b.message.clone()),
+            Some(&(_, _, was, was_spread)) if *apart > was + SLACK || *spread > was_spread + SLACK => {
+                changed.push(format!("worse than its baseline ({was:.3} apart, spread {was_spread:.3}): {}", b.message))
+            }
+            Some(&(_, _, was, was_spread)) if all && (*apart < was - SLACK || *spread < was_spread - SLACK) => changed.push(format!(
+                "{stratum}, level {level}: better than its baseline ({was:.3} apart, spread {was_spread:.3}): {apart:.3}, {spread:.3}"
+            )),
+            Some(_) => {}
+        }
+    }
+    if all {
+        for (stratum, level, _, _) in &listed {
+            if !breaks.iter().any(|b| b.of.as_ref().is_some_and(|(s, l, _, _)| s == stratum && l == level)) {
+                changed.push(format!("{stratum}, level {level}: in its baseline, but keeps the contract now"));
+            }
+        }
+    }
+    assert!(changed.is_empty(), "{}\nif that is meant, CONTRACT_BLESS=1 writes {path} anew", changed.join("\n"));
+}
+
+/**
  * Where worlds checked (at several seeds, say) break the contract: the
  * rules that hold exactly, layers that draw nothing, and each stratum's
  * margins (by measure and level) averaged over the regions holding it
  * at every seed, if they are as far apart as the measure allows
- * (`Measure::tolerance`) or more in any channel.
+ * (`Measure::tolerance`) or more in any channel, or as spread as SPREAD.
  * Each broken mean names the regions it was averaged over, and the
- * worst of them broken down by kind.
+ * worst of them broken down by kind. Each with what it is of.
  */
-pub fn strata_kept(checked: &[Checked]) -> Vec<String> {
+pub fn breaks(checked: &[Checked]) -> Vec<Break> {
     let mut broken = Vec::new();
+    let mut push = |of: Option<(String, u32, f64, f64)>, message: String| broken.push(Break { of, message });
     for c in checked {
-        broken.extend(c.broken.iter().map(|b| format!("{}: {b}", c.name)));
+        c.broken.iter().for_each(|b| push(None, format!("{}: {b}", c.name)));
         if c.complete && !c.silent.is_empty() {
-            broken.push(format!(
-                "{}: {} draw nothing around spawn or the places it names (worldgen::checks::survey): too far from them, or not at all",
-                c.name,
-                c.silent.join(", ")
-            ));
+            push(
+                None,
+                format!(
+                    "{}: {} draw nothing around spawn or the places it names (worldgen::checks::survey): too far from them, or not at all",
+                    c.name,
+                    c.silent.join(", ")
+                ),
+            );
         }
     }
     // Each stratum's margins, by measure and level, from every world checked.
@@ -726,38 +614,30 @@ pub fn strata_kept(checked: &[Checked]) -> Vec<String> {
     }
     for ((stratum, measure, level), margins) in means {
         let n = margins.len() as f64;
-        let changes = margins.iter().map(|(_, m)| {
-            let [a, c] = m.looks;
-            std::array::from_fn::<f64, 5, _>(|i| c[i] - a[i])
-        });
-        let mean = changes.fold([0.0; 5], |sum, c| std::array::from_fn(|i| sum[i] + c[i] / n));
-        let apart = mean.iter().fold(0.0, |a: f64, v| a.max(v.abs()));
-        if apart < measure.tolerance() {
+        let mean = |i: usize| -> Look { std::array::from_fn(|k| margins.iter().map(|(_, m)| m.looks[i][k]).sum::<f64>() / n) };
+        let means = [mean(0), mean(1)];
+        let apart = apart(&means[0], &means[1], 0..4);
+        let mean: Look = std::array::from_fn(|k| means[1][k] - means[0][k]);
+        let spread = margins.iter().map(|(_, m)| m.spread).sum::<f64>() / n;
+        if apart < measure.tolerance() && spread < SPREAD {
             continue;
         }
         let mut message = format!(
-            "{stratum}, level {level}, {measure:?}: {apart:.3} apart on average over {} regions (stops {:+.3} + {:+.3}, shows {:+.3} {:+.3} {:+.3}):",
+            "{stratum}, level {level}, {measure:?}: {apart:.3} apart, spread {spread:.3}, on average over {} regions (stops {:+.3}, shows {:+.3} {:+.3} {:+.3}):",
             margins.len(),
             mean[0],
             mean[1],
             mean[2],
-            mean[3],
-            mean[4]
+            mean[3]
         );
         for (c, m) in &margins {
             message += &format!("\n  {} in {:?}: {:.3}", c.name, m.region, m.difference());
         }
         let (c, worst) = margins.iter().max_by(|a, b| a.1.difference().total_cmp(&b.1.difference())).expect("a margin");
         message += &format!("\n{:#}", Report { margins: vec![(*worst).clone()], ..c.report.clone() });
-        broken.push(message);
+        push(Some((stratum.to_string(), level, apart, spread)), message);
     }
     broken
-}
-
-/** Panics where worlds checked (at several seeds, say) break the contract (`strata_kept`). */
-pub fn assert_kept(checked: &[Checked]) {
-    let broken = strata_kept(checked);
-    assert!(broken.is_empty(), "the contract is broken:\n{}", broken.join("\n"));
 }
 
 /**
@@ -779,13 +659,13 @@ pub fn parts_equal_whole(name: &str, world: &World, regions: &[Box3], levels: u3
 /**
  * The whole contract for `world`, named `name` (with its seed, say), in
  * regions holding everything it is made of around spawn (`regions`),
- * `only` some if any, up to the level `levels` it keeps what a camera
- * sees to, and `from_above` what is seen from above. Hands `surveyed`
+ * `only` some if any, up to the level `levels` its cells look as what
+ * is in them to. Hands `surveyed`
  * the regions once found: to check them in parts (`parts_equal_whole`)
  * meanwhile, on a thread of their own, say. Prints its regions and
  * margins (see them with --nocapture); returns where it breaks it.
  */
-pub fn check(name: &str, world: &World, levels: u32, from_above: u32, only: &[&str], surveyed: impl FnOnce(&[Box3])) -> Checked {
+pub fn check(name: &str, world: &World, levels: u32, only: &[&str], surveyed: impl FnOnce(&[Box3])) -> Checked {
     let start = Instant::now();
     let (survey, regions) = regions(world, only);
     let layers: Vec<String> = survey
@@ -803,18 +683,16 @@ pub fn check(name: &str, world: &World, levels: u32, from_above: u32, only: &[&s
     surveyed(&boxes);
     let mut broken = Vec::new();
     let start = Instant::now();
-    let report = Report {
-        held: regions.iter().map(|(b, strata)| (*b, strata.join(", "))).collect(),
-        ..margins(name, world, &boxes, levels, from_above)
-    };
-    let rays = start.elapsed().as_secs_f64();
+    let report =
+        Report { held: regions.iter().map(|(b, strata)| (*b, strata.join(", "))).collect(), ..margins(name, world, &boxes, levels) };
+    let cells = start.elapsed().as_secs_f64();
     broken.extend(heights_hold(world, &boxes, levels));
-    let heights = start.elapsed().as_secs_f64() - rays;
+    let heights = start.elapsed().as_secs_f64() - cells;
     broken.extend(things_hold(world, &survey));
-    let things = start.elapsed().as_secs_f64() - rays - heights;
+    let things = start.elapsed().as_secs_f64() - cells - heights;
     broken.extend(skips_hold(world, &boxes, levels));
-    let skips = start.elapsed().as_secs_f64() - rays - heights - things;
-    println!("{report}{name}: margins {rays:.1} s, heights {heights:.1} s, things {things:.1} s, skips {skips:.1} s");
+    let skips = start.elapsed().as_secs_f64() - cells - heights - things;
+    println!("{report}{name}: cells {cells:.1} s, heights {heights:.1} s, things {things:.1} s, skips {skips:.1} s");
     let silent = survey.layers.iter().filter(|l| l.found == 0).map(|l| l.layer).collect();
     Checked { name: name.to_string(), regions, report, broken, silent, complete: only.is_empty() }
 }

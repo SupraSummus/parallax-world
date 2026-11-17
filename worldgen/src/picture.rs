@@ -200,9 +200,11 @@ const OPAQUE: f64 = 1e-4;
  * site glows to it; the rest goes on (`through`). A site stops its alpha
  * of a ray crossing its voxel; one crossing `part` of the voxel's chord
  * along it (starting or ending in it) stops as a medium would:
- * 1 − (1 − alpha)^part.
+ * 1 − (1 − alpha)^part. Its medium, as `crossing` crossings: by how long
+ * a ray is in it (checks::cells's CROSSING), unlike its pieces, which cover a share
+ * of its rays wherever they cross it.
  */
-fn composite(ray: &mut Ray, grid: &VoxelGrid, part: f64) -> ([(f64, [f64; 3]); 2], [f64; 3]) {
+fn composite(ray: &mut Ray, grid: &VoxelGrid, part: f64, crossing: f64) -> ([(f64, [f64; 3]); 2], [f64; 3]) {
     let [x, y, z] = ray.site;
     let (mut parts, mut glow, mut faces) = ([(0.0, [0.0; 3]); 2], [0.0; 3], 0.0);
     for k in fcc::facing(ray.direction) {
@@ -213,6 +215,13 @@ fn composite(ray: &mut Ray, grid: &VoxelGrid, part: f64) -> ([(f64, [f64; 3]); 2
         }
         (0..3).for_each(|c| glow[c] += glows[c] as f64 / GLOW_ONE as f64);
         faces += 1.0;
+    }
+    // The medium stops its share of what the pieces let through: as `crossing` crossings, 1 − (1 − that)^crossing.
+    let (pieces, medium) = (parts[0].0 / faces, parts[1].0 / faces);
+    if crossing != 1.0 && medium > 0.0 && pieces < 1.0 {
+        let of = medium / (1.0 - pieces);
+        let scale = (1.0 - (1.0 - of).powf(crossing)) / of;
+        parts[1] = (parts[1].0 * scale, parts[1].1.map(|c| c * scale));
     }
     let alpha = (parts[0].0 + parts[1].0) / faces;
     let scale = if alpha > 0.0 && part < 1.0 { (1.0 - (1.0 - alpha).powf(part)) / alpha } else { part };
@@ -331,7 +340,7 @@ impl Tiles {
                 } else {
                     match tile.grid.get_or_empty_brick(x, y, z) {
                         Some(_) if seen.is_some() => {
-                            let (parts, glow) = composite(ray, &tile.grid, walk.part(ray, &planes));
+                            let (parts, glow) = composite(ray, &tile.grid, walk.part(ray, &planes), 1.0);
                             let seen = seen.as_mut().expect("composited");
                             seen.add(parts[0].0 + parts[1].0, [0, 1, 2].map(|c| parts[0].1[c] + parts[1].1[c]), glow);
                             if ray.through < OPAQUE {
@@ -371,8 +380,10 @@ impl Tiles {
  * `grid` before `end`, site by site, as `composite`: how far along it
  * enters each that stops some of it or glows, how much it stops, what
  * that shows and what it glows; till next to none of it gets through.
+ * Each site's medium counts as `crossing` crossings (checks::cells's
+ * CROSSING), 1 for a ray at any offset.
  */
-pub(crate) fn composited(grid: &VoxelGrid, origin: [f64; 3], direction: [f64; 3], end: f64) -> Vec<(f64, Seen)> {
+pub(crate) fn composited(grid: &VoxelGrid, origin: [f64; 3], direction: [f64; 3], end: f64, crossing: f64) -> Vec<(f64, Seen)> {
     let mut ray = Ray { pixel: 0, origin, direction, t: 0.0, end, site: nearest_site(origin), face: FACES.len(), through: 1.0 };
     let walk = Walk::new(direction);
     let mut planes = walk.planes(&ray);
@@ -380,7 +391,7 @@ pub(crate) fn composited(grid: &VoxelGrid, origin: [f64; 3], direction: [f64; 3]
     while ray.t <= end && ray.through >= OPAQUE {
         let t = ray.t;
         let part = walk.part(&ray, &planes);
-        let ([pieces, medium], glow) = composite(&mut ray, grid, part);
+        let ([pieces, medium], glow) = composite(&mut ray, grid, part, crossing);
         let stopped = pieces.0 + medium.0;
         if stopped > 0.0 || glow != [0.0; 3] {
             seen.push((t, Seen { stopped, shown: [0, 1, 2].map(|c| pieces.1[c] + medium.1[c]), glow }));
@@ -967,7 +978,7 @@ mod tests {
         let (origin, direction) = ([-3.1, -2.3, -1.7], normalize([0.8, 0.5, 0.3]));
         let through = |from: f64, to: f64| {
             let start = [0, 1, 2].map(|i| origin[i] + from * direction[i]);
-            1.0 - composited(&grid, start, direction, to - from).iter().map(|(_, seen)| seen.stopped).sum::<f64>()
+            1.0 - composited(&grid, start, direction, to - from, 1.0).iter().map(|(_, seen)| seen.stopped).sum::<f64>()
         };
         for cut in [0.3, 1.1, 2.5, 3.7, 4.9] {
             let (whole, parts) = (through(0.0, 6.0), through(0.0, cut) * through(cut, 6.0));

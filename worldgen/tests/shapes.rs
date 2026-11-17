@@ -1,12 +1,12 @@
 //! Each solid the engine draws (a tube's pieces are capsules, or cones
-//! where its radius changes) keeps the contract (worldgen::checks::contract) to the levels its case names, wherever
+//! where its radius changes) keeps the contract (worldgen::checks::contract) as its baseline says, wherever
 //! it falls against the sites: many of one case, of sizes and places
 //! drawn at random, on a ground.
 //! Bright on dark, as small shares of a bright colour differ the most in
 //! sRGB, so a world's palette can only hide what breaks here.
 
 use worldgen::World;
-use worldgen::checks::contract::{Measure, margins, whole_equals_parts};
+use worldgen::checks::contract::{Break, Margin, Report, hold_to_baseline, margins, whole_equals_parts};
 use worldgen::curve::Curve;
 use worldgen::generator::{
     ANY_SIZE, Field, Generator, KindDef, Layer, Node, Op, Point, Population, SOLID, Shape, Span, ball, capsule, cuboid, ellipsoid, gable,
@@ -39,75 +39,46 @@ fn block(p: Point, size: [f64; 3], lift: f64, random: &mut Rng) -> Shape {
 }
 
 /**
- * The cases: a name, the cell one stands in (every other one of a square
- * grid), and the levels it keeps the contract to, against the level two
- * finer and from above (`margins`). Past them it breaks: planned work
- * in docs/todo.md, and the levels only rise.
+ * The cases: a name, and the cell one stands in (every other one of a
+ * square grid). Where each breaks the contract, its cells against what is
+ * in them (`margins`), and by how much, is its baseline,
+ * data/contract/shapes.txt (CONTRACT_BLESS=1 writes it): planned work in
+ * docs/todo.md.
  */
-const CASES: &[(&str, i64, Make, u32, u32)] = &[
-    ("speck", 4, |p, r| block(p, [1.0, 1.0, 1.0], 4.0, r), 5, 5),
-    ("block", 16, |p, r| block(p, [6.0, 6.0, 6.0], 0.0, r), 5, 5),
-    ("big block", 48, |p, r| block(p, [24.0, 24.0, 24.0], 0.0, r), 5, 3),
-    ("wall", 24, |p, r| block(p, [16.0, 20.0, 1.0], 0.0, r), 5, 1),
-    ("thick wall", 24, |p, r| block(p, [16.0, 20.0, 3.0], 0.0, r), 5, 2),
-    ("plate", 24, |p, r| block(p, [16.0, 1.0, 16.0], 12.0, r), 5, 3),
-    ("post", 8, |p, r| block(p, [1.0, 16.0, 1.0], 0.0, r), 5, 1),
-    ("beam", 16, |p, r| block(p, [16.0, 1.0, 1.0], 8.0, r), 5, 5),
-    ("ball", 8, |p, r| ball([p[0], p[1] + about(r, 3.0), p[2]], about(r, 1.5), BRIGHT, SOLID, Op::Fill), 5, 5),
-    ("big ball", 24, |p, r| ball([p[0], p[1] + about(r, 8.0), p[2]], about(r, 8.0), BRIGHT, SOLID, Op::Fill), 5, 3),
-    (
-        "disc",
-        24,
-        |p, r| {
-            let (a, b) = (about(r, 8.0), about(r, 1.0));
-            ellipsoid([p[0], p[1] + about(r, 10.0), p[2]], [a, b, a], BRIGHT, SOLID, Op::Fill)
-        },
-        5,
-        3,
-    ),
-    (
-        "stick",
-        16,
-        |p, r| {
-            let (l, turn, y) = (about(r, 12.0), r.next() * std::f64::consts::TAU, p[1] + about(r, 4.0));
-            let q = [p[0] + l * turn.cos(), y + l * (r.next() - 0.5), p[2] + l * turn.sin()];
-            capsule([p[0], y, p[2]], q, about(r, 0.5), BRIGHT, SOLID, Op::Fill)
-        },
-        5,
-        5,
-    ),
-    (
-        "bent cone",
-        24,
-        |p, r| {
-            let (h, w) = (about(r, 20.0), about(r, 2.0));
-            let bend = Curve::wandering(r.next_u64(), vec![fx(2.0), fx(1.0)]);
-            tube(&bend, [p[0], p[1] - 1.0, p[2]], [p[0], p[1] + h, p[2]], move |t| w * (1.0 - t * 2.0 / 3.0), BRIGHT, SOLID, Op::Fill)
-        },
-        5,
-        5,
-    ),
-    (
-        "cone",
-        24,
-        |p, r| {
-            let (h, w) = (about(r, 24.0), about(r, 4.0));
-            lathe(p, [p[0], p[1] + h, p[2]], move |t| w * (1.0 - t), BRIGHT, SOLID, Op::Fill)
-        },
-        5,
-        5,
-    ),
-    (
-        "roof",
-        32,
-        |p, r| {
-            let (l, w, h) = (about(r, 16.0), about(r, 12.0), about(r, 8.0));
-            let min = [p[0] - l / 2.0, p[1], p[2] - w / 2.0];
-            gable(min, [min[0] + l, min[1] + h, min[2] + w], 0, BRIGHT, SOLID, Op::Fill)
-        },
-        5,
-        3,
-    ),
+const CASES: &[(&str, i64, Make)] = &[
+    ("speck", 4, |p, r| block(p, [1.0, 1.0, 1.0], 4.0, r)),
+    ("block", 16, |p, r| block(p, [6.0, 6.0, 6.0], 0.0, r)),
+    ("big block", 48, |p, r| block(p, [24.0, 24.0, 24.0], 0.0, r)),
+    ("wall", 24, |p, r| block(p, [16.0, 20.0, 1.0], 0.0, r)),
+    ("thick wall", 24, |p, r| block(p, [16.0, 20.0, 3.0], 0.0, r)),
+    ("plate", 24, |p, r| block(p, [16.0, 1.0, 16.0], 12.0, r)),
+    ("post", 8, |p, r| block(p, [1.0, 16.0, 1.0], 0.0, r)),
+    ("beam", 16, |p, r| block(p, [16.0, 1.0, 1.0], 8.0, r)),
+    ("ball", 8, |p, r| ball([p[0], p[1] + about(r, 3.0), p[2]], about(r, 1.5), BRIGHT, SOLID, Op::Fill)),
+    ("big ball", 24, |p, r| ball([p[0], p[1] + about(r, 8.0), p[2]], about(r, 8.0), BRIGHT, SOLID, Op::Fill)),
+    ("disc", 24, |p, r| {
+        let (a, b) = (about(r, 8.0), about(r, 1.0));
+        ellipsoid([p[0], p[1] + about(r, 10.0), p[2]], [a, b, a], BRIGHT, SOLID, Op::Fill)
+    }),
+    ("stick", 16, |p, r| {
+        let (l, turn, y) = (about(r, 12.0), r.next() * std::f64::consts::TAU, p[1] + about(r, 4.0));
+        let q = [p[0] + l * turn.cos(), y + l * (r.next() - 0.5), p[2] + l * turn.sin()];
+        capsule([p[0], y, p[2]], q, about(r, 0.5), BRIGHT, SOLID, Op::Fill)
+    }),
+    ("bent cone", 24, |p, r| {
+        let (h, w) = (about(r, 20.0), about(r, 2.0));
+        let bend = Curve::wandering(r.next_u64(), vec![fx(2.0), fx(1.0)]);
+        tube(&bend, [p[0], p[1] - 1.0, p[2]], [p[0], p[1] + h, p[2]], move |t| w * (1.0 - t * 2.0 / 3.0), BRIGHT, SOLID, Op::Fill)
+    }),
+    ("cone", 24, |p, r| {
+        let (h, w) = (about(r, 24.0), about(r, 4.0));
+        lathe(p, [p[0], p[1] + h, p[2]], move |t| w * (1.0 - t), BRIGHT, SOLID, Op::Fill)
+    }),
+    ("roof", 32, |p, r| {
+        let (l, w, h) = (about(r, 16.0), about(r, 12.0), about(r, 8.0));
+        let min = [p[0] - l / 2.0, p[1], p[2] - w / 2.0];
+        gable(min, [min[0] + l, min[1] + h, min[2] + w], 0, BRIGHT, SOLID, Op::Fill)
+    }),
 ];
 
 /** Many of a case on a ground at y = 0, one anywhere in each cell it stands in. */
@@ -130,29 +101,26 @@ fn world(make: Make, cell: i64) -> World {
 const LEVELS: u32 = 5;
 
 #[test]
-fn each_solid_keeps_the_contract_to_its_levels() {
+fn each_solid_keeps_to_its_baseline() {
     let region = Box3 { min: [-128, -16, -128], max: [128, 48, 128] };
-    let failed: Vec<String> = std::thread::scope(|scope| {
+    let breaks: Vec<Break> = std::thread::scope(|scope| {
         let runs: Vec<_> = CASES
             .iter()
-            .map(|&(name, cell, make, finer, above)| {
+            .map(|&(name, cell, make)| {
                 scope.spawn(move || {
                     let world = world(make, cell);
                     for level in [0, 2, LEVELS] {
                         whole_equals_parts(&world.generator, &region, level);
                     }
-                    let report = margins(name, &world, &[region], LEVELS, LEVELS);
-                    // The last level before the first that breaks, of each.
-                    let kept = |above: bool| {
-                        let broken = report.margins.iter().filter(|m| m.broken() && (m.measure == Measure::FromAbove) == above);
-                        broken.map(|m| m.level - 1).min().unwrap_or(LEVELS)
-                    };
-                    let kept = (kept(false), kept(true));
-                    (kept != (finer, above)).then(|| format!("{name} keeps it to {kept:?}, not {:?}:\n{}", (finer, above), report.broken()))
+                    let report = margins(name, &world, &[region], LEVELS);
+                    let broken = report.broken();
+                    let message = |m: &Margin| format!("{name}: {}", Report { margins: vec![m.clone()], ..broken.clone() });
+                    let of = |m: &Margin| Some((name.to_string(), m.level, m.difference(), m.spread));
+                    broken.margins.iter().map(|m| Break { of: of(m), message: message(m) }).collect::<Vec<_>>()
                 })
             })
             .collect();
-        runs.into_iter().filter_map(|run| run.join().expect("ran")).collect()
+        runs.into_iter().flat_map(|run| run.join().expect("ran")).collect()
     });
-    assert!(failed.is_empty(), "levels against the level two finer and from above:\n{}", failed.join("\n"));
+    hold_to_baseline(&breaks, concat!(env!("CARGO_MANIFEST_DIR"), "/data/contract/shapes.txt"), true);
 }

@@ -5,7 +5,7 @@
 
 use std::sync::mpsc;
 
-use worldgen::checks::contract::{check, check_far, parts_equal_whole, strata_kept};
+use worldgen::checks::contract::{Break, breaks, check, check_far, hold_to_baseline, parts_equal_whole};
 use worlds::{Entry, REGIONS_SEED, WORLDS};
 
 /** The seeds each world is checked at: each stratum's margins are averaged over all of them. */
@@ -17,7 +17,8 @@ const SEEDS: &[u64] = &[REGIONS_SEED, 1, 2, 3];
  * stratum's margins averaged over all of them; generated in parts too at
  * REGIONS_SEED; and in its far regions at REGIONS_SEED. CONTRACT_ONLY,
  * names of strata separated by commas ("towns › church,railway"), checks
- * only regions holding them. Panics with what breaks it.
+ * only regions holding them. Panics where it breaks it but as its
+ * baseline, data/contract/<name>.txt, says.
  */
 fn keeps_the_contract(entry: &Entry) {
     let only = std::env::var("CONTRACT_ONLY").unwrap_or_default();
@@ -39,7 +40,7 @@ fn keeps_the_contract(entry: &Entry) {
                             to_parts.send(boxes.to_vec()).expect("the parts' thread waiting");
                         }
                     };
-                    check(&format!("{} (seed {seed})", entry.name), &world, entry.levels, entry.from_above, only, surveyed)
+                    check(&format!("{} (seed {seed})", entry.name), &world, entry.levels, only, surveyed)
                 })
             })
             .collect();
@@ -77,8 +78,10 @@ fn keeps_the_contract(entry: &Entry) {
         }
         (checked, panicked)
     });
-    let broken: Vec<String> = panicked.into_iter().chain(strata_kept(&checked)).collect();
-    assert!(broken.is_empty(), "{}", broken.join("\n"));
+    // What panicked has no baseline: it always breaks.
+    let mut breaks = breaks(&checked);
+    breaks.extend(panicked.into_iter().map(|message| Break { of: None, message }));
+    hold_to_baseline(&breaks, &format!("{}/data/contract/{}.txt", env!("CARGO_MANIFEST_DIR"), entry.name), only.is_empty());
 }
 
 /** A test per world named, keeps_the_contract::<name>, and the names. */

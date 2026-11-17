@@ -508,24 +508,24 @@ Numbers are for the forest at 1280×800, as measured when written.
   Still to do:
   coverage by direction where sites are filled in part
   (fields' sites are wholly in a span or out, solids' views only for sheets).
-  `checks::cells` (an experiment) holds each cell, one by one,
-  to what is in it `FINER_BY` levels finer,
-  along each of the 12 directions, by the rows of the finer level's sites in it.
+  The contract holds each cell to what is in it `FINER_BY` levels finer
+  (`checks::cells`), along each of the 12 directions, by the rows of the finer level's sites in it,
+  on average over a stratum's cells.
   On a flat ground a cell at level 1 is a whole site or none,
   where what is in it stops a third of the rays along it, or more:
-  58 % of cells are further than `TOLERANCE`, as many on a slope.
-  Region means hid that; a cell checked alone does not,
-  and a track's sleepers, or a ground's sides swapped, are its cells too.
-  A world keeps it if every cell checked, along every direction, is within `TOLERANCE`
-  (`Cells::kept`): the simplest rule, till we know what good enough is.
-  Once worlds keep it, it is to take the place of the contract's cameras and its looks from above.
+  so the worlds, the engine's test worlds and every solid break it from level 1,
+  their cells stopping less than what is in them and spread past `SPREAD`,
+  as their baselines say (`worlds/data/contract/`, `worldgen/data/contract/`).
+  Sites that look as what is in them do along each direction
+  would keep it; drawn so, by rays through each site's voxel, they did,
+  but generating took 4 to 100 times as long.
   A field's sites seen along each direction, as much of their rays as cross their spans
   (tried, not kept), kept a flat ground's cells within it at level 2;
   but layers sharing a site, each giving only what it covers,
   leave it to guess how they lie: the valley's snow, painted over its ground, came out grey.
   A ray along no direction of the lattice reads a site's nearest directions alike:
-  straight down, the four up, so a wall, along which straight down is, shows half as across it
-  (`worldgen/tests/shapes.rs` from above to level 1, not 2); the cells' check reads along the lattice's only.
+  straight down, the four up, so a wall, along which straight down is, shows half as across it;
+  the cells' check reads along the lattice's only.
 - **The forest's canopy measures crowded trees in sample stands.**
   From above it reads each column's owner (`Rooms`),
   but what the trees standing in a column hide from the side
@@ -549,16 +549,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   `mountains.rs` turns its noise by 37° (`turned`),
   which leaves its four-fold harmonic mostly on the diagonals;
   22.6°, (12, 5)/13, would leave none there.
-- **Walls seen from above keep `FROM_ABOVE` looser than `TOLERANCE`**
-  (`worldgen/src/checks/contract.rs`).
-  Walls grown to a site show from above
-  ("Sheets and rods", above, and "Measured houses", below):
-  around the valley's towns 0.0496 apart at level 4, on average over seeds,
-  so the valley is checked from above to level 3;
-  the city's buildings keep within it at level 3 by 0.004,
-  the engine's village at level 2 by 0.01,
-  and several solids (`worldgen/tests/shapes.rs`) only within it.
-  With walls fixed, one tolerance would do.
 - **Measured houses show their walls from above at level 6**,
   which the contract does not check, and at level 4 in a region of houses alone
   (seed 2: plaster 0.19 against 0.01 at level 0, 0.106 apart;
@@ -567,9 +557,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   level 6 shows 46 % houses from above against 25 % at level 0,
   and 16 % roofs against 24 %: the rest is walls, timber and stone
   (0.31 off; 0.18 measured from level 1, 0.22 from level 3).
-  The engine's test village (`worldgen/tests/contract.rs`) is checked
-  from above only to level 2: at 3 its walls take over from the grass
-  (0.07 in a linear channel).
   Measured from level 4, a house is a few fine sites
   ("Levels" in `docs/generators.md`):
   its eaves, thinner than one, leave its walls' tops to show,

@@ -4,10 +4,9 @@
 use std::rc::Rc;
 
 use worldgen::World;
-use worldgen::checks::cells::cells;
 use worldgen::checks::contract::{
-    Measure, REGION, Report, SHOWN, STOPPED, TOLERANCE, assert_kept, check, heights_hold, margins, parts_equal_whole, regions, things_hold,
-    whole_equals_parts,
+    REGION, Report, SHOWN, STOPPED, TOLERANCE, breaks, check, heights_hold, hold_to_baseline, margins, parts_equal_whole, regions,
+    things_hold, whole_equals_parts,
 };
 use worldgen::checks::survey::survey;
 use worldgen::generator::{
@@ -184,42 +183,31 @@ fn anchors_along_an_axis_are_one_per_square_across_it() {
     }
 }
 
-/** `world` keeps the contract up to `levels`, seen from above to `from_above`. */
-fn keeps_the_contract(name: &str, world: &World, levels: u32, from_above: u32) {
+/**
+ * `world` keeps the contract up to `levels`, but where its baseline,
+ * data/contract/`name`.txt, says it breaks it, and by how much
+ * (CONTRACT_BLESS=1 writes it).
+ */
+fn keeps_the_contract(name: &str, world: &World, levels: u32) {
     let mut found = Vec::new();
-    let checked = check(name, world, levels, from_above, &[], |boxes| found = boxes.to_vec());
+    let checked = check(name, world, levels, &[], |boxes| found = boxes.to_vec());
     parts_equal_whole(name, world, &found, levels);
-    assert_kept(&[checked]);
+    hold_to_baseline(&breaks(&[checked]), &format!("{}/data/contract/{name}.txt", env!("CARGO_MANIFEST_DIR")), true);
 }
 
 #[test]
 fn fog_keeps_the_contract() {
-    keeps_the_contract("fog", &world_of(fog(), (0, 128)), 4, 3);
+    keeps_the_contract("fog", &world_of(fog(), (0, 128)), 4);
 }
 
 #[test]
 fn caves_keep_the_contract() {
-    keeps_the_contract("caves", &world_of(caves(), (-256, 256)), 3, 3);
+    keeps_the_contract("caves", &world_of(caves(), (-256, 256)), 3);
 }
 
 #[test]
 fn village_keeps_the_contract() {
-    // From above to 2: at 3 its walls take over from the ground (docs/todo.md, "Measured houses show their walls").
-    keeps_the_contract("village", &world_of(village(), (-64, 64)), 4, 2);
-}
-
-/** An experiment ("Cells hold what they look like" in docs/todo.md): how far the test worlds' cells are from what is in them. */
-#[test]
-#[ignore]
-fn cells_against_what_is_in_them() {
-    for (name, world, levels) in [
-        ("fog", world_of(fog(), (0, 128)), 4),
-        ("caves", world_of(caves(), (-256, 256)), 3),
-        ("village", world_of(village(), (-64, 64)), 4),
-    ] {
-        let boxes: Vec<Box3> = regions(&world, &[]).1.into_iter().map(|(b, _)| b).collect();
-        cells(name, &world, &boxes, levels).iter().for_each(|c| print!("{c}"));
-    }
+    keeps_the_contract("village", &world_of(village(), (-64, 64)), 4);
 }
 
 /**
@@ -325,7 +313,7 @@ fn fog_layer(from: i64, to: i64, kind: fn(i64) -> u8, extinction: fn(i64) -> f64
 
 /** The broken margins of fog of `kind` and `extinction` (as `fog_layer`) at levels 1 and 2. */
 fn fog_breaks(kind: fn(i64) -> u8, extinction: fn(i64) -> f64) -> Report {
-    margins("fog", &world_of(fog_layer(-64, 64, kind, extinction), (-256, 256)), &[b(0, -32, 0, 128, 32, 128)], 2, 2).broken()
+    margins("fog", &world_of(fog_layer(-64, 64, kind, extinction), (-256, 256)), &[b(0, -32, 0, 128, 32, 128)], 2).broken()
 }
 
 #[test]
@@ -342,14 +330,14 @@ fn finds_fog_of_another_colour_at_coarser_levels() {
     // Of one type, as the materials' types would have it, but darker.
     let smoke = fog_breaks(|spacing| if spacing == 1 { FOG } else { SMOKE }, |_| 0.01);
     assert!(smoke.margins.iter().all(|m| m.apart(STOPPED) < TOLERANCE), "{smoke}");
-    assert!(smoke.margins.iter().any(|m| m.measure == Measure::Cameras && m.apart(SHOWN) >= TOLERANCE), "{smoke}");
+    assert!(smoke.margins.iter().any(|m| m.apart(SHOWN) >= TOLERANCE), "{smoke}");
 }
 
 #[test]
 fn finds_fog_that_glows_only_near() {
     // Of one colour, but it glows only at level 0: what rays see is brighter there.
     let glow = fog_breaks(|spacing| if spacing == 1 { GLOWING_FOG } else { FOG }, |_| 0.01);
-    assert!(glow.margins.iter().any(|m| m.measure == Measure::FromAbove), "{glow}");
+    assert!(!glow.margins.is_empty(), "{glow}");
 }
 
 #[test]
