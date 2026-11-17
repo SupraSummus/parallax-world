@@ -105,14 +105,14 @@ landmarks iron	1	0.063	0.200
 landmarks iron	2	0.049	0.165
 landmarks iron	3	0.046	0.143
 landmarks iron	4	0.076	0.150
-landmarks lily	1	0.010	0.170
-landmarks lily	2	0.027	0.184
-landmarks lily	3	0.092	0.213
-landmarks lily	4	0.081	0.170
-landmarks mossyStone	1	0.055	0.172
-landmarks mossyStone	2	0.054	0.159
-landmarks mossyStone	3	0.071	0.165
-landmarks mossyStone	4	0.052	0.144
+landmarks lily	1	0.011	0.135
+landmarks lily	2	0.031	0.161
+landmarks lily	3	0.064	0.176
+landmarks lily	4	0.072	0.161
+landmarks mossyStone	1	0.045	0.160
+landmarks mossyStone	2	0.047	0.152
+landmarks mossyStone	3	0.070	0.167
+landmarks mossyStone	4	0.047	0.147
 landmarks planks	1	0.061	0.202
 landmarks planks	2	0.046	0.162
 landmarks planks	3	0.048	0.150
@@ -129,10 +129,10 @@ landmarks plasterWhite	1	0.068	0.168
 landmarks plasterWhite	2	0.048	0.160
 landmarks plasterWhite	3	0.034	0.127
 landmarks plasterWhite	4	0.022	0.112
-landmarks roofBrown	1	0.123	0.245
-landmarks roofBrown	2	0.060	0.133
-landmarks roofBrown	3	0.033	0.116
-landmarks roofBrown	4	0.039	0.125
+landmarks roofBrown	1	0.120	0.236
+landmarks roofBrown	2	0.056	0.125
+landmarks roofBrown	3	0.032	0.116
+landmarks roofBrown	4	0.037	0.124
 landmarks roofRed	1	0.072	0.175
 landmarks roofRed	2	0.054	0.167
 landmarks roofRed	3	0.061	0.144
@@ -172,10 +172,10 @@ landmarks water	1	0.070	0.177
 landmarks water	2	0.053	0.161
 landmarks water	3	0.060	0.137
 landmarks water	4	0.029	0.102
-landmarks' ground grass	1	0.059	0.178
-landmarks' ground grass	2	0.039	0.148
-landmarks' ground grass	3	0.035	0.132
-landmarks' ground grass	4	0.040	0.133
+landmarks' ground grass	1	0.049	0.167
+landmarks' ground grass	2	0.033	0.142
+landmarks' ground grass	3	0.035	0.134
+landmarks' ground grass	4	0.035	0.136
 landmarks' ground path	1	0.059	0.160
 landmarks' ground path	2	0.039	0.143
 landmarks' ground path	3	0.049	0.129
@@ -183,14 +183,14 @@ landmarks' ground sand	1	0.015	0.175
 landmarks' ground sand	2	0.019	0.199
 landmarks' ground sand	3	0.062	0.201
 landmarks' ground sand	4	0.090	0.171
-landmarks' ground scree	1	0.055	0.172
-landmarks' ground scree	2	0.054	0.159
-landmarks' ground scree	3	0.071	0.165
-landmarks' ground scree	4	0.052	0.144
-landmarks' ground soil	1	0.014	0.167
-landmarks' ground soil	2	0.021	0.186
-landmarks' ground soil	3	0.089	0.217
-landmarks' ground soil	4	0.071	0.171
+landmarks' ground scree	1	0.045	0.160
+landmarks' ground scree	2	0.047	0.152
+landmarks' ground scree	3	0.070	0.167
+landmarks' ground scree	4	0.047	0.147
+landmarks' ground soil	1	0.015	0.132
+landmarks' ground soil	2	0.025	0.163
+landmarks' ground soil	3	0.060	0.180
+landmarks' ground soil	4	0.063	0.163
 logs deadwood	1	0.026	0.190
 logs deadwood	2	0.013	0.190
 logs deadwood	3	0.031	0.183
@@ -199,10 +199,9 @@ logs moss	1	0.026	0.190
 logs moss	2	0.013	0.190
 logs moss	3	0.031	0.183
 logs moss	4	0.080	0.175
-mist mist	1	0.028	0.114
-mist mist	2	0.013	0.114
-mist mist	3	0.055	0.156
-mist mist	4	0.066	0.158
+mist mist	2	0.016	0.101
+mist mist	3	0.059	0.139
+mist mist	4	0.072	0.151
 moor boulders lichen	2	0.022	0.108
 moor boulders lichen	3	0.052	0.148
 moor boulders lichen	4	0.069	0.169
@@ -302,10 +301,10 @@ ponds reed	1	0.008	0.160
 ponds reed	2	0.008	0.144
 ponds reed	3	0.072	0.177
 ponds reed	4	0.040	0.139
-ponds water	1	0.005	0.155
-ponds water	2	0.010	0.158
-ponds water	3	0.086	0.201
-ponds water	4	0.065	0.164
+ponds water	1	0.004	0.135
+ponds water	2	0.011	0.144
+ponds water	3	0.074	0.184
+ponds water	4	0.056	0.156
 railway ballast	1	0.024	0.187
 railway ballast	2	0.014	0.193
 railway ballast	3	0.034	0.179

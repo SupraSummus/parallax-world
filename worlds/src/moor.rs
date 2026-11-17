@@ -29,7 +29,7 @@ use crate::landmarks::{self, Landmarks};
 use crate::mountains::{self, K as A};
 use crate::path::Path;
 use crate::railway::Railway;
-use crate::town::K as T;
+use crate::town::{self, K as T};
 use crate::valley::{self, Terrain};
 
 // After the valley's kinds, the moor's own; the rest are the forest's stone, soil and path,
@@ -182,6 +182,13 @@ fn to_segment(x: f64, z: f64, a: [f64; 2], b: [f64; 2]) -> f64 {
     let l2 = dx * dx + dz * dz;
     let t = if l2 == 0.0 { 0.0 } else { (((x - a[0]) * dx + (z - a[1]) * dz) / l2).clamp(0.0, 1.0) };
     js::hypot(&[x - a[0] - t * dx, z - a[1] - t * dz])
+}
+
+/** How much of a column the heath covers: all of it, or its surface alone. */
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Cover {
+    All,
+    Surface,
 }
 
 /** What a column is by the stream: in its bed, on its boggy banks a metre either side, or neither. */
@@ -461,6 +468,11 @@ impl Uplands {
         }
     }
 
+    /** How much of column (x, z) the moor would have alone with the forest, as the valley's land eases (valley::LEAD). */
+    fn alone(&self, x: i64, z: i64) -> Fx {
+        smoothstep(-valley::LEAD, valley::LEAD, self.bid(x, z))
+    }
+
     /** Its bid for column (x, z), from position alone. */
     pub fn bid(&self, x: i64, z: i64) -> Fx {
         let h = self.terrain.ground(x, z).round_units().0;
@@ -536,19 +548,38 @@ impl Domain for Moor {
         self.moorland.pull(x, z, ground)
     }
 
-    /** Drawn where it owns the land; its kinds are KINDS, after the valley's. */
+    /** Drawn where it owns the land, and its heath and mist over the landmarks on it (`Alone`); its kinds are KINDS, after the valley's. */
     fn layers(self: Rc<Self>, ground: &Rc<Sloped>, hold: Holding) -> Vec<Layer> {
-        let on = Ground { ground: ground.clone(), hold, path: self.path.clone(), under: self.under };
+        let alone = self.uplands.clone().map(|uplands| Alone {
+            landmarks: uplands.landmarks.clone(),
+            share: Plan::dithered("moor alone", town::BID_SCALE, move |x, z| uplands.alone(x, z)),
+        });
+        let on = Ground { ground: ground.clone(), hold, path: self.path.clone(), under: self.under, alone };
         layers(self.moorland.clone(), on)
     }
 }
 
-/** What the moor's layers lie on: the ground, its hold on the land, the path through it if any, and whether its peat is all the ground. */
+/**
+ * What the moor's layers lie on: the ground, its hold on the land, the
+ * path through it if any, whether its peat is all the ground, and, on
+ * the valley's land, the landmarks it stands round.
+ */
 struct Ground {
     ground: Rc<Sloped>,
     hold: Holding,
     path: Option<Rc<Path>>,
     under: bool,
+    alone: Option<Alone>,
+}
+
+/**
+ * The landmarks on the moor's land, and the share of each column it
+ * would have without them (`Uplands::alone`): a landmark keeps trees and
+ * steadings off its clearing, not the heath's cover or the mist.
+ */
+struct Alone {
+    landmarks: Rc<Landmarks>,
+    share: Plan<Fx>,
 }
 
 /** The moor's layers' state: its moorland, and what it lies on. */
@@ -568,6 +599,29 @@ impl Heath {
 
     fn share(&self, x: i64, z: i64) -> Fx {
         self.ground.hold.share(x, z)
+    }
+
+    /** Its share of column (x, z)'s air: of the land, or where a landmark reaches, as without it (asked only there: costly). */
+    fn air(&self, x: i64, z: i64) -> Fx {
+        match &self.ground.alone {
+            Some(a) if a.landmarks.site(x, z).is_some() => a.share.at(x, z),
+            _ => self.share(x, z),
+        }
+    }
+
+    /**
+     * How its heath covers column (x, z): all of it where it owns the
+     * land; on a landmark's grass it would own but for the landmark, all
+     * of it too, but only the surface inside the footprint, where the
+     * landmark builds.
+     */
+    fn covers(&self, x: i64, z: i64) -> Option<Cover> {
+        if self.owns(x, z) {
+            return Some(Cover::All);
+        }
+        let a = self.ground.alone.as_ref()?;
+        let outside = a.landmarks.lawn(x, z).filter(|_| a.share.at(x, z) >= Fx::HALF)?;
+        Some(if outside > Units(0) { Cover::All } else { Cover::Surface })
     }
 
     /** Whether column (x, z) is within `distance` of the path through it, if any. */
@@ -638,10 +692,10 @@ fn layers(moorland: Rc<Moorland>, ground: Ground) -> Vec<Layer> {
 
 /**
  * Mist: cold air pooled in the hollows, its top level over each, and in
- * patches over the rest; as deep as the moor's share, so it thins out
- * where the moor gives way. Drawn after all else, into what is empty, so
- * it stands among the heather, round the huts and over the water, and
- * takes nothing's place.
+ * patches over the rest; as deep as the moor's share of the air, so it
+ * thins out where the moor gives way. Drawn after all else, into what is
+ * empty, so it stands among the heather, round the huts, over the water
+ * and the landmarks, and takes nothing's place.
  */
 fn mist(f: Rc<Heath>) -> Field {
     let lid = {
@@ -654,7 +708,7 @@ fn mist(f: Rc<Heath>) -> Field {
     };
     let (ground, lies) = (f.ground.ground.clone(), f.moorland.lies);
     Field::columns("mist", 5.0, Op::Fill, move |x, z| {
-        let share = f.share(x, z);
+        let share = f.air(x, z);
         if share == Fx::ZERO {
             return Vec::new();
         }
@@ -680,9 +734,7 @@ fn heath(f: Rc<Heath>) -> Field {
     // Half a metre of its surface and of peat, heather on it; or peat down without end.
     let (of, under) = (f.ground.ground.clone(), f.ground.under);
     let field = Field::columns("heath", 0.7, Op::Paint, move |x, z| {
-        if !f.owns(x, z) || f.by_path(x, z, Fx::m(1.6)) {
-            return Vec::new();
-        }
+        let Some(cover) = f.covers(x, z).filter(|_| !f.by_path(x, z, Fx::m(1.6))) else { return Vec::new() };
         let h = f.height(x, z);
         let wet = f.moorland.water(x, z).is_some_and(|level| Units(h) <= level + BOG) || f.moorland.streamside(x, z) != Streamside::Off;
         let surface: Kind = if wet {
@@ -696,7 +748,7 @@ fn heath(f: Rc<Heath>) -> Field {
         };
         let column = Column::new(h).surface(surface, m(0.5));
         let column = if f.ground.under { column.under(F::soil) } else { column.surface(F::soil, m(0.5)) };
-        if wet {
+        if wet || cover == Cover::Surface {
             column
         } else if surface == K::heather.into() {
             column.medium(K::heatherSprigs, m(0.4), 0.5)
