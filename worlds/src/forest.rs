@@ -296,11 +296,14 @@ fn steep(ground: &Sloped, x: i64, z: i64, s: i64) -> bool {
     rises(x + s, z) || rises(x, z + s)
 }
 
+/** How far the path's edge lies from its centre line, in metres: the least and, where it frays, the most. */
+const PATH_EDGE: [f64; 2] = [1.1, 1.6];
+
 /** Column (x, z), given the ground's height there. */
 fn column_of(n: &Noise, path: &Path, x: i64, z: i64, h: i64) -> Column {
     let conifer = smoothstep(fx(0.4), fx(0.6), n.conifer.at(x, z)) * 3 / 4 + smoothstep(Fx::m(6.0), Fx::m(16.0), Units(h).to_fx()) / 4;
     let density = smoothstep(fx(0.3), fx(0.48), n.density.at(x, z));
-    let on_path = path.by(x, z, Fx::m(1.1) + n.path_edge.at(z, 0) * Units::m(0.5));
+    let on_path = path.by(x, z, Fx::m(PATH_EDGE[0]) + n.path_edge.at(z, 0) * Units::m(PATH_EDGE[1] - PATH_EDGE[0]));
     let floor = n.floor.at(x, z);
     let rock = if on_path {
         K::path
@@ -674,8 +677,9 @@ fn layers(scope: &Scope, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
         let f = f.clone();
         on_ground("boulders", vox(3.0) as i64).make(move |[x, y, z], cell| {
             let mut random = cell.random("boulder");
-            let chance = f.thinned(fx(0.15), x as i64, z as i64);
-            if random.chance(chance) { Some(Node::of(boulder(x, y, z, &mut random))) } else { None }
+            let (xi, zi) = (x as i64, z as i64);
+            let clear = !f.ground.path.by(xi, zi, Fx::m(PATH_EDGE[1] + BOULDER_RADIUS[1]));
+            if clear && random.chance(f.thinned(fx(0.15), xi, zi)) { Some(Node::of(boulder(x, y, z, &mut random))) } else { None }
         })
     };
     let logs = {
@@ -1288,11 +1292,15 @@ fn mushrooms(x: f64, y: f64, z: f64, kind: K, random: &mut Rng) -> Vec<Shape> {
     shapes
 }
 
+/** A boulder's radii across, in metres: the least and the most. */
+const BOULDER_RADIUS: [f64; 2] = [0.8, 2.2];
+
 /** A half-buried rock with moss on its upper side. */
 fn boulder(x: f64, ground: f64, z: f64, random: &mut Rng) -> Vec<Shape> {
-    let rx = vox(0.8 + random.next() * 1.4);
+    let [least, most] = BOULDER_RADIUS;
+    let rx = vox(least + random.next() * (most - least));
     let ry = rx * (0.6 + random.next() * 0.3);
-    let rz = vox(0.8 + random.next() * 1.4);
+    let rz = vox(least + random.next() * (most - least));
     vec![
         Shape::ellipsoid([x, ground, z], [rx, ry, rz], K::stone).paint(),
         ellipsoid(
