@@ -517,8 +517,12 @@ Numbers are for the forest at 1280×800, as measured when written.
   their cells stopping less than what is in them and spread past `SPREAD`,
   as their baselines say (`worlds/data/contract/`, `worldgen/data/contract/`).
   Sites that look as what is in them do along each direction
-  would keep it; drawn so, by rays through each site's voxel, they did,
-  but generating took 4 to 100 times as long.
+  would keep it; drawn so, by lines through each site's voxel, they did,
+  but generating took 7 to 50 times as long
+  ([SupraSummus/parallax-world#266](https://github.com/SupraSummus/parallax-world/pull/266), a draft).
+  What costs is testing each line against each shape in a site filled in part,
+  not keeping where in the site pieces lie:
+  keeping none was barely faster, and pieces drawn apart leaked rays where they met.
   A field's sites seen along each direction, as much of their rays as cross their spans
   (tried, not kept), kept a flat ground's cells within it at level 2;
   but layers sharing a site, each giving only what it covers,
@@ -733,6 +737,21 @@ Numbers are for the forest at 1280×800, as measured when written.
 
 ## Ideas
 
+- Check a component alone.
+  Working on one thing, a church or a kind of tree,
+  a world's author wants its contract alone, quickly, not the whole world's.
+  A component is a name in the survey's tree (`towns › block › house`),
+  as strata and declared accuracies are (`Accuracy::of`).
+  Generated alone, only its drawables are drawn
+  (a filter while generating, as `checking_skipped` is one),
+  and all it reads stays (plans, the ground, claims), so it stands where it would.
+  `CONTRACT_ONLY` would then draw only what it names, not only pick its regions,
+  each component with a baseline of its own, as its numbers alone differ from the world's.
+  A component made of others (a town, the world itself) is checked the same way:
+  if its parts keep the contract alone and it does not,
+  the fault is in how it puts them together.
+  A carve alone has nothing to cut: it is checked with its parent.
+  Its accuracy could then be declared next to its code, not in `WORLDS`.
 - The forest's and the learned town's paths are still sines about x = 0
   (`Relief::path_x` in `worlds/src/forest.rs`);
   a route along their floor (`worlds/src/course.rs`) would serve them too.
