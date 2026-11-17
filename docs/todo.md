@@ -75,6 +75,11 @@ Numbers are for the forest at 1280×800, as measured when written.
   full already: what the solid stops is lost.
   From level 4, small blocks, balls and specks on the ground
   keep 0.4 to 0.6 of what they stop from above; lifted clear of it, 0.8.
+- **A sheet over nothing, drawn on its own, still breaks the contract.**
+  The market hall's timber floor, a child of its own
+  ("Levels" in `docs/generators.md`),
+  stopped less than level 0 by 0.07 to 0.10 at levels 1, 2 and 4;
+  measured with the hall, it darkened the walls over it, so it was taken out.
 - **Most surfaces are thinner than `SURFACE`.**
   The valley's snow and landmarks' ground lie as deep as level 4 draws them;
   the fields, towns, the learned town, the moor, the forest and the railway

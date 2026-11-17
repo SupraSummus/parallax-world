@@ -336,6 +336,8 @@ A roof is solid down to its eaves, its gables walls only at its ends
 (`gable_ends` in `town.rs`), so it is roof from above, not the walls under it.
 A sheet over nothing, such as a windmill's stage, is a child of its own,
 drawn as sheets are, not measured.
+A thin roof over nothing, such as a stall's awning, is a flat sheet:
+a gable's thin edges are lost from level 1.
 
 ## Points
 
