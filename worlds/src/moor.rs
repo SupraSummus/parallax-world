@@ -548,10 +548,11 @@ impl Domain for Moor {
         self.moorland.pull(x, z, ground)
     }
 
-    /** Drawn where it owns the land, and its heath and mist over the landmarks on it (`Alone`); its kinds are KINDS, after the valley's. */
+    /** Drawn where it owns the land, its heath over the landmarks on it and its mist over them and the railway (`Alone`); its kinds are KINDS, after the valley's. */
     fn layers(self: Rc<Self>, ground: &Rc<Sloped>, hold: Holding) -> Vec<Layer> {
         let alone = self.uplands.clone().map(|uplands| Alone {
             landmarks: uplands.landmarks.clone(),
+            railway: uplands.railway.clone(),
             share: Plan::dithered("moor alone", town::BID_SCALE, move |x, z| uplands.alone(x, z)),
         });
         let on = Ground { ground: ground.clone(), hold, path: self.path.clone(), under: self.under, alone };
@@ -573,12 +574,14 @@ struct Ground {
 }
 
 /**
- * The landmarks on the moor's land, and the share of each column it
- * would have without them (`Uplands::alone`): a landmark keeps trees and
- * steadings off its clearing, not the heath's cover or the mist.
+ * The landmarks and the railway on the moor's land, and the share of
+ * each column it would have without them (`Uplands::alone`): a landmark
+ * keeps trees and steadings off its clearing, not the heath or the mist;
+ * the railway keeps nothing off the mist.
  */
 struct Alone {
     landmarks: Rc<Landmarks>,
+    railway: Rc<Railway>,
     share: Plan<Fx>,
 }
 
@@ -601,10 +604,10 @@ impl Heath {
         self.ground.hold.share(x, z)
     }
 
-    /** Its share of column (x, z)'s air: of the land, or where a landmark reaches, as without it (asked only there: costly). */
+    /** Its share of column (x, z)'s air: of the land, or where a landmark or the railway reaches, as without them (asked only there: costly). */
     fn air(&self, x: i64, z: i64) -> Fx {
         match &self.ground.alone {
-            Some(a) if a.landmarks.site(x, z).is_some() => a.share.at(x, z),
+            Some(a) if a.landmarks.site(x, z).is_some() || a.railway.reaches(x, z, 0) => a.share.at(x, z),
             _ => self.share(x, z),
         }
     }
@@ -694,8 +697,8 @@ fn layers(moorland: Rc<Moorland>, ground: Ground) -> Vec<Layer> {
  * Mist: cold air pooled in the hollows, its top level over each, and in
  * patches over the rest; as deep as the moor's share of the air, so it
  * thins out where the moor gives way. Drawn after all else, into what is
- * empty, so it stands among the heather, round the huts, over the water
- * and the landmarks, and takes nothing's place.
+ * empty, so it stands among the heather, round the huts, over the water,
+ * the landmarks and the railway's track, and takes nothing's place.
  */
 fn mist(f: Rc<Heath>) -> Field {
     let lid = {
