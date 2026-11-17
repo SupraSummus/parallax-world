@@ -481,6 +481,14 @@ Numbers are for the forest at 1280×800, as measured when written.
   (`Cell::random`), not its `Scope`: two forests would grow the same trees.
   And its kinds' ids are its place in a table every world concatenates
   in one order (`kinds!`'s `base`); named, the world would number them.
+- **A domain owns a column's things, cover and air at once.**
+  So a landmark's clearing, kept for itself to keep trees off,
+  cut the moor's heath and mist away.
+  The moor now reads the landmarks and its bid without them (`moor::Alone`),
+  but its mist still stops at the railway,
+  and a landmark among fields or dense forest paints its own grass.
+  Land could share cover and air apart from things,
+  a domain bidding for its things only where it builds.
 - **Worlds share tables of kinds**, so the contract only prints
   the kinds nothing surveyed draws, and fails on silent layers alone:
   the moor's, the learned town's and the city's are the valley's.

@@ -435,9 +435,10 @@ enum Spot {
 /** The valley's landmarks, claimed anywhere. */
 pub struct Landmarks {
     terrain: Rc<Terrain>,
-    sites: Claims<Site>,
-    /** Patches of gravel and of a yard's grass; clumps of reeds. */
-    patches: ValueNoise<{ m(3.0) }>,
+    sites: Rc<Claims<Site>>,
+    /** What each column round a landmark is. */
+    spots: Plan<Spot>,
+    /** Clumps of reeds. */
     reeds: ValueNoise<{ m(2.5) }>,
 }
 
@@ -447,14 +448,19 @@ impl Landmarks {
         let sites = {
             let (terrain, s) = (terrain.clone(), scope.seed("sites"));
             let first = levelled(&terrain, first(&terrain, &mut Rng::new(hash64(s, 0, 0, 0))));
-            Claims::new("landmarks", s, CLAIM, APART, Some(first.centre), move |spot, random| {
+            Rc::new(Claims::new("landmarks", s, CLAIM, APART, Some(first.centre), move |spot, random| {
                 if spot == first.centre {
                     return Some((first.centre, first));
                 }
                 claim(&terrain, &railway, spot, random).map(|site| (site.centre, site))
-            })
+            }))
         };
-        Landmarks { terrain, sites, patches: ValueNoise::new(scope.seed("patches")), reeds: ValueNoise::new(scope.seed("reeds")) }
+        let spots = {
+            // Patches of gravel and of a yard's grass.
+            let (terrain, sites, patches) = (terrain.clone(), sites.clone(), ValueNoise::new(scope.seed("patches")));
+            Plan::dithered("landmark spots", SPOT_SCALE, move |x, z| spot(&terrain, &sites, &patches, x, z))
+        };
+        Landmarks { terrain, sites, spots, reeds: ValueNoise::new(scope.seed("reeds")) }
     }
 
     /**
@@ -483,40 +489,45 @@ impl Landmarks {
         self.sites.near(x, z, NEAR).map(|(_, s)| s)
     }
 
-    /** What column (x, z) is of the landmark there. */
-    fn spot(&self, x: i64, z: i64) -> Spot {
-        let Some(s) = self.site(x, z) else { return Spot::Off };
-        let d = s.outside(x, z);
-        if d > s.clearing + Units::m(2.0) {
-            return Spot::Off;
+    /** Where a landmark's ground is grass, how far column (x, z) is outside its footprint: what the moor's heath covers (moor.rs). */
+    pub fn lawn(&self, x: i64, z: i64) -> Option<Units> {
+        (self.spots.at(x, z) == Spot::Grass).then(|| self.site(x, z).map_or(Units(0), |s| s.outside(x, z)))
+    }
+}
+
+/** What column (x, z) is of the landmark of `sites` there, on `terrain`, with `patches` of gravel and of a yard's grass. */
+fn spot(terrain: &Terrain, sites: &Claims<Site>, patches: &ValueNoise<{ m(3.0) }>, x: i64, z: i64) -> Spot {
+    let Some((_, s)) = sites.near(x, z, NEAR) else { return Spot::Off };
+    let d = s.outside(x, z);
+    if d > s.clearing + Units::m(2.0) {
+        return Spot::Off;
+    }
+    let (dx, dz) = (x - s.centre[0], z - s.centre[1]);
+    let [hx, hz] = s.half();
+    let patch = patches.at(x, z);
+    match s.landmark {
+        Landmark::Ruin if d == Units(0) && patch > fx(0.62) => Spot::Gravel,
+        Landmark::Watchtower if dx.abs().max(dz.abs()) < m(2.6) => Spot::Trodden,
+        Landmark::Chapel => {
+            // A path from its door to the valley's.
+            let [ux, _, uz] = s.frame().site([s.size[0] / 2, 0, 0]);
+            let path = terrain.path.x(z).round_units().0;
+            let along = (x - ux) * (path - ux) >= 0 && (x - ux).abs() <= (path - ux).abs();
+            if (z - uz).abs() <= m(0.8) && along { Spot::Trodden } else { Spot::Grass }
         }
-        let (dx, dz) = (x - s.centre[0], z - s.centre[1]);
-        let [hx, hz] = s.half();
-        let patch = self.patches.at(x, z);
-        match s.landmark {
-            Landmark::Ruin if d == Units(0) && patch > fx(0.62) => Spot::Gravel,
-            Landmark::Watchtower if dx.abs().max(dz.abs()) < m(2.6) => Spot::Trodden,
-            Landmark::Chapel => {
-                // A path from its door to the valley's.
-                let [ux, _, uz] = s.frame().site([s.size[0] / 2, 0, 0]);
-                let path = self.terrain.path.x(z).round_units().0;
-                let along = (x - ux) * (path - ux) >= 0 && (x - ux).abs() <= (path - ux).abs();
-                if (z - uz).abs() <= m(0.8) && along { Spot::Trodden } else { Spot::Grass }
+        Landmark::Pond => {
+            let bowl = s.bowl(x, z);
+            if bowl < fx(0.7) {
+                Spot::Mud
+            } else if bowl < fx(1.5) {
+                if patch > fx(0.65) { Spot::Gravel } else { Spot::Sand }
+            } else {
+                Spot::Grass
             }
-            Landmark::Pond => {
-                let bowl = s.bowl(x, z);
-                if bowl < fx(0.7) {
-                    Spot::Mud
-                } else if bowl < fx(1.5) {
-                    if patch > fx(0.65) { Spot::Gravel } else { Spot::Sand }
-                } else {
-                    Spot::Grass
-                }
-            }
-            Landmark::Farmstead if dx.abs() < hx - m(1.0) && dz.abs() < hz - m(1.0) && patch < fx(0.6) => Spot::Trodden,
-            Landmark::Windmill if dx * dx + dz * dz < m(4.6) * m(4.6) => Spot::Trodden,
-            _ => Spot::Grass,
         }
+        Landmark::Farmstead if dx.abs() < hx - m(1.0) && dz.abs() < hz - m(1.0) && patch < fx(0.6) => Spot::Trodden,
+        Landmark::Windmill if dx * dx + dz * dz < m(4.6) * m(4.6) => Spot::Trodden,
+        _ => Spot::Grass,
     }
 }
 
@@ -549,15 +560,11 @@ impl Domain for Landmarks {
 }
 
 fn layers(landmarks: Rc<Landmarks>, hold: Holding, ground: Rc<Sloped>) -> Vec<Layer> {
-    let spots = {
-        let landmarks = landmarks.clone();
-        Rc::new(Plan::dithered("landmark spots", SPOT_SCALE, move |x, z| landmarks.spot(x, z)))
-    };
     let surface = {
-        let ground = ground.clone();
+        let (landmarks, ground) = (landmarks.clone(), ground.clone());
         let on = ground.clone();
         Field::columns("landmarks' ground", 0.55, Op::Paint, move |x, z| {
-            let spot = spots.at(x, z);
+            let spot = landmarks.spots.at(x, z);
             if spot == Spot::Off || !hold.owns(x, z) {
                 return Vec::new();
             }

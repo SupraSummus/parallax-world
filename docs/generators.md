@@ -944,8 +944,10 @@ whether it is up on a rise or down in a hollow,
 how even the ground under the footprint is.
 A site levels the ground plan under it (a pond digs a bowl),
 bids for its footprint and a clearing, which trees and crops then keep off,
-and paints its ground;
-a population anchored at the sites builds each in its own frame.
+and paints its ground.
+On the moor's land, the moor's heath covers its grass
+and its mist lies over it, as without the landmark (`moor::Alone`).
+A population anchored at the sites builds each in its own frame.
 A pond's water stops under the rim its bowl leaves,
 so it never stands over the ground round it.
 The first is a chapel beside the path, in the camera's view at spawn.

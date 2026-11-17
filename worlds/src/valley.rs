@@ -34,6 +34,9 @@ use crate::town::{self, Towns};
  */
 const SLOPE: i64 = 8;
 
+/** How far a domain's bid leads the rest's for all of a column (Land). */
+pub const LEAD: Fx = fx(0.125);
+
 /**
  * The valley's lie of the land before what is built on it shapes it: its
  * first two bands, the relief and the ranges along the path, then
@@ -125,7 +128,7 @@ pub fn valley(seed: u64) -> World {
         Fields::new(scope, path, bid)
     };
     let domains: [Rc<dyn Domain>; 7] = [Rc::new(forest), towns, Rc::new(fields), landmarks, moor, ranges, railway];
-    let layers = compose(&domains, &ground, town::BID_SCALE, fx(0.125));
+    let layers = compose(&domains, &ground, town::BID_SCALE, LEAD);
     World { generator: Generator { kinds: kinds(), seed: world.seed("layers"), layers }, spawn, heights: Some(mountains::HEIGHTS), points }
 }
 
