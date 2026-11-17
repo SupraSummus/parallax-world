@@ -289,7 +289,7 @@ fn place(terrain: &Terrain, [x, z]: [i64; 2]) -> Place {
     let ring = [(r, 0), (-r, 0), (0, r), (0, -r), (d, d), (d, -d), (-d, d), (-d, -d)].map(|(dx, dz)| terrain.ground(x + dx, z + dz));
     Place {
         town: terrain.towns.distance(x, z),
-        path: (Units(x).to_fx() - terrain.path_x(z)).abs().floor_units(),
+        path: terrain.path.across(x, z).abs().floor_units(),
         prominence: (terrain.ground(x, z) - Fx::mean(ring)).round_units(),
     }
 }
@@ -298,7 +298,7 @@ fn place(terrain: &Terrain, [x, z]: [i64; 2]) -> Place {
 fn fits(terrain: &Terrain, railway: &Railway, site: &Site) -> bool {
     let ([hx, hz], [cx, cz]) = (site.half(), site.centre);
     let off_path = (cz - hz..=cz + hz).step_by(m(1.0) as usize).all(|z| {
-        let path = terrain.path_x(z).round_units().0;
+        let path = terrain.path.x(z).round_units().0;
         (path - cx).abs() - hx >= m(3.5)
     });
     // Its footprint's edge, every 2 m along each of its four sides, and its middle.
@@ -374,7 +374,7 @@ fn claim(terrain: &Terrain, railway: &Railway, spot: [i64; 2], random: &mut Rng)
             if (x - spot[0]).abs() > CLAIM / 2 || (z - spot[1]).abs() > CLAIM / 2 {
                 continue;
             }
-            let turns = if spec.faces_path { facing(terrain.path_x(z).round_units().0 - x, 0) } else { random.below(4) as i64 };
+            let turns = if spec.faces_path { facing(terrain.path.x(z).round_units().0 - x, 0) } else { random.below(4) as i64 };
             let site = Site { landmark, centre: [x, z], level: 0, size, turns, seed: random.next_u64(), clearing: spec.clearing };
             if fits(terrain, railway, &site) && even(terrain, &site) && (spec.suits)(&place(terrain, site.centre)) {
                 return Some(levelled(terrain, site));
@@ -392,7 +392,7 @@ fn candidate(terrain: &Terrain, stands: Stands, spot: [i64; 2], size: [i64; 2], 
         Stands::Anywhere => Some([x0 + below(random, CLAIM), z0 + below(random, CLAIM)]),
         Stands::ByPath => {
             let z = z0 + below(random, CLAIM);
-            Some([terrain.path_x(z).round_units().0 + side * (size[1] / 2 + m(5.0) + below(random, m(5.0))), z])
+            Some([terrain.path.x(z).round_units().0 + side * (size[1] / 2 + m(5.0) + below(random, m(5.0))), z])
         }
         Stands::ByTown => {
             let t = terrain.towns.near(spot[1])?;
@@ -408,11 +408,11 @@ fn first(terrain: &Terrain, random: &mut Rng) -> Site {
     let size = (landmark.spec().size)(random);
     let z = m(2.0);
     // On the side the camera, on the path at z = -31 m, looks across to.
-    let side = if terrain.path_x(m(-31.0)) > terrain.path_x(z) { 1 } else { -1 };
+    let side = if terrain.path.x(m(-31.0)) > terrain.path.x(z) { 1 } else { -1 };
     // Across the path, clear of it where it bends nearest.
     let near = (z - size[0] / 2..=z + size[0] / 2)
         .step_by(m(1.0) as usize)
-        .map(|z| terrain.path_x(z).round_units().0 * side)
+        .map(|z| terrain.path.x(z).round_units().0 * side)
         .max()
         .expect("a step");
     let x = side * (near + size[1] / 2 + m(5.0));
@@ -465,7 +465,7 @@ impl Landmarks {
     pub fn first(&self, landmark: Landmark) -> Site {
         let rows = (0..ROWS).flat_map(|k| [-k, k + 1]).map(|k| k * NEAR);
         rows.flat_map(|z| {
-            let path = self.terrain.path_x(z).round_units().0;
+            let path = self.terrain.path.x(z).round_units().0;
             (0..ACROSS).flat_map(|i| [i, -i - 1]).map(move |i| [path + i * NEAR, z])
         })
         .find_map(|[x, z]| self.site(x, z).filter(|s| s.landmark == landmark))
@@ -498,7 +498,7 @@ impl Landmarks {
             Landmark::Chapel => {
                 // A path from its door to the valley's.
                 let [ux, _, uz] = s.frame().site([s.size[0] / 2, 0, 0]);
-                let path = self.terrain.path_x(z).round_units().0;
+                let path = self.terrain.path.x(z).round_units().0;
                 let along = (x - ux) * (path - ux) >= 0 && (x - ux).abs() <= (path - ux).abs();
                 if (z - uz).abs() <= m(0.8) && along { Spot::Trodden } else { Spot::Grass }
             }
@@ -524,7 +524,7 @@ impl Domain for Landmarks {
     fn bid(&self, x: i64, z: i64) -> Fx {
         let most = fx(4.0);
         let Some(s) = self.site(x, z) else { return -most };
-        if (Units(x).to_fx() - self.terrain.path_x(z)).abs() < Fx::m(2.4) {
+        if self.terrain.path.across(x, z).abs() < Fx::m(2.4) {
             return -most;
         }
         ((s.clearing - s.outside(x, z)).to_fx() * most / FADE).clamp(-most, most)

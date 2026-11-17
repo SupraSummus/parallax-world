@@ -22,8 +22,8 @@ use worldgen::noise::{Fx, Rng, ease_towards, fx, hash64};
 use worldgen::plan::{Claims, Holding, Plan, Sloped};
 use worldgen::units::{Units, m};
 
-use crate::course::Course;
 use crate::forest::{self, K as F, Relief, Species, make_tree};
+use crate::path::Spine;
 
 kinds! {
     base: forest::KINDS.len() as u8;
@@ -401,7 +401,7 @@ impl Towns {
      * it), claimed from spots within half a cell of x = 0, the course
      * straightened, at the mean height of the valley floor under it.
      */
-    pub fn new(scope: &Scope, relief: Rc<Relief>, course: Rc<Course>) -> Towns {
+    pub fn new(scope: &Scope, relief: Rc<Relief>, course: Spine) -> Towns {
         let s = scope.seed("towns");
         let claims = Claims::new("towns", s, CLAIM, APART, Some([0, FIRST]), move |[x, z], random| {
             let mut town = if [x, z] == [0, FIRST] {

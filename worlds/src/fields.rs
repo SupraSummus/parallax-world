@@ -105,7 +105,7 @@ impl Plots {
         if !self.hold.owns(x, z) || self.path.by(x, z, Units::m(1.6).to_fx()) {
             return None;
         }
-        let from_path = Units(x).to_fx() - self.path.x(z);
+        let from_path = self.path.across(x, z);
         let side = from_path.signum();
         let across = from_path.abs().floor_units() + (self.warp.at(z, 0) * Units::m(12.0)).floor_units();
         let along = Units(z) + (self.warp.at(x, 1) * Units::m(12.0)).floor_units();

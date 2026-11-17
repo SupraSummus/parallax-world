@@ -152,9 +152,12 @@ It looks only into segments whose corridor reaches that near,
 so it costs little but close to the curve.
 One rule serves every piece of a curve too long to make whole,
 between ends the world finds near a point.
-A path (`worlds/src/path.rs`) is one, in pieces 8 m long:
-what is on it or keeps off it measures from the curve,
-what is laid out beside it across its centre line, along x.
+A path (`worlds/src/path.rs`) is one, in pieces 8 m long,
+about its centre line, a **spine** (`Spine`): a line by z.
+What is on the path or keeps off it measures from the curve,
+what is laid out beside it across the spine.
+The path measures how steeply it runs, piece by piece,
+which bounds how far across a column near it can be.
 The valley's path follows a route along its floor (`worlds/src/course.rs`),
 a curve in pieces 1 km long on the valley's course at their ends,
 each point the lowest of the floor within its level's wander,

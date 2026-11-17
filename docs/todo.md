@@ -609,13 +609,14 @@ Numbers are for the forest at 1280×800, as measured when written.
   The valley's landmarks: 118 at eight seeds (not 686 as one per region),
   under ENOUGH a seed, so no seed is tested alone;
   its towns 57, its haystacks 2.
-- **The valley is still laid out along x, across lines by z.**
+- **The valley is still laid out along x, across spines by z.**
   The path is a curve (`worlds/src/path.rs`),
   but the ground's walls and dip, the fields' plots
-  and the landmarks measure across its centre line,
+  and the landmarks measure across its spine (`Spine`),
   and the ranges across the valley's course (`worlds/src/course.rs`),
   so the valley winds, but never turns back on itself.
-  A curve's distance folds past a bend's radius
+  A spine along a curve, across and along it, would let it,
+  but a curve's distance folds past a bend's radius
   (16 m at the tightest, where the path bends onto a street),
   which would crease the walls and the ranges,
   and costs a search far from the curve;
@@ -732,6 +733,10 @@ Numbers are for the forest at 1280×800, as measured when written.
   `llvm::sys::getHostCPUName` made to return `znver4` by `LD_PRELOAD`,
   and `MESA_SHADER_CACHE_DISABLE=true`,
   else lavapipe reuses what it compiled for another CPU.
+- **A path's bend is promised by hand** (`BEND` in `worlds/src/path.rs`),
+  for each world's route, though its slope is measured:
+  `worldgen::curve` takes a wander per level, fixed for the whole curve.
+  Corridors measured piece by piece would let a curve keep its own.
 - **README's valley shots predate the winding valley** (`docs/shots/`).
   The view down it and the ranges were taken at fixed cameras
   where the valley ran along x = 0; retake them (`pnpm shot`).

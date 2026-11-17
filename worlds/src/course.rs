@@ -1,6 +1,6 @@
 //! The valley's course, and the route its path takes along its floor.
 //!
-//! The course is the line the valley winds along, kilometres either way:
+//! The course is the spine the valley winds along, kilometres either way:
 //! noise along z, smooth at every scale, so it never runs straight for
 //! long, through x = 0 at z = 0, where the camera starts. The ranges
 //! stand either side of it, the towns on it, the railway beside it.
@@ -20,26 +20,18 @@ use worldgen::noise::{Fx, fx, hash, unit};
 use worldgen::plan::Plan;
 use worldgen::units::{UNIT_SIZE, Units, m};
 
+use crate::path::Spine;
+
 /** The course's octaves: each one's swing across, from its least to its most, and its period along z, metres. */
 const OCTAVES: [(f64, f64); 2] = [(1200.0, 8000.0), (220.0, 2200.0)];
 /** The most the course runs across z: a quintic ease runs at most 15/8 of its rise over its run. */
 pub const COURSE_SLOPE: f64 = 1.875 * (OCTAVES[0].0 / OCTAVES[0].1 + OCTAVES[1].0 / OCTAVES[1].1);
 
-/** The valley's course: where it runs at each z. */
-pub struct Course {
-    seeds: [u64; 2],
-}
-
-impl Course {
-    pub fn new(scope: &Scope) -> Course {
-        Course { seeds: [scope.seed("long"), scope.seed("short")] }
-    }
-
-    /** Its x at z, with its fraction. */
-    pub fn x(&self, z: i64) -> Fx {
-        let at = |zm: f64| -> f64 { OCTAVES.iter().zip(self.seeds).map(|(&(swing, period), seed)| swing * noise(seed, zm / period)).sum() };
-        Fx::m(at(z as f64 * UNIT_SIZE) - at(0.0))
-    }
+/** The valley's course of `scope`. */
+pub fn course(scope: &Scope) -> Spine {
+    let seeds = [scope.seed("long"), scope.seed("short")];
+    let at = move |zm: f64| -> f64 { OCTAVES.iter().zip(seeds).map(|(&(swing, period), seed)| swing * noise(seed, zm / period)).sum() };
+    Spine::new(move |z| Fx::m(at(z as f64 * UNIT_SIZE) - at(0.0)))
 }
 
 /** Noise along a line: a value in 0..1 at each whole t, eased between them by a quintic, so it bends smoothly. */
@@ -65,21 +57,6 @@ const TRIES: i64 = 8;
 /** Plan scale of the route's pieces: under the towns' (which the path bends onto), over the railway's (which reads the ground about it). */
 const SCALE: i64 = m(512.0);
 
-/**
- * The most the route runs across z: the course's slope between its
- * pieces' ends, and each level's point turning the halves either side
- * by its wander over half the level's segment. A B-spline through the
- * points runs no steeper than the segments between them.
- */
-pub const ROUTE_SLOPE: f64 = {
-    let (mut slope, mut level) = (COURSE_SLOPE, 0);
-    while level < LEVELS {
-        slope += 2.0 * WANDER[level] as f64 / (PIECE >> level) as f64;
-        level += 1;
-    }
-    slope
-};
-
 /** The route along the valley's floor: its points, by piece. */
 pub struct Route {
     pieces: Plan<Option<Rc<Vec<[Fx; 2]>>>>,
@@ -87,7 +64,7 @@ pub struct Route {
 
 impl Route {
     /** The route along `course` keeping lowest on `floor`, the ground at (x, z) before anything shapes it. */
-    pub fn new(course: Rc<Course>, floor: impl Fn(i64, i64) -> Fx + 'static) -> Route {
+    pub fn new(course: Spine, floor: impl Fn(i64, i64) -> Fx + 'static) -> Route {
         let wander = WANDER.iter().map(|&w| Units(w).to_fx()).collect();
         let rule = Curve::new(wander, move |level, a: [Fx; 2], b: [Fx; 2]| {
             let (middle, z) = ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2);

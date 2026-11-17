@@ -47,6 +47,7 @@ one world's: `cargo test --release -p worlds --test contract valley`.
 | `web/src/lib/world.test.ts` | The worlds listed; a generated world's grids put together from parts generated alone |
 | `worlds/tests/contract.rs`, `worldgen/tests/contract.rs`, `worldgen/tests/shapes.rs` | Every world, the engine's test worlds and each solid keep the contract (`worldgen/src/checks/contract.rs`): generated in pieces equals generated whole; each stratum's levels agree on average on what rays see, and seen from above with level 0; each solid in the worst case |
 | `worlds/tests/cost.rs` | What generating each world costs, counted, stays within a quarter of its baseline (`worlds/data/cost/`; "Cost" in `docs/generators.md`) |
+| `worlds/src/path.rs` | Whether a column is by a path agrees with its distance to the path's curve, round a steep, fast-bending spine |
 | `worlds/src/railway.rs` | The valley's railway keeps its grade and its side of the valley, out of towns; it bends gently; it has bridges and tunnels, none a stub |
 | `worldgen/src/points.rs` | Points: a cell holds its children's, whichever is asked first; they stand where their mark has a chance, as often as it is; a blur is its cells' counts weighed, wherever its blocks fall |
 | `worlds/tests/places.rs` | No world's things prefer places on its grids (`worldgen/src/places.rs`), but those known to (`KNOWN`, docs/todo.md) |
