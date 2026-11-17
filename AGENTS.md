@@ -97,7 +97,7 @@ worldgen/                    # The world-generation engine, moving to integers, 
 │   ├── frame.rs             # Things built in frames of their own: quarter turns, mirrors, walls
 │   ├── world.rs             # World: what a host needs to show one (generator, spawn, heights), the places it names
 │   ├── picture.rs           # Pictures of a world at one level: rays through its voxels, as PNGs, or through its sites' alpha
-│   ├── light.rs             # Light (a prototype, for look and native's computed lighting): sky, sun and what glows, each level's from coarser levels'; held to light/reference.rs, rays traced through level 0
+│   ├── light.rs             # Light (a prototype, for look and native's computed lighting): sky, sun and what glows, each level's from coarser levels' and its bounces, settled round by round; held to light/reference.rs, rays traced through level 0
 │   ├── cost.rs              # What generating costs: work counted by layer, reported for a world's tiles, against a baseline
 │   └── checks/              # Checks of worlds, for tests
 │       ├── cells.rs         # Each cell against what is in it two levels finer, one by one, along the 12 directions: what the contract measures

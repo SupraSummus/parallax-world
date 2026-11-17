@@ -20,7 +20,9 @@
 //! --light lights the world (worldgen's light.rs), the sky, the sun and
 //! what glows this bright: 1,1,0 a clear day (as the panel's Computed
 //! lighting is unless --light), 0.01,0,1 night; a fourth number, the steps
-//! light takes along each level before the coarser one takes over.
+//! light takes along each level before the coarser one takes over; a
+//! fifth, how little light may change, round by round of its bounces, to
+//! be found.
 //! --engine picks what draws, as the panel does (Kind): rays through the
 //! tiles' voxels (the default), chunks of cells' reliefs or splats, as the
 //! web draws, or reliefs drawn flat (an experiment).
@@ -74,9 +76,10 @@ struct App {
     world: World,
     look: Look,
     lighting: Lighting,
-    /** How bright the sky, the sun and what glows are, Computed, and the steps light takes along each level, as the sliders say: the world is lit so once one is let go. */
+    /** How bright the sky, the sun and what glows are, Computed, the steps light takes along each level and how little it may change to be found, as the sliders say: the world is lit so once one is let go. */
     brightness: Brightness,
     steps: usize,
+    tolerance: f32,
     stats: String,
     times: window::Times,
     /** How long the engine took to make the last frame, ms. */
@@ -197,8 +200,7 @@ impl window::Content for App {
             self.framing = start.elapsed().as_secs_f64() * 1000.0;
             self.stats = frame.stats;
             if let Some((file, start)) = &mut self.recording {
-                let steps = self.world.shared().map_or(0, Shared::steps);
-                record(file, start.elapsed().as_secs_f64(), self.kind, look, steps, self.walker.is_some(), &self.stats);
+                record(file, start.elapsed().as_secs_f64(), self.kind, look, self.world.shared(), self.walker.is_some(), &self.stats);
             }
             // Drawn from the next frame on.
             let arrived = self.world.update(look.camera, &with_ground(frame.wants, self.walker.is_some()));
@@ -219,12 +221,12 @@ impl window::Content for App {
 
 /**
  * A frame of the window, for --replay: when, since the window began; the
- * engine; the look, its light taking `steps`; whether walking; and what
+ * engine; the look, lit as `shared` lights it; whether walking; and what
  * the engine said of it (for the reader). A line of tab-separated fields.
  */
-fn record(file: &mut impl Write, t: f64, kind: Kind, look: &Look, steps: usize, walking: bool, stats: &str) {
+fn record(file: &mut impl Write, t: f64, kind: Kind, look: &Look, shared: Option<&Shared>, walking: bool, stats: &str) {
     let Look { camera: [x, y, z], yaw, pitch, fov, far, detail, shift, size: [w, h], .. } = *look;
-    let light = look.light.map_or("-".to_string(), |b| format!("{},{},{},{steps}", b.sky, b.sun, b.glow));
+    let light = look.light.zip(shared).map_or("-".to_string(), |(b, shared)| light_arg(&shared.under(b)));
     let view = format!("camera={x},{y},{z}&look={yaw},{pitch}&fov={fov}&distance={far}&detail={detail}");
     let line = format!("{t:.4}\t{kind:?}\t{view}\t{shift}\t{w}x{h}\t{light}\t{}\t{}", u8::from(walking), stats.replace('\n', ", "));
     // Line by line, all there should the window panic.
@@ -263,12 +265,11 @@ fn replay(
         let t: f64 = t.parse().expect("time");
         let walking = walking == "1";
         let numbers = |v: &str, by: char| v.split(by).map(|v| v.parse().expect("a number")).collect::<Vec<f64>>();
-        let lit = (light != "-").then(|| parse_light(light));
-        look.light = lit.map(|(b, _)| b);
         let named = Kind::ALL.into_iter().find(|(_, n)| n.eq_ignore_ascii_case(named)).expect("engine").0;
         let shared = world.shared().expect("a world with light");
-        let relit = lit.map(|(b, steps)| shared.under(b).stepping(steps.unwrap_or(shared.steps())));
-        if let Some(shared) = relit.filter(|s| s.brightness() != shared.brightness() || s.steps() != shared.steps()) {
+        let relit = (light != "-").then(|| parse_light(light, shared));
+        look.light = relit.as_ref().map(Shared::brightness);
+        if let Some(shared) = relit.filter(|s| !s.lights_as(shared)) {
             world.relight(shared);
             engine = named.make(world);
         } else if named != kind {
@@ -290,8 +291,7 @@ fn replay(
             easel.wait_for(last);
         }
         if let Some(file) = &mut recording {
-            let steps = world.shared().map_or(0, Shared::steps);
-            record(file, start.elapsed().as_secs_f64(), kind, &look, steps, walking, &frame.stats);
+            record(file, start.elapsed().as_secs_f64(), kind, &look, world.shared(), walking, &frame.stats);
         }
         let due = |k: &(f64, Look, Box<dyn Picture>)| t - k.0 >= end / KEPT as f64;
         if shots.is_some() && frame.busy && kept.len() < KEPT && kept.last().is_none_or(due) {
@@ -332,10 +332,13 @@ impl App {
         }
         // More steps a level, the thicker a wall must be to let light through: about its distance over them.
         responses.push(ui.add(egui::Slider::new(&mut self.steps, 1..=8).text("Steps a Level")));
+        // Less, the more rounds of bounces where light bounces back and forth.
+        responses.push(ui.add(egui::Slider::new(&mut self.tolerance, 1e-4..=0.5).logarithmic(true).text("Tolerance")));
         let done = responses.iter().any(|r| r.drag_stopped() || (r.changed() && !r.dragged()));
         let shared = self.world.shared().expect("a world with light");
-        if done && (shared.brightness() != self.brightness || shared.steps() != self.steps) {
-            self.world.relight(shared.under(self.brightness).stepping(self.steps));
+        let relit = shared.under(self.brightness).stepping(self.steps).settling(self.tolerance);
+        if done && !relit.lights_as(shared) {
+            self.world.relight(relit);
             self.engine = self.kind.make(&self.world);
         }
     }
@@ -351,9 +354,7 @@ impl App {
             if hides { "" } else { " --unhidden" },
         );
         let shared = self.world.shared().expect("a world with light");
-        let (b, steps) = (shared.brightness(), shared.steps());
-        let light =
-            if self.lighting == Lighting::Computed { format!(" --light {},{},{},{steps}", b.sky, b.sun, b.glow) } else { String::new() };
+        let light = if self.lighting == Lighting::Computed { format!(" --light {}", light_arg(shared)) } else { String::new() };
         *LAST_FRAME.lock().unwrap_or_else(|e| e.into_inner()) = format!("{frame}{light}\n{}", self.stats);
     }
 }
@@ -563,18 +564,16 @@ fn main() {
         size.try_into().expect("--size WxH")
     });
     // Sky, sun and lamps, as in look's `light`: 1,1,0 a clear day, 0.01,0,1 night.
-    let lit = value("--light").map(parse_light);
-    let light = lit.map(|(b, _)| b);
-    let brightness = light.unwrap_or(Brightness { sky: 1.0, sun: 1.0, glow: 0.0 });
-    let shared = Shared::new(brightness);
-    let shared = shared.stepping(lit.and_then(|(_, steps)| steps).unwrap_or(shared.steps()));
-    let steps = shared.steps();
+    let day = Shared::new(Brightness { sky: 1.0, sun: 1.0, glow: 0.0 });
+    let lit = value("--light");
+    let shared = lit.map_or(day.clone(), |v| parse_light(v, &day));
+    let (brightness, steps, tolerance) = (shared.brightness(), shared.steps(), shared.tolerance());
     let mut world = World::new(make, seed, Some(shared), threads);
     let shown = make(seed);
     let camera = query.camera.unwrap_or(shown.spawn.map(|v| v as f64));
     let far = query.distance.unwrap_or(RENDER_DISTANCE);
     let mut look = Look::new(camera, query.look.unwrap_or([YAW, PITCH]), query.fov.unwrap_or(FOV), far, size);
-    look.light = light;
+    look.light = lit.is_some().then_some(brightness);
     if let Some(v) = value("--detail").map(|v| v.parse().expect("--detail D")).or(query.detail) {
         look.detail = v;
     }
@@ -612,9 +611,10 @@ fn main() {
         engine,
         world,
         look,
-        lighting: if light.is_some() { Lighting::Computed } else { Lighting::Shaded },
+        lighting: if lit.is_some() { Lighting::Computed } else { Lighting::Shaded },
         brightness,
         steps,
+        tolerance,
         stats: String::new(),
         times: window::Times::default(),
         framing: 0.0,
@@ -632,15 +632,21 @@ fn main() {
     window::run("Parallax", [1580.0, 800.0], app);
 }
 
-/** --light's SKY,SUN,GLOW[,STEPS], as --record writes it. */
-fn parse_light(v: &str) -> (Brightness, Option<usize>) {
-    let usage = "--light SKY,SUN,GLOW[,STEPS]";
+/** --light's SKY,SUN,GLOW[,STEPS[,TOLERANCE]], as --record writes it: `shared` lit so, what it leaves out as `shared` has it. */
+fn parse_light(v: &str, shared: &Shared) -> Shared {
+    let usage = "--light SKY,SUN,GLOW[,STEPS[,TOLERANCE]]";
     let v: Vec<f32> = v.split(',').map(|v| v.parse().expect(usage)).collect();
-    match v[..] {
-        [sky, sun, glow] => (Brightness { sky, sun, glow }, None),
-        [sky, sun, glow, steps] => (Brightness { sky, sun, glow }, Some(steps as usize)),
-        _ => panic!("{usage}"),
-    }
+    let [sky, sun, glow, ..] = v[..] else { panic!("{usage}") };
+    assert!(v.len() <= 5, "{usage}");
+    let shared = shared.under(Brightness { sky, sun, glow });
+    let shared = v.get(3).map_or(shared.clone(), |&steps| shared.stepping(steps as usize));
+    v.get(4).map_or(shared.clone(), |&tolerance| shared.settling(tolerance))
+}
+
+/** How `shared` lights a world, as --light takes it. */
+fn light_arg(shared: &Shared) -> String {
+    let b = shared.brightness();
+    format!("{},{},{},{},{}", b.sky, b.sun, b.glow, shared.steps(), shared.tolerance())
 }
 
 fn num_cpus() -> usize {
