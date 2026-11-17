@@ -6,6 +6,7 @@
 //! cargo run --release --example look -- valley 42 3 top -800 800 800 2400 size 960 out.png
 //! cargo run --release --example look -- valley 7 3 top mountainside 400 out.png
 //! cargo run --release --example look -- city 42 0 eye spawn -20 30 -10 at spawn -100 10 50 light 0.01 0 1 out.png
+//! cargo run --release --example look -- valley 42 0 eye town -60 40 -60 at town alone towns/block/church out.png
 //!
 //! for world, seed and level, then the camera: its eye and a target to
 //! look at or a yaw and pitch (degrees; yaw 0 looks along +z), with `fov`
@@ -13,7 +14,9 @@
 //! or `top` and an area (min x and z, max x and z) to look straight down
 //! at; `light` and how bright the sky, the sun and glowing kinds are
 //! (1 1 0: a clear day; 0.01 0 1: night) lights the picture by
-//! worldgen::light instead of a fixed sun. Last, the file. A point is
+//! worldgen::light instead of a fixed sun; `alone` and a component
+//! (`Generator::alone`: "towns/block/church") draws it alone, where it
+//! stands. Last, the file. A point is
 //! x y z (lattice units), or a place the world names (`World::point`:
 //! spawn, a town, a windmill…) and, optionally, x y z from it; `top`
 //! takes one and how far around it.
@@ -27,7 +30,8 @@ use worlds::{WORLDS, by_name};
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let usage = "look <world> <seed> <level> (eye <point> (at <point>|yaw <d> pitch <d>) | top <x0 z0 x1 z1|place d>) \
-                 [fov <d>] [far <units>] [size <w> [h]] [light <sky> <sun> <glow>] <out.png>, a point x y z or <place> [x y z]";
+                 [fov <d>] [far <units>] [size <w> [h]] [light <sky> <sun> <glow>] [alone <component>] <out.png>, \
+                 a point x y z or <place> [x y z]";
     let is_number = |i: usize| args.get(i).is_some_and(|a| a.parse::<f64>().is_ok());
     let number = |i: usize| args.get(i).and_then(|a| a.parse::<f64>().ok()).unwrap_or_else(|| panic!("a number at {i}: {usage}"));
     let seed = number(1) as u64;
@@ -60,7 +64,7 @@ fn main() {
     };
     let level = number(2) as u32;
     let (mut eye, mut target, mut angles, mut area) = (None, None, [0.0, 0.0], None);
-    let (mut fov, mut far, mut size, mut brightness) = (70.0, 3000.0, [960, 600], None);
+    let (mut fov, mut far, mut size, mut brightness, mut alone) = (70.0, 3000.0, [960, 600], None, None);
     let mut i = 3;
     while i + 1 < args.len() {
         let word = args[i].as_str();
@@ -82,6 +86,10 @@ fn main() {
                     "fov" => fov = number(i),
                     _ => far = number(i),
                 }
+                i += 1;
+            }
+            "alone" => {
+                alone = Some(args[i].clone());
                 i += 1;
             }
             "light" => {
@@ -119,10 +127,14 @@ fn main() {
         }
         _ => panic!("no camera: {usage}"),
     };
-    let mut picture = picture_on_threads(&|| (entry.make)(seed).generator, &camera, level, world.heights_at(level));
+    let make = || match &alone {
+        Some(component) => (entry.make)(seed).alone(component),
+        None => (entry.make)(seed),
+    };
+    let mut picture = picture_on_threads(&|| make().generator, &camera, level, world.heights_at(level));
     if let Some(brightness) = brightness {
         let start = std::time::Instant::now();
-        Light::new((entry.make)(seed), Shared::new(brightness)).relight(&mut picture, level);
+        Light::new(make(), Shared::new(brightness)).relight(&mut picture, level);
         println!("lit in {:.2} s", start.elapsed().as_secs_f64());
     }
     std::fs::write(args.last().expect("a file"), picture.png()).expect("written");

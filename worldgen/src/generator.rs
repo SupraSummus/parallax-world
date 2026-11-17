@@ -17,6 +17,7 @@ use crate::noise::{Fixed, Fx, ONE, Rng, fixed, float, hash, hash_text, hash64};
 use crate::plan;
 use crate::points::{Points, Spot};
 
+mod alone;
 mod drawables;
 mod forms;
 mod generate;
@@ -30,6 +31,8 @@ pub use forms::*;
 pub use generate::*;
 pub use shapes::*;
 pub use things::*;
+
+pub(crate) use alone::unnumbered;
 
 /** A kind of what is in a world: its index in Generator::kinds. */
 pub type Kind = u8;
@@ -483,6 +486,15 @@ pub enum Anchors {
 pub enum Layer {
     Field(Field),
     Population(Population),
+}
+
+impl Layer {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Layer::Field(f) => f.name,
+            Layer::Population(p) => p.name,
+        }
+    }
 }
 
 #[derive(Clone)]

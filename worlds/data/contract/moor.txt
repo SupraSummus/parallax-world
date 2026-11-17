@@ -61,42 +61,42 @@ steadings timber	2	0.025	0.106
 steadings timber	3	0.082	0.159
 steadings timber	4	0.109	0.177
 steadings timber	5	0.118	0.209
-steadings › cairns lichen	1	0.037	0.109
-steadings › cairns lichen	2	0.036	0.110
-steadings › cairns lichen	3	0.097	0.170
-steadings › cairns lichen	4	0.095	0.213
-steadings › cairns lichen	5	0.106	0.204
-steadings › cairns stone	1	0.037	0.109
-steadings › cairns stone	2	0.036	0.110
-steadings › cairns stone	3	0.097	0.170
-steadings › cairns stone	4	0.095	0.213
-steadings › cairns stone	5	0.106	0.204
-steadings › hut drystone	2	0.035	0.111
-steadings › hut drystone	3	0.073	0.150
-steadings › hut drystone	4	0.092	0.172
-steadings › hut drystone	5	0.108	0.187
-steadings › hut stone	2	0.035	0.111
-steadings › hut stone	3	0.073	0.150
-steadings › hut stone	4	0.092	0.172
-steadings › hut stone	5	0.108	0.187
-steadings › hut thatch	2	0.035	0.111
-steadings › hut thatch	3	0.073	0.150
-steadings › hut thatch	4	0.092	0.172
-steadings › hut thatch	5	0.108	0.187
-steadings › hut timber	2	0.035	0.111
-steadings › hut timber	3	0.073	0.150
-steadings › hut timber	4	0.092	0.172
-steadings › hut timber	5	0.108	0.187
-steadings › ring lichen	1	0.037	0.107
-steadings › ring lichen	2	0.040	0.107
-steadings › ring lichen	3	0.105	0.170
-steadings › ring lichen	4	0.102	0.220
-steadings › ring lichen	5	0.098	0.206
-steadings › ring stone	1	0.037	0.107
-steadings › ring stone	2	0.040	0.107
-steadings › ring stone	3	0.105	0.170
-steadings › ring stone	4	0.102	0.220
-steadings › ring stone	5	0.098	0.206
+steadings/cairns lichen	1	0.037	0.109
+steadings/cairns lichen	2	0.036	0.110
+steadings/cairns lichen	3	0.097	0.170
+steadings/cairns lichen	4	0.095	0.213
+steadings/cairns lichen	5	0.106	0.204
+steadings/cairns stone	1	0.037	0.109
+steadings/cairns stone	2	0.036	0.110
+steadings/cairns stone	3	0.097	0.170
+steadings/cairns stone	4	0.095	0.213
+steadings/cairns stone	5	0.106	0.204
+steadings/hut drystone	2	0.035	0.111
+steadings/hut drystone	3	0.073	0.150
+steadings/hut drystone	4	0.092	0.172
+steadings/hut drystone	5	0.108	0.187
+steadings/hut stone	2	0.035	0.111
+steadings/hut stone	3	0.073	0.150
+steadings/hut stone	4	0.092	0.172
+steadings/hut stone	5	0.108	0.187
+steadings/hut thatch	2	0.035	0.111
+steadings/hut thatch	3	0.073	0.150
+steadings/hut thatch	4	0.092	0.172
+steadings/hut thatch	5	0.108	0.187
+steadings/hut timber	2	0.035	0.111
+steadings/hut timber	3	0.073	0.150
+steadings/hut timber	4	0.092	0.172
+steadings/hut timber	5	0.108	0.187
+steadings/ring lichen	1	0.037	0.107
+steadings/ring lichen	2	0.040	0.107
+steadings/ring lichen	3	0.105	0.170
+steadings/ring lichen	4	0.102	0.220
+steadings/ring lichen	5	0.098	0.206
+steadings/ring stone	1	0.037	0.107
+steadings/ring stone	2	0.040	0.107
+steadings/ring stone	3	0.105	0.170
+steadings/ring stone	4	0.102	0.220
+steadings/ring stone	5	0.098	0.206
 stream bed carving	3	0.080	0.149
 stream bed carving	4	0.098	0.192
 stream bed carving	5	0.115	0.193

@@ -138,86 +138,86 @@ plants tallGrass	1	0.038	0.196
 plants tallGrass	2	0.031	0.207
 plants tallGrass	3	0.024	0.188
 plants tallGrass	4	0.084	0.163
-settlements › house brick	1	0.010	0.177
-settlements › house brick	2	0.020	0.204
-settlements › house brick	3	0.065	0.201
-settlements › house brick	4	0.058	0.142
-settlements › house churchStone	1	0.010	0.177
-settlements › house churchStone	2	0.020	0.204
-settlements › house churchStone	3	0.065	0.201
-settlements › house churchStone	4	0.058	0.142
-settlements › house door	1	0.010	0.177
-settlements › house door	2	0.020	0.204
-settlements › house door	3	0.065	0.201
-settlements › house door	4	0.058	0.142
-settlements › house faluRed	1	0.026	0.177
-settlements › house faluRed	2	0.016	0.177
-settlements › house faluRed	3	0.037	0.170
-settlements › house faluRed	4	0.053	0.150
-settlements › house glass	1	0.010	0.177
-settlements › house glass	2	0.020	0.204
-settlements › house glass	3	0.065	0.201
-settlements › house glass	4	0.058	0.142
-settlements › house iron	1	0.030	0.183
-settlements › house iron	2	0.016	0.185
-settlements › house iron	3	0.030	0.156
-settlements › house iron	4	0.051	0.141
-settlements › house plasterBlue	1	0.016	0.172
-settlements › house plasterBlue	2	0.025	0.170
-settlements › house plasterBlue	3	0.047	0.164
-settlements › house plasterBlue	4	0.057	0.152
-settlements › house plasterGrey	1	0.037	0.185
-settlements › house plasterGrey	2	0.018	0.171
-settlements › house plasterGrey	3	0.043	0.168
-settlements › house plasterGrey	4	0.048	0.145
-settlements › house plasterOchre	1	0.035	0.180
-settlements › house plasterOchre	2	0.013	0.176
-settlements › house plasterOchre	3	0.031	0.158
-settlements › house plasterOchre	4	0.046	0.132
-settlements › house plasterPink	1	0.023	0.178
-settlements › house plasterPink	2	0.011	0.181
-settlements › house plasterPink	3	0.022	0.153
-settlements › house plasterPink	4	0.048	0.137
-settlements › house plasterSage	1	0.030	0.183
-settlements › house plasterSage	2	0.016	0.185
-settlements › house plasterSage	3	0.030	0.156
-settlements › house plasterSage	4	0.051	0.141
-settlements › house plasterWhite	1	0.026	0.187
-settlements › house plasterWhite	2	0.012	0.198
-settlements › house plasterWhite	3	0.046	0.187
-settlements › house plasterWhite	4	0.057	0.140
-settlements › house roofBrown	1	0.025	0.178
-settlements › house roofBrown	2	0.018	0.179
-settlements › house roofBrown	3	0.039	0.176
-settlements › house roofBrown	4	0.057	0.142
-settlements › house roofRed	1	0.009	0.182
-settlements › house roofRed	2	0.015	0.197
-settlements › house roofRed	3	0.060	0.192
-settlements › house roofRed	4	0.057	0.141
-settlements › house roofTile	1	0.030	0.183
-settlements › house roofTile	2	0.016	0.185
-settlements › house roofTile	3	0.030	0.156
-settlements › house roofTile	4	0.051	0.141
-settlements › house shutterBlue	1	0.038	0.186
-settlements › house shutterBlue	2	0.012	0.178
-settlements › house shutterBlue	3	0.047	0.169
-settlements › house shutterBlue	4	0.052	0.147
-settlements › house shutterGreen	1	0.019	0.170
-settlements › house shutterGreen	2	0.023	0.188
-settlements › house shutterGreen	3	0.053	0.173
-settlements › house shutterGreen	4	0.049	0.137
-settlements › house slate	1	0.022	0.170
-settlements › house slate	2	0.025	0.184
-settlements › house slate	3	0.068	0.190
-settlements › house slate	4	0.052	0.150
-settlements › house timber	1	0.027	0.185
-settlements › house timber	2	0.017	0.192
-settlements › house timber	3	0.046	0.193
-settlements › house timber	4	0.051	0.140
-settlements › house trim	1	0.010	0.177
-settlements › house trim	2	0.020	0.204
-settlements › house trim	3	0.065	0.201
-settlements › house trim	4	0.058	0.142
+settlements/house brick	1	0.010	0.177
+settlements/house brick	2	0.020	0.204
+settlements/house brick	3	0.065	0.201
+settlements/house brick	4	0.058	0.142
+settlements/house churchStone	1	0.010	0.177
+settlements/house churchStone	2	0.020	0.204
+settlements/house churchStone	3	0.065	0.201
+settlements/house churchStone	4	0.058	0.142
+settlements/house door	1	0.010	0.177
+settlements/house door	2	0.020	0.204
+settlements/house door	3	0.065	0.201
+settlements/house door	4	0.058	0.142
+settlements/house faluRed	1	0.026	0.177
+settlements/house faluRed	2	0.016	0.177
+settlements/house faluRed	3	0.037	0.170
+settlements/house faluRed	4	0.053	0.150
+settlements/house glass	1	0.010	0.177
+settlements/house glass	2	0.020	0.204
+settlements/house glass	3	0.065	0.201
+settlements/house glass	4	0.058	0.142
+settlements/house iron	1	0.030	0.183
+settlements/house iron	2	0.016	0.185
+settlements/house iron	3	0.030	0.156
+settlements/house iron	4	0.051	0.141
+settlements/house plasterBlue	1	0.016	0.172
+settlements/house plasterBlue	2	0.025	0.170
+settlements/house plasterBlue	3	0.047	0.164
+settlements/house plasterBlue	4	0.057	0.152
+settlements/house plasterGrey	1	0.037	0.185
+settlements/house plasterGrey	2	0.018	0.171
+settlements/house plasterGrey	3	0.043	0.168
+settlements/house plasterGrey	4	0.048	0.145
+settlements/house plasterOchre	1	0.035	0.180
+settlements/house plasterOchre	2	0.013	0.176
+settlements/house plasterOchre	3	0.031	0.158
+settlements/house plasterOchre	4	0.046	0.132
+settlements/house plasterPink	1	0.023	0.178
+settlements/house plasterPink	2	0.011	0.181
+settlements/house plasterPink	3	0.022	0.153
+settlements/house plasterPink	4	0.048	0.137
+settlements/house plasterSage	1	0.030	0.183
+settlements/house plasterSage	2	0.016	0.185
+settlements/house plasterSage	3	0.030	0.156
+settlements/house plasterSage	4	0.051	0.141
+settlements/house plasterWhite	1	0.026	0.187
+settlements/house plasterWhite	2	0.012	0.198
+settlements/house plasterWhite	3	0.046	0.187
+settlements/house plasterWhite	4	0.057	0.140
+settlements/house roofBrown	1	0.025	0.178
+settlements/house roofBrown	2	0.018	0.179
+settlements/house roofBrown	3	0.039	0.176
+settlements/house roofBrown	4	0.057	0.142
+settlements/house roofRed	1	0.009	0.182
+settlements/house roofRed	2	0.015	0.197
+settlements/house roofRed	3	0.060	0.192
+settlements/house roofRed	4	0.057	0.141
+settlements/house roofTile	1	0.030	0.183
+settlements/house roofTile	2	0.016	0.185
+settlements/house roofTile	3	0.030	0.156
+settlements/house roofTile	4	0.051	0.141
+settlements/house shutterBlue	1	0.038	0.186
+settlements/house shutterBlue	2	0.012	0.178
+settlements/house shutterBlue	3	0.047	0.169
+settlements/house shutterBlue	4	0.052	0.147
+settlements/house shutterGreen	1	0.019	0.170
+settlements/house shutterGreen	2	0.023	0.188
+settlements/house shutterGreen	3	0.053	0.173
+settlements/house shutterGreen	4	0.049	0.137
+settlements/house slate	1	0.022	0.170
+settlements/house slate	2	0.025	0.184
+settlements/house slate	3	0.068	0.190
+settlements/house slate	4	0.052	0.150
+settlements/house timber	1	0.027	0.185
+settlements/house timber	2	0.017	0.192
+settlements/house timber	3	0.046	0.193
+settlements/house timber	4	0.051	0.140
+settlements/house trim	1	0.010	0.177
+settlements/house trim	2	0.020	0.204
+settlements/house trim	3	0.065	0.201
+settlements/house trim	4	0.058	0.142
 terrain grass	1	0.017	0.197
 terrain grass	2	0.018	0.184
 terrain grass	3	0.067	0.186

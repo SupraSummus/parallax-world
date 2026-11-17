@@ -9,7 +9,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 
 use crate::World;
-use crate::generator::{Children, Field, FieldValues, Generator, Kind, Layer, Node, Op, Population, Shape, bounds_of_shapes, each_made};
+use crate::generator::{
+    Children, Field, FieldValues, Generator, Kind, Layer, Node, Op, Population, Shape, bounds_of_shapes, each_made, unnumbered,
+};
 use crate::grid::Box3;
 use crate::noise::{Rng, hash_text};
 use crate::plan::footprint;
@@ -97,11 +99,7 @@ pub fn survey(world: &World, region: i64, wanted: impl Fn(&str) -> bool) -> Surv
     let mut found = Found::new();
     let (mut layers, mut things) = (Vec::new(), Vec::new());
     for layer in &world.generator.layers {
-        let layer_name = match layer {
-            Layer::Population(p) => p.name,
-            Layer::Field(f) => f.name,
-        };
-        if !wanted(layer_name) {
+        if !wanted(layer.name()) {
             continue;
         }
         let start = Instant::now();
@@ -262,7 +260,7 @@ fn take_apart(node: &Node, name: String, region: i64, parts: &mut Found) -> usiz
         kinds.into_iter().for_each(|kind| parts.entry((format!("{name} itself"), Some(kind))).or_default().push(place));
         count += 1;
     }
-    each_child(node, |child, node| count += take_apart(node, format!("{name} › {}", unnumbered(child)), region, parts));
+    each_child(node, |child, node| count += take_apart(node, format!("{name}/{}", unnumbered(child)), region, parts));
     count
 }
 
@@ -297,12 +295,6 @@ fn fits(b: &Box3, region: i64) -> bool {
 fn centred(b: &Box3, region: i64) -> Box3 {
     let c = [0, 1, 2].map(|i| (b.min[i] + b.max[i]).div_euclid(2));
     Box3 { min: [0, 1, 2].map(|i| b.min[i].max(c[i] - region / 2)), max: [0, 1, 2].map(|i| b.max[i].min(c[i] + region / 2)) }
-}
-
-/** A part's name without its numbers: "block 3 1 2" is a block. */
-fn unnumbered(name: &str) -> String {
-    let words: Vec<&str> = name.split_whitespace().filter(|w| !w.chars().any(|c| c.is_ascii_digit())).collect();
-    if words.is_empty() { "?".into() } else { words.join(" ") }
 }
 
 impl Survey {
