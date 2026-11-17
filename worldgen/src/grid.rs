@@ -273,19 +273,16 @@ pub(crate) fn first_met(parts: &[&Segments]) -> Vec<[f64; FACE_KINDS]> {
             }
         }
     }
-    let mut met = vec![[0.0; FACE_KINDS]; parts.len()];
-    for k in 0..FACE_KINDS {
-        let (a, from_high) = axis_of(k);
-        let of = lines.of_axis(a);
-        let n = of.len() as f64;
-        for l in of {
-            let p = if from_high { high[l].1 } else { low[l].1 };
-            if p != usize::MAX {
-                met[p][k] += 1.0 / n;
-            }
-        }
-    }
-    met
+    (0..parts.len())
+        .map(|p| {
+            std::array::from_fn(|k| {
+                let (a, from_high) = axis_of(k);
+                let of = lines.of_axis(a);
+                let n = of.len() as f64;
+                of.filter(|&l| (if from_high { high[l].1 } else { low[l].1 }) == p).count() as f64 / n
+            })
+        })
+        .collect()
 }
 
 /** The axis (of `lines`' six) face `k`'s normal runs along, and whether it is its face rather than its opposite. */
