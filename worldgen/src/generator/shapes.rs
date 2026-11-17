@@ -419,8 +419,8 @@ impl Shape {
     }
 }
 
-/** Puts a site: its share, its share of each face's rays where they differ, its pick, and where it is. */
-type PutSite<'a> = dyn FnMut(u32, Option<[u32; FACE_KINDS]>, u32, i64, i64, i64) + 'a;
+/** Puts a site: its share, its share of each face's rays where they differ, where on its lines it lies (`Look::rays`), its pick, and where it is. */
+type PutSite<'a> = dyn FnMut(u32, Option<[u32; FACE_KINDS]>, Option<u32>, u32, i64, i64, i64) + 'a;
 
 type V3 = [f64; 3];
 
@@ -678,8 +678,7 @@ impl Lined {
  * Draws a shape at sites `s` apart: each site its voxel reaches into, as
  * what its lines (grid's `lines`) find of the shape, so the site looks as
  * what of the shape is in it does to rays through it (docs/generators.md,
- * "Levels"). Opaque, how much of each face's rays it meets (a carve, holds
- * all along); not opaque, its
+ * "Levels"). Opaque, where on them it lies (`Look::rays`); not opaque, its
  * chance per level-0 voxel's chord stopping each line by its length in
  * the shape. A shape smaller than the lines are apart every way is seen
  * as a whole: the share of its nearest site's rays its mean shadow is.
@@ -693,7 +692,7 @@ pub(super) fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &m
         let [x, y, z] = nearest_site(shape.centre, si);
         let chance = shape.area / (VOXEL_AREA * s * s);
         if clip.holds([x, y, z]) {
-            put(share(chance), None, picked(x, y, z), x, y, z);
+            put(share(chance), None, None, picked(x, y, z), x, y, z);
         }
         return 1;
     }
@@ -719,7 +718,7 @@ pub(super) fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &m
                 let ball = shape.about(centre, s * (1.0 + 1e-9), apart, &mut near);
                 if ball == Some(false) || (ball == Some(true) && extinction(x, y, z).is_none()) {
                     if ball == Some(true) {
-                        put(SHARE, None, picked(x, y, z), x, y, z);
+                        put(SHARE, None, None, picked(x, y, z), x, y, z);
                     }
                     x += 2;
                     continue;
@@ -743,16 +742,12 @@ pub(super) fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &m
                 if !segments.is_empty() {
                     let pick = picked(x, y, z);
                     match extinction(x, y, z) {
-                        None if full => put(SHARE, None, pick, x, y, z),
-                        // What it meets of each face's rays; a carve, what it takes out: those it holds all along.
-                        None => {
-                            let cover = if shape.op == Op::Carve { grid::through(&segments) } else { grid::met(&segments) };
-                            put(share(grid::filled(&segments)), Some(cover.map(share)), pick, x, y, z)
-                        }
+                        None if full => put(SHARE, None, None, pick, x, y, z),
+                        None => put(share(grid::filled(&segments)), None, Some(keep(segments)), pick, x, y, z),
                         Some(e) => {
                             let stops = grid::medium_stops_along(e, s, &segments).map(share);
                             let cover = stops.iter().any(|c| *c != stops[0]).then_some(stops);
-                            put(stops.iter().sum::<u32>() / FACE_KINDS as u32, cover, pick, x, y, z);
+                            put(stops.iter().sum::<u32>() / FACE_KINDS as u32, cover, None, pick, x, y, z);
                         }
                     }
                 }
