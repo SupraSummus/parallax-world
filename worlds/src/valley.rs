@@ -22,7 +22,7 @@ use crate::fields::{self, Fields};
 use crate::forest::{self, Forest, GROUND_SCALE, Relief};
 use crate::landmarks::{self, Landmark, Landmarks};
 use crate::moor::{self, Moor, Moorland, Uplands};
-use crate::mountains::{self, Ranges};
+use crate::mountains::{self, Landforms, Ranges};
 use crate::path::{Path, Spine};
 use crate::railway::{self, Railway, Structure};
 use crate::town::{self, Towns};
@@ -39,8 +39,8 @@ pub const LEAD: Fx = fx(0.125);
 
 /**
  * The valley's lie of the land before what is built on it shapes it: its
- * first two bands, the relief and the ranges along the path, then
- * levelled under the towns. A function of position, read by the plans of
+ * first two bands, the relief and the ranges along the path (and the
+ * landforms at their feet), then levelled under the towns. A function of position, read by the plans of
  * what is built, coarse ones too, which can't read the fine ground plan.
  */
 pub struct Terrain {
@@ -54,6 +54,8 @@ pub struct Terrain {
      */
     pub path: Spine,
     pub ranges: Rc<Ranges>,
+    /** The spurs and gorges at the ranges' feet. */
+    pub landforms: Rc<Landforms>,
     pub towns: Rc<Towns>,
 }
 
@@ -72,11 +74,17 @@ impl Terrain {
             let towns = towns.clone();
             Spine::new(move |z| towns.street_x(z, route.x(z)))
         };
+        let landforms = Rc::new(Landforms::new(&world.of("landforms"), towns.clone()));
         let lie = {
-            let (course, path, relief, ranges) = (course.clone(), path.clone(), relief.clone(), ranges.clone());
-            Lie::new(move |x, z| relief.ground(x, z, path.across(x, z).abs()) + ranges.height(x, z, course.across(x, z)))
+            let (course, path, relief, ranges, landforms) =
+                (course.clone(), path.clone(), relief.clone(), ranges.clone(), landforms.clone());
+            Lie::new(move |x, z| {
+                let across = course.across(x, z);
+                let h = ranges.height(x, z, across);
+                relief.ground(x, z, path.across(x, z).abs()) + h + landforms.at(z, across, h)
+            })
         };
-        Terrain { lie: lie.shaped(vec![towns.clone()]), course, path, ranges, towns }
+        Terrain { lie: lie.shaped(vec![towns.clone()]), course, path, ranges, landforms, towns }
     }
 
     /** The ground at (x, z), with its fraction. */
