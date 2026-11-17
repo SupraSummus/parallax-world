@@ -884,6 +884,13 @@ Composing generators (section "Composing" of `docs/generators.md`), untried:
   water in the route's cost, once the ground the line reads has any.
   Curves still lack arc length from an end (`Near::along` counts segments):
   the line's sleepers and piers stand by its segments along z.
+  Its grade turns at once where it tops a rise or bottoms out,
+  often from the steepest up to the steepest down:
+  vertical curves would round those, as smoothing rounds its bends.
+- The mountains' gorges (`Landforms` in `worlds/src/mountains.rs`) are dry,
+  with no stream in their beds,
+  and below the treeline the forest covers their walls and the spurs' noses,
+  where rock would show.
 - Rivers and roads along curves, in pieces and from `near`, as the path is,
   not as tubes:
   a tube makes all its points when made,

@@ -15,6 +15,10 @@
 //! The ranges are a belt: a few kilometres behind the first crest the
 //! land leaves them, west down to the sea, east up to an upland under the
 //! treeline. On the valley's relief, so the coast is ragged with islands.
+//!
+//! At their feet, every few kilometres, a rock spur stands out onto the
+//! valley's floor or a gorge cuts into it (`Landforms`), what the railway
+//! along the valley must tunnel through or bridge.
 
 use std::rc::Rc;
 
@@ -22,14 +26,15 @@ use worldgen::column::{Column, lowest_around};
 use worldgen::domain::{Domain, Scope};
 use worldgen::generator::{Field, Layer, Meets, Op};
 use worldgen::kinds;
-use worldgen::noise::{Fbm, Fx, ValueNoise, fx, smoothstep};
+use worldgen::noise::{Fbm, Fx, Rng, ValueNoise, fx, hash64, smoothstep};
 use worldgen::plan::{self, Holding, Sloped};
 use worldgen::units::{Units, m};
 
 use crate::SURFACE;
+use crate::course::COURSE_SLOPE;
 use crate::fields;
 use crate::landmarks::K as L;
-use crate::town::K as T;
+use crate::town::{self, K as T, Towns};
 
 kinds! {
     base: fields::BASE + fields::KINDS.len() as u8;
@@ -193,6 +198,90 @@ impl Ranges {
     pub fn below_treeline(&self, x: i64, z: i64, height: i64) -> Fx {
         let line = self.treeline(x, z);
         Fx::ONE - smoothstep(line - Fx::m(30.0), line, Units(height).to_fx())
+    }
+}
+
+/** Each side's landforms at the ranges' feet: one or none in each stretch this long along the valley, within it by MARGIN. */
+pub const APART: i64 = m(3000.0);
+const MARGIN: i64 = m(150.0);
+/** Where across from the course a spur's nose starts and a gorge is at its full depth: past the towns, short of the railway's band. */
+pub const NOSE: i64 = m(195.0);
+const _: () = assert!(NOSE > town::ACROSS + (COURSE_SLOPE * town::LONG as f64) as i64);
+/** A spur's nose rises over this across; its crest behind rises one in RIDGE, to meet the face. */
+const CLIFF: Fx = Fx::m(30.0);
+const RIDGE: i64 = 5;
+/** A gorge fades out on the floor over this, inside NOSE; it and a spur, up the face, between FAR's two (across from the course), so neither stands past the ranges. */
+const FADE: Fx = Fx::m(70.0);
+const FAR: (Fx, Fx) = (Fx::m(700.0), Fx::m(1000.0));
+/** A gorge's bed, flat, its share of its half width either side of its middle; steep walls from there. */
+const BED: Fx = fx(0.4);
+
+/** A landform at the ranges' feet, at z along the valley: its height or depth, and its half width along z. */
+#[derive(Clone, Copy)]
+pub enum Form {
+    Spur { z: i64, high: Fx, half: Fx },
+    Gorge { z: i64, deep: Fx, half: Fx },
+}
+
+/**
+ * Landforms at the ranges' feet along each side, one or none every APART,
+ * none by a town: rock spurs, ridges down the face whose steep noses
+ * stand out onto the valley's floor, and gorges that side streams cut down
+ * the face and into the floor, fading out on it. Both reach across from
+ * NOSE out past the railway's band, so the railway, which can't go round
+ * or over them, tunnels through a spur and bridges a gorge.
+ */
+pub struct Landforms {
+    seed: u64,
+    towns: Rc<Towns>,
+}
+
+impl Landforms {
+    pub fn new(scope: &Scope, towns: Rc<Towns>) -> Landforms {
+        Landforms { seed: scope.seed("forms"), towns }
+    }
+
+    /** The form in the stretch of side `side` (±1) that z is in, if any: two in five a spur, two a gorge. */
+    pub fn form(&self, side: i64, z: i64) -> Option<Form> {
+        let stretch = z.div_euclid(APART);
+        let mut random = Rng::new(hash64(self.seed, stretch, side, 0));
+        let at = stretch * APART + MARGIN + i64::from(random.below((APART - 2 * MARGIN) as u32));
+        // Clear of a town and the ground it levels round it (120 m), a form's half width, and room.
+        if self.towns.near(at).is_some_and(|t| (t.z - at).abs() < town::LONG + m(260.0)) {
+            return None;
+        }
+        let between = |lo: f64, hi: f64, random: &mut Rng| Fx::m(lo) + Units::m(hi - lo).to_fx() * Fx::fraction(random.next_u32());
+        match random.below(5) {
+            0 | 1 => Some(Form::Spur { z: at, high: between(30.0, 55.0, &mut random), half: between(60.0, 90.0, &mut random) }),
+            2 | 3 => Some(Form::Gorge { z: at, deep: between(20.0, 32.0, &mut random), half: between(30.0, 45.0, &mut random) }),
+            _ => None,
+        }
+    }
+
+    /**
+     * What the landforms add to column (x, z) `across` from the valley's
+     * course, where the ranges raise it `h` (a gorge's depth subtracted):
+     * a spur stands over the ranges, a gorge cuts into them and the floor.
+     */
+    pub fn at(&self, z: i64, across: Fx, h: Fx) -> Fx {
+        let out = across.abs() - Units(NOSE).to_fx();
+        if out <= -FADE || across.abs() >= FAR.1 {
+            return Fx::ZERO;
+        }
+        let side = if across < Fx::ZERO { -1 } else { 1 };
+        let far = Fx::ONE - smoothstep(FAR.0, FAR.1, across.abs());
+        match self.form(side, z) {
+            Some(Form::Spur { z: at, high, half }) if out > Fx::ZERO => {
+                let crest = (high * smoothstep(Fx::ZERO, CLIFF, out) + out / RIDGE) * far;
+                let top = crest * (Fx::ONE - smoothstep(Fx::ZERO, half, Units((z - at).abs()).to_fx()));
+                // Nothing where it has faded, over the sea's floor too.
+                (top - h.max(Fx::ZERO)).max(Fx::ZERO)
+            }
+            Some(Form::Gorge { z: at, deep, half }) => {
+                -deep * smoothstep(-FADE, Fx::ZERO, out) * far * (Fx::ONE - smoothstep(half * BED, half, Units((z - at).abs()).to_fx()))
+            }
+            _ => Fx::ZERO,
+        }
     }
 }
 

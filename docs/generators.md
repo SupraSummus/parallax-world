@@ -846,7 +846,8 @@ so the band is the same in any order and no domain undoes another's work.
 So domains of one band keep apart
 (the landmarks and the moor's pools keep off the railway and each other).
 A domain reads only the bands it was made with.
-The valley's are the relief and the ranges,
+The valley's are the relief and the ranges
+(with the landforms at their feet, kept clear of the towns),
 then the towns' terraces (`valley::Terrain`),
 then the railway, the landmarks and the moor;
 the last, kept by plan, is the ground layers stand on (`Lie::ground`).
@@ -955,33 +956,50 @@ The first is a chapel beside the path, in the camera's view at spawn.
 ### Railway
 
 The railway (`worlds/src/railway.rs`) is a domain built on curves.
-Its main line runs along one side of the valley,
-in pieces 4 km long whose ends stand off the valley's course by noise.
+Its main line runs along one side of the valley, in pieces 4 km long,
+within a band across from the valley's course:
+far enough across that it never reaches a town, by construction,
+and some way further, up the mountains' faces.
 Each piece is a curve in x, y and z, x across from the course,
 turned to the world's when made, so it winds with the valley,
-made top-down:
-at each level a point between two neighbours,
-its x the one of a few within the level's wander
-whose track leaves the ground least,
-its y the ground there as far as the grade lets it from both neighbours.
-So no stretch is steeper than the grade,
-and each wander is a quarter of the one before,
-which bounds how sharply it turns at each point.
+made top-down, by what its track costs:
+at each level, between two neighbours,
+the place across within the level's wander
+and the height within the grade from both
+where the track from one to the other through it
+leaves the ground least, sampled along it,
+a bridge or a tunnel much more than earth cut or filled.
+A piece's ends are placed so too, a level track along z.
+So the line bends along a slope and climbs or falls with the ground
+to keep off bridges and tunnels where its bends and grade let it,
+and fits the ground over each level's length, not at a point,
+so a bump at a coarse level's point does not hold it up for kilometres.
+No stretch is steeper than the grade,
+and each wander is half the one before,
+so each level turns it by as much at its points.
 The turns are then smoothed away:
 the line's x is the mean over 12 points either side,
 across the pieces' ends too
 (a piece reads its neighbours' unsmoothed points, a plan of their own),
-so seen from above it bends from the course by a fifth of a degree per point at most,
-and the course bends less.
+so seen from above it bends from the course round no tighter than `TURN` lets it.
 The line reads the ground as the towns level it (`valley::Terrain`),
-not as it cuts and fills it;
-it stands far enough across the valley
-that it never reaches a town, by construction,
+not as it cuts and fills it,
 and the landmarks and the moor keep off it.
+
+It can't go round everything, though:
+at the ranges' feet, every few kilometres either side,
+a rock spur stands its steep nose out onto the floor,
+or a side stream's gorge, flat-bedded between steep walls,
+cuts down the face and into the floor, fading out on it
+(`Landforms` in `worlds/src/mountains.rs`).
+Each reaches across the whole band, too high to climb over at the grade,
+too sudden to dip into,
+so the line tunnels through a spur and bridges a gorge,
+and its bridges and tunnels stand where the ground shows why.
 
 What carries the track comes from comparing it with the ground under it,
 the same everywhere:
-ground far above it is tunnelled, ground far below it bridged,
+ground over 10 m above it is tunnelled, over 8 m below it bridged,
 and nearer it is cut or filled, sloping from the formation's edges.
 That is decided at each of the line's points, 8 m apart,
 and a bridge or tunnel shorter than four points (32 m) is cut or filled
@@ -993,8 +1011,7 @@ A station stands by each town the line passes on the ground.
 The railway bids for its formation and under its bridges, not over its tunnels.
 Its bores are carved after every other layer, and the track in them drawn after,
 so nothing standing over a tunnel (trees and plants at a portal) reaches into it.
-Seen from above, the line keeps within a corridor of the segment
-between its piece's ends,
+Seen from above, the line keeps to its band,
 so it turns away columns further across before reading any plan.
 
 ### Learned domains

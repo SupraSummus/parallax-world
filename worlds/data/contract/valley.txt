@@ -1,23 +1,23 @@
-boulders mossyStone	1	0.010	0.185
-boulders mossyStone	2	0.008	0.191
+boulders mossyStone	1	0.012	0.183
+boulders mossyStone	2	0.011	0.190
 boulders mossyStone	3	0.034	0.190
-boulders mossyStone	4	0.084	0.168
-boulders stone	1	0.010	0.185
-boulders stone	2	0.008	0.191
+boulders mossyStone	4	0.084	0.167
+boulders stone	1	0.012	0.183
+boulders stone	2	0.011	0.190
 boulders stone	3	0.034	0.190
-boulders stone	4	0.084	0.168
-fields bush	1	0.020	0.167
-fields bush	2	0.016	0.173
-fields bush	3	0.067	0.187
-fields bush	4	0.100	0.188
+boulders stone	4	0.084	0.167
+fields bush	1	0.024	0.164
+fields bush	2	0.016	0.169
+fields bush	3	0.066	0.189
+fields bush	4	0.098	0.187
 fields crop	1	0.010	0.176
 fields crop	2	0.013	0.170
 fields crop	3	0.054	0.176
 fields crop	4	0.089	0.169
-fields furrow	1	0.022	0.185
-fields furrow	2	0.020	0.183
+fields furrow	1	0.022	0.184
+fields furrow	2	0.021	0.183
 fields furrow	3	0.043	0.171
-fields furrow	4	0.080	0.160
+fields furrow	4	0.077	0.160
 fields meadow	1	0.034	0.161
 fields meadow	2	0.018	0.168
 fields meadow	3	0.073	0.203
@@ -26,18 +26,18 @@ fields meadowGrass	1	0.015	0.171
 fields meadowGrass	2	0.025	0.163
 fields meadowGrass	3	0.060	0.192
 fields meadowGrass	4	0.100	0.185
-fields stubble	1	0.013	0.176
-fields stubble	2	0.018	0.166
-fields stubble	3	0.064	0.167
-fields stubble	4	0.098	0.169
+fields stubble	1	0.012	0.173
+fields stubble	2	0.029	0.162
+fields stubble	3	0.071	0.164
+fields stubble	4	0.098	0.170
 fields tilth	1	0.013	0.169
 fields tilth	2	0.012	0.187
 fields tilth	3	0.025	0.163
-fields tilth	4	0.082	0.171
-fields wheat	1	0.013	0.176
-fields wheat	2	0.018	0.166
-fields wheat	3	0.064	0.167
-fields wheat	4	0.098	0.169
+fields tilth	4	0.080	0.171
+fields wheat	1	0.012	0.173
+fields wheat	2	0.029	0.162
+fields wheat	3	0.071	0.164
+fields wheat	4	0.098	0.170
 haystacks hay	1	0.033	0.170
 haystacks hay	2	0.050	0.189
 haystacks hay	3	0.064	0.195
@@ -65,22 +65,22 @@ heath path	3	0.077	0.153
 heath path	4	0.081	0.168
 heath soil	3	0.072	0.124
 heath soil	4	0.068	0.152
-landmarks bark	1	0.070	0.177
-landmarks bark	2	0.053	0.161
-landmarks bark	3	0.060	0.137
-landmarks bark	4	0.029	0.102
-landmarks brick	1	0.072	0.175
-landmarks brick	2	0.054	0.167
-landmarks brick	3	0.061	0.144
-landmarks brick	4	0.029	0.104
+landmarks bark	1	0.068	0.178
+landmarks bark	2	0.054	0.162
+landmarks bark	3	0.061	0.139
+landmarks bark	4	0.032	0.105
+landmarks brick	1	0.070	0.176
+landmarks brick	2	0.055	0.169
+landmarks brick	3	0.062	0.146
+landmarks brick	4	0.032	0.107
 landmarks bronze	1	0.046	0.175
 landmarks bronze	2	0.038	0.176
 landmarks bronze	3	0.058	0.160
 landmarks bronze	4	0.076	0.154
-landmarks churchStone	1	0.048	0.183
-landmarks churchStone	2	0.024	0.156
-landmarks churchStone	3	0.024	0.132
-landmarks churchStone	4	0.043	0.127
+landmarks churchStone	1	0.057	0.191
+landmarks churchStone	2	0.031	0.158
+landmarks churchStone	3	0.066	0.158
+landmarks churchStone	4	0.039	0.124
 landmarks deadwood	1	0.061	0.202
 landmarks deadwood	2	0.046	0.162
 landmarks deadwood	3	0.048	0.150
@@ -97,22 +97,22 @@ landmarks glass	1	0.055	0.180
 landmarks glass	2	0.026	0.159
 landmarks glass	3	0.021	0.129
 landmarks glass	4	0.047	0.129
-landmarks hay	1	0.070	0.177
-landmarks hay	2	0.053	0.161
-landmarks hay	3	0.060	0.137
-landmarks hay	4	0.029	0.102
+landmarks hay	1	0.068	0.178
+landmarks hay	2	0.054	0.162
+landmarks hay	3	0.061	0.139
+landmarks hay	4	0.032	0.105
 landmarks iron	1	0.063	0.200
 landmarks iron	2	0.049	0.165
 landmarks iron	3	0.046	0.143
 landmarks iron	4	0.076	0.150
-landmarks lily	1	0.011	0.135
-landmarks lily	2	0.031	0.161
-landmarks lily	3	0.064	0.176
-landmarks lily	4	0.072	0.161
-landmarks mossyStone	1	0.045	0.160
-landmarks mossyStone	2	0.047	0.152
-landmarks mossyStone	3	0.070	0.167
-landmarks mossyStone	4	0.047	0.147
+landmarks lily	1	0.005	0.130
+landmarks lily	2	0.008	0.138
+landmarks lily	3	0.067	0.168
+landmarks lily	4	0.082	0.166
+landmarks mossyStone	1	0.056	0.164
+landmarks mossyStone	2	0.049	0.150
+landmarks mossyStone	3	0.101	0.187
+landmarks mossyStone	4	0.031	0.134
 landmarks planks	1	0.061	0.202
 landmarks planks	2	0.046	0.162
 landmarks planks	3	0.048	0.150
@@ -129,14 +129,14 @@ landmarks plasterWhite	1	0.068	0.168
 landmarks plasterWhite	2	0.048	0.160
 landmarks plasterWhite	3	0.034	0.127
 landmarks plasterWhite	4	0.022	0.112
-landmarks roofBrown	1	0.120	0.236
-landmarks roofBrown	2	0.056	0.125
-landmarks roofBrown	3	0.032	0.116
-landmarks roofBrown	4	0.037	0.124
-landmarks roofRed	1	0.072	0.175
-landmarks roofRed	2	0.054	0.167
-landmarks roofRed	3	0.061	0.144
-landmarks roofRed	4	0.029	0.104
+landmarks roofBrown	1	0.118	0.234
+landmarks roofBrown	2	0.055	0.124
+landmarks roofBrown	3	0.031	0.114
+landmarks roofBrown	4	0.036	0.121
+landmarks roofRed	1	0.070	0.176
+landmarks roofRed	2	0.055	0.169
+landmarks roofRed	3	0.062	0.146
+landmarks roofRed	4	0.032	0.107
 landmarks sail	1	0.053	0.156
 landmarks sail	2	0.057	0.163
 landmarks sail	3	0.045	0.153
@@ -145,17 +145,18 @@ landmarks shutterBlue	1	0.069	0.195
 landmarks shutterBlue	2	0.025	0.145
 landmarks shutterBlue	3	0.029	0.103
 landmarks shutterBlue	4	0.069	0.122
-landmarks shutterGreen	1	0.072	0.176
-landmarks shutterGreen	2	0.035	0.149
-landmarks shutterGreen	3	0.033	0.122
+landmarks shutterGreen	1	0.070	0.176
+landmarks shutterGreen	2	0.036	0.150
+landmarks shutterGreen	3	0.034	0.123
+landmarks shutterGreen	4	0.034	0.102
 landmarks slate	1	0.046	0.175
 landmarks slate	2	0.038	0.176
 landmarks slate	3	0.058	0.160
 landmarks slate	4	0.076	0.154
-landmarks stone	1	0.053	0.187
-landmarks stone	2	0.027	0.163
-landmarks stone	3	0.041	0.142
-landmarks stone	4	0.047	0.132
+landmarks stone	1	0.057	0.191
+landmarks stone	2	0.031	0.158
+landmarks stone	3	0.066	0.158
+landmarks stone	4	0.039	0.124
 landmarks thatch	1	0.059	0.161
 landmarks thatch	2	0.035	0.142
 landmarks thatch	3	0.031	0.131
@@ -164,59 +165,59 @@ landmarks timber	1	0.080	0.185
 landmarks timber	2	0.049	0.169
 landmarks timber	3	0.049	0.139
 landmarks timber	4	0.034	0.108
-landmarks trim	1	0.070	0.177
-landmarks trim	2	0.053	0.161
-landmarks trim	3	0.060	0.137
-landmarks trim	4	0.029	0.102
-landmarks water	1	0.070	0.177
-landmarks water	2	0.053	0.161
-landmarks water	3	0.060	0.137
-landmarks water	4	0.029	0.102
-landmarks' ground grass	1	0.049	0.167
-landmarks' ground grass	2	0.033	0.142
-landmarks' ground grass	3	0.035	0.134
-landmarks' ground grass	4	0.035	0.136
-landmarks' ground path	1	0.059	0.160
-landmarks' ground path	2	0.039	0.143
-landmarks' ground path	3	0.049	0.129
-landmarks' ground sand	1	0.015	0.175
-landmarks' ground sand	2	0.019	0.199
-landmarks' ground sand	3	0.062	0.201
-landmarks' ground sand	4	0.090	0.171
-landmarks' ground scree	1	0.045	0.160
-landmarks' ground scree	2	0.047	0.152
-landmarks' ground scree	3	0.070	0.167
-landmarks' ground scree	4	0.047	0.147
-landmarks' ground soil	1	0.015	0.132
-landmarks' ground soil	2	0.025	0.163
-landmarks' ground soil	3	0.060	0.180
-landmarks' ground soil	4	0.063	0.163
-logs deadwood	1	0.026	0.190
-logs deadwood	2	0.013	0.190
-logs deadwood	3	0.031	0.183
-logs deadwood	4	0.080	0.175
-logs moss	1	0.026	0.190
-logs moss	2	0.013	0.190
-logs moss	3	0.031	0.183
-logs moss	4	0.080	0.175
+landmarks trim	1	0.068	0.178
+landmarks trim	2	0.054	0.162
+landmarks trim	3	0.061	0.139
+landmarks trim	4	0.032	0.105
+landmarks water	1	0.068	0.178
+landmarks water	2	0.054	0.162
+landmarks water	3	0.061	0.139
+landmarks water	4	0.032	0.105
+landmarks' ground grass	1	0.052	0.164
+landmarks' ground grass	2	0.041	0.144
+landmarks' ground grass	3	0.047	0.136
+landmarks' ground grass	4	0.023	0.122
+landmarks' ground path	1	0.057	0.160
+landmarks' ground path	2	0.041	0.145
+landmarks' ground path	3	0.050	0.130
+landmarks' ground sand	1	0.016	0.172
+landmarks' ground sand	2	0.024	0.172
+landmarks' ground sand	3	0.062	0.196
+landmarks' ground sand	4	0.090	0.172
+landmarks' ground scree	1	0.034	0.155
+landmarks' ground scree	2	0.026	0.140
+landmarks' ground scree	3	0.072	0.168
+landmarks' ground scree	4	0.057	0.152
+landmarks' ground soil	1	0.004	0.131
+landmarks' ground soil	2	0.041	0.172
+landmarks' ground soil	3	0.118	0.208
+landmarks' ground soil	4	0.072	0.170
+logs deadwood	1	0.031	0.184
+logs deadwood	2	0.007	0.192
+logs deadwood	3	0.025	0.182
+logs deadwood	4	0.075	0.168
+logs moss	1	0.031	0.184
+logs moss	2	0.007	0.192
+logs moss	3	0.025	0.182
+logs moss	4	0.075	0.168
 mist mist	2	0.016	0.101
 mist mist	3	0.059	0.139
 mist mist	4	0.072	0.151
-moor boulders lichen	2	0.022	0.108
+moor boulders lichen	2	0.023	0.107
 moor boulders lichen	3	0.052	0.148
-moor boulders lichen	4	0.069	0.169
-moor boulders stone	1	0.019	0.106
-moor boulders stone	2	0.028	0.113
-moor boulders stone	3	0.064	0.151
-moor boulders stone	4	0.072	0.164
+moor boulders lichen	4	0.069	0.168
+moor boulders stone	1	0.021	0.103
+moor boulders stone	2	0.029	0.112
+moor boulders stone	3	0.064	0.150
+moor boulders stone	4	0.072	0.163
 mountains alpine	1	0.020	0.186
 mountains alpine	2	0.019	0.189
 mountains alpine	3	0.047	0.174
 mountains alpine	4	0.080	0.158
-mountains rock	1	0.066	0.195
-mountains rock	2	0.079	0.196
-mountains rock	3	0.097	0.200
-mountains rock	4	0.108	0.210
+mountains rock	1	0.064	0.202
+mountains rock	2	0.075	0.200
+mountains rock	3	0.095	0.204
+mountains rock	4	0.104	0.213
 mountains scree	1	0.014	0.181
 mountains scree	2	0.023	0.185
 mountains scree	3	0.066	0.176
@@ -225,78 +226,78 @@ mountains snow	1	0.061	0.206
 mountains snow	2	0.071	0.200
 mountains snow	3	0.098	0.206
 mountains snow	4	0.103	0.214
-plants amanita	1	0.021	0.189
-plants amanita	2	0.005	0.192
-plants amanita	3	0.031	0.186
-plants amanita	4	0.091	0.175
-plants amanitaSpot	1	0.021	0.189
-plants amanitaSpot	2	0.005	0.192
-plants amanitaSpot	3	0.031	0.186
-plants amanitaSpot	4	0.091	0.175
-plants berry	1	0.021	0.189
-plants berry	2	0.005	0.192
-plants berry	3	0.031	0.186
-plants berry	4	0.091	0.175
-plants bolete	1	0.035	0.184
-plants bolete	2	0.022	0.183
-plants bolete	3	0.032	0.172
-plants bolete	4	0.069	0.171
-plants bracken	1	0.032	0.184
-plants bracken	2	0.016	0.187
-plants bracken	3	0.034	0.179
-plants bracken	4	0.072	0.173
-plants bush	1	0.018	0.190
-plants bush	2	0.007	0.197
-plants bush	3	0.032	0.194
-plants bush	4	0.094	0.176
-plants cone	1	0.013	0.183
-plants cone	2	0.018	0.197
-plants cone	3	0.039	0.198
-plants cone	4	0.100	0.177
-plants fallenLeaf	1	0.032	0.184
-plants fallenLeaf	2	0.016	0.187
-plants fallenLeaf	3	0.034	0.179
-plants fallenLeaf	4	0.072	0.173
-plants fern	1	0.013	0.183
-plants fern	2	0.018	0.197
-plants fern	3	0.039	0.198
-plants fern	4	0.100	0.177
-plants flowerRed	1	0.019	0.189
-plants flowerRed	2	0.004	0.192
-plants flowerRed	3	0.034	0.187
-plants flowerRed	4	0.085	0.176
-plants flowerViolet	1	0.010	0.184
-plants flowerViolet	2	0.010	0.187
-plants flowerViolet	3	0.042	0.181
-plants flowerViolet	4	0.068	0.170
-plants flowerWhite	1	0.036	0.175
-plants flowerWhite	2	0.046	0.181
-plants flowerWhite	3	0.056	0.169
-plants flowerWhite	4	0.096	0.169
-plants flowerYellow	1	0.017	0.188
-plants flowerYellow	2	0.003	0.192
-plants flowerYellow	3	0.035	0.181
-plants flowerYellow	4	0.075	0.171
-plants grass	1	0.037	0.178
-plants grass	2	0.051	0.187
-plants grass	3	0.047	0.178
-plants grass	4	0.091	0.172
-plants hay	1	0.007	0.179
-plants hay	2	0.019	0.179
-plants hay	3	0.047	0.185
-plants hay	4	0.074	0.179
-plants mushroomStem	1	0.018	0.190
-plants mushroomStem	2	0.007	0.197
-plants mushroomStem	3	0.032	0.194
-plants mushroomStem	4	0.094	0.176
+plants amanita	1	0.016	0.191
+plants amanita	2	0.007	0.197
+plants amanita	3	0.026	0.187
+plants amanita	4	0.085	0.166
+plants amanitaSpot	1	0.016	0.191
+plants amanitaSpot	2	0.007	0.197
+plants amanitaSpot	3	0.026	0.187
+plants amanitaSpot	4	0.085	0.166
+plants berry	1	0.025	0.187
+plants berry	2	0.005	0.188
+plants berry	3	0.030	0.188
+plants berry	4	0.088	0.173
+plants bolete	1	0.032	0.178
+plants bolete	2	0.024	0.176
+plants bolete	3	0.037	0.170
+plants bolete	4	0.067	0.171
+plants bracken	1	0.028	0.178
+plants bracken	2	0.024	0.180
+plants bracken	3	0.039	0.178
+plants bracken	4	0.070	0.173
+plants bush	1	0.021	0.187
+plants bush	2	0.008	0.193
+plants bush	3	0.031	0.195
+plants bush	4	0.091	0.175
+plants cone	1	0.015	0.181
+plants cone	2	0.018	0.194
+plants cone	3	0.040	0.200
+plants cone	4	0.097	0.176
+plants fallenLeaf	1	0.028	0.178
+plants fallenLeaf	2	0.024	0.180
+plants fallenLeaf	3	0.039	0.178
+plants fallenLeaf	4	0.070	0.173
+plants fern	1	0.015	0.181
+plants fern	2	0.018	0.194
+plants fern	3	0.040	0.200
+plants fern	4	0.097	0.176
+plants flowerRed	1	0.023	0.186
+plants flowerRed	2	0.005	0.188
+plants flowerRed	3	0.033	0.189
+plants flowerRed	4	0.083	0.175
+plants flowerViolet	1	0.007	0.178
+plants flowerViolet	2	0.019	0.179
+plants flowerViolet	3	0.046	0.179
+plants flowerViolet	4	0.066	0.170
+plants flowerWhite	1	0.033	0.172
+plants flowerWhite	2	0.046	0.178
+plants flowerWhite	3	0.058	0.170
+plants flowerWhite	4	0.093	0.168
+plants flowerYellow	1	0.021	0.184
+plants flowerYellow	2	0.004	0.188
+plants flowerYellow	3	0.035	0.183
+plants flowerYellow	4	0.073	0.170
+plants grass	1	0.034	0.175
+plants grass	2	0.052	0.183
+plants grass	3	0.050	0.180
+plants grass	4	0.088	0.170
+plants hay	1	0.011	0.177
+plants hay	2	0.019	0.176
+plants hay	3	0.049	0.186
+plants hay	4	0.071	0.177
+plants mushroomStem	1	0.021	0.187
+plants mushroomStem	2	0.008	0.193
+plants mushroomStem	3	0.031	0.195
+plants mushroomStem	4	0.091	0.175
 plants stone	1	0.025	0.183
 plants stone	2	0.037	0.185
 plants stone	3	0.049	0.166
 plants stone	4	0.084	0.160
-plants tallGrass	1	0.013	0.183
-plants tallGrass	2	0.018	0.197
-plants tallGrass	3	0.039	0.198
-plants tallGrass	4	0.100	0.177
+plants tallGrass	1	0.015	0.181
+plants tallGrass	2	0.018	0.194
+plants tallGrass	3	0.040	0.200
+plants tallGrass	4	0.097	0.176
 ponds reed	1	0.008	0.160
 ponds reed	2	0.008	0.144
 ponds reed	3	0.072	0.177
@@ -305,54 +306,54 @@ ponds water	1	0.004	0.135
 ponds water	2	0.011	0.144
 ponds water	3	0.074	0.184
 ponds water	4	0.056	0.156
-railway ballast	1	0.024	0.187
-railway ballast	2	0.014	0.193
-railway ballast	3	0.034	0.179
-railway ballast	4	0.080	0.163
-railway brick	1	0.016	0.190
-railway brick	2	0.030	0.210
-railway brick	3	0.034	0.205
-railway brick	4	0.058	0.173
-railway in its tunnels ballast	1	0.019	0.192
-railway in its tunnels ballast	2	0.018	0.201
-railway in its tunnels ballast	3	0.058	0.194
-railway in its tunnels ballast	4	0.096	0.176
-railway in its tunnels brick	1	0.014	0.191
-railway in its tunnels brick	2	0.015	0.200
-railway in its tunnels brick	3	0.051	0.191
-railway in its tunnels brick	4	0.086	0.177
-railway in its tunnels iron	1	0.019	0.192
-railway in its tunnels iron	2	0.018	0.201
-railway in its tunnels iron	3	0.058	0.194
-railway in its tunnels iron	4	0.096	0.176
-railway in its tunnels path	1	0.008	0.186
-railway in its tunnels path	2	0.037	0.199
-railway in its tunnels path	3	0.063	0.190
-railway in its tunnels path	4	0.070	0.175
-railway in its tunnels timber	1	0.016	0.191
-railway in its tunnels timber	2	0.026	0.200
-railway in its tunnels timber	3	0.072	0.190
-railway in its tunnels timber	4	0.095	0.178
-railway iron	1	0.035	0.177
-railway iron	2	0.009	0.190
-railway iron	3	0.041	0.182
-railway iron	4	0.072	0.158
-railway path	1	0.041	0.178
-railway path	2	0.034	0.192
-railway path	3	0.043	0.190
-railway path	4	0.055	0.164
-railway slab	1	0.061	0.174
-railway slab	2	0.038	0.178
-railway slab	3	0.049	0.175
-railway slab	4	0.059	0.156
-railway timber	1	0.026	0.187
-railway timber	2	0.013	0.190
-railway timber	3	0.037	0.178
-railway timber	4	0.070	0.157
-railway's tunnels carving	1	0.014	0.182
-railway's tunnels carving	2	0.044	0.200
-railway's tunnels carving	3	0.074	0.194
-railway's tunnels carving	4	0.074	0.178
+railway ballast	1	0.006	0.185
+railway ballast	2	0.011	0.200
+railway ballast	3	0.050	0.192
+railway ballast	4	0.063	0.178
+railway brick	1	0.011	0.187
+railway brick	2	0.035	0.200
+railway brick	3	0.052	0.196
+railway brick	4	0.048	0.175
+railway in its tunnels ballast	1	0.054	0.178
+railway in its tunnels ballast	2	0.063	0.196
+railway in its tunnels ballast	3	0.086	0.187
+railway in its tunnels ballast	4	0.113	0.183
+railway in its tunnels brick	1	0.056	0.174
+railway in its tunnels brick	2	0.073	0.196
+railway in its tunnels brick	3	0.089	0.191
+railway in its tunnels brick	4	0.104	0.173
+railway in its tunnels iron	1	0.026	0.196
+railway in its tunnels iron	2	0.026	0.210
+railway in its tunnels iron	3	0.040	0.195
+railway in its tunnels iron	4	0.109	0.191
+railway in its tunnels path	1	0.042	0.175
+railway in its tunnels path	2	0.072	0.204
+railway in its tunnels path	3	0.075	0.189
+railway in its tunnels path	4	0.096	0.169
+railway in its tunnels timber	1	0.054	0.178
+railway in its tunnels timber	2	0.063	0.196
+railway in its tunnels timber	3	0.086	0.187
+railway in its tunnels timber	4	0.113	0.183
+railway iron	1	0.016	0.184
+railway iron	2	0.015	0.204
+railway iron	3	0.031	0.185
+railway iron	4	0.078	0.169
+railway path	1	0.041	0.181
+railway path	2	0.030	0.186
+railway path	3	0.034	0.175
+railway path	4	0.065	0.170
+railway slab	1	0.054	0.173
+railway slab	2	0.031	0.191
+railway slab	3	0.050	0.181
+railway slab	4	0.060	0.158
+railway timber	1	0.013	0.182
+railway timber	2	0.011	0.200
+railway timber	3	0.044	0.188
+railway timber	4	0.065	0.171
+railway's tunnels carving	1	0.024	0.184
+railway's tunnels carving	2	0.032	0.203
+railway's tunnels carving	3	0.066	0.195
+railway's tunnels carving	4	0.115	0.185
 sea sand	1	0.007	0.155
 sea sand	2	0.042	0.156
 sea sand	3	0.066	0.169
@@ -361,74 +362,78 @@ sea water	1	0.007	0.155
 sea water	2	0.042	0.156
 sea water	3	0.066	0.169
 sea water	4	0.070	0.168
-stations brick	1	0.061	0.174
-stations brick	2	0.038	0.178
-stations brick	3	0.049	0.175
-stations brick	4	0.059	0.156
-stations churchStone	1	0.061	0.174
-stations churchStone	2	0.038	0.178
-stations churchStone	3	0.049	0.175
-stations churchStone	4	0.059	0.156
-stations door	1	0.061	0.174
-stations door	2	0.038	0.178
-stations door	3	0.049	0.175
-stations door	4	0.059	0.156
-stations faluRed	1	0.051	0.174
-stations faluRed	2	0.023	0.185
-stations faluRed	3	0.037	0.176
-stations faluRed	4	0.050	0.152
-stations glass	1	0.061	0.174
-stations glass	2	0.038	0.178
-stations glass	3	0.049	0.175
-stations glass	4	0.059	0.156
-stations iron	1	0.067	0.167
-stations iron	2	0.064	0.179
-stations iron	3	0.038	0.176
-stations iron	4	0.068	0.174
-stations plasterGrey	1	0.049	0.164
-stations plasterGrey	2	0.010	0.161
-stations plasterGrey	3	0.039	0.158
-stations plasterGrey	4	0.069	0.161
-stations plasterOchre	1	0.036	0.172
-stations plasterOchre	2	0.035	0.178
-stations plasterOchre	3	0.044	0.176
-stations plasterOchre	4	0.058	0.165
-stations plasterWhite	1	0.049	0.185
-stations plasterWhite	2	0.047	0.238
-stations plasterWhite	3	0.056	0.204
-stations plasterWhite	4	0.060	0.163
-stations roofBrown	1	0.062	0.168
-stations roofBrown	2	0.035	0.184
-stations roofBrown	3	0.024	0.159
-stations roofBrown	4	0.059	0.166
-stations roofRed	1	0.035	0.174
-stations roofRed	2	0.035	0.208
-stations roofRed	3	0.044	0.191
-stations roofRed	4	0.064	0.162
-stations roofTile	1	0.042	0.169
-stations roofTile	2	0.035	0.169
-stations roofTile	3	0.043	0.169
-stations roofTile	4	0.062	0.167
-stations shutterBlue	1	0.049	0.164
-stations shutterBlue	2	0.010	0.161
-stations shutterBlue	3	0.039	0.158
-stations shutterBlue	4	0.069	0.161
-stations shutterGreen	1	0.049	0.168
-stations shutterGreen	2	0.043	0.173
-stations shutterGreen	3	0.039	0.170
-stations shutterGreen	4	0.064	0.168
-stations slate	1	0.051	0.177
-stations slate	2	0.029	0.184
-stations slate	3	0.040	0.176
-stations slate	4	0.049	0.148
-stations timber	1	0.042	0.183
-stations timber	2	0.040	0.230
-stations timber	3	0.041	0.203
-stations timber	4	0.057	0.162
-stations trim	1	0.061	0.174
-stations trim	2	0.038	0.178
-stations trim	3	0.049	0.175
-stations trim	4	0.059	0.156
+stations brick	1	0.049	0.178
+stations brick	2	0.020	0.186
+stations brick	3	0.032	0.168
+stations brick	4	0.058	0.159
+stations churchStone	1	0.037	0.177
+stations churchStone	2	0.024	0.195
+stations churchStone	3	0.029	0.172
+stations churchStone	4	0.058	0.154
+stations door	1	0.037	0.177
+stations door	2	0.024	0.195
+stations door	3	0.029	0.172
+stations door	4	0.058	0.154
+stations faluRed	1	0.024	0.176
+stations faluRed	2	0.030	0.187
+stations faluRed	3	0.033	0.171
+stations faluRed	4	0.069	0.169
+stations glass	1	0.037	0.177
+stations glass	2	0.024	0.195
+stations glass	3	0.029	0.172
+stations glass	4	0.058	0.154
+stations iron	1	0.040	0.176
+stations iron	2	0.031	0.181
+stations iron	3	0.050	0.180
+stations iron	4	0.060	0.159
+stations plasterBlue	1	0.025	0.173
+stations plasterBlue	2	0.018	0.195
+stations plasterBlue	3	0.039	0.168
+stations plasterBlue	4	0.078	0.174
+stations plasterGrey	1	0.060	0.166
+stations plasterGrey	2	0.016	0.166
+stations plasterGrey	3	0.034	0.156
+stations plasterGrey	4	0.055	0.144
+stations plasterOchre	1	0.047	0.176
+stations plasterOchre	2	0.029	0.180
+stations plasterOchre	3	0.040	0.170
+stations plasterOchre	4	0.059	0.159
+stations plasterWhite	1	0.031	0.191
+stations plasterWhite	2	0.059	0.242
+stations plasterWhite	3	0.050	0.201
+stations plasterWhite	4	0.055	0.151
+stations roofBrown	1	0.049	0.178
+stations roofBrown	2	0.022	0.191
+stations roofBrown	3	0.023	0.162
+stations roofBrown	4	0.052	0.142
+stations roofRed	1	0.035	0.181
+stations roofRed	2	0.030	0.222
+stations roofRed	3	0.030	0.189
+stations roofRed	4	0.064	0.147
+stations roofTile	1	0.045	0.176
+stations roofTile	2	0.030	0.182
+stations roofTile	3	0.050	0.178
+stations roofTile	4	0.056	0.157
+stations shutterBlue	1	0.047	0.174
+stations shutterBlue	2	0.029	0.175
+stations shutterBlue	3	0.032	0.158
+stations shutterBlue	4	0.065	0.160
+stations shutterGreen	1	0.033	0.175
+stations shutterGreen	2	0.022	0.187
+stations shutterGreen	3	0.047	0.180
+stations shutterGreen	4	0.060	0.153
+stations slate	1	0.032	0.173
+stations slate	2	0.007	0.187
+stations slate	3	0.031	0.170
+stations slate	4	0.064	0.166
+stations timber	1	0.038	0.179
+stations timber	2	0.050	0.235
+stations timber	3	0.047	0.194
+stations timber	4	0.053	0.152
+stations trim	1	0.037	0.177
+stations trim	2	0.024	0.195
+stations trim	3	0.029	0.172
+stations trim	4	0.058	0.154
 steadings drystone	3	0.092	0.151
 steadings drystone	4	0.092	0.173
 steadings lichen	3	0.092	0.151
@@ -481,26 +486,26 @@ streets slab	1	0.018	0.152
 streets slab	2	0.043	0.175
 streets slab	3	0.036	0.164
 streets slab	4	0.077	0.174
-terrain grass	1	0.008	0.145
-terrain grass	2	0.024	0.148
-terrain grass	3	0.043	0.159
-terrain grass	4	0.062	0.158
-terrain litter	1	0.011	0.162
-terrain litter	2	0.021	0.173
-terrain litter	3	0.052	0.162
-terrain litter	4	0.071	0.162
-terrain moss	1	0.042	0.186
-terrain moss	2	0.021	0.160
-terrain moss	3	0.030	0.153
-terrain moss	4	0.055	0.163
-terrain mossyStone	1	0.054	0.170
-terrain mossyStone	2	0.071	0.179
-terrain mossyStone	3	0.088	0.179
-terrain mossyStone	4	0.096	0.185
-terrain needles	1	0.020	0.161
-terrain needles	2	0.023	0.168
-terrain needles	3	0.029	0.148
-terrain needles	4	0.111	0.191
+terrain grass	1	0.012	0.144
+terrain grass	2	0.023	0.153
+terrain grass	3	0.061	0.169
+terrain grass	4	0.060	0.153
+terrain litter	1	0.013	0.161
+terrain litter	2	0.020	0.177
+terrain litter	3	0.053	0.171
+terrain litter	4	0.070	0.168
+terrain moss	1	0.016	0.157
+terrain moss	2	0.014	0.147
+terrain moss	3	0.047	0.154
+terrain moss	4	0.073	0.162
+terrain mossyStone	1	0.040	0.169
+terrain mossyStone	2	0.060	0.180
+terrain mossyStone	3	0.079	0.178
+terrain mossyStone	4	0.074	0.177
+terrain needles	1	0.017	0.170
+terrain needles	2	0.019	0.138
+terrain needles	3	0.041	0.155
+terrain needles	4	0.107	0.176
 terrain path	1	0.019	0.161
 terrain path	2	0.057	0.192
 terrain path	3	0.041	0.151
@@ -993,57 +998,57 @@ towns/well water	1	0.034	0.179
 towns/well water	2	0.023	0.164
 towns/well water	3	0.078	0.167
 towns/well water	4	0.085	0.161
-trees bark	1	0.032	0.184
-trees bark	2	0.016	0.187
-trees bark	3	0.034	0.179
-trees bark	4	0.072	0.173
-trees barkFurrow	1	0.032	0.184
-trees barkFurrow	2	0.016	0.187
-trees barkFurrow	3	0.034	0.179
-trees barkFurrow	4	0.072	0.173
-trees birchBark	1	0.035	0.184
-trees birchBark	2	0.022	0.183
-trees birchBark	3	0.032	0.172
-trees birchBark	4	0.069	0.171
-trees birchGold	1	0.033	0.183
-trees birchGold	2	0.021	0.183
-trees birchGold	3	0.036	0.173
-trees birchGold	4	0.066	0.173
-trees birchGreen	1	0.033	0.183
-trees birchGreen	2	0.021	0.183
-trees birchGreen	3	0.036	0.173
-trees birchGreen	4	0.066	0.173
-trees birchMark	1	0.035	0.184
-trees birchMark	2	0.022	0.183
-trees birchMark	3	0.032	0.172
-trees birchMark	4	0.069	0.171
-trees oakGold	1	0.032	0.184
-trees oakGold	2	0.016	0.187
-trees oakGold	3	0.034	0.179
-trees oakGold	4	0.072	0.173
-trees oakGreen	1	0.018	0.181
-trees oakGreen	2	0.015	0.182
-trees oakGreen	3	0.030	0.167
-trees oakGreen	4	0.057	0.159
-trees oakOrange	1	0.032	0.184
-trees oakOrange	2	0.016	0.187
-trees oakOrange	3	0.034	0.179
-trees oakOrange	4	0.072	0.173
-trees spruce	1	0.051	0.194
-trees spruce	2	0.052	0.196
-trees spruce	3	0.019	0.183
-trees spruce	4	0.076	0.168
-trees spruceBark	1	0.051	0.194
-trees spruceBark	2	0.052	0.196
-trees spruceBark	3	0.019	0.183
-trees spruceBark	4	0.076	0.168
-trees spruceScale	1	0.051	0.194
-trees spruceScale	2	0.052	0.196
-trees spruceScale	3	0.019	0.183
-trees spruceScale	4	0.076	0.168
-trees twig	1	0.032	0.184
-trees twig	2	0.016	0.187
-trees twig	3	0.034	0.179
-trees twig	4	0.072	0.173
+trees bark	1	0.016	0.178
+trees bark	2	0.009	0.192
+trees bark	3	0.030	0.179
+trees bark	4	0.074	0.162
+trees barkFurrow	1	0.016	0.178
+trees barkFurrow	2	0.009	0.192
+trees barkFurrow	3	0.030	0.179
+trees barkFurrow	4	0.074	0.162
+trees birchBark	1	0.032	0.178
+trees birchBark	2	0.024	0.176
+trees birchBark	3	0.037	0.170
+trees birchBark	4	0.067	0.171
+trees birchGold	1	0.030	0.178
+trees birchGold	2	0.023	0.175
+trees birchGold	3	0.041	0.171
+trees birchGold	4	0.064	0.173
+trees birchGreen	1	0.030	0.178
+trees birchGreen	2	0.023	0.175
+trees birchGreen	3	0.041	0.171
+trees birchGreen	4	0.064	0.173
+trees birchMark	1	0.032	0.178
+trees birchMark	2	0.024	0.176
+trees birchMark	3	0.037	0.170
+trees birchMark	4	0.067	0.171
+trees oakGold	1	0.016	0.178
+trees oakGold	2	0.009	0.192
+trees oakGold	3	0.030	0.179
+trees oakGold	4	0.074	0.162
+trees oakGreen	1	0.010	0.180
+trees oakGreen	2	0.012	0.186
+trees oakGreen	3	0.033	0.167
+trees oakGreen	4	0.065	0.155
+trees oakOrange	1	0.035	0.188
+trees oakOrange	2	0.013	0.203
+trees oakOrange	3	0.019	0.185
+trees oakOrange	4	0.066	0.165
+trees spruce	1	0.033	0.185
+trees spruce	2	0.023	0.195
+trees spruce	3	0.017	0.182
+trees spruce	4	0.064	0.167
+trees spruceBark	1	0.033	0.185
+trees spruceBark	2	0.023	0.195
+trees spruceBark	3	0.017	0.182
+trees spruceBark	4	0.064	0.167
+trees spruceScale	1	0.033	0.185
+trees spruceScale	2	0.023	0.195
+trees spruceScale	3	0.017	0.182
+trees spruceScale	4	0.064	0.167
+trees twig	1	0.028	0.178
+trees twig	2	0.024	0.180
+trees twig	3	0.039	0.178
+trees twig	4	0.070	0.173
 water water	3	0.081	0.116
 water water	4	0.064	0.157
