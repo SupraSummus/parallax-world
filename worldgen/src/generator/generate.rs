@@ -83,15 +83,13 @@ pub fn generate(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
     }
     let palette = Palette::new(&generator.kinds, generator.seed);
     let clip = grid.clip();
-    // Segments kept while generating this box, let go after (a generate may run inside another's drawing).
-    let kept = SEGMENTS.with_borrow(Vec::len);
     let mut put = |look: Look, op: Op, share: u32, pick: u32, x: i64, y: i64, z: i64| {
         let colour = |kind: Kind| palette.colour(kind, s, [x, y, z].map(|v| v * s));
         let colours = std::array::from_fn(|k| colour(look.faces.map_or(look.kind, |kinds| kinds[k])));
         let kind = &generator.kinds[look.kind as usize];
         // What glows gives light of its colour.
         let glow = colour(look.kind).map(|c| if kind.glows { (c * 255 + COLOUR_ONE as u32 / 2) / COLOUR_ONE as u32 } else { 0 });
-        let added = Added { op, pick, colours, glow, cover: look.cover, rays: look.rays, medium: kind.medium, solid: !kind.walk_through };
+        let added = Added { op, pick, colours, glow, cover: look.cover, medium: kind.medium, solid: !kind.walk_through };
         see(&mut grid, &added, share, x, y, z);
     };
     let drawables = drawables_in(generator, &clip, s);
@@ -135,8 +133,6 @@ pub fn generate(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
     }
     // One coin per site: its pieces shown as often as they stop rays.
     let coins = hash_text("shown", generator.seed);
-    grid.settle();
-    SEGMENTS.with_borrow_mut(|segments| segments.truncate(kept));
     grid.show(|x, y, z| ((hash(coins, x * s, y * s, z * s) as u64 * ALPHA as u64) >> 32) as u8);
     grid
 }
@@ -150,11 +146,7 @@ pub fn generate(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
  * Pieces covering some faces' rays more than others' (`cover`), unlike
  * through some faces, or put where some did, are added face by face
  * (VoxelGrid's `views`); the site as a whole, to what sees no faces (a
- * host's voxels, a camera colliding), stops and glows as its most. Pieces
- * that say where on the site's lines they lie (`Look::rays`), in a site
- * of none yet (or one filled whole, coming to take out or paint over
- * some of it), and whole ones after them, lie there: a fill where nothing
- * is, a paint over it (VoxelGrid's `put_rays`); anything else settles them.
+ * host's voxels, a camera colliding), stops and glows as its most.
  * What stops a walking body adds its share to the site's `solid`,
  * wherever in it, in front or behind; a carve takes out of it too.
  */
@@ -170,36 +162,7 @@ fn see(grid: &mut VoxelGrid, added: &Added, share: u32, x: i64, y: i64, z: i64) 
         grid.medium.alpha[i] = added.rounded(grid.medium.alpha[i] as u64 * kept);
         grid.medium.colour[i] = grid.medium.colour[i].map(|c| (c as u64 * kept / SHARE as u64) as u16);
     }
-    // Where on the site's lines its pieces lie, while all that comes there says where (or fills it whole). Else as
-    // shares, by how much of each face's rays each meets.
-    let whole = share >= SHARE && added.cover.is_none();
-    let starts = false
-        && added.rays.is_some()
-        && !medium
-        && !grid.is_rays(i)
-        && if grid.has_no_pieces(i) { added.op != Op::Carve } else { added.op != Op::Fill && grid.make_rays(i) };
-    if false && !medium && (added.rays.is_some() || whole) && (grid.is_rays(i) || starts) {
-        let part = (added.op != Op::Carve).then_some(RayPart { colours: added.colours, glow: added.glow, solid: added.solid });
-        match added.rays {
-            // Each put once: let go of its segments.
-            Some(id) => {
-                let segments = SEGMENTS.with_borrow_mut(|kept| std::mem::take(&mut kept[id as usize]));
-                grid.put_rays(i, Some(&segments), part, added.op == Op::Paint);
-            }
-            None => grid.put_rays(i, None, part, added.op == Op::Paint),
-        }
-        return;
-    }
-    if !medium {
-        grid.settle_site(i);
-    }
-    // Each put once: let go of its segments.
-    // What it meets of each face's rays; a carve, what it takes out: those it holds all along.
-    let met = added.rays.map(|id| {
-        let segments = SEGMENTS.with_borrow_mut(|kept| std::mem::take(&mut kept[id as usize]));
-        if added.op == Op::Carve { grid::through(&segments) } else { grid::met(&segments) }
-    });
-    let cover = added.cover.or(met.map(|met| met.map(super::share)));
+    let cover = added.cover;
     let (solid, all, one) = (grid.solid[i] as u64, ALPHA as u64, SHARE as u64);
     let share64 = share.min(SHARE) as u64;
     grid.solid[i] = match added.op {
@@ -240,8 +203,6 @@ struct Added {
     glow: [u32; 3],
     /** How much of each face's rays it covers, if not its share. */
     cover: Option<[u32; FACE_KINDS]>,
-    /** Where on the site's lines it lies, if it says (`Look::rays`). */
-    rays: Option<u32>,
     medium: bool,
     solid: bool,
 }

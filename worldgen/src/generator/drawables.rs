@@ -35,8 +35,8 @@ pub(super) fn draw(drawable: &Drawable, seed: u64, s: i64, clip: &Box3, put: &mu
             let mut tests = 0;
             for (i, shape) in shapes.iter().enumerate() {
                 let seed = hash_text(&format!("{}#{}{i}", drawable.key, if *far { "far" } else { "" }), seed);
-                tests += draw_shape(shape, seed, s, clip, &mut |share, cover, rays, pick, x, y, z| {
-                    put(Look { cover, rays, ..shape.kind.into() }, shape.op, share, pick, x, y, z)
+                tests += draw_shape(shape, seed, s, clip, &mut |share, cover, pick, x, y, z| {
+                    put(Look { cover, ..shape.kind.into() }, shape.op, share, pick, x, y, z)
                 });
             }
             Work { nodes: 1, tests, ..Work::default() }
@@ -189,17 +189,12 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
                                         }
                                     }
                                 }
-                                for ((kind, extinction), segments) in parts {
-                                    let pick = picked(x, y, z);
-                                    match extinction {
-                                        None => {
-                                            let filled = share(grid::filled(&segments));
-                                            put(Look { rays: Some(keep(segments)), ..kind.into() }, op, filled, pick, x, y, z);
-                                        }
-                                        Some(e) => {
-                                            put(kind.into(), op, share(grid::medium_stops(e, s as f64, Some(&segments))), pick, x, y, z)
-                                        }
-                                    }
+                                let pick = picked(x, y, z);
+                                let (solid, media): (Vec<_>, Vec<_>) = parts.into_iter().partition(|((_, e), _)| e.is_none());
+                                put_apart(solid.into_iter().map(|((kind, _), segments)| (kind, segments)).collect(), op, pick, site, put);
+                                for ((kind, extinction), segments) in media {
+                                    let e = extinction.expect("a medium");
+                                    put(kind.into(), op, share(grid::medium_stops(e, s as f64, Some(&segments))), pick, x, y, z);
                                 }
                             }
                             w += 2;
@@ -297,17 +292,7 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
                                         None => break,
                                     },
                                     Err(()) => {
-                                        // Its kinds lie apart in the site: each covers the rays it meets first, put one behind
-                                        // another (a fill behind what is there covers its share of the rest).
-                                        let kinds = span_segments(&around, site, s);
-                                        let met = grid::first_met(&kinds.iter().map(|(_, segments)| segments).collect::<Vec<_>>());
-                                        let mut before = [0.0f64; FACE_KINDS];
-                                        for ((kind, segments), met) in kinds.iter().zip(met) {
-                                            let cover = std::array::from_fn(|k| share(met[k] / (1.0 - before[k]).max(1e-9)));
-                                            (0..FACE_KINDS).for_each(|k| before[k] += met[k]);
-                                            let filled = share(grid::filled(segments));
-                                            put(Look { cover: Some(cover), ..(*kind).into() }, op, filled, picked(x, y, z), x, y, z);
-                                        }
+                                        put_apart(span_segments(&around, site, s), op, picked(x, y, z), site, put);
                                     }
                                 }
                                 w += 2;
@@ -452,6 +437,26 @@ fn span_segments(around: &[((i64, i64), Vec<Span>)], site: [i64; 3], s: i64) -> 
 }
 
 /**
+ * Puts the kinds of a site, `kinds`, where on its lines each lies, apart:
+ * each covers the rays of each face it meets first, one behind another (a
+ * fill behind what is there covers its share of the rest); a carve takes
+ * out the rays each holds all along.
+ */
+fn put_apart(kinds: Vec<(Kind, grid::Segments)>, op: Op, pick: u32, [x, y, z]: [i64; 3], put: &mut Put) {
+    let met = grid::first_met(&kinds.iter().map(|(_, segments)| segments).collect::<Vec<_>>());
+    let mut before = [0.0f64; FACE_KINDS];
+    for ((kind, segments), met) in kinds.iter().zip(met) {
+        let cover = if op == Op::Carve {
+            grid::through(segments).map(super::share)
+        } else {
+            std::array::from_fn(|k| super::share(met[k] / (1.0 - before[k]).max(1e-9)))
+        };
+        (0..FACE_KINDS).for_each(|k| before[k] += met[k]);
+        put(Look { cover: Some(cover), ..(*kind).into() }, op, super::share(grid::filled(segments)), pick, x, y, z);
+    }
+}
+
+/**
  * Draws a field's shapes into `clip` (sites s apart), each as a thing's
  * shape is drawn (draw_shape), but over the world, in the order `near`
  * gives them, with picks of their own (from their bounds), so whichever
@@ -471,8 +476,8 @@ fn draw_field_shapes(field: &Field, near: &FieldShapes, seed: u64, s: i64, clip:
         let b = &shape.bounds;
         let picks = hash64(hash64(field_seed, b.min[0], b.min[1], b.min[2]), b.max[0], b.max[1], b.max[2]);
         work.shapes += 1;
-        work.tests += draw_shape(shape, picks, s, clip, &mut |share, cover, rays, pick, x, y, z| {
-            put(Look { cover, rays, ..shape.kind.into() }, shape.op, share, pick, x, y, z)
+        work.tests += draw_shape(shape, picks, s, clip, &mut |share, cover, pick, x, y, z| {
+            put(Look { cover, ..shape.kind.into() }, shape.op, share, pick, x, y, z)
         });
     }
     work
