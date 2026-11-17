@@ -19,6 +19,7 @@ pub mod town;
 pub mod valley;
 
 use worldgen::World;
+use worldgen::checks::contract::Accuracy;
 use worldgen::grid::Box3;
 
 /** A box around a place a world names (worldgen::World::point), lattice units from it: the same feature at any seed. */
@@ -54,6 +55,11 @@ pub struct Entry {
     /** The level up to which its cells look as what is in them (worldgen::checks::contract). */
     pub levels: u32,
     /**
+     * How closely its strata do, on average, by name: a thing's or a
+     * layer's covers its parts (Accuracy::of); DEFAULT for the rest.
+     */
+    pub accuracy: &'static [(&'static str, Accuracy)],
+    /**
      * Wide regions whose fields are seen from above at coarse levels
      * (worldgen::checks::contract::check_far); only their x and z count.
      */
@@ -73,6 +79,7 @@ pub const WORLDS: &[Entry] = &[
         make: forest::forest,
         regions: &[Region::at("spawn", [-71, -115, -136], [185, 333, 120])],
         levels: 6,
+        accuracy: &[],
         far: &[],
         far_levels: 6,
     },
@@ -97,6 +104,7 @@ pub const WORLDS: &[Entry] = &[
             Region::at("station", [-192, -60, -256], [192, 240, 256]),
         ],
         levels: 4,
+        accuracy: &[],
         far: &[Region::at("town", [-704, -38, -736], [704, 298, 736])],
         far_levels: 6,
     },
@@ -107,6 +115,7 @@ pub const WORLDS: &[Entry] = &[
         make: moor::moor,
         regions: &[Region::at("spawn", [-113, -46, 9], [143, 50, 393])],
         levels: 5,
+        accuracy: &[],
         far: &[Region::at("spawn", [-689, -46, -439], [719, 50, 969])],
         far_levels: 6,
     },
@@ -117,6 +126,7 @@ pub const WORLDS: &[Entry] = &[
         make: moor::fog,
         regions: &[Region::at("spawn", [-113, -46, 9], [143, 50, 393])],
         levels: 5,
+        accuracy: &[],
         far: &[],
         far_levels: 5,
     },
@@ -127,6 +137,7 @@ pub const WORLDS: &[Entry] = &[
         make: learned::learned,
         regions: &[Region::at("settlement", [64, -34, -96], [448, 222, 288])],
         levels: 4,
+        accuracy: &[],
         far: &[Region::at("settlement", [-1536, -34, -1536], [1536, 302, 1536])],
         far_levels: 6,
     },
@@ -138,6 +149,7 @@ pub const WORLDS: &[Entry] = &[
         make: city::city,
         regions: &[Region::at("spawn", [-478, -20, -16], [482, 108, 304])],
         levels: 3,
+        accuracy: &[],
         far: &[Region::at("spawn", [-478, -20, -32], [482, 108, 928])],
         far_levels: 6,
     },
@@ -149,6 +161,7 @@ pub const WORLDS: &[Entry] = &[
         make: cheese::cheese,
         regions: &[Region::at("spawn", [-128, -128, -128], [128, 128, 128])],
         levels: 3,
+        accuracy: &[],
         far: &[],
         far_levels: 6,
     },
@@ -159,6 +172,7 @@ pub const WORLDS: &[Entry] = &[
         make: sponza,
         regions: &[Region::at("spawn", [-242, -46, -150], [242, 160, 150])],
         levels: 5,
+        accuracy: &[],
         far: &[],
         far_levels: 6,
     },
