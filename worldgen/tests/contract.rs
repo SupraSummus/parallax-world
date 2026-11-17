@@ -1,21 +1,23 @@
 //! The engine on small test worlds: they keep the contract
 //! (worldgen::checks::contract), and the framework refuses what breaks it.
 
+use std::collections::BTreeSet;
 use std::rc::Rc;
 
 use fcc::FACE_KINDS;
 use worldgen::World;
 use worldgen::checks::contract::{
-    Accuracy, REGION, Report, SHOWN, STOPPED, TOLERANCE, breaks, check, heights_hold, hold_to_baseline, margins, parts_equal_whole,
-    regions, things_hold, whole_equals_parts,
+    Accuracy, REGION, Report, SHOWN, STOPPED, TOLERANCE, breaks, check, check_component, heights_hold, hold_to_baseline, margins,
+    parts_equal_whole, regions, things_hold, whole_equals_parts,
 };
 use worldgen::checks::survey::survey;
 use worldgen::generator::{
-    ANY_SIZE, Anchors, Child, Children, Field, FieldValues, Generator, KindDef, Layer, Node, Op, Population, SOLID, Shapes, Span, ball,
-    cuboid, generate, kind_of, things_in,
+    ANY_SIZE, Anchors, Child, Children, Far, Field, FieldValues, Generator, KindDef, Layer, Node, Op, Population, SOLID, Shapes, Span,
+    ball, cuboid, generate, kind_of, things_in,
 };
 use worldgen::generator::{Cell, Fill, Point};
-use worldgen::grid::{ALPHA, Box3, COLOUR_ONE};
+use worldgen::grid::{ALPHA, Box3, COLOUR_ONE, is_site};
+use worldgen::noise::fx;
 use worldgen::plan::{Plan, spacing};
 
 static KINDS: &[KindDef] = &[
@@ -199,9 +201,9 @@ fn keeps_the_contract(name: &str, world: &World, levels: u32) {
 #[test]
 fn a_declared_accuracy_covers_its_parts() {
     let (loose, looser) = (Accuracy { apart: 0.1, spread: 0.2 }, Accuracy { apart: 0.2, spread: 0.3 });
-    let declared = [("towns", loose), ("towns › block › house", looser)];
-    assert_eq!(Accuracy::of(&declared, "towns › block › house wall"), looser);
-    assert_eq!(Accuracy::of(&declared, "towns › church stone"), loose);
+    let declared = [("towns", loose), ("towns/block/house", looser)];
+    assert_eq!(Accuracy::of(&declared, "towns/block/house wall"), looser);
+    assert_eq!(Accuracy::of(&declared, "towns/church stone"), loose);
     assert_eq!(Accuracy::of(&declared, "townsfolk grass"), Accuracy::DEFAULT);
 }
 
@@ -436,4 +438,57 @@ fn a_things_carve_cuts_only_the_thing() {
         (None, Some("rock"), Some("wood")),
         "carved, rock under it, wood beside it"
     );
+}
+
+/** The kinds of the sites `generator` draws in `b` at `level`, by name; a site of several, none. */
+fn kinds_drawn(generator: &Generator, b: &Box3, level: u32) -> BTreeSet<Option<&'static str>> {
+    let grid = generate(generator, b, level);
+    let kind = kind_of(generator);
+    let sites = (b.min[2]..b.max[2]).flat_map(|z| (b.min[1]..b.max[1]).flat_map(move |y| (b.min[0]..b.max[0]).map(move |x| [x, y, z])));
+    sites
+        .filter(|&[x, y, z]| is_site(x, y, z) && grid.alpha(x, y, z) > 0)
+        .map(|[x, y, z]| kind(grid.get(x, y, z)).map(|k| k.name))
+        .collect()
+}
+
+#[test]
+fn a_component_alone_draws_only_itself() {
+    // The tables in the village's houses, not their walls, nor the ground; at level 2 too, where the houses draw none.
+    let near_house = |level: u32| b(-64 >> level, -8 >> level, -64 >> level, 64 >> level, 32 >> level, 64 >> level);
+    let tables = village().alone("houses/table");
+    assert_eq!(kinds_drawn(&tables, &near_house(0), 0), BTreeSet::from([Some("wood")]));
+    assert!(kinds_drawn(&tables, &near_house(2), 2).contains(&Some("wood")), "the tables are drawn at any level");
+    assert!(!kinds_drawn(&village(), &near_house(2), 2).contains(&Some("wood")), "the village draws no tables at level 2");
+    assert_eq!(kinds_drawn(&village().alone("ground"), &near_house(0), 0), BTreeSet::from([Some("grass")]));
+}
+
+#[test]
+fn a_component_alone_stands_for_its_parents_far_form() {
+    // A ball of rock in a thing drawn far away as a box of wall: alone, past the far form's detail, it is the ball measured.
+    let thing = || {
+        world(single(
+            |_, _| {
+                let box_of_wall = vec![cuboid([56.0; 3], [72.0; 3], WALL, SOLID, Op::Fill)];
+                let ball = Child { name: "ball".into(), size: ANY_SIZE, node: Node::of(vec![ball([64.0; 3], 6.0, ROCK, SOLID, Op::Fill)]) };
+                Some(Node::group(vec![ball]).with_far(Far::of(fx(4.0), box_of_wall)))
+            },
+            64,
+        ))
+    };
+    let around = b(4, 4, 4, 12, 12, 12);
+    assert_eq!(kinds_drawn(&thing(), &around, 3), BTreeSet::from([Some("wall")]));
+    let alone = kinds_drawn(&thing().alone("single/ball"), &around, 3);
+    assert!(alone.contains(&Some("rock")) && !alone.contains(&Some("wall")), "{alone:?}");
+    // Cut again, it is the same: check_component checks it alone so.
+    let drawn = |generator: Generator| generate(&generator, &around, 3).pieces.alpha;
+    assert_eq!(drawn(thing().alone("single/ball").alone("single/ball")), drawn(thing().alone("single/ball")));
+}
+
+#[test]
+fn a_component_is_checked_in_its_places() {
+    // The village's tables at the three houses nearest spawn, a region each, named by them, the houses drawn around.
+    let checked = check_component("tables", &|| world_of(village(), (-64, 64)), "houses/table", 3, 1);
+    let held: Vec<&Vec<String>> = checked.regions.iter().map(|(_, held)| held).collect();
+    assert_eq!(held, vec![&vec!["houses/table".to_string()]; 3]);
+    assert!(checked.report.margins.iter().all(|m| m.looks[1][0] > 0.0), "cells near the tables in each place");
 }

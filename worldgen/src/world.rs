@@ -62,4 +62,9 @@ impl World {
         }
         self.points.iter().find(|(n, _)| *n == name).map(|(_, find)| find())
     }
+
+    /** Its `component` alone (`Generator::alone`), where it is in the world: its spawn, heights and places. */
+    pub fn alone(self, component: &str) -> World {
+        World { generator: self.generator.alone(component), ..self }
+    }
 }

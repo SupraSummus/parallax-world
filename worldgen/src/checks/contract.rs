@@ -71,7 +71,7 @@ impl Accuracy {
     /**
      * How closely `stratum` is to keep the contract, of those `declared`
      * by name: the stratum named, or the nearest part of a thing or layer
-     * it is in ("towns" for "towns › block › house wall"); DEFAULT for one
+     * it is in ("towns" for "towns/block/house wall"); DEFAULT for one
      * in none.
      */
     pub fn of(declared: &[(&str, Accuracy)], stratum: &str) -> Accuracy {
@@ -79,9 +79,9 @@ impl Accuracy {
     }
 }
 
-/** Whether `stratum` is the one named `name`, or a part or a kind of it. */
-fn covers(name: &str, stratum: &str) -> bool {
-    stratum == name || stratum.strip_prefix(name).is_some_and(|rest| rest.starts_with(' '))
+/** Whether `stratum` is the one named `name`, or a part (after a '/') or a kind (after a space) of it. */
+pub fn covers(name: &str, stratum: &str) -> bool {
+    stratum == name || stratum.strip_prefix(name).is_some_and(|rest| rest.starts_with([' ', '/']))
 }
 
 /** `region` grown to at least 16 sites of `level` across around its centre, along x and z. */
@@ -310,10 +310,15 @@ fn from_above(world: &World, region: &Box3, levels: impl Iterator<Item = u32>, l
  * sample of them, each along each of the lattice's 12 directions.
  */
 pub fn margins(name: &str, world: &World, regions: &[Box3], levels: u32) -> Report {
+    margins_near(name, world, None, regions, levels)
+}
+
+/** `margins`, of the cells near a surface of `focus` too, if given. */
+fn margins_near(name: &str, world: &World, focus: Option<&Generator>, regions: &[Box3], levels: u32) -> Report {
     let mut report = Report::new(name);
     for region in regions {
         for level in 1..=levels {
-            let c = cells::cells_of(name, world, region, level);
+            let c = cells::cells_of(name, world, focus, region, level);
             let n = c.cells.len().max(1) as f64;
             let looks = [0, 1].map(|i| std::array::from_fn(|k| c.cells.iter().map(|cell| cell.looks[i][k]).sum::<f64>() / n));
             let spread = c.cells.iter().map(cells::Cell::deviation).sum::<f64>() / n;
@@ -500,8 +505,8 @@ pub const REGION: i64 = m(32.0);
 /**
  * What `world` is made of (`survey`), and regions holding a place of
  * each of its strata, with their names; `only` those of strata whose
- * names hold one of `only`, if any (a layer's name first: "towns ›
- * church", "railway"), and only their layers surveyed.
+ * names hold one of `only`, if any (a layer's name first:
+ * "towns/church", "railway"), and only their layers surveyed.
  */
 pub fn regions(world: &World, only: &[&str]) -> (Survey, Vec<(Box3, Vec<String>)>) {
     let survey = survey(world, REGION, |layer| only.is_empty() || only.iter().any(|o| o.starts_with(layer) || layer.starts_with(o)));
@@ -694,13 +699,7 @@ pub fn parts_equal_whole(name: &str, world: &World, regions: &[Box3], levels: u3
 pub fn check(name: &str, world: &World, levels: u32, only: &[&str], surveyed: impl FnOnce(&[Box3])) -> Checked {
     let start = Instant::now();
     let (survey, regions) = regions(world, only);
-    let layers: Vec<String> = survey
-        .layers
-        .iter()
-        .map(|l| format!("{} {:.1} km {:.1} s", l.layer, 2.0 * l.half as f64 * crate::units::UNIT_SIZE / 1000.0, l.seconds))
-        .collect();
-    let (n, took) = (survey.strata.len(), start.elapsed().as_secs_f64());
-    println!("{name}: {n} strata in {} regions, surveyed in {took:.1} s: {}", regions.len(), layers.join(", "));
+    print_survey(name, &survey, regions.len(), start);
     if only.is_empty() {
         // Not checked: a world may share a table of kinds with others (the moor's is the valley's).
         println!("{name}: kinds nothing surveyed draws: {}", survey.unseen(&world.generator).join(", "));
@@ -721,4 +720,73 @@ pub fn check(name: &str, world: &World, levels: u32, only: &[&str], surveyed: im
     println!("{report}{name}: cells {cells:.1} s, heights {heights:.1} s, things {things:.1} s, skips {skips:.1} s");
     let silent = survey.layers.iter().filter(|l| l.found == 0).map(|l| l.layer).collect();
     Checked { name: name.to_string(), regions, report, broken, silent, complete: only.is_empty() }
+}
+
+/**
+ * The contract for a `component` of the world `make` makes (`World::alone`),
+ * at its `places` places nearest spawn as the survey finds it, none over
+ * another, a thread each, up to `levels`: its cells near its surfaces and
+ * the world's, all around it drawn as the world draws it, and each place
+ * in parts equals it whole. Its margins are the component's, by name.
+ * Alone if `make` makes the world cut to it.
+ */
+pub fn check_component(name: &str, make: &(dyn Fn() -> World + Sync), component: &str, places: usize, levels: u32) -> Checked {
+    let start = Instant::now();
+    let focus = make().alone(component);
+    let survey = survey(&focus, REGION, |_| true);
+    let boxes = nearest(&survey, places);
+    print_survey(name, &survey, boxes.len(), start);
+    let start = Instant::now();
+    let each: Vec<(Vec<Margin>, Vec<String>)> = std::thread::scope(|scope| {
+        let threads: Vec<_> = boxes
+            .iter()
+            .map(|b| {
+                // Worlds aren't Send: each thread makes its own.
+                scope.spawn(move || {
+                    let (world, focus) = (make(), make().alone(component));
+                    let margins = margins_near(name, &world, Some(&focus.generator), &[*b], levels).margins;
+                    [0, 2, levels + 1].into_iter().for_each(|level| whole_equals_parts(&world.generator, b, level));
+                    let mut broken = heights_hold(&world, &[*b], levels);
+                    broken.extend(skips_hold(&world, &[*b], levels));
+                    (margins, broken)
+                })
+            })
+            .collect();
+        threads.into_iter().map(|t| t.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic))).collect()
+    });
+    let (margins, broken): (Vec<_>, Vec<_>) = each.into_iter().unzip();
+    let mut broken: Vec<String> = broken.into_iter().flatten().chain(things_hold(&focus, &survey)).collect();
+    broken.sort();
+    broken.dedup();
+    let regions: Vec<(Box3, Vec<String>)> = boxes.iter().map(|b| (*b, vec![component.to_string()])).collect();
+    let held = boxes.iter().map(|b| (*b, component.to_string())).collect();
+    let report = Report { name: name.to_string(), margins: margins.into_iter().flatten().collect(), held };
+    println!("{report}{name}: checked in {:.1} s", start.elapsed().as_secs_f64());
+    let silent = survey.layers.iter().filter(|l| l.found == 0).map(|l| l.layer).collect();
+    Checked { name: name.to_string(), regions, report, broken, silent, complete: true }
+}
+
+/** Of the places of `survey`'s strata, the `n` nearest its spawn (along x and z), none overlapping one nearer. */
+fn nearest(survey: &Survey, n: usize) -> Vec<Box3> {
+    let mut places: Vec<Box3> = survey.strata.iter().flat_map(|s| s.places.iter().copied()).collect();
+    let distance = |b: &Box3| [0, 2].map(|a| ((b.min[a] + b.max[a]) / 2 - survey.spawn[a]).pow(2)).iter().sum::<i64>();
+    places.sort_by_key(|b| (distance(b), b.min, b.max));
+    let mut nearest: Vec<Box3> = Vec::new();
+    for place in places {
+        if nearest.len() < n && !nearest.iter().any(|b| b.overlaps(&place)) {
+            nearest.push(place);
+        }
+    }
+    nearest
+}
+
+/** Prints what `survey` found, and in how long since `start`. */
+fn print_survey(name: &str, survey: &Survey, regions: usize, start: Instant) {
+    let layers: Vec<String> = survey
+        .layers
+        .iter()
+        .map(|l| format!("{} {:.1} km {:.1} s", l.layer, 2.0 * l.half as f64 * crate::units::UNIT_SIZE / 1000.0, l.seconds))
+        .collect();
+    let (n, took) = (survey.strata.len(), start.elapsed().as_secs_f64());
+    println!("{name}: {n} strata in {regions} regions, surveyed in {took:.1} s: {}", layers.join(", "));
 }

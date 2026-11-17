@@ -87,7 +87,7 @@ worldgen/                    # The world-generation engine, moving to integers, 
 │   ├── noise.rs, grid.rs    # Integer hashes, random numbers, fixed point (Fx) and noise; voxel-grid.ts's bricks, each site's alpha, and the voxels it shows
 │   ├── units.rs             # UNIT_SIZE: metres per lattice unit; whole Units, typed apart from Fx
 │   ├── generator.rs         # The framework: nodes, fields, populations, the model worlds are written in
-│   ├── generator/           # generate.rs: any box at any level, of forms.rs: a node's near and far forms (measured), of drawables.rs: fields, shapes (shapes.rs, the solids) or sites drawn; things.rs: the things populations make
+│   ├── generator/           # generate.rs: any box at any level, of forms.rs: a node's near and far forms (measured), of drawables.rs: fields, shapes (shapes.rs, the solids) or sites drawn; things.rs: the things populations make; alone.rs: a component of a world alone, to check or look at
 │   ├── build.rs             # Short forms to write worlds with: constructors of fields, populations, nodes, solid shapes; layers about a ground (About, on)
 │   ├── column.rs            # A heightfield's spans, each tall enough to keep a site at every level, thin media a coat on it; its slopes' sides closed
 │   ├── plan.rs              # Plans by column, each from coarser ones only; heights with a slope, their range anywhere; land domains bid for, each's hold on it; claims, things kept apart anywhere
@@ -131,7 +131,7 @@ worlds/                      # The worlds, on worldgen's public API only
 ├── data/cost/               # Each world's cost baseline, which tests/cost.rs holds it to
 ├── data/contract/           # Where each world breaks the contract, and by how much: the baseline tests/contract.rs holds it to
 ├── tests/                   # Every world in WORLDS keeps the contract and its cost baseline; the scenes' contents
-└── examples/                # map: a world from above; look: a picture of it, of any place it names (picture.rs), lit (light.rs); cost: what its tiles cost (cost.rs); bench: timing a world's tiles
+└── examples/                # map: a world from above; look: a picture of it, of any place it names (picture.rs), lit (light.rs), or of a component alone; check: the contract for a component of it, in place or alone; cost: what its tiles cost (cost.rs); bench: timing a world's tiles
 lab/                         # Experiment, linted but not tested by pnpm: split grammars with shared splits, learned from the valley's towns; a masked model of any volume, flat, 3D or on the FCC lattice; synthesis by coordinates into examples; a critic and profiles that score any of them; real places (scripts/overture.py) drawn to a plan (see src/lib.rs); exports the learned town's rules
 native/                      # The native frontend (egui on winit and wgpu), linking fcc/, bake/, worldgen/ and worlds/; see src/main.rs
 └── src/

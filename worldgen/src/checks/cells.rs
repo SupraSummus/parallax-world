@@ -14,7 +14,7 @@ use fcc::VOXEL_FACES;
 
 use crate::World;
 use crate::checks::contract::{TOLERANCE, around, box_at, sites};
-use crate::generator::generate;
+use crate::generator::{Generator, generate};
 use crate::grid::{ALPHA, Box3, VoxelGrid};
 use crate::noise::Rng;
 use crate::picture::{composited, nearest_site};
@@ -124,16 +124,25 @@ impl std::fmt::Display for Cells {
     }
 }
 
-/** A sample of the cells of `level` in `region` of `world`, named `name`, against what is in them. */
-pub(crate) fn cells_of(name: &str, world: &World, region: &Box3, level: u32) -> Cells {
+/**
+ * A sample of the cells of `level` in `region` of `world`, named `name`,
+ * against what is in them: of those near its surfaces, those near the
+ * surfaces of `focus` too, if given (a component of it alone, checked in place).
+ */
+pub(crate) fn cells_of(name: &str, world: &World, focus: Option<&Generator>, region: &Box3, level: u32) -> Cells {
     let against = level.saturating_sub(FINER_BY);
     let (s, f) = ((1i64 << level) as f64, (1i64 << against) as f64);
     let mut area = around(region, level);
     let grow = 0.max((8i64 << level) - (region.max[1] - region.min[1]) / 2);
     (area.min[1], area.max[1]) = (region.min[1] - grow, region.max[1] + grow);
-    let grids = [against, level].map(|l| generate(&world.generator, &box_at(&area, l), l));
+    let grids_of = |generator: &Generator| [against, level].map(|l| generate(generator, &box_at(&area, l), l));
+    let grids = grids_of(&world.generator);
     let within = |c: &[i64; 3]| (0..3).all(|i| c[i] as f64 * s - s >= area.min[i] as f64 && c[i] as f64 * s + s <= area.max[i] as f64);
-    let mut near: Vec<[i64; 3]> = near_surfaces(&grids, f / s).into_iter().filter(within).collect();
+    let mut near = near_surfaces(&grids, f / s);
+    if let Some(focus) = focus {
+        near = near.intersection(&near_surfaces(&grids_of(focus), f / s)).copied().collect();
+    }
+    let mut near: Vec<[i64; 3]> = near.into_iter().filter(within).collect();
     let mut random = Rng::new(17);
     for i in (1..near.len()).rev() {
         near.swap(i, (random.next() * (i + 1) as f64) as usize % (i + 1));

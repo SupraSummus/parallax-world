@@ -16,7 +16,7 @@ const SEEDS: &[u64] = &[REGIONS_SEED, 1, 2, 3];
  * in regions holding everything it is made of around spawn, each
  * stratum's margins averaged over all of them; generated in parts too at
  * REGIONS_SEED; and in its far regions at REGIONS_SEED. CONTRACT_ONLY,
- * names of strata separated by commas ("towns › church,railway"), checks
+ * names of strata separated by commas ("towns/church,railway"), checks
  * only regions holding them. Panics where it breaks it but as its
  * baseline, data/contract/<name>.txt, says.
  */

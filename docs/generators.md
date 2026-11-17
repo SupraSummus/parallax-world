@@ -474,7 +474,7 @@ so a feature too rare to be near spawn at every seed
 (the valley's tunnels) is checked where the world says it is,
 and only a layer drawing nowhere is silent.
 Things come apart into parts no wider than a region (`REGION`),
-named by their children's names, numbers left out (`towns › block › house`);
+named by their children's names, numbers left out (`towns/block/house`);
 a dense population is surveyed over a smaller square than a sparse one (`PARTS`),
 and one of small cells over fewer metres (`HALF_CELLS`).
 Fields are asked at columns of a coarse level, and at level 0 there:
@@ -489,8 +489,23 @@ but a part's variants drawing the same kinds are one stratum.
 A layer that draws nothing surveyed breaks the contract;
 the kinds nothing draws are only printed,
 as worlds share tables of kinds (the moor's is the valley's).
-`CONTRACT_ONLY='towns › church,railway'` checks only the regions
+`CONTRACT_ONLY='towns/church,railway'` checks only the regions
 of strata so named, and surveys only their layers.
+A world's author works on one part at a time:
+`worlds/examples/check.rs` checks a component (`check_component`),
+a name in the tree of the world's things (`towns/block/church`).
+At the few places of it nearest spawn that the survey finds,
+it holds the cells near the component's surfaces to what is in them,
+the world drawn all around.
+So its numbers are its own, not averaged with the rest of a region;
+its baseline is a snapshot outside git, taken before a change.
+`alone`, the world is cut to it first (`Generator::alone`).
+A coarse site is shared, so where it meets the rest its cells look otherwise
+(on the moor's hut, by as much as the margins themselves):
+what breaks alone is its own,
+what breaks only in place is how it meets the rest.
+Alone, its parents draw it at every spacing, their far forms measured from it;
+a carve has nothing to cut, a paint paints over nothing.
 A world's heights are its own, a ground's sky and the rock under it,
 and an endless world has none;
 the checks look at it in cubes around places
