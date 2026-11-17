@@ -227,7 +227,7 @@ impl Light {
     /** The light of `world`, found only where asked, its tiles and light in `shared`. */
     pub fn new(world: World, shared: Shared) -> Light {
         let Brightness { sky, sun, .. } = shared.brightness;
-        let coarsest = GRID_LEVELS as u32 - 1;
+        let coarsest = std::env::var("LIGHT_TOP").ok().map_or(GRID_LEVELS as u32 - 1, |v| v.parse().unwrap());
         let levels = (0..=coarsest)
             .map(|level| Level {
                 heights: world.heights_at(level),
@@ -270,9 +270,38 @@ impl Light {
 
     /** How light sees face `face` of `site` of level `i`: how much of it stops (alpha) and its colour; what it glows. */
     fn see(&mut self, i: usize, site: [i64; 3], face: usize) -> ((f32, Rgb), Rgb) {
+        let splat_from: usize = std::env::var("SPLAT").map_or(99, |v| v.parse().unwrap());
+        let glow = if i >= splat_from { self.splat(i, site) } else { self.raw_glow(i, site) };
         let Some(([x, y, z], grid)) = self.hold(i, site) else { return ((0.0, [0.0; 3]), [0.0; 3]) };
         let look = grid.face(x, y, z, face);
-        ((alpha_of(look) as f32 / ALPHA as f32, linear(look)), grid.glow(x, y, z).map(|g| g as f32 * self.glow))
+        ((alpha_of(look) as f32 / ALPHA as f32, linear(look)), glow)
+    }
+
+    fn raw_glow(&mut self, i: usize, site: [i64; 3]) -> Rgb {
+        let Some(([x, y, z], grid)) = self.hold(i, site) else { return [0.0; 3] };
+        grid.glow(x, y, z).map(|g| g as f32 * self.glow)
+    }
+
+    /** Level i's glow at `site` from level i - 1's, each fine site's spread over the coarse sites around it, keeping its centre. */
+    fn splat(&mut self, i: usize, c: [i64; 3]) -> Rgb {
+        let f = c.map(|v| 2 * v);
+        let mut sum = [0.0f32; 3];
+        let mut put = |g: Rgb, w: f32| (0..3).for_each(|k| sum[k] += g[k] * w);
+        let g = self.raw_glow(i - 1, f);
+        put(g, 1.0);
+        for face in FACES {
+            let g = self.raw_glow(i - 1, add(f, face));
+            put(g, 0.5);
+        }
+        for axis in 0..3 {
+            for sign in [-2, 2] {
+                let mut o = [0; 3];
+                o[axis] = sign;
+                let g = self.raw_glow(i - 1, add(f, o));
+                put(g, 1.0 / 6.0);
+            }
+        }
+        sum.map(|v| v / 4.0)
     }
 
     /** How much of what comes through `site` of level `i` it lets through. */
@@ -415,7 +444,7 @@ impl Light {
     fn past(&mut self, i: usize, at: [f64; 3], d: usize) -> Option<Rgb> {
         let mut reads = reads(at).peekable();
         let &(nearest, _) = reads.peek().expect("the nearest site");
-        if self.open(i, nearest) <= 0.0 {
+        if !self.room_ahead(i, nearest, d) {
             return None;
         }
         let (mut sum, mut total) = ([0.0f32; 3], 0.0f32);
@@ -449,7 +478,13 @@ impl Light {
             }
         }
         let mean = |sum: Rgb, total: f32| if total > 0.0 { sum.map(|c| c / total) } else { sum };
-        std::array::from_fn(|d| (self.open(i, add(base, nearest[d])) > 0.0).then(|| mean(past[d], totals[d])))
+        std::array::from_fn(|d| self.room_ahead(i, add(base, nearest[d]), d).then(|| mean(past[d], totals[d])))
+    }
+
+    /** Whether level `i` has room for light at `site` and for AHEAD sites past it along `d`. */
+    fn room_ahead(&mut self, i: usize, site: [i64; 3], d: usize) -> bool {
+        let ahead: i64 = std::env::var("AHEAD").map_or(0, |v| v.parse().unwrap());
+        (0..=ahead).all(|k| self.open(i, add(site, DIRECTIONS[d].map(|v| v * k))) > 0.0)
     }
 
     /** How much a site's light changed from `before` to `after`, of what it is: the most of any channel of the light on any face (`on_face`). */
@@ -895,6 +930,8 @@ mod tests {
         scenes.push(scene("yellow cave, lamp", cave, night, probes.to_vec(), 1 << 16, 1.3));
         scenes
     }
+
+    mod probe;
 
     /** The cave's radius and how high its middle is. */
     const CAVE: (i64, i64) = (32, 40);
