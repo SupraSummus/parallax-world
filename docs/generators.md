@@ -475,7 +475,8 @@ so a feature too rare to be near spawn at every seed
 and only a layer drawing nowhere is silent.
 Things come apart into parts no wider than a region (`REGION`),
 named by their children's names, numbers left out (`towns › block › house`);
-a dense population is surveyed over a smaller square than a sparse one (`PARTS`).
+a dense population is surveyed over a smaller square than a sparse one (`PARTS`),
+and one of small cells over fewer metres (`HALF_CELLS`).
 Fields are asked at columns of a coarse level, and at level 0 there:
 they keep what is finer than their sites in proportion ("Plans" in "Levels"),
 so a railway, a kerb or a pond shows.

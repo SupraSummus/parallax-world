@@ -11,9 +11,10 @@ default-members = ["fcc", "bake", "worldgen", "worlds", "worlds/cheese", "native
 [profile.test]
 opt-level = 2
 
-# The web's WebAssembly (pnpm wasm, web/wasm/): small and fast, however long it takes to build.
+# The web's WebAssembly (pnpm wasm, web/wasm/): optimised, built again in
+# seconds after a change. pnpm build adds LTO (--config): a tenth smaller,
+# though slower to build, and the tests run no faster.
 [profile.wasm]
 inherits = "release"
-lto = true
-codegen-units = 1
+incremental = true
 panic = "abort"
