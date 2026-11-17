@@ -1,4 +1,5 @@
-//! A picture of a world at one level of detail (picture.rs), as a PNG:
+//! A picture of a world at one level of detail (picture.rs), as a PNG,
+//! each pixel the first voxel its ray meets: media (mist, fog) don't show.
 //!
 //! cargo run --release --example look -- forest 42 0 eye spawn yaw 0 pitch -4 out.png
 //! cargo run --release --example look -- valley 42 2 eye 0 800 400 at 0 0 1500 fov 60 far 2600 out.png

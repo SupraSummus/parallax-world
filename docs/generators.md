@@ -1011,6 +1011,8 @@ A station stands by each town the line passes on the ground.
 The railway bids for its formation and under its bridges, not over its tunnels.
 Its bores are carved after every other layer, and the track in them drawn after,
 so nothing standing over a tunnel (trees and plants at a portal) reaches into it.
+On the moor's land, the moor's mist lies over the track and in its cuttings,
+as without the railway (`moor::Alone`).
 Seen from above, the line keeps to its band,
 so it turns away columns further across before reading any plan.
 

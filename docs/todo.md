@@ -484,9 +484,9 @@ Numbers are for the forest at 1280×800, as measured when written.
 - **A domain owns a column's things, cover and air at once.**
   So a landmark's clearing, kept for itself to keep trees off,
   cut the moor's heath and mist away.
-  The moor now reads the landmarks and its bid without them (`moor::Alone`),
-  but its mist still stops at the railway,
-  and a landmark among fields or dense forest paints its own grass.
+  The moor now lays its heath over the landmarks and its mist over them
+  and the railway, by its bid without them (`moor::Alone`),
+  but a landmark among fields or dense forest paints its own grass.
   Land could share cover and air apart from things,
   a domain bidding for its things only where it builds.
 - **Worlds share tables of kinds**, so the contract only prints
