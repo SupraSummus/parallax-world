@@ -8,7 +8,8 @@
 //! has room for light (`past`). So a wall thinner than about its distance
 //! over the steps lets light through: more steps, less leaks.
 //! Each site sends what it glows, and of what it stops (its alpha) its
-//! colour times the light on it; the rest of what comes from past it gets
+//! colour times the light on its face turned back (`on_face`), a third of
+//! what it shows that way; the rest of what comes from past it gets
 //! through. So what comes from far comes from coarser levels, the
 //! coarsest's from the sky.
 //!
@@ -44,7 +45,7 @@ type Rgb = [f32; 3];
 
 const N: usize = 12;
 
-/** The directions light comes along: towards the neighbours, through the voxel's faces. */
+/** The directions light comes along: towards the neighbours. A voxel's face is across each, numbered alike. */
 const DIRECTIONS: [[i64; 3]; N] = FACES;
 
 /** Steps along a direction before the coarser level's light may take over, unless set (Shared::stepping), and at most: at the coarsest, before the sky's does. */
@@ -219,8 +220,8 @@ pub struct Light {
     unit: [[f64; 3]; N],
     /** Per face, how much the light from each direction weighs in the light on it (`on_face`). */
     cosines: [[f32; N]; N],
-    /** Per direction, the face of the voxel it meets that it enters by. */
-    enters: [usize; N],
+    /** Per direction, the one opposite: where a site met along it is seen from. */
+    opposite: [usize; N],
     /** The radiance of a glow of GLOW_ONE. */
     glow: f32,
     /** The sky's radiance per direction (the sun's within it). */
@@ -252,7 +253,7 @@ impl Light {
             let total: f64 = weights.iter().sum();
             weights.map(|w| (w / total) as f32)
         });
-        let enters = DIRECTIONS.map(|d| DIRECTIONS.iter().position(|f| *f == d.map(|c| -c)).expect("faces come in pairs"));
+        let opposite = DIRECTIONS.map(|d| DIRECTIONS.iter().position(|f| *f == d.map(|c| -c)).expect("directions come in pairs"));
         let sun_at = DIRECTIONS.iter().position(|d| *d == SUN_DIRECTION).expect("the sun is in one of them");
         let skies = std::array::from_fn(|d| {
             let up = unit[d][1];
@@ -269,7 +270,7 @@ impl Light {
         // A world with no heights has no sky: what glows is all its light.
         let (skies, background) = if world.heights.is_some() { (skies, background) } else { ([[0.0; 3]; N], [0.0; 3]) };
         let glow = shared.brightness.glowing() / GLOW_ONE as f32;
-        Light { world, shared, levels, unit, cosines, enters, glow, sky: skies, background }
+        Light { world, shared, levels, unit, cosines, opposite, glow, sky: skies, background }
     }
 
     /** Whether a whole voxel, one that lets nothing through, is at `site` of level `i`. */
@@ -277,20 +278,20 @@ impl Light {
         self.open(i, site) <= 0.0
     }
 
-    /** How light sees face `face` of `site` of level `i`: how much of it stops (alpha) and its colour; what it glows. */
-    fn see(&mut self, i: usize, site: [i64; 3], face: usize) -> ((f32, Rgb), Rgb) {
+    /** How light sees `site` of level `i` from direction `from`: how much of it stops (alpha) and its colour; what it glows. */
+    fn see(&mut self, i: usize, site: [i64; 3], from: usize) -> ((f32, Rgb), Rgb) {
         let Some(([x, y, z], grid)) = self.hold(i, site) else { return ((0.0, [0.0; 3]), [0.0; 3]) };
-        let look = grid.face(x, y, z, face);
+        let look = grid.face(x, y, z, from);
         ((alpha_of(look) as f32 / ALPHA as f32, linear(look)), grid.glow(x, y, z).map(|g| g as f32 * self.glow))
     }
 
     /**
      * What a line through the middle of `site` of level `i` meets of it,
-     * entering by face `face` (`see`): a whole voxel, as it is; pieces or
+     * coming from direction `from` (`see`): a whole voxel, as it is; pieces or
      * a medium, LINES as much, of what they stop and of what they glow.
      */
-    fn meets(&mut self, i: usize, site: [i64; 3], face: usize) -> ((f32, Rgb), Rgb) {
-        let ((alpha, colour), glow) = self.see(i, site, face);
+    fn meets(&mut self, i: usize, site: [i64; 3], from: usize) -> ((f32, Rgb), Rgb) {
+        let ((alpha, colour), glow) = self.see(i, site, from);
         if alpha >= 1.0 {
             return ((alpha, colour), glow);
         }
@@ -353,7 +354,7 @@ impl Light {
         if n > 0 {
             for &(d, q, reflects) in &paths.reflects {
                 let (before, touches) = (self.round(i, q, n - 1), self.paths(i, q).touches);
-                let on = self.on_face(&before, &touches, self.enters[d]);
+                let on = self.on_face(&before, &touches, self.opposite[d]);
                 (0..3).for_each(|c| light[d][c] += reflects[c] * on[c]);
             }
         }
@@ -376,7 +377,7 @@ impl Light {
         let comes = std::array::from_fn(|d| {
             let q = add(p, DIRECTIONS[d]);
             if whole && self.whole(i, q) {
-                touches[d] = self.see(i, q, self.enters[d]).0.1;
+                touches[d] = self.see(i, q, self.opposite[d]).0.1;
                 return [0.0; 3];
             }
             self.along(i, p, d, near.as_ref(), &mut reflects)
@@ -403,7 +404,7 @@ impl Light {
             for step in 1..=TOP_STEPS {
                 let from = q;
                 q = add(q, v);
-                let ((alpha, colour), glow) = self.meets(i, q, self.enters[d]);
+                let ((alpha, colour), glow) = self.meets(i, q, self.opposite[d]);
                 (0..3).for_each(|c| sum[c] += through * glow[c]);
                 if alpha > 0.0 {
                     reflects.push((d, q, colour.map(|c| through * alpha * c)));
