@@ -34,10 +34,10 @@ use worldgen::plan::{Claims, Holding, Plan, Sloped};
 use worldgen::units::{Units, m};
 use worldgen::world::{Find, World};
 
-use crate::fields::Fields;
 use crate::forest::{self, Forest, GROUND_SCALE, K as F, Relief};
 use crate::path::{Path, Spine};
-use crate::town::{self, House, K as T, Style};
+use crate::valley::fields::Fields;
+use crate::valley::town::{self, House, K as T, Style};
 
 /** The rule table, learned in lab/ (examples/export.rs) from 54 of the valley's towns. */
 const TABLE: &[u8] = include_bytes!("../data/town-grammar.bin");
@@ -522,7 +522,7 @@ pub fn learned(seed: u64) -> World {
     let forest = Forest::new(world.of("forest"), path, spawn);
     let domains: [Rc<dyn Domain>; 3] = [Rc::new(forest), settlements, Rc::new(fields)];
     let layers = compose(&domains, &ground, SPOT_SCALE, fx(0.125));
-    let kinds = [forest::KINDS, town::KINDS, crate::fields::KINDS].concat();
+    let kinds = [forest::KINDS, town::KINDS, crate::valley::fields::KINDS].concat();
     let first: Find = Box::new(move || first.near(FIRST).map(|s| [s.x, s.level, s.z]).expect("the first settlement"));
     World {
         generator: Generator { kinds, seed: world.seed("layers"), layers },

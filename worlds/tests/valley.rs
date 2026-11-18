@@ -7,8 +7,8 @@ use worldgen::generator::{Layer, generate, kind_of};
 use worldgen::grid::{ALPHA, Box3, is_site};
 use worldgen::picture::{Camera, picture};
 use worldgen::units::UNIT_SIZE;
-use worlds::landmarks::{LANDMARKS, Landmark, Landmarks, NEAR, Site};
-use worlds::railway::Railway;
+use worlds::valley::landmarks::{LANDMARKS, Landmark, Landmarks, NEAR, Site};
+use worlds::valley::railway::Railway;
 use worlds::valley::{Terrain, valley};
 
 fn unit(metres: f64) -> i64 {

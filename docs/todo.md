@@ -322,7 +322,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   The path is a curve (`worlds/src/path.rs`),
   but the ground's walls and dip, the fields' plots
   and the landmarks measure across its spine (`Spine`),
-  and the ranges across the valley's course (`worlds/src/course.rs`),
+  and the ranges across the valley's course (`worlds/src/valley/course.rs`),
   so the valley winds, but never turns back on itself.
   A spine along a curve, across and along it, would let it,
   but a curve's distance folds past a bend's radius
@@ -339,7 +339,7 @@ Numbers are for the forest at 1280×800, as measured when written.
 - **A station stands along the axes, its track may not.**
   Where the valley bends at a town,
   the track runs up to 30° off z past a building along it
-  (`Station::frame` in `worlds/src/railway.rs`).
+  (`Station::frame` in `worlds/src/valley/railway.rs`).
 - **README's valley shots predate the winding valley** (`docs/shots/`).
   The view down it and the ranges were taken at fixed cameras
   where the valley ran along x = 0; retake them (`pnpm shot`).
@@ -687,10 +687,10 @@ Numbers are for the forest at 1280×800, as measured when written.
     `checks/` (only tests and examples use it), `light.rs` (only native and `look`),
     and in `picture.rs` a PNG coder, of which `lab/src/png.rs` is another.
     Crates of their own would say so; `picture.rs` in parts.
-  - `worlds/src/forest.rs` is a world, the ground others build on,
-    their table of kinds and the trees they plant;
-    the valley is nine files beside it that use each other in circles.
-    A directory each, and the kinds and the ground apart,
+  - `worlds/src/forest.rs` is still a world, the ground others build on
+    (`Relief`, `Forest`) and the table of kinds they draw with (`K`);
+    the valley's domains (`worlds/src/valley/`) use each other in circles.
+    The kinds and the ground apart
     come before "Worlds are not yet crates of their own".
   - `worlds/data/cost/valley.txt` is the repo's largest text file
     and changes with most commits to the worlds;
@@ -708,7 +708,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   and its accuracy could be declared next to its code, not in `WORLDS`.
 - The forest's and the learned town's paths are still sines about x = 0
   (`Relief::path_x` in `worlds/src/forest.rs`);
-  a route along their floor (`worlds/src/course.rs`) would serve them too.
+  a route along their floor (`worlds/src/valley/course.rs`) would serve them too.
 
 - The valley's geography from water, not along one line:
   rivers that drain the ranges to the sea, lakes in basins,
@@ -827,7 +827,7 @@ Composing generators (section "Composing" of `docs/generators.md`), untried:
   since plans declare their scale:
   coarse levels would skip fine bands' cost as they skip their things.
   Plans of categories are read dithered already ("Plans" in "Levels").
-- More of the railway (`worlds/src/railway.rs`):
+- More of the railway (`worlds/src/valley/railway.rs`):
   a graph of lines between stations, made locally, and branch lines;
   catenary poles; a road from each station to its town;
   water in the route's cost, once the ground the line reads has any.
@@ -836,7 +836,7 @@ Composing generators (section "Composing" of `docs/generators.md`), untried:
   Its grade turns at once where it tops a rise or bottoms out,
   often from the steepest up to the steepest down:
   vertical curves would round those, as smoothing rounds its bends.
-- The mountains' gorges (`Landforms` in `worlds/src/mountains.rs`) are dry,
+- The mountains' gorges (`Landforms` in `worlds/src/valley/mountains.rs`) are dry,
   with no stream in their beds,
   and below the treeline the forest covers their walls and the spurs' noses,
   where rock would show.
@@ -850,7 +850,7 @@ Composing generators (section "Composing" of `docs/generators.md`), untried:
   and a tube's against each piece of the level drawn
   (bent, the forest's branches cost a few percent more at level 0).
   A span per row from the pieces' boxes would keep the test exact.
-- More trees as the oak (`Bole` and `Crown` in `worlds/src/forest.rs`):
+- More trees as the oak (`Bole` and `Crown` in `worlds/src/forest/trees.rs`):
   the birch's trunk round, bent where its boxes step, its branches forking;
   the spruce's trunk round.
 - Solve what a coarse cell decides (a block's lots, a room's furniture)

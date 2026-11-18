@@ -34,12 +34,12 @@ use worldgen::noise::{Fx, Rng, fx, hash, hash64, smoothstep};
 use worldgen::plan::{self, Holding, Plan, Sloped};
 use worldgen::units::{Units, m};
 
-use crate::course::COURSE_SLOPE;
+use super::Terrain;
+use super::course::COURSE_SLOPE;
+use super::moor;
+use super::mountains;
+use super::town::{self, House, K as T, Style, Town, Towns, thing};
 use crate::forest::K as F;
-use crate::moor;
-use crate::mountains;
-use crate::town::{self, House, K as T, Style, Town, Towns, thing};
-use crate::valley::Terrain;
 
 kinds! {
     base: moor::BASE + moor::KINDS.len() as u8;
@@ -763,8 +763,8 @@ fn building(s: &Station) -> Node {
 
 #[cfg(test)]
 mod tests {
+    use super::mountains::Form;
     use super::*;
-    use crate::mountains::Form;
 
     /** The railway of `seed`, and the terrain it is on. */
     fn railway(seed: u64) -> (Railway, Rc<Terrain>) {

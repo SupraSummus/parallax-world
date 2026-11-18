@@ -30,11 +30,11 @@ use worldgen::noise::{Fbm, Fx, Rng, ValueNoise, fx, hash64, smoothstep};
 use worldgen::plan::{self, Holding, Sloped};
 use worldgen::units::{Units, m};
 
+use super::course::COURSE_SLOPE;
+use super::fields;
+use super::landmarks::K as L;
+use super::town::{self, K as T, Towns};
 use crate::SURFACE;
-use crate::course::COURSE_SLOPE;
-use crate::fields;
-use crate::landmarks::K as L;
-use crate::town::{self, K as T, Towns};
 
 kinds! {
     base: fields::BASE + fields::KINDS.len() as u8;

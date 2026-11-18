@@ -23,12 +23,12 @@ use worldgen::noise::{Fx, Rng, ValueNoise, fx, hash64};
 use worldgen::plan::{self, Claims, Holding, Plan, Sloped};
 use worldgen::units::{Units, m};
 
+use super::Terrain;
+use super::mountains::{self, K as M};
+use super::railway::Railway;
+use super::town::{House, K as T, ROOF, Style, gable_ends, thing};
 use crate::SURFACE;
 use crate::forest::K as F;
-use crate::mountains::{self, K as M};
-use crate::railway::Railway;
-use crate::town::{House, K as T, ROOF, Style, gable_ends, thing};
-use crate::valley::Terrain;
 
 kinds! {
     base: mountains::BASE + mountains::KINDS.len() as u8;

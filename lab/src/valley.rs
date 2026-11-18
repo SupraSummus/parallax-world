@@ -6,14 +6,14 @@ use std::rc::Rc;
 use worldgen::domain::Scope;
 use worldgen::generator::{Generator, Kind, generate};
 use worldgen::grid::Box3;
-use worlds::fields;
 use worlds::forest::{self, K as F};
-use worlds::landmarks::{self, K as L};
-use worlds::moor::{self, K as M};
-use worlds::mountains::{self, K as A};
-use worlds::railway::{self, K as R};
-use worlds::town::{self, K as T, Towns};
 use worlds::valley::Terrain;
+use worlds::valley::fields;
+use worlds::valley::landmarks::{self, K as L};
+use worlds::valley::moor::{self, K as M};
+use worlds::valley::mountains::{self, K as A};
+use worlds::valley::railway::{self, K as R};
+use worlds::valley::town::{self, K as T, Towns};
 
 use crate::image::Image;
 
@@ -40,7 +40,7 @@ pub fn kind_near(generator: &Generator) -> impl Fn(u32) -> Option<usize> + '_ {
 }
 
 pub fn class_of_kind(kinds: usize) -> Vec<u8> {
-    use worlds::fields::K as P;
+    use worlds::valley::fields::K as P;
     let forest: [(&[F], u8); 10] = [
         (&[F::moss, F::grass, F::tallGrass], 0),
         (&[F::litter, F::needles, F::soil, F::fallenLeaf], 1),
