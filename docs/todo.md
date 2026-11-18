@@ -674,6 +674,13 @@ Numbers are for the forest at 1280×800, as measured when written.
   though light may come to it after more bounces.
   Rock filled round the tunnels kept them dark,
   but bent a world to the light: not kept.
+  Columns and boxes generated anew for light,
+  their coarse sites covered in part along each direction,
+  left the tunnel a third as bright, still tens of times too bright:
+  not kept
+  ([SupraSummus/parallax-world#264](https://github.com/SupraSummus/parallax-world/pull/264)),
+  as the world had two forms, the hosts' and the light's,
+  and each block was generated twice.
   Against the reference (`light/reference.rs`, test `against_the_reference`;
   the ignored test `maps` draws the scenes from above):
   a lamp lights the ground in four lobes, along the upward directions,
