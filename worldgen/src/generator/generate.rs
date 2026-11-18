@@ -286,9 +286,9 @@ fn thing_box(group: &[Drawable], s: i64) -> Box3 {
 
 /** What draws into `clip` (sites s apart), in drawing order: by layer, then key. */
 fn drawables_in<'a>(generator: &'a Generator, clip: &Box3, s: i64) -> Vec<Drawable<'a>> {
-    // The lattice units the sites of `clip` cover, with what a shape may grow by at this level.
+    // The lattice units the sites of `clip` cover, with what a shape may reach by at this level: a speck, the sites around it.
     let sites = units_of(clip, s);
-    let units = sites.widen(s);
+    let units = sites.widen(2 * s);
     let mut drawables = Vec::new();
     let mut things = 0;
     for layer in &generator.layers {

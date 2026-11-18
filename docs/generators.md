@@ -196,6 +196,9 @@ how many rays get how far, and what they stop on.
   Two or three, a rod or a speck: the sites near it, kept with a chance
   that stops as many rays as it does on average over directions
   (Cauchy: a convex body's mean shadow is a quarter of its area).
+  A speck's chance is shared by the sites that hold its centre between them,
+  each as near it is (`around` in `shapes.rs`),
+  so it keeps its place at every level, as a lamp's light must.
   Chances are compared with a hash of the position in lattice units,
   so a site kept at one level stays kept where coarser levels give it as high a chance.
 - **Nodes** whose parts get smaller than the sites draw their `far` shapes instead

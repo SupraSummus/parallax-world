@@ -3,6 +3,22 @@ use crate::noise::fx;
 use crate::plan::Sloped;
 
 #[test]
+fn the_sites_around_a_point_keep_its_place() {
+    // On a site, between two, in a tetrahedron's middle, in an octahedron's, and anywhere.
+    for p in [[2.0, 1.0, -1.0], [0.5, 0.5, 0.0], [0.5, 0.5, 0.5], [1.0, 0.0, 0.0], [0.3, 1.9, -0.6], [-2.25, 0.75, 7.5]] {
+        let around = shapes::around(p);
+        assert!(
+            around.iter().all(|(site, near)| (site[0] + site[1] + site[2]) & 1 == 0 && (0.0..=1.0).contains(near)),
+            "{p:?}: {around:?}"
+        );
+        let centre: [f64; 3] = std::array::from_fn(|a| around.iter().map(|(site, near)| near * site[a] as f64).sum());
+        let all: f64 = around.iter().map(|(_, near)| near).sum();
+        assert!((all - 1.0).abs() < 1e-12 && (0..3).all(|a| (centre[a] - p[a]).abs() < 1e-12), "{p:?}: {around:?}");
+    }
+    assert!(shapes::around([2.0, 1.0, -1.0]).contains(&([2, 1, -1], 1.0)), "all of it on the site it is at");
+}
+
+#[test]
 fn a_long_lathe_reaches_its_widest_circle() {
     // 1000 units long, at 3 : 4 : 0, so its widest circle reaches 4, 3 and 5 units along x, y and z.
     let shape = lathe([0.0; 3], [600.0, 800.0, 0.0], |_| 5.0, 1, Fill::Const(1.0), Op::Fill);

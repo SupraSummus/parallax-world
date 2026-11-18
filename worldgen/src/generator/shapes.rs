@@ -478,6 +478,29 @@ type PutSite<'a> = dyn FnMut(u32, Option<[u32; FACE_KINDS]>, u32, i64, i64, i64)
 const ALONG: f64 = 2.0 / 3.0;
 
 /**
+ * The sites that hold `p` between them (in units of their spacing), each
+ * with how near it is: shares of 1 whose centre is p, so that what is
+ * smaller than a site keeps its place at every level. A cube of the
+ * integer grid holds 4 sites, a tetrahedron; its other corners are the
+ * middles of octahedra of 6.
+ */
+pub(super) fn around(p: [f64; 3]) -> Vec<([i64; 3], f64)> {
+    let base = p.map(|c| c.floor() as i64);
+    let corners = (0..8).map(|k| [0, 1, 2].map(|a| base[a] + (k >> a & 1)));
+    let odd = |c: &[i64; 3]| (c[0] + c[1] + c[2]) & 1 != 0;
+    // How far a corner is, along the axes.
+    let far = |c: [i64; 3]| (0..3).map(|a| (p[a] - c[a] as f64).abs()).sum::<f64>();
+    if let Some(middle) = corners.clone().find(|&c| odd(&c) && far(c) < 1.0) {
+        let rest = (1.0 - far(middle)) / 6.0;
+        let towards = |a: usize, sign: i64| std::array::from_fn(|b| middle[b] + if a == b { sign } else { 0 });
+        let near = |a: usize, sign: i64| rest + (sign as f64 * (p[a] - middle[a] as f64)).max(0.0);
+        return (0..3).flat_map(|a| [-1, 1].map(|sign| (towards(a, sign), near(a, sign)))).collect();
+    }
+    // In the tetrahedron, a site is as near as the point is far from the corner across the cube from it.
+    corners.filter(|c| !odd(c)).map(|c| (c, (far([0, 1, 2].map(|a| 2 * base[a] + 1 - c[a])) - 1.0) / 2.0)).collect()
+}
+
+/**
  * Draws a shape at sites `s` apart, by how many of its sizes are under s;
  * returns how many sites it tested. A sheet across an axis (a box's or an
  * ellipsoid's least size under s) stops the rays crossing it as its
@@ -489,12 +512,18 @@ pub(super) fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &m
     let small = shape.extents.iter().filter(|e| e.to_bits() < spacing).count();
     let picked = |x: i64, y: i64, z: i64| to_pick(hash(seed, x * si, y * si, z * si));
     if small == 3 {
-        let [x, y, z] = nearest_site(shape.centre, si);
-        let chance = shape.area / (VOXEL_AREA * s * s);
-        if clip.holds([x, y, z]) {
-            put(share(chance), None, picked(x, y, z), x, y, z);
+        let whole = share(shape.area / (VOXEL_AREA * s * s));
+        let around = around(shape.centre.map(|c| c as f64 / spacing as f64));
+        // Each site's share of it, rounded down; what that leaves, to the nearest.
+        let mut shares: Vec<u32> = around.iter().map(|&(_, near)| (whole as f64 * near) as u32).collect();
+        let nearest = (0..shares.len()).max_by_key(|&k| shares[k]).expect("sites around it");
+        shares[nearest] += whole - shares.iter().sum::<u32>();
+        for (&([x, y, z], _), share) in around.iter().zip(shares) {
+            if clip.holds([x, y, z]) {
+                put(share, None, picked(x, y, z), x, y, z);
+            }
         }
-        return 1;
+        return around.len() as u64;
     }
     // A sheet a site thick holds a plane of sites: shapes' sheets lie across an axis, where planes of sites are a site
     // apart (across (1, 1, 1), 2/√3).
