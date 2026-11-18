@@ -134,7 +134,8 @@ impl Own {
 
     /** Puts what the thing put, as it came. */
     pub(super) fn each(&self, visit: &mut Put) {
-        for i in 0..self.cells.len() {
+        // Most of its box is empty: only where it put something.
+        for i in (0..self.cells.len()).filter(|&i| self.cells[i] != NONE) {
             let puts: Vec<_> = self.puts_at(i).collect();
             let [x, y, z] = self.site(i);
             for &&(look, op, share, pick, _) in puts.iter().rev() {

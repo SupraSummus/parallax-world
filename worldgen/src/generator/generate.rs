@@ -86,13 +86,10 @@ pub fn generate(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
     let mut odd = Vec::new();
     let mut put = |look: Look, op: Op, share: u32, pick: u32, x: i64, y: i64, z: i64| {
         let colour = |kind: Kind| palette.colour(kind, s, [x, y, z].map(|v| v * s));
-        let own = colour(look.kind);
-        let faces = look.faces.map(|kinds| kinds.map(colour)).filter(|faces| faces.iter().any(|c| *c != own));
         let kind = &generator.kinds[look.kind as usize];
-        // What glows gives light of its colour.
-        let glow = if kind.glows { own.map(|c| (c * 255 + COLOUR_ONE as u32 / 2) / COLOUR_ONE as u32) } else { [0; 3] };
-        let added = Added { op, pick, colour: own, faces, glow, cover: look.cover, medium: kind.medium, solid: !kind.walk_through };
-        see(&mut grid, &mut odd, &added, share, x, y, z);
+        if !see_whole(&mut grid, &odd, &look, kind, op, share, [x, y, z], || colour(look.kind)) {
+            see(&mut grid, &mut odd, &Added::of(&look, kind, op, pick, colour), share, x, y, z);
+        }
     };
     let drawables = drawables_in(generator, &clip, s);
     let mut at = 0;
@@ -214,6 +211,51 @@ fn see(grid: &mut VoxelGrid, odd: &mut Vec<bool>, added: &Added, share: u32, x: 
     }
 }
 
+/**
+ * `see`, for most sites: one put whole (painted, or filled where nothing
+ * is) or carved out whole, alike through every face, by a kind that
+ * neither glows nor is a medium, where nothing is in `glow` or `views`.
+ * Set outright, without `see`'s sums, nor its colour (`own`) for a carve.
+ * False, and nothing done, if not so.
+ */
+#[allow(clippy::too_many_arguments)]
+fn see_whole(
+    grid: &mut VoxelGrid,
+    odd: &[bool],
+    look: &Look,
+    kind: &KindDef,
+    op: Op,
+    share: u32,
+    [x, y, z]: [i64; 3],
+    own: impl FnOnce() -> [u32; 3],
+) -> bool {
+    if share < SHARE || look.cover.is_some() || look.faces.is_some() || kind.glows || (kind.medium && op != Op::Carve) {
+        return false;
+    }
+    let Some(i) = grid.index(x, y, z) else { return true };
+    if odd.get(i).is_some_and(|odd| *odd) {
+        return false;
+    }
+    // A fill is behind what is there: what a carve left of colour, if anything.
+    let behind = match op {
+        Op::Carve => {
+            (grid.pieces.alpha[i], grid.pieces.colour[i], grid.medium.alpha[i], grid.medium.colour[i], grid.solid[i]) =
+                (0, [0; 3], 0, [0; 3], 0);
+            return true;
+        }
+        Op::Paint => [0; 3],
+        Op::Fill if grid.pieces.alpha[i] == 0 => grid.pieces.colour[i],
+        Op::Fill => return false,
+    };
+    let own = own();
+    grid.pieces.colour[i] = std::array::from_fn(|c| (behind[c] as u32 + own[c]).min(COLOUR_ONE as u32) as u16);
+    grid.pieces.alpha[i] = ALPHA;
+    if !kind.walk_through {
+        grid.solid[i] = ALPHA;
+    }
+    true
+}
+
 /** What `see` adds to a site: a thing's colour through each face, what it glows, whether a medium, whether it stops a walking body. */
 struct Added {
     op: Op,
@@ -230,6 +272,15 @@ struct Added {
 }
 
 impl Added {
+    /** What a put of `look`, of `kind`, adds: `colour` gives each kind's colour at its site. */
+    fn of(look: &Look, kind: &KindDef, op: Op, pick: u32, colour: impl Fn(Kind) -> [u32; 3]) -> Added {
+        let own = colour(look.kind);
+        let faces = look.faces.map(|kinds| kinds.map(&colour)).filter(|faces| faces.iter().any(|c| *c != own));
+        // What glows gives light of its colour.
+        let glow = if kind.glows { own.map(|c| (c * 255 + COLOUR_ONE as u32 / 2) / COLOUR_ONE as u32) } else { [0; 3] };
+        Added { op, pick, colour: own, faces, glow, cover: look.cover, medium: kind.medium, solid: !kind.walk_through }
+    }
+
     /**
      * Of what a site (or a face of it) stops, shows and glows, `share` of
      * it (of SHARE) added, seen through face `k`: what it stops, shows and
@@ -478,4 +529,51 @@ pub fn generate_shown(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid 
     }
     grid.bury();
     grid
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_site_put_whole_outright_is_as_its_sums_make_it() {
+        let kind = |walk_through, glows, medium| KindDef { name: "", kind_type: 0, colors: &[], walk_through, glows, medium };
+        let kinds = [kind(false, false, false), kind(true, false, false), kind(false, true, false), kind(true, false, true)];
+        let (plain, sheet) = (Look::from(0), Look { cover: Some([SHARE / 3; FACE_KINDS]), ..Look::from(0) });
+        let colour = |_: Kind| [40_000, 20_000, 10_000];
+        // What is in the site before, each put as `see` adds it: nothing, pieces in part, whole, cut down to a
+        // trace, to nothing but their colour, unlike through its faces, a lamp, mist.
+        let before: [&[(usize, &Look, Op, u32)]; 8] = [
+            &[],
+            &[(0, &plain, Op::Fill, SHARE / 2)],
+            &[(0, &plain, Op::Fill, SHARE)],
+            &[(0, &plain, Op::Fill, SHARE), (0, &plain, Op::Carve, SHARE - 300)],
+            &[(0, &plain, Op::Fill, SHARE / 200), (0, &plain, Op::Carve, SHARE / 2)],
+            &[(0, &sheet, Op::Paint, SHARE / 3)],
+            &[(2, &plain, Op::Fill, SHARE / 2)],
+            &[(3, &plain, Op::Fill, SHARE / 2), (0, &plain, Op::Fill, SHARE / 4)],
+        ];
+        let mut outright = 0;
+        for (puts, pick) in before.iter().flat_map(|puts| [0, 21_845, 43_690].map(|pick| (puts, pick))) {
+            let (mut grid, mut odd) = (VoxelGrid::new(&Box3::around([0; 3], 1)), Vec::new());
+            for &(k, look, op, share) in *puts {
+                see(&mut grid, &mut odd, &Added::of(look, &kinds[k], op, pick, colour), share, 0, 0, 0);
+            }
+            for (kind, look, op, share) in kinds.iter().flat_map(|kind| {
+                [&plain, &sheet].into_iter().flat_map(move |look| {
+                    [Op::Fill, Op::Paint, Op::Carve].into_iter().flat_map(move |op| [SHARE, SHARE - 1].map(|share| (kind, look, op, share)))
+                })
+            }) {
+                let (mut whole, mut summed) = (grid.clone(), (grid.clone(), odd.clone()));
+                if !see_whole(&mut whole, &odd, look, kind, op, share, [0; 3], || colour(0)) {
+                    continue;
+                }
+                see(&mut summed.0, &mut summed.1, &Added::of(look, kind, op, pick, colour), share, 0, 0, 0);
+                let held = |g: VoxelGrid| (g.pieces.alpha, g.pieces.colour, g.medium.alpha, g.medium.colour, g.solid, g.glow, g.views);
+                assert_eq!(held(whole), held(summed.0), "after {} puts, pick {pick}, share {share}", puts.len());
+                outright += 1;
+            }
+        }
+        assert!(outright > 60, "only {outright} put outright");
+    }
 }

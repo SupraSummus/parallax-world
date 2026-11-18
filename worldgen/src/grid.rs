@@ -326,7 +326,12 @@ impl VoxelGrid {
                             continue;
                         }
                         let site = at * BRICK_SITES + (((k * BRICK + j) * BRICK + i) >> 1) as usize;
-                        self.shown[site] = self.pieces.alpha[site] > coin(x, y, z);
+                        // Most hold nothing or are whole: shown never or always, whatever the coin.
+                        self.shown[site] = match self.pieces.alpha[site] {
+                            0 => false,
+                            ALPHA => true,
+                            alpha => alpha > coin(x, y, z),
+                        };
                     }
                 }
             }

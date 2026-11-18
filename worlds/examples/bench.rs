@@ -31,7 +31,7 @@ fn main() {
             let b = shown(generator, &tile_box(heights, [cx + i % 2, cy, cz + i / 2]), level);
             let grid = generate(generator, &b, level).into_grid(false);
             voxels += grid.cells.len();
-            (&grid.bricks, &grid.cells).hash(&mut hash);
+            (&grid.bricks, &grid.cells, &grid.solid, &grid.views, &grid.glow).hash(&mut hash);
         }
         println!(
             "level {level}: 4 tiles in {:.1} ms ({voxels} bytes of bricks, hash {:016x})",
