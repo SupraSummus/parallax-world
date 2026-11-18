@@ -1263,6 +1263,40 @@ and without them rays slipped in at a cliff's corners.
   its flags are light or dark at random now).
   Over the forest at level 6 such reads of its floor came within 0.042 (seed 42)
   of level 0, likely by chance: too close to the far check's tolerance to add it.
+- **Cells hold what they look like** (begun; the steps left are in `docs/todo.md`).
+  What a site holds, and what hosts take of it, is in "Checks".
+  The aim: a site is a medium along each direction, by one law at every level:
+  no level is special, level 0 an arbitrary one on a scale that goes on both ways
+  (how fine a host may ask for is the host's to limit).
+  What fills a site in part is a piece with an alpha, shown by the site's coin,
+  a solid's edge as leaves are;
+  things in a site stop as if apart, but a paint, which lies on what is there.
+  A field's solid spans cover their sites so ("Faces" in "Levels").
+  The contract holds each cell to what is in it `FINER_BY` levels finer
+  (`checks::cells`), along each of the 12 directions, by the rows of the finer level's sites in it,
+  on average over a stratum's cells.
+  A row's ray reads its own row's sites, not the teeth of the rows beside
+  (`CROSSING` stands for them, on average):
+  a lone whole voxel counts for two thirds of its shadow,
+  a sheet one layer thick across a direction for half of the rays, where it stops three quarters.
+  Rays along the rows of a lattice finer still would meet both.
+  Where a cell is a whole site or none
+  and what is in it stops a third of the rays along it, or more,
+  it breaks the contract from level 1,
+  stopping less than what is in it and spread past `SPREAD`:
+  grounds did, till their spans covered their sites
+  (the engine's test village keeps it now, its baseline empty);
+  what still does is in the baselines (`worlds/data/contract/`, `worldgen/data/contract/`).
+  Sites that look as what is in them do along each direction
+  would keep it; drawn so, by lines through each site's voxel, they did,
+  but generating took 7 to 50 times as long
+  ([SupraSummus/parallax-world#266](https://github.com/SupraSummus/parallax-world/pull/266), a draft).
+  What costs is testing each line against each shape in a site filled in part,
+  not keeping where in the site pieces lie:
+  keeping none was barely faster, and pieces drawn apart leaked rays where they met.
+  A ray along no direction of the lattice reads a site's nearest directions alike:
+  straight down, the four up, so a wall, along which straight down is, shows half as across it;
+  the cells' check reads along the lattice's only.
 - **Things of one band can't see each other.** Bands order what decides where,
   but two populations of one scale ("no tree on a boulder") still can't
   exclude each other.

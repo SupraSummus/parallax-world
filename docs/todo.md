@@ -1,7 +1,9 @@
 # To do
 
-Known problems, measured or derived, then open ideas.
+Known problems, measured or derived, by the part they are in, then open ideas.
 Numbers are for the forest at 1280×800, as measured when written.
+
+## Generating
 
 - **worldgen still decides some things with floats.**
   Shapes are kept and tested in fixed point,
@@ -74,15 +76,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   The depth that keeps a world's levels alike is that of its coarsest checked
   (`levels` in `WORLDS`: the forest's is 6, so 16 m),
   so `SURFACE` could be read from it, or `Column` could know it.
-- **The railway's track is too bright seen low from level 2.**
-  At level 0 its sleepers and rails hide the ballast from a ray coming in low;
-  at level 1 a medium of them over it does (`railway.rs`, as `Column::medium`);
-  from level 2, shorter than a spacing, they are its top's dithered shares,
-  as seen from above, and the grey ballast shows from every side.
-  A field giving its sites a kind per face, as a thing's far form does
-  (`Look`'s faces, measured in `generator/forms.rs`),
-  would keep the ballast's shares on the faces looking up
-  and the sleepers and rails on the others.
 - **A thin ellipsoid between two planes of sites can vanish.**
   Its thickness grows to half a site either way of its centre,
   so centred between two planes it holds their sites only at a point:
@@ -99,6 +92,271 @@ Numbers are for the forest at 1280×800, as measured when written.
   would leave the spacing to the engine but in the canopy and scenes.
   Found on the way: the town's kerbs (a unit) and the railway's tunnel lining
   are never thickened.
+- **Cells hold what they look like** (begun;
+  what it means and what the contract makes of it
+  are in "Open problems" of `docs/generators.md`).
+  Still to do, each a step of its own:
+  - Boxes. Their three axes' slabs taken as if apart (tried)
+    are wrong for what is thin along two, a rod or a speck:
+    a small lamp's glow grew with the level.
+    Wanted: the shadow of the box's part of the voxel along each direction.
+  - Balls, tubes and gables; with them `Tie` and the thin shapes' rules go.
+  - Spans of a medium or a coat, by how long a ray is in them;
+    then `Column` need not thicken spans to two sites, nor coat thin media.
+  - Hosts: the levels they ask for, the scale a body walks at.
+    Seen from near, a level is pitted where its sites are held in part
+    (a flat ground's top, a site deep),
+    and sharp only where a shape is several sites thick.
+  - Light and hosts see a site held in part unlike:
+    light its share, hosts a whole voxel or none by the coin.
+    Light corrects for the coin only next to what is shown (`shown` in `light.rs`),
+    so two such sites in a row still shade what shows behind them.
+    Hosts drawing pieces as light sees them would end it:
+    blended by their alpha as a medium is (smooth, soft edges),
+    or by a coin for each finer site in them (tried in `look`: both show no dark pits).
+- **Layers that don't say where they are are drawn everywhere**
+  (`Field::meets`, `Population::stands`):
+  the city's buildings, and the towns', landmarks', settlements' and steadings' things.
+  Native's tiles are cubes, so what a column needs is made again
+  in each cube the ground passes through (a plan's columns, per thread);
+  its views take up to twice as long to complete
+  as with tiles of whole columns,
+  the voxels engine's most, as it asks for every cube around the eye.
+  Saying so is for speed, not simplicity:
+  a promise per layer says again what `heights` says once.
+  The railway's piers can't yet: a bridge has no greatest height,
+  and `About` is a band around one plan.
+  Simpler would be a field of `Column`s on a plan knowing where it is,
+  with only what varies by column (water, mist, bridges) declared.
+- **Whole sites are still put one by one.**
+  Under the surface nearly every put is a whole site of the ground's fill,
+  each through `put`, its brick looked up, at level 0 its shade hashed.
+  A line's run of them put brick by brick would spare most of that.
+- **A site's glow and views are kept in maps by site** (`VoxelGrid`),
+  so `generate` marks apart which sites may be in them (`odd`),
+  not to look each up as it adds to it.
+  Kept by brick, as the sites are, the grid would know itself.
+  Sites unlike through their faces are the dearest to put:
+  few of a tile's, each added face by face
+  and taken out of the map and put back,
+  they take several percent of the valley's time at level 0.
+- **Plans are made at every column read, whatever their scale.**
+  The valley's land, decided at 4 m, makes its six domains' bids
+  at each column of a tile at level 0.
+  Bids made every 4 m and interpolated (tried) cost as many instructions:
+  most of a bid is the terrain, which the ground makes there anyway;
+  level 0 took a tenth less, level 6 a quarter more,
+  as things read the land at a point, four samples each.
+- **Claims cost coarse tiles most.**
+  At level 8 a column's ground costs some 24,000 instructions,
+  mostly the moor's pools and steadings near it:
+  columns 32 m apart each ask their own stretch (`Claims::near`),
+  and each new claim reads the ground dozens of times.
+  Asked per column without stretches (tried), every level took twice as long.
+  Claims reading the ground at their own scale (a band sampled every 8 m)
+  would spare about a tenth of the tile, and move pools and steadings.
+- **Plans lose columns at coarse levels.**
+  A tile there reads more columns than a plan keeps (`SLOTS`):
+  claims read the ground where they ask.
+  The valley makes its ground 1.3 times a column at levels 4 and 5,
+  its nearest town twice at level 8 (the land asks at its dithered points).
+  With eight times the slots, each was made once;
+  pairs or fours of slots per column cost more than they saved.
+- **Sparse populations anchor every cell first.**
+  The moor's boulders (one cell in ten at most), the forest's boulders and logs
+  make the ground at a point of each cell, and ask its land,
+  before the cell's roll says no: the moor's took a sixth of the valley's level 6.
+  Rolled in its anchor, that level cost a twentieth less,
+  but split what decides a boulder in two, each with its own stream.
+  A population's highest chance, rolled by the engine before anchoring,
+  would serve them all alike.
+- **Hashing is the forest's largest single cost.**
+  Each site hashes three times (shade, pick, `shown`'s coin),
+  each `hash64` mixing three times, as do noise corners.
+  A cheaper hash would change every world.
+
+## Checks and cost
+
+- **Cost is counted for more than hosts make.**
+  `cost::report` and the baselines count `generate` of what `shown` leaves,
+  not `generate_shown`, which skips what is buried under each block (`Floors`):
+  they don't see what that saves, nor what finding the floors costs.
+- **Cost counts a shape's tests by its box**,
+  though the time is in the sites inside it:
+  a slanting twig's box is mostly empty,
+  but testing only each row's span of it (tried) took as long.
+- **Cost weighs every plan lookup alike** (`NS` in `worldgen/src/cost.rs`),
+  though one of a column just read costs a fraction
+  of one among claims making their keys,
+  and one making the valley's land, many times both:
+  the moor's boulders at `Points` counted 15 % less at level 6
+  and took as many instructions.
+- **The places check finds few things of sparse populations**
+  (`worldgen/src/checks/places.rs`):
+  it asks COLUMNS cells at most,
+  and finds a claimed thing only from those within its reach.
+  The valley's landmarks: 118 at eight seeds (not 686 as one per region),
+  under ENOUGH a seed, so no seed is tested alone;
+  its towns 57, its haystacks 2.
+- **Far regions and cost's places are still listed by hand**
+  (`Entry` in `worlds/src/lib.rs`).
+  The survey could give both: wide boxes around fields' strata,
+  the places of the costliest strata.
+  Then `Region` would go.
+- **Things' variants of one part, drawing the same kinds, are one stratum**
+  (`worldgen::checks::survey`): a ruin and a watchtower, both of stone,
+  are checked in one region between them.
+  Naming a landmark's node by its variant, as towns name their children,
+  would part them; or the survey could count which code drew each part.
+- **The solids' scenes ask little against the level two finer.**
+  In `worldgen/tests/shapes.rs` every solid keeps the contract there
+  to the last level checked: a `Look` is a mean over a region's rays,
+  so a solid that thins changes it only by its share of the view.
+  Scenes the solid fills, the same share for every case, would ask more.
+
+## Worlds
+
+- **A domain can't stand in a world twice.**
+  Its populations seed their cells by layer name and the generator's seed
+  (`Cell::random`), not its `Scope`: two forests would grow the same trees.
+  And its kinds' ids are its place in a table every world concatenates
+  in one order (`kinds!`'s `base`); named, the world would number them.
+- **A domain owns a column's things, cover and air at once.**
+  So a landmark's clearing, kept for itself to keep trees off,
+  cut the moor's heath and mist away.
+  The moor now lays its heath over the landmarks and its mist over them
+  and the railway, by its bid without them (`moor::Alone`),
+  but a landmark among fields or dense forest paints its own grass.
+  Land could share cover and air apart from things,
+  a domain bidding for its things only where it builds.
+- **Worlds share tables of kinds**, so the contract only prints
+  the kinds nothing surveyed draws, and fails on silent layers alone:
+  the moor's, the learned town's and the city's are the valley's.
+  With only the kinds it draws, a world could fail on a kind
+  drawn only far from spawn, or never.
+- **Worlds are not yet crates of their own.**
+  One should be written without touching another world or the engine,
+  using others' pieces as crates.
+  Only the cheese is one (`worlds/cheese/`),
+  and it still needs its entry in `WORLDS`, its name in three tests' `worlds!`
+  and its cost baseline in `worlds/` (generators.md, "Checks").
+  With `Entry` and `Region` in `worldgen`,
+  each world's crate could give its entry and test itself
+  (one macro of `worldgen::checks`), `WORLDS` a line per crate.
+  Sharing pieces runs into the two items above.
+- **The railway's track is too bright seen low from level 2.**
+  At level 0 its sleepers and rails hide the ballast from a ray coming in low;
+  at level 1 a medium of them over it does (`railway.rs`, as `Column::medium`);
+  from level 2, shorter than a spacing, they are its top's dithered shares,
+  as seen from above, and the grey ballast shows from every side.
+  A field giving its sites a kind per face, as a thing's far form does
+  (`Look`'s faces, measured in `generator/forms.rs`),
+  would keep the ballast's shares on the faces looking up
+  and the sleepers and rails on the others.
+- **Generating the forest's grids takes 3–8 s of worker time per level**
+  (the web's WebAssembly, in Node; the TS forest took twice that),
+  most at levels 0 to 4 (a moved grid, a seventh of that).
+  In the TS forest it was mostly the ground's noise,
+  which the terrain and the canopy compute about 14 times per column
+  (with its neighbours, for slopes),
+  and at levels 0 and 1 the undergrowth's many small shapes;
+  worldgen's, counted ("Cost" in `docs/generators.md`),
+  goes mostly to the trees at levels 0 to 2
+  and to the canopy from level 4 (`Rooms::owner` making the trees near).
+- **One of the valley's tiles is over the cost budget**
+  (`OVER_BUDGET` in `worlds/tests/cost.rs`), by things done one by one
+  where a tile holds four times as many each level:
+  at level 3 the towns' things drawn whole to be measured.
+- **Two of the cheese's tiles are over the cost budget**
+  (`OVER_BUDGET`): at level 7 a tile holds a few hundred thousand holes,
+  each a shape, most of them a site or two
+  ("Far forms for what fills space", below);
+  at level 3, the grottoes each make the holes around them to place their stairs.
+  Estimated, not timed: the cheese's body, all of a kind, is filled site by site
+  uncounted, a good part of a coarse tile's time.
+- **The learned town's rules are from the old towns.**
+  `worlds/data/town-grammar.bin` was learned when the valley's towns
+  were all market towns alike, so lab's `export -- --check` says it differs.
+  Learned again from today's, mostly hamlets and villages,
+  it draws far less town: 235 houses in `learned.rs`'s test, not over 600.
+  Learn it from the market towns alone, or let the learned town be sparser.
+- **The forest's canopy measures crowded trees in sample stands.**
+  From above it reads each column's owner (`Rooms`),
+  but what the trees standing in a column hide from the side
+  comes from stands at four densities, read by the trees' chance.
+  A crown alone measured by offset and slab (`Shadows`),
+  read for each column's owner, would leave rooms the one rule.
+- **The forest on steep slopes breaks the contract at level 4.**
+  A region on a wooded mountainside of the valley,
+  where the trees thin out to the treeline,
+  came 0.10 to 0.15 apart at level 4, in materials hit and from above:
+  leaves in place of trunks and of the slope's scree and rock.
+- **Towns and the city line up with the lattice.**
+  `worlds/tests/directions.rs` lists them (`KNOWN`).
+  The valley's first town lays out streets and blocks along x and z,
+  and builds in frames of quarter turns (`frame.rs`):
+  a four-fold harmonic of 10 %.
+  The city is boxes on a plan, all along the axes: 4 %.
+  The learned town's settlements are such boxes too (2.5 %),
+  but their streets' own direction (2 %) hides them from the check.
+  Square noise (`ValueNoise`, `Fbm`) draws under 1 %, too little to tell.
+  `mountains.rs` turns its noise by 37° (`turned`),
+  which leaves its four-fold harmonic mostly on the diagonals;
+  22.6°, (12, 5)/13, would leave none there.
+- **Measured houses show their walls from above at level 6**,
+  which the contract does not check, and at level 4 in a region of houses alone
+  (seed 2: plaster 0.19 against 0.01 at level 0, 0.106 apart;
+  within the contract since the oaks among them are round, likely by chance).
+  Around the valley's first town's centre (seed 42),
+  level 6 shows 46 % houses from above against 25 % at level 0,
+  and 16 % roofs against 24 %: the rest is walls, timber and stone
+  (0.31 off; 0.18 measured from level 1, 0.22 from level 3).
+  Measured from level 4, a house is a few fine sites
+  ("Levels" in `docs/generators.md`):
+  its eaves, thinner than one, leave its walls' tops to show,
+  and its gable ends (`gable_ends` in `town.rs`), grown to one,
+  paint its roof's ends.
+  And a cell's share counts rays the cells behind it stop too,
+  so a thing keeps more cells than it stops rays.
+- **The valley is still laid out along x, across spines by z.**
+  The path is a curve (`worlds/src/path.rs`),
+  but the ground's walls and dip, the fields' plots
+  and the landmarks measure across its spine (`Spine`),
+  and the ranges across the valley's course (`worlds/src/course.rs`),
+  so the valley winds, but never turns back on itself.
+  A spine along a curve, across and along it, would let it,
+  but a curve's distance folds past a bend's radius
+  (16 m at the tightest, where the path bends onto a street),
+  which would crease the walls and the ranges,
+  and costs a search far from the curve;
+  what is far would read a coarser band of the curve, its mean.
+  The moor's stream (`stream_distance` in `moor.rs`) is measured along x too;
+  from a curve its banks would move where it bends, so it is left as it is.
+- **A path's bend is promised by hand** (`BEND` in `worlds/src/path.rs`),
+  for each world's route, though its slope is measured:
+  `worldgen::curve` takes a wander per level, fixed for the whole curve.
+  Corridors measured piece by piece would let a curve keep its own.
+- **A station stands along the axes, its track may not.**
+  Where the valley bends at a town,
+  the track runs up to 30° off z past a building along it
+  (`Station::frame` in `worlds/src/railway.rs`).
+- **README's valley shots predate the winding valley** (`docs/shots/`).
+  The view down it and the ranges were taken at fixed cameras
+  where the valley ran along x = 0; retake them (`pnpm shot`).
+
+## Light
+
+- **Light is a prototype, in look's pictures and native's computed lighting**
+  (`worldgen/src/light.rs`); the web does not light its tiles.
+  [docs/light.md](light.md) says what it gets wrong against its reference,
+  what was tried and what it costs.
+  Where it is to go, a step at a time, each measured on the reference's scenes:
+  sites that hold what they stop along each direction, boxes' too
+  ("Cells hold what they look like", above);
+  then coarser levels taking more directions (in Ideas).
+
+## Native
+
 - **The native frontend is missing pieces.**
   Its camera is f64, not fixed point (positions reach the GPU relative to it).
   Its compositor needs indirect draws counted on the GPU
@@ -149,65 +407,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   Q itself, a whole number, would say what it does.
   The web still draws slices, with runs and cut faces:
   its compositor would need depth by distance too to draw cells.
-
-- **TS and Rust still say much the same twice.**
-  The tiles around the camera (`world.ts`) are `native/src/world.rs`,
-  and faces are in `native/src` too, though its renderer draws cells, not slices.
-  The renderer is the large step.
-  Tests too: cells' and view's are in both;
-  relief's, pillars', the renderer's and its regressions' only in TS.
-- **Tests take most of CI's time.**
-  Most of it is the worlds' contract, bound by the CPU, in jobs of its own;
-  the valley's, alone, is CI's longest job.
-  Its threads end together, so only less work would shorten it,
-  or its seeds on several runners (`--nocapture` shows each part's time).
-  A seed's margins (rays, and pictures from above) take longest,
-  then checking its regions in parts.
-  Pictures from above generate level 0 over all of a world's heights,
-  region by region, keeping the tiles a region shares with the one before:
-  the forest's regions overlap, the valley's hardly.
-  If CI is still too slow, the contract at seeds but `REGIONS_SEED`
-  (`worlds/tests/contract.rs`) could run only on main.
-- **Slice detail sets both thickness and level of detail.**
-  "Slice Detail" sets how thick slices are,
-  and so their level of detail (atoms of 2^(k−s) at level k,
-  s as large as the grids' reach allows).
-  Thicker is faster but coarser: in the forest, a first render takes
-  about 6.5 s at detail 9.5, 3 s at 2.4 and 2.7 s at 1
-  (voxels 4 and 10 times as large), against 2.5 s drawn flat at 9.5
-  (Node, 1280×800).
-  Thickness could follow what culling and the slice count want,
-  and the level of detail the screen's pixels:
-  coarser atoms than detail gives are a smaller s,
-  finer ones need more than 2^4 layers of atoms a slab,
-  so splats' depths in more than a byte (`ATOM_SHIFT`).
-- **Coverage is weaker in relief.**
-  A splat moves on its centre plane with the camera,
-  so a chunk's mask holds what it covers from the axis and the corners
-  of the rhombus of rays, and what it may reach from any:
-  in the forest at the default detail, twice the chunks of flat slices are drawn.
-  Nor is that exact: a block covered from each of those may still open
-  between them, which no picture has shown yet.
-  The camera's slant is known where coverage is tested;
-  masks for a few slants, picked per block, would cover nearly as much
-  as flat ones, and between nearer slants.
-- **Coverage masks are coarser than the screen.**
-  `mask_scale` marks ⌊40 / t⌋ pixels per unit of a slice t thick,
-  but at a level's nearest slices a unit is focal / (t · detail · LAYER)
-  pixels on screen, about 95 / t at 90° on 1280 px at the default detail.
-  A mask pixel counts as drawn when its centre is in a splat,
-  so a gap between splats narrower than a mask pixel can count as covered,
-  and what is behind it is skipped.
-  The mask could follow the focal length and detail,
-  keyed in the chunk like its grid, leaving the slices as they are.
-- **The web culls only whole clusters, on the main thread.**
-  The forest has millions of splats in view, and only about 1.5 % show a pixel;
-  coverage leaves out the clusters hidden whole,
-  and the rest are drawn.
-  The native compositor culls finer, on the GPU
-  (section 4 of `docs/architecture.md`), which WebGL 2 cannot
-  (no compute, no indirect draws);
-  WebGPU can, where a browser has it.
 - **Native pillars more than double the splats.**
   Natively a run is a row of splats, one a voxel
   (section 4 of `docs/architecture.md`),
@@ -220,44 +419,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   and with its depth varying along the axis, culled worse;
   one splat cut to the hull of a pillar's ends drew large rectangles,
   mostly discarded.
-- **A chunk as an image was slower, on an Intel GPU.**
-  The branch `relief-chunks` draws a chunk's columns as tiles of
-  colour, depth and run, a rectangle each whose fragment shader
-  follows each ray through them, or traced in compute:
-  right to the pixel, runs included, a tenth of the vertices,
-  but slower than splats in the forest.
-  There (Mesa's driver), a fragment shader that discards
-  or writes its depth, even conservatively, is depth tested after it runs,
-  so it runs for several times the fragments that lie before what shows.
-  GPUs that test early despite discarding may differ;
-  fewer, thicker slices, a column holding several runs,
-  would cut the layers a ray crosses.
-- **The depth within a layer needs a fine depth buffer.**
-  A layer's splats share 1 / (layers + 1) of the depth range;
-  WebGL promises only 16 bits, which leaves a few dozen steps for them.
-- **Bricks on the edge of a face's rhombus are baked whole.**
-  Near where a level starts, about 19 bricks meet the rhombus,
-  and most of them cross its edge or the screen's.
-- **Most baked splats are hidden.**
-  When chunks were bitmaps,
-  over 95 % of opaque baked pixels were covered by nearer slices.
-  Content that no ray of the face reaches within its slice
-  need not be baked.
-- **Flying, the main thread can't keep up with the workers.**
-  Flying up (a trace in a desktop browser),
-  workers bake about 4,000 chunks a second
-  and the main thread is busy 97 % of the time, at 10–13 frames a second.
-  Renders take 30–90 ms, longer the more new chunks they take:
-  uploading textures (now splats), handing chunks to `Coverage` (`coverage_add`),
-  and covering with them (`coverage_cover`).
-- **Turning, finding covered chunks is slow.**
-  About 11 ms of a render (forest, 1920×1080, Node),
-  mostly testing sub-blocks one by one in `cover` (`web/wasm/src/coverage.rs`):
-  about 270,000 tests a frame, three in four failing,
-  as the forest covers the screen in fine pieces.
-  Testing quarters of a cell first would not help (two in three are mixed),
-  nor would clipping without allocating in `shape`.
-  The web could run it in a worker, a frame behind.
 - **Walking, native keeps more than a core busy**
   (the valley, `--stroll 20 --on-ground`, outside the GPU driver),
   measured when it drew slices: new tiles took about a third.
@@ -384,6 +545,87 @@ Numbers are for the forest at 1280×800, as measured when written.
   (the city at 1280×660 at detail 27 did, before `GRID_REACH`;
   the forest at its defaults does, `seed=42&world=forest&look=200,10`).
   Past the limit it could drop the farthest chunks, or split the buffer.
+
+## Web
+
+- **Slice detail sets both thickness and level of detail.**
+  "Slice Detail" sets how thick slices are,
+  and so their level of detail (atoms of 2^(k−s) at level k,
+  s as large as the grids' reach allows).
+  Thicker is faster but coarser: in the forest, a first render takes
+  about 6.5 s at detail 9.5, 3 s at 2.4 and 2.7 s at 1
+  (voxels 4 and 10 times as large), against 2.5 s drawn flat at 9.5
+  (Node, 1280×800).
+  Thickness could follow what culling and the slice count want,
+  and the level of detail the screen's pixels:
+  coarser atoms than detail gives are a smaller s,
+  finer ones need more than 2^4 layers of atoms a slab,
+  so splats' depths in more than a byte (`ATOM_SHIFT`).
+- **Coverage is weaker in relief.**
+  A splat moves on its centre plane with the camera,
+  so a chunk's mask holds what it covers from the axis and the corners
+  of the rhombus of rays, and what it may reach from any:
+  in the forest at the default detail, twice the chunks of flat slices are drawn.
+  Nor is that exact: a block covered from each of those may still open
+  between them, which no picture has shown yet.
+  The camera's slant is known where coverage is tested;
+  masks for a few slants, picked per block, would cover nearly as much
+  as flat ones, and between nearer slants.
+- **Coverage masks are coarser than the screen.**
+  `mask_scale` marks ⌊40 / t⌋ pixels per unit of a slice t thick,
+  but at a level's nearest slices a unit is focal / (t · detail · LAYER)
+  pixels on screen, about 95 / t at 90° on 1280 px at the default detail.
+  A mask pixel counts as drawn when its centre is in a splat,
+  so a gap between splats narrower than a mask pixel can count as covered,
+  and what is behind it is skipped.
+  The mask could follow the focal length and detail,
+  keyed in the chunk like its grid, leaving the slices as they are.
+- **The web culls only whole clusters, on the main thread.**
+  The forest has millions of splats in view, and only about 1.5 % show a pixel;
+  coverage leaves out the clusters hidden whole,
+  and the rest are drawn.
+  The native compositor culls finer, on the GPU
+  (section 4 of `docs/architecture.md`), which WebGL 2 cannot
+  (no compute, no indirect draws);
+  WebGPU can, where a browser has it.
+- **A chunk as an image was slower, on an Intel GPU.**
+  The branch `relief-chunks` draws a chunk's columns as tiles of
+  colour, depth and run, a rectangle each whose fragment shader
+  follows each ray through them, or traced in compute:
+  right to the pixel, runs included, a tenth of the vertices,
+  but slower than splats in the forest.
+  There (Mesa's driver), a fragment shader that discards
+  or writes its depth, even conservatively, is depth tested after it runs,
+  so it runs for several times the fragments that lie before what shows.
+  GPUs that test early despite discarding may differ;
+  fewer, thicker slices, a column holding several runs,
+  would cut the layers a ray crosses.
+- **The depth within a layer needs a fine depth buffer.**
+  A layer's splats share 1 / (layers + 1) of the depth range;
+  WebGL promises only 16 bits, which leaves a few dozen steps for them.
+- **Bricks on the edge of a face's rhombus are baked whole.**
+  Near where a level starts, about 19 bricks meet the rhombus,
+  and most of them cross its edge or the screen's.
+- **Most baked splats are hidden.**
+  When chunks were bitmaps,
+  over 95 % of opaque baked pixels were covered by nearer slices.
+  Content that no ray of the face reaches within its slice
+  need not be baked.
+- **Flying, the main thread can't keep up with the workers.**
+  Flying up (a trace in a desktop browser),
+  workers bake about 4,000 chunks a second
+  and the main thread is busy 97 % of the time, at 10–13 frames a second.
+  Renders take 30–90 ms, longer the more new chunks they take:
+  uploading textures (now splats), handing chunks to `Coverage` (`coverage_add`),
+  and covering with them (`coverage_cover`).
+- **Turning, finding covered chunks is slow.**
+  About 11 ms of a render (forest, 1920×1080, Node),
+  mostly testing sub-blocks one by one in `cover` (`web/wasm/src/coverage.rs`):
+  about 270,000 tests a frame, three in four failing,
+  as the forest covers the screen in fine pieces.
+  Testing quarters of a cell first would not help (two in three are mixed),
+  nor would clipping without allocating in `shape`.
+  The web could run it in a worker, a frame behind.
 - **After a long jump, the workers' frame culls more than the main thread's.**
   Once the grids of three or more levels move at once,
   a renderer baking in workers counts a few more chunks covered
@@ -403,437 +645,27 @@ Numbers are for the forest at 1280×800, as measured when written.
   or bricks sent to a worker only once a chunk it bakes needs them.
   (Shared memory needs cross-origin isolation,
   which GitHub Pages can only get through a service worker.)
-- **Generating the forest's grids takes 3–8 s of worker time per level**
-  (the web's WebAssembly, in Node; the TS forest took twice that),
-  most at levels 0 to 4 (a moved grid, a seventh of that).
-  In the TS forest it was mostly the ground's noise,
-  which the terrain and the canopy compute about 14 times per column
-  (with its neighbours, for slopes),
-  and at levels 0 and 1 the undergrowth's many small shapes;
-  worldgen's, counted ("Cost" in `docs/generators.md`),
-  goes mostly to the trees at levels 0 to 2
-  and to the canopy from level 4 (`Rooms::owner` making the trees near).
-- **One of the valley's tiles is over the cost budget**
-  (`OVER_BUDGET` in `worlds/tests/cost.rs`), by things done one by one
-  where a tile holds four times as many each level:
-  at level 3 the towns' things drawn whole to be measured.
-- **Two of the cheese's tiles are over the cost budget**
-  (`OVER_BUDGET`): at level 7 a tile holds a few hundred thousand holes,
-  each a shape, most of them a site or two
-  ("Far forms for what fills space", below);
-  at level 3, the grottoes each make the holes around them to place their stairs.
-  Estimated, not timed: the cheese's body, all of a kind, is filled site by site
-  uncounted, a good part of a coarse tile's time.
-- **Cost is counted for more than hosts make.**
-  `cost::report` and the baselines count `generate` of what `shown` leaves,
-  not `generate_shown`, which skips what is buried under each block (`Floors`):
-  they don't see what that saves, nor what finding the floors costs.
-- **Whole sites are still put one by one.**
-  Under the surface nearly every put is a whole site of the ground's fill,
-  each through `put`, its brick looked up, at level 0 its shade hashed.
-  A line's run of them put brick by brick would spare most of that.
-- **A site's glow and views are kept in maps by site** (`VoxelGrid`),
-  so `generate` marks apart which sites may be in them (`odd`),
-  not to look each up as it adds to it.
-  Kept by brick, as the sites are, the grid would know itself.
-  Sites unlike through their faces are the dearest to put:
-  few of a tile's, each added face by face
-  and taken out of the map and put back,
-  they take several percent of the valley's time at level 0.
-- **Plans are made at every column read, whatever their scale.**
-  The valley's land, decided at 4 m, makes its six domains' bids
-  at each column of a tile at level 0.
-  Bids made every 4 m and interpolated (tried) cost as many instructions:
-  most of a bid is the terrain, which the ground makes there anyway;
-  level 0 took a tenth less, level 6 a quarter more,
-  as things read the land at a point, four samples each.
-- **Claims cost coarse tiles most.**
-  At level 8 a column's ground costs some 24,000 instructions,
-  mostly the moor's pools and steadings near it:
-  columns 32 m apart each ask their own stretch (`Claims::near`),
-  and each new claim reads the ground dozens of times.
-  Asked per column without stretches (tried), every level took twice as long.
-  Claims reading the ground at their own scale (a band sampled every 8 m)
-  would spare about a tenth of the tile, and move pools and steadings.
-- **Plans lose columns at coarse levels.**
-  A tile there reads more columns than a plan keeps (`SLOTS`):
-  claims read the ground where they ask.
-  The valley makes its ground 1.3 times a column at levels 4 and 5,
-  its nearest town twice at level 8 (the land asks at its dithered points).
-  With eight times the slots, each was made once;
-  pairs or fours of slots per column cost more than they saved.
-- **Sparse populations anchor every cell first.**
-  The moor's boulders (one cell in ten at most), the forest's boulders and logs
-  make the ground at a point of each cell, and ask its land,
-  before the cell's roll says no: the moor's took a sixth of the valley's level 6.
-  Rolled in its anchor, that level cost a twentieth less,
-  but split what decides a boulder in two, each with its own stream.
-  A population's highest chance, rolled by the engine before anchoring,
-  would serve them all alike.
-- **Hashing is the forest's largest single cost.**
-  Each site hashes three times (shade, pick, `shown`'s coin),
-  each `hash64` mixing three times, as do noise corners.
-  A cheaper hash would change every world.
-- **The learned town's rules are from the old towns.**
-  `worlds/data/town-grammar.bin` was learned when the valley's towns
-  were all market towns alike, so lab's `export -- --check` says it differs.
-  Learned again from today's, mostly hamlets and villages,
-  it draws far less town: 235 houses in `learned.rs`'s test, not over 600.
-  Learn it from the market towns alone, or let the learned town be sparser.
-- **A domain can't stand in a world twice.**
-  Its populations seed their cells by layer name and the generator's seed
-  (`Cell::random`), not its `Scope`: two forests would grow the same trees.
-  And its kinds' ids are its place in a table every world concatenates
-  in one order (`kinds!`'s `base`); named, the world would number them.
-- **A domain owns a column's things, cover and air at once.**
-  So a landmark's clearing, kept for itself to keep trees off,
-  cut the moor's heath and mist away.
-  The moor now lays its heath over the landmarks and its mist over them
-  and the railway, by its bid without them (`moor::Alone`),
-  but a landmark among fields or dense forest paints its own grass.
-  Land could share cover and air apart from things,
-  a domain bidding for its things only where it builds.
-- **Worlds share tables of kinds**, so the contract only prints
-  the kinds nothing surveyed draws, and fails on silent layers alone:
-  the moor's, the learned town's and the city's are the valley's.
-  With only the kinds it draws, a world could fail on a kind
-  drawn only far from spawn, or never.
-- **Worlds are not yet crates of their own.**
-  One should be written without touching another world or the engine,
-  using others' pieces as crates.
-  Only the cheese is one (`worlds/cheese/`),
-  and it still needs its entry in `WORLDS`, its name in three tests' `worlds!`
-  and its cost baseline in `worlds/` (generators.md, "Checks").
-  With `Entry` and `Region` in `worldgen`,
-  each world's crate could give its entry and test itself
-  (one macro of `worldgen::checks`), `WORLDS` a line per crate.
-  Sharing pieces runs into the two items above.
-- **Far regions and cost's places are still listed by hand**
-  (`Entry` in `worlds/src/lib.rs`).
-  The survey could give both: wide boxes around fields' strata,
-  the places of the costliest strata.
-  Then `Region` would go.
-- **Things' variants of one part, drawing the same kinds, are one stratum**
-  (`worldgen::checks::survey`): a ruin and a watchtower, both of stone,
-  are checked in one region between them.
-  Naming a landmark's node by its variant, as towns name their children,
-  would part them; or the survey could count which code drew each part.
-- **The solids' scenes ask little against the level two finer.**
-  In `worldgen/tests/shapes.rs` every solid keeps the contract there
-  to the last level checked: a `Look` is a mean over a region's rays,
-  so a solid that thins changes it only by its share of the view.
-  Scenes the solid fills, the same share for every case, would ask more.
-- **Cells hold what they look like** (begun).
-  A site of `VoxelGrid` holds how much it stops, what that shows and what it glows,
-  along each direction where they differ; worldgen reads only that
-  (pictures, the contract, light and its reference), along a ray's direction.
-  Hosts take what a site looks like too, through each face where it differs (fcc's `Look`),
-  each site whole or not by a coin (`VoxelGrid::show`).
-  A site is a medium along each direction, by one law at every level:
-  no level is special, level 0 an arbitrary one on a scale that goes on both ways
-  (how fine a host may ask for is the host's to limit).
-  What fills a site in part is a piece with an alpha, shown by the site's coin,
-  a solid's edge as leaves are;
-  things in a site stop as if apart, but a paint, which lies on what is there.
-  A field's solid spans cover their sites so ("Faces" in `docs/generators.md`).
-  Still to do, each a step of its own:
-  - Boxes. Their three axes' slabs taken as if apart (tried)
-    are wrong for what is thin along two, a rod or a speck:
-    a small lamp's glow grew with the level.
-    Wanted: the shadow of the box's part of the voxel along each direction.
-  - Balls, tubes and gables; with them `Tie` and the thin shapes' rules go.
-  - Spans of a medium or a coat, by how long a ray is in them;
-    then `Column` need not thicken spans to two sites, nor coat thin media.
-  - Hosts: the levels they ask for, the scale a body walks at.
-    Seen from near, a level is pitted where its sites are held in part
-    (a flat ground's top, a site deep),
-    and sharp only where a shape is several sites thick.
-  - Light and hosts see a site held in part unlike:
-    light its share, hosts a whole voxel or none by the coin.
-    Light corrects for the coin only next to what is shown (`shown` in `light.rs`),
-    so two such sites in a row still shade what shows behind them.
-    Hosts drawing pieces as light sees them would end it:
-    blended by their alpha as a medium is (smooth, soft edges),
-    or by a coin for each finer site in them (tried in `look`: both show no dark pits).
-  The contract holds each cell to what is in it `FINER_BY` levels finer
-  (`checks::cells`), along each of the 12 directions, by the rows of the finer level's sites in it,
-  on average over a stratum's cells.
-  A row's ray reads its own row's sites, not the teeth of the rows beside
-  (`CROSSING` stands for them, on average):
-  a lone whole voxel counts for two thirds of its shadow,
-  a sheet one layer thick across a direction for half of the rays, where it stops three quarters.
-  Rays along the rows of a lattice finer still would meet both.
-  Where a cell is a whole site or none
-  and what is in it stops a third of the rays along it, or more,
-  it breaks the contract from level 1,
-  stopping less than what is in it and spread past `SPREAD`:
-  grounds did, till their spans covered their sites
-  (the engine's test village keeps it now, its baseline empty);
-  what still does is in the baselines (`worlds/data/contract/`, `worldgen/data/contract/`).
-  Sites that look as what is in them do along each direction
-  would keep it; drawn so, by lines through each site's voxel, they did,
-  but generating took 7 to 50 times as long
-  ([SupraSummus/parallax-world#266](https://github.com/SupraSummus/parallax-world/pull/266), a draft).
-  What costs is testing each line against each shape in a site filled in part,
-  not keeping where in the site pieces lie:
-  keeping none was barely faster, and pieces drawn apart leaked rays where they met.
-  A ray along no direction of the lattice reads a site's nearest directions alike:
-  straight down, the four up, so a wall, along which straight down is, shows half as across it;
-  the cells' check reads along the lattice's only.
-- **The forest's canopy measures crowded trees in sample stands.**
-  From above it reads each column's owner (`Rooms`),
-  but what the trees standing in a column hide from the side
-  comes from stands at four densities, read by the trees' chance.
-  A crown alone measured by offset and slab (`Shadows`),
-  read for each column's owner, would leave rooms the one rule.
-- **The forest on steep slopes breaks the contract at level 4.**
-  A region on a wooded mountainside of the valley,
-  where the trees thin out to the treeline,
-  came 0.10 to 0.15 apart at level 4, in materials hit and from above:
-  leaves in place of trunks and of the slope's scree and rock.
-- **Towns and the city line up with the lattice.**
-  `worlds/tests/directions.rs` lists them (`KNOWN`).
-  The valley's first town lays out streets and blocks along x and z,
-  and builds in frames of quarter turns (`frame.rs`):
-  a four-fold harmonic of 10 %.
-  The city is boxes on a plan, all along the axes: 4 %.
-  The learned town's settlements are such boxes too (2.5 %),
-  but their streets' own direction (2 %) hides them from the check.
-  Square noise (`ValueNoise`, `Fbm`) draws under 1 %, too little to tell.
-  `mountains.rs` turns its noise by 37° (`turned`),
-  which leaves its four-fold harmonic mostly on the diagonals;
-  22.6°, (12, 5)/13, would leave none there.
-- **Measured houses show their walls from above at level 6**,
-  which the contract does not check, and at level 4 in a region of houses alone
-  (seed 2: plaster 0.19 against 0.01 at level 0, 0.106 apart;
-  within the contract since the oaks among them are round, likely by chance).
-  Around the valley's first town's centre (seed 42),
-  level 6 shows 46 % houses from above against 25 % at level 0,
-  and 16 % roofs against 24 %: the rest is walls, timber and stone
-  (0.31 off; 0.18 measured from level 1, 0.22 from level 3).
-  Measured from level 4, a house is a few fine sites
-  ("Levels" in `docs/generators.md`):
-  its eaves, thinner than one, leave its walls' tops to show,
-  and its gable ends (`gable_ends` in `town.rs`), grown to one,
-  paint its roof's ends.
-  And a cell's share counts rays the cells behind it stop too,
-  so a thing keeps more cells than it stops rays.
-- **Layers that don't say where they are are drawn everywhere**
-  (`Field::meets`, `Population::stands`):
-  the city's buildings, and the towns', landmarks', settlements' and steadings' things.
-  Native's tiles are cubes, so what a column needs is made again
-  in each cube the ground passes through (a plan's columns, per thread);
-  its views take up to twice as long to complete
-  as with tiles of whole columns,
-  the voxels engine's most, as it asks for every cube around the eye.
-  Saying so is for speed, not simplicity:
-  a promise per layer says again what `heights` says once.
-  The railway's piers can't yet: a bridge has no greatest height,
-  and `About` is a band around one plan.
-  Simpler would be a field of `Column`s on a plan knowing where it is,
-  with only what varies by column (water, mist, bridges) declared.
-- **Cost counts a shape's tests by its box**,
-  though the time is in the sites inside it:
-  a slanting twig's box is mostly empty,
-  but testing only each row's span of it (tried) took as long.
-- **Cost weighs every plan lookup alike** (`NS` in `worldgen/src/cost.rs`),
-  though one of a column just read costs a fraction
-  of one among claims making their keys,
-  and one making the valley's land, many times both:
-  the moor's boulders at `Points` counted 15 % less at level 6
-  and took as many instructions.
-- **The places check finds few things of sparse populations**
-  (`worldgen/src/checks/places.rs`):
-  it asks COLUMNS cells at most,
-  and finds a claimed thing only from those within its reach.
-  The valley's landmarks: 118 at eight seeds (not 686 as one per region),
-  under ENOUGH a seed, so no seed is tested alone;
-  its towns 57, its haystacks 2.
-- **The valley is still laid out along x, across spines by z.**
-  The path is a curve (`worlds/src/path.rs`),
-  but the ground's walls and dip, the fields' plots
-  and the landmarks measure across its spine (`Spine`),
-  and the ranges across the valley's course (`worlds/src/course.rs`),
-  so the valley winds, but never turns back on itself.
-  A spine along a curve, across and along it, would let it,
-  but a curve's distance folds past a bend's radius
-  (16 m at the tightest, where the path bends onto a street),
-  which would crease the walls and the ranges,
-  and costs a search far from the curve;
-  what is far would read a coarser band of the curve, its mean.
-  The moor's stream (`stream_distance` in `moor.rs`) is measured along x too;
-  from a curve its banks would move where it bends, so it is left as it is.
-- **Light is a prototype, in look's pictures and native's computed lighting**
-  (`worldgen/src/light.rs`); the web does not light its tiles.
-  Light comes along the 12 neighbours' directions only,
-  and each level takes one step (`STEPS`; native's panel sets more)
-  before the coarser one takes over,
-  or more where the coarser fills what it leaves empty.
-  So light from D away comes from a level whose sites are about D across,
-  which keeps what a region stops on average (the contract),
-  not whether it is closed:
-  walls thinner than the space they close let light in,
-  openings smaller than it let none (the door and the window below).
-  A railway tunnel, under 1 to 4 m of rock where its hill is low,
-  is lit through it from the sky,
-  as the reference's tunnel under a thin roof is,
-  its middle hundreds of times too bright.
-  Columns put a whole site where its middle was in a span,
-  so the coarse levels lost a roof thinner than their spacing
-  along some directions
-  (their solid spans cover their sites in part now; the tunnel was not lit anew);
-  and taking over, a coarser level's light comes to the middle of its site,
-  what lies between there and where it took over unread.
-  Three steps a level leave the tunnel ten times too bright, not hundreds,
-  but the lamp several times further off.
-  Where light is to go, a step at a time, each measured on these scenes:
-  sites hold what they stop along each direction, a share, boxes' too
-  (light reads a site's share already, not the coin hosts are shown by);
-  then coarser levels take more directions (in Ideas).
-  Taking over later or less did not do, each tried against the reference:
-  only where the coarser level is open some sites ahead,
-  only the share of the light its sites around have room for,
-  or after two steps.
-  Each lit the closed room better,
-  and left the roof's middle and the room past the yard's door dark, or lit it many times too much:
-  there no direction of the 12 meets what is lit,
-  and the coarser levels' blur is all that carries light.
-  So what is left in rooms, under roofs and in the tunnel
-  is how few the directions are and how coarse a level takes over,
-  not how it does.
-  A site whose light is none in two rounds running is found dark (`Light::change`),
-  though light may come to it after more bounces.
-  Rock filled round the tunnels kept them dark,
-  but bent a world to the light: not kept.
-  Columns and boxes generated anew for light,
-  their coarse sites covered in part along each direction,
-  left the tunnel a third as bright, still tens of times too bright:
-  not kept
-  ([SupraSummus/parallax-world#264](https://github.com/SupraSummus/parallax-world/pull/264)),
-  as the world had two forms, the hosts' and the light's,
-  and each block was generated twice.
-  A beam along a direction enters a voxel by five faces,
-  a third of it by the one across and a sixth by each of four slanted to it
-  (on a cubic lattice, by the one);
-  light reads the site across the one, and `CROSSING` stands for the rest.
-  Tried, the five sites read, each a line of its own from there:
-  light went round walls one site thick, a third of it at each level.
-  Tried, the slanted four only stopping, glowing and reflecting,
-  what they let through the straight line's:
-  walls held, and without `CROSSING` the strewn blocks stopped what they should,
-  the lamp and the white room about as before
-  (closer with `CROSSING`, the blocks then a third too dark);
-  but the yard and the ground under the roof came out darker,
-  the yard several times:
-  the coarse levels' walls, a site thick, stop more of a beam five faces wide.
-  Not kept.
-  Against the reference (`light/reference.rs`, test `against_the_reference`;
-  the ignored test `maps` draws the scenes from above):
-  a lamp lights the ground in four lobes, along the upward directions,
-  and three times too little right under it;
-  under a roof turned off the lattice, light is off by up to 1.7 times;
-  along the lattice, its middle gets a third of what it should:
-  from there no direction meets the lit ground past its edge;
-  a wall's shadow in the sun is short and blotchy,
-  as the levels that carry it get coarser;
-  past a door from a yard, where only bounced light comes,
-  a room is about as bright as it should be, and the yard a third as bright.
-  In a closed white room or the cheese, where light bounces many times,
-  the light on the floor is a few times too little,
-  as little as reaches it from the lamp.
-  A site met reflects the light on its one face turned back,
-  a third of what it shows that way.
-  Tried: the light on all the faces it shows, each by its share:
-  no closer to the reference.
-  And with it a whole voxel touched read as any site met, not lit as the face:
-  a wall one site thick lit its dark side, and a white room was darker.
-  A whole voxel touching a face is taken to be lit as the face is
-  (`weighed` in `light.rs`), as a flat floor's are;
-  where it is not, at a wall's edge or a corner, the face is lit wrong.
-  It sends back no glow: a lamp's voxels do not light each other's faces,
-  so a lamp of white voxels is a third dimmer near than the reference's.
-  A coarse site holding part of a door (as `Far::measured` draws one)
-  lets light through in every direction alike:
-  drawn so, the yard's door made the room tens of times too bright.
-  A window smaller than the coarser levels' sites lets no sky in at all
-  (they close the room), so a room lit by its windows is black.
-  Native's bakers each light what they show with a `Light` of their own
-  (a generator is not `Send`):
-  they share blocks (`Shared`) with each other and the world's threads,
-  not the world's tiles, which keep of a site only what is drawn:
-  what is lit is generated twice, as a tile and as blocks,
-  till hosts read sites as light does ("Cells hold what they look like");
-  the tiles' own (`TILE`, `tile_box`, `make_tile`) are still in `light.rs`,
-  which no longer makes them;
-  but each finds light again where another found it
-  (all but the coarsest level's: `Shared`'s `top`),
-  and makes a generator, whose plans' caches take tens of MB;
-  each of the world's threads makes two, its own and its Light's.
-  A site of a block costs a few times one of a tile at the finest levels
-  (the cheese's holes, the valley's plans, asked again per block),
-  so a tile read all round its edges costs about as much in blocks.
-  Native's light sliders light the world anew (`World::relight`),
-  as slowly as at the start.
-  Lighting costs several times what it did
-  before light read sites' shares and bounces settled site by site:
-  sites filled in part let light on,
-  so each is one more that reflects, with rounds of its own.
-  Of the light alone, about a third is `shown`'s:
-  the settled light of every neighbour whose pieces are not shown.
-  Lighting a place first, most is its blocks,
-  the coarsest level's far around (`TOP_STEPS` sites along every direction).
-  `look`'s "lit in" overstates it: a picture's rows cross the world,
-  and each forgets what the last found (`KEPT_SITES`),
-  where bakers light what is side by side.
-  Light adds up, so it is the sum of the sky's, the sun's and the glow's;
-  kept apart, the sliders could only mix them,
-  but lighting and keeping that light would cost three times as much.
-  The sun is one of the 12 directions.
-  Light reads a coarser level at the nearest site and its 12 neighbours (`reads`),
-  so near a corner where six voxels meet it misses one within its reach,
-  and light jumps a little there;
-  every site within reach would leak light through walls one site thick.
-- **Sites, as hosts and light see them, and what glows, a prototype**:
-  - a site's pieces show hosts a voxel where a hash is under their alpha
-    (`VoxelGrid::show`), as leaves should,
-    but measured houses' walls come out ragged;
-    light reads their share, of the rays through the voxel
-    (`VoxelGrid::light`; a line through sites' middles meets it
-    3/2 as often, `CROSSING` in `picture.rs`),
-    so it goes on through sites filled in part
-    where it stopped at the first voxel shown:
-    a forest or a city at night takes half as long again to light, or more;
-    a crown's voxels at the coarse levels come out darker,
-    lit under what else is in their sites and those around:
-    right or not, no scene of the reference says, its probes all on the ground;
-  - a site's pieces' colour is one of theirs, picked as often as it is seen,
-    not the mean of what its faces see;
-    where they show, its medium is not seen;
-    a glowing thing's glow is hidden by its own, pieces or medium,
-    not by the other;
-  - measured things are measured from fine voxels kept by chance,
-    so their small lamps come and go;
-  - a lamp smaller than a site glows from the sites around it,
-    its place kept (`around` in `shapes.rs`):
-    put on the nearest, further off it was in the ground's layer,
-    and a fifth of its light fell on open ground.
-    What of it falls on a whole site is lost, as a fill behind a wall is:
-    in a room one site wide it glows a third as bright,
-    and the white room's floor is darker for it;
-    two or three steps a level (`STEPS`), not one,
-    would read each level only where its sites are small next to the distance,
-    but against the reference they sharpen the wall's shadow
-    and leave less light under the roofs and right under the lamp:
-    the coarser levels' blur no longer hides how few the directions are.
-    Light entering a site by each of the five faces it crosses
-    (weighed as `cosines`), not by one,
-    did better on the flat scenes with four or five steps,
-    but darkened the valley, as its side lines ran into uneven ground,
-    did not help the yard, and cost 2.5 to 4 times the time;
-    mixing each direction's light into its neighbours' blurred more every level;
-  - things in a site add up as if apart, and alpha has 255 steps,
-    so at the coarsest levels a lamp stops nothing;
-  - generating costs more, lit or not: every covered site is put for light.
+
+## Tools and CI
+
+- **TS and Rust still say much the same twice.**
+  The tiles around the camera (`world.ts`) are `native/src/world.rs`,
+  and faces are in `native/src` too, though its renderer draws cells, not slices.
+  The renderer is the large step.
+  Tests too: cells' and view's are in both;
+  relief's, pillars', the renderer's and its regressions' only in TS.
+- **Tests take most of CI's time.**
+  Most of it is the worlds' contract, bound by the CPU, in jobs of its own;
+  the valley's, alone, is CI's longest job.
+  Its threads end together, so only less work would shorten it,
+  or its seeds on several runners (`--nocapture` shows each part's time).
+  A seed's margins (rays, and pictures from above) take longest,
+  then checking its regions in parts.
+  Pictures from above generate level 0 over all of a world's heights,
+  region by region, keeping the tiles a region shares with the one before:
+  the forest's regions overlap, the valley's hardly.
+  If CI is still too slow, the contract at seeds but `REGIONS_SEED`
+  (`worlds/tests/contract.rs`) could run only on main.
 - **LLVM 21 compiles AVX-512 code wrong (lavapipe).**
   It may rematerialise a vector of all ones into a register past 15
   in an encoding that cannot name one: the ones land in another register,
@@ -850,17 +682,24 @@ Numbers are for the forest at 1280×800, as measured when written.
   `llvm::sys::getHostCPUName` made to return `znver4` by `LD_PRELOAD`,
   and `MESA_SHADER_CACHE_DISABLE=true`,
   else lavapipe reuses what it compiled for another CPU.
-- **A path's bend is promised by hand** (`BEND` in `worlds/src/path.rs`),
-  for each world's route, though its slope is measured:
-  `worldgen::curve` takes a wander per level, fixed for the whole curve.
-  Corridors measured piece by piece would let a curve keep its own.
-- **README's valley shots predate the winding valley** (`docs/shots/`).
-  The view down it and the ranges were taken at fixed cameras
-  where the valley ran along x = 0; retake them (`pnpm shot`).
-- **A station stands along the axes, its track may not.**
-  Where the valley bends at a town,
-  the track runs up to 30° off z past a building along it
-  (`Station::frame` in `worlds/src/railway.rs`).
+- **The layout has more to sort.**
+  - `worldgen` holds more than generating, none of it read by the engine:
+    `checks/` (only tests and examples use it), `light.rs` (only native and `look`),
+    and in `picture.rs` a PNG coder, of which `lab/src/png.rs` is another.
+    Crates of their own would say so; `picture.rs` in parts.
+  - `worlds/src/forest.rs` is a world, the ground others build on,
+    their table of kinds and the trees they plant;
+    the valley is nine files beside it that use each other in circles.
+    A directory each, and the kinds and the ground apart,
+    come before "Worlds are not yet crates of their own".
+  - `worlds/data/cost/valley.txt` is the repo's largest text file
+    and changes with most commits to the worlds;
+    a baseline per place and level would do for a test with a quarter's slack.
+  - `docs/generators.md` holds the worlds beside the engine ("Composing"),
+    and `docs/architecture.md` native's cells and voxels inside the web's sections.
+  - Tests at the end of `picture.rs`, `light.rs`, `native/src/main.rs`,
+    `voxels.rs` and `lod.rs` are a quarter to a half of each;
+    `generator/tests.rs` shows the way.
 
 ## Ideas
 
