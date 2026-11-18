@@ -28,7 +28,7 @@
 //! around a small lamp glow as bright as the lamp, on average over their
 //! faces, and those small things fill in part stop as much as the things
 //! do. What fills a site in part, a line through its middle meets more
-//! often than its share says (LINES, `meets`).
+//! often than its share says (picture's CROSSING, `meets`).
 
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -40,7 +40,7 @@ use fcc::{GRID_LEVELS, Look};
 use crate::World;
 use crate::generator::{Generator, generate_shown};
 use crate::grid::{ALPHA, BRICK, Box3, COLOUR_ONE, GLOW_ONE, Grid, VoxelGrid};
-use crate::picture::{FACES, Picture, nearest_site};
+use crate::picture::{CROSSING, FACES, Picture, nearest_site, over};
 
 type Rgb = [f32; 3];
 
@@ -52,14 +52,6 @@ const DIRECTIONS: [[i64; 3]; N] = FACES;
 /** Steps along a direction before the coarser level's light may take over, unless set (Shared::stepping), and at most: at the coarsest, before the sky's does. */
 const STEPS: usize = 1;
 const TOP_STEPS: usize = 64;
-/**
- * How much more often a line through sites' middles meets what fills a
- * site in part than its share says, which is of the rays through its
- * voxel (generator's VOXEL_AREA and CHORD): the voxel's section across a
- * face's direction (3 / √2, of a spacing of 1) over the lines' spacing
- * across it (√2). So a ray meets 3/2 as many voxels as a line does sites.
- */
-const LINES: f32 = 1.5;
 /** How little the light on a site's faces may change, of what it is, for it to be found, unless set (Shared::settling); and rounds at most, should it never settle (a closed room that reflects all). */
 const TOLERANCE: f32 = 1e-2;
 const ROUNDS: usize = 256;
@@ -287,15 +279,13 @@ impl Light {
 
     /**
      * What a line through the middle of `site` of level `i` meets of it,
-     * coming from direction `from` (`see`): a whole voxel, as it is; pieces or
-     * a medium, LINES as much, of what they stop and of what they glow.
+     * coming from direction `from` (`see`): what it stops and glows over
+     * CROSSING crossings (picture's `over`).
      */
     fn meets(&mut self, i: usize, site: [i64; 3], from: usize) -> ((f32, Rgb), Rgb) {
         let ((alpha, colour), glow) = self.see(i, site, from);
-        if alpha >= 1.0 {
-            return ((alpha, colour), glow);
-        }
-        ((1.0 - (1.0 - alpha).powf(LINES), colour), glow.map(|g| g * LINES))
+        let over = over(alpha as f64, CROSSING) as f32;
+        ((alpha * over, colour), glow.map(|g| g * over))
     }
 
     /** How much of what comes through `site` of level `i` it lets through. */

@@ -531,6 +531,11 @@ Numbers are for the forest at 1280×800, as measured when written.
   The contract holds each cell to what is in it `FINER_BY` levels finer
   (`checks::cells`), along each of the 12 directions, by the rows of the finer level's sites in it,
   on average over a stratum's cells.
+  A row's ray reads its own row's sites, not the teeth of the rows beside
+  (`CROSSING` stands for them, on average):
+  a lone whole voxel counts for two thirds of its shadow,
+  a sheet one layer thick across a direction for half of the rays, where it stops three quarters.
+  Rays along the rows of a lattice finer still would meet both.
   On a flat ground a cell at level 1 is a whole site or none,
   where what is in it stops a third of the rays along it, or more:
   so the worlds, the engine's test worlds and every solid break it from level 1,
@@ -681,6 +686,21 @@ Numbers are for the forest at 1280×800, as measured when written.
   ([SupraSummus/parallax-world#264](https://github.com/SupraSummus/parallax-world/pull/264)),
   as the world had two forms, the hosts' and the light's,
   and each block was generated twice.
+  A beam along a direction enters a voxel by five faces,
+  a third of it by the one across and a sixth by each of four slanted to it
+  (on a cubic lattice, by the one);
+  light reads the site across the one, and `CROSSING` stands for the rest.
+  Tried, the five sites read, each a line of its own from there:
+  light went round walls one site thick, a third of it at each level.
+  Tried, the slanted four only stopping, glowing and reflecting,
+  what they let through the straight line's:
+  walls held, and without `CROSSING` the strewn blocks stopped what they should,
+  the lamp and the white room about as before
+  (closer with `CROSSING`, the blocks then a third too dark);
+  but the yard and the ground under the roof came out darker,
+  the yard several times:
+  the coarse levels' walls, a site thick, stop more of a beam five faces wide.
+  Not kept.
   Against the reference (`light/reference.rs`, test `against_the_reference`;
   the ignored test `maps` draws the scenes from above):
   a lamp lights the ground in four lobes, along the upward directions,
@@ -741,7 +761,7 @@ Numbers are for the forest at 1280×800, as measured when written.
     but measured houses' walls come out ragged;
     light reads their share, of the rays through the voxel
     (`VoxelGrid::light`; a line through sites' middles meets it
-    3/2 as often, `LINES` in `light.rs`),
+    3/2 as often, `CROSSING` in `picture.rs`),
     so it goes on through sites filled in part
     where it stopped at the first voxel shown:
     a forest or a city at night takes half as long again to light, or more;

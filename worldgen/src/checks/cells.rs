@@ -17,19 +17,7 @@ use crate::checks::contract::{TOLERANCE, around, box_at, sites};
 use crate::generator::{Generator, generate};
 use crate::grid::{ALPHA, Box3, VoxelGrid};
 use crate::noise::Rng;
-use crate::picture::{composited, nearest_site};
-
-/**
- * How many of a ray's crossings of sites one along a row of a lattice
- * stands for: a row runs through its sites' middles, along their longest
- * chord, √2 spacings; a ray at any offset weaves through the teeth of
- * neighbouring rows, more sites, each shorter: a voxel's mean chord along
- * a face's direction is 2√2/3 spacings (its volume, 2, over its shadow, a
- * hexagon of 3/√2), 2/3 of its middle's. Here, the rays run
- * along the finer sites' rows, and only for media: pieces cover a share
- * of a site's rays wherever they cross it.
- */
-pub(crate) const CROSSING: f64 = 1.5;
+use crate::picture::{CROSSING, composited, nearest_site};
 
 /** How many levels finer a level's cells are held to: more costs more, and loses less (a finer cell's mean forgets which of its rays it stops). */
 pub const FINER_BY: u32 = 2;
@@ -154,7 +142,7 @@ pub(crate) fn cells_of(name: &str, world: &World, focus: Option<&Generator>, reg
             let mut looks = [[0.0; 4]; 2];
             let rays = rays_through(centre, s, f, along);
             for (q, d, length) in &rays {
-                // The rays run along the finer sites' rows, through their middles: each crossing of one's medium stands for CROSSING.
+                // The rays run along the finer sites' rows, through their middles: each crossing stands for CROSSING.
                 for (((grid, scale), crossing), look) in grids.iter().zip([f, s]).zip([CROSSING, 1.0]).zip(&mut looks) {
                     for (_, seen) in composited(grid, q.map(|v| v / scale), *d, length / scale, crossing) {
                         look[0] += seen.stopped;
