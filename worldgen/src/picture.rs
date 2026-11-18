@@ -194,15 +194,33 @@ impl Seen {
 const OPAQUE: f64 = 1e-4;
 
 /**
+ * How many crossings of a site one along a row of a lattice stands for.
+ * A row runs through its sites' middles, along their longest chord, √2
+ * spacings; a ray at any offset weaves through the teeth of the rows
+ * beside, crossing 3/2 as many sites, each by a shorter chord (a voxel's
+ * mean chord along a face's direction is its volume, 2, over its shadow,
+ * a hexagon of 3/√2). A whole voxel's shadow falls on the rows beside
+ * too: a row's ray does not see that.
+ */
+pub(crate) const CROSSING: f64 = 1.5;
+
+/**
+ * How many times what a site of `alpha` stops and glows in one crossing
+ * it does in `crossings` (part of one, or CROSSING): what it stops,
+ * 1 − (1 − alpha)^crossings, over alpha. A whole voxel, once.
+ */
+pub(crate) fn over(alpha: f64, crossings: f64) -> f64 {
+    if alpha > 0.0 && crossings != 1.0 { (1.0 - (1.0 - alpha).powf(crossings)) / alpha } else { crossings }
+}
+
+/**
  * What the site `ray` is in shows it, as light sees it: its pieces (as
  * seen along the ray, fcc's `facing`) and its medium, each how much of the ray
  * it stops and what that shows (linear, premultiplied), and what the
  * site glows to it; the rest goes on (`through`). A site stops its alpha
- * of a ray crossing its voxel; one crossing `part` of the voxel's chord
- * along it (starting or ending in it) stops as a medium would:
- * 1 − (1 − alpha)^part. Its medium, as `crossing` crossings: by how long
- * a ray is in it (checks::cells's CROSSING), unlike its pieces, which cover a share
- * of its rays wherever they cross it.
+ * of a ray crossing its voxel: here, of one crossing `part` of the
+ * voxel's chord (starting or ending in it) that stands for `crossing`
+ * crossings (CROSSING along a row, 1 at any offset), `over` both.
  */
 fn composite(ray: &mut Ray, grid: &VoxelGrid, part: f64, crossing: f64) -> ([(f64, [f64; 3]); 2], [f64; 3]) {
     let [x, y, z] = ray.site;
@@ -216,16 +234,7 @@ fn composite(ray: &mut Ray, grid: &VoxelGrid, part: f64, crossing: f64) -> ([(f6
         (0..3).for_each(|c| glow[c] += glows[c] as f64 / GLOW_ONE as f64);
         faces += 1.0;
     }
-    // The medium stops its share of what the pieces let through: as `crossing` crossings, 1 − (1 − that)^crossing.
-    let (pieces, medium) = (parts[0].0 / faces, parts[1].0 / faces);
-    if crossing != 1.0 && medium > 0.0 && pieces < 1.0 {
-        let of = medium / (1.0 - pieces);
-        let scale = (1.0 - (1.0 - of).powf(crossing)) / of;
-        parts[1] = (parts[1].0 * scale, parts[1].1.map(|c| c * scale));
-    }
-    let alpha = (parts[0].0 + parts[1].0) / faces;
-    let scale = if alpha > 0.0 && part < 1.0 { (1.0 - (1.0 - alpha).powf(part)) / alpha } else { part };
-    let through = ray.through * scale / faces;
+    let through = ray.through * over((parts[0].0 + parts[1].0) / faces, part * crossing) / faces;
     let parts = parts.map(|(alpha, colour)| (through * alpha, colour.map(|c| through * c)));
     ray.through -= parts[0].0 + parts[1].0;
     (parts, glow.map(|g| through * g))
@@ -380,8 +389,7 @@ impl Tiles {
  * `grid` before `end`, site by site, as `composite`: how far along it
  * enters each that stops some of it or glows, how much it stops, what
  * that shows and what it glows; till next to none of it gets through.
- * Each site's medium counts as `crossing` crossings (checks::cells's
- * CROSSING), 1 for a ray at any offset.
+ * Each site counts as `crossing` crossings (CROSSING along a row).
  */
 pub(crate) fn composited(grid: &VoxelGrid, origin: [f64; 3], direction: [f64; 3], end: f64, crossing: f64) -> Vec<(f64, Seen)> {
     let mut ray = Ray { pixel: 0, origin, direction, t: 0.0, end, site: nearest_site(origin), face: FACES.len(), through: 1.0 };
