@@ -531,6 +531,13 @@ Numbers are for the forest at 1280×800, as measured when written.
     Seen from near, a level is pitted where its sites are held in part
     (a flat ground's top, a site deep),
     and sharp only where a shape is several sites thick.
+  - Light and hosts see a site held in part unlike:
+    light its share, hosts a whole voxel or none by the coin.
+    Light corrects for the coin only next to what is shown (`shown` in `light.rs`),
+    so two such sites in a row still shade what shows behind them.
+    Hosts drawing pieces as light sees them would end it:
+    blended by their alpha as a medium is (smooth, soft edges),
+    or by a coin for each finer site in them (tried in `look`: both show no dark pits).
   The contract holds each cell to what is in it `FINER_BY` levels finer
   (`checks::cells`), along each of the 12 directions, by the rows of the finer level's sites in it,
   on average over a stratum's cells.
