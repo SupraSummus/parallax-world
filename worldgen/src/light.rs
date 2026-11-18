@@ -29,6 +29,8 @@
 //! faces, and those small things fill in part stop as much as the things
 //! do. What fills a site in part, a line through its middle meets more
 //! often than its share says (picture's CROSSING, `meets`).
+//! A voxel hosts show behind pieces they show nothing of is lit as if
+//! those pieces were not there (`shown`): the ray that shows it met none.
 
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -523,9 +525,28 @@ impl Light {
         FACES.iter().any(|f| !self.whole(i, add(site, *f)))
     }
 
+    /**
+     * The light coming to the voxel hosts show at `site` of level `i`: its
+     * site's (`light`), but through a neighbour whose pieces they show
+     * nothing of, what comes to that neighbour. A ray that shows the voxel
+     * through them met none of them.
+     */
+    fn shown(&mut self, i: usize, site: [i64; 3]) -> [Rgb; N] {
+        let mut light = self.light(i, site);
+        for d in 0..N {
+            let q = add(site, DIRECTIONS[d]);
+            let from = self.opposite[d];
+            let pieces = self.hold(i, q).is_some_and(|([x, y, z], grid)| grid.light(x, y, z, from).0[0].0 > 0);
+            if pieces && !self.drawn(i, q) {
+                light[d] = self.light(i, q)[d];
+            }
+        }
+        light
+    }
+
     /** The light from each face of the voxel at `site` of level `i`, on its surface. */
     fn lit(&mut self, i: usize, site: [i64; 3]) -> FaceLight {
-        let (light, touches) = (self.light(i, site), self.paths(i, site).touches);
+        let (light, touches) = (self.shown(i, site), self.paths(i, site).touches);
         std::array::from_fn(|f| {
             let on = self.on_face(&light, &touches, f);
             let ((_, colour), glow) = self.see(i, site, f);
@@ -542,7 +563,7 @@ impl Light {
                 (0..3).for_each(|c| normal[c] += face[c] as f64);
             }
         }
-        let (light, touches) = (self.light(i, site), self.paths(i, site).touches);
+        let (light, touches) = (self.shown(i, site), self.paths(i, site).touches);
         if normal == [0.0; 3] {
             // No surface, or all of it: the mean of all its faces'.
             let all = FACES.map(|f| self.on(&light, &touches, normalize(f.map(|v| v as f64))));
@@ -781,6 +802,27 @@ mod tests {
         let mut light = Light::new(world, Shared::new(Brightness { sky: 1.0, sun: 1.0, glow: 0.0 }));
         let inside = light.on_voxel(0, ground(1, 0));
         assert!(inside.iter().all(|c| *c < 0.02), "inside {inside:?}");
+    }
+
+    #[test]
+    fn ground_seen_through_pieces_not_shown_is_lit_as_in_the_open() {
+        // Blocks a quarter of a site of level 3 across, on the ground: pieces of their sites, some not shown.
+        let blocks: Vec<[f64; 3]> = (0..64).map(|k| [16.0 * k as f64, 4.0, 0.0]).collect();
+        let world = world_with(&["#808080"], &[], &blocks, |_, y, _, _| y < 0);
+        let mut light = Light::new(world, Shared::new(Brightness { sky: 1.0, sun: 1.0, glow: 0.0 }));
+        let open = light.on_voxel(3, ground(-9, 0))[0];
+        let mut under = 0;
+        for site in (0..128).map(|k| ground(2 * k + 1, 0)) {
+            let above = FACES.map(|f| add(site, f)).into_iter().filter(|q| q[1] == 0);
+            // Not beside a block shown: that one does shade it.
+            if above.clone().any(|q| light.open(3, q) < 1.0) && !above.clone().any(|q| light.drawn(3, q)) {
+                under += 1;
+                let lit = light.on_voxel(3, site)[0];
+                // Less by what the blocks around stop.
+                assert!((lit / open - 1.0).abs() < 0.08, "at {site:?} {lit}, in the open {open}");
+            }
+        }
+        assert!(under > 0, "no ground under pieces not shown");
     }
 
     #[test]
