@@ -285,22 +285,22 @@ impl Light {
         self.open(i, site) <= 0.0
     }
 
-    /** How light sees face `face` of `site` of level `i`: how much of it stops (alpha) and its colour; what it glows. */
-    fn see(&mut self, i: usize, site: [i64; 3], face: usize) -> ((f32, Rgb), Rgb) {
+    /** How light sees `site` of level `i` from direction `from`: how much of it stops (alpha) and its colour; what it glows. */
+    fn see(&mut self, i: usize, site: [i64; 3], from: usize) -> ((f32, Rgb), Rgb) {
         let Some(([x, y, z], grid)) = self.hold(i, site) else { return ((0.0, [0.0; 3]), [0.0; 3]) };
-        let look = grid.face(x, y, z, face);
+        let look = grid.face(x, y, z, from);
         ((alpha_of(look) as f32 / ALPHA as f32, linear(look)), grid.glow(x, y, z).map(|g| g as f32 * self.glow))
     }
 
     /**
-     * What a line meets of `site` of level `i`, entering by face `face`
+     * What a line meets of `site` of level `i`, seen from direction `from`
      * (`see`): a whole voxel, as it is; pieces or a medium, `reach` as
      * much, of what they stop and of what they glow. Their share is of
      * the rays through the voxel: a line longer through the site than
      * most meets them more often.
      */
-    fn meets(&mut self, i: usize, site: [i64; 3], face: usize, reach: f32) -> ((f32, Rgb), Rgb) {
-        let ((alpha, colour), glow) = self.see(i, site, face);
+    fn meets(&mut self, i: usize, site: [i64; 3], from: usize, reach: f32) -> ((f32, Rgb), Rgb) {
+        let ((alpha, colour), glow) = self.see(i, site, from);
         if alpha <= 0.0 || alpha >= 1.0 {
             return ((alpha, colour), glow);
         }
