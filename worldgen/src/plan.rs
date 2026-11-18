@@ -514,7 +514,8 @@ impl<T: Copy + Default + 'static> Claims<T> {
 fn spots(cell: i64, seed: u64, first: Option<[i64; 2]>, at: [i64; 2], reach: i64) -> Vec<(i64, i64)> {
     let range = |a: usize| (at[a] - reach - 2 * cell).div_euclid(cell)..=(at[a] + reach + cell).div_euclid(cell);
     let first = first.map(|f| f.map(|v| v.div_euclid(cell)));
-    let mut keys = Vec::new();
+    // A spot a cell on average: room for most without growing.
+    let mut keys = Vec::with_capacity(2 * range(0).count() * range(1).count());
     for i in range(0) {
         for k in range(1) {
             let h = (hash64(seed, i, k, 2) >> 32) as u32;

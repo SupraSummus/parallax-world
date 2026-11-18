@@ -216,11 +216,22 @@ fn cover(spans: &[&Span], axis: usize, line: [i64; 2], (lo, hi): (i64, i64), s: 
     // The sites whose voxels, s each way along the axis, meet [from, to].
     let first = ((from - s).div_euclid(s) + 1).max(lo);
     let mut w = first + ((first + line[0] + line[1]) & 1);
+    // Kept from site to site: a line has thousands.
+    let mut parts: Vec<(f64, f64, Kind)> = Vec::new();
+    let mut ends: Vec<(f64, f64)> = Vec::new();
     while w * s < to + s && w < hi {
         let at = |end: i64| ((end - w * s) as f64 / s as f64).clamp(-1.0, 1.0);
         // Each span's part of the voxel, −1 to 1 along the axis, in order.
-        let mut parts: Vec<(f64, f64, Kind)> =
-            spans.iter().map(|span| (at(span.from), at(span.to), span.kind)).filter(|p| p.0 < p.1).collect();
+        parts.clear();
+        parts.extend(spans.iter().map(|span| (at(span.from), at(span.to), span.kind)).filter(|p| p.0 < p.1));
+        // Whole in one span, as most sites under the ground: all of it, to every face.
+        if op != Op::Carve
+            && let [(-1.0, 1.0, kind)] = parts[..]
+        {
+            put(kind.into(), SHARE, w);
+            w += 2;
+            continue;
+        }
         parts.sort_by(|p, q| p.0.total_cmp(&q.0));
         if let (Some(bottom), Some(top)) = (parts.first(), parts.iter().max_by(|p, q| p.1.total_cmp(&q.1))) {
             let most = parts.iter().max_by(|p, q| (p.1 - p.0).total_cmp(&(q.1 - q.0))).expect("a part").2;
@@ -229,7 +240,8 @@ fn cover(spans: &[&Span], axis: usize, line: [i64; 2], (lo, hi): (i64, i64), s: 
                 -1 => bottom.2,
                 _ => most,
             });
-            let ends: Vec<(f64, f64)> = parts.iter().map(|p| (p.0, p.1)).collect();
+            ends.clear();
+            ends.extend(parts.iter().map(|p| (p.0, p.1)));
             let [across, along] = [true, false].map(|across| share(slabs(across, &ends, op == Op::Carve)));
             let cover = (across != along).then(|| std::array::from_fn(|k| if VOXEL_FACES[k][axis] == 0 { along } else { across }));
             put(Look { kind: most, faces: faces.iter().any(|&k| k != most).then_some(faces), cover }, across.max(along), w);
