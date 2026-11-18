@@ -23,9 +23,10 @@
 //!
 //! Light sees the voxels as the eye does, in the grids hosts draw (Grid):
 //! a coarse site its pieces fill in part shows a whole voxel, or nothing,
-//! as often (VoxelGrid::show). What glows glows shown or not: a coarse
-//! site a small lamp is in glows as bright as the lamp, on average over
-//! its faces.
+//! as often (VoxelGrid::show). What glows glows shown or not: the coarse
+//! sites around a small lamp glow as bright as the lamp, on average over
+//! their faces. What fills a site in part, a line through its middle
+//! meets more often than its share says (LINES, `meets`).
 
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -49,6 +50,14 @@ const DIRECTIONS: [[i64; 3]; N] = FACES;
 /** Steps along a direction before the coarser level's light may take over, unless set (Shared::stepping), and at most: at the coarsest, before the sky's does. */
 const STEPS: usize = 1;
 const TOP_STEPS: usize = 64;
+/**
+ * How much more often a line through sites' middles meets what fills a
+ * site in part than its share says, which is of the rays through its
+ * voxel (generator's VOXEL_AREA and CHORD): the voxel's section across a
+ * face's direction (3 / √2, of a spacing of 1) over the lines' spacing
+ * across it (√2). So a ray meets 3/2 as many voxels as a line does sites.
+ */
+const LINES: f32 = 1.5;
 /** How little the light on a site's faces may change, of what it is, for it to be found, unless set (Shared::settling); and rounds at most, should it never settle (a closed room that reflects all). */
 const TOLERANCE: f32 = 1e-2;
 const ROUNDS: usize = 256;
@@ -275,6 +284,19 @@ impl Light {
         ((alpha_of(look) as f32 / ALPHA as f32, linear(look)), grid.glow(x, y, z).map(|g| g as f32 * self.glow))
     }
 
+    /**
+     * What a line through the middle of `site` of level `i` meets of it,
+     * entering by face `face` (`see`): a whole voxel, as it is; pieces or
+     * a medium, LINES as much, of what they stop and of what they glow.
+     */
+    fn meets(&mut self, i: usize, site: [i64; 3], face: usize) -> ((f32, Rgb), Rgb) {
+        let ((alpha, colour), glow) = self.see(i, site, face);
+        if alpha >= 1.0 {
+            return ((alpha, colour), glow);
+        }
+        ((1.0 - (1.0 - alpha).powf(LINES), colour), glow.map(|g| g * LINES))
+    }
+
     /** How much of what comes through `site` of level `i` it lets through. */
     fn open(&mut self, i: usize, site: [i64; 3]) -> f32 {
         let Some(([x, y, z], grid)) = self.hold(i, site) else { return 1.0 };
@@ -381,7 +403,7 @@ impl Light {
             for step in 1..=TOP_STEPS {
                 let from = q;
                 q = add(q, v);
-                let ((alpha, colour), glow) = self.see(i, q, self.enters[d]);
+                let ((alpha, colour), glow) = self.meets(i, q, self.enters[d]);
                 (0..3).for_each(|c| sum[c] += through * glow[c]);
                 if alpha > 0.0 {
                     reflects.push((d, q, colour.map(|c| through * alpha * c)));
@@ -726,12 +748,22 @@ mod tests {
 
     /** As `world`, its stone coloured `colour`. */
     fn world_of(colour: &'static [&'static str], lamps: &[[f64; 3]], stone: impl Fn(i64, i64, i64, i64) -> bool + 'static) -> World {
+        world_with(colour, lamps, &[], stone)
+    }
+
+    /** As `world_of`, with blocks of stone the lamps' size at `blocks`. */
+    fn world_with(
+        colour: &'static [&'static str],
+        lamps: &[[f64; 3]],
+        blocks: &[[f64; 3]],
+        stone: impl Fn(i64, i64, i64, i64) -> bool + 'static,
+    ) -> World {
         let kinds = vec![
             KindDef { name: "stone", kind_type: 1, colors: colour, walk_through: false, glows: false, medium: false },
             KindDef { name: "lamp", kind_type: 6, colors: &["#ffffff"], walk_through: false, glows: true, medium: false },
         ];
-        let shapes: Vec<_> =
-            lamps.iter().map(|p| cuboid(p.map(|c| c - LAMP / 2.0), p.map(|c| c + LAMP / 2.0), LAMP_KIND, SOLID, Op::Fill)).collect();
+        let cube = |p: &[f64; 3], kind| cuboid(p.map(|c| c - LAMP / 2.0), p.map(|c| c + LAMP / 2.0), kind, SOLID, Op::Fill);
+        let shapes: Vec<_> = lamps.iter().map(|p| cube(p, LAMP_KIND)).chain(blocks.iter().map(|p| cube(p, STONE))).collect();
         let lamps = Population::new("lamps", 1.0, 1024)
             .reach(1024)
             .anchor(|cell| (cell.centre == [0; 3]).then_some([0.0; 3]))
@@ -850,7 +882,7 @@ mod tests {
                 night,
                 vec![ground(1, 0), ground(16, 7), ground(33, 0)],
                 1 << 16,
-                1.6,
+                0.75,
             ),
         ];
         // A roof 2 sites thick and 128 units wide at y = 24, turned about y, probed across it: the same light at every turn.
@@ -877,6 +909,20 @@ mod tests {
         let tunnel = world(&[], |x, y, z, _| y < 0 || z.abs() < 192 && y < 56 && !(x.abs() < 20 && y < 40));
         let probes = [0.0, 96.0, 160.0, 224.0].map(|z| ground_near(0.0, z)).to_vec();
         scenes.push(scene("tunnel under a thin roof", tunnel, day, probes, 1 << 16, 4.0));
+        // Blocks the lamps' size strewn over the ground, two to a square 8 wide, from 24 to 40 up: whole voxels near, a
+        // share of a site each far, stopping about two thirds of the sky's light.
+        let strewn = |k: i64, v: i64| (crate::noise::hash(k as u64, v, 0, 0) % 1000) as f64 / 1000.0;
+        let blocks: Vec<[f64; 3]> = (0..2 * 23 * 23)
+            .map(|k| {
+                [
+                    8.0 * (k % 23 - 11) as f64 + 4.0 * strewn(1, k),
+                    26.0 + 12.0 * strewn(2, k),
+                    8.0 * (k / 23 % 23 - 11) as f64 + 4.0 * strewn(3, k),
+                ]
+            })
+            .collect();
+        let canopy = world_with(&["#808080"], &[], &blocks, |_, y, _, _| y < 0);
+        scenes.push(scene("blocks over the ground", canopy, sky, [0.0, 24.0, 48.0].map(|x| ground_near(x, 0.0)).to_vec(), 4096, 0.4));
         // A closed room, white, a lamp in it: most of the light on its floor has bounced, many times.
         let room = world_of(&["#f0f0f0"], &[[0.0, 24.0, 0.0]], |x, y, z, s| {
             let wall = |c: i64| (32..32 + s).contains(&c.abs());
@@ -884,7 +930,7 @@ mod tests {
             y < 0 || within(x) && within(z) && (0..48 + s).contains(&y) && (wall(x) || wall(z) || y >= 48)
         });
         let probes = vec![ground(1, 0), ground(16, 7), ground(29, 0), ground(28, 27)];
-        scenes.push(scene("white room, lamp", room, night, probes, 1 << 16, 1.3));
+        scenes.push(scene("white room, lamp", room, night, probes, 1 << 16, 1.1));
         // A cave, a ball in rock the cheese's colour, a lamp by its wall: probed across its floor.
         let ball = |x: i64, y: i64, z: i64| x * x + (y - CAVE.1) * (y - CAVE.1) + z * z < CAVE.0 * CAVE.0;
         let cave = world_of(&["#f3d46c"], &[[0.0, 20.0, 20.0]], move |x, y, z, _| y < 80 && !ball(x, y, z));
@@ -892,7 +938,7 @@ mod tests {
             let y = (0..CAVE.1).find(|&y| ball(x, y, 0)).expect("the cave's floor") - 1;
             [x + (x + y).rem_euclid(2), y, 0]
         });
-        scenes.push(scene("yellow cave, lamp", cave, night, probes.to_vec(), 1 << 16, 1.3));
+        scenes.push(scene("yellow cave, lamp", cave, night, probes.to_vec(), 1 << 16, 0.95));
         scenes
     }
 

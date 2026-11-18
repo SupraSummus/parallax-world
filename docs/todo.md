@@ -658,15 +658,26 @@ Numbers are for the forest at 1280×800, as measured when written.
   Where light is to go, a step at a time, each measured on these scenes:
   sites hold what they stop along each direction, a share, columns' too,
   and light reads that, not the coin hosts are shown by;
-  then each level lights its stretch of a ray, from where the finer one's ends,
-  in place of the steps and `past`'s room;
   then coarser levels take more directions (in Ideas).
+  Taking over later or less did not do, each tried against the reference:
+  only where the coarser level is open some sites ahead,
+  only the share of the light its sites around have room for,
+  or after two steps.
+  Each lit the closed room better,
+  and left the roof's middle and the room past the yard's door dark, or lit it many times too much:
+  there no direction of the 12 meets what is lit,
+  and the coarser levels' blur is all that carries light.
+  So what is left in rooms, under roofs and in the tunnel
+  is how few the directions are and how coarse a level takes over,
+  not how it does.
+  A site whose light is none in two rounds running is found dark (`Light::change`),
+  though light may come to it after more bounces.
   Rock filled round the tunnels kept them dark,
   but bent a world to the light: not kept.
   Against the reference (`light/reference.rs`, test `against_the_reference`;
   the ignored test `maps` draws the scenes from above):
   a lamp lights the ground in four lobes, along the upward directions,
-  and up to ten times too little right under it;
+  and three times too little right under it;
   under a roof turned off the lattice, light is off by up to 1.7 times;
   along the lattice, its middle gets a third of what it should:
   from there no direction meets the lit ground past its edge;
@@ -680,6 +691,8 @@ Numbers are for the forest at 1280×800, as measured when written.
   A whole voxel touching a face is taken to be lit as the face is
   (`weighed` in `light.rs`), as a flat floor's are;
   where it is not, at a wall's edge or a corner, the face is lit wrong.
+  It sends back no glow: a lamp's voxels do not light each other's faces,
+  so a lamp of white voxels is a third dimmer near than the reference's.
   A coarse site holding part of a door (as `Far::measured` draws one)
   lets light through in every direction alike:
   drawn so, the yard's door made the room tens of times too bright.
@@ -708,6 +721,11 @@ Numbers are for the forest at 1280×800, as measured when written.
   - a site's pieces show a voxel where a hash is under their alpha
     (`VoxelGrid::show`), as leaves should,
     but measured houses' walls come out ragged;
+    their share is of the rays through the voxel,
+    and a line through sites' middles meets 2/3 as many sites as a ray does voxels
+    (`LINES` in `light.rs`, which makes up for it in what glows and in media):
+    shown by the coin, pieces stop light 2/3 as often as they should,
+    and the ground under blocks strewn over it is up to 1.7 times too bright;
     at the coarse levels light reads few sites,
     so a voxel there shown or not moves a lamp's light (the city at night);
   - a site's pieces' colour is one of theirs, picked as often as it is seen,
@@ -717,9 +735,13 @@ Numbers are for the forest at 1280×800, as measured when written.
     not by the other;
   - measured things are measured from fine voxels kept by chance,
     so their small lamps come and go;
-  - a lamp glows from one site at each level:
-    further off, that site may be as low as the ground's,
-    its light comes flat, and none falls on the ground;
+  - a lamp smaller than a site glows from the sites around it,
+    its place kept (`around` in `shapes.rs`):
+    put on the nearest, further off it was in the ground's layer,
+    and a fifth of its light fell on open ground.
+    What of it falls on a whole site is lost, as a fill behind a wall is:
+    in a room one site wide it glows a third as bright,
+    and the white room's floor is darker for it;
     two or three steps a level (`STEPS`), not one,
     would read each level only where its sites are small next to the distance,
     but against the reference they sharpen the wall's shadow
