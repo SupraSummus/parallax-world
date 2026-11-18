@@ -3,6 +3,7 @@
 //! The same layout as the baker's Grid, which `into_grid` hands over.
 
 use std::collections::BTreeMap;
+use std::sync::OnceLock;
 
 use fcc::light::linear_to_srgb;
 use fcc::{FACE_KINDS, Look};
@@ -485,11 +486,16 @@ impl VoxelGrid {
             sites.sort_unstable_by_key(|w| w[0]);
             sites.concat()
         };
-        let view = |i: usize| -> Option<Vec<u32>> {
-            let (to, views) = (to(i)?, std::array::from_fn::<Look, FACE_KINDS, _>(|k| self.view(i, k)));
-            (self.shown[i] && views.iter().any(|&v| v != views[0])).then(|| [&[to][..], &views].concat())
+        // As `view` gives them, without looking each face's up again.
+        let view = |(&i, v): (&usize, &Views)| -> Option<Vec<u32>> {
+            if !self.shown[i] {
+                return None;
+            }
+            let look = |k: usize| if v.alpha[k] > 0 { look_of(v.colour[k], v.alpha[k], ALPHA) } else { looks[i] };
+            let (to, views) = (to(i)?, std::array::from_fn::<Look, FACE_KINDS, _>(look));
+            views.iter().any(|&v| v != views[0]).then(|| [&[to][..], &views].concat())
         };
-        grid.views = sorted(&mut self.views.keys().filter_map(|&i| view(i)));
+        grid.views = sorted(&mut self.views.iter().filter_map(view));
         grid.glow = sorted(&mut self.glow.iter().filter_map(|(&i, g)| Some([&[to(i)?][..], g].concat())));
         grid
     }
@@ -500,8 +506,19 @@ impl VoxelGrid {
  * COLOUR_ONE): its colour unpremultiplied, sRGB, and `shown` its alpha.
  */
 pub(crate) fn look_of(colour: [u16; 3], alpha: u8, shown: u8) -> Look {
-    let of = alpha.max(1) as f32 / ALPHA as f32 * COLOUR_ONE as f32;
-    fcc::look(colour.map(|c| (255.0 * linear_to_srgb((c as f32 / of).min(1.0))).round() as u8), shown)
+    let srgb = |c: u16, alpha: u8| {
+        let of = alpha.max(1) as f32 / ALPHA as f32 * COLOUR_ONE as f32;
+        (255.0 * linear_to_srgb((c as f32 / of).min(1.0))).round() as u8
+    };
+    // Most sites shown are whole, and a power costs more than all else here: theirs are kept.
+    static WHOLE: OnceLock<Vec<u8>> = OnceLock::new();
+    match alpha {
+        ALPHA => {
+            let whole = WHOLE.get_or_init(|| (0..=COLOUR_ONE).map(|c| srgb(c, ALPHA)).collect());
+            fcc::look(colour.map(|c| whole[c as usize]), shown)
+        }
+        _ => fcc::look(colour.map(|c| srgb(c, alpha)), shown),
+    }
 }
 
 #[cfg(test)]

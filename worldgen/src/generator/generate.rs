@@ -83,14 +83,16 @@ pub fn generate(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
     }
     let palette = Palette::new(&generator.kinds, generator.seed);
     let clip = grid.clip();
+    let mut odd = Vec::new();
     let mut put = |look: Look, op: Op, share: u32, pick: u32, x: i64, y: i64, z: i64| {
         let colour = |kind: Kind| palette.colour(kind, s, [x, y, z].map(|v| v * s));
-        let colours = std::array::from_fn(|k| colour(look.faces.map_or(look.kind, |kinds| kinds[k])));
+        let own = colour(look.kind);
+        let faces = look.faces.map(|kinds| kinds.map(colour)).filter(|faces| faces.iter().any(|c| *c != own));
         let kind = &generator.kinds[look.kind as usize];
         // What glows gives light of its colour.
-        let glow = colour(look.kind).map(|c| if kind.glows { (c * 255 + COLOUR_ONE as u32 / 2) / COLOUR_ONE as u32 } else { 0 });
-        let added = Added { op, pick, colours, glow, cover: look.cover, medium: kind.medium, solid: !kind.walk_through };
-        see(&mut grid, &added, share, x, y, z);
+        let glow = if kind.glows { own.map(|c| (c * 255 + COLOUR_ONE as u32 / 2) / COLOUR_ONE as u32) } else { [0; 3] };
+        let added = Added { op, pick, colour: own, faces, glow, cover: look.cover, medium: kind.medium, solid: !kind.walk_through };
+        see(&mut grid, &mut odd, &added, share, x, y, z);
     };
     let drawables = drawables_in(generator, &clip, s);
     let mut at = 0;
@@ -150,12 +152,17 @@ pub fn generate(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
  * host's voxels, a camera colliding), stops and glows as its most.
  * What stops a walking body adds its share to the site's `solid`,
  * wherever in it, in front or behind; a carve takes out of it too.
+ * `odd` marks, by index in `shown`, the sites that may be in `glow` or
+ * `views`: few are, so most are added to without a lookup.
  */
-fn see(grid: &mut VoxelGrid, added: &Added, share: u32, x: i64, y: i64, z: i64) {
+fn see(grid: &mut VoxelGrid, odd: &mut Vec<bool>, added: &Added, share: u32, x: i64, y: i64, z: i64) {
     if share == 0 && added.cover.is_none_or(|cover| cover == [0; FACE_KINDS]) {
         return;
     }
     let Some(i) = grid.index(x, y, z) else { return };
+    if odd.len() <= i {
+        odd.resize(grid.shown.len(), false);
+    }
     let (solid, all, one) = (grid.solid[i] as u64, ALPHA as u64, SHARE as u64);
     let share64 = share.min(SHARE) as u64;
     grid.solid[i] = match added.op {
@@ -165,22 +172,22 @@ fn see(grid: &mut VoxelGrid, added: &Added, share: u32, x: i64, y: i64, z: i64) 
     };
     // A carve takes out pieces and medium alike: the medium here, the pieces as any.
     let medium = added.medium && added.op != Op::Carve;
-    let old = grid.glow.get(&i).copied().unwrap_or_default();
+    let old = if odd[i] { grid.glow.get(&i).copied().unwrap_or_default() } else { [0; 3] };
     if added.op == Op::Carve {
         let kept = (SHARE - share.min(SHARE)) as u64;
         grid.medium.alpha[i] = added.rounded(grid.medium.alpha[i] as u64 * kept);
         grid.medium.colour[i] = grid.medium.colour[i].map(|c| (c as u64 * kept / SHARE as u64) as u16);
     }
-    let unlike = added.colours.iter().any(|c| *c != added.colours[0]);
-    let by_face = !medium && (added.cover.is_some() || unlike || grid.views.contains_key(&i));
+    let by_face = !medium && (added.cover.is_some() || added.faces.is_some() || odd[i] && grid.views.contains_key(&i));
     if !by_face {
         let part = if medium { &mut grid.medium } else { &mut grid.pieces };
         let (alpha, colour, glow) = added.to((part.alpha[i], part.colour[i], old), share, 0);
         (part.alpha[i], part.colour[i]) = (alpha, colour);
-        set_glow(grid, i, glow);
+        set_glow(grid, odd, i, glow);
         return;
     }
     // Face by face, from what each saw so far; the site as a whole stops and glows as its most.
+    odd[i] = true;
     let (was, was_colour) = (grid.pieces.alpha[i], grid.pieces.colour[i]);
     let mut views = grid.views.remove(&i).unwrap_or(crate::grid::Views {
         alpha: [was; FACE_KINDS],
@@ -200,9 +207,9 @@ fn see(grid: &mut VoxelGrid, added: &Added, share: u32, x: i64, y: i64, z: i64) 
     let alike = |k: usize| views.alpha[k] == views.alpha[0] && views.colour[k] == views.colour[0] && views.glow[k] == views.glow[0];
     if (0..FACE_KINDS).all(alike) {
         (grid.pieces.alpha[i], grid.pieces.colour[i]) = (views.alpha[0], views.colour[0]);
-        set_glow(grid, i, views.glow[0]);
+        set_glow(grid, odd, i, views.glow[0]);
     } else {
-        set_glow(grid, i, most(&views.glow));
+        set_glow(grid, odd, i, most(&views.glow));
         grid.views.insert(i, views);
     }
 }
@@ -211,8 +218,10 @@ fn see(grid: &mut VoxelGrid, added: &Added, share: u32, x: i64, y: i64, z: i64) 
 struct Added {
     op: Op,
     pick: u32,
-    /** Linear, of COLOUR_ONE, through each face. */
-    colours: [[u32; 3]; FACE_KINDS],
+    /** Linear, of COLOUR_ONE. */
+    colour: [u32; 3],
+    /** Its colour through each face, where they differ. */
+    faces: Option<[[u32; 3]; FACE_KINDS]>,
     glow: [u32; 3],
     /** How much of each face's rays it covers, if not its share. */
     cover: Option<[u32; FACE_KINDS]>,
@@ -241,9 +250,9 @@ impl Added {
             Op::Fill => self.rounded(alpha * one + (all - alpha) * share),
             Op::Paint => self.rounded((alpha * one).max(all * share)),
         };
-        let colour =
-            [0, 1, 2].map(|c| ((colour[c] as u64 * kept + visible * self.colours[k][c] as u64) / one).min(COLOUR_ONE as u64) as u16);
-        let glow = [0, 1, 2].map(|c| (glow[c] as u64 * kept / one + visible * self.glow[c] as u64) as u32);
+        let own = self.faces.map_or(self.colour, |faces| faces[k]);
+        let colour = std::array::from_fn(|c| ((colour[c] as u64 * kept + visible * own[c] as u64) / one).min(COLOUR_ONE as u64) as u16);
+        let glow = std::array::from_fn(|c| (glow[c] as u64 * kept / one + visible * self.glow[c] as u64) as u32);
         (after, colour, glow)
     }
 
@@ -260,10 +269,11 @@ impl Added {
 }
 
 /** Sets site `i`'s glow, none if it glows nothing. */
-fn set_glow(grid: &mut VoxelGrid, i: usize, glow: [u32; 3]) {
+fn set_glow(grid: &mut VoxelGrid, odd: &mut [bool], i: usize, glow: [u32; 3]) {
     if glow != [0; 3] {
         grid.glow.insert(i, glow);
-    } else if !grid.glow.is_empty() {
+        odd[i] = true;
+    } else if odd[i] {
         grid.glow.remove(&i);
     }
 }

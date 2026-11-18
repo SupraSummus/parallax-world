@@ -8,6 +8,7 @@ use std::ops::{Add, AddAssign, Div, Mul, Neg, Sub, SubAssign};
 use crate::units::Units;
 
 /** splitmix64's finaliser: a bijection of u64 that mixes every bit into every other. */
+#[inline]
 fn mix(mut z: u64) -> u64 {
     z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
     z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
@@ -15,6 +16,7 @@ fn mix(mut z: u64) -> u64 {
 }
 
 /** A hash of a lattice point, 64 bits: each coordinate mixed in whole, so nothing repeats every 2^32 units. */
+#[inline]
 pub fn hash64(seed: u64, x: i64, y: i64, z: i64) -> u64 {
     let h = mix(seed ^ (x as u64).wrapping_mul(0x9e3779b97f4a7c15));
     let h = mix(h ^ (y as u64).wrapping_mul(0xc2b2ae3d27d4eb4f));
@@ -22,6 +24,7 @@ pub fn hash64(seed: u64, x: i64, y: i64, z: i64) -> u64 {
 }
 
 /** A hash of a lattice point, 32 bits. */
+#[inline]
 pub fn hash(seed: u64, x: i64, y: i64, z: i64) -> u32 {
     (hash64(seed, x, y, z) >> 32) as u32
 }
