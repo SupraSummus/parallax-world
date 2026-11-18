@@ -139,8 +139,9 @@ pub fn generate(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
 
 /**
  * Adds a thing's `share` of site (x, y, z) to it (VoxelGrid's `pieces`,
- * `medium`, `glow`): as a Fill behind what is there, a Paint in front of
- * it, a Carve taking it out, of both. A medium joins the site's medium,
+ * `medium`, `glow`): as a Fill behind what is there, apart from it; a
+ * Paint in front of it, lying on it, and past it only where it covers
+ * more; a Carve taking it out, of both. A medium joins the site's medium,
  * the rest its pieces. What either stops, shows and glows is the sum of
  * what is in it, each by how much of the site's rays it stops there.
  * Pieces covering some faces' rays more than others' (`cover`), unlike
@@ -232,11 +233,13 @@ impl Added {
         let (kept, visible) = match self.op {
             Op::Carve => (one - share, 0),
             Op::Fill => (one, (all - alpha) * share / all),
-            Op::Paint => (one - share, share),
+            // On what is there, as much of it as the paint covers of the site.
+            Op::Paint => (one - (share * all).checked_div(alpha).map_or(one, |painted| painted.min(one)), share),
         };
         let after = match self.op {
             Op::Carve => self.rounded(alpha * kept),
-            _ => self.rounded(alpha * one + (all - alpha) * share),
+            Op::Fill => self.rounded(alpha * one + (all - alpha) * share),
+            Op::Paint => self.rounded((alpha * one).max(all * share)),
         };
         let colour =
             [0, 1, 2].map(|c| ((colour[c] as u64 * kept + visible * self.colours[k][c] as u64) / one).min(COLOUR_ONE as u64) as u16);

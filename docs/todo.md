@@ -10,22 +10,12 @@ Numbers are for the forest at 1280×800, as measured when written.
   They should go to fixed point like the noise,
   the forest building each thing relative to its anchor.
   The fixed-point containment tests cost about 15% at level 0.
-- **A flat thing's faces round to the sites.**
+- **A box's faces round to the sites.**
   Faces on a plane of a level's sites split its sites ("Faces" in
   `docs/generators.md`); off those planes a face rounds to the sites,
-  up to half a site either way: even over a ground's many heights,
-  but a town's floors at one height all go one way.
-  Sites near a face kept with the share of their voxel inside it
-  would be even for any height,
-  but would leave holes in boxes under two sites thick
-  and roughen every surface.
-  On a gentle slope the rounding is steps a site high,
-  which computed light shows as contour lines from level 2 on.
-  Tried on spans' open ends past level 0, that share took the lines away,
-  but each of the layers painting one ground (forest, mountains)
-  had to cover the same part of its top site, not add up, by a flag on the share;
-  a ground declared once, not by each layer painting it,
-  would hold its top's share in one place.
+  up to half a site either way: a town's floors at one height all go one way.
+  A field's solid spans no longer do: their sites hold the share they cover
+  ("Cells hold what they look like", below).
 - **Sheets and rods stop too much seen along them.**
   Grown to a site and opaque ("Levels" in `docs/generators.md`),
   a wall stops every ray across it, as it should, and every ray down it:
@@ -65,10 +55,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   A site's pieces now may stop and glow unlike along each of the 12 directions
   (`VoxelGrid`'s `views`), so far only for a box's or an ellipsoid's sheet;
   straight down is none of them ("Cells hold what they look like", below).
-  Still to do: rods, measured far forms,
-  and fields, whose sites are wholly in a span or out:
-  a site on a span's end covering the share of each face's rays it crosses
-  broke a column's closed sides, what `About` promises and planes of sites.
+  Still to do: rods, measured far forms.
 - **Small things on a ground sink into it at coarse levels.**
   A solid under the sites is drawn at the site nearest it,
   which a few units over a ground on a plane of sites is the ground's,
@@ -525,9 +512,25 @@ Numbers are for the forest at 1280×800, as measured when written.
   (pictures, the contract, light and its reference), along a ray's direction.
   Hosts take what a site looks like too, through each face where it differs (fcc's `Look`),
   each site whole or not by a coin (`VoxelGrid::show`).
-  Still to do:
-  coverage by direction where sites are filled in part
-  (fields' sites are wholly in a span or out, solids' views only for sheets).
+  A site is a medium along each direction, by one law at every level:
+  no level is special, level 0 an arbitrary one on a scale that goes on both ways
+  (how fine a host may ask for is the host's to limit).
+  What fills a site in part is a piece with an alpha, shown by the site's coin,
+  a solid's edge as leaves are;
+  things in a site stop as if apart, but a paint, which lies on what is there.
+  A field's solid spans cover their sites so ("Faces" in `docs/generators.md`).
+  Still to do, each a step of its own:
+  - Boxes. Their three axes' slabs taken as if apart (tried)
+    are wrong for what is thin along two, a rod or a speck:
+    a small lamp's glow grew with the level.
+    Wanted: the shadow of the box's part of the voxel along each direction.
+  - Balls, tubes and gables; with them `Tie` and the thin shapes' rules go.
+  - Spans of a medium or a coat, by how long a ray is in them;
+    then `Column` need not thicken spans to two sites, nor coat thin media.
+  - Hosts: the levels they ask for, the scale a body walks at.
+    Seen from near, a level is pitted where its sites are held in part
+    (a flat ground's top, a site deep),
+    and sharp only where a shape is several sites thick.
   The contract holds each cell to what is in it `FINER_BY` levels finer
   (`checks::cells`), along each of the 12 directions, by the rows of the finer level's sites in it,
   on average over a stratum's cells.
@@ -536,11 +539,13 @@ Numbers are for the forest at 1280×800, as measured when written.
   a lone whole voxel counts for two thirds of its shadow,
   a sheet one layer thick across a direction for half of the rays, where it stops three quarters.
   Rays along the rows of a lattice finer still would meet both.
-  On a flat ground a cell at level 1 is a whole site or none,
-  where what is in it stops a third of the rays along it, or more:
-  so the worlds, the engine's test worlds and every solid break it from level 1,
-  their cells stopping less than what is in them and spread past `SPREAD`,
-  as their baselines say (`worlds/data/contract/`, `worldgen/data/contract/`).
+  Where a cell is a whole site or none
+  and what is in it stops a third of the rays along it, or more,
+  it breaks the contract from level 1,
+  stopping less than what is in it and spread past `SPREAD`:
+  grounds did, till their spans covered their sites
+  (the engine's test village keeps it now, its baseline empty);
+  what still does is in the baselines (`worlds/data/contract/`, `worldgen/data/contract/`).
   Sites that look as what is in them do along each direction
   would keep it; drawn so, by lines through each site's voxel, they did,
   but generating took 7 to 50 times as long
@@ -548,10 +553,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   What costs is testing each line against each shape in a site filled in part,
   not keeping where in the site pieces lie:
   keeping none was barely faster, and pieces drawn apart leaked rays where they met.
-  A field's sites seen along each direction, as much of their rays as cross their spans
-  (tried, not kept), kept a flat ground's cells within it at level 2;
-  but layers sharing a site, each giving only what it covers,
-  leave it to guess how they lie: the valley's snow, painted over its ground, came out grey.
   A ray along no direction of the lattice reads a site's nearest directions alike:
   straight down, the four up, so a wall, along which straight down is, shows half as across it;
   the cells' check reads along the lattice's only.
@@ -653,15 +654,16 @@ Numbers are for the forest at 1280×800, as measured when written.
   is lit through it from the sky,
   as the reference's tunnel under a thin roof is,
   its middle hundreds of times too bright.
-  Columns put a whole site where its middle is in a span (`drawables.rs`),
-  so the coarse levels lose a roof thinner than their spacing
-  along some directions;
+  Columns put a whole site where its middle was in a span,
+  so the coarse levels lost a roof thinner than their spacing
+  along some directions
+  (their solid spans cover their sites in part now; the tunnel was not lit anew);
   and taking over, a coarser level's light comes to the middle of its site,
   what lies between there and where it took over unread.
   Three steps a level leave the tunnel ten times too bright, not hundreds,
   but the lamp several times further off.
   Where light is to go, a step at a time, each measured on these scenes:
-  sites hold what they stop along each direction, a share, columns' too
+  sites hold what they stop along each direction, a share, boxes' too
   (light reads a site's share already, not the coin hosts are shown by);
   then coarser levels take more directions (in Ideas).
   Taking over later or less did not do, each tried against the reference:

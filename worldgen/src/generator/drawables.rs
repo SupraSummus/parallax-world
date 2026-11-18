@@ -139,7 +139,8 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
                     }
                     Lines::Spans(spans) => {
                         let spans = match all {
-                            Some(kind) => vec![Span::solid(DEEP, top + s, kind)],
+                            // Past the sites, so that the top ones are whole too.
+                            Some(kind) => vec![Span::solid(DEEP, top + 2 * s, kind)],
                             None => {
                                 // A line along x or z reads plans at one z or x: dithered across it only.
                                 let mut moved = offset(site[0], site[2]);
@@ -163,14 +164,21 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
                                 unlike = Some((site, kind));
                             }
                         }
-                        for span in spans {
+                        // Solid spans cover the line's sites together, as they lie along it.
+                        let (solid, thin): (Vec<&Span>, Vec<&Span>) = spans.iter().partition(|span| span.holds == Holds::Solid);
+                        cover(&solid, axis, [u, v], (lo[axis], hi[axis]), s, op, &mut |look, share, w| {
+                            site[axis] = w;
+                            put(look, op, share, picked(site[0], site[1], site[2]), site[0], site[1], site[2]);
+                        });
+                        // A medium or a coat, thickened to hold a site (Column), is in the sites whose middles it holds.
+                        for span in thin {
                             // s is a power of two: shifting is dividing, rounded down.
                             let first = (-((-span.from) >> s.trailing_zeros())).max(lo[axis]);
                             let mut w = first + ((first + u + v) & 1);
                             let (op, share) = match span.holds {
-                                Holds::Solid => (op, SHARE),
                                 Holds::Medium(e) => (op, medium(e)),
                                 Holds::Coat(c) => (Op::Paint, share(c)),
+                                Holds::Solid => unreachable!("solid spans are covered"),
                             };
                             while w * s <= span.to && w < hi[axis] {
                                 site[axis] = w;
@@ -192,6 +200,42 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
         broke(field.name, site, s, clip, &format!("isn't all kind {kind}, as it says"));
     }
     work
+}
+
+/**
+ * Puts the sites `s` apart of a line along `axis`, at `line` across it,
+ * within [lo, hi), as its solid `spans` cover each: the share of the
+ * voxel's chords along each face's direction that they stop, or as a
+ * carve frees (`slabs`). A face across the axis sees the span its rays
+ * meet first, the others the one that fills most of the site. At every
+ * level alike: a site holds what its part of the spans looks like, whole
+ * only if they hold all of its voxel.
+ */
+fn cover(spans: &[&Span], axis: usize, line: [i64; 2], (lo, hi): (i64, i64), s: i64, op: Op, put: &mut dyn FnMut(Look, u32, i64)) {
+    let (Some(from), Some(to)) = (spans.iter().map(|span| span.from).min(), spans.iter().map(|span| span.to).max()) else { return };
+    // The sites whose voxels, s each way along the axis, meet [from, to].
+    let first = ((from - s).div_euclid(s) + 1).max(lo);
+    let mut w = first + ((first + line[0] + line[1]) & 1);
+    while w * s < to + s && w < hi {
+        let at = |end: i64| ((end - w * s) as f64 / s as f64).clamp(-1.0, 1.0);
+        // Each span's part of the voxel, −1 to 1 along the axis, in order.
+        let mut parts: Vec<(f64, f64, Kind)> =
+            spans.iter().map(|span| (at(span.from), at(span.to), span.kind)).filter(|p| p.0 < p.1).collect();
+        parts.sort_by(|p, q| p.0.total_cmp(&q.0));
+        if let (Some(bottom), Some(top)) = (parts.first(), parts.iter().max_by(|p, q| p.1.total_cmp(&q.1))) {
+            let most = parts.iter().max_by(|p, q| (p.1 - p.0).total_cmp(&(q.1 - q.0))).expect("a part").2;
+            let faces: [Kind; FACE_KINDS] = std::array::from_fn(|k| match VOXEL_FACES[k][axis] {
+                1 => top.2,
+                -1 => bottom.2,
+                _ => most,
+            });
+            let ends: Vec<(f64, f64)> = parts.iter().map(|p| (p.0, p.1)).collect();
+            let [across, along] = [true, false].map(|across| share(slabs(across, &ends, op == Op::Carve)));
+            let cover = (across != along).then(|| std::array::from_fn(|k| if VOXEL_FACES[k][axis] == 0 { along } else { across }));
+            put(Look { kind: most, faces: faces.iter().any(|&k| k != most).then_some(faces), cover }, across.max(along), w);
+        }
+        w += 2;
+    }
 }
 
 /**

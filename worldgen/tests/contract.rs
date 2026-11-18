@@ -440,15 +440,12 @@ fn a_things_carve_cuts_only_the_thing() {
     );
 }
 
-/** The kinds of the sites `generator` draws in `b` at `level`, by name; a site of several, none. */
+/** The kinds of the sites `generator` shows in `b` at `level`, by name; a site of several, none. */
 fn kinds_drawn(generator: &Generator, b: &Box3, level: u32) -> BTreeSet<Option<&'static str>> {
     let grid = generate(generator, b, level);
     let kind = kind_of(generator);
     let sites = (b.min[2]..b.max[2]).flat_map(|z| (b.min[1]..b.max[1]).flat_map(move |y| (b.min[0]..b.max[0]).map(move |x| [x, y, z])));
-    sites
-        .filter(|&[x, y, z]| is_site(x, y, z) && grid.alpha(x, y, z) > 0)
-        .map(|[x, y, z]| kind(grid.get(x, y, z)).map(|k| k.name))
-        .collect()
+    sites.filter(|&[x, y, z]| is_site(x, y, z) && grid.get(x, y, z) != 0).map(|[x, y, z]| kind(grid.get(x, y, z)).map(|k| k.name)).collect()
 }
 
 #[test]
