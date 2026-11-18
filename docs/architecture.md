@@ -242,6 +242,9 @@ widest along a surface parallel to the axis,
 where a picture is a row or two of columns
 and their pillars run through the cell.
 So the plane is the one they reach least from,
+the least steep of those
+(any slope is as good for one column's pillar,
+and a steep plane near the face's edge shows edge on),
 and each frame each edge of a picture moves out by that reach
 times the slant of the rays to it;
 depth decides where neighbours overlap.

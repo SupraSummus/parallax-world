@@ -204,6 +204,9 @@ pub struct Flat {
 /** The face's rays' tangents across and up, at most (|x| + √2 |y| ≤ z). */
 const MAX_SLANT: [f64; 2] = [1.0, std::f64::consts::FRAC_1_SQRT_2];
 
+/** What a slope of 1 costs a picture's plane (flatten), as reach, in its rows' heights: too little to matter but between planes as good. */
+const STEEP: f64 = 1e-3;
+
 /** Runs of a picture a cluster holds at most (its count is a byte). */
 const RUNS: usize = 255;
 
@@ -224,7 +227,9 @@ const RUNS: usize = 255;
  * midway through the thinnest slab of that slope holding them, and they
  * reach half its thickness from it: a convex function of g, least within
  * the slopes no steeper than the face's rays (so that none goes along the
- * plane but at the face's edge), found by golden sections.
+ * plane but at the face's edge), found by golden sections. Any slope is
+ * as good for one column's pillar: the least steep then (STEEP), as a
+ * steep plane near the face's edge shows edge on, a sliver past its cell.
  */
 pub fn flatten(baked: &[[u32; 3]], base: [f64; 2], unit: f64, half_layer: f64) -> (Vec<GpuColumn>, Vec<GpuCluster>, Flat) {
     let i16s = |v: u32| [v as u16, (v >> 16) as u16].map(|v| i32::from(v as i16));
@@ -258,18 +263,12 @@ pub fn flatten(baked: &[[u32; 3]], base: [f64; 2], unit: f64, half_layer: f64) -
         ((lo + hi) / 2.0, (hi - lo) / 2.0)
     };
     let [most_x, most_y] = MAX_SLANT.map(|s| 1.0 / s);
-    let gy_for = |gx: f64| least(|gy| slab([gx, gy]).1, most_y);
-    let gx = least(|gx| slab([gx, gy_for(gx)]).1, most_x);
+    let cost = |g: [f64; 2]| slab(g).1 + STEEP * unit * (g[0].abs() + g[1].abs());
+    let gy_for = |gx: f64| least(|gy| cost([gx, gy]), most_y);
+    let gx = least(|gx| cost([gx, gy_for(gx)]), most_x);
     let g = [gx, gy_for(gx)];
     let (z0, reach) = slab(g);
-    // A brick's half width and height.
-    let brick = [LAYER * unit, 0.5 * unit];
-    let box_of = |centres: &mut dyn Iterator<Item = [f64; 2]>| {
-        centres.fold(([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]), |(min, max), c| {
-            ([0, 1].map(|d| min[d].min(c[d] - brick[d])), [0, 1].map(|d| max[d].max(c[d] + brick[d])))
-        })
-    };
-    let (min, max) = box_of(&mut columns.iter().map(|c| c.1));
+    let (min, max) = bricks_box(unit, columns.iter().map(|c| c.1));
     let flat = Flat { plane: [z0, g[0], g[1]], reach, min, max };
     // Its picture: a column's place (r, s), from the first.
     let mut least = columns.iter().fold([i32::MAX; 2], |l, c| [0, 1].map(|d| l[d].min(place(c.0)[d])));
@@ -337,12 +336,19 @@ fn column_centre(base: [f64; 2], unit: f64, least: [i32; 2], r: u32, s: u32) -> 
 
 /** The box runs' bricks fill. */
 fn runs_box(runs: &[[u32; 3]], base: [f64; 2], unit: f64, least: [i32; 2]) -> ([f64; 2], [f64; 2]) {
+    bricks_box(
+        unit,
+        runs.iter().flat_map(|&[r, s, n]| [column_centre(base, unit, least, r, s), column_centre(base, unit, least, r, s + n - 1)]),
+    )
+}
+
+/** The box the bricks at `centres` fill. */
+fn bricks_box(unit: f64, centres: impl Iterator<Item = [f64; 2]>) -> ([f64; 2], [f64; 2]) {
+    // A brick's half width and height.
     let brick = [LAYER * unit, 0.5 * unit];
-    runs.iter()
-        .flat_map(|&[r, s, n]| [column_centre(base, unit, least, r, s), column_centre(base, unit, least, r, s + n - 1)])
-        .fold(([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]), |(min, max), c| {
-            ([0, 1].map(|d| min[d].min(c[d] - brick[d])), [0, 1].map(|d| max[d].max(c[d] + brick[d])))
-        })
+    centres.fold(([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]), |(min, max), c| {
+        ([0, 1].map(|d| min[d].min(c[d] - brick[d])), [0, 1].map(|d| max[d].max(c[d] + brick[d])))
+    })
 }
 
 /** A picture's place (r, s) of column (a, b): its row, and its count in it. */
@@ -1829,6 +1835,15 @@ mod tests {
         assert_eq!(free.give(6..20), 3..30);
         assert_eq!(free.take(27), Some(3..30));
         assert!(free.ends.is_empty() && free.lengths.is_empty());
+    }
+
+    #[test]
+    fn a_plane_is_no_steeper_than_its_pillars_ask() {
+        // Columns [place, depth and run, colour]: one alone, and a row of two a step apart in depth.
+        let alone = flatten(&[[0, 3 | 5 << 16, 1]], [0.0; 2], 1.0, 0.5).2;
+        assert!(alone.plane[1].abs() < 1e-3 && alone.plane[2].abs() < 1e-3, "{:?}", alone.plane);
+        let row = flatten(&[[0, 1 << 16, 1], [2, 1 | 1 << 16, 1]], [0.0; 2], 1.0, 0.5).2;
+        assert!(row.plane[1] > 0.1 && row.plane[2].abs() < 1e-3, "{:?}", row.plane);
     }
 
     #[test]
