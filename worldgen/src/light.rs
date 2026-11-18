@@ -29,8 +29,8 @@
 //! faces, and those small things fill in part stop as much as the things
 //! do. What fills a site in part, a line through its middle meets more
 //! often than its share says (picture's CROSSING, `meets`).
-//! A voxel hosts show behind pieces they show nothing of is lit as if
-//! those pieces were not there (`shown`): the ray that shows it met none.
+//! A voxel hosts show is lit as if the pieces that fill its neighbours in
+//! part were not there (`shown`): they are of its surface, not a shade on it.
 
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -527,9 +527,9 @@ impl Light {
 
     /**
      * The light coming to the voxel hosts show at `site` of level `i`: its
-     * site's (`light`), but through a neighbour whose pieces they show
-     * nothing of, what comes to that neighbour. A ray that shows the voxel
-     * through them met none of them.
+     * site's (`light`), but through a neighbour pieces fill in part, what
+     * comes to that neighbour. Those pieces and the voxel are of one
+     * surface: shown or not, they do not shade it.
      */
     fn shown(&mut self, i: usize, site: [i64; 3]) -> [Rgb; N] {
         let mut light = self.light(i, site);
@@ -537,7 +537,7 @@ impl Light {
             let q = add(site, DIRECTIONS[d]);
             let from = self.opposite[d];
             let pieces = self.hold(i, q).is_some_and(|([x, y, z], grid)| grid.light(x, y, z, from).0[0].0 > 0);
-            if pieces && !self.drawn(i, q) {
+            if pieces && !self.whole(i, q) {
                 light[d] = self.light(i, q)[d];
             }
         }

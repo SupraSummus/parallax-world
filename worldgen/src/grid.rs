@@ -3,6 +3,7 @@
 //! The same layout as the baker's Grid, which `into_grid` hands over.
 
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use fcc::light::linear_to_srgb;
 use fcc::{FACE_KINDS, Look};
@@ -92,6 +93,19 @@ pub struct Views {
     pub alpha: [u8; FACE_KINDS],
     pub colour: [[u16; 3]; FACE_KINDS],
     pub glow: [[u32; 3]; FACE_KINDS],
+}
+
+/**
+ * An experiment (docs/todo.md, "Cells hold what they look like"): whether
+ * hosts get pieces that fill a site in part blended, see-through by their
+ * alpha as a medium is, not a whole voxel or nothing by a coin. For every
+ * grid made from then on; a host makes its world again after changing it.
+ */
+static BLENDED: AtomicBool = AtomicBool::new(false);
+
+/** Sets how hosts get pieces that fill a site in part from now on (`BLENDED`). */
+pub fn blend_pieces(blended: bool) {
+    BLENDED.store(blended, Ordering::Relaxed);
 }
 
 /** What the sites hold one way, as pieces or as a medium, by index in `shown`. */
@@ -261,6 +275,9 @@ impl VoxelGrid {
     fn look(&self, i: usize, see_through: bool) -> Look {
         match self.shown[i] {
             true => look_of(self.pieces.colour[i], self.pieces.alpha[i], ALPHA),
+            false if see_through && self.pieces.alpha[i] > 0 && BLENDED.load(Ordering::Relaxed) => {
+                look_of(self.pieces.colour[i], self.pieces.alpha[i], self.pieces.alpha[i])
+            }
             false if see_through && self.medium.alpha[i] > 0 => look_of(self.medium.colour[i], self.medium.alpha[i], self.medium.alpha[i]),
             false => 0,
         }
@@ -325,7 +342,8 @@ impl VoxelGrid {
                             continue;
                         }
                         let site = at * BRICK_SITES + (((k * BRICK + j) * BRICK + i) >> 1) as usize;
-                        self.shown[site] = self.pieces.alpha[site] > coin(x, y, z);
+                        let coin = if BLENDED.load(Ordering::Relaxed) { ALPHA - 1 } else { coin(x, y, z) };
+                        self.shown[site] = self.pieces.alpha[site] > coin;
                     }
                 }
             }

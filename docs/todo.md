@@ -533,11 +533,13 @@ Numbers are for the forest at 1280×800, as measured when written.
     and sharp only where a shape is several sites thick.
   - Light and hosts see a site held in part unlike:
     light its share, hosts a whole voxel or none by the coin.
-    Light corrects for the coin only next to what is shown (`shown` in `light.rs`),
-    so two such sites in a row still shade what shows behind them.
-    Hosts drawing pieces as light sees them would end it:
-    blended by their alpha as a medium is (smooth, soft edges),
-    or by a coin for each finer site in them (tried in `look`: both show no dark pits).
+    So a pit where a site is not shown lay in its shown neighbours' shade.
+    Light now takes pieces that fill a voxel's neighbours in part
+    as of its surface, not a shade on it (`shown` in `light.rs`): a step deep only.
+    An experiment to compare with, in native (`--blended`, the panel's Pieces):
+    hosts get such pieces see-through, by their alpha, as a medium is
+    (`blend_pieces` in `grid.rs`, a switch for the whole process).
+    Smooth, no pits; edges soft, far crowns a haze. To keep or to take out.
   The contract holds each cell to what is in it `FINER_BY` levels finer
   (`checks::cells`), along each of the 12 directions, by the rows of the finer level's sites in it,
   on average over a stratum's cells.

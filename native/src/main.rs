@@ -2,7 +2,7 @@
 //! generated in tiles, those in view first (world.rs), drawn by an engine
 //! (engine.rs) with wgpu in an egui window (window.rs), or offscreen (gpu.rs).
 //!
-//! parallax-native [--engine reliefs|flat|splats|voxels] [--world NAME] [--threads N] [--seed S] [--view QUERY] [--light SKY,SUN,GLOW[,STEPS]] [--detail D] [--shift S] [--seams] [--colour voxels|layers|chunks] [--unhidden] [--shot out.png [--size WxH] | --bench] [--stroll S [--on-ground]] [--record FILE] [--replay FILE [--shots DIR]]
+//! parallax-native [--engine reliefs|flat|splats|voxels] [--world NAME] [--threads N] [--seed S] [--view QUERY] [--light SKY,SUN,GLOW[,STEPS]] [--detail D] [--shift S] [--seams] [--colour voxels|layers|chunks] [--unhidden] [--blended] [--shot out.png [--size WxH] | --bench] [--stroll S [--on-ground]] [--record FILE] [--replay FILE [--shots DIR]]
 //!
 //! --view takes the web page's view query (parseViewQuery in renderer.ts),
 //! overriding --seed and --world.
@@ -23,6 +23,8 @@
 //! light takes along each level before the coarser one takes over; a
 //! fifth, how little light may change, round by round of its bounces, to
 //! be found.
+//! --blended draws pieces that fill a site in part by their alpha, not
+//! whole or not by a coin (an experiment; the panel's Pieces).
 //! --engine picks what draws, as the panel does (Kind): rays through the
 //! tiles' voxels (the default), chunks of cells' reliefs or splats, as the
 //! web draws, or reliefs drawn flat (an experiment).
@@ -88,6 +90,10 @@ struct App {
     speed: f64,
     /** Walking on the ground (bake's walk.rs): the body the camera is the eye of; None flying. */
     walker: Option<Walker>,
+    /** An experiment: pieces that fill a site in part drawn blended, by their alpha, not whole or not by a coin (worldgen's `blend_pieces`). */
+    blended: bool,
+    /** What makes the world again (`blended` changed): its maker, seed and threads. */
+    remake: (Make, u64, usize),
     /** The world, as --view gives it: `seed=…` and `&world=…` if given. */
     world_query: String,
     /** What the ui drew last, for the window to draw (window::Content). */
@@ -140,6 +146,19 @@ impl window::Content for App {
                 });
                 if self.lighting == Lighting::Computed {
                     self.light_sliders(ui);
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.label("Pieces");
+                let was = self.blended;
+                ui.radio_value(&mut self.blended, false, "coin");
+                ui.radio_value(&mut self.blended, true, "blended");
+                if self.blended != was {
+                    worldgen::grid::blend_pieces(self.blended);
+                    let (make, seed, threads) = self.remake;
+                    let shared = Shared::new(self.brightness).stepping(self.steps).settling(self.tolerance);
+                    self.world = World::new(make, seed, Some(shared), threads);
+                    self.engine = self.kind.make(&self.world);
                 }
             });
             let mut walking = self.walker.is_some();
@@ -568,6 +587,8 @@ fn main() {
     let lit = value("--light");
     let shared = lit.map_or(day.clone(), |v| parse_light(v, &day));
     let (brightness, steps, tolerance) = (shared.brightness(), shared.steps(), shared.tolerance());
+    let blended = flag("--blended");
+    worldgen::grid::blend_pieces(blended);
     let mut world = World::new(make, seed, Some(shared), threads);
     let shown = make(seed);
     let camera = query.camera.unwrap_or(shown.spawn.map(|v| v as f64));
@@ -620,6 +641,8 @@ fn main() {
         framing: 0.0,
         speed: SPEED,
         walker: None,
+        blended,
+        remake: (make, seed, threads),
         world_query,
         picture: None,
         recording: recording.map(|file| (file, Instant::now())),
