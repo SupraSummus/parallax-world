@@ -9,7 +9,8 @@ use worldgen::noise::{Fx, fx};
 use worldgen::plan::Plan;
 use worldgen::units::{Units, m};
 
-use crate::forest::PATH_SCALE;
+/** The plan scale of a path's bends (see "Bands" in docs/generators.md). */
+const PATH_SCALE: i64 = 256;
 
 /**
  * A line along z, by its x at each z: a valley's course, a path's centre.

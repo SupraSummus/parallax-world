@@ -160,7 +160,7 @@ What is on the path or keeps off it measures from the curve,
 what is laid out beside it across the spine.
 The path measures how steeply it runs, piece by piece,
 which bounds how far across a column near it can be.
-The valley's path follows a route along its floor (`worlds/src/course.rs`),
+The valley's path follows a route along its floor (`worlds/src/valley/course.rs`),
 a curve in pieces 1 km long on the valley's course at their ends,
 each point the lowest of the floor within its level's wander,
 so it keeps to hollows and winds round rises,
@@ -947,7 +947,7 @@ Fields do not glow.
 
 ### Landmarks
 
-Structures that stand alone (`worlds/src/landmarks.rs`),
+Structures that stand alone (`worlds/src/valley/landmarks.rs`),
 a ruined keep, a watchtower, chapels, ponds, farmsteads and windmills,
 are the valley's fourth domain:
 a new structure joins it as a landmark, or as a thing of a domain.
@@ -971,7 +971,7 @@ The first is a chapel beside the path, in the camera's view at spawn.
 
 ### Railway
 
-The railway (`worlds/src/railway.rs`) is a domain built on curves.
+The railway (`worlds/src/valley/railway.rs`) is a domain built on curves.
 Its main line runs along one side of the valley, in pieces 4 km long,
 within a band across from the valley's course:
 far enough across that it never reaches a town, by construction,
@@ -1007,7 +1007,7 @@ at the ranges' feet, every few kilometres either side,
 a rock spur stands its steep nose out onto the floor,
 or a side stream's gorge, flat-bedded between steep walls,
 cuts down the face and into the floor, fading out on it
-(`Landforms` in `worlds/src/mountains.rs`).
+(`Landforms` in `worlds/src/valley/mountains.rs`).
 Each reaches across the whole band, too high to climb over at the grade,
 too sudden to dip into,
 so the line tunnels through a spur and bridges a gorge,
@@ -1093,7 +1093,7 @@ cargo run --release -p parallax-native --features worlds/sponza -- --view 'world
 
 ## Writing a world
 
-The moor (`worlds/src/moor.rs`) is the shortest whole world to start from.
+The moor (`worlds/src/valley/moor.rs`) is the shortest whole world to start from.
 `build.rs` has the short forms:
 `Field::columns` and `Field::at`,
 `Population::new(…).reach(…).anchor(…)`, `.anchor_along(axis, …)` or `.anchor_points(…)`, `.make(…)`,

@@ -107,16 +107,18 @@ worlds/                      # The worlds, on worldgen's public API only
 ├── cheese/                  # The cheese, a crate of its own
 ├── src/
 │   ├── lib.rs               # WORLDS: the registry hosts start worlds from by name
-│   ├── forest.rs            # The forest, on ground other worlds share
-│   ├── valley.rs            # The valley: its domains on one land
 │   ├── path.rs              # Spines and paths along them
-│   ├── course.rs            # The valley's course and its path's route
-│   ├── town.rs              # Towns along the path
-│   ├── fields.rs            # Farmland around them
-│   ├── landmarks.rs         # Keeps, chapels, ponds, farmsteads, windmills
-│   ├── moor.rs              # The moor; alone, the worlds moor and fog
-│   ├── mountains.rs         # The valley's ranges
-│   ├── railway.rs           # The valley's railway
+│   ├── forest.rs            # The forest, on ground other worlds share
+│   ├── forest/              # Its trees (trees.rs) and what lies on its floor (floor.rs)
+│   ├── valley.rs            # The valley: its domains on one land
+│   ├── valley/
+│   │   ├── course.rs        # The valley's course and its path's route
+│   │   ├── town.rs          # Towns along the path
+│   │   ├── fields.rs        # Farmland around them
+│   │   ├── landmarks.rs     # Keeps, chapels, ponds, farmsteads, windmills
+│   │   ├── moor.rs          # The moor; alone, the worlds moor and fog
+│   │   ├── mountains.rs     # The valley's ranges
+│   │   └── railway.rs       # The valley's railway
 │   ├── city.rs              # The city: blocks of buildings on a plan
 │   ├── learned.rs           # Settlements drawn by a grammar learned in lab/
 │   └── scene.rs             # Scenes made elsewhere, read from a file

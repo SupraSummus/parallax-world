@@ -8,6 +8,14 @@
 //! structures join it as landmarks (landmarks.rs), as domains, or as
 //! things of one. See "Composing" in docs/generators.md.
 
+pub mod course;
+pub mod fields;
+pub mod landmarks;
+pub mod moor;
+pub mod mountains;
+pub mod railway;
+pub mod town;
+
 use std::rc::Rc;
 
 use worldgen::domain::{Domain, Lie, Scope, compose};
@@ -17,15 +25,15 @@ use worldgen::plan::Plan;
 use worldgen::units::{Units, m};
 use worldgen::world::{Find, World};
 
-use crate::course::{self, Route};
-use crate::fields::{self, Fields};
 use crate::forest::{self, Forest, GROUND_SCALE, Relief};
-use crate::landmarks::{self, Landmark, Landmarks};
-use crate::moor::{self, Moor, Moorland, Uplands};
-use crate::mountains::{self, Landforms, Ranges};
 use crate::path::{Path, Spine};
-use crate::railway::{self, Railway, Structure};
-use crate::town::{self, Towns};
+use course::Route;
+use fields::Fields;
+use landmarks::{Landmark, Landmarks};
+use moor::{Moor, Moorland, Uplands};
+use mountains::{Landforms, Ranges};
+use railway::{Railway, Structure};
+use town::Towns;
 
 /**
  * The most the valley's ground rises or falls from a column to the next,

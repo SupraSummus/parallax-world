@@ -14,9 +14,9 @@ use worldgen::noise::{Fbm, Fx, Rng, ValueNoise, fx, hash, hash64, smoothstep};
 use worldgen::plan::{Holding, Plan, Sloped};
 use worldgen::units::{Units, m};
 
+use super::town::{self, Towns};
 use crate::forest::K as F;
 use crate::path::Path;
-use crate::town::{self, Towns};
 
 kinds! {
     base: town::BASE + town::KINDS.len() as u8;

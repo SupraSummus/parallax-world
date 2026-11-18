@@ -5,17 +5,10 @@
 //! web/src/lib/worldgen.ts).
 
 pub mod city;
-pub mod course;
-pub mod fields;
 pub mod forest;
-pub mod landmarks;
 pub mod learned;
-pub mod moor;
-pub mod mountains;
 pub mod path;
-pub mod railway;
 pub mod scene;
-pub mod town;
 pub mod valley;
 
 use worldgen::World;
@@ -120,7 +113,7 @@ pub const WORLDS: &[Entry] = &[
     // Far away, 175 m around it: the stream, narrower than the sites there, and patches of heather and grass.
     Entry {
         name: "moor",
-        make: moor::moor,
+        make: valley::moor::moor,
         regions: &[Region::at("spawn", [-113, -46, 9], [143, 50, 393])],
         levels: 5,
         accuracy: &[],
@@ -131,7 +124,7 @@ pub const WORLDS: &[Entry] = &[
     // Its land is the moor's, checked far away there.
     Entry {
         name: "fog",
-        make: moor::fog,
+        make: valley::moor::fog,
         regions: &[Region::at("spawn", [-113, -46, 9], [143, 50, 393])],
         levels: 5,
         accuracy: &[],

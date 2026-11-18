@@ -24,12 +24,12 @@ use worldgen::noise::{Fbm, Fx, Rng, ValueNoise, fx, hash64, smoothstep};
 use worldgen::plan::{self, Claims, Holding, Plan, Sloped};
 use worldgen::units::{Units, m};
 
+use super::landmarks::{self, Landmarks};
+use super::mountains::{self, K as A};
+use super::railway::Railway;
+use super::town::{self, K as T};
 use crate::forest::K as F;
-use crate::landmarks::{self, Landmarks};
-use crate::mountains::{self, K as A};
 use crate::path::Path;
-use crate::railway::Railway;
-use crate::town::{self, K as T};
 use crate::valley::{self, Terrain};
 
 // After the valley's kinds, the moor's own; the rest are the forest's stone, soil and path,
