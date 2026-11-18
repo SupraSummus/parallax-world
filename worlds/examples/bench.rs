@@ -4,10 +4,10 @@
 //!
 //! for world (the forest if none), seed, and where, off spawn along x and z (lattice units):
 //! at each level given (0, 4 and 6 if none), four tiles (native's cubes of 128 sites, light::tile_box) side by side there, at the spawn's height,
-//! what may show of them (shown).
+//! as hosts make them (generate_shown).
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::time::Instant;
-use worldgen::generator::{generate, shown};
+use worldgen::generator::generate_shown;
 use worldgen::light::{TILE, tile_box};
 use worlds::by_name;
 
@@ -28,8 +28,7 @@ fn main() {
         let start = Instant::now();
         let (mut voxels, mut hash) = (0, DefaultHasher::new());
         for i in 0..4 {
-            let b = shown(generator, &tile_box(heights, [cx + i % 2, cy, cz + i / 2]), level);
-            let grid = generate(generator, &b, level).into_grid(false);
+            let grid = generate_shown(generator, &tile_box(heights, [cx + i % 2, cy, cz + i / 2]), level).into_grid(false);
             voxels += grid.cells.len();
             (&grid.bricks, &grid.cells, &grid.solid, &grid.views, &grid.glow).hash(&mut hash);
         }

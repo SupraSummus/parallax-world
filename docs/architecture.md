@@ -97,7 +97,8 @@ when the camera goes far enough from its middle,
 it moves to the camera, and only the tiles it lacks are generated
 (`World.missingParts`), each only as far up and down as it may show
 (`shown`), its bricks buried in rock kept as one,
-and what is buried under that not made but one brick of rock for all
+and what is buried under that, or under a block of its columns (`Floors`),
+not made but one brick of rock for all
 (`generate_shown`, in `worldgen/src/generator/generate.rs`).
 A level with no grid yet is no special case: its grid has no tiles.
 The bake workers generate the tiles, finest level first;

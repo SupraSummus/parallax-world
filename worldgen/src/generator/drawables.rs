@@ -28,9 +28,9 @@ pub(super) struct Drawable<'a> {
 }
 
 /** Draws one drawable at sites `s` apart into `clip`; returns the work. */
-pub(super) fn draw(drawable: &Drawable, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> Work {
+pub(super) fn draw(drawable: &Drawable, seed: u64, s: i64, clip: &Box3, floors: Option<&Floors>, put: &mut Put) -> Work {
     match &drawable.draw {
-        Draw::Field(field) => draw_field(field, seed, s, clip, put),
+        Draw::Field(field) => draw_field(field, seed, s, clip, floors, put),
         Draw::Shapes(shapes, far) => {
             let mut tests = 0;
             for (i, shape) in shapes.iter().enumerate() {
@@ -55,8 +55,12 @@ pub(super) fn draw(drawable: &Drawable, seed: u64, s: i64, clip: &Box3, put: &mu
 /** Lines of a field a side that are asked together what they draw (Field::meets): a box's own would reach from the ground into the air. */
 const LINES: i64 = 32;
 
-/** Draws a field into `clip`, a medium keeping a site with the chance a ray crossing it is stopped; returns the work. */
-fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> Work {
+/**
+ * Draws a field into `clip`, a medium keeping a site with the chance a ray
+ * crossing it is stopped; its lines along y from `floors` up, if any, one
+ * all under them not asked. Returns the work.
+ */
+fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, floors: Option<&Floors>, put: &mut Put) -> Work {
     let mut work = Work::default();
     let op = field.op;
     let field_seed = hash_text(field.name, seed);
@@ -116,9 +120,17 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
             for v in bv..to_v {
                 site[a] = u;
                 site[b] = v;
+                // The line's first site: along y, its column's floor.
+                let first = match floors {
+                    Some(floors) if axis == 1 => floors.at(u, v).max(lo[axis]),
+                    _ => lo[axis],
+                };
+                if first >= hi[axis] {
+                    continue;
+                }
                 match lines {
                     Lines::At(at) => {
-                        let mut w = lo[axis] + ((lo[axis] + u + v) & 1);
+                        let mut w = first + ((first + u + v) & 1);
                         while w < hi[axis] {
                             site[axis] = w;
                             let [x, y, z] = site;
@@ -166,14 +178,14 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> W
                         }
                         // Solid spans cover the line's sites together, as they lie along it.
                         let (solid, thin): (Vec<&Span>, Vec<&Span>) = spans.iter().partition(|span| span.holds == Holds::Solid);
-                        cover(&solid, axis, [u, v], (lo[axis], hi[axis]), s, op, &mut |look, share, w| {
+                        cover(&solid, axis, [u, v], (first, hi[axis]), s, op, &mut |look, share, w| {
                             site[axis] = w;
                             put(look, op, share, picked(site[0], site[1], site[2]), site[0], site[1], site[2]);
                         });
                         // A medium or a coat, thickened to hold a site (Column), is in the sites whose middles it holds.
                         for span in thin {
                             // s is a power of two: shifting is dividing, rounded down.
-                            let first = (-((-span.from) >> s.trailing_zeros())).max(lo[axis]);
+                            let first = (-((-span.from) >> s.trailing_zeros())).max(first);
                             let mut w = first + ((first + u + v) & 1);
                             let (op, share) = match span.holds {
                                 Holds::Medium(e) => (op, medium(e)),
@@ -224,12 +236,18 @@ fn cover(spans: &[&Span], axis: usize, line: [i64; 2], (lo, hi): (i64, i64), s: 
         // Each span's part of the voxel, −1 to 1 along the axis, in order.
         parts.clear();
         parts.extend(spans.iter().map(|span| (at(span.from), at(span.to), span.kind)).filter(|p| p.0 < p.1));
-        // Whole in one span, as most sites under the ground: all of it, to every face.
+        // Whole in one span, as most sites under the ground: all of it, to every face. So are the sites after it, up
+        // to where that span ends or the next starts: put without being measured.
         if op != Op::Carve
             && let [(-1.0, 1.0, kind)] = parts[..]
         {
-            put(kind.into(), SHARE, w);
-            w += 2;
+            let top = (w + 1) * s;
+            let ends = spans.iter().filter(|span| span.from < span.to).map(|span| if span.from >= top { span.from } else { span.to });
+            let until = ends.filter(|&end| end >= top).min().expect("the span it is whole in");
+            while w < hi && (w + 1) * s <= until {
+                put(kind.into(), SHARE, w);
+                w += 2;
+            }
             continue;
         }
         parts.sort_by(|p, q| p.0.total_cmp(&q.0));
