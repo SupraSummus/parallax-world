@@ -31,7 +31,8 @@ pub const COURSE_SLOPE: f64 = 1.875 * (OCTAVES[0].0 / OCTAVES[0].1 + OCTAVES[1].
 pub fn course(scope: &Scope) -> Spine {
     let seeds = [scope.seed("long"), scope.seed("short")];
     let at = move |zm: f64| -> f64 { OCTAVES.iter().zip(seeds).map(|(&(swing, period), seed)| swing * noise(seed, zm / period)).sum() };
-    Spine::new(move |z| Fx::m(at(z as f64 * UNIT_SIZE) - at(0.0)))
+    let origin = at(0.0);
+    Spine::new(move |z| Fx::m(at(z as f64 * UNIT_SIZE) - origin))
 }
 
 /** Noise along a line: a value in 0..1 at each whole t, eased between them by a quintic, so it bends smoothly. */

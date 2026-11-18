@@ -428,6 +428,10 @@ Numbers are for the forest at 1280×800, as measured when written.
   so `generate` marks apart which sites may be in them (`odd`),
   not to look each up as it adds to it.
   Kept by brick, as the sites are, the grid would know itself.
+  Sites unlike through their faces are the dearest to put:
+  few of a tile's, each added face by face
+  and taken out of the map and put back,
+  they take several percent of the valley's time at level 0.
 - **Plans are made at every column read, whatever their scale.**
   The valley's land, decided at 4 m, makes its six domains' bids
   at each column of a tile at level 0.
