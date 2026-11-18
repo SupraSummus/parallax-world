@@ -594,3 +594,107 @@ pub(super) fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &m
         }
     }
 }
+
+/**
+ * Of a voxel's chords along a face's direction (`within`'s `across`), the
+ * share that meets `parts`, slabs of its extent along an axis in order: what
+ * they stop of a voxel otherwise empty. A carve frees those wholly in one,
+ * of a voxel otherwise whole.
+ */
+pub(super) fn slabs(across: bool, parts: &[(f64, f64)], carve: bool) -> f64 {
+    if carve {
+        return parts.iter().map(|&(a, b)| within(across, a, b)).sum();
+    }
+    // Chords wholly between the slabs or past them meet none.
+    let mut at = -1.0;
+    let mut free = 0.0;
+    for &(a, b) in parts {
+        free += within(across, at, a);
+        at = f64::max(at, b);
+    }
+    (1.0 - free - within(across, at, 1.0)).clamp(0.0, 1.0)
+}
+
+/** Steps the chords' table takes across a voxel's extent along an axis, −1 to 1. */
+const CHORD_STEPS: usize = 64;
+
+/** By whether the chords run across the axis (true) or along a plane across it, the share wholly within [a, b), at every step. */
+type Chords = [Box<[[f32; CHORD_STEPS + 1]; CHORD_STEPS + 1]>; 2];
+
+/**
+ * Of a voxel's chords along a face's direction, crossing planes across an
+ * axis (`across`, as eight of the twelve do) or within one (the other
+ * four): the share that lies wholly within [a, b), a slab of the voxel's
+ * extent along the axis, from −1 to 1 (its sites' spacing).
+ */
+fn within(across: bool, a: f64, b: f64) -> f64 {
+    static CHORDS: OnceLock<Chords> = OnceLock::new();
+    let table = &CHORDS.get_or_init(|| [true, false].map(chords))[usize::from(!across)];
+    let at = |v: f64| {
+        let t = (v.clamp(-1.0, 1.0) + 1.0) / 2.0 * CHORD_STEPS as f64;
+        let i = (t as usize).min(CHORD_STEPS - 1);
+        (i, (t - i as f64) as f32)
+    };
+    if b <= a {
+        return 0.0;
+    }
+    let ((i, u), (j, v)) = (at(a), at(b));
+    let row = |i: usize| table[i][j] * (1.0 - v) + table[i][j + 1] * v;
+    f64::from(row(i) * (1.0 - u) + row(i + 1) * u)
+}
+
+/**
+ * `within`'s table for chords across the y axis, along (1, 1, 0), or
+ * within a plane across it, along (1, 0, 1): rays on a grid across them,
+ * each chord's lowest and highest y binned to the steps (rounded out),
+ * then summed, from the bins at or above each lower step and at or below
+ * each upper one.
+ */
+fn chords(across: bool) -> Box<[[f32; CHORD_STEPS + 1]; CHORD_STEPS + 1]> {
+    const RAYS: i32 = 512;
+    let n = CHORD_STEPS as f64;
+    // The direction, and two across it: the rays' grid, its spacing alike both ways.
+    let (d, e1, e2): ([f64; 3], [f64; 3], [f64; 3]) = if across {
+        ([1.0, 1.0, 0.0], [0.5, -0.5, 0.0], [0.0, 0.0, 0.5f64.sqrt()])
+    } else {
+        ([1.0, 0.0, 1.0], [0.5, 0.0, -0.5], [0.0, 0.5f64.sqrt(), 0.0])
+    };
+    let mut counts = vec![[0u32; CHORD_STEPS + 1]; CHORD_STEPS + 1];
+    let mut total = 0u32;
+    for i in 0..RAYS {
+        for j in 0..RAYS {
+            let [u, v] = [i, j].map(|k| (2.0 * f64::from(k) + 1.0) / f64::from(RAYS) - 1.0).map(|c| c * 2.0);
+            let o: [f64; 3] = std::array::from_fn(|c| u * e1[c] + v * e2[c]);
+            // Within every face: (o + t d) · f ≤ 1.
+            let (mut from, mut to) = (f64::NEG_INFINITY, f64::INFINITY);
+            for f in VOXEL_FACES.map(|f| f.map(f64::from)) {
+                let (of, df) = (o[0] * f[0] + o[1] * f[1] + o[2] * f[2], d[0] * f[0] + d[1] * f[1] + d[2] * f[2]);
+                if df > 0.0 {
+                    to = to.min((1.0 - of) / df);
+                } else if df < 0.0 {
+                    from = from.max((1.0 - of) / df);
+                } else if of > 1.0 {
+                    to = f64::NEG_INFINITY;
+                }
+            }
+            if from >= to {
+                continue;
+            }
+            let (y0, y1) = (o[1] + from * d[1], o[1] + to * d[1]);
+            let (lo, hi) = (y0.min(y1), y0.max(y1));
+            let step = |y: f64| (y + 1.0) / 2.0 * n;
+            counts[(step(lo).floor().max(0.0) as usize).min(CHORD_STEPS)][(step(hi).ceil().max(0.0) as usize).min(CHORD_STEPS)] += 1;
+            total += 1;
+        }
+    }
+    // Wholly within [step i, step j]: lowest at or above i, highest at or below j.
+    let mut table = Box::new([[0.0f32; CHORD_STEPS + 1]; CHORD_STEPS + 1]);
+    let mut sums = vec![[0u32; CHORD_STEPS + 2]; CHORD_STEPS + 2];
+    for i in (0..=CHORD_STEPS).rev() {
+        for j in 0..=CHORD_STEPS {
+            sums[i][j + 1] = counts[i][j] + sums[i + 1][j + 1] + sums[i][j] - sums[i + 1][j];
+            table[i][j] = sums[i][j + 1] as f32 / total as f32;
+        }
+    }
+    table
+}

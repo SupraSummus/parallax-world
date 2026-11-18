@@ -315,17 +315,28 @@ how many rays get how far, and what they stop on.
   Plans and points read the ground where asked, the same at every level.
   Things read plans where they ask,
   so a thing at a dithered edge may stand a site off what the fields show.
-- **Faces.** Boxes and spans keep the sites in [min, max) along each axis.
+- **Faces.** A field's solid spans are where they are at every level:
+  a site holds what its part of them stops along each direction,
+  the share of its voxel's chords along a face's direction that meet them
+  (`cover` in `drawables.rs`, `slabs` in `shapes.rs`),
+  and is whole only if they hold all of its voxel.
+  A line's spans cover its sites together:
+  a face across the line sees the kind its rays meet first.
+  No plane across an axis parts the lattice's layers,
+  so a flat ground's top sites are held in part at every level, level 0 too,
+  and shown by their coins: the ground is pitted, a site deep.
+  A paint lies on what is there, and past it only where it covers more:
+  a field painting another's ground paints all of its top sites.
+  Boxes, and spans of a medium or a coat, keep the sites in [min, max) along each axis.
   On a plane of a level's sites (y = 0 is one at every level)
   half the lines across a face have a site on it,
   all kept at a bottom face and dropped at a top one,
-  so a ground and the houses on it would sink half a site, and more each level.
+  so they would sink half a site, and more each level.
   A site on a face counts as above it with the chance ½ + 1/(2s)
   by a hash of its position and the axis (`Tie`):
   always at level 0, about half the time far away,
   so on average a face is where level 0 has it.
-  Boxes and spans meeting on a face share its sites;
-  a box one site thick keeps its bottom face whole, as at level 0,
+  A box one site thick keeps its bottom face whole, as at level 0,
   as halves of two faces would let rays through.
   Faces off those planes still round to the sites, up to half a site either way:
   even over many heights, not for one flat thing.

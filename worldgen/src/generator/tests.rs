@@ -386,58 +386,50 @@ fn refuses_a_thing_anchored_off_the_ground_it_stands_on() {
 }
 
 #[test]
-fn faces_on_a_plane_of_sites_stay_where_level_0_has_them() {
-    // Ground up to y = 0 and boxes from y = 0 up, on a plane of sites at every level, each drawn alone.
-    let ground = Layer::Field(Field {
-        name: "ground",
-        order: 0.0,
-        op: Op::Fill,
-        values: FieldValues::Spans { axis: 1, spans: Box::new(|_, _| vec![Span::solid(-4096, 0, 0)]) },
-        meets: None,
-    });
-    let n = 1 << 14;
-    let block = |top: f64| {
-        Layer::Population(Population {
-            name: "block",
-            order: 1.0,
-            cell: n,
-            reach: [0; 3],
-            size: ANY_SIZE,
-            anchor: Anchors::Cells(Box::new(|cell| (cell.centre == [0; 3]).then_some([0.0; 3]))),
-            make: Box::new(move |_, _| Some(Node::of(vec![cuboid([-8192.0, 0.0, -8192.0], [8192.0, top, 8192.0], 0, SOLID, Op::Fill)]))),
-            far: None,
-            stands: None,
-        })
-    };
+fn a_spans_face_is_where_it_is_at_every_level() {
+    // Ground up to y = h, on a plane of sites or off it. Along the plane, a line's sites stop as much of their rays as
+    // ground up to h holds of their voxels, a site standing for two spacings of its line: on average over the lines.
     let kinds = vec![KindDef { name: "stone", kind_type: 1, colors: &["#808080"], walk_through: false, glows: false, medium: false }];
-    let alone = |layer: Layer| Generator { kinds: kinds.clone(), seed: 1, layers: vec![layer] };
-    let (ground, solid) = (alone(ground), alone(block(4096.0)));
-    for level in 0..6 {
-        let s = 1i64 << level;
-        let b = Box3 { min: [0, -32 / s - 2, 0], max: [128, 32 / s + 2, 128] };
-        let (below, above) = (generate(&ground, &b, level), generate(&solid, &b, level));
-        let (mut tops, mut lines) = (0, 0);
-        for x in 0..128 {
-            for z in 0..128 {
+    let along = (0..FACE_KINDS).find(|&k| VOXEL_FACES[k][1] == 0).expect("a face along the plane");
+    for h in [0, 3, -7] {
+        let ground = Layer::Field(Field {
+            name: "ground",
+            order: 0.0,
+            op: Op::Fill,
+            values: FieldValues::Spans { axis: 1, spans: Box::new(move |_, _| vec![Span::solid(-4096, h, 0)]) },
+            meets: None,
+        });
+        let world = Generator { kinds: kinds.clone(), seed: 1, layers: vec![ground] };
+        for level in 0..6 {
+            let s = 1i64 << level;
+            let b = Box3 { min: [0, -32 / s - 2, 0], max: [32, 32 / s + 2, 32] };
+            let grid = generate(&world, &b, level);
+            let stopped = |x: i64, y: i64, z: i64| grid.light(x, y, z, along).0[0].0 as f64 / ALPHA as f64;
+            let lines = (0..32).flat_map(|x| (0..32).map(move |z| (x, z)));
+            let tops = lines.map(|(x, z)| {
                 let sites = (b.min[1]..b.max[1]).filter(|y| (x + y + z) & 1 == 0);
-                let (mut top, mut bottom) = (i64::MIN, i64::MAX);
-                for y in sites {
-                    let (g, h) = (below.get(x, y, z) != 0, above.get(x, y, z) != 0);
-                    assert!(g != h, "level {level}: ({x}, {y}, {z}) is in {} of the two", g as u8 + h as u8);
-                    if g { top = top.max(y) } else { bottom = bottom.min(y) }
-                }
-                assert_eq!(top + 2, bottom, "level {level}: the line at ({x}, {z}) is split once");
-                // A site's voxel reaches a site's spacing along the line.
-                tops += (top + 1) * s;
-                lines += 1;
-            }
+                // The lowest site's voxel starts a spacing under it.
+                let bottom = (b.min[1] + ((b.min[1] + x + z) & 1) - 1) * s;
+                bottom as f64 + sites.map(|y| stopped(x, y, z)).sum::<f64>() * 2.0 * s as f64
+            });
+            let mean = tops.sum::<f64>() / (32.0 * 32.0);
+            assert!((mean - h as f64).abs() <= s as f64 / 16.0, "level {level}: ground up to {h} has its top at {mean} on average");
         }
-        // Level 0's ground is half a unit low; a site on the plane counts as in it with chance ½ − 1/(2s), so
-        // the mean is within a few s / √lines of that, not (s − 1) / 2 lower.
-        let mean = tops as f64 / lines as f64;
-        assert!((mean + 0.5).abs() <= s as f64 / 16.0, "level {level}: the ground's top is at {mean} on average");
-        // A slab one site thick keeps the whole plane: half of it and half the next would let rays through.
-        let slab = generate(&alone(block(s as f64)), &b, level);
-        assert!((0..128).all(|x| (0..128).all(|z| (x + z) & 1 != 0 || slab.get(x, 0, z) != 0)), "level {level}: the slab has holes");
     }
+}
+
+#[test]
+fn slabs_of_a_voxel_stop_the_chords_that_meet_them() {
+    let near = |a: f64, b: f64| (a - b).abs() < 1e-3;
+    for across in [true, false] {
+        // All of it stops all; its halves, by symmetry, alike; a carve of both halves frees what lies wholly in either.
+        assert!(near(slabs(across, &[(-1.0, 1.0)], false), 1.0));
+        assert!(near(slabs(across, &[(-1.0, 0.0)], false), slabs(across, &[(0.0, 1.0)], false)));
+        assert!(near(slabs(across, &[(-1.0, 0.0), (0.0, 1.0)], true), 2.0 * slabs(across, &[(-1.0, 0.0)], true)));
+    }
+    // Chords along a plane across the axis lie at one height each, half of them below the middle; those crossing such
+    // planes span heights, so a thin slab across the middle stops most of them and few of the others.
+    assert!(near(slabs(false, &[(-1.0, 0.0)], true), 0.5));
+    let thin = |across| slabs(across, &[(-0.1, 0.1)], false);
+    assert!(thin(true) > 0.5 && thin(false) < 0.2, "{} across, {} along", thin(true), thin(false));
 }
