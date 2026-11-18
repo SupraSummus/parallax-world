@@ -688,6 +688,12 @@ Numbers are for the forest at 1280×800, as measured when written.
   In a closed white room or the cheese, where light bounces many times,
   the light on the floor is a few times too little,
   as little as reaches it from the lamp.
+  A site met reflects the light on its one face turned back,
+  a third of what it shows that way.
+  Tried: the light on all the faces it shows, each by its share:
+  no closer to the reference.
+  And with it a whole voxel touched read as any site met, not lit as the face:
+  a wall one site thick lit its dark side, and a white room was darker.
   A whole voxel touching a face is taken to be lit as the face is
   (`weighed` in `light.rs`), as a flat floor's are;
   where it is not, at a wall's edge or a corner, the face is lit wrong.
