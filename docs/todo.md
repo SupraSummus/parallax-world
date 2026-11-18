@@ -522,7 +522,7 @@ Numbers are for the forest at 1280×800, as measured when written.
 - **Cells hold what they look like** (begun).
   A site of `VoxelGrid` holds how much it stops, what that shows and what it glows,
   along each direction where they differ; worldgen reads only that
-  (pictures, the contract, the light's reference), along a ray's direction.
+  (pictures, the contract, light and its reference), along a ray's direction.
   Hosts take what a site looks like too, through each face where it differs (fcc's `Look`),
   each site whole or not by a coin (`VoxelGrid::show`).
   Still to do:
@@ -656,8 +656,8 @@ Numbers are for the forest at 1280×800, as measured when written.
   Three steps a level leave the tunnel ten times too bright, not hundreds,
   but the lamp several times further off.
   Where light is to go, a step at a time, each measured on these scenes:
-  sites hold what they stop along each direction, a share, columns' too,
-  and light reads that, not the coin hosts are shown by;
+  sites hold what they stop along each direction, a share, columns' too
+  (light reads a site's share already, not the coin hosts are shown by);
   then coarser levels take more directions (in Ideas).
   Taking over later or less did not do, each tried against the reference:
   only where the coarser level is open some sites ahead,
@@ -713,7 +713,12 @@ Numbers are for the forest at 1280×800, as measured when written.
   (they close the room), so a room lit by its windows is black.
   Native's bakers each light what they show with a `Light` of their own
   (a generator is not `Send`):
-  they share tiles and blocks (`Shared`) with each other and the world's threads,
+  they share blocks (`Shared`) with each other and the world's threads,
+  not the world's tiles, which keep of a site only what is drawn:
+  what is lit is generated twice, as a tile and as blocks,
+  till hosts read sites as light does ("Cells hold what they look like");
+  the tiles' own (`TILE`, `tile_box`, `make_tile`) are still in `light.rs`,
+  which no longer makes them;
   but each finds light again where another found it,
   and makes a generator, whose plans' caches take tens of MB;
   each of the world's threads makes two, its own and its Light's.
@@ -730,17 +735,19 @@ Numbers are for the forest at 1280×800, as measured when written.
   so near a corner where six voxels meet it misses one within its reach,
   and light jumps a little there;
   every site within reach would leak light through walls one site thick.
-- **Light sees each site as hosts draw it (`Grid`), and what glows, a prototype**:
-  - a site's pieces show a voxel where a hash is under their alpha
+- **Sites, as hosts and light see them, and what glows, a prototype**:
+  - a site's pieces show hosts a voxel where a hash is under their alpha
     (`VoxelGrid::show`), as leaves should,
     but measured houses' walls come out ragged;
-    their share is of the rays through the voxel,
-    and a line through sites' middles meets 2/3 as many sites as a ray does voxels
-    (`LINES` in `light.rs`, which makes up for it in what glows and in media):
-    shown by the coin, pieces stop light 2/3 as often as they should,
-    and the ground under blocks strewn over it is up to 1.7 times too bright;
-    at the coarse levels light reads few sites,
-    so a voxel there shown or not moves a lamp's light (the city at night);
+    light reads their share, of the rays through the voxel
+    (`VoxelGrid::light`; a line through sites' middles meets it
+    3/2 as often, `LINES` in `light.rs`),
+    so it goes on through sites filled in part
+    where it stopped at the first voxel shown:
+    a forest or a city at night takes half as long again to light, or more;
+    a crown's voxels at the coarse levels come out darker,
+    lit under what else is in their sites and those around:
+    right or not, no scene of the reference says, its probes all on the ground;
   - a site's pieces' colour is one of theirs, picked as often as it is seen,
     not the mean of what its faces see;
     where they show, its medium is not seen;
