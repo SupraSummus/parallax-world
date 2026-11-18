@@ -75,6 +75,8 @@ type Grids = Map<(usize, [i64; 3]), Made>;
  * BLOCK sites a side, of every level, generated once by whichever Light
  * needs one first, kept till the host forgets them (`forget`). Not the
  * host's tiles (make_tile), which keep of a site only what is drawn.
+ * And the coarsest level's light, settled (`top`): no coarser level
+ * takes over there, so a site's reads more sites than a Light keeps.
  */
 #[derive(Clone)]
 pub struct Shared {
@@ -82,12 +84,13 @@ pub struct Shared {
     steps: usize,
     tolerance: f32,
     blocks: Arc<Mutex<Grids>>,
+    top: Arc<Mutex<Found>>,
 }
 
 impl Shared {
     /** Nothing made yet, for a world under `brightness`. */
     pub fn new(brightness: Brightness) -> Shared {
-        Shared { brightness, steps: STEPS, tolerance: TOLERANCE, blocks: Arc::default() }
+        Shared { brightness, steps: STEPS, tolerance: TOLERANCE, blocks: Arc::default(), top: Arc::default() }
     }
 
     pub fn brightness(&self) -> Brightness {
@@ -96,7 +99,7 @@ impl Shared {
 
     /** The same world under `brightness`: its blocks kept. */
     pub fn under(&self, brightness: Brightness) -> Shared {
-        Shared { brightness, ..self.clone() }
+        Shared { brightness, top: Arc::default(), ..self.clone() }
     }
 
     /** Steps along a direction before the coarser level's light may take over. */
@@ -107,7 +110,7 @@ impl Shared {
     /** The same world, light taking `steps` steps along each level before the coarser's: its blocks kept. */
     pub fn stepping(&self, steps: usize) -> Shared {
         assert!((1..=TOP_STEPS).contains(&steps), "{steps} steps");
-        Shared { steps, ..self.clone() }
+        Shared { steps, top: Arc::default(), ..self.clone() }
     }
 
     /** How little the light on a site's faces may change, of what it is, for it to be found. */
@@ -118,7 +121,7 @@ impl Shared {
     /** The same world, a site's light found once the light on its faces changes by less than `tolerance` of what it is: its blocks kept. */
     pub fn settling(&self, tolerance: f32) -> Shared {
         assert!(tolerance > 0.0, "tolerance {tolerance}");
-        Shared { tolerance, ..self.clone() }
+        Shared { tolerance, top: Arc::default(), ..self.clone() }
     }
 
     /** Whether `other` lights the world as this does: as bright, as many steps, as little change. */
@@ -134,9 +137,10 @@ impl Shared {
         (b, block.get_or_init(|| Arc::new(generate_shown(generator, &b, level))).clone())
     }
 
-    /** Forgets the blocks in the tiles `far` says are far, by level and key, to make again if asked. */
+    /** Forgets the blocks in the tiles `far` says are far, by level and key, and the coarsest level's light there, to make again if asked. */
     pub fn forget(&self, far: impl Fn(usize, [i64; 3]) -> bool) {
         self.blocks.lock().expect("blocks").retain(|&(level, key), _| !far(level, key.map(|k| k.div_euclid(TILE / BLOCK))));
+        self.top.lock().expect("light").retain(|site, _| !far(GRID_LEVELS - 1, site.map(|v| v.div_euclid(TILE))));
     }
 }
 
@@ -164,6 +168,9 @@ const GLOW: f32 = 250.0;
 
 type Map<K, V> = fcc::FastMap<K, V>;
 
+/** The light coming to sites from each direction, settled. */
+type Found = Map<[i64; 3], [Rgb; N]>;
+
 /** A level's blocks, as they are needed, and the light found at its sites. */
 struct Level {
     heights: (i64, i64),
@@ -172,9 +179,9 @@ struct Level {
     /** What comes to sites, as found (KEPT_SITES). */
     paths: Map<[i64; 3], Rc<Paths>>,
     /** The light coming to sites from each direction, by round (`round`), as found (KEPT_SITES each). */
-    rounds: Vec<Map<[i64; 3], [Rgb; N]>>,
-    /** The light coming to sites from each direction, settled, as found (KEPT_SITES). */
-    found: Map<[i64; 3], [Rgb; N]>,
+    rounds: Vec<Found>,
+    /** The light coming to sites from each direction, settled, as found (KEPT_SITES); the coarsest level's is Shared's. */
+    found: Found,
 }
 
 /**
@@ -315,8 +322,11 @@ impl Light {
      * back, in many in a closed white room.
      */
     fn light(&mut self, i: usize, p: [i64; 3]) -> [Rgb; N] {
-        if let Some(light) = self.levels[i].found.get(&p) {
-            return *light;
+        // The coarsest level's is Shared's.
+        let top = i + 1 == self.levels.len();
+        let found = if top { self.shared.top.lock().expect("light").get(&p).copied() } else { self.levels[i].found.get(&p).copied() };
+        if let Some(light) = found {
+            return light;
         }
         let touches = self.paths(i, p).touches;
         let mut light = self.round(i, p, 0);
@@ -328,7 +338,11 @@ impl Light {
                 break;
             }
         }
-        keep(&mut self.levels[i].found, p, light);
+        if top {
+            self.shared.top.lock().expect("light").insert(p, light);
+        } else {
+            keep(&mut self.levels[i].found, p, light);
+        }
         light
     }
 
