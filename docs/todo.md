@@ -749,7 +749,8 @@ Numbers are for the forest at 1280×800, as measured when written.
   till hosts read sites as light does ("Cells hold what they look like");
   the tiles' own (`TILE`, `tile_box`, `make_tile`) are still in `light.rs`,
   which no longer makes them;
-  but each finds light again where another found it,
+  but each finds light again where another found it
+  (all but the coarsest level's: `Shared`'s `top`),
   and makes a generator, whose plans' caches take tens of MB;
   each of the world's threads makes two, its own and its Light's.
   A site of a block costs a few times one of a tile at the finest levels
@@ -757,6 +758,17 @@ Numbers are for the forest at 1280×800, as measured when written.
   so a tile read all round its edges costs about as much in blocks.
   Native's light sliders light the world anew (`World::relight`),
   as slowly as at the start.
+  Lighting costs several times what it did
+  before light read sites' shares and bounces settled site by site:
+  sites filled in part let light on,
+  so each is one more that reflects, with rounds of its own.
+  Of the light alone, about a third is `shown`'s:
+  the settled light of every neighbour whose pieces are not shown.
+  Lighting a place first, most is its blocks,
+  the coarsest level's far around (`TOP_STEPS` sites along every direction).
+  `look`'s "lit in" overstates it: a picture's rows cross the world,
+  and each forgets what the last found (`KEPT_SITES`),
+  where bakers light what is side by side.
   Light adds up, so it is the sum of the sky's, the sun's and the glow's;
   kept apart, the sliders could only mix them,
   but lighting and keeping that light would cost three times as much.

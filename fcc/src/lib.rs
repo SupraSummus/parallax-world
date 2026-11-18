@@ -24,11 +24,19 @@ impl Hasher for Fast {
         self.0
     }
     fn write(&mut self, bytes: &[u8]) {
-        for chunk in bytes.chunks(8) {
+        let (words, rest) = bytes.as_chunks::<8>();
+        for word in words {
+            self.write_u64(u64::from_le_bytes(*word));
+        }
+        if !rest.is_empty() {
             let mut word = [0; 8];
-            word[..chunk.len()].copy_from_slice(chunk);
+            word[..rest.len()].copy_from_slice(rest);
             self.write_u64(u64::from_le_bytes(word));
         }
+    }
+    // An array's length, hashed before it: as `write` would, without its bytes' loop.
+    fn write_usize(&mut self, v: usize) {
+        self.write_u64(v as u64);
     }
     fn write_u64(&mut self, v: u64) {
         self.0 = (self.0.rotate_left(5) ^ v).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
