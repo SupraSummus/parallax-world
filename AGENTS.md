@@ -12,6 +12,7 @@ Entry point for AI agents working on this codebase. Read this first.
 | [docs/testing.md](docs/testing.md) | Test layout and conventions | Writing tests |
 | [docs/todo.md](docs/todo.md) | Planned work: known problems and open ideas | Looking for what to do next |
 | [docs/generators.md](docs/generators.md) | Generating worlds in pieces: layers, things, rules | Writing or changing a world generator |
+| [docs/light.md](docs/light.md) | Light: what the prototype gets wrong, what was tried, what it costs | Touching `worldgen/src/light.rs` or native's lighting |
 | [.claude/skills/lead/SKILL.md](.claude/skills/lead/SKILL.md) | The lead role: driving changes to main through delegated work and PRs | Only when the user asks for it (`/lead`) |
 
 Each concept has one home:
@@ -27,130 +28,114 @@ only conventional files (README, AGENTS, LICENSE) stay at the root.
 
 ## Source layout
 
+A map: each file's header comment says what is in it.
+
 ```
 web/                         # The web frontend: React and WebGL 2, its Rust in WebAssembly
 ├── index.html, vite.config.ts, tsconfig.json
 ├── components.json          # shadcn/ui's CLI config
-├── wasm/                    # The web's WebAssembly module: bake/, worldgen/ and worlds/, and the exports the page calls
-│   └── src/
-│       ├── worlds.rs        # The worlds' exports, for worldgen.ts
-│       ├── baker.rs         # The baker's, for chunk-baker.ts
-│       ├── index.rs         # The layer index: where each face's layers hold voxels; its exports, for voxel-grid.ts
-│       ├── walk.rs          # Walking's, for walk.ts
-│       └── coverage.rs      # Which screen cells nearer layers cover, on the main thread; its exports, for occlusion.ts
+├── wasm/src/                # The WebAssembly module: the exports the page calls
+│   ├── worlds.rs            # The worlds, for worldgen.ts
+│   ├── baker.rs             # The baker, for chunk-baker.ts
+│   ├── index.rs             # The layer index, for voxel-grid.ts
+│   ├── walk.rs              # Walking, for walk.ts
+│   └── coverage.rs          # Screen cells nearer layers cover, for occlusion.ts
 └── src/
     ├── main.tsx             # Entry: error boundary + App
     ├── App.tsx              # UI panels, keyboard movement loop
     ├── ErrorFallback.tsx
     ├── main.css             # Tailwind + design tokens
-    ├── components/
-    │   └── ui/              # shadcn/ui primitives (generated)
+    ├── components/ui/       # shadcn/ui primitives (generated)
     └── lib/
-        ├── fcc.ts           # Voxel geometry: rhombic dodecahedra of the FCC lattice
-        ├── voxel-grid.ts    # Voxel storage on the FCC lattice, in bricks (typed arrays), each site's look (colour and alpha), through each face where they differ; LayerIndex, made by wasm/
-        ├── world.ts         # World: voxel grids by level of detail (generated in tiles around the camera), spawn; tests' scenes, a grid per level given
-        ├── worldgen.ts      # The worlds of worlds/ (WebAssembly), any box at any level
-        ├── cells.ts         # Cells of the coarser lattices N·FCC that slices are made of
+        ├── fcc.ts           # Voxel geometry on the FCC lattice
+        ├── voxel-grid.ts    # Voxel storage in bricks; LayerIndex
+        ├── world.ts         # World: grids by level of detail, in tiles around the camera
+        ├── worldgen.ts      # The worlds of worlds/, any box at any level
+        ├── cells.ts         # Cells of the coarser lattices N·FCC
         ├── slice-selection.ts # Slices and chunks (pure functions)
-        ├── view.ts          # Camera orientation, the 12 faces (FCC directions), projection
-        ├── walk.ts          # Walking on the ground with bake/src/walk.rs (WebAssembly)
+        ├── view.ts          # Camera, the 12 faces, projection
+        ├── walk.ts          # Walking on the ground
         ├── renderer.ts      # Slices and chunks in view, caching, screen placement (no DOM)
-        ├── occlusion.ts     # Which screen cells nearer layers cover (wasm/src/coverage.rs), to skip chunks behind them
-        ├── chunk-baker.ts   # Bakes whole chunks with bake/ (WebAssembly); the bake worker's message protocol
-        ├── wasm.ts          # The WebAssembly module (wasm/), inlined; an instance per use
-        ├── worker-bakery.ts # Pool of bake workers the renderer sends missing chunks to
+        ├── occlusion.ts     # Skipping chunks behind what nearer layers cover
+        ├── chunk-baker.ts   # Bakes chunks with bake/; the bake worker's protocol
+        ├── wasm.ts          # The WebAssembly module, inlined; an instance per use
+        ├── worker-bakery.ts # Pool of bake workers
         ├── bake.worker.ts   # Bake worker entry
-        ├── compositor.ts    # Draws the renderer's frames with WebGL 2: chunks' splats as instanced prisms
+        ├── compositor.ts    # Draws frames with WebGL 2
         └── utils.ts         # cn() for class names
-Cargo.toml                   # The Rust crates' workspace: one lock, one target; lab/ a member, not a default one
-.cargo/config.toml           # Builds for x86-64-v3: floor and ceil inline (see there)
+Cargo.toml                   # The Rust crates' workspace; lab/ a member, not a default one
+.cargo/config.toml           # Builds for x86-64-v3 (see there)
 scripts/shot.mjs             # pnpm shot: a view in headless Chromium, saved once complete
-scripts/voxelize.py          # A glTF scene as voxels of the FCC lattice, for worlds/src/scene.rs (numpy, Pillow)
-fcc/                         # The FCC lattice and its voxels as every crate sees them (no dependencies)
-└── src/
-    ├── lib.rs               # The voxel's faces, the view faces' lattices, the grids' levels, Grid, tiles of grids, voxels read per face
-    └── light.rs             # The light from voxels' faces, as hosts that light a world hand it over
-bake/                        # Chunk baker and walking in Rust, on fcc/: native links it, web/wasm/ exports it
-└── src/
-    ├── lib.rs               # Baker: one chunk per call
-    ├── cells.rs             # cells.ts, with a table per level
-    ├── slicing.rs           # slice-selection.ts's slices' shapes and chunks, for the web's baker
-    ├── surface.rs           # A cell's voxels that can show
-    ├── tables.rs            # The voxel's faces in a view face's lattice coordinates, their shades per view face
-    ├── splats.rs            # Which voxels a chunk shows, each a hexagon at its site: of a slice, each column's nearest over its run; of a cell, its whole ones' relief: a pillar per column (or each a ray can enter), and its medium, a picture per slab of its columns' optical depths
-    ├── lod.rs               # Native's chunks: whole cells of the lattice, each face's levels by depth along it, its cells kept picked
-    ├── fill.rs              # Splats filled into a mask for every slant, solid blocks (for coverage)
-    └── walk.rs              # Walking: a body that falls, collides, steps and jumps
-worldgen/                    # The world-generation engine, moving to integers, into the baker's grids; no worlds
+scripts/voxelize.py          # A glTF scene as voxels, for worlds/src/scene.rs
+fcc/src/                     # The FCC lattice and its voxels as every crate sees them (no dependencies)
+├── lib.rs                   # Faces, lattices, levels, Grid, tiles
+└── light.rs                 # The light from voxels' faces, as hosts hand it over
+bake/src/                    # Chunk baker and walking, on fcc/: native links it, web/wasm/ exports it
+├── lib.rs                   # Baker: one chunk per call
+├── cells.rs                 # cells.ts, with a table per level
+├── slicing.rs               # slice-selection.ts's slices and chunks
+├── surface.rs               # A cell's voxels that can show
+├── tables.rs                # The voxel's faces and shades per view face
+├── splats.rs                # What a chunk shows: splats, reliefs, media
+├── lod.rs                   # Native's chunks: whole cells, levels by depth
+├── fill.rs                  # Splats filled into masks (for coverage)
+└── walk.rs                  # A body that falls, collides, steps and jumps
+worldgen/                    # The world-generation engine; no worlds (docs/generators.md)
 ├── src/
-│   ├── js.rs                # Float math the same on every target (libm), named after JS's Math
-│   ├── noise.rs, grid.rs    # Integer hashes, random numbers, fixed point (Fx) and noise; voxel-grid.ts's bricks, each site's alpha, and the voxels it shows
-│   ├── units.rs             # UNIT_SIZE: metres per lattice unit; whole Units, typed apart from Fx
-│   ├── generator.rs         # The framework: nodes, fields, populations, the model worlds are written in
-│   ├── generator/           # generate.rs: any box at any level, of forms.rs: a node's near and far forms (measured), of drawables.rs: fields, shapes (shapes.rs, the solids) or sites drawn; things.rs: the things populations make; alone.rs: a component of a world alone, to check or look at
-│   ├── build.rs             # Short forms to write worlds with: constructors of fields, populations, nodes, solid shapes; layers about a ground (About, on)
-│   ├── column.rs            # A heightfield's spans, each tall enough to keep a site at every level, thin media a coat on it; its slopes' sides closed
-│   ├── plan.rs              # Plans by column, each from coarser ones only; heights with a slope, their range anywhere; land domains bid for, each's hold on it; claims, things kept apart anywhere
-│   ├── domain.rs            # Domains a world is composed of: named (seeds from names), bidding, pulling the ground in bands, drawing by their hold
-│   ├── curve.rs             # Curves: lines through space made top-down within narrowing corridors; where one passes nearest a point
-│   ├── points.rs            # Points: where things are, drawn top down, so a cell of any size knows how many it holds; blurs of their counts; rooms: their power diagram, which things keep to near and far forms read
-│   ├── frame.rs             # Things built in frames of their own: quarter turns, mirrors, walls
-│   ├── world.rs             # World: what a host needs to show one (generator, spawn, heights), the places it names
-│   ├── picture.rs           # Pictures of a world at one level: rays through its voxels, as PNGs, or through its sites' alpha
-│   ├── light.rs             # Light (a prototype, for look and native's computed lighting): sky, sun and what glows, each level's from coarser levels' and its bounces, settled round by round; held to light/reference.rs, rays traced through level 0
-│   ├── cost.rs              # What generating costs: work counted by layer, reported for a world's tiles, against a baseline
-│   └── checks/              # Checks of worlds, for tests
-│       ├── cells.rs         # Each cell against what is in it two levels finer, one by one, along the 12 directions: what the contract measures
-│       ├── contract.rs      # The contract every world keeps, in regions holding every stratum: each level's cells look as what is in them
-│       ├── survey.rs        # What a world is made of: its layers asked around spawn, things taken apart, strata to check
-│       ├── places.rs        # Whether things prefer places: positions modulo periods, as on a grid, over seeds
-│       └── directions.rs    # Whether a world's directions follow the lattice's: four-fold harmonics of pairs' directions, over seeds
-├── data/light-reference.txt # The reference's light in light.rs's test scenes, written by its test reference_values
-├── data/contract/           # Where the test worlds and the solids of tests/ break the contract, and by how much: their baselines
-└── tests/                  # contract.rs: the engine on test worlds (fog, caves, a village, knobs on a wall), what it refuses; shapes.rs: each solid against its baseline
+│   ├── generator.rs         # The framework: nodes, fields, populations
+│   ├── generator/           # Any box at any level: forms, drawables, shapes, things
+│   ├── build.rs             # Short forms to write worlds with
+│   ├── grid.rs              # voxel-grid.ts's bricks, each site's look
+│   ├── noise.rs             # Integer hashes, fixed point (Fx), noise
+│   ├── units.rs             # Metres per lattice unit
+│   ├── js.rs                # Float math the same on every target
+│   ├── column.rs            # A heightfield's spans
+│   ├── plan.rs              # Plans by column: heights, land, claims
+│   ├── domain.rs            # Domains a world is composed of
+│   ├── curve.rs             # Curves: lines through space
+│   ├── points.rs            # Points: where things are; rooms
+│   ├── frame.rs             # Things built in frames of their own
+│   ├── world.rs             # World: what a host needs to show one
+│   ├── picture.rs           # Rays through a world's voxels; pictures as PNGs
+│   ├── light.rs             # Light, a prototype (docs/light.md)
+│   ├── light/reference.rs   # Its reference: rays traced through level 0
+│   ├── cost.rs              # What generating costs, against a baseline
+│   └── checks/              # The contract, the survey, places, directions: for tests
+├── data/                    # The light reference's values; the test worlds' contract baselines
+└── tests/                   # The engine on test worlds; each solid against its baseline
 worlds/                      # The worlds, on worldgen's public API only
-├── cheese/                  # A world in a crate of its own (docs/todo.md, "Worlds are not yet crates of their own")
-│   └── src/lib.rs           # The cheese: endless every way, caverns, tunnels and eyes carved by a field of shapes, stairs up each cavern, lit by glowing crystals
+├── cheese/                  # The cheese, a crate of its own
 ├── src/
-│   ├── lib.rs               # WORLDS: the registry hosts start worlds from by name, with the regions checked around their places
-│   ├── forest.rs            # The forest, on ground it may share, its trees' crowns kept to their rooms
-│   ├── path.rs              # Spines, lines by z that what is laid out about them measures across; paths, a spine and a curve through it
-│   ├── course.rs            # The valley's course, the spine it winds along; the route its path takes along its floor, the lowest within reach
-│   ├── town.rs, fields.rs   # Towns along the path, farmland around them: the valley's other domains
-│   ├── landmarks.rs         # The valley's fourth domain: a keep, a watchtower, chapels, ponds, farmsteads, windmills
-│   ├── valley.rs            # The valley: the six domains on one land
-│   ├── mountains.rs         # The valley's ranges: massifs, crests, peaks and passes, side valleys; spurs and gorges at their feet; treeline, meadows, scree, rock, snow; the sea west past them, an upland east
-│   ├── moor.rs              # The moor: heath, a stream or pools, mist in its hollows (or, the fog, over all of it), steadings of a hut and a ring of stones; the valley's fifth domain
-│   ├── railway.rs           # The valley's railway: a line along it made by cost, along slopes, cut, filled, bridged and tunnelled; stations by towns
-│   ├── city.rs              # The city: blocks of buildings whose rooms form a maze, boxes on a plan of quarter metres
-│   ├── learned.rs           # The learned town: settlements drawn by a split grammar learned in lab/, on the forest's land
-│   └── scene.rs             # Scenes made elsewhere: voxels read from a file (scripts/voxelize.py); lib.rs adds Sponza, with its feature
-├── data/town-grammar.bin    # learned.rs's rule table, written by lab's export example
-├── data/forest-stands.txt   # What forest.rs's sample stands hide, by spacing, written by its test keep_samples
-├── data/scenes/             # Scenes' voxels, not in git (their licences): see docs/generators.md, "Scenes"
-├── data/cost/               # Each world's cost baseline, which tests/cost.rs holds it to
-├── data/contract/           # Where each world breaks the contract, and by how much: the baseline tests/contract.rs holds it to
-├── tests/                   # Every world in WORLDS keeps the contract and its cost baseline; the scenes' contents
-└── examples/                # map: a world from above; look: a picture of it, of any place it names (picture.rs), lit (light.rs), or of a component alone; check: the contract for a component of it, in place or alone; cost: what its tiles cost (cost.rs); bench: timing a world's tiles
-lab/                         # Experiment, linted but not tested by pnpm: split grammars with shared splits, learned from the valley's towns; a masked model of any volume, flat, 3D or on the FCC lattice; synthesis by coordinates into examples; a critic and profiles that score any of them; real places (scripts/overture.py) drawn to a plan (see src/lib.rs); exports the learned town's rules
-native/                      # The native frontend (egui on winit and wgpu), linking fcc/, bake/, worldgen/ and worlds/; see src/main.rs
-└── src/
-    ├── main.rs              # The camera (flying or walking, F), the panel, its engine and lighting (shaded or computed); --shot, --bench, --stroll for any engine; --record and --replay a walk
-    ├── window.rs            # The window: egui on winit and wgpu, over the engine's picture, its GPU device made again when lost
-    ├── gpu.rs               # What a device must allow; an Easel: a device and the painter of the engine that drew on it, in the window or offscreen (saved as a PNG, timed); for tests, shaders checked as wgpu would, without a GPU
-    ├── world.rs             # world.ts for generated worlds: a World's tiles, those the engine wants first, made, indexed (which cells of the lattice their voxels meet, which bricks are whole) and (for the voxels, the bricks rays ask for) lit on threads
-    ├── view.rs              # view.ts: faces, which rays and screen boxes they draw
-    ├── engine.rs            # What draws: Engine (on the main thread, a Frame of what a Look sees), Picture and Painter (on the GPU); Kind, the engines by name
-    └── engine/
-        ├── chunks.rs        # The chunks engine, as the web draws (reliefs or splats), or reliefs flat (an experiment); its renderer on a thread of its own
-        ├── chunks/
-        │   ├── renderer.rs  # Chunks in view: cells of the lattice (bake's lod.rs), not slices, all a face's pick composes but what rays from the eye find hidden, each then a probe for the GPU; cached, finest and nearest first
-        │   ├── occlusion.rs # Which cells of a face's pick nothing could show: behind where rays from the eye through a buffer's pixels' corners stop (renderer.rs's Hiding casts them through the voxels)
-        │   ├── bakery.rs    # Worker threads baking chunks, a baker each sharing the tiles (lit, with a Light each), and putting their reliefs' columns in tiles and their splats in clusters for the GPU
-        │   ├── compositor.rs # compositor.ts with wgpu, for cells, placed from the camera on the GPU: reliefs' columns uploaded per chunk in tiles, each tile a quad whose pixels' rays find their column, or a picture a cell on a plane, a quad per run of a row of its columns, enlarged to close the gaps, or whole voxels as splats each, culled on the GPU against what showed; see-through voxels as pictures of each cell's medium slab by slab, sorted far to near on the GPU, each over those behind; hidden cells' probes, those a pixel's ray reaches past all drawn read back for the renderer
-        │   └── compositor.wgsl
-        ├── voxels.rs        # The voxels engine: rays through the tiles' voxels, cell to cell, see-through ones added up in the order met; each level's bricks (and, lit, the light of those rays asked for) in a ball around the eye, one radius for all as large as the pool holds, in a window, a torus, which cells of 8·FCC and 32·FCC no voxel meets, crossed at once, and the box of what it holds; no chunks or faces of the view
-        └── voxels.wgsl
+│   ├── lib.rs               # WORLDS: the registry hosts start worlds from by name
+│   ├── forest.rs            # The forest, on ground other worlds share
+│   ├── valley.rs            # The valley: its domains on one land
+│   ├── path.rs              # Spines and paths along them
+│   ├── course.rs            # The valley's course and its path's route
+│   ├── town.rs              # Towns along the path
+│   ├── fields.rs            # Farmland around them
+│   ├── landmarks.rs         # Keeps, chapels, ponds, farmsteads, windmills
+│   ├── moor.rs              # The moor; alone, the worlds moor and fog
+│   ├── mountains.rs         # The valley's ranges
+│   ├── railway.rs           # The valley's railway
+│   ├── city.rs              # The city: blocks of buildings on a plan
+│   ├── learned.rs           # Settlements drawn by a grammar learned in lab/
+│   └── scene.rs             # Scenes made elsewhere, read from a file
+├── data/                    # Baselines of cost and contract, the forest's stands, the town grammar;
+│                            # scenes/ is not in git (docs/generators.md, "Scenes")
+├── tests/                   # Every world keeps the contract and its cost baseline
+└── examples/                # map, look, check, cost, bench: a world looked at, checked, measured
+lab/                         # Experiment, linted but not tested by pnpm (see src/lib.rs); scripts/overture.py fetches its real places
+native/src/                  # The native frontend: egui on winit and wgpu
+├── main.rs                  # The camera, the panel, the command line
+├── window.rs                # The window: egui on winit and wgpu
+├── gpu.rs                   # The device; offscreen pictures; shaders checked without a GPU
+├── world.rs                 # world.ts for generated worlds: tiles made and lit on threads
+├── view.rs                  # view.ts: faces, rays, screen boxes
+├── engine.rs                # What draws: Engine, Picture, Painter; the engines by name
+└── engine/
+    ├── chunks.rs            # The chunks engine, as the web draws
+    ├── chunks/              # Its renderer, occlusion, bakery, compositor (and .wgsl)
+    └── voxels.rs, voxels.wgsl # The voxels engine: rays through the tiles' voxels
 ```
 
 ## Workflow
