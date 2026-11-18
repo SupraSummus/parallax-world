@@ -316,8 +316,8 @@ fn a_field_at_each_site_is_drawn_only_where_it_says_and_held_to_it() {
 
 #[test]
 fn a_tile_holds_its_ground_by_its_surface_not_its_volume() {
-    // Ground rising g sites a column: a column of bricks holds its surface and the ring of whole bricks under it,
-    // some 2 + 4g, whatever the tile's size; the rock under them, some g·t/16 more, is held once, a brick.
+    // Ground rising g sites a column: a column of bricks holds its surface and what its block of columns rises by,
+    // some 2 + 2g, whatever the tile's size; the rock under them, some g·t/16 more, is held once, a brick.
     for g in [0, 1, 2, 4] {
         let height: fn(i64) -> i64 = match g {
             0 => |_| 0,
@@ -331,7 +331,27 @@ fn a_tile_holds_its_ground_by_its_surface_not_its_volume() {
             let sites = (BRICK * BRICK * BRICK / 2) as usize;
             let column = |grid: VoxelGrid| (grid.shown.len() / sites - 1) as f64 / (t * t / BRICK / BRICK) as f64;
             let held = column(generate_shown(&world, &b, 0));
-            assert!(held <= 2.0 + 4.5 * g as f64, "rising {g} a column, a tile {t} sites a side holds {held} bricks a column");
+            assert!(held <= 2.5 + 2.0 * g as f64, "rising {g} a column, a tile {t} sites a side holds {held} bricks a column");
+        }
+    }
+}
+
+#[test]
+fn what_hosts_make_of_a_box_differs_from_all_of_it_only_in_buried_rock() {
+    // Ground rising two sites a column along x: no layer of the box's bricks is buried, its blocks of columns are.
+    let world = solid_ground(|x| 2 * x, 2);
+    let b = Box3 { min: [0, -64, 0], max: [128, 320, 64] };
+    for level in 0..3 {
+        let (all, made) = (generate(&world, &b, level), generate_shown(&world, &b, level));
+        let whole = |grid: &VoxelGrid, [x, y, z]: [i64; 3]| grid.alpha(x, y, z) == ALPHA;
+        let sites = (b.min[2]..b.max[2]).flat_map(|z| (b.min[1]..b.max[1]).flat_map(move |y| (b.min[0]..b.max[0]).map(move |x| [x, y, z])));
+        for [x, y, z] in sites.filter(|&[x, y, z]| crate::grid::is_site(x, y, z)) {
+            let light = |grid: &VoxelGrid| std::array::from_fn::<_, FACE_KINDS, _>(|k| grid.light(x, y, z, k));
+            let look = |grid: &VoxelGrid| (grid.get(x, y, z), grid.solid(x, y, z), light(grid));
+            let around = VOXEL_FACES.map(|[i, j, k]| [x + i as i64, y + j as i64, z + k as i64]);
+            // Rock no ray reaches: whole, as is every site around it.
+            let buried = whole(&made, [x, y, z]) && whole(&all, [x, y, z]) && around.iter().all(|&p| !b.holds(p) || whole(&all, p));
+            assert!(look(&made) == look(&all) || buried, "level {level}: site ({x}, {y}, {z})");
         }
     }
 }

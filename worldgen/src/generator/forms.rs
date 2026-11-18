@@ -154,7 +154,7 @@ fn alone(node: &Node, key: &str, layer: &'static str, bounds: Box3, f: i64, seed
     let mut own = Own::new(&fine);
     let mut work = Work::default();
     for drawable in &drawables {
-        work.add(&draw(drawable, seed, f, &fine, &mut |look, op, share, pick, x, y, z| own.put(look, op, share, pick, x, y, z)));
+        work.add(&draw(drawable, seed, f, &fine, None, &mut |look, op, share, pick, x, y, z| own.put(look, op, share, pick, x, y, z)));
     }
     cost::add(layer, work);
     own

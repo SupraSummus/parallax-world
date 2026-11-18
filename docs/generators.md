@@ -109,11 +109,13 @@ a carve what is empty, a fill or paint what is buried
 (a thing's carves cut only it).
 A population draws in it if a thing of the cells reaching it,
 made as drawing makes it, reaches it by its bounds
-(asked only where the rest would leave it whole);
+(asked only where the rest would leave it empty: what is buried stays so);
 past their size, its far form, if any.
 A host need not make either (`shown`):
 it generates a box less its whole bottom and top,
-and keeps a buried bottom as rock, a brick of it for all (`generate_shown`),
+and less what is buried under each block of its columns (`Floors`):
+a tile on a slope costs its surface, not the rock under it.
+It keeps what is buried as rock, a brick of it for all (`generate_shown`),
 not emptied, as rays from a finer level's hollows and light meet it.
 A layer that says nothing is drawn everywhere.
 

@@ -75,6 +75,11 @@ const KIND_STEPS: u8 = 3;
  * grid may reach one site further in x (its rows start and end on an even x).
  */
 pub fn generate(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
+    made(generator, b, level, None)
+}
+
+/** `generate`, nothing drawn under `floors`, if any: what is buried there is not made. */
+fn made(generator: &Generator, b: &Box3, level: u32, floors: Option<&Floors>) -> VoxelGrid {
     let s = 1i64 << level;
     let mut grid = VoxelGrid::new(b);
     if (0..3).any(|d| b.max[d] <= b.min[d]) {
@@ -85,6 +90,10 @@ pub fn generate(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
     let clip = grid.clip();
     let mut odd = Vec::new();
     let mut put = |look: Look, op: Op, share: u32, pick: u32, x: i64, y: i64, z: i64| {
+        // Things and lines across y are drawn whole and kept from the floors up.
+        if floors.is_some_and(|floors| y < floors.at(x, z)) {
+            return;
+        }
         let colour = |kind: Kind| palette.colour(kind, s, [x, y, z].map(|v| v * s));
         let kind = &generator.kinds[look.kind as usize];
         if !see_whole(&mut grid, &odd, &look, kind, op, share, [x, y, z], || colour(look.kind)) {
@@ -102,7 +111,9 @@ pub fn generate(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
         if group[0].checked {
             let mut drew = None;
             for drawable in group {
-                draw(drawable, generator.seed, s, &clip, &mut |_, _, share, _, x, y, z| drew = drew.or((share > 0).then_some([x, y, z])));
+                draw(drawable, generator.seed, s, &clip, None, &mut |_, _, share, _, x, y, z| {
+                    drew = drew.or((share > 0).then_some([x, y, z]))
+                });
             }
             if let Some(site) = drew {
                 broke(&group[0].key, site, s, &clip, "draws where it says it may not");
@@ -113,13 +124,13 @@ pub fn generate(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
         let mut work = Work::default();
         if !carves {
             for drawable in group {
-                work.add(&draw(drawable, generator.seed, s, &clip, &mut put));
+                work.add(&draw(drawable, generator.seed, s, &clip, floors, &mut put));
             }
         } else {
             // It cuts only itself: drawn aside, then over the world.
             let mut own = Own::new(&thing_box(group, s).intersect(&clip));
             for drawable in group {
-                work.add(&draw(drawable, generator.seed, s, &clip, &mut |look, op, share, pick, x, y, z| {
+                work.add(&draw(drawable, generator.seed, s, &clip, floors, &mut |look, op, share, pick, x, y, z| {
                     own.put(look, op, share, pick, x, y, z)
                 }));
             }
@@ -467,8 +478,8 @@ pub fn whole(generator: &Generator, b: &Box3, level: u32) -> Option<Whole> {
     let fold = |things: bool| {
         let mut holds = Some(Whole::Empty);
         for layer in &layers {
-            // Things are asked only of what is whole: of what isn't, they change nothing.
-            holds = match (meets(layer, things && holds.is_some()), holds) {
+            // Things are asked only of what is empty: what is buried or not whole, they leave so.
+            holds = match (meets(layer, things && holds == Some(Whole::Empty)), holds) {
                 ((Meets::Nothing, _), holds) => holds,
                 ((Meets::All(kind), carves), _) if !generator.kinds[kind as usize].medium => {
                     Some(if carves { Whole::Empty } else { Whole::Buried(kind) })
@@ -511,24 +522,117 @@ pub fn shown(generator: &Generator, b: &Box3, level: u32) -> Box3 {
 
 /**
  * Box `b` of `level` as hosts make it: what may show of it (`shown`)
- * generated, on what is buried under it, not generated but kept as rock
- * (VoxelGrid::on_buried), its buried bricks kept as one (VoxelGrid::bury).
- * Not `generate`'s grid, so not for checking a box made whole against
- * its parts.
+ * generated, and of that only each block of columns from its `Floors`
+ * up; what is buried under them, and under it all, not generated but
+ * kept as rock (VoxelGrid::on_rock), its buried bricks kept as one
+ * (VoxelGrid::bury). Not `generate`'s grid, so not for checking a box
+ * made whole against its parts.
  */
 pub fn generate_shown(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
     let part = shown(generator, b, level);
-    let mut grid = generate(generator, &part, level);
     let under = Box3 { max: [b.max[0], part.min[1], b.max[2]], ..*b };
-    if under.min[1] < under.max[1]
-        && let Some(Whole::Buried(kind)) = whole(generator, &under, level)
-    {
+    let rock = match whole(generator, &under, level) {
+        Some(Whole::Buried(kind)) if under.min[1] < under.max[1] => Some(kind),
+        _ => None,
+    };
+    let all = if rock.is_some() { Box3 { min: b.min, ..part } } else { part };
+    let floors = Floors::of(generator, &VoxelGrid::new(&all).clip(), part.min[1], rock, level);
+    // Nothing buried, nothing is kept from being drawn; all buried, nothing is made, not even things near.
+    let under = floors.kind.map(|_| &floors);
+    let mut grid = if part.min[1] < part.max[1] { made(generator, &all, level, under) } else { VoxelGrid::new(&all) };
+    if let Some(kind) = floors.kind {
         let s = 1i64 << level;
         let colour = Palette::new(&generator.kinds, generator.seed).colour(kind, s, b.min.map(|v| v * s));
-        grid = grid.on_buried(&under, colour.map(|c| c as u16));
+        grid.on_rock(|x, z| floors.at(x, z), colour.map(|c| c as u16));
     }
     grid.bury();
     grid
+}
+
+/**
+ * Columns a side of the blocks `Floors` are found for. No fewer: a
+ * ground's range over a smaller block is sampled between the level's
+ * columns (Sloped::range), each made for it.
+ */
+const FLOOR: i64 = 2 * BRICK;
+
+/**
+ * How far up from its bottom each block of a box's columns, FLOOR a
+ * side, is buried (`whole`), in bricks: hosts make none of that
+ * (`generate_shown`), so a tile on a slope costs its surface, not the
+ * rock under it.
+ */
+pub(super) struct Floors {
+    min: [i64; 3],
+    /** Blocks along x and z. */
+    blocks: [i64; 2],
+    /** By block, z-major: the first of its sites along y that isn't buried under. */
+    y: Vec<i64>,
+    /** The kind what is buried is of, the last found; none if nothing is. */
+    kind: Option<Kind>,
+}
+
+impl Floors {
+    /**
+     * Those of box `b` of `level`, known buried up to `from`, in `rock`
+     * if that is above its bottom. Found by quarters: what is buried of
+     * a block is of each part of it, so each is asked from its parent's
+     * floor up.
+     */
+    fn of(generator: &Generator, b: &Box3, from: i64, rock: Option<Kind>, level: u32) -> Floors {
+        let blocks = [0, 2].map(|a| (b.max[a] - b.min[a] + FLOOR - 1).div_euclid(FLOOR).max(0));
+        let mut floors = Floors { min: b.min, blocks, y: vec![b.min[1]; (blocks[0] * blocks[1]) as usize], kind: rock };
+        let y = floors.rise(generator, b, level, [[0, 0], blocks], from);
+        floors.quarter(generator, b, level, [[0, 0], blocks], y);
+        floors
+    }
+
+    /** How far up from `from` blocks `lo` to `hi` (x, z; exclusive) of `b` are buried together, brick by brick. */
+    fn rise(&mut self, generator: &Generator, b: &Box3, level: u32, [lo, hi]: [[i64; 2]; 2], from: i64) -> i64 {
+        let along = |a: usize, block: i64| (b.min[2 * a] + block * FLOOR).min(b.max[2 * a]);
+        let mut y = from;
+        while y < b.max[1] {
+            let top = (y + BRICK).min(b.max[1]);
+            let layer = Box3 { min: [along(0, lo[0]), y, along(1, lo[1])], max: [along(0, hi[0]), top, along(1, hi[1])] };
+            let Some(Whole::Buried(kind)) = whole(generator, &layer, level) else { break };
+            (self.kind, y) = (Some(kind), top);
+        }
+        y
+    }
+
+    /**
+     * Sets the floors of blocks `lo` to `hi` of `b`, buried up to `y`
+     * together, then of its quarters, unless none is buried higher: where
+     * no rock is near, few blocks are asked.
+     */
+    fn quarter(&mut self, generator: &Generator, b: &Box3, level: u32, [lo, hi]: [[i64; 2]; 2], y: i64) {
+        for z in lo[1]..hi[1] {
+            self.y[(z * self.blocks[0] + lo[0]) as usize..(z * self.blocks[0] + hi[0]) as usize].fill(y);
+        }
+        let mid = [0, 1].map(|a| (lo[a] + hi[a] + 1) / 2);
+        let quarters = [[lo, mid], [[mid[0], lo[1]], [hi[0], mid[1]]], [[lo[0], mid[1]], [mid[0], hi[1]]], [mid, hi]];
+        // Those with blocks: of a block alone, itself.
+        let quarters: Vec<[[i64; 2]; 2]> = quarters.into_iter().filter(|[lo, hi]| lo[0] < hi[0] && lo[1] < hi[1]).collect();
+        if quarters.len() < 2 {
+            return;
+        }
+        let floors: Vec<i64> = quarters.iter().map(|q| self.rise(generator, b, level, *q, y)).collect();
+        if floors.iter().any(|&floor| floor > y) {
+            for (q, floor) in quarters.into_iter().zip(floors) {
+                self.quarter(generator, b, level, q, floor);
+            }
+        }
+    }
+
+    /** The first site of column (x, z) (sites) that isn't buried under: the lowest of all, off the box. */
+    #[inline]
+    pub(super) fn at(&self, x: i64, z: i64) -> i64 {
+        let (i, k) = ((x - self.min[0]).div_euclid(FLOOR), (z - self.min[2]).div_euclid(FLOOR));
+        if i < 0 || i >= self.blocks[0] || k < 0 || k >= self.blocks[1] {
+            return i64::MIN;
+        }
+        self.y[(k * self.blocks[0] + i) as usize]
+    }
 }
 
 #[cfg(test)]

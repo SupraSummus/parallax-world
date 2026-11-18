@@ -424,6 +424,14 @@ Numbers are for the forest at 1280×800, as measured when written.
   at level 3, the grottoes each make the holes around them to place their stairs.
   Estimated, not timed: the cheese's body, all of a kind, is filled site by site
   uncounted, a good part of a coarse tile's time.
+- **Cost is counted for more than hosts make.**
+  `cost::report` and the baselines count `generate` of what `shown` leaves,
+  not `generate_shown`, which skips what is buried under each block (`Floors`):
+  they don't see what that saves, nor what finding the floors costs.
+- **Whole sites are still put one by one.**
+  Under the surface nearly every put is a whole site of the ground's fill,
+  each through `put`, its brick looked up, at level 0 its shade hashed.
+  A line's run of them put brick by brick would spare most of that.
 - **A site's glow and views are kept in maps by site** (`VoxelGrid`),
   so `generate` marks apart which sites may be in them (`odd`),
   not to look each up as it adds to it.
@@ -893,9 +901,12 @@ Numbers are for the forest at 1280×800, as measured when written.
 - Assume no ground.
   y stays up: bodies fall along it, the sky and the sun are over it.
   But the engine still takes a ground where a world has no say in it:
-  - `shown` trims a box along y alone (`on_buried` keeps a buried bottom).
+  - `shown` trims a box along y alone, and `Floors` find what is buried
+    from the bottom up (`on_rock` keeps it).
     Halved along every axis it would not pay:
     asked brick by brick, `whole` cost many times generating the tile.
+    Blocks of columns finer than `FLOOR` would take a ground's range
+    from columns between the level's own, each made for it.
   - The web tiles x and z over a world's heights (native's tiles are cubes),
     so it can't show the cheese.
   - Places and the survey sample lines of cells along y (`PER_COLUMN`);
