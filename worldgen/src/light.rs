@@ -43,6 +43,7 @@ use crate::World;
 use crate::generator::{Generator, generate_shown};
 use crate::grid::{ALPHA, BRICK, Box3, COLOUR_ONE, GLOW_ONE, Grid, VoxelGrid};
 use crate::picture::{CROSSING, FACES, Picture, nearest_site, over};
+use crate::recent::Recent;
 
 type Rgb = [f32; 3];
 
@@ -740,43 +741,6 @@ fn weighed(weights: &[f32; N], light: &[Rgb; N], touches: &Touches) -> Rgb {
         });
     }
     std::array::from_fn(|c| if kept[c] > 0.0 { sum[c] / kept[c] } else { 0.0 })
-}
-
-/**
- * The values of the keys used last: those put or read since it last held
- * `kept`, and those of before, forgotten when it holds as many again.
- * So what is in use is never forgotten, as all of a map cleared when full is.
- */
-struct Recent<K, V> {
-    kept: usize,
-    new: Map<K, V>,
-    old: Map<K, V>,
-}
-
-impl<K: Copy + Eq + std::hash::Hash, V> Recent<K, V> {
-    fn new(kept: usize) -> Recent<K, V> {
-        Recent { kept, new: Map::default(), old: Map::default() }
-    }
-
-    fn retain(&mut self, keep: impl Fn(&K) -> bool) {
-        self.new.retain(|key, _| keep(key));
-        self.old.retain(|key, _| keep(key));
-    }
-
-    fn get(&mut self, key: &K) -> Option<&mut V> {
-        if !self.new.contains_key(key) {
-            let value = self.old.remove(key)?;
-            self.insert(*key, value);
-        }
-        self.new.get_mut(key)
-    }
-
-    fn insert(&mut self, key: K, value: V) {
-        if self.new.len() == self.kept {
-            self.old = std::mem::take(&mut self.new);
-        }
-        self.new.insert(key, value);
-    }
 }
 
 fn add(a: [i64; 3], b: [i64; 3]) -> [i64; 3] {

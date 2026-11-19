@@ -11,8 +11,8 @@ pub(super) enum Draw<'a> {
     Field(&'a Field),
     /** A node's shapes, and whether they are its far ones. */
     Shapes(Vec<Shape>, bool),
-    /** A thing measured: its sites. */
-    Sites(Sites),
+    /** A thing measured: its sites, as its population keeps them (Measured). */
+    Sites(Rc<Sites>),
 }
 
 pub(super) struct Drawable<'a> {
@@ -42,7 +42,7 @@ pub(super) fn draw(drawable: &Drawable, seed: u64, s: i64, clip: &Box3, floors: 
             Work { nodes: 1, tests, ..Work::default() }
         }
         Draw::Sites(sites) => {
-            for &([x, y, z], look, op, share, pick) in sites {
+            for &([x, y, z], look, op, share, pick) in sites.iter() {
                 if clip.holds([x, y, z]) {
                     put(look, op, share, pick, x, y, z);
                 }

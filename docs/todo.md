@@ -414,10 +414,13 @@ Numbers are for the forest at 1280×800, as measured when written.
   and with its depth varying along the axis, culled worse;
   one splat cut to the hull of a pillar's ends drew large rectangles,
   mostly discarded.
-- **Native's threads each keep their own plans' columns**
+- **Native's threads each keep their own plans' columns**,
+  and their things measured (`Measured` in `forms.rs`)
   (a generator per thread, `native/src/world.rs`):
   completing the valley's first view takes four threads
-  about a tenth more work than one, eight a quarter more.
+  about a sixth more work than one, lit a third more,
+  and each thread holds tens of MB more, lit over a hundred.
+  A generator all threads share would measure each thing once.
   Tiles side by side still make again the things reaching both;
   those one above another are made together (`make_tiles`).
 - **Walking, native keeps more than a core busy**
@@ -490,15 +493,21 @@ Numbers are for the forest at 1280×800, as measured when written.
   as fast only once it held as much as now.
   Kept by all the threads, as the coarsest level's sites are,
   each would be found once, not by every thread that lights beside it.
-- **The light's blocks of level 3 cost several times their neighbours'**,
-  a block, lighting the valley's first view:
-  those a town reaches,
-  where each of its buildings is measured for its far form
-  (`measure` in `forms.rs`), once a box, whatever the box's size.
-  Few are measured twice, so keeping them would not help;
-  measuring goes over all of a thing's box, most of it empty.
-  So `voxels_show_the_faces_rays_enter_by`, lit, takes over ten minutes
-  on a software GPU's machine: its one block, 512 wide, is measured for each box of light.
+- **`voxels_show_the_faces_rays_enter_by`, lit, takes over nine minutes** on a software GPU's machine,
+  all of them in the light's rounds (`Light::round`), not in measuring its block, as was thought.
+  Why was not looked into: its block is white, so its light may settle late or never (`ROUNDS`),
+  each round reading sites one further around, more than a `Light` keeps the rounds of (`KEPT_ROUNDS`).
+- **Tiles as small as the light's blocks** (32 sites a side, `TILE_SHIFT` 5), tried on the valley:
+  rays ask for a fifth of what the tiles made hold,
+  so shaded, a first view takes half the work and less memory,
+  and flying on, a frame uploads half as much;
+  lit, as much work as now, tiles and blocks still made apart.
+  A tile and a block would then be one box,
+  made once for hosts and light, kept and forgotten one way.
+  Not kept: a view asks in more rounds, each a picture drawn and read back,
+  so a shot on a software GPU takes three times as long, and likely the GPU's tests;
+  and the light's blocks of the levels no ray reads are kept two tiles around the eye (`World::update`),
+  nearer than the coarsest level's light reads (`TOP_STEPS`): made again every frame.
 - **Native's voxels wait on memory** (`march` in `voxels.wgsl`):
   most of a frame is its samples' rays, some 50 steps each,
   and a step costs its reads one after another (a brick's slot, then its site),

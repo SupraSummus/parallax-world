@@ -18,6 +18,7 @@ pub mod noise;
 pub mod picture;
 pub mod plan;
 pub mod points;
+mod recent;
 pub mod units;
 pub mod world;
 

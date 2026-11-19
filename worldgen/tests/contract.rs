@@ -49,6 +49,7 @@ fn single(make: impl Fn(Point, &Cell) -> Option<Node> + 'static, reach: i64) -> 
         make: Box::new(make),
         far: None,
         stands: None,
+        measured: Default::default(),
     })
 }
 
@@ -135,6 +136,7 @@ fn village() -> Generator {
         }),
         far: None,
         stands: None,
+        measured: Default::default(),
     };
     Generator { kinds: KINDS.to_vec(), seed: 3, layers: vec![spans("ground", -64, 0, GRASS), Layer::Population(houses)] }
 }
@@ -293,6 +295,7 @@ fn finds_a_far_thing_reaching_past_its_populations_reach() {
         make: Box::new(|[x, y, z], _| Some(Node::of(vec![ball([x, y, z], 100.0, ROCK, SOLID, Op::Fill)]))),
         far: None,
         stands: None,
+        measured: Default::default(),
     });
     let world = world_of(world(far), (-256, 256));
     let broken = things_hold(&world, &survey(&world, REGION, |_| true));

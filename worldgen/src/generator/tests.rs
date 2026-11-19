@@ -48,7 +48,7 @@ fn a_measured_far_form_keeps_what_rays_see() {
         ..Node::of(vec![cuboid([0.0; 3], [64.0; 3], 1, SOLID, Op::Fill), cuboid([0.0, 56.0, 0.0], [64.0, 64.0, 64.0], 2, SOLID, Op::Paint)])
     };
     let one = block();
-    let sites = measure(&one, "block", "blocks", bounds_of(&one), fixed(2.0), 16, 1);
+    let sites = measure(&one, "block", "blocks", bounds_of(&one), fixed(2.0), 16, 1, &Measured::default());
     assert!(
         (1..4).all(|y| (1..4).all(|x| (1..4).all(|z| (x + y + z) % 2 == 1 || sites.iter().any(|s| s.0 == [x, y, z])))),
         "its inside is all drawn"
@@ -76,7 +76,7 @@ fn a_measured_far_form_keeps_what_rays_see() {
     };
     let blocks: Vec<Sites> = on_threads(16, |i| {
         let block = block();
-        measure(&block, &format!("block {i}"), "blocks", bounds_of(&block), fixed(2.0), 16, 1)
+        measure(&block, &format!("block {i}"), "blocks", bounds_of(&block), fixed(2.0), 16, 1, &Measured::default())
     });
     let from_above = blocks.iter().map(|sites| seen(sites, [0, -1, 0])).sum::<f64>() / 16.0;
     let from_the_side = blocks.iter().map(|sites| seen(sites, [1, 0, 0])).sum::<f64>() / 16.0;
@@ -90,7 +90,7 @@ fn a_measured_far_form_keeps_what_rays_see() {
     let cloud = || Node { far: Some(Far::measured(fx(2.0))), ..Node::of(vec![ball([0.0; 3], 64.0, 1, Fill::Const(0.02), Op::Fill)]) };
     let kept: Vec<f64> = on_threads(16, |i| {
         let cloud = cloud();
-        let sites = measure(&cloud, &format!("cloud {i}"), "clouds", bounds_of(&cloud), fixed(2.0), 16, 1);
+        let sites = measure(&cloud, &format!("cloud {i}"), "clouds", bounds_of(&cloud), fixed(2.0), 16, 1, &Measured::default());
         sites.iter().map(|s| s.3 as f64 / SHARE as f64).sum()
     });
     assert!(kept.iter().all(|n| (26.0..38.0).contains(n)), "sparse clouds keep {kept:?} of their about 134 cells");

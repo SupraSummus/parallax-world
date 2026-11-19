@@ -95,6 +95,7 @@ worldgen/                    # The world-generation engine; no worlds (docs/gene
 │   ├── curve.rs             # Curves: lines through space
 │   ├── points.rs            # Points: where things are; rooms
 │   ├── frame.rs             # Things built in frames of their own
+│   ├── recent.rs            # What was used last, kept
 │   ├── world.rs             # World: what a host needs to show one
 │   ├── picture.rs           # Rays through a world's voxels; pictures as PNGs
 │   ├── light.rs             # Light, a prototype (docs/light.md)
