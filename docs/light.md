@@ -61,7 +61,7 @@ So what is left in rooms, under roofs and in the tunnel
 is how few the directions are and how coarse a level takes over,
 not how it does.
 
-A site whose light is none in two rounds running is found dark (`Light::change`),
+A site whose light is none in two rounds running is found dark (`change`),
 though light may come to it after more bounces.
 
 Rock filled round the tunnels kept them dark,
@@ -137,25 +137,24 @@ A window smaller than the coarser levels' sites lets no sky in at all
 
 Native's bakers each light what they show with a `Light` of their own
 (a generator is not `Send`):
-they share blocks (`Shared`) with each other and the world's threads,
+they share blocks, and the light found at their sites (`Shared`),
+with each other and the world's threads,
+so a site's light is found once, whichever of them asks;
 not the world's tiles, which keep of a site only what is drawn:
 what is lit is generated twice, as a tile and as blocks,
 till hosts read sites as light does
 ("Cells hold what they look like" in [generators.md](generators.md));
 the tiles' own (`TILE`, `tile_box`, `make_tiles`) are still in `light.rs`,
 which no longer makes them;
-but each finds light again where another found it
-(all but the coarsest level's: `Shared`'s `top`,
-whose sites light reads far around, the same whatever is lit),
 and the bakers' each make a generator, whose plans take tens of MB;
 a thread of the world lights with the one it makes tiles with.
 
-Each `Light` keeps the sites it used last (`Recent`),
-few next to what a view reads:
-lighting the valley's first view finds what comes to a site (`paths`)
-some four times, not once, by each thread that lights beside it.
-So the world's threads take bricks near their last (`Queue::next`).
-Keeping more is faster and holds more, about in step.
+What is found at a site is a function of the world alone,
+so the Lights keep it together, every level's alike,
+and two finding the same at once do no harm.
+They keep the sites read lately (`KEPT_SITES`, `Shared::begun`):
+fewer hold less, and under what a view reads at once, lighting slows by half.
+A site kept takes about 1.5 KB, half of it its rounds.
 
 A site of a block costs a few times one of a tile at the finest levels
 (the cheese's holes, the valley's plans, asked again per block),
@@ -164,23 +163,24 @@ so a tile read all round its edges costs about as much in blocks.
 Native's light sliders light the world anew (`World::relight`),
 as slowly as at the start.
 
-Flying on, lit, the light is nearly all of the world's threads' work
-(`--stroll` with `--by-work` in `native/src/main.rs`):
-about a quarter of it its blocks.
-Of the rest, more than half is the rounds past a site's first:
+Lighting the valley's first view, two thirds of the world's threads' work
+is generating, the tiles and the light's blocks, and a fifth finding the light.
+Of that, most is the rounds past a site's first:
 each round reads sites one further around what is lit,
 many where sites filled in part reflect on each other, as all through a wood's crowns.
-Tried, each measured on the valley's first view and a flight on from it,
+Tried, each measured on the valley's first view and a flight on from it
+(`--stroll` with `--by-work` in `native/src/main.rs`),
 and not kept:
 
 - the tiles as the light's blocks, each made once for both:
   an eighth less work, and two thirds more held,
   as every tile then keeps all of its sites, lit or not;
 - blocks half or twice as wide: more work either way;
-- a cube's bricks lit together by one thread: no less work,
-  as threads already light side by side (`Queue::next`);
-- each `Light` keeping eight times the sites:
-  a tenth less work, for more than twice the memory;
+- a cube's bricks lit together by one thread: no less work;
+- the blocks forgotten with their sites' light, once none read them:
+  made again, a flight lit less than half the bricks in a time;
+- a block's light forgotten whole once none read the block, not site by site:
+  as fast for as much held, and one more thing to keep;
 - a site's rounds started from the coarser level's light on what it meets:
   a tenth fewer rounds, no less work;
 - a site's rounds ended once their steps fall off as a geometric series,
@@ -199,9 +199,6 @@ the settled light of every neighbour whose pieces are not shown.
 
 Lighting a place first, most is its blocks,
 the coarsest level's far around (`TOP_STEPS` sites along every direction).
-`look`'s "lit in" overstates it: a picture's rows cross the world,
-and each forgets what the last found (`KEPT_SITES`),
-where bakers light what is side by side.
 
 Light adds up, so it is the sum of the sky's, the sun's and the glow's;
 kept apart, the sliders could only mix them,
