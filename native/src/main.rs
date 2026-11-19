@@ -2,15 +2,20 @@
 //! generated in tiles, those in view first (world.rs), drawn by an engine
 //! (engine.rs) with wgpu in an egui window (window.rs), or offscreen (gpu.rs).
 //!
-//! parallax-native [--engine reliefs|flat|splats|voxels] [--world NAME] [--threads N] [--seed S] [--view QUERY] [--light SKY,SUN,GLOW[,STEPS]] [--detail D] [--shift S] [--seams] [--colour voxels|layers|chunks] [--unhidden] [--shot out.png [--size WxH] | --bench] [--stroll S [--on-ground]] [--record FILE] [--replay FILE [--shots DIR]]
+//! parallax-native [--engine reliefs|flat|splats|voxels] [--world NAME] [--threads N] [--seed S] [--view QUERY] [--light SKY,SUN,GLOW[,STEPS]] [--detail D] [--shift S] [--seams] [--colour voxels|layers|chunks] [--unhidden] [--shot out.png [--size WxH] | --bench] [--stroll S [--on-ground] [--speed U] [--heading DEG] [--turn DEG] [--by-work]] [--record FILE] [--replay FILE [--shots DIR]]
 //!
 //! --view takes the web page's view query (parseViewQuery in renderer.ts),
 //! overriding --seed and --world.
 //! --shot draws the first frame once all it shows is in, at 1280×800 or
-//! --size, offscreen, and saves it; --bench only times the first frame
-//! once the world has all its tiles, the main thread's frames after, and
-//! the GPU drawing the last. --stroll S then flies on for S seconds
-//! (walks, --on-ground) as the window would, a frame every 60th, and times each frame's parts.
+//! --size, offscreen, and saves it; --bench only times it, the main
+//! thread's frames after, and the GPU drawing the last. --stroll S then
+//! flies on for S seconds (walks, --on-ground) as the window would, a
+//! frame every 60th: at --speed units a second, --heading degrees off the
+//! way it looks (90 flies sideways), turning --turn degrees a second. It
+//! times each frame's parts, and counts what the frames asked for and the
+//! world owed them: what a view shows too late.
+//! --by-work gives the world's threads each frame's time on their cores
+//! before the next, as if drawing took none: a software GPU takes most.
 //! When the window panics or loses its GPU device, it says what it showed as these arguments.
 //! --record writes each of the window's frames to a file, and --replay
 //! draws them again offscreen, each at its time, with the world and threads
@@ -42,6 +47,7 @@ mod window;
 mod world;
 
 use std::io::Write;
+use std::sync::Arc;
 use std::time::Instant;
 
 use bake::walk::{COLLISION_LEVEL, Ground, WalkInput, Walker};
@@ -49,7 +55,7 @@ use bake::walk::{COLLISION_LEVEL, Ground, WalkInput, Walker};
 use engine::{Colours, Engine, Frame, Kind, Look, Picture};
 use gpu::Easel;
 use view::{Vec3, view_basis};
-use world::{Make, TILE, Wants, World};
+use world::{Make, Piece, TILE, Wants, World};
 use worldgen::light::{Brightness, Shared};
 
 /** The world shown unless --world names another (worlds::WORLDS). */
@@ -203,7 +209,7 @@ impl window::Content for App {
                 record(file, start.elapsed().as_secs_f64(), self.kind, look, self.world.shared(), self.walker.is_some(), &self.stats);
             }
             // Drawn from the next frame on.
-            let arrived = self.world.update(look.camera, &with_ground(frame.wants, self.walker.is_some()));
+            let arrived = self.world.update(look.camera, &with_ground(frame.wants, self.walker.is_some(), &self.world, look.camera));
             let pixels = ui.ctx().pixels_per_point();
             self.remember([rect.width() * pixels, rect.height() * pixels]);
             self.picture = Some((frame.picture, rect));
@@ -285,7 +291,7 @@ fn replay(
             std::thread::sleep(wait);
         }
         let frame = engine.frame(&look, world);
-        world.update(look.camera, &with_ground(frame.wants, walking));
+        world.update(look.camera, &with_ground(frame.wants, walking, world, look.camera));
         let next = easel.draw(&*frame.picture, look.size.map(|v| v as u32));
         if let Some(last) = last.replace(next) {
             easel.wait_for(last);
@@ -303,15 +309,22 @@ fn replay(
     for (t, look, picture) in &kept {
         let pixels = look.size.map(|v| v as u32);
         easel.save(&**picture, pixels, &format!("{dir}/{t:08.3}-shown.png"));
-        let whole = drawn_complete(&mut *engine, world, look, false, &mut easel);
+        let whole = drawn_complete(&mut *engine, world, look, &mut easel);
         easel.save(&*whole.picture, pixels, &format!("{dir}/{t:08.3}-complete.png"));
     }
 }
 
-/** What the world is to make for `wants`; walking, the ground's level too, whether drawn or not, a tile around at least. */
-fn with_ground(mut wants: Wants, walking: bool) -> Wants {
-    let ground = &mut wants.reach[COLLISION_LEVEL as usize];
-    *ground = ground.or(walking.then_some(TILE as f64));
+/**
+ * What the world is to make for `wants`; walking, first the ground's level
+ * a tile around the body at `camera`, which it asks for whether seen or not.
+ */
+fn with_ground(mut wants: Wants, walking: bool, world: &World, camera: Vec3) -> Wants {
+    if walking {
+        let level = COLLISION_LEVEL as usize;
+        wants.reach[level] = wants.reach[level].or(Some(TILE as f64));
+        let ground = world.lacking(level, TILE as f64, camera).into_iter().map(|id| (level, Piece::Tile(id)));
+        wants.asked = Arc::new(ground.chain(wants.asked.iter().copied()).collect());
+    }
     wants
 }
 
@@ -361,27 +374,24 @@ impl App {
 
 /**
  * Frames of `look` until all it shows is in: every tile it lacks made,
- * and all the engine makes of them; and, if `whole`, every tile the world
- * would make around it, else it makes no more: they would only take cores
- * from the GPU's drawing. Says when.
+ * and all the engine makes of them. Says when.
  */
-fn complete(engine: &mut dyn Engine, world: &mut World, look: &Look, whole: bool) -> Frame {
+fn complete(engine: &mut dyn Engine, world: &mut World, look: &Look) -> Frame {
     let start = Instant::now();
     loop {
         let frame = engine.frame(look, world);
-        let shown = frame.wants.tiles.is_empty() && !frame.busy;
-        if shown && !whole {
-            world.stop();
-        } else if world.update(look.camera, &frame.wants) || engine.wait() {
-            continue;
-        } else if world.making() > 0 {
-            world.wait();
-            continue;
-        }
-        if shown {
+        if !world.lacks(&frame.wants) && !frame.busy {
             println!("the view complete after {:.2} s", start.elapsed().as_secs_f64());
+            return frame;
         }
-        return frame;
+        if world.update(look.camera, &frame.wants) || engine.wait() {
+            continue;
+        }
+        // Nothing came and nothing is to come: the engine is to be drawn, to ask for more (drawn_complete).
+        if world.making() == 0 {
+            return frame;
+        }
+        world.wait();
     }
 }
 
@@ -391,9 +401,9 @@ fn complete(engine: &mut dyn Engine, world: &mut World, look: &Look, whole: bool
  * painter asks the engine for what it left out (the chunks' probes of
  * cells hidden that show): so that all it shows is in.
  */
-fn drawn_complete(engine: &mut dyn Engine, world: &mut World, look: &Look, whole: bool, easel: &mut Easel) -> Frame {
+fn drawn_complete(engine: &mut dyn Engine, world: &mut World, look: &Look, easel: &mut Easel) -> Frame {
     loop {
-        let frame = complete(engine, world, look, whole);
+        let frame = complete(engine, world, look);
         easel.settle(&*frame.picture, look.size.map(|v| v as u32));
         if !easel.painter.as_ref().is_some_and(|p| p.asked()) {
             return frame;
@@ -402,16 +412,20 @@ fn drawn_complete(engine: &mut dyn Engine, world: &mut World, look: &Look, whole
 }
 
 /**
- * --bench, --stroll and --shot: the view of `look` once complete (with all
- * the world would make around it, if timed), timed, strolled on from for
+ * --bench, --stroll and --shot: the view of `look` once complete, timed, strolled on from for
  * `seconds`, walking on the ground if `on_ground`, and saved.
  */
-fn offscreen(engine: &mut dyn Engine, world: &mut World, look: Look, bench: bool, stroll: Option<(f64, bool)>, shot: Option<&str>) {
+fn offscreen(engine: &mut dyn Engine, world: &mut World, look: Look, bench: bool, stroll: Option<Stroll>, shot: Option<&str>) {
     let mut easel = Easel::offscreen(None);
     let start = Instant::now();
-    let frame = drawn_complete(engine, world, &look, bench || stroll.is_some(), &mut easel);
+    let frame = drawn_complete(engine, world, &look, &mut easel);
     let (seconds, threads) = (start.elapsed().as_secs_f64(), world.threads);
-    println!("first frame complete in {seconds:.2} s on {threads} threads: {}", frame.stats.replace('\n', ", "));
+    let worked = world.worked();
+    let (all, most) = (worked.iter().sum::<f64>(), worked.iter().copied().fold(0.0, f64::max));
+    println!(
+        "first frame complete in {seconds:.2} s on {threads} threads, their work {all:.2} s, the busiest's {most:.2} s: {}",
+        frame.stats.replace('\n', ", ")
+    );
     let pixels = look.size.map(|v| v as u32);
     if bench {
         // What a frame costs the main thread once all is made, still and turning.
@@ -425,8 +439,8 @@ fn offscreen(engine: &mut dyn Engine, world: &mut World, look: Look, bench: bool
         let ms = easel.time(&*frame.picture, pixels, 30);
         println!("drawn again and again, the frame takes {ms:.1} ms{}", easel.describe());
     }
-    if let Some((seconds, on_ground)) = stroll {
-        self::stroll(seconds, on_ground, engine, world, look, &mut easel);
+    if let Some(stroll) = stroll {
+        self::stroll(stroll, engine, world, look, &mut easel);
     }
     if let Some(path) = shot {
         easel.save(&*frame.picture, pixels, path);
@@ -435,41 +449,99 @@ fn offscreen(engine: &mut dyn Engine, world: &mut World, look: Look, bench: bool
 }
 
 /**
- * Moves on along the view for `seconds` at SPEED, flying, or
- * walking on the ground if `on_ground`, a frame every 60th of a
- * second as the window draws it, the GPU a frame behind, and says what
- * the frames cost, and where the slowest were.
+ * --stroll: for how many seconds, walking on the ground or flying at
+ * `speed` (units a second), how far off the way the view looks at first
+ * (degrees), turning how fast (degrees a second), and whether the world's
+ * threads get each frame's time on their cores (`worked_a_frame`).
  */
-fn stroll(seconds: f64, on_ground: bool, engine: &mut dyn Engine, world: &mut World, mut look: Look, easel: &mut Easel) {
+struct Stroll {
+    seconds: f64,
+    on_ground: bool,
+    speed: f64,
+    heading: f64,
+    turn: f64,
+    by_work: bool,
+}
+
+/** A frame's time, as the window draws them. */
+const FRAME: f64 = 1.0 / 60.0;
+
+/**
+ * How long the world's threads took from `before` to `after`
+ * (World::worked), had they the cores to themselves: as long as the
+ * busiest was on one.
+ */
+fn passed(before: &[f64], after: &[f64]) -> f64 {
+    after.iter().zip(before).map(|(a, b)| a - b).fold(0.0, f64::max)
+}
+
+/**
+ * Waits till the world's threads have had a frame's time on their cores
+ * since `before` (World::worked), or work no more, with nothing left to
+ * do: what they would do in a frame, did drawing it take none of their
+ * cores. Idle is a guess: a millisecond in which none worked a twentieth
+ * of it, which threads starved of their cores would pass for too.
+ */
+fn worked_a_frame(world: &World, before: &[f64]) {
+    let mut last = 0.0;
+    loop {
+        std::thread::sleep(std::time::Duration::from_millis(1));
+        let passed = passed(before, &world.worked());
+        if passed >= FRAME || passed - last < 5e-5 {
+            return;
+        }
+        last = passed;
+    }
+}
+
+/**
+ * Moves on for `seconds`, `heading` off the view, flying at `speed`, or
+ * walking on the ground if `on_ground`, a frame every 60th of a
+ * second as the window draws it (the world's threads given that long on
+ * their cores, if `by_work`), the GPU a frame behind. Says what the
+ * frames cost and where the slowest were; what they asked for (where
+ * rays took a coarser level) and the world owed them, tiles to make and
+ * bricks to light (World::owed), on average and at most; and how long
+ * after the last frame its view was complete.
+ */
+fn stroll(stroll: Stroll, engine: &mut dyn Engine, world: &mut World, mut look: Look, easel: &mut Easel) {
+    let Stroll { seconds, on_ground, speed, heading, turn, by_work } = stroll;
     let pixels = look.size.map(|v| v as u32);
     // All of the first frame is new to this GPU.
     let mut last = easel.draw(&*engine.frame(&look, world).picture, pixels);
-    let forward = view_basis(look.yaw, 0.0)[2];
+    let (forward, heading) = (view_basis(look.yaw + heading, 0.0)[2], look.yaw + heading);
     let mut walker = Walker::at(look.camera);
     let ms = |a: Instant, b: Instant| (b - a).as_secs_f64() * 1000.0;
-    let (mut times, mut cameras, mut short) = (Vec::new(), Vec::new(), 0);
-    for _ in 0..((seconds * 60.0) as usize).max(1) {
+    let (mut times, mut cameras, mut short, mut owed) = (Vec::new(), Vec::new(), 0, Vec::new());
+    for _ in 0..((seconds / FRAME) as usize).max(1) {
         look.camera = if on_ground {
             let ground = Ground { tiles: &world.level(COLLISION_LEVEL as usize).grids };
-            let input = WalkInput { forward: 1.0, right: 0.0, yaw: look.yaw, jump: false, sneak: false };
-            walker = walker.walk(input, 1.0 / 60.0, &ground);
+            let input = WalkInput { forward: 1.0, right: 0.0, yaw: heading, jump: false, sneak: false };
+            walker = walker.walk(input, FRAME, &ground);
             walker.eye()
         } else {
-            std::array::from_fn(|d| look.camera[d] + forward[d] * SPEED / 60.0)
+            std::array::from_fn(|d| look.camera[d] + forward[d] * speed * FRAME)
         };
+        look.yaw += turn * FRAME;
         cameras.push(look.camera);
         let start = Instant::now();
         let frame = engine.frame(&look, world);
         let framed = Instant::now();
-        let wants = with_ground(frame.wants, on_ground);
+        let wants = with_ground(frame.wants, on_ground, world, look.camera);
+        let worked = by_work.then(|| world.worked());
         world.update(look.camera, &wants);
+        if let Some(worked) = worked {
+            worked_a_frame(world, &worked);
+        }
+        let [tiles, bricks] = world.owed();
+        owed.push([wants.asked.len(), tiles, bricks]);
         let updated = Instant::now();
         let next = easel.draw(&*frame.picture, pixels);
         let drawn = Instant::now();
         easel.wait_for(std::mem::replace(&mut last, next));
         let end = Instant::now();
         times.push([ms(start, framed), ms(framed, updated), ms(updated, drawn), ms(drawn, end), ms(start, end)]);
-        short += usize::from(frame.busy || !wants.tiles.is_empty());
+        short += usize::from(frame.busy || world.lacks(&wants));
     }
     println!("{} frames, {short} with what they show still coming; ms at the median, 90th and 99th percentile, and most:", times.len());
     for (k, name) in ["engine", "world", "upload", "GPU", "frame"].iter().enumerate() {
@@ -478,6 +550,14 @@ fn stroll(seconds: f64, on_ground: bool, engine: &mut dyn Engine, world: &mut Wo
         let at = |q: f64| t[((t.len() - 1) as f64 * q) as usize];
         println!("  {name:>6}: {:6.1} {:6.1} {:6.1} {:6.1}", at(0.5), at(0.9), at(0.99), at(1.0));
     }
+    for (k, name) in ["tiles and bricks asked for", "tiles owed", "bricks owed"].iter().enumerate() {
+        let (sum, most) = owed.iter().fold((0, 0), |(sum, most), o| (sum + o[k], most.max(o[k])));
+        println!("  {name}: {:.1} on average, {most} at most", sum as f64 / owed.len() as f64);
+    }
+    let (start, worked) = (Instant::now(), world.worked());
+    complete(engine, world, &look);
+    let (wall, work) = (start.elapsed().as_secs_f64(), passed(&worked, &world.worked()));
+    println!("  caught up {wall:.2} s after the last frame, its threads' work {work:.2} s");
     let mut slowest: Vec<usize> = (0..times.len()).collect();
     slowest.sort_by(|&a, &b| times[b][4].total_cmp(&times[a][4]));
     for &k in slowest.iter().take(5) {
@@ -601,7 +681,15 @@ fn main() {
         return;
     }
     if ["--bench", "--shot", "--stroll"].into_iter().any(flag) {
-        let stroll = value("--stroll").map(|v| (v.parse().expect("seconds"), flag("--on-ground")));
+        let number = |name: &str, unless: f64| value(name).map_or(unless, |v| v.parse().unwrap_or_else(|_| panic!("{name}: a number")));
+        let stroll = value("--stroll").map(|v| Stroll {
+            seconds: v.parse().expect("seconds"),
+            on_ground: flag("--on-ground"),
+            speed: number("--speed", SPEED),
+            heading: number("--heading", 0.0),
+            turn: number("--turn", 0.0),
+            by_work: flag("--by-work"),
+        });
         offscreen(&mut *engine, &mut world, look, flag("--bench"), stroll, value("--shot"));
         return;
     }
@@ -688,10 +776,14 @@ mod tests {
         let mut world = World::new(make, 1, None, 4);
         let spawn = make(1).spawn.map(|v| v as f64);
         let look = Look { fog: f64::INFINITY, detail: 8.0, ..Look::new(spawn, [45.0, 0.0], FOV, 1000.0, [320.0, 200.0]) };
-        let mut engine = kind.make(&world);
-        let frame = complete(&mut *engine, &mut world, &look, false);
-        let (width, _, pixels) = Easel::offscreen(None).pixels(&*frame.picture, [320, 200]);
-        (width, pixels)
+        (320, drawn(&mut *kind.make(&world), &mut world, &look))
+    }
+
+    /** The pixels of the view of `look` as `engine` draws it once complete, at the look's size. */
+    fn drawn(engine: &mut dyn Engine, world: &mut World, look: &Look) -> Vec<u8> {
+        let mut easel = Easel::offscreen(None);
+        let frame = drawn_complete(engine, world, look, &mut easel);
+        easel.pixels(&*frame.picture, look.size.map(|v| v as u32)).2
     }
 
     /** Red ground under y = 0, endless. */
@@ -716,8 +808,7 @@ mod tests {
         for kind in [Kind::Reliefs, Kind::Flat] {
             let mut world = World::new(ground, 1, None, 4);
             let look = Look { fog: f64::INFINITY, ..Look::new([0.0, 16.0, 0.0], [45.0, -10.0], FOV, 1000.0, PIXELS.map(f64::from)) };
-            let frame = complete(&mut *kind.make(&world), &mut world, &look, false);
-            let (width, _, pixels) = Easel::offscreen(None).pixels(&*frame.picture, PIXELS);
+            let (width, pixels) = (PIXELS[0], drawn(&mut *kind.make(&world), &mut world, &look));
             let [right, up, forward] = view::view_basis(look.yaw, look.pitch);
             let focal = look.view().focal;
             let (mut ground, mut gaps) = (0, 0);
@@ -842,9 +933,7 @@ mod tests {
             let mut world = World::new(sheeted_block, 1, light.map(Shared::new), 4);
             let at = Look::new([0.0, -distance, 0.0], [0.0, 80.0], FOV, 8000.0, [320.0, 200.0]);
             let look = Look { fog: f64::INFINITY, light, ..at };
-            let mut easel = Easel::offscreen(None);
-            let frame = drawn_complete(&mut *Kind::Voxels.make(&world), &mut world, &look, false, &mut easel);
-            let pixels = easel.pixels(&*frame.picture, [320, 200]).2;
+            let pixels = drawn(&mut *Kind::Voxels.make(&world), &mut world, &look);
             let (white, red) = pixels.chunks(4).fold((0, 0), |(w, r), p| {
                 let [red, green, blue] = [p[0], p[1], p[2]].map(i32::from);
                 (w + usize::from(red > 100 && (red - green).abs() < 8 && (red - blue).abs() < 8), r + usize::from(red > green + 60))
@@ -884,8 +973,7 @@ mod tests {
         let camera = std::array::from_fn(|i| spawn[i] + eye[i]);
         let look = Look { fog: f64::INFINITY, ..Look::new(camera, angles, FOV, 200.0, [320.0, 200.0]) };
         let mut engine = Kind::Voxels.make(&world);
-        let frame = complete(&mut *engine, &mut world, &look, false);
-        Easel::offscreen(None).pixels(&*frame.picture, [320, 200]).2
+        drawn(&mut *engine, &mut world, &look)
     }
 
     #[test]
@@ -897,8 +985,7 @@ mod tests {
             let spawn = make(1).spawn.map(|v| v as f64);
             let look = Look::new(spawn, [YAW, PITCH], FOV, RENDER_DISTANCE, SHOT);
             let mut engine = Kind::Voxels.make(&world);
-            let frame = complete(&mut *engine, &mut world, &look, false);
-            let pixels = Easel::offscreen(None).pixels(&*frame.picture, SHOT.map(|v| v as u32)).2;
+            let pixels = drawn(&mut *engine, &mut world, &look);
             // Lost rays show magenta (voxels.wgsl's LOST).
             let lost = pixels.chunks(4).filter(|p| p[..3] == [255, 0, 255]).count();
             assert_eq!(lost, 0, "pixels of rays that ran out of steps");

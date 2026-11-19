@@ -423,8 +423,14 @@ Numbers are for the forest at 1280×800, as measured when written.
 - **Walking, native keeps more than a core busy**
   (the valley, `--stroll 20 --on-ground`, outside the GPU driver),
   measured when it drew slices: new tiles took about a third.
-  Lit, about 1.6 times that: the light itself (`Light::light` most),
-  and new tiles half as much again, why is open.
+- **Native's voxels, lit, are lit slower than the eye moves**
+  (the valley, `--light 1,1,0 --stroll 8 --speed 100 --by-work`, and walking):
+  four threads, the cores to themselves,
+  owe the view hundreds of bricks all the while,
+  so each level shows lit less far than it reads, the next coarser past there.
+  Nearly all of their work is then the light, a quarter of it its blocks;
+  no part of it stands out ([light.md](light.md), "In native, and what it costs").
+  Its tiles come in time, made before the bricks are lit.
 - **Native's medium costs a fragment per slab a ray crosses**
   (architecture.md, "See-through"), as far as the view goes:
   pictures laid far to near, nothing behind what all but stops a ray is left out.
@@ -443,11 +449,27 @@ Numbers are for the forest at 1280×800, as measured when written.
   - A site's pieces, where shown, hide its medium and what is behind:
     right on average, but a coarse site of a crown in mist
     is a whole voxel or mist, never the crown's grain seen through mist.
-- **Native's voxels, lit, light what rays ask for a frame or two late**
+- **Native's voxels show what rays ask for a frame or two late**
   (architecture.md, "Native: another engine"):
   turning, what comes into view shows coarser first,
-  as every ray past the window's edge does, till its bricks are lit.
+  as every ray past the window's edge does,
+  till its tiles are made and its bricks placed, and lit.
+  Every tile around the eye made beforehand spared little of that
+  (lit and turning, an eighth fewer bricks asked for a frame; shaded, none),
+  for many times the tiles: not kept.
   The light takes twice the bricks' memory, so the pool holds a third as many.
+- **Native's voxels, shaded, read each level as far as lit**,
+  now that their pool holds only the bricks asked for:
+  twice as far as when it held every brick around the eye,
+  finer far off, and more steps a ray, so more of the GPU's time.
+  Seen on a software GPU only; how far is worth it on a real one is open.
+- **Native's voxels ask for a tile before any light, however far it is**
+  (`Voxels::frame`):
+  tiles and bricks in one order, nearest first, was tried,
+  and rays took a coarser level at half as many bricks again,
+  as a tile's bricks are asked for only once it is made.
+  And a window grows when all its ball would gain fits (`Windows::sync`),
+  counting, shaded, every brick of it, and lit, only those lit.
 - **Native, lit, holds three quarters more than it does shaded**,
   and more as the eye moves:
   the light's blocks (`Shared`) are kept wherever tiles are,
@@ -462,10 +484,14 @@ Numbers are for the forest at 1280×800, as measured when written.
   Kept by all the threads, as the coarsest level's sites are,
   each would be found once, not by every thread that lights beside it.
 - **The light's blocks of level 3 cost several times their neighbours'**,
-  a block, lighting the valley's first view: why is open.
-- **Native's voxels make every tile of their balls**, lit or not:
-  in the cheese, hundreds for a view whose walls hide all but a few.
-  Rays could ask for tiles as they ask for bricks to light.
+  a block, lighting the valley's first view:
+  those a town reaches,
+  where each of its buildings is measured for its far form
+  (`measure` in `forms.rs`), once a box, whatever the box's size.
+  Few are measured twice, so keeping them would not help;
+  measuring goes over all of a thing's box, most of it empty.
+  So `voxels_show_the_faces_rays_enter_by`, lit, takes over ten minutes
+  on a software GPU's machine: its one block, 512 wide, is measured for each box of light.
 - **Native's voxels wait on memory** (`march` in `voxels.wgsl`):
   most of a frame is its samples' rays, some 50 steps each,
   and a step costs its reads one after another (a brick's slot, then its site),

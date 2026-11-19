@@ -20,7 +20,7 @@ use renderer::Renderer;
 
 use super::{Colours, Engine, Frame, Look, Picture};
 use crate::gpu::Easel;
-use crate::world::{Level, Lit, Wants, World};
+use crate::world::{Level, Lit, Piece, Wants, World};
 
 /** What passes between the renderer's thread and the one that draws. */
 #[derive(Default)]
@@ -163,7 +163,11 @@ impl Engine for Chunks {
             ),
             picture: Box::new(Composed { frame, view: View::new(look) }),
             // Whichever way the eye turns.
-            wants: Wants { reach: std::array::from_fn(reach), lit, tiles: stats.tiles, bricks: Arc::default() },
+            wants: Wants {
+                reach: std::array::from_fn(reach),
+                lit,
+                asked: Arc::new(stats.tiles.into_iter().map(|(level, id)| (level, Piece::Tile(id))).collect()),
+            },
             busy: self.busy,
         }
     }
@@ -233,7 +237,7 @@ mod tests {
 
     /** What `chunks` draws of `world` as `look` sees it, once complete. */
     fn complete(chunks: &mut Chunks, world: &mut World, look: &Look) -> Composed {
-        let picture: Box<dyn Any> = crate::complete(chunks, world, look, false).picture;
+        let picture: Box<dyn Any> = crate::complete(chunks, world, look).picture;
         *picture.downcast().expect("chunks")
     }
 
@@ -337,7 +341,7 @@ mod tests {
             let look = Look { hides, ..look };
             let (mut chunks, mut easel) = (Chunks::new(&world, true, false), Easel::offscreen(None));
             let mut drawn = |look: &Look| {
-                let frame = crate::drawn_complete(&mut chunks, &mut world, look, false, &mut easel);
+                let frame = crate::drawn_complete(&mut chunks, &mut world, look, &mut easel);
                 let pixels = easel.pixels(&*frame.picture, PIXELS).2;
                 let composed: Box<dyn Any> = frame.picture;
                 let composed: Box<Composed> = composed.downcast().expect("chunks");
