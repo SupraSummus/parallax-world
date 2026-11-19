@@ -289,14 +289,18 @@ railway's tunnels carving	1	0.031	0.148
 railway's tunnels carving	2	0.021	0.150
 railway's tunnels carving	3	0.045	0.131
 railway's tunnels carving	4	0.071	0.125
-sea sand	1	0.036	0.125
-sea sand	2	0.018	0.101
+sea sand	1	0.036	0.157
+sea sand	2	0.024	0.128
 sea sand	3	0.067	0.122
-sea sand	4	0.104	0.135
-sea water	1	0.036	0.125
-sea water	2	0.018	0.101
-sea water	3	0.067	0.122
-sea water	4	0.104	0.135
+sea sand	4	0.077	0.139
+sea sea	1	0.036	0.157
+sea sea	2	0.024	0.128
+sea sea	3	0.067	0.122
+sea sea	4	0.077	0.139
+sea seaTop	1	0.036	0.157
+sea seaTop	2	0.024	0.128
+sea seaTop	3	0.067	0.122
+sea seaTop	4	0.077	0.139
 stations brick	1	0.049	0.154
 stations brick	2	0.024	0.160
 stations brick	3	0.030	0.142
@@ -418,10 +422,10 @@ streets slab	2	0.034	0.133
 streets slab	3	0.059	0.145
 streets slab	4	0.052	0.139
 terrain grass	3	0.057	0.094
-terrain litter	1	0.045	0.131
-terrain litter	2	0.028	0.118
-terrain litter	3	0.054	0.118
-terrain litter	4	0.049	0.115
+terrain litter	1	0.049	0.128
+terrain litter	2	0.030	0.108
+terrain litter	3	0.065	0.114
+terrain litter	4	0.055	0.113
 terrain moss	1	0.030	0.132
 terrain moss	2	0.022	0.126
 terrain moss	3	0.042	0.128
