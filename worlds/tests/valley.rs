@@ -5,6 +5,7 @@ use std::rc::Rc;
 use worldgen::domain::Scope;
 use worldgen::generator::{Layer, generate, kind_of};
 use worldgen::grid::{ALPHA, Box3, is_site};
+use worldgen::light::{TILE, make_tile, make_tiles, tile_box};
 use worldgen::picture::{Camera, picture};
 use worldgen::units::UNIT_SIZE;
 use worlds::valley::landmarks::{LANDMARKS, Landmark, Landmarks, NEAR, Site};
@@ -25,6 +26,40 @@ fn the_forest_keeps_off_the_first_towns_main_street() {
     let street =
         Box3 { min: [town.x - 2, town.level + 8, town.z - unit(60.0)], max: [town.x + 2, town.level + unit(30.0), town.z - unit(40.0)] };
     assert!(generate(&world.generator, &street, 0).shown.iter().all(|shown| !shown), "something stands on the main street");
+}
+
+/**
+ * A host makes the tiles one above another as one box (make_tiles): each
+ * is as made alone wherever a voxel may show. Buried, a site may differ:
+ * rock under a box is of one shade from its bottom up.
+ */
+#[test]
+fn tiles_made_together_show_what_each_shows_alone() {
+    let world = valley(42);
+    for level in [0, 3] {
+        let heights = world.heights_at(level);
+        let [x, y, z] = world.spawn.map(|v| (v >> level).div_euclid(TILE));
+        let together = make_tiles(&world.generator, level, heights, [x, y - 1, z], y + 1);
+        let mut shown = 0;
+        for (y, together) in (y - 1..).zip(&together) {
+            let (alone, b) = (make_tile(&world.generator, level, heights, [x, y, z]), tile_box(heights, [x, y, z]));
+            let faces = |g: &fcc::Grid, [x, y, z]: [i32; 3]| std::array::from_fn::<_, { fcc::FACE_KINDS }, _>(|k| g.face(x, y, z, k));
+            let held = |g: &fcc::Grid, p @ [x, y, z]: [i32; 3]| (g.get(x, y, z), faces(g, p), g.solid(x, y, z), g.glow(x, y, z));
+            let whole = |p: [i32; 3]| [&alone, together].iter().all(|g| fcc::alpha_of(g.get(p[0], p[1], p[2])) == ALPHA);
+            let sites =
+                (b.min[0]..b.max[0]).flat_map(|x| (b.min[1]..b.max[1]).flat_map(move |y| (b.min[2]..b.max[2]).map(move |z| [x, y, z])));
+            for p in sites.filter(|&[x, y, z]| is_site(x, y, z)).map(|p| p.map(|v| v as i32)) {
+                let around = fcc::VOXEL_FACES.iter().flat_map(|f| [1, -1].map(|n| [0, 1, 2].map(|a| p[a] + n * f[a])));
+                // Whole, and all around it in the tile too: no ray gets to it.
+                if whole(p) && around.filter(|q| b.holds(q.map(i64::from))).all(whole) {
+                    continue;
+                }
+                assert_eq!(held(together, p), held(&alone, p), "level {level}, site {p:?}");
+                shown += u32::from(alone.get(p[0], p[1], p[2]) != 0);
+            }
+        }
+        assert!(shown > 10_000, "level {level}: only {shown} voxels that may show");
+    }
 }
 
 /** Nothing standing over a tunnel reaches into its bore: the railway's bores are carved last, the track in them drawn after. */

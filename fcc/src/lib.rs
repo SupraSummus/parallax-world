@@ -217,6 +217,38 @@ impl Grid {
         }
     }
 
+    /**
+     * Its part in the box of `n` sites from `min`, a box of its bricks:
+     * their sites, shared as they are here. What a grid made as one box
+     * holds of each of the tiles it spans.
+     */
+    pub fn part(&self, min: [i32; 3], n: [i32; 3]) -> Grid {
+        debug_assert!((0..3).all(|a| (min[a] - self.min[a]) % BRICK == 0), "a part is of whole bricks");
+        let mut part = Grid::new(min, n, 0);
+        let count = n.map(|v| (v.max(0) + BRICK - 1) / BRICK);
+        // By brick of sites here, where it is in the part, in bricks.
+        let mut moved = vec![None; self.cells.len() / BRICK_SITES];
+        for (place, [i, j, k]) in
+            (0..count[2]).flat_map(|k| (0..count[1]).flat_map(move |j| (0..count[0]).map(move |i| [i, j, k]))).enumerate()
+        {
+            let Ok(at) = usize::try_from(self.brick(min[0] + i * BRICK, min[1] + j * BRICK, min[2] + k * BRICK)) else { continue };
+            let to = *moved[at].get_or_insert_with(|| {
+                part.cells.extend_from_slice(&self.cells[at * BRICK_SITES..][..BRICK_SITES]);
+                part.solid.extend_from_slice(&self.solid[at * BRICK_SITES / 32..][..BRICK_SITES / 32]);
+                part.cells.len() / BRICK_SITES - 1
+            });
+            part.bricks[place] = to as i32;
+        }
+        let kept = |words: &[u32], per: usize| -> Vec<u32> {
+            let to = |i: u32| moved[i as usize / BRICK_SITES].map(|to| (to * BRICK_SITES + i as usize % BRICK_SITES) as u32);
+            let mut sites: Vec<Vec<u32>> = words.chunks(per).filter_map(|w| Some([&[to(w[0])?], &w[1..]].concat())).collect();
+            sites.sort_unstable_by_key(|w| w[0]);
+            sites.concat()
+        };
+        (part.views, part.glow) = (kept(&self.views, VIEW_WORDS), kept(&self.glow, GLOW_WORDS));
+        part
+    }
+
     /** The place in `bricks` of the brick holding site (x, y, z); None if it is outside. */
     #[inline]
     pub fn place(&self, x: i32, y: i32, z: i32) -> Option<usize> {
@@ -474,6 +506,31 @@ mod tests {
         }
         assert!(tiles.has_all([[0, 0, 0], [1, 0, 0]]) && tiles.has_all([[0, 0, 0], [0, 1, 0]]));
         assert!(!tiles.has_all([[0, 0, 0], [1, 1, 0]]) && !tiles.has([0, 0, 1]));
+    }
+
+    #[test]
+    fn a_part_holds_its_boxs_sites_as_the_grid_does() {
+        // Two bricks along y sharing sites, a third above with a site that glows and one unlike through its faces.
+        let mut grid = Grid::new([0, 0, 0], [8, 24, 8], 2);
+        grid.bricks = vec![0, 0, 1];
+        let index = |[x, y, z]: [i32; 3]| (((z * BRICK + y % BRICK) * BRICK + x) >> 1) as usize;
+        let (rock, lamp, painted) = ([2, 2, 2], [2, 18, 2], [4, 20, 2]);
+        grid.cells[index(rock)] = 7;
+        grid.solid[index(rock) / 32] = 1 << (index(rock) % 32);
+        for site in [lamp, painted] {
+            grid.cells[BRICK_SITES + index(site)] = 1;
+        }
+        grid.glow = vec![(BRICK_SITES + index(lamp)) as u32, 1, 2, 3];
+        grid.views = [(BRICK_SITES + index(painted)) as u32].into_iter().chain((0..FACE_KINDS as u32).map(|k| 10 + k)).collect();
+        let held = |g: &Grid, [x, y, z]: [i32; 3]| (g.get(x, y, z), g.face(x, y, z, 3), g.solid(x, y, z), g.glow(x, y, z));
+        for (y, n, bricks) in [(0, 16, 1), (8, 16, 2), (16, 8, 1), (0, 24, 2)] {
+            let part = grid.part([0, y, 0], [8, n, 8]);
+            assert_eq!(part.cells.len(), bricks * BRICK_SITES, "from y = {y}: bricks sharing sites still do");
+            for site in [rock, [2, 10, 2], lamp, painted, [6, 6, 2]] {
+                let inside = (y..y + n).contains(&site[1]);
+                assert_eq!(held(&part, site), if inside { held(&grid, site) } else { (0, 0, false, [0; 3]) }, "{site:?} from y = {y}");
+            }
+        }
     }
 
     #[test]

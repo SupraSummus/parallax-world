@@ -142,7 +142,7 @@ not the world's tiles, which keep of a site only what is drawn:
 what is lit is generated twice, as a tile and as blocks,
 till hosts read sites as light does
 ("Cells hold what they look like" in [generators.md](generators.md));
-the tiles' own (`TILE`, `tile_box`, `make_tile`) are still in `light.rs`,
+the tiles' own (`TILE`, `tile_box`, `make_tiles`) are still in `light.rs`,
 which no longer makes them;
 but each finds light again where another found it
 (all but the coarsest level's: `Shared`'s `top`),

@@ -2,9 +2,10 @@
 //! world, cubes TILE sites of the level a side (worldgen's tile_box), no
 //! axis apart from the others: asked for, made and dropped by how far they
 //! are from the camera, as the crow flies. Of each, only what may show is
-//! generated (worldgen's make_tile): none of it above or below the world's
-//! heights, nor where its layers say it is empty or buried; alone on the
-//! world's threads (a generator per thread) and indexed there.
+//! generated (worldgen's make_tiles): none of it above or below the world's
+//! heights, nor where its layers say it is empty or buried; on the
+//! world's threads (a generator per thread), the tiles wanted one above
+//! another together if the world has heights, and indexed there.
 //! Which tiles, and in what order, is up to the engine drawing them (Wants): every update hands over the tiles it misses for
 //! what is in view, most wanted first, replacing the previous list; then
 //! the rest of each level it reads, as far around the camera as it reads
@@ -26,7 +27,7 @@ use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use fcc::GRID_LEVELS;
 pub use fcc::TileId;
 use fcc::{Grid, Tiles};
-use worldgen::light::{Light, Shared, make_tile};
+use worldgen::light::{Light, Shared, make_tiles};
 
 use crate::engine::voxels;
 use crate::view::Vec3;
@@ -228,6 +229,22 @@ struct Queue {
     lighting: u32,
 }
 
+impl Queue {
+    /** Takes the tiles wanted right below and right above tile `id` of `level`, to be made with it (make_tiles): how many below, and above. */
+    fn column(&mut self, level: usize, id: TileId) -> [i32; 2] {
+        [-1, 1].map(|way| {
+            let mut taken = 0;
+            loop {
+                let next = (level, Piece::Tile([id[0], id[1] + way * (taken + 1), id[2]]));
+                let Some(at) = self.wanted.iter().position(|job| (job.0, job.1) == next) else { return taken };
+                self.wanted.remove(at);
+                self.in_flight.insert(next);
+                taken += 1;
+            }
+        })
+    }
+}
+
 /** A piece done: a tile made, or a brick lit (its light in its tile). */
 type Made = (usize, Piece, Option<Arc<Tile>>);
 
@@ -285,36 +302,47 @@ pub fn behind_drawing() {
 fn work(make: Make, seed: u64, heights: &Heights, queue: &(Mutex<Queue>, Condvar), send: &Sender<Made>) {
     behind_drawing();
     // Made on the thread: a generator is not Send.
-    let generator = make(seed).generator;
+    let world = make(seed);
+    // A world with heights lies across y, so tiles one above another share most of their cost; an endless one's
+    // (the cheese) cost as much together as alone, and take a box that large.
+    let (generator, columns) = (world.generator, world.heights.is_some());
     // Made once there are tiles to light, and again when the light changes.
     let mut light: Option<(u32, Light)> = None;
     loop {
-        let ((level, piece, of), shared, lighting) = {
+        let ((level, piece, of), [below, above], shared, lighting) = {
             let mut q = queue.0.lock().expect("queue");
             loop {
                 if let Some(job) = q.wanted.pop_front() {
                     q.in_flight.insert((job.0, job.1));
-                    break (job, q.shared.clone(), q.lighting);
+                    let column = match job.1 {
+                        Piece::Tile(id) if columns => q.column(job.0, id),
+                        _ => [0, 0],
+                    };
+                    break (job, column, q.shared.clone(), q.lighting);
                 }
                 q = queue.1.wait(q).expect("queue");
             }
         };
-        let made = match piece {
+        let made: Vec<Made> = match piece {
             Piece::Brick(corner) => {
                 light.take_if(|(l, _)| *l != lighting);
                 let (_, light) =
                     light.get_or_insert_with(|| (lighting, Light::new(make(seed), shared.expect("light to light tiles with"))));
                 // A tile lit anew since (relight) is let go, and this light with it.
                 of.expect("the tile of a brick").lit(level as u32, corner, light);
-                None
+                vec![(level, piece, None)]
             }
-            Piece::Tile(id) => {
-                let (heights, key) = (heights[level], id.map(i64::from));
-                Some(Arc::new(Tile::new(id, Arc::new(make_tile(&generator, level as u32, heights, key)))))
+            Piece::Tile([x, y, z]) => {
+                let (first, last) = ([x, y - below, z], y + above);
+                let grids = make_tiles(&generator, level as u32, heights[level], first.map(i64::from), last.into());
+                let tile = |(y, grid)| (level, Piece::Tile([x, y, z]), Some(Arc::new(Tile::new([x, y, z], Arc::new(grid)))));
+                (first[1]..=last).zip(grids).map(tile).collect()
             }
         };
-        if send.send((level, piece, made)).is_err() {
-            return;
+        for made in made {
+            if send.send(made).is_err() {
+                return;
+            }
         }
     }
 }
@@ -553,6 +581,7 @@ mod tests {
      */
     #[test]
     fn cells_meet_the_voxels_they_hold() {
+        use worldgen::light::make_tile;
         let mut see_through = 0;
         for (name, level) in [("city", 0), ("moor", 0), ("forest", 2)] {
             let world = (worlds::by_name(name).expect("world").make)(1);
