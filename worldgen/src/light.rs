@@ -63,6 +63,8 @@ pub const TILE: i64 = 128;
 const BLOCK: i64 = 32;
 /** Sites whose light a Light keeps at each level, all forgotten once full: the finer sites around read it soon after it is found, seldom later. */
 const KEPT_SITES: usize = 1 << 13;
+/** Sites whose rounds a Light keeps, of every level together, and as many used before them (Recent): a site's rounds are read by every site it reflects on, round after round. */
+const KEPT_ROUNDS: usize = 1 << 14;
 
 /** A grid made once: those that want it while it is made wait. */
 type Made = Arc<OnceLock<Arc<VoxelGrid>>>;
@@ -178,8 +180,6 @@ struct Level {
     last: Option<(Box3, Arc<VoxelGrid>)>,
     /** What comes to sites, as found (KEPT_SITES). */
     paths: Map<[i64; 3], Rc<Paths>>,
-    /** The light coming to sites from each direction, by round (`round`), as found (KEPT_SITES each). */
-    rounds: Vec<Found>,
     /** The light coming to sites from each direction, settled, as found (KEPT_SITES); the coarsest level's is Shared's. */
     found: Found,
 }
@@ -205,6 +205,8 @@ pub struct Light {
     shared: Shared,
     /** By level, up to a renderer's coarsest grid's (GRID_LEVELS). */
     levels: Vec<Level>,
+    /** By level and site, the light coming to it from each direction in each round (`round`), from the first on. */
+    rounds: Recent<(usize, [i64; 3]), Vec<[Rgb; N]>>,
     unit: [[f64; 3]; N],
     /** Per face, how much the light from each direction weighs in the light on it (`on_face`). */
     cosines: [[f32; N]; N],
@@ -227,13 +229,7 @@ impl Light {
         let Brightness { sky, sun, .. } = shared.brightness;
         let coarsest = GRID_LEVELS as u32 - 1;
         let levels = (0..=coarsest)
-            .map(|level| Level {
-                heights: world.heights_at(level),
-                last: None,
-                paths: Map::default(),
-                rounds: Vec::new(),
-                found: Map::default(),
-            })
+            .map(|level| Level { heights: world.heights_at(level), last: None, paths: Map::default(), found: Map::default() })
             .collect();
         let unit = DIRECTIONS.map(|d| normalize(d.map(|v| v as f64)));
         let cosines = unit.map(|normal| {
@@ -258,7 +254,7 @@ impl Light {
         // A world with no heights has no sky: what glows is all its light.
         let (skies, background) = if world.heights.is_some() { (skies, background) } else { ([[0.0; 3]; N], [0.0; 3]) };
         let glow = shared.brightness.glowing() / GLOW_ONE as f32;
-        Light { world, shared, levels, unit, cosines, opposite, glow, sky: skies, background }
+        Light { world, shared, levels, rounds: Recent::default(), unit, cosines, opposite, glow, sky: skies, background }
     }
 
     /** Whether a whole voxel, one that lets nothing through, is at `site` of level `i`. */
@@ -352,7 +348,7 @@ impl Light {
      * the light on them in the round before; none in round 0.
      */
     fn round(&mut self, i: usize, p: [i64; 3], n: usize) -> [Rgb; N] {
-        if let Some(light) = self.levels[i].rounds.get(n).and_then(|r| r.get(&p)) {
+        if let Some(light) = self.rounds.get(&(i, p)).and_then(|rounds| rounds.get(n)) {
             return *light;
         }
         let paths = self.paths(i, p);
@@ -364,11 +360,12 @@ impl Light {
                 (0..3).for_each(|c| light[d][c] += reflects[c] * on[c]);
             }
         }
-        let rounds = &mut self.levels[i].rounds;
-        if rounds.len() <= n {
-            rounds.resize_with(n + 1, Map::default);
+        // A site's rounds are asked for in turn; where the earlier ones were forgotten since, this one is not kept.
+        match self.rounds.get(&(i, p)) {
+            Some(rounds) if rounds.len() == n => rounds.push(light),
+            None if n == 0 => self.rounds.insert((i, p), vec![light]),
+            _ => {}
         }
-        keep(&mut rounds[n], p, light);
         light
     }
 
@@ -669,6 +666,39 @@ fn weighed(weights: &[f32; N], light: &[Rgb; N], touches: &Touches) -> Rgb {
         });
     }
     std::array::from_fn(|c| if kept[c] > 0.0 { sum[c] / kept[c] } else { 0.0 })
+}
+
+/**
+ * The values of the keys used last: those put or read since it last held
+ * KEPT_ROUNDS, and those of before, forgotten when it holds as many again.
+ * So what is in use is never forgotten, as all of a map cleared when full is.
+ */
+struct Recent<K, V> {
+    new: Map<K, V>,
+    old: Map<K, V>,
+}
+
+impl<K, V> Default for Recent<K, V> {
+    fn default() -> Recent<K, V> {
+        Recent { new: Map::default(), old: Map::default() }
+    }
+}
+
+impl<K: Copy + Eq + std::hash::Hash, V> Recent<K, V> {
+    fn get(&mut self, key: &K) -> Option<&mut V> {
+        if !self.new.contains_key(key) {
+            let value = self.old.remove(key)?;
+            self.insert(*key, value);
+        }
+        self.new.get_mut(key)
+    }
+
+    fn insert(&mut self, key: K, value: V) {
+        if self.new.len() == KEPT_ROUNDS {
+            self.old = std::mem::take(&mut self.new);
+        }
+        self.new.insert(key, value);
+    }
 }
 
 /** Keeps `value` for `site` in `map`, forgetting all it held once it holds KEPT_SITES. */
