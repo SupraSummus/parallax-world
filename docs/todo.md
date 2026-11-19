@@ -335,9 +335,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   Where the valley bends at a town,
   the track runs up to 30° off z past a building along it
   (`Station::frame` in `worlds/src/valley/railway.rs`).
-- **README's valley shots predate the winding valley** (`docs/shots/`).
-  The view down it and the ranges were taken at fixed cameras
-  where the valley ran along x = 0; retake them (`pnpm shot`).
 
 ## Light
 
