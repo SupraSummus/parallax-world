@@ -112,12 +112,15 @@ In a world with heights, the tiles wanted one above another
 are generated as one box and parted (`Queue::column`):
 they share their fields' lines and the things reaching several.
 An endless world's cost as much together, so each is made alone.
-Tiles are made in the order the renderer wants them:
+Tiles are made in the order the engine asks for them (`Wants`):
 a cell is baked once the world has every tile it reads (`chunk_reads`),
-and until then it asks for them, nearest first.
-Then come the other tiles of each level
-as far around the camera as the engine reads it, whichever way it looks (`Wants`),
-so that turning finds them made, and far ones are dropped:
+and until then it asks for them, nearest first;
+the voxels' rays ask for those they meet (section 4).
+No other tile is made: what no one asks for, no one reads,
+so turning asks for what comes into view
+(a body walking asks for the ground around it, seen or not).
+Tiles are kept as far around the camera as the engine may ask for them,
+whichever way it looks (`Wants`), and dropped farther:
 for the chunks, as far as each grid's chunks read
 (`Lod::grid_reach`: their level's claims, to the render distance);
 for the voxels engine, `voxels::READ`, as far as its rays read.
@@ -843,11 +846,21 @@ short of slots, all shrink, every level read less far,
 and with room to spare they grow back.
 The pool is bounded; what does not fit shows coarser, sooner.
 Tiles never change once made, and are packed for the GPU where they are made,
-so a brick is uploaded once, when it comes into a ball,
+so a brick is uploaded once,
 and bricks of a tile holding the same sites (its buried rock) share a slot.
-A brick of a tile not made yet is unknown, not empty,
-and rays take the next coarser level there:
-what is missing shows coarser, never as a hole.
+A brick is unknown, not empty, till its tile is made,
+and, with voxels, till a ray asks for it (and, lit, it is lit: below):
+rays take the next coarser level there,
+so what is missing shows coarser, never as a hole,
+and each such ray sets a bit for the brick, which the CPU reads back,
+a frame or two later (`Asked` in `voxels.rs`).
+A brick asked for whose tile is made is placed (`Window::ripe`);
+the tile of one that is not is what the engine asks the world for,
+those before any light, as no ray asks for the light of a tile not made,
+each kind nearest first in its level's own sites, as rays read them.
+So the pool holds what shows, and the world makes what shows,
+not every brick of a window's ball: walls hide most of what is near.
+A window is settled once a frame of its bricks as they are asks for nothing.
 A voxel shows how it looks along the ray,
 the mean of its looks through the faces turned most against it
 (fcc's `facing`, the one rule every host and check reads by),
@@ -898,10 +911,9 @@ It reads a few sites past what it lights, at each coarser level,
 kept as far around the camera as the world keeps its tiles;
 each engine only shows it its own way.
 The splats' bakers light the voxels they show, face by face.
-For the voxels, the world's threads light the bricks rays ask for,
-before any tile to make,
-nearest first in each level's own sites, as rays read them
-(each thread, of the most wanted, the one beside its last):
+For the voxels, the world's threads light the bricks rays ask for
+(above; `World::update`),
+each thread, of the most wanted, the one beside its last:
 each voxel of the brick a ray can meet gets the light on it,
 by the way its surface faces (`Light::on_seen`),
 and what it glows,
@@ -909,16 +921,9 @@ and shows its colour times the one, and the other,
 as worldgen's lit pictures do (`Light::relight`);
 shaded, the light is the mean of its open faces' shades.
 The light goes to the GPU beside the bricks, two words a site (RGB9E5), in a pool of its own.
-Till a brick with voxels is lit, it is not on the GPU, as if its tile were not made:
-rays take the next coarser level there,
-so what is not lit yet shows coarser, lit, never shaded by another light;
-and each such ray sets a bit for the brick, which the CPU reads back,
-a frame or two later, and hands the world (`Asked` in `voxels.rs`).
-A window places the bricks rays asked for once their light is found (`Window::ripe`),
-and is settled once a frame of its bricks as they are asks for nothing.
+Till a brick with voxels is lit, it is not on the GPU, as if no ray had asked for it:
+what is not lit yet shows coarser, lit, never shaded by another light.
 A tile never changes but for its bricks' light, each found once.
-So what is lit is what shows, not every brick a window's ball holds:
-in a world that is not flat, walls hide most of what is near.
 
 ## 5. Caching
 

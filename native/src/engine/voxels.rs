@@ -13,10 +13,16 @@
 //! rest. The levels' balls share a radius, as large as the pool holds
 //! (Windows). Beside it, which cells of coarser FCC lattices no voxel
 //! meets (CELLS): rays go across those at once, as across a voxel. Tiles
-//! never change once made, so a brick is uploaded once as it comes into a
-//! ball, with its tile or as the ball moves, and its slot freed as it
-//! leaves. A brick of no tile yet is unknown, and rays take the next
-//! coarser level there: what is missing shows coarser, never as a hole.
+//! never change once made, so a brick is uploaded once, and its slot
+//! freed as it leaves its ball.
+//!
+//! Only what rays meet is made and held: a brick of no tile yet, or with
+//! voxels and not placed yet, is unknown, so rays take the next coarser
+//! level there (what is missing shows coarser, never as a hole) and ask
+//! for it (a bit per entry of the windows' tables, read back: Asked). A
+//! brick asked for of a tile made is placed; of none, the world is asked
+//! for its tile. In a world that is not flat, walls hide most of a
+//! window's ball: what shows is far less.
 //!
 //! A voxel shows how it looks along the ray, through the faces turned to
 //! it (fcc's `facing`; a brick whose voxels look unlike through some faces
@@ -25,14 +31,11 @@
 //! (world.rs, worldgen's Light), and its own glow, uploaded with its brick
 //! to a pool of its own.
 //!
-//! Lit, only what rays meet is lit: a brick with voxels and no light yet
-//! is unknown, as one of no tile yet, so rays take the next coarser level
-//! there, and ask for it (a bit per entry of the windows' tables, read
-//! back: Asked). The world lights the bricks asked for, and the windows
-//! place them once lit. In a world that is not flat, walls hide most of a
-//! window's ball: what shows is far less.
+//! Lit, only what rays meet is lit: a brick asked for is unknown till it
+//! has its light. The world lights the bricks asked for, and the windows
+//! place them once lit.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -44,7 +47,7 @@ use worldgen::light::Light;
 use super::{Engine, Frame, Look, Painter, Picture};
 use crate::gpu::Easel;
 use crate::view::{Vec3, focal_length, view_basis};
-use crate::world::{Bricks, Level, Lit, TILE, Tile, TileId, Wants, World};
+use crate::world::{Level, Lit, Piece, TILE, Tile, TileId, Wants, World};
 
 /** A level's window, in bricks a side (a power of two: the table is a torus). */
 const WINDOW: i32 = 64;
@@ -317,9 +320,14 @@ pub fn light(grid: &fcc::Grid, level: u32, corner: [i32; 3], light: &mut Light) 
     out.into()
 }
 
-/** What the painter tells the engine, lit: the bricks rays asked for, as last read back, not yet taken; and whether frames to come may ask for more, or place what was lit. */
+/**
+ * What the painter tells the engine: the bricks rays asked for, as last
+ * read back, not yet taken, by level and where their sites start, each
+ * with whether its tile is made (so it waits for light); and whether
+ * frames to come may ask for more, or place what was made or lit.
+ */
 struct Asked {
-    bricks: Option<Bricks>,
+    bricks: Option<Vec<(usize, [i32; 3], bool)>>,
     busy: bool,
 }
 
@@ -330,11 +338,13 @@ impl Default for Asked {
     }
 }
 
-/** The voxels engine: each frame, the tiles of the levels its rays read, as they are; lit, the bricks they asked for, as last read back. */
+/** The voxels engine: each frame, the tiles of the levels its rays read, as they are; and what they asked for, as last read back. */
 #[derive(Default)]
 pub struct Voxels {
     asked: Arc<Mutex<Asked>>,
-    bricks: Arc<Bricks>,
+    pieces: Arc<Vec<(usize, Piece)>>,
+    /** What its last frame showed, from where: one of other tiles or from elsewhere has yet to ask for what it lacks. */
+    shown: (Vec<Arc<Level>>, Vec3),
 }
 
 impl Engine for Voxels {
@@ -347,22 +357,31 @@ impl Engine for Voxels {
         let busy = {
             let mut asked = self.asked.lock().expect("asked");
             if let Some(mut bricks) = asked.bricks.take() {
-                // Nearest first in each level's own sites, the finer first as near: as rays read the levels.
-                let far = |&(level, corner): &(usize, [i32; 3])| {
+                // Nearest first in each level's own sites, the finer first as near: as rays read the levels. Those of no
+                // tile before those to light: a tile is little work next to its light, which no ray asks for till it is made.
+                let far = |&(level, corner, _): &(usize, [i32; 3], bool)| {
                     let at = look.camera.map(|v| v / (1u64 << level) as f64);
                     (0..3).map(|d| (f64::from(corner[d] + BRICK / 2) - at[d]).powi(2)).sum::<f64>()
                 };
-                bricks.sort_by(|a, b| far(a).total_cmp(&far(b)).then(a.0.cmp(&b.0)));
-                self.bricks = Arc::new(bricks);
+                bricks.sort_by(|a, b| a.2.cmp(&b.2).then(far(a).total_cmp(&far(b))).then(a.0.cmp(&b.0)));
+                // A brick of a tile made, to light; of none, its tile to make, as wanted as the nearest of its bricks asked for.
+                let piece = |(level, corner, made): (usize, [i32; 3], bool)| {
+                    (level, if made { Piece::Brick(corner) } else { Piece::Tile(corner.map(|v| v.div_euclid(TILE as i32))) })
+                };
+                let mut tiles = HashSet::new();
+                let once = |&(level, piece): &(usize, Piece)| !matches!(piece, Piece::Tile(_)) || tiles.insert((level, piece));
+                self.pieces = Arc::new(bricks.into_iter().map(piece).filter(once).collect());
             }
-            lit == Lit::Bricks && asked.busy
+            asked.busy
         };
+        let same =
+            self.shown.1 == look.camera && self.shown.0.len() == count && self.shown.0.iter().zip(&levels).all(|(a, b)| Arc::ptr_eq(a, b));
+        self.shown = (levels.clone(), look.camera);
         let asked = self.asked.clone();
         Frame {
             picture: Box::new(Scene { levels, look: *look, asked }),
-            // Rays read all around the eye.
-            wants: Wants { reach, lit, tiles: world.lacking(&reach, look.camera), bricks: self.bricks.clone() },
-            busy,
+            wants: Wants { reach, lit, asked: self.pieces.clone() },
+            busy: busy || !same,
             stats: format!("{tiles} tiles"),
         }
     }
@@ -601,7 +620,7 @@ struct Window {
     rows: [[u32; WINDOW as usize]; 3],
     /** Slots it holds. */
     slots: usize,
-    /** Lit, the bricks rays last asked for (asked's), to place once lit. */
+    /** The bricks of its tiles rays last asked for (asked's), to place once lit. */
     asked: Vec<[i32; 3]>,
 }
 
@@ -675,11 +694,12 @@ impl Window {
 
     /**
      * Sets brick `b` of the ball, unless set already, from its tile: EMPTY,
-     * or the slot its sites are in, from `pool` if none is yet (to upload,
-     * in `added`: as many as `needs` says); UNKNOWN still if no tile is held
-     * there, or, `lit`, its light is not found yet.
+     * or, `asked` for by a ray, the slot its sites are in, from `pool` if
+     * none is yet (to upload, in `added`: as many as `needs` says); UNKNOWN
+     * still if no tile is held there, no ray asked for it, or, `lit`, its
+     * light is not found yet.
      */
-    fn place(&mut self, b: [i32; 3], lit: bool, pool: &mut Pool, added: &mut Vec<Added>) {
+    fn place(&mut self, b: [i32; 3], lit: bool, asked: bool, pool: &mut Pool, added: &mut Vec<Added>) {
         if self.table[entry(b)] != UNKNOWN {
             return;
         }
@@ -691,7 +711,7 @@ impl Window {
             return;
         };
         let first = grid.bricks[place] as usize;
-        if lit && held.tile.light(first).is_none() {
+        if !asked || lit && held.tile.light(first).is_none() {
             return;
         }
         let (slot, uses) = &mut held.slots[first];
@@ -707,23 +727,25 @@ impl Window {
 
     /**
      * Where its bricks start, and the brick its ball heads for, given
-     * `level`'s `tiles` about `eye`: the eye's, or where it is if there
-     * are none; None if it holds nothing and there are none to hold.
+     * `level`'s `tiles` about `eye`, if rays read it (`read`): the eye's,
+     * with tiles or none yet, all unknown then, for rays to ask for. Not
+     * read, where it is; None if it holds nothing then.
      */
-    fn aim(&self, level: usize, tiles: &Level, eye: Vec3) -> Option<([i32; 3], [i32; 3])> {
+    fn aim(&self, level: usize, tiles: &Level, eye: Vec3, read: bool) -> Option<([i32; 3], [i32; 3])> {
         match (tiles.tiles.values().next(), self.ball) {
             (Some(tile), _) => {
                 let origin = tile.grid.min.map(|v| v.rem_euclid(BRICK));
                 Some((origin, eye_brick(level, eye, origin)))
             }
+            (None, _) if read => Some((self.origin, eye_brick(level, eye, self.origin))),
             (None, Some(ball)) => Some((self.origin, ball.middle)),
             (None, None) => None,
         }
     }
 
     /** Whether it is short of holding `tiles` of `level` as a ball about `eye` (retarget's). */
-    fn behind(&self, level: usize, tiles: &Arc<Level>, eye: Vec3) -> bool {
-        self.aim(level, tiles, eye).is_some_and(|(_, target)| {
+    fn behind(&self, level: usize, tiles: &Arc<Level>, eye: Vec3, read: bool) -> bool {
+        self.aim(level, tiles, eye, read).is_some_and(|(_, target)| {
             !self.level.as_ref().is_some_and(|l| Arc::ptr_eq(l, tiles)) || self.ball.is_none_or(|b| b.middle != target)
         })
     }
@@ -741,9 +763,8 @@ impl Window {
      * gone is held till its step. A ball that holds nothing around the eye
      * starts anew there, the window as made (clear).
      */
-    fn retarget(&mut self, level: usize, tiles: &Arc<Level>, eye: Vec3, radius: i32, pool: &mut Pool) -> Vec<[i32; 3]> {
-        // Until it has tiles, it holds nothing and rays do not read it.
-        let Some((origin, target)) = self.aim(level, tiles, eye) else { return Vec::new() };
+    fn retarget(&mut self, level: usize, tiles: &Arc<Level>, eye: Vec3, read: bool, radius: i32, pool: &mut Pool) -> Vec<[i32; 3]> {
+        let Some((origin, target)) = self.aim(level, tiles, eye, read) else { return Vec::new() };
         assert!(self.ball.is_none() || self.origin == origin, "a level's bricks moved");
         self.origin = origin;
         if self.ball.is_some_and(|old| old.about(target) < 0) {
@@ -836,27 +857,29 @@ impl Window {
     }
 
     /**
-     * The brick whose entry in its table is `e`, if rays may ask for it:
-     * unknown in its ball, of a tile it holds, with voxels (so waiting for
-     * light, or lit and to place).
+     * The brick whose entry in its table is `e`, if rays may ask for it,
+     * unknown in its ball, and whether it holds its tile: of a tile it
+     * holds, one with voxels (to place, once lit if it is to be); of
+     * none, any: its tile is to make.
      */
-    fn asked(&self, e: usize) -> Option<[i32; 3]> {
+    fn asked(&self, e: usize) -> Option<([i32; 3], bool)> {
         let ball = self.ball?;
         let w = [e % WINDOW as usize, e / WINDOW as usize % WINDOW as usize, e / (WINDOW * WINDOW) as usize].map(|v| v as i32);
         // The window's corner (gpu's): its bricks, from there.
         let low = ball.middle.map(|v| v - WINDOW / 2);
         let b = std::array::from_fn(|d| low[d] + (w[d] - low[d]).rem_euclid(WINDOW));
         let ([x, y, z], id) = self.site(b);
-        let voxels = self.tiles.get(&id).is_some_and(|h| h.tile.grid.brick(x, y, z) >= 0);
-        (ball.contains(b) && self.table[entry(b)] == UNKNOWN && voxels).then_some(b)
+        let held = self.tiles.get(&id);
+        let asked = held.is_none_or(|h| h.tile.grid.brick(x, y, z) >= 0);
+        (ball.contains(b) && self.table[entry(b)] == UNKNOWN && asked).then_some((b, held.is_some()))
     }
 
-    /** Of the bricks rays last asked for, those lit since and not placed yet. */
-    fn ripe(&self) -> Vec<[i32; 3]> {
+    /** Of the bricks rays last asked for, those not placed yet, and, `lit`, lit since. */
+    fn ripe(&self, lit: bool) -> Vec<[i32; 3]> {
         let lit = |b: [i32; 3]| {
             let ([x, y, z], id) = self.site(b);
             let held = self.tiles.get(&id);
-            held.is_some_and(|h| usize::try_from(h.tile.grid.brick(x, y, z)).is_ok_and(|first| h.tile.light(first).is_some()))
+            !lit || held.is_some_and(|h| usize::try_from(h.tile.grid.brick(x, y, z)).is_ok_and(|first| h.tile.light(first).is_some()))
         };
         let ball = self.ball;
         self.asked
@@ -966,7 +989,7 @@ impl Windows {
      */
     fn next(&self, levels: &[Arc<Level>], eye: Vec3) -> Option<usize> {
         let tiles = |level: usize| levels.get(level).unwrap_or(&self.none);
-        (1..=GRID_LEVELS).map(|k| (self.last + k) % GRID_LEVELS).find(|&l| self.windows[l].behind(l, tiles(l), eye))
+        (1..=GRID_LEVELS).map(|k| (self.last + k) % GRID_LEVELS).find(|&l| self.windows[l].behind(l, tiles(l), eye, l < levels.len()))
     }
 
     /** The slots placing each window's `pending` bricks would take. */
@@ -974,11 +997,11 @@ impl Windows {
         self.windows.iter().zip(pending).map(|(w, bricks)| w.needs(bricks, self.lit)).sum()
     }
 
-    /** Places each window's `pending` bricks, which fit. */
-    fn place(&mut self, pending: Vec<Vec<[i32; 3]>>, added: &mut Vec<Added>) {
+    /** Places each window's `pending` bricks, which fit: `asked` for by rays, or not, so only known empty if they are. */
+    fn place(&mut self, pending: Vec<Vec<[i32; 3]>>, asked: bool, added: &mut Vec<Added>) {
         for (window, bricks) in self.windows.iter_mut().zip(pending) {
             for b in bricks {
-                window.place(b, self.lit, &mut self.pool, added);
+                window.place(b, self.lit, asked, &mut self.pool, added);
             }
         }
     }
@@ -992,16 +1015,16 @@ impl Windows {
      * changed.
      */
     fn sync(&mut self, levels: &[Arc<Level>], eye: Vec3) -> (Vec<Added>, [bool; GRID_LEVELS]) {
-        let (mut pending, mut changed) = (vec![Vec::new(); GRID_LEVELS], [false; GRID_LEVELS]);
+        let (mut found, mut changed, mut added) = (vec![Vec::new(); GRID_LEVELS], [false; GRID_LEVELS], Vec::new());
         if let Some(level) = self.next(levels, eye) {
             let tiles = levels.get(level).unwrap_or(&self.none);
-            pending[level] = self.windows[level].retarget(level, tiles, eye, self.radius, &mut self.pool);
+            found[level] = self.windows[level].retarget(level, tiles, eye, level < levels.len(), self.radius, &mut self.pool);
             (changed[level], self.last) = (true, level);
         }
-        for (level, window) in self.windows.iter().enumerate() {
-            let ripe = window.ripe();
+        self.place(found, false, &mut added);
+        let mut pending: Vec<_> = self.windows.iter().map(|w| w.ripe(self.lit)).collect();
+        for (level, ripe) in pending.iter().enumerate() {
             changed[level] |= !ripe.is_empty();
-            pending[level].extend(ripe);
         }
         // Short of slots: every window a brick less, till what is to place fits.
         while self.needs(&pending) > self.pool.free.len() {
@@ -1011,9 +1034,8 @@ impl Windows {
             }
             (self.growing, changed) = (0, [true; GRID_LEVELS]);
         }
-        let mut added = Vec::new();
-        self.place(pending, &mut added);
-        // Room to spare: every window a brick more, if what that gains fits with room still.
+        self.place(pending, true, &mut added);
+        // Room to spare: every window a brick more, if what that gains would fit with room still, were it all asked for.
         if self.radius < RADIUS && self.pool.free.len() >= self.growing.max(self.margin) {
             let radius = self.radius + 1;
             let shells: Vec<_> = self.windows.iter().map(|w| w.shell(radius)).collect();
@@ -1022,7 +1044,7 @@ impl Windows {
                 for window in &mut self.windows {
                     window.resize(radius, &mut Vec::new(), &mut self.pool);
                 }
-                self.place(shells, &mut added);
+                self.place(shells, false, &mut added);
                 (self.radius, self.growing, changed) = (radius, 0, [true; GRID_LEVELS]);
             } else {
                 self.growing = needs + self.margin;
@@ -1117,9 +1139,9 @@ impl Marcher {
             buffer("filled", GRID_LEVELS * COUNTS * 4, storage),
             buffer("lights", (pool as usize * light_words * 4).max(4), storage),
             buffer("next", pool as usize * 4, storage),
-            buffer("asked", if lit { ASKED_WORDS * 4 } else { 4 }, storage | wgpu::BufferUsages::COPY_SRC),
+            buffer("asked", ASKED_WORDS * 4, storage | wgpu::BufferUsages::COPY_SRC),
         ];
-        let readback = buffer("asked read", if lit { ASKED_WORDS * 4 } else { 4 }, wgpu::BufferUsages::MAP_READ);
+        let readback = buffer("asked read", ASKED_WORDS * 4, wgpu::BufferUsages::MAP_READ);
         let entry = |binding: u32, ty| wgpu::BindGroupLayoutEntry { binding, visibility: wgpu::ShaderStages::FRAGMENT, ty, count: None };
         let buffer_type = |ty| wgpu::BindingType::Buffer { ty, has_dynamic_offset: false, min_binding_size: None };
         let read = buffer_type(wgpu::BufferBindingType::Storage { read_only: true });
@@ -1189,19 +1211,17 @@ impl Marcher {
     /**
      * Brings the voxels on the GPU up to date with `scene`, then draws it
      * into a picture of `pixels`: the samples, then each pixel resolving
-     * its own. Lit, it reads back what rays asked for as far as it can
+     * its own. It reads back what rays asked for as far as it can
      * without waiting (`ask`), and copies what they ask for now to read.
      */
     fn draw(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, scene: &Scene, pixels: [u32; 2]) {
         let look = &scene.look;
-        if self.lit {
-            self.ask(device, &scene.asked);
-        }
+        self.ask(device, &scene.asked);
         let mut levels = [GpuLevel::default(); GRID_LEVELS];
         let (added, changed) = self.windows.sync(&scene.levels, look.camera);
         self.changes += u64::from(changed.contains(&true));
-        // Lit, settled once a frame of the windows as they are has asked for nothing.
-        self.settled = self.windows.next(&scene.levels, look.camera).is_none() && (!self.lit || self.read.0 == self.changes);
+        // Settled once what rays asked for of the windows as they are was read back.
+        self.settled = self.windows.next(&scene.levels, look.camera).is_none() && self.read.0 == self.changes;
         upload(device, encoder, &self.buffers[3], &added, BRICK_SITES, |a| words(&a.tile.grid, a.first, a.part));
         let next = &self.windows.pool.next;
         upload(device, encoder, &self.buffers[7], &added, 1, |a| [next[a.slot as usize] as u32]);
@@ -1255,7 +1275,7 @@ impl Marcher {
             pass.set_bind_group(0, group, &[]);
             pass.draw(0..4, 0..1);
         }
-        if self.lit && matches!(self.reading, Reading::Idle) {
+        if matches!(self.reading, Reading::Idle) {
             encoder.copy_buffer_to_buffer(&self.buffers[8], 0, &self.readback, 0, self.readback.size());
             encoder.clear_buffer(&self.buffers[8], 0, None);
             self.reading = Reading::Copied(self.changes);
@@ -1266,8 +1286,9 @@ impl Marcher {
 
     /**
      * Reads back what rays asked for: maps what the last frame copied, or,
-     * once mapped, tells `asked` the bricks the windows wait to light that
-     * rays asked for (Window::asked), which the windows place once lit.
+     * once mapped, tells `asked` the bricks rays asked for that the
+     * windows wait for, a tile or light (Window::asked), which the windows
+     * place once made and lit.
      */
     fn ask(&mut self, device: &wgpu::Device, asked: &Mutex<Asked>) {
         // What it waits for, done: the map's callback.
@@ -1291,9 +1312,11 @@ impl Marcher {
                         for bit in (0..32).filter(|bit| word >> bit & 1 != 0) {
                             let (level, e) = ((k * 32 + bit) / TABLE, (k * 32 + bit) % TABLE);
                             let window = &mut self.windows.windows[level];
-                            if let Some(b) = window.asked(e) {
-                                window.asked.push(b);
-                                bricks.push((level, window.site(b).0));
+                            if let Some((b, held)) = window.asked(e) {
+                                if held {
+                                    window.asked.push(b);
+                                }
+                                bricks.push((level, window.site(b).0, held));
                             }
                         }
                     }
@@ -1411,7 +1434,7 @@ impl Painter for Marcher {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashMap;
 
     use super::*;
 
@@ -1423,7 +1446,9 @@ mod tests {
     fn forest_tiles(eye: Vec3) -> Arc<Level> {
         let mut world = World::new(worlds::by_name("forest").expect("forest").make, 1, None, 4);
         let reach = std::array::from_fn(|l| (l == 0).then_some(fcc::GRID_REACH));
-        let wants = Wants { reach, lit: Lit::Not, tiles: Vec::new(), bricks: Arc::default() };
+        // All around the eye asked for.
+        let asked = Arc::new(world.lacking(0, fcc::GRID_REACH, eye).into_iter().map(|id| (0, Piece::Tile(id))).collect());
+        let wants = Wants { reach, lit: Lit::Not, asked };
         loop {
             world.update(eye, &wants);
             if world.making() == 0 {
@@ -1448,8 +1473,14 @@ mod tests {
     /** `forest_tiles(EYE)`, made once: only lit windows read their light, and only one test lights them. */
     static FOREST: std::sync::LazyLock<Arc<Level>> = std::sync::LazyLock::new(|| forest_tiles(EYE));
 
-    /** Syncs `windows` to level 0's `tiles` around `eye`, keeping what they upload in `slots`; whether any window changed. */
+    /**
+     * Syncs `windows` to level 0's `tiles` around `eye`, rays having asked
+     * for every brick of them it may place, keeping what they upload in
+     * `slots`; whether any window changed.
+     */
     fn sync(windows: &mut Windows, tiles: &Arc<Level>, eye: Vec3, slots: &mut HashMap<u32, Vec<u32>>) -> bool {
+        let w = &mut windows.windows[0];
+        w.asked = (0..TABLE).filter_map(|e| w.asked(e)).filter(|(_, held)| *held).map(|(b, _)| b).collect();
         let (added, changed) = windows.sync(std::slice::from_ref(tiles), eye);
         for a in added {
             slots.insert(a.slot, words(&a.tile.grid, a.first, a.part).collect());
@@ -1549,9 +1580,12 @@ mod tests {
         let steps =
             [(some(0), eye), (all.clone(), [13.0, 31.0, -9.0]), (some(1), [-140.0, 30.0, 70.0]), (all.clone(), [-130.0, 22.0, 75.0])];
         let (mut windows, mut slots) = (Windows::new(1 << 20, false), HashMap::new());
-        // No tiles yet: nothing held, nothing read.
-        assert!(!sync(&mut windows, &Arc::new(Level::new(HashMap::new())), eye, &mut slots));
-        assert_eq!(windows.windows[0].gpu(0, eye, f64::MAX).reach, 0.0);
+        // No tiles yet: all it reads unknown, each brick's tile for rays to ask for.
+        settle(&mut windows, &Arc::new(Level::new(HashMap::new())), eye, &mut slots);
+        let w = &windows.windows[0];
+        let ball = w.ball.expect("a ball");
+        assert!(w.gpu(0, eye, f64::MAX).reach > 0.0 && w.slots == 0);
+        assert!(in_ball(ball.bounds(), ball, None).all(|b| w.asked(entry(b)) == Some((b, false))), "every brick's tile may be asked for");
         for (tiles, eye) in &steps {
             assert!(settle(&mut windows, tiles, *eye, &mut slots), "a change");
             assert_eq!(windows.radius, RADIUS, "room for all");
@@ -1575,7 +1609,7 @@ mod tests {
         let unknown: Vec<[i32; 3]> = held.iter().copied().filter(|&b| w.table[entry(b)] == UNKNOWN).collect();
         assert!(held.iter().all(|&b| matches!(w.table[entry(b)], UNKNOWN | EMPTY)));
         assert!(unknown.len() > 1000 && unknown.len() < held.len(), "{} of {} bricks unknown", unknown.len(), held.len());
-        assert!(unknown.iter().all(|&b| w.asked(entry(b)) == Some(b)), "every unknown brick may be asked for");
+        assert!(unknown.iter().all(|&b| w.asked(entry(b)) == Some((b, true))), "every unknown brick may be asked for");
         // Rays ask for half, and some of all are lit (with them the buried bricks of a tile, which share their sites):
         // those placed that were asked for and are lit, no other.
         let world = (worlds::by_name("forest").expect("forest").make)(1);
@@ -1666,12 +1700,11 @@ mod tests {
         // The voxel a ray is in, wherever it is up to its level's reach, and that voxel's neighbours, whose faces
         // shade it: eyes along a line across a tile, rays every way, balls of any radius.
         let world = World::new(worlds::by_name("forest").expect("forest").make, 1, None, 1);
-        let reach = std::array::from_fn(|l| (l == 0).then_some(READ));
         let ways = (0..125).map(|i| [i % 5 - 2, i / 5 % 5 - 2, i / 25 - 2].map(f64::from)).filter(|w| w != &[0.0; 3]);
         for step in 0..TILE * 4 / 3 {
             let t = step as f64 * 0.75;
             let eye = [t, 0.6 * t + 31.3, 0.3 * t - 17.9];
-            let tiles: HashSet<_> = world.lacking(&reach, eye).into_iter().map(|(_, id)| id).collect();
+            let tiles: HashSet<_> = world.lacking(0, READ, eye).into_iter().collect();
             // Balls about the eye's brick, or behind it, rays reading as far as they hold around it.
             let balls = [0, 1, 13, RADIUS].into_iter().flat_map(|radius| {
                 [[0, 0, 0], [1, -1, 1], [3, 0, -2], [-7, 5, 4]]

@@ -172,6 +172,9 @@ several times faster, though it still differs in places
 Both take the page's view query, e.g. `'seed=1&world=moor&look=30,-10'`,
 and want Mesa's software Vulkan (`apt-get install mesa-vulkan-drivers`):
 without it the native one cannot draw, the web's draws several times slower.
+A software GPU takes the cores the native world's threads work on:
+to time those, moving, add `--stroll SECONDS --by-work`
+(`native/src/main.rs`), which gives them each frame's time to themselves.
 
 ## Rules
 

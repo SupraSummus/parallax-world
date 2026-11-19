@@ -6,17 +6,18 @@
 //! heights, nor where its layers say it is empty or buried; on the
 //! world's threads (a generator per thread), the tiles wanted one above
 //! another together if the world has heights, and indexed there.
-//! Which tiles, and in what order, is up to the engine drawing them (Wants): every update hands over the tiles it misses for
-//! what is in view, most wanted first, replacing the previous list; then
-//! the rest of each level it reads, as far around the camera as it reads
-//! it whichever way it looks (Wants's reach), so that turning finds them made. Tiles far from the camera are dropped, and
+//! Which tiles, and in what order, is up to the engine drawing them
+//! (Wants): every update hands over what it asks for, most wanted first,
+//! replacing the previous list. No other tile is made, so turning asks
+//! for what comes into view. Tiles farther from the camera than the
+//! engine may ask for (Wants's reach) are dropped, and
 //! the light's blocks in them (worldgen's Shared). A tile
 //! never changes, so a chunk baked once all the tiles it reads are in
 //! stays right whatever comes after (fcc's Tiles). Given light (worldgen's Shared),
 //! the bakers' Lights read blocks of their own, each site as it is, where
 //! they read them. Asked for light, for the voxels engine
 //! (voxels.rs), the bricks of tiles made that its rays asked for are lit,
-//! their voxels' light found, before any tile is made: only what shows,
+//! their voxels' light found: only what shows,
 //! which in a world that is not flat is little of all a ball around the
 //! eye holds. Lit anew (relight), the tiles are kept, their light found again.
 
@@ -196,24 +197,20 @@ pub enum Lit {
 
 /**
  * What an engine reads of the world: each level's tiles as far around the
- * camera as it reads them whichever way it looks, `reach`, in the level's
- * sites (none if it reads none), lit as `lit` says; the tiles it lacks for
- * what is in view, most wanted first; and, lit here, the bricks of tiles
- * made to light, by level and where their sites start, most wanted first.
+ * camera as it may ask for them whichever way it looks, `reach`, in the
+ * level's sites (none if it reads none; those farther are dropped), lit
+ * as `lit` says; and what it asks for, most wanted first: the tiles it
+ * lacks for what is in view, and, lit here, the bricks of tiles made to light.
  */
 pub struct Wants {
     pub reach: [Option<f64>; GRID_LEVELS],
     pub lit: Lit,
-    pub tiles: Vec<(usize, TileId)>,
-    pub bricks: Arc<Bricks>,
+    pub asked: Arc<Vec<(usize, Piece)>>,
 }
 
-/** Bricks, by level and where their sites start. */
-pub type Bricks = Vec<(usize, [i32; 3])>;
-
-/** What a worker does: makes a tile, or lights a brick of one made, where its sites start. */
+/** What a worker does, of a level: makes a tile, or lights a brick of one made, where its sites start. */
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-enum Piece {
+pub enum Piece {
     Tile(TileId),
     Brick([i32; 3]),
 }
@@ -231,19 +228,23 @@ struct Queue {
     in_flight: HashSet<(usize, Piece)>,
     shared: Option<Shared>,
     lighting: u32,
+    /** Each worker's clock (own_clock). */
+    #[cfg(target_os = "linux")]
+    clocks: Vec<libc::clockid_t>,
 }
 
 impl Queue {
     /**
-     * The piece a worker is to do next, whose last was `last` if a brick:
-     * of the NEAR most wanted, the brick of that level nearest it, else the
-     * most wanted. Its Light keeps the sites it read last, which bricks
-     * side by side read again; taken in turn, each worker's would lie far
-     * apart, all around the eye as they are wanted.
+     * The piece a worker is to do next, whose last brick was `last`: the
+     * most wanted if a tile; else, of the NEAR most wanted, the brick of
+     * that level nearest it, or the most wanted. Its Light keeps the sites
+     * it read last, which bricks side by side read again; taken in turn,
+     * each worker's would lie far apart, all around the eye as they are wanted.
      */
     fn next(&mut self, last: Option<(usize, [i32; 3])>) -> Option<Job> {
         let apart = |a: [i32; 3], b: [i32; 3]| (0..3).map(|d| (i64::from(a[d]) - i64::from(b[d])).pow(2)).sum::<i64>();
-        let near = last.and_then(|(level, at)| {
+        let brick = self.wanted.front().is_some_and(|job| matches!(job.1, Piece::Brick(_)));
+        let near = last.filter(|_| brick).and_then(|(level, at)| {
             let bricks = self.wanted.iter().take(NEAR).enumerate();
             bricks
                 .filter_map(|(k, job)| match job.1 {
@@ -324,8 +325,19 @@ pub fn behind_drawing() {
     }
 }
 
+/** The clock of the calling thread's time on a core, to read from another (World::worked). */
+#[cfg(target_os = "linux")]
+fn own_clock() -> libc::clockid_t {
+    let mut clock = 0;
+    // SAFETY: pthread_getcpuclockid only writes the clock of this thread, which is running.
+    unsafe { libc::pthread_getcpuclockid(libc::pthread_self(), &mut clock) };
+    clock
+}
+
 fn work(make: Make, seed: u64, heights: &Heights, queue: &(Mutex<Queue>, Condvar), send: &Sender<Made>) {
     behind_drawing();
+    #[cfg(target_os = "linux")]
+    queue.0.lock().expect("queue").clocks.push(own_clock());
     // Made on the thread: a generator is not Send. Its Light's too: what tiles and light's blocks share is planned once.
     let world = Rc::new(make(seed));
     // A world with heights lies across y, so tiles one above another share most of their cost; an endless one's
@@ -412,17 +424,12 @@ impl World {
     }
 
     /**
-     * The tiles of each level within its `reach` of the camera, in its
-     * sites, not made yet: what an engine that reads all around the eye
-     * lacks, level by level, nearest first.
+     * The tiles of `level` within `reach` of the camera, in its sites, not
+     * made yet, nearest first: what one who reads all around there lacks,
+     * as a body does of the ground it walks on.
      */
-    pub fn lacking(&self, reach: &[Option<f64>; GRID_LEVELS], camera: Vec3) -> Vec<(usize, TileId)> {
-        (0..GRID_LEVELS)
-            .flat_map(|level| reach[level].map(|r| (level, around(level, camera, r))))
-            .flat_map(|(level, around)| {
-                around.into_iter().filter(move |(_, id)| !self.tiles[level].contains_key(id)).map(move |(_, id)| (level, id))
-            })
-            .collect()
+    pub fn lacking(&self, level: usize, reach: f64, camera: Vec3) -> Vec<TileId> {
+        around(level, camera, reach).into_iter().map(|(_, id)| id).filter(|id| !self.tiles[level].contains_key(id)).collect()
     }
 
     /** The light it is lit by, if any. */
@@ -451,15 +458,44 @@ impl World {
         }
     }
 
-    /** Makes no more tiles but those being made. */
-    pub fn stop(&self) {
-        self.queue.0.lock().expect("queue").wanted.clear();
-    }
-
     /** Tiles being made and bricks lit, or waiting to be. */
     pub fn making(&self) -> usize {
         let q = self.queue.0.lock().expect("queue");
         q.wanted.len() + q.in_flight.len()
+    }
+
+    /** Whether it lacks a tile `wants` asks for. */
+    pub fn lacks(&self, wants: &Wants) -> bool {
+        wants.asked.iter().any(|&(level, piece)| matches!(piece, Piece::Tile(id) if !self.tiles[level].contains_key(&id)))
+    }
+
+    /** What it owes the view: the tiles to make and the bricks to light, waiting or under way. */
+    pub fn owed(&self) -> [usize; 2] {
+        let q = self.queue.0.lock().expect("queue");
+        let pieces = q.wanted.iter().map(|job| job.1).chain(q.in_flight.iter().map(|job| job.1));
+        pieces.fold([0, 0], |[tiles, bricks], piece| match piece {
+            Piece::Tile(_) => [tiles + 1, bricks],
+            Piece::Brick(_) => [tiles, bricks + 1],
+        })
+    }
+
+    /**
+     * Seconds each of its threads has had on a core, so far: what its work
+     * costs, whatever else the cores were busy with (none, off Linux).
+     */
+    pub fn worked(&self) -> Vec<f64> {
+        #[cfg(target_os = "linux")]
+        {
+            let time = |&clock: &libc::clockid_t| {
+                let mut t = libc::timespec { tv_sec: 0, tv_nsec: 0 };
+                // SAFETY: clock_gettime only writes `t`; the clock is of a worker, which never ends.
+                unsafe { libc::clock_gettime(clock, &mut t) };
+                t.tv_sec as f64 + t.tv_nsec as f64 * 1e-9
+            };
+            self.queue.0.lock().expect("queue").clocks.iter().map(time).collect()
+        }
+        #[cfg(not(target_os = "linux"))]
+        Vec::new()
     }
 
     /** Waits until a tile is made or a brick lit. */
@@ -469,14 +505,14 @@ impl World {
 
     /**
      * Takes the tiles made, drops those far from the camera (lattice
-     * units), and, lit here, has the bricks `wants` names lit first: what
-     * shows (rays ask for them), small, and in a world that is not flat,
-     * little of the tiles made. Then has the tiles it names made, most
-     * wanted first, then the rest within its reach of each level. Returns
-     * whether any level's tiles changed.
+     * units), and has done what `wants` asks for, most wanted first: the
+     * tiles it names made, and, lit here, the bricks lit, what shows
+     * (rays ask for them), small, and in a world that is not flat, little
+     * of the tiles made. No other tile is made: what no one asks for, no
+     * one reads. Returns whether any level's tiles changed.
      */
     pub fn update(&mut self, camera: Vec3, wants: &Wants) -> bool {
-        let Wants { reach, lit, tiles: wanted, bricks } = wants;
+        let Wants { reach, lit, asked } = wants;
         let lit = *lit;
         assert!(lit == Lit::Not || self.shared.is_some(), "a world lit with no light");
         // Tiles are made no farther from the camera than `keep` (in the level's sites), and dropped once a tile farther.
@@ -505,31 +541,20 @@ impl World {
             shared.forget(|level, key| far(level, key.map(|k| k as i32)));
         }
 
-        let mut list = VecDeque::new();
-        if lit == Lit::Bricks {
-            let tile = |level: usize, corner: [i32; 3]| self.tiles[level].get(&corner.map(|v| v.div_euclid(TILE as i32)));
-            let unlit = |tile: &Tile, [x, y, z]: [i32; 3]| usize::try_from(tile.grid.brick(x, y, z)).is_ok_and(|f| tile.light(f).is_none());
-            let mut listed = HashSet::new();
-            for &(level, corner) in bricks.iter() {
-                if let Some(tile) = tile(level, corner).filter(|t| unlit(t, corner))
-                    && listed.insert((level, corner))
-                {
-                    list.push_back((level, Piece::Brick(corner), Some(tile.clone())));
+        let (mut list, mut listed) = (VecDeque::new(), HashSet::new());
+        let unlit = |tile: &Tile, [x, y, z]: [i32; 3]| usize::try_from(tile.grid.brick(x, y, z)).is_ok_and(|f| tile.light(f).is_none());
+        for &(level, piece) in asked.iter() {
+            let job = match piece {
+                Piece::Tile(id) => (distance(level, camera, id) <= keep(level) && !self.tiles[level].contains_key(&id)).then_some(None),
+                Piece::Brick(corner) => {
+                    let tile = self.tiles[level].get(&corner.map(|v| v.div_euclid(TILE as i32)));
+                    tile.filter(|t| lit == Lit::Bricks && unlit(t, corner)).map(|t| Some(t.clone()))
                 }
-            }
-        }
-        let mut listed = HashSet::new();
-        let mut add = |tiles: &HashMap<TileId, Arc<Tile>>, level: usize, id: TileId| {
-            if distance(level, camera, id) <= keep(level) && !tiles.contains_key(&id) && listed.insert((level, id)) {
-                list.push_back((level, Piece::Tile(id), None));
-            }
-        };
-        for &(level, id) in wanted.iter() {
-            add(&self.tiles[level], level, id);
-        }
-        for (level, reach) in reach.iter().enumerate() {
-            for (_, id) in reach.map(|r| around(level, camera, r)).unwrap_or_default() {
-                add(&self.tiles[level], level, id);
+            };
+            if let Some(of) = job
+                && listed.insert((level, piece))
+            {
+                list.push_back((level, piece, of));
             }
         }
         {
@@ -556,12 +581,15 @@ mod tests {
     fn lit(world: &mut World) -> Vec<(TileId, Vec<Option<Vec<u32>>>)> {
         let coarsest = GRID_LEVELS - 1;
         let reach = std::array::from_fn(|l| (l == coarsest).then_some(TILE as f64));
-        let mut wants = Wants { reach, lit: Lit::Bricks, tiles: Vec::new(), bricks: Arc::default() };
+        let mut wants = Wants { reach, lit: Lit::Bricks, asked: Arc::default() };
         loop {
             world.update([0.0; 3], &wants);
-            let bricks: Vec<_> = world.level(coarsest).tiles.values().flat_map(|t| corners(&t.grid)).map(|c| (coarsest, c)).collect();
-            if bricks.len() != wants.bricks.len() {
-                wants.bricks = Arc::new(bricks);
+            let lacking = world.lacking(coarsest, TILE as f64, [0.0; 3]).into_iter().map(|id| (coarsest, Piece::Tile(id)));
+            let tiles = world.level(coarsest).tiles.values();
+            let bricks = tiles.flat_map(|t| corners(&t.grid)).map(|c| (coarsest, Piece::Brick(c)));
+            let asked: Vec<_> = lacking.chain(bricks).collect();
+            if asked != *wants.asked {
+                wants.asked = Arc::new(asked);
             } else if world.making() == 0 {
                 break;
             } else {

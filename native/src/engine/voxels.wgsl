@@ -7,9 +7,9 @@
 // in the order the ray meets them, each by its path through it.
 // A voxel shows how it looks along the ray (`seen`), times the
 // light on it: shaded, by the way its surface faces; lit, the light its tile
-// found for it (world.rs), and its own glow. A brick not
-// lit yet is not on the GPU (voxels.rs), as one of a tile not made: rays take
-// the next level, and ask for it (`asked`).
+// found for it (world.rs), and its own glow. A brick no ray asked for yet,
+// or, lit, not lit yet, is not on the GPU (voxels.rs), as one of a tile not
+// made: rays take the next level, and ask for it (`asked`).
 // voxels.rs puts the constants it shares with this file before it.
 
 // The picture's size in pixels, and its sides over the focal length; the
@@ -73,7 +73,7 @@ fn hollow(l: Level, k: vec3i, j: u32) -> bool {
 // Per slot of the pool, the next of its brick's (voxels.rs's Pool), EMPTY if none: a brick whose
 // voxels' faces differ has more, each its sites' faces two by two, as `cells` has them.
 @group(0) @binding(7) var<storage, read> next: array<i32>;
-// Lit, a bit per entry of the levels' tables (as `bricks`): whether a ray took the next level at its brick, unknown.
+// A bit per entry of the levels' tables (as `bricks`): whether a ray took the next level at its brick, unknown, or read it for what it shows.
 @group(0) @binding(11) var<storage, read_write> asked: array<atomic<u32>>;
 
 const NONE = 0xffffffffu;
@@ -119,8 +119,21 @@ fn brick_of(level: u32, s: vec3i) -> i32 {
   return bricks[entry(l, b)];
 }
 
-// The look of the voxel at site `s` of `level`, 0 if none.
+// Asks for the brick of `level` holding site `s`, if unknown in its window: for its tile, or its light.
+fn ask(level: u32, s: vec3i) {
+  let l = levels[level];
+  let b = (s - l.min) >> vec3u(BRICK_SHIFT);
+  if all(b >= vec3i(0)) && all(b < vec3i(WINDOW)) {
+    let e = entry(l, b);
+    if bricks[e] == UNKNOWN {
+      atomicOr(&asked[e >> 5u], 1u << (e & 31u));
+    }
+  }
+}
+
+// The look of the voxel at site `s` of `level`, 0 if none, or not known yet: asked for then, as what shows is shaded by it.
 fn voxel(level: u32, s: vec3i) -> u32 {
+  ask(level, s);
   return in_brick(level, brick_of(level, s), s);
 }
 
@@ -154,10 +167,11 @@ fn light_in(slot: i32, r: vec3i) -> vec2u {
   return vec2u(lights[i], lights[i + 1u]);
 }
 
-// Lit, the light of the voxel at site `s` of `level`, words 0 if none.
+// Lit, the light of the voxel at site `s` of `level`, words 0 if none, or not known yet: asked for then.
 fn light_at(level: u32, s: vec3i) -> vec2u {
   let slot = brick_of(level, s);
   if slot < 0 {
+    ask(level, s);
     return vec2u(0u);
   }
   return light_in(slot, (s - levels[level].min) & vec3i(BRICK - 1));
@@ -320,12 +334,9 @@ fn march(d: vec3f) -> Hit {
         brick = b;
         slot = brick_of(level, s);
       }
-      // No tile here yet, not lit yet, or off the window: the next coarser level from here on, lit, asking for it.
+      // No tile here yet, not lit yet, or off the window: the next coarser level from here on, asking for it.
       if slot == UNKNOWN {
-        if globals.lit != 0u && all(b >= vec3i(0)) && all(b < vec3i(WINDOW)) {
-          let e = entry(l, b);
-          atomicOr(&asked[e >> 5u], 1u << (e & 31u));
-        }
+        ask(level, s);
         break;
       }
       if slot >= 0 {

@@ -164,6 +164,32 @@ so a tile read all round its edges costs about as much in blocks.
 Native's light sliders light the world anew (`World::relight`),
 as slowly as at the start.
 
+Flying on, lit, the light is nearly all of the world's threads' work
+(`--stroll` with `--by-work` in `native/src/main.rs`):
+about a quarter of it its blocks.
+Of the rest, more than half is the rounds past a site's first:
+each round reads sites one further around what is lit,
+many where sites filled in part reflect on each other, as all through a wood's crowns.
+Tried, each measured on the valley's first view and a flight on from it,
+and not kept:
+
+- the tiles as the light's blocks, each made once for both:
+  an eighth less work, and two thirds more held,
+  as every tile then keeps all of its sites, lit or not;
+- blocks half or twice as wide: more work either way;
+- a cube's bricks lit together by one thread: no less work,
+  as threads already light side by side (`Queue::next`);
+- each `Light` keeping eight times the sites:
+  a tenth less work, for more than twice the memory;
+- a site's rounds started from the coarser level's light on what it meets:
+  a tenth fewer rounds, no less work;
+- a site's rounds ended once their steps fall off as a geometric series,
+  its rest added:
+  as much faster, and as far off a tightly settled light,
+  as settling to three times the tolerance (`Shared::settling`),
+  which takes a third less time for twice the error,
+  both small next to the model's.
+
 Lighting costs several times what it did
 before light read sites' shares and bounces settled site by site:
 sites filled in part let light on,
