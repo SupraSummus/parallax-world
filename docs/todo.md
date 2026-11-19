@@ -434,8 +434,15 @@ Numbers are for the forest at 1280×800, as measured when written.
 - **Native's medium costs a fragment per slab a ray crosses**
   (architecture.md, "See-through"), as far as the view goes:
   pictures laid far to near, nothing behind what all but stops a ray is left out.
-  Only media are (`KindDef::medium`): the moor's mist, and the fog's (`world=fog`),
-  where a pixel takes some 10 slabs on average and up to 40.
+  Only media are (`KindDef::medium`): the moor's mist, the fog's (`world=fog`),
+  where a pixel takes some 10 slabs on average and up to 40,
+  and the valley's sea (`mountains.rs`).
+  - The sea's top is a medium of its own, so that where it ends shows;
+    it mirrors no sky.
+    A kind's shine, kept by sites as glow is,
+    would let a ray take the sky's colour where shine changes along it.
+    Not looked at in the chunks engines, whose slabs blur where a medium ends.
+    Ponds, the moor's water and wells are still whole voxels.
   - Most of what a fragment costs is reading its four columns from storage:
     two columns an item, or the pictures in a texture the GPU filters,
     would read half as often.

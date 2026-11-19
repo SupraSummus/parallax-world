@@ -33,7 +33,7 @@ use worldgen::units::{Units, m};
 use super::course::COURSE_SLOPE;
 use super::fields;
 use super::landmarks::K as L;
-use super::town::{self, K as T, Towns};
+use super::town::{self, Towns};
 use crate::SURFACE;
 
 kinds! {
@@ -42,6 +42,8 @@ kinds! {
     scree: 3, ["#a39d92", "#968f84"];
     rock: 3, ["#7e776e", "#6f6961"];
     snow: 14, ["#f1f4f7", "#e3e9ef"];
+    sea: 13, ["#1b5873"], walk_through, medium;
+    seaTop: 13, ["#9cc4d6"], walk_through, medium;
 }
 
 /** The valley's heights with its mountains, lattice units: from the sea's floor up to their highest peaks, and a little over. */
@@ -64,6 +66,14 @@ const LEAVE: Units = Units::m(1500.0);
 pub const SEA: Units = Units::m(-40.0);
 const LOWLAND: Fx = Fx::m(10.0);
 const SHELF: i64 = 30;
+/**
+ * The sea is see-through: a medium that hides its bottom some 6 m down.
+ * Its top SEA_TOP is another, lighter and denser, so that where the sea
+ * ends shows: little from above, most along the water.
+ */
+const SEA_STOPS: f64 = 3.9 / m(6.0) as f64;
+const SEA_TOP: i64 = m(0.25);
+const SEA_TOP_STOPS: f64 = 0.4 / SEA_TOP as f64;
 const DEEP: Fx = Fx::m(-75.0);
 /** East past the ranges, the upland's lowest, and how much higher its ridges rise. */
 const UPLAND: Fx = Fx::m(160.0);
@@ -362,14 +372,16 @@ pub fn dry(height: i64) -> Fx {
     smoothstep(SEA.to_fx() + Fx::m(0.5), SEA.to_fx() + Fx::m(2.0), Units(height).to_fx())
 }
 
-/** The sea: water up to its level on sand, and a beach of it a little over; nothing higher. */
+/** The sea: water up to its level on sand, its top apart (SEA_TOP), and a beach of sand a little over; nothing higher. */
 fn sea(ground: Rc<Sloped>) -> Field {
     Field::columns("sea", 0.85, Op::Paint, move |x, z| {
         let h = ground.at(x, z);
         if h > (SEA + Units::m(1.5)).0 {
             return Vec::new();
         }
-        Column::new(h).surface(L::sand, m(1.0)).water_to(T::water, SEA.0).spans()
+        let deep = (SEA.0 - h).max(0);
+        let top = deep.min(SEA_TOP);
+        Column::new(h).surface(L::sand, m(1.0)).medium(K::sea, deep - top, SEA_STOPS).medium(K::seaTop, top, SEA_TOP_STOPS).spans()
     })
     .meets(|b, _| Meets::under((SEA + Units::m(1.5)).0 + 1, b))
 }

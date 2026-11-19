@@ -108,6 +108,8 @@ pub fn class_of_kind(kinds: usize) -> Vec<u8> {
         (mountains::k(A::scree), 3),
         (mountains::k(A::rock), 3),
         (mountains::k(A::snow), 3),
+        (mountains::k(A::sea), 15),
+        (mountains::k(A::seaTop), 15),
         (landmarks::k(L::sand), 0),
         (landmarks::k(L::reed), 8),
         (landmarks::k(L::lily), 8),
