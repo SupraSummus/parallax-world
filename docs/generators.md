@@ -738,9 +738,10 @@ Counts are the same on every machine;
 weighed by rough times per count (`NS`),
 they show what takes the time.
 
-`cost::report` generates a world's host tiles at several levels
-around some places, each tile by a fresh world, as a host's first is:
-cubes of the lattice, as native's (`light::tile_box`).
+`cost::report` generates boxes of a world at several levels
+around some places, each by a fresh world, as a host's first is:
+cubes of the lattice, four of native's tiles a side (`tiles::tile_box`),
+as large as its tiles were.
 It prints the estimate by layer and level, largest first,
 the time each tile took here,
 and flags what looks costly:

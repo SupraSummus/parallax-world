@@ -105,18 +105,22 @@ The bake workers generate the tiles, finest level first;
 a level's slices show once its grid is in,
 and a moved grid replaces the old one once all its tiles are.
 The native frontend (`native/src/world.rs`) has no grids, only tiles:
-cubes, alike along every axis, so no direction is up to how they are asked for
-(`make_tiles` in `worldgen/src/light.rs`: `generate_shown` of each;
+cubes, alike along every axis, so no direction is up to how they are asked for,
+and small (`TILE` in `worldgen/src/tiles.rs`),
+as rays ask for little of a larger one
+(`make_tiles` there: `generate_shown`;
 those outside the world's heights are empty).
-In a world with heights, the tiles wanted one above another
-are generated as one box and parted (`Queue::column`):
+In a world with heights, a tile is generated with those above and below it,
+as one box, and parted (`made_with`):
 they share their fields' lines and the things reaching several.
 An endless world's cost as much together, so each is made alone.
+Lit, a tile's sites are made into the light, which reads the same tiles
+(`Shared::make_tiles`): once, for what draws them and what lights them.
 Tiles are made in the order the engine asks for them (`Wants`):
 a cell is baked once the world has every tile it reads (`chunk_reads`),
 and until then it asks for them, nearest first;
 the voxels' rays ask for those they meet (section 4).
-No other tile is made: what no one asks for, no one reads,
+No other tile is made but with one asked for,
 so turning asks for what comes into view
 (a body walking asks for the ground around it, seen or not).
 Tiles are kept as far around the camera as the engine may ask for them,
@@ -262,7 +266,7 @@ Its see-through voxels are pictures of its medium, slab by slab
 (section 4, "See-through");
 the relief takes them for empty.
 Its tiles hold the sites' media too, with how much each stops
-(`VoxelGrid::into_grid`):
+(`VoxelGrid::to_grid`):
 a face is open where its neighbour lets rays through,
 so a cell holds what shows through see-through voxels too.
 The compositor's depth decides between cells:
@@ -836,7 +840,7 @@ so the ball moves a brick at a time
 and only the bricks that came into it or left are touched.
 A frame steps one window, each in turn:
 its ball a brick along an axis toward the eye's,
-and one tile in it, gone or new,
+and the tiles in it, gone or new, those made with a few at most (`STEP`),
 so what a frame costs is bounded however fast the eye or many the tiles;
 a window behind is read only as far as it holds around the eye,
 and one holding nothing around it starts anew there.
@@ -904,9 +908,9 @@ and a slab of medium to exp(−extinction · path), as the splats' test does.
 The panel picks the lighting apart from the engine (`Lighting`):
 voxels shaded by the way their faces face, or computed,
 by worldgen's `Light`, one model and one cache (`Shared`) for every engine:
-blocks, smaller than tiles (`BLOCK`), where the light reads,
+the world's tiles where the light reads, made if not yet,
 each site as it is, what it stops a share,
-where the tiles the world draws show it whole or not at all.
+where the grids the world draws show it whole or not at all.
 It reads a few sites past what it lights, at each coarser level,
 kept as far around the camera as the world keeps its tiles;
 each engine only shows it its own way.

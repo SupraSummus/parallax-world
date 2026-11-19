@@ -97,6 +97,7 @@ worldgen/                    # The world-generation engine; no worlds (docs/gene
 │   ├── frame.rs             # Things built in frames of their own
 │   ├── recent.rs            # What was used last, kept
 │   ├── world.rs             # World: what a host needs to show one
+│   ├── tiles.rs             # A world's tiles, as hosts and light take them
 │   ├── picture.rs           # Rays through a world's voxels; pictures as PNGs
 │   ├── light.rs             # Light, a prototype (docs/light.md)
 │   ├── light/reference.rs   # Its reference: rays traced through level 0

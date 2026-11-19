@@ -226,14 +226,18 @@ pub fn places(world: &World, regions: &[Box3]) -> Vec<(String, [i64; 3])> {
     [("spawn".to_string(), world.spawn)].into_iter().chain(centres).collect()
 }
 
+/** Host tiles a side of the boxes reported on (tiles::TILE): the baselines and the budget are of tiles as they were, that large. */
+const TILES: i64 = 4;
+
 /**
- * The host tile of `level` holding `at` (lattice units), what may show
- * of it (shown): a cube of the lattice, cut to the world's heights, as
- * native's (light::tile_box).
+ * The box of `level` reported on that holds `at` (lattice units), what
+ * may show of it (shown): a cube of the lattice TILES host tiles a side,
+ * cut to the world's heights as they are (tiles::tile_box).
  */
 fn tile(world: &World, at: [i64; 3], level: u32) -> Box3 {
-    let key = at.map(|v| v.div_euclid(crate::light::TILE << level));
-    shown(&world.generator, &crate::light::tile_box(world.heights_at(level), key), level)
+    let first = at.map(|v| v.div_euclid((TILES * crate::tiles::TILE) << level) * TILES);
+    let corner = |key: [i64; 3]| crate::tiles::tile_box(world.heights_at(level), key);
+    shown(&world.generator, &Box3 { min: corner(first).min, max: corner(first.map(|k| k + TILES - 1)).max }, level)
 }
 
 /** A tile of a report: where and at what level, its work, and how long it took here. */

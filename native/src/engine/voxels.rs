@@ -61,6 +61,9 @@ const FACTOR: u32 = 4;
 /** Bytes of bricks the pool holds at most. */
 const POOL_BYTES: u64 = 256 << 20;
 
+/** Tiles whose bricks are in its ball that a window lets go or takes in a step (Window::retarget): as many as are made with a few (worldgen's made_with). */
+const STEP: usize = 64;
+
 /** The largest radius of a window's ball (Ball): its bricks, at most RADIUS + 1 from the middle each way, within the window. */
 const RADIUS: i32 = WINDOW / 2 - 2;
 /** How far around the eye rays read, in a level's sites, at most: as far as a ball of RADIUS holds (reach_of). */
@@ -756,10 +759,10 @@ impl Window {
      * UNKNOWN. Returns the bricks to place: those of tiles it holds that
      * the ball gains, and those of a tile new.
      *
-     * A step is a brick along one axis, and one tile whose bricks are in
+     * A step is a brick along one axis, and STEP tiles whose bricks are in
      * the ball, gone or (once none is) the nearest new: what it places
-     * is a shell of the ball and a tile, however fast the eye or many the
-     * tiles. Rays take the next level for what is still UNKNOWN; a tile
+     * is a shell of the ball and those tiles', however fast the eye or
+     * many the tiles. Rays take the next level for what is still UNKNOWN; a tile
      * gone is held till its step. A ball that holds nothing around the eye
      * starts anew there, the window as made (clear).
      */
@@ -787,7 +790,7 @@ impl Window {
         self.ball = Some(ball);
         let mut pending: Vec<[i32; 3]> = self.tiles.keys().flat_map(|&id| in_ball(tile_bricks(id, origin), ball, old)).collect();
         let meets = |id: TileId| in_ball(tile_bricks(id, origin), ball, None).next().is_some();
-        let (mut step, mut left) = (true, 0);
+        let (mut steps, mut left) = (STEP, 0);
         let gone: Vec<TileId> = (self.tiles.iter())
             .filter(|&(id, h)| tiles.tiles.get(id).is_none_or(|t| !Arc::ptr_eq(t, &h.tile)))
             .map(|(id, _)| *id)
@@ -795,7 +798,8 @@ impl Window {
         for id in gone {
             if !meets(id) {
                 self.tiles.remove(&id);
-            } else if std::mem::take(&mut step) {
+            } else if steps > 0 {
+                steps -= 1;
                 for b in in_ball(tile_bricks(id, origin), ball, None) {
                     self.release(b, pool);
                 }
@@ -811,9 +815,12 @@ impl Window {
         });
         for (&id, tile) in new {
             assert!((0..3).all(|d| tile.grid.min[d].rem_euclid(BRICK) == origin[d]), "a tile off its level's bricks");
-            if meets(id) && !std::mem::take(&mut step) {
-                left += 1;
-                continue;
+            if meets(id) {
+                if steps == 0 {
+                    left += 1;
+                    continue;
+                }
+                steps -= 1;
             }
             self.tiles.insert(id, Held { tile: tile.clone(), slots: vec![(EMPTY, 0); tile.grid.cells.len() / BRICK_SITES] });
             pending.extend(in_ball(tile_bricks(id, origin), ball, None));
@@ -1492,7 +1499,7 @@ mod tests {
      * Syncs `windows` as `sync` does till nothing changes; whether any
      * did. Each sync moves level 0's ball a brick along an axis at most
      * (or anew about the eye, the old one holding nothing around it), and
-     * places one new tile's bricks in it at most.
+     * places STEP new tiles' bricks in it at most.
      */
     fn settle(windows: &mut Windows, tiles: &Arc<Level>, eye: Vec3, slots: &mut HashMap<u32, Vec<u32>>) -> bool {
         for k in 0..1000 {
@@ -1508,7 +1515,7 @@ mod tests {
                 assert!(stepped || was.about(ball.middle) < 0, "{was:?} to {ball:?}, at {eye:?}");
             }
             let new = w.tiles.keys().filter(|&id| !had.contains(id) && in_ball(tile_bricks(*id, w.origin), ball, None).next().is_some());
-            assert!(new.count() <= 1, "new tiles in the ball, at {eye:?}");
+            assert!(new.count() <= STEP, "new tiles in the ball, at {eye:?}");
         }
         panic!("unsettled at {eye:?}");
     }

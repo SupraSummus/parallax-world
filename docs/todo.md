@@ -190,6 +190,8 @@ Numbers are for the forest at 1280×800, as measured when written.
   `cost::report` and the baselines count `generate` of what `shown` leaves,
   not `generate_shown`, which skips what is buried under each block (`Floors`):
   they don't see what that saves, nor what finding the floors costs.
+  And for boxes four of native's tiles a side, each alone (`cost::tile`),
+  where a host makes a tile with those above and below it.
 - **Cost counts a shape's tests by its box**,
   though the time is in the sites inside it:
   a slanting twig's box is mostly empty,
@@ -430,10 +432,12 @@ Numbers are for the forest at 1280×800, as measured when written.
   (a generator per thread, `native/src/world.rs`):
   completing the valley's first view takes four threads
   about a sixth more work than one, lit a third more,
-  and each thread holds tens of MB more.
+  and each thread holds tens of MB more:
+  its plans keep as many columns as two tiles had when 128 sites wide (`SLOTS`),
+  likely more than the small ones need.
   A generator all threads share would measure each thing once.
   Tiles side by side still make again the things reaching both;
-  those one above another are made together (`make_tiles`).
+  those one above another are made together (`made_with`).
 - **Walking, native keeps more than a core busy**
   (the valley, `--stroll 20 --on-ground`, outside the GPU driver),
   measured when it drew slices: new tiles took about a third.
@@ -442,7 +446,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   four threads, the cores to themselves,
   owe the view hundreds of bricks all the while,
   so each level shows lit less far than it reads, the next coarser past there.
-  Most of their work is then generating, the light's blocks and the tiles
+  Much of their work is then generating, the tiles the light reads
   ([light.md](light.md), "In native, and what it costs").
   Its tiles come in time, made before the bricks are lit.
 - **Native's medium costs a fragment per slab a ray crosses**
@@ -495,25 +499,33 @@ Numbers are for the forest at 1280×800, as measured when written.
   counting, shaded, every brick of it, and lit, only those lit.
 - **Native, lit, holds more than twice what it does shaded**,
   and more as the eye moves:
-  the light's blocks (`Shared`) are kept wherever tiles are,
+  a tile's sites (`Shared`) are kept beside the grid drawn of them,
   though a brick lit needs them no more, till one beside it is lit;
   and the light of the sites read lately, a few hundred MB (`KEPT_SITES`)
   ([light.md](light.md), "In native, and what it costs").
-  Keeping only the blocks read last was tried, twice:
-  lighting slows, by blocks made again.
-  So a block's sites and their light are forgotten two ways (`forget`, `begun`);
-  a tile and a block as one box (below) would leave one.
-- **Tiles as small as the light's blocks** (32 sites a side, `TILE_SHIFT` 5), tried on the valley:
-  rays ask for a fifth of what the tiles made hold,
-  so shaded, a first view takes half the work and less memory,
-  and flying on, a frame uploads half as much;
-  lit, as much work as now, tiles and blocks still made apart.
-  A tile and a block would then be one box,
-  made once for hosts and light, kept and forgotten one way.
-  Not kept: a view asks in more rounds, each a picture drawn and read back,
-  so a shot on a software GPU takes three times as long, and likely the GPU's tests;
-  and the light's blocks of the levels no ray reads are kept two tiles around the eye (`World::update`),
-  nearer than the coarsest level's light reads (`TOP_STEPS`): made again every frame.
+  Keeping only the sites read last was tried, twice:
+  lighting slows, by tiles made again.
+  A site's medium takes as much as its pieces, in every brick,
+  though few bricks hold any.
+- **Native makes more tiles than rays ask for.**
+  A tile is made with those above and below it (`made_with`),
+  and rays ask for few of them:
+  those far from the eye are made and dropped at once,
+  the rest held, most of them empty, each with its indexes (`Tile::new`).
+  A host's tiles as they are made, a box each, would hold and index them once;
+  `fcc`'s `Tiles` and the windows take cubes.
+- **A level's tiles are indexed anew whenever one comes or goes**
+  (`Level::new`), and small, they come by the dozen:
+  flying lit, an update takes the main thread several ms at most.
+- **A world lit only later makes its tiles twice.**
+  Shaded, a tile's sites are not kept (`Queue`'s `lit`):
+  the light, turned on in the panel, makes them again.
+  One store of tiles for hosts, lit or not, would make them once,
+  for what the sites of shaded tiles take;
+  it would not be the light's then (`Shared` in `light.rs`).
+- **How far past an engine's reach tiles are kept is chosen**
+  (`KEPT` in `native/src/world.rs`),
+  not derived from how far the light reads (`TOP_STEPS`, and each level the next).
 - **Native's voxels wait on memory** (`march` in `voxels.wgsl`):
   most of a frame is its samples' rays, some 50 steps each,
   and a step costs its reads one after another (a brick's slot, then its site),
@@ -537,7 +549,7 @@ Numbers are for the forest at 1280×800, as measured when written.
     the compositor paces frames by.
   - Making the uploaded bricks' words (`words`) varies tenfold from frame to frame,
     by memory, not work.
-  - Shots and tests wait for the windows a tile at a time,
+  - Shots and tests wait for the windows a step at a time (`STEP` tiles),
     a whole picture drawn each, so the voxels' GPU tests take twice as long.
 - **`culling_on_the_gpu_leaves_the_picture_unchanged` failed on an Intel UHD** (Mesa),
   drawn flat, every time: the forest from its spawn.

@@ -90,7 +90,7 @@ fn a_body_walks_the_path_through_its_ferns() {
     let [x, z] = [world.spawn[0], world.spawn[2]].map(|v| v >> level);
     let (min_y, max_y) = world.heights_at(level);
     let area = Box3 { min: [2 * ((x - 32) / 2), min_y, z - 8], max: [x + 32, max_y, z + 128] };
-    let tiles = fcc::Tiles::one(generate(&world.generator, &area, level).into_grid(true));
+    let tiles = fcc::Tiles::one(generate(&world.generator, &area, level).to_grid(true));
     let ground = Ground { tiles: &tiles };
     let mut body = Walker::at(world.spawn.map(|v| v as f64));
     let forward = WalkInput { forward: 1.0, ..WalkInput::default() };

@@ -1,6 +1,6 @@
 //! Voxel storage as voxel-grid.ts lays it out: what each site of a box
 //! looks like, in bricks BRICK units wide, only bricks with voxels stored.
-//! The same layout as the baker's Grid, which `into_grid` hands over.
+//! The same layout as the baker's Grid, which `to_grid` hands over.
 
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
@@ -58,7 +58,7 @@ pub fn is_site(x: i64, y: i64, z: i64) -> bool {
  * than itself, which stop some of its rays whole, and a medium
  * (KindDef::medium), which stops some of each ray the pieces let
  * through. Hosts are shown its pieces as a whole voxel as often as they
- * stop rays (`show`, `into_grid`); light sees every site as it is
+ * stop rays (`show`, `to_grid`); light sees every site as it is
  * (`light`). Apart from how it looks, how much of it stops a walking body.
  */
 #[derive(Clone)]
@@ -463,7 +463,7 @@ impl VoxelGrid {
      * medium, as much as it stops. What glows, shown or not, for the light:
      * its bricks are kept too.
      */
-    pub fn into_grid(self, see_through: bool) -> Grid {
+    pub fn to_grid(&self, see_through: bool) -> Grid {
         let looks: Vec<Look> = (0..self.shown.len()).map(|i| self.look(i, see_through)).collect();
         let keep: Vec<bool> = (0..self.shown.len() / BRICK_SITES)
             .map(|at| {
@@ -544,7 +544,7 @@ mod tests {
         grid.put_whole(10, 2, 2, colour);
         let lamp = grid.index(18, 2, 2).unwrap();
         grid.glow.insert(lamp, [1, 2, 3]);
-        let whole = grid.into_grid(false);
+        let whole = grid.to_grid(false);
         // A fifth of white, linear, is 124 of 255 in sRGB.
         let (dim, white) = (fcc::look([124; 3], ALPHA), fcc::look([255; 3], ALPHA));
         assert_eq!((whole.cells.len(), whole.get(2, 2, 2), whole.get(10, 2, 2)), (2 * BRICK_SITES, 0, dim));
@@ -572,7 +572,7 @@ mod tests {
         // Of the inner 4³ bricks (1 to 4 each way), those not around the hole's (2, 2, 2): any 4 away, held once.
         let buried = |p: [i64; 3]| p.iter().all(|&v| (8..40).contains(&v)) && p.iter().any(|&v| v >= 32);
         assert_eq!(grid.shown.len(), (6 * 6 * 6 - (4 * 4 * 4 - 3 * 3 * 3) + 1) * BRICK_SITES);
-        let handed = grid.clone().into_grid(false);
+        let handed = grid.to_grid(false);
         for [x, y, z] in sites() {
             if buried([x, y, z]) {
                 assert_eq!(grid.light(x, y, z, 1).0[0].0, ALPHA, "{x}, {y}, {z}");
@@ -601,7 +601,7 @@ mod tests {
         assert_eq!((grid.alpha(2, 2, 0), grid.light(2, 2, 0, 0).0.map(|part| part.0)), (91, [40, 51]));
         let handed = |grid: Grid| sites.map(|(x, y, ..)| (grid.get(x, y, 0), grid.solid(x, y, 0)));
         let (pieces, medium) = ((fcc::look([255; 3], ALPHA), true), (fcc::look([0; 3], 60), false));
-        assert_eq!(handed(grid.clone().into_grid(true)), [(0, false), pieces, medium, medium, pieces]);
-        assert_eq!(handed(grid.into_grid(false)), [(0, false), pieces, (0, false), (0, false), pieces]);
+        assert_eq!(handed(grid.to_grid(true)), [(0, false), pieces, medium, medium, pieces]);
+        assert_eq!(handed(grid.to_grid(false)), [(0, false), pieces, (0, false), (0, false), pieces]);
     }
 }

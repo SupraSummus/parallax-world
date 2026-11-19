@@ -2,19 +2,21 @@
 //! world, cubes TILE sites of the level a side (worldgen's tile_box), no
 //! axis apart from the others: asked for, made and dropped by how far they
 //! are from the camera, as the crow flies. Of each, only what may show is
-//! generated (worldgen's make_tiles): none of it above or below the world's
+//! generated (worldgen's tiles.rs): none of it above or below the world's
 //! heights, nor where its layers say it is empty or buried; on the
-//! world's threads (a generator per thread), the tiles wanted one above
-//! another together if the world has heights, and indexed there.
+//! world's threads (a generator per thread), a tile with those above and
+//! below it if the world has heights (made_with), and indexed
+//! there. Lit, a tile's sites are made into the light (Shared::make_tiles),
+//! which reads them, or are those it made: once, for both.
 //! Which tiles, and in what order, is up to the engine drawing them
 //! (Wants): every update hands over what it asks for, most wanted first,
-//! replacing the previous list. No other tile is made, so turning asks
-//! for what comes into view. Tiles farther from the camera than the
-//! engine may ask for (Wants's reach) are dropped, and
-//! the light's blocks in them (worldgen's Shared). A tile
+//! replacing the previous list. No other tile is made but with one asked
+//! for, so turning asks for what comes into view. Tiles farther from the
+//! camera than the engine may ask for (Wants's reach) are dropped, and
+//! the light's with them (worldgen's Shared). A tile
 //! never changes, so a chunk baked once all the tiles it reads are in
 //! stays right whatever comes after (fcc's Tiles). Given light (worldgen's Shared),
-//! the bakers' Lights read blocks of their own, each site as it is, where
+//! the bakers' Lights read its tiles, each site as it is, where
 //! they read them. Asked for light, for the voxels engine
 //! (voxels.rs), the bricks of tiles made that its rays asked for are lit,
 //! their voxels' light found: only what shows,
@@ -29,16 +31,25 @@ use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use fcc::GRID_LEVELS;
 pub use fcc::TileId;
 use fcc::{Grid, Tiles};
-use worldgen::light::{Light, Shared, make_tiles};
+use worldgen::light::{Light, Shared};
+use worldgen::tiles::{made_with, make_tiles};
 
 use crate::engine::voxels;
 use crate::view::Vec3;
 
-/** Tiles are 2^TILE_SHIFT sites of their level wide. */
-pub const TILE_SHIFT: u32 = 7;
-pub const TILE: i64 = 1 << TILE_SHIFT;
-// Lit, tiles are the Lights'.
-const _: () = assert!(TILE == worldgen::light::TILE);
+/** Tiles are worldgen's: 2^TILE_SHIFT sites of their level wide. */
+pub const TILE: i64 = worldgen::tiles::TILE;
+pub const TILE_SHIFT: u32 = TILE.trailing_zeros();
+const _: () = assert!(TILE == 1 << TILE_SHIFT);
+/**
+ * Sites past an engine's reach that tiles are made within, and how much
+ * farther they are dropped: apart, so that a tile dropped is not asked
+ * for a step on. Chosen, not derived: the levels no ray reads have no
+ * reach, and the light of what is lit reads their tiles, the coarsest's
+ * worldgen's TOP_STEPS sites off; nearer, those were made every frame.
+ */
+const KEPT: f64 = 256.0;
+const DROPPED: f64 = 128.0;
 
 /** The world of a seed. */
 pub type Make = fn(u64) -> worldgen::World;
@@ -218,31 +229,29 @@ pub enum Piece {
 /** A piece of a level, and the tile a brick is of. */
 type Job = (usize, Piece, Option<Arc<Tile>>);
 
-/** The pieces to make or light, most wanted first, those being made or lit, and the light they are lit by: how many times it changed. */
+/**
+ * The pieces to make or light, most wanted first, those being made or
+ * lit, the light they are lit by, how many times it changed, and whether
+ * what asks reads it (Wants's `lit`): tiles are then made into it.
+ */
 #[derive(Default)]
 struct Queue {
     wanted: VecDeque<Job>,
     in_flight: HashSet<(usize, Piece)>,
     shared: Option<Shared>,
     lighting: u32,
+    lit: bool,
     /** Each worker's clock (own_clock). */
     #[cfg(target_os = "linux")]
     clocks: Vec<libc::clockid_t>,
 }
 
 impl Queue {
-    /** Takes the tiles wanted right below and right above tile `id` of `level`, to be made with it (make_tiles): how many below, and above. */
-    fn column(&mut self, level: usize, id: TileId) -> [i32; 2] {
-        [-1, 1].map(|way| {
-            let mut taken = 0;
-            loop {
-                let next = (level, Piece::Tile([id[0], id[1] + way * (taken + 1), id[2]]));
-                let Some(at) = self.wanted.iter().position(|job| (job.0, job.1) == next) else { return taken };
-                self.wanted.remove(at);
-                self.in_flight.insert(next);
-                taken += 1;
-            }
-        })
+    /** Takes the tiles `with` tile `id` of `level` (made_with), to be made with it: those wanted wait no more. */
+    fn take(&mut self, level: usize, with: impl Iterator<Item = TileId>) {
+        let with: HashSet<Piece> = with.map(Piece::Tile).collect();
+        self.wanted.retain(|job| job.0 != level || !with.contains(&job.1));
+        self.in_flight.extend(with.into_iter().map(|piece| (level, piece)));
     }
 }
 
@@ -309,28 +318,25 @@ fn own_clock() -> libc::clockid_t {
     clock
 }
 
-fn work(make: Make, seed: u64, heights: &Heights, queue: &(Mutex<Queue>, Condvar), send: &Sender<Made>) {
+fn work(make: Make, seed: u64, queue: &(Mutex<Queue>, Condvar), send: &Sender<Made>) {
     behind_drawing();
     #[cfg(target_os = "linux")]
     queue.0.lock().expect("queue").clocks.push(own_clock());
-    // Made on the thread: a generator is not Send. Its Light's too: what tiles and light's blocks share is planned once.
+    // Made on the thread: a generator is not Send. Its Light's too.
     let world = Rc::new(make(seed));
-    // A world with heights lies across y, so tiles one above another share most of their cost; an endless one's
-    // (the cheese) cost as much together as alone, and take a box that large.
-    let columns = world.heights.is_some();
+    let with = |level: usize, id: TileId| made_with(&world, level as u32, id.map(i64::from)).map(|key| key.map(|v| v as i32));
     // Made once there are tiles to light, and again when the light changes.
     let mut light: Option<(u32, Light)> = None;
     loop {
-        let ((level, piece, of), [below, above], shared, lighting) = {
+        let ((level, piece, of), shared, lighting, lit) = {
             let mut q = queue.0.lock().expect("queue");
             loop {
                 if let Some(job) = q.wanted.pop_front() {
                     q.in_flight.insert((job.0, job.1));
-                    let column = match job.1 {
-                        Piece::Tile(id) if columns => q.column(job.0, id),
-                        _ => [0, 0],
-                    };
-                    break (job, column, q.shared.clone(), q.lighting);
+                    if let Piece::Tile(id) = job.1 {
+                        q.take(job.0, with(job.0, id));
+                    }
+                    break (job, q.shared.clone(), q.lighting, q.lit);
                 }
                 q = queue.1.wait(q).expect("queue");
             }
@@ -344,11 +350,18 @@ fn work(make: Make, seed: u64, heights: &Heights, queue: &(Mutex<Queue>, Condvar
                 of.expect("the tile of a brick").lit(level as u32, corner, light);
                 vec![(level, piece, None)]
             }
-            Piece::Tile([x, y, z]) => {
-                let (first, last) = ([x, y - below, z], y + above);
-                let grids = make_tiles(&world.generator, level as u32, heights[level], first.map(i64::from), last.into());
-                let tile = |(y, grid)| (level, Piece::Tile([x, y, z]), Some(Arc::new(Tile::new([x, y, z], Arc::new(grid)))));
-                (first[1]..=last).zip(grids).map(tile).collect()
+            Piece::Tile(id) => {
+                let key = id.map(i64::from);
+                // Read by light, its sites are the light's: made once.
+                let grids = match shared.filter(|_| lit) {
+                    Some(shared) => shared.make_tiles(&world, level as u32, key),
+                    None => make_tiles(&world, level as u32, key),
+                };
+                let tile = |(key, grid): ([i64; 3], Grid)| {
+                    let id = key.map(|v| v as i32);
+                    (level, Piece::Tile(id), Some(Arc::new(Tile::new(id, Arc::new(grid)))))
+                };
+                grids.into_iter().map(tile).collect()
             }
         };
         for made in made {
@@ -368,7 +381,7 @@ impl World {
         let queue = Arc::new((Mutex::new(Queue { shared: shared.clone(), ..Queue::default() }), Condvar::new()));
         for _ in 0..threads {
             let (queue, send) = (queue.clone(), send.clone());
-            std::thread::spawn(move || work(make, seed, &heights, &queue, &send));
+            std::thread::spawn(move || work(make, seed, &queue, &send));
         }
         World {
             tiles: (0..GRID_LEVELS).map(|_| HashMap::new()).collect(),
@@ -480,15 +493,15 @@ impl World {
      * units), and has done what `wants` asks for, most wanted first: the
      * tiles it names made, and, lit here, the bricks lit, what shows
      * (rays ask for them), small, and in a world that is not flat, little
-     * of the tiles made. No other tile is made: what no one asks for, no
-     * one reads. Returns whether any level's tiles changed.
+     * of the tiles made. No other tile is made but with one it names
+     * (made_with). Returns whether any level's tiles changed.
      */
     pub fn update(&mut self, camera: Vec3, wants: &Wants) -> bool {
         let Wants { reach, lit, asked } = wants;
         let lit = *lit;
         assert!(lit == Lit::Not || self.shared.is_some(), "a world lit with no light");
-        // Tiles are made no farther from the camera than `keep` (in the level's sites), and dropped once a tile farther.
-        let keep = |level: usize| reach[level].unwrap_or(0.0) + 2.0 * TILE as f64;
+        // Tiles are made no farther from the camera than `keep` (in the level's sites), and dropped once farther still.
+        let keep = |level: usize| reach[level].unwrap_or(0.0) + KEPT;
         let mut changed = [false; GRID_LEVELS];
         let made: Vec<Made> = std::mem::take(&mut self.early).into_iter().chain(self.done.try_iter()).collect();
         {
@@ -497,13 +510,17 @@ impl World {
                 q.in_flight.remove(&(*level, *piece));
             }
         }
+        let far = |level: usize, id: TileId| distance(level, camera, id) > keep(level) + DROPPED;
         for (level, piece, tile) in made {
-            if let (Piece::Tile(id), Some(tile)) = (piece, tile) {
-                self.tiles[level].insert(id, tile);
+            // Made with one asked for, a tile may be far, or here already: that one is kept, with its light.
+            if let (Piece::Tile(id), Some(tile)) = (piece, tile)
+                && !far(level, id)
+                && let std::collections::hash_map::Entry::Vacant(entry) = self.tiles[level].entry(id)
+            {
+                entry.insert(tile);
                 changed[level] = true;
             }
         }
-        let far = |level: usize, id: TileId| distance(level, camera, id) > keep(level) + TILE as f64;
         for (level, tiles) in self.tiles.iter_mut().enumerate() {
             let before = tiles.len();
             tiles.retain(|&id, _| !far(level, id));
@@ -531,6 +548,7 @@ impl World {
         }
         {
             let mut q = self.queue.0.lock().expect("queue");
+            q.lit = lit != Lit::Not;
             list.retain(|job| !q.in_flight.contains(&(job.0, job.1)));
             if !list.is_empty() {
                 self.queue.1.notify_all();
@@ -543,6 +561,21 @@ impl World {
         }
         changed.contains(&true)
     }
+}
+
+/** For tests: the tiles of `level` of `world`, unlit, that meet the cube reaching `reach` sites each way from `centre`. */
+#[cfg(test)]
+pub fn tiles_about(world: &worldgen::World, level: u32, centre: [i32; 3], reach: i32) -> HashMap<TileId, Arc<Tile>> {
+    let tile = |v: i32| v.div_euclid(TILE as i32);
+    let mut tiles = HashMap::new();
+    for id in within([centre.map(|v| tile(v - reach)), centre.map(|v| tile(v + reach - 1))]) {
+        if !tiles.contains_key(&id) {
+            let made = make_tiles(world, level, id.map(i64::from)).into_iter().map(|(key, grid)| (key.map(|v| v as i32), grid));
+            tiles.extend(made.map(|(id, grid)| (id, Arc::new(Tile::new(id, Arc::new(grid))))));
+        }
+    }
+    tiles.retain(|id, _| (0..3).all(|d| (tile(centre[d] - reach)..=tile(centre[d] + reach - 1)).contains(&id[d])));
+    tiles
 }
 
 #[cfg(test)]
@@ -609,21 +642,20 @@ mod tests {
      */
     #[test]
     fn cells_meet_the_voxels_they_hold() {
-        use worldgen::light::make_tile;
+        // Around the corner of cubes this many sites a side that is nearest the spawn, as far each way.
+        const REACH: i32 = 128;
         let mut see_through = 0;
         for (name, level) in [("city", 0), ("moor", 0), ("forest", 2)] {
             let world = (worlds::by_name(name).expect("world").make)(1);
             let spawn = world.spawn.map(|v| (v >> level) as i32);
-            let corner = spawn.map(|v| (v as f64 / TILE as f64).round() as i32);
-            let make = |id: TileId| Tile::new(id, Arc::new(make_tile(&world.generator, level, world.heights_at(level), id.map(i64::from))));
-            let tiles = within([corner.map(|v| v - 1), corner]);
-            let level = Level::new(tiles.map(|id| (id, Arc::new(make(id)))).collect());
+            let corner = spawn.map(|v| (v as f64 / REACH as f64).round() as i32 * REACH);
+            let level = Level::new(tiles_about(&world, level, corner, REACH));
             for kept in [false, true] {
                 let voxel = |look: fcc::Look| if kept { !matches!(fcc::alpha_of(look), 0 | fcc::ALPHA) } else { look != 0 };
                 let held = |q: [i32; 3]| (q[0] + q[1] + q[2]) & 1 == 0 && level.grids.at(q[0], q[1], q[2]).is_some_and(voxel);
                 for radius in [1, 2, 4, 8, 16, 32] {
-                    // Each cell within a tile of the spawn (to the next multiple of 64, a site of each), or 8 cells, the nearer.
-                    let n = (TILE as i32 / radius).min(8);
+                    // Each cell within REACH of the spawn (to the next multiple of 64, a site of each), or 8 cells, the nearer.
+                    let n = (REACH / radius).min(8);
                     let cells: Vec<[i32; 3]> = within([[-n; 3], [n; 3]])
                         .filter(|p| (p[0] + p[1] + p[2]) & 1 == 0)
                         .map(|p| std::array::from_fn(|d| (spawn[d] + 32).div_euclid(64) * 64 + p[d] * radius))

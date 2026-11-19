@@ -137,16 +137,18 @@ A window smaller than the coarser levels' sites lets no sky in at all
 
 Native's bakers each light what they show with a `Light` of their own
 (a generator is not `Send`):
-they share blocks, and the light found at their sites (`Shared`),
+they share the world's tiles, and the light found at their sites (`Shared`),
 with each other and the world's threads,
-so a site's light is found once, whichever of them asks;
-not the world's tiles, which keep of a site only what is drawn:
-what is lit is generated twice, as a tile and as blocks,
+so a tile is made once, for what draws it and what lights it
+(`Shared::make_tiles`),
+and a site's light is found once, whichever of them asks.
+A tile is made with those above and below it (`made_with`):
+alone, a cube costs about twice what it does in its column.
+The world draws grids that keep of a site only what is drawn (`VoxelGrid::to_grid`),
+beside the sites the light reads,
 till hosts read sites as light does
-("Cells hold what they look like" in [generators.md](generators.md));
-the tiles' own (`TILE`, `tile_box`, `make_tiles`) are still in `light.rs`,
-which no longer makes them;
-and the bakers' each make a generator, whose plans take tens of MB;
+("Cells hold what they look like" in [generators.md](generators.md)).
+The bakers' each make a generator, whose plans take tens of MB;
 a thread of the world lights with the one it makes tiles with.
 
 What is found at a site is a function of the world alone,
@@ -156,15 +158,12 @@ They keep the sites read lately (`KEPT_SITES`, `Shared::begun`):
 fewer hold less, and under what a view reads at once, lighting slows by half.
 A site kept takes about 1.5 KB, half of it its rounds.
 
-A site of a block costs a few times one of a tile at the finest levels
-(the cheese's holes, the valley's plans, asked again per block),
-so a tile read all round its edges costs about as much in blocks.
-
 Native's light sliders light the world anew (`World::relight`),
 as slowly as at the start.
 
-Lighting the valley's first view, two thirds of the world's threads' work
-is generating, the tiles and the light's blocks, and a fifth finding the light.
+Lighting the valley's first view, over half of the world's threads' work
+is generating, the tiles rays ask for and those the light reads around them,
+and over a third finding the light.
 Of that, most is the rounds past a site's first:
 each round reads sites one further around what is lit,
 many where sites filled in part reflect on each other, as all through a wood's crowns.
@@ -172,15 +171,14 @@ Tried, each measured on the valley's first view and a flight on from it
 (`--stroll` with `--by-work` in `native/src/main.rs`),
 and not kept:
 
-- the tiles as the light's blocks, each made once for both:
-  an eighth less work, and two thirds more held,
-  as every tile then keeps all of its sites, lit or not;
-- blocks half or twice as wide: more work either way;
+- tiles half or twice as wide, when the light's were its own: more work either way;
 - a cube's bricks lit together by one thread: no less work;
-- the blocks forgotten with their sites' light, once none read them:
+- the tiles forgotten with their sites' light, once none read them:
   made again, a flight lit less than half the bricks in a time;
-- a block's light forgotten whole once none read the block, not site by site:
+- a tile's light forgotten whole once none read the tile, not site by site:
   as fast for as much held, and one more thing to keep;
+- a site's rounds ended where it settles, later ones its last:
+  a tenth fewer rounds, little less work;
 - a site's rounds started from the coarser level's light on what it meets:
   a tenth fewer rounds, no less work;
 - a site's rounds ended once their steps fall off as a geometric series,
@@ -197,7 +195,7 @@ so each is one more that reflects, with rounds of its own.
 Of the light alone, about a third is `shown`'s:
 the settled light of every neighbour whose pieces are not shown.
 
-Lighting a place first, most is its blocks,
+Lighting a place first, most is its tiles,
 the coarsest level's far around (`TOP_STEPS` sites along every direction).
 
 Light adds up, so it is the sum of the sky's, the sun's and the glow's;
