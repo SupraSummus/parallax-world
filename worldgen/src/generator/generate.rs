@@ -152,7 +152,9 @@ fn made(generator: &Generator, b: &Box3, level: u32, floors: Option<&Floors>) ->
  * `medium`, `glow`): as a Fill behind what is there, apart from it; a
  * Paint in front of it, lying on it, and past it only where it covers
  * more; a Carve taking it out, of both. A medium joins the site's medium,
- * the rest its pieces. What either stops, shows and glows is the sum of
+ * the rest its pieces; painted, it lies on the pieces and takes their
+ * place, as far as it covers them. What either stops, shows and glows
+ * is the sum of
  * what is in it, each by how much of the site's rays it stops there.
  * Pieces covering some faces' rays more than others' (`cover`), unlike
  * through some faces, or put where some did, are added face by face
@@ -180,17 +182,42 @@ fn see(grid: &mut VoxelGrid, odd: &mut Vec<bool>, added: &Added, share: u32, x: 
     };
     // A carve takes out pieces and medium alike: the medium here, the pieces as any.
     let medium = added.medium && added.op != Op::Carve;
-    let old = if odd[i] { grid.glow.get(&i).copied().unwrap_or_default() } else { [0; 3] };
     if added.op == Op::Carve {
         let kept = (SHARE - share.min(SHARE)) as u64;
         grid.medium.alpha[i] = added.rounded(grid.medium.alpha[i] as u64 * kept);
         grid.medium.colour[i] = grid.medium.colour[i].map(|c| (c as u64 * kept / SHARE as u64) as u16);
     }
-    let by_face = !medium && (added.cover.is_some() || added.faces.is_some() || odd[i] && grid.views.contains_key(&i));
+    if medium {
+        let mut share = share.min(SHARE);
+        if added.op == Op::Paint && grid.pieces.alpha[i] > 0 {
+            // It lies on the pieces, as any paint on what is there, and takes their place: as much of them as it
+            // covers through the face that sees most of it, through every face alike, as a site shows its pieces whole
+            // or not at all. The site's medium is a share of the rays the pieces let through, so the rest of them.
+            let (all, one) = (ALPHA as u64, SHARE as u64);
+            let most = (0..FACE_KINDS).max_by_key(|&k| added.cover.map_or(share, |cover| cover[k])).expect("faces");
+            let seen = grid.views.get(&i).filter(|_| odd[i]).map_or(grid.pieces.alpha[i], |views| views.alpha[most]) as u64;
+            let covered = (share as u64 * all).checked_div(seen).map_or(one, |of| of.min(one));
+            let under = Added { op: Op::Carve, faces: None, cover: None, medium: false, solid: false, ..*added };
+            pieces(grid, odd, &under, covered as u32, i);
+            let left = all * one - seen * (one - covered);
+            share = (share as u64 * all * one).checked_div(left).map_or(SHARE, |of| of.min(one) as u32);
+        }
+        let old = if odd[i] { grid.glow.get(&i).copied().unwrap_or_default() } else { [0; 3] };
+        let (alpha, colour, glow) = added.to((grid.medium.alpha[i], grid.medium.colour[i], old), share, 0);
+        (grid.medium.alpha[i], grid.medium.colour[i]) = (alpha, colour);
+        set_glow(grid, odd, i, glow);
+        return;
+    }
+    pieces(grid, odd, added, share, i);
+}
+
+/** `see`, of site `i`'s pieces: `added`'s `share` of it, face by face where its faces differ. */
+fn pieces(grid: &mut VoxelGrid, odd: &mut [bool], added: &Added, share: u32, i: usize) {
+    let old = if odd[i] { grid.glow.get(&i).copied().unwrap_or_default() } else { [0; 3] };
+    let by_face = added.cover.is_some() || added.faces.is_some() || odd[i] && grid.views.contains_key(&i);
     if !by_face {
-        let part = if medium { &mut grid.medium } else { &mut grid.pieces };
-        let (alpha, colour, glow) = added.to((part.alpha[i], part.colour[i], old), share, 0);
-        (part.alpha[i], part.colour[i]) = (alpha, colour);
+        let (alpha, colour, glow) = added.to((grid.pieces.alpha[i], grid.pieces.colour[i], old), share, 0);
+        (grid.pieces.alpha[i], grid.pieces.colour[i]) = (alpha, colour);
         set_glow(grid, odd, i, glow);
         return;
     }
@@ -273,6 +300,7 @@ fn see_whole(
 type Sight = ([u32; 3], [u32; 3]);
 
 /** What `see` adds to a site: what a thing shows and glows through each face, whether a medium, whether it stops a walking body. */
+#[derive(Clone, Copy)]
 struct Added {
     op: Op,
     pick: u32,

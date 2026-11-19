@@ -101,8 +101,22 @@ Numbers are for the forest at 1280×800, as measured when written.
     a small lamp's glow grew with the level.
     Wanted: the shadow of the box's part of the voxel along each direction.
   - Balls, tubes and gables; with them `Tie` and the thin shapes' rules go.
-  - Spans of a medium or a coat, by how long a ray is in them;
-    then `Column` need not thicken spans to two sites, nor coat thin media.
+  - Spans of a medium are held so now (`held` in `drawables.rs`). Left:
+    - A see-through kind has one share a site, pieces one a face,
+      and a site shows its pieces whole or not at all.
+      So it takes its most across the line,
+      and a painted one takes the pieces' place through every face alike (`see`).
+      Its own share for each face, drawn so by hosts, would end both,
+      and the thickening below.
+    - One standing free (`Span::medium`: mist, rails) is still spread over two sites:
+      in the site of the ground under it, the ground's pieces, shown, hide it.
+    - Two measures of one voxel: a medium's length is that of rays along the line (`crossed`),
+      what its solids stop, of chords along the faces' directions (`slabs`).
+      One for both would move every ground's top.
+    - Through the faces along the line, the solids behind a medium are those under it:
+      right for a column, not for a line along x or z.
+    - A medium as thick as a site lies on its ground through those faces too,
+      where it is beside it: a little less is stopped at level 1 (the valley's fields).
   - Hosts: the levels they ask for, the scale a body walks at.
     Seen from near, a level is pitted where its sites are held in part
     (a flat ground's top, a site deep),
@@ -446,6 +460,8 @@ Numbers are for the forest at 1280×800, as measured when written.
     would let a ray take the sky's colour where shine changes along it.
     Not looked at in the chunks engines, whose slabs blur where a medium ends.
     Ponds, the moor's water and wells are still whole voxels.
+  - At the levels whose sites are a few pixels wide, the sea shows rings (the valley, from 600 m up):
+    a ray for every 4 × 4 pixels takes its medium from a lattice of see-through sites as fine.
   - Most of what a fragment costs is reading its four columns from storage:
     two columns an item, or the pictures in a texture the GPU filters,
     would read half as often.

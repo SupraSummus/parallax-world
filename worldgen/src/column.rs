@@ -3,17 +3,17 @@
 //!
 //! A line of sites along an axis has a site only every two spacings: at
 //! a level's sites, x + y + z is even, so with x and z fixed, y keeps
-//! its parity. A span shorter than two spacings may hold no site at all,
-//! and whatever it is (a pond, a layer of turf) vanishes at that level.
-//! So every span a `Column` makes is at least two spacings tall, those of
-//! `fill_below_exactly` aside, and a thinned medium keeps its density
-//! along a ray. A heightfield's columns close its slopes' sides by
-//! reaching down past the columns around (`sides`). The spacing is that
-//! of the sites read for (`plan::spacing`), so a world declares a column
-//! once, for every level. See "Writing a world" in docs/generators.md.
+//! its parity. A solid span shorter than two spacings may hold no site
+//! whole, and whatever it is (a pond, a layer of turf) fades at that level.
+//! So every solid span a `Column` makes is at least two spacings tall,
+//! those of `fill_below_exactly` aside; a medium on the ground is as tall
+//! as it is, held in part by the sites it reaches. A heightfield's
+//! columns close its slopes' sides by reaching down past the columns
+//! around (`sides`). The spacing is that of the sites read for
+//! (`plan::spacing`), so a world declares a column once, for every level.
+//! See "Writing a world" in docs/generators.md.
 
 use crate::generator::{DEEP, Holds, Kind, Span};
-use crate::js;
 use crate::plan::spacing;
 
 impl Span {
@@ -24,8 +24,10 @@ impl Span {
 
     /**
      * A medium of `kind` from `from`, `height` tall, stopping `extinction`
-     * per unit of a ray's path (see Span): at least two sites tall, and
-     * then as much thinner as it is taller, as dense along a ray through it.
+     * per unit of a ray's path (see Holds), standing free: at least two
+     * sites tall, and then as much thinner as it is taller, as dense along
+     * a ray through it. In the site of the ground under it alone, the
+     * ground's pieces, shown, would hide it (VoxelGrid's `look`).
      */
     pub fn medium(from: i64, height: i64, kind: impl Into<Kind>, extinction: f64) -> Span {
         let tall = height.max(2 * spacing());
@@ -117,22 +119,13 @@ impl Column {
     }
 
     /**
-     * A medium `height` tall on what stands on the ground so far, as
-     * `Span::medium`. Thinner than a spacing, a coat on what it stands on
-     * instead: the site under its top shows it as often as all of it
-     * stops a ray down through it. Grown to two sites, its top would
-     * stand a spacing or more over where it is, and rays look down on it
-     * that much nearer.
+     * A medium `height` tall on what stands on the ground so far, as tall
+     * as it is: it lies on that where the field paints, and shows on it
+     * from above as often as it stops a ray down, at every level.
      */
     pub fn medium(mut self, kind: impl Into<Kind>, height: i64, extinction: f64) -> Column {
-        let (from, s) = (self.ceiling(), self.spacing);
-        let medium = if height < s {
-            let to = from + height;
-            Span { from: to - 2 * s, to, kind: kind.into(), holds: Holds::Coat(1.0 - js::exp(-extinction * height as f64)) }
-        } else {
-            Span::medium(from, height, kind, extinction)
-        };
-        self.above.push(medium);
+        let from = self.ceiling();
+        self.above.push(Span { from, to: from + height, kind: kind.into(), holds: Holds::Medium(extinction) });
         self
     }
 
@@ -174,11 +167,9 @@ mod tests {
     use crate::plan::footprint;
 
     #[test]
-    fn every_span_holds_a_site_at_every_level() {
-        // A thin turf over soil, a thin medium on it, shallow water: each still on every line of sites, at every level.
-        let column = |h: i64, s: i64| {
-            footprint(s, [0, 0], || Column::new(h).surface(1, 1).fill_below(2, h - 2).medium(3, 1, 0.5).water_to(4, h + 1).spans())
-        };
+    fn every_solid_span_holds_a_site_at_every_level() {
+        // A thin turf over soil, shallow water: each still on every line of sites, at every level.
+        let column = |h: i64, s: i64| footprint(s, [0, 0], || Column::new(h).surface(1, 1).fill_below(2, h - 2).water_to(4, h + 1).spans());
         for level in 0..6 {
             let s = 1 << level;
             for h in -40..40 {
@@ -195,13 +186,13 @@ mod tests {
     }
 
     #[test]
-    fn spans_come_out_bottom_up_and_media_keep_their_density() {
+    fn spans_come_out_bottom_up_and_media_are_as_tall_as_they_are() {
         let spans = footprint(4, [0, 0], || Column::new(10).surface(1, 3).surface(2, 1).fill_below(3, -20).medium(4, 6, 0.5).spans());
         let bounds: Vec<(i64, i64)> = spans.iter().map(|s| (s.from, s.to)).collect();
-        assert_eq!(bounds, [(-20, -5), (-5, 3), (3, 11), (11, 19)]);
-        assert_eq!(spans[3].holds, Holds::Medium(0.5 * 6.0 / 8.0));
+        assert_eq!(bounds, [(-20, -5), (-5, 3), (3, 11), (11, 17)]);
+        assert_eq!(spans[3].holds, Holds::Medium(0.5));
         // A field of columns draws them.
-        let world = ground(Op::Fill, |_, _| Column::new(0).surface(0, 1));
+        let world = ground(Op::Fill, false, |_, _| Column::new(0).surface(0, 1));
         let grid = generate(&world, &Box3 { min: [0, -4, 0], max: [4, 4, 4] }, 0);
         assert!((0..4).all(|x| (0..4).all(|z| (-1..=0).any(|y| grid.alpha(x, y, z) != 0))), "the turf is on every column");
     }
@@ -213,7 +204,7 @@ mod tests {
         // the columns a site's voxel reaches into: not the hollow under the ground, past a cliff's corners or through a
         // steep face. Nearer a cliff's face, the sky shows, as it would.
         let top = |x: i64, z: i64| i64::from(crate::noise::hash(7, x, 0, z) % 40);
-        let world = ground(Op::Fill, move |x, z| Column::new(top(x, z)).surface(0, 1).sides(0, lowest_around(top, x, z), 3));
+        let world = ground(Op::Fill, false, move |x, z| Column::new(top(x, z)).surface(0, 1).sides(0, lowest_around(top, x, z), 3));
         for level in 0..4 {
             let s = 1 << level;
             let b = Box3 { min: [0, -48 / s, 0], max: [24, 48 / s, 24] };
@@ -244,35 +235,41 @@ mod tests {
     }
 
     #[test]
-    fn a_thin_medium_shows_on_its_ground_as_often_as_it_stops_rays_down_it() {
-        // Stopping half of what comes down, on flat ground: its top sites show it half, whatever the field's op, at
-        // every level whose sites are further apart than it is tall.
-        for op in [Op::Fill, Op::Paint] {
-            let world = ground(op, |_, _| Column::new(0).surface(0, 1).medium(1, 2, std::f64::consts::LN_2 / 2.0));
-            for level in 2..6 {
-                let grid = generate(&world, &Box3 { min: [0, -4, 0], max: [96, 4, 96] }, level);
-                let tops: Vec<fcc::Look> =
-                    (0..96 * 96).filter_map(|i| (-4..4).rev().map(|y| grid.get(i % 96, y, i / 96)).find(|&look| look != 0)).collect();
-                // How much of each top's red is moss's (0x40) rather than stone's (0x80), linear.
-                let red = |v: f64| fcc::light::srgb_to_linear((v / 255.0) as f32) as f64;
-                let moss = |look: &fcc::Look| (red(128.0) - red((look & 255) as f64)) / (red(128.0) - red(64.0));
-                let shown = tops.iter().map(moss).sum::<f64>() / tops.len() as f64;
-                assert!((shown - 0.5).abs() < 0.03, "level {level}: {shown} of the top sites show it");
+    fn a_thin_medium_shows_on_its_ground_as_often_at_every_level() {
+        // Moss that stops half of a ray down, painted on flat ground: rays down see half of it and half the stone,
+        // near and far, whether its kind is pieces or see-through.
+        let red = |v: f64| fcc::light::srgb_to_linear((v / 255.0) as f32) as f64;
+        let shown = |see_through: bool, level: u32| {
+            let world = ground(Op::Paint, see_through, |_, _| Column::new(0).surface(0, 1).medium(1, 2, std::f64::consts::LN_2 / 2.0));
+            let grid = generate(&world, &Box3 { min: [0, -6, 0], max: [64, 6, 64] }, level);
+            let rays = (0..4096).map(|i| {
+                let at = |n: u64| 8.0 + 48.0 * crate::noise::hash(n, i, 0, 0) as f64 / u32::MAX as f64;
+                let seen = composited(&grid, [at(1), 5.0, at(2)], [0.0, -1.0, 0.0], 10.0, 1.0);
+                // How much of what the ray sees is moss's red (0x40) rather than stone's (0x80).
+                let (stopped, r) = seen.iter().fold((0.0, 0.0), |(s, r), (_, seen)| (s + seen.stopped, r + seen.shown[0]));
+                (red(128.0) - r / stopped) / (red(128.0) - red(64.0))
+            });
+            rays.sum::<f64>() / 4096.0
+        };
+        for see_through in [false, true] {
+            for level in 0..6 {
+                let moss = shown(see_through, level);
+                assert!((moss - 0.5).abs() < 0.08, "see-through {see_through}, level {level}: rays down see {moss} of it");
             }
         }
     }
 
-    /** A world of stone, and moss, a field of `columns` its ground, drawn by `op`. */
-    fn ground(op: Op, columns: impl Fn(i64, i64) -> Column + 'static) -> Generator {
-        let kind = |name, colour| crate::generator::KindDef {
+    /** A world of stone, and moss, see-through or not, a field of `columns` its ground, drawn by `op`. */
+    fn ground(op: Op, see_through: bool, columns: impl Fn(i64, i64) -> Column + 'static) -> Generator {
+        let kind = |name, colour, medium| crate::generator::KindDef {
             name,
             kind_type: 1,
             colors: std::slice::from_ref(colour),
             walk_through: false,
             glows: false,
-            medium: false,
+            medium,
         };
-        let kinds = vec![kind("stone", &"#808080"), kind("moss", &"#408040")];
+        let kinds = vec![kind("stone", &"#808080", false), kind("moss", &"#408040", see_through)];
         Generator { kinds, seed: 1, layers: vec![Layer::Field(Field::columns("ground", 0.0, op, columns))] }
     }
 }

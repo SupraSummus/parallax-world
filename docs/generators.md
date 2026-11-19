@@ -331,7 +331,14 @@ how many rays get how far, and what they stop on.
   and shown by their coins: the ground is pitted, a site deep.
   A paint lies on what is there, and past it only where it covers more:
   a field painting another's ground paints all of its top sites.
-  Boxes, and spans of a medium or a coat, keep the sites in [min, max) along each axis.
+  A medium's span is in every site it reaches too, by the same law:
+  through each face, the share of the voxel's chords it stops,
+  each as far as it runs in the span (`held` in `drawables.rs`).
+  Chords that end in the line's solids behind it show it too,
+  as a ground shows only by its top:
+  so a thin medium shows on its ground from above
+  as often as it stops a ray down, at every level.
+  Boxes keep the sites in [min, max) along each axis.
   On a plane of a level's sites (y = 0 is one at every level)
   half the lines across a face have a site on it,
   all kept at a bottom face and dropped at a top one,
@@ -904,8 +911,9 @@ the one place preferred.
 What is drawn far away keeps what is near on average, not its outline:
 the towns' things and the forest's canopy are measured ("Levels"),
 patterns finer than the sites draw their parts in proportion (`stripe`),
-and media too thin for the sites are thickened, as dense along a ray
-(`Span::medium`), or a coat on the ground they stand on (`Column::medium`, `Holds::Coat`).
+and media thinner than the sites are in them in part, as dense along a ray;
+one standing free is spread over two sites (`Span::medium`),
+as the ground's pieces, shown, would hide it in the site they share.
 
 ### Kinds and things
 
@@ -934,6 +942,9 @@ pieces smaller than the site, as leaves are,
 stop a share of its rays whole;
 a kind marked `medium`, as mist is,
 stops a share of every ray the pieces let through.
+Painted, a medium lies on the site's pieces as any paint does,
+and takes their place as far as it covers them:
+so the sea hides its floor where both are in one coarse site.
 So a coarse site of a crown in mist holds both, each as it is.
 The pieces show as grain, a whole voxel as often (`VoxelGrid::show`);
 where they don't, a host that draws alpha (native)
@@ -1123,7 +1134,6 @@ so its fill is given only then, and can't be set afterwards.
 | Lengths with their fraction: `Fx::m(metres)`, a path's centre line | `Fx` | lattice units: `fx(2.0)` is 2 |
 | `Far` detail, a shape's `extents` | `Fx` | lattice units |
 | A span's `Holds::Medium` | `f64` | per lattice unit of a ray's path |
-| A span's `Holds::Coat` | `f64` | a share of each site |
 
 `Fx` is fixed point, 16 bits after the point:
 a fraction, or a length in units with its fraction kept.
@@ -1144,13 +1154,11 @@ A line of sites along an axis has a site only every two spacings
 so a span shorter than that may hold none, and vanishes at that level:
 a pond, a layer of turf, a hedge.
 `Column` (`column.rs`) builds a column's spans from its ground's top,
-each at least two spacings tall:
+each solid one at least two spacings tall:
 `Column::new(height).surface(grass, m(0.5)).fill_below(soil, bottom)`,
 at the spacing of the sites drawn,
-`.medium(kind, height, extinction)` on top, thickened but as dense along a ray;
-thinner than a spacing, a coat on what it stands on (`Holds::Coat`),
-as much as all of it stops a ray from above
-(grown to two sites, its top would stand a spacing or more too high),
+`.medium(kind, height, extinction)` on top, as tall as it is,
+over its ground where the field paints,
 `.water_to(kind, level)` where the ground is lower.
 Carves along a line want the same margin.
 A surface on ground of another kind lies as deep
@@ -1178,12 +1186,6 @@ and without them rays slipped in at a cliff's corners.
   Don't widen them to a site either:
   the moor's stream, drawn at least a site wide, covered five times its share
   at level 6; decided in a dithered plan, it shows as often as it is.
-- **Thickened media spread.** A medium thickened to two sites
-  stands over the columns beside it, and takes over their edges from above
-  (the moor's grass over its heather, 0.03 at level 6),
-  and stops rays skimming over it.
-  `Column::medium` makes one thinner than a spacing a coat on its ground;
-  `Span::medium` still thickens it, for media that fill what is empty (mist).
 - **Keep the top where it is.** Whatever has to be two sites tall
   grows down, not up, as `Column::surface` does
   (the railway's platform; its bridges' parapets):
