@@ -97,7 +97,7 @@ fn made(generator: &Generator, b: &Box3, level: u32, floors: Option<&Floors>) ->
         let colour = |kind: Kind| palette.colour(kind, s, [x, y, z].map(|v| v * s));
         let kind = &generator.kinds[look.kind as usize];
         if !see_whole(&mut grid, &odd, &look, kind, op, share, [x, y, z], || colour(look.kind)) {
-            see(&mut grid, &mut odd, &Added::of(&look, kind, op, pick, colour), share, x, y, z);
+            see(&mut grid, &mut odd, &Added::of(&look, &generator.kinds, op, pick, colour), share, x, y, z);
         }
     };
     let drawables = drawables_in(generator, &clip, s);
@@ -267,15 +267,16 @@ fn see_whole(
     true
 }
 
-/** What `see` adds to a site: a thing's colour through each face, what it glows, whether a medium, whether it stops a walking body. */
+/** What is seen of a kind: its colour (linear, of COLOUR_ONE), and what it glows. */
+type Sight = ([u32; 3], [u32; 3]);
+
+/** What `see` adds to a site: what a thing shows and glows through each face, whether a medium, whether it stops a walking body. */
 struct Added {
     op: Op,
     pick: u32,
-    /** Linear, of COLOUR_ONE. */
-    colour: [u32; 3],
-    /** Its colour through each face, where they differ. */
-    faces: Option<[[u32; 3]; FACE_KINDS]>,
-    glow: [u32; 3],
+    sight: Sight,
+    /** Through each face, where they differ. */
+    faces: Option<[Sight; FACE_KINDS]>,
     /** How much of each face's rays it covers, if not its share. */
     cover: Option<[u32; FACE_KINDS]>,
     medium: bool,
@@ -283,13 +284,18 @@ struct Added {
 }
 
 impl Added {
-    /** What a put of `look`, of `kind`, adds: `colour` gives each kind's colour at its site. */
-    fn of(look: &Look, kind: &KindDef, op: Op, pick: u32, colour: impl Fn(Kind) -> [u32; 3]) -> Added {
-        let own = colour(look.kind);
-        let faces = look.faces.map(|kinds| kinds.map(&colour)).filter(|faces| faces.iter().any(|c| *c != own));
+    /** What a put of `look`, its kinds of `kinds`, adds: `colour` gives each kind's colour at its site. */
+    fn of(look: &Look, kinds: &[KindDef], op: Op, pick: u32, colour: impl Fn(Kind) -> [u32; 3]) -> Added {
         // What glows gives light of its colour.
-        let glow = if kind.glows { own.map(|c| (c * 255 + COLOUR_ONE as u32 / 2) / COLOUR_ONE as u32) } else { [0; 3] };
-        Added { op, pick, colour: own, faces, glow, cover: look.cover, medium: kind.medium, solid: !kind.walk_through }
+        let sight = |kind: Kind| {
+            let own = colour(kind);
+            let glow = if kinds[kind as usize].glows { own.map(|c| (c * 255 + COLOUR_ONE as u32 / 2) / COLOUR_ONE as u32) } else { [0; 3] };
+            (own, glow)
+        };
+        let own = sight(look.kind);
+        let faces = look.faces.map(|kinds| kinds.map(&sight)).filter(|faces| faces.iter().any(|s| *s != own));
+        let kind = &kinds[look.kind as usize];
+        Added { op, pick, sight: own, faces, cover: look.cover, medium: kind.medium, solid: !kind.walk_through }
     }
 
     /**
@@ -312,9 +318,9 @@ impl Added {
             Op::Fill => self.rounded(alpha * one + (all - alpha) * share),
             Op::Paint => self.rounded((alpha * one).max(all * share)),
         };
-        let own = self.faces.map_or(self.colour, |faces| faces[k]);
+        let (own, glows) = self.faces.map_or(self.sight, |faces| faces[k]);
         let colour = std::array::from_fn(|c| ((colour[c] as u64 * kept + visible * own[c] as u64) / one).min(COLOUR_ONE as u64) as u16);
-        let glow = std::array::from_fn(|c| (glow[c] as u64 * kept / one + visible * self.glow[c] as u64) as u32);
+        let glow = std::array::from_fn(|c| (glow[c] as u64 * kept / one + visible * glows[c] as u64) as u32);
         (after, colour, glow)
     }
 
@@ -645,6 +651,8 @@ mod tests {
         let kinds = [kind(false, false, false), kind(true, false, false), kind(false, true, false), kind(true, false, true)];
         let (plain, sheet) = (Look::from(0), Look { cover: Some([SHARE / 3; FACE_KINDS]), ..Look::from(0) });
         let colour = |_: Kind| [40_000, 20_000, 10_000];
+        // Each look is of kind 0: of the one kind `of` is given.
+        let from_ref = std::slice::from_ref::<KindDef>;
         // What is in the site before, each put as `see` adds it: nothing, pieces in part, whole, cut down to a
         // trace, to nothing but their colour, unlike through its faces, a lamp, mist.
         let before: [&[(usize, &Look, Op, u32)]; 8] = [
@@ -661,7 +669,7 @@ mod tests {
         for (puts, pick) in before.iter().flat_map(|puts| [0, 21_845, 43_690].map(|pick| (puts, pick))) {
             let (mut grid, mut odd) = (VoxelGrid::new(&Box3::around([0; 3], 1)), Vec::new());
             for &(k, look, op, share) in *puts {
-                see(&mut grid, &mut odd, &Added::of(look, &kinds[k], op, pick, colour), share, 0, 0, 0);
+                see(&mut grid, &mut odd, &Added::of(look, from_ref(&kinds[k]), op, pick, colour), share, 0, 0, 0);
             }
             for (kind, look, op, share) in kinds.iter().flat_map(|kind| {
                 [&plain, &sheet].into_iter().flat_map(move |look| {
@@ -672,12 +680,27 @@ mod tests {
                 if !see_whole(&mut whole, &odd, look, kind, op, share, [0; 3], || colour(0)) {
                     continue;
                 }
-                see(&mut summed.0, &mut summed.1, &Added::of(look, kind, op, pick, colour), share, 0, 0, 0);
+                see(&mut summed.0, &mut summed.1, &Added::of(look, from_ref(kind), op, pick, colour), share, 0, 0, 0);
                 let held = |g: VoxelGrid| (g.pieces.alpha, g.pieces.colour, g.medium.alpha, g.medium.colour, g.solid, g.glow, g.views);
                 assert_eq!(held(whole), held(summed.0), "after {} puts, pick {pick}, share {share}", puts.len());
                 outright += 1;
             }
         }
         assert!(outright > 60, "only {outright} put outright");
+    }
+
+    #[test]
+    fn a_site_glows_through_each_face_as_the_kind_it_shows_there() {
+        let kind = |glows| KindDef { name: "", kind_type: 0, colors: &[], walk_through: false, glows, medium: false };
+        let kinds = [kind(false), kind(true)];
+        // A lamp through the even faces, what does not glow through the others: whichever of the two the site is of.
+        let faces = std::array::from_fn(|k| (k % 2 == 0) as Kind);
+        for of in [0, 1] {
+            let (mut grid, mut odd) = (VoxelGrid::new(&Box3::around([0; 3], 1)), Vec::new());
+            let look = Look { faces: Some(faces), ..Look::from(of) };
+            see(&mut grid, &mut odd, &Added::of(&look, &kinds, Op::Fill, 0, |_| [40_000; 3]), SHARE, 0, 0, 0);
+            let glows: [bool; FACE_KINDS] = std::array::from_fn(|k| grid.light(0, 0, 0, k).1 != [0; 3]);
+            assert_eq!(glows, faces.map(|kind| kind == 1), "the site of kind {of}");
+        }
     }
 }

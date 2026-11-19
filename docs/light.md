@@ -193,6 +193,9 @@ How a site shows to hosts and to light, and what glows, is a prototype too:
   where they show, its medium is not seen;
   a glowing thing's glow is hidden by its own, pieces or medium,
   not by the other;
+- the voxels engine and `relight` keep one glow a voxel, its first face's
+  (`Light::glow`), though its looks by face:
+  a lamp on one side of a coarse voxel glows to every ray, or to none;
 - measured things are measured from fine voxels kept by chance,
   so their small lamps come and go;
 - a lamp smaller than a site glows from the sites around it,
