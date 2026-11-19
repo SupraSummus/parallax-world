@@ -215,6 +215,8 @@ how many rays get how far, and what they stop on.
   drawn whole two levels finer than it is drawn at,
   but no finer than the coarsest level its near form is drawn at,
   then coarsened.
+  Its population keeps it (`Measured`), the ones asked for last:
+  every box a thing reaches asks.
   Seen along an axis, a voxel is a square turned 45° round its column,
   twice a column's area:
   the even columns' voxels cover the plane once, the odd ones' once more,

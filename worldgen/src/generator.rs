@@ -16,6 +16,7 @@ use crate::js;
 use crate::noise::{Fixed, Fx, ONE, Rng, fixed, float, hash, hash_text, hash64};
 use crate::plan;
 use crate::points::{Points, Spot};
+use crate::recent::Recent;
 
 mod alone;
 mod drawables;
@@ -464,6 +465,8 @@ pub struct Population {
      * only where its things may reach (`Population::on`). None: anywhere.
      */
     pub stands: Option<Box<Stands>>,
+    /** Its things' far forms, measured. */
+    pub measured: Measured,
 }
 
 /** Where a population's things are, each owned by the cell it is in, if asked there. */

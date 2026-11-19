@@ -945,6 +945,7 @@ mod tests {
                 make: Box::new(|at, _| Some(Node::of(vec![ball(at, 40.0, 0, SOLID, Op::Fill)]))),
                 far: None,
                 stands: None,
+                measured: Default::default(),
             })],
         }
     }

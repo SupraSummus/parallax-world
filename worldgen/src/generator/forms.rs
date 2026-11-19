@@ -15,16 +15,54 @@ pub(super) struct Visit<'u> {
     pub(super) thing: u32,
     pub(super) seed: u64,
     pub(super) checked: bool,
+    pub(super) measured: &'u Measured,
+}
+
+/**
+ * A population's things as measured (`measure`), the ones asked for last:
+ * by a thing's key, its sites' spacing, and the spacing its ground was
+ * read at when it was made (plan::spacing). Measuring draws a thing
+ * whole, and every box it reaches asks for it: a tile, and each of the
+ * light's blocks.
+ */
+pub struct Measured(Box<RefCell<Forms>>);
+
+/** Boxed: a population is no larger for them. */
+type Forms = Recent<(String, i64, i64), Rc<Sites>>;
+
+/** Things a population keeps measured, and as many asked for before them (Recent): the valley's first view asks for about as many, of all its populations. */
+const MEASURED: usize = 1 << 10;
+
+impl Default for Measured {
+    fn default() -> Measured {
+        Measured(Box::new(RefCell::new(Recent::new(MEASURED))))
+    }
+}
+
+impl Measured {
+    /** What `measure` gives for the thing of `key` at sites `s` apart: kept, or measured now. */
+    fn of(&self, key: &str, s: i64, measure: impl FnOnce() -> Sites) -> Rc<Sites> {
+        let at = (key.to_string(), s, plan::spacing());
+        if let Some(sites) = self.0.borrow_mut().get(&at) {
+            return sites.clone();
+        }
+        // Not borrowed meanwhile: measuring a thing asks for its children's.
+        let sites = Rc::new(measure());
+        self.0.borrow_mut().insert(at, sites.clone());
+        sites
+    }
 }
 
 /** Adds a node's drawables and its children's, as far as they reach `at.units` and are drawn at its spacing. */
 pub(super) fn visit(node: &Node, key: String, bounds: Box3, at: &Visit, drawables: &mut Vec<Drawable<'_>>) {
-    let Visit { s, units, order, layer, thing, seed, checked } = *at;
+    let Visit { s, units, order, layer, thing, seed, checked, measured } = *at;
     if !bounds.overlaps(units) {
         return;
     }
     let draw = match node.far.as_ref().filter(|far| s * ONE > far.detail.to_bits()) {
-        Some(Far { detail, form: FarForm::Measured }) => Draw::Sites(measure(node, &key, layer, bounds, detail.to_bits(), s, seed)),
+        Some(Far { detail, form: FarForm::Measured }) => {
+            Draw::Sites(measured.of(&key, s, || measure(node, &key, layer, bounds, detail.to_bits(), s, seed, measured)))
+        }
         Some(Far { form: FarForm::Shapes(shapes), .. }) => Draw::Shapes(shapes.to_vec(), true),
         None => return near(node, key, bounds, at, drawables),
     };
@@ -146,10 +184,12 @@ impl Own {
 }
 
 /** A node of `layer` drawn alone, whole, at sites `f` apart, its drawables added by `form`. */
-fn alone(node: &Node, key: &str, layer: &'static str, bounds: Box3, f: i64, seed: u64, form: Form) -> Own {
+#[allow(clippy::too_many_arguments)]
+fn alone(node: &Node, key: &str, layer: &'static str, bounds: Box3, f: i64, seed: u64, measured: &Measured, form: Form) -> Own {
     let units = bounds.widen(f);
     let mut drawables = Vec::new();
-    form(node, key.to_string(), bounds, &Visit { s: f, units: &units, order: 0.0, layer, thing: 1, seed, checked: false }, &mut drawables);
+    let at = Visit { s: f, units: &units, order: 0.0, layer, thing: 1, seed, checked: false, measured };
+    form(node, key.to_string(), bounds, &at, &mut drawables);
     let fine = Box3 { min: bounds.min.map(|v| v.div_euclid(f) - 2), max: bounds.max.map(|v| -(-v).div_euclid(f) + 2) };
     let mut own = Own::new(&fine);
     let mut work = Work::default();
@@ -330,7 +370,7 @@ impl Shadows {
             .iter()
             .enumerate()
             .map(|(i, node)| {
-                let own = alone(node, &format!("sample {i}"), "shadows", bounds_of(node), f, 0, visit);
+                let own = alone(node, &format!("sample {i}"), "shadows", bounds_of(node), f, 0, &Measured::default(), visit);
                 let (n, min) = (own.n, own.b.min);
                 let mut layers: Vec<Slice> = (0..n[axis])
                     .map(|_| Slice {
@@ -502,10 +542,20 @@ pub(super) fn pairs_of_cell(r: i64) -> [u32; 3] {
  * that). The site is of a kind of all its faces see, for whatever does
  * not look at faces.
  */
-pub(super) fn measure(node: &Node, key: &str, layer: &'static str, bounds: Box3, detail: Fixed, s: i64, seed: u64) -> Sites {
+#[allow(clippy::too_many_arguments)]
+pub(super) fn measure(
+    node: &Node,
+    key: &str,
+    layer: &'static str,
+    bounds: Box3,
+    detail: Fixed,
+    s: i64,
+    seed: u64,
+    measured: &Measured,
+) -> Sites {
     // Two levels finer, its cells hold enough fine sites to measure, and a tile's things cost less a level coarser.
     let f = (1i64 << ((detail / ONE).max(1).ilog2())).max(s / 4);
-    let own = alone(node, key, layer, bounds, f, seed, near);
+    let own = alone(node, key, layer, bounds, f, seed, measured, near);
     cost::add(layer, Work { measured: own.cells.len() as u64, ..Work::default() });
     // Kinds counted, each with how it meets the world.
     type Counts = Vec<(Kind, Op, u32)>;

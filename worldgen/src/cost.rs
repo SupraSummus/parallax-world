@@ -64,7 +64,7 @@ work! {
     shapes,
     /** Sites tested against a shape: the inner loop of drawing things. */
     tests,
-    /** Sites of the boxes things are drawn in whole, to be measured (`Far::measured`). */
+    /** Sites of the boxes things are drawn in whole, to be measured (`Far::measured`); none where one is found kept (`Measured`). */
     measured,
     /** A field's values: at a site, or a line of sites' spans. */
     reads,

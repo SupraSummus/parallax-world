@@ -213,6 +213,7 @@ impl Population {
             make: Box::new(|_, _| None),
             far: None,
             stands: None,
+            measured: Default::default(),
         }
     }
 

@@ -404,7 +404,7 @@ fn drawables_in<'a>(generator: &'a Generator, clip: &Box3, s: i64) -> Vec<Drawab
                 assert!(bounds.inside(&reach), "{}", past_reach(&key, &bounds, &reach, n, population.reach));
                 things += 1;
                 let (order, layer, seed) = (population.order, population.name, generator.seed);
-                let at = Visit { s, units: &units, order, layer, thing: things, seed, checked };
+                let at = Visit { s, units: &units, order, layer, thing: things, seed, checked, measured: &population.measured };
                 visit(&node, key, bounds, &at, &mut drawables);
             })
         });
