@@ -77,9 +77,9 @@ impl Profile {
     pub fn of(maps: &[Image], n: usize) -> Profile {
         let mut p = Profile { n, sizes: vec![[0.0; BINS]; n], widths: vec![[0.0; BINS]; n], near: vec![[0.0; BINS]; n * n] };
         for map in maps {
-            for l in 0..n {
+            for (l, sizes) in p.sizes.iter_mut().enumerate() {
                 for part in components(map, l as u16) {
-                    p.sizes[l][bin(part.len())] += part.len() as f64;
+                    sizes[bin(part.len())] += part.len() as f64;
                 }
             }
             let d: Vec<Vec<u32>> = (0..n).map(|l| distances(map, l as u16)).collect();
