@@ -117,11 +117,6 @@ Numbers are for the forest at 1280×800, as measured when written.
 - **Layers that don't say where they are are drawn everywhere**
   (`Field::meets`, `Population::stands`):
   the city's buildings, and the towns', landmarks', settlements' and steadings' things.
-  Native's tiles are cubes, so what a column needs is made again
-  in each cube the ground passes through (a plan's columns, per thread);
-  its views take up to twice as long to complete
-  as with tiles of whole columns,
-  the voxels engine's most, as it asks for every cube around the eye.
   Saying so is for speed, not simplicity:
   a promise per layer says again what `heights` says once.
   The railway's piers can't yet: a bridge has no greatest height,
@@ -419,6 +414,12 @@ Numbers are for the forest at 1280×800, as measured when written.
   and with its depth varying along the axis, culled worse;
   one splat cut to the hull of a pillar's ends drew large rectangles,
   mostly discarded.
+- **Native's threads each keep their own plans' columns**
+  (a generator per thread, `native/src/world.rs`):
+  completing the valley's first view takes four threads
+  about a tenth more work than one, eight a quarter more.
+  Tiles side by side still make again the things reaching both;
+  those one above another are made together (`make_tiles`).
 - **Walking, native keeps more than a core busy**
   (the valley, `--stroll 20 --on-ground`, outside the GPU driver),
   measured when it drew slices: new tiles took about a third.

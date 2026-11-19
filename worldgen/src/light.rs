@@ -632,7 +632,26 @@ fn cube_box((low, high): (i64, i64), key: [i64; 3], side: i64) -> Box3 {
 
 /** Tile `key` of `level` of the world `generator` makes, of `heights`, as hosts make and draw it (generate_shown), see-through ones too. */
 pub fn make_tile(generator: &Generator, level: u32, heights: (i64, i64), key: [i64; 3]) -> Grid {
-    generate_shown(generator, &tile_box(heights, key), level).into_grid(true)
+    make_tiles(generator, level, heights, key, key[1]).remove(0)
+}
+
+/**
+ * Tile `key` and those above it up to y = `last`: generated as one box
+ * and parted, so what they share is made once (their fields' lines, the
+ * things reaching several). Each shows as made alone; what is buried may
+ * differ in shade, rock being of one from a box's bottom up.
+ */
+pub fn make_tiles(generator: &Generator, level: u32, heights: (i64, i64), key: [i64; 3], last: i64) -> Vec<Grid> {
+    let boxes: Vec<Box3> = (key[1]..=last).map(|y| tile_box(heights, [key[0], y, key[2]])).collect();
+    let all = Box3 { min: boxes[0].min, max: boxes[boxes.len() - 1].max };
+    let grid = generate_shown(generator, &all, level).into_grid(true);
+    // What was made may end short of a tile, or before it.
+    let (low, high) = (grid.min[1] as i64, (grid.min[1] + grid.n[1]) as i64);
+    let part = |b: &Box3| {
+        let (y0, y1) = (b.min[1].clamp(low, high), b.max[1].clamp(low, high));
+        grid.part([grid.min[0], y0 as i32, grid.min[2]], [grid.n[0], (y1 - y0) as i32, grid.n[2]])
+    };
+    boxes.iter().map(part).collect()
 }
 
 /**

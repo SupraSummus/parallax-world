@@ -106,9 +106,13 @@ a level's slices show once its grid is in,
 and a moved grid replaces the old one once all its tiles are.
 The native frontend (`native/src/world.rs`) has no grids, only tiles:
 cubes, alike along every axis, so no direction is up to how they are asked for
-(`make_tile` in `worldgen/src/light.rs`: `generate_shown` of each;
-those outside the world's heights are empty),
-made in the order the renderer wants them:
+(`make_tiles` in `worldgen/src/light.rs`: `generate_shown` of each;
+those outside the world's heights are empty).
+In a world with heights, the tiles wanted one above another
+are generated as one box and parted (`Queue::column`):
+they share their fields' lines and the things reaching several.
+An endless world's cost as much together, so each is made alone.
+Tiles are made in the order the renderer wants them:
 a cell is baked once the world has every tile it reads (`chunk_reads`),
 and until then it asks for them, nearest first.
 Then come the other tiles of each level
