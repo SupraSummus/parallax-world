@@ -97,7 +97,6 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, floors: Option<&Flo
     };
     let ([a, b], (lo, hi)) = (across(axis), (clip.min, clip.max));
     let (bottom, top) = (lo[axis] * s, (hi[axis] - 1) * s);
-    let tie = Tie::new(s);
     let mut site = [0i64; 3];
     let (mut drew, mut unlike) = (None, None);
     let mut record = |_: Look, _: Op, share: u32, _: u32, x: i64, y: i64, z: i64| drew = drew.or((share > 0).then_some([x, y, z]));
@@ -182,20 +181,30 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, floors: Option<&Flo
                             site[axis] = w;
                             put(look, op, share, picked(site[0], site[1], site[2]), site[0], site[1], site[2]);
                         });
-                        // A medium or a coat, thickened to hold a site (Column), is in the sites whose middles it holds.
+                        // A medium is in every site its span reaches, whole or in part.
                         for span in thin {
-                            // s is a power of two: shifting is dividing, rounded down.
-                            let first = (-((-span.from) >> s.trailing_zeros())).max(first);
+                            let Holds::Medium(e) = span.holds else { unreachable!("solid spans are covered") };
+                            let first = ((span.from - s).div_euclid(s) + 1).max(first);
                             let mut w = first + ((first + u + v) & 1);
-                            let (op, share) = match span.holds {
-                                Holds::Medium(e) => (op, medium(e)),
-                                Holds::Coat(c) => (Op::Paint, share(c)),
-                                Holds::Solid => unreachable!("solid spans are covered"),
-                            };
-                            while w * s <= span.to && w < hi[axis] {
+                            while w * s < span.to + s && w < hi[axis] {
+                                let at = |end: i64| ((end - w * s) as f64 / s as f64).clamp(-1.0, 1.0);
+                                let own = (at(span.from), at(span.to));
                                 site[axis] = w;
-                                if tie.within(axis, site.map(|c| c * s), span.from, span.to, 1) {
-                                    put(span.kind.into(), op, share, picked(site[0], site[1], site[2]), site[0], site[1], site[2]);
+                                let pick = picked(site[0], site[1], site[2]);
+                                if own == (-1.0, 1.0) {
+                                    put(span.kind.into(), op, medium(e), pick, site[0], site[1], site[2]);
+                                } else if own.0 < own.1 {
+                                    let solids: Vec<Part> =
+                                        solid.iter().map(|other| ((at(other.from), at(other.to)), other.from < span.from)).collect();
+                                    let [down, up, along] = held(own, &solids, e * CHORD * s as f64);
+                                    let cover: [u32; FACE_KINDS] = std::array::from_fn(|k| match VOXEL_FACES[k][axis] {
+                                        1 => down,
+                                        -1 => up,
+                                        _ => along,
+                                    });
+                                    let look = Look { cover: cover.iter().any(|c| *c != along).then_some(cover), ..span.kind.into() };
+                                    // A see-through kind has one share for every face (VoxelGrid's `medium`): its most across the line.
+                                    put(look, op, down.max(up), pick, site[0], site[1], site[2]);
                                 }
                                 w += 2;
                             }
@@ -212,6 +221,44 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, floors: Option<&Flo
         broke(field.name, site, s, clip, &format!("isn't all kind {kind}, as it says"));
     }
     work
+}
+
+/** A solid span's part of a voxel, −1 to 1 along its line, and whether it is under the medium `held` is asked about. */
+type Part = ((f64, f64), bool);
+
+/**
+ * What a medium holds of a site (of SHARE) through its faces: those the
+ * line comes in by from above, those from below, and those along it.
+ * `own` is its part of the voxel, −1 to 1 along the line, `solids` the
+ * line's solid parts there, and `depth` how much it stops along a mean
+ * chord's length.
+ *
+ * It stops the chords that cross it, each as far as it runs in it: across
+ * the line as a ray along the line does (`crossed`), along the line all
+ * its way, as it stays in the medium. Chords that end in the solids
+ * behind it, short of it, show it as a ray along the line does too: a
+ * ground shows only by its top, which the medium is on. Chords that meet
+ * the solids in front of it show none. Along the line, in front is over it.
+ */
+fn held(own: (f64, f64), solids: &[Part], depth: f64) -> [u32; 3] {
+    let stops = |length: f64| 1.0 - js::exp(-depth * length);
+    let (crossing, length) = crossed(own.0, own.1);
+    let on = |across: bool, from_above: bool| {
+        // The chords that meet it or a solid, and those that meet a solid in front of it.
+        let meet = |all: bool| {
+            let mut parts: Vec<(f64, f64)> =
+                solids.iter().filter(|(_, under)| all || *under != from_above).map(|(part, _)| *part).collect();
+            if all {
+                parts.push(own);
+            }
+            parts.retain(|part| part.0 < part.1);
+            parts.sort_by(|p, q| p.0.total_cmp(&q.0));
+            slabs(across, &parts, false)
+        };
+        let (crossing, stopped) = if across { (crossing, stops(length)) } else { (slabs(false, &[own], false), stops(1.0)) };
+        share(crossing * stopped + (meet(true) - meet(false) - crossing).max(0.0) * stops(length))
+    };
+    [on(true, true), on(true, false), on(false, true)]
 }
 
 /**

@@ -453,3 +453,16 @@ fn slabs_of_a_voxel_stop_the_chords_that_meet_them() {
     let thin = |across| slabs(across, &[(-0.1, 0.1)], false);
     assert!(thin(true) > 0.5 && thin(false) < 0.2, "{} across, {} along", thin(true), thin(false));
 }
+
+#[test]
+fn slabs_that_share_a_voxel_out_share_out_its_mean_chord() {
+    // However it is cut across an axis, what its rays along the axis run in its slabs adds up to their whole way:
+    // so a medium is as dense along a ray whatever sites its span is cut by.
+    for cuts in [vec![-1.0, 1.0], vec![-1.0, 0.0, 1.0], vec![-1.0, -0.9, -0.3, 0.05, 0.6, 1.0]] {
+        let run: f64 = cuts.windows(2).map(|cut| crossed(cut[0], cut[1])).map(|(share, length)| share * length).sum();
+        assert!((run - 1.0).abs() < 1e-9, "{cuts:?}: {run}");
+    }
+    // A thin slab is crossed by all of them across the middle, where each runs its height in it, and by few at a tip.
+    let ((middle, height), (tip, _)) = (crossed(-0.05, 0.05), crossed(0.9, 1.0));
+    assert!((middle - 1.0).abs() < 1e-9 && (height - 0.1).abs() < 0.01 && tip < 0.05, "{middle} {height} {tip}");
+}

@@ -615,6 +615,24 @@ pub(super) fn slabs(across: bool, parts: &[(f64, f64)], carve: bool) -> f64 {
     (1.0 - free - within(across, at, 1.0)).clamp(0.0, 1.0)
 }
 
+/**
+ * Of the rays through a voxel along an axis, the share that cross [a, b),
+ * a slab of its extent along it (−1 to 1, its sites' spacing), and how
+ * long they are in the slab on average, of the mean chord's length. So
+ * slabs that share a voxel out share its mean chord out, share times length.
+ */
+pub(super) fn crossed(a: f64, b: f64) -> (f64, f64) {
+    let (a, b) = (a.clamp(-1.0, 1.0), b.clamp(-1.0, 1.0));
+    // The voxel's section across the axis w short of its tip, of its widest: a square, its corners cut past half way.
+    // Rays along the axis cross a plane as often as its section is wide, and are in a slab as long as its volume.
+    let section = |w: f64| (4.0 * w * w - 2.0 * (2.0 * w - 1.0).max(0.0).powi(2)) / 2.0;
+    let past = |w: f64| (4.0 * w.powi(3) - (2.0 * w - 1.0).max(0.0).powi(3)) / 6.0;
+    let under = |v: f64| if v < 0.0 { past(1.0 + v) } else { 1.0 - past(1.0 - v) };
+    let nearest = if a < 0.0 && b > 0.0 { 0.0 } else { a.abs().min(b.abs()) };
+    let crossing = section(1.0 - nearest);
+    if crossing <= 0.0 { (0.0, 0.0) } else { (crossing, ((under(b) - under(a)) / crossing).min(1.0)) }
+}
+
 /** Steps the chords' table takes across a voxel's extent along an axis, −1 to 1. */
 const CHORD_STEPS: usize = 64;
 

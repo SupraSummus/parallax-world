@@ -271,8 +271,8 @@ impl Node {
 /**
  * Part of a line of sites: [from, to) along the line, of `kind`, holding
  * its sites as `holds` says. A line has a site every two spacings, so a
- * span shorter than that may have none: `Column` (column.rs) makes spans
- * that keep one.
+ * solid span shorter than that may have none whole: `Column` (column.rs)
+ * makes spans that keep one.
  */
 pub struct Span {
     pub from: i64,
@@ -288,13 +288,12 @@ pub enum Holds {
     Solid,
     /**
      * As a medium, by the field's op: stopping this much per lattice unit
-     * of a ray's path, so a site is kept with the chance 1 − exp(−it · c),
-     * c the mean chord of its voxel (about 0.94 units at level 0, twice
-     * that a level up).
+     * of a ray's path, so a site whole in it is kept with the chance
+     * 1 − exp(−it · c), c the mean chord of its voxel (about 0.94 units at
+     * level 0, twice that a level up); one in part, through each face as
+     * its chords are in it.
      */
     Medium(f64),
-    /** This share of each, painted over what is there whatever the field's op: a coat on it. */
-    Coat(f64),
 }
 
 pub enum FieldValues {
