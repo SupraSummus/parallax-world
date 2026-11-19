@@ -11,29 +11,27 @@ images.
 The native one (`native/`, wgpu) draws it by rays through its voxels,
 or by chunks as the web does, cells of the lattice instead of slices.
 
-![The forest: a path under autumn birches, maples and spruces](docs/shots/forest.webp "seed=12345&camera=-14,40,-200&look=-25,6")
+![Autumn forest by the railway, mist lying among the trunks over heather](docs/shots/forest-fog.webp "--view 'seed=12345&world=valley&camera=-2231,139,13027&look=-142,1&fov=90&distance=40000' --light 4,1,0")
 
 <table>
 <tr>
-<td width="50%"><img src="docs/shots/valley.webp" alt="The valley: a town's square and church, forest up to the mountains" title="seed=12345&amp;world=valley&amp;camera=0,400,1000&amp;look=0,-3&amp;distance=40000"><br><sub>The valley, 5 km deep</sub></td>
-<td width="50%"><img src="docs/shots/town.webp" alt="A street into the town's square, its fountain and church" title="seed=12345&amp;world=valley&amp;camera=0,40,1420&amp;look=0,-6"><br><sub>The town's square</sub></td>
+<td width="50%"><img src="docs/shots/town.webp" alt="A street into the town's square, its fountain and church, by day" title="--view 'seed=12345&amp;world=valley&amp;camera=0,40,1420&amp;look=0,-6' --light 1,1,0"><br><sub>The town's square by day</sub></td>
+<td width="50%"><img src="docs/shots/town-night.webp" alt="The same square at night, lit by its street lamps" title="--view 'seed=12345&amp;world=valley&amp;camera=0,40,1420&amp;look=0,-6' --light 0.01,0,1"><br><sub>And at night, by its lamps</sub></td>
 </tr>
 <tr>
-<td><img src="docs/shots/chapel.webp" alt="A chapel by the forest path" title="seed=12345&amp;world=valley"><br><sub>A chapel by the path</sub></td>
-<td><img src="docs/shots/windmill.webp" alt="A windmill among fields and forest, seen from above" title="seed=12345&amp;world=valley&amp;camera=748,450,547&amp;look=34,-45"><br><sub>A windmill among the fields</sub></td>
+<td><img src="docs/shots/tunnel.webp" alt="From a railway tunnel's dark bore out to the forest in daylight" title="--view 'seed=12345&amp;world=valley&amp;camera=-2005,177,8336&amp;look=180,0' --light 1,1,0"><br><sub>Out of the railway's tunnel</sub></td>
+<td><img src="docs/shots/city-night.webp" alt="City blocks at night, the streets lit by lamps, lit windows" title="--view 'seed=12345&amp;world=city&amp;camera=-2,250,-150&amp;look=0,-30' --light 0.01,0,1"><br><sub>The city at night</sub></td>
 </tr>
 <tr>
-<td><img src="docs/shots/mountains.webp" alt="A crest over the treeline, a peak and a snowy massif behind" title="seed=12345&amp;world=valley&amp;camera=9571,4500,33856&amp;look=30,-5&amp;distance=40000"><br><sub>The ranges over the treeline</sub></td>
-<td><img src="docs/shots/city.webp" alt="City blocks, streets and crossings from above" title="seed=12345&amp;world=city&amp;camera=-2,250,-150&amp;look=0,-30"><br><sub>The city</sub></td>
-</tr>
-<tr>
-<td><img src="docs/shots/learned.webp" alt="A settlement in the forest, drawn by a learned grammar" title="seed=12345&amp;world=learned&amp;camera=0,450,1700&amp;look=0,-30"><br><sub>The learned town</sub></td>
-<td><img src="docs/shots/moor.webp" alt="Heather, grass, a stream and pools to the horizon" title="seed=12345&amp;world=moor&amp;camera=0,200,-200&amp;look=0,-5&amp;distance=40000"><br><sub>The moor, 5 km deep</sub></td>
+<td><img src="docs/shots/mountainside.webp" alt="Mist over the heath on a slope, spruces and a peak above it" title="--view 'seed=12345&amp;world=valley&amp;camera=6911,2128,12155&amp;look=19,4&amp;fov=90&amp;distance=40000' --light 2.5,1,0"><br><sub>Mist under a peak</sub></td>
+<td><img src="docs/shots/valley.webp" alt="The valley: a town's square and church, forest up to the mountains" title="--view 'seed=12345&amp;world=valley&amp;camera=0,400,1000&amp;look=0,-3&amp;distance=40000' --light 1,1,0"><br><sub>The valley, 5 km deep</sub></td>
 </tr>
 </table>
 
-<sub>Seed 12345, drawn by `pnpm shot`;
-each picture's view is its title (hover over it).</sub>
+<sub>Drawn by the native frontend, lit by light worked out across the world
+(the web does not light its tiles):
+`pnpm shot:native --size 1600x900 --shot out.png`
+and the picture's title (hover over it).</sub>
 
 ## Design principles
 
