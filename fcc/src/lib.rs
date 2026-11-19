@@ -246,6 +246,9 @@ impl Grid {
             sites.concat()
         };
         (part.views, part.glow) = (kept(&self.views, VIEW_WORDS), kept(&self.glow, GLOW_WORDS));
+        // Grown brick by brick, they hold room for up to as much again; a tile is kept long.
+        part.cells.shrink_to_fit();
+        part.solid.shrink_to_fit();
         part
     }
 

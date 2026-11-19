@@ -569,8 +569,7 @@ fn main() {
     let shared = lit.map_or(day.clone(), |v| parse_light(v, &day));
     let (brightness, steps, tolerance) = (shared.brightness(), shared.steps(), shared.tolerance());
     let mut world = World::new(make, seed, Some(shared), threads);
-    let shown = make(seed);
-    let camera = query.camera.unwrap_or(shown.spawn.map(|v| v as f64));
+    let camera = query.camera.unwrap_or_else(|| make(seed).spawn.map(|v| v as f64));
     let far = query.distance.unwrap_or(RENDER_DISTANCE);
     let mut look = Look::new(camera, query.look.unwrap_or([YAW, PITCH]), query.fov.unwrap_or(FOV), far, size);
     look.light = lit.is_some().then_some(brightness);

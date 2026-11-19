@@ -448,17 +448,21 @@ Numbers are for the forest at 1280×800, as measured when written.
   turning, what comes into view shows coarser first,
   as every ray past the window's edge does, till its bricks are lit.
   The light takes twice the bricks' memory, so the pool holds a third as many.
-- **Native, lit, holds more than twice what it does shaded**,
+- **Native, lit, holds three quarters more than it does shaded**,
   and more as the eye moves:
   the light's blocks (`Shared`) are kept wherever tiles are,
   though a brick lit needs them no more, till one beside it is lit;
-  and each of the world's threads holds two generators
+  and each of the world's threads keeps sites of its own
   ([light.md](light.md), "In native, and what it costs").
   Keeping only the blocks read last (as `Recent` keeps rounds) was tried:
   held to fewer than a first view reads, lighting slows, by blocks made again.
   So was one `Recent` for all a Light keeps of a site,
   its paths and settled light with its rounds:
   as fast only once it held as much as now.
+  Kept by all the threads, as the coarsest level's sites are,
+  each would be found once, not by every thread that lights beside it.
+- **The light's blocks of level 3 cost several times their neighbours'**,
+  a block, lighting the valley's first view: why is open.
 - **Native's voxels make every tile of their balls**, lit or not:
   in the cheese, hundreds for a view whose walls hide all but a few.
   Rays could ask for tiles as they ask for bricks to light.
