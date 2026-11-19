@@ -19,8 +19,14 @@
 //! of theirs in the round before; found once it changes by less than a
 //! tolerance (Shared's, TOLERANCE unless set): in a round or two in the
 //! open, in more where light bounces back and forth, as in a closed white
-//! room. Between whole voxels that touch no light comes: one beside a
-//! face is lit as the face is (`weighed`).
+//! room. Of each round a site keeps the light on its faces (`round`): what
+//! the sites it reflects on read, and what is to settle. Between whole
+//! voxels that touch no light comes: one beside a face is lit as the face
+//! is (`weighed`).
+//!
+//! What is found at a site is a function of the world alone, so the Lights
+//! of all threads keep it together, by block (Shared), each site's found
+//! once: no level's sites apart from another's.
 //!
 //! Light sees each site as it is (VoxelGrid::light): what its pieces and
 //! its medium stop of its rays, a share, where hosts are shown its pieces
@@ -34,6 +40,7 @@
 
 use std::collections::BTreeMap;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use fcc::light::{FaceLight, linear_to_srgb, srgb_to_linear};
@@ -43,7 +50,6 @@ use crate::World;
 use crate::generator::{Generator, generate_shown};
 use crate::grid::{ALPHA, BRICK, Box3, COLOUR_ONE, GLOW_ONE, Grid, VoxelGrid};
 use crate::picture::{CROSSING, FACES, Picture, nearest_site, over};
-use crate::recent::Recent;
 
 type Rgb = [f32; 3];
 
@@ -60,66 +66,81 @@ const TOLERANCE: f32 = 1e-2;
 const ROUNDS: usize = 256;
 /** Sites a tile is a side, at each level, as native's (tile_box). */
 pub const TILE: i64 = 128;
-/** Sites a block is a side (Shared): small, as light reads a few sites around what it lights. */
+/** Sites a block is a side (Block): small, as light reads a few sites around what it lights. */
 const BLOCK: i64 = 32;
-/** Sites whose paths and light a Light keeps at each level, and as many used before them (Recent): the sites around read them, bricks side by side again. */
-const KEPT_SITES: usize = 1 << 13;
 /**
- * Sites whose rounds a Light keeps, of every level together, likewise: a site's rounds are read by every site it
- * reflects on, round after round. No fewer than a brick's light reads (the forest's, some thousands): a round
- * forgotten is found again from those before it, each forgotten too, and lighting all but stops.
+ * Sites begun between one forgetting and the next (Shared::begun): fewer
+ * hold less, and under what a view reads at once, lighting slows by half
+ * (docs/light.md).
  */
-const KEPT_ROUNDS: usize = 1 << 14;
+const KEPT_SITES: usize = 1 << 17;
 
-/** A grid made once: those that want it while it is made wait. */
-type Made = Arc<OnceLock<Arc<VoxelGrid>>>;
-/** Grids by level and key. */
-type Grids = Map<(usize, [i64; 3]), Made>;
+/**
+ * A block of a level, BLOCK sites a side: its sites, generated once by
+ * whichever Light reads one first (those that want it meanwhile wait), and
+ * what the Lights found at them so far, by site. Not a host's tile
+ * (make_tile), which keeps of a site only what is drawn.
+ */
+#[derive(Default)]
+struct Block {
+    grid: Arc<OnceLock<VoxelGrid>>,
+    lit: Mutex<Map<[i64; 3], Site>>,
+}
+
+/** What is kept of a site, each once found: the same whichever Light finds it, so two finding it at once do no harm. */
+#[derive(Default)]
+struct Site {
+    /** What comes to it. */
+    paths: Option<Arc<Paths>>,
+    /** The light on each of its faces in each round (`round`), from the first on. */
+    rounds: Vec<[Rgb; N]>,
+    /** The light coming to it from each direction, settled. */
+    found: Option<[Rgb; N]>,
+    /** Whether a Light read it since the sites not read were last forgotten (Shared::begun). */
+    read: bool,
+}
+
+/** Blocks by level and key. */
+type Blocks = Map<(usize, [i64; 3]), Arc<Block>>;
 
 /**
  * What the Lights of one world under one brightness, and taking as many
- * steps along each level, share (a thread's each): the world's blocks,
- * BLOCK sites a side, of every level, generated once by whichever Light
- * needs one first, kept till the host forgets them (`forget`). Not the
- * host's tiles (make_tile), which keep of a site only what is drawn.
- * And all that is kept of the coarsest level's sites (`top`): no coarser
- * level takes over there, so a site's light reads more sites than a Light
- * keeps, as far as light goes in its rounds, the same for all that is lit.
+ * steps along each level, share (a thread's each): the world's blocks of
+ * every level, with all the Lights find at their sites, so each site's
+ * light is found once, whichever thread lights beside it. A block is kept
+ * till the host forgets it (`forget`); the light of a site, while Lights
+ * read it (`begun`).
  */
 #[derive(Clone)]
 pub struct Shared {
     brightness: Brightness,
     steps: usize,
     tolerance: f32,
-    blocks: Arc<Mutex<Grids>>,
-    top: Arc<Mutex<Top>>,
-}
-
-/** What is kept of the coarsest level's sites, all of it, till forgotten (Shared::forget). */
-struct Top {
-    kept: Kept,
-    rounds: Rounds,
-}
-
-impl Default for Top {
-    fn default() -> Top {
-        Top { kept: Kept::new(usize::MAX), rounds: Recent::new(usize::MAX) }
-    }
+    blocks: Arc<Mutex<Blocks>>,
+    /** Sites whose light was begun, so far (`begun`). */
+    begun: Arc<AtomicUsize>,
 }
 
 impl Shared {
     /** Nothing made yet, for a world under `brightness`. */
     pub fn new(brightness: Brightness) -> Shared {
-        Shared { brightness, steps: STEPS, tolerance: TOLERANCE, blocks: Arc::default(), top: Arc::default() }
+        Shared { brightness, steps: STEPS, tolerance: TOLERANCE, blocks: Arc::default(), begun: Arc::default() }
     }
 
     pub fn brightness(&self) -> Brightness {
         self.brightness
     }
 
-    /** The same world under `brightness`: its blocks kept. */
+    /** The same world, none of it lit: its blocks' sites kept. */
+    fn unlit(&self) -> Shared {
+        let unlit = |block: &Arc<Block>| Arc::new(Block { grid: block.grid.clone(), ..Block::default() });
+        let blocks: Blocks = self.blocks.lock().expect("blocks").iter().map(|(key, block)| (*key, unlit(block))).collect();
+        Shared { blocks: Arc::new(Mutex::new(blocks)), begun: Arc::default(), ..self.clone() }
+    }
+
+    /** The same world under `brightness`: its blocks' sites kept. */
     pub fn under(&self, brightness: Brightness) -> Shared {
-        Shared { brightness, top: Arc::default(), ..self.clone() }
+        Shared { brightness, ..self.unlit() }
     }
 
     /** Steps along a direction before the coarser level's light may take over. */
@@ -127,10 +148,10 @@ impl Shared {
         self.steps
     }
 
-    /** The same world, light taking `steps` steps along each level before the coarser's: its blocks kept. */
+    /** The same world, light taking `steps` steps along each level before the coarser's: its blocks' sites kept. */
     pub fn stepping(&self, steps: usize) -> Shared {
         assert!((1..=TOP_STEPS).contains(&steps), "{steps} steps");
-        Shared { steps, top: Arc::default(), ..self.clone() }
+        Shared { steps, ..self.unlit() }
     }
 
     /** How little the light on a site's faces may change, of what it is, for it to be found. */
@@ -138,10 +159,10 @@ impl Shared {
         self.tolerance
     }
 
-    /** The same world, a site's light found once the light on its faces changes by less than `tolerance` of what it is: its blocks kept. */
+    /** The same world, a site's light found once the light on its faces changes by less than `tolerance` of what it is: its blocks' sites kept. */
     pub fn settling(&self, tolerance: f32) -> Shared {
         assert!(tolerance > 0.0, "tolerance {tolerance}");
-        Shared { tolerance, top: Arc::default(), ..self.clone() }
+        Shared { tolerance, ..self.unlit() }
     }
 
     /** Whether `other` lights the world as this does: as bright, as many steps, as little change. */
@@ -149,35 +170,34 @@ impl Shared {
         (self.brightness, self.steps, self.tolerance) == (other.brightness, other.steps, other.tolerance)
     }
 
-    /** The block a Light reads `site` of `level` from, and the box it holds, made if not yet. */
-    fn holding(&self, generator: &Generator, level: u32, heights: (i64, i64), site: [i64; 3]) -> (Box3, Arc<VoxelGrid>) {
-        let key = site.map(|v| v.div_euclid(BLOCK));
-        let block = self.blocks.lock().expect("blocks").entry((level as usize, key)).or_default().clone();
-        let b = cube_box(heights, key, BLOCK);
-        (b, block.get_or_init(|| Arc::new(generate_shown(generator, &b, level))).clone())
+    /** Block `key` of `level`, begun if not yet. */
+    fn block(&self, level: usize, key: [i64; 3]) -> Arc<Block> {
+        self.blocks.lock().expect("blocks").entry((level, key)).or_default().clone()
     }
 
     /**
-     * Forgets the blocks in the tiles `far` says are far, by level and key,
-     * to make again if asked; and, when one of the coarsest level goes,
-     * what is kept of that level's sites there: seldom, as a host asks
-     * every frame, and they are many.
+     * Counts a site whose light is begun. Every KEPT_SITES, the sites no
+     * Light read since the last time are forgotten, to find again if
+     * asked: what is being lit, and what it reads, is read all the while.
+     */
+    fn begun(&self) {
+        if (self.begun.fetch_add(1, Ordering::Relaxed) + 1).is_multiple_of(KEPT_SITES) {
+            // Block by block, none waiting for all the blocks meanwhile.
+            let blocks: Vec<Arc<Block>> = self.blocks.lock().expect("blocks").values().cloned().collect();
+            for block in blocks {
+                let mut lit = block.lit.lock().expect("lit");
+                lit.retain(|_, site| std::mem::take(&mut site.read));
+                lit.shrink_to_fit();
+            }
+        }
+    }
+
+    /**
+     * Forgets the blocks in the tiles `far` says are far, by level and
+     * key, and their light with them, to make again if asked.
      */
     pub fn forget(&self, far: impl Fn(usize, [i64; 3]) -> bool) {
-        let top = GRID_LEVELS - 1;
-        let mut gone = false;
-        self.blocks.lock().expect("blocks").retain(|&(level, key), _| {
-            let far = far(level, key.map(|k| k.div_euclid(TILE / BLOCK)));
-            gone |= far && level == top;
-            !far
-        });
-        if gone {
-            let near = |site: &[i64; 3]| !far(top, site.map(|v| v.div_euclid(TILE)));
-            let mut kept = self.top.lock().expect("light");
-            kept.kept.paths.retain(near);
-            kept.kept.found.retain(near);
-            kept.rounds.retain(|(_, site)| near(site));
-        }
+        self.blocks.lock().expect("blocks").retain(|&(level, key), _| !far(level, key.map(|k| k.div_euclid(TILE / BLOCK))));
     }
 }
 
@@ -205,31 +225,22 @@ const GLOW: f32 = 250.0;
 
 type Map<K, V> = fcc::FastMap<K, V>;
 
-/** A level's blocks, as they are needed, and the light found at its sites. */
+/** A level's heights, and its block a Light read last, by key: most reads are in it. */
 struct Level {
     heights: (i64, i64),
-    /** The block read last, and the box it holds: most reads are in it. */
-    last: Option<(Box3, Arc<VoxelGrid>)>,
-    /** The coarsest level's are Shared's, here while its light is found (`light`). */
-    kept: Kept,
+    last: Option<([i64; 3], Arc<Block>)>,
 }
 
-/** What is kept of a level's sites, of each the ones used last (KEPT_SITES). */
-struct Kept {
-    /** What comes to sites. */
-    paths: Recent<[i64; 3], Arc<Paths>>,
-    /** The light coming to sites from each direction, settled. */
-    found: Recent<[i64; 3], [Rgb; N]>,
-}
-
-impl Kept {
-    fn new(sites: usize) -> Kept {
-        Kept { paths: Recent::new(sites), found: Recent::new(sites) }
+impl Level {
+    /** The block of this level, `i`, that holds `site`, from those shared. */
+    fn block(&mut self, shared: &Shared, i: usize, site: [i64; 3]) -> &Block {
+        let key = site.map(|v| v.div_euclid(BLOCK));
+        if self.last.as_ref().is_none_or(|(k, _)| *k != key) {
+            self.last = Some((key, shared.block(i, key)));
+        }
+        &self.last.as_ref().expect("held").1
     }
 }
-
-/** By level and site, the light coming to it from each direction in each round (`round`), from the first on. */
-type Rounds = Recent<(usize, [i64; 3]), Vec<[Rgb; N]>>;
 
 /**
  * What comes to a site and does not change as its light settles (`along`):
@@ -252,8 +263,6 @@ pub struct Light {
     shared: Shared,
     /** By level, up to a renderer's coarsest grid's (GRID_LEVELS). */
     levels: Vec<Level>,
-    /** KEPT_ROUNDS; the coarsest level's are Shared's, as its `kept`. */
-    rounds: Rounds,
     /** `paths`'s sites that reflect, while it finds them: its room kept from one site to the next. */
     reflecting: Vec<(u8, u8, Rgb)>,
     unit: [[f64; 3]; N],
@@ -273,13 +282,12 @@ pub struct Light {
 type Near = [Option<Rgb>; N];
 
 impl Light {
-    /** The light of `world`, found only where asked, its blocks in `shared`. */
+    /** The light of `world`, found only where asked, and kept in `shared`. */
     pub fn new(world: impl Into<Rc<World>>, shared: Shared) -> Light {
         let world = world.into();
         let Brightness { sky, sun, .. } = shared.brightness;
         let coarsest = GRID_LEVELS as u32 - 1;
-        let levels =
-            (0..=coarsest).map(|level| Level { heights: world.heights_at(level), last: None, kept: Kept::new(KEPT_SITES) }).collect();
+        let levels = (0..=coarsest).map(|level| Level { heights: world.heights_at(level), last: None }).collect();
         let unit = DIRECTIONS.map(|d| normalize(d.map(|v| v as f64)));
         let cosines = unit.map(|normal| {
             let weights = unit.map(|u| dot(u, normal).max(0.0));
@@ -303,19 +311,7 @@ impl Light {
         // A world with no heights has no sky: what glows is all its light.
         let (skies, background) = if world.heights.is_some() { (skies, background) } else { ([[0.0; 3]; N], [0.0; 3]) };
         let glow = shared.brightness.glowing() / GLOW_ONE as f32;
-        Light {
-            world,
-            shared,
-            levels,
-            rounds: Recent::new(KEPT_ROUNDS),
-            reflecting: Vec::new(),
-            unit,
-            cosines,
-            opposite,
-            glow,
-            sky: skies,
-            background,
-        }
+        Light { world, shared, levels, reflecting: Vec::new(), unit, cosines, opposite, glow, sky: skies, background }
     }
 
     /** Whether a whole voxel, one that lets nothing through, is at `site` of level `i`. */
@@ -360,92 +356,100 @@ impl Light {
         1.0 - grid.alpha(x, y, z) as f32 / ALPHA as f32
     }
 
-    /** The block of level `i` that holds `site`, from those shared (Shared::holding); none above or below every voxel. */
+    /** The sites of level `i`'s block that holds `site`, generated if not yet; none above or below every voxel. */
     fn hold(&mut self, i: usize, site: [i64; 3]) -> Option<([i64; 3], &VoxelGrid)> {
         let level = &mut self.levels[i];
-        if !(level.heights.0..level.heights.1).contains(&site[1]) {
+        let heights = level.heights;
+        if !(heights.0..heights.1).contains(&site[1]) {
             return None;
         }
-        if level.last.as_ref().is_none_or(|(b, _)| !b.holds(site)) {
-            level.last = Some(self.shared.holding(&self.world.generator, i as u32, level.heights, site));
+        let key = site.map(|v| v.div_euclid(BLOCK));
+        let generator = &self.world.generator;
+        let grid = &level.block(&self.shared, i, site).grid;
+        Some((site, grid.get_or_init(|| generate_shown(generator, &cube_box(heights, key, BLOCK), i as u32))))
+    }
+
+    /**
+     * What is kept of site `p` of level `i`, in its block, read or changed
+     * by `with`: nothing yet, if it is begun here (Shared::begun).
+     */
+    fn site<T>(&mut self, i: usize, p: [i64; 3], with: impl FnOnce(&mut Site) -> T) -> T {
+        let (value, begun) = {
+            let mut lit = self.levels[i].block(&self.shared, i, p).lit.lock().expect("lit");
+            let sites = lit.len();
+            let site = lit.entry(p).or_default();
+            site.read = true;
+            (with(site), lit.len() > sites)
+        };
+        if begun {
+            self.shared.begun();
         }
-        Some((site, &level.last.as_ref().expect("held").1))
+        value
     }
 
     /**
      * The light coming to site `p` of level `i` from every direction, as
-     * it settles round by round (`round`): found once it changes by less
-     * than Shared's tolerance, in a round or two where little reflects
-     * back, in many in a closed white room.
+     * it settles round by round (`round`): found once the light on its
+     * faces changes by less than Shared's tolerance, in a round or two
+     * where little reflects back, in many in a closed white room.
      */
     fn light(&mut self, i: usize, p: [i64; 3]) -> [Rgb; N] {
-        if i + 1 < self.levels.len() {
-            return self.settled(i, p);
+        if let Some(light) = self.site(i, p, |site| site.found) {
+            return light;
         }
-        // The coarsest level's sites are Shared's: this Light's while it finds the light of one.
-        let top = self.shared.top.clone();
-        let mut top = top.lock().expect("light");
-        let mut swap = |light: &mut Light| {
-            std::mem::swap(&mut top.kept, &mut light.levels[i].kept);
-            std::mem::swap(&mut top.rounds, &mut light.rounds);
-        };
-        swap(self);
-        let light = self.settled(i, p);
-        swap(self);
-        light
-    }
-
-    /** `light`, from the sites the level keeps. */
-    fn settled(&mut self, i: usize, p: [i64; 3]) -> [Rgb; N] {
-        if let Some(light) = self.levels[i].kept.found.get(&p) {
-            return *light;
-        }
-        let touches = self.paths(i, p).touches;
-        let mut light = self.round(i, p, 0);
-        for n in 1..=ROUNDS {
-            let next = self.round(i, p, n);
-            let settled = self.change(&light, &next, &touches) <= self.shared.tolerance;
-            light = next;
+        let (mut on, mut rounds) = (self.round(i, p, 0), 0);
+        while rounds < ROUNDS {
+            let next = self.round(i, p, rounds + 1);
+            let settled = change(&on, &next) <= self.shared.tolerance;
+            (on, rounds) = (next, rounds + 1);
             if settled {
                 break;
             }
         }
-        self.levels[i].kept.found.insert(p, light);
+        let light = self.coming(i, p, rounds);
+        self.site(i, p, |site| site.found = Some(light));
         light
     }
 
     /**
      * The light coming to site `p` of level `i` from every direction in
      * round `n`: what comes (`paths`), and what the sites met reflect of
-     * the light on them in the round before; none in round 0.
+     * the light on their faces turned back in the round before; none in
+     * round 0.
      */
-    fn round(&mut self, i: usize, p: [i64; 3], n: usize) -> [Rgb; N] {
-        if let Some(light) = self.rounds.get(&(i, p)).and_then(|rounds| rounds.get(n)) {
-            return *light;
-        }
+    fn coming(&mut self, i: usize, p: [i64; 3], n: usize) -> [Rgb; N] {
         let paths = self.paths(i, p);
         let mut light = paths.comes;
         if n > 0 {
             for &(d, step, reflects) in &paths.reflects {
                 let (d, q) = (d as usize, add(p, DIRECTIONS[d as usize].map(|v| v * step as i64)));
-                let (before, touches) = (self.round(i, q, n - 1), self.paths(i, q).touches);
-                let on = self.on_face(&before, &touches, self.opposite[d]);
+                let on = self.round(i, q, n - 1)[self.opposite[d]];
                 (0..3).for_each(|c| light[d][c] += reflects[c] * on[c]);
             }
-        }
-        // A site's rounds are asked for in turn; where the earlier ones were forgotten since, this one is not kept.
-        match self.rounds.get(&(i, p)) {
-            Some(rounds) if rounds.len() == n => rounds.push(light),
-            None if n == 0 => self.rounds.insert((i, p), vec![light]),
-            _ => {}
         }
         light
     }
 
+    /** The light on each face of site `p` of level `i` in round `n` (`on_face`), from what comes to it then (`coming`). */
+    fn round(&mut self, i: usize, p: [i64; 3], n: usize) -> [Rgb; N] {
+        if let Some(on) = self.site(i, p, |site| site.rounds.get(n).copied()) {
+            return on;
+        }
+        let (light, touches) = (self.coming(i, p, n), self.paths(i, p).touches);
+        let on = std::array::from_fn(|f| self.on_face(&light, &touches, f));
+        // A site's rounds are asked for in turn: one whose earlier ones were forgotten since, or that another Light kept meanwhile, is not kept.
+        self.site(i, p, |site| {
+            if site.rounds.len() == n {
+                site.rounds.push(on);
+            }
+        });
+        on
+    }
+
     /** What comes to site `p` of level `i` (Paths), along each direction. */
     fn paths(&mut self, i: usize, p: [i64; 3]) -> Arc<Paths> {
-        if let Some(paths) = self.levels[i].kept.paths.get(&p) {
-            return paths.clone();
+        if let Some(paths) = self.site(i, p, |site| site.paths.clone()) {
+            return paths;
         }
         let near = (i + 1 < self.levels.len()).then(|| self.near(i + 1, p));
         let whole = self.whole(i, p);
@@ -461,8 +465,7 @@ impl Light {
         });
         let paths = Arc::new(Paths { comes, reflects: reflects.as_slice().into(), touches });
         self.reflecting = reflects;
-        self.levels[i].kept.paths.insert(p, paths.clone());
-        paths
+        self.site(i, p, |site| site.paths.insert(paths).clone())
     }
 
     /**
@@ -551,16 +554,6 @@ impl Light {
         }
         let mean = |sum: Rgb, total: f32| if total > 0.0 { sum.map(|c| c / total) } else { sum };
         std::array::from_fn(|d| (self.open(i, add(base, nearest[d])) > 0.0).then(|| mean(past[d], totals[d])))
-    }
-
-    /** How much a site's light changed from `before` to `after`, of what it is: the most of any channel of the light on any face (`on_face`). */
-    fn change(&self, before: &[Rgb; N], after: &[Rgb; N], touches: &Touches) -> f32 {
-        let mut most = 0.0f32;
-        for f in 0..N {
-            let (b, a) = (self.on_face(before, touches, f), self.on_face(after, touches, f));
-            (0..3).filter(|&c| a[c] > 0.0).for_each(|c| most = most.max((a[c] - b[c]).abs() / a[c]));
-        }
-        most
     }
 
     /** Over π, the light on face `f` from `light`, its directions weighed by their cosines (`weighed`). */
@@ -741,6 +734,15 @@ fn weighed(weights: &[f32; N], light: &[Rgb; N], touches: &Touches) -> Rgb {
         });
     }
     std::array::from_fn(|c| if kept[c] > 0.0 { sum[c] / kept[c] } else { 0.0 })
+}
+
+/** How much the light on a site's faces changed from `before` to `after`, of what it is: the most of any channel on any face. */
+fn change(before: &[Rgb; N], after: &[Rgb; N]) -> f32 {
+    let mut most = 0.0f32;
+    for (b, a) in before.iter().zip(after) {
+        (0..3).filter(|&c| a[c] > 0.0).for_each(|c| most = most.max((a[c] - b[c]).abs() / a[c]));
+    }
+    most
 }
 
 fn add(a: [i64; 3], b: [i64; 3]) -> [i64; 3] {

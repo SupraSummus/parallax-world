@@ -215,9 +215,6 @@ pub enum Piece {
     Brick([i32; 3]),
 }
 
-/** How many of the most wanted pieces a worker picks its next brick from (Queue::next). */
-const NEAR: usize = 64;
-
 /** A piece of a level, and the tile a brick is of. */
 type Job = (usize, Piece, Option<Arc<Tile>>);
 
@@ -234,28 +231,6 @@ struct Queue {
 }
 
 impl Queue {
-    /**
-     * The piece a worker is to do next, whose last brick was `last`: the
-     * most wanted if a tile; else, of the NEAR most wanted, the brick of
-     * that level nearest it, or the most wanted. Its Light keeps the sites
-     * it read last, which bricks side by side read again; taken in turn,
-     * each worker's would lie far apart, all around the eye as they are wanted.
-     */
-    fn next(&mut self, last: Option<(usize, [i32; 3])>) -> Option<Job> {
-        let apart = |a: [i32; 3], b: [i32; 3]| (0..3).map(|d| (i64::from(a[d]) - i64::from(b[d])).pow(2)).sum::<i64>();
-        let brick = self.wanted.front().is_some_and(|job| matches!(job.1, Piece::Brick(_)));
-        let near = last.filter(|_| brick).and_then(|(level, at)| {
-            let bricks = self.wanted.iter().take(NEAR).enumerate();
-            bricks
-                .filter_map(|(k, job)| match job.1 {
-                    Piece::Brick(c) if job.0 == level => Some((apart(c, at), k)),
-                    _ => None,
-                })
-                .min()
-        });
-        self.wanted.remove(near.map_or(0, |(_, k)| k))
-    }
-
     /** Takes the tiles wanted right below and right above tile `id` of `level`, to be made with it (make_tiles): how many below, and above. */
     fn column(&mut self, level: usize, id: TileId) -> [i32; 2] {
         [-1, 1].map(|way| {
@@ -345,13 +320,11 @@ fn work(make: Make, seed: u64, heights: &Heights, queue: &(Mutex<Queue>, Condvar
     let columns = world.heights.is_some();
     // Made once there are tiles to light, and again when the light changes.
     let mut light: Option<(u32, Light)> = None;
-    // The brick it lit last (Queue::next).
-    let mut lit = None;
     loop {
         let ((level, piece, of), [below, above], shared, lighting) = {
             let mut q = queue.0.lock().expect("queue");
             loop {
-                if let Some(job) = q.next(lit) {
+                if let Some(job) = q.wanted.pop_front() {
                     q.in_flight.insert((job.0, job.1));
                     let column = match job.1 {
                         Piece::Tile(id) if columns => q.column(job.0, id),
@@ -364,7 +337,6 @@ fn work(make: Make, seed: u64, heights: &Heights, queue: &(Mutex<Queue>, Condvar
         };
         let made: Vec<Made> = match piece {
             Piece::Brick(corner) => {
-                lit = Some((level, corner));
                 light.take_if(|(l, _)| *l != lighting);
                 let (_, light) =
                     light.get_or_insert_with(|| (lighting, Light::new(world.clone(), shared.expect("light to light tiles with"))));

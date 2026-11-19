@@ -419,7 +419,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   (a generator per thread, `native/src/world.rs`):
   completing the valley's first view takes four threads
   about a sixth more work than one, lit a third more,
-  and each thread holds tens of MB more, lit over a hundred.
+  and each thread holds tens of MB more.
   A generator all threads share would measure each thing once.
   Tiles side by side still make again the things reaching both;
   those one above another are made together (`make_tiles`).
@@ -431,8 +431,8 @@ Numbers are for the forest at 1280×800, as measured when written.
   four threads, the cores to themselves,
   owe the view hundreds of bricks all the while,
   so each level shows lit less far than it reads, the next coarser past there.
-  Nearly all of their work is then the light, a quarter of it its blocks;
-  no part of it stands out ([light.md](light.md), "In native, and what it costs").
+  Most of their work is then generating, the light's blocks and the tiles
+  ([light.md](light.md), "In native, and what it costs").
   Its tiles come in time, made before the bricks are lit.
 - **Native's medium costs a fragment per slab a ray crosses**
   (architecture.md, "See-through"), as far as the view goes:
@@ -480,23 +480,16 @@ Numbers are for the forest at 1280×800, as measured when written.
   as a tile's bricks are asked for only once it is made.
   And a window grows when all its ball would gain fits (`Windows::sync`),
   counting, shaded, every brick of it, and lit, only those lit.
-- **Native, lit, holds three quarters more than it does shaded**,
+- **Native, lit, holds more than twice what it does shaded**,
   and more as the eye moves:
   the light's blocks (`Shared`) are kept wherever tiles are,
   though a brick lit needs them no more, till one beside it is lit;
-  and each of the world's threads keeps sites of its own
+  and the light of the sites read lately, a few hundred MB (`KEPT_SITES`)
   ([light.md](light.md), "In native, and what it costs").
-  Keeping only the blocks read last (as `Recent` keeps rounds) was tried:
-  held to fewer than a first view reads, lighting slows, by blocks made again.
-  So was one `Recent` for all a Light keeps of a site,
-  its paths and settled light with its rounds:
-  as fast only once it held as much as now.
-  Kept by all the threads, as the coarsest level's sites are,
-  each would be found once, not by every thread that lights beside it.
-- **`voxels_show_the_faces_rays_enter_by`, lit, takes over nine minutes** on a software GPU's machine,
-  all of them in the light's rounds (`Light::round`), not in measuring its block, as was thought.
-  Why was not looked into: its block is white, so its light may settle late or never (`ROUNDS`),
-  each round reading sites one further around, more than a `Light` keeps the rounds of (`KEPT_ROUNDS`).
+  Keeping only the blocks read last was tried, twice:
+  lighting slows, by blocks made again.
+  So a block's sites and their light are forgotten two ways (`forget`, `begun`);
+  a tile and a block as one box (below) would leave one.
 - **Tiles as small as the light's blocks** (32 sites a side, `TILE_SHIFT` 5), tried on the valley:
   rays ask for a fifth of what the tiles made hold,
   so shaded, a first view takes half the work and less memory,
