@@ -20,6 +20,7 @@ pub mod plan;
 pub mod points;
 pub mod recent;
 pub mod tiles;
+pub mod time;
 pub mod units;
 pub mod world;
 

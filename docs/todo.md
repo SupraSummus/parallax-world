@@ -377,6 +377,47 @@ Numbers are for the forest at 1280×800, as measured when written.
   the track runs up to 30° off z past a building along it
   (`Station::frame` in `worlds/src/valley/railway.rs`).
 
+## Time
+
+The prototype of worlds that move (`worldgen/src/time.rs`;
+"Time" in `docs/architecture.md`): the valley's clouds.
+
+- **Tiles are made anew whole.**
+  A tile the clouds are in is made anew each time they cross one of its sites,
+  all its sites, though they moved by one.
+  From the valley's floor the threads about keep up:
+  the levels that show the clouds are coarse, and change seldom.
+  From just under the clouds, on four cores,
+  a third of their tiles were behind the world's time (`--stroll --by-work` says).
+  To try: a tile that only drifted, its sites moved to the next
+  (a step is the lattice's own) and only what came in by its faces made;
+  what stays as made by brick, not by tile;
+  what moves in grids of its own, apart from what stays.
+- **Behind, tiles show different times.**
+  Clouds tear along tiles' faces, and between levels.
+  To try: all of a time made, then shown together.
+- **Light does not move.**
+  The light's blocks and what Lights keep (`worldgen/src/light.rs`)
+  are made once, at time 0, and a tile's light is found once:
+  a cloud's shadow stays where it fell.
+  Each needs the time it stays for, as tiles have.
+- **Only native's voxels engine follows.**
+  The chunks engines bake a cell once its tiles are in, and keep it;
+  the web has no time at all: there the clouds stand still.
+  A chunk stays no longer than the tiles it reads (`chunk_reads`).
+  The voxels engine places a tile made anew in the step the old one goes,
+  so that rays read no coarser level between: not looked at in a window yet.
+- **Tiles made together stay together.**
+  Tiles one above another, made as one box, stay no longer than the clouds among them;
+  made anew alone, the others then stay always: each is made twice.
+- **Only drifting, and only by layers.**
+  `time::drift` is all that reads the time, and plans and things may not,
+  kept as they are from box to box:
+  a tree's crown in the wind is a thing.
+- **The window never rests under clouds**:
+  it draws a frame every 60th of a second while any tile holds what moves.
+- **README's pictures of the valley are from before its clouds.**
+
 ## Light
 
 - **Light is a prototype, in look's pictures and native's computed lighting**

@@ -1,0 +1,4 @@
+        let mut world = seed|seed| worlds::valley::valley(seed).alone("clouds"), 1, None, 4);
+        let mut world = seedmake(), Some(Shared::new(day)), 4);
+        assert!(after == lit(&mut seedmake(), Some(Shared::new(dusk).stepping(3)), 4)));
+        assert!(lit(&mut seedmake(), Some(Shared::new(day)), 0)) == lit(&mut World::new(make(), Some(Shared::new(day)), 4)));

@@ -625,6 +625,13 @@ struct Held {
     slots: Vec<(i32, u32)>,
 }
 
+impl Held {
+    /** `tile`, none of its bricks in a slot yet. */
+    fn new(tile: &Arc<Tile>) -> Held {
+        Held { tile: tile.clone(), slots: vec![(EMPTY, 0); tile.grid.cells.len() / BRICK_SITES] }
+    }
+}
+
 /**
  * A level's window as the GPU holds it: from which tiles, the ball of
  * bricks it holds of them, its table (per brick a slot, EMPTY or UNKNOWN:
@@ -789,7 +796,7 @@ impl Window {
      * the ball, gone or (once none is) the nearest new: what it places
      * is a shell of the ball and those tiles', however fast the eye or
      * many the tiles. Rays take the next level for what is still UNKNOWN; a tile
-     * gone is held till its step. A ball that holds nothing around the eye
+     * gone is held till its step, and one made anew placed in it. A ball that holds nothing around the eye
      * starts anew there, the window as made (clear).
      */
     fn retarget(&mut self, level: usize, tiles: &Arc<Level>, eye: Vec3, read: bool, radius: i32, pool: &mut Pool) -> Vec<[i32; 3]> {
@@ -830,6 +837,11 @@ impl Window {
                     self.release(b, pool);
                 }
                 self.tiles.remove(&id);
+                // One made anew takes its place in the same step: between two, rays would read the next level there.
+                if let Some(tile) = tiles.tiles.get(&id) {
+                    self.tiles.insert(id, Held::new(tile));
+                    pending.extend(in_ball(tile_bricks(id, origin), ball, None));
+                }
             } else {
                 left += 1;
             }
@@ -848,7 +860,7 @@ impl Window {
                 }
                 steps -= 1;
             }
-            self.tiles.insert(id, Held { tile: tile.clone(), slots: vec![(EMPTY, 0); tile.grid.cells.len() / BRICK_SITES] });
+            self.tiles.insert(id, Held::new(tile));
             pending.extend(in_ball(tile_bricks(id, origin), ball, None));
         }
         // Tiles still to change: it is behind, and steps again.

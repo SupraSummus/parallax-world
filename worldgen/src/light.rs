@@ -47,6 +47,7 @@
 //! those pieces were not there (`shown`): the ray that shows it met none.
 
 use std::collections::BTreeMap;
+use std::ops::Range;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -56,7 +57,8 @@ use fcc::{GRID_LEVELS, Look};
 use crate::World;
 use crate::grid::{ALPHA, BRICK, COLOUR_ONE, GLOW_ONE, Grid, VoxelGrid};
 use crate::picture::{CROSSING, FACES, Picture, nearest_site, over};
-use crate::tiles::{TILE, made_with, make_sites, parted};
+use crate::tiles::{TILE, made_with, make_sites, make_tiles, parted};
+use crate::time;
 
 type Rgb = [f32; 3];
 
@@ -92,7 +94,7 @@ const KEPT_SITES: usize = 1 << 17;
  */
 struct Made {
     tiles: Vec<[i64; 3]>,
-    sites: Arc<OnceLock<VoxelGrid>>,
+    sites: Arc<OnceLock<(VoxelGrid, Range<i64>)>>,
     lit: Box<[OnceLock<Arc<Lit>>]>,
 }
 
@@ -258,11 +260,18 @@ impl Shared {
 
     /**
      * tiles' make_tiles, their sites kept for the Lights, or theirs if a
-     * Light made them: so what is drawn and lit is made once.
+     * Light made them: so what is drawn and lit is made once. At a time
+     * they do not stay for (time.rs), made anew and not kept.
      */
     pub fn make_tiles(&self, world: &World, level: u32, key: [i64; 3]) -> Vec<([i64; 3], Grid)> {
         let made = self.made(world, level, key);
-        parted(made.sites.get_or_init(|| make_sites(world, level, key)), world, level, key)
+        let (sites, stays) = made.sites.get_or_init(|| time::at(time::now(), || make_sites(world, level, key)));
+        // What moves (time.rs) is made anew at another time, the light reading it where it was.
+        if !stays.contains(&time::now()) {
+            return make_tiles(world, level, key);
+        }
+        time::narrow(stays);
+        parted(sites, world, level, key)
     }
 
     /**
@@ -491,7 +500,7 @@ impl Light {
         }
         let world = &self.world;
         let sites = &level.made(world, &self.shared, i, site).sites;
-        Some((site, sites.get_or_init(|| make_sites(world, i as u32, site.map(|v| v.div_euclid(TILE))))))
+        Some((site, &sites.get_or_init(|| time::at(time::now(), || make_sites(world, i as u32, site.map(|v| v.div_euclid(TILE))))).0))
     }
 
     /**
