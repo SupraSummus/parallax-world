@@ -3,10 +3,10 @@
 use std::rc::Rc;
 
 use worldgen::domain::Scope;
-use worldgen::generator::{Layer, generate, kind_of};
+use worldgen::generator::{Layer, generate, generate_shown, kind_of};
 use worldgen::grid::{ALPHA, Box3, is_site};
-use worldgen::light::{TILE, make_tile, make_tiles, tile_box};
 use worldgen::picture::{Camera, picture};
+use worldgen::tiles::{TILE, make_tiles, tile_box};
 use worldgen::units::UNIT_SIZE;
 use worlds::valley::landmarks::{LANDMARKS, Landmark, Landmarks, NEAR, Site};
 use worlds::valley::railway::Railway;
@@ -30,8 +30,9 @@ fn the_forest_keeps_off_the_first_towns_main_street() {
 
 /**
  * A host makes the tiles one above another as one box (make_tiles): each
- * is as made alone wherever a voxel may show. Buried, a site may differ:
- * rock under a box is of one shade from its bottom up.
+ * is as made alone wherever a voxel may show, here those of the columns
+ * around the spawn. Buried, a site may differ: rock under a box is of one
+ * shade from its bottom up.
  */
 #[test]
 fn tiles_made_together_show_what_each_shows_alone() {
@@ -39,10 +40,11 @@ fn tiles_made_together_show_what_each_shows_alone() {
     for level in [0, 3] {
         let heights = world.heights_at(level);
         let [x, y, z] = world.spawn.map(|v| (v >> level).div_euclid(TILE));
-        let together = make_tiles(&world.generator, level, heights, [x, y - 1, z], y + 1);
+        let columns = (x - 2..=x + 2).flat_map(|x| (z - 2..=z + 2).map(move |z| [x, y, z]));
         let mut shown = 0;
-        for (y, together) in (y - 1..).zip(&together) {
-            let (alone, b) = (make_tile(&world.generator, level, heights, [x, y, z]), tile_box(heights, [x, y, z]));
+        for (key, together) in &columns.flat_map(|key| make_tiles(&world, level, key)).collect::<Vec<_>>() {
+            let b = tile_box(heights, *key);
+            let alone = generate_shown(&world.generator, &b, level).to_grid(true);
             let faces = |g: &fcc::Grid, [x, y, z]: [i32; 3]| std::array::from_fn::<_, { fcc::FACE_KINDS }, _>(|k| g.face(x, y, z, k));
             let held = |g: &fcc::Grid, p @ [x, y, z]: [i32; 3]| (g.get(x, y, z), faces(g, p), g.solid(x, y, z), g.glow(x, y, z));
             let whole = |p: [i32; 3]| [&alone, together].iter().all(|g| fcc::alpha_of(g.get(p[0], p[1], p[2])) == ALPHA);

@@ -25,8 +25,10 @@
 //! is (`weighed`).
 //!
 //! What is found at a site is a function of the world alone, so the Lights
-//! of all threads keep it together, by block (Shared), each site's found
-//! once: no level's sites apart from another's.
+//! of all threads keep it together (Shared), each site's found once: no
+//! level's sites apart from another's. They read the world's tiles
+//! (tiles.rs), as hosts draw them: lit, a tile's sites are made once, for
+//! what draws it and what lights it (Shared::make_tiles).
 //!
 //! Light sees each site as it is (VoxelGrid::light): what its pieces and
 //! its medium stop of its rays, a share, where hosts are shown its pieces
@@ -47,9 +49,9 @@ use fcc::light::{FaceLight, linear_to_srgb, srgb_to_linear};
 use fcc::{GRID_LEVELS, Look};
 
 use crate::World;
-use crate::generator::{Generator, generate_shown};
-use crate::grid::{ALPHA, BRICK, Box3, COLOUR_ONE, GLOW_ONE, Grid, VoxelGrid};
+use crate::grid::{ALPHA, COLOUR_ONE, GLOW_ONE, Grid, VoxelGrid};
 use crate::picture::{CROSSING, FACES, Picture, nearest_site, over};
+use crate::tiles::{TILE, made_with, make_sites, parted};
 
 type Rgb = [f32; 3];
 
@@ -64,10 +66,6 @@ const TOP_STEPS: usize = 64;
 /** How little the light on a site's faces may change, of what it is, for it to be found, unless set (Shared::settling); and rounds at most, should it never settle (a closed room that reflects all). */
 const TOLERANCE: f32 = 1e-2;
 const ROUNDS: usize = 256;
-/** Sites a tile is a side, at each level, as native's (tile_box). */
-pub const TILE: i64 = 128;
-/** Sites a block is a side (Block): small, as light reads a few sites around what it lights. */
-const BLOCK: i64 = 32;
 /**
  * Sites begun between one forgetting and the next (Shared::begun): fewer
  * hold less, and under what a view reads at once, lighting slows by half
@@ -76,14 +74,14 @@ const BLOCK: i64 = 32;
 const KEPT_SITES: usize = 1 << 17;
 
 /**
- * A block of a level, BLOCK sites a side: its sites, generated once by
- * whichever Light reads one first (those that want it meanwhile wait), and
- * what the Lights found at them so far, by site. Not a host's tile
- * (make_tile), which keeps of a site only what is drawn.
+ * The tiles of a level made as one box (tiles' made_with): their sites,
+ * generated once by whichever reads one first, a Light or a host (those
+ * that want them meanwhile wait), and what the Lights found at them so
+ * far, by site.
  */
-#[derive(Default)]
-struct Block {
-    grid: Arc<OnceLock<VoxelGrid>>,
+struct Made {
+    tiles: Vec<[i64; 3]>,
+    sites: Arc<OnceLock<VoxelGrid>>,
     lit: Mutex<Map<[i64; 3], Site>>,
 }
 
@@ -100,23 +98,23 @@ struct Site {
     read: bool,
 }
 
-/** Blocks by level and key. */
-type Blocks = Map<(usize, [i64; 3]), Arc<Block>>;
+/** What is made, by level and the key of its first tile. */
+type Boxes = Map<(usize, [i64; 3]), Arc<Made>>;
 
 /**
  * What the Lights of one world under one brightness, and taking as many
- * steps along each level, share (a thread's each): the world's blocks of
- * every level, with all the Lights find at their sites, so each site's
- * light is found once, whichever thread lights beside it. A block is kept
- * till the host forgets it (`forget`); the light of a site, while Lights
- * read it (`begun`).
+ * steps along each level, share (a thread's each), and the host with
+ * them: the world's tiles of every level, with all the Lights find at
+ * their sites, so each tile is made once, and each site's light found
+ * once, whichever thread lights beside it. Tiles are kept till the host
+ * forgets them (`forget`); the light of a site, while Lights read it (`begun`).
  */
 #[derive(Clone)]
 pub struct Shared {
     brightness: Brightness,
     steps: usize,
     tolerance: f32,
-    blocks: Arc<Mutex<Blocks>>,
+    made: Arc<Mutex<Boxes>>,
     /** Sites whose light was begun, so far (`begun`). */
     begun: Arc<AtomicUsize>,
 }
@@ -124,21 +122,21 @@ pub struct Shared {
 impl Shared {
     /** Nothing made yet, for a world under `brightness`. */
     pub fn new(brightness: Brightness) -> Shared {
-        Shared { brightness, steps: STEPS, tolerance: TOLERANCE, blocks: Arc::default(), begun: Arc::default() }
+        Shared { brightness, steps: STEPS, tolerance: TOLERANCE, made: Arc::default(), begun: Arc::default() }
     }
 
     pub fn brightness(&self) -> Brightness {
         self.brightness
     }
 
-    /** The same world, none of it lit: its blocks' sites kept. */
+    /** The same world, none of it lit: its tiles' sites kept. */
     fn unlit(&self) -> Shared {
-        let unlit = |block: &Arc<Block>| Arc::new(Block { grid: block.grid.clone(), ..Block::default() });
-        let blocks: Blocks = self.blocks.lock().expect("blocks").iter().map(|(key, block)| (*key, unlit(block))).collect();
-        Shared { blocks: Arc::new(Mutex::new(blocks)), begun: Arc::default(), ..self.clone() }
+        let unlit = |made: &Arc<Made>| Arc::new(Made { tiles: made.tiles.clone(), sites: made.sites.clone(), lit: Mutex::default() });
+        let made: Boxes = self.made.lock().expect("made").iter().map(|(key, made)| (*key, unlit(made))).collect();
+        Shared { made: Arc::new(Mutex::new(made)), begun: Arc::default(), ..self.clone() }
     }
 
-    /** The same world under `brightness`: its blocks' sites kept. */
+    /** The same world under `brightness`: its tiles' sites kept. */
     pub fn under(&self, brightness: Brightness) -> Shared {
         Shared { brightness, ..self.unlit() }
     }
@@ -148,7 +146,7 @@ impl Shared {
         self.steps
     }
 
-    /** The same world, light taking `steps` steps along each level before the coarser's: its blocks' sites kept. */
+    /** The same world, light taking `steps` steps along each level before the coarser's: its tiles' sites kept. */
     pub fn stepping(&self, steps: usize) -> Shared {
         assert!((1..=TOP_STEPS).contains(&steps), "{steps} steps");
         Shared { steps, ..self.unlit() }
@@ -159,7 +157,7 @@ impl Shared {
         self.tolerance
     }
 
-    /** The same world, a site's light found once the light on its faces changes by less than `tolerance` of what it is: its blocks' sites kept. */
+    /** The same world, a site's light found once the light on its faces changes by less than `tolerance` of what it is: its tiles' sites kept. */
     pub fn settling(&self, tolerance: f32) -> Shared {
         assert!(tolerance > 0.0, "tolerance {tolerance}");
         Shared { tolerance, ..self.unlit() }
@@ -170,9 +168,20 @@ impl Shared {
         (self.brightness, self.steps, self.tolerance) == (other.brightness, other.steps, other.tolerance)
     }
 
-    /** Block `key` of `level`, begun if not yet. */
-    fn block(&self, level: usize, key: [i64; 3]) -> Arc<Block> {
-        self.blocks.lock().expect("blocks").entry((level, key)).or_default().clone()
+    /** What tile `key` of `level` of `world` is made in, begun if not yet. */
+    fn made(&self, world: &World, level: u32, key: [i64; 3]) -> Arc<Made> {
+        let tiles: Vec<[i64; 3]> = made_with(world, level, key).collect();
+        let begin = || Arc::new(Made { tiles: tiles.clone(), sites: Arc::default(), lit: Mutex::default() });
+        self.made.lock().expect("made").entry((level as usize, tiles[0])).or_insert_with(begin).clone()
+    }
+
+    /**
+     * tiles' make_tiles, their sites kept for the Lights, or theirs if a
+     * Light made them: so what is drawn and lit is made once.
+     */
+    pub fn make_tiles(&self, world: &World, level: u32, key: [i64; 3]) -> Vec<([i64; 3], Grid)> {
+        let made = self.made(world, level, key);
+        parted(made.sites.get_or_init(|| make_sites(world, level, key)), world, level, key)
     }
 
     /**
@@ -182,10 +191,10 @@ impl Shared {
      */
     fn begun(&self) {
         if (self.begun.fetch_add(1, Ordering::Relaxed) + 1).is_multiple_of(KEPT_SITES) {
-            // Block by block, none waiting for all the blocks meanwhile.
-            let blocks: Vec<Arc<Block>> = self.blocks.lock().expect("blocks").values().cloned().collect();
-            for block in blocks {
-                let mut lit = block.lit.lock().expect("lit");
+            // One by one, none waiting for all of them meanwhile.
+            let made: Vec<Arc<Made>> = self.made.lock().expect("made").values().cloned().collect();
+            for made in made {
+                let mut lit = made.lit.lock().expect("lit");
                 lit.retain(|_, site| std::mem::take(&mut site.read));
                 lit.shrink_to_fit();
             }
@@ -193,11 +202,11 @@ impl Shared {
     }
 
     /**
-     * Forgets the blocks in the tiles `far` says are far, by level and
-     * key, and their light with them, to make again if asked.
+     * Forgets what was made whose every tile `far` says is far, by level
+     * and key, and its light with it, to make again if asked.
      */
     pub fn forget(&self, far: impl Fn(usize, [i64; 3]) -> bool) {
-        self.blocks.lock().expect("blocks").retain(|&(level, key), _| !far(level, key.map(|k| k.div_euclid(TILE / BLOCK))));
+        self.made.lock().expect("made").retain(|&(level, _), made| !made.tiles.iter().all(|&key| far(level, key)));
     }
 }
 
@@ -225,18 +234,18 @@ const GLOW: f32 = 250.0;
 
 type Map<K, V> = fcc::FastMap<K, V>;
 
-/** A level's heights, and its block a Light read last, by key: most reads are in it. */
+/** A level's heights, and the tile a Light read last, with what it is made in: most reads are in it. */
 struct Level {
     heights: (i64, i64),
-    last: Option<([i64; 3], Arc<Block>)>,
+    last: Option<([i64; 3], Arc<Made>)>,
 }
 
 impl Level {
-    /** The block of this level, `i`, that holds `site`, from those shared. */
-    fn block(&mut self, shared: &Shared, i: usize, site: [i64; 3]) -> &Block {
-        let key = site.map(|v| v.div_euclid(BLOCK));
+    /** What the tile of this level, `i`, of `world`, that holds `site` is made in, from those shared. */
+    fn made(&mut self, world: &World, shared: &Shared, i: usize, site: [i64; 3]) -> &Made {
+        let key = site.map(|v| v.div_euclid(TILE));
         if self.last.as_ref().is_none_or(|(k, _)| *k != key) {
-            self.last = Some((key, shared.block(i, key)));
+            self.last = Some((key, shared.made(world, i as u32, key)));
         }
         &self.last.as_ref().expect("held").1
     }
@@ -356,26 +365,25 @@ impl Light {
         1.0 - grid.alpha(x, y, z) as f32 / ALPHA as f32
     }
 
-    /** The sites of level `i`'s block that holds `site`, generated if not yet; none above or below every voxel. */
+    /** The sites of level `i`'s tile that holds `site`, generated if not yet; none above or below every voxel. */
     fn hold(&mut self, i: usize, site: [i64; 3]) -> Option<([i64; 3], &VoxelGrid)> {
         let level = &mut self.levels[i];
         let heights = level.heights;
         if !(heights.0..heights.1).contains(&site[1]) {
             return None;
         }
-        let key = site.map(|v| v.div_euclid(BLOCK));
-        let generator = &self.world.generator;
-        let grid = &level.block(&self.shared, i, site).grid;
-        Some((site, grid.get_or_init(|| generate_shown(generator, &cube_box(heights, key, BLOCK), i as u32))))
+        let world = &self.world;
+        let sites = &level.made(world, &self.shared, i, site).sites;
+        Some((site, sites.get_or_init(|| make_sites(world, i as u32, site.map(|v| v.div_euclid(TILE))))))
     }
 
     /**
-     * What is kept of site `p` of level `i`, in its block, read or changed
+     * What is kept of site `p` of level `i`, with its tile, read or changed
      * by `with`: nothing yet, if it is begun here (Shared::begun).
      */
     fn site<T>(&mut self, i: usize, p: [i64; 3], with: impl FnOnce(&mut Site) -> T) -> T {
         let (value, begun) = {
-            let mut lit = self.levels[i].block(&self.shared, i, p).lit.lock().expect("lit");
+            let mut lit = self.levels[i].made(&self.world, &self.shared, i, p).lit.lock().expect("lit");
             let sites = lit.len();
             let site = lit.entry(p).or_default();
             site.read = true;
@@ -677,49 +685,6 @@ fn linear(look: Look) -> Rgb {
 }
 
 /**
- * Tile `key`'s box: a cube TILE sites a side, holding x in
- * [key[0] · TILE, (key[0] + 1) · TILE), y and z likewise, cut to `heights`
- * rounded out to whole bricks, so that every tile's bricks are on one
- * grid; empty (no y) if it is all above or below them.
- */
-pub fn tile_box(heights: (i64, i64), key: [i64; 3]) -> Box3 {
-    cube_box(heights, key, TILE)
-}
-
-/** As tile_box, of cubes `side` sites a side (blocks too). */
-fn cube_box((low, high): (i64, i64), key: [i64; 3], side: i64) -> Box3 {
-    let [x, y, z] = key.map(|k| k * side);
-    let low = low.div_euclid(BRICK) * BRICK;
-    let high = (high + BRICK - 1).div_euclid(BRICK) * BRICK;
-    let (y0, y1) = (low.clamp(y, y + side), high.clamp(y, y + side));
-    Box3 { min: [x, y0, z], max: [x + side, y1.max(y0), z + side] }
-}
-
-/** Tile `key` of `level` of the world `generator` makes, of `heights`, as hosts make and draw it (generate_shown), see-through ones too. */
-pub fn make_tile(generator: &Generator, level: u32, heights: (i64, i64), key: [i64; 3]) -> Grid {
-    make_tiles(generator, level, heights, key, key[1]).remove(0)
-}
-
-/**
- * Tile `key` and those above it up to y = `last`: generated as one box
- * and parted, so what they share is made once (their fields' lines, the
- * things reaching several). Each shows as made alone; what is buried may
- * differ in shade, rock being of one from a box's bottom up.
- */
-pub fn make_tiles(generator: &Generator, level: u32, heights: (i64, i64), key: [i64; 3], last: i64) -> Vec<Grid> {
-    let boxes: Vec<Box3> = (key[1]..=last).map(|y| tile_box(heights, [key[0], y, key[2]])).collect();
-    let all = Box3 { min: boxes[0].min, max: boxes[boxes.len() - 1].max };
-    let grid = generate_shown(generator, &all, level).into_grid(true);
-    // What was made may end short of a tile, or before it.
-    let (low, high) = (grid.min[1] as i64, (grid.min[1] + grid.n[1]) as i64);
-    let part = |b: &Box3| {
-        let (y0, y1) = (b.min[1].clamp(low, high), b.max[1].clamp(low, high));
-        grid.part([grid.min[0], y0 as i32, grid.min[2]], [grid.n[0], (y1 - y0) as i32, grid.n[2]])
-    };
-    boxes.iter().map(part).collect()
-}
-
-/**
  * The light on a face, its directions weighed by `weights` (summing to 1).
  * A voxel the face touches is taken to be lit as the face is, so it sends
  * back its colour times that light: the light on the face is what comes
@@ -830,19 +795,6 @@ mod tests {
     use crate::generator::{Field, Generator, KindDef, Layer, Node, Op, Population, SOLID, cuboid};
     use fcc::light::colour;
 
-    #[test]
-    fn tiles_are_cubes_cut_to_the_heights_at_bricks() {
-        let heights = (-70, 140);
-        let cube = |key: [i64; 3]| Box3 { min: key.map(|k| k * TILE), max: key.map(|k| (k + 1) * TILE) };
-        assert_eq!(tile_box(heights, [2, 1, -3]), Box3 { max: [3 * TILE, 144, -2 * TILE], ..cube([2, 1, -3]) });
-        assert_eq!(tile_box(heights, [0, -1, 0]), Box3 { min: [0, -72, 0], ..cube([0, -1, 0]) });
-        assert_eq!(tile_box((-500, 500), [1, 2, 3]), cube([1, 2, 3]), "whole within them");
-        for key in [[0, 2, 0], [0, -2, 0]] {
-            let b = tile_box(heights, key);
-            assert!(b.min[1] == b.max[1], "{key:?}: none of it in the heights");
-        }
-    }
-
     const STONE: u8 = 0;
     const LAMP_KIND: u8 = 1;
     /** Lamps are cubes 4 units wide, as the towns' are: many sites, its glow on those inside. */
@@ -930,7 +882,7 @@ mod tests {
         let world = world(&[[5.0, 31.0, 6.0]], |_, _, _, _| false);
         let glows: Vec<f64> = (3..=8)
             .map(|level| {
-                let grid = crate::generator::generate(&world.generator, &Box3 { min: [-8; 3], max: [8; 3] }, level);
+                let grid = crate::generator::generate(&world.generator, &crate::grid::Box3 { min: [-8; 3], max: [8; 3] }, level);
                 grid.glow.values().map(|g| g[0] as f64).sum::<f64>() * (1u64 << (2 * level)) as f64
             })
             .collect();

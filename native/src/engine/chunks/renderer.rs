@@ -866,12 +866,8 @@ impl Renderer {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
-    use worldgen::light::make_tile;
-
     use super::*;
-    use crate::world::Tile;
+    use crate::world::tiles_about;
 
     /**
      * The cells may_hold says hold nothing that shows bake empty, of every
@@ -884,12 +880,10 @@ mod tests {
         for (name, grid) in [("forest", 0), ("moor", 0), ("valley", 2)] {
             let world = (worlds::by_name(name).expect("world").make)(1);
             let spawn = world.spawn.map(|v| (v >> grid) as i32);
-            let corner = spawn.map(|v| (v as f64 / TILE as f64).round() as i32);
+            // The tiles around the corner of cubes 128 sites a side that is nearest the spawn, as far each way.
+            let corner = spawn.map(|v| (v as f64 / 128.0).round() as i32 * 128);
             let heights = world.heights_at(grid);
-            let tiles: HashMap<TileId, Arc<Tile>> = within([corner.map(|v| v - 1), corner])
-                .map(|id| (id, Arc::new(Tile::new(id, Arc::new(make_tile(&world.generator, grid, heights, id.map(i64::from)))))))
-                .collect();
-            let level = Level::new(tiles);
+            let level = Level::new(tiles_about(&world, grid, corner, 128));
             let mut baker = Baker::new();
             baker.share_tiles(grid as usize, level.grids.clone());
             let (mut buried, mut empty) = (0, 0);
