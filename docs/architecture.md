@@ -900,7 +900,8 @@ each engine only shows it its own way.
 The splats' bakers light the voxels they show, face by face.
 For the voxels, the world's threads light the bricks rays ask for,
 before any tile to make,
-nearest first in each level's own sites, as rays read them:
+nearest first in each level's own sites, as rays read them
+(each thread, of the most wanted, the one beside its last):
 each voxel of the brick a ray can meet gets the light on it,
 by the way its surface faces (`Light::on_seen`),
 and what it glows,

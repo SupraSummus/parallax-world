@@ -145,9 +145,18 @@ till hosts read sites as light does
 the tiles' own (`TILE`, `tile_box`, `make_tiles`) are still in `light.rs`,
 which no longer makes them;
 but each finds light again where another found it
-(all but the coarsest level's: `Shared`'s `top`),
-and makes a generator, whose plans' caches take tens of MB;
-each of the world's threads makes two, its own and its Light's.
+(all but the coarsest level's: `Shared`'s `top`,
+whose sites light reads far around, the same whatever is lit),
+and the bakers' each make a generator, whose plans take tens of MB;
+a thread of the world lights with the one it makes tiles with.
+
+Each `Light` keeps the sites it used last (`Recent`),
+few next to what a view reads:
+lighting the valley's first view finds what comes to a site (`paths`)
+some four times, not once, by each thread that lights beside it.
+So the world's threads take bricks near their last (`Queue::next`).
+Keeping more is faster and holds more, about in step.
+
 A site of a block costs a few times one of a tile at the finest levels
 (the cheese's holes, the valley's plans, asked again per block),
 so a tile read all round its edges costs about as much in blocks.

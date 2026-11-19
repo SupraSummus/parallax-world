@@ -21,6 +21,7 @@
 //! eye holds. Lit anew (relight), the tiles are kept, their light found again.
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::rc::Rc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 
@@ -217,6 +218,9 @@ enum Piece {
     Brick([i32; 3]),
 }
 
+/** How many of the most wanted pieces a worker picks its next brick from (Queue::next). */
+const NEAR: usize = 64;
+
 /** A piece of a level, and the tile a brick is of. */
 type Job = (usize, Piece, Option<Arc<Tile>>);
 
@@ -230,6 +234,27 @@ struct Queue {
 }
 
 impl Queue {
+    /**
+     * The piece a worker is to do next, whose last was `last` if a brick:
+     * of the NEAR most wanted, the brick of that level nearest it, else the
+     * most wanted. Its Light keeps the sites it read last, which bricks
+     * side by side read again; taken in turn, each worker's would lie far
+     * apart, all around the eye as they are wanted.
+     */
+    fn next(&mut self, last: Option<(usize, [i32; 3])>) -> Option<Job> {
+        let apart = |a: [i32; 3], b: [i32; 3]| (0..3).map(|d| (i64::from(a[d]) - i64::from(b[d])).pow(2)).sum::<i64>();
+        let near = last.and_then(|(level, at)| {
+            let bricks = self.wanted.iter().take(NEAR).enumerate();
+            bricks
+                .filter_map(|(k, job)| match job.1 {
+                    Piece::Brick(c) if job.0 == level => Some((apart(c, at), k)),
+                    _ => None,
+                })
+                .min()
+        });
+        self.wanted.remove(near.map_or(0, |(_, k)| k))
+    }
+
     /** Takes the tiles wanted right below and right above tile `id` of `level`, to be made with it (make_tiles): how many below, and above. */
     fn column(&mut self, level: usize, id: TileId) -> [i32; 2] {
         [-1, 1].map(|way| {
@@ -301,18 +326,20 @@ pub fn behind_drawing() {
 
 fn work(make: Make, seed: u64, heights: &Heights, queue: &(Mutex<Queue>, Condvar), send: &Sender<Made>) {
     behind_drawing();
-    // Made on the thread: a generator is not Send.
-    let world = make(seed);
+    // Made on the thread: a generator is not Send. Its Light's too: what tiles and light's blocks share is planned once.
+    let world = Rc::new(make(seed));
     // A world with heights lies across y, so tiles one above another share most of their cost; an endless one's
     // (the cheese) cost as much together as alone, and take a box that large.
-    let (generator, columns) = (world.generator, world.heights.is_some());
+    let columns = world.heights.is_some();
     // Made once there are tiles to light, and again when the light changes.
     let mut light: Option<(u32, Light)> = None;
+    // The brick it lit last (Queue::next).
+    let mut lit = None;
     loop {
         let ((level, piece, of), [below, above], shared, lighting) = {
             let mut q = queue.0.lock().expect("queue");
             loop {
-                if let Some(job) = q.wanted.pop_front() {
+                if let Some(job) = q.next(lit) {
                     q.in_flight.insert((job.0, job.1));
                     let column = match job.1 {
                         Piece::Tile(id) if columns => q.column(job.0, id),
@@ -325,16 +352,17 @@ fn work(make: Make, seed: u64, heights: &Heights, queue: &(Mutex<Queue>, Condvar
         };
         let made: Vec<Made> = match piece {
             Piece::Brick(corner) => {
+                lit = Some((level, corner));
                 light.take_if(|(l, _)| *l != lighting);
                 let (_, light) =
-                    light.get_or_insert_with(|| (lighting, Light::new(make(seed), shared.expect("light to light tiles with"))));
+                    light.get_or_insert_with(|| (lighting, Light::new(world.clone(), shared.expect("light to light tiles with"))));
                 // A tile lit anew since (relight) is let go, and this light with it.
                 of.expect("the tile of a brick").lit(level as u32, corner, light);
                 vec![(level, piece, None)]
             }
             Piece::Tile([x, y, z]) => {
                 let (first, last) = ([x, y - below, z], y + above);
-                let grids = make_tiles(&generator, level as u32, heights[level], first.map(i64::from), last.into());
+                let grids = make_tiles(&world.generator, level as u32, heights[level], first.map(i64::from), last.into());
                 let tile = |(y, grid)| (level, Piece::Tile([x, y, z]), Some(Arc::new(Tile::new([x, y, z], Arc::new(grid)))));
                 (first[1]..=last).zip(grids).map(tile).collect()
             }

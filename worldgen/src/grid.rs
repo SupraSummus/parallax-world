@@ -79,20 +79,24 @@ pub struct VoxelGrid {
     pub solid: Vec<u8>,
     /** By index in `shown`, of the sites that glow: how much, per channel, of GLOW_ONE. */
     pub glow: BTreeMap<usize, [u32; 3]>,
-    /** By index in `shown`, the sites whose pieces look unlike along each direction: what they stop, show and glow along each. */
+    /** By index in `shown`, the sites whose pieces look unlike along each direction: what they stop and show along each. */
     pub views: BTreeMap<usize, Views>,
+    /** Of the sites in `views`, those that glow: how much along each direction. Apart, as few do. */
+    pub glows: BTreeMap<usize, Glows>,
 }
+
+/** What a site's pieces glow along each direction, as Views are. */
+pub type Glows = [[u32; 3]; FACE_KINDS];
 
 /**
  * What a site's pieces stop of the rays along each of the lattice's
- * directions, show and glow to them: by the face of VOXEL_FACES they head
+ * directions and show to them: by the face of VOXEL_FACES they head
  * into, along the opposite of its normal (fcc's `facing`).
  */
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Views {
     pub alpha: [u8; FACE_KINDS],
     pub colour: [[u16; 3]; FACE_KINDS],
-    pub glow: [[u32; 3]; FACE_KINDS],
 }
 
 /** What the sites hold one way, as pieces or as a medium, by index in `shown`. */
@@ -130,6 +134,7 @@ impl VoxelGrid {
             solid: Vec::new(),
             glow: BTreeMap::new(),
             views: BTreeMap::new(),
+            glows: BTreeMap::new(),
         }
     }
 
@@ -284,7 +289,7 @@ impl VoxelGrid {
         let i = self.index(x, y, z).expect("in the box");
         (self.shown[i], self.pieces.alpha[i], self.pieces.colour[i]) = (true, ALPHA, colours[0]);
         if colours.iter().any(|c| *c != colours[0]) {
-            self.views.insert(i, Views { alpha: [ALPHA; FACE_KINDS], colour: colours, glow: [[0; 3]; FACE_KINDS] });
+            self.views.insert(i, Views { alpha: [ALPHA; FACE_KINDS], colour: colours });
         }
     }
 
@@ -360,13 +365,16 @@ impl VoxelGrid {
         };
         let buried: Vec<usize> = (0..self.bricks.len()).filter(|&b| buried(b)).collect();
         // The last of their sites: on_rock's, if they are of it, so it is kept once.
-        let Some(one) = buried.iter().map(|&b| self.bricks[b]).max() else { return };
-        let sites = one as usize * BRICK_SITES..(one as usize + 1) * BRICK_SITES;
-        self.glow.retain(|i, _| !sites.contains(i));
-        self.views.retain(|i, _| !sites.contains(i));
-        for brick in buried {
-            self.bricks[brick] = one;
+        if let Some(one) = buried.iter().map(|&b| self.bricks[b]).max() {
+            let sites = one as usize * BRICK_SITES..(one as usize + 1) * BRICK_SITES;
+            self.glow.retain(|i, _| !sites.contains(i));
+            self.views.retain(|i, _| !sites.contains(i));
+            self.glows.retain(|i, _| !sites.contains(i));
+            for brick in buried {
+                self.bricks[brick] = one;
+            }
         }
+        // With none buried too: its sites, grown brick by brick, are held with no room to spare.
         self.hold(|_| true);
     }
 
@@ -408,6 +416,7 @@ impl VoxelGrid {
         let to = |i: usize| moved[i / BRICK_SITES].map(|to| to * BRICK_SITES + i % BRICK_SITES);
         self.glow = std::mem::take(&mut self.glow).into_iter().filter_map(|(i, g)| Some((to(i)?, g))).collect();
         self.views = std::mem::take(&mut self.views).into_iter().filter_map(|(i, v)| Some((to(i)?, v))).collect();
+        self.glows = std::mem::take(&mut self.glows).into_iter().filter_map(|(i, g)| Some((to(i)?, g))).collect();
     }
 
     /** Of ALPHA, how much of its rays site `i` of `shown` stops: its pieces, and its medium of the rest. */
@@ -426,7 +435,7 @@ impl VoxelGrid {
         match self.slot(x, y, z) {
             Some(Ok(i)) => {
                 let (pieces, colour, glow) = match self.views.get(&i) {
-                    Some(view) => (view.alpha[kind], view.colour[kind], view.glow[kind]),
+                    Some(view) => (view.alpha[kind], view.colour[kind], self.glows.get(&i).map_or([0; 3], |g| g[kind])),
                     None => (self.pieces.alpha[i], self.pieces.colour[i], self.glow.get(&i).copied().unwrap_or_default()),
                 };
                 let colour = colour.map(u32::from);

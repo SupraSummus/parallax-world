@@ -197,28 +197,30 @@ fn see(grid: &mut VoxelGrid, odd: &mut Vec<bool>, added: &Added, share: u32, x: 
     // Face by face, from what each saw so far; the site as a whole stops and glows as its most.
     odd[i] = true;
     let (was, was_colour) = (grid.pieces.alpha[i], grid.pieces.colour[i]);
-    let mut views = grid.views.remove(&i).unwrap_or(crate::grid::Views {
-        alpha: [was; FACE_KINDS],
-        colour: [was_colour; FACE_KINDS],
-        glow: [old; FACE_KINDS],
-    });
+    // Its views' glows are apart (VoxelGrid's `glows`): none, where none glows.
+    let (mut views, mut glows) = match grid.views.remove(&i) {
+        Some(views) => (views, grid.glows.remove(&i).unwrap_or_default()),
+        None => (crate::grid::Views { alpha: [was; FACE_KINDS], colour: [was_colour; FACE_KINDS] }, [old; FACE_KINDS]),
+    };
     for k in 0..FACE_KINDS {
-        let (alpha, colour, glow) =
-            added.to((views.alpha[k], views.colour[k], views.glow[k]), added.cover.map_or(share, |cover| cover[k]), k);
-        (views.alpha[k], views.colour[k], views.glow[k]) = (alpha, colour, glow);
+        let (alpha, colour, glow) = added.to((views.alpha[k], views.colour[k], glows[k]), added.cover.map_or(share, |cover| cover[k]), k);
+        (views.alpha[k], views.colour[k], glows[k]) = (alpha, colour, glow);
     }
     fn most<T: Ord + Copy>(of: &[[T; 3]; FACE_KINDS]) -> [T; 3] {
         [0, 1, 2].map(|c| of.iter().map(|v| v[c]).max().expect("faces"))
     }
     grid.pieces.alpha[i] = views.alpha.into_iter().max().expect("faces");
     grid.pieces.colour[i] = most(&views.colour);
-    let alike = |k: usize| views.alpha[k] == views.alpha[0] && views.colour[k] == views.colour[0] && views.glow[k] == views.glow[0];
+    let alike = |k: usize| views.alpha[k] == views.alpha[0] && views.colour[k] == views.colour[0] && glows[k] == glows[0];
     if (0..FACE_KINDS).all(alike) {
         (grid.pieces.alpha[i], grid.pieces.colour[i]) = (views.alpha[0], views.colour[0]);
-        set_glow(grid, odd, i, views.glow[0]);
+        set_glow(grid, odd, i, glows[0]);
     } else {
-        set_glow(grid, odd, i, most(&views.glow));
+        set_glow(grid, odd, i, most(&glows));
         grid.views.insert(i, views);
+        if glows != [[0; 3]; FACE_KINDS] {
+            grid.glows.insert(i, glows);
+        }
     }
 }
 
@@ -681,7 +683,8 @@ mod tests {
                     continue;
                 }
                 see(&mut summed.0, &mut summed.1, &Added::of(look, from_ref(kind), op, pick, colour), share, 0, 0, 0);
-                let held = |g: VoxelGrid| (g.pieces.alpha, g.pieces.colour, g.medium.alpha, g.medium.colour, g.solid, g.glow, g.views);
+                let held =
+                    |g: VoxelGrid| (g.pieces.alpha, g.pieces.colour, g.medium.alpha, g.medium.colour, g.solid, g.glow, g.views, g.glows);
                 assert_eq!(held(whole), held(summed.0), "after {} puts, pick {pick}, share {share}", puts.len());
                 outright += 1;
             }
