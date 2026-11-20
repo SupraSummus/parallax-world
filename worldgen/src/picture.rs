@@ -981,7 +981,7 @@ mod tests {
         let mut grid = VoxelGrid::new(&Box3 { min: [-8; 3], max: [8; 3] });
         for (x, y, z) in (-8..8).flat_map(|z| (-8..8).flat_map(move |y| (-8..8).map(move |x| (x, y, z)))) {
             if let Some(i) = grid.index(x, y, z) {
-                grid.medium.alpha[i] = ALPHA / 2;
+                grid.medium.set(i, ALPHA / 2, [0; 3]);
             }
         }
         let (origin, direction) = ([-3.1, -2.3, -1.7], normalize([0.8, 0.5, 0.3]));
