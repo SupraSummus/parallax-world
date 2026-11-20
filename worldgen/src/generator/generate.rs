@@ -161,8 +161,8 @@ fn made(generator: &Generator, b: &Box3, level: u32, floors: Option<&Floors>) ->
  * host's voxels, a camera colliding), stops and glows as its most.
  * What stops a walking body adds its share to the site's `solid`,
  * wherever in it, in front or behind; a carve takes out of it too.
- * Few sites are in `glow` or `views` (VoxelGrid's `odd`): most are added
- * to without a lookup.
+ * Few sites are in `glow` or `views` (grid's Few): most are added to at
+ * a glance.
  */
 fn see(grid: &mut VoxelGrid, added: &Added, share: u32, x: i64, y: i64, z: i64) {
     if share == 0 && added.cover.is_none_or(|cover| cover == [0; FACE_KINDS]) {
@@ -191,14 +191,14 @@ fn see(grid: &mut VoxelGrid, added: &Added, share: u32, x: i64, y: i64, z: i64) 
             // or not at all. The site's medium is a share of the rays the pieces let through, so the rest of them.
             let (all, one) = (ALPHA as u64, SHARE as u64);
             let most = (0..FACE_KINDS).max_by_key(|&k| added.cover.map_or(share, |cover| cover[k])).expect("faces");
-            let seen = grid.views.get(&i).filter(|_| grid.odd[i]).map_or(grid.pieces.get(i).0, |views| views.alpha[most]) as u64;
+            let seen = grid.views.get(i).map_or(grid.pieces.get(i).0, |views| views.alpha[most]) as u64;
             let covered = (share as u64 * all).checked_div(seen).map_or(one, |of| of.min(one));
             let under = Added { op: Op::Carve, faces: None, cover: None, medium: false, solid: false, ..*added };
             pieces(grid, &under, covered as u32, i);
             let left = all * one - seen * (one - covered);
             share = (share as u64 * all * one).checked_div(left).map_or(SHARE, |of| of.min(one) as u32);
         }
-        let old = if grid.odd[i] { grid.glow.get(&i).copied().unwrap_or_default() } else { [0; 3] };
+        let old = grid.glow.get(i).copied().unwrap_or_default();
         let (alpha, colour) = grid.medium.get(i);
         let (alpha, colour, glow) = added.to((alpha, colour, old), share, 0);
         grid.medium.set(i, alpha, colour);
@@ -210,8 +210,8 @@ fn see(grid: &mut VoxelGrid, added: &Added, share: u32, x: i64, y: i64, z: i64) 
 
 /** `see`, of site `i`'s pieces: `added`'s `share` of it, face by face where its faces differ. */
 fn pieces(grid: &mut VoxelGrid, added: &Added, share: u32, i: usize) {
-    let old = if grid.odd[i] { grid.glow.get(&i).copied().unwrap_or_default() } else { [0; 3] };
-    let by_face = added.cover.is_some() || added.faces.is_some() || grid.odd[i] && grid.views.contains_key(&i);
+    let old = grid.glow.get(i).copied().unwrap_or_default();
+    let by_face = added.cover.is_some() || added.faces.is_some() || grid.views.get(i).is_some();
     if !by_face {
         let (alpha, colour) = grid.pieces.get(i);
         let (alpha, colour, glow) = added.to((alpha, colour, old), share, 0);
@@ -220,11 +220,10 @@ fn pieces(grid: &mut VoxelGrid, added: &Added, share: u32, i: usize) {
         return;
     }
     // Face by face, from what each saw so far; the site as a whole stops and glows as its most.
-    grid.odd[i] = true;
     let (was, was_colour) = grid.pieces.get(i);
     // Its views' glows are apart (VoxelGrid's `glows`): none, where none glows.
-    let (mut views, mut glows) = match grid.views.remove(&i) {
-        Some(views) => (views, grid.glows.remove(&i).unwrap_or_default()),
+    let (mut views, mut glows) = match grid.views.get(i) {
+        Some(views) => (*views, grid.glows.get(i).copied().unwrap_or_default()),
         None => (crate::grid::Views { alpha: [was; FACE_KINDS], colour: [was_colour; FACE_KINDS] }, [old; FACE_KINDS]),
     };
     for k in 0..FACE_KINDS {
@@ -236,16 +235,10 @@ fn pieces(grid: &mut VoxelGrid, added: &Added, share: u32, i: usize) {
     }
     grid.pieces.set(i, views.alpha.into_iter().max().expect("faces"), most(&views.colour));
     let alike = |k: usize| views.alpha[k] == views.alpha[0] && views.colour[k] == views.colour[0] && glows[k] == glows[0];
-    if (0..FACE_KINDS).all(alike) {
-        grid.pieces.set(i, views.alpha[0], views.colour[0]);
-        set_glow(grid, i, glows[0]);
-    } else {
-        set_glow(grid, i, most(&glows));
-        grid.views.insert(i, views);
-        if glows != [[0; 3]; FACE_KINDS] {
-            grid.glows.insert(i, glows);
-        }
-    }
+    let unlike = !(0..FACE_KINDS).all(alike);
+    set_glow(grid, i, most(&glows));
+    grid.views.set(i, unlike.then_some(views));
+    grid.glows.set(i, (unlike && glows != [[0; 3]; FACE_KINDS]).then_some(glows));
 }
 
 /**
@@ -269,7 +262,7 @@ fn see_whole(
         return false;
     }
     let Some(i) = grid.index(x, y, z) else { return true };
-    if grid.odd[i] {
+    if grid.glow.get(i).is_some() || grid.views.get(i).is_some() {
         return false;
     }
     // A fill is behind what is there: what a carve left of colour, if anything.
@@ -366,12 +359,7 @@ impl Added {
 
 /** Sets site `i`'s glow, none if it glows nothing. */
 fn set_glow(grid: &mut VoxelGrid, i: usize, glow: [u32; 3]) {
-    if glow != [0; 3] {
-        grid.glow.insert(i, glow);
-        grid.odd[i] = true;
-    } else if grid.odd[i] {
-        grid.glow.remove(&i);
-    }
+    grid.glow.set(i, (glow != [0; 3]).then_some(glow));
 }
 
 /** The sites of level spacing `s` a thing's drawables may draw at: its shapes' bounds and two sites more, and its measured sites. */
@@ -709,8 +697,13 @@ mod tests {
                     continue;
                 }
                 see(&mut summed, &Added::of(look, from_ref(kind), op, pick, colour), share, 0, 0, 0);
-                let held =
-                    |g: VoxelGrid| (g.pieces.alpha, g.pieces.colour, g.medium.alpha, g.medium.colour, g.solid, g.glow, g.views, g.glows);
+                fn few<T: Copy>(few: &crate::grid::Few<T>) -> Vec<(usize, T)> {
+                    few.iter().map(|(i, value)| (i, *value)).collect()
+                }
+                let held = |g: VoxelGrid| {
+                    let few = (few(&g.glow), few(&g.views), few(&g.glows));
+                    (g.pieces.alpha, g.pieces.colour, g.medium.alpha, g.medium.colour, g.solid, few)
+                };
                 assert_eq!(held(whole), held(summed), "after {} puts, pick {pick}, share {share}", puts.len());
                 outright += 1;
             }

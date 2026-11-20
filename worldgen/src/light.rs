@@ -129,9 +129,9 @@ impl Made {
 }
 
 /**
- * A light in 16 bits a channel, as rounds are kept: a float of 10 bits
- * past its first, from about 2⁻³² (less is none) to 2³¹ (more is that),
- * so within a thousandth.
+ * A light in 16 bits a channel, as most of what a site keeps is: a float
+ * of 10 bits past its first, from about 2⁻³² (less is none) to 2³¹ (more
+ * is that), so within a thousandth.
  */
 type Packed = [u16; 3];
 
@@ -147,12 +147,17 @@ fn unpack(packed: Packed) -> Rgb {
     packed.map(|k| if k == 0 { 0.0 } else { f32::from_bits(((k as i32 + PACK) as u32) << 13) })
 }
 
-/** What is kept of a site, each once found: the same whichever Light finds it, so two finding it at once do no harm. */
+/**
+ * What is kept of a site, each once found: the same whichever Light finds
+ * it, so two finding it at once do no harm. What its rounds are found from
+ * and the rounds are packed, half of what floats take; its settled light
+ * not, read far more often than found.
+ */
 #[derive(Default)]
 struct Site {
     /** What comes to it. */
     paths: Option<Arc<Paths>>,
-    /** The light on each of its faces in each round (`round`), from the first on: most of what it holds, so packed. */
+    /** The light on each of its faces in each round (`round`), from the first on: most of what it holds. */
     rounds: Vec<[Packed; N]>,
     /** The light coming to it from each direction, settled. */
     found: Option<Box<[Rgb; N]>>,
@@ -359,8 +364,8 @@ impl Level {
  * touches (`weighed`).
  */
 struct Paths {
-    comes: [Rgb; N],
-    reflects: Box<[(u8, u8, Rgb)]>,
+    comes: [Packed; N],
+    reflects: Box<[(u8, u8, Packed)]>,
     touches: Touches,
 }
 
@@ -373,7 +378,7 @@ pub struct Light {
     /** By level, up to a renderer's coarsest grid's (GRID_LEVELS). */
     levels: Vec<Level>,
     /** `paths`'s sites that reflect, while it finds them: its room kept from one site to the next. */
-    reflecting: Vec<(u8, u8, Rgb)>,
+    reflecting: Vec<(u8, u8, Packed)>,
     unit: [[f64; 3]; N],
     /** Per face, how much the light from each direction weighs in the light on it (`on_face`). */
     cosines: [[f32; N]; N],
@@ -525,7 +530,7 @@ impl Light {
      * before; none in round 0.
      */
     fn coming(&mut self, i: usize, p: [i64; 3], n: usize, paths: &Paths) -> [Rgb; N] {
-        let mut light = paths.comes;
+        let mut light = paths.comes.map(unpack);
         if n > 0 {
             for &(d, step, reflects) in &paths.reflects {
                 let (d, q) = (d as usize, add(p, DIRECTIONS[d as usize].map(|v| v * step as i64)));
@@ -534,6 +539,7 @@ impl Light {
                     Some(on) => unpack(on),
                     None => self.round(i, q, n - 1)[back],
                 };
+                let reflects = unpack(reflects);
                 (0..3).for_each(|c| light[d][c] += reflects[c] * on[c]);
             }
         }
@@ -577,9 +583,9 @@ impl Light {
             let q = add(p, DIRECTIONS[d]);
             if whole && self.whole(i, q) {
                 touches.get_or_insert_with(|| Box::new([[0.0; 3]; N]))[d] = self.see(i, q, self.opposite[d]).0.1;
-                return [0.0; 3];
+                return [0; 3];
             }
-            self.along(i, p, d, near.as_ref(), &mut reflects)
+            pack(self.along(i, p, d, near.as_ref(), &mut reflects))
         });
         let paths = Arc::new(Paths { comes, reflects: reflects.as_slice().into(), touches });
         self.reflecting = reflects;
@@ -594,7 +600,7 @@ impl Light {
      * the next TOP_STEPS, and past them the sky. The sites met that
      * reflect go in `reflects` (Paths): of what each stops, its colour.
      */
-    fn along(&mut self, i: usize, p: [i64; 3], d: usize, near: Option<&Near>, reflects: &mut Vec<(u8, u8, Rgb)>) -> Rgb {
+    fn along(&mut self, i: usize, p: [i64; 3], d: usize, near: Option<&Near>, reflects: &mut Vec<(u8, u8, Packed)>) -> Rgb {
         let (v, heights, steps) = (DIRECTIONS[d], self.levels[i].heights, self.shared.steps);
         // What has come so far, and how much of what comes from further on gets through.
         let (mut sum, mut through) = ([0.0f32; 3], 1.0f32);
@@ -606,7 +612,7 @@ impl Light {
                 let ((alpha, colour), glow) = self.meets(i, q, self.opposite[d]);
                 (0..3).for_each(|c| sum[c] += through * glow[c]);
                 if alpha > 0.0 {
-                    reflects.push((d as u8, step as u8, colour.map(|c| through * alpha * c)));
+                    reflects.push((d as u8, step as u8, pack(colour.map(|c| through * alpha * c))));
                 }
                 through *= 1.0 - alpha;
                 // Nothing more gets through, or nothing more is met: below every voxel and not going up, or above them and not going down.
@@ -1005,7 +1011,7 @@ mod tests {
         let glows: Vec<f64> = (3..=8)
             .map(|level| {
                 let grid = crate::generator::generate(&world.generator, &crate::grid::Box3 { min: [-8; 3], max: [8; 3] }, level);
-                grid.glow.values().map(|g| g[0] as f64).sum::<f64>() * (1u64 << (2 * level)) as f64
+                grid.glow.iter().map(|(_, g)| g[0] as f64).sum::<f64>() * (1u64 << (2 * level)) as f64
             })
             .collect();
         assert!(glows.iter().all(|g| (g / glows[0] - 1.0).abs() < 0.1), "glow times the site's area, by level from 3: {glows:?}");
