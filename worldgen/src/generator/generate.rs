@@ -191,7 +191,7 @@ fn see(grid: &mut VoxelGrid, added: &Added, share: u32, x: i64, y: i64, z: i64) 
             // or not at all. The site's medium is a share of the rays the pieces let through, so the rest of them.
             let (all, one) = (ALPHA as u64, SHARE as u64);
             let most = (0..FACE_KINDS).max_by_key(|&k| added.cover.map_or(share, |cover| cover[k])).expect("faces");
-            let seen = grid.views.get(i).map_or(grid.pieces.get(i).0, |views| views.alpha[most]) as u64;
+            let seen = grid.views.face(i, most).map_or(grid.pieces.get(i).0, |sight| sight.0) as u64;
             let covered = (share as u64 * all).checked_div(seen).map_or(one, |of| of.min(one));
             let under = Added { op: Op::Carve, faces: None, cover: None, medium: false, solid: false, ..*added };
             pieces(grid, &under, covered as u32, i);
@@ -223,7 +223,7 @@ fn pieces(grid: &mut VoxelGrid, added: &Added, share: u32, i: usize) {
     let (was, was_colour) = grid.pieces.get(i);
     // Its views' glows are apart (VoxelGrid's `glows`): none, where none glows.
     let (mut views, mut glows) = match grid.views.get(i) {
-        Some(views) => (*views, grid.glows.get(i).copied().unwrap_or_default()),
+        Some(views) => (views, grid.glows.get(i).copied().unwrap_or_default()),
         None => (crate::grid::Views { alpha: [was; FACE_KINDS], colour: [was_colour; FACE_KINDS] }, [old; FACE_KINDS]),
     };
     for k in 0..FACE_KINDS {
@@ -701,7 +701,7 @@ mod tests {
                     few.iter().map(|(i, value)| (i, *value)).collect()
                 }
                 let held = |g: VoxelGrid| {
-                    let few = (few(&g.glow), few(&g.views), few(&g.glows));
+                    let few = (few(&g.glow), g.views.iter().collect::<Vec<_>>(), few(&g.glows));
                     (g.pieces.alpha, g.pieces.colour, g.medium.alpha, g.medium.colour, g.solid, few)
                 };
                 assert_eq!(held(whole), held(summed), "after {} puts, pick {pick}, share {share}", puts.len());

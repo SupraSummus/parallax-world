@@ -79,7 +79,7 @@ pub struct VoxelGrid {
     /** Of the sites that glow: how much, per channel, of GLOW_ONE. */
     pub glow: Few<[u32; 3]>,
     /** Of the sites whose pieces look unlike along each direction: what they stop and show along each. */
-    pub views: Few<Views>,
+    pub views: Sights,
     /** Of the sites in `views`, those that glow: how much along each direction. Apart, as few do. */
     pub glows: Few<Glows>,
 }
@@ -251,6 +251,81 @@ impl<T: Clone> Few<T> {
     }
 }
 
+/** What a site's pieces stop of the rays along one direction, and show of them (as Views', one face's). */
+pub type Sight = (u8, [u16; 3]);
+
+/** A site's views, as Sights holds them: where its sights start, and by face, which of them it sees. */
+type Seen = (u32, [u8; FACE_KINDS]);
+
+/**
+ * The Views of the few sites that have them, by index in `shown`: the
+ * sights a site's faces see, each once, and which of them each face
+ * sees. Nine in ten of a valley's see two, and a sight is a twelfth of
+ * a Views.
+ */
+#[derive(Clone, Default)]
+pub struct Sights {
+    seen: Few<Seen>,
+    /** Sites' sights; and, till `hold`, those of what sites held before. */
+    sights: Vec<Sight>,
+}
+
+/** `views` as a site holds them, their sights added to `sights`. */
+fn seen(sights: &mut Vec<Sight>, views: &Views) -> Seen {
+    let first = sights.len();
+    let which = std::array::from_fn(|k| {
+        let sight = (views.alpha[k], views.colour[k]);
+        let at = sights[first..].iter().position(|s| *s == sight).unwrap_or_else(|| {
+            sights.push(sight);
+            sights.len() - first - 1
+        });
+        at as u8
+    });
+    (first as u32, which)
+}
+
+/** The views a site holds as `seen`, of `sights`. */
+fn views(sights: &[Sight], (first, which): &Seen) -> Views {
+    let sight = |k: usize| sights[*first as usize + which[k] as usize];
+    Views { alpha: std::array::from_fn(|k| sight(k).0), colour: std::array::from_fn(|k| sight(k).1) }
+}
+
+impl Sights {
+    /** What site `i` of `shown` stops and shows along face `kind`'s direction, if it has views. */
+    #[inline]
+    pub fn face(&self, i: usize, kind: usize) -> Option<Sight> {
+        let (first, which) = self.seen.get(i)?;
+        Some(self.sights[*first as usize + which[kind] as usize])
+    }
+
+    /** Site `i`'s views, if it has any. */
+    pub fn get(&self, i: usize) -> Option<Views> {
+        self.seen.get(i).map(|seen| views(&self.sights, seen))
+    }
+
+    /** Has site `i` of `shown` hold `views`, or none. */
+    pub fn set(&mut self, i: usize, views: Option<Views>) {
+        let seen = views.map(|views| seen(&mut self.sights, &views));
+        self.seen.set(i, seen);
+    }
+
+    /** Every site that has views, with them, in their order. */
+    pub fn iter(&self) -> impl Iterator<Item = (usize, Views)> {
+        self.seen.iter().map(|(i, seen)| (i, views(&self.sights, seen)))
+    }
+
+    /** As Few's `hold`, of the sights too. */
+    fn hold(&mut self, held: &[usize]) {
+        self.seen.hold(held);
+        let mut kept = Vec::new();
+        for held in &mut self.seen.held {
+            *held = seen(&mut kept, &views(&self.sights, held));
+        }
+        kept.shrink_to_fit();
+        self.sights = kept;
+    }
+}
+
 /** The glow of a site all of a glowing white: 255 per channel (linear), of a whole share (generator's SHARE). */
 pub const GLOW_ONE: u32 = 255 << 16;
 
@@ -276,7 +351,7 @@ impl VoxelGrid {
             medium: Part::default(),
             solid: Vec::new(),
             glow: Few::default(),
-            views: Few::default(),
+            views: Sights::default(),
             glows: Few::default(),
         }
     }
@@ -316,7 +391,7 @@ impl VoxelGrid {
         self.pieces.at.push(-1);
         self.medium.at.push(-1);
         self.glow.at.push(-1);
-        self.views.at.push(-1);
+        self.views.seen.at.push(-1);
         self.glows.at.push(-1);
         first..len
     }
@@ -434,10 +509,7 @@ impl VoxelGrid {
 
     /** Site `i`'s pieces along face `kind`'s direction: what they stop of it and show (premultiplied), where they stop any of it, else as a whole. */
     fn part(&self, i: usize, kind: usize) -> (u8, [u16; 3]) {
-        match self.views.get(i) {
-            Some(v) if v.alpha[kind] > 0 => (v.alpha[kind], v.colour[kind]),
-            _ => self.pieces.get(i),
-        }
+        self.views.face(i, kind).filter(|sight| sight.0 > 0).unwrap_or_else(|| self.pieces.get(i))
     }
 
     /**
@@ -520,7 +592,7 @@ impl VoxelGrid {
         let buried: Vec<usize> = (0..self.bricks.len()).filter(|&b| buried(b)).collect();
         // The last of their sites: on_rock's, if they are of it, so it is kept once.
         if let Some(one) = buried.iter().map(|&b| self.bricks[b]).max() {
-            (self.glow.at[one as usize], self.views.at[one as usize], self.glows.at[one as usize]) = (-1, -1, -1);
+            (self.glow.at[one as usize], self.views.seen.at[one as usize], self.glows.at[one as usize]) = (-1, -1, -1);
             for brick in buried {
                 self.bricks[brick] = one;
             }
@@ -582,8 +654,8 @@ impl VoxelGrid {
     pub fn light(&self, x: i64, y: i64, z: i64, kind: usize) -> ([(u8, [u32; 3]); 2], [u32; 3]) {
         match self.slot(x, y, z) {
             Some(Ok(i)) => {
-                let (pieces, colour, glow) = match self.views.get(i) {
-                    Some(view) => (view.alpha[kind], view.colour[kind], self.glows.get(i).map_or([0; 3], |g| g[kind])),
+                let (pieces, colour, glow) = match self.views.face(i, kind) {
+                    Some((pieces, colour)) => (pieces, colour, self.glows.get(i).map_or([0; 3], |g| g[kind])),
                     None => {
                         let (pieces, colour) = self.pieces.get(i);
                         (pieces, colour, self.glow.get(i).copied().unwrap_or_default())
@@ -647,7 +719,7 @@ impl VoxelGrid {
             sites.concat()
         };
         // As `view` gives them, without looking each face's up again.
-        let view = |(i, v): (usize, &Views)| -> Option<Vec<u32>> {
+        let view = |(i, v): (usize, Views)| -> Option<Vec<u32>> {
             if !self.shown[i] {
                 return None;
             }
