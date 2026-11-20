@@ -284,6 +284,9 @@ Numbers are for the forest at 1280×800, as measured when written.
   (`OVER_BUDGET` in `worlds/tests/cost.rs`), by things done one by one
   where a tile holds four times as many each level:
   at level 3 the towns' things drawn whole to be measured.
+  Drawing one is a quarter of measuring it (`measure` in `forms.rs`):
+  the rest counts its fine sites by cell, axis and face,
+  with a vector of kinds for each face of each cell.
 - **Two of the cheese's tiles are over the cost budget**
   (`OVER_BUDGET`): at level 7 a tile holds a few hundred thousand holes,
   each a shape, most of them a site or two
@@ -443,7 +446,10 @@ Numbers are for the forest at 1280×800, as measured when written.
   A quarter as many slots made a third more columns; four times as many, few fewer.
   Of the columns four threads make, a sixth are ones another made:
   a worker taking the nearest of the first jobs wanted spared few of them.
-  A generator all threads share would make each once, and measure each thing once.
+  A generator all threads share would make each once, and measure each thing once
+  (of the things four threads measure, a third are ones another did).
+  It would hold no less: the threads' boxes lie apart,
+  so their columns together want as many slots as each thread's do now.
   Tiles side by side still make again the things reaching both;
   those one above another are made together (`made_with`).
 - **Walking, native keeps more than a core busy**
