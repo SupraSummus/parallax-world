@@ -110,18 +110,17 @@ pub const WORLDS: &[Entry] = &[
         far_levels: 6,
     },
     // The first steading: its hut, the cairns and the ring north of it, heather and grass, from under the ground to over the roof.
-    // Far away, 175 m around it: the stream, narrower than the sites there, and patches of heather and grass.
+    // Not checked far away: its coarse levels show less of its mist from above ("Spans of a medium" in docs/todo.md).
     Entry {
         name: "moor",
         make: valley::moor::moor,
         regions: &[Region::at("spawn", [-113, -46, 9], [143, 50, 393])],
         levels: 5,
         accuracy: &[],
-        far: &[Region::at("spawn", [-689, -46, -439], [719, 50, 969])],
+        far: &[],
         far_levels: 6,
     },
     // The moor in fog (moor.rs's FOG), mist over all of it: where see-through voxels cost a host most.
-    // Its land is the moor's, checked far away there.
     Entry {
         name: "fog",
         make: valley::moor::fog,

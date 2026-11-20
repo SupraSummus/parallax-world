@@ -41,20 +41,21 @@ haystacks hay	1	0.030	0.112
 haystacks hay	2	0.033	0.121
 haystacks hay	3	0.049	0.124
 haystacks hay	4	0.081	0.137
-heath alpine	3	0.087	0.113
-heath alpine	4	0.065	0.109
+heath alpine	3	0.088	0.113
+heath alpine	4	0.069	0.110
 heath bog	2	0.056	0.074
-heath bog	3	0.072	0.097
-heath bog	4	0.066	0.103
-heath grassBlades	3	0.087	0.113
-heath grassBlades	4	0.065	0.109
-heath heather	3	0.050	0.094
-heath heather	4	0.049	0.101
-heath heatherSprigs	3	0.050	0.094
-heath heatherSprigs	4	0.049	0.101
-heath path	3	0.064	0.103
-heath path	4	0.051	0.104
-heath soil	3	0.050	0.072
+heath bog	3	0.075	0.098
+heath bog	4	0.070	0.104
+heath grassBlades	3	0.088	0.113
+heath grassBlades	4	0.069	0.110
+heath heather	3	0.053	0.094
+heath heather	4	0.054	0.102
+heath heatherSprigs	3	0.053	0.094
+heath heatherSprigs	4	0.054	0.102
+heath path	3	0.065	0.104
+heath path	4	0.059	0.106
+heath soil	3	0.052	0.073
+heath soil	4	0.050	0.093
 landmarks bark	1	0.060	0.128
 landmarks bark	2	0.031	0.105
 landmarks brick	1	0.065	0.132
@@ -76,8 +77,8 @@ landmarks hay	1	0.060	0.128
 landmarks hay	2	0.031	0.105
 landmarks iron	1	0.060	0.165
 landmarks iron	2	0.038	0.118
-landmarks lily	3	0.084	0.104
-landmarks lily	4	0.052	0.106
+landmarks lily	3	0.085	0.104
+landmarks lily	4	0.055	0.106
 landmarks mossyStone	1	0.053	0.117
 landmarks mossyStone	2	0.052	0.121
 landmarks mossyStone	3	0.074	0.138
@@ -123,8 +124,8 @@ landmarks' ground sand	4	0.068	0.126
 landmarks' ground scree	2	0.043	0.107
 landmarks' ground scree	3	0.058	0.121
 landmarks' ground scree	4	0.034	0.103
-landmarks' ground soil	3	0.103	0.115
-landmarks' ground soil	4	0.043	0.105
+landmarks' ground soil	3	0.105	0.115
+landmarks' ground soil	4	0.045	0.105
 logs deadwood	1	0.010	0.165
 logs deadwood	2	0.009	0.151
 logs deadwood	3	0.031	0.137
@@ -133,12 +134,12 @@ logs moss	1	0.010	0.165
 logs moss	2	0.009	0.151
 logs moss	3	0.031	0.137
 logs moss	4	0.070	0.143
-mist mist	3	0.051	0.096
-mist mist	4	0.051	0.104
-moor boulders lichen	3	0.049	0.100
-moor boulders lichen	4	0.045	0.104
-moor boulders stone	3	0.048	0.095
-moor boulders stone	4	0.047	0.106
+mist mist	3	0.054	0.097
+mist mist	4	0.057	0.106
+moor boulders lichen	3	0.050	0.101
+moor boulders lichen	4	0.050	0.106
+moor boulders stone	3	0.050	0.095
+moor boulders stone	4	0.053	0.107
 mountains alpine	1	0.009	0.139
 mountains alpine	2	0.012	0.124
 mountains alpine	3	0.032	0.104
@@ -149,7 +150,7 @@ mountains rock	3	0.042	0.112
 mountains rock	4	0.045	0.133
 mountains scree	1	0.018	0.119
 mountains scree	2	0.009	0.107
-mountains scree	4	0.046	0.102
+mountains scree	4	0.046	0.103
 mountains snow	1	0.048	0.123
 mountains snow	2	0.039	0.107
 mountains snow	3	0.036	0.101
@@ -225,8 +226,8 @@ plants tallGrass	2	0.014	0.131
 plants tallGrass	3	0.044	0.134
 plants tallGrass	4	0.093	0.153
 ponds reed	3	0.068	0.100
-ponds water	3	0.081	0.108
-ponds water	4	0.035	0.104
+ponds water	3	0.082	0.108
+ponds water	4	0.037	0.104
 railway ballast	1	0.021	0.163
 railway ballast	2	0.020	0.159
 railway ballast	3	0.038	0.143
@@ -260,7 +261,7 @@ railway iron	2	0.011	0.153
 railway iron	3	0.028	0.136
 railway iron	4	0.064	0.129
 railway path	1	0.042	0.156
-railway path	2	0.027	0.155
+railway path	2	0.026	0.155
 railway path	3	0.030	0.144
 railway path	4	0.049	0.118
 railway slab	1	0.048	0.137
@@ -308,9 +309,9 @@ stations glass	2	0.028	0.169
 stations glass	3	0.034	0.150
 stations glass	4	0.050	0.113
 stations iron	1	0.044	0.147
-stations iron	2	0.030	0.142
+stations iron	2	0.031	0.142
 stations iron	3	0.042	0.135
-stations iron	4	0.054	0.117
+stations iron	4	0.055	0.117
 stations plasterBlue	1	0.038	0.157
 stations plasterBlue	2	0.023	0.158
 stations plasterBlue	3	0.047	0.139
@@ -336,8 +337,8 @@ stations roofRed	2	0.038	0.195
 stations roofRed	3	0.041	0.173
 stations roofRed	4	0.046	0.108
 stations roofTile	1	0.042	0.136
-stations roofTile	2	0.025	0.133
-stations roofTile	3	0.038	0.131
+stations roofTile	2	0.026	0.133
+stations roofTile	3	0.039	0.131
 stations roofTile	4	0.052	0.112
 stations shutterBlue	1	0.041	0.146
 stations shutterBlue	2	0.028	0.149
@@ -354,37 +355,37 @@ stations slate	4	0.052	0.122
 stations timber	1	0.031	0.173
 stations timber	2	0.046	0.219
 stations timber	3	0.042	0.182
-stations timber	4	0.054	0.124
+stations timber	4	0.055	0.124
 stations trim	1	0.042	0.156
 stations trim	2	0.028	0.169
 stations trim	3	0.034	0.150
 stations trim	4	0.050	0.113
-steadings drystone	3	0.074	0.095
-steadings drystone	4	0.060	0.106
-steadings lichen	3	0.074	0.095
-steadings lichen	4	0.060	0.106
-steadings stone	3	0.074	0.095
-steadings stone	4	0.060	0.106
-steadings thatch	3	0.074	0.095
-steadings thatch	4	0.060	0.106
-steadings timber	3	0.074	0.095
-steadings timber	4	0.060	0.106
-steadings/cairns lichen	3	0.064	0.111
-steadings/cairns lichen	4	0.051	0.102
-steadings/cairns stone	3	0.064	0.111
-steadings/cairns stone	4	0.051	0.102
-steadings/hut drystone	3	0.063	0.116
-steadings/hut drystone	4	0.050	0.102
-steadings/hut stone	3	0.063	0.116
-steadings/hut stone	4	0.050	0.102
-steadings/hut thatch	3	0.063	0.116
-steadings/hut thatch	4	0.050	0.102
-steadings/hut timber	3	0.063	0.116
-steadings/hut timber	4	0.050	0.102
-steadings/ring lichen	3	0.061	0.075
-steadings/ring lichen	4	0.049	0.093
-steadings/ring stone	3	0.061	0.075
-steadings/ring stone	4	0.049	0.093
+steadings drystone	3	0.076	0.095
+steadings drystone	4	0.065	0.107
+steadings lichen	3	0.076	0.095
+steadings lichen	4	0.065	0.107
+steadings stone	3	0.076	0.095
+steadings stone	4	0.065	0.107
+steadings thatch	3	0.076	0.095
+steadings thatch	4	0.065	0.107
+steadings timber	3	0.076	0.095
+steadings timber	4	0.065	0.107
+steadings/cairns lichen	3	0.066	0.112
+steadings/cairns lichen	4	0.059	0.104
+steadings/cairns stone	3	0.066	0.112
+steadings/cairns stone	4	0.059	0.104
+steadings/hut drystone	3	0.064	0.117
+steadings/hut drystone	4	0.057	0.104
+steadings/hut stone	3	0.064	0.117
+steadings/hut stone	4	0.057	0.104
+steadings/hut thatch	3	0.064	0.117
+steadings/hut thatch	4	0.057	0.104
+steadings/hut timber	3	0.064	0.117
+steadings/hut timber	4	0.057	0.104
+steadings/ring lichen	3	0.064	0.076
+steadings/ring lichen	4	0.055	0.096
+steadings/ring stone	3	0.064	0.076
+steadings/ring stone	4	0.055	0.096
 streets cobble	1	0.051	0.131
 streets cobble	2	0.028	0.120
 streets cobble	3	0.053	0.112
@@ -403,7 +404,7 @@ streets slab	1	0.042	0.119
 streets slab	2	0.038	0.130
 streets slab	3	0.056	0.134
 streets slab	4	0.051	0.126
-terrain grass	3	0.054	0.086
+terrain grass	3	0.055	0.086
 terrain litter	1	0.047	0.123
 terrain litter	2	0.029	0.107
 terrain litter	3	0.065	0.114
@@ -411,7 +412,7 @@ terrain litter	4	0.054	0.111
 terrain moss	1	0.033	0.127
 terrain moss	2	0.022	0.122
 terrain moss	3	0.039	0.121
-terrain moss	4	0.049	0.129
+terrain moss	4	0.052	0.129
 terrain mossyStone	1	0.051	0.139
 terrain mossyStone	2	0.047	0.133
 terrain mossyStone	3	0.056	0.125
@@ -424,13 +425,13 @@ terrain path	1	0.034	0.129
 terrain path	2	0.016	0.111
 terrain path	3	0.048	0.106
 terrain soil	1	0.042	0.109
-terrain soil	2	0.027	0.100
-terrain soil	3	0.055	0.102
-terrain soil	4	0.055	0.099
+terrain soil	2	0.028	0.100
+terrain soil	3	0.056	0.102
+terrain soil	4	0.056	0.099
 terrain stone	1	0.042	0.109
-terrain stone	2	0.027	0.100
-terrain stone	3	0.055	0.102
-terrain stone	4	0.055	0.099
+terrain stone	2	0.028	0.100
+terrain stone	3	0.056	0.102
+terrain stone	4	0.056	0.099
 towns/block/avenue bark	1	0.043	0.155
 towns/block/avenue bark	2	0.028	0.139
 towns/block/avenue bark	3	0.052	0.109
@@ -934,5 +935,6 @@ trees twig	1	0.018	0.144
 trees twig	2	0.016	0.136
 trees twig	3	0.036	0.121
 trees twig	4	0.064	0.145
-water water	2	0.047	0.045
-water water	3	0.065	0.068
+water water	2	0.048	0.045
+water water	3	0.067	0.069
+water water	4	0.046	0.094

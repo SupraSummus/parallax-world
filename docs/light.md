@@ -246,6 +246,14 @@ How a site shows to hosts and to light, and what glows, is a prototype too:
   but darkened the valley, as its side lines ran into uneven ground,
   did not help the yard, and cost 2.5 to 4 times the time;
   mixing each direction's light into its neighbours' blurred more every level;
+- a medium's colour is what it sends on of the light it stops, each time,
+  so a thick layer of it, where light is stopped many times on its way out,
+  shows darker than its colour (the moor's mist is nearly white for that);
+  shaded, hosts show the colour as it is.
+  A thick white one under the sky sends back four fifths of its light, not all,
+  and light dies sooner inside it than it should:
+  perhaps as a site sends light back only the way it came, as a wall does,
+  where a medium scatters it on too. Not looked into;
 - things in a site add up as if apart, and alpha has 255 steps,
   so at the coarsest levels a lamp stops nothing;
 - generating costs more, lit or not: every covered site is put for light.

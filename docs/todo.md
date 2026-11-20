@@ -110,6 +110,10 @@ Numbers are for the forest at 1280×800, as measured when written.
       and the thickening below.
     - One standing free (`Span::medium`: mist, rails) is still spread over two sites:
       in the site of the ground under it, the ground's pieces, shown, hide it.
+      Likely why the moor's coarse levels show less mist from above than level 0:
+      with the mist nearly white, 0.019 apart at level 4,
+      so the moor is not checked far away (`far` in `worlds/src/lib.rs`):
+      its region was 175 m around the spawn, the stream and the heath's patches.
     - Two measures of one voxel: a medium's length is that of rays along the line (`crossed`),
       what its solids stop, of chords along the faces' directions (`slabs`).
       One for both would move every ground's top.
