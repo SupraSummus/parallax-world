@@ -10,11 +10,13 @@
 //! Each site sends what it glows, and of what it stops (its alpha, a
 //! medium's by channel) its colour times the light on its face
 //! turned back (`on_face`), a third of what it shows that way; the rest
-//! of what comes from past it gets through. So what comes from far comes from coarser levels, the
-//! coarsest's from the sky. Sites that reflect less than the tolerance
-//! reflect together, as the next one met that brings them over it, and
-//! nothing comes from past where less than the tolerance gets through
-//! (`along`): the light on few sites is asked for, where many stop little.
+//! of what comes from past it gets through. So what comes from far comes
+//! from coarser levels, the coarsest's from the sky, once a line has gone
+//! as far as the world is high (`top_steps`). Sites that reflect less than
+//! the tolerance reflect together, as the next one met that brings them
+//! over it, and nothing comes from past where less than the tolerance gets
+//! through (`along`): the light on few sites is asked for, where many stop
+//! little.
 //!
 //! The light on a site is what the sites near it reflect of the light on
 //! them, so it settles round by round: round 0 has what glows, the sky and
@@ -63,9 +65,9 @@ const N: usize = 12;
 /** The directions light comes along: towards the neighbours. A voxel's face is across each, numbered alike. */
 const DIRECTIONS: [[i64; 3]; N] = FACES;
 
-/** Steps along a direction before the coarser level's light may take over, unless set (Shared::stepping), and at most: at the coarsest, before the sky's does. */
+/** Steps along a direction before the coarser level's light may take over, unless set (Shared::stepping), and at most, where none does: in a closed place, or a world with no heights. */
 const STEPS: usize = 1;
-const TOP_STEPS: usize = 64;
+const MOST_STEPS: usize = 64;
 /**
  * How little of the light on a site is not followed, unless set
  * (Shared::settling): its change from a round to the next, for it to be
@@ -222,7 +224,7 @@ impl Shared {
 
     /** The same world, light taking `steps` steps along each level before the coarser's: its tiles' sites kept. */
     pub fn stepping(&self, steps: usize) -> Shared {
-        assert!((1..=TOP_STEPS).contains(&steps), "{steps} steps");
+        assert!((1..=MOST_STEPS).contains(&steps), "{steps} steps");
         Shared { steps, ..self.unlit() }
     }
 
@@ -607,7 +609,7 @@ impl Light {
      * all but reflected light: from the sites that way, what each glows;
      * past them, the coarser level's light, from the steps on, where it
      * has room for it (`past`). At the coarsest level (no `near`), from
-     * the next TOP_STEPS, and past them the sky. The sites met that
+     * the next `top_steps`, and past them the sky. The sites met that
      * reflect go in `reflects` (Paths): of what each stops, its colour.
      * Each has its own light found, so one that reflects under Shared's
      * tolerance is owed to the next that, with it, reflects over: that
@@ -621,8 +623,9 @@ impl Light {
         // What the sites met so far reflect, under the tolerance: none reflects for them yet.
         let mut owed = [0.0f32; 3];
         let mut q = p;
+        let most = if near.is_some() { MOST_STEPS } else { top_steps(heights) };
         let beyond = 'march: {
-            for step in 1..=TOP_STEPS {
+            for step in 1..=most {
                 let from = q;
                 q = add(q, v);
                 let ((alpha, colour), glow) = self.meets(i, q, self.opposite[d]);
@@ -835,6 +838,17 @@ fn weighed(weights: &[f32; N], light: &[Rgb; N], touches: &Touches) -> Rgb {
     std::array::from_fn(|c| if kept[c] > 0.0 { sum[c] / kept[c] } else { 0.0 })
 }
 
+/**
+ * Steps a line takes at the coarsest level, of `heights`, before the
+ * sky's light takes over: as many as the heights are sites high. One that
+ * rises or falls has left them by then; one that keeps level never does,
+ * and ends as far, shaded by nothing farther off. Chosen, for a world
+ * that lies across y (docs/light.md).
+ */
+fn top_steps((low, high): (i64, i64)) -> usize {
+    MOST_STEPS.min((high - low) as usize)
+}
+
 /** How much the light on a site's faces changed from `before` to `after`, of what it is: the most of any channel on any face. */
 fn change(before: &[Rgb; N], after: &[Rgb; N]) -> f32 {
     let mut most = 0.0f32;
@@ -879,7 +893,7 @@ fn class(p: [i64; 3]) -> (usize, [i64; 3]) {
 
 /** `Around` for each class, taking `steps` steps. */
 fn around(steps: usize) -> &'static [Around; 8] {
-    static AROUND: [OnceLock<[Around; 8]>; TOP_STEPS + 1] = [const { OnceLock::new() }; TOP_STEPS + 1];
+    static AROUND: [OnceLock<[Around; 8]>; MOST_STEPS + 1] = [const { OnceLock::new() }; MOST_STEPS + 1];
     AROUND[steps].get_or_init(|| {
         std::array::from_fn(|class| {
             let (c, b) = (class as i64 & 3, class as i64 >> 2);

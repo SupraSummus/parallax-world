@@ -45,7 +45,7 @@ const _: () = assert!(TILE == 1 << TILE_SHIFT);
  * farther they are dropped: apart, so that a tile dropped is not asked
  * for a step on. Chosen, not derived: the levels no ray reads have no
  * reach, and the light of what is lit reads their tiles, the coarsest's
- * worldgen's TOP_STEPS sites off; nearer, those were made every frame.
+ * as far off as the world is high (worldgen's `top_steps`); nearer, those were made every frame.
  */
 const KEPT: f64 = 256.0;
 const DROPPED: f64 = 128.0;

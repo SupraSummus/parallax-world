@@ -568,7 +568,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   it would not be the light's then (`Shared` in `light.rs`).
 - **How far past an engine's reach tiles are kept is chosen**
   (`KEPT` in `native/src/world.rs`),
-  not derived from how far the light reads (`TOP_STEPS`, and each level the next).
+  not derived from how far the light reads (`top_steps` in `light.rs`, and each level the next).
 - **Native's voxels wait on memory** (`march` in `voxels.wgsl`):
   most of a frame is its samples' rays, some 50 steps each,
   and a step costs its reads one after another (a brick's slot, then its site),
@@ -789,6 +789,11 @@ Numbers are for the forest at 1280×800, as measured when written.
     from columns between the level's own, each made for it.
   - Places and the survey sample lines of cells along y (`PER_COLUMN`);
     `directions` measures the four-fold harmonic about y alone.
+  - Light takes its sky from above y (`SKY`, `SUN` in `light.rs`),
+    and ends a line as far as the world's heights are high (`top_steps`).
+    A world's generator could say where light comes into it from outside,
+    at which sites of which levels:
+    a sky over a ground would be such a world's, not the engine's.
 - Far forms for what fills space: the cheese's holes are carved
   while wider than the sites are apart (past level 8 it is all buried),
   and its grottoes (pillars, stairs, crystals) stop at level 3,
