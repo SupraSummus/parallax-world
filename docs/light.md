@@ -154,9 +154,18 @@ a thread of the world lights with the one it makes tiles with.
 What is found at a site is a function of the world alone,
 so the Lights keep it together, every level's alike,
 and two finding the same at once do no harm.
-They keep the sites read lately (`KEPT_SITES`, `Shared::begun`):
+Each site is kept under a lock of its own (`Lit` in `light.rs`):
+under one lock a column of tiles, and found by a map,
+the threads waited for each other, and the first view took a quarter more work.
+Each Light holds the tiles it read (`Level`), asking the others for each once.
+They keep the light of the tiles read lately (`KEPT_SITES`, `Shared::begun`):
 fewer hold less, and under what a view reads at once, lighting slows by half.
-A site kept takes about 1.5 KB, half of it its rounds.
+Forgotten brick by brick, not tile by tile,
+a flight held a tenth less and owed twice the bricks.
+Most of what a site kept takes is its rounds,
+kept only of sites that stop light (no site reads another's),
+in 16 bits a channel (`Packed`): half of what floats took,
+a few pixels of a view one step of colour off.
 
 Native's light sliders light the world anew (`World::relight`),
 as slowly as at the start.
@@ -175,8 +184,6 @@ and not kept:
 - a cube's bricks lit together by one thread: no less work;
 - the tiles forgotten with their sites' light, once none read them:
   made again, a flight lit less than half the bricks in a time;
-- a tile's light forgotten whole once none read the tile, not site by site:
-  as fast for as much held, and one more thing to keep;
 - a site's rounds ended where it settles, later ones its last:
   a tenth fewer rounds, little less work;
 - a site's rounds started from the coarser level's light on what it meets:
