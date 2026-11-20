@@ -1,4 +1,4 @@
-//! Voxel storage as voxel-grid.ts lays it out: what each site of a box
+//! Voxel storage: what each site of a box
 //! looks like, in bricks BRICK units wide, only bricks with voxels stored.
 //! The same layout as the baker's Grid, which `to_grid` hands over.
 
@@ -7,7 +7,7 @@ use std::sync::OnceLock;
 use fcc::light::linear_to_srgb;
 use fcc::{FACE_KINDS, Look};
 
-// The baker's grids, as worlds hand them over (web/wasm/src/lib.rs), the voxel's faces, and a whole site's alpha: it stops every ray.
+// The baker's grids, as worlds hand them over, the voxel's faces, and a whole site's alpha: it stops every ray.
 pub use fcc::{ALPHA, Grid, VOXEL_FACES};
 
 pub const BRICK: i64 = 8;
@@ -52,7 +52,7 @@ pub fn is_site(x: i64, y: i64, z: i64) -> bool {
 }
 
 /**
- * The sites of a box: see VoxelGrid in voxel-grid.ts. A site holds what
+ * The sites of a box. A site holds what
  * it looks like, not what it is made of, in two ways: pieces smaller
  * than itself, which stop some of its rays whole, and a medium
  * (KindDef::medium), which stops some of each ray the pieces let

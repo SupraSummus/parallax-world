@@ -1,7 +1,5 @@
 //! The voxels of a chunk cell that can show: its surface.
 
-use crate::cells::Cells;
-use crate::slicing::{cell_margin, chunk_cell, site_layers};
 use fcc::{ALPHA, FACE_KINDS, Look, Reader, alpha_of};
 
 use crate::tables::Geometry;
@@ -15,8 +13,8 @@ pub struct Voxel {
     /** Faces whose neighbour across them lets rays through: none, or a see-through one. */
     pub open: u16,
     /**
-     * Faces drawn because the slice is cut there: their neighbour is in
-     * another slice. Cells of neighbouring layers interlock, so that may be
+     * Faces drawn because the chunk is cut there: their neighbour is in
+     * another chunk. Cells of neighbouring layers interlock, so that may be
      * a farther one, even across a face towards the camera.
      */
     pub cut: u16,
@@ -27,49 +25,6 @@ impl Voxel {
     pub fn alpha(&self) -> u8 {
         alpha_of(self.look)
     }
-}
-
-/**
- * A slice: slab `layer` of `level`, made of cells of level `atoms` (see
- * SliceId in slice-selection.ts). As its grid sees it (in_grid in lib.rs),
- * of single voxels: the sites in the slab's 2^level layers. If `cutoff` is
- * finite, only those whose cell of 2·FCC has its site before layer `cutoff`.
- */
-#[derive(Clone, Copy, PartialEq)]
-pub struct Slice {
-    pub level: i32,
-    pub atoms: i32,
-    pub layer: i32,
-    pub cutoff: f64,
-}
-
-/** The voxels cell_surface looks at for chunk cell (i, j) of a slice, as a box of (a, b, c), inclusive. */
-fn cell_box(slice: &Slice, i: i32, j: i32) -> ([i32; 3], [i32; 3]) {
-    let cell = chunk_cell(slice.level, i, j);
-    let (ma, mb) = cell_margin(slice.level, slice.atoms);
-    let start = slice.layer * (1 << slice.level);
-    let (first, last) = site_layers(slice.level, slice.atoms);
-    ([cell.left - ma, cell.bottom - mb, start + first], [cell.left + cell.columns + ma - 1, cell.bottom + cell.rows + mb - 1, start + last])
-}
-
-/**
- * The voxels of chunk cell (i, j) (chunkCell in slice-selection.ts) of
- * a slice, and of the margin around it its chunks may show (cell_margin),
- * that have an open face (one no neighbour covers), or a face whose
- * neighbour is in another slice (the slice is cut there and the cut must
- * show). Buried voxels are dropped.
- * `next` are the cells of 2·FCC (for the cutoff).
- */
-pub fn cell_surface(reader: &Reader, geometry: &Geometry, next: &Cells, slice: &Slice, i: i32, j: i32) -> Vec<Voxel> {
-    let (from, to) = cell_box(slice, i, j);
-    // Its sites are in layers [start, end).
-    let start = slice.layer * (1 << slice.level);
-    let end = start + (1 << slice.level);
-    let holds = |a: i32, b: i32, c: i32| {
-        let past_cutoff = slice.cutoff.is_finite() && next.owner_c(a, b, c) as f64 >= slice.cutoff;
-        !past_cutoff && (start..end).contains(&c)
-    };
-    surface(reader, geometry, from, to, holds)
 }
 
 /**

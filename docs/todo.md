@@ -282,8 +282,8 @@ Numbers are for the forest at 1280×800, as measured when written.
   (`Look`'s faces, measured in `generator/forms.rs`),
   would keep the ballast's shares on the faces looking up
   and the sleepers and rails on the others.
-- **Generating the forest's grids takes 3–8 s of worker time per level**
-  (the web's WebAssembly, in Node; the TS forest took twice that),
+- **Generating the forest's grids took 3–8 s of a thread's time per level**
+  (in WebAssembly, in Node, when the web drew grids; the TS forest took twice that),
   most at levels 0 to 4 (a moved grid, a seventh of that).
   In the TS forest it was mostly the ground's noise,
   which the terrain and the canopy compute about 14 times per column
@@ -376,7 +376,7 @@ Numbers are for the forest at 1280×800, as measured when written.
 ## Light
 
 - **Light is a prototype, in look's pictures and native's computed lighting**
-  (`worldgen/src/light.rs`); the web does not light its tiles.
+  (`worldgen/src/light.rs`).
   [docs/light.md](light.md) says what it gets wrong against its reference,
   what was tried and what it costs.
   Where it is to go, a step at a time, each measured on the reference's scenes:
@@ -434,8 +434,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   `surface` still finds a cell's cut faces, which `cell_relief` drops.
   Detail sets Q = max(4, ⌈2·detail⌉), so below 2 it changes nothing;
   Q itself, a whole number, would say what it does.
-  The web still draws slices, with runs and cut faces:
-  its compositor would need depth by distance too to draw cells.
 - **Native pillars more than double the splats.**
   Natively a run is a row of splats, one a voxel
   (section 4 of `docs/architecture.md`),
@@ -657,12 +655,8 @@ Numbers are for the forest at 1280×800, as measured when written.
   the forest at its defaults does, `seed=42&world=forest&look=200,10`).
   Past the limit it could drop the farthest chunks, or split the buffer.
 
-## Web
+## Browsers
 
-- **The native frontend in a browser is to replace the app.**
-  `native.html` draws what the window does, with the voxels engine;
-  once it serves, `web/src/`, `web/wasm/` and what only they use go,
-  and the sections of `docs/architecture.md` that follow them.
 - **In a browser the world is made on the main thread**,
   a piece or more between frames (`World::work`), on one core:
   a first view takes several times what the window's threads take,
@@ -672,116 +666,24 @@ Numbers are for the forest at 1280×800, as measured when written.
   a page isolated by headers GitHub Pages does not send
   (a service worker can add them),
   and no lock waited for on the main thread.
-- **`native.html` is not tested.**
+- **A browser draws by the voxels engine alone.**
+  The chunks' compositor needs indirect draws counted on the GPU
+  and depth tested before a shader that writes it,
+  which WebGPU lacks ("The native frontend is missing pieces", above).
+- **The page is not tested.**
   Headless Chromium shows nothing of a WebGPU canvas on a software GPU;
   a shot would read its frames back from a texture of its own.
-
-- **Slice detail sets both thickness and level of detail.**
-  "Slice Detail" sets how thick slices are,
-  and so their level of detail (atoms of 2^(k−s) at level k,
-  s as large as the grids' reach allows).
-  Thicker is faster but coarser: in the forest, a first render takes
-  about 6.5 s at detail 9.5, 3 s at 2.4 and 2.7 s at 1
-  (voxels 4 and 10 times as large), against 2.5 s drawn flat at 9.5
-  (Node, 1280×800).
-  Thickness could follow what culling and the slice count want,
-  and the level of detail the screen's pixels:
-  coarser atoms than detail gives are a smaller s,
-  finer ones need more than 2^4 layers of atoms a slab,
-  so splats' depths in more than a byte (`ATOM_SHIFT`).
-- **Coverage is weaker in relief.**
-  A splat moves on its centre plane with the camera,
-  so a chunk's mask holds what it covers from the axis and the corners
-  of the rhombus of rays, and what it may reach from any:
-  in the forest at the default detail, twice the chunks of flat slices are drawn.
-  Nor is that exact: a block covered from each of those may still open
-  between them, which no picture has shown yet.
-  The camera's slant is known where coverage is tested;
-  masks for a few slants, picked per block, would cover nearly as much
-  as flat ones, and between nearer slants.
-- **Coverage masks are coarser than the screen.**
-  `mask_scale` marks ⌊40 / t⌋ pixels per unit of a slice t thick,
-  but at a level's nearest slices a unit is focal / (t · detail · LAYER)
-  pixels on screen, about 95 / t at 90° on 1280 px at the default detail.
-  A mask pixel counts as drawn when its centre is in a splat,
-  so a gap between splats narrower than a mask pixel can count as covered,
-  and what is behind it is skipped.
-  The mask could follow the focal length and detail,
-  keyed in the chunk like its grid, leaving the slices as they are.
-- **The web culls only whole clusters, on the main thread.**
-  The forest has millions of splats in view, and only about 1.5 % show a pixel;
-  coverage leaves out the clusters hidden whole,
-  and the rest are drawn.
-  The native compositor culls finer, on the GPU
-  (section 4 of `docs/architecture.md`), which WebGL 2 cannot
-  (no compute, no indirect draws);
-  WebGPU can, where a browser has it.
-- **A chunk as an image was slower, on an Intel GPU.**
-  The branch `relief-chunks` draws a chunk's columns as tiles of
-  colour, depth and run, a rectangle each whose fragment shader
-  follows each ray through them, or traced in compute:
-  right to the pixel, runs included, a tenth of the vertices,
-  but slower than splats in the forest.
-  There (Mesa's driver), a fragment shader that discards
-  or writes its depth, even conservatively, is depth tested after it runs,
-  so it runs for several times the fragments that lie before what shows.
-  GPUs that test early despite discarding may differ;
-  fewer, thicker slices, a column holding several runs,
-  would cut the layers a ray crosses.
-- **The depth within a layer needs a fine depth buffer.**
-  A layer's splats share 1 / (layers + 1) of the depth range;
-  WebGL promises only 16 bits, which leaves a few dozen steps for them.
-- **Bricks on the edge of a face's rhombus are baked whole.**
-  Near where a level starts, about 19 bricks meet the rhombus,
-  and most of them cross its edge or the screen's.
-- **Most baked splats are hidden.**
-  When chunks were bitmaps,
-  over 95 % of opaque baked pixels were covered by nearer slices.
-  Content that no ray of the face reaches within its slice
-  need not be baked.
-- **Flying, the main thread can't keep up with the workers.**
-  Flying up (a trace in a desktop browser),
-  workers bake about 4,000 chunks a second
-  and the main thread is busy 97 % of the time, at 10–13 frames a second.
-  Renders take 30–90 ms, longer the more new chunks they take:
-  uploading textures (now splats), handing chunks to `Coverage` (`coverage_add`),
-  and covering with them (`coverage_cover`).
-- **Turning, finding covered chunks is slow.**
-  About 11 ms of a render (forest, 1920×1080, Node),
-  mostly testing sub-blocks one by one in `cover` (`web/wasm/src/coverage.rs`):
-  about 270,000 tests a frame, three in four failing,
-  as the forest covers the screen in fine pieces.
-  Testing quarters of a cell first would not help (two in three are mixed),
-  nor would clipping without allocating in `shape`.
-  The web could run it in a worker, a frame behind.
-- **After a long jump, the workers' frame culls more than the main thread's.**
-  Once the grids of three or more levels move at once,
-  a renderer baking in workers counts a few more chunks covered
-  than one baking on the main thread at the same view
-  (`worker-bakery.test.ts` keeps its move short of that).
-  Whether it shows on screen is not checked.
-- **Moved grids are posted whole.**
-  When a grid moves with the camera (section 1 of `docs/architecture.md`),
-  the main thread posts all of it to every worker, though they have most of it:
-  at level 0, ~40 MB a worker every 12 m walked.
-  Workers could keep the tiles and put the grid together themselves.
-- **Far voxels 5.6–11 pixels across.**
-  Atoms 4 times as fine (1.4–2.7 pixels)
-  would need `GRID_REACH` 4 times as large:
-  ~16 times the grids' bytes, in each bake worker.
-  Grids shared between the workers would allow it,
-  or bricks sent to a worker only once a chunk it bakes needs them.
-  (Shared memory needs cross-origin isolation,
-  which GitHub Pages can only get through a service worker.)
+- **Node is kept for Vite alone**,
+  which serves the page while developing
+  and names its files by their hashes,
+  so that a browser never pairs an old module with new bindings.
+  `web/bindgen/` could write the page's directory itself, hashes too,
+  and the scripts would be cargo's.
+- Keep the view in the address bar as the camera moves,
+  so a view can be copied (the page reads it already).
 
 ## Tools and CI
 
-- **TS and Rust still say much the same twice.**
-  The tiles around the camera (`world.ts`) are `native/src/world.rs`,
-  and faces are in `native/src` too, though its renderer draws cells, not slices.
-  The renderer is the large step.
-  Tests too: cells' and view's are in both;
-  relief's, pillars', the renderer's and its regressions' only in TS.
 - **Tests take most of CI's time.**
   Most of it is the worlds' contract, bound by the CPU, in jobs of its own;
   the valley's, alone, is CI's longest job.
@@ -823,8 +725,9 @@ Numbers are for the forest at 1280×800, as measured when written.
   - `worlds/data/cost/valley.txt` is the repo's largest text file
     and changes with most commits to the worlds;
     a baseline per place and level would do for a test with a quarter's slack.
-  - `docs/generators.md` holds the worlds beside the engine ("Composing"),
-    and `docs/architecture.md` native's cells and voxels inside the web's sections.
+  - `docs/generators.md` holds the worlds beside the engine ("Composing").
+  - `native/` is no longer only native, and `bake/` serves one engine of it,
+    the chunks', which a browser cannot draw.
   - Tests at the end of `picture.rs`, `light.rs`, `native/src/main.rs`,
     `voxels.rs` and `lod.rs` are a quarter to a half of each;
     `generator/tests.rs` shows the way.
@@ -851,13 +754,6 @@ Numbers are for the forest at 1280×800, as measured when written.
 - Light along more directions at coarser levels, as radiance cascades do:
   near, light wants fine places and few directions; far, coarse places and many.
   Light keeps 12 at every level, too few far off (a lamp's lobes, blurred shadows).
-- Slices' splats that show alpha (the web's show no medium,
-  so the moor has no mist there):
-  a chunk keeps a column's voxels till their alpha adds up to whole,
-  and splats that overlap in a slice may add up to an opaque one,
-  the rest drawn see-through.
-  Alpha in steps of optical depth (−ln of what gets through),
-  which add up where things are apart, might take fewer bits.
 - WGSL formatted in `pnpm lint`, as rustfmt does the Rust.
   wgslfmt 0.1 (wgsl-analyzer's) pads compound assignments (`x   += 1`)
   and joins long expressions into one line; try a later one.
@@ -874,8 +770,6 @@ Numbers are for the forest at 1280×800, as measured when written.
     asked brick by brick, `whole` cost many times generating the tile.
     Blocks of columns finer than `FLOOR` would take a ground's range
     from columns between the level's own, each made for it.
-  - The web tiles x and z over a world's heights (native's tiles are cubes),
-    so it can't show the cheese.
   - Places and the survey sample lines of cells along y (`PER_COLUMN`);
     `directions` measures the four-fold harmonic about y alone.
 - Far forms for what fills space: the cheese's holes are carved
@@ -892,22 +786,12 @@ Numbers are for the forest at 1280×800, as measured when written.
   A middle way: streets and plots at any angle, the buildings on the axes.
   The buildings' walls would still show to `directions.rs`.
 - Keep the fit of `cost::NS` in the repo, to refit it on a quiet machine.
-- Generate the web's tiles as the native frontend does:
-  those the chunks in view read, nearest first,
-  instead of every tile within `GRID_REACH` of the camera.
-- Keep the view in the address bar as the camera moves,
-  so a view can be copied (the page reads it already).
 - Measure the seams between faces against ray-cast perspective.
-- Make the 12 stacks cheaper:
-  four or more faces are in view at once, each with its own near slices.
-- Find covered chunks more exactly: many chunks drawn show no pixel.
-- Measure the WebGL compositor on real GPUs (headless Chromium only has a
-  software one); if draw calls matter, pack chunks' splats into one buffer.
 - Drop a splat's size: every splat is a voxel's outline,
   so a splat could be its site, depth and colour.
 - Show render distance in metres:
   they are lattice units, and the forest's unit is 0.125 m.
-- Show the forest to 22 km again: `MAX_LEVEL` 13, one grid more.
+- Show the forest to 22 km again: one level more (`GRID_LEVELS`).
 - Learn a world from examples instead of the split grammar.
   Two models in lab draw any box alone, flat or on the FCC lattice.
   The masked model (`lab/src/masked.rs`, `masked_fcc.rs`)

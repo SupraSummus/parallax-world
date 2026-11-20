@@ -35,7 +35,7 @@ fn main() {
     let mut image = vec![0u8; (nx * nz * 3) as usize];
     // A ray straight down sees a voxel through its four faces up alike (picture.rs's facing): their mean.
     let up: Vec<usize> = (0..VOXEL_FACES.len()).filter(|&k| VOXEL_FACES[k][1] > 0).collect();
-    // In tiles, as the web generates it.
+    // In tiles, as hosts generate it.
     const TILE: i64 = 64;
     for tz in (0..nz).step_by(TILE as usize) {
         for tx in (0..nx).step_by(TILE as usize) {

@@ -54,7 +54,10 @@ pub fn run(title: &str, size: [f64; 2], content: impl Content + 'static) {
     let arrived = Default::default();
     let windowed = Windowed { title: title.to_string(), size, content, instance, open: None, arrived, next: None, last: None };
     #[cfg(not(target_arch = "wasm32"))]
-    event_loop.run_app(&mut { windowed }).expect("the event loop");
+    {
+        let mut windowed = windowed;
+        event_loop.run_app(&mut windowed).expect("the event loop");
+    }
     // A browser's loop is the page's: it goes on after this returns.
     #[cfg(target_arch = "wasm32")]
     winit::platform::web::EventLoopExtWebSys::spawn_app(event_loop, windowed);

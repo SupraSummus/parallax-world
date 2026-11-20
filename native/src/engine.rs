@@ -4,7 +4,7 @@
 //! On a GPU, the engine's Painter draws its pictures into one of its own,
 //! which the window shows or a shot saves (gpu.rs).
 //!
-//! - chunks: cells of the lattice baked into chunks, as the web draws them,
+//! - chunks: cells of the lattice baked into chunks,
 //!   their whole voxels reliefs or splats (Kind's Reliefs, Splats), or
 //!   reliefs drawn flat, a picture a cell (Flat, an experiment);
 //! - voxels: rays through the tiles' voxels, nothing baked.
@@ -39,8 +39,8 @@ impl Kind {
      * Those that draw here: in a browser the voxels alone, as the chunks'
      * compositor needs all of gpu.rs's FEATURES, and their bakery threads.
      */
-    pub fn offered() -> &'static [(Kind, &'static str)] {
-        if cfg!(target_arch = "wasm32") { &Kind::ALL[3..] } else { &Kind::ALL }
+    pub fn offered() -> impl Iterator<Item = (Kind, &'static str)> {
+        Kind::ALL.into_iter().filter(|(kind, _)| !cfg!(target_arch = "wasm32") || *kind == Kind::Voxels)
     }
 
     /** An engine of this kind, drawing `world`. */
@@ -138,7 +138,7 @@ pub struct Look {
 }
 
 impl Look {
-    /** From `camera`, looking `yaw` and `pitch` across `fov`, as far as `far`, at `size`; as the web's page starts. */
+    /** From `camera`, looking `yaw` and `pitch` across `fov`, as far as `far`, at `size`. */
     pub fn new(camera: Vec3, [yaw, pitch]: [f64; 2], fov: f64, far: f64, size: [f64; 2]) -> Look {
         Look {
             camera,
@@ -146,7 +146,6 @@ impl Look {
             pitch,
             fov,
             far,
-            // renderer.ts's FOG_PER_RENDER_DISTANCE and DEFAULT_DETAIL.
             fog: 0.7,
             size,
             light: None,
@@ -166,7 +165,7 @@ impl Look {
 
     /** The panel's sliders of its detail and shift, for engines that draw cells. */
     pub fn detail_panel(&mut self, ui: &mut egui::Ui) {
-        // In quarter octaves, as the web's: dragging picks cells anew only at each step.
+        // In quarter octaves: dragging picks cells anew only at each step.
         let mut octaves = self.detail.log2();
         let detail = egui::Slider::new(&mut octaves, 0.0..=6.0).step_by(0.25).custom_formatter(|v, _| format!("{:.1}", 2f64.powf(v)));
         if ui.add(detail.text("Detail")).changed() {

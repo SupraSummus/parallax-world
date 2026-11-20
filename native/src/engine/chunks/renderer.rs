@@ -14,8 +14,8 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+use bake::face::LAYER;
 use bake::lod::{CellChunk, Lod, Picked, distance};
-use bake::slicing::LAYER;
 use bake::{Baker, chunk_reads, medium_reads};
 use fcc::Lattice;
 use fcc::{FastMap, FastSet, GRID_LEVELS, Tiles};

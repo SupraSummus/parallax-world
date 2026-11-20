@@ -17,8 +17,7 @@ and the cheese (`worlds/cheese/`), endless every way, no way up but for walking 
 a host starts any by name from `WORLDS` (`worlds/src/lib.rs`),
 as a `World`: its generator, spawn and heights
 (the bounds it has anything in, with a sky over them; the cheese has none),
-and the places it names (`points`);
-the web lists and generates them all as WebAssembly (`web/src/lib/worldgen.ts`).
+and the places it names (`points`).
 Integers and fixed point (`noise.rs`) decide wherever they can,
 so a world is the same on every machine and as fine far from the origin.
 
@@ -50,7 +49,7 @@ A world is **layers** of two kinds, drawn in `order`:
   the cheese's holes, balls and capsules.
 - **Populations:** things in cells, at most one per cell.
   A population's cells are those of the lattice N times coarser, N·FCC
-  (as the renderer's, `cells.ts`, when N is a power of two):
+  (as the chunks', `bake/src/cells.rs`, when N is a power of two):
   the rhombic dodecahedra of the points nearest to each of its sites,
   reaching N from their centre along each axis.
   The framework asks each cell for an `anchor`;
@@ -711,8 +710,7 @@ A new world is a crate of its own in `worlds/`, as the cheese is,
 an entry in `WORLDS`
 with `far` regions where its fields have patterns finer than the far sites,
 and its name in `worlds!` in `worlds/tests/contract.rs`,
-whose tests fail without it;
-the web app lists it by itself, under its name.
+whose tests fail without it.
 To see a world without the renderer,
 `worlds/examples/map.rs` draws its layout from above, any level, any area,
 and `worlds/examples/look.rs` takes a picture of it at one level
@@ -948,10 +946,9 @@ and takes their place as far as it covers them:
 so the sea hides its floor where both are in one coarse site.
 So a coarse site of a crown in mist holds both, each as it is.
 The pieces show as grain, a whole voxel as often (`VoxelGrid::show`);
-where they don't, a host that draws alpha (native)
+where they don't, a host that draws alpha
 shows the medium as see-through as it is.
 Drawn see-through, leaves are smoke; as grain, mist is snow.
-The web draws no alpha, and shows no medium.
 So a lamp too small for a coarse site
 is in it as a little glow, and stops a little light.
 A far form without its near form's lamps goes dark,

@@ -1,25 +1,21 @@
 # Product Requirements
 
-A proof of concept for rendering a 3D voxel world as a stack of cached 2D
-depth slices composited with parallax, instead of rasterising the scene in 3D
-every frame. The demo exists to show (and measure) that idea.
-It has two frontends on the same worlds:
-the web page, which this document describes,
-and a native one (`native/`), which draws them by other engines too,
-rays through the voxels by default (its options in `native/src/main.rs`).
+Voxel worlds, generated in pieces at any level of detail,
+and a frontend (`native/`) that draws them,
+in a window and, in a browser with WebGPU, in a page:
+by rays through the voxels,
+or by engines that bake cells of the lattice into chunks
+(window only; its options are in `native/src/main.rs`).
 Voxels are rhombic dodecahedra on the face-centred cubic (FCC) lattice,
 not cubes; scenes keep their shapes (flat walls along the axes,
 rectangular buildings), only their surfaces are made of rhombi.
 
 ## Goals
 
-- **Cheap camera movement.** Moving redraws cached chunks; only
-  chunks coming into view are baked.
+- **Cheap camera movement.** Moving makes only what comes into view.
 - **Close to true perspective.** Nothing that perspective would hide shows
   by more than a set angle.
 - **Event-driven.** Nothing renders while the camera is idle.
-- **Visible mechanics.** Users can see the slices, toggle them, and watch
-  cache statistics react to their movement.
 
 ## Features
 
@@ -33,44 +29,22 @@ is stopped by walls and trunks, steps up and down what is half a metre high,
 jumps (Space) and sneaks (Shift);
 it walks through plants and water, as each world marks its kinds.
 
-**Slicing** – Twelve stacks of slices, one per direction to a voxel's
-nearest neighbours (the faces of a rhombic dodecahedron around the
-camera), each cut along the lattice's layers across it.
-Slices grow thicker with viewing distance, and far ones draw the world
-at a coarser level of detail, so far voxels stay a pixel or two across.
-Slices are split into chunks, baked only in view, as seen along their
-direction, and cached: moving bakes only what comes into view.
-A chunk is a list of its visible voxels,
-each painted as a hexagon of one colour, its outline along that direction,
-drawn at its voxel's depth, so a slice is a relief,
-in the colour of its voxel's face towards it:
-an impressionist picture of the scene, not its exact faces.
+**Drawing** – Rays go through the voxels, from one to the next across
+their faces, each level of detail as far as it is held around the eye,
+then the next coarser.
 A voxel may look different through each of its 12 faces,
 so a coarse voxel at a house's eaves is roof from above and wall from the side.
-How thick slices are follows "Slice Detail":
-a slice is at most 1/detail of its distance thick.
-Thinner slices draw coarser voxels sooner,
-so that the world generated around the camera holds all they show.
-Thicker ones are faster, but leak where a column along a slice's direction
-has a gap (a valley between two hills):
-only what is before it is drawn, and farther slices show through.
-The field of view only zooms the picture, without re-slicing.
-"Skip Covered Chunks" (on by default) doesn't bake chunks that nearer
-ones cover, nor (on the web) draw them;
-the picture is the same, it is there to compare.
-"Show Face Seams" (off by default) draws lines where the twelve
-stacks meet on screen.
-Each slice is a picture along its stack's direction with a depth per point:
-of each column along it, only the nearest voxel,
-drawn as a pillar over the voxels behind it in the column,
-so the ground shows no stripes where the view slants;
-but what a column shows along it is its nearest voxel's colour,
-so a lawn's shades and a road's markings stretch along it.
+See-through voxels (mist, the sea) add up along a ray.
+The chunks engines (`--engine`) instead bake cells of the lattice
+as seen along twelve directions, and draw them in relief.
 See [architecture.md](architecture.md).
 
-**Worlds** – Procedurally generated, regenerable with a new seed; the camera
-moves to the world's spawn point.
-A spinner shows while a world generates.
+**Light** – Voxels are shaded by the way their faces face,
+or lit by light worked out across the world:
+the sky, the sun and what glows, each as bright as its slider says.
+
+**Worlds** – Procedurally generated, by name and seed (`--world`, `--seed`,
+or the page's query); the camera starts at the world's spawn point.
 - *Forest*: an endless autumn forest valley on hills kilometres
   wide: a winding path, spruces, birches and oaks, ferns, bushes, boulders
   and fallen logs.
@@ -127,7 +101,7 @@ A spinner shows while a world generates.
   on lawn.
   The camera starts in front of an open entrance.
   Generated like the forest.
-- *Cheese*: cheese endless every way (native only: the web tiles columns),
+- *Cheese*: cheese endless every way,
   holed through with caverns a few metres wide, tunnels between them
   and eyes in their walls, lit by glowing crystals on the caverns' walls
   and by nothing else: it has no sky.
@@ -138,18 +112,13 @@ A spinner shows while a world generates.
 
 **Views in the URL** – The page's query can give the world, its seed,
 the camera, where it looks, the field of view and the render distance,
-so a view can be shown again.
+so a view can be shown again; the window takes the same as `--view`.
 
-**Statistics panel** – Session totals (updates, average render time)
-and details of the last update (layers,
-slice detail, chunks in view reused vs newly baked,
-chunks still baking, levels of detail still generating,
-chunks covered, cached chunk bytes).
-Chunks bake in background workers, so moving never waits for them;
-meanwhile a cell shows an older bake, or nothing.
+**Panel** – The engine, the field of view and render distance,
+the lighting, walking, the flying speed,
+and where each frame's time went.
 
 ## Non-goals (for the POC)
 
 - Rolling the camera.
 - Mobile/touch controls.
-- Lighting beyond flat colours, distance fog and simple face shading.

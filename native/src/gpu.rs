@@ -46,7 +46,7 @@ pub const FEATURES: wgpu::Features = wgpu::Features::INDIRECT_FIRST_INSTANCE
 /**
  * FEATURES, as a device of `adapter` is asked for them: all, but in a
  * browser, whose WebGPU has no draws counted on the GPU, those it has,
- * for the engines that need no more (engine.rs's Kind::ALL).
+ * for the engines that need no more (Kind::offered).
  */
 pub fn features(adapter: &wgpu::Adapter) -> wgpu::Features {
     if cfg!(target_arch = "wasm32") { FEATURES & adapter.features() } else { FEATURES }

@@ -1,11 +1,10 @@
 # Light
 
 Light on the lattices (`worldgen/src/light.rs`) is a prototype,
-in `look`'s pictures and native's computed lighting;
-the web does not light its tiles.
+in `look`'s pictures and native's computed lighting.
 The model is in that file's header,
 and how native's engines use it in section 4 of [architecture.md](architecture.md)
-("Native: another engine").
+("The engines, and rays through the voxels").
 Here: what it gets wrong, what was tried, and what it costs.
 What is left to do is in [todo.md](todo.md).
 
