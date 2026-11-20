@@ -175,12 +175,23 @@ held a twentieth less for a tenth more work.
 Native's light sliders light the world anew (`World::relight`),
 as slowly as at the start.
 
-Lighting the valley's first view, over half of the world's threads' work
+Lighting the valley's first view, over two thirds of the world's threads' work
 is generating, the tiles rays ask for and those the light reads around them,
-and over a third finding the light.
+and a quarter finding the light.
 Of that, most is the rounds past a site's first:
 each round reads sites one further around what is lit,
 many where sites filled in part reflect on each other, as all through a wood's crowns.
+Each site met that reflects has its own light found, and its tiles made,
+and where many stop little (mist, crowns, the coarsest level's long lines)
+most reflect next to nothing.
+So sites that reflect under the tolerance reflect together,
+as the next one met that brings them over it (`along` in `light.rs`),
+and a line ends where less than the tolerance gets through:
+the moor's first view took over twice the work without,
+no pixel more than two steps of colour off.
+Left out instead, they cost less still,
+but a thin medium, each site of it under the tolerance, would reflect nothing.
+No test holds that: one that simply leaves them out passes them all.
 Tried, each measured on the valley's first view and a flight on from it
 (`--stroll` with `--by-work` in `native/src/main.rs`),
 and not kept:
@@ -210,7 +221,7 @@ the settled light of every neighbour whose pieces are not shown.
 Lighting a place first, most is its tiles,
 the coarsest level's far around (`TOP_STEPS` sites along every direction):
 each site met there reflects, so its light is found too, as far around it again.
-Of the valley's first view, a seventh of the work is that level's tiles,
+Of the valley's first view, a sixth of the work is that level's tiles,
 which no ray reads.
 Tried there, and not kept:
 

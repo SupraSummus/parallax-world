@@ -26,8 +26,8 @@
 //! what glows this bright: 1,1,0 a clear day (as the panel's Computed
 //! lighting is unless --light), 0.01,0,1 night; a fourth number, the steps
 //! light takes along each level before the coarser one takes over; a
-//! fifth, how little light may change, round by round of its bounces, to
-//! be found.
+//! fifth, how little of the light on a site is not followed (worldgen's
+//! TOLERANCE).
 //! --engine picks what draws, as the panel does (Kind): rays through the
 //! tiles' voxels (the default), chunks of cells' reliefs or splats, as the
 //! web draws, or reliefs drawn flat (an experiment).

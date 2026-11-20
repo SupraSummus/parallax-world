@@ -11,7 +11,10 @@
 //! colour times the light on its face turned back (`on_face`), a third of
 //! what it shows that way; the rest of what comes from past it gets
 //! through. So what comes from far comes from coarser levels, the
-//! coarsest's from the sky.
+//! coarsest's from the sky. Sites that reflect less than the tolerance
+//! reflect together, as the next one met that brings them over it, and
+//! nothing comes from past where less than the tolerance gets through
+//! (`along`): the light on few sites is asked for, where many stop little.
 //!
 //! The light on a site is what the sites near it reflect of the light on
 //! them, so it settles round by round: round 0 has what glows, the sky and
@@ -64,7 +67,13 @@ const DIRECTIONS: [[i64; 3]; N] = FACES;
 /** Steps along a direction before the coarser level's light may take over, unless set (Shared::stepping), and at most: at the coarsest, before the sky's does. */
 const STEPS: usize = 1;
 const TOP_STEPS: usize = 64;
-/** How little the light on a site's faces may change, of what it is, for it to be found, unless set (Shared::settling); and rounds at most, should it never settle (a closed room that reflects all). */
+/**
+ * How little of the light on a site is not followed, unless set
+ * (Shared::settling): its change from a round to the next, for it to be
+ * found; what a site met reflects, and what gets through from past it
+ * (`along`). And rounds at most, should it never settle (a closed room
+ * that reflects all).
+ */
 const TOLERANCE: f32 = 1e-2;
 const ROUNDS: usize = 256;
 /**
@@ -218,12 +227,12 @@ impl Shared {
         Shared { steps, ..self.unlit() }
     }
 
-    /** How little the light on a site's faces may change, of what it is, for it to be found. */
+    /** How little of the light on a site is not followed (TOLERANCE). */
     pub fn tolerance(&self) -> f32 {
         self.tolerance
     }
 
-    /** The same world, a site's light found once the light on its faces changes by less than `tolerance` of what it is: its tiles' sites kept. */
+    /** The same world, less than `tolerance` of the light on a site not followed (TOLERANCE): its tiles' sites kept. */
     pub fn settling(&self, tolerance: f32) -> Shared {
         assert!(tolerance > 0.0, "tolerance {tolerance}");
         Shared { tolerance, ..self.unlit() }
@@ -360,8 +369,9 @@ impl Level {
  * What comes to a site and does not change as its light settles (`along`):
  * from each direction, all but reflected light; the sites met that
  * reflect, each with its direction, how many steps along it, and the share
- * of the light on its face that comes; and, for a whole voxel, the colours of the whole voxels it
- * touches (`weighed`).
+ * of the light on its face that comes, its own and that of the sites it
+ * reflects for (`along`); and, for a whole voxel, the colours of the whole
+ * voxels it touches (`weighed`).
  */
 struct Paths {
     comes: [Packed; N],
@@ -599,11 +609,17 @@ impl Light {
      * has room for it (`past`). At the coarsest level (no `near`), from
      * the next TOP_STEPS, and past them the sky. The sites met that
      * reflect go in `reflects` (Paths): of what each stops, its colour.
+     * Each has its own light found, so one that reflects under Shared's
+     * tolerance is owed to the next that, with it, reflects over: that
+     * one reflects for both, as if lit alike. What is still owed where
+     * the line ends is left out.
      */
     fn along(&mut self, i: usize, p: [i64; 3], d: usize, near: Option<&Near>, reflects: &mut Vec<(u8, u8, Packed)>) -> Rgb {
         let (v, heights, steps) = (DIRECTIONS[d], self.levels[i].heights, self.shared.steps);
         // What has come so far, and how much of what comes from further on gets through.
         let (mut sum, mut through) = ([0.0f32; 3], 1.0f32);
+        // What the sites met so far reflect, under the tolerance: none reflects for them yet.
+        let mut owed = [0.0f32; 3];
         let mut q = p;
         let beyond = 'march: {
             for step in 1..=TOP_STEPS {
@@ -611,12 +627,13 @@ impl Light {
                 q = add(q, v);
                 let ((alpha, colour), glow) = self.meets(i, q, self.opposite[d]);
                 (0..3).for_each(|c| sum[c] += through * glow[c]);
-                if alpha > 0.0 {
-                    reflects.push((d as u8, step as u8, pack(colour.map(|c| through * alpha * c))));
+                (0..3).for_each(|c| owed[c] += through * alpha * colour[c]);
+                if owed.iter().any(|&r| r > self.shared.tolerance) {
+                    reflects.push((d as u8, step as u8, pack(std::mem::take(&mut owed))));
                 }
                 through *= 1.0 - alpha;
-                // Nothing more gets through, or nothing more is met: below every voxel and not going up, or above them and not going down.
-                if through < 1.0 / ALPHA as f32 || q[1] < heights.0 - 1 && v[1] <= 0 {
+                // Less gets through than the tolerance, or nothing more is met: below every voxel and not going up, or above them and not going down.
+                if through < self.shared.tolerance || q[1] < heights.0 - 1 && v[1] <= 0 {
                     break 'march [0.0; 3];
                 }
                 if q[1] > heights.1 && v[1] >= 0 {
