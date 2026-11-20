@@ -177,13 +177,11 @@ fn see(grid: &mut VoxelGrid, added: &Added, share: u32, x: i64, y: i64, z: i64) 
         _ => solid as u8,
     };
     // A carve takes out pieces and medium alike: the medium here, the pieces as any.
-    let medium = added.medium && added.op != Op::Carve;
     if added.op == Op::Carve {
         let kept = (SHARE - share.min(SHARE)) as u64;
-        let (alpha, colour) = grid.medium.get(i);
-        grid.medium.set(i, added.rounded(alpha as u64 * kept), colour.map(|c| (c as u64 * kept / SHARE as u64) as u16));
-    }
-    if medium {
+        let (stops, shows) = grid.medium.get(i);
+        grid.medium.set(i, stops.map(|a| added.rounded(a as u64 * kept)), shows.map(|c| (c as u64 * kept / SHARE as u64) as u16));
+    } else if let Some(faster) = added.medium {
         let mut share = share.min(SHARE);
         if added.op == Op::Paint && grid.pieces.get(i).0 > 0 {
             // It lies on the pieces, as any paint on what is there, and takes their place: as much of them as it
@@ -193,19 +191,37 @@ fn see(grid: &mut VoxelGrid, added: &Added, share: u32, x: i64, y: i64, z: i64) 
             let most = (0..FACE_KINDS).max_by_key(|&k| added.cover.map_or(share, |cover| cover[k])).expect("faces");
             let seen = grid.views.face(i, most).map_or(grid.pieces.get(i).0, |sight| sight.0) as u64;
             let covered = (share as u64 * all).checked_div(seen).map_or(one, |of| of.min(one));
-            let under = Added { op: Op::Carve, faces: None, cover: None, medium: false, solid: false, ..*added };
+            let under = Added { op: Op::Carve, faces: None, cover: None, medium: None, solid: false, ..*added };
             pieces(grid, &under, covered as u32, i);
             let left = all * one - seen * (one - covered);
             share = (share as u64 * all * one).checked_div(left).map_or(SHARE, |of| of.min(one) as u32);
         }
-        let old = grid.glow.get(i).copied().unwrap_or_default();
-        let (alpha, colour) = grid.medium.get(i);
-        let (alpha, colour, glow) = added.to((alpha, colour, old), share, 0);
-        grid.medium.set(i, alpha, colour);
+        let (stops, shows, glow) = added.joins(grid.medium.get(i), grid.glow.get(i).copied().unwrap_or_default(), faster, share);
+        grid.medium.set(i, stops, shows);
         set_glow(grid, i, glow);
         return;
     }
     pieces(grid, added, share, i);
+}
+
+/**
+ * How many times as fast as the channel it stops least a medium of
+ * `colour` (linear, of COLOUR_ONE) stops each: where its share of a site
+ * lets `t` through, it lets t^this. Its colour is what it sends on of the
+ * light it stops, and it scatters every channel alike: so it stops each
+ * the more, the darker its colour there. The law's one place: what sees
+ * a site takes what its medium holds (`Added::joins`).
+ */
+fn stops_faster(colour: [u32; 3]) -> [f64; 3] {
+    let sends = colour.map(|c| (c as f64 / COLOUR_ONE as f64).max(1.0 / 255.0));
+    let most = js::max(sends);
+    sends.map(|c| most / c)
+}
+
+/** A medium's share of a site (of SHARE) in each channel: `share` in the one it stops least, the others `faster` (`stops_faster`). */
+fn shares(share: u32, faster: [f64; 3]) -> [u64; 3] {
+    let through = 1.0 - share as f64 / SHARE as f64;
+    faster.map(|faster| if faster == 1.0 { share as u64 } else { ((1.0 - js::pow(through, faster)) * SHARE as f64) as u64 })
 }
 
 /** `see`, of site `i`'s pieces: `added`'s `share` of it, face by face where its faces differ. */
@@ -269,7 +285,7 @@ fn see_whole(
     let behind = match op {
         Op::Carve => {
             grid.pieces.set(i, 0, [0; 3]);
-            grid.medium.set(i, 0, [0; 3]);
+            grid.medium.set(i, [0; 3], [0; 3]);
             grid.solid[i] = 0;
             return true;
         }
@@ -300,7 +316,8 @@ struct Added {
     faces: Option<[Sight; FACE_KINDS]>,
     /** How much of each face's rays it covers, if not its share. */
     cover: Option<[u32; FACE_KINDS]>,
-    medium: bool,
+    /** If a medium, how many times as fast as its share it stops each channel (`stops_faster`). */
+    medium: Option<[f64; 3]>,
     solid: bool,
 }
 
@@ -316,7 +333,15 @@ impl Added {
         let own = sight(look.kind);
         let faces = look.faces.map(|kinds| kinds.map(&sight)).filter(|faces| faces.iter().any(|s| *s != own));
         let kind = &kinds[look.kind as usize];
-        Added { op, pick, sight: own, faces, cover: look.cover, medium: kind.medium, solid: !kind.walk_through }
+        Added {
+            op,
+            pick,
+            sight: own,
+            faces,
+            cover: look.cover,
+            medium: kind.medium.then(|| stops_faster(own.0)),
+            solid: !kind.walk_through,
+        }
     }
 
     /**
@@ -343,6 +368,32 @@ impl Added {
         let colour = std::array::from_fn(|c| ((colour[c] as u64 * kept + visible * own[c] as u64) / one).min(COLOUR_ONE as u64) as u16);
         let glow = std::array::from_fn(|c| (glow[c] as u64 * kept / one + visible * glows[c] as u64) as u32);
         (after, colour, glow)
+    }
+
+    /**
+     * A site's medium, what it stops of each channel (of ALPHA) and shows,
+     * and its `glow`, once `share` (of SHARE) of the site of this one joins
+     * it: of each channel its own share, `faster`. None of a site's media
+     * hides another: this one stops its share of what the others let
+     * through, behind them, or, painted, they of what it lets through.
+     */
+    fn joins(&self, (stops, shows): ([u8; 3], [u16; 3]), glow: [u32; 3], faster: [f64; 3], share: u32) -> ([u8; 3], [u16; 3], [u32; 3]) {
+        let (all, one) = (ALPHA as u64, SHARE as u64);
+        // Of SHARE: how much of what was there is still seen, and how much of the site this is seen in, where `stopped` (of ALPHA) is.
+        let seen = |share: u64, stopped: u8| match self.op {
+            Op::Paint => (one - share, share),
+            _ => (one, (all - stopped as u64) * share / all),
+        };
+        let shares = shares(share, faster);
+        let mut after = (stops, shows);
+        for c in 0..3 {
+            let share = shares[c];
+            let (kept, visible) = seen(share, stops[c]);
+            after.0[c] = self.rounded(stops[c] as u64 * one + (all - stops[c] as u64) * share);
+            after.1[c] = ((shows[c] as u64 * kept + visible * self.sight.0[c] as u64) / one).min(COLOUR_ONE as u64) as u16;
+        }
+        let (kept, visible) = seen(share as u64, crate::grid::least(stops));
+        (after.0, after.1, std::array::from_fn(|c| (glow[c] as u64 * kept / one + visible * self.sight.1[c] as u64) as u32))
     }
 
     /**
@@ -721,7 +772,7 @@ mod tests {
             let mut grid = VoxelGrid::new(&Box3::around([0; 3], 1));
             let look = Look { faces: Some(faces), ..Look::from(of) };
             see(&mut grid, &Added::of(&look, &kinds, Op::Fill, 0, |_| [40_000; 3]), SHARE, 0, 0, 0);
-            let glows: [bool; FACE_KINDS] = std::array::from_fn(|k| grid.light(0, 0, 0, k).1 != [0; 3]);
+            let glows: [bool; FACE_KINDS] = std::array::from_fn(|k| grid.light(0, 0, 0, k).2 != [0; 3]);
             assert_eq!(glows, faces.map(|kind| kind == 1), "the site of kind {of}");
         }
     }

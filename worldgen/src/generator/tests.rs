@@ -423,7 +423,7 @@ fn a_spans_face_is_where_it_is_at_every_level() {
             let s = 1i64 << level;
             let b = Box3 { min: [0, -32 / s - 2, 0], max: [32, 32 / s + 2, 32] };
             let grid = generate(&world, &b, level);
-            let stopped = |x: i64, y: i64, z: i64| grid.light(x, y, z, along).0[0].0 as f64 / ALPHA as f64;
+            let stopped = |x: i64, y: i64, z: i64| grid.light(x, y, z, along).0.0 as f64 / ALPHA as f64;
             let lines = (0..32).flat_map(|x| (0..32).map(move |z| (x, z)));
             let tops = lines.map(|(x, z)| {
                 let sites = (b.min[1]..b.max[1]).filter(|y| (x + y + z) & 1 == 0);

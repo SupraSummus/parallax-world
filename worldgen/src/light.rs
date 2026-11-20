@@ -8,7 +8,7 @@
 //! has room for light (`past`). So a wall thinner than about its distance
 //! over the steps lets light through: more steps, less leaks.
 //! Each site sends what it glows, and of what it stops (its alpha, a
-//! medium's by channel: `stopped`) its colour times the light on its face
+//! medium's by channel) its colour times the light on its face
 //! turned back (`on_face`), a third of what it shows that way; the rest
 //! of what comes from past it gets through. So what comes from far comes from coarser levels, the
 //! coarsest's from the sky. Sites that reflect less than the tolerance
@@ -449,26 +449,17 @@ impl Light {
 
     /**
      * How light sees `site` of level `i` from direction `from`: how much of
-     * each channel it stops (alpha), its pieces and its medium (`stopped`),
+     * each channel it stops (alpha), its pieces and its medium of the rest,
      * and their colour; what it glows.
      */
     fn see(&mut self, i: usize, site: [i64; 3], from: usize) -> ((Rgb, Rgb), Rgb) {
         let glowing = self.glow;
         let Some(([x, y, z], grid)) = self.hold(i, site) else { return (([0.0; 3], [0.0; 3]), [0.0; 3]) };
-        let ([(pieces, p), (medium, m)], glow) = grid.light(x, y, z, from);
-        // Their colours come premultiplied, of COLOUR_ONE: as a share of the light on what it stops.
-        let [pieces, medium] = [pieces, medium].map(|a| f32::from(a) / ALPHA as f32);
-        let [p, m] = [p, m].map(|colour| colour.map(|c| c as f32 / COLOUR_ONE as f32));
-        // The medium stops of the rays the pieces let through, and shows its colour of what it stops.
-        let (stops, shows) = if medium > 0.0 {
-            let colour = m.map(|c| c / medium);
-            let stops = stopped(medium / (1.0 - pieces), colour).map(|s| s * (1.0 - pieces));
-            (stops, std::array::from_fn(|c| stops[c] * colour[c]))
-        } else {
-            ([0.0; 3], [0.0; 3])
-        };
-        let alpha: Rgb = std::array::from_fn(|c| pieces + stops[c]);
-        let colour = std::array::from_fn(|c| if alpha[c] > 0.0 { ((p[c] + shows[c]) / alpha[c]).min(1.0) } else { 0.0 });
+        let ((pieces, p), (medium, m), glow) = grid.light(x, y, z, from);
+        // What they show comes premultiplied, of COLOUR_ONE: as a share of the light on what it stops.
+        let alpha: Rgb = std::array::from_fn(|c| (pieces as f32 + medium[c] as f32) / ALPHA as f32);
+        let shows: Rgb = std::array::from_fn(|c| (p[c] + m[c]) as f32 / COLOUR_ONE as f32);
+        let colour = std::array::from_fn(|c| if alpha[c] > 0.0 { (shows[c] / alpha[c]).min(1.0) } else { 0.0 });
         ((alpha, colour), glow.map(|g| g as f32 * glowing))
     }
 
@@ -765,7 +756,7 @@ impl Light {
         for d in 0..N {
             let q = add(site, DIRECTIONS[d]);
             let from = self.opposite[d];
-            let pieces = self.hold(i, q).is_some_and(|([x, y, z], grid)| grid.light(x, y, z, from).0[0].0 > 0);
+            let pieces = self.hold(i, q).is_some_and(|([x, y, z], grid)| grid.light(x, y, z, from).0.0 > 0);
             if pieces && !self.drawn(i, q) {
                 light[d] = self.light(i, q)[d];
             }
@@ -820,20 +811,6 @@ impl Light {
             }
         }
     }
-}
-
-/**
- * What a medium of `alpha` and `colour` stops of each channel of a ray
- * crossing its site. Its colour is what it sends on of the light it stops,
- * channel by channel, and it scatters all alike: so it stops each the
- * more, the darker its colour there, and its alpha is of the channel it
- * stops least. A grey one stops all alike; one dark in red stops red
- * first. The voxels engine has the same law (voxels.wgsl's `lets_through`).
- */
-fn stopped(alpha: f32, colour: Rgb) -> Rgb {
-    let sends = colour.map(|c| c.max(1.0 / 255.0));
-    let most = sends.into_iter().fold(0.0, f32::max);
-    sends.map(|c| 1.0 - (1.0 - alpha).powf(most / c))
 }
 
 /** A look's colour as a share of the light on it, linear, as light adds up; looks are sRGB. */

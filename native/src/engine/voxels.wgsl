@@ -271,14 +271,18 @@ const OPAQUE = 1.0 / 256.0;
 // times what each let through of them; and what they let through, each channel.
 var<private> gathered = vec3f(0.0);
 var<private> through = vec3f(1.0);
-// What a see-through voxel of look `v` lets through along `path` of its grid's units, each channel.
-// Its colour (linear) is what it sends on of the light it stops, channel by channel, and it scatters all alike:
-// so it stops each the more, the darker its colour there. Its alpha is of the channel it stops least.
-// A grey one stops all alike, as its alpha says; one dark in red stops red first. Light has the same law (light.rs's `stopped`).
-fn lets_through(v: u32, path: f32) -> vec3f {
-  let sends = max(to_linear(unpack4x8unorm(v).rgb), vec3f(1.0 / 255.0));
-  let most = max(sends.r, max(sends.g, sends.b));
-  return pow(vec3f(1.0 - f32(v >> 24u) / 255.0), path / CHORD * most / sends);
+// What the see-through voxel of look `v` at `r` in the brick at `slot` stops of each channel of a ray crossing it:
+// its alpha, unless the brick holds its voxels' own, in the slot after it (voxels.rs's STOPS).
+fn medium_stops(slot: i32, r: vec3i, v: u32) -> vec3f {
+  let more = next[slot];
+  if more >= 0 && (more & STOPS) != 0 {
+    return unpack4x8unorm(site_in(more & ~STOPS, r)).rgb;
+  }
+  return vec3f(f32(v >> 24u) / 255.0);
+}
+// What a see-through voxel that stops `stops` of a ray crossing it lets through along `path` of its grid's units, each channel.
+fn lets_through(stops: vec3f, path: f32) -> vec3f {
+  return pow(1.0 - stops, vec3f(path / CHORD));
 }
 // Where the ray from `o` leaves the cell of scale `j` (voxels.rs's CELLS)
 // it is in at `mid`, if no voxel meets that cell: it meets none till then.
@@ -331,7 +335,7 @@ fn march(d: vec3f) -> Hit {
     var s = site_at(o + d * at);
     var brick = vec3i(-1 << 30);
     var slot = UNKNOWN;
-    var medium = 0u;
+    var medium = vec3f(0.0);
     var tint = vec3f(0.0);
     // Of the cells of the two scales, fine and coarse, till where the ray is in one some voxel meets.
     var fine = -1.0;
@@ -355,8 +359,8 @@ fn march(d: vec3f) -> Hit {
         if v >> 24u == 255u && (steps > 0 || at > 0.0) {
           return Hit(level, s, v, at * scale);
         }
-        medium = v;
         if v != 0u {
+          medium = medium_stops(slot, r, v);
           tint = medium_colour(slot, r, v);
         }
       }
@@ -373,13 +377,13 @@ fn march(d: vec3f) -> Hit {
       var step = vec3i(0);
       step[k] = i32(way);
       step[(k + 1) % 3] = i32(select(-way, way, by_plus));
-      if medium != 0u {
+      if any(medium != vec3f(0.0)) {
         // Its path through the voxel: from where it entered (or the eye) to where it leaves.
         let stops = 1.0 - lets_through(medium, leave - at);
         let fog = 1.0 - exp(-(at + leave) * 0.5 * scale / globals.fog);
         gathered += through * stops * mix(tint, globals.horizon.rgb, fog);
         through *= 1.0 - stops;
-        medium = 0u;
+        medium = vec3f(0.0);
         if all(through < vec3f(OPAQUE)) {
           return Hit(NONE, vec3i(0), 0u, 0.0);
         }
@@ -446,6 +450,10 @@ fn coloured(rgb: vec3f, light: Light) -> vec3f {
 // The look through face `k` (of FACES) of the voxel hit: its brick's next slots hold its faces', one a slot, if they differ.
 fn face_look(hit: Hit, k: u32) -> u32 {
   var faces = next[brick_of(hit.level, hit.site)];
+  // Past what its see-through voxels stop, if it holds that.
+  if faces >= 0 && (faces & STOPS) != 0 {
+    faces = next[faces & ~STOPS];
+  }
   if faces < 0 {
     return hit.voxel;
   }

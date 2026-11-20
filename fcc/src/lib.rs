@@ -139,7 +139,8 @@ pub const ALPHA: u8 = 255;
 /**
  * What a voxel looks like, in a word: its colour, sRGB, a byte a channel
  * from red in the lowest, and in the highest its alpha, how much of the
- * rays through its site it stops. 0 is none: what is there stops some.
+ * rays through its site it stops; a see-through one's, of the channel it
+ * stops least (Grid's `stops`). 0 is none: what is there stops some.
  */
 pub type Look = u32;
 
@@ -158,6 +159,8 @@ pub const fn alpha_of(look: Look) -> u8 {
 pub const VIEW_WORDS: usize = 1 + FACE_KINDS;
 /** Words per site in a grid's `glow`: its index in `cells`, then what it glows per channel. */
 pub const GLOW_WORDS: usize = 4;
+/** Words per site in a grid's `stops`: its index in `cells`, then what it stops of each channel, a byte each as a look's colour. */
+pub const STOPS_WORDS: usize = 2;
 
 /**
  * The sites of a box in bricks, BRICK units wide (see VoxelGrid).
@@ -177,6 +180,13 @@ pub struct Grid {
     pub views: Vec<u32>,
     /** The sites that glow, shown or not, by index in `cells`: GLOW_WORDS each, for the light (worldgen's light.rs). */
     pub glow: Vec<u32>,
+    /**
+     * The see-through sites that do not stop every channel alike, by index
+     * in `cells`: STOPS_WORDS each. Of a ray crossing one it stops that
+     * much of each channel and shows its colour of it; its look's alpha is
+     * of the channel it stops least, to what takes one for all.
+     */
+    pub stops: Vec<u32>,
     /** Bit i % 32 of word i / 32: whether the voxel at index i of `cells` stops a walking body (bake's walk.rs). */
     pub solid: Vec<u32>,
 }
@@ -193,6 +203,11 @@ fn first_from(words: &[u32], per: usize, i: usize) -> usize {
         }
     }
     lo
+}
+
+/** Whether `words`, `per` words a site, sorted by index, has any site at `sites`. */
+fn has(words: &[u32], per: usize, sites: std::ops::Range<usize>) -> bool {
+    words.get(first_from(words, per, sites.start) * per).is_some_and(|&i| sites.contains(&(i as usize)))
 }
 
 /** The words after site index `i` in `words`, `per` words a site, sorted by index; None if it has none. */
@@ -212,6 +227,7 @@ impl Grid {
             cells: vec![0; used * BRICK_SITES],
             views: Vec::new(),
             glow: Vec::new(),
+            stops: Vec::new(),
             solid: vec![0; used * BRICK_SITES / 32],
         }
     }
@@ -245,6 +261,7 @@ impl Grid {
             sites.concat()
         };
         (part.views, part.glow) = (kept(&self.views, VIEW_WORDS), kept(&self.glow, GLOW_WORDS));
+        part.stops = kept(&self.stops, STOPS_WORDS);
         // Grown brick by brick, they hold room for up to as much again; a tile is kept long.
         part.cells.shrink_to_fit();
         part.solid.shrink_to_fit();
@@ -312,8 +329,18 @@ impl Grid {
 
     /** Whether any site at `sites` (indices in `cells`) looks unlike through some faces. */
     pub fn has_views(&self, sites: std::ops::Range<usize>) -> bool {
-        let at = first_from(&self.views, VIEW_WORDS, sites.start) * VIEW_WORDS;
-        self.views.get(at).is_some_and(|&i| sites.contains(&(i as usize)))
+        has(&self.views, VIEW_WORDS, sites)
+    }
+
+    /** What the see-through site at index `i` of `cells` stops of each channel, a byte each as a look's colour: its alpha of all, unless `stops` says. */
+    pub fn stops_at(&self, i: usize) -> Look {
+        let alpha = alpha_of(self.cells[i]);
+        words_of(&self.stops, STOPS_WORDS, i).map_or(look([alpha; 3], 0), |w| w[0])
+    }
+
+    /** Whether any site at `sites` (indices in `cells`) stops channels unlike. */
+    pub fn has_stops(&self, sites: std::ops::Range<usize>) -> bool {
+        has(&self.stops, STOPS_WORDS, sites)
     }
 }
 

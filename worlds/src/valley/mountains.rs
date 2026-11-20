@@ -68,7 +68,7 @@ const LOWLAND: Fx = Fx::m(10.0);
 const SHELF: i64 = 30;
 /**
  * The sea is see-through: a medium whose colour is dark in red, so it stops
- * red first (light.rs's `stopped`). Its floor shows greener, then bluer,
+ * red first (worldgen's `stops_faster`). Its floor shows greener, then bluer,
  * the deeper it is, to some 10 m down.
  * Its top SEA_TOP is another, lighter and denser, so that where the sea
  * ends shows: little from above, most along the water.

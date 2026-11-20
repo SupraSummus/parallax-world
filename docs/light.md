@@ -278,7 +278,7 @@ How a site shows to hosts and to light, and what glows, is a prototype too:
   did not help the yard, and cost 2.5 to 4 times the time;
   mixing each direction's light into its neighbours' blurred more every level;
 - a medium's colour is what it sends on of the light it stops, each time,
-  and it stops a channel the more, the darker its colour there (`stopped`),
+  and it stops a channel the more, the darker its colour there (generators.md, "Kinds and things"),
   so a thick layer of it, where light is stopped many times on its way out,
   shows darker than its colour (the moor's mist is nearly white for that);
   shaded, hosts show the colour as it is.

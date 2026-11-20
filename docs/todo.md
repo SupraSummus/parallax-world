@@ -232,6 +232,10 @@ Numbers are for the forest at 1280×800, as measured when written.
   The survey could give both: wide boxes around fields' strata,
   the places of the costliest strata.
   Then `Region` would go.
+  Unlisted, a field is checked by its cells alone, which see little of a medium on its ground:
+  each held to what is in it, to the world's `levels`,
+  in a region its stratum shares with others (the sea's, with its beach).
+  So the valley's far sites showed the sea's floor dry till its coast was listed.
 - **Things' variants of one part, drawing the same kinds, are one stratum**
   (`worldgen::checks::survey`): a ruin and a watchtower, both of stone,
   are checked in one region between them.
@@ -488,14 +492,17 @@ Numbers are for the forest at 1280×800, as measured when written.
     would let a ray take the sky's colour where shine changes along it.
     Not looked at in the chunks engines, whose slabs blur where a medium ends.
     Ponds, the moor's water and wells are still whole voxels.
-  - The voxels engine and the light stop each channel by the medium's colour
-    (architecture.md, "Native: another engine"), others the alpha for every channel:
-    the chunks engines, whose pictures hold one optical depth a column,
-    and picture.rs's rays, so the contract and the light's reference.
-    The law is written twice, in voxels.wgsl and light.rs, a test for each;
-    picture.rs's rays would be its third place, and the one to hold the others to.
-    A thin medium's look clips a channel at 255 where its alpha rounds down,
-    so the voxels engine stops too little of its other channels.
+  - The chunks engines take a medium's alpha for every channel,
+    their pictures holding one optical depth a column;
+    the voxels engine, the light and picture.rs's rays take each channel's own
+    (architecture.md, "Native: another engine").
+  - Lit (computed), the sea from above is darker at the finer levels,
+    a ring where they meet (`seed=12345&world=valley&camera=-51216,3251,-9490&look=-473,-90`
+    with `--light 3.5,1,0`); shaded, it is not.
+    Left for now. Likely the light on a thick site:
+    a coarse site of water is lit whole by the light on its faces,
+    where the fine sites it stands for are each lit through those above.
+    No check sees light across levels: the contract's rays have a white light all round.
   - From inside the sea, the voxels engine shows bright dots along two diagonals
     of the picture (`seed=42&world=valley&camera=-36000,-336,40000&look=90,0`),
     as it did before: not looked into.

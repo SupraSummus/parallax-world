@@ -909,7 +909,7 @@ mod tests {
 
     /**
      * A medium stops each channel the more, the darker its colour there
-     * (voxels.wgsl's lets_through): pink, half as bright (linear) in green as in red,
+     * (worldgen's stops_faster, as voxels.wgsl's lets_through draws it): pink, half as bright (linear) in green as in red,
      * lets through of red what its extinction says, and of green that twice over.
      * What a white wall behind it shows over a black one is what it lets through.
      */
