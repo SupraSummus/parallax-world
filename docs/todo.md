@@ -146,9 +146,12 @@ Numbers are for the forest at 1280×800, as measured when written.
   each through `put`, its brick looked up, at level 0 its shade hashed.
   A line's run of them put brick by brick would spare most of that.
 - **A site's glow and views are kept in maps by site** (`VoxelGrid`),
-  so `generate` marks apart which sites may be in them (`odd`),
-  not to look each up as it adds to it.
-  Kept by brick, as the sites are, the grid would know itself.
+  so the grid marks which sites may be in them (`odd`),
+  not to look each up as it is added to or read.
+  A seventh of the valley's sites are in `views`,
+  which take as much as all the sites' pieces.
+  Kept by brick, as pieces and media are (`Part`),
+  the maps and the marks would go.
   Sites unlike through their faces are the dearest to put:
   few of a tile's, each added face by face
   and taken out of the map and put back,
@@ -437,9 +440,11 @@ Numbers are for the forest at 1280×800, as measured when written.
   completing the valley's first view takes four threads
   about a sixth more work than one, lit a third more,
   and each thread holds tens of MB more:
-  its plans keep as many columns as two tiles had when 128 sites wide (`SLOTS`),
-  likely more than the small ones need.
-  A generator all threads share would measure each thing once.
+  its plans keep as many columns as two tiles had when 128 sites wide (`SLOTS`).
+  A quarter as many slots made a third more columns; four times as many, few fewer.
+  Of the columns four threads make, a sixth are ones another made:
+  a worker taking the nearest of the first jobs wanted spared few of them.
+  A generator all threads share would make each once, and measure each thing once.
   Tiles side by side still make again the things reaching both;
   those one above another are made together (`made_with`).
 - **Walking, native keeps more than a core busy**
@@ -505,12 +510,10 @@ Numbers are for the forest at 1280×800, as measured when written.
   and more as the eye moves:
   a tile's sites (`Shared`) are kept beside the grid drawn of them,
   though a brick lit needs them no more, till one beside it is lit;
-  and the light of the sites read lately, a few hundred MB (`KEPT_SITES`)
+  and the light of the tiles read lately, a few hundred MB (`KEPT_SITES`)
   ([light.md](light.md), "In native, and what it costs").
   Keeping only the sites read last was tried, twice:
   lighting slows, by tiles made again.
-  A site's medium takes as much as its pieces, in every brick,
-  though few bricks hold any.
 - **Native makes more tiles than rays ask for.**
   A tile is made with those above and below it (`made_with`),
   and rays ask for few of them:
