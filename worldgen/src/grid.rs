@@ -166,6 +166,8 @@ impl Part {
                 kept.colour.extend_from_slice(&self.colour[sites]);
             }
         }
+        kept.alpha.shrink_to_fit();
+        kept.colour.shrink_to_fit();
         *self = kept;
     }
 }
@@ -243,6 +245,7 @@ impl<T: Clone> Few<T> {
                 kept.set(to * BRICK_SITES + i % BRICK_SITES, Some(value.clone()));
             }
         }
+        kept.marks.shrink_to_fit();
         kept.held.shrink_to_fit();
         *self = kept;
     }
