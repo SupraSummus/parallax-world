@@ -50,7 +50,7 @@ pub fn lowest_around(ground: impl Fn(i64, i64) -> i64, x: i64, z: i64) -> i64 {
 /**
  * The spans of a column whose ground's top unit is `height`, at the sites
  * read for, built from its top: layers stack down from it, media up from
- * it. Its spans come out bottom up, water last.
+ * it. Its spans come out bottom up, what fills up to a level (`fill_to`) last.
  */
 pub struct Column {
     height: i64,
@@ -130,12 +130,12 @@ impl Column {
     }
 
     /**
-     * Water (or any `kind`) where the ground is under `level`, up to it
-     * (its top unit, as the ground's `height`). At least two sites deep:
-     * where it is shallower, it reaches down over the ground's top, so
+     * `kind` on the ground where it is under `level`, up to it
+     * (its top unit, as the ground's `height`), as what stands in a hollow.
+     * At least two sites deep: where it is shallower, it reaches down over the ground's top, so
      * a field painting it keeps it there.
      */
-    pub fn water_to(mut self, kind: impl Into<Kind>, level: i64) -> Column {
+    pub fn fill_to(mut self, kind: impl Into<Kind>, level: i64) -> Column {
         if self.height < level {
             let from = (self.height + 1).min(level + 1 - 2 * self.spacing);
             self.above.push(Span::solid(from, level + 1, kind));
@@ -168,8 +168,8 @@ mod tests {
 
     #[test]
     fn every_solid_span_holds_a_site_at_every_level() {
-        // A thin turf over soil, shallow water: each still on every line of sites, at every level.
-        let column = |h: i64, s: i64| footprint(s, [0, 0], || Column::new(h).surface(1, 1).fill_below(2, h - 2).water_to(4, h + 1).spans());
+        // A thin turf over soil, a shallow fill: each still on every line of sites, at every level.
+        let column = |h: i64, s: i64| footprint(s, [0, 0], || Column::new(h).surface(1, 1).fill_below(2, h - 2).fill_to(4, h + 1).spans());
         for level in 0..6 {
             let s = 1 << level;
             for h in -40..40 {

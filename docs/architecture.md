@@ -892,8 +892,17 @@ each pixel takes the nearest of the voxels its four nearest samples met
 that its own ray enters, so edges stay sharp.
 See-through voxels add up in the order the ray meets them,
 each stopping `1 − (1 − alpha)^(path / chord)` of what is left,
-its path the ray's through the voxel, until little is let through;
-a pixel takes the medium in front of what it sees
+its path the ray's through the voxel, until little is let through.
+Each channel apart (`lets_through`):
+a medium's colour (linear) is what it sends on of the light it stops,
+and it scatters every channel alike,
+so it stops each the more, the darker its colour there,
+its alpha that of the channel it stops least.
+Grey mist stops all alike; the sea stops red first,
+so its floor turns green, then blue, with the water in front of it.
+The light has the same law (light.rs's `stopped`);
+the chunks engines take the alpha for every channel.
+A pixel takes the medium in front of what it sees
 from those of its samples that saw the same.
 Tests hold the window's table to a new one's after any moves and tiles
 (`a_window_moved_and_its_tiles_changed_holds_what_a_new_one_would`),
@@ -902,8 +911,10 @@ its box and its cells counted hollow, at its edge too, to ones no voxel it holds
 its rays to their steps (`no_ray_of_the_voxels_runs_out_of_steps`),
 a block's coarse voxels to the faces rays enter them by (`voxels_show_the_faces_rays_enter_by`),
 the picture to the same one with the world and the eye moved by a vector of the lattice
-that is not one of the bricks' (`voxels_look_the_same_wherever_the_bricks_fall`)
-and a slab of medium to exp(−extinction · path), as the splats' test does.
+that is not one of the bricks' (`voxels_look_the_same_wherever_the_bricks_fall`),
+a slab of medium to exp(−extinction · path), as the splats' test does,
+and each channel to its own
+(`a_medium_of_voxels_stops_more_of_the_channels_its_colour_is_darker_in`).
 
 The panel picks the lighting apart from the engine (`Lighting`):
 voxels shaded by the way their faces face, or computed,

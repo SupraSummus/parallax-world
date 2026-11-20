@@ -475,6 +475,17 @@ Numbers are for the forest at 1280×800, as measured when written.
     would let a ray take the sky's colour where shine changes along it.
     Not looked at in the chunks engines, whose slabs blur where a medium ends.
     Ponds, the moor's water and wells are still whole voxels.
+  - The voxels engine and the light stop each channel by the medium's colour
+    (architecture.md, "Native: another engine"), others the alpha for every channel:
+    the chunks engines, whose pictures hold one optical depth a column,
+    and picture.rs's rays, so the contract and the light's reference.
+    The law is written twice, in voxels.wgsl and light.rs, a test for each;
+    picture.rs's rays would be its third place, and the one to hold the others to.
+    A thin medium's look clips a channel at 255 where its alpha rounds down,
+    so the voxels engine stops too little of its other channels.
+  - From inside the sea, the voxels engine shows bright dots along two diagonals
+    of the picture (`seed=42&world=valley&camera=-36000,-336,40000&look=90,0`),
+    as it did before: not looked into.
   - At the levels whose sites are a few pixels wide, the sea shows rings (the valley, from 600 m up):
     a ray for every 4 × 4 pixels takes its medium from a lattice of see-through sites as fine.
   - Most of what a fragment costs is reading its four columns from storage:

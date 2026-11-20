@@ -866,6 +866,59 @@ mod tests {
         }
     }
 
+    /** A wall, white if `WHITE`, else black, behind a slab of pink medium if `VEILED`, as `wall`'s. No channel of the pink at 255: thin, its look would clip it. */
+    fn pink<const WHITE: bool, const VEILED: bool>(_: u64) -> worldgen::World {
+        use worldgen::generator::{Field, Generator, KindDef, Layer, Op};
+        let kinds = vec![
+            KindDef { name: "medium", kind_type: 8, colors: &["#bc8989"], walk_through: true, glows: false, medium: true },
+            KindDef {
+                name: "wall",
+                kind_type: 10,
+                colors: if WHITE { &["#ffffff"] } else { &["#000000"] },
+                walk_through: false,
+                glows: false,
+                medium: false,
+            },
+        ];
+        let slab = Field::at("slab", 0.0, Op::Fill, |x, y, z| match x + z {
+            _ if y.abs() >= 48 => None,
+            k if (NEAR..FAR).contains(&k) && VEILED => Some((MEDIUM, Some(0.015))),
+            k if (FAR..FAR + 16).contains(&k) => Some((WALL, None)),
+            _ => None,
+        });
+        let generator = Generator { kinds, seed: 1, layers: vec![Layer::Field(slab)] };
+        worldgen::World { generator, spawn: [0, 0, 0], heights: Some((-64, 64)), points: Vec::new() }
+    }
+
+    /**
+     * A medium stops each channel the more, the darker its colour there
+     * (voxels.wgsl's lets_through): pink, half as bright (linear) in green as in red,
+     * lets through of red what its extinction says, and of green that twice over.
+     * What a white wall behind it shows over a black one is what it lets through.
+     */
+    #[test]
+    #[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
+    fn a_medium_of_voxels_stops_more_of_the_channels_its_colour_is_darker_in() {
+        // The mean of red and of green over 9 × 9 pixels in the middle of the picture.
+        let seen = |make: Make| {
+            let (width, pixels) = along_a_face(Kind::Voxels, make);
+            [0, 1].map(|c| {
+                (96..=104)
+                    .flat_map(|j| (156..=164).map(move |i| (i, j)))
+                    .map(|(i, j)| f64::from(pixels[4 * (j * width as usize + i) + c]))
+                    .sum::<f64>()
+                    / 81.0
+            })
+        };
+        let [bare, white, black] = [seen(pink::<true, false>), seen(pink::<true, true>), seen(pink::<false, true>)];
+        let [red, green] = [0, 1].map(|c| (white[c] - black[c]) / bare[c]);
+        let expected = (-0.015 * (FAR - NEAR) as f64 / std::f64::consts::SQRT_2).exp();
+        assert!((red - expected).abs() < 0.01, "red: {red:.3} let through, {expected:.3} expected");
+        let [most, less] = [0xbc, 0x89].map(|c| f64::from(fcc::light::srgb_to_linear(f32::from(c as u8) / 255.0)));
+        let expected = expected.powf(most / less);
+        assert!((green - expected).abs() < 0.01, "green: {green:.3} let through, {expected:.3} expected");
+    }
+
     /** A white wall behind two slabs of medium, a red one and a green one, the red nearer if `RED_NEAR`. */
     fn red_and_green<const RED_NEAR: bool>(_: u64) -> worldgen::World {
         use worldgen::generator::{Field, Generator, KindDef, Layer, Op};

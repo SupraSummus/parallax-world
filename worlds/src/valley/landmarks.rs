@@ -593,7 +593,7 @@ fn layers(landmarks: Rc<Landmarks>, hold: Holding, ground: Rc<Sloped>) -> Vec<La
             }
             let mut column = Column::new(ground.at(x, z));
             if bowl < Fx::ONE {
-                column = column.water_to(T::water, level);
+                column = column.fill_to(T::water, level);
             }
             if 2 * plan::spacing() <= REED_HEIGHT && bowl > fx(0.62) && landmarks.reeds.at(x, z) > fx(0.58) {
                 column = column.medium(K::reed, REED_HEIGHT, 0.6);
