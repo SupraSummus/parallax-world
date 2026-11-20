@@ -1128,7 +1128,7 @@ pnpm wasm --features sponza && pnpm exec vite
 ```
 
 ```bash
-cargo run --release -p parallax-native --features worlds/sponza -- --view 'world=sponza&look=90,5' --shot out.png
+cargo run --release -p parallax-native --features worlds/sponza -- --headless --world sponza --look 90,5 --shot out.png
 ```
 
 ## Writing a world

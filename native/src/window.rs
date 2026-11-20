@@ -25,11 +25,11 @@ pub trait Content {
     /** egui's ui for a frame. */
     fn ui(&mut self, ui: &mut egui::Ui);
     /** What the ui last asked to draw, and where it shows, under egui's. */
-    fn picture(&mut self) -> Option<(Box<dyn Picture>, egui::Rect)>;
+    fn picture(&self) -> Option<(&dyn Picture, egui::Rect)>;
     /** What it showed last, for a report. */
     fn describe(&self) -> String;
-    /** Where the last frame's time went. */
-    fn timed(&mut self, times: Times);
+    /** The frame drawn on `easel`: where its time went. */
+    fn drawn(&mut self, times: Times, easel: &mut Easel);
 }
 
 /**
@@ -148,13 +148,7 @@ impl Gpu {
     }
 
     /** Draws the content's picture, then egui's `output` over it, and shows them: how long the upload and the wait for the window's image took. */
-    fn draw(
-        &mut self,
-        window: &Window,
-        content: &mut impl Content,
-        output: egui::FullOutput,
-        ctx: &egui::Context,
-    ) -> Result<[f64; 2], Lost> {
+    fn draw(&mut self, window: &Window, content: &impl Content, output: egui::FullOutput, ctx: &egui::Context) -> Result<[f64; 2], Lost> {
         let start = Instant::now();
         let pixels_per_point = output.pixels_per_point;
         let screen = egui_wgpu::ScreenDescriptor { size_in_pixels: [self.config.width, self.config.height], pixels_per_point };
@@ -164,7 +158,7 @@ impl Gpu {
             let viewport = egui::epaint::ViewportInPixels::from_points(&rect, pixels_per_point, screen.size_in_pixels);
             let pixels = [viewport.width_px as u32, viewport.height_px as u32];
             (pixels[0] > 0 && pixels[1] > 0).then(|| {
-                self.easel.draw(&*picture, pixels);
+                self.easel.draw(picture, pixels);
                 viewport
             })
         });
@@ -261,10 +255,10 @@ impl<C: Content> Windowed<C> {
         open.egui.handle_platform_output(&open.window, std::mem::take(&mut output.platform_output));
         self.next = output.viewport_output.get(&egui::ViewportId::ROOT).and_then(|v| Instant::now().checked_add(v.repaint_delay));
         let ui = start.elapsed().as_secs_f64() * 1000.0;
-        match open.gpu.draw(&open.window, &mut self.content, output, &ctx) {
+        match open.gpu.draw(&open.window, &self.content, output, &ctx) {
             Ok([upload, waiting]) => {
                 let rest = start.elapsed().as_secs_f64() * 1000.0 - ui - upload - waiting;
-                self.content.timed(Times { ui, upload, waiting, rest, since });
+                self.content.drawn(Times { ui, upload, waiting, rest, since }, &mut open.gpu.easel);
                 // A painter that left work for later frames gets them, even if nothing moves.
                 if !open.gpu.easel.settled() {
                     self.next = Some(Instant::now());

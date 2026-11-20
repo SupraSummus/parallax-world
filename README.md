@@ -7,20 +7,20 @@ in a window or a browser:
 by rays through the voxels,
 or by cells of the lattice baked into chunks, drawn in relief.
 
-![Autumn forest by the railway, mist lying among the trunks over heather](docs/shots/forest-fog.webp "--view 'seed=12345&world=valley&camera=-2231,139,13027&look=-142,1&fov=90&distance=40000' --light 4,1,0")
+![Autumn forest by the railway, mist lying among the trunks over heather](docs/shots/forest-fog.webp "--camera -2231,139,13027 --look -142,1 --distance 40000 --light 4,1,0")
 
 <table>
 <tr>
-<td width="50%"><img src="docs/shots/town.webp" alt="A street into the town's square, its fountain and church, by day" title="--view 'seed=12345&amp;world=valley&amp;camera=0,40,1420&amp;look=0,-6' --light 1,1,0"><br><sub>The town's square by day</sub></td>
-<td width="50%"><img src="docs/shots/town-night.webp" alt="The same square at night, lit by its street lamps" title="--view 'seed=12345&amp;world=valley&amp;camera=0,40,1420&amp;look=0,-6' --light 0.01,0,1"><br><sub>And at night, by its lamps</sub></td>
+<td width="50%"><img src="docs/shots/town.webp" alt="A street into the town's square, its fountain and church, by day" title="--camera 0,40,1420 --look 0,-6 --light 1,1,0"><br><sub>The town's square by day</sub></td>
+<td width="50%"><img src="docs/shots/town-night.webp" alt="The same square at night, lit by its street lamps" title="--camera 0,40,1420 --look 0,-6 --light 0.01,0,1"><br><sub>And at night, by its lamps</sub></td>
 </tr>
 <tr>
-<td><img src="docs/shots/tunnel.webp" alt="From a railway tunnel's dark bore out to the forest in daylight" title="--view 'seed=12345&amp;world=valley&amp;camera=-2005,177,8336&amp;look=180,0' --light 1,1,0"><br><sub>Out of the railway's tunnel</sub></td>
-<td><img src="docs/shots/city-night.webp" alt="City blocks at night, the streets lit by lamps, lit windows" title="--view 'seed=12345&amp;world=city&amp;camera=-2,250,-150&amp;look=0,-30' --light 0.01,0,1"><br><sub>The city at night</sub></td>
+<td><img src="docs/shots/tunnel.webp" alt="From a railway tunnel's dark bore out to the forest in daylight" title="--camera -2005,177,8336 --look 180,0 --light 1,1,0"><br><sub>Out of the railway's tunnel</sub></td>
+<td><img src="docs/shots/city-night.webp" alt="City blocks at night, the streets lit by lamps, lit windows" title="--world city --camera -2,250,-150 --look 0,-30 --light 0.01,0,1"><br><sub>The city at night</sub></td>
 </tr>
 <tr>
-<td><img src="docs/shots/mountainside.webp" alt="Mist over the heath on a slope, spruces and a peak above it" title="--view 'seed=12345&amp;world=valley&amp;camera=6911,2128,12155&amp;look=19,4&amp;fov=90&amp;distance=40000' --light 2.5,1,0"><br><sub>Mist under a peak</sub></td>
-<td><img src="docs/shots/valley.webp" alt="The valley: a town's square and church, forest up to the mountains" title="--view 'seed=12345&amp;world=valley&amp;camera=0,400,1000&amp;look=0,-3&amp;distance=40000' --light 1,1,0"><br><sub>The valley, 5 km deep</sub></td>
+<td><img src="docs/shots/mountainside.webp" alt="Mist over the heath on a slope, spruces and a peak above it" title="--camera 6911,2128,12155 --look 19,4 --distance 40000 --light 2.5,1,0"><br><sub>Mist under a peak</sub></td>
+<td><img src="docs/shots/valley.webp" alt="The valley: a town's square and church, forest up to the mountains" title="--camera 0,400,1000 --look 0,-3 --distance 40000 --light 1,1,0"><br><sub>The valley, 5 km deep</sub></td>
 </tr>
 </table>
 
@@ -115,8 +115,10 @@ pnpm install
 pnpm dev
 ```
 
-The page takes a view in its query, as `--view` does:
-`?seed=&world=&camera=x,y,z&look=yaw,pitch&fov=&distance=&detail=`
+The page takes the native frontend's options in its query,
+each `--key value` as `key=value`
+(`pnpm shot --help` lists them):
+`?world=moor&camera=x,y,z&look=yaw,pitch&light=1,1,0`
 (camera in lattice units, angles in degrees).
 
 Other scripts (`check`, `test`, `lint`, `build`, `shot`)

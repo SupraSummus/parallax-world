@@ -135,13 +135,13 @@ CI runs the same scripts plus `pnpm build`, in jobs side by side,
 and `native/`'s tests that draw, on Mesa's software Vulkan.
 For rendering changes, also look at the result,
 in the window or the browser (`pnpm dev`); unit tests can't see pixels.
-Without a GPU, `pnpm shot --view QUERY --shot out.png`
-saves a picture of a view once it is complete;
-it takes the page's view query, e.g. `'seed=1&world=moor&look=30,-10'`,
+Without a GPU, `pnpm shot --world moor --look 30,-10 --shot out.png`
+saves a picture of a view once it is complete,
+headless (`pnpm shot --help` lists the options),
 and wants Mesa's software Vulkan (`apt-get install mesa-vulkan-drivers`).
 A software GPU takes the cores the world's threads work on:
-to time those, moving, add `--stroll SECONDS --by-work`
-(`native/src/main.rs`), which gives them each frame's time to themselves.
+to time those, moving, add `--stroll SECONDS --by-work`,
+which gives them each frame's time to themselves.
 
 ## Rules
 
