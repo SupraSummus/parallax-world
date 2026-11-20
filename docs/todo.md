@@ -147,7 +147,10 @@ Numbers are for the forest at 1280×800, as measured when written.
   A line's run of them put brick by brick would spare most of that.
 - **Sites unlike through their faces are the dearest to put.**
   A seventh of the valley's sites are in `views` (`VoxelGrid`),
-  which take as much as all the sites' pieces.
+  which take as much as all the sites' pieces,
+  held by sight (`Sights`); each its own twelve, twice that.
+  Half are alike another site's: held once, they took a third less,
+  for a grid not to be changed once held. Not kept.
   Each is added to face by face (`pieces` in `generate.rs`),
   a dozen sums a put:
   lighting a small view, where most of the work is the coarser levels' tiles,
