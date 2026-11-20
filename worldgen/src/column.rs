@@ -259,17 +259,52 @@ mod tests {
         }
     }
 
-    /** A world of stone, and moss, see-through or not, a field of `columns` its ground, drawn by `op`. */
-    fn ground(op: Op, see_through: bool, columns: impl Fn(i64, i64) -> Column + Send + Sync + 'static) -> Generator {
-        let kind = |name, colour, medium| crate::generator::KindDef {
-            name,
+    #[test]
+    fn a_sea_shows_as_much_from_above_at_every_level() {
+        // Dark water under a thin, paler, denser top, on stone: where a coarse site holds two of them,
+        // the top is in front of the water, not in its place nor mixed with it, and the water in front of the floor.
+        let kinds = vec![kind(&"#808080", false), kind(&"#2478a0", true), kind(&"#9cc4d6", true)];
+        let sea = |_, _| Column::new(0).surface(0, 1).medium(1, 38, 0.8 / 38.0).medium(2, 2, 0.4 / 2.0);
+        let world = Generator { kinds, seed: 1, layers: vec![Layer::Field(Field::columns("sea", 0.0, Op::Paint, sea))] };
+        let shown = |level: u32| {
+            let s = (1i64 << level) as f64;
+            let grid = generate(&world, &Box3 { min: [0, -6, 0], max: [64, (40 >> level) + 6, 64] }, level);
+            let mut sum = [0.0; 3];
+            for i in 0..4096 {
+                let at = |n: u64| 8.0 + 48.0 * crate::noise::hash(n, i, 0, 0) as f64 / u32::MAX as f64;
+                for (_, seen) in composited(&grid, [at(1), 40.0 / s + 5.0, at(2)], [0.0, -1.0, 0.0], 40.0 / s + 10.0, 1.0) {
+                    (0..3).for_each(|c| sum[c] += seen.shown[c] / 4096.0);
+                }
+            }
+            sum
+        };
+        let fine = shown(0);
+        // Not past level 5, where a voxel holds all of the sea. Not nearer than this: a site's share of the water
+        // stops red for all its rays, those that meet the top in the site beside it too (0.027 of red at level 4).
+        for level in 1..6 {
+            let coarse = shown(level);
+            for c in 0..3 {
+                assert!((coarse[c] - fine[c]).abs() < 0.035, "level {level}: rays down see {coarse:.3?}, at level 0 {fine:.3?}");
+            }
+        }
+    }
+
+    /** A kind of `colour`, a medium or not. */
+    fn kind(colour: &'static &'static str, medium: bool) -> crate::generator::KindDef {
+        crate::generator::KindDef {
+            name: "",
             kind_type: 1,
             colors: std::slice::from_ref(colour),
             walk_through: false,
             glows: false,
             medium,
-        };
-        let kinds = vec![kind("stone", &"#808080", false), kind("moss", &"#408040", see_through)];
+        }
+    }
+
+    /** A world of stone, and moss, see-through or not, a field of `columns` its ground, drawn by `op`. */
+    fn ground(op: Op, see_through: bool, columns: impl Fn(i64, i64) -> Column + Send + Sync + 'static) -> Generator {
+        // The moss grey, so that see-through it stops every channel alike.
+        let kinds = vec![kind(&"#808080", false), kind(&"#404040", see_through)];
         Generator { kinds, seed: 1, layers: vec![Layer::Field(Field::columns("ground", 0.0, op, columns))] }
     }
 }

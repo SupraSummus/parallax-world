@@ -593,6 +593,10 @@ made coarse levels look denser near.
 What rays see, a `Look`, is how much of them stops,
 and what shows: each site's colour, linear, by how much of it the site stops,
 and what glows, as in compositing (premultiplied).
+A medium stops each channel its own share (`VoxelGrid`'s `medium`),
+so a ray keeps what gets through of each,
+and how much of it stops is of the channel most gets through in.
+Hosts, light and these rays all take what the site holds.
 Linear, as a coarse site averages finer ones;
 with no sky behind, as over any sky
 it differs by no more than its colour and how much it stops do.
@@ -633,7 +637,7 @@ in shares of material types or in sRGB.
   so what is finer than the sites must show in proportion ("Plans" in "Levels").
   Things are left out, with their far fields,
   as their far forms keep what rays see around them, not from above.
-  The valley's has its first town,
+  The valley's has its first town and the sea off its coast,
   the moor's its stream and patches of heath,
   the learned town's its whole crop;
 - at each level up to one past the world's, in each region
@@ -709,6 +713,7 @@ The engine's tests also check that a thing's carves cut only the thing.
 A new world is a crate of its own in `worlds/`, as the cheese is,
 an entry in `WORLDS`
 with `far` regions where its fields have patterns finer than the far sites,
+or a medium on ground the far sites are taller than (a sea on its floor),
 and its name in `worlds!` in `worlds/tests/contract.rs`,
 whose tests fail without it.
 To see a world without the renderer,
@@ -950,10 +955,24 @@ Things are in a site in two ways, and it keeps a share for each:
 pieces smaller than the site, as leaves are,
 stop a share of its rays whole;
 a kind marked `medium`, as mist is,
-stops a share of every ray the pieces let through.
+stops a share of every ray the pieces let through, of each channel its own.
+Its colour is what it sends on of the light it stops,
+and it scatters every channel alike:
+so it stops each the more, the darker its colour there
+(`stops_faster` in `generate.rs`, the law's one place),
+grey mist all alike, the sea red first.
+A site's medium is what that comes to, not the kind:
+how much of each channel it stops, and what that shows.
+So among a site's media none hides another:
+each stops its share of what the others let through,
+behind them, or, painted, in front (`Added::joins`),
+and the sea's pale top stays pale over its dark water.
 Painted, a medium lies on the site's pieces as any paint does,
 and takes their place as far as it covers them:
 so the sea hides its floor where both are in one coarse site.
+A site is still one look, whatever lies where in it:
+its share of the water stops red for every ray through it,
+those that meet the sea's top in the site beside it too.
 So a coarse site of a crown in mist holds both, each as it is.
 The pieces show as grain, a whole voxel as often (`VoxelGrid::show`);
 where they don't, a host that draws alpha

@@ -89,7 +89,8 @@ pub const WORLDS: &[Entry] = &[
     // A mountainside behind a crest above the treeline: scree and rock, and alpine meadows among them at some seeds.
     // Moorland on the valley's floor, a steading by the path from 4.5 km on: heather and grass, boulders, its hut, path and ring.
     // The railway's first station: its building, the platform, the track and the formation either side, forest or fields round them.
-    // Far away, all of that town and a few metres of fields around it: its streets and paving are finer than the sites there.
+    // Far away, all of that town and a few metres of fields around it: its streets and paving are finer than the sites there;
+    // and the sea off the coast, from 16 m out: its shallows, where far sites are taller than the water is deep.
     Entry {
         name: "valley",
         make: valley::valley,
@@ -104,7 +105,7 @@ pub const WORLDS: &[Entry] = &[
         ],
         levels: 4,
         accuracy: &[],
-        far: &[Region::at("town", [-704, -38, -736], [704, 298, 736])],
+        far: &[Region::at("town", [-704, -38, -736], [704, 298, 736]), Region::at("coast", [-1536, -38, -704], [-128, 298, 704])],
         far_levels: 6,
     },
     // The first steading: its hut, the cairns and the ring north of it, heather and grass, from under the ground to over the roof.

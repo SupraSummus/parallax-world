@@ -75,7 +75,7 @@ impl Reference {
     /** One sample of the light from face `face` of the voxel at `site`: at a random point of it, from a random direction, `bounces` more to follow. */
     fn on_face(&self, site: [i64; 3], face: usize, random: &mut Random, bounces: usize) -> Rgb {
         let [x, y, z] = site;
-        let ([(alpha, colour), _], glow) = self.grid.light(x, y, z, face);
+        let ((alpha, colour), _, glow) = self.grid.light(x, y, z, face);
         debug_assert_eq!(alpha, ALPHA, "voxels of the reference's scenes are whole");
         let normal = normalize(FACES[face].map(|v| v as f64));
         let point = add(rhombus(site, face, random), normal.map(|c| c * OFF));
@@ -94,7 +94,7 @@ impl Reference {
             Some((_, site, face)) if bounces > 0 => self.on_face(site, face, random, bounces - 1),
             Some((_, [x, y, z], face)) => {
                 // Followed as often as it reflects, its light the more for it: on average, all of it.
-                let ([(_, colour), _], glow) = self.grid.light(x, y, z, face);
+                let ((_, colour), _, glow) = self.grid.light(x, y, z, face);
                 let survives = (colour.iter().copied().max().unwrap_or(0) as f32 / COLOUR_ONE as f32).min(SURVIVES);
                 let glow = glow.map(|g| g as f32 * self.glow);
                 if random.next() < survives as f64 {

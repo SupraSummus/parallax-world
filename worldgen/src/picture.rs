@@ -152,7 +152,8 @@ pub struct Picture {
 /**
  * A ray through the level's voxels, in its units: where it is, the voxel
  * it is in and the face it entered by (12: none); composited, how much of
- * it gets through what it crossed.
+ * each channel of it gets through what it crossed: a medium stops them
+ * unlike.
  */
 #[derive(Clone, Copy)]
 struct Ray {
@@ -163,7 +164,14 @@ struct Ray {
     end: f64,
     site: [i64; 3],
     face: usize,
-    through: f64,
+    through: [f64; 3],
+}
+
+impl Ray {
+    /** How much of it gets through, in the channel most does. */
+    fn left(&self) -> f64 {
+        self.through.into_iter().fold(0.0, f64::max)
+    }
 }
 
 /**
@@ -215,29 +223,34 @@ pub(crate) fn over(alpha: f64, crossings: f64) -> f64 {
 
 /**
  * What the site `ray` is in shows it, as light sees it: its pieces (as
- * seen along the ray, fcc's `facing`) and its medium, each how much of the ray
- * it stops and what that shows (linear, premultiplied), and what the
+ * seen along the ray, fcc's `facing`) and its medium of the rays they let
+ * through, channel by channel: how much of the ray stops (in the channel
+ * most gets through), what shows (linear, premultiplied), and what the
  * site glows to it; the rest goes on (`through`). A site stops its alpha
  * of a ray crossing its voxel: here, of one crossing `part` of the
  * voxel's chord (starting or ending in it) that stands for `crossing`
  * crossings (CROSSING along a row, 1 at any offset), `over` both.
  */
-fn composite(ray: &mut Ray, grid: &VoxelGrid, part: f64, crossing: f64) -> ([(f64, [f64; 3]); 2], [f64; 3]) {
+fn composite(ray: &mut Ray, grid: &VoxelGrid, part: f64, crossing: f64) -> (f64, [f64; 3], [f64; 3]) {
     let [x, y, z] = ray.site;
-    let (mut parts, mut glow, mut faces) = ([(0.0, [0.0; 3]); 2], [0.0; 3], 0.0);
+    let (mut stops, mut shows, mut glow, mut faces) = ([0.0; 3], [0.0; 3], [0.0; 3], 0.0);
     for k in fcc::facing(ray.direction) {
-        let (seen, glows) = grid.light(x, y, z, k);
-        for (sum, (alpha, colour)) in parts.iter_mut().zip(seen) {
-            sum.0 += alpha as f64 / ALPHA as f64;
-            (0..3).for_each(|c| sum.1[c] += colour[c] as f64 / COLOUR_ONE as f64);
+        let (pieces, medium, glows) = grid.light(x, y, z, k);
+        for c in 0..3 {
+            stops[c] += (pieces.0 as f64 + medium.0[c] as f64) / ALPHA as f64;
+            shows[c] += (pieces.1[c] as f64 + medium.1[c] as f64) / COLOUR_ONE as f64;
+            glow[c] += glows[c] as f64 / GLOW_ONE as f64;
         }
-        (0..3).for_each(|c| glow[c] += glows[c] as f64 / GLOW_ONE as f64);
         faces += 1.0;
     }
-    let through = ray.through * over((parts[0].0 + parts[1].0) / faces, part * crossing) / faces;
-    let parts = parts.map(|(alpha, colour)| (through * alpha, colour.map(|c| through * c)));
-    ray.through -= parts[0].0 + parts[1].0;
-    (parts, glow.map(|g| through * g))
+    let before = ray.left();
+    let (mut shown, mut glows) = ([0.0; 3], [0.0; 3]);
+    for c in 0..3 {
+        let through = ray.through[c] * over(stops[c] / faces, part * crossing) / faces;
+        (shown[c], glows[c]) = (through * shows[c], through * glow[c]);
+        ray.through[c] -= through * stops[c];
+    }
+    (before - ray.left(), shown, glows)
 }
 
 #[derive(Clone, Copy)]
@@ -349,10 +362,9 @@ impl Tiles {
                 } else {
                     match tile.grid.get_or_empty_brick(x, y, z) {
                         Some(_) if seen.is_some() => {
-                            let (parts, glow) = composite(ray, &tile.grid, walk.part(ray, &planes), 1.0);
-                            let seen = seen.as_mut().expect("composited");
-                            seen.add(parts[0].0 + parts[1].0, [0, 1, 2].map(|c| parts[0].1[c] + parts[1].1[c]), glow);
-                            if ray.through < OPAQUE {
+                            let (stopped, shown, glow) = composite(ray, &tile.grid, walk.part(ray, &planes), 1.0);
+                            seen.as_mut().expect("composited").add(stopped, shown, glow);
+                            if ray.left() < OPAQUE {
                                 return Step::Miss;
                             }
                             None
@@ -392,17 +404,16 @@ impl Tiles {
  * Each site counts as `crossing` crossings (CROSSING along a row).
  */
 pub(crate) fn composited(grid: &VoxelGrid, origin: [f64; 3], direction: [f64; 3], end: f64, crossing: f64) -> Vec<(f64, Seen)> {
-    let mut ray = Ray { pixel: 0, origin, direction, t: 0.0, end, site: nearest_site(origin), face: FACES.len(), through: 1.0 };
+    let mut ray = Ray { pixel: 0, origin, direction, t: 0.0, end, site: nearest_site(origin), face: FACES.len(), through: [1.0; 3] };
     let walk = Walk::new(direction);
     let mut planes = walk.planes(&ray);
     let mut seen = Vec::new();
-    while ray.t <= end && ray.through >= OPAQUE {
+    while ray.t <= end && ray.left() >= OPAQUE {
         let t = ray.t;
         let part = walk.part(&ray, &planes);
-        let ([pieces, medium], glow) = composite(&mut ray, grid, part, crossing);
-        let stopped = pieces.0 + medium.0;
+        let (stopped, shown, glow) = composite(&mut ray, grid, part, crossing);
         if stopped > 0.0 || glow != [0.0; 3] {
-            seen.push((t, Seen { stopped, shown: [0, 1, 2].map(|c| pieces.1[c] + medium.1[c]), glow }));
+            seen.push((t, Seen { stopped, shown, glow }));
         }
         walk.cross(&mut ray, &mut planes);
     }
@@ -432,7 +443,7 @@ fn entered(ray: &Ray) -> usize {
 /** Where a ray from `origin` along `direction` (a level's units) first enters a voxel of `grid`, if before `end`: how far, the voxel's site and the face it enters by. */
 #[cfg(test)]
 pub(crate) fn first_hit(grid: &VoxelGrid, origin: [f64; 3], direction: [f64; 3], end: f64) -> Option<(f64, [i64; 3], usize)> {
-    let mut ray = Ray { pixel: 0, origin, direction, t: 0.0, end, site: nearest_site(origin), face: FACES.len(), through: 1.0 };
+    let mut ray = Ray { pixel: 0, origin, direction, t: 0.0, end, site: nearest_site(origin), face: FACES.len(), through: [1.0; 3] };
     let walk = Walk::new(direction);
     let mut planes = walk.planes(&ray);
     while ray.t <= end {
@@ -714,7 +725,7 @@ fn picture_of_tiles(camera: &Camera, tiles: &mut Tiles, tops: &Tops, make: &mut 
             continue;
         }
         let site = nearest_site([0, 1, 2].map(|i| origin[i] + t * direction[i]));
-        rays.push(Ray { pixel, origin, direction, t, end, site, face: FACES.len(), through: 1.0 });
+        rays.push(Ray { pixel, origin, direction, t, end, site, face: FACES.len(), through: [1.0; 3] });
     }
     let fog = match camera.projection {
         Projection::Perspective { .. } => FOG,
@@ -754,7 +765,7 @@ fn picture_of_tiles(camera: &Camera, tiles: &mut Tiles, tops: &Tops, make: &mut 
                 }
                 Step::Miss => {
                     picture.set(ray.pixel, 0, f64::INFINITY, sky(ray.direction));
-                    seen.add(ray.through, [0.0; 3], [0.0; 3]);
+                    seen.add(ray.left(), [0.0; 3], [0.0; 3]);
                 }
                 Step::Hit(look, normal) => {
                     let entered = match FACES.get(ray.face) {
@@ -976,7 +987,7 @@ mod tests {
         let mut grid = VoxelGrid::new(&Box3 { min: [-8; 3], max: [8; 3] });
         for (x, y, z) in (-8..8).flat_map(|z| (-8..8).flat_map(move |y| (-8..8).map(move |x| (x, y, z)))) {
             if let Some(i) = grid.index(x, y, z) {
-                grid.medium.set(i, ALPHA / 2, [0; 3]);
+                grid.medium.set(i, [ALPHA / 2; 3], [0; 3]);
             }
         }
         let (origin, direction) = ([-3.1, -2.3, -1.7], normalize([0.8, 0.5, 0.3]));

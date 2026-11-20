@@ -250,7 +250,7 @@ fn stripes(dithered: bool, level: u32) -> (f64, Vec<u32>) {
     let (mut red, mut stopped) = (0.0, 0.0);
     for &(x, y, z) in &sites {
         for k in 0..FACE_KINDS {
-            let [(alpha, colour), _] = grid.light(x, y, z, k).0;
+            let (alpha, colour) = grid.light(x, y, z, k).0;
             (red, stopped) = (red + colour[0] as f64 / COLOUR_ONE as f64, stopped + alpha as f64 / ALPHA as f64);
         }
     }

@@ -98,6 +98,8 @@ const COUNTS: usize = CELLS + (CELLS >> 6);
 const AROUND: u32 = (1 << 27) - 1;
 /** A table's entries other than slots (voxels.wgsl's). */
 const EMPTY: i32 = -1;
+/** In a slot's `next` (Pool): the slot after it holds what the brick's see-through voxels stop of each channel (`words`), not its looks through a face. */
+const STOPS: i32 = 1 << 30;
 const UNKNOWN: i32 = -2;
 
 const SKY_TOP: [f32; 3] = [0x3f as f32 / 255.0, 0x73 as f32 / 255.0, 0xb8 as f32 / 255.0];
@@ -279,21 +281,35 @@ fn sites(first: usize) -> std::ops::Range<usize> {
     first * BRICK_SITES..(first + 1) * BRICK_SITES
 }
 
-/** Slots the brick of `grid` whose sites start at `first` takes: one, and PARTS more if its voxels look unlike through some faces. */
+/**
+ * Slots the brick of `grid` whose sites start at `first` takes: one, one
+ * more if some see-through voxel of it stops channels unlike, and PARTS
+ * more if its voxels look unlike through some faces.
+ */
 fn slots(grid: &fcc::Grid, first: usize) -> usize {
-    1 + if grid.has_views(sites(first)) { PARTS } else { 0 }
+    1 + usize::from(grid.has_stops(sites(first))) + if grid.has_views(sites(first)) { PARTS } else { 0 }
 }
 
 /**
  * Part `part` of the brick whose sites start at `first` in `grid`'s cells
  * (in bricks) as the GPU takes it, a word a site: part 0, each site's
- * look; part 1 + k, its look through face k (of VOXEL_FACES), its site's
- * where they do not differ.
+ * look; then, if the brick has any (`slots`), what each see-through site
+ * stops of each channel (fcc's `stops_at`); then part k of the rest, its
+ * look through face k (of VOXEL_FACES), its site's where they do not
+ * differ.
  */
 fn words(grid: &fcc::Grid, first: usize, part: usize) -> impl Iterator<Item = u32> + '_ {
+    let stops = usize::from(grid.has_stops(sites(first)));
     sites(first).map(move |i| match grid.cells[i] {
         look if part == 0 || look == 0 => look,
-        look => grid.views_at(i).map_or(look, |views| views[part - 1]),
+        look if part == stops => {
+            if fcc::alpha_of(look) < u8::MAX {
+                grid.stops_at(i)
+            } else {
+                0
+            }
+        }
+        look => grid.views_at(i).map_or(look, |views| views[part - 1 - stops]),
     })
 }
 
@@ -555,7 +571,9 @@ const PARTS: usize = fcc::FACE_KINDS;
 /**
  * The pool's slots: those free, and per slot, the next of its brick's
  * (EMPTY if none): a brick whose voxels look unlike through some faces
- * takes PARTS more, its looks through each face (words' parts), in a chain.
+ * takes PARTS more, its looks through each face (words' parts), in a
+ * chain; before them, marked STOPS, one for what its see-through voxels
+ * stop of each channel, if they differ.
  */
 struct Pool {
     free: Vec<u32>,
@@ -578,6 +596,9 @@ impl Pool {
         for pair in chain.windows(2) {
             self.next[pair[0] as usize] = pair[1] as i32;
         }
+        if tile.grid.has_stops(sites(first)) {
+            self.next[chain[0] as usize] |= STOPS;
+        }
         chain[0]
     }
 
@@ -586,11 +607,16 @@ impl Pool {
         let (mut slot, mut count) = (slot as i32, 0);
         while slot >= 0 {
             self.free.push(slot as u32);
-            slot = std::mem::replace(&mut self.next[slot as usize], EMPTY);
+            slot = after(std::mem::replace(&mut self.next[slot as usize], EMPTY));
             count += 1;
         }
         count
     }
+}
+
+/** The slot a slot's `next` names, EMPTY if none: without its mark. */
+fn after(next: i32) -> i32 {
+    if next < 0 { next } else { next & !STOPS }
 }
 
 /** A tile a window holds bricks of; per brick of its grid (in its cells, its buried ones one: worldgen's VoxelGrid::bury), its slot (EMPTY if none) and how many entries hold it. */
@@ -1110,7 +1136,7 @@ pub struct Marcher {
 /** voxels.wgsl, with the constants it shares with this file. */
 fn shader() -> String {
     format!(
-        "const WINDOW = {WINDOW};\nconst CELLS = {CELLS}u;\nconst BRICK = {BRICK};\nconst BRICK_SHIFT = {BRICK_SHIFT}u;\nconst BRICK_SITES = {BRICK_SITES}u;\nconst LIGHT_WORDS = {LIGHT_WORDS}u;\nconst FACTOR = {FACTOR}u;\nconst EMPTY = {EMPTY};\nconst UNKNOWN = {UNKNOWN};\nconst FACES = array<vec3f, {}>({});\n{}",
+        "const WINDOW = {WINDOW};\nconst CELLS = {CELLS}u;\nconst BRICK = {BRICK};\nconst BRICK_SHIFT = {BRICK_SHIFT}u;\nconst BRICK_SITES = {BRICK_SITES}u;\nconst LIGHT_WORDS = {LIGHT_WORDS}u;\nconst FACTOR = {FACTOR}u;\nconst EMPTY = {EMPTY};\nconst STOPS = {STOPS};\nconst UNKNOWN = {UNKNOWN};\nconst FACES = array<vec3f, {}>({});\n{}",
         fcc::FACE_KINDS,
         fcc::VOXEL_FACES.map(|[x, y, z]| format!("vec3f({x}.0, {y}.0, {z}.0)")).join(", "),
         include_str!("voxels.wgsl")
@@ -1549,7 +1575,7 @@ mod tests {
             let mut words = Vec::new();
             while slot >= 0 {
                 words.extend(&slots[&(slot as u32)]);
-                slot = windows.pool.next[slot as usize];
+                slot = after(windows.pool.next[slot as usize]);
             }
             words
         };

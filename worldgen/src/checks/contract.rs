@@ -109,7 +109,8 @@ const FAR: Accuracy = Accuracy { apart: 0.0125, spread: f64::INFINITY };
 pub fn whole_equals_parts(generator: &Generator, region: &Box3, level: u32) {
     let whole = box_at(region, level);
     let grid = generate(generator, &whole, level);
-    assert!([&grid.pieces, &grid.medium].iter().any(|part| part.alpha.iter().any(|a| *a != 0)), "level {level} is empty");
+    let empty = grid.pieces.alpha.iter().all(|a| *a == 0) && grid.medium.alpha.iter().all(|a| *a == [0; 3]);
+    assert!(!empty, "level {level} is empty");
     // Eight parts, split at random points (seeded, so failures reproduce).
     let mut random = Rng::new(7);
     let mut split = |axis: usize, even: bool| {
@@ -162,12 +163,17 @@ const SEEN: f64 = 1e-3;
  * How far apart two looks are in `channels`, in the one they differ the
  * most in: how much stops, and the colour of what stops (what shows over
  * how much stops), so a thin medium's colour or glow counts as much as a
- * solid's.
+ * solid's. A look that is no number is no number apart, which is within
+ * nothing (`Margin::broken`, `breaks`).
  */
 pub fn apart(a: &Look, c: &Look, channels: Range<usize>) -> f64 {
     let colour = |l: &Look, i: usize| if i == 0 { l[0] } else { l[i] / l[0] };
     let coloured = a[0] >= SEEN && c[0] >= SEEN;
-    channels.filter(|&i| i == 0 || coloured).map(|i| (colour(c, i) - colour(a, i)).abs()).fold(0.0, f64::max)
+    // f64::max would drop a NaN.
+    channels
+        .filter(|&i| i == 0 || coloured)
+        .map(|i| (colour(c, i) - colour(a, i)).abs())
+        .fold(0.0, |most, d| if d <= most { most } else { d })
 }
 
 /** The look of what pixels see (a mean over them). */
@@ -211,7 +217,7 @@ impl Margin {
 
     /** Whether this region alone is as far apart, or as spread, as a stratum may be on average `within`, or more. */
     pub fn broken(&self, within: Accuracy) -> bool {
-        self.difference() >= within.apart || self.spread >= within.spread
+        !(self.difference() < within.apart && self.spread < within.spread)
     }
 }
 

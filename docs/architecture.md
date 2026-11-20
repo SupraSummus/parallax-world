@@ -535,15 +535,15 @@ that its own ray enters, so edges stay sharp.
 See-through voxels add up in the order the ray meets them,
 each stopping `1 − (1 − alpha)^(path / chord)` of what is left,
 its path the ray's through the voxel, until little is let through.
-Each channel apart (`lets_through`):
-a medium's colour (linear) is what it sends on of the light it stops,
-and it scatters every channel alike,
-so it stops each the more, the darker its colour there,
-its alpha that of the channel it stops least.
+Each channel apart (`lets_through`), by what the voxel stops of it:
+a site's medium holds that, and what it shows, channel by channel
+("Kinds and things" in generators.md),
+handed over beside the looks where the channels differ (fcc's `stops`),
+a slot more for a brick that has any (`STOPS`).
 Grey mist stops all alike; the sea stops red first,
 so its floor turns green, then blue, with the water in front of it.
-The light has the same law (light.rs's `stopped`);
-the chunks engines take the alpha for every channel.
+The chunks engines take the look's alpha for every channel:
+that of the channel stopped least.
 A pixel takes the medium in front of what it sees
 from those of its samples that saw the same.
 Tests hold the window's table to a new one's after any moves and tiles
