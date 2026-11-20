@@ -260,7 +260,7 @@ mod tests {
     }
 
     /** A world of stone, and moss, see-through or not, a field of `columns` its ground, drawn by `op`. */
-    fn ground(op: Op, see_through: bool, columns: impl Fn(i64, i64) -> Column + 'static) -> Generator {
+    fn ground(op: Op, see_through: bool, columns: impl Fn(i64, i64) -> Column + Send + Sync + 'static) -> Generator {
         let kind = |name, colour, medium| crate::generator::KindDef {
             name,
             kind_type: 1,

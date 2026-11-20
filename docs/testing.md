@@ -35,10 +35,11 @@ one world's: `cargo test --release -p worlds --test contract valley`.
 | `worlds/tests/cost.rs` | What generating each world costs, counted, stays within a quarter of its baseline (`worlds/data/cost/`; "Cost" in `docs/generators.md`) |
 | `worlds/src/path.rs` | Whether a column is by a path agrees with its distance to the path's curve, round a steep, fast-bending spine |
 | `worlds/src/valley/railway.rs` | The valley's railway keeps its grade and its band of the valley, out of towns; it bends gently; few bridges and tunnels, none a stub, one through each spur and over each gorge on its side |
+| `worldgen/src/plan.rs` | Plans: finer ones refused, slopes kept, claims apart; a column read while threads keep others is whole or not found |
 | `worldgen/src/points.rs` | Points: a cell holds its children's, whichever is asked first; they stand where their mark has a chance, as often as it is; a blur is its cells' counts weighed, wherever its blocks fall |
 | `worlds/tests/places.rs` | No world's things prefer places on its grids (`worldgen/src/checks/places.rs`), but those known to (`KNOWN`, docs/todo.md) |
 | `worlds/tests/directions.rs`, `worldgen/src/checks/directions.rs` | No world's directions follow the lattice's, but around the places known to (`KNOWN`, docs/todo.md); walls along the axes or the diagonals do; hills, gentle or steep, rows along z, and walls turned any way a seed likes don't |
-| `worlds/tests/forest.rs`, `worlds/tests/valley.rs`, `worlds/tests/city.rs` | The scenes: determinism, contents, spawn |
+| `worlds/tests/forest.rs`, `worlds/tests/valley.rs`, `worlds/tests/city.rs` | The scenes: determinism, contents, spawn; threads sharing a world make its tiles as one alone |
 
 ## Conventions
 

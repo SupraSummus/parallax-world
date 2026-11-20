@@ -4,7 +4,7 @@
 //! and the ground's slope, both coarser than it: it bids for gentle land
 //! near towns, and draws only the columns it wins.
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use worldgen::column::Column;
 use worldgen::domain::{Domain, Scope};
@@ -38,7 +38,7 @@ pub const SLOPE_SCALE: i64 = m(16.0);
  * at a town's edge, none 90 to 150 m out (by noise), and none where the
  * ground is steep: `slope`, rise over run.
  */
-pub fn round_towns(scope: &Scope, towns: Rc<Towns>, slope: Rc<Plan<Fx>>) -> impl Fn(i64, i64) -> Fx + 'static {
+pub fn round_towns(scope: &Scope, towns: Arc<Towns>, slope: Arc<Plan<Fx>>) -> impl Fn(i64, i64) -> Fx + Send + Sync + 'static {
     let reach = Fbm::<{ m(160.0) }, 3>::new(scope.seed("reach"));
     move |x, z| {
         let d = towns.distance(x, z).max(Units(0));
@@ -66,12 +66,12 @@ const CROPS: [Crop; 6] = [Crop::Wheat, Crop::Wheat, Crop::Stubble, Crop::Ploughe
 /** The fields, a domain bidding `bid` for each column, kept off the forest's `path`. */
 pub struct Fields {
     scope: Scope,
-    path: Rc<Path>,
-    bid: Box<dyn Fn(i64, i64) -> Fx>,
+    path: Arc<Path>,
+    bid: Box<dyn Fn(i64, i64) -> Fx + Send + Sync>,
 }
 
 impl Fields {
-    pub fn new(scope: Scope, path: Rc<Path>, bid: impl Fn(i64, i64) -> Fx + 'static) -> Fields {
+    pub fn new(scope: Scope, path: Arc<Path>, bid: impl Fn(i64, i64) -> Fx + Send + Sync + 'static) -> Fields {
         Fields { scope, path, bid: Box::new(bid) }
     }
 }
@@ -81,7 +81,7 @@ impl Domain for Fields {
         (self.bid)(x, z)
     }
 
-    fn layers(self: Rc<Self>, ground: &Rc<Sloped>, hold: Holding) -> Vec<Layer> {
+    fn layers(self: Arc<Self>, ground: &Arc<Sloped>, hold: Holding) -> Vec<Layer> {
         layers(&self.scope, hold, ground.clone(), self.path.clone())
     }
 }
@@ -91,7 +91,7 @@ struct Plots {
     seed: u64,
     hold: Holding,
     /** The forest's path. */
-    path: Rc<Path>,
+    path: Arc<Path>,
     warp: ValueNoise<{ m(64.0) }>,
 }
 
@@ -120,8 +120,8 @@ impl Plots {
 }
 
 /** The fields' layers on `ground`, along `path`, where they own the land. */
-fn layers(scope: &Scope, hold: Holding, ground: Rc<Sloped>, path: Rc<Path>) -> Vec<Layer> {
-    let f = Rc::new(Plots { seed: scope.seed("plots"), hold, path, warp: ValueNoise::new(scope.seed("warp")) });
+fn layers(scope: &Scope, hold: Holding, ground: Arc<Sloped>, path: Arc<Path>) -> Vec<Layer> {
+    let f = Arc::new(Plots { seed: scope.seed("plots"), hold, path, warp: ValueNoise::new(scope.seed("warp")) });
     let dithers = scope.seed("dither");
     let plots = {
         let (f, ground) = (f.clone(), ground.clone());

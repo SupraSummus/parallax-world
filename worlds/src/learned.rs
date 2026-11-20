@@ -19,10 +19,8 @@
 //! canopy and texture rules (no town, not fields) are the forest's; houses
 //! (town.rs's) stand on the leaves' boxes, facing the street beside them.
 
-use std::cell::RefCell;
 use std::collections::HashMap;
-use std::rc::Rc;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use worldgen::column::Column;
 use worldgen::domain::{Domain, Lie, Scope, compose, eased};
@@ -31,6 +29,7 @@ use worldgen::generator::{ANY_SIZE, Child, Children, Field, Generator, Layer, No
 use worldgen::grid::Box3;
 use worldgen::noise::{Fx, Rng, ease_towards, fx, hash64};
 use worldgen::plan::{Claims, Holding, Plan, Sloped};
+use worldgen::recent::Memo;
 use worldgen::units::{Units, m};
 use worldgen::world::{Find, World};
 
@@ -395,15 +394,15 @@ impl Spot {
 /** The settlements along the path: where they are, and each one's layout, drawn once and kept (the last few). */
 struct Settlements {
     sites: Claims<Site>,
-    layouts: RefCell<Vec<(i64, Rc<Layout>)>>,
+    layouts: Memo<i64, Layout>,
     spots: Plan<Spot>,
 }
 
-/** Layouts kept: a host's tiles are near one or two settlements at a time. */
+/** Layouts kept, and as many asked for before them: a host's tiles are near one or two settlements at a time. */
 const KEPT: usize = 4;
 
 impl Settlements {
-    fn new(scope: &Scope, relief: Rc<Relief>) -> Rc<Settlements> {
+    fn new(scope: &Scope, relief: Arc<Relief>) -> Arc<Settlements> {
         let s = scope.seed("settlements");
         let crop = grammar().crop;
         let sites = Claims::new("settlements", s, CLAIM, APART, Some([0, FIRST]), move |[x, z], random| {
@@ -420,11 +419,11 @@ impl Settlements {
             let level = Fx::mean(around.map(|(i, j)| relief.ground(i * half, z + j * half, Fx::ZERO))).round_units().0;
             Some(([0, z], Site { x: 0, z, level, seed }))
         });
-        Rc::new_cyclic(|me: &std::rc::Weak<Settlements>| {
+        Arc::new_cyclic(|me: &std::sync::Weak<Settlements>| {
             let me = me.clone();
             Settlements {
                 sites,
-                layouts: RefCell::new(Vec::new()),
+                layouts: Memo::new(KEPT),
                 spots: Plan::dithered("learned spots", SPOT_SCALE, move |x, z| me.upgrade().map_or(Spot::Forest, |s| s.spot_of(x, z))),
             }
         })
@@ -434,17 +433,8 @@ impl Settlements {
         self.sites.near(0, z, WITHIN).map(|(_, site)| site)
     }
 
-    fn layout(&self, site: &Site) -> Rc<Layout> {
-        let mut kept = self.layouts.borrow_mut();
-        if let Some((_, l)) = kept.iter().find(|(z, _)| *z == site.z) {
-            return l.clone();
-        }
-        let layout = Rc::new(grammar().layout(site.seed));
-        if kept.len() >= KEPT {
-            kept.remove(0);
-        }
-        kept.push((site.z, layout.clone()));
-        layout
+    fn layout(&self, site: &Site) -> Arc<Layout> {
+        self.layouts.of(&site.z, || grammar().layout(site.seed))
     }
 
     /** The label of column (x, z) in its settlement's crop, if in one. */
@@ -493,7 +483,7 @@ impl Domain for Settlements {
     }
 
     /** Its streets, paving and yards where it owns the land, and its settlements' houses. */
-    fn layers(self: Rc<Self>, ground: &Rc<Sloped>, hold: Holding) -> Vec<Layer> {
+    fn layers(self: Arc<Self>, ground: &Arc<Sloped>, hold: Holding) -> Vec<Layer> {
         town_layers(self, hold, ground.clone())
     }
 }
@@ -501,14 +491,14 @@ impl Domain for Settlements {
 /** The learned town of `seed`; the camera starts in the forest, on the path to the first settlement. */
 pub fn learned(seed: u64) -> World {
     let world = Scope::new(seed);
-    let relief = Rc::new(Relief::new(&world.of("relief")));
+    let relief = Arc::new(Relief::new(&world.of("relief")));
     let settlements = Settlements::new(&world.of("settlements"), relief.clone());
     let first = settlements.clone();
     let spine = {
         let (relief, settlements) = (relief.clone(), settlements.clone());
         Spine::new(move |z| settlements.path_x(z, relief.path_x(z)))
     };
-    let path = Rc::new(Path::new(spine.clone()));
+    let path = Arc::new(Path::new(spine.clone()));
     let ground = Lie::new(move |x, z| relief.ground(x, z, spine.across(x, z).abs()))
         .shaped(vec![settlements.clone()])
         .ground(GROUND_SCALE, forest::SLOPE);
@@ -520,7 +510,7 @@ pub fn learned(seed: u64) -> World {
         Fields::new(world.of("fields"), path.clone(), move |x, z| if settlements.spot(x, z) == Spot::Fields { Fx::ONE } else { -Fx::ONE })
     };
     let forest = Forest::new(world.of("forest"), path, spawn);
-    let domains: [Rc<dyn Domain>; 3] = [Rc::new(forest), settlements, Rc::new(fields)];
+    let domains: [Arc<dyn Domain>; 3] = [Arc::new(forest), settlements, Arc::new(fields)];
     let layers = compose(&domains, &ground, SPOT_SCALE, fx(0.125));
     let kinds = [forest::KINDS, town::KINDS, crate::valley::fields::KINDS].concat();
     let first: Find = Box::new(move || first.near(FIRST).map(|s| [s.x, s.level, s.z]).expect("the first settlement"));
@@ -533,7 +523,7 @@ pub fn learned(seed: u64) -> World {
 }
 
 /** The town's layers: its streets, paving and yards where it owns the land, and its settlements' houses. */
-fn town_layers(settlements: Rc<Settlements>, hold: Holding, ground: Rc<Sloped>) -> Vec<Layer> {
+fn town_layers(settlements: Arc<Settlements>, hold: Holding, ground: Arc<Sloped>) -> Vec<Layer> {
     let surface = {
         let (settlements, ground) = (settlements.clone(), ground.clone());
         let on = ground.clone();

@@ -12,12 +12,10 @@
 //! winds round rises; seen from above it turns at its points, so it is
 //! smoothed, a B-spline through them.
 
-use std::rc::Rc;
-
 use worldgen::curve::Curve;
 use worldgen::domain::Scope;
 use worldgen::noise::{Fx, fx, hash, unit};
-use worldgen::plan::Plan;
+use worldgen::plan::Large;
 use worldgen::units::{UNIT_SIZE, Units, m};
 
 use crate::path::Spine;
@@ -60,12 +58,12 @@ const SCALE: i64 = m(512.0);
 
 /** The route along the valley's floor: its points, by piece. */
 pub struct Route {
-    pieces: Plan<Option<Rc<Vec<[Fx; 2]>>>>,
+    pieces: Large<Vec<[Fx; 2]>>,
 }
 
 impl Route {
     /** The route along `course` keeping lowest on `floor`, the ground at (x, z) before anything shapes it. */
-    pub fn new(course: Spine, floor: impl Fn(i64, i64) -> Fx + 'static) -> Route {
+    pub fn new(course: Spine, floor: impl Fn(i64, i64) -> Fx + Send + Sync + 'static) -> Route {
         let wander = WANDER.iter().map(|&w| Units(w).to_fx()).collect();
         let rule = Curve::new(wander, move |level, a: [Fx; 2], b: [Fx; 2]| {
             let (middle, z) = ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2);
@@ -77,11 +75,11 @@ impl Route {
             [x, z]
         });
         let end = move |k: i64| [course.x(k * PIECE), Units(k * PIECE).to_fx()];
-        Route { pieces: Plan::new("route", SCALE, move |_, k| Some(Rc::new(rule.points([end(k), end(k + 1)])))) }
+        Route { pieces: Large::new("route", SCALE, move |_, k| rule.points([end(k), end(k + 1)])) }
     }
 
-    fn piece(&self, k: i64) -> Rc<Vec<[Fx; 2]>> {
-        self.pieces.at(0, k).expect("a piece")
+    fn piece(&self, k: i64) -> &[[Fx; 2]] {
+        self.pieces.at(0, k)
     }
 
     /** Its x at z, with its fraction: a uniform cubic B-spline through its points. */

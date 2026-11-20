@@ -11,7 +11,7 @@
 //! solids with a measured far form (`town::thing`), open frames and boards
 //! as they are.
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use worldgen::column::Column;
 use worldgen::domain::{Domain, Scope, eased};
@@ -434,8 +434,8 @@ enum Spot {
 
 /** The valley's landmarks, claimed anywhere. */
 pub struct Landmarks {
-    terrain: Rc<Terrain>,
-    sites: Rc<Claims<Site>>,
+    terrain: Arc<Terrain>,
+    sites: Arc<Claims<Site>>,
     /** What each column round a landmark is. */
     spots: Plan<Spot>,
     /** Clumps of reeds. */
@@ -444,11 +444,11 @@ pub struct Landmarks {
 
 impl Landmarks {
     /** The landmarks on `terrain`, clear of `railway`, the first a chapel by the path ahead of the camera. */
-    pub fn new(scope: &Scope, terrain: Rc<Terrain>, railway: Rc<Railway>) -> Landmarks {
+    pub fn new(scope: &Scope, terrain: Arc<Terrain>, railway: Arc<Railway>) -> Landmarks {
         let sites = {
             let (terrain, s) = (terrain.clone(), scope.seed("sites"));
             let first = levelled(&terrain, first(&terrain, &mut Rng::new(hash64(s, 0, 0, 0))));
-            Rc::new(Claims::new("landmarks", s, CLAIM, APART, Some(first.centre), move |spot, random| {
+            Arc::new(Claims::new("landmarks", s, CLAIM, APART, Some(first.centre), move |spot, random| {
                 if spot == first.centre {
                     return Some((first.centre, first));
                 }
@@ -554,12 +554,12 @@ impl Domain for Landmarks {
     }
 
     /** Their surface where they own the land, ponds' water, the landmarks. */
-    fn layers(self: Rc<Self>, ground: &Rc<Sloped>, hold: Holding) -> Vec<Layer> {
+    fn layers(self: Arc<Self>, ground: &Arc<Sloped>, hold: Holding) -> Vec<Layer> {
         layers(self, hold, ground.clone())
     }
 }
 
-fn layers(landmarks: Rc<Landmarks>, hold: Holding, ground: Rc<Sloped>) -> Vec<Layer> {
+fn layers(landmarks: Arc<Landmarks>, hold: Holding, ground: Arc<Sloped>) -> Vec<Layer> {
     let surface = {
         let (landmarks, ground) = (landmarks.clone(), ground.clone());
         let on = ground.clone();

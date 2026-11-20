@@ -1,7 +1,7 @@
 //! The forest's trees: spruces, birches and oaks, each a trunk, branches
 //! and a crown of leaf clusters kept to its room. `random` picks their shapes.
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use worldgen::curve::Curve;
 use worldgen::generator::{ANY_SIZE, Child, Far, Fill, Node, Op, Point, Shape, ball, bounds_of_shapes, capsule, lathe};
@@ -35,7 +35,7 @@ pub type GroundAt<'a> = &'a dyn Fn(i64, i64) -> i64;
 /** A tree standing alone, its height picked by `random` too. */
 pub fn make_tree(species: Species, x: f64, ground: f64, z: f64, random: &mut Rng, ground_at: GroundAt) -> Node {
     let height = height(species, random.next());
-    grow(species, x, ground, z, height, Rc::new(Room::everywhere()), random, ground_at)
+    grow(species, x, ground, z, height, Arc::new(Room::everywhere()), random, ground_at)
 }
 
 /** A tree `height` tall (units) whose crown keeps to its `room` (only across: its walls are upright). */
@@ -46,7 +46,7 @@ pub(super) fn grow(
     ground: f64,
     z: f64,
     height: f64,
-    room: Rc<Room>,
+    room: Arc<Room>,
     random: &mut Rng,
     ground_at: GroundAt,
 ) -> Node {
@@ -122,7 +122,7 @@ impl Bole {
     }
 
     /** Its radius along it, narrowing evenly. */
-    fn radius(&self) -> impl Fn(f64) -> f64 + 'static {
+    fn radius(&self) -> impl Fn(f64) -> f64 + Send + Sync + 'static {
         let [r0, r1] = self.radius;
         move |t| r0 + t * (r1 - r0)
     }
@@ -149,7 +149,7 @@ impl Bole {
             let within = (u - k as f64 - 0.5 - 0.4 * shift).abs() < 0.25 && js::wrap(along, run) < run * (1.0 - gap);
             if within { 1.0 } else { 0.0 }
         };
-        capsule(self.foot, self.top, self.radius(), k(kind), Fill::At(Rc::new(furrow)), Op::Paint)
+        capsule(self.foot, self.top, self.radius(), k(kind), Fill::At(Arc::new(furrow)), Op::Paint)
     }
 }
 
@@ -161,13 +161,13 @@ impl Bole {
 struct Crown {
     kind: K,
     forks: usize,
-    room: Rc<Room>,
+    room: Arc<Room>,
     tubes: Vec<Shape>,
     tips: Vec<Point>,
 }
 
 impl Crown {
-    fn new(kind: K, forks: usize, room: Rc<Room>) -> Crown {
+    fn new(kind: K, forks: usize, room: Arc<Room>) -> Crown {
         Crown { kind, forks, room, tubes: Vec::new(), tips: Vec::new() }
     }
 
@@ -274,12 +274,12 @@ fn leaf_cluster(name: String, centre: Point, radius: f64, kind: K, fill: f64, ra
     };
     // The ball is of one kind, turning as often as a spray is: right on average over a tree's clusters, not in each.
     let far_kind = if Rng::new(seed ^ 0x7475_726e).chance(fx(TURNING)) { turning } else { kind };
-    let far = ball(centre, radius, k(far_kind), Fill::At(Rc::new(density)), Op::Fill);
+    let far = ball(centre, radius, k(far_kind), Fill::At(Arc::new(density)), Op::Fill);
     Child::new(name, ANY_SIZE, Node::lazy(bounds, seed, sprays).with_far(Far::of(fx(FINE), vec![far])))
 }
 
 /** A child of a thing within `bounds`, drawn only at level 0, its shapes made only then. */
-fn fine_child(name: &str, bounds: Box3, random: &mut Rng, make: impl Fn(&mut Rng) -> Vec<Shape> + 'static) -> Child {
+fn fine_child(name: &str, bounds: Box3, random: &mut Rng, make: impl Fn(&mut Rng) -> Vec<Shape> + Send + Sync + 'static) -> Child {
     Child::new(name, FINE as i64, Node::lazy(bounds, random.next_u64(), make))
 }
 
@@ -358,7 +358,7 @@ fn roots(x: f64, ground: f64, z: f64, half: f64, kind: K, random: &mut Rng, grou
 }
 
 /** Conical spruce with drooping whorls of branches, its crown cut where its room ends. */
-fn spruce_tree(x: f64, ground: f64, z: f64, height: f64, room: Rc<Room>, random: &mut Rng, ground_at: GroundAt) -> Node {
+fn spruce_tree(x: f64, ground: f64, z: f64, height: f64, room: Arc<Room>, random: &mut Rng, ground_at: GroundAt) -> Node {
     let width = if height >= vox(20.0) { vox(1.0) } else { vox(0.5) };
     let top = ground + height;
     let base = ground + round(height * (0.15 + random.next() * 0.15));
@@ -406,12 +406,12 @@ fn spruce_tree(x: f64, ground: f64, z: f64, height: f64, room: Rc<Room>, random:
     })];
     let mut shapes = vec![bole.clone()];
     shapes.extend(foot.iter().cloned());
-    shapes.push(crown(Fill::At(Rc::new(fans))));
+    shapes.push(crown(Fill::At(Arc::new(fans))));
     let mut near = tree(shapes, hidden, fine, Vec::new());
     // Its hidden parts are not drawn beyond level 0: inside a crown this dense they don't show.
     let mut far = vec![bole];
     far.extend(foot);
-    far.push(crown(Fill::At(Rc::new(move |px, py, pz| {
+    far.push(crown(Fill::At(Arc::new(move |px, py, pz| {
         let distance = js::hypot(&[px - cx, pz - cz]);
         if roomy(px, pz) { density(distance, py) * covered(distance) } else { 0.0 }
     }))));
@@ -420,7 +420,7 @@ fn spruce_tree(x: f64, ground: f64, z: f64, height: f64, room: Rc<Room>, random:
 }
 
 /** Slender white birch with a wavy trunk and a loose, clumpy crown of drooping twigs, in its room. */
-fn birch_tree(x: f64, ground: f64, z: f64, height: f64, room: Rc<Room>, random: &mut Rng) -> Node {
+fn birch_tree(x: f64, ground: f64, z: f64, height: f64, room: Arc<Room>, random: &mut Rng) -> Node {
     let width = vox(0.375);
     let (mut shapes, mut marks) = (Vec::new(), Vec::new());
     let mut segments: Vec<[f64; 4]> = Vec::new();
@@ -488,7 +488,7 @@ fn birch_tree(x: f64, ground: f64, z: f64, height: f64, room: Rc<Room>, random: 
 }
 
 /** Broad oak: thick trunk, a few limbs forking twice, a leaf cluster at each tip, as far as its room lets them. */
-fn oak_tree(x: f64, ground: f64, z: f64, height: f64, room: Rc<Room>, random: &mut Rng, ground_at: GroundAt) -> Node {
+fn oak_tree(x: f64, ground: f64, z: f64, height: f64, room: Arc<Room>, random: &mut Rng, ground_at: GroundAt) -> Node {
     let trunk_top = ground + round(height * (0.45 + random.next() * 0.1));
     let width = vox(1.0);
     // The middle of `width` sites from x and z.

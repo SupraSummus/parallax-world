@@ -21,7 +21,7 @@
 //! comparison at each point, and no run of bridge or tunnel is shorter
 //! than MIN_RUN points.
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use worldgen::column::Column;
 use worldgen::curve::{self, Curve, Near};
@@ -31,7 +31,7 @@ use worldgen::generator::{Field, Kind, Layer, Node, Op, Population, Span};
 use worldgen::js;
 use worldgen::kinds;
 use worldgen::noise::{Fx, Rng, fx, hash, hash64, smoothstep};
-use worldgen::plan::{self, Holding, Plan, Sloped};
+use worldgen::plan::{self, Holding, Large, Plan, Sloped};
 use worldgen::units::{Units, m};
 
 use super::Terrain;
@@ -227,7 +227,7 @@ struct Ends {
     phase: i64,
     /** The side of the valley it runs on. */
     side: i64,
-    terrain: Rc<Terrain>,
+    terrain: Arc<Terrain>,
 }
 
 impl Ends {
@@ -388,17 +388,17 @@ impl Station {
 
 /** The line and its stations, from position alone. */
 struct Line {
-    ends: Rc<Ends>,
-    pieces: Plan<Option<Rc<Piece>>>,
-    towns: Rc<Towns>,
+    ends: Arc<Ends>,
+    pieces: Large<Piece>,
+    towns: Arc<Towns>,
     /** Its stations' seed, and its surfaces'. */
     stations: u64,
     surfaces: u64,
 }
 
 impl Line {
-    fn piece(&self, k: i64) -> Rc<Piece> {
-        self.pieces.at(0, k).expect("a piece")
+    fn piece(&self, k: i64) -> &Piece {
+        self.pieces.at(0, k)
     }
 
     /**
@@ -419,7 +419,7 @@ impl Line {
      * cutting's sides, and a station's room by a town. Its piece, and
      * where on it.
      */
-    fn near(&self, x: i64, z: i64, margin: i64) -> Option<(i64, Rc<Piece>, Near<2>)> {
+    fn near(&self, x: i64, z: i64, margin: i64) -> Option<(i64, &Piece, Near<2>)> {
         let most = REACH + margin;
         if !self.may_reach(x, z, most) {
             return None;
@@ -512,14 +512,14 @@ impl Line {
 
 /** The valley's railway: its line and stations, and what each column is to them, kept. */
 pub struct Railway {
-    line: Rc<Line>,
+    line: Arc<Line>,
     at: Plan<Option<At>>,
 }
 
 impl Railway {
-    pub fn new(scope: &Scope, terrain: Rc<Terrain>) -> Railway {
+    pub fn new(scope: &Scope, terrain: Arc<Terrain>) -> Railway {
         let s = scope.seed("ends");
-        let ends = Rc::new(Ends {
+        let ends = Arc::new(Ends {
             phase: (hash64(s, 0, 0, 0) % PIECE as u64) as i64,
             side: if hash64(s, 1, 0, 0) & 1 == 0 { 1 } else { -1 },
             terrain,
@@ -534,13 +534,13 @@ impl Railway {
         };
         let raw = {
             let ends = ends.clone();
-            Plan::new("railway's unsmoothed line", BAND, move |_, k| Some(Rc::new(rule.points([ends.at(k), ends.at(k + 1)]))))
+            Large::new("railway's unsmoothed line", BAND, move |_, k| rule.points([ends.at(k), ends.at(k + 1)]))
         };
         let pieces = {
             let ends = ends.clone();
-            Plan::new("railway's line", BAND, move |_, k| {
+            Large::new("railway's line", BAND, move |_, k| {
                 let n = 1i64 << LEVELS;
-                let around: Vec<Rc<Vec<[Fx; 3]>>> = (k - 1..=k + 1).map(|k| raw.at(0, k).expect("a piece")).collect();
+                let around: Vec<&Vec<[Fx; 3]>> = (k - 1..=k + 1).map(|k| raw.at(0, k)).collect();
                 // Point i of this piece, past its ends those of its neighbours'.
                 let unsmoothed = |i: i64| around[(i.div_euclid(n) + 1) as usize][i.rem_euclid(n) as usize];
                 // MIN_RUN points past each end too, for the runs that cross it.
@@ -565,11 +565,11 @@ impl Railway {
                 towns.dedup_by_key(|t| t.z);
                 towns.retain(|t| (from..to).contains(&t.z));
                 let xz = points.iter().map(|p| [p[0], p[2]]).collect();
-                Some(Rc::new(Piece { points, structure, towns, xz }))
+                Piece { points, structure, towns, xz }
             })
         };
         let towns = ends.terrain.towns.clone();
-        let line = Rc::new(Line { ends, pieces, towns, stations: scope.seed("stations"), surfaces: scope.seed("surfaces") });
+        let line = Arc::new(Line { ends, pieces, towns, stations: scope.seed("stations"), surfaces: scope.seed("surfaces") });
         let at = {
             let line = line.clone();
             Plan::new("railway", SCALE, move |x, z| line.at(x, z))
@@ -630,16 +630,16 @@ impl Domain for Railway {
     }
 
     /** Its tunnels' bores, its track, bridges and platforms where it owns the land, its stations. */
-    fn layers(self: Rc<Self>, ground: &Rc<Sloped>, hold: Holding) -> Vec<Layer> {
+    fn layers(self: Arc<Self>, ground: &Arc<Sloped>, hold: Holding) -> Vec<Layer> {
         layers(self, hold, ground.clone())
     }
 }
 
-fn layers(railway: Rc<Railway>, hold: Holding, ground: Rc<Sloped>) -> Vec<Layer> {
+fn layers(railway: Arc<Railway>, hold: Holding, ground: Arc<Sloped>) -> Vec<Layer> {
     // The track's top by row, rising under a unit a column (GRADE): a bore is over it, within BORE across.
     let top = {
         let line = railway.line.clone();
-        Rc::new(Sloped::new(Rc::new(Plan::new("railway's top", SCALE, move |_, z| line.track(z).1)), 1))
+        Arc::new(Sloped::new(Arc::new(Plan::new("railway's top", SCALE, move |_, z| line.track(z).1)), 1))
     };
     let bores = {
         let (railway, top) = (railway.clone(), top.clone());
@@ -767,9 +767,9 @@ mod tests {
     use super::*;
 
     /** The railway of `seed`, and the terrain it is on. */
-    fn railway(seed: u64) -> (Railway, Rc<Terrain>) {
+    fn railway(seed: u64) -> (Railway, Arc<Terrain>) {
         let world = Scope::new(seed);
-        let terrain = Rc::new(Terrain::new(&world));
+        let terrain = Arc::new(Terrain::new(&world));
         (Railway::new(&world.of("railway"), terrain.clone()), terrain)
     }
 

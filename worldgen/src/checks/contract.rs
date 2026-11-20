@@ -730,9 +730,9 @@ pub fn check(name: &str, world: &World, levels: u32, only: &[&str], surveyed: im
  * in parts equals it whole. Its margins are the component's, by name.
  * Alone if `make` makes the world cut to it.
  */
-pub fn check_component(name: &str, make: &(dyn Fn() -> World + Sync), component: &str, places: usize, levels: u32) -> Checked {
+pub fn check_component(name: &str, make: &dyn Fn() -> World, component: &str, places: usize, levels: u32) -> Checked {
     let start = Instant::now();
-    let focus = make().alone(component);
+    let (world, focus) = (make(), make().alone(component));
     let survey = survey(&focus, REGION, |_| true);
     let boxes = nearest(&survey, places);
     print_survey(name, &survey, boxes.len(), start);
@@ -741,13 +741,12 @@ pub fn check_component(name: &str, make: &(dyn Fn() -> World + Sync), component:
         let threads: Vec<_> = boxes
             .iter()
             .map(|b| {
-                // Worlds aren't Send: each thread makes its own.
+                let (world, focus) = (&world, &focus);
                 scope.spawn(move || {
-                    let (world, focus) = (make(), make().alone(component));
-                    let margins = margins_near(name, &world, Some(&focus.generator), &[*b], levels).margins;
+                    let margins = margins_near(name, world, Some(&focus.generator), &[*b], levels).margins;
                     [0, 2, levels + 1].into_iter().for_each(|level| whole_equals_parts(&world.generator, b, level));
-                    let mut broken = heights_hold(&world, &[*b], levels);
-                    broken.extend(skips_hold(&world, &[*b], levels));
+                    let mut broken = heights_hold(world, &[*b], levels);
+                    broken.extend(skips_hold(world, &[*b], levels));
                     (margins, broken)
                 })
             })

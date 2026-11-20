@@ -17,8 +17,7 @@
 //! its leaves' corners, sites of the levels whose sites are at most a
 //! leaf apart.
 
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 use crate::cost;
 use crate::js;
@@ -51,16 +50,18 @@ const TRIES: u32 = 16;
 /** Slots each cache keeps values in, the last made in each: enough for a host tile's cells at any level. */
 const SLOTS: usize = 1 << 15;
 
-/** Values kept by key, the last made in each slot. */
-struct Slots<K, V>(RefCell<Vec<Option<(K, V)>>>);
+/** Values kept by key, the last made in each slot, for all the threads that read a world: each slot under a lock of its own. */
+struct Slots<K, V>(Box<[Slot<K, V>]>);
+
+type Slot<K, V> = Mutex<Option<(K, V)>>;
 
 impl<K: Copy + PartialEq, V: Clone> Slots<K, V> {
     fn new(slots: usize) -> Self {
-        Slots(RefCell::new(vec![None; slots]))
+        Slots((0..slots).map(|_| Mutex::new(None)).collect())
     }
 
     fn get(&self, slot: usize, key: K, make: impl FnOnce() -> V) -> V {
-        if let Some((k, v)) = &self.0.borrow()[slot]
+        if let Some((k, v)) = &*self.0[slot].lock().expect("slot")
             && *k == key
         {
             return v.clone();
@@ -71,7 +72,7 @@ impl<K: Copy + PartialEq, V: Clone> Slots<K, V> {
     }
 
     fn put(&self, slot: usize, key: K, v: V) {
-        self.0.borrow_mut()[slot] = Some((key, v));
+        *self.0[slot].lock().expect("slot") = Some((key, v));
     }
 }
 
@@ -92,12 +93,12 @@ pub struct Points {
     pub leaf: i64,
     pub root: i64,
     marks: usize,
-    chances: Box<dyn Fn([i64; 3]) -> Chances>,
+    chances: Box<dyn Fn([i64; 3]) -> Chances + Send + Sync>,
     corners: Slots<[i64; 3], Chances>,
     /** By cell, its counts. */
     counted: Slots<(i64, [i64; 3]), Counts>,
     /** By leaf holding any, its points, placed: each costs reading its chances up to TRIES times. */
-    placed: Slots<[i64; 3], Rc<[Spot]>>,
+    placed: Slots<[i64; 3], Arc<[Spot]>>,
 }
 
 impl Points {
@@ -115,7 +116,7 @@ impl Points {
         leaf: i64,
         root: i64,
         marks: usize,
-        chances: impl Fn([i64; 3]) -> Chances + 'static,
+        chances: impl Fn([i64; 3]) -> Chances + Send + Sync + 'static,
     ) -> Points {
         assert!(
             leaf > 0 && (leaf as u64).is_power_of_two() && (root as u64).is_power_of_two() && root >= leaf,
@@ -312,7 +313,7 @@ impl Points {
     }
 
     /** The points of the leaf at `leaf`, `counts` of them by mark, placed. */
-    fn place(&self, leaf: [i64; 3], counts: Counts) -> Rc<[Spot]> {
+    fn place(&self, leaf: [i64; 3], counts: Counts) -> Arc<[Spot]> {
         let mut spots = Vec::new();
         for (mark, &count) in counts.iter().enumerate() {
             for nth in 0..count {
@@ -345,15 +346,15 @@ pub type Weights = [f64; MARKS];
  * of cells at once, reading each cell once, not once per cell around.
  */
 pub struct Blur {
-    points: Rc<Points>,
+    points: Arc<Points>,
     size: i64,
     taps: Vec<([i64; 2], Weights)>,
-    blocks: Slots<[i64; 2], Rc<[Weights]>>,
+    blocks: Slots<[i64; 2], Arc<[Weights]>>,
 }
 
 impl Blur {
     /** Of `points`' cells `size` wide, with `taps`: offsets in cells, each with its weights. */
-    pub fn new(points: Rc<Points>, size: i64, taps: Vec<([i64; 2], Weights)>) -> Blur {
+    pub fn new(points: Arc<Points>, size: i64, taps: Vec<([i64; 2], Weights)>) -> Blur {
         assert!(points.dims == 2, "points {}: blurs are of points on two axes", points.name);
         Blur { points, size, taps, blocks: Slots::new((BLOCKS * BLOCKS) as usize) }
     }
@@ -368,7 +369,7 @@ impl Blur {
     }
 
     /** The values of a block's cells, from the counts of those it reaches, read once each. */
-    fn block(&self, block: [i64; 2]) -> Rc<[Weights]> {
+    fn block(&self, block: [i64; 2]) -> Arc<[Weights]> {
         let reach = self.taps.iter().flat_map(|(o, _)| o.map(i64::abs)).max().unwrap_or(0);
         let (first, side) = (block.map(|b| b * BLOCK - reach), BLOCK + 2 * reach);
         let [a, b] = [self.points.axes[0], self.points.axes[1]];
@@ -405,22 +406,22 @@ impl Blur {
  * whose power beats a thing within reach stands that near.
  */
 pub struct Rooms {
-    points: Rc<Points>,
+    points: Arc<Points>,
     reach: i64,
     most: i64,
     /** The least and most gap between two rooms (units), each pair's drawn between. */
     gaps: [i64; 2],
     seed: u64,
-    weight: Box<dyn Fn(&Spot) -> i64>,
+    weight: Box<dyn Fn(&Spot) -> i64 + Send + Sync>,
     /** By block `reach` wide, the points that may own its places, each with its weight: BLOCKS along each axis spanned, as a host tile's. */
-    near: Slots<[i64; 3], Rc<[(Spot, i64)]>>,
+    near: Slots<[i64; 3], Arc<[(Spot, i64)]>>,
     /** By block, the points in it, for `within`: twice as many blocks along each axis, as it reads those 3 around. */
-    blocks: Slots<[i64; 3], Rc<[Spot]>>,
+    blocks: Slots<[i64; 3], Arc<[Spot]>>,
 }
 
 impl Rooms {
     /** The rooms of `points`' things, reaching `reach`, weighed by `weight`, 0 to `most`, `gaps` apart. */
-    pub fn new(points: Rc<Points>, reach: i64, most: i64, gaps: [i64; 2], weight: impl Fn(&Spot) -> i64 + 'static) -> Rooms {
+    pub fn new(points: Arc<Points>, reach: i64, most: i64, gaps: [i64; 2], weight: impl Fn(&Spot) -> i64 + Send + Sync + 'static) -> Rooms {
         assert!(reach > 0 && most >= 0 && gaps[0] <= gaps[1], "points {}: rooms reach somewhere, weights and gaps are ranges", points.name);
         let seed = hash_text("rooms", points.seed);
         let slots = BLOCKS.pow(points.dims) as usize;
@@ -462,7 +463,7 @@ impl Rooms {
     }
 
     /** The points in a block, kept: of the leaves meeting it or a leaf below, as a point may stand at its leaf's far corner. */
-    fn block(&self, block: [i64; 3]) -> Rc<[Spot]> {
+    fn block(&self, block: [i64; 3]) -> Arc<[Spot]> {
         let axes = &self.points.axes[..self.points.dims as usize];
         let slot = axes.iter().fold(0, |slot, &a| slot * 2 * BLOCKS + block[a].rem_euclid(2 * BLOCKS)) as usize;
         self.blocks.get(slot, block, || {
@@ -675,7 +676,7 @@ mod tests {
 
     /** Rooms of `points(7)`'s things reaching 100, weighed by where they are, `gaps` apart. */
     fn rooms(gaps: [i64; 2]) -> Rooms {
-        Rooms::new(Rc::new(points(7)), 100, 2000, gaps, |s| (hash(9, s.at[0], s.at[2], s.mark as i64) % 2001) as i64)
+        Rooms::new(Arc::new(points(7)), 100, 2000, gaps, |s| (hash(9, s.at[0], s.at[2], s.mark as i64) % 2001) as i64)
     }
 
     #[test]
@@ -719,7 +720,7 @@ mod tests {
 
     #[test]
     fn a_blur_is_its_cells_counts_weighed_wherever_its_blocks_fall() {
-        let p = Rc::new(points(5));
+        let p = Arc::new(points(5));
         let taps: Vec<_> =
             [[-2, 1], [0, 0], [1, -1], [3, 2]].into_iter().zip([[1.0; MARKS], [0.5; MARKS], [2.0; MARKS], [0.25; MARKS]]).collect();
         let blur = Blur::new(p.clone(), 32, taps.clone());

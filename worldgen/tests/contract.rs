@@ -2,7 +2,7 @@
 //! (worldgen::checks::contract), and the framework refuses what breaks it.
 
 use std::collections::BTreeSet;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use fcc::FACE_KINDS;
 use worldgen::World;
@@ -38,7 +38,7 @@ const SMOKE: u8 = 5;
 const GLOWING_FOG: u8 = 6;
 
 /** One population of one thing, near the origin: cells reach 1024 + `reach` from their centres. */
-fn single(make: impl Fn(Point, &Cell) -> Option<Node> + 'static, reach: i64) -> Layer {
+fn single(make: impl Fn(Point, &Cell) -> Option<Node> + Send + Sync + 'static, reach: i64) -> Layer {
     Layer::Population(Population {
         name: "single",
         order: 1.0,
@@ -239,7 +239,7 @@ fn village_keeps_the_contract() {
  */
 fn stripes(dithered: bool, level: u32) -> (f64, Vec<u32>) {
     let make = |x: i64, _| if x.rem_euclid(8) == 0 { ROCK } else { GRASS };
-    let plan = Rc::new(if dithered { Plan::dithered("stripes", 1, make) } else { Plan::new("stripes", 1, make) });
+    let plan = Arc::new(if dithered { Plan::dithered("stripes", 1, make) } else { Plan::new("stripes", 1, make) });
     let ground = Field::columns("ground", 0.0, Op::Fill, move |x, z| vec![Span::solid(-8, 0, plan.at(x, z))]);
     let (generator, b) = (world(Layer::Field(ground)), Box3 { min: [0, -8 >> level, 0], max: [4096 >> level, 0, 64] });
     let grid = generate(&generator, &b, level);

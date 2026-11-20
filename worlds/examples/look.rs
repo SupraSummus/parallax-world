@@ -128,14 +128,15 @@ fn main() {
         }
         _ => panic!("no camera: {usage}"),
     };
-    let make = || match &alone {
+    // The world drawn: all of it, or a component alone.
+    let drawn = std::sync::Arc::new(match &alone {
         Some(component) => (entry.make)(seed).alone(component),
         None => (entry.make)(seed),
-    };
-    let mut picture = picture_on_threads(&|| make().generator, &camera, level, world.heights_at(level));
+    });
+    let mut picture = picture_on_threads(&drawn.generator, &camera, level, world.heights_at(level));
     if let Some(brightness) = brightness {
         let start = std::time::Instant::now();
-        Light::new(make(), Shared::new(brightness)).relight(&mut picture, level);
+        Light::new(drawn, Shared::new(brightness)).relight(&mut picture, level);
         println!("lit in {:.2} s", start.elapsed().as_secs_f64());
     }
     std::fs::write(args.last().expect("a file"), picture.png()).expect("written");

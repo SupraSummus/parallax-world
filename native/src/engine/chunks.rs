@@ -232,7 +232,7 @@ mod tests {
     fn world_and_look(name: &str, look: [f64; 2], detail: f64) -> (World, Look) {
         let make = worlds::by_name(name).expect("world").make;
         let look = Look { detail, ..Look::new(make(1).spawn.map(|v| v as f64), look, 90.0, 1000.0, [320.0, 200.0]) };
-        (World::new(make, 1, None, 4), look)
+        (World::new(make(1), None, 4), look)
     }
 
     /** What `chunks` draws of `world` as `look` sees it, once complete. */
@@ -258,7 +258,7 @@ mod tests {
     #[test]
     fn moving_keeps_most_chunks() {
         let make = worlds::by_name("moor").expect("moor").make;
-        let mut world = World::new(make, 1, None, 4);
+        let mut world = World::new(make(1), None, 4);
         let mut chunks = Chunks::new(&world, true, false);
         let look = Look::new(make(1).spawn.map(|v| v as f64), [30.0, -10.0], 90.0, 400.0, [320.0, 200.0]);
         let ids = |c: &Composed| c.frame.chunks.iter().map(|p| p.chunk.id).collect::<HashSet<_>>();
@@ -276,7 +276,7 @@ mod tests {
     #[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
     fn a_compositor_following_changes_draws_as_one_taking_the_frame_whole() {
         let make = worlds::by_name("moor").expect("moor").make;
-        let mut world = World::new(make, 1, None, 4);
+        let mut world = World::new(make(1), None, 4);
         let look = Look::new(make(1).spawn.map(|v| v as f64), [30.0, -10.0], 90.0, 400.0, [320.0, 200.0]);
         let forward = view_basis(look.yaw, look.pitch)[2];
         let moved = Look { camera: std::array::from_fn(|i| look.camera[i] + forward[i] * 7.0), ..look };

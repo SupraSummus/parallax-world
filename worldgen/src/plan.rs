@@ -2,8 +2,10 @@
 //! scale and from coarser ones only; and land that domains bid for.
 //! See "Composing" in docs/generators.md.
 
-use std::cell::{Cell, RefCell};
-use std::rc::Rc;
+use std::cell::{Cell, UnsafeCell};
+use std::mem::MaybeUninit;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::noise::{Fixed, Fx, Rng, hash64, smoothstep};
 
@@ -48,7 +50,7 @@ pub(crate) fn where_asked<R>(read: impl FnOnce() -> R) -> R {
     value
 }
 
-/** Slots a plan keeps values in: as many as two tiles have columns, so a layer finds what the one before made in its tile. */
+/** Slots a plan keeps values in: as many as 32 tiles have columns, for the tiles the world's threads make at once and what their layers read around them. */
 const SLOTS: usize = 1 << 15;
 const _: () = assert!(SLOTS.is_power_of_two());
 /** Column (x, z) takes slot `sum(x, z) >> SHIFT`: each a run of 2^SHIFT sums. */
@@ -65,23 +67,59 @@ fn sum(x: i64, z: i64) -> u64 {
     (x as u64).wrapping_mul(0xd548ecfaef79b2e7).wrapping_add((z as u64).wrapping_mul(0xf0d62a6465469d21))
 }
 
-/** Values by column, the last kept in each of SLOTS. */
-pub(crate) struct Kept<T>(RefCell<Vec<(i64, i64, T)>>);
+/**
+ * Values by column, the last kept in each of SLOTS, for all the threads
+ * that read a world together: read without waiting, as nearly every read
+ * finds its column kept. A column is a function of the world alone, so
+ * one not found kept, or not kept at all, is only made again.
+ */
+pub(crate) struct Kept<T>(Box<[Slot<T>]>);
 
-impl<T: Clone + Default> Kept<T> {
+/**
+ * A slot: a column and its value, and how many times it was written, odd
+ * while it is (a sequence lock). A reader copies it and takes the copy
+ * only if no one wrote meanwhile. By the letter its read may race a write,
+ * which Rust does not allow even of bytes dropped: as sequence locks do.
+ */
+struct Slot<T> {
+    written: AtomicU32,
+    kept: UnsafeCell<(i64, i64, T)>,
+}
+
+// SAFETY: `kept` is written only by the one that made `written` odd, and what is read of it meanwhile is not used.
+unsafe impl<T: Send> Sync for Slot<T> {}
+
+impl<T: Copy + Default> Kept<T> {
     pub(crate) fn new() -> Kept<T> {
-        Kept(RefCell::new(vec![(i64::MIN, 0, T::default()); SLOTS]))
+        let empty = || Slot { written: AtomicU32::new(0), kept: UnsafeCell::new((i64::MIN, 0, T::default())) };
+        Kept((0..SLOTS).map(|_| empty()).collect())
     }
 
     /** Column (x, z), if kept in `slot`: its own (`slot`), or, read dithered, its column's (Plan::fetch). */
     #[inline]
     pub(crate) fn get(&self, slot: usize, x: i64, z: i64) -> Option<T> {
-        let (kx, kz, value) = &self.0.borrow()[slot];
-        ((*kx, *kz) == (x, z)).then(|| value.clone())
+        let slot = &self.0[slot];
+        let before = slot.written.load(Ordering::Acquire);
+        // SAFETY: the copy may be torn by one writing now, so it is no value yet: only bytes, which T, Copy, is whole in.
+        let copy = unsafe { std::ptr::read_volatile(slot.kept.get().cast::<MaybeUninit<(i64, i64, T)>>()) };
+        std::sync::atomic::fence(Ordering::Acquire);
+        if before & 1 != 0 || slot.written.load(Ordering::Relaxed) != before {
+            return None;
+        }
+        // SAFETY: none wrote while it was copied, so it is what the last one to write kept, whole.
+        let (kx, kz, value) = unsafe { copy.assume_init() };
+        ((kx, kz) == (x, z)).then_some(value)
     }
 
+    /** Keeps column (x, z) in `slot`, unless another thread is keeping one there now. */
     pub(crate) fn keep(&self, slot: usize, x: i64, z: i64, value: T) {
-        self.0.borrow_mut()[slot] = (x, z, value);
+        let slot = &self.0[slot];
+        let before = slot.written.load(Ordering::Relaxed);
+        if before & 1 == 0 && slot.written.compare_exchange(before, before + 1, Ordering::Acquire, Ordering::Relaxed).is_ok() {
+            // SAFETY: `written` is odd by this thread, so no other writes, and readers drop what they copy.
+            unsafe { slot.kept.get().write((x, z, value)) };
+            slot.written.store(before.wrapping_add(2), Ordering::Release);
+        }
     }
 }
 
@@ -92,26 +130,59 @@ pub(crate) fn slot(x: i64, z: i64) -> usize {
 }
 
 /**
- * A decision for any column, made on demand and kept (the last made in
- * each slot; a large one, such as a curve's points, as an `Rc`). Its
- * `scale` is the size of the smallest features it decides, in lattice
- * units; it reads only plans at least as coarse, and panics otherwise,
- * naming both.
+ * What a plan is made and read under: its name, and its `scale`, the size
+ * of the smallest features it decides, in lattice units. It reads only
+ * plans at least as coarse, and panics otherwise, naming both.
  */
-pub struct Plan<T> {
+struct Rule {
     name: &'static str,
     scale: i64,
     /** Made from finer plans' samples: a filter, which may read any. */
     filter: bool,
+}
+
+impl Rule {
+    /** Counts a read, and refuses one by a plan being made that is coarser. */
+    #[inline]
+    fn read(&self) {
+        crate::cost::lookup();
+        if self.scale < MAKING.get().1 {
+            self.refuse();
+        }
+    }
+
+    /** Panics: the plan being made reads this one, of a finer scale. */
+    #[cold]
+    #[inline(never)]
+    fn refuse(&self) -> ! {
+        let (reader, finest) = MAKING.get();
+        panic!("plan {reader} (scale {finest}) reads {} of the finer scale {}; see \"Bands\" in {DOCS}", self.name, self.scale)
+    }
+
+    /** Makes column (x, z) of plan `of` with `make`: under its scale, and read where asked, as what a plan decides for a column is the same whoever reads it. */
+    fn making<T, P>(&self, of: &P, x: i64, z: i64, make: impl FnOnce() -> T) -> T {
+        let outer = MAKING.replace(if self.filter { ("", 0) } else { (self.name, self.scale) });
+        let value = where_asked(|| crate::cost::plan(self.name, of, [x, 0, z], make));
+        MAKING.set(outer);
+        value
+    }
+}
+
+/**
+ * A decision for any column, made on demand and kept (the last made in
+ * each slot): small, as every slot holds one; a large one is a `Large`.
+ */
+pub struct Plan<T> {
+    rule: Rule,
     /** Read by layers at a point of their sites' footprint where they are further apart than `scale`. */
     dithered: bool,
     kept: Kept<T>,
-    make: Box<dyn Fn(i64, i64) -> T>,
+    make: Box<dyn Fn(i64, i64) -> T + Send + Sync>,
 }
 
-impl<T: Clone + Default> Plan<T> {
-    pub fn new(name: &'static str, scale: i64, make: impl Fn(i64, i64) -> T + 'static) -> Plan<T> {
-        Plan { name, scale, filter: false, dithered: false, kept: Kept::new(), make: Box::new(make) }
+impl<T: Copy + Default> Plan<T> {
+    pub fn new(name: &'static str, scale: i64, make: impl Fn(i64, i64) -> T + Send + Sync + 'static) -> Plan<T> {
+        Plan { rule: Rule { name, scale, filter: false }, dithered: false, kept: Kept::new(), make: Box::new(make) }
     }
 
     /**
@@ -123,7 +194,7 @@ impl<T: Clone + Default> Plan<T> {
      * as it covers, its edges dithered; read where the line is, it would
      * alias. Things read it where they ask.
      */
-    pub fn dithered(name: &'static str, scale: i64, make: impl Fn(i64, i64) -> T + 'static) -> Plan<T> {
+    pub fn dithered(name: &'static str, scale: i64, make: impl Fn(i64, i64) -> T + Send + Sync + 'static) -> Plan<T> {
         Plan { dithered: true, ..Plan::new(name, scale, make) }
     }
 
@@ -134,15 +205,11 @@ impl<T: Clone + Default> Plan<T> {
     /** Column (x, z), and whether it was made now. Making is out of line, so a kept column costs a few instructions. */
     #[inline]
     fn fetch(&self, x: i64, z: i64) -> (T, bool) {
-        crate::cost::lookup();
-        let finest = MAKING.get().1;
-        if self.scale < finest {
-            self.refuse();
-        }
+        self.rule.read();
         // A dithered read keeps its point in the slot of the column it is read for: those of a tile's never share one.
         let at = slot(x, z);
         let (x, z) = match FOOTPRINT.get() {
-            Some((spacing, [dx, dz])) if self.dithered && spacing > self.scale => (x + dx, z + dz),
+            Some((spacing, [dx, dz])) if self.dithered && spacing > self.rule.scale => (x + dx, z + dz),
             _ => (x, z),
         };
         match self.kept.get(at, x, z) {
@@ -155,25 +222,56 @@ impl<T: Clone + Default> Plan<T> {
     #[cold]
     #[inline(never)]
     fn make(&self, slot: usize, x: i64, z: i64) -> T {
-        let outer = MAKING.replace(if self.filter { ("", 0) } else { (self.name, self.scale) });
-        // What a plan decides for a column is the same whoever reads it.
-        let value = where_asked(|| crate::cost::plan(self.name, self, [x, 0, z], || (self.make)(x, z)));
-        MAKING.set(outer);
-        self.kept.keep(slot, x, z, value.clone());
+        let value = self.rule.making(self, x, z, || (self.make)(x, z));
+        self.kept.keep(slot, x, z, value);
         value
-    }
-
-    /** Panics: the plan being made reads this one, of a finer scale. */
-    #[cold]
-    #[inline(never)]
-    fn refuse(&self) -> ! {
-        let (reader, finest) = MAKING.get();
-        panic!("plan {reader} (scale {finest}) reads {} of the finer scale {}; see \"Bands\" in {DOCS}", self.name, self.scale)
     }
 
     /** Column (x, z), if kept: none is made. */
     fn kept(&self, x: i64, z: i64) -> Option<T> {
         self.kept.get(slot(x, z), x, z)
+    }
+}
+
+/** Values a Large holds at most: a curve's pieces are a kilometre long or more, so further than a world is crossed. */
+const LARGE: usize = 1 << 10;
+const _: () = assert!(LARGE.is_power_of_two());
+
+/**
+ * A plan of large values, a few of them, such as a curve's pieces: made
+ * and read under its scale as a Plan's columns are, but each held for
+ * good, in the first free slot from its column's on, so read where it is,
+ * without waiting, by all the threads that read the world.
+ */
+pub struct Large<T> {
+    rule: Rule,
+    held: Box<[Held<T>]>,
+    make: Box<dyn Fn(i64, i64) -> T + Send + Sync>,
+}
+
+/** A column and its large value, once made. */
+type Held<T> = OnceLock<([i64; 2], T)>;
+
+impl<T> Large<T> {
+    pub fn new(name: &'static str, scale: i64, make: impl Fn(i64, i64) -> T + Send + Sync + 'static) -> Large<T> {
+        Large { rule: Rule { name, scale, filter: false }, held: (0..LARGE).map(|_| OnceLock::new()).collect(), make: Box::new(make) }
+    }
+
+    pub fn at(&self, x: i64, z: i64) -> &T {
+        self.rule.read();
+        let first = (sum(x, z) >> (64 - LARGE.trailing_zeros())) as usize;
+        let mut made = None;
+        for slot in (first..first + LARGE).map(|i| &self.held[i % LARGE]) {
+            if slot.get().is_none() {
+                // Made outside the slot, which another column may take meanwhile, as making it may ask for others: it then goes in the next free.
+                let value = made.take().unwrap_or_else(|| self.rule.making(self, x, z, || (self.make)(x, z)));
+                made = slot.set(([x, z], value)).err().map(|(_, value)| value);
+            }
+            if let Some((_, value)) = slot.get().filter(|(at, _)| *at == [x, z]) {
+                return value;
+            }
+        }
+        panic!("plan {}: over {LARGE} large values", self.rule.name)
     }
 }
 
@@ -188,10 +286,10 @@ impl<T: Clone + Default> Plan<T> {
  * without a promise, everywhere.
  */
 pub struct Sloped {
-    pub plan: Rc<Plan<i64>>,
+    pub plan: Arc<Plan<i64>>,
     slope: Option<i64>,
     /** The rectangles asked last and their ranges: a box's layers ask for the same few. */
-    last: RefCell<Vec<Ranged>>,
+    last: Mutex<Vec<Ranged>>,
 }
 
 /** A rectangle of columns, min x, min z, max x, max z, and the range of a plan over it. */
@@ -203,13 +301,13 @@ const SAMPLES: i64 = 16;
 const KEPT: usize = 16;
 
 impl Sloped {
-    pub fn new(plan: Rc<Plan<i64>>, slope: i64) -> Sloped {
-        Sloped { plan, slope: Some(slope), last: RefCell::new(Vec::new()) }
+    pub fn new(plan: Arc<Plan<i64>>, slope: i64) -> Sloped {
+        Sloped { plan, slope: Some(slope), last: Mutex::default() }
     }
 
     /** `plan`, promising no slope: as steep as it likes. */
-    pub fn any(plan: Rc<Plan<i64>>) -> Sloped {
-        Sloped { plan, slope: None, last: RefCell::new(Vec::new()) }
+    pub fn any(plan: Arc<Plan<i64>>) -> Sloped {
+        Sloped { plan, slope: None, last: Mutex::default() }
     }
 
     /**
@@ -244,7 +342,7 @@ impl Sloped {
                 assert!(
                     (h - n).abs() <= slope,
                     "plan {}: columns ({x}, {z}) and ({nx}, {nz}) differ by {}, more than its slope {}; see \"Rules\" in {DOCS}",
-                    self.plan.name,
+                    self.plan.rule.name,
                     (h - n).abs(),
                     slope
                 );
@@ -262,7 +360,7 @@ impl Sloped {
     pub fn range(&self, min: [i64; 2], max: [i64; 2]) -> Option<(i64, i64)> {
         let slope = self.slope?;
         let key = [min[0], min[1], max[0], max[1]];
-        if let Some((_, range)) = self.last.borrow().iter().find(|(k, _)| *k == key) {
+        if let Some((_, range)) = self.last.lock().expect("ranges").iter().find(|(k, _)| *k == key) {
             return Some(*range);
         }
         // Samples every `step` columns, a power of two, from below min to past max: on one grid for any rectangle, so
@@ -278,7 +376,7 @@ impl Sloped {
         }
         let far = slope * (step[0] / 2 + step[1] / 2);
         let range = (lo - far, hi + far);
-        let mut last = self.last.borrow_mut();
+        let mut last = self.last.lock().expect("ranges");
         if last.len() == KEPT {
             last.remove(0);
         }
@@ -294,9 +392,9 @@ impl Plan<Fx> {
      * Sampling is what makes a coarse band of finer ones, so `make` may
      * read finer plans; what it reads finer than `step` aliases.
      */
-    pub fn sampled(name: &'static str, scale: i64, step: i64, make: impl Fn(i64, i64) -> Fx + 'static) -> Plan<Fx> {
+    pub fn sampled(name: &'static str, scale: i64, step: i64, make: impl Fn(i64, i64) -> Fx + Send + Sync + 'static) -> Plan<Fx> {
         let mut samples = Plan::new(name, scale, move |i, k| make(i * step, k * step));
-        samples.filter = true;
+        samples.rule.filter = true;
         Plan::new(name, scale, move |x, z| {
             let (i, k) = (x.div_euclid(step), z.div_euclid(step));
             let (u, v) = ((x.rem_euclid(step) << 16) / step, (z.rem_euclid(step) << 16) / step);
@@ -325,7 +423,7 @@ struct Shares {
  * A domain's bid for column (x, z), a fraction: read once a column, by
  * the land's plan, so it reads only plans as coarse as the land's.
  */
-pub type Bid = Box<dyn Fn(i64, i64) -> Fx>;
+pub type Bid = Box<dyn Fn(i64, i64) -> Fx + Send + Sync>;
 
 /**
  * Land shared by domains that never see each other: each bids for every
@@ -373,14 +471,14 @@ impl Land {
     }
 
     /** Domain `d`'s hold on it. */
-    pub fn holding(self: &Rc<Self>, d: usize) -> Holding {
+    pub fn holding(self: &Arc<Self>, d: usize) -> Holding {
         Holding(Some((self.clone(), d)))
     }
 }
 
 /** A domain's hold on land: its share of each column, and whether it owns it; or all of every column, holding none shared. */
 #[derive(Clone)]
-pub struct Holding(Option<(Rc<Land>, usize)>);
+pub struct Holding(Option<(Arc<Land>, usize)>);
 
 impl Holding {
     /** All of every column. */
@@ -419,7 +517,7 @@ pub type Claim<T> = Option<([i64; 2], T)>;
 pub struct Claims<T> {
     apart: i64,
     /** Each spot's thing, by its key. */
-    proposed: Rc<Plan<Claim<T>>>,
+    proposed: Arc<Plan<Claim<T>>>,
     /** The keys of the things kept near each stretch of columns `apart` / 2 wide, for `near`. */
     nearby: Plan<[(i32, i32); NEARBY]>,
 }
@@ -431,16 +529,16 @@ pub struct Claims<T> {
  */
 const NEARBY: usize = 9;
 
-impl<T: Copy + Default + 'static> Claims<T> {
+impl<T: Copy + Default + Send + Sync + 'static> Claims<T> {
     pub fn new(
         name: &'static str,
         seed: u64,
         cell: i64,
         apart: i64,
         first: Option<[i64; 2]>,
-        claim: impl Fn([i64; 2], &mut Rng) -> Claim<T> + 'static,
+        claim: impl Fn([i64; 2], &mut Rng) -> Claim<T> + Send + Sync + 'static,
     ) -> Claims<T> {
-        let proposed = Rc::new(Plan::new(name, cell, move |i, key| {
+        let proposed = Arc::new(Plan::new(name, cell, move |i, key| {
             let mut random = Rng::new(hash64(seed, i, key, 0));
             let spot = match first {
                 Some(spot) if key.rem_euclid(SPOTS) == SPOTS - 1 => spot,
@@ -534,11 +632,37 @@ mod tests {
     use crate::noise::{ONE, fx};
     use crate::units::Units;
 
+    /** Threads keeping columns in the same few slots, each a value many words long that says its column: none reads one torn, or another's. */
+    #[test]
+    fn a_column_read_while_others_are_kept_is_whole_or_not_found() {
+        let kept = Kept::<[i64; 16]>::new();
+        let found = std::sync::atomic::AtomicUsize::new(0);
+        std::thread::scope(|scope| {
+            for thread in 0..4 {
+                let (kept, found) = (&kept, &found);
+                scope.spawn(move || {
+                    let mut random = Rng::new(thread);
+                    for _ in 0..1 << 20 {
+                        let (slot, x, z) = (random.below(4) as usize, random.below(8) as i64, random.below(8) as i64);
+                        match kept.get(slot, x, z) {
+                            Some(value) => {
+                                assert_eq!(value, [x * 8 + z; 16], "column ({x}, {z})");
+                                found.fetch_add(1, Ordering::Relaxed);
+                            }
+                            None => kept.keep(slot, x, z, [x * 8 + z; 16]),
+                        }
+                    }
+                });
+            }
+        });
+        assert!(found.load(Ordering::Relaxed) > 0, "some columns found kept");
+    }
+
     #[test]
     fn a_sloped_plan_is_within_its_range_wherever_asked() {
         // Hills rising a few units a column at most: their range over rectangles holds every column in them, not far past.
         let hills = |x: i64, z: i64| ((x as f64 / 9.0).sin() * 30.0 + (z as f64 / 13.0).cos() * 50.0).round() as i64;
-        let sloped = Sloped::new(Rc::new(Plan::new("hills", 1, hills)), 9);
+        let sloped = Sloped::new(Arc::new(Plan::new("hills", 1, hills)), 9);
         for (min, max) in [([0, 0], [0, 0]), ([-40, 7], [87, 300]), ([5, -5], [6, 1000])] {
             let (lo, hi) = sloped.range(min, max).expect("a promise");
             let columns = (min[0]..=max[0]).flat_map(|x| (min[1]..=max[1]).map(move |z| hills(x, z)));
@@ -551,7 +675,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "plan steps: columns (1, 0) and (0, 0) differ by 5, more than its slope 2")]
     fn refuses_a_sloped_plan_steeper_than_it_says() {
-        let steps = Sloped::new(Rc::new(Plan::new("steps", 1, |x, _| 5 * x)), 2);
+        let steps = Sloped::new(Arc::new(Plan::new("steps", 1, |x, _| 5 * x)), 2);
         steps.at(0, 0);
         steps.at(1, 0);
     }
@@ -559,14 +683,14 @@ mod tests {
     #[test]
     #[should_panic(expected = "plan coarse (scale 64) reads fine of the finer scale 1")]
     fn refuses_a_plan_reading_a_finer_one() {
-        let fine = Rc::new(Plan::new("fine", 1, |x, _| x));
+        let fine = Arc::new(Plan::new("fine", 1, |x, _| x));
         let coarse = Plan::new("coarse", 64, move |x, z| fine.at(x, z));
         coarse.at(3, 4);
     }
 
     #[test]
     fn a_sampled_plan_may_read_finer_ones_and_interpolates() {
-        let fine = Rc::new(Plan::new("fine", 1, |x, z| Units(x + 2 * z).to_fx()));
+        let fine = Arc::new(Plan::new("fine", 1, |x, z| Units(x + 2 * z).to_fx()));
         let coarse = Plan::sampled("coarse", 64, 16, move |x, z| fine.at(x, z));
         assert_eq!((coarse.at(0, 0), coarse.at(8, 0), coarse.at(5, 3)), (Fx::ZERO, fx(8.0), fx(11.0)));
     }
@@ -574,7 +698,7 @@ mod tests {
     #[test]
     fn lookups_count_to_whoever_looks_up() {
         use crate::cost::{self, Work};
-        let fine = Rc::new(Plan::new("fine", 8, |x, _| x));
+        let fine = Arc::new(Plan::new("fine", 8, |x, _| x));
         let coarse = Plan::new("coarse", 1, move |x, z| fine.at(x, z) + fine.at(x + 1, z));
         let counts = cost::counted(|| {
             coarse.at(0, 0);

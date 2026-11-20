@@ -134,9 +134,8 @@ A window smaller than the coarser levels' sites lets no sky in at all
 
 ## In native, and what it costs
 
-Native's bakers each light what they show with a `Light` of their own
-(a generator is not `Send`):
-they share the world's tiles, and the light found at their sites (`Shared`),
+Native's bakers each light what they show with a `Light` of their own:
+they share the world, its tiles, and the light found at their sites (`Shared`),
 with each other and the world's threads,
 so a tile is made once, for what draws it and what lights it
 (`Shared::make_tiles`),
@@ -147,8 +146,6 @@ The world draws grids that keep of a site only what is drawn (`VoxelGrid::to_gri
 beside the sites the light reads,
 till hosts read sites as light does
 ("Cells hold what they look like" in [generators.md](generators.md)).
-The bakers' each make a generator, whose plans take tens of MB;
-a thread of the world lights with the one it makes tiles with.
 
 What is found at a site is a function of the world alone,
 so the Lights keep it together, every level's alike,

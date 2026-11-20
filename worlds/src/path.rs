@@ -2,7 +2,7 @@
 //! across; and paths: a spine with a curve (worldgen::curve) through it,
 //! which what is on the path or keeps off it measures from.
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use worldgen::curve::Curve;
 use worldgen::noise::{Fx, fx};
@@ -17,11 +17,11 @@ const PATH_SCALE: i64 = 256;
  * A function of position, so a plan of any band may read it.
  */
 #[derive(Clone)]
-pub struct Spine(Rc<dyn Fn(i64) -> Fx>);
+pub struct Spine(Arc<dyn Fn(i64) -> Fx + Send + Sync>);
 
 impl Spine {
-    pub fn new(x: impl Fn(i64) -> Fx + 'static) -> Spine {
-        Spine(Rc::new(x))
+    pub fn new(x: impl Fn(i64) -> Fx + Send + Sync + 'static) -> Spine {
+        Spine(Arc::new(x))
     }
 
     /** Its x at z, with its fraction. */
@@ -49,7 +49,7 @@ const BEND: Fx = fx(0.0135);
 const SAG: Fx = fx(0.125);
 
 pub struct Path {
-    centre: Rc<Plan<Fx>>,
+    centre: Arc<Plan<Fx>>,
     curve: Curve<2>,
     /** By piece, √(1 + s²) for its steepest segment's slope s: the path keeps further than a distance from a column this many times as far across. */
     stretch: Plan<Fx>,
@@ -58,7 +58,7 @@ pub struct Path {
 impl Path {
     /** The path along `spine`, its centre line. */
     pub fn new(spine: Spine) -> Path {
-        let centre = Rc::new(Plan::new("path", PATH_SCALE, move |_, z| spine.x(z)));
+        let centre = Arc::new(Plan::new("path", PATH_SCALE, move |_, z| spine.x(z)));
         // A point halves a run h long along z: it is off its ends' middle by at most BEND·h²/8.
         let wander = (0..LEVELS).map(|level| BEND * Units((PIECE >> level).pow(2)) / 8).collect();
         let curve = {

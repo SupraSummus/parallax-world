@@ -45,7 +45,6 @@
 //! those pieces were not there (`shown`): the ray that shows it met none.
 
 use std::collections::BTreeMap;
-use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -383,7 +382,7 @@ struct Paths {
 type Touches = Option<Box<[Rgb; N]>>;
 
 pub struct Light {
-    world: Rc<World>,
+    world: Arc<World>,
     shared: Shared,
     /** By level, up to a renderer's coarsest grid's (GRID_LEVELS). */
     levels: Vec<Level>,
@@ -407,7 +406,7 @@ type Near = [Option<Rgb>; N];
 
 impl Light {
     /** The light of `world`, found only where asked, and kept in `shared`. */
-    pub fn new(world: impl Into<Rc<World>>, shared: Shared) -> Light {
+    pub fn new(world: impl Into<Arc<World>>, shared: Shared) -> Light {
         let world = world.into();
         let Brightness { sky, sun, .. } = shared.brightness;
         let coarsest = GRID_LEVELS as u32 - 1;
@@ -963,12 +962,16 @@ mod tests {
      * `lamps`, as the towns' are; from y = −64 up to what the coarsest
      * levels' sites hold.
      */
-    fn world(lamps: &[[f64; 3]], stone: impl Fn(i64, i64, i64, i64) -> bool + 'static) -> World {
+    fn world(lamps: &[[f64; 3]], stone: impl Fn(i64, i64, i64, i64) -> bool + Send + Sync + 'static) -> World {
         world_of(&["#808080"], lamps, stone)
     }
 
     /** As `world`, its stone coloured `colour`. */
-    fn world_of(colour: &'static [&'static str], lamps: &[[f64; 3]], stone: impl Fn(i64, i64, i64, i64) -> bool + 'static) -> World {
+    fn world_of(
+        colour: &'static [&'static str],
+        lamps: &[[f64; 3]],
+        stone: impl Fn(i64, i64, i64, i64) -> bool + Send + Sync + 'static,
+    ) -> World {
         world_with(colour, lamps, &[], stone)
     }
 
@@ -977,7 +980,7 @@ mod tests {
         colour: &'static [&'static str],
         lamps: &[[f64; 3]],
         blocks: &[[f64; 3]],
-        stone: impl Fn(i64, i64, i64, i64) -> bool + 'static,
+        stone: impl Fn(i64, i64, i64, i64) -> bool + Send + Sync + 'static,
     ) -> World {
         let kinds = vec![
             KindDef { name: "stone", kind_type: 1, colors: colour, walk_through: false, glows: false, medium: false },

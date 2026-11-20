@@ -4,10 +4,8 @@
 //! its layers; its trees are in forest/trees.rs, what lies on its floor in
 //! forest/floor.rs.
 
-use std::cell::RefCell;
 use std::collections::HashMap;
-use std::rc::Rc;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use worldgen::World;
 use worldgen::column::{self, lowest_around};
@@ -167,26 +165,26 @@ impl Relief {
  */
 pub struct Forest {
     scope: Scope,
-    path: Rc<Path>,
+    path: Arc<Path>,
     spawn: [i64; 3],
-    thinning: Rc<dyn Fn(i64, i64) -> Fx>,
+    thinning: Arc<dyn Fn(i64, i64) -> Fx + Send + Sync>,
 }
 
 impl Forest {
-    pub fn new(scope: Scope, path: Rc<Path>, spawn: [i64; 3]) -> Forest {
-        Forest { scope, path, spawn, thinning: Rc::new(|_, _| Fx::ONE) }
+    pub fn new(scope: Scope, path: Arc<Path>, spawn: [i64; 3]) -> Forest {
+        Forest { scope, path, spawn, thinning: Arc::new(|_, _| Fx::ONE) }
     }
 
     /** Thinned by `thinning` too, a fraction kept: at the treeline, by the sea. */
-    pub fn thinned(self, thinning: impl Fn(i64, i64) -> Fx + 'static) -> Forest {
-        Forest { thinning: Rc::new(thinning), ..self }
+    pub fn thinned(self, thinning: impl Fn(i64, i64) -> Fx + Send + Sync + 'static) -> Forest {
+        Forest { thinning: Arc::new(thinning), ..self }
     }
 }
 
 impl Domain for Forest {
-    fn layers(self: Rc<Self>, ground: &Rc<Sloped>, hold: Holding) -> Vec<Layer> {
+    fn layers(self: Arc<Self>, ground: &Arc<Sloped>, hold: Holding) -> Vec<Layer> {
         let thinning = self.thinning.clone();
-        let share = Rc::new(move |x, z| hold.share(x, z) * thinning(x, z));
+        let share = Arc::new(move |x, z| hold.share(x, z) * thinning(x, z));
         layers(&self.scope, Ground { ground: ground.clone(), path: self.path.clone(), share }, self.spawn)
     }
 }
@@ -200,9 +198,9 @@ pub fn on_path(ground: &Sloped, path: &Path, z: i64, above: i64) -> [i64; 3] {
 
 /** What the forest grows on: the ground's height, the path, and its share of each column (a fraction), which thins whatever it grows. */
 struct Ground {
-    ground: Rc<Sloped>,
-    path: Rc<Path>,
-    share: Rc<dyn Fn(i64, i64) -> Fx>,
+    ground: Arc<Sloped>,
+    path: Arc<Path>,
+    share: Arc<dyn Fn(i64, i64) -> Fx + Send + Sync>,
 }
 
 /** The forest's state shared by its layers: what it knows about any column, from the seed and its ground alone. */
@@ -323,7 +321,7 @@ impl Woods {
     }
 
     /** The rooms of the trees at `points`: by their heights, as light favours the taller (`weight`). */
-    fn rooms(self: &Rc<Woods>, points: Rc<Points>) -> Rooms {
+    fn rooms(self: &Arc<Woods>, points: Arc<Points>) -> Rooms {
         let f = self.clone();
         Rooms::new(points, TREE_REACH, MOST, GAPS, move |s| weight(f.height(s.at[0], s.at[2], s.mark)))
     }
@@ -425,16 +423,16 @@ fn read_samples(text: &str) -> HashMap<i64, Sampled> {
 /** The forest of `seed`, alone on the relief, all of it its own. */
 pub fn forest(seed: u64) -> World {
     let world = Scope::new(seed);
-    let relief = Rc::new(Relief::new(&world.of("relief")));
+    let relief = Arc::new(Relief::new(&world.of("relief")));
     let spine = {
         let relief = relief.clone();
         Spine::new(move |z| relief.path_x(z))
     };
-    let path = Rc::new(Path::new(spine.clone()));
+    let path = Arc::new(Path::new(spine.clone()));
     let ground = Lie::new(move |x, z| relief.ground(x, z, spine.across(x, z).abs())).ground(GROUND_SCALE, SLOPE);
     // Start on the path at the near end, at about the height of a tall shrub.
     let spawn = on_path(&ground, &path, vox(-31.0) as i64, vox(3.0) as i64);
-    let forest: Rc<dyn Domain> = Rc::new(Forest::new(world.of("forest"), path, spawn));
+    let forest: Arc<dyn Domain> = Arc::new(Forest::new(world.of("forest"), path, spawn));
     let layers = compose(&[forest], &ground, GROUND_SCALE, Fx::ONE);
     World {
         generator: Generator { kinds: KINDS.to_vec(), seed: world.seed("layers"), layers },
@@ -461,7 +459,7 @@ fn layers(scope: &Scope, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
         let heights = ground.ground.clone();
         Plan::new("forest steep", COLUMN_SCALE, move |x, z| steep(&heights, x, z, 1))
     };
-    let f = Rc::new(Woods { scope: scope.clone(), spawn, ground, columns, steep });
+    let f = Arc::new(Woods { scope: scope.clone(), spawn, ground, columns, steep });
 
     // The ground: along each column, soil or stone under a layer of its surface, and stone down to the bottom.
     let terrain = {
@@ -483,52 +481,46 @@ fn layers(scope: &Scope, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
     // by its share of tree_chance, a square 4 m wide's; roots 8 m wide, as wide as the chances follow.
     let points = {
         let f = f.clone();
-        Rc::new(Points::new("trees", f.s("trees"), &[0, 2], TREE_LEAF, vox(8.0) as i64, 3, move |[x, _, z]| {
+        Arc::new(Points::new("trees", f.s("trees"), &[0, 2], TREE_LEAF, vox(8.0) as i64, 3, move |[x, _, z]| {
             let [spruce, birch, oak] = f.leaf_chances(x, z);
             [spruce, birch, oak, Fx::ZERO]
         }))
     };
     // What each slab of each species' trees adds to their shadow, and where around their cells they hide what
-    // from above, from the sample stands (`stands`), by spacing.
-    let measured = Rc::new(RefCell::new(HashMap::<i64, Rc<Measured>>::new()));
+    // from above, from the sample stands (`stands`), by spacing: by its level, each made once.
+    let measured: [OnceLock<Measured>; i64::BITS as usize] = std::array::from_fn(|_| OnceLock::new());
     let blurred = points.clone();
-    let measured_at = move |spacing: i64| {
-        measured
-            .borrow_mut()
-            .entry(spacing)
-            .or_insert_with(|| {
-                let Sampled { slabs, wood, across, spread } = sampled_at(spacing);
-                let above = across.map(|slabs| {
-                    let sum: f64 = slabs.iter().sum();
-                    slabs.iter().map(|s| s / sum).collect()
-                });
-                let (mut shadow, mut over) = ([0.0; 3], HashMap::<[i64; 2], [f64; 3]>::new());
-                let column = (spacing * spacing) as f64;
-                for (sp, spread) in spread.into_iter().enumerate() {
-                    for &([x, z], area) in &spread {
-                        shadow[sp] += area;
-                        over.entry([x, z]).or_default()[sp] = -js::log(1.0 - (area / column).min(0.99)) * column;
-                    }
-                }
-                let feet = [[-1, -1], [-1, 0], [0, -1], [0, 0]].map(|o| (o, [0.25; MARKS])).to_vec();
-                let own = Blur::new(blurred.clone(), spacing, feet);
-                Rc::new(Measured { slabs, above, wood, shadow, own, over })
-            })
-            .clone()
+    let measure = move |spacing: i64| {
+        let Sampled { slabs, wood, across, spread } = sampled_at(spacing);
+        let above = across.map(|slabs| {
+            let sum: f64 = slabs.iter().sum();
+            slabs.iter().map(|s| s / sum).collect()
+        });
+        let (mut shadow, mut over) = ([0.0; 3], HashMap::<[i64; 2], [f64; 3]>::new());
+        let column = (spacing * spacing) as f64;
+        for (sp, spread) in spread.into_iter().enumerate() {
+            for &([x, z], area) in &spread {
+                shadow[sp] += area;
+                over.entry([x, z]).or_default()[sp] = -js::log(1.0 - (area / column).min(0.99)) * column;
+            }
+        }
+        let feet = [[-1, -1], [-1, 0], [0, -1], [0, 0]].map(|o| (o, [0.25; MARKS])).to_vec();
+        let own = Blur::new(blurred.clone(), spacing, feet);
+        Measured { slabs, above, wood, shadow, own, over }
     };
     // A medium as dense as the trees standing in each column, their area per volume. Where the crown over it
     // (its owner's: Rooms) hides more from above than that (over a clearing, a path, a street), it hides the
     // rest too, slab by slab as they do. Not their whole medium spread around: denser from above
     // than the trees ("Media are isotropic" in docs/generators.md), it filled the gaps among them (from above
     // at level 4, 0.14 apart in the forest).
-    let rooms = Rc::new(f.rooms(points.clone()));
+    let rooms = Arc::new(f.rooms(points.clone()));
     let canopy = {
         let (f, rooms) = (f.clone(), rooms.clone());
         Field::columns("canopy", 1.0, Op::Fill, move |x, z| {
             // Its own far form, measured by the sites' spacing.
             let spacing = plan::spacing();
-            let measured = measured_at(spacing);
-            let Measured { slabs, above, wood, shadow, own, over } = &*measured;
+            let measured = measured[spacing.trailing_zeros() as usize].get_or_init(|| measure(spacing));
+            let Measured { slabs, above, wood, shadow, own, over } = measured;
             // Its trees as measured in stands as dense as they are there, between the two nearest.
             let chances = f.leaf_chances(x, z);
             let at = chances.iter().fold(0.0, |sum, c| sum + 4.0 * c.to_f64()) / STANDS[1];
@@ -593,7 +585,7 @@ fn layers(scope: &Scope, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
             })
             .make(move |[x, y, z], cell| {
                 let (at, mark) = ([x as i64, 0, z as i64], cell.mark);
-                let (height, room) = (f.height(at[0], at[2], mark), Rc::new(rooms.room(at, mark)));
+                let (height, room) = (f.height(at[0], at[2], mark), Arc::new(rooms.room(at, mark)));
                 Some(grow(SPECIES[cell.mark], x, y, z, height, room, &mut cell.random("tree"), &|x, z| f.ground(x, z)))
             })
             .on(on.clone())
@@ -718,14 +710,14 @@ mod tests {
         }
         let tall = move |s: &Spot| height(species, unit(hash(seed, s.at[0], s.at[2], 0)));
         let points =
-            Rc::new(Points::new("stand", seed, &[0, 2], m(2.0), m(8.0), 1, move |_| [fx(chance / 4.0), Fx::ZERO, Fx::ZERO, Fx::ZERO]));
+            Arc::new(Points::new("stand", seed, &[0, 2], m(2.0), m(8.0), 1, move |_| [fx(chance / 4.0), Fx::ZERO, Fx::ZERO, Fx::ZERO]));
         let rooms = Rooms::new(points.clone(), TREE_REACH, MOST, GAPS, move |s| weight(tall(s)));
         let half = m(64.0);
         let mut spots = points.points_in([-half, 0, -half], [half, 1, half]);
         spots.sort_by_key(|s| (s.at[0] * s.at[0] + s.at[2] * s.at[2], s.at, s.nth));
         let grown = |s: &Spot| {
             let ([x, _, z], random) = (s.at, &mut Rng::new(hash64(seed, s.at[0], s.at[2], 1)));
-            grow(species, x as f64, 0.0, z as f64, tall(s), Rc::new(rooms.room(s.at, 0)), random, &|_, _| 0)
+            grow(species, x as f64, 0.0, z as f64, tall(s), Arc::new(rooms.room(s.at, 0)), random, &|_, _| 0)
         };
         spots.iter().take(64).map(grown).collect()
     }

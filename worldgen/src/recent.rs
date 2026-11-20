@@ -1,4 +1,7 @@
-//! What was used last, kept: a population's things measured.
+//! What was used last, kept: a population's things measured, a settlement's layout.
+
+use std::hash::Hash;
+use std::sync::{Arc, Mutex};
 
 use fcc::FastMap;
 
@@ -13,7 +16,7 @@ pub(crate) struct Recent<K, V> {
     old: FastMap<K, V>,
 }
 
-impl<K: Clone + Eq + std::hash::Hash, V> Recent<K, V> {
+impl<K: Clone + Eq + Hash, V> Recent<K, V> {
     pub(crate) fn new(kept: usize) -> Recent<K, V> {
         Recent { kept, new: FastMap::default(), old: FastMap::default() }
     }
@@ -31,5 +34,29 @@ impl<K: Clone + Eq + std::hash::Hash, V> Recent<K, V> {
             self.old = std::mem::take(&mut self.new);
         }
         self.new.insert(key, value);
+    }
+}
+
+/**
+ * Large values by key, made when first asked for and shared by all who
+ * ask, the ones asked for last kept (Recent): each a function of the
+ * world alone, so two threads making the same at once make the same.
+ */
+pub struct Memo<K, V>(Mutex<Recent<K, Arc<V>>>);
+
+impl<K: Clone + Eq + Hash, V> Memo<K, V> {
+    /** None made yet: to keep `kept`, and as many asked for before them. */
+    pub fn new(kept: usize) -> Memo<K, V> {
+        Memo(Mutex::new(Recent::new(kept)))
+    }
+
+    /** The value of `key`: kept, or made now with `make`, unlocked meanwhile: making one may ask for others. */
+    pub fn of(&self, key: &K, make: impl FnOnce() -> V) -> Arc<V> {
+        if let Some(value) = self.0.lock().expect("memo").get(key) {
+            return value.clone();
+        }
+        let value = Arc::new(make());
+        self.0.lock().expect("memo").insert(key.clone(), value.clone());
+        value
     }
 }

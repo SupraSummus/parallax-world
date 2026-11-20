@@ -16,7 +16,7 @@ impl Generator {
     pub fn alone(self, component: &str) -> Generator {
         let mut names = component.split('/').map(str::trim);
         let first = names.next().unwrap_or_default();
-        let path: Rc<[String]> = names.map(String::from).collect();
+        let path: Arc<[String]> = names.map(String::from).collect();
         let layers: Vec<&str> = self.layers.iter().map(Layer::name).collect();
         let Some(mut layer) = self.layers.into_iter().find(|l| l.name() == first) else {
             panic!("no layer {first} to draw alone; the layers are {}", layers.join(", "));
@@ -37,9 +37,9 @@ impl Generator {
  * children named drawn at any spacing (`Generator::alone`). None if
  * `path` names none of its children, or it has none.
  */
-fn part(node: Node, path: &Rc<[String]>) -> Option<Node> {
+fn part(node: Node, path: &Arc<[String]>) -> Option<Node> {
     let Some(name) = path.first().cloned() else { return Some(node) };
-    let rest: Rc<[String]> = path[1..].into();
+    let rest: Arc<[String]> = path[1..].into();
     let keep = move |children: Vec<Child>| -> Vec<Child> {
         children
             .into_iter()

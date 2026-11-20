@@ -1,7 +1,7 @@
 //! What a host needs to show a world: its generator, where the camera
 //! starts, and the heights it has anything at, if it is bounded so; and
 //! the places it names, for checks and tools to find its features at any
-//! seed.
+//! seed. One for all the threads that make and light its tiles.
 //!
 //! Heights are a world's own: a ground's sky over it, and the rock under
 //! it no one sees. A world endless every way (the cheese) has none, nor a
@@ -12,7 +12,7 @@ use crate::generator::Generator;
 use crate::grid::Box3;
 
 /** Finds a place of a world, lattice units. */
-pub type Find = Box<dyn Fn() -> [i64; 3]>;
+pub type Find = Box<dyn Fn() -> [i64; 3] + Send + Sync>;
 
 /**
  * The heights hosts tile a world with none in: as good as endless, and

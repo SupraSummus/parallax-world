@@ -42,7 +42,6 @@ fn on_threads<T: Send>(n: usize, f: impl Fn(usize) -> T + Sync) -> Vec<T> {
 fn a_measured_far_form_keeps_what_rays_see() {
     // A solid block 64 units wide, painted with a sheet of glass on top two fine sites deep, and a sparse cloud:
     // measured at sites 16 apart from sites 4 apart.
-    // Made on each thread: a node is not Sync.
     let block = || Node {
         far: Some(Far::measured(fx(2.0))),
         ..Node::of(vec![cuboid([0.0; 3], [64.0; 3], 1, SOLID, Op::Fill), cuboid([0.0, 56.0, 0.0], [64.0, 64.0, 64.0], 2, SOLID, Op::Paint)])
@@ -189,7 +188,7 @@ fn layers(layers: Vec<Layer>) -> Generator {
 
 /** Ground `height(x)` high, said to rise at most `slope` a column: eight units of it about it. */
 fn ground(height: fn(i64) -> i64, slope: i64) -> Generator {
-    let of = Rc::new(Sloped::new(Rc::new(plan::Plan::new("ground", 1, move |x, _| height(x))), slope));
+    let of = Arc::new(Sloped::new(Arc::new(plan::Plan::new("ground", 1, move |x, _| height(x))), slope));
     let field = Field::columns("ground", 0.0, Op::Fill, move |x, _| vec![Span::solid(height(x) - 8, height(x) + 1, 0)]);
     layers(vec![Layer::Field(field.about(of, 8, 1))])
 }
@@ -206,7 +205,7 @@ fn a_field_about_its_ground_is_drawn_only_where_its_lines_may_be() {
 #[test]
 #[should_panic(expected = "field ground: span [-8, 1) at column (0, 0) reaches past 2 under and 1 over its ground 0")]
 fn refuses_a_field_reaching_past_what_it_says() {
-    let flat = Rc::new(Sloped::new(Rc::new(plan::Plan::new("flat", 1, |_, _| 0)), 0));
+    let flat = Arc::new(Sloped::new(Arc::new(plan::Plan::new("flat", 1, |_, _| 0)), 0));
     let field = Field::columns("ground", 0.0, Op::Fill, |_, _| vec![Span::solid(-8, 1, 0)]).about(flat, 2, 1);
     generate(&layers(vec![Layer::Field(field)]), &Box3 { min: [0, -16, 0], max: [8, 16, 8] }, 0);
 }
@@ -223,7 +222,7 @@ fn checking_finds_what_a_broken_promise_skips() {
 
 /** Ground `height(x)` high, said to rise at most `slope` a column: a surface about it, stone under it. */
 fn solid_ground(height: fn(i64) -> i64, slope: i64) -> Generator {
-    let of = Rc::new(Sloped::new(Rc::new(plan::Plan::new("ground", 1, move |x, _| height(x))), slope));
+    let of = Arc::new(Sloped::new(Arc::new(plan::Plan::new("ground", 1, move |x, _| height(x))), slope));
     let field = Field::columns("ground", 0.0, Op::Fill, move |x, _| crate::column::Column::new(height(x)).surface(0, 4).under(0));
     layers(vec![Layer::Field(field.ground(of, 4, 1, 0))])
 }
@@ -379,7 +378,7 @@ fn what_shows_of_a_box_is_all_but_its_whole_bottom_and_top() {
 #[test]
 #[should_panic(expected = "field ground: at column (0, 0), kind Some(0) doesn't reach up from DEEP to -6, 4 under its ground 0")]
 fn refuses_a_field_not_under_its_ground_as_it_says() {
-    let flat = Rc::new(Sloped::new(Rc::new(plan::Plan::new("flat", 1, |_, _| 0)), 0));
+    let flat = Arc::new(Sloped::new(Arc::new(plan::Plan::new("flat", 1, |_, _| 0)), 0));
     let field = Field::columns("ground", 0.0, Op::Fill, |_, _| vec![Span::solid(-4, 1, 0)]).ground(flat, 4, 1, 0);
     generate(&layers(vec![Layer::Field(field)]), &Box3 { min: [0, -16, 0], max: [8, 16, 8] }, 0);
 }
@@ -397,7 +396,7 @@ fn checking_finds_a_field_not_under_its_ground_where_it_says() {
 #[should_panic(expected = "rocks 0,0,0 is anchored at [0.0, 0.0, 0.0], where its population says none stand (Population::stands)")]
 fn refuses_a_thing_anchored_off_the_ground_it_stands_on() {
     // In its cell, but the ground is 100 units under it.
-    let low = Rc::new(Sloped::new(Rc::new(plan::Plan::new("low", 1, |_, _| -100)), 0));
+    let low = Arc::new(Sloped::new(Arc::new(plan::Plan::new("low", 1, |_, _| -100)), 0));
     let rocks = Population::new("rocks", 1.0, 16)
         .on(low)
         .anchor(|cell| (cell.centre == [0; 3]).then_some([0.0; 3]))

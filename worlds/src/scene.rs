@@ -9,7 +9,7 @@
 //! (varints), and the full ones' ids (bytes, 1 the first colour); a run
 //! with no full ones ends it.
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use worldgen::World;
 use worldgen::generator::{Field, Generator, KindDef, Layer, Meets, Op};
@@ -220,7 +220,7 @@ impl Scene {
         // Coarser levels may reach a site past level 0.
         let heights = (0..self.levels.len()).filter_map(|k| self.levels[k].heights(1 << k));
         let heights = heights.reduce(|a, b| (a.0.min(b.0), a.1.max(b.1))).unwrap_or((min[1], min[1]));
-        let scene = Rc::new(self);
+        let scene = Arc::new(self);
         let field = Field::at("scene", 0.0, Op::Fill, move |x, y, z| match scene.at(x, y, z, plan::spacing()) {
             0 => None,
             id => Some((id - 1, None)),
