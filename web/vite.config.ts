@@ -16,6 +16,8 @@ export default defineConfig({
     },
   },
   build: {
+    // The app, and the native frontend in a browser.
+    rollupOptions: { input: [resolve(import.meta.dirname, 'index.html'), resolve(import.meta.dirname, 'native.html')] },
     // Both bundles, the page's and the bake worker's, inline the WebAssembly as base64: most of their size.
     chunkSizeWarningLimit: 2500,
   },

@@ -118,7 +118,11 @@ its options are in `native/src/main.rs`:
 cargo run --release -p parallax-native
 ```
 
-The page takes a view in its query:
+It runs in a browser too, where there is WebGPU,
+at `native.html` beside the app (`pnpm dev`, `pnpm build`):
+the same code in WebAssembly, its world made between frames, with no threads.
+
+The pages take a view in their query:
 `?seed=&world=&camera=x,y,z&look=yaw,pitch&fov=&distance=&detail=`
 (camera in lattice units, angles in degrees).
 

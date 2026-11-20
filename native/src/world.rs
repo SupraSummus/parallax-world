@@ -273,6 +273,8 @@ pub struct World {
     done: Receiver<Made>,
     /** Received by wait(), not taken yet. */
     early: Vec<Made>,
+    /** With no threads, what works in their place. */
+    own: Option<Worker>,
 }
 
 /** How far tile `id` of `level` is from the camera (lattice units), in the level's sites. */
@@ -318,34 +320,42 @@ fn own_clock() -> libc::clockid_t {
     clock
 }
 
-fn work(make: Make, seed: u64, queue: &(Mutex<Queue>, Condvar), send: &Sender<Made>) {
-    behind_drawing();
-    #[cfg(target_os = "linux")]
-    queue.0.lock().expect("queue").clocks.push(own_clock());
-    // Made on the thread: a generator is not Send. Its Light's too.
-    let world = Rc::new(make(seed));
-    let with = |level: usize, id: TileId| made_with(&world, level as u32, id.map(i64::from)).map(|key| key.map(|v| v as i32));
-    // Made once there are tiles to light, and again when the light changes.
-    let mut light: Option<(u32, Light)> = None;
-    loop {
-        let ((level, piece, of), shared, lighting, lit) = {
-            let mut q = queue.0.lock().expect("queue");
-            loop {
-                if let Some(job) = q.wanted.pop_front() {
-                    q.in_flight.insert((job.0, job.1));
-                    if let Piece::Tile(id) = job.1 {
-                        q.take(job.0, with(job.0, id));
-                    }
-                    break (job, q.shared.clone(), q.lighting, q.lit);
-                }
-                q = queue.1.wait(q).expect("queue");
-            }
-        };
-        let made: Vec<Made> = match piece {
+/**
+ * What makes tiles and lights bricks, on a thread of its own or, a world
+ * with no threads, on its caller's: a generator is not Send, nor its Light.
+ */
+struct Worker {
+    world: Rc<worldgen::world::World>,
+    /** Made once there are tiles to light, and again when the light changes. */
+    light: Option<(u32, Light)>,
+}
+
+/** A job taken off the queue, and what the queue said then: its light, how many times that changed, and whether it is read. */
+type Taken = (Job, Option<Shared>, u32, bool);
+
+impl Worker {
+    fn new(make: Make, seed: u64) -> Worker {
+        Worker { world: Rc::new(make(seed)), light: None }
+    }
+
+    /** The most wanted job, if any, now under way, with the tiles made with its own. */
+    fn take(&self, q: &mut Queue) -> Option<Taken> {
+        let job = q.wanted.pop_front()?;
+        q.in_flight.insert((job.0, job.1));
+        if let Piece::Tile(id) = job.1 {
+            let with = made_with(&self.world, job.0 as u32, id.map(i64::from)).map(|key| key.map(|v| v as i32));
+            q.take(job.0, with);
+        }
+        Some((job, q.shared.clone(), q.lighting, q.lit))
+    }
+
+    fn make(&mut self, ((level, piece, of), shared, lighting, lit): Taken) -> Vec<Made> {
+        match piece {
             Piece::Brick(corner) => {
-                light.take_if(|(l, _)| *l != lighting);
+                self.light.take_if(|(l, _)| *l != lighting);
+                let world = &self.world;
                 let (_, light) =
-                    light.get_or_insert_with(|| (lighting, Light::new(world.clone(), shared.expect("light to light tiles with"))));
+                    self.light.get_or_insert_with(|| (lighting, Light::new(world.clone(), shared.expect("light to light tiles with"))));
                 // A tile lit anew since (relight) is let go, and this light with it.
                 of.expect("the tile of a brick").lit(level as u32, corner, light);
                 vec![(level, piece, None)]
@@ -354,8 +364,8 @@ fn work(make: Make, seed: u64, queue: &(Mutex<Queue>, Condvar), send: &Sender<Ma
                 let key = id.map(i64::from);
                 // Read by light, its sites are the light's: made once.
                 let grids = match shared.filter(|_| lit) {
-                    Some(shared) => shared.make_tiles(&world, level as u32, key),
-                    None => make_tiles(&world, level as u32, key),
+                    Some(shared) => shared.make_tiles(&self.world, level as u32, key),
+                    None => make_tiles(&self.world, level as u32, key),
                 };
                 let tile = |(key, grid): ([i64; 3], Grid)| {
                     let id = key.map(|v| v as i32);
@@ -363,8 +373,26 @@ fn work(make: Make, seed: u64, queue: &(Mutex<Queue>, Condvar), send: &Sender<Ma
                 };
                 grids.into_iter().map(tile).collect()
             }
+        }
+    }
+}
+
+fn work(make: Make, seed: u64, queue: &(Mutex<Queue>, Condvar), send: &Sender<Made>) {
+    behind_drawing();
+    #[cfg(target_os = "linux")]
+    queue.0.lock().expect("queue").clocks.push(own_clock());
+    let mut worker = Worker::new(make, seed);
+    loop {
+        let taken = {
+            let mut q = queue.0.lock().expect("queue");
+            loop {
+                match worker.take(&mut q) {
+                    Some(taken) => break taken,
+                    None => q = queue.1.wait(q).expect("queue"),
+                }
+            }
         };
-        for made in made {
+        for made in worker.make(taken) {
             if send.send(made).is_err() {
                 return;
             }
@@ -373,7 +401,12 @@ fn work(make: Make, seed: u64, queue: &(Mutex<Queue>, Condvar), send: &Sender<Ma
 }
 
 impl World {
-    /** The world `make` makes of `seed`, generated (into `shared` if given, the light it can be lit by) and indexed on `threads` threads; not lit yet. */
+    /**
+     * The world `make` makes of `seed`, generated (into `shared` if given,
+     * the light it can be lit by) and indexed on `threads` threads, or
+     * with none, where there are none to have (a browser), a piece each
+     * time its caller has it work (`work`, `wait`); not lit yet.
+     */
     pub fn new(make: Make, seed: u64, shared: Option<Shared>, threads: usize) -> World {
         let world = make(seed);
         let heights = heights(&world);
@@ -394,7 +427,17 @@ impl World {
             queue,
             done,
             early: Vec::new(),
+            own: (threads == 0).then(|| Worker::new(make, seed)),
         }
+    }
+
+    /** With no threads, makes or lights the piece most wanted, here; whether there was one. */
+    pub fn work(&mut self) -> bool {
+        let Some(worker) = &mut self.own else { return false };
+        let taken = worker.take(&mut self.queue.0.lock().expect("queue"));
+        let Some(taken) = taken else { return false };
+        self.early.extend(worker.make(taken));
+        true
     }
 
     /** The tiles of `level` made so far. */
@@ -485,6 +528,10 @@ impl World {
 
     /** Waits until a tile is made or a brick lit. */
     pub fn wait(&mut self) {
+        if self.own.is_some() {
+            self.work();
+            return;
+        }
         self.early.extend(self.done.recv());
     }
 
@@ -695,5 +742,13 @@ mod tests {
         let after = lit(&mut world);
         assert!(after != before, "the light changed");
         assert!(after == lit(&mut World::new(make, 1, Some(Shared::new(dusk).stepping(3)), 4)));
+    }
+
+    #[test]
+    fn a_world_with_no_threads_is_as_one_with_some() {
+        use worldgen::light::Brightness;
+        let make = worlds::by_name("forest").expect("forest").make;
+        let day = Brightness { sky: 1.0, sun: 1.0, glow: 0.0 };
+        assert!(lit(&mut World::new(make, 1, Some(Shared::new(day)), 0)) == lit(&mut World::new(make, 1, Some(Shared::new(day)), 4)));
     }
 }

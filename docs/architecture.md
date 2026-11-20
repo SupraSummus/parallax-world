@@ -11,6 +11,13 @@ The Rust is a workspace of crates (`Cargo.toml`):
 `worlds/` on `worldgen/`
 (the registry, and worlds in crates of their own inside it);
 `web/wasm/` makes the web's WebAssembly of them, `native/` links them.
+`native/` is also built for browsers (`web/native.html`):
+WebGPU for its GPU, a canvas for its window,
+and the voxels engine alone,
+as the chunks' compositor draws with what WebGPU lacks.
+A browser gives it no threads,
+so its world makes a piece or more after each frame
+(`World::work` in `native/src/world.rs`).
 
 The world is cut into slices, each a slab between two layers of a
 coarser FCC lattice made of whole cells of a finer one,

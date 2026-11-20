@@ -3,7 +3,7 @@
 //! in the window or offscreen, where it also times a picture or saves it.
 
 use std::any::Any;
-use std::time::Instant;
+use web_time::Instant;
 
 use egui_wgpu::wgpu;
 
@@ -15,7 +15,11 @@ use crate::engine::{Painter, Picture};
  * carries the tile, and their first vertex out of the vertex index, which
  * carries a splat's chunk's slot (chunks' compositor.rs).
  */
+#[cfg(not(target_arch = "wasm32"))]
 const BACKENDS: wgpu::Backends = wgpu::Backends::VULKAN;
+/** In a browser, its WebGPU. */
+#[cfg(target_arch = "wasm32")]
+const BACKENDS: wgpu::Backends = wgpu::Backends::BROWSER_WEBGPU;
 
 /**
  * The instance engines draw with, its backends; without wgpu's checks of
@@ -38,6 +42,15 @@ pub const FEATURES: wgpu::Features = wgpu::Features::INDIRECT_FIRST_INSTANCE
     .union(wgpu::Features::MULTI_DRAW_INDIRECT_COUNT)
     .union(wgpu::Features::SHADER_EARLY_DEPTH_TEST)
     .union(wgpu::Features::CLIP_DISTANCES);
+
+/**
+ * FEATURES, as a device of `adapter` is asked for them: all, but in a
+ * browser, whose WebGPU has no draws counted on the GPU, those it has,
+ * for the engines that need no more (engine.rs's Kind::ALL).
+ */
+pub fn features(adapter: &wgpu::Adapter) -> wgpu::Features {
+    if cfg!(target_arch = "wasm32") { FEATURES & adapter.features() } else { FEATURES }
+}
 
 /** What engines need of a device: buffers as large as the adapter allows, for what is in view. */
 pub fn limits(adapter: &wgpu::Adapter) -> wgpu::Limits {
@@ -75,7 +88,7 @@ impl Easel {
         if let Some(most) = most {
             limits.max_buffer_size = limits.max_buffer_size.min(most);
         }
-        let descriptor = wgpu::DeviceDescriptor { required_limits: limits, required_features: FEATURES, ..Default::default() };
+        let descriptor = wgpu::DeviceDescriptor { required_limits: limits, required_features: features(&adapter), ..Default::default() };
         let (device, queue) = pollster::block_on(adapter.request_device(&descriptor)).expect("device");
         Easel::new(device, queue, OFFSCREEN)
     }

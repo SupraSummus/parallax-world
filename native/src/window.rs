@@ -5,9 +5,11 @@
 //! lives on it is made again, and the window goes on from where it was,
 //! the world and what engines made of it kept.
 
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use web_time::Instant;
 
 use egui_wgpu::wgpu;
 use winit::application::ApplicationHandler;
@@ -46,24 +48,35 @@ pub struct Times {
 }
 
 /** Shows `content` in a window until it is closed. */
-pub fn run(title: &str, size: [f64; 2], content: impl Content) {
+pub fn run(title: &str, size: [f64; 2], content: impl Content + 'static) {
     let event_loop = EventLoop::new().expect("an event loop");
     let instance = gpu::instance();
-    let mut windowed = Windowed { title: title.to_string(), size, content, instance, open: None, next: None, last: None };
-    event_loop.run_app(&mut windowed).expect("the event loop");
+    let arrived = Default::default();
+    let windowed = Windowed { title: title.to_string(), size, content, instance, open: None, arrived, next: None, last: None };
+    #[cfg(not(target_arch = "wasm32"))]
+    event_loop.run_app(&mut { windowed }).expect("the event loop");
+    // A browser's loop is the page's: it goes on after this returns.
+    #[cfg(target_arch = "wasm32")]
+    winit::platform::web::EventLoopExtWebSys::spawn_app(event_loop, windowed);
 }
 
 struct Windowed<C> {
     title: String,
+    /** In points; a browser's page sizes its own. */
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     size: [f64; 2],
     content: C,
     instance: wgpu::Instance,
     open: Option<Open>,
+    arrived: Arrived,
     /** When egui wants the next frame. */
     next: Option<Instant>,
     /** When the last frame began. */
     last: Option<Instant>,
 }
+
+/** A window's GPU, made: in a browser it comes later, a redraw asked for with it (Windowed::make). */
+type Arrived = Rc<RefCell<Option<(Arc<Window>, Gpu)>>>;
 
 /** A window open: it, egui's state for it, and its GPU. */
 struct Open {
@@ -86,13 +99,16 @@ struct Gpu {
 struct Lost(String);
 
 impl Gpu {
-    fn new(instance: &wgpu::Instance, window: &Arc<Window>) -> Gpu {
+    async fn new(instance: wgpu::Instance, window: Arc<Window>) -> Gpu {
         let surface = instance.create_surface(window.clone()).expect("a surface");
         let options = wgpu::RequestAdapterOptions { compatible_surface: Some(&surface), ..Default::default() };
-        let adapter = pollster::block_on(instance.request_adapter(&options)).expect("an adapter");
-        let descriptor =
-            wgpu::DeviceDescriptor { required_limits: gpu::limits(&adapter), required_features: gpu::FEATURES, ..Default::default() };
-        let (device, queue) = pollster::block_on(adapter.request_device(&descriptor)).expect("a device");
+        let adapter = instance.request_adapter(&options).await.expect("an adapter");
+        let descriptor = wgpu::DeviceDescriptor {
+            required_limits: gpu::limits(&adapter),
+            required_features: gpu::features(&adapter),
+            ..Default::default()
+        };
+        let (device, queue) = adapter.request_device(&descriptor).await.expect("a device");
         let lost = Arc::new((AtomicBool::new(false), Mutex::new(String::new())));
         let on_lost = lost.clone();
         device.set_device_lost_callback(move |reason, message| {
@@ -208,12 +224,27 @@ impl Gpu {
 }
 
 impl<C: Content> Windowed<C> {
-    /** The window's GPU, made anew (as egui's state, so that it uploads its textures again). */
-    fn make(&self, window: Arc<Window>) -> Open {
-        let gpu = Gpu::new(&self.instance, &window);
+    /** Has the window's GPU made anew, to open the window with once made (`opened`): here, or in a browser, later. */
+    fn make(&self, window: Arc<Window>) {
+        let (gpu, arrived) = (Gpu::new(self.instance.clone(), window.clone()), self.arrived.clone());
+        #[cfg(not(target_arch = "wasm32"))]
+        arrived.replace(Some((window, pollster::block_on(gpu))));
+        #[cfg(target_arch = "wasm32")]
+        wasm_bindgen_futures::spawn_local(async move {
+            let gpu = gpu.await;
+            window.request_redraw();
+            arrived.replace(Some((window, gpu)));
+        });
+    }
+
+    /** Opens the window whose GPU was made, if one was (with egui's state anew, so that it uploads its textures again). */
+    fn opened(&mut self) {
+        let Some((window, gpu)) = self.arrived.take() else { return };
+
         let most = gpu.easel.device.limits().max_texture_dimension_2d as usize;
         let egui = egui_winit::State::new(egui::Context::default(), egui::ViewportId::ROOT, &window, None, None, Some(most));
-        Open { window, egui, gpu }
+        self.open = Some(Open { window, egui, gpu });
+        self.next = Some(Instant::now());
     }
 
     fn redraw(&mut self) {
@@ -243,8 +274,8 @@ impl<C: Content> Windowed<C> {
                 let window = open.window.clone();
                 // The old surface goes before the new one is made for the same window.
                 self.open = None;
-                self.open = Some(self.make(window));
-                self.next = Some(Instant::now());
+                self.make(window);
+                self.opened();
             }
         }
     }
@@ -253,15 +284,20 @@ impl<C: Content> Windowed<C> {
 impl<C: Content> ApplicationHandler for Windowed<C> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.open.is_none() {
-            let [width, height] = self.size;
-            let attributes =
-                Window::default_attributes().with_title(&self.title).with_inner_size(winit::dpi::LogicalSize::new(width, height));
+            let attributes = Window::default_attributes().with_title(&self.title);
+            #[cfg(not(target_arch = "wasm32"))]
+            let attributes = attributes.with_inner_size(winit::dpi::LogicalSize::new(self.size[0], self.size[1]));
+            // In a browser the window is a canvas, put in the page, which sizes it.
+            #[cfg(target_arch = "wasm32")]
+            let attributes = winit::platform::web::WindowAttributesExtWebSys::with_append(attributes, true);
             let window = Arc::new(event_loop.create_window(attributes).expect("a window"));
-            self.open = Some(self.make(window));
+            self.make(window);
+            self.opened();
         }
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
+        self.opened();
         let Some(open) = &mut self.open else { return };
         let response = open.egui.on_window_event(&open.window, &event);
         match event {

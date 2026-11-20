@@ -35,6 +35,14 @@ impl Kind {
     pub const ALL: [(Kind, &str); 4] =
         [(Kind::Reliefs, "reliefs"), (Kind::Flat, "flat"), (Kind::Splats, "splats"), (Kind::Voxels, "voxels")];
 
+    /**
+     * Those that draw here: in a browser the voxels alone, as the chunks'
+     * compositor needs all of gpu.rs's FEATURES, and their bakery threads.
+     */
+    pub fn offered() -> &'static [(Kind, &'static str)] {
+        if cfg!(target_arch = "wasm32") { &Kind::ALL[3..] } else { &Kind::ALL }
+    }
+
     /** An engine of this kind, drawing `world`. */
     pub fn make(self, world: &World) -> Box<dyn Engine> {
         match self {

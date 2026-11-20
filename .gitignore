@@ -12,6 +12,8 @@ coverage
 .idea
 .DS_Store
 lab/out
+# The native frontend bound to a browser (pnpm bindgen)
+web/native
 # Agents' git worktrees
 .claude/worktrees
 # Scenes made elsewhere, voxelized (scripts/voxelize.py): their licences keep them out

@@ -659,6 +659,23 @@ Numbers are for the forest at 1280×800, as measured when written.
 
 ## Web
 
+- **The native frontend in a browser is to replace the app.**
+  `native.html` draws what the window does, with the voxels engine;
+  once it serves, `web/src/`, `web/wasm/` and what only they use go,
+  and the sections of `docs/architecture.md` that follow them.
+- **In a browser the world is made on the main thread**,
+  a piece or more between frames (`World::work`), on one core:
+  a first view takes several times what the window's threads take,
+  and a piece that takes long holds its frame.
+  Threads there are workers that share the module's memory:
+  a nightly toolchain (std built with atomics),
+  a page isolated by headers GitHub Pages does not send
+  (a service worker can add them),
+  and no lock waited for on the main thread.
+- **`native.html` is not tested.**
+  Headless Chromium shows nothing of a WebGPU canvas on a software GPU;
+  a shot would read its frames back from a texture of its own.
+
 - **Slice detail sets both thickness and level of detail.**
   "Slice Detail" sets how thick slices are,
   and so their level of detail (atoms of 2^(k−s) at level k,
