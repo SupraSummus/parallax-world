@@ -1273,6 +1273,14 @@ and without them rays slipped in at a cliff's corners.
   The aim: a site is a medium along each direction, by one law at every level:
   no level is special, level 0 an arbitrary one on a scale that goes on both ways
   (how fine a host may ask for is the host's to limit).
+  What a level then shows unlike a finer one is inherent, a bug or a patch.
+  Inherent to seeing each cell as a whole, not where in it its content lies:
+  a ray along a surface crosses many cells it is part of, each stopping some,
+  so it sees the surface higher, and walls from above wider. It stays.
+  A bug is a site not looking as its cell does (`checks::cells`).
+  A patch is a rule making a site look other than its cell does,
+  to hide what is inherent
+  (sheets grown to a site, `Tie`, `Column`'s two sites): to go, none to add.
   What fills a site in part is a piece with an alpha, shown by the site's coin,
   a solid's edge as leaves are;
   things in a site stop as if apart, but a paint, which lies on what is there.
