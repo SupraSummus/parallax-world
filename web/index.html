@@ -19,8 +19,13 @@
         import init from './native/parallax-native.js'
         import wasm from './native/parallax-native_bg.wasm?url'
         const say = text => { document.body.appendChild(document.createElement('p')).textContent = text }
-        if (navigator.gpu) init({ module_or_path: wasm }).catch(e => { say(`Parallax stopped: ${e}`) })
-        else say('Parallax draws with WebGPU, which this browser does not have.')
+        // The adapter asked for here first: the native frontend panics without one.
+        if (!navigator.gpu) say('Parallax draws with WebGPU, which this browser does not have.')
+        else navigator.gpu.requestAdapter()
+            .then(adapter => adapter
+                ? init({ module_or_path: wasm })
+                : say('Parallax draws with WebGPU, which this browser has but gives no GPU to: it is off or blocked here.'))
+            .catch(e => { say(`Parallax stopped: ${e}`) })
     </script>
 </body>
 
