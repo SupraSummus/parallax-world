@@ -81,6 +81,15 @@ Numbers are for the forest at 1280×800, as measured when written.
   so centred between two planes it holds their sites only at a point:
   discs 2 units thick, each 10 units over the ground, were gone at level 2.
   Boxes keep the sites on their faces by `Tie`.
+- **`Column` grows its layers to two sites**, a patch
+  ("Cells hold what they look like" in `docs/generators.md`).
+  Its reason, as `column.rs` and "Spans that stay" still give it, is gone:
+  a span under two sites could hold no site,
+  but every site now holds what its spans stop of its voxel's chords,
+  however thin (`cover` in `drawables.rs`).
+  A layer of turf a unit thick is 16 units at level 3,
+  so a slope shows turf from the side where its soil is.
+  Taking the rule out changes every ground: not tried.
 - **Some fields still keep their levels by rules of their own** (`plan::spacing`):
   the moor's stream bed and the railway write out
   `Column`'s rule of two sites (`.max(2 * spacing)`);
