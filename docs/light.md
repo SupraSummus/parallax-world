@@ -215,13 +215,20 @@ Of the light alone, about a third is `shown`'s:
 the settled light of every neighbour whose pieces are not shown.
 
 Lighting a place first, most is its tiles,
-the coarsest level's far around (`TOP_STEPS` sites along every direction):
+the coarsest level's far around, which no ray reads:
 each site met there reflects, so its light is found too, as far around it again.
-Of the valley's first view, a sixth of the work is that level's tiles,
-which no ray reads.
+A line there takes as many steps as the world's heights are sites high
+(`top_steps` in `light.rs`), then the sky's light:
+one that rises or falls has left them by then,
+and one that keeps level, which never does, ends as far,
+so what stands farther off shades nothing along it.
+Chosen: the reference's scenes do not tell it from 64 steps.
 Tried there, and not kept:
 
-- a quarter of the steps: the view drawn alike, for a tenth less work;
+- 64 steps, nearly twice as far in the valley:
+  its mountains seen from afar (README's views) took half as much work again or more,
+  under a hundredth of their pixels over two steps of colour off, on the far slopes;
+- 16 steps: the first view drawn alike, for a tenth less work than at 64;
   not looked at where mountains stand far off, which the steps are for;
 - levels past the coarsest, each taking a step as the others do,
   so that no level is unlike the rest: twice the work,
