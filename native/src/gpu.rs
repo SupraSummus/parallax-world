@@ -3,7 +3,6 @@
 //! in the window or offscreen, where it also times a picture or saves it.
 
 use std::any::Any;
-use web_time::Instant;
 
 use egui_wgpu::wgpu;
 
@@ -125,7 +124,7 @@ impl Easel {
         }
     }
 
-    /** What a bench says of the frame drawn last (Painter::describe). */
+    /** What its painter says of the frame drawn last (Painter::describe). */
     pub fn describe(&self) -> String {
         self.painter.as_ref().map_or_else(String::new, |p| p.describe(self))
     }
@@ -155,22 +154,6 @@ impl Easel {
             self.draw(picture, pixels);
             frames += 1;
         }
-    }
-
-    /**
-     * The time `picture` takes to draw again and again, in ms, uploads and
-     * all, as the window draws it when still (frames back to back, no
-     * vsync), once what it draws has settled.
-     */
-    pub fn time(&mut self, picture: &dyn Picture, pixels: [u32; 2], runs: usize) -> f64 {
-        self.settle(picture, pixels);
-        self.wait();
-        let start = Instant::now();
-        for _ in 0..runs {
-            self.draw(picture, pixels);
-        }
-        self.wait();
-        start.elapsed().as_secs_f64() * 1000.0 / runs as f64
     }
 
     /** `picture` drawn as the window shows it once settled, still: its width, height and RGBA pixels, row by row from the top. */

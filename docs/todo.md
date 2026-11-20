@@ -470,7 +470,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   thousands of kilometres of the valley.
   Forgetting would take a count of readers at every read, at every column.
 - **Walking, native keeps more than a core busy**
-  (the valley, `--stroll 20 --on-ground`, outside the GPU driver),
+  (the valley, `--stroll 20 --walk`, outside the GPU driver),
   measured when it drew slices: new tiles took about a third.
 - **Native's voxels, lit, are lit slower than the eye moves**
   (the valley, `--light 1,1,0 --stroll 8 --speed 100 --by-work`, and walking):
@@ -615,7 +615,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   - Their renderer composes a frame behind (`chunks.rs`),
     so `--stroll` counts nearly every frame as one whose content is still coming:
     it no longer tells holes from that;
-    `--replay --shots` does, from a walk the window recorded (`--record`).
+    `--shots` does, replaying, from a walk the window recorded (`--record`).
   - Turning leaves holes: a face out of view has no pick,
     and one coming into view is baked from nothing,
     tens of thousands of chunks, seconds of the bakers' work.
@@ -640,7 +640,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   as on Intel's, which tests depth only after a relief's pixel writes its own.
   Gone, `Chunks::new` takes `flat` alone, and the hole below goes with them.
 - **Native's splats leave a hole by a hut.**
-  `--engine splats --view 'seed=42&world=valley&camera=1200,100,36700&look=20,-12'`:
+  `--engine splats --seed 42 --camera 1200,100,36700 --look 20,-12`:
   sky shows through the ground in the bottom right, with or without culling,
   in straight edges like a cell's. Not looked into.
 - **Native's reliefs.**

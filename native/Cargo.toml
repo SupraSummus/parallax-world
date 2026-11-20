@@ -17,6 +17,7 @@ winit = { version = "0.30.13", default-features = false, features = ["rwh_06", "
 worlds = { path = "../worlds" }
 pollster = "1"
 web-time = "1"
+clap = { version = "4.6.9", features = ["derive"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 libc = "0.2"

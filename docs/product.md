@@ -111,8 +111,9 @@ or the page's query); the camera starts at the world's spawn point.
   Generated like the forest.
 
 **Views in the URL** – The page's query can give the world, its seed,
-the camera, where it looks, the field of view and the render distance,
-so a view can be shown again; the window takes the same as `--view`.
+the camera, where it looks, the field of view, the render distance
+and the light, so a view can be shown again:
+the same options the native frontend takes on its command line.
 
 **Panel** – The engine, the field of view and render distance,
 the lighting, walking, the flying speed,

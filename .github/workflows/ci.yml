@@ -122,4 +122,4 @@ jobs:
         run: cargo test --release --no-fail-fast -p parallax-native -- --ignored
 
       - name: Draw a view
-        run: cargo run --release -p parallax-native -- --view 'seed=1&world=moor&look=30,-10' --size 320x200 --shot shot.png
+        run: cargo run --release -p parallax-native -- --headless --world moor --seed 1 --look 30,-10 --size 320x200 --shot shot.png

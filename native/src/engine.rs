@@ -23,11 +23,15 @@ use crate::view::{self, Vec3, focal_length};
 use crate::world::{Wants, World};
 
 /** The engines, as --engine and the panel name them. */
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug, clap::ValueEnum)]
 pub enum Kind {
+    /** Chunks of cells' reliefs. */
     Reliefs,
+    /** Reliefs drawn flat, a picture a cell (an experiment). */
     Flat,
+    /** Chunks of cells' whole splats. */
     Splats,
+    /** Rays through the tiles' voxels. */
     Voxels,
 }
 
@@ -90,7 +94,7 @@ pub trait Painter: Any {
     /** Shows that picture on `pass`'s viewport. */
     fn show(&self, pass: &mut wgpu::RenderPass<'_>);
 
-    /** What a bench says of the frame it drew last, beside its time. */
+    /** What it says of the frame it drew last, once the view is complete. */
     fn describe(&self, _easel: &Easel) -> String {
         String::new()
     }
@@ -176,7 +180,7 @@ impl Look {
 }
 
 /** What voxels are painted in: their own colours, or to see how the picture is cut up, a colour per layer or per chunk. */
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, clap::ValueEnum)]
 pub enum Colours {
     #[default]
     Voxels,

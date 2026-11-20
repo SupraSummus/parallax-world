@@ -467,7 +467,7 @@ On the GPU its `Painter` keeps what it needs from frame to frame
 and draws its pictures into one of its own,
 which the window shows under egui's panel, or a shot saves.
 A device holds one painter at a time (`Easel`, `native/src/gpu.rs`).
-So the window, `--shot`, `--bench`, `--stroll` and the tests
+So the window, `--headless` and the tests
 name no engine:
 a view is complete when its engine lacks no tile and makes nothing more.
 
