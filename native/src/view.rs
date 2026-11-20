@@ -1,8 +1,8 @@
-//! The camera's view and the 12 faces around it (view.ts): each face has its
+//! The camera's view and the 12 faces around it: each face has its
 //! own chunks and draws the rays closer to its axis than to any
 //! other's. See docs/architecture.md, section 4.
 
-use bake::slicing::LAYER;
+use bake::face::LAYER;
 use fcc::Lattice;
 
 pub type Vec3 = [f64; 3];
@@ -29,14 +29,14 @@ pub fn focal_length(fov: f64, width: f64, height: f64) -> f64 {
 
 /**
  * A face: its axes in world coordinates, and its lattice vectors R = √2 ·
- * right, U = up, F = √2 · forward (Face in view.ts).
+ * right, U = up, F = √2 · forward.
  */
 pub struct Face {
     pub axes: [Vec3; 3],
     pub lattice: Lattice,
 }
 
-/** One face per neighbour direction F, in the order of FACES in view.ts (fcc's lattices). */
+/** One face per neighbour direction F, in the order of fcc's lattices. */
 pub fn faces() -> Vec<Face> {
     let scaled = |v: [i32; 3], s: f64| v.map(|c| c as f64 * s);
     fcc::lattices()
@@ -121,7 +121,7 @@ mod tests {
         x.abs() + std::f64::consts::SQRT_2 * y.abs() <= z
     }
 
-    /** Seeded uniform samples in [lo, hi), so failures reproduce (sampler in view.test.ts). */
+    /** Seeded uniform samples in [lo, hi), so failures reproduce. */
     fn sampler(seed: u64) -> impl FnMut(f64, f64) -> f64 {
         let mut state = seed;
         move |lo, hi| {

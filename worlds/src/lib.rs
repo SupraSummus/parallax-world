@@ -1,8 +1,6 @@
 //! The worlds, built on worldgen's engine with its public API only, and
 //! the registry hosts start them from by name (docs/generators.md): those
-//! here, and those in crates of their own (cheese/). The native frontend
-//! links them; the web generates them as WebAssembly (web/wasm/,
-//! web/src/lib/worldgen.ts).
+//! here, and those in crates of their own (cheese/).
 
 pub mod city;
 pub mod forest;
@@ -72,7 +70,7 @@ pub struct Entry {
 /** The seed a world's regions were laid out at; its costs, parts and far regions are checked at it alone. */
 pub const REGIONS_SEED: u64 = 42;
 
-/** Every world; the web lists them by itself (worldgen_worlds) and starts them by index (worldgen_start). */
+/** Every world. */
 pub const WORLDS: &[Entry] = &[
     // Near the spawn point: path, trees, undergrowth, from under the ground to above the crowns.
     Entry {

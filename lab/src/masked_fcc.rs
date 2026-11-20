@@ -1,8 +1,8 @@
 //! The masked model (masked.rs) on the worlds' FCC lattice:
 //! sites where x + y + z is even, coarse site S at 2S of the level below.
 //!
-//! There is no octree: the engine's coarse cells (voxel-grid.ts's
-//! COARSE_CELL) overlap, so a fine site is in one cell, two or six.
+//! There is no octree: the engine's coarse cells
+//! overlap, so a fine site is in one cell, two or six.
 //! Codes describe a cell by its 19 parts, weighted as the engine coarsens.
 //! A site sees its neighbours and the coarse sites near it, each in a slot
 //! of its offset, which also tells which kind of site it is.
@@ -59,7 +59,7 @@ fn random_site(rng: &mut Rng, dims: [usize; 3]) -> [i64; 3] {
     }
 }
 
-/** The cell of a coarse site: its parts' offsets from 2S and weights (of 48), as voxel-grid.ts's COARSE_CELL. */
+/** The cell of a coarse site: its parts' offsets from 2S and weights (of 48). */
 pub fn coarse_cell() -> Vec<([i64; 3], f32)> {
     let mut parts = vec![([0, 0, 0], 6.0)];
     for s in [-1, 1] {

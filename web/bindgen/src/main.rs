@@ -1,6 +1,6 @@
 //! pnpm bindgen: the native frontend's WebAssembly (pnpm wasm) with the
 //! JavaScript that binds it to a browser, wgpu's and winit's calls into
-//! the page, in web/native/ for native.html to load.
+//! the page, in web/native/ for index.html to load.
 
 use std::path::Path;
 

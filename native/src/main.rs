@@ -4,7 +4,7 @@
 //!
 //! parallax-native [--engine reliefs|flat|splats|voxels] [--world NAME] [--threads N] [--seed S] [--view QUERY] [--light SKY,SUN,GLOW[,STEPS]] [--detail D] [--shift S] [--seams] [--colour voxels|layers|chunks] [--unhidden] [--shot out.png [--size WxH] | --bench] [--stroll S [--on-ground] [--speed U] [--heading DEG] [--turn DEG] [--by-work]] [--record FILE] [--replay FILE [--shots DIR]]
 //!
-//! --view takes the web page's view query (parseViewQuery in renderer.ts),
+//! --view takes a view as the page's query gives it in a browser (parse_view_query),
 //! overriding --seed and --world.
 //! --shot draws the first frame once all it shows is in, at 1280×800 or
 //! --size, offscreen, and saves it; --bench only times it, the main
@@ -117,7 +117,7 @@ impl window::Content for App {
 
     fn ui(&mut self, ui: &mut egui::Ui) {
         egui::Panel::left("panel").show(ui, |ui| {
-            ui.heading("Parallax (native)");
+            ui.heading("Parallax");
             ui.label(&self.stats);
             ui.label(format!("{} tiles being made", self.world.making()));
             ui.group(|ui| {
@@ -125,13 +125,12 @@ impl window::Content for App {
                 ui.strong("Renderer");
                 ui.horizontal(|ui| {
                     ui.label("Engine");
-                    for &(kind, name) in Kind::offered() {
+                    for (kind, name) in Kind::offered() {
                         if ui.radio_value(&mut self.kind, kind, name).changed() {
                             self.engine = kind.make(&self.world);
                         }
                     }
                 });
-                // The web's (App.tsx).
                 ui.add(egui::Slider::new(&mut self.look.fov, 5.0..=120.0).step_by(1.0).text("Field of View (°)"));
                 ui.add(egui::Slider::new(&mut self.look.far, 40.0..=40000.0).logarithmic(true).text("Render Distance"));
                 self.engine.panel(ui, &mut self.look);
@@ -570,7 +569,7 @@ fn stroll(stroll: Stroll, engine: &mut dyn Engine, world: &mut World, mut look: 
     }
 }
 
-/** The view the TS renderer starts with (renderer.ts), at the size --shot draws unless --size. */
+/** The view it starts with, at the size --shot draws unless --size. */
 const YAW: f64 = 0.0;
 const PITCH: f64 = 0.0;
 const FOV: f64 = 90.0;
@@ -583,7 +582,7 @@ const WORK: std::time::Duration = std::time::Duration::from_millis(12);
 /** Units a second the window flies at to begin with, and --stroll flies at. */
 const SPEED: f64 = 40.0;
 
-/** A view as the web's page query gives it (parseViewQuery in renderer.ts); what it leaves out or gets wrong is None. */
+/** A view as a page's query gives it, in a browser, or --view; what it leaves out or gets wrong is None. */
 #[derive(Default)]
 struct ViewQuery {
     seed: Option<u64>,
@@ -609,7 +608,6 @@ fn parse_view_query(query: &str) -> ViewQuery {
         v.try_into().ok().filter(|v: &[f64; N]| v.iter().all(|x| x.is_finite()))
     }
     ViewQuery {
-        // As the web's WebAssembly takes it.
         seed: numbers::<1>(get("seed")).map(|[v]| v as i64 as u64),
         world: get("world").filter(|w| worlds::by_name(w).is_some()).map(str::to_string),
         camera: numbers::<3>(get("camera")),

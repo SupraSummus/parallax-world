@@ -1,7 +1,7 @@
 //! What the baker makes of the view's faces: the voxel's faces in lattice
 //! coordinates, and each face kind's shade per view face.
 
-use crate::slicing::LAYER;
+use crate::face::LAYER;
 use fcc::{FACE_KINDS, Lattice, VIEW_FACES, VOXEL_FACES};
 
 /**

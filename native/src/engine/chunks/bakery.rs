@@ -1,4 +1,4 @@
-//! Bakes chunks on worker threads (WorkerBakery in worker-bakery.ts), each
+//! Bakes chunks on worker threads, each
 //! with its own baker sharing the grids. Every render hands over the chunks
 //! it misses, most wanted first, replacing the previous list, spread over
 //! the workers by cell.
@@ -13,8 +13,8 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Condvar, Mutex};
 
 use bake::Baker;
+use bake::face::{LAYER, half_layer, spacing};
 use bake::lod::CellChunk;
-use bake::slicing::{LAYER, half_layer, spacing};
 use fcc::GRID_LEVELS;
 use fcc::{TileId, Tiles};
 

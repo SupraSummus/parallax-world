@@ -1,4 +1,4 @@
-//! The chunks engine, as the web draws: the renderer picks the cells of the
+//! The chunks engine: the renderer picks the cells of the
 //! lattice in view (renderer.rs), on a thread of its own, worker threads
 //! bake them into chunks (bakery.rs), their whole voxels reliefs or splats
 //! each, and the compositor draws them (compositor.rs).

@@ -35,7 +35,7 @@
 
 use fcc::GRID_LEVELS;
 
-use crate::slicing::LAYER;
+use crate::face::LAYER;
 
 /** Layers ahead of the camera's layer that the nearest voxels drawn are in: nearer, one would fill the screen. */
 const NEAR: i32 = 4;
@@ -86,7 +86,7 @@ pub struct Lod {
 
 impl Lod {
     /**
-     * For `detail` (viewing distance over thickness, as slices have it):
+     * For `detail` (viewing distance over thickness):
      * a cell 2N layers deep is drawn from Q · N layers ahead on, Q at
      * least 2 · detail; and at least 4, so that no cell but single voxels
      * reaches the near plane.
@@ -275,7 +275,7 @@ impl Lod {
      * cells each level draws for one of them, from its layer to the pick's
      * `far` (world units) ahead along the axis, whose rays have x / z and
      * y / z within `tangents` (min x, max x, min y, max y; the face's
-     * coordinates, see view.ts); each with its `T` in `picked`, which covers
+     * coordinates, see native's view.rs); each with its `T` in `picked`, which covers
      * them (Picked::covers).
      */
     pub fn composed<T>(&self, picked: &mut Picked<T>, eyes: Eyes, tangents: [f64; 4], mut visit: impl FnMut(CellChunk, &mut T)) {

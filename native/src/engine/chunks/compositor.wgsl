@@ -1,4 +1,4 @@
-// compositor.ts in WGSL, for cells' reliefs of whole voxels (bake's
+// The chunks' compositor's shaders (compositor.rs), for cells' reliefs of whole voxels (bake's
 // cell_relief), or their whole voxels as splats, and pictures of their
 // medium, drawing only the clusters of them that may show: each
 // cluster names its chunk's slot in `chunks`, which gives its face and
@@ -208,7 +208,7 @@ fn ray_of(view: mat3x3f, position: vec4f) -> vec3f {
 // A splat instance (GpuSplat): its hexagon's centre relative to its chunk's
 // origin, half its width (its height √2 times that) and its depth past the
 // plane, and its colour; drawn at its depth, as much wider as the ray to it
-// slants across (compositor.ts). Its chunk's slot comes as the first
+// slants across. Its chunk's slot comes as the first
 // vertex's index over 4.
 @vertex
 fn splat_vertex(@builtin(vertex_index) vertex: u32, @location(0) splat: vec4f, @location(1) paint: vec4f) -> Splat {

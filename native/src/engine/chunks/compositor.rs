@@ -1,4 +1,4 @@
-//! Draws a frame's chunks with wgpu, as compositor.ts does with WebGL 2,
+//! Draws a frame's chunks with wgpu,
 //! into a picture of its own, which the window (or a shot) shows:
 //! cells' reliefs of whole voxels, a quad per tile of their columns whose
 //! pixels' rays find the column they meet first, or (Frame's `relief` off)
@@ -24,8 +24,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use bake::Medium;
+use bake::face::{LAYER, half_layer};
 use bake::lod::{CellChunk, Lod};
-use bake::slicing::{LAYER, half_layer};
 use egui_wgpu::wgpu;
 use fcc::light::{linear_to_srgb, srgb_to_linear};
 use fcc::{FastMap, FastSet};
@@ -140,7 +140,7 @@ const TILE: i32 = 4;
  * drawn first; their `first` counts from the chunk's first column, and
  * their chunk's slot is not in them yet. `base` is where its column (0, 0)
  * is, relative to its origin, `unit` its grid's spacing, both in world
- * units, and `half_layer` a half layer of it. In the bake workers, so that
+ * units, and `half_layer` a half layer of it. In the bakery's threads, so that
  * a chunk's upload is a copy.
  */
 pub fn tiles(baked: &[[u32; 3]], base: [f64; 2], unit: f64, half_layer: f64) -> (Vec<GpuColumn>, Vec<GpuCluster>) {
@@ -484,7 +484,7 @@ pub fn block(distance: f64, focal: f64) -> f64 {
  * A cluster's box holds its splats' outlines along the axis, from `near`
  * to `far` past the plane, `half_layer` per half layer of their depth, and
  * how wide the widest is: the GPU finds where they are drawn for its
- * camera. In the bake workers, so that a chunk's upload is a copy.
+ * camera. In the bakery's threads, so that a chunk's upload is a copy.
  */
 pub fn cluster(numbers: &[f32], half_layer: f64, block: f64) -> (Vec<GpuSplat>, Vec<GpuCluster>) {
     let numbers = numbers.as_chunks::<5>().0;

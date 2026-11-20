@@ -32,15 +32,6 @@ jobs:
       - name: Lint
         run: pnpm lint
 
-      - name: Type check
-        run: pnpm typecheck
-
-      - name: Unused code (knip)
-        run: pnpm knip
-
-      - name: Test-only code (knip --production)
-        run: pnpm knip:production
-
   web:
     runs-on: ubuntu-latest
     steps:
@@ -50,9 +41,12 @@ jobs:
       - name: Set up environment
         uses: ./.github/actions/setup
 
-      - name: Test
-        run: pnpm test:web
+      - name: Cache Rust's dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
+      # The native frontend for browsers: what clippy, on the host, does not see.
       - name: Build
         run: pnpm build
 
@@ -71,7 +65,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Test
-        run: pnpm test:rust
+        run: pnpm test
 
       # pnpm hands what follows `--` to test:worlds' command.
       - name: Test the worlds' directions and places

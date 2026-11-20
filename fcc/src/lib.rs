@@ -1,9 +1,9 @@
 //! The face-centred cubic lattice and the voxels on it, as every crate
 //! sees them: the voxel's faces, the view faces' lattices, the levels of
 //! detail a world is held at, the grids of sites generators make and
-//! bakers read (voxel-grid.ts on the web), tiles of grids, the light from
+//! bakers read, tiles of grids, the light from
 //! voxels' faces (light.rs); and maps keyed by sites, cells and tiles.
-//! See fcc.ts and docs/architecture.md.
+//! See docs/architecture.md.
 
 pub mod light;
 
@@ -48,8 +48,7 @@ pub type FastSet<K> = HashSet<K, BuildHasherDefault<Fast>>;
 
 /**
  * The voxel's 12 faces' normals in the world, the offsets of the
- * neighbours across them; a face's index is its kind (VOXEL_FACES in
- * fcc.ts, in the same order).
+ * neighbours across them; a face's index is its kind.
  */
 pub const VOXEL_FACES: [[i32; 3]; FACE_KINDS] = [
     [-1, -1, 0],
@@ -81,10 +80,10 @@ pub fn facing(direction: [f64; 3]) -> impl Iterator<Item = usize> {
     let least = (0..FACE_KINDS).map(against).fold(f64::INFINITY, f64::min);
     (0..FACE_KINDS).filter(move |&k| against(k) <= least + 1e-9)
 }
-/** Faces of the view (FACES in view.ts). */
+/** Faces of the view. */
 pub const VIEW_FACES: usize = 12;
 
-/** A face's lattice vectors R, U, F (integer, see Face in view.ts). */
+/** A face's lattice vectors R, U, F (integer, see Face in native's view.rs). */
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Lattice {
     pub r: [i32; 3],
@@ -106,7 +105,7 @@ impl Lattice {
 }
 
 /**
- * The view faces' lattices, in the order of FACES in view.ts: one per
+ * The view faces' lattices, in the order of native's FACES (view.rs): one per
  * neighbour direction F, U the world axis across it, R = U × F.
  */
 pub fn lattices() -> [Lattice; VIEW_FACES] {
@@ -123,13 +122,13 @@ pub fn lattices() -> [Lattice; VIEW_FACES] {
     })
 }
 
-/** Levels of a world's grids: one per atom level up to MAX_LEVEL's at the largest shift (bake's slicing.rs). */
+/** Levels of a world's grids. */
 pub const GRID_LEVELS: usize = 9;
 
-/** How far around the camera each grid holds the world, in its units, and slices read it (GRID_REACH in slice-selection.ts). */
+/** How far around the camera each grid holds the world, in its units. */
 pub const GRID_REACH: f64 = 400.0;
 
-/** Bricks of the sites of a box (see VoxelGrid in voxel-grid.ts). */
+/** Bricks of the sites of a box (see VoxelGrid in worldgen's grid.rs). */
 pub const BRICK: i32 = 8;
 /** Sites a brick holds: every other one of its BRICK³ points. */
 pub const BRICK_SITES: usize = (BRICK * BRICK * BRICK / 2) as usize;
@@ -392,14 +391,6 @@ impl Tiles {
         (lo[2]..=hi[2]).all(|k| (lo[1]..=hi[1]).all(|j| (lo[0]..=hi[0]).all(|i| self.has([i, j, k]))))
     }
 
-    /** The grid of the only tile, if no other bakers share it (see one). */
-    pub fn only_mut(&mut self) -> Option<&mut Grid> {
-        match self.grids.as_mut_slice() {
-            [Some(grid)] => Arc::get_mut(grid),
-            _ => None,
-        }
-    }
-
     /** The tile site (x, y, z) is in, relative to the table's first. */
     #[inline]
     fn tile(&self, x: i32, y: i32, z: i32) -> TileId {
@@ -420,9 +411,9 @@ impl Tiles {
 
 /**
  * The sites read in a face's lattice coordinates (a, b, c) (see Face in
- * view.ts), each voxel's look the one through its face towards the
- * camera, −F: a slice is drawn as seen along F, so that is the face its
- * voxels show (docs/architecture.md, section 3).
+ * native's view.rs), each voxel's look the one through its face towards
+ * the camera, −F: a chunk is drawn as seen along F, so that is the face
+ * its voxels show (docs/architecture.md, section 3).
  */
 pub struct Reader<'a> {
     tiles: &'a Tiles,

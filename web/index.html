@@ -4,21 +4,24 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Parallax Voxel Engine</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter&family=JetBrains+Mono&display=swap">
+    <title>Parallax</title>
+    <style>
+        html, body { margin: 0; height: 100%; overflow: hidden; background: #1b1b1b; color: #ccc; font: 14px sans-serif; }
+        /* The native frontend's window (native/src/window.rs): the page sizes it. */
+        canvas { display: block; width: 100%; height: 100%; outline: none; }
+        p { position: absolute; margin: 1em; }
+    </style>
 </head>
 
 <body>
-    <div id="root">
-        <!-- Generating in App.tsx, until the app first renders (it generates the world first). -->
-        <div role="status" class="pointer-events-none absolute inset-0 flex items-center justify-center gap-3 font-mono text-sm text-white">
-            <span class="size-5 animate-spin rounded-full border-2 border-white border-t-transparent"></span>
-            Generating world…
-        </div>
-    </div>
-    <script type="module" src="/src/main.tsx"></script>
+    <!-- The native frontend (native/), in WebAssembly (pnpm wasm, pnpm bindgen), with the page's view query. -->
+    <script type="module">
+        import init from './native/parallax-native.js'
+        import wasm from './native/parallax-native_bg.wasm?url'
+        const say = text => { document.body.appendChild(document.createElement('p')).textContent = text }
+        if (navigator.gpu) init({ module_or_path: wasm }).catch(e => { say(`Parallax stopped: ${e}`) })
+        else say('Parallax draws with WebGPU, which this browser does not have.')
+    </script>
 </body>
 
 </html>

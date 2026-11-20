@@ -1,4 +1,4 @@
-//! Cells of the coarser lattices (cells.ts restated): in a face's lattice
+//! Cells of the coarser lattices : in a face's lattice
 //! coordinates (a, b, c), the sites with a, b and c multiples of N and
 //! a / N, b / N, c / N of one parity are N·FCC, again an FCC lattice. A site
 //! belongs to the cell of the nearest of them: the rhombic dodecahedron of
@@ -7,7 +7,7 @@
 
 /**
  * Twice the squared distance between two sites (a, b, c) apart: a and c
- * are LAYER = 1/√2 per unit, b is 1 (see Face in view.ts).
+ * are LAYER = 1/√2 per unit, b is 1 (see Face in native's view.rs).
  */
 fn distance2(a: i32, b: i32, c: i32) -> i64 {
     let (a, b, c) = (a as i64, b as i64, c as i64);
@@ -76,12 +76,6 @@ impl Cells {
         let index = (a.rem_euclid(period) * period + b.rem_euclid(period)) * period + c.rem_euclid(period);
         let [da, db, dc] = self.offsets[index as usize];
         [a + da as i32, b + db as i32, c + dc as i32]
-    }
-
-    /** c of the site of N·FCC owning site (a, b, c): a multiple of N. */
-    #[inline]
-    pub fn owner_c(&self, a: i32, b: i32, c: i32) -> i32 {
-        self.owner(a, b, c)[2]
     }
 }
 
