@@ -163,9 +163,14 @@ fewer hold less, and under what a view reads at once, lighting slows by half.
 Forgotten brick by brick, not tile by tile,
 a flight held a tenth less and owed twice the bricks.
 Most of what a site kept takes is its rounds,
-kept only of sites that stop light (no site reads another's),
-in 16 bits a channel (`Packed`): half of what floats took,
-a few pixels of a view one step of colour off.
+kept only of sites that stop light (no site reads another's).
+They, and what they are found from (`Paths`),
+are in 16 bits a channel (`Packed`): half of what floats took,
+a hundredth of a view's pixels one step of colour off.
+A site's settled light is not, read far more often than found:
+packed, it cost more time than the rest for a third of what they saved.
+Room for each round alone, not a vector's to spare,
+held a twentieth less for a tenth more work.
 
 Native's light sliders light the world anew (`World::relight`),
 as slowly as at the start.
@@ -203,7 +208,19 @@ Of the light alone, about a third is `shown`'s:
 the settled light of every neighbour whose pieces are not shown.
 
 Lighting a place first, most is its tiles,
-the coarsest level's far around (`TOP_STEPS` sites along every direction).
+the coarsest level's far around (`TOP_STEPS` sites along every direction):
+each site met there reflects, so its light is found too, as far around it again.
+Of the valley's first view, a seventh of the work is that level's tiles,
+which no ray reads.
+Tried there, and not kept:
+
+- a quarter of the steps: the view drawn alike, for a tenth less work;
+  not looked at where mountains stand far off, which the steps are for;
+- levels past the coarsest, each taking a step as the others do,
+  so that no level is unlike the rest: twice the work,
+  as a column of level 12's tiles costs thirty times level 8's
+  ("Claims cost coarse tiles most" in [todo.md](todo.md)).
+  Were coarse tiles as cheap as fine ones, a few a level would do.
 
 Light adds up, so it is the sum of the sky's, the sun's and the glow's;
 kept apart, the sliders could only mix them,

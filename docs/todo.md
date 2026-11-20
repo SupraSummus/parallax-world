@@ -145,17 +145,16 @@ Numbers are for the forest at 1280×800, as measured when written.
   Under the surface nearly every put is a whole site of the ground's fill,
   each through `put`, its brick looked up, at level 0 its shade hashed.
   A line's run of them put brick by brick would spare most of that.
-- **A site's glow and views are kept in maps by site** (`VoxelGrid`),
-  so the grid marks which sites may be in them (`odd`),
-  not to look each up as it is added to or read.
-  A seventh of the valley's sites are in `views`,
+- **Sites unlike through their faces are the dearest to put.**
+  A seventh of the valley's sites are in `views` (`VoxelGrid`),
   which take as much as all the sites' pieces.
-  Kept by brick, as pieces and media are (`Part`),
-  the maps and the marks would go.
-  Sites unlike through their faces are the dearest to put:
-  few of a tile's, each added face by face
-  and taken out of the map and put back,
-  they take several percent of the valley's time at level 0.
+  Each is added to face by face (`pieces` in `generate.rs`),
+  a dozen sums a put:
+  lighting a small view, where most of the work is the coarser levels' tiles,
+  that is over a tenth of it.
+  Their glows are kept apart (`glows`), as few glow:
+  one record a site would be read and written once, not twice,
+  for memory not measured.
 - **Plans are made at every column read, whatever their scale.**
   The valley's land, decided at 4 m, makes its six domains' bids
   at each column of a tile at level 0.
