@@ -1063,7 +1063,7 @@ impl Windows {
 
 const PICTURE: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 const SAMPLE_HITS: wgpu::TextureFormat = wgpu::TextureFormat::Rgba32Uint;
-const SAMPLE_COLOURS: wgpu::TextureFormat = wgpu::TextureFormat::Rg32Uint;
+const SAMPLE_COLOURS: wgpu::TextureFormat = wgpu::TextureFormat::Rgba32Uint;
 
 /** Textures as big as the picture: the samples', the picture, and the groups binding them. */
 struct Targets {

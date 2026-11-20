@@ -42,7 +42,7 @@ kinds! {
     scree: 3, ["#a39d92", "#968f84"];
     rock: 3, ["#7e776e", "#6f6961"];
     snow: 14, ["#f1f4f7", "#e3e9ef"];
-    sea: 13, ["#1b5873"], walk_through, medium;
+    sea: 13, ["#2478a0"], walk_through, medium;
     seaTop: 13, ["#9cc4d6"], walk_through, medium;
 }
 
@@ -67,11 +67,13 @@ pub const SEA: Units = Units::m(-40.0);
 const LOWLAND: Fx = Fx::m(10.0);
 const SHELF: i64 = 30;
 /**
- * The sea is see-through: a medium that hides its bottom some 6 m down.
+ * The sea is see-through: a medium whose colour is dark in red, so it stops
+ * red first (light.rs's `stopped`). Its floor shows greener, then bluer,
+ * the deeper it is, to some 10 m down.
  * Its top SEA_TOP is another, lighter and denser, so that where the sea
  * ends shows: little from above, most along the water.
  */
-const SEA_STOPS: f64 = 3.9 / m(6.0) as f64;
+const SEA_STOPS: f64 = 0.8 / m(6.0) as f64;
 const SEA_TOP: i64 = m(0.25);
 const SEA_TOP_STOPS: f64 = 0.4 / SEA_TOP as f64;
 const DEEP: Fx = Fx::m(-75.0);

@@ -800,7 +800,7 @@ fn water(f: Rc<Heath>) -> Field {
             return vec![Span::solid(bed_bottom(h), h - 1, T::water)];
         }
         match f.moorland.water(x, z) {
-            Some(level) if f.owns(x, z) => Column::new(h).water_to(T::water, level.0).spans(),
+            Some(level) if f.owns(x, z) => Column::new(h).fill_to(T::water, level.0).spans(),
             _ => Vec::new(),
         }
     })

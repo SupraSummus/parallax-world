@@ -1160,7 +1160,7 @@ each solid one at least two spacings tall:
 at the spacing of the sites drawn,
 `.medium(kind, height, extinction)` on top, as tall as it is,
 over its ground where the field paints,
-`.water_to(kind, level)` where the ground is lower.
+`.fill_to(kind, level)` where the ground is lower.
 Carves along a line want the same margin.
 A surface on ground of another kind lies as deep
 as the coarsest level checked draws it (`SURFACE` in `worlds/src/lib.rs`),

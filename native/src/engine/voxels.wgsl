@@ -268,9 +268,18 @@ const MEDIUM_SHADE = 0.7666667;
 // Less let through than this, and nothing behind shows.
 const OPAQUE = 1.0 / 256.0;
 // What the see-through voxels in front of the ray's hit gave, their colours
-// times what each let through of them; and what they let through.
+// times what each let through of them; and what they let through, each channel.
 var<private> gathered = vec3f(0.0);
-var<private> through = 1.0;
+var<private> through = vec3f(1.0);
+// What a see-through voxel of look `v` lets through along `path` of its grid's units, each channel.
+// Its colour (linear) is what it sends on of the light it stops, channel by channel, and it scatters all alike:
+// so it stops each the more, the darker its colour there. Its alpha is of the channel it stops least.
+// A grey one stops all alike, as its alpha says; one dark in red stops red first. Light has the same law (light.rs's `stopped`).
+fn lets_through(v: u32, path: f32) -> vec3f {
+  let sends = max(to_linear(unpack4x8unorm(v).rgb), vec3f(1.0 / 255.0));
+  let most = max(sends.r, max(sends.g, sends.b));
+  return pow(vec3f(1.0 - f32(v >> 24u) / 255.0), path / CHORD * most / sends);
+}
 // Where the ray from `o` leaves the cell of scale `j` (voxels.rs's CELLS)
 // it is in at `mid`, if no voxel meets that cell: it meets none till then.
 // Else 0, and till then, `held`: no need to look again.
@@ -366,12 +375,12 @@ fn march(d: vec3f) -> Hit {
       step[(k + 1) % 3] = i32(select(-way, way, by_plus));
       if medium != 0u {
         // Its path through the voxel: from where it entered (or the eye) to where it leaves.
-        let stops = 1.0 - pow(1.0 - f32(medium >> 24u) / 255.0, (leave - at) / CHORD);
+        let stops = 1.0 - lets_through(medium, leave - at);
         let fog = 1.0 - exp(-(at + leave) * 0.5 * scale / globals.fog);
         gathered += through * stops * mix(tint, globals.horizon.rgb, fog);
         through *= 1.0 - stops;
         medium = 0u;
-        if through < OPAQUE {
+        if all(through < vec3f(OPAQUE)) {
           return Hit(NONE, vec3i(0), 0u, 0.0);
         }
       } else {
@@ -500,13 +509,13 @@ fn lit(hit: Hit) -> Light {
 }
 
 // What each sample met: its site, and level | voxel << 8 (NONE if
-// nothing); and the voxel's colour, and what the see-through voxels in front gave (rgb) and let through (a).
+// nothing); and the voxel's colour, and what the see-through voxels in front gave, and what they let through.
 @group(0) @binding(8) var sample_hits: texture_2d<u32>;
 @group(0) @binding(9) var sample_colours: texture_2d<u32>;
 
 struct Sample {
   @location(0) hit: vec4u,
-  @location(1) colour: vec2u,
+  @location(1) colour: vec4u,
 }
 
 @fragment
@@ -514,12 +523,12 @@ fn sample_fragment(in: Screen) -> Sample {
   let p = (floor(in.position.xy) + 0.5) * f32(FACTOR);
   let d = ray_at(p);
   let hit = march(d);
-  let medium = pack4x8unorm(vec4f(gathered, through));
+  let medium = vec2u(pack4x8unorm(vec4f(gathered, 1.0)), pack4x8unorm(vec4f(through, 1.0)));
   if hit.level >= LOST {
-    return Sample(vec4u(0u, 0u, 0u, hit.level), vec2u(0u, medium));
+    return Sample(vec4u(0u, 0u, 0u, hit.level), vec4u(0u, medium, 0u));
   }
   let colour = coloured(seen(hit, d), light_on(hit));
-  return Sample(vec4u(bitcast<vec3u>(hit.site), hit.level), vec2u(pack4x8unorm(vec4f(colour, 1.0)), medium));
+  return Sample(vec4u(bitcast<vec3u>(hit.site), hit.level), vec4u(pack4x8unorm(vec4f(colour, 1.0)), medium, 0u));
 }
 
 // Each pixel: the nearest voxel its own ray enters of those its four nearest
@@ -611,9 +620,13 @@ fn resolve_fragment(in: Screen) -> @location(0) vec4f {
     agreeing(h2, 2, g.x * f.y, seen, only),
     agreeing(h3, 3, f.x * f.y, seen, only),
   );
-  let medium = (w.x * unpack4x8unorm(textureLoad(sample_colours, p0, 0).y) + w.y * unpack4x8unorm(textureLoad(sample_colours, p1, 0).y)
-    + w.z * unpack4x8unorm(textureLoad(sample_colours, p2, 0).y) + w.w * unpack4x8unorm(textureLoad(sample_colours, p3, 0).y)) / dot(w, vec4f(1.0));
-  return vec4f(medium.rgb + medium.a * behind, 1.0);
+  let m0 = textureLoad(sample_colours, p0, 0).yz;
+  let m1 = textureLoad(sample_colours, p1, 0).yz;
+  let m2 = textureLoad(sample_colours, p2, 0).yz;
+  let m3 = textureLoad(sample_colours, p3, 0).yz;
+  let gave = w.x * unpack4x8unorm(m0.x) + w.y * unpack4x8unorm(m1.x) + w.z * unpack4x8unorm(m2.x) + w.w * unpack4x8unorm(m3.x);
+  let let_through = w.x * unpack4x8unorm(m0.y) + w.y * unpack4x8unorm(m1.y) + w.z * unpack4x8unorm(m2.y) + w.w * unpack4x8unorm(m3.y);
+  return vec4f((gave.rgb + let_through.rgb * behind) / dot(w, vec4f(1.0)), 1.0);
 }
 
 // The picture, shown where egui's pass puts it.

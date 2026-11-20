@@ -7,10 +7,10 @@
 //! after a few steps (Shared's, STEPS unless set), where the coarser level
 //! has room for light (`past`). So a wall thinner than about its distance
 //! over the steps lets light through: more steps, less leaks.
-//! Each site sends what it glows, and of what it stops (its alpha) its
-//! colour times the light on its face turned back (`on_face`), a third of
-//! what it shows that way; the rest of what comes from past it gets
-//! through. So what comes from far comes from coarser levels, the
+//! Each site sends what it glows, and of what it stops (its alpha, a
+//! medium's by channel: `stopped`) its colour times the light on its face
+//! turned back (`on_face`), a third of what it shows that way; the rest
+//! of what comes from past it gets through. So what comes from far comes from coarser levels, the
 //! coarsest's from the sky. Sites that reflect less than the tolerance
 //! reflect together, as the next one met that brings them over it, and
 //! nothing comes from past where less than the tolerance gets through
@@ -450,16 +450,26 @@ impl Light {
 
     /**
      * How light sees `site` of level `i` from direction `from`: how much of
-     * it stops (alpha), its pieces and its medium, and their colour; what
-     * it glows.
+     * each channel it stops (alpha), its pieces and its medium (`stopped`),
+     * and their colour; what it glows.
      */
-    fn see(&mut self, i: usize, site: [i64; 3], from: usize) -> ((f32, Rgb), Rgb) {
+    fn see(&mut self, i: usize, site: [i64; 3], from: usize) -> ((Rgb, Rgb), Rgb) {
         let glowing = self.glow;
-        let Some(([x, y, z], grid)) = self.hold(i, site) else { return ((0.0, [0.0; 3]), [0.0; 3]) };
+        let Some(([x, y, z], grid)) = self.hold(i, site) else { return (([0.0; 3], [0.0; 3]), [0.0; 3]) };
         let ([(pieces, p), (medium, m)], glow) = grid.light(x, y, z, from);
-        let alpha = (u32::from(pieces) + u32::from(medium)) as f32 / ALPHA as f32;
         // Their colours come premultiplied, of COLOUR_ONE: as a share of the light on what it stops.
-        let colour = std::array::from_fn(|c| if alpha > 0.0 { ((p[c] + m[c]) as f32 / COLOUR_ONE as f32 / alpha).min(1.0) } else { 0.0 });
+        let [pieces, medium] = [pieces, medium].map(|a| f32::from(a) / ALPHA as f32);
+        let [p, m] = [p, m].map(|colour| colour.map(|c| c as f32 / COLOUR_ONE as f32));
+        // The medium stops of the rays the pieces let through, and shows its colour of what it stops.
+        let (stops, shows) = if medium > 0.0 {
+            let colour = m.map(|c| c / medium);
+            let stops = stopped(medium / (1.0 - pieces), colour).map(|s| s * (1.0 - pieces));
+            (stops, std::array::from_fn(|c| stops[c] * colour[c]))
+        } else {
+            ([0.0; 3], [0.0; 3])
+        };
+        let alpha: Rgb = std::array::from_fn(|c| pieces + stops[c]);
+        let colour = std::array::from_fn(|c| if alpha[c] > 0.0 { ((p[c] + shows[c]) / alpha[c]).min(1.0) } else { 0.0 });
         ((alpha, colour), glow.map(|g| g as f32 * glowing))
     }
 
@@ -468,10 +478,10 @@ impl Light {
      * coming from direction `from` (`see`): what it stops and glows over
      * CROSSING crossings (picture's `over`).
      */
-    fn meets(&mut self, i: usize, site: [i64; 3], from: usize) -> ((f32, Rgb), Rgb) {
+    fn meets(&mut self, i: usize, site: [i64; 3], from: usize) -> ((Rgb, Rgb), Rgb) {
         let ((alpha, colour), glow) = self.see(i, site, from);
-        let over = over(alpha as f64, CROSSING) as f32;
-        ((alpha * over, colour), glow.map(|g| g * over))
+        let over = alpha.map(|a| over(a as f64, CROSSING) as f32);
+        ((std::array::from_fn(|c| alpha[c] * over[c]), colour), std::array::from_fn(|c| glow[c] * over[c]))
     }
 
     /** How much of what comes through `site` of level `i` it lets through. */
@@ -617,7 +627,7 @@ impl Light {
     fn along(&mut self, i: usize, p: [i64; 3], d: usize, near: Option<&Near>, reflects: &mut Vec<(u8, u8, Packed)>) -> Rgb {
         let (v, heights, steps) = (DIRECTIONS[d], self.levels[i].heights, self.shared.steps);
         // What has come so far, and how much of what comes from further on gets through.
-        let (mut sum, mut through) = ([0.0f32; 3], 1.0f32);
+        let (mut sum, mut through) = ([0.0f32; 3], [1.0f32; 3]);
         // What the sites met so far reflect, under the tolerance: none reflects for them yet.
         let mut owed = [0.0f32; 3];
         let mut q = p;
@@ -626,14 +636,14 @@ impl Light {
                 let from = q;
                 q = add(q, v);
                 let ((alpha, colour), glow) = self.meets(i, q, self.opposite[d]);
-                (0..3).for_each(|c| sum[c] += through * glow[c]);
-                (0..3).for_each(|c| owed[c] += through * alpha * colour[c]);
+                (0..3).for_each(|c| sum[c] += through[c] * glow[c]);
+                (0..3).for_each(|c| owed[c] += through[c] * alpha[c] * colour[c]);
                 if owed.iter().any(|&r| r > self.shared.tolerance) {
                     reflects.push((d as u8, step as u8, pack(std::mem::take(&mut owed))));
                 }
-                through *= 1.0 - alpha;
+                (0..3).for_each(|c| through[c] *= 1.0 - alpha[c]);
                 // Less gets through than the tolerance, or nothing more is met: below every voxel and not going up, or above them and not going down.
-                if through < self.shared.tolerance || q[1] < heights.0 - 1 && v[1] <= 0 {
+                if through.iter().all(|&t| t < self.shared.tolerance) || q[1] < heights.0 - 1 && v[1] <= 0 {
                     break 'march [0.0; 3];
                 }
                 if q[1] > heights.1 && v[1] >= 0 {
@@ -648,7 +658,7 @@ impl Light {
             }
             if near.is_none() && v[1] >= 0 { self.sky[d] } else { [0.0; 3] }
         };
-        std::array::from_fn(|c| sum[c] + through * beyond[c])
+        std::array::from_fn(|c| sum[c] + through[c] * beyond[c])
     }
 
     /**
@@ -811,6 +821,20 @@ impl Light {
             }
         }
     }
+}
+
+/**
+ * What a medium of `alpha` and `colour` stops of each channel of a ray
+ * crossing its site. Its colour is what it sends on of the light it stops,
+ * channel by channel, and it scatters all alike: so it stops each the
+ * more, the darker its colour there, and its alpha is of the channel it
+ * stops least. A grey one stops all alike; one dark in red stops red
+ * first. The voxels engine has the same law (voxels.wgsl's `lets_through`).
+ */
+fn stopped(alpha: f32, colour: Rgb) -> Rgb {
+    let sends = colour.map(|c| c.max(1.0 / 255.0));
+    let most = sends.into_iter().fold(0.0, f32::max);
+    sends.map(|c| 1.0 - (1.0 - alpha).powf(most / c))
 }
 
 /** A look's colour as a share of the light on it, linear, as light adds up; looks are sRGB. */
@@ -998,6 +1022,32 @@ mod tests {
         let mut light = Light::new(world, Shared::new(Brightness { sky: 1.0, sun: 1.0, glow: 0.0 }));
         let inside = light.on_voxel(0, ground(1, 0));
         assert!(inside.iter().all(|c| *c < 0.02), "inside {inside:?}");
+    }
+
+    #[test]
+    fn a_medium_stops_more_of_the_channels_its_colour_is_darker_in() {
+        // Ground under a thin slab of blue medium: lit in blue nearly as in the open, in red hardly.
+        let under = |veiled: bool| {
+            let kinds = vec![
+                KindDef { name: "stone", kind_type: 1, colors: &["#808080"], walk_through: false, glows: false, medium: false },
+                KindDef { name: "medium", kind_type: 8, colors: &["#0000ff"], walk_through: true, glows: false, medium: true },
+            ];
+            let field = Field::at("slab", 0.0, Op::Fill, move |_, y, _| match y {
+                ..0 => Some((0, None)),
+                0..32 if veiled => Some((1, Some(0.005))),
+                _ => None,
+            });
+            let world = World {
+                generator: Generator { kinds, seed: 1, layers: vec![Layer::Field(field)] },
+                spawn: [0; 3],
+                heights: Some((-64, 1024)),
+                points: Vec::new(),
+            };
+            Light::new(world, Shared::new(Brightness { sky: 1.0, sun: 1.0, glow: 0.0 })).on_voxel(0, ground(1, 0))
+        };
+        let (open, veiled) = (under(false), under(true));
+        let [red, _, blue] = std::array::from_fn(|c| veiled[c] / open[c]);
+        assert!(red < 0.05 && blue > 0.6, "of the open's, red {red}, blue {blue}");
     }
 
     #[test]
