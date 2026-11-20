@@ -12,7 +12,7 @@ pub(super) enum Draw<'a> {
     /** A node's shapes, and whether they are its far ones. */
     Shapes(Vec<Shape>, bool),
     /** A thing measured: its sites, as its population keeps them (Measured). */
-    Sites(Rc<Sites>),
+    Sites(Arc<Sites>),
 }
 
 pub(super) struct Drawable<'a> {

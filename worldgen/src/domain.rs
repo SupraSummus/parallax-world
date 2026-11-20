@@ -6,7 +6,7 @@
 //! bands of ground they shape, and the land they share.
 //! See "Composing" in docs/generators.md.
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::generator::Layer;
 use crate::noise::{Fx, Text, smoothstep, stream};
@@ -52,7 +52,7 @@ impl Scope {
  * A part of a world: what it proposes for each column, and what it
  * draws. Each but `layers` has a default, for domains that don't propose it.
  */
-pub trait Domain {
+pub trait Domain: Send + Sync {
     /**
      * Whether it holds land: bids for it, and draws by its share. Relief,
      * which every domain stands on, holds none, and draws everywhere.
@@ -76,7 +76,7 @@ pub trait Domain {
     }
 
     /** Its layers on `ground`, drawn by `hold`, its hold on the land. */
-    fn layers(self: Rc<Self>, ground: &Rc<Sloped>, hold: Holding) -> Vec<Layer>;
+    fn layers(self: Arc<Self>, ground: &Arc<Sloped>, hold: Holding) -> Vec<Layer>;
 }
 
 /**
@@ -96,16 +96,16 @@ pub fn eased(to: Fx, over: Units, d: Units) -> Option<(Fx, Fx)> {
  * layers stand on is its last band, a plan (`ground`).
  */
 #[derive(Clone)]
-pub struct Lie(Rc<Band>);
+pub struct Lie(Arc<Band>);
 
 struct Band {
-    height: Box<dyn Fn(i64, i64) -> Fx>,
+    height: Box<dyn Fn(i64, i64) -> Fx + Send + Sync>,
     kept: Kept<Fx>,
 }
 
 impl Lie {
-    pub fn new(height: impl Fn(i64, i64) -> Fx + 'static) -> Lie {
-        Lie(Rc::new(Band { height: Box::new(height), kept: Kept::new() }))
+    pub fn new(height: impl Fn(i64, i64) -> Fx + Send + Sync + 'static) -> Lie {
+        Lie(Arc::new(Band { height: Box::new(height), kept: Kept::new() }))
     }
 
     /** The height at column (x, z), with its fraction. */
@@ -124,7 +124,7 @@ impl Lie {
      * their pulls on a column add up to all of it at most, so none undoes
      * another's; broken, it panics.
      */
-    pub fn shaped(&self, domains: Vec<Rc<dyn Domain>>) -> Lie {
+    pub fn shaped(&self, domains: Vec<Arc<dyn Domain>>) -> Lie {
         let under = self.clone();
         Lie::new(move |x, z| {
             let ground = under.at(x, z);
@@ -143,9 +143,9 @@ impl Lie {
     }
 
     /** The ground layers stand on: this band rounded to units, kept by plan at `scale`, rising at most `slope` a column. */
-    pub fn ground(&self, scale: i64, slope: i64) -> Rc<Sloped> {
+    pub fn ground(&self, scale: i64, slope: i64) -> Arc<Sloped> {
         let lie = self.clone();
-        Rc::new(Sloped::new(Rc::new(Plan::new("ground", scale, move |x, z| lie.at(x, z).round_units().0)), slope))
+        Arc::new(Sloped::new(Arc::new(Plan::new("ground", scale, move |x, z| lie.at(x, z).round_units().0)), slope))
     }
 }
 
@@ -156,15 +156,15 @@ impl Lie {
  * land alone. In the domains' order, which is that of their layers, and
  * of what wins a tie.
  */
-pub fn compose(domains: &[Rc<dyn Domain>], ground: &Rc<Sloped>, scale: i64, width: Fx) -> Vec<Layer> {
-    let holding: Vec<Rc<dyn Domain>> = domains.iter().filter(|d| d.holds_land()).cloned().collect();
-    let bid = |d: &Rc<dyn Domain>| -> Bid {
+pub fn compose(domains: &[Arc<dyn Domain>], ground: &Arc<Sloped>, scale: i64, width: Fx) -> Vec<Layer> {
+    let holding: Vec<Arc<dyn Domain>> = domains.iter().filter(|d| d.holds_land()).cloned().collect();
+    let bid = |d: &Arc<dyn Domain>| -> Bid {
         let d = d.clone();
         Box::new(move |x, z| d.bid(x, z))
     };
-    let land = (holding.len() > 1).then(|| Rc::new(Land::new(scale, width, holding.iter().map(bid).collect())));
+    let land = (holding.len() > 1).then(|| Arc::new(Land::new(scale, width, holding.iter().map(bid).collect())));
     let mut holds = (0..).map(|d| land.as_ref().map_or_else(Holding::all, |land| land.holding(d)));
-    let mut hold = |d: &Rc<dyn Domain>| if d.holds_land() { holds.next().expect("endless") } else { Holding::all() };
+    let mut hold = |d: &Arc<dyn Domain>| if d.holds_land() { holds.next().expect("endless") } else { Holding::all() };
     domains.iter().flat_map(|d| d.clone().layers(ground, hold(d))).collect()
 }
 
@@ -185,13 +185,13 @@ mod tests {
             (x >= self.from).then_some((self.to, self.how_hard))
         }
 
-        fn layers(self: Rc<Self>, _: &Rc<Sloped>, _: Holding) -> Vec<Layer> {
+        fn layers(self: Arc<Self>, _: &Arc<Sloped>, _: Holding) -> Vec<Layer> {
             Vec::new()
         }
     }
 
-    fn pull(from: i64, to: f64, how_hard: f64) -> Rc<dyn Domain> {
-        Rc::new(Pull { from, to: fx(to), how_hard: fx(how_hard) })
+    fn pull(from: i64, to: f64, how_hard: f64) -> Arc<dyn Domain> {
+        Arc::new(Pull { from, to: fx(to), how_hard: fx(how_hard) })
     }
 
     #[test]

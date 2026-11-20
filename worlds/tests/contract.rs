@@ -32,7 +32,7 @@ fn keeps_the_contract(entry: &Entry) {
             .iter()
             .map(|&seed| {
                 let to_parts = (seed == REGIONS_SEED).then(|| to_parts.clone());
-                // World and Generator aren't Send: each thread makes its own.
+                // Each seed is a world of its own.
                 scope.spawn(move || {
                     let world = (entry.make)(seed);
                     let surveyed = |boxes: &[_]| {

@@ -25,31 +25,22 @@ pub(super) struct Visit<'u> {
  * whole, and every box it reaches asks for it: a tile, and each of the
  * light's blocks.
  */
-pub struct Measured(Box<RefCell<Forms>>);
+pub struct Measured(Box<Memo<(String, i64, i64), Sites>>);
 
-/** Boxed: a population is no larger for them. */
-type Forms = Recent<(String, i64, i64), Rc<Sites>>;
-
-/** Things a population keeps measured, and as many asked for before them (Recent): the valley's first view asks for about as many, of all its populations. */
+/** Things a population keeps measured, and as many asked for before them (Memo): the valley's first view asks for about as many, of all its populations. */
 const MEASURED: usize = 1 << 10;
 
+/** Boxed: a population is no larger for them. */
 impl Default for Measured {
     fn default() -> Measured {
-        Measured(Box::new(RefCell::new(Recent::new(MEASURED))))
+        Measured(Box::new(Memo::new(MEASURED)))
     }
 }
 
 impl Measured {
     /** What `measure` gives for the thing of `key` at sites `s` apart: kept, or measured now. */
-    fn of(&self, key: &str, s: i64, measure: impl FnOnce() -> Sites) -> Rc<Sites> {
-        let at = (key.to_string(), s, plan::spacing());
-        if let Some(sites) = self.0.borrow_mut().get(&at) {
-            return sites.clone();
-        }
-        // Not borrowed meanwhile: measuring a thing asks for its children's.
-        let sites = Rc::new(measure());
-        self.0.borrow_mut().insert(at, sites.clone());
-        sites
+    fn of(&self, key: &str, s: i64, measure: impl FnOnce() -> Sites) -> Arc<Sites> {
+        self.0.of(&(key.to_string(), s, plan::spacing()), measure)
     }
 }
 

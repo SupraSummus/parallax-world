@@ -4,9 +4,9 @@
 //! are from the camera, as the crow flies. Of each, only what may show is
 //! generated (worldgen's tiles.rs): none of it above or below the world's
 //! heights, nor where its layers say it is empty or buried; on the
-//! world's threads (a generator per thread), a tile with those above and
-//! below it if the world has heights (made_with), and indexed
-//! there. Lit, a tile's sites are made into the light (Shared::make_tiles),
+//! world's threads, which share the world and what it keeps, a tile with
+//! those above and below it if the world has heights (made_with), and
+//! indexed there. Lit, a tile's sites are made into the light (Shared::make_tiles),
 //! which reads them, or are those it made: once, for both.
 //! Which tiles, and in what order, is up to the engine drawing them
 //! (Wants): every update hands over what it asks for, most wanted first,
@@ -24,7 +24,6 @@
 //! eye holds. Lit anew (relight), the tiles are kept, their light found again.
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::rc::Rc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 
@@ -50,9 +49,6 @@ const _: () = assert!(TILE == 1 << TILE_SHIFT);
  */
 const KEPT: f64 = 256.0;
 const DROPPED: f64 = 128.0;
-
-/** The world of a seed. */
-pub type Make = fn(u64) -> worldgen::World;
 
 /** Each grid level's heights (World::heights_at). */
 pub type Heights = [(i64, i64); GRID_LEVELS];
@@ -265,9 +261,8 @@ pub struct World {
     pub heights: Heights,
     /** The threads it makes tiles on, which engines may take as many of. */
     pub threads: usize,
-    /** The world and the light (if any) it is made into, for Lights of the bakers' own. */
-    make: Make,
-    seed: u64,
+    /** The world its threads make, and the light (if any) it is made into, for Lights of the bakers' own. */
+    world: Arc<worldgen::World>,
     shared: Option<Shared>,
     queue: Arc<(Mutex<Queue>, Condvar)>,
     done: Receiver<Made>,
@@ -322,10 +317,10 @@ fn own_clock() -> libc::clockid_t {
 
 /**
  * What makes tiles and lights bricks, on a thread of its own or, a world
- * with no threads, on its caller's: a generator is not Send, nor its Light.
+ * with no threads, on its caller's: the world all share, and a Light of its own.
  */
 struct Worker {
-    world: Rc<worldgen::world::World>,
+    world: Arc<worldgen::World>,
     /** Made once there are tiles to light, and again when the light changes. */
     light: Option<(u32, Light)>,
 }
@@ -334,8 +329,8 @@ struct Worker {
 type Taken = (Job, Option<Shared>, u32, bool);
 
 impl Worker {
-    fn new(make: Make, seed: u64) -> Worker {
-        Worker { world: Rc::new(make(seed)), light: None }
+    fn new(world: Arc<worldgen::World>) -> Worker {
+        Worker { world, light: None }
     }
 
     /** The most wanted job, if any, now under way, with the tiles made with its own. */
@@ -377,11 +372,11 @@ impl Worker {
     }
 }
 
-fn work(make: Make, seed: u64, queue: &(Mutex<Queue>, Condvar), send: &Sender<Made>) {
+fn work(world: Arc<worldgen::World>, queue: &(Mutex<Queue>, Condvar), send: &Sender<Made>) {
     behind_drawing();
     #[cfg(target_os = "linux")]
     queue.0.lock().expect("queue").clocks.push(own_clock());
-    let mut worker = Worker::new(make, seed);
+    let mut worker = Worker::new(world);
     loop {
         let taken = {
             let mut q = queue.0.lock().expect("queue");
@@ -402,32 +397,31 @@ fn work(make: Make, seed: u64, queue: &(Mutex<Queue>, Condvar), send: &Sender<Ma
 
 impl World {
     /**
-     * The world `make` makes of `seed`, generated (into `shared` if given,
+     * `world`, generated (into `shared` if given,
      * the light it can be lit by) and indexed on `threads` threads, or
      * with none, where there are none to have (a browser), a piece each
      * time its caller has it work (`work`, `wait`); not lit yet.
      */
-    pub fn new(make: Make, seed: u64, shared: Option<Shared>, threads: usize) -> World {
-        let world = make(seed);
+    pub fn new(world: worldgen::World, shared: Option<Shared>, threads: usize) -> World {
+        let world = Arc::new(world);
         let heights = heights(&world);
         let (send, done) = channel();
         let queue = Arc::new((Mutex::new(Queue { shared: shared.clone(), ..Queue::default() }), Condvar::new()));
         for _ in 0..threads {
-            let (queue, send) = (queue.clone(), send.clone());
-            std::thread::spawn(move || work(make, seed, &queue, &send));
+            let (world, queue, send) = (world.clone(), queue.clone(), send.clone());
+            std::thread::spawn(move || work(world, &queue, &send));
         }
         World {
             tiles: (0..GRID_LEVELS).map(|_| HashMap::new()).collect(),
             levels: (0..GRID_LEVELS).map(|_| Arc::new(Level::new(HashMap::new()))).collect(),
             heights,
             threads,
-            make,
-            seed,
+            own: (threads == 0).then(|| Worker::new(world.clone())),
+            world,
             shared,
             queue,
             done,
             early: Vec::new(),
-            own: (threads == 0).then(|| Worker::new(make, seed)),
         }
     }
 
@@ -447,8 +441,8 @@ impl World {
 
     /** A Light of the world for each who asks, if it was given light: it lights what they read from the tiles' light. */
     pub fn light(&self) -> Option<impl Fn() -> Light + Send + Sync + 'static> {
-        let (make, seed) = (self.make, self.seed);
-        self.shared.clone().map(|shared| move || Light::new(make(seed), shared.clone()))
+        let world = self.world.clone();
+        self.shared.clone().map(|shared| move || Light::new(world.clone(), shared.clone()))
     }
 
     /**
@@ -734,21 +728,21 @@ mod tests {
     #[test]
     fn a_world_lit_anew_is_as_one_made_so() {
         use worldgen::light::Brightness;
-        let make = worlds::by_name("forest").expect("forest").make;
+        let make = || (worlds::by_name("forest").expect("forest").make)(1);
         let (day, dusk) = (Brightness { sky: 1.0, sun: 1.0, glow: 0.0 }, Brightness { sky: 0.3, sun: 0.1, glow: 1.0 });
-        let mut world = World::new(make, 1, Some(Shared::new(day)), 4);
+        let mut world = World::new(make(), Some(Shared::new(day)), 4);
         let before = lit(&mut world);
         world.relight(world.shared().expect("light").under(dusk).stepping(3));
         let after = lit(&mut world);
         assert!(after != before, "the light changed");
-        assert!(after == lit(&mut World::new(make, 1, Some(Shared::new(dusk).stepping(3)), 4)));
+        assert!(after == lit(&mut World::new(make(), Some(Shared::new(dusk).stepping(3)), 4)));
     }
 
     #[test]
     fn a_world_with_no_threads_is_as_one_with_some() {
         use worldgen::light::Brightness;
-        let make = worlds::by_name("forest").expect("forest").make;
+        let make = || (worlds::by_name("forest").expect("forest").make)(1);
         let day = Brightness { sky: 1.0, sun: 1.0, glow: 0.0 };
-        assert!(lit(&mut World::new(make, 1, Some(Shared::new(day)), 0)) == lit(&mut World::new(make, 1, Some(Shared::new(day)), 4)));
+        assert!(lit(&mut World::new(make(), Some(Shared::new(day)), 0)) == lit(&mut World::new(make(), Some(Shared::new(day)), 4)));
     }
 }

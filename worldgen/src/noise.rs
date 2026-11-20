@@ -1,7 +1,6 @@
 //! Deterministic hashing, noise and randomness for the world generators:
 //! integers wherever they decide something, so a seed gives the same world everywhere and far from the origin.
 
-use std::cell::Cell;
 use std::iter::Sum;
 use std::ops::{Add, AddAssign, Div, Mul, Neg, Sub, SubAssign};
 
@@ -269,37 +268,26 @@ fn lerp(a: Fixed, b: Fixed, t: Fixed) -> Fixed {
     a + (((b - a) * t) >> 16)
 }
 
-/** Cells a ValueNoise keeps the corners of, each in a slot by its index. */
-const CELLS: usize = 4;
-
 /**
  * Lattice noise in [0, ONE) at (x, y) / PERIOD: random values at multiples
  * of PERIOD, eased between. A constant, so dividing by it is multiplying.
- * The corners of the cells it was last asked in are kept, a few: as
- * neighbouring columns mostly ask in the same, and a world may read one
- * noise at a few places far apart in turn (both sides of a valley).
+ * A cell's corners are hashed at every read: kept, those of the cells
+ * last asked in, they took as long to find as to hash.
  */
 pub struct ValueNoise<const PERIOD: i64> {
     seed: u64,
-    cells: [Cell<(i64, i64, [Fixed; 4])>; CELLS],
 }
 
 impl<const PERIOD: i64> ValueNoise<PERIOD> {
     pub fn new(seed: u64) -> Self {
-        ValueNoise { seed, cells: std::array::from_fn(|_| Cell::new((i64::MIN, i64::MIN, [0; 4]))) }
+        ValueNoise { seed }
     }
 
     #[inline(always)]
     fn bits(&self, x: i64, y: i64) -> Fixed {
         let (ix, iy) = (x.div_euclid(PERIOD), y.div_euclid(PERIOD));
-        let key = (ix as u64).wrapping_mul(0x9e3779b97f4a7c15) ^ (iy as u64).wrapping_mul(0xc2b2ae3d27d4eb4f);
-        let slot = &self.cells[(key >> (64 - CELLS.trailing_zeros())) as usize];
-        let (kx, ky, mut c) = slot.get();
-        if (kx, ky) != (ix, iy) {
-            let at = |i, j| fraction(hash(self.seed, i, j, 0));
-            c = [at(ix, iy), at(ix + 1, iy), at(ix, iy + 1), at(ix + 1, iy + 1)];
-            slot.set((ix, iy, c));
-        }
+        let at = |i, j| fraction(hash(self.seed, i, j, 0));
+        let c = [at(ix, iy), at(ix + 1, iy), at(ix, iy + 1), at(ix + 1, iy + 1)];
         let u = ease((x.rem_euclid(PERIOD) << 16) / PERIOD);
         let v = ease((y.rem_euclid(PERIOD) << 16) / PERIOD);
         lerp(lerp(c[0], c[1], u), lerp(c[2], c[3], u), v)

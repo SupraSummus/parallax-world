@@ -55,7 +55,10 @@ use bake::walk::{COLLISION_LEVEL, Ground, WalkInput, Walker};
 use engine::{Colours, Engine, Frame, Kind, Look, Picture};
 use gpu::Easel;
 use view::{Vec3, view_basis};
-use world::{Make, Piece, TILE, Wants, World};
+use world::{Piece, TILE, Wants, World};
+
+/** The world of a seed. */
+type Make = fn(u64) -> worldgen::World;
 use worldgen::light::{Brightness, Shared};
 
 /** The world shown unless --world names another (worlds::WORLDS). */
@@ -659,7 +662,7 @@ fn main() {
     let lit = value("--light");
     let shared = lit.map_or(day.clone(), |v| parse_light(v, &day));
     let (brightness, steps, tolerance) = (shared.brightness(), shared.steps(), shared.tolerance());
-    let mut world = World::new(make, seed, Some(shared), threads);
+    let mut world = World::new(make(seed), Some(shared), threads);
     let camera = query.camera.unwrap_or_else(|| make(seed).spawn.map(|v| v as f64));
     let far = query.distance.unwrap_or(RENDER_DISTANCE);
     let mut look = Look::new(camera, query.look.unwrap_or([YAW, PITCH]), query.fov.unwrap_or(FOV), far, size);
@@ -787,7 +790,7 @@ mod tests {
 
     /** What `kind` draws of the world `make` makes, from its spawn, looking along the face (1, 0, 1), without fog: its width and pixels. */
     fn along_a_face(kind: Kind, make: Make) -> (u32, Vec<u8>) {
-        let mut world = World::new(make, 1, None, 4);
+        let mut world = World::new(make(1), None, 4);
         let spawn = make(1).spawn.map(|v| v as f64);
         let look = Look { fog: f64::INFINITY, detail: 8.0, ..Look::new(spawn, [45.0, 0.0], FOV, 1000.0, [320.0, 200.0]) };
         (320, drawn(&mut *kind.make(&world), &mut world, &look))
@@ -820,7 +823,7 @@ mod tests {
     fn ground_along_a_face_shows_no_gaps() {
         const PIXELS: [u32; 2] = [320, 200];
         for kind in [Kind::Reliefs, Kind::Flat] {
-            let mut world = World::new(ground, 1, None, 4);
+            let mut world = World::new(ground(1), None, 4);
             let look = Look { fog: f64::INFINITY, ..Look::new([0.0, 16.0, 0.0], [45.0, -10.0], FOV, 1000.0, PIXELS.map(f64::from)) };
             let (width, pixels) = (PIXELS[0], drawn(&mut *kind.make(&world), &mut world, &look));
             let [right, up, forward] = view::view_basis(look.yaw, look.pitch);
@@ -997,7 +1000,7 @@ mod tests {
         // Lit, near: only the light differs.
         let lit = Some(Brightness { sky: 0.0, sun: 0.0, glow: 1.0 });
         for (light, distance) in [(None, 400.0), (None, 1500.0), (None, 2500.0), (lit, 400.0)] {
-            let mut world = World::new(sheeted_block, 1, light.map(Shared::new), 4);
+            let mut world = World::new(sheeted_block(1), light.map(Shared::new), 4);
             let at = Look::new([0.0, -distance, 0.0], [0.0, 80.0], FOV, 8000.0, [320.0, 200.0]);
             let look = Look { fog: f64::INFINITY, light, ..at };
             let pixels = drawn(&mut *Kind::Voxels.make(&world), &mut world, &look);
@@ -1035,7 +1038,7 @@ mod tests {
 
     /** What the voxels engine draws of `make`'s world from `eye` past its spawn, within level 0's reach: its pixels. */
     fn specks_from(make: Make, eye: Vec3, angles: [f64; 2]) -> Vec<u8> {
-        let mut world = World::new(make, 1, None, 4);
+        let mut world = World::new(make(1), None, 4);
         let spawn = make(1).spawn.map(|v| v as f64);
         let camera = std::array::from_fn(|i| spawn[i] + eye[i]);
         let look = Look { fog: f64::INFINITY, ..Look::new(camera, angles, FOV, 200.0, [320.0, 200.0]) };
@@ -1048,7 +1051,7 @@ mod tests {
     fn no_ray_of_the_voxels_runs_out_of_steps() {
         // As a shot looks, from the spawn, where rays once stuck crossing cells.
         for make in [WORLD, worlds::by_name("forest").expect("forest").make] {
-            let mut world = World::new(make, 1, None, 4);
+            let mut world = World::new(make(1), None, 4);
             let spawn = make(1).spawn.map(|v| v as f64);
             let look = Look::new(spawn, [YAW, PITCH], FOV, RENDER_DISTANCE, SHOT);
             let mut engine = Kind::Voxels.make(&world);
@@ -1085,7 +1088,7 @@ mod tests {
     #[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
     fn frames_come_till_a_world_lit_anew_shows() {
         let (day, dusk) = (Brightness { sky: 1.0, sun: 1.0, glow: 0.0 }, Brightness { sky: 0.2, sun: 0.0, glow: 0.0 });
-        let mut world = World::new(ground, 1, Some(Shared::new(day)), 4);
+        let mut world = World::new(ground(1), Some(Shared::new(day)), 4);
         let mut look = Look::new([0.0, 16.0, 0.0], [0.0, -20.0], FOV, 1000.0, [160.0, 100.0]);
         look.light = Some(day);
         let (mut engine, mut easel) = (Kind::Voxels.make(&world), Easel::offscreen(None));

@@ -1451,7 +1451,7 @@ mod tests {
      * face, so that windows hold their views too.
      */
     fn forest_tiles(eye: Vec3) -> Arc<Level> {
-        let mut world = World::new(worlds::by_name("forest").expect("forest").make, 1, None, 4);
+        let mut world = World::new((worlds::by_name("forest").expect("forest").make)(1), None, 4);
         let reach = std::array::from_fn(|l| (l == 0).then_some(fcc::GRID_REACH));
         // All around the eye asked for.
         let asked = Arc::new(world.lacking(0, fcc::GRID_REACH, eye).into_iter().map(|id| (0, Piece::Tile(id))).collect());
@@ -1679,7 +1679,7 @@ mod tests {
         // Over the forest's heights, where its tiles are made empty (world.rs): each brick of a tile made is held,
         // as empty or with voxels, not unknown, so rays read on through it, not the next level. Those over
         // the heights are empty.
-        let tall = World::new(worlds::by_name("forest").expect("forest").make, 1, None, 1).heights[0].1 as f64;
+        let tall = World::new((worlds::by_name("forest").expect("forest").make)(1), None, 1).heights[0].1 as f64;
         let eye = [10.0, tall + 100.0, -20.0];
         let tiles = forest_tiles(eye);
         let mut windows = Windows::new(1 << 20, false);
@@ -1706,7 +1706,7 @@ mod tests {
     fn the_window_and_the_tiles_wanted_hold_all_a_ray_reads_of_what_it_meets() {
         // The voxel a ray is in, wherever it is up to its level's reach, and that voxel's neighbours, whose faces
         // shade it: eyes along a line across a tile, rays every way, balls of any radius.
-        let world = World::new(worlds::by_name("forest").expect("forest").make, 1, None, 1);
+        let world = World::new((worlds::by_name("forest").expect("forest").make)(1), None, 1);
         let ways = (0..125).map(|i| [i % 5 - 2, i / 5 % 5 - 2, i / 25 - 2].map(f64::from)).filter(|w| w != &[0.0; 3]);
         for step in 0..TILE * 4 / 3 {
             let t = step as f64 * 0.75;

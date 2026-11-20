@@ -10,7 +10,7 @@ use crate::generator::{
     SOLID, Shape, Shapes, Span, ball, bounds_of_shapes, capsule, cuboid, ellipsoid, gable, lathe, tube,
 };
 use crate::grid::Box3;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::noise::Rng;
 use crate::plan::{self, Sloped};
@@ -18,7 +18,12 @@ use crate::points::{Points, Spot};
 
 impl Field {
     /** A kind, with a medium's extinction if it is one, at each site: `at(x, y, z)`, lattice units. */
-    pub fn at(name: &'static str, order: f64, op: Op, at: impl Fn(i64, i64, i64) -> Option<(Kind, Option<f64>)> + 'static) -> Field {
+    pub fn at(
+        name: &'static str,
+        order: f64,
+        op: Op,
+        at: impl Fn(i64, i64, i64) -> Option<(Kind, Option<f64>)> + Send + Sync + 'static,
+    ) -> Field {
         Field { name, order, op, values: FieldValues::At(Box::new(at)), meets: None }
     }
 
@@ -28,7 +33,7 @@ impl Field {
         order: f64,
         op: Op,
         axis: usize,
-        spans: impl Fn(i64, i64) -> S + 'static,
+        spans: impl Fn(i64, i64) -> S + Send + Sync + 'static,
     ) -> Field {
         let spans = Box::new(move |u, v| spans(u, v).into());
         Field { name, order, op, values: FieldValues::Spans { axis, spans }, meets: None }
@@ -40,8 +45,13 @@ impl Field {
      * same, in the same order, whichever box asks (FieldValues::Shapes).
      * What it meets follows from their bounds, asked till one reaches the box.
      */
-    pub fn shapes<S: IntoIterator<Item = Shape>>(name: &'static str, order: f64, op: Op, near: impl Fn(&Box3) -> S + 'static) -> Field {
-        let near = Rc::new(near);
+    pub fn shapes<S: IntoIterator<Item = Shape>>(
+        name: &'static str,
+        order: f64,
+        op: Op,
+        near: impl Fn(&Box3) -> S + Send + Sync + 'static,
+    ) -> Field {
+        let near = Arc::new(near);
         let reaching = near.clone();
         let values = FieldValues::Shapes(Box::new(move |b| near(b).into_iter().collect()));
         Field { name, order, op, values, meets: None }.meets(move |b, spacing| {
@@ -51,12 +61,17 @@ impl Field {
     }
 
     /** Spans along each column, up y, all of them: `spans(x, z)`, lattice units; a `Column` or the spans. */
-    pub fn columns<S: Into<Vec<Span>>>(name: &'static str, order: f64, op: Op, spans: impl Fn(i64, i64) -> S + 'static) -> Field {
+    pub fn columns<S: Into<Vec<Span>>>(
+        name: &'static str,
+        order: f64,
+        op: Op,
+        spans: impl Fn(i64, i64) -> S + Send + Sync + 'static,
+    ) -> Field {
         Field::spans(name, order, op, 1, spans)
     }
 
     /** Its spans along y from `below` under to `above` over `of` at their column (About): a rule; what it meets follows. */
-    pub fn about(self, of: Rc<Sloped>, below: i64, above: i64) -> Field {
+    pub fn about(self, of: Arc<Sloped>, below: i64, above: i64) -> Field {
         self.about_as(About { of, below, above, under: None })
     }
 
@@ -64,7 +79,7 @@ impl Field {
      * A ground: its spans about `of` as `about` says, and solid `under`
      * under them, down without end (About's `under`): solid to the bottom.
      */
-    pub fn ground(self, of: Rc<Sloped>, below: i64, above: i64, under: impl Into<Kind>) -> Field {
+    pub fn ground(self, of: Arc<Sloped>, below: i64, above: i64, under: impl Into<Kind>) -> Field {
         self.about_as(About { of, below, above, under: Some(under.into()) })
     }
 
@@ -74,7 +89,7 @@ impl Field {
         let FieldValues::Spans { axis: 1, spans } = self.values else {
             panic!("field {name}: spans along y only are about a plan of heights")
         };
-        let about = Rc::new(about);
+        let about = Arc::new(about);
         let held = about.clone();
         let spans = Box::new(move |x, z| {
             let spans = spans(x, z);
@@ -89,7 +104,7 @@ impl Field {
      * `meets(box, spacing)`, along any axis (Field::meets): a rule;
      * drawn only where it may be, a box all of a kind without asking.
      */
-    pub fn meets(self, meets: impl Fn(&Box3, i64) -> Meets + 'static) -> Field {
+    pub fn meets(self, meets: impl Fn(&Box3, i64) -> Meets + Send + Sync + 'static) -> Field {
         Field { meets: Some(Box::new(meets)), ..self }
     }
 }
@@ -102,7 +117,7 @@ impl Field {
  * the field meets follows (Sloped::range).
  */
 struct About {
-    of: Rc<Sloped>,
+    of: Arc<Sloped>,
     below: i64,
     above: i64,
     /** A solid kind under it all: the ground, solid to the bottom. */
@@ -228,7 +243,7 @@ impl Population {
     }
 
     /** Where a cell's thing is: the cell owns one only if its anchor is in it. */
-    pub fn anchor(self, anchor: impl Fn(&Cell) -> Option<Point> + 'static) -> Population {
+    pub fn anchor(self, anchor: impl Fn(&Cell) -> Option<Point> + Send + Sync + 'static) -> Population {
         Population { anchor: Anchors::Cells(Box::new(anchor)), ..self }
     }
 
@@ -237,7 +252,7 @@ impl Population {
      * however many of them a box reaches: the cell of the line it is in
      * owns it (`Line::pick` picks a point on a surface across the axis).
      */
-    pub fn anchor_along(self, axis: usize, anchor: impl Fn(&Line) -> Option<Point> + 'static) -> Population {
+    pub fn anchor_along(self, axis: usize, anchor: impl Fn(&Line) -> Option<Point> + Send + Sync + 'static) -> Population {
         Population { anchor: Anchors::Lines { axis, anchor: Box::new(anchor) }, ..self }
     }
 
@@ -246,7 +261,7 @@ impl Population {
      * along the axes they don't span (onto a ground); its cells are their
      * leaves, and its cell's `mark` the point's.
      */
-    pub fn anchor_points(self, points: std::rc::Rc<Points>, anchor: impl Fn(&Spot) -> Option<Point> + 'static) -> Population {
+    pub fn anchor_points(self, points: Arc<Points>, anchor: impl Fn(&Spot) -> Option<Point> + Send + Sync + 'static) -> Population {
         assert!(
             self.stands.is_none(),
             "population {}: give its points before where it stands (`on`), whose N is their leaves' width",
@@ -256,7 +271,7 @@ impl Population {
     }
 
     /** The thing at an anchor, of a cell, if it has one. */
-    pub fn make(self, make: impl Fn(Point, &Cell) -> Option<Node> + 'static) -> Population {
+    pub fn make(self, make: impl Fn(Point, &Cell) -> Option<Node> + Send + Sync + 'static) -> Population {
         Population { make: Box::new(make), ..self }
     }
 
@@ -265,7 +280,7 @@ impl Population {
      * `stands(box)` (Population::stands): a rule; asked to draw only where
      * they may reach.
      */
-    pub fn stands(self, stands: impl Fn(&Box3) -> bool + 'static) -> Population {
+    pub fn stands(self, stands: impl Fn(&Box3) -> bool + Send + Sync + 'static) -> Population {
         Population { stands: Some(Box::new(stands)), ..self }
     }
 
@@ -274,7 +289,7 @@ impl Population {
      * as now) off it: on the ground the level's sites read where one is,
      * over a box its range (Population::stands).
      */
-    pub fn on(self, ground: Rc<Sloped>) -> Population {
+    pub fn on(self, ground: Arc<Sloped>) -> Population {
         let n = self.cell;
         self.stands(move |b| {
             let column = b.max[0] - b.min[0] == 1 && b.max[2] - b.min[2] == 1;
@@ -307,7 +322,7 @@ impl Node {
     }
 
     /** Shapes made only once read, by `make` from a random sequence of `seed`, within `bounds`. */
-    pub fn lazy(bounds: Box3, seed: u64, make: impl Fn(&mut Rng) -> Vec<Shape> + 'static) -> Node {
+    pub fn lazy(bounds: Box3, seed: u64, make: impl Fn(&mut Rng) -> Vec<Shape> + Send + Sync + 'static) -> Node {
         Node { shapes: Shapes::lazy(seed, make), bounds: Some(bounds), children: None, far: None }
     }
 

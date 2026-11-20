@@ -818,6 +818,16 @@ read it dithered ("Plans" in "Levels").
 Plans are built in order from those before them, so they can't form cycles;
 layers read any plan.
 
+A world is one for all the threads that make and light its tiles (`World` is `Sync`):
+what it keeps is a function of the world alone, so whichever thread makes it keeps it for all.
+A plan's values are small, the last kept in each slot (`Kept`);
+a few large ones, a curve's pieces, are a `Large`'s, each held for good.
+Both are read without waiting.
+What is asked for less often is under a lock:
+things measured and a settlement's layout (`Memo` in `recent.rs`), points' cells.
+So a world's closures are `Send` and `Sync`: they capture `Arc`s,
+and keep what they keep in one of these.
+
 ### Land
 
 Domains share land by **bidding** for each column (`Land`).

@@ -1,6 +1,6 @@
 //! The valley: the forest, towns, fields, landmarks and moorland on one land.
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use worldgen::domain::Scope;
 use worldgen::generator::{Layer, generate, generate_shown, kind_of};
@@ -65,6 +65,39 @@ fn tiles_made_together_show_what_each_shows_alone() {
 }
 
 /** Nothing standing over a tunnel reaches into its bore: the railway's bores are carved last, the track in them drawn after. */
+/**
+ * A world is one for all the threads that make its tiles, and what it
+ * keeps is a function of it alone: the columns of tiles around the spawn,
+ * of a fine, a middle and a coarse level, are the same made by threads
+ * together as by one.
+ */
+#[test]
+fn threads_sharing_a_world_make_its_tiles_as_one_alone() {
+    const THREADS: usize = 4;
+    let (alone, shared) = (valley(42), valley(42));
+    let [x, y, z] = alone.spawn;
+    let keys: Vec<(u32, [i64; 3])> = [0, 3, 6]
+        .into_iter()
+        .flat_map(|level| {
+            (0..16).map(move |i| (level, [(x >> level) / TILE + i % 4 - 2, (y >> level) / TILE, (z >> level) / TILE + i / 4 - 2]))
+        })
+        .collect();
+    let made = |world: &worldgen::World, (level, key): (u32, [i64; 3])| -> Vec<_> {
+        make_tiles(world, level, key).into_iter().map(|(key, grid)| (key, grid.bricks, grid.cells, grid.views, grid.glow)).collect()
+    };
+    let alone: Vec<_> = keys.iter().map(|&key| made(&alone, key)).collect();
+    std::thread::scope(|scope| {
+        for thread in 0..THREADS {
+            let (keys, alone, shared) = (&keys, &alone, &shared);
+            scope.spawn(move || {
+                for i in (thread..keys.len()).step_by(THREADS) {
+                    assert!(made(shared, keys[i]) == alone[i], "tile {:?} of level {}", keys[i].1, keys[i].0);
+                }
+            });
+        }
+    });
+}
+
 #[test]
 fn the_railways_bores_are_carved_last() {
     let world = valley(42);
@@ -87,10 +120,10 @@ fn the_railways_bores_are_carved_last() {
  * valley's course along its first 8 km, so all those standing there, and
  * the terrain they stand on.
  */
-fn landmarks(seed: u64) -> (Vec<Site>, Rc<Terrain>) {
+fn landmarks(seed: u64) -> (Vec<Site>, Arc<Terrain>) {
     let world = Scope::new(seed);
-    let terrain = Rc::new(Terrain::new(&world));
-    let railway = Rc::new(Railway::new(&world.of("railway"), terrain.clone()));
+    let terrain = Arc::new(Terrain::new(&world));
+    let railway = Arc::new(Railway::new(&world.of("railway"), terrain.clone()));
     let landmarks = &Landmarks::new(&world.of("landmarks"), terrain.clone(), railway);
     let points = |from: f64, to: f64| (unit(from)..=unit(to)).step_by(NEAR as usize);
     let course = |z: i64| terrain.course.x(z).round_units().0;

@@ -11,7 +11,7 @@
 //! `moor` is the moor alone, all of its land, with its own stream; `fog`
 //! the same in fog, mist over all of it.
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use worldgen::World;
 use worldgen::column::Column;
@@ -114,7 +114,7 @@ struct Mist {
 }
 
 /** A quantity of column (x, z) from position alone, with its fraction: the ground's height, a bid's lead. */
-type ByColumn = Rc<dyn Fn(i64, i64) -> Fx>;
+type ByColumn = Arc<dyn Fn(i64, i64) -> Fx + Send + Sync>;
 
 /** A steading: a ring of stones, a hut facing it (its front wall towards the ring), a path between. */
 #[derive(Clone, Copy, Default)]
@@ -203,7 +203,7 @@ enum Streamside {
 
 /** The moor alone's stream: its centre line by z, and where its bed and banks are, dithered far away, so it shows as often as it is. */
 struct Stream {
-    line: Rc<Plan<Fx>>,
+    line: Arc<Plan<Fx>>,
     side: Plan<Streamside>,
 }
 
@@ -232,7 +232,7 @@ pub struct Moorland {
     mist: ValueNoise<{ m(48.0) }>,
     lies: Mist,
     stream: Option<Stream>,
-    steadings: Rc<Claims<Steading>>,
+    steadings: Arc<Claims<Steading>>,
     water: Water,
 }
 
@@ -250,12 +250,12 @@ impl Moorland {
         height: ByColumn,
         lead: ByColumn,
         chance: Fx,
-        line: Option<Rc<dyn Fn(i64) -> Fx>>,
+        line: Option<Arc<dyn Fn(i64) -> Fx + Send + Sync>>,
         level: Option<Units>,
         lies: Mist,
     ) -> Moorland {
         let brook = line.clone().map(|line| {
-            let line = Rc::new(Plan::new("stream", STREAM_SCALE, move |_, z| line(z)));
+            let line = Arc::new(Plan::new("stream", STREAM_SCALE, move |_, z| line(z)));
             let side = {
                 let line = line.clone();
                 Plan::dithered("streamside", BANK_SCALE, move |x, z| {
@@ -274,7 +274,7 @@ impl Moorland {
         let steadings = {
             let (height, lead) = (height.clone(), lead.clone());
             let s = scope.seed("steadings");
-            Rc::new(Claims::new("steadings", s, CLAIM, APART, Some(FIRST), move |ring, random| {
+            Arc::new(Claims::new("steadings", s, CLAIM, APART, Some(FIRST), move |ring, random| {
                 // The stream's plan is finer than the steadings': its line is read here.
                 let off_stream = |c: [i64; 2]| line.as_ref().is_none_or(|l| (Units(c[0]).to_fx() - l(c[1])).abs() > Units::m(14.0).to_fx());
                 // No room where the moor doesn't lead (`around`, below): asked before the ground is measured.
@@ -449,16 +449,16 @@ fn pool_at(spot: [i64; 2], ground: &dyn Fn(i64, i64) -> Fx, random: &mut Rng) ->
  * path and the railway (`lead`).
  */
 pub struct Uplands {
-    terrain: Rc<Terrain>,
-    landmarks: Rc<Landmarks>,
-    railway: Rc<Railway>,
+    terrain: Arc<Terrain>,
+    landmarks: Arc<Landmarks>,
+    railway: Arc<Railway>,
     clear: [i64; 2],
     stretches: ValueNoise<{ m(1600.0) }>,
     patches: Fbm<{ m(160.0) }, 2>,
 }
 
 impl Uplands {
-    pub fn new(scope: &Scope, terrain: Rc<Terrain>, landmarks: Rc<Landmarks>, railway: Rc<Railway>, clear: [i64; 2]) -> Uplands {
+    pub fn new(scope: &Scope, terrain: Arc<Terrain>, landmarks: Arc<Landmarks>, railway: Arc<Railway>, clear: [i64; 2]) -> Uplands {
         Uplands {
             terrain,
             landmarks,
@@ -514,9 +514,9 @@ impl Uplands {
     }
 
     /** The moorland on them: steadings, fewer than on the moor alone, and pools where it leads; no stream. */
-    pub fn moorland(self: &Rc<Self>, scope: &Scope) -> Moorland {
+    pub fn moorland(self: &Arc<Self>, scope: &Scope) -> Moorland {
         let (terrain, lead) = (self.terrain.clone(), self.clone());
-        Moorland::new(scope, Rc::new(move |x, z| terrain.ground(x, z)), Rc::new(move |x, z| lead.lead(x, z)), fx(0.225), None, None, MIST)
+        Moorland::new(scope, Arc::new(move |x, z| terrain.ground(x, z)), Arc::new(move |x, z| lead.lead(x, z)), fx(0.225), None, None, MIST)
     }
 }
 
@@ -527,15 +527,15 @@ impl Uplands {
  * whether nothing is under it: its peat is the ground, down without end.
  */
 pub struct Moor {
-    moorland: Rc<Moorland>,
-    uplands: Option<Rc<Uplands>>,
-    path: Option<Rc<Path>>,
+    moorland: Arc<Moorland>,
+    uplands: Option<Arc<Uplands>>,
+    path: Option<Arc<Path>>,
     under: bool,
 }
 
 impl Moor {
     /** On the valley's `uplands`, along its `path`. */
-    pub fn on(uplands: Rc<Uplands>, moorland: Rc<Moorland>, path: Rc<Path>) -> Moor {
+    pub fn on(uplands: Arc<Uplands>, moorland: Arc<Moorland>, path: Arc<Path>) -> Moor {
         Moor { moorland, uplands: Some(uplands), path: Some(path), under: false }
     }
 }
@@ -550,7 +550,7 @@ impl Domain for Moor {
     }
 
     /** Drawn where it owns the land, its heath over the landmarks on it and its mist over them and the railway (`Alone`); its kinds are KINDS, after the valley's. */
-    fn layers(self: Rc<Self>, ground: &Rc<Sloped>, hold: Holding) -> Vec<Layer> {
+    fn layers(self: Arc<Self>, ground: &Arc<Sloped>, hold: Holding) -> Vec<Layer> {
         let alone = self.uplands.clone().map(|uplands| Alone {
             landmarks: uplands.landmarks.clone(),
             railway: uplands.railway.clone(),
@@ -567,9 +567,9 @@ impl Domain for Moor {
  * the valley's land, the landmarks it stands round.
  */
 struct Ground {
-    ground: Rc<Sloped>,
+    ground: Arc<Sloped>,
     hold: Holding,
-    path: Option<Rc<Path>>,
+    path: Option<Arc<Path>>,
     under: bool,
     alone: Option<Alone>,
 }
@@ -581,14 +581,14 @@ struct Ground {
  * the railway keeps nothing off the mist.
  */
 struct Alone {
-    landmarks: Rc<Landmarks>,
-    railway: Rc<Railway>,
+    landmarks: Arc<Landmarks>,
+    railway: Arc<Railway>,
     share: Plan<Fx>,
 }
 
 /** The moor's layers' state: its moorland, and what it lies on. */
 struct Heath {
-    moorland: Rc<Moorland>,
+    moorland: Arc<Moorland>,
     ground: Ground,
 }
 
@@ -650,16 +650,16 @@ fn moor_in(seed: u64, lies: Mist) -> World {
     let relief = world.of("heath");
     let hills = Fbm::<{ m(240.0) }, 4>::new(relief.seed("hills"));
     let bumps = ValueNoise::<{ m(10.0) }>::new(relief.seed("bumps"));
-    let heath: ByColumn = Rc::new(move |x, z| (hills.at(x, z) - Fx::HALF) * Units::m(28.0) + (bumps.at(x, z) - Fx::HALF) * Units::m(0.8));
+    let heath: ByColumn = Arc::new(move |x, z| (hills.at(x, z) - Fx::HALF) * Units::m(28.0) + (bumps.at(x, z) - Fx::HALF) * Units::m(0.8));
     // Winding along z west of the origin.
     let phase = (hash64(relief.seed("stream"), 0, 0, 0) % 1000) as f64 / 100.0;
-    let line: Rc<dyn Fn(i64) -> Fx> = Rc::new(move |z| {
+    let line: Arc<dyn Fn(i64) -> Fx + Send + Sync> = Arc::new(move |z| {
         let zm = z as f64 / m(1.0) as f64;
         fx(m(-40.0) as f64 + m(1.0) as f64 * (12.0 * js::sin(zm / 37.0 + phase) + 4.0 * js::sin(zm / 11.0 + 2.0 * phase)))
     });
     let moorland =
-        Rc::new(Moorland::new(&world.of("moor"), heath.clone(), Rc::new(|_, _| Fx::ONE), fx(0.65), Some(line), Some(WATER), lies));
-    let moor: Rc<dyn Domain> = Rc::new(Moor { moorland: moorland.clone(), uplands: None, path: None, under: true });
+        Arc::new(Moorland::new(&world.of("moor"), heath.clone(), Arc::new(|_, _| Fx::ONE), fx(0.65), Some(line), Some(WATER), lies));
+    let moor: Arc<dyn Domain> = Arc::new(Moor { moorland: moorland.clone(), uplands: None, path: None, under: true });
     // The heath, levelled under each hut.
     let ground = Lie::new(move |x, z| heath(x, z)).shaped(vec![moor.clone()]).ground(GROUND_SCALE, SLOPE);
     let spawn = {
@@ -679,8 +679,8 @@ fn moor_in(seed: u64, lies: Mist) -> World {
 }
 
 /** The moor's layers on `ground`, of `moorland`: drawn where it owns the land. */
-fn layers(moorland: Rc<Moorland>, ground: Ground) -> Vec<Layer> {
-    let f = Rc::new(Heath { moorland, ground });
+fn layers(moorland: Arc<Moorland>, ground: Ground) -> Vec<Layer> {
+    let f = Arc::new(Heath { moorland, ground });
     let mut layers = vec![Layer::Field(heath(f.clone()))];
     if f.moorland.stream.is_some() {
         layers.push(Layer::Field(stream_bed(f.clone())));
@@ -701,7 +701,7 @@ fn layers(moorland: Rc<Moorland>, ground: Ground) -> Vec<Layer> {
  * empty, so it stands among the heather, round the huts, over the water,
  * the landmarks and the railway's track, and takes nothing's place.
  */
-fn mist(f: Rc<Heath>) -> Field {
+fn mist(f: Arc<Heath>) -> Field {
     let lid = {
         let ground = f.ground.ground.clone();
         Plan::sampled("mist", MIST_RING, MIST_RING, move |x, z| {
@@ -734,7 +734,7 @@ fn mist(f: Rc<Heath>) -> Field {
 }
 
 /** The heath: heather, grass or bog over peat, a gravel path to each ring; heather and grass standing on it as media. */
-fn heath(f: Rc<Heath>) -> Field {
+fn heath(f: Arc<Heath>) -> Field {
     // Half a metre of its surface and of peat, heather on it; or peat down without end.
     let (of, under) = (f.ground.ground.clone(), f.ground.under);
     let field = Field::columns("heath", 0.7, Op::Paint, move |x, z| {
@@ -775,7 +775,7 @@ fn bed_bottom(h: i64) -> i64 {
  * The stream's bed: the ground carved out down to where `water`, drawn
  * after, fills it from; on the faces they share, they keep the same sites.
  */
-fn stream_bed(f: Rc<Heath>) -> Field {
+fn stream_bed(f: Arc<Heath>) -> Field {
     let f_ground = f.ground.ground.clone();
     Field::columns("stream bed", 1.0, Op::Carve, move |x, z| {
         if f.moorland.streamside(x, z) != Streamside::Bed {
@@ -792,7 +792,7 @@ fn stream_bed(f: Rc<Heath>) -> Field {
  * hollows. Painted, so at coarse levels, where the ground's surface is
  * two sites thick, its top site is water, not lost under it.
  */
-fn water(f: Rc<Heath>) -> Field {
+fn water(f: Arc<Heath>) -> Field {
     let (moorland, ground) = (f.moorland.clone(), f.ground.ground.clone());
     Field::columns("water", 2.0, Op::Paint, move |x, z| {
         let h = f.height(x, z);
@@ -818,7 +818,7 @@ fn water(f: Rc<Heath>) -> Field {
 }
 
 /** Boulders half sunk in the heath, granite or lichened, off the water and the paths; as many as the moor's share. */
-fn boulders(f: Rc<Heath>) -> Population {
+fn boulders(f: Arc<Heath>) -> Population {
     let ground = f.clone();
     Population::new("moor boulders", 3.0, m(6.0))
         .reach(m(2.5))
@@ -844,7 +844,7 @@ fn boulders(f: Rc<Heath>) -> Population {
 }
 
 /** The steadings: each owned by the cell its ring's centre is in. */
-fn steadings_population(f: Rc<Heath>) -> Population {
+fn steadings_population(f: Arc<Heath>) -> Population {
     let anchor = f.clone();
     Population::new("steadings", 4.0, STEADING_CELL)
         .reach([REACH_ACROSS, m(16.0), REACH_ACROSS])

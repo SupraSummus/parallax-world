@@ -1,7 +1,7 @@
 //! The data: the valley seen from above, each column's topmost voxel as a
 //! class of kinds; and its towns, as worlds/src/valley.rs builds them.
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use worldgen::domain::Scope;
 use worldgen::generator::{Generator, Kind, generate};
@@ -130,7 +130,7 @@ pub fn class_of_kind(kinds: usize) -> Vec<u8> {
 }
 
 /** The valley's towns, on its terrain. */
-pub fn towns(seed: u64) -> Rc<Towns> {
+pub fn towns(seed: u64) -> Arc<Towns> {
     Terrain::new(&Scope::new(seed)).towns
 }
 

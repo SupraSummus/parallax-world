@@ -16,7 +16,7 @@ pub mod mountains;
 pub mod railway;
 pub mod town;
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use worldgen::domain::{Domain, Lie, Scope, compose};
 use worldgen::generator::{Generator, KindDef};
@@ -61,28 +61,28 @@ pub struct Terrain {
      * made from it, keeps it for those as fine as it.
      */
     pub path: Spine,
-    pub ranges: Rc<Ranges>,
+    pub ranges: Arc<Ranges>,
     /** The spurs and gorges at the ranges' feet. */
-    pub landforms: Rc<Landforms>,
-    pub towns: Rc<Towns>,
+    pub landforms: Arc<Landforms>,
+    pub towns: Arc<Towns>,
 }
 
 impl Terrain {
     /** The terrain of the valley `world`. */
     pub fn new(world: &Scope) -> Terrain {
         let course = course::course(&world.of("course"));
-        let relief = Rc::new(Relief::new(&world.of("relief")));
-        let ranges = Rc::new(Ranges::new(&world.of("mountains")));
+        let relief = Arc::new(Relief::new(&world.of("relief")));
+        let ranges = Arc::new(Ranges::new(&world.of("mountains")));
         let route = {
             let (course, relief, ranges) = (course.clone(), relief.clone(), ranges.clone());
             Route::new(course.clone(), move |x, z| relief.floor(x, z) + ranges.height(x, z, course.across(x, z)))
         };
-        let towns = Rc::new(Towns::new(&world.of("towns"), relief.clone(), course.clone()));
+        let towns = Arc::new(Towns::new(&world.of("towns"), relief.clone(), course.clone()));
         let path = {
             let towns = towns.clone();
             Spine::new(move |z| towns.street_x(z, route.x(z)))
         };
-        let landforms = Rc::new(Landforms::new(&world.of("landforms"), towns.clone()));
+        let landforms = Arc::new(Landforms::new(&world.of("landforms"), towns.clone()));
         let lie = {
             let (course, path, relief, ranges, landforms) =
                 (course.clone(), path.clone(), relief.clone(), ranges.clone(), landforms.clone());
@@ -110,21 +110,21 @@ impl Terrain {
  */
 pub fn valley(seed: u64) -> World {
     let world = Scope::new(seed);
-    let terrain = Rc::new(Terrain::new(&world));
+    let terrain = Arc::new(Terrain::new(&world));
     let (ranges, towns) = (terrain.ranges.clone(), terrain.towns.clone());
-    let railway = Rc::new(Railway::new(&world.of("railway"), terrain.clone()));
-    let landmarks = Rc::new(Landmarks::new(&world.of("landmarks"), terrain.clone(), railway.clone()));
+    let railway = Arc::new(Railway::new(&world.of("railway"), terrain.clone()));
+    let landmarks = Arc::new(Landmarks::new(&world.of("landmarks"), terrain.clone(), railway.clone()));
     // No moor from behind the spawn to past the first town: the contract's regions are there.
-    let uplands = Rc::new(Uplands::new(&world.of("uplands"), terrain.clone(), landmarks.clone(), railway.clone(), [m(-200.0), m(500.0)]));
-    let moorland = Rc::new(uplands.moorland(&world.of("moor")));
+    let uplands = Arc::new(Uplands::new(&world.of("uplands"), terrain.clone(), landmarks.clone(), railway.clone(), [m(-200.0), m(500.0)]));
+    let moorland = Arc::new(uplands.moorland(&world.of("moor")));
     let points = points(&terrain, &landmarks, &moorland, &railway);
-    let path = Rc::new(Path::new(terrain.path.clone()));
-    let moor = Rc::new(Moor::on(uplands, moorland, path.clone()));
+    let path = Arc::new(Path::new(terrain.path.clone()));
+    let moor = Arc::new(Moor::on(uplands, moorland, path.clone()));
     let ground = terrain.lie.shaped(vec![railway.clone(), landmarks.clone(), moor.clone()]).ground(GROUND_SCALE, SLOPE);
     let slope = {
         let ground = ground.clone();
         let step = 16;
-        Rc::new(Plan::sampled("slope", fields::SLOPE_SCALE, step, move |x, z| {
+        Arc::new(Plan::sampled("slope", fields::SLOPE_SCALE, step, move |x, z| {
             let rise = (ground.at(x + step, z) - ground.at(x - step, z)).abs() + (ground.at(x, z + step) - ground.at(x, z - step)).abs();
             Units(rise).to_fx() / Units(2 * step)
         }))
@@ -143,7 +143,7 @@ pub fn valley(seed: u64) -> World {
         let bid = fields::round_towns(&scope, towns.clone(), slope);
         Fields::new(scope, path, bid)
     };
-    let domains: [Rc<dyn Domain>; 7] = [Rc::new(forest), towns, Rc::new(fields), landmarks, moor, ranges, railway];
+    let domains: [Arc<dyn Domain>; 7] = [Arc::new(forest), towns, Arc::new(fields), landmarks, moor, ranges, railway];
     let layers = compose(&domains, &ground, town::BID_SCALE, LEAD);
     World { generator: Generator { kinds: kinds(), seed: world.seed("layers"), layers }, spawn, heights: Some(mountains::HEIGHTS), points }
 }
@@ -158,7 +158,12 @@ pub fn kinds() -> Vec<KindDef> {
  * windmill, a mountainside, the coast, a steading on the moor; the
  * railway's first station, bridge and tunnel.
  */
-fn points(terrain: &Rc<Terrain>, landmarks: &Rc<Landmarks>, moorland: &Rc<Moorland>, railway: &Rc<Railway>) -> Vec<(&'static str, Find)> {
+fn points(
+    terrain: &Arc<Terrain>,
+    landmarks: &Arc<Landmarks>,
+    moorland: &Arc<Moorland>,
+    railway: &Arc<Railway>,
+) -> Vec<(&'static str, Find)> {
     let site = |landmark| -> Find {
         let landmarks = landmarks.clone();
         Box::new(move || {

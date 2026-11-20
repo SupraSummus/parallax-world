@@ -301,7 +301,11 @@ mod tests {
     }
 
     /** A world of ground up to `ground`, and walls 6 m high where `wall` says, at (x, z). */
-    fn world(seed: u64, ground: impl Fn(f64, f64) -> f64 + 'static, wall: impl Fn(f64, f64) -> bool + 'static) -> World {
+    fn world(
+        seed: u64,
+        ground: impl Fn(f64, f64) -> f64 + Send + Sync + 'static,
+        wall: impl Fn(f64, f64) -> bool + Send + Sync + 'static,
+    ) -> World {
         let kinds = ["ground", "wall"].map(|name| KindDef {
             name,
             kind_type: 1,

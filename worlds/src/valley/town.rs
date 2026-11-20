@@ -8,7 +8,7 @@
 //! (valley.rs): it bids for the land around its towns, levels the ground
 //! under them, and draws only the columns it wins. Its trees are the forest's.
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use worldgen::column::Column;
 use worldgen::domain::{Domain, Scope, eased};
@@ -388,7 +388,7 @@ impl Town {
 /** The towns along the valley's path, by where they are. */
 pub struct Towns {
     /** The town nearest each z along the path, if it has one: kept, as a column asks several times. */
-    nearest: Rc<Plan<Option<Town>>>,
+    nearest: Arc<Plan<Option<Town>>>,
     /** What each column is, a plan of categories: dithered far away, so streets show as often as they are. */
     spots: Plan<Spot>,
 }
@@ -401,7 +401,7 @@ impl Towns {
      * it), claimed from spots within half a cell of x = 0, the course
      * straightened, at the mean height of the valley floor under it.
      */
-    pub fn new(scope: &Scope, relief: Rc<Relief>, course: Spine) -> Towns {
+    pub fn new(scope: &Scope, relief: Arc<Relief>, course: Spine) -> Towns {
         let s = scope.seed("towns");
         let claims = Claims::new("towns", s, CLAIM, APART, Some([0, FIRST]), move |[x, z], random| {
             let mut town = if [x, z] == [0, FIRST] {
@@ -426,7 +426,7 @@ impl Towns {
             // Kept apart along the course straightened, as they are claimed.
             Some(([0, town.z], town))
         });
-        let nearest = Rc::new(Plan::new("nearest town", CLAIM, move |_, z| claims.near(0, z, WITHIN).map(|(_, town)| town)));
+        let nearest = Arc::new(Plan::new("nearest town", CLAIM, move |_, z| claims.near(0, z, WITHIN).map(|(_, town)| town)));
         let spots = {
             let nearest = nearest.clone();
             Plan::dithered("town spots", SPOT_SCALE, move |x, z| nearest.at(0, z).map_or(Spot::Outside, |t| t.spot(x, z)))
@@ -474,12 +474,12 @@ impl Domain for Towns {
     }
 
     /** Its streets' surface, and the towns, both only where it owns the land. */
-    fn layers(self: Rc<Self>, ground: &Rc<Sloped>, hold: Holding) -> Vec<Layer> {
+    fn layers(self: Arc<Self>, ground: &Arc<Sloped>, hold: Holding) -> Vec<Layer> {
         layers(self, hold, ground.clone())
     }
 }
 
-fn layers(towns: Rc<Towns>, hold: Holding, ground: Rc<Sloped>) -> Vec<Layer> {
+fn layers(towns: Arc<Towns>, hold: Holding, ground: Arc<Sloped>) -> Vec<Layer> {
     let surface = {
         let (towns, surface_ground) = (towns.clone(), ground.clone());
         Field::columns("streets", 0.5, Op::Paint, move |x, z| {

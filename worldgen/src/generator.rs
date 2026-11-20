@@ -2,9 +2,8 @@
 //! shapes; the framework draws any box of it alone, at any level of
 //! detail. See docs/generators.md.
 
-use std::cell::{OnceCell, RefCell};
-use std::rc::Rc;
-use std::sync::OnceLock;
+use std::cell::RefCell;
+use std::sync::{Arc, OnceLock};
 
 use fcc::light::srgb_to_linear;
 use fcc::{FACE_KINDS, VOXEL_FACES};
@@ -16,7 +15,7 @@ use crate::js;
 use crate::noise::{Fixed, Fx, ONE, Rng, fixed, float, hash, hash_text, hash64};
 use crate::plan;
 use crate::points::{Points, Spot};
-use crate::recent::Recent;
+use crate::recent::Memo;
 
 mod alone;
 mod drawables;
@@ -92,7 +91,7 @@ pub enum Op {
 #[derive(Clone)]
 pub enum Fill {
     Const(f64),
-    At(Rc<dyn Fn(f64, f64, f64) -> f64>),
+    At(Arc<dyn Fn(f64, f64, f64) -> f64 + Send + Sync>),
 }
 
 impl Fill {
@@ -113,7 +112,7 @@ pub const SOLID: Fill = Fill::Const(1.0);
 #[derive(Clone)]
 pub enum Radius {
     Const(f64),
-    Along(Rc<dyn Fn(f64) -> f64>),
+    Along(Arc<dyn Fn(f64) -> f64 + Send + Sync>),
 }
 
 impl Radius {
@@ -131,9 +130,9 @@ impl From<f64> for Radius {
     }
 }
 
-impl<F: Fn(f64) -> f64 + 'static> From<F> for Radius {
+impl<F: Fn(f64) -> f64 + Send + Sync + 'static> From<F> for Radius {
     fn from(radius: F) -> Radius {
-        Radius::Along(Rc::new(radius))
+        Radius::Along(Arc::new(radius))
     }
 }
 
@@ -229,24 +228,24 @@ pub struct Child {
  */
 pub enum Shapes {
     Now(Vec<Shape>),
-    Lazy { seed: u64, make: Box<MakeShapes>, made: OnceCell<Vec<Shape>> },
+    Lazy { seed: u64, make: Box<MakeShapes>, made: OnceLock<Vec<Shape>> },
 }
 
-type ChildrenReaching = dyn Fn(&Box3) -> Vec<Child>;
-type MakeShapes = dyn Fn(&mut Rng) -> Vec<Shape>;
-type FieldAt = dyn Fn(i64, i64, i64) -> Option<(Kind, Option<f64>)>;
-type FieldSpans = dyn Fn(i64, i64) -> Vec<Span>;
-type FieldShapes = dyn Fn(&Box3) -> Vec<Shape>;
-type FieldMeets = dyn Fn(&Box3, i64) -> Meets;
-type Stands = dyn Fn(&Box3) -> bool;
-type CellAnchor = dyn Fn(&Cell) -> Option<Point>;
-type LineAnchor = dyn Fn(&Line) -> Option<Point>;
-type SpotAnchor = dyn Fn(&Spot) -> Option<Point>;
-type Make = dyn Fn(Point, &Cell) -> Option<Node>;
+type ChildrenReaching = dyn Fn(&Box3) -> Vec<Child> + Send + Sync;
+type MakeShapes = dyn Fn(&mut Rng) -> Vec<Shape> + Send + Sync;
+type FieldAt = dyn Fn(i64, i64, i64) -> Option<(Kind, Option<f64>)> + Send + Sync;
+type FieldSpans = dyn Fn(i64, i64) -> Vec<Span> + Send + Sync;
+type FieldShapes = dyn Fn(&Box3) -> Vec<Shape> + Send + Sync;
+type FieldMeets = dyn Fn(&Box3, i64) -> Meets + Send + Sync;
+type Stands = dyn Fn(&Box3) -> bool + Send + Sync;
+type CellAnchor = dyn Fn(&Cell) -> Option<Point> + Send + Sync;
+type LineAnchor = dyn Fn(&Line) -> Option<Point> + Send + Sync;
+type SpotAnchor = dyn Fn(&Spot) -> Option<Point> + Send + Sync;
+type Make = dyn Fn(Point, &Cell) -> Option<Node> + Send + Sync;
 
 impl Shapes {
-    pub fn lazy(seed: u64, make: impl Fn(&mut Rng) -> Vec<Shape> + 'static) -> Shapes {
-        Shapes::Lazy { seed, make: Box::new(make), made: OnceCell::new() }
+    pub fn lazy(seed: u64, make: impl Fn(&mut Rng) -> Vec<Shape> + Send + Sync + 'static) -> Shapes {
+        Shapes::Lazy { seed, make: Box::new(make), made: OnceLock::new() }
     }
 
     pub fn get(&self) -> &[Shape] {
@@ -482,7 +481,7 @@ pub enum Anchors {
      * A thing at each point of `points` (points.rs), anchored where
      * `anchor` lifts it to along the axes they don't span (onto a ground).
      */
-    Points { points: Rc<Points>, anchor: Box<SpotAnchor> },
+    Points { points: Arc<Points>, anchor: Box<SpotAnchor> },
 }
 
 pub enum Layer {

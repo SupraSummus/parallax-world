@@ -7,7 +7,7 @@
 //! lattice units), drawn over what is there, as one would paint voxels.
 //! From afar each building is its outline (INSIDE).
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use worldgen::World;
 use worldgen::column::Column;
@@ -890,7 +890,7 @@ fn ground(seed: u64) -> Field {
         column.under(K::soil)
     })
     // Flat, a plan cell over it at most.
-    .ground(Rc::new(Sloped::new(Rc::new(Plan::new("ground", 1 << 20, |_, _| PLAN * MIN_Y)), 0)), 1, PLAN + 1, K::soil)
+    .ground(Arc::new(Sloped::new(Arc::new(Plan::new("ground", 1 << 20, |_, _| PLAN * MIN_Y)), 0)), 1, PLAN + 1, K::soil)
 }
 
 /** A street lamp on the pavement at (x, z), its arm reaching over the road along (dx, dz). */
@@ -1007,7 +1007,7 @@ const INSIDE: i64 = 2 * PLAN;
 const OUTLINE: i64 = 2 * INSIDE;
 
 /** The district: each block's building and its street, made only for the boxes they reach. */
-fn district(blocks: Rc<Vec<Block>>) -> Node {
+fn district(blocks: Arc<Vec<Block>>) -> Node {
     let cells = |c0: i64, c1: i64| (PLAN * c0 - 1, PLAN * c1 + 1);
     let ((x0, x1), (y0, y1), (z0, z1)) = (cells(MIN_X, MIN_X + SIZE - 1), cells(MIN_Y, MAX_Y), cells(MIN_Z, MIN_Z + SIZE - 1));
     Node {
@@ -1036,7 +1036,7 @@ fn district(blocks: Rc<Vec<Block>>) -> Node {
 
 /** The city of `seed`; the camera starts on the road in front of the middle front building's open entrance, at eye height. */
 pub fn city(seed: u64) -> World {
-    let blocks = Rc::new(blocks(seed));
+    let blocks = Arc::new(blocks(seed));
     let front = blocks.iter().find(|b| b.px == MIN_X + PERIOD + ROAD && b.pz == MIN_Z + ROAD).expect("the middle front block").building;
     // In plan cells; their upper sites are sites of the lattice.
     let spawn = [front.bx + front.entrance * CELL + MID - 1, MIN_Y + vox(1.75), MIN_Z + vox(2.0)].map(|v| PLAN * v);

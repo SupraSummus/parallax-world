@@ -446,22 +446,25 @@ Numbers are for the forest at 1280×800, as measured when written.
   and with its depth varying along the axis, culled worse;
   one splat cut to the hull of a pillar's ends drew large rectangles,
   mostly discarded.
-- **Native's threads each keep their own plans' columns**,
-  and their things measured (`Measured` in `forms.rs`)
-  (a generator per thread, `native/src/world.rs`):
-  completing the valley's first view takes four threads
-  about a sixth more work than one, lit a third more,
-  and each thread holds tens of MB more:
-  its plans keep as many columns as two tiles had when 128 sites wide (`SLOTS`).
-  A quarter as many slots made a third more columns; four times as many, few fewer.
-  Of the columns four threads make, a sixth are ones another made:
-  a worker taking the nearest of the first jobs wanted spared few of them.
-  A generator all threads share would make each once, and measure each thing once
-  (of the things four threads measure, a third are ones another did).
-  It would hold no less: the threads' boxes lie apart,
-  so their columns together want as many slots as each thread's do now.
+- **Native's threads take more work together than one alone**:
+  completing the valley's first view, lit, four take about a third more than one.
+  Little of it is work done twice, now that they share the world
+  ("Bands" in [generators.md](generators.md)):
+  a generator each, they made a fifth more of the plans' columns
+  and a sixth more measured things;
+  sharing spared four threads a fifteenth of their work
+  and each the tens of MB its plans held,
+  for a thirtieth more of one thread's alone.
+  The rest is every function alike taking longer on shared cores
+  (four virtual ones, a software GPU beside them): not looked into.
+  A lock on each of a plan's slots cost one thread a tenth of generating,
+  as much as four gained: so `Kept` in `plan.rs` reads without one, unsafely.
   Tiles side by side still make again the things reaching both;
   those one above another are made together (`made_with`).
+- **A `Large` never forgets** (`plan.rs`): it holds each piece of a curve for good,
+  read where it is, and panics past `LARGE` of them,
+  thousands of kilometres of the valley.
+  Forgetting would take a count of readers at every read, at every column.
 - **Walking, native keeps more than a core busy**
   (the valley, `--stroll 20 --on-ground`, outside the GPU driver),
   measured when it drew slices: new tiles took about a third.
@@ -696,6 +699,8 @@ Numbers are for the forest at 1280×800, as measured when written.
   or its seeds on several runners (`--nocapture` shows each part's time).
   A seed's margins (rays, and pictures from above) take longest,
   then checking its regions in parts.
+  At `REGIONS_SEED` three threads each make the world (`worlds/tests/contract.rs`);
+  one for all, now that a world is shared, would make its plans' columns once. Not measured.
   Pictures from above generate level 0 over all of a world's heights,
   region by region, keeping the tiles a region shares with the one before:
   the forest's regions overlap, the valley's hardly.

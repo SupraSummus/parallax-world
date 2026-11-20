@@ -30,7 +30,7 @@ pub struct Curve<const D: usize> {
 }
 
 /** Where a level puts the point between two neighbours. */
-type Refine<const D: usize> = dyn Fn(usize, [Fx; D], [Fx; D]) -> [Fx; D];
+type Refine<const D: usize> = dyn Fn(usize, [Fx; D], [Fx; D]) -> [Fx; D] + Send + Sync;
 
 /** Where a curve passes nearest a point. */
 #[derive(Clone, Copy, Debug)]
@@ -50,7 +50,7 @@ pub struct Near<const D: usize> {
 
 impl<const D: usize> Curve<D> {
     /** A curve refined once per `wander`, coarsest first. */
-    pub fn new(wander: Vec<Fx>, refine: impl Fn(usize, [Fx; D], [Fx; D]) -> [Fx; D] + 'static) -> Curve<D> {
+    pub fn new(wander: Vec<Fx>, refine: impl Fn(usize, [Fx; D], [Fx; D]) -> [Fx; D] + Send + Sync + 'static) -> Curve<D> {
         let wander: Vec<Fixed> = wander.into_iter().map(Fx::to_bits).collect();
         let mut corridor = vec![0; wander.len() + 1];
         for level in (0..wander.len()).rev() {

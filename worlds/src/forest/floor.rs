@@ -1,7 +1,7 @@
 //! What lies on the forest's floor at (x, y, z): undergrowth (blades, stems
 //! and leaves a unit or two thick), boulders and fallen logs.
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use worldgen::generator::{Fill, Op, Shape, ball, capsule, ellipsoid};
 use worldgen::js::{self, round};
@@ -91,7 +91,7 @@ pub(super) fn mushrooms(x: f64, y: f64, z: f64, kind: K, random: &mut Rng) -> Ve
                 cap,
                 radii,
                 k(K::amanitaSpot),
-                Fill::At(Rc::new(move |_, py, _| if py > top { 0.35 } else { 0.0 })),
+                Fill::At(Arc::new(move |_, py, _| if py > top { 0.35 } else { 0.0 })),
                 Op::Paint,
             ));
         }
@@ -115,7 +115,7 @@ pub(super) fn boulder(x: f64, ground: f64, z: f64, random: &mut Rng) -> Vec<Shap
             [x, ground, z],
             [rx, ry, rz],
             k(K::mossyStone),
-            Fill::At(Rc::new(move |_, y, _| if y - ground > ry * 0.4 { 0.7 } else { 0.0 })),
+            Fill::At(Arc::new(move |_, y, _| if y - ground > ry * 0.4 { 0.7 } else { 0.0 })),
             Op::Paint,
         ),
     ]

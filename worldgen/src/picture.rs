@@ -620,13 +620,9 @@ fn tops_of(generator: &Generator, camera: &Camera, level: u32, heights: (i64, i6
     tops.collect()
 }
 
-/**
- * As `picture`, generating tiles on all threads, each with its own of the
- * generators `make` makes (the same world: a generator is not Send).
- */
-pub fn picture_on_threads(make: &(dyn Fn() -> Generator + Sync), camera: &Camera, level: u32, heights: (i64, i64)) -> Picture {
-    let generator = make();
-    let tops = tops_of(&generator, camera, level, heights);
+/** As `picture`, generating tiles on all threads. */
+pub fn picture_on_threads(generator: &Generator, camera: &Camera, level: u32, heights: (i64, i64)) -> Picture {
+    let tops = tops_of(generator, camera, level, heights);
     let tiles = Tiles::new(level, heights);
     let tiling = tiles.tiling;
     let (jobs, queue) = mpsc::channel::<(usize, Key)>();
@@ -636,11 +632,10 @@ pub fn picture_on_threads(make: &(dyn Fn() -> Generator + Sync), camera: &Camera
         for _ in 0..threads() {
             let (queue, done) = (&queue, done.clone());
             scope.spawn(move || {
-                let generator = make();
                 loop {
                     let Ok((i, key)) = queue.lock().expect("no thread panicked").recv() else { break };
                     // A generator's panic, passed on to the picture's thread rather than leaving it waiting.
-                    let grid = std::panic::catch_unwind(AssertUnwindSafe(|| generate_shown(&generator, &tiling.tile(key), level)));
+                    let grid = std::panic::catch_unwind(AssertUnwindSafe(|| generate_shown(generator, &tiling.tile(key), level)));
                     done.send((i, grid)).expect("the picture waits for it");
                 }
             });
@@ -1007,7 +1002,7 @@ mod tests {
             assert_ne!(seen.looks[middle], 0, "level {level}: the ball is in the middle");
             assert!((155.0..=162.0).contains(&seen.depth[middle]), "level {level}: {} away", seen.depth[middle]);
             assert_eq!((seen.looks[0], seen.depth[0]), (0, f32::INFINITY), "level {level}: the corner misses");
-            let threaded = picture_on_threads(&a_ball, &camera, level, heights);
+            let threaded = picture_on_threads(&generator, &camera, level, heights);
             assert!(threaded.rgb == seen.rgb && threaded.depth == seen.depth, "level {level}: the same on threads");
             let from_above = picture(&generator, &Camera::top([-100.0, -100.0], [100.0, 100.0], 32), level, heights);
             assert_eq!((from_above.looks[16 * 32 + 16] != 0, from_above.looks[0]), (true, 0), "level {level}: from above");

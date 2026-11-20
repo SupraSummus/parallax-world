@@ -335,7 +335,7 @@ pub(super) struct Piece {
 #[derive(Clone, Copy)]
 pub(super) struct Thick<'a> {
     r2: i64,
-    radius: Option<&'a dyn Fn(f64) -> f64>,
+    radius: Option<&'a (dyn Fn(f64) -> f64 + Send + Sync)>,
     half: Fixed,
     short: i64,
 }

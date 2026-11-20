@@ -20,7 +20,7 @@
 //! valley's floor or a gorge cuts into it (`Landforms`), what the railway
 //! along the valley must tunnel through or bridge.
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use worldgen::column::{Column, lowest_around};
 use worldgen::domain::{Domain, Scope};
@@ -245,11 +245,11 @@ pub enum Form {
  */
 pub struct Landforms {
     seed: u64,
-    towns: Rc<Towns>,
+    towns: Arc<Towns>,
 }
 
 impl Landforms {
-    pub fn new(scope: &Scope, towns: Rc<Towns>) -> Landforms {
+    pub fn new(scope: &Scope, towns: Arc<Towns>) -> Landforms {
         Landforms { seed: scope.seed("forms"), towns }
     }
 
@@ -303,7 +303,7 @@ impl Domain for Ranges {
         false
     }
 
-    fn layers(self: Rc<Self>, ground: &Rc<Sloped>, _: Holding) -> Vec<Layer> {
+    fn layers(self: Arc<Self>, ground: &Arc<Sloped>, _: Holding) -> Vec<Layer> {
         layers(self, ground.clone())
     }
 }
@@ -315,7 +315,7 @@ impl Domain for Ranges {
  * scree under them; painted over whatever the domains under it drew, down
  * the faces they show.
  */
-fn layers(ranges: Rc<Ranges>, ground: Rc<Sloped>) -> Vec<Layer> {
+fn layers(ranges: Arc<Ranges>, ground: Arc<Sloped>) -> Vec<Layer> {
     let bounds = ground.clone();
     let sea = sea(ground.clone());
     let surface = Field::columns("mountains", 0.8, Op::Paint, move |x, z| {
@@ -375,7 +375,7 @@ pub fn dry(height: i64) -> Fx {
 }
 
 /** The sea: water up to its level on sand, its top apart (SEA_TOP), and a beach of sand a little over; nothing higher. */
-fn sea(ground: Rc<Sloped>) -> Field {
+fn sea(ground: Arc<Sloped>) -> Field {
     Field::columns("sea", 0.85, Op::Paint, move |x, z| {
         let h = ground.at(x, z);
         if h > (SEA + Units::m(1.5)).0 {
