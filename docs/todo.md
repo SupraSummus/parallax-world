@@ -670,6 +670,11 @@ Numbers are for the forest at 1280×800, as measured when written.
   The chunks' compositor needs indirect draws counted on the GPU
   and depth tested before a shader that writes it,
   which WebGPU lacks ("The native frontend is missing pieces", above).
+- **A device lost in a browser can leave the page blank.**
+  The window makes its GPU anew (`native/src/window.rs`),
+  but Chromium may give that page no adapter after a GPU crash,
+  and the window panics on none;
+  the page asks for one only at the start.
 - **The page is not tested.**
   Headless Chromium shows nothing of a WebGPU canvas on a software GPU;
   a shot would read its frames back from a texture of its own.
