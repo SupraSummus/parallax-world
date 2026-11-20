@@ -588,6 +588,8 @@ pub(super) fn measure(
     // Fine points by their index in `own` (x first): steps along each axis, and the cell of each fine site
     // (x + y + z even), found once for all the passes.
     let stride = [1, n[0], n[0] * n[1]];
+    // What the thing has at each fine point, found once for all the passes.
+    let has: Vec<Option<(Kind, Op)>> = (0..own.cells.len()).map(|p| own.of(p)).collect();
     let parity = own.b.min.iter().sum::<i64>();
     let units: [Vec<Fixed>; 3] = std::array::from_fn(|c| (0..n[c]).map(|v| scaled(c, v)).collect());
     let mut cell_at = vec![u32::MAX; own.cells.len()];
@@ -604,20 +606,24 @@ pub(super) fn measure(
     // convex), then for each pair of neighbouring columns, the cells either holds one in.
     for axis in 0..3 {
         let (a, b) = ((axis + 1) % 3, (axis + 2) % 3);
-        let mut held: Vec<Vec<u32>> = vec![Vec::new(); (n[a] * n[b]) as usize];
+        // Column (i, j)'s cells are `held` from ends[i · n[b] + j] to the next.
+        let (mut held, mut ends): (Vec<u32>, Vec<usize>) = (Vec::new(), vec![0]);
         for i in 0..n[a] {
             for j in 0..n[b] {
-                let column = &mut held[(i * n[b] + j) as usize];
+                let first = held.len();
                 for k in 0..n[axis] {
                     let p = (i * stride[a] + j * stride[b] + k * stride[axis]) as usize;
-                    if own.of(p).is_some() && column.last() != Some(&cell_at[p]) {
-                        column.push(cell_at[p]);
+                    if has[p].is_some() && held[first..].last() != Some(&cell_at[p]) {
+                        held.push(cell_at[p]);
                     }
                 }
+                ends.push(held.len());
             }
         }
-        let none = Vec::new();
-        let at = |[i, j]: [i64; 2]| if (0..n[a]).contains(&i) && (0..n[b]).contains(&j) { &held[(i * n[b] + j) as usize] } else { &none };
+        let at = |[i, j]: [i64; 2]| -> &[u32] {
+            let column = (i * n[b] + j) as usize;
+            if (0..n[a]).contains(&i) && (0..n[b]).contains(&j) { &held[ends[column]..ends[column + 1]] } else { &[] }
+        };
         pairs([n[a], n[b]], |p, q| {
             let (p, q) = (at(p), at(q));
             for &c in p.iter().chain(q.iter().filter(|c| !p.contains(c))) {
@@ -631,6 +637,7 @@ pub(super) fn measure(
     let shares: Vec<f64> = cells.iter().map(|stats| (0..3).map(|i| stats.pairs[i] as f64 / all[i] as f64).sum::<f64>() / 3.0).collect();
     // Columns along each line of nearest neighbours d, from its start on the side of −d to its end on the side of
     // d: rays coming from either end see the faces towards it.
+    let mut crossed: Vec<usize> = Vec::new();
     for (from_end, d) in VOXEL_FACES.iter().enumerate().filter(|(_, d)| d.iter().find(|v| **v != 0) == Some(&-1)) {
         let d = d.map(i64::from);
         let from_start = VOXEL_FACES.iter().position(|e| e.map(i64::from) == d.map(|v| -v)).expect("−d is a face");
@@ -655,13 +662,13 @@ pub(super) fn measure(
                     (0..3).filter(|c| d[*c] != 0).map(|c| if d[c] > 0 { n[c] - start[c] } else { start[c] + 1 }).min().expect("d moves");
                 // What it holds first and last, and the cells it crosses that the thing is in.
                 let (mut first, mut last) = (None, None);
-                let mut crossed: Vec<usize> = Vec::new();
+                crossed.clear();
                 for p in (0..length).map(|t| (origin + t * step) as usize) {
                     let cell = cell_at[p] as usize;
                     if shares[cell] > 0.0 && crossed.last() != Some(&cell) {
                         crossed.push(cell);
                     }
-                    if let Some(at) = own.of(p) {
+                    if let Some(at) = has[p] {
                         first.get_or_insert(at);
                         last = Some(at);
                     }
@@ -683,9 +690,8 @@ pub(super) fn measure(
         let faces = stats.seen;
         // One pick for all of its faces and itself: faces that see alike are of one kind.
         let u = hash(picks, x * s, y * s, z * s) as u64;
-        let pick = |kinds: &Counts| -> (Kind, Op) {
+        let pick = |kinds: &mut Counts| -> (Kind, Op) {
             // In an order of their own: the columns' isn't one.
-            let mut kinds = kinds.clone();
             kinds.sort_by_key(|e| e.0);
             let total: u32 = kinds.iter().map(|e| e.2).sum();
             let mut pick = ((u * total as u64) >> 32) as u32;
@@ -709,7 +715,7 @@ pub(super) fn measure(
         }
         // Its share, of each kind as much as its faces see of it, each kind's of what the ones before leave, so that
         // together they stop as much as the cell's share; each with the faces seen.
-        let faces = faces.map(|counts| pick(&counts).0);
+        let faces = faces.map(|mut counts| pick(&mut counts).0);
         let total = all.iter().map(|e| e.2).sum::<u32>().max(1) as f64;
         let mut before = 0.0f64;
         for &(kind, op, n) in &all {
