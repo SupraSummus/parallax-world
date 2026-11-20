@@ -33,6 +33,8 @@ A map: each file's header comment says what is in it.
 ```
 web/                         # The web frontend: React and WebGL 2, its Rust in WebAssembly
 ├── index.html, vite.config.ts, tsconfig.json
+├── native.html              # The native frontend in a browser: native/ in WebAssembly, on WebGPU
+├── bindgen/                 # pnpm bindgen: binds that WebAssembly to the page (into web/native/, not in git)
 ├── components.json          # shadcn/ui's CLI config
 ├── wasm/src/                # The WebAssembly module: the exports the page calls
 │   ├── worlds.rs            # The worlds, for worldgen.ts
@@ -129,7 +131,7 @@ worlds/                      # The worlds, on worldgen's public API only
 ├── tests/                   # Every world keeps the contract and its cost baseline
 └── examples/                # map, look, check, cost, bench: a world looked at, checked, measured
 lab/                         # Experiment, linted but not tested by pnpm (see src/lib.rs); scripts/overture.py fetches its real places
-native/src/                  # The native frontend: egui on winit and wgpu
+native/src/                  # The native frontend: egui on winit and wgpu; in browsers too (web/native.html)
 ├── main.rs                  # The camera, the panel, the command line
 ├── window.rs                # The window: egui on winit and wgpu
 ├── gpu.rs                   # The device; offscreen pictures; shaders checked without a GPU
@@ -161,7 +163,9 @@ the worlds' checks over seeds, which `pnpm test` leaves out.
 `pnpm lint` and `pnpm test` cover the Rust
 in `fcc/`, `bake/`, `worldgen/`, `worlds/`, `native/` and `web/wasm/` too
 (clippy with warnings as errors, rustfmt, `cargo test`);
-`pnpm dev`, `pnpm build` and `pnpm test:web` rebuild its WebAssembly first.
+`pnpm dev`, `pnpm build` and `pnpm test:web` rebuild its WebAssembly first,
+the native frontend's for browsers with it (clippy sees only the host's code:
+what is `cfg(target_arch = "wasm32")` is checked by building it).
 CI runs the same scripts plus `pnpm build`, in jobs side by side,
 and `native/`'s tests that draw, on Mesa's software Vulkan.
 For rendering changes, also look

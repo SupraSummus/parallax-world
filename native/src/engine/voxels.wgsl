@@ -598,7 +598,7 @@ fn resolve_fragment(in: Screen) -> @location(0) vec4f {
   if best < 0 && !c.sky_seen {
     // None covers it: its nearest sample's voxel, where its ray would enter it.
     let near = vec2i(floor(position / f32(FACTOR))) - base;
-    only = near.x | near.y << 1u;
+    only = near.x | (near.y << 1u);
     best = only;
   }
   let p = clamp(base + vec2i(best & 1, best >> 1), vec2i(0), last);

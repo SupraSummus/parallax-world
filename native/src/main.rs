@@ -48,7 +48,7 @@ mod world;
 
 use std::io::Write;
 use std::sync::Arc;
-use std::time::Instant;
+use web_time::Instant;
 
 use bake::walk::{COLLISION_LEVEL, Ground, WalkInput, Walker};
 
@@ -125,7 +125,7 @@ impl window::Content for App {
                 ui.strong("Renderer");
                 ui.horizontal(|ui| {
                     ui.label("Engine");
-                    for (kind, name) in Kind::ALL {
+                    for &(kind, name) in Kind::offered() {
                         if ui.radio_value(&mut self.kind, kind, name).changed() {
                             self.engine = kind.make(&self.world);
                         }
@@ -210,6 +210,9 @@ impl window::Content for App {
             }
             // Drawn from the next frame on.
             let arrived = self.world.update(look.camera, &with_ground(frame.wants, self.walker.is_some(), &self.world, look.camera));
+            // A world with no threads works here, a frame's time between frames.
+            let start = Instant::now();
+            while start.elapsed() < WORK && self.world.work() {}
             let pixels = ui.ctx().pixels_per_point();
             self.remember([rect.width() * pixels, rect.height() * pixels]);
             self.picture = Some((frame.picture, rect));
@@ -574,6 +577,9 @@ const FOV: f64 = 90.0;
 const RENDER_DISTANCE: f64 = 8000.0;
 const SHOT: [f64; 2] = [1280.0, 800.0];
 
+/** How long a world with no threads works after each of the window's frames (World::work), a piece at least. */
+const WORK: std::time::Duration = std::time::Duration::from_millis(12);
+
 /** Units a second the window flies at to begin with, and --stroll flies at. */
 const SPEED: f64 = 40.0;
 
@@ -622,7 +628,14 @@ fn main() {
     unsafe {
         libc::mallopt(libc::M_MMAP_THRESHOLD, 128 << 10);
     }
+    #[cfg(not(target_arch = "wasm32"))]
     let mut args: Vec<String> = std::env::args().collect();
+    // In a browser, the page's query is the view, and there are no threads to make the world on.
+    #[cfg(target_arch = "wasm32")]
+    let mut args: Vec<String> = {
+        let query = web_sys::window().and_then(|w| w.location().search().ok()).unwrap_or_default();
+        ["", "--view", &query, "--threads", "0"].map(str::to_string).into()
+    };
     // A recording's world and threads, its first line, unless given.
     let replaying = args.iter().position(|a| a == "--replay").map(|i| std::fs::read_to_string(&args[i + 1]).expect("--replay file"));
     if let Some(text) = &replaying {
@@ -714,6 +727,9 @@ fn main() {
     let panic = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         eprintln!("The last frame:\n{}", last_frame());
+        // A browser shows nothing of stderr.
+        #[cfg(target_arch = "wasm32")]
+        web_sys::console::error_1(&format!("{info}\nThe last frame:\n{}", last_frame()).into());
         panic(info);
     }));
     window::run("Parallax", [1580.0, 800.0], app);

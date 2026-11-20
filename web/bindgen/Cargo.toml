@@ -1,0 +1,10 @@
+[package]
+name = "bindgen"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# wasm-bindgen's command line, at the version native/ links (the two must
+# be the same): built here, with the workspace's lock, none is to install.
+[dependencies]
+wasm-bindgen-cli-support = "=0.2.130"

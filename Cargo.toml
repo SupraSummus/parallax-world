@@ -1,9 +1,9 @@
 # The Rust crates, built and checked together with one lock and one target.
 # lab/ is a member, for the lock, but no default one: cargo test leaves its
-# tests out, and pnpm lint checks it (--workspace).
+# tests out, and pnpm lint checks it (--workspace); web/bindgen/ likewise.
 [workspace]
 resolver = "3"
-members = ["fcc", "bake", "worldgen", "worlds", "worlds/cheese", "native", "web/wasm", "lab"]
+members = ["fcc", "bake", "worldgen", "worlds", "worlds/cheese", "native", "web/wasm", "web/bindgen", "lab"]
 default-members = ["fcc", "bake", "worldgen", "worlds", "worlds/cheese", "native", "web/wasm"]
 
 # The tests bake whole cells and generate whole tiles, several times faster
