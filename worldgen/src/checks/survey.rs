@@ -3,7 +3,8 @@
 //! nothing there, around each place the world names), things taken
 //! apart into parts no wider than a region, sorted into strata: a part or
 //! a field, with a kind it draws. The contract checks a place of every
-//! stratum found (worldgen::checks::contract), however rare, without a list.
+//! stratum found (worldgen::checks::contract), however rare, without a list,
+//! and in each region every stratum surveyed there (`survey_in`).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
@@ -70,6 +71,13 @@ pub struct Stratum {
     pub places: Vec<Box3>,
 }
 
+impl Stratum {
+    /** Its name and kind, for messages. */
+    pub fn describe(&self, generator: &Generator) -> String {
+        format!("{} {}", self.name, self.kind.map_or("carving", |k| generator.kinds[k as usize].name))
+    }
+}
+
 /** How far a layer was surveyed. */
 pub struct Surveyed {
     pub layer: &'static str,
@@ -100,37 +108,40 @@ pub struct Survey {
     pub things: Vec<Things>,
 }
 
-/** What the survey found of each stratum, by name and kind: at how many places, and the PLACES nearest spawn. */
+/** What the survey found of each stratum, by name and kind: at how many places, and the `most` nearest spawn, or all. */
 struct Found {
     spawn: [i64; 3],
+    most: Option<usize>,
     strata: BTreeMap<(String, Option<Kind>), (usize, Vec<Box3>)>,
 }
 
 impl Found {
-    fn new(spawn: [i64; 3]) -> Found {
-        Found { spawn, strata: BTreeMap::new() }
+    fn new(spawn: [i64; 3], most: Option<usize>) -> Found {
+        Found { spawn, most, strata: BTreeMap::new() }
     }
 
-    /** `places` of the stratum `key`, found at `found` places: those of them among its PLACES nearest spawn kept. */
+    /** `places` of the stratum `key`, found at `found` places: those of them among its `most` nearest spawn kept, or all. */
     fn add(&mut self, key: (String, Option<Kind>), found: usize, places: impl IntoIterator<Item = Box3>) {
         let (n, kept) = self.strata.entry(key).or_default();
         *n += found;
         for place in places {
             kept.push(place);
-            if kept.len() == 2 * PLACES {
+            if let Some(most) = self.most
+                && kept.len() == 2 * most
+            {
                 nearest_first(kept, self.spawn);
-                kept.truncate(PLACES);
+                kept.truncate(most);
             }
         }
     }
 
     fn into_strata(self) -> Vec<Stratum> {
-        let spawn = self.spawn;
+        let (spawn, most) = (self.spawn, self.most);
         self.strata
             .into_iter()
             .map(|((name, kind), (found, mut places))| {
                 nearest_first(&mut places, spawn);
-                places.truncate(PLACES);
+                places.truncate(most.unwrap_or(usize::MAX));
                 Stratum { name, kind, found, places }
             })
             .collect()
@@ -149,11 +160,12 @@ pub(crate) fn nearest_first(places: &mut [Box3], spawn: [i64; 3]) {
 
 /** What `world` is made of around spawn, in places at most `region` wide (lattice units): of the layers `wanted` by name. */
 pub fn survey(world: &World, region: i64, wanted: impl Fn(&str) -> bool) -> Survey {
-    let mut found = Found::new(world.spawn);
+    let mut found = Found::new(world.spawn, Some(PLACES));
     let (mut layers, mut things) = (Vec::new(), Vec::new());
     let wanted = || world.generator.layers.iter().filter(|layer| wanted(layer.name()));
     let fields: Vec<&Field> = wanted().filter_map(|layer| if let Layer::Field(field) = layer { Some(field) } else { None }).collect();
-    let mut at_spawn = survey_fields(world, world.spawn, (FIELD_LEVEL, SIDE), &fields, &mut found).into_iter();
+    let cube = |centre, side| world.within(Box3::around(centre, side / 2));
+    let mut at_spawn = survey_fields(world, &cube(world.spawn, SIDE), FIELD_LEVEL, &fields, &mut found).into_iter();
     for layer in wanted() {
         let start = Instant::now();
         match layer {
@@ -166,7 +178,7 @@ pub fn survey(world: &World, region: i64, wanted: impl Fn(&str) -> bool) -> Surv
             }
             Layer::Field(field) => {
                 let (at_spawn, seconds) = at_spawn.next().expect("a field");
-                let at_place = |centre| survey_fields(world, centre, (PLACE_LEVEL, PLACE_SIDE), &[field], &mut found)[0].0;
+                let at_place = |centre| survey_fields(world, &cube(centre, PLACE_SIDE), PLACE_LEVEL, &[field], &mut found)[0].0;
                 let drawn = or_at_places(world, at_spawn, at_place, |drawn| *drawn);
                 layers.push(Surveyed { layer: field.name, half: SIDE / 2, found: drawn, seconds: seconds + start.elapsed().as_secs_f64() });
             }
@@ -194,22 +206,21 @@ fn or_at_places<T>(world: &World, at_spawn: T, mut survey: impl FnMut([i64; 3]) 
 }
 
 /**
- * Where each of `fields` draws around `centre`, asked at every column of
- * sites of `level` in a cube `side` wide, at a height in it, into
- * `found`: all of them at a column before the next, so a plan they share
- * (a world's land) is made there once. Returns at how many each draws,
- * and how long it took: a shared plan's time is the first's to read it.
+ * Where each of `fields` draws in `b`, asked at every column of sites of
+ * `level` whose sites meet it, at a height in it, into `found`: all of them at a
+ * column before the next, so a plan they share (a world's land) is made
+ * there once. Returns at how many each draws, and how long it took: a
+ * shared plan's time is the first's to read it.
  */
-fn survey_fields(world: &World, centre: [i64; 3], (level, side): (u32, i64), fields: &[&Field], found: &mut Found) -> Vec<(usize, f64)> {
+fn survey_fields(world: &World, b: &Box3, level: u32, fields: &[&Field], found: &mut Found) -> Vec<(usize, f64)> {
     let mut randoms: Vec<Rng> = fields.iter().map(|field| Rng::new(hash_text(field.name, world.generator.seed))).collect();
     let s = 1i64 << level;
-    let cube = world.within(Box3::around(centre, side / 2));
-    let (h0, h1) = (cube.min[1], cube.max[1]);
-    let side = side / s;
+    let (h0, h1) = (b.min[1], b.max[1]);
+    // Column i's sites reach s / 2 either side of i·s.
+    let columns = |a: usize| (b.min[a] + s / 2).div_euclid(s)..(b.max[a] + s / 2 + s - 1).div_euclid(s);
     let mut drawn = vec![(0, 0.0); fields.len()];
-    for c in 0..side * side {
+    for (x, z) in columns(2).flat_map(|z| columns(0).map(move |x| (x * s, z * s))) {
         // A site's column of the level, as generating it asks: at any height, for a field of sites.
-        let [x, z] = [(c % side, centre[0]), (c / side, centre[2])].map(|(i, o)| (o.div_euclid(s) + i - side / 2) * s);
         for ((field, random), drawn) in fields.iter().zip(&mut randoms).zip(&mut drawn) {
             let start = Instant::now();
             let p = [x, h0 + random.below((h1 - h0) as u32) as i64, z];
@@ -278,16 +289,12 @@ fn across(axis: usize) -> [usize; 2] {
  */
 fn survey_things(world: &World, centre: [i64; 3], population: &Population, region: i64, found: &mut Found) -> (i64, Things) {
     let (n, reach) = (population.cell, population.reach);
-    let [ci, _, ck] = centre.map(|v| v.div_euclid(n));
     let (mut half, most) = (8, (SIDE / 2 / n).min(HALF_CELLS));
     loop {
-        let (mut parts, mut count) = (Found::new(world.spawn), 0);
+        let mut parts = Found::new(world.spawn, Some(PLACES));
         let mut seen = Things { population: population.name, reach, made: 0, past: Vec::new(), leaving: Vec::new() };
-        // Along y, the cells whose reach meets the cube within the heights.
         let cube = world.within(Box3::around(centre, half * n));
-        let (j0, j1) = ((cube.min[1] - n - reach[1]).div_euclid(n), (cube.max[1] + n + reach[1]).div_euclid(n) + 1);
-        let cells = [(ci - half, ci + half), (j0, j1), (ck - half, ck + half)];
-        each_made(&world.generator, population, cells, |key, bounds, allowed, node| {
+        let count = things_in(world, population, &cube, region, &mut parts, |key, bounds, allowed| {
             seen.made += 1;
             if !bounds.inside(&allowed) {
                 seen.past.push((key.clone(), bounds, allowed));
@@ -296,7 +303,6 @@ fn survey_things(world: &World, centre: [i64; 3], population: &Population, regio
             if leaves && seen.leaving.len() < LEAVING {
                 seen.leaving.push((key, bounds));
             }
-            count += take_apart(node, population.name.to_string(), region, &mut parts);
         });
         if count * 4 > PARTS || half >= most {
             for (key, (n, places)) in parts.strata {
@@ -306,6 +312,50 @@ fn survey_things(world: &World, centre: [i64; 3], population: &Population, regio
         }
         half = (2 * half).min(most);
     }
+}
+
+/**
+ * The things of `population` in the cells whose reach meets `b`, each to
+ * `each` (its key, bounds and the box its reach allows), taken apart into
+ * `parts`: how many.
+ */
+fn things_in(
+    world: &World,
+    population: &Population,
+    b: &Box3,
+    region: i64,
+    parts: &mut Found,
+    mut each: impl FnMut(String, Box3, Box3),
+) -> usize {
+    let (n, reach) = (population.cell, population.reach);
+    let cells = [0, 1, 2].map(|a| ((b.min[a] - n - reach[a]).div_euclid(n), (b.max[a] + n + reach[a]).div_euclid(n) + 1));
+    let mut count = 0;
+    each_made(&world.generator, population, cells, |key, bounds, allowed, node| {
+        count += take_apart(node, population.name.to_string(), region, parts);
+        each(key, bounds, allowed);
+    });
+    count
+}
+
+/**
+ * The strata of the layers of `world` `wanted` by name in `b`, each with
+ * every place of it that meets `b`, in parts at most `region` wide: what
+ * `survey` finds there, none left out for being far from spawn.
+ */
+pub fn survey_in(world: &World, b: &Box3, region: i64, wanted: impl Fn(&str) -> bool) -> Vec<Stratum> {
+    let mut found = Found::new(world.spawn, None);
+    let wanted = || world.generator.layers.iter().filter(|layer| wanted(layer.name()));
+    let fields: Vec<&Field> = wanted().filter_map(|layer| if let Layer::Field(field) = layer { Some(field) } else { None }).collect();
+    survey_fields(world, b, FIELD_LEVEL, &fields, &mut found);
+    for layer in wanted() {
+        if let Layer::Population(population) = layer {
+            things_in(world, population, b, region, &mut found, |_, _, _| {});
+        }
+    }
+    let mut strata = found.into_strata();
+    strata.iter_mut().for_each(|stratum| stratum.places.retain(|place| place.overlaps(b)));
+    strata.retain(|stratum| !stratum.places.is_empty());
+    strata
 }
 
 /**
@@ -373,7 +423,7 @@ impl Survey {
      * Regions, each at most `region` wide, holding a place of every
      * stratum: the rarest first, each in the region it widens least,
      * or else its place nearest spawn starts one; of the strata
-     * `wanted`, by index. With the strata each holds, by index.
+     * `wanted`, by index. With the strata each was laid out for, by index.
      */
     pub fn regions(&self, wanted: impl Fn(&usize) -> bool) -> Vec<(Box3, Vec<usize>)> {
         let mut order: Vec<usize> = (0..self.strata.len()).filter(wanted).collect();
@@ -419,7 +469,6 @@ impl Survey {
 
     /** A stratum's name and kind, for messages. */
     pub fn describe(&self, generator: &Generator, i: usize) -> String {
-        let s = &self.strata[i];
-        format!("{} {}", s.name, s.kind.map_or("carving", |k| generator.kinds[k as usize].name))
+        self.strata[i].describe(generator)
     }
 }

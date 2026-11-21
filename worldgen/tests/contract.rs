@@ -7,7 +7,7 @@ use std::sync::Arc;
 use fcc::FACE_KINDS;
 use worldgen::World;
 use worldgen::checks::contract::{
-    Accuracy, REGION, Region, Report, SHOWN, STOPPED, TOLERANCE, breaks, check, check_component, heights_hold, hold_to_baseline,
+    Accuracy, Held, REGION, Region, Report, SHOWN, STOPPED, TOLERANCE, breaks, check, check_component, heights_hold, hold_to_baseline,
     in_regions, parts, parts_hold, regions, things_hold,
 };
 use worldgen::checks::survey::survey;
@@ -233,14 +233,17 @@ fn village_keeps_the_contract() {
 
 #[test]
 fn a_stratum_measures_the_same_in_any_region_holding_it() {
-    // Its cells are drawn by where they are, and none is cut off at its region's edge.
+    // Its cells are drawn by where they are, and none is cut off at its region's edge;
+    // a cell is the first region's to sample it, so regions that meet take none twice.
     let world = world_of(village(), (-64, 64));
     let house = b(-32, -8, -32, 32, 24, 32);
-    let measured = |area| {
-        let (report, _) = in_regions("village", &world, &[Region { area, strata: vec![("houses".into(), vec![house])] }], 2);
+    let region = |area, share| Region { area, strata: vec![Held { name: "houses".into(), places: vec![house], share }] };
+    let measured = |regions: &[Region]| {
+        let (report, _) = in_regions("village", &world, regions, 2);
         report.margins.iter().map(|m| (m.level, m.looks, m.spread)).collect::<Vec<_>>()
     };
-    assert_eq!(measured(house), measured(b(-96, -8, -96, 96, 24, 96)));
+    assert_eq!(measured(&[region(house, [0, 1])]), measured(&[region(b(-96, -8, -96, 96, 24, 96), [0, 1])]));
+    assert_eq!(measured(&[region(house, [0, 2]), region(house, [1, 2])]), measured(&[region(house, [0, 2])]));
 }
 
 /**
@@ -327,7 +330,7 @@ fn a_rare_thing_far_from_spawn_gets_a_region() {
         Some(Node::of(vec![cuboid(p, p.map(|v| v + 8.0), kind, SOLID, Op::Fill)]))
     });
     let (_, regions) = regions(&world_of(world(Layer::Population(posts)), (-64, 64)), &[]);
-    let names: Vec<&String> = regions.iter().flat_map(|r| r.strata.iter().map(|(name, _)| name)).collect();
+    let names: Vec<&String> = regions.iter().flat_map(|r| r.strata.iter().map(|s| &s.name)).collect();
     assert_eq!(names, ["posts rock", "posts wood"]);
     assert!(regions[0].area.holds([50 * 64, 0, 50 * 64]), "{regions:?}");
 }
@@ -511,7 +514,7 @@ fn a_component_alone_stands_for_its_parents_far_form() {
 fn a_component_is_checked_in_its_places() {
     // The village's tables at the three houses nearest spawn, a region each, named by them, the houses drawn around.
     let checked = check_component("tables", &|| world_of(village(), (-64, 64)), "houses/table", 3, 1);
-    let held: Vec<Vec<&String>> = checked.regions.iter().map(|r| r.strata.iter().map(|(name, _)| name).collect()).collect();
+    let held: Vec<Vec<&String>> = checked.regions.iter().map(|r| r.strata.iter().map(|s| &s.name).collect()).collect();
     assert_eq!(held, vec![vec!["houses/table"]; 3]);
     assert!(checked.report.margins.iter().all(|m| m.looks[1][0] > 0.0), "cells near the tables in each place");
 }
