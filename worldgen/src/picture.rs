@@ -13,7 +13,6 @@ use fcc::{FACE_KINDS, Look, VOXEL_FACES};
 
 use crate::generator::{Generator, generate_shown, shown};
 use crate::grid::{ALPHA, BRICK, Box3, COLOUR_ONE, GLOW_ONE, VoxelGrid};
-use crate::noise::hash;
 
 /** Sites a tile is wide, at the picture's level. */
 const TILE: i64 = 64;
@@ -81,8 +80,6 @@ pub struct Camera {
     pub height: usize,
     /** How far rays go, lattice units; fog thickens towards it. */
     pub far: f64,
-    /** If some, the seed of a random point of each pixel its ray goes through (`jittered`); else its middle. */
-    pub jitter: Option<u64>,
 }
 
 impl Camera {
@@ -91,7 +88,7 @@ impl Camera {
         let d = [0, 1, 2].map(|i| target[i] - eye[i]);
         let yaw = d[0].atan2(d[2]);
         let pitch = d[1].atan2(d[0].hypot(d[2]));
-        Camera { eye, yaw, pitch, projection: Projection::Perspective { fov }, width, height, far, jitter: None }
+        Camera { eye, yaw, pitch, projection: Projection::Perspective { fov }, width, height, far }
     }
 
     /** Looking straight down at the area from (x0, z0) to (x1, z1), `width` pixels across. */
@@ -99,21 +96,12 @@ impl Camera {
         let across = max[0] - min[0];
         let height = ((max[1] - min[1]) / across * width as f64).round().max(1.0) as usize;
         let eye = [(min[0] + max[0]) / 2.0, 0.0, (min[1] + max[1]) / 2.0];
-        Camera { eye, yaw: 0.0, pitch: 0.0, projection: Projection::Top { width: across }, width, height, far: f64::INFINITY, jitter: None }
-    }
-
-    /**
-     * Each pixel's ray through a random point of it, by `seed`: rays all at
-     * their pixels' middles meet a pattern as fine as them at one phase.
-     */
-    pub fn jittered(self, seed: u64) -> Camera {
-        Camera { jitter: Some(seed), ..self }
+        Camera { eye, yaw: 0.0, pitch: 0.0, projection: Projection::Top { width: across }, width, height, far: f64::INFINITY }
     }
 
     /** Pixel (i, j)'s ray: from where, which way (unit), lattice units; from above `top` looking down. */
     fn ray(&self, i: usize, j: usize, top: f64) -> ([f64; 3], [f64; 3]) {
-        let within = |axis: i64| self.jitter.map_or(0.5, |seed| hash(seed, i as i64, j as i64, axis) as f64 / 2f64.powi(32));
-        let (u, v) = ((i as f64 + within(0)) / self.width as f64 - 0.5, 0.5 - (j as f64 + within(1)) / self.height as f64);
+        let (u, v) = ((i as f64 + 0.5) / self.width as f64 - 0.5, 0.5 - (j as f64 + 0.5) / self.height as f64);
         let aspect = self.height as f64 / self.width as f64;
         match self.projection {
             Projection::Top { width } => ([self.eye[0] + u * width, top, self.eye[2] + v * width * aspect], [0.0, -1.0, 0.0]),
@@ -181,21 +169,10 @@ impl Ray {
  * what glowing sites send them (linear, of a site all of a glowing white).
  */
 #[derive(Clone, Debug, Default)]
-pub struct Seen {
-    pub stopped: f64,
-    pub shown: [f64; 3],
-    pub glow: [f64; 3],
-}
-
-impl Seen {
-    pub(crate) fn add(&mut self, stopped: f64, shown: [f64; 3], glow: [f64; 3]) {
-        self.stopped += stopped;
-        (0..3).for_each(|c| (self.shown[c], self.glow[c]) = (self.shown[c] + shown[c], self.glow[c] + glow[c]));
-    }
-
-    fn merge(&mut self, other: Seen) {
-        self.add(other.stopped, other.shown, other.glow);
-    }
+pub(crate) struct Seen {
+    pub(crate) stopped: f64,
+    pub(crate) shown: [f64; 3],
+    pub(crate) glow: [f64; 3],
 }
 
 /** Composited, a ray stops where less than this of it gets through. */
@@ -276,11 +253,8 @@ impl Tile {
     }
 }
 
-/**
- * A level's tiles generated so far, and the heights of sites in them:
- * pictures at the level that share one generate each tile once.
- */
-pub struct Tiles {
+/** A level's tiles generated so far, and the heights of sites in them. */
+struct Tiles {
     tiles: HashMap<Key, Tile>,
     level: u32,
     tiling: Tiling,
@@ -288,14 +262,8 @@ pub struct Tiles {
 
 impl Tiles {
     /** None yet, of `level` between `heights` (in the level's units). */
-    pub fn new(level: u32, heights: (i64, i64)) -> Tiles {
+    fn new(level: u32, heights: (i64, i64)) -> Tiles {
         Tiles { tiles: HashMap::new(), level, tiling: Tiling { heights } }
-    }
-
-    /** Keeps only the tiles of the columns over `area` (x and z, the level's units) and those round them, which its rays may read. */
-    pub(crate) fn keep(&mut self, area: &Box3) {
-        let [lo, hi] = [area.min, area.max].map(|p| self.tiling.key(p));
-        self.tiles.retain(|k, _| (lo[0] - 1..=hi[0] + 1).contains(&k[0]) && (lo[2] - 1..=hi[2] + 1).contains(&k[2]));
     }
 
     /** What site (x, y, z) looks like; Err if its tile is not generated. */
@@ -328,13 +296,9 @@ impl Tiles {
     /**
      * How far the ray goes: to a voxel, out of the slab of heights or past
      * its end, or to a tile not generated. It skips what holds nothing:
-     * the space over a tile's highest brick, and empty bricks. Given
-     * `seen`, it composites instead: it goes on through every site,
-     * adding to `seen` how much of the ray it stops, what that shows and
-     * what it glows to it, till none gets through
-     * (then a Miss).
+     * the space over a tile's highest brick, and empty bricks.
      */
-    fn march(&self, ray: &mut Ray, mut seen: Option<&mut Seen>) -> Step {
+    fn march(&self, ray: &mut Ray) -> Step {
         let walk = Walk::new(ray.direction);
         let mut planes = walk.planes(ray);
         let mut current: Option<(Key, &Tile)> = None;
@@ -361,14 +325,6 @@ impl Tiles {
                     leaves(ray, [b.min[0], tile.top + 1, b.min[2]].map(|v| v as f64), b.max.map(|v| (v - 1) as f64))
                 } else {
                     match tile.grid.get_or_empty_brick(x, y, z) {
-                        Some(_) if seen.is_some() => {
-                            let (stopped, shown, glow) = composite(ray, &tile.grid, walk.part(ray, &planes), 1.0);
-                            seen.as_mut().expect("composited").add(stopped, shown, glow);
-                            if ray.left() < OPAQUE {
-                                return Step::Miss;
-                            }
-                            None
-                        }
                         Some(0) => None,
                         Some(_) => {
                             let look = tile.grid.along(x, y, z, ray.direction);
@@ -581,29 +537,10 @@ fn sky(direction: [f64; 3]) -> [f64; 3] {
  * reach are generated on this thread; the rays are cast on all.
  */
 pub fn picture(generator: &Generator, camera: &Camera, level: u32, heights: (i64, i64)) -> Picture {
-    picture_in(generator, camera, &mut Tiles::new(level, heights))
-}
-
-/** As `picture`, at `tiles`' level and heights, generating only the tiles it lacks, into it. */
-pub fn picture_in(generator: &Generator, camera: &Camera, tiles: &mut Tiles) -> Picture {
-    tiled(generator, camera, tiles, false).0
-}
-
-/**
- * As `picture_in`, but composited: what its rays see on average (Seen),
- * each site by its alpha, not as one of the voxels it shows by chance.
- */
-pub fn composite_in(generator: &Generator, camera: &Camera, tiles: &mut Tiles) -> Seen {
-    let Seen { stopped, shown, glow } = tiled(generator, camera, tiles, true).1;
-    let pixels = (camera.width * camera.height) as f64;
-    Seen { stopped: stopped / pixels, shown: shown.map(|c| c / pixels), glow: glow.map(|g| g / pixels) }
-}
-
-fn tiled(generator: &Generator, camera: &Camera, tiles: &mut Tiles, composite: bool) -> (Picture, Seen) {
-    let (level, tiling) = (tiles.level, tiles.tiling);
-    let tops = tops_of(generator, camera, level, tiling.heights);
+    let tops = tops_of(generator, camera, level, heights);
+    let tiling = Tiling { heights };
     let make = &mut |keys: &[Key]| keys.iter().map(|key| generate_shown(generator, &tiling.tile(*key), level)).collect();
-    picture_of_tiles(camera, tiles, &tops, make, composite)
+    picture_of_tiles(camera, &mut Tiles::new(level, heights), &tops, make)
 }
 
 /** Where rays enter the slab of heights from above, by the tile they are over (x, z). */
@@ -652,24 +589,17 @@ pub fn picture_on_threads(generator: &Generator, camera: &Camera, level: u32, he
             });
         }
         drop(done);
-        let picture = picture_of_tiles(
-            camera,
-            &mut { tiles },
-            &tops,
-            &mut |keys: &[Key]| {
-                for job in keys.iter().copied().enumerate() {
-                    jobs.send(job).expect("a thread takes it");
-                }
-                let mut grids: Vec<Option<VoxelGrid>> = keys.iter().map(|_| None).collect();
-                for _ in keys {
-                    let (i, grid) = results.recv().expect("a thread sends it");
-                    grids[i] = Some(grid.unwrap_or_else(|panic| std::panic::resume_unwind(panic)));
-                }
-                grids.into_iter().map(|grid| grid.expect("each sent")).collect()
-            },
-            false,
-        )
-        .0;
+        let picture = picture_of_tiles(camera, &mut { tiles }, &tops, &mut |keys: &[Key]| {
+            for job in keys.iter().copied().enumerate() {
+                jobs.send(job).expect("a thread takes it");
+            }
+            let mut grids: Vec<Option<VoxelGrid>> = keys.iter().map(|_| None).collect();
+            for _ in keys {
+                let (i, grid) = results.recv().expect("a thread sends it");
+                grids[i] = Some(grid.unwrap_or_else(|panic| std::panic::resume_unwind(panic)));
+            }
+            grids.into_iter().map(|grid| grid.expect("each sent")).collect()
+        });
         // The threads end with the jobs.
         drop(jobs);
         picture
@@ -683,12 +613,8 @@ fn threads() -> usize {
 /** Generates the tiles of the keys it is given, in their order. */
 type MakeTiles<'a> = dyn FnMut(&[Key]) -> Vec<VoxelGrid> + 'a;
 
-/**
- * The picture `camera` sees in `tiles`, from above under `tops`, generating
- * those it lacks with `make`; composited, what its rays see summed over
- * the pixels (Seen), else nothing.
- */
-fn picture_of_tiles(camera: &Camera, tiles: &mut Tiles, tops: &Tops, make: &mut MakeTiles, composite: bool) -> (Picture, Seen) {
+/** The picture `camera` sees in `tiles`, from above under `tops`, generating those it lacks with `make`. */
+fn picture_of_tiles(camera: &Camera, tiles: &mut Tiles, tops: &Tops, make: &mut MakeTiles) -> Picture {
     let (level, heights) = (tiles.level, tiles.tiling.heights);
     let s = (1i64 << level) as f64;
     let pixels = camera.width * camera.height;
@@ -703,7 +629,6 @@ fn picture_of_tiles(camera: &Camera, tiles: &mut Tiles, tops: &Tops, make: &mut 
         generating: Duration::ZERO,
         casting: Duration::ZERO,
     };
-    let mut seen = Seen::default();
     // Each ray from where it enters the slab of heights (and a voxel's reach past them) to where it leaves it, or `far`.
     let (low, top) = ((heights.0 - 1) as f64, (heights.1 + 1) as f64);
     let mut rays = Vec::new();
@@ -721,7 +646,6 @@ fn picture_of_tiles(camera: &Camera, tiles: &mut Tiles, tops: &Tops, make: &mut 
         }
         if t > end {
             picture.set(pixel, 0, f64::INFINITY, sky(direction));
-            seen.add(1.0, [0.0; 3], [0.0; 3]);
             continue;
         }
         let site = nearest_site([0, 1, 2].map(|i| origin[i] + t * direction[i]));
@@ -738,19 +662,16 @@ fn picture_of_tiles(camera: &Camera, tiles: &mut Tiles, tops: &Tops, make: &mut 
         let mut steps = vec![Step::Miss; rays.len()];
         {
             let work = Mutex::new(rays.chunks_mut(1024).zip(steps.chunks_mut(1024)));
-            let seen = Mutex::new(&mut seen);
             let tiles = &*tiles;
             std::thread::scope(|scope| {
                 for _ in 0..threads() {
                     scope.spawn(|| {
-                        let mut here = Seen::default();
                         loop {
                             let Some((rays, steps)) = work.lock().expect("no thread panicked").next() else { break };
                             for (ray, step) in rays.iter_mut().zip(steps) {
-                                *step = tiles.march(ray, composite.then_some(&mut here));
+                                *step = tiles.march(ray);
                             }
                         }
-                        seen.lock().expect("no thread panicked").merge(here);
                     });
                 }
             });
@@ -763,10 +684,7 @@ fn picture_of_tiles(camera: &Camera, tiles: &mut Tiles, tops: &Tops, make: &mut 
                     needed.insert(key);
                     left.push(ray);
                 }
-                Step::Miss => {
-                    picture.set(ray.pixel, 0, f64::INFINITY, sky(ray.direction));
-                    seen.add(ray.left(), [0.0; 3], [0.0; 3]);
-                }
+                Step::Miss => picture.set(ray.pixel, 0, f64::INFINITY, sky(ray.direction)),
                 Step::Hit(look, normal) => {
                     let entered = match FACES.get(ray.face) {
                         Some(face) => normalize(face.map(|v| -v as f64)),
@@ -791,7 +709,7 @@ fn picture_of_tiles(camera: &Camera, tiles: &mut Tiles, tops: &Tops, make: &mut 
         picture.generating += start.elapsed();
     }
     picture.tiles = tiles.tiles.len() - before;
-    (picture, seen)
+    picture
 }
 
 impl Picture {

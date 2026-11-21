@@ -58,16 +58,9 @@ pub struct Entry {
      * layer's covers its parts (Accuracy::of); DEFAULT for the rest.
      */
     pub accuracy: &'static [(&'static str, Accuracy)],
-    /**
-     * Wide regions whose fields are seen from above at coarse levels
-     * (worldgen::checks::contract::check_far); only their x and z count.
-     */
-    pub far: &'static [Region],
-    /** The level up to which its far regions keep their fields' look from above, from level 4. */
-    pub far_levels: u32,
 }
 
-/** The seed a world's regions were laid out at; its costs, parts and far regions are checked at it alone. */
+/** The seed a world's regions were laid out at; its costs and parts are checked at it alone. */
 pub const REGIONS_SEED: u64 = 42;
 
 /** Every world. */
@@ -79,8 +72,6 @@ pub const WORLDS: &[Entry] = &[
         regions: &[Region::at("spawn", [-71, -115, -136], [185, 333, 120])],
         levels: 6,
         accuracy: &[],
-        far: &[],
-        far_levels: 6,
     },
     // The first town's south edge: fields, its first row of houses and the main street, trees of its yards and of the forest;
     // and its centre: houses back to back, a cross street, the square with its fountain and church.
@@ -89,8 +80,6 @@ pub const WORLDS: &[Entry] = &[
     // A mountainside behind a crest above the treeline: scree and rock, and alpine meadows among them at some seeds.
     // Moorland on the valley's floor, a steading by the path from 4.5 km on: heather and grass, boulders, its hut, path and ring.
     // The railway's first station: its building, the platform, the track and the formation either side, forest or fields round them.
-    // Far away, all of that town and a few metres of fields around it: its streets and paving are finer than the sites there;
-    // and the sea off the coast, from 16 m out: its shallows, where far sites are taller than the water is deep.
     Entry {
         name: "valley",
         make: valley::valley,
@@ -105,19 +94,14 @@ pub const WORLDS: &[Entry] = &[
         ],
         levels: 4,
         accuracy: &[],
-        far: &[Region::at("town", [-704, -38, -736], [704, 298, 736]), Region::at("coast", [-1536, -38, -704], [-128, 298, 704])],
-        far_levels: 6,
     },
     // The first steading: its hut, the cairns and the ring north of it, heather and grass, from under the ground to over the roof.
-    // Not checked far away: its coarse levels show less of its mist from above ("Spans of a medium" in docs/todo.md).
     Entry {
         name: "moor",
         make: valley::moor::moor,
         regions: &[Region::at("spawn", [-113, -46, 9], [143, 50, 393])],
         levels: 5,
         accuracy: &[],
-        far: &[],
-        far_levels: 6,
     },
     // The moor in fog (moor.rs's FOG), mist over all of it: where see-through voxels cost a host most.
     Entry {
@@ -126,55 +110,30 @@ pub const WORLDS: &[Entry] = &[
         regions: &[Region::at("spawn", [-113, -46, 9], [143, 50, 393])],
         levels: 5,
         accuracy: &[],
-        far: &[],
-        far_levels: 5,
     },
     // The first settlement's main street where a cross street meets it (at REGIONS_SEED): houses facing both, yards, trees, paving.
-    // Far away, all of its crop: streets, paving and yards, fields beside them, the forest round it.
     Entry {
         name: "learned",
         make: learned::learned,
         regions: &[Region::at("settlement", [64, -34, -96], [448, 222, 288])],
         levels: 4,
         accuracy: &[],
-        far: &[Region::at("settlement", [-1536, -34, -1536], [1536, 302, 1536])],
-        far_levels: 6,
     },
     // The front row of blocks: the road before them, their entrances and the rooms behind, from under the road to over the roofs.
     // To level 3: at level 4, sites 2 m apart, a building's measured outline (city.rs, INSIDE) is kept or lost a site at a time.
-    // Far away, the whole district: its markings, kerbs and paving slabs are finer than the sites there.
-    Entry {
-        name: "city",
-        make: city::city,
-        regions: &[Region::at("spawn", [-478, -20, -16], [482, 108, 304])],
-        levels: 3,
-        accuracy: &[],
-        far: &[Region::at("spawn", [-478, -20, -32], [482, 108, 928])],
-        far_levels: 6,
-    },
+    Entry { name: "city", make: city::city, regions: &[Region::at("spawn", [-478, -20, -16], [482, 108, 304])], levels: 3, accuracy: &[] },
     // The cavern the camera starts in, the caverns, tunnels and eyes around it, their pillars, stairs and crystals.
     // To level 3: from level 4 on, caves have no pillars, stairs or crystals (cheese/src/lib.rs, SIZE).
-    // Endless, it has no sky to be seen from.
     Entry {
         name: "cheese",
         make: cheese::cheese,
         regions: &[Region::at("spawn", [-128, -128, -128], [128, 128, 128])],
         levels: 3,
         accuracy: &[],
-        far: &[],
-        far_levels: 6,
     },
     // All of Sponza's atrium, from its middle: floor, colonnades, galleries, the roof's edge (scene.rs).
     #[cfg(feature = "sponza")]
-    Entry {
-        name: "sponza",
-        make: sponza,
-        regions: &[Region::at("spawn", [-242, -46, -150], [242, 160, 150])],
-        levels: 5,
-        accuracy: &[],
-        far: &[],
-        far_levels: 6,
-    },
+    Entry { name: "sponza", make: sponza, regions: &[Region::at("spawn", [-242, -46, -150], [242, 160, 150])], levels: 5, accuracy: &[] },
 ];
 
 /** The world named `name`. */

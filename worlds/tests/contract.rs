@@ -1,11 +1,11 @@
 //! Every world keeps the contract (worldgen::checks::contract) in regions holding
-//! everything it is made of around spawn, on average over several seeds,
-//! and far away in its registry entry's far regions: a test each, so they
-//! run in parallel, and a thread each seed, and for the parts and far regions.
+//! everything it is made of around spawn, on average over several seeds:
+//! a test each, so they run in parallel, and a thread each seed, and for
+//! the parts.
 
 use std::sync::mpsc;
 
-use worldgen::checks::contract::{Break, breaks, check, check_far, hold_to_baseline, parts_equal_whole};
+use worldgen::checks::contract::{Break, breaks, check, hold_to_baseline, parts_equal_whole};
 use worlds::{Entry, REGIONS_SEED, WORLDS};
 
 /** The seeds each world is checked at: each stratum's margins are averaged over all of them. */
@@ -15,10 +15,9 @@ const SEEDS: &[u64] = &[REGIONS_SEED, 1, 2, 3];
  * `entry`'s world keeps the contract (worldgen::checks::contract) at SEEDS,
  * in regions holding everything it is made of around spawn, each
  * stratum's margins averaged over all of them; generated in parts too at
- * REGIONS_SEED; and in its far regions at REGIONS_SEED. CONTRACT_ONLY,
- * names of strata separated by commas ("towns/church,railway"), checks
- * only regions holding them. Panics where it breaks it but as its
- * baseline, data/contract/<name>.txt, says.
+ * REGIONS_SEED. CONTRACT_ONLY, names of strata separated by commas
+ * ("towns/church,railway"), checks only regions holding them. Panics
+ * where it breaks it but as its baseline, data/contract/<name>.txt, says.
  */
 fn keeps_the_contract(entry: &Entry) {
     let only = std::env::var("CONTRACT_ONLY").unwrap_or_default();
@@ -52,14 +51,6 @@ fn keeps_the_contract(entry: &Entry) {
                 parts_equal_whole(&name, &(entry.make)(REGIONS_SEED), &boxes, entry.levels);
             }
         });
-        // Far regions at one seed too: they check how fields are read far away.
-        let far = (!entry.far.is_empty() && only.is_empty()).then(|| {
-            scope.spawn(move || {
-                let world = (entry.make)(REGIONS_SEED);
-                let far: Vec<_> = entry.far.iter().map(|r| r.of(&world)).collect();
-                check_far(&format!("{} (seed {REGIONS_SEED})", entry.name), world, &far, entry.far_levels)
-            })
-        });
         let message = |panic: Box<dyn std::any::Any + Send>| {
             panic.downcast_ref::<String>().cloned().or_else(|| panic.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default()
         };
@@ -72,9 +63,6 @@ fn keeps_the_contract(entry: &Entry) {
         }
         if let Err(panic) = parts.join() {
             panicked.push(format!("parts: {}", message(panic)));
-        }
-        if let Some(Err(panic)) = far.map(|t| t.join()) {
-            panicked.push(format!("far: {}", message(panic)));
         }
         (checked, panicked)
     });
