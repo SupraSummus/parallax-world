@@ -108,11 +108,12 @@ Controls: W/S forward/back, A/D left/right, Space/Shift up/down, arrow
 keys or drag to look around.
 
 In a browser with WebGPU it is the same code in WebAssembly,
-by the voxels engine, its world made between frames, with no threads;
-that takes Node, pnpm and Rust's WebAssembly target besides:
+by the voxels engine, on threads sharing its memory;
+that takes Node, pnpm and the nightly Rust `pnpm wasm` names besides,
+with its source and WebAssembly target:
 
 ```bash
-rustup target add wasm32-unknown-unknown
+rustup toolchain install nightly-2026-11-21 --component rust-src --target wasm32-unknown-unknown
 pnpm install
 pnpm dev
 ```

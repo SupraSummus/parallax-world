@@ -177,6 +177,30 @@ struct Site {
 type Boxes = Map<(usize, [i64; 3]), Arc<Made>>;
 
 /**
+ * What a Shared's Lights keep of what was made: lit anew (Shared::unlit),
+ * a copy of what it was lit from, taken when first read, by a thread that
+ * lights: a host's thread that draws takes no lock the Lights take.
+ */
+#[derive(Default)]
+struct Kept {
+    boxes: OnceLock<Mutex<Boxes>>,
+    from: Mutex<Option<Arc<Kept>>>,
+}
+
+impl Kept {
+    fn boxes(&self) -> &Mutex<Boxes> {
+        self.boxes.get_or_init(|| {
+            let from = self.from.lock().expect("from").take();
+            let made = |from: Arc<Kept>| {
+                let from = from.boxes().lock().expect("made");
+                from.iter().map(|(key, made)| (*key, Arc::new(made.keeping(|_| false)))).collect()
+            };
+            Mutex::new(from.map(made).unwrap_or_default())
+        })
+    }
+}
+
+/**
  * What the Lights of one world under one brightness, and taking as many
  * steps along each level, share (a thread's each), and the host with
  * them: the world's tiles of every level, with all the Lights find at
@@ -189,7 +213,7 @@ pub struct Shared {
     brightness: Brightness,
     steps: usize,
     tolerance: f32,
-    made: Arc<Mutex<Boxes>>,
+    made: Arc<Kept>,
     /** Sites whose light was begun, so far (`begun`). */
     begun: Arc<AtomicUsize>,
     /** Times something made was forgotten or replaced: a Light then lets go of what it read (Level::made). */
@@ -206,10 +230,10 @@ impl Shared {
         self.brightness
     }
 
-    /** The same world, none of it lit: its tiles' sites kept. */
+    /** The same world, none of it lit: its tiles' sites kept (Kept). */
     fn unlit(&self) -> Shared {
-        let made: Boxes = self.made.lock().expect("made").iter().map(|(key, made)| (*key, Arc::new(made.keeping(|_| false)))).collect();
-        Shared { made: Arc::new(Mutex::new(made)), begun: Arc::default(), forgotten: Arc::default(), ..self.clone() }
+        let made = Kept { boxes: OnceLock::new(), from: Mutex::new(Some(self.made.clone())) };
+        Shared { made: Arc::new(made), begun: Arc::default(), forgotten: Arc::default(), ..self.clone() }
     }
 
     /** The same world under `brightness`: its tiles' sites kept. */
@@ -244,6 +268,7 @@ impl Shared {
         let tiles: Vec<[i64; 3]> = made_with(world, level, key).collect();
         let key = (level as usize, tiles[0]);
         self.made
+            .boxes()
             .lock()
             .expect("made")
             .entry(key)
@@ -269,10 +294,10 @@ impl Shared {
     fn begun(&self) {
         if (self.begun.fetch_add(1, Ordering::Relaxed) + 1).is_multiple_of(KEPT_SITES) {
             // Aside, none waiting for all of them meanwhile: what was forgotten or made anew since is left as it is.
-            let made: Vec<_> = self.made.lock().expect("made").iter().map(|(key, made)| (*key, made.clone())).collect();
+            let made: Vec<_> = self.made.boxes().lock().expect("made").iter().map(|(key, made)| (*key, made.clone())).collect();
             let kept: Vec<_> = made.iter().map(|(_, made)| Arc::new(made.keeping(|lit| lit.read.swap(false, Ordering::Relaxed)))).collect();
             // What they were is let go once none waits for the lock: after `now`, as `made` goes.
-            let mut now = self.made.lock().expect("made");
+            let mut now = self.made.boxes().lock().expect("made");
             for ((key, was), kept) in made.iter().zip(kept) {
                 if let Some(made) = now.get_mut(key).filter(|made| Arc::ptr_eq(made, was)) {
                     *made = kept;
@@ -289,7 +314,7 @@ impl Shared {
      * the time: freeing it is long.
      */
     pub fn forget(&self, far: impl Fn(usize, [i64; 3]) -> bool) -> Option<Box<dyn Send>> {
-        let mut made = self.made.lock().expect("made");
+        let mut made = self.made.boxes().lock().expect("made");
         let gone: Vec<_> = made.extract_if(|&(level, _), made| made.tiles.iter().all(|&key| far(level, key))).collect();
         if gone.is_empty() {
             return None;

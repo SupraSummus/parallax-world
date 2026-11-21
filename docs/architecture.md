@@ -17,9 +17,14 @@ For browsers it is built as WebAssembly and bound to the page
 WebGPU for its GPU, a canvas for its window,
 and the voxels engine alone,
 as the chunks' compositor draws with what WebGPU lacks.
-A browser gives it no threads,
-so its world makes a piece or more after each frame
-(`World::work` in `native/src/world.rs`).
+Its threads are there too, Web Workers on its memory
+(`native/src/threads.rs`, `web/worker.js`; std built with atomics, by a nightly).
+On either, the thread that draws waits for none of them,
+as a browser's main thread may not:
+it posts them work and reads what they did by channels,
+and takes no lock they take.
+A page shares memory only isolated (`web/vite.config.js`),
+on GitHub Pages by a service worker (`web/public/isolated.js`).
 
 Voxels are rhombic dodecahedra on the face-centred cubic (FCC) lattice
 (section 5).
@@ -499,8 +504,7 @@ a frame hands it the tiles, the eye and what rays asked for (a `Task`),
 and takes what an earlier step changed (a `Patch`: bricks, tables, counts),
 all of it copied to the GPU in that frame or none,
 so a frame waits for no step, and the GPU holds the windows a frame or two late.
-A picture drawn till settled waits for each patch;
-in a browser, with no threads, a frame does the step itself.
+A picture drawn till settled (headless, and the tests) waits for each patch.
 The levels' balls share one radius, in each level's own bricks,
 as large as the pool holds:
 short of slots, all shrink, every level read less far,

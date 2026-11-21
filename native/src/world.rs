@@ -26,8 +26,8 @@
 #[cfg(test)]
 use std::collections::HashMap;
 use std::collections::VecDeque;
-use std::sync::mpsc::{Receiver, Sender, channel};
-use std::sync::{Arc, Condvar, Mutex, OnceLock};
+use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use fcc::GRID_LEVELS;
 pub use fcc::TileId;
@@ -36,6 +36,7 @@ use light::{Light, Shared};
 use worldgen::tiles::{made_with, make_tiles};
 
 use crate::engine::voxels;
+use crate::threads::Post;
 use crate::view::Vec3;
 
 /** Tiles are worldgen's: 2^TILE_SHIFT sites of their level wide. */
@@ -246,37 +247,74 @@ pub enum Piece {
 /** A piece of a level, and the tile a brick is of. */
 type Job = (usize, Piece, Option<Arc<Tile>>);
 
+/** What the thread that draws has the workers do, in turn. */
+enum Order {
+    /**
+     * Make or light `wanted`, most wanted first, in place of what was
+     * wanted, but what is under way; into the light if `lit` (Wants's);
+     * free what is `gone`; and forget the light of `level` far from
+     * `camera`, past its `keep`.
+     */
+    Want { wanted: VecDeque<Job>, lit: bool, gone: Vec<Box<dyn Send>>, level: usize, camera: Vec3, keep: f64 },
+    /** Light by this, from now on (World::relight). */
+    Relight(Shared),
+}
+
+/** What the workers tell the thread that draws: pieces taken to make or light, and a piece done. */
+enum Done {
+    Took(Vec<(usize, Piece)>),
+    Made(Made),
+}
+
 /**
- * The pieces to make or light, most wanted first, those being made or
- * lit, the light they are lit by, how many times it changed, and whether
- * what asks reads it (Wants's `lit`): tiles are then made into it.
+ * The workers' alone: the orders, and as they say, the pieces to make or
+ * light, most wanted first, those being made or lit, the light, how many
+ * times it changed, whether tiles are made into it (`lit`), what to free,
+ * and where the light is to forget from, if asked since it last did.
  */
-#[derive(Default)]
 struct Queue {
+    orders: Receiver<Order>,
     wanted: VecDeque<Job>,
     in_flight: FastSet<(usize, Piece)>,
     shared: Option<Shared>,
     lighting: u32,
     lit: bool,
-    /** What the world let go, for a worker to free: long, for the thread that draws. */
     gone: Vec<Box<dyn Send>>,
-    /** Each worker's clock (own_clock). */
-    #[cfg(target_os = "linux")]
-    clocks: Vec<libc::clockid_t>,
+    forget: Option<(usize, Vec3, f64)>,
 }
 
 impl Queue {
-    /** Takes the tiles `with` tile `id` of `level` (made_with), to be made with it: those wanted wait no more. */
-    fn take(&mut self, level: usize, with: impl Iterator<Item = TileId>) {
-        let with: FastSet<Piece> = with.map(Piece::Tile).collect();
-        self.wanted.retain(|job| job.0 != level || !with.contains(&job.1));
-        self.in_flight.extend(with.into_iter().map(|piece| (level, piece)));
+    /** Takes the orders given since it last did; false once the world is gone. */
+    fn read(&mut self) -> bool {
+        loop {
+            let order = match self.orders.try_recv() {
+                Ok(order) => order,
+                Err(TryRecvError::Empty) => return true,
+                Err(TryRecvError::Disconnected) => return false,
+            };
+            match order {
+                Order::Want { mut wanted, lit, mut gone, level, camera, keep } => {
+                    wanted.retain(|job| !self.in_flight.contains(&(job.0, job.1)));
+                    self.gone.append(&mut gone);
+                    (self.wanted, self.lit, self.forget) = (wanted, lit, Some((level, camera, keep)));
+                }
+                Order::Relight(shared) => {
+                    self.shared = Some(shared);
+                    self.lighting += 1;
+                }
+            }
+        }
     }
 }
 
 /** A piece done: a tile made, or a brick lit (its light in its tile). */
 type Made = (usize, Piece, Option<Arc<Tile>>);
 
+/**
+ * The world's tiles as the thread that draws has them: it orders its
+ * threads to make and light them, and follows what they do from what
+ * they tell it (Done), waiting for none of them (threads.rs).
+ */
 pub struct World {
     /** Per level, the tiles made so far, as engines read them. */
     levels: Vec<Arc<Level>>,
@@ -288,12 +326,16 @@ pub struct World {
     /** The world its threads make, and the light (if any) it is made into, for Lights of the bakers' own. */
     world: Arc<worldgen::World>,
     shared: Option<Shared>,
-    queue: Arc<(Mutex<Queue>, Condvar)>,
-    done: Receiver<Made>,
+    orders: Post<Order>,
+    done: Receiver<Done>,
     /** Received by wait(), not taken yet. */
-    early: Vec<Made>,
-    /** With no threads, what works in their place. */
-    own: Option<Worker>,
+    early: Vec<Done>,
+    /** What it last wanted, but what was taken since; and what was taken, not done yet: as its threads told. */
+    wanted: FastSet<(usize, Piece)>,
+    in_flight: FastSet<(usize, Piece)>,
+    /** Each worker's clock (own_clock), once it runs. */
+    #[cfg(target_os = "linux")]
+    clocks: Arc<[OnceLock<libc::clockid_t>]>,
 }
 
 /** How far tile `id` of `level` is from the camera (lattice units), in the level's sites. */
@@ -339,10 +381,7 @@ fn own_clock() -> libc::clockid_t {
     clock
 }
 
-/**
- * What makes tiles and lights bricks, on a thread of its own or, a world
- * with no threads, on its caller's: the world all share, and a Light of its own.
- */
+/** What makes tiles and lights bricks, on a thread of its own: the world all share, and a Light of its own. */
 struct Worker {
     world: Arc<worldgen::World>,
     /** Made once there are tiles to light, and again when the light changes. */
@@ -357,15 +396,18 @@ impl Worker {
         Worker { world, light: None }
     }
 
-    /** The most wanted job, if any, now under way, with the tiles made with its own. */
-    fn take(&self, q: &mut Queue) -> Option<Taken> {
+    /** The most wanted job, if any, now under way, with the tiles made with its own; and the pieces it took. */
+    fn take(&self, q: &mut Queue) -> Option<(Taken, Vec<(usize, Piece)>)> {
         let job = q.wanted.pop_front()?;
-        q.in_flight.insert((job.0, job.1));
+        let mut took = vec![(job.0, job.1)];
+        // Those wanted that are made with it wait no more.
         if let Piece::Tile(id) = job.1 {
-            let with = made_with(&self.world, job.0 as u32, id.map(i64::from)).map(|key| key.map(|v| v as i32));
-            q.take(job.0, with);
+            took.extend(made_with(&self.world, job.0 as u32, id.map(i64::from)).map(|key| (job.0, Piece::Tile(key.map(|v| v as i32)))));
+            let with: FastSet<_> = took.iter().copied().collect();
+            q.wanted.retain(|job| !with.contains(&(job.0, job.1)));
         }
-        Some((job, q.shared.clone(), q.lighting, q.lit))
+        q.in_flight.extend(took.iter().copied());
+        Some(((job, q.shared.clone(), q.lighting, q.lit), took))
     }
 
     fn make(&mut self, ((level, piece, of), shared, lighting, lit): Taken) -> Vec<Made> {
@@ -396,68 +438,96 @@ impl Worker {
     }
 }
 
-fn work(world: Arc<worldgen::World>, queue: &(Mutex<Queue>, Condvar), send: &Sender<Made>) {
-    behind_drawing();
-    #[cfg(target_os = "linux")]
-    queue.0.lock().expect("queue").clocks.push(own_clock());
-    let mut worker = Worker::new(world);
+/**
+ * A worker's: the orders as they come, the light's forgetting, the most
+ * wanted piece at a time; parked when there is none, till the world is gone.
+ */
+fn work(worker: &mut Worker, queue: &Mutex<Queue>, send: &Sender<Done>) {
+    let mut done = Vec::new();
     loop {
-        let (gone, taken) = {
-            let mut q = queue.0.lock().expect("queue");
-            loop {
-                let gone = std::mem::take(&mut q.gone);
-                match worker.take(&mut q) {
-                    None if gone.is_empty() => q = queue.1.wait(q).expect("queue"),
-                    taken => break (gone, taken),
-                }
+        let (gone, forget, taken) = {
+            let mut q = queue.lock().expect("queue");
+            for piece in done.drain(..) {
+                q.in_flight.remove(&piece);
             }
-        };
-        drop(gone);
-        for made in taken.into_iter().flat_map(|taken| worker.make(taken)) {
-            if send.send(made).is_err() {
+            if !q.read() {
                 return;
             }
+            (std::mem::take(&mut q.gone), q.forget.take().zip(q.shared.clone()), worker.take(&mut q))
+        };
+        // What the world let go, and the light forgets, is long to free: here, not where it is drawn.
+        drop(gone);
+        if let Some(((level, camera, keep), shared)) = forget {
+            drop(shared.forget(|l, key| l == level && far(level, camera, keep, key.map(|k| k as i32))));
         }
+        let Some((taken, took)) = taken else {
+            std::thread::park();
+            continue;
+        };
+        // Taken, then done: so the thread that draws knows of each piece under way till it is done.
+        _ = send.send(Done::Took(took.clone()));
+        for made in worker.make(taken) {
+            _ = send.send(Done::Made(made));
+        }
+        done = took;
     }
 }
 
 impl World {
     /**
      * `world`, generated (into `shared` if given,
-     * the light it can be lit by) and indexed on `threads` threads, or
-     * with none, where there are none to have (a browser), a piece each
-     * time its caller has it work (`work`, `wait`); not lit yet.
+     * the light it can be lit by) and indexed on `threads` threads; not lit yet.
      */
     pub fn new(world: worldgen::World, shared: Option<Shared>, threads: usize) -> World {
+        assert!(threads > 0, "a world made on no threads");
         let world = Arc::new(world);
         let heights = heights(&world);
         let (send, done) = channel();
-        let queue = Arc::new((Mutex::new(Queue { shared: shared.clone(), ..Queue::default() }), Condvar::new()));
-        for _ in 0..threads {
-            let (world, queue, send) = (world.clone(), queue.clone(), send.clone());
-            std::thread::spawn(move || work(world, &queue, &send));
-        }
+        #[cfg(target_os = "linux")]
+        let clocks: Arc<[OnceLock<libc::clockid_t>]> = (0..threads).map(|_| OnceLock::new()).collect();
+        let orders = Post::spawn(|orders| {
+            let queue = Queue {
+                orders,
+                wanted: VecDeque::new(),
+                in_flight: FastSet::default(),
+                shared: shared.clone(),
+                lighting: 0,
+                lit: false,
+                gone: Vec::new(),
+                forget: None,
+            };
+            let queue = Arc::new(Mutex::new(queue));
+            (0..threads)
+                .map(|i| {
+                    let (world, queue, send) = (world.clone(), queue.clone(), send.clone());
+                    #[cfg(target_os = "linux")]
+                    let clocks = clocks.clone();
+                    move || {
+                        behind_drawing();
+                        #[cfg(target_os = "linux")]
+                        clocks[i].set(own_clock()).expect("a clock once");
+                        #[cfg(not(target_os = "linux"))]
+                        let _ = i;
+                        work(&mut Worker::new(world), &queue, &send)
+                    }
+                })
+                .collect()
+        });
         World {
             levels: (0..GRID_LEVELS).map(|_| Arc::new(Level::new([]))).collect(),
             sweeping: 0,
             heights,
             threads,
-            own: (threads == 0).then(|| Worker::new(world.clone())),
             world,
             shared,
-            queue,
+            orders,
             done,
             early: Vec::new(),
+            wanted: FastSet::default(),
+            in_flight: FastSet::default(),
+            #[cfg(target_os = "linux")]
+            clocks,
         }
-    }
-
-    /** With no threads, makes or lights the piece most wanted, here; whether there was one. */
-    pub fn work(&mut self) -> bool {
-        let Some(worker) = &mut self.own else { return false };
-        let taken = worker.take(&mut self.queue.0.lock().expect("queue"));
-        let Some(taken) = taken else { return false };
-        self.early.extend(worker.make(taken));
-        true
     }
 
     /** The tiles of `level` made so far. */
@@ -493,11 +563,7 @@ impl World {
      */
     pub fn relight(&mut self, shared: Shared) {
         self.shared = Some(shared.clone());
-        {
-            let mut q = self.queue.0.lock().expect("queue");
-            q.shared = Some(shared);
-            q.lighting += 1;
-        }
+        self.orders.send(Order::Relight(shared));
         for level in &mut self.levels {
             *level = Arc::new(Level::new(level.tiles.iter().map(|(id, tile)| (id, Arc::new(tile.unlit())))));
         }
@@ -505,8 +571,7 @@ impl World {
 
     /** Tiles being made and bricks lit, or waiting to be. */
     pub fn making(&self) -> usize {
-        let q = self.queue.0.lock().expect("queue");
-        q.wanted.len() + q.in_flight.len()
+        self.wanted.len() + self.in_flight.len()
     }
 
     /** Whether it lacks a tile `wants` asks for. */
@@ -514,10 +579,9 @@ impl World {
         wants.asked.iter().any(|&(level, piece)| matches!(piece, Piece::Tile(id) if self.levels[level].tiles.get(id).is_none()))
     }
 
-    /** What it owes the view: the tiles to make and the bricks to light, waiting or under way. */
+    /** What it owes the view, as its threads last told: the tiles to make and the bricks to light, waiting or under way. */
     pub fn owed(&self) -> [usize; 2] {
-        let q = self.queue.0.lock().expect("queue");
-        let pieces = q.wanted.iter().map(|job| job.1).chain(q.in_flight.iter().map(|job| job.1));
+        let pieces = self.wanted.iter().chain(&self.in_flight).map(|job| job.1);
         pieces.fold([0, 0], |[tiles, bricks], piece| match piece {
             Piece::Tile(_) => [tiles + 1, bricks],
             Piece::Brick(_) => [tiles, bricks + 1],
@@ -537,18 +601,17 @@ impl World {
                 unsafe { libc::clock_gettime(clock, &mut t) };
                 t.tv_sec as f64 + t.tv_nsec as f64 * 1e-9
             };
-            self.queue.0.lock().expect("queue").clocks.iter().map(time).collect()
+            self.clocks.iter().filter_map(OnceLock::get).map(time).collect()
         }
         #[cfg(not(target_os = "linux"))]
         Vec::new()
     }
 
-    /** Waits until a tile is made or a brick lit. */
+    /**
+     * Waits until its threads tell of a piece taken or done: for those
+     * that want all of a view (main.rs's `complete`), never in a frame.
+     */
     pub fn wait(&mut self) {
-        if self.own.is_some() {
-            self.work();
-            return;
-        }
         self.early.extend(self.done.recv());
     }
 
@@ -559,8 +622,8 @@ impl World {
      * tiles it names made, and, lit here, the bricks lit, what shows
      * (rays ask for them), small, and in a world that is not flat, little
      * of the tiles made. No other tile is made but with one it names
-     * (made_with). What it lets go, its threads free, if it has any: that
-     * is long. Returns whether any level's tiles changed.
+     * (made_with). What it lets go, its threads free: that is long.
+     * Returns whether any level's tiles changed.
      */
     pub fn update(&mut self, camera: Vec3, wants: &Wants) -> bool {
         let Wants { reach, lit, asked } = wants;
@@ -569,14 +632,22 @@ impl World {
         // Tiles are made no farther from the camera than `keep` (in the level's sites), and dropped once farther still.
         let keep = |level: usize| reach[level].unwrap_or(0.0) + KEPT;
         let mut changed = false;
-        let made: Vec<Made> = std::mem::take(&mut self.early).into_iter().chain(self.done.try_iter()).collect();
-        {
-            let mut q = self.queue.0.lock().expect("queue");
-            for (level, piece, _) in &made {
-                q.in_flight.remove(&(*level, *piece));
+        let mut made = Vec::new();
+        for done in std::mem::take(&mut self.early).into_iter().chain(self.done.try_iter()) {
+            match done {
+                Done::Took(took) => {
+                    for piece in took {
+                        self.wanted.remove(&piece);
+                        self.in_flight.insert(piece);
+                    }
+                }
+                Done::Made(piece) => {
+                    self.in_flight.remove(&(piece.0, piece.1));
+                    made.push(piece);
+                }
             }
         }
-        let far = |level: usize, id: TileId| distance(level, camera, id) > keep(level) + DROPPED;
+        let far = |level: usize, id: TileId| far(level, camera, keep(level), id);
         let mut gone: Vec<Box<dyn Send>> = Vec::new();
         for (level, piece, tile) in made {
             let (Piece::Tile(id), Some(tile)) = (piece, tile) else { continue };
@@ -596,7 +667,6 @@ impl World {
             gone.extend(dropped.into_iter().filter_map(|id| tiles.remove(id)).map(|tile| Box::new(tile) as Box<dyn Send>));
             changed = true;
         }
-        gone.extend(self.shared.as_ref().and_then(|shared| shared.forget(|l, key| l == level && far(l, key.map(|k| k as i32)))));
 
         let (mut list, mut listed) = (VecDeque::new(), FastSet::default());
         let unlit = |tile: &Tile, [x, y, z]: [i32; 3]| usize::try_from(tile.grid.brick(x, y, z)).is_ok_and(|f| tile.light(f).is_none());
@@ -610,25 +680,22 @@ impl World {
                 }
             };
             if let Some(of) = job
+                && !self.in_flight.contains(&(level, piece))
                 && listed.insert((level, piece))
             {
                 list.push_back((level, piece, of));
             }
         }
-        {
-            let mut q = self.queue.0.lock().expect("queue");
-            q.lit = lit != Lit::Not;
-            list.retain(|job| !q.in_flight.contains(&(job.0, job.1)));
-            if self.threads > 0 {
-                q.gone.append(&mut gone);
-            }
-            if !list.is_empty() || !q.gone.is_empty() {
-                self.queue.1.notify_all();
-            }
-            q.wanted = list;
-        }
+        // One taken and done since what was done was read above may be asked for and made again: the second is dropped.
+        self.wanted = listed;
+        self.orders.send(Order::Want { wanted: list, lit: lit != Lit::Not, gone, level, camera, keep: keep(level) });
         changed
     }
+}
+
+/** Whether tile `id` of `level` is far enough from the camera (lattice units) to drop, kept within `keep` (World::update). */
+fn far(level: usize, camera: Vec3, keep: f64, id: TileId) -> bool {
+    distance(level, camera, id) > keep + DROPPED
 }
 
 /** For tests: the tiles of `level` of `world`, unlit, that meet the cube reaching `reach` sites each way from `centre`. */
@@ -766,10 +833,10 @@ mod tests {
     }
 
     #[test]
-    fn a_world_with_no_threads_is_as_one_with_some() {
+    fn a_world_on_one_thread_is_as_one_on_some() {
         use light::Brightness;
         let make = || (worlds::by_name("forest").expect("forest").make)(1);
         let day = Brightness { sky: 1.0, sun: 1.0, glow: 0.0 };
-        assert!(lit(&mut World::new(make(), Some(Shared::new(day)), 0)) == lit(&mut World::new(make(), Some(Shared::new(day)), 4)));
+        assert!(lit(&mut World::new(make(), Some(Shared::new(day)), 1)) == lit(&mut World::new(make(), Some(Shared::new(day)), 4)));
     }
 }

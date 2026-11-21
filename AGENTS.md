@@ -34,9 +34,12 @@ A map: each file's header comment says what is in it.
 ```
 web/                         # The frontend in a browser
 ├── index.html               # The page: native/ in WebAssembly, on WebGPU
+├── worker.js                # A thread of native/ in the page: a Web Worker on its memory
+├── vite.config.js           # The page isolated while developing, so its threads share memory
+├── public/isolated.js       # A service worker that isolates the page where the server does not
 └── bindgen/                 # pnpm bindgen: binds that WebAssembly to the page (into web/native/, not in git)
 Cargo.toml                   # The Rust crates' workspace; lab/ a member, not a default one
-.cargo/config.toml           # Builds for x86-64-v3 (see there)
+.cargo/config.toml           # Builds for x86-64-v3, and WebAssembly with threads (see there)
 scripts/voxelize.py          # A glTF scene as voxels, for worlds/src/scene.rs
 fcc/src/                     # The FCC lattice and its voxels as every crate sees them (no dependencies)
 ├── lib.rs                   # Faces, lattices, levels, Grid, tiles
@@ -105,6 +108,7 @@ native/src/                  # The frontend: egui on winit and wgpu; in browsers
 ├── main.rs                  # The camera, the panel, the command line
 ├── window.rs                # The window: egui on winit and wgpu
 ├── gpu.rs                   # The device; offscreen pictures; shaders checked without a GPU
+├── threads.rs               # Threads natively and in browsers, which the thread that draws never waits for
 ├── world.rs                 # The world's tiles around the camera, made and lit on threads
 ├── view.rs                  # The camera, the 12 faces, rays, screen boxes
 ├── engine.rs                # What draws: Engine, Picture, Painter; the engines by name

@@ -25,7 +25,7 @@ one world's: `cargo test --release -p worlds --test contract valley`.
 | `native/src/engine/chunks.rs` | Culling on the GPU leaves the picture unchanged |
 | `native/src/view.rs` | Camera basis, faces, projection, culling |
 | `native/src/engine/chunks.rs` | Moving keeps most chunks |
-| `native/src/world.rs` | A world with no threads is as one with some; `Level::meets`: every cell holding a voxel, or a see-through one, and of 8·FCC, 32·FCC and smaller no other |
+| `native/src/world.rs` | A world on one thread is as one on some; `Level::meets`: every cell holding a voxel, or a see-through one, and of 8·FCC, 32·FCC and smaller no other |
 | `native/src/engine/chunks/renderer.rs` | Cells said to hold nothing that shows, none of their voxels meeting them or all buried, bake empty |
 | `native/src/engine/chunks/occlusion.rs`, `native/src/engine/chunks.rs` | Rays hide what is wholly behind where they stop and nothing else, cast as far as what asks is and on from there, those that wait going on once told to; hiding cells on the CPU draws fewer chunks, and once its probes' cells are in, leaves the picture unchanged |
 | `native/src/engine/chunks.rs` | What the GPU's buffers cannot hold is left out, the farthest first |

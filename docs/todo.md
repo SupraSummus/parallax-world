@@ -719,15 +719,17 @@ Numbers are for the forest at 1280×800, as measured when written.
 
 ## Browsers
 
-- **In a browser the world is made on the main thread**,
-  a piece or more between frames (`World::work`), on one core:
-  a first view takes several times what the window's threads take,
-  and a piece that takes long holds its frame.
-  Threads there are workers that share the module's memory:
-  a nightly toolchain (std built with atomics),
-  a page isolated by headers GitHub Pages does not send
-  (a service worker can add them),
-  and no lock waited for on the main thread.
+- **A browser's threads gain less than native's.**
+  In headless Chromium on four cores,
+  the valley's ground about a walker (six times its reach)
+  was made in 3.5 s on one thread, 2.2 on two and 2.0 on three,
+  and in 3.8 on the main thread alone, as before there were threads.
+  Not looked into: they share std's allocator, whose lock spins in WebAssembly,
+  and the GPU, in software, takes cores too.
+- **The chunks engine's thread that draws takes its renderer's lock**
+  (`native/src/engine/chunks.rs`'s mailbox), as `native/src/threads.rs` says it must not:
+  harmless natively, where alone the engine runs.
+  Its renderer could take a `Post` as the voxels engine's `Keeper` does.
 - **A browser draws by the voxels engine alone.**
   The chunks' compositor needs indirect draws counted on the GPU
   and depth tested before a shader that writes it,

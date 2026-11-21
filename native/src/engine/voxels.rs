@@ -40,8 +40,9 @@
 //! place them once lit.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 
 use egui_wgpu::wgpu;
 use fcc::GRID_LEVELS;
@@ -50,6 +51,7 @@ use light::Light;
 
 use super::{Engine, Frame, Look, Painter, Picture};
 use crate::gpu::Easel;
+use crate::threads::Post;
 use crate::view::{Vec3, focal_length, view_basis};
 use crate::world::{Level, Lit, Piece, TILE, Tile, TileId, Wants, World};
 
@@ -373,30 +375,27 @@ pub fn light(grid: &fcc::Grid, level: u32, corner: [i32; 3], light: &mut Light) 
 }
 
 /**
- * What the painter tells the engine: the bricks rays asked for, as last
- * read back, not yet taken, by level and where their sites start, each
- * with whether its tile is made (so it waits for light); and whether
- * frames to come may ask for more, or place what was made or lit.
+ * The bricks rays asked for, as read back, by level and where their sites
+ * start, each with whether its tile is made (so it waits for light).
  */
-struct Asked {
-    bricks: Option<Vec<(usize, [i32; 3], bool)>>,
-    busy: bool,
-}
-
-/** Till its painter has drawn (an engine made anew, as when the world is lit anew), frames to come may ask for anything: busy, so that they come. */
-impl Default for Asked {
-    fn default() -> Asked {
-        Asked { bricks: None, busy: true }
-    }
-}
+type Asked = Vec<(usize, [i32; 3], bool)>;
 
 /** The voxels engine: each frame, the tiles of the levels its rays read, as they are; and what they asked for, as last read back. */
-#[derive(Default)]
 pub struct Voxels {
-    asked: Arc<Mutex<Asked>>,
+    /** What rays asked for, as the windows' thread tells (Windows::hear): the last told is what they ask for. */
+    asked: (Sender<Asked>, Receiver<Asked>),
+    /** Whether frames to come may ask for more, or place what was made or lit, as its painter last drew. */
+    busy: Arc<AtomicBool>,
     pieces: Arc<Vec<(usize, Piece)>>,
     /** What its last frame showed, from where: one of other tiles or from elsewhere has yet to ask for what it lacks. */
     shown: (Vec<Arc<Level>>, Vec3),
+}
+
+/** Till its painter has drawn (an engine made anew, as when the world is lit anew), frames to come may ask for anything: busy, so that they come. */
+impl Default for Voxels {
+    fn default() -> Voxels {
+        Voxels { asked: channel(), busy: Arc::new(AtomicBool::new(true)), pieces: Arc::default(), shown: Default::default() }
+    }
 }
 
 impl Engine for Voxels {
@@ -406,32 +405,29 @@ impl Engine for Voxels {
         let tiles: usize = levels.iter().map(|l| l.tiles.len()).sum();
         let lit = if look.light.is_some() { Lit::Bricks } else { Lit::Not };
         let reach = std::array::from_fn(|l| (l < count).then_some(READ));
-        let busy = {
-            let mut asked = self.asked.lock().expect("asked");
-            if let Some(mut bricks) = asked.bricks.take() {
-                // Nearest first in each level's own sites, the finer first as near: as rays read the levels. Those of no
-                // tile before those to light: a tile is little work next to its light, which no ray asks for till it is made.
-                let far = |&(level, corner, _): &(usize, [i32; 3], bool)| {
-                    let at = look.camera.map(|v| v / (1u64 << level) as f64);
-                    (0..3).map(|d| (f64::from(corner[d] + BRICK / 2) - at[d]).powi(2)).sum::<f64>()
-                };
-                bricks.sort_by(|a, b| a.2.cmp(&b.2).then(far(a).total_cmp(&far(b))).then(a.0.cmp(&b.0)));
-                // A brick of a tile made, to light; of none, its tile to make, as wanted as the nearest of its bricks asked for.
-                let piece = |(level, corner, made): (usize, [i32; 3], bool)| {
-                    (level, if made { Piece::Brick(corner) } else { Piece::Tile(corner.map(|v| v.div_euclid(TILE as i32))) })
-                };
-                let mut tiles = HashSet::new();
-                let once = |&(level, piece): &(usize, Piece)| !matches!(piece, Piece::Tile(_)) || tiles.insert((level, piece));
-                self.pieces = Arc::new(bricks.into_iter().map(piece).filter(once).collect());
-            }
-            asked.busy
-        };
+        if let Some(mut bricks) = self.asked.1.try_iter().last() {
+            // Nearest first in each level's own sites, the finer first as near: as rays read the levels. Those of no
+            // tile before those to light: a tile is little work next to its light, which no ray asks for till it is made.
+            let far = |&(level, corner, _): &(usize, [i32; 3], bool)| {
+                let at = look.camera.map(|v| v / (1u64 << level) as f64);
+                (0..3).map(|d| (f64::from(corner[d] + BRICK / 2) - at[d]).powi(2)).sum::<f64>()
+            };
+            bricks.sort_by(|a, b| a.2.cmp(&b.2).then(far(a).total_cmp(&far(b))).then(a.0.cmp(&b.0)));
+            // A brick of a tile made, to light; of none, its tile to make, as wanted as the nearest of its bricks asked for.
+            let piece = |(level, corner, made): (usize, [i32; 3], bool)| {
+                (level, if made { Piece::Brick(corner) } else { Piece::Tile(corner.map(|v| v.div_euclid(TILE as i32))) })
+            };
+            let mut tiles = HashSet::new();
+            let once = |&(level, piece): &(usize, Piece)| !matches!(piece, Piece::Tile(_)) || tiles.insert((level, piece));
+            self.pieces = Arc::new(bricks.into_iter().map(piece).filter(once).collect());
+        }
+        let busy = self.busy.load(Ordering::Relaxed);
         let same =
             self.shown.1 == look.camera && self.shown.0.len() == count && self.shown.0.iter().zip(&levels).all(|(a, b)| Arc::ptr_eq(a, b));
         self.shown = (levels.clone(), look.camera);
-        let asked = self.asked.clone();
+        let (asked, painted) = (self.asked.0.clone(), self.busy.clone());
         Frame {
-            picture: Box::new(Scene { levels, look: *look, asked }),
+            picture: Box::new(Scene { levels, look: *look, asked, busy: painted }),
             wants: Wants { reach, lit, asked: self.pieces.clone() },
             busy: busy || !same,
             stats: format!("{tiles} tiles"),
@@ -439,11 +435,12 @@ impl Engine for Voxels {
     }
 }
 
-/** What to draw: each level's tiles, as `look` sees them; where to tell what rays ask for. */
+/** What to draw: each level's tiles, as `look` sees them; where to tell what rays ask for, and whether frames to come are busy. */
 struct Scene {
     levels: Vec<Arc<Level>>,
     look: Look,
-    asked: Arc<Mutex<Asked>>,
+    asked: Sender<Asked>,
+    busy: Arc<AtomicBool>,
 }
 
 impl Picture for Scene {
@@ -1081,7 +1078,7 @@ struct Task {
     levels: Vec<Arc<Level>>,
     eye: Vec3,
     read: Option<Read>,
-    asked: Arc<Mutex<Asked>>,
+    asked: Sender<Asked>,
 }
 
 /** Slots' words to copy into a pool, `per` a slot: the slots, in order, and their words. */
@@ -1238,7 +1235,7 @@ impl Windows {
      * wait for, a tile or light (Window::asked), which they place once
      * made and lit; whether there is any.
      */
-    fn hear(&mut self, seen: &[Option<Ball>; GRID_LEVELS], words: &[(usize, u32)], asked: &Mutex<Asked>) -> bool {
+    fn hear(&mut self, seen: &[Option<Ball>; GRID_LEVELS], words: &[(usize, u32)], asked: &Sender<Asked>) -> bool {
         let mut bricks = Vec::new();
         for window in &mut self.windows {
             window.asked.clear();
@@ -1256,7 +1253,8 @@ impl Windows {
             }
         }
         let any = !bricks.is_empty();
-        asked.lock().expect("asked").bricks = Some(bricks);
+        // None to tell, once the engine is made anew.
+        _ = asked.send(bricks);
         any
     }
 
@@ -1291,93 +1289,71 @@ impl Windows {
     }
 }
 
-/** A task for the windows' thread, the last given, and the patch of the one before, till taken; `stop`, once either end is gone. */
-#[derive(Default)]
-struct Mail {
-    task: Option<Task>,
-    patch: Option<Patch>,
-    stop: bool,
-}
-
 /**
  * The windows, kept on a thread of their own: what a step costs (a ball
  * begun anew, its bricks placed) is not the frame's. A draw hands over a
  * task and takes the patch ready, of an earlier task; the thread does a
  * task once its last patch was taken, so there is one a draw at most.
- * With no threads (a browser), a task is done as it is handed over.
+ * Both go by channels, so a draw waits for the thread only when told to
+ * (threads.rs): with each task it says whether it took a patch since the last.
  */
 struct Keeper {
-    mail: Arc<(Mutex<Mail>, Condvar)>,
-    own: Option<Windows>,
+    tasks: Post<(Task, bool)>,
+    patches: Receiver<Patch>,
+    /** Whether a patch was taken that the thread has not been told of. */
+    taken: bool,
 }
 
 impl Keeper {
     fn new(windows: Windows) -> Keeper {
-        let mail: Arc<(Mutex<Mail>, Condvar)> = Arc::default();
-        if cfg!(target_arch = "wasm32") {
-            return Keeper { mail, own: Some(windows) };
-        }
-        let theirs = mail.clone();
-        std::thread::spawn(move || keep(windows, &theirs));
-        Keeper { mail, own: None }
+        let (send, patches) = channel();
+        let tasks = Post::spawn(|tasks| vec![move || keep(windows, &tasks, &send)]);
+        Keeper { tasks, patches, taken: false }
     }
 
     /** Hands over `task` in place of the last, if not begun (what that read back kept, unless `task` read more); the patch ready, if any, or, told to `wait`, the next. */
-    fn swap(&mut self, mut task: Task, wait: bool) -> Option<Patch> {
-        if let Some(windows) = &mut self.own {
-            return Some(windows.step(task));
+    fn swap(&mut self, task: Task, wait: bool) -> Option<Patch> {
+        let mut patch = match self.patches.try_recv() {
+            Ok(patch) => Some(patch),
+            Err(TryRecvError::Empty) => None,
+            Err(TryRecvError::Disconnected) => panic!("the windows' thread stopped"),
+        };
+        self.taken |= patch.is_some();
+        self.tasks.send((task, std::mem::take(&mut self.taken)));
+        if wait && patch.is_none() {
+            patch = Some(self.patches.recv().expect("the windows' thread stopped"));
+            self.taken = true;
         }
-        let mut mail = self.mail.0.lock().expect("mail");
-        assert!(!mail.stop, "the windows' thread stopped");
-        if let Some(last) = mail.task.take() {
-            task.read = task.read.or(last.read);
-        }
-        mail.task = Some(task);
-        self.mail.1.notify_all();
-        while wait && mail.patch.is_none() {
-            assert!(!mail.stop, "the windows' thread stopped");
-            mail = self.mail.1.wait(mail).expect("mail");
-        }
-        mail.patch.take()
+        patch
     }
 }
 
-impl Drop for Keeper {
-    fn drop(&mut self) {
-        self.mail.0.lock().unwrap_or_else(|e| e.into_inner()).stop = true;
-        self.mail.1.notify_all();
-    }
-}
-
-/** The windows' thread: a task at a time, once the last one's patch was taken, till told to stop. */
-fn keep(mut windows: Windows, mail: &(Mutex<Mail>, Condvar)) {
-    // Stopped, even by a panic: the thread that draws is told (Keeper::swap).
-    struct Stopped<'a>(&'a (Mutex<Mail>, Condvar));
-    impl Drop for Stopped<'_> {
-        fn drop(&mut self) {
-            self.0.0.lock().unwrap_or_else(|e| e.into_inner()).stop = true;
-            self.0.1.notify_all();
-        }
-    }
-    let _stopped = Stopped(mail);
+/** The windows' thread: the last task given at a time, once the last one's patch was taken, till either end is gone. */
+fn keep(mut windows: Windows, tasks: &Receiver<(Task, bool)>, patches: &Sender<Patch>) {
+    let (mut task, mut waiting) = (None::<Task>, false);
     loop {
-        let task = {
-            let mut m = mail.0.lock().expect("mail");
-            loop {
-                if m.stop {
+        loop {
+            match tasks.try_recv() {
+                Ok((mut next, taken)) => {
+                    if let Some(last) = task.take() {
+                        next.read = next.read.or(last.read);
+                    }
+                    task = Some(next);
+                    waiting &= !taken;
+                }
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => return,
+            }
+        }
+        match task.take_if(|_| !waiting) {
+            Some(task) => {
+                if patches.send(windows.step(task)).is_err() {
                     return;
                 }
-                if m.patch.is_none()
-                    && let Some(task) = m.task.take()
-                {
-                    break task;
-                }
-                m = mail.1.wait(m).expect("mail");
+                waiting = true;
             }
-        };
-        let patch = windows.step(task);
-        mail.0.lock().expect("mail").patch = Some(patch);
-        mail.1.notify_all();
+            None => std::thread::park(),
+        }
     }
 }
 
@@ -1641,7 +1617,7 @@ impl Marcher {
             self.reading = Reading::Copied(self.changes, self.shapes.map(|s| s.ball));
         }
         let busy = !self.settled || self.read.1;
-        scene.asked.lock().expect("asked").busy = busy;
+        scene.busy.store(busy, Ordering::Relaxed);
     }
 
     /**
