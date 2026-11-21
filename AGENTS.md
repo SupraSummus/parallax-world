@@ -7,7 +7,7 @@ Entry point for AI agents working on this codebase. Read this first.
 | Document | Purpose | Read when |
 |----------|---------|-----------|
 | [README.md](README.md) | Overview and quick start | First |
-| [docs/product.md](docs/product.md) | What the product does and doesn't do | Adding or changing features |
+| [docs/worlds.md](docs/worlds.md) | The worlds: what is in them and how they are seen | Adding or changing what one sees or does |
 | [docs/architecture.md](docs/architecture.md) | Cells, chunks, compositing and the voxels engine; the crates | Touching the Rust |
 | [docs/testing.md](docs/testing.md) | Test layout and conventions | Writing tests |
 | [docs/todo.md](docs/todo.md) | Planned work: known problems and open ideas | Looking for what to do next |
@@ -19,7 +19,7 @@ Entry point for AI agents working on this codebase. Read this first.
 Each concept has one home:
 build/test commands live in `package.json` scripts,
 architecture in `docs/architecture.md`,
-product behaviour in `docs/product.md`,
+what one sees and does in `docs/worlds.md`,
 test conventions in `docs/testing.md`,
 planned work in `docs/todo.md`,
 agent rules here.
