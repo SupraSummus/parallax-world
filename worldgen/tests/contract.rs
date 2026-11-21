@@ -8,7 +8,7 @@ use fcc::FACE_KINDS;
 use worldgen::World;
 use worldgen::checks::contract::{
     Accuracy, REGION, Region, Report, SHOWN, STOPPED, TOLERANCE, breaks, check, check_component, heights_hold, hold_to_baseline,
-    in_regions, parts_hold, regions, things_hold,
+    in_regions, parts, parts_hold, regions, things_hold,
 };
 use worldgen::checks::survey::survey;
 use worldgen::generator::{
@@ -184,7 +184,8 @@ fn anchors_along_an_axis_are_one_per_square_across_it() {
     let each = expected / 16.0;
     assert!(squares.iter().all(|n| (*n as f64 / each - 1.0).abs() < 0.25), "{squares:?} knobs by where in 2N, not about {each}");
     for level in [0, 2] {
-        let broken = parts_hold(&generator, &generate(&generator, &b(0, 0, 0, 128, 128, 128), level), level);
+        let whole = generate(&generator, &b(0, 0, 0, 128, 128, 128), level);
+        let broken = parts_hold(&generator, &whole, level, &parts(&whole.clip(), level));
         assert!(broken.is_empty(), "{broken:?}");
     }
 }

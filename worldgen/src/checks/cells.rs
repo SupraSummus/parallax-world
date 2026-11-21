@@ -9,7 +9,7 @@
 //! stratum's places, by a hash of where they are. The contract holds
 //! levels to it (checks::contract).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use fcc::VOXEL_FACES;
 
@@ -27,6 +27,12 @@ pub const SAMPLES: usize = 256;
 /** What rays see of a cell along a direction, a mean over them: how much of them it stops, and what shows (linear: what it stops by its colour, and what it glows). */
 pub type Look = [f64; 4];
 
+/** Whether `b`, a box of `level`'s sites, meets any of `places` (lattice units): what a stratum's cells and parts are sampled by. */
+pub(crate) fn meets(places: &[Box3], b: &Box3, level: u32) -> bool {
+    let b = Box3 { min: b.min.map(|v| v << level), max: b.max.map(|v| v << level) };
+    places.iter().any(|place| place.overlaps(&b))
+}
+
 /** What rays along a direction see of a cell at the finer level and at its own. */
 pub type Cell = [Look; 2];
 
@@ -36,18 +42,20 @@ pub fn deviation([a, b]: &Cell) -> f64 {
 }
 
 /**
- * Of the cells of `level` in `area` near the surfaces of `grids` (the
+ * Of the cells of `level` in `area` near the surfaces of `levels` (the
  * level `against` and its own, each covering `area`), a sample in the
  * places of each of `strata`: those whose voxel reaches into one, each
  * seen along each direction at both levels. By stratum, in order; a cell
  * in the places of several is seen once.
  */
-pub(crate) fn cells_of(grids: [&VoxelGrid; 2], strata: &[(String, Vec<Box3>)], area: &Box3, [against, level]: [u32; 2]) -> Vec<Vec<Cell>> {
+pub(crate) fn cells_of(levels: [&Level; 2], strata: &[(String, Vec<Box3>)], area: &Box3, [against, level]: [u32; 2]) -> Vec<Vec<Cell>> {
     let (s, f) = ((1i64 << level) as f64, (1i64 << against) as f64);
     let within = |c: &[i64; 3]| (0..3).all(|i| c[i] as f64 * s - s >= area.min[i] as f64 && c[i] as f64 * s + s <= area.max[i] as f64);
-    let mut near: Vec<[i64; 3]> = near_surfaces(grids, f / s).into_iter().filter(within).collect();
+    let grids = levels.map(|l| &l.grid);
+    let near: HashSet<[i64; 3]> = near_surfaces(levels, f / s).filter(within).collect();
     // Ordered by where each is: a stratum's sample is the same in any region holding it.
-    near.sort_by_cached_key(|&[x, y, z]| hash64(level as u64, x, y, z));
+    let mut near: Vec<(u64, [i64; 3])> = near.into_iter().map(|cell| (hash64(level as u64, cell[0], cell[1], cell[2]), cell)).collect();
+    near.sort_unstable();
     // The same rays through every cell, moved to it: its centre is a site of the finer level too.
     let rays: [_; VOXEL_FACES.len()] = std::array::from_fn(|along| rays_through(s, f, along));
     let mut seen: BTreeMap<[i64; 3], Vec<Cell>> = BTreeMap::new();
@@ -55,10 +63,9 @@ pub(crate) fn cells_of(grids: [&VoxelGrid; 2], strata: &[(String, Vec<Box3>)], a
     strata
         .iter()
         .map(|(_, places)| {
-            // Its voxel reaches s along each axis.
-            let reaches =
-                |c: &&[i64; 3]| places.iter().any(|p| (0..3).all(|i| p.min[i] < (c[i] + 1) << level && p.max[i] > (c[i] - 1) << level));
-            let cells: Vec<[i64; 3]> = near.iter().filter(reaches).take(SAMPLES).copied().collect();
+            // Its voxel reaches a site along each axis.
+            let reaches = |c: &&[i64; 3]| meets(places, &Box3 { min: c.map(|v| v - 1), max: c.map(|v| v + 1) }, level);
+            let cells: Vec<[i64; 3]> = near.iter().map(|(_, cell)| cell).filter(reaches).take(SAMPLES).copied().collect();
             cells.into_iter().flat_map(&mut see).collect()
         })
         .collect()
@@ -144,30 +151,36 @@ fn rays_through(s: f64, f: f64, along: usize) -> Vec<Ray> {
     rays
 }
 
+/** A level's grid of a region, and its sites at a surface, found once for all it is held against. */
+pub(crate) struct Level {
+    grid: VoxelGrid,
+    /** Each site that stops some light beside one that doesn't stop all of it. */
+    surface: Vec<[i32; 3]>,
+}
+
+impl Level {
+    pub(crate) fn of(grid: VoxelGrid) -> Level {
+        let open = |[x, y, z]: [i64; 3]| VOXEL_FACES.iter().any(|f| grid.alpha(x + f[0] as i64, y + f[1] as i64, z + f[2] as i64) < ALPHA);
+        let surface = sites(&grid.clip())
+            .filter(|&(x, y, z)| grid.alpha(x, y, z) != 0 && open([x, y, z]))
+            .map(|(x, y, z)| [x, y, z].map(|v| v as i32))
+            .collect();
+        Level { grid, surface }
+    }
+}
+
 /**
  * The cells of a level near a surface, at it or at the level finer
- * (`grids`, the finer's sites `finer` of the level's apart): of each site
- * that stops some light beside one that doesn't stop all of it, the cells
- * its voxel reaches into (its centre's and its corners' along the axes).
+ * (`levels`, the finer's sites `finer` of the level's apart): of each
+ * site at a surface, the cells its voxel reaches into (its centre's and
+ * its corners' along the axes), each as often as it is reached.
  */
-fn near_surfaces(grids: [&VoxelGrid; 2], finer: f64) -> BTreeSet<[i64; 3]> {
-    let mut cells = BTreeSet::new();
-    for (grid, scale) in grids.iter().zip([finer, 1.0]) {
-        for (x, y, z) in sites(&grid.clip()) {
-            let open = |f: &[i64; 3]| grid.alpha(x + f[0], y + f[1], z + f[2]) < ALPHA;
-            if grid.alpha(x, y, z) == 0 || !VOXEL_FACES.iter().map(|f| f.map(|v| v as i64)).any(|f| open(&f)) {
-                continue;
-            }
-            let at = [x, y, z].map(|v| v as f64 * scale);
-            cells.insert(nearest_site(at));
-            for axis in 0..3 {
-                for side in [-0.5, 0.5] {
-                    let mut corner = at;
-                    corner[axis] += side * scale;
-                    cells.insert(nearest_site(corner));
-                }
-            }
-        }
-    }
-    cells
+fn near_surfaces<'a>(levels: [&'a Level; 2], finer: f64) -> impl Iterator<Item = [i64; 3]> + 'a {
+    levels.into_iter().zip([finer, 1.0]).flat_map(|(level, scale)| {
+        level.surface.iter().flat_map(move |site| {
+            let at = site.map(|v| v as f64 * scale);
+            let corner = move |axis: usize, side: f64| std::array::from_fn(|i| at[i] + if i == axis { side * scale } else { 0.0 });
+            [at].into_iter().chain((0..3).flat_map(move |axis| [-0.5, 0.5].map(|side| corner(axis, side)))).map(nearest_site)
+        })
+    })
 }

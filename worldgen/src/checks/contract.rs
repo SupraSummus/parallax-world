@@ -18,7 +18,7 @@ use crate::checks::cells::FINER_BY;
 use crate::checks::survey::{Survey, nearest_first, survey};
 use crate::generator::{Generator, Whole, checking_skipped, generate, kind_of};
 use crate::grid::{ALPHA, Box3, VoxelGrid};
-use crate::noise::Rng;
+use crate::noise::{Rng, hash64};
 use crate::units::m;
 
 /** The box of `level`'s sites covering `region` and a margin of two sites. */
@@ -241,18 +241,19 @@ pub fn in_regions(name: &str, world: &World, regions: &[Region], levels: u32) ->
 
 /**
  * `region` of `world`, each level from 0 to one past `levels` generated
- * once: in parts (`parts_hold`), and up to `levels`, each stratum's cells
- * against the level FINER_BY finer (checks::cells). Its margins, and
- * where it breaks the rules that hold exactly.
+ * once: held to parts of it around each stratum's places (`parts_hold`),
+ * and up to `levels`, each stratum's cells against the level FINER_BY
+ * finer (checks::cells). Its margins, and where it breaks the rules that
+ * hold exactly.
  */
 fn hold_region(world: &World, region: &Region, levels: u32) -> (Vec<Margin>, Vec<String>) {
     let (mut margins, mut broken) = (Vec::new(), Vec::new());
     // Each level's grid, until the level FINER_BY coarser is held against it.
-    let mut grids: Vec<Option<VoxelGrid>> = Vec::new();
+    let mut grids: Vec<Option<cells::Level>> = Vec::new();
     for level in 0..=levels + 1 {
         let grid = generate(&world.generator, &box_at(&area_at(&region.area, level, levels), level), level);
-        broken.extend(parts_hold(&world.generator, &grid, level));
-        grids.push(Some(grid));
+        broken.extend(parts_hold(&world.generator, &grid, level, &sample(parts(&grid.clip(), level), &region.strata, level)));
+        grids.push(Some(cells::Level::of(grid)));
         if (1..=levels).contains(&level) {
             let against = level.saturating_sub(FINER_BY);
             let [Some(fine), Some(coarse)] = [against, level].map(|l| grids[l as usize].as_ref()) else { unreachable!("kept") };
@@ -321,39 +322,66 @@ pub fn heights_hold(world: &World, regions: &[Box3], levels: u32) -> Vec<String>
 const PART: i64 = 32;
 
 /**
- * `whole`, a box generated at `level`, generated again in parts PART
- * sites a side, each alone and with what it skips drawn all the same
- * (`checking_skipped`): each part equals it whole (`VoxelGrid::held`),
- * what is skipped draws nothing, and a part `whole` says is empty or
- * buried is (a site around it too, if buried). Returns where not.
+ * Parts held at each level for a stratum in a region, at most: as many
+ * at every level, where a seam or a skip is as likely, and for every
+ * stratum, however much else its region holds.
  */
-pub fn parts_hold(generator: &Generator, whole: &VoxelGrid, level: u32) -> Vec<String> {
+pub const PARTS: usize = 8;
+
+/**
+ * The parts PART sites a side that meet `b`, a box of `level`'s sites:
+ * of a grid the level has everywhere, anywhere on its sites.
+ */
+pub fn parts(b: &Box3, level: u32) -> Vec<Box3> {
+    let mut random = Rng::new(7 + level as u64);
+    let offset: [i64; 3] = std::array::from_fn(|_| random.below(PART as u32) as i64);
+    let starts = |a: usize| (b.min[a] - (b.min[a] - offset[a]).rem_euclid(PART)..b.max[a]).step_by(PART as usize);
+    let part = |x, y, z| Box3 { min: [x, y, z], max: [x + PART, y + PART, z + PART] };
+    starts(2).flat_map(|z| starts(1).flat_map(move |y| starts(0).map(move |x| part(x, y, z)))).collect()
+}
+
+/**
+ * Of `parts` of `level`, a sample for each of `strata`, as its cells
+ * are one (checks::cells): the PARTS that meet its places, first by a
+ * hash of where each is, so the same in any region holding them, and
+ * shared by strata sharing places. A field's places reach above and
+ * under its surface, where it says it draws nothing, or all of a kind.
+ */
+fn sample(mut parts: Vec<Box3>, strata: &[(String, Vec<Box3>)], level: u32) -> Vec<Box3> {
+    parts.sort_by_cached_key(|p| hash64(level as u64, p.min[0], p.min[1], p.min[2]));
+    let mut held = vec![false; parts.len()];
+    for (_, places) in strata {
+        (0..parts.len()).filter(|&i| cells::meets(places, &parts[i], level)).take(PARTS).for_each(|i| held[i] = true);
+    }
+    parts.into_iter().zip(held).filter_map(|(part, held)| held.then_some(part)).collect()
+}
+
+/**
+ * `whole`, a box generated at `level`, against `parts`, each as far as
+ * it is in it generated again alone, with what it skips drawn all the same
+ * (`checking_skipped`): each equals it whole (`VoxelGrid::held`), what
+ * is skipped draws nothing, and a part `whole` says is empty or buried
+ * is (a site around it too, if buried). Returns where not.
+ */
+pub fn parts_hold(generator: &Generator, whole: &VoxelGrid, level: u32, parts: &[Box3]) -> Vec<String> {
     let b = whole.clip();
     let mut broken = Vec::new();
     if whole.pieces.alpha.iter().all(|a| *a == 0) && whole.medium.alpha.iter().all(|a| *a == [0; 3]) {
         broken.push(format!("level {level}: nothing drawn in {b:?}, for parts to differ from"));
     }
-    let mut random = Rng::new(7 + level as u64);
-    let offset: [i64; 3] = std::array::from_fn(|_| random.below(PART as u32) as i64);
-    let starts = |a: usize| (b.min[a] - offset[a]..b.max[a]).step_by(PART as usize);
-    for z in starts(2) {
-        for y in starts(1) {
-            for x in starts(0) {
-                let part = Box3 { min: [x, y, z], max: [x + PART, y + PART, z + PART] }.intersect(&b);
-                let (grid, drew) = checking_skipped(|| generate(generator, &part.widen(1), level));
-                broken.extend(drew.into_iter().map(|d| format!("level {level}: {d}")));
-                if let Some(site) = sites(&part).find(|&(x, y, z)| grid.held(x, y, z) != whole.held(x, y, z)) {
-                    broken.push(format!("level {level}: part {part:?} generated alone differs at {site:?} from {b:?} generated whole"));
-                }
-                let Some(whole) = crate::generator::whole(generator, &part, level) else { continue };
-                let unlike = match whole {
-                    Whole::Empty => sites(&part).find(|&(x, y, z)| grid.alpha(x, y, z) > 0),
-                    Whole::Buried(_) => sites(&part.widen(1)).find(|&(x, y, z)| grid.alpha(x, y, z) < ALPHA),
-                };
-                if let Some(site) = unlike {
-                    broken.push(format!("level {level}: {part:?} is {whole:?}, as its layers say, but not at site {site:?}"));
-                }
-            }
+    for part in parts.iter().map(|part| part.intersect(&b)) {
+        let (grid, drew) = checking_skipped(|| generate(generator, &part.widen(1), level));
+        broken.extend(drew.into_iter().map(|d| format!("level {level}: {d}")));
+        if let Some(site) = sites(&part).find(|&(x, y, z)| grid.held(x, y, z) != whole.held(x, y, z)) {
+            broken.push(format!("level {level}: part {part:?} generated alone differs at {site:?} from {b:?} generated whole"));
+        }
+        let Some(whole) = crate::generator::whole(generator, &part, level) else { continue };
+        let unlike = match whole {
+            Whole::Empty => sites(&part).find(|&(x, y, z)| grid.alpha(x, y, z) > 0),
+            Whole::Buried(_) => sites(&part.widen(1)).find(|&(x, y, z)| grid.alpha(x, y, z) < ALPHA),
+        };
+        if let Some(site) = unlike {
+            broken.push(format!("level {level}: {part:?} is {whole:?}, as its layers say, but not at site {site:?}"));
         }
     }
     broken.sort();
