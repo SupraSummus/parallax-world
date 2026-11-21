@@ -406,7 +406,9 @@ then shows as much as the rays cross of it,
 not only where they cross the planes, in stripes.
 It still blurs where the medium ends by about a slab's depth times the slant:
 where a face's axis is tilted, mist lying on the ground
-shows that much above and below it.
+shows that much above and below it,
+and at a seam with a level face's rays, which take it where it is,
+the difference shows as a V.
 As a relief drawn flat is enlarged by its pillars' reach,
 a picture is drawn that much wider than its columns,
 so neighbours' pictures lie over one another, each its own columns' share:
@@ -452,9 +454,13 @@ not the finest cells, a chunk per voxel.
 So a picture of medium takes the depths of the level
 whose whole voxels are drawn where it is (`level_ahead`),
 or finer levels' voxels behind it would hide it:
-at the front of the halves of its slab it draws,
+the least depth anything past its slab's front may be drawn at,
+the one its culling asks about (`nearest_depth`),
 as what a ray crosses of it lies before whatever it meets within the slab.
-So medium behind a wall, in its slab, shows before it.
+So medium behind a wall shows before it, in its slab and a little before:
+the sea over the shore it ends at.
+A test holds a thin medium on the ground to hiding it, seen from above
+(`a_thin_medium_on_the_ground_hides_it_from_above`).
 A test holds a slab of medium to exp(−extinction · path),
 thin and thick, along the axis and slanted
 (`a_medium_of_splats_lets_through_as_much_as_its_extinction_says`).

@@ -97,8 +97,8 @@ const FLAT = 2.0;
 // (low byte of `slot_count`), the widest's half width `wide`; or `count`
 // runs of a picture from `first`, its first column's centre `base`; or a
 // picture of medium at `first`, its slab's first layer `layer` and how
-// deep its halves are, `half`, in half layers (see veil_fragment). Its chunk's slot
-// (`slot_count` above the low byte), the box of their outlines along the
+// deep its halves are, `half`, in half layers (see veil_fragment). Its
+// chunk's slot (`slot_count` above the low byte), the box of their outlines along the
 // axis relative to the chunk's origin, whether any showed in the last
 // frame, and how far past the plane they are, nearest and farthest.
 struct Cluster {
@@ -395,18 +395,17 @@ fn flat_fragment(in: RunPixel) -> @location(0) vec4f {
 
 // A picture of medium (compositor.rs's veils), a quad on its slab's middle
 // plane, as wide as its cluster's box but for the slants the face's rays
-// do not reach where its chunk is; at the depth of a voxel at the front
-// of the halves of its slab its level draws (veil_fragment), of the level
-// whose whole voxels are drawn there (level_ahead): so medium behind them
-// is not drawn, and where their level is coarser, it is in front. Drawn
-// flat, whole voxels' pictures stand as far before what they show as half
-// their cell is deep, a quarter of the medium's (lod.rs's MEDIUM_COARSER),
-// so its depth is that much nearer. Where on
+// do not reach where its chunk is. Its depth is the least anything past
+// its slab's front may be drawn at (nearest_depth, as its culling has it),
+// of the level whose whole voxels are drawn there (level_ahead): what a
+// ray crosses of it lies before whatever the ray meets in the slab, so
+// medium behind that is not drawn, and it shows before all within. Where on
 // the picture, in halves of a brick across and rows up from its first
 // place's centre; where its picture is; which halves of its slab its
-// level draws; how far aside a ray of slant 1 takes its columns there;
-// where it is from the eye; and how its chunk shades (Shading), worked
-// out here: reading the globals for it in every fragment is slow.
+// level draws (veil_fragment); how far aside a ray of slant 1 takes its
+// columns there; where it is from the eye; and how its chunk shades
+// (Shading), worked out here: reading the globals for it in every
+// fragment is slow.
 struct Veil {
   @builtin(position) position: vec4f,
   @builtin(clip_distances) owned: array<f32, 4>,
@@ -436,22 +435,14 @@ fn veil_vertex(@builtin(vertex_index) vertex: u32) -> Veil {
   let c = chunks[slot];
   let first = t.layer + vec2f(0.0, t.half);
   let drawn = select(vec2f(0.0), vec2f(1.0), first > vec2f(c.clip) & first <= vec2f(c.reach));
-  // Its slab's middle plane, and the front of the halves it draws.
-  let deep = t.half * c.half_layer;
-  let middle = c.distance + t.far;
-  let front = max(middle - deep * drawn.x, 0.0);
-  // Its box holds the face's rays' slants: this chunk's, at most.
+  // Its box holds the face's rays' slants: this chunk's, from its slab's front, at most.
+  let front = c.distance + t.near;
   let far = max(abs(c.origin + t.min), abs(c.origin + t.max));
   let slant = select(MAX_SLANT, min(far / front, MAX_SLANT), front > 0.0);
   let out_by = vec2f(f32(vertex & 1u), f32((vertex >> 1u) & 1u)) * 2.0 - 1.0;
-  let corner = select(t.min, t.max, out_by > vec2f(0.0)) - out_by * (MAX_SLANT - slant) * deep;
-  let at = vec3f(c.origin + corner, middle);
-  let level = level_ahead(c.face, front);
-  let at_front = at * (front / middle);
-  var depth = depth_of(level, length(at_front));
-  if globals.whole == FLAT {
-    depth = flat_depth(level, dot(globals.faces[c.face].view[2], at * (max(front - deep / 4.0, 0.0) / middle)));
-  }
+  let corner = select(t.min, t.max, out_by > vec2f(0.0)) - out_by * (MAX_SLANT - slant) * t.half * c.half_layer;
+  let at = vec3f(c.origin + corner, c.distance + t.far);
+  let depth = nearest_depth(t, level_ahead(c.face, front));
   var out: Veil;
   out.position = quad_position(c, at, depth);
   out.owned = in_face(at);
@@ -510,8 +501,9 @@ const TAPS = 8;
 // over σ times the half's depth, the nearer half's before where it
 // crosses the slab's middle plane and the farther's after, and takes of
 // each as much as it crosses, so a pixel takes the columns along that
-// line, a few along it (TAPS). So medium thin along the axis shows as
-// much as the rays cross of it, not only where they cross the plane.
+// line, one a column but TAPS at most: a deeper slab's, more apart. So
+// medium thin along the axis shows as much as the rays cross of it, not
+// only where they cross the plane.
 // A column's voxels are 2 layers apart, and its brick its share of the
 // plane, so a ray along the axis crosses as much of each as 2 layers'
 // depth, a slanted one as much more as its path through the slab is
