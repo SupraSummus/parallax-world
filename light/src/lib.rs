@@ -475,18 +475,20 @@ impl Light {
 
     /**
      * How light sees `site` of level `i` from direction `from`: how much of
-     * each channel it stops (alpha), its pieces and its medium of the rest,
-     * and their colour; what it glows.
+     * each channel it stops (of ALPHA), its pieces and its medium of the
+     * rest, and their colour; what it glows.
      */
-    fn see(&mut self, i: usize, site: [i64; 3], from: usize) -> ((Rgb, Rgb), Rgb) {
+    fn see(&mut self, i: usize, site: [i64; 3], from: usize) -> (([u32; 3], Rgb), Rgb) {
         let glowing = self.glow;
-        let Some(([x, y, z], grid)) = self.hold(i, site) else { return (([0.0; 3], [0.0; 3]), [0.0; 3]) };
+        let Some(([x, y, z], grid)) = self.hold(i, site) else { return (([0; 3], [0.0; 3]), [0.0; 3]) };
         let ((pieces, p), (medium, m), glow) = grid.light(x, y, z, from);
         // What they show comes premultiplied, of COLOUR_ONE: as a share of the light on what it stops.
-        let alpha: Rgb = std::array::from_fn(|c| (pieces as f32 + medium[c] as f32) / ALPHA as f32);
-        let shows: Rgb = std::array::from_fn(|c| (p[c] + m[c]) as f32 / COLOUR_ONE as f32);
-        let colour = std::array::from_fn(|c| if alpha[c] > 0.0 { (shows[c] / alpha[c]).min(1.0) } else { 0.0 });
-        ((alpha, colour), glow.map(|g| g as f32 * glowing))
+        let stops = medium.map(|m| pieces as u32 + m as u32);
+        let colour = std::array::from_fn(|c| {
+            let (alpha, shows) = (stops[c] as f32 / ALPHA as f32, (p[c] + m[c]) as f32 / COLOUR_ONE as f32);
+            if alpha > 0.0 { (shows / alpha).min(1.0) } else { 0.0 }
+        });
+        ((stops, colour), glow.map(|g| g as f32 * glowing))
     }
 
     /**
@@ -495,9 +497,12 @@ impl Light {
      * CROSSING crossings (picture's `over`).
      */
     fn meets(&mut self, i: usize, site: [i64; 3], from: usize) -> ((Rgb, Rgb), Rgb) {
-        let ((alpha, colour), glow) = self.see(i, site, from);
-        let over = alpha.map(|a| over(a as f64, CROSSING) as f32);
-        ((std::array::from_fn(|c| alpha[c] * over[c]), colour), std::array::from_fn(|c| glow[c] * over[c]))
+        // By what a channel stops: a power each, the same for every site, read often.
+        static OVER: OnceLock<[f32; ALPHA as usize + 1]> = OnceLock::new();
+        let table = OVER.get_or_init(|| std::array::from_fn(|k| over((k as f32 / ALPHA as f32) as f64, CROSSING) as f32));
+        let ((stops, colour), glow) = self.see(i, site, from);
+        let over = stops.map(|k| table[k as usize]);
+        ((std::array::from_fn(|c| stops[c] as f32 / ALPHA as f32 * over[c]), colour), std::array::from_fn(|c| glow[c] * over[c]))
     }
 
     /** How much of what comes through `site` of level `i` it lets through. */
@@ -842,7 +847,10 @@ impl Light {
 
 /** A look's colour as a share of the light on it, linear, as light adds up; looks are sRGB. */
 fn linear(look: Look) -> Rgb {
-    [0, 8, 16].map(|shift| srgb_to_linear(((look >> shift) & 255) as f32 / 255.0))
+    // A power a channel, of only 256 bytes: kept.
+    static LINEAR: OnceLock<[f32; 256]> = OnceLock::new();
+    let table = LINEAR.get_or_init(|| std::array::from_fn(|b| srgb_to_linear(b as f32 / 255.0)));
+    [0, 8, 16].map(|shift| table[((look >> shift) & 255) as usize])
 }
 
 /**
