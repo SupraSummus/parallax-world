@@ -439,7 +439,7 @@ fn to_srgb(c: vec3f) -> vec3f {
 }
 
 // Colour `rgb` (sRGB) under `light`: shaded, times a shade, as the splats paint it; lit, linear times the
-// light on it, and its glow, as worldgen's Light::relight shows it.
+// light on it, and its glow, as light's Light::relight shows it.
 fn coloured(rgb: vec3f, light: Light) -> vec3f {
   if globals.lit == 0u {
     return rgb * light.on;

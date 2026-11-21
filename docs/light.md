@@ -1,8 +1,8 @@
 # Light
 
-Light on the lattices (`worldgen/src/light.rs`) is a prototype,
+Light on the lattices (the crate `light/`) is a prototype,
 in `look`'s pictures and native's computed lighting.
-The model is in that file's header,
+The model is in its header (`light/src/lib.rs`),
 and how native's engines use it in section 4 of [architecture.md](architecture.md)
 ("The engines, and rays through the voxels").
 Here: what it gets wrong, what was tried, and what it costs.
@@ -94,7 +94,7 @@ Not kept.
 
 ## Against the reference
 
-Against the reference (`light/reference.rs`, test `against_the_reference`;
+Against the reference (`light/src/reference.rs`, test `against_the_reference`;
 the ignored test `maps` draws the scenes from above):
 a lamp lights the ground in four lobes, along the upward directions,
 and three times too little right under it;
@@ -119,7 +119,7 @@ And with it a whole voxel touched read as any site met, not lit as the face:
 a wall one site thick lit its dark side, and a white room was darker.
 
 A whole voxel touching a face is taken to be lit as the face is
-(`weighed` in `light.rs`), as a flat floor's are;
+(`weighed` in `light/`), as a flat floor's are;
 where it is not, at a wall's edge or a corner, the face is lit wrong.
 
 It sends back no glow: a lamp's voxels do not light each other's faces,
@@ -150,7 +150,7 @@ till hosts read sites as light does
 What is found at a site is a function of the world alone,
 so the Lights keep it together, every level's alike,
 and two finding the same at once do no harm.
-Each site is kept under a lock of its own (`Lit` in `light.rs`):
+Each site is kept under a lock of its own (`Lit` in `light/`):
 under one lock a column of tiles, and found by a map,
 the threads waited for each other, and the first view took a quarter more work.
 Each Light holds the tiles it read (`Level`), asking the others for each once.
@@ -181,7 +181,7 @@ Each site met that reflects has its own light found, and its tiles made,
 and where many stop little (mist, crowns, the coarsest level's long lines)
 most reflect next to nothing.
 So sites that reflect under the tolerance reflect together,
-as the next one met that brings them over it (`along` in `light.rs`),
+as the next one met that brings them over it (`along` in `light/`),
 and a line ends where less than the tolerance gets through:
 the moor's first view took over twice the work without,
 no pixel more than two steps of colour off.
@@ -218,7 +218,7 @@ Lighting a place first, most is its tiles,
 the coarsest level's far around, which no ray reads:
 each site met there reflects, so its light is found too, as far around it again.
 A line there takes as many steps as the world's heights are sites high
-(`top_steps` in `light.rs`), then the sky's light:
+(`top_steps` in `light/`), then the sky's light:
 one that rises or falls has left them by then,
 and one that keeps level, which never does, ends as far,
 so what stands farther off shades nothing along it.

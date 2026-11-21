@@ -16,7 +16,7 @@ pub mod voxels;
 use std::any::Any;
 
 use egui_wgpu::wgpu;
-use worldgen::light::Brightness;
+use light::Brightness;
 
 use crate::gpu::Easel;
 use crate::view::{self, Vec3, focal_length};
@@ -125,7 +125,7 @@ pub struct Look {
     pub far: f64,
     pub fog: f64,
     pub size: [f64; 2],
-    /** How bright the light is, if voxels are lit by light worked out across the world (worldgen's Light); None, shaded. */
+    /** How bright the light is, if voxels are lit by light worked out across the world (light's Light); None, shaded. */
     pub light: Option<Brightness>,
     /** Viewing distance over a cell's thickness, and how many levels finer than its cell its voxels are (bake's Lod). */
     pub detail: f64,

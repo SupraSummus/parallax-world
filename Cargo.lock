@@ -1240,6 +1240,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "light"
+version = "0.0.0"
+dependencies = [
+ "fcc",
+ "worldgen",
+]
+
+[[package]]
 name = "linebender_resource_handle"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1800,6 +1808,7 @@ dependencies = [
  "egui-winit",
  "fcc",
  "libc",
+ "light",
  "naga",
  "png",
  "pollster",
@@ -3379,9 +3388,9 @@ dependencies = [
 name = "worlds"
 version = "0.0.0"
 dependencies = [
- "bake",
  "cheese",
  "fcc",
+ "light",
  "worldgen",
 ]
 

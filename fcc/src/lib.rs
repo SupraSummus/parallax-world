@@ -2,10 +2,12 @@
 //! sees them: the voxel's faces, the view faces' lattices, the levels of
 //! detail a world is held at, the grids of sites generators make and
 //! bakers read, tiles of grids, the light from
-//! voxels' faces (light.rs); and maps keyed by sites, cells and tiles.
+//! voxels' faces (light.rs), a body walking on them (walk.rs); and maps
+//! keyed by sites, cells and tiles.
 //! See docs/architecture.md.
 
 pub mod light;
+pub mod walk;
 
 use std::collections::{HashMap, HashSet};
 use std::hash::{BuildHasherDefault, Hasher};
@@ -178,7 +180,7 @@ pub struct Grid {
     pub cells: Vec<Look>,
     /** The sites that do not look alike through every face, by index in `cells`: VIEW_WORDS each. */
     pub views: Vec<u32>,
-    /** The sites that glow, shown or not, by index in `cells`: GLOW_WORDS each, for the light (worldgen's light.rs). */
+    /** The sites that glow, shown or not, by index in `cells`: GLOW_WORDS each, for the light (light/). */
     pub glow: Vec<u32>,
     /**
      * The see-through sites that do not stop every channel alike, by index
@@ -187,7 +189,7 @@ pub struct Grid {
      * of the channel it stops least, to what takes one for all.
      */
     pub stops: Vec<u32>,
-    /** Bit i % 32 of word i / 32: whether the voxel at index i of `cells` stops a walking body (bake's walk.rs). */
+    /** Bit i % 32 of word i / 32: whether the voxel at index i of `cells` stops a walking body (fcc's walk.rs). */
     pub solid: Vec<u32>,
 }
 

@@ -13,6 +13,6 @@ cheese = { path = "cheese" }
 sponza = []
 
 [dev-dependencies]
-bake = { path = "../bake" }
 fcc = { path = "../fcc" }
+light = { path = "../light" }
 

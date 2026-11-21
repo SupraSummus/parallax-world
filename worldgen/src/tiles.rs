@@ -46,7 +46,7 @@ pub fn made_with(world: &World, level: u32, key: [i64; 3]) -> impl Iterator<Item
  * The sites of the tiles made with tile `key` of `level` of `world`
  * (`made_with`), as one box, what may show of it (generate_shown).
  */
-pub(crate) fn make_sites(world: &World, level: u32, key: [i64; 3]) -> VoxelGrid {
+pub fn make_sites(world: &World, level: u32, key: [i64; 3]) -> VoxelGrid {
     let heights = world.heights_at(level);
     let boxes = made_with(world, level, key).map(|key| tile_box(heights, key));
     let all = boxes.reduce(|all, b| Box3 { min: all.min, max: b.max }).expect("its own");
@@ -54,7 +54,7 @@ pub(crate) fn make_sites(world: &World, level: u32, key: [i64; 3]) -> VoxelGrid 
 }
 
 /** The tiles `sites` are of (`make_sites`), by key, as hosts draw them, see-through ones too: each its part. */
-pub(crate) fn parted(sites: &VoxelGrid, world: &World, level: u32, key: [i64; 3]) -> Vec<([i64; 3], Grid)> {
+pub fn parted(sites: &VoxelGrid, world: &World, level: u32, key: [i64; 3]) -> Vec<([i64; 3], Grid)> {
     let (grid, heights) = (sites.to_grid(true), world.heights_at(level));
     // What was made may end short of a tile, or before it.
     let (low, high) = (grid.min[1] as i64, (grid.min[1] + grid.n[1]) as i64);

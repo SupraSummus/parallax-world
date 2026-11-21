@@ -1,7 +1,7 @@
 //! What generating costs: work counted by layer while `counted` runs,
 //! the same on every machine, weighed into a rough estimate of its time;
 //! a report of a world's host tiles at several levels, what in them looks
-//! costly, and how they differ from a baseline (docs/generators.md,
+//! costly, and how they differ from a baseline (docs/checks.md,
 //! "Cost").
 
 use std::cell::{Cell, RefCell};

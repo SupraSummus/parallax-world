@@ -1,5 +1,5 @@
 //! A reference for `Light`, for tests: the light on a voxel's face found
-//! by following random rays through the voxels of level 0 (picture.rs),
+//! by following random rays through the voxels of level 0 (worldgen's picture.rs),
 //! bounce after bounce till chance ends them, with none of Light's shortcuts (its 12 directions,
 //! its levels). Voxels are opaque and reflect evenly (Lambert); the sky is as
 //! bright everywhere above the horizon; the sun is a direction, as bright
@@ -9,10 +9,10 @@
 //! ground.
 
 use super::{ALPHA, Brightness, GLOW, GLOW_ONE, Rgb, SKY, SUN, SUN_DIRECTION};
-use crate::World;
-use crate::generator::generate;
-use crate::grid::{Box3, COLOUR_ONE, VoxelGrid};
-use crate::picture::{FACES, first_hit};
+use worldgen::World;
+use worldgen::generator::generate;
+use worldgen::grid::{Box3, COLOUR_ONE, VoxelGrid};
+use worldgen::picture::{FACES, first_hit};
 
 /** What the reference's voxels are generated over: the scenes' and enough ground around them. */
 const BOX: Box3 = Box3 { min: [-256, -2, -256], max: [256, 96, 256] };

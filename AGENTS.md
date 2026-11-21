@@ -12,7 +12,8 @@ Entry point for AI agents working on this codebase. Read this first.
 | [docs/testing.md](docs/testing.md) | Test layout and conventions | Writing tests |
 | [docs/todo.md](docs/todo.md) | Planned work: known problems and open ideas | Looking for what to do next |
 | [docs/generators.md](docs/generators.md) | Generating worlds in pieces: layers, things, rules | Writing or changing a world generator |
-| [docs/light.md](docs/light.md) | Light: what the prototype gets wrong, what was tried, what it costs | Touching `worldgen/src/light.rs` or native's lighting |
+| [docs/checks.md](docs/checks.md) | The contract worlds keep, checks of places and directions, what generating costs | A world's check or cost fails |
+| [docs/light.md](docs/light.md) | Light: what the prototype gets wrong, what was tried, what it costs | Touching `light/` or native's lighting |
 | [.claude/skills/lead/SKILL.md](.claude/skills/lead/SKILL.md) | The lead role: driving changes to main through delegated work and PRs | Only when the user asks for it (`/lead`) |
 
 Each concept has one home:
@@ -39,16 +40,16 @@ Cargo.toml                   # The Rust crates' workspace; lab/ a member, not a 
 scripts/voxelize.py          # A glTF scene as voxels, for worlds/src/scene.rs
 fcc/src/                     # The FCC lattice and its voxels as every crate sees them (no dependencies)
 ├── lib.rs                   # Faces, lattices, levels, Grid, tiles
-└── light.rs                 # The light from voxels' faces, as hosts hand it over
-bake/src/                    # Chunk baker and walking, on fcc/
+├── light.rs                 # The light from voxels' faces, as hosts hand it over
+└── walk.rs                  # A body that falls, collides, steps and jumps
+bake/src/                    # Chunk baker, on fcc/
 ├── lib.rs                   # Baker: one chunk per call
 ├── cells.rs                 # Cells of the coarser lattices N·FCC, with a table per level
 ├── face.rs                  # A face's measures along its axis
 ├── surface.rs               # A cell's voxels that can show
 ├── tables.rs                # The voxel's faces and shades per view face
 ├── splats.rs                # What a chunk shows: splats, reliefs, media
-├── lod.rs                   # Chunks: whole cells, levels by depth
-└── walk.rs                  # A body that falls, collides, steps and jumps
+└── lod.rs                   # Chunks: whole cells, levels by depth
 worldgen/                    # The world-generation engine; no worlds (docs/generators.md)
 ├── src/
 │   ├── generator.rs         # The framework: nodes, fields, populations
@@ -68,12 +69,14 @@ worldgen/                    # The world-generation engine; no worlds (docs/gene
 │   ├── world.rs             # World: what a host needs to show one
 │   ├── tiles.rs             # A world's tiles, as hosts and light take them
 │   ├── picture.rs           # Rays through a world's voxels; pictures as PNGs
-│   ├── light.rs             # Light, a prototype (docs/light.md)
-│   ├── light/reference.rs   # Its reference: rays traced through level 0
-│   ├── cost.rs              # What generating costs, against a baseline
-│   └── checks/              # The contract, the survey, places, directions: for tests
-├── data/                    # The light reference's values; the test worlds' contract baselines
+│   ├── cost.rs              # What generating costs, against a baseline (docs/checks.md)
+│   └── checks/              # The contract, the survey, places, directions: for tests (docs/checks.md)
+├── data/                    # The test worlds' contract baselines
 └── tests/                   # The engine on test worlds; each solid against its baseline
+light/                       # Light, a prototype (docs/light.md), on worldgen's tiles
+├── src/lib.rs               # Light: each site's, settled round by round, shared by threads
+├── src/reference.rs         # Its reference: rays traced through level 0
+└── data/                    # The reference's values
 worlds/                      # The worlds, on worldgen's public API only
 ├── cheese/                  # The cheese, a crate of its own
 ├── src/
