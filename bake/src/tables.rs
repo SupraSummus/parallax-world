@@ -1,17 +1,15 @@
 //! What the baker makes of the view's faces: the voxel's faces in lattice
 //! coordinates, and each face kind's shade per view face.
 
-use crate::face::LAYER;
 use fcc::{FACE_KINDS, Lattice, VIEW_FACES, VOXEL_FACES};
 
 /**
  * The voxel's faces in a face's lattice coordinates, the same for every
- * face (`geometry`): kind k's neighbour offset (a, b, c) and its normal in
- * face coordinates.
+ * face (`geometry`): kind k's neighbour offset (a, b, c), its normal in
+ * face coordinates (a · LAYER, b, c · LAYER).
  */
 pub struct Geometry {
     pub offsets: [[i32; 3]; FACE_KINDS],
-    pub normals: [[f64; 3]; FACE_KINDS],
 }
 
 /** A world vector in a face's lattice coordinates (a, b, c) = (v · R, v · U, v · F). */
@@ -21,12 +19,10 @@ fn lattice_of(Lattice { r, u, f }: &Lattice, v: [i32; 3]) -> [i32; 3] {
 
 /**
  * Per face kind, the neighbour's offset (a, b, c) in a face's lattice
- * coordinates, and the normal in face coordinates (a · LAYER, b, c · LAYER):
- * the same for every face, as they see the same lattice.
+ * coordinates: the same for every face, as they see the same lattice.
  */
 pub fn geometry(lattice: &Lattice) -> Geometry {
-    let offsets = VOXEL_FACES.map(|n| lattice_of(lattice, n));
-    Geometry { offsets, normals: offsets.map(|[a, b, c]| [a as f64 * LAYER, b as f64, c as f64 * LAYER]) }
+    Geometry { offsets: VOXEL_FACES.map(|n| lattice_of(lattice, n)) }
 }
 
 /**

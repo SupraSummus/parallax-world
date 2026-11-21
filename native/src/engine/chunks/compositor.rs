@@ -901,8 +901,8 @@ struct Globals {
     sky_view: [[f32; 4]; 3],
     faces: [FaceView; 12],
     /** The Lods of whole voxels and of the medium (View's). */
-    lod: [f32; 4],
-    medium: [f32; 4],
+    lod: [i32; 4],
+    medium: [i32; 4],
 }
 
 /** FaceView in compositor.wgsl. */
@@ -1701,8 +1701,8 @@ pub struct View {
     pub sky: f32,
     pub camera: Vec3,
     /** Which cells each level claims (Lod::layers), and which the medium's, by their Lods (Lod::for_medium): each its Q, layers of grid 0 to the render distance, its coarsest level and its finest. */
-    pub lod: [f32; 4],
-    pub medium: [f32; 4],
+    pub lod: [i32; 4],
+    pub medium: [i32; 4],
 }
 
 /** A number in [0, 1) from `numbers`, as if at random. */
@@ -1725,7 +1725,7 @@ impl View {
     pub fn new(look: &Look) -> View {
         let faces = view::faces();
         let whole = Lod::new(look.shift, look.detail);
-        let lod = |lod: Lod| [lod.q as f32, (look.far / LAYER).ceil() as f32, lod.top() as f32, lod.finest() as f32];
+        let lod = |lod: Lod| [lod.q, (look.far / LAYER).ceil() as i32, lod.top(), lod.finest()];
         View {
             yaw: look.yaw,
             pitch: look.pitch,

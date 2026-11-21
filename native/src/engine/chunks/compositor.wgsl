@@ -41,8 +41,8 @@ struct Globals {
   // Which cells each level claims (claims), and which the medium's
   // (medium_claims), by their Lods (Lod::for_medium): each its Q, the layers
   // of grid 0 to the render distance, its coarsest level and its finest.
-  lod: vec4f,
-  medium: vec4f,
+  lod: vec4i,
+  medium: vec4i,
 }
 
 // A chunk where it is, wherever the camera (compositor.rs's GpuRecord):
@@ -802,7 +802,7 @@ fn level_ahead(face: u32, ahead: f32) -> f32 {
   let layer = i32(floor((eye + ahead) / LAYER));
   let at = i32(floor(eye / LAYER));
   var level = 0;
-  while level < i32(globals.lod.z) && layer > reach(level, at) {
+  while level < globals.lod.z && layer > reach(level, at) {
     level++;
   }
   return f32(level);
@@ -948,7 +948,7 @@ fn veil_place(cluster: Cluster, c: Chunk) -> i32 {
   }
   let eye = i32(floor(globals.faces[c.face].eye.z / LAYER));
   var place = 0;
-  for (var l = i32(globals.medium.w); l < i32(c.level); l++) {
+  for (var l = globals.medium.w; l < i32(c.level); l++) {
     place += ((reach_of(globals.medium, l, eye) - medium_from(l, eye)) >> u32(l - 1)) + 2;
   }
   return place + i32(ceil((select(halves.y, halves.x, drawn.x) - c.clip) / cluster.half)) - 1;
@@ -1168,11 +1168,11 @@ const MAX_SLANT = vec2f(1.0, 0.7071067811865476);
 // `eye` (Lod::reach), of `lod`'s Q and coarsest level: 2Q · N layers past
 // the last of its own layers of sites not past the eye's; all, for the
 // coarsest.
-fn reach_of(lod: vec4f, level: i32, eye: i32) -> i32 {
-  if level >= i32(lod.z) {
+fn reach_of(lod: vec4i, level: i32, eye: i32) -> i32 {
+  if level >= lod.z {
     return 0x7fffffff;
   }
-  return ((eye >> u32(level)) + 2 * i32(lod.x)) << u32(level);
+  return ((eye >> u32(level)) + 2 * lod.x) << u32(level);
 }
 
 // Of whole voxels' cells.
@@ -1185,7 +1185,7 @@ fn reach(level: i32, eye: i32) -> i32 {
 // finer level's claims; not past the render distance.
 fn claims(level: i32, c: i32, eye: i32) -> bool {
   let n = 1 << u32(level);
-  let last = eye + i32(globals.lod.y);
+  let last = eye + globals.lod.y;
   var first = eye + NEAR_LAYERS;
   if level > 0 {
     first = reach(level - 1, eye) - n + 1;
@@ -1197,7 +1197,7 @@ fn claims(level: i32, c: i32, eye: i32) -> bool {
 // medium (Lod::layers): the finer level's reach, or the near plane, if it
 // is the finest that draws it.
 fn medium_from(level: i32, eye: i32) -> i32 {
-  return select(reach_of(globals.medium, level - 1, eye), eye + NEAR_LAYERS, level <= i32(globals.medium.w));
+  return select(reach_of(globals.medium, level - 1, eye), eye + NEAR_LAYERS, level <= globals.medium.w);
 }
 
 // Whether `level` draws the medium of its cell whose site is in layer `c`
@@ -1205,10 +1205,10 @@ fn medium_from(level: i32, eye: i32) -> i32 {
 // which may hold what it draws of a slab of a column (bake's Medium).
 fn medium_claims(level: i32, c: i32, eye: i32) -> bool {
   let n = 1 << u32(level);
-  let last = eye + i32(globals.medium.y);
+  let last = eye + globals.medium.y;
   let first = medium_from(level, eye) - 2 * n + 1;
   var to = last + n;
-  if level < i32(globals.medium.z) {
+  if level < globals.medium.z {
     to = min(reach_of(globals.medium, level, eye) + n, to);
   }
   return first <= last && first <= c && c <= to;
@@ -1252,7 +1252,7 @@ fn place(@builtin(workgroup_id) id: vec3u, @builtin(num_workgroups) n: vec3u, @b
   c.whole = r.whole;
   c.veils = r.veils;
   c.reach = 3.0e38;
-  if r.level < i32(globals.medium.z) {
+  if r.level < globals.medium.z {
     c.reach = f32(2 * ((reach_of(globals.medium, r.level, layer) >> u32(r.atoms)) - r.site));
   }
   if !medium_claims(r.level, r.site << u32(r.atoms), layer) {

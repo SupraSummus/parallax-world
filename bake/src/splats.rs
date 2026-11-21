@@ -145,12 +145,14 @@ pub fn lit_voxel_colour(voxel: &Voxel, light: &FaceLight, kinds: &[usize; FACE_K
 /**
  * Whether a ray of a face (|x| + √2·|y| ≤ z, see in_face in native's view.rs) can
  * meet one of `faces` from outside: n · r < 0 at a corner of the rhombus
- * of rays, r = (±MAX_SLANT, 0, 1) or (0, ±MAX_SLANT · LAYER, 1).
+ * of rays, r = (±MAX_SLANT, 0, 1) or (0, ±MAX_SLANT · LAYER, 1). The
+ * normal is (a · LAYER, b, c · LAYER) of the face's offset, so LAYER
+ * drops out.
  */
 fn seen(geometry: &Geometry, faces: u16) -> bool {
     (0..FACE_KINDS).any(|kind| {
-        let [nx, ny, nz] = geometry.normals[kind];
-        faces & (1 << kind) != 0 && nz < MAX_SLANT * nx.abs().max(LAYER * ny.abs())
+        let [a, b, c] = geometry.offsets[kind];
+        faces & (1 << kind) != 0 && f64::from(c) < MAX_SLANT * f64::from(a.abs().max(b.abs()))
     })
 }
 
