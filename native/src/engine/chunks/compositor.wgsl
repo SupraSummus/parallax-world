@@ -95,10 +95,10 @@ const FLAT = 2.0;
 // `first`, by rows, the centre of its first column `base`; or whole
 // splats of it near each other on its plane, `first` and the next `count`
 // (low byte of `slot_count`), the widest's half width `wide`; or `count`
-// runs of a picture from `first`, its first column's centre `base`, of
-// medium, its slab's first layer `layer` and how deep its halves are,
-// `half`, in half layers (see veil_fragment). Its chunk's slot
-// (`slot_count` above the low byte), the box of their outlines along the
+// runs of a picture from `first`, its first column's centre `base`; or a
+// picture of medium at `first`, its slab's first layer `layer` and how
+// deep its halves are, `half`, in half layers (see veil_fragment). Its
+// chunk's slot (`slot_count` above the low byte), the box of their outlines along the
 // axis relative to the chunk's origin, whether any showed in the last
 // frame, and how far past the plane they are, nearest and farthest.
 struct Cluster {
@@ -393,56 +393,63 @@ fn flat_fragment(in: RunPixel) -> @location(0) vec4f {
   return vec4f(shade(chunks[in.colours.z], unpack4x8unorm(colour)), 1.0);
 }
 
-// A run of a picture of medium (compositor.rs's veils), its own columns'
-// bricks on its slab's plane, `near` past its chunk's, at the depth of a
-// voxel there, of the level whose whole voxels are drawn there
-// (level_ahead): so medium behind them is not drawn, and where their
-// level is coarser, it is in front. Where on
+// A picture of medium (compositor.rs's veils), a quad on its slab's middle
+// plane, as wide as its cluster's box but for the slants the face's rays
+// do not reach where its chunk is. Its depth is the least anything past
+// its slab's front may be drawn at (nearest_depth, as its culling has it),
+// of the level whose whole voxels are drawn there (level_ahead): what a
+// ray crosses of it lies before whatever the ray meets in the slab, so
+// medium behind that is not drawn, and it shows before all within. Where on
 // the picture, in halves of a brick across and rows up from its first
-// place's centre; where its picture is, and how many columns its rows are;
-// which halves of its slab its level draws (veil_fragment); where it is
-// from the eye; and how its chunk shades (Shading), worked out here:
-// reading the globals for it in every fragment is slow.
+// place's centre; where its picture is; which halves of its slab its
+// level draws (veil_fragment); how far aside a ray of slant 1 takes its
+// columns there; where it is from the eye; and how its chunk shades
+// (Shading), worked out here: reading the globals for it in every
+// fragment is slow.
 struct Veil {
   @builtin(position) position: vec4f,
   @builtin(clip_distances) owned: array<f32, 4>,
   @location(0) place: vec2f,
-  @location(1) @interpolate(flat) picture: vec2u,
+  @location(1) @interpolate(flat) picture: u32,
   @location(2) @interpolate(flat) drawn: vec2f,
   @location(3) at: vec3f,
   @location(4) @interpolate(flat) grey: vec4f,
   @location(5) @interpolate(flat) weight: vec3f,
+  @location(6) @interpolate(flat) aside: vec2f,
 }
 
 struct VeilPixel {
   @location(0) place: vec2f,
-  @location(1) @interpolate(flat) picture: vec2u,
+  @location(1) @interpolate(flat) picture: u32,
   @location(2) @interpolate(flat) drawn: vec2f,
   @location(3) at: vec3f,
   @location(4) @interpolate(flat) grey: vec4f,
   @location(5) @interpolate(flat) weight: vec3f,
+  @location(6) @interpolate(flat) aside: vec2f,
 }
 
 @vertex
-fn veil_vertex(@builtin(vertex_index) vertex: u32, @builtin(instance_index) instance: u32) -> Veil {
+fn veil_vertex(@builtin(vertex_index) vertex: u32) -> Veil {
   let t = tiles[vertex >> 2u];
   let slot = t.slot_count >> 8u;
   let c = chunks[slot];
-  let run = columns[t.first + instance];
-  let corner = run_corner(run.x, vertex);
-  let at = vec3f(c.origin + run_at(t, c, corner), c.distance + t.near);
-  let level = level_ahead(c.face, at.z);
-  var depth = depth_of(level, length(at));
-  if globals.whole == FLAT {
-    depth = flat_depth(level, dot(globals.faces[c.face].view[2], at));
-  }
+  let first = t.layer + vec2f(0.0, t.half);
+  let drawn = select(vec2f(0.0), vec2f(1.0), first > vec2f(c.clip) & first <= vec2f(c.reach));
+  // Its box holds the face's rays' slants: this chunk's, from its slab's front, at most.
+  let front = c.distance + t.near;
+  let far = max(abs(c.origin + t.min), abs(c.origin + t.max));
+  let slant = select(MAX_SLANT, min(far / front, MAX_SLANT), front > 0.0);
+  let out_by = vec2f(f32(vertex & 1u), f32((vertex >> 1u) & 1u)) * 2.0 - 1.0;
+  let corner = select(t.min, t.max, out_by > vec2f(0.0)) - out_by * (MAX_SLANT - slant) * t.half * c.half_layer;
+  let at = vec3f(c.origin + corner, c.distance + t.far);
+  let depth = nearest_depth(t, level_ahead(c.face, front));
   var out: Veil;
   out.position = quad_position(c, at, depth);
   out.owned = in_face(at);
-  out.place = corner;
-  out.picture = vec2u(t.first + instance - (run.y & 0xfffffu), run.y >> 20u);
-  let first = t.layer + vec2f(0.0, t.half);
-  out.drawn = select(vec2f(0.0), vec2f(1.0), first > vec2f(c.clip) & first <= vec2f(c.reach));
+  out.place = (corner - t.base) / (vec2f(LAYER, 1.0) * c.half_layer * 2.0 / LAYER);
+  out.picture = t.first;
+  out.drawn = drawn;
+  out.aside = t.half * vec2f(0.5, LAYER / 2.0);
   out.at = at;
   let shading = shading_of(c);
   out.grey = shading.grey;
@@ -454,27 +461,49 @@ fn veil_vertex(@builtin(vertex_index) vertex: u32, @builtin(instance_index) inst
 // 4/(3√2) (worldgen's CHORD), both in units of its grid.
 const LAYER_OVER_CHORD = 0.75;
 
-// A column of a picture of medium, row q, column s: its colour times its
-// optical depth, and that depth, of the halves of its slab `drawn` says
-// its level draws.
-fn medium_at(picture: vec2u, q: i32, s: i32, drawn: vec2f) -> vec4f {
-  let column = columns[picture.x + u32(q) * picture.y + u32(s)];
-  let depth = dot(unpack2x16float(column.y), drawn);
+// A column of the picture of medium at `picture`, row q, column s: its
+// colour times its optical depth, and that depth, of the halves of its
+// slab `halves` weighs; none outside the picture.
+fn medium_at(picture: u32, q: i32, s: i32, halves: vec2f) -> vec4f {
+  let size = vec2i(columns[picture]);
+  if q < 0 || s < 0 || q >= size.y || s >= size.x {
+    return vec4f(0.0);
+  }
+  let column = columns[picture + 1u + u32(q * size.x + s)];
+  let depth = dot(unpack2x16float(column.y), halves);
   return vec4f(unpack4x8unorm(column.x).rgb * depth, depth);
 }
 
 // A row of a picture of medium at x, in halves of a brick: between the
 // two columns around x, each as much as x is near it.
-fn medium_row(picture: vec2u, q: i32, x: f32, drawn: vec2f) -> vec4f {
+fn medium_row(picture: u32, q: i32, x: f32, halves: vec2f) -> vec4f {
   let u = (x - f32(q & 1)) / 2.0;
   let s = i32(floor(u));
-  return mix(medium_at(picture, q, s, drawn), medium_at(picture, q, s + 1, drawn), u - f32(s));
+  return mix(medium_at(picture, q, s, halves), medium_at(picture, q, s + 1, halves), u - f32(s));
 }
 
-// The medium of a slab where a pixel's ray crosses its plane: its
-// columns' as a field, each column's share of it a tent over twice its
-// brick, so that they add up to one everywhere, across cells (a picture
-// holds its own columns' neighbours), seams and the face's rays' slants.
+// A picture of medium at `place`: its columns' as a field, each column's
+// share of it a tent over twice its brick, so that they add up to one
+// everywhere: across cells too, whose pictures, each its own columns'
+// alone, lie over one another there.
+fn medium_field(picture: u32, place: vec2f, halves: vec2f) -> vec4f {
+  let q = i32(floor(place.y));
+  return mix(medium_row(picture, q, place.x, halves), medium_row(picture, q + 1, place.x, halves), place.y - f32(q));
+}
+
+// Columns of a picture of medium a pixel takes along its ray through each
+// half of a slab, at most.
+const TAPS = 8;
+
+// The medium of a slab along a pixel's ray. A column's is taken as spread
+// evenly through each half of its slab, as a relief's pillar is solid
+// through its depth: a ray slanting σ off the axis crosses the columns
+// over σ times the half's depth, the nearer half's before where it
+// crosses the slab's middle plane and the farther's after, and takes of
+// each as much as it crosses, so a pixel takes the columns along that
+// line, one a column but TAPS at most: a deeper slab's, more apart. So
+// medium thin along the axis shows as much as the rays cross of it, not
+// only where they cross the plane.
 // A column's voxels are 2 layers apart, and its brick its share of the
 // plane, so a ray along the axis crosses as much of each as 2 layers'
 // depth, a slanted one as much more as its path through the slab is
@@ -487,9 +516,19 @@ fn medium_row(picture: vec2u, q: i32, x: f32, drawn: vec2f) -> vec4f {
 // between halves (bake's slab_layers).
 @fragment
 fn veil_fragment(in: VeilPixel) -> @location(0) vec4f {
-  let q = i32(floor(in.place.y));
-  let y = in.place.y - f32(q);
-  let field = mix(medium_row(in.picture, q, in.place.x, in.drawn), medium_row(in.picture, q + 1, in.place.x, in.drawn), y);
+  let aside = in.at.xy / in.at.z * in.aside;
+  let taps = clamp(i32(ceil(max(abs(aside.x) / 2.0, abs(aside.y)))), 1, TAPS);
+  var field = vec4f(0.0);
+  for (var k = 0; k < taps; k++) {
+    let by = aside * (f32(k) + 0.5) / f32(taps);
+    if in.drawn.x != 0.0 {
+      field += medium_field(in.picture, in.place - by, vec2f(1.0, 0.0));
+    }
+    if in.drawn.y != 0.0 {
+      field += medium_field(in.picture, in.place + by, vec2f(0.0, 1.0));
+    }
+  }
+  field /= f32(taps);
   let along = 2.0 * LAYER_OVER_CHORD * length(in.at) / in.at.z;
   let stops = 1.0 - exp(-field.a * along);
   return vec4f(shaded(Shading(in.grey, in.weight), field) * (stops / max(field.a, 1e-30)), stops);

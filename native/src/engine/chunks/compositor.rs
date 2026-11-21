@@ -314,7 +314,7 @@ fn runs(places: &mut dyn Iterator<Item = [u32; 2]>) -> Vec<[u32; 3]> {
     runs
 }
 
-/** Runs as the GPU takes them (flat_vertex, veil_vertex): packed, and where `colours(k, columns before)` says the k-th's colours are. */
+/** Runs as the GPU takes them (flat_vertex): packed, and where `colours(k, columns before)` says the k-th's colours are. */
 fn packed(runs: &[[u32; 3]], colours: impl Fn(usize, usize) -> usize) -> Vec<GpuColumn> {
     let mut before = 0;
     runs.iter()
@@ -358,55 +358,52 @@ fn place([a, b]: [i32; 2]) -> [i32; 2] {
 
 /**
  * A chunk's medium (bake's Medium) as the GPU takes it, `start` columns
- * into the chunk's: a picture of it per slab, on the
- * slab's plane, of its own columns' bricks as flatten lays them out, drawn
- * as its rows' runs, and a column around them each way, its neighbours';
- * each picture its columns, all in its box from its first place, row by
- * row, each an item: [colour, its optical depths in its slab's nearer half
- * and its farther, as f16s], 0 where none; then its runs
- * of its own columns, each [its row, first column and length (packed, as
- * flatten's), how many items back its first column is | how many columns
- * its rows are << 20]. Its runs in clusters of at most RUNS, each holding
- * its runs' box, its picture's plane, its slab's first layer and its
- * halves' depth.
- * `base`, `unit` and `half_layer` as tiles() takes them. However the
- * cells share out a slab, its columns tile its plane once.
+ * into the chunk's: a picture of it per slab, of its columns' bricks as
+ * flatten lays them out: [how many columns its rows are, how many rows],
+ * then its columns, all in their box from its first place, row by row,
+ * each an item: [colour, its optical depths in its slab's nearer half and
+ * its farther, as f16s], 0 where none. A cluster each, holding its box,
+ * from its slab's front to its middle plane, its slab's first layer and
+ * its halves' depth.
+ * As a relief drawn flat is enlarged by how far its pillars reach (Flat),
+ * the box is as much wider as a ray takes its columns aside
+ * (veil_fragment): by half the slab's depth times the face's rays' slant,
+ * and a column more, as a column's share reaches its neighbours' centres.
+ * So neighbours' pictures lie over one another there, each adding its own
+ * columns' share.
+ * `base`, `unit` and `half_layer` as tiles() takes them.
  */
 pub fn veils(medium: &[Medium], base: [f64; 2], unit: f64, half_layer: f64, slab: i32, start: usize) -> (Vec<GpuColumn>, Vec<GpuCluster>) {
     let (mut items, mut clusters) = (Vec::new(), Vec::new());
     for picture in medium.chunk_by(|p, q| p.first == q.first) {
-        let own = || picture.iter().filter(|p| p.own).map(|p| place(p.column));
+        let places = || picture.iter().map(|p| place(p.column));
         let (Some(low), Some(high)) =
-            (own().reduce(|l, p| [l[0].min(p[0]), l[1].min(p[1])]), own().reduce(|h, p| [h[0].max(p[0]), h[1].max(p[1])]))
+            (places().reduce(|l, p| [l[0].min(p[0]), l[1].min(p[1])]), places().reduce(|h, p| [h[0].max(p[0]), h[1].max(p[1])]))
         else {
             continue;
         };
-        // A row and a column around its own, its first row even.
-        let least = [(low[0] - 1) & !1, low[1] - 1];
-        let [rows, width] = [high[0] - least[0] + 2, high[1] - least[1] + 2];
-        let at = |p: [i32; 2]| [p[0] - least[0], p[1] - least[1]];
+        // Its first row even.
+        let least = [low[0] & !1, low[1]];
+        let [rows, width] = [high[0] - least[0] + 1, high[1] - least[1] + 1];
         let first = items.len();
-        items.resize(first + (rows * width) as usize, [0; 2]);
+        items.push([width as u32, rows as u32]);
+        items.resize(first + 1 + (rows * width) as usize, [0; 2]);
         for p in picture {
-            let [r, s] = at(place(p.column));
-            if (0..rows).contains(&r) && (0..width).contains(&s) {
-                let [near, far] = p.depth.map(f16_bits);
-                items[first + (r * width + s) as usize] = [p.colour, near | far << 16];
-            }
+            let [r, s] = place(p.column);
+            let [near, far] = p.depth.map(f16_bits);
+            items[first + 1 + ((r - least[0]) * width + s - least[1]) as usize] = [p.colour, near | far << 16];
         }
-        let runs = runs(&mut own().map(|p| at(p).map(|v| v as u32)));
-        let runs_first = items.len();
-        assert!(width < 1 << 12 && runs_first + runs.len() - first < 1 << 20, "a picture of {width} columns");
-        items.extend(packed(&runs, |k, _| (runs_first + k - first) | (width as usize) << 20));
+        let centre = |[r, s]: [i32; 2]| column_centre(base, unit, least, (r - least[0]) as u32, (s - least[1]) as u32);
+        let (lo, hi) = bricks_box(unit, places().map(centre));
+        // A column's share reaches its neighbours' centres, and a ray takes those half the slab's depth times its slant aside.
+        let deep = f64::from(slab) * half_layer;
+        let margin = [2.0 * LAYER * unit + MAX_SLANT[0] * deep, unit + MAX_SLANT[1] * deep];
         // Its sites' outlines span a layer either side of them.
-        let depth = f64::from(picture[0].first + slab - 1) * half_layer;
-        clusters.extend(runs.chunks(RUNS).enumerate().map(|(k, part)| {
-            let (lo, hi) = runs_box(part, base, unit, least);
-            let mut cluster = GpuCluster::new(start + runs_first + k * RUNS, part.len(), column_centre(base, unit, least, 0, 0));
-            cluster.hold([0, 1].map(|d| (lo[d] + hi[d]) / 2.0), [0, 1].map(|d| (hi[d] - lo[d]) / 2.0), [depth; 2]);
-            (cluster.layer, cluster.half) = (picture[0].first as f32, slab as f32);
-            cluster
-        }));
+        let middle = f64::from(picture[0].first + slab - 1) * half_layer;
+        let mut cluster = GpuCluster::new(start + first, 1, column_centre(base, unit, least, 0, 0));
+        cluster.hold([0, 1].map(|d| (lo[d] + hi[d]) / 2.0), [0, 1].map(|d| (hi[d] - lo[d]) / 2.0 + margin[d]), [middle - deep, middle]);
+        (cluster.layer, cluster.half) = (picture[0].first as f32, slab as f32);
+        clusters.push(cluster);
     }
     (items, clusters)
 }

@@ -479,8 +479,7 @@ fn box_tiles(Lattice { r, u, f }: Lattice, heights: (i64, i64), min: [i32; 3], m
  * meet it (Level::meets), and not all are buried, every voxel's neighbours
  * whole (Level::buried), so that no ray from anywhere enters one; of its
  * medium, whether any see-through ones meet the least cell about its site
- * that holds all its medium reads (medium_reads), its neighbours' slabs
- * too, beside which it draws its own. Once it has its tiles.
+ * that holds all its medium reads (medium_reads). Once it has its tiles.
  */
 fn may_hold(cell: &CellChunk, lattice: Lattice, level: &Level) -> bool {
     let centre = lattice.world(cell.site);

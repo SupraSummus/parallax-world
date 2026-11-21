@@ -29,8 +29,8 @@ use tables::Geometry;
  * (a, b, c) in the face's lattice coordinates, in that grid's units,
  * inclusive: a chunk is the same whatever else the grid holds. A cell deep
  * past its cell, where its relief's solid may run on, and half a cell
- * before it and a column or two around it, where its medium's slabs and
- * their neighbours are (Baker::bake_cell).
+ * before it, where its medium's slabs are (Baker::bake_cell); a column or
+ * two around it, which nothing reads any more (docs/todo.md).
  */
 pub fn chunk_reads(chunk: &CellChunk) -> (usize, [i32; 3], [i32; 3]) {
     let (min, max) = chunk.bounds();
@@ -40,12 +40,12 @@ pub fn chunk_reads(chunk: &CellChunk) -> (usize, [i32; 3], [i32; 3]) {
 
 /**
  * The sites a cell chunk's medium reads, a box as chunk_reads has it: the
- * slabs of its columns whose middle sites it holds, and their neighbours
- * (cell_medium), half a cell deeper each way and a column or two around.
+ * slabs of its columns whose middle sites it holds (cell_medium), half a
+ * cell deeper each way.
  */
 pub fn medium_reads(chunk: &CellChunk) -> ([i32; 3], [i32; 3]) {
     let ((from, to), m) = (chunk.bounds(), chunk.spacing());
-    ([from[0] - 2, from[1] - 1, from[2] - m], [to[0] + 2, to[1] + 1, to[2] + m])
+    ([from[0], from[1], from[2] - m], [to[0], to[1], to[2] + m])
 }
 
 /**
