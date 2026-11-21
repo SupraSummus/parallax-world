@@ -31,7 +31,7 @@ one world's: `cargo test --release -p worlds --test contract valley`.
 | `native/src/engine/chunks.rs` | What the GPU's buffers cannot hold is left out, the farthest first |
 | `native/src/engine/chunks/compositor.rs`, `native/src/engine/voxels.rs` | Their shaders valid as wgpu would find them, without a GPU (naga); the structs they share laid out alike in WGSL and Rust |
 | `fcc/src/lib.rs` | Tiles hold their cubes alike along every axis; a table of tiles in blocks holds what a map would, and a copy changes alone; a part of a grid holds its box's sites as the grid does; each face reads the look through the voxels' faces towards it |
-| `fcc/src/walk.rs`, `worlds/tests/forest.rs` | Walking: the ground, steps, walls, jumps; the forest's path through its ferns |
+| `fcc/src/walk.rs`, `worlds/tests/forest.rs`, `worlds/src/valley/moor.rs` | Walking: the ground, steps, walls, jumps; the forest's path through its ferns; into the moor's huts |
 | `worlds/tests/contract.rs`, `worldgen/tests/contract.rs`, `worldgen/tests/shapes.rs` | Every world, the engine's test worlds and each solid keep the contract (`worldgen/src/checks/contract.rs`): generated in pieces equals generated whole; each stratum's cells look on average as what is in them two levels finer, or as their baseline says they don't (`worlds/data/contract/`, `worldgen/data/contract/`; `docs/checks.md`); each solid in the worst case |
 | `worlds/tests/cost.rs` | What generating each world costs, counted, stays within a quarter of its baseline (`worlds/data/cost/`; "Cost" in `docs/checks.md`) |
 | `worlds/src/path.rs` | Whether a column is by a path agrees with its distance to the path's curve, round a steep, fast-bending spine |

@@ -646,18 +646,7 @@ pub fn fog(seed: u64) -> World {
 /** The moor of `seed`, its mist lying as `lies` says. */
 fn moor_in(seed: u64, lies: Mist) -> World {
     let world = Scope::new(seed);
-    let relief = world.of("heath");
-    let hills = Fbm::<{ m(240.0) }, 4>::new(relief.seed("hills"));
-    let bumps = ValueNoise::<{ m(10.0) }>::new(relief.seed("bumps"));
-    let heath: ByColumn = Arc::new(move |x, z| (hills.at(x, z) - Fx::HALF) * Units::m(28.0) + (bumps.at(x, z) - Fx::HALF) * Units::m(0.8));
-    // Winding along z west of the origin.
-    let phase = (hash64(relief.seed("stream"), 0, 0, 0) % 1000) as f64 / 100.0;
-    let line: Arc<dyn Fn(i64) -> Fx + Send + Sync> = Arc::new(move |z| {
-        let zm = z as f64 / m(1.0) as f64;
-        fx(m(-40.0) as f64 + m(1.0) as f64 * (12.0 * js::sin(zm / 37.0 + phase) + 4.0 * js::sin(zm / 11.0 + 2.0 * phase)))
-    });
-    let moorland =
-        Arc::new(Moorland::new(&world.of("moor"), heath.clone(), Arc::new(|_, _| Fx::ONE), fx(0.65), Some(line), Some(WATER), lies));
+    let (heath, moorland) = heath_and_moorland(&world, lies);
     let moor: Arc<dyn Domain> = Arc::new(Moor { moorland: moorland.clone(), uplands: None, path: None, under: true });
     // The heath, levelled under each hut.
     let ground = Lie::new(move |x, z| heath(x, z)).shaped(vec![moor.clone()]).ground(GROUND_SCALE, SLOPE);
@@ -675,6 +664,22 @@ fn moor_in(seed: u64, lies: Mist) -> World {
         heights: Some(HEIGHTS),
         points: Vec::new(),
     }
+}
+
+/** The moor alone's heath, and its moorland on all of it, with its own stream, its mist lying as `lies` says. */
+fn heath_and_moorland(world: &Scope, lies: Mist) -> (ByColumn, Arc<Moorland>) {
+    let relief = world.of("heath");
+    let hills = Fbm::<{ m(240.0) }, 4>::new(relief.seed("hills"));
+    let bumps = ValueNoise::<{ m(10.0) }>::new(relief.seed("bumps"));
+    let heath: ByColumn = Arc::new(move |x, z| (hills.at(x, z) - Fx::HALF) * Units::m(28.0) + (bumps.at(x, z) - Fx::HALF) * Units::m(0.8));
+    // Winding along z west of the origin.
+    let phase = (hash64(relief.seed("stream"), 0, 0, 0) % 1000) as f64 / 100.0;
+    let line: Arc<dyn Fn(i64) -> Fx + Send + Sync> = Arc::new(move |z| {
+        let zm = z as f64 / m(1.0) as f64;
+        fx(m(-40.0) as f64 + m(1.0) as f64 * (12.0 * js::sin(zm / 37.0 + phase) + 4.0 * js::sin(zm / 11.0 + 2.0 * phase)))
+    });
+    let moorland = Moorland::new(&world.of("moor"), heath.clone(), Arc::new(|_, _| Fx::ONE), fx(0.65), Some(line), Some(WATER), lies);
+    (heath, Arc::new(moorland))
 }
 
 /** The moor's layers on `ground`, of `moorland`: drawn where it owns the land. */
@@ -863,23 +868,29 @@ fn steading(f: &Heath, s: &Steading) -> Node {
     Node::group(vec![Child::new("hut", ANY_SIZE, hut), Child::new("ring", ANY_SIZE, ring), Child::new("cairns", m(2.0), cairns)])
 }
 
-/** The hut, in its frame: u along its front, v up from its floor, w back from the front. Drystone walls, a doorway and a window cut through them, a thatched gable roof, a hearth. */
+/**
+ * The hut, in its frame: u along its front, v up from its floor, w back
+ * from the front. Drystone walls, a doorway and a window cut through
+ * them, a thatched gable roof, a hearth. Its doorway and eaves are high
+ * enough, and the doorway wide enough, for a walking body (fcc's walk.rs)
+ * to go in and stand, though it collides with coarser voxels.
+ */
 fn hut(s: &Steading, random: &mut Rng) -> Node {
     let (length, depth) = (s.length, s.depth);
-    let top = m(2.0);
+    let (top, door) = (m(2.75), m(2.4));
     let mut shapes = Vec::new();
     let mut part = Part::new(s.frame(), &mut shapes);
     part.add([-1, -m(1.5), -1], [length + 1, 0, depth + 1], F::stone);
     part.add([0, 0, 0], [length, top, depth], K::drystone);
     part.cut([WALL, 0, WALL], [length - WALL, top, depth - WALL]);
     let [(front, _), _, (back, back_length), _] = walls(length, depth);
-    part.within(front).cut([length / 2 - 4, 0, 0], [length / 2 + 4, m(1.7), WALL]);
+    part.within(front).cut([length / 2 - 6, 0, 0], [length / 2 + 6, door, WALL]);
     part.within(back).cut([back_length / 2 - 2, 7, 0], [back_length / 2 + 2, 11, WALL]);
     // A lintel over the door, a hearth on the floor.
-    part.within(front).add([length / 2 - 6, m(1.7), -1], [length / 2 + 6, m(1.7) + 2, 0], T::timber);
+    part.within(front).add([length / 2 - 8, door, -1], [length / 2 + 8, door + 2, 0], T::timber);
     part.ball([(length / 2) as f64, 0.5, (depth * 2 / 3) as f64], 2.5, F::stone, Op::Fill);
     // A thatched roof, one solid, overhanging all round: a skin of thatch over a stone gable
-    // would be thinner than coarse sites, and they would show the stone.
+    // would be thinner than coarse sites, and they would show the stone. So inside, its eaves are the ceiling.
     let rise = (depth as f64 / 2.0 + 3.0) * (0.9 + random.next() * 0.3);
     part.gable([-2.0, (top - 2) as f64, -3.0], [(length + 2) as f64, top as f64 + rise, (depth + 3) as f64], 0, T::thatch, Op::Fill);
     // From afar, its outline. Measured (Far::measured), the roof's thatch is lost from above at levels 2 and 3
@@ -933,4 +944,40 @@ fn cairns(f: &Heath, s: &Steading, random: &mut Rng) -> Node {
         side = -side;
     }
     Node::of(shapes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fcc::walk::{COLLISION_LEVEL, Ground, WalkInput, Walker};
+    use worldgen::generator::generate;
+    use worldgen::grid::Box3;
+
+    #[test]
+    fn a_body_walks_into_a_hut_and_stands_in_it() {
+        for seed in [1, 7, 42] {
+            let s = heath_and_moorland(&Scope::new(seed), MIST).1.steading(0, 0).expect("a steading by the origin");
+            let world = moor(seed);
+            let level = COLLISION_LEVEL;
+            let [cx, cz] = s.centre;
+            let (min_y, max_y) = world.heights_at(level);
+            let [x0, z0, x1, z1] = [cx - m(8.0), cz - m(8.0), cx + m(8.0), cz + m(8.0)].map(|v| v >> level);
+            let area = Box3 { min: [2 * (x0 / 2), min_y, z0], max: [x1, max_y, z1] };
+            let tiles = fcc::Tiles::one(generate(&world.generator, &area, level).to_grid(true));
+            let ground = Ground { tiles: &tiles };
+            // Outside its doorway, facing in.
+            let [x, _, z] = s.frame().site([s.length / 2, 0, -m(2.0)]);
+            let mut body = Walker::at([x as f64, (s.level.0 + m(2.0)) as f64, z as f64]);
+            let yaw = ((cx - x) as f64).atan2((cz - z) as f64).to_degrees();
+            let forward = WalkInput { forward: 1.0, yaw, ..WalkInput::default() };
+            for _ in 0..2 * 60 {
+                body = body.walk(forward, 1.0 / 60.0, &ground);
+            }
+            // Inside its walls, standing on its floor.
+            let [ex, ey, ez] = body.eye();
+            let inside = (ex - cx as f64).hypot(ez - cz as f64) < (s.depth / 2 - WALL) as f64;
+            let standing = (m(1.6)..m(2.0)).contains(&(ey as i64 - s.level.0));
+            assert!(inside && standing, "seed {seed}: eye at {:?}, the hut's floor at {cx} {} {cz}", body.eye(), s.level.0);
+        }
+    }
 }
