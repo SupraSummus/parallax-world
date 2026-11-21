@@ -258,9 +258,17 @@ Numbers are for the forest at 1280×800, as measured when written.
   in a cube grown until there are enough, a field's columns in all 16 km.
   The rarest go first by these counts; places per area would compare them.
 - **The survey asks each field at every column of 16 km**, a million,
-  at every seed: most of a seed's survey.
+  at every seed: most of a seed's survey,
+  though the plans they share are made there once.
   Over 4 km, or at columns of level 9, it lost strata (tried):
   the valley's rare ponds and kinds of heath, the moor's stream bed.
+- **A region's level 0 is made whole, and is most of its time**
+  (`hold_region` in `worldgen/src/checks/contract.rs`),
+  to find the surfaces its cells are sampled near:
+  rays then see a hundredth of it, and few of its parts are held.
+  Made part by part, only where cells are looked at,
+  the cells would be those of a few parts:
+  near each other, so telling less surely.
 - **A component is checked apart from a world** (`check_component`):
   `check` narrowed to its name, at several places a stratum, would do.
 - **The solids' scenes ask little against the level two finer.**

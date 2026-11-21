@@ -32,7 +32,8 @@ Things come apart into parts no wider than a region (`REGION`),
 named by their children's names, numbers left out (`towns/block/house`);
 a dense population is surveyed over a smaller square than a sparse one (`PARTS`),
 and one of small cells over fewer metres (`HALF_CELLS`).
-Fields are asked at columns of a coarse level, and at level 0 there:
+Fields are asked at columns of a coarse level, and at level 0 there,
+all of them at a column before the next, as they share its plans:
 they keep what is finer than their sites in proportion ("Plans" in "Levels", generators.md),
 so a railway, a kerb or a pond shows;
 a field's place is the site asked, at its surface, as a part's is its bounds.
@@ -150,9 +151,15 @@ Margins quoted elsewhere in this document are older ones,
 in shares of material types or in sRGB.
 
 The first two of these share a region's levels, each generated once (`hold_region`):
-- at each level, the region against parts 32 sites a side (`parts_hold`),
+- at each level, the region against parts of it 32 sites a side (`parts_hold`),
   each generated alone:
-  a seam, order dependence or hidden state shows as a differing site;
+  for each stratum a sample of those meeting its places (`PARTS`),
+  drawn by where each is, as its cells are:
+  as many at every level and for every stratum,
+  not all of a region's, hundreds at level 0 and a few at the coarsest.
+  A field's places reach above and under its surface,
+  where it says it draws nothing, or all of a kind.
+  A seam, order dependence or hidden state shows as a differing site;
   and with what is skipped where it says it may not be drawn all the same
   (`checking_skipped`): it draws nothing there,
   what a field fills unasked, as all of a kind, is what it would draw,

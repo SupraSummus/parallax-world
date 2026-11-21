@@ -151,20 +151,24 @@ pub(crate) fn nearest_first(places: &mut [Box3], spawn: [i64; 3]) {
 pub fn survey(world: &World, region: i64, wanted: impl Fn(&str) -> bool) -> Survey {
     let mut found = Found::new(world.spawn);
     let (mut layers, mut things) = (Vec::new(), Vec::new());
-    for layer in &world.generator.layers {
-        if !wanted(layer.name()) {
-            continue;
-        }
+    let wanted = || world.generator.layers.iter().filter(|layer| wanted(layer.name()));
+    let fields: Vec<&Field> = wanted().filter_map(|layer| if let Layer::Field(field) = layer { Some(field) } else { None }).collect();
+    let mut at_spawn = survey_fields(world, world.spawn, (FIELD_LEVEL, SIDE), &fields, &mut found).into_iter();
+    for layer in wanted() {
         let start = Instant::now();
         match layer {
             Layer::Population(population) => {
-                let (half, seen) = around(world, |centre, _| survey_things(world, centre, population, region, &mut found), |s| s.1.made);
+                let mut things_around = |centre| survey_things(world, centre, population, region, &mut found);
+                let at_spawn = things_around(world.spawn);
+                let (half, seen) = or_at_places(world, at_spawn, things_around, |s| s.1.made);
                 layers.push(Surveyed { layer: population.name, half, found: seen.made, seconds: start.elapsed().as_secs_f64() });
                 things.push(seen);
             }
             Layer::Field(field) => {
-                let drawn = around(world, |centre, cube| survey_field(world, centre, cube, field, &mut found), |d| *d);
-                layers.push(Surveyed { layer: field.name, half: SIDE / 2, found: drawn, seconds: start.elapsed().as_secs_f64() });
+                let (at_spawn, seconds) = at_spawn.next().expect("a field");
+                let at_place = |centre| survey_fields(world, centre, (PLACE_LEVEL, PLACE_SIDE), &[field], &mut found)[0].0;
+                let drawn = or_at_places(world, at_spawn, at_place, |drawn| *drawn);
+                layers.push(Surveyed { layer: field.name, half: SIDE / 2, found: drawn, seconds: seconds + start.elapsed().as_secs_f64() });
             }
         }
     }
@@ -173,80 +177,92 @@ pub fn survey(world: &World, region: i64, wanted: impl Fn(&str) -> bool) -> Surv
 }
 
 /**
- * `survey` around spawn in the whole cube, or, finding nothing there
- * (`found` is 0), around each place the world names in turn, finer:
- * a feature too rare to be near spawn at every seed (the valley's
- * tunnels) is where the world says it is.
+ * `at_spawn`, what a layer's survey found around spawn, or, if nothing
+ * (`found` is 0), what `survey` finds around each place the world names
+ * in turn: a feature too rare to be near spawn at every seed (the
+ * valley's tunnels) is where the world says it is.
  */
-fn around<T>(world: &World, mut survey: impl FnMut([i64; 3], (u32, i64)) -> T, found: impl Fn(&T) -> usize) -> T {
-    let mut done = survey(world.spawn, (FIELD_LEVEL, SIDE));
+fn or_at_places<T>(world: &World, at_spawn: T, mut survey: impl FnMut([i64; 3]) -> T, found: impl Fn(&T) -> usize) -> T {
+    let mut done = at_spawn;
     for (_, find) in &world.points {
         if found(&done) > 0 {
             break;
         }
-        done = survey(find(), (PLACE_LEVEL, PLACE_SIDE));
+        done = survey(find());
     }
     done
 }
 
 /**
- * Where `field` draws around `centre`, asked at every column of sites of
- * `level` in a cube `side` wide, at a height in it, into `found`; returns
- * at how many.
+ * Where each of `fields` draws around `centre`, asked at every column of
+ * sites of `level` in a cube `side` wide, at a height in it, into
+ * `found`: all of them at a column before the next, so a plan they share
+ * (a world's land) is made there once. Returns at how many each draws,
+ * and how long it took: a shared plan's time is the first's to read it.
  */
-fn survey_field(world: &World, centre: [i64; 3], (level, side): (u32, i64), field: &Field, found: &mut Found) -> usize {
-    let mut random = Rng::new(hash_text(field.name, world.generator.seed));
+fn survey_fields(world: &World, centre: [i64; 3], (level, side): (u32, i64), fields: &[&Field], found: &mut Found) -> Vec<(usize, f64)> {
+    let mut randoms: Vec<Rng> = fields.iter().map(|field| Rng::new(hash_text(field.name, world.generator.seed))).collect();
     let s = 1i64 << level;
     let cube = world.within(Box3::around(centre, side / 2));
     let (h0, h1) = (cube.min[1], cube.max[1]);
     let side = side / s;
-    let mut drawn = 0;
+    let mut drawn = vec![(0, 0.0); fields.len()];
     for c in 0..side * side {
-        // A site's column of FIELD_LEVEL, as generating it asks: at any height, for a field of sites.
+        // A site's column of the level, as generating it asks: at any height, for a field of sites.
         let [x, z] = [(c % side, centre[0]), (c / side, centre[2])].map(|(i, o)| (o.div_euclid(s) + i - side / 2) * s);
-        let p = [x, h0 + random.below((h1 - h0) as u32) as i64, z];
-        // What it draws there, along an axis from..to: the place is around the top of what fills, the middle of what carves.
-        let (kinds, along, from, to): (Vec<Kind>, usize, i64, i64) = match &field.values {
-            FieldValues::At(at) => {
-                let at = |s| footprint(s, [0, 0], || at(x, p[1], z));
-                let Some((kind, _)) = at(s) else { continue };
-                (at(1).into_iter().map(|(k, _)| k).chain([kind]).collect(), 1, p[1], p[1] + 1)
-            }
-            FieldValues::Shapes(near) => {
-                // A shape reaching the site's voxel, from its bottom to its top.
-                let b = Box3::around(p, s);
-                let shapes = footprint(s, [0, 0], || near(&b));
-                let Some(shape) = shapes.iter().find(|shape| shape.bounds.overlaps(&b)) else { continue };
-                (vec![shape.kind], 1, shape.bounds.min[1], shape.bounds.max[1])
-            }
-            FieldValues::Spans { axis, spans } => {
-                let [a, b] = across(*axis);
-                let spans = |s| footprint(s, [0, 0], || spans(p[a], p[b]));
-                let coarse = spans(s);
-                if coarse.is_empty() {
-                    continue;
-                }
-                // And what it draws finer than these sites, at level 0, where the place is: a coarse
-                // site's span is stretched to keep a site (column.rs), so its top may be far from the ground's.
-                let fine = spans(1);
-                let at = if fine.is_empty() { &coarse } else { &fine };
-                let (from, to) = (at.iter().map(|s| s.from).min().expect("spans"), at.iter().map(|s| s.to).max().expect("spans"));
-                (coarse.iter().chain(&fine).map(|s| s.kind).collect(), *axis, from, to)
-            }
-        };
-        drawn += 1;
-        let carves = field.op == Op::Carve;
-        let at = if carves { (from + to) / 2 } else { to };
-        // The site, moved there: fields whose surfaces are near share a region.
-        let mut centre = p;
-        centre[along] = at;
-        let place = Box3::around(centre, s / 2);
-        let kinds: BTreeSet<Option<Kind>> = if carves { [None].into() } else { kinds.into_iter().map(Some).collect() };
-        for kind in kinds {
-            found.add((field.name.to_string(), kind), 1, [place]);
+        for ((field, random), drawn) in fields.iter().zip(&mut randoms).zip(&mut drawn) {
+            let start = Instant::now();
+            let p = [x, h0 + random.below((h1 - h0) as u32) as i64, z];
+            drawn.0 += survey_site(field, p, s, found) as usize;
+            drawn.1 += start.elapsed().as_secs_f64();
         }
     }
     drawn
+}
+
+/** What `field` draws at `p`, a site of sites `s` apart, into `found`; whether anything. */
+fn survey_site(field: &Field, p: [i64; 3], s: i64, found: &mut Found) -> bool {
+    let [x, _, z] = p;
+    // What it draws there, along an axis from..to: the place is around the top of what fills, the middle of what carves.
+    let (kinds, along, from, to): (Vec<Kind>, usize, i64, i64) = match &field.values {
+        FieldValues::At(at) => {
+            let at = |s| footprint(s, [0, 0], || at(x, p[1], z));
+            let Some((kind, _)) = at(s) else { return false };
+            (at(1).into_iter().map(|(k, _)| k).chain([kind]).collect(), 1, p[1], p[1] + 1)
+        }
+        FieldValues::Shapes(near) => {
+            // A shape reaching the site's voxel, from its bottom to its top.
+            let b = Box3::around(p, s);
+            let shapes = footprint(s, [0, 0], || near(&b));
+            let Some(shape) = shapes.iter().find(|shape| shape.bounds.overlaps(&b)) else { return false };
+            (vec![shape.kind], 1, shape.bounds.min[1], shape.bounds.max[1])
+        }
+        FieldValues::Spans { axis, spans } => {
+            let [a, b] = across(*axis);
+            let spans = |s| footprint(s, [0, 0], || spans(p[a], p[b]));
+            let coarse = spans(s);
+            if coarse.is_empty() {
+                return false;
+            }
+            // And what it draws finer than these sites, at level 0, where the place is: a coarse
+            // site's span is stretched to keep a site (column.rs), so its top may be far from the ground's.
+            let fine = spans(1);
+            let at = if fine.is_empty() { &coarse } else { &fine };
+            let (from, to) = (at.iter().map(|s| s.from).min().expect("spans"), at.iter().map(|s| s.to).max().expect("spans"));
+            (coarse.iter().chain(&fine).map(|s| s.kind).collect(), *axis, from, to)
+        }
+    };
+    let carves = field.op == Op::Carve;
+    let at = if carves { (from + to) / 2 } else { to };
+    // The site, moved there: fields whose surfaces are near share a region.
+    let mut centre = p;
+    centre[along] = at;
+    let place = Box3::around(centre, s / 2);
+    let kinds: BTreeSet<Option<Kind>> = if carves { [None].into() } else { kinds.into_iter().map(Some).collect() };
+    for kind in kinds {
+        found.add((field.name.to_string(), kind), 1, [place]);
+    }
+    true
 }
 
 /** The axes across `axis`, in order. */
