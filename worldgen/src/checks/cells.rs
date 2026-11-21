@@ -136,12 +136,14 @@ pub(crate) fn cells_of(name: &str, world: &World, focus: Option<&Generator>, reg
         near.swap(i, (random.next() * (i + 1) as f64) as usize % (i + 1));
     }
     let mut cells = Vec::new();
+    // The same rays through every cell, moved to it: its centre is a site of the finer level too.
+    let rays: [_; VOXEL_FACES.len()] = std::array::from_fn(|along| rays_through(s, f, along));
     for &cell in near.iter().take(SAMPLES) {
         let centre = cell.map(|v| v as f64 * s);
-        for along in 0..VOXEL_FACES.len() {
+        for (along, rays) in rays.iter().enumerate() {
             let mut looks = [[0.0; 4]; 2];
-            let rays = rays_through(centre, s, f, along);
-            for (q, d, length) in &rays {
+            for (q, d, length) in rays {
+                let q: [f64; 3] = std::array::from_fn(|c| centre[c] + q[c]);
                 // The rays run along the finer sites' rows, through their middles: each crossing stands for CROSSING.
                 for (((grid, scale), crossing), look) in grids.iter().zip([f, s]).zip([CROSSING, 1.0]).zip(&mut looks) {
                     for (_, seen) in composited(grid, q.map(|v| v / scale), *d, length / scale, crossing) {
@@ -158,12 +160,12 @@ pub(crate) fn cells_of(name: &str, world: &World, focus: Option<&Generator>, reg
 }
 
 /**
- * The rays along direction `along` through the cell centred at `centre`
+ * The rays along direction `along` through the cell centred at the origin
  * (sites `s` apart, lattice units): those of the rows of the sites `f`
  * apart along it that cross it, each two a hair to either side of its
  * row, each where it enters the cell and how far it goes in it.
  */
-fn rays_through(centre: [f64; 3], s: f64, f: f64, along: usize) -> Vec<([f64; 3], [f64; 3], f64)> {
+fn rays_through(s: f64, f: f64, along: usize) -> Vec<([f64; 3], [f64; 3], f64)> {
     let n = VOXEL_FACES[along].map(|v| v as f64);
     let d = n.map(|v| v / std::f64::consts::SQRT_2);
     // A hair across d, n × (3, 2, 1): along no plane of the lattice.
@@ -173,15 +175,13 @@ fn rays_through(centre: [f64; 3], s: f64, f: f64, along: usize) -> Vec<([f64; 3]
     // Each row once, by where it meets the plane across d through the origin.
     let mut rows = BTreeSet::new();
     let reach = (s / f) as i64 + 1;
-    let at = centre.map(|v| (v / f).round() as i64);
     for i in -reach..=reach {
         for j in -reach..=reach {
             for k in -reach..=reach {
-                let p = [at[0] + i, at[1] + j, at[2] + k];
-                if (p[0] + p[1] + p[2]) & 1 != 0 {
+                if (i + j + k) & 1 != 0 {
                     continue;
                 }
-                let p = p.map(|v| v as f64 * f);
+                let p = [i, j, k].map(|v| v as f64 * f);
                 let along = p[0] * d[0] + p[1] * d[1] + p[2] * d[2];
                 rows.insert([0, 1, 2].map(|c| ((p[c] - along * d[c]) * 1e3).round() as i64));
             }
@@ -191,12 +191,12 @@ fn rays_through(centre: [f64; 3], s: f64, f: f64, along: usize) -> Vec<([f64; 3]
     for row in rows {
         for side in [-1.0, 1.0] {
             let q: [f64; 3] = std::array::from_fn(|c| row[c] as f64 / 1e3 + side * e[c]);
-            // Where it crosses the cell: |m · (x − centre)| ≤ s for each face's m.
+            // Where it crosses the cell: |m · x| ≤ s for each face's m.
             let (mut t0, mut t1) = (f64::NEG_INFINITY, f64::INFINITY);
             for m in VOXEL_FACES {
                 let m = m.map(|v| v as f64);
                 let towards = m[0] * d[0] + m[1] * d[1] + m[2] * d[2];
-                let off: f64 = (0..3).map(|c| m[c] * (q[c] - centre[c])).sum();
+                let off = m[0] * q[0] + m[1] * q[1] + m[2] * q[2];
                 if towards.abs() < 1e-12 {
                     if off > s {
                         t1 = f64::NEG_INFINITY;
