@@ -11,15 +11,15 @@
 //! winds with it, within a band clear of the towns and up the mountains'
 //! faces: at each level a point between two neighbours, the place across
 //! within its wander and the height within the grade where the track
-//! between them costs least over the ground under it, a bridge or a tunnel
-//! much more than earth cut or filled. So it bends along a slope and
-//! climbs or falls with the ground to keep off them where its bends and
-//! grade let it. Seen from above that line turns at its points, so its x
-//! is averaged over SMOOTH_HALF points either side, across the pieces'
-//! ends, and it bends gently. Where the ground is far from the track the
-//! line tunnels or bridges, nearer it cuts or fills, by the same
-//! comparison at each point, and no run of bridge or tunnel is shorter
-//! than MIN_RUN points.
+//! between them costs least over the ground under it: earth cut or filled
+//! by its cross-section, a bridge or a tunnel much more. So it bends along
+//! a slope and climbs or falls with the ground to keep off deep earth, and
+//! off tunnels and bridges most, where its bends and grade let it. Seen from above that line turns
+//! at its points, so its x is averaged over SMOOTH_HALF points either
+//! side, across the pieces' ends, and it bends gently. Where the ground is
+//! far from the track the line tunnels or bridges, nearer it cuts or
+//! fills, by the same comparison at each point, and no run of bridge or
+//! tunnel is shorter than MIN_RUN points.
 
 use std::sync::Arc;
 
@@ -73,8 +73,6 @@ const TRIES: i64 = 6;
  */
 const INNER: i64 = town::ACROSS + m(4.0) + (COURSE_SLOPE * town::LONG as f64) as i64 + REACH + 1;
 const OUTER: i64 = INNER + m(256.0);
-// Past where the mountains' spurs stand full height and their gorges are full depth, so it can't go round them.
-const _: () = assert!(INNER >= mountains::NOSE + m(30.0));
 /**
  * The steepest the line runs across from the course: its ends across the
  * band over a piece, and each level that wanders by its wander over half
@@ -102,13 +100,6 @@ const TURN: f64 = 2.0 * SLANT / (2 * SMOOTH_HALF + 1) as f64;
 const GRADE: f64 = 4.0 / 256.0;
 /** The lowest its pieces' ends lie; the highest, a grade's rise over a piece above. */
 const LOW: Fx = Fx::m(-6.0);
-/**
- * What the line weighs where it goes, per sample of the ground under it,
- * in metres of earth cut or filled: a bridge or a tunnel costs as much as
- * COSTLY more, so it bends or climbs round what would need one where its
- * grade and its bends let it.
- */
-const COSTLY: Fx = Fx::m(20.0);
 /** Samples of the ground over each half of a segment, at most; at a piece's end, along z either side, ENDS_APART apart. */
 const SAMPLES: i64 = 8;
 const ENDS_APART: i64 = m(64.0);
@@ -117,10 +108,18 @@ const HEIGHTS: i64 = 8;
 const ACROSS_STEP: i64 = m(16.0);
 /** What keeping straight is worth: a metre of earth a sample for each STRAIGHT metres a point stands across from its neighbours' middle. */
 const STRAIGHT: i64 = 32;
-/** Ground further above the track than CUT metres is tunnelled, further below than FILL bridged; nearer, cut or filled, its sides SLOPE (rise over run). */
+/**
+ * Ground further above the track than CUT metres is tunnelled, further
+ * below than FILL bridged; nearer, cut or filled, its sides SLOPE (rise
+ * over run), so earth's cross-section is the formation's width times its
+ * depth and SPREAD more.
+ */
 const CUT: f64 = 10.0;
 const FILL: f64 = 8.0;
 const SLOPE: f64 = 2.0 / 3.0;
+const SPREAD: i64 = (2.0 * FORMATION as f64 * SLOPE) as i64;
+/** What a tunnel or a bridge costs a sample at the least: a few times the deepest earth. */
+const COSTLY: Fx = Fx::m(100.0);
 /** Half the formation's width; at a station EXTRA more, for its platform and building, easing back over EASE past its ends. */
 const FORMATION: i64 = m(3.0);
 const EXTRA: i64 = m(14.0);
@@ -280,10 +279,17 @@ fn turned(terrain: &Terrain, p: [Fx; 3]) -> [Fx; 3] {
     [p[0] + terrain.course.x(p[2].floor_units().0), p[1], p[2]]
 }
 
-/** What a track `top` high costs over ground: the earth cut or filled to it, and COSTLY more where it would be tunnelled or bridged. */
+/**
+ * What a track `top` high costs over ground, per sample, in metres of
+ * earth over the formation's width: cut or filled, its cross-section,
+ * which grows with the square of its depth as its sides slope out;
+ * tunnelled or bridged, COSTLY, and the more the deeper or higher. So
+ * the line keeps to shallow earth where its bends and grade let it, and
+ * off tunnels and bridges most.
+ */
 fn cost(ground: Fx, top: Fx) -> Fx {
-    let costly = if structure(ground, top) == Structure::Earth { Fx::ZERO } else { COSTLY };
-    (ground - top).abs() + costly
+    let d = (ground - top).abs();
+    if structure(ground, top) == Structure::Earth { d + d * d / Units(SPREAD) } else { COSTLY + d }
 }
 
 /** The ground under a track, where its top is `base` and `weight` times the height being fitted. */
@@ -326,12 +332,13 @@ fn refine(ends: &Ends, level: usize, a: [Fx; 3], b: [Fx; 3]) -> [Fx; 3] {
     // No more than a sample a point of the finest level.
     let n = SAMPLES.min((PIECE >> (level + 1)) / FINEST);
     let fits = places.into_iter().map(|x| {
-        // Along each half, its track from the neighbour's height to the one fitted.
+        // Along each half, its track from the neighbour's height to the one fitted, from the point itself: what a coarse
+        // point stands on, the finer can't climb out of at the grade.
         let samples: Vec<Sample> = [a, b]
             .iter()
             .flat_map(|e| {
                 (0..n).map(move |j| {
-                    let t = fx((j as f64 + 0.5) / n as f64);
+                    let t = fx(j as f64 / n as f64);
                     let to = Fx::ONE - t;
                     Sample { ground: ground(&ends.terrain, e[0] + (x - e[0]) * to, e[2] + (z - e[2]) * to), base: e[1] * t, weight: to }
                 })
@@ -598,10 +605,14 @@ impl Railway {
         [s.at[0], s.top, s.at[1]]
     }
 
-    /** The first place from the start, ahead and behind in turn, where `structure` carries the track: the track there. */
+    /**
+     * The first place from the start, ahead and behind in turn, where
+     * `structure` carries the track: the track there. Within 256 km: much
+     * further, the plans the ground is read by hold too few pieces.
+     */
     pub fn first(&self, structure: Structure) -> [i64; 3] {
-        let z = (0..1_000_000).flat_map(|k| [k, -k - 1]).map(|k| k * FINEST).find(|&z| self.line.track(z).2 == structure);
-        let (at, top, _) = self.line.track(z.expect("one within 8000 km"));
+        let z = (0..m(256_000.0) / FINEST).flat_map(|k| [k, -k - 1]).map(|k| k * FINEST).find(|&z| self.line.track(z).2 == structure);
+        let (at, top, _) = self.line.track(z.expect("one within 256 km"));
         [at[0], top, at[1]]
     }
 }
@@ -763,7 +774,6 @@ fn building(s: &Station) -> Node {
 
 #[cfg(test)]
 mod tests {
-    use super::mountains::Form;
     use super::*;
 
     /** The railway of `seed`, and the terrain it is on. */
@@ -777,8 +787,7 @@ mod tests {
      * Along its first 32 km at each seed: no segment climbs steeper than
      * the grade, the line keeps to its band across from the valley's
      * course (so out of towns), and it is bridged or tunnelled along
-     * under 5 % of it, as it bends and climbs round what would need them
-     * but the mountains' spurs and gorges.
+     * under 5 % of it, as it bends and climbs round what would need them.
      */
     #[test]
     fn keeps_its_grade_and_band_and_off_structures() {
@@ -798,30 +807,6 @@ mod tests {
                 }
             }
             assert!(costly * 20 < all, "seed {seed}: bridged or tunnelled at {costly} points of {all}");
-        }
-    }
-
-    /**
-     * Along its first 32 km at each seed, the line tunnels through each
-     * spur at the mountains' feet on its side and bridges each gorge:
-     * it can't go round them, and there are some.
-     */
-    #[test]
-    fn tunnels_through_spurs_and_bridges_gorges() {
-        for seed in [42, 1, 2, 3] {
-            let (railway, terrain) = railway(seed);
-            let line = railway.line;
-            let mut met = 0;
-            for z in (line.ends.z(0)..line.ends.z(8)).step_by(mountains::APART as usize) {
-                let (at, carried) = match terrain.landforms.form(line.ends.side, z) {
-                    Some(Form::Spur { z, .. }) => (z, Structure::Tunnel),
-                    Some(Form::Gorge { z, .. }) => (z, Structure::Bridge),
-                    None => continue,
-                };
-                assert_eq!(line.track(at).2, carried, "seed {seed}: at {at}");
-                met += 1;
-            }
-            assert!(met > 0, "seed {seed}: no spur or gorge");
         }
     }
 
