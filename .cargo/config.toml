@@ -5,3 +5,19 @@
 # every crate built for the host takes it, so they share one build.
 [target.x86_64-unknown-linux-gnu]
 rustflags = ["-C", "target-cpu=x86-64-v3"]
+
+# The native frontend's WebAssembly (pnpm wasm): its threads, Web Workers,
+# share its memory, so std is built anew with atomics (-Z build-std, a
+# nightly's), and it is linked as wasm-bindgen's guide to threads says,
+# its memory as large as wasm32 reaches.
+[target.wasm32-unknown-unknown]
+rustflags = [
+    "-C", "target-feature=+atomics",
+    "-C", "link-arg=--shared-memory",
+    "-C", "link-arg=--import-memory",
+    "-C", "link-arg=--max-memory=4294967296",
+    "-C", "link-arg=--export=__wasm_init_tls",
+    "-C", "link-arg=--export=__tls_size",
+    "-C", "link-arg=--export=__tls_align",
+    "-C", "link-arg=--export=__tls_base",
+]

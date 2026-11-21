@@ -1,5 +1,5 @@
 name: Set up environment
-description: Install pnpm, set up Node.js with pnpm cache, install dependencies, and add Rust's WebAssembly target
+description: Install pnpm, set up Node.js with pnpm cache, install dependencies, and add the nightly Rust that builds the WebAssembly
 
 runs:
   using: composite
@@ -17,6 +17,9 @@ runs:
       shell: bash
       run: pnpm install --frozen-lockfile
 
-    - name: Add Rust's WebAssembly target
+    # The nightly pnpm wasm names, with std's source to build anew (its threads).
+    - name: Add Rust's nightly for WebAssembly
       shell: bash
-      run: rustup target add wasm32-unknown-unknown && rustup component add clippy rustfmt
+      run: |
+        rustup toolchain install "$(grep -o 'nightly-[0-9-]*' package.json)" --profile minimal --component rust-src --target wasm32-unknown-unknown
+        rustup component add clippy rustfmt

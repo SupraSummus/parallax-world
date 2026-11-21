@@ -8,7 +8,7 @@
     "build": "pnpm wasm --config profile.wasm.lto=true --config profile.wasm.codegen-units=1 --config profile.wasm.incremental=false && pnpm bindgen && vite build web --base ./",
     "preview": "vite preview web",
     "shot": "cargo run --release -p parallax-native -- --headless",
-    "wasm": "cargo build --profile wasm --target wasm32-unknown-unknown -p parallax-native",
+    "wasm": "cargo +nightly-2026-11-21 build -Z build-std=panic_abort,std --profile wasm --target wasm32-unknown-unknown -p parallax-native",
     "bindgen": "cargo run --release -p bindgen",
     "lint": "cargo clippy --workspace --all-targets -- -D warnings && cargo fmt --check",
     "test": "cargo test --no-fail-fast -p fcc -p bake && cargo test --release --no-fail-fast -p parallax-native -p worldgen -p light -p worlds -p cheese -- --skip keeps_the_contract:: --skip turned:: --skip even::",

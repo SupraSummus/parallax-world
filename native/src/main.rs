@@ -10,6 +10,7 @@
 
 mod engine;
 mod gpu;
+mod threads;
 mod view;
 mod window;
 mod world;
@@ -40,7 +41,7 @@ struct Args {
     #[arg(long, default_value_t = 12345)]
     seed: u64,
     /** Threads the world is made on [default: one a core]. */
-    #[arg(long, value_name = "N")]
+    #[arg(long, value_name = "N", value_parser = clap::builder::RangedU64ValueParser::<usize>::new().range(1..))]
     threads: Option<usize>,
 
     /** Where the camera is, in lattice units [default: the world's spawn]. */
@@ -236,7 +237,7 @@ impl View {
         // Sky, sun and lamps, as in look's `light`: 1,1,0 a clear day.
         let day = Shared::new(Brightness { sky: 1.0, sun: 1.0, glow: 0.0 });
         let shared = args.light.and_then(|light| light.on(&day)).unwrap_or(day.clone());
-        let world = World::new(made, Some(shared.clone()), args.threads.unwrap_or_else(num_cpus));
+        let world = World::new(made, Some(shared.clone()), args.threads.unwrap_or_else(threads::cores));
         let mut view = View {
             kind: args.engine,
             engine: args.engine.make(&world),
@@ -646,9 +647,6 @@ impl App {
         if let Some(worked) = worked {
             worked_a_frame(&view.world, &worked);
         }
-        // A world with no threads works here, a frame's time between frames.
-        let working = Instant::now();
-        while working.elapsed() < WORK && view.world.work() {}
         self.shown = !frame.busy && !view.world.lacks(&wants);
         if steered {
             let [tiles, bricks] = view.world.owed();
@@ -895,9 +893,6 @@ const RENDER_DISTANCE: f64 = 8000.0;
 const SHOT: [f64; 2] = [1280.0, 800.0];
 const WINDOW: [f64; 2] = [1580.0, 800.0];
 
-/** How long a world with no threads works after each frame (World::work), a piece at least. */
-const WORK: std::time::Duration = std::time::Duration::from_millis(12);
-
 /** Units a second it flies at unless --speed. */
 const SPEED: f64 = 40.0;
 
@@ -922,8 +917,7 @@ fn main() {
     }));
     #[cfg(not(target_arch = "wasm32"))]
     let argv: Vec<String> = std::env::args().collect();
-    // In a browser, the page's query gives the options, each key=value as --key value, and there are no threads to
-    // make the world on.
+    // In a browser, the page's query gives the options, each key=value as --key value.
     #[cfg(target_arch = "wasm32")]
     let argv: Vec<String> = {
         let query = web_sys::window().and_then(|w| w.location().search().ok()).unwrap_or_default();
@@ -933,7 +927,7 @@ fn main() {
             Some((key, value)) => vec![format!("--{key}"), value.replace("%2C", ",").replace("%2c", ",")],
             None => vec![format!("--{p}")],
         });
-        std::iter::once(String::new()).chain(options).chain(["--threads".into(), "0".into()]).collect()
+        std::iter::once(String::new()).chain(options).collect()
     };
     let mut args = parse(&argv);
     // A recording's world, seed and threads, its first line, unless given.
@@ -951,10 +945,6 @@ fn main() {
     } else {
         window::run("Parallax", args.size.unwrap_or(WINDOW), app);
     }
-}
-
-fn num_cpus() -> usize {
-    std::thread::available_parallelism().map_or(1, |n| n.get())
 }
 
 #[cfg(test)]
