@@ -104,6 +104,43 @@ fn ground_along_a_face_shows_no_gaps() {
     }
 }
 
+/** `ground`, under 2 units of blue medium that lets next to nothing through. */
+fn flooded(seed: u64) -> worldgen::World {
+    use worldgen::generator::{Field, KindDef, Layer, Op};
+    let mut world = ground(seed);
+    world.generator.kinds.push(KindDef {
+        name: "water",
+        kind_type: 8,
+        colors: &["#0000ff"],
+        walk_through: true,
+        glows: false,
+        medium: true,
+    });
+    world.generator.layers.push(Layer::Field(Field::at("water", 0.0, Op::Fill, |_, y, _| (0..2).contains(&y).then_some((1, Some(1.0))))));
+    world
+}
+
+/**
+ * A medium thin along a face's axis, on the ground, hides it from above,
+ * though rays cross it between the planes its slabs' pictures are on,
+ * many times its depth apart (veil_fragment), and meet the ground within
+ * a slab (veil_vertex).
+ */
+#[test]
+#[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
+fn a_thin_medium_on_the_ground_hides_it_from_above() {
+    const PIXELS: [u32; 2] = [320, 200];
+    for kind in [Kind::Reliefs, Kind::Flat] {
+        let mut world = World::new(flooded(1), None, 4);
+        let look = Look { fog: f64::INFINITY, ..Look::new([0.0, 32.0, 0.0], [45.0, -25.0], FOV, 300.0, PIXELS.map(f64::from)) };
+        let pixels = drawn(&mut *kind.make(&world), &mut world, &look);
+        // The lower half of the picture is all ground; right under the eye the medium is a little thin (docs/todo.md).
+        let ground = pixels.chunks(4).skip((PIXELS[0] * PIXELS[1] / 2) as usize);
+        let bare = ground.clone().filter(|p| p[0] > p[2]).count();
+        assert!(bare * 50 < ground.len(), "{kind:?}: {bare} of {} pixels of the ground show through", ground.len());
+    }
+}
+
 #[test]
 #[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
 fn a_medium_of_splats_lets_through_as_much_as_its_extinction_says() {

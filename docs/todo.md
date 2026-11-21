@@ -542,6 +542,25 @@ Numbers are for the forest at 1280×800, as measured when written.
     would let a ray take the sky's colour where shine changes along it.
     Not looked at in the chunks engines, whose slabs blur where a medium ends.
     Ponds, the moor's water and wells are still whole voxels.
+  - In the chunks engines the sea from above still shows its slabs
+    (`--camera=-38111,3719,-7706 --look=-58,-29 --distance 40000`):
+    bands across a face whose axis is tilted, where it stands over the horizon
+    as far as half a slab is deep; and it lies over the shore's trees, at the far side of an island:
+    a picture's depth is the least for its whole slab (`veil_vertex`),
+    by distance along the axis, or drawn flat the least ahead in its box.
+    A depth per pixel, where its ray enters the slab, hid the medium behind ground
+    it was before: in reliefs along a band past each seam of a tilted face, not understood;
+    drawn flat, where the floor's picture stands before the floor.
+  - A chunk still reads a column or two around its cell (`chunk_reads`),
+    where its medium's neighbours were, which no picture holds now:
+    `Lod::grid_reach` and its test are fitted to that width.
+  - A pixel reads up to `TAPS` columns four times over for each half of a slab,
+    and pictures overlap: the moor's frame, drawn flat, takes a third longer
+    on Mesa's software GPU; on a real one, not measured.
+    Cells deeper than 32 voxels (`--shift` over 3) have more columns along a ray than `TAPS`.
+  - Where neighbours' pictures overlap, their order shows, by a level or two of colour,
+    and the GPU lists them in no set order (`order_veils`):
+    two tests that held pictures to be the same allow as much now (`chunks.rs`).
   - The chunks engines take a medium's alpha for every channel,
     their pictures holding one optical depth a column;
     the voxels engine, the light and picture.rs's rays take each channel's own
@@ -564,8 +583,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   - Its deep slabs (`Lod::for_medium`) show mist on the ground above and below it
     in faces with tilted axes: a V at their seams near the horizon,
     and a column of smoke, as wide as a slab is deep, cut across at a seam.
-    Taking each half slab at its own middle plane halved the V at no cost,
-    but needs four columns of neighbours round a picture, not one.
+    Not looked at since a pixel takes its slab's halves along its ray.
   - The medium starts at the first half slab past the near plane:
     right by the eye, mist is a little thin.
   - A site's pieces, where shown, hide its medium and what is behind:
