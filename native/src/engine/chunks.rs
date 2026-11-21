@@ -287,7 +287,10 @@ mod tests {
             easel.pixels(&first, PIXELS);
             let followed = easel.pixels(&second, PIXELS).2;
             let whole = Easel::offscreen(None).pixels(&second, PIXELS).2;
-            assert!(followed == whole, "relief {relief}: {}", differ(&followed, &whole));
+            // Neighbours' pictures of medium lie over one another along their edges, in the clusters' order too:
+            // where their colours differ, by a level or two.
+            let most = followed.iter().zip(&whole).map(|(a, b)| a.abs_diff(*b)).max();
+            assert!(most <= Some(2), "relief {relief}: {}", differ(&followed, &whole));
         }
     }
 

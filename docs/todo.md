@@ -522,6 +522,18 @@ Numbers are for the forest at 1280×800, as measured when written.
     A kind's shine, kept by sites as glow is,
     would let a ray take the sky's colour where shine changes along it.
     Not looked at in the chunks engines, whose slabs blur where a medium ends.
+  - In the chunks engines the sea from above still shows its slabs
+    (`--camera=-38111,3719,-7706 --look=-58,-29 --distance 40000`):
+    bands across a face whose axis is tilted, where it stands over the horizon
+    as far as half a slab is deep, and a line of sand between slabs in a level one;
+    drawn flat, patches of sand too, where the floor's picture
+    stands farther before the floor than the medium's depth allows for (`veil_vertex`).
+  - A chunk still reads a column or two around its cell (`chunk_reads`),
+    where its medium's neighbours were, which no picture holds now:
+    `Lod::grid_reach` and its test are fitted to that width.
+  - A pixel reads up to `TAPS` columns four times over for each half of a slab,
+    and pictures overlap: the moor's frame, drawn flat, takes a third longer
+    on Mesa's software GPU; on a real one, not measured.
     Ponds, the moor's water and wells are still whole voxels.
   - The chunks engines take a medium's alpha for every channel,
     their pictures holding one optical depth a column;
@@ -543,10 +555,7 @@ Numbers are for the forest at 1280×800, as measured when written.
     two columns an item, or the pictures in a texture the GPU filters,
     would read half as often.
   - Its deep slabs (`Lod::for_medium`) show mist on the ground above and below it
-    in faces with tilted axes: a V at their seams near the horizon,
-    and a column of smoke, as wide as a slab is deep, cut across at a seam.
-    Taking each half slab at its own middle plane halved the V at no cost,
-    but needs four columns of neighbours round a picture, not one.
+    in faces with tilted axes, and a column of smoke as wide as a slab is deep.
   - The medium starts at the first half slab past the near plane:
     right by the eye, mist is a little thin.
   - A site's pieces, where shown, hide its medium and what is behind:

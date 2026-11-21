@@ -245,17 +245,13 @@ pub fn cell_splats(splats: &mut Splats, geometry: &Geometry, colour: &mut dyn Fn
  * a column of its grid, its voxels in `slab` layers of it, drawn on the
  * slab's middle plane see-through, as much as they stop.
  * Each slab of a column is one cell's, the one holding its middle, so that
- * a slab's pictures, one per cell, tile its plane once; a picture holds
- * its neighbours around its own too, so that its pixels may take each
- * column's and its neighbours' by how near they are, across cells.
+ * a slab's pictures, one per cell, tile its plane once.
  */
 pub struct Medium {
     /** Its column (a, b), from the least of its cell's bounds. */
     pub column: [i32; 2],
     /** Its slab's first layer, past the cell's plane, in half layers: every cell's slab there starts there. */
     pub first: i32,
-    /** Whether the cell's own, or its neighbour's. */
-    pub own: bool,
     /**
      * How much its voxels stop of a ray crossing each along its mean
      * chord (worldgen's CHORD), as optical depth: −ln of what gets through
@@ -275,8 +271,8 @@ pub(crate) fn slab_middle(c: i32, b: i32, slab: i32) -> i32 {
 /**
  * Fills `medium` with the see-through voxels of `voxels` a ray of the face
  * can enter (seen), their slabs of `slab` layers by column, the first from
- * layer 1, those whose middle site `owns` says is the cell's, and their
- * neighbours, `centre` as cell_splats takes it; by slab, row b and a.
+ * layer 1, those whose middle site `owns` says is the cell's, `centre`
+ * as cell_splats takes it; by slab, row b and a.
  */
 pub fn cell_medium(
     medium: &mut Vec<Medium>,
@@ -301,26 +297,16 @@ pub fn cell_medium(
             *sum += depth * f64::from((rgb >> (8 * k)) & 0xff);
         }
     }
-    let own = |[k, b, a]: [i32; 3]| owns(a, b, slab_middle(k * slab + 1, b, slab));
-    // Its own slabs of columns where the field is: by any with medium, which reaches as far as their neighbours' middles (veil_fragment); their neighbours, for their pixels' field.
-    const NEIGHBOURS: [[i32; 2]; 6] = [[2, 0], [-2, 0], [1, 1], [-1, 1], [1, -1], [-1, -1]];
-    let near = |[k, b, a]: [i32; 3]| std::iter::once([k, b, a]).chain(NEIGHBOURS.map(|[da, db]| [k, b + db, a + da]));
-    let mut kept: Vec<([i32; 3], bool)> = slabs.keys().flat_map(|&key| near(key)).filter(|&key| own(key)).map(|key| (key, true)).collect();
-    kept.sort_unstable();
-    kept.dedup();
-    let owned: Vec<[i32; 3]> = kept.iter().map(|k| k.0).collect();
-    kept.extend(owned.into_iter().flat_map(near).filter(|key| slabs.contains_key(key) && !own(*key)).map(|key| (key, false)));
     // By slab, row and column.
+    let mut kept: Vec<[i32; 3]> = slabs.keys().copied().filter(|&[k, b, a]| owns(a, b, slab_middle(k * slab + 1, b, slab))).collect();
     kept.sort_unstable();
-    kept.dedup();
-    for ([k, b, a], own) in kept {
-        let (depths, colours) = slabs.get(&[k, b, a]).copied().unwrap_or_default();
+    for [k, b, a] in kept {
+        let (depths, colours) = slabs[&[k, b, a]];
         let all: f64 = depths.iter().sum();
         let channel = |k: usize| ((colours[k] / all.max(f64::MIN_POSITIVE)).round() as u32).min(255) << (8 * k);
         medium.push(Medium {
             column: [a, b],
             first: 2 * (k * slab + 1) - centre,
-            own,
             depth: depths.map(|d| d as f32),
             colour: channel(0) | channel(1) | channel(2) | 0xff << 24,
         });

@@ -395,13 +395,22 @@ A ray costs a fragment per slab it crosses, 2Q near the eye and Q a level after
 (of the medium's Q);
 deeper slabs lose little along the axis, as optical depths add up in any order,
 though within a slab colours mix without their order.
-A ray takes the slab where it crosses that plane,
-so where it slants it takes it a little aside,
-which blurs where the medium ends by about a slab's depth times the slant:
+A column's medium is taken as spread evenly through each half of its slab,
+as a relief's pillar is solid through its depth:
+a ray slanting σ off the axis crosses the columns
+over σ times the half's depth,
+the nearer half's before where it crosses the plane, the farther's after,
+so a pixel takes a few columns along that line (`veil_fragment`).
+Medium thin along the axis, as the sea is in a level face,
+then shows as much as the rays cross of it,
+not only where they cross the planes, in stripes.
+It still blurs where the medium ends by about a slab's depth times the slant:
 where a face's axis is tilted, mist lying on the ground
-shows that much above and below it,
-and at a seam with a level face's rays, which take it where it is,
-the difference shows as a V.
+shows that much above and below it.
+As a relief drawn flat is enlarged by its pillars' reach,
+a picture is drawn that much wider than its columns,
+so neighbours' pictures lie over one another, each its own columns' share:
+what each lets through multiplies, as optical depths add up.
 The compositor lays the pictures one over another, far to near,
 each as much as it stops, fogged by its distance as whole voxels are,
 into a picture of their own, in front of what the reliefs drew,
@@ -415,17 +424,17 @@ so they are numbered from the near plane on, level by level.
 It counts the pictures at each place
 and lists each after those at farther places
 (a counting sort, `scan_veils` and `order_veils`).
-A face's pictures at one place are on one plane, which they tile once,
-so their order there makes no difference.
+A face's pictures at one place are on one plane,
+and lie over one another only along their edges,
+where their order shows by a level or two of colour, if they differ in it.
 So media of different colours, smoke in fog say,
 mix in their order along a ray (`a_nearer_medium_shows_over_one_behind`),
 and far mist fades to the horizon.
 Each slab of a column is one cell's, the one holding its middle site,
-so a slab's pictures tile its plane once;
+so a slab's columns tile its plane once;
 and a pixel takes the columns around it as a field,
 each a tent over twice its brick, so that they sum to one,
-from its picture, which holds its own columns' neighbours too,
-whichever cells they are:
+across cells, whose pictures overlap there:
 bricks alone showed their edges.
 So that none counts twice,
 each pixel is one face's only,
@@ -442,7 +451,10 @@ its cells, 32 voxels across, draw it from the near plane on,
 not the finest cells, a chunk per voxel.
 So a picture of medium takes the depths of the level
 whose whole voxels are drawn where it is (`level_ahead`),
-or finer levels' voxels behind it would hide it.
+or finer levels' voxels behind it would hide it:
+at the front of the halves of its slab it draws,
+as what a ray crosses of it lies before whatever it meets within the slab.
+So medium behind a wall, in its slab, shows before it.
 A test holds a slab of medium to exp(−extinction · path),
 thin and thick, along the axis and slanted
 (`a_medium_of_splats_lets_through_as_much_as_its_extinction_says`).
