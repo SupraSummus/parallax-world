@@ -1006,6 +1006,7 @@ and without them rays slipped in at a cliff's corners.
   A patch is a rule making a site look other than its cell does,
   to hide what is inherent
   (sheets grown to a site, `Tie`, `Column`'s two sites): to go, none to add.
+  But the first two also keep a thin wall whole (docs/todo.md, "Boxes and gables").
   What fills a site in part is a piece with an alpha, shown by the site's coin,
   a solid's edge as leaves are;
   things in a site stop as if apart, but a paint, which lies on what is there.
