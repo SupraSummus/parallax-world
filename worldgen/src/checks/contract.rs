@@ -1,4 +1,4 @@
-//! The contract every world keeps (docs/generators.md, "Checks"), to run
+//! The contract every world keeps (docs/checks.md), to run
 //! in tests: a box generated in parts, alone and in any order, equals it
 //! generated whole; nothing lies outside its heights, things keep their
 //! reach, and what is skipped where it says it may not draw draws nothing

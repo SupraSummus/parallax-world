@@ -513,7 +513,7 @@ pub struct KindDef {
      * plants and water, rather than stands on it and is stopped by it.
      */
     pub walk_through: bool,
-    /** Whether it gives light of its colour (light.rs), as a lamp does. */
+    /** Whether it gives light of its colour (light/), as a lamp does. */
     pub glows: bool,
     /**
      * Whether it stops a share of every ray, as mist does, and is drawn

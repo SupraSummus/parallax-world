@@ -4,7 +4,6 @@
 //! the face's axis, and its medium.
 //! A world is tiles of grids, one set per level of detail.
 //! See docs/architecture.md, section 3.
-//! It also walks a body on the ground (walk.rs).
 
 mod cells;
 pub mod face;
@@ -12,7 +11,6 @@ pub mod lod;
 mod splats;
 mod surface;
 mod tables;
-pub mod walk;
 
 use std::sync::Arc;
 

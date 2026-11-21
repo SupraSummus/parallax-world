@@ -30,7 +30,7 @@ use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use fcc::GRID_LEVELS;
 pub use fcc::TileId;
 use fcc::{Grid, Tiles};
-use worldgen::light::{Light, Shared};
+use light::{Light, Shared};
 use worldgen::tiles::{made_with, make_tiles};
 
 use crate::engine::voxels;
@@ -732,7 +732,7 @@ mod tests {
 
     #[test]
     fn a_world_lit_anew_is_as_one_made_so() {
-        use worldgen::light::Brightness;
+        use light::Brightness;
         let make = || (worlds::by_name("forest").expect("forest").make)(1);
         let (day, dusk) = (Brightness { sky: 1.0, sun: 1.0, glow: 0.0 }, Brightness { sky: 0.3, sun: 0.1, glow: 1.0 });
         let mut world = World::new(make(), Some(Shared::new(day)), 4);
@@ -745,7 +745,7 @@ mod tests {
 
     #[test]
     fn a_world_with_no_threads_is_as_one_with_some() {
-        use worldgen::light::Brightness;
+        use light::Brightness;
         let make = || (worlds::by_name("forest").expect("forest").make)(1);
         let day = Brightness { sky: 1.0, sun: 1.0, glow: 0.0 };
         assert!(lit(&mut World::new(make(), Some(Shared::new(day)), 0)) == lit(&mut World::new(make(), Some(Shared::new(day)), 4)));

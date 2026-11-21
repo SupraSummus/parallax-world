@@ -1,7 +1,7 @@
 //! The cheese: endless every way, holed through with caverns a few metres
 //! wide, tunnels between them and eyes in their walls, lit by magic
 //! crystals growing from the caverns' walls. No way is up but for a body
-//! walking it (bake/src/walk.rs): it climbs the caverns' floors, walks the
+//! walking it (fcc/src/walk.rs): it climbs the caverns' floors, walks the
 //! tunnels, and a pillar's winding stairs in each cavern lead up into the
 //! one over it. The caverns overlap enough to make one maze.
 //! Written from the engine's public API alone (docs/generators.md).

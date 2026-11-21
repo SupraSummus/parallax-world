@@ -1,5 +1,5 @@
 //! Whether a world's directions follow the lattice's: the rotational
-//! sibling of `places` (docs/generators.md, "Checks"). About the vertical
+//! sibling of `places` (docs/checks.md). About the vertical
 //! the lattice, square noise and tiles are four-fold, so their mark is a
 //! four-fold harmonic of horizontal directions at the lattice's phase,
 //! the same at every seed. Only about y, a ground's vertical: about x and
@@ -212,7 +212,7 @@ impl fmt::Display for Leak {
             self.chance
         )?;
         if self.broken() {
-            write!(f, ": its directions follow the lattice's (see \"Checks\" in docs/generators.md)")?;
+            write!(f, ": its directions follow the lattice's (see docs/checks.md)")?;
         }
         Ok(())
     }

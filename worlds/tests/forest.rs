@@ -84,7 +84,7 @@ fn forest_is_deterministic_has_ground_trees_and_a_clear_spawn() {
 
 #[test]
 fn a_body_walks_the_path_through_its_ferns() {
-    use bake::walk::{COLLISION_LEVEL, Ground, WalkInput, Walker};
+    use fcc::walk::{COLLISION_LEVEL, Ground, WalkInput, Walker};
     let world = forest(7);
     let level = COLLISION_LEVEL;
     let [x, z] = [world.spawn[0], world.spawn[2]].map(|v| v >> level);

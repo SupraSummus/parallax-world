@@ -1,5 +1,5 @@
 //! Light from a voxel's faces, as hosts that light a world hand it to the
-//! baker (Baker's `light`; worldgen's light.rs finds it): per face, the
+//! baker (Baker's `light`; light/ finds it): per face, the
 //! light it sends out, what it reflects and what it glows, linear. It is
 //! the face's colour as seen.
 

@@ -15,7 +15,7 @@
 //! or `top` and an area (min x and z, max x and z) to look straight down
 //! at; `light` and how bright the sky, the sun and glowing kinds are
 //! (1 1 0: a clear day; 0.01 0 1: night) lights the picture by
-//! worldgen::light instead of a fixed sun; `alone` and a component
+//! the light crate instead of a fixed sun; `alone` and a component
 //! (`Generator::alone`: "towns/block/church") draws it alone, where it
 //! stands. Last, the file. A point is
 //! x y z (lattice units), or a place the world names (`World::point`:
@@ -23,8 +23,8 @@
 //! takes one and how far around it.
 //! It prints the time taken and the share of pixels of each kind type.
 
+use light::{Brightness, Light, Shared};
 use worldgen::generator::kind_of;
-use worldgen::light::{Brightness, Light, Shared};
 use worldgen::picture::{Camera, picture_on_threads};
 use worlds::{WORLDS, by_name};
 

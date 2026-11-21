@@ -8,7 +8,8 @@ The Rust is a workspace of crates (`Cargo.toml`):
 `fcc/` under all of them
 (the lattice, grids and tiles of them, the light from voxels' faces),
 `bake/` (chunks baked) and `worldgen/` (the generator framework) on it,
-`worlds/` on `worldgen/`
+`light/` (light worked out across a world, [light.md](light.md))
+and `worlds/` on `worldgen/`
 (the registry, and worlds in crates of their own inside it);
 `native/` links them.
 For browsers it is built as WebAssembly and bound to the page
@@ -265,7 +266,7 @@ and coloured by what is seen of it along the face.
 Lit by computed light (`Lighting` in the panel, or `--light`),
 the baker is handed instead
 the light each face of a voxel it shows sends out
-(`fcc/src/light.rs`, found by `worldgen/src/light.rs`),
+(`fcc/src/light.rs`, found by `light/`),
 so only what shows is lit:
 a splat shows the mean of its open faces',
 each as much as it faces the camera.
@@ -570,7 +571,7 @@ and each channel to its own
 
 The panel picks the lighting apart from the engine (`Lighting`):
 voxels shaded by the way their faces face, or computed,
-by worldgen's `Light`, one model and one cache (`Shared`) for every engine:
+by `Light` (`light/`), one model and one cache (`Shared`) for every engine:
 the world's tiles where the light reads, made if not yet,
 each site as it is, what it stops a share,
 where the grids the world draws show it whole or not at all.
@@ -585,7 +586,7 @@ each voxel of the brick a ray can meet gets the light on it,
 by the way its surface faces (`Light::on_seen`),
 and what it glows,
 and shows its colour times the one, and the other,
-as worldgen's lit pictures do (`Light::relight`);
+as look's lit pictures do (`Light::relight`);
 shaded, the light is the mean of its open faces' shades.
 The light goes to the GPU beside the bricks, two words a site (RGB9E5), in a pool of its own.
 Till a brick with voxels is lit, it is not on the GPU, as if no ray had asked for it:

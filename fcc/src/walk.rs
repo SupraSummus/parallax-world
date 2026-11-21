@@ -3,7 +3,7 @@
 //! from) what is low enough as it walks, and jumps.
 //! Lattice units throughout, 0.125 m (worldgen's UNIT_SIZE).
 
-use fcc::{Tiles, VOXEL_FACES};
+use crate::{Tiles, VOXEL_FACES};
 
 /** Lattice units per metre. */
 const M: f64 = 8.0;

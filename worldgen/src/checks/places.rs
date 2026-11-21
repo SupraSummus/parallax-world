@@ -1,6 +1,6 @@
 //! Whether things prefer places: a world's layout must not follow the
 //! grids it is generated on (cells, plans' regions, tiles), at any seed
-//! (docs/generators.md, "Checks"). A town placed once per region, kept a
+//! (docs/checks.md). A town placed once per region, kept a
 //! margin inside it, is never on a region's edge; seen over many regions,
 //! its positions modulo the region's width bunch up.
 //!
@@ -151,7 +151,7 @@ impl fmt::Display for Preference {
             self.chance
         )?;
         if self.broken() {
-            write!(f, ": the same places in every period, as if on a grid (see \"Checks\" in docs/generators.md)")?;
+            write!(f, ": the same places in every period, as if on a grid (see docs/checks.md)")?;
         }
         let most = self.histogram.iter().copied().max().unwrap_or(0).max(1);
         let bars: String = self.histogram.iter().map(|&c| [' ', '.', ':', '-', '=', '+', '*', '#', '%', '@'][c * 9 / most]).collect();

@@ -136,7 +136,7 @@ Numbers are for the forest at 1280×800, as measured when written.
     and sharp only where a shape is several sites thick.
   - Light and hosts see a site held in part unlike:
     light its share, hosts a whole voxel or none by the coin.
-    Light corrects for the coin only next to what is shown (`shown` in `light.rs`),
+    Light corrects for the coin only next to what is shown (`shown` in `light/`),
     so two such sites in a row still shade what shows behind them.
     Hosts drawing pieces as light sees them would end it:
     blended by their alpha as a medium is (smooth, soft edges),
@@ -275,7 +275,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   using others' pieces as crates.
   Only the cheese is one (`worlds/cheese/`),
   and it still needs its entry in `WORLDS`, its name in three tests' `worlds!`
-  and its cost baseline in `worlds/` (generators.md, "Checks").
+  and its cost baseline in `worlds/` (checks.md).
   With `Entry` and `Region` in `worldgen`,
   each world's crate could give its entry and test itself
   (one macro of `worldgen::checks`), `WORLDS` a line per crate.
@@ -296,7 +296,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   which the terrain and the canopy compute about 14 times per column
   (with its neighbours, for slopes),
   and at levels 0 and 1 the undergrowth's many small shapes;
-  worldgen's, counted ("Cost" in `docs/generators.md`),
+  worldgen's, counted ("Cost" in `docs/checks.md`),
   goes mostly to the trees at levels 0 to 2
   and to the canopy from level 4 (`Rooms::owner` making the trees near).
 - **One of the valley's tiles is over the cost budget**
@@ -383,7 +383,7 @@ Numbers are for the forest at 1280×800, as measured when written.
 ## Light
 
 - **Light is a prototype, in look's pictures and native's computed lighting**
-  (`worldgen/src/light.rs`).
+  (`light/`).
   [docs/light.md](light.md) says what it gets wrong against its reference,
   what was tried and what it costs.
   Where it is to go, a step at a time, each measured on the reference's scenes:
@@ -575,10 +575,10 @@ Numbers are for the forest at 1280×800, as measured when written.
   the light, turned on in the panel, makes them again.
   One store of tiles for hosts, lit or not, would make them once,
   for what the sites of shaded tiles take;
-  it would not be the light's then (`Shared` in `light.rs`).
+  it would not be the light's then (`Shared` in `light/`).
 - **How far past an engine's reach tiles are kept is chosen**
   (`KEPT` in `native/src/world.rs`),
-  not derived from how far the light reads (`top_steps` in `light.rs`, and each level the next).
+  not derived from how far the light reads (`top_steps` in `light/`, and each level the next).
 - **Native's voxels wait on memory** (`march` in `voxels.wgsl`):
   most of a frame is its samples' rays, some 50 steps each,
   and a step costs its reads one after another (a brick's slot, then its site),
@@ -751,10 +751,16 @@ Numbers are for the forest at 1280×800, as measured when written.
   and `MESA_SHADER_CACHE_DISABLE=true`,
   else lavapipe reuses what it compiled for another CPU.
 - **The layout has more to sort.**
-  - `worldgen` holds more than generating, none of it read by the engine:
-    `checks/` (only tests and examples use it), `light.rs` (only native and `look`),
-    and in `picture.rs` a PNG coder, of which `lab/src/png.rs` is another.
-    Crates of their own would say so; `picture.rs` in parts.
+  - `worldgen` holds more than generating:
+    `checks/` and `cost.rs`, which only tests and examples use.
+    A crate of their own, as `light/` is, would say so,
+    but they read the generator's private parts (`whole`, `checking_skipped`),
+    and `WORLDS`' entries hold the contract's `Accuracy`.
+  - `picture.rs` is three things:
+    rays through the lattice (`FACES`, `CROSSING`, `over`, `first_hit`),
+    which light reads too and could go to `fcc`;
+    pictures of a world;
+    and a PNG coder, of which `lab/src/png.rs` is another.
   - `worlds/src/forest.rs` is still a world, the ground others build on
     (`Relief`, `Forest`) and the table of kinds they draw with (`K`);
     the valley's domains (`worlds/src/valley/`) use each other in circles.
@@ -766,8 +772,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   - `docs/generators.md` holds the worlds beside the engine ("Composing").
   - `native/` is no longer only native, and `bake/` serves one engine of it,
     the chunks', which a browser cannot draw.
-  - Tests at the end of `picture.rs`, `light.rs`, `native/src/main.rs`,
-    `voxels.rs` and `lod.rs` are a quarter to a half of each;
+  - Tests at the end of `lod.rs` are a third of it;
     `generator/tests.rs` shows the way.
 
 ## Ideas
@@ -810,7 +815,7 @@ Numbers are for the forest at 1280×800, as measured when written.
     from columns between the level's own, each made for it.
   - Places and the survey sample lines of cells along y (`PER_COLUMN`);
     `directions` measures the four-fold harmonic about y alone.
-  - Light takes its sky from above y (`SKY`, `SUN` in `light.rs`),
+  - Light takes its sky from above y (`SKY`, `SUN` in `light/`),
     and ends a line as far as the world's heights are high (`top_steps`).
     A world's generator could say where light comes into it from outside,
     at which sites of which levels:

@@ -62,7 +62,7 @@ then gets each change to a reviewed, green PR.
 Add the points worth a specific look:
 cost, thin margins, claims the author made but didn't prove.
 A claim that generation is unchanged or faster
-needs `bench` ("Cost" in docs/generators.md);
+needs `bench` ("Cost" in docs/checks.md);
 lists of known exceptions change only as docs/testing.md says.
 
 ## Git
@@ -86,7 +86,7 @@ lists of known exceptions change only as docs/testing.md says.
 - Rebase each open branch onto the new `main`,
   resolving conflicts so both sides' intent stays.
 - Cost baselines (`worlds/data/cost/`) never merge by hand:
-  take `main`'s, then bless them anew ("Cost" in docs/generators.md).
+  take `main`'s, then bless them anew ("Cost" in docs/checks.md).
 - Run the checks the change could break, push, and watch CI again.
 - Tell running agents that `main` moved.
 
