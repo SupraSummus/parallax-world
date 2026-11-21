@@ -13,6 +13,7 @@ use fcc::{FACE_KINDS, Look, VOXEL_FACES};
 
 use crate::generator::{Generator, generate_shown, shown};
 use crate::grid::{ALPHA, BRICK, Box3, COLOUR_ONE, GLOW_ONE, VoxelGrid};
+use crate::noise::hash;
 
 /** Sites a tile is wide, at the picture's level. */
 const TILE: i64 = 64;
@@ -325,7 +326,7 @@ impl Tiles {
                     leaves(ray, [b.min[0], tile.top + 1, b.min[2]].map(|v| v as f64), b.max.map(|v| (v - 1) as f64))
                 } else {
                     match tile.grid.get_or_empty_brick(x, y, z) {
-                        Some(0) => None,
+                        Some(0) if !stopped(ray, tile.grid.held(x, y, z).1.0) => None,
                         Some(_) => {
                             let look = tile.grid.along(x, y, z, ray.direction);
                             return match self.normal(ray.site, &tile.grid) {
@@ -416,6 +417,17 @@ pub fn first_hit(grid: &VoxelGrid, origin: [f64; 3], direction: [f64; 3], end: f
         walk.cross(&mut ray, &mut planes);
     }
     None
+}
+
+/**
+ * Whether pieces held in part that stop `pieces` of a site's rays (of
+ * ALPHA) stop this ray: by a coin of the site of a lattice four times
+ * finer that it enters them by, as native's voxels engine shows them
+ * (voxels.wgsl's `stops`).
+ */
+fn stopped(ray: &Ray, pieces: u8) -> bool {
+    let [x, y, z] = nearest_site(std::array::from_fn(|i| 4.0 * (ray.origin[i] + ray.t * ray.direction[i])));
+    pieces > 0 && ((hash(0, x, y, z) as u64 * ALPHA as u64) >> 32) < pieces as u64
 }
 
 /** When the ray leaves the box from `min` to `max` (a level's units), if it is in it now and goes further in it. */

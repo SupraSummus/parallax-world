@@ -55,7 +55,7 @@ pub fn make_sites(world: &World, level: u32, key: [i64; 3]) -> VoxelGrid {
 
 /** The tiles `sites` are of (`make_sites`), by key, as hosts draw them, see-through ones too: each its part. */
 pub fn parted(sites: &VoxelGrid, world: &World, level: u32, key: [i64; 3]) -> Vec<([i64; 3], Grid)> {
-    let (grid, heights) = (sites.to_grid(true), world.heights_at(level));
+    let (grid, heights) = (sites.to_grid(), world.heights_at(level));
     // What was made may end short of a tile, or before it.
     let (low, high) = (grid.min[1] as i64, (grid.min[1] + grid.n[1]) as i64);
     let part = |key: [i64; 3]| {

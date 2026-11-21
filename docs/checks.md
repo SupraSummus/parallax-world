@@ -146,9 +146,9 @@ each the sum of what is in it (`see` in `generate.rs`),
 a coarse site's colour its kinds' mean shades;
 so a coarse level may draw one kind for another,
 as the moor's heather for its sprigs, if it looks alike.
-Hosts take what a site's pieces look like, through each face where it differs,
-whole as often as they are seen there, by a site's coin
-(`VoxelGrid::show`): noisy, and a site too thin to show still stops light.
+Hosts take what a site's pieces look like, through each face where it differs:
+whole where they stop every ray, else held in part (fcc's `in_part`),
+shown by coins as often as they stop rays (architecture.md, section 4).
 What stops a walking body is apart from how a site looks:
 the share of its rays what stops one stops, wherever in it (`VoxelGrid`'s `solid`);
 a host's site stops a body where that is over half.

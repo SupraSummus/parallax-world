@@ -156,7 +156,7 @@ impl Level {
     }
 
     /**
-     * Whether a voxel of its tiles, or (`see_through`) a see-through one,
+     * Whether a voxel of its tiles, or (`see_through`) one of a medium,
      * meets the cell of `radius`·FCC about `centre`, a rhombic dodecahedron
      * as a voxel is of radius 1.
      * A cell smaller than those of 8·FCC is read site by site;
@@ -165,7 +165,7 @@ impl Level {
      */
     pub fn meets(&self, centre: [i32; 3], radius: i32, see_through: bool) -> bool {
         if radius < voxels::cell_size(0) {
-            let kept = |look| if see_through { !matches!(fcc::alpha_of(look), 0 | fcc::ALPHA) } else { look != 0 };
+            let kept = |look| if see_through { fcc::medium(look) } else { look != 0 };
             return meeting(centre, radius, 1).any(|q| self.grids.at(q[0], q[1], q[2]).is_some_and(kept));
         }
         let j = usize::from(radius >= voxels::cell_size(1));
@@ -786,7 +786,7 @@ mod tests {
             let corner = spawn.map(|v| (v as f64 / REACH as f64).round() as i32 * REACH);
             let level = Level::new(tiles_about(&world, level, corner, REACH));
             for kept in [false, true] {
-                let voxel = |look: fcc::Look| if kept { !matches!(fcc::alpha_of(look), 0 | fcc::ALPHA) } else { look != 0 };
+                let voxel = |look: fcc::Look| if kept { fcc::medium(look) } else { look != 0 };
                 let held = |q: [i32; 3]| (q[0] + q[1] + q[2]) & 1 == 0 && level.grids.at(q[0], q[1], q[2]).is_some_and(voxel);
                 for radius in [1, 2, 4, 8, 16, 32] {
                     // Each cell within REACH of the spawn (to the next multiple of 64, a site of each), or 8 cells, the nearer.

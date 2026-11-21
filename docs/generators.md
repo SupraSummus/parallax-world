@@ -327,7 +327,7 @@ how many rays get how far, and what they stop on.
   a face across the line sees the kind its rays meet first.
   No plane across an axis parts the lattice's layers,
   so a flat ground's top sites are held in part at every level, level 0 too,
-  and shown by their coins: the ground is pitted, a site deep.
+  shown by coins (fcc's `in_part`): the ground is speckled, a site deep.
   A paint lies on what is there, and past it only where it covers more:
   a field painting another's ground paints all of its top sites.
   A medium's span is in every site it reaches too, by the same law:
@@ -1007,7 +1007,7 @@ and without them rays slipped in at a cliff's corners.
   to hide what is inherent
   (sheets grown to a site, `Tie`, `Column`'s two sites): to go, none to add.
   But the first two also keep a thin wall whole (docs/todo.md, "Boxes and gables").
-  What fills a site in part is a piece with an alpha, shown by the site's coin,
+  What fills a site in part is a piece with an alpha, shown by coins,
   a solid's edge as leaves are;
   things in a site stop as if apart, but a paint, which lies on what is there.
   A field's solid spans cover their sites so ("Faces" in "Levels").

@@ -44,7 +44,7 @@ fn tiles_made_together_show_what_each_shows_alone() {
         let mut shown = 0;
         for (key, together) in &columns.flat_map(|key| make_tiles(&world, level, key)).collect::<Vec<_>>() {
             let b = tile_box(heights, *key);
-            let alone = generate_shown(&world.generator, &b, level).to_grid(true);
+            let alone = generate_shown(&world.generator, &b, level).to_grid();
             let faces = |g: &fcc::Grid, [x, y, z]: [i32; 3]| std::array::from_fn::<_, { fcc::FACE_KINDS }, _>(|k| g.face(x, y, z, k));
             let held = |g: &fcc::Grid, p @ [x, y, z]: [i32; 3]| (g.get(x, y, z), faces(g, p), g.solid(x, y, z), g.glow(x, y, z));
             let whole = |p: [i32; 3]| [&alone, together].iter().all(|g| fcc::alpha_of(g.get(p[0], p[1], p[2])) == ALPHA);

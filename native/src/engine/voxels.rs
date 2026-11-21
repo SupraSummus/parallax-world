@@ -215,7 +215,7 @@ pub struct Met {
 impl Met {
     /** Of tile `id`, its grid and its bricks' `meets`. */
     pub fn new(id: TileId, grid: &fcc::Grid, meets: &[u32]) -> Met {
-        let see_through = |i: usize| !matches!(fcc::alpha_of(grid.cells[i]), 0 | fcc::ALPHA);
+        let see_through = |i: usize| fcc::medium(grid.cells[i]);
         let see_through = (0..grid.cells.len()).any(see_through).then(|| Met::bits(id, grid, &meets_of(grid, see_through)));
         Met { all: Met::bits(id, grid, meets), see_through }
     }
@@ -335,7 +335,7 @@ fn words(grid: &fcc::Grid, first: usize, part: usize) -> [u32; BRICK_SITES] {
         out.copy_from_slice(&grid.cells[sites]);
     } else if part == stops {
         for (word, i) in out.iter_mut().zip(sites) {
-            if grid.cells[i] != 0 && fcc::alpha_of(grid.cells[i]) < u8::MAX {
+            if fcc::medium(grid.cells[i]) {
                 *word = grid.stops_at(i);
             }
         }

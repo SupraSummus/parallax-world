@@ -57,9 +57,10 @@ pub fn is_site(x: i64, y: i64, z: i64) -> bool {
  * it looks like, not what it is made of, in two ways: pieces smaller
  * than itself, which stop some of its rays whole, and a medium
  * (KindDef::medium), which stops some of each ray the pieces let
- * through, of each channel its own share. Hosts are shown its pieces as a whole voxel as often as they
- * stop rays (`show`, `to_grid`); light sees every site as it is
- * (`light`). Apart from how it looks, how much of it stops a walking body.
+ * through, of each channel its own share. Hosts and light see every
+ * site as it is: pieces that stop every ray as a whole voxel (`show`),
+ * else what it stops, held in part (`to_grid`, `light`). Apart from how
+ * it looks, how much of it stops a walking body.
  */
 #[derive(Clone)]
 pub struct VoxelGrid {
@@ -69,7 +70,7 @@ pub struct VoxelGrid {
     by: i64,
     /** Per brick, z-major, then y, then x: where its sites start in `shown`, in BRICK_SITES; −1 if empty. Once buried (`bury`), bricks may share sites. */
     pub bricks: Vec<i32>,
-    /** Whether each site's pieces are shown to hosts, a whole voxel (`show`). */
+    /** Whether each site's pieces stop every ray, shown to hosts as a whole voxel (`show`). */
     pub shown: Vec<bool>,
     /** What is in each site in pieces: how many of its rays they stop, whole. */
     pub pieces: Part<u8>,
@@ -422,10 +423,10 @@ impl VoxelGrid {
         })
     }
 
-    /** What the voxel at (x, y, z) looks like to hosts (`look`); 0 if none, outside the box or not a site. */
+    /** What the voxel at (x, y, z) looks like if its pieces are whole (`look`); 0 if not, outside the box or not a site. */
     pub fn get(&self, x: i64, y: i64, z: i64) -> Look {
         match self.slot(x, y, z) {
-            Some(Ok(i)) => self.look(i, false),
+            Some(Ok(i)) => self.look(i),
             _ => 0,
         }
     }
@@ -433,7 +434,7 @@ impl VoxelGrid {
     /** As `get`, but None if the brick of (x, y, z) holds nothing: rays skip it. */
     pub fn get_or_empty_brick(&self, x: i64, y: i64, z: i64) -> Option<Look> {
         match self.slot(x, y, z) {
-            Some(Ok(i)) => Some(self.look(i, false)),
+            Some(Ok(i)) => Some(self.look(i)),
             Some(Err(_)) => None,
             None => Some(0),
         }
@@ -448,13 +449,13 @@ impl VoxelGrid {
     }
 
     /**
-     * What the voxel at (x, y, z) looks like to a ray along `direction`:
-     * the mean of its looks through the faces turned most against it
-     * (fcc's `facing`); 0 if none, outside the box or not a site.
+     * What the voxel at (x, y, z)'s pieces look like to a ray along
+     * `direction`, whole: the mean of their looks through the faces turned
+     * most against it (fcc's `facing`); 0 if none, outside the box or not a site.
      */
     pub fn along(&self, x: i64, y: i64, z: i64, direction: [f64; 3]) -> Look {
         match self.slot(x, y, z) {
-            Some(Ok(i)) if self.shown[i] => {
+            Some(Ok(i)) if self.pieces.get(i).0 > 0 => {
                 let (mut alpha, mut colour, mut faces) = (0, [0; 3], 0);
                 for k in fcc::facing(direction) {
                     let (a, c) = self.part(i, k);
@@ -476,7 +477,7 @@ impl VoxelGrid {
     pub fn inside(&self, x: i64, y: i64, z: i64) -> Look {
         match self.slot(x, y, z) {
             Some(Ok(i)) => match self.pieces.get(i) {
-                (0, _) => self.medium_look(i),
+                (0, _) => self.partial(i),
                 (alpha, colour) => look_of(colour, alpha, alpha),
             },
             _ => 0,
@@ -507,33 +508,43 @@ impl VoxelGrid {
         }
     }
 
-    /**
-     * What site `i` looks like to hosts (fcc's Look): its pieces where
-     * shown, whole; else, `see_through`, its medium, as much as it stops.
-     */
-    fn look(&self, i: usize, see_through: bool) -> Look {
+    /** What site `i`'s pieces look like where shown, whole (fcc's Look); else 0. */
+    fn look(&self, i: usize) -> Look {
         match self.shown[i] {
             true => {
                 let (alpha, colour) = self.pieces.get(i);
                 look_of(colour, alpha, ALPHA)
             }
-            false if see_through => self.medium_look(i),
             false => 0,
         }
     }
 
     /**
-     * What site `i`'s medium looks like (fcc's Look): its colour, each
+     * What site `i` looks like held in part (fcc's Look): its colour, each
      * channel what it shows of what it stops of it, and for alpha what it
-     * stops of the channel it stops least; 0 if it stops none of one.
-     * How much it stops of each is apart (`to_grid`'s `stops`).
+     * stops of the channel it stops least, of pieces if it holds any, else
+     * of a medium; 0 if it stops none of one. How much a medium stops of
+     * each is apart (`to_grid`'s `stops`).
      */
-    fn medium_look(&self, i: usize) -> Look {
-        let (stops, shows) = self.medium.get(i);
+    fn partial(&self, i: usize) -> Look {
+        let (stops, shows) = self.seen(i);
         match least(stops) {
             0 => 0,
-            alpha => fcc::look(std::array::from_fn(|c| srgb(shows[c], stops[c])), alpha),
+            alpha => fcc::partial(std::array::from_fn(|c| srgb(shows[c], stops[c])), alpha, self.pieces.get(i).0 > 0),
         }
+    }
+
+    /** What site `i` stops of each channel of its rays, its pieces and its medium of the rest, and what that shows (premultiplied, of COLOUR_ONE). */
+    fn seen(&self, i: usize) -> ([u8; 3], [u16; 3]) {
+        let ((pieces, p), (medium, m)) = self.with_medium(i, self.pieces.get(i));
+        (medium.map(|m| pieces + m), std::array::from_fn(|c| (p[c] + m[c]) as u16))
+    }
+
+    /** Of site `i`, pieces that stop `pieces` of its rays and show `colour`, and its medium of the rest: each how much it stops and shows. */
+    fn with_medium(&self, i: usize, (pieces, colour): (u8, [u16; 3])) -> (Stops<u8>, Stops<[u8; 3]>) {
+        let rest = |v: u32| ((ALPHA - pieces) as u64 * v as u64 + ALPHA as u64 / 2) / ALPHA as u64;
+        let (medium, of) = self.medium.get(i);
+        ((pieces, colour.map(u32::from)), (medium.map(|a| rest(a as u32) as u8), of.map(|c| rest(c as u32) as u32)))
     }
 
     /** What site `i`'s shown pieces look like to hosts through face `kind`: as along its direction, where they stop any of it, else as a whole. */
@@ -572,29 +583,10 @@ impl VoxelGrid {
         }
     }
 
-    /** Shows each site its pieces, a whole voxel, where their alpha is over `coin` of it (under ALPHA), else nothing. */
-    pub fn show(&mut self, coin: impl Fn(i64, i64, i64) -> u8) {
-        for (brick, &at) in self.bricks.iter().enumerate() {
-            let Ok(at) = usize::try_from(at) else { continue };
-            let b = brick as i64;
-            let corner = [b % self.bx, b / self.bx % self.by, b / (self.bx * self.by)].map(|v| v * BRICK);
-            for k in 0..BRICK {
-                for j in 0..BRICK {
-                    for i in 0..BRICK {
-                        let [x, y, z] = [0, 1, 2].map(|c| self.min[c] + corner[c] + [i, j, k][c]);
-                        if !is_site(x, y, z) {
-                            continue;
-                        }
-                        let site = at * BRICK_SITES + (((k * BRICK + j) * BRICK + i) >> 1) as usize;
-                        // Most hold nothing or are whole: shown never or always, whatever the coin.
-                        self.shown[site] = match self.pieces.get(site).0 {
-                            0 => false,
-                            ALPHA => true,
-                            alpha => alpha > coin(x, y, z),
-                        };
-                    }
-                }
-            }
+    /** Shows each site its pieces as a whole voxel where they stop every ray; the rest are held in part (`to_grid`). */
+    pub fn show(&mut self) {
+        for i in 0..self.shown.len() {
+            self.shown[i] = self.pieces.get(i).0 == ALPHA;
         }
     }
 
@@ -690,19 +682,12 @@ impl VoxelGrid {
     pub fn light(&self, x: i64, y: i64, z: i64, kind: usize) -> (Stops<u8>, Stops<[u8; 3]>, [u32; 3]) {
         match self.slot(x, y, z) {
             Some(Ok(i)) => {
-                let (pieces, colour, glow) = match self.views.face(i, kind) {
-                    Some((pieces, colour)) => (pieces, colour, self.glows.get(i).map_or([0; 3], |g| g[kind])),
-                    None => {
-                        let (pieces, colour) = self.pieces.get(i);
-                        (pieces, colour, self.glow.get(i).copied().unwrap_or_default())
-                    }
+                let (pieces, glow) = match self.views.face(i, kind) {
+                    Some(pieces) => (pieces, self.glows.get(i).map_or([0; 3], |g| g[kind])),
+                    None => (self.pieces.get(i), self.glow.get(i).copied().unwrap_or_default()),
                 };
-                let colour = colour.map(u32::from);
-                // The medium, of the rays the pieces let through.
-                let rest = |v: u32| ((ALPHA - pieces) as u64 * v as u64 + ALPHA as u64 / 2) / ALPHA as u64;
-                let (medium, of) = self.medium.get(i);
-                let medium = (medium.map(|a| rest(a as u32) as u8), of.map(|c| rest(c as u32) as u32));
-                ((pieces, colour), medium, glow)
+                let (pieces, medium) = self.with_medium(i, pieces);
+                (pieces, medium, glow)
             }
             _ => ((0, [0; 3]), ([0; 3], [0; 3]), [0; 3]),
         }
@@ -717,15 +702,14 @@ impl VoxelGrid {
     }
 
     /**
-     * The voxels as the baker takes them, bricks with none left out: each
+     * The voxels as hosts take them, bricks with none left out: each
      * site's pieces where shown (`show`), whole, as they look through each
-     * face; and `see_through`, for a host that draws alpha, elsewhere its
-     * medium, as much as it stops, and of each channel where they differ
-     * (the grid's `stops`). What glows, shown or not, for the light: its
-     * bricks are kept too.
+     * face; elsewhere what it stops, its pieces and its medium, and of each
+     * channel where they differ (the grid's `stops`). What glows, shown or
+     * not, for the light: its bricks are kept too.
      */
-    pub fn to_grid(&self, see_through: bool) -> Grid {
-        let looks: Vec<Look> = (0..self.shown.len()).map(|i| self.look(i, see_through)).collect();
+    pub fn to_grid(&self) -> Grid {
+        let looks: Vec<Look> = (0..self.shown.len()).map(|i| if self.shown[i] { self.look(i) } else { self.partial(i) }).collect();
         let keep: Vec<bool> = (0..self.shown.len() / BRICK_SITES)
             .map(|at| {
                 let sites = at * BRICK_SITES..(at + 1) * BRICK_SITES;
@@ -766,17 +750,15 @@ impl VoxelGrid {
         };
         grid.views = sorted(&mut self.views.iter().filter_map(view));
         grid.glow = sorted(&mut self.glow.iter().filter_map(|(i, g)| Some([&[to(i)?][..], g].concat())));
-        if see_through {
-            // Of the bricks that hold a medium only: few do.
-            let held = (0..self.shown.len() / BRICK_SITES).filter(|&at| self.medium.brick(at).is_some());
-            let stops = |i: usize| {
-                let [r, g, b] = self.medium.get(i).0;
-                (!self.shown[i] && looks[i] != 0 && (r != g || g != b)).then(|| Some([to(i)?, fcc::look([r, g, b], 0)])).flatten()
-            };
-            let mut stops: Vec<[u32; 2]> = held.flat_map(|at| at * BRICK_SITES..(at + 1) * BRICK_SITES).filter_map(stops).collect();
-            stops.sort_unstable_by_key(|w| w[0]);
-            grid.stops = stops.into_flattened();
-        }
+        // Of the bricks that hold a medium only: few do.
+        let held = (0..self.shown.len() / BRICK_SITES).filter(|&at| self.medium.brick(at).is_some());
+        let stops = |i: usize| {
+            let [r, g, b] = self.seen(i).0;
+            (fcc::medium(looks[i]) && (r != g || g != b)).then(|| Some([to(i)?, fcc::look([r, g, b], 0)])).flatten()
+        };
+        let mut stops: Vec<[u32; 2]> = held.flat_map(|at| at * BRICK_SITES..(at + 1) * BRICK_SITES).filter_map(stops).collect();
+        stops.sort_unstable_by_key(|w| w[0]);
+        grid.stops = stops.into_flattened();
         grid
     }
 }
@@ -832,7 +814,7 @@ mod tests {
         grid.put_whole(10, 2, 2, colour);
         let lamp = grid.index(18, 2, 2).unwrap();
         grid.glow.set(lamp, Some([1, 2, 3]));
-        let whole = grid.to_grid(false);
+        let whole = grid.to_grid();
         // A fifth of white, linear, is 124 of 255 in sRGB.
         let (dim, white) = (fcc::look([124; 3], ALPHA), fcc::look([255; 3], ALPHA));
         assert_eq!((whole.cells.len(), whole.get(2, 2, 2), whole.get(10, 2, 2)), (2 * BRICK_SITES, 0, dim));
@@ -880,7 +862,7 @@ mod tests {
         // Of the inner 4³ bricks (1 to 4 each way), those not around the hole's (2, 2, 2): any 4 away, held once.
         let buried = |p: [i64; 3]| p.iter().all(|&v| (8..40).contains(&v)) && p.iter().any(|&v| v >= 32);
         assert_eq!(grid.shown.len(), (6 * 6 * 6 - (4 * 4 * 4 - 3 * 3 * 3) + 1) * BRICK_SITES);
-        let handed = grid.to_grid(false);
+        let handed = grid.to_grid();
         for [x, y, z] in sites() {
             if buried([x, y, z]) {
                 assert_eq!(grid.light(x, y, z, 1).0.0, ALPHA, "{x}, {y}, {z}");
@@ -894,10 +876,10 @@ mod tests {
     }
 
     #[test]
-    fn a_site_is_handed_over_as_its_pieces_where_shown_and_elsewhere_its_medium() {
+    fn hosts_see_a_site_as_light_does() {
         let mut grid = VoxelGrid::new(&Box3 { min: [0; 3], max: [8, 8, 8] });
-        // White pieces, as much of them stopping a walking body, under the coin and over it, without a black medium and in one.
-        let sites: [(i32, i32, u8, u8); 5] = [(0, 0, 40, 0), (2, 0, 200, 0), (0, 2, 0, 60), (2, 2, 40, 60), (4, 2, 200, 60)];
+        // White pieces, as much of them stopping a walking body: in part, whole, none; each without a black medium and in one.
+        let sites: [(i32, i32, u8, u8); 5] = [(0, 0, 40, 0), (2, 0, ALPHA, 0), (0, 2, 0, 60), (2, 2, 40, 60), (4, 2, ALPHA, 60)];
         for (x, y, pieces, medium) in sites {
             let i = grid.index(x.into(), y.into(), 0).unwrap();
             let white = (COLOUR_ONE as u32 * pieces as u32 / ALPHA as u32) as u16;
@@ -905,13 +887,17 @@ mod tests {
             grid.pieces.set(i, pieces, [white; 3]);
             grid.medium.set(i, [medium; 3], [0; 3]);
         }
-        grid.show(|_, _, _| 100);
+        grid.show();
         // Light sees all a site stops, each as it is: its pieces 40 of 255, its medium 60 of the rest.
         let (pieces, medium, _) = grid.light(2, 2, 0, 0);
         assert_eq!((grid.alpha(2, 2, 0), pieces.0, medium.0), (91, 40, [51; 3]));
-        let handed = |grid: Grid| sites.map(|(x, y, ..)| (grid.get(x, y, 0), grid.solid(x, y, 0)));
-        let (pieces, medium) = ((fcc::look([255; 3], ALPHA), true), (fcc::look([0; 3], 60), false));
-        assert_eq!(handed(grid.to_grid(true)), [(0, false), pieces, medium, medium, pieces]);
-        assert_eq!(handed(grid.to_grid(false)), [(0, false), pieces, (0, false), (0, false), pieces]);
+        // Hosts see whole pieces whole, what hides behind them not; the rest as much as light sees it stop,
+        // pieces held in part told from a medium alone (fcc's in_part).
+        let (handed, whole) = (grid.to_grid(), fcc::look([255; 3], ALPHA));
+        assert_eq!([(2, 0), (4, 2)].map(|(x, y)| (handed.get(x, y, 0), handed.solid(x, y, 0))), [(whole, true); 2]);
+        for (x, y, pieces, _) in [sites[0], sites[2], sites[3]] {
+            let (look, light) = (handed.get(x, y, 0), grid.alpha(x.into(), y.into(), 0));
+            assert!(fcc::alpha_of(look) == light && fcc::in_part(look) == (pieces > 0), "at ({x}, {y}): {look:x}");
+        }
     }
 }

@@ -116,8 +116,8 @@ Numbers are for the forest at 1280×800, as measured when written.
     and the village's houses thinner at levels 1 and 2:
     a wall a unit thick on a plane of sites is half of two sites,
     each shown by its own coin, so rays leak through it.
-    Hosts showing a site held in part as light sees it (below)
-    would end the pits, not the leak.
+    Native's voxels engine shows a site held in part speckled, not pitted,
+    but the leak stays.
   - Balls and tubes. With them `Tie` and the thin shapes' rules go,
     once a thin wall stays whole across sites shown apart (above).
   - Spans of a medium are held so now (`held` in `drawables.rs`). Left:
@@ -128,7 +128,7 @@ Numbers are for the forest at 1280×800, as measured when written.
       Its own share for each face, drawn so by hosts, would end both,
       and the thickening below.
     - One standing free (`Span::medium`: mist, rails) is still spread over two sites:
-      in the site of the ground under it, the ground's pieces, shown, hide it.
+      in the site of the ground under it, it shows only in the colour of the ground's pieces.
       Likely why the moor's coarse levels show less mist from above than level 0:
       with the mist nearly white, 0.019 apart at level 4,
       so the moor is not checked far away (`far` in `worlds/src/lib.rs`):
@@ -141,16 +141,14 @@ Numbers are for the forest at 1280×800, as measured when written.
     - A medium as thick as a site lies on its ground through those faces too,
       where it is beside it: a little less is stopped at level 1 (the valley's fields).
   - Hosts: the levels they ask for, the scale a body walks at.
-    Seen from near, a level is pitted where its sites are held in part
+    Seen from near, a level is speckled where its sites are held in part
     (a flat ground's top, a site deep),
     and sharp only where a shape is several sites thick.
-  - Light and hosts see a site held in part unlike:
-    light its share, hosts a whole voxel or none by the coin.
-    Light corrects for the coin only next to what is shown (`shown` in `light/`),
-    so two such sites in a row still shade what shows behind them.
-    Hosts drawing pieces as light sees them would end it:
-    blended by their alpha as a medium is (smooth, soft edges),
-    or by a coin for each finer site in them (tried in `look`: both show no dark pits).
+  - The chunk engines show a site held in part whole or not, by its coin (fcc's `Reader`),
+    so light, which sees its share, lights what shows behind it as if through it,
+    and from near it is pitted.
+    A coin of a finer site in their shaders, as the voxels engine's, would end both.
+    Drawn as a medium is (tried), the reliefs engine smeared the ground.
 - **Layers that don't say where they are are drawn everywhere**
   (`Field::meets`, `Population::stands`):
   the city's buildings, and the towns', landmarks', settlements' and steadings' things.
@@ -160,6 +158,8 @@ Numbers are for the forest at 1280×800, as measured when written.
   and `About` is a band around one plan.
   Simpler would be a field of `Column`s on a plan knowing where it is,
   with only what varies by column (water, mist, bridges) declared.
+- **`VoxelGrid::shown` says what `pieces` does**: whether a site's pieces are whole.
+  `show` could go, but `shown` is what the grid's sites are indexed by, and named for.
 - **Whole sites are still put one by one.**
   Under the surface nearly every put is a whole site of the ground's fill,
   each through `put`, its brick looked up, at level 0 its shade hashed.
@@ -208,7 +208,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   A population's highest chance, rolled by the engine before anchoring,
   would serve them all alike.
 - **Hashing is the forest's largest single cost.**
-  Each site hashes three times (shade, pick, `shown`'s coin),
+  Each site hashes twice (shade, pick),
   each `hash64` mixing three times, as do noise corners.
   A cheaper hash would change every world.
 
