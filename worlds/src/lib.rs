@@ -60,7 +60,7 @@ pub struct Entry {
     pub accuracy: &'static [(&'static str, Accuracy)],
 }
 
-/** The seed a world's regions were laid out at; its costs and parts are checked at it alone. */
+/** The seed a world's regions were laid out at; its costs are checked at it alone. */
 pub const REGIONS_SEED: u64 = 42;
 
 /** Every world. */

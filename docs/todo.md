@@ -244,6 +244,17 @@ Numbers are for the forest at 1280×800, as measured when written.
   are checked in one region between them.
   Naming a landmark's node by its variant, as towns name their children,
   would part them; or the survey could count which code drew each part.
+- **A part's kinds share its places**, so they share its cells
+  (`worldgen::checks::cells`): a house's wall and its wood measure the same.
+  A cell could count for a kind only where the finer level draws it.
+- **A field's places are a region tall** (`worldgen::checks::survey`),
+  so two fields share a region only where their tops are level:
+  the forest's grass, litter and needles take three.
+  A place as tall as the surface it marks would pack them.
+- **The survey asks each field at every column of 16 km**, a million,
+  at every seed: most of a seed's survey.
+- **A component is checked apart from a world** (`check_component`):
+  `check` narrowed to its name, at several places a stratum, would do.
 - **The solids' scenes ask little against the level two finer.**
   In `worldgen/tests/shapes.rs` every solid keeps the contract there
   to the last level checked: a `Look` is a mean over a region's rays,
@@ -728,10 +739,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   the valley's, alone, is CI's longest job.
   Its threads end together, so only less work would shorten it,
   or its seeds on several runners (`--nocapture` shows each part's time).
-  A seed's margins take longest,
-  then checking its regions in parts.
-  At `REGIONS_SEED` three threads each make the world (`worlds/tests/contract.rs`);
-  one for all, now that a world is shared, would make its plans' columns once. Not measured.
+  A seed's regions take longest, then its survey.
   If CI is still too slow, the contract at seeds but `REGIONS_SEED`
   (`worlds/tests/contract.rs`) could run only on main.
 - **LLVM 21 compiles AVX-512 code wrong (lavapipe).**

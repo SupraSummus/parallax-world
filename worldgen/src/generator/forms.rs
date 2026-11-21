@@ -63,7 +63,12 @@ pub(super) fn visit(node: &Node, key: String, bounds: Box3, at: &Visit, drawable
 /** Adds a node's near form, whatever the spacing: its shapes, and its children's drawables (`visit`). */
 fn near(node: &Node, key: String, bounds: Box3, at: &Visit, drawables: &mut Vec<Drawable<'_>>) {
     let Visit { s, units, order, layer, thing, checked, .. } = *at;
-    drawables.push(Drawable { order, key: key.clone(), layer, thing, draw: Draw::Shapes(node.shapes.get().to_vec(), false), checked });
+    let own = node.shapes.get();
+    // A carve cuts only the thing (docs/generators.md), so it may reach past it.
+    if let Some(shape) = own.iter().find(|shape| shape.op != Op::Carve && !shape.bounds.inside(&bounds)) {
+        panic!("{key} draws past its bounds {bounds:?}, to {:?}; see \"Things\" in {DOCS}", shape.bounds);
+    }
+    drawables.push(Drawable { order, key: key.clone(), layer, thing, draw: Draw::Shapes(own.to_vec(), false), checked });
     let reaching;
     let children: &[Child] = match &node.children {
         None => &[],

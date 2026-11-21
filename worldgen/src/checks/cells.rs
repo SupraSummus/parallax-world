@@ -5,16 +5,14 @@
 //! shows and what it glows. The rays are the rows of the finer level's
 //! sites through it, each two rays a hair to either side, half each (a
 //! row along a face between two cells is both's): nothing drawn by chance
-//! but which cells are checked, a sample of those near a surface. The
-//! contract holds levels to it (checks::contract's `margins`).
+//! but which cells are checked, a sample of those near a surface in each
+//! stratum's places. The contract holds levels to it (checks::contract).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use fcc::VOXEL_FACES;
 
-use crate::World;
-use crate::checks::contract::{TOLERANCE, around, box_at, sites};
-use crate::generator::{Generator, generate};
+use crate::checks::contract::sites;
 use crate::grid::{ALPHA, Box3, VoxelGrid};
 use crate::noise::Rng;
 use crate::picture::{CROSSING, composited, nearest_site};
@@ -22,140 +20,74 @@ use crate::picture::{CROSSING, composited, nearest_site};
 /** How many levels finer a level's cells are held to: more costs more, and loses less (a finer cell's mean forgets which of its rays it stops). */
 pub const FINER_BY: u32 = 2;
 
-/** Cells checked at each level of a region, at most: more costs more, and tells more surely. */
-pub const SAMPLES: usize = 2000;
+/** Cells checked at each level of a stratum in a region, at most: more costs more, and tells more surely. */
+pub const SAMPLES: usize = 256;
 
 /** What rays see of a cell along a direction, a mean over them: how much of them it stops, and what shows (linear: what it stops by its colour, and what it glows). */
 pub type Look = [f64; 4];
 
-/** A cell seen along a direction. */
-#[derive(Clone, Debug)]
-pub struct Cell {
-    /** Its centre, lattice units. */
-    pub at: [i64; 3],
-    /** The direction, of VOXEL_FACES. */
-    pub along: usize,
-    /** What rays see of it at the finer level and at its own. */
-    pub looks: [Look; 2],
-}
+/** What rays along a direction see of a cell at the finer level and at its own. */
+pub type Cell = [Look; 2];
 
-impl Cell {
-    /** How far its own look is from the finer one's, in the channel they differ the most in. */
-    pub fn deviation(&self) -> f64 {
-        let [a, b] = self.looks;
-        (0..4).map(|c| (b[c] - a[c]).abs()).fold(0.0, f64::max)
-    }
-}
-
-/** A sample of a level's cells in a region, each seen along each direction, against the level `against`. */
-#[derive(Clone, Debug)]
-pub struct Cells {
-    pub name: String,
-    pub region: Box3,
-    pub level: u32,
-    pub against: u32,
-    /** Cells near a surface, those sampled of them. */
-    pub near: usize,
-    pub cells: Vec<Cell>,
-}
-
-impl Cells {
-    /** The share of the cells (each along each direction) further than `tolerance` from what is in them. */
-    pub fn over(&self, tolerance: f64) -> f64 {
-        self.cells.iter().filter(|c| c.deviation() > tolerance).count() as f64 / self.cells.len().max(1) as f64
-    }
-
-    /** How far a level's look is from the finer one's on average, channel by channel: what it adds or loses everywhere. */
-    pub fn bias(&self) -> Look {
-        let n = self.cells.len().max(1) as f64;
-        std::array::from_fn(|c| self.cells.iter().map(|cell| cell.looks[1][c] - cell.looks[0][c]).sum::<f64>() / n)
-    }
-}
-
-/** Upper ends of the buckets a report counts deviations in. */
-const BUCKETS: [f64; 7] = [0.01, 0.02, TOLERANCE, 0.1, 0.2, 0.5, 1.0];
-
-impl std::fmt::Display for Cells {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let r = self.region;
-        let look = |l: &Look| format!("stops {:.3}, shows {:.3} {:.3} {:.3}", l[0], l[1], l[2], l[3]);
-        writeln!(
-            f,
-            "{} in x {}..{}, y {}..{}, z {}..{}, level {} against {}: {} cells along 12 directions, of {} near a surface",
-            self.name,
-            r.min[0],
-            r.max[0],
-            r.min[1],
-            r.max[1],
-            r.min[2],
-            r.max[2],
-            self.level,
-            self.against,
-            self.cells.len() / VOXEL_FACES.len(),
-            self.near
-        )?;
-        let mut counts = [0; BUCKETS.len()];
-        for cell in &self.cells {
-            counts[BUCKETS.iter().position(|&top| cell.deviation() <= top).unwrap_or(BUCKETS.len() - 1)] += 1;
-        }
-        let n = self.cells.len().max(1) as f64;
-        let buckets: Vec<String> = BUCKETS.iter().zip(counts).map(|(top, k)| format!("≤{top}: {:.1}%", 100.0 * k as f64 / n)).collect();
-        writeln!(f, "  apart {}", buckets.join(", "))?;
-        writeln!(f, "  over {TOLERANCE} {:.1}%; on average {}", 100.0 * self.over(TOLERANCE), look(&self.bias()))?;
-        let mut worst: Vec<&Cell> = self.cells.iter().collect();
-        worst.sort_by(|a, b| b.deviation().total_cmp(&a.deviation()));
-        for cell in worst.iter().take(3) {
-            let [a, b] = cell.looks.map(|l| look(&l));
-            writeln!(f, "  at {:?} along {:?}: {a} -> {b}", cell.at, VOXEL_FACES[cell.along])?;
-        }
-        Ok(())
-    }
+/** How far a cell's own look is from the finer one's, in the channel they differ the most in. */
+pub fn deviation([a, b]: &Cell) -> f64 {
+    (0..4).map(|c| (b[c] - a[c]).abs()).fold(0.0, f64::max)
 }
 
 /**
- * A sample of the cells of `level` in `region` of `world`, named `name`,
- * against what is in them: of those near its surfaces, those near the
- * surfaces of `focus` too, if given (a component of it alone, checked in place).
+ * Of the cells of `level` in `area` near the surfaces of `grids` (the
+ * level `against` and its own, each covering `area`), a sample in the
+ * places of each of `strata`: those whose voxel reaches into one, each
+ * seen along each direction at both levels. By stratum, in order; a cell
+ * in the places of several is seen once.
  */
-pub(crate) fn cells_of(name: &str, world: &World, focus: Option<&Generator>, region: &Box3, level: u32) -> Cells {
-    let against = level.saturating_sub(FINER_BY);
+pub(crate) fn cells_of(grids: [&VoxelGrid; 2], strata: &[(String, Vec<Box3>)], area: &Box3, [against, level]: [u32; 2]) -> Vec<Vec<Cell>> {
     let (s, f) = ((1i64 << level) as f64, (1i64 << against) as f64);
-    let area = around(region, level);
-    let grids_of = |generator: &Generator| [against, level].map(|l| generate(generator, &box_at(&area, l), l));
-    let grids = grids_of(&world.generator);
     let within = |c: &[i64; 3]| (0..3).all(|i| c[i] as f64 * s - s >= area.min[i] as f64 && c[i] as f64 * s + s <= area.max[i] as f64);
-    let mut near = near_surfaces(&grids, f / s);
-    if let Some(focus) = focus {
-        near = near.intersection(&near_surfaces(&grids_of(focus), f / s)).copied().collect();
-    }
-    let mut near: Vec<[i64; 3]> = near.into_iter().filter(within).collect();
+    let mut near: Vec<[i64; 3]> = near_surfaces(grids, f / s).into_iter().filter(within).collect();
     let mut random = Rng::new(17);
     for i in (1..near.len()).rev() {
         near.swap(i, (random.next() * (i + 1) as f64) as usize % (i + 1));
     }
-    let mut cells = Vec::new();
     // The same rays through every cell, moved to it: its centre is a site of the finer level too.
     let rays: [_; VOXEL_FACES.len()] = std::array::from_fn(|along| rays_through(s, f, along));
-    for &cell in near.iter().take(SAMPLES) {
-        let centre = cell.map(|v| v as f64 * s);
-        for (along, rays) in rays.iter().enumerate() {
-            let mut looks = [[0.0; 4]; 2];
-            for (q, d, length) in rays {
-                let q: [f64; 3] = std::array::from_fn(|c| centre[c] + q[c]);
-                // The rays run along the finer sites' rows, through their middles: each crossing stands for CROSSING.
-                for (((grid, scale), crossing), look) in grids.iter().zip([f, s]).zip([CROSSING, 1.0]).zip(&mut looks) {
-                    for (_, seen) in composited(grid, q.map(|v| v / scale), *d, length / scale, crossing) {
-                        look[0] += seen.stopped;
-                        (0..3).for_each(|c| look[1 + c] += seen.shown[c] + seen.glow[c]);
-                    }
+    let mut seen: BTreeMap<[i64; 3], Vec<Cell>> = BTreeMap::new();
+    let mut see = |cell: [i64; 3]| seen.entry(cell).or_insert_with(|| seen_along(grids, &rays, cell, [f, s])).clone();
+    strata
+        .iter()
+        .map(|(_, places)| {
+            // Its voxel reaches s along each axis.
+            let reaches =
+                |c: &&[i64; 3]| places.iter().any(|p| (0..3).all(|i| p.min[i] < (c[i] + 1) << level && p.max[i] > (c[i] - 1) << level));
+            let cells: Vec<[i64; 3]> = near.iter().filter(reaches).take(SAMPLES).copied().collect();
+            cells.into_iter().flat_map(&mut see).collect()
+        })
+        .collect()
+}
+
+/** `cell` seen along each direction by `rays`, at the finer level and its own (sites `scales` apart, lattice units). */
+fn seen_along(grids: [&VoxelGrid; 2], rays: &[Vec<Ray>], cell: [i64; 3], scales: [f64; 2]) -> Vec<Cell> {
+    let centre = cell.map(|v| v as f64 * scales[1]);
+    let mut cells = Vec::new();
+    for rays in rays {
+        let mut looks = [[0.0; 4]; 2];
+        for (q, d, length) in rays {
+            let q: [f64; 3] = std::array::from_fn(|c| centre[c] + q[c]);
+            // The rays run along the finer sites' rows, through their middles: each crossing stands for CROSSING.
+            for (((grid, scale), crossing), look) in grids.iter().zip(scales).zip([CROSSING, 1.0]).zip(&mut looks) {
+                for (_, seen) in composited(grid, q.map(|v| v / scale), *d, length / scale, crossing) {
+                    look[0] += seen.stopped;
+                    (0..3).for_each(|c| look[1 + c] += seen.shown[c] + seen.glow[c]);
                 }
             }
-            let looks = looks.map(|l| l.map(|v| v / rays.len().max(1) as f64));
-            cells.push(Cell { at: cell.map(|v| v << level), along, looks });
         }
+        cells.push(looks.map(|l| l.map(|v| v / rays.len().max(1) as f64)));
     }
-    Cells { name: name.to_string(), region: *region, level, against, near: near.len(), cells }
+    cells
 }
+
+/** A ray through a cell: where it enters it, its direction and how far it goes in it. */
+type Ray = ([f64; 3], [f64; 3], f64);
 
 /**
  * The rays along direction `along` through the cell centred at the origin
@@ -163,7 +95,7 @@ pub(crate) fn cells_of(name: &str, world: &World, focus: Option<&Generator>, reg
  * apart along it that cross it, each two a hair to either side of its
  * row, each where it enters the cell and how far it goes in it.
  */
-fn rays_through(s: f64, f: f64, along: usize) -> Vec<([f64; 3], [f64; 3], f64)> {
+fn rays_through(s: f64, f: f64, along: usize) -> Vec<Ray> {
     let n = VOXEL_FACES[along].map(|v| v as f64);
     let d = n.map(|v| v / std::f64::consts::SQRT_2);
     // A hair across d, n × (3, 2, 1): along no plane of the lattice.
@@ -219,7 +151,7 @@ fn rays_through(s: f64, f: f64, along: usize) -> Vec<([f64; 3], [f64; 3], f64)> 
  * that stops some light beside one that doesn't stop all of it, the cells
  * its voxel reaches into (its centre's and its corners' along the axes).
  */
-fn near_surfaces(grids: &[VoxelGrid; 2], finer: f64) -> BTreeSet<[i64; 3]> {
+fn near_surfaces(grids: [&VoxelGrid; 2], finer: f64) -> BTreeSet<[i64; 3]> {
     let mut cells = BTreeSet::new();
     for (grid, scale) in grids.iter().zip([finer, 1.0]) {
         for (x, y, z) in sites(&grid.clip()) {

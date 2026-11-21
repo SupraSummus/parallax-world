@@ -49,6 +49,12 @@ const FIELD_LEVEL: u32 = 7;
 const PLACE_LEVEL: u32 = 3;
 const PLACE_SIDE: i64 = m(128.0);
 
+/**
+ * Places of each stratum the survey keeps, at most: those nearest spawn.
+ * How many it found is kept apart: the rarest strata get regions first.
+ */
+const PLACES: usize = 64;
+
 /** Things whose bounds leave the heights that the survey keeps, at most, of each population. */
 const LEAVING: usize = 16;
 
@@ -58,7 +64,9 @@ pub struct Stratum {
     pub name: String,
     /** By index in Generator::kinds. */
     pub kind: Option<Kind>,
-    /** A box around each, at most a region wide: parts' bounds, around a field's samples. */
+    /** How many places it was found at. */
+    pub found: usize,
+    /** A box around each of the PLACES of them nearest spawn, at most a region wide: parts' bounds, around a field's samples. */
     pub places: Vec<Box3>,
 }
 
@@ -92,11 +100,56 @@ pub struct Survey {
     pub things: Vec<Things>,
 }
 
-type Found = BTreeMap<(String, Option<Kind>), Vec<Box3>>;
+/** What the survey found of each stratum, by name and kind: at how many places, and the PLACES nearest spawn. */
+struct Found {
+    spawn: [i64; 3],
+    strata: BTreeMap<(String, Option<Kind>), (usize, Vec<Box3>)>,
+}
+
+impl Found {
+    fn new(spawn: [i64; 3]) -> Found {
+        Found { spawn, strata: BTreeMap::new() }
+    }
+
+    /** `places` of the stratum `key`, found at `found` places: those of them among its PLACES nearest spawn kept. */
+    fn add(&mut self, key: (String, Option<Kind>), found: usize, places: impl IntoIterator<Item = Box3>) {
+        let (n, kept) = self.strata.entry(key).or_default();
+        *n += found;
+        for place in places {
+            kept.push(place);
+            if kept.len() == 2 * PLACES {
+                nearest_first(kept, self.spawn);
+                kept.truncate(PLACES);
+            }
+        }
+    }
+
+    fn into_strata(self) -> Vec<Stratum> {
+        let spawn = self.spawn;
+        self.strata
+            .into_iter()
+            .map(|((name, kind), (found, mut places))| {
+                nearest_first(&mut places, spawn);
+                places.truncate(PLACES);
+                Stratum { name, kind, found, places }
+            })
+            .collect()
+    }
+}
+
+/** How far `b` is from `spawn`, along x and z, squared. */
+fn distance(b: &Box3, spawn: [i64; 3]) -> i64 {
+    [0, 2].map(|a| ((b.min[a] + b.max[a]) / 2 - spawn[a]).pow(2)).iter().sum()
+}
+
+/** `places` nearest `spawn` first (along x and z), then by where they are. */
+pub(crate) fn nearest_first(places: &mut [Box3], spawn: [i64; 3]) {
+    places.sort_by_key(|b| (distance(b, spawn), b.min, b.max));
+}
 
 /** What `world` is made of around spawn, in places at most `region` wide (lattice units): of the layers `wanted` by name. */
 pub fn survey(world: &World, region: i64, wanted: impl Fn(&str) -> bool) -> Survey {
-    let mut found = Found::new();
+    let mut found = Found::new(world.spawn);
     let (mut layers, mut things) = (Vec::new(), Vec::new());
     for layer in &world.generator.layers {
         if !wanted(layer.name()) {
@@ -115,7 +168,7 @@ pub fn survey(world: &World, region: i64, wanted: impl Fn(&str) -> bool) -> Surv
             }
         }
     }
-    let strata = found.into_iter().map(|((name, kind), places)| Stratum { name, kind, places }).collect();
+    let strata = found.into_strata();
     Survey { spawn: world.spawn, region, strata, layers, things }
 }
 
@@ -188,7 +241,7 @@ fn survey_field(world: &World, centre: [i64; 3], (level, side): (u32, i64), fiel
         (place.min[along], place.max[along]) = (at - half, at + half);
         let kinds: BTreeSet<Option<Kind>> = if carves { [None].into() } else { kinds.into_iter().map(Some).collect() };
         for kind in kinds {
-            found.entry((field.name.to_string(), kind)).or_default().push(place);
+            found.add((field.name.to_string(), kind), 1, [place]);
         }
     }
     drawn
@@ -210,7 +263,7 @@ fn survey_things(world: &World, centre: [i64; 3], population: &Population, regio
     let [ci, _, ck] = centre.map(|v| v.div_euclid(n));
     let (mut half, most) = (8, (SIDE / 2 / n).min(HALF_CELLS));
     loop {
-        let (mut parts, mut count) = (Found::new(), 0);
+        let (mut parts, mut count) = (Found::new(world.spawn), 0);
         let mut seen = Things { population: population.name, reach, made: 0, past: Vec::new(), leaving: Vec::new() };
         // Along y, the cells whose reach meets the cube within the heights.
         let cube = world.within(Box3::around(centre, half * n));
@@ -228,8 +281,8 @@ fn survey_things(world: &World, centre: [i64; 3], population: &Population, regio
             count += take_apart(node, population.name.to_string(), region, &mut parts);
         });
         if count * 4 > PARTS || half >= most {
-            for (key, mut places) in parts {
-                found.entry(key).or_default().append(&mut places);
+            for (key, (n, places)) in parts.strata {
+                found.add(key, n, places);
             }
             return (half * n, seen);
         }
@@ -249,7 +302,7 @@ fn take_apart(node: &Node, name: String, region: i64, parts: &mut Found) -> usiz
         let mut kinds = BTreeSet::new();
         kinds_of(node, &mut kinds);
         let place = centred(&bounds, region);
-        kinds.into_iter().for_each(|kind| parts.entry((name.clone(), Some(kind))).or_default().push(place));
+        kinds.into_iter().for_each(|kind| parts.add((name.clone(), Some(kind)), 1, [place]));
         return 1;
     }
     let own = node.shapes.get();
@@ -257,7 +310,7 @@ fn take_apart(node: &Node, name: String, region: i64, parts: &mut Found) -> usiz
     if own.iter().any(|s| s.op != Op::Carve) {
         let place = centred(&bounds_of_shapes(own.iter().map(|s| &s.bounds)), region);
         let kinds: BTreeSet<Kind> = shapes_kinds(own).collect();
-        kinds.into_iter().for_each(|kind| parts.entry((format!("{name} itself"), Some(kind))).or_default().push(place));
+        kinds.into_iter().for_each(|kind| parts.add((format!("{name} itself"), Some(kind)), 1, [place]));
         count += 1;
     }
     each_child(node, |child, node| count += take_apart(node, format!("{name}/{}", unnumbered(child)), region, parts));
@@ -306,7 +359,7 @@ impl Survey {
      */
     pub fn regions(&self, wanted: impl Fn(&usize) -> bool) -> Vec<(Box3, Vec<usize>)> {
         let mut order: Vec<usize> = (0..self.strata.len()).filter(wanted).collect();
-        order.sort_by_key(|&i| (self.strata[i].places.len(), i));
+        order.sort_by_key(|&i| (self.strata[i].found, i));
         let mut regions: Vec<(Box3, Vec<usize>)> = Vec::new();
         let volume = |b: &Box3| (0..3).map(|i| (b.max[i] - b.min[i]) as f64).product::<f64>();
         for i in order {
@@ -328,14 +381,16 @@ impl Survey {
                     regions[r].0 = union;
                     regions[r].1.push(i);
                 }
-                None => {
-                    let distance = |b: &&Box3| [0, 2].map(|a| ((b.min[a] + b.max[a]) / 2 - self.spawn[a]).pow(2)).iter().sum::<i64>();
-                    let nearest = self.strata[i].places.iter().min_by_key(distance).expect("a stratum has places");
-                    regions.push((*nearest, vec![i]));
-                }
+                // Its places are nearest spawn first.
+                None => regions.push((self.strata[i].places[0], vec![i])),
             }
         }
         regions
+    }
+
+    /** The places of stratum `i` that meet `b`. */
+    pub fn places_in(&self, i: usize, b: &Box3) -> Vec<Box3> {
+        self.strata[i].places.iter().filter(|p| p.overlaps(b)).copied().collect()
     }
 
     /** The kinds of `generator` that nothing surveyed draws, by name. */

@@ -35,12 +35,15 @@ and one of small cells over fewer metres (`HALF_CELLS`).
 Fields are asked at columns of a coarse level, and at level 0 there:
 they keep what is finer than their sites in proportion ("Plans" in "Levels", generators.md),
 so a railway, a kerb or a pond shows.
-A stratum is a part or a field, with a kind it draws.
+A stratum is a part or a field, with a kind it draws;
+the survey counts its places, and keeps those nearest spawn (`PLACES`).
 Every stratum found gets a region: the rarest first,
 each in the region it widens least, or in one of its own nearest spawn.
-So a rare thing is checked without being listed,
-and not lost among the rest of a wide region;
-but a part's variants drawing the same kinds are one stratum.
+Its cells are those in its places there,
+so a rare thing is checked without being listed,
+and in itself, not averaged with the rest of a region;
+but a part's variants drawing the same kinds are one stratum,
+and a part's kinds share its places.
 A layer that draws nothing surveyed breaks the contract;
 the kinds nothing draws are only printed,
 as worlds share tables of kinds (the moor's is the valley's).
@@ -50,9 +53,8 @@ A world's author works on one part at a time:
 `worlds/examples/check.rs` checks a component (`check_component`),
 a name in the tree of the world's things (`towns/block/church`).
 At the few places of it nearest spawn that the survey finds,
-it holds the cells near the component's surfaces to what is in them,
-the world drawn all around.
-So its numbers are its own, not averaged with the rest of a region;
+a region each, it holds the cells in its places to what is in them,
+the world drawn all around, as `check` does a stratum's;
 its baseline is a snapshot outside git, taken before a change.
 `alone`, the world is cut to it first (`Generator::alone`).
 A coarse site is shared, so where it meets the rest its cells look otherwise
@@ -83,7 +85,7 @@ Not what a ray through many cells sees:
 that differs by what is inherent to seeing each cell as a whole.
 A cell is one site, its look coarse,
 so it is checked on average:
-each stratum's cells, near a surface, a sample, over its regions at every seed,
+each stratum's cells, near a surface in its places, a sample, over its regions at every seed,
 as far apart as `TOLERANCE` (0.045) in how much they stop,
 or in the colour of what they stop (so a thin medium's colour counts as a solid's),
 and each cell as far from what is in it as `SPREAD` (0.1), on average.
@@ -94,7 +96,6 @@ one for a thing or a layer covers its parts, unless a part has its own
 (`Accuracy::of`), and each is checked as closely as declared;
 a name that covers no stratum breaks it, so a misspelt one is not lost.
 A mean settles as seeds are added; the largest of many only grows.
-A region holding several strata counts for each.
 Where a world, a test world or a solid breaks it,
 its baseline says by how much, as lint baselines do:
 `worlds/data/contract/<world>.txt`, `worldgen/data/contract/`
@@ -146,13 +147,19 @@ read it from its colour (`kind_of`): a mix of kinds is none.
 Margins quoted elsewhere in this document are older ones,
 in shares of material types or in sRGB.
 
-- a box against eight parts generated alone, in reverse order,
-  at levels 0, 2 and one past the last checked below:
-  any seam, order dependence or hidden state shows up as a differing site,
-  in its voxels, its alpha, how it looks through each face, its glow or its solid share;
+The first two of these share a region's levels, each generated once (`hold_region`):
+- at each level, the region against parts 32 sites a side (`parts_hold`),
+  each generated alone:
+  a seam, order dependence or hidden state shows as a differing site;
+  and with what is skipped where it says it may not be drawn all the same
+  (`checking_skipped`): it draws nothing there,
+  what a field fills unasked, as all of a kind, is what it would draw,
+  and a part `whole` says is empty or buried is.
+  This finds what drawing can't see,
+  as a plan steeper between columns no layer reads together;
 - at each level up to the world's, against the level two finer,
-  a sample of cells near a surface in each region (`checks::cells`),
-  the region grown to at least 16 sites of the level across,
+  a sample of cells near a surface in each stratum's places in each region
+  (`checks::cells`), the region grown to at least 16 sites of the level across,
   each along each of the 12 directions, inside it only;
 - at each level up to one past the world's, in each region
   and a host tile's width around spawn,
@@ -161,16 +168,7 @@ in shares of material types or in sRGB.
   (under them, the ground goes on, unseen);
 - the things of each population the survey found, of all heights,
   keep within its `reach`, which drawing checks only where it draws;
-  and where a thing's bounds leave the heights, nothing is drawn outside;
-- at levels 0, 2 and one past the last checked, in each region
-  cut into boxes 32 sites a side (`skips_hold`),
-  what is skipped where it says it may not be draws nothing there:
-  it is drawn all the same, to see (`checking_skipped`),
-  and what a field fills unasked, as all of a kind, is what it would draw;
-  and a box `whole` says is empty or buried is.
-  The rules above hold wherever something is drawn;
-  this finds what they can't see,
-  as a plan steeper between columns no layer reads together.
+  and where a thing's bounds leave the heights, nothing is drawn outside.
 
 A world's layout must not follow the grids it is generated on:
 a town placed once per region, kept inside it,
@@ -216,10 +214,8 @@ as is the rest of the world, in boxes anywhere.
 `worlds/tests/directions.rs` checks each world in `WORLDS`,
 but for the places it knows follow the lattice (`KNOWN`, docs/todo.md).
 
-Parts are checked at seed 42 only:
-they check how a world is drawn, not what a seed puts in it.
 With `--nocapture` it prints each level's margins;
-`contract::margins` returns them as a `Report` to print,
+`contract::in_regions` returns them as a `Report` to print,
 each margin's looks at both levels.
 A broken mean (`contract::breaks`) names the stratum and level,
 and each region it was averaged over, at its seed.
