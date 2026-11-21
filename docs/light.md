@@ -11,7 +11,7 @@ What is left to do is in [todo.md](todo.md).
 ## What it gets wrong, and why
 
 Light comes along the 12 neighbours' directions only,
-and each level takes one step (`STEPS`; native's panel sets more)
+and each level takes one step (`STEPS`; native's panel sets up to three)
 before the coarser one takes over,
 or more where the coarser fills what it leaves empty.
 So light from D away comes from a level whose sites are about D across,
