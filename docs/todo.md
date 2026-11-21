@@ -413,7 +413,10 @@ Numbers are for the forest at 1280×800, as measured when written.
 ## Native
 
 - **The native frontend is missing pieces.**
-  Its camera is f64, not fixed point (positions reach the GPU relative to it).
+  Its camera is f64, not fixed point,
+  and the GPU gets chunks' places and the eye in f32 and subtracts them there
+  (`GpuRecord`, `FaceView`; the voxels engine's eye too):
+  far from the origin they lose their fraction before they meet.
   Its compositor needs indirect draws counted on the GPU
   (`MULTI_DRAW_INDIRECT_COUNT`), and so Vulkan:
   Metal and GL lack them, and on DX12 wgpu's leave out the first vertex

@@ -456,21 +456,21 @@ fn depths(cell: &CellChunk, local: [f64; 3]) -> [f64; 2] {
  * below the world.
  */
 fn box_tiles(Lattice { r, u, f }: Lattice, heights: (i64, i64), min: [i32; 3], max: [i32; 3]) -> Option<[TileId; 2]> {
-    // x, y, z at (a, b, c) as bake's Reader has it, over the box's corners.
-    let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+    // Twice x, y, z at (a, b, c) as bake's Reader has it, over the box's corners: whole numbers.
+    let (mut lo, mut hi) = ([i64::MAX; 3], [i64::MIN; 3]);
     for corner in 0..8 {
-        let [a, b, c] = std::array::from_fn(|d| if corner >> d & 1 == 0 { min[d] } else { max[d] } as f64);
+        let [a, b, c] = std::array::from_fn(|d| i64::from(if corner >> d & 1 == 0 { min[d] } else { max[d] }));
         for d in 0..3 {
-            let v = (a * r[d] as f64 + c * f[d] as f64) / 2.0 + b * u[d] as f64;
+            let v = a * i64::from(r[d]) + c * i64::from(f[d]) + 2 * b * i64::from(u[d]);
             lo[d] = lo[d].min(v);
             hi[d] = hi[d].max(v);
         }
     }
-    if hi[1] < heights.0 as f64 || lo[1] >= heights.1 as f64 {
+    if hi[1] < 2 * heights.0 || lo[1] >= 2 * heights.1 {
         return None;
     }
-    (lo[1], hi[1]) = (lo[1].max(heights.0 as f64), hi[1].min((heights.1 - 1) as f64));
-    let tile = |v: f64| (v / TILE as f64).floor() as i32;
+    (lo[1], hi[1]) = (lo[1].max(2 * heights.0), hi[1].min(2 * (heights.1 - 1)));
+    let tile = |v: i64| v.div_euclid(2 * TILE) as i32;
     Some([lo.map(tile), hi.map(tile)])
 }
 
