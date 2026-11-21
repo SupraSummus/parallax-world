@@ -302,21 +302,9 @@ pub struct World {
     done: Receiver<Made>,
     /** Received by wait(), not taken yet. */
     early: Vec<Made>,
-    /**
-     * Per level, tiles made anew for the world's time (`now`), waiting to
-     * take their places together (`update`), and since when.
-     */
-    fresh: Vec<(HashMap<TileId, Arc<Tile>>, i64)>,
     /** With no threads, what works in their place. */
     own: Option<Worker>,
 }
-
-/**
- * World time, ms, a level's tiles made anew wait at most for the rest
- * (World's `fresh`): threads behind, it shows some of a time with others
- * of another, rather than none of it.
- */
-const FRESH: i64 = 500;
 
 /**
  * The world's time, ms, its tiles are made at a whole number of: what
@@ -495,7 +483,6 @@ impl World {
             queue,
             done,
             early: Vec::new(),
-            fresh: (0..GRID_LEVELS).map(|_| (HashMap::new(), 0)).collect(),
         }
     }
 
@@ -640,25 +627,14 @@ impl World {
         let far = |level: usize, id: TileId| distance(level, camera, id) > keep(level) + DROPPED;
         let now = self.tick();
         for (level, piece, tile) in made {
-            // Made with one asked for, a tile may be far, or here already: that one is kept, with its light. One made
-            // for another time than this one waits for the rest of its level.
+            // Made with one asked for, a tile may be far, or here already: that one is kept, with its light, unless
+            // made for another time than this one.
             if let (Piece::Tile(id), Some(tile)) = (piece, tile)
                 && !far(level, id)
+                && self.tiles[level].get(&id).is_none_or(|had| !had.stays.contains(&now))
             {
-                match self.tiles[level].get(&id) {
-                    None => {
-                        self.tiles[level].insert(id, tile);
-                        changed[level] = true;
-                    }
-                    Some(had) if !had.stays.contains(&now) => {
-                        let (fresh, since) = &mut self.fresh[level];
-                        if fresh.is_empty() {
-                            *since = now;
-                        }
-                        fresh.insert(id, tile);
-                    }
-                    Some(_) => {}
-                }
+                self.tiles[level].insert(id, tile);
+                changed[level] = true;
             }
         }
         // Made for another time, a tile no engine reads is dropped: made with one asked for, it would be made anew
@@ -670,15 +646,6 @@ impl World {
             let before = tiles.len();
             tiles.retain(|&id, tile| !far(level, id) && !stale(level, id, tile));
             changed[level] |= tiles.len() < before;
-            // A level's tiles made anew take their places together, once none is still to be: so the engines read
-            // one time of them, and the level is handed over once a step, not once a tile.
-            let (fresh, since) = &mut self.fresh[level];
-            fresh.retain(|id, _| tiles.contains_key(id));
-            let all = tiles.iter().all(|(id, tile)| tile.stays.contains(&now) || fresh.contains_key(id));
-            if !fresh.is_empty() && (all || (now - *since).abs() > FRESH) {
-                tiles.extend(fresh.drain());
-                changed[level] = true;
-            }
         }
         if let Some(shared) = &self.shared {
             shared.forget(|level, key| far(level, key.map(|k| k as i32)));
@@ -704,8 +671,7 @@ impl World {
         // that moves is as far behind, whatever its level, should the threads not keep up.
         let behind = |t: &Tile| (now - t.stays.end).max(t.stays.start - now);
         let tiles = self.tiles.iter().enumerate().flat_map(|(level, tiles)| tiles.iter().map(move |(&id, tile)| (level, id, tile)));
-        let fresh = &self.fresh;
-        let mut anew: Vec<_> = tiles.filter(|(level, id, tile)| !tile.stays.contains(&now) && !fresh[*level].0.contains_key(id)).collect();
+        let mut anew: Vec<_> = tiles.filter(|(_, _, tile)| !tile.stays.contains(&now)).collect();
         anew.sort_by_key(|(_, _, tile)| std::cmp::Reverse(behind(tile)));
         list.extend(anew.into_iter().map(|(level, id, tile)| (level, Piece::Tile(id), Some(tile.clone()))));
         {
@@ -880,44 +846,28 @@ mod tests {
         }
     }
 
-    /** Lit by bricks, a tile made anew has the light of each brick the old one had lit: rays do not wait for it. */
+    /** A tile made anew takes the light of each brick of the old one whose sites are as they were, and lights the rest the old had. */
     #[test]
     fn a_tile_made_anew_is_lit_where_the_old_one_was() {
         use worldgen::light::Brightness;
-        let (level, eye) = (5, [0.0, 5600.0, 0.0]);
-        let reach = std::array::from_fn(|l| (l == level).then_some(TILE as f64));
-        let tiles: Vec<_> = around(level, eye, TILE as f64).into_iter().map(|(_, id)| (level, Piece::Tile(id))).collect();
-        let day = Shared::new(Brightness { sky: 1.0, sun: 1.0, glow: 0.0 });
-        let mut world = World::new(worlds::valley::valley(1).alone("clouds"), Some(day), 4);
-        let settle = |world: &mut World, now: i64, asked: Vec<(usize, Piece)>| {
-            world.now = now;
-            let wants = Wants { reach, lit: Lit::Bricks, asked: Arc::new(asked) };
-            while world.update(eye, &wants) || world.making() > 0 {
-                if world.making() > 0 {
-                    world.wait();
-                }
-            }
-            world.level(level).tiles.clone()
+        let world = (worlds::by_name("forest").expect("forest").make)(1);
+        let tiles = tiles_about(&world, 0, world.spawn.map(|v| v as i32), TILE as i32);
+        let (&id, old) = tiles.iter().max_by_key(|(_, t)| voxels::bricks(&t.grid).count()).expect("a tile");
+        let mut light = Light::new(world, Shared::new(Brightness { sky: 1.0, sun: 1.0, glow: 0.0 }));
+        // Bricks lit up to the second that shows, a site of it that shows emptied.
+        let shows = |&(_, b, first): &(usize, [i32; 3], usize)| {
+            old.lit(0, b.map(|v| v * fcc::BRICK), &mut light);
+            old.light(first).is_some_and(|l| l.iter().any(|&w| w != 0))
         };
-        settle(&mut world, 0, tiles.clone());
-        // Some bricks of the clouds lit, as rays ask.
-        let corners = |t: &Tile| voxels::bricks(&t.grid).map(|(_, b, _)| b.map(|v| v * fcc::BRICK)).collect::<Vec<_>>();
-        let bricks: Vec<_> =
-            world.level(level).tiles.values().filter(|t| t.stays != time::ALWAYS).flat_map(|t| corners(t)).step_by(64).take(3).collect();
-        let before = settle(&mut world, 0, tiles.iter().copied().chain(bricks.into_iter().map(|c| (level, Piece::Brick(c)))).collect());
-        let after = settle(&mut world, 60_000, tiles);
-        let lit = |t: &Tile, [x, y, z]: [i32; 3]| usize::try_from(t.grid.brick(x, y, z)).is_ok_and(|f| t.light(f).is_some());
-        let mut anew = 0;
-        // Those within reach: the others, made with them, are dropped.
-        for (id, old, new) in
-            before.iter().filter_map(|(id, old)| after.get(id).filter(|new| !Arc::ptr_eq(old, new)).map(|new| (id, old, new)))
-        {
-            anew += 1;
-            for corner in corners(new).into_iter().filter(|&c| lit(old, c)) {
-                assert!(lit(new, corner), "tile {id:?}, brick at {corner:?}");
-            }
-        }
-        assert!(anew > 0, "the clouds moved");
+        let (_, _, changed) = voxels::bricks(&old.grid).filter(shows).nth(1).expect("two bricks that show");
+        let mut grid = (*old.grid).clone();
+        let lit = old.light(changed).expect("lit");
+        let words = lit.len() / fcc::BRICK_SITES;
+        let site = (0..fcc::BRICK_SITES).find(|&k| lit[k * words] != 0).expect("a voxel that shows");
+        grid.cells[changed * fcc::BRICK_SITES + site] = 0;
+        let new = Tile::new(id, Arc::new(grid)).lit_as(old, 0, &mut light);
+        assert!((0..new.lights.len()).filter(|&f| f != changed).all(|f| new.light(f) == old.light(f)), "the rest as it was");
+        assert!(new.light(changed).is_some_and(|l| Some(l) != old.light(changed)), "lit anew");
     }
 
     #[test]

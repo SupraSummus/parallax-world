@@ -383,24 +383,23 @@ The prototype of worlds that move (`worldgen/src/time.rs`;
 "Time" in `docs/architecture.md`): the valley's clouds.
 
 - **Tiles are made anew whole, and that is most of what moving costs.**
-  A tile the clouds are in is made anew each time they cross one of its sites
-  (a tick at most, `TICK` in `native/src/world.rs`), all of it, a few ms a tile,
-  and making the clouds' layer alone costs over a third of that.
-  Under the clouds, on four cores, the voxels engine reads a thousand tiles with clouds,
-  and over half are behind the world's time (`--stroll --by-work` says).
-  To try: what drifts in a frame of its own, made once there,
-  a tile at another time its sites moved to the next (a step is the lattice's own),
-  what stays drawn under it; a tile then costs as much as copying it.
-- **Behind, levels show different times.**
-  A level's tiles take their places together, so clouds no longer tear along tiles' faces,
-  but each level steps when its own are made, and they tear between levels;
-  far behind (`FRESH` in `native/src/world.rs`), a level shows some of a time with the rest of another.
-  The voxels engine then places them STEP tiles a step, its windows in turn:
-  for a moment a level's tiles show two times.
+  A tile the clouds are in is made anew each tick they cross one of its sites,
+  all of it, a few ms each; the clouds' layer alone is over a third of that.
+  Under the clouds, on four cores, over half the tiles with clouds that the voxels engine reads
+  are behind the world's time (`--stroll --by-work` says).
+  To try: making anew only the bricks that changed,
+  which edits and physics would want too;
+  the valley keeping its clouds' cover by where the wind has carried it (`recent.rs`).
+- **The world, not the engine, decides what to make anew.**
+  It makes anew each tile of another time within an engine's reach,
+  though only the engine knows which show.
+  To try: a tile of another time counted as lacking, and the engines asking for it.
+- **Behind, tiles show different times.**
+  Clouds tear along tiles' faces, and between levels.
 - **Light does not move.**
   The light's blocks and what Lights keep (`worldgen/src/light.rs`)
-  are made once, at time 0, and a tile made anew takes its light from the old one
-  where its sites did not change, and finds the rest from them:
+  are made once, at time 0, and a tile made anew lights from them
+  what the old one had lit and changed:
   a cloud's shadow stays where it fell.
   Each needs the time it stays for, as tiles have.
 - **Only the voxels engine follows.**
@@ -418,13 +417,9 @@ The prototype of worlds that move (`worldgen/src/time.rs`;
   kept as they are from box to box:
   a tree's crown in the wind is a thing.
 - **Time on its own lattice.**
-  As FCC is the densest packing of balls in three dimensions (D3),
-  D4 is in four: sites of space and time whose coordinates add up to an even number.
-  Its cell, the 24-cell, cut at a time is a rhombic dodecahedron,
-  a cube half a step on, and the next voxel of the other parity a step on:
-  so what moves would step a cube's side, to the other parity, not a neighbour's way,
-  and a level's steps in time be as fine as its sites in space.
-  What stays would be made anew each step, of the other parity: only what moves could take it.
+  Time is a parameter of the world, not a dimension of its lattice.
+  D4 (sites of space and time adding up to even, as FCC's do in space) would make it one:
+  only for what moves, as what stays would be made anew each step.
 - **The window never rests under clouds**:
   it draws a frame every 60th of a second while any tile holds what moves.
 - **README's pictures of the valley are from before its clouds.**

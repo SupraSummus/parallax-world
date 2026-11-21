@@ -645,15 +645,13 @@ Whatever is made says while when it stays as made (`time::at`),
 back in time as on; always, if it read no time.
 So a tile still never changes once made: it is a tile of a time.
 The native frontend makes its tiles at the world's time
-(`World::now`; `--time`, running on with the frames) at its tick,
-and those of another time anew, alone, if an engine reads them, else drops them:
-how often is the host's to say, an approximation
-(at the finest levels, what moves jumps a few sites a tick),
-whatever made them stale.
-A level's tiles made anew wait for one another and take their places together,
-lit as the old ones were where their sites did not change;
-the voxels engine places them in the step the old ones go,
-what showed of them as if rays asked for it, so nothing shows coarser between.
+(`World::now`; `--time`, running on with the frames),
+rounded down to a tick: how often what moves is made anew is the host's choice,
+an approximation (at the finest levels, what moves jumps a few sites a tick).
+A tile of another time is made anew, alone, if an engine reads it, else dropped.
+It keeps the old one's light where its bricks did not change,
+and the voxels engine places what showed of it in the step the old one goes,
+so nothing shows coarser between.
 The threads do not always keep up ([todo.md](todo.md), "Time").
 
 ## Limitations
