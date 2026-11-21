@@ -139,6 +139,7 @@ it differs by no more than its colour and how much it stops do.
 A cell's rays run along the rows of the finer level's sites,
 each crossing of a finer site filled in part counted as `CROSSING` (3/2):
 through a row's middles a ray crosses fewer sites, by longer chords, than one at any offset.
+At its own level a cell is one site, which each of its rays crosses whole.
 A site holds what it looks like, not what it is made of:
 how much of a ray it stops, what that shows and what it glows,
 each the sum of what is in it (`see` in `generate.rs`),

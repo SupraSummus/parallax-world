@@ -2,21 +2,22 @@
 //! finer, one by one: what rays along each of the lattice's 12 directions
 //! see of it, inside it only, at both levels. A cell holds what it looks
 //! like, not what it is made of: how much of a ray it stops, what that
-//! shows and what it glows. The rays are the rows of the finer level's
-//! sites through it, each two rays a hair to either side, half each (a
-//! row along a face between two cells is both's): nothing drawn by chance
-//! but which cells are checked, a sample of those near a surface in each
-//! stratum's places, by a hash of where they are. The contract holds
-//! levels to it (checks::contract).
+//! shows and what it glows. At its own level a cell is one site, which
+//! each ray crosses whole; at the finer, the rays are the rows of its
+//! sites through the cell, a row along a face between two cells half
+//! each's: nothing drawn by chance but which cells are checked, a sample
+//! of those near a surface in each stratum's places, by a hash of where
+//! they are. The contract holds levels to it (checks::contract).
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::cmp::Ordering;
+use std::collections::BTreeMap;
 
-use fcc::VOXEL_FACES;
+use fcc::{FastSet, VOXEL_FACES};
 
 use crate::checks::contract::{Held, sites};
 use crate::grid::{ALPHA, Box3, VoxelGrid};
 use crate::noise::hash64;
-use crate::picture::{CROSSING, composited, nearest_site};
+use crate::picture::{CROSSING, Seen, composited, nearest_site, seen_whole};
 
 /** How many levels finer a level's cells are held to: more costs more, and loses less (a finer cell's mean forgets which of its rays it stops). */
 pub const FINER_BY: u32 = 2;
@@ -53,9 +54,10 @@ pub(crate) fn cells_of(levels: [&Level; 2], strata: &[Held], area: &Box3, taken:
     let within = |b: &Box3, c: &[i64; 3]| (0..3).all(|i| c[i] as f64 * s - s >= b.min[i] as f64 && c[i] as f64 * s + s <= b.max[i] as f64);
     let grids = levels.map(|l| &l.grid);
     let ours = |c: &[i64; 3]| within(area, c) && !taken.iter().any(|b| within(b, c));
-    let near: HashSet<[i64; 3]> = near_surfaces(levels, f / s).filter(ours).collect();
+    let near: FastSet<[i64; 3]> = near_surfaces(levels, f / s).collect();
     // Ordered by where each is: a stratum's sample is the same in any region holding it.
-    let mut near: Vec<(u64, [i64; 3])> = near.into_iter().map(|cell| (hash64(level as u64, cell[0], cell[1], cell[2]), cell)).collect();
+    let mut near: Vec<(u64, [i64; 3])> =
+        near.into_iter().filter(ours).map(|cell| (hash64(level as u64, cell[0], cell[1], cell[2]), cell)).collect();
     near.sort_unstable();
     // The same rays through every cell, moved to it: its centre is a site of the finer level too.
     let rays: [_; VOXEL_FACES.len()] = std::array::from_fn(|along| rays_through(s, f, along));
@@ -72,81 +74,76 @@ pub(crate) fn cells_of(levels: [&Level; 2], strata: &[Held], area: &Box3, taken:
         .collect()
 }
 
-/** `cell` seen along each direction by `rays`, at the finer level and its own (sites `scales` apart, lattice units). */
+/**
+ * `cell` seen along each direction by `rays` at the finer level, each as
+ * much as it weighs, and at its own (sites `scales` apart, lattice units):
+ * there a cell is one site, which each of its rays crosses whole.
+ */
 fn seen_along(grids: [&VoxelGrid; 2], rays: &[Vec<Ray>], cell: [i64; 3], scales: [f64; 2]) -> Vec<Cell> {
     let centre = cell.map(|v| v as f64 * scales[1]);
     let mut cells = Vec::new();
-    for rays in rays {
-        let mut looks = [[0.0; 4]; 2];
-        for (q, d, length) in rays {
-            let q: [f64; 3] = std::array::from_fn(|c| centre[c] + q[c]);
+    for (rays, face) in rays.iter().zip(VOXEL_FACES) {
+        let d = face.map(|v| v as f64 / std::f64::consts::SQRT_2);
+        let mut fine = [0.0; 4];
+        for (q, length, weight) in rays {
+            let q: [f64; 3] = std::array::from_fn(|c| (centre[c] + q[c]) / scales[0]);
             // The rays run along the finer sites' rows, through their middles: each crossing stands for CROSSING.
-            for (((grid, scale), crossing), look) in grids.iter().zip(scales).zip([CROSSING, 1.0]).zip(&mut looks) {
-                for (_, seen) in composited(grid, q.map(|v| v / scale), *d, length / scale, crossing) {
-                    look[0] += seen.stopped;
-                    (0..3).for_each(|c| look[1 + c] += seen.shown[c] + seen.glow[c]);
-                }
+            for (_, seen) in composited(grids[0], q, d, length / scales[0], CROSSING) {
+                fine.iter_mut().zip(look(&seen)).for_each(|(sum, v)| *sum += weight * v);
             }
         }
-        cells.push(looks.map(|l| l.map(|v| v / rays.len().max(1) as f64)));
+        let weights: f64 = rays.iter().map(|ray| ray.2).sum();
+        cells.push([fine.map(|v| v / weights), look(&seen_whole(grids[1], cell, d))]);
     }
     cells
 }
 
-/** A ray through a cell: where it enters it, its direction and how far it goes in it. */
-type Ray = ([f64; 3], [f64; 3], f64);
+/** What a ray sees of a site: how much of it the site stops, and what shows (what it stops by its colour, and what it glows). */
+fn look(seen: &Seen) -> Look {
+    [seen.stopped, seen.shown[0] + seen.glow[0], seen.shown[1] + seen.glow[1], seen.shown[2] + seen.glow[2]]
+}
+
+/** A ray through a cell along a direction: where it enters it, how far it goes in it, and what it weighs. */
+type Ray = ([f64; 3], f64, f64);
 
 /**
  * The rays along direction `along` through the cell centred at the origin
- * (sites `s` apart, lattice units): those of the rows of the sites `f`
- * apart along it that cross it, each two a hair to either side of its
- * row, each where it enters the cell and how far it goes in it.
+ * (sites `s` apart, lattice units): one along each row of the sites `f`
+ * apart along it that crosses the cell, entering it a hair inside;
+ * weighed 1, or ½ along a face, half each cell's. Only the two faces
+ * parallel to it can hold a row, and they are opposite. A row that only
+ * touches the cell, at an edge or a corner, crosses none of it.
  */
 fn rays_through(s: f64, f: f64, along: usize) -> Vec<Ray> {
-    let n = VOXEL_FACES[along].map(|v| v as f64);
-    let d = n.map(|v| v / std::f64::consts::SQRT_2);
-    // A hair across d, n × (3, 2, 1): along no plane of the lattice.
-    let e = [n[1] - 2.0 * n[2], 3.0 * n[2] - n[0], 2.0 * n[0] - 3.0 * n[1]];
-    let e = e.map(|v| v * 1e-4 / e.iter().map(|v| v * v).sum::<f64>().sqrt());
+    let dot = |a: [i64; 3], b: [i64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let n = VOXEL_FACES[along].map(i64::from);
+    let d = n.map(|v| v as f64 / std::f64::consts::SQRT_2);
     let hair = 1e-6;
-    // Each row once, by where it meets the plane across d through the origin.
-    let mut rows = BTreeSet::new();
-    let reach = (s / f) as i64 + 1;
-    for i in -reach..=reach {
-        for j in -reach..=reach {
-            for k in -reach..=reach {
-                if (i + j + k) & 1 != 0 {
-                    continue;
-                }
-                let p = [i, j, k].map(|v| v as f64 * f);
-                let along = p[0] * d[0] + p[1] * d[1] + p[2] * d[2];
-                rows.insert([0, 1, 2].map(|c| ((p[c] - along * d[c]) * 1e3).round() as i64));
-            }
-        }
+    // In the finer sites' units, the cell is |m · x| ≤ r for each face's m, and row p is p + t n.
+    let r = (s / f) as i64;
+    // Each row once, by where it meets the plane across n through the origin (doubled); of
+    // one that crosses the cell, the site nearest it is within r + 1 along each axis.
+    let mut rows = BTreeMap::new();
+    for p in sites(&Box3 { min: [-r - 1; 3], max: [r + 2; 3] }).map(|(x, y, z)| [x, y, z]) {
+        rows.entry([0, 1, 2].map(|c| 2 * p[c] - dot(p, n) * n[c])).or_insert(p);
     }
     let mut rays = Vec::new();
-    for row in rows {
-        for side in [-1.0, 1.0] {
-            let q: [f64; 3] = std::array::from_fn(|c| row[c] as f64 / 1e3 + side * e[c]);
-            // Where it crosses the cell: |m · x| ≤ s for each face's m.
-            let (mut t0, mut t1) = (f64::NEG_INFINITY, f64::INFINITY);
-            for m in VOXEL_FACES {
-                let m = m.map(|v| v as f64);
-                let towards = m[0] * d[0] + m[1] * d[1] + m[2] * d[2];
-                let off = m[0] * q[0] + m[1] * q[1] + m[2] * q[2];
-                if towards.abs() < 1e-12 {
-                    if off > s {
-                        t1 = f64::NEG_INFINITY;
-                    }
-                } else if towards > 0.0 {
-                    t1 = t1.min((s - off) / towards);
-                } else {
-                    t0 = t0.max((s - off) / towards);
-                }
+    'rows: for p in rows.into_values() {
+        let (mut t0, mut t1, mut weight) = (f64::NEG_INFINITY, f64::INFINITY, 1.0);
+        for m in VOXEL_FACES.map(|m| m.map(i64::from)) {
+            let (towards, off) = (dot(m, n), dot(m, p));
+            match towards.cmp(&0) {
+                Ordering::Equal if off > r => continue 'rows,
+                Ordering::Equal if off == r => weight = 0.5,
+                Ordering::Equal => {}
+                Ordering::Greater => t1 = t1.min((r - off) as f64 / towards as f64),
+                Ordering::Less => t0 = t0.max((r - off) as f64 / towards as f64),
             }
-            if t1 - t0 > 2.0 * hair {
-                rays.push((std::array::from_fn(|c| q[c] + (t0 + hair) * d[c]), d, t1 - t0 - 2.0 * hair));
-            }
+        }
+        // Each unit of t is √2 sites of the finer level along the row.
+        let length = (t1 - t0) * std::f64::consts::SQRT_2 * f - 2.0 * hair;
+        if length > 0.0 {
+            rays.push((std::array::from_fn(|c| (p[c] as f64 + t0 * n[c] as f64) * f + hair * d[c]), length, weight));
         }
     }
     rays
@@ -184,4 +181,33 @@ fn near_surfaces<'a>(levels: [&'a Level; 2], finer: f64) -> impl Iterator<Item =
             [at].into_iter().chain((0..3).flat_map(move |axis| [-0.5, 0.5].map(|side| corner(axis, side)))).map(nearest_site)
         })
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /**
+     * Along every direction a cell's rays are alike, and weighed they fill
+     * it: their lengths sum to its volume, 2s³, over each row's share of
+     * the plane across it, √2 f² (a site's volume, 2 f³, over the rows'
+     * spacing, √2 f).
+     */
+    #[test]
+    fn a_cells_rays_fill_it_alike_along_every_direction() {
+        for (s, f) in [(2.0, 1.0), (4.0, 1.0), (16.0, 4.0)] {
+            let alike = |along: usize| {
+                let mut rays: Vec<[i64; 2]> =
+                    rays_through(s, f, along).iter().map(|r| [(r.1 * 1e6).round() as i64, (r.2 * 2.0) as i64]).collect();
+                rays.sort();
+                rays
+            };
+            for (along, face) in VOXEL_FACES.iter().enumerate() {
+                assert_eq!(alike(along), alike(0), "s {s}, f {f}: along {face:?} and {:?}", VOXEL_FACES[0]);
+                let filled: f64 = rays_through(s, f, along).iter().map(|r| r.1 * r.2).sum();
+                let volume = 2.0 * s * s * s / (std::f64::consts::SQRT_2 * f * f);
+                assert!((filled - volume).abs() < 1e-3, "s {s}, f {f}, along {along}: {filled} for {volume}");
+            }
+        }
+    }
 }
