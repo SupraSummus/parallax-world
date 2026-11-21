@@ -434,11 +434,28 @@ Numbers are for the forest at 1280×800, as measured when written.
   Of those they hide, about one in seven the GPU's probes find showing,
   most because a probe's box shows where its voxels would not;
   the first frame takes up to a third longer, waiting for probes.
-  The rays are cast once a pick, from where the eye was:
+  The rays are cast for a pick, from where the eye was:
   what the eye comes to see as it moves within it shows a few frames late.
-  Cast again as it moves, they cost tens of milliseconds a face;
-  cheaper rays (steps a voxel long, empty cells of 8·FCC crossed at once)
-  could follow the eye.
+  A face picked anew, every few units moved,
+  takes the renderer's thread tens of milliseconds:
+  its cells of the three finest levels, near the eye, are nearly all new,
+  each asked whether it holds voxels (`may_hold`) and whether it is hidden,
+  and every ray goes on to the new cells far off.
+  Flying fast, the eye leaves a pick before it is rendered,
+  and what is near shows holes till it slows:
+  no coarser level stands in for a finer one not baked.
+  Crossing a tile that holds nothing at once
+  made the rays no cheaper, measured.
+  Each such pick swaps a few thousand chunks in the compositor,
+  a thousand a frame (`CHANGES`), each through four sorted free lists.
+- **Native's world lists all it is asked for every frame** (`World::update`),
+  thousands of tiles when flying fast, and frees what comes far:
+  a tile is made with all those above and below it (`made_with`),
+  in the valley kilometres of air, hundreds of tiles a frame.
+  Leaving the queue alone while asked the same took exceptions
+  (a tile dropped since, bricks to light) for milliseconds no frame was short of.
+- **Flat, the valley looking `--look 30,-10` never completes** (`--shot`):
+  the world's threads idle, the renderer's and the main one busy.
   Mist hides nothing: the GPU's depths have none, so it would ask for it all.
   A server handing each player only the cells it may see
   would need, for each probe a client says shows,

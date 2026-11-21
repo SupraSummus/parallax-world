@@ -209,6 +209,8 @@ over the face goes through the voxels drawn along it,
 the grid of the level claiming each layer,
 half a voxel at a time, across empty bricks half a brick,
 and stops at the first whole voxel.
+A ray is cast when a cell asks for it, and as far as the cell is,
+on from there when a farther one asks.
 So ground, walls and trunks hide what is behind them,
 and leaves (grain, as often as they cover) what is deep enough in a wood;
 see-through voxels hide nothing, as the GPU sees no mist in its depths.

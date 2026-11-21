@@ -126,7 +126,7 @@ impl Lod {
      * `camera`: 2Q · N layers past the last of the level's layers of
      * sites not past the camera's; none for the coarsest, which claims all.
      */
-    fn reach(&self, level: i32, camera: i32) -> i64 {
+    pub fn reach(&self, level: i32, camera: i32) -> i64 {
         let n = 1i64 << level;
         if level == self.top() { i64::MAX } else { (camera as i64).div_euclid(n) * n + 2 * self.q as i64 * n }
     }

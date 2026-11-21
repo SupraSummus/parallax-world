@@ -20,7 +20,7 @@ use renderer::Renderer;
 
 use super::{Colours, Engine, Frame, Look, Picture};
 use crate::gpu::Easel;
-use crate::world::{Level, Lit, Piece, Wants, World};
+use crate::world::{Level, Lit, Wants, World};
 
 /** What passes between the renderer's thread and the one that draws. */
 #[derive(Default)]
@@ -163,11 +163,7 @@ impl Engine for Chunks {
             ),
             picture: Box::new(Composed { frame, view: View::new(look) }),
             // Whichever way the eye turns.
-            wants: Wants {
-                reach: std::array::from_fn(reach),
-                lit,
-                asked: Arc::new(stats.tiles.into_iter().map(|(level, id)| (level, Piece::Tile(id))).collect()),
-            },
+            wants: Wants { reach: std::array::from_fn(reach), lit, asked: stats.tiles },
             busy: self.busy,
         }
     }

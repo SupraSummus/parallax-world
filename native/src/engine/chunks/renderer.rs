@@ -22,10 +22,10 @@ use fcc::{FastMap, FastSet, GRID_LEVELS, Tiles};
 
 use super::bakery::{Baked, Bakery, Request};
 use super::compositor::GpuProbe;
-use super::occlusion::{Box3, Occlusion};
+use super::occlusion::{Box3, Cast, Occlusion};
 use crate::engine::Look;
 use crate::view::{self, Face, to_local};
-use crate::world::{Heights, Level, TILE, TileId, World, within};
+use crate::world::{Heights, Level, Piece, TILE, TileId, World, within};
 
 /**
  * Chunks kept beyond the picks, before those not looked up or let go for
@@ -146,7 +146,7 @@ pub struct Stats {
     /** Chunks to bake, in view or not. */
     pub queued: usize,
     /** Tiles that cells in view read and the world has not made, by grid level, most wanted first. */
-    pub tiles: Vec<(usize, TileId)>,
+    pub tiles: Arc<Vec<(usize, Piece)>>,
     /** Cells hidden in the faces in view (Hiding), each a probe of the frame's, and how many the GPU found showing after all, of all hidden. */
     pub hidden: usize,
     pub found: usize,
@@ -165,15 +165,16 @@ const TURN: f64 = 0.15;
  * What is known of a cell of a face: nothing yet; that it holds nothing
  * (all above or below the world, meeting none of its level's voxels,
  * or baked empty); that it is hidden (Hiding), so not baked while that
- * holds; that it waits for the tiles it reads (box_tiles), or for its
- * bake; or its chunk.
+ * holds, with the tiles it reads and whether it had them all, to bake;
+ * that it waits for the tiles it reads (box_tiles), or for its bake; or
+ * its chunk.
  */
 #[derive(Clone, Default)]
 enum Seen {
     #[default]
     Unknown,
     Empty,
-    Hidden,
+    Hidden([TileId; 2], bool),
     Tiles([TileId; 2]),
     Bake([TileId; 2]),
     Baked(Arc<Chunk>),
@@ -233,7 +234,7 @@ impl Asking<'_> {
  * wood what is deep enough in it; see-through voxels, mist, hide nothing,
  * as the GPU, which sees no mist in its depths, would ask for it all.
  * A cell is hidden if all it may draw (`shown`) is behind where the rays
- * round it stop.
+ * round it stop; those are cast as cells ask for them, as far as they are.
  * Between rays, or from where the eye has moved since (DRIFT), it may
  * show: so each cell hidden asks the GPU whether it does after all.
  */
@@ -249,15 +250,13 @@ struct Hiding {
     /** Each grid level's heights, past which rays meet nothing; the tiles rays went through last, by level. */
     heights: Heights,
     cast: Vec<Arc<Tiles>>,
-    /** Whether some rays met tiles not made, and may yet stop nearer. */
-    open: bool,
 }
 
 impl Hiding {
     /** From the eye at `eye`. */
     fn new(eye: [f64; 3], far: f64, lod: Lod, lattice: Lattice, flat: bool, heights: Heights) -> Hiding {
         let occlusion = Occlusion::new([eye[0] * LAYER, eye[1], eye[2] * LAYER]);
-        Hiding { occlusion, centre: eye, far, lod, lattice, flat, heights, cast: Vec::new(), open: true }
+        Hiding { occlusion, centre: eye, far, lod, lattice, flat, heights, cast: Vec::new() }
     }
 
     /**
@@ -275,67 +274,97 @@ impl Hiding {
         shown
     }
 
-    /** Whether nothing of `cell` shows: all it may draw (`shown`) is behind where the rays stop. */
-    fn hides(&self, cell: &CellChunk) -> bool {
-        self.occlusion.hides(self.shown(cell))
-    }
-
-    /** Whether to cast rays: never cast, or some met tiles not made, and tiles came since. */
-    fn stale(&self, levels: &[Arc<Level>]) -> bool {
-        self.open && (self.cast.len() != levels.len() || self.cast.iter().zip(levels).any(|(c, l)| !Arc::ptr_eq(c, &l.grids)))
-    }
-
     /**
-     * Casts on its rays that may yet stop nearer (occlusion.rs), through the
-     * tiles of `levels`: half a voxel at a time, stopping where the nearest
-     * site's voxel is whole; across a brick holding none, half a brick at a
-     * time. Never, past the render distance, or out of the world's heights
-     * going away. Where a tile is not made, it waits to go on from there.
+     * Whether nothing of `cell` shows: all it may draw (`shown`) is behind
+     * where the rays round it stop, cast through the tiles of `levels` as
+     * far as it is, if they were not yet.
      */
-    fn cast(&mut self, levels: &[Arc<Level>]) {
-        self.cast = levels.iter().map(|l| l.grids.clone()).collect();
-        let eye = [self.centre[0] * LAYER, self.centre[1], self.centre[2] * LAYER];
-        let Lattice { r, u, f } = self.lattice;
-        let (lod, far, heights, layer) = (self.lod, self.far, self.heights, self.centre[2].floor() as i32);
-        // Of a face's coordinates in units of grid 0, the world's: (a R + c F) / 2 + b U, a = x / LAYER, b = y, c = z / LAYER.
-        let world = |p: [f64; 3]| -> [f64; 3] {
-            std::array::from_fn(|d| (p[0] / LAYER * f64::from(r[d]) + p[2] / LAYER * f64::from(f[d])) / 2.0 + p[1] * f64::from(u[d]))
-        };
-        self.open = self.occlusion.cast(|[tx, ty], from| {
-            let rising = world([tx, ty, 1.0])[1];
-            let mut t = from.max(LAYER);
-            // The tile read last, of its grid.
-            let mut last: Option<(i32, TileId, &fcc::Grid)> = None;
-            while t < far {
-                let at = world([eye[0] + tx * t, eye[1] + ty * t, eye[2] + t]);
-                let grid = lod.grid(lod.claiming((eye[2] + t) / LAYER, layer));
-                let unit = f64::from(1 << grid);
-                let (low, high) = heights[grid as usize];
-                let q = at.map(|v| v / unit);
-                if (q[1] >= high as f64 && rising >= 0.0) || (q[1] < low as f64 && rising <= 0.0) {
-                    break;
-                }
-                let site = nearest_site(q);
-                let id = site.map(|v| (v as i64).div_euclid(TILE) as i32);
-                if last.is_none_or(|(g, i, _)| g != grid || i != id) {
-                    last = levels[grid as usize].tiles.get(id).map(|t| (grid, id, &*t.grid));
-                }
-                let mut step = f64::from(fcc::BRICK) / 2.0 * unit;
-                match last {
-                    None => return (f64::INFINITY, Some(t)),
-                    Some((.., g)) if g.brick(site[0], site[1], site[2]) >= 0 => {
-                        if fcc::alpha_of(g.get(site[0], site[1], site[2])) == fcc::ALPHA {
-                            return (eye[2] + t, None);
-                        }
-                        step = unit / 2.0;
-                    }
-                    Some(_) => (),
-                }
-                t += step;
-            }
-            (f64::INFINITY, None)
-        });
+    fn hides(&mut self, cell: &CellChunk, levels: &[Arc<Level>]) -> bool {
+        let shown = self.shown(cell);
+        let Hiding { occlusion, centre, far, lod, lattice, heights, .. } = self;
+        occlusion.hides(shown, |tangents, from, to| stop(*centre, *far, lod, *lattice, heights, levels, tangents, from, to))
     }
+
+    /** Has its rays go through the tiles of `levels` from now on. Whether some waited for tiles and these are others: those go on. */
+    fn follow(&mut self, levels: &[Arc<Level>]) -> bool {
+        let came = self.cast.len() != levels.len() || self.cast.iter().zip(levels).any(|(c, l)| !Arc::ptr_eq(c, &l.grids));
+        if came {
+            self.cast = levels.iter().map(|l| l.grids.clone()).collect();
+        }
+        let on = came && self.occlusion.waits();
+        if on {
+            self.occlusion.again();
+        }
+        on
+    }
+}
+
+/**
+ * What a ray finds (occlusion.rs): from the eye at `centre` of a face of
+ * `lattice`, with `tangents`, from depth `from` to `to` at least, through
+ * the tiles of `levels`: half a voxel at a time, stopping where the nearest
+ * site's voxel is whole; across a brick holding none, half a brick at a
+ * time. Nothing ever, past `far`, or out of the world's `heights` going
+ * away. Where a tile is not made, it waits.
+ */
+#[allow(clippy::too_many_arguments)]
+fn stop(
+    centre: [f64; 3],
+    far: f64,
+    lod: &Lod,
+    Lattice { r, u, f }: Lattice,
+    heights: &Heights,
+    levels: &[Arc<Level>],
+    [tx, ty]: [f64; 2],
+    from: f64,
+    to: f64,
+) -> Cast {
+    let eye = [centre[0] * LAYER, centre[1], centre[2] * LAYER];
+    let layer = centre[2].floor() as i32;
+    // Of a face's coordinates in units of grid 0, the world's: (a R + c F) / 2 + b U, a = x / LAYER, b = y, c = z / LAYER.
+    let world = |p: [f64; 3]| -> [f64; 3] {
+        std::array::from_fn(|d| (p[0] / LAYER * f64::from(r[d]) + p[2] / LAYER * f64::from(f[d])) / 2.0 + p[1] * f64::from(u[d]))
+    };
+    let rising = world([tx, ty, 1.0])[1];
+    let mut t = from.max(LAYER);
+    // The tile read last, of its grid; the grid drawn here, as far as its level claims.
+    let mut last: Option<(i32, TileId, &fcc::Grid)> = None;
+    let (mut grid, mut claimed) = (0, f64::NEG_INFINITY);
+    while t < far {
+        if t >= to {
+            return Cast::Clear(t);
+        }
+        let at = world([eye[0] + tx * t, eye[1] + ty * t, eye[2] + t]);
+        let ahead = (eye[2] + t) / LAYER;
+        if ahead > claimed {
+            let level = lod.claiming(ahead, layer);
+            (grid, claimed) = (lod.grid(level), lod.reach(level, layer) as f64);
+        }
+        let unit = f64::from(1 << grid);
+        let (low, high) = heights[grid as usize];
+        let q = at.map(|v| v / unit);
+        if (q[1] >= high as f64 && rising >= 0.0) || (q[1] < low as f64 && rising <= 0.0) {
+            break;
+        }
+        let site = nearest_site(q);
+        let id = site.map(|v| (v as i64).div_euclid(TILE) as i32);
+        if last.is_none_or(|(g, i, _)| g != grid || i != id) {
+            last = levels[grid as usize].tiles.get(id).map(|t| (grid, id, &*t.grid));
+        }
+        let mut step = f64::from(fcc::BRICK) / 2.0 * unit;
+        match last {
+            None => return Cast::Waits(t),
+            Some((.., g)) if g.brick(site[0], site[1], site[2]) >= 0 => {
+                if fcc::alpha_of(g.get(site[0], site[1], site[2])) == fcc::ALPHA {
+                    return Cast::Stops(t);
+                }
+                step = unit / 2.0;
+            }
+            Some(_) => (),
+        }
+        t += step;
+    }
+    Cast::Clear(f64::INFINITY)
 }
 
 /** The site of the FCC lattice (coordinates adding up to an even number) nearest point `q`. */
@@ -468,29 +497,25 @@ fn may_hold(cell: &CellChunk, lattice: Lattice, level: &Level) -> bool {
 }
 
 /**
- * Casts `pick`'s hiding's rays, if it hides and they are to be cast; then,
- * if they were or there are `fresh` cells to bake, those it hides of the
- * cells that wait for tiles or bakes are hidden, neither baked nor their
- * tiles asked for, each with a probe. Whether any were.
+ * If `pick` hides, and there are `fresh` cells to bake, or rays that wait
+ * for tiles and tiles came since: those it hides of the cells that
+ * wait for tiles or bakes are hidden, neither baked nor their tiles asked
+ * for, each with a probe. Whether any were.
  */
 fn hide(pick: &mut Pick, fresh: bool, levels: &[Arc<Level>], asking: &mut Asking) -> bool {
     let Some(hiding) = &mut pick.hiding else { return false };
-    let cast = hiding.stale(levels);
-    if cast {
-        hiding.cast(levels);
-    }
-    if !cast && !fresh {
+    if !hiding.follow(levels) && !fresh {
         return false;
     }
     let showing = &pick.showing;
-    let hides = |cell: &CellChunk| !showing.contains(cell) && hiding.hides(cell);
+    let mut hides = |cell: &CellChunk| !showing.contains(cell) && hiding.hides(cell, levels);
     let mut hidden = Vec::new();
     pick.waiting.retain(|&(cell, tiles, wanted)| !hides(&cell) || (hidden.push((cell, tiles, wanted, None)), false).1);
     pick.baking.retain(|&cell, &mut (r, wanted)| !hides(&cell) || (hidden.push((cell, r.tiles, wanted, Some(r))), false).1);
     let any = !hidden.is_empty();
     for (cell, tiles, wanted, request) in hidden {
         if let Some(seen) = pick.picked.at(&cell) {
-            *seen = Seen::Hidden;
+            *seen = Seen::Hidden(tiles, request.is_some());
         }
         let probe = asking.probe(cell, hiding.shown(&cell));
         pick.hidden.insert(cell, Hidden { cell, tiles, wanted, request, probe });
@@ -502,11 +527,11 @@ fn hide(pick: &mut Pick, fresh: bool, levels: &[Arc<Level>], asking: &mut Asking
 fn unhide(f: usize, pick: &mut Pick, h: Hidden) {
     let Some(seen) = pick.picked.at(&h.cell) else { return };
     match (&*seen, h.request) {
-        (Seen::Hidden, Some(r)) => {
+        (Seen::Hidden(..), Some(r)) => {
             *seen = Seen::Bake(h.tiles);
             pick.baking.insert(h.cell, (r, h.wanted));
         }
-        (Seen::Hidden, None) => {
+        (Seen::Hidden(..), None) => {
             *seen = Seen::Tiles(h.tiles);
             pick.waiting.push((h.cell, h.tiles, h.wanted));
         }
@@ -568,7 +593,7 @@ impl Renderer {
                 feedback,
                 heard: 0,
             },
-            stats: Stats { baking: 0, queued: 0, tiles: Vec::new(), hidden: 0, found: 0 },
+            stats: Stats { baking: 0, queued: 0, tiles: Arc::default(), hidden: 0, found: 0 },
             ids: FastSet::default(),
             changes: VecDeque::new(),
         }
@@ -685,9 +710,9 @@ impl Renderer {
         let (mut chunks, mut waiting, mut baking) = (Vec::new(), Vec::new(), FastMap::default());
         let (eyes, wide) = picked.bounds();
         lod.composed(&mut picked, eyes, wide, |cell, seen| {
-            // Hidden from where the eye was at the last pick, maybe not from where it is.
-            if matches!(seen, Seen::Hidden) {
-                *seen = Seen::Unknown;
+            // Hidden from where the eye was at the last pick, maybe not from where it is: it waits for its tiles or its bake, as then.
+            if let Seen::Hidden(tiles, to_bake) = *seen {
+                *seen = if to_bake { Seen::Bake(tiles) } else { Seen::Tiles(tiles) };
             }
             if matches!(seen, Seen::Empty) {
                 return;
@@ -715,7 +740,7 @@ impl Renderer {
             }
             let wanted = Wanted { distance: distance(&cell, eye), in_view: lod.composes(&cell, eye, far, tangents) };
             match seen {
-                Seen::Unknown | Seen::Hidden | Seen::Empty => (),
+                Seen::Unknown | Seen::Hidden(..) | Seen::Empty => (),
                 &mut Seen::Tiles(t) => waiting.push((cell, t, wanted)),
                 &mut Seen::Bake(t) => _ = baking.insert(cell, (request(cell, t), wanted)),
                 Seen::Baked(chunk) => chunks.push(Placement { face: f, cell, chunk: chunk.clone() }),
@@ -810,20 +835,22 @@ impl Renderer {
         baking.sort_by(|a, b| a.1.order().partial_cmp(&b.1.order()).expect("distances"));
         let wanted: Vec<Request> = baking.iter().map(|b| b.0).collect();
         self.bakery.want(&wanted);
-        let mut tiles: Vec<(usize, TileId, f64)> = picks()
-            .flat_map(|p| &p.waiting)
-            .filter(|w| w.2.in_view)
-            .flat_map(|&(cell, t, wanted)| {
-                let (level, source) = (cell.atoms as usize, &self.tiles[cell.atoms as usize]);
-                within(t).filter(|&id| !source.has(id)).map(move |id| (level, id, wanted.distance))
-            })
-            .collect();
-        tiles.sort_by(|a, b| a.2.total_cmp(&b.2));
-        let mut listed = FastSet::default();
+        // Each tile once, as far as the nearest cell that waits for it.
+        let mut nearest: FastMap<(usize, TileId), f64> = FastMap::default();
+        for &(cell, t, wanted) in picks().flat_map(|p| &p.waiting).filter(|w| w.2.in_view) {
+            let (level, source) = (cell.atoms as usize, &self.tiles[cell.atoms as usize]);
+            for id in within(t).filter(|&id| !source.has(id)) {
+                let distance = nearest.entry((level, id)).or_insert(f64::INFINITY);
+                *distance = distance.min(wanted.distance);
+            }
+        }
+        let mut tiles: Vec<((usize, TileId), f64)> = nearest.into_iter().collect();
+        tiles.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
+        let tiles: Vec<(usize, Piece)> = tiles.into_iter().map(|((level, id), _)| (level, Piece::Tile(id))).collect();
         self.stats = Stats {
             baking: baking.iter().filter(|b| b.1.in_view).count(),
             queued: baking.len(),
-            tiles: tiles.into_iter().filter(|t| listed.insert((t.0, t.1))).map(|t| (t.0, t.1)).collect(),
+            tiles: Arc::new(tiles),
             hidden: picks().map(|p| p.hidden.len()).sum(),
             found: self.found,
         };
