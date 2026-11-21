@@ -84,9 +84,9 @@ pub fn covers(name: &str, stratum: &str) -> bool {
     stratum == name || stratum.strip_prefix(name).is_some_and(|rest| rest.starts_with([' ', '/']))
 }
 
-/** `region` grown to at least 16 sites of `level` across around its centre, along x and z. */
+/** `region` grown to at least 16 sites of `level` across around its centre. */
 pub(crate) fn around(region: &Box3, level: u32) -> Box3 {
-    let grow = |i: usize| if i == 1 { 0 } else { 0.max((8i64 << level) - (region.max[i] - region.min[i]) / 2) };
+    let grow = |i: usize| 0.max((8i64 << level) - (region.max[i] - region.min[i]) / 2);
     Box3 { min: [0, 1, 2].map(|i| region.min[i] - grow(i)), max: [0, 1, 2].map(|i| region.max[i] + grow(i)) }
 }
 

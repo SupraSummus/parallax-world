@@ -120,9 +120,7 @@ impl std::fmt::Display for Cells {
 pub(crate) fn cells_of(name: &str, world: &World, focus: Option<&Generator>, region: &Box3, level: u32) -> Cells {
     let against = level.saturating_sub(FINER_BY);
     let (s, f) = ((1i64 << level) as f64, (1i64 << against) as f64);
-    let mut area = around(region, level);
-    let grow = 0.max((8i64 << level) - (region.max[1] - region.min[1]) / 2);
-    (area.min[1], area.max[1]) = (region.min[1] - grow, region.max[1] + grow);
+    let area = around(region, level);
     let grids_of = |generator: &Generator| [against, level].map(|l| generate(generator, &box_at(&area, l), l));
     let grids = grids_of(&world.generator);
     let within = |c: &[i64; 3]| (0..3).all(|i| c[i] as f64 * s - s >= area.min[i] as f64 && c[i] as f64 * s + s <= area.max[i] as f64);
