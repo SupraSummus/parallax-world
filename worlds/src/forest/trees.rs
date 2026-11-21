@@ -289,6 +289,12 @@ enum BarkStyle {
     Dashes,
 }
 
+/** Where `bark` draws on a trunk [x, x + width) × [from, to) × [z, z + width): a mark reaches a unit past it. */
+fn bark_bounds(x: f64, z: f64, width: f64, from: f64, to: f64) -> Box3 {
+    let (min, max) = ([x, from, z], [x + width, to, z + width]);
+    Box3 { min: min.map(|v| v.floor() as i64 - 1), max: max.map(|v| v.ceil() as i64 + 1) }
+}
+
 /** Bark on the four faces of a trunk [x, x + width) × [from, to) × [z, z + width). */
 #[allow(clippy::too_many_arguments)]
 fn bark(x: f64, z: f64, width: f64, from: f64, to: f64, style: BarkStyle, kind: K, random: &mut Rng) -> Vec<Shape> {
@@ -401,7 +407,7 @@ fn spruce_tree(x: f64, ground: f64, z: f64, height: f64, room: Arc<Room>, random
     };
     let crown = |fill: Fill| lathe([cx, from, cz], [cx, to, cz], move |t| r(round(from + t * (to - from))), k(K::spruce), fill, Op::Fill);
     let foot = roots(cx, ground, cz, width / 2.0, K::spruceBark, random, ground_at);
-    let fine = vec![fine_child("bark", bole.bounds, random, move |random| {
+    let fine = vec![fine_child("bark", bounds_of_shapes([&bole.bounds, &bark_bounds(x, z, width, ground, base)]), random, move |random| {
         bark(x, z, width, ground, base, BarkStyle::Furrows, K::spruceScale, random)
     })];
     let mut shapes = vec![bole.clone()];
@@ -481,7 +487,8 @@ fn birch_tree(x: f64, ground: f64, z: f64, height: f64, room: Arc<Room>, random:
         let radius = vox(1.0 + random.next() * 0.6).min(room.margin(p));
         clusters.push(leaf_cluster(format!("leaves {i}"), p, radius, foliage, 0.35, random, 0.6, turning));
     }
-    let dashes = fine_child("bark", bounds_of_shapes(shapes.iter().map(|s| &s.bounds)), random, move |random| {
+    let marked: Vec<Box3> = segments.iter().map(|&[sx, sz, y0, y1]| bark_bounds(sx, sz, width, y0, y1)).collect();
+    let dashes = fine_child("bark", bounds_of_shapes(shapes.iter().map(|s| &s.bounds).chain(&marked)), random, move |random| {
         segments.iter().flat_map(|&[sx, sz, y0, y1]| bark(sx, sz, width, y0, y1, BarkStyle::Dashes, K::birchMark, random)).collect()
     });
     tree(shapes, branches, vec![dashes], clusters)

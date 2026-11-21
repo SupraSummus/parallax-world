@@ -84,6 +84,9 @@ pub struct VoxelGrid {
     pub glows: Few<Glows>,
 }
 
+/** All a site holds (`VoxelGrid::held`). */
+pub type Held = (bool, (u8, [u16; 3]), ([u8; 3], [u16; 3]), u8, [u32; 3], Option<Views>, Option<Glows>);
+
 /** What a site's pieces glow along each direction, as Views are. */
 pub type Glows = [[u32; 3]; FACE_KINDS];
 
@@ -476,6 +479,22 @@ impl VoxelGrid {
                 (alpha, colour) => look_of(colour, alpha, alpha),
             },
             _ => 0,
+        }
+    }
+
+    /** All site (x, y, z) holds, which every way of seeing it reads; nothing outside the box or off the sites. */
+    pub fn held(&self, x: i64, y: i64, z: i64) -> Held {
+        match self.slot(x, y, z) {
+            Some(Ok(i)) => (
+                self.shown[i],
+                self.pieces.get(i),
+                self.medium.get(i),
+                self.solid[i],
+                self.glow.get(i).copied().unwrap_or_default(),
+                self.views.get(i),
+                self.glows.get(i).copied(),
+            ),
+            _ => Held::default(),
         }
     }
 

@@ -442,7 +442,8 @@ Broken rules panic, naming the thing and pointing here:
   N from its centre (one number or per axis), whichever way it is anchored;
   only things that get made are checked, so derive `reach` from the largest possible.
 - **Things.** A node with children gives `bounds` holding them;
-  a child stays inside its parent's bounds;
+  a child stays inside its parent's bounds, as a node's shapes do inside its own
+  (but carves, which cut only the thing);
   siblings have unique names;
   a measured far form starts at a `detail` of a unit or more.
 - **Plans.** A plan reads only plans at least as coarse (see "Bands").
@@ -461,7 +462,7 @@ Broken rules panic, naming the thing and pointing here:
   It is asked of the box two sites wider each way than the sites drawn,
   as a site stands for its voxel and a span or shape grows to keep one:
   it says where it is, not where its sites are.
-  Only the contract checks it (`skips_hold`),
+  Only the contract checks it (`parts_hold`),
   so derive it from what bounds the spans, as `about` does.
 - **About.** A field's span lies within `below` under and `above` over
   what it is `about` at its column,

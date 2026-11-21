@@ -893,12 +893,15 @@ fn ground(seed: u64) -> Field {
     .ground(Arc::new(Sloped::new(Arc::new(Plan::new("ground", 1 << 20, |_, _| PLAN * MIN_Y)), 0)), 1, PLAN + 1, K::soil)
 }
 
+/** How far a street lamp's arm reaches from its pole, in plan cells. */
+const ARM: i64 = 3;
+
 /** A street lamp on the pavement at (x, z), its arm reaching over the road along (dx, dz). */
 fn street_lamp(c: &mut Canvas, x: i64, z: i64, dx: i64, dz: i64) {
     let height = vox(4.0);
     c.cells([x, 1, z], [x, height, z], Some(K::pole));
-    c.cells([x + dx, height, z + dz], [x + 3 * dx, height, z + 3 * dz], Some(K::pole));
-    c.put([x + 3 * dx, height - 1, z + 3 * dz], K::light);
+    c.cells([x + dx, height, z + dz], [x + ARM * dx, height, z + ARM * dz], Some(K::pole));
+    c.put([x + ARM * dx, height - 1, z + ARM * dz], K::light);
 }
 
 fn street_tree(c: &mut Canvas, x: i64, z: i64) {
@@ -922,6 +925,13 @@ impl Block {
         let cells = |c0: i64, c1: i64| (PLAN * c0 - 1, PLAN * c1 + 1);
         let ((x0, x1), (y0, y1), (z0, z1)) = (cells(self.px, self.px + PLOT - 1), cells(MIN_Y, MAX_Y), cells(self.pz, self.pz + PLOT - 1));
         Box3 { min: [x0, y0, z0], max: [x1, y1, z1] }
+    }
+
+    /** Its street's bounds: its plot's, and over the road as far as the lamps' arms reach past it (from a cell inside it). */
+    fn street_bounds(&self) -> Box3 {
+        let b = self.bounds();
+        let over = PLAN * (ARM - 1);
+        Box3 { min: [b.min[0] - over, b.min[1], b.min[2] - over], max: [b.max[0] + over, b.max[1], b.max[2] + over] }
     }
 
     /** Lamps at the corners and trees between them along every side; hedges round the back and sides of the lot, a gap behind the back door. */
@@ -1017,16 +1027,18 @@ fn district(blocks: Arc<Vec<Block>>) -> Node {
             let mut children = Vec::new();
             for (n, block) in blocks.iter().enumerate() {
                 let bounds = block.bounds();
-                if !bounds.overlaps(units) {
-                    continue;
+                if bounds.overlaps(units) {
+                    let (shapes, outline) = draw_building(&block.building, &mut Rng::new(block.seed));
+                    let mut inside = vec![Shape::cuboid(bounds.min.map(|v| v as f64), bounds.max.map(|v| v as f64), 0).carve()];
+                    inside.extend(shapes);
+                    let building = Node::of(outline).with_children(vec![Child::new("inside", INSIDE, Node::of(inside))]);
+                    children.push(Child::new(format!("building {n}"), ANY_SIZE, building.with_far(Far::measured(fx(OUTLINE as f64)))));
                 }
-                let (shapes, outline) = draw_building(&block.building, &mut Rng::new(block.seed));
-                let mut inside = vec![Shape::cuboid(bounds.min.map(|v| v as f64), bounds.max.map(|v| v as f64), 0).carve()];
-                inside.extend(shapes);
-                let building = Node::of(outline).with_children(vec![Child::new("inside", INSIDE, Node::of(inside))]);
-                children.push(Child::new(format!("building {n}"), ANY_SIZE, building.with_far(Far::measured(fx(OUTLINE as f64)))));
-                let block = *block;
-                children.push(Child::new(format!("street {n}"), ANY_SIZE, Node::lazy(bounds, 0, move |_| block.street())));
+                let street = block.street_bounds();
+                if street.overlaps(units) {
+                    let block = *block;
+                    children.push(Child::new(format!("street {n}"), ANY_SIZE, Node::lazy(street, 0, move |_| block.street())));
+                }
             }
             children
         }))),

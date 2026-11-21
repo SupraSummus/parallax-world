@@ -1,11 +1,8 @@
 //! Every world keeps the contract (worldgen::checks::contract) in regions holding
 //! everything it is made of around spawn, on average over several seeds:
-//! a test each, so they run in parallel, and a thread each seed, and for
-//! the parts.
+//! a test each, so they run in parallel, and a thread each seed.
 
-use std::sync::mpsc;
-
-use worldgen::checks::contract::{Break, breaks, check, hold_to_baseline, parts_equal_whole};
+use worldgen::checks::contract::{Break, breaks, check, hold_to_baseline};
 use worlds::{Entry, REGIONS_SEED, WORLDS};
 
 /** The seeds each world is checked at: each stratum's margins are averaged over all of them. */
@@ -14,8 +11,7 @@ const SEEDS: &[u64] = &[REGIONS_SEED, 1, 2, 3];
 /**
  * `entry`'s world keeps the contract (worldgen::checks::contract) at SEEDS,
  * in regions holding everything it is made of around spawn, each
- * stratum's margins averaged over all of them; generated in parts too at
- * REGIONS_SEED. CONTRACT_ONLY, names of strata separated by commas
+ * stratum's margins averaged over all of them. CONTRACT_ONLY, names of strata separated by commas
  * ("towns/church,railway"), checks only regions holding them. Panics
  * where it breaks it but as its baseline, data/contract/<name>.txt, says.
  */
@@ -24,33 +20,11 @@ fn keeps_the_contract(entry: &Entry) {
     let only: Vec<&str> = only.split(',').map(str::trim).filter(|o| !o.is_empty()).collect();
     let only = &only;
     let (checked, panicked) = std::thread::scope(|scope| {
-        // Parts at one seed: they check how a world is drawn, which seeds don't change. On a thread of their own, in the
-        // regions that seed's thread finds, while it goes on with the rest.
-        let (to_parts, regions) = mpsc::channel();
+        // Each seed is a world of its own.
         let seeds: Vec<_> = SEEDS
             .iter()
-            .map(|&seed| {
-                let to_parts = (seed == REGIONS_SEED).then(|| to_parts.clone());
-                // Each seed is a world of its own.
-                scope.spawn(move || {
-                    let world = (entry.make)(seed);
-                    let surveyed = |boxes: &[_]| {
-                        if let Some(to_parts) = to_parts {
-                            to_parts.send(boxes.to_vec()).expect("the parts' thread waiting");
-                        }
-                    };
-                    check(&format!("{} (seed {seed})", entry.name), &world, entry.levels, only, surveyed)
-                })
-            })
+            .map(|&seed| scope.spawn(move || check(&format!("{} (seed {seed})", entry.name), &(entry.make)(seed), entry.levels, only)))
             .collect();
-        drop(to_parts);
-        // No regions if their seed's thread panicked before it found them: that thread says why.
-        let parts = scope.spawn(move || {
-            if let Ok(boxes) = regions.recv() {
-                let name = format!("{} (seed {REGIONS_SEED})", entry.name);
-                parts_equal_whole(&name, &(entry.make)(REGIONS_SEED), &boxes, entry.levels);
-            }
-        });
         let message = |panic: Box<dyn std::any::Any + Send>| {
             panic.downcast_ref::<String>().cloned().or_else(|| panic.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default()
         };
@@ -60,9 +34,6 @@ fn keeps_the_contract(entry: &Entry) {
                 Ok(c) => checked.push(c),
                 Err(panic) => panicked.push(format!("seed {seed}: {}", message(panic))),
             }
-        }
-        if let Err(panic) = parts.join() {
-            panicked.push(format!("parts: {}", message(panic)));
         }
         (checked, panicked)
     });

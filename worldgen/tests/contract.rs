@@ -7,8 +7,8 @@ use std::sync::Arc;
 use fcc::FACE_KINDS;
 use worldgen::World;
 use worldgen::checks::contract::{
-    Accuracy, REGION, Report, SHOWN, STOPPED, TOLERANCE, breaks, check, check_component, heights_hold, hold_to_baseline, margins,
-    parts_equal_whole, regions, things_hold, whole_equals_parts,
+    Accuracy, REGION, Region, Report, SHOWN, STOPPED, TOLERANCE, breaks, check, check_component, heights_hold, hold_to_baseline,
+    in_regions, parts_hold, regions, things_hold,
 };
 use worldgen::checks::survey::survey;
 use worldgen::generator::{
@@ -184,7 +184,8 @@ fn anchors_along_an_axis_are_one_per_square_across_it() {
     let each = expected / 16.0;
     assert!(squares.iter().all(|n| (*n as f64 / each - 1.0).abs() < 0.25), "{squares:?} knobs by where in 2N, not about {each}");
     for level in [0, 2] {
-        whole_equals_parts(&generator, &b(0, 0, 0, 128, 128, 128), level);
+        let broken = parts_hold(&generator, &generate(&generator, &b(0, 0, 0, 128, 128, 128), level), level);
+        assert!(broken.is_empty(), "{broken:?}");
     }
 }
 
@@ -194,9 +195,7 @@ fn anchors_along_an_axis_are_one_per_square_across_it() {
  * (CONTRACT_BLESS=1 writes it).
  */
 fn keeps_the_contract(name: &str, world: &World, levels: u32) {
-    let mut found = Vec::new();
-    let checked = check(name, world, levels, &[], |boxes| found = boxes.to_vec());
-    parts_equal_whole(name, world, &found, levels);
+    let checked = check(name, world, levels, &[]);
     hold_to_baseline(&breaks(&[checked], &[]), &format!("{}/data/contract/{name}.txt", env!("CARGO_MANIFEST_DIR")), true);
 }
 
@@ -211,7 +210,7 @@ fn a_declared_accuracy_covers_its_parts() {
 
 #[test]
 fn an_accuracy_declared_for_nothing_breaks() {
-    let checked = check("fog", &world_of(fog(), (0, 128)), 1, &[], |_| ());
+    let checked = check("fog", &world_of(fog(), (0, 128)), 1, &[]);
     let breaks = breaks(&[checked], &[("fgo", Accuracy::DEFAULT)]);
     assert!(breaks.iter().any(|b| b.of.is_none() && b.message.contains("fgo")), "a declaration for no stratum passed");
 }
@@ -315,9 +314,9 @@ fn a_rare_thing_far_from_spawn_gets_a_region() {
         Some(Node::of(vec![cuboid(p, p.map(|v| v + 8.0), kind, SOLID, Op::Fill)]))
     });
     let (_, regions) = regions(&world_of(world(Layer::Population(posts)), (-64, 64)), &[]);
-    let names: Vec<String> = regions.iter().flat_map(|(_, strata)| strata.clone()).collect();
+    let names: Vec<&String> = regions.iter().flat_map(|r| r.strata.iter().map(|(name, _)| name)).collect();
     assert_eq!(names, ["posts rock", "posts wood"]);
-    assert!(regions[0].0.holds([50 * 64, 0, 50 * 64]), "{regions:?}");
+    assert!(regions[0].area.holds([50 * 64, 0, 50 * 64]), "{regions:?}");
 }
 
 #[test]
@@ -344,7 +343,8 @@ fn fog_layer(from: i64, to: i64, kind: fn(i64) -> u8, extinction: fn(i64) -> f64
 
 /** The broken margins of fog of `kind` and `extinction` (as `fog_layer`) at levels 1 and 2. */
 fn fog_breaks(kind: fn(i64) -> u8, extinction: fn(i64) -> f64) -> Report {
-    margins("fog", &world_of(fog_layer(-64, 64, kind, extinction), (-256, 256)), &[b(0, -32, 0, 128, 32, 128)], 2).broken(Accuracy::DEFAULT)
+    let fog = world_of(fog_layer(-64, 64, kind, extinction), (-256, 256));
+    in_regions("fog", &fog, &[Region::whole("fog", b(0, -32, 0, 128, 32, 128))], 2).0.broken(Accuracy::DEFAULT)
 }
 
 #[test]
@@ -406,6 +406,16 @@ fn child(name: &str, radius: f64) -> Child {
 #[should_panic(expected = "reaches past its parent")]
 fn refuses_a_child_reaching_past_its_parent() {
     generate(&parent(|| vec![child("a", 20.0)]), &near(), 0);
+}
+
+#[test]
+#[should_panic(expected = "draws past its bounds")]
+fn refuses_a_node_drawing_past_its_bounds() {
+    let past = |_: Point, _: &Cell| {
+        let shapes = Shapes::Now(vec![ball([64.0; 3], 20.0, ROCK, SOLID, Op::Fill)]);
+        Some(Node { shapes, bounds: Some(b(60, 60, 60, 70, 70, 70)), children: None, far: None })
+    };
+    generate(&world(single(past, 64)), &near(), 0);
 }
 
 #[test]
@@ -488,7 +498,7 @@ fn a_component_alone_stands_for_its_parents_far_form() {
 fn a_component_is_checked_in_its_places() {
     // The village's tables at the three houses nearest spawn, a region each, named by them, the houses drawn around.
     let checked = check_component("tables", &|| world_of(village(), (-64, 64)), "houses/table", 3, 1);
-    let held: Vec<&Vec<String>> = checked.regions.iter().map(|(_, held)| held).collect();
-    assert_eq!(held, vec![&vec!["houses/table".to_string()]; 3]);
+    let held: Vec<Vec<&String>> = checked.regions.iter().map(|r| r.strata.iter().map(|(name, _)| name).collect()).collect();
+    assert_eq!(held, vec![vec!["houses/table"]; 3]);
     assert!(checked.report.margins.iter().all(|m| m.looks[1][0] > 0.0), "cells near the tables in each place");
 }

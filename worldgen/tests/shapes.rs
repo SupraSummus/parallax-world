@@ -6,7 +6,7 @@
 //! sRGB, so a world's palette can only hide what breaks here.
 
 use worldgen::World;
-use worldgen::checks::contract::{Accuracy, Break, Margin, Report, hold_to_baseline, margins, whole_equals_parts};
+use worldgen::checks::contract::{Accuracy, Break, Margin, Region, Report, hold_to_baseline, in_regions};
 use worldgen::curve::Curve;
 use worldgen::generator::{
     ANY_SIZE, Field, Generator, KindDef, Layer, Node, Op, Point, Population, SOLID, Shape, Span, ball, capsule, cuboid, ellipsoid, gable,
@@ -109,14 +109,12 @@ fn each_solid_keeps_to_its_baseline() {
             .map(|&(name, cell, make)| {
                 scope.spawn(move || {
                     let world = world(make, cell);
-                    for level in [0, 2, LEVELS] {
-                        whole_equals_parts(&world.generator, &region, level);
-                    }
-                    let report = margins(name, &world, &[region], LEVELS);
+                    let (report, exact) = in_regions(name, &world, &[Region::whole(name, region)], LEVELS);
                     let broken = report.broken(Accuracy::DEFAULT);
                     let message = |m: &Margin| format!("{name}: {}", Report { margins: vec![m.clone()], ..broken.clone() });
                     let of = |m: &Margin| Some((name.to_string(), m.level, m.difference(), m.spread));
-                    broken.margins.iter().map(|m| Break { of: of(m), message: message(m) }).collect::<Vec<_>>()
+                    let exact = exact.into_iter().map(|b| Break { of: None, message: format!("{name}: {b}") });
+                    broken.margins.iter().map(|m| Break { of: of(m), message: message(m) }).chain(exact).collect::<Vec<_>>()
                 })
             })
             .collect();
