@@ -148,6 +148,33 @@ impl Fx {
         Fx(self.0.saturating_sub(other.0))
     }
 
+    /**
+     * The cosine and sine of `k` `n`ths of a turn, `n` dividing 32: the
+     * points of a ring, from a table, so the same on every machine.
+     */
+    pub fn turn(k: i64, n: i64) -> [Fx; 2] {
+        assert!(n > 0 && 32 % n == 0, "a turn in 32nds or coarser");
+        // cos(i π / 16) for i from 0 to 8, a quarter turn.
+        const QUARTER: [Fixed; 9] = [
+            fixed(1.0),
+            fixed(0.980_785_280_403_230_4),
+            fixed(0.923_879_532_511_286_7),
+            fixed(0.831_469_612_302_545_2),
+            fixed(std::f64::consts::FRAC_1_SQRT_2),
+            fixed(0.555_570_233_019_602_2),
+            fixed(0.382_683_432_365_089_8),
+            fixed(0.195_090_322_016_128_3),
+            0,
+        ];
+        // Even, and odd about a quarter turn.
+        let cos = |i: i64| {
+            let i = i.rem_euclid(32).min((-i).rem_euclid(32));
+            if i <= 8 { QUARTER[i as usize] } else { -QUARTER[16 - i as usize] }
+        };
+        let i = k * (32 / n);
+        [Fx(cos(i)), Fx(cos(i - 8))]
+    }
+
     /** The mean of `values`, truncated towards zero; zero if there are none. */
     pub fn mean(values: impl IntoIterator<Item = Fx>) -> Fx {
         let (sum, n) = values.into_iter().fold((0, 0), |(sum, n), v| (sum + v.0, n + 1));
@@ -354,9 +381,19 @@ impl Rng {
         ((self.next_u32() as u64 * n as u64) >> 32) as u32
     }
 
+    /** One of `list`, each as likely. */
+    pub fn pick<T: Copy>(&mut self, list: &[T]) -> T {
+        list[self.below(list.len() as u32) as usize]
+    }
+
     /** True with chance `p`. */
     pub fn chance(&mut self, p: Fx) -> bool {
-        fraction(self.next_u32()) < p.0
+        self.fraction() < p
+    }
+
+    /** A fraction of 1 in [0, 1), in steps of 2^-16. */
+    pub fn fraction(&mut self) -> Fx {
+        Fx::fraction(self.next_u32())
     }
 
     /** A fraction of 1 in [0, 1), in steps of 2^-32. */
@@ -384,5 +421,16 @@ mod tests {
         }
         // 32-bit coordinates would wrap here.
         assert_ne!(hash(7, 1, 2, 3), hash(7, 1 + (1 << 32), 2, 3));
+    }
+
+    #[test]
+    fn a_turn_is_its_cosine_and_sine() {
+        for n in [1, 2, 4, 8, 16, 32] {
+            for k in -n..2 * n {
+                let a = std::f64::consts::TAU * k as f64 / n as f64;
+                let [c, s] = Fx::turn(k, n);
+                assert!((c.to_f64() - a.cos()).abs() <= 1e-5 && (s.to_f64() - a.sin()).abs() <= 1e-5, "{k}/{n}: {c:?}, {s:?}");
+            }
+        }
     }
 }

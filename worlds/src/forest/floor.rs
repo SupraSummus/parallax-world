@@ -31,7 +31,7 @@ const FLOWERS: [K; 4] = [K::flowerYellow, K::flowerViolet, K::flowerWhite, K::fl
 /** A flower: a stem and a head two sites wide. */
 pub(super) fn flower(x: f64, y: f64, z: f64, random: &mut Rng) -> Vec<Shape> {
     let stem = 2.0 + random.below(2) as f64;
-    let colour = FLOWERS[random.below(FLOWERS.len() as u32) as usize];
+    let colour = random.pick(&FLOWERS);
     vec![
         Shape::cuboid([x, y, z], [x + 2.0, y + stem, z + 1.0], K::tallGrass),
         Shape::cuboid([x - 1.0, y + stem, z - 1.0], [x + 1.0, y + stem + 1.0, z + 1.0], colour),
