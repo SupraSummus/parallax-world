@@ -71,7 +71,7 @@ fn hollow(l: Level, k: vec3i, j: u32) -> bool {
 // it and what it glows, RGB9E5, 0 if none.
 @group(0) @binding(6) var<storage, read> lights: array<u32>;
 // Per slot of the pool, the next of its brick's (voxels.rs's Pool), EMPTY if none: a brick whose
-// voxels' faces differ has more, each its sites' faces two by two, as `cells` has them.
+// voxels look unlike through some faces has more (face_look), as `cells` has them.
 @group(0) @binding(7) var<storage, read> next: array<i32>;
 // A bit per entry of the levels' tables (as `bricks`): whether a ray took the next level at its brick, unknown, or read it for what it shows.
 @group(0) @binding(11) var<storage, read_write> asked: array<atomic<u32>>;
@@ -447,20 +447,27 @@ fn coloured(rgb: vec3f, light: Light) -> vec3f {
   return to_srgb(min(to_linear(rgb) * light.on + light.glow, vec3f(1.0)));
 }
 
-// The look through face `k` (of FACES) of the voxel hit: its brick's next slots hold its faces', one a slot, if they differ.
+// The look through face `k` (of FACES) of the voxel hit: its own, unless its brick's next slots hold what its
+// voxels' faces see (voxels.rs's `sights`): which sight each face sees, two bits a face (0: its own), then the
+// sights, one a slot.
 fn face_look(hit: Hit, k: u32) -> u32 {
-  var faces = next[brick_of(hit.level, hit.site)];
+  var sights = next[brick_of(hit.level, hit.site)];
   // Past what its see-through voxels stop, if it holds that.
-  if faces >= 0 && (faces & STOPS) != 0 {
-    faces = next[faces & ~STOPS];
+  if sights >= 0 && (sights & STOPS) != 0 {
+    sights = next[sights & ~STOPS];
   }
-  if faces < 0 {
+  if sights < 0 {
     return hit.voxel;
   }
-  for (var j = 0u; j < k; j++) {
-    faces = next[faces];
+  let r = (hit.site - levels[hit.level].min) & vec3i(BRICK - 1);
+  let which = (site_in(sights, r) >> (2u * k)) & 3u;
+  if which == 0u {
+    return hit.voxel;
   }
-  return site_in(faces, (hit.site - levels[hit.level].min) & vec3i(BRICK - 1));
+  for (var j = 0u; j < which; j++) {
+    sights = next[sights];
+  }
+  return site_in(sights, r);
 }
 
 // What the voxel hit looks like along `d` (sRGB): the mean (linear) of its looks through the faces turned

@@ -512,15 +512,18 @@ the mean of its looks through the faces turned most against it
 (fcc's `facing`, the one rule every host and check reads by),
 times the light on it (below):
 a coarse voxel of a house may show its wall from the side and its roof from above.
-So a brick whose voxels look unlike through some faces takes twelve more slots of the pool,
-its sites' looks through one face each, each slot naming the next.
+So a brick whose voxels look unlike through some faces takes more slots of the pool,
+each naming the next:
+one for which sight each face of a site sees, then one a sight,
+each look once, as worldgen holds them (`sights`);
+a face that sees one more than they hold sees its site's own look.
 Empty space is crossed on the lattice too, not by boxes:
 beside its bricks, a window counts for each cell of 8·FCC and of 32·FCC
 (rhombic dodecahedra about every other corner of its bricks, or of blocks of 4³ of them)
-the bricks around it whose voxels meet it, or that are unknown,
-as is every brick out of its ball, which rays do not read:
-counts start full, and only bricks of tiles change them,
-so a ball moves through what is unknown at no cost to them.
+the bricks of its ball around it whose voxels meet it, or that are unknown.
+A brick out of the ball counts in none, as rays do not read it:
+a cell across the ball's edge is crossed as far as the level is read,
+not stepped through voxel by voxel to its end.
 A ray in a cell that none meets goes across it at once, face to face,
 as it goes across a voxel: whatever it met in the cell would meet the cell.
 A window also keeps the box, in the level's axes as its bricks are,

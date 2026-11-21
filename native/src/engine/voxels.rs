@@ -26,7 +26,7 @@
 //!
 //! A voxel shows how it looks along the ray, through the faces turned to
 //! it (fcc's `facing`; a brick whose voxels look unlike through some faces
-//! takes PARTS more slots for them: Pool), times the light on it: shaded,
+//! takes more slots, for what those see: `sights`, Pool), times the light on it: shaded,
 //! by the way its surface faces; lit, the light its tile found for it
 //! (world.rs, worldgen's Light), and its own glow, uploaded with its brick
 //! to a pool of its own.
@@ -79,13 +79,12 @@ const TABLE: usize = (WINDOW * WINDOW * WINDOW) as usize;
  * it have voxels that meet it or are unknown, a torus as its table:
  * CELLS of the finer scale, then the coarser's (voxels.wgsl's fine and coarse).
  *
- * Every brick out of the ball is unknown, and counts in every cell around
- * it: counts start full, only bricks of tiles change them, and a ball
- * moving through unknown space costs them nothing. Rays read nothing past
- * the ball (reach); a cell at its edge counted full is only not crossed at
- * once. A cell's entry in the torus is also that of the cell a window
- * away, whose bricks only add to its count. So a cell counted hollow holds
- * no voxel the ball holds, as a ray stepping voxel by voxel would find.
+ * Only the ball's bricks count: an unknown one in every cell around it.
+ * Rays read nothing past the ball (reach), so a cell across its edge is
+ * crossed as far as they read, not stepped through to the level's end. A
+ * cell's entry in the torus is also that of the cell a window away, whose
+ * bricks only add to its count. So a cell counted hollow holds no voxel
+ * the ball holds, as a ray stepping voxel by voxel would find.
  */
 const SCALES: usize = 2;
 const CELLS: usize = TABLE / 2;
@@ -98,7 +97,7 @@ const COUNTS: usize = CELLS + (CELLS >> 6);
 const AROUND: u32 = (1 << 27) - 1;
 /** A table's entries other than slots (voxels.wgsl's). */
 const EMPTY: i32 = -1;
-/** In a slot's `next` (Pool): the slot after it holds what the brick's see-through voxels stop of each channel (`words`), not its looks through a face. */
+/** In a slot's `next` (Pool): the slot after it holds what the brick's see-through voxels stop of each channel (`words`), not what its faces see. */
 const STOPS: i32 = 1 << 30;
 const UNKNOWN: i32 = -2;
 
@@ -135,8 +134,9 @@ fn around(b: [i32; 3], j: usize, e: u32) -> [i32; 3] {
 
 /** Where cell `k` of scale `j` (its coordinates adding up to an even number) is in a window's counts. */
 fn cell_entry(k: [i32; 3], j: usize) -> usize {
+    // A power of two: a mask, not a division.
     let across = WINDOW >> (2 * j);
-    let w = k.map(|v| v.rem_euclid(across));
+    let w = k.map(|v| v & (across - 1));
     j * CELLS + (((w[2] * across + w[1]) * across + w[0]) / 2) as usize
 }
 
@@ -281,36 +281,65 @@ fn sites(first: usize) -> std::ops::Range<usize> {
     first * BRICK_SITES..(first + 1) * BRICK_SITES
 }
 
+/** Sights a site's faces see beside its own look, at most, as the GPU holds them (`sights`). */
+const SIGHTS: usize = 3;
+
 /**
- * Slots the brick of `grid` whose sites start at `first` takes: one, one
- * more if some see-through voxel of it stops channels unlike, and PARTS
- * more if its voxels look unlike through some faces.
+ * What the faces of a site of look `own` see, given its looks through
+ * each (`views`), as worldgen's Sights hold it: the looks unlike its own,
+ * each once; how many; and, two bits a face, which each sees: 0 its own,
+ * else a sight's number from 1. Most sites' faces see two looks in all; a
+ * face that sees one more than SIGHTS sees the site's own.
+ */
+fn sights(own: u32, views: &[u32]) -> ([u32; SIGHTS], usize, u32) {
+    let (mut sights, mut count, mut which) = ([0; SIGHTS], 0, 0);
+    for (k, &view) in views.iter().enumerate().filter(|(_, view)| **view != own) {
+        let at = sights[..count].iter().position(|s| *s == view).unwrap_or(count);
+        if at == SIGHTS {
+            continue;
+        }
+        (sights[at], count) = (view, count.max(at + 1));
+        which |= (at as u32 + 1) << (2 * k);
+    }
+    (sights, count, which)
+}
+
+/**
+ * Slots the brick of `grid` whose sites start at `first` takes: one; one
+ * more if some see-through voxel of it stops channels unlike; and, if its
+ * voxels look unlike through some faces, one for which sight each face
+ * sees and one per sight of the site with most (`sights`).
  */
 fn slots(grid: &fcc::Grid, first: usize) -> usize {
-    1 + usize::from(grid.has_stops(sites(first))) + if grid.has_views(sites(first)) { PARTS } else { 0 }
+    let most = grid.views_in(sites(first)).map(|(i, views)| sights(grid.cells[i], views).1).max();
+    1 + usize::from(grid.has_stops(sites(first))) + most.map_or(0, |most| 1 + most)
 }
 
 /**
  * Part `part` of the brick whose sites start at `first` in `grid`'s cells
  * (in bricks) as the GPU takes it, a word a site: part 0, each site's
  * look; then, if the brick has any (`slots`), what each see-through site
- * stops of each channel (fcc's `stops_at`); then part k of the rest, its
- * look through face k (of VOXEL_FACES), its site's where they do not
- * differ.
+ * stops of each channel (fcc's `stops_at`); then which sight each of its
+ * faces sees, and its sights, one a part (`sights`).
  */
-fn words(grid: &fcc::Grid, first: usize, part: usize) -> impl Iterator<Item = u32> + '_ {
-    let stops = usize::from(grid.has_stops(sites(first)));
-    sites(first).map(move |i| match grid.cells[i] {
-        look if part == 0 || look == 0 => look,
-        look if part == stops => {
-            if fcc::alpha_of(look) < u8::MAX {
-                grid.stops_at(i)
-            } else {
-                0
+fn words(grid: &fcc::Grid, first: usize, part: usize) -> [u32; BRICK_SITES] {
+    let (sites, stops) = (sites(first), usize::from(grid.has_stops(sites(first))));
+    let mut out = [0; BRICK_SITES];
+    if part == 0 {
+        out.copy_from_slice(&grid.cells[sites]);
+    } else if part == stops {
+        for (word, i) in out.iter_mut().zip(sites) {
+            if grid.cells[i] != 0 && fcc::alpha_of(grid.cells[i]) < u8::MAX {
+                *word = grid.stops_at(i);
             }
         }
-        look => grid.views_at(i).map_or(look, |views| views[part - 1 - stops]),
-    })
+    } else {
+        for (i, views) in grid.views_in(sites.clone()) {
+            let (sights, _, which) = sights(grid.cells[i], views);
+            out[i - sites.start] = if part == stops + 1 { which } else { sights[part - stops - 2] };
+        }
+    }
+    out
 }
 
 /** Words a site's light takes: the light on it, and what it glows. */
@@ -485,7 +514,7 @@ struct GpuLevel {
 
 /** Where brick `b` (of a window holding it) is in a window's table. */
 fn entry(b: [i32; 3]) -> usize {
-    let w = b.map(|v| v.rem_euclid(WINDOW));
+    let w = b.map(|v| v & (WINDOW - 1));
     ((w[2] * WINDOW + w[1]) * WINDOW + w[0]) as usize
 }
 
@@ -565,15 +594,12 @@ struct Added {
     part: usize,
 }
 
-/** Slots a brick takes beyond its own if its voxels look unlike through some faces: its looks through each face, one a slot. */
-const PARTS: usize = fcc::FACE_KINDS;
-
 /**
  * The pool's slots: those free, and per slot, the next of its brick's
- * (EMPTY if none): a brick whose voxels look unlike through some faces
- * takes PARTS more, its looks through each face (words' parts), in a
- * chain; before them, marked STOPS, one for what its see-through voxels
- * stop of each channel, if they differ.
+ * (EMPTY if none), words' parts in a chain: a brick whose voxels look
+ * unlike through some faces takes more, which sight each face sees, then
+ * its sights; before them, marked STOPS, one for what its see-through
+ * voxels stop of each channel, if they differ.
  */
 struct Pool {
     free: Vec<u32>,
@@ -629,10 +655,9 @@ struct Held {
  * A level's window as the GPU holds it: from which tiles, the ball of
  * bricks it holds of them, its table (per brick a slot, EMPTY or UNKNOWN:
  * every brick outside the ball), and, per cell of each scale, how many
- * bricks around it have voxels that meet it or are unknown (SCALES's).
- * Bricks of a tile
- * that share their sites share a slot: the ground's rock, buried, a slot
- * a tile.
+ * of the ball's bricks around it have voxels that meet it or are unknown
+ * (SCALES's). Bricks of a tile that share their sites share a slot: the
+ * ground's rock, buried, a slot a tile.
  */
 struct Window {
     /** The tiles it holds, as last given; None while some are still to come or go. */
@@ -642,7 +667,7 @@ struct Window {
     /** Sites of the level's bricks start at origin + BRICK · b. */
     origin: [i32; 3],
     table: Vec<i32>,
-    /** Per entry of the table, the cells of each scale around its brick it counts in (AROUND's bits): those its voxels meet, all if UNKNOWN. */
+    /** Per entry of the table, the cells of each scale around its brick it counts in (AROUND's bits): those its voxels meet, all if UNKNOWN in the ball, none out of it. */
     meets: Vec<[u32; SCALES]>,
     counts: Vec<u32>,
     /** Per axis, per brick coordinate along it (modulo WINDOW, as the table), how many of the ball's bricks count in a cell. */
@@ -651,6 +676,8 @@ struct Window {
     slots: usize,
     /** The bricks of its tiles rays last asked for (asked's), to place once lit. */
     asked: Vec<[i32; 3]>,
+    /** Whether an entry or a count changed since last asked (Windows::sync). */
+    changed: bool,
 }
 
 impl Window {
@@ -661,12 +688,13 @@ impl Window {
             ball: None,
             origin: [0; 3],
             table: vec![UNKNOWN; TABLE],
-            meets: vec![[AROUND; SCALES]; TABLE],
-            // Every brick unknown: in a cell of scale j, the 27 blocks of 4^j bricks a side around it.
-            counts: (0..COUNTS).map(|i| 27 << (6 * usize::from(i >= CELLS))).collect(),
+            meets: vec![[0; SCALES]; TABLE],
+            counts: vec![0; COUNTS],
             rows: [[0; WINDOW as usize]; 3],
             slots: 0,
             asked: Vec::new(),
+            // All of it to write: the GPU's is another's, or none's.
+            changed: true,
         }
     }
 
@@ -676,7 +704,7 @@ impl Window {
         (site, site.map(|v| v.div_euclid(TILE as i32)))
     }
 
-    /** Sets brick `b`'s entry, of the ball, and the cells around it that it counts in; returns the entry it had. */
+    /** Sets brick `b`'s entry and the cells around it that it counts in; returns the entry it had. */
     fn set(&mut self, b: [i32; 3], (entry, meets): (i32, [u32; SCALES])) -> i32 {
         let at = self::entry(b);
         let had = std::mem::replace(&mut self.meets[at], meets);
@@ -695,20 +723,14 @@ impl Window {
                 }
             }
         }
-        std::mem::replace(&mut self.table[at], entry)
+        let was = std::mem::replace(&mut self.table[at], entry);
+        self.changed |= was != entry || had != meets;
+        was
     }
 
-    /** Counts brick `b`, coming into the ball (unknown, in every cell around it) or `by` −1 leaving it, in the rows of what the ball holds. */
-    fn count(&mut self, b: [i32; 3], by: i32) {
-        for (rows, v) in self.rows.iter_mut().zip(b) {
-            let count = &mut rows[v.rem_euclid(WINDOW) as usize];
-            *count = count.wrapping_add_signed(by);
-        }
-    }
-
-    /** Makes brick `b` of the ball UNKNOWN, its slots freed once no entry holds it. */
-    fn release(&mut self, b: [i32; 3], pool: &mut Pool) {
-        if self.set(b, (UNKNOWN, [AROUND; SCALES])) < 0 {
+    /** Makes brick `b` UNKNOWN, counting in the cells `around` it: all (AROUND) in the ball, none as it leaves; its slots freed once no entry holds it. */
+    fn release(&mut self, b: [i32; 3], around: u32, pool: &mut Pool) {
+        if self.set(b, (UNKNOWN, [around; SCALES])) < 0 {
             return;
         }
         let ([x, y, z], id) = self.site(b);
@@ -806,15 +828,15 @@ impl Window {
         let (old, ball) = (self.ball, Ball { middle, radius });
         if let Some(old) = old {
             for b in in_ball(old.bounds(), old, Some(ball)) {
-                self.release(b, pool);
-                self.count(b, -1);
+                self.release(b, 0, pool);
             }
         }
-        for b in in_ball(ball.bounds(), ball, old) {
-            self.count(b, 1);
+        // What the ball gains: unknown, till placed from the tiles held.
+        let mut pending: Vec<[i32; 3]> = in_ball(ball.bounds(), ball, old).collect();
+        for &b in &pending {
+            self.set(b, (UNKNOWN, [AROUND; SCALES]));
         }
         self.ball = Some(ball);
-        let mut pending: Vec<[i32; 3]> = self.tiles.keys().flat_map(|&id| in_ball(tile_bricks(id, origin), ball, old)).collect();
         let meets = |id: TileId| in_ball(tile_bricks(id, origin), ball, None).next().is_some();
         let (mut steps, mut left) = (STEP, 0);
         let gone: Vec<TileId> = (self.tiles.iter())
@@ -827,7 +849,7 @@ impl Window {
             } else if steps > 0 {
                 steps -= 1;
                 for b in in_ball(tile_bricks(id, origin), ball, None) {
-                    self.release(b, pool);
+                    self.release(b, AROUND, pool);
                 }
                 self.tiles.remove(&id);
             } else {
@@ -872,11 +894,10 @@ impl Window {
         let Some(old) = self.ball else { return };
         let ball = Ball { radius, ..old };
         for b in in_ball(old.bounds(), old, Some(ball)) {
-            self.release(b, pool);
-            self.count(b, -1);
+            self.release(b, 0, pool);
         }
         for b in in_ball(ball.bounds(), ball, Some(old)) {
-            self.count(b, 1);
+            self.set(b, (UNKNOWN, [AROUND; SCALES]));
         }
         self.ball = Some(ball);
         pending.retain(|&b| ball.contains(b));
@@ -1048,24 +1069,21 @@ impl Windows {
      * changed.
      */
     fn sync(&mut self, levels: &[Arc<Level>], eye: Vec3) -> (Vec<Added>, [bool; GRID_LEVELS]) {
-        let (mut found, mut changed, mut added) = (vec![Vec::new(); GRID_LEVELS], [false; GRID_LEVELS], Vec::new());
+        let (mut found, mut added) = (vec![Vec::new(); GRID_LEVELS], Vec::new());
         if let Some(level) = self.next(levels, eye) {
             let tiles = levels.get(level).unwrap_or(&self.none);
             found[level] = self.windows[level].retarget(level, tiles, eye, level < levels.len(), self.radius, &mut self.pool);
-            (changed[level], self.last) = (true, level);
+            self.last = level;
         }
         self.place(found, false, &mut added);
         let mut pending: Vec<_> = self.windows.iter().map(|w| w.ripe(self.lit)).collect();
-        for (level, ripe) in pending.iter().enumerate() {
-            changed[level] |= !ripe.is_empty();
-        }
         // Short of slots: every window a brick less, till what is to place fits.
         while self.needs(&pending) > self.pool.free.len() {
             self.radius -= 1;
             for (window, bricks) in self.windows.iter_mut().zip(&mut pending) {
                 window.resize(self.radius, bricks, &mut self.pool);
             }
-            (self.growing, changed) = (0, [true; GRID_LEVELS]);
+            self.growing = 0;
         }
         self.place(pending, true, &mut added);
         // Room to spare: every window a brick more, if what that gains would fit with room still, were it all asked for.
@@ -1078,12 +1096,12 @@ impl Windows {
                     window.resize(radius, &mut Vec::new(), &mut self.pool);
                 }
                 self.place(shells, false, &mut added);
-                (self.radius, self.growing, changed) = (radius, 0, [true; GRID_LEVELS]);
+                (self.radius, self.growing) = (radius, 0);
             } else {
                 self.growing = needs + self.margin;
             }
         }
-        (added, changed)
+        (added, std::array::from_fn(|level| std::mem::take(&mut self.windows[level].changed)))
     }
 }
 
@@ -1259,9 +1277,9 @@ impl Marcher {
         let next = &self.windows.pool.next;
         upload(device, encoder, &self.buffers[7], &added, 1, |a| [next[a.slot as usize] as u32]);
         if self.lit {
-            // A brick's own slot only: those of its faces have no light.
+            // A brick's own slot only: the rest of its slots have no light.
             upload(device, encoder, &self.buffers[6], added.iter().filter(|a| a.part == 0), BRICK_SITES * LIGHT_WORDS, |a| {
-                a.tile.light(a.first).expect("a brick placed lit").iter().copied()
+                a.tile.light(a.first).expect("a brick placed lit")
             });
         }
         for (level, gpu) in levels.iter_mut().enumerate() {
@@ -1405,7 +1423,7 @@ impl Marcher {
  * them: one buffer, copied from per run of consecutive slots
  * (runs are many, and a write_buffer costs as much as a large copy).
  */
-fn upload<'a, W: IntoIterator<Item = u32>>(
+fn upload<'a, W: AsRef<[u32]>>(
     device: &wgpu::Device,
     encoder: &mut wgpu::CommandEncoder,
     pool: &wgpu::Buffer,
@@ -1419,7 +1437,10 @@ fn upload<'a, W: IntoIterator<Item = u32>>(
         return;
     }
     added.sort_unstable_by_key(|a| a.slot);
-    let all: Vec<u32> = added.iter().flat_map(|&a| words(a)).collect();
+    let mut all = Vec::with_capacity(added.len() * per);
+    for &a in &added {
+        all.extend_from_slice(words(a).as_ref());
+    }
     assert_eq!(all.len(), added.len() * per, "{per} words a slot");
     let usage = wgpu::BufferUsages::COPY_SRC;
     let from =
@@ -1500,6 +1521,19 @@ mod tests {
         Arc::new(Level::new(world.level(0).tiles.iter().map(|(&id, tile)| (id, Arc::new(faced(id, tile)))).collect()))
     }
 
+    #[test]
+    fn a_site_s_faces_see_their_looks_till_more_than_sights_differ() {
+        // What each face sees, as voxels.wgsl's face_look reads it.
+        let seen = |own: u32, views: &[u32]| -> Vec<u32> {
+            let (sights, _, which) = sights(own, views);
+            (0..views.len()).map(|k| which >> (2 * k) & 3).map(|at| if at == 0 { own } else { sights[at as usize - 1] }).collect()
+        };
+        let few = [7, 5, 5, 7, 9, 9, 5, 7, 7, 11, 7, 5];
+        assert_eq!(seen(7, &few), few);
+        let many: Vec<u32> = (10..22).collect();
+        assert_eq!(seen(7, &many), [10, 11, 12, 7, 7, 7, 7, 7, 7, 7, 7, 7]);
+    }
+
     /** Where the forest's windows are looked at from. */
     const EYE: Vec3 = [10.0, 30.0, -20.0];
 
@@ -1516,7 +1550,7 @@ mod tests {
         w.asked = (0..TABLE).filter_map(|e| w.asked(e)).filter(|(_, held)| *held).map(|(b, _)| b).collect();
         let (added, changed) = windows.sync(std::slice::from_ref(tiles), eye);
         for a in added {
-            slots.insert(a.slot, words(&a.tile.grid, a.first, a.part).collect());
+            slots.insert(a.slot, words(&a.tile.grid, a.first, a.part).to_vec());
         }
         changed.contains(&true)
     }
@@ -1570,7 +1604,7 @@ mod tests {
             }
         }
         assert!(w.counts == counts && w.rows == rows, "counts and rows as the entries say");
-        // A slot's words, and those of the slots after it (its faces').
+        // A slot's words, and those of the slots after it.
         let words = |mut slot: i32| {
             let mut words = Vec::new();
             while slot >= 0 {

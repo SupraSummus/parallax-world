@@ -557,9 +557,16 @@ Numbers are for the forest at 1280×800, as measured when written.
   the rest held, most of them empty, each with its indexes (`Tile::new`).
   A host's tiles as they are made, a box each, would hold and index them once;
   `fcc`'s `Tiles` and the windows take cubes.
-- **A level's tiles are indexed anew whenever one comes or goes**
-  (`Level::new`), and small, they come by the dozen:
-  flying lit, an update takes the main thread several ms at most.
+- **A level is handed over whole whenever a tile comes or goes**
+  (`Level::new` in `World::update`):
+  its tiles copied and indexed anew,
+  and the voxels' window looking through them all for the new (`retarget`).
+  Small, tiles come by the dozen, most frames:
+  walking the valley lit, level 0 holds some 10 000,
+  and an update takes the main thread 9 ms a frame, 40 at most.
+  A level handed over with what changed,
+  or its tiles kept so that those unchanged are shared,
+  would cost by the change.
 - **A world lit only later makes its tiles twice.**
   Shaded, a tile's sites are not kept (`Queue`'s `lit`):
   the light, turned on in the panel, makes them again.
@@ -580,7 +587,9 @@ Numbers are for the forest at 1280×800, as measured when written.
   each empty voxel saying how clear around it is
   (a third fewer voxel steps, most turned into jumps: 2%, tiles twice as slow to make);
   a rhombic dodecahedron about what a window holds, for its box or with it
-  (its faces slant across ground that lies flat in the lattice's axes).
+  (its faces slant across ground that lies flat in the lattice's axes);
+  a box of the voxels of each brick, or of each block of them,
+  for the cells or beside them (a third slower, and a tenth).
 - **Native's voxels while the eye moves** (`Windows::sync`).
   - A frame steps one window, each in turn,
     so level 0's ball moves a brick every ninth frame:
@@ -590,8 +599,14 @@ Numbers are for the forest at 1280×800, as measured when written.
   - Walking, frames come every 33 ms:
     CPU and GPU together take a little more than the 16.7 ms
     the compositor paces frames by.
-  - Making the uploaded bricks' words (`words`) varies tenfold from frame to frame,
-    by memory, not work.
+  - A ball's step counts the bricks it gains and loses in the cells around them (`set`),
+    by memory, not work: a few ms at the worst,
+    and a window filled anew, some 50 ms a level.
+  - A site's faces see three sights beside its own look (`SIGHTS`):
+    with more, far off at coarse levels, the rest see its own.
+    worldgen holds sights already (`Sights` in `grid.rs`),
+    `fcc`'s `Grid` a look a face, which the engine packs again:
+    a grid holding sights would spare that, and say how many there may be.
   - Shots and tests wait for the windows a step at a time (`STEP` tiles),
     a whole picture drawn each, so the voxels' GPU tests take twice as long.
 - **`culling_on_the_gpu_leaves_the_picture_unchanged` failed on an Intel UHD** (Mesa),

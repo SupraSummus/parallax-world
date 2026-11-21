@@ -327,9 +327,10 @@ impl Grid {
         words_of(&self.views, VIEW_WORDS, i)
     }
 
-    /** Whether any site at `sites` (indices in `cells`) looks unlike through some faces. */
-    pub fn has_views(&self, sites: std::ops::Range<usize>) -> bool {
-        has(&self.views, VIEW_WORDS, sites)
+    /** The sites at `sites` (indices in `cells`) that look unlike through some faces, in order: each's index and its looks through each face. */
+    pub fn views_in(&self, sites: std::ops::Range<usize>) -> impl Iterator<Item = (usize, &[Look])> {
+        let from = first_from(&self.views, VIEW_WORDS, sites.start) * VIEW_WORDS;
+        self.views[from..].as_chunks::<VIEW_WORDS>().0.iter().map(|w| (w[0] as usize, &w[1..])).take_while(move |(i, _)| *i < sites.end)
     }
 
     /** What the see-through site at index `i` of `cells` stops of each channel, a byte each as a look's colour: its alpha of all, unless `stops` says. */
