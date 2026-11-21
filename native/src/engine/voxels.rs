@@ -16,6 +16,10 @@
 //! never change once made, so a brick is uploaded once, and its slot
 //! freed as it leaves its ball.
 //!
+//! The windows are kept on a thread of their own (Keeper), which a draw
+//! hands a task and takes a patch from: what the GPU holds of them is a
+//! draw or two late, and no draw waits for a step.
+//!
 //! Only what rays meet is made and held: a brick of no tile yet, or with
 //! voxels and not placed yet, is unknown, so rays take the next coarser
 //! level there (what is missing shows coarser, never as a hole) and ask
@@ -37,7 +41,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 
 use egui_wgpu::wgpu;
 use fcc::GRID_LEVELS;
@@ -449,8 +453,9 @@ impl Picture for Scene {
         if easel.held::<Marcher>().is_some_and(|m| m.lit != lit) {
             easel.painter = None;
         }
+        let still = easel.still;
         let (marcher, device, queue) = easel.painter(|device, format| Marcher::new(device, format, lit));
-        marcher.draw(device, queue, encoder, self, pixels);
+        marcher.draw(device, queue, encoder, self, pixels, still);
     }
 }
 
@@ -817,10 +822,10 @@ impl Window {
     fn retarget(&mut self, level: usize, tiles: &Arc<Level>, eye: Vec3, read: bool, radius: i32, pool: &mut Pool) -> Vec<[i32; 3]> {
         let Some((origin, target)) = self.aim(level, tiles, eye, read) else { return Vec::new() };
         assert!(self.ball.is_none() || self.origin == origin, "a level's bricks moved");
-        self.origin = origin;
         if self.ball.is_some_and(|old| old.about(target) < 0) {
             self.clear(pool);
         }
+        self.origin = origin;
         let middle = self.ball.map_or(target, |old| {
             let d = (0..3).max_by_key(|&d| (target[d] - old.middle[d]).abs()).expect("an axis");
             std::array::from_fn(|k| old.middle[k] + if k == d { (target[d] - old.middle[d]).signum() } else { 0 })
@@ -831,10 +836,15 @@ impl Window {
                 self.release(b, 0, pool);
             }
         }
-        // What the ball gains: unknown, till placed from the tiles held.
-        let mut pending: Vec<[i32; 3]> = in_ball(ball.bounds(), ball, old).collect();
-        for &b in &pending {
-            self.set(b, (UNKNOWN, [AROUND; SCALES]));
+        // What the ball gains: unknown, till placed from the tiles held (none, begun anew).
+        let mut pending: Vec<[i32; 3]> = Vec::new();
+        if old.is_some() {
+            pending.extend(in_ball(ball.bounds(), ball, old));
+            for &b in &pending {
+                self.set(b, (UNKNOWN, [AROUND; SCALES]));
+            }
+        } else {
+            self.fill(ball);
         }
         self.ball = Some(ball);
         let meets = |id: TileId| in_ball(tile_bricks(id, origin), ball, None).next().is_some();
@@ -878,6 +888,47 @@ impl Window {
         pending
     }
 
+    /**
+     * Makes every brick of `ball` unknown in a window as made, as `set`
+     * would brick by brick, but at once: a whole ball begun anew is what a
+     * step costs at most, however fast the eye. A cell's count is that of
+     * the ball's bricks in the blocks around its corner: of each row of
+     * bricks there, as many as are in the ball's row.
+     */
+    fn fill(&mut self, ball: Ball) {
+        let (lo, hi) = ball.bounds();
+        let wide = (hi[1] - lo[1]) as usize;
+        let rows: Vec<(i32, i32)> = (lo[2]..hi[2]).flat_map(|z| (lo[1]..hi[1]).map(move |y| ball.row(y, z))).collect();
+        for (i, &(from, to)) in rows.iter().enumerate() {
+            for b in (from..to).map(|x| [x, lo[1] + (i % wide) as i32, lo[2] + (i / wide) as i32]) {
+                self.meets[entry(b)] = [AROUND; SCALES];
+                for (rows, v) in self.rows.iter_mut().zip(b) {
+                    rows[(v & (WINDOW - 1)) as usize] += 1;
+                }
+            }
+        }
+        let mut near = Vec::new();
+        for j in 0..SCALES {
+            // The cells with a block of the ball's box around them, and the bricks of the blocks around cell `k`, along an axis.
+            let cells = |d: usize| (lo[d] >> (2 * j)) - 1..=((hi[d] - 1) >> (2 * j)) + 1;
+            let bricks = |k: i32| ((k - 1) << (2 * j), (k + 2) << (2 * j));
+            for (kz, ky) in cells(2).flat_map(|kz| cells(1).map(move |ky| (kz, ky))) {
+                let ((y0, y1), (z0, z1)) = (bricks(ky), bricks(kz));
+                near.clear();
+                for z in z0.max(lo[2])..z1.min(hi[2]) {
+                    near.extend((y0.max(lo[1])..y1.min(hi[1])).map(|y| rows[(z - lo[2]) as usize * wide + (y - lo[1]) as usize]));
+                }
+                for kx in cells(0).filter(|kx| (kx + ky + kz) & 1 == 0) {
+                    let (x0, x1) = bricks(kx);
+                    let count: i32 = near.iter().map(|&(from, to)| (to.min(x1) - from.max(x0)).max(0)).sum();
+                    // A cell a window away shares the entry: both add to it.
+                    self.counts[cell_entry([kx, ky, kz], j)] += count as u32;
+                }
+            }
+        }
+        self.changed = true;
+    }
+
     /** Holds nothing, as made: its slots given back to `pool`, its tiles let go, all unknown at once. */
     fn clear(&mut self, pool: &mut Pool) {
         for held in self.tiles.values() {
@@ -911,16 +962,17 @@ impl Window {
     }
 
     /**
-     * The brick whose entry in its table is `e`, if rays may ask for it,
+     * The brick whose entry in its table was `e` as rays read it, its
+     * ball `seen` then, if they may ask for it,
      * unknown in its ball, and whether it holds its tile: of a tile it
      * holds, one with voxels (to place, once lit if it is to be); of
      * none, any: its tile is to make.
      */
-    fn asked(&self, e: usize) -> Option<([i32; 3], bool)> {
-        let ball = self.ball?;
+    fn asked(&self, e: usize, seen: Option<Ball>) -> Option<([i32; 3], bool)> {
+        let (seen, ball) = (seen?, self.ball?);
         let w = [e % WINDOW as usize, e / WINDOW as usize % WINDOW as usize, e / (WINDOW * WINDOW) as usize].map(|v| v as i32);
-        // The window's corner (gpu's): its bricks, from there.
-        let low = ball.middle.map(|v| v - WINDOW / 2);
+        // The window's corner as rays read it (Shape::gpu): its bricks, from there.
+        let low = seen.middle.map(|v| v - WINDOW / 2);
         let b = std::array::from_fn(|d| low[d] + (w[d] - low[d]).rem_euclid(WINDOW));
         let ([x, y, z], id) = self.site(b);
         let held = self.tiles.get(&id);
@@ -959,20 +1011,9 @@ impl Window {
         new.values().sum()
     }
 
-    /** As voxels.wgsl reads it, the level drawn as far as `far` (world units) or its ball holds around `eye`, unless it holds nothing yet: rays read none past 0. */
-    fn gpu(&self, level: usize, eye: Vec3, far: f64) -> GpuLevel {
-        let corner = self.ball.map_or([0; 3], |b| b.middle.map(|v| v - WINDOW / 2));
-        let (low, high) = self.bounds();
-        GpuLevel {
-            min: std::array::from_fn(|d| self.origin[d] + corner[d] * BRICK),
-            offset: (level * TABLE) as u32,
-            corner,
-            reach: self.ball.map_or(0.0, |b| reach(level, b.about(eye_brick(level, eye, self.origin)), far) as f32),
-            low,
-            filled: (level * COUNTS) as u32,
-            high,
-            _pad: 0,
-        }
+    /** As rays read it (Shape). */
+    fn shape(&self) -> Shape {
+        Shape { origin: self.origin, ball: self.ball, bounds: self.bounds() }
     }
 
     /**
@@ -994,6 +1035,94 @@ impl Window {
         }
         out
     }
+}
+
+/** A window as rays read it: where its bricks start, its ball, and the box what it holds is in (Window::bounds). */
+#[derive(Clone, Copy)]
+struct Shape {
+    origin: [i32; 3],
+    ball: Option<Ball>,
+    bounds: ([f32; 3], [f32; 3]),
+}
+
+impl Shape {
+    /** As voxels.wgsl reads it, the level drawn as far as `far` (world units) or its ball holds around `eye`, unless it holds nothing yet: rays read none past 0. */
+    fn gpu(&self, level: usize, eye: Vec3, far: f64) -> GpuLevel {
+        let corner = self.ball.map_or([0; 3], |b| b.middle.map(|v| v - WINDOW / 2));
+        let (low, high) = self.bounds;
+        GpuLevel {
+            min: std::array::from_fn(|d| self.origin[d] + corner[d] * BRICK),
+            offset: (level * TABLE) as u32,
+            corner,
+            reach: self.ball.map_or(0.0, |b| reach(level, b.about(eye_brick(level, eye, self.origin)), far) as f32),
+            low,
+            filled: (level * COUNTS) as u32,
+            high,
+            _pad: 0,
+        }
+    }
+}
+
+/**
+ * What rays asked for, read back: the windows' changes as the frame they
+ * asked in was drawn, the balls it read (an entry is a brick by its
+ * window's ball: since, that may have begun anew elsewhere), and the
+ * words that are not 0, each with its place.
+ */
+type Read = (u64, [Option<Ball>; GRID_LEVELS], Vec<(usize, u32)>);
+
+/**
+ * What a draw has the windows do (Windows::step): hold the `levels`'
+ * tiles around `eye`; and what rays asked for, if read back since the
+ * last: at which of the windows' changes, and the words that are not 0,
+ * each with its place; `asked` is told the bricks.
+ */
+struct Task {
+    levels: Vec<Arc<Level>>,
+    eye: Vec3,
+    read: Option<Read>,
+    asked: Arc<Mutex<Asked>>,
+}
+
+/** Slots' words to copy into a pool, `per` a slot: the slots, in order, and their words. */
+struct Words {
+    slots: Vec<u32>,
+    words: Vec<u32>,
+    per: usize,
+}
+
+impl Words {
+    fn of<'a, W: AsRef<[u32]>>(added: impl IntoIterator<Item = &'a Added>, per: usize, words: impl Fn(&'a Added) -> W) -> Words {
+        let mut added: Vec<_> = added.into_iter().collect();
+        added.sort_unstable_by_key(|a| a.slot);
+        let mut all = Vec::with_capacity(added.len() * per);
+        for &a in &added {
+            all.extend_from_slice(words(a).as_ref());
+        }
+        assert_eq!(all.len(), added.len() * per, "{per} words a slot");
+        Words { slots: added.iter().map(|a| a.slot).collect(), words: all, per }
+    }
+}
+
+/**
+ * What a step changed, for the GPU to hold the windows as they are after
+ * it, all of it or none: the bricks placed (their words, their slots'
+ * next, and, lit, their light), the tables and counts of the windows
+ * that changed, every window's shape. And of the task: its tiles and
+ * eye, whether a window is still behind them (Windows::next), and what
+ * was read back (at which changes, and whether rays asked for any brick).
+ */
+struct Patch {
+    of: (Vec<Arc<Level>>, Vec3),
+    behind: bool,
+    read: Option<(u64, bool)>,
+    bricks: [Words; 2],
+    lights: Option<Words>,
+    tables: Vec<(usize, Vec<i32>, Vec<u32>)>,
+    shapes: [Shape; GRID_LEVELS],
+    /** Slots held, slots free, and the windows' radius. */
+    held: [usize; 2],
+    radius: i32,
 }
 
 /**
@@ -1103,6 +1232,153 @@ impl Windows {
         }
         (added, std::array::from_fn(|level| std::mem::take(&mut self.windows[level].changed)))
     }
+
+    /**
+     * Tells `asked` the bricks of the words read back that the windows
+     * wait for, a tile or light (Window::asked), which they place once
+     * made and lit; whether there is any.
+     */
+    fn hear(&mut self, seen: &[Option<Ball>; GRID_LEVELS], words: &[(usize, u32)], asked: &Mutex<Asked>) -> bool {
+        let mut bricks = Vec::new();
+        for window in &mut self.windows {
+            window.asked.clear();
+        }
+        for &(k, word) in words {
+            for bit in (0..32).filter(|bit| word >> bit & 1 != 0) {
+                let (level, e) = ((k * 32 + bit) / TABLE, (k * 32 + bit) % TABLE);
+                let window = &mut self.windows[level];
+                if let Some((b, held)) = window.asked(e, seen[level]) {
+                    if held {
+                        window.asked.push(b);
+                    }
+                    bricks.push((level, window.site(b).0, held));
+                }
+            }
+        }
+        let any = !bricks.is_empty();
+        asked.lock().expect("asked").bricks = Some(bricks);
+        any
+    }
+
+    /** Does `task`: hears what was read back, syncs, and packs what that changed. */
+    fn step(&mut self, task: Task) -> Patch {
+        let read = task.read.map(|(changes, seen, words)| (changes, self.hear(&seen, &words, &task.asked)));
+        let (added, changed) = self.sync(&task.levels, task.eye);
+        let next = &self.pool.next;
+        let bricks = [
+            Words::of(&added, BRICK_SITES, |a| words(&a.tile.grid, a.first, a.part)),
+            Words::of(&added, 1, |a| [next[a.slot as usize] as u32]),
+        ];
+        // A brick's own slot only: the rest of its slots have no light.
+        let lights = self.lit.then(|| {
+            Words::of(added.iter().filter(|a| a.part == 0), BRICK_SITES * LIGHT_WORDS, |a| {
+                a.tile.light(a.first).expect("a brick placed lit")
+            })
+        });
+        let tables =
+            (0..GRID_LEVELS).filter(|&l| changed[l]).map(|l| (l, self.windows[l].table.clone(), self.windows[l].counts.clone())).collect();
+        Patch {
+            behind: self.next(&task.levels, task.eye).is_some(),
+            of: (task.levels, task.eye),
+            read,
+            bricks,
+            lights,
+            tables,
+            shapes: std::array::from_fn(|l| self.windows[l].shape()),
+            held: [self.windows.iter().map(|w| w.slots).sum(), self.pool.free.len()],
+            radius: self.radius,
+        }
+    }
+}
+
+/** A task for the windows' thread, the last given, and the patch of the one before, till taken; `stop`, once either end is gone. */
+#[derive(Default)]
+struct Mail {
+    task: Option<Task>,
+    patch: Option<Patch>,
+    stop: bool,
+}
+
+/**
+ * The windows, kept on a thread of their own: what a step costs (a ball
+ * begun anew, its bricks placed) is not the frame's. A draw hands over a
+ * task and takes the patch ready, of an earlier task; the thread does a
+ * task once its last patch was taken, so there is one a draw at most.
+ * With no threads (a browser), a task is done as it is handed over.
+ */
+struct Keeper {
+    mail: Arc<(Mutex<Mail>, Condvar)>,
+    own: Option<Windows>,
+}
+
+impl Keeper {
+    fn new(windows: Windows) -> Keeper {
+        let mail: Arc<(Mutex<Mail>, Condvar)> = Arc::default();
+        if cfg!(target_arch = "wasm32") {
+            return Keeper { mail, own: Some(windows) };
+        }
+        let theirs = mail.clone();
+        std::thread::spawn(move || keep(windows, &theirs));
+        Keeper { mail, own: None }
+    }
+
+    /** Hands over `task` in place of the last, if not begun (what that read back kept, unless `task` read more); the patch ready, if any, or, told to `wait`, the next. */
+    fn swap(&mut self, mut task: Task, wait: bool) -> Option<Patch> {
+        if let Some(windows) = &mut self.own {
+            return Some(windows.step(task));
+        }
+        let mut mail = self.mail.0.lock().expect("mail");
+        assert!(!mail.stop, "the windows' thread stopped");
+        if let Some(last) = mail.task.take() {
+            task.read = task.read.or(last.read);
+        }
+        mail.task = Some(task);
+        self.mail.1.notify_all();
+        while wait && mail.patch.is_none() {
+            assert!(!mail.stop, "the windows' thread stopped");
+            mail = self.mail.1.wait(mail).expect("mail");
+        }
+        mail.patch.take()
+    }
+}
+
+impl Drop for Keeper {
+    fn drop(&mut self) {
+        self.mail.0.lock().unwrap_or_else(|e| e.into_inner()).stop = true;
+        self.mail.1.notify_all();
+    }
+}
+
+/** The windows' thread: a task at a time, once the last one's patch was taken, till told to stop. */
+fn keep(mut windows: Windows, mail: &(Mutex<Mail>, Condvar)) {
+    // Stopped, even by a panic: the thread that draws is told (Keeper::swap).
+    struct Stopped<'a>(&'a (Mutex<Mail>, Condvar));
+    impl Drop for Stopped<'_> {
+        fn drop(&mut self) {
+            self.0.0.lock().unwrap_or_else(|e| e.into_inner()).stop = true;
+            self.0.1.notify_all();
+        }
+    }
+    let _stopped = Stopped(mail);
+    loop {
+        let task = {
+            let mut m = mail.0.lock().expect("mail");
+            loop {
+                if m.stop {
+                    return;
+                }
+                if m.patch.is_none()
+                    && let Some(task) = m.task.take()
+                {
+                    break task;
+                }
+                m = mail.1.wait(m).expect("mail");
+            }
+        };
+        let patch = windows.step(task);
+        mail.0.lock().expect("mail").patch = Some(patch);
+        mail.1.notify_all();
+    }
 }
 
 const PICTURE: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
@@ -1120,11 +1396,11 @@ struct Targets {
 /** Words of the bits rays ask for bricks by, one per entry of the windows' tables (voxels.wgsl's `asked`). */
 const ASKED_WORDS: usize = GRID_LEVELS * TABLE / 32;
 
-/** Where reading back what rays asked for is: not, copied from a frame (the windows' changes then), or mapping what was copied. */
+/** Where reading back what rays asked for is: not, copied from a frame (the windows' changes and balls then: Read's), or mapping what was copied. */
 enum Reading {
     Idle,
-    Copied(u64),
-    Mapping(Arc<AtomicBool>, u64),
+    Copied(u64, [Option<Ball>; GRID_LEVELS]),
+    Mapping(Arc<AtomicBool>, u64, [Option<Ball>; GRID_LEVELS]),
 }
 
 /** The voxels on a device, drawn into a picture that the window or a shot shows. */
@@ -1140,13 +1416,19 @@ pub struct Marcher {
     reading: Reading,
     layouts: [wgpu::BindGroupLayout; 3],
     pipelines: [wgpu::RenderPipeline; 3],
-    windows: Windows,
+    keeper: Keeper,
+    /** The windows as the GPU holds them: their shapes, the slots held and free, their radius (the last Patch's). */
+    shapes: [Shape; GRID_LEVELS],
+    held: [usize; 2],
+    radius: i32,
+    /** What was read back, for the next task. */
+    heard: Option<Read>,
     targets: Option<Targets>,
     /** Whether it draws lit scenes (Look's `sky`). */
     pub lit: bool,
-    /** Whether the windows held all they were given at the last draw (Windows::sync's syncs being bounded); lit, and what rays asked for of them as they are was read back. */
+    /** Whether the GPU held, at the last draw, the windows with all that draw gave them (a patch comes a draw late at best, and steps are bounded), and what rays asked for of them as they are was read back. */
     settled: bool,
-    /** How many draws changed the windows; lit, as of the frame rays last asked in, read back, and whether they asked for any brick. */
+    /** How many patches changed the windows; as of the frame rays last asked in, read back, and whether they asked for any brick. */
     changes: u64,
     read: (u64, bool),
 }
@@ -1254,43 +1536,70 @@ impl Marcher {
             pipeline("resolve_fragment", &layouts[1], &[PICTURE]),
             pipeline("show_fragment", &layouts[2], &[format]),
         ];
-        let (windows, reading) = (Windows::new(pool as usize, lit), Reading::Idle);
+        let windows = Windows::new(pool as usize, lit);
+        let (shapes, held, radius) = (std::array::from_fn(|l| windows.windows[l].shape()), [0, pool as usize], windows.radius);
+        let (keeper, reading, heard) = (Keeper::new(windows), Reading::Idle, None);
         let (targets, read) = (None, (u64::MAX, false));
-        Marcher { buffers, readback, reading, layouts, pipelines, windows, targets, lit, settled: true, changes: 0, read }
+        Marcher {
+            buffers,
+            readback,
+            reading,
+            layouts,
+            pipelines,
+            keeper,
+            shapes,
+            held,
+            radius,
+            heard,
+            targets,
+            lit,
+            settled: true,
+            changes: 0,
+            read,
+        }
     }
 
     /**
-     * Brings the voxels on the GPU up to date with `scene`, then draws it
-     * into a picture of `pixels`: the samples, then each pixel resolving
-     * its own. It reads back what rays asked for as far as it can
-     * without waiting (`ask`), and copies what they ask for now to read.
+     * Has the windows brought up to date with `scene` (a Task), and the
+     * GPU with the windows as far as they are (a Patch), then draws the
+     * scene into a picture of `pixels`: the samples, then each pixel
+     * resolving its own. It reads back what rays asked for as far as it
+     * can without waiting (`ask`), and copies what they ask for now to read.
+     * `still` (Easel's), it waits for a patch: each draw a step nearer.
      */
-    fn draw(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, scene: &Scene, pixels: [u32; 2]) {
+    fn draw(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        scene: &Scene,
+        pixels: [u32; 2],
+        still: bool,
+    ) {
         let look = &scene.look;
-        self.ask(device, &scene.asked);
-        let mut levels = [GpuLevel::default(); GRID_LEVELS];
-        let (added, changed) = self.windows.sync(&scene.levels, look.camera);
-        self.changes += u64::from(changed.contains(&true));
-        // Settled once what rays asked for of the windows as they are was read back.
-        self.settled = self.windows.next(&scene.levels, look.camera).is_none() && self.read.0 == self.changes;
-        upload(device, encoder, &self.buffers[3], &added, BRICK_SITES, |a| words(&a.tile.grid, a.first, a.part));
-        let next = &self.windows.pool.next;
-        upload(device, encoder, &self.buffers[7], &added, 1, |a| [next[a.slot as usize] as u32]);
-        if self.lit {
-            // A brick's own slot only: the rest of its slots have no light.
-            upload(device, encoder, &self.buffers[6], added.iter().filter(|a| a.part == 0), BRICK_SITES * LIGHT_WORDS, |a| {
-                a.tile.light(a.first).expect("a brick placed lit")
-            });
+        self.ask(device);
+        let task = Task { levels: scene.levels.clone(), eye: look.camera, read: self.heard.take(), asked: scene.asked.clone() };
+        let patch = self.keeper.swap(task, still);
+        // Settled once the GPU holds what this draw's tiles and eye come to, and what rays asked for of that was read back.
+        let mut current = false;
+        if let Some(patch) = patch {
+            for (words, buffer) in patch.bricks.iter().zip([3, 7]).chain(patch.lights.iter().zip([6])) {
+                upload(device, encoder, &self.buffers[buffer], words);
+            }
+            for (level, table, counts) in &patch.tables {
+                queue.write_buffer(&self.buffers[2], (level * TABLE * 4) as u64, bytemuck::cast_slice(table));
+                queue.write_buffer(&self.buffers[5], (level * COUNTS * 4) as u64, bytemuck::cast_slice(counts));
+            }
+            self.changes += u64::from(!patch.tables.is_empty());
+            self.read = patch.read.unwrap_or(self.read);
+            (self.shapes, self.held, self.radius) = (patch.shapes, patch.held, patch.radius);
+            let same = patch.of.0.len() == scene.levels.len() && patch.of.0.iter().zip(&scene.levels).all(|(a, b)| Arc::ptr_eq(a, b));
+            current = !patch.behind && same && patch.of.1 == look.camera;
         }
-        for (level, gpu) in levels.iter_mut().enumerate() {
-            let window = &self.windows.windows[level];
-            if changed[level] {
-                queue.write_buffer(&self.buffers[2], (level * TABLE * 4) as u64, bytemuck::cast_slice(&window.table));
-                queue.write_buffer(&self.buffers[5], (level * COUNTS * 4) as u64, bytemuck::cast_slice(&window.counts));
-            }
-            if level < scene.levels.len() {
-                *gpu = window.gpu(level, look.camera, look.far);
-            }
+        self.settled = current && self.read.0 == self.changes;
+        let mut levels = [GpuLevel::default(); GRID_LEVELS];
+        for (level, gpu) in levels.iter_mut().enumerate().take(scene.levels.len()) {
+            *gpu = self.shapes[level].gpu(level, look.camera, look.far);
         }
         queue.write_buffer(&self.buffers[1], 0, bytemuck::cast_slice(&levels));
         queue.write_buffer(&self.buffers[0], 0, bytemuck::bytes_of(&Globals::of(look, pixels)));
@@ -1329,7 +1638,7 @@ impl Marcher {
         if matches!(self.reading, Reading::Idle) {
             encoder.copy_buffer_to_buffer(&self.buffers[8], 0, &self.readback, 0, self.readback.size());
             encoder.clear_buffer(&self.buffers[8], 0, None);
-            self.reading = Reading::Copied(self.changes);
+            self.reading = Reading::Copied(self.changes, self.shapes.map(|s| s.ball));
         }
         let busy = !self.settled || self.read.1;
         scene.asked.lock().expect("asked").busy = busy;
@@ -1337,44 +1646,25 @@ impl Marcher {
 
     /**
      * Reads back what rays asked for: maps what the last frame copied, or,
-     * once mapped, tells `asked` the bricks rays asked for that the
-     * windows wait for, a tile or light (Window::asked), which the windows
-     * place once made and lit.
+     * once mapped, keeps its words that are not 0 for the next task (`heard`).
      */
-    fn ask(&mut self, device: &wgpu::Device, asked: &Mutex<Asked>) {
+    fn ask(&mut self, device: &wgpu::Device) {
         // What it waits for, done: the map's callback.
         _ = device.poll(wgpu::PollType::Poll);
         match std::mem::replace(&mut self.reading, Reading::Idle) {
-            Reading::Copied(changes) => {
+            Reading::Copied(changes, seen) => {
                 let done = Arc::new(AtomicBool::new(false));
                 let mapped = done.clone();
                 self.readback.slice(..).map_async(wgpu::MapMode::Read, move |r| mapped.store(r.is_ok(), Ordering::Release));
-                self.reading = Reading::Mapping(done, changes);
+                self.reading = Reading::Mapping(done, changes, seen);
             }
-            Reading::Mapping(done, changes) if done.load(Ordering::Acquire) => {
-                let mut bricks = Vec::new();
-                for window in &mut self.windows.windows {
-                    window.asked.clear();
-                }
+            Reading::Mapping(done, changes, seen) if done.load(Ordering::Acquire) => {
                 {
                     let bytes = self.readback.slice(..).get_mapped_range().expect("mapped");
                     let words: &[u32] = bytemuck::cast_slice(&bytes);
-                    for (k, &word) in words.iter().enumerate().filter(|(_, w)| **w != 0) {
-                        for bit in (0..32).filter(|bit| word >> bit & 1 != 0) {
-                            let (level, e) = ((k * 32 + bit) / TABLE, (k * 32 + bit) % TABLE);
-                            let window = &mut self.windows.windows[level];
-                            if let Some((b, held)) = window.asked(e) {
-                                if held {
-                                    window.asked.push(b);
-                                }
-                                bricks.push((level, window.site(b).0, held));
-                            }
-                        }
-                    }
+                    self.heard = Some((changes, seen, words.iter().copied().enumerate().filter(|(_, w)| *w != 0).collect()));
                 }
                 self.readback.unmap();
-                self.read = (changes, !bricks.is_empty());
-                asked.lock().expect("asked").bricks = Some(bricks);
             }
             waiting => self.reading = waiting,
         }
@@ -1419,38 +1709,27 @@ impl Marcher {
 }
 
 /**
- * Copies `added` slots into `pool`, `per` words a slot as `words` gives
- * them: one buffer, copied from per run of consecutive slots
- * (runs are many, and a write_buffer costs as much as a large copy).
+ * Copies `words` into `pool`: one buffer, copied from per run of
+ * consecutive slots (runs are many, and a write_buffer costs as much as a
+ * large copy).
  */
-fn upload<'a, W: AsRef<[u32]>>(
-    device: &wgpu::Device,
-    encoder: &mut wgpu::CommandEncoder,
-    pool: &wgpu::Buffer,
-    added: impl IntoIterator<Item = &'a Added>,
-    per: usize,
-    words: impl Fn(&'a Added) -> W,
-) {
+fn upload(device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, pool: &wgpu::Buffer, Words { slots, words, per }: &Words) {
     use wgpu::util::DeviceExt;
-    let mut added: Vec<_> = added.into_iter().collect();
-    if added.is_empty() {
+    if slots.is_empty() {
         return;
     }
-    added.sort_unstable_by_key(|a| a.slot);
-    let mut all = Vec::with_capacity(added.len() * per);
-    for &a in &added {
-        all.extend_from_slice(words(a).as_ref());
-    }
-    assert_eq!(all.len(), added.len() * per, "{per} words a slot");
     let usage = wgpu::BufferUsages::COPY_SRC;
-    let from =
-        device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("upload"), contents: bytemuck::cast_slice(&all), usage });
+    let from = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("upload"),
+        contents: bytemuck::cast_slice(words),
+        usage,
+    });
     let bytes = (per * 4) as u64;
     let mut start = 0;
-    for k in 1..=added.len() {
-        if k == added.len() || added[k].slot != added[k - 1].slot + 1 {
+    for k in 1..=slots.len() {
+        if k == slots.len() || slots[k] != slots[k - 1] + 1 {
             let size = (k - start) as u64 * bytes;
-            encoder.copy_buffer_to_buffer(&from, start as u64 * bytes, pool, u64::from(added[start].slot) * bytes, size);
+            encoder.copy_buffer_to_buffer(&from, start as u64 * bytes, pool, u64::from(slots[start]) * bytes, size);
             start = k;
         }
     }
@@ -1480,9 +1759,8 @@ impl Painter for Marcher {
 
     /** Slots held, of the pool's, and the windows' radius. */
     fn describe(&self, _: &Easel) -> String {
-        let Windows { windows, pool, radius, .. } = &self.windows;
-        let held: usize = windows.iter().map(|w| w.slots).sum();
-        format!(": {held} slots of {} on the GPU, windows {radius} bricks of {RADIUS} round", held + pool.free.len())
+        let ([held, free], radius) = (self.held, self.radius);
+        format!(": {held} slots of {} on the GPU, windows {radius} bricks of {RADIUS} round", held + free)
     }
 }
 
@@ -1547,7 +1825,7 @@ mod tests {
      */
     fn sync(windows: &mut Windows, tiles: &Arc<Level>, eye: Vec3, slots: &mut HashMap<u32, Vec<u32>>) -> bool {
         let w = &mut windows.windows[0];
-        w.asked = (0..TABLE).filter_map(|e| w.asked(e)).filter(|(_, held)| *held).map(|(b, _)| b).collect();
+        w.asked = (0..TABLE).filter_map(|e| w.asked(e, w.ball)).filter(|(_, held)| *held).map(|(b, _)| b).collect();
         let (added, changed) = windows.sync(std::slice::from_ref(tiles), eye);
         for a in added {
             slots.insert(a.slot, words(&a.tile.grid, a.first, a.part).to_vec());
@@ -1642,17 +1920,27 @@ mod tests {
         let mut ids: Vec<_> = all.tiles.keys().copied().collect();
         ids.sort();
         assert!(ids.len() > 4, "{} tiles", ids.len());
-        // Some tiles of all, then others, as the eye moves through bricks and across the torus's seams.
+        // Some tiles of all, then others, as the eye moves through bricks and across the torus's seams,
+        // then farther than the ball reaches, and back: begun anew each time.
         let some = |skip: usize| Arc::new(Level::new(ids.iter().skip(skip).step_by(2).map(|id| (*id, all.tiles[id].clone())).collect()));
-        let steps =
-            [(some(0), eye), (all.clone(), [13.0, 31.0, -9.0]), (some(1), [-140.0, 30.0, 70.0]), (all.clone(), [-130.0, 22.0, 75.0])];
+        let steps = [
+            (some(0), eye),
+            (all.clone(), [13.0, 31.0, -9.0]),
+            (some(1), [-140.0, 30.0, 70.0]),
+            (all.clone(), [-130.0, 22.0, 75.0]),
+            (all.clone(), [900.0, 22.0, 75.0]),
+            (all.clone(), eye),
+        ];
         let (mut windows, mut slots) = (Windows::new(1 << 20, false), HashMap::new());
         // No tiles yet: all it reads unknown, each brick's tile for rays to ask for.
         settle(&mut windows, &Arc::new(Level::new(HashMap::new())), eye, &mut slots);
         let w = &windows.windows[0];
         let ball = w.ball.expect("a ball");
-        assert!(w.gpu(0, eye, f64::MAX).reach > 0.0 && w.slots == 0);
-        assert!(in_ball(ball.bounds(), ball, None).all(|b| w.asked(entry(b)) == Some((b, false))), "every brick's tile may be asked for");
+        assert!(w.shape().gpu(0, eye, f64::MAX).reach > 0.0 && w.slots == 0);
+        assert!(
+            in_ball(ball.bounds(), ball, None).all(|b| w.asked(entry(b), w.ball) == Some((b, false))),
+            "every brick's tile may be asked for"
+        );
         for (tiles, eye) in &steps {
             assert!(settle(&mut windows, tiles, *eye, &mut slots), "a change");
             assert_eq!(windows.radius, RADIUS, "room for all");
@@ -1676,7 +1964,7 @@ mod tests {
         let unknown: Vec<[i32; 3]> = held.iter().copied().filter(|&b| w.table[entry(b)] == UNKNOWN).collect();
         assert!(held.iter().all(|&b| matches!(w.table[entry(b)], UNKNOWN | EMPTY)));
         assert!(unknown.len() > 1000 && unknown.len() < held.len(), "{} of {} bricks unknown", unknown.len(), held.len());
-        assert!(unknown.iter().all(|&b| w.asked(entry(b)) == Some((b, true))), "every unknown brick may be asked for");
+        assert!(unknown.iter().all(|&b| w.asked(entry(b), w.ball) == Some((b, true))), "every unknown brick may be asked for");
         // Rays ask for half, and some of all are lit (with them the buried bricks of a tile, which share their sites):
         // those placed that were asked for and are lit, no other.
         let world = (worlds::by_name("forest").expect("forest").make)(1);
@@ -1697,7 +1985,7 @@ mod tests {
         for (k, &b) in unknown.iter().enumerate() {
             let placed = w.table[entry(b)] >= 0;
             assert_eq!(placed, k % 2 == 0 && lit[k], "brick {b:?}");
-            assert_eq!(w.asked(entry(b)).is_some(), !placed, "brick {b:?}");
+            assert_eq!(w.asked(entry(b), w.ball).is_some(), !placed, "brick {b:?}");
         }
         assert!(!sync(&mut windows), "nothing more to place");
     }

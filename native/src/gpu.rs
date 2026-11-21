@@ -72,11 +72,13 @@ pub struct Easel {
     pub queue: wgpu::Queue,
     pub format: wgpu::TextureFormat,
     pub painter: Option<Box<dyn Painter>>,
+    /** Drawing a picture till settled (`settle`): a painter may wait for what its threads have yet to do, a draw else none the nearer. */
+    pub still: bool,
 }
 
 impl Easel {
     pub fn new(device: wgpu::Device, queue: wgpu::Queue, format: wgpu::TextureFormat) -> Easel {
-        Easel { device, queue, format, painter: None }
+        Easel { device, queue, format, painter: None, still: false }
     }
 
     /** One of its own, offscreen, with buffers as large as its device allows, or `most` bytes. */
@@ -150,10 +152,12 @@ impl Easel {
      */
     pub fn settle(&mut self, picture: &dyn Picture, pixels: [u32; 2]) {
         let mut frames = 0;
+        self.still = true;
         while frames < 3 || !self.settled() {
             self.draw(picture, pixels);
             frames += 1;
         }
+        self.still = false;
     }
 
     /** `picture` drawn as the window shows it once settled, still: its width, height and RGBA pixels, row by row from the top. */

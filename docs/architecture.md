@@ -480,12 +480,19 @@ its table of the bricks' slots in a pool is a torus,
 a brick's entry at its coordinates modulo the window's size,
 so the ball moves a brick at a time
 and only the bricks that came into it or left are touched.
-A frame steps one window, each in turn:
+A step moves one window, each in turn:
 its ball a brick along an axis toward the eye's,
 and the tiles in it, gone or new, those made with a few at most (`STEP`),
-so what a frame costs is bounded however fast the eye or many the tiles;
+so what a step costs is bounded however fast the eye or many the tiles;
 a window behind is read only as far as it holds around the eye,
 and one holding nothing around it starts anew there.
+The windows are kept on a thread of their own (`Keeper`):
+a frame hands it the tiles, the eye and what rays asked for (a `Task`),
+and takes what an earlier step changed (a `Patch`: bricks, tables, counts),
+all of it copied to the GPU in that frame or none,
+so a frame waits for no step, and the GPU holds the windows a frame or two late.
+A picture drawn till settled waits for each patch;
+in a browser, with no threads, a frame does the step itself.
 The levels' balls share one radius, in each level's own bricks,
 as large as the pool holds:
 short of slots, all shrink, every level read less far,

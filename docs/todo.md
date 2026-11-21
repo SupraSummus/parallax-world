@@ -594,8 +594,8 @@ Numbers are for the forest at 1280×800, as measured when written.
   a box of the voxels of each brick, or of each block of them,
   for the cells or beside them (a third slower, and a tenth).
 - **Native's voxels while the eye moves** (`Windows::sync`).
-  - A frame steps one window, each in turn,
-    so level 0's ball moves a brick every ninth frame:
+  - A step moves one window, each in turn,
+    so level 0's ball moves a brick every ninth step:
     flying faster, it lags, read less far, till it starts anew.
     Stepping first the window that holds least of what it should around the eye
     (`Ball::about` against its radius), not each in turn, may do better.
@@ -603,8 +603,14 @@ Numbers are for the forest at 1280×800, as measured when written.
     CPU and GPU together take a little more than the 16.7 ms
     the compositor paces frames by.
   - A ball's step counts the bricks it gains and loses in the cells around them (`set`),
-    by memory, not work: a few ms at the worst,
-    and a window filled anew, some 50 ms a level.
+    by memory, not work: some 10 ms while the world's threads work.
+    On the windows' thread that is no frame's time,
+    but what a step changed comes a frame late for each.
+    In a browser a frame still does the step itself.
+  - A frame copies the whole table and counts of each window a step changed.
+  - A painter made anew (the first frame, the light switched) takes a frame of some 50 ms.
+  - The world keeps tiles, and lit, their light, by distance alone:
+    flying lit at a render distance of 40000, some 8 GB.
   - A site's faces see three sights beside its own look (`SIGHTS`):
     with more, far off at coarse levels, the rest see its own.
     worldgen holds sights already (`Sights` in `grid.rs`),
