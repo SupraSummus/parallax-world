@@ -36,9 +36,15 @@ impl Hasher for Fast {
             self.write_u64(u64::from_le_bytes(word));
         }
     }
-    // An array's length, hashed before it: as `write` would, without its bytes' loop.
+    // An array's length, hashed before it, and a key's small integers: as `write` would, without its bytes' loop.
     fn write_usize(&mut self, v: usize) {
         self.write_u64(v as u64);
+    }
+    fn write_u32(&mut self, v: u32) {
+        self.write_u64(v.into());
+    }
+    fn write_u8(&mut self, v: u8) {
+        self.write_u64(v.into());
     }
     fn write_u64(&mut self, v: u64) {
         self.0 = (self.0.rotate_left(5) ^ v).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
@@ -350,55 +356,141 @@ impl Grid {
 /** A tile's (i, j, k): it holds x in [i · 2^shift, (i + 1) · 2^shift), y by j and z by k likewise. */
 pub type TileId = [i32; 3];
 
+/** Tiles a block of Blocks holds a side, as a shift, and in all. */
+const BLOCK_SHIFT: u32 = 2;
+const BLOCK_TILES: usize = 1 << (3 * BLOCK_SHIFT);
+
+/**
+ * A `T` per tile, held in blocks of tiles, each shared with the copies
+ * made of it: a copy takes as long as it has blocks, and a tile set or
+ * taken out copies its block alone. So those who each read the tiles as
+ * they were when they took them pay for what changed since, not for all
+ * there is.
+ */
+#[derive(Clone)]
+pub struct Blocks<T> {
+    blocks: FastMap<TileId, Arc<Block<T>>>,
+    len: usize,
+}
+
+/** A block's tiles, z-major, then y, and how many it holds. */
+#[derive(Clone)]
+struct Block<T> {
+    tiles: [Option<T>; BLOCK_TILES],
+    held: usize,
+}
+
+/** The block tile `id` is in, and its place there. */
+#[inline]
+fn block_of(id: TileId) -> (TileId, usize) {
+    let within = id.map(|v| (v & ((1 << BLOCK_SHIFT) - 1)) as usize);
+    (id.map(|v| v >> BLOCK_SHIFT), (within[2] << BLOCK_SHIFT | within[1]) << BLOCK_SHIFT | within[0])
+}
+
+impl<T> Default for Blocks<T> {
+    fn default() -> Blocks<T> {
+        Blocks { blocks: FastMap::default(), len: 0 }
+    }
+}
+
+impl<T: Clone> Blocks<T> {
+    /** How many tiles it holds. */
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /** What tile `id` holds, if any. */
+    #[inline]
+    pub fn get(&self, id: TileId) -> Option<&T> {
+        let (block, place) = block_of(id);
+        self.blocks.get(&block)?.tiles[place].as_ref()
+    }
+
+    /** Sets what tile `id` holds; what it held. */
+    pub fn insert(&mut self, id: TileId, value: T) -> Option<T> {
+        let (block, place) = block_of(id);
+        let block = self.blocks.entry(block).or_insert_with(|| Arc::new(Block { tiles: std::array::from_fn(|_| None), held: 0 }));
+        let block = Arc::make_mut(block);
+        let held = block.tiles[place].replace(value);
+        if held.is_none() {
+            block.held += 1;
+            self.len += 1;
+        }
+        held
+    }
+
+    /** Takes out what tile `id` holds, if any. */
+    pub fn remove(&mut self, id: TileId) -> Option<T> {
+        let (at, place) = block_of(id);
+        let block = self.blocks.get_mut(&at).filter(|b| b.tiles[place].is_some())?;
+        let block = Arc::make_mut(block);
+        let held = block.tiles[place].take();
+        block.held -= 1;
+        self.len -= 1;
+        if block.held == 0 {
+            self.blocks.remove(&at);
+        }
+        held
+    }
+
+    /** Each tile it holds, in no order. */
+    pub fn iter(&self) -> impl Iterator<Item = (TileId, &T)> {
+        self.blocks.iter().flat_map(|(at, block)| {
+            let id = move |place: usize| {
+                std::array::from_fn(|d| at[d] << BLOCK_SHIFT | (place >> (d as u32 * BLOCK_SHIFT) & ((1 << BLOCK_SHIFT) - 1)) as i32)
+            };
+            block.tiles.iter().enumerate().filter_map(move |(place, tile)| Some((id(place), tile.as_ref()?)))
+        })
+    }
+}
+
+impl<T: Clone> FromIterator<(TileId, T)> for Blocks<T> {
+    fn from_iter<I: IntoIterator<Item = (TileId, T)>>(tiles: I) -> Blocks<T> {
+        let mut blocks = Blocks::default();
+        for (id, value) in tiles {
+            blocks.insert(id, value);
+        }
+        blocks
+    }
+}
+
 /**
  * A level's sites as grids on a tiling of space by cubes, 2^shift sites a
  * side: a site no tile has a grid for is unknown; one a tile's grid does
- * not hold, empty. The grids are shared, so tiles are cheap to add.
+ * not hold, empty. The grids are shared, and the table of them in blocks
+ * (Blocks), so a copy with tiles added or taken out is cheap to make.
  */
 #[derive(Clone)]
 pub struct Tiles {
     shift: u32,
-    /** The table's first tile, the site of its corner, and its tiles along each axis. */
-    from: TileId,
-    origin: [i64; 3],
-    size: [i32; 3],
-    /** Tile by tile, z-major, then y. */
-    grids: Vec<Option<Arc<Grid>>>,
-    /** Bounds of the grids' sites, inclusive (min > max if none). */
-    min: [i32; 3],
-    max: [i32; 3],
+    /** Where the tiling starts along each axis: 0, or the least i32 for the one tile of `one`. */
+    origin: i64,
+    grids: Blocks<Arc<Grid>>,
 }
 
 impl Tiles {
     /** The tiles 2^shift sites a side that have a grid: `tiles` holds each one's id and grid, its box within the tile. */
     pub fn new(shift: u32, tiles: impl IntoIterator<Item = (TileId, Arc<Grid>)>) -> Tiles {
-        let tiles: Vec<_> = tiles.into_iter().collect();
-        let (mut from, mut to) = ([i32::MAX; 3], [i32::MIN; 3]);
-        let (mut min, mut max) = ([i32::MAX; 3], [i32::MIN; 3]);
-        for (id, grid) in &tiles {
-            from = std::array::from_fn(|d| from[d].min(id[d]));
-            to = std::array::from_fn(|d| to[d].max(id[d]));
-            if grid.n.iter().all(|&n| n > 0) {
-                min = std::array::from_fn(|d| min[d].min(grid.min[d]));
-                max = std::array::from_fn(|d| max[d].max(grid.min[d] + grid.n[d] - 1));
-            }
-        }
-        if tiles.is_empty() {
-            (from, to) = ([0; 3], [-1; 3]);
-        }
-        let size = std::array::from_fn(|d| to[d] - from[d] + 1);
-        let mut grids = vec![None; size.iter().map(|&n| n as usize).product()];
-        for (id, grid) in tiles {
-            let [i, j, k] = std::array::from_fn(|d| id[d] - from[d]);
-            grids[((k * size[1] + j) * size[0] + i) as usize] = Some(grid);
-        }
-        Tiles { shift, from, origin: from.map(|v| (v as i64) << shift), size, grids, min, max }
+        Tiles { shift, origin: 0, grids: tiles.into_iter().collect() }
     }
 
     /** A grid as the only tile: one holding all space, 2^32 sites a side from the least i32. */
     pub fn one(grid: Grid) -> Tiles {
-        let (min, max) = (grid.min, std::array::from_fn(|d| grid.min[d] + grid.n[d] - 1));
-        Tiles { shift: 32, from: [0; 3], origin: [i32::MIN as i64; 3], size: [1; 3], grids: vec![Some(Arc::new(grid))], min, max }
+        Tiles { shift: 32, origin: i32::MIN as i64, grids: [([0; 3], Arc::new(grid))].into_iter().collect() }
+    }
+
+    /** Gives tile `id` a grid, its box within the tile. */
+    pub fn insert(&mut self, id: TileId, grid: Arc<Grid>) {
+        self.grids.insert(id, grid);
+    }
+
+    /** Tile `id` has no grid any more. */
+    pub fn remove(&mut self, id: TileId) {
+        self.grids.remove(id);
     }
 
     /** The look at site (x, y, z), 0 if empty; None if no tile has a grid there. */
@@ -413,7 +505,7 @@ impl Tiles {
 
     /** Whether tile `id` has a grid. */
     pub fn has(&self, id: TileId) -> bool {
-        self.grid(std::array::from_fn(|d| id[d] - self.from[d])).is_some()
+        self.grid(id).is_some()
     }
 
     /** Whether the tiles from `lo` to `hi`, inclusive, all have grids: those a chunk reads (chunk_reads). */
@@ -421,21 +513,16 @@ impl Tiles {
         (lo[2]..=hi[2]).all(|k| (lo[1]..=hi[1]).all(|j| (lo[0]..=hi[0]).all(|i| self.has([i, j, k]))))
     }
 
-    /** The tile site (x, y, z) is in, relative to the table's first. */
+    /** The tile site (x, y, z) is in. */
     #[inline]
     fn tile(&self, x: i32, y: i32, z: i32) -> TileId {
-        let o = self.origin;
-        [((x as i64 - o[0]) >> self.shift) as i32, ((y as i64 - o[1]) >> self.shift) as i32, ((z as i64 - o[2]) >> self.shift) as i32]
+        [x, y, z].map(|v| ((v as i64 - self.origin) >> self.shift) as i32)
     }
 
-    /** The grid of tile `t`, relative to the table's first, if it has one. */
+    /** The grid of tile `id`, if it has one. */
     #[inline]
-    fn grid(&self, [i, j, k]: TileId) -> Option<&Grid> {
-        let [nx, ny, nz] = self.size;
-        if i < 0 || i >= nx || j < 0 || j >= ny || k < 0 || k >= nz {
-            return None;
-        }
-        self.grids[((k * ny + j) * nx + i) as usize].as_deref()
+    fn grid(&self, id: TileId) -> Option<&Grid> {
+        self.grids.get(id).map(|grid| &**grid)
     }
 }
 
@@ -450,30 +537,11 @@ pub struct Reader<'a> {
     lattice: Lattice,
     /** The kind of the faces towards the camera. */
     front: usize,
-    /** Bounds of a, b, c over the sites, inclusive. */
-    pub min: [i32; 3],
-    pub max: [i32; 3],
 }
 
 impl<'a> Reader<'a> {
     pub fn new(tiles: &'a Tiles, lattice: Lattice) -> Reader<'a> {
-        let mut min = [i32::MAX; 3];
-        let mut max = [i32::MIN; 3];
-        for x in [tiles.min[0], tiles.max[0]] {
-            for y in [tiles.min[1], tiles.max[1]] {
-                for z in [tiles.min[2], tiles.max[2]] {
-                    for (d, v) in [lattice.r, lattice.u, lattice.f].iter().enumerate() {
-                        let along = x * v[0] + y * v[1] + z * v[2];
-                        min[d] = min[d].min(along);
-                        max[d] = max[d].max(along);
-                    }
-                }
-            }
-        }
-        if (0..3).any(|d| tiles.min[d] > tiles.max[d]) {
-            (min, max) = ([0; 3], [-1; 3]);
-        }
-        Reader { tiles, lattice, front: lattice.front(), min, max }
+        Reader { tiles, lattice, front: lattice.front() }
     }
 
     /**
@@ -507,6 +575,32 @@ mod tests {
     use super::*;
 
     #[test]
+    fn blocks_hold_what_a_map_would_and_a_copy_changes_alone() {
+        use std::collections::BTreeMap;
+        // Tiles either side of zero and of blocks' edges: set, then of a copy one in three taken out, one set again.
+        let ids = || (-9..9).flat_map(|i| (-9..9).map(move |j| [i, j, i * j]));
+        let (mut blocks, mut map) = (Blocks::default(), BTreeMap::new());
+        for (n, id) in ids().enumerate() {
+            assert_eq!(blocks.insert(id, n), map.insert(id, n));
+        }
+        let before = (blocks.clone(), map.clone());
+        for (n, id) in ids().enumerate() {
+            match n % 3 {
+                0 => assert_eq!(blocks.remove(id), map.remove(&id)),
+                1 => assert_eq!(blocks.insert(id, 0), map.insert(id, 0)),
+                _ => (),
+            }
+        }
+        assert_eq!(blocks.remove([99; 3]), None);
+        for (blocks, map) in [(&blocks, &map), (&before.0, &before.1)] {
+            assert_eq!(blocks.iter().map(|(id, n)| (id, *n)).collect::<BTreeMap<_, _>>(), *map);
+            assert!(blocks.len() == map.len() && ids().all(|id| blocks.get(id) == map.get(&id)));
+        }
+        ids().for_each(|id| _ = blocks.remove(id));
+        assert!(blocks.is_empty() && blocks.iter().next().is_none());
+    }
+
+    #[test]
     fn tiles_hold_their_cubes_alike_along_every_axis() {
         // A voxel in each of two tiles, one above the other, as shift 3 makes them: a brick each.
         let tile = |min: [i32; 3]| {
@@ -530,6 +624,12 @@ mod tests {
         }
         assert!(tiles.has_all([[0, 0, 0], [1, 0, 0]]) && tiles.has_all([[0, 0, 0], [0, 1, 0]]));
         assert!(!tiles.has_all([[0, 0, 0], [1, 1, 0]]) && !tiles.has([0, 0, 1]));
+        // A copy with a tile more and one less: the first is as it was.
+        let mut next = tiles.clone();
+        next.insert([0, 0, 1], tile([0, 0, 8]));
+        next.remove([0, 1, 0]);
+        assert_eq!((next.at(0, 0, 8), next.at(0, 8, 0)), (Some(1), None));
+        assert_eq!((tiles.at(0, 0, 8), tiles.at(0, 8, 0)), (None, Some(2)));
     }
 
     #[test]

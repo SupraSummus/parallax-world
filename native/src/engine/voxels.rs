@@ -788,8 +788,8 @@ impl Window {
      * read, where it is; None if it holds nothing then.
      */
     fn aim(&self, level: usize, tiles: &Level, eye: Vec3, read: bool) -> Option<([i32; 3], [i32; 3])> {
-        match (tiles.tiles.values().next(), self.ball) {
-            (Some(tile), _) => {
+        match (tiles.tiles.iter().next(), self.ball) {
+            (Some((_, tile)), _) => {
                 let origin = tile.grid.min.map(|v| v.rem_euclid(BRICK));
                 Some((origin, eye_brick(level, eye, origin)))
             }
@@ -850,7 +850,7 @@ impl Window {
         let meets = |id: TileId| in_ball(tile_bricks(id, origin), ball, None).next().is_some();
         let (mut steps, mut left) = (STEP, 0);
         let gone: Vec<TileId> = (self.tiles.iter())
-            .filter(|&(id, h)| tiles.tiles.get(id).is_none_or(|t| !Arc::ptr_eq(t, &h.tile)))
+            .filter(|&(id, h)| tiles.tiles.get(*id).is_none_or(|t| !Arc::ptr_eq(t, &h.tile)))
             .map(|(id, _)| *id)
             .collect();
         for id in gone {
@@ -866,12 +866,12 @@ impl Window {
                 left += 1;
             }
         }
-        let mut new: Vec<_> = tiles.tiles.iter().filter(|&(id, _)| !self.tiles.contains_key(id)).collect();
+        let mut new: Vec<_> = tiles.tiles.iter().filter(|(id, _)| !self.tiles.contains_key(id)).collect();
         new.sort_by_key(|(id, _)| {
-            let (lo, hi) = tile_bricks(**id, origin);
+            let (lo, hi) = tile_bricks(*id, origin);
             (0..3).map(|d| (lo[d] + hi[d] - 2 * target[d]).pow(2)).sum::<i32>()
         });
-        for (&id, tile) in new {
+        for (id, tile) in new {
             assert!((0..3).all(|d| tile.grid.min[d].rem_euclid(BRICK) == origin[d]), "a tile off its level's bricks");
             if meets(id) {
                 if steps == 0 {

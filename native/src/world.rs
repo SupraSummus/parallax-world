@@ -23,13 +23,15 @@
 //! which in a world that is not flat is little of all a ball around the
 //! eye holds. Lit anew (relight), the tiles are kept, their light found again.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+#[cfg(test)]
+use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 
 use fcc::GRID_LEVELS;
 pub use fcc::TileId;
-use fcc::{Grid, Tiles};
+use fcc::{Blocks, FastSet, Grid, Tiles};
 use light::{Light, Shared};
 use worldgen::tiles::{made_with, make_tiles};
 
@@ -74,9 +76,14 @@ pub struct Tile {
     lights: Box<[OnceLock<Box<[u32]>>]>,
 }
 
-/** A level's tiles made so far, and their voxels as the bakers read them. */
+/**
+ * A level's tiles made so far, and their voxels as the bakers read them:
+ * as they were when it was taken. Both are held in blocks (fcc's Blocks),
+ * so that the next, some tiles come or gone, costs as those do.
+ */
+#[derive(Clone)]
 pub struct Level {
-    pub tiles: HashMap<TileId, Arc<Tile>>,
+    pub tiles: Blocks<Arc<Tile>>,
     pub grids: Arc<Tiles>,
 }
 
@@ -128,9 +135,23 @@ fn whole(grid: &Grid) -> Arc<[u64]> {
 }
 
 impl Level {
-    pub fn new(tiles: HashMap<TileId, Arc<Tile>>) -> Level {
-        let grids = Arc::new(Tiles::new(TILE_SHIFT, tiles.iter().map(|(&id, t)| (id, t.grid.clone()))));
+    pub fn new(tiles: impl IntoIterator<Item = (TileId, Arc<Tile>)>) -> Level {
+        let tiles: Blocks<Arc<Tile>> = tiles.into_iter().collect();
+        let grids = Arc::new(Tiles::new(TILE_SHIFT, tiles.iter().map(|(id, t)| (id, t.grid.clone()))));
         Level { tiles, grids }
+    }
+
+    /** Takes `tile` as its tile `id`: its voxels are others' than those read so far (`grids`). */
+    fn insert(&mut self, id: TileId, tile: Arc<Tile>) {
+        Arc::make_mut(&mut self.grids).insert(id, tile.grid.clone());
+        self.tiles.insert(id, tile);
+    }
+
+    /** Lets its tile `id` go, if it has it. */
+    fn remove(&mut self, id: TileId) -> Option<Arc<Tile>> {
+        let tile = self.tiles.remove(id)?;
+        Arc::make_mut(&mut self.grids).remove(id);
+        Some(tile)
     }
 
     /**
@@ -148,7 +169,7 @@ impl Level {
         }
         let j = usize::from(radius >= voxels::cell_size(1));
         meeting(centre, radius, voxels::cell_size(j))
-            .any(|k| within(voxels::Met::tiles(j, k)).any(|t| self.tiles.get(&t).is_some_and(|tile| tile.met.has(t, j, k, see_through))))
+            .any(|k| within(voxels::Met::tiles(j, k)).any(|t| self.tiles.get(t).is_some_and(|tile| tile.met.has(t, j, k, see_through))))
     }
 
     /**
@@ -159,7 +180,7 @@ impl Level {
     pub fn buried(&self, lo: [i32; 3], hi: [i32; 3]) -> bool {
         let tile = |v: i32| (v as i64).div_euclid(TILE) as i32;
         within([lo.map(tile), hi.map(tile)]).all(|id| {
-            let Some(t) = self.tiles.get(&id) else { return false };
+            let Some(t) = self.tiles.get(id) else { return false };
             let g = &t.grid;
             // The box within the tile, by brick of its grid, whose box is to hold it.
             let (from, to): ([i32; 3], [i32; 3]) = (
@@ -233,7 +254,7 @@ type Job = (usize, Piece, Option<Arc<Tile>>);
 #[derive(Default)]
 struct Queue {
     wanted: VecDeque<Job>,
-    in_flight: HashSet<(usize, Piece)>,
+    in_flight: FastSet<(usize, Piece)>,
     shared: Option<Shared>,
     lighting: u32,
     lit: bool,
@@ -247,7 +268,7 @@ struct Queue {
 impl Queue {
     /** Takes the tiles `with` tile `id` of `level` (made_with), to be made with it: those wanted wait no more. */
     fn take(&mut self, level: usize, with: impl Iterator<Item = TileId>) {
-        let with: HashSet<Piece> = with.map(Piece::Tile).collect();
+        let with: FastSet<Piece> = with.map(Piece::Tile).collect();
         self.wanted.retain(|job| job.0 != level || !with.contains(&job.1));
         self.in_flight.extend(with.into_iter().map(|piece| (level, piece)));
     }
@@ -257,9 +278,10 @@ impl Queue {
 type Made = (usize, Piece, Option<Arc<Tile>>);
 
 pub struct World {
-    tiles: Vec<HashMap<TileId, Arc<Tile>>>,
     /** Per level, the tiles made so far, as engines read them. */
     levels: Vec<Arc<Level>>,
+    /** The level whose far tiles the next update drops: one each, in turn. */
+    sweeping: usize,
     pub heights: Heights,
     /** The threads it makes tiles on, which engines may take as many of. */
     pub threads: usize,
@@ -416,8 +438,8 @@ impl World {
             std::thread::spawn(move || work(world, &queue, &send));
         }
         World {
-            tiles: (0..GRID_LEVELS).map(|_| HashMap::new()).collect(),
-            levels: (0..GRID_LEVELS).map(|_| Arc::new(Level::new(HashMap::new()))).collect(),
+            levels: (0..GRID_LEVELS).map(|_| Arc::new(Level::new([]))).collect(),
+            sweeping: 0,
             heights,
             threads,
             own: (threads == 0).then(|| Worker::new(world.clone())),
@@ -455,7 +477,7 @@ impl World {
      * as a body does of the ground it walks on.
      */
     pub fn lacking(&self, level: usize, reach: f64, camera: Vec3) -> Vec<TileId> {
-        around(level, camera, reach).into_iter().map(|(_, id)| id).filter(|id| !self.tiles[level].contains_key(id)).collect()
+        around(level, camera, reach).into_iter().map(|(_, id)| id).filter(|&id| self.levels[level].tiles.get(id).is_none()).collect()
     }
 
     /** The light it is lit by, if any. */
@@ -476,11 +498,8 @@ impl World {
             q.shared = Some(shared);
             q.lighting += 1;
         }
-        for (level, tiles) in self.tiles.iter_mut().enumerate() {
-            for tile in tiles.values_mut() {
-                *tile = Arc::new(tile.unlit());
-            }
-            self.levels[level] = Arc::new(Level::new(tiles.clone()));
+        for level in &mut self.levels {
+            *level = Arc::new(Level::new(level.tiles.iter().map(|(id, tile)| (id, Arc::new(tile.unlit())))));
         }
     }
 
@@ -492,7 +511,7 @@ impl World {
 
     /** Whether it lacks a tile `wants` asks for. */
     pub fn lacks(&self, wants: &Wants) -> bool {
-        wants.asked.iter().any(|&(level, piece)| matches!(piece, Piece::Tile(id) if !self.tiles[level].contains_key(&id)))
+        wants.asked.iter().any(|&(level, piece)| matches!(piece, Piece::Tile(id) if self.levels[level].tiles.get(id).is_none()))
     }
 
     /** What it owes the view: the tiles to make and the bricks to light, waiting or under way. */
@@ -535,11 +554,13 @@ impl World {
 
     /**
      * Takes the tiles made, drops those far from the camera (lattice
-     * units), and has done what `wants` asks for, most wanted first: the
+     * units), a level's each time, in turn (none comes to be far in a few
+     * frames), and has done what `wants` asks for, most wanted first: the
      * tiles it names made, and, lit here, the bricks lit, what shows
      * (rays ask for them), small, and in a world that is not flat, little
      * of the tiles made. No other tile is made but with one it names
-     * (made_with). Returns whether any level's tiles changed.
+     * (made_with). What it lets go, its threads free, if it has any: that
+     * is long. Returns whether any level's tiles changed.
      */
     pub fn update(&mut self, camera: Vec3, wants: &Wants) -> bool {
         let Wants { reach, lit, asked } = wants;
@@ -547,7 +568,7 @@ impl World {
         assert!(lit == Lit::Not || self.shared.is_some(), "a world lit with no light");
         // Tiles are made no farther from the camera than `keep` (in the level's sites), and dropped once farther still.
         let keep = |level: usize| reach[level].unwrap_or(0.0) + KEPT;
-        let mut changed = [false; GRID_LEVELS];
+        let mut changed = false;
         let made: Vec<Made> = std::mem::take(&mut self.early).into_iter().chain(self.done.try_iter()).collect();
         {
             let mut q = self.queue.0.lock().expect("queue");
@@ -556,32 +577,35 @@ impl World {
             }
         }
         let far = |level: usize, id: TileId| distance(level, camera, id) > keep(level) + DROPPED;
+        let mut gone: Vec<Box<dyn Send>> = Vec::new();
         for (level, piece, tile) in made {
+            let (Piece::Tile(id), Some(tile)) = (piece, tile) else { continue };
             // Made with one asked for, a tile may be far, or here already: that one is kept, with its light.
-            if let (Piece::Tile(id), Some(tile)) = (piece, tile)
-                && !far(level, id)
-                && let std::collections::hash_map::Entry::Vacant(entry) = self.tiles[level].entry(id)
-            {
-                entry.insert(tile);
-                changed[level] = true;
+            if far(level, id) || self.levels[level].tiles.get(id).is_some() {
+                gone.push(Box::new(tile));
+            } else {
+                Arc::make_mut(&mut self.levels[level]).insert(id, tile);
+                changed = true;
             }
         }
-        for (level, tiles) in self.tiles.iter_mut().enumerate() {
-            let before = tiles.len();
-            tiles.retain(|&id, _| !far(level, id));
-            changed[level] |= tiles.len() < before;
+        let level = self.sweeping;
+        self.sweeping = (level + 1) % GRID_LEVELS;
+        let dropped: Vec<TileId> = self.levels[level].tiles.iter().map(|(id, _)| id).filter(|&id| far(level, id)).collect();
+        if !dropped.is_empty() {
+            let tiles = Arc::make_mut(&mut self.levels[level]);
+            gone.extend(dropped.into_iter().filter_map(|id| tiles.remove(id)).map(|tile| Box::new(tile) as Box<dyn Send>));
+            changed = true;
         }
-        // What the light forgot is long to free: a thread's to, if the world has any.
-        let gone = self.shared.as_ref().and_then(|shared| shared.forget(|level, key| far(level, key.map(|k| k as i32))));
-        let gone = gone.filter(|_| self.threads > 0);
+        gone.extend(self.shared.as_ref().and_then(|shared| shared.forget(|l, key| l == level && far(l, key.map(|k| k as i32)))));
 
-        let (mut list, mut listed) = (VecDeque::new(), HashSet::new());
+        let (mut list, mut listed) = (VecDeque::new(), FastSet::default());
         let unlit = |tile: &Tile, [x, y, z]: [i32; 3]| usize::try_from(tile.grid.brick(x, y, z)).is_ok_and(|f| tile.light(f).is_none());
         for &(level, piece) in asked.iter() {
+            let tiles = &self.levels[level].tiles;
             let job = match piece {
-                Piece::Tile(id) => (distance(level, camera, id) <= keep(level) && !self.tiles[level].contains_key(&id)).then_some(None),
+                Piece::Tile(id) => (distance(level, camera, id) <= keep(level) && tiles.get(id).is_none()).then_some(None),
                 Piece::Brick(corner) => {
-                    let tile = self.tiles[level].get(&corner.map(|v| v.div_euclid(TILE as i32)));
+                    let tile = tiles.get(corner.map(|v| v.div_euclid(TILE as i32)));
                     tile.filter(|t| lit == Lit::Bricks && unlit(t, corner)).map(|t| Some(t.clone()))
                 }
             };
@@ -595,17 +619,15 @@ impl World {
             let mut q = self.queue.0.lock().expect("queue");
             q.lit = lit != Lit::Not;
             list.retain(|job| !q.in_flight.contains(&(job.0, job.1)));
-            q.gone.extend(gone);
+            if self.threads > 0 {
+                q.gone.append(&mut gone);
+            }
             if !list.is_empty() || !q.gone.is_empty() {
                 self.queue.1.notify_all();
             }
             q.wanted = list;
         }
-
-        for level in (0..GRID_LEVELS).filter(|&l| changed[l]) {
-            self.levels[level] = Arc::new(Level::new(self.tiles[level].clone()));
-        }
-        changed.contains(&true)
+        changed
     }
 }
 
@@ -636,7 +658,7 @@ mod tests {
         loop {
             world.update([0.0; 3], &wants);
             let lacking = world.lacking(coarsest, TILE as f64, [0.0; 3]).into_iter().map(|id| (coarsest, Piece::Tile(id)));
-            let tiles = world.level(coarsest).tiles.values();
+            let tiles = world.level(coarsest).tiles.iter().map(|(_, t)| t);
             let bricks = tiles.flat_map(|t| corners(&t.grid)).map(|c| (coarsest, Piece::Brick(c)));
             let asked: Vec<_> = lacking.chain(bricks).collect();
             if asked != *wants.asked {
@@ -648,7 +670,7 @@ mod tests {
             }
         }
         let light = |t: &Tile| -> Vec<_> { (0..t.grid.cells.len() / fcc::BRICK_SITES).map(|f| t.light(f).map(<[u32]>::to_vec)).collect() };
-        let mut lights: Vec<_> = world.level(coarsest).tiles.iter().map(|(&id, t)| (id, light(t))).collect();
+        let mut lights: Vec<_> = world.level(coarsest).tiles.iter().map(|(id, t)| (id, light(t))).collect();
         lights.sort();
         assert!(lights.iter().any(|(_, l)| l.iter().any(Option::is_some)), "some light found");
         lights

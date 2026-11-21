@@ -94,6 +94,11 @@ for the chunks, as far as each grid's chunks read
 for the voxels engine, `voxels::READ`, as far as its rays read.
 A tile never changes once made,
 so no chunk or cell surface goes stale as tiles come.
+Those that read a level's tiles, on their own threads,
+each take them as they were (`Level`, `fcc`'s `Tiles`):
+tables in blocks of tiles, shared between one taking and the next (`Blocks`),
+so that a frame in which tiles come or go
+costs as those do, not as all the world holds.
 
 ### Chunks are whole cells
 

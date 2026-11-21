@@ -318,7 +318,7 @@ impl Hiding {
                 let site = nearest_site(q);
                 let id = site.map(|v| (v as i64).div_euclid(TILE) as i32);
                 if last.is_none_or(|(g, i, _)| g != grid || i != id) {
-                    last = levels[grid as usize].tiles.get(&id).map(|t| (grid, id, &*t.grid));
+                    last = levels[grid as usize].tiles.get(id).map(|t| (grid, id, &*t.grid));
                 }
                 let mut step = f64::from(fcc::BRICK) / 2.0 * unit;
                 match last {

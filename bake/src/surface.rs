@@ -34,14 +34,10 @@ impl Voxel {
  * show).
  */
 pub fn surface(reader: &Reader, geometry: &Geometry, from: [i32; 3], to: [i32; 3], holds: impl Fn(i32, i32, i32) -> bool) -> Vec<Voxel> {
-    let (min, max) = (reader.min, reader.max);
-    let (a0, a1) = (from[0].max(min[0]), (to[0] + 1).min(max[0] + 1));
-    let (b0, b1) = (from[1].max(min[1]), (to[1] + 1).min(max[1] + 1));
-    let (bottom, top) = (from[2].max(min[2]), to[2].min(max[2]));
+    let (a0, a1) = (from[0], to[0] + 1);
+    let (b0, b1) = (from[1], to[1] + 1);
+    let (bottom, top) = (from[2], to[2]);
     let mut voxels = Vec::new();
-    if a0 >= a1 || b0 >= b1 || top < bottom {
-        return voxels;
-    }
 
     // Layers as dense planes of the cell and its sites' neighbours (up to 2
     // away in a, 1 in b): site (a, b) at (b - b0 + 1) · stride + a - a0 + 2,

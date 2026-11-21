@@ -27,7 +27,7 @@ fn forest_tiles(eye: Vec3) -> Arc<Level> {
         let views = sites.flat_map(|i| std::iter::once(i as u32).chain((0..fcc::FACE_KINDS as u32).map(move |k| g.cells[i] + k))).collect();
         Tile::new(id, Arc::new(fcc::Grid { views, ..(**g).clone() }))
     };
-    Arc::new(Level::new(world.level(0).tiles.iter().map(|(&id, tile)| (id, Arc::new(faced(id, tile)))).collect()))
+    Arc::new(Level::new(world.level(0).tiles.iter().map(|(id, tile)| (id, Arc::new(faced(id, tile))))))
 }
 
 #[test]
@@ -148,12 +148,13 @@ fn window_bricks(middle: [i32; 3]) -> impl Iterator<Item = [i32; 3]> {
 fn a_window_moved_and_its_tiles_changed_holds_what_a_new_one_would() {
     let eye = EYE;
     let all = FOREST.clone();
-    let mut ids: Vec<_> = all.tiles.keys().copied().collect();
+    let mut ids: Vec<_> = all.tiles.iter().map(|(id, _)| id).collect();
     ids.sort();
     assert!(ids.len() > 4, "{} tiles", ids.len());
     // Some tiles of all, then others, as the eye moves through bricks and across the torus's seams,
     // then farther than the ball reaches, and back: begun anew each time.
-    let some = |skip: usize| Arc::new(Level::new(ids.iter().skip(skip).step_by(2).map(|id| (*id, all.tiles[id].clone())).collect()));
+    let some =
+        |skip: usize| Arc::new(Level::new(ids.iter().skip(skip).step_by(2).map(|id| (*id, all.tiles.get(*id).expect("the tile").clone()))));
     let steps = [
         (some(0), eye),
         (all.clone(), [13.0, 31.0, -9.0]),
@@ -190,7 +191,7 @@ fn lit_a_window_places_the_bricks_rays_asked_for_once_lit() {
     // No light found: the bricks with voxels unknown, rays may ask for them, the empty ones empty.
     let w = &windows.windows[0];
     let ball = w.ball.expect("a ball");
-    let held: Vec<[i32; 3]> = window_bricks(ball.middle).filter(|&b| ball.contains(b) && tiles.tiles.contains_key(&w.site(b).1)).collect();
+    let held: Vec<[i32; 3]> = window_bricks(ball.middle).filter(|&b| ball.contains(b) && tiles.tiles.get(w.site(b).1).is_some()).collect();
     let unknown: Vec<[i32; 3]> = held.iter().copied().filter(|&b| w.table[entry(b)] == UNKNOWN).collect();
     assert!(held.iter().all(|&b| matches!(w.table[entry(b)], UNKNOWN | EMPTY)));
     assert!(unknown.len() > 1000 && unknown.len() < held.len(), "{} of {} bricks unknown", unknown.len(), held.len());
@@ -201,11 +202,11 @@ fn lit_a_window_places_the_bricks_rays_asked_for_once_lit() {
     let mut light = Light::new(world, light::Shared::new(light::Brightness { sky: 1.0, sun: 1.0, glow: 0.0 }));
     for &b in unknown.iter().step_by(3) {
         let (corner, id) = w.site(b);
-        tiles.tiles[&id].lit(0, corner, &mut light);
+        tiles.tiles.get(id).expect("the tile").lit(0, corner, &mut light);
     }
     let lit = |b: [i32; 3]| {
         let ([x, y, z], id) = w.site(b);
-        let tile = &tiles.tiles[&id];
+        let tile = tiles.tiles.get(id).expect("the tile");
         tile.light(tile.grid.brick(x, y, z) as usize).is_some()
     };
     let lit: Vec<bool> = unknown.iter().map(|&b| lit(b)).collect();
@@ -237,7 +238,7 @@ fn windows_short_of_slots_hold_as_large_a_ball_as_fits() {
         assert!(ball.radius == windows.radius && windows.radius < RADIUS && w.slots <= pool, "at {eye:?}");
         // Every brick of a tile made in the ball held, every other unknown.
         for b in window_bricks(ball.middle) {
-            let inside = ball.contains(b) && tiles.tiles.contains_key(&w.site(b).1);
+            let inside = ball.contains(b) && tiles.tiles.get(w.site(b).1).is_some();
             assert_eq!(w.table[entry(b)] != UNKNOWN, inside, "brick {b:?}, at {eye:?}");
         }
         assert!(holds(&windows, &slots) == anew(windows.radius, &tiles, eye), "at {eye:?}");
@@ -267,7 +268,7 @@ fn a_window_holds_the_bricks_of_every_tile_made_past_the_heights_too() {
     let (mut made, mut over) = (0, 0);
     for b in window_bricks(ball.middle).filter(|&b| ball.contains(b)) {
         let (site, id) = w.site(b);
-        if !tiles.tiles.contains_key(&id) {
+        if tiles.tiles.get(id).is_none() {
             continue;
         }
         made += 1;
