@@ -106,11 +106,20 @@ Numbers are for the forest at 1280×800, as measured when written.
   what it means and what the contract makes of it
   are in "Open problems" of `docs/generators.md`).
   Still to do, each a step of its own:
-  - Boxes. Their three axes' slabs taken as if apart (tried)
+  - Boxes and gables. A box's three axes' slabs taken as if apart (tried)
     are wrong for what is thin along two, a rod or a speck:
     a small lamp's glow grew with the level.
-    Wanted: the shadow of the box's part of the voxel along each direction.
-  - Balls, tubes and gables; with them `Tie` and the thin shapes' rules go.
+    Each site holding its part's exact shadow along each direction (tried:
+    the voxel cut by the planes, each shadow the hull of its corners seen along it)
+    kept the solids' contract (`worldgen/tests/shapes.rs`),
+    but walls came out pitted at level 0,
+    and the village's houses thinner at levels 1 and 2:
+    a wall a unit thick on a plane of sites is half of two sites,
+    each shown by its own coin, so rays leak through it.
+    Hosts showing a site held in part as light sees it (below)
+    would end the pits, not the leak.
+  - Balls and tubes. With them `Tie` and the thin shapes' rules go,
+    once a thin wall stays whole across sites shown apart (above).
   - Spans of a medium are held so now (`held` in `drawables.rs`). Left:
     - A see-through kind has one share a site, pieces one a face,
       and a site shows its pieces whole or not at all.
