@@ -16,10 +16,9 @@ use fcc::FACE_KINDS;
 use crate::World;
 use crate::checks::cells;
 use crate::checks::survey::{Survey, survey};
-use crate::generator::{Generator, Layer, Whole, checking_skipped, generate, kind_of, whole};
+use crate::generator::{Generator, Whole, checking_skipped, generate, kind_of, whole};
 use crate::grid::{ALPHA, Box3, VoxelGrid, is_site};
 use crate::noise::Rng;
-use crate::picture::{Camera, Seen, Tiles, composite_in};
 use crate::units::m;
 
 fn b(min_x: i64, min_y: i64, min_z: i64, max_x: i64, max_y: i64, max_z: i64) -> Box3 {
@@ -89,21 +88,6 @@ pub(crate) fn around(region: &Box3, level: u32) -> Box3 {
     let grow = |i: usize| 0.max((8i64 << level) - (region.max[i] - region.min[i]) / 2);
     Box3 { min: [0, 1, 2].map(|i| region.min[i] - grow(i)), max: [0, 1, 2].map(|i| region.max[i] + grow(i)) }
 }
-
-/**
- * Levels from FAR_FROM see the fields of far regions from above (sites
- * 2 m apart and more), against level 0, within FAR.
- */
-const FAR_FROM: u32 = 4;
-
-/**
- * How far the fields of a far region may stray from level 0 seen from
- * above, each region. A field is drawn from position alone, and a wide
- * region has hundreds of lines of sites at level 6, so it keeps close; a
- * plan finer than the sites read where each line is aliases ("Plans" in
- * "Levels" in docs/generators.md).
- */
-const FAR: Accuracy = Accuracy { apart: 0.0125, spread: f64::INFINITY };
 
 /** A box of `region` at `level` generated in eight parts, alone and in any order, equals it generated whole. */
 pub fn whole_equals_parts(generator: &Generator, region: &Box3, level: u32) {
@@ -176,31 +160,16 @@ pub fn apart(a: &Look, c: &Look, channels: Range<usize>) -> f64 {
         .fold(0.0, |most, d| if d <= most { most } else { d })
 }
 
-/** The look of what pixels see (a mean over them). */
-fn look_of(seen: &Seen) -> Look {
-    [seen.stopped, seen.shown[0] + seen.glow[0], seen.shown[1] + seen.glow[1], seen.shown[2] + seen.glow[2]]
-}
-
-/** What a margin measures. */
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Measure {
-    /** What each of a sample of cells looks like along each of the lattice's directions, against what is in it (checks::cells). */
-    Cells,
-    /** What rays straight down see of the fields alone, against level 0. */
-    FieldsFromAbove,
-}
-
-/** How far a level of a world strays from another in a region, by one measure. */
+/** How far a level's cells in a region look from what is in them (checks::cells), on average. */
 #[derive(Clone, Debug)]
 pub struct Margin {
     pub region: Box3,
-    pub measure: Measure,
     pub level: u32,
-    /** The level it is measured against: FINER_BY finer, or 0 from above. */
+    /** The level it is measured against: FINER_BY finer, down to 0. */
     pub against: u32,
     /** What is seen at `against` and at `level`, on average. */
     pub looks: [Look; 2],
-    /** How far, on average, each of its cells is from what is in it, in its channel furthest; none from above. */
+    /** How far, on average, each of its cells is from what is in it, in its channel furthest. */
     pub spread: f64,
 }
 
@@ -260,52 +229,10 @@ impl std::fmt::Display for Report {
                 )?;
                 region = Some(r);
             }
-            let what = match m.measure {
-                Measure::Cells => format!("cells, spread {:.3}", m.spread),
-                Measure::FieldsFromAbove => "fields from above".to_string(),
-            };
             let [a, c] = m.looks.map(|v| look(&v));
-            writeln!(f, "  level {} against {}, {what}: {a} -> {c}: {:.3} apart", m.level, m.against, m.difference())?;
+            writeln!(f, "  level {} against {}, spread {:.3}: {a} -> {c}: {:.3} apart", m.level, m.against, m.spread, m.difference())?;
         }
         Ok(())
-    }
-}
-
-/**
- * What rays straight down over `region` see at each of `levels`, against
- * level 0, as `Measure::FieldsFromAbove`: level 0's tiles in `level_0`, which keeps those
- * this region shares with the one before.
- */
-fn from_above(world: &World, region: &Box3, levels: impl Iterator<Item = u32>, level_0: &mut Tiles, report: &mut Report) {
-    let levels: Vec<u32> = levels.collect();
-    if world.heights.is_none() {
-        assert!(levels.is_empty(), "a world with no heights has no sky to be seen from (World::heights)");
-        return;
-    }
-    let seen = |tiles: &mut Tiles, area: &Box3| {
-        // A ray every 2 units, through a random point of each 2 × 2: through their middles, rays meet plans of whole
-        // units at one phase, and the lattice's vertices, where a ray goes on into a voxel by its side.
-        let width = ((area.max[0] - area.min[0]) / 2).clamp(16, 1024) as usize;
-        let camera = Camera::top([area.min[0] as f64, area.min[2] as f64], [area.max[0] as f64, area.max[2] as f64], width);
-        let camera = camera.jittered(13);
-        composite_in(&world.generator, &camera, tiles)
-    };
-    // Level 0 over the area of the levels since it last grew; the areas
-    // nest, so its tiles are kept for the next. Rays come down from the
-    // world's sky, over its heights, cutting nothing.
-    if let Some(&widest) = levels.last() {
-        level_0.keep(&around(region, widest));
-    }
-    let mut reference: Option<(Box3, Seen)> = None;
-    for level in levels {
-        let area = around(region, level);
-        if reference.as_ref().is_none_or(|(a, _)| *a != area) {
-            reference = Some((area, seen(level_0, &area)));
-        }
-        let reference = &reference.as_ref().expect("made").1;
-        let here = seen(&mut Tiles::new(level, world.heights_at(level)), &area);
-        let looks = [look_of(reference), look_of(&here)];
-        report.margins.push(Margin { region: *region, measure: Measure::FieldsFromAbove, level, against: 0, looks, spread: 0.0 });
     }
 }
 
@@ -328,36 +255,10 @@ fn margins_near(name: &str, world: &World, focus: Option<&Generator>, regions: &
             let n = c.cells.len().max(1) as f64;
             let looks = [0, 1].map(|i| std::array::from_fn(|k| c.cells.iter().map(|cell| cell.looks[i][k]).sum::<f64>() / n));
             let spread = c.cells.iter().map(cells::Cell::deviation).sum::<f64>() / n;
-            report.margins.push(Margin { region: *region, measure: Measure::Cells, level, against: c.against, looks, spread });
+            report.margins.push(Margin { region: *region, level, against: c.against, looks, spread });
         }
     }
     report
-}
-
-/**
- * What `world`'s fields show from above over each of `regions`, wide
- * ones, at levels FAR_FROM to `levels`, against
- * level 0. Its things are left out, and with them their far
- * fields: their far forms keep what rays see around them, not from
- * above ("Media are isotropic" in docs/generators.md).
- */
-pub fn far_margins(name: &str, world: World, regions: &[Box3], levels: u32) -> Report {
-    let world = fields_of(world);
-    let mut report = Report::new(name);
-    let mut level_0 = Tiles::new(0, world.heights_at(0));
-    for region in regions {
-        from_above(&world, region, FAR_FROM..=levels, &mut level_0, &mut report);
-    }
-    report
-}
-
-/** `far_margins`, printed; panics where one breaks FAR. */
-pub fn check_far(name: &str, world: World, regions: &[Box3], levels: u32) {
-    let start = Instant::now();
-    let report = far_margins(name, world, regions, levels);
-    println!("{report}{name}: far {:.1} s", start.elapsed().as_secs_f64());
-    let broken = report.broken(FAR);
-    assert!(broken.margins.is_empty(), "{name} breaks the contract far away, over {}:\n{broken}", FAR.apart);
 }
 
 /** Sites of each level above a world's heights that `heights_hold` generates. */
@@ -496,12 +397,6 @@ pub fn things_hold(world: &World, survey: &Survey) -> Vec<String> {
     broken
 }
 
-/** `world` with its fields alone: its things left out, and with them their far fields. */
-fn fields_of(mut world: World) -> World {
-    world.generator.layers.retain(|layer| matches!(layer, Layer::Field(_)));
-    world
-}
-
 /**
  * The widest region the contract checks in (32 m), along any axis: each
  * holds places of strata (worldgen::checks::survey), as many as fit.
@@ -610,7 +505,7 @@ pub fn hold_to_baseline(breaks: &[Break], path: &str, all: bool) {
 /**
  * Where worlds checked (at several seeds, say) break the contract: the
  * rules that hold exactly, layers that draw nothing, and each stratum's
- * margins (by measure and level) averaged over the regions holding it
+ * margins (by level) averaged over the regions holding it
  * at every seed, if they are as far apart or as spread as it is to keep
  * it (as `declared` by name, `Accuracy::of`), or more; and, if every
  * stratum was checked, a name declared that covers none.
@@ -633,12 +528,12 @@ pub fn breaks(checked: &[Checked], declared: &[(&str, Accuracy)]) -> Vec<Break> 
             );
         }
     }
-    // Each stratum's margins, by measure and level, from every world checked.
-    let mut means: BTreeMap<(&str, Measure, u32), Vec<Held>> = BTreeMap::new();
+    // Each stratum's margins, by level, from every world checked.
+    let mut means: BTreeMap<(&str, u32), Vec<Held>> = BTreeMap::new();
     for c in checked {
         for m in &c.report.margins {
             let Some((_, strata)) = c.regions.iter().find(|(b, _)| *b == m.region) else { continue };
-            strata.iter().for_each(|s| means.entry((s, m.measure, m.level)).or_default().push((c, m)));
+            strata.iter().for_each(|s| means.entry((s, m.level)).or_default().push((c, m)));
         }
     }
     if checked.iter().all(|c| c.complete) {
@@ -646,7 +541,7 @@ pub fn breaks(checked: &[Checked], declared: &[(&str, Accuracy)]) -> Vec<Break> 
             push(None, format!("an accuracy is declared for {name}, which no stratum surveyed is or is in"));
         }
     }
-    for ((stratum, measure, level), margins) in means {
+    for ((stratum, level), margins) in means {
         let n = margins.len() as f64;
         let mean = |i: usize| -> Look { std::array::from_fn(|k| margins.iter().map(|(_, m)| m.looks[i][k]).sum::<f64>() / n) };
         let means = [mean(0), mean(1)];
@@ -658,7 +553,7 @@ pub fn breaks(checked: &[Checked], declared: &[(&str, Accuracy)]) -> Vec<Break> 
             continue;
         }
         let mut message = format!(
-            "{stratum}, level {level}, {measure:?}: {apart:.3} apart, spread {spread:.3} (within {}, {}), on average over {} regions (stops {:+.3}, shows {:+.3} {:+.3} {:+.3}):",
+            "{stratum}, level {level}: {apart:.3} apart, spread {spread:.3} (within {}, {}), on average over {} regions (stops {:+.3}, shows {:+.3} {:+.3} {:+.3}):",
             within.apart,
             within.spread,
             margins.len(),

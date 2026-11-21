@@ -227,15 +227,18 @@ Numbers are for the forest at 1280×800, as measured when written.
   The valley's landmarks: 118 at eight seeds (not 686 as one per region),
   under ENOUGH a seed, so no seed is tested alone;
   its towns 57, its haystacks 2.
-- **Far regions and cost's places are still listed by hand**
-  (`Entry` in `worlds/src/lib.rs`).
-  The survey could give both: wide boxes around fields' strata,
-  the places of the costliest strata.
+- **Levels past a world's `levels` are not checked.**
+  The valley's, the learned town's and the city's stop at 3 or 4,
+  where their things break; their fields go on to 6.
+  So the valley's sea, where far sites are taller than the water is deep,
+  may show its floor dry at level 6 unseen.
+  A world could name levels for its fields apart from its things'.
+  Not long rays across a wide region, against level 0:
+  grazing along a ground, they cross its coarse half-full sites many times over,
+  and stop far more than at level 0 (0.67 against 0.5 at level 6), which no alpha keeps.
+- **Cost's places are still listed by hand** (`Entry` in `worlds/src/lib.rs`).
+  The survey could give them: the places of the costliest strata.
   Then `Region` would go.
-  Unlisted, a field is checked by its cells alone, which see little of a medium on its ground:
-  each held to what is in it, to the world's `levels`,
-  in a region its stratum shares with others (the sea's, with its beach).
-  So the valley's far sites showed the sea's floor dry till its coast was listed.
 - **Things' variants of one part, drawing the same kinds, are one stratum**
   (`worldgen::checks::survey`): a ruin and a watchtower, both of stone,
   are checked in one region between them.
@@ -719,13 +722,10 @@ Numbers are for the forest at 1280×800, as measured when written.
   the valley's, alone, is CI's longest job.
   Its threads end together, so only less work would shorten it,
   or its seeds on several runners (`--nocapture` shows each part's time).
-  A seed's margins (rays, and pictures from above) take longest,
+  A seed's margins take longest,
   then checking its regions in parts.
   At `REGIONS_SEED` three threads each make the world (`worlds/tests/contract.rs`);
   one for all, now that a world is shared, would make its plans' columns once. Not measured.
-  Pictures from above generate level 0 over all of a world's heights,
-  region by region, keeping the tiles a region shares with the one before:
-  the forest's regions overlap, the valley's hardly.
   If CI is still too slow, the contract at seeds but `REGIONS_SEED`
   (`worlds/tests/contract.rs`) could run only on main.
 - **LLVM 21 compiles AVX-512 code wrong (lavapipe).**

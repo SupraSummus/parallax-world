@@ -539,9 +539,6 @@ the checks look at it in cubes around places
 each within its heights if it has them (`World::within`),
 so a cube as wide as a ground's heights holds all of them,
 and an endless world's is a cube of it.
-"From above" (a far region's fields) is a sky's view: rays down from over what may show,
-through cubes as any picture's;
-a world with no heights has no sky, and is not seen from it.
 y stays up, but some of the engine still takes a ground
 ("Assume no ground" in `docs/todo.md`).
 
@@ -628,18 +625,6 @@ in shares of material types or in sRGB.
   a sample of cells near a surface in each region (`checks::cells`),
   the region grown to at least 16 sites of the level across,
   each along each of the 12 directions, inside it only;
-- in an entry's `far` regions, wide ones (only x and z count),
-  what its fields alone show from above from level 4 to its `far_levels`,
-  against level 0,
-  each region within 0.0125:
-  fields come from position alone,
-  and hundreds of lines of sites average out,
-  so what is finer than the sites must show in proportion ("Plans" in "Levels").
-  Things are left out, with their far fields,
-  as their far forms keep what rays see around them, not from above.
-  The valley's has its first town and the sea off its coast,
-  the moor's its stream and patches of heath,
-  the learned town's its whole crop;
 - at each level up to one past the world's, in each region
   and a host tile's width around spawn,
   a slab above the world's `heights`, if it has them, stops no rays at all:
@@ -702,18 +687,16 @@ as is the rest of the world, in boxes anywhere.
 `worlds/tests/directions.rs` checks each world in `WORLDS`,
 but for the places it knows follow the lattice (`KNOWN`, docs/todo.md).
 
-Parts and far regions are checked at seed 42 only:
+Parts are checked at seed 42 only:
 they check how a world is drawn, not what a seed puts in it.
 With `--nocapture` it prints each level's margins;
 `contract::margins` returns them as a `Report` to print,
 each margin's looks at both levels.
-A broken mean (`contract::breaks`) names the stratum, level and measure,
+A broken mean (`contract::breaks`) names the stratum and level,
 and each region it was averaged over, at its seed.
 The engine's tests also check that a thing's carves cut only the thing.
 A new world is a crate of its own in `worlds/`, as the cheese is,
-an entry in `WORLDS`
-with `far` regions where its fields have patterns finer than the far sites,
-or a medium on ground the far sites are taller than (a sea on its floor),
+an entry in `WORLDS`,
 and its name in `worlds!` in `worlds/tests/contract.rs`,
 whose tests fail without it.
 To see a world without the renderer,
