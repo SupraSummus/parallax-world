@@ -35,7 +35,7 @@ one world's: `cargo test --release -p worlds --test contract valley`.
 | `worlds/tests/contract.rs`, `worldgen/tests/contract.rs`, `worldgen/tests/shapes.rs` | Every world, the engine's test worlds and each solid keep the contract (`worldgen/src/checks/contract.rs`): generated in pieces equals generated whole; each stratum's cells look on average as what is in them two levels finer, or as their baseline says they don't (`worlds/data/contract/`, `worldgen/data/contract/`; `docs/checks.md`); each solid in the worst case |
 | `worlds/tests/cost.rs` | What generating each world costs, counted, stays within a quarter of its baseline (`worlds/data/cost/`; "Cost" in `docs/checks.md`) |
 | `worlds/src/path.rs` | Whether a column is by a path agrees with its distance to the path's curve, round a steep, fast-bending spine |
-| `worlds/src/valley/railway.rs` | The valley's railway keeps its grade and its band of the valley, out of towns; it bends gently; few bridges and tunnels, none a stub, one through each spur and over each gorge on its side |
+| `worlds/src/valley/railway.rs` | The valley's railway keeps its grade and its band of the valley, out of towns; it bends gently; few bridges and tunnels, none a stub |
 | `worldgen/src/plan.rs` | Plans: finer ones refused, slopes kept, claims apart; a column read while threads keep others is whole or not found |
 | `worldgen/src/points.rs` | Points: a cell holds its children's, whichever is asked first; they stand where their mark has a chance, as often as it is; a blur is its cells' counts weighed, wherever its blocks fall |
 | `worlds/tests/places.rs` | No world's things prefer places on its grids (`worldgen/src/checks/places.rs`), but those known to (`KNOWN`, docs/todo.md) |

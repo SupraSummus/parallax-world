@@ -583,8 +583,7 @@ so the band is the same in any order and no domain undoes another's work.
 So domains of one band keep apart
 (the landmarks and the moor's pools keep off the railway and each other).
 A domain reads only the bands it was made with.
-The valley's are the relief and the ranges
-(with the landforms at their feet, kept clear of the towns),
+The valley's are the relief and the ranges,
 then the towns' terraces (`valley::Terrain`),
 then the railway, the landmarks and the moor;
 the last, kept by plan, is the ground layers stand on (`Lie::ground`).
@@ -720,14 +719,21 @@ made top-down, by what its track costs:
 at each level, between two neighbours,
 the place across within the level's wander
 and the height within the grade from both
-where the track from one to the other through it
-leaves the ground least, sampled along it,
-a bridge or a tunnel much more than earth cut or filled.
+where the track from one to the other through it costs least,
+sampled along it, as building it would:
+earth cut or filled by its cross-section,
+which grows with the square of its depth as its sides slope out,
+a bridge or a tunnel a few times the deepest earth.
 A piece's ends are placed so too, a level track along z.
-So the line bends along a slope and climbs or falls with the ground
-to keep off bridges and tunnels where its bends and grade let it,
-and fits the ground over each level's length, not at a point,
-so a bump at a coarse level's point does not hold it up for kilometres.
+The ground is what it is, made with no thought of the line;
+the line makes do with it,
+bending along a slope and climbing or falling with the ground
+to keep off deep earth, and off bridges and tunnels most,
+where its bends and grade let it.
+It fits the ground over each level's length,
+so a bump at a coarse level's point does not hold it up for kilometres,
+and at the point itself,
+so a coarse point does not sink it into a hill.
 No stretch is steeper than the grade,
 and each wander is half the one before,
 so each level turns it by as much at its points.
@@ -741,14 +747,9 @@ not as it cuts and fills it,
 and the landmarks and the moor keep off it.
 
 It can't go round everything, though:
-at the ranges' feet, every few kilometres either side,
-a rock spur stands its steep nose out onto the floor,
-or a side stream's gorge, flat-bedded between steep walls,
-cuts down the face and into the floor, fading out on it
-(`Landforms` in `worlds/src/valley/mountains.rs`).
-Each reaches across the whole band, too high to climb over at the grade,
-too sudden to dip into,
-so the line tunnels through a spur and bridges a gorge,
+where the ground rises or falls across its whole band
+faster than the grade lets it follow,
+it tunnels or bridges,
 and its bridges and tunnels stand where the ground shows why.
 
 What carries the track comes from comparing it with the ground under it,

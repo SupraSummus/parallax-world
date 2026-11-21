@@ -38,61 +38,57 @@ heath grassBlades	3	0.084	0.091
 heath grassBlades	4	0.079	0.114
 heath path	3	0.067	0.092
 heath path	4	0.058	0.105
-heath soil	3	0.061	0.085
-heath soil	4	0.065	0.109
-landmarks bark	1	0.059	0.136
-landmarks bark	2	0.033	0.109
-landmarks brick	1	0.059	0.136
-landmarks brick	2	0.033	0.109
+heath soil	3	0.068	0.085
+heath soil	4	0.074	0.113
+landmarks bark	1	0.048	0.130
+landmarks bark	2	0.038	0.118
+landmarks brick	1	0.055	0.127
+landmarks brick	2	0.031	0.107
 landmarks bronze	1	0.060	0.167
 landmarks bronze	2	0.036	0.145
 landmarks bronze	3	0.037	0.106
 landmarks churchStone	1	0.071	0.173
 landmarks churchStone	2	0.039	0.140
 landmarks churchStone	3	0.035	0.104
-landmarks deadwood	1	0.073	0.147
-landmarks deadwood	2	0.049	0.120
-landmarks deadwood	3	0.034	0.109
-landmarks deadwood	4	0.049	0.097
+landmarks deadwood	1	0.087	0.171
+landmarks deadwood	2	0.059	0.129
 landmarks door	1	0.071	0.173
 landmarks door	2	0.039	0.140
 landmarks door	3	0.035	0.104
-landmarks faluRed	1	0.099	0.202
-landmarks faluRed	2	0.064	0.114
+landmarks faluRed	1	0.109	0.202
+landmarks faluRed	2	0.064	0.119
 landmarks glass	1	0.071	0.173
 landmarks glass	2	0.039	0.140
 landmarks glass	3	0.035	0.104
-landmarks hay	1	0.059	0.136
-landmarks hay	2	0.033	0.109
+landmarks hay	1	0.048	0.130
+landmarks hay	2	0.038	0.118
 landmarks iron	1	0.060	0.167
 landmarks iron	2	0.036	0.145
 landmarks iron	3	0.037	0.106
-landmarks lily	3	0.126	0.132
-landmarks lily	4	0.146	0.170
-landmarks mossyStone	1	0.072	0.133
-landmarks mossyStone	2	0.067	0.141
-landmarks mossyStone	3	0.078	0.145
-landmarks mossyStone	4	0.032	0.113
-landmarks planks	1	0.073	0.147
-landmarks planks	2	0.049	0.120
-landmarks planks	3	0.034	0.109
-landmarks planks	4	0.049	0.097
+landmarks lily	3	0.124	0.129
+landmarks lily	4	0.141	0.168
+landmarks mossyStone	1	0.066	0.124
+landmarks mossyStone	2	0.067	0.140
+landmarks mossyStone	3	0.066	0.139
+landmarks mossyStone	4	0.032	0.114
+landmarks planks	1	0.087	0.171
+landmarks planks	2	0.059	0.129
 landmarks plasterOchre	1	0.056	0.129
 landmarks plasterOchre	2	0.032	0.114
 landmarks plasterPink	1	0.063	0.140
 landmarks plasterWhite	1	0.075	0.150
 landmarks plasterWhite	2	0.057	0.142
 landmarks plasterWhite	3	0.034	0.104
-landmarks roofBrown	1	0.106	0.209
-landmarks roofBrown	2	0.070	0.118
-landmarks roofRed	1	0.059	0.136
-landmarks roofRed	2	0.033	0.109
+landmarks roofBrown	1	0.116	0.209
+landmarks roofBrown	2	0.071	0.122
+landmarks roofRed	1	0.048	0.130
+landmarks roofRed	2	0.038	0.118
 landmarks sail	1	0.075	0.150
 landmarks sail	2	0.057	0.142
 landmarks sail	3	0.034	0.104
 landmarks shutterBlue	1	0.047	0.137
 landmarks shutterBlue	2	0.040	0.139
-landmarks shutterGreen	1	0.075	0.140
+landmarks shutterGreen	1	0.070	0.131
 landmarks slate	1	0.060	0.167
 landmarks slate	2	0.036	0.145
 landmarks slate	3	0.037	0.106
@@ -101,21 +97,23 @@ landmarks stone	2	0.036	0.145
 landmarks stone	3	0.037	0.106
 landmarks thatch	1	0.069	0.143
 landmarks thatch	2	0.051	0.138
-landmarks timber	1	0.049	0.128
-landmarks timber	2	0.037	0.111
-landmarks trim	1	0.059	0.136
-landmarks trim	2	0.033	0.109
-landmarks water	1	0.059	0.136
-landmarks water	2	0.033	0.109
+landmarks timber	1	0.055	0.127
+landmarks timber	2	0.031	0.107
+landmarks trim	1	0.048	0.130
+landmarks trim	2	0.038	0.118
+landmarks water	1	0.048	0.130
+landmarks water	2	0.038	0.118
 landmarks' ground grass	1	0.046	0.104
 landmarks' ground grass	2	0.042	0.106
 landmarks' ground grass	3	0.039	0.101
-landmarks' ground path	1	0.061	0.118
-landmarks' ground sand	3	0.041	0.101
-landmarks' ground sand	4	0.057	0.112
-landmarks' ground scree	2	0.040	0.102
-landmarks' ground scree	3	0.047	0.109
-landmarks' ground scree	4	0.044	0.111
+landmarks' ground path	1	0.057	0.115
+landmarks' ground sand	1	0.022	0.104
+landmarks' ground sand	3	0.039	0.102
+landmarks' ground sand	4	0.050	0.109
+landmarks' ground scree	1	0.048	0.096
+landmarks' ground scree	2	0.051	0.110
+landmarks' ground scree	3	0.050	0.111
+landmarks' ground scree	4	0.040	0.110
 landmarks' ground soil	3	0.073	0.099
 landmarks' ground soil	4	0.091	0.115
 logs deadwood	1	0.067	0.147
@@ -126,13 +124,11 @@ logs moss	1	0.067	0.147
 logs moss	2	0.096	0.155
 logs moss	3	0.075	0.125
 logs moss	4	0.048	0.096
-mist mist	3	0.045	0.069
-mist mist	4	0.053	0.094
 moor boulders lichen	2	0.047	0.095
 moor boulders lichen	3	0.046	0.096
-moor boulders stone	1	0.036	0.102
-moor boulders stone	2	0.059	0.111
-moor boulders stone	3	0.049	0.091
+moor boulders stone	1	0.049	0.098
+moor boulders stone	2	0.066	0.110
+moor boulders stone	3	0.046	0.093
 mountains alpine	1	0.019	0.126
 mountains alpine	2	0.007	0.110
 mountains alpine	4	0.054	0.109
@@ -211,53 +207,52 @@ ponds reed	3	0.055	0.094
 ponds reed	4	0.061	0.100
 ponds water	3	0.072	0.100
 ponds water	4	0.091	0.114
-railway ballast	1	0.025	0.150
-railway ballast	2	0.029	0.154
-railway ballast	3	0.036	0.140
-railway ballast	4	0.048	0.140
-railway brick	1	0.039	0.159
-railway brick	2	0.049	0.170
-railway brick	3	0.035	0.155
-railway brick	4	0.038	0.158
-railway in its tunnels ballast	1	0.040	0.134
-railway in its tunnels ballast	2	0.039	0.137
-railway in its tunnels ballast	3	0.049	0.117
-railway in its tunnels ballast	4	0.066	0.112
-railway in its tunnels brick	1	0.029	0.145
-railway in its tunnels brick	2	0.017	0.149
-railway in its tunnels brick	3	0.046	0.128
-railway in its tunnels brick	4	0.088	0.132
-railway in its tunnels iron	1	0.015	0.179
-railway in its tunnels iron	2	0.017	0.177
-railway in its tunnels iron	3	0.038	0.147
-railway in its tunnels iron	4	0.119	0.173
-railway in its tunnels path	1	0.038	0.130
-railway in its tunnels path	2	0.027	0.141
-railway in its tunnels path	3	0.047	0.119
-railway in its tunnels path	4	0.082	0.120
-railway in its tunnels timber	1	0.071	0.119
-railway in its tunnels timber	2	0.061	0.115
-railway in its tunnels timber	3	0.054	0.101
-railway iron	1	0.029	0.124
-railway iron	2	0.029	0.124
-railway iron	3	0.036	0.114
-railway iron	4	0.049	0.116
-railway path	1	0.025	0.160
-railway path	2	0.022	0.152
-railway path	3	0.027	0.145
-railway path	4	0.058	0.125
-railway slab	1	0.062	0.131
-railway slab	2	0.038	0.140
-railway slab	3	0.042	0.141
-railway slab	4	0.050	0.112
-railway timber	1	0.039	0.128
-railway timber	2	0.046	0.132
-railway timber	3	0.042	0.125
-railway timber	4	0.049	0.123
-railway's tunnels carving	1	0.036	0.140
-railway's tunnels carving	2	0.038	0.144
-railway's tunnels carving	3	0.048	0.126
-railway's tunnels carving	4	0.080	0.126
+railway ballast	1	0.020	0.159
+railway ballast	2	0.007	0.152
+railway ballast	3	0.033	0.123
+railway ballast	4	0.062	0.117
+railway brick	1	0.007	0.178
+railway brick	2	0.027	0.188
+railway brick	3	0.033	0.178
+railway brick	4	0.031	0.152
+railway in its tunnels ballast	1	0.035	0.104
+railway in its tunnels ballast	2	0.030	0.106
+railway in its tunnels ballast	3	0.099	0.161
+railway in its tunnels ballast	4	0.113	0.173
+railway in its tunnels brick	1	0.045	0.117
+railway in its tunnels brick	2	0.044	0.130
+railway in its tunnels brick	3	0.109	0.175
+railway in its tunnels brick	4	0.111	0.182
+railway in its tunnels iron	1	0.025	0.104
+railway in its tunnels iron	2	0.024	0.104
+railway in its tunnels iron	3	0.083	0.136
+railway in its tunnels iron	4	0.121	0.178
+railway in its tunnels path	1	0.066	0.137
+railway in its tunnels path	2	0.074	0.173
+railway in its tunnels path	3	0.122	0.215
+railway in its tunnels path	4	0.098	0.173
+railway in its tunnels timber	3	0.092	0.146
+railway in its tunnels timber	4	0.136	0.198
+railway iron	1	0.025	0.154
+railway iron	2	0.016	0.143
+railway iron	3	0.038	0.119
+railway iron	4	0.052	0.115
+railway path	1	0.049	0.145
+railway path	2	0.043	0.155
+railway path	3	0.037	0.152
+railway path	4	0.063	0.132
+railway slab	1	0.040	0.129
+railway slab	2	0.028	0.144
+railway slab	3	0.035	0.132
+railway slab	4	0.052	0.117
+railway timber	1	0.022	0.136
+railway timber	2	0.023	0.130
+railway timber	3	0.037	0.122
+railway timber	4	0.044	0.112
+railway's tunnels carving	1	0.097	0.145
+railway's tunnels carving	2	0.113	0.202
+railway's tunnels carving	3	0.158	0.225
+railway's tunnels carving	4	0.130	0.179
 sea sand	1	0.051	0.132
 sea sand	2	0.052	0.114
 sea sand	3	0.081	0.131
@@ -270,78 +265,78 @@ sea seaTop	1	0.051	0.132
 sea seaTop	2	0.052	0.114
 sea seaTop	3	0.081	0.131
 sea seaTop	4	0.104	0.123
-stations brick	1	0.071	0.191
-stations brick	2	0.042	0.196
-stations brick	3	0.034	0.165
-stations brick	4	0.051	0.118
-stations churchStone	1	0.068	0.196
-stations churchStone	2	0.055	0.197
-stations churchStone	3	0.050	0.172
-stations churchStone	4	0.054	0.123
-stations door	1	0.068	0.196
-stations door	2	0.055	0.197
-stations door	3	0.050	0.172
-stations door	4	0.054	0.123
-stations faluRed	1	0.052	0.178
-stations faluRed	2	0.026	0.182
-stations faluRed	3	0.036	0.155
-stations faluRed	4	0.053	0.114
-stations glass	1	0.068	0.196
-stations glass	2	0.055	0.197
-stations glass	3	0.050	0.172
-stations glass	4	0.054	0.123
-stations iron	1	0.073	0.199
-stations iron	2	0.041	0.173
-stations iron	3	0.042	0.153
-stations iron	4	0.048	0.121
-stations plasterBlue	1	0.054	0.183
-stations plasterBlue	2	0.026	0.191
-stations plasterBlue	3	0.034	0.157
-stations plasterBlue	4	0.044	0.104
-stations plasterGrey	1	0.069	0.178
-stations plasterGrey	2	0.023	0.170
-stations plasterGrey	3	0.028	0.139
-stations plasterGrey	4	0.046	0.107
-stations plasterOchre	1	0.077	0.193
-stations plasterOchre	2	0.036	0.173
-stations plasterOchre	3	0.036	0.152
-stations plasterOchre	4	0.048	0.118
-stations plasterWhite	1	0.064	0.201
-stations plasterWhite	2	0.083	0.253
-stations plasterWhite	3	0.049	0.208
-stations plasterWhite	4	0.049	0.131
-stations roofBrown	1	0.078	0.191
-stations roofBrown	2	0.035	0.195
-stations roofBrown	3	0.033	0.151
-stations roofBrown	4	0.057	0.111
-stations roofRed	1	0.061	0.193
-stations roofRed	2	0.018	0.199
-stations roofRed	3	0.035	0.180
-stations roofRed	4	0.050	0.119
-stations roofTile	1	0.069	0.188
-stations roofTile	2	0.036	0.173
-stations roofTile	3	0.036	0.152
-stations roofTile	4	0.046	0.117
-stations shutterBlue	1	0.081	0.194
-stations shutterBlue	2	0.029	0.179
-stations shutterBlue	3	0.031	0.151
-stations shutterBlue	4	0.047	0.109
-stations shutterGreen	1	0.066	0.193
-stations shutterGreen	2	0.035	0.179
-stations shutterGreen	3	0.030	0.161
-stations shutterGreen	4	0.048	0.123
-stations slate	1	0.066	0.178
-stations slate	2	0.031	0.185
-stations slate	3	0.034	0.158
-stations slate	4	0.046	0.113
-stations timber	1	0.051	0.198
-stations timber	2	0.067	0.245
-stations timber	3	0.052	0.201
-stations timber	4	0.054	0.130
-stations trim	1	0.068	0.196
-stations trim	2	0.055	0.197
-stations trim	3	0.050	0.172
-stations trim	4	0.054	0.123
+stations brick	1	0.085	0.184
+stations brick	2	0.032	0.179
+stations brick	3	0.039	0.174
+stations brick	4	0.050	0.120
+stations churchStone	1	0.067	0.195
+stations churchStone	2	0.049	0.192
+stations churchStone	3	0.049	0.176
+stations churchStone	4	0.048	0.123
+stations door	1	0.067	0.195
+stations door	2	0.049	0.192
+stations door	3	0.049	0.176
+stations door	4	0.048	0.123
+stations faluRed	1	0.069	0.172
+stations faluRed	2	0.030	0.176
+stations faluRed	3	0.038	0.160
+stations faluRed	4	0.049	0.115
+stations glass	1	0.067	0.195
+stations glass	2	0.049	0.192
+stations glass	3	0.049	0.176
+stations glass	4	0.048	0.123
+stations iron	1	0.059	0.176
+stations iron	2	0.035	0.167
+stations iron	3	0.043	0.153
+stations iron	4	0.051	0.120
+stations plasterBlue	1	0.075	0.174
+stations plasterBlue	2	0.031	0.178
+stations plasterBlue	3	0.041	0.177
+stations plasterBlue	4	0.044	0.102
+stations plasterGrey	1	0.069	0.164
+stations plasterGrey	2	0.025	0.157
+stations plasterGrey	3	0.021	0.140
+stations plasterGrey	4	0.047	0.103
+stations plasterOchre	1	0.078	0.184
+stations plasterOchre	2	0.037	0.165
+stations plasterOchre	3	0.040	0.156
+stations plasterOchre	4	0.047	0.118
+stations plasterWhite	1	0.034	0.191
+stations plasterWhite	2	0.060	0.241
+stations plasterWhite	3	0.051	0.216
+stations plasterWhite	4	0.066	0.146
+stations roofBrown	1	0.083	0.184
+stations roofBrown	2	0.042	0.184
+stations roofBrown	3	0.035	0.155
+stations roofBrown	4	0.050	0.114
+stations roofRed	1	0.066	0.196
+stations roofRed	2	0.029	0.202
+stations roofRed	3	0.035	0.185
+stations roofRed	4	0.046	0.117
+stations roofTile	1	0.071	0.180
+stations roofTile	2	0.038	0.164
+stations roofTile	3	0.043	0.154
+stations roofTile	4	0.051	0.121
+stations shutterBlue	1	0.076	0.180
+stations shutterBlue	2	0.031	0.165
+stations shutterBlue	3	0.027	0.153
+stations shutterBlue	4	0.053	0.110
+stations shutterGreen	1	0.056	0.184
+stations shutterGreen	2	0.048	0.180
+stations shutterGreen	3	0.034	0.162
+stations shutterGreen	4	0.049	0.123
+stations slate	1	0.069	0.164
+stations slate	2	0.034	0.175
+stations slate	3	0.034	0.155
+stations slate	4	0.048	0.111
+stations timber	1	0.033	0.199
+stations timber	2	0.051	0.232
+stations timber	3	0.051	0.208
+stations timber	4	0.065	0.142
+stations trim	1	0.067	0.195
+stations trim	2	0.049	0.192
+stations trim	3	0.049	0.176
+stations trim	4	0.048	0.123
 steadings drystone	3	0.075	0.092
 steadings drystone	4	0.063	0.105
 steadings lichen	3	0.075	0.092
@@ -401,14 +396,14 @@ terrain moss	1	0.020	0.147
 terrain moss	2	0.011	0.145
 terrain moss	3	0.042	0.118
 terrain moss	4	0.054	0.121
-terrain mossyStone	1	0.049	0.141
-terrain mossyStone	2	0.039	0.141
-terrain mossyStone	3	0.048	0.126
-terrain mossyStone	4	0.061	0.134
-terrain needles	1	0.007	0.156
-terrain needles	2	0.009	0.159
-terrain needles	3	0.046	0.129
-terrain needles	4	0.088	0.151
+terrain mossyStone	1	0.062	0.111
+terrain mossyStone	2	0.061	0.109
+terrain mossyStone	3	0.058	0.105
+terrain mossyStone	4	0.058	0.115
+terrain needles	1	0.009	0.189
+terrain needles	2	0.024	0.189
+terrain needles	3	0.035	0.141
+terrain needles	4	0.103	0.169
 terrain path	1	0.024	0.120
 terrain path	2	0.018	0.118
 terrain path	3	0.054	0.123

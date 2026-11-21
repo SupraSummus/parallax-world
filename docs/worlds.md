@@ -74,18 +74,16 @@ each level of detail reaches twice as far as the one before, to 11 km.
   Landmarks standing alone: a ruined keep on a hilltop, a watchtower,
   wayside chapels, ponds, farmsteads and windmills.
   The valley winds, its path along the lowest of its floor.
-  Mountain ranges along both sides: crests, peaks and passes,
-  side valleys, rock spurs and gorges at their feet,
+  Mountain ranges along both sides: crests, peaks and passes, side valleys,
   arêtes and cirques behind the crests,
   meadows and scree above the treeline, snow in high hollows.
   Past a few kilometres of them the land leaves the ranges:
   west, a lowland falling to the sea, its coast ragged with bays and islands;
   east, an upland under the treeline, moor and forest.
   A railway up one side of the valley,
-  along the slopes where that spares it structures:
+  laid on the ground as it is, along the slopes where that spares it earthworks:
   ballast, sleepers and rails in cuttings and on embankments,
-  bridges on piers over the gorges at the mountains' feet,
-  lined tunnels through their rock spurs,
+  and, where it can't go round, bridges on piers and lined tunnels,
   and a station by each town it passes on the ground.
 - *Moor*: the valley's moorland alone: rolling heath, a stream and pools,
   mist in its hollows, boulders,

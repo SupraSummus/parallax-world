@@ -942,10 +942,13 @@ Composing generators (section "Composing" of `docs/generators.md`), untried:
   Its grade turns at once where it tops a rise or bottoms out,
   often from the steepest up to the steepest down:
   vertical curves would round those, as smoothing rounds its bends.
-- The mountains' gorges (`Landforms` in `worlds/src/valley/mountains.rs`) are dry,
-  with no stream in their beds,
-  and below the treeline the forest covers their walls and the spurs' noses,
-  where rock would show.
+  What carries the track is decided by thresholds, apart from what it costs,
+  and runs shorter than `MIN_RUN` are cut or filled after,
+  however deep that leaves the earth.
+  From prices alone (earth by its cross-section, a tunnel's portals,
+  a bridge's piers by their height), one pass along the line
+  could choose the cheapest run of each,
+  with only how deep the railway can shape the ground as a limit.
 - Rivers and roads along curves, in pieces and from `near`, as the path is,
   not as tubes:
   a tube makes all its points when made,
