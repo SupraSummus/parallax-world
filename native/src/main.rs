@@ -378,7 +378,8 @@ impl View {
             responses.push(ui.add(egui::Slider::new(value, 0.0..=10.0).logarithmic(true).smallest_positive(0.01).text(name)));
         }
         // More steps a level, the thicker a wall must be to let light through: about its distance over them.
-        responses.push(ui.add(egui::Slider::new(&mut self.steps, 1..=8).text("Steps a Level")));
+        // Few: past three, each direction reads too little of what it stands for, and lighting takes many times longer (docs/light.md).
+        responses.push(ui.add(egui::Slider::new(&mut self.steps, 1..=3).text("Steps a Level")));
         // Less, the more rounds of bounces where light bounces back and forth.
         responses.push(ui.add(egui::Slider::new(&mut self.tolerance, 1e-4..=0.5).logarithmic(true).text("Tolerance")));
         let done = responses.iter().any(|r| r.drag_stopped() || (r.changed() && !r.dragged()));
