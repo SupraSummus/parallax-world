@@ -39,7 +39,12 @@ pub(crate) fn footprint<R>(spacing: i64, offset: [i64; 2], read: impl FnOnce() -
 /** The spacing of the sites a layer reads for now (`footprint`); 1 where asked, as plans and points are made. */
 #[inline]
 pub fn spacing() -> i64 {
-    FOOTPRINT.get().map_or(1, |(spacing, _)| spacing)
+    layer_spacing().unwrap_or(1)
+}
+
+/** The spacing of the sites a layer reads for now; none while plans or things are made (time.rs). */
+pub(crate) fn layer_spacing() -> Option<i64> {
+    FOOTPRINT.get().map(|(spacing, _)| spacing)
 }
 
 /** Runs `read` with plans read where asked, whoever asks: as a plan's columns are made, and points' chances (points.rs). */

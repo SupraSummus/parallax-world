@@ -67,6 +67,7 @@ worldgen/                    # The world-generation engine; no worlds (docs/gene
 │   ├── recent.rs            # What was used last, kept
 │   ├── world.rs             # World: what a host needs to show one
 │   ├── tiles.rs             # A world's tiles, as hosts and light take them
+│   ├── time.rs              # Time, a prototype: worlds that move
 │   ├── picture.rs           # Rays through a world's voxels; pictures as PNGs
 │   ├── light.rs             # Light, a prototype (docs/light.md)
 │   ├── light/reference.rs   # Its reference: rays traced through level 0
@@ -89,6 +90,7 @@ worlds/                      # The worlds, on worldgen's public API only
 │   │   ├── landmarks.rs     # Keeps, chapels, ponds, farmsteads, windmills
 │   │   ├── moor.rs          # The moor; alone, the worlds moor and fog
 │   │   ├── mountains.rs     # The valley's ranges
+│   │   ├── sky.rs           # The valley's clouds, driven by the wind
 │   │   └── railway.rs       # The valley's railway
 │   ├── city.rs              # The city: blocks of buildings on a plan
 │   ├── learned.rs           # Settlements drawn by a grammar learned in lab/

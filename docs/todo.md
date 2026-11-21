@@ -377,6 +377,53 @@ Numbers are for the forest at 1280×800, as measured when written.
   the track runs up to 30° off z past a building along it
   (`Station::frame` in `worlds/src/valley/railway.rs`).
 
+## Time
+
+The prototype of worlds that move (`worldgen/src/time.rs`;
+"Time" in `docs/architecture.md`): the valley's clouds.
+
+- **Tiles are made anew whole, and that is most of what moving costs.**
+  A tile the clouds are in is made anew each tick they cross one of its sites,
+  all of it, a few ms each; the clouds' layer alone is over a third of that.
+  Under the clouds, on four cores, over half the tiles with clouds that the voxels engine reads
+  are behind the world's time (`--stroll --by-work` says).
+  To try: making anew only the bricks that changed,
+  which edits and physics would want too;
+  the valley keeping its clouds' cover by where the wind has carried it (`recent.rs`).
+- **The world, not the engine, decides what to make anew.**
+  It makes anew each tile of another time within an engine's reach,
+  though only the engine knows which show.
+  To try: a tile of another time counted as lacking, and the engines asking for it.
+- **Behind, tiles show different times.**
+  Clouds tear along tiles' faces, and between levels.
+- **Light does not move.**
+  The light's blocks and what Lights keep (`worldgen/src/light.rs`)
+  are made once, at time 0, and a tile made anew lights from them
+  what the old one had lit and changed:
+  a cloud's shadow stays where it fell.
+  Each needs the time it stays for, as tiles have.
+- **Only the voxels engine follows.**
+  The chunks engines bake a cell once its tiles are in, and keep it:
+  there the clouds stand still.
+  A chunk stays no longer than the tiles it reads (`chunk_reads`).
+  The web runs the same frames, with no threads: not looked at.
+  Nor has the voxels engine placing tiles made anew been looked at in a window,
+  only by its tests.
+- **Tiles made together stay together.**
+  Tiles one above another, made as one box, stay no longer than the clouds among them;
+  made anew alone, the others then stay always: each is made twice.
+- **Only drifting, and only by layers.**
+  `time::drift` is all that reads the time, and plans and things may not,
+  kept as they are from box to box:
+  a tree's crown in the wind is a thing.
+- **Time on its own lattice.**
+  Time is a parameter of the world, not a dimension of its lattice.
+  D4 (sites of space and time adding up to even, as FCC's do in space) would make it one:
+  only for what moves, as what stays would be made anew each step.
+- **The window never rests under clouds**:
+  it draws a frame every 60th of a second while any tile holds what moves.
+- **README's pictures of the valley are from before its clouds.**
+
 ## Light
 
 - **Light is a prototype, in look's pictures and native's computed lighting**

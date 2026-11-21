@@ -77,6 +77,15 @@ pub fn make_tiles(world: &World, level: u32, key: [i64; 3]) -> Vec<([i64; 3], Gr
     parted(&make_sites(world, level, key), world, level, key)
 }
 
+/**
+ * Tile `key` of `level` of `world` alone, as hosts draw it: what may show
+ * of its box (generate_shown). A host makes a tile so anew when what
+ * moves in it moved (time.rs), the others made with it staying as made.
+ */
+pub fn make_tile(world: &World, level: u32, key: [i64; 3]) -> Grid {
+    generate_shown(&world.generator, &tile_box(world.heights_at(level), key), level).to_grid(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
