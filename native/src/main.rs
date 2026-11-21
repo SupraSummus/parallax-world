@@ -766,7 +766,7 @@ fn report(samples: &[Sample]) {
     }
 }
 
-/** --headless: as a window draws, offscreen, the GPU a frame behind, till the steering ends. */
+/** --headless: as a window draws, offscreen, the GPU a frame behind, a stroll's frames a 60th of a second apart at least, till the steering ends. */
 fn headless(mut app: App) {
     let mut easel = Easel::offscreen(None);
     let mut last = None;
@@ -787,6 +787,12 @@ fn headless(mut app: App) {
             rest: 0.0,
             since: ms(start, end),
         });
+        // A stroll steers a frame's time each: no sooner than a window would draw the next. (A replay's come at their own.)
+        if matches!(app.pilot, Some(Pilot::Stroll { .. }))
+            && let Some(early) = std::time::Duration::from_secs_f64(FRAME).checked_sub(start.elapsed())
+        {
+            std::thread::sleep(early);
+        }
     }
     app.end(&mut easel);
 }
