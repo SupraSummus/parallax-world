@@ -382,31 +382,34 @@ Numbers are for the forest at 1280×800, as measured when written.
 The prototype of worlds that move (`worldgen/src/time.rs`;
 "Time" in `docs/architecture.md`): the valley's clouds.
 
-- **Tiles are made anew whole.**
-  A tile the clouds are in is made anew each time they cross one of its sites,
-  all its sites, though they moved by one.
-  From the valley's floor the threads about keep up:
-  the levels that show the clouds are coarse, and change seldom.
-  From just under the clouds, on four cores,
-  a third of their tiles were behind the world's time (`--stroll --by-work` says).
-  To try: a tile that only drifted, its sites moved to the next
-  (a step is the lattice's own) and only what came in by its faces made;
-  what stays as made by brick, not by tile;
-  what moves in grids of its own, apart from what stays.
-- **Behind, tiles show different times.**
-  Clouds tear along tiles' faces, and between levels.
-  To try: all of a time made, then shown together.
+- **Tiles are made anew whole, and that is most of what moving costs.**
+  A tile the clouds are in is made anew each time they cross one of its sites
+  (a few times a second, `time::STEPS`), all of it, a few ms a tile,
+  and making the clouds' layer alone costs over a third of that.
+  Under the clouds, on four cores, the voxels engine reads a thousand tiles with clouds,
+  and over half are behind the world's time (`--stroll --by-work` says).
+  To try: what drifts in a frame of its own, made once there,
+  a tile at another time its sites moved to the next (a step is the lattice's own),
+  what stays drawn under it; a tile then costs as much as copying it.
+- **Behind, levels show different times.**
+  A level's tiles take their places together, so clouds no longer tear along tiles' faces,
+  but each level steps when its own are made, and they tear between levels;
+  far behind (`FRESH` in `native/src/world.rs`), a level shows some of a time with the rest of another.
+  The voxels engine then places them STEP tiles a step, its windows in turn:
+  for a moment a level's tiles show two times.
 - **Light does not move.**
   The light's blocks and what Lights keep (`worldgen/src/light.rs`)
-  are made once, at time 0, and a tile's light is found once:
+  are made once, at time 0, and a tile made anew takes its light from the old one
+  where its sites did not change, and finds the rest from them:
   a cloud's shadow stays where it fell.
   Each needs the time it stays for, as tiles have.
-- **Only native's voxels engine follows.**
-  The chunks engines bake a cell once its tiles are in, and keep it;
-  the web has no time at all: there the clouds stand still.
+- **Only the voxels engine follows.**
+  The chunks engines bake a cell once its tiles are in, and keep it:
+  there the clouds stand still.
   A chunk stays no longer than the tiles it reads (`chunk_reads`).
-  The voxels engine places a tile made anew in the step the old one goes,
-  so that rays read no coarser level between: not looked at in a window yet.
+  The web runs the same frames, with no threads: not looked at.
+  Nor has the voxels engine placing tiles made anew been looked at in a window,
+  only by its tests.
 - **Tiles made together stay together.**
   Tiles one above another, made as one box, stay no longer than the clouds among them;
   made anew alone, the others then stay always: each is made twice.
@@ -414,6 +417,14 @@ The prototype of worlds that move (`worldgen/src/time.rs`;
   `time::drift` is all that reads the time, and plans and things may not,
   kept as they are from box to box:
   a tree's crown in the wind is a thing.
+- **Time on its own lattice.**
+  As FCC is the densest packing of balls in three dimensions (D3),
+  D4 is in four: sites of space and time whose coordinates add up to an even number.
+  Its cell, the 24-cell, cut at a time is a rhombic dodecahedron,
+  a cube half a step on, and the next voxel of the other parity a step on:
+  so what moves would step a cube's side, to the other parity, not a neighbour's way,
+  and a level's steps in time be as fine as its sites in space.
+  What stays would be made anew each step, of the other parity: only what moves could take it.
 - **The window never rests under clouds**:
   it draws a frame every 60th of a second while any tile holds what moves.
 - **README's pictures of the valley are from before its clouds.**

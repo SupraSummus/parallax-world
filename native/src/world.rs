@@ -108,6 +108,27 @@ impl Tile {
         self.lights[first].get().map(|l| &l[..])
     }
 
+    /**
+     * Tile `self`, of `level`, made anew in place of `old` (World::now),
+     * with the light `old` found: a brick whose sites are as they were
+     * takes it, one changed is lit by `light`. What showed of `old` so
+     * shows of it at once, rays not waiting for its light.
+     */
+    fn lit_as(self, old: &Tile, level: u32, light: &mut Light) -> Tile {
+        for (_, b, first) in voxels::bricks(&self.grid) {
+            let corner = b.map(|v| v * fcc::BRICK);
+            let Ok(had) = usize::try_from(old.grid.brick(corner[0], corner[1], corner[2])) else { continue };
+            let Some(found) = old.light(had) else { continue };
+            let sites = |first: usize| first * fcc::BRICK_SITES..(first + 1) * fcc::BRICK_SITES;
+            if self.grid.cells[sites(first)] == old.grid.cells[sites(had)] {
+                _ = self.lights[first].set(found.into());
+            } else {
+                self.lit(level, corner, light);
+            }
+        }
+        self
+    }
+
     /** Finds the light of its brick whose sites start at `corner`, of `level`, by `light`, if it has voxels and not found yet. */
     pub fn lit(&self, level: u32, corner: [i32; 3], light: &mut Light) {
         let Ok(first) = usize::try_from(self.grid.brick(corner[0], corner[1], corner[2])) else { return };
@@ -281,9 +302,21 @@ pub struct World {
     done: Receiver<Made>,
     /** Received by wait(), not taken yet. */
     early: Vec<Made>,
+    /**
+     * Per level, tiles made anew for the world's time (`now`), waiting to
+     * take their places together (`update`), and since when.
+     */
+    fresh: Vec<(HashMap<TileId, Arc<Tile>>, i64)>,
     /** With no threads, what works in their place. */
     own: Option<Worker>,
 }
+
+/**
+ * World time, ms, a level's tiles made anew wait at most for the rest
+ * (World's `fresh`): threads behind, it shows some of a time with others
+ * of another, rather than none of it.
+ */
+const FRESH: i64 = 500;
 
 /** How far tile `id` of `level` is from the camera (lattice units), in the level's sites. */
 fn distance(level: usize, camera: Vec3, id: TileId) -> f64 {
@@ -358,25 +391,39 @@ impl Worker {
         Some((job, q.shared.clone(), q.lighting, q.lit, q.now))
     }
 
+    /** Its Light, by `shared`, as it changed `lighting` times. */
+    fn light(&mut self, shared: Option<Shared>, lighting: u32) -> &mut Light {
+        self.light.take_if(|(l, _)| *l != lighting);
+        let world = &self.world;
+        &mut self.light.get_or_insert_with(|| (lighting, Light::new(world.clone(), shared.expect("light to light tiles with")))).1
+    }
+
     fn make(&mut self, ((level, piece, of), shared, lighting, lit, now): Taken) -> Vec<Made> {
         match piece {
             Piece::Brick(corner) => {
-                self.light.take_if(|(l, _)| *l != lighting);
-                let world = &self.world;
-                let (_, light) =
-                    self.light.get_or_insert_with(|| (lighting, Light::new(world.clone(), shared.expect("light to light tiles with"))));
                 // A tile lit anew since (relight) is let go, and this light with it.
-                of.expect("the tile of a brick").lit(level as u32, corner, light);
+                of.expect("the tile of a brick").lit(level as u32, corner, self.light(shared, lighting));
                 vec![(level, piece, None)]
+            }
+            Piece::Tile(id) if let Some(old) = of => {
+                let key = id.map(i64::from);
+                let (grid, stays) = time::at(now, || make_tile(&self.world, level as u32, key));
+                let tile = Tile { stays, ..Tile::new(id, Arc::new(grid)) };
+                // Its light found as the old one's was, here: a tile lit anew since has none.
+                let tile = if old.lights.iter().any(|l| l.get().is_some()) {
+                    tile.lit_as(&old, level as u32, self.light(shared, lighting))
+                } else {
+                    tile
+                };
+                vec![(level, piece, Some(Arc::new(tile)))]
             }
             Piece::Tile(id) => {
                 let (world, key) = (&self.world, id.map(i64::from));
                 // Read by light, its sites are the light's: made once. Made together, they stay as made together:
                 // no longer than any of them.
-                let (grids, stays) = time::at(now, || match (of, shared.filter(|_| lit)) {
-                    (Some(_), _) => vec![(key, make_tile(world, level as u32, key))],
-                    (None, Some(shared)) => shared.make_tiles(world, level as u32, key),
-                    (None, None) => make_tiles(world, level as u32, key),
+                let (grids, stays) = time::at(now, || match shared.filter(|_| lit) {
+                    Some(shared) => shared.make_tiles(world, level as u32, key),
+                    None => make_tiles(world, level as u32, key),
                 });
                 let tile = |(key, grid): ([i64; 3], Grid)| {
                     let id = key.map(|v| v as i32);
@@ -439,6 +486,7 @@ impl World {
             queue,
             done,
             early: Vec::new(),
+            fresh: (0..GRID_LEVELS).map(|_| (HashMap::new(), 0)).collect(),
         }
     }
 
@@ -558,8 +606,8 @@ impl World {
      * tiles it names made, and, lit here, the bricks lit, what shows
      * (rays ask for them), small, and in a world that is not flat, little
      * of the tiles made. No other tile is made but with one it names
-     * (made_with); but those made for another time are made anew. Returns
-     * whether any level's tiles changed.
+     * (made_with); but those made for another time are made anew, if
+     * within its reach, else dropped. Returns whether any level's tiles changed.
      */
     pub fn update(&mut self, camera: Vec3, wants: &Wants) -> bool {
         let Wants { reach, lit, asked } = wants;
@@ -578,20 +626,45 @@ impl World {
         let far = |level: usize, id: TileId| distance(level, camera, id) > keep(level) + DROPPED;
         let now = self.now;
         for (level, piece, tile) in made {
-            // Made with one asked for, a tile may be far, or here already: that one is kept, with its light, unless
-            // made for another time than this one.
+            // Made with one asked for, a tile may be far, or here already: that one is kept, with its light. One made
+            // for another time than this one waits for the rest of its level.
             if let (Piece::Tile(id), Some(tile)) = (piece, tile)
                 && !far(level, id)
-                && self.tiles[level].get(&id).is_none_or(|had| !had.stays.contains(&now))
             {
-                self.tiles[level].insert(id, tile);
-                changed[level] = true;
+                match self.tiles[level].get(&id) {
+                    None => {
+                        self.tiles[level].insert(id, tile);
+                        changed[level] = true;
+                    }
+                    Some(had) if !had.stays.contains(&now) => {
+                        let (fresh, since) = &mut self.fresh[level];
+                        if fresh.is_empty() {
+                            *since = now;
+                        }
+                        fresh.insert(id, tile);
+                    }
+                    Some(_) => {}
+                }
             }
         }
+        // Made for another time, a tile no engine reads is dropped: made with one asked for, it would be made anew
+        // each step, unread.
+        let stale = |level: usize, id: TileId, tile: &Tile| {
+            !tile.stays.contains(&now) && reach[level].is_none_or(|reach| distance(level, camera, id) > reach)
+        };
         for (level, tiles) in self.tiles.iter_mut().enumerate() {
             let before = tiles.len();
-            tiles.retain(|&id, _| !far(level, id));
+            tiles.retain(|&id, tile| !far(level, id) && !stale(level, id, tile));
             changed[level] |= tiles.len() < before;
+            // A level's tiles made anew take their places together, once none is still to be: so the engines read
+            // one time of them, and the level is handed over once a step, not once a tile.
+            let (fresh, since) = &mut self.fresh[level];
+            fresh.retain(|id, _| tiles.contains_key(id));
+            let all = tiles.iter().all(|(id, tile)| tile.stays.contains(&now) || fresh.contains_key(id));
+            if !fresh.is_empty() && (all || (now - *since).abs() > FRESH) {
+                tiles.extend(fresh.drain());
+                changed[level] = true;
+            }
         }
         if let Some(shared) = &self.shared {
             shared.forget(|level, key| far(level, key.map(|k| k as i32)));
@@ -617,7 +690,8 @@ impl World {
         // that moves is as far behind, whatever its level, should the threads not keep up.
         let behind = |t: &Tile| (now - t.stays.end).max(t.stays.start - now);
         let tiles = self.tiles.iter().enumerate().flat_map(|(level, tiles)| tiles.iter().map(move |(&id, tile)| (level, id, tile)));
-        let mut anew: Vec<_> = tiles.filter(|(_, _, tile)| !tile.stays.contains(&now)).collect();
+        let fresh = &self.fresh;
+        let mut anew: Vec<_> = tiles.filter(|(level, id, tile)| !tile.stays.contains(&now) && !fresh[*level].0.contains_key(id)).collect();
         anew.sort_by_key(|(_, _, tile)| std::cmp::Reverse(behind(tile)));
         list.extend(anew.into_iter().map(|(level, id, tile)| (level, Piece::Tile(id), Some(tile.clone()))));
         {
@@ -790,6 +864,46 @@ mod tests {
             }
             before = after;
         }
+    }
+
+    /** Lit by bricks, a tile made anew has the light of each brick the old one had lit: rays do not wait for it. */
+    #[test]
+    fn a_tile_made_anew_is_lit_where_the_old_one_was() {
+        use worldgen::light::Brightness;
+        let (level, eye) = (5, [0.0, 5600.0, 0.0]);
+        let reach = std::array::from_fn(|l| (l == level).then_some(TILE as f64));
+        let tiles: Vec<_> = around(level, eye, TILE as f64).into_iter().map(|(_, id)| (level, Piece::Tile(id))).collect();
+        let day = Shared::new(Brightness { sky: 1.0, sun: 1.0, glow: 0.0 });
+        let mut world = World::new(worlds::valley::valley(1).alone("clouds"), Some(day), 4);
+        let settle = |world: &mut World, now: i64, asked: Vec<(usize, Piece)>| {
+            world.now = now;
+            let wants = Wants { reach, lit: Lit::Bricks, asked: Arc::new(asked) };
+            while world.update(eye, &wants) || world.making() > 0 {
+                if world.making() > 0 {
+                    world.wait();
+                }
+            }
+            world.level(level).tiles.clone()
+        };
+        settle(&mut world, 0, tiles.clone());
+        // Some bricks of the clouds lit, as rays ask.
+        let corners = |t: &Tile| voxels::bricks(&t.grid).map(|(_, b, _)| b.map(|v| v * fcc::BRICK)).collect::<Vec<_>>();
+        let bricks: Vec<_> =
+            world.level(level).tiles.values().filter(|t| t.stays != time::ALWAYS).flat_map(|t| corners(t)).step_by(64).take(3).collect();
+        let before = settle(&mut world, 0, tiles.iter().copied().chain(bricks.into_iter().map(|c| (level, Piece::Brick(c)))).collect());
+        let after = settle(&mut world, 60_000, tiles);
+        let lit = |t: &Tile, [x, y, z]: [i32; 3]| usize::try_from(t.grid.brick(x, y, z)).is_ok_and(|f| t.light(f).is_some());
+        let mut anew = 0;
+        // Those within reach: the others, made with them, are dropped.
+        for (id, old, new) in
+            before.iter().filter_map(|(id, old)| after.get(id).filter(|new| !Arc::ptr_eq(old, new)).map(|new| (id, old, new)))
+        {
+            anew += 1;
+            for corner in corners(new).into_iter().filter(|&c| lit(old, c)) {
+                assert!(lit(new, corner), "tile {id:?}, brick at {corner:?}");
+            }
+        }
+        assert!(anew > 0, "the clouds moved");
     }
 
     #[test]
