@@ -963,7 +963,7 @@ mod tests {
             let (min_y, max_y) = world.heights_at(level);
             let [x0, z0, x1, z1] = [cx - m(8.0), cz - m(8.0), cx + m(8.0), cz + m(8.0)].map(|v| v >> level);
             let area = Box3 { min: [2 * (x0 / 2), min_y, z0], max: [x1, max_y, z1] };
-            let tiles = fcc::Tiles::one(generate(&world.generator, &area, level).to_grid(true));
+            let tiles = fcc::Tiles::one(generate(&world.generator, &area, level).to_grid());
             let ground = Ground { tiles: &tiles };
             // Outside its doorway, facing in.
             let [x, _, z] = s.frame().site([s.length / 2, 0, -m(2.0)]);

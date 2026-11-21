@@ -45,7 +45,7 @@ every site within reach would leak light through walls one site thick.
 
 Where light is to go, a step at a time, each measured on these scenes:
 sites hold what they stop along each direction, a share, boxes' too
-(light reads a site's share already, not the coin hosts are shown by);
+(light reads a site's share already, as hosts show it);
 then coarser levels take more directions ("Ideas" in [todo.md](todo.md)).
 
 Taking over later or less did not do, each tried against the reference:

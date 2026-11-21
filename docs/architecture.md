@@ -384,8 +384,8 @@ and a face picked anew writes thousands of places.
 Otherwise a frame writes its globals alone.
 
 **See-through.** A site's medium is drawn see-through
-(`KindDef::medium`, as mist) where its pieces don't show;
-those come whole.
+(`KindDef::medium`, as mist) where it holds no pieces;
+pieces held in part come whole or not, by a coin of their site (fcc's `Reader`).
 Like a relief drawn flat, a cell's medium is pictures:
 one per slab of its columns, as deep as its cells' spacing
 (`bake::Medium`, `cell_medium`),
@@ -549,6 +549,9 @@ the mean of its looks through the faces turned most against it
 (fcc's `facing`, the one rule every host and check reads by),
 times the light on it (below):
 a coarse voxel of a house may show its wall from the side and its roof from above.
+Pieces held in part stop a ray by a coin of the site of a lattice four times finer
+it enters them by (`stops`): as often as light sees them stop rays,
+speckled finer than their voxel, and still as the eye moves.
 So a brick whose voxels look unlike through some faces takes more slots of the pool,
 each naming the next:
 one for which sight each face of a site sees, then one a sight,
@@ -641,6 +644,8 @@ and the 12 faces of section 4 map sites to sites.
 detail (section 1) plus a spawn point: a word per site of a tile's box,
 what its voxel looks like (`Look` in `fcc/`):
 its colour, sRGB, and how much of the rays through it it stops; 0 for empty.
+Under all of them, it is of pieces held in part, which stop a ray whole or not at all,
+or of a medium, which stops some of each (`in_part`, `medium`).
 Grids hold colours, not materials:
 a coarse voxel holds the mean of what is in it.
 A voxel may look different through each of its 12 faces (`VOXEL_FACES`),

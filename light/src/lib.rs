@@ -36,15 +36,12 @@
 //! world's tiles (worldgen's tiles.rs), as hosts draw them: lit, a tile's sites are
 //! made once, for what draws it and what lights it (Shared::make_tiles).
 //!
-//! Light sees each site as it is (VoxelGrid::light): what its pieces and
-//! its medium stop of its rays, a share, where hosts are shown its pieces
-//! as a whole voxel or nothing (VoxelGrid::show). So the coarse sites
-//! around a small lamp glow as bright as the lamp, on average over their
-//! faces, and those small things fill in part stop as much as the things
-//! do. What fills a site in part, a line through its middle meets more
-//! often than its share says (picture's CROSSING, `meets`).
-//! A voxel hosts show behind pieces they show nothing of is lit as if
-//! those pieces were not there (`shown`): the ray that shows it met none.
+//! Light sees each site as it is (VoxelGrid::light), as hosts take it: what
+//! its pieces and its medium stop of its rays, a share. So the coarse
+//! sites around a small lamp glow as bright as the lamp, on average over
+//! their faces, and those small things fill in part stop as much as the
+//! things do. What fills a site in part, a line through its middle meets
+//! more often than its share says (picture's CROSSING, `meets`).
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -468,7 +465,7 @@ impl Light {
         self.open(i, site) <= 0.0
     }
 
-    /** Whether hosts are shown a voxel at `site` of level `i` (VoxelGrid::show). */
+    /** Whether hosts are shown a whole voxel at `site` of level `i` (VoxelGrid::show). */
     fn drawn(&mut self, i: usize, site: [i64; 3]) -> bool {
         self.hold(i, site).is_some_and(|([x, y, z], grid)| grid.get(x, y, z) != 0)
     }
@@ -777,28 +774,9 @@ impl Light {
         FACES.iter().any(|f| !self.whole(i, add(site, *f)))
     }
 
-    /**
-     * The light coming to the voxel hosts show at `site` of level `i`: its
-     * site's (`light`), but through a neighbour whose pieces they show
-     * nothing of, what comes to that neighbour. A ray that shows the voxel
-     * through them met none of them.
-     */
-    fn shown(&mut self, i: usize, site: [i64; 3]) -> [Rgb; N] {
-        let mut light = self.light(i, site);
-        for d in 0..N {
-            let q = add(site, DIRECTIONS[d]);
-            let from = self.opposite[d];
-            let pieces = self.hold(i, q).is_some_and(|([x, y, z], grid)| grid.light(x, y, z, from).0.0 > 0);
-            if pieces && !self.drawn(i, q) {
-                light[d] = self.light(i, q)[d];
-            }
-        }
-        light
-    }
-
     /** The light from each face of the voxel at `site` of level `i`, on its surface. */
     fn lit(&mut self, i: usize, site: [i64; 3]) -> FaceLight {
-        let (light, paths) = (self.shown(i, site), self.paths(i, site));
+        let (light, paths) = (self.light(i, site), self.paths(i, site));
         std::array::from_fn(|f| {
             let on = self.on_face(&light, &paths.touches, f);
             let ((_, colour), glow) = self.see(i, site, f);
@@ -815,7 +793,7 @@ impl Light {
                 (0..3).for_each(|c| normal[c] += face[c] as f64);
             }
         }
-        let (light, paths) = (self.shown(i, site), self.paths(i, site));
+        let (light, paths) = (self.light(i, site), self.paths(i, site));
         let touches = &paths.touches;
         if normal == [0.0; 3] {
             // No surface, or all of it: the mean of all its faces'.

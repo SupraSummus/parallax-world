@@ -147,8 +147,11 @@ pub const ALPHA: u8 = 255;
 /**
  * What a voxel looks like, in a word: its colour, sRGB, a byte a channel
  * from red in the lowest, and in the highest its alpha, how much of the
- * rays through its site it stops; a see-through one's, of the channel it
- * stops least (Grid's `stops`). 0 is none: what is there stops some.
+ * rays through its site it stops. 0 is none: what is there stops some.
+ * Under ALPHA, it is of pieces held in part (`in_part`) if red is odd,
+ * which stop each ray whole or not at all, as often as the alpha says;
+ * else of a medium, which stops some of every ray: of the channel it
+ * stops least (Grid's `stops`).
  */
 pub type Look = u32;
 
@@ -161,6 +164,38 @@ pub const fn look([r, g, b]: [u8; 3], alpha: u8) -> Look {
 #[inline]
 pub const fn alpha_of(look: Look) -> u8 {
     (look >> 24) as u8
+}
+
+/** A look of colour `rgb` (sRGB) stopping `alpha` of the rays, under ALPHA: of pieces held in part, or of a medium (Look). */
+pub const fn partial([r, g, b]: [u8; 3], alpha: u8, pieces: bool) -> Look {
+    let alpha = if alpha == ALPHA { ALPHA - 1 } else { alpha };
+    look([if pieces { r | 1 } else { r & !1 }, g, b], alpha)
+}
+
+/** Whether a look is of pieces held in part (Look): under ALPHA, its red odd. */
+#[inline]
+pub const fn in_part(look: Look) -> bool {
+    look & 1 == 1 && alpha_of(look) != 0 && alpha_of(look) != ALPHA
+}
+
+/** Whether a look is of a medium (Look): under ALPHA, its red even. */
+#[inline]
+pub const fn medium(look: Look) -> bool {
+    look & 1 == 0 && alpha_of(look) != 0 && alpha_of(look) != ALPHA
+}
+
+/**
+ * What a host that draws only whole voxels shows of `look` at site
+ * (x, y, z): pieces held in part whole where their alpha is over a coin
+ * of the site, so as often as they stop rays, else nothing.
+ */
+pub fn whole_or_none(look: Look, x: i32, y: i32, z: i32) -> Look {
+    if !in_part(look) {
+        return look;
+    }
+    let h = (x as u32).wrapping_mul(0x9e37_79b1) ^ (y as u32).wrapping_mul(0x85eb_ca77) ^ (z as u32).wrapping_mul(0xc2b2_ae3d);
+    let h = (h ^ h >> 15).wrapping_mul(0x2c1b_3c6d);
+    if alpha_of(look) > ((h ^ h >> 12) >> 24) as u8 { look | 0xff00_0000 } else { 0 }
 }
 
 /** Words per site in a grid's `views`: its index in `cells`, then its look along each face kind (VOXEL_FACES). */
@@ -548,6 +583,7 @@ impl<'a> Reader<'a> {
      * The looks at (a + 2i, b, c) for i in [0, count), through the faces
      * towards the camera, 0 where empty or outside, to `visit` with each i, for a site (a, b, c): stepping a by
      * 2 steps (x, y, z) by R, and the grid only changes at a tile's edge.
+     * Pieces held in part are whole or none (`whole_or_none`).
      */
     #[inline]
     pub fn row(&self, a: i32, b: i32, c: i32, count: i32, mut visit: impl FnMut(i32, Look)) {
@@ -562,7 +598,7 @@ impl<'a> Reader<'a> {
                 tile = here;
                 grid = self.tiles.grid(tile);
             }
-            visit(i, grid.map_or(0, |grid| grid.face(x, y, z, self.front)));
+            visit(i, whole_or_none(grid.map_or(0, |grid| grid.face(x, y, z, self.front)), x, y, z));
             x += r[0];
             y += r[1];
             z += r[2];
@@ -573,6 +609,17 @@ impl<'a> Reader<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pieces_held_in_part_show_whole_as_often_as_they_stop_rays() {
+        for alpha in [1, 64, 191, 254] {
+            let look = partial([200, 100, 50], alpha, true);
+            let shown = (0..64 * 64 * 64).filter(|&i| whole_or_none(look, i % 64, i / 64 % 64, i / 4096) != 0).count();
+            let share = shown as f64 / (64 * 64 * 64) as f64;
+            assert!((share - f64::from(alpha) / 256.0).abs() < 0.005, "alpha {alpha}: shown {share}");
+        }
+        assert_eq!(whole_or_none(partial([200, 100, 50], 64, false), 0, 0, 0), partial([200, 100, 50], 64, false), "a medium as it is");
+    }
 
     #[test]
     fn blocks_hold_what_a_map_would_and_a_copy_changes_alone() {

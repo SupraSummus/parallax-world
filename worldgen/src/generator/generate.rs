@@ -140,9 +140,7 @@ fn made(generator: &Generator, b: &Box3, level: u32, floors: Option<&Floors>) ->
         }
         cost::add(group[0].layer, work);
     }
-    // One coin per site: its pieces shown as often as they stop rays.
-    let coins = hash_text("shown", generator.seed);
-    grid.show(|x, y, z| ((hash(coins, x * s, y * s, z * s) as u64 * ALPHA as u64) >> 32) as u8);
+    grid.show();
     grid
 }
 

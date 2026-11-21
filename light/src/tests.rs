@@ -104,27 +104,6 @@ fn a_medium_stops_more_of_the_channels_its_colour_is_darker_in() {
 }
 
 #[test]
-fn ground_seen_through_pieces_not_shown_is_lit_as_in_the_open() {
-    // Blocks a quarter of a site of level 3 across, on the ground: pieces of their sites, some not shown.
-    let blocks: Vec<[f64; 3]> = (0..64).map(|k| [16.0 * k as f64, 4.0, 0.0]).collect();
-    let world = world_with(&["#808080"], &[], &blocks, |_, y, _, _| y < 0);
-    let mut light = Light::new(world, Shared::new(Brightness { sky: 1.0, sun: 1.0, glow: 0.0 }));
-    let open = light.on_voxel(3, ground(-9, 0))[0];
-    let mut under = 0;
-    for site in (0..128).map(|k| ground(2 * k + 1, 0)) {
-        let above = FACES.map(|f| add(site, f)).into_iter().filter(|q| q[1] == 0);
-        // Not beside a block shown: that one does shade it.
-        if above.clone().any(|q| light.open(3, q) < 1.0) && !above.clone().any(|q| light.drawn(3, q)) {
-            under += 1;
-            let lit = light.on_voxel(3, site)[0];
-            // Less by what the blocks around stop.
-            assert!((lit / open - 1.0).abs() < 0.08, "at {site:?} {lit}, in the open {open}");
-        }
-    }
-    assert!(under > 0, "no ground under pieces not shown");
-}
-
-#[test]
 fn a_lamp_glows_as_much_at_every_level_it_is_smaller_than_a_site() {
     // Its glow is its share of its site, which is its area over the site's: times the site's area, the same.
     let world = world(&[[5.0, 31.0, 6.0]], |_, _, _, _| false);

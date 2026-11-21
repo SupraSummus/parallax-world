@@ -26,8 +26,8 @@ impl Span {
      * A medium of `kind` from `from`, `height` tall, stopping `extinction`
      * per unit of a ray's path (see Holds), standing free: at least two
      * sites tall, and then as much thinner as it is taller, as dense along
-     * a ray through it. In the site of the ground under it alone, the
-     * ground's pieces, shown, would hide it (VoxelGrid's `look`).
+     * a ray through it. In the site of the ground under it alone, it would
+     * show only in the colour of the ground's pieces (VoxelGrid's `partial`).
      */
     pub fn medium(from: i64, height: i64, kind: impl Into<Kind>, extinction: f64) -> Span {
         let tall = height.max(2 * spacing());
