@@ -262,7 +262,7 @@ impl Landforms {
         if self.towns.near(at).is_some_and(|t| (t.z - at).abs() < town::LONG + m(260.0)) {
             return None;
         }
-        let between = |lo: f64, hi: f64, random: &mut Rng| Fx::m(lo) + Units::m(hi - lo).to_fx() * Fx::fraction(random.next_u32());
+        let between = |lo: f64, hi: f64, random: &mut Rng| Fx::m(lo) + Units::m(hi - lo).to_fx() * random.fraction();
         match random.below(5) {
             0 | 1 => Some(Form::Spur { z: at, high: between(30.0, 55.0, &mut random), half: between(60.0, 90.0, &mut random) }),
             2 | 3 => Some(Form::Gorge { z: at, deep: between(20.0, 32.0, &mut random), half: between(30.0, 45.0, &mut random) }),

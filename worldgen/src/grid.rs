@@ -4,8 +4,9 @@
 
 use std::sync::OnceLock;
 
-use fcc::light::linear_to_srgb;
 use fcc::{FACE_KINDS, Look};
+
+use crate::js;
 
 // The baker's grids, as worlds hand them over, the voxel's faces, and a whole site's alpha: it stops every ray.
 pub use fcc::{ALPHA, Grid, VOXEL_FACES};
@@ -790,8 +791,14 @@ pub fn least(stops: [u8; 3]) -> u8 {
 
 /** A channel `c` (linear, premultiplied by `alpha`, of COLOUR_ONE) unpremultiplied, sRGB. */
 fn srgb(c: u16, alpha: u8) -> u8 {
-    let of = alpha.max(1) as f32 / ALPHA as f32 * COLOUR_ONE as f32;
-    (255.0 * linear_to_srgb((c as f32 / of).min(1.0))).round() as u8
+    let of = alpha.max(1) as f64 / ALPHA as f64 * COLOUR_ONE as f64;
+    let c = (c as f64 / of).min(1.0);
+    (255.0 * if c <= 0.003_130_8 { c * 12.92 } else { 1.055 * js::pow(c, 1.0 / 2.4) - 0.055 }).round() as u8
+}
+
+/** A channel of sRGB (of 1) as linear light: fcc::light's, by libm's power (js.rs), as generating is the same on every target. */
+pub(crate) fn to_linear(c: f64) -> f64 {
+    if c <= 0.04045 { c / 12.92 } else { js::pow((c + 0.055) / 1.055, 2.4) }
 }
 
 /**

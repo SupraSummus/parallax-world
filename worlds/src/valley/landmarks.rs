@@ -737,8 +737,7 @@ fn ruin(s: &Site, random: &mut Rng) -> Node {
             if !random.chance(fx(0.7)) {
                 continue;
             }
-            let a = j as f64 * std::f64::consts::PI / 4.0;
-            let (u, w) = ((c + (r - 3.0) * js::cos(a)) as i64, (c + (r - 3.0) * js::sin(a)) as i64);
+            let [u, w] = Fx::turn(j, 8).map(|v| c as i64 + (v * Units(r as i64 - 3)).round_units().0);
             let high = top + m(0.5) + below(random, m(0.5));
             k.add([u - 3, top, w - 3], [u + 3, high, w + 3], stone);
             k.paint([u - 3, high - 2, w - 3], [u + 3, high, w + 3], moss);

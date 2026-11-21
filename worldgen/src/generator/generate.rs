@@ -17,7 +17,7 @@ impl Palette {
     fn new(kinds: &[KindDef], seed: u64) -> Palette {
         let linear = |color: &str| {
             let rgb = color.strip_prefix('#').and_then(|hex| u32::from_str_radix(hex, 16).ok()).expect("a colour #rrggbb");
-            [16, 8, 0].map(|shift| (COLOUR_ONE as f32 * srgb_to_linear(((rgb >> shift) & 255) as f32 / 255.0)).round() as u32)
+            [16, 8, 0].map(|shift| (COLOUR_ONE as f64 * to_linear(((rgb >> shift) & 255) as f64 / 255.0)).round() as u32)
         };
         let shades: Vec<Vec<[u32; 3]>> = kinds.iter().map(|k| k.colors.iter().map(|c| linear(c)).collect()).collect();
         let means = shades

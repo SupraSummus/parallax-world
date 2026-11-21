@@ -121,10 +121,10 @@ struct Palette {
     walls: &'static [K],
     roofs: &'static [K],
     pitch: [f64; 2],
-    shutters: f64,
+    shutters: Fx,
     shutter_kinds: &'static [K],
-    gables: f64,
-    dormers: f64,
+    gables: Fx,
+    dormers: Fx,
     /** Storeys more than the town's own. */
     storeys: i64,
 }
@@ -141,40 +141,40 @@ impl Style {
                 walls: &[K::plasterOchre, K::plasterOchre, K::plasterPink, K::plasterWhite, K::plasterSage],
                 roofs: &[K::roofTile, K::roofTile, K::roofRed],
                 pitch: [0.3, 0.45],
-                shutters: 0.85,
+                shutters: fx(0.85),
                 shutter_kinds: &[K::shutterGreen, K::shutterGreen, K::shutterBlue],
-                gables: 0.05,
-                dormers: 0.0,
+                gables: fx(0.05),
+                dormers: Fx::ZERO,
                 storeys: 1,
             },
             Style::Northern => Palette {
                 walls: &[K::plasterWhite, K::plasterGrey, K::faluRed, K::faluRed, K::plasterOchre, K::plasterBlue],
                 roofs: &[K::slate, K::slate, K::slate, K::roofRed, K::roofBrown],
                 pitch: [0.95, 1.25],
-                shutters: 0.1,
+                shutters: fx(0.1),
                 shutter_kinds: &[K::shutterBlue],
-                gables: 0.15,
-                dormers: 0.5,
+                gables: fx(0.15),
+                dormers: fx(0.5),
                 storeys: 0,
             },
             Style::Timbered => Palette {
                 walls: &[K::plasterWhite, K::plasterWhite, K::plasterWhite, K::plasterOchre, K::plasterPink],
                 roofs: &[K::roofBrown, K::roofRed, K::roofRed, K::slate],
                 pitch: [1.1, 1.5],
-                shutters: 0.3,
+                shutters: fx(0.3),
                 shutter_kinds: &[K::shutterGreen, K::faluRed],
-                gables: 0.6,
-                dormers: 0.5,
+                gables: fx(0.6),
+                dormers: fx(0.5),
                 storeys: 1,
             },
             Style::Brick => Palette {
                 walls: &[K::brick],
                 roofs: &[K::roofRed, K::slate, K::slate, K::roofBrown],
                 pitch: [0.8, 1.1],
-                shutters: 0.25,
+                shutters: fx(0.25),
                 shutter_kinds: &[K::shutterGreen],
-                gables: 0.5,
-                dormers: 0.0,
+                gables: fx(0.5),
+                dormers: Fx::ZERO,
                 storeys: 1,
             },
         }
@@ -189,11 +189,6 @@ impl Style {
             Style::Brick => (K::brick, K::slate, K::copper, m(12.0)),
         }
     }
-}
-
-/** A kind of `kinds`, picked evenly. */
-fn pick(random: &mut Rng, kinds: &[K]) -> K {
-    kinds[random.below(kinds.len() as u32) as usize]
 }
 
 /** How large a town is, and what it has. */
@@ -837,13 +832,13 @@ impl House {
     pub fn build(&self, part: &mut Part, random: &mut Rng) -> i64 {
         let House { length, depth, storeys, style, .. } = *self;
         let p = style.palette();
-        let plaster = k(pick(random, p.walls));
-        let roof = k(if self.thatched { K::thatch } else { pick(random, p.roofs) });
+        let plaster = k(random.pick(p.walls));
+        let roof = k(if self.thatched { K::thatch } else { random.pick(p.roofs) });
         let top = storeys * STOREY;
         part.add([-1, -3, -1], [length + 1, 4, depth + 1], k(K::churchStone));
         part.add([0, 0, 0], [length, top, depth], plaster);
         // Its ridge along the street, eaves to it; or gable-fronted.
-        let ridge = if random.chance(fx(p.gables)) { 2 } else { 0 };
+        let ridge = if random.chance(p.gables) { 2 } else { 0 };
         let across = 2 - ridge;
         let (width, eaves) = (if across == 0 { length } else { depth }, if self.thatched { 5 } else { 3 });
         let run = width as f64 / 2.0 + eaves as f64;
@@ -854,7 +849,7 @@ impl House {
         let at = 3;
         let low = roof_at(at, rise, run, eaves) as i64;
         let room = ridge == 0 && low + 20 < rise as i64;
-        let dormers = if room && random.chance(fx(p.dormers)) { 1 + i64::from(length >= m(9.0)) } else { 0 };
+        let dormers = if room && random.chance(p.dormers) { 1 + i64::from(length >= m(9.0)) } else { 0 };
         let dormer = |j: i64| length * (2 * j + 1) / (2 * dormers);
         for j in 0..dormers {
             let (u, v) = (dormer(j), top + low + 13);
@@ -905,7 +900,7 @@ impl House {
         }
 
         // Windows front and back, a door in the front's middle; a shop's open door, wide windows and room on the ground floor.
-        let shutters = random.chance(fx(p.shutters)).then(|| pick(random, p.shutter_kinds));
+        let shutters = random.chance(p.shutters).then(|| random.pick(p.shutter_kinds));
         let shop = self.shop && random.chance(Fx::HALF);
         let balcony = style == Style::Southern && storeys > 1 && random.chance(Fx::HALF);
         let door_at = slot(slots / 2);

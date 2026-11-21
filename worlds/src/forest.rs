@@ -110,8 +110,8 @@ const MOST: i64 = m(2.5) * m(2.5);
 const GAPS: [i64; 2] = [m(-0.5), m(1.5)];
 
 /** A tree's weight in its rooms: none for the shortest, MOST for the tallest, as light favours it. */
-fn weight(height: f64) -> i64 {
-    (MOST as f64 * ((height - vox(12.0)) / vox(12.0)).clamp(0.0, 1.0)) as i64
+fn weight(height: i64) -> i64 {
+    MOST * (height - m(12.0)).clamp(0, m(12.0)) / m(12.0)
 }
 
 /**
@@ -308,16 +308,16 @@ impl Woods {
         // Keep the view from the spawn point clear of low branches: within 7 m of the 40 m ahead along +z, where the
         // camera starts looking.
         let (dx, dz) = (x - self.spawn[0], z - self.spawn[2]);
-        let beyond = dz - dz.clamp(0, vox(40.0) as i64);
-        if dx * dx + beyond * beyond < (vox(7.0) as i64).pow(2) {
+        let beyond = dz - dz.clamp(0, m(40.0));
+        if dx * dx + beyond * beyond < m(7.0).pow(2) {
             return Fx::ZERO;
         }
         self.thinned(fx(0.12) + c.density / 2, x, z)
     }
 
     /** How tall the tree at a point grows (units): of the point alone, so its neighbours know it too. */
-    fn height(&self, x: i64, z: i64, mark: usize) -> f64 {
-        height(SPECIES[mark], unit(hash(self.s("heights"), x, z, mark as i64)))
+    fn height(&self, x: i64, z: i64, mark: usize) -> i64 {
+        height(SPECIES[mark], hash(self.s("heights"), x, z, mark as i64))
     }
 
     /** The rooms of the trees at `points`: by their heights, as light favours the taller (`weight`). */
@@ -431,7 +431,7 @@ pub fn forest(seed: u64) -> World {
     let path = Arc::new(Path::new(spine.clone()));
     let ground = Lie::new(move |x, z| relief.ground(x, z, spine.across(x, z).abs())).ground(GROUND_SCALE, SLOPE);
     // Start on the path at the near end, at about the height of a tall shrub.
-    let spawn = on_path(&ground, &path, vox(-31.0) as i64, vox(3.0) as i64);
+    let spawn = on_path(&ground, &path, m(-31.0), m(3.0));
     let forest: Arc<dyn Domain> = Arc::new(Forest::new(world.of("forest"), path, spawn));
     let layers = compose(&[forest], &ground, GROUND_SCALE, Fx::ONE);
     World {
@@ -472,16 +472,16 @@ fn layers(scope: &Scope, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
             // a corner's where only a diagonal falls away.
             let cliff = h - lowest >= STEEP * plan::spacing();
             let below = if cliff || surface == K::stone || surface == K::mossyStone { K::stone } else { K::soil };
-            column::Column::new(h).surface(surface, vox(1.0) as i64).sides(below, lowest, vox(1.5) as i64).under(K::stone)
+            column::Column::new(h).surface(surface, m(1.0)).sides(below, lowest, m(1.5)).under(K::stone)
         })
-        .ground(on.clone(), vox(1.5) as i64, 1, K::stone)
+        .ground(on.clone(), m(1.5), 1, K::stone)
     };
 
     // Trees, at the trees' points (worldgen's Points), of their marks' species: leaves 2 m wide, each holding one
     // by its share of tree_chance, a square 4 m wide's; roots 8 m wide, as wide as the chances follow.
     let points = {
         let f = f.clone();
-        Arc::new(Points::new("trees", f.s("trees"), &[0, 2], TREE_LEAF, vox(8.0) as i64, 3, move |[x, _, z]| {
+        Arc::new(Points::new("trees", f.s("trees"), &[0, 2], TREE_LEAF, m(8.0), 3, move |[x, _, z]| {
             let [spruce, birch, oak] = f.leaf_chances(x, z);
             [spruce, birch, oak, Fx::ZERO]
         }))
@@ -578,7 +578,7 @@ fn layers(scope: &Scope, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
         let (f, ground) = (f.clone(), f.clone());
         Population::new("trees", 1.0, TREE_LEAF)
             .reach([TREE_REACH, TREE_TOP, TREE_REACH])
-            .size(vox(1.0) as i64)
+            .size(m(1.0))
             .anchor_points(points, move |spot| {
                 let [x, _, z] = spot.at;
                 Some([x as f64, ground.ground(x, z) as f64, z as f64])
@@ -586,25 +586,21 @@ fn layers(scope: &Scope, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
             .make(move |[x, y, z], cell| {
                 let (at, mark) = ([x as i64, 0, z as i64], cell.mark);
                 let (height, room) = (f.height(at[0], at[2], mark), Arc::new(rooms.room(at, mark)));
-                Some(grow(SPECIES[cell.mark], x, y, z, height, room, &mut cell.random("tree"), &|x, z| f.ground(x, z)))
+                Some(grow(SPECIES[cell.mark], x, y, z, height as f64, room, &mut cell.random("tree"), &|x, z| f.ground(x, z)))
             })
             .on(on.clone())
             .far(canopy.about(on.clone(), 0, TREE_TOP))
     };
 
     // Boulders and fallen logs.
-    let rock_cell = vox(4.0) as i64;
+    let rock_cell = m(4.0);
     let on_ground = |name, reach| {
         let anchor = f.clone();
-        Population::new(name, 2.0, rock_cell)
-            .reach(reach)
-            .size(vox(2.0) as i64)
-            .on(on.clone())
-            .anchor_along(1, move |line| Some(anchor.spot(line)))
+        Population::new(name, 2.0, rock_cell).reach(reach).size(m(2.0)).on(on.clone()).anchor_along(1, move |line| Some(anchor.spot(line)))
     };
     let boulders = {
         let f = f.clone();
-        on_ground("boulders", vox(3.0) as i64).make(move |[x, y, z], cell| {
+        on_ground("boulders", m(3.0)).make(move |[x, y, z], cell| {
             let mut random = cell.random("boulder");
             let (xi, zi) = (x as i64, z as i64);
             let clear = !f.ground.path.by(xi, zi, Fx::m(PATH_EDGE[1] + BOULDER_RADIUS[1]));
@@ -613,7 +609,7 @@ fn layers(scope: &Scope, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
     };
     let logs = {
         let f = f.clone();
-        on_ground("logs", vox(10.0) as i64).make(move |[x, _, z], cell| {
+        on_ground("logs", m(10.0)).make(move |[x, _, z], cell| {
             let mut random = cell.random("log");
             if random.chance(f.thinned(fx(0.077), x as i64, z as i64)) && !f.column(x as i64, z as i64).on_path {
                 fallen_log(x, z, &|x, z| f.ground(x, z), &mut random).map(Node::of)
@@ -627,10 +623,10 @@ fn layers(scope: &Scope, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
     const PLANTS: i64 = 16;
     // The most of a column's roll any plant takes, fallen leaves': a column rolling more draws nothing, whatever the share.
     const LITTER: Fx = fx(0.4);
-    let column_width = vox(0.25) as i64;
+    let column_width = m(0.25);
     let anchor = f.clone();
     let plants = Population::new("plants", 3.0, PLANTS)
-        .reach([0, vox(10.0) as i64, 0])
+        .reach([0, m(10.0), 0])
         .size(column_width)
         .on(on.clone())
         .anchor_along(1, move |line| {
@@ -708,7 +704,7 @@ mod tests {
         if chance == 0.0 {
             return (0..64).map(|i| make_tree(species, 0.0, 0.0, 0.0, &mut Rng::new(hash64(seed, i, 0, 0)), &|_, _| 0)).collect();
         }
-        let tall = move |s: &Spot| height(species, unit(hash(seed, s.at[0], s.at[2], 0)));
+        let tall = move |s: &Spot| height(species, hash(seed, s.at[0], s.at[2], 0));
         let points =
             Arc::new(Points::new("stand", seed, &[0, 2], m(2.0), m(8.0), 1, move |_| [fx(chance / 4.0), Fx::ZERO, Fx::ZERO, Fx::ZERO]));
         let rooms = Rooms::new(points.clone(), TREE_REACH, MOST, GAPS, move |s| weight(tall(s)));
@@ -717,7 +713,7 @@ mod tests {
         spots.sort_by_key(|s| (s.at[0] * s.at[0] + s.at[2] * s.at[2], s.at, s.nth));
         let grown = |s: &Spot| {
             let ([x, _, z], random) = (s.at, &mut Rng::new(hash64(seed, s.at[0], s.at[2], 1)));
-            grow(species, x as f64, 0.0, z as f64, tall(s), Arc::new(rooms.room(s.at, 0)), random, &|_, _| 0)
+            grow(species, x as f64, 0.0, z as f64, tall(s) as f64, Arc::new(rooms.room(s.at, 0)), random, &|_, _| 0)
         };
         spots.iter().take(64).map(grown).collect()
     }

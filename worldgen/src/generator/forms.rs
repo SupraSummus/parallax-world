@@ -630,7 +630,9 @@ pub(super) fn measure(
     // Each pair counted against those holding one of the cell's fine sites at all.
     let all = pairs_of_cell(s / f);
     let picks = hash_text(&format!("{key}#measured"), seed);
-    let shares: Vec<f64> = cells.iter().map(|stats| (0..3).map(|i| stats.pairs[i] as f64 / all[i] as f64).sum::<f64>() / 3.0).collect();
+    // Its share is the mean over the axes of the share of pairs: of `whole`, exact.
+    let whole = 3 * all.iter().map(|&a| a as u128).product::<u128>();
+    let shares: Vec<u128> = cells.iter().map(|stats| (0..3).map(|i| stats.pairs[i] as u128 * (whole / 3 / all[i] as u128)).sum()).collect();
     // Columns along each line of nearest neighbours d, from its start on the side of −d to its end on the side of
     // d: rays coming from either end see the faces towards it.
     let mut crossed: Vec<usize> = Vec::new();
@@ -661,7 +663,7 @@ pub(super) fn measure(
                 crossed.clear();
                 for p in (0..length).map(|t| (origin + t * step) as usize) {
                     let cell = cell_at[p] as usize;
-                    if shares[cell] > 0.0 && crossed.last() != Some(&cell) {
+                    if shares[cell] > 0 && crossed.last() != Some(&cell) {
                         crossed.push(cell);
                     }
                     if let Some(at) = has[p] {
@@ -680,7 +682,7 @@ pub(super) fn measure(
         }
     }
     let mut sites = Vec::new();
-    for (i, stats) in cells.into_iter().enumerate().filter(|(i, _)| shares[*i] > 0.0) {
+    for (i, stats) in cells.into_iter().enumerate().filter(|(i, _)| shares[*i] > 0) {
         let site = site_of(i);
         let [x, y, z] = site;
         let faces = stats.seen;
@@ -712,14 +714,16 @@ pub(super) fn measure(
         // Its share, of each kind as much as its faces see of it, each kind's of what the ones before leave, so that
         // together they stop as much as the cell's share; each with the faces seen.
         let faces = faces.map(|mut counts| pick(&mut counts).0);
-        let total = all.iter().map(|e| e.2).sum::<u32>().max(1) as f64;
-        let mut before = 0.0f64;
+        // As fractions of `whole` times `total`, exact: its part, and what the ones before leave of the site, never
+        // less than the part.
+        let total = all.iter().map(|e| e.2).sum::<u32>().max(1) as u128;
+        let mut before = 0u128;
         for &(kind, op, n) in &all {
-            let part = shares[i] * n as f64 / total;
+            let (part, left) = (shares[i] * n as u128, whole * total - shares[i] * before);
             let look = Look { kind, faces: faces.iter().any(|k| *k != kind).then_some(faces), cover: None };
             let picked = to_pick(hash(picks.wrapping_add(kind as u64 + 1), x * s, y * s, z * s));
-            sites.push((site, look, op, share(part / (1.0 - before).max(f64::EPSILON)), picked));
-            before += part;
+            sites.push((site, look, op, (SHARE as u128 * part / left) as u32, picked));
+            before += n as u128;
         }
     }
     // In an order of their own, as sites are put in it.

@@ -8,7 +8,8 @@ Numbers are for the forest at 1280×800, as measured when written.
 - **worldgen still decides some things with floats.**
   Shapes are kept and tested in fixed point,
   but they are given in floats, and their areas, fills and tubes' radii are f64,
-  as is the forest's geometry (sin, cos, pow, exp, atan2, hypot, from `js.rs`).
+  as is the forest's geometry (sin, cos, pow, exp, atan2, hypot, from `js.rs`)
+  and the draws it takes (`Rng::next`, a float).
   They should go to fixed point like the noise,
   the forest building each thing relative to its anchor.
   The fixed-point containment tests cost about 15% at level 0.

@@ -309,9 +309,8 @@ impl Moorland {
                     let [x, z] = pool.centre;
                     // Its centre and eight points 4 m past its rim: every column of it is within 7.4 m of one, and the lead
                     // keeps 8 m off the landmarks and the railway.
-                    let r = (pool.radius + m(4.0)) as f64;
-                    let ring =
-                        (0..8).map(|k| k as f64 * std::f64::consts::FRAC_PI_4).map(|a| [(r * js::cos(a)) as i64, (r * js::sin(a)) as i64]);
+                    let r = Units(pool.radius + m(4.0));
+                    let ring = (0..8).map(|k| Fx::turn(k, 8).map(|v| (v * r).round_units().0));
                     let room = ring.chain([[0, 0]]).all(|[a, b]| lead(x + a, z + b) >= SURE);
                     // Off all the steadings reach: theirs is levelled ground, and their huts and paths dry.
                     let off = steadings.near(x, z, pool.radius + m(4.0) + NEAR).is_none();
@@ -425,8 +424,8 @@ fn pool_at(spot: [i64; 2], ground: &dyn Fn(i64, i64) -> Fx, random: &mut Rng) ->
     (0..4).map(|n| POOL_RADIUS - n * (POOL_RADIUS - smallest) / 3).find_map(|radius| {
         // Its rim's 32 points, read only while they keep within 1.5 m: most rims don't.
         let mut rim = (0..32).map(|a| {
-            let angle = a as f64 * std::f64::consts::PI / 16.0;
-            ground(centre[0] + (radius as f64 * js::cos(angle)) as i64, centre[1] + (radius as f64 * js::sin(angle)) as i64)
+            let [u, w] = Fx::turn(a, 32).map(|v| (v * Units(radius)).round_units().0);
+            ground(centre[0] + u, centre[1] + w)
         });
         let first = rim.next()?;
         let (low, _) = rim.try_fold((first, first), |(low, high), h| {

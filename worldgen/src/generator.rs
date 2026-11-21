@@ -5,12 +5,11 @@
 use std::cell::RefCell;
 use std::sync::{Arc, OnceLock};
 
-use fcc::light::srgb_to_linear;
 use fcc::{FACE_KINDS, VOXEL_FACES};
 
 use crate::cost::{self, Work};
 use crate::curve::Curve;
-use crate::grid::{ALPHA, BRICK, Box3, COLOUR_ONE, VoxelGrid, look_of};
+use crate::grid::{ALPHA, BRICK, Box3, COLOUR_ONE, VoxelGrid, look_of, to_linear};
 use crate::js;
 use crate::noise::{Fixed, Fx, ONE, Rng, fixed, float, hash, hash_text, hash64};
 use crate::plan;

@@ -150,9 +150,9 @@ const CARPETS: [K; 4] = [K::carpetRed, K::carpetBlue, K::carpetGreen, K::carpetM
 const CARPET_BORDERS: [K; 2] = [K::carpetGold, K::carpetBeige];
 const PAVING: [K; 3] = [K::paving0, K::paving1, K::paving2];
 
-/** One of `list`, picked by `t` in [0, 1). */
-fn pick<T: Copy>(list: &[T], t: f64) -> T {
-    list[(t * list.len() as f64) as usize]
+/** One of `list`, picked by a hash `h`, each as likely: as Rng::pick. */
+fn pick<T: Copy>(list: &[T], h: u32) -> T {
+    list[((h as u64 * list.len() as u64) >> 32) as usize]
 }
 
 /** A thing's shapes, painted plan cell by plan cell: each box over what the thing has there. */
@@ -418,10 +418,10 @@ fn plan_storey(b: &Building, storey: i64, random: &mut Rng) -> StoreyPlan {
     let mut edge = |ai: i64, aj: i64, ci: i64, cj: i64, along_x: bool, index: usize| -> Edge {
         let a_in = b.inside(ai, aj);
         if !a_in || !b.inside(ci, cj) {
-            let roll = random.next();
-            let kind = if storey > 0 && roll < 0.2 {
+            let roll = random.fraction();
+            let kind = if storey > 0 && roll < fx(0.2) {
                 EdgeKind::Balcony
-            } else if roll > 0.92 {
+            } else if roll > fx(0.92) {
                 EdgeKind::Wall
             } else {
                 EdgeKind::Window
@@ -432,7 +432,7 @@ fn plan_storey(b: &Building, storey: i64, random: &mut Rng) -> StoreyPlan {
         if c_court || b.is_court(ai, aj) {
             return Edge { kind: EdgeKind::Window, facade: true, exterior: false, out: if c_court { 1 } else { -1 }, leaf: Leaf::None };
         }
-        let out = if random.next() < 0.5 { 1 } else { -1 };
+        let out = if random.chance(fx(0.5)) { 1 } else { -1 };
         between.push((along_x, index, aj * b.w + ai, cj * b.w + ci));
         Edge { kind: EdgeKind::Wall, facade: false, exterior: false, out, leaf: Leaf::None }
     };
@@ -449,31 +449,31 @@ fn plan_storey(b: &Building, storey: i64, random: &mut Rng) -> StoreyPlan {
         parent[k]
     }
     for k in (1..between.len()).rev() {
-        let r = (random.next() * (k + 1) as f64) as usize;
+        let r = random.below(k as u32 + 1) as usize;
         between.swap(k, r);
     }
     for (along_x, index, a, c) in between {
         let (ra, rc) = (root(&mut parent, a as usize), root(&mut parent, c as usize));
         if ra != rc {
             parent[ra] = rc;
-        } else if random.next() > 0.15 {
+        } else if !random.chance(fx(0.15)) {
             continue;
         }
         let e = if along_x { &mut plan.z_edges[index] } else { &mut plan.x_edges[index] };
-        let roll = random.next();
-        e.kind = if roll < 0.72 {
+        let roll = random.fraction();
+        e.kind = if roll < fx(0.72) {
             EdgeKind::Door
-        } else if roll < 0.87 {
+        } else if roll < fx(0.87) {
             EdgeKind::Arch
         } else {
             EdgeKind::Open
         };
-        let l = random.next();
-        e.leaf = if l < 0.3 {
+        let l = random.fraction();
+        e.leaf = if l < fx(0.3) {
             Leaf::OpenIn
-        } else if l < 0.6 {
+        } else if l < fx(0.6) {
             Leaf::OpenOut
-        } else if l < 0.75 {
+        } else if l < fx(0.75) {
             Leaf::Closed
         } else {
             Leaf::None
@@ -491,7 +491,7 @@ fn plan_storey(b: &Building, storey: i64, random: &mut Rng) -> StoreyPlan {
         }
         // One door from a neighbouring room out into the courtyard.
         if let Some((i, j)) = b.court {
-            let e = plan.side_mut(i, j, pick(&SIDES, random.next()));
+            let e = plan.side_mut(i, j, random.pick(&SIDES));
             e.kind = EdgeKind::Door;
             e.leaf = Leaf::OpenOut;
         }
@@ -605,7 +605,7 @@ fn draw_building(b: &Building, random: &mut Rng) -> (Vec<Shape>, Vec<Shape>) {
         // Openings; the facades' on the outline too, as they are.
         for (wall, e) in &edges {
             let thick = if e.facade { 2 } else { 1 };
-            let leaf = if e.kind == EdgeKind::Door { pick(&ROOM_DOORS, random.next()) } else { b.entrance_door };
+            let leaf = if e.kind == EdgeKind::Door { random.pick(&ROOM_DOORS) } else { b.entrance_door };
             for c in [&mut *c, &mut *far].into_iter().take(if e.facade { 2 } else { 1 }) {
                 match e.kind {
                     EdgeKind::Door => door(c, wall, thick, e.leaf, leaf, b.trim, false),
@@ -633,7 +633,7 @@ fn draw_building(b: &Building, random: &mut Rng) -> (Vec<Shape>, Vec<Shape>) {
                     continue;
                 }
                 let front = s == 0 && i == b.entrance && j == 0;
-                let floor = if front { Floor::Checker } else { pick(&FLOORS, random.next()) };
+                let floor = if front { Floor::Checker } else { random.pick(&FLOORS) };
                 room(c, b, &plan, i, j, y0, floor, random);
             }
         }
@@ -662,7 +662,7 @@ fn draw_building(b: &Building, random: &mut Rng) -> (Vec<Shape>, Vec<Shape>) {
     }
 
     let rooms: Vec<(i64, i64)> = (0..b.w).flat_map(|i| (0..b.d).map(move |j| (i, j))).filter(|&(i, j)| !b.is_court(i, j)).collect();
-    let pick_room = |random: &mut Rng| pick(&rooms, random.next());
+    let pick_room = |random: &mut Rng| random.pick(&rooms);
     {
         let (i, j) = pick_room(random);
         let (x, z) = (b.bx + i * CELL, b.bz + j * CELL);
@@ -673,12 +673,12 @@ fn draw_building(b: &Building, random: &mut Rng) -> (Vec<Shape>, Vec<Shape>) {
             c.cells([x + MID - 2, top + 1, z + 4], [x + MID + 1, top + DOOR_TOP, z + 4], Some(K::pole));
         }
     }
-    let units = 1 + (random.next() * 3.0) as i64;
+    let units = 1 + random.below(3) as i64;
     for _ in 0..units {
         let (i, j) = pick_room(random);
-        let x = b.bx + i * CELL + 2 + (random.next() * 8.0) as i64;
-        let z = b.bz + j * CELL + 2 + (random.next() * 8.0) as i64;
-        let (dx, dy, dz) = ((random.next() * 3.0) as i64, (random.next() * 3.0) as i64, (random.next() * 2.0) as i64);
+        let x = b.bx + i * CELL + 2 + random.below(8) as i64;
+        let z = b.bz + j * CELL + 2 + random.below(8) as i64;
+        let (dx, dy, dz) = (random.below(3) as i64, random.below(3) as i64, random.below(2) as i64);
         for c in [&mut *c, &mut *far] {
             c.cells([x, top + 1, z], [x + 2 + dx, top + 2 + dy, z + 2 + dz], Some(K::roofUnit));
         }
@@ -692,7 +692,7 @@ fn room(c: &mut Canvas, b: &Building, plan: &StoreyPlan, i: i64, j: i64, y0: i64
     let x0 = b.bx + i * CELL;
     let z0 = b.bz + j * CELL;
     let room_seed = random.next_u64();
-    let shade = random.next();
+    let shade = random.next_u32();
     // Cells (u, v) of the room's floor, from its corner on the grid lines: 1 to CELL − 1, between the walls.
     let area = |c: &mut Canvas, u0: i64, u1: i64, v0: i64, v1: i64, kind: K| {
         c.cells([x0 + u0.max(1), y0, z0 + v0.max(1)], [x0 + u1.min(CELL - 1), y0, z0 + v1.min(CELL - 1)], Some(kind));
@@ -715,8 +715,7 @@ fn room(c: &mut Canvas, b: &Building, plan: &StoreyPlan, i: i64, j: i64, y0: i64
                 let offset = (v % 2) * 2;
                 for plank in 0..=(CELL - 1 + offset) / 4 {
                     let u0 = 4 * plank - offset;
-                    let shade = ((hash(room_seed, plank, v, 0) as u64 * PARQUET.len() as u64) >> 32) as usize;
-                    area(c, u0, u0 + 3, v, v, PARQUET[shade]);
+                    area(c, u0, u0 + 3, v, v, pick(&PARQUET, hash(room_seed, plank, v, 0)));
                 }
             }
         }
@@ -741,7 +740,7 @@ fn room(c: &mut Canvas, b: &Building, plan: &StoreyPlan, i: i64, j: i64, y0: i64
         Side::Back => (t, CELL - d),
     };
 
-    if random.next() < 0.5 {
+    if random.chance(fx(0.5)) {
         // Table 1.25 m × 0.75 m with a chair on each long side.
         at(c, [MID - 2, MID + 2], [MID - 1, MID + 1], [3, 3], K::table);
         for (u, v) in [(MID - 2, MID - 1), (MID + 2, MID - 1), (MID - 2, MID + 1), (MID + 2, MID + 1)] {
@@ -754,7 +753,7 @@ fn room(c: &mut Canvas, b: &Building, plan: &StoreyPlan, i: i64, j: i64, y0: i64
     }
     for side in SIDES {
         let e = plan.side(i, j, side);
-        if e.kind != EdgeKind::Wall || e.facade || random.next() > 0.4 {
+        if e.kind != EdgeKind::Wall || e.facade || !random.chance(fx(0.4)) {
             continue;
         }
         // Bookcase: shelves every 0.75 m and its ends, books in between with gaps.
@@ -770,16 +769,16 @@ fn room(c: &mut Canvas, b: &Building, plan: &StoreyPlan, i: i64, j: i64, y0: i64
         shelf(c, last, last, 1, 8);
         for t in first + 1..last {
             for row in (1..=8).filter(|row| row % 3 != 1) {
-                if random.next() < 0.8 {
+                if random.chance(fx(0.8)) {
                     let (u, v) = along(side, t, 1);
-                    at(c, [u, u], [v, v], [row, row], pick(&BOOKS, random.next()));
+                    at(c, [u, u], [v, v], [row, row], random.pick(&BOOKS));
                 }
             }
         }
     }
-    if random.next() < 0.4 {
+    if random.chance(fx(0.4)) {
         // Potted plant in a corner.
-        let (u, v) = pick(&[(1, 1), (CELL - 1, 1), (1, CELL - 1), (CELL - 1, CELL - 1)], random.next());
+        let (u, v) = random.pick(&[(1, 1), (CELL - 1, 1), (1, CELL - 1), (CELL - 1, CELL - 1)]);
         at(c, [u, u], [v, v], [1, 2], K::pot);
         at(c, [u, u], [v, v], [3, 6], K::plant);
         let (du, dv) = (if u == 1 { 1 } else { -1 }, if v == 1 { 1 } else { -1 });
@@ -792,7 +791,7 @@ fn room(c: &mut Canvas, b: &Building, plan: &StoreyPlan, i: i64, j: i64, y0: i64
 /** The courtyard floor's centrepiece: a tree in a planter, or a fountain. */
 fn courtyard(c: &mut Canvas, x0: i64, y0: i64, z0: i64, random: &mut Rng) {
     let (cx, cz) = (x0 + MID, z0 + MID);
-    if random.next() < 0.5 {
+    if random.chance(fx(0.5)) {
         c.cells([cx - 2, y0 + 1, cz - 2], [cx + 2, y0 + 2, cz + 2], Some(K::plinth));
         c.cells([cx - 1, y0 + 2, cz - 1], [cx + 1, y0 + 2, cz + 1], Some(K::soil));
         c.cells([cx, y0 + 3, cz], [cx, y0 + vox(2.5), cz], Some(K::bark));
@@ -979,13 +978,12 @@ fn blocks(seed: u64) -> Vec<Block> {
             let mut random = Rng::new(hash64(seed, bi, bj, 3));
             let (px, pz) = (MIN_X + bi * PERIOD + ROAD, MIN_Z + bj * PERIOD + ROAD);
             let front = bi == 1 && bj == 0;
-            let w = 3 + (random.next() * 3.0) as i64;
-            let d = 3 + (random.next() * 3.0) as i64;
+            let w = 3 + random.below(3) as i64;
+            let d = 3 + random.below(3) as i64;
             let (lx, lz) = (px + SIDEWALK, pz + SIDEWALK);
-            let storeys = if front { 2 + (random.next() * 2.0) as i64 } else { 1 + (random.next() * MAX_STOREYS as f64) as i64 };
-            let court =
-                (random.next() < 0.6).then(|| (1 + (random.next() * (w - 2) as f64) as i64, 1 + (random.next() * (d - 2) as f64) as i64));
-            let back_door = (random.next() < 0.5).then(|| (random.next() * w as f64) as i64);
+            let storeys = if front { 2 + random.below(2) as i64 } else { 1 + random.below(MAX_STOREYS as u32) as i64 };
+            let court = random.chance(fx(0.6)).then(|| (1 + random.below((w - 2) as u32) as i64, 1 + random.below((d - 2) as u32) as i64));
+            let back_door = random.chance(fx(0.5)).then(|| random.below(w as u32) as i64);
             let building = Building {
                 bx: lx + (LOT - w * CELL) / 2,
                 bz: lz + 2,
@@ -995,10 +993,10 @@ fn blocks(seed: u64) -> Vec<Block> {
                 court,
                 entrance: w / 2,
                 back_door,
-                facade: pick(&FACADES, random.next()),
-                trim: pick(&TRIMS, random.next()),
-                interior: pick(&INTERIORS, random.next()),
-                entrance_door: pick(&ENTRANCE_DOORS, random.next()),
+                facade: random.pick(&FACADES),
+                trim: random.pick(&TRIMS),
+                interior: random.pick(&INTERIORS),
+                entrance_door: random.pick(&ENTRANCE_DOORS),
             };
             blocks.push(Block { px, pz, building, seed: hash64(seed, bi, bj, 4) });
         }

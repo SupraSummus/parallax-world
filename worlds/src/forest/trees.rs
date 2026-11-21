@@ -9,7 +9,7 @@ use worldgen::grid::Box3;
 use worldgen::js::{self, round};
 use worldgen::noise::{Rng, fx, hash, unit};
 use worldgen::points::Room;
-use worldgen::units::UNIT_SIZE;
+use worldgen::units::{UNIT_SIZE, m};
 
 use super::{K, PI, k, vox};
 
@@ -34,7 +34,7 @@ pub type GroundAt<'a> = &'a dyn Fn(i64, i64) -> i64;
 
 /** A tree standing alone, its height picked by `random` too. */
 pub fn make_tree(species: Species, x: f64, ground: f64, z: f64, random: &mut Rng, ground_at: GroundAt) -> Node {
-    let height = height(species, random.next());
+    let height = height(species, random.next_u32()) as f64;
     grow(species, x, ground, z, height, Arc::new(Room::everywhere()), random, ground_at)
 }
 
@@ -57,13 +57,14 @@ pub(super) fn grow(
     }
 }
 
-/** How tall a tree of `species` grows (units), by a fraction `pick`. */
-pub(super) fn height(species: Species, pick: f64) -> f64 {
-    match species {
-        Species::Spruce => vox(14.0 + pick * 10.0),
-        Species::Birch => vox(12.0 + pick * 7.0),
-        Species::Oak => vox(12.0 + pick * 8.0),
-    }
+/** How tall a tree of `species` grows (units), by a hash `pick`: from its least to its most, rounded. */
+pub(super) fn height(species: Species, pick: u32) -> i64 {
+    let (least, more) = match species {
+        Species::Spruce => (m(14.0), m(10.0)),
+        Species::Birch => (m(12.0), m(7.0)),
+        Species::Oak => (m(12.0), m(8.0)),
+    };
+    least + ((pick as i64 * more + (1 << 31)) >> 32)
 }
 
 /** Each species' bark. */
@@ -89,7 +90,7 @@ pub(super) fn foliage(species: Species, pick: f64) -> K {
 
 /** A tree of `shapes`, with the parts its crown hides as a child, and its crown's leaf clusters. */
 fn tree(shapes: Vec<Shape>, hidden: Vec<Shape>, fine: Vec<Child>, clusters: Vec<Child>) -> Node {
-    let mut children = vec![Child::new("hidden", vox(0.5) as i64, Node::of(hidden))];
+    let mut children = vec![Child::new("hidden", m(0.5), Node::of(hidden))];
     children.extend(fine);
     children.extend(clusters);
     Node::of(shapes).with_children(children)

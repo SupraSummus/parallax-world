@@ -15,7 +15,7 @@ use worldgen::World;
 use worldgen::generator::{Child, Field, Generator, Layer, Meets, Node, Op, Point, Population, Shape};
 use worldgen::js;
 use worldgen::kinds;
-use worldgen::noise::{Rng, hash64, stream};
+use worldgen::noise::{Fx, Rng, fx, hash64, stream};
 use worldgen::plan::spacing;
 use worldgen::units::m;
 
@@ -32,7 +32,7 @@ struct Balls {
     cell: i64,
     least: i64,
     most: i64,
-    chance: f64,
+    chance: Fx,
 }
 
 /**
@@ -40,9 +40,9 @@ struct Balls {
  * per cell is 0.48 of it, so 38 % of the cheese is caverns, over the 29 %
  * at which balls' union reaches through all of it).
  */
-const CAVERNS: Balls = Balls { cell: m(16.0), least: m(5.0), most: m(10.0), chance: 1.0 };
+const CAVERNS: Balls = Balls { cell: m(16.0), least: m(5.0), most: m(10.0), chance: Fx::ONE };
 /** Eyes: smaller, in the walls of the caverns and on their own. */
-const EYES: Balls = Balls { cell: m(6.0), least: m(1.0), most: m(2.5), chance: 0.6 };
+const EYES: Balls = Balls { cell: m(6.0), least: m(1.0), most: m(2.5), chance: fx(0.6) };
 const _: () = assert!(CAVERNS.most <= CAVERNS.cell && EYES.most <= EYES.cell, "a ball reaches into the cells beside its own only");
 
 /**
@@ -50,7 +50,7 @@ const _: () = assert!(CAVERNS.most <= CAVERNS.cell && EYES.most <= EYES.cell, "a
  * layer of cells down, each with its chance; wide enough to walk, their
  * radius from TUNNEL_LEAST to TUNNEL_MOST.
  */
-const TUNNELS: [([i64; 3], f64); 4] = [([1, 0, 0], 0.5), ([0, 0, 1], 0.5), ([1, -1, 0], 0.35), ([0, -1, 1], 0.35)];
+const TUNNELS: [([i64; 3], Fx); 4] = [([1, 0, 0], Fx::HALF), ([0, 0, 1], Fx::HALF), ([1, -1, 0], fx(0.35)), ([0, -1, 1], fx(0.35))];
 const TUNNEL_LEAST: i64 = m(1.2);
 const TUNNEL_MOST: i64 = m(1.8);
 
@@ -81,11 +81,11 @@ impl Balls {
     /** The ball of cell (i, j, k), its centre and radius, if it has one. */
     fn ball(&self, seed: u64, [i, j, k]: [i64; 3]) -> Option<([i64; 3], i64)> {
         let mut rng = Rng::new(hash64(seed, i, j, k));
-        if rng.next() >= self.chance {
+        if !rng.chance(self.chance) {
             return None;
         }
-        let centre = [i, j, k].map(|c| c * self.cell + (rng.next() * self.cell as f64) as i64);
-        let radius = self.least + (rng.next() * (self.most - self.least + 1) as f64) as i64;
+        let centre = [i, j, k].map(|c| c * self.cell + rng.below(self.cell as u32) as i64);
+        let radius = self.least + rng.below((self.most - self.least + 1) as u32) as i64;
         Some((centre, radius))
     }
 
@@ -127,12 +127,12 @@ fn tunnels(seeds: Seeds, min: [i64; 3], max: [i64; 3], spacing: i64) -> impl Ite
         });
         cells(lo, hi).filter_map(move |a| {
             let mut rng = Rng::new(hash64(seeds.tunnels ^ n as u64, a[0], a[1], a[2]));
-            if rng.next() >= chance {
+            if !rng.chance(chance) {
                 return None;
             }
             let from = low(CAVERNS.ball(seeds.caverns, a)?);
             let to = low(CAVERNS.ball(seeds.caverns, [0, 1, 2].map(|i| a[i] + d[i]))?);
-            let radius = TUNNEL_LEAST + (rng.next() * (TUNNEL_MOST - TUNNEL_LEAST + 1) as f64) as i64;
+            let radius = TUNNEL_LEAST + rng.below((TUNNEL_MOST - TUNNEL_LEAST + 1) as u32) as i64;
             carved(radius, spacing).then(|| Shape::capsule(from, to, radius as f64, K::cheese).carve())
         })
     })
