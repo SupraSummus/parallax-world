@@ -376,6 +376,14 @@ pub(crate) fn composited(grid: &VoxelGrid, origin: [f64; 3], direction: [f64; 3]
     seen
 }
 
+/** What site `site` of `grid` (a level's units) shows a ray along `direction` crossing its voxel whole. */
+pub(crate) fn seen_whole(grid: &VoxelGrid, site: [i64; 3], direction: [f64; 3]) -> Seen {
+    let origin = site.map(|v| v as f64);
+    let mut ray = Ray { pixel: 0, origin, direction, t: 0.0, end: 0.0, site, face: FACES.len(), through: [1.0; 3] };
+    let (stopped, shown, glow) = composite(&mut ray, grid, 1.0, 1.0);
+    Seen { stopped, shown, glow }
+}
+
 /**
  * The face a ray enters its voxel by: the one opposite the face it left
  * the voxel before by, or, if it came from elsewhere, the face whose plane

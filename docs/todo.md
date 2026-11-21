@@ -273,18 +273,18 @@ Numbers are for the forest at 1280×800, as measured when written.
   the valley's rare ponds and kinds of heath, the moor's stream bed.
   Each column is asked again at level 0, for what is finer than its sites:
   two fifths of the valley's survey, for its ponds' reeds alone (tried).
-- **A region's level 0 is made whole, and is a quarter of its time**
+- **A region's level 0 is made whole, and is a third of its time**
   (`hold_region` in `worldgen/src/checks/contract.rs`),
   to find the surfaces its cells are sampled near:
   rays then see a hundredth of it, and few of its parts are held.
   Made part by part, only where cells are looked at,
   the cells would be those of a few parts:
   near each other, so telling less surely.
-- **A cell's rays come in pairs** (`rays_through` in `worldgen::checks::cells`):
-  each row of finer sites as two, a hair to either side,
-  which see the same sites unless the row lies on the cell's face.
-  A row once, weighed 1 or ½ on a face, would see the same:
-  25 rays a direction, not 46, most of the cells' time.
+- **A stratum joins a region however much it widens it** (`Survey::regions`):
+  of the valley's joins, a quarter widen theirs by more than its place's own volume,
+  and make over half of all the regions' volume.
+  But a region's coarse levels cost about the same at any size,
+  so a region of its own is not cheaper by volume alone.
 - **The contract's memory is mostly the generator's caches**,
   things measured (`MEASURED` in `worldgen/src/generator/forms.rs`),
   filled as regions move about the world:
