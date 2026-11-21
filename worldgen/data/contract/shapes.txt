@@ -1,10 +1,11 @@
-big ball	1	0.057	0.092
-big ball	2	0.054	0.079
-big ball	3	0.070	0.103
-big ball	4	0.052	0.089
-big block	2	0.055	0.082
-big block	3	0.061	0.088
-big block	4	0.056	0.096
-block	1	0.049	0.076
-disc	1	0.055	0.084
-thick wall	2	0.053	0.071
+big ball	1	0.049	0.098
+big ball	2	0.057	0.094
+big ball	3	0.056	0.100
+big ball	4	0.058	0.081
+big block	2	0.072	0.101
+big block	4	0.046	0.094
+block	2	0.046	0.067
+cone	1	0.045	0.069
+cone	2	0.051	0.057
+thick wall	1	0.059	0.097
+thick wall	2	0.049	0.074

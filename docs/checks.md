@@ -34,7 +34,8 @@ a dense population is surveyed over a smaller square than a sparse one (`PARTS`)
 and one of small cells over fewer metres (`HALF_CELLS`).
 Fields are asked at columns of a coarse level, and at level 0 there:
 they keep what is finer than their sites in proportion ("Plans" in "Levels", generators.md),
-so a railway, a kerb or a pond shows.
+so a railway, a kerb or a pond shows;
+a field's place is the site asked, at its surface, as a part's is its bounds.
 A stratum is a part or a field, with a kind it draws;
 the survey counts its places, and keeps those nearest spawn (`PLACES`).
 Every stratum found gets a region: the rarest first,
@@ -85,7 +86,8 @@ Not what a ray through many cells sees:
 that differs by what is inherent to seeing each cell as a whole.
 A cell is one site, its look coarse,
 so it is checked on average:
-each stratum's cells, near a surface in its places, a sample, over its regions at every seed,
+each stratum's cells, near a surface in its places, a sample, over its regions at every seed
+(drawn by where each cell is, so the same in any region holding it),
 as far apart as `TOLERANCE` (0.045) in how much they stop,
 or in the colour of what they stop (so a thin medium's colour counts as a solid's),
 and each cell as far from what is in it as `SPREAD` (0.1), on average.
@@ -159,7 +161,7 @@ The first two of these share a region's levels, each generated once (`hold_regio
   as a plan steeper between columns no layer reads together;
 - at each level up to the world's, against the level two finer,
   a sample of cells near a surface in each stratum's places in each region
-  (`checks::cells`), the region grown to at least 16 sites of the level across,
+  (`checks::cells`), the region grown by a site of the level, and to at least 16 across,
   each along each of the 12 directions, inside it only;
 - at each level up to one past the world's, in each region
   and a host tile's width around spawn,

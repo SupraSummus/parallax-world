@@ -6,7 +6,8 @@
 //! sites through it, each two rays a hair to either side, half each (a
 //! row along a face between two cells is both's): nothing drawn by chance
 //! but which cells are checked, a sample of those near a surface in each
-//! stratum's places. The contract holds levels to it (checks::contract).
+//! stratum's places, by a hash of where they are. The contract holds
+//! levels to it (checks::contract).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -14,7 +15,7 @@ use fcc::VOXEL_FACES;
 
 use crate::checks::contract::sites;
 use crate::grid::{ALPHA, Box3, VoxelGrid};
-use crate::noise::Rng;
+use crate::noise::hash64;
 use crate::picture::{CROSSING, composited, nearest_site};
 
 /** How many levels finer a level's cells are held to: more costs more, and loses less (a finer cell's mean forgets which of its rays it stops). */
@@ -45,10 +46,8 @@ pub(crate) fn cells_of(grids: [&VoxelGrid; 2], strata: &[(String, Vec<Box3>)], a
     let (s, f) = ((1i64 << level) as f64, (1i64 << against) as f64);
     let within = |c: &[i64; 3]| (0..3).all(|i| c[i] as f64 * s - s >= area.min[i] as f64 && c[i] as f64 * s + s <= area.max[i] as f64);
     let mut near: Vec<[i64; 3]> = near_surfaces(grids, f / s).into_iter().filter(within).collect();
-    let mut random = Rng::new(17);
-    for i in (1..near.len()).rev() {
-        near.swap(i, (random.next() * (i + 1) as f64) as usize % (i + 1));
-    }
+    // Ordered by where each is: a stratum's sample is the same in any region holding it.
+    near.sort_by_cached_key(|&[x, y, z]| hash64(level as u64, x, y, z));
     // The same rays through every cell, moved to it: its centre is a site of the finer level too.
     let rays: [_; VOXEL_FACES.len()] = std::array::from_fn(|along| rays_through(s, f, along));
     let mut seen: BTreeMap<[i64; 3], Vec<Cell>> = BTreeMap::new();

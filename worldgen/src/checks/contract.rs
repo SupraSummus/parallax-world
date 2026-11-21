@@ -79,8 +79,13 @@ pub fn covers(name: &str, stratum: &str) -> bool {
     stratum == name || stratum.strip_prefix(name).is_some_and(|rest| rest.starts_with([' ', '/']))
 }
 
-/** `region` grown to at least 16 sites of `level` across around its centre. */
+/**
+ * Where `level`'s cells of `region` are sampled: `region` and a site of
+ * the level around it, so a cell reaching into it is whole in it (a
+ * thing's walls are its region's), grown to at least 16 sites across.
+ */
 pub(crate) fn around(region: &Box3, level: u32) -> Box3 {
+    let region = region.widen(1 << level);
     let grow = |i: usize| 0.max((8i64 << level) - (region.max[i] - region.min[i]) / 2);
     Box3 { min: [0, 1, 2].map(|i| region.min[i] - grow(i)), max: [0, 1, 2].map(|i| region.max[i] + grow(i)) }
 }
@@ -515,7 +520,7 @@ pub fn hold_to_baseline(breaks: &[Break], path: &str, all: bool) {
  * it (as `declared` by name, `Accuracy::of`), or more; and, if every
  * stratum was checked, a name declared that covers none.
  * Each broken mean names the regions it was averaged over, and the
- * worst of them broken down by kind. Each with what it is of.
+ * worst of them by channel. Each with what it is of.
  */
 pub fn breaks(checked: &[Checked], declared: &[(&str, Accuracy)]) -> Vec<Break> {
     let mut broken = Vec::new();

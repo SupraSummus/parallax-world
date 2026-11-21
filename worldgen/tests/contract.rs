@@ -230,6 +230,18 @@ fn village_keeps_the_contract() {
     keeps_the_contract("village", &world_of(village(), (-64, 64)), 4);
 }
 
+#[test]
+fn a_stratum_measures_the_same_in_any_region_holding_it() {
+    // Its cells are drawn by where they are, and none is cut off at its region's edge.
+    let world = world_of(village(), (-64, 64));
+    let house = b(-32, -8, -32, 32, 24, 32);
+    let measured = |area| {
+        let (report, _) = in_regions("village", &world, &[Region { area, strata: vec![("houses".into(), vec![house])] }], 2);
+        report.margins.iter().map(|m| (m.level, m.looks, m.spread)).collect::<Vec<_>>()
+    };
+    assert_eq!(measured(house), measured(b(-96, -8, -96, 96, 24, 96)));
+}
+
 /**
  * Grass with a stripe of rock a unit wide every 8 along x, from a plan
  * of scale 1, dithered or not: the share of rock in what the sites drawn
