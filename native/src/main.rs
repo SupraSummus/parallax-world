@@ -146,11 +146,15 @@ fn parse_light(v: &str) -> Result<Light, String> {
 }
 
 impl Light {
-    /** `shared` lit so, what it leaves out as `shared` has it. */
-    fn on(self, shared: &Shared) -> Shared {
-        let shared = shared.under(self.brightness);
-        let shared = self.steps.map_or(shared.clone(), |steps| shared.stepping(steps));
-        self.tolerance.map_or(shared.clone(), |tolerance| shared.settling(tolerance))
+    /**
+     * `shared` lit so, what it leaves out as `shared` has it; None if it
+     * lights so already, as most frames find: a light made anew copies
+     * all the world made.
+     */
+    fn on(self, shared: &Shared) -> Option<Shared> {
+        let (steps, tolerance) = (self.steps.unwrap_or(shared.steps()), self.tolerance.unwrap_or(shared.tolerance()));
+        let same = (self.brightness, steps, tolerance) == (shared.brightness(), shared.steps(), shared.tolerance());
+        (!same).then(|| shared.under(self.brightness).stepping(steps).settling(tolerance))
     }
 }
 
@@ -231,7 +235,7 @@ impl View {
         let spawn = made.spawn.map(|v| v as f64);
         // Sky, sun and lamps, as in look's `light`: 1,1,0 a clear day.
         let day = Shared::new(Brightness { sky: 1.0, sun: 1.0, glow: 0.0 });
-        let shared = args.light.map_or(day.clone(), |light| light.on(&day));
+        let shared = args.light.and_then(|light| light.on(&day)).unwrap_or(day.clone());
         let world = World::new(made, Some(shared.clone()), args.threads.unwrap_or_else(num_cpus));
         let mut view = View {
             kind: args.engine,
@@ -253,8 +257,7 @@ impl View {
     /** Takes what `args` say of it, but the world and the speed: the engine, the light, the look, walking. */
     fn apply(&mut self, args: &Args) {
         let shared = self.world.shared().expect("a world with light");
-        let lit = args.light.map(|light| light.on(shared)).filter(|lit| !lit.lights_as(shared));
-        if let Some(lit) = lit {
+        if let Some(lit) = args.light.and_then(|light| light.on(shared)) {
             self.world.relight(lit);
             self.engine = args.engine.make(&self.world);
         } else if args.engine != self.kind {
@@ -379,8 +382,8 @@ impl View {
         responses.push(ui.add(egui::Slider::new(&mut self.tolerance, 1e-4..=0.5).logarithmic(true).text("Tolerance")));
         let done = responses.iter().any(|r| r.drag_stopped() || (r.changed() && !r.dragged()));
         let shared = self.world.shared().expect("a world with light");
-        let relit = shared.under(self.brightness).stepping(self.steps).settling(self.tolerance);
-        if done && !relit.lights_as(shared) {
+        let light = Light { brightness: self.brightness, steps: Some(self.steps), tolerance: Some(self.tolerance) };
+        if done && let Some(relit) = light.on(shared) {
             self.world.relight(relit);
             self.engine = self.kind.make(&self.world);
         }

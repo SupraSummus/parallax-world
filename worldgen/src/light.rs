@@ -239,11 +239,6 @@ impl Shared {
         Shared { tolerance, ..self.unlit() }
     }
 
-    /** Whether `other` lights the world as this does: as bright, as many steps, as little change. */
-    pub fn lights_as(&self, other: &Shared) -> bool {
-        (self.brightness, self.steps, self.tolerance) == (other.brightness, other.steps, other.tolerance)
-    }
-
     /** What tile `key` of `level` of `world` is made in, begun if not yet. */
     fn made(&self, world: &World, level: u32, key: [i64; 3]) -> Arc<Made> {
         let tiles: Vec<[i64; 3]> = made_with(world, level, key).collect();
@@ -276,9 +271,10 @@ impl Shared {
             // Aside, none waiting for all of them meanwhile: what was forgotten or made anew since is left as it is.
             let made: Vec<_> = self.made.lock().expect("made").iter().map(|(key, made)| (*key, made.clone())).collect();
             let kept: Vec<_> = made.iter().map(|(_, made)| Arc::new(made.keeping(|lit| lit.read.swap(false, Ordering::Relaxed)))).collect();
+            // What they were is let go once none waits for the lock: after `now`, as `made` goes.
             let mut now = self.made.lock().expect("made");
-            for ((key, was), kept) in made.into_iter().zip(kept) {
-                if let Some(made) = now.get_mut(&key).filter(|made| Arc::ptr_eq(made, &was)) {
+            for ((key, was), kept) in made.iter().zip(kept) {
+                if let Some(made) = now.get_mut(key).filter(|made| Arc::ptr_eq(made, was)) {
                     *made = kept;
                 }
             }
