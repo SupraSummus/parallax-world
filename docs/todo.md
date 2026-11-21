@@ -384,7 +384,7 @@ The prototype of worlds that move (`worldgen/src/time.rs`;
 
 - **Tiles are made anew whole, and that is most of what moving costs.**
   A tile the clouds are in is made anew each time they cross one of its sites
-  (a few times a second, `time::STEPS`), all of it, a few ms a tile,
+  (a tick at most, `TICK` in `native/src/world.rs`), all of it, a few ms a tile,
   and making the clouds' layer alone costs over a third of that.
   Under the clouds, on four cores, the voxels engine reads a thousand tiles with clouds,
   and over half are behind the world's time (`--stroll --by-work` says).

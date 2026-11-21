@@ -291,7 +291,7 @@ pub struct World {
     /** Per level, the tiles made so far, as engines read them. */
     levels: Vec<Arc<Level>>,
     pub heights: Heights,
-    /** The world's time, milliseconds, as its host sets it: tiles are made at it, and anew once it is not while they stay. */
+    /** The world's time, milliseconds, as its host sets it: tiles are made at its tick (`tick`), and anew once that is not while they stay. */
     pub now: i64,
     /** The threads it makes tiles on, which engines may take as many of. */
     pub threads: usize,
@@ -317,6 +317,15 @@ pub struct World {
  * of another, rather than none of it.
  */
 const FRESH: i64 = 500;
+
+/**
+ * The world's time, ms, its tiles are made at a whole number of: what
+ * moves is made anew no more than so often, whatever its pace and level.
+ * At the finest levels a cloud crosses a site in a fiftieth of a second,
+ * and would be made anew so often that the threads never kept up; on a
+ * tick it jumps a few of their sites, near the eye, where they show.
+ */
+const TICK: i64 = 250;
 
 /** How far tile `id` of `level` is from the camera (lattice units), in the level's sites. */
 fn distance(level: usize, camera: Vec3, id: TileId) -> f64 {
@@ -545,10 +554,15 @@ impl World {
         }
     }
 
+    /** The time its tiles are made at: `now`, at its tick (TICK). */
+    fn tick(&self) -> i64 {
+        self.now - self.now.rem_euclid(TICK)
+    }
+
     /** The tiles made that hold what moves, and those of them made for another time than the world's: behind it. */
     pub fn moving(&self) -> [usize; 2] {
-        let moving = self.tiles.iter().flat_map(HashMap::values).filter(|t| t.stays != time::ALWAYS);
-        moving.fold([0, 0], |[all, behind], t| [all + 1, behind + usize::from(!t.stays.contains(&self.now))])
+        let (now, moving) = (self.tick(), self.tiles.iter().flat_map(HashMap::values).filter(|t| t.stays != time::ALWAYS));
+        moving.fold([0, 0], |[all, behind], t| [all + 1, behind + usize::from(!t.stays.contains(&now))])
     }
 
     /** Tiles being made and bricks lit, or waiting to be. */
@@ -624,7 +638,7 @@ impl World {
             }
         }
         let far = |level: usize, id: TileId| distance(level, camera, id) > keep(level) + DROPPED;
-        let now = self.now;
+        let now = self.tick();
         for (level, piece, tile) in made {
             // Made with one asked for, a tile may be far, or here already: that one is kept, with its light. One made
             // for another time than this one waits for the rest of its level.

@@ -2,9 +2,7 @@
 //! one at each place and level. A layer reads where what moves has got to
 //! (`drift`): a site of the lattice it draws, so what drifts goes from
 //! site to site, the world then the same world a site on. A level's sites
-//! change as often as what moves crosses one, a coarser level's half as
-//! often; but no level's more than STEPS a second: a finer level steps as
-//! a coarser one does (`step`).
+//! change as often as what moves crosses one, a coarser level's half as often.
 //! What is made says while when it stays as made (`at`): while each of
 //! its reads would answer the same, always if it read none. So a host's
 //! tile still never changes; it is a tile of a time, and one that holds
@@ -21,17 +19,6 @@ use crate::plan;
 
 /** While what read no time stays as made. */
 pub const ALWAYS: Range<i64> = i64::MIN..i64::MAX;
-
-/**
- * Steps a second what moves takes at most, at any level: an
- * approximation. Each step a host makes the tiles it is in anew; at the
- * finest levels, crossing a site in a fiftieth of a second at a
- * cloud's pace, it would never keep up. Seen near the eye, where only
- * fine levels are, a cloud then jumps a few of their sites at once:
- * what it jumps is a site of the level it steps as, which shows as
- * its own level's sites do, further off.
- */
-pub const STEPS: i64 = 8;
 
 thread_local! {
     /** The time what is made on this thread is made at, and while when it stays as made, milliseconds. */
@@ -70,30 +57,13 @@ fn site(p: [i64; 3], s: i64) -> [i64; 3] {
 }
 
 /**
- * The spacing what moves at `velocity` (lattice units a second) steps by,
- * read for sites `spacing` apart: theirs, or as many times that (a power
- * of two, so a coarser level's sites, of the same lattice) as it takes
- * to cross voxels no more than STEPS times a second: one a spacing
- * along a face's normal, at its pace along that, as it may cross into
- * a voxel by one face and out by another.
- */
-pub fn step(velocity: [i64; 3], spacing: i64) -> i64 {
-    let fastest = FACES.iter().map(|f| (f[0] * velocity[0] + f[1] * velocity[1] + f[2] * velocity[2]).abs()).max().unwrap_or(0);
-    let mut step = spacing;
-    while fastest > STEPS * step {
-        step *= 2;
-    }
-    step
-}
-
-/**
  * Where what moves at `velocity` (lattice units a second) has got to from
  * where it was at time 0, lattice units: the site whose voxel it is in, of
- * the lattice it steps by (`step`) where read for `plan::spacing`. What
- * is made stays as made while it is in that voxel.
+ * the lattice read for (`plan::spacing`). What is made stays as made
+ * while it is in that voxel.
  */
 pub fn drift(velocity: [i64; 3]) -> [i64; 3] {
-    let spacing = step(velocity, plan::layer_spacing().expect("only layers read the time: plans and things are kept"));
+    let spacing = plan::layer_spacing().expect("only layers read the time: plans and things are kept");
     let (now, from, until) = NOW.get();
     // In thousandths of a unit: as far as it goes in a millisecond at a unit a second.
     let (s, at) = (1000 * spacing, |t: i64| velocity.map(|v| v * t));
@@ -129,7 +99,6 @@ mod tests {
     fn what_drifts_goes_from_site_to_site_and_says_while_when_it_stays() {
         for spacing in [1, 2, 16] {
             for velocity in [[3, 0, 0], [-40, 0, 17], [7, -5, 11], [48, 0, 20]] {
-                let spacing = step(velocity, spacing);
                 let mut now = -5000;
                 while now < 5000 {
                     let (gone, stays) = read(spacing, velocity, now);
@@ -147,24 +116,6 @@ mod tests {
                     }
                     now = stays.end;
                 }
-            }
-        }
-    }
-
-    #[test]
-    fn no_level_steps_more_often_than_steps_says() {
-        for velocity in [[3, 0, 0], [-40, 0, 17], [48, 0, 20], [400, 0, 0]] {
-            for spacing in [1, 4, 64] {
-                let s = step(velocity, spacing);
-                assert!(s >= spacing && (s / spacing).count_ones() == 1);
-                // Steps over ten seconds, from what it says while each stays.
-                let (mut now, mut steps) = (0, 0);
-                while now < 10_000 {
-                    now = read(spacing, velocity, now).1.end;
-                    steps += 1;
-                }
-                assert!(steps <= 10 * STEPS + 1, "{velocity:?} at {spacing}: {steps} steps");
-                assert!(s == spacing || steps > 10 * STEPS / 4, "{velocity:?} at {spacing}: steps as coarse as it takes, no coarser");
             }
         }
     }

@@ -640,16 +640,16 @@ nothing is simulated, and no state is kept.
 A layer reads where what moves has got to (`time::drift`):
 the site of the lattice it draws whose voxel that is in.
 So what drifts goes from site to site, alike along every face,
-and a coarser level's sites change half as often;
-but no level's more than `time::STEPS` times a second, an approximation:
-near the eye, at the finest levels, what moves jumps a few sites at once,
-and a host can keep up.
+and a coarser level's sites change half as often.
 Whatever is made says while when it stays as made (`time::at`),
 back in time as on; always, if it read no time.
 So a tile still never changes once made: it is a tile of a time.
 The native frontend makes its tiles at the world's time
-(`World::now`; `--time`, running on with the frames),
-and those of another time anew, alone, if an engine reads them, else drops them.
+(`World::now`; `--time`, running on with the frames) at its tick,
+and those of another time anew, alone, if an engine reads them, else drops them:
+how often is the host's to say, an approximation
+(at the finest levels, what moves jumps a few sites a tick),
+whatever made them stale.
 A level's tiles made anew wait for one another and take their places together,
 lit as the old ones were where their sites did not change;
 the voxels engine places them in the step the old ones go,
