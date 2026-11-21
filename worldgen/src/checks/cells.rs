@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use fcc::VOXEL_FACES;
 
-use crate::checks::contract::sites;
+use crate::checks::contract::{Held, sites};
 use crate::grid::{ALPHA, Box3, VoxelGrid};
 use crate::noise::hash64;
 use crate::picture::{CROSSING, composited, nearest_site};
@@ -21,7 +21,7 @@ use crate::picture::{CROSSING, composited, nearest_site};
 /** How many levels finer a level's cells are held to: more costs more, and loses less (a finer cell's mean forgets which of its rays it stops). */
 pub const FINER_BY: u32 = 2;
 
-/** Cells checked at each level of a stratum in a region, at most: more costs more, and tells more surely. */
+/** Cells checked at each level of a stratum, at most, shared by the regions holding it: more costs more, and tells more surely. */
 pub const SAMPLES: usize = 256;
 
 /** What rays see of a cell along a direction, a mean over them: how much of them it stops, and what shows (linear: what it stops by its colour, and what it glows). */
@@ -42,17 +42,18 @@ pub fn deviation([a, b]: &Cell) -> f64 {
 }
 
 /**
- * Of the cells of `level` in `area` near the surfaces of `levels` (the
- * level `against` and its own, each covering `area`), a sample in the
- * places of each of `strata`: those whose voxel reaches into one, each
- * seen along each direction at both levels. By stratum, in order; a cell
- * in the places of several is seen once.
+ * Of the cells of `level` in `area` but not in `taken` near the surfaces
+ * of `levels` (the level `against` and its own, each covering `area`), a
+ * sample in the places of each of `strata`: those whose voxel reaches
+ * into one, each seen along each direction at both levels. By stratum, in
+ * order; a cell in the places of several is seen once.
  */
-pub(crate) fn cells_of(levels: [&Level; 2], strata: &[(String, Vec<Box3>)], area: &Box3, [against, level]: [u32; 2]) -> Vec<Vec<Cell>> {
+pub(crate) fn cells_of(levels: [&Level; 2], strata: &[Held], area: &Box3, taken: &[Box3], [against, level]: [u32; 2]) -> Vec<Vec<Cell>> {
     let (s, f) = ((1i64 << level) as f64, (1i64 << against) as f64);
-    let within = |c: &[i64; 3]| (0..3).all(|i| c[i] as f64 * s - s >= area.min[i] as f64 && c[i] as f64 * s + s <= area.max[i] as f64);
+    let within = |b: &Box3, c: &[i64; 3]| (0..3).all(|i| c[i] as f64 * s - s >= b.min[i] as f64 && c[i] as f64 * s + s <= b.max[i] as f64);
     let grids = levels.map(|l| &l.grid);
-    let near: HashSet<[i64; 3]> = near_surfaces(levels, f / s).filter(within).collect();
+    let ours = |c: &[i64; 3]| within(area, c) && !taken.iter().any(|b| within(b, c));
+    let near: HashSet<[i64; 3]> = near_surfaces(levels, f / s).filter(ours).collect();
     // Ordered by where each is: a stratum's sample is the same in any region holding it.
     let mut near: Vec<(u64, [i64; 3])> = near.into_iter().map(|cell| (hash64(level as u64, cell[0], cell[1], cell[2]), cell)).collect();
     near.sort_unstable();
@@ -62,10 +63,10 @@ pub(crate) fn cells_of(levels: [&Level; 2], strata: &[(String, Vec<Box3>)], area
     let mut see = |cell: [i64; 3]| seen.entry(cell).or_insert_with(|| seen_along(grids, &rays, cell, [f, s])).clone();
     strata
         .iter()
-        .map(|(_, places)| {
+        .map(|stratum| {
             // Its voxel reaches a site along each axis.
-            let reaches = |c: &&[i64; 3]| meets(places, &Box3 { min: c.map(|v| v - 1), max: c.map(|v| v + 1) }, level);
-            let cells: Vec<[i64; 3]> = near.iter().map(|(_, cell)| cell).filter(reaches).take(SAMPLES).copied().collect();
+            let reaches = |c: &&[i64; 3]| meets(&stratum.places, &Box3 { min: c.map(|v| v - 1), max: c.map(|v| v + 1) }, level);
+            let cells: Vec<[i64; 3]> = near.iter().map(|(_, cell)| cell).filter(reaches).take(stratum.of(SAMPLES)).copied().collect();
             cells.into_iter().flat_map(&mut see).collect()
         })
         .collect()

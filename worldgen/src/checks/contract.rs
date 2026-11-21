@@ -15,7 +15,7 @@ use std::time::Instant;
 use crate::World;
 use crate::checks::cells;
 use crate::checks::cells::FINER_BY;
-use crate::checks::survey::{Survey, nearest_first, survey};
+use crate::checks::survey::{Survey, nearest_first, survey, survey_in};
 use crate::generator::{Generator, Whole, checking_skipped, generate, kind_of};
 use crate::grid::{ALPHA, Box3, VoxelGrid};
 use crate::noise::{Rng, hash64};
@@ -138,6 +138,8 @@ pub struct Margin {
     pub looks: [Look; 2],
     /** How far, on average, each of its cells is from what is in it, in its channel furthest. */
     pub spread: f64,
+    /** How many cells: what it weighs in the stratum's mean (`breaks`). */
+    pub cells: usize,
 }
 
 impl Margin {
@@ -207,19 +209,43 @@ fn area_at(region: &Box3, level: u32, levels: u32) -> Box3 {
 }
 
 /**
- * A region the contract checks in, and the strata it holds, each by name
- * with its places in it: a stratum's cells are those in its places.
+ * A region the contract checks in, and the strata it holds: a stratum's
+ * cells and parts are those in its places.
  */
 #[derive(Clone, Debug)]
 pub struct Region {
     pub area: Box3,
-    pub strata: Vec<(String, Vec<Box3>)>,
+    pub strata: Vec<Held>,
 }
 
 impl Region {
     /** `area`, all of it the place of one stratum, named `name`. */
     pub fn whole(name: &str, area: Box3) -> Region {
-        Region { area, strata: vec![(name.to_string(), vec![area])] }
+        Region { area, strata: vec![Held::all(name, vec![area])] }
+    }
+}
+
+/**
+ * A stratum in a region: its name, its places there, and its share of
+ * its sample, the k-th [k, n] of the n regions holding it.
+ */
+#[derive(Clone, Debug)]
+pub struct Held {
+    pub name: String,
+    pub places: Vec<Box3>,
+    pub share: [usize; 2],
+}
+
+impl Held {
+    /** A stratum held in one region alone: all its sample there. */
+    pub fn all(name: &str, places: Vec<Box3>) -> Held {
+        Held { name: name.to_string(), places, share: [0, 1] }
+    }
+
+    /** Of a sample of `total`, this region's: as even as can be, the regions' summing to it. */
+    pub(crate) fn of(&self, total: usize) -> usize {
+        let [k, n] = self.share;
+        total * (k + 1) / n - total * k / n
     }
 }
 
@@ -227,12 +253,15 @@ impl Region {
  * `world`, named `name` (with its seed, say), in each of `regions`
  * (`hold_region`) up to `levels`: how each level's cells look against
  * what is in them, and where it breaks the rules that hold exactly.
+ * A cell is the first region's to sample it, so regions that meet take
+ * none twice.
  */
 pub fn in_regions(name: &str, world: &World, regions: &[Region], levels: u32) -> (Report, Vec<String>) {
     let mut report = Report::new(name);
     let mut broken = Vec::new();
-    for region in regions {
-        let (margins, b) = hold_region(world, region, levels);
+    for (i, region) in regions.iter().enumerate() {
+        let before: Vec<Box3> = regions[..i].iter().map(|r| r.area).collect();
+        let (margins, b) = hold_region(world, region, &before, levels);
         report.margins.extend(margins);
         broken.extend(b);
     }
@@ -243,10 +272,10 @@ pub fn in_regions(name: &str, world: &World, regions: &[Region], levels: u32) ->
  * `region` of `world`, each level from 0 to one past `levels` generated
  * once: held to parts of it around each stratum's places (`parts_hold`),
  * and up to `levels`, each stratum's cells against the level FINER_BY
- * finer (checks::cells). Its margins, and where it breaks the rules that
- * hold exactly.
+ * finer (checks::cells), but those regions `before` it sample. Its
+ * margins, and where it breaks the rules that hold exactly.
  */
-fn hold_region(world: &World, region: &Region, levels: u32) -> (Vec<Margin>, Vec<String>) {
+fn hold_region(world: &World, region: &Region, before: &[Box3], levels: u32) -> (Vec<Margin>, Vec<String>) {
     let (mut margins, mut broken) = (Vec::new(), Vec::new());
     // Each level's grid, until the level FINER_BY coarser is held against it.
     let mut grids: Vec<Option<cells::Level>> = Vec::new();
@@ -257,12 +286,15 @@ fn hold_region(world: &World, region: &Region, levels: u32) -> (Vec<Margin>, Vec
         if (1..=levels).contains(&level) {
             let against = level.saturating_sub(FINER_BY);
             let [Some(fine), Some(coarse)] = [against, level].map(|l| grids[l as usize].as_ref()) else { unreachable!("kept") };
-            let each = cells::cells_of([fine, coarse], &region.strata, &around(&region.area, level), [against, level]);
-            for ((stratum, _), cells) in region.strata.iter().zip(each).filter(|(_, cells)| !cells.is_empty()) {
+            let taken: Vec<Box3> = before.iter().map(|b| around(b, level)).collect();
+            let each = cells::cells_of([fine, coarse], &region.strata, &around(&region.area, level), &taken, [against, level]);
+            for (stratum, cells) in region.strata.iter().zip(each).filter(|(_, cells)| !cells.is_empty()) {
                 let n = cells.len() as f64;
                 let looks = [0, 1].map(|i| std::array::from_fn(|k| cells.iter().map(|cell| cell[i][k]).sum::<f64>() / n));
                 let spread = cells.iter().map(cells::deviation).sum::<f64>() / n;
-                margins.push(Margin { region: region.area, stratum: stratum.clone(), level, against, looks, spread });
+                // A cell is seen along each of the 12 directions.
+                let cells = cells.len() / fcc::VOXEL_FACES.len();
+                margins.push(Margin { region: region.area, stratum: stratum.name.clone(), level, against, looks, spread, cells });
             }
         }
         if level >= FINER_BY {
@@ -322,9 +354,9 @@ pub fn heights_hold(world: &World, regions: &[Box3], levels: u32) -> Vec<String>
 const PART: i64 = 32;
 
 /**
- * Parts held at each level for a stratum in a region, at most: as many
- * at every level, where a seam or a skip is as likely, and for every
- * stratum, however much else its region holds.
+ * Parts held at each level for a stratum, at most, shared by the regions
+ * holding it: as many at every level, where a seam or a skip is as
+ * likely, and for every stratum, however much else its regions hold.
  */
 pub const PARTS: usize = 8;
 
@@ -342,16 +374,17 @@ pub fn parts(b: &Box3, level: u32) -> Vec<Box3> {
 
 /**
  * Of `parts` of `level`, a sample for each of `strata`, as its cells
- * are one (checks::cells): the PARTS that meet its places, first by a
- * hash of where each is, so the same in any region holding them, and
+ * are one (checks::cells): its share of PARTS that meet its places, first
+ * by a hash of where each is, so the same in any region holding them, and
  * shared by strata sharing places. A field's places reach above and
  * under its surface, where it says it draws nothing, or all of a kind.
  */
-fn sample(mut parts: Vec<Box3>, strata: &[(String, Vec<Box3>)], level: u32) -> Vec<Box3> {
+fn sample(mut parts: Vec<Box3>, strata: &[Held], level: u32) -> Vec<Box3> {
     parts.sort_by_cached_key(|p| hash64(level as u64, p.min[0], p.min[1], p.min[2]));
     let mut held = vec![false; parts.len()];
-    for (_, places) in strata {
-        (0..parts.len()).filter(|&i| cells::meets(places, &parts[i], level)).take(PARTS).for_each(|i| held[i] = true);
+    for stratum in strata {
+        let meets = |i: &usize| cells::meets(&stratum.places, &parts[*i], level);
+        (0..parts.len()).filter(meets).take(stratum.of(PARTS)).for_each(|i| held[i] = true);
     }
     parts.into_iter().zip(held).filter_map(|(part, held)| held.then_some(part)).collect()
 }
@@ -438,20 +471,45 @@ pub const REGION: i64 = m(32.0);
 
 /**
  * What `world` is made of (`survey`), and regions holding a place of
- * each of its strata, by name with their places; `only` those of strata whose
- * names hold one of `only`, if any (a layer's name first:
- * "towns/church", "railway"), and only their layers surveyed.
+ * each of its strata; `only` those of strata whose names hold one of
+ * `only`, if any (a layer's name first: "towns/church", "railway"), and
+ * only their layers surveyed. Each region holds every stratum surveyed in
+ * it (`survey_in`), not only those it was laid out for, with their
+ * places there; a stratum's sample is shared by the regions holding it.
  */
 pub fn regions(world: &World, only: &[&str]) -> (Survey, Vec<Region>) {
-    let survey = survey(world, REGION, |layer| only.is_empty() || only.iter().any(|o| o.starts_with(layer) || layer.starts_with(o)));
+    let layers = |layer: &str| only.is_empty() || only.iter().any(|o| o.starts_with(layer) || layer.starts_with(o));
+    let survey = survey(world, REGION, layers);
     let names: Vec<String> = (0..survey.strata.len()).map(|i| survey.describe(&world.generator, i)).collect();
-    let wanted = |i: &usize| only.is_empty() || only.iter().any(|o| names[*i].contains(o));
-    let regions = survey.regions(wanted).into_iter();
-    let regions = regions.map(|(area, strata)| Region {
-        strata: strata.into_iter().map(|i| (names[i].clone(), survey.places_in(i, &area))).collect(),
-        area,
-    });
-    let regions = regions.collect();
+    let wanted = |name: &str| only.is_empty() || only.iter().any(|o| name.contains(o));
+    let held: Vec<(Box3, BTreeMap<String, Vec<Box3>>)> = survey
+        .regions(|i| wanted(&names[*i]))
+        .into_iter()
+        .map(|(area, laid)| {
+            let there = survey_in(world, &area, REGION, layers).into_iter().map(|s| (s.describe(&world.generator), s.places));
+            let mut strata: BTreeMap<String, Vec<Box3>> = there.filter(|(name, _)| wanted(name)).collect();
+            // And what it was laid out for where the survey finds it finer: around a place the world names.
+            for i in laid {
+                strata.entry(names[i].clone()).or_insert_with(|| survey.places_in(i, &area));
+            }
+            (area, strata)
+        })
+        .collect();
+    // How many regions hold each stratum, and how many of them are taken so far.
+    let mut shares: BTreeMap<String, [usize; 2]> = BTreeMap::new();
+    held.iter().flat_map(|(_, strata)| strata.keys()).for_each(|name| shares.entry(name.clone()).or_default()[1] += 1);
+    let mut share = |name: &str| {
+        let [k, n] = shares.get_mut(name).expect("counted");
+        *k += 1;
+        [*k - 1, *n]
+    };
+    let regions = held
+        .into_iter()
+        .map(|(area, strata)| Region {
+            area,
+            strata: strata.into_iter().map(|(name, places)| Held { share: share(&name), name, places }).collect(),
+        })
+        .collect();
     (survey, regions)
 }
 
@@ -471,7 +529,7 @@ pub struct Checked {
 }
 
 /** A margin, and the world checked it is of. */
-type Held<'a> = (&'a Checked, &'a Margin);
+type Of<'a> = (&'a Checked, &'a Margin);
 
 /**
  * Where the contract breaks: the stratum and level of a mean that breaks
@@ -567,7 +625,7 @@ pub fn breaks(checked: &[Checked], declared: &[(&str, Accuracy)]) -> Vec<Break> 
         }
     }
     // Each stratum's margins, by level, from every world checked.
-    let mut means: BTreeMap<(&str, u32), Vec<Held>> = BTreeMap::new();
+    let mut means: BTreeMap<(&str, u32), Vec<Of>> = BTreeMap::new();
     for c in checked {
         for m in &c.report.margins {
             means.entry((&m.stratum, m.level)).or_default().push((c, m));
@@ -579,18 +637,19 @@ pub fn breaks(checked: &[Checked], declared: &[(&str, Accuracy)]) -> Vec<Break> 
         }
     }
     for ((stratum, level), margins) in means {
-        let n = margins.len() as f64;
-        let mean = |i: usize| -> Look { std::array::from_fn(|k| margins.iter().map(|(_, m)| m.looks[i][k]).sum::<f64>() / n) };
-        let means = [mean(0), mean(1)];
+        // Each region by its cells: a mean over the stratum's cells.
+        let n = margins.iter().map(|(_, m)| m.cells as f64).sum::<f64>();
+        let weighed = |of: &dyn Fn(&Margin) -> f64| margins.iter().map(|(_, m)| m.cells as f64 * of(m)).sum::<f64>() / n;
+        let means: [Look; 2] = [0, 1].map(|i| std::array::from_fn(|k| weighed(&|m| m.looks[i][k])));
         let apart = apart(&means[0], &means[1], 0..4);
         let mean: Look = std::array::from_fn(|k| means[1][k] - means[0][k]);
-        let spread = margins.iter().map(|(_, m)| m.spread).sum::<f64>() / n;
+        let spread = weighed(&|m| m.spread);
         let within = Accuracy::of(declared, stratum);
         if apart < within.apart && spread < within.spread {
             continue;
         }
         let mut message = format!(
-            "{stratum}, level {level}: {apart:.3} apart, spread {spread:.3} (within {}, {}), on average over {} regions (stops {:+.3}, shows {:+.3} {:+.3} {:+.3}):",
+            "{stratum}, level {level}: {apart:.3} apart, spread {spread:.3} (within {}, {}), on average over {n} cells in {} regions (stops {:+.3}, shows {:+.3} {:+.3} {:+.3}):",
             within.apart,
             within.spread,
             margins.len(),
@@ -600,7 +659,7 @@ pub fn breaks(checked: &[Checked], declared: &[(&str, Accuracy)]) -> Vec<Break> 
             mean[3]
         );
         for (c, m) in &margins {
-            message += &format!("\n  {} in {:?}: {:.3}", c.name, m.region, m.difference());
+            message += &format!("\n  {} in {:?}, {} cells: {:.3}", c.name, m.region, m.cells, m.difference());
         }
         let (c, worst) = margins.iter().max_by(|a, b| a.1.difference().total_cmp(&b.1.difference())).expect("a margin");
         message += &format!("\n{:#}", Report { margins: vec![(*worst).clone()], ..c.report.clone() });
@@ -650,7 +709,7 @@ pub fn check_component(name: &str, make: &dyn Fn() -> World, component: &str, pl
     let survey = survey(&focus, REGION, |_| true);
     let in_it = |b: &Box3| (0..survey.strata.len()).flat_map(|i| survey.places_in(i, b)).collect();
     let regions: Vec<Region> =
-        nearest(&survey, places).iter().map(|b| Region { area: *b, strata: vec![(component.to_string(), in_it(b))] }).collect();
+        nearest(&survey, places).iter().map(|b| Region { area: *b, strata: vec![Held::all(component, in_it(b))] }).collect();
     print_survey(name, &survey, regions.len(), start);
     let start = Instant::now();
     let each: Vec<(Vec<Margin>, Vec<String>)> = std::thread::scope(|scope| {
@@ -659,7 +718,8 @@ pub fn check_component(name: &str, make: &dyn Fn() -> World, component: &str, pl
             .map(|r| {
                 let world = &world;
                 scope.spawn(move || {
-                    let (margins, mut broken) = hold_region(world, r, levels);
+                    // None over another (`nearest`), so none takes another's cells.
+                    let (margins, mut broken) = hold_region(world, r, &[], levels);
                     broken.extend(heights_hold(world, &[r.area], levels));
                     (margins, broken)
                 })

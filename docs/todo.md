@@ -242,7 +242,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   Then `Region` would go.
 - **Things' variants of one part, drawing the same kinds, are one stratum**
   (`worldgen::checks::survey`): a ruin and a watchtower, both of stone,
-  are checked in one region between them.
+  are measured as one between them.
   Naming a landmark's node by its variant, as towns name their children,
   would part them; or the survey could count which code drew each part.
 - **A part's kinds share its places**, so they share its cells
@@ -262,13 +262,25 @@ Numbers are for the forest at 1280×800, as measured when written.
   though the plans they share are made there once.
   Over 4 km, or at columns of level 9, it lost strata (tried):
   the valley's rare ponds and kinds of heath, the moor's stream bed.
-- **A region's level 0 is made whole, and is most of its time**
+  Each column is asked again at level 0, for what is finer than its sites:
+  two fifths of the valley's survey, for its ponds' reeds alone (tried).
+- **A region's level 0 is made whole, and is a quarter of its time**
   (`hold_region` in `worldgen/src/checks/contract.rs`),
   to find the surfaces its cells are sampled near:
   rays then see a hundredth of it, and few of its parts are held.
   Made part by part, only where cells are looked at,
   the cells would be those of a few parts:
   near each other, so telling less surely.
+- **A cell's rays come in pairs** (`rays_through` in `worldgen::checks::cells`):
+  each row of finer sites as two, a hair to either side,
+  which see the same sites unless the row lies on the cell's face.
+  A row once, weighed 1 or ½ on a face, would see the same:
+  25 rays a direction, not 46, most of the cells' time.
+- **The contract's memory is mostly the generator's caches**,
+  things measured (`MEASURED` in `worldgen/src/generator/forms.rs`),
+  filled as regions move about the world:
+  1.5 GB for the valley's four seeds, 1 GB with 64 kept, no slower.
+  They are sized for a host's first view.
 - **A component is checked apart from a world** (`check_component`):
   `check` narrowed to its name, at several places a stratum, would do.
 - **The solids' scenes ask little against the level two finer.**
