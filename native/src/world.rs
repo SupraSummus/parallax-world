@@ -237,6 +237,8 @@ struct Queue {
     shared: Option<Shared>,
     lighting: u32,
     lit: bool,
+    /** What the world let go, for a worker to free: long, for the thread that draws. */
+    gone: Vec<Box<dyn Send>>,
     /** Each worker's clock (own_clock). */
     #[cfg(target_os = "linux")]
     clocks: Vec<libc::clockid_t>,
@@ -378,16 +380,18 @@ fn work(world: Arc<worldgen::World>, queue: &(Mutex<Queue>, Condvar), send: &Sen
     queue.0.lock().expect("queue").clocks.push(own_clock());
     let mut worker = Worker::new(world);
     loop {
-        let taken = {
+        let (gone, taken) = {
             let mut q = queue.0.lock().expect("queue");
             loop {
+                let gone = std::mem::take(&mut q.gone);
                 match worker.take(&mut q) {
-                    Some(taken) => break taken,
-                    None => q = queue.1.wait(q).expect("queue"),
+                    None if gone.is_empty() => q = queue.1.wait(q).expect("queue"),
+                    taken => break (gone, taken),
                 }
             }
         };
-        for made in worker.make(taken) {
+        drop(gone);
+        for made in taken.into_iter().flat_map(|taken| worker.make(taken)) {
             if send.send(made).is_err() {
                 return;
             }
@@ -567,9 +571,9 @@ impl World {
             tiles.retain(|&id, _| !far(level, id));
             changed[level] |= tiles.len() < before;
         }
-        if let Some(shared) = &self.shared {
-            shared.forget(|level, key| far(level, key.map(|k| k as i32)));
-        }
+        // What the light forgot is long to free: a thread's to, if the world has any.
+        let gone = self.shared.as_ref().and_then(|shared| shared.forget(|level, key| far(level, key.map(|k| k as i32))));
+        let gone = gone.filter(|_| self.threads > 0);
 
         let (mut list, mut listed) = (VecDeque::new(), HashSet::new());
         let unlit = |tile: &Tile, [x, y, z]: [i32; 3]| usize::try_from(tile.grid.brick(x, y, z)).is_ok_and(|f| tile.light(f).is_none());
@@ -591,7 +595,8 @@ impl World {
             let mut q = self.queue.0.lock().expect("queue");
             q.lit = lit != Lit::Not;
             list.retain(|job| !q.in_flight.contains(&(job.0, job.1)));
-            if !list.is_empty() {
+            q.gone.extend(gone);
+            if !list.is_empty() || !q.gone.is_empty() {
                 self.queue.1.notify_all();
             }
             q.wanted = list;

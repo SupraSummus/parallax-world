@@ -284,15 +284,18 @@ impl Shared {
 
     /**
      * Forgets what was made whose every tile `far` says is far, by level
-     * and key, and its light with it, to make again if asked.
+     * and key, and its light with it, to make again if asked. Returns
+     * what it forgot, if anything, for its caller to let go where it has
+     * the time: freeing it is long.
      */
-    pub fn forget(&self, far: impl Fn(usize, [i64; 3]) -> bool) {
+    pub fn forget(&self, far: impl Fn(usize, [i64; 3]) -> bool) -> Option<Box<dyn Send>> {
         let mut made = self.made.lock().expect("made");
-        let before = made.len();
-        made.retain(|&(level, _), made| !made.tiles.iter().all(|&key| far(level, key)));
-        if made.len() < before {
-            self.forgotten.fetch_add(1, Ordering::Relaxed);
+        let gone: Vec<_> = made.extract_if(|&(level, _), made| made.tiles.iter().all(|&key| far(level, key))).collect();
+        if gone.is_empty() {
+            return None;
         }
+        self.forgotten.fetch_add(1, Ordering::Relaxed);
+        Some(Box::new(gone))
     }
 }
 
