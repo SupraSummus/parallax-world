@@ -1,23 +1,11 @@
-# Product Requirements
+# The worlds
 
-Voxel worlds, generated in pieces at any level of detail,
-and a frontend (`native/`) that draws them,
-in a window and, in a browser with WebGPU, in a page:
-by rays through the voxels,
-or by engines that bake cells of the lattice into chunks
-(window only; its options are in `native/src/main.rs`).
-Voxels are rhombic dodecahedra on the face-centred cubic (FCC) lattice,
-not cubes; scenes keep their shapes (flat walls along the axes,
+What there is to see in the worlds, and how to look at them.
+Their voxels are rhombic dodecahedra, not cubes;
+scenes keep their shapes (flat walls along the axes,
 rectangular buildings), only their surfaces are made of rhombi.
 
-## Goals
-
-- **Cheap camera movement.** Moving makes only what comes into view.
-- **Close to true perspective.** Nothing that perspective would hide shows
-  by more than a set angle.
-- **Event-driven.** Nothing renders while the camera is idle.
-
-## Features
+## Looking at them
 
 **Camera** – Arrow keys or dragging on the scene turn it all around
 (up to straight up or down). W/S forward/back and A/D left/right along
@@ -35,7 +23,7 @@ then the next coarser.
 A voxel may look different through each of its 12 faces,
 so a coarse voxel at a house's eaves is roof from above and wall from the side.
 See-through voxels (mist, the sea) add up along a ray.
-The chunks engines (`--engine`) instead bake cells of the lattice
+The chunks engines (`--engine`, window only) instead bake cells of the lattice
 as seen along twelve directions, and draw them in relief.
 See [architecture.md](architecture.md).
 
@@ -43,8 +31,22 @@ See [architecture.md](architecture.md).
 or lit by light worked out across the world:
 the sky, the sun and what glows, each as bright as its slider says.
 
-**Worlds** – Procedurally generated, by name and seed (`--world`, `--seed`,
+**Views in the URL** – The page's query can give the world, its seed,
+the camera, where it looks, the field of view, the render distance
+and the light, so a view can be shown again:
+the same options the native frontend takes on its command line.
+
+**Panel** – The engine, the field of view and render distance,
+the lighting, walking, the flying speed,
+and where each frame's time went.
+
+## The worlds
+
+Procedurally generated, by name and seed (`--world`, `--seed`,
 or the page's query); the camera starts at the world's spawn point.
+Each is generated around the camera in the background, finest first,
+and again where the camera goes:
+each level of detail reaches twice as far as the one before, to 11 km.
 - *Forest*: an endless autumn forest valley on hills kilometres
   wide: a winding path, spruces, birches and oaks, ferns, bushes, boulders
   and fallen logs.
@@ -53,11 +55,9 @@ or the page's query); the camera starts at the world's spawn point.
   Its finest voxels, 0.125 m, show what is lost further away:
   leaves on twigs, bark and roots, blades of grass,
   berries, mushrooms, cones, pebbles and fallen leaves.
-  Generated around the camera in the background, finest first,
-  and again where the camera goes:
-  each level of detail reaches twice as far as the one before, to 11 km.
-- *Valley* (default, the flagship new structures are added to): the forest, with a town on its path
-  every kilometre or so, the first ahead of the camera:
+- *Valley* (default, and where new structures go first):
+  the forest, with a town on its path every kilometre or so,
+  the first ahead of the camera:
   hamlets, villages and market towns,
   each in a style of its own: southern plaster under low red tiles,
   northern walls under steep slate, timber frames, or brick with stepped gables.
@@ -75,32 +75,30 @@ or the page's query); the camera starts at the world's spawn point.
   wayside chapels, ponds, farmsteads and windmills.
   The valley winds, its path along the lowest of its floor.
   Mountain ranges along both sides: crests, peaks and passes,
-  side valleys, rock spurs and gorges at their feet, arêtes and cirques behind the crests,
+  side valleys, rock spurs and gorges at their feet,
+  arêtes and cirques behind the crests,
   meadows and scree above the treeline, snow in high hollows.
   Past a few kilometres of them the land leaves the ranges:
   west, a lowland falling to the sea, its coast ragged with bays and islands;
   east, an upland under the treeline, moor and forest.
-  A railway up one side of the valley, along the slopes where that spares it structures:
+  A railway up one side of the valley,
+  along the slopes where that spares it structures:
   ballast, sleepers and rails in cuttings and on embankments,
   bridges on piers over the gorges at the mountains' feet,
   lined tunnels through their rock spurs,
   and a station by each town it passes on the ground.
-  Generated like the forest.
 - *Moor*: the valley's moorland alone: rolling heath, a stream and pools,
   mist in its hollows, boulders,
   and steadings with a path of cairns between hut and ring.
-  Generated like the forest.
 - *Learned*: the forest, with settlements along its path
   drawn by a split grammar learned from the valley's towns
   (`lab/`), not written.
-  Generated like the forest.
 - *City*: a district of a few blocks,
   for checking flat walls, thin frames and openings:
   low buildings whose rooms form a maze of doorways,
   with windows, balconies, courtyards, furniture, street lamps and trees,
   on lawn.
   The camera starts in front of an open entrance.
-  Generated like the forest.
 - *Cheese*: cheese endless every way,
   holed through with caverns a few metres wide, tunnels between them
   and eyes in their walls, lit by glowing crystals on the caverns' walls
@@ -108,18 +106,3 @@ or the page's query); the camera starts at the world's spawn point.
   Walkable: up the caverns' floors, along the tunnels,
   and up the winding stairs round a pillar in each cavern
   into the one over it.
-  Generated like the forest.
-
-**Views in the URL** – The page's query can give the world, its seed,
-the camera, where it looks, the field of view, the render distance
-and the light, so a view can be shown again:
-the same options the native frontend takes on its command line.
-
-**Panel** – The engine, the field of view and render distance,
-the lighting, walking, the flying speed,
-and where each frame's time went.
-
-## Non-goals (for the POC)
-
-- Rolling the camera.
-- Mobile/touch controls.

@@ -64,6 +64,8 @@ the engine simplifies what a viewer won't notice
 and bounds, as an angle on screen, how far the rest can be off
 (section 2 of [docs/architecture.md](docs/architecture.md),
 where the sections below are too).
+Moving makes only what comes into view,
+and once a view is complete nothing is drawn till the camera moves.
 
 1. **Rhombic dodecahedra on the FCC lattice.**
    A voxel meets its 12 nearest neighbours face to face, all equally far,
