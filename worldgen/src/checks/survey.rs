@@ -66,7 +66,7 @@ pub struct Stratum {
     pub kind: Option<Kind>,
     /** How many places it was found at. */
     pub found: usize,
-    /** A box around each of the PLACES of them nearest spawn, at most a region wide: parts' bounds, around a field's samples. */
+    /** A box around each of the PLACES of them nearest spawn, at most a region wide: parts' bounds, a field's site at its surface. */
     pub places: Vec<Box3>,
 }
 
@@ -163,7 +163,7 @@ pub fn survey(world: &World, region: i64, wanted: impl Fn(&str) -> bool) -> Surv
                 things.push(seen);
             }
             Layer::Field(field) => {
-                let drawn = around(world, |centre, cube| survey_field(world, centre, cube, field, region, &mut found), |d| *d);
+                let drawn = around(world, |centre, cube| survey_field(world, centre, cube, field, &mut found), |d| *d);
                 layers.push(Surveyed { layer: field.name, half: SIDE / 2, found: drawn, seconds: start.elapsed().as_secs_f64() });
             }
         }
@@ -194,9 +194,9 @@ fn around<T>(world: &World, mut survey: impl FnMut([i64; 3], (u32, i64)) -> T, f
  * `level` in a cube `side` wide, at a height in it, into `found`; returns
  * at how many.
  */
-fn survey_field(world: &World, centre: [i64; 3], (level, side): (u32, i64), field: &Field, region: i64, found: &mut Found) -> usize {
+fn survey_field(world: &World, centre: [i64; 3], (level, side): (u32, i64), field: &Field, found: &mut Found) -> usize {
     let mut random = Rng::new(hash_text(field.name, world.generator.seed));
-    let (half, s) = (region / 2, 1i64 << level);
+    let s = 1i64 << level;
     let cube = world.within(Box3::around(centre, side / 2));
     let (h0, h1) = (cube.min[1], cube.max[1]);
     let side = side / s;
@@ -237,8 +237,10 @@ fn survey_field(world: &World, centre: [i64; 3], (level, side): (u32, i64), fiel
         drawn += 1;
         let carves = field.op == Op::Carve;
         let at = if carves { (from + to) / 2 } else { to };
-        let mut place = Box3 { min: p.map(|v| v - s / 2), max: p.map(|v| v + s / 2) };
-        (place.min[along], place.max[along]) = (at - half, at + half);
+        // The site, moved there: fields whose surfaces are near share a region.
+        let mut centre = p;
+        centre[along] = at;
+        let place = Box3::around(centre, s / 2);
         let kinds: BTreeSet<Option<Kind>> = if carves { [None].into() } else { kinds.into_iter().map(Some).collect() };
         for kind in kinds {
             found.add((field.name.to_string(), kind), 1, [place]);

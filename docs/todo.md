@@ -245,14 +245,21 @@ Numbers are for the forest at 1280×800, as measured when written.
   Naming a landmark's node by its variant, as towns name their children,
   would part them; or the survey could count which code drew each part.
 - **A part's kinds share its places**, so they share its cells
-  (`worldgen::checks::cells`): a house's wall and its wood measure the same.
+  (`worldgen::checks::cells`): a house's wall and its wood measure the same,
+  a line each in the baselines.
+  Checked by the part's name (tried), a kind only one variant draws is averaged away:
+  the landmarks' worst fell by two thirds.
+  Strata by variant (above) come first.
   A cell could count for a kind only where the finer level draws it.
-- **A field's places are a region tall** (`worldgen::checks::survey`),
-  so two fields share a region only where their tops are level:
-  the forest's grass, litter and needles take three.
-  A place as tall as the surface it marks would pack them.
+- **A part that only carves is no stratum** (`kinds_of` in `worldgen::checks::survey`),
+  though a field that carves is one: a thing's cuts get no region of their own.
+- **Rarity is counted two ways** (`Stratum::found`): a population's parts
+  in a cube grown until there are enough, a field's columns in all 16 km.
+  The rarest go first by these counts; places per area would compare them.
 - **The survey asks each field at every column of 16 km**, a million,
   at every seed: most of a seed's survey.
+  Over 4 km, or at columns of level 9, it lost strata (tried):
+  the valley's rare ponds and kinds of heath, the moor's stream bed.
 - **A component is checked apart from a world** (`check_component`):
   `check` narrowed to its name, at several places a stratum, would do.
 - **The solids' scenes ask little against the level two finer.**
