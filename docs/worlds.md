@@ -70,7 +70,7 @@ each level of detail reaches twice as far as the one before, to 11 km.
   Moorland on the uplands under the treeline,
   and along stretches of the valley kilometres apart:
   heather, grass and bog, pools in hollows, mist pooled in them, boulders,
-  and steadings of a drystone hut and a ring of standing stones.
+  and steadings of a drystone hut, walked into, and a ring of standing stones.
   Landmarks standing alone: a ruined keep on a hilltop, a watchtower,
   wayside chapels, ponds, farmsteads and windmills.
   The valley winds, its path along the lowest of its floor.
