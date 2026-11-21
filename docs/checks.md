@@ -46,6 +46,13 @@ so a rare thing is checked without being listed,
 and in itself, not averaged with the rest of a region;
 but a part's variants drawing the same kinds are one stratum,
 and a part's kinds share its places.
+A region holds every stratum surveyed in it, not only those it was laid out for
+(`survey_in`: the survey again, there, keeping every place),
+and a stratum's sample is shared by the regions holding it:
+as many cells and parts as in one region,
+but a common stratum's from wherever the rare ones took regions,
+on slopes, by houses, in a forest,
+not from the one setting it was laid out in.
 A layer that draws nothing surveyed breaks the contract;
 the kinds nothing draws are only printed,
 as worlds share tables of kinds (the moor's is the valley's).
@@ -87,7 +94,8 @@ Not what a ray through many cells sees:
 that differs by what is inherent to seeing each cell as a whole.
 A cell is one site, its look coarse,
 so it is checked on average:
-each stratum's cells, near a surface in its places, a sample, over its regions at every seed
+each stratum's cells, near a surface in its places, a sample, over its regions at every seed,
+each region weighed by its cells
 (drawn by where each cell is, so the same in any region holding it),
 as far apart as `TOLERANCE` (0.045) in how much they stop,
 or in the colour of what they stop (so a thin medium's colour counts as a solid's),
@@ -154,7 +162,7 @@ The first two of these share a region's levels, each generated once (`hold_regio
 - at each level, the region against parts of it 32 sites a side (`parts_hold`),
   each generated alone:
   for each stratum a sample of those meeting its places (`PARTS`),
-  drawn by where each is, as its cells are:
+  drawn by where each is and shared by its regions, as its cells are:
   as many at every level and for every stratum,
   not all of a region's, hundreds at level 0 and a few at the coarsest.
   A field's places reach above and under its surface,

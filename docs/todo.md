@@ -242,7 +242,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   Then `Region` would go.
 - **Things' variants of one part, drawing the same kinds, are one stratum**
   (`worldgen::checks::survey`): a ruin and a watchtower, both of stone,
-  are checked in one region between them.
+  are measured as one between them.
   Naming a landmark's node by its variant, as towns name their children,
   would part them; or the survey could count which code drew each part.
 - **A part's kinds share its places**, so they share its cells
