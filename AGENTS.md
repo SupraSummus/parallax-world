@@ -71,6 +71,7 @@ worldgen/                    # The world-generation engine, no direction up in i
 │   ├── world.rs             # World: what a host needs to show one
 │   ├── entry.rs             # Entry: a world by name, what its checks hold it to; its tests (world_tests!)
 │   ├── tiles.rs             # A world's tiles, as hosts and light take them
+│   ├── time.rs              # Time, a prototype: worlds that move
 │   ├── picture.rs           # Pictures of a world, by rays through its voxels
 │   ├── png.rs               # A small PNG encoder, every crate's
 │   ├── cost.rs              # What generating costs, against a baseline (docs/checks.md)
@@ -103,6 +104,7 @@ worlds/                      # The worlds, on worldgen's and ground's public API
 │   │   ├── landmarks.rs     # Keeps, chapels, ponds, farmsteads, windmills
 │   │   ├── moor.rs          # The moor; alone, the worlds moor and fog
 │   │   ├── mountains.rs     # The valley's ranges
+│   │   ├── sky.rs           # The valley's clouds, driven by the wind
 │   │   └── railway.rs       # The valley's railway
 │   ├── city.rs              # The city: blocks of buildings on a plan
 │   ├── learned.rs           # Settlements drawn by a grammar learned in lab/

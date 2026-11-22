@@ -14,6 +14,7 @@ pub mod landmarks;
 pub mod moor;
 pub mod mountains;
 pub mod railway;
+pub mod sky;
 pub mod town;
 
 use std::sync::Arc;
@@ -155,13 +156,14 @@ pub fn valley(seed: u64) -> World {
         Fields::new(scope, path, bidding)
     };
     let domains: [Arc<dyn Domain>; 7] = [Arc::new(forest), towns, Arc::new(fields), landmarks, moor, ranges, railway];
-    let layers = compose(&domains, &ground, town::BID_SCALE, LEAD);
+    let mut layers = compose(&domains, &ground, town::BID_SCALE, LEAD);
+    layers.push(sky::clouds(seed));
     World { generator: Generator { kinds: kinds(), seed: world.seed("layers"), layers }, spawn, heights: Some(mountains::HEIGHTS), points }
 }
 
 /** The valley's kinds, each domain's after those of the domains it draws from; the moor alone has them too. */
 pub fn kinds() -> Vec<KindDef> {
-    [forest::KINDS, town::KINDS, fields::KINDS, mountains::KINDS, landmarks::KINDS, moor::KINDS, railway::KINDS].concat()
+    [forest::KINDS, town::KINDS, fields::KINDS, mountains::KINDS, landmarks::KINDS, moor::KINDS, railway::KINDS, sky::KINDS].concat()
 }
 
 /**

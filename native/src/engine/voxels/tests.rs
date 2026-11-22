@@ -181,6 +181,29 @@ fn a_window_moved_and_its_tiles_changed_holds_what_a_new_one_would() {
     }
 }
 
+/** Tiles made anew (World::now), each as it was: what showed shows all the while, rays asking for nothing more. */
+#[test]
+fn a_tile_made_anew_shows_in_the_step_the_old_one_goes() {
+    let (eye, tiles) = (EYE, FOREST.clone());
+    let (mut windows, mut slots) = (Windows::new(1 << 20, false), HashMap::new());
+    settle(&mut windows, &tiles, eye, &mut slots);
+    let before = holds(&windows, &slots);
+    let shown = |held: &Holds| held.0.iter().flatten().filter(|(e, _)| e.is_ok()).count();
+    let anew = Arc::new(Level::new(tiles.tiles.iter().map(|(id, t)| (id, Arc::new(Tile::new(id, t.grid.clone()))))));
+    windows.windows[0].asked.clear();
+    let mut steps = 0;
+    while windows.windows[0].level.as_ref().is_none_or(|l| !Arc::ptr_eq(l, &anew)) {
+        let (added, _) = windows.sync(std::slice::from_ref(&anew), eye);
+        for a in added {
+            slots.insert(a.slot, words(&a.tile.grid, a.first, a.part).to_vec());
+        }
+        assert_eq!(shown(&holds(&windows, &slots)), shown(&before), "step {steps}");
+        steps += 1;
+    }
+    assert!(steps > 1, "{steps} steps: STEP tiles a step");
+    assert!(holds(&windows, &slots) == before);
+}
+
 #[test]
 fn lit_a_window_places_the_bricks_rays_asked_for_once_lit() {
     let eye = EYE;
