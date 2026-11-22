@@ -26,6 +26,7 @@ use ground::FieldAbout;
 use ground::column::Column;
 use ground::domain::{Domain, Lie, Scope, compose, eased};
 use ground::plan::{Claims, Holding, Plan, Sloped};
+use worldgen::Entry;
 use worldgen::frame::{Frame, Part, U, V, W, back};
 use worldgen::generator::{ANY_SIZE, Child, Children, Generator, Layer, Node, Op, Population, Shapes};
 use worldgen::grid::Box3;
@@ -488,6 +489,9 @@ impl Domain for Settlements {
         town_layers(self, hold, ground.clone())
     }
 }
+
+/** The learned town, checked to level 4. */
+pub const LEARNED: Entry = Entry { name: "learned", make: learned, levels: 4, accuracy: &[], known: &[] };
 
 /** The learned town of `seed`; the camera starts in the forest, on the path to the first settlement. */
 pub fn learned(seed: u64) -> World {

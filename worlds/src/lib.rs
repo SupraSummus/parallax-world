@@ -1,6 +1,6 @@
 //! The worlds, built on worldgen's engine with its public API only, and
 //! the registry hosts start them from by name (docs/generators.md): those
-//! here, and those in crates of their own (cheese/).
+//! here, and those in crates of their own (cheese/), each crate's WORLDS.
 
 pub mod city;
 pub mod forest;
@@ -9,8 +9,9 @@ pub mod path;
 pub mod scene;
 pub mod valley;
 
+use worldgen::Entry;
+#[cfg(feature = "sponza")]
 use worldgen::World;
-use worldgen::checks::contract::Accuracy;
 use worldgen::units::m;
 
 /**
@@ -20,43 +21,26 @@ use worldgen::units::m;
  */
 pub const SURFACE: i64 = m(4.0);
 
-/** A world hosts can start by name, with how far the contract checks it. */
-pub struct Entry {
-    pub name: &'static str,
-    /** The world of a seed. */
-    pub make: fn(u64) -> World,
-    /** The level up to which its cells look as what is in them (worldgen::checks::contract). */
-    pub levels: u32,
-    /**
-     * How closely its strata do, on average, by name: a thing's or a
-     * layer's covers its parts (Accuracy::of); DEFAULT for the rest.
-     */
-    pub accuracy: &'static [(&'static str, Accuracy)],
-}
-
-/** The seed worlds are checked at first, and their cost measured at alone. */
-pub const SEED: u64 = 42;
-
-/** Every world. */
+/** The worlds of this crate (worldgen's entry.rs). */
 pub const WORLDS: &[Entry] = &[
-    Entry { name: "forest", make: forest::forest, levels: 6, accuracy: &[] },
-    Entry { name: "valley", make: valley::valley, levels: 4, accuracy: &[] },
-    Entry { name: "moor", make: valley::moor::moor, levels: 5, accuracy: &[] },
-    // The moor in fog (moor.rs's FOG), mist over all of it: where see-through voxels cost a host most.
-    Entry { name: "fog", make: valley::moor::fog, levels: 5, accuracy: &[] },
-    Entry { name: "learned", make: learned::learned, levels: 4, accuracy: &[] },
-    // To level 3: at level 4, sites 2 m apart, a building's measured outline (city.rs, INSIDE) is kept or lost a site at a time.
-    Entry { name: "city", make: city::city, levels: 3, accuracy: &[] },
-    // To level 7, past which the caverns are buried (cheese/src/lib.rs, `carved`).
-    // From level 4 on, caves have no pillars or stairs, and their crystals are their far form (SIZE).
-    Entry { name: "cheese", make: cheese::cheese, levels: 7, accuracy: &[] },
+    forest::FOREST,
+    valley::VALLEY,
+    valley::moor::MOOR,
+    valley::moor::FOG,
+    learned::LEARNED,
+    city::CITY,
     #[cfg(feature = "sponza")]
-    Entry { name: "sponza", make: sponza, levels: 5, accuracy: &[] },
+    Entry { name: "sponza", make: sponza, levels: 5, accuracy: &[], known: &[] },
 ];
+
+/** Every world hosts start by name: each crate's WORLDS. */
+pub fn all() -> impl Iterator<Item = &'static Entry> {
+    [WORLDS, cheese::WORLDS].into_iter().flatten()
+}
 
 /** The world named `name`. */
 pub fn by_name(name: &str) -> Option<&'static Entry> {
-    WORLDS.iter().find(|e| e.name == name)
+    all().find(|e| e.name == name)
 }
 
 /** Crytek's Sponza at twice its size (docs/generators.md, "Scenes"); the same at every seed. */

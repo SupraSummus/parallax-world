@@ -17,7 +17,6 @@ use ground::column::Column;
 use ground::domain::{Domain, Lie, Scope, compose, eased};
 use ground::plan::{Claims, Holding, Plan, Sloped};
 use ground::{FieldAbout, PopulationOn};
-use worldgen::World;
 use worldgen::build::thick;
 use worldgen::frame::{Frame, Part, facing, walls};
 use worldgen::generator::{ANY_SIZE, Child, Far, Field, Generator, Kind, Layer, Meets, Node, Op, Population, Shape, Span};
@@ -25,6 +24,7 @@ use worldgen::js;
 use worldgen::kinds;
 use worldgen::noise::{Fbm, Fx, Rng, ValueNoise, fx, hash64, smoothstep};
 use worldgen::units::{Units, m};
+use worldgen::{Entry, World};
 
 use super::landmarks::{self, Landmarks};
 use super::mountains::{self, K as A};
@@ -102,9 +102,9 @@ const SURE: Fx = fx(0.2);
  * too: the ground is made once for each.
  */
 const MIST_RING: i64 = m(24.0);
-const MIST: Mist = Mist { under: Units::m(1.0), over: Units::m(3.0), extinction: 3.9 / m(15.0) as f64 };
+const IN_HOLLOWS: Mist = Mist { under: Units::m(1.0), over: Units::m(3.0), extinction: 3.9 / m(15.0) as f64 };
 /** Fog: mist lying 8 m over the mean of the ground round it, 6 m more in patches, some 60 m seen through. */
-const FOG: Mist = Mist { under: Units::m(-8.0), over: Units::m(6.0), extinction: 3.9 / m(60.0) as f64 };
+const OVER_ALL: Mist = Mist { under: Units::m(-8.0), over: Units::m(6.0), extinction: 3.9 / m(60.0) as f64 };
 const WALL: i64 = 3;
 
 /** How mist lies: its top under the mean of the ground round it, how much higher in patches, and how thick it is per unit. */
@@ -517,7 +517,15 @@ impl Uplands {
     /** The moorland on them: steadings, fewer than on the moor alone, and pools where it leads; no stream. */
     pub fn moorland(self: &Arc<Self>, scope: &Scope) -> Moorland {
         let (terrain, lead) = (self.terrain.clone(), self.clone());
-        Moorland::new(scope, Arc::new(move |x, z| terrain.ground(x, z)), Arc::new(move |x, z| lead.lead(x, z)), fx(0.225), None, None, MIST)
+        Moorland::new(
+            scope,
+            Arc::new(move |x, z| terrain.ground(x, z)),
+            Arc::new(move |x, z| lead.lead(x, z)),
+            fx(0.225),
+            None,
+            None,
+            IN_HOLLOWS,
+        )
     }
 }
 
@@ -635,14 +643,20 @@ impl Heath {
     }
 }
 
+/** The moor, checked to level 5. */
+pub const MOOR: Entry = Entry { name: "moor", make: moor, levels: 5, accuracy: &[], known: &[] };
+
+/** The moor in fog, mist over all of it (OVER_ALL): where see-through voxels cost a host most. */
+pub const FOG: Entry = Entry { name: "fog", make: fog, levels: 5, accuracy: &[], known: &[] };
+
 /** The moor of `seed`, all of it; the camera starts behind the first steading's hut, looking past it to the ring. */
 pub fn moor(seed: u64) -> World {
-    moor_in(seed, MIST)
+    moor_in(seed, IN_HOLLOWS)
 }
 
-/** The moor of `seed` in fog (FOG): mist over all of it, as thick as the moor's is in its hollows. */
+/** The moor of `seed` in fog (OVER_ALL): mist over all of it, as thick as the moor's is in its hollows. */
 pub fn fog(seed: u64) -> World {
-    moor_in(seed, FOG)
+    moor_in(seed, OVER_ALL)
 }
 
 /** The moor of `seed`, its mist lying as `lies` says. */
@@ -959,7 +973,7 @@ mod tests {
     #[test]
     fn a_body_walks_into_a_hut_and_stands_in_it() {
         for seed in [1, 7, 42] {
-            let s = heath_and_moorland(&Scope::new(seed), MIST).1.steading(0, 0).expect("a steading by the origin");
+            let s = heath_and_moorland(&Scope::new(seed), IN_HOLLOWS).1.steading(0, 0).expect("a steading by the origin");
             let world = moor(seed);
             let level = COLLISION_LEVEL;
             let [cx, cz] = s.centre;

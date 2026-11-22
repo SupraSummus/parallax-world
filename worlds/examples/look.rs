@@ -26,7 +26,7 @@
 use light::{Brightness, Light, Shared};
 use worldgen::generator::kind_of;
 use worldgen::picture::{Camera, picture_on_threads};
-use worlds::{WORLDS, by_name};
+use worlds::{all, by_name};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -37,7 +37,7 @@ fn main() {
     let number = |i: usize| args.get(i).and_then(|a| a.parse::<f64>().ok()).unwrap_or_else(|| panic!("a number at {i}: {usage}"));
     let seed = number(1) as u64;
     let Some(entry) = by_name(&args[0]) else {
-        let names: Vec<&str> = WORLDS.iter().map(|e| e.name).collect();
+        let names: Vec<&str> = all().map(|e| e.name).collect();
         eprintln!("no world {}; the worlds are {}", args[0], names.join(", "));
         std::process::exit(1);
     };

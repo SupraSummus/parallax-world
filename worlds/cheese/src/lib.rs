@@ -16,6 +16,7 @@
 use std::sync::{Arc, OnceLock};
 
 use worldgen::World;
+use worldgen::entry::{Entry, Known};
 use worldgen::generator::{Child, Field, Fill, Generator, Layer, Meets, Node, Op, Point, Population, Shadows, Shape, ball};
 use worldgen::js;
 use worldgen::kinds;
@@ -403,6 +404,29 @@ fn grottoes(seeds: Seeds) -> Population {
             Some(Node::group(std::iter::once(stairs).chain(clusters).collect()))
         })
 }
+
+/**
+ * The cheese, checked to level 7, past which the caverns are buried
+ * (`carved`). From level 4 on, caves have no pillars or stairs, and their
+ * crystals are their far form (SIZE).
+ */
+pub const CHEESE: Entry = Entry {
+    name: "cheese",
+    make: cheese,
+    levels: 7,
+    accuracy: &[],
+    // Why: docs/todo.md, "Five of the cheese's tiles are over the cost budget".
+    known: &[
+        Known::OverBudget("spawn", 3),
+        Known::OverBudget("spawn", 4),
+        Known::OverBudget("spawn", 5),
+        Known::OverBudget("spawn", 6),
+        Known::OverBudget("spawn", 7),
+    ],
+};
+
+/** The worlds of this crate (worldgen's entry.rs). */
+pub const WORLDS: &[Entry] = &[CHEESE];
 
 /** The cheese of a seed; the camera starts beside the pillar of the cavern of the origin's cell. */
 pub fn cheese(seed: u64) -> World {

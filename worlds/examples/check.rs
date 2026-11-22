@@ -10,14 +10,15 @@
 //! CONTRACT_BLESS=1 takes one before a change, to see what it does.
 
 use worldgen::checks::contract::{breaks, check, hold_to_baseline};
-use worlds::{SEED, WORLDS, by_name};
+use worldgen::entry::SEED;
+use worlds::{all, by_name};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let usage = "check <world> <component> [seed <n>] [levels <n>] [alone]";
     let (Some(world), Some(component)) = (args.first(), args.get(1)) else { panic!("{usage}") };
     let Some(entry) = by_name(world) else {
-        let names: Vec<&str> = WORLDS.iter().map(|e| e.name).collect();
+        let names: Vec<&str> = all().map(|e| e.name).collect();
         eprintln!("no world {world}; the worlds are {}", names.join(", "));
         std::process::exit(1);
     };

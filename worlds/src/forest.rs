@@ -12,7 +12,6 @@ use ground::column::lowest_around;
 use ground::domain::{Domain, Lie, Scope, compose};
 use ground::plan::{Holding, Plan, Sloped};
 use ground::{FieldAbout, PopulationOn};
-use worldgen::World;
 use worldgen::generator::{Generator, Holds, Layer, Line, Node, Op, Point, Population, Shape, Span};
 use worldgen::js::{self, round};
 use worldgen::kinds;
@@ -20,6 +19,7 @@ use worldgen::noise::{Fbm, Fx, Rng, ValueNoise, fx, hash, hash64, smoothstep, un
 use worldgen::points::{Blur, MARKS, Points, Rooms};
 use worldgen::sites;
 use worldgen::units::{UNIT_SIZE, Units, m};
+use worldgen::{Entry, World};
 
 use crate::path::{Path, Spine};
 
@@ -422,6 +422,9 @@ fn read_samples(text: &str) -> HashMap<i64, Sampled> {
     }
     samples
 }
+
+/** The forest, checked to level 6. */
+pub const FOREST: Entry = Entry { name: "forest", make: forest, levels: 6, accuracy: &[], known: &[] };
 
 /** The forest of `seed`, alone on the relief, all of it its own. */
 pub fn forest(seed: u64) -> World {

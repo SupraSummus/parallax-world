@@ -67,9 +67,9 @@ jobs:
       - name: Test
         run: pnpm test
 
-      # pnpm hands what follows `--` to test:worlds' command.
+      # pnpm hands what follows `--` to test:worlds' command; pnpm test ran their costs.
       - name: Test the worlds' directions and places
-        run: pnpm test:worlds -- --skip 'keeps_the_contract::'
+        run: pnpm test:worlds -- --skip 'keeps_the_contract::' --skip 'cost::'
 
   # The worlds' contract, but the valley's: a test each, run side by side.
   contract:
@@ -80,7 +80,7 @@ jobs:
 
       # Only Cargo, which the runner has.
       - name: Test the worlds' contract, but the valley's
-        run: cargo test --release -p worlds --test contract -- --skip keeps_the_contract::valley
+        run: cargo test --release -p worlds -p cheese --test checks keeps_the_contract:: -- --skip keeps_the_contract::valley
 
   valley-contract:
     runs-on: ubuntu-latest
@@ -90,7 +90,7 @@ jobs:
 
       # Only Cargo, which the runner has.
       - name: Test the valley's contract
-        run: cargo test --release -p worlds --test contract keeps_the_contract::valley
+        run: cargo test --release -p worlds --test checks keeps_the_contract::valley
 
   # The native frontend's GPU half, which the other jobs do not run,
   # on Mesa's software Vulkan: its tests that draw, and a view drawn.

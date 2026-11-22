@@ -14,10 +14,11 @@ the forest with towns, fields, landmarks, moorland and a railway
 between mountains, six domains composed as in "Composing",
 the city (`city.rs`), boxes on a plan of quarter metres,
 and the cheese (`worlds/cheese/`), endless every way, no way up but for walking it;
-a host starts any by name from `WORLDS` (`worlds/src/lib.rs`),
+a host starts any by name (`worlds::all`, `worlds/src/lib.rs`),
 as a `World`: its generator, spawn and heights
 (the bounds it has anything in, with a sky over them; the cheese has none),
 and the places it names (`points`).
+Each crate of worlds lists its `Entry`s as its `WORLDS`, and tests them ([checks.md](checks.md)).
 Integers and fixed point (`noise.rs`) decide wherever they can,
 so a world is the same on every machine and as fine far from the origin.
 

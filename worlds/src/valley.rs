@@ -20,6 +20,7 @@ use std::sync::Arc;
 
 use ground::domain::{Domain, Lie, Scope, compose};
 use ground::plan::Plan;
+use worldgen::entry::{Entry, Known};
 use worldgen::generator::{Generator, KindDef};
 use worldgen::noise::{Fx, fx};
 use worldgen::units::{Units, m};
@@ -92,6 +93,20 @@ impl Terrain {
         self.lie.at(x, z)
     }
 }
+
+/** The valley, checked to level 4, where its things break. */
+pub const VALLEY: Entry = Entry {
+    name: "valley",
+    make: valley,
+    levels: 4,
+    accuracy: &[],
+    known: &[
+        // Why: docs/todo.md, "Towns and the city line up with the lattice".
+        Known::Turned("town"),
+        // Why: docs/todo.md, "One of the valley's tiles is over the cost budget".
+        Known::OverBudget("town", 3),
+    ],
+};
 
 /**
  * The valley of `seed`, its domains in bands: the relief and the ranges,

@@ -38,8 +38,8 @@ use world::{Piece, TILE, Wants, World};
 #[command(name = "parallax-native", args_override_self = true, max_term_width = 100)]
 #[command(group(clap::ArgGroup::new("pilot").args(["stroll", "replay"])))]
 struct Args {
-    /** The world (worlds::WORLDS). */
-    #[arg(long, default_value = WORLD, value_parser = clap::builder::PossibleValuesParser::new(worlds::WORLDS.iter().map(|w| w.name)))]
+    /** The world (worlds::all). */
+    #[arg(long, default_value = WORLD, value_parser = clap::builder::PossibleValuesParser::new(worlds::all().map(|w| w.name)))]
     world: String,
     /** Its seed. */
     #[arg(long, default_value_t = 12345)]

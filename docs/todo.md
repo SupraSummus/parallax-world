@@ -84,7 +84,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   the fields, towns, the learned town, the moor, the forest and the railway
   still lay theirs half a metre to a metre deep on ground of another kind.
   The depth that keeps a world's levels alike is that of its coarsest checked
-  (`levels` in `WORLDS`: the forest's is 6, so 16 m),
+  (its entry's `levels`: the forest's is 6, so 16 m),
   so `SURFACE` could be read from it, or `Column` could know it.
 - **Some fields still keep their levels by rules of their own** (`sites::spacing`):
   the ponds' reeds, the rails and the city's roads leave detail out by level,
@@ -189,10 +189,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   its nearest town twice at level 8 (the land asks at its dithered points).
   With eight times the slots, each was made once;
   pairs or fours of slots per column cost more than they saved.
-- **Hashing is the forest's largest single cost.**
-  Each site hashes twice (shade, pick),
-  each `hash64` mixing three times, as do noise corners.
-  A cheaper hash would change every world.
 
 ## Checks and cost
 
@@ -307,16 +303,10 @@ Numbers are for the forest at 1280×800, as measured when written.
   the moor's is the valley's, the learned town's the first of it.
   With only the kinds it draws, a world could fail on a kind
   drawn only far from spawn, or never.
-- **Worlds are not yet crates of their own.**
-  One should be written without touching another world or the engine,
-  using others' pieces as crates.
-  Only the cheese is one (`worlds/cheese/`),
-  and it still needs its entry in `WORLDS`, its name in three tests' `worlds!`
-  and its cost baseline in `worlds/` (checks.md).
-  With `Entry` in `worldgen`,
-  each world's crate could give its entry and test itself
-  (one macro of `worldgen::checks`), `WORLDS` a line per crate.
-  Sharing pieces runs into the two items above.
+- **The worlds but the cheese share one crate**, as they share pieces:
+  the forest's ground and kinds, the valley's domains.
+  A world in a crate of its own, using others' pieces as crates,
+  runs into the two items above and "The layout has more to sort".
 - **The railway's track is too bright seen low from level 2.**
   At level 0 its sleepers and rails hide the ballast from a ray coming in low;
   at level 1 a medium of them over it does (`railway.rs`, as `Column::medium`);
@@ -337,14 +327,14 @@ Numbers are for the forest at 1280×800, as measured when written.
   goes mostly to the trees at levels 0 to 2
   and to the canopy from level 4 (`Rooms::owner` making the trees near).
 - **One of the valley's tiles is over the cost budget**
-  (`OVER_BUDGET` in `worlds/tests/cost.rs`), by things done one by one
+  (`Known::OverBudget` in its entry), by things done one by one
   where a tile holds four times as many each level:
   at level 3 the towns' things drawn whole to be measured.
   Drawing one is a quarter of measuring it (`measure` in `forms.rs`):
   the rest counts its fine sites by cell, axis and face,
   with a vector of kinds for each face of each cell.
 - **Five of the cheese's tiles are over the cost budget**
-  (`OVER_BUDGET`): at level 7 a tile holds a few hundred thousand holes,
+  (`Known::OverBudget`): at level 7 a tile holds a few hundred thousand holes,
   each a shape, most of them a site or two
   ("Far forms for what fills space", below);
   at level 3, the grottoes each make the holes around them to place their stairs;
@@ -373,7 +363,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   came 0.10 to 0.15 apart at level 4, in materials hit and from above:
   leaves in place of trunks and of the slope's scree and rock.
 - **Towns and the city line up with the lattice.**
-  `worlds/tests/directions.rs` lists them (`KNOWN`).
+  Their entries list them (`Known::Turned`).
   The valley's first town lays out streets and blocks along x and z,
   and builds in frames of quarter turns (`frame.rs`):
   a four-fold harmonic of 10 %.
@@ -631,16 +621,10 @@ Numbers are for the forest at 1280×800, as measured when written.
   the rest held, most of them empty, each with its indexes (`Tile::new`).
   A host's tiles as they are made, a box each, would hold and index them once;
   `fcc`'s `Tiles` and the windows take cubes.
-- **A level is handed over whole whenever a tile comes or goes**
-  (`Level::new` in `World::update`):
-  its tiles copied and indexed anew,
-  and the voxels' window looking through them all for the new (`retarget`).
-  Small, tiles come by the dozen, most frames:
-  walking the valley lit, level 0 holds some 10 000,
-  and an update takes the main thread 9 ms a frame, 40 at most.
-  A level handed over with what changed,
-  or its tiles kept so that those unchanged are shared,
-  would cost by the change.
+- **A window looks through all its level's tiles at every step** (`retarget`),
+  for those gone and those new,
+  though a level is handed over in blocks shared with the last (fcc's `Blocks`):
+  on the windows' thread, by the tiles held, not by what changed.
 - **A world lit only later makes its tiles twice.**
   Shaded, a tile's sites are not kept (`Queue`'s `lit`):
   the light, turned on in the panel, makes them again.
@@ -795,7 +779,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   or its seeds on several runners (`--nocapture` shows each part's time).
   A seed's regions take longest, then its survey.
   If CI is still too slow, the contract at seeds but `SEED`
-  (`worlds/tests/contract.rs`) could run only on main.
+  (`worldgen/src/entry.rs`) could run only on main.
 - **LLVM 21 compiles AVX-512 code wrong (lavapipe).**
   It may rematerialise a vector of all ones into a register past 15
   in an encoding that cannot name one: the ones land in another register,
@@ -817,12 +801,12 @@ Numbers are for the forest at 1280×800, as measured when written.
     `checks/` and `cost.rs`, which only tests and examples use.
     A crate of their own, as `light/` is, would say so,
     but they read the generator's private parts (`whole`, `checking_skipped`),
-    and `WORLDS`' entries hold the contract's `Accuracy`.
+    and a world's `Entry` holds the contract's `Accuracy`.
   - `worlds/src/forest.rs` is still a world, the ground others build on
     (`Relief`, `Forest`) and the table of kinds they draw with (`K`);
     the valley's domains (`worlds/src/valley/`) use each other in circles.
     The kinds and the ground apart
-    come before "Worlds are not yet crates of their own".
+    come before "The worlds but the cheese share one crate".
   - `worlds/data/cost/valley.txt` is the repo's largest text file,
     grows with every place the valley names,
     and changes with most commits to the worlds;
