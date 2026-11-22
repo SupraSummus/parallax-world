@@ -106,9 +106,17 @@ as the levels that carry it get coarser;
 past a door from a yard, where only bounced light comes,
 a room is about as bright as it should be, and the yard a third as bright.
 
-In a closed white room or the cheese, where light bounces many times,
+In a closed white room, where light bounces many times,
 the light on the floor is a few times too little,
 as little as reaches it from the lamp.
+
+A lamp lights only as far as the coarser levels hold it:
+the cheese's crystals stopped at level 3, and its caverns were black
+a few metres from them.
+Past it they are glowing pieces (`far` in `worlds/cheese/`):
+on its walls, measured by hand, light is a third over the reference;
+drawn as a medium, a sixth under.
+Light reads the two unlike; the contract does not tell them apart.
 
 A site met reflects the light on its one face turned back,
 a third of what it shows that way.

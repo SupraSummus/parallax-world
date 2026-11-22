@@ -68,8 +68,9 @@ fn length(units: f32) -> String {
     format!("{units:.2} units, {:.2} m", f64::from(units) * UNIT_SIZE)
 }
 
-fn three([r, g, b]: [f32; 3]) -> String {
-    format!("{r:.3} {g:.3} {b:.3}")
+/** Three numbers, those under a thousandth as powers of ten: light there is little, not none. */
+fn three(v: [f32; 3]) -> String {
+    v.map(|v| if v == 0.0 || v.abs() >= 1e-3 { format!("{v:.3}") } else { format!("{v:.1e}") }).join(" ")
 }
 
 /** A look: its colour, and what it is of (fcc's Look). */

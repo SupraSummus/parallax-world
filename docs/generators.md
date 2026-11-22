@@ -685,9 +685,13 @@ Drawn see-through, leaves are smoke; as grain, mist is snow.
 So a lamp too small for a coarse site
 is in it as a little glow, and stops a little light.
 A far form without its near form's lamps goes dark,
-as does a child too small to be drawn at a level (give lamps `ANY_SIZE`):
+as does a child too small to be drawn at a level,
+unless the lamps are drawn at any size (`ANY_SIZE`)
+or the far form glows as they do on average:
 lamps light what is far from them only from coarse levels.
-Fields do not glow.
+Past level 3 the cheese's crystals are pieces of sites along its caverns' walls,
+as dense as the crystals measured (`far` in `worlds/cheese/`, `Fill::stopping`):
+pieces, as crystals are, not a medium, which would stop the channels unlike.
 
 ### Landmarks
 
