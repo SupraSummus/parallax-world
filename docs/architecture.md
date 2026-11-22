@@ -660,7 +660,8 @@ Under all of them, it is of pieces held in part, which stop a ray whole or not a
 or of a medium, which stops some of each (`in_part`, `medium`).
 Grids hold colours, not materials:
 a coarse voxel holds the mean of what is in it.
-A voxel may look different through each of its 12 faces (`VOXEL_FACES`),
+A voxel, whole or held in part,
+may look different through each of its 12 faces (`VOXEL_FACES`),
 what is seen of it looking at that face:
 a coarse voxel stands for its cell, which may look different from each side.
 Mostly it looks alike through all;
