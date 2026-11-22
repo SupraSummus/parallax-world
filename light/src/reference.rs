@@ -1,5 +1,5 @@
 //! A reference for `Light`, for tests: the light on a voxel's face found
-//! by following random rays through the voxels of level 0 (worldgen's picture.rs),
+//! by following random rays through the voxels of level 0 (fcc's ray.rs),
 //! bounce after bounce till chance ends them, with none of Light's shortcuts (its 12 directions,
 //! its levels). Voxels are opaque and reflect evenly (Lambert); the sky is as
 //! bright everywhere above the horizon; the sun is a direction, as bright
@@ -9,10 +9,10 @@
 //! ground.
 
 use super::{ALPHA, Brightness, GLOW, GLOW_ONE, Rgb, SKY, SUN, SUN_DIRECTION};
+use fcc::ray::{FACES, first_hit};
 use worldgen::World;
 use worldgen::generator::generate;
 use worldgen::grid::{Box3, COLOUR_ONE, VoxelGrid};
-use worldgen::picture::{FACES, first_hit};
 
 /** What the reference's voxels are generated over: the scenes' and enough ground around them. */
 const BOX: Box3 = Box3 { min: [-256, -2, -256], max: [256, 96, 256] };
@@ -81,14 +81,19 @@ impl Reference {
         let point = add(rhombus(site, face, random), normal.map(|c| c * OFF));
         // The sun, if it reaches the point, and one direction's light, as often as its cosine.
         let cosine = dot(normal, self.sun_direction);
-        let sun = if cosine > 0.0 && first_hit(&self.grid, point, self.sun_direction, FAR).is_none() { cosine as f32 } else { 0.0 };
+        let sun = if cosine > 0.0 && self.hit(point, self.sun_direction).is_none() { cosine as f32 } else { 0.0 };
         let incoming = self.incoming(point, cosine_weighted(normal, random), random, bounces);
         std::array::from_fn(|c| colour[c] as f32 / COLOUR_ONE as f32 * (sun * self.sun[c] + incoming[c]) + glow[c] as f32 * self.glow)
     }
 
+    /** Where a ray from `point` along `direction` first meets a voxel within FAR: how far, its site and the face it enters by. */
+    fn hit(&self, point: [f64; 3], direction: [f64; 3]) -> Option<(f64, [i64; 3], usize)> {
+        first_hit(point, direction, FAR, |[x, y, z]| self.grid.get(x, y, z) != 0)
+    }
+
     /** One sample of the light coming to `point` from `direction`. */
     fn incoming(&self, point: [f64; 3], direction: [f64; 3], random: &mut Random, bounces: usize) -> Rgb {
-        match first_hit(&self.grid, point, direction, FAR) {
+        match self.hit(point, direction) {
             None if direction[1] > 0.0 => self.sky,
             None => [0.0; 3],
             Some((_, site, face)) if bounces > 0 => self.on_face(site, face, random, bounces - 1),

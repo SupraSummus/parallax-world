@@ -2,74 +2,6 @@ use super::*;
 use crate::generator::{ANY_SIZE, KindDef, Layer, Node, Op, Population, SOLID, ball};
 use fcc::light::linear_to_srgb;
 
-#[test]
-fn checksums_are_zlib_and_png_ones() {
-    assert_eq!(crc32(b"123456789"), 0xCBF4_3926);
-    assert_eq!(adler32(b"Wikipedia"), 0x11E6_0398);
-    assert_eq!(adler32(&vec![255; 100_000]), {
-        let (mut a, mut b) = (1u64, 0u64);
-        for _ in 0..100_000 {
-            a = (a + 255) % 65521;
-            b = (b + a) % 65521;
-        }
-        ((b << 16) | a) as u32
-    });
-}
-
-#[test]
-fn a_png_holds_its_pixels() {
-    let (width, height) = (300, 250); // more than one stored block
-    let rgb: Vec<u8> = (0..3 * width * height).map(|i| (i * 7 % 251) as u8).collect();
-    let picture = Picture {
-        width,
-        height,
-        rgb: rgb.clone(),
-        looks: vec![0; width * height],
-        depth: vec![0.0; width * height],
-        sites: vec![[0; 3]; width * height],
-        tiles: 0,
-        generating: Duration::ZERO,
-        casting: Duration::ZERO,
-    };
-    let png = picture.png();
-    assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
-    assert_eq!(&png[png.len() - 12..], [0, 0, 0, 0, b'I', b'E', b'N', b'D', 0xAE, 0x42, 0x60, 0x82]);
-    // Its chunks, each with its CRC; the image data inflated from its stored blocks.
-    let (mut at, mut idat) = (8, Vec::new());
-    while at < png.len() {
-        let length = u32::from_be_bytes(png[at..at + 4].try_into().unwrap()) as usize;
-        let body = &png[at + 4..at + 8 + length];
-        assert_eq!(crc32(body), u32::from_be_bytes(png[at + 8 + length..at + 12 + length].try_into().unwrap()));
-        match &body[..4] {
-            b"IHDR" => assert_eq!(body[4..], [0, 0, 1, 44, 0, 0, 0, 250, 8, 2, 0, 0, 0]),
-            b"IDAT" => idat.extend_from_slice(&body[4..]),
-            _ => {}
-        }
-        at += 12 + length;
-    }
-    assert_eq!((u16::from_be_bytes([idat[0], idat[1]]) % 31, idat[0] & 15), (0, 8));
-    let (mut raw, mut at) = (Vec::new(), 2);
-    loop {
-        let length = u16::from_le_bytes([idat[at + 1], idat[at + 2]]) as usize;
-        assert_eq!(!length as u16, u16::from_le_bytes([idat[at + 3], idat[at + 4]]));
-        raw.extend_from_slice(&idat[at + 5..at + 5 + length]);
-        let last = idat[at] & 1 == 1;
-        at += 5 + length;
-        if last {
-            break;
-        }
-    }
-    assert_eq!(u32::from_be_bytes(idat[at..at + 4].try_into().unwrap()), adler32(&raw));
-    let rows: Vec<u8> = raw
-        .chunks(3 * width + 1)
-        .flat_map(|row| {
-            assert_eq!(row[0], 0);
-            row[1..].to_vec()
-        })
-        .collect();
-    assert_eq!(rows, rgb);
-}
-
 /** A ball of radius 40 at the origin, on the corner of four tiles. */
 fn a_ball() -> Generator {
     Generator {
@@ -93,7 +25,8 @@ fn a_ray_sees_a_voxel_along_its_direction_wherever_it_enters() {
     grid.put_whole(0, 0, 0, std::array::from_fn(|k| [white(k); 3]));
     let seen = |origin: [f64; 3], direction: [f64; 3]| {
         let direction = normalize(direction);
-        first_hit(&grid, origin, direction, 8.0).map(|(_, [x, y, z], face)| (grid.along(x, y, z, direction) & 255, FACES[face][1]))
+        fcc::ray::first_hit(origin, direction, 8.0, |[x, y, z]| grid.get(x, y, z) != 0)
+            .map(|(_, [x, y, z], face)| (grid.along(x, y, z, direction) & 255, FACES[face][1]))
     };
     assert_eq!(seen([0.1, 3.0, 0.2], [0.0, -1.0, 0.0]), Some((255, 1)));
     // Along +x, by its four faces towards −x, one of them up: a quarter of it.

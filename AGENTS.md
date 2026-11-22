@@ -44,6 +44,7 @@ scripts/voxelize.py          # A glTF scene as voxels, for worlds/src/scene.rs
 fcc/src/                     # The FCC lattice and its voxels as every crate sees them (no dependencies)
 ├── lib.rs                   # Faces, lattices, levels, Grid, tiles
 ├── light.rs                 # The light from voxels' faces, as hosts hand it over
+├── ray.rs                   # Rays across the voxels, exactly, face to face
 └── walk.rs                  # A body that falls, collides, steps and jumps
 bake/src/                    # Chunk baker, on fcc/
 ├── lib.rs                   # Baker: one chunk per call
@@ -69,7 +70,8 @@ worldgen/                    # The world-generation engine, no direction up in i
 │   ├── recent.rs            # What was used last, kept
 │   ├── world.rs             # World: what a host needs to show one
 │   ├── tiles.rs             # A world's tiles, as hosts and light take them
-│   ├── picture.rs           # Rays through a world's voxels; pictures as PNGs
+│   ├── picture.rs           # Pictures of a world, by rays through its voxels
+│   ├── png.rs               # A small PNG encoder, every crate's
 │   ├── cost.rs              # What generating costs, against a baseline (docs/checks.md)
 │   └── checks/              # The contract, the survey, places, directions: for tests (docs/checks.md)
 ├── data/                    # The test worlds' contract baselines

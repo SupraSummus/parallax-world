@@ -41,18 +41,19 @@
 //! sites around a small lamp glow as bright as the lamp, on average over
 //! their faces, and those small things fill in part stop as much as the
 //! things do. What fills a site in part, a line through its middle meets
-//! more often than its share says (picture's CROSSING, `meets`).
+//! more often than its share says (fcc's CROSSING, `meets`).
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use fcc::light::{FaceLight, linear_to_srgb, srgb_to_linear};
+use fcc::ray::{CROSSING, FACES, nearest_site, over};
 use fcc::{GRID_LEVELS, Look};
 
 use worldgen::World;
 use worldgen::grid::{ALPHA, BRICK, COLOUR_ONE, GLOW_ONE, Grid, VoxelGrid};
-use worldgen::picture::{CROSSING, FACES, Picture, nearest_site, over};
+use worldgen::picture::Picture;
 use worldgen::tiles::{TILE, made_with, make_sites, parted};
 
 type Rgb = [f32; 3];
@@ -440,7 +441,7 @@ impl Light {
             let total: f64 = weights.iter().sum();
             weights.map(|w| (w / total) as f32)
         });
-        let opposite = DIRECTIONS.map(|d| DIRECTIONS.iter().position(|f| *f == d.map(|c| -c)).expect("directions come in pairs"));
+        let opposite = std::array::from_fn(fcc::opposite);
         let sun_at = DIRECTIONS.iter().position(|d| *d == SUN_DIRECTION).expect("the sun is in one of them");
         let skies = std::array::from_fn(|d| {
             let up = unit[d][1];
@@ -491,7 +492,7 @@ impl Light {
     /**
      * What a line through the middle of `site` of level `i` meets of it,
      * coming from direction `from` (`see`): what it stops and glows over
-     * CROSSING crossings (picture's `over`).
+     * CROSSING crossings (fcc's `over`).
      */
     fn meets(&mut self, i: usize, site: [i64; 3], from: usize) -> ((Rgb, Rgb), Rgb) {
         // By what a channel stops: a power each, the same for every site, read often.

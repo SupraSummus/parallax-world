@@ -2,11 +2,12 @@
 //! sees them: the voxel's faces, the view faces' lattices, the levels of
 //! detail a world is held at, the grids of sites generators make and
 //! bakers read, tiles of grids, the light from
-//! voxels' faces (light.rs), a body walking on them (walk.rs); and maps
-//! keyed by sites, cells and tiles.
+//! voxels' faces (light.rs), rays across them (ray.rs), a body walking on
+//! them (walk.rs); and maps keyed by sites, cells and tiles.
 //! See docs/architecture.md.
 
 pub mod light;
+pub mod ray;
 pub mod walk;
 
 use std::collections::{HashMap, HashSet};
@@ -75,6 +76,11 @@ pub const VOXEL_FACES: [[i32; 3]; FACE_KINDS] = [
 
 /** Kinds of voxel faces. */
 pub const FACE_KINDS: usize = 12;
+
+/** The kind of the face opposite face `k`: VOXEL_FACES are so ordered. */
+pub const fn opposite(k: usize) -> usize {
+    k ^ 3
+}
 
 /**
  * The faces (kinds of VOXEL_FACES) a ray along `direction` sees a voxel
@@ -609,6 +615,11 @@ impl<'a> Reader<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn opposite_faces_are_opposite() {
+        assert!((0..FACE_KINDS).all(|k| VOXEL_FACES[opposite(k)] == VOXEL_FACES[k].map(|v| -v)));
+    }
 
     #[test]
     fn pieces_held_in_part_show_whole_as_often_as_they_stop_rays() {

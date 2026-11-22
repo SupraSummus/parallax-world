@@ -1,8 +1,6 @@
 //! Label images: a label per cell of a w × h grid (x fastest), drawn with
 //! +z (rows) up as worlds/examples/map.rs draws the world.
 
-use crate::png;
-
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Image {
     pub w: usize,
@@ -64,7 +62,7 @@ pub fn write_side_by_side(path: &str, pictures: &[(usize, usize, Vec<u8>)], gap:
         }
         x0 += pw + gap;
     }
-    png::write(path, w, h, &out);
+    write(path, w, h, &out);
 }
 
 /** Rows of pictures side by side, the rows one above another, `gap` white pixels between. */
@@ -84,5 +82,13 @@ pub fn write_grid(path: &str, rows: &[Vec<(usize, usize, Vec<u8>)>], gap: usize)
         }
         y0 += rh + gap;
     }
-    png::write(path, w, h, &out);
+    write(path, w, h, &out);
+}
+
+/** Writes `rgb` (`w` × `h` pixels, rows top first, 3 bytes each) to `path` as a PNG. */
+pub fn write(path: &str, w: usize, h: usize, rgb: &[u8]) {
+    if let Some(dir) = std::path::Path::new(path).parent() {
+        std::fs::create_dir_all(dir).expect("output directory");
+    }
+    std::fs::write(path, worldgen::png::encode(w, h, 3, rgb)).expect("PNG written");
 }

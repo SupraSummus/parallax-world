@@ -1819,7 +1819,6 @@ dependencies = [
  "libc",
  "light",
  "naga",
- "png",
  "pollster",
  "wasm-bindgen",
  "wasm-bindgen-futures",

@@ -12,12 +12,13 @@
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
+use fcc::ray::{CROSSING, nearest_site};
 use fcc::{FastSet, VOXEL_FACES};
 
 use crate::checks::contract::{Held, sites};
 use crate::grid::{ALPHA, Box3, VoxelGrid};
 use crate::noise::hash64;
-use crate::picture::{CROSSING, Seen, composited, nearest_site, seen_whole};
+use crate::picture::{Seen, composited, seen_whole};
 
 /** How many levels finer a level's cells are held to: more costs more, and loses less (a finer cell's mean forgets which of its rays it stops). */
 pub const FINER_BY: u32 = 2;

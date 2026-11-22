@@ -156,7 +156,7 @@ fn main() {
         }
         (side * s, side * s, out)
     };
-    lab::png::write(&format!("{OUT}/shared-parse-zoom.png"), 768, 768, &zoomed(&parses[1].2).2);
+    lab::image::write(&format!("{OUT}/shared-parse-zoom.png"), 768, 768, &zoomed(&parses[1].2).2);
     lab::image::write_side_by_side(&format!("{OUT}/shared-parses.png"), &parses, 8);
 }
 
