@@ -301,8 +301,8 @@ how many rays get how far, and what they stop on.
   or categories, which can't be averaged (`Plan::dithered`:
   what a town's column is, who owns the land).
   Where the sites are further apart than its scale,
-  a line of sites reads a plan of categories at one point
-  of the s × s columns it stands for,
+  a field's line of spans reads a plan of categories at one point
+  of the s × s lines it stands for, across it,
   the same point for every such plan,
   so each category shows as often as it covers, its edges dithered.
   Along a row of lines the points are a Weyl sequence from a hashed phase,
@@ -320,8 +320,8 @@ how many rays get how far, and what they stop on.
   A slope is read over the spacing:
   the forest's stone, as the terrain's cliffs.
   Plans and points read the ground where asked, the same at every level.
-  Things read plans where they ask,
-  so a thing at a dithered edge may stand a site off what the fields show.
+  Things read plans where they ask, as does a field given at each site,
+  so a thing at a dithered edge may stand a site off what the spans show.
 - **Faces.** A field's solid spans are where they are at every level:
   a site holds what its part of them stops along each direction,
   the share of its voxel's chords along a face's direction that meet them

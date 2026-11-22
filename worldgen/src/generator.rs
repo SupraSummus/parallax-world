@@ -143,7 +143,7 @@ enum Solid {
     Ellipsoid { centre: At, radii: At },
     Tube { pieces: Vec<Piece>, radius: Radius, widest: Fixed, length: Fixed },
     Cuboid { min: At, max: At },
-    Gable { min: At, max: At, ridge: usize },
+    Gable { min: At, max: At, ridge: usize, rise: usize, down: bool },
 }
 
 /** A solid, in lattice units: given in floats, kept in fixed point. */
@@ -295,7 +295,11 @@ pub enum Holds {
 }
 
 pub enum FieldValues {
-    /** A kind, with a medium's extinction if it is one, at each site; given (x, y, z), lattice units. */
+    /**
+     * A kind, with a medium's extinction if it is one, at each site; given
+     * (x, y, z), lattice units. It reads plans where the site is: a line
+     * of spans reads dithered ones (generator/drawables.rs).
+     */
     At(Box<FieldAt>),
     /**
      * Spans along each line of sites parallel to `axis`, drawn in order;

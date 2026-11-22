@@ -1,5 +1,5 @@
 //! Frames: things built in coordinates of their own (u, v, w), placed in
-//! their parent's by quarter turns about the vertical, mirrors and an
+//! their parent's by quarter turns about their v, mirrors and an
 //! offset, so boxes stay boxes and a part's sites land on its parent's.
 //! See "Model" in docs/generators.md.
 
@@ -102,13 +102,13 @@ impl Frame {
 
 /**
  * The quarter turns about v (as `Frame::turned`) that take a frame's
- * front, its −w, nearest to the direction (dx, dz) of its parent's x
- * and z; along z where they tie.
+ * front, its −w, nearest to the direction (du, dw) along its u and w
+ * before it is turned; along w where they tie.
  */
-pub fn facing(dx: i64, dz: i64) -> i64 {
-    if dx.abs() > dz.abs() {
-        if dx > 0 { 1 } else { 3 }
-    } else if dz > 0 {
+pub fn facing(du: i64, dw: i64) -> i64 {
+    if du.abs() > dw.abs() {
+        if du > 0 { 1 } else { 3 }
+    } else if dw > 0 {
         2
     } else {
         0
@@ -178,7 +178,7 @@ impl Part<'_> {
     /** A gable roof over the cells from min to max, its ridge along `ridge` (u or w, 0 or 2), up along v. */
     pub fn gable(&mut self, min: [f64; 3], max: [f64; 3], ridge: usize, kind: impl Into<Kind>, op: Op) -> &mut Shape {
         let (a, b) = self.frame.cells(min, max);
-        self.shapes.push(gable(a, b, self.frame.axis(ridge), kind.into(), SOLID, op));
+        self.shapes.push(gable(a, b, self.frame.axis(ridge), self.frame.axes[1], kind.into(), SOLID, op));
         self.shapes.last_mut().expect("one")
     }
 

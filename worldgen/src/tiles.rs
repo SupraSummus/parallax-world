@@ -6,6 +6,7 @@
 use crate::World;
 use crate::generator::generate_shown;
 use crate::grid::{BRICK, Box3, Grid, VoxelGrid};
+use crate::world::UP;
 
 /**
  * Sites a tile is a side, at each level: small, as rays ask for little of
@@ -15,22 +16,22 @@ pub const TILE: i64 = 32;
 
 /**
  * Tile `key`'s box: a cube TILE sites a side, holding x in
- * [key[0] · TILE, (key[0] + 1) · TILE), y and z likewise, cut to `heights`
- * rounded out to whole bricks, so that every tile's bricks are on one
- * grid; empty (no y) if it is all above or below them.
+ * [key[0] · TILE, (key[0] + 1) · TILE), y and z likewise, cut along UP to
+ * `heights` rounded out to whole bricks, so that every tile's bricks are
+ * on one grid; empty (no sites along UP) if it is all above or below them.
  */
 pub fn tile_box((low, high): (i64, i64), key: [i64; 3]) -> Box3 {
-    let [x, y, z] = key.map(|k| k * TILE);
+    let cube = Box3 { min: key.map(|k| k * TILE), max: key.map(|k| (k + 1) * TILE) };
     let low = low.div_euclid(BRICK) * BRICK;
     let high = (high + BRICK - 1).div_euclid(BRICK) * BRICK;
-    let (y0, y1) = (low.clamp(y, y + TILE), high.clamp(y, y + TILE));
-    Box3 { min: [x, y0, z], max: [x + TILE, y1.max(y0), z + TILE] }
+    let (from, to) = (low.clamp(cube.min[UP], cube.max[UP]), high.clamp(cube.min[UP], cube.max[UP]));
+    cube.slab(UP, from, to.max(from))
 }
 
 /**
  * The tiles of `level` of `world` made with tile `key`, itself among
  * them, bottom up: those above and below it within the world's heights,
- * as a world with heights lies across y, and what they share (their
+ * as a world with heights lies across UP, and what they share (their
  * fields' lines, the things reaching several) costs most of each; alone,
  * if past its heights, empty, or in an endless one, where tiles cost as
  * much together as apart.
@@ -38,8 +39,12 @@ pub fn tile_box((low, high): (i64, i64), key: [i64; 3]) -> Box3 {
 pub fn made_with(world: &World, level: u32, key: [i64; 3]) -> impl Iterator<Item = [i64; 3]> + use<> {
     let (low, high) = world.heights_at(level);
     let within = low.div_euclid(TILE)..=(high - 1).div_euclid(TILE);
-    let ys = if world.heights.is_some() && within.contains(&key[1]) { within } else { key[1]..=key[1] };
-    ys.map(move |y| [key[0], y, key[2]])
+    let ups = if world.heights.is_some() && within.contains(&key[UP]) { within } else { key[UP]..=key[UP] };
+    ups.map(move |up| {
+        let mut key = key;
+        key[UP] = up;
+        key
+    })
 }
 
 /**
@@ -50,18 +55,20 @@ pub fn make_sites(world: &World, level: u32, key: [i64; 3]) -> VoxelGrid {
     let heights = world.heights_at(level);
     let boxes = made_with(world, level, key).map(|key| tile_box(heights, key));
     let all = boxes.reduce(|all, b| Box3 { min: all.min, max: b.max }).expect("its own");
-    generate_shown(&world.generator, &all, level)
+    generate_shown(&world.generator, &all, level, UP)
 }
 
 /** The tiles `sites` are of (`make_sites`), by key, as hosts draw them, see-through ones too: each its part. */
 pub fn parted(sites: &VoxelGrid, world: &World, level: u32, key: [i64; 3]) -> Vec<([i64; 3], Grid)> {
     let (grid, heights) = (sites.to_grid(), world.heights_at(level));
     // What was made may end short of a tile, or before it.
-    let (low, high) = (grid.min[1] as i64, (grid.min[1] + grid.n[1]) as i64);
+    let (low, high) = (grid.min[UP] as i64, (grid.min[UP] + grid.n[UP]) as i64);
     let part = |key: [i64; 3]| {
         let b = tile_box(heights, key);
-        let (y0, y1) = (b.min[1].clamp(low, high), b.max[1].clamp(low, high));
-        (key, grid.part([grid.min[0], y0 as i32, grid.min[2]], [grid.n[0], (y1 - y0) as i32, grid.n[2]]))
+        let (from, to) = (b.min[UP].clamp(low, high), b.max[UP].clamp(low, high));
+        let (mut min, mut n) = (grid.min, grid.n);
+        (min[UP], n[UP]) = (from as i32, (to - from) as i32);
+        (key, grid.part(min, n))
     };
     made_with(world, level, key).map(part).collect()
 }

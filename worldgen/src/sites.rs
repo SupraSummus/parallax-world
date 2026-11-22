@@ -1,7 +1,8 @@
 //! The sites a layer reads for: their spacing, which a field or a thing
 //! asks to leave out what is finer than its sites, and where in their
-//! voxels' footprint a line of them reads what is dithered (plans in the
-//! ground crate). Set by the engine as it draws; read by whatever draws.
+//! voxels' footprint across it a line of them reads what is dithered
+//! (plans in the ground crate). Set by the engine as it draws; read by
+//! whatever draws.
 
 use std::cell::Cell;
 
@@ -11,16 +12,17 @@ thread_local! {
      * it asks it reads dithered plans finer than that (`footprint`);
      * none while plans or things are made.
      */
-    static FOOTPRINT: Cell<Option<(i64, [i64; 2])>> = const { Cell::new(None) };
+    static FOOTPRINT: Cell<Option<(i64, [i64; 3])>> = const { Cell::new(None) };
 }
 
 /**
  * Runs `read`, a layer's reads for sites `spacing` apart, with dithered
- * plans finer than the spacing read `offset` (x, z) from where asked:
- * how a line of sites reads them at one point of its voxels' footprint
- * (see the ground crate's Plan::dithered).
+ * plans finer than the spacing read `offset` from where asked, none of
+ * it along the line of sites reading: how the line reads them at one
+ * point of its voxels' footprint across it (see the ground crate's
+ * Plan::dithered).
  */
-pub fn footprint<R>(spacing: i64, offset: [i64; 2], read: impl FnOnce() -> R) -> R {
+pub fn footprint<R>(spacing: i64, offset: [i64; 3], read: impl FnOnce() -> R) -> R {
     debug_assert!((spacing as u64).is_power_of_two(), "sites are a power of two apart");
     let outer = FOOTPRINT.replace(Some((spacing, offset)));
     let value = read();
@@ -30,7 +32,7 @@ pub fn footprint<R>(spacing: i64, offset: [i64; 2], read: impl FnOnce() -> R) ->
 
 /** The sites read for now (`footprint`): their spacing and the offset dithered plans are read at; none where asked. */
 #[inline]
-pub fn read_for() -> Option<(i64, [i64; 2])> {
+pub fn read_for() -> Option<(i64, [i64; 3])> {
     FOOTPRINT.get()
 }
 

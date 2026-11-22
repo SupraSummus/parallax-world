@@ -15,6 +15,14 @@ use crate::grid::Box3;
 pub type Find = Box<dyn Fn() -> [i64; 3] + Send + Sync>;
 
 /**
+ * The axis hosts show every world up along: its heights lie along it,
+ * tiles are made together along it, rock is found under them along it.
+ * The engine has none (docs/architecture.md, section 5); hosts keep it +y,
+ * and a world could name its own (docs/todo.md).
+ */
+pub const UP: usize = 1;
+
+/**
  * The heights hosts tile a world with none in: as good as endless, and
  * far within what their coordinates hold.
  */
@@ -25,8 +33,8 @@ pub struct World {
     /** Where the camera starts, lattice units. */
     pub spawn: [i64; 3],
     /**
-     * The heights it has anything at, lattice units, [min, max), with a
-     * sky over them; none for a world endless every way.
+     * The heights it has anything at, along UP, lattice units, [min,
+     * max), with a sky over them; none for a world endless every way.
      */
     pub heights: Option<(i64, i64)>,
     /**
@@ -51,8 +59,8 @@ impl World {
     /** What of box `b` (lattice units) lies within its heights, if it has them. */
     pub fn within(&self, b: Box3) -> Box3 {
         let Some((low, high)) = self.heights else { return b };
-        let (min, max) = (low.max(b.min[1]), high.min(b.max[1]));
-        Box3 { min: [b.min[0], min, b.min[2]], max: [b.max[0], max.max(min), b.max[2]] }
+        let from = low.max(b.min[UP]);
+        b.slab(UP, from, high.min(b.max[UP]).max(from))
     }
 
     /** The place named `name`: "spawn", or one of its points. */

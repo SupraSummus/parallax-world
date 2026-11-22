@@ -247,14 +247,16 @@ pub fn cuboid(min: Point, max: Point, kind: Kind, fill: Fill, op: Op) -> Shape {
 }
 
 /**
- * The points of a gable roof over [min, max): along `ridge` (x or z, 0 or
- * 2) from min to max, across the other from min to max at the bottom
- * (y = min) and narrowing to the ridge line at the top (y = max). Up is +y.
+ * The points of a gable roof over [min, max), standing along `up` (an
+ * axis or its opposite, as a frame's): along axis `ridge`, across `up`,
+ * from min to max; across both, from min to max at its eaves, the end
+ * `up` points from, narrowing to the ridge line at the other.
  */
-pub fn gable(min: Point, max: Point, ridge: usize, kind: Kind, fill: Fill, op: Op) -> Shape {
-    assert!(ridge == 0 || ridge == 2, "a gable's ridge runs along x or z");
-    let across = 2 - ridge;
-    let (length, width, height) = (max[ridge] - min[ridge], max[across] - min[across], max[1] - min[1]);
+pub fn gable(min: Point, max: Point, ridge: usize, up: [i64; 3], kind: Kind, fill: Fill, op: Op) -> Shape {
+    let rise = (0..3).find(|&i| up[i] != 0).expect("an axis");
+    assert!(up[rise].abs() == 1 && ridge != rise, "a gable stands along an axis, its ridge across it");
+    let across = 3 - ridge - rise;
+    let (length, width, height) = (max[ridge] - min[ridge], max[across] - min[across], max[rise] - min[rise]);
     let slant = js::hypot(&[width / 2.0, height]);
     let area = 2.0 * length * slant + width * height + length * width;
     let (lo, hi) = (at(min), at(max));
@@ -263,10 +265,10 @@ pub fn gable(min: Point, max: Point, ridge: usize, kind: Kind, fill: Fill, op: O
         op,
         centre: at(mid(min, max)),
         bounds: Box3 { min: lo.map(|v| -((-v) >> 16)), max: hi.map(|v| -((-v) >> 16)) },
-        extents: [hi[ridge] - lo[ridge], hi[across] - lo[across], hi[1] - lo[1]].map(Fx::from_bits),
+        extents: [hi[ridge] - lo[ridge], hi[across] - lo[across], hi[rise] - lo[rise]].map(Fx::from_bits),
         area: effective_area(area, (2.0 * length * width * height) / area, &fill, mid(min, max)),
         fill,
-        solid: Solid::Gable { min: lo, max: hi, ridge },
+        solid: Solid::Gable { min: lo, max: hi, ridge, rise, down: up[rise] < 0 },
     }
 }
 
@@ -383,12 +385,18 @@ pub(super) enum Inside<'a> {
         min: Fixed,
         tie: Tie,
     },
-    /** Under the slopes: |2u − lo − hi| · height ≤ width · (top − y), with 8 bits after the point. */
+    /**
+     * Under the slopes: |2u − lo − hi| · height ≤ width · (how far x is
+     * along `rise` from the ridge, at hi, or at lo if `down`), with 8 bits
+     * after the point.
+     */
     Gable {
         lo: At,
         hi: At,
         min: Fixed,
-        across: usize,
+        ridge: usize,
+        rise: usize,
+        down: bool,
         tie: Tie,
     },
 }
@@ -406,21 +414,21 @@ impl Inside<'_> {
             Inside::Cuboid { lo, hi, min, tie } => (0..3).all(|i| {
                 if hi[i] - lo[i] >= *min { tie.within(i, x, lo[i], hi[i], ONE) } else { (2 * x[i] - lo[i] - hi[i]).abs() <= *min }
             }),
-            Inside::Gable { lo, hi, min, across, tie } => {
-                let a = *across;
-                let ridge = 2 - a;
+            Inside::Gable { lo, hi, min, ridge, rise, down, tie } => {
+                let (r, a) = (*rise, 3 - ridge - rise);
                 let side = |i: usize| {
                     if hi[i] - lo[i] >= *min { tie.within(i, x, lo[i], hi[i], ONE) } else { (2 * x[i] - lo[i] - hi[i]).abs() <= *min }
                 };
-                if !side(ridge) || !side(1) || !side(a) {
+                if !side(*ridge) || !side(r) || !side(a) {
                     return false;
                 }
                 // Too low or narrow for its slopes to show: its box.
-                if hi[1] - lo[1] < *min || hi[a] - lo[a] < *min {
+                if hi[r] - lo[r] < *min || hi[a] - lo[a] < *min {
                     return true;
                 }
                 let u = (2 * x[a] - lo[a] - hi[a]).abs() >> 8;
-                u * ((hi[1] - lo[1]) >> 8) <= ((hi[a] - lo[a]) >> 8) * ((hi[1] - x[1]) >> 8)
+                let below = if *down { x[r] - lo[r] } else { hi[r] - x[r] };
+                u * ((hi[r] - lo[r]) >> 8) <= ((hi[a] - lo[a]) >> 8) * (below >> 8)
             }
         }
     }
@@ -461,7 +469,9 @@ impl Shape {
                 }
             }
             Solid::Cuboid { min: lo, max: hi } => Inside::Cuboid { lo: *lo, hi: *hi, min, tie: Tie::new(s) },
-            Solid::Gable { min: lo, max: hi, ridge } => Inside::Gable { lo: *lo, hi: *hi, min, across: 2 - ridge, tie: Tie::new(s) },
+            Solid::Gable { min: lo, max: hi, ridge, rise, down } => {
+                Inside::Gable { lo: *lo, hi: *hi, min, ridge: *ridge, rise: *rise, down: *down, tie: Tie::new(s) }
+            }
         }
     }
 }

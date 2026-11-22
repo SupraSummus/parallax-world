@@ -154,12 +154,13 @@ impl<T: Copy + Default> Plan<T> {
 
     /**
      * A plan of categories, which can't be averaged (what a town's column
-     * is: street, pavement, yard). A line of sites further apart than
-     * `scale` reads it at one point of the columns it stands for, the
+     * is: street, pavement, yard). A field's line of spans further apart
+     * than `scale` reads it at one point of the columns it stands for, the
      * same for every such plan it reads (spread evenly along rows of
-     * lines: generator/drawables.rs, draw_field), so each category shows as often
-     * as it covers, its edges dithered; read where the line is, it would
-     * alias. Things read it where they ask.
+     * lines: worldgen's generator/drawables.rs, draw_field), so each
+     * category shows as often as it covers, its edges dithered; read where
+     * the line is, it would alias. Things, and fields given at each site,
+     * read it where they ask.
      */
     pub fn dithered(name: &'static str, scale: i64, make: impl Fn(i64, i64) -> T + Send + Sync + 'static) -> Plan<T> {
         Plan { dithered: true, ..Plan::new(name, scale, make) }
@@ -176,7 +177,7 @@ impl<T: Copy + Default> Plan<T> {
         // A dithered read keeps its point in the slot of the column it is read for: those of a tile's never share one.
         let at = slot(x, z);
         let (x, z) = match read_for() {
-            Some((spacing, [dx, dz])) if self.dithered && spacing > self.rule.scale => (x + dx, z + dz),
+            Some((spacing, [dx, _, dz])) if self.dithered && spacing > self.rule.scale => (x + dx, z + dz),
             _ => (x, z),
         };
         match self.kept.get(at, x, z) {
