@@ -19,6 +19,10 @@ Numbers are for the forest at 1280×800, as measured when written.
   up to half a site either way: a town's floors at one height all go one way.
   A field's solid spans no longer do: their sites hold the share they cover
   ("Cells hold what they look like", below).
+  A sheet midway between two planes is held by both (`Sides`), twice as thick:
+  discs all midway showed 0.085 at level 2 against 0.044.
+  The city leans on it: half its plan cells are midway at level 2,
+  and held by the lower plane alone, they came 0.03 to 0.05 further off.
 - **Sheets and rods stop too much seen along them.**
   Grown to a site and opaque ("Levels" in `docs/generators.md`),
   a wall stops every ray across it, as it should, and every ray down it:
@@ -82,11 +86,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   The depth that keeps a world's levels alike is that of its coarsest checked
   (`levels` in `WORLDS`: the forest's is 6, so 16 m),
   so `SURFACE` could be read from it, or `Column` could know it.
-- **A thin ellipsoid between two planes of sites can vanish.**
-  Its thickness grows to half a site either way of its centre,
-  so centred between two planes it holds their sites only at a point:
-  discs 2 units thick, each 10 units over the ground, were gone at level 2.
-  Boxes keep the sites on their faces by `Tie`.
 - **Some fields still keep their levels by rules of their own** (`sites::spacing`):
   the ponds' reeds, the rails and the city's roads leave detail out by level,
   and the railway's ballast dithers by hand, in shares of iron and timber,
@@ -112,7 +111,7 @@ Numbers are for the forest at 1280×800, as measured when written.
     each shown by its own coin, so rays leak through it.
     Native's voxels engine shows a site held in part speckled, not pitted,
     but the leak stays.
-  - Balls and tubes. With them `Tie` and the thin shapes' rules go,
+  - Balls and tubes. With them `Sides`' ties and the thin shapes' rules go,
     once a thin wall stays whole across sites shown apart (above).
   - Spans of a medium are held so now (`held` in `drawables.rs`). Left:
     - A see-through kind has one share a site, pieces one a face,

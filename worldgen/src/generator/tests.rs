@@ -167,6 +167,27 @@ fn a_tube_is_within_half_a_site_of_its_curve() {
 }
 
 #[test]
+fn a_sheet_is_its_middle_on_the_planes_of_sites_within_half_a_site() {
+    // A disc and a plate 2 thick and 16 wide across each axis, at sites 4 apart, grown to a site thick as a sheet is
+    // (draw_shape): on a plane of sites, near one, and midway between two.
+    let s = 4;
+    for (axis, c) in (0..3).flat_map(|axis| [8.0, 9.5, 11.0, 10.0].map(move |c| (axis, c))) {
+        let along = |thick: f64, wide: f64| std::array::from_fn(|i| if i == axis { thick } else { wide });
+        let disc = ellipsoid(along(c, 1.0), along(1.0, 8.0), 1, SOLID, Op::Fill);
+        let plate = cuboid(along(c - 1.0, -7.0), along(c + 1.0, 9.0), 1, SOLID, Op::Fill);
+        for sheet in [disc, plate] {
+            let inside = sheet.inside(s * ONE, s);
+            for site in (-3..4).flat_map(|u| (-3..4).flat_map(move |v| (-3..4).map(move |w| [u, v, w]))) {
+                let p = site.map(|v| (v * s) as f64);
+                let middle = std::array::from_fn(|i| if i == axis { c } else { p[i] });
+                let held = (p[axis] - c).abs() <= s as f64 / 2.0 && sheet.holds(middle);
+                assert_eq!(inside.holds(site.map(|v| v * s * ONE)), held, "across {axis}, at {c}: {site:?}");
+            }
+        }
+    }
+}
+
+#[test]
 fn a_gable_narrows_to_its_ridge() {
     // 8 wide across x, 4 high: at height h, the sites within 4 · (1 − h / 4) of x = 4.
     let shape = gable([0.0; 3], [8.0, 4.0, 6.0], 2, [0, 1, 0], 1, SOLID, Op::Fill);
