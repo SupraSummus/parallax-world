@@ -185,21 +185,16 @@ fn near(b: &Box3, spawn: [i64; 3]) -> Near {
     (distance, [b.min[0], b.min[2]], b.min, b.max)
 }
 
-/** `places` nearest `spawn` first (along x and z), then by where they are. */
-pub(crate) fn nearest_first(places: &mut [Box3], spawn: [i64; 3]) {
-    places.sort_by_key(|b| near(b, spawn));
-}
-
 /**
  * What `world` is made of around spawn, in places at most `region` wide
- * (lattice units): of the layers `wanted` by name, as one of `together`
- * worlds (seeds of one), which share the fields' SIDE square and PARTS
- * (docs/checks.md).
+ * (lattice units), as one of `together` worlds (seeds of one), which
+ * share the fields' SIDE square and PARTS (docs/checks.md): all of it,
+ * or what `only` names (`within`).
  */
-pub fn survey(world: &World, together: usize, region: i64, wanted: impl Fn(&str) -> bool) -> Survey {
+pub fn survey(world: &World, together: usize, region: i64, only: &[&str]) -> Survey {
     let mut found = Found::new(world.spawn, PLACES);
     let (mut layers, mut things) = (Vec::new(), Vec::new());
-    let wanted = || world.generator.layers.iter().filter(|layer| wanted(layer.name()));
+    let wanted = || wanted(world, only);
     let fields: Vec<&Field> = wanted().filter_map(|layer| if let Layer::Field(field) = layer { Some(field) } else { None }).collect();
     let cube = |centre, side| world.within(Box3::around(centre, side / 2));
     let side = (SIDE as f64 / (together as f64).sqrt()) as i64;
@@ -208,7 +203,7 @@ pub fn survey(world: &World, together: usize, region: i64, wanted: impl Fn(&str)
         let start = Instant::now();
         match layer {
             Layer::Population(population) => {
-                let mut things_around = |centre| survey_things(world, centre, population, PARTS / together, region, &mut found);
+                let mut things_around = |centre| survey_things(world, centre, population, PARTS / together, region, only, &mut found);
                 let at_spawn = things_around(world.spawn);
                 let (half, seen) = or_at_places(world, at_spawn, things_around, |s| s.1.made);
                 layers.push(Surveyed { layer: population.name, half, found: seen.made, seconds: start.elapsed().as_secs_f64() });
@@ -222,7 +217,8 @@ pub fn survey(world: &World, together: usize, region: i64, wanted: impl Fn(&str)
             }
         }
     }
-    let strata = found.into_strata(&world.generator);
+    let mut strata = found.into_strata(&world.generator);
+    strata.retain(|stratum| within(only, &stratum.name));
     Survey { spawn: world.spawn, region, strata, layers, things }
 }
 
@@ -331,14 +327,22 @@ fn drawn(field: &Field, p: [i64; 3], s: i64) -> Option<Drawn> {
  * than `parts` / 4 parts, up to SIDE (HALF_CELLS once any is found); their
  * parts, into `found`. Returns half the cube's side, and the things.
  */
-fn survey_things(world: &World, centre: [i64; 3], population: &Population, parts: usize, region: i64, found: &mut Found) -> (i64, Things) {
+fn survey_things(
+    world: &World,
+    centre: [i64; 3],
+    population: &Population,
+    parts: usize,
+    region: i64,
+    only: &[&str],
+    found: &mut Found,
+) -> (i64, Things) {
     let (n, reach) = (population.cell, population.reach);
     let mut half = 8;
     loop {
         let mut taken = Found::new(world.spawn, PLACES);
         let mut seen = Things { population: population.name, reach, made: 0, past: Vec::new(), leaving: Vec::new() };
         let cube = world.within(Box3::around(centre, half * n));
-        let count = things_in(world, population, &cube, region, &mut taken, |key, bounds, allowed| {
+        let count = things_in(world, population, &cube, region, only, &mut taken, |key, bounds, allowed| {
             seen.made += 1;
             if !bounds.inside(&allowed) {
                 seen.past.push((key.clone(), bounds, allowed));
@@ -360,13 +364,14 @@ fn survey_things(world: &World, centre: [i64; 3], population: &Population, parts
 /**
  * The things of `population` in the cells whose reach meets `b`, each to
  * `each` (its key, bounds and the box its reach allows), taken apart into
- * `parts`: how many.
+ * `parts` (`take_apart`): how many.
  */
 fn things_in(
     world: &World,
     population: &Population,
     b: &Box3,
     region: i64,
+    only: &[&str],
     parts: &mut Found,
     mut each: impl FnMut(String, Box3, Box3),
 ) -> usize {
@@ -374,42 +379,44 @@ fn things_in(
     let cells = [0, 1, 2].map(|a| ((b.min[a] - n - reach[a]).div_euclid(n), (b.max[a] + n + reach[a]).div_euclid(n) + 1));
     let mut count = 0;
     each_made(&world.generator, population, cells, |key, bounds, allowed, node| {
-        count += take_apart(node, population.name.to_string(), region, parts);
+        count += take_apart(node, population.name.to_string(), region, only, parts);
         each(key, bounds, allowed);
     });
     count
 }
 
 /**
- * The strata of the layers of `world` `wanted` by name in `b`, each with
- * every place of it that meets `b`, in parts at most `region` wide: what
- * `survey` finds there, none left out for being far from spawn.
+ * The strata of `world`, or those `only` names, in `b`, each with every
+ * place of it that meets `b`: what `survey` finds there, none left out
+ * for being far from spawn.
  */
-pub fn survey_in(world: &World, b: &Box3, region: i64, wanted: impl Fn(&str) -> bool) -> Vec<Stratum> {
+pub fn survey_in(world: &World, b: &Box3, region: i64, only: &[&str]) -> Vec<Stratum> {
     let mut found = Found::new(world.spawn, usize::MAX);
-    let wanted = || world.generator.layers.iter().filter(|layer| wanted(layer.name()));
+    let wanted = || wanted(world, only);
     let fields: Vec<&Field> = wanted().filter_map(|layer| if let Layer::Field(field) = layer { Some(field) } else { None }).collect();
     survey_fields(world, b, FIELD_LEVEL, &fields, &mut found);
     for layer in wanted() {
         if let Layer::Population(population) = layer {
-            things_in(world, population, b, region, &mut found, |_, _, _| {});
+            things_in(world, population, b, region, only, &mut found, |_, _, _| {});
         }
     }
     let mut strata = found.into_strata(&world.generator);
     strata.iter_mut().for_each(|stratum| stratum.places.retain(|place| place.overlaps(b)));
-    strata.retain(|stratum| !stratum.places.is_empty());
+    strata.retain(|stratum| within(only, &stratum.name) && !stratum.places.is_empty());
     strata
 }
 
 /**
- * `node`, named `name`, into parts at most `region` wide: itself if it
- * is, else its own shapes and its children's parts, each named by the
- * names down to it; each a place of every kind it draws. Returns how
- * many parts.
+ * `node`, named `name`, into parts at most `region` wide, and down to
+ * those `only` names: itself if it is one, else its own shapes and its
+ * children's parts, each named by the names down to it; each a place of
+ * every kind it draws. Returns how many parts.
  */
-fn take_apart(node: &Node, name: String, region: i64, parts: &mut Found) -> usize {
+fn take_apart(node: &Node, name: String, region: i64, only: &[&str], parts: &mut Found) -> usize {
     let bounds = node.bounds();
-    if fits(&bounds, region) || node.children.is_none() {
+    // Whether `only` names a part of it (`covers`, after a '/').
+    let named_within = only.iter().any(|o| o.strip_prefix(name.as_str()).is_some_and(|rest| rest.starts_with('/')));
+    if (fits(&bounds, region) && !named_within) || node.children.is_none() {
         let mut kinds = BTreeSet::new();
         kinds_of(node, &mut kinds);
         let place = centred(&bounds, region);
@@ -424,8 +431,31 @@ fn take_apart(node: &Node, name: String, region: i64, parts: &mut Found) -> usiz
         kinds.into_iter().for_each(|kind| parts.add((format!("{name} itself"), Some(kind)), 1, [place]));
         count += 1;
     }
-    each_child(node, |child, node| count += take_apart(node, format!("{name}/{}", unnumbered(child)), region, parts));
+    each_child(node, |child, node| count += take_apart(node, format!("{name}/{}", unnumbered(child)), region, only, parts));
     count
+}
+
+/** Whether `stratum` is the one named `name`, or a part (after a '/') or a kind (after a space) of it. */
+pub(crate) fn covers(name: &str, stratum: &str) -> bool {
+    stratum == name || stratum.strip_prefix(name).is_some_and(|rest| rest.starts_with([' ', '/']))
+}
+
+/**
+ * Whether `stratum` is in what `only` names (`covers`): layers, things'
+ * parts or kinds of them ("towns/block/church", "railway ballast"); all,
+ * if it names none.
+ */
+fn within(only: &[&str], stratum: &str) -> bool {
+    only.is_empty() || only.iter().any(|o| covers(o, stratum))
+}
+
+/**
+ * The layers of `world` holding what `only` names, or in it ("railway in
+ * its tunnels" in "railway"): all, if it names none.
+ */
+fn wanted<'a>(world: &'a World, only: &'a [&str]) -> impl Iterator<Item = &'a Layer> {
+    let on_one_line = |layer: &str, o: &str| covers(layer, o) || covers(o, layer);
+    world.generator.layers.iter().filter(move |layer| only.is_empty() || only.iter().any(|o| on_one_line(layer.name(), o)))
 }
 
 /** Each of a node's children, with its name: all of those it makes for a box, made for its bounds. */
@@ -469,16 +499,16 @@ fn centred(b: &Box3, region: i64) -> Box3 {
 pub const HELD: usize = 3;
 
 /**
- * Regions over all of `surveys` holding places of each stratum `wanted`,
+ * Regions over all of `surveys` holding places of each of their strata,
  * one by name in all of them: the rarest first, each until HELD regions
  * hold it. A free place of it joins the region it widens least, or else
  * the one nearest its spawn starts one. Each with the strata laid out in it.
  */
-pub fn regions(surveys: &[Survey], wanted: impl Fn(&str) -> bool) -> Vec<(Placed, Vec<String>)> {
+pub fn regions(surveys: &[Survey]) -> Vec<(Placed, Vec<String>)> {
     // Each stratum by name: how many places it was found at in all, and its places in each survey.
     let mut strata: BTreeMap<&str, (usize, Vec<Placed>)> = BTreeMap::new();
     for (s, survey) in surveys.iter().enumerate() {
-        for stratum in survey.strata.iter().filter(|stratum| wanted(&stratum.name)) {
+        for stratum in &survey.strata {
             let (found, places) = strata.entry(&stratum.name).or_default();
             *found += stratum.found;
             places.extend(stratum.places.iter().map(|place| (s, *place)));

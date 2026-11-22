@@ -16,7 +16,7 @@ use std::time::Instant;
 use crate::World;
 use crate::checks::cells;
 use crate::checks::cells::FINER_BY;
-use crate::checks::survey::{Survey, nearest_first, survey, survey_in};
+use crate::checks::survey::{Survey, covers, survey, survey_in};
 use crate::generator::{Generator, Whole, checking_skipped, generate, kind_of};
 use crate::grid::{ALPHA, Box3, VoxelGrid};
 use crate::noise::{Rng, hash64};
@@ -74,11 +74,6 @@ impl Accuracy {
     pub fn of(declared: &[(&str, Accuracy)], stratum: &str) -> Accuracy {
         declared.iter().filter(|(name, _)| covers(name, stratum)).max_by_key(|(name, _)| name.len()).map_or(Accuracy::DEFAULT, |(_, a)| *a)
     }
-}
-
-/** Whether `stratum` is the one named `name`, or a part (after a '/') or a kind (after a space) of it. */
-pub fn covers(name: &str, stratum: &str) -> bool {
-    stratum == name || stratum.strip_prefix(name).is_some_and(|rest| rest.starts_with([' ', '/']))
 }
 
 /**
@@ -223,7 +218,7 @@ pub struct Region {
 impl Region {
     /** `area`, all of it the place of one stratum, named `name`. */
     pub fn whole(name: &str, area: Box3) -> Region {
-        Region { area, strata: vec![Held::all(name, vec![area])] }
+        Region { area, strata: vec![Held { name: name.to_string(), places: vec![area], share: [0, 1] }] }
     }
 }
 
@@ -239,11 +234,6 @@ pub struct Held {
 }
 
 impl Held {
-    /** A stratum held in one region alone: all its sample there. */
-    pub fn all(name: &str, places: Vec<Box3>) -> Held {
-        Held { name: name.to_string(), places, share: [0, 1] }
-    }
-
     /** Of a sample of `total`, this region's: as even as can be, the regions' summing to it. */
     pub(crate) fn of(&self, total: usize) -> usize {
         let [k, n] = self.share;
@@ -474,22 +464,18 @@ pub const REGION: i64 = m(32.0);
 
 /**
  * What each of `worlds` is made of (`survey`, all surveyed together:
- * several seeds of one, say), and regions holding a place of each of
- * their strata, one by name in all of them, by world; `only` those of
- * strata whose names hold one of `only`, if any (a layer's name first:
- * "towns/church", "railway"), and only their layers surveyed. Each region
- * holds every stratum surveyed in it (`survey_in`), not only those it was
- * laid out for, with their places there; a stratum's sample is shared by
- * the regions holding it, in every world.
+ * several seeds of one, say), or what of it `only` names, and regions
+ * holding a place of each of their strata, one by name in all of them,
+ * by world. Each region holds every stratum surveyed in it (`survey_in`),
+ * not only those it was laid out for, with their places there; a
+ * stratum's sample is shared by the regions holding it, in every world.
  */
 pub fn regions(worlds: &[&World], only: &[&str]) -> (Vec<Survey>, Vec<Vec<Region>>) {
-    let layers = |layer: &str| only.is_empty() || only.iter().any(|o| o.starts_with(layer) || layer.starts_with(o));
-    let surveys = on_threads(worlds, |world| survey(world, worlds.len(), REGION, layers));
-    let wanted = |name: &str| only.is_empty() || only.iter().any(|o| name.contains(o));
-    let laid = crate::checks::survey::regions(&surveys, wanted);
+    let surveys = on_threads(worlds, |world| survey(world, worlds.len(), REGION, only));
+    let laid = crate::checks::survey::regions(&surveys);
     let held: Vec<BTreeMap<String, Vec<Box3>>> = on_threads(&laid, |((w, area), laid)| {
-        let there = survey_in(worlds[*w], area, REGION, layers).into_iter().map(|s| (s.name, s.places));
-        let mut strata: BTreeMap<String, Vec<Box3>> = there.filter(|(name, _)| wanted(name)).collect();
+        let mut strata: BTreeMap<String, Vec<Box3>> =
+            survey_in(worlds[*w], area, REGION, only).into_iter().map(|s| (s.name, s.places)).collect();
         // And what it was laid out for where the survey finds it finer: around a place the world names.
         for stratum in surveys[*w].strata.iter().filter(|s| laid.contains(&s.name)) {
             strata.entry(stratum.name.clone()).or_insert_with(|| stratum.places_in(area));
@@ -738,48 +724,6 @@ pub fn check(worlds: &[(&str, &World)], levels: u32, only: &[&str]) -> Vec<Check
     let n: usize = checked.iter().map(|c| c.regions.len()).sum();
     println!("surveyed in {surveyed:.1} s, {n} regions held in {:.1} s", start.elapsed().as_secs_f64() - surveyed);
     checked
-}
-
-/**
- * The contract for a `component` of the world `make` makes (`World::alone`),
- * at its `places` places nearest spawn as the survey finds it, none over
- * another, a region each, held on threads, up to `levels` (`hold_region`):
- * its cells in its places, all around it drawn as the world draws it.
- * Its margins are the component's, by name. Alone if `make` makes the
- * world cut to it.
- */
-pub fn check_component(name: &str, make: &dyn Fn() -> World, component: &str, places: usize, levels: u32) -> Checked {
-    let start = Instant::now();
-    let (world, focus) = (make(), make().alone(component));
-    let survey = survey(&focus, 1, REGION, |_| true);
-    let in_it = |b: &Box3| survey.strata.iter().flat_map(|s| s.places_in(b)).collect();
-    let regions: Vec<Region> =
-        nearest(&survey, places).iter().map(|b| Region { area: *b, strata: vec![Held::all(component, in_it(b))] }).collect();
-    print_survey(name, &survey, regions.len());
-    // None over another (`nearest`), so none takes another's cells.
-    let each = on_threads(&regions, |r| hold_region(&world, r, &[], levels));
-    let (margins, broken): (Vec<_>, Vec<_>) = each.into_iter().unzip();
-    let mut broken: Vec<String> =
-        broken.into_iter().flatten().chain(heights_hold(&world, levels)).chain(things_hold(&focus, &survey)).collect();
-    broken.sort();
-    broken.dedup();
-    let report = Report { name: name.to_string(), margins: margins.into_iter().flatten().collect() };
-    println!("{report}{name}: checked in {:.1} s", start.elapsed().as_secs_f64());
-    let silent = survey.layers.iter().filter(|l| l.found == 0).map(|l| l.layer).collect();
-    Checked { name: name.to_string(), regions, report, broken, silent, complete: true }
-}
-
-/** Of the places of `survey`'s strata, the `n` nearest its spawn (along x and z), none overlapping one nearer. */
-fn nearest(survey: &Survey, n: usize) -> Vec<Box3> {
-    let mut places: Vec<Box3> = survey.strata.iter().flat_map(|s| s.places.iter().copied()).collect();
-    nearest_first(&mut places, survey.spawn);
-    let mut nearest: Vec<Box3> = Vec::new();
-    for place in places {
-        if nearest.len() < n && !nearest.iter().any(|b| b.overlaps(&place)) {
-            nearest.push(place);
-        }
-    }
-    nearest
 }
 
 /** Prints what `survey` found, and how long each layer took. */

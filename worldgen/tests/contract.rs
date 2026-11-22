@@ -5,8 +5,8 @@ use std::collections::BTreeSet;
 
 use worldgen::World;
 use worldgen::checks::contract::{
-    Accuracy, Held, REGION, Region, Report, SHOWN, STOPPED, TOLERANCE, breaks, check, check_component, heights_hold, hold_to_baseline,
-    in_regions, parts, parts_hold, regions, things_hold,
+    Accuracy, Held, REGION, Region, Report, SHOWN, STOPPED, TOLERANCE, breaks, check, heights_hold, hold_to_baseline, in_regions, parts,
+    parts_hold, regions, things_hold,
 };
 use worldgen::checks::survey::{HELD, survey};
 use worldgen::generator::{
@@ -257,7 +257,7 @@ fn finds_a_far_thing_reaching_past_its_populations_reach() {
             .make(|[x, y, z], _| Some(Node::of(vec![ball([x, y, z], 100.0, ROCK, SOLID, Op::Fill)]))),
     );
     let world = world_of(world(far), (-256, 256));
-    let broken = things_hold(&world, &survey(&world, 1, REGION, |_| true));
+    let broken = things_hold(&world, &survey(&world, 1, REGION, &[]));
     assert_eq!(broken.len(), 1, "{broken:?}");
     assert!(
         broken[0].contains("far surveyed reach past their population's reach [16, 16, 16]; it needs at least [37, 37, 37]"),
@@ -454,16 +454,16 @@ fn a_component_alone_stands_for_its_parents_far_form() {
     assert_eq!(kinds_drawn(&thing(), &around, 3), BTreeSet::from([Some("wall")]));
     let alone = kinds_drawn(&thing().alone("single/ball"), &around, 3);
     assert!(alone.contains(&Some("rock")) && !alone.contains(&Some("wall")), "{alone:?}");
-    // Cut again, it is the same: check_component checks it alone so.
+    // Cut again, it is the same.
     let drawn = |generator: Generator| generate(&generator, &around, 3).pieces.alpha;
     assert_eq!(drawn(thing().alone("single/ball").alone("single/ball")), drawn(thing().alone("single/ball")));
 }
 
 #[test]
-fn a_component_is_checked_in_its_places() {
-    // The village's tables at the three houses nearest spawn, a region each, named by them, the houses drawn around.
-    let checked = check_component("tables", &|| world_of(village(), (-64, 64)), "houses/table", 3, 1);
-    let held: Vec<Vec<&String>> = checked.regions.iter().map(|r| r.strata.iter().map(|s| &s.name).collect()).collect();
-    assert_eq!(held, vec![vec!["houses/table"]; 3]);
-    assert!(checked.report.margins.iter().all(|m| m.looks[1][0] > 0.0), "cells near the tables in each place");
+fn a_component_is_checked_in_regions_of_its_own() {
+    // A house fits a region, so its tables are a stratum only as the name goes down to them.
+    let checked = check(&[("tables", &world_of(village(), (-64, 64)))], 1, &["houses/table"]);
+    let held: Vec<Vec<&str>> = checked[0].regions.iter().map(|r| r.strata.iter().map(|s| s.name.as_str()).collect()).collect();
+    assert_eq!(held, vec![vec!["houses/table wood"]; HELD]);
+    assert!(checked[0].report.margins.iter().all(|m| m.looks[1][0] > 0.0), "cells near the tables in each region");
 }

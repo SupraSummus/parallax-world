@@ -271,6 +271,9 @@ Numbers are for the forest at 1280×800, as measured when written.
   many joins widen theirs by more than the place's own volume.
   But a region's coarse levels cost about the same at any size,
   so a region of its own is not cheaper by volume alone.
+- **A narrowed check is held to its world's baseline, measured elsewhere**
+  (`CONTRACT_ONLY`): laid out for fewer strata, its regions move,
+  and the valley's railway came worse than its baseline by more than `SLACK`.
 - **A panic while holding a region doesn't say which seed's.**
   Regions of all seeds share one pool of threads (`check`).
 - **The contract's memory is mostly the generator's caches**,
@@ -278,8 +281,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   filled as regions move about the world:
   1.5 GB for the valley's four seeds, 1 GB with 64 kept, no slower.
   They are sized for a host's first view.
-- **A component is checked apart from a world** (`check_component`):
-  `check` narrowed to its name, at several places a stratum, would do.
 - **The solids' scenes ask little against the level two finer.**
   In `worldgen/tests/shapes.rs` every solid keeps the contract there
   to the last level checked: a `Look` is a mean over a region's rays,
@@ -303,7 +304,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   a domain bidding for its things only where it builds.
 - **Worlds share tables of kinds**, so the contract only prints
   the kinds nothing surveyed draws, and fails on silent layers alone:
-  the moor's, the learned town's and the city's are the valley's.
+  the moor's is the valley's, the learned town's the first of it.
   With only the kinds it draws, a world could fail on a kind
   drawn only far from spawn, or never.
 - **Worlds are not yet crates of their own.**
@@ -834,9 +835,6 @@ Numbers are for the forest at 1280×800, as measured when written.
 
 ## Ideas
 
-- Components' baselines are snapshots outside git (`worlds/examples/check.rs`);
-  kept in git, a component's would be checked as its world is,
-  and its accuracy could be declared next to its code, not in `WORLDS`.
 - The forest's and the learned town's paths are still sines about x = 0
   (`Relief::path_x` in `worlds/src/forest.rs`);
   a route along their floor (`worlds/src/valley/course.rs`) would serve them too.

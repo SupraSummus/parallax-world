@@ -64,15 +64,13 @@ A cell is the first region's of its seed to sample it, so regions that meet take
 A layer that draws nothing surveyed breaks the contract;
 the kinds nothing draws are only printed,
 as worlds share tables of kinds (the moor's is the valley's).
-`CONTRACT_ONLY='towns/church,railway'` checks only the regions
-of strata so named, and surveys only their layers.
-A world's author works on one part at a time:
-`worlds/examples/check.rs` checks a component (`check_component`),
-a name in the tree of the world's things (`towns/block/church`).
-At the few places of it nearest spawn that the survey finds,
-a region each, it holds the cells in its places to what is in them,
-the world drawn all around, as `check` does a stratum's;
-its baseline is a snapshot outside git, taken before a change.
+`CONTRACT_ONLY='towns/block/church,railway'` checks only what is so named
+(`covers`): a layer, a part of a thing, or a kind of either.
+The survey takes things apart as deep as a name goes,
+though a region would hold more.
+A world's author works on one part at a time so:
+`worlds/examples/check.rs` checks a component at one seed,
+held to a snapshot outside git, taken before a change;
 `alone`, the world is cut to it first (`Generator::alone`).
 A coarse site is shared, so where it meets the rest its cells look otherwise
 (on the moor's hut, by as much as the margins themselves):
