@@ -70,6 +70,11 @@ Numbers are for the forest at 1280×800, as measured when written.
   (`VoxelGrid`'s `views`), so far only for a box's or an ellipsoid's sheet;
   straight down is none of them ("Cells hold what they look like", below).
   Still to do: rods, measured far forms.
+- **A coarse site takes a share of a solid a site past it.**
+  A box 6 units high on y = 0 gives the site 64 units up a share of 1 in 255 at level 6;
+  a wall 20 high, 1 or 2 at levels 5 and 6, though neither reaches that site's voxel.
+  A world's heights then need a coarsest site of room over what it holds,
+  as the solids' world in `worldgen/tests/shapes.rs` is given.
 - **Small things on a ground sink into it at coarse levels.**
   A solid under the sites is drawn at the site nearest it,
   which a few units over a ground on a plane of sites is the ground's,
@@ -268,6 +273,9 @@ Numbers are for the forest at 1280×800, as measured when written.
   and found no stratum more.
   So what only level 0 shows is found only where coarser kinds' places are kept:
   a kind sparse everywhere would be found little.
+  Seeds checked together are places of one world,
+  so they could share 16 km out between them;
+  the surveys are two fifths of the worlds' contract.
 - **A region's level 0 is made whole, and is a third of its time**
   (`hold_region` in `worldgen/src/checks/contract.rs`),
   to find the surfaces its cells are sampled near:
@@ -275,11 +283,12 @@ Numbers are for the forest at 1280×800, as measured when written.
   Made part by part, only where cells are looked at,
   the cells would be those of a few parts:
   near each other, so telling less surely.
-- **A stratum joins a region however much it widens it** (`Survey::regions`):
-  of the valley's joins, a quarter widen theirs by more than its place's own volume,
-  and make over half of all the regions' volume.
+- **A stratum joins a region however much it widens it** (`survey::regions`):
+  many joins widen theirs by more than the place's own volume.
   But a region's coarse levels cost about the same at any size,
   so a region of its own is not cheaper by volume alone.
+- **A panic while holding a region doesn't say which seed's.**
+  Regions of all seeds share one pool of threads (`check`).
 - **The contract's memory is mostly the generator's caches**,
   things measured (`MEASURED` in `worldgen/src/generator/forms.rs`),
   filled as regions move about the world:

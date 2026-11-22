@@ -10,6 +10,7 @@
 
 use std::collections::BTreeMap;
 use std::ops::Range;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
 use crate::World;
@@ -260,8 +261,7 @@ pub fn in_regions(name: &str, world: &World, regions: &[Region], levels: u32) ->
     let mut report = Report::new(name);
     let mut broken = Vec::new();
     for (i, region) in regions.iter().enumerate() {
-        let before: Vec<Box3> = regions[..i].iter().map(|r| r.area).collect();
-        let (margins, b) = hold_region(world, region, &before, levels);
+        let (margins, b) = hold_region(world, region, &regions[..i], levels);
         report.margins.extend(margins);
         broken.extend(b);
     }
@@ -271,22 +271,24 @@ pub fn in_regions(name: &str, world: &World, regions: &[Region], levels: u32) ->
 /**
  * `region` of `world`, each level from 0 to one past `levels` generated
  * once: held to parts of it around each stratum's places (`parts_hold`),
- * and up to `levels`, each stratum's cells against the level FINER_BY
- * finer (checks::cells), but those regions `before` it sample. Its
- * margins, and where it breaks the rules that hold exactly.
+ * nothing over the world's heights there (`over_heights`), and up to
+ * `levels`, each stratum's cells against the level FINER_BY finer
+ * (checks::cells), but those regions `before` it sample. Its margins, and
+ * where it breaks the rules that hold exactly.
  */
-fn hold_region(world: &World, region: &Region, before: &[Box3], levels: u32) -> (Vec<Margin>, Vec<String>) {
+fn hold_region(world: &World, region: &Region, before: &[Region], levels: u32) -> (Vec<Margin>, Vec<String>) {
     let (mut margins, mut broken) = (Vec::new(), Vec::new());
     // Each level's grid, until the level FINER_BY coarser is held against it.
     let mut grids: Vec<Option<cells::Level>> = Vec::new();
     for level in 0..=levels + 1 {
         let grid = generate(&world.generator, &box_at(&area_at(&region.area, level, levels), level), level);
         broken.extend(parts_hold(&world.generator, &grid, level, &sample(parts(&grid.clip(), level), &region.strata, level)));
+        broken.extend(over_heights(world, &region.area, level, &format!("in {:?}", region.area)));
         grids.push(Some(cells::Level::of(grid)));
         if (1..=levels).contains(&level) {
             let against = level.saturating_sub(FINER_BY);
             let [Some(fine), Some(coarse)] = [against, level].map(|l| grids[l as usize].as_ref()) else { unreachable!("kept") };
-            let taken: Vec<Box3> = before.iter().map(|b| around(b, level)).collect();
+            let taken: Vec<Box3> = before.iter().map(|b| around(&b.area, level)).collect();
             let each = cells::cells_of([fine, coarse], &region.strata, &around(&region.area, level), &taken, [against, level]);
             for (stratum, cells) in region.strata.iter().zip(each).filter(|(_, cells)| !cells.is_empty()) {
                 let n = cells.len() as f64;
@@ -304,7 +306,7 @@ fn hold_region(world: &World, region: &Region, before: &[Box3], levels: u32) -> 
     (margins, broken)
 }
 
-/** Sites of each level above a world's heights that `heights_hold` generates. */
+/** Sites of each level above a world's heights that `over_heights` generates. */
 const BEYOND: i64 = 16;
 
 /** Where a level `level` box of `grid` has a site that stops any light (its alpha), in lattice units, and its kind; how many it has. */
@@ -318,36 +320,35 @@ fn stopping(generator: &Generator, grid: VoxelGrid, level: u32) -> Option<([i64;
 
 /**
  * Hosts generate a world only within its heights, so nothing may lie
- * over them: at each level up to one past `levels`, in each region and a
- * host tile's width around spawn, BEYOND sites above the heights are
- * empty. Under them the ground may go on (FieldAbout::ground), unseen. Returns
- * where they are not.
+ * over them: at `level`, BEYOND sites above the heights over `area` are
+ * empty. Under them the ground may go on (FieldAbout::ground), unseen. Where
+ * not, said to be `place`.
  */
-pub fn heights_hold(world: &World, regions: &[Box3], levels: u32) -> Vec<String> {
-    let mut broken = Vec::new();
-    if world.heights.is_none() {
-        return broken;
-    }
-    for level in 0..=levels + 1 {
-        let high = world.heights_at(level).1;
-        // A host's tile: 128 sites wide.
+fn over_heights(world: &World, area: &Box3, level: u32, place: &str) -> Option<String> {
+    let (heights, high) = (world.heights?, world.heights_at(level).1);
+    let b = box_at(area, level);
+    let slab = Box3 { min: [b.min[0], high, b.min[2]], max: [b.max[0], high + BEYOND, b.max[2]] };
+    let (at, kind, n) = stopping(&world.generator, generate(&world.generator, &slab, level), level)?;
+    Some(format!(
+        "level {level}, {place}: {n} sites stopping light above the heights {heights:?} (World::heights), which hosts don't generate, \
+         such as {kind} at {at:?} lattice units"
+    ))
+}
+
+/**
+ * Nothing lies over a world's heights (`over_heights`) a host tile's
+ * width around spawn, where a host starts, at each level up to one past
+ * `levels`; regions are held to it as they are held (`hold_region`).
+ * Returns where it does.
+ */
+pub fn heights_hold(world: &World, levels: u32) -> Vec<String> {
+    let [x, _, z] = world.spawn;
+    let tile = |level: u32| {
+        // 128 sites wide.
         let half = 64 << level;
-        let [x, _, z] = world.spawn;
-        let spawn = Box3 { min: [x - half, 0, z - half], max: [x + half, 0, z + half] };
-        for (i, area) in regions.iter().chain([&spawn]).enumerate() {
-            let b = box_at(area, level);
-            let slab = Box3 { min: [b.min[0], high, b.min[2]], max: [b.max[0], high + BEYOND, b.max[2]] };
-            if let Some((at, kind, n)) = stopping(&world.generator, generate(&world.generator, &slab, level), level) {
-                let place = if i == regions.len() { "around spawn".to_string() } else { format!("in {area:?}") };
-                broken.push(format!(
-                    "level {level}, {place}: {n} sites stopping light above the heights {:?} (World::heights), which hosts don't generate, \
-                     such as {kind} at {at:?} lattice units",
-                    world.heights.expect("bounded")
-                ));
-            }
-        }
-    }
-    broken
+        Box3 { min: [x - half, 0, z - half], max: [x + half, 0, z + half] }
+    };
+    (0..=levels + 1).filter_map(|level| over_heights(world, &tile(level), level, "around spawn")).collect()
 }
 
 /** Sites a side of the parts `parts_hold` generates a box in: small, so lines and things are skipped near what they draw. */
@@ -355,10 +356,11 @@ const PART: i64 = 32;
 
 /**
  * Parts held at each level for a stratum, at most, shared by the regions
- * holding it: as many at every level, where a seam or a skip is as
- * likely, and for every stratum, however much else its regions hold.
+ * holding it in every world checked: as many at every level, where a
+ * seam or a skip is as likely, and for every stratum, however much else
+ * its regions hold.
  */
-pub const PARTS: usize = 8;
+pub const PARTS: usize = 32;
 
 /**
  * The parts PART sites a side that meet `b`, a box of `level`'s sites:
@@ -470,47 +472,69 @@ pub fn things_hold(world: &World, survey: &Survey) -> Vec<String> {
 pub const REGION: i64 = m(32.0);
 
 /**
- * What `world` is made of (`survey`), and regions holding a place of
- * each of its strata; `only` those of strata whose names hold one of
+ * What each of `worlds` is made of (`survey`; several seeds of one, say),
+ * and regions holding a place of each of their strata, one by name in all
+ * of them, by world; `only` those of strata whose names hold one of
  * `only`, if any (a layer's name first: "towns/church", "railway"), and
  * only their layers surveyed. Each region holds every stratum surveyed in
- * it (`survey_in`), not only those it was laid out for, with their
- * places there; a stratum's sample is shared by the regions holding it.
+ * it (`survey_in`), not only those it was laid out for, with their places
+ * there; a stratum's sample is shared by the regions holding it, in every
+ * world.
  */
-pub fn regions(world: &World, only: &[&str]) -> (Survey, Vec<Region>) {
+pub fn regions(worlds: &[&World], only: &[&str]) -> (Vec<Survey>, Vec<Vec<Region>>) {
     let layers = |layer: &str| only.is_empty() || only.iter().any(|o| o.starts_with(layer) || layer.starts_with(o));
-    let survey = survey(world, REGION, layers);
-    let names: Vec<String> = (0..survey.strata.len()).map(|i| survey.describe(&world.generator, i)).collect();
+    let surveys = on_threads(worlds, |world| survey(world, REGION, layers));
     let wanted = |name: &str| only.is_empty() || only.iter().any(|o| name.contains(o));
-    let held: Vec<(Box3, BTreeMap<String, Vec<Box3>>)> = survey
-        .regions(|i| wanted(&names[*i]))
-        .into_iter()
-        .map(|(area, laid)| {
-            let there = survey_in(world, &area, REGION, layers).into_iter().map(|s| (s.describe(&world.generator), s.places));
-            let mut strata: BTreeMap<String, Vec<Box3>> = there.filter(|(name, _)| wanted(name)).collect();
-            // And what it was laid out for where the survey finds it finer: around a place the world names.
-            for i in laid {
-                strata.entry(names[i].clone()).or_insert_with(|| survey.places_in(i, &area));
-            }
-            (area, strata)
-        })
-        .collect();
+    let laid = crate::checks::survey::regions(&surveys, wanted);
+    let held: Vec<BTreeMap<String, Vec<Box3>>> = on_threads(&laid, |((w, area), laid)| {
+        let there = survey_in(worlds[*w], area, REGION, layers).into_iter().map(|s| (s.name, s.places));
+        let mut strata: BTreeMap<String, Vec<Box3>> = there.filter(|(name, _)| wanted(name)).collect();
+        // And what it was laid out for where the survey finds it finer: around a place the world names.
+        for stratum in surveys[*w].strata.iter().filter(|s| laid.contains(&s.name)) {
+            strata.entry(stratum.name.clone()).or_insert_with(|| stratum.places_in(area));
+        }
+        strata
+    });
     // How many regions hold each stratum, and how many of them are taken so far.
     let mut shares: BTreeMap<String, [usize; 2]> = BTreeMap::new();
-    held.iter().flat_map(|(_, strata)| strata.keys()).for_each(|name| shares.entry(name.clone()).or_default()[1] += 1);
+    held.iter().flat_map(|strata| strata.keys()).for_each(|name| shares.entry(name.clone()).or_default()[1] += 1);
     let mut share = |name: &str| {
         let [k, n] = shares.get_mut(name).expect("counted");
         *k += 1;
         [*k - 1, *n]
     };
-    let regions = held
-        .into_iter()
-        .map(|(area, strata)| Region {
-            area,
-            strata: strata.into_iter().map(|(name, places)| Held { share: share(&name), name, places }).collect(),
-        })
-        .collect();
-    (survey, regions)
+    let mut regions: Vec<Vec<Region>> = worlds.iter().map(|_| Vec::new()).collect();
+    for (((w, area), _), strata) in laid.into_iter().zip(held) {
+        let strata = strata.into_iter().map(|(name, places)| Held { share: share(&name), name, places }).collect();
+        regions[w].push(Region { area, strata });
+    }
+    (surveys, regions)
+}
+
+/**
+ * `each` of `items` on as many threads as the machine has, each taking
+ * the next item as it is done with one; what they return, in order.
+ */
+fn on_threads<T: Sync, R: Send>(items: &[T], each: impl Fn(&T) -> R + Sync) -> Vec<R> {
+    let next = AtomicUsize::new(0);
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(items.len());
+    let mut done: Vec<(usize, R)> = std::thread::scope(|scope| {
+        let threads: Vec<_> = (0..threads)
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut done = Vec::new();
+                    loop {
+                        let i = next.fetch_add(1, Ordering::Relaxed);
+                        let Some(item) = items.get(i) else { return done };
+                        done.push((i, each(item)));
+                    }
+                })
+            })
+            .collect();
+        threads.into_iter().flat_map(|t| t.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic))).collect()
+    });
+    done.sort_by_key(|(i, _)| *i);
+    done.into_iter().map(|(_, r)| r).collect()
 }
 
 /** What `check` found of a world at one seed. */
@@ -669,36 +693,56 @@ pub fn breaks(checked: &[Checked], declared: &[(&str, Accuracy)]) -> Vec<Break> 
 }
 
 /**
- * The whole contract for `world`, named `name` (with its seed, say), in
- * regions holding everything it is made of around spawn (`regions`),
- * `only` some if any, up to the level `levels` its cells look as what
- * is in them to. Prints its regions and margins (see them with
- * --nocapture); returns where it breaks it.
+ * The whole contract for `worlds`, each named (with its seed, say), in
+ * regions holding everything they are made of around spawn (`regions`),
+ * `only` some if any, up to the level `levels` their cells look as what
+ * is in them to; the regions held on threads, each by the next free.
+ * Prints each world's survey and margins (see them with --nocapture);
+ * returns where each breaks it.
  */
-pub fn check(name: &str, world: &World, levels: u32, only: &[&str]) -> Checked {
+pub fn check(worlds: &[(&str, &World)], levels: u32, only: &[&str]) -> Vec<Checked> {
     let start = Instant::now();
-    let (survey, regions) = regions(world, only);
-    print_survey(name, &survey, regions.len(), start);
-    if only.is_empty() {
-        // Not checked: a world may share a table of kinds with others (the moor's is the valley's).
-        println!("{name}: kinds nothing surveyed draws: {}", survey.unseen(&world.generator).join(", "));
-    }
-    let boxes: Vec<Box3> = regions.iter().map(|r| r.area).collect();
-    let start = Instant::now();
-    let (report, mut broken) = in_regions(name, world, &regions, levels);
-    let held = start.elapsed().as_secs_f64();
-    broken.extend(heights_hold(world, &boxes, levels));
-    broken.extend(things_hold(world, &survey));
-    let rest = start.elapsed().as_secs_f64() - held;
-    println!("{report}{name}: regions {held:.1} s, heights and things {rest:.1} s");
-    let silent = survey.layers.iter().filter(|l| l.found == 0).map(|l| l.layer).collect();
-    Checked { name: name.to_string(), regions, report, broken, silent, complete: only.is_empty() }
+    let (surveys, regions) = regions(&worlds.iter().map(|(_, world)| *world).collect::<Vec<_>>(), only);
+    let surveyed = start.elapsed().as_secs_f64();
+    // Each region, after those of its world before it.
+    let each: Vec<(usize, &[Region])> =
+        regions.iter().enumerate().flat_map(|(w, regions)| (1..=regions.len()).map(move |i| (w, &regions[..i]))).collect();
+    let mut held = on_threads(&each, |(w, regions)| {
+        let (region, before) = regions.split_last().expect("a region");
+        hold_region(worlds[*w].1, region, before, levels)
+    })
+    .into_iter();
+    let checked: Vec<Checked> = worlds
+        .iter()
+        .zip(surveys)
+        .zip(regions)
+        .map(|(((name, world), survey), regions)| {
+            print_survey(name, &survey, regions.len());
+            if only.is_empty() {
+                // Not checked: a world may share a table of kinds with others (the moor's is the valley's).
+                println!("{name}: kinds nothing surveyed draws: {}", survey.unseen(&world.generator).join(", "));
+            }
+            let mut report = Report::new(name);
+            let mut broken = heights_hold(world, levels);
+            broken.extend(things_hold(world, &survey));
+            for (margins, b) in held.by_ref().take(regions.len()) {
+                report.margins.extend(margins);
+                broken.extend(b);
+            }
+            print!("{report}");
+            let silent = survey.layers.iter().filter(|l| l.found == 0).map(|l| l.layer).collect();
+            Checked { name: name.to_string(), regions, report, broken, silent, complete: only.is_empty() }
+        })
+        .collect();
+    let n: usize = checked.iter().map(|c| c.regions.len()).sum();
+    println!("surveyed in {surveyed:.1} s, {n} regions held in {:.1} s", start.elapsed().as_secs_f64() - surveyed);
+    checked
 }
 
 /**
  * The contract for a `component` of the world `make` makes (`World::alone`),
  * at its `places` places nearest spawn as the survey finds it, none over
- * another, a region each and a thread each, up to `levels` (`hold_region`):
+ * another, a region each, held on threads, up to `levels` (`hold_region`):
  * its cells in its places, all around it drawn as the world draws it.
  * Its margins are the component's, by name. Alone if `make` makes the
  * world cut to it.
@@ -707,28 +751,15 @@ pub fn check_component(name: &str, make: &dyn Fn() -> World, component: &str, pl
     let start = Instant::now();
     let (world, focus) = (make(), make().alone(component));
     let survey = survey(&focus, REGION, |_| true);
-    let in_it = |b: &Box3| (0..survey.strata.len()).flat_map(|i| survey.places_in(i, b)).collect();
+    let in_it = |b: &Box3| survey.strata.iter().flat_map(|s| s.places_in(b)).collect();
     let regions: Vec<Region> =
         nearest(&survey, places).iter().map(|b| Region { area: *b, strata: vec![Held::all(component, in_it(b))] }).collect();
-    print_survey(name, &survey, regions.len(), start);
-    let start = Instant::now();
-    let each: Vec<(Vec<Margin>, Vec<String>)> = std::thread::scope(|scope| {
-        let threads: Vec<_> = regions
-            .iter()
-            .map(|r| {
-                let world = &world;
-                scope.spawn(move || {
-                    // None over another (`nearest`), so none takes another's cells.
-                    let (margins, mut broken) = hold_region(world, r, &[], levels);
-                    broken.extend(heights_hold(world, &[r.area], levels));
-                    (margins, broken)
-                })
-            })
-            .collect();
-        threads.into_iter().map(|t| t.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic))).collect()
-    });
+    print_survey(name, &survey, regions.len());
+    // None over another (`nearest`), so none takes another's cells.
+    let each = on_threads(&regions, |r| hold_region(&world, r, &[], levels));
     let (margins, broken): (Vec<_>, Vec<_>) = each.into_iter().unzip();
-    let mut broken: Vec<String> = broken.into_iter().flatten().chain(things_hold(&focus, &survey)).collect();
+    let mut broken: Vec<String> =
+        broken.into_iter().flatten().chain(heights_hold(&world, levels)).chain(things_hold(&focus, &survey)).collect();
     broken.sort();
     broken.dedup();
     let report = Report { name: name.to_string(), margins: margins.into_iter().flatten().collect() };
@@ -750,13 +781,12 @@ fn nearest(survey: &Survey, n: usize) -> Vec<Box3> {
     nearest
 }
 
-/** Prints what `survey` found, and in how long since `start`. */
-fn print_survey(name: &str, survey: &Survey, regions: usize, start: Instant) {
+/** Prints what `survey` found, and how long each layer took. */
+fn print_survey(name: &str, survey: &Survey, regions: usize) {
     let layers: Vec<String> = survey
         .layers
         .iter()
         .map(|l| format!("{} {:.1} km {:.1} s", l.layer, 2.0 * l.half as f64 * crate::units::UNIT_SIZE / 1000.0, l.seconds))
         .collect();
-    let (n, took) = (survey.strata.len(), start.elapsed().as_secs_f64());
-    println!("{name}: {n} strata in {regions} regions, surveyed in {took:.1} s: {}", layers.join(", "));
+    println!("{name}: {} strata in {regions} regions: {}", survey.strata.len(), layers.join(", "));
 }

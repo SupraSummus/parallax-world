@@ -2,8 +2,9 @@
 //! layer of its generator asked in a cube around spawn (or, drawing
 //! nothing there, around each place the world names), things taken
 //! apart into parts no wider than a region, sorted into strata: a part or
-//! a field, with a kind it draws. The contract checks a place of every
+//! a field, with a kind it draws. The contract checks places of every
 //! stratum found (worldgen::checks::contract), however rare, without a list,
+//! in regions laid out over several worlds' surveys at once (`regions`),
 //! and in each region every stratum surveyed there (`survey_in`).
 
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
@@ -63,7 +64,11 @@ const LEAVING: usize = 16;
 
 /** A kind a part of things or a field draws, or none if it carves: a stratum, and its places. */
 pub struct Stratum {
-    /** The layer, and in a thing the names of its parts down to this one, numbers left out. */
+    /**
+     * The layer, in a thing the names of its parts down to this one,
+     * numbers left out, and the kind it draws ("towns/church stone",
+     * "holes carving"): what it is, at any seed.
+     */
     pub name: String,
     /** By index in Generator::kinds. */
     pub kind: Option<Kind>,
@@ -74,9 +79,9 @@ pub struct Stratum {
 }
 
 impl Stratum {
-    /** Its name and kind, for messages. */
-    pub fn describe(&self, generator: &Generator) -> String {
-        format!("{} {}", self.name, self.kind.map_or("carving", |k| generator.kinds[k as usize].name))
+    /** Its places that meet `b`. */
+    pub fn places_in(&self, b: &Box3) -> Vec<Box3> {
+        self.places.iter().filter(|p| p.overlaps(b)).copied().collect()
     }
 }
 
@@ -145,11 +150,20 @@ impl Found {
         }
     }
 
-    fn into_strata(self) -> Vec<Stratum> {
+    /** What `other` found, as if found here. */
+    fn absorb(&mut self, other: Found) {
+        for (key, (found, kept)) in other.strata {
+            self.add(key, found, kept.into_iter().map(|(.., min, max)| Box3 { min, max }));
+        }
+    }
+
+    /** The strata, named with the kinds of `generator` they draw. */
+    fn into_strata(self, generator: &Generator) -> Vec<Stratum> {
         self.strata
             .into_iter()
             .map(|((name, kind), (found, kept))| {
                 let places = kept.into_sorted_vec().into_iter().map(|(.., min, max)| Box3 { min, max }).collect();
+                let name = format!("{name} {}", kind.map_or("carving", |k| generator.kinds[k as usize].name));
                 Stratum { name, kind, found, places }
             })
             .collect()
@@ -200,7 +214,7 @@ pub fn survey(world: &World, region: i64, wanted: impl Fn(&str) -> bool) -> Surv
             }
         }
     }
-    let strata = found.into_strata();
+    let strata = found.into_strata(&world.generator);
     Survey { spawn: world.spawn, region, strata, layers, things }
 }
 
@@ -334,9 +348,7 @@ fn survey_things(world: &World, centre: [i64; 3], population: &Population, regio
         });
         let most = if seen.made > 0 { HALF_CELLS } else { i64::MAX }.min(SIDE / 2 / n);
         if count * 4 > PARTS || half >= most {
-            for stratum in parts.into_strata() {
-                found.add((stratum.name, stratum.kind), stratum.found, stratum.places);
-            }
+            found.absorb(parts);
             return (half * n, seen);
         }
         half = (2 * half).min(most);
@@ -381,7 +393,7 @@ pub fn survey_in(world: &World, b: &Box3, region: i64, wanted: impl Fn(&str) -> 
             things_in(world, population, b, region, &mut found, |_, _, _| {});
         }
     }
-    let mut strata = found.into_strata();
+    let mut strata = found.into_strata(&world.generator);
     strata.iter_mut().for_each(|stratum| stratum.places.retain(|place| place.overlaps(b)));
     strata.retain(|stratum| !stratum.places.is_empty());
     strata
@@ -447,58 +459,77 @@ fn centred(b: &Box3, region: i64) -> Box3 {
     Box3 { min: [0, 1, 2].map(|i| b.min[i].max(c[i] - region / 2)), max: [0, 1, 2].map(|i| b.max[i].min(c[i] + region / 2)) }
 }
 
-impl Survey {
-    /**
-     * Regions, each at most `region` wide, holding a place of every
-     * stratum: the rarest first, each in the region it widens least,
-     * or else its place nearest spawn starts one; of the strata
-     * `wanted`, by index. With the strata each was laid out for, by index.
-     */
-    pub fn regions(&self, wanted: impl Fn(&usize) -> bool) -> Vec<(Box3, Vec<usize>)> {
-        let mut order: Vec<usize> = (0..self.strata.len()).filter(wanted).collect();
-        order.sort_by_key(|&i| (self.strata[i].found, i));
-        let mut regions: Vec<(Box3, Vec<usize>)> = Vec::new();
-        let volume = |b: &Box3| (0..3).map(|i| (b.max[i] - b.min[i]) as f64).product::<f64>();
-        for i in order {
+/**
+ * Regions a stratum is held in, at least, while it has places no region
+ * holds: in one, its mean is of one setting (docs/checks.md). Each costs
+ * about a region of its own.
+ */
+pub const HELD: usize = 3;
+
+/**
+ * Regions over all of `surveys` holding places of each stratum `wanted`,
+ * one by name in all of them: the rarest first, each until HELD regions
+ * hold it. A free place of it joins the region it widens least, or else
+ * the one nearest its spawn starts one. Each with the strata laid out in it.
+ */
+pub fn regions(surveys: &[Survey], wanted: impl Fn(&str) -> bool) -> Vec<(Placed, Vec<String>)> {
+    // Each stratum by name: how many places it was found at in all, and its places in each survey.
+    let mut strata: BTreeMap<&str, (usize, Vec<Placed>)> = BTreeMap::new();
+    for (s, survey) in surveys.iter().enumerate() {
+        for stratum in survey.strata.iter().filter(|stratum| wanted(&stratum.name)) {
+            let (found, places) = strata.entry(&stratum.name).or_default();
+            *found += stratum.found;
+            places.extend(stratum.places.iter().map(|place| (s, *place)));
+        }
+    }
+    let mut order: Vec<_> = strata.into_iter().collect();
+    order.sort_by_key(|(name, (found, _))| (*found, *name));
+    let mut regions: Vec<(Placed, Vec<String>)> = Vec::new();
+    let meets = |(s, place): &Placed, (of, region): &Placed| s == of && place.overlaps(region);
+    let volume = |b: &Box3| (0..3).map(|i| (b.max[i] - b.min[i]) as f64).product::<f64>();
+    for (name, (_, places)) in order {
+        loop {
+            let holds = |region: &Placed| places.iter().any(|place| meets(place, region));
+            let free: Vec<&Placed> = places.iter().filter(|place| !regions.iter().any(|(region, _)| meets(place, region))).collect();
+            if free.is_empty() || regions.iter().filter(|(region, _)| holds(region)).count() >= HELD {
+                break;
+            }
             let mut best: Option<(f64, usize, Box3)> = None;
-            for place in &self.strata[i].places {
-                for (r, (region, _)) in regions.iter().enumerate() {
+            for (s, place) in &free {
+                for (r, ((_, region), _)) in regions.iter().enumerate().filter(|(_, (region, _))| region.0 == *s && !holds(region)) {
                     let union = Box3 {
                         min: [0, 1, 2].map(|a| region.min[a].min(place.min[a])),
                         max: [0, 1, 2].map(|a| region.max[a].max(place.max[a])),
                     };
                     let growth = volume(&union) - volume(region);
-                    if fits(&union, self.region) && best.as_ref().is_none_or(|(g, ..)| growth < *g) {
+                    if fits(&union, surveys[*s].region) && best.as_ref().is_none_or(|(g, ..)| growth < *g) {
                         best = Some((growth, r, union));
                     }
                 }
             }
             match best {
                 Some((_, r, union)) => {
-                    regions[r].0 = union;
-                    regions[r].1.push(i);
+                    regions[r].0.1 = union;
+                    regions[r].1.push(name.to_string());
                 }
-                // Its places are nearest spawn first.
-                None => regions.push((self.strata[i].places[0], vec![i])),
+                None => {
+                    let &place = free.into_iter().min_by_key(|(s, place)| near(place, surveys[*s].spawn)).expect("a place");
+                    regions.push((place, vec![name.to_string()]));
+                }
             }
         }
-        regions
     }
+    regions
+}
 
-    /** The places of stratum `i` that meet `b`. */
-    pub fn places_in(&self, i: usize, b: &Box3) -> Vec<Box3> {
-        self.strata[i].places.iter().filter(|p| p.overlaps(b)).copied().collect()
-    }
+/** A box in one of several surveys, by index: a place, or a region. */
+pub type Placed = (usize, Box3);
 
+impl Survey {
     /** The kinds of `generator` that nothing surveyed draws, by name. */
     pub fn unseen(&self, generator: &Generator) -> Vec<&'static str> {
         let seen: BTreeSet<Kind> = self.strata.iter().filter_map(|s| s.kind).collect();
         generator.kinds.iter().enumerate().filter(|(i, _)| !seen.contains(&(*i as Kind))).map(|(_, k)| k.name).collect()
-    }
-
-    /** A stratum's name and kind, for messages. */
-    pub fn describe(&self, generator: &Generator, i: usize) -> String {
-        self.strata[i].describe(generator)
     }
 }
 
@@ -526,7 +557,7 @@ mod tests {
                 }
                 found.add(key(), 1, [place]);
             }
-            let kept = found.into_strata().remove(0).places;
+            let kept = found.into_strata(&Generator { kinds: Vec::new(), seed: 0, layers: Vec::new() }).remove(0).places;
             assert!(!unwanted.iter().any(|p| kept.contains(p)), "order {order}: kept a place it did not want");
             kept
         };

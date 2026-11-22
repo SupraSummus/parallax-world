@@ -8,7 +8,7 @@ use worldgen::checks::contract::{
     Accuracy, Held, REGION, Region, Report, SHOWN, STOPPED, TOLERANCE, breaks, check, check_component, heights_hold, hold_to_baseline,
     in_regions, parts, parts_hold, regions, things_hold,
 };
-use worldgen::checks::survey::survey;
+use worldgen::checks::survey::{HELD, survey};
 use worldgen::generator::{
     ANY_SIZE, Child, Children, Far, Field, FieldValues, Generator, KindDef, Layer, Node, Op, Population, SOLID, Shapes, Span, ball, cuboid,
     generate, kind_of, things_in,
@@ -181,8 +181,8 @@ fn anchors_along_an_axis_are_one_per_square_across_it() {
  * (CONTRACT_BLESS=1 writes it).
  */
 fn keeps_the_contract(name: &str, world: &World, levels: u32) {
-    let checked = check(name, world, levels, &[]);
-    hold_to_baseline(&breaks(&[checked], &[]), &format!("{}/data/contract/{name}.txt", env!("CARGO_MANIFEST_DIR")), true);
+    let checked = check(&[(name, world)], levels, &[]);
+    hold_to_baseline(&breaks(&checked, &[]), &format!("{}/data/contract/{name}.txt", env!("CARGO_MANIFEST_DIR")), true);
 }
 
 #[test]
@@ -196,8 +196,8 @@ fn a_declared_accuracy_covers_its_parts() {
 
 #[test]
 fn an_accuracy_declared_for_nothing_breaks() {
-    let checked = check("fog", &world_of(fog(), (0, 128)), 1, &[]);
-    let breaks = breaks(&[checked], &[("fgo", Accuracy::DEFAULT)]);
+    let checked = check(&[("fog", &world_of(fog(), (0, 128)))], 1, &[]);
+    let breaks = breaks(&checked, &[("fgo", Accuracy::DEFAULT)]);
     assert!(breaks.iter().any(|b| b.of.is_none() && b.message.contains("fgo")), "a declaration for no stratum passed");
 }
 
@@ -266,21 +266,23 @@ fn finds_a_far_thing_reaching_past_its_populations_reach() {
 }
 
 #[test]
-fn a_rare_thing_far_from_spawn_gets_a_region() {
+fn a_rare_thing_gets_a_region_first_and_seeds_checked_together_share_regions() {
     // A wooden post in every cell on y = 0, but one of rock 400 m away: a stratum of its own.
     let posts = Population::new("posts", 1.0, 64).anchor(|cell| (cell.j == 0).then_some(cell.centre.map(|v| v as f64))).make(|p, cell| {
         let kind = if (cell.i, cell.k) == (50, 50) { ROCK } else { WOOD };
         Some(Node::of(vec![cuboid(p, p.map(|v| v + 8.0), kind, SOLID, Op::Fill)]))
     });
-    let (_, regions) = regions(&world_of(world(Layer::Population(posts)), (-64, 64)), &[]);
-    let names: Vec<&String> = regions.iter().flat_map(|r| r.strata.iter().map(|s| &s.name)).collect();
-    assert_eq!(names, ["posts rock", "posts wood"]);
-    assert!(regions[0].area.holds([50 * 64, 0, 50 * 64]), "{regions:?}");
+    let world = world_of(world(Layer::Population(posts)), (-64, 64));
+    // As two seeds: the rock has a place at each, the wood places everywhere.
+    let (_, regions) = regions(&[&world, &world], &[]);
+    assert!(regions[0][0].area.holds([50 * 64, 0, 50 * 64]), "{regions:?}");
+    let holding = |name: &str| regions.iter().flatten().filter(|r| r.strata.iter().any(|s| s.name == name)).count();
+    assert_eq!([holding("posts rock"), holding("posts wood")], [2.min(HELD), HELD], "{regions:?}");
 }
 
 #[test]
 fn finds_voxels_over_the_heights() {
-    let broken = heights_hold(&world_of(world(spans("rock", -256, 256, ROCK)), (-64, 64)), &[near()], 1);
+    let broken = heights_hold(&world_of(world(spans("rock", -256, 256, ROCK)), (-64, 64)), 1);
     assert!(broken.iter().any(|b| b.contains("above the heights (-64, 64)") && b.contains("such as rock")), "{broken:?}");
     // Under them, the ground goes on.
     assert!(!broken.iter().any(|b| b.contains("below the heights")), "{broken:?}");
@@ -336,7 +338,7 @@ fn finds_a_speck_too_small_to_show_outside_the_heights() {
     let speck = world(single(|_, _| Some(Node::of(vec![ball([64.0, 70.0, 64.0], 0.1, ROCK, SOLID, Op::Fill)])), 64));
     let grid = generate(&speck, &near(), 0);
     assert!(grid.shown.iter().all(|shown| !shown) && grid.pieces.alpha.iter().any(|a| *a > 0), "the speck shows");
-    let broken = heights_hold(&world_of(speck, (-64, 64)), &[near()], 0);
+    let broken = heights_hold(&world_of(speck, (-64, 64)), 0);
     assert!(
         broken.iter().any(|b| b.contains("1 sites stopping light above the heights (-64, 64)") && b.contains("such as rock")),
         "{broken:?}"
