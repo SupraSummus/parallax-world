@@ -57,8 +57,8 @@ const LINES: i64 = 32;
 
 /**
  * Draws a field into `clip`, a medium keeping a site with the chance a ray
- * crossing it is stopped; its lines along y from `floors` up, if any, one
- * all under them not asked. Returns the work.
+ * crossing it is stopped; its lines along the floors' axis from `floors`
+ * up, if any, one all under them not asked. Returns the work.
  */
 fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, floors: Option<&Floors>, put: &mut Put) -> Work {
     let mut work = Work::default();
@@ -68,34 +68,36 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, floors: Option<&Flo
     let medium = |e: f64| share(1.0 - js::exp(-e * CHORD * s as f64));
     let share_of = |extinction: Option<f64>| extinction.map_or(SHARE, medium);
     let picked = |x: i64, y: i64, z: i64| to_pick(hash(field_seed, x * s, y * s, z * s));
-    // Where column (i, j) of sites reads dithered plans, in the s × s columns it stands for (Plan::dithered): the same
-    // for every field, so a column's fields read one point. Along a row of columns the offsets across it are a Weyl
-    // sequence (the golden ratio's) from a phase hashed per row, so any run of them is spread evenly: a street along
-    // the row is read by as many columns as it covers, give or take one, not by chance. None at level 0.
-    let bits = s.trailing_zeros();
-    let offset = |i: i64, j: i64| -> [i64; 2] {
-        if bits == 0 {
-            return [0, 0];
-        }
-        let weyl = |n: i64, row: i64, axis: i64| {
-            let phase = hash64(seed, 0x0f00_7041, row, axis << 8 | bits as i64);
-            ((n as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15).wrapping_add(phase) >> (64 - bits)) as i64 - s / 2
-        };
-        [weyl(j, i, 0), weyl(i, j, 2)]
-    };
-    // Block by block of lines along an axis (a field's spans', or y for one given at each site), those it says it
-    // draws nothing in skipped; while checking, drawn to see they don't.
+    // Block by block of lines along an axis, those it says it draws nothing in skipped; while checking, drawn to see
+    // they don't. A field's spans lie along their own; one given at each site reads plans where each site is, so it
+    // is the same along any, and is drawn along the floors', if any: what is buried under them is not asked.
     /** What a field gives along its lines. */
     enum Lines<'a> {
         At(&'a FieldAt),
         Spans(&'a FieldSpans),
     }
     let (axis, lines) = match &field.values {
-        FieldValues::At(at) => (1, Lines::At(at)),
+        FieldValues::At(at) => (floors.map_or(0, |floors| floors.axis), Lines::At(at)),
         FieldValues::Spans { axis, spans } => (*axis, Lines::Spans(spans)),
         FieldValues::Shapes(near) => return draw_field_shapes(field, near, seed, s, clip, put),
     };
     let ([a, b], (lo, hi)) = (across(axis), (clip.min, clip.max));
+    // Where line (u, v) reads dithered plans, in the s × s lines it stands for (Plan::dithered): the same for every
+    // field along it, so a line's fields read one point. Along a row of lines the offsets across it are a Weyl
+    // sequence (the golden ratio's) from a phase hashed per row, so any run of them is spread evenly: a street along
+    // the row is read by as many lines as it covers, give or take one, not by chance. None at level 0.
+    let bits = s.trailing_zeros();
+    let offset = |u: i64, v: i64| -> [i64; 3] {
+        let mut offset = [0; 3];
+        if bits > 0 {
+            let weyl = |n: i64, row: i64, axis: usize| {
+                let phase = hash64(seed, 0x0f00_7041, row, (axis as i64) << 8 | bits as i64);
+                ((n as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15).wrapping_add(phase) >> (64 - bits)) as i64 - s / 2
+            };
+            (offset[a], offset[b]) = (weyl(v, u, a), weyl(u, v, b));
+        }
+        offset
+    };
     let (bottom, top) = (lo[axis] * s, (hi[axis] - 1) * s);
     let mut site = [0i64; 3];
     let (mut drew, mut unlike) = (None, None);
@@ -119,9 +121,9 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, floors: Option<&Flo
             for v in bv..to_v {
                 site[a] = u;
                 site[b] = v;
-                // The line's first site: along y, its column's floor.
+                // The line's first site: along the floors' axis, its floor.
                 let first = match floors {
-                    Some(floors) if axis == 1 => floors.at(u, v).max(lo[axis]),
+                    Some(floors) if axis == floors.axis => floors.floor(site).max(lo[axis]),
                     _ => lo[axis],
                 };
                 if first >= hi[axis] {
@@ -135,7 +137,7 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, floors: Option<&Flo
                             let [x, y, z] = site;
                             let value = all.map(|kind| (kind, None)).or_else(|| {
                                 work.reads += 1;
-                                sites::footprint(s, offset(x, z), || at(x * s, y * s, z * s))
+                                sites::footprint(s, [0; 3], || at(x * s, y * s, z * s))
                             });
                             if let Meets::All(kind) = meets
                                 && value != Some((kind, None))
@@ -153,13 +155,8 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, floors: Option<&Flo
                             // Past the sites, so that the top ones are whole too.
                             Some(kind) => vec![Span::solid(DEEP, top + 2 * s, kind)],
                             None => {
-                                // A line along x or z reads plans at one z or x: dithered across it only.
-                                let mut moved = offset(site[0], site[2]);
-                                if axis != 1 {
-                                    moved[axis / 2] = 0;
-                                }
                                 work.reads += 1;
-                                sites::footprint(s, moved, || spans(u * s, v * s))
+                                sites::footprint(s, offset(u, v), || spans(u * s, v * s))
                             }
                         };
                         if let Meets::All(kind) = meets {
@@ -326,7 +323,7 @@ fn draw_field_shapes(field: &Field, near: &FieldShapes, seed: u64, s: i64, clip:
     let units = units_of(clip, s).widen(2 * s);
     let field_seed = hash_text(field.name, seed);
     let mut work = Work::default();
-    for shape in sites::footprint(s, [0, 0], || near(&units)).iter().filter(|shape| shape.bounds.overlaps(&units)) {
+    for shape in sites::footprint(s, [0; 3], || near(&units)).iter().filter(|shape| shape.bounds.overlaps(&units)) {
         assert!(
             shape.op == field.op,
             "field {}: a shape drawn other than by its field's op (Field::shapes); see \"Model\" in {DOCS}",

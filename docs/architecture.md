@@ -681,6 +681,9 @@ They are endless and can be generated in any box alone
 by `worlds/` on the engine of `worldgen/`.
 The engine has no up: a field's spans lie along any axis,
 shapes and things stand any way, the contract checks every direction.
+Hosts show a world up along one axis, +y (`world::UP`):
+its heights lie along it, its tiles are made together along it,
+and the rock under them is found and kept along it (`generate_shown`).
 What only a world on a ground needs, plans of its columns (x, z),
 heights, layers down from a top, land shared by domains,
 is `ground/`, on the engine's public API;

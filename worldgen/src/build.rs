@@ -84,7 +84,7 @@ impl Field {
         let reaching = near.clone();
         let values = FieldValues::Shapes(Box::new(move |b| near(b).into_iter().collect()));
         Field { name, order, op, values, meets: None }.meets(move |b, spacing| {
-            let reaches = crate::sites::footprint(spacing, [0, 0], || reaching(b).into_iter().any(|s| s.bounds.overlaps(b)));
+            let reaches = crate::sites::footprint(spacing, [0; 3], || reaching(b).into_iter().any(|s| s.bounds.overlaps(b)));
             if reaches { Meets::Any } else { Meets::Nothing }
         })
     }
@@ -264,8 +264,8 @@ impl Shape {
         cuboid(min, max, kind.into(), SOLID, Op::Fill)
     }
 
-    pub fn gable(min: Point, max: Point, ridge: usize, kind: impl Into<Kind>) -> Shape {
-        gable(min, max, ridge, kind.into(), SOLID, Op::Fill)
+    pub fn gable(min: Point, max: Point, ridge: usize, up: [i64; 3], kind: impl Into<Kind>) -> Shape {
+        gable(min, max, ridge, up, kind.into(), SOLID, Op::Fill)
     }
 
     /** Over whatever is drawn before it. */

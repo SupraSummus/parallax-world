@@ -15,15 +15,11 @@ Numbers are for the forest at 1280×800, as measured when written.
   The fixed-point containment tests cost about 15% at level 0.
 - **worldgen still has an up in a few paths**,
   though it should have none (section 5 of `docs/architecture.md`):
-  hosts' tiles cut to a world's `heights` along y (`World::heights`, `tiles.rs`);
-  what is buried, found under each block of columns
-  (`Floors`, `generate_shown`, `VoxelGrid::on_rock`);
-  a field `at` each site, drawn in lines along y,
-  reading dithered plans across x and z (`sites::footprint`);
-  gables up y, frames turning about it (`gable`, `Frame::turned`);
   `picture.rs`'s sky, sun and cameras looking down;
   the checks' columns along y (`checks/`).
-  Each could take an axis, or go to `ground/`.
+  Both are of the world a host shows, up along `world::UP`, as its tiles are,
+  and could take it from there; a world could name its own,
+  which the hosts would then have to follow.
 - **A box's faces round to the sites.**
   Faces on a plane of a level's sites split its sites ("Faces" in
   `docs/generators.md`); off those planes a face rounds to the sites,

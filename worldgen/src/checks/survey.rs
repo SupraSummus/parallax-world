@@ -301,17 +301,17 @@ type Drawn = (Vec<Kind>, usize, i64, i64);
 fn drawn(field: &Field, p: [i64; 3], s: i64) -> Option<Drawn> {
     let [x, _, z] = p;
     match &field.values {
-        FieldValues::At(at) => footprint(s, [0, 0], || at(x, p[1], z)).map(|(kind, _)| (vec![kind], 1, p[1], p[1] + 1)),
+        FieldValues::At(at) => footprint(s, [0; 3], || at(x, p[1], z)).map(|(kind, _)| (vec![kind], 1, p[1], p[1] + 1)),
         FieldValues::Shapes(near) => {
             // A shape reaching the site's voxel, from its bottom to its top.
             let b = Box3::around(p, s);
-            let shapes = footprint(s, [0, 0], || near(&b));
+            let shapes = footprint(s, [0; 3], || near(&b));
             let shape = shapes.iter().find(|shape| shape.bounds.overlaps(&b))?;
             Some((vec![shape.kind], 1, shape.bounds.min[1], shape.bounds.max[1]))
         }
         FieldValues::Spans { axis, spans } => {
             let [a, b] = across(*axis);
-            let spans = footprint(s, [0, 0], || spans(p[a], p[b]));
+            let spans = footprint(s, [0; 3], || spans(p[a], p[b]));
             let (from, to) = (spans.iter().map(|s| s.from).min()?, spans.iter().map(|s| s.to).max()?);
             Some((spans.iter().map(|s| s.kind).collect(), *axis, from, to))
         }

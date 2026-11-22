@@ -14,6 +14,7 @@ use fcc::{FACE_KINDS, Look, VOXEL_FACES};
 use crate::generator::{Generator, generate_shown, shown};
 use crate::grid::{ALPHA, BRICK, Box3, COLOUR_ONE, GLOW_ONE, VoxelGrid};
 use crate::noise::hash;
+use crate::world::UP;
 
 /** Sites a tile is wide, at the picture's level. */
 const TILE: i64 = 64;
@@ -557,7 +558,7 @@ fn sky(direction: [f64; 3]) -> [f64; 3] {
 pub fn picture(generator: &Generator, camera: &Camera, level: u32, heights: (i64, i64)) -> Picture {
     let tops = tops_of(generator, camera, level, heights);
     let tiling = Tiling { heights };
-    let make = &mut |keys: &[Key]| keys.iter().map(|key| generate_shown(generator, &tiling.tile(*key), level)).collect();
+    let make = &mut |keys: &[Key]| keys.iter().map(|key| generate_shown(generator, &tiling.tile(*key), level, UP)).collect();
     picture_of_tiles(camera, &mut Tiles::new(level, heights), &tops, make)
 }
 
@@ -581,7 +582,7 @@ fn tops_of(generator: &Generator, camera: &Camera, level: u32, heights: (i64, i6
     let tops = (i0..=i1).flat_map(|i| (k0..=k1).map(move |k| [i, k])).map(|[i, k]| {
         // With a site more round it: a ray reads its neighbours.
         let column = Box3 { min: [i * TILE - 1, heights.0, k * TILE - 1], max: [(i + 1) * TILE + 1, heights.1, (k + 1) * TILE + 1] };
-        ([i, k], shown(generator, &column, level).max[1])
+        ([i, k], shown(generator, &column, level, UP).max[1])
     });
     tops.collect()
 }
@@ -601,7 +602,7 @@ pub fn picture_on_threads(generator: &Generator, camera: &Camera, level: u32, he
                 loop {
                     let Ok((i, key)) = queue.lock().expect("no thread panicked").recv() else { break };
                     // A generator's panic, passed on to the picture's thread rather than leaving it waiting.
-                    let grid = std::panic::catch_unwind(AssertUnwindSafe(|| generate_shown(generator, &tiling.tile(key), level)));
+                    let grid = std::panic::catch_unwind(AssertUnwindSafe(|| generate_shown(generator, &tiling.tile(key), level, UP)));
                     done.send((i, grid)).expect("the picture waits for it");
                 }
             });

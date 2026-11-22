@@ -150,7 +150,7 @@ mod tests {
 
     #[test]
     fn spans_come_out_bottom_up_and_media_are_as_tall_as_they_are() {
-        let spans = footprint(4, [0, 0], || Column::new(10).surface(1, 3).surface(2, 1).fill_below(3, -20).medium(4, 6, 0.5).spans());
+        let spans = footprint(4, [0; 3], || Column::new(10).surface(1, 3).surface(2, 1).fill_below(3, -20).medium(4, 6, 0.5).spans());
         let bounds: Vec<(i64, i64)> = spans.iter().map(|s| (s.from, s.to)).collect();
         assert_eq!(bounds, [(-20, -5), (-5, 3), (3, 11), (11, 17)]);
         assert_eq!(spans[3].holds, Holds::Medium(0.5));

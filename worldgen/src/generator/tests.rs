@@ -169,11 +169,17 @@ fn a_tube_is_within_half_a_site_of_its_curve() {
 #[test]
 fn a_gable_narrows_to_its_ridge() {
     // 8 wide across x, 4 high: at height h, the sites within 4 · (1 − h / 4) of x = 4.
-    let shape = gable([0.0; 3], [8.0, 4.0, 6.0], 2, 1, SOLID, Op::Fill);
+    let shape = gable([0.0; 3], [8.0, 4.0, 6.0], 2, [0, 1, 0], 1, SOLID, Op::Fill);
     let inside = shape.inside(0, 1);
     let holds = |x: i64, y: i64| inside.holds([x, y, 2].map(|v| v * ONE));
     assert!(holds(0, 0) && holds(7, 0) && holds(4, 3) && holds(3, 2) && holds(6, 1));
     assert!(!holds(1, 3) && !holds(8, 0) && !holds(4, 4) && !holds(7, 2));
+    // Standing along −x, its ridge along y, it holds the same points turned (off its ends, which a box rounds one way).
+    let turned = gable([-4.0, 0.0, 0.0], [0.0, 6.0, 8.0], 1, [-1, 0, 0], 1, SOLID, Op::Fill);
+    let inside = turned.inside(0, 1);
+    for (x, y) in (-1..9).flat_map(|x| (1..4).map(move |y| (x, y))) {
+        assert_eq!(inside.holds([-y, 2, x].map(|v| v * ONE)), holds(x, y), "({x}, {y})");
+    }
 }
 
 /** A generator of `layers`, of one kind. */
@@ -186,20 +192,41 @@ fn layers(layers: Vec<Layer>) -> Generator {
 }
 
 /**
- * Stone up to `height(x)`, which never falls along x, solid to the
- * bottom: saying where a box is all of it or none (Field::meets).
+ * Stone up along `up` to `height(r)`, r along `rising(up)`, which it
+ * never falls along, solid to the bottom: saying where a box is all of it
+ * or none (Field::meets).
  */
-fn solid_ground(height: fn(i64) -> i64) -> Generator {
-    let field = Field::spans("ground", 0.0, Op::Fill, 1, move |x, _| vec![Span::solid(DEEP, height(x) + 1, 0)]).meets(move |b, _| {
-        if b.min[1] > height(b.max[0] - 1) {
+fn solid_ground(up: usize, height: fn(i64) -> i64) -> Generator {
+    let (rise, [a, _]) = (rising(up), across(up));
+    let field =
+        Field::spans("ground", 0.0, Op::Fill, up, move |u, v| vec![Span::solid(DEEP, height(if a == rise { u } else { v }) + 1, 0)]);
+    let field = field.meets(move |b, _| {
+        if b.min[up] > height(b.max[rise] - 1) {
             Meets::Nothing
-        } else if b.max[1] <= height(b.min[0]) {
+        } else if b.max[up] <= height(b.min[rise]) {
             Meets::All(0)
         } else {
             Meets::Any
         }
     });
     layers(vec![Layer::Field(field)])
+}
+
+/** The axis a ground standing along `up` rises along: x for y, and so on round. */
+fn rising(up: usize) -> usize {
+    (up + 2) % 3
+}
+
+/** Point (x, y, z) of a ground standing along y, turned to stand along `up`. */
+fn standing(up: usize, [x, y, z]: [i64; 3]) -> [i64; 3] {
+    let mut p = [0; 3];
+    (p[rising(up)], p[up], p[3 - up - rising(up)]) = (x, y, z);
+    p
+}
+
+/** Box `b` of a ground standing along y, turned as `standing`. */
+fn standing_box(up: usize, b: Box3) -> Box3 {
+    Box3 { min: standing(up, b.min), max: standing(up, b.max) }
 }
 
 /**
@@ -238,7 +265,7 @@ fn a_field_says_where_it_is_along_any_axis() {
                 assert_eq!(grid.pieces.alpha, generate(&wall(at, false), &b, level).pieces.alpha, "level {level}, {b:?}");
             }
             // All buried, it is made as one brick, every site of it whole.
-            let buried = generate_shown(&world, &behind, level);
+            let buried = generate_shown(&world, &behind, level, 1);
             assert_eq!(buried.shown.len(), (BRICK * BRICK * BRICK / 2) as usize);
             assert!(buried.bricks.iter().all(|&at| at == 0) && buried.pieces.alpha.iter().all(|&a| a == ALPHA));
         }
@@ -274,13 +301,13 @@ fn a_tile_holds_its_ground_by_its_surface_not_its_volume() {
             2 => |x| 2 * x,
             _ => |x| 4 * x,
         };
-        let world = solid_ground(height);
-        for t in [64, 256] {
-            let b = Box3 { min: [0, -64, 0], max: [t, g * t + 64, t] };
+        for (up, t) in (0..3).flat_map(|up| [64, 256].map(|t| (up, t))) {
+            let world = solid_ground(up, height);
+            let b = standing_box(up, Box3 { min: [0, -64, 0], max: [t, g * t + 64, t] });
             let sites = (BRICK * BRICK * BRICK / 2) as usize;
             let column = |grid: VoxelGrid| (grid.shown.len() / sites - 1) as f64 / (t * t / BRICK / BRICK) as f64;
-            let held = column(generate_shown(&world, &b, 0));
-            assert!(held <= 2.5 + 2.0 * g as f64, "rising {g} a column, a tile {t} sites a side holds {held} bricks a column");
+            let held = column(generate_shown(&world, &b, 0, up));
+            assert!(held <= 2.5 + 2.0 * g as f64, "up {up}, rising {g} a column, a tile {t} sites a side holds {held} bricks a column");
         }
     }
 }
@@ -288,10 +315,10 @@ fn a_tile_holds_its_ground_by_its_surface_not_its_volume() {
 #[test]
 fn what_hosts_make_of_a_box_differs_from_all_of_it_only_in_buried_rock() {
     // Ground rising two sites a column along x: no layer of the box's bricks is buried, its blocks of columns are.
-    let world = solid_ground(|x| 2 * x);
-    let b = Box3 { min: [0, -64, 0], max: [128, 320, 64] };
-    for level in 0..3 {
-        let (all, made) = (generate(&world, &b, level), generate_shown(&world, &b, level));
+    for (up, level) in (0..3).flat_map(|up| (0..3).map(move |level| (up, level))) {
+        let world = solid_ground(up, |x| 2 * x);
+        let b = standing_box(up, Box3 { min: [0, -64, 0], max: [128, 320, 64] });
+        let (all, made) = (generate(&world, &b, level), generate_shown(&world, &b, level, up));
         let whole = |grid: &VoxelGrid, [x, y, z]: [i64; 3]| grid.alpha(x, y, z) == ALPHA;
         let sites = (b.min[2]..b.max[2]).flat_map(|z| (b.min[1]..b.max[1]).flat_map(move |y| (b.min[0]..b.max[0]).map(move |x| [x, y, z])));
         for [x, y, z] in sites.filter(|&[x, y, z]| crate::grid::is_site(x, y, z)) {
@@ -300,29 +327,34 @@ fn what_hosts_make_of_a_box_differs_from_all_of_it_only_in_buried_rock() {
             let around = VOXEL_FACES.map(|[i, j, k]| [x + i as i64, y + j as i64, z + k as i64]);
             // Rock no ray reaches: whole, as is every site around it.
             let buried = whole(&made, [x, y, z]) && whole(&all, [x, y, z]) && around.iter().all(|&p| !b.holds(p) || whole(&all, p));
-            assert!(look(&made) == look(&all) || buried, "level {level}: site ({x}, {y}, {z})");
+            assert!(look(&made) == look(&all) || buried, "up {up}, level {level}: site ({x}, {y}, {z})");
         }
     }
 }
 
 #[test]
 fn what_shows_of_a_box_is_all_but_its_whole_bottom_and_top() {
-    // Ground from 0 to 16 high.
-    let world = solid_ground(|x| x / 4);
-    let b = Box3 { min: [0, -509, 0], max: [64, 509, 16] };
-    let part = shown(&world, &b, 0);
-    assert!(part.min[1] < 0 && part.min[1] > -64 && part.max[1] > 16 && part.max[1] < 64, "{part:?}");
-    assert_eq!((part.min[1] - b.min[1]) % BRICK, 0, "in bricks from the bottom");
-    assert_eq!(whole(&world, &Box3 { max: [64, part.min[1], 16], ..b }, 0), Some(Whole::Buried(0)));
-    assert_eq!(whole(&world, &Box3 { min: [0, part.max[1], 0], ..b }, 0), Some(Whole::Empty));
-    // A brick more of either is not.
-    assert_eq!(whole(&world, &Box3 { max: [64, part.min[1] + BRICK, 16], ..b }, 0), None);
-    assert_eq!(whole(&world, &Box3 { min: [0, part.max[1] - BRICK, 0], ..b }, 0), None);
-    let buried = shown(&world, &Box3 { max: [64, -100, 16], ..b }, 0);
-    assert_eq!(buried.min[1], buried.max[1], "all buried");
-    // Hosts keep its whole bottom as rock, not a hollow rays from a finer level's tunnels would see through.
-    let grid = generate_shown(&world, &b, 0);
-    assert_eq!((grid.clip().min[1], grid.alpha(1, b.min[1], 0)), (b.min[1], ALPHA));
+    for up in 0..3 {
+        // Ground from 0 to 16 high.
+        let world = solid_ground(up, |x| x / 4);
+        let ground = |min: [i64; 3], max: [i64; 3]| standing_box(up, Box3 { min, max });
+        let b = ground([0, -509, 0], [64, 509, 16]);
+        let part = shown(&world, &b, 0, up);
+        assert!(part.min[up] < 0 && part.min[up] > -64 && part.max[up] > 16 && part.max[up] < 64, "up {up}: {part:?}");
+        assert_eq!((part.min[up] - b.min[up]) % BRICK, 0, "in bricks from the bottom");
+        assert_eq!(whole(&world, &ground([0, -509, 0], [64, part.min[up], 16]), 0), Some(Whole::Buried(0)));
+        assert_eq!(whole(&world, &ground([0, part.max[up], 0], [64, 509, 16]), 0), Some(Whole::Empty));
+        // A brick more of either is not.
+        assert_eq!(whole(&world, &ground([0, -509, 0], [64, part.min[up] + BRICK, 16]), 0), None);
+        assert_eq!(whole(&world, &ground([0, part.max[up] - BRICK, 0], [64, 509, 16]), 0), None);
+        let buried = shown(&world, &ground([0, -509, 0], [64, -100, 16]), 0, up);
+        assert_eq!(buried.min[up], buried.max[up], "all buried");
+        // Hosts keep its whole bottom as rock, not a hollow rays from a finer level's tunnels would see through.
+        let grid = generate_shown(&world, &b, 0, up);
+        let [x, y, z] = standing(up, [1, b.min[up], 0]);
+        // Its rows start on an even x, so along x it may reach a site further.
+        assert!(grid.clip().min[up] <= b.min[up] && grid.alpha(x, y, z) == ALPHA, "up {up}");
+    }
 }
 
 /** Rocks in a tenth of the cells west of x = 0, a twentieth east, saying `most`; in cells, or along lines across a plane. */

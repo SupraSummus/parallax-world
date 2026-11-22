@@ -237,7 +237,7 @@ const TILES: i64 = 4;
 fn tile(world: &World, at: [i64; 3], level: u32) -> Box3 {
     let first = at.map(|v| v.div_euclid((TILES * crate::tiles::TILE) << level) * TILES);
     let corner = |key: [i64; 3]| crate::tiles::tile_box(world.heights_at(level), key);
-    shown(&world.generator, &Box3 { min: corner(first).min, max: corner(first.map(|k| k + TILES - 1)).max }, level)
+    shown(&world.generator, &Box3 { min: corner(first).min, max: corner(first.map(|k| k + TILES - 1)).max }, level, crate::world::UP)
 }
 
 /** A tile of a report: where and at what level, its work, and how long it took here. */

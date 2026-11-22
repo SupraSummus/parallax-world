@@ -77,7 +77,7 @@ const CASES: &[(&str, i64, Make)] = &[
     ("roof", 32, |p, r| {
         let (l, w, h) = (about(r, 16.0), about(r, 12.0), about(r, 8.0));
         let min = [p[0] - l / 2.0, p[1], p[2] - w / 2.0];
-        gable(min, [min[0] + l, min[1] + h, min[2] + w], 0, BRIGHT, SOLID, Op::Fill)
+        gable(min, [min[0] + l, min[1] + h, min[2] + w], 0, [0, 1, 0], BRIGHT, SOLID, Op::Fill)
     }),
 ];
 

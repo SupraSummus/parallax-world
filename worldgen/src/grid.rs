@@ -42,6 +42,13 @@ impl Box3 {
         Box3 { min: self.min.map(|v| v - m), max: self.max.map(|v| v + m) }
     }
 
+    /** It with its sites from `from` to `to` along `axis`. */
+    pub fn slab(&self, axis: usize, from: i64, to: i64) -> Box3 {
+        let (mut min, mut max) = (self.min, self.max);
+        (min[axis], max[axis]) = (from, to);
+        Box3 { min, max }
+    }
+
     /** The cube reaching `half` from `centre` along each axis. */
     pub fn around(centre: [i64; 3], half: i64) -> Box3 {
         Box3 { min: centre.map(|v| v - half), max: centre.map(|v| v + half) }
@@ -364,20 +371,21 @@ impl VoxelGrid {
     }
 
     /**
-     * Keeps its bricks under `floor`, by column (x, z) the first site
-     * along y not buried under, the same over a brick's columns, as one
-     * of rock of `colour` (a whole site's, premultiplied): each a whole
-     * voxel, as `bury` keeps them. Nothing was put in them. Not emptied: a
-     * host shows it as rock, which rays from a finer level's hollows meet
-     * and light doesn't pass.
+     * Keeps its bricks under `floor` along `axis`, by line along it the
+     * first site of the line through a site not buried under, the same
+     * over a brick's lines, as one of rock of `colour` (a whole site's,
+     * premultiplied): each a whole voxel, as `bury` keeps them. Nothing was
+     * put in them. Not emptied: a host shows it as rock, which rays from a
+     * finer level's hollows meet and light doesn't pass.
      */
-    pub fn on_rock(&mut self, floor: impl Fn(i64, i64) -> i64, colour: [u16; 3]) {
+    pub fn on_rock(&mut self, axis: usize, floor: impl Fn([i64; 3]) -> i64, colour: [u16; 3]) {
         let at = (self.shown.len() / BRICK_SITES) as i32;
-        let (bx, by, top) = (self.bx, self.by, self.min[1] + self.n[1]);
+        let (bx, by, top) = (self.bx, self.by, self.min[axis] + self.n[axis]);
         let mut any = false;
         for (i, brick) in self.bricks.iter_mut().enumerate() {
-            let [x, y, z] = [i as i64 % bx, i as i64 / bx % by, i as i64 / (bx * by)];
-            if (self.min[1] + (y + 1) * BRICK).min(top) <= floor(self.min[0] + x * BRICK, self.min[2] + z * BRICK) {
+            let first = [i as i64 % bx, i as i64 / bx % by, i as i64 / (bx * by)].map(|b| b * BRICK);
+            let first: [i64; 3] = std::array::from_fn(|a| self.min[a] + first[a]);
+            if (first[axis] + BRICK).min(top) <= floor(first) {
                 debug_assert!(*brick < 0, "a brick under its floor holds sites");
                 (*brick, any) = (at, true);
             }
