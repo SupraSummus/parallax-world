@@ -109,8 +109,6 @@ Numbers are for the forest at 1280×800, as measured when written.
     and the village's houses thinner at levels 1 and 2:
     a wall a unit thick on a plane of sites is half of two sites,
     each shown by its own coin, so rays leak through it.
-    Native's voxels engine shows a site held in part speckled, not pitted,
-    but the leak stays.
   - Balls and tubes. With them `Sides`' ties and the thin shapes' rules go,
     once a thin wall stays whole across sites shown apart (above).
   - Spans of a medium are held so now (`held` in `drawables.rs`). Left:
@@ -134,14 +132,13 @@ Numbers are for the forest at 1280×800, as measured when written.
     - A medium as thick as a site lies on its ground through those faces too,
       where it is beside it: a little less is stopped at level 1 (the valley's fields).
   - Hosts: the levels they ask for, the scale a body walks at.
-    Seen from near, a level is speckled where its sites are held in part
-    (a flat ground's top, a site deep),
-    and sharp only where a shape is several sites thick.
-  - The chunk engines show a site held in part whole or not, by its coin (fcc's `Reader`),
-    so light, which sees its share, lights what shows behind it as if through it,
-    and from near it is pitted.
-    A coin of a finer site in their shaders, as the voxels engine's, would end both.
-    Drawn as a medium is (tried), the reliefs engine smeared the ground.
+    Seen from near, a level is sharp only where a shape is several sites thick.
+  - Hosts show a site held in part whole or not, by a coin of its site (fcc's `shows_whole`),
+    so from near it is pitted (a flat ground's top, a site deep),
+    and light, which sees its share, lights what shows behind it as if through it.
+    Tried instead:
+    a coin four times finer (the voxels engine) flickered far off, finer than a pixel;
+    drawn as a medium, reliefs smeared the ground and far trees blurred to haze.
 - **Layers that don't say where they are are drawn everywhere**
   (`Field::meets`, `Population::stands`):
   the city's buildings, and the towns', landmarks', settlements' and steadings' things.

@@ -333,7 +333,7 @@ how many rays get how far, and what they stop on.
   a face across the line sees the kind its rays meet first.
   No plane across an axis parts the lattice's layers,
   so a flat ground's top sites are held in part at every level, level 0 too,
-  shown by coins (fcc's `in_part`): the ground is speckled, a site deep.
+  shown by coins (fcc's `shows_whole`): the ground is pitted, a site deep.
   A paint lies on what is there, and past it only where it covers more:
   a field painting another's ground paints all of its top sites.
   A medium's span is in every site it reaches too, by the same law:

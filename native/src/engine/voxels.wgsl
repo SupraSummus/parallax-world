@@ -5,8 +5,8 @@
 // samples met, and takes the nearest it enters (resolve_fragment).
 // See-through voxels (a medium: fog, water, a far canopy) add up on the way,
 // in the order the ray meets them, each by its path through it; pieces
-// held in part (fcc's in_part) stop it whole or not at all, by a coin of
-// where it enters them (`stops`).
+// held in part (fcc's in_part) show whole or not at all, by a coin of
+// their site, as in every host (`whole_or_none`).
 // A voxel shows how it looks along the ray (`seen`), times the
 // light on it: shaded, by the way its surface faces; lit, the light its tile
 // found for it (world.rs), and its own glow, as the eye sees it (eye.rs:
@@ -178,18 +178,27 @@ fn ask(level: u32, s: vec3i) {
   }
 }
 
-// The look of the voxel at site `s` of `level`, 0 if none, or not known yet: asked for then, as what shows is shaded by it.
+// The look of the voxel at site `s` of `level` as it shows, 0 if none, or not known yet: asked for then, as what shows is shaded by it.
 fn voxel(level: u32, s: vec3i) -> u32 {
   ask(level, s);
-  return in_brick(level, brick_of(level, s), s);
-}
-
-// The voxel at site `s` of `level` in the brick at `slot`.
-fn in_brick(level: u32, slot: i32, s: vec3i) -> u32 {
+  let slot = brick_of(level, s);
   if slot < 0 {
     return 0u;
   }
-  return site_in(slot, (s - levels[level].min) & vec3i(BRICK - 1));
+  return whole_or_none(site_in(slot, (s - levels[level].min) & vec3i(BRICK - 1)), s);
+}
+
+// How look `v` at site `s` shows, as fcc's whole_or_none: of pieces held in part (alpha under 255, red odd), whole where
+// its alpha is over a coin of the site, else nothing; so every look shows empty, whole or a medium.
+fn whole_or_none(v: u32, s: vec3i) -> u32 {
+  let alpha = v >> 24u;
+  if (v & 1u) == 0u || alpha == 0u || alpha == 255u {
+    return v;
+  }
+  let h = bitcast<vec3u>(s) * vec3u(0x9e3779b1u, 0x85ebca77u, 0xc2b2ae3du);
+  var x = h.x ^ h.y ^ h.z;
+  x = (x ^ (x >> 15u)) * 0x2c1b3c6du;
+  return select(0u, v | 0xff000000u, alpha > (x ^ (x >> 12u)) >> 24u);
 }
 
 // Where site `r` of a brick is among its sites (Grid's order: z, y, then every other x).
@@ -363,21 +372,6 @@ fn within(l: Level, o: vec3f, d: vec3f) -> vec2f {
   return span;
 }
 
-// Whether look `v` is of pieces held in part (fcc's in_part): under 255, its red odd.
-fn in_part(v: u32) -> bool {
-  return (v & 1u) == 1u && (v >> 24u) != 0u && (v >> 24u) != 255u;
-}
-
-// Whether pieces held in part of `alpha` in a voxel of `level` stop a ray entering it at `p` (the level's units): by
-// a coin of the site of a lattice four times finer that it enters by, so as often as they stop rays, speckled
-// finer than their voxel, where they are in the world.
-fn stops(alpha: u32, level: u32, p: vec3f) -> bool {
-  let h = bitcast<vec3u>(site_at(p * 4.0)) * vec3u(0x9e3779b1u, 0x85ebca77u, 0xc2b2ae3du);
-  var x = h.x ^ h.y ^ h.z ^ (level * 0x27d4eb2fu);
-  x = (x ^ (x >> 15u)) * 0x2c1b3c6du;
-  return alpha > (x ^ (x >> 12u)) >> 24u;
-}
-
 fn march(d: vec3f) -> Hit {
   let ray = ray_of(d);
   var t = 0.0;
@@ -416,15 +410,13 @@ fn march(d: vec3f) -> Hit {
       }
       if slot >= 0 {
         let r = (s - l.min) & vec3i(BRICK - 1);
-        let v = site_in(slot, r);
+        let v = whole_or_none(site_in(slot, r), s);
         let alpha = v >> 24u;
-        // Opaque, or pieces held in part that stop it, unless the eye is in it.
-        let part = in_part(v);
-        let stopped = alpha == 255u || part && stops(alpha, level, o + d * at);
-        if stopped && (steps > 0 || at > 0.0) {
+        // Whole, unless the eye is in it; or a medium.
+        if alpha == 255u && (steps > 0 || at > 0.0) {
           return Hit(level, s, v, at * scale);
         }
-        if alpha != 0u && !part {
+        if alpha != 0u && alpha != 255u {
           medium = medium_stops(slot, r, v);
           tint = medium_colour(slot, r, v);
         }
@@ -654,8 +646,8 @@ struct Choice {
   sky_seen: bool,
 }
 
-// A sample's hit, for a pixel whose ray, along `d`, enters its voxel, unless pieces held in part let that ray by.
-fn consider(c: Choice, hit: vec4u, k: i32, ray: Ray, d: vec3f) -> Choice {
+// A sample's hit, for a pixel whose ray enters its voxel.
+fn consider(c: Choice, hit: vec4u, k: i32, ray: Ray) -> Choice {
   var out = c;
   if hit.w == NONE {
     out.sky_seen = true;
@@ -668,10 +660,6 @@ fn consider(c: Choice, hit: vec4u, k: i32, ray: Ray, d: vec3f) -> Choice {
   let enter = entering(crossed);
   let leave = leaving(crossed);
   let t = enter * scale;
-  let v = in_brick(level, brick_of(level, site), site);
-  if in_part(v) && !stops(v >> 24u, level, eye.xyz / scale + d * enter) {
-    return out;
-  }
   if enter < leave && leave > 0.0 && t < c.nearest {
     out = Choice(k, t, c.sky_seen);
   }
@@ -707,10 +695,10 @@ fn resolve_fragment(in: Screen) -> @location(0) vec4f {
     return vec4f(1.0, 0.0, 1.0, 1.0);
   }
   var c = Choice(-1, 1e30, false);
-  c = consider(c, h0, 0, ray, d);
-  c = consider(c, h1, 1, ray, d);
-  c = consider(c, h2, 2, ray, d);
-  c = consider(c, h3, 3, ray, d);
+  c = consider(c, h0, 0, ray);
+  c = consider(c, h1, 1, ray);
+  c = consider(c, h2, 2, ray);
+  c = consider(c, h3, 3, ray);
   // What the samples agreeing with the pixel saw (w NONE: nothing), or the only one.
   var seen = vec4u(0u, 0u, 0u, NONE);
   var only = -1;
