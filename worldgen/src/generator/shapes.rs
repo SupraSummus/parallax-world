@@ -26,53 +26,57 @@ fn sites_between(min: At, max: At) -> Box3 {
 }
 
 /**
- * Which side of a face a site on it counts as on. A box or span keeps the
- * sites whose centres are in [from, to); on a plane of a level's sites
- * (y = 0 at every level), half its lines of sites have one on each face,
- * kept at the bottom, dropped at the top, so it sinks half a site, more
- * the coarser the level. Level 0's sink, half a unit, is the reference:
- * a site on a face counts as above it, along `axis`, with the chance
- * ½ + 1/(2s), sites s apart: always at level 0, nearly half the time far
- * away, so a face is where level 0 has it on average (docs/generators.md,
- * "Levels"). By a hash of the position and axis alone, so boxes and
- * spans meeting on a face share its sites, and a site above at one level
- * is above at the finer ones.
+ * A box's sides: along each axis, the sites in [lo, hi). On a plane of a
+ * level's sites (y = 0 at every level), half its lines of sites have one
+ * on each face: kept at the bottom and dropped at the top, it would sink
+ * half a site, more the coarser the level. Level 0's sink, half a unit, is
+ * the reference: a site on a face counts as above it, along `axis`, with
+ * the chance ½ + 1/(2s), sites s apart: always at level 0, nearly half
+ * the time far away, so a face is where level 0 has it on average
+ * (docs/generators.md, "Levels"). By a hash of the position and axis
+ * alone, so boxes meeting on a face share its sites, and a site above at
+ * one level is above at the finer ones.
+ *
+ * A side one site wide keeps its bottom face's sites, as at level 0: each
+ * line across it has a site on one face only, and halves of both would
+ * let rays through. One under `min` is grown to it about its middle, its
+ * faces kept: a sheet midway between two planes is held by both.
  */
 #[derive(Clone, Copy)]
-pub(super) struct Tie {
+pub(super) struct Sides {
+    lo: At,
+    hi: At,
+    min: Fixed,
     s: i64,
     /** Above when the hash is under this, of 2^32. */
     under: u64,
 }
 
-impl Tie {
-    pub(super) fn new(s: i64) -> Tie {
-        Tie { s, under: (1 << 31) + (1 << 31) / s as u64 }
+impl Sides {
+    fn new(lo: At, hi: At, min: Fixed, s: i64) -> Sides {
+        Sides { lo, hi, min, s, under: (1 << 31) + (1 << 31) / s as u64 }
     }
 
-    /**
-     * Whether coordinate `axis` of site `p` is in [lo, hi), all in units
-     * `one` to a lattice unit. A box one site thick keeps its bottom face's
-     * sites, as at level 0: each line across it has a site on one face
-     * only, and halves of both would let rays through.
-     */
-    pub(super) fn within(&self, axis: usize, p: [i64; 3], lo: i64, hi: i64, one: i64) -> bool {
-        let v = p[axis];
+    fn within(&self, axis: usize, p: At) -> bool {
+        let (lo, hi, v) = (self.lo[axis], self.hi[axis], p[axis]);
+        if hi - lo < self.min {
+            return (2 * v - lo - hi).abs() <= self.min;
+        }
         if lo < v && v < hi {
             return true;
         }
         if v != lo && v != hi {
             return false;
         }
-        if hi - lo <= self.s * one {
+        if hi - lo <= self.s * ONE {
             return v == lo;
         }
-        let [x, y, z] = p.map(|c| c.div_euclid(one));
-        ((hash(TIE_SEEDS[axis], x, y, z) as u64) < self.under) == (v == lo)
+        let [x, y, z] = p.map(|c| c.div_euclid(ONE));
+        ((hash(SIDE_SEEDS[axis], x, y, z) as u64) < self.under) == (v == lo)
     }
 }
 
-const TIE_SEEDS: [u64; 3] = [0x7a1e_0001, 0x7a1e_0002, 0x7a1e_0003];
+const SIDE_SEEDS: [u64; 3] = [0x7a1e_0001, 0x7a1e_0002, 0x7a1e_0003];
 
 fn dot(a: At, b: At) -> i64 {
     (0..3).map(|i| a[i] * b[i]).sum()
@@ -365,9 +369,16 @@ impl Piece {
 /** A shape's test for one `min`, with what does not depend on the point worked out. */
 pub(super) enum Inside<'a> {
     Nothing,
+    /**
+     * Σ (u / a)² ≤ 1 over the axes it is at least `min` wide along; along
+     * the others, `thin`, its middle's section, grown as a box's sides are
+     * (its own ends, grown, would meet a plane of sites at a point).
+     */
     Ellipsoid {
         centre: At,
         inverse: [i64; 3],
+        thin: [bool; 3],
+        sides: Sides,
     },
     /** A tube drawn in one piece, as most are, by value: looping over one cost a few percent at level 0. */
     Piece {
@@ -379,25 +390,18 @@ pub(super) enum Inside<'a> {
         pieces: &'a [Piece],
         thick: Thick<'a>,
     },
-    Cuboid {
-        lo: At,
-        hi: At,
-        min: Fixed,
-        tie: Tie,
-    },
+    Cuboid(Sides),
     /**
-     * Under the slopes: |2u − lo − hi| · height ≤ width · (how far x is
-     * along `rise` from the ridge, at hi, or at lo if `down`), with 8 bits
-     * after the point.
+     * Under the slopes, if `sloped`: |2u − lo − hi| · height ≤ width · (how
+     * far x is along `rise` from the ridge, at hi, or at lo if `down`), with
+     * 8 bits after the point. Too low or narrow for them to show, its box.
      */
     Gable {
-        lo: At,
-        hi: At,
-        min: Fixed,
+        sides: Sides,
         ridge: usize,
         rise: usize,
         down: bool,
-        tie: Tie,
+        sloped: bool,
     },
 }
 
@@ -405,27 +409,22 @@ impl Inside<'_> {
     pub(super) fn holds(&self, x: At) -> bool {
         match self {
             Inside::Nothing => false,
-            Inside::Ellipsoid { centre, inverse } => {
+            Inside::Ellipsoid { centre, inverse, thin, sides } => {
                 let u = offset(x, *centre);
-                (0..3).map(|i| ((u[i] * inverse[i]) >> 16).pow(2)).sum::<i64>() <= ONE * ONE
+                (0..3).all(|i| !thin[i] || sides.within(i, x))
+                    && (0..3).map(|i| ((u[i] * inverse[i]) >> 16).pow(2)).sum::<i64>() <= ONE * ONE
             }
             Inside::Piece { piece, thick } => piece.holds(x, thick),
             Inside::Tube { pieces, thick } => pieces.iter().any(|piece| piece.holds(x, thick)),
-            Inside::Cuboid { lo, hi, min, tie } => (0..3).all(|i| {
-                if hi[i] - lo[i] >= *min { tie.within(i, x, lo[i], hi[i], ONE) } else { (2 * x[i] - lo[i] - hi[i]).abs() <= *min }
-            }),
-            Inside::Gable { lo, hi, min, ridge, rise, down, tie } => {
-                let (r, a) = (*rise, 3 - ridge - rise);
-                let side = |i: usize| {
-                    if hi[i] - lo[i] >= *min { tie.within(i, x, lo[i], hi[i], ONE) } else { (2 * x[i] - lo[i] - hi[i]).abs() <= *min }
-                };
-                if !side(*ridge) || !side(r) || !side(a) {
+            Inside::Cuboid(sides) => (0..3).all(|i| sides.within(i, x)),
+            Inside::Gable { sides, ridge, rise, down, sloped } => {
+                if !(0..3).all(|i| sides.within(i, x)) {
                     return false;
                 }
-                // Too low or narrow for its slopes to show: its box.
-                if hi[r] - lo[r] < *min || hi[a] - lo[a] < *min {
+                if !sloped {
                     return true;
                 }
+                let (r, a, Sides { lo, hi, .. }) = (*rise, 3 - ridge - rise, sides);
                 let u = (2 * x[a] - lo[a] - hi[a]).abs() >> 8;
                 let below = if *down { x[r] - lo[r] } else { hi[r] - x[r] };
                 u * ((hi[r] - lo[r]) >> 8) <= ((hi[a] - lo[a]) >> 8) * (below >> 8)
@@ -448,12 +447,15 @@ impl Shape {
         let q8 = |v: Fixed| v >> 8;
         match &self.solid {
             Solid::Ellipsoid { centre, radii } => {
-                // Σ (u / a)² ≤ 1, u / a as u · (2^32 / a) with 16 bits after the point.
-                let a = radii.map(|r| q8(r.max(half)));
-                if a.contains(&0) {
+                // u / a as u · (2^32 / a) with 16 bits after the point; along a thin axis, none.
+                let thin = radii.map(|r| r < half);
+                let a = radii.map(q8);
+                if (0..3).any(|i| !thin[i] && a[i] == 0) {
                     return Inside::Nothing;
                 }
-                Inside::Ellipsoid { centre: *centre, inverse: a.map(|a| (1 << 32) / a) }
+                let inverse = std::array::from_fn(|i| if thin[i] { 0 } else { (1 << 32) / a[i] });
+                let sides = Sides::new(*centre, *centre, min, s);
+                Inside::Ellipsoid { centre: *centre, inverse, thin, sides }
             }
             Solid::Tube { pieces, radius, widest, length } => {
                 // The coarsest level within half a site of the curve; level l is pieces 2^l − 1 to 2^(l+1) − 2.
@@ -468,9 +470,10 @@ impl Shape {
                     pieces => Inside::Tube { pieces, thick },
                 }
             }
-            Solid::Cuboid { min: lo, max: hi } => Inside::Cuboid { lo: *lo, hi: *hi, min, tie: Tie::new(s) },
+            Solid::Cuboid { min: lo, max: hi } => Inside::Cuboid(Sides::new(*lo, *hi, min, s)),
             Solid::Gable { min: lo, max: hi, ridge, rise, down } => {
-                Inside::Gable { lo: *lo, hi: *hi, min, ridge: *ridge, rise: *rise, down: *down, tie: Tie::new(s) }
+                let sloped = [*rise, 3 - ridge - rise].iter().all(|&i| hi[i] - lo[i] >= min);
+                Inside::Gable { sides: Sides::new(*lo, *hi, min, s), ridge: *ridge, rise: *rise, down: *down, sloped }
             }
         }
     }
@@ -539,7 +542,7 @@ pub(super) fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &m
     // apart (across (1, 1, 1), 2/√3).
     let min = [0, spacing, spacing * 8 / 5][small];
     let b = &shape.bounds;
-    // A box's sites on its top faces may count as under them (Tie), past its bounds but at level 0.
+    // A box's sites on its top faces may count as under them (Sides), past its bounds but at level 0.
     let past = if matches!(shape.solid, Solid::Cuboid { .. } | Solid::Gable { .. }) { 0 } else { ONE };
     let [x0, y0, z0] = b.min.map(|v| -(-(v * ONE - min / 2)).div_euclid(spacing));
     let [x1, y1, z1] = b.max.map(|v| (v * ONE - past + min / 2).div_euclid(spacing));

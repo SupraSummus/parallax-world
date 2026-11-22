@@ -196,6 +196,8 @@ how many rays get how far, and what they stop on.
   of level 0 it stands for along a ray is kept, 1 − (1 − fill)^s.
   One, a sheet such as a wall: grown to one site thick and kept opaque,
   since a ray crossing it crosses it once; it looks up to half a site thicker.
+  The planes of sites within half a site of its middle hold its middle's section,
+  a box's and an ellipsoid's alike (`Sides`): two where it lies midway.
   A box's or an ellipsoid's stops only 2t/3s of the rays along it,
   those entering by the four faces parallel to it (a site's `views`).
   Two or three, a rod or a speck: the sites near it, kept with a chance
@@ -347,7 +349,7 @@ how many rays get how far, and what they stop on.
   all kept at a bottom face and dropped at a top one,
   so they would sink half a site, and more each level.
   A site on a face counts as above it with the chance ½ + 1/(2s)
-  by a hash of its position and the axis (`Tie`):
+  by a hash of its position and the axis (`Sides`):
   always at level 0, about half the time far away,
   so on average a face is where level 0 has it.
   A box one site thick keeps its bottom face whole, as at level 0,
@@ -1012,7 +1014,7 @@ and without them rays slipped in at a cliff's corners.
   A bug is a site not looking as its cell does (`checks::cells`).
   A patch is a rule making a site look other than its cell does,
   to hide what is inherent
-  (sheets grown to a site, `Tie`, `Column`'s two sites): to go, none to add.
+  (sheets grown to a site, `Sides`' ties, `Column`'s two sites): to go, none to add.
   But the first two also keep a thin wall whole (docs/todo.md, "Boxes and gables"),
   and the last a thin layer over what it lies on (`ground/src/column.rs`).
   What fills a site in part is a piece with an alpha, shown by coins,
