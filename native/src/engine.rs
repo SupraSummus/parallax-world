@@ -143,6 +143,8 @@ pub struct Look {
      * find and ask for those that show after all.
      */
     pub hides: bool,
+    /** Where the pointer is, as a share of the picture's sides, for the voxels engine to tell what its ray meets (voxels.rs's Probe); None, nowhere. */
+    pub pointer: Option<[f64; 2]>,
 }
 
 impl Look {
@@ -163,6 +165,7 @@ impl Look {
             seams: false,
             colours: Colours::Voxels,
             hides: true,
+            pointer: None,
         }
     }
 

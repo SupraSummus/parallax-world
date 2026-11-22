@@ -45,6 +45,11 @@ the same options the native frontend takes on its command line.
 the lighting, walking, the flying speed,
 and where each frame's time went.
 
+**The voxel under the pointer** (I, or the panel; the voxels engine) –
+what the ray through the pointer meets, told beside it:
+the voxel that stops it, where, how far, its look and the light on it;
+and the see-through voxels before it, and what they let through.
+
 ## The worlds
 
 Procedurally generated, by name and seed (`--world`, `--seed`,

@@ -631,6 +631,13 @@ A tile never changes but for its bricks' light, each found once.
 Lit, the voxels show light as an eye adapting to it would (`native/src/eye.rs`):
 the samples meter the luminance their rays meet,
 read back with what they asked for.
+
+With them comes what the ray through the pointer's pixel meets
+(`native/src/inspect.rs`):
+the resolving pass, at that pixel, marches it as the samples' rays are,
+writing down the see-through voxels it crosses,
+then the voxel that stops it and the light that voxel is drawn under;
+the window finds their looks in their tiles.
 The chunks engines show light as it is, baked into their splats,
 past white white.
 
