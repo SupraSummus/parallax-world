@@ -1,27 +1,30 @@
-//! A small PNG encoder: RGB, 8 bits, deflated with LZ77 and the fixed
-//! Huffman codes. Label maps are runs and repeats of the row above, which
-//! that finds without dynamic codes.
+//! A small PNG encoder, the one every crate writes pictures with:
+//! 8 bits a channel, deflated with LZ77 and the fixed Huffman codes. Label
+//! maps are runs and repeats of the row above, which that finds without
+//! dynamic codes.
 
-/** Writes `rgb` (`w` × `h` pixels, rows top first, 3 bytes each) to `path` as a PNG. */
-pub fn write(path: &str, w: usize, h: usize, rgb: &[u8]) {
-    assert_eq!(rgb.len(), w * h * 3, "{path}: {w} × {h} pixels");
-    let mut raw = Vec::with_capacity((w * 3 + 1) * h);
-    for row in rgb.chunks(w * 3) {
+/** `pixels` (`width` × `height`, rows top first, `channels` bytes each: 3 RGB, 4 RGBA) as a PNG. */
+pub fn encode(width: usize, height: usize, channels: usize, pixels: &[u8]) -> Vec<u8> {
+    let colour = match channels {
+        3 => 2,
+        4 => 6,
+        _ => panic!("{channels} channels: RGB or RGBA"),
+    };
+    assert_eq!(pixels.len(), width * height * channels, "{width} × {height} pixels of {channels} channels");
+    let mut raw = Vec::with_capacity((width * channels + 1) * height);
+    for row in pixels.chunks(width * channels) {
         raw.push(0); // filter: none
         raw.extend_from_slice(row);
     }
-    let mut ihdr = Vec::new();
-    ihdr.extend((w as u32).to_be_bytes());
-    ihdr.extend((h as u32).to_be_bytes());
-    ihdr.extend([8, 2, 0, 0, 0]);
-    let mut png = vec![0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n'];
-    chunk(&mut png, b"IHDR", &ihdr);
+    let mut header = Vec::new();
+    header.extend((width as u32).to_be_bytes());
+    header.extend((height as u32).to_be_bytes());
+    header.extend([8, colour, 0, 0, 0]); // 8 bits, deflate, no filter, not interlaced
+    let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+    chunk(&mut png, b"IHDR", &header);
     chunk(&mut png, b"IDAT", &zlib(&raw));
     chunk(&mut png, b"IEND", &[]);
-    if let Some(dir) = std::path::Path::new(path).parent() {
-        std::fs::create_dir_all(dir).expect("output directory");
-    }
-    std::fs::write(path, png).expect("PNG written");
+    png
 }
 
 fn chunk(png: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
@@ -38,7 +41,7 @@ fn crc32(bytes: &[u8]) -> u32 {
     for &b in bytes {
         crc ^= b as u32;
         for _ in 0..8 {
-            crc = if crc & 1 != 0 { 0xedb88320 ^ (crc >> 1) } else { crc >> 1 };
+            crc = if crc & 1 != 0 { 0xEDB8_8320 ^ (crc >> 1) } else { crc >> 1 };
         }
     }
     !crc
@@ -46,13 +49,13 @@ fn crc32(bytes: &[u8]) -> u32 {
 
 fn adler32(bytes: &[u8]) -> u32 {
     let (mut a, mut b) = (1u32, 0u32);
+    // 5552 bytes at most between reductions keep b from overflowing.
     for block in bytes.chunks(5552) {
         for &x in block {
             a += x as u32;
             b += a;
         }
-        a %= 65521;
-        b %= 65521;
+        (a, b) = (a % 65521, b % 65521);
     }
     (b << 16) | a
 }
@@ -157,3 +160,6 @@ fn zlib(data: &[u8]) -> Vec<u8> {
     out.extend(adler32(data).to_be_bytes());
     out
 }
+
+#[cfg(test)]
+mod tests;

@@ -175,7 +175,7 @@ mod tests {
             for (x, z) in (2..22).flat_map(|x| (2..22).map(move |z| (x, z))) {
                 let lowest = (-1..=1).flat_map(|i| (-1..=1).map(move |j| top((x + i) * s, (z + j) * s))).min().expect("nine");
                 for y in (b.min[1]..(lowest - 2 * s).div_euclid(s)).filter(|&y| worldgen::grid::is_site(x, y, z)) {
-                    for n in worldgen::picture::FACES.iter().filter(|n| n[1] > 0) {
+                    for n in fcc::ray::FACES.iter().filter(|n| n[1] > 0) {
                         let (p, d) = ([x, y, z].map(|v| v as f64), n.map(|v| v as f64 / std::f64::consts::SQRT_2));
                         let exits = |i: usize| match d[i] {
                             v if v > 0.0 => (b.max[i] as f64 - p[i]) / v,

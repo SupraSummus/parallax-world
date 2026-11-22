@@ -638,7 +638,7 @@ pub(super) fn measure(
     let mut crossed: Vec<usize> = Vec::new();
     for (from_end, d) in VOXEL_FACES.iter().enumerate().filter(|(_, d)| d.iter().find(|v| **v != 0) == Some(&-1)) {
         let d = d.map(i64::from);
-        let from_start = VOXEL_FACES.iter().position(|e| e.map(i64::from) == d.map(|v| -v)).expect("−d is a face");
+        let from_start = fcc::opposite(from_end);
         let step: i64 = (0..3).map(|c| d[c] * stride[c]).sum();
         // Columns of sites start where a step back leaves the box: on its side of −d along an axis d moves on.
         let edge = |c: usize, v: i64| d[c] != 0 && v == if d[c] < 0 { n[c] - 1 } else { 0 };

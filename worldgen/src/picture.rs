@@ -1,15 +1,15 @@
 //! Pictures of a world at one level of detail, without the browser: for
 //! a world's author to look at, and for checks to measure. Rays cross the
-//! level's voxels exactly, one rhombic dodecahedron to the next; the tiles
-//! they cross are generated as they reach them, as hosts make them
-//! (generate_shown).
+//! level's voxels exactly (fcc's ray.rs); the tiles they cross are
+//! generated as they reach them, as hosts make them (generate_shown).
 
 use std::collections::{BTreeSet, HashMap};
 use std::panic::AssertUnwindSafe;
 use std::sync::{Mutex, mpsc};
 use std::time::{Duration, Instant};
 
-use fcc::{FACE_KINDS, Look, VOXEL_FACES};
+use fcc::Look;
+use fcc::ray::{FACES, Ray, nearest_site, over};
 
 use crate::generator::{Generator, across, generate_shown, shown, turned};
 use crate::grid::{ALPHA, BRICK, Box3, COLOUR_ONE, GLOW_ONE, VoxelGrid};
@@ -40,17 +40,6 @@ impl Tiling {
         cube.slab(UP, from, to)
     }
 }
-
-/** The voxel's faces: towards its 12 neighbours, (p − site) · face ≤ 1 inside, in a level's units (fcc's VOXEL_FACES). */
-pub const FACES: [[i64; 3]; FACE_KINDS] = {
-    let mut faces = [[0; 3]; FACE_KINDS];
-    let mut k = 0;
-    while k < FACE_KINDS {
-        faces[k] = [VOXEL_FACES[k][0] as i64, VOXEL_FACES[k][1] as i64, VOXEL_FACES[k][2] as i64];
-        k += 1;
-    }
-    faces
-};
 
 /** Where the sun is, over UP, and how much light comes from the sky and from it. */
 const SUN: [f64; 3] = turned(UP, [-0.48, -0.47], 0.74);
@@ -144,24 +133,23 @@ pub struct Picture {
 }
 
 /**
- * A ray through the level's voxels, in its units: where it is, the voxel
- * it is in and the face it entered by (12: none); composited, how much of
- * each channel of it gets through what it crossed: a medium stops them
- * unlike.
+ * A pixel's ray through the level's voxels, in its units, till `end`;
+ * composited, how much of each channel of it gets through what it
+ * crossed: a medium stops them unlike.
  */
 #[derive(Clone, Copy)]
-struct Ray {
+struct Cast {
     pixel: usize,
-    origin: [f64; 3],
-    direction: [f64; 3],
-    t: f64,
+    ray: Ray,
     end: f64,
-    site: [i64; 3],
-    face: usize,
     through: [f64; 3],
 }
 
-impl Ray {
+impl Cast {
+    fn new(pixel: usize, ray: Ray, end: f64) -> Cast {
+        Cast { pixel, ray, end, through: [1.0; 3] }
+    }
+
     /** How much of it gets through, in the channel most does. */
     fn left(&self) -> f64 {
         self.through.into_iter().fold(0.0, f64::max)
@@ -185,27 +173,7 @@ pub struct Seen {
 const OPAQUE: f64 = 1e-4;
 
 /**
- * How many crossings of a site one along a row of a lattice stands for.
- * A row runs through its sites' middles, along their longest chord, √2
- * spacings; a ray at any offset weaves through the teeth of the rows
- * beside, crossing 3/2 as many sites, each by a shorter chord (a voxel's
- * mean chord along a face's direction is its volume, 2, over its shadow,
- * a hexagon of 3/√2). A whole voxel's shadow falls on the rows beside
- * too: a row's ray does not see that.
- */
-pub const CROSSING: f64 = 1.5;
-
-/**
- * How many times what a site of `alpha` stops and glows in one crossing
- * it does in `crossings` (part of one, or CROSSING): what it stops,
- * 1 − (1 − alpha)^crossings, over alpha. A whole voxel, once.
- */
-pub fn over(alpha: f64, crossings: f64) -> f64 {
-    if alpha > 0.0 && crossings != 1.0 { (1.0 - (1.0 - alpha).powf(crossings)) / alpha } else { crossings }
-}
-
-/**
- * What the site `ray` is in shows it, as light sees it: its pieces (as
+ * What the site `cast` is in shows it, as light sees it: its pieces (as
  * seen along the ray, fcc's `facing`) and its medium of the rays they let
  * through, channel by channel: how much of the ray stops (in the channel
  * most gets through), what shows (linear, premultiplied), and what the
@@ -214,10 +182,10 @@ pub fn over(alpha: f64, crossings: f64) -> f64 {
  * voxel's chord (starting or ending in it) that stands for `crossing`
  * crossings (CROSSING along a row, 1 at any offset), `over` both.
  */
-fn composite(ray: &mut Ray, grid: &VoxelGrid, part: f64, crossing: f64) -> (f64, [f64; 3], [f64; 3]) {
-    let [x, y, z] = ray.site;
+fn composite(cast: &mut Cast, grid: &VoxelGrid, part: f64, crossing: f64) -> (f64, [f64; 3], [f64; 3]) {
+    let [x, y, z] = cast.ray.site;
     let (mut stops, mut shows, mut glow, mut faces) = ([0.0; 3], [0.0; 3], [0.0; 3], 0.0);
-    for k in fcc::facing(ray.direction) {
+    for k in fcc::facing(cast.ray.direction) {
         let (pieces, medium, glows) = grid.light(x, y, z, k);
         for c in 0..3 {
             stops[c] += (pieces.0 as f64 + medium.0[c] as f64) / ALPHA as f64;
@@ -226,14 +194,14 @@ fn composite(ray: &mut Ray, grid: &VoxelGrid, part: f64, crossing: f64) -> (f64,
         }
         faces += 1.0;
     }
-    let before = ray.left();
+    let before = cast.left();
     let (mut shown, mut glows) = ([0.0; 3], [0.0; 3]);
     for c in 0..3 {
-        let through = ray.through[c] * over(stops[c] / faces, part * crossing) / faces;
+        let through = cast.through[c] * over(stops[c] / faces, part * crossing) / faces;
         (shown[c], glows[c]) = (through * shows[c], through * glow[c]);
-        ray.through[c] -= through * stops[c];
+        cast.through[c] -= through * stops[c];
     }
-    (before - ray.left(), shown, glows)
+    (before - cast.left(), shown, glows)
 }
 
 #[derive(Clone, Copy)]
@@ -303,12 +271,11 @@ impl Tiles {
      * its end, or to a tile not generated. It skips what holds nothing:
      * the space over a tile's highest brick, and empty bricks.
      */
-    fn march(&self, ray: &mut Ray) -> Step {
-        let walk = Walk::new(ray.direction);
-        let mut planes = walk.planes(ray);
+    fn march(&self, cast: &mut Cast) -> Step {
+        let ray = &mut cast.ray;
         let mut current: Option<(Key, &Tile)> = None;
         loop {
-            if ray.t > ray.end {
+            if ray.t > cast.end {
                 return Step::Miss;
             }
             let [x, y, z] = ray.site;
@@ -347,14 +314,11 @@ impl Tiles {
                     }
                 };
                 if let Some(t) = empty {
-                    ray.t = t;
-                    ray.site = nearest_site([0, 1, 2].map(|i| ray.origin[i] + t * ray.direction[i]));
-                    ray.face = FACES.len();
-                    planes = walk.planes(ray);
+                    *ray = Ray::new(ray.origin, ray.direction, t);
                     continue;
                 }
             }
-            walk.cross(ray, &mut planes);
+            ray.cross();
         }
     }
 }
@@ -367,62 +331,25 @@ impl Tiles {
  * Each site counts as `crossing` crossings (CROSSING along a row).
  */
 pub fn composited(grid: &VoxelGrid, origin: [f64; 3], direction: [f64; 3], end: f64, crossing: f64) -> Vec<(f64, Seen)> {
-    let mut ray = Ray { pixel: 0, origin, direction, t: 0.0, end, site: nearest_site(origin), face: FACES.len(), through: [1.0; 3] };
-    let walk = Walk::new(direction);
-    let mut planes = walk.planes(&ray);
+    let mut cast = Cast::new(0, Ray::new(origin, direction, 0.0), end);
     let mut seen = Vec::new();
-    while ray.t <= end && ray.left() >= OPAQUE {
-        let t = ray.t;
-        let part = walk.part(&ray, &planes);
-        let (stopped, shown, glow) = composite(&mut ray, grid, part, crossing);
+    while cast.ray.t <= end && cast.left() >= OPAQUE {
+        let t = cast.ray.t;
+        let part = cast.ray.part(end);
+        let (stopped, shown, glow) = composite(&mut cast, grid, part, crossing);
         if stopped > 0.0 || glow != [0.0; 3] {
             seen.push((t, Seen { stopped, shown, glow }));
         }
-        walk.cross(&mut ray, &mut planes);
+        cast.ray.cross();
     }
     seen
 }
 
 /** What site `site` of `grid` (a level's units) shows a ray along `direction` crossing its voxel whole. */
 pub(crate) fn seen_whole(grid: &VoxelGrid, site: [i64; 3], direction: [f64; 3]) -> Seen {
-    let origin = site.map(|v| v as f64);
-    let mut ray = Ray { pixel: 0, origin, direction, t: 0.0, end: 0.0, site, face: FACES.len(), through: [1.0; 3] };
-    let (stopped, shown, glow) = composite(&mut ray, grid, 1.0, 1.0);
+    let mut cast = Cast::new(0, Ray::new(site.map(|v| v as f64), direction, 0.0), 0.0);
+    let (stopped, shown, glow) = composite(&mut cast, grid, 1.0, 1.0);
     Seen { stopped, shown, glow }
-}
-
-/**
- * The face a ray enters its voxel by: the one opposite the face it left
- * the voxel before by, or, if it came from elsewhere, the face whose plane
- * it crosses last on its way in ((p − site) · face ≤ 1 inside). Where it
- * lands, as light does (light/src/reference.rs); what it sees there is along
- * its direction, whichever face it enters by (fcc's `facing`).
- */
-fn entered(ray: &Ray) -> usize {
-    if ray.face < FACE_KINDS {
-        return FACES.iter().position(|f| *f == FACES[ray.face].map(|v| -v)).expect("faces come in pairs");
-    }
-    let r = [0, 1, 2].map(|i| ray.origin[i] - ray.site[i] as f64);
-    let enters = |f: &[i64; 3]| {
-        let (f, along) = (f.map(|v| v as f64), dot(f.map(|v| v as f64), ray.direction));
-        if along < 0.0 { (1.0 - dot(r, f)) / along } else { f64::NEG_INFINITY }
-    };
-    (0..FACE_KINDS).max_by(|&a, &b| enters(&FACES[a]).total_cmp(&enters(&FACES[b]))).expect("faces")
-}
-
-/** Where a ray from `origin` along `direction` (a level's units) first enters a voxel of `grid`, if before `end`: how far, the voxel's site and the face it enters by. */
-pub fn first_hit(grid: &VoxelGrid, origin: [f64; 3], direction: [f64; 3], end: f64) -> Option<(f64, [i64; 3], usize)> {
-    let mut ray = Ray { pixel: 0, origin, direction, t: 0.0, end, site: nearest_site(origin), face: FACES.len(), through: [1.0; 3] };
-    let walk = Walk::new(direction);
-    let mut planes = walk.planes(&ray);
-    while ray.t <= end {
-        let [x, y, z] = ray.site;
-        if grid.get(x, y, z) != 0 {
-            return Some((ray.t, ray.site, entered(&ray)));
-        }
-        walk.cross(&mut ray, &mut planes);
-    }
-    None
 }
 
 /**
@@ -432,7 +359,7 @@ pub fn first_hit(grid: &VoxelGrid, origin: [f64; 3], direction: [f64; 3], end: f
  * (voxels.wgsl's `stops`).
  */
 fn stopped(ray: &Ray, pieces: u8) -> bool {
-    let [x, y, z] = nearest_site(std::array::from_fn(|i| 4.0 * (ray.origin[i] + ray.t * ray.direction[i])));
+    let [x, y, z] = nearest_site(ray.at().map(|v| 4.0 * v));
     pieces > 0 && ((hash(0, x, y, z) as u64 * ALPHA as u64) >> 32) < pieces as u64
 }
 
@@ -453,76 +380,6 @@ fn leaves(ray: &Ray, min: [f64; 3], max: [f64; 3]) -> Option<f64> {
     (enter <= ray.t + 1e-9 && leave > ray.t + 1e-9).then_some(leave)
 }
 
-/**
- * How a ray crosses voxels: the faces it can leave one by (at most two
- * of each pair of axes; FACES.len() for none), and per face it leaves by,
- * how much later it reaches each face's plane in the next voxel.
- */
-struct Walk {
-    faces: [usize; 6],
-    inverse: [f64; 6],
-    after: [[f64; 6]; 6],
-}
-
-impl Walk {
-    fn new(direction: [f64; 3]) -> Walk {
-        let mut walk = Walk { faces: [FACES.len(); 6], inverse: [0.0; 6], after: [[0.0; 6]; 6] };
-        let mut n = 0;
-        for (i, face) in FACES.iter().enumerate() {
-            let along = dot(direction, face.map(|v| v as f64));
-            if along > 1e-12 {
-                (walk.faces[n], walk.inverse[n]) = (i, 1.0 / along);
-                n += 1;
-            }
-        }
-        for k in 0..n {
-            for j in 0..n {
-                let (a, b) = (FACES[walk.faces[k]], FACES[walk.faces[j]]);
-                walk.after[k][j] = (a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) as f64 * walk.inverse[j];
-            }
-        }
-        walk
-    }
-
-    /** Takes the ray into the next voxel: out by the face whose plane it reaches first. */
-    fn cross(&self, ray: &mut Ray, planes: &mut [f64; 6]) {
-        let mut k = 0;
-        for j in 1..planes.len() {
-            if planes[j] < planes[k] {
-                k = j;
-            }
-        }
-        ray.t = ray.t.max(planes[k]);
-        ray.face = self.faces[k];
-        ray.site = [0, 1, 2].map(|i| ray.site[i] + FACES[ray.face][i]);
-        for (plane, after) in planes.iter_mut().zip(self.after[k]) {
-            *plane += after;
-        }
-    }
-
-    /**
-     * The share of its voxel's chord the ray crosses, from where it is to
-     * where it leaves the voxel or ends. The line enters the voxel at the
-     * last of the planes opposite those it may leave by, (p − site) · face
-     * = −1, and leaves at the first it leaves by.
-     */
-    fn part(&self, ray: &Ray, planes: &[f64; 6]) -> f64 {
-        let leaves = planes.iter().fold(f64::INFINITY, |a, &p| a.min(p));
-        let enters = planes.iter().zip(self.inverse).filter(|(p, _)| p.is_finite()).fold(f64::NEG_INFINITY, |a, (p, i)| a.max(p - 2.0 * i));
-        let chord = leaves - enters;
-        if chord > 0.0 { ((leaves.min(ray.end) - ray.t) / chord).clamp(0.0, 1.0) } else { 0.0 }
-    }
-
-    /** When the ray reaches each face's plane of its voxel's: (p − site) · face = 1. */
-    fn planes(&self, ray: &Ray) -> [f64; 6] {
-        let r = [0, 1, 2].map(|i| ray.origin[i] - ray.site[i] as f64);
-        std::array::from_fn(|j| match FACES.get(self.faces[j]) {
-            Some(f) => (1.0 - (r[0] * f[0] as f64 + r[1] * f[1] as f64 + r[2] * f[2] as f64)) * self.inverse[j],
-            None => f64::INFINITY,
-        })
-    }
-}
-
 fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
@@ -530,24 +387,6 @@ fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
 fn normalize(v: [f64; 3]) -> [f64; 3] {
     let length = dot(v, v).sqrt();
     if length > 0.0 { v.map(|c| c / length) } else { v }
-}
-
-/** The site whose voxel holds p, in a level's units. */
-pub fn nearest_site(p: [f64; 3]) -> [i64; 3] {
-    let mut r = p.map(|v| v.round());
-    if (r[0] + r[1] + r[2]) as i64 & 1 != 0 {
-        // Off by one in the coordinate rounded the furthest.
-        let e = [0, 1, 2].map(|i| (p[i] - r[i]).abs());
-        let k = if e[0] >= e[1] && e[0] >= e[2] {
-            0
-        } else if e[1] >= e[2] {
-            1
-        } else {
-            2
-        };
-        r[k] += if p[k] > r[k] { 1.0 } else { -1.0 };
-    }
-    r.map(|v| v as i64)
 }
 
 fn sky(direction: [f64; 3]) -> [f64; 3] {
@@ -674,8 +513,7 @@ fn picture_of_tiles(camera: &Camera, tiles: &mut Tiles, tops: &Tops, make: &mut 
             picture.set(pixel, 0, f64::INFINITY, sky(direction));
             continue;
         }
-        let site = nearest_site([0, 1, 2].map(|i| origin[i] + t * direction[i]));
-        rays.push(Ray { pixel, origin, direction, t, end, site, face: FACES.len(), through: [1.0; 3] });
+        rays.push(Cast::new(pixel, Ray::new(origin, direction, t), end));
     }
     let fog = match camera.projection {
         Projection::Perspective { .. } => FOG,
@@ -704,26 +542,24 @@ fn picture_of_tiles(camera: &Camera, tiles: &mut Tiles, tops: &Tops, make: &mut 
         }
         let mut needed = BTreeSet::new();
         let mut left = Vec::new();
-        for (ray, step) in rays.into_iter().zip(steps) {
+        for (cast, step) in rays.into_iter().zip(steps) {
+            let (pixel, ray) = (cast.pixel, cast.ray);
             match step {
                 Step::Needs(key) => {
                     needed.insert(key);
-                    left.push(ray);
+                    left.push(cast);
                 }
-                Step::Miss => picture.set(ray.pixel, 0, f64::INFINITY, sky(ray.direction)),
+                Step::Miss => picture.set(pixel, 0, f64::INFINITY, sky(ray.direction)),
                 Step::Hit(look, normal) => {
-                    let entered = match FACES.get(ray.face) {
-                        Some(face) => normalize(face.map(|v| -v as f64)),
-                        None => ray.direction.map(|v| -v),
-                    };
+                    let entered = normalize(FACES[ray.entered()].map(|v| v as f64));
                     // Mostly the surface's way, a little the voxel face's, to see the voxels.
                     let n = if normal == [0.0; 3] { entered } else { normalize([0, 1, 2].map(|i| normal[i] + 0.3 * entered[i])) };
                     let light = AMBIENT + SKYLIGHT * (0.5 + 0.5 * n[UP]) + SUNLIGHT * dot(n, normalize(SUN)).max(0.0);
                     let lit = [0, 8, 16].map(|shift| ((look >> shift) & 255) as f64 * light);
                     let distance = ray.t * s;
                     let f = (fog * (distance / camera.far).powi(2)).min(fog);
-                    picture.set(ray.pixel, look, distance, [0, 1, 2].map(|i| lit[i] + (HORIZON[i] - lit[i]) * f));
-                    picture.sites[ray.pixel] = ray.site;
+                    picture.set(pixel, look, distance, [0, 1, 2].map(|i| lit[i] + (HORIZON[i] - lit[i]) * f));
+                    picture.sites[pixel] = ray.site;
                 }
             }
         }
@@ -747,63 +583,10 @@ impl Picture {
         }
     }
 
-    /** As a PNG file: 8-bit RGB, stored uncompressed. */
+    /** As a PNG file. */
     pub fn png(&self) -> Vec<u8> {
-        let mut raw = Vec::with_capacity((3 * self.width + 1) * self.height);
-        for row in self.rgb.chunks(3 * self.width) {
-            raw.push(0); // no filter
-            raw.extend_from_slice(row);
-        }
-        // zlib: deflate's stored blocks, at most 65535 bytes each.
-        let mut zlib = vec![0x78, 0x01];
-        let blocks: Vec<&[u8]> = if raw.is_empty() { vec![&[]] } else { raw.chunks(65535).collect() };
-        for (i, block) in blocks.iter().enumerate() {
-            let length = block.len() as u16;
-            zlib.push((i + 1 == blocks.len()) as u8);
-            zlib.extend(length.to_le_bytes());
-            zlib.extend((!length).to_le_bytes());
-            zlib.extend_from_slice(block);
-        }
-        zlib.extend(adler32(&raw).to_be_bytes());
-        let mut header = Vec::new();
-        header.extend((self.width as u32).to_be_bytes());
-        header.extend((self.height as u32).to_be_bytes());
-        header.extend([8, 2, 0, 0, 0]); // 8 bits, RGB, deflate, no filter, not interlaced
-        let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
-        for (kind, data) in [(b"IHDR", header), (b"IDAT", zlib), (b"IEND", Vec::new())] {
-            png.extend((data.len() as u32).to_be_bytes());
-            let start = png.len();
-            png.extend_from_slice(kind);
-            png.extend(data);
-            let crc = crc32(&png[start..]);
-            png.extend(crc.to_be_bytes());
-        }
-        png
+        crate::png::encode(self.width, self.height, 3, &self.rgb)
     }
-}
-
-fn crc32(bytes: &[u8]) -> u32 {
-    let mut crc = !0u32;
-    for &b in bytes {
-        crc ^= b as u32;
-        for _ in 0..8 {
-            crc = if crc & 1 != 0 { 0xEDB8_8320 ^ (crc >> 1) } else { crc >> 1 };
-        }
-    }
-    !crc
-}
-
-fn adler32(bytes: &[u8]) -> u32 {
-    let (mut a, mut b) = (1u32, 0u32);
-    // 5552 bytes at most between reductions keep b from overflowing.
-    for chunk in bytes.chunks(5552) {
-        for &byte in chunk {
-            a += byte as u32;
-            b += a;
-        }
-        (a, b) = (a % 65521, b % 65521);
-    }
-    (b << 16) | a
 }
 
 #[cfg(test)]

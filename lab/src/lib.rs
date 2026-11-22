@@ -78,7 +78,6 @@ pub mod masked;
 pub mod masked_fcc;
 pub mod net;
 pub mod plan;
-pub mod png;
 pub mod profile;
 pub mod real;
 pub mod scenes;

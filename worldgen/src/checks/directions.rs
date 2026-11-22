@@ -33,8 +33,8 @@ use crate::World;
 use crate::generator::{across, generate, turned};
 use crate::grid::Box3;
 use crate::noise::{Rng, hash_text};
-use crate::picture::nearest_site;
 use crate::world::UP;
+use fcc::ray::nearest_site;
 
 /** The level pairs are sampled at. */
 const LEVEL: u32 = 3;

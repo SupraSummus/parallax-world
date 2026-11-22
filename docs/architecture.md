@@ -6,7 +6,8 @@ by engines it switches between (section 4):
 rays through the voxels by default, or cells of the lattice baked into chunks.
 The Rust is a workspace of crates (`Cargo.toml`):
 `fcc/` under all of them
-(the lattice, grids and tiles of them, the light from voxels' faces),
+(the lattice, grids and tiles of them, rays across its voxels,
+the light from voxels' faces),
 `bake/` (chunks baked) and `worldgen/` (the generator framework) on it,
 in which no direction is up,
 `ground/` on `worldgen/` (worlds on a ground: plans by column, heights, columns, domains;
@@ -667,7 +668,7 @@ the sites that do not are listed apart (`views`).
 What stops a walking body is a bit a site apart (`solid`).
 Each reader shows the faces it sees:
 the baker the face towards its chunks' camera (section 3),
-rays (`worldgen/src/picture.rs`) those turned most against them.
+rays (`fcc/src/ray.rs`) those turned most against them (`facing`).
 The box is cut into bricks 8 units wide, 256 sites,
 and only bricks with voxels are stored.
 A baker reads the tiles for every face (`Reader` in `fcc/`),

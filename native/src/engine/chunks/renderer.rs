@@ -344,7 +344,7 @@ fn stop(
         if (q[1] >= high as f64 && rising >= 0.0) || (q[1] < low as f64 && rising <= 0.0) {
             break;
         }
-        let site = nearest_site(q);
+        let site = fcc::ray::nearest_site(q).map(|v| v as i32);
         let id = site.map(|v| (v as i64).div_euclid(TILE) as i32);
         if last.is_none_or(|(g, i, _)| g != grid || i != id) {
             last = levels[grid as usize].tiles.get(id).map(|t| (grid, id, &*t.grid));
@@ -363,16 +363,6 @@ fn stop(
         t += step;
     }
     Cast::Clear(f64::INFINITY)
-}
-
-/** The site of the FCC lattice (coordinates adding up to an even number) nearest point `q`. */
-fn nearest_site(q: [f64; 3]) -> [i32; 3] {
-    let mut s = q.map(f64::round);
-    if (s[0] + s[1] + s[2]) as i64 & 1 != 0 {
-        let d = (0..3).max_by(|&a, &b| (q[a] - s[a]).abs().total_cmp(&(q[b] - s[b]).abs())).expect("three");
-        s[d] += if q[d] > s[d] { 1.0 } else { -1.0 };
-    }
-    s.map(|v| v as i32)
 }
 
 /** The box of half widths `half` about a cell's site, in a face's coordinates in units of grid 0 (occlusion's Box3). */

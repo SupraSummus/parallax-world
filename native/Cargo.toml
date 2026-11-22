@@ -12,7 +12,6 @@ egui-wgpu = "0.37"
 egui-winit = { version = "0.37", default-features = false, features = ["wayland", "x11"] }
 fcc = { path = "../fcc" }
 light = { path = "../light" }
-png = "0.18"
 worldgen = { path = "../worldgen" }
 winit = { version = "0.30.13", default-features = false, features = ["rwh_06", "wayland", "x11"] }
 worlds = { path = "../worlds" }

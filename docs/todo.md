@@ -731,6 +731,10 @@ Numbers are for the forest at 1280×800, as measured when written.
   - A shot may differ from run to run (flat, the valley):
     where depths tie exactly, the one drawn last shows,
     in the clusters' order: the order chunks came in, which timing decides.
+- **The chunks' occlusion steps rays half a voxel at a time** (`stop` in `renderer.rs`),
+  so it can miss a voxel's corner.
+  Exact rays across the voxels are `fcc::ray`'s;
+  where the level changes, a ray starts anew there.
 - **Native's reliefs.**
   - Thin things seen at a slant break at the default detail:
     the city's road markings into combs, whole at twice the detail.
@@ -816,11 +820,6 @@ Numbers are for the forest at 1280×800, as measured when written.
     A crate of their own, as `light/` is, would say so,
     but they read the generator's private parts (`whole`, `checking_skipped`),
     and `WORLDS`' entries hold the contract's `Accuracy`.
-  - `picture.rs` is three things:
-    rays through the lattice (`FACES`, `CROSSING`, `over`, `first_hit`),
-    which light reads too and could go to `fcc`;
-    pictures of a world;
-    and a PNG coder, of which `lab/src/png.rs` is another.
   - `worlds/src/forest.rs` is still a world, the ground others build on
     (`Relief`, `Forest`) and the table of kinds they draw with (`K`);
     the valley's domains (`worlds/src/valley/`) use each other in circles.

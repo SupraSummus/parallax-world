@@ -300,7 +300,7 @@ fn the_window_and_the_tiles_wanted_hold_all_a_ray_reads_of_what_it_meets() {
             let read = reach_of(ball.about(eye_brick(0, eye, [0; 3])));
             for way in ways.clone() {
                 let length = way.iter().map(|v| v * v).sum::<f64>().sqrt();
-                let site = worldgen::picture::nearest_site(std::array::from_fn(|d| eye[d] + way[d] / length * read));
+                let site = fcc::ray::nearest_site(std::array::from_fn(|d| eye[d] + way[d] / length * read));
                 for s in std::iter::once([0; 3]).chain(fcc::VOXEL_FACES).map(|n| std::array::from_fn(|d| site[d] as i32 + n[d])) {
                     let b = s.map(|v: i32| v.div_euclid(BRICK));
                     assert!(ball.contains(b), "eye {eye:?}: site {s:?} out of {ball:?}");

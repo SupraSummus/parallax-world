@@ -33,7 +33,7 @@ fn main() {
     let (x0, z0, nx, nz) = (2 * (number(3) / s).div_euclid(2), number(4) / s, number(5) / s, number(6) / s);
     let (min_y, max_y) = world.heights_at(level);
     let mut image = vec![0u8; (nx * nz * 3) as usize];
-    // A ray straight down sees a voxel through its four faces up alike (picture.rs's facing): their mean.
+    // A ray straight down sees a voxel through its four faces up alike (fcc's `facing`): their mean.
     let up: Vec<usize> = (0..VOXEL_FACES.len()).filter(|&k| VOXEL_FACES[k][1] > 0).collect();
     // In tiles, as hosts generate it.
     const TILE: i64 = 64;

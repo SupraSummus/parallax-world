@@ -177,10 +177,7 @@ impl Easel {
     /** Draws `picture` as `pixels` does, and saves it as a PNG at `path`. */
     pub fn save(&mut self, picture: &dyn Picture, pixels: [u32; 2], path: &str) {
         let (width, height, pixels) = self.pixels(picture, pixels);
-        let mut png = png::Encoder::new(std::io::BufWriter::new(std::fs::File::create(path).expect("shot file")), width, height);
-        png.set_color(png::ColorType::Rgba);
-        png.set_depth(png::BitDepth::Eight);
-        png.write_header().expect("png").write_image_data(&pixels).expect("png");
+        std::fs::write(path, worldgen::png::encode(width as usize, height as usize, 4, &pixels)).expect("shot file");
     }
 
     /** `size` bytes that `copy` copies into a buffer, once the GPU is done. */

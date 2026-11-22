@@ -257,7 +257,7 @@ How a site shows to hosts and to light, and what glows, is a prototype too:
   but measured houses' walls come out ragged;
   light reads their share, of the rays through the voxel
   (`VoxelGrid::light`; a line through sites' middles meets it
-  3/2 as often, `CROSSING` in `picture.rs`),
+  3/2 as often, `CROSSING` in `fcc/src/ray.rs`),
   so it goes on through sites filled in part
   where it stopped at the first voxel shown:
   a forest or a city at night takes half as long again to light, or more;

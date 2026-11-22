@@ -14,6 +14,7 @@ pub mod grid;
 pub mod js;
 pub mod noise;
 pub mod picture;
+pub mod png;
 pub mod points;
 pub mod recent;
 pub mod sites;
