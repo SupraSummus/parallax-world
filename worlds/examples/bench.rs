@@ -28,7 +28,7 @@ fn main() {
         let start = Instant::now();
         let (mut voxels, mut hash) = (0, DefaultHasher::new());
         for i in 0..SIDE * SIDE {
-            for (_, grid) in make_tiles(&world, level, [cx + i % SIDE, cy, cz + i / SIDE]) {
+            for (_, grid, _) in make_tiles(&world, level, [cx + i % SIDE, cy, cz + i / SIDE]) {
                 voxels += grid.cells.len();
                 (&grid.bricks, &grid.cells, &grid.solid, &grid.views, &grid.glow).hash(&mut hash);
             }

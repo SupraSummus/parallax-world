@@ -42,7 +42,7 @@ fn tiles_made_together_show_what_each_shows_alone() {
         let [x, y, z] = world.spawn.map(|v| (v >> level).div_euclid(TILE));
         let columns = (x - 2..=x + 2).flat_map(|x| (z - 2..=z + 2).map(move |z| [x, y, z]));
         let mut shown = 0;
-        for (key, together) in &columns.flat_map(|key| make_tiles(&world, level, key)).collect::<Vec<_>>() {
+        for (key, together, _) in &columns.flat_map(|key| make_tiles(&world, level, key)).collect::<Vec<_>>() {
             let b = tile_box(heights, *key);
             let alone = generate_shown(&world.generator, &b, level, worldgen::world::UP).to_grid();
             let faces = |g: &fcc::Grid, [x, y, z]: [i32; 3]| std::array::from_fn::<_, { fcc::FACE_KINDS }, _>(|k| g.face(x, y, z, k));
@@ -83,7 +83,7 @@ fn threads_sharing_a_world_make_its_tiles_as_one_alone() {
         })
         .collect();
     let made = |world: &worldgen::World, (level, key): (u32, [i64; 3])| -> Vec<_> {
-        make_tiles(world, level, key).into_iter().map(|(key, grid)| (key, grid.bricks, grid.cells, grid.views, grid.glow)).collect()
+        make_tiles(world, level, key).into_iter().map(|(key, grid, _)| (key, grid.bricks, grid.cells, grid.views, grid.glow)).collect()
     };
     let alone: Vec<_> = keys.iter().map(|&key| made(&alone, key)).collect();
     std::thread::scope(|scope| {

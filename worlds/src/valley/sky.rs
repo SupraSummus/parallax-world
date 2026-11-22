@@ -52,7 +52,10 @@ mod tests {
     /** The tile of level 5 the clouds are in over the origin, and the one under it, at `now`: each as made, and while when it stays so. */
     fn tiles(world: &World, now: i64) -> [(Vec<u32>, Range<i64>); 2] {
         let (level, y) = (5, (BASE_HEIGHT >> 5).div_euclid(TILE));
-        [y, y - 1].map(|y| time::at(now, || make_tile(world, level, [0, y, 0]).cells))
+        [y, y - 1].map(|y| {
+            let ((grid, stays), _) = time::at(now, || make_tile(world, level, [0, y, 0]));
+            (grid.cells, stays)
+        })
     }
 
     #[test]

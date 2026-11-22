@@ -711,12 +711,18 @@ So what drifts goes from site to site, alike along every face,
 and a coarser level's sites change half as often.
 Whatever is made says while when it stays as made (`time::at`),
 back in time as on; always, if it read no time.
+The generator asks each of what it draws (a field, a thing) apart,
+and narrows that only in the bricks it may draw in at all,
+as its `meets` says for every time as for every place (`VoxelGrid::stays`):
+of tiles made together, those it cannot reach stay always.
 So a tile still never changes once made: it is a tile of a time.
 The native frontend makes its tiles at the world's time
 (`World::now`; `--time`, running on with the frames),
 rounded down to a tick: how often what moves is made anew is the host's choice,
 an approximation (at the finest levels, what moves jumps a few sites a tick).
-A tile of another time is made anew, alone, if an engine reads it, else dropped.
+A tile of another time is made anew, alone, if an engine reads it, else dropped;
+the tiles that move are kept by when each stops staying as made,
+so a frame finds those of another time, however many move.
 It keeps the old one's light where its bricks did not change,
 and the voxels engine places what showed of it in the step the old one goes,
 so nothing shows coarser between.

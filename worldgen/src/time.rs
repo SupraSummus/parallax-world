@@ -39,12 +39,6 @@ pub fn now() -> i64 {
     NOW.get().0
 }
 
-/** Narrows while when what is being made stays as made to `stays`, as if it read what that was found of. */
-pub fn narrow(stays: &Range<i64>) {
-    let (now, from, until) = NOW.get();
-    NOW.set((now, from.max(stays.start), until.min(stays.end)));
-}
-
 /** The site of the lattice `s` apart whose voxel holds `p`, in units of `s`. */
 fn site(p: [i64; 3], s: i64) -> [i64; 3] {
     let mut r = p.map(|v| (v + s / 2).div_euclid(s));

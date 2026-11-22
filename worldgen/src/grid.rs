@@ -2,11 +2,14 @@
 //! looks like, in bricks BRICK units wide, only bricks with voxels stored.
 //! The same layout as the baker's Grid, which `to_grid` hands over.
 
+use std::collections::BTreeMap;
+use std::ops::Range;
 use std::sync::OnceLock;
 
 use fcc::{FACE_KINDS, Look};
 
 use crate::js;
+use crate::time;
 
 // The baker's grids, as worlds hand them over, the voxel's faces, and a whole site's alpha: it stops every ray.
 pub use fcc::{ALPHA, Grid, VOXEL_FACES};
@@ -89,6 +92,11 @@ pub struct VoxelGrid {
     pub views: Sights,
     /** Of the sites in `views`, those that glow: how much along each direction. Apart, as few do. */
     pub glows: Few<Glows>,
+    /**
+     * By brick, as in `bricks`: while when what may be drawn there stays as
+     * drawn, of the world's time (time.rs), where that is not always.
+     */
+    stays: BTreeMap<usize, Range<i64>>,
 }
 
 /** All a site holds (`VoxelGrid::held`). */
@@ -364,7 +372,44 @@ impl VoxelGrid {
             glow: Few::default(),
             views: Sights::default(),
             glows: Few::default(),
+            stays: BTreeMap::new(),
         }
+    }
+
+    /** Its bricks that meet `b`, of sites: from the first to the last, inclusive, in bricks from its first; none if none do. */
+    fn bricks_meeting(&self, b: &Box3) -> Option<[[i64; 3]; 2]> {
+        let count = [self.bx, self.by, self.bricks.len() as i64 / (self.bx * self.by).max(1)];
+        let lo: [i64; 3] = std::array::from_fn(|d| (b.min[d] - self.min[d]).div_euclid(BRICK).max(0));
+        let hi: [i64; 3] = std::array::from_fn(|d| (b.max[d] - 1 - self.min[d]).div_euclid(BRICK).min(count[d] - 1));
+        (0..3).all(|d| lo[d] <= hi[d] && b.min[d] < b.max[d]).then_some([lo, hi])
+    }
+
+    /** Narrows while when what is in its bricks that meet `b` (sites) stays as drawn to `stays`: something drawn there read the time. */
+    pub fn narrow(&mut self, b: &Box3, stays: &Range<i64>) {
+        let Some([lo, hi]) = self.bricks_meeting(b) else { return };
+        for k in lo[2]..=hi[2] {
+            for j in lo[1]..=hi[1] {
+                for i in lo[0]..=hi[0] {
+                    let at = ((k * self.by + j) * self.bx + i) as usize;
+                    let was = self.stays.entry(at).or_insert(time::ALWAYS);
+                    *was = was.start.max(stays.start)..was.end.min(stays.end);
+                }
+            }
+        }
+    }
+
+    /** While when what is in `b` (sites) stays as drawn: as long as in every brick of it that meets it (`narrow`); always if nothing there read the time. */
+    pub fn stays(&self, b: &Box3) -> Range<i64> {
+        let (mut from, mut until) = (time::ALWAYS.start, time::ALWAYS.end);
+        if let Some([lo, hi]) = self.bricks_meeting(b) {
+            for (&at, stays) in &self.stays {
+                let p = self.brick_at(at);
+                if (0..3).all(|d| lo[d] <= p[d] && p[d] <= hi[d]) {
+                    (from, until) = (from.max(stays.start), until.min(stays.end));
+                }
+            }
+        }
+        from..until
     }
 
     /**

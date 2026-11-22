@@ -44,7 +44,6 @@
 //! more often than its share says (fcc's CROSSING, `meets`).
 
 use std::collections::BTreeMap;
-use std::ops::Range;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -53,9 +52,9 @@ use fcc::ray::{CROSSING, FACES, nearest_site, over};
 use fcc::{GRID_LEVELS, Look};
 
 use worldgen::World;
-use worldgen::grid::{ALPHA, BRICK, COLOUR_ONE, GLOW_ONE, Grid, VoxelGrid};
+use worldgen::grid::{ALPHA, BRICK, COLOUR_ONE, GLOW_ONE, VoxelGrid};
 use worldgen::picture::Picture;
-use worldgen::tiles::{TILE, made_with, make_sites, make_tiles, parted};
+use worldgen::tiles::{Made as Tile, TILE, made_with, make_sites, make_tile, parted};
 use worldgen::time;
 
 type Rgb = [f32; 3];
@@ -96,7 +95,7 @@ const KEPT_SITES: usize = 1 << 17;
  */
 struct Made {
     tiles: Vec<[i64; 3]>,
-    sites: Arc<OnceLock<(VoxelGrid, Range<i64>)>>,
+    sites: Arc<OnceLock<VoxelGrid>>,
     lit: Box<[OnceLock<Arc<Lit>>]>,
 }
 
@@ -282,18 +281,21 @@ impl Shared {
 
     /**
      * tiles' make_tiles, their sites kept for the Lights, or theirs if a
-     * Light made them: so what is drawn and lit is made once. At a time
-     * they do not stay for (time.rs), made anew and not kept.
+     * Light made them: so what is drawn and lit is made once. A tile of
+     * them that does not stay for the time it is made at (time.rs) is made
+     * anew alone, and not kept: the light reads it where it was.
      */
-    pub fn make_tiles(&self, world: &World, level: u32, key: [i64; 3]) -> Vec<([i64; 3], Grid)> {
+    pub fn make_tiles(&self, world: &World, level: u32, key: [i64; 3]) -> Vec<Tile> {
         let made = self.made(world, level, key);
-        let (sites, stays) = made.sites.get_or_init(|| time::at(time::now(), || make_sites(world, level, key)));
-        // What moves (time.rs) is made anew at another time, the light reading it where it was.
-        if !stays.contains(&time::now()) {
-            return make_tiles(world, level, key);
-        }
-        time::narrow(stays);
-        parted(sites, world, level, key)
+        let sites = made.sites.get_or_init(|| make_sites(world, level, key));
+        let now = |(key, grid, stays): Tile| {
+            if stays.contains(&time::now()) {
+                return (key, grid, stays);
+            }
+            let (grid, stays) = make_tile(world, level, key);
+            (key, grid, stays)
+        };
+        parted(sites, world, level, key).into_iter().map(now).collect()
     }
 
     /**
@@ -531,7 +533,7 @@ impl Light {
         }
         let world = &self.world;
         let sites = &level.made(world, &self.shared, i, site).sites;
-        Some((site, &sites.get_or_init(|| time::at(time::now(), || make_sites(world, i as u32, site.map(|v| v.div_euclid(TILE))))).0))
+        Some((site, sites.get_or_init(|| make_sites(world, i as u32, site.map(|v| v.div_euclid(TILE))))))
     }
 
     /**

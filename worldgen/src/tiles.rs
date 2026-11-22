@@ -1,7 +1,10 @@
 //! A world's tiles, as hosts and light take them: each level's sites in
 //! cubes fixed in the world (`tile_box`), a tile made with those it shares
 //! most of its cost with (`made_with`), only what may show of them
-//! (generate_shown), and parted into the grids hosts draw (`make_tiles`).
+//! (generate_shown), and parted into the grids hosts draw (`make_tiles`),
+//! each saying while when it stays as made (time.rs).
+
+use std::ops::Range;
 
 use crate::World;
 use crate::generator::generate_shown;
@@ -58,8 +61,15 @@ pub fn make_sites(world: &World, level: u32, key: [i64; 3]) -> VoxelGrid {
     generate_shown(&world.generator, &all, level, UP)
 }
 
-/** The tiles `sites` are of (`make_sites`), by key, as hosts draw them, see-through ones too: each its part. */
-pub fn parted(sites: &VoxelGrid, world: &World, level: u32, key: [i64; 3]) -> Vec<([i64; 3], Grid)> {
+/**
+ * A tile as hosts draw it: its key, its grid, and while when it stays as
+ * made, of the world's time (time.rs): always, unless what may be drawn
+ * in it moves.
+ */
+pub type Made = ([i64; 3], Grid, Range<i64>);
+
+/** The tiles `sites` are of (`make_sites`), by key, as hosts draw them, see-through ones too: each its part, staying as its bricks do. */
+pub fn parted(sites: &VoxelGrid, world: &World, level: u32, key: [i64; 3]) -> Vec<Made> {
     let (grid, heights) = (sites.to_grid(), world.heights_at(level));
     // What was made may end short of a tile, or before it.
     let (low, high) = (grid.min[UP] as i64, (grid.min[UP] + grid.n[UP]) as i64);
@@ -68,7 +78,7 @@ pub fn parted(sites: &VoxelGrid, world: &World, level: u32, key: [i64; 3]) -> Ve
         let (from, to) = (b.min[UP].clamp(low, high), b.max[UP].clamp(low, high));
         let (mut min, mut n) = (grid.min, grid.n);
         (min[UP], n[UP]) = (from as i32, (to - from) as i32);
-        (key, grid.part(min, n))
+        (key, grid.part(min, n), sites.stays(&b))
     };
     made_with(world, level, key).map(part).collect()
 }
@@ -80,17 +90,20 @@ pub fn parted(sites: &VoxelGrid, world: &World, level: u32, key: [i64; 3]) -> Ve
  * from a box's bottom up. Their sites are not kept: a host that lights
  * them makes them into the light (light's Shared::make_tiles).
  */
-pub fn make_tiles(world: &World, level: u32, key: [i64; 3]) -> Vec<([i64; 3], Grid)> {
+pub fn make_tiles(world: &World, level: u32, key: [i64; 3]) -> Vec<Made> {
     parted(&make_sites(world, level, key), world, level, key)
 }
 
 /**
  * Tile `key` of `level` of `world` alone, as hosts draw it: what may show
- * of its box (generate_shown). A host makes a tile so anew when what
- * moves in it moved (time.rs), the others made with it staying as made.
+ * of its box (generate_shown), and while when it stays so. A host makes a
+ * tile so anew when what moves in it moved (time.rs), the others made
+ * with it staying as made.
  */
-pub fn make_tile(world: &World, level: u32, key: [i64; 3]) -> Grid {
-    generate_shown(&world.generator, &tile_box(world.heights_at(level), key), level, UP).to_grid()
+pub fn make_tile(world: &World, level: u32, key: [i64; 3]) -> (Grid, Range<i64>) {
+    let b = tile_box(world.heights_at(level), key);
+    let sites = generate_shown(&world.generator, &b, level, UP);
+    (sites.to_grid(), sites.stays(&b))
 }
 
 #[cfg(test)]
@@ -108,6 +121,53 @@ mod tests {
         for key in [[0, 5, 0], [0, -4, 0]] {
             let b = tile_box(heights, key);
             assert!(b.min[1] == b.max[1], "{key:?}: none of it in the heights");
+        }
+    }
+
+    /**
+     * Of tiles made together, only those a field that reads the time may
+     * draw in (Field::meets) stay as made for less than always: a slab of
+     * mist drifting high over a ground. With no word of where it draws, it
+     * may draw anywhere: all of them.
+     */
+    #[test]
+    fn only_the_tiles_what_moves_may_be_in_stay_for_less_than_always() {
+        use crate::generator::{Field, KindDef, Layer, Meets, Op, Span};
+        use crate::time;
+        let (low, high) = (200, 210);
+        let world = |bounded: bool| {
+            let kind = |name, medium| KindDef { name, kind_type: 10, colors: &["#808080"], walk_through: medium, glows: false, medium };
+            let ground = Field::spans("ground", 0.0, Op::Fill, UP, |_, _| vec![Span::solid(-1000, 0, 0)]);
+            let mist = Field::spans("mist", 1.0, Op::Fill, UP, move |x, _| {
+                let [dx, _, _] = time::drift([40, 0, 0]);
+                if (x - dx).rem_euclid(64) < 32 { vec![Span::medium(low, high - low, 1, 0.05)] } else { Vec::new() }
+            });
+            let mist = if bounded {
+                mist.meets(move |b, _| if b.max[UP] <= low || b.min[UP] >= high { Meets::Nothing } else { Meets::Any })
+            } else {
+                mist
+            };
+            let layers = vec![Layer::Field(ground), Layer::Field(mist)];
+            let generator = Generator { kinds: vec![kind("ground", false), kind("mist", true)], seed: 1, layers };
+            World { generator, spawn: [0; 3], heights: Some((-64, 320)), points: Vec::new() }
+        };
+        for bounded in [true, false] {
+            let world = world(bounded);
+            let (tiles, _) = time::at(1000, || make_tiles(&world, 0, [0, 0, 0]));
+            assert!(tiles.len() > 4, "{} tiles made together", tiles.len());
+            for (key, grid, stays) in tiles {
+                let b = tile_box(world.heights_at(0), key);
+                let mist = b.min[UP] < high && b.max[UP] > low;
+                assert!(stays.contains(&1000), "tile {key:?}: {stays:?}");
+                assert_eq!(stays == time::ALWAYS, bounded && !mist, "tile {key:?}, bounded {bounded}: {stays:?}");
+                // The mist in it, made alone, the same while it stays, and moved after.
+                if mist {
+                    let alone = |now: i64| time::at(now, || make_tile(&world, 0, key)).0;
+                    let (then, while_then) = alone(1000);
+                    assert!(then.cells == grid.cells && while_then == stays, "tile {key:?} alone");
+                    assert!(alone(stays.end - 1).0.cells == then.cells && alone(stays.end).0.cells != then.cells, "tile {key:?}");
+                }
+            }
         }
     }
 

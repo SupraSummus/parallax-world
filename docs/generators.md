@@ -970,8 +970,9 @@ which the valley's clouds take off where they read their cover
 (`worlds/src/valley/sky.rs`).
 Only layers may, where they draw:
 plans and things are kept from box to box, and would keep what they read.
-A `meets` rule keeps a moving layer's reads to where it is,
-so tiles it is not in stay always.
+A moving layer's `meets` is where it may draw at any time, not only now:
+the bricks it says it draws nothing in stay always,
+and without a `meets` every brick it reaches moves.
 What it costs hosts is in [architecture.md](architecture.md), "Time".
 
 ## Open problems

@@ -419,11 +419,12 @@ Numbers are for the forest at 1280×800, as measured when written.
 The prototype of worlds that move (`worldgen/src/time.rs`;
 "Time" in `docs/architecture.md`): the valley's clouds.
 
-- **Tiles are made anew whole, and that is most of what moving costs.**
+- **Tiles are made anew whole, and that is all that moving costs.**
   A tile the clouds are in is made anew each tick they cross one of its sites,
   all of it, a few ms each; the clouds' layer alone is over a third of that.
-  Under the clouds, on four cores, over half the tiles with clouds that the voxels engine reads
-  are behind the world's time (`--stroll --by-work` says).
+  Under the valley's clouds that keeps some two cores busy,
+  as many as the world takes with them standing still;
+  the bricks know while when they stay (`VoxelGrid::stays`), the tiles are made by the whole.
   To try: making anew only the bricks that changed,
   which edits and physics would want too;
   the valley keeping its clouds' cover by where the wind has carried it (`recent.rs`).
@@ -446,9 +447,6 @@ The prototype of worlds that move (`worldgen/src/time.rs`;
   The web runs the same frames, with no threads: not looked at.
   Nor has the voxels engine placing tiles made anew been looked at in a window,
   only by its tests.
-- **Tiles made together stay together.**
-  Tiles one above another, made as one box, stay no longer than the clouds among them;
-  made anew alone, the others then stay always: each is made twice.
 - **Only drifting, and only by layers.**
   `time::drift` is all that reads the time, and plans and things may not,
   kept as they are from box to box:

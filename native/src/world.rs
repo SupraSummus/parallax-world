@@ -29,7 +29,7 @@
 
 #[cfg(test)]
 use std::collections::HashMap;
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, VecDeque};
 use std::ops::Range;
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -341,6 +341,48 @@ impl Queue {
 /** A piece done: a tile made, or a brick lit (its light in its tile). */
 type Made = (usize, Piece, Option<Arc<Tile>>);
 
+/** A tile of a level, and the world's time it stops staying as made at (`Moving`). */
+type Due = (i64, usize, TileId);
+
+/**
+ * The tiles made that hold what moves, by level: by the time each stays
+ * as made till, and from. So those made for another time than the world's
+ * are found as many as they are, however many move, on in time as back.
+ */
+#[derive(Default)]
+struct Moving {
+    ends: BTreeSet<Due>,
+    starts: BTreeSet<Due>,
+}
+
+impl Moving {
+    /** Takes tile `id` of `level`, staying as made while `stays`: if not always, it moves. */
+    fn add(&mut self, level: usize, id: TileId, stays: &Range<i64>) {
+        if *stays != time::ALWAYS {
+            self.ends.insert((stays.end, level, id));
+            self.starts.insert((stays.start, level, id));
+        }
+    }
+
+    /** Lets tile `id` of `level` go, as `add` took it. */
+    fn remove(&mut self, level: usize, id: TileId, stays: &Range<i64>) {
+        self.ends.remove(&(stays.end, level, id));
+        self.starts.remove(&(stays.start, level, id));
+    }
+
+    fn len(&self) -> usize {
+        self.ends.len()
+    }
+
+    /** Those that do not stay as made at `now`, each with how far behind or ahead of it they are. */
+    fn behind(&self, now: i64) -> impl Iterator<Item = (i64, usize, TileId)> + '_ {
+        let first = (now + 1, 0, [i32::MIN; 3]);
+        let ended = self.ends.range(..first).map(move |&(end, level, id)| (now + 1 - end, level, id));
+        let to_come = self.starts.range(first..).map(move |&(start, level, id)| (start - now, level, id));
+        ended.chain(to_come)
+    }
+}
+
 /**
  * The world's tiles as the thread that draws has them: it orders its
  * threads to make and light them, and follows what they do from what
@@ -351,8 +393,8 @@ pub struct World {
     levels: Vec<Arc<Level>>,
     /** The level whose far tiles the next update drops: one each, in turn. */
     sweeping: usize,
-    /** The tiles made that hold what moves (Tile's `stays`), by level. */
-    moving: FastSet<(usize, TileId)>,
+    /** The tiles made that hold what moves (Tile's `stays`), by when they stop staying as made. */
+    moving: Moving,
     pub heights: Heights,
     /** The world's time, milliseconds, as its host sets it: tiles are made at its tick (`tick`), and anew once that is not while they stay. */
     pub now: i64,
@@ -471,7 +513,7 @@ impl Worker {
             }
             Piece::Tile(id) if let Some(old) = of => {
                 let key = id.map(i64::from);
-                let (grid, stays) = time::at(now, || make_tile(&self.world, level as u32, key));
+                let ((grid, stays), _) = time::at(now, || make_tile(&self.world, level as u32, key));
                 let tile = Tile { stays, ..Tile::new(id, Arc::new(grid)) };
                 // Its light found as the old one's was, here: a tile lit anew since has none.
                 let tile = if old.lights.iter().any(|l| l.get().is_some()) {
@@ -483,17 +525,17 @@ impl Worker {
             }
             Piece::Tile(id) => {
                 let (world, key) = (&self.world, id.map(i64::from));
-                // Read by light, its sites are the light's: made once. Made together, they stay as made together:
-                // no longer than any of them.
-                let (grids, stays) = time::at(now, || match shared.filter(|_| lit) {
+                // Read by light, its sites are the light's: made once. Each stays as made as long as what may be drawn
+                // in it does.
+                let (tiles, _) = time::at(now, || match shared.filter(|_| lit) {
                     Some(shared) => shared.make_tiles(world, level as u32, key),
                     None => make_tiles(world, level as u32, key),
                 });
-                let tile = |(key, grid): ([i64; 3], Grid)| {
+                let tile = |(key, grid, stays): worldgen::tiles::Made| {
                     let id = key.map(|v| v as i32);
-                    (level, Piece::Tile(id), Some(Arc::new(Tile { stays: stays.clone(), ..Tile::new(id, Arc::new(grid)) })))
+                    (level, Piece::Tile(id), Some(Arc::new(Tile { stays, ..Tile::new(id, Arc::new(grid)) })))
                 };
-                grids.into_iter().map(tile).collect()
+                tiles.into_iter().map(tile).collect()
             }
         }
     }
@@ -578,7 +620,7 @@ impl World {
         World {
             levels: (0..GRID_LEVELS).map(|_| Arc::new(Level::new([]))).collect(),
             sweeping: 0,
-            moving: FastSet::default(),
+            moving: Moving::default(),
             heights,
             now: 0,
             threads,
@@ -640,9 +682,7 @@ impl World {
 
     /** The tiles made that hold what moves, and those of them made for another time than the world's: behind it. */
     pub fn moving(&self) -> [usize; 2] {
-        let now = self.tick();
-        let behind = self.moving.iter().filter(|&&(level, id)| self.levels[level].tiles.get(id).is_some_and(|t| !t.stays.contains(&now)));
-        [self.moving.len(), behind.count()]
+        [self.moving.len(), self.moving.behind(self.tick()).count()]
     }
 
     /** Tiles being made and bricks lit, or waiting to be. */
@@ -735,10 +775,12 @@ impl World {
                 gone.push(Box::new(tile));
                 continue;
             }
-            if tile.stays != time::ALWAYS {
-                self.moving.insert((level, id));
+            let stays = tile.stays.clone();
+            if let Some(had) = Arc::make_mut(&mut self.levels[level]).insert(id, tile) {
+                self.moving.remove(level, id, &had.stays);
+                gone.push(Box::new(had));
             }
-            gone.extend(Arc::make_mut(&mut self.levels[level]).insert(id, tile).map(|had| Box::new(had) as Box<dyn Send>));
+            self.moving.add(level, id, &stays);
             changed = true;
         }
         // Made for another time, a tile no engine reads is dropped: made with one asked for, it would be made anew
@@ -752,9 +794,9 @@ impl World {
         let dropped: Vec<TileId> = tiles.iter().filter(|&(id, tile)| far(level, id) || stale(level, id, tile)).map(|(id, _)| id).collect();
         if !dropped.is_empty() {
             let tiles = Arc::make_mut(&mut self.levels[level]);
-            for id in dropped {
-                self.moving.remove(&(level, id));
-                gone.extend(tiles.remove(id).map(|tile| Box::new(tile) as Box<dyn Send>));
+            for tile in dropped.into_iter().filter_map(|id| tiles.remove(id).map(|tile| (id, tile))) {
+                self.moving.remove(level, tile.0, &tile.1.stays);
+                gone.push(Box::new(tile.1));
             }
             changed = true;
         }
@@ -777,14 +819,14 @@ impl World {
                 list.push_back((level, piece, of));
             }
         }
-        // Those made for another time come after all that is asked for, the one furthest from its own first: so all
-        // that moves is as far behind, whatever its level, should the threads not keep up.
-        let behind = |t: &Tile| (now - t.stays.end).max(t.stays.start - now);
-        let held = self.moving.iter().filter_map(|&(level, id)| self.levels[level].tiles.get(id).map(|tile| (level, id, tile)));
+        // Those made for another time within an engine's reach come after all that is asked for, the one furthest
+        // from its own first: so all that moves is as far behind, whatever its level, should the threads not keep up.
+        let read = |level: usize, id: TileId| reach[level].is_some_and(|reach| distance(level, camera, id) <= reach);
         let in_flight = |level: usize, id: TileId| self.in_flight.contains(&(level, Piece::Tile(id)));
-        let mut anew: Vec<_> = held.filter(|&(level, id, tile)| !tile.stays.contains(&now) && !in_flight(level, id)).collect();
-        anew.sort_by_key(|(_, _, tile)| std::cmp::Reverse(behind(tile)));
-        for (level, id, tile) in anew {
+        let mut anew: Vec<_> = self.moving.behind(now).filter(|&(_, level, id)| read(level, id) && !in_flight(level, id)).collect();
+        anew.sort_by_key(|&(behind, ..)| std::cmp::Reverse(behind));
+        for (_, level, id) in anew {
+            let tile = self.levels[level].tiles.get(id).expect("a tile that moves is held");
             listed.insert((level, Piece::Tile(id)));
             list.push_back((level, Piece::Tile(id), Some(tile.clone())));
         }
@@ -807,8 +849,9 @@ pub fn tiles_about(world: &worldgen::World, level: u32, centre: [i32; 3], reach:
     let mut tiles = HashMap::new();
     for id in within([centre.map(|v| tile(v - reach)), centre.map(|v| tile(v + reach - 1))]) {
         if !tiles.contains_key(&id) {
-            let made = make_tiles(world, level, id.map(i64::from)).into_iter().map(|(key, grid)| (key.map(|v| v as i32), grid));
-            tiles.extend(made.map(|(id, grid)| (id, Arc::new(Tile::new(id, Arc::new(grid))))));
+            let made =
+                make_tiles(world, level, id.map(i64::from)).into_iter().map(|(key, grid, stays)| (key.map(|v| v as i32), grid, stays));
+            tiles.extend(made.map(|(id, grid, stays)| (id, Arc::new(Tile { stays, ..Tile::new(id, Arc::new(grid)) }))));
         }
     }
     tiles.retain(|id, _| (0..3).all(|d| (tile(centre[d] - reach)..=tile(centre[d] + reach - 1)).contains(&id[d])));
