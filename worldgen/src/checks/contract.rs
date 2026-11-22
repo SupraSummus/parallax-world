@@ -472,18 +472,18 @@ pub fn things_hold(world: &World, survey: &Survey) -> Vec<String> {
 pub const REGION: i64 = m(32.0);
 
 /**
- * What each of `worlds` is made of (`survey`; several seeds of one, say),
- * and regions holding a place of each of their strata, one by name in all
- * of them, by world; `only` those of strata whose names hold one of
- * `only`, if any (a layer's name first: "towns/church", "railway"), and
- * only their layers surveyed. Each region holds every stratum surveyed in
- * it (`survey_in`), not only those it was laid out for, with their places
- * there; a stratum's sample is shared by the regions holding it, in every
- * world.
+ * What each of `worlds` is made of (`survey`, all surveyed together:
+ * several seeds of one, say), and regions holding a place of each of
+ * their strata, one by name in all of them, by world; `only` those of
+ * strata whose names hold one of `only`, if any (a layer's name first:
+ * "towns/church", "railway"), and only their layers surveyed. Each region
+ * holds every stratum surveyed in it (`survey_in`), not only those it was
+ * laid out for, with their places there; a stratum's sample is shared by
+ * the regions holding it, in every world.
  */
 pub fn regions(worlds: &[&World], only: &[&str]) -> (Vec<Survey>, Vec<Vec<Region>>) {
     let layers = |layer: &str| only.is_empty() || only.iter().any(|o| o.starts_with(layer) || layer.starts_with(o));
-    let surveys = on_threads(worlds, |world| survey(world, REGION, layers));
+    let surveys = on_threads(worlds, |world| survey(world, worlds.len(), REGION, layers));
     let wanted = |name: &str| only.is_empty() || only.iter().any(|o| name.contains(o));
     let laid = crate::checks::survey::regions(&surveys, wanted);
     let held: Vec<BTreeMap<String, Vec<Box3>>> = on_threads(&laid, |((w, area), laid)| {
@@ -750,7 +750,7 @@ pub fn check(worlds: &[(&str, &World)], levels: u32, only: &[&str]) -> Vec<Check
 pub fn check_component(name: &str, make: &dyn Fn() -> World, component: &str, places: usize, levels: u32) -> Checked {
     let start = Instant::now();
     let (world, focus) = (make(), make().alone(component));
-    let survey = survey(&focus, REGION, |_| true);
+    let survey = survey(&focus, 1, REGION, |_| true);
     let in_it = |b: &Box3| survey.strata.iter().flat_map(|s| s.places_in(b)).collect();
     let regions: Vec<Region> =
         nearest(&survey, places).iter().map(|b| Region { area: *b, strata: vec![Held::all(component, in_it(b))] }).collect();

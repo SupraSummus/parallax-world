@@ -188,19 +188,25 @@ pub(crate) fn nearest_first(places: &mut [Box3], spawn: [i64; 3]) {
     places.sort_by_key(|b| near(b, spawn));
 }
 
-/** What `world` is made of around spawn, in places at most `region` wide (lattice units): of the layers `wanted` by name. */
-pub fn survey(world: &World, region: i64, wanted: impl Fn(&str) -> bool) -> Survey {
+/**
+ * What `world` is made of around spawn, in places at most `region` wide
+ * (lattice units): of the layers `wanted` by name, as one of `together`
+ * worlds (seeds of one), which share the fields' SIDE square and PARTS
+ * (docs/checks.md).
+ */
+pub fn survey(world: &World, together: usize, region: i64, wanted: impl Fn(&str) -> bool) -> Survey {
     let mut found = Found::new(world.spawn, PLACES);
     let (mut layers, mut things) = (Vec::new(), Vec::new());
     let wanted = || world.generator.layers.iter().filter(|layer| wanted(layer.name()));
     let fields: Vec<&Field> = wanted().filter_map(|layer| if let Layer::Field(field) = layer { Some(field) } else { None }).collect();
     let cube = |centre, side| world.within(Box3::around(centre, side / 2));
-    let mut at_spawn = survey_fields(world, &cube(world.spawn, SIDE), FIELD_LEVEL, &fields, &mut found).into_iter();
+    let side = (SIDE as f64 / (together as f64).sqrt()) as i64;
+    let mut at_spawn = survey_fields(world, &cube(world.spawn, side), FIELD_LEVEL, &fields, &mut found).into_iter();
     for layer in wanted() {
         let start = Instant::now();
         match layer {
             Layer::Population(population) => {
-                let mut things_around = |centre| survey_things(world, centre, population, region, &mut found);
+                let mut things_around = |centre| survey_things(world, centre, population, PARTS / together, region, &mut found);
                 let at_spawn = things_around(world.spawn);
                 let (half, seen) = or_at_places(world, at_spawn, things_around, |s| s.1.made);
                 layers.push(Surveyed { layer: population.name, half, found: seen.made, seconds: start.elapsed().as_secs_f64() });
@@ -210,7 +216,7 @@ pub fn survey(world: &World, region: i64, wanted: impl Fn(&str) -> bool) -> Surv
                 let (at_spawn, seconds) = at_spawn.next().expect("a field");
                 let at_place = |centre| survey_fields(world, &cube(centre, PLACE_SIDE), PLACE_LEVEL, &[field], &mut found)[0].0;
                 let drawn = or_at_places(world, at_spawn, at_place, |drawn| *drawn);
-                layers.push(Surveyed { layer: field.name, half: SIDE / 2, found: drawn, seconds: seconds + start.elapsed().as_secs_f64() });
+                layers.push(Surveyed { layer: field.name, half: side / 2, found: drawn, seconds: seconds + start.elapsed().as_secs_f64() });
             }
         }
     }
@@ -326,17 +332,17 @@ fn across(axis: usize) -> [usize; 2] {
 /**
  * The things of `population` in a cube around `centre`, from 16 cells
  * wide, twice as wide each time while they are taken apart into fewer
- * than PARTS / 4 parts, up to SIDE (HALF_CELLS once any is found); their
+ * than `parts` / 4 parts, up to SIDE (HALF_CELLS once any is found); their
  * parts, into `found`. Returns half the cube's side, and the things.
  */
-fn survey_things(world: &World, centre: [i64; 3], population: &Population, region: i64, found: &mut Found) -> (i64, Things) {
+fn survey_things(world: &World, centre: [i64; 3], population: &Population, parts: usize, region: i64, found: &mut Found) -> (i64, Things) {
     let (n, reach) = (population.cell, population.reach);
     let mut half = 8;
     loop {
-        let mut parts = Found::new(world.spawn, PLACES);
+        let mut taken = Found::new(world.spawn, PLACES);
         let mut seen = Things { population: population.name, reach, made: 0, past: Vec::new(), leaving: Vec::new() };
         let cube = world.within(Box3::around(centre, half * n));
-        let count = things_in(world, population, &cube, region, &mut parts, |key, bounds, allowed| {
+        let count = things_in(world, population, &cube, region, &mut taken, |key, bounds, allowed| {
             seen.made += 1;
             if !bounds.inside(&allowed) {
                 seen.past.push((key.clone(), bounds, allowed));
@@ -347,8 +353,8 @@ fn survey_things(world: &World, centre: [i64; 3], population: &Population, regio
             }
         });
         let most = if seen.made > 0 { HALF_CELLS } else { i64::MAX }.min(SIDE / 2 / n);
-        if count * 4 > PARTS || half >= most {
-            found.absorb(parts);
+        if count * 4 > parts || half >= most {
+            found.absorb(taken);
             return (half * n, seen);
         }
         half = (2 * half).min(most);

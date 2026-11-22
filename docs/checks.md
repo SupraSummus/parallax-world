@@ -41,6 +41,10 @@ A stratum is a part or a field, with a kind it draws;
 the survey counts its places, and keeps those nearest spawn (`PLACES`).
 A field is asked at level 0 too, only where a place it finds is kept:
 for where its surface is, and what it draws finer still (a pond's reeds, a kerb's concrete).
+Seeds checked together share what one seed's survey asks:
+the fields' columns of a square `SIDE` wide, each of n seeds a square 1/n as large,
+and a population's `PARTS`;
+a population held by its distance (`HALF_CELLS`), not its parts, goes as far at each.
 Every stratum found is held by regions of the seeds checked together,
 one stratum by name at all of them, so where it is cheapest:
 the rarest first, each until `HELD` regions hold a place of it or none is left;
