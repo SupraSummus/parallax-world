@@ -12,12 +12,14 @@ use std::time::Instant;
 
 use crate::World;
 use crate::generator::{
-    Children, Field, FieldValues, Generator, Kind, Layer, Node, Op, Population, Shape, bounds_of_shapes, each_made, unnumbered,
+    Children, Field, FieldValues, Generator, Kind, Layer, Node, Op, Population, Shape, across, bounds_of_shapes, each_made, turned,
+    unnumbered,
 };
 use crate::grid::Box3;
 use crate::noise::{Rng, hash_text, hash64};
 use crate::sites::footprint;
 use crate::units::m;
+use crate::world::UP;
 
 /** The side of the cube around spawn layers are surveyed in (16 km), lattice units, cut to the world's heights. */
 const SIDE: i64 = m(16_000.0);
@@ -254,20 +256,20 @@ fn or_at_places<T>(world: &World, at_spawn: T, mut survey: impl FnMut([i64; 3]) 
 fn survey_fields(world: &World, b: &Box3, level: u32, fields: &[&Field], found: &mut Found) -> Vec<(usize, f64)> {
     let seeds: Vec<u64> = fields.iter().map(|field| hash_text(field.name, world.generator.seed)).collect();
     let s = 1i64 << level;
-    let (h0, h1) = (b.min[1], b.max[1]);
+    let (h0, h1) = (b.min[UP], b.max[UP]);
     // Column i's sites reach s / 2 either side of i·s.
     let columns = |a: usize| {
         let mut columns: Vec<i64> = ((b.min[a] + s / 2).div_euclid(s)..(b.max[a] + s / 2 + s - 1).div_euclid(s)).map(|i| i * s).collect();
         columns.sort_by_key(|v| (v - found.spawn[a]).abs());
         columns
     };
-    let (xs, zs) = (columns(0), columns(2));
+    let [is, ks] = across(UP).map(columns);
     let mut drawn = vec![(0, 0.0); fields.len()];
-    for (&x, &z) in zs.iter().flat_map(|z| xs.iter().map(move |x| (x, z))) {
+    for (&i, &k) in ks.iter().flat_map(|k| is.iter().map(move |i| (i, k))) {
         // A site's column of the level, as generating it asks: at any height, for a field of sites; a hash of where it is, in any order.
         for ((field, seed), drawn) in fields.iter().zip(&seeds).zip(&mut drawn) {
             let start = Instant::now();
-            let p = [x, h0 + Rng::new(hash64(*seed, x, 0, z)).below((h1 - h0) as u32) as i64, z];
+            let p = turned(UP, [i, k], h0 + Rng::new(hash64(*seed, i, 0, k)).below((h1 - h0) as u32) as i64);
             drawn.0 += survey_site(field, p, s, found) as usize;
             drawn.1 += start.elapsed().as_secs_f64();
         }
@@ -305,15 +307,14 @@ type Drawn = (Vec<Kind>, usize, i64, i64);
 
 /** What `field` draws at `p`, as a site of sites `s` apart reads it. */
 fn drawn(field: &Field, p: [i64; 3], s: i64) -> Option<Drawn> {
-    let [x, _, z] = p;
     match &field.values {
-        FieldValues::At(at) => footprint(s, [0; 3], || at(x, p[1], z)).map(|(kind, _)| (vec![kind], 1, p[1], p[1] + 1)),
+        FieldValues::At(at) => footprint(s, [0; 3], || at(p[0], p[1], p[2])).map(|(kind, _)| (vec![kind], UP, p[UP], p[UP] + 1)),
         FieldValues::Shapes(near) => {
             // A shape reaching the site's voxel, from its bottom to its top.
             let b = Box3::around(p, s);
             let shapes = footprint(s, [0; 3], || near(&b));
             let shape = shapes.iter().find(|shape| shape.bounds.overlaps(&b))?;
-            Some((vec![shape.kind], 1, shape.bounds.min[1], shape.bounds.max[1]))
+            Some((vec![shape.kind], UP, shape.bounds.min[UP], shape.bounds.max[UP]))
         }
         FieldValues::Spans { axis, spans } => {
             let [a, b] = across(*axis);
@@ -322,11 +323,6 @@ fn drawn(field: &Field, p: [i64; 3], s: i64) -> Option<Drawn> {
             Some((spans.iter().map(|s| s.kind).collect(), *axis, from, to))
         }
     }
-}
-
-/** The axes across `axis`, in order. */
-fn across(axis: usize) -> [usize; 2] {
-    [(axis == 0) as usize, 2 - (axis == 2) as usize]
 }
 
 /**
@@ -347,7 +343,7 @@ fn survey_things(world: &World, centre: [i64; 3], population: &Population, parts
             if !bounds.inside(&allowed) {
                 seen.past.push((key.clone(), bounds, allowed));
             }
-            let leaves = world.heights.is_some_and(|(h0, h1)| bounds.min[1] < h0 || bounds.max[1] > h1);
+            let leaves = world.heights.is_some_and(|(h0, h1)| bounds.min[UP] < h0 || bounds.max[UP] > h1);
             if leaves && seen.leaving.len() < LEAVING {
                 seen.leaving.push((key, bounds));
             }

@@ -20,9 +20,10 @@ use std::f64::consts::TAU;
 use std::fmt;
 
 use crate::World;
-use crate::generator::{Anchors, Generator, Layer, Population, anchor_in, anchors_in, made_in};
+use crate::generator::{Anchors, Generator, Layer, Population, across, anchor_in, anchors_in, made_in, turned};
 use crate::grid::Box3;
 use crate::noise::{Rng, hash_text, hash64};
+use crate::world::UP;
 
 /** How wide a cube around spawn things are gathered in, lattice units (16 km), cut to the world's heights: periods up to 2 km. */
 pub const SIDE: i64 = 128_000;
@@ -55,7 +56,7 @@ const BINS: usize = 24;
 
 /**
  * Where the things of `population` are, lattice units: those anchored in
- * `area`, found from its columns of cells over it (along y), all of them
+ * `area`, found from its columns of cells over it (along UP), all of them
  * if COLUMNS or fewer, else patches of them at random by the world's
  * seed until THINGS are found or COLUMNS picked. A cell's anchor finds
  * the thing of the cell it is in, if any, so a thing many cells ask for
@@ -67,7 +68,7 @@ const BINS: usize = 24;
 pub fn places(generator: &Generator, population: &Population, area: &Box3) -> Vec<[i64; 3]> {
     let n = population.cell;
     let range = |a: usize| ((area.min[a] - n).div_euclid(n), (area.max[a] + n).div_euclid(n));
-    let ((i0, i1), (j0, j1), (k0, k1)) = (range(0), range(1), range(2));
+    let ([(i0, i1), (k0, k1)], (j0, j1)) = (across(UP).map(range), range(UP));
     let wide = i1 - i0 + 1;
     let total = (wide * (k1 - k0 + 1)) as u64;
     let column = move |c: u64| (i0 + c as i64 % wide, k0 + c as i64 / wide);
@@ -86,11 +87,14 @@ pub fn places(generator: &Generator, population: &Population, area: &Box3) -> Ve
         let first = (hash64(seed, i, 0, k) % tall as u64) as i64;
         let anchors = match population.anchor {
             // A leaf's points are its own: they are found from it.
-            Anchors::Points { .. } => anchors_in(generator, population, [(i, i), (j0, j1), (k, k)]),
+            Anchors::Points { .. } => anchors_in(generator, population, turned(UP, [(i, i), (k, k)], (j0, j1))),
             _ => (0..tall)
                 .map(|n| j0 + (first + n) % tall)
                 .filter(|j| (i + j + k) & 1 == 0)
-                .filter_map(|j| anchor_in(generator, population, i, j, k))
+                .filter_map(|j| {
+                    let [x, y, z] = turned(UP, [i, k], j);
+                    anchor_in(generator, population, x, y, z)
+                })
                 .filter(|(_, owner)| asked.insert(*owner))
                 .filter_map(|(_, [i, j, k])| made_in(generator, population, i, j, k).map(|(anchor, _)| anchor))
                 .take(PER_COLUMN)

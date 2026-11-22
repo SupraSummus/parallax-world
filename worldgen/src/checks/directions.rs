@@ -2,8 +2,8 @@
 //! sibling of `places` (docs/checks.md). About the vertical
 //! the lattice, square noise and tiles are four-fold, so their mark is a
 //! four-fold harmonic of horizontal directions at the lattice's phase,
-//! the same at every seed. Only about y, a ground's vertical: about x and
-//! z too, for worlds with no ground, is in docs/todo.md.
+//! the same at every seed. Only about UP, a ground's vertical: about the
+//! other axes too, for worlds with no ground, is in docs/todo.md.
 //!
 //! The measure: pairs of points a few metres apart, at random places and
 //! in continuous random directions φ, and whether the two look unlike
@@ -30,10 +30,11 @@ use std::f64::consts::{PI, SQRT_2, TAU};
 use std::fmt;
 
 use crate::World;
-use crate::generator::generate;
-use crate::grid::{BRICK, Box3};
+use crate::generator::{across, generate, turned};
+use crate::grid::Box3;
 use crate::noise::{Rng, hash_text};
 use crate::picture::nearest_site;
+use crate::world::UP;
 
 /** The level pairs are sampled at. */
 const LEVEL: u32 = 3;
@@ -90,17 +91,15 @@ impl Sums {
 
 /** Pairs at each of DISTANCES in a box around `at` (lattice units, at a random place in the box), into `sums`. */
 fn sample(world: &World, at: [i64; 3], random: &mut Rng, sums: &mut [Sums; DISTANCES.len()]) {
-    let [x0, y0, z0] = at.map(|v| (v >> LEVEL) - random.below(SIDE as u32) as i64);
+    let corner = at.map(|v| (v >> LEVEL) - random.below(SIDE as u32) as i64);
     let (h0, h1) = world.heights_at(LEVEL);
-    let (y0, y1) = (y0.max(h0), (y0 + SIDE).min(h1));
-    if y0 >= y1 {
+    let (low, high) = (corner[UP].max(h0), (corner[UP] + SIDE).min(h1));
+    if low >= high {
         return;
     }
-    let grid = generate(&world.generator, &Box3 { min: [x0, y0, z0], max: [x0 + SIDE, y1, z0 + SIDE] }, LEVEL);
+    let grid = generate(&world.generator, &Box3 { min: corner, max: corner.map(|v| v + SIDE) }.slab(UP, low, high), LEVEL);
     // Over the highest brick with voxels, pairs never part.
-    let [bx, by] = [0, 1].map(|i| (grid.n[i] + BRICK - 1) / BRICK);
-    let highest = grid.bricks.iter().enumerate().filter(|(_, at)| **at >= 0).map(|(i, _)| (i as i64 / bx) % by).max();
-    let Some(top) = highest.map(|j| (grid.min[1] + (j + 1) * BRICK).min(y1)) else { return };
+    let Some(top) = grid.end_of_bricks(UP).map(|end| end.min(high)) else { return };
     let look = |p: [f64; 3]| {
         let [x, y, z] = nearest_site(p);
         grid.get(x, y, z)
@@ -112,16 +111,16 @@ fn sample(world: &World, at: [i64; 3], random: &mut Rng, sums: &mut [Sums; DISTA
     for (sums, &d) in sums.iter_mut().zip(&DISTANCES) {
         let (d, inside) = (d as f64, (SIDE - 2 * d - 2) as f64);
         for _ in 0..POINTS {
-            // On a plane of sites, a whole y, so both of a pair round to its sites (see above).
-            let (x, y) = (x0 as f64 + d + 1.0 + random.next() * inside, (y0 + random.below((top - y0) as u32) as i64) as f64);
-            let p = [x, y, z0 as f64 + d + 1.0 + random.next() * inside];
-            let (here, turn) = (look(p), random.next() * TAU);
+            // On a plane of sites, a whole height, so both of a pair round to its sites (see above).
+            let [a, b] = across(UP).map(|i| corner[i] as f64 + d + 1.0 + random.next() * inside);
+            let up = (low + random.below((top - low) as u32) as i64) as f64;
+            let (here, turn) = (look(turned(UP, [a, b], up)), random.next() * TAU);
             let (c0, s0) = (turn.cos(), turn.sin());
             for [ck, sk] in spread {
                 // cos φ and sin φ, φ the turn and the k-th direction; then of 2φ and 4φ.
                 let (c, s) = (c0 * ck - s0 * sk, s0 * ck + c0 * sk);
                 sums.pairs += 1.0;
-                if look([p[0] + d * c, p[1], p[2] + d * s]) != here {
+                if look(turned(UP, [a + d * c, b + d * s], up)) != here {
                     let (c2, s2) = (c * c - s * s, 2.0 * s * c);
                     sums.parted += 1.0;
                     sums.four += c2 * c2 - s2 * s2;
@@ -176,7 +175,7 @@ pub struct Leak {
     pub distance: i64,
     /** The four-fold harmonic at the lattice's phase, relative to how often pairs part: most along the axes if positive, the diagonals if negative. */
     pub four: f64,
-    /** The two-fold harmonic's size, and the direction pairs part most along, radians from x towards z. */
+    /** The two-fold harmonic's size, and the direction pairs part most along, radians from x towards z (across UP). */
     pub two: f64,
     pub along: f64,
     /** Seeds, and the share of pairs that part. */

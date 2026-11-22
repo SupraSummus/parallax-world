@@ -87,7 +87,7 @@ the checks look at it in cubes around places
 each within its heights if it has them (`World::within`),
 so a cube as wide as a ground's heights holds all of them,
 and an endless world's is a cube of it.
-y stays up, but some of the engine still takes a ground
+Hosts keep an up (`world::UP`), but some of the engine still takes a ground
 ("Assume no ground" in `docs/todo.md`).
 
 The contract says three things.

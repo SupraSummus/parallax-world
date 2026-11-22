@@ -192,14 +192,13 @@ fn layers(layers: Vec<Layer>) -> Generator {
 }
 
 /**
- * Stone up along `up` to `height(r)`, r along `rising(up)`, which it
- * never falls along, solid to the bottom: saying where a box is all of it
- * or none (Field::meets).
+ * Stone up along `up` to `height(r)`, r along the first axis across it
+ * (x for y), which it never falls along, solid to the bottom: saying where
+ * a box is all of it or none (Field::meets).
  */
 fn solid_ground(up: usize, height: fn(i64) -> i64) -> Generator {
-    let (rise, [a, _]) = (rising(up), across(up));
-    let field =
-        Field::spans("ground", 0.0, Op::Fill, up, move |u, v| vec![Span::solid(DEEP, height(if a == rise { u } else { v }) + 1, 0)]);
+    let rise = across(up)[0];
+    let field = Field::spans("ground", 0.0, Op::Fill, up, move |u, _| vec![Span::solid(DEEP, height(u) + 1, 0)]);
     let field = field.meets(move |b, _| {
         if b.min[up] > height(b.max[rise] - 1) {
             Meets::Nothing
@@ -212,16 +211,9 @@ fn solid_ground(up: usize, height: fn(i64) -> i64) -> Generator {
     layers(vec![Layer::Field(field)])
 }
 
-/** The axis a ground standing along `up` rises along: x for y, and so on round. */
-fn rising(up: usize) -> usize {
-    (up + 2) % 3
-}
-
 /** Point (x, y, z) of a ground standing along y, turned to stand along `up`. */
 fn standing(up: usize, [x, y, z]: [i64; 3]) -> [i64; 3] {
-    let mut p = [0; 3];
-    (p[rising(up)], p[up], p[3 - up - rising(up)]) = (x, y, z);
-    p
+    turned(up, [x, z], y)
 }
 
 /** Box `b` of a ground standing along y, turned as `standing`. */

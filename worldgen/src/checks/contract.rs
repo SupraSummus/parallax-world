@@ -21,6 +21,7 @@ use crate::generator::{Generator, Whole, checking_skipped, generate, kind_of};
 use crate::grid::{ALPHA, Box3, VoxelGrid};
 use crate::noise::{Rng, hash64};
 use crate::units::m;
+use crate::world::UP;
 
 /** The box of `level`'s sites covering `region` and a margin of two sites. */
 pub(crate) fn box_at(r: &Box3, level: u32) -> Box3 {
@@ -436,11 +437,11 @@ pub fn things_hold(world: &World, survey: &Survey) -> Vec<String> {
     for things in &survey.things {
         for (key, bounds) in &things.leaving {
             let (h0, h1) = world.heights.expect("the survey keeps things leaving a world's heights, if it has them");
-            for (from, to, side) in [(h1, bounds.max[1] + 2, "above"), (bounds.min[1] - 2, h0, "below")] {
+            for (from, to, side) in [(h1, bounds.max[UP] + 2, "above"), (bounds.min[UP] - 2, h0, "below")] {
                 if from >= to {
                     continue;
                 }
-                let b = Box3 { min: [bounds.min[0] - 2, from, bounds.min[2] - 2], max: [bounds.max[0] + 2, to, bounds.max[2] + 2] };
+                let b = bounds.widen(2).slab(UP, from, to);
                 if let Some((at, kind, n)) = stopping(&world.generator, generate(&world.generator, &b, 0), 0) {
                     broken.push(format!(
                         "{key}: {n} sites stopping light {side} the heights {:?} (World::heights), which hosts don't generate, \

@@ -56,7 +56,7 @@ impl Field {
         Field { name, order, op, values: FieldValues::At(Box::new(at)), meets: None }
     }
 
-    /** Spans along each line of sites parallel to `axis`: `spans(u, v)`, the line's other coordinates in axis order (FieldValues::Spans). */
+    /** Spans along each line of sites parallel to `axis`: `spans(u, v)`, the line's coordinates across it, as `across` orders them (FieldValues::Spans). */
     pub fn spans<S: Into<Vec<Span>>>(
         name: &'static str,
         order: f64,
