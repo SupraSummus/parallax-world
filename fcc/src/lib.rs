@@ -191,17 +191,26 @@ pub const fn medium(look: Look) -> bool {
 }
 
 /**
- * What a host that draws only whole voxels shows of `look` at site
- * (x, y, z): pieces held in part whole where their alpha is over a coin
- * of the site, so as often as they stop rays, else nothing.
+ * Whether pieces held in part stopping `alpha` of rays (of ALPHA) at site
+ * (x, y, z) show whole: where their alpha is over a coin of the site, so as
+ * often as they stop rays. Every host shows them so (voxels.wgsl's copy too),
+ * none by a finer coin: far off, a voxel is a few pixels.
  */
-pub fn whole_or_none(look: Look, x: i32, y: i32, z: i32) -> Look {
-    if !in_part(look) {
-        return look;
-    }
+pub fn shows_whole(alpha: u8, x: i32, y: i32, z: i32) -> bool {
     let h = (x as u32).wrapping_mul(0x9e37_79b1) ^ (y as u32).wrapping_mul(0x85eb_ca77) ^ (z as u32).wrapping_mul(0xc2b2_ae3d);
     let h = (h ^ h >> 15).wrapping_mul(0x2c1b_3c6d);
-    if alpha_of(look) > ((h ^ h >> 12) >> 24) as u8 { look | 0xff00_0000 } else { 0 }
+    alpha > ((h ^ h >> 12) >> 24) as u8
+}
+
+/** What a host shows of `look` at site (x, y, z): pieces held in part whole or nothing (`shows_whole`). */
+pub fn whole_or_none(look: Look, x: i32, y: i32, z: i32) -> Look {
+    if !in_part(look) {
+        look
+    } else if shows_whole(alpha_of(look), x, y, z) {
+        look | 0xff00_0000
+    } else {
+        0
+    }
 }
 
 /** Words per site in a grid's `views`: its index in `cells`, then its look along each face kind (VOXEL_FACES). */

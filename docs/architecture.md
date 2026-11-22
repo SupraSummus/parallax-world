@@ -548,9 +548,9 @@ the mean of its looks through the faces turned most against it
 (fcc's `facing`, the one rule every host and check reads by),
 times the light on it (below):
 a coarse voxel of a house may show its wall from the side and its roof from above.
-Pieces held in part stop a ray by a coin of the site of a lattice four times finer
-it enters them by (`stops`): as often as light sees them stop rays,
-speckled finer than their voxel, and still as the eye moves.
+A site's look is read as the chunk engines read it (`whole_or_none`, fcc's):
+pieces held in part whole or not at all, by a coin of their site.
+So rays, pixels and shades meet only voxels empty, whole or a medium.
 So a brick whose voxels look unlike through some faces takes more slots of the pool,
 each naming the next:
 one for which sight each face of a site sees, then one a sight,
