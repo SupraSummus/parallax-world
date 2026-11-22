@@ -256,15 +256,18 @@ Numbers are for the forest at 1280×800, as measured when written.
 - **A part that only carves is no stratum** (`kinds_of` in `worldgen::checks::survey`),
   though a field that carves is one: a thing's cuts get no region of their own.
 - **Rarity is counted two ways** (`Stratum::found`): a population's parts
-  in a cube grown until there are enough, a field's columns in all 16 km.
+  in a cube grown until there are enough, a field's columns in all 16 km;
+  and of a field, what only level 0 shows (the valley's mossy stones)
+  only at the columns asked there.
   The rarest go first by these counts; places per area would compare them.
 - **The survey asks each field at every column of 16 km**, a million,
-  at every seed: most of a seed's survey,
-  though the plans they share are made there once.
+  at every seed, though the plans they share are made there once.
   Over 4 km, or at columns of level 9, it lost strata (tried):
   the valley's rare ponds and kinds of heath, the moor's stream bed.
-  Each column is asked again at level 0, for what is finer than its sites:
-  two fifths of the valley's survey, for its ponds' reeds alone (tried).
+  Asked at level 0 at every column too (tried), it took half as long again
+  and found no stratum more.
+  So what only level 0 shows is found only where coarser kinds' places are kept:
+  a kind sparse everywhere would be found little.
 - **A region's level 0 is made whole, and is a third of its time**
   (`hold_region` in `worldgen/src/checks/contract.rs`),
   to find the surfaces its cells are sampled near:
