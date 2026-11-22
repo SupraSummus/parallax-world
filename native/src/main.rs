@@ -11,6 +11,7 @@
 mod engine;
 mod eye;
 mod gpu;
+mod inspect;
 mod threads;
 mod view;
 mod window;
@@ -23,6 +24,7 @@ use web_time::Instant;
 use clap::{Parser, ValueEnum};
 use fcc::walk::{COLLISION_LEVEL, Ground, WalkInput, Walker};
 
+use engine::voxels::{Marcher, Probe};
 use engine::{Colours, Engine, Frame, Kind, Look, Picture};
 use eye::Eye;
 use gpu::Easel;
@@ -238,6 +240,8 @@ struct View {
     speed: f64,
     /** Walking on the ground (fcc's walk.rs): the body the camera is the eye of; None flying. */
     walker: Option<Walker>,
+    /** Whether the window tells of the voxel under the pointer (inspect.rs), as the voxels engine finds it. */
+    inspecting: bool,
 }
 
 impl View {
@@ -260,6 +264,7 @@ impl View {
             tolerance: shared.tolerance(),
             speed: args.speed,
             walker: None,
+            inspecting: false,
         };
         view.apply(args);
         view
@@ -380,6 +385,9 @@ impl View {
                 }
             }
         });
+        if self.kind == Kind::Voxels {
+            ui.checkbox(&mut self.inspecting, "The Voxel under the Pointer (I)");
+        }
         let mut walking = self.walker.is_some();
         if ui.checkbox(&mut walking, "Walk on Ground (F)").changed() {
             self.walker = walking.then(|| Walker::at(self.look.camera));
@@ -515,6 +523,8 @@ struct App {
     /** What the last frame drew, till drawn, and where the window shows it. */
     picture: Option<Box<dyn Picture>>,
     rect: egui::Rect,
+    /** What the voxels engine last found the pointer's ray meets, and that pointer. */
+    probed: Option<([f64; 2], Probe)>,
     /** The frames a stroll or a replay steered, the last till drawn. */
     samples: Vec<Sample>,
     sample: Option<Sample>,
@@ -537,6 +547,7 @@ impl window::Content for App {
 
     fn drawn(&mut self, times: Times, easel: &mut Easel) {
         App::drawn(self, times);
+        self.probed = easel.held::<Marcher>().and_then(|m| m.probed);
         if self.ended() {
             self.end(easel);
         }
@@ -553,7 +564,7 @@ impl window::Content for App {
                 "frame {:.1} ms: ui {:.1} (the engine's frame {:.1}), upload {:.1}, waiting for the GPU {:.1}, the rest {:.1}",
                 t.since, t.ui, self.framing, t.upload, t.waiting, t.rest
             ));
-            ui.label("WASD, Space/Shift, arrows or drag\nWalking: Space jumps, Shift sneaks");
+            ui.label("WASD, Space/Shift, arrows or drag\nWalking: Space jumps, Shift sneaks\nI: the voxel under the pointer");
         });
         egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
             let (rect, response) = ui.allocate_exact_size(ui.available_size(), egui::Sense::drag());
@@ -569,12 +580,29 @@ impl window::Content for App {
                 let drag = [drag.x, drag.y].map(f64::from);
                 (i.stable_dt.min(0.1) as f64, Keys { held, drag, toggle: i.key_pressed(egui::Key::F) })
             });
+            if ui.input(|i| i.key_pressed(egui::Key::I)) {
+                self.view.inspecting = !self.view.inspecting;
+            }
+            // Where the pointer is on the picture, as a share of its sides, while what its ray meets is told of.
+            let telling = self.view.inspecting && self.view.kind == Kind::Voxels && !response.dragged();
+            let pointer = response.hover_pos().filter(|_| telling).map(|p| {
+                let at = (p - rect.min) / rect.size();
+                [at.x, at.y].map(f64::from)
+            });
+            self.view.look.pointer = pointer;
             let more = self.frame(keys, dt, Some([rect.width(), rect.height()].map(f64::from)));
             self.rect = rect;
+            // Read back a frame or two late: frames come till it is of where the pointer is.
+            let probed = self.probed.filter(|_| pointer.is_some());
+            let waiting = pointer.is_some() && probed.map(|p| p.0) != pointer;
+            if let Some((_, probe)) = probed {
+                let lines = inspect::lines(&probe, &self.view.world, self.view.look.light.is_some());
+                egui::Tooltip::for_widget(&response).at_pointer().gap(12.0).show(|ui| inspect::show(ui, &lines));
+            }
             // While moving, the view changes; until all is made, tiles and what engines make of them keep arriving,
             // often enough for a frame now and then. A walking body moves on while it falls or its eye catches up with a step.
             let walking = self.view.walker.is_some_and(|w| !w.settled());
-            if keys.held.iter().any(|m| *m != 0.0) || walking || self.pilot.is_some() {
+            if keys.held.iter().any(|m| *m != 0.0) || walking || waiting || self.pilot.is_some() {
                 ui.ctx().request_repaint();
             } else if more {
                 ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
@@ -617,6 +645,7 @@ impl App {
             framing: 0.0,
             picture: None,
             rect: egui::Rect::NOTHING,
+            probed: None,
             samples: Vec::new(),
             sample: None,
             by_work: args.by_work,

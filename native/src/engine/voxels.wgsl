@@ -18,7 +18,8 @@
 // The picture's size in pixels, and its sides over the focal length; the
 // fog's distance, and what of the sky it hides; whether voxels are lit; the
 // multiple of light the eye shows (eye.rs); the sky's light (linear); right,
-// up and forward in the world; the light the eye shows white.
+// up and forward in the world; the light the eye shows white; the pixel
+// whose ray to probe (`probe`), negative if none.
 struct Globals {
   resolution: vec2f,
   extent: vec2f,
@@ -30,6 +31,7 @@ struct Globals {
   horizon: vec4f,
   view: mat3x3f,
   white: f32,
+  pointer: vec2f,
 }
 
 // A grid level's window of WINDOW³ bricks: the site it starts at, in the
@@ -81,8 +83,35 @@ fn hollow(l: Level, k: vec3i, j: u32) -> bool {
 @group(0) @binding(7) var<storage, read> next: array<i32>;
 // A bit per entry of the levels' tables (as `bricks`): whether a ray took the next level at its brick, unknown, or read it for what it shows.
 @group(0) @binding(11) var<storage, read_write> asked: array<atomic<u32>>;
-// Lit, the samples by the stops of the luminance they meet (eye.rs's BINS).
-@group(0) @binding(12) var<storage, read_write> metered: array<atomic<u32>, BINS>;
+// What the passes tell back besides (voxels.rs's): lit, the samples by the
+// stops of the luminance they meet (eye.rs's BINS); and what the pointer's
+// ray meets (`probe`).
+struct Told {
+  metered: array<atomic<u32>, BINS>,
+  probe: Probe,
+}
+@group(0) @binding(12) var<storage, read_write> told: Told;
+// What the pointer's ray meets: the voxel that stops it
+// (level NONE if none), how far, the light it is drawn under and its glow;
+// the see-through voxels it crosses before: how many, what they let through,
+// its path through them all (world units), and the first MEDIA of them.
+struct Probe {
+  site: vec3i,
+  level: u32,
+  on: vec3f,
+  distance: f32,
+  glow: vec3f,
+  crossed: u32,
+  through: vec3f,
+  path: f32,
+  media: array<Crossed, MEDIA>,
+}
+struct Crossed {
+  site: vec3i,
+  level: u32,
+  through: vec3f,
+  path: f32,
+}
 
 const NONE = 0xffffffffu;
 // A ray's steps at a level at most: more than any needs. One that runs out
@@ -416,6 +445,9 @@ fn march(d: vec3f) -> Hit {
       if any(medium != vec3f(0.0)) {
         // Its path through the voxel: from where it entered (or the eye) to where it leaves.
         let stops = 1.0 - lets_through(medium, leave - at);
+        if recording {
+          record(level, s, 1.0 - stops, (leave - at) * scale);
+        }
         let fog = 1.0 - exp(-(at + leave) * 0.5 * scale / globals.fog);
         gathered += through * stops * mix(tint, horizon(), fog);
         through *= 1.0 - stops;
@@ -502,7 +534,7 @@ fn shown(c: vec3f) -> vec3f {
 fn meter(c: vec3f) {
   if globals.lit != 0u {
     let stops = (log2(max(dot(c, LUMINANCE), 1e-30)) - LOWEST) * f32(BINS) / SPAN;
-    atomicAdd(&metered[u32(clamp(stops, 0.0, f32(BINS - 1u)))], 1u);
+    atomicAdd(&told.metered[u32(clamp(stops, 0.0, f32(BINS - 1u)))], 1u);
   }
 }
 
@@ -655,6 +687,9 @@ fn agreeing(hit: vec4u, k: i32, w: f32, seen: vec4u, only: i32) -> f32 {
 fn resolve_fragment(in: Screen) -> @location(0) vec4f {
   let position = in.position.xy;
   let d = ray_at(position);
+  if all(floor(position) == globals.pointer) {
+    probe(d);
+  }
   let ray = ray_of(d);
   let last = vec2i(textureDimensions(sample_hits)) - 1;
   let at = position / f32(FACTOR) - 0.5;
@@ -712,6 +747,35 @@ fn resolve_fragment(in: Screen) -> @location(0) vec4f {
   let gave = w.x * unpack4x8unorm(m0.x) + w.y * unpack4x8unorm(m1.x) + w.z * unpack4x8unorm(m2.x) + w.w * unpack4x8unorm(m3.x);
   let let_through = w.x * unpack4x8unorm(m0.y) + w.y * unpack4x8unorm(m1.y) + w.z * unpack4x8unorm(m2.y) + w.w * unpack4x8unorm(m3.y);
   return vec4f((gave.rgb + let_through.rgb * behind) / dot(w, vec4f(1.0)), 1.0);
+}
+
+// Whether a march writes down what it meets, as `probe`'s does.
+var<private> recording = false;
+
+// Writes down a see-through voxel crossed: of `level` at site `s`, letting `through` through along `path`.
+fn record(level: u32, s: vec3i, through: vec3f, path: f32) {
+  if told.probe.crossed < MEDIA {
+    told.probe.media[told.probe.crossed] = Crossed(s, level, through, path);
+  }
+  told.probe.crossed += 1u;
+  told.probe.path += path;
+}
+
+// Writes down what the ray along `d` meets (Told's), marched as the samples' rays are.
+fn probe(d: vec3f) {
+  told.probe = Probe();
+  recording = true;
+  let hit = march(d);
+  recording = false;
+  told.probe.site = hit.site;
+  told.probe.level = hit.level;
+  told.probe.distance = hit.t;
+  told.probe.through = through;
+  if hit.level < LOST {
+    let light = light_on(hit);
+    told.probe.on = light.on;
+    told.probe.glow = light.glow;
+  }
 }
 
 // The picture, shown where egui's pass puts it.

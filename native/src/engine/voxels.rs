@@ -34,7 +34,9 @@
 //! by the way its surface faces; lit, the light its tile found for it
 //! (world.rs, light's Light), and its own glow, uploaded with its brick
 //! to a pool of its own; as the eye sees it (eye.rs), adapted to what the
-//! samples' rays meet, metered and read back with what they asked for.
+//! samples' rays meet, metered and read back with what they asked for,
+//! and with what the ray through the pointer's pixel meets (Probe,
+//! inspect.rs).
 //!
 //! Lit, only what rays meet is lit: a brick asked for is unknown till it
 //! has its light. The world lights the bricks asked for, and the windows
@@ -478,7 +480,9 @@ struct Globals {
     view: [[f32; 4]; 3],
     /** The light the eye shows white: unlit, 1, the light as it is. */
     white: f32,
-    _pad: [u32; 3],
+    _pad: u32,
+    /** The pixel whose ray to probe (Probe), negative if none. */
+    pointer: [f32; 2],
 }
 
 impl Globals {
@@ -504,7 +508,11 @@ impl Globals {
             horizon: rgba(SKY_HORIZON),
             view: view_basis(look.yaw, look.pitch).map(column),
             white,
-            _pad: [0; 3],
+            _pad: 0,
+            // Within the picture, so that a frame with a pointer always probes.
+            pointer: look
+                .pointer
+                .map_or([-1.0; 2], |p| std::array::from_fn(|d| (p[d] * f64::from(pixels[d])).floor().min(f64::from(pixels[d] - 1)) as f32)),
         }
     }
 }
@@ -1381,11 +1389,59 @@ struct Targets {
 /** Words of the bits rays ask for bricks by, one per entry of the windows' tables (voxels.wgsl's `asked`). */
 const ASKED_WORDS: usize = GRID_LEVELS * TABLE / 32;
 
-/** Where reading back what rays asked for is: not, copied from a frame (the windows' changes and balls then: Read's), or mapping what was copied. */
+/** See-through voxels the pointer's ray crosses that it writes down, at most. */
+const MEDIA: usize = 8;
+
+/** voxels.wgsl's Told. */
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct Told {
+    metered: [u32; BINS],
+    probe: Probe,
+}
+
+/** voxels.wgsl's Probe. */
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct Probe {
+    pub site: [i32; 3],
+    pub level: u32,
+    pub on: [f32; 3],
+    pub distance: f32,
+    pub glow: [f32; 3],
+    pub crossed: u32,
+    pub through: [f32; 3],
+    pub path: f32,
+    media: [Crossed; MEDIA],
+}
+
+/** voxels.wgsl's Crossed. */
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct Crossed {
+    pub site: [i32; 3],
+    pub level: u32,
+    pub through: [f32; 3],
+    pub path: f32,
+}
+
+impl Probe {
+    /** Whether a voxel stopped the ray (NONE and LOST are no level). */
+    pub fn stopped(&self) -> bool {
+        (self.level as usize) < GRID_LEVELS
+    }
+
+    /** The see-through voxels it wrote down. */
+    pub fn media(&self) -> &[Crossed] {
+        &self.media[..(self.crossed as usize).min(MEDIA)]
+    }
+}
+
+/** Where reading back what rays asked for is: not, copied from a frame (the windows' changes and balls then: Read's; its pointer), or mapping what was copied. */
 enum Reading {
     Idle,
-    Copied(u64, [Option<Ball>; GRID_LEVELS]),
-    Mapping(Arc<AtomicBool>, u64, [Option<Ball>; GRID_LEVELS]),
+    Copied(u64, [Option<Ball>; GRID_LEVELS], Option<[f64; 2]>),
+    Mapping(Arc<AtomicBool>, u64, [Option<Ball>; GRID_LEVELS], Option<[f64; 2]>),
 }
 
 /** The voxels on a device, drawn into a picture that the window or a shot shows. */
@@ -1394,11 +1450,13 @@ pub struct Marcher {
      * Globals, levels, tables, the pool, the eye, cells'
      * counts, the pool's bricks' light (none unlit), its slots' next
      * (Pool's), and, lit, the bricks rays asked for (ASKED_WORDS) and
-     * the meter's bins (BINS).
+     * the meter's bins and what the pointer's ray met (Told).
      */
     buffers: [wgpu::Buffer; 10],
-    /** What the asked and the meter were copied to, to read, one after the other. */
+    /** What the last two were copied to, to read, one after the other. */
     readback: wgpu::Buffer,
+    /** What the pointer's ray met, as last read back, and the pointer, as that frame's Look had it. */
+    pub probed: Option<([f64; 2], Probe)>,
     /** What the eye adapted to, as the meter last read back says. */
     adapted: Adapted,
     reading: Reading,
@@ -1424,7 +1482,7 @@ pub struct Marcher {
 /** voxels.wgsl, with the constants it shares with this file. */
 fn shader() -> String {
     format!(
-        "const BINS = {BINS}u;\nconst LOWEST = {:?};\nconst SPAN = {:?};\nconst WINDOW = {WINDOW};\nconst CELLS = {CELLS}u;\nconst BRICK = {BRICK};\nconst BRICK_SHIFT = {BRICK_SHIFT}u;\nconst BRICK_SITES = {BRICK_SITES}u;\nconst LIGHT_WORDS = {LIGHT_WORDS}u;\nconst FACTOR = {FACTOR}u;\nconst EMPTY = {EMPTY};\nconst STOPS = {STOPS};\nconst UNKNOWN = {UNKNOWN};\nconst FACES = array<vec3f, {}>({});\n{}",
+        "const BINS = {BINS}u;\nconst LOWEST = {:?};\nconst SPAN = {:?};\nconst WINDOW = {WINDOW};\nconst CELLS = {CELLS}u;\nconst BRICK = {BRICK};\nconst BRICK_SHIFT = {BRICK_SHIFT}u;\nconst BRICK_SITES = {BRICK_SITES}u;\nconst LIGHT_WORDS = {LIGHT_WORDS}u;\nconst FACTOR = {FACTOR}u;\nconst EMPTY = {EMPTY};\nconst STOPS = {STOPS};\nconst UNKNOWN = {UNKNOWN};\nconst MEDIA = {MEDIA}u;\nconst FACES = array<vec3f, {}>({});\n{}",
         eye::LOWEST,
         eye::SPAN,
         fcc::FACE_KINDS,
@@ -1463,9 +1521,9 @@ impl Marcher {
             buffer("lights", (pool as usize * light_words * 4).max(4), storage),
             buffer("next", pool as usize * 4, storage),
             buffer("asked", ASKED_WORDS * 4, storage | wgpu::BufferUsages::COPY_SRC),
-            buffer("metered", BINS * 4, storage | wgpu::BufferUsages::COPY_SRC),
+            buffer("told", size_of::<Told>(), storage | wgpu::BufferUsages::COPY_SRC),
         ];
-        let readback = buffer("asked read", (ASKED_WORDS + BINS) * 4, wgpu::BufferUsages::MAP_READ);
+        let readback = buffer("read", ASKED_WORDS * 4 + size_of::<Told>(), wgpu::BufferUsages::MAP_READ);
         let entry = |binding: u32, ty| wgpu::BindGroupLayoutEntry { binding, visibility: wgpu::ShaderStages::FRAGMENT, ty, count: None };
         let buffer_type = |ty| wgpu::BindingType::Buffer { ty, has_dynamic_offset: false, min_binding_size: None };
         let read = buffer_type(wgpu::BufferBindingType::Storage { read_only: true });
@@ -1490,9 +1548,9 @@ impl Marcher {
         ];
         let samples = [&all[..8], &all[10..]].concat();
         let shown = [entry(10, texture(wgpu::TextureSampleType::Float { filterable: false }))];
-        // The samples' pass draws into the textures the resolving one reads, which draws the picture shown; the
-        // samples' rays ask for bricks, and meter the light they meet.
-        let layouts = [&samples[..], &all[..10], &shown[..]]
+        // The samples' pass draws into the textures the resolving one reads, which draws the picture shown; rays
+        // ask for bricks, the samples' meter the light they meet, and the pointer's writes down what it meets.
+        let layouts = [&samples[..], &all[..], &shown[..]]
             .map(|entries| device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: None, entries }));
         let pipeline = |entry: &str, layout: &wgpu::BindGroupLayout, formats: &[wgpu::TextureFormat]| {
             let targets: Vec<_> = formats.iter().map(|&f| Some(f.into())).collect();
@@ -1535,6 +1593,7 @@ impl Marcher {
         Marcher {
             buffers,
             readback,
+            probed: None,
             adapted: Adapted::default(),
             reading,
             layouts,
@@ -1630,11 +1689,13 @@ impl Marcher {
             pass.draw(0..4, 0..1);
         }
         if matches!(self.reading, Reading::Idle) {
-            encoder.copy_buffer_to_buffer(&self.buffers[8], 0, &self.readback, 0, self.buffers[8].size());
-            encoder.copy_buffer_to_buffer(&self.buffers[9], 0, &self.readback, self.buffers[8].size(), self.buffers[9].size());
-            encoder.clear_buffer(&self.buffers[8], 0, None);
-            encoder.clear_buffer(&self.buffers[9], 0, None);
-            self.reading = Reading::Copied(self.changes, self.shapes.map(|s| s.ball));
+            let mut offset = 0;
+            for buffer in &self.buffers[8..] {
+                encoder.copy_buffer_to_buffer(buffer, 0, &self.readback, offset, buffer.size());
+                encoder.clear_buffer(buffer, 0, None);
+                offset += buffer.size();
+            }
+            self.reading = Reading::Copied(self.changes, self.shapes.map(|s| s.ball), look.pointer);
         }
         let busy = !self.settled || self.read.1 || self.adapted.adapting();
         scene.busy.store(busy, Ordering::Relaxed);
@@ -1649,18 +1710,20 @@ impl Marcher {
         // What it waits for, done: the map's callback.
         _ = device.poll(wgpu::PollType::Poll);
         match std::mem::replace(&mut self.reading, Reading::Idle) {
-            Reading::Copied(changes, seen) => {
+            Reading::Copied(changes, seen, pointer) => {
                 let done = Arc::new(AtomicBool::new(false));
                 let mapped = done.clone();
                 self.readback.slice(..).map_async(wgpu::MapMode::Read, move |r| mapped.store(r.is_ok(), Ordering::Release));
-                self.reading = Reading::Mapping(done, changes, seen);
+                self.reading = Reading::Mapping(done, changes, seen, pointer);
             }
-            Reading::Mapping(done, changes, seen) if done.load(Ordering::Acquire) => {
+            Reading::Mapping(done, changes, seen, pointer) if done.load(Ordering::Acquire) => {
                 {
                     let bytes = self.readback.slice(..).get_mapped_range().expect("mapped");
-                    let (words, bins) = bytemuck::cast_slice::<_, u32>(&bytes).split_at(ASKED_WORDS);
+                    let (words, told) = bytemuck::cast_slice::<_, u32>(&bytes).split_at(ASKED_WORDS);
+                    let told: Told = bytemuck::pod_read_unaligned(bytemuck::cast_slice(told));
                     self.heard = Some((changes, seen, words.iter().copied().enumerate().filter(|(_, w)| *w != 0).collect()));
-                    self.adapted.metered(bins);
+                    self.adapted.metered(&told.metered);
+                    self.probed = pointer.map(|pointer| (pointer, told.probe));
                 }
                 self.readback.unmap();
             }
@@ -1686,7 +1749,7 @@ impl Marcher {
             [SAMPLE_HITS, SAMPLE_COLOURS].map(|f| target("samples", pixels.map(|v| v.div_ceil(FACTOR)), f, wgpu::TextureUsages::empty()));
         let views = samples.each_ref().map(|t| t.create_view(&Default::default()));
         let picture_view = picture.create_view(&Default::default());
-        // Bound as numbered, the asked at 11, the meter at 12.
+        // Bound as numbered, the asked at 11, the told at 12.
         let mut entries: Vec<_> = self.buffers[..8]
             .iter()
             .enumerate()
@@ -1695,14 +1758,15 @@ impl Marcher {
         for (k, view) in views.iter().enumerate() {
             entries.push(wgpu::BindGroupEntry { binding: 8 + k as u32, resource: wgpu::BindingResource::TextureView(view) });
         }
-        entries.push(wgpu::BindGroupEntry { binding: 11, resource: self.buffers[8].as_entire_binding() });
-        entries.push(wgpu::BindGroupEntry { binding: 12, resource: self.buffers[9].as_entire_binding() });
+        for (k, buffer) in self.buffers[8..].iter().enumerate() {
+            entries.push(wgpu::BindGroupEntry { binding: 11 + k as u32, resource: buffer.as_entire_binding() });
+        }
         let shown = [wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::TextureView(&picture_view) }];
         let group = |layout, entries: &[wgpu::BindGroupEntry]| {
             device.create_bind_group(&wgpu::BindGroupDescriptor { label: None, layout, entries })
         };
         let sampling = [&entries[..8], &entries[10..]].concat();
-        let groups = [group(&self.layouts[0], &sampling), group(&self.layouts[1], &entries[..10]), group(&self.layouts[2], &shown)];
+        let groups = [group(&self.layouts[0], &sampling), group(&self.layouts[1], &entries), group(&self.layouts[2], &shown)];
         Targets { pixels, samples, picture, groups }
     }
 }

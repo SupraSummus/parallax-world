@@ -406,3 +406,39 @@ fn voxels_look_the_same_wherever_the_bricks_fall() {
         assert_eq!(differ, 0, "pixels that differ moved by {SHIFT:?}, from {eye:?}");
     }
 }
+
+/**
+ * The pointer's ray (inspect.rs) meets what the picture shows along it: of
+ * a white wall behind a slab of medium, seen along a face's axis, the
+ * wall, as far as it is, and before it the slab, its path through it and
+ * what it lets through as its extinction says.
+ */
+#[test]
+#[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
+fn the_pointers_ray_meets_the_wall_behind_the_medium() {
+    const PIXELS: [u32; 2] = [320, 200];
+    let mut world = World::new(wall::<15>(1), None, 4);
+    let look = Look { fog: f64::INFINITY, pointer: Some([0.5; 2]), ..Look::new([0.0; 3], [45.0, 0.0], FOV, 1000.0, PIXELS.map(f64::from)) };
+    let (mut engine, mut easel) = (Kind::Voxels.make(&world), Easel::offscreen(None));
+    let frame = drawn_complete(&mut *engine, &mut world, &look, &mut easel);
+    // Read back a frame or two late.
+    let probed = (0..100).find_map(|_| {
+        let drawn = easel.draw(&*frame.picture, PIXELS);
+        easel.wait_for(drawn);
+        easel.held::<Marcher>().and_then(|m| m.probed)
+    });
+    let probe = probed.expect("read back").1;
+    let lines = inspect::lines(&probe, &world, false);
+    assert!(lines.contains(&("look", "#ffffff, opaque".into(), vec![[255; 4]])), "the wall: {lines:?}");
+    // Entered where it begins, x + z = FAR.
+    let along = |k: i64| k as f64 / std::f64::consts::SQRT_2;
+    assert!((f64::from(probe.distance) - along(FAR)).abs() < 1.0, "the wall {} away", probe.distance);
+    assert!(probe.media().iter().all(|m| (NEAR..FAR).contains(&i64::from(m.site[0] + m.site[2]))), "{:?}", probe.media());
+    assert!((f64::from(probe.path) - along(FAR - NEAR)).abs() < 1.0, "{} across the slab", probe.path);
+    let expected = (-0.015 * along(FAR - NEAR)).exp();
+    assert!(
+        probe.through.iter().all(|&t| (f64::from(t) - expected).abs() < 0.01),
+        "{:?} let through, {expected:.3} expected",
+        probe.through
+    );
+}

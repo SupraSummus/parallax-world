@@ -24,6 +24,7 @@ one world's: `cargo test --release -p worlds --test contract valley`.
 | `bake/src/lod.rs` | Cells: every site drawn first at the finest level claiming it; no ray meets a finer level after a coarser |
 | `native/src/engine/chunks.rs` | Culling on the GPU leaves the picture unchanged |
 | `native/src/view.rs` | Camera basis, faces, projection, culling |
+| `native/src/tests.rs` | The pointer's ray meets what the picture shows along it: the voxel that stops it, how far, the media before it and what they let through |
 | `native/src/engine/chunks.rs` | Moving keeps most chunks |
 | `native/src/world.rs` | A world on one thread is as one on some; `Level::meets`: every cell holding a voxel, or a see-through one, and of 8·FCC, 32·FCC and smaller no other |
 | `native/src/engine/chunks/renderer.rs` | Cells said to hold nothing that shows, none of their voxels meeting them or all buried, bake empty |
