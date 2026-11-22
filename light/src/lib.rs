@@ -466,9 +466,9 @@ impl Light {
         self.open(i, site) <= 0.0
     }
 
-    /** Whether hosts are shown a whole voxel at `site` of level `i` (VoxelGrid::show). */
+    /** Whether hosts are shown a whole voxel at `site` of level `i` (VoxelGrid::shows_whole). */
     fn drawn(&mut self, i: usize, site: [i64; 3]) -> bool {
-        self.hold(i, site).is_some_and(|([x, y, z], grid)| grid.get(x, y, z) != 0)
+        self.hold(i, site).is_some_and(|([x, y, z], grid)| grid.shows_whole(x, y, z))
     }
 
     /**

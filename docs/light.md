@@ -252,8 +252,8 @@ but lighting and keeping that light would cost three times as much.
 
 How a site shows to hosts and to light, and what glows, is a prototype too:
 
-- a site's pieces show hosts a voxel where a hash is under their alpha
-  (`VoxelGrid::show`), as leaves should,
+- a site's pieces show hosts a voxel where a hash is under the site's alpha
+  (`fcc::shows_whole`), as leaves should,
   but measured houses' walls come out ragged;
   light reads their share, of the rays through the voxel
   (`VoxelGrid::light`; a line through sites' middles meets it

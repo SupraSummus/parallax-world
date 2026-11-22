@@ -25,7 +25,7 @@ fn the_forest_keeps_off_the_first_towns_main_street() {
     // Along the main street's middle, 20 m into the town: nothing from a metre above it to the sky.
     let street =
         Box3 { min: [town.x - 2, town.level + 8, town.z - unit(60.0)], max: [town.x + 2, town.level + unit(30.0), town.z - unit(40.0)] };
-    assert!(generate(&world.generator, &street, 0).shown.iter().all(|shown| !shown), "something stands on the main street");
+    assert!(generate(&world.generator, &street, 0).pieces.alpha.iter().all(|&a| a < ALPHA), "something stands on the main street");
 }
 
 /**

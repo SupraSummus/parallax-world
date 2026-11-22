@@ -65,7 +65,7 @@ pub fn is_site(x: i64, y: i64, z: i64) -> bool {
  * than itself, which stop some of its rays whole, and a medium
  * (KindDef::medium), which stops some of each ray the pieces let
  * through, of each channel its own share. Hosts and light see every
- * site as it is: pieces that stop every ray as a whole voxel (`show`),
+ * site as it is: pieces that stop every ray as a whole voxel (`whole`),
  * else what it stops, held in part (`to_grid`, `light`). Apart from how
  * it looks, how much of it stops a walking body.
  */
@@ -75,10 +75,8 @@ pub struct VoxelGrid {
     pub n: [i64; 3],
     bx: i64,
     by: i64,
-    /** Per brick, z-major, then y, then x: where its sites start in `shown`, in BRICK_SITES; −1 if empty. Once buried (`bury`), bricks may share sites. */
+    /** Per brick, z-major, then y, then x: where its sites' indices start (`index`), in BRICK_SITES; −1 if empty. Once buried (`bury`), bricks may share sites. */
     pub bricks: Vec<i32>,
-    /** Whether each site's pieces stop every ray, shown to hosts as a whole voxel (`show`). */
-    pub shown: Vec<bool>,
     /** What is in each site in pieces: how many of its rays they stop, whole. */
     pub pieces: Part<u8>,
     /** What is in each site as a medium: how much it stops of each ray the pieces let through, channel by channel. */
@@ -94,7 +92,7 @@ pub struct VoxelGrid {
 }
 
 /** All a site holds (`VoxelGrid::held`). */
-pub type Held = (bool, (u8, [u16; 3]), ([u8; 3], [u16; 3]), u8, [u32; 3], Option<Views>, Option<Glows>);
+pub type Held = ((u8, [u16; 3]), ([u8; 3], [u16; 3]), u8, [u32; 3], Option<Views>, Option<Glows>);
 
 /** What a site's pieces glow along each direction, as Views are. */
 pub type Glows = [[u32; 3]; FACE_KINDS];
@@ -111,14 +109,14 @@ pub struct Views {
 }
 
 /**
- * What the sites hold one way, as pieces or as a medium, by index in
- * `shown`: only of the bricks that hold any, as few hold a medium, and
+ * What the sites hold one way, as pieces or as a medium, by the grid's
+ * index: only of the bricks that hold any, as few hold a medium, and
  * some no pieces. Pieces stop every channel alike (`A` a share), a
  * medium each its own (a share a channel).
  */
 #[derive(Clone, Default)]
 pub struct Part<A> {
-    /** By where a brick's sites start in `shown` (in bricks), where they start here; −1 if it holds none. */
+    /** By where a brick's sites start (in bricks), where they start here; −1 if it holds none. */
     at: Vec<i32>,
     /** Of ALPHA, how much they stop. */
     pub alpha: Vec<A>,
@@ -126,26 +124,26 @@ pub struct Part<A> {
     pub colour: Vec<[u16; 3]>,
 }
 
-/** Where site `i` of `shown` is among the sites of the bricks that `at` says hold any: by brick of `shown`, where its own start, in bricks; −1 if it holds none. */
+/** Where site `i` is among the sites of the bricks that `at` says hold any: by the grid's brick, where its own start, in bricks; −1 if it holds none. */
 #[inline]
 fn within(at: &[i32], i: usize) -> Option<usize> {
     usize::try_from(at[i / BRICK_SITES]).ok().map(|at| at * BRICK_SITES + i % BRICK_SITES)
 }
 
 impl<A: Copy + Default + PartialEq> Part<A> {
-    /** Where site `i` of `shown` is here, if its brick holds any. */
+    /** Where site `i` is here, if its brick holds any. */
     #[inline]
     fn slot(&self, i: usize) -> Option<usize> {
         within(&self.at, i)
     }
 
-    /** What site `i` of `shown` stops and shows: nothing, if its brick holds none. */
+    /** What site `i` stops and shows: nothing, if its brick holds none. */
     #[inline]
     pub fn get(&self, i: usize) -> (A, [u16; 3]) {
         self.slot(i).map_or((A::default(), [0; 3]), |at| (self.alpha[at], self.colour[at]))
     }
 
-    /** Has site `i` of `shown` stop `alpha` and show `colour`. */
+    /** Has site `i` stop `alpha` and show `colour`. */
     #[inline]
     pub fn set(&mut self, i: usize, alpha: A, colour: [u16; 3]) {
         let at = match self.slot(i) {
@@ -161,7 +159,7 @@ impl<A: Copy + Default + PartialEq> Part<A> {
         (self.alpha[at], self.colour[at]) = (alpha, colour);
     }
 
-    /** What the sites of the brick starting at `at` in `shown` (in bricks) stop, if it holds any. */
+    /** What the sites of the brick starting at `at` (in bricks) stop, if it holds any. */
     fn brick(&self, at: usize) -> Option<&[A]> {
         usize::try_from(self.at[at]).ok().map(|at| &self.alpha[at * BRICK_SITES..][..BRICK_SITES])
     }
@@ -187,7 +185,7 @@ impl<A: Copy + Default + PartialEq> Part<A> {
 }
 
 /**
- * What few sites hold, by index in `shown`: each site of a brick that
+ * What few sites hold, by the grid's index: each site of a brick that
  * holds any has a mark, so most sites, in bricks that hold none, are read
  * at a glance. Marks, not room for every site as a Part has: what a site
  * holds is many times a mark, and most sites of such a brick hold nothing.
@@ -209,14 +207,14 @@ impl<T> Default for Few<T> {
 }
 
 impl<T> Few<T> {
-    /** What site `i` of `shown` holds, if anything. */
+    /** What site `i` holds, if anything. */
     #[inline]
     pub fn get(&self, i: usize) -> Option<&T> {
         let place = (self.marks[within(&self.at, i)?] as usize).checked_sub(1)?;
         Some(&self.held[place])
     }
 
-    /** Has site `i` of `shown` hold `value`, or nothing. */
+    /** Has site `i` hold `value`, or nothing. */
     pub fn set(&mut self, i: usize, value: Option<T>) {
         let mark = match (within(&self.at, i), &value) {
             (Some(mark), _) => mark,
@@ -242,7 +240,7 @@ impl<T> Few<T> {
         (0..self.at.len()).flat_map(|at| self.brick(at))
     }
 
-    /** `iter`, of the brick whose sites start at `at` in `shown` (in bricks). */
+    /** `iter`, of the brick whose sites start at `at` (in bricks). */
     fn brick(&self, at: usize) -> impl Iterator<Item = (usize, &T)> {
         let marks = usize::try_from(self.at[at]).ok().map(|marks| &self.marks[marks * BRICK_SITES..][..BRICK_SITES]);
         let held = marks.into_iter().flatten().enumerate().filter_map(|(site, &mark)| Some((site, (mark as usize).checked_sub(1)?)));
@@ -272,7 +270,7 @@ pub type Sight = (u8, [u16; 3]);
 type Seen = (u32, [u8; FACE_KINDS]);
 
 /**
- * The Views of the few sites that have them, by index in `shown`: the
+ * The Views of the few sites that have them, by the grid's index: the
  * sights a site's faces see, each once, and which of them each face
  * sees. Nine in ten of a valley's see two, and a sight is a twelfth of
  * a Views.
@@ -305,7 +303,7 @@ fn views(sights: &[Sight], (first, which): &Seen) -> Views {
 }
 
 impl Sights {
-    /** What site `i` of `shown` stops and shows along face `kind`'s direction, if it has views. */
+    /** What site `i` stops and shows along face `kind`'s direction, if it has views. */
     #[inline]
     pub fn face(&self, i: usize, kind: usize) -> Option<Sight> {
         let (first, which) = self.seen.get(i)?;
@@ -317,7 +315,7 @@ impl Sights {
         self.seen.get(i).map(|seen| views(&self.sights, seen))
     }
 
-    /** Has site `i` of `shown` hold `views`, or none. */
+    /** Has site `i` hold `views`, or none. */
     pub fn set(&mut self, i: usize, views: Option<Views>) {
         let seen = views.map(|views| seen(&mut self.sights, &views));
         self.seen.set(i, seen);
@@ -360,7 +358,6 @@ impl VoxelGrid {
             bx,
             by,
             bricks: vec![-1; (bx * by * bz) as usize],
-            shown: Vec::new(),
             pieces: Part::default(),
             medium: Part::default(),
             solid: Vec::new(),
@@ -379,7 +376,7 @@ impl VoxelGrid {
      * finer level's hollows meet and light doesn't pass.
      */
     pub fn on_rock(&mut self, axis: usize, floor: impl Fn([i64; 3]) -> i64, colour: [u16; 3]) {
-        let (at, top) = ((self.shown.len() / BRICK_SITES) as i32, self.min[axis] + self.n[axis]);
+        let (at, top) = ((self.sites() / BRICK_SITES) as i32, self.min[axis] + self.n[axis]);
         let mut any = false;
         for i in 0..self.bricks.len() {
             let first = self.brick_at(i);
@@ -391,16 +388,25 @@ impl VoxelGrid {
         }
         if any {
             for i in self.grown() {
-                (self.shown[i], self.solid[i]) = (true, ALPHA);
+                self.solid[i] = ALPHA;
                 self.pieces.set(i, ALPHA, colour);
             }
         }
     }
 
-    /** Room for one more brick's sites, each holding nothing: where they are in `shown`. */
+    /** How many sites it holds room for, in its bricks that hold any; each site's index (`index`) is below. */
+    pub fn sites(&self) -> usize {
+        self.solid.len()
+    }
+
+    /** Whether site `i`'s pieces stop every ray: hosts see it as a whole voxel. */
+    fn whole(&self, i: usize) -> bool {
+        self.pieces.get(i).0 == ALPHA
+    }
+
+    /** Room for one more brick's sites, each holding nothing: their indices. */
     fn grown(&mut self) -> std::ops::Range<usize> {
-        let (first, len) = (self.shown.len(), self.shown.len() + BRICK_SITES);
-        self.shown.resize(len, false);
+        let (first, len) = (self.sites(), self.sites() + BRICK_SITES);
         self.solid.resize(len, 0);
         self.pieces.at.push(-1);
         self.medium.at.push(-1);
@@ -427,7 +433,7 @@ impl VoxelGrid {
         Box3 { min: self.min, max: [0, 1, 2].map(|i| self.min[i] + self.n[i]) }
     }
 
-    /** Where site (x, y, z) is in `shown`: Err(brick) if that brick is empty, None outside the box or off the sites. */
+    /** Site (x, y, z)'s index: Err(brick) if that brick is empty, None outside the box or off the sites. */
     fn slot(&self, x: i64, y: i64, z: i64) -> Option<Result<usize, usize>> {
         let (i, j, k) = (x - self.min[0], y - self.min[1], z - self.min[2]);
         if i < 0 || i >= self.n[0] || j < 0 || j >= self.n[1] || k < 0 || k >= self.n[2] || !is_site(x, y, z) {
@@ -507,7 +513,6 @@ impl VoxelGrid {
     pub fn held(&self, x: i64, y: i64, z: i64) -> Held {
         match self.slot(x, y, z) {
             Some(Ok(i)) => (
-                self.shown[i],
                 self.pieces.get(i),
                 self.medium.get(i),
                 self.solid[i],
@@ -527,14 +532,33 @@ impl VoxelGrid {
         }
     }
 
-    /** What site `i`'s pieces look like where shown, whole (fcc's Look); else 0. */
-    fn look(&self, i: usize) -> Look {
-        match self.shown[i] {
-            true => {
-                let (alpha, colour) = self.pieces.get(i);
-                look_of(colour, alpha, ALPHA)
+    /**
+     * Whether hosts show site (x, y, z) as a whole voxel: its pieces whole,
+     * or held in part and whole by the site's coin (fcc's `whole_or_none`).
+     */
+    pub fn shows_whole(&self, x: i64, y: i64, z: i64) -> bool {
+        match self.slot(x, y, z) {
+            // Only pieces can, so a medium's look, dear to make, isn't made.
+            Some(Ok(i)) if self.pieces.get(i).0 > 0 => {
+                fcc::alpha_of(fcc::whole_or_none(self.handed(i), x as i32, y as i32, z as i32)) == ALPHA
             }
-            false => 0,
+            _ => false,
+        }
+    }
+
+    /** What site `i`'s pieces look like where whole (fcc's Look); else 0. */
+    fn look(&self, i: usize) -> Look {
+        match self.pieces.get(i) {
+            (ALPHA, colour) => look_of(colour, ALPHA, ALPHA),
+            _ => 0,
+        }
+    }
+
+    /** What hosts are handed of site `i` (fcc's Look): its pieces where whole, else what it stops, held in part. */
+    fn handed(&self, i: usize) -> Look {
+        match self.look(i) {
+            0 => self.partial(i),
+            whole => whole,
         }
     }
 
@@ -566,10 +590,10 @@ impl VoxelGrid {
         ((pieces, colour.map(u32::from)), (medium.map(|a| rest(a as u32) as u8), of.map(|c| rest(c as u32) as u32)))
     }
 
-    /** What site `i`'s shown pieces look like to hosts through face `kind`: as along its direction, where they stop any of it, else as a whole. */
+    /** What site `i`'s whole pieces look like to hosts through face `kind`: as along its direction, where they stop any of it, else as a whole. */
     fn view(&self, i: usize, kind: usize) -> Look {
         let (alpha, colour) = self.part(i, kind);
-        if self.shown[i] { look_of(colour, alpha, ALPHA) } else { 0 }
+        if self.whole(i) { look_of(colour, alpha, ALPHA) } else { 0 }
     }
 
     /** Site `i`'s pieces along face `kind`'s direction: what they stop of it and show (premultiplied), where they stop any of it, else as a whole. */
@@ -578,20 +602,19 @@ impl VoxelGrid {
     }
 
     /**
-     * Puts at (x, y, z) pieces that stop every ray, shown, of `colours`
+     * Puts at (x, y, z) pieces that stop every ray, of `colours`
      * through each face (linear, of COLOUR_ONE), for tests.
      */
     #[cfg(test)]
     pub(crate) fn put_whole(&mut self, x: i64, y: i64, z: i64, colours: [[u16; 3]; FACE_KINDS]) {
         let i = self.index(x, y, z).expect("in the box");
-        self.shown[i] = true;
         self.pieces.set(i, ALPHA, colours[0]);
         if colours.iter().any(|c| *c != colours[0]) {
             self.views.set(i, Some(Views { alpha: [ALPHA; FACE_KINDS], colour: colours }));
         }
     }
 
-    /** Where site (x, y, z) is in `shown`, its brick added if empty; None outside the box or off the sites. */
+    /** Site (x, y, z)'s index, its brick added if empty; None outside the box or off the sites. */
     pub fn index(&mut self, x: i64, y: i64, z: i64) -> Option<usize> {
         match self.slot(x, y, z)? {
             Ok(i) => Some(i),
@@ -599,13 +622,6 @@ impl VoxelGrid {
                 self.bricks[brick] = (self.grown().start / BRICK_SITES) as i32;
                 self.slot(x, y, z).and_then(Result::ok)
             }
-        }
-    }
-
-    /** Shows each site its pieces as a whole voxel where they stop every ray; the rest are held in part (`to_grid`). */
-    pub fn show(&mut self) {
-        for i in 0..self.shown.len() {
-            self.shown[i] = self.pieces.get(i).0 == ALPHA;
         }
     }
 
@@ -648,11 +664,11 @@ impl VoxelGrid {
 
     /**
      * Holds the sites of only the bricks that are in `bricks` and `keep`
-     * (by where their sites start in `shown`, in bricks), together in
-     * their order in `shown`; the others' bricks become empty.
+     * (by where their sites start, in bricks), together in their
+     * order; the others' bricks become empty.
      */
     fn hold(&mut self, keep: impl Fn(usize) -> bool) {
-        let mut moved = vec![None; self.shown.len() / BRICK_SITES];
+        let mut moved = vec![None; self.sites() / BRICK_SITES];
         for &at in &self.bricks {
             if let Ok(at) = usize::try_from(at) {
                 moved[at] = Some(0);
@@ -675,7 +691,6 @@ impl VoxelGrid {
             }
             *v = kept;
         }
-        hold(&mut self.shown, &held);
         hold(&mut self.solid, &held);
         self.pieces.hold(&held);
         self.medium.hold(&held);
@@ -684,7 +699,7 @@ impl VoxelGrid {
         self.glows.hold(&held);
     }
 
-    /** Of ALPHA, how much of its rays site `i` of `shown` stops: its pieces, and its medium of the rest, in the channel it stops least. */
+    /** Of ALPHA, how much of its rays site `i` stops: its pieces, and its medium of the rest, in the channel it stops least. */
     fn stops(&self, i: usize) -> u8 {
         let (pieces, medium, all) = (self.pieces.get(i).0 as u32, least(self.medium.get(i).0) as u32, ALPHA as u32);
         ((pieces * all + (all - pieces) * medium + all / 2) / all) as u8
@@ -721,14 +736,14 @@ impl VoxelGrid {
 
     /**
      * The voxels as hosts take them, bricks with none left out: each
-     * site's pieces where shown (`show`), whole, as they look through each
-     * face; elsewhere what it stops, its pieces and its medium, and of each
-     * channel where they differ (the grid's `stops`). What glows, shown or
+     * site's pieces where whole, as they look through each face;
+     * elsewhere what it stops, its pieces and its medium, and of each
+     * channel where they differ (the grid's `stops`). What glows, whole or
      * not, for the light: its bricks are kept too.
      */
     pub fn to_grid(&self) -> Grid {
-        let looks: Vec<Look> = (0..self.shown.len()).map(|i| if self.shown[i] { self.look(i) } else { self.partial(i) }).collect();
-        let keep: Vec<bool> = (0..self.shown.len() / BRICK_SITES)
+        let looks: Vec<Look> = (0..self.sites()).map(|i| self.handed(i)).collect();
+        let keep: Vec<bool> = (0..self.sites() / BRICK_SITES)
             .map(|at| {
                 let sites = at * BRICK_SITES..(at + 1) * BRICK_SITES;
                 looks[sites].iter().any(|&c| c != 0) || self.glow.brick(at).next().is_some()
@@ -759,7 +774,7 @@ impl VoxelGrid {
         };
         // As `view` gives them, without looking each face's up again.
         let view = |(i, v): (usize, Views)| -> Option<Vec<u32>> {
-            if !self.shown[i] {
+            if !self.whole(i) {
                 return None;
             }
             let look = |k: usize| if v.alpha[k] > 0 { look_of(v.colour[k], v.alpha[k], ALPHA) } else { looks[i] };
@@ -769,7 +784,7 @@ impl VoxelGrid {
         grid.views = sorted(&mut self.views.iter().filter_map(view));
         grid.glow = sorted(&mut self.glow.iter().filter_map(|(i, g)| Some([&[to(i)?][..], g].concat())));
         // Of the bricks that hold a medium only: few do.
-        let held = (0..self.shown.len() / BRICK_SITES).filter(|&at| self.medium.brick(at).is_some());
+        let held = (0..self.sites() / BRICK_SITES).filter(|&at| self.medium.brick(at).is_some());
         let stops = |i: usize| {
             let [r, g, b] = self.seen(i).0;
             (fcc::medium(looks[i]) && (r != g || g != b)).then(|| Some([to(i)?, fcc::look([r, g, b], 0)])).flatten()
@@ -870,7 +885,6 @@ mod tests {
             grid.put_whole(x, y, z, [[(1 + (x + y) % 3) as u16 * 1000; 3]; FACE_KINDS]);
         }
         let i = grid.index(20, 20, 20).unwrap();
-        grid.shown[i] = false;
         grid.pieces.set(i, 0, [0; 3]);
         let lamp = grid.index(12, 12, 12).unwrap();
         grid.glow.set(lamp, Some([1, 2, 3]));
@@ -879,7 +893,7 @@ mod tests {
         grid.bury();
         // Of the inner 4³ bricks (1 to 4 each way), those not around the hole's (2, 2, 2): any 4 away, held once.
         let buried = |p: [i64; 3]| p.iter().all(|&v| (8..40).contains(&v)) && p.iter().any(|&v| v >= 32);
-        assert_eq!(grid.shown.len(), (6 * 6 * 6 - (4 * 4 * 4 - 3 * 3 * 3) + 1) * BRICK_SITES);
+        assert_eq!(grid.sites(), (6 * 6 * 6 - (4 * 4 * 4 - 3 * 3 * 3) + 1) * BRICK_SITES);
         let handed = grid.to_grid();
         for [x, y, z] in sites() {
             if buried([x, y, z]) {
@@ -905,7 +919,6 @@ mod tests {
             grid.pieces.set(i, pieces, [white; 3]);
             grid.medium.set(i, [medium; 3], [0; 3]);
         }
-        grid.show();
         // Light sees all a site stops, each as it is: its pieces 40 of 255, its medium 60 of the rest.
         let (pieces, medium, _) = grid.light(2, 2, 0, 0);
         assert_eq!((grid.alpha(2, 2, 0), pieces.0, medium.0), (91, 40, [51; 3]));
