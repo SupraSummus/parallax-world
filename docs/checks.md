@@ -260,7 +260,8 @@ and for hosts, its `WORLDS` one more in `worlds::all` (`worlds/src/lib.rs`).
 To see a world without the renderer,
 `worlds/examples/map.rs` draws its layout from above, any level, any area,
 and `worlds/examples/look.rs` takes a picture of it at one level
-(`worldgen::picture`: rays through its voxels, from any eye or straight down),
+(`worldgen::picture`: rays through its voxels, from any eye or straight down,
+each voxel as hosts are handed it),
 with what each pixel hit and how far away, for checks to measure
 (`cargo run --release --example map` or `look` in `worlds/`, arguments in the files).
 `look` takes the places a world names for its eye, target or area,

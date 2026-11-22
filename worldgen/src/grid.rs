@@ -475,21 +475,21 @@ impl VoxelGrid {
 
     /**
      * What the voxel at (x, y, z)'s pieces look like to a ray along
-     * `direction`, whole: the mean of their looks through the faces turned
-     * most against it (fcc's `facing`); 0 if none, outside the box or not a site.
+     * `direction`, shown whole: the mean (linear) of its looks through the
+     * faces turned most against it (fcc's `facing`), as hosts are handed
+     * them (`face`) and the voxels engine shows them; 0 if none, outside
+     * the box or not a site.
      */
     pub fn along(&self, x: i64, y: i64, z: i64, direction: [f64; 3]) -> Look {
         match self.slot(x, y, z) {
             Some(Ok(i)) if self.pieces.get(i).0 > 0 => {
-                let (mut alpha, mut colour, mut faces) = (0, [0; 3], 0);
+                let (mut sum, mut faces) = ([0.0; 3], 0.0);
                 for k in fcc::facing(direction) {
-                    let (a, c) = self.part(i, k);
-                    alpha += a as u32;
-                    (0..3).for_each(|j| colour[j] += c[j] as u32);
-                    faces += 1;
+                    let look = self.view(i, k).to_le_bytes();
+                    (0..3).for_each(|c| sum[c] += to_linear(look[c] as f64 / 255.0));
+                    faces += 1.0;
                 }
-                let mean = |v: u32| (v + faces / 2) / faces;
-                look_of(colour.map(|c| mean(c) as u16), mean(alpha) as u8, ALPHA)
+                look_of(sum.map(|c| (c / faces * COLOUR_ONE as f64).round() as u16), ALPHA, ALPHA)
             }
             _ => 0,
         }
@@ -502,7 +502,7 @@ impl VoxelGrid {
     pub fn inside(&self, x: i64, y: i64, z: i64) -> Look {
         match self.slot(x, y, z) {
             Some(Ok(i)) => match self.pieces.get(i) {
-                (0, _) => self.partial(i),
+                pieces @ (0, _) => self.handed(i, pieces),
                 (alpha, colour) => look_of(colour, alpha, alpha),
             },
             _ => 0,
@@ -540,7 +540,7 @@ impl VoxelGrid {
         match self.slot(x, y, z) {
             // Only pieces can, so a medium's look, dear to make, isn't made.
             Some(Ok(i)) if self.pieces.get(i).0 > 0 => {
-                fcc::alpha_of(fcc::whole_or_none(self.handed(i), x as i32, y as i32, z as i32)) == ALPHA
+                fcc::alpha_of(fcc::whole_or_none(self.handed(i, self.pieces.get(i)), x as i32, y as i32, z as i32)) == ALPHA
             }
             _ => false,
         }
@@ -548,39 +548,33 @@ impl VoxelGrid {
 
     /** What site `i`'s pieces look like where whole (fcc's Look); else 0. */
     fn look(&self, i: usize) -> Look {
-        match self.pieces.get(i) {
-            (ALPHA, colour) => look_of(colour, ALPHA, ALPHA),
-            _ => 0,
-        }
-    }
-
-    /** What hosts are handed of site `i` (fcc's Look): its pieces where whole, else what it stops, held in part. */
-    fn handed(&self, i: usize) -> Look {
-        match self.look(i) {
-            0 => self.partial(i),
-            whole => whole,
-        }
+        if self.whole(i) { self.handed(i, self.pieces.get(i)) } else { 0 }
     }
 
     /**
-     * What site `i` looks like held in part (fcc's Look): its colour, each
-     * channel what it shows of what it stops of it, and for alpha what it
-     * stops of the channel it stops least, of pieces if it holds any, else
-     * of a medium; 0 if it stops none of one. How much a medium stops of
-     * each is apart (`to_grid`'s `stops`).
+     * What hosts are handed of site `i` (fcc's Look), its pieces seen as
+     * `part`: whole, held in part or a medium, as much as it stops, in the
+     * colour of `part` and its medium of the rest. Its pieces as a whole
+     * give its own look; a face's part, its look through that face.
      */
-    fn partial(&self, i: usize) -> Look {
-        let (stops, shows) = self.seen(i);
-        match least(stops) {
-            0 => 0,
-            alpha => fcc::partial(std::array::from_fn(|c| srgb(shows[c], stops[c])), alpha, self.pieces.get(i).0 > 0),
+    fn handed(&self, i: usize, part: Sight) -> Look {
+        match (self.pieces.get(i).0, self.stops(i)) {
+            (_, 0) => 0,
+            (ALPHA, _) => fcc::look(self.colour(i, part), ALPHA),
+            (pieces, alpha) => fcc::partial(self.colour(i, part), alpha, pieces > 0),
         }
     }
 
-    /** What site `i` stops of each channel of its rays, its pieces and its medium of the rest, and what that shows (premultiplied, of COLOUR_ONE). */
-    fn seen(&self, i: usize) -> ([u8; 3], [u16; 3]) {
-        let ((pieces, p), (medium, m)) = self.with_medium(i, self.pieces.get(i));
+    /** What site `i` stops of each channel of its rays, `pieces` of it and its medium of the rest, and what that shows (premultiplied, of COLOUR_ONE). */
+    fn seen(&self, i: usize, pieces: Sight) -> ([u8; 3], [u16; 3]) {
+        let ((pieces, p), (medium, m)) = self.with_medium(i, pieces);
         (medium.map(|m| pieces + m), std::array::from_fn(|c| (p[c] + m[c]) as u16))
+    }
+
+    /** The colour site `i` shows, `pieces` of it and its medium of the rest (sRGB, unpremultiplied). */
+    fn colour(&self, i: usize, pieces: Sight) -> [u8; 3] {
+        let (stops, shows) = self.seen(i, pieces);
+        std::array::from_fn(|c| srgb(shows[c], stops[c]))
     }
 
     /** Of site `i`, pieces that stop `pieces` of its rays and show `colour`, and its medium of the rest: each how much it stops and shows. */
@@ -590,15 +584,18 @@ impl VoxelGrid {
         ((pieces, colour.map(u32::from)), (medium.map(|a| rest(a as u32) as u8), of.map(|c| rest(c as u32) as u32)))
     }
 
-    /** What site `i`'s whole pieces look like to hosts through face `kind`: as along its direction, where they stop any of it, else as a whole. */
+    /**
+     * What hosts are handed of site `i` through face `kind`, whole or held
+     * in part: far off, a cell of a roof shows its tiles from above, as the
+     * checks' rays see it, not the mean of its walls and rooms.
+     */
     fn view(&self, i: usize, kind: usize) -> Look {
-        let (alpha, colour) = self.part(i, kind);
-        if self.whole(i) { look_of(colour, alpha, ALPHA) } else { 0 }
+        self.handed(i, self.part(i, self.views.face(i, kind)))
     }
 
-    /** Site `i`'s pieces along face `kind`'s direction: what they stop of it and show (premultiplied), where they stop any of it, else as a whole. */
-    fn part(&self, i: usize, kind: usize) -> (u8, [u16; 3]) {
-        self.views.face(i, kind).filter(|sight| sight.0 > 0).unwrap_or_else(|| self.pieces.get(i))
+    /** Site `i`'s pieces along a face whose `sight` they have (`views`): what they stop of it and show (premultiplied), where they stop any of it, else as a whole. */
+    fn part(&self, i: usize, sight: Option<Sight>) -> Sight {
+        sight.filter(|sight| sight.0 > 0).unwrap_or_else(|| self.pieces.get(i))
     }
 
     /**
@@ -735,14 +732,14 @@ impl VoxelGrid {
     }
 
     /**
-     * The voxels as hosts take them, bricks with none left out: each
-     * site's pieces where whole, as they look through each face;
-     * elsewhere what it stops, its pieces and its medium, and of each
-     * channel where they differ (the grid's `stops`). What glows, whole or
-     * not, for the light: its bricks are kept too.
+     * The voxels as hosts take them, bricks with none left out: each site
+     * as it is handed (`handed`), and through each face where that differs
+     * (`view`); of a medium, what it stops of each channel where they
+     * differ (the grid's `stops`). What glows, whole or not, for the
+     * light: its bricks are kept too.
      */
     pub fn to_grid(&self) -> Grid {
-        let looks: Vec<Look> = (0..self.sites()).map(|i| self.handed(i)).collect();
+        let looks: Vec<Look> = (0..self.sites()).map(|i| self.handed(i, self.pieces.get(i))).collect();
         let keep: Vec<bool> = (0..self.sites() / BRICK_SITES)
             .map(|at| {
                 let sites = at * BRICK_SITES..(at + 1) * BRICK_SITES;
@@ -774,11 +771,8 @@ impl VoxelGrid {
         };
         // As `view` gives them, without looking each face's up again.
         let view = |(i, v): (usize, Views)| -> Option<Vec<u32>> {
-            if !self.whole(i) {
-                return None;
-            }
-            let look = |k: usize| if v.alpha[k] > 0 { look_of(v.colour[k], v.alpha[k], ALPHA) } else { looks[i] };
-            let (to, views) = (to(i)?, std::array::from_fn::<Look, FACE_KINDS, _>(look));
+            let face = |k: usize| self.handed(i, self.part(i, Some((v.alpha[k], v.colour[k]))));
+            let (to, views) = (to(i)?, std::array::from_fn::<Look, FACE_KINDS, _>(face));
             views.iter().any(|&v| v != views[0]).then(|| [&[to][..], &views].concat())
         };
         grid.views = sorted(&mut self.views.iter().filter_map(view));
@@ -786,7 +780,7 @@ impl VoxelGrid {
         // Of the bricks that hold a medium only: few do.
         let held = (0..self.sites() / BRICK_SITES).filter(|&at| self.medium.brick(at).is_some());
         let stops = |i: usize| {
-            let [r, g, b] = self.seen(i).0;
+            let [r, g, b] = self.seen(i, self.pieces.get(i)).0;
             (fcc::medium(looks[i]) && (r != g || g != b)).then(|| Some([to(i)?, fcc::look([r, g, b], 0)])).flatten()
         };
         let mut stops: Vec<[u32; 2]> = held.flat_map(|at| at * BRICK_SITES..(at + 1) * BRICK_SITES).filter_map(stops).collect();
@@ -806,9 +800,17 @@ pub fn least(stops: [u8; 3]) -> u8 {
 
 /** A channel `c` (linear, premultiplied by `alpha`, of COLOUR_ONE) unpremultiplied, sRGB. */
 fn srgb(c: u16, alpha: u8) -> u8 {
-    let of = alpha.max(1) as f64 / ALPHA as f64 * COLOUR_ONE as f64;
-    let c = (c as f64 / of).min(1.0);
-    (255.0 * if c <= 0.003_130_8 { c * 12.92 } else { 1.055 * js::pow(c, 1.0 / 2.4) - 0.055 }).round() as u8
+    let power = |c: u16, alpha: u8| {
+        let of = alpha.max(1) as f64 / ALPHA as f64 * COLOUR_ONE as f64;
+        let c = (c as f64 / of).min(1.0);
+        (255.0 * if c <= 0.003_130_8 { c * 12.92 } else { 1.055 * js::pow(c, 1.0 / 2.4) - 0.055 }).round() as u8
+    };
+    // Most sites shown are whole, and a power costs more than all else here: theirs are kept.
+    static WHOLE: OnceLock<Vec<u8>> = OnceLock::new();
+    match alpha {
+        ALPHA => WHOLE.get_or_init(|| (0..=COLOUR_ONE).map(|c| power(c, ALPHA)).collect())[c as usize],
+        _ => power(c, alpha),
+    }
 }
 
 /** A channel of sRGB (of 1) as linear light: fcc::light's, by libm's power (js.rs), as generating is the same on every target. */
@@ -821,15 +823,7 @@ pub(crate) fn to_linear(c: f64) -> f64 {
  * COLOUR_ONE): its colour unpremultiplied, sRGB, and `shown` its alpha.
  */
 pub(crate) fn look_of(colour: [u16; 3], alpha: u8, shown: u8) -> Look {
-    // Most sites shown are whole, and a power costs more than all else here: theirs are kept.
-    static WHOLE: OnceLock<Vec<u8>> = OnceLock::new();
-    match alpha {
-        ALPHA => {
-            let whole = WHOLE.get_or_init(|| (0..=COLOUR_ONE).map(|c| srgb(c, ALPHA)).collect());
-            fcc::look(colour.map(|c| whole[c as usize]), shown)
-        }
-        _ => fcc::look(colour.map(|c| srgb(c, alpha)), shown),
-    }
+    fcc::look(colour.map(|c| srgb(c, alpha)), shown)
 }
 
 #[cfg(test)]
@@ -837,22 +831,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_site_is_handed_over_as_it_looks_through_each_face_and_moves_with_its_brick() {
-        // Pieces in the second brick, a grey through every face but one; a lamp, nothing shown, in the third.
+    fn a_site_is_handed_over_as_it_looks_through_each_face_whole_or_held_in_part_and_moves_with_its_brick() {
+        // In the second brick, pieces whole and pieces stopping a third of the rays (a thin roof in a far cell),
+        // each a grey through every face but one; a lamp, nothing shown, in the third.
         let mut grid = VoxelGrid::new(&Box3 { min: [0; 3], max: [24, 8, 8] });
         grid.index(2, 2, 2);
-        let grey = |c: u16| [c; 3];
-        let mut colour = [grey(COLOUR_ONE / 5); FACE_KINDS];
-        colour[3] = grey(COLOUR_ONE);
-        grid.put_whole(10, 2, 2, colour);
+        let colour = |of: u16| std::array::from_fn(|k| [if k == 3 { of } else { of / 5 }; 3]);
+        grid.put_whole(10, 2, 2, colour(COLOUR_ONE));
+        let (third, i) = (ALPHA / 3, grid.index(12, 2, 2).unwrap());
+        grid.pieces.set(i, third, colour(COLOUR_ONE / 3)[0]);
+        grid.views.set(i, Some(Views { alpha: [third; FACE_KINDS], colour: colour(COLOUR_ONE / 3) }));
         let lamp = grid.index(18, 2, 2).unwrap();
         grid.glow.set(lamp, Some([1, 2, 3]));
-        let whole = grid.to_grid();
+        let handed = grid.to_grid();
         // A fifth of white, linear, is 124 of 255 in sRGB.
         let (dim, white) = (fcc::look([124; 3], ALPHA), fcc::look([255; 3], ALPHA));
-        assert_eq!((whole.cells.len(), whole.get(2, 2, 2), whole.get(10, 2, 2)), (2 * BRICK_SITES, 0, dim));
-        assert_eq!([2, 3].map(|k| whole.face(10, 2, 2, k)), [dim, white]);
-        assert_eq!((whole.get(18, 2, 2), whole.glow(18, 2, 2), whole.glow(10, 2, 2)), (0, [1, 2, 3], [0; 3]));
+        let held = |c: u8| fcc::partial([c; 3], third, true);
+        assert_eq!((handed.cells.len(), handed.get(2, 2, 2), handed.get(10, 2, 2)), (2 * BRICK_SITES, 0, dim));
+        assert_eq!([2, 3].map(|k| handed.face(10, 2, 2, k)), [dim, white]);
+        assert_eq!([2, 3].map(|k| handed.face(12, 2, 2, k)), [held(124), held(255)]);
+        for x in [10, 12] {
+            assert!((0..FACE_KINDS).all(|k| handed.face(x, 2, 2, k) == grid.face(x as i64, 2, 2, k)), "{x}: as `face` gives it");
+        }
+        assert_eq!((handed.get(18, 2, 2), handed.glow(18, 2, 2), handed.glow(10, 2, 2)), (0, [1, 2, 3], [0; 3]));
     }
 
     #[test]
