@@ -372,13 +372,32 @@ pub struct Cell<'a> {
     nth: u32,
     population: &'a str,
     seed: u64,
+    /** Its roll (`chance`): that of what was asked for its anchor, it, its line or its point. */
+    roll: Fx,
+    /** Its population's `chance`. */
+    most: Fx,
 }
 
 impl Cell<'_> {
     /** Cell (i, j, k) of N·FCC, i + j + k even. */
-    fn fcc(population: &Population, seed: u64, [i, j, k]: [i64; 3]) -> Cell<'_> {
-        let n = population.cell;
-        Cell { i, j, k, centre: [i * n, j * n, k * n], n, mark: 0, nth: 0, population: population.name, seed }
+    fn fcc(population: &Population, seed: u64, [i, j, k]: [i64; 3], roll: Fx) -> Cell<'_> {
+        let (n, most) = (population.cell, population.chance);
+        Cell { i, j, k, centre: [i * n, j * n, k * n], n, mark: 0, nth: 0, population: population.name, seed, roll, most }
+    }
+
+    /**
+     * Whether it holds a thing with chance `p`, by one roll at every `p`:
+     * a cell missing its population's `chance` misses any lower, so the
+     * engine skips it unanchored.
+     */
+    pub fn chance(&self, p: Fx) -> bool {
+        assert!(
+            p <= self.most,
+            "{} asks for a chance of {p:?}, over its population's {:?} (Population::chance); see \"Rules\" in {DOCS}",
+            self.key(),
+            self.most
+        );
+        self.roll < p
     }
 
     /** Whether an anchor at `p` is in it, of N·FCC: the cell owns a thing anchored there, if asked. */
@@ -388,8 +407,12 @@ impl Cell<'_> {
 
     /** A random sequence that depends on the cell and `stream` only. */
     pub fn random(&self, stream: &str) -> Rng {
-        let point = (self.mark as u64) << 32 | self.nth as u64;
-        Rng::new(hash64(hash_text(&format!("{}:{stream}", self.population), self.seed) ^ point, self.i, self.j, self.k))
+        Rng::new(hash64(
+            hash_text(&format!("{}:{stream}", self.population), self.seed) ^ point(self.mark, self.nth),
+            self.i,
+            self.j,
+            self.k,
+        ))
     }
 
     /** Its thing's name, for messages and drawing order. */
@@ -417,6 +440,18 @@ pub struct Line<'a> {
 }
 
 impl Line<'_> {
+    /** Line (u, v) along `axis` of the cells of N·FCC of `population`. */
+    fn new(population: &str, seed: u64, axis: usize, [u, v]: [i64; 2], n: i64) -> Line<'_> {
+        Line { axis, across: [u, v], centre: [u * n, v * n], n, population, seed }
+    }
+
+    /** Its cells' indices with its axis 0: its roll's, as a cell's are its own. */
+    fn indices(&self) -> [i64; 3] {
+        let ([a, b], mut indices) = (across(self.axis), [0; 3]);
+        (indices[a], indices[b]) = (self.across[0], self.across[1]);
+        indices
+    }
+
     /** A random sequence that depends on the line and `stream` only. */
     pub fn random(&self, stream: &str) -> Rng {
         let [u, v] = self.across;
@@ -436,6 +471,11 @@ impl Line<'_> {
         (point[a], point[b], point[self.axis]) = (u as f64, v as f64, along(u, v) as f64);
         point
     }
+}
+
+/** A leaf's point as one number, hashed with its cell's indices; 0 for cells of N·FCC. */
+fn point(mark: usize, nth: u32) -> u64 {
+    (mark as u64) << 32 | nth as u64
 }
 
 /** The axes across `axis`, in order. */
@@ -464,6 +504,8 @@ pub struct Population {
     pub stands: Option<Box<Stands>>,
     /** Its things' far forms, measured. */
     pub measured: Measured,
+    /** The most chance a cell asks for (Cell::chance): cells rolling over it aren't anchored. */
+    pub chance: Fx,
 }
 
 /** Where a population's things are, each owned by the cell it is in, if asked there. */

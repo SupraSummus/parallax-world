@@ -14,7 +14,7 @@ use worldgen::column::Column;
 use worldgen::domain::{Domain, Scope, eased};
 use worldgen::frame::{Frame, Part, U, V, W, back, walls};
 use worldgen::generator::{
-    ANY_SIZE, Anchors, Child, Children, Far, Field, Fill, Kind, Layer, Node, Op, Population, SOLID, Shape, Shapes, Span, bounds_of_shapes,
+    ANY_SIZE, Child, Children, Far, Field, Fill, Kind, Layer, Node, Op, Population, SOLID, Shape, Shapes, Span, bounds_of_shapes,
 };
 use worldgen::grid::Box3;
 use worldgen::kinds;
@@ -499,25 +499,13 @@ fn layers(towns: Arc<Towns>, hold: Holding, ground: Arc<Sloped>) -> Vec<Layer> {
         })
         .about(ground.clone(), m(0.5), 2)
     };
-    let built = Population {
-        name: "towns",
-        order: 1.5,
-        cell: m(256.0),
+    let anchor = towns.clone();
+    let built = Population::new("towns", 1.5, m(256.0))
         // The largest town's blocks, wall and what overhangs them, past its cell's reach.
-        reach: [m(150.0), m(45.0), m(150.0)],
-        size: ANY_SIZE,
-        anchor: {
-            let towns = towns.clone();
-            Anchors::Lines {
-                axis: 1,
-                anchor: Box::new(move |line| towns.near(line.centre[1]).map(|t| [t.x as f64, t.level as f64, t.z as f64])),
-            }
-        },
-        make: Box::new(move |_, cell| towns.near(cell.centre[2]).map(town)),
-        far: None,
-        stands: None,
-        measured: Default::default(),
-    };
+        .reach([m(150.0), m(45.0), m(150.0)])
+        .size(ANY_SIZE)
+        .anchor_along(1, move |line| anchor.near(line.centre[1]).map(|t| [t.x as f64, t.level as f64, t.z as f64]))
+        .make(move |_, cell| towns.near(cell.centre[2]).map(town));
     vec![Layer::Field(surface), Layer::Population(built)]
 }
 

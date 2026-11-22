@@ -823,23 +823,24 @@ fn water(f: Arc<Heath>) -> Field {
 
 /** Boulders half sunk in the heath, granite or lichened, off the water and the paths; as many as the moor's share. */
 fn boulders(f: Arc<Heath>) -> Population {
+    const CHANCE: Fx = fx(0.1);
     let ground = f.clone();
     Population::new("moor boulders", 3.0, m(6.0))
         .reach(m(2.5))
+        .chance(CHANCE)
         .on(f.ground.ground.clone())
         .anchor_along(1, move |line| {
             let [i, k] = line.across;
             Some(line.pick(&mut Rng::new(hash64(ground.moorland.seed, i, 0, k)), |x, z| ground.height(x, z)))
         })
         .make(move |[x, y, z], c| {
-            let mut random = c.random("boulder");
             let (xi, zi) = (x as i64, z as i64);
-            let chance = fx(0.1) * f.share(xi, zi);
             let wet = f.moorland.water(xi, zi).is_some_and(|level| y <= level.0 as f64 + 2.0);
             let by_stream = f.moorland.stream.as_ref().is_some_and(|s| stream_distance(&s.line, xi, zi).0 < Units::m(4.0));
-            if !random.chance(chance) || wet || by_stream || f.moorland.on_path(xi, zi) || f.by_path(xi, zi, Fx::m(3.0)) {
+            if !c.chance(CHANCE * f.share(xi, zi)) || wet || by_stream || f.moorland.on_path(xi, zi) || f.by_path(xi, zi, Fx::m(3.0)) {
                 return None;
             }
+            let mut random = c.random("boulder");
             let r = m(0.4) as f64 + random.next() * m(0.8) as f64;
             let radii = [r * (1.0 + random.next() * 0.6), r * 0.7, r * (1.0 + random.next() * 0.6)];
             let kind: Kind = if random.chance(fx(1.0 / 3.0)) { K::lichen.into() } else { F::stone.into() };

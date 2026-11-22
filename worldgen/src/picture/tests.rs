@@ -1,5 +1,5 @@
 use super::*;
-use crate::generator::{ANY_SIZE, Anchors, KindDef, Layer, Node, Op, Population, SOLID, ball};
+use crate::generator::{ANY_SIZE, KindDef, Layer, Node, Op, Population, SOLID, ball};
 use fcc::light::linear_to_srgb;
 
 #[test]
@@ -75,18 +75,13 @@ fn a_ball() -> Generator {
     Generator {
         kinds: vec![KindDef { name: "red", kind_type: 1, colors: &["#c04030"], walk_through: false, glows: false, medium: false }],
         seed: 1,
-        layers: vec![Layer::Population(Population {
-            name: "ball",
-            order: 1.0,
-            cell: 1024,
-            reach: [64; 3],
-            size: ANY_SIZE,
-            anchor: Anchors::Cells(Box::new(|cell| if cell.i == 0 && cell.j == 0 && cell.k == 0 { Some([0.0; 3]) } else { None })),
-            make: Box::new(|at, _| Some(Node::of(vec![ball(at, 40.0, 0, SOLID, Op::Fill)]))),
-            far: None,
-            stands: None,
-            measured: Default::default(),
-        })],
+        layers: vec![Layer::Population(
+            Population::new("ball", 1.0, 1024)
+                .reach(64)
+                .size(ANY_SIZE)
+                .anchor(|cell| if cell.i == 0 && cell.j == 0 && cell.k == 0 { Some([0.0; 3]) } else { None })
+                .make(|at, _| Some(Node::of(vec![ball(at, 40.0, 0, SOLID, Op::Fill)]))),
+        )],
     }
 }
 

@@ -13,9 +13,9 @@ spawn            3      6083      1401      7712         0   2021407         0  
 spawn            3         0         0         0         0         0         0         0         0         0         0         0 cheese
 spawn            3         0         0         0      8795   2168834         0         0         0         0         0         0 holes
 spawn            4         0         0         0         0         0         0         0         0         0         0         0 cheese
-spawn            4         0         0         0     61929   2233100         0         0         0         0         0         0 holes
+spawn            4         0         0         0     61930   2233104         0         0         0         0         0         0 holes
 spawn            5         0         0         0         0         0         0         0         0         0         0         0 cheese
-spawn            5         0         0         0    164858   1291943         0         0         0         0         0         0 holes
+spawn            5         0         0         0    164860   1291946         0         0         0         0         0         0 holes
 spawn            6         0         0         0         0         0         0         0         0         0         0         0 cheese
 spawn            6         0         0         0    293354   1138425         0         0         0         0         0         0 holes
 spawn            7         0         0         0         0         0         0         0         0         0         0         0 cheese

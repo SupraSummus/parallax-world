@@ -12,8 +12,8 @@ use worldgen::checks::contract::{
 };
 use worldgen::checks::survey::survey;
 use worldgen::generator::{
-    ANY_SIZE, Anchors, Child, Children, Far, Field, FieldValues, Generator, KindDef, Layer, Node, Op, Population, SOLID, Shapes, Span,
-    ball, cuboid, generate, kind_of, things_in,
+    ANY_SIZE, Child, Children, Far, Field, FieldValues, Generator, KindDef, Layer, Node, Op, Population, SOLID, Shapes, Span, ball, cuboid,
+    generate, kind_of, things_in,
 };
 use worldgen::generator::{Cell, Fill, Point};
 use worldgen::grid::{ALPHA, Box3, COLOUR_ONE, is_site};
@@ -39,18 +39,13 @@ const GLOWING_FOG: u8 = 6;
 
 /** One population of one thing, near the origin: cells reach 1024 + `reach` from their centres. */
 fn single(make: impl Fn(Point, &Cell) -> Option<Node> + Send + Sync + 'static, reach: i64) -> Layer {
-    Layer::Population(Population {
-        name: "single",
-        order: 1.0,
-        cell: 1024,
-        reach: [reach; 3],
-        size: ANY_SIZE,
-        anchor: Anchors::Cells(Box::new(|cell| if cell.i == 0 && cell.j == 0 && cell.k == 0 { Some([64.0, 64.0, 64.0]) } else { None })),
-        make: Box::new(make),
-        far: None,
-        stands: None,
-        measured: Default::default(),
-    })
+    Layer::Population(
+        Population::new("single", 1.0, 1024)
+            .reach(reach)
+            .size(ANY_SIZE)
+            .anchor(|cell| if cell.i == 0 && cell.j == 0 && cell.k == 0 { Some([64.0, 64.0, 64.0]) } else { None })
+            .make(make),
+    )
 }
 
 fn spans(name: &'static str, from: i64, to: i64, kind: u8) -> Layer {
@@ -95,15 +90,11 @@ fn caves() -> Generator {
  * sites on faces are split ("Levels" in docs/generators.md).
  */
 fn village() -> Generator {
-    let houses = Population {
-        name: "houses",
-        order: 1.0,
-        cell: 64,
-        reach: [0; 3],
-        size: ANY_SIZE,
+    let houses = Population::new("houses", 1.0, 64)
+        .size(ANY_SIZE)
         // On the plain: the cells centred on y = 0, every other one of a square grid.
-        anchor: Anchors::Cells(Box::new(|cell| if cell.j == 0 { Some(cell.centre.map(|v| v as f64)) } else { None })),
-        make: Box::new(|[x, _, z], cell| {
+        .anchor(|cell| if cell.j == 0 { Some(cell.centre.map(|v| v as f64)) } else { None })
+        .make(|[x, _, z], cell| {
             let (w, d, h) = (16.0 + (cell.random("size").next() * 12.0).floor(), 16.0 + (cell.random("size").next() * 12.0).floor(), 20.0);
             let (x0, z0, x1, z1, y) = (x - w, z - d, x + w, z + d, 0.0);
             let tables = move |clip: &Box3| -> Vec<Child> {
@@ -133,11 +124,7 @@ fn village() -> Generator {
                 children: Some(Children::Reaching(Box::new(tables))),
                 far: None,
             })
-        }),
-        far: None,
-        stands: None,
-        measured: Default::default(),
-    };
+        });
     Generator { kinds: KINDS.to_vec(), seed: 3, layers: vec![spans("ground", -64, 0, GRASS), Layer::Population(houses)] }
 }
 
@@ -300,18 +287,13 @@ fn refuses_a_thing_reaching_past_its_populations_reach() {
 #[test]
 fn finds_a_far_thing_reaching_past_its_populations_reach() {
     // Only cells from 30 along x make things, too big for their reach: no box near spawn draws them.
-    let far = Layer::Population(Population {
-        name: "far",
-        order: 1.0,
-        cell: 64,
-        reach: [16; 3],
-        size: ANY_SIZE,
-        anchor: Anchors::Cells(Box::new(|cell| (cell.i >= 30 && cell.j == 0).then_some(cell.centre.map(|v| v as f64)))),
-        make: Box::new(|[x, y, z], _| Some(Node::of(vec![ball([x, y, z], 100.0, ROCK, SOLID, Op::Fill)]))),
-        far: None,
-        stands: None,
-        measured: Default::default(),
-    });
+    let far = Layer::Population(
+        Population::new("far", 1.0, 64)
+            .reach(16)
+            .size(ANY_SIZE)
+            .anchor(|cell| (cell.i >= 30 && cell.j == 0).then_some(cell.centre.map(|v| v as f64)))
+            .make(|[x, y, z], _| Some(Node::of(vec![ball([x, y, z], 100.0, ROCK, SOLID, Op::Fill)]))),
+    );
     let world = world_of(world(far), (-256, 256));
     let broken = things_hold(&world, &survey(&world, REGION, |_| true));
     assert_eq!(broken.len(), 1, "{broken:?}");

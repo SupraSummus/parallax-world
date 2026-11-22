@@ -12,7 +12,7 @@ use crate::generator::{
 use crate::grid::Box3;
 use std::sync::Arc;
 
-use crate::noise::Rng;
+use crate::noise::{Fx, Rng};
 use crate::plan::{self, Sloped};
 use crate::points::{Points, Spot};
 
@@ -229,6 +229,7 @@ impl Population {
             far: None,
             stands: None,
             measured: Default::default(),
+            chance: Fx::ONE,
         }
     }
 
@@ -268,6 +269,11 @@ impl Population {
             self.name
         );
         Population { cell: points.leaf, anchor: Anchors::Points { points, anchor: Box::new(anchor) }, ..self }
+    }
+
+    /** The most chance its cells ask for (`Cell::chance`): a sparse population anchors only cells that may hold a thing. */
+    pub fn chance(self, chance: Fx) -> Population {
+        Population { chance, ..self }
     }
 
     /** The thing at an anchor, of a cell, if it has one. */
