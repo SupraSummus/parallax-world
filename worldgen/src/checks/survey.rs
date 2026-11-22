@@ -28,9 +28,11 @@ const SIDE: i64 = m(16_000.0);
 const PARTS: usize = 20_000;
 
 /**
- * Cells from a population's centre to its cube's side, at most: past
- * it, the cube stops growing too. Each cell asked costs; small cells of
- * rare things (the valley's haystacks) found nothing new past it.
+ * Cells from a population's centre to its cube's side, at most, once it
+ * has found a thing: past it, the cube stops growing too. Each cell
+ * asked costs; small cells of rare things (the valley's haystacks) found
+ * nothing new past it. One that has found none is looked for up to SIDE,
+ * as fields are, so only one drawing nowhere is silent.
  */
 const HALF_CELLS: i64 = 512;
 
@@ -284,12 +286,12 @@ fn across(axis: usize) -> [usize; 2] {
 /**
  * The things of `population` in a cube around `centre`, from 16 cells
  * wide, twice as wide each time while they are taken apart into fewer
- * than PARTS / 4 parts, up to SIDE; their parts, into `found`. Returns
- * half the cube's side, and the things.
+ * than PARTS / 4 parts, up to SIDE (HALF_CELLS once any is found); their
+ * parts, into `found`. Returns half the cube's side, and the things.
  */
 fn survey_things(world: &World, centre: [i64; 3], population: &Population, region: i64, found: &mut Found) -> (i64, Things) {
     let (n, reach) = (population.cell, population.reach);
-    let (mut half, most) = (8, (SIDE / 2 / n).min(HALF_CELLS));
+    let mut half = 8;
     loop {
         let mut parts = Found::new(world.spawn, Some(PLACES));
         let mut seen = Things { population: population.name, reach, made: 0, past: Vec::new(), leaving: Vec::new() };
@@ -304,6 +306,7 @@ fn survey_things(world: &World, centre: [i64; 3], population: &Population, regio
                 seen.leaving.push((key, bounds));
             }
         });
+        let most = if seen.made > 0 { HALF_CELLS } else { i64::MAX }.min(SIDE / 2 / n);
         if count * 4 > PARTS || half >= most {
             for (key, (n, places)) in parts.strata {
                 found.add(key, n, places);

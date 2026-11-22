@@ -72,6 +72,10 @@ A world is **layers** of two kinds, drawn in `order`:
   for one pick however long the line.
   Cells and lines give named random sequences (`cell.random("species")`)
   that depend on them and the name only.
+  A cell holds a thing by chance (`cell.chance(p)`)
+  by one roll, its own, its line's or its point's, the same at every `p`.
+  A sparse population says the most it asks (`Population::chance`),
+  and the framework skips the cells that miss it, unanchored.
   Or a population makes a thing at each point of `Points`
   (`anchor_points`; see "Points").
 
@@ -455,6 +459,7 @@ Broken rules panic, naming the thing and pointing here:
 - **Slopes.** A `Sloped` plan's column differs from a neighbour's
   by at most its `slope`, checked as one is made and the other is kept:
   so every two ever kept together.
+- **Chances.** A cell's chance is at most its population's `chance`.
 - **Stands.** A thing's anchor lies where its population `stands`:
   on a plan (`on`), at most N (its cell) off it.
 - **Meets.** A field draws in a box what it `meets` there:

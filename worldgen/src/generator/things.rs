@@ -17,8 +17,8 @@ pub(super) fn each_thing(
     mut each: impl FnMut(&Cell, Point, Node),
 ) -> Work {
     let mut work = Work::default();
-    let n = population.cell;
-    let cell = |c: [i64; 3]| Cell::fcc(population, generator.seed, c);
+    let (n, rolled) = (population.cell, rolls(population, generator.seed));
+    let cell = |c: [i64; 3], roll: Fx| Cell::fcc(population, generator.seed, c, roll);
     let mut make = |cell: &Cell, anchor: Point| {
         if let Some(stands) = &population.stands {
             let at = anchor.map(|v| v.round() as i64);
@@ -38,7 +38,8 @@ pub(super) fn each_thing(
             for i in i0..=i1 {
                 for j in j0..=j1 {
                     for k in (k0 + ((k0 + i + j) & 1)..=k1).step_by(2) {
-                        let cell = cell([i, j, k]);
+                        let Some(roll) = rolled([i, j, k], 0) else { continue };
+                        let cell = cell([i, j, k], roll);
                         work.cells += 1;
                         if let Some(p) = anchor(&cell).filter(|p| nearest_site(at(*p), n) == [i, j, k]) {
                             work.owned += 1;
@@ -52,14 +53,15 @@ pub(super) fn each_thing(
             let (axis, [a, b]) = (*axis, across(*axis));
             for u in cells[a].0..=cells[a].1 {
                 for v in cells[b].0..=cells[b].1 {
-                    let line = Line { axis, across: [u, v], centre: [u * n, v * n], n, population: population.name, seed: generator.seed };
+                    let line = Line::new(population.name, generator.seed, axis, [u, v], n);
+                    let Some(roll) = rolled(line.indices(), 0) else { continue };
                     work.cells += 1;
                     let Some(p) = anchor(&line) else { continue };
                     // Owned by the cell of the line it is in, if the box reaches it.
                     let owner = nearest_site(at(p), n);
                     if owner[a] == u && owner[b] == v && (cells[axis].0..=cells[axis].1).contains(&owner[axis]) {
                         work.owned += 1;
-                        make(&cell(owner), p);
+                        make(&cell(owner, roll), p);
                     }
                 }
             }
@@ -69,16 +71,17 @@ pub(super) fn each_thing(
             let spans = points.spans();
             work.cells += (0..3).filter(|a| spans[*a]).map(|a| (cells[a].1 - cells[a].0 + 1) as u64).product::<u64>();
             for spot in points.points_in(cells.map(|c| c.0 * n), cells.map(|c| (c.1 + 1) * n)) {
+                let [i, j, k] = [0, 1, 2].map(|a| if spans[a] { spot.leaf[a].div_euclid(n) } else { 0 });
+                let (mark, nth) = (spot.mark, spot.nth);
+                let Some(roll) = rolled([i, j, k], point(mark, nth)) else { continue };
                 let Some(p) = anchor(&spot) else { continue };
                 let along = |a: usize| (p[a].round() as i64 + n / 2).div_euclid(n);
                 if (0..3).any(|a| !spans[a] && !(cells[a].0..=cells[a].1).contains(&along(a))) {
                     continue;
                 }
-                let [i, j, k] = [0, 1, 2].map(|a| if spans[a] { spot.leaf[a].div_euclid(n) } else { 0 });
                 let centre = [0, 1, 2].map(|a| if spans[a] { spot.leaf[a] + n / 2 } else { p[a].round() as i64 });
-                let (mark, nth) = (spot.mark, spot.nth);
                 work.owned += 1;
-                make(&Cell { i, j, k, centre, n: n / 2, mark, nth, population: population.name, seed: generator.seed }, p);
+                make(&Cell { centre, n: n / 2, mark, nth, ..cell([i, j, k], roll) }, p);
             }
         }
     }
@@ -137,8 +140,8 @@ pub fn each_made(
  * makes none there.
  */
 pub fn made_in(generator: &Generator, population: &Population, i: i64, j: i64, k: i64) -> Option<(Point, Node)> {
-    let (anchor, owner) = anchor_in(generator, population, i, j, k)?;
-    let cell = Cell::fcc(population, generator.seed, [i, j, k]);
+    let (anchor, owner, roll) = asked(generator, population, [i, j, k])?;
+    let cell = Cell::fcc(population, generator.seed, [i, j, k], roll);
     (owner == [i, j, k]).then(|| (population.make)(anchor, &cell)).flatten().map(|node| (anchor, node))
 }
 
@@ -159,24 +162,37 @@ pub fn anchors_in(generator: &Generator, population: &Population, cells: [(i64, 
  * one; none anchored at points.
  */
 pub fn anchor_in(generator: &Generator, population: &Population, i: i64, j: i64, k: i64) -> Option<(Point, [i64; 3])> {
-    let n = population.cell;
-    let anchor = match &population.anchor {
-        Anchors::Cells(anchor) => anchor(&Cell::fcc(population, generator.seed, [i, j, k])),
+    asked(generator, population, [i, j, k]).map(|(anchor, owner, _)| (anchor, owner))
+}
+
+/** As `anchor_in`, with the roll it was asked by. */
+fn asked(generator: &Generator, population: &Population, c: [i64; 3]) -> Option<(Point, [i64; 3], Fx)> {
+    let (n, rolled) = (population.cell, rolls(population, generator.seed));
+    let (anchor, roll) = match &population.anchor {
+        Anchors::Cells(anchor) => {
+            let roll = rolled(c, 0)?;
+            (anchor(&Cell::fcc(population, generator.seed, c, roll))?, roll)
+        }
         Anchors::Lines { axis, anchor } => {
-            let ([a, b], c) = (across(*axis), [i, j, k]);
-            anchor(&Line {
-                axis: *axis,
-                across: [c[a], c[b]],
-                centre: [c[a] * n, c[b] * n],
-                n,
-                population: population.name,
-                seed: generator.seed,
-            })
+            let [a, b] = across(*axis);
+            let line = Line::new(population.name, generator.seed, *axis, [c[a], c[b]], n);
+            let roll = rolled(line.indices(), 0)?;
+            (anchor(&line)?, roll)
         }
         // A leaf holds any number: see anchors_in.
-        Anchors::Points { .. } => None,
-    }?;
-    Some((anchor, nearest_site(at(anchor), n)))
+        Anchors::Points { .. } => return None,
+    };
+    Some((anchor, nearest_site(at(anchor), n), roll))
+}
+
+/**
+ * The roll of what is asked for an anchor (Cell::chance), by its indices
+ * (a line's: Line::indices) and point; none over the population's
+ * `chance`, so nothing is asked.
+ */
+fn rolls(population: &Population, seed: u64) -> impl Fn([i64; 3], u64) -> Option<Fx> {
+    let (seed, most) = (hash_text(&format!("{}:chance", population.name), seed), population.chance);
+    move |[i, j, k], point| Some(Rng::new(hash64(seed ^ point, i, j, k)).fraction()).filter(|roll| *roll < most)
 }
 
 pub(super) fn bounds_of(node: &Node) -> Box3 {

@@ -404,6 +404,33 @@ fn refuses_a_thing_anchored_off_the_ground_it_stands_on() {
     generate(&layers(vec![Layer::Population(rocks)]), &Box3 { min: [-8, -100, -8], max: [8, 8, 8] }, 0);
 }
 
+/** Rocks in a tenth of the cells west of x = 0, a twentieth east, saying `most`; in cells, or along lines across a plane. */
+fn rocks(most: Fx, along: bool) -> Population {
+    let rocks = Population::new("rocks", 1.0, 16)
+        .chance(most)
+        .make(|p, cell| cell.chance(if p[0] < 0.0 { fx(0.1) } else { fx(0.05) }).then(|| Node::of(vec![ball(p, 2.0, 0, SOLID, Op::Fill)])));
+    if along { rocks.anchor_along(1, |line| Some(line.pick(&mut line.random("spot"), |_, _| 0))) } else { rocks }
+}
+
+#[test]
+fn a_population_rolled_before_anchoring_makes_the_same_things() {
+    let (generator, cells) = (layers(vec![]), [(-32, 32), (-4, 4), (-32, 32)]);
+    for along in [false, true] {
+        let (mut all, mut rolled) = (Vec::new(), Vec::new());
+        let asked = each_made(&generator, &rocks(Fx::ONE, along), cells, |key, bounds, _, _| all.push((key, bounds)));
+        let anchored = each_made(&generator, &rocks(fx(0.1), along), cells, |key, bounds, _, _| rolled.push((key, bounds)));
+        assert!(!all.is_empty() && all == rolled, "along lines: {along}");
+        assert!(anchored * 5 < asked, "along lines: {along}: {anchored} anchored of {asked}");
+    }
+}
+
+#[test]
+#[should_panic(expected = "asks for a chance of Fx(6554), over its population's Fx(3277) (Population::chance)")]
+fn refuses_a_cell_asking_more_than_its_populations_chance() {
+    let rocks = rocks(fx(0.05), false);
+    each_made(&layers(vec![]), &rocks, [(-32, 32), (-4, 4), (-32, 32)], |_, _, _, _| {});
+}
+
 #[test]
 fn a_spans_face_is_where_it_is_at_every_level() {
     // Ground up to y = h, on a plane of sites or off it. Along the plane, a line's sites stop as much of their rays as

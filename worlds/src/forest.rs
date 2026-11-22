@@ -599,20 +599,22 @@ fn layers(scope: &Scope, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
         Population::new(name, 2.0, rock_cell).reach(reach).size(m(2.0)).on(on.clone()).anchor_along(1, move |line| Some(anchor.spot(line)))
     };
     let boulders = {
-        let f = f.clone();
-        on_ground("boulders", m(3.0)).make(move |[x, y, z], cell| {
-            let mut random = cell.random("boulder");
+        let (f, chance) = (f.clone(), fx(0.15));
+        on_ground("boulders", m(3.0)).chance(chance).make(move |[x, y, z], cell| {
             let (xi, zi) = (x as i64, z as i64);
             let clear = !f.ground.path.by(xi, zi, Fx::m(PATH_EDGE[1] + BOULDER_RADIUS[1]));
-            if clear && random.chance(f.thinned(fx(0.15), xi, zi)) { Some(Node::of(boulder(x, y, z, &mut random))) } else { None }
+            if clear && cell.chance(f.thinned(chance, xi, zi)) {
+                Some(Node::of(boulder(x, y, z, &mut cell.random("boulder"))))
+            } else {
+                None
+            }
         })
     };
     let logs = {
-        let f = f.clone();
-        on_ground("logs", m(10.0)).make(move |[x, _, z], cell| {
-            let mut random = cell.random("log");
-            if random.chance(f.thinned(fx(0.077), x as i64, z as i64)) && !f.column(x as i64, z as i64).on_path {
-                fallen_log(x, z, &|x, z| f.ground(x, z), &mut random).map(Node::of)
+        let (f, chance) = (f.clone(), fx(0.077));
+        on_ground("logs", m(10.0)).chance(chance).make(move |[x, _, z], cell| {
+            if cell.chance(f.thinned(chance, x as i64, z as i64)) && !f.column(x as i64, z as i64).on_path {
+                fallen_log(x, z, &|x, z| f.ground(x, z), &mut cell.random("log")).map(Node::of)
             } else {
                 None
             }

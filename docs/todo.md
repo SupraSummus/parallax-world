@@ -199,14 +199,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   its nearest town twice at level 8 (the land asks at its dithered points).
   With eight times the slots, each was made once;
   pairs or fours of slots per column cost more than they saved.
-- **Sparse populations anchor every cell first.**
-  The moor's boulders (one cell in ten at most), the forest's boulders and logs
-  make the ground at a point of each cell, and ask its land,
-  before the cell's roll says no: the moor's took a sixth of the valley's level 6.
-  Rolled in its anchor, that level cost a twentieth less,
-  but split what decides a boulder in two, each with its own stream.
-  A population's highest chance, rolled by the engine before anchoring,
-  would serve them all alike.
 - **Hashing is the forest's largest single cost.**
   Each site hashes twice (shade, pick),
   each `hash64` mixing three times, as do noise corners.

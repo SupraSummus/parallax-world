@@ -147,9 +147,10 @@ fn layers(scope: &Scope, hold: Holding, ground: Arc<Sloped>, path: Arc<Path>) ->
     };
     // Haystacks on the stubble.
     let haystacks = {
-        let seed = scope.seed("haystacks");
+        let (seed, chance) = (scope.seed("haystacks"), fx(0.3));
         Population::new("haystacks", 3.0, m(6.0))
             .reach(m(2.0))
+            .chance(chance)
             .size(m(4.0))
             .on(ground.clone())
             .anchor_along(1, move |line| {
@@ -157,10 +158,10 @@ fn layers(scope: &Scope, hold: Holding, ground: Arc<Sloped>, path: Arc<Path>) ->
                 Some(line.pick(&mut Rng::new(hash64(seed, i, 0, k)), |x, z| ground.at(x, z)))
             })
             .make(move |[x, y, z], cell| {
-                let mut random = cell.random("haystack");
-                if f.crop(x as i64, z as i64) != Some(Crop::Stubble) || !random.chance(fx(0.3)) {
+                if !cell.chance(chance) || f.crop(x as i64, z as i64) != Some(Crop::Stubble) {
                     return None;
                 }
+                let mut random = cell.random("haystack");
                 let r = m(1.0) as f64 + random.next() * 4.0;
                 Some(Node::of(vec![Shape::ball([x, y + r * 0.5, z], r, F::hay)]))
             })
