@@ -7,11 +7,11 @@ Which tests run them is in [testing.md](testing.md).
 
 ## Checks
 
-`worldgen::checks::contract` (`worldgen/src/checks/contract.rs`) checks a world
-in regions holding everything it is made of around spawn,
+`worldgen::checks::contract` (`worldgen/src/checks/contract.rs`) checks worlds
+in regions holding everything they are made of around spawn,
 which it finds itself (`worldgen::checks::survey`, `survey.rs`), not from a list:
 `worlds/tests/contract.rs` runs it for each world in `WORLDS`
-at seed 42 and three more, a thread each,
+at seed 42 and three more together, as more places of one world,
 and `worldgen/tests/contract.rs` for test worlds of fog, caves,
 and a village of houses with doors and tables
 on y = 0, a plane of sites at every level ("Faces" in "Levels", generators.md);
@@ -41,18 +41,22 @@ A stratum is a part or a field, with a kind it draws;
 the survey counts its places, and keeps those nearest spawn (`PLACES`).
 A field is asked at level 0 too, only where a place it finds is kept:
 for where its surface is, and what it draws finer still (a pond's reeds, a kerb's concrete).
-Every stratum found gets a region: the rarest first,
-each in the region it widens least, or in one of its own nearest spawn.
+Every stratum found is held by regions of the seeds checked together,
+one stratum by name at all of them, so where it is cheapest:
+the rarest first, each until `HELD` regions hold a place of it or none is left;
+a place joins the region of its seed it widens least, or starts one nearest spawn.
 Its cells are those in its places there,
 so a rare thing is checked without being listed,
 and in itself, not averaged with the rest of a region;
 but a part's variants drawing the same kinds are one stratum,
 and a part's kinds share its places.
+Held once, a stratum would be measured in one setting:
+at other places its mean moves by about twice `SLACK`.
 A region holds every stratum surveyed in it (`survey_in`),
 not only those it was laid out for,
-and the regions holding a stratum share its sample:
+and the regions holding a stratum share its sample, at every seed:
 a common stratum costs what it did, but is measured wherever regions are.
-A cell is the first region's to sample it, so regions that meet take none twice.
+A cell is the first region's of its seed to sample it, so regions that meet take none twice.
 A layer that draws nothing surveyed breaks the contract;
 the kinds nothing draws are only printed,
 as worlds share tables of kinds (the moor's is the valley's).
@@ -159,7 +163,8 @@ read it from its colour (`kind_of`): a mix of kinds is none.
 Margins quoted elsewhere in this document are older ones,
 in shares of material types or in sRGB.
 
-The first two of these share a region's levels, each generated once (`hold_region`):
+The first three are checked region by region,
+at each level of a region generated once (`hold_region`):
 - at each level, the region against parts of it 32 sites a side (`parts_hold`),
   each generated alone:
   for each stratum a sample of those meeting its places (`PARTS`),
@@ -179,8 +184,8 @@ The first two of these share a region's levels, each generated once (`hold_regio
   a sample of cells near a surface in each stratum's places in each region
   (`checks::cells`), the region grown by a site of the level, and to at least 16 across,
   each along each of the 12 directions, inside it only;
-- at each level up to one past the world's, in each region
-  and a host tile's width around spawn,
+- at each level up to one past the world's, over the region
+  (and once a world, a host tile's width around spawn),
   a slab above the world's `heights`, if it has them, stops no rays at all:
   hosts generate only within them, and cut whatever is outside
   (under them, the ground goes on, unseen);

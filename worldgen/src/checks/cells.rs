@@ -22,8 +22,8 @@ use crate::picture::{CROSSING, Seen, composited, nearest_site, seen_whole};
 /** How many levels finer a level's cells are held to: more costs more, and loses less (a finer cell's mean forgets which of its rays it stops). */
 pub const FINER_BY: u32 = 2;
 
-/** Cells checked at each level of a stratum, at most, shared by the regions holding it: more costs more, and tells more surely. */
-pub const SAMPLES: usize = 256;
+/** Cells checked at each level of a stratum, at most, shared by the regions holding it in every world checked: more costs more, and tells more surely. */
+pub const SAMPLES: usize = 1024;
 
 /** What rays see of a cell along a direction, a mean over them: how much of them it stops, and what shows (linear: what it stops by its colour, and what it glows). */
 pub type Look = [f64; 4];
