@@ -52,7 +52,7 @@ fn forest_is_deterministic_has_ground_trees_and_a_clear_spawn() {
     });
     let all = voxels(&grid, &generator);
     assert_eq!(again_spawn, spawn);
-    assert!(again.shown == grid.shown && again.pieces.colour == grid.pieces.colour && again.bricks == grid.bricks);
+    assert!(again.pieces.alpha == grid.pieces.alpha && again.pieces.colour == grid.pieces.colour && again.bricks == grid.bricks);
 
     // Ground under every column of the 48 m × 80 m area.
     let columns: HashSet<(i64, i64)> = all.iter().map(|&(x, _, z, _)| (x, z)).collect();

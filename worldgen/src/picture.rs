@@ -8,8 +8,8 @@ use std::panic::AssertUnwindSafe;
 use std::sync::{Mutex, mpsc};
 use std::time::{Duration, Instant};
 
+use fcc::Look;
 use fcc::ray::{FACES, Ray, over};
-use fcc::{Look, shows_whole};
 
 use crate::generator::{Generator, across, generate_shown, shown, turned};
 use crate::grid::{ALPHA, BRICK, Box3, COLOUR_ONE, GLOW_ONE, VoxelGrid};
@@ -242,13 +242,13 @@ impl Tiles {
         (self.tiling.heights.0..self.tiling.heights.1).contains(&p[UP])
     }
 
-    /** Whether site `p` shows whole (`whole`); Err if its tile is not generated. */
+    /** Whether site `p` shows whole (VoxelGrid's `shows_whole`); Err if its tile is not generated. */
     fn whole(&self, p: [i64; 3]) -> Result<bool, Key> {
         if !self.within(p) {
             return Ok(false);
         }
         let key = self.tiling.key(p);
-        self.tiles.get(&key).map(|tile| whole(&tile.grid, p)).ok_or(key)
+        self.tiles.get(&key).map(|tile| tile.grid.shows_whole(p[0], p[1], p[2])).ok_or(key)
     }
 
     /** Which way site's surface faces: towards its neighbours not whole (`whole`), unit; zero if none is whole (or all). Its tile's grid is `grid`. */
@@ -257,7 +257,7 @@ impl Tiles {
         let key = self.tiling.key(site);
         for face in FACES {
             let p = [0, 1, 2].map(|i| site[i] + face[i]);
-            let whole = if self.tiling.key(p) == key && self.within(p) { whole(grid, p) } else { self.whole(p)? };
+            let whole = if self.tiling.key(p) == key && self.within(p) { grid.shows_whole(p[0], p[1], p[2]) } else { self.whole(p)? };
             if !whole {
                 (0..3).for_each(|i| sum[i] += face[i] as f64);
             }
@@ -298,7 +298,7 @@ impl Tiles {
                     leaves(ray, min.map(|v| v as f64), b.max.map(|v| (v - 1) as f64))
                 } else {
                     match tile.grid.get_or_empty_brick(x, y, z) {
-                        Some(_) if !whole(&tile.grid, ray.site) => None,
+                        Some(_) if !tile.grid.shows_whole(x, y, z) => None,
                         Some(_) => {
                             let look = tile.grid.along(x, y, z, ray.direction);
                             return match self.normal(ray.site, &tile.grid) {
@@ -349,15 +349,6 @@ pub(crate) fn seen_whole(grid: &VoxelGrid, site: [i64; 3], direction: [f64; 3]) 
     let mut cast = Cast::new(0, Ray::new(site.map(|v| v as f64), direction, 0.0), 0.0);
     let (stopped, shown, glow) = composite(&mut cast, grid, 1.0, 1.0);
     Seen { stopped, shown, glow }
-}
-
-/**
- * Whether site (x, y, z) of `grid` shows whole: its pieces whole, or held
- * in part and shown whole by their coin (fcc's shows_whole), as every host
- * shows them.
- */
-fn whole(grid: &VoxelGrid, [x, y, z]: [i64; 3]) -> bool {
-    grid.get(x, y, z) != 0 || shows_whole(grid.held(x, y, z).1.0, x as i32, y as i32, z as i32)
 }
 
 /** When the ray leaves the box from `min` to `max` (a level's units), if it is in it now and goes further in it. */

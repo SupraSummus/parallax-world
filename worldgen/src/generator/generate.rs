@@ -140,7 +140,6 @@ fn made(generator: &Generator, b: &Box3, level: u32, floors: Option<&Floors>) ->
         }
         cost::add(group[0].layer, work);
     }
-    grid.show();
     grid
 }
 

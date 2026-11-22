@@ -148,8 +148,8 @@ Numbers are for the forest at 1280×800, as measured when written.
   and `About` is a band around one plan.
   Simpler would be a field of `Column`s on a plan knowing where it is,
   with only what varies by column (water, mist, bridges) declared.
-- **`VoxelGrid::shown` says what `pieces` does**: whether a site's pieces are whole.
-  `show` could go, but `shown` is what the grid's sites are indexed by, and named for.
+- **`VoxelGrid::get` gives whole voxels alone, `fcc::Grid::get` all hosts are handed**:
+  one name, two meanings. Most callers of the first are tests asking for a whole voxel.
 - **Whole sites are still put one by one.**
   Under the surface nearly every put is a whole site of the ground's fill,
   each through `put`, its brick looked up, at level 0 its shade hashed.

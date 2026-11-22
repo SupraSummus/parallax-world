@@ -228,7 +228,7 @@ impl Asking<'_> {
  * was when the face was picked through the voxels drawn along them, the grid of the level claiming
  * each layer (Lod::claiming), each stopped at the first whole voxel it
  * meets. So ground, walls, trunks and leaves (shown as grain, as often as
- * they cover: worldgen's VoxelGrid::show) hide what is behind them, and a
+ * they cover: fcc's shows_whole) hide what is behind them, and a
  * wood what is deep enough in it; see-through voxels, mist, hide nothing,
  * as the GPU, which sees no mist in its depths, would ask for it all.
  * A cell is hidden if all it may draw (`shown`) is behind where the rays

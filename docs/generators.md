@@ -679,9 +679,10 @@ A site is still one look, whatever lies where in it:
 its share of the water stops red for every ray through it,
 those that meet the sea's top in the site beside it too.
 So a coarse site of a crown in mist holds both, each as it is.
-The pieces show as grain, a whole voxel as often (`VoxelGrid::show`);
-where they don't, a host that draws alpha
-shows the medium as see-through as it is.
+The pieces show as grain:
+the site's look a whole voxel as often as the site stops rays, else nothing
+(`fcc::whole_or_none`).
+A host that draws alpha shows a medium alone as see-through as it is.
 Drawn see-through, leaves are smoke; as grain, mist is snow.
 So a lamp too small for a coarse site
 is in it as a little glow, and stops a little light.
