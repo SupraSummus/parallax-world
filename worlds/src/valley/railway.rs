@@ -23,7 +23,7 @@
 
 use std::sync::Arc;
 
-use worldgen::column::Column;
+use worldgen::column::{self, Column};
 use worldgen::curve::{self, Curve, Near};
 use worldgen::domain::{Domain, Scope};
 use worldgen::frame::{Frame, Part, facing};
@@ -683,9 +683,9 @@ fn layers(railway: Arc<Railway>, hold: Holding, ground: Arc<Sloped>) -> Vec<Laye
                     if within(DECK - 2) {
                         spans.push(Span::solid(top - m(1.0), floor, T::brick));
                     } else if within(DECK) {
-                        // Its top where it is at every level: at least two sites, grown down, not up.
-                        let parapet = top + 1 + m(0.75);
-                        spans.push(Span::solid((top - m(1.0)).min(parapet - 2 * spacing), parapet, T::brick));
+                        // Its top where it is at every level: `thick`, grown down, not up.
+                        let (bottom, parapet) = (top - m(1.0), top + 1 + m(0.75));
+                        spans.push(Span::solid(parapet - column::thick(parapet - bottom), parapet, T::brick));
                     }
                 }
                 // A floor as deep as the ballast, and a lining round the bore: walls on it, then its vault.
@@ -755,9 +755,9 @@ fn layers(railway: Arc<Railway>, hold: Holding, ground: Arc<Sloped>) -> Vec<Laye
     ]
 }
 
-/** The bottom of the ballast under a track `top` high, and of what it lies on: half a metre down, two sites at least. */
+/** The bottom of the ballast under a track `top` high, and of what it lies on: half a metre down, `thick`. */
 fn bed(top: i64) -> i64 {
-    top + 1 - m(0.5).max(2 * plan::spacing())
+    top + 1 - column::thick(m(0.5))
 }
 
 /** How high a tunnel's bore is `e` across from its middle: walls, then a round vault. */

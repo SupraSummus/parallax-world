@@ -1,20 +1,35 @@
 //! Columns: the spans of a heightfield's line of sites (a field's
-//! `Spans` along y), built so that each stays visible at every level.
+//! `Spans` along y), built so that each shows at every level as it does
+//! at level 0.
 //!
-//! A line of sites along an axis has a site only every two spacings: at
-//! a level's sites, x + y + z is even, so with x and z fixed, y keeps
-//! its parity. A solid span shorter than two spacings may hold no site
-//! whole, and whatever it is (a pond, a layer of turf) fades at that level.
-//! So every solid span a `Column` makes is at least two spacings tall,
-//! those of `fill_below_exactly` aside; a medium on the ground is as tall
-//! as it is, held in part by the sites it reaches. A heightfield's
-//! columns close its slopes' sides by reaching down past the columns
-//! around (`sides`). The spacing is that of the sites read for
-//! (`plan::spacing`), so a world declares a column once, for every level.
-//! See "Writing a world" in docs/generators.md.
+//! A site holds what its spans stop of its voxel (`cover` in
+//! generator/drawables.rs), so a span thinner than the sites is held in
+//! part. A line of sites along an axis has a site only every two
+//! spacings (x + y + z is even at a level's sites): on a line whose site
+//! is mostly over a thin layer, rays down pass it to the site under it,
+//! and the layer fades to what it lies on, as a turf a unit thick on
+//! stone does from level 2 (`a_thin_layer_tops_the_ground_at_every_level`).
+//! So every layer a `Column` lays is `thick`, what `fill_below` fills
+//! aside: from the side, where a slope shows it, it then hides what it
+//! lies on. A medium on the ground is as tall as it is,
+//! held in part by the sites it reaches. A heightfield's columns close
+//! its slopes' sides by reaching down past the columns around (`sides`).
+//! The spacing is that of the sites read for (`plan::spacing`), so a
+//! world declares a column once, for every level. See "Writing a world"
+//! in docs/generators.md.
 
 use crate::generator::{DEEP, Holds, Kind, Span};
 use crate::plan::spacing;
+
+/**
+ * A span `length` long as it stays at every level: at least two spacings
+ * of the sites read for, as a line of sites along an axis has a site every
+ * two. A solid grows away from where it is seen (a layer down from its top),
+ * a medium standing free up from what it stands on.
+ */
+pub fn thick(length: i64) -> i64 {
+    length.max(2 * spacing())
+}
 
 impl Span {
     /** Solid `kind` in [from, to). */
@@ -24,13 +39,13 @@ impl Span {
 
     /**
      * A medium of `kind` from `from`, `height` tall, stopping `extinction`
-     * per unit of a ray's path (see Holds), standing free: at least two
-     * sites tall, and then as much thinner as it is taller, as dense along
+     * per unit of a ray's path (see Holds), standing free: `thick`, and
+     * then as much thinner as it is taller, as dense along
      * a ray through it. In the site of the ground under it alone, it would
      * show only in the colour of the ground's pieces (VoxelGrid's `partial`).
      */
     pub fn medium(from: i64, height: i64, kind: impl Into<Kind>, extinction: f64) -> Span {
-        let tall = height.max(2 * spacing());
+        let tall = thick(height);
         Span { from, to: from + tall, kind: kind.into(), holds: Holds::Medium(extinction * height as f64 / tall as f64) }
     }
 }
@@ -54,7 +69,6 @@ pub fn lowest_around(ground: impl Fn(i64, i64) -> i64, x: i64, z: i64) -> i64 {
  */
 pub struct Column {
     height: i64,
-    spacing: i64,
     /** What is under the top, top down, and what stands on it, bottom up. */
     below: Vec<Span>,
     above: Vec<Span>,
@@ -62,7 +76,7 @@ pub struct Column {
 
 impl Column {
     pub fn new(height: i64) -> Column {
-        Column { height, spacing: spacing(), below: Vec::new(), above: Vec::new() }
+        Column { height, below: Vec::new(), above: Vec::new() }
     }
 
     /** Where the ground's layers end so far, going down: the top of the next. */
@@ -74,17 +88,10 @@ impl Column {
         self.above.last().map_or(self.height + 1, |s| s.to)
     }
 
-    /** A layer of `kind` `depth` deep, under the layers so far (the first is the ground's top), at least two sites. */
-    pub fn surface(mut self, kind: impl Into<Kind>, depth: i64) -> Column {
-        let to = self.floor();
-        self.below.push(Span::solid(to - depth.max(2 * self.spacing), to, kind));
-        self
-    }
-
-    /** `kind` under the layers so far, down to `bottom`, or two sites if that is less. */
-    pub fn fill_below(self, kind: impl Into<Kind>, bottom: i64) -> Column {
-        let bottom = bottom.min(self.floor() - 2 * self.spacing);
-        self.fill_below_exactly(kind, bottom)
+    /** A layer of `kind` `depth` deep, `thick`, under the layers so far (the first is the ground's top). */
+    pub fn surface(self, kind: impl Into<Kind>, depth: i64) -> Column {
+        let bottom = self.floor() - thick(depth);
+        self.fill_below(kind, bottom)
     }
 
     /**
@@ -92,7 +99,7 @@ impl Column {
      * thinner than two sites, or nothing. For what shows only from the
      * side, such as soil down to a slope's lower neighbours.
      */
-    pub fn fill_below_exactly(mut self, kind: impl Into<Kind>, bottom: i64) -> Column {
+    pub fn fill_below(mut self, kind: impl Into<Kind>, bottom: i64) -> Column {
         let to = self.floor();
         if bottom < to {
             self.below.push(Span::solid(bottom, to, kind));
@@ -109,13 +116,13 @@ impl Column {
      * cliff's corners into the hollow under the ground.
      */
     pub fn sides(self, kind: impl Into<Kind>, lowest: i64, depth: i64) -> Column {
-        let bottom = lowest.min(self.height - depth) - 2 * self.spacing;
-        self.fill_below_exactly(kind, bottom)
+        let bottom = lowest.min(self.height - depth) - 2 * spacing();
+        self.fill_below(kind, bottom)
     }
 
     /** `kind` under the layers so far, down without end: the ground solid to the bottom (`Field::ground`). */
     pub fn under(self, kind: impl Into<Kind>) -> Column {
-        self.fill_below_exactly(kind, DEEP)
+        self.fill_below(kind, DEEP)
     }
 
     /**
@@ -132,13 +139,12 @@ impl Column {
     /**
      * `kind` on the ground where it is under `level`, up to it
      * (its top unit, as the ground's `height`), as what stands in a hollow.
-     * At least two sites deep: where it is shallower, it reaches down over the ground's top, so
-     * a field painting it keeps it there.
+     * A layer down from its top, `thick`: where it is shallower, it reaches
+     * down over the ground's top, so a field painting it keeps it there.
      */
     pub fn fill_to(mut self, kind: impl Into<Kind>, level: i64) -> Column {
         if self.height < level {
-            let from = (self.height + 1).min(level + 1 - 2 * self.spacing);
-            self.above.push(Span::solid(from, level + 1, kind));
+            self.above.push(Span::solid(level - thick(level - self.height) + 1, level + 1, kind));
         }
         self
     }
@@ -168,8 +174,8 @@ mod tests {
 
     #[test]
     fn every_solid_span_holds_a_site_at_every_level() {
-        // A thin turf over soil, a shallow fill: each still on every line of sites, at every level.
-        let column = |h: i64, s: i64| footprint(s, [0, 0], || Column::new(h).surface(1, 1).fill_below(2, h - 2).fill_to(4, h + 1).spans());
+        // A thin turf over thin soil, a shallow fill: each still on every line of sites, at every level.
+        let column = |h: i64, s: i64| footprint(s, [0, 0], || Column::new(h).surface(1, 1).surface(2, 1).fill_to(4, h + 1).spans());
         for level in 0..6 {
             let s = 1 << level;
             for h in -40..40 {
@@ -181,6 +187,29 @@ mod tests {
                         assert!(site < span.to, "level {level}, height {h}: {}..{} has no site of line {line}", span.from, span.to);
                     }
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn a_thin_layer_tops_the_ground_at_every_level() {
+        // Turf a unit thick on stone, at heights of every parity: rays down see the turf, near and far. As thin as
+        // it is (not two sites), from level 2 they see the stone too, from level 4 up to a third of what they see.
+        for h in 0..8 {
+            let world = ground(Op::Fill, false, move |_, _| Column::new(h).surface(1, 1).under(0));
+            for level in 0..6 {
+                let s = (1i64 << level) as f64;
+                let grid = generate(&world, &Box3 { min: [0, -4, 0], max: [64, (16 >> level) + 2, 64] }, level);
+                let red = |v: f64| fcc::light::srgb_to_linear((v / 255.0) as f32) as f64;
+                let turf = (0..1024).map(|i| {
+                    let at = |n: u64| 8.0 + 48.0 * crate::noise::hash(n, i, 0, 0) as f64 / u32::MAX as f64;
+                    let seen = composited(&grid, [at(1), 16.0 / s - 1.0, at(2)], [0.0, -1.0, 0.0], 16.0 / s + 4.0, 1.0);
+                    // How much of what the ray sees is turf's red (0x40) rather than stone's (0x80).
+                    let (stopped, r) = seen.iter().fold((0.0, 0.0), |(s, r), (_, seen)| (s + seen.stopped, r + seen.shown[0]));
+                    (red(128.0) - r / stopped) / (red(128.0) - red(64.0))
+                });
+                let turf = turf.sum::<f64>() / 1024.0;
+                assert!(turf > 0.99, "height {h}, level {level}: rays down see {turf} of turf");
             }
         }
     }
