@@ -882,10 +882,12 @@ Fields get the coordinates of sites in lattice units
 
 A line of sites along an axis has a site only every two spacings
 (x + y + z is even at a level's sites),
-so a span shorter than that may hold none, and vanishes at that level:
-a pond, a layer of turf, a hedge.
+and a site holds only its share of a span thinner than that:
+on a line whose site is mostly over the span, rays pass it,
+and it fades at that level to what is under it
+(a layer of turf, the bottom of a pond).
 `Column` (`column.rs`) builds a column's spans from its ground's top,
-each solid one at least two spacings tall:
+each layer (`surface`) at least two spacings deep (`column::thick`):
 `Column::new(height).surface(grass, m(0.5)).fill_below(soil, bottom)`,
 at the spacing of the sites drawn,
 `.medium(kind, height, extinction)` on top, as tall as it is,
@@ -918,7 +920,7 @@ and without them rays slipped in at a cliff's corners.
   the moor's stream, drawn at least a site wide, covered five times its share
   at level 6; decided in a dithered plan, it shows as often as it is.
 - **Keep the top where it is.** Whatever has to be two sites tall
-  grows down, not up, as `Column::surface` does
+  (`column::thick`) grows down, not up, as `Column::surface` does
   (the railway's platform; its bridges' parapets):
   cameras look down on the top.
 - **Things on a surface.** Anchor them along the axis across it
@@ -935,7 +937,7 @@ and without them rays slipped in at a cliff's corners.
   is kilometres away at some seeds).
 - **The bottom.** Spans at least two spacings tall grow past a fixed bottom
   at coarse levels, out of the heights:
-  fill to the world's bottom with `fill_below_exactly`.
+  fill to the world's bottom with `fill_below`.
 
 ## Open problems
 
@@ -1011,7 +1013,8 @@ and without them rays slipped in at a cliff's corners.
   A patch is a rule making a site look other than its cell does,
   to hide what is inherent
   (sheets grown to a site, `Tie`, `Column`'s two sites): to go, none to add.
-  But the first two also keep a thin wall whole (docs/todo.md, "Boxes and gables").
+  But the first two also keep a thin wall whole (docs/todo.md, "Boxes and gables"),
+  and the last a thin layer over what it lies on (`column.rs`).
   What fills a site in part is a piece with an alpha, shown by coins,
   a solid's edge as leaves are;
   things in a site stop as if apart, but a paint, which lies on what is there.

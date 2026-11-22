@@ -14,14 +14,14 @@
 use std::sync::Arc;
 
 use worldgen::World;
-use worldgen::column::Column;
+use worldgen::column::{self, Column};
 use worldgen::domain::{Domain, Lie, Scope, compose, eased};
 use worldgen::frame::{Frame, Part, facing, walls};
 use worldgen::generator::{ANY_SIZE, Child, Far, Field, Generator, Kind, Layer, Meets, Node, Op, Population, Shape, Span};
 use worldgen::js;
 use worldgen::kinds;
 use worldgen::noise::{Fbm, Fx, Rng, ValueNoise, fx, hash64, smoothstep};
-use worldgen::plan::{self, Claims, Holding, Plan, Sloped};
+use worldgen::plan::{Claims, Holding, Plan, Sloped};
 use worldgen::units::{Units, m};
 
 use super::landmarks::{self, Landmarks};
@@ -770,9 +770,9 @@ fn heath(f: Arc<Heath>) -> Field {
     if under { field.ground(of, m(1.0), m(0.4), F::soil) } else { field.about(of, m(1.0), m(0.4)) }
 }
 
-/** The bottom of the stream's bed under ground `h` high: a metre deep, at least two sites, as a line of sites along y has one every two. */
+/** The bottom of the stream's bed under ground `h` high: a metre deep, `thick`. */
 fn bed_bottom(h: i64) -> i64 {
-    h - m(1.0).max(2 * plan::spacing())
+    h - column::thick(m(1.0))
 }
 
 /**

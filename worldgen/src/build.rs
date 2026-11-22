@@ -137,7 +137,7 @@ impl About {
 
     /**
      * How far past them a line's spans may reach: its `sides`, and two
-     * sites more, as spans are at least two sites tall. Asked of a box,
+     * sites more, as spans are `thick` (column.rs). Asked of a box,
      * the two sites are what it is widened by (Field::meets).
      */
     fn slack(&self, spacing: i64) -> Option<i64> {

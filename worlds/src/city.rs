@@ -885,7 +885,7 @@ fn ground(seed: u64) -> Field {
         let top = if road && plan::spacing() <= PLAN { MIN_Y } else { MIN_Y + 1 };
         let column = Column::new(PLAN * top).surface(surface, PLAN);
         // Pavements on a cell of concrete, where sites are as fine.
-        let column = if paved { column.fill_below_exactly(K::concrete, PLAN * MIN_Y - 1) } else { column };
+        let column = if paved { column.fill_below(K::concrete, PLAN * MIN_Y - 1) } else { column };
         column.under(K::soil)
     })
     // Flat, a plan cell over it at most.
