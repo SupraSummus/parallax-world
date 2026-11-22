@@ -256,7 +256,7 @@ fn finds_a_far_thing_reaching_past_its_populations_reach() {
             .make(|[x, y, z], _| Some(Node::of(vec![ball([x, y, z], 100.0, ROCK, SOLID, Op::Fill)]))),
     );
     let world = world_of(world(far), (-256, 256));
-    let broken = things_hold(&world, &survey(&world, REGION, |_| true));
+    let broken = things_hold(&world, &survey(&world, 1, REGION, |_| true));
     assert_eq!(broken.len(), 1, "{broken:?}");
     assert!(
         broken[0].contains("far surveyed reach past their population's reach [16, 16, 16]; it needs at least [37, 37, 37]"),
