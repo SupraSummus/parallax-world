@@ -13,6 +13,17 @@ Numbers are for the forest at 1280×800, as measured when written.
   They should go to fixed point like the noise,
   the forest building each thing relative to its anchor.
   The fixed-point containment tests cost about 15% at level 0.
+- **worldgen still has an up in a few paths**,
+  though it should have none (section 5 of `docs/architecture.md`):
+  hosts' tiles cut to a world's `heights` along y (`World::heights`, `tiles.rs`);
+  what is buried, found under each block of columns
+  (`Floors`, `generate_shown`, `VoxelGrid::on_rock`);
+  a field `at` each site, drawn in lines along y,
+  reading dithered plans across x and z (`sites::footprint`);
+  gables up y, frames turning about it (`gable`, `Frame::turned`);
+  `picture.rs`'s sky, sun and cameras looking down;
+  the checks' columns along y (`checks/`).
+  Each could take an axis, or go to `ground/`.
 - **A box's faces round to the sites.**
   Faces on a plane of a level's sites split its sites ("Faces" in
   `docs/generators.md`); off those planes a face rounds to the sites,
@@ -82,7 +93,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   so centred between two planes it holds their sites only at a point:
   discs 2 units thick, each 10 units over the ground, were gone at level 2.
   Boxes keep the sites on their faces by `Tie`.
-- **Some fields still keep their levels by rules of their own** (`plan::spacing`):
+- **Some fields still keep their levels by rules of their own** (`sites::spacing`):
   the ponds' reeds, the rails and the city's roads leave detail out by level,
   and the railway's ballast dithers by hand, in shares of iron and timber,
   or, where the rails are as tall as a spacing, bears a medium of them.
@@ -517,10 +528,10 @@ Numbers are for the forest at 1280×800, as measured when written.
   The rest is every function alike taking longer on shared cores
   (four virtual ones, a software GPU beside them): not looked into.
   A lock on each of a plan's slots cost one thread a tenth of generating,
-  as much as four gained: so `Kept` in `plan.rs` reads without one, unsafely.
+  as much as four gained: so `Kept` in `ground/src/plan.rs` reads without one, unsafely.
   Tiles side by side still make again the things reaching both;
   those one above another are made together (`made_with`).
-- **A `Large` never forgets** (`plan.rs`): it holds each piece of a curve for good,
+- **A `Large` never forgets** (`ground/src/plan.rs`): it holds each piece of a curve for good,
   read where it is, and panics past `LARGE` of them,
   thousands of kilometres of the valley.
   Forgetting would take a count of readers at every read, at every column.

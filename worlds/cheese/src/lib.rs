@@ -16,7 +16,7 @@ use worldgen::generator::{Child, Field, Generator, Layer, Meets, Node, Op, Point
 use worldgen::js;
 use worldgen::kinds;
 use worldgen::noise::{Fx, Rng, fx, hash64, stream};
-use worldgen::plan::spacing;
+use worldgen::sites::spacing;
 use worldgen::units::m;
 
 kinds! {

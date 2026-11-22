@@ -84,21 +84,21 @@ the framework knows nothing else of where anything is.
 A field says what it draws in any box (`Field::meets`, a `Meets`):
 anything, nothing, or all of it solid of one kind.
 The cheese is all cheese, its holes nothing where none of them reaches;
-the sea nothing over its level (`Meets::under`).
+the sea nothing over its level (`ground::under`).
 A population says where its things' anchors may lie (`Population::stands`).
 Each is a rule (below),
 so the framework asks it to draw only where it may be:
 a field in blocks of lines (`LINES`), a population box by box.
-On a ground, `build.rs` says both for a layer
-about a plan of heights (`plan::Sloped`):
+On a ground, the `ground` crate (`ground/src/about.rs`) says both for a layer
+about a plan of heights (`ground::plan::Sloped`), up being +y there alone:
 a field's spans along y lie from `below` under to `above` over it
-at their column (`Field::about`), held to it as they are made,
+at their column (`FieldAbout::about`), held to it as they are made,
 and what it meets follows, from the plan's range over the box's columns
 (`Sloped::range`), which its slope bounds;
 a plan promising no slope (`Sloped::any`) says nothing.
-The ground's own field also says what it is under all that (`Field::ground`),
+The ground's own field also says what it is under all that (`FieldAbout::ground`),
 solid down without end.
-A population's things may stand on such a plan (`Population::on`),
+A population's things may stand on such a plan (`PopulationOn::on`),
 each anchored at most N (its cell) off it.
 So a host may ask for any box, in any order,
 and a field about the ground costs little in the air above it
@@ -296,7 +296,7 @@ how many rays get how far, and what they stop on.
   a field that leaves detail out by level
   (the railway's rails, the ponds' reeds, the city's roads)
   or makes its own far form (the forest's canopy, a scene's levels)
-  asks for the spacing (`plan::spacing`).
+  asks for the spacing (`sites::spacing`).
 - **Plans** they read hold numbers, read where the line is,
   or categories, which can't be averaged (`Plan::dithered`:
   what a town's column is, who owns the land).
@@ -492,7 +492,7 @@ through the land they bid for, the ground they shape,
 and through things they share.
 Each part below is an experiment in how far that goes.
 
-A domain is a `Domain` (`worldgen/src/domain.rs`),
+A domain is a `Domain` (`ground/src/domain.rs`),
 made with what it reads, all of it coarser than itself.
 It bids for each column (`bid`, "Land"),
 pulls the ground there (`shape`, "Ground"),
@@ -506,7 +506,7 @@ so no two share one by chance, whatever is added.
 
 ### Bands
 
-A **plan** (`plan.rs`) is a decision for any column (x, z),
+A **plan** (`ground/src/plan.rs`) is a decision for any column (x, z),
 made on demand and kept: the path's centre line, the ground, where towns are.
 Its **scale** is the size of the smallest features it decides,
 and it reads only plans at least as coarse; reading a finer one panics.
@@ -599,7 +599,7 @@ Things placed whole at a coarse band, a town, a steading or a landmark,
 must keep apart, yet a plan of one per region,
 kept inside it so a column asks only its region's,
 never puts one where regions meet ([checks.md](checks.md)).
-`Claims` (`plan.rs`) places them anywhere instead:
+`Claims` (`ground/src/plan.rs`) places them anywhere instead:
 each cell proposes spots evenly in it, a Poisson number,
 the world's `claim` makes each a thing there or turns it down,
 and a thing is kept unless one of higher priority stands closer than `apart`,
@@ -838,8 +838,8 @@ cargo run --release -p parallax-native --features worlds/sponza -- --headless --
 ## Writing a world
 
 The moor (`worlds/src/valley/moor.rs`) is the shortest whole world to start from.
-`build.rs` has the short forms:
-`Field::columns` and `Field::at`,
+`build.rs` has the short forms, and the `ground` crate those of a ground:
+`ground::columns` and `Field::at`,
 `Population::new(…).reach(…).anchor(…)`, `.anchor_along(axis, …)` or `.anchor_points(…)`, `.make(…)`,
 `Node::group`, `Child::new`, and `Shape::ball` and the like,
 solid and filling unless told to `paint` or `carve`;
@@ -886,8 +886,8 @@ and a site holds only its share of a span thinner than that:
 on a line whose site is mostly over the span, rays pass it,
 and it fades at that level to what is under it
 (a layer of turf, the bottom of a pond).
-`Column` (`column.rs`) builds a column's spans from its ground's top,
-each layer (`surface`) at least two spacings deep (`column::thick`):
+`Column` (`ground/src/column.rs`) builds a column's spans from its ground's top,
+each layer (`surface`) at least two spacings deep (`build::thick`):
 `Column::new(height).surface(grass, m(0.5)).fill_below(soil, bottom)`,
 at the spacing of the sites drawn,
 `.medium(kind, height, extinction)` on top, as tall as it is,
@@ -920,7 +920,7 @@ and without them rays slipped in at a cliff's corners.
   the moor's stream, drawn at least a site wide, covered five times its share
   at level 6; decided in a dithered plan, it shows as often as it is.
 - **Keep the top where it is.** Whatever has to be two sites tall
-  (`column::thick`) grows down, not up, as `Column::surface` does
+  (`build::thick`) grows down, not up, as `Column::surface` does
   (the railway's platform; its bridges' parapets):
   cameras look down on the top.
 - **Things on a surface.** Anchor them along the axis across it
@@ -1014,7 +1014,7 @@ and without them rays slipped in at a cliff's corners.
   to hide what is inherent
   (sheets grown to a site, `Tie`, `Column`'s two sites): to go, none to add.
   But the first two also keep a thin wall whole (docs/todo.md, "Boxes and gables"),
-  and the last a thin layer over what it lies on (`column.rs`).
+  and the last a thin layer over what it lies on (`ground/src/column.rs`).
   What fills a site in part is a piece with an alpha, shown by coins,
   a solid's edge as leaves are;
   things in a site stop as if apart, but a paint, which lies on what is there.

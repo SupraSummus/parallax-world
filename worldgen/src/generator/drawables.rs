@@ -135,7 +135,7 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, floors: Option<&Flo
                             let [x, y, z] = site;
                             let value = all.map(|kind| (kind, None)).or_else(|| {
                                 work.reads += 1;
-                                plan::footprint(s, offset(x, z), || at(x * s, y * s, z * s))
+                                sites::footprint(s, offset(x, z), || at(x * s, y * s, z * s))
                             });
                             if let Meets::All(kind) = meets
                                 && value != Some((kind, None))
@@ -159,7 +159,7 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, floors: Option<&Flo
                                     moved[axis / 2] = 0;
                                 }
                                 work.reads += 1;
-                                plan::footprint(s, moved, || spans(u * s, v * s))
+                                sites::footprint(s, moved, || spans(u * s, v * s))
                             }
                         };
                         if let Meets::All(kind) = meets {
@@ -326,7 +326,7 @@ fn draw_field_shapes(field: &Field, near: &FieldShapes, seed: u64, s: i64, clip:
     let units = units_of(clip, s).widen(2 * s);
     let field_seed = hash_text(field.name, seed);
     let mut work = Work::default();
-    for shape in plan::footprint(s, [0, 0], || near(&units)).iter().filter(|shape| shape.bounds.overlaps(&units)) {
+    for shape in sites::footprint(s, [0, 0], || near(&units)).iter().filter(|shape| shape.bounds.overlaps(&units)) {
         assert!(
             shape.op == field.op,
             "field {}: a shape drawn other than by its field's op (Field::shapes); see \"Model\" in {DOCS}",

@@ -4,9 +4,9 @@
 
 use std::sync::Arc;
 
+use ground::plan::Plan;
 use worldgen::curve::Curve;
 use worldgen::noise::{Fx, fx};
-use worldgen::plan::Plan;
 use worldgen::units::{Units, m};
 
 /** The plan scale of a path's bends (see "Bands" in docs/generators.md). */

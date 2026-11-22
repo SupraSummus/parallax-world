@@ -18,12 +18,14 @@
 
 use std::sync::Arc;
 
-use worldgen::column::{Column, lowest_around};
-use worldgen::domain::{Domain, Scope};
-use worldgen::generator::{Field, Layer, Meets, Op};
+use ground::FieldAbout;
+use ground::column::{Column, lowest_around};
+use ground::domain::{Domain, Scope};
+use ground::plan::{Holding, Sloped};
+use worldgen::generator::{Field, Layer, Op};
 use worldgen::kinds;
 use worldgen::noise::{Fbm, Fx, ValueNoise, fx, smoothstep};
-use worldgen::plan::{self, Holding, Sloped};
+use worldgen::sites;
 use worldgen::units::{Units, m};
 
 use super::fields;
@@ -228,7 +230,7 @@ impl Domain for Ranges {
 fn layers(ranges: Arc<Ranges>, ground: Arc<Sloped>) -> Vec<Layer> {
     let bounds = ground.clone();
     let sea = sea(ground.clone());
-    let surface = Field::columns("mountains", 0.8, Op::Paint, move |x, z| {
+    let surface = ground::columns("mountains", 0.8, Op::Paint, move |x, z| {
         let h = ground.at(x, z);
         let height = Units(h).to_fx();
         let treeline = ranges.treeline(x, z);
@@ -242,7 +244,7 @@ fn layers(ranges: Arc<Ranges>, ground: Arc<Sloped>) -> Vec<Layer> {
         let slope =
             |heights: [i64; 4], step: i64| Units(heights.map(|n| (n - h).abs()).into_iter().max().unwrap_or(0)).to_fx() / Units(step);
         let steep = slope(near, m(1.0));
-        let far = plan::spacing().max(m(12.0));
+        let far = sites::spacing().max(m(12.0));
         let wide = around(far);
         let cliffs = slope(wide, far);
         // How far the ground around lies over this column: snow stays in hollows and gullies, crests are bare.
@@ -286,7 +288,7 @@ pub fn dry(height: i64) -> Fx {
 
 /** The sea: water up to its level on sand, its top apart (SEA_TOP), and a beach of sand a little over; nothing higher. */
 fn sea(ground: Arc<Sloped>) -> Field {
-    Field::columns("sea", 0.85, Op::Paint, move |x, z| {
+    ground::columns("sea", 0.85, Op::Paint, move |x, z| {
         let h = ground.at(x, z);
         if h > (SEA + Units::m(1.5)).0 {
             return Vec::new();
@@ -295,5 +297,5 @@ fn sea(ground: Arc<Sloped>) -> Field {
         let top = deep.min(SEA_TOP);
         Column::new(h).surface(L::sand, m(1.0)).medium(K::sea, deep - top, SEA_STOPS).medium(K::seaTop, top, SEA_TOP_STOPS).spans()
     })
-    .meets(|b, _| Meets::under((SEA + Units::m(1.5)).0 + 1, b))
+    .meets(|b, _| ground::under((SEA + Units::m(1.5)).0 + 1, b))
 }

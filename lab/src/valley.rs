@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use worldgen::domain::Scope;
+use ground::domain::Scope;
 use worldgen::generator::{Generator, Kind, generate};
 use worldgen::grid::Box3;
 use worlds::forest::{self, K as F};

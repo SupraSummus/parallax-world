@@ -946,6 +946,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ground"
+version = "0.0.0"
+dependencies = [
+ "fcc",
+ "worldgen",
+]
+
+[[package]]
 name = "guillotiere"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1189,6 +1197,7 @@ dependencies = [
 name = "lab"
 version = "0.0.0"
 dependencies = [
+ "ground",
  "worldgen",
  "worlds",
 ]
@@ -3390,6 +3399,7 @@ version = "0.0.0"
 dependencies = [
  "cheese",
  "fcc",
+ "ground",
  "light",
  "worldgen",
 ]

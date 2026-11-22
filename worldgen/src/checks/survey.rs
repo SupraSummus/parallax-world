@@ -15,7 +15,7 @@ use crate::generator::{
 };
 use crate::grid::Box3;
 use crate::noise::{Rng, hash_text, hash64};
-use crate::plan::footprint;
+use crate::sites::footprint;
 use crate::units::m;
 
 /** The side of the cube around spawn layers are surveyed in (16 km), lattice units, cut to the world's heights. */
@@ -260,7 +260,7 @@ fn survey_fields(world: &World, b: &Box3, level: u32, fields: &[&Field], found: 
  * whether anything. Where a place of a kind it draws there is to be kept
  * (`Found::wants`), it is asked at level 0 too: for what it draws finer
  * than these sites, and where: a coarse site's span is stretched to keep
- * a site (column.rs), so its top may be far from the ground's.
+ * a site (ground's column.rs), so its top may be far from the ground's.
  */
 fn survey_site(field: &Field, p: [i64; 3], s: i64, found: &mut Found) -> bool {
     let carves = field.op == Op::Carve;

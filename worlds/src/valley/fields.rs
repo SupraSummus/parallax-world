@@ -6,12 +6,13 @@
 
 use std::sync::Arc;
 
-use worldgen::column::Column;
-use worldgen::domain::{Domain, Scope};
-use worldgen::generator::{Field, Layer, Node, Op, Population, Shape, stripe};
+use ground::column::Column;
+use ground::domain::{Domain, Scope};
+use ground::plan::{Holding, Plan, Sloped};
+use ground::{FieldAbout, PopulationOn};
+use worldgen::generator::{Layer, Node, Op, Population, Shape, stripe};
 use worldgen::kinds;
 use worldgen::noise::{Fbm, Fx, Rng, ValueNoise, fx, hash, hash64, smoothstep};
-use worldgen::plan::{Holding, Plan, Sloped};
 use worldgen::units::{Units, m};
 
 use super::town::{self, Towns};
@@ -126,7 +127,7 @@ fn layers(scope: &Scope, hold: Holding, ground: Arc<Sloped>, path: Arc<Path>) ->
     let plots = {
         let (f, ground) = (f.clone(), ground.clone());
         let on = ground.clone();
-        Field::columns("fields", 0.6, Op::Paint, move |x, z| {
+        ground::columns("fields", 0.6, Op::Paint, move |x, z| {
             let Some(crop) = f.crop(x, z) else { return Vec::new() };
             let dither = hash(dithers, x, z, 0);
             // Half a metre of soil (or stubble) under each, and what grows on it.

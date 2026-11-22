@@ -1,54 +1,18 @@
-//! Columns: the spans of a heightfield's line of sites (a field's
-//! `Spans` along y), built so that each shows at every level as it does
-//! at level 0.
+//! Columns: the spans of a heightfield's line of sites along y, laid down
+//! from its ground's top, so that each shows at every level as at level 0.
 //!
-//! A site holds what its spans stop of its voxel (`cover` in
-//! generator/drawables.rs), so a span thinner than the sites is held in
-//! part. A line of sites along an axis has a site only every two
-//! spacings (x + y + z is even at a level's sites): on a line whose site
-//! is mostly over a thin layer, rays down pass it to the site under it,
-//! and the layer fades to what it lies on, as a turf a unit thick on
-//! stone does from level 2 (`a_thin_layer_tops_the_ground_at_every_level`).
-//! So every layer a `Column` lays is `thick`, what `fill_below` fills
-//! aside: from the side, where a slope shows it, it then hides what it
-//! lies on. A medium on the ground is as tall as it is,
-//! held in part by the sites it reaches. A heightfield's columns close
-//! its slopes' sides by reaching down past the columns around (`sides`).
-//! The spacing is that of the sites read for (`plan::spacing`), so a
-//! world declares a column once, for every level. See "Writing a world"
-//! in docs/generators.md.
+//! A site holds only its share of a span thinner than the sites
+//! (worldgen's `cover`), and a line has a site every two spacings: rays
+//! down pass the site a thin layer is a sliver of to the one under it,
+//! and see what the layer lies on. So each layer is `thick`, what
+//! `fill_below` fills aside, and from the side it hides what it lies on.
+//! A medium on the ground is as tall as it is. A heightfield's columns
+//! close its slopes' sides by reaching down past the columns around
+//! (`sides`). See "Writing a world" in docs/generators.md.
 
-use crate::generator::{DEEP, Holds, Kind, Span};
-use crate::plan::spacing;
-
-/**
- * A span `length` long as it stays at every level: at least two spacings
- * of the sites read for, as a line of sites along an axis has a site every
- * two. A solid grows away from where it is seen (a layer down from its top),
- * a medium standing free up from what it stands on.
- */
-pub fn thick(length: i64) -> i64 {
-    length.max(2 * spacing())
-}
-
-impl Span {
-    /** Solid `kind` in [from, to). */
-    pub fn solid(from: i64, to: i64, kind: impl Into<Kind>) -> Span {
-        Span { from, to, kind: kind.into(), holds: Holds::Solid }
-    }
-
-    /**
-     * A medium of `kind` from `from`, `height` tall, stopping `extinction`
-     * per unit of a ray's path (see Holds), standing free: `thick`, and
-     * then as much thinner as it is taller, as dense along
-     * a ray through it. In the site of the ground under it alone, it would
-     * show only in the colour of the ground's pieces (VoxelGrid's `partial`).
-     */
-    pub fn medium(from: i64, height: i64, kind: impl Into<Kind>, extinction: f64) -> Span {
-        let tall = thick(height);
-        Span { from, to: from + tall, kind: kind.into(), holds: Holds::Medium(extinction * height as f64 / tall as f64) }
-    }
-}
+use worldgen::build::thick;
+use worldgen::generator::{DEEP, Holds, Kind, Span};
+use worldgen::sites::spacing;
 
 /**
  * A column's neighbours: along the axes, then the diagonals. A voxel shares
@@ -120,7 +84,7 @@ impl Column {
         self.fill_below(kind, bottom)
     }
 
-    /** `kind` under the layers so far, down without end: the ground solid to the bottom (`Field::ground`). */
+    /** `kind` under the layers so far, down without end: the ground solid to the bottom (`FieldAbout::ground`). */
     pub fn under(self, kind: impl Into<Kind>) -> Column {
         self.fill_below(kind, DEEP)
     }
@@ -167,48 +131,18 @@ impl From<Column> for Vec<Span> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::generator::{Field, Generator, Layer, Op, generate};
-    use crate::grid::Box3;
-    use crate::picture::composited;
-    use crate::plan::footprint;
-
-    #[test]
-    fn every_solid_span_holds_a_site_at_every_level() {
-        // A thin turf over thin soil, a shallow fill: each still on every line of sites, at every level.
-        let column = |h: i64, s: i64| footprint(s, [0, 0], || Column::new(h).surface(1, 1).surface(2, 1).fill_to(4, h + 1).spans());
-        for level in 0..6 {
-            let s = 1 << level;
-            for h in -40..40 {
-                for line in 0..2 {
-                    for span in column(h, s) {
-                        // Sites on this line along y, in lattice units: y ≡ line (mod 2) at the level.
-                        let first = span.from.div_euclid(s) + i64::from(span.from.rem_euclid(s) != 0);
-                        let site = (first..).find(|y| (y - line).rem_euclid(2) == 0).expect("a site") * s;
-                        assert!(site < span.to, "level {level}, height {h}: {}..{} has no site of line {line}", span.from, span.to);
-                    }
-                }
-            }
-        }
-    }
+    use worldgen::generator::{Generator, Layer, Op, generate};
+    use worldgen::grid::{Box3, VoxelGrid};
+    use worldgen::picture::composited;
+    use worldgen::sites::footprint;
 
     #[test]
     fn a_thin_layer_tops_the_ground_at_every_level() {
-        // Turf a unit thick on stone, at heights of every parity: rays down see the turf, near and far. As thin as
-        // it is (not two sites), from level 2 they see the stone too, from level 4 up to a third of what they see.
+        // Turf a unit thick on stone, at heights of either parity. Not `thick`, rays down would see the stone from level 2.
         for h in 0..8 {
             let world = ground(Op::Fill, false, move |_, _| Column::new(h).surface(1, 1).under(0));
             for level in 0..6 {
-                let s = (1i64 << level) as f64;
-                let grid = generate(&world, &Box3 { min: [0, -4, 0], max: [64, (16 >> level) + 2, 64] }, level);
-                let red = |v: f64| fcc::light::srgb_to_linear((v / 255.0) as f32) as f64;
-                let turf = (0..1024).map(|i| {
-                    let at = |n: u64| 8.0 + 48.0 * crate::noise::hash(n, i, 0, 0) as f64 / u32::MAX as f64;
-                    let seen = composited(&grid, [at(1), 16.0 / s - 1.0, at(2)], [0.0, -1.0, 0.0], 16.0 / s + 4.0, 1.0);
-                    // How much of what the ray sees is turf's red (0x40) rather than stone's (0x80).
-                    let (stopped, r) = seen.iter().fold((0.0, 0.0), |(s, r), (_, seen)| (s + seen.stopped, r + seen.shown[0]));
-                    (red(128.0) - r / stopped) / (red(128.0) - red(64.0))
-                });
-                let turf = turf.sum::<f64>() / 1024.0;
+                let turf = dark_from_above(&generate(&world, &Box3 { min: [0, -4, 0], max: [64, (16 >> level) + 2, 64] }, level));
                 assert!(turf > 0.99, "height {h}, level {level}: rays down see {turf} of turf");
             }
         }
@@ -232,7 +166,7 @@ mod tests {
         // sky, along the lattice's directions up (a voxel's faces), reaches nothing two sites under the lowest top of
         // the columns a site's voxel reaches into: not the hollow under the ground, past a cliff's corners or through a
         // steep face. Nearer a cliff's face, the sky shows, as it would.
-        let top = |x: i64, z: i64| i64::from(crate::noise::hash(7, x, 0, z) % 40);
+        let top = |x: i64, z: i64| i64::from(worldgen::noise::hash(7, x, 0, z) % 40);
         let world = ground(Op::Fill, false, move |x, z| Column::new(top(x, z)).surface(0, 1).sides(0, lowest_around(top, x, z), 3));
         for level in 0..4 {
             let s = 1 << level;
@@ -240,8 +174,8 @@ mod tests {
             let grid = generate(&world, &b, level);
             for (x, z) in (2..22).flat_map(|x| (2..22).map(move |z| (x, z))) {
                 let lowest = (-1..=1).flat_map(|i| (-1..=1).map(move |j| top((x + i) * s, (z + j) * s))).min().expect("nine");
-                for y in (b.min[1]..(lowest - 2 * s).div_euclid(s)).filter(|&y| crate::grid::is_site(x, y, z)) {
-                    for n in crate::picture::FACES.iter().filter(|n| n[1] > 0) {
+                for y in (b.min[1]..(lowest - 2 * s).div_euclid(s)).filter(|&y| worldgen::grid::is_site(x, y, z)) {
+                    for n in worldgen::picture::FACES.iter().filter(|n| n[1] > 0) {
                         let (p, d) = ([x, y, z].map(|v| v as f64), n.map(|v| v as f64 / std::f64::consts::SQRT_2));
                         let exits = |i: usize| match d[i] {
                             v if v > 0.0 => (b.max[i] as f64 - p[i]) / v,
@@ -267,22 +201,10 @@ mod tests {
     fn a_thin_medium_shows_on_its_ground_as_often_at_every_level() {
         // Moss that stops half of a ray down, painted on flat ground: rays down see half of it and half the stone,
         // near and far, whether its kind is pieces or see-through.
-        let red = |v: f64| fcc::light::srgb_to_linear((v / 255.0) as f32) as f64;
-        let shown = |see_through: bool, level: u32| {
-            let world = ground(Op::Paint, see_through, |_, _| Column::new(0).surface(0, 1).medium(1, 2, std::f64::consts::LN_2 / 2.0));
-            let grid = generate(&world, &Box3 { min: [0, -6, 0], max: [64, 6, 64] }, level);
-            let rays = (0..4096).map(|i| {
-                let at = |n: u64| 8.0 + 48.0 * crate::noise::hash(n, i, 0, 0) as f64 / u32::MAX as f64;
-                let seen = composited(&grid, [at(1), 5.0, at(2)], [0.0, -1.0, 0.0], 10.0, 1.0);
-                // How much of what the ray sees is moss's red (0x40) rather than stone's (0x80).
-                let (stopped, r) = seen.iter().fold((0.0, 0.0), |(s, r), (_, seen)| (s + seen.stopped, r + seen.shown[0]));
-                (red(128.0) - r / stopped) / (red(128.0) - red(64.0))
-            });
-            rays.sum::<f64>() / 4096.0
-        };
         for see_through in [false, true] {
+            let world = ground(Op::Paint, see_through, |_, _| Column::new(0).surface(0, 1).medium(1, 2, std::f64::consts::LN_2 / 2.0));
             for level in 0..6 {
-                let moss = shown(see_through, level);
+                let moss = dark_from_above(&generate(&world, &Box3 { min: [0, -6, 0], max: [64, 6, 64] }, level));
                 assert!((moss - 0.5).abs() < 0.08, "see-through {see_through}, level {level}: rays down see {moss} of it");
             }
         }
@@ -294,13 +216,13 @@ mod tests {
         // the top is in front of the water, not in its place nor mixed with it, and the water in front of the floor.
         let kinds = vec![kind(&"#808080", false), kind(&"#2478a0", true), kind(&"#9cc4d6", true)];
         let sea = |_, _| Column::new(0).surface(0, 1).medium(1, 38, 0.8 / 38.0).medium(2, 2, 0.4 / 2.0);
-        let world = Generator { kinds, seed: 1, layers: vec![Layer::Field(Field::columns("sea", 0.0, Op::Paint, sea))] };
+        let world = Generator { kinds, seed: 1, layers: vec![Layer::Field(crate::columns("sea", 0.0, Op::Paint, sea))] };
         let shown = |level: u32| {
             let s = (1i64 << level) as f64;
             let grid = generate(&world, &Box3 { min: [0, -6, 0], max: [64, (40 >> level) + 6, 64] }, level);
             let mut sum = [0.0; 3];
             for i in 0..4096 {
-                let at = |n: u64| 8.0 + 48.0 * crate::noise::hash(n, i, 0, 0) as f64 / u32::MAX as f64;
+                let at = |n: u64| 8.0 + 48.0 * worldgen::noise::hash(n, i, 0, 0) as f64 / u32::MAX as f64;
                 for (_, seen) in composited(&grid, [at(1), 40.0 / s + 5.0, at(2)], [0.0, -1.0, 0.0], 40.0 / s + 10.0, 1.0) {
                     (0..3).for_each(|c| sum[c] += seen.shown[c] / 4096.0);
                 }
@@ -318,9 +240,22 @@ mod tests {
         }
     }
 
+    /** Of what rays straight down `grid`'s middle see, the share that is the dark kind's red (#40), not stone's (#80). */
+    fn dark_from_above(grid: &VoxelGrid) -> f64 {
+        let red = |v: f64| fcc::light::srgb_to_linear((v / 255.0) as f32) as f64;
+        let (top, depth) = (grid.clip().max[1] as f64 - 1.0, (grid.clip().max[1] - grid.clip().min[1]) as f64);
+        let rays = (0..4096).map(|i| {
+            let at = |n: u64| 8.0 + 48.0 * worldgen::noise::hash(n, i, 0, 0) as f64 / u32::MAX as f64;
+            let seen = composited(grid, [at(1), top, at(2)], [0.0, -1.0, 0.0], depth, 1.0);
+            let (stopped, r) = seen.iter().fold((0.0, 0.0), |(s, r), (_, seen)| (s + seen.stopped, r + seen.shown[0]));
+            (red(128.0) - r / stopped) / (red(128.0) - red(64.0))
+        });
+        rays.sum::<f64>() / 4096.0
+    }
+
     /** A kind of `colour`, a medium or not. */
-    fn kind(colour: &'static &'static str, medium: bool) -> crate::generator::KindDef {
-        crate::generator::KindDef {
+    fn kind(colour: &'static &'static str, medium: bool) -> worldgen::generator::KindDef {
+        worldgen::generator::KindDef {
             name: "",
             kind_type: 1,
             colors: std::slice::from_ref(colour),
@@ -334,6 +269,6 @@ mod tests {
     fn ground(op: Op, see_through: bool, columns: impl Fn(i64, i64) -> Column + Send + Sync + 'static) -> Generator {
         // The moss grey, so that see-through it stops every channel alike.
         let kinds = vec![kind(&"#808080", false), kind(&"#404040", see_through)];
-        Generator { kinds, seed: 1, layers: vec![Layer::Field(Field::columns("ground", 0.0, op, columns))] }
+        Generator { kinds, seed: 1, layers: vec![Layer::Field(crate::columns("ground", 0.0, op, columns))] }
     }
 }

@@ -68,8 +68,8 @@ pub fn unit(h: u32) -> f64 {
     h as f64 / 4294967296.0
 }
 
-/** A fixed-point number, 16 bits after the point, untyped: the engine's inside; the worlds have `Fx`. */
-pub(crate) type Fixed = i64;
+/** A fixed-point number, 16 bits after the point, untyped: the engine's inside (and the ground crate's); the worlds have `Fx`. */
+pub type Fixed = i64;
 pub(crate) const ONE: Fixed = 1 << 16;
 
 /** `x` in fixed point, for constants. */
@@ -102,12 +102,12 @@ impl Fx {
     pub const EPSILON: Fx = Fx(1);
 
     /** The `Fx` of an untyped `Fixed`, where the engine's typed and untyped code meet. */
-    pub(crate) const fn from_bits(bits: Fixed) -> Fx {
+    pub const fn from_bits(bits: Fixed) -> Fx {
         Fx(bits)
     }
 
     /** As an untyped `Fixed`, for the engine's untyped code. */
-    pub(crate) const fn to_bits(self) -> Fixed {
+    pub const fn to_bits(self) -> Fixed {
         self.0
     }
 

@@ -14,7 +14,7 @@ use std::sync::Arc;
 use worldgen::World;
 use worldgen::generator::{Field, Generator, KindDef, Layer, Meets, Op};
 use worldgen::grid::Box3;
-use worldgen::plan;
+use worldgen::sites;
 use worldgen::units::m;
 
 /** One level's sites, of any lattice point of its box: 0 none, else 1 + the palette's index. */
@@ -221,7 +221,7 @@ impl Scene {
         let heights = (0..self.levels.len()).filter_map(|k| self.levels[k].heights(1 << k));
         let heights = heights.reduce(|a, b| (a.0.min(b.0), a.1.max(b.1))).unwrap_or((min[1], min[1]));
         let scene = Arc::new(self);
-        let field = Field::at("scene", 0.0, Op::Fill, move |x, y, z| match scene.at(x, y, z, plan::spacing()) {
+        let field = Field::at("scene", 0.0, Op::Fill, move |x, y, z| match scene.at(x, y, z, sites::spacing()) {
             0 => None,
             id => Some((id - 1, None)),
         })

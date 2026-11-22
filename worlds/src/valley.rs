@@ -2,7 +2,7 @@
 //! farmland around them, landmarks scattered through it, moorland on its
 //! uplands and along stretches of it, and a railway up one side, between
 //! mountain ranges; past them the sea to the west, an upland to the east.
-//! Domains on one land (plan.rs) that never call each other: each reads
+//! Domains on one land (ground's plan.rs) that never call each other: each reads
 //! only plans coarser than its own, bids for every column, and draws what
 //! it wins; the mountains raise the ground they all stand on. New
 //! structures join it as landmarks (landmarks.rs), as domains, or as
@@ -18,10 +18,10 @@ pub mod town;
 
 use std::sync::Arc;
 
-use worldgen::domain::{Domain, Lie, Scope, compose};
+use ground::domain::{Domain, Lie, Scope, compose};
+use ground::plan::Plan;
 use worldgen::generator::{Generator, KindDef};
 use worldgen::noise::{Fx, fx};
-use worldgen::plan::Plan;
 use worldgen::units::{Units, m};
 use worldgen::world::{Find, World};
 

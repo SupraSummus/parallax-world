@@ -12,9 +12,9 @@ use crate::curve::Curve;
 use crate::grid::{ALPHA, BRICK, Box3, COLOUR_ONE, VoxelGrid, look_of, to_linear};
 use crate::js;
 use crate::noise::{Fixed, Fx, ONE, Rng, fixed, float, hash, hash_text, hash64};
-use crate::plan;
 use crate::points::{Points, Spot};
 use crate::recent::Memo;
+use crate::sites;
 
 mod alone;
 mod drawables;
@@ -269,8 +269,8 @@ impl Node {
 /**
  * Part of a line of sites: [from, to) along the line, of `kind`, holding
  * its sites as `holds` says. A line has a site every two spacings, so a
- * solid span shorter than that may have none whole: `Column` (column.rs)
- * makes spans that keep one.
+ * span shorter than that is held in part: what is behind it along the
+ * line shows through it. One `thick` (build.rs) keeps a site whole.
  */
 pub struct Span {
     pub from: i64,
@@ -305,7 +305,7 @@ pub enum FieldValues {
     Spans { axis: usize, spans: Box<FieldSpans> },
     /**
      * Shapes, each of the field's op, that may reach a box (lattice units)
-     * asked for, at the sites read for (`plan::spacing`): drawn as a
+     * asked for, at the sites read for (`sites::spacing`): drawn as a
      * thing's are, but cutting the world, as any field does (dig with
      * them), in the order given. Each is the same, and in the same order,
      * whichever box asked for it.
@@ -313,7 +313,7 @@ pub enum FieldValues {
     Shapes(Box<FieldShapes>),
 }
 
-/** Something everywhere, given by position alone; what it leaves out by level, it asks the spacing for (`plan::spacing`). */
+/** Something everywhere, given by position alone; what it leaves out by level, it asks the spacing for (`sites::spacing`). */
 pub struct Field {
     pub name: &'static str,
     pub order: f64,
@@ -499,7 +499,7 @@ pub struct Population {
     /**
      * Whether an anchor of its things may lie in a box (lattice units),
      * as it says: a rule, checked on each one made; so it is asked to draw
-     * only where its things may reach (`Population::on`). None: anywhere.
+     * only where its things may reach (the ground crate's `PopulationOn::on`). None: anywhere.
      */
     pub stands: Option<Box<Stands>>,
     /** Its things' far forms, measured. */
@@ -621,12 +621,12 @@ const PI: f64 = std::f64::consts::PI;
 
 /**
  * Whether coordinate `at` is in the first half of a stripe `period` wide,
- * at the sites read for (`plan::spacing`). Stripes finer than the sites
+ * at the sites read for (`sites::spacing`). Stripes finer than the sites
  * would alias into wider ones: they draw each half as often as it is, by
  * `dither` (a hash of the site).
  */
 pub fn stripe(at: i64, period: i64, dither: u32) -> bool {
-    if 2 * plan::spacing() <= period { at.rem_euclid(period) < period / 2 } else { dither < 1 << 31 }
+    if 2 * sites::spacing() <= period { at.rem_euclid(period) < period / 2 } else { dither < 1 << 31 }
 }
 
 const EVERYWHERE: Box3 = Box3 { min: [i64::MIN / 4; 3], max: [i64::MAX / 4; 3] };

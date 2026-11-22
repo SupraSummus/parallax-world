@@ -6,15 +6,44 @@
 
 use crate::curve::Curve;
 use crate::generator::{
-    Anchors, Cell, Child, Children, DEEP, DOCS, Far, Field, FieldValues, Holds, Kind, Line, Meets, Node, Op, Point, Population, Radius,
-    SOLID, Shape, Shapes, Span, ball, bounds_of_shapes, capsule, cuboid, ellipsoid, gable, lathe, tube,
+    Anchors, Cell, Child, Children, Far, Field, FieldValues, Holds, Kind, Line, Meets, Node, Op, Point, Population, Radius, SOLID, Shape,
+    Shapes, Span, ball, bounds_of_shapes, capsule, cuboid, ellipsoid, gable, lathe, tube,
 };
 use crate::grid::Box3;
 use std::sync::Arc;
 
 use crate::noise::{Fx, Rng};
-use crate::plan::{self, Sloped};
 use crate::points::{Points, Spot};
+use crate::sites::spacing;
+
+/**
+ * A span `length` long as it stays at every level: at least two spacings
+ * of the sites read for, as a line of sites along an axis has a site every
+ * two (generator.rs, Span). Grown away from the end that shows: a layer
+ * from its top, a medium standing free from what it stands on.
+ */
+pub fn thick(length: i64) -> i64 {
+    length.max(2 * spacing())
+}
+
+impl Span {
+    /** Solid `kind` in [from, to). */
+    pub fn solid(from: i64, to: i64, kind: impl Into<Kind>) -> Span {
+        Span { from, to, kind: kind.into(), holds: Holds::Solid }
+    }
+
+    /**
+     * A medium of `kind` from `from`, `length` long, stopping `extinction`
+     * per unit of a ray's path (see Holds), standing free: `thick`, and
+     * then as much thinner as it is longer, as dense along a ray through
+     * it. In the site of what it stands on alone, it would show only in
+     * the colour of that site's pieces (VoxelGrid's `partial`).
+     */
+    pub fn medium(from: i64, length: i64, kind: impl Into<Kind>, extinction: f64) -> Span {
+        let long = thick(length);
+        Span { from, to: from + long, kind: kind.into(), holds: Holds::Medium(extinction * length as f64 / long as f64) }
+    }
+}
 
 impl Field {
     /** A kind, with a medium's extinction if it is one, at each site: `at(x, y, z)`, lattice units. */
@@ -55,48 +84,9 @@ impl Field {
         let reaching = near.clone();
         let values = FieldValues::Shapes(Box::new(move |b| near(b).into_iter().collect()));
         Field { name, order, op, values, meets: None }.meets(move |b, spacing| {
-            let reaches = plan::footprint(spacing, [0, 0], || reaching(b).into_iter().any(|s| s.bounds.overlaps(b)));
+            let reaches = crate::sites::footprint(spacing, [0, 0], || reaching(b).into_iter().any(|s| s.bounds.overlaps(b)));
             if reaches { Meets::Any } else { Meets::Nothing }
         })
-    }
-
-    /** Spans along each column, up y, all of them: `spans(x, z)`, lattice units; a `Column` or the spans. */
-    pub fn columns<S: Into<Vec<Span>>>(
-        name: &'static str,
-        order: f64,
-        op: Op,
-        spans: impl Fn(i64, i64) -> S + Send + Sync + 'static,
-    ) -> Field {
-        Field::spans(name, order, op, 1, spans)
-    }
-
-    /** Its spans along y from `below` under to `above` over `of` at their column (About): a rule; what it meets follows. */
-    pub fn about(self, of: Arc<Sloped>, below: i64, above: i64) -> Field {
-        self.about_as(About { of, below, above, under: None })
-    }
-
-    /**
-     * A ground: its spans about `of` as `about` says, and solid `under`
-     * under them, down without end (About's `under`): solid to the bottom.
-     */
-    pub fn ground(self, of: Arc<Sloped>, below: i64, above: i64, under: impl Into<Kind>) -> Field {
-        self.about_as(About { of, below, above, under: Some(under.into()) })
-    }
-
-    /** Its spans held to `about` as they are made, and what it meets following from it. */
-    fn about_as(self, about: About) -> Field {
-        let name = self.name;
-        let FieldValues::Spans { axis: 1, spans } = self.values else {
-            panic!("field {name}: spans along y only are about a plan of heights")
-        };
-        let about = Arc::new(about);
-        let held = about.clone();
-        let spans = Box::new(move |x, z| {
-            let spans = spans(x, z);
-            held.hold(name, x, z, &spans);
-            spans
-        });
-        Field { values: FieldValues::Spans { axis: 1, spans }, ..self }.meets(move |b, spacing| about.meets(b, spacing))
     }
 
     /**
@@ -106,90 +96,6 @@ impl Field {
      */
     pub fn meets(self, meets: impl Fn(&Box3, i64) -> Meets + Send + Sync + 'static) -> Field {
         Field { meets: Some(Box::new(meets)), ..self }
-    }
-}
-
-/**
- * Where a field's spans along y are: from `below` under to `above` over
- * `of` at their column, give or take what a line of sites stands for
- * (`slack`), and under that `under` if it says, down without end (a span
- * from DEEP). A rule, checked on each line's spans as they are made; what
- * the field meets follows (Sloped::range).
- */
-struct About {
-    of: Arc<Sloped>,
-    below: i64,
-    above: i64,
-    /** A solid kind under it all: the ground, solid to the bottom. */
-    under: Option<Kind>,
-}
-
-impl About {
-    /**
-     * How far past `below` and `above` the ground a line reaches, at sites
-     * `spacing` apart: down past the eight columns a spacing around it
-     * (column.rs's `sides`), the diagonals' up to twice the slope times
-     * that off; without one, any way.
-     */
-    fn sides(&self, spacing: i64) -> Option<i64> {
-        Some(2 * self.of.slope()? * spacing)
-    }
-
-    /**
-     * How far past them a line's spans may reach: its `sides`, and two
-     * sites more, as spans are `thick` (column.rs). Asked of a box,
-     * the two sites are what it is widened by (Field::meets).
-     */
-    fn slack(&self, spacing: i64) -> Option<i64> {
-        Some(self.sides(spacing)? + 2 * spacing)
-    }
-
-    /** What its lines draw in box `b` (lattice units), at sites `spacing` apart: whatever they draw, all `under` (a kind), or nothing. */
-    fn meets(&self, b: &Box3, spacing: i64) -> Meets {
-        let range = self.of.range([b.min[0], b.min[2]], [b.max[0] - 1, b.max[2] - 1]);
-        let (Some((lo, hi)), Some(sides)) = (range, self.sides(spacing)) else { return Meets::Any };
-        let (y0, y1) = (b.min[1], b.max[1] - 1);
-        match self.under {
-            _ if y0 > hi + self.above + sides => Meets::Nothing,
-            Some(kind) if y1 < lo - self.below - sides => Meets::All(kind),
-            None if y1 < lo - self.below - sides => Meets::Nothing,
-            _ => Meets::Any,
-        }
-    }
-
-    /** Panics unless field `name`'s `spans` of column (x, z), at the spacing read for, lie where it says. */
-    fn hold(&self, name: &str, x: i64, z: i64, spans: &[Span]) {
-        let s = plan::spacing();
-        let Some(slack) = self.slack(s) else { return };
-        // The column itself, wherever the spans read the ground.
-        let g = plan::where_asked(|| self.of.at(x, z));
-        let (low, high) = (g - self.below - slack, g + self.above + slack);
-        let under = |span: &Span| self.under == Some(span.kind) && span.holds == Holds::Solid;
-        for span in spans.iter().filter(|span| span.from < span.to) {
-            assert!(
-                (span.from >= low || under(span)) && span.to <= high,
-                "field {name}: span [{}, {}) at column ({x}, {z}) reaches past {} under and {} over its ground {g}, \
-                 give or take {slack} at sites {s} apart (Field::about); see \"Rules\" in {DOCS}",
-                span.from,
-                span.to,
-                self.below,
-                self.above
-            );
-        }
-        assert!(
-            self.under.is_none() || spans.iter().any(|span| under(span) && span.from <= DEEP && span.to >= low),
-            "field {name}: at column ({x}, {z}), kind {:?} doesn't reach up from DEEP to {low}, {} under its ground {g}, \
-             give or take {slack} at sites {s} apart (Field::ground); see \"Rules\" in {DOCS}",
-            self.under,
-            self.below,
-        );
-    }
-}
-
-impl Meets {
-    /** What a field drawing nothing over `top` along y (lattice units) draws in box `b`: nothing over it, anything under (Field::meets). */
-    pub fn under(top: i64, b: &Box3) -> Meets {
-        if b.min[1] > top { Meets::Nothing } else { Meets::Any }
     }
 }
 
@@ -288,24 +194,6 @@ impl Population {
      */
     pub fn stands(self, stands: impl Fn(&Box3) -> bool + Send + Sync + 'static) -> Population {
         Population { stands: Some(Box::new(stands)), ..self }
-    }
-
-    /**
-     * Its things standing on `ground`, each anchored at most N (its cell,
-     * as now) off it: on the ground the level's sites read where one is,
-     * over a box its range (Population::stands).
-     */
-    pub fn on(self, ground: Arc<Sloped>) -> Population {
-        let n = self.cell;
-        self.stands(move |b| {
-            let column = b.max[0] - b.min[0] == 1 && b.max[2] - b.min[2] == 1;
-            let range = if column {
-                Some((ground.at(b.min[0], b.min[2]), ground.at(b.min[0], b.min[2])))
-            } else {
-                ground.range([b.min[0], b.min[2]], [b.max[0], b.max[2]])
-            };
-            range.is_none_or(|(lo, hi)| b.min[1] <= hi + n && b.max[1] > lo - n)
-        })
     }
 
     /** What it draws while its sites are further apart than its `size`: a medium as dense as its things. */

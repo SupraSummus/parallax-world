@@ -7,47 +7,14 @@ use std::mem::MaybeUninit;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use crate::noise::{Fixed, Fx, Rng, hash64, smoothstep};
+use worldgen::noise::{Fixed, Fx, Rng, hash64, smoothstep};
+use worldgen::sites::{read_for, spacing, where_asked};
 
-const DOCS: &str = "docs/generators.md";
+use crate::DOCS;
 
 thread_local! {
     /** The plan being made on this thread and its scale (none: a layer, which may read any). */
     static MAKING: Cell<(&'static str, i64)> = const { Cell::new(("", 0)) };
-    /**
-     * The sites a layer reads plans for: their spacing, and how far from
-     * where it asks it reads dithered plans finer than that (`footprint`);
-     * none while plans or things are made.
-     */
-    static FOOTPRINT: Cell<Option<(i64, [i64; 2])>> = const { Cell::new(None) };
-}
-
-/**
- * Runs `read`, a layer's reads for sites `spacing` apart, with dithered
- * plans finer than the spacing read `offset` (x, z) from where asked:
- * how a line of sites reads them at one point of its voxels' footprint
- * (see Plan::dithered).
- */
-pub(crate) fn footprint<R>(spacing: i64, offset: [i64; 2], read: impl FnOnce() -> R) -> R {
-    debug_assert!((spacing as u64).is_power_of_two(), "sites are a power of two apart");
-    let outer = FOOTPRINT.replace(Some((spacing, offset)));
-    let value = read();
-    FOOTPRINT.set(outer);
-    value
-}
-
-/** The spacing of the sites a layer reads for now (`footprint`); 1 where asked, as plans and points are made. */
-#[inline]
-pub fn spacing() -> i64 {
-    FOOTPRINT.get().map_or(1, |(spacing, _)| spacing)
-}
-
-/** Runs `read` with plans read where asked, whoever asks: as a plan's columns are made, and points' chances (points.rs). */
-pub(crate) fn where_asked<R>(read: impl FnOnce() -> R) -> R {
-    let outer = FOOTPRINT.take();
-    let value = read();
-    FOOTPRINT.set(outer);
-    value
 }
 
 /** Slots a plan keeps values in: as many as 32 tiles have columns, for the tiles the world's threads make at once and what their layers read around them. */
@@ -145,7 +112,7 @@ impl Rule {
     /** Counts a read, and refuses one by a plan being made that is coarser. */
     #[inline]
     fn read(&self) {
-        crate::cost::lookup();
+        worldgen::cost::lookup();
         if self.scale < MAKING.get().1 {
             self.refuse();
         }
@@ -162,7 +129,7 @@ impl Rule {
     /** Makes column (x, z) of plan `of` with `make`: under its scale, and read where asked, as what a plan decides for a column is the same whoever reads it. */
     fn making<T, P>(&self, of: &P, x: i64, z: i64, make: impl FnOnce() -> T) -> T {
         let outer = MAKING.replace(if self.filter { ("", 0) } else { (self.name, self.scale) });
-        let value = where_asked(|| crate::cost::plan(self.name, of, [x, 0, z], make));
+        let value = where_asked(|| worldgen::cost::plan(self.name, of, [x, 0, z], make));
         MAKING.set(outer);
         value
     }
@@ -208,7 +175,7 @@ impl<T: Copy + Default> Plan<T> {
         self.rule.read();
         // A dithered read keeps its point in the slot of the column it is read for: those of a tile's never share one.
         let at = slot(x, z);
-        let (x, z) = match FOOTPRINT.get() {
+        let (x, z) = match read_for() {
             Some((spacing, [dx, dz])) if self.dithered && spacing > self.rule.scale => (x + dx, z + dz),
             _ => (x, z),
         };
@@ -282,7 +249,7 @@ impl<T> Large<T> {
  * broken, it panics). So its least and greatest over a rectangle of
  * columns are near those of a grid of samples of it: within the slope
  * times how far a column may be from a sample. Layers drawn about it
- * (Field::about, Population::on) are asked where they may draw from that;
+ * (FieldAbout::about, PopulationOn::on) are asked where they may draw from that;
  * without a promise, everywhere.
  */
 pub struct Sloped {
@@ -629,8 +596,8 @@ fn spots(cell: i64, seed: u64, first: Option<[i64; 2]>, at: [i64; 2], reach: i64
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::noise::{ONE, fx};
-    use crate::units::Units;
+    use worldgen::noise::fx;
+    use worldgen::units::Units;
 
     /** Threads keeping columns in the same few slots, each a value many words long that says its column: none reads one torn, or another's. */
     #[test]
@@ -697,7 +664,7 @@ mod tests {
 
     #[test]
     fn lookups_count_to_whoever_looks_up() {
-        use crate::cost::{self, Work};
+        use worldgen::cost::{self, Work};
         let fine = Arc::new(Plan::new("fine", 8, |x, _| x));
         let coarse = Plan::new("coarse", 1, move |x, z| fine.at(x, z) + fine.at(x + 1, z));
         let counts = cost::counted(|| {
@@ -716,7 +683,7 @@ mod tests {
 
     #[test]
     fn shares_add_up_and_ease_across_the_edge() {
-        let land = Land::new(8, fx(0.1), vec![Box::new(|x, _| Fx::from_bits(x * ONE / 100)), Box::new(|_, _| Fx::ZERO)]);
+        let land = Land::new(8, fx(0.1), vec![Box::new(|x, _| Fx::from_bits(x * Fx::ONE.to_bits() / 100)), Box::new(|_, _| Fx::ZERO)]);
         for x in -30..30 {
             let (sa, sb) = (land.share(0, x, 0), land.share(1, x, 0));
             assert!((sa + sb - Fx::ONE).abs() <= Fx::from_bits(1), "{x}: {sa:?} + {sb:?}");
@@ -729,8 +696,8 @@ mod tests {
     fn claims_are_apart_and_prefer_no_places() {
         use std::collections::BTreeSet;
 
-        use crate::checks::places::{SIDE, preference};
-        use crate::grid::Box3;
+        use worldgen::checks::places::{SIDE, preference};
+        use worldgen::grid::Box3;
         // Things at least 100 apart, where x + z is even (a ground they suit), the first at (5, 5); in cells 64 wide.
         let claims = |seed| Claims::new("claims", seed, 64, 100, Some([5, 5]), |[x, z], _| ((x + z) & 1 == 0).then_some(([x, z], ())));
         let area = Box3 { min: [-SIDE / 2, 0, -SIDE / 2], max: [SIDE / 2, 1, SIDE / 2] };

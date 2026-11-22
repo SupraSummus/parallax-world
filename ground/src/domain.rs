@@ -8,12 +8,12 @@
 
 use std::sync::Arc;
 
-use crate::generator::Layer;
-use crate::noise::{Fx, Text, smoothstep, stream};
-use crate::plan::{Bid, Holding, Kept, Land, Plan, Sloped, slot};
-use crate::units::Units;
+use worldgen::generator::Layer;
+use worldgen::noise::{Fx, Text, smoothstep, stream};
+use worldgen::units::Units;
 
-const DOCS: &str = "docs/generators.md";
+use crate::DOCS;
+use crate::plan::{Bid, Holding, Kept, Land, Plan, Sloped, slot};
 
 /**
  * A part of a world by name, and the seeds of what it draws, each from
@@ -171,7 +171,7 @@ pub fn compose(domains: &[Arc<dyn Domain>], ground: &Arc<Sloped>, scale: i64, wi
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::noise::fx;
+    use worldgen::noise::fx;
 
     /** Pulls towards `to` with `how_hard` where x is at least `from`. */
     struct Pull {
@@ -197,7 +197,7 @@ mod tests {
     #[test]
     fn a_parts_seeds_hash_its_path_of_names() {
         // Its name hashed as it grows, as every world's seeds were from the text "forest/trees:what".
-        let seed = |path: &str| stream(7, crate::noise::hash_text(path, 0));
+        let seed = |path: &str| stream(7, worldgen::noise::hash_text(path, 0));
         let world = Scope::new(7);
         assert_eq!(world.seed("relief"), seed(":relief"));
         assert_eq!(world.of("valley").of("forest").seed("heights"), seed("valley/forest:heights"));

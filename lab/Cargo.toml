@@ -7,3 +7,4 @@ publish = false
 [dependencies]
 worlds = { path = "../worlds" }
 worldgen = { path = "../worldgen" }
+ground = { path = "../ground" }

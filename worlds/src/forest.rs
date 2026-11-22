@@ -7,15 +7,18 @@
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
+use ground::column;
+use ground::column::lowest_around;
+use ground::domain::{Domain, Lie, Scope, compose};
+use ground::plan::{Holding, Plan, Sloped};
+use ground::{FieldAbout, PopulationOn};
 use worldgen::World;
-use worldgen::column::{self, lowest_around};
-use worldgen::domain::{Domain, Lie, Scope, compose};
-use worldgen::generator::{Field, Generator, Holds, Layer, Line, Node, Op, Point, Population, Shape, Span};
+use worldgen::generator::{Generator, Holds, Layer, Line, Node, Op, Point, Population, Shape, Span};
 use worldgen::js::{self, round};
 use worldgen::kinds;
 use worldgen::noise::{Fbm, Fx, Rng, ValueNoise, fx, hash, hash64, smoothstep, unit};
-use worldgen::plan::{self, Holding, Plan, Sloped};
 use worldgen::points::{Blur, MARKS, Points, Rooms};
+use worldgen::sites;
 use worldgen::units::{UNIT_SIZE, Units, m};
 
 use crate::path::{Path, Spine};
@@ -271,9 +274,9 @@ impl Woods {
         self.ground.ground.at(x, z)
     }
 
-    /** Column (x, z): rock where the ground is `steep` over the spacing read for (plan::spacing), as the terrain's cliffs. */
+    /** Column (x, z): rock where the ground is `steep` over the spacing read for (sites::spacing), as the terrain's cliffs. */
     fn column(&self, x: i64, z: i64) -> Column {
-        self.column_over(x, z, plan::spacing())
+        self.column_over(x, z, sites::spacing())
     }
 
     /** Column (x, z): rock where the ground is `steep` over `s`. */
@@ -337,7 +340,7 @@ impl Woods {
      * over the square at least, so the trees' points read the ground only at their leaves' corners.
      */
     fn leaf_chances(&self, x: i64, z: i64) -> [Fx; 3] {
-        let c = self.column_over(x, z, plan::spacing().max(TREE_LEAF));
+        let c = self.column_over(x, z, sites::spacing().max(TREE_LEAF));
         let chance = self.tree_chance(x, z, &c) / 4;
         Woods::species_chances(&c).map(|sp| chance * sp)
     }
@@ -464,13 +467,13 @@ fn layers(scope: &Scope, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
     // The ground: along each column, soil or stone under a layer of its surface, and stone down to the bottom.
     let terrain = {
         let f = f.clone();
-        Field::columns("terrain", 0.0, Op::Paint, move |x, z| {
+        ground::columns("terrain", 0.0, Op::Paint, move |x, z| {
             let h = f.ground(x, z);
             let lowest = lowest_around(|x, z| f.ground(x, z), x, z);
             let surface = f.column(x, z).surface;
             // Stone under stone, and down a side as steep over the spacing as stone ground: a cliff's at any level,
             // a corner's where only a diagonal falls away.
-            let cliff = h - lowest >= STEEP * plan::spacing();
+            let cliff = h - lowest >= STEEP * sites::spacing();
             let below = if cliff || surface == K::stone || surface == K::mossyStone { K::stone } else { K::soil };
             column::Column::new(h).surface(surface, m(1.0)).sides(below, lowest, m(1.5)).under(K::stone)
         })
@@ -516,9 +519,9 @@ fn layers(scope: &Scope, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
     let rooms = Arc::new(f.rooms(points.clone()));
     let canopy = {
         let (f, rooms) = (f.clone(), rooms.clone());
-        Field::columns("canopy", 1.0, Op::Fill, move |x, z| {
+        ground::columns("canopy", 1.0, Op::Fill, move |x, z| {
             // Its own far form, measured by the sites' spacing.
-            let spacing = plan::spacing();
+            let spacing = sites::spacing();
             let measured = measured[spacing.trailing_zeros() as usize].get_or_init(|| measure(spacing));
             let Measured { slabs, above, wood, shadow, own, over } = measured;
             // Its trees as measured in stands as dense as they are there, between the two nearest.

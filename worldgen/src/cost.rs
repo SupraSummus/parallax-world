@@ -170,7 +170,7 @@ pub fn counted<R>(f: impl FnOnce() -> R) -> (R, Counts) {
 
 /** Adds `work` to `layer`'s, if counting, with the plans looked up since work was last added: the layer's. */
 #[inline]
-pub(crate) fn add(layer: &'static str, work: Work) {
+pub fn add(layer: &'static str, work: Work) {
     let lookups = LOOKUPS.take();
     if COUNTING.get() {
         let work = Work { lookups: work.lookups + lookups, ..work };
@@ -180,7 +180,7 @@ pub(crate) fn add(layer: &'static str, work: Work) {
 
 /** Counts a plan looked up. */
 #[inline]
-pub(crate) fn lookup() {
+pub fn lookup() {
     LOOKUPS.set(LOOKUPS.get() + 1);
 }
 
@@ -190,7 +190,7 @@ pub(crate) fn lookup() {
  * others of its name.
  */
 #[inline]
-pub(crate) fn plan<T, P>(plan: &'static str, of: &P, at: [i64; 3], make: impl FnOnce() -> T) -> T {
+pub fn plan<T, P>(plan: &'static str, of: &P, at: [i64; 3], make: impl FnOnce() -> T) -> T {
     let outer = LOOKUPS.take();
     let value = make();
     let lookups = LOOKUPS.replace(outer);
