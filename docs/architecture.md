@@ -625,6 +625,12 @@ Till a brick with voxels is lit, it is not on the GPU, as if no ray had asked fo
 what is not lit yet shows coarser, lit, never shaded by another light.
 A tile never changes but for its bricks' light, each found once.
 
+Lit, the voxels show light as an eye adapting to it would (`native/src/eye.rs`):
+the samples meter the luminance their rays meet,
+read back with what they asked for.
+The chunks engines show light as it is, baked into their splats,
+past white white.
+
 ## 5. Worlds (`fcc/`, `worldgen/`, `worlds/`)
 
 **The lattice** (`fcc/`). Voxels sit on the face-centred cubic lattice:

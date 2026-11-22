@@ -874,6 +874,11 @@ Numbers are for the forest at 1280×800, as measured when written.
 - Light along more directions at coarser levels, as radiance cascades do:
   near, light wants fine places and few directions; far, coarse places and many.
   Light keeps 12 at every level, too few far off (a lamp's lobes, blurred shadows).
+- The eye (`native/src/eye.rs`) in the chunks engines too:
+  their splats hold light baked as a byte a channel;
+  held as RGB9E5, the compositor could show it as the voxels do.
+- The eye at night: colours fading and bluer (Purkinje's shift),
+  so that a night shown brighter still looks like night.
 - WGSL formatted in `pnpm lint`, as rustfmt does the Rust.
   wgslfmt 0.1 (wgsl-analyzer's) pads compound assignments (`x   += 1`)
   and joins long expressions into one line; try a later one.

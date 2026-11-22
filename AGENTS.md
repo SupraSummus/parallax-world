@@ -111,6 +111,7 @@ native/src/                  # The frontend: egui on winit and wgpu; in browsers
 ├── threads.rs               # Threads natively and in browsers, which the thread that draws never waits for
 ├── world.rs                 # The world's tiles around the camera, made and lit on threads
 ├── view.rs                  # The camera, the 12 faces, rays, screen boxes
+├── eye.rs                   # How light shows: the eye adapting, its curve
 ├── engine.rs                # What draws: Engine, Picture, Painter; the engines by name
 └── engine/
     ├── chunks.rs            # The chunks engine

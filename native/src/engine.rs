@@ -18,6 +18,7 @@ use std::any::Any;
 use egui_wgpu::wgpu;
 use light::Brightness;
 
+use crate::eye::Eye;
 use crate::gpu::Easel;
 use crate::view::{self, Vec3, focal_length};
 use crate::world::{Wants, World};
@@ -112,8 +113,9 @@ pub trait Painter: Any {
 
 /**
  * How the world is seen: from where, which way, how wide (degrees across
- * the longer side) and how far, at what size (points), lit or not; and
- * what engines that draw cells, or chunks, read besides.
+ * the longer side) and how far, at what size (points), lit or not, and
+ * how the light shows; and what engines that draw cells, or chunks, read
+ * besides.
  */
 #[derive(Clone, Copy, PartialEq)]
 pub struct Look {
@@ -127,6 +129,8 @@ pub struct Look {
     pub size: [f64; 2],
     /** How bright the light is, if voxels are lit by light worked out across the world (light's Light); None, shaded. */
     pub light: Option<Brightness>,
+    /** How that light shows (eye.rs), in the voxels. */
+    pub eye: Eye,
     /** Viewing distance over a cell's thickness, and how many levels finer than its cell its voxels are (bake's Lod). */
     pub detail: f64,
     pub shift: i32,
@@ -153,6 +157,7 @@ impl Look {
             fog: 0.7,
             size,
             light: None,
+            eye: Eye::default(),
             detail: 2f64.powf(3.25),
             shift: 3,
             seams: false,

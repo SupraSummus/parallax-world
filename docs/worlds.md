@@ -30,6 +30,11 @@ See [architecture.md](architecture.md).
 **Light** – Voxels are shaded by the way their faces face,
 or lit by light worked out across the world:
 the sky, the sun and what glows, each as bright as its slider says.
+Lit, the voxels show it as an eye would:
+adapting, over a second, to how bright what it looks at is,
+so that a dark room or a night shows brighter, but still dark,
+and what is bright past a door or round a lamp washes out less;
+its exposure and how far it adapts are sliders too.
 
 **Views in the URL** – The page's query can give the world, its seed,
 the camera, where it looks, the field of view, the render distance

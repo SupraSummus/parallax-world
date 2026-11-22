@@ -33,7 +33,8 @@
 //! takes more slots, for what those see: `sights`, Pool), times the light on it: shaded,
 //! by the way its surface faces; lit, the light its tile found for it
 //! (world.rs, light's Light), and its own glow, uploaded with its brick
-//! to a pool of its own.
+//! to a pool of its own; as the eye sees it (eye.rs), adapted to what the
+//! samples' rays meet, metered and read back with what they asked for.
 //!
 //! Lit, only what rays meet is lit: a brick asked for is unknown till it
 //! has its light. The world lights the bricks asked for, and the windows
@@ -46,10 +47,11 @@ use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 
 use egui_wgpu::wgpu;
 use fcc::GRID_LEVELS;
-use fcc::light::{linear_to_srgb, rgb9e5, srgb_to_linear};
+use fcc::light::{rgb9e5, srgb_to_linear};
 use light::Light;
 
 use super::{Engine, Frame, Look, Painter, Picture};
+use crate::eye::{self, Adapted, BINS};
 use crate::gpu::Easel;
 use crate::threads::Post;
 use crate::view::{Vec3, focal_length, view_basis};
@@ -467,24 +469,29 @@ struct Globals {
     sky_fog: f32,
     /** 1 if voxels are lit by their tiles' light, 0 shaded by the way their surface faces. */
     lit: u32,
-    _pad: u32,
+    /** The multiple of light the eye shows (eye.rs): lit, as it adapted; else 1. */
+    exposure: f32,
+    /** The sky's light, linear. */
     sky_top: [f32; 4],
     horizon: [f32; 4],
     /** Right, up, forward, in the world: columns of a mat3x3f. */
     view: [[f32; 4]; 3],
+    /** The light the eye shows white: unlit, 1, the light as it is. */
+    white: f32,
+    _pad: [u32; 3],
 }
 
 impl Globals {
-    fn of(look: &Look, pixels: [u32; 2]) -> Globals {
+    fn of(look: &Look, pixels: [u32; 2], marks: [f32; 2]) -> Globals {
         let [width, height] = pixels.map(f64::from);
         let focal = focal_length(look.fov, width, height);
         let column = |v: Vec3| [v[0] as f32, v[1] as f32, v[2] as f32, 0.0];
-        // Dimmed in linear terms, as light adds up.
         let sky = look.light.map_or(1.0, |b| b.sky);
         let rgba = |c: [f32; 3]| {
-            let [r, g, b] = c.map(|c| linear_to_srgb(srgb_to_linear(c) * sky));
+            let [r, g, b] = c.map(|c| srgb_to_linear(c) * sky);
             [r, g, b, 1.0]
         };
+        let [exposure, white] = if look.light.is_some() { look.eye.shows(marks) } else { [1.0; 2] };
         Globals {
             resolution: [width as f32, height as f32],
             extent: [(width / focal) as f32, (height / focal) as f32],
@@ -492,10 +499,12 @@ impl Globals {
             // What of the sky the fog hides, as of something at the far end.
             sky_fog: (1.0 - (-1.0 / look.fog).exp()) as f32,
             lit: u32::from(look.light.is_some()),
-            _pad: 0,
+            exposure,
             sky_top: rgba(SKY_TOP),
             horizon: rgba(SKY_HORIZON),
             view: view_basis(look.yaw, look.pitch).map(column),
+            white,
+            _pad: [0; 3],
         }
     }
 }
@@ -1384,11 +1393,14 @@ pub struct Marcher {
     /**
      * Globals, levels, tables, the pool, the eye, cells'
      * counts, the pool's bricks' light (none unlit), its slots' next
-     * (Pool's), and, lit, the bricks rays asked for (ASKED_WORDS).
+     * (Pool's), and, lit, the bricks rays asked for (ASKED_WORDS) and
+     * the meter's bins (BINS).
      */
-    buffers: [wgpu::Buffer; 9],
-    /** What the asked were copied to, to read. */
+    buffers: [wgpu::Buffer; 10],
+    /** What the asked and the meter were copied to, to read, one after the other. */
     readback: wgpu::Buffer,
+    /** What the eye adapted to, as the meter last read back says. */
+    adapted: Adapted,
     reading: Reading,
     layouts: [wgpu::BindGroupLayout; 3],
     pipelines: [wgpu::RenderPipeline; 3],
@@ -1412,7 +1424,9 @@ pub struct Marcher {
 /** voxels.wgsl, with the constants it shares with this file. */
 fn shader() -> String {
     format!(
-        "const WINDOW = {WINDOW};\nconst CELLS = {CELLS}u;\nconst BRICK = {BRICK};\nconst BRICK_SHIFT = {BRICK_SHIFT}u;\nconst BRICK_SITES = {BRICK_SITES}u;\nconst LIGHT_WORDS = {LIGHT_WORDS}u;\nconst FACTOR = {FACTOR}u;\nconst EMPTY = {EMPTY};\nconst STOPS = {STOPS};\nconst UNKNOWN = {UNKNOWN};\nconst FACES = array<vec3f, {}>({});\n{}",
+        "const BINS = {BINS}u;\nconst LOWEST = {:?};\nconst SPAN = {:?};\nconst WINDOW = {WINDOW};\nconst CELLS = {CELLS}u;\nconst BRICK = {BRICK};\nconst BRICK_SHIFT = {BRICK_SHIFT}u;\nconst BRICK_SITES = {BRICK_SITES}u;\nconst LIGHT_WORDS = {LIGHT_WORDS}u;\nconst FACTOR = {FACTOR}u;\nconst EMPTY = {EMPTY};\nconst STOPS = {STOPS};\nconst UNKNOWN = {UNKNOWN};\nconst FACES = array<vec3f, {}>({});\n{}",
+        eye::LOWEST,
+        eye::SPAN,
         fcc::FACE_KINDS,
         fcc::VOXEL_FACES.map(|[x, y, z]| format!("vec3f({x}.0, {y}.0, {z}.0)")).join(", "),
         include_str!("voxels.wgsl")
@@ -1449,8 +1463,9 @@ impl Marcher {
             buffer("lights", (pool as usize * light_words * 4).max(4), storage),
             buffer("next", pool as usize * 4, storage),
             buffer("asked", ASKED_WORDS * 4, storage | wgpu::BufferUsages::COPY_SRC),
+            buffer("metered", BINS * 4, storage | wgpu::BufferUsages::COPY_SRC),
         ];
-        let readback = buffer("asked read", ASKED_WORDS * 4, wgpu::BufferUsages::MAP_READ);
+        let readback = buffer("asked read", (ASKED_WORDS + BINS) * 4, wgpu::BufferUsages::MAP_READ);
         let entry = |binding: u32, ty| wgpu::BindGroupLayoutEntry { binding, visibility: wgpu::ShaderStages::FRAGMENT, ty, count: None };
         let buffer_type = |ty| wgpu::BindingType::Buffer { ty, has_dynamic_offset: false, min_binding_size: None };
         let read = buffer_type(wgpu::BufferBindingType::Storage { read_only: true });
@@ -1471,11 +1486,12 @@ impl Marcher {
             entry(8, uint),
             entry(9, uint),
             entry(11, write),
+            entry(12, write),
         ];
         let samples = [&all[..8], &all[10..]].concat();
         let shown = [entry(10, texture(wgpu::TextureSampleType::Float { filterable: false }))];
         // The samples' pass draws into the textures the resolving one reads, which draws the picture shown; the
-        // samples' rays ask for bricks.
+        // samples' rays ask for bricks, and meter the light they meet.
         let layouts = [&samples[..], &all[..10], &shown[..]]
             .map(|entries| device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: None, entries }));
         let pipeline = |entry: &str, layout: &wgpu::BindGroupLayout, formats: &[wgpu::TextureFormat]| {
@@ -1519,6 +1535,7 @@ impl Marcher {
         Marcher {
             buffers,
             readback,
+            adapted: Adapted::default(),
             reading,
             layouts,
             pipelines,
@@ -1578,7 +1595,8 @@ impl Marcher {
             *gpu = self.shapes[level].gpu(level, look.camera, look.far);
         }
         queue.write_buffer(&self.buffers[1], 0, bytemuck::cast_slice(&levels));
-        queue.write_buffer(&self.buffers[0], 0, bytemuck::bytes_of(&Globals::of(look, pixels)));
+        self.adapted.adapt(still);
+        queue.write_buffer(&self.buffers[0], 0, bytemuck::bytes_of(&Globals::of(look, pixels, self.adapted.marks())));
         let eye = look.camera.map(|v| v as f32);
         queue.write_buffer(&self.buffers[4], 0, bytemuck::cast_slice(&[eye[0], eye[1], eye[2], 0.0]));
         if self.targets.as_ref().is_none_or(|t| t.pixels != pixels) {
@@ -1612,17 +1630,20 @@ impl Marcher {
             pass.draw(0..4, 0..1);
         }
         if matches!(self.reading, Reading::Idle) {
-            encoder.copy_buffer_to_buffer(&self.buffers[8], 0, &self.readback, 0, self.readback.size());
+            encoder.copy_buffer_to_buffer(&self.buffers[8], 0, &self.readback, 0, self.buffers[8].size());
+            encoder.copy_buffer_to_buffer(&self.buffers[9], 0, &self.readback, self.buffers[8].size(), self.buffers[9].size());
             encoder.clear_buffer(&self.buffers[8], 0, None);
+            encoder.clear_buffer(&self.buffers[9], 0, None);
             self.reading = Reading::Copied(self.changes, self.shapes.map(|s| s.ball));
         }
-        let busy = !self.settled || self.read.1;
+        let busy = !self.settled || self.read.1 || self.adapted.adapting();
         scene.busy.store(busy, Ordering::Relaxed);
     }
 
     /**
      * Reads back what rays asked for: maps what the last frame copied, or,
-     * once mapped, keeps its words that are not 0 for the next task (`heard`).
+     * once mapped, keeps its words that are not 0 for the next task
+     * (`heard`), and has the eye adapt towards what was metered.
      */
     fn ask(&mut self, device: &wgpu::Device) {
         // What it waits for, done: the map's callback.
@@ -1637,8 +1658,9 @@ impl Marcher {
             Reading::Mapping(done, changes, seen) if done.load(Ordering::Acquire) => {
                 {
                     let bytes = self.readback.slice(..).get_mapped_range().expect("mapped");
-                    let words: &[u32] = bytemuck::cast_slice(&bytes);
+                    let (words, bins) = bytemuck::cast_slice::<_, u32>(&bytes).split_at(ASKED_WORDS);
                     self.heard = Some((changes, seen, words.iter().copied().enumerate().filter(|(_, w)| *w != 0).collect()));
+                    self.adapted.metered(bins);
                 }
                 self.readback.unmap();
             }
@@ -1664,7 +1686,7 @@ impl Marcher {
             [SAMPLE_HITS, SAMPLE_COLOURS].map(|f| target("samples", pixels.map(|v| v.div_ceil(FACTOR)), f, wgpu::TextureUsages::empty()));
         let views = samples.each_ref().map(|t| t.create_view(&Default::default()));
         let picture_view = picture.create_view(&Default::default());
-        // Bound as numbered, the asked at 11.
+        // Bound as numbered, the asked at 11, the meter at 12.
         let mut entries: Vec<_> = self.buffers[..8]
             .iter()
             .enumerate()
@@ -1674,6 +1696,7 @@ impl Marcher {
             entries.push(wgpu::BindGroupEntry { binding: 8 + k as u32, resource: wgpu::BindingResource::TextureView(view) });
         }
         entries.push(wgpu::BindGroupEntry { binding: 11, resource: self.buffers[8].as_entire_binding() });
+        entries.push(wgpu::BindGroupEntry { binding: 12, resource: self.buffers[9].as_entire_binding() });
         let shown = [wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::TextureView(&picture_view) }];
         let group = |layout, entries: &[wgpu::BindGroupEntry]| {
             device.create_bind_group(&wgpu::BindGroupDescriptor { label: None, layout, entries })
