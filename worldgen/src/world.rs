@@ -64,7 +64,12 @@ impl World {
         b.slab(UP, from, high.min(b.max[UP]).max(from))
     }
 
-    /** The place named `name`: "spawn", or one of its points. */
+    /** Its places by name: "spawn", then its points, each found when the iterator reaches it. */
+    pub fn places(&self) -> impl Iterator<Item = (&'static str, [i64; 3])> + '_ {
+        std::iter::once(("spawn", self.spawn)).chain(self.points.iter().map(|(name, find)| (*name, find())))
+    }
+
+    /** The place named `name`, of `places`, finding no other. */
     pub fn point(&self, name: &str) -> Option<[i64; 3]> {
         if name == "spawn" {
             return Some(self.spawn);

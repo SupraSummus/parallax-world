@@ -217,15 +217,6 @@ pub fn aside<R>(f: impl FnOnce() -> R) -> R {
 // ---------------------------------------------------------------------------
 // Reports
 
-/**
- * Places to report on: a world's spawn and the centres of `regions`
- * (lattice units), by name.
- */
-pub fn places(world: &World, regions: &[Box3]) -> Vec<(String, [i64; 3])> {
-    let centres = regions.iter().enumerate().map(|(i, r)| (format!("region{}", i + 1), [0, 1, 2].map(|a| (r.min[a] + r.max[a]) / 2)));
-    [("spawn".to_string(), world.spawn)].into_iter().chain(centres).collect()
-}
-
 /** Host tiles a side of the boxes reported on (tiles::TILE): the baselines and the budget are of tiles as they were, that large. */
 const TILES: i64 = 4;
 

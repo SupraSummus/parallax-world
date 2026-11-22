@@ -231,9 +231,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   Not long rays across a wide region, against level 0:
   grazing along a ground, they cross its coarse half-full sites many times over,
   and stop far more than at level 0 (0.67 against 0.5 at level 6), which no alpha keeps.
-- **Cost's places are still listed by hand** (`Entry` in `worlds/src/lib.rs`).
-  The survey could give them: the places of the costliest strata.
-  Then `Region` would go.
 - **Things' variants of one part, drawing the same kinds, are one stratum**
   (`worldgen::checks::survey`): a ruin and a watchtower, both of stone,
   are measured as one between them.
@@ -318,7 +315,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   Only the cheese is one (`worlds/cheese/`),
   and it still needs its entry in `WORLDS`, its name in three tests' `worlds!`
   and its cost baseline in `worlds/` (checks.md).
-  With `Entry` and `Region` in `worldgen`,
+  With `Entry` in `worldgen`,
   each world's crate could give its entry and test itself
   (one macro of `worldgen::checks`), `WORLDS` a line per crate.
   Sharing pieces runs into the two items above.
@@ -790,7 +787,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   Its threads end together, so only less work would shorten it,
   or its seeds on several runners (`--nocapture` shows each part's time).
   A seed's regions take longest, then its survey.
-  If CI is still too slow, the contract at seeds but `REGIONS_SEED`
+  If CI is still too slow, the contract at seeds but `SEED`
   (`worlds/tests/contract.rs`) could run only on main.
 - **LLVM 21 compiles AVX-512 code wrong (lavapipe).**
   It may rematerialise a vector of all ones into a register past 15
@@ -824,7 +821,8 @@ Numbers are for the forest at 1280×800, as measured when written.
     the valley's domains (`worlds/src/valley/`) use each other in circles.
     The kinds and the ground apart
     come before "Worlds are not yet crates of their own".
-  - `worlds/data/cost/valley.txt` is the repo's largest text file
+  - `worlds/data/cost/valley.txt` is the repo's largest text file,
+    grows with every place the valley names,
     and changes with most commits to the worlds;
     a baseline per place and level would do for a test with a quarter's slack.
   - `docs/generators.md` holds the worlds beside the engine ("Composing").
@@ -863,10 +861,6 @@ Numbers are for the forest at 1280×800, as measured when written.
 - WGSL formatted in `pnpm lint`, as rustfmt does the Rust.
   wgslfmt 0.1 (wgsl-analyzer's) pads compound assignments (`x   += 1`)
   and joins long expressions into one line; try a later one.
-- Report cost at the places worlds name (`World::points`),
-  not at the spawn and the regions' centres (`cost::places`),
-  once the forest, the moor and the city name some:
-  they would be measured at their spawn alone.
 - Assume no ground.
   Hosts keep an up (`world::UP`, +y): bodies fall along it, the sky and the sun are over it.
   A world could name its own, which hosts would then follow.

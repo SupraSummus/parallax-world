@@ -259,7 +259,8 @@ with what each pixel hit and how far away, for checks to measure
 (`cargo run --release --example map` or `look` in `worlds/`, arguments in the files).
 `look` takes the places a world names for its eye, target or area,
 so a feature can be seen at any seed (`at windmill`);
-to find one more, give its world a point for it, not a scratch search.
+to find one more, give its world a point for it, not a scratch search:
+its cost is then measured there too (`worlds/tests/cost.rs`).
 
 ## Cost
 
@@ -277,7 +278,8 @@ weighed by rough times per count (`NS`),
 they show what takes the time.
 
 `cost::report` generates boxes of a world at several levels
-around some places, each by a fresh world, as a host's first is:
+around its places (`World::places`): its spawn and those it names,
+each by a fresh world, as a host's first is:
 cubes of the lattice, four of native's tiles a side (`tiles::tile_box`),
 as large as its tiles were.
 It prints the estimate by layer and level, largest first,
