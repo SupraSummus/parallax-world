@@ -6,6 +6,11 @@ resolver = "3"
 members = ["fcc", "bake", "worldgen", "ground", "light", "worlds", "worlds/cheese", "native", "web/bindgen", "lab"]
 default-members = ["fcc", "bake", "worldgen", "ground", "light", "worlds", "worlds/cheese", "native"]
 
+# Debug builds keep files and lines, for panics and profiles, but no
+# variables: about half the size on disk.
+[profile.dev]
+debug = "line-tables-only"
+
 # The tests bake whole cells and generate whole tiles, several times faster
 # optimised. Debug assertions stay on.
 [profile.test]
