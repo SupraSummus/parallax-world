@@ -10,7 +10,7 @@ Which tests run them is in [testing.md](testing.md).
 `worldgen::checks::contract` (`worldgen/src/checks/contract.rs`) checks worlds
 in regions holding everything they are made of around spawn,
 which it finds itself (`worldgen::checks::survey`, `survey.rs`), not from a list:
-`worlds/tests/contract.rs` runs it for each world in `WORLDS`
+each world's crate runs it on its worlds (`keeps_the_contract::<world>`, below)
 at seed 42 and three more together, as more places of one world,
 and `worldgen/tests/contract.rs` for test worlds of fog, caves,
 and a village of houses with doors and tables
@@ -107,7 +107,7 @@ as far apart as `TOLERANCE` (0.045) in how much they stop,
 or in the colour of what they stop (so a thin medium's colour counts as a solid's),
 and each cell as far from what is in it as `SPREAD` (0.1), on average.
 Those are the defaults (`Accuracy::DEFAULT`).
-A world's entry in `WORLDS` may declare others by stratum (`accuracy`),
+A world's `Entry` may declare others by stratum (`accuracy`),
 as it declares to which level it keeps it (`levels`):
 one for a thing or a layer covers its parts, unless a part has its own
 (`Accuracy::of`), and each is checked as closely as declared;
@@ -115,14 +115,15 @@ a name that covers no stratum breaks it, so a misspelt one is not lost.
 A mean settles as seeds are added; the largest of many only grows.
 Where a world, a test world or a solid breaks it,
 its baseline says by how much, as lint baselines do:
-`worlds/data/contract/<world>.txt`, `worldgen/data/contract/`
+`data/contract/<world>.txt` in its crate, `worldgen/data/contract/`
 (`contract::hold_to_baseline`), a line per stratum and level that breaks it,
 how far apart and how spread on average.
 A test fails on a break not in it,
 and on one further apart or more spread, or nearer or less, by more than `SLACK`,
 or kept now: the baseline goes with the code it measures.
 `CONTRACT_BLESS=1` writes the baselines anew
-(`cargo test --release --test contract` in `worlds/`, or `--test contract --test shapes` in `worldgen/`).
+(`cargo test --release --test checks keeps_the_contract::` in a world's crate,
+or `--test contract --test shapes` in `worldgen/`).
 Breaks of the rules that hold exactly have no baseline.
 The worst case is each solid's alone (`shapes.rs`),
 though its scenes ask little of it (`docs/todo.md`).
@@ -219,8 +220,8 @@ and each seed's alone:
 a grid whose phase a seed draws still keeps towns off its regions' edges.
 Only things are checked: claims a field draws (the moor's pools) are not,
 and things as rare as the valley's haystacks are too few to tell.
-`worlds/tests/places.rs` checks each world in `WORLDS`,
-but for the populations it knows prefer places (`KNOWN`, docs/todo.md).
+Each world is checked so (`even::<world>`),
+but for the populations its entry knows prefer places (`Known::Prefers`).
 
 Nor must a world's directions follow the lattice's.
 Its own may be anything: up, a heading, a valley along z.
@@ -236,8 +237,8 @@ but none larger than its two-fold one, so only the excess counts:
 a strong direction of the world's own hides as much of the lattice's.
 Each place a world names is tested apart, in a box around it at each seed,
 as is the rest of the world, in boxes anywhere.
-`worlds/tests/directions.rs` checks each world in `WORLDS`,
-but for the places it knows follow the lattice (`KNOWN`, docs/todo.md).
+Each world is checked so (`turned::<world>`),
+but for the places its entry knows follow the lattice (`Known::Turned`).
 
 With `--nocapture` it prints each level's margins;
 `contract::in_regions` returns them as a `Report` to print,
@@ -245,10 +246,17 @@ each margin's looks at both levels.
 A broken mean (`contract::breaks`) names the stratum and level,
 and each region it was averaged over, at its seed.
 The engine's tests also check that a thing's carves cut only the thing.
-A new world is a crate of its own in `worlds/`, as the cheese is,
-an entry in `WORLDS`,
-and its name in `worlds!` in `worlds/tests/contract.rs`,
-whose tests fail without it.
+A world is named by an `Entry` (`worldgen/src/entry.rs`):
+how to make it, to which level and how closely it keeps the contract,
+and what it is known to break (`Known`), each for a reason in docs/todo.md.
+Every crate of worlds is alike:
+it lists its entries as its `WORLDS`,
+and tests them, against baselines in its own `data/`,
+by one line, `worldgen::world_tests!`, which makes for each world
+`keeps_the_contract::<world>`, `turned::<world>`, `even::<world>`
+and `cost::<world>`, and fails on a world of `WORLDS` it does not name.
+So a new world is a crate of its own in `worlds/`, as the cheese is,
+and for hosts, its `WORLDS` one more in `worlds::all` (`worlds/src/lib.rs`).
 To see a world without the renderer,
 `worlds/examples/map.rs` draws its layout from above, any level, any area,
 and `worlds/examples/look.rs` takes a picture of it at one level
@@ -258,7 +266,7 @@ with what each pixel hit and how far away, for checks to measure
 `look` takes the places a world names for its eye, target or area,
 so a feature can be seen at any seed (`at windmill`);
 to find one more, give its world a point for it, not a scratch search:
-its cost is then measured there too (`worlds/tests/cost.rs`).
+its cost is then measured there too (`cost::<world>`).
 
 ## Cost
 
@@ -294,16 +302,16 @@ as a failing cache does (each plan's row shows its times made).
 `cargo run --release --example cost -- <world>` in `worlds/` prints it
 (arguments in the file).
 
-`worlds/tests/cost.rs` holds each world in `WORLDS`,
+`cost::<world>` holds each world
 at every level a host makes, odd ones too,
-to its baseline, `worlds/data/cost/<world>.txt`:
+to its baseline, `data/cost/<world>.txt` in its crate:
 it fails when a count rises or falls by more than a quarter
 and the change weighs a hundredth of its tile or more.
 When the change is meant,
-`COST_BLESS=1 cargo test --release --test cost` in `worlds/`
+`COST_BLESS=1 cargo test --release --test checks cost::` in its crate
 writes the baselines anew, and their diff shows it.
 It also fails when a tile's estimate is over the budget (`cost::BUDGET`),
-unless the tile is listed in `OVER_BUDGET` there,
+unless its entry knows it is (`Known::OverBudget`),
 and when a listed one is not, to take it off:
 the list only shrinks, and blessing does not move it.
 It fails, too, when a plan makes a tile's columns over `REMADE` times each,

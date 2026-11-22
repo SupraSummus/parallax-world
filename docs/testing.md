@@ -5,16 +5,16 @@ Commands are in `package.json`:
 
 ```bash
 pnpm test                       # every crate's tests, but the worlds' checks over seeds
-pnpm test:worlds                # every world's contract, directions and places
+pnpm test:worlds                # every world's contract, directions, places and cost
 cargo test --release -p parallax-native world::   # one crate's, by name
 ```
 
 `pnpm test` leaves out the worlds' checks over seeds
-(`worlds/tests/contract.rs`, `directions.rs`, `places.rs`),
+(`keeps_the_contract::`, `turned::`, `even::` in each crate's `tests/checks.rs`),
 most of the time testing takes;
 only `worldgen/`, `ground/`, `worlds/` and `fcc/` change what they check.
 `pnpm test:worlds` runs them, as CI always does;
-one world's: `cargo test --release -p worlds --test contract valley`.
+one world's: `cargo test --release -p worlds --test checks valley`.
 
 ## Layout
 
@@ -33,17 +33,16 @@ one world's: `cargo test --release -p worlds --test contract valley`.
 | `native/src/engine/chunks/compositor.rs`, `native/src/engine/voxels.rs` | Their shaders valid as wgpu would find them, without a GPU (naga); the structs they share laid out alike in WGSL and Rust |
 | `fcc/src/lib.rs` | Tiles hold their cubes alike along every axis; a table of tiles in blocks holds what a map would, and a copy changes alone; a part of a grid holds its box's sites as the grid does; each face reads the look through the voxels' faces towards it |
 | `fcc/src/walk.rs`, `worlds/tests/forest.rs`, `worlds/src/valley/moor.rs` | Walking: the ground, steps, walls, jumps; the forest's path through its ferns; into the moor's huts |
-| `worlds/tests/contract.rs`, `worldgen/tests/contract.rs`, `worldgen/tests/shapes.rs` | Every world, the engine's test worlds and each solid keep the contract (`worldgen/src/checks/contract.rs`): generated in pieces equals generated whole; each stratum's cells look on average as what is in them two levels finer, or as their baseline says they don't (`worlds/data/contract/`, `worldgen/data/contract/`; `docs/checks.md`); each solid in the worst case |
+| `worlds/tests/checks.rs`, `worlds/cheese/tests/checks.rs`, `worldgen/tests/contract.rs`, `worldgen/tests/shapes.rs` | Each world of a crate's `WORLDS` (`worldgen/src/entry.rs`), the engine's test worlds and each solid keep the contract (`worldgen/src/checks/contract.rs`): generated in pieces equals generated whole; each stratum's cells look on average as what is in them two levels finer, or as their baseline says they don't (`data/contract/` of a world's crate, `worldgen/data/contract/`; `docs/checks.md`); each solid in the worst case |
+| `worlds/tests/checks.rs`, `worlds/cheese/tests/checks.rs` | What generating each world costs, counted, stays within a quarter of its baseline (`data/cost/` of its crate; "Cost" in `docs/checks.md`); its things prefer no places on its grids (`worldgen/src/checks/places.rs`); its directions don't follow the lattice's; each but as its entry knows (`Known`) |
 | `worldgen/src/checks/cells.rs` | A cell's rays are alike along every direction, and weighed they fill it |
 | `worldgen/src/checks/survey.rs` | The survey keeps the same places in any order, and none it did not want when it came |
-| `worlds/tests/cost.rs` | What generating each world costs, counted, stays within a quarter of its baseline (`worlds/data/cost/`; "Cost" in `docs/checks.md`) |
 | `worlds/src/path.rs` | Whether a column is by a path agrees with its distance to the path's curve, round a steep, fast-bending spine |
 | `worlds/src/valley/railway.rs` | The valley's railway keeps its grade and its band of the valley, out of towns; it bends gently; few bridges and tunnels, none a stub |
 | `ground/src/plan.rs`, `ground/tests/plans.rs` | Plans: finer ones refused, slopes kept, claims apart; a column read while threads keep others is whole or not found; a dithered one read by fields as often as it covers |
 | `ground/tests/about.rs`, `ground/src/column.rs` | Fields about a ground drawn only where they may be, and held to it; things on it; a column's layers at every level, its sides closed |
 | `worldgen/src/points.rs` | Points: a cell holds its children's, whichever is asked first; they stand where their mark has a chance, as often as it is; a blur is its cells' counts weighed, wherever its blocks fall |
-| `worlds/tests/places.rs` | No world's things prefer places on its grids (`worldgen/src/checks/places.rs`), but those known to (`KNOWN`, docs/todo.md) |
-| `worlds/tests/directions.rs`, `worldgen/src/checks/directions.rs` | No world's directions follow the lattice's, but around the places known to (`KNOWN`, docs/todo.md); walls along the axes or the diagonals do; hills, gentle or steep, rows along z, and walls turned any way a seed likes don't |
+| `worldgen/src/checks/directions.rs` | Walls along the axes or the diagonals follow the lattice's directions; hills, gentle or steep, rows along z, and walls turned any way a seed likes don't |
 | `worlds/tests/forest.rs`, `worlds/tests/valley.rs`, `worlds/tests/city.rs` | The scenes: determinism, contents, spawn; threads sharing a world make its tiles as one alone |
 
 ## Conventions
@@ -54,7 +53,7 @@ one world's: `cargo test --release -p worlds --test contract valley`.
   example tests. For a claim about all inputs, check it on seeded random
   samples so failures reproduce.
 - The worlds' checks list their known exceptions
-  (`OVER_BUDGET`, `KNOWN`) and fail both ways:
+  (an entry's `known`) and fail both ways:
   on a new failure, and on a listed one that now passes, to take it off.
   Change a list only with the reason, in the commit or docs/todo.md;
   never pick seeds, places or points to dodge a check.

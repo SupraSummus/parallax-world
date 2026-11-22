@@ -13,6 +13,7 @@ use ground::FieldAbout;
 use ground::column::Column;
 use ground::plan::{Plan, Sloped};
 use worldgen::World;
+use worldgen::entry::{Entry, Known};
 use worldgen::generator::{ANY_SIZE, Child, Children, Far, Field, Generator, Layer, Node, Op, Population, Shape, Shapes};
 use worldgen::grid::Box3;
 use worldgen::kinds;
@@ -1045,6 +1046,19 @@ fn district(blocks: Arc<Vec<Block>>) -> Node {
         far: None,
     }
 }
+
+/**
+ * The city, checked to level 3: at level 4, sites 2 m apart, a building's
+ * measured outline (INSIDE) is kept or lost a site at a time.
+ */
+pub const CITY: Entry = Entry {
+    name: "city",
+    make: city,
+    levels: 3,
+    accuracy: &[],
+    // Why: docs/todo.md, "Towns and the city line up with the lattice".
+    known: &[Known::Turned("spawn")],
+};
 
 /** The city of `seed`; the camera starts on the road in front of the middle front building's open entrance, at eye height. */
 pub fn city(seed: u64) -> World {

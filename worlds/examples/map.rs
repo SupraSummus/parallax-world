@@ -5,20 +5,20 @@
 //!
 //! cargo run --release --example map -- valley 42 2 -1600 -400 3200 4000 map.ppm
 //!
-//! for world (by name, as in WORLDS), seed, level, the area's min x and z, width and depth (lattice
+//! for world (by name, as in worlds::all), seed, level, the area's min x and z, width and depth (lattice
 //! units), and the file.
 
 use fcc::light::{linear_to_srgb, srgb_to_linear};
 use worldgen::generator::generate;
 use worldgen::grid::{Box3, VOXEL_FACES};
-use worlds::{WORLDS, by_name};
+use worlds::{all, by_name};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let number = |i: usize| args[i].parse::<i64>().expect("a number");
     let seed = number(1) as u64;
     let Some(entry) = by_name(&args[0]) else {
-        let names: Vec<&str> = WORLDS.iter().map(|e| e.name).collect();
+        let names: Vec<&str> = all().map(|e| e.name).collect();
         eprintln!("no world {}; the worlds are {}", args[0], names.join(", "));
         std::process::exit(1);
     };

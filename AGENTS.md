@@ -69,6 +69,7 @@ worldgen/                    # The world-generation engine, no direction up in i
 │   ├── frame.rs             # Things built in frames of their own
 │   ├── recent.rs            # What was used last, kept
 │   ├── world.rs             # World: what a host needs to show one
+│   ├── entry.rs             # Entry: a world by name, what its checks hold it to; its tests (world_tests!)
 │   ├── tiles.rs             # A world's tiles, as hosts and light take them
 │   ├── picture.rs           # Pictures of a world, by rays through its voxels
 │   ├── png.rs               # A small PNG encoder, every crate's
@@ -88,9 +89,9 @@ light/                       # Light, a prototype (docs/light.md), on worldgen's
 ├── src/reference.rs         # Its reference: rays traced through level 0
 └── data/                    # The reference's values
 worlds/                      # The worlds, on worldgen's and ground's public API only
-├── cheese/                  # The cheese, a crate of its own
+├── cheese/                  # The cheese, a crate of its own, with its tests and baselines
 ├── src/
-│   ├── lib.rs               # WORLDS: the registry hosts start worlds from by name
+│   ├── lib.rs               # all: the registry hosts start worlds from by name, each crate's WORLDS
 │   ├── path.rs              # Spines and paths along them
 │   ├── forest.rs            # The forest, on ground other worlds share
 │   ├── forest/              # Its trees (trees.rs) and what lies on its floor (floor.rs)
@@ -108,7 +109,7 @@ worlds/                      # The worlds, on worldgen's and ground's public API
 │   └── scene.rs             # Scenes made elsewhere, read from a file
 ├── data/                    # Baselines of cost and contract, the forest's stands, the town grammar;
 │                            # scenes/ is not in git (docs/generators.md, "Scenes")
-├── tests/                   # Every world keeps the contract and its cost baseline
+├── tests/                   # Its worlds keep the contract and their cost baselines (checks.rs); scenes
 └── examples/                # map, look, check, cost, bench: a world looked at, checked, measured
 lab/                         # Experiment, linted but not tested by pnpm (see src/lib.rs); scripts/overture.py fetches its real places
 native/src/                  # The frontend: egui on winit and wgpu; in browsers too (web/index.html)

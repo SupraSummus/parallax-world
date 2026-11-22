@@ -9,12 +9,13 @@
 //! the world names there), and `all` for every count of every tile.
 
 use worldgen::cost::report;
-use worlds::{SEED, WORLDS, by_name};
+use worldgen::entry::SEED;
+use worlds::{all, by_name};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let Some(entry) = args.first().and_then(|name| by_name(name)) else {
-        let names: Vec<&str> = WORLDS.iter().map(|e| e.name).collect();
+        let names: Vec<&str> = all().map(|e| e.name).collect();
         eprintln!("cost <world> [seed] [levels <l>...] [at <x y z>...] [all]; the worlds are {}", names.join(", "));
         std::process::exit(1);
     };
