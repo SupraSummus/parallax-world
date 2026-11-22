@@ -10,16 +10,17 @@
 
 use std::sync::Arc;
 
-use worldgen::column::Column;
-use worldgen::domain::{Domain, Scope, eased};
+use ground::FieldAbout;
+use ground::column::Column;
+use ground::domain::{Domain, Scope, eased};
+use ground::plan::{Claims, Holding, Plan, Sloped};
 use worldgen::frame::{Frame, Part, U, V, W, back, walls};
 use worldgen::generator::{
-    ANY_SIZE, Child, Children, Far, Field, Fill, Kind, Layer, Node, Op, Population, SOLID, Shape, Shapes, Span, bounds_of_shapes,
+    ANY_SIZE, Child, Children, Far, Fill, Kind, Layer, Node, Op, Population, SOLID, Shape, Shapes, Span, bounds_of_shapes,
 };
 use worldgen::grid::Box3;
 use worldgen::kinds;
 use worldgen::noise::{Fx, Rng, ease_towards, fx, hash64};
-use worldgen::plan::{Claims, Holding, Plan, Sloped};
 use worldgen::units::{Units, m};
 
 use crate::forest::{self, K as F, Relief, Species, make_tree};
@@ -477,7 +478,7 @@ impl Domain for Towns {
 fn layers(towns: Arc<Towns>, hold: Holding, ground: Arc<Sloped>) -> Vec<Layer> {
     let surface = {
         let (towns, surface_ground) = (towns.clone(), ground.clone());
-        Field::columns("streets", 0.5, Op::Paint, move |x, z| {
+        ground::columns("streets", 0.5, Op::Paint, move |x, z| {
             let spot = towns.spot(x, z);
             if spot == Spot::Outside || !hold.owns(x, z) {
                 return Vec::new();

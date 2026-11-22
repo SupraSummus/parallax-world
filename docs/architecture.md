@@ -8,8 +8,11 @@ The Rust is a workspace of crates (`Cargo.toml`):
 `fcc/` under all of them
 (the lattice, grids and tiles of them, the light from voxels' faces),
 `bake/` (chunks baked) and `worldgen/` (the generator framework) on it,
+in which no direction is up,
+`ground/` on `worldgen/` (worlds on a ground: plans by column, heights, columns, domains;
+up is +y),
 `light/` (light worked out across a world, [light.md](light.md))
-and `worlds/` on `worldgen/`
+and `worlds/` on `worldgen/` and `ground/`
 (the registry, and worlds in crates of their own inside it);
 `native/` links them.
 For browsers it is built as WebAssembly and bound to the page
@@ -631,7 +634,7 @@ read back with what they asked for.
 The chunks engines show light as it is, baked into their splats,
 past white white.
 
-## 5. Worlds (`fcc/`, `worldgen/`, `worlds/`)
+## 5. Worlds (`fcc/`, `worldgen/`, `ground/`, `worlds/`)
 
 **The lattice** (`fcc/`). Voxels sit on the face-centred cubic lattice:
 the integer points (x, y, z) with x + y + z even.
@@ -676,6 +679,12 @@ The worlds have `UNIT_SIZE` metres per unit
 They are endless and can be generated in any box alone
 ([generators.md](generators.md)),
 by `worlds/` on the engine of `worldgen/`.
+The engine has no up: a field's spans lie along any axis,
+shapes and things stand any way, the contract checks every direction.
+What only a world on a ground needs, plans of its columns (x, z),
+heights, layers down from a top, land shared by domains,
+is `ground/`, on the engine's public API;
+the cheese needs none of it.
 The forest's ground is a heightfield sampled per column of sites;
 trunks are columns at least 2 units square,
 crowns leaf clusters (balls) or a solid of revolution (spruce),

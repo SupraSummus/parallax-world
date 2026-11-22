@@ -53,7 +53,7 @@ bake/src/                    # Chunk baker, on fcc/
 ├── tables.rs                # The voxel's faces and shades per view face
 ├── splats.rs                # What a chunk shows: splats, reliefs, media
 └── lod.rs                   # Chunks: whole cells, levels by depth
-worldgen/                    # The world-generation engine; no worlds (docs/generators.md)
+worldgen/                    # The world-generation engine, no direction up in it; no worlds (docs/generators.md)
 ├── src/
 │   ├── generator.rs         # The framework: nodes, fields, populations
 │   ├── generator/           # Any box at any level: forms, drawables, shapes, things
@@ -61,10 +61,8 @@ worldgen/                    # The world-generation engine; no worlds (docs/gene
 │   ├── grid.rs              # Voxel storage in bricks, each site's look
 │   ├── noise.rs             # Integer hashes, fixed point (Fx), noise
 │   ├── units.rs             # Metres per lattice unit
+│   ├── sites.rs             # The sites a layer reads for: their spacing
 │   ├── js.rs                # Float math the same on every target
-│   ├── column.rs            # A heightfield's spans
-│   ├── plan.rs              # Plans by column: heights, land, claims
-│   ├── domain.rs            # Domains a world is composed of
 │   ├── curve.rs             # Curves: lines through space
 │   ├── points.rs            # Points: where things are; rooms
 │   ├── frame.rs             # Things built in frames of their own
@@ -76,11 +74,18 @@ worldgen/                    # The world-generation engine; no worlds (docs/gene
 │   └── checks/              # The contract, the survey, places, directions: for tests (docs/checks.md)
 ├── data/                    # The test worlds' contract baselines
 └── tests/                   # The engine on test worlds; each solid against its baseline
+ground/                      # Worlds on a ground, on worldgen's public API: up is +y
+├── src/
+│   ├── plan.rs              # Plans by column: heights, land, claims
+│   ├── column.rs            # A heightfield's spans
+│   ├── about.rs             # Fields about a ground, things on it
+│   └── domain.rs            # Domains a world is composed of
+└── tests/                   # Fields about a ground; plans read by fields
 light/                       # Light, a prototype (docs/light.md), on worldgen's tiles
 ├── src/lib.rs               # Light: each site's, settled round by round, shared by threads
 ├── src/reference.rs         # Its reference: rays traced through level 0
 └── data/                    # The reference's values
-worlds/                      # The worlds, on worldgen's public API only
+worlds/                      # The worlds, on worldgen's and ground's public API only
 ├── cheese/                  # The cheese, a crate of its own
 ├── src/
 │   ├── lib.rs               # WORLDS: the registry hosts start worlds from by name
@@ -132,7 +137,7 @@ pnpm check   # lint, the WebAssembly built, then test
 While iterating, run only the affected tests
 ([docs/testing.md](docs/testing.md));
 run `pnpm check` again only after changing code.
-After changing `worldgen/`, `worlds/` or `fcc/`, also run `pnpm test:worlds`:
+After changing `worldgen/`, `ground/`, `worlds/` or `fcc/`, also run `pnpm test:worlds`:
 the worlds' checks over seeds, which `pnpm test` leaves out.
 
 `pnpm lint` is clippy with warnings as errors, and rustfmt.

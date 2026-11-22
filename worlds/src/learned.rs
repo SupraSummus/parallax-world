@@ -22,13 +22,14 @@
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
-use worldgen::column::Column;
-use worldgen::domain::{Domain, Lie, Scope, compose, eased};
+use ground::FieldAbout;
+use ground::column::Column;
+use ground::domain::{Domain, Lie, Scope, compose, eased};
+use ground::plan::{Claims, Holding, Plan, Sloped};
 use worldgen::frame::{Frame, Part, U, V, W, back};
-use worldgen::generator::{ANY_SIZE, Child, Children, Field, Generator, Layer, Node, Op, Population, Shapes};
+use worldgen::generator::{ANY_SIZE, Child, Children, Generator, Layer, Node, Op, Population, Shapes};
 use worldgen::grid::Box3;
 use worldgen::noise::{Fx, Rng, ease_towards, fx, hash64};
-use worldgen::plan::{Claims, Holding, Plan, Sloped};
 use worldgen::recent::Memo;
 use worldgen::units::{Units, m};
 use worldgen::world::{Find, World};
@@ -527,7 +528,7 @@ fn town_layers(settlements: Arc<Settlements>, hold: Holding, ground: Arc<Sloped>
     let surface = {
         let (settlements, ground) = (settlements.clone(), ground.clone());
         let on = ground.clone();
-        Field::columns("learned streets", 0.5, Op::Paint, move |x, z| {
+        ground::columns("learned streets", 0.5, Op::Paint, move |x, z| {
             let spot = settlements.spot(x, z);
             if !spot.town() || !hold.owns(x, z) {
                 return Vec::new();

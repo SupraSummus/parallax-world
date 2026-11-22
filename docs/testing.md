@@ -12,7 +12,7 @@ cargo test --release -p parallax-native world::   # one crate's, by name
 `pnpm test` leaves out the worlds' checks over seeds
 (`worlds/tests/contract.rs`, `directions.rs`, `places.rs`),
 most of the time testing takes;
-only `worldgen/`, `worlds/` and `fcc/` change what they check.
+only `worldgen/`, `ground/`, `worlds/` and `fcc/` change what they check.
 `pnpm test:worlds` runs them, as CI always does;
 one world's: `cargo test --release -p worlds --test contract valley`.
 
@@ -38,7 +38,8 @@ one world's: `cargo test --release -p worlds --test contract valley`.
 | `worlds/tests/cost.rs` | What generating each world costs, counted, stays within a quarter of its baseline (`worlds/data/cost/`; "Cost" in `docs/checks.md`) |
 | `worlds/src/path.rs` | Whether a column is by a path agrees with its distance to the path's curve, round a steep, fast-bending spine |
 | `worlds/src/valley/railway.rs` | The valley's railway keeps its grade and its band of the valley, out of towns; it bends gently; few bridges and tunnels, none a stub |
-| `worldgen/src/plan.rs` | Plans: finer ones refused, slopes kept, claims apart; a column read while threads keep others is whole or not found |
+| `ground/src/plan.rs`, `ground/tests/plans.rs` | Plans: finer ones refused, slopes kept, claims apart; a column read while threads keep others is whole or not found; a dithered one read by fields as often as it covers |
+| `ground/tests/about.rs`, `ground/src/column.rs` | Fields about a ground drawn only where they may be, and held to it; things on it; a column's layers at every level, its sides closed |
 | `worldgen/src/points.rs` | Points: a cell holds its children's, whichever is asked first; they stand where their mark has a chance, as often as it is; a blur is its cells' counts weighed, wherever its blocks fall |
 | `worlds/tests/places.rs` | No world's things prefer places on its grids (`worldgen/src/checks/places.rs`), but those known to (`KNOWN`, docs/todo.md) |
 | `worlds/tests/directions.rs`, `worldgen/src/checks/directions.rs` | No world's directions follow the lattice's, but around the places known to (`KNOWN`, docs/todo.md); walls along the axes or the diagonals do; hills, gentle or steep, rows along z, and walls turned any way a seed likes don't |

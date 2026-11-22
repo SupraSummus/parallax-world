@@ -12,10 +12,10 @@
 //! winds round rises; seen from above it turns at its points, so it is
 //! smoothed, a B-spline through them.
 
+use ground::domain::Scope;
+use ground::plan::Large;
 use worldgen::curve::Curve;
-use worldgen::domain::Scope;
 use worldgen::noise::{Fx, fx, hash, unit};
-use worldgen::plan::Large;
 use worldgen::units::{UNIT_SIZE, Units, m};
 
 use crate::path::Spine;

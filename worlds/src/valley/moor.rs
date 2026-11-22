@@ -13,15 +13,17 @@
 
 use std::sync::Arc;
 
+use ground::column::Column;
+use ground::domain::{Domain, Lie, Scope, compose, eased};
+use ground::plan::{Claims, Holding, Plan, Sloped};
+use ground::{FieldAbout, PopulationOn};
 use worldgen::World;
-use worldgen::column::{self, Column};
-use worldgen::domain::{Domain, Lie, Scope, compose, eased};
+use worldgen::build::thick;
 use worldgen::frame::{Frame, Part, facing, walls};
 use worldgen::generator::{ANY_SIZE, Child, Far, Field, Generator, Kind, Layer, Meets, Node, Op, Population, Shape, Span};
 use worldgen::js;
 use worldgen::kinds;
 use worldgen::noise::{Fbm, Fx, Rng, ValueNoise, fx, hash64, smoothstep};
-use worldgen::plan::{Claims, Holding, Plan, Sloped};
 use worldgen::units::{Units, m};
 
 use super::landmarks::{self, Landmarks};
@@ -715,7 +717,7 @@ fn mist(f: Arc<Heath>) -> Field {
         })
     };
     let (ground, lies) = (f.ground.ground.clone(), f.moorland.lies);
-    Field::columns("mist", 5.0, Op::Fill, move |x, z| {
+    ground::columns("mist", 5.0, Op::Fill, move |x, z| {
         let share = f.air(x, z);
         if share == Fx::ZERO {
             return Vec::new();
@@ -733,7 +735,7 @@ fn mist(f: Arc<Heath>) -> Field {
     .meets(move |b, _| {
         let r = 2 * MIST_RING;
         let Some((_, high)) = ground.range([b.min[0] - r, b.min[2] - r], [b.max[0] - 1 + r, b.max[2] - 1 + r]) else { return Meets::Any };
-        Meets::under(high + 1 + (lies.over - lies.under).0.max(0), b)
+        ground::under(high + 1 + (lies.over - lies.under).0.max(0), b)
     })
 }
 
@@ -741,7 +743,7 @@ fn mist(f: Arc<Heath>) -> Field {
 fn heath(f: Arc<Heath>) -> Field {
     // Half a metre of its surface and of peat, heather on it; or peat down without end.
     let (of, under) = (f.ground.ground.clone(), f.ground.under);
-    let field = Field::columns("heath", 0.7, Op::Paint, move |x, z| {
+    let field = ground::columns("heath", 0.7, Op::Paint, move |x, z| {
         let Some(cover) = f.covers(x, z).filter(|_| !f.by_path(x, z, Fx::m(1.6))) else { return Vec::new() };
         let h = f.height(x, z);
         let wet = f.moorland.water(x, z).is_some_and(|level| Units(h) <= level + BOG) || f.moorland.streamside(x, z) != Streamside::Off;
@@ -772,7 +774,7 @@ fn heath(f: Arc<Heath>) -> Field {
 
 /** The bottom of the stream's bed under ground `h` high: a metre deep, `thick`. */
 fn bed_bottom(h: i64) -> i64 {
-    h - column::thick(m(1.0))
+    h - thick(m(1.0))
 }
 
 /**
@@ -781,7 +783,7 @@ fn bed_bottom(h: i64) -> i64 {
  */
 fn stream_bed(f: Arc<Heath>) -> Field {
     let f_ground = f.ground.ground.clone();
-    Field::columns("stream bed", 1.0, Op::Carve, move |x, z| {
+    ground::columns("stream bed", 1.0, Op::Carve, move |x, z| {
         if f.moorland.streamside(x, z) != Streamside::Bed {
             return Vec::new();
         }
@@ -798,7 +800,7 @@ fn stream_bed(f: Arc<Heath>) -> Field {
  */
 fn water(f: Arc<Heath>) -> Field {
     let (moorland, ground) = (f.moorland.clone(), f.ground.ground.clone());
-    Field::columns("water", 2.0, Op::Paint, move |x, z| {
+    ground::columns("water", 2.0, Op::Paint, move |x, z| {
         let h = f.height(x, z);
         if f.moorland.streamside(x, z) == Streamside::Bed {
             return vec![Span::solid(bed_bottom(h), h - 1, T::water)];
@@ -815,7 +817,7 @@ fn water(f: Arc<Heath>) -> Field {
         let Some((_, high)) = ground.range(min, max).filter(|_| s < POOLS_APART / 2) else { return Meets::Any };
         let water = moorland.highest_water(min, max).map(|level| level.0 + 1);
         match water.max(moorland.stream.as_ref().map(|_| high)) {
-            Some(top) => Meets::under(top, b),
+            Some(top) => ground::under(top, b),
             None => Meets::Nothing,
         }
     })

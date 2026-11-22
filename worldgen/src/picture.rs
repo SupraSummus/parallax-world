@@ -170,10 +170,10 @@ impl Ray {
  * what glowing sites send them (linear, of a site all of a glowing white).
  */
 #[derive(Clone, Debug, Default)]
-pub(crate) struct Seen {
-    pub(crate) stopped: f64,
-    pub(crate) shown: [f64; 3],
-    pub(crate) glow: [f64; 3],
+pub struct Seen {
+    pub stopped: f64,
+    pub shown: [f64; 3],
+    pub glow: [f64; 3],
 }
 
 /** Composited, a ray stops where less than this of it gets through. */
@@ -360,7 +360,7 @@ impl Tiles {
  * that shows and what it glows; till next to none of it gets through.
  * Each site counts as `crossing` crossings (CROSSING along a row).
  */
-pub(crate) fn composited(grid: &VoxelGrid, origin: [f64; 3], direction: [f64; 3], end: f64, crossing: f64) -> Vec<(f64, Seen)> {
+pub fn composited(grid: &VoxelGrid, origin: [f64; 3], direction: [f64; 3], end: f64, crossing: f64) -> Vec<(f64, Seen)> {
     let mut ray = Ray { pixel: 0, origin, direction, t: 0.0, end, site: nearest_site(origin), face: FACES.len(), through: [1.0; 3] };
     let walk = Walk::new(direction);
     let mut planes = walk.planes(&ray);

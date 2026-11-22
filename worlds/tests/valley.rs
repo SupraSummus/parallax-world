@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use worldgen::domain::Scope;
+use ground::domain::Scope;
 use worldgen::generator::{Layer, generate, generate_shown, kind_of};
 use worldgen::grid::{ALPHA, Box3, is_site};
 use worldgen::picture::{Camera, picture};

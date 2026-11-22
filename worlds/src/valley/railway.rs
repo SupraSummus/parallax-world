@@ -23,15 +23,18 @@
 
 use std::sync::Arc;
 
-use worldgen::column::{self, Column};
+use ground::FieldAbout;
+use ground::column::Column;
+use ground::domain::{Domain, Scope};
+use ground::plan::{Holding, Large, Plan, Sloped};
+use worldgen::build::thick;
 use worldgen::curve::{self, Curve, Near};
-use worldgen::domain::{Domain, Scope};
 use worldgen::frame::{Frame, Part, facing};
-use worldgen::generator::{Field, Kind, Layer, Node, Op, Population, Span};
+use worldgen::generator::{Kind, Layer, Node, Op, Population, Span};
 use worldgen::js;
 use worldgen::kinds;
 use worldgen::noise::{Fx, Rng, fx, hash, hash64, smoothstep};
-use worldgen::plan::{self, Holding, Large, Plan, Sloped};
+use worldgen::sites;
 use worldgen::units::{Units, m};
 
 use super::Terrain;
@@ -655,7 +658,7 @@ fn layers(railway: Arc<Railway>, hold: Holding, ground: Arc<Sloped>) -> Vec<Laye
     let bores = {
         let (railway, top) = (railway.clone(), top.clone());
         // Last: nothing standing over a tunnel (trees and plants at a portal, mist) reaches into its bore.
-        Field::columns("railway's tunnels", BORES, Op::Carve, move |x, z| {
+        ground::columns("railway's tunnels", BORES, Op::Carve, move |x, z| {
             let Some(at) = railway.at(x, z).filter(|a| a.structure == Structure::Tunnel && a.distance < Units(BORE).to_fx()) else {
                 return Vec::new();
             };
@@ -668,9 +671,9 @@ fn layers(railway: Arc<Railway>, hold: Holding, ground: Arc<Sloped>) -> Vec<Laye
     let track = |name, order, tunnel: bool| {
         let (railway, top) = (railway.clone(), top.clone());
         let (ground, hold) = (ground.clone(), hold.clone());
-        Field::columns(name, order, Op::Paint, move |x, z| {
+        ground::columns(name, order, Op::Paint, move |x, z| {
             let Some(at) = railway.at(x, z).filter(|a| (a.structure == Structure::Tunnel) == tunnel) else { return Vec::new() };
-            let spacing = plan::spacing();
+            let spacing = sites::spacing();
             let (top, e, floor) = (at.top, at.distance, bed(at.top));
             let within = |d: i64| e < Units(d).to_fx();
             let mut spans = Vec::new();
@@ -685,7 +688,7 @@ fn layers(railway: Arc<Railway>, hold: Holding, ground: Arc<Sloped>) -> Vec<Laye
                     } else if within(DECK) {
                         // Its top where it is at every level: `thick`, grown down, not up.
                         let (bottom, parapet) = (top - m(1.0), top + 1 + m(0.75));
-                        spans.push(Span::solid(parapet - column::thick(parapet - bottom), parapet, T::brick));
+                        spans.push(Span::solid(parapet - thick(parapet - bottom), parapet, T::brick));
                     }
                 }
                 // A floor as deep as the ballast, and a lining round the bore: walls on it, then its vault.
@@ -757,7 +760,7 @@ fn layers(railway: Arc<Railway>, hold: Holding, ground: Arc<Sloped>) -> Vec<Laye
 
 /** The bottom of the ballast under a track `top` high, and of what it lies on: half a metre down, `thick`. */
 fn bed(top: i64) -> i64 {
-    top + 1 - column::thick(m(0.5))
+    top + 1 - thick(m(0.5))
 }
 
 /** How high a tunnel's bore is `e` across from its middle: walls, then a round vault. */

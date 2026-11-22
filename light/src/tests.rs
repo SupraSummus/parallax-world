@@ -42,7 +42,7 @@ fn world_with(
         .reach(1024)
         .anchor(|cell| (cell.centre == [0; 3]).then_some([0.0; 3]))
         .make(move |_, _| Some(Node::of(shapes.clone())));
-    let ground = Field::at("stone", 0.0, Op::Fill, move |x, y, z| stone(x, y, z, worldgen::plan::spacing()).then_some((STONE, None)));
+    let ground = Field::at("stone", 0.0, Op::Fill, move |x, y, z| stone(x, y, z, worldgen::sites::spacing()).then_some((STONE, None)));
     let layers = vec![Layer::Field(ground), Layer::Population(lamps)];
     World { generator: Generator { kinds, seed: 1, layers }, spawn: [0; 3], heights: Some((-64, 1024)), points: Vec::new() }
 }

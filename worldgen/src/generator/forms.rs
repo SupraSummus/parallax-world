@@ -21,7 +21,7 @@ pub(super) struct Visit<'u> {
 /**
  * A population's things as measured (`measure`), the ones asked for last:
  * by a thing's key, its sites' spacing, and the spacing its ground was
- * read at when it was made (plan::spacing). Measuring draws a thing
+ * read at when it was made (sites::spacing). Measuring draws a thing
  * whole, and every box it reaches asks for it: a tile, and each of the
  * light's blocks.
  */
@@ -40,7 +40,7 @@ impl Default for Measured {
 impl Measured {
     /** What `measure` gives for the thing of `key` at sites `s` apart: kept, or measured now. */
     fn of(&self, key: &str, s: i64, measure: impl FnOnce() -> Sites) -> Arc<Sites> {
-        self.0.of(&(key.to_string(), s, plan::spacing()), measure)
+        self.0.of(&(key.to_string(), s, sites::spacing()), measure)
     }
 }
 

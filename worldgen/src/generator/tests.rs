@@ -1,6 +1,5 @@
 use super::*;
 use crate::noise::fx;
-use crate::plan::Sloped;
 
 #[test]
 fn the_sites_around_a_point_keep_its_place() {
@@ -186,70 +185,21 @@ fn layers(layers: Vec<Layer>) -> Generator {
     }
 }
 
-/** Ground `height(x)` high, said to rise at most `slope` a column: eight units of it about it. */
-fn ground(height: fn(i64) -> i64, slope: i64) -> Generator {
-    let of = Arc::new(Sloped::new(Arc::new(plan::Plan::new("ground", 1, move |x, _| height(x))), slope));
-    let field = Field::columns("ground", 0.0, Op::Fill, move |x, _| vec![Span::solid(height(x) - 8, height(x) + 1, 0)]);
-    layers(vec![Layer::Field(field.about(of, 8, 1))])
-}
-
-#[test]
-fn a_field_about_its_ground_is_drawn_only_where_its_lines_may_be() {
-    let flat = ground(|_| 0, 0);
-    let (across, above) = (Box3 { min: [0, -16, 0], max: [64, 16, 8] }, Box3 { min: [0, 16, 0], max: [64, 48, 8] });
-    let drawn = |b: &Box3| checking_skipped(|| generate(&flat, b, 0).pieces.alpha.iter().any(|&a| a > 0));
-    assert_eq!(drawn(&across), (true, Vec::new()));
-    assert_eq!(drawn(&above), (false, Vec::new()), "skipped above it, and nothing would be drawn there");
-}
-
-#[test]
-#[should_panic(expected = "field ground: span [-8, 1) at column (0, 0) reaches past 2 under and 1 over its ground 0")]
-fn refuses_a_field_reaching_past_what_it_says() {
-    let flat = Arc::new(Sloped::new(Arc::new(plan::Plan::new("flat", 1, |_, _| 0)), 0));
-    let field = Field::columns("ground", 0.0, Op::Fill, |_, _| vec![Span::solid(-8, 1, 0)]).about(flat, 2, 1);
-    generate(&layers(vec![Layer::Field(field)]), &Box3 { min: [0, -16, 0], max: [8, 16, 8] }, 0);
-}
-
-#[test]
-fn checking_finds_what_a_broken_promise_skips() {
-    // A spike at x = 12 the slope's rule never sees (no neighbour of it is read): sampled every 8, it is skipped.
-    let spiked = ground(|x| if x == 12 { 200 } else { 0 }, 0);
-    let b = Box3 { min: [0, 45, 0], max: [32, 55, 4] };
-    assert!(generate(&spiked, &b, 2).pieces.alpha.iter().all(|&a| a == 0), "skipped");
-    let (_, broken) = checking_skipped(|| generate(&spiked, &b, 2));
-    assert!(broken.len() == 1 && broken[0].starts_with("ground draws where it says it may not: at site [3, 49, 0]"), "{broken:?}");
-}
-
-/** Ground `height(x)` high, said to rise at most `slope` a column: a surface about it, stone under it. */
-fn solid_ground(height: fn(i64) -> i64, slope: i64) -> Generator {
-    let of = Arc::new(Sloped::new(Arc::new(plan::Plan::new("ground", 1, move |x, _| height(x))), slope));
-    let field = Field::columns("ground", 0.0, Op::Fill, move |x, _| crate::column::Column::new(height(x)).surface(0, 4).under(0));
-    layers(vec![Layer::Field(field.ground(of, 4, 1, 0))])
-}
-
-#[test]
-fn a_field_under_its_ground_is_solid_to_the_bottom_and_says_so() {
-    let world = solid_ground(|x| x / 4, 1);
-    for level in 0..4 {
-        let s = 1 << level;
-        // Deep under it, across it, over it.
-        for (y, whole) in [(-4096, Some(Whole::Buried(0))), (-16, None), (1024, Some(Whole::Empty))] {
-            let b = Box3 { min: [0, y / s, 0], max: [64, y / s + 32, 16] };
-            assert_eq!(super::whole(&world, &b, level), whole, "level {level}, at {y}");
-            let (grid, broken) = checking_skipped(|| generate(&world, &b.widen(1), level));
-            assert_eq!(broken, Vec::<String>::new());
-            let sites =
-                || (b.min[2]..b.max[2]).flat_map(|z| (b.min[1]..b.max[1]).flat_map(move |y| (b.min[0]..b.max[0]).map(move |x| [x, y, z])));
-            let alpha = |[x, y, z]: [i64; 3]| grid.alpha(x, y, z);
-            match whole {
-                Some(Whole::Buried(_)) => assert!(sites().filter(|&[x, y, z]| crate::grid::is_site(x, y, z)).all(|p| alpha(p) == ALPHA)),
-                Some(Whole::Empty) => assert!(sites().all(|p| alpha(p) == 0)),
-                None => {}
-            }
-            // Drawn as the field would, without asking it.
-            assert_eq!(generate(&world, &b, level).alpha(0, b.min[1], 0), grid.alpha(0, b.min[1], 0));
+/**
+ * Stone up to `height(x)`, which never falls along x, solid to the
+ * bottom: saying where a box is all of it or none (Field::meets).
+ */
+fn solid_ground(height: fn(i64) -> i64) -> Generator {
+    let field = Field::spans("ground", 0.0, Op::Fill, 1, move |x, _| vec![Span::solid(DEEP, height(x) + 1, 0)]).meets(move |b, _| {
+        if b.min[1] > height(b.max[0] - 1) {
+            Meets::Nothing
+        } else if b.max[1] <= height(b.min[0]) {
+            Meets::All(0)
+        } else {
+            Meets::Any
         }
-    }
+    });
+    layers(vec![Layer::Field(field)])
 }
 
 /**
@@ -324,7 +274,7 @@ fn a_tile_holds_its_ground_by_its_surface_not_its_volume() {
             2 => |x| 2 * x,
             _ => |x| 4 * x,
         };
-        let world = solid_ground(height, g);
+        let world = solid_ground(height);
         for t in [64, 256] {
             let b = Box3 { min: [0, -64, 0], max: [t, g * t + 64, t] };
             let sites = (BRICK * BRICK * BRICK / 2) as usize;
@@ -338,7 +288,7 @@ fn a_tile_holds_its_ground_by_its_surface_not_its_volume() {
 #[test]
 fn what_hosts_make_of_a_box_differs_from_all_of_it_only_in_buried_rock() {
     // Ground rising two sites a column along x: no layer of the box's bricks is buried, its blocks of columns are.
-    let world = solid_ground(|x| 2 * x, 2);
+    let world = solid_ground(|x| 2 * x);
     let b = Box3 { min: [0, -64, 0], max: [128, 320, 64] };
     for level in 0..3 {
         let (all, made) = (generate(&world, &b, level), generate_shown(&world, &b, level));
@@ -358,7 +308,7 @@ fn what_hosts_make_of_a_box_differs_from_all_of_it_only_in_buried_rock() {
 #[test]
 fn what_shows_of_a_box_is_all_but_its_whole_bottom_and_top() {
     // Ground from 0 to 16 high.
-    let world = solid_ground(|x| x / 4, 1);
+    let world = solid_ground(|x| x / 4);
     let b = Box3 { min: [0, -509, 0], max: [64, 509, 16] };
     let part = shown(&world, &b, 0);
     assert!(part.min[1] < 0 && part.min[1] > -64 && part.max[1] > 16 && part.max[1] < 64, "{part:?}");
@@ -373,35 +323,6 @@ fn what_shows_of_a_box_is_all_but_its_whole_bottom_and_top() {
     // Hosts keep its whole bottom as rock, not a hollow rays from a finer level's tunnels would see through.
     let grid = generate_shown(&world, &b, 0);
     assert_eq!((grid.clip().min[1], grid.alpha(1, b.min[1], 0)), (b.min[1], ALPHA));
-}
-
-#[test]
-#[should_panic(expected = "field ground: at column (0, 0), kind Some(0) doesn't reach up from DEEP to -6, 4 under its ground 0")]
-fn refuses_a_field_not_under_its_ground_as_it_says() {
-    let flat = Arc::new(Sloped::new(Arc::new(plan::Plan::new("flat", 1, |_, _| 0)), 0));
-    let field = Field::columns("ground", 0.0, Op::Fill, |_, _| vec![Span::solid(-4, 1, 0)]).ground(flat, 4, 1, 0);
-    generate(&layers(vec![Layer::Field(field)]), &Box3 { min: [0, -16, 0], max: [8, 16, 8] }, 0);
-}
-
-#[test]
-fn checking_finds_a_field_not_under_its_ground_where_it_says() {
-    // A hole at x = 12 the slope's rule never sees, sampled every 8: filled under the ground all the same.
-    let holed = solid_ground(|x| if x == 12 { -200 } else { 0 }, 0);
-    let b = Box3 { min: [0, -55, 0], max: [32, -45, 4] };
-    let (_, broken) = checking_skipped(|| generate(&holed, &b, 2));
-    assert!(broken.len() == 1 && broken[0].starts_with("ground isn't all kind 0, as it says: at site [3, -55, 0]"), "{broken:?}");
-}
-
-#[test]
-#[should_panic(expected = "rocks 0,0,0 is anchored at [0.0, 0.0, 0.0], where its population says none stand (Population::stands)")]
-fn refuses_a_thing_anchored_off_the_ground_it_stands_on() {
-    // In its cell, but the ground is 100 units under it.
-    let low = Arc::new(Sloped::new(Arc::new(plan::Plan::new("low", 1, |_, _| -100)), 0));
-    let rocks = Population::new("rocks", 1.0, 16)
-        .on(low)
-        .anchor(|cell| (cell.centre == [0; 3]).then_some([0.0; 3]))
-        .make(|p, _| Some(Node::of(vec![ball(p, 2.0, 0, SOLID, Op::Fill)])));
-    generate(&layers(vec![Layer::Population(rocks)]), &Box3 { min: [-8, -100, -8], max: [8, 8, 8] }, 0);
 }
 
 /** Rocks in a tenth of the cells west of x = 0, a twentieth east, saying `most`; in cells, or along lines across a plane. */

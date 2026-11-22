@@ -22,7 +22,7 @@ use std::sync::{Arc, Mutex};
 use crate::cost;
 use crate::js;
 use crate::noise::{Fixed, Fx, Rng, hash_text, hash64, unit};
-use crate::plan;
+use crate::sites;
 
 /** The most marks a process draws: kinds of things, each with chances of its own. */
 pub const MARKS: usize = 4;
@@ -164,7 +164,7 @@ impl Points {
     /** The chances at a point, by mark: a leaf there holds that many points of each, on average. */
     fn chances(&self, at: [i64; 3]) -> Chances {
         // The same whoever asks: a layer reads dithered plans at a point of its sites' footprint.
-        plan::where_asked(|| (self.chances)(at))
+        sites::where_asked(|| (self.chances)(at))
     }
 
     /**

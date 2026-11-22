@@ -461,7 +461,7 @@ fn drawables_in<'a>(generator: &'a Generator, clip: &Box3, s: i64) -> Vec<Drawab
         }
         let (n, cells) = (population.cell, cells_reaching(population, &units));
         // Its things read the ground on the level's sites, as its fields do (Sloped::at).
-        let work = plan::footprint(s, [0, 0], || {
+        let work = sites::footprint(s, [0, 0], || {
             each_thing(generator, population, cells, |cell, _, node| {
                 let (key, bounds, reach) = (cell.key(), bounds_of(&node), reach_of(population, cell));
                 assert!(bounds.inside(&reach), "{}", past_reach(&key, &bounds, &reach, n, population.reach));
@@ -543,7 +543,7 @@ pub fn whole(generator: &Generator, b: &Box3, level: u32) -> Option<Whole> {
             p.far.as_ref().map_or((Meets::Nothing, false), |far| (far.meets_in(&units, s), far.op == Op::Carve))
         }
         // As drawables_in makes them, with what a shape may grow by at this level.
-        Layer::Population(p) if things && plan::footprint(s, [0, 0], || reaches(generator, p, &units.widen(2 * s))) => (Meets::Any, false),
+        Layer::Population(p) if things && sites::footprint(s, [0, 0], || reaches(generator, p, &units.widen(2 * s))) => (Meets::Any, false),
         Layer::Population(_) => (Meets::Nothing, false),
     };
     let fold = |things: bool| {
