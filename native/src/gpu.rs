@@ -12,7 +12,7 @@ use crate::engine::{Painter, Picture};
  * The backend engines draw with: on DX12, wgpu's indirect draws counted on
  * the GPU leave their first instance out of the instance index, which
  * carries the tile, and their first vertex out of the vertex index, which
- * carries a splat's chunk's slot (chunks' compositor.rs).
+ * carries a flat picture's cluster (chunks' compositor.rs).
  */
 #[cfg(not(target_arch = "wasm32"))]
 const BACKENDS: wgpu::Backends = wgpu::Backends::VULKAN;
@@ -33,7 +33,7 @@ pub fn instance() -> wgpu::Instance {
 
 /**
  * What the chunks' compositor needs of a device: draws listed on the GPU,
- * a tile or a cluster's splats each; depth tested before tiles' pixels
+ * a tile or a flat picture's runs each; depth tested before tiles' pixels
  * march, though they write it (compositor.wgsl); and flat pictures cut
  * to their faces' rays.
  */

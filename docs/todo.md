@@ -443,7 +443,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   Its compositor needs indirect draws counted on the GPU
   (`MULTI_DRAW_INDIRECT_COUNT`), and so Vulkan:
   Metal and GL lack them, and on DX12 wgpu's leave out the first vertex
-  the chunk's slot comes as (`BACKENDS`).
+  a flat picture's cluster comes as, and the first instance a tile does (`BACKENDS`).
   Its frames are bound by the GPU (`--stroll`):
   culling the clusters in view costs about a third of a frame,
   drawing those that show most of the rest.
@@ -488,6 +488,9 @@ Numbers are for the forest at 1280×800, as measured when written.
   in the valley kilometres of air, hundreds of tiles a frame.
   Leaving the queue alone while asked the same took exceptions
   (a tile dropped since, bricks to light) for milliseconds no frame was short of.
+- **In relief, a shot of the moor did not complete in minutes on lavapipe**
+  (`--engine reliefs --world moor --seed 1 --look 30,-10 --size 320x200 --shot`),
+  though the chunks' tests complete it at a shorter distance. Not looked into.
 - **Flat, the valley looking `--look 30,-10` never completes** (`--shot`):
   the world's threads idle, the renderer's and the main one busy.
   Mist hides nothing: the GPU's depths have none, so it would ask for it all.
@@ -503,18 +506,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   `surface` still finds a cell's cut faces, which `cell_relief` drops.
   Detail sets Q = max(4, ⌈2·detail⌉), so below 2 it changes nothing;
   Q itself, a whole number, would say what it does.
-- **Native pillars more than double the splats.**
-  Natively a run is a row of splats, one a voxel
-  (section 4 of `docs/architecture.md`),
-  which in the forest adds more than half to the GPU's frame.
-  Splats of a row that no ray of the face can see,
-  hidden by neighbouring columns with runs as long,
-  need not be made.
-  Fewer, larger splats cost more, not less:
-  a splat every other voxel, grown to leave no gaps
-  and with its depth varying along the axis, culled worse;
-  one splat cut to the hull of a pillar's ends drew large rectangles,
-  mostly discarded.
 - **Native's threads take more work together than one alone**:
   completing the valley's first view, lit, four take about a third more than one.
   Little of it is work done twice, now that they share the world
@@ -738,21 +729,9 @@ Numbers are for the forest at 1280×800, as measured when written.
   - A shot may differ from run to run (flat, the valley):
     where depths tie exactly, the one drawn last shows,
     in the clusters' order: the order chunks came in, which timing decides.
-- **Native's splats may go too.**
-  Each whole voxel a hexagon is the voxels engine's idea, rasterized.
-  They are worth keeping only if faster than reliefs on some GPU,
-  as on Intel's, which tests depth only after a relief's pixel writes its own.
-  Gone, `Chunks::new` takes `flat` alone, and the hole below goes with them.
-- **Native's splats leave a hole by a hut.**
-  `--engine splats --seed 42 --camera 1200,100,36700 --look 20,-12`:
-  sky shows through the ground in the bottom right, with or without culling,
-  in straight edges like a cell's. Not looked into.
 - **Native's reliefs.**
   - Thin things seen at a slant break at the default detail:
     the city's road markings into combs, whole at twice the detail.
-  - Marched per pixel, a tile per quad, they are slower on lavapipe
-    than whole splats (`--engine splats`), which lavapipe tests no earlier;
-    a real GPU is unmeasured.
   - Tiles hold their empty columns: about half of those uploaded.
   - A few pixels show what is under the ground at cells' edges
     (7 in the forest at `seed=12345&camera=-14,40,-200&look=-25,6`):
@@ -877,7 +856,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   near, light wants fine places and few directions; far, coarse places and many.
   Light keeps 12 at every level, too few far off (a lamp's lobes, blurred shadows).
 - The eye (`native/src/eye.rs`) in the chunks engines too:
-  their splats hold light baked as a byte a channel;
+  their pillars hold light baked as a byte a channel;
   held as RGB9E5, the compositor could show it as the voxels do.
 - The eye at night: colours fading and bluer (Purkinje's shift),
   so that a night shown brighter still looks like night.
@@ -920,8 +899,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   The buildings' walls would still show to `directions.rs`.
 - Keep the fit of `cost::NS` in the repo, to refit it on a quiet machine.
 - Measure the seams between faces against ray-cast perspective.
-- Drop a splat's size: every splat is a voxel's outline,
-  so a splat could be its site, depth and colour.
 - Show render distance in metres:
   they are lattice units, and the forest's unit is 0.125 m.
 - Show the forest to 22 km again: one level more (`GRID_LEVELS`).

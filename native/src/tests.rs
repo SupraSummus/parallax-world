@@ -11,7 +11,7 @@ fn the_options_are_well_formed() {
 /** What --record writes and --replay reads, and a panic reports. */
 #[test]
 fn a_view_gives_back_the_options_it_takes() {
-    let options = "--engine splats --camera 1.5,-2,3 --look -30,10 --fov 70 --distance 500 --detail 4 --shift 2 --colour layers \
+    let options = "--engine flat --camera 1.5,-2,3 --look -30,10 --fov 70 --distance 500 --detail 4 --shift 2 --colour layers \
                    --size 320x200 --light 0.5,1,0,3,0.01 --eye -1,0.5 --seams --unhidden --walk";
     let argv: Vec<String> =
         ["", "--world", "moor", "--threads", "1"].into_iter().chain(options.split_whitespace()).map(str::to_string).collect();
@@ -143,7 +143,7 @@ fn a_thin_medium_on_the_ground_hides_it_from_above() {
 
 #[test]
 #[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
-fn a_medium_of_splats_lets_through_as_much_as_its_extinction_says() {
+fn a_medium_of_reliefs_lets_through_as_much_as_its_extinction_says() {
     medium_lets_through_as_much_as_its_extinction_says(Kind::Reliefs);
 }
 

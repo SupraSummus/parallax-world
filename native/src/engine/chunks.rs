@@ -1,7 +1,7 @@
 //! The chunks engine: the renderer picks the cells of the
 //! lattice in view (renderer.rs), on a thread of its own, worker threads
-//! bake them into chunks (bakery.rs), their whole voxels reliefs or splats
-//! each, and the compositor draws them (compositor.rs).
+//! bake them into chunks (bakery.rs), their whole voxels reliefs,
+//! and the compositor draws them (compositor.rs).
 //! See docs/architecture.md, sections 1 to 5.
 
 mod bakery;
@@ -54,8 +54,8 @@ pub struct Chunks {
 }
 
 impl Chunks {
-    /** Draws `world`, its whole voxels reliefs or splats each (Renderer's `relief`), reliefs flat if `flat`. */
-    pub fn new(world: &World, relief: bool, flat: bool) -> Chunks {
+    /** Draws `world`, its whole voxels reliefs, flat if `flat`. */
+    pub fn new(world: &World, flat: bool) -> Chunks {
         let shared: Shared = Arc::default();
         let baked = {
             let shared = shared.clone();
@@ -64,7 +64,7 @@ impl Chunks {
                 shared.1.notify_all();
             }
         };
-        let renderer = Renderer::new(world, relief, flat, baked);
+        let renderer = Renderer::new(world, flat, baked);
         let mailbox = shared.clone();
         std::thread::spawn(move || render_on(renderer, &mailbox));
         Chunks { shared, asked: None, busy: false, published: 0 }
@@ -217,11 +217,11 @@ mod tests {
 
     /**
      * World `name` of seed 1 from its spawn, looking `look`, at `detail`,
-     * once the view is complete, its whole voxels reliefs (flat if `flat`) or splats.
+     * once the view is complete, in relief.
      */
-    fn complete_view(name: &str, look: [f64; 2], detail: f64, relief: bool, flat: bool) -> Composed {
+    fn complete_view(name: &str, look: [f64; 2], detail: f64) -> Composed {
         let (mut world, look) = world_and_look(name, look, detail);
-        complete(&mut Chunks::new(&world, relief, flat), &mut world, &look)
+        complete(&mut Chunks::new(&world, false), &mut world, &look)
     }
 
     /** World `name` of seed 1, and the look from its spawn, looking `look`, at `detail`. */
@@ -255,7 +255,7 @@ mod tests {
     fn moving_keeps_most_chunks() {
         let make = worlds::by_name("moor").expect("moor").make;
         let mut world = World::new(make(1), None, 4);
-        let mut chunks = Chunks::new(&world, true, false);
+        let mut chunks = Chunks::new(&world, false);
         let look = Look::new(make(1).spawn.map(|v| v as f64), [30.0, -10.0], 90.0, 400.0, [320.0, 200.0]);
         let ids = |c: &Composed| c.frame.chunks.iter().map(|p| p.chunk.id).collect::<HashSet<_>>();
         let before = ids(&complete(&mut chunks, &mut world, &look));
@@ -278,20 +278,18 @@ mod tests {
         let moved = Look { camera: std::array::from_fn(|i| look.camera[i] + forward[i] * 7.0), ..look };
         // Not flat: following changes lays the clusters out in another order than taking the frame whole, and ties
         // fall by it (docs/todo.md).
-        for relief in [true, false] {
-            let mut chunks = Chunks::new(&world, relief, false);
-            let first = complete(&mut chunks, &mut world, &look);
-            let second = complete(&mut chunks, &mut world, &moved);
-            assert!(second.frame.since(first.frame.number).is_some(), "the changes since the first frame kept");
-            let mut easel = Easel::offscreen(None);
-            easel.pixels(&first, PIXELS);
-            let followed = easel.pixels(&second, PIXELS).2;
-            let whole = Easel::offscreen(None).pixels(&second, PIXELS).2;
-            // Neighbours' pictures of medium lie over one another along their edges, in the clusters' order:
-            // where their colours differ, it shows by a level or two (docs/todo.md).
-            let most = followed.iter().zip(&whole).map(|(a, b)| a.abs_diff(*b)).max();
-            assert!(most <= Some(2), "relief {relief}: {}", differ(&followed, &whole));
-        }
+        let mut chunks = Chunks::new(&world, false);
+        let first = complete(&mut chunks, &mut world, &look);
+        let second = complete(&mut chunks, &mut world, &moved);
+        assert!(second.frame.since(first.frame.number).is_some(), "the changes since the first frame kept");
+        let mut easel = Easel::offscreen(None);
+        easel.pixels(&first, PIXELS);
+        let followed = easel.pixels(&second, PIXELS).2;
+        let whole = Easel::offscreen(None).pixels(&second, PIXELS).2;
+        // Neighbours' pictures of medium lie over one another along their edges, in the clusters' order:
+        // where their colours differ, it shows by a level or two (docs/todo.md).
+        let most = followed.iter().zip(&whole).map(|(a, b)| a.abs_diff(*b)).max();
+        assert!(most <= Some(2), "{}", differ(&followed, &whole));
     }
 
     /**
@@ -300,21 +298,15 @@ mod tests {
      */
     fn culling_leaves_the_picture_unchanged(name: &str, angles: [f64; 2], octaves: f64) {
         let (mut world, look) = world_and_look(name, angles, 2f64.powf(octaves));
-        for (relief, flat) in [(true, false), (true, true), (false, false)] {
-            let composed = complete(&mut Chunks::new(&world, relief, flat), &mut world, &look);
+        for flat in [false, true] {
+            let composed = complete(&mut Chunks::new(&world, flat), &mut world, &look);
             let [culled, all] = [true, false].map(|culls| {
                 let mut easel = Easel::offscreen(None);
                 easel.painter = Some(Box::new(Compositor::new(&easel.device, easel.format, culls)));
                 let pixels = easel.pixels(&composed, PIXELS).2;
                 (pixels, easel.held::<Compositor>().expect("a compositor").drawn(&easel).iter().sum::<u32>())
             });
-            let drew = if flat {
-                "flat tiles"
-            } else if relief {
-                "tiles"
-            } else {
-                "splats"
-            };
+            let drew = if flat { "flat tiles" } else { "tiles" };
             assert!(culled.0 == all.0, "{name} {angles:?} {drew}: {}", differ(&culled.0, &all.0));
             assert!(culled.1 < all.1, "{name} {angles:?}: culling drew {} {drew} of {}", culled.1, all.1);
         }
@@ -324,8 +316,8 @@ mod tests {
      * Hiding cells on the CPU (renderer.rs's Hiding) draws fewer chunks of
      * the forest from its spawn, and once all its probes asked for is drawn
      * (drawn_complete), leaves it unchanged in relief, there and moved on
-     * within its pick. (As splats, and flat, a pixel or two falls by the
-     * order of their chunks, hiding or not.)
+     * within its pick. (Flat, a pixel or two falls by the order of their
+     * chunks, hiding or not.)
      */
     #[test]
     #[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
@@ -338,7 +330,7 @@ mod tests {
         let [hidden, all] = [true, false].map(|hides| {
             let (mut world, look) = world_and_look("forest", [0.0, 0.0], 2f64.powf(3.25));
             let look = Look { hides, ..look };
-            let (mut chunks, mut easel) = (Chunks::new(&world, true, false), Easel::offscreen(None));
+            let (mut chunks, mut easel) = (Chunks::new(&world, false), Easel::offscreen(None));
             let mut drawn = |look: &Look| {
                 let frame = crate::drawn_complete(&mut chunks, &mut world, look, &mut easel);
                 let pixels = easel.pixels(&*frame.picture, PIXELS).2;
@@ -383,17 +375,15 @@ mod tests {
     #[test]
     #[ignore = "draws on the GPU: needs Vulkan, as Mesa's software one"]
     fn what_the_buffers_cannot_hold_is_left_out_farthest_first() {
-        let mut composed = complete_view("moor", [-30.0, 10.0], 2f64.powf(3.25), true, false);
+        let mut composed = complete_view("moor", [-30.0, 10.0], 2f64.powf(3.25));
         let all = Easel::offscreen(None).pixels(&composed, PIXELS).2;
-        // Room for about half of the frame's columns: the chunks that come first, as many as fit, of columns, splats and
-        // clusters, and records.
-        let bytes = |b: &bakery::Baked| {
-            [size_of_val(&b.columns[..]) as u64, size_of_val(&b.splats[..]) as u64, size_of_val(&b.clusters[..]) as u64, compositor::RECORD]
-        };
+        // Room for about half of the frame's columns: the chunks that come first, as many as fit, of columns and clusters,
+        // and records.
+        let bytes = |b: &bakery::Baked| [size_of_val(&b.columns[..]) as u64, size_of_val(&b.clusters[..]) as u64, compositor::RECORD];
         let chunks = &composed.frame.chunks;
         let room = chunks.iter().map(|p| bytes(&p.chunk.baked)[0]).sum::<u64>() / 2;
         let some = Easel::offscreen(Some(room)).pixels(&composed, PIXELS).2;
-        let sums = chunks.iter().scan([0; 4], |sum, p| {
+        let sums = chunks.iter().scan([0; 3], |sum, p| {
             sum.iter_mut().zip(bytes(&p.chunk.baked)).for_each(|(s, b)| *s += b);
             Some(*sum)
         });

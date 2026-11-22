@@ -543,7 +543,7 @@ mod tests {
                                 continue;
                             }
                             let [a, b, c] = p.map(|v| v / s);
-                            let middle = crate::splats::slab_middle(c, b, crate::slab_layers(1 << (l - atoms)));
+                            let middle = crate::pillars::slab_middle(c, b, crate::slab_layers(1 << (l - atoms)));
                             let held = (l, true, owner(1 << l, [a * s, b * s, middle * s]));
                             assert!(chunks.contains(&held), "shift {shift} site {p:?}: its slab of level {l} in {held:?}");
                         }

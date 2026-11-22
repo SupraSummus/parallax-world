@@ -18,7 +18,7 @@ use bake::lod::CellChunk;
 use fcc::GRID_LEVELS;
 use fcc::{TileId, Tiles};
 
-use super::compositor::{Flat, GpuCluster, GpuColumn, GpuSplat, cluster, flatten, tiles, veils};
+use super::compositor::{Flat, GpuCluster, GpuColumn, flatten, tiles, veils};
 
 /** A chunk to bake: a cell of a face, reading the tiles of its grid level from the first to the last, each way. */
 #[derive(Clone, Copy)]
@@ -26,28 +26,22 @@ pub struct Request {
     pub face: usize,
     pub cell: CellChunk,
     pub tiles: [TileId; 2],
-    /** The size of the blocks its splats are clustered by (compositor::cluster). */
-    pub block: f64,
     /** Whether its voxels are lit, by the baker's light (Baker's `light`), or shaded by the way their faces face. */
     pub lit: bool,
-    /** Whether its whole voxels are its cell's relief, or splats each (Baker::bake_cell). */
-    pub relief: bool,
     /** Whether its relief is drawn flat (compositor::flatten). */
     pub flat: bool,
 }
 
 /**
  * A baked chunk, as the GPU takes it, and where it may be drawn: its
- * relief's columns (compositor::tiles), if it has one, or its whole
- * voxels' splats (compositor::cluster), then its medium's pictures
- * (compositor::veils), and their clusters: its whole voxels' first, the
- * tiles of columns (or, drawn flat, its picture: compositor::flatten) or
- * else the splats', then the medium's from `veils`.
+ * relief's columns (compositor::tiles), then its medium's pictures
+ * (compositor::veils), and their clusters: its relief's first, the tiles
+ * of columns (or, drawn flat, its picture: compositor::flatten), then the
+ * medium's from `veils`.
  */
 pub struct Baked {
     pub origin: [f64; 2],
     pub columns: Vec<GpuColumn>,
-    pub splats: Vec<GpuSplat>,
     pub clusters: Vec<GpuCluster>,
     pub veils: usize,
     /** Its relief drawn flat, if its request's is (compositor::flatten). */
@@ -191,11 +185,11 @@ fn work(queue: &Queue, send: &Sender<(Request, Baked)>, grids: &Grids, mut baker
         if r.lit != baker.light.is_some() {
             std::mem::swap(&mut baker.light, &mut aside);
         }
-        let b = baker.bake_cell(r.face, &r.cell, r.relief);
+        let origin = baker.bake_cell(r.face, &r.cell);
         // Its column (0, 0): the least (a, b) of its cell's bounds, relative to its origin.
         let unit = spacing(r.cell.atoms) as f64;
         let [a, b0, _] = r.cell.bounds().0;
-        let base = [a as f64 * LAYER * unit - b.origin_x, b0 as f64 * unit - b.origin_y];
+        let base = [a as f64 * LAYER * unit - origin[0], b0 as f64 * unit - origin[1]];
         let half_layer = half_layer(r.cell.atoms);
         let (mut columns, mut clusters, flat) = if r.flat {
             flatten(&baker.columns, base, unit, half_layer)
@@ -203,13 +197,11 @@ fn work(queue: &Queue, send: &Sender<(Request, Baked)>, grids: &Grids, mut baker
             let (columns, clusters) = tiles(&baker.columns, base, unit, half_layer);
             (columns, clusters, Flat::default())
         };
-        let (splats, splat_clusters) = cluster(&baker.numbers, half_layer, r.block);
-        clusters.extend(splat_clusters);
         let veils_at = clusters.len();
         let (medium, medium_clusters) = veils(&baker.medium, base, unit, half_layer, bake::slab_layers(r.cell.spacing()), columns.len());
         columns.extend(medium);
         clusters.extend(medium_clusters);
-        let baked = Baked { origin: [b.origin_x, b.origin_y], columns, splats, clusters, veils: veils_at, flat };
+        let baked = Baked { origin, columns, clusters, veils: veils_at, flat };
         if send.send((request, baked)).is_err() {
             return;
         }
