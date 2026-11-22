@@ -9,23 +9,27 @@
 // where it enters them (`stops`).
 // A voxel shows how it looks along the ray (`seen`), times the
 // light on it: shaded, by the way its surface faces; lit, the light its tile
-// found for it (world.rs), and its own glow. A brick no ray asked for yet,
+// found for it (world.rs), and its own glow, as the eye sees it (eye.rs:
+// `shown`, adapted to what the samples meter). A brick no ray asked for yet,
 // or, lit, not lit yet, is not on the GPU (voxels.rs), as one of a tile not
 // made: rays take the next level, and ask for it (`asked`).
 // voxels.rs puts the constants it shares with this file before it.
 
 // The picture's size in pixels, and its sides over the focal length; the
 // fog's distance, and what of the sky it hides; whether voxels are lit; the
-// sky's colours; right, up and forward in the world.
+// multiple of light the eye shows (eye.rs); the sky's light (linear); right,
+// up and forward in the world; the light the eye shows white.
 struct Globals {
   resolution: vec2f,
   extent: vec2f,
   fog: f32,
   sky_fog: f32,
   lit: u32,
+  exposure: f32,
   sky_top: vec4f,
   horizon: vec4f,
   view: mat3x3f,
+  white: f32,
 }
 
 // A grid level's window of WINDOW³ bricks: the site it starts at, in the
@@ -77,6 +81,8 @@ fn hollow(l: Level, k: vec3i, j: u32) -> bool {
 @group(0) @binding(7) var<storage, read> next: array<i32>;
 // A bit per entry of the levels' tables (as `bricks`): whether a ray took the next level at its brick, unknown, or read it for what it shows.
 @group(0) @binding(11) var<storage, read_write> asked: array<atomic<u32>>;
+// Lit, the samples by the stops of the luminance they meet (eye.rs's BINS).
+@group(0) @binding(12) var<storage, read_write> metered: array<atomic<u32>, BINS>;
 
 const NONE = 0xffffffffu;
 // A ray's steps at a level at most: more than any needs. One that runs out
@@ -105,10 +111,20 @@ fn ray_at(p: vec2f) -> vec3f {
   return normalize(globals.view * vec3f(vec2f(s.x, -s.y) * globals.extent, 1.0));
 }
 
-fn sky(ray: vec3f) -> vec3f {
+// The sky's light along `ray` (linear).
+fn sky_light(ray: vec3f) -> vec3f {
   let elevation = ray.y / length(ray.xz);
-  let rgb = mix(globals.horizon.rgb, globals.sky_top.rgb, clamp(elevation / 0.625, 0.0, 1.0));
-  return mix(rgb, globals.horizon.rgb, globals.sky_fog);
+  return mix(globals.horizon.rgb, globals.sky_top.rgb, clamp(elevation / 0.625, 0.0, 1.0));
+}
+
+// The sky along `ray` as the eye sees it, fogged.
+fn sky(ray: vec3f) -> vec3f {
+  return mix(shown(sky_light(ray)), horizon(), globals.sky_fog);
+}
+
+// The horizon as the eye sees it: what the fog fades to.
+fn horizon() -> vec3f {
+  return shown(globals.horizon.rgb);
 }
 
 // The slot of the brick of `level` holding site `s`, EMPTY or UNKNOWN (also off the window).
@@ -401,7 +417,7 @@ fn march(d: vec3f) -> Hit {
         // Its path through the voxel: from where it entered (or the eye) to where it leaves.
         let stops = 1.0 - lets_through(medium, leave - at);
         let fog = 1.0 - exp(-(at + leave) * 0.5 * scale / globals.fog);
-        gathered += through * stops * mix(tint, globals.horizon.rgb, fog);
+        gathered += through * stops * mix(tint, horizon(), fog);
         through *= 1.0 - stops;
         medium = vec3f(0.0);
         if all(through < vec3f(OPAQUE)) {
@@ -458,13 +474,36 @@ fn to_srgb(c: vec3f) -> vec3f {
   return select(1.055 * pow(c, vec3f(1.0 / 2.4)) - 0.055, c * 12.92, c <= vec3f(0.0031308));
 }
 
-// Colour `rgb` (sRGB) under `light`: shaded, times a shade, as the splats paint it; lit, linear times the
-// light on it, and its glow, as light's Light::relight shows it.
+// Colour `rgb` (sRGB) under `light`: shaded, times a shade, as the splats paint it; lit, the light it sends
+// as the eye sees it.
 fn coloured(rgb: vec3f, light: Light) -> vec3f {
   if globals.lit == 0u {
     return rgb * light.on;
   }
-  return to_srgb(min(to_linear(rgb) * light.on + light.glow, vec3f(1.0)));
+  return shown(sent(rgb, light));
+}
+
+// The light colour `rgb` (sRGB) sends under `light` (linear): times the light on it, and its glow, as light's
+// Light::relight has it.
+fn sent(rgb: vec3f, light: Light) -> vec3f {
+  return to_linear(rgb) * light.on + light.glow;
+}
+
+const LUMINANCE = vec3f(0.2126, 0.7152, 0.0722);
+
+// Light `c` (linear) as the eye sees it (eye.rs), sRGB: each channel times the exposure, x, as Reinhard's curve
+// takes it, x (1 + x / w²) / (1 + x), w white: about x where dark, 1 at w, past it white; w 1, the light as it is.
+fn shown(c: vec3f) -> vec3f {
+  let x = c * globals.exposure;
+  return to_srgb(min(x * (1.0 + x / (globals.white * globals.white)) / (1.0 + x), vec3f(1.0)));
+}
+
+// Lit, counts light `c` (linear) in the meter's bin of the stops of its luminance (eye.rs).
+fn meter(c: vec3f) {
+  if globals.lit != 0u {
+    let stops = (log2(max(dot(c, LUMINANCE), 1e-30)) - LOWEST) * f32(BINS) / SPAN;
+    atomicAdd(&metered[u32(clamp(stops, 0.0, f32(BINS - 1u)))], 1u);
+  }
 }
 
 // The look through face `k` (of FACES) of the voxel hit: its own, unless its brick's next slots hold what its
@@ -560,9 +599,13 @@ fn sample_fragment(in: Screen) -> Sample {
   let hit = march(d);
   let medium = vec2u(pack4x8unorm(vec4f(gathered, 1.0)), pack4x8unorm(vec4f(through, 1.0)));
   if hit.level >= LOST {
+    meter(sky_light(d));
     return Sample(vec4u(0u, 0u, 0u, hit.level), vec4u(0u, medium, 0u));
   }
-  let colour = coloured(seen(hit, d), light_on(hit));
+  let look = seen(hit, d);
+  let light = light_on(hit);
+  meter(sent(look, light));
+  let colour = coloured(look, light);
   return Sample(vec4u(bitcast<vec3u>(hit.site), hit.level), vec4u(pack4x8unorm(vec4f(colour, 1.0)), medium, 0u));
 }
 
@@ -653,7 +696,7 @@ fn resolve_fragment(in: Screen) -> @location(0) vec4f {
       let scale = exp2(f32(seen.w & 255u));
       nearest = max(entering(crossings(ray, eye.xyz / scale - vec3f(bitcast<vec3i>(seen.xyz)), 1.0)), 0.0) * scale;
     }
-    behind = mix(unpack4x8unorm(colours).rgb, globals.horizon.rgb, 1.0 - exp(-nearest / globals.fog));
+    behind = mix(unpack4x8unorm(colours).rgb, horizon(), 1.0 - exp(-nearest / globals.fog));
   }
   let g = vec2f(1.0) - f;
   let w = vec4f(

@@ -9,6 +9,7 @@
 //! or, headless, it ends too.
 
 mod engine;
+mod eye;
 mod gpu;
 mod threads;
 mod view;
@@ -23,6 +24,7 @@ use clap::{Parser, ValueEnum};
 use fcc::walk::{COLLISION_LEVEL, Ground, WalkInput, Walker};
 
 use engine::{Colours, Engine, Frame, Kind, Look, Picture};
+use eye::Eye;
 use gpu::Easel;
 use light::{Brightness, Shared};
 use view::{Vec3, view_basis};
@@ -59,6 +61,9 @@ struct Args {
     /** Light worked out across the world (light/): how bright the sky, the sun and what glows are (1,1,0 a clear day, 0.01,0,1 night); the steps light takes along each level before the coarser one takes over; how little of the light on a site is not followed (light's TOLERANCE). Without it, voxels are shaded by the way their faces face. */
     #[arg(long, value_name = "SKY,SUN,GLOW[,STEPS[,TOLERANCE]]", value_parser = parse_light, help_heading = "View")]
     light: Option<Light>,
+    /** How that light shows, in the voxels (eye.rs): stops of exposure added, and how far the eye adapts to what it sees, 0 not at all, 1 a dark place as bright as day. */
+    #[arg(long, value_name = "EXPOSURE,ADAPTING", value_parser = parse_eye, allow_hyphen_values = true, help_heading = "View")]
+    eye: Option<Eye>,
 
     /** What draws. */
     #[arg(long, value_enum, default_value_t = Kind::Voxels, help_heading = "Engine")]
@@ -157,6 +162,11 @@ impl Light {
         let same = (self.brightness, steps, tolerance) == (shared.brightness(), shared.steps(), shared.tolerance());
         (!same).then(|| shared.under(self.brightness).stepping(steps).settling(tolerance))
     }
+}
+
+fn parse_eye(v: &str) -> Result<Eye, String> {
+    let [exposure, adapting] = numbers::<2>(v)?.map(|v| v as f32);
+    Ok(Eye { exposure, adapting })
 }
 
 /** How `shared` lights a world, as --light takes it. */
@@ -268,6 +278,7 @@ impl View {
         let shared = self.world.shared().expect("a world with light");
         (self.brightness, self.steps, self.tolerance) = (shared.brightness(), shared.steps(), shared.tolerance());
         self.lighting = if args.light.is_some() { Lighting::Computed } else { Lighting::Shaded };
+        self.light_look();
         let look = &mut self.look;
         if let Some(camera) = args.camera {
             look.camera = camera;
@@ -280,13 +291,19 @@ impl View {
             look.shift = shift;
         }
         (look.colours, look.seams, look.hides) = (args.colour, args.seams, !args.unhidden);
+        look.eye = args.eye.unwrap_or_default();
         look.size = args.size.unwrap_or(SHOT);
         self.walker = args.walk.then(|| Walker::at(look.camera));
     }
 
+    /** Its look lit as the lighting says, by the world's light: a shot with nothing to steer is drawn with no frame before. */
+    fn light_look(&mut self) {
+        self.look.light = self.world.shared().map(Shared::brightness).filter(|_| self.lighting == Lighting::Computed);
+    }
+
     /** What `apply` takes, as the options that say it. */
     fn options(&self) -> String {
-        let Look { camera: [x, y, z], yaw, pitch, fov, far, detail, shift, seams, colours, hides, size: [w, h], .. } = self.look;
+        let Look { camera: [x, y, z], yaw, pitch, fov, far, detail, shift, seams, colours, hides, size: [w, h], eye, .. } = self.look;
         let mut options = format!(
             "--engine {} --camera {x},{y},{z} --look {yaw},{pitch} --fov {fov} --distance {far} --detail {detail} --shift {shift} --colour {} --size {w}x{h}",
             named(self.kind),
@@ -294,6 +311,8 @@ impl View {
         );
         if self.lighting == Lighting::Computed {
             options += &format!(" --light {}", light_arg(self.world.shared().expect("a world with light")));
+            let Eye { exposure, adapting } = eye;
+            options += &format!(" --eye {exposure},{adapting}");
         }
         for (set, flag) in [(seams, " --seams"), (!hides, " --unhidden"), (self.walker.is_some(), " --walk")] {
             if set {
@@ -356,6 +375,9 @@ impl View {
             });
             if self.lighting == Lighting::Computed {
                 self.light_sliders(ui);
+                if self.kind == Kind::Voxels {
+                    self.look.eye.panel(ui);
+                }
             }
         });
         let mut walking = self.walker.is_some();
@@ -635,7 +657,7 @@ impl App {
         if let Some(size) = size {
             view.look.size = size;
         }
-        view.look.light = view.world.shared().map(Shared::brightness).filter(|_| view.lighting == Lighting::Computed);
+        view.light_look();
         let start = Instant::now();
         let frame = view.engine.frame(&view.look, &view.world);
         let framed = Instant::now();

@@ -355,6 +355,6 @@ fn no_voxel_the_window_holds_is_out_of_its_box_or_meets_a_cell_counted_hollow() 
 fn the_shader_is_valid_and_lays_out_what_this_file_writes() {
     use crate::gpu::wgsl;
     let module = wgsl::shader(&shader());
-    wgsl::assert_layout!(&module, "Globals", Globals { resolution, extent, fog, sky_fog, lit, sky_top, horizon, view });
+    wgsl::assert_layout!(&module, "Globals", Globals { resolution, extent, fog, sky_fog, lit, exposure, sky_top, horizon, view, white });
     wgsl::assert_layout!(&module, "Level", GpuLevel { min, offset, corner, reach, low, filled, high });
 }
