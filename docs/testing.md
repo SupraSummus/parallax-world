@@ -34,6 +34,7 @@ one world's: `cargo test --release -p worlds --test contract valley`.
 | `fcc/src/walk.rs`, `worlds/tests/forest.rs`, `worlds/src/valley/moor.rs` | Walking: the ground, steps, walls, jumps; the forest's path through its ferns; into the moor's huts |
 | `worlds/tests/contract.rs`, `worldgen/tests/contract.rs`, `worldgen/tests/shapes.rs` | Every world, the engine's test worlds and each solid keep the contract (`worldgen/src/checks/contract.rs`): generated in pieces equals generated whole; each stratum's cells look on average as what is in them two levels finer, or as their baseline says they don't (`worlds/data/contract/`, `worldgen/data/contract/`; `docs/checks.md`); each solid in the worst case |
 | `worldgen/src/checks/cells.rs` | A cell's rays are alike along every direction, and weighed they fill it |
+| `worldgen/src/checks/survey.rs` | The survey keeps the same places in any order, and none it did not want when it came |
 | `worlds/tests/cost.rs` | What generating each world costs, counted, stays within a quarter of its baseline (`worlds/data/cost/`; "Cost" in `docs/checks.md`) |
 | `worlds/src/path.rs` | Whether a column is by a path agrees with its distance to the path's curve, round a steep, fast-bending spine |
 | `worlds/src/valley/railway.rs` | The valley's railway keeps its grade and its band of the valley, out of towns; it bends gently; few bridges and tunnels, none a stub |

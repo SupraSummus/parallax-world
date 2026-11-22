@@ -6,7 +6,7 @@
 //! stratum found (worldgen::checks::contract), however rare, without a list,
 //! and in each region every stratum surveyed there (`survey_in`).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 use std::time::Instant;
 
 use crate::World;
@@ -14,7 +14,7 @@ use crate::generator::{
     Children, Field, FieldValues, Generator, Kind, Layer, Node, Op, Population, Shape, bounds_of_shapes, each_made, unnumbered,
 };
 use crate::grid::Box3;
-use crate::noise::{Rng, hash_text};
+use crate::noise::{Rng, hash_text, hash64};
 use crate::plan::footprint;
 use crate::units::m;
 
@@ -110,59 +110,73 @@ pub struct Survey {
     pub things: Vec<Things>,
 }
 
-/** What the survey found of each stratum, by name and kind: at how many places, and the `most` nearest spawn, or all. */
+/**
+ * What the survey found of each stratum, by name and kind: at how many
+ * places, and the `most` nearest spawn (all, if usize::MAX), whatever
+ * order they come in.
+ */
 struct Found {
     spawn: [i64; 3],
-    most: Option<usize>,
-    strata: BTreeMap<(String, Option<Kind>), (usize, Vec<Box3>)>,
+    most: usize,
+    /** Of each stratum, at how many places, and those kept, the farthest on top. */
+    strata: BTreeMap<(String, Option<Kind>), (usize, BinaryHeap<Near>)>,
 }
 
 impl Found {
-    fn new(spawn: [i64; 3], most: Option<usize>) -> Found {
+    fn new(spawn: [i64; 3], most: usize) -> Found {
         Found { spawn, most, strata: BTreeMap::new() }
     }
 
-    /** `places` of the stratum `key`, found at `found` places: those of them among its `most` nearest spawn kept, or all. */
+    /** Whether `place` of the stratum `key` would be kept: at any height, as that comes last (`Near`). */
+    fn wants(&self, key: &(String, Option<Kind>), place: &Box3) -> bool {
+        let kept = self.strata.get(key).map(|(_, kept)| kept);
+        kept.is_none_or(|kept| kept.len() < self.most || kept.peek().is_some_and(|farthest| near(place, self.spawn) < *farthest))
+    }
+
+    /** `places` of the stratum `key`, found at `found` places: those of them among its `most` nearest spawn kept. */
     fn add(&mut self, key: (String, Option<Kind>), found: usize, places: impl IntoIterator<Item = Box3>) {
         let (n, kept) = self.strata.entry(key).or_default();
         *n += found;
         for place in places {
-            kept.push(place);
-            if let Some(most) = self.most
-                && kept.len() == 2 * most
-            {
-                nearest_first(kept, self.spawn);
-                kept.truncate(most);
+            kept.push(near(&place, self.spawn));
+            if kept.len() > self.most {
+                kept.pop();
             }
         }
     }
 
     fn into_strata(self) -> Vec<Stratum> {
-        let (spawn, most) = (self.spawn, self.most);
         self.strata
             .into_iter()
-            .map(|((name, kind), (found, mut places))| {
-                nearest_first(&mut places, spawn);
-                places.truncate(most.unwrap_or(usize::MAX));
+            .map(|((name, kind), (found, kept))| {
+                let places = kept.into_sorted_vec().into_iter().map(|(.., min, max)| Box3 { min, max }).collect();
                 Stratum { name, kind, found, places }
             })
             .collect()
     }
 }
 
-/** How far `b` is from `spawn`, along x and z, squared. */
-fn distance(b: &Box3, spawn: [i64; 3]) -> i64 {
-    [0, 2].map(|a| ((b.min[a] + b.max[a]) / 2 - spawn[a]).pow(2)).iter().sum()
+/**
+ * Where a place is among others: how far from spawn along x and z,
+ * squared, and where along them; then where it is. Its height comes
+ * last, so places of one column rank alike above all others.
+ */
+type Near = (i64, [i64; 2], [i64; 3], [i64; 3]);
+
+/** Where `b` is among places, nearest `spawn` first. */
+fn near(b: &Box3, spawn: [i64; 3]) -> Near {
+    let distance = [0, 2].map(|a| ((b.min[a] + b.max[a]) / 2 - spawn[a]).pow(2)).iter().sum();
+    (distance, [b.min[0], b.min[2]], b.min, b.max)
 }
 
 /** `places` nearest `spawn` first (along x and z), then by where they are. */
 pub(crate) fn nearest_first(places: &mut [Box3], spawn: [i64; 3]) {
-    places.sort_by_key(|b| (distance(b, spawn), b.min, b.max));
+    places.sort_by_key(|b| near(b, spawn));
 }
 
 /** What `world` is made of around spawn, in places at most `region` wide (lattice units): of the layers `wanted` by name. */
 pub fn survey(world: &World, region: i64, wanted: impl Fn(&str) -> bool) -> Survey {
-    let mut found = Found::new(world.spawn, Some(PLACES));
+    let mut found = Found::new(world.spawn, PLACES);
     let (mut layers, mut things) = (Vec::new(), Vec::new());
     let wanted = || world.generator.layers.iter().filter(|layer| wanted(layer.name()));
     let fields: Vec<&Field> = wanted().filter_map(|layer| if let Layer::Field(field) = layer { Some(field) } else { None }).collect();
@@ -211,21 +225,29 @@ fn or_at_places<T>(world: &World, at_spawn: T, mut survey: impl FnMut([i64; 3]) 
  * Where each of `fields` draws in `b`, asked at every column of sites of
  * `level` whose sites meet it, at a height in it, into `found`: all of them at a
  * column before the next, so a plan they share (a world's land) is made
- * there once. Returns at how many each draws, and how long it took: a
- * shared plan's time is the first's to read it.
+ * there once. Rows nearest spawn go first, and in each the columns: any
+ * order keeps the same places (`Found`), this one finds them early, so
+ * few later are asked at level 0 (`survey_site`). Returns at how many
+ * each draws, and how long it took: a shared plan's time is the first's
+ * to read it.
  */
 fn survey_fields(world: &World, b: &Box3, level: u32, fields: &[&Field], found: &mut Found) -> Vec<(usize, f64)> {
-    let mut randoms: Vec<Rng> = fields.iter().map(|field| Rng::new(hash_text(field.name, world.generator.seed))).collect();
+    let seeds: Vec<u64> = fields.iter().map(|field| hash_text(field.name, world.generator.seed)).collect();
     let s = 1i64 << level;
     let (h0, h1) = (b.min[1], b.max[1]);
     // Column i's sites reach s / 2 either side of i·s.
-    let columns = |a: usize| (b.min[a] + s / 2).div_euclid(s)..(b.max[a] + s / 2 + s - 1).div_euclid(s);
+    let columns = |a: usize| {
+        let mut columns: Vec<i64> = ((b.min[a] + s / 2).div_euclid(s)..(b.max[a] + s / 2 + s - 1).div_euclid(s)).map(|i| i * s).collect();
+        columns.sort_by_key(|v| (v - found.spawn[a]).abs());
+        columns
+    };
+    let (xs, zs) = (columns(0), columns(2));
     let mut drawn = vec![(0, 0.0); fields.len()];
-    for (x, z) in columns(2).flat_map(|z| columns(0).map(move |x| (x * s, z * s))) {
-        // A site's column of the level, as generating it asks: at any height, for a field of sites.
-        for ((field, random), drawn) in fields.iter().zip(&mut randoms).zip(&mut drawn) {
+    for (&x, &z) in zs.iter().flat_map(|z| xs.iter().map(move |x| (x, z))) {
+        // A site's column of the level, as generating it asks: at any height, for a field of sites; a hash of where it is, in any order.
+        for ((field, seed), drawn) in fields.iter().zip(&seeds).zip(&mut drawn) {
             let start = Instant::now();
-            let p = [x, h0 + random.below((h1 - h0) as u32) as i64, z];
+            let p = [x, h0 + Rng::new(hash64(*seed, x, 0, z)).below((h1 - h0) as u32) as i64, z];
             drawn.0 += survey_site(field, p, s, found) as usize;
             drawn.1 += start.elapsed().as_secs_f64();
         }
@@ -233,49 +255,53 @@ fn survey_fields(world: &World, b: &Box3, level: u32, fields: &[&Field], found: 
     drawn
 }
 
-/** What `field` draws at `p`, a site of sites `s` apart, into `found`; whether anything. */
+/**
+ * What `field` draws at `p`, a site of sites `s` apart, into `found`;
+ * whether anything. Where a place of a kind it draws there is to be kept
+ * (`Found::wants`), it is asked at level 0 too: for what it draws finer
+ * than these sites, and where: a coarse site's span is stretched to keep
+ * a site (column.rs), so its top may be far from the ground's.
+ */
 fn survey_site(field: &Field, p: [i64; 3], s: i64, found: &mut Found) -> bool {
+    let carves = field.op == Op::Carve;
+    let key = |kind: Kind| (field.name.to_string(), (!carves).then_some(kind));
+    // The site, moved along its axis to the top of what fills, the middle of what carves: fields whose surfaces are near share a region.
+    let place = |&(_, along, from, to): &Drawn| {
+        let mut centre = p;
+        centre[along] = if carves { (from + to) / 2 } else { to };
+        Box3::around(centre, s / 2)
+    };
+    let Some(coarse) = drawn(field, p, s) else { return false };
+    let there = place(&coarse);
+    let fine = coarse.0.iter().any(|&kind| found.wants(&key(kind), &there)).then(|| drawn(field, p, 1)).flatten();
+    let place = place(fine.as_ref().unwrap_or(&coarse));
+    let keys: BTreeSet<_> = coarse.0.iter().chain(fine.iter().flat_map(|f| &f.0)).map(|&kind| key(kind)).collect();
+    keys.into_iter().for_each(|key| found.add(key, 1, [place]));
+    true
+}
+
+/** What a field draws at a site: its kinds, and along an axis, from and to. */
+type Drawn = (Vec<Kind>, usize, i64, i64);
+
+/** What `field` draws at `p`, as a site of sites `s` apart reads it. */
+fn drawn(field: &Field, p: [i64; 3], s: i64) -> Option<Drawn> {
     let [x, _, z] = p;
-    // What it draws there, along an axis from..to: the place is around the top of what fills, the middle of what carves.
-    let (kinds, along, from, to): (Vec<Kind>, usize, i64, i64) = match &field.values {
-        FieldValues::At(at) => {
-            let at = |s| footprint(s, [0, 0], || at(x, p[1], z));
-            let Some((kind, _)) = at(s) else { return false };
-            (at(1).into_iter().map(|(k, _)| k).chain([kind]).collect(), 1, p[1], p[1] + 1)
-        }
+    match &field.values {
+        FieldValues::At(at) => footprint(s, [0, 0], || at(x, p[1], z)).map(|(kind, _)| (vec![kind], 1, p[1], p[1] + 1)),
         FieldValues::Shapes(near) => {
             // A shape reaching the site's voxel, from its bottom to its top.
             let b = Box3::around(p, s);
             let shapes = footprint(s, [0, 0], || near(&b));
-            let Some(shape) = shapes.iter().find(|shape| shape.bounds.overlaps(&b)) else { return false };
-            (vec![shape.kind], 1, shape.bounds.min[1], shape.bounds.max[1])
+            let shape = shapes.iter().find(|shape| shape.bounds.overlaps(&b))?;
+            Some((vec![shape.kind], 1, shape.bounds.min[1], shape.bounds.max[1]))
         }
         FieldValues::Spans { axis, spans } => {
             let [a, b] = across(*axis);
-            let spans = |s| footprint(s, [0, 0], || spans(p[a], p[b]));
-            let coarse = spans(s);
-            if coarse.is_empty() {
-                return false;
-            }
-            // And what it draws finer than these sites, at level 0, where the place is: a coarse
-            // site's span is stretched to keep a site (column.rs), so its top may be far from the ground's.
-            let fine = spans(1);
-            let at = if fine.is_empty() { &coarse } else { &fine };
-            let (from, to) = (at.iter().map(|s| s.from).min().expect("spans"), at.iter().map(|s| s.to).max().expect("spans"));
-            (coarse.iter().chain(&fine).map(|s| s.kind).collect(), *axis, from, to)
+            let spans = footprint(s, [0, 0], || spans(p[a], p[b]));
+            let (from, to) = (spans.iter().map(|s| s.from).min()?, spans.iter().map(|s| s.to).max()?);
+            Some((spans.iter().map(|s| s.kind).collect(), *axis, from, to))
         }
-    };
-    let carves = field.op == Op::Carve;
-    let at = if carves { (from + to) / 2 } else { to };
-    // The site, moved there: fields whose surfaces are near share a region.
-    let mut centre = p;
-    centre[along] = at;
-    let place = Box3::around(centre, s / 2);
-    let kinds: BTreeSet<Option<Kind>> = if carves { [None].into() } else { kinds.into_iter().map(Some).collect() };
-    for kind in kinds {
-        found.add((field.name.to_string(), kind), 1, [place]);
     }
-    true
 }
 
 /** The axes across `axis`, in order. */
@@ -293,7 +319,7 @@ fn survey_things(world: &World, centre: [i64; 3], population: &Population, regio
     let (n, reach) = (population.cell, population.reach);
     let mut half = 8;
     loop {
-        let mut parts = Found::new(world.spawn, Some(PLACES));
+        let mut parts = Found::new(world.spawn, PLACES);
         let mut seen = Things { population: population.name, reach, made: 0, past: Vec::new(), leaving: Vec::new() };
         let cube = world.within(Box3::around(centre, half * n));
         let count = things_in(world, population, &cube, region, &mut parts, |key, bounds, allowed| {
@@ -308,8 +334,8 @@ fn survey_things(world: &World, centre: [i64; 3], population: &Population, regio
         });
         let most = if seen.made > 0 { HALF_CELLS } else { i64::MAX }.min(SIDE / 2 / n);
         if count * 4 > PARTS || half >= most {
-            for (key, (n, places)) in parts.strata {
-                found.add(key, n, places);
+            for stratum in parts.into_strata() {
+                found.add((stratum.name, stratum.kind), stratum.found, stratum.places);
             }
             return (half * n, seen);
         }
@@ -346,7 +372,7 @@ fn things_in(
  * `survey` finds there, none left out for being far from spawn.
  */
 pub fn survey_in(world: &World, b: &Box3, region: i64, wanted: impl Fn(&str) -> bool) -> Vec<Stratum> {
-    let mut found = Found::new(world.spawn, None);
+    let mut found = Found::new(world.spawn, usize::MAX);
     let wanted = || world.generator.layers.iter().filter(|layer| wanted(layer.name()));
     let fields: Vec<&Field> = wanted().filter_map(|layer| if let Layer::Field(field) = layer { Some(field) } else { None }).collect();
     survey_fields(world, b, FIELD_LEVEL, &fields, &mut found);
@@ -473,5 +499,37 @@ impl Survey {
     /** A stratum's name and kind, for messages. */
     pub fn describe(&self, generator: &Generator, i: usize) -> String {
         self.strata[i].describe(generator)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /**
+     * In any order the same places are kept, and none that was not wanted
+     * when it came: so a column whose place isn't wanted need not be asked
+     * at level 0 (`survey_site`).
+     */
+    #[test]
+    fn found_keeps_the_same_places_in_any_order_and_none_unwanted() {
+        let key = || ("stratum".to_string(), None);
+        let columns = (0..32).flat_map(|z| (0..32).map(move |x| [x, hash64(1, x, 0, z) as i64 % 64, z]));
+        let places: Vec<Box3> = columns.map(|c| Box3::around(c, 1)).collect();
+        let kept = |order: u64| {
+            let mut places = places.clone();
+            places.sort_by_key(|b| hash64(order, b.min[0], b.min[1], b.min[2]));
+            let (mut found, mut unwanted) = (Found::new([16, 0, 16], 16), Vec::new());
+            for place in places {
+                if !found.wants(&key(), &place) {
+                    unwanted.push(place);
+                }
+                found.add(key(), 1, [place]);
+            }
+            let kept = found.into_strata().remove(0).places;
+            assert!(!unwanted.iter().any(|p| kept.contains(p)), "order {order}: kept a place it did not want");
+            kept
+        };
+        (1..8).for_each(|order| assert_eq!(kept(order), kept(0), "order {order}"));
     }
 }

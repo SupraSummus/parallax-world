@@ -32,13 +32,15 @@ Things come apart into parts no wider than a region (`REGION`),
 named by their children's names, numbers left out (`towns/block/house`);
 a dense population is surveyed over a smaller square than a sparse one (`PARTS`),
 and one of small cells over fewer metres (`HALF_CELLS`).
-Fields are asked at columns of a coarse level, and at level 0 there,
+Fields are asked at columns of a coarse level,
 all of them at a column before the next, as they share its plans:
 they keep what is finer than their sites in proportion ("Plans" in "Levels", generators.md),
 so a railway, a kerb or a pond shows;
 a field's place is the site asked, at its surface, as a part's is its bounds.
 A stratum is a part or a field, with a kind it draws;
 the survey counts its places, and keeps those nearest spawn (`PLACES`).
+A field is asked at level 0 too, only where a place it finds is kept:
+for where its surface is, and what it draws finer still (a pond's reeds, a kerb's concrete).
 Every stratum found gets a region: the rarest first,
 each in the region it widens least, or in one of its own nearest spawn.
 Its cells are those in its places there,
