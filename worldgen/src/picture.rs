@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use fcc::{FACE_KINDS, Look, VOXEL_FACES};
 
-use crate::generator::{Generator, generate_shown, shown};
+use crate::generator::{Generator, across, generate_shown, shown, turned};
 use crate::grid::{ALPHA, BRICK, Box3, COLOUR_ONE, GLOW_ONE, VoxelGrid};
 use crate::noise::hash;
 use crate::world::UP;
@@ -22,7 +22,7 @@ const TILE: i64 = 64;
 /** A tile: where along each axis, in tiles. */
 type Key = [i64; 3];
 
-/** A picture's tiles: cubes, cut to its slab of heights (in the level's units). */
+/** A picture's tiles: cubes, cut to its slab of heights along UP (in the level's units). */
 #[derive(Clone, Copy)]
 struct Tiling {
     heights: (i64, i64),
@@ -34,9 +34,10 @@ impl Tiling {
     }
 
     /** Tile `key`'s box: within the heights. */
-    fn tile(&self, [i, j, k]: Key) -> Box3 {
-        let (y0, y1) = ((j * TILE).clamp(self.heights.0, self.heights.1), ((j + 1) * TILE).clamp(self.heights.0, self.heights.1));
-        Box3 { min: [i * TILE, y0, k * TILE], max: [(i + 1) * TILE, y1, (k + 1) * TILE] }
+    fn tile(&self, key: Key) -> Box3 {
+        let cube = Box3 { min: key.map(|v| v * TILE), max: key.map(|v| (v + 1) * TILE) };
+        let [from, to] = [cube.min[UP], cube.max[UP]].map(|v| v.clamp(self.heights.0, self.heights.1));
+        cube.slab(UP, from, to)
     }
 }
 
@@ -51,8 +52,8 @@ pub const FACES: [[i64; 3]; FACE_KINDS] = {
     faces
 };
 
-/** Where the sun is, and how much light comes from the sky and from it. */
-const SUN: [f64; 3] = [-0.48, 0.74, -0.47];
+/** Where the sun is, over UP, and how much light comes from the sky and from it. */
+const SUN: [f64; 3] = turned(UP, [-0.48, -0.47], 0.74);
 const AMBIENT: f64 = 0.36;
 const SKYLIGHT: f64 = 0.2;
 const SUNLIGHT: f64 = 0.48;
@@ -66,7 +67,7 @@ const FOG: f64 = 0.5;
 pub enum Projection {
     /** Field of view across the picture's width, radians. */
     Perspective { fov: f64 },
-    /** Straight down from above the world, +x right and +z up, `width` lattice units across. */
+    /** Straight down UP from above the world, +x right and +z up, `width` lattice units across. */
     Top { width: f64 },
 }
 
@@ -74,7 +75,7 @@ pub enum Projection {
 pub struct Camera {
     /** Lattice units: the eye; looking down, the middle of the area (its height is ignored). */
     pub eye: [f64; 3],
-    /** Radians: yaw 0 looks along +z, a quarter turn along +x; pitch up from level. */
+    /** Radians: yaw 0 looks along +z, a quarter turn along +x; pitch up from level (UP is +y; `turned` places the others). */
     pub yaw: f64,
     pub pitch: f64,
     pub projection: Projection,
@@ -88,8 +89,8 @@ impl Camera {
     /** A perspective camera at `eye` looking at `target`. */
     pub fn looking_at(eye: [f64; 3], target: [f64; 3], fov: f64, width: usize, height: usize, far: f64) -> Camera {
         let d = [0, 1, 2].map(|i| target[i] - eye[i]);
-        let yaw = d[0].atan2(d[2]);
-        let pitch = d[1].atan2(d[0].hypot(d[2]));
+        let [a, b] = across(UP).map(|i| d[i]);
+        let (yaw, pitch) = (a.atan2(b), d[UP].atan2(a.hypot(b)));
         Camera { eye, yaw, pitch, projection: Projection::Perspective { fov }, width, height, far }
     }
 
@@ -97,7 +98,7 @@ impl Camera {
     pub fn top(min: [f64; 2], max: [f64; 2], width: usize) -> Camera {
         let across = max[0] - min[0];
         let height = ((max[1] - min[1]) / across * width as f64).round().max(1.0) as usize;
-        let eye = [(min[0] + max[0]) / 2.0, 0.0, (min[1] + max[1]) / 2.0];
+        let eye = turned(UP, [0, 1].map(|i| (min[i] + max[i]) / 2.0), 0.0);
         Camera { eye, yaw: 0.0, pitch: 0.0, projection: Projection::Top { width: across }, width, height, far: f64::INFINITY }
     }
 
@@ -106,12 +107,15 @@ impl Camera {
         let (u, v) = ((i as f64 + 0.5) / self.width as f64 - 0.5, 0.5 - (j as f64 + 0.5) / self.height as f64);
         let aspect = self.height as f64 / self.width as f64;
         match self.projection {
-            Projection::Top { width } => ([self.eye[0] + u * width, top, self.eye[2] + v * width * aspect], [0.0, -1.0, 0.0]),
+            Projection::Top { width } => {
+                let [a, b] = across(UP).map(|i| self.eye[i]);
+                (turned(UP, [a + u * width, b + v * width * aspect], top), turned(UP, [0.0; 2], -1.0))
+            }
             Projection::Perspective { fov } => {
                 let (sy, cy, sp, cp) = (self.yaw.sin(), self.yaw.cos(), self.pitch.sin(), self.pitch.cos());
-                let forward = [sy * cp, sp, cy * cp];
-                let right = [cy, 0.0, -sy];
-                let up = [-sp * sy, cp, -sp * cy];
+                let forward = turned(UP, [sy * cp, cy * cp], sp);
+                let right = turned(UP, [cy, -sy], 0.0);
+                let up = turned(UP, [-sp * sy, -sp * cy], cp);
                 let span = 2.0 * (fov / 2.0).tan();
                 let d: [f64; 3] = std::array::from_fn(|k| forward[k] + u * span * right[k] + v * span * aspect * up[k]);
                 (self.eye, normalize(d))
@@ -240,7 +244,7 @@ enum Step {
     Needs(Key),
 }
 
-/** A tile's grid, and the height of its highest brick with voxels. */
+/** A tile's grid, and the last height along UP its bricks with voxels reach. */
 struct Tile {
     grid: VoxelGrid,
     top: i64,
@@ -248,9 +252,7 @@ struct Tile {
 
 impl Tile {
     fn new(grid: VoxelGrid) -> Tile {
-        let [bx, by] = [0, 1].map(|i| (grid.n[i] + BRICK - 1) / BRICK);
-        let highest = grid.bricks.iter().enumerate().filter(|(_, at)| **at >= 0).map(|(i, _)| (i as i64 / bx) % by).max();
-        let top = highest.map_or(grid.min[1] - 1, |j| grid.min[1] + (j + 1) * BRICK - 1);
+        let top = grid.end_of_bricks(UP).unwrap_or(grid.min[UP]) - 1;
         Tile { grid, top }
     }
 }
@@ -268,13 +270,18 @@ impl Tiles {
         Tiles { tiles: HashMap::new(), level, tiling: Tiling { heights } }
     }
 
-    /** What site (x, y, z) looks like; Err if its tile is not generated. */
-    fn get(&self, [x, y, z]: [i64; 3]) -> Result<Look, Key> {
-        if y < self.tiling.heights.0 || y >= self.tiling.heights.1 {
+    /** Whether site `p` is within the heights. */
+    fn within(&self, p: [i64; 3]) -> bool {
+        (self.tiling.heights.0..self.tiling.heights.1).contains(&p[UP])
+    }
+
+    /** What site `p` looks like; Err if its tile is not generated. */
+    fn get(&self, p: [i64; 3]) -> Result<Look, Key> {
+        if !self.within(p) {
             return Ok(0);
         }
-        let key = self.tiling.key([x, y, z]);
-        self.tiles.get(&key).map(|tile| tile.grid.get(x, y, z)).ok_or(key)
+        let key = self.tiling.key(p);
+        self.tiles.get(&key).map(|tile| tile.grid.get(p[0], p[1], p[2])).ok_or(key)
     }
 
     /** Which way site's surface faces: towards its empty neighbours, unit; zero if all are empty (or none). Its tile's grid is `grid`. */
@@ -283,11 +290,7 @@ impl Tiles {
         let key = self.tiling.key(site);
         for face in FACES {
             let p = [0, 1, 2].map(|i| site[i] + face[i]);
-            let id = if self.tiling.key(p) == key && p[1] >= self.tiling.heights.0 && p[1] < self.tiling.heights.1 {
-                grid.get(p[0], p[1], p[2])
-            } else {
-                self.get(p)?
-            };
+            let id = if self.tiling.key(p) == key && self.within(p) { grid.get(p[0], p[1], p[2]) } else { self.get(p)? };
             if id == 0 {
                 (0..3).for_each(|i| sum[i] += face[i] as f64);
             }
@@ -309,8 +312,8 @@ impl Tiles {
                 return Step::Miss;
             }
             let [x, y, z] = ray.site;
-            if y >= self.tiling.heights.0 && y < self.tiling.heights.1 {
-                let key = self.tiling.key([x, y, z]);
+            if self.within(ray.site) {
+                let key = self.tiling.key(ray.site);
                 let tile = match current {
                     Some((k, tile)) if k == key => tile,
                     _ => match self.tiles.get(&key) {
@@ -322,9 +325,11 @@ impl Tiles {
                     },
                 };
                 // Space whose voxels are all empty: a voxel is within 1 of its site on every axis.
-                let empty = if y > tile.top {
+                let empty = if ray.site[UP] > tile.top {
                     let b = self.tiling.tile(key);
-                    leaves(ray, [b.min[0], tile.top + 1, b.min[2]].map(|v| v as f64), b.max.map(|v| (v - 1) as f64))
+                    let mut min = b.min;
+                    min[UP] = tile.top + 1;
+                    leaves(ray, min.map(|v| v as f64), b.max.map(|v| (v - 1) as f64))
                 } else {
                     match tile.grid.get_or_empty_brick(x, y, z) {
                         Some(0) if !stopped(ray, tile.grid.held(x, y, z).1.0) => None,
@@ -546,7 +551,7 @@ pub fn nearest_site(p: [f64; 3]) -> [i64; 3] {
 }
 
 fn sky(direction: [f64; 3]) -> [f64; 3] {
-    let up = direction[1].max(0.0).sqrt();
+    let up = direction[UP].max(0.0).sqrt();
     [0, 1, 2].map(|i| HORIZON[i] + (ZENITH[i] - HORIZON[i]) * up)
 }
 
@@ -562,7 +567,7 @@ pub fn picture(generator: &Generator, camera: &Camera, level: u32, heights: (i64
     picture_of_tiles(camera, &mut Tiles::new(level, heights), &tops, make)
 }
 
-/** Where rays enter the slab of heights from above, by the tile they are over (x, z). */
+/** Where rays enter the slab of heights from above, by the tile they are over (across UP). */
 type Tops = HashMap<[i64; 2], i64>;
 
 /**
@@ -575,14 +580,16 @@ type Tops = HashMap<[i64; 2], i64>;
 fn tops_of(generator: &Generator, camera: &Camera, level: u32, heights: (i64, i64)) -> Tops {
     let Projection::Top { width } = camera.projection else { return Tops::new() };
     let (s, depth) = ((1i64 << level) as f64, width * camera.height as f64 / camera.width as f64);
-    let [i0, k0] =
-        [camera.eye[0] - width / 2.0, camera.eye[2] - depth / 2.0].map(|v| (v / s).floor() as i64 - 1).map(|v| v.div_euclid(TILE));
-    let [i1, k1] =
-        [camera.eye[0] + width / 2.0, camera.eye[2] + depth / 2.0].map(|v| (v / s).ceil() as i64 + 1).map(|v| v.div_euclid(TILE));
-    let tops = (i0..=i1).flat_map(|i| (k0..=k1).map(move |k| [i, k])).map(|[i, k]| {
+    let ([a, b], half) = (across(UP).map(|i| camera.eye[i]), [width / 2.0, depth / 2.0]);
+    let [i0, k0] = [a - half[0], b - half[1]].map(|v| (v / s).floor() as i64 - 1).map(|v| v.div_euclid(TILE));
+    let [i1, k1] = [a + half[0], b + half[1]].map(|v| (v / s).ceil() as i64 + 1).map(|v| v.div_euclid(TILE));
+    let tops = (i0..=i1).flat_map(|i| (k0..=k1).map(move |k| [i, k])).map(|column| {
         // With a site more round it: a ray reads its neighbours.
-        let column = Box3 { min: [i * TILE - 1, heights.0, k * TILE - 1], max: [(i + 1) * TILE + 1, heights.1, (k + 1) * TILE + 1] };
-        ([i, k], shown(generator, &column, level, UP).max[1])
+        let (mut min, mut max) = ([heights.0; 3], [heights.1; 3]);
+        for (a, c) in across(UP).into_iter().zip(column) {
+            (min[a], max[a]) = (c * TILE - 1, (c + 1) * TILE + 1);
+        }
+        (column, shown(generator, &Box3 { min, max }, level, UP).max[UP])
     });
     tops.collect()
 }
@@ -654,13 +661,13 @@ fn picture_of_tiles(camera: &Camera, tiles: &mut Tiles, tops: &Tops, make: &mut 
     for pixel in 0..pixels {
         let (from, direction) = camera.ray(pixel % camera.width, pixel / camera.width, top * s);
         let origin = from.map(|v| v / s);
-        let column = [origin[0], origin[2]].map(|v| (v.floor() as i64).div_euclid(TILE));
+        let column = across(UP).map(|i| (origin[i].floor() as i64).div_euclid(TILE));
         let high = tops.get(&column).map_or(top, |&t| t.min(heights.1) as f64 + 1.0);
         let (mut t, mut end) = (0.0, camera.far / s);
-        if direction[1] != 0.0 {
-            let (a, b) = ((low - origin[1]) / direction[1], (high - origin[1]) / direction[1]);
+        if direction[UP] != 0.0 {
+            let (a, b) = ((low - origin[UP]) / direction[UP], (high - origin[UP]) / direction[UP]);
             (t, end) = (a.min(b).max(t), a.max(b).min(end));
-        } else if origin[1] < low || origin[1] > high {
+        } else if origin[UP] < low || origin[UP] > high {
             end = -1.0;
         }
         if t > end {
@@ -711,7 +718,7 @@ fn picture_of_tiles(camera: &Camera, tiles: &mut Tiles, tops: &Tops, make: &mut 
                     };
                     // Mostly the surface's way, a little the voxel face's, to see the voxels.
                     let n = if normal == [0.0; 3] { entered } else { normalize([0, 1, 2].map(|i| normal[i] + 0.3 * entered[i])) };
-                    let light = AMBIENT + SKYLIGHT * (0.5 + 0.5 * n[1]) + SUNLIGHT * dot(n, normalize(SUN)).max(0.0);
+                    let light = AMBIENT + SKYLIGHT * (0.5 + 0.5 * n[UP]) + SUNLIGHT * dot(n, normalize(SUN)).max(0.0);
                     let lit = [0, 8, 16].map(|shift| ((look >> shift) & 255) as f64 * light);
                     let distance = ray.t * s;
                     let f = (fog * (distance / camera.far).powi(2)).min(fog);

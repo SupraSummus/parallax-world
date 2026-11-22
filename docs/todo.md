@@ -13,13 +13,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   They should go to fixed point like the noise,
   the forest building each thing relative to its anchor.
   The fixed-point containment tests cost about 15% at level 0.
-- **worldgen still has an up in a few paths**,
-  though it should have none (section 5 of `docs/architecture.md`):
-  `picture.rs`'s sky, sun and cameras looking down;
-  the checks' columns along y (`checks/`).
-  Both are of the world a host shows, up along `world::UP`, as its tiles are,
-  and could take it from there; a world could name its own,
-  which the hosts would then have to follow.
 - **A box's faces round to the sites.**
   Faces on a plane of a level's sites split its sites ("Faces" in
   `docs/generators.md`); off those planes a face rounds to the sites,
@@ -897,16 +890,17 @@ Numbers are for the forest at 1280×800, as measured when written.
   once the forest, the moor and the city name some:
   they would be measured at their spawn alone.
 - Assume no ground.
-  y stays up: bodies fall along it, the sky and the sun are over it.
+  Hosts keep an up (`world::UP`, +y): bodies fall along it, the sky and the sun are over it.
+  A world could name its own, which hosts would then follow.
   But the engine still takes a ground where a world has no say in it:
-  - `shown` trims a box along y alone, and `Floors` find what is buried
+  - `shown` trims a box along one axis alone, and `Floors` find what is buried
     from the bottom up (`on_rock` keeps it).
     Halved along every axis it would not pay:
     asked brick by brick, `whole` cost many times generating the tile.
     Blocks of columns finer than `FLOOR` would take a ground's range
     from columns between the level's own, each made for it.
-  - Places and the survey sample lines of cells along y (`PER_COLUMN`);
-    `directions` measures the four-fold harmonic about y alone.
+  - Places and the survey sample lines of cells along up (`PER_COLUMN`);
+    `directions` measures the four-fold harmonic about up alone.
   - Light takes its sky from above y (`SKY`, `SUN` in `light/`),
     and ends a line as far as the world's heights are high (`top_steps`).
     A world's generator could say where light comes into it from outside,

@@ -379,15 +379,14 @@ impl VoxelGrid {
      * finer level's hollows meet and light doesn't pass.
      */
     pub fn on_rock(&mut self, axis: usize, floor: impl Fn([i64; 3]) -> i64, colour: [u16; 3]) {
-        let at = (self.shown.len() / BRICK_SITES) as i32;
-        let (bx, by, top) = (self.bx, self.by, self.min[axis] + self.n[axis]);
+        let (at, top) = ((self.shown.len() / BRICK_SITES) as i32, self.min[axis] + self.n[axis]);
         let mut any = false;
-        for (i, brick) in self.bricks.iter_mut().enumerate() {
-            let first = [i as i64 % bx, i as i64 / bx % by, i as i64 / (bx * by)].map(|b| b * BRICK);
-            let first: [i64; 3] = std::array::from_fn(|a| self.min[a] + first[a]);
+        for i in 0..self.bricks.len() {
+            let first = self.brick_at(i);
+            let first: [i64; 3] = std::array::from_fn(|a| self.min[a] + first[a] * BRICK);
             if (first[axis] + BRICK).min(top) <= floor(first) {
-                debug_assert!(*brick < 0, "a brick under its floor holds sites");
-                (*brick, any) = (at, true);
+                debug_assert!(self.bricks[i] < 0, "a brick under its floor holds sites");
+                (self.bricks[i], any) = (at, true);
             }
         }
         if any {
@@ -409,6 +408,18 @@ impl VoxelGrid {
         self.views.seen.at.push(-1);
         self.glows.at.push(-1);
         first..len
+    }
+
+    /** Where brick `i` is, in bricks from its first. */
+    fn brick_at(&self, i: usize) -> [i64; 3] {
+        let i = i as i64;
+        [i % self.bx, i / self.bx % self.by, i / (self.bx * self.by)]
+    }
+
+    /** Where its bricks holding sites end along `axis`: past the last, which may reach past its box; None if none do. */
+    pub fn end_of_bricks(&self, axis: usize) -> Option<i64> {
+        let last = (0..self.bricks.len()).filter(|&i| self.bricks[i] >= 0).map(|i| self.brick_at(i)[axis]).max()?;
+        Some(self.min[axis] + (last + 1) * BRICK)
     }
 
     /** The box of its sites. */
@@ -616,8 +627,7 @@ impl VoxelGrid {
             .collect();
         let count = [self.bx, self.by, self.bricks.len() as i64 / (self.bx * self.by).max(1)];
         let buried = |brick: usize| {
-            let b = brick as i64;
-            let at = [b % self.bx, b / self.bx % self.by, b / (self.bx * self.by)];
+            let (b, at) = (brick as i64, self.brick_at(brick));
             (0..3).all(|c| at[c] > 0 && at[c] + 1 < count[c])
                 && (0..27).all(|d| {
                     let [i, j, k] = [d % 3, d / 3 % 3, d / 9].map(|v| v - 1);

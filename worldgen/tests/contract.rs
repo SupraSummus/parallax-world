@@ -142,7 +142,7 @@ fn wall(y: i64, z: i64) -> i64 {
 
 /** The wall, and `knobs` on its face: a unit of wood at each anchor. */
 fn knobbly_wall(knobs: Population) -> Generator {
-    let rock = Field::spans("rock", 0.0, Op::Fill, 0, |y, z| vec![Span::solid(wall(y, z) - 64, wall(y, z), ROCK)]);
+    let rock = Field::spans("rock", 0.0, Op::Fill, 0, |z, y| vec![Span::solid(wall(y, z) - 64, wall(y, z), ROCK)]);
     let knobs = knobs.reach(2).make(|p, _| Some(Node::of(vec![cuboid(p, p.map(|v| v + 1.0), WOOD, SOLID, Op::Fill)])));
     Generator { kinds: KINDS.to_vec(), seed: 4, layers: vec![Layer::Field(rock), Layer::Population(knobs)] }
 }
@@ -153,7 +153,8 @@ fn anchors_along_an_axis_are_one_per_square_across_it() {
     // across x, owned by the cell it is in, is one per square 2N wide, wherever in the lattice's period.
     const N: i64 = 8;
     const LINES: i64 = 128;
-    let generator = knobbly_wall(Population::new("knobs", 1.0, N).anchor_along(0, |line| Some(line.pick(&mut line.random("spot"), wall))));
+    let generator =
+        knobbly_wall(Population::new("knobs", 1.0, N).anchor_along(0, |line| Some(line.pick(&mut line.random("spot"), |z, y| wall(y, z)))));
     let Layer::Population(knobs) = &generator.layers[1] else { unreachable!() };
     // The cells of LINES² lines along x, as far along as the wall over them goes.
     let along = (wall(-N, -N).div_euclid(N) - 1, wall(LINES * N, LINES * N).div_euclid(N) + 1);

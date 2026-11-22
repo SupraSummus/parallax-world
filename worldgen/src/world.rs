@@ -16,9 +16,10 @@ pub type Find = Box<dyn Fn() -> [i64; 3] + Send + Sync>;
 
 /**
  * The axis hosts show every world up along: its heights lie along it,
- * tiles are made together along it, rock is found under them along it.
- * The engine has none (docs/architecture.md, section 5); hosts keep it +y,
- * and a world could name its own (docs/todo.md).
+ * tiles are made together along it, rock is found under them along it;
+ * pictures and checks look down it. The engine has none
+ * (docs/architecture.md, section 5); hosts keep it +y, and a world could
+ * name its own ("Assume no ground" in docs/todo.md).
  */
 pub const UP: usize = 1;
 

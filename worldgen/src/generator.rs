@@ -451,9 +451,7 @@ impl Line<'_> {
 
     /** Its cells' indices with its axis 0: its roll's, as a cell's are its own. */
     fn indices(&self) -> [i64; 3] {
-        let ([a, b], mut indices) = (across(self.axis), [0; 3]);
-        (indices[a], indices[b]) = (self.across[0], self.across[1]);
-        indices
+        turned(self.axis, self.across, 0)
     }
 
     /** A random sequence that depends on the line and `stream` only. */
@@ -464,16 +462,14 @@ impl Line<'_> {
 
     /**
      * A point picked by `random` evenly in the line's square across its
-     * axis, at `along(u, v)` along it (u and v in axis order). Each point
+     * axis, at `along(u, v)` along it (u and v in `across`'s order). Each point
      * of a surface crossing the lines once is in one line's cells, which
      * picks it as often as any: anchored there, things are as even as one
      * per square 2N wide.
      */
     pub fn pick(&self, random: &mut Rng, along: impl Fn(i64, i64) -> i64) -> Point {
         let [u, v] = self.centre.map(|c| c - self.n + random.below(2 * self.n as u32) as i64);
-        let ([a, b], mut point) = (across(self.axis), [0.0; 3]);
-        (point[a], point[b], point[self.axis]) = (u as f64, v as f64, along(u, v) as f64);
-        point
+        turned(self.axis, [u as f64, v as f64], along(u, v) as f64)
     }
 }
 
@@ -482,9 +478,20 @@ fn point(mark: usize, nth: u32) -> u64 {
     (mark as u64) << 32 | nth as u64
 }
 
-/** The axes across `axis`, in order. */
-pub(crate) fn across(axis: usize) -> [usize; 2] {
-    [(axis == 0) as usize, 2 - (axis == 2) as usize]
+/**
+ * The axes across `axis`: x and z across y, and turned with it, so
+ * (across[0], axis, across[1]) is as (x, y, z), never mirrored.
+ */
+pub const fn across(axis: usize) -> [usize; 2] {
+    [(axis + 2) % 3, (axis + 1) % 3]
+}
+
+/** The point with parts `[u, v]` across `axis` (as `across` orders them) and `along` it: (u, along, v) turned to stand along `axis`. */
+pub const fn turned<T: Copy>(axis: usize, [u, v]: [T; 2], along: T) -> [T; 3] {
+    let ([a, b], mut p) = (across(axis), [along; 3]);
+    p[a] = u;
+    p[b] = v;
+    p
 }
 
 /** Things placed in the cells of N·FCC, at most one per cell, or at points. */
