@@ -9,10 +9,14 @@
 //! Caverns and eyes are balls, one in each cell of a cubic grid of their
 //! own; tunnels capsules from low in a cavern to low in a neighbour's.
 //! A field of them carves the world (Field::shapes): those that may reach
-//! the box asked for.
+//! the box asked for. Crystals too small for a level's sites are there as
+//! what they are on average (`far`): along the caverns' walls, glowing
+//! pieces of sites, as dense as the crystals measured, so they light from afar.
+
+use std::sync::{Arc, OnceLock};
 
 use worldgen::World;
-use worldgen::generator::{Child, Field, Generator, Layer, Meets, Node, Op, Point, Population, Shape};
+use worldgen::generator::{Child, Field, Fill, Generator, Layer, Meets, Node, Op, Point, Population, Shadows, Shape, ball};
 use worldgen::js;
 use worldgen::kinds;
 use worldgen::noise::{Fx, Rng, fx, hash64, stream};
@@ -25,6 +29,8 @@ kinds! {
     amethyst: 6, ["#b884ff", "#a36cf7"], glows;
     aquamarine: 6, ["#74e6ff", "#5cd3f2"], glows;
     rose: 6, ["#ff86dc", "#f572cf"], glows;
+    // The crystals far off: their shades.
+    crystals: 6, ["#b884ff", "#a36cf7", "#74e6ff", "#5cd3f2", "#ff86dc", "#f572cf"], glows;
 }
 
 /** Balls of one size: one in a cell CELL wide with the chance `chance`, its radius from `least` to `most`. */
@@ -59,6 +65,7 @@ const TUNNEL_MOST: i64 = m(1.8);
  * clusters about SPREAD apart, each reaching LENGTH out of it at most.
  * What stands in a cavern is made while sites are SIZE apart at most
  * (level 3): a host's cube a level coarser holds eight times the caverns.
+ * Further apart, the crystals are their mean (`far`).
  */
 const NEAR: i64 = m(0.75);
 const SPREAD: i64 = m(6.0);
@@ -94,6 +101,12 @@ impl Balls {
         let [lo, hi] = [min.map(|v| v - self.most), max.map(|v| v + self.most)].map(|p| p.map(|v| v.div_euclid(self.cell)));
         cells(lo, hi).filter_map(move |c| self.ball(seed, c))
     }
+
+    /** Those carved at sites `spacing` apart (`carved`): none, if none of them is so wide. */
+    fn carved(&self, seed: u64, min: [i64; 3], max: [i64; 3], spacing: i64) -> impl Iterator<Item = ([i64; 3], i64)> + '_ {
+        let wide = carved(self.most, spacing).then(|| self.balls(seed, min, max).filter(move |&(_, r)| carved(r, spacing)));
+        wide.into_iter().flatten()
+    }
 }
 
 /** The cells from `lo` to `hi`, both included. */
@@ -107,6 +120,12 @@ struct Seeds {
     caverns: u64,
     eyes: u64,
     tunnels: u64,
+}
+
+impl Seeds {
+    fn of(seed: u64) -> Seeds {
+        Seeds { caverns: stream(seed, 1), eyes: stream(seed, 2), tunnels: stream(seed, 3) }
+    }
 }
 
 /** Where a tunnel starts in a cavern: half way down from its centre. */
@@ -209,12 +228,8 @@ fn hole((centre, radius): ([i64; 3], i64)) -> Shape {
 fn holes(seeds: Seeds) -> Field {
     Field::shapes("holes", 1.0, Op::Carve, move |b| {
         let ([min, max], s) = ([b.min, b.max.map(|v| v - 1)], spacing());
-        let balls = |balls: &'static Balls, seed| {
-            let wide = carved(balls.most, s).then(|| balls.balls(seed, min, max).filter(move |&(_, r)| carved(r, s)));
-            wide.into_iter().flatten().map(hole)
-        };
         let tunnels = carved(TUNNEL_MOST, s).then(|| tunnels(seeds, min, max, s)).into_iter().flatten();
-        balls(&CAVERNS, seeds.caverns).chain(balls(&EYES, seeds.eyes)).chain(tunnels)
+        CAVERNS.carved(seeds.caverns, min, max, s).chain(EYES.carved(seeds.eyes, min, max, s)).map(hole).chain(tunnels)
     })
 }
 
@@ -235,6 +250,100 @@ fn cluster(p: Point, into: [i64; 3], rng: &mut Rng) -> Node {
         })
         .collect();
     Node::of(shapes)
+}
+
+/**
+ * The clusters of crystals on the wall of the cavern `ball`, by `rng`:
+ * each its number, where it is in the cheese, and what it is made by.
+ */
+fn clusters<'a>(holes: &'a Holes, (centre, radius): ([i64; 3], i64), mut rng: Rng) -> impl Iterator<Item = (usize, Point, Rng)> + 'a {
+    let tries = (4.0 * std::f64::consts::PI * (radius * radius) as f64 / (SPREAD * SPREAD) as f64) as usize;
+    (0..tries).filter_map(move |n| {
+        let out = direction(&mut rng);
+        let behind = radius as f64 + behind(&mut rng);
+        let p = [0, 1, 2].map(|i| centre[i] as f64 + out[i] * behind);
+        let rng = Rng::new(rng.next_u64());
+        (holes.wall_near(p) == Some(centre)).then_some((n, p, rng))
+    })
+}
+
+/** How far behind its cavern's wall a cluster is. */
+fn behind(rng: &mut Rng) -> f64 {
+    1.0 + rng.next() * (NEAR - 1) as f64
+}
+
+/**
+ * The crystals measured, the same in every cheese: what each slab of a
+ * cluster adds to its shadow over directions, a cluster on a wall that
+ * faces up (lattice units, y from the wall into the cavern); and how
+ * many clusters a cavern's wall holds a unit², of caverns near the origin.
+ */
+struct Crystals {
+    shadows: Shadows,
+    per_area: f64,
+    /** By the spacing's power of two, what each slab a spacing thick adds, from the first a site may read (`slab`). */
+    slabs: [OnceLock<Vec<f64>>; 64],
+}
+
+impl Crystals {
+    /** What the slab from `from`, `s` thick, adds to a cluster's shadow (Shadows::slab): measured once a spacing. */
+    fn slab(&self, from: i64, s: i64) -> f64 {
+        let first = -(NEAR + s + 1);
+        let slabs = self.slabs[s.trailing_zeros() as usize]
+            .get_or_init(|| (first..NEAR + LENGTH).map(|from| self.shadows.slab(from, from + s)).collect());
+        slabs.get((from - first) as usize).copied().unwrap_or(0.0)
+    }
+}
+
+/** Clusters the crystals are measured over (Crystals); their caverns, those of 4³ cells about the origin. */
+const MEASURED: usize = 64;
+
+fn crystals() -> &'static Crystals {
+    static CRYSTALS: OnceLock<Crystals> = OnceLock::new();
+    CRYSTALS.get_or_init(|| {
+        let (seeds, measuring) = (Seeds::of(0), stream(0, 5));
+        let mut rng = Rng::new(measuring);
+        let sample: Vec<Node> = (0..MEASURED)
+            .map(|_| {
+                let p = [0.0, -behind(&mut rng), 0.0];
+                let mut rng = Rng::new(rng.next_u64());
+                cluster(p, [0, CAVERNS.most, 0], &mut rng)
+            })
+            .collect();
+        let (mut found, mut area) = (0usize, 0.0);
+        for c in cells([-2; 3], [1; 3]) {
+            let Some((centre, radius)) = CAVERNS.ball(seeds.caverns, c) else { continue };
+            let reach = radius + m(1.0);
+            let holes = Holes::near(seeds, centre.map(|v| v - reach), centre.map(|v| v + reach));
+            found += clusters(&holes, (centre, radius), Rng::new(hash64(measuring, c[0], c[1], c[2]))).count();
+            area += 4.0 * std::f64::consts::PI * (radius * radius) as f64;
+        }
+        Crystals { shadows: Shadows::new(&sample, 0, 1), per_area: found as f64 / area, slabs: std::array::from_fn(|_| OnceLock::new()) }
+    })
+}
+
+/**
+ * The crystals at sites further apart than SIZE: about each cavern the
+ * holes carve at the spacing, a ball of them strewn along its wall, as
+ * dense as they are (Shadows: extinction = clusters a unit³ times their
+ * mean shadow) at each site's depth, a spacing thick; denser inwards, as
+ * the wall's sphere shrinks.
+ */
+fn far(seeds: Seeds) -> Field {
+    Field::shapes("crystals", 2.0, Op::Fill, move |b| {
+        let ([min, max], s) = ([b.min, b.max.map(|v| v - 1)], spacing());
+        CAVERNS.carved(seeds.caverns, min.map(|v| v - NEAR), max.map(|v| v + NEAR), s).map(|(centre, radius)| {
+            let at = centre.map(|v| v as f64);
+            let fill = move |x: f64, y: f64, z: f64| {
+                let (s, depth) = (spacing(), -outside([x, y, z], (centre, radius)));
+                let (crystals, half) = (crystals(), s as f64 / 2.0);
+                let shrunk = (radius as f64 / (radius as f64 - depth).max(1.0)).powi(2);
+                let extinction = crystals.per_area * shrunk * crystals.slab((depth - half).floor() as i64, s) / s as f64;
+                Fill::stopping(extinction)
+            };
+            ball(at, (radius + NEAR) as f64, K::crystals.into(), Fill::At(Arc::new(fill)), Op::Fill)
+        })
+    })
 }
 
 /** A random direction, every one as likely. */
@@ -275,6 +384,7 @@ fn grottoes(seeds: Seeds) -> Population {
     Population::new("grottoes", 2.0, n)
         .reach(CAVERNS.most + CLIMB + m(1.0))
         .size(SIZE)
+        .far(far(seeds))
         .anchor(move |cell| {
             // The caverns' cells it meets: it reaches n from its centre, a cavern's cell is 2n wide.
             let [lo, hi] = [-n, n - 1].map(|d| cell.centre.map(|v| (v + d).div_euclid(CAVERNS.cell)));
@@ -287,15 +397,8 @@ fn grottoes(seeds: Seeds) -> Population {
             // All it asks of: its wall, a little behind it, and over its ceiling as high as its stairs may climb.
             let reach = radius + CLIMB + m(3.0);
             let holes = Holes::near(seeds, at.map(|v| v - reach), at.map(|v| v + reach));
-            let mut rng = cell.random("clusters");
-            let tries = (4.0 * std::f64::consts::PI * (radius * radius) as f64 / (SPREAD * SPREAD) as f64) as usize;
-            let clusters = (0..tries).filter_map(|n| {
-                let out = direction(&mut rng);
-                let behind = radius as f64 + 1.0 + rng.next() * (NEAR - 1) as f64;
-                let p = [0, 1, 2].map(|i| centre[i] as f64 + out[i] * behind);
-                let mut rng = Rng::new(rng.next_u64());
-                (holes.wall_near(p) == Some(centre)).then(|| Child::new(format!("cluster {n}"), SIZE, cluster(p, centre, &mut rng)))
-            });
+            let clusters = clusters(&holes, (centre, radius), cell.random("clusters"))
+                .map(|(n, p, mut rng)| Child::new(format!("cluster {n}"), SIZE, cluster(p, centre, &mut rng)));
             let stairs = Child::new("stairs", SIZE, stairs(&holes, (centre, radius), &mut cell.random("stairs")));
             Some(Node::group(std::iter::once(stairs).chain(clusters).collect()))
         })
@@ -303,7 +406,7 @@ fn grottoes(seeds: Seeds) -> Population {
 
 /** The cheese of a seed; the camera starts beside the pillar of the cavern of the origin's cell. */
 pub fn cheese(seed: u64) -> World {
-    let seeds = Seeds { caverns: stream(seed, 1), eyes: stream(seed, 2), tunnels: stream(seed, 3) };
+    let seeds = Seeds::of(seed);
     let ([x, y, z], _) = CAVERNS.ball(seeds.caverns, [0, 0, 0]).expect("a cavern in every cell");
     // Clear of the stairs, on a site: x + y + z even.
     let x = x + m(3.5);

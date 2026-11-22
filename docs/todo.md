@@ -345,11 +345,16 @@ Numbers are for the forest at 1280×800, as measured when written.
   Drawing one is a quarter of measuring it (`measure` in `forms.rs`):
   the rest counts its fine sites by cell, axis and face,
   with a vector of kinds for each face of each cell.
-- **Two of the cheese's tiles are over the cost budget**
+- **Five of the cheese's tiles are over the cost budget**
   (`OVER_BUDGET`): at level 7 a tile holds a few hundred thousand holes,
   each a shape, most of them a site or two
   ("Far forms for what fills space", below);
-  at level 3, the grottoes each make the holes around them to place their stairs.
+  at level 3, the grottoes each make the holes around them to place their stairs;
+  at levels 4 to 6, the crystals' far form, a ball about each cavern.
+  Timed, it makes levels 4 to 7 three or four times as long:
+  mostly its sites filled in part;
+  a tenth a power per site (`Fill::At`),
+  a tenth balls made only to ask what they reach (`whole`).
   Estimated, not timed: the cheese's body, all of a kind, is filled site by site
   uncounted, a good part of a coarse tile's time.
 - **The learned town's rules are from the old towns.**
@@ -880,9 +885,8 @@ Numbers are for the forest at 1280×800, as measured when written.
     a sky over a ground would be such a world's, not the engine's.
 - Far forms for what fills space: the cheese's holes are carved
   while wider than the sites are apart (past level 8 it is all buried),
-  and its grottoes (pillars, stairs, crystals) stop at level 3,
-  and its only light with them:
-  a far form glowing on the caverns' walls would keep it.
+  and its pillars and stairs stop at level 3
+  (its crystals go on as their far form, glowing pieces on the caverns' walls).
   Holes as things that cut the world cost far more: each a thing, its cells asked.
 - Lay out towns at any angle?
   Walls along the lattice's axes look crisp on FCC;

@@ -47,8 +47,9 @@ pub const WORLDS: &[Entry] = &[
     Entry { name: "learned", make: learned::learned, levels: 4, accuracy: &[] },
     // To level 3: at level 4, sites 2 m apart, a building's measured outline (city.rs, INSIDE) is kept or lost a site at a time.
     Entry { name: "city", make: city::city, levels: 3, accuracy: &[] },
-    // To level 3: from level 4 on, caves have no pillars, stairs or crystals (cheese/src/lib.rs, SIZE).
-    Entry { name: "cheese", make: cheese::cheese, levels: 3, accuracy: &[] },
+    // To level 7, past which the caverns are buried (cheese/src/lib.rs, `carved`).
+    // From level 4 on, caves have no pillars or stairs, and their crystals are their far form (SIZE).
+    Entry { name: "cheese", make: cheese::cheese, levels: 7, accuracy: &[] },
     #[cfg(feature = "sponza")]
     Entry { name: "sponza", make: sponza, levels: 5, accuracy: &[] },
 ];

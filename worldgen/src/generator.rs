@@ -94,6 +94,15 @@ pub enum Fill {
 }
 
 impl Fill {
+    /**
+     * The fill of what stops `extinction` of a ray a unit, strewn: a
+     * level-0 voxel's chance to stop one across it. So a shape of it stops
+     * as much as a field's medium of it (FieldValues), at every level.
+     */
+    pub fn stopping(extinction: f64) -> f64 {
+        1.0 - js::exp(-extinction * CHORD)
+    }
+
     fn at(&self, x: f64, y: f64, z: f64) -> f64 {
         match self {
             Fill::Const(f) => *f,
