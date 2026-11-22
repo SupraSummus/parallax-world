@@ -71,13 +71,3 @@ spawn            8         0         0         0         0         0         0  
 spawn            8         0         0         0         0         0         0         0         0      2175      2175         0 plan path
 spawn            8         0         0         0         0         0         0         0      2304       256       256         0 plan path's stretch
 spawn            8         0         0         0         0         0         0         0     65520     16384     16384         0 plan forest columns
-region1          0       361        30       121         0    536362         0         0      1011         0         0    134645 trees
-region1          0         7         2         1         0      2622         0         0       136         0         0      2622 boulders
-region1          0         7         1         1         0     13473         0         0       250         0         0     13473 logs
-region1          0       121       121        30         0     10818         0         0      3627         0         0      2487 plants
-region1          0         0         0         0         0         0         0     11264    129680         0         0         0 terrain
-region1          0         0         0         0         0         0         0         0         0     16735     16732         0 plan ground
-region1          0         0         0         0         0         0         0         0         0       341       341         0 plan path
-region1          0         0         0         0         0         0         0         0       126        14        14         0 plan path's stretch
-region1          0         0         0         0         0         0         0         0     51408     15314     15313         0 plan forest columns
-region1          0         0         0         0         0         0         0         0      7508      2029      2029         0 plan trees

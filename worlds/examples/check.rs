@@ -10,7 +10,7 @@
 //! CONTRACT_BLESS=1 takes one before a change, to see what it does.
 
 use worldgen::checks::contract::{breaks, check_component, covers, hold_to_baseline};
-use worlds::{REGIONS_SEED, WORLDS, by_name};
+use worlds::{SEED, WORLDS, by_name};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -21,7 +21,7 @@ fn main() {
         eprintln!("no world {world}; the worlds are {}", names.join(", "));
         std::process::exit(1);
     };
-    let (mut seed, mut places, mut levels, mut alone) = (REGIONS_SEED, 8, entry.levels, false);
+    let (mut seed, mut places, mut levels, mut alone) = (SEED, 8, entry.levels, false);
     let mut words = args[2..].iter();
     while let Some(word) = words.next() {
         let mut number = || words.next().and_then(|n| n.parse::<u64>().ok()).unwrap_or_else(|| panic!("a number after {word}: {usage}"));

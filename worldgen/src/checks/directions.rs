@@ -139,8 +139,8 @@ fn sample(world: &World, at: [i64; 3], random: &mut Rng, sums: &mut [Sums; DISTA
  */
 fn sums(world: &World) -> Vec<(&'static str, [Sums; DISTANCES.len()])> {
     let mut random = Rng::new(hash_text("directions", world.generator.seed));
-    let mut named: Vec<(&'static str, [Sums; DISTANCES.len()])> = std::iter::once(("spawn", world.spawn))
-        .chain(world.points.iter().map(|(name, find)| (*name, find())))
+    let mut named: Vec<(&'static str, [Sums; DISTANCES.len()])> = world
+        .places()
         .map(|(name, at)| {
             let mut sums = [Sums::default(); DISTANCES.len()];
             sample(world, at, &mut random, &mut sums);

@@ -199,15 +199,12 @@ fn points(
 /**
  * A mountainside above the treeline, where meadows give way to scree
  * and rock: just behind the crest of the range east of the path, 20 m
- * down from its top, where the crest stands 250 m over the treeline.
- * Looked for every 64 m along the valley, ahead and behind in turn, from
- * 5820 m on, where REGIONS_SEED's is, so its region stays where it was
- * laid out; the first from the start is elsewhere at that seed.
+ * down from its top, where the crest stands 250 m over the treeline:
+ * the first from the start, looked for every 64 m along the valley.
  */
 fn mountainside(terrain: &Terrain) -> [i64; 3] {
     (0..400)
-        .flat_map(|k| [k, -k - 1])
-        .map(|k| m(5820.0) + k * m(64.0))
+        .map(|k| k * m(64.0))
         .find_map(|z| {
             let path = terrain.path.x(z).round_units().0;
             let out: Vec<(i64, Fx)> = (path..path + m(3000.0)).step_by(m(8.0) as usize).map(|x| (x, terrain.ground(x, z))).collect();
@@ -236,12 +233,11 @@ fn coast(terrain: &Terrain) -> [i64; 3] {
  * A steading of the moor on the valley's floor, within 400 m of the
  * path: of those reaching the first row of points that any reaches, the
  * nearest the path. Rows and points are as far apart as a steading
- * reaches (moor::NEAR), so none falls between. From 4.5 km on, where
- * REGIONS_SEED's is, as for the mountainside.
+ * reaches (moor::NEAR), so none falls between.
  */
 fn steading(terrain: &Terrain, moorland: &Moorland) -> [i64; 3] {
     let path = |z: i64| terrain.path.x(z).round_units().0;
-    (m(4500.0)..m(164_500.0))
+    (0..m(160_000.0))
         .step_by(moor::NEAR as usize)
         .find_map(|z| {
             let near = (-8..=8).filter_map(|i| moorland.steading_near(path(z) + i * moor::NEAR, z)).map(|p| ((p[0] - path(p[2])).abs(), p));

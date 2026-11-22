@@ -4,10 +4,10 @@
 
 use worldgen::World;
 use worldgen::checks::contract::{breaks, check, hold_to_baseline};
-use worlds::{Entry, REGIONS_SEED, WORLDS};
+use worlds::{Entry, SEED, WORLDS};
 
 /** The seeds each world is checked at, together: each stratum is checked where it is cheapest, its margins averaged over all of them. */
-const SEEDS: &[u64] = &[REGIONS_SEED, 1, 2, 3];
+const SEEDS: &[u64] = &[SEED, 1, 2, 3];
 
 /**
  * `entry`'s world keeps the contract (worldgen::checks::contract) at SEEDS,
