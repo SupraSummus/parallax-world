@@ -4,9 +4,9 @@
 //! On a GPU, the engine's Painter draws its pictures into one of its own,
 //! which the window shows or a shot saves (gpu.rs).
 //!
-//! - chunks: cells of the lattice baked into chunks,
-//!   their whole voxels reliefs or splats (Kind's Reliefs, Splats), or
-//!   reliefs drawn flat, a picture a cell (Flat, an experiment);
+//! - chunks: cells of the lattice baked into chunks, their whole voxels
+//!   reliefs (Kind's Reliefs), or reliefs drawn flat, a picture a cell
+//!   (Flat, an experiment);
 //! - voxels: rays through the tiles' voxels, nothing baked.
 
 mod chunks;
@@ -30,15 +30,12 @@ pub enum Kind {
     Reliefs,
     /** Reliefs drawn flat, a picture a cell (an experiment). */
     Flat,
-    /** Chunks of cells' whole splats. */
-    Splats,
     /** Rays through the tiles' voxels. */
     Voxels,
 }
 
 impl Kind {
-    pub const ALL: [(Kind, &str); 4] =
-        [(Kind::Reliefs, "reliefs"), (Kind::Flat, "flat"), (Kind::Splats, "splats"), (Kind::Voxels, "voxels")];
+    pub const ALL: [(Kind, &str); 3] = [(Kind::Reliefs, "reliefs"), (Kind::Flat, "flat"), (Kind::Voxels, "voxels")];
 
     /**
      * Those that draw here: in a browser the voxels alone, as the chunks'
@@ -51,9 +48,8 @@ impl Kind {
     /** An engine of this kind, drawing `world`. */
     pub fn make(self, world: &World) -> Box<dyn Engine> {
         match self {
-            Kind::Reliefs => Box::new(chunks::Chunks::new(world, true, false)),
-            Kind::Flat => Box::new(chunks::Chunks::new(world, true, true)),
-            Kind::Splats => Box::new(chunks::Chunks::new(world, false, false)),
+            Kind::Reliefs => Box::new(chunks::Chunks::new(world, false)),
+            Kind::Flat => Box::new(chunks::Chunks::new(world, true)),
             Kind::Voxels => Box::new(voxels::Voxels::default()),
         }
     }

@@ -63,8 +63,6 @@ pub struct Frame {
     pub changes: Arc<[Arc<Change>]>,
     /** The farthest chunk's distance, or the render distance if farther: the sky's fog. */
     pub farthest: f64,
-    /** Whether its chunks' whole voxels are reliefs, or splats each (Renderer's `relief`). */
-    pub relief: bool,
     /** Whether its reliefs are drawn flat, a picture a cell (compositor::flatten). */
     pub flat: bool,
     /** The cells hidden in the faces in view (Hiding), for the compositor to ask the GPU whether they show after all. */
@@ -419,8 +417,6 @@ pub struct Renderer {
     bakery: Bakery,
     next_id: u32,
     renders: u64,
-    /** Whether its chunks' whole voxels are reliefs (Request's `relief`). */
-    relief: bool,
     /** Whether its reliefs are drawn flat (Request's `flat`). */
     flat: bool,
     /** Whether the chunks it has are lit (Request's `lit`): when the look's lighting changes, they are baked again. */
@@ -541,12 +537,12 @@ fn unhide(f: usize, pick: &mut Pick, h: Hidden) {
 
 impl Renderer {
     /**
-     * A renderer of `world`, its whole voxels reliefs or splats each, its
+     * A renderer of `world`, its whole voxels reliefs, flat if `flat`, its
      * bakers on as many threads as the world's, which call `baked` as each
      * chunk is; given light, each can light the voxels it shows (a Light
      * each), as the look asks.
      */
-    pub fn new(world: &World, relief: bool, flat: bool, baked: impl Fn() + Send + Sync + 'static) -> Renderer {
+    pub fn new(world: &World, flat: bool, baked: impl Fn() + Send + Sync + 'static) -> Renderer {
         let faces = view::faces();
         let light = world.light();
         let baked = Arc::new(baked);
@@ -573,7 +569,6 @@ impl Renderer {
             bakery,
             next_id: 0,
             renders: 0,
-            relief,
             flat,
             lit: false,
             hides: true,
@@ -586,7 +581,6 @@ impl Renderer {
                 number: number(),
                 changes: Arc::new([]),
                 farthest: 0.0,
-                relief,
                 flat,
                 probes: Arc::new([]),
                 feedback,
@@ -653,7 +647,7 @@ impl Renderer {
                 if self.picks[f][part].as_ref().is_some_and(|p| p.picked.covers(&lod, look.far, eye, tangents)) {
                     // Unhidden, what waits for tiles looks for those that came meanwhile, as back in view.
                     let all = back || asked;
-                    changed |= self.look_up(f, part, if all { &[true; GRID_LEVELS] } else { &arrived }, levels, view.focal, local);
+                    changed |= self.look_up(f, part, if all { &[true; GRID_LEVELS] } else { &arrived }, levels);
                     continue;
                 }
                 let [t0, t1, t2, t3] = tangents;
@@ -675,7 +669,7 @@ impl Renderer {
                         }
                     })
                 });
-                self.compose(f, picked, tangents, &lod, look.far, levels, view.focal, local);
+                self.compose(f, picked, tangents, &lod, look.far, levels, local);
                 changed = true;
             }
         }
@@ -701,10 +695,9 @@ impl Renderer {
         lod: &Lod,
         far: f64,
         levels: &[Arc<Level>],
-        focal: f64,
         local: [f64; 3],
     ) {
-        let (lattice, request) = (self.faces[f].lattice, self.request(f, focal, local));
+        let (lattice, request) = (self.faces[f].lattice, self.request(f));
         let eye = [local[0] / LAYER, local[1], local[2] / LAYER];
         let (mut chunks, mut waiting, mut baking) = (Vec::new(), Vec::new(), FastMap::default());
         let (eyes, wide) = picked.bounds();
@@ -751,13 +744,10 @@ impl Renderer {
         self.picks[f][usize::from(lod.medium)] = Some(pick);
     }
 
-    /** Requests to bake a cell of face `f` that reads given tiles, the eye at `local` seeing at `focal`. */
-    fn request(&self, f: usize, focal: f64, local: [f64; 3]) -> impl Fn(CellChunk, [TileId; 2]) -> Request + use<> {
-        let (lit, relief, flat) = (self.lit, self.relief, self.flat);
-        move |cell, tiles| {
-            let block = super::compositor::block(depths(&cell, local)[1].max(1.0), focal);
-            Request { face: f, cell, tiles, block, lit, relief, flat }
-        }
+    /** Requests to bake a cell of face `f` that reads given tiles. */
+    fn request(&self, f: usize) -> impl Fn(CellChunk, [TileId; 2]) -> Request + use<> {
+        let (lit, flat) = (self.lit, self.flat);
+        move |cell, tiles| Request { face: f, cell, tiles, lit, flat }
     }
 
     /**
@@ -765,17 +755,9 @@ impl Renderer {
      * (`part`, 1), those whose tiles arrived (by level, `arrived`) are to
      * bake, or hold nothing. Whether any were.
      */
-    fn look_up(
-        &mut self,
-        f: usize,
-        part: usize,
-        arrived: &[bool; GRID_LEVELS],
-        levels: &[Arc<Level>],
-        focal: f64,
-        local: [f64; 3],
-    ) -> bool {
+    fn look_up(&mut self, f: usize, part: usize, arrived: &[bool; GRID_LEVELS], levels: &[Arc<Level>]) -> bool {
         let Some(mut pick) = self.picks[f][part].take() else { return false };
-        let (lattice, request) = (self.faces[f].lattice, self.request(f, focal, local));
+        let (lattice, request) = (self.faces[f].lattice, self.request(f));
         let before = pick.waiting.len();
         pick.waiting.retain(|&(cell, t, wanted)| {
             let level = cell.atoms as usize;
@@ -897,7 +879,7 @@ mod tests {
 
     /**
      * The cells may_hold says hold nothing that shows bake empty, of every
-     * face, in relief and as splats: a world's cells of 8·FCC of a grid
+     * face: a world's cells of 8·FCC of a grid
      * (level 3 over it) around its spawn, all whose reads its tiles there
      * hold; and some cells meeting voxels are buried.
      */
@@ -928,10 +910,8 @@ mod tests {
                     }
                     empty += 1;
                     buried += usize::from(level.meets(lattice.world(cell.site), cell.spacing(), false));
-                    for relief in [true, false] {
-                        let baked = baker.bake_cell(face, &cell, relief);
-                        assert!(baked.count == 0 && baker.columns.is_empty(), "{name}: face {face}'s {cell:?} shows (relief: {relief})");
-                    }
+                    baker.bake_cell(face, &cell);
+                    assert!(baker.columns.is_empty(), "{name}: face {face}'s {cell:?} shows");
                 }
             }
             assert!(buried > 0 && buried < empty, "{name}: of {empty} cells holding nothing that shows, {buried} buried");

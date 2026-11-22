@@ -51,7 +51,7 @@ bake/src/                    # Chunk baker, on fcc/
 ├── face.rs                  # A face's measures along its axis
 ├── surface.rs               # A cell's voxels that can show
 ├── tables.rs                # The voxel's faces and shades per view face
-├── splats.rs                # What a chunk shows: splats, reliefs, media
+├── pillars.rs               # What a chunk shows: its relief's pillars, its medium
 └── lod.rs                   # Chunks: whole cells, levels by depth
 worldgen/                    # The world-generation engine, no direction up in it; no worlds (docs/generators.md)
 ├── src/

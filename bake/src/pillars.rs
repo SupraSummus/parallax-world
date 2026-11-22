@@ -1,8 +1,6 @@
-//! The voxels of a chunk the face's axis sees, each a hexagonal dab of
-//! paint (a splat) at its site, in relief over its chunk's plane:
-//! a slice's swept over its column's voxels behind it,
-//! a cell's whole ones one per column, as far as its side may show,
-//! or each; and a cell's see-through ones as pictures of its medium,
+//! What a chunk shows of a cell, seen along the face's axis, in relief
+//! over its chunk's plane: its whole voxels a pillar per column, as far as
+//! its side may show, and its see-through ones as pictures of its medium,
 //! a column's slab by slab.
 
 use std::collections::HashMap;
@@ -16,103 +14,64 @@ use fcc::{ALPHA, FACE_KINDS, VOXEL_FACES};
 use crate::tables::Geometry;
 
 /**
- * A voxel painted as a hexagon across the face's axis, at its site:
- * the points (x + u, y + v) with |u| ≤ width and |u| / √2 + |v| ≤ height,
- * its outline seen along the axis (width 1/√2, height 1, in units of its
- * grid), `depth` half layers past its slice's centre plane.
- * Seen along a ray slanting σ off the axis, the voxel's outline is
- * |σx| · width wider (its tips a layer before and after move sideways),
- * no higher in the face's rays; the compositor widens it so.
- * With `run` > 0 it stands for its column's voxels behind it too, that
- * many half layers deep: a pillar along the axis (see chunk_splats).
+ * A column of a cell's relief: its first voxel a ray can enter, at its
+ * site (a, b, c), `depth` half layers past its cell's centre plane, its
+ * outline seen along the axis a hexagon (the points (a·LAYER + u, b + v)
+ * with |u| ≤ 1/√2 and |u| / √2 + |v| ≤ 1, in units of its grid), standing for its column's
+ * voxels behind it too, `run` half layers deep: a pillar along the axis.
+ * Seen along a ray slanting σ off the axis, a voxel's outline is |σx| / √2
+ * wider (its tips a layer before and after move sideways), no higher in
+ * the face's rays.
  */
-pub struct Splat {
-    pub x: f64,
-    pub y: f64,
+pub struct Pillar {
     pub depth: i32,
-    /** How many half layers its pillar reaches past its site. */
+    /** How many half layers it reaches past its site. */
     pub run: i32,
-    pub width: f64,
     /** RGBA (see voxel_colour), its alpha its voxel's (Voxel). */
     pub colour: u32,
     /** Its voxel's lattice coordinates. */
     pub site: [i32; 3],
 }
 
-impl Splat {
-    /** √2 times its width, as a voxel's outline is (Baker::numbers leaves it out). */
-    pub fn height(&self) -> f64 {
-        self.width * std::f64::consts::SQRT_2
-    }
-
-    /** How far past its centre plane it is, in units of its grid. */
-    pub fn offset(&self) -> f64 {
-        self.depth as f64 * LAYER / 2.0
-    }
-
-    /** See reach; its pillar's farther end, if it moves more. */
+impl Pillar {
+    /**
+     * The half width and height of the hexagon holding where it may be
+     * drawn on its plane, for any ray of the face: seen along a ray
+     * slanting σ off the axis, |σx| + √2·|σy| ≤ MAX_SLANT, a voxel `offset`
+     * past the plane is drawn σ · offset off its site, |σx| / √2 wider; of
+     * its ends, the one that moves more.
+     */
     pub fn reach(&self) -> (f64, f64) {
-        let far = (self.depth + self.run) as f64 * LAYER / 2.0;
-        reach(self.width, self.height(), if far.abs() > self.offset().abs() { far } else { self.offset() })
+        let offset = (self.depth.abs().max((self.depth + self.run).abs())) as f64 * LAYER / 2.0;
+        (FRAC_1_SQRT_2 + MAX_SLANT * (FRAC_1_SQRT_2 + offset), 1.0 + MAX_SLANT * offset * FRAC_1_SQRT_2)
     }
 }
 
-/**
- * The width and height of the hexagon holding where a splat `offset` past
- * its centre plane may be drawn on that plane, for any ray of the face:
- * seen along a ray slanting σ off the axis, |σx| + √2·|σy| ≤ MAX_SLANT,
- * it is drawn σ · offset off its site, |σx| · width wider.
- */
-pub fn reach(width: f64, height: f64, offset: f64) -> (f64, f64) {
-    (width + MAX_SLANT * (width + offset.abs()), height + MAX_SLANT * offset.abs() * FRAC_1_SQRT_2)
-}
-
-/** The splats of one chunk, far to near, and the extent of their reach. */
-pub struct Splats {
-    pub splats: Vec<Splat>,
+/** The pillars of one chunk, and the lists that make them, kept for their memory. */
+#[derive(Default)]
+pub struct Pillars {
+    pub pillars: Vec<Pillar>,
     /** Painting order: each surface voxel's layer, and its index. */
     order: Vec<(i32, usize)>,
     /** A voxel's index by column (a, b), to keep the first. */
     columns: HashMap<(i32, i32), usize>,
-    pub min_x: f64,
-    pub max_x: f64,
-    pub min_y: f64,
-    pub max_y: f64,
 }
 
-impl Splats {
-    pub fn new() -> Splats {
-        Splats {
-            splats: Vec::new(),
-            order: Vec::new(),
-            columns: HashMap::new(),
-            min_x: f64::INFINITY,
-            max_x: f64::NEG_INFINITY,
-            min_y: f64::INFINITY,
-            max_y: f64::NEG_INFINITY,
-        }
-    }
-
-    /** Empties it, keeping the lists' memory. */
-    fn clear(&mut self) {
-        self.splats.clear();
-        (self.min_x, self.max_x, self.min_y, self.max_y) = (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
-    }
-
-    fn push(&mut self, splat: Splat) {
-        let (width, height) = splat.reach();
-        self.min_x = self.min_x.min(splat.x - width);
-        self.max_x = self.max_x.max(splat.x + width);
-        self.min_y = self.min_y.min(splat.y - height);
-        self.max_y = self.max_y.max(splat.y + height);
-        self.splats.push(splat);
+impl Pillars {
+    /** The top-left corner of where its pillars may be drawn (Pillar::reach), in units of their grid; none, if it has none. */
+    pub fn corner(&self) -> Option<[f64; 2]> {
+        let corners = self.pillars.iter().map(|p| {
+            let (width, height) = p.reach();
+            [p.site[0] as f64 * LAYER - width, p.site[1] as f64 + height]
+        });
+        corners.reduce(|[x, y], [u, v]| [x.min(u), y.max(v)])
     }
 }
 
 /**
  * A voxel's colour: its look (through its face towards the camera, as
  * Reader reads it) shaded as the mean of its open faces' shades (or of
- * its cut faces', if it has none), so a splat is shaded by the way its
+ * its cut faces', if it has none), so a voxel is shaded by the way its
  * surface faces; `shades` are a view face's (tables::shades). Opaque.
  */
 pub fn voxel_colour(voxel: &Voxel, shades: &[f32; FACE_KINDS]) -> u32 {
@@ -157,25 +116,25 @@ fn seen(geometry: &Geometry, faces: u16) -> bool {
 }
 
 /**
- * Fills `splats` with a relief of a cell's whole voxels (lod.rs), `centre`
- * as chunk_splats takes it: a splat per column (a, b), its first voxel a
+ * Fills `pillars` with a relief of a cell's whole voxels (lod.rs), `centre`
+ * twice the layer of its plane: a pillar per column (a, b), its first voxel a
  * ray of the face can enter (seen), a pillar from there as deep as its
  * side may show: at most to the column's last voxel, and on as far as the
  * solid behind it `runs_on` past the cell, as the next cell's relief
  * starts at what a ray enters, not at its cut. A slanted ray sees the
  * column as the axis does, wherever it meets the pillar. What is
- * see-through is no part of it, as if empty: cell_splats.
+ * see-through is no part of it, as if empty: cell_medium.
  */
 pub fn cell_relief(
-    splats: &mut Splats,
+    pillars: &mut Pillars,
     geometry: &Geometry,
     colour: &mut dyn FnMut(&Voxel) -> u32,
     whole: &[Voxel],
     centre: i32,
     runs_on: &dyn Fn([i32; 3]) -> i32,
 ) {
-    splats.clear();
-    let mut order = std::mem::take(&mut splats.order);
+    pillars.pillars.clear();
+    let mut order = std::mem::take(&mut pillars.order);
     order.clear();
     // Column by column, near to far.
     order.extend(whole.iter().enumerate().map(|(k, voxel)| (voxel.site[2], k)));
@@ -187,7 +146,7 @@ pub fn cell_relief(
         let Some(first) = voxels.next() else { continue };
         reliefs.push((first.site, voxels.last().unwrap_or(first).site, colour(first)));
     }
-    let mut fronts = std::mem::take(&mut splats.columns);
+    let mut fronts = std::mem::take(&mut pillars.columns);
     fronts.clear();
     fronts.extend(reliefs.iter().enumerate().map(|(k, (site, ..))| ((site[0], site[1]), k)));
     for &(site, last, paint) in &reliefs {
@@ -203,43 +162,10 @@ pub fn cell_relief(
             .map(|o| fronts.get(&(a + o[0], b + o[1])).map_or(i32::MAX, |&k| reliefs[k].0[2]));
         let reach = farthest.max().unwrap_or(i32::MAX);
         let end = if reach <= last[2] { reach.max(c) } else { runs_on(last).min(reach) };
-        splats.push(Splat {
-            x: a as f64 * LAYER,
-            y: b as f64,
-            depth: 2 * c - centre,
-            run: 2 * (end - c),
-            width: FRAC_1_SQRT_2,
-            colour: paint,
-            site,
-        });
+        pillars.pillars.push(Pillar { depth: 2 * c - centre, run: 2 * (end - c), colour: paint, site });
     }
-    splats.columns = fronts;
-    splats.order = order;
-}
-
-/**
- * Fills `splats` with the voxels of a cell (lod.rs), of `voxels`, a ray of
- * the face can enter, by an open face (seen), each a hexagon at its site,
- * `centre` as chunk_splats takes it, no run: its see-through ones, which a
- * ray meets one after another, so each is drawn in the order it does (the
- * native compositor); or all of them, where its whole ones are no relief.
- * A ray's first whole voxel is entered so and is in one cell: its hexagon,
- * holding its outline, meets the ray, and depth decides between cells'.
- */
-pub fn cell_splats(splats: &mut Splats, geometry: &Geometry, colour: &mut dyn FnMut(&Voxel) -> u32, voxels: &[Voxel], centre: i32) {
-    splats.clear();
-    for voxel in voxels.iter().filter(|v| seen(geometry, v.open)) {
-        let [a, b, c] = voxel.site;
-        splats.push(Splat {
-            x: a as f64 * LAYER,
-            y: b as f64,
-            depth: 2 * c - centre,
-            run: 0,
-            width: FRAC_1_SQRT_2,
-            colour: colour(voxel),
-            site: voxel.site,
-        });
-    }
+    pillars.columns = fronts;
+    pillars.order = order;
 }
 
 /**
@@ -274,7 +200,7 @@ pub(crate) fn slab_middle(c: i32, b: i32, slab: i32) -> i32 {
  * Fills `medium` with the see-through voxels of `voxels` a ray of the face
  * can enter (seen), their slabs of `slab` layers by column, the first from
  * layer 1, those whose middle site `owns` says is the cell's, `centre`
- * as cell_splats takes it; by slab, row b and a.
+ * as cell_relief takes it; by slab, row b and a.
  */
 pub fn cell_medium(
     medium: &mut Vec<Medium>,

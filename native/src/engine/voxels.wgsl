@@ -506,7 +506,7 @@ fn to_srgb(c: vec3f) -> vec3f {
   return select(1.055 * pow(c, vec3f(1.0 / 2.4)) - 0.055, c * 12.92, c <= vec3f(0.0031308));
 }
 
-// Colour `rgb` (sRGB) under `light`: shaded, times a shade, as the splats paint it; lit, the light it sends
+// Colour `rgb` (sRGB) under `light`: shaded, times a shade, as bake paints a relief; lit, the light it sends
 // as the eye sees it.
 fn coloured(rgb: vec3f, light: Light) -> vec3f {
   if globals.lit == 0u {

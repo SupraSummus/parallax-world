@@ -125,11 +125,6 @@ where one has none in the cell, to the column's last voxel,
 and on through the solid behind it past the cell, a cell deep at most,
 as the next cell's relief starts at what a ray enters, not at its cut.
 A relief is off by an angle that detail bounds (section 2).
-Or, drawn by the `splats` engine (`Renderer::relief` off),
-its whole voxels a ray can enter are each one hexagon too:
-a ray's first voxel is entered so and is in one cell,
-so its hexagon, holding its outline, meets the ray;
-no runs and no cut faces.
 Or, drawn flat (the `flat` engine, an experiment;
 `Flat` in `native/src/engine/chunks/compositor.rs`),
 its relief is a picture of its columns' colours without their depths,
@@ -260,17 +255,16 @@ Which cell a site is in comes from a table over one period
 of N·FCC, 2N along each of a, b and c (`bake/src/cells.rs`).
 A baker per thread shares one copy of the tiles (`share_tiles`).
 
-**Splats.** Seen along the axis, a face's columns (a, b) tile the plane.
-A voxel is painted as one hexagon (`Splat`),
-the voxel's outline seen along the face's axis
+**Pillars.** Seen along the axis, a face's columns (a, b) tile the plane.
+A column's pillar (`Pillar`) stands at its first voxel's site,
+its depth in half layers;
+the voxel's outline seen along the face's axis is a hexagon
 (√2 wide and 2 high, its corners the rhombic dodecahedron's),
-across the axis at its site, its depth in half layers.
-Seen along a ray slanting σ off the axis, the outline is 1 + |σx| times
+and seen along a ray slanting σ off the axis, 1 + |σx| times
 as wide (the voxel's tips a layer before and after move sideways)
-and, within the face's rays, no higher;
-the compositor widens it so,
-and the splats of a surface leave no gaps from any ray of the face.
-A splat's colour is that of the voxel's face towards the camera, −F
+and, within the face's rays, no higher:
+where a chunk may be drawn holds its pillars' outlines so widened.
+A pillar's colour is that of the voxel's face towards the camera, −F
 (the face a chunk seen along F shows; `Reader` in `fcc/` reads it),
 shaded as the mean of its open faces' shades
 (of its cut faces' where it has none),
@@ -283,8 +277,18 @@ the baker is handed instead
 the light each face of a voxel it shows sends out
 (`fcc/src/light.rs`, found by `light/`),
 so only what shows is lit:
-a splat shows the mean of its open faces',
+a pillar shows the mean of its front voxel's open faces',
 each as much as it faces the camera.
+
+Whole voxels were once also drawn each as its hexagon, rasterized
+(the `splats` engine):
+every voxel a ray can enter, at its own depth and in its own colour,
+however many a column has,
+where a relief has one pillar a column and a flat picture one colour.
+So it showed what the voxels engine shows, by outlines instead of rays,
+depth tested before every pixel as nothing marches.
+On lavapipe it drew faster than reliefs; real GPUs were not measured.
+It went, as an idea the voxels engine holds already.
 
 ## 4. Faces, compositing and the voxels engine (`native/src/view.rs`, `native/src/engine/`)
 
@@ -311,7 +315,7 @@ by the ray's two largest world components, one face a pixel (`owns`).
 Looking straight along a world axis, as the scenes' walls and streets
 invite, puts a corner of 4 faces in the middle of the screen.
 The panel draws the seams over the picture,
-and can colour the splats by layer or by chunk (`Colours`).
+and can colour the voxels by layer or by chunk (`Colours`).
 
 Chunks depend on neither where the camera is nor where it looks,
 and detail on nothing else, not the field of view or viewport.
@@ -357,15 +361,6 @@ listed in their order (`scan_draws`, `pack_draws`): roughly near to far,
 so nearer tiles mostly hide what is behind them early,
 and where depths tie, the same tile shows every frame, culled or not.
 It draws into a picture of its own, which the window (or `--shot`) shows.
-Where whole voxels are splats (section 1),
-the bakery's threads put them in clusters of a few nearby on its plane instead,
-each with the box of their outlines,
-drawn and culled as the tiles are,
-each splat at the depth of its site,
-widened by the slant of the ray to it;
-a chunk's slot in the table comes to the vertex shader
-as its draws' first vertex,
-so its splats are uploaded as the threads made them.
 A chunk's record, where it is whatever the camera
 and which clusters are its, is uploaded with it;
 each frame the GPU places every chunk from the camera (`place`),
@@ -471,7 +466,7 @@ A test holds a thin medium on the ground to hiding it, seen from above
 (`a_thin_medium_on_the_ground_hides_it_from_above`).
 A test holds a slab of medium to exp(−extinction · path),
 thin and thick, along the axis and slanted
-(`a_medium_of_splats_lets_through_as_much_as_its_extinction_says`).
+(`a_medium_of_reliefs_lets_through_as_much_as_its_extinction_says`).
 
 **Fog.** What is drawn at distance d keeps `exp(−d / F)` of its own colour;
 the rest is the horizon colour, mixed in per pixel;
@@ -489,7 +484,7 @@ distance.
 
 The window switches at run time between engines (`Kind`),
 each drawing the same tiles its own way, with its own shaders:
-chunks above, their whole voxels reliefs or splats (`reliefs`, `splats`),
+chunks above, their whole voxels reliefs, or drawn flat (`reliefs`, `flat`),
 or rays through the tiles' voxels (`native/src/engine/voxels.rs`),
 with no chunks, faces or baking, described here.
 
@@ -600,7 +595,7 @@ its rays to their steps (`no_ray_of_the_voxels_runs_out_of_steps`),
 a block's coarse voxels to the faces rays enter them by (`voxels_show_the_faces_rays_enter_by`),
 the picture to the same one with the world and the eye moved by a vector of the lattice
 that is not one of the bricks' (`voxels_look_the_same_wherever_the_bricks_fall`),
-a slab of medium to exp(−extinction · path), as the splats' test does,
+a slab of medium to exp(−extinction · path), as the reliefs' test does,
 and each channel to its own
 (`a_medium_of_voxels_stops_more_of_the_channels_its_colour_is_darker_in`).
 
@@ -613,7 +608,7 @@ where the grids the world draws show it whole or not at all.
 It reads a few sites past what it lights, at each coarser level,
 kept as far around the camera as the world keeps its tiles;
 each engine only shows it its own way.
-The splats' bakers light the voxels they show, face by face.
+The chunks' bakers light the voxels they show, face by face.
 For the voxels, the world's threads light the bricks rays ask for
 (above; `World::update`),
 each thread, of the most wanted, the one beside its last:
@@ -638,7 +633,7 @@ the resolving pass, at that pixel, marches it as the samples' rays are,
 writing down the see-through voxels it crosses,
 then the voxel that stops it and the light that voxel is drawn under;
 the window finds their looks in their tiles.
-The chunks engines show light as it is, baked into their splats,
+The chunks engines show light as it is, baked into their pillars,
 past white white.
 
 ## 5. Worlds (`fcc/`, `worldgen/`, `ground/`, `worlds/`)
@@ -706,15 +701,11 @@ each plan cell is a box holding four sites, so walls stay flat and frames one pi
 
 ## Limitations
 
-Of the chunks engines' splats:
+Of the chunks engines:
 
-- A voxel's hexagon holds its outline, not more:
-  near a slant's extremes it may hide a neighbour in its layer that is in
-  front (section 3).
-- A voxel is painted as one hexagon of one colour holding its outline,
-  that of its face towards the camera:
-  its other faces' shapes, shades and looks are lost,
-  and a silhouette is a row of hexagons.
+- A pillar is painted one colour, that of its front voxel's face towards the camera:
+  the voxels behind it along its side, and its other faces'
+  shapes, shades and looks, are lost.
 - At a seam, the two faces cut the world differently.
   Looking along a world axis, four faces meet in the middle of the screen.
 - More faces are in view at once than with a cube's six (four or more,

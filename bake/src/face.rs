@@ -12,12 +12,12 @@ pub fn spacing(level: i32) -> i32 {
 /**
  * How far a face's rays are from its axis, as a tangent, at most: the
  * face's rays are |x| + √2 · |y| ≤ z (in_face in native's view.rs). Seen
- * along them, a splat d ahead of its chunk's plane is drawn up to
+ * along them, a voxel d ahead of its chunk's plane is drawn up to
  * MAX_SLANT · d off its site there.
  */
 pub const MAX_SLANT: f64 = 1.0;
 
-/** How far past its chunk's plane a splat is per half layer of its depth, in world units, its voxels of level `atoms`. */
+/** How far past its chunk's plane a voxel is per half layer of its depth, in world units, its voxels of level `atoms`. */
 pub fn half_layer(atoms: i32) -> f64 {
     spacing(atoms) as f64 * LAYER / 2.0
 }

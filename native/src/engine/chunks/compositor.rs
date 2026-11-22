@@ -1,22 +1,21 @@
 //! Draws a frame's chunks with wgpu,
 //! into a picture of its own, which the window (or a shot) shows:
 //! cells' reliefs of whole voxels, a quad per tile of their columns whose
-//! pixels' rays find the column they meet first, or (Frame's `relief` off)
-//! their whole voxels as splats, each at its depth; only the tiles or
-//! clusters of splats that may show, culled on the GPU against the depth of
-//! what the last frame showed (compositor.wgsl), then the sky behind them.
+//! pixels' rays find the column they meet first (or, drawn flat, runs of
+//! their pictures); only the tiles that may show, culled on the GPU
+//! against the depth of what the last frame showed (compositor.wgsl), then
+//! the sky behind them.
 //! See-through voxels come after, as pictures of each cell's medium slab
 //! by slab, far to near, each over those behind, then over the picture.
 //!
-//! A chunk's columns and splats are uploaded when it comes into view, into
-//! a buffer each for all, in clusters (tiles of columns, and splats near
-//! each other on its plane), with its record (where it is, wherever the
-//! camera, and which clusters are its), and dropped when it leaves, as the
-//! frame's changes say (renderer.rs's Change): a change costs what changed,
-//! its writes one copy that the GPU scatters (Arena). Each frame writes
-//! only the globals: the GPU places the chunks relative to the camera
-//! (`place`), and culls the clusters, all there are, that its eye does not
-//! draw.
+//! A chunk's columns are uploaded when it comes into view, into a buffer
+//! for all, in clusters (tiles of columns), with its record (where it is,
+//! wherever the camera, and which clusters are its), and dropped when it
+//! leaves, as the frame's changes say (renderer.rs's Change): a change
+//! costs what changed, its writes one copy that the GPU scatters (Arena).
+//! Each frame writes only the globals: the GPU places the chunks relative
+//! to the camera (`place`), and culls the clusters, all there are, that its
+//! eye does not draw.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::ops::Range;
@@ -61,7 +60,7 @@ struct GpuRecord {
     plane: [f32; 4],
     /** Its clusters of whole voxels, [first, end) of all, its medium's from there to `veils`; none if its slot is free. */
     whole: [u32; 2],
-    /** A half layer of its grid: the unit of its columns' and splats' depths. */
+    /** A half layer of its grid: the unit of its columns' depths. */
     half_layer: f32,
     veils: u32,
 }
@@ -77,18 +76,15 @@ const CHUNK: u64 = 80;
  */
 pub type GpuColumn = [u32; 2];
 
-/** A splat (splat_vertex's instance in compositor.wgsl): its numbers as a cell's are baked (bake's bake_cell). */
-pub type GpuSplat = [u32; 5];
-
 /**
  * A cluster (Cluster in compositor.wgsl): a tile of a chunk's columns, or
- * splats of it, or runs of a picture. Where they are along the axis,
- * relative to the chunk's origin, and how far past the plane, nearest and
- * farthest; a tile's (or picture's) first column's centre, and the
- * splats' widest's half width; its first column or splat, its chunk's
- * slot and how many splats or runs, and whether it showed in the last
+ * runs of a picture. Where they are along the axis, relative to the
+ * chunk's origin, and how far past the plane, nearest and farthest; a
+ * tile's (or picture's) first column's centre; its first column, its
+ * chunk's slot and how many runs, and whether it showed in the last
  * frame; of a picture of medium, its slab's first layer, and how many half
- * layers its halves are (bake's Medium).
+ * layers its halves are (bake's Medium). `pad` makes it as long as the
+ * shaders' Cluster, whose vec2fs align it to 8 bytes.
  */
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -101,9 +97,9 @@ pub struct GpuCluster {
     visible: u32,
     near: f32,
     far: f32,
-    wide: f32,
     layer: f32,
     half: f32,
+    pad: u32,
 }
 
 impl GpuCluster {
@@ -117,9 +113,9 @@ impl GpuCluster {
             visible: 0,
             near: f32::INFINITY,
             far: f32::NEG_INFINITY,
-            wide: 0.0,
             layer: 0.0,
             half: 0.0,
+            pad: 0,
         }
     }
 
@@ -459,61 +455,6 @@ fn least(f: impl Fn(f64) -> f64, most: f64) -> f64 {
 }
 
 /**
- * Splats at most in a cluster (its count is a byte), and points across the
- * blocks of a chunk's plane its clusters gather splats from, where the chunk
- * is when it comes into view.
- */
-const CLUSTER: usize = 16;
-const BLOCK: f64 = 12.0;
-
-/** The size of the blocks that cluster() gathers splats from, for a chunk on a plane `distance` ahead seen at `focal`. */
-pub fn block(distance: f64, focal: f64) -> f64 {
-    BLOCK * distance / focal
-}
-
-/**
- * A chunk's splats as the GPU takes them, its whole voxels' where they are
- * no relief, in clusters: of the splats in each block of size `block` on
- * its plane, nearest first in each, so that a block's first clusters are
- * its front, the clusters nearest first, so that splats are mostly drawn
- * near to far. Their `first` counts from the chunk's first splat, and
- * their chunk's slot is not in them yet.
- * A cluster's box holds its splats' outlines along the axis, from `near`
- * to `far` past the plane, `half_layer` per half layer of their depth, and
- * how wide the widest is: the GPU finds where they are drawn for its
- * camera. In the bakery's threads, so that a chunk's upload is a copy.
- */
-pub fn cluster(numbers: &[f32], half_layer: f64, block: f64) -> (Vec<GpuSplat>, Vec<GpuCluster>) {
-    let numbers = numbers.as_chunks::<5>().0;
-    let block_of = |s: usize| [1, 0].map(|d| (numbers[s][d] as f64 / block).floor() as i64);
-    let depth = |s: usize| numbers[s][3] as i32;
-    let mut sorted: Vec<usize> = (0..numbers.len()).collect();
-    sorted.sort_by_key(|&s| (block_of(s), depth(s)));
-    let of = |part: &[usize], first: usize| {
-        let mut cluster = GpuCluster::new(first, part.len(), [0.0; 2]);
-        for &s in part {
-            let [x, y, w, depth, ..] = numbers[s].map(f64::from);
-            cluster.hold([x, y], [w, w * std::f64::consts::SQRT_2], [depth * half_layer; 2]);
-            cluster.wide = cluster.wide.max(w as f32);
-        }
-        cluster
-    };
-    let mut clusters = Vec::new();
-    let mut start = 0;
-    for run in sorted.chunk_by(|&a, &b| block_of(a) == block_of(b)) {
-        // Split evenly.
-        let parts = run.len().div_ceil(CLUSTER);
-        for p in 0..parts {
-            let first = run.len() * p / parts;
-            clusters.push(of(&run[first..run.len() * (p + 1) / parts], start + first));
-        }
-        start += run.len();
-    }
-    clusters.sort_by(|a, b| a.near.total_cmp(&b.near));
-    (sorted.iter().map(|&s| numbers[s].map(f32::to_bits)).collect(), clusters)
-}
-
-/**
  * A hidden cell (renderer.rs's Hidden) as the GPU asks whether it shows
  * (Probe in compositor.wgsl, find_probes): the box all it may draw fills,
  * in its face's coordinates (occlusion.rs's Box3), its face, its cell's
@@ -555,10 +496,9 @@ enum Reading {
     Mapping(Arc<AtomicBool>),
 }
 
-/** A chunk's columns, splats and clusters on the GPU, and its slot in the table (its record's place). */
+/** A chunk's columns and clusters on the GPU, and its slot in the table (its record's place). */
 struct Resident {
     columns: Range<u32>,
-    splats: Range<u32>,
     clusters: Range<u32>,
     slot: u32,
     /** Its record, and its tint for each of Colours, by Colours::ALL. */
@@ -784,10 +724,9 @@ struct Pipelines {
     composite: wgpu::BindGroupLayout,
     place: wgpu::BindGroupLayout,
     scatter: wgpu::BindGroupLayout,
-    /** The tiles of whole voxels, or their splats; then the pictures of medium one over another, and those over the picture. */
+    /** The tiles of whole voxels, or their flat pictures; then the pictures of medium one over another, and those over the picture. */
     tiles: wgpu::RenderPipeline,
     flat: wgpu::RenderPipeline,
-    splats: wgpu::RenderPipeline,
     veil: wgpu::RenderPipeline,
     composite_picture: wgpu::RenderPipeline,
     sky: wgpu::RenderPipeline,
@@ -814,7 +753,6 @@ pub struct Compositor {
     records: Arena,
     table: wgpu::Buffer,
     columns: Arena,
-    splats: Arena,
     clusters: Arena,
     resident: FastMap<u32, Resident>,
     /**
@@ -851,8 +789,7 @@ pub struct Compositor {
     veil_places: wgpu::Buffer,
     targets: Option<Targets>,
     seams: bool,
-    /** Whether the frame's whole voxels are reliefs, or splats (Frame's `relief`), and its reliefs flat (Frame's `flat`). */
-    relief: bool,
+    /** Whether the frame's reliefs are flat (Frame's `flat`). */
     flat: bool,
     /** What draws, and by phase what culls. */
     draw_group: Option<wgpu::BindGroup>,
@@ -889,8 +826,8 @@ struct Globals {
     resolution: [f32; 2],
     focal: f32,
     fog_distance: f32,
-    /** How whole voxels are drawn: 0 reliefs' tiles, 1 splats, 2 flat pictures. */
-    whole: f32,
+    /** Whether whole voxels are drawn as flat pictures, 1, or reliefs' tiles, 0. */
+    flat: f32,
     sky_fog: f32,
     sky_top: [f32; 4],
     horizon: [f32; 4],
@@ -1039,11 +976,6 @@ impl Pipelines {
                 immediate_size: 0,
             })
         };
-        let splat = wgpu::VertexBufferLayout {
-            array_stride: size_of::<GpuSplat>() as u64,
-            step_mode: wgpu::VertexStepMode::Instance,
-            attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Unorm8x4],
-        };
         // Ties (the sky, cleared to 1) are drawn.
         let depth = |compare, write| wgpu::DepthStencilState {
             format: DEPTH,
@@ -1097,7 +1029,6 @@ impl Pipelines {
         Pipelines {
             tiles: render(&draw, "tile_vertex", "tile_fragment", &[], tested.clone(), &[target(format, None)]),
             flat: render(&draw, "flat_vertex", "flat_fragment", &[], tested.clone(), &[target(format, None)]),
-            splats: render(&draw, "splat_vertex", "splat_fragment", &[Some(splat)], tested.clone(), &[target(format, None)]),
             veil: render(&draw, "veil_vertex", "veil_fragment", &[], behind, &[target(VEIL, Some(over_veils))]),
             composite_picture: render(
                 &composite,
@@ -1201,7 +1132,6 @@ impl Compositor {
             records: Arena::new(device, "records", RECORD, U::STORAGE, 1024),
             table: buffer(device, "chunks", 1024 * CHUNK, U::STORAGE),
             columns: Arena::new(device, "columns", size_of::<GpuColumn>() as u64, wgpu::BufferUsages::STORAGE, 1 << 20),
-            splats: Arena::new(device, "splats", size_of::<GpuSplat>() as u64, wgpu::BufferUsages::VERTEX, 1 << 20),
             clusters: Arena::new(device, "clusters", size_of::<GpuCluster>() as u64, wgpu::BufferUsages::STORAGE, 1 << 15),
             resident: FastMap::default(),
             belt: wgpu::util::StagingBelt::new(device.clone(), BELT),
@@ -1218,7 +1148,6 @@ impl Compositor {
             veil_places: buffer(device, "veil places", 4, U::STORAGE | U::COPY_DST),
             targets: None,
             seams: false,
-            relief: true,
             flat: false,
             draw_group: None,
             cull_groups: Vec::new(),
@@ -1235,7 +1164,7 @@ impl Compositor {
         }
     }
 
-    /** How many tiles (or whole splats) the frame drawn last drew in each phase, as `easel` reads them from the GPU. */
+    /** How many tiles (or runs of flat pictures) the frame drawn last drew in each phase, as `easel` reads them from the GPU. */
     pub fn drawn(&self, easel: &Easel) -> [u32; 2] {
         let word = |bytes: &[u8]| u32::from_le_bytes(bytes[..4].try_into().expect("a word"));
         std::array::from_fn(|phase| {
@@ -1245,32 +1174,26 @@ impl Compositor {
         })
     }
 
-    /** Uploads `p`'s chunk's columns, splats and clusters (see tiles and cluster), and its record, unless the buffers can hold no more. */
+    /** Uploads `p`'s chunk's columns and clusters (see tiles), and its record, unless the buffers can hold no more. */
     fn upload(&mut self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, p: &Placement, colours: Colours) -> bool {
         let baked = &p.chunk.baked;
-        let mut arenas = [&mut self.records, &mut self.columns, &mut self.splats, &mut self.clusters];
-        let counts = [1, baked.columns.len(), baked.splats.len(), baked.clusters.len()];
-        let mut ranges: [Range<u32>; 4] = Default::default();
-        for k in 0..4 {
+        let mut arenas = [&mut self.records, &mut self.columns, &mut self.clusters];
+        let counts = [1, baked.columns.len(), baked.clusters.len()];
+        let mut ranges: [Range<u32>; 3] = Default::default();
+        for k in 0..3 {
             let Some(range) = arenas[k].allocate(device, encoder, counts[k] as u32) else {
                 (0..k).for_each(|j| arenas[j].release(ranges[j].clone()));
                 return false;
             };
             ranges[k] = range;
         }
-        let [slot, columns, splats, range] = ranges;
+        let [slot, columns, range] = ranges;
         let slot = slot.start;
         self.columns.write(columns.start, bytemuck::cast_slice(&baked.columns));
-        self.splats.write(splats.start, bytemuck::cast_slice(&baked.splats));
         let clusters: Vec<GpuCluster> = baked
             .clusters
             .iter()
-            .enumerate()
-            .map(|(k, c)| {
-                // Its whole voxels' first: tiles of columns, if the frame's are reliefs; its medium's runs.
-                let first = if k < baked.veils && !self.relief { splats.start } else { columns.start };
-                GpuCluster { first: first + c.first, slot_count: slot << 8 | c.slot_count, ..*c }
-            })
+            .map(|c| GpuCluster { first: columns.start + c.first, slot_count: slot << 8 | c.slot_count, ..*c })
             .collect();
         self.clusters.write(range.start, bytemuck::cast_slice(&clusters));
         // A hue per layer of a level's cells (Colours), neighbours in a stack far apart.
@@ -1296,15 +1219,14 @@ impl Compositor {
         };
         self.records.write(slot, bytemuck::bytes_of(&record));
         self.veils += range.end - veils;
-        self.resident.insert(p.chunk.id, Resident { columns, splats, clusters: range, slot, record, tints, going: false });
+        self.resident.insert(p.chunk.id, Resident { columns, clusters: range, slot, record, tints, going: false });
         true
     }
 
-    /** Drops chunk `id`'s columns, splats and clusters, if it has them, and its record: its slot's clusters are none. */
+    /** Drops chunk `id`'s columns and clusters, if it has them, and its record: its slot's clusters are none. */
     fn release(&mut self, id: u32) {
         let Some(r) = self.resident.remove(&id) else { return };
         self.columns.release(r.columns);
-        self.splats.release(r.splats);
         self.clusters.release(r.clusters);
         self.records.release(r.slot..r.slot + 1);
         self.records.write(r.slot, bytemuck::bytes_of(&GpuRecord::default()));
@@ -1322,7 +1244,7 @@ impl Compositor {
         self.feedback = Some(frame.feedback.clone());
         let read = self.read(device);
         let size = view.pixels.map(|v| v.max(1));
-        (self.seams, self.relief, self.flat) = (view.seams, frame.relief, frame.flat);
+        (self.seams, self.flat) = (view.seams, frame.flat);
         let resized = self.targets.as_ref().is_none_or(|t| t.size != size);
         if resized {
             self.targets = Some(Targets::new(device, &self.pipelines, self.format, size));
@@ -1347,14 +1269,7 @@ impl Compositor {
             self.bind_groups(device);
         }
         let sky_fog = 1.0 - (-frame.farthest / view.fog_distance).exp();
-        let whole = if frame.flat {
-            2.0
-        } else if frame.relief {
-            0.0
-        } else {
-            1.0
-        };
-        queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&view.globals(size, sky_fog, whole)));
+        queue.write_buffer(&self.globals, 0, bytemuck::bytes_of(&view.globals(size, sky_fog, frame.flat)));
         // The frame's probes, sent anew if they changed; not in the frame that read the last, so that it settles.
         self.copying = matches!(self.reading, Reading::Idle) && !read && !frame.probes.is_empty();
         if self.copying {
@@ -1485,7 +1400,7 @@ impl Compositor {
 
     /** Stages what the changes wrote; makes room for what the GPU makes of them. */
     fn flush(&mut self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder) {
-        for arena in [&mut self.records, &mut self.columns, &mut self.splats, &mut self.clusters] {
+        for arena in [&mut self.records, &mut self.columns, &mut self.clusters] {
             arena.stage(device, encoder, &mut self.belt, &self.pipelines);
         }
         at_least(device, &mut self.table, u64::from(self.records.capacity) * CHUNK);
@@ -1537,8 +1452,8 @@ impl Compositor {
 
     /**
      * Draws the frame prepared last into the picture: its chunks placed
-     * from the camera (place in compositor.wgsl); the tiles (or
-     * clusters of whole splats) that showed last frame, then those that show now that did not, culled
+     * from the camera (place in compositor.wgsl); the tiles (or runs of
+     * flat pictures) that showed last frame, then those that show now that did not, culled
      * against the farthest depths of the first; then the pictures of
      * medium in front of them, far to near, and those over the picture.
      */
@@ -1591,14 +1506,7 @@ impl Compositor {
         };
         let tiles = |pass: &mut wgpu::RenderPass<'_>, phase: usize| {
             pass.set_bind_group(0, self.draw_group.as_ref(), &[]);
-            if self.flat {
-                pass.set_pipeline(&p.flat);
-            } else if self.relief {
-                pass.set_pipeline(&p.tiles);
-            } else {
-                pass.set_pipeline(&p.splats);
-                pass.set_vertex_buffer(0, self.splats.buffer.slice(..));
-            }
+            pass.set_pipeline(if self.flat { &p.flat } else { &p.tiles });
             pass.multi_draw_indirect_count(&self.draws[phase], 0, &self.blocks[phase], 0, self.clusters.top);
         };
         cull(encoder, 0);
@@ -1751,7 +1659,7 @@ impl View {
         ((top - finest) * (4.0 * q + 3.0) + layers / 2f64.powf(top - 1.0) + 6.0).ceil() as u64
     }
 
-    fn globals(&self, pixels: [u32; 2], sky_fog: f64, whole: f32) -> Globals {
+    fn globals(&self, pixels: [u32; 2], sky_fog: f64, flat: bool) -> Globals {
         // Dimmed in linear terms, as light adds up.
         let rgba = |c: [f32; 3]| {
             let [r, g, b] = c.map(|c| linear_to_srgb(srgb_to_linear(c) * self.sky));
@@ -1764,7 +1672,7 @@ impl View {
             resolution: pixels.map(|v| v as f32),
             focal: self.focal as f32,
             fog_distance: self.fog_distance as f32,
-            whole,
+            flat: f32::from(u8::from(flat)),
             sky_fog: sky_fog as f32,
             sky_top: rgba(SKY_TOP),
             horizon: rgba(SKY_HORIZON),
@@ -1803,13 +1711,7 @@ impl Painter for Compositor {
 
     fn describe(&self, easel: &Easel) -> String {
         let [first, next] = self.drawn(easel);
-        let what = if self.flat {
-            "runs of flat pictures' columns"
-        } else if self.relief {
-            "tiles of columns"
-        } else {
-            "whole splats"
-        };
+        let what = if self.flat { "runs of flat pictures' columns" } else { "tiles of columns" };
         format!(": {what}, {first} that showed before and {next} more")
     }
 }
@@ -1861,12 +1763,12 @@ mod tests {
             "Record",
             GpuRecord { origin, depth, face, level, atoms, site, tint, min, max, plane, whole, half_layer, veils }
         );
-        wgsl::assert_layout!(&module, "Cluster", GpuCluster { min, max, base, first, slot_count, visible, near, far, wide, layer, half });
+        wgsl::assert_layout!(&module, "Cluster", GpuCluster { min, max, base, first, slot_count, visible, near, far, layer, half, pad });
         assert_eq!(u64::from(wgsl::layout(&module, "Chunk").1), CHUNK);
         wgsl::assert_layout!(
             &module,
             "Globals",
-            Globals { viewport, resolution, focal, fog_distance, whole, sky_fog, sky_top, horizon, sky_view, faces, lod, medium }
+            Globals { viewport, resolution, focal, fog_distance, flat, sky_fog, sky_top, horizon, sky_view, faces, lod, medium }
         );
         wgsl::assert_layout!(&module, "FaceView", FaceView { view, axis, eye });
         wgsl::assert_layout!(&module, "Probe", GpuProbe { min, max, depth, face, level, layer, id });
