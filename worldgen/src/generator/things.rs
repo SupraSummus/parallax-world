@@ -20,6 +20,7 @@ pub(super) fn each_thing(
     let (n, rolled) = (population.cell, rolls(population, generator.seed));
     let cell = |c: [i64; 3], roll: Fx| Cell::fcc(population, generator.seed, c, roll);
     let mut make = |cell: &Cell, anchor: Point| {
+        let Some(node) = (population.make)(anchor, cell) else { return };
         if let Some(stands) = &population.stands {
             let at = anchor.map(|v| v.round() as i64);
             assert!(
@@ -28,9 +29,7 @@ pub(super) fn each_thing(
                 cell.key()
             );
         }
-        if let Some(node) = (population.make)(anchor, cell) {
-            each(cell, anchor, node);
-        }
+        each(cell, anchor, node);
     };
     match &population.anchor {
         Anchors::Cells(anchor) => {

@@ -21,7 +21,7 @@ use std::sync::Arc;
 use ground::FieldAbout;
 use ground::column::{Column, lowest_around};
 use ground::domain::{Domain, Scope};
-use ground::plan::{Holding, Sloped};
+use ground::plan::{Holding, Region, Sloped};
 use worldgen::generator::{Field, Layer, Op};
 use worldgen::kinds;
 use worldgen::noise::{Fbm, Fx, ValueNoise, fx, smoothstep};
@@ -60,6 +60,8 @@ const LEAVE: Units = Units::m(1500.0);
  * the ranges, where the lowland falls from LOWLAND, one in SHELF, to DEEP.
  */
 pub const SEA: Units = Units::m(-40.0);
+/** The treeline: its lowest, and how much higher it wavers. */
+const TREELINE: (Fx, Units) = (Fx::m(230.0), Units::m(120.0));
 const LOWLAND: Fx = Fx::m(10.0);
 const SHELF: i64 = 30;
 /**
@@ -194,7 +196,7 @@ impl Ranges {
 
     /** Where trees end, by column, lattice units. */
     pub fn treeline(&self, x: i64, z: i64) -> Fx {
-        Fx::m(230.0) + self.lines.at(x, z) * Units::m(120.0)
+        TREELINE.0 + self.lines.at(x, z) * TREELINE.1
     }
 
     /** Where snow lies from, by column, lattice units: higher where the trees end higher. */
@@ -284,6 +286,16 @@ fn layers(ranges: Arc<Ranges>, ground: Arc<Sloped>) -> Vec<Layer> {
 /** How much of ground `height` units high is dry land: none under the sea, all from a little over it. */
 pub fn dry(height: i64) -> Fx {
     smoothstep(SEA.to_fx() + Fx::m(0.5), SEA.to_fx() + Fx::m(2.0), Units(height).to_fx())
+}
+
+/**
+ * Where trees may grow, over rectangles of `ground`'s columns: somewhere
+ * under the treeline at its highest and somewhere dry (`below_treeline`,
+ * `dry`), as the lowest and the highest ground there may be.
+ */
+pub fn wooded(ground: Arc<Sloped>) -> Region {
+    let highest = TREELINE.0 + TREELINE.1.to_fx();
+    Region::new(move |min, max| ground.range(min, max).is_none_or(|(lo, hi)| Units(lo).to_fx() < highest && dry(hi) > Fx::ZERO))
 }
 
 /** The sea: water up to its level on sand, its top apart (SEA_TOP), and a beach of sand a little over; nothing higher. */

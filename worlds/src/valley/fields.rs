@@ -8,8 +8,8 @@ use std::sync::Arc;
 
 use ground::column::Column;
 use ground::domain::{Domain, Scope};
-use ground::plan::{Holding, Plan, Sloped};
-use ground::{FieldAbout, PopulationOn};
+use ground::plan::{Bid, Bids, Holding, Plan, Sloped};
+use ground::{FieldAbout, PopulationOn, Within};
 use worldgen::generator::{Layer, Node, Op, Population, Shape, stripe};
 use worldgen::kinds;
 use worldgen::noise::{Fbm, Fx, Rng, ValueNoise, fx, hash, hash64, smoothstep};
@@ -37,19 +37,26 @@ pub const SLOPE_SCALE: i64 = m(16.0);
 /**
  * The fields' bid for column (x, z) round the valley's towns: up to 0.6
  * at a town's edge, none 90 to 150 m out (by noise), and none where the
- * ground is steep: `slope`, rise over run.
+ * ground is steep: `slope`, rise over run. And over rectangles
+ * (Domain::bids): none beyond 150 m of the towns.
  */
-pub fn round_towns(scope: &Scope, towns: Arc<Towns>, slope: Arc<Plan<Fx>>) -> impl Fn(i64, i64) -> Fx + Send + Sync + 'static {
+pub fn round_towns(scope: &Scope, towns: Arc<Towns>, slope: Arc<Plan<Fx>>) -> (Bid, Bids) {
     let reach = Fbm::<{ m(160.0) }, 3>::new(scope.seed("reach"));
-    move |x, z| {
+    let (least, more) = (Units::m(90.0), Units::m(60.0));
+    let bids: Bids = {
+        let towns = towns.clone();
+        Box::new(move |min, max| (-Fx::ONE, if towns.least_distance(min, max) >= least + more { -Fx::ONE } else { fx(0.6) }))
+    };
+    let bid: Bid = Box::new(move |x, z| {
         let d = towns.distance(x, z).max(Units(0));
-        let r = Units::m(90.0) + (reach.at(x, z) * Units::m(60.0)).floor_units();
+        let r = least + (reach.at(x, z) * more).floor_units();
         if d >= r {
             return -Fx::ONE;
         }
         let near = fx(0.6) * (r - d) / r;
         near - smoothstep(fx(0.12), fx(0.25), slope.at(x, z))
-    }
+    });
+    (bid, bids)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -64,22 +71,27 @@ enum Crop {
 
 const CROPS: [Crop; 6] = [Crop::Wheat, Crop::Wheat, Crop::Stubble, Crop::Ploughed, Crop::Rows, Crop::Meadow];
 
-/** The fields, a domain bidding `bid` for each column, kept off the forest's `path`. */
+/** The fields, a domain bidding `bid` for each column and `bids` over rectangles (Domain::bids), kept off the forest's `path`. */
 pub struct Fields {
     scope: Scope,
     path: Arc<Path>,
-    bid: Box<dyn Fn(i64, i64) -> Fx + Send + Sync>,
+    bid: Bid,
+    bids: Bids,
 }
 
 impl Fields {
-    pub fn new(scope: Scope, path: Arc<Path>, bid: impl Fn(i64, i64) -> Fx + Send + Sync + 'static) -> Fields {
-        Fields { scope, path, bid: Box::new(bid) }
+    pub fn new(scope: Scope, path: Arc<Path>, (bid, bids): (Bid, Bids)) -> Fields {
+        Fields { scope, path, bid, bids }
     }
 }
 
 impl Domain for Fields {
     fn bid(&self, x: i64, z: i64) -> Fx {
         (self.bid)(x, z)
+    }
+
+    fn bids(&self, min: [i64; 2], max: [i64; 2]) -> (Fx, Fx) {
+        (self.bids)(min, max)
     }
 
     fn layers(self: Arc<Self>, ground: &Arc<Sloped>, hold: Holding) -> Vec<Layer> {
@@ -122,6 +134,7 @@ impl Plots {
 
 /** The fields' layers on `ground`, along `path`, where they own the land. */
 fn layers(scope: &Scope, hold: Holding, ground: Arc<Sloped>, path: Arc<Path>) -> Vec<Layer> {
+    let region = hold.region();
     let f = Arc::new(Plots { seed: scope.seed("plots"), hold, path, warp: ValueNoise::new(scope.seed("warp")) });
     let dithers = scope.seed("dither");
     let plots = {
@@ -145,6 +158,7 @@ fn layers(scope: &Scope, hold: Holding, ground: Arc<Sloped>, path: Arc<Path>) ->
             .spans()
         })
         .about(on, m(0.5), m(1.4))
+        .within(region.clone())
     };
     // Haystacks on the stubble.
     let haystacks = {
@@ -154,6 +168,7 @@ fn layers(scope: &Scope, hold: Holding, ground: Arc<Sloped>, path: Arc<Path>) ->
             .chance(chance)
             .size(m(4.0))
             .on(ground.clone())
+            .within(region)
             .anchor_along(1, move |line| {
                 let [i, k] = line.across;
                 Some(line.pick(&mut Rng::new(hash64(seed, i, 0, k)), |x, z| ground.at(x, z)))
