@@ -1,6 +1,6 @@
 //! The forest: an autumn forest valley, endless, on the generator
 //! framework. Its numbers are moving to integers (docs/generators.md).
-//! Here: its kinds, its ground, the domain other worlds grow it as, and
+//! Here: its kinds, its ground, the part other worlds grow it as, and
 //! its layers; its trees are in forest/trees.rs, what lies on its floor in
 //! forest/floor.rs.
 
@@ -9,14 +9,15 @@ use std::sync::{Arc, OnceLock};
 
 use ground::column;
 use ground::column::lowest_around;
-use ground::domain::{Domain, Lie, Scope, compose};
-use ground::plan::{Holding, Plan, Region, Sloped};
-use ground::{FieldAbout, PopulationOn, Within};
+use ground::land::{Columns, Lie};
+use ground::plan::{Plan, Sloped};
+use ground::{FieldAbout, PopulationOn};
 use worldgen::generator::{Generator, Holds, Layer, Line, Node, Op, Point, Population, Shape, Span};
 use worldgen::js::{self, round};
 use worldgen::kinds;
-use worldgen::noise::{Fbm, Fx, Rng, ValueNoise, fx, hash, hash64, smoothstep, unit};
+use worldgen::noise::{Fbm, Fx, Rng, Scope, ValueNoise, fx, hash, hash64, smoothstep, unit};
 use worldgen::points::{Blur, MARKS, Points, Rooms};
+use worldgen::scalar::Scalar;
 use worldgen::sites;
 use worldgen::units::{UNIT_SIZE, Units, m};
 use worldgen::{Entry, World};
@@ -162,39 +163,36 @@ impl Relief {
 }
 
 /**
- * The forest, a domain on ground decided outside it: it grows along
- * `path`, kept clear around `spawn`, thinned by its share of each column
- * and by `thinning` (a fraction, none by default), none outside `wooded`.
+ * The forest, on ground decided outside it: it grows along `path`, kept
+ * clear around `spawn`, thinned by its share of each column and by
+ * `thinning` (a fraction kept, all by default).
  */
 pub struct Forest {
     scope: Scope,
     path: Arc<Path>,
     spawn: [i64; 3],
-    thinning: Arc<dyn Fn(i64, i64) -> Fx + Send + Sync>,
-    wooded: Region,
+    thinning: Scalar,
 }
 
 impl Forest {
     pub fn new(scope: Scope, path: Arc<Path>, spawn: [i64; 3]) -> Forest {
-        Forest { scope, path, spawn, thinning: Arc::new(|_, _| Fx::ONE), wooded: Region::everywhere() }
+        Forest { scope, path, spawn, thinning: Scalar::constant(Fx::ONE) }
     }
 
-    /** Thinned by `thinning` too, a fraction kept: at the treeline, by the sea; none outside `wooded` (a rule). */
-    pub fn thinned(self, thinning: impl Fn(i64, i64) -> Fx + Send + Sync + 'static, wooded: Region) -> Forest {
-        Forest { thinning: Arc::new(thinning), wooded, ..self }
-    }
-}
-
-impl Domain for Forest {
-    /** Nothing, anywhere: it has what no other outbids it for. */
-    fn bids(&self, _: [i64; 2], _: [i64; 2]) -> (Fx, Fx) {
-        (Fx::ZERO, Fx::ZERO)
+    /** Thinned by `thinning` too, a fraction kept: at the treeline, by the sea. */
+    pub fn thinned(self, thinning: Scalar) -> Forest {
+        Forest { thinning, ..self }
     }
 
-    fn layers(self: Arc<Self>, ground: &Arc<Sloped>, hold: Holding) -> Vec<Layer> {
-        let (thinning, region) = (self.thinning.clone(), hold.region().and(&self.wooded));
-        let share = Arc::new(move |x, z| hold.share(x, z) * thinning(x, z));
-        layers(&self.scope, Ground { ground: ground.clone(), path: self.path.clone(), share, region }, self.spawn)
+    /** It bids nothing, anywhere: it has what no other outbids it for. */
+    pub fn bid() -> Scalar {
+        Scalar::constant(Fx::ZERO)
+    }
+
+    /** Its layers on `ground`, by `share`, its share of the land. */
+    pub fn layers(&self, ground: &Arc<Sloped>, share: Scalar) -> Vec<Layer> {
+        let share = share.times(&self.thinning);
+        layers(&self.scope, Ground { ground: ground.clone(), path: self.path.clone(), share }, self.spawn)
     }
 }
 
@@ -207,14 +205,13 @@ pub fn on_path(ground: &Sloped, path: &Path, z: i64, above: i64) -> [i64; 3] {
 
 /**
  * What the forest grows on: the ground's height, the path, and its share
- * of each column (a fraction), which thins whatever it grows, none outside
- * its region.
+ * of each column (a fraction), which thins whatever it grows; it is not
+ * asked where its share is surely none.
  */
 struct Ground {
     ground: Arc<Sloped>,
     path: Arc<Path>,
-    share: Arc<dyn Fn(i64, i64) -> Fx + Send + Sync>,
-    region: Region,
+    share: Scalar,
 }
 
 /** The forest's state shared by its layers: what it knows about any column, from the seed and its ground alone. */
@@ -305,7 +302,7 @@ impl Woods {
 
     /** `chance` times the forest's share of column (x, z). */
     fn thinned(&self, chance: Fx, x: i64, z: i64) -> Fx {
-        chance * (self.ground.share)(x, z)
+        chance * self.ground.share.column(x, z)
     }
 
     /** A spot on the ground picked evenly under a column of cells, the same for every population of its N. */
@@ -449,8 +446,7 @@ pub fn forest(seed: u64) -> World {
     let ground = Lie::new(move |x, z| relief.ground(x, z, spine.across(x, z).abs())).ground(GROUND_SCALE, SLOPE);
     // Start on the path at the near end, at about the height of a tall shrub.
     let spawn = on_path(&ground, &path, m(-31.0), m(3.0));
-    let forest: Arc<dyn Domain> = Arc::new(Forest::new(world.of("forest"), path, spawn));
-    let layers = compose(&[forest], &ground, GROUND_SCALE, Fx::ONE);
+    let layers = Forest::new(world.of("forest"), path, spawn).layers(&ground, Scalar::constant(Fx::ONE));
     World {
         generator: Generator { kinds: KINDS.to_vec(), seed: world.seed("layers"), layers },
         spawn,
@@ -476,7 +472,7 @@ fn layers(scope: &Scope, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
         let heights = ground.ground.clone();
         Plan::new("forest steep", COLUMN_SCALE, move |x, z| steep(&heights, x, z, 1))
     };
-    let region = ground.region.clone();
+    let region = ground.share.clone();
     let f = Arc::new(Woods { scope: scope.clone(), spawn, ground, columns, steep });
 
     // The ground: along each column, soil or stone under a layer of its surface, and stone down to the bottom.
@@ -607,9 +603,9 @@ fn layers(scope: &Scope, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
                 Some(grow(SPECIES[cell.mark], x, y, z, height as f64, room, &mut cell.random("tree"), &|x, z| f.ground(x, z)))
             })
             .on(on.clone())
-            .within(region.clone())
+            .within(region.clone(), 0)
             // Under the crowns of the trees around.
-            .far(canopy.about(on.clone(), 0, TREE_TOP).within(region.widened(TREE_REACH)))
+            .far(canopy.about(on.clone(), 0, TREE_TOP).within(region.clone(), TREE_REACH))
     };
 
     // Boulders and fallen logs.
@@ -618,7 +614,7 @@ fn layers(scope: &Scope, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
         let anchor = f.clone();
         // Thinned by the ground on the level's sites, at most its size apart.
         let size = m(2.0);
-        let population = Population::new(name, 2.0, rock_cell).reach(reach).size(size).on(on.clone()).within(region.widened(size));
+        let population = Population::new(name, 2.0, rock_cell).reach(reach).size(size).on(on.clone()).within(region.clone(), size);
         population.anchor_along(1, move |line| Some(anchor.spot(line)))
     };
     let boulders = {
@@ -655,7 +651,7 @@ fn layers(scope: &Scope, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
         .size(column_width)
         .on(on.clone())
         // A patch N wide round each cell's centre.
-        .within(region.widened(PLANTS / 2))
+        .within(region.clone(), PLANTS / 2)
         .anchor_along(1, move |line| {
             let [cx, cz] = line.centre;
             Some([cx as f64, anchor.ground(cx, cz) as f64 + 0.5, cz as f64])
@@ -670,7 +666,7 @@ fn layers(scope: &Scope, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
                     continue;
                 }
                 // Rarer as the forest's share falls: as dense as it is, none where it has none.
-                let share = (f.ground.share)(xi, zi);
+                let share = f.ground.share.column(xi, zi);
                 if share <= Fx::ZERO {
                     continue;
                 }

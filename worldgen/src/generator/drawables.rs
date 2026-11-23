@@ -54,6 +54,13 @@ pub(super) fn draw(drawable: &Drawable, seed: u64, s: i64, clip: &Box3, floors: 
 
 /** Lines of a field a side that are asked together what they draw (Field::meets): a box's own would reach from the ground into the air. */
 const LINES: i64 = 32;
+/**
+ * Sites a side of a field given at each site that are asked together, a
+ * cube: as it is read site by site, a part of a line is skipped as well
+ * as all of it, and a body filling a share of space is asked only by
+ * its edges.
+ */
+const SITES: i64 = 16;
 
 /**
  * Draws a field into `clip`, a medium keeping a site with the chance a ray
@@ -99,14 +106,20 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, floors: Option<&Flo
         offset
     };
     let (bottom, top) = (lo[axis] * s, (hi[axis] - 1) * s);
+    // Blocks of lines across, each all along them or, given at each site, in parts along them too.
+    let (side, along) = match lines {
+        Lines::At(_) => (SITES, SITES),
+        Lines::Spans(_) => (LINES, hi[axis] - lo[axis]),
+    };
     let mut site = [0i64; 3];
     let (mut drew, mut unlike) = (None, None);
     let mut record = |_: Look, _: Op, share: u32, _: u32, x: i64, y: i64, z: i64| drew = drew.or((share > 0).then_some([x, y, z]));
-    for (bu, bv) in (lo[a]..hi[a]).step_by(LINES as usize).flat_map(|u| (lo[b]..hi[b]).step_by(LINES as usize).map(move |v| (u, v))) {
-        let (to_u, to_v) = ((bu + LINES).min(hi[a]), (bv + LINES).min(hi[b]));
+    let blocks = (lo[a]..hi[a]).step_by(side as usize).flat_map(|u| (lo[b]..hi[b]).step_by(side as usize).map(move |v| (u, v)));
+    for (bu, bv, bw) in blocks.flat_map(|(u, v)| (lo[axis]..hi[axis]).step_by(along.max(1) as usize).map(move |w| (u, v, w))) {
+        let (to_u, to_v, to_w) = ((bu + side).min(hi[a]), (bv + side).min(hi[b]), (bw + along).min(hi[axis]));
         let mut block = Box3 { min: [0; 3], max: [0; 3] };
         (block.min[a], block.max[a], block.min[b], block.max[b]) = (bu * s, (to_u - 1) * s + 1, bv * s, (to_v - 1) * s + 1);
-        (block.min[axis], block.max[axis]) = (bottom, top + 1);
+        (block.min[axis], block.max[axis]) = (bw * s, (to_w - 1) * s + 1);
         let meets = field.meets_in(&block, s);
         if meets == Meets::Nothing && !checking() {
             continue;
@@ -121,18 +134,18 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, floors: Option<&Flo
             for v in bv..to_v {
                 site[a] = u;
                 site[b] = v;
-                // The line's first site: along the floors' axis, its floor.
+                // The line's first site in the block: along the floors' axis, its floor.
                 let first = match floors {
-                    Some(floors) if axis == floors.axis => floors.floor(site).max(lo[axis]),
-                    _ => lo[axis],
+                    Some(floors) if axis == floors.axis => floors.floor(site).max(bw),
+                    _ => bw,
                 };
-                if first >= hi[axis] {
+                if first >= to_w {
                     continue;
                 }
                 match lines {
                     Lines::At(at) => {
                         let mut w = first + ((first + u + v) & 1);
-                        while w < hi[axis] {
+                        while w < to_w {
                             site[axis] = w;
                             let [x, y, z] = site;
                             let value = all.map(|kind| (kind, None)).or_else(|| {

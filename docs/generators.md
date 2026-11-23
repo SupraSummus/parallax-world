@@ -11,9 +11,10 @@ which use only the engine's public API.
 The forest (`worlds/src/forest.rs`) is written this way,
 and so is the valley (`valley.rs`),
 the forest with towns, fields, landmarks, moorland and a railway
-between mountains, six domains composed as in "Composing",
+between mountains, six parts composed as in "Composing",
 the city (`city.rs`), boxes on a plan of quarter metres,
-and the cheese (`worlds/cheese/`), endless every way, no way up but for walking it;
+and the cheese (`worlds/cheese/`), endless every way, no way up but for walking it,
+its holed cheese and a mine two parts sharing space ("Composing");
 a host starts any by name (`worlds::all`, `worlds/src/lib.rs`),
 as a `World`: its generator, spawn and heights
 (the bounds it has anything in, with a sky over them; the cheese has none),
@@ -84,12 +85,14 @@ A layer may say **where it is**, along any axis;
 the framework knows nothing else of where anything is.
 A field says what it draws in any box (`Field::meets`, a `Meets`):
 anything, nothing, or all of it solid of one kind.
-The cheese is all cheese, its holes nothing where none of them reaches;
+The cheese is all cheese, its holes nothing where none of them reaches,
+the mine's rock all aged where it surely owns a box;
 the sea nothing over its level (`ground::under`).
 A population says where its things' anchors may lie (`Population::stands`).
 Each is a rule (below),
 so the framework asks it to draw only where it may be:
-a field in blocks of lines (`LINES`), a population box by box.
+a field in blocks of lines (`LINES`), one given at each site in cubes (`SITES`),
+a population box by box.
 On a ground, the `ground` crate (`ground/src/about.rs`) says both for a layer
 about a plan of heights (`ground::plan::Sloped`), up being +y there alone:
 a field's spans along y lie from `below` under to `above` over it
@@ -101,9 +104,10 @@ The ground's own field also says what it is under all that (`FieldAbout::ground`
 solid down without end.
 A population's things may stand on such a plan (`PopulationOn::on`),
 each anchored at most N (its cell) off it.
-And either may be drawn within a **region** of columns (`Within::within`):
-where something may be, asked of a rectangle of them (`Region`),
-such as a domain's share of the land ("Land") or the trees below the treeline.
+And either may be drawn within a **scalar** (`Field::within`, `Population::within`):
+where something may be, a number bounded over a box ("Land"),
+such as a part's share of the land or the trees below the treeline,
+on a ground bounded over a rectangle of columns at any height.
 Such rules add up, each narrowing where a layer is asked.
 So a host may ask for any box, in any order,
 and a field about the ground costs little in the air above it
@@ -463,9 +467,9 @@ Broken rules panic, naming the thing and pointing here:
   only points a query looks at are checked,
   so derive `wander` from the most a rule can stray.
 - **Kinds.** A world has at most 256 kinds: a kind is a byte.
-- **Bids.** A domain's bid for a column lies within what it `bids`
-  over any rectangle holding it.
-  Checked only through what is drawn within the regions it gives ("Meets", "Stands").
+- **Scalars.** A scalar at a point lies within its bounds
+  over any box holding it (`Scalar::new`): a bid, a thinning.
+  Checked only through what is drawn within them ("Meets", "Stands").
 - **Slopes.** A `Sloped` plan's column differs from a neighbour's
   by at most its `slope`, checked as one is made and the other is kept:
   so every two ever kept together.
@@ -495,22 +499,21 @@ and fields from position alone.
 
 ## Composing
 
-A world as large as the valley is **domains**
+A world as large as the valley is **parts**
 (the forest, `town.rs`, `fields.rs`, `landmarks.rs`, `moor.rs`, `railway.rs`,
 the mountains): blocks of plans and layers that never call each other.
+So is the cheese, in space: its holed cheese and its mine.
 They meet only through plans coarser than their own,
-through the land they bid for, the ground they shape,
+through the land they bid for, the ground they pull,
 and through things they share.
 Each part below is an experiment in how far that goes.
 
-A domain is a `Domain` (`ground/src/domain.rs`),
-made with what it reads, all of it coarser than itself.
-It bids for each column (`bid`, "Land"),
-pulls the ground there (`shape`, "Ground"),
-and draws its layers by its hold on the land (`layers`).
-A world is a list of domains and the bands of ground they shape;
-`compose` makes their land and layers.
-So one domain serves several worlds:
+A part is no type of its own, only what it reads, all of it coarser than itself:
+a struct made with that, its bid a scalar ("Land"),
+on a ground its pull on the ground a `Pull` ("Ground"),
+and its layers, drawn by its share of the land.
+The world wires them up: their bids into a land, its shares to their layers.
+So one part serves several worlds:
 the forest grows alone, in the valley and in the learned town.
 Each part draws its seeds from its name (`Scope`: `forest:conifer`),
 so no two share one by chance, whatever is added.
@@ -549,42 +552,57 @@ and keep what they keep in one of these.
 
 ### Land
 
-Domains share land by **bidding** for each column (`Land`).
-A bid is a function of the column,
-read once a column by the land's plan, so not kept apart:
-a domain bidding nothing somewhere costs nothing there.
-A domain's share eases from none to all
-as its bid goes from `width` behind the best of the rest to `width` ahead,
-and the domain with the most owns the column.
-What the domains propose blends by their shares:
+Where something may be is a **scalar** (`worldgen/src/scalar.rs`):
+a number at each point, and its least and most over any box, a rule.
+A layer drawn within one (`Field::within`, `Population::within`)
+is not asked further than its reach from where the scalar may be over none.
+A product of scalars is one (`Scalar::times`):
+the forest's share thinned towards the treeline and the sea (`mountains::wooded`).
+
+Parts share space by **bidding** for each point (`land::shares`):
+each bid a scalar, each share one too.
+A share eases from none to all
+as its bid goes from `width` behind the best of the rest to `width` ahead.
+The shares of a point add up to one, so at most one is over a half:
+that one owns the point (`land::owns`), whatever the order of the bids.
+Where three bids or more meet, none may own it,
+and what is drawn only where owned leaves it to what is under.
+A share's bounds over a box follow from the bids'.
+Where it is surely none, what is drawn by it is not asked:
+away from the towns their streets, the fields and the landmarks' ground,
+in the mine's lumps the caverns.
+Where its least is over a half it owns all of a box:
+the mine's rock is all of a kind there, so what is buried in it is not made.
+In space the shares are decided where read.
+On a ground (`ground/src/land.rs`) they are a plan of columns,
+each bid read once a column, so not kept apart:
+a part bidding nothing somewhere costs nothing there.
+
+What the parts propose blends by their shares:
 the forest's chances of trees, rocks and plants are times its share,
 so it thins towards the fields by itself,
 and the towns and fields draw only the columns they own.
 The forest bids nothing: it has what no one outbids it for.
-A domain added later is seen by the others only as a smaller share:
+A part added later is seen by the others only as a smaller share:
 adding the fields changed neither the forest nor the towns.
-`compose` hands each domain its hold (`Holding`):
-its share and whether it owns a column, never an index into the land.
-A domain also says the least and the most it bids over a rectangle of columns
-(`bids`, a rule; by default anything): the towns by how near one may be.
-Where the most it bids is `width` behind the least another bids,
-its share is surely none, and its hold's region says so (`Holding::region`).
-What it draws by its share is drawn within that region,
-so away from the towns their streets, the fields and the landmarks' ground
-are not asked at all, nor the forest's things over the treeline (`Forest::thinned`).
-Relief holds no land (`holds_land`):
-the valley's mountains (`mountains.rs`) raise the ground all of them stand on,
+A part digging in space digs from the points it owns,
+a cavern from its centre, a gallery from its end,
+so each reaches past the edge of its share, and they meet.
+
+Relief bids for nothing and draws everywhere:
+the valley's mountains (`mountains.rs`) raise the ground all the parts stand on,
 either side of its course (`course.rs`), the line it winds along,
 kilometres either way, smooth noise along z,
 massifs and passes along it, crests, spurs and side valleys across,
-and end the forest at a treeline (`Forest::thinned`),
-where a field paints meadows, scree, rock and snow by height, slope and hollows.
+and end the forest at a treeline (`mountains::wooded`),
+where a field paints meadows, scree, rock and snow by height, slope and hollows;
+the cheese's body is the cheese all through, which both its parts dig.
 Quantities want blends of their own, though.
 A town levels the ground 120 m past its streets,
 far beyond the metres in which it gives way to fields,
 so the ground blends by the town's own pull, not by shares ("Ground").
 
-A domain can't place what it builds whole, a hut or a pool, by the shares:
+A part can't place what it builds whole, a hut or a pool, by the shares:
 they are a finer band than its places,
 and they read the ground (the fields bid by its slope), which a hut levels.
 So the moor bids from position alone,
@@ -594,18 +612,18 @@ by more than the land's width.
 
 ### Ground
 
-The ground is made in **bands** (`Lie`), coarse to fine,
+The ground is made in **bands** (`Lie`, `ground/src/land.rs`), coarse to fine,
 each a function of the column, not a plan,
 so plans of any scale may read it;
 kept by column, as several read each column.
-A band is the one before pulled by its domains (`Lie::shaped`):
+A band is the one before pulled by parts (`Lie::shaped`):
 each towards a height of its own, which may depend on the band under it,
-as hard as it says, a fraction (`Domain::shape`).
+as hard as it says, a fraction (`Pull::pull`).
 A rule: the pulls on a column add up to all of it at most,
-so the band is the same in any order and no domain undoes another's work.
-So domains of one band keep apart
+so the band is the same in any order and no part undoes another's work.
+So parts of one band keep apart
 (the landmarks and the moor's pools keep off the railway and each other).
-A domain reads only the bands it was made with.
+A part reads only the bands it was made with.
 The valley's are the relief and the ranges,
 then the towns' terraces (`valley::Terrain`),
 then the railway, the landmarks and the moor;
@@ -651,12 +669,12 @@ as the ground's pieces, shown, would hide it in the site they share.
 
 ### Kinds and things
 
-A domain names its kinds with `kinds!`,
-after those of the domains it builds on:
+A part names its kinds with `kinds!`,
+after those of the parts it builds on:
 the forest's come first in any world it grows in,
 so its things are a library others draw from
 (the towns' trees are the forest's `make_tree`).
-A world of fewer domains may still have all their kinds:
+A world of fewer parts may still have all their kinds:
 the moor alone has the valley's (`valley::kinds`), its own last,
 so its ids are the same in both,
 and it reuses the forest's stone and the town's thatch.
@@ -714,8 +732,8 @@ pieces, as crystals are, not a medium, which would stop the channels unlike.
 
 Structures that stand alone (`worlds/src/valley/landmarks.rs`),
 a ruined keep, a watchtower, chapels, ponds, farmsteads and windmills,
-are the valley's fourth domain:
-a new structure joins it as a landmark, or as a thing of a domain.
+are the valley's fourth part:
+a new structure joins it as a landmark, or as a thing of a part.
 Sites are claimed ("Claims"):
 each spot tries the kinds in a square around it,
 and a column asks for the one site within its reach.
@@ -728,7 +746,8 @@ A site levels the ground plan under it (a pond digs a bowl),
 bids for its footprint and a clearing, which trees and crops then keep off,
 and paints its ground.
 On the moor's land, the moor's heath covers its grass
-and its mist lies over it, as without the landmark (`moor::Alone`).
+and its mist lies over it, as without the landmark (`moor::Alone`):
+by its share of a land of its own and the forest's bids alone.
 A population anchored at the sites builds each in its own frame.
 A pond's water stops under the rim its bowl leaves,
 so it never stands over the ground round it.
@@ -736,7 +755,7 @@ The first is a chapel beside the path, in the camera's view at spawn.
 
 ### Railway
 
-The railway (`worlds/src/valley/railway.rs`) is a domain built on curves.
+The railway (`worlds/src/valley/railway.rs`) is a part built on curves.
 Its main line runs along one side of the valley, in pieces 4 km long,
 within a band across from the valley's course:
 far enough across that it never reaches a town, by construction,
@@ -799,9 +818,9 @@ as without the railway (`moor::Alone`).
 Seen from above, the line keeps to its band,
 so it turns away columns further across before reading any plan.
 
-### Learned domains
+### Learned parts
 
-A domain's plan can be learned instead of written.
+A part's plan can be learned instead of written.
 The learned town (`worlds/src/learned.rs`) is the forest and fields
 with settlements whose layout is a split grammar
 learned in `lab/` from the valley's towns seen from above at a metre:
@@ -816,7 +835,7 @@ as their ground and the box of what was built on them.
 That is a function of the site alone, integers only,
 so it is drawn whole, once, and kept.
 What it says of each column is a dithered plan;
-the domains bid by it outright:
+the parts bid by it outright:
 streets, paving and yards are the town's,
 fields the fields', canopy and what the grammar left as texture the forest's,
 and the town's houses stand on the leaves' boxes, facing the street.
@@ -867,7 +886,7 @@ The moor (`worlds/src/valley/moor.rs`) is the shortest whole world to start from
 `Node::group`, `Child::new`, and `Shape::ball` and the like,
 solid and filling unless told to `paint` or `carve`;
 `.meets(…)` or `.about(ground, below, above)` on a field, `.stands(…)` or `.on(ground)` on a population,
-and `.within(region)` on either, says where it is ("Model");
+and `.within(scalar, reach)` on either, says where it is ("Model");
 the ground's field `.ground(plan, below, above, kind)`, its columns ending `Column::under(kind)`:
 a world is solid under its ground, not a shell over a hollow.
 A shape kept with a chance is made with the long form (`ball(…, fill, op)`,
@@ -1073,5 +1092,5 @@ and without them rays slipped in at a cliff's corners.
   `Claims` keep things of one plan apart ("Claims" in "Composing"),
   and rooms things of one `Points` ("Rooms");
   populations' anchors could claim the same way, against each other's.
-  So could domains' things: towns, landmarks and steadings
+  So could parts' things: towns, landmarks and steadings
   claim apart and keep off each other by asking (`fits`, `Uplands::lead`).

@@ -60,7 +60,7 @@ worldgen/                    # The world-generation engine, no direction up in i
 │   ├── generator/           # Any box at any level: forms, drawables, shapes, things
 │   ├── build.rs             # Short forms to write worlds with
 │   ├── grid.rs              # Voxel storage in bricks, each site's look
-│   ├── noise.rs             # Integer hashes, fixed point (Fx), noise
+│   ├── noise.rs             # Integer hashes, fixed point (Fx), noise; seeds by name (Scope)
 │   ├── units.rs             # Metres per lattice unit
 │   ├── sites.rs             # The sites a layer reads for: their spacing
 │   ├── js.rs                # Float math the same on every target
@@ -73,29 +73,32 @@ worldgen/                    # The world-generation engine, no direction up in i
 │   ├── tiles.rs             # A world's tiles, as hosts and light take them
 │   ├── picture.rs           # Pictures of a world, by rays through its voxels
 │   ├── png.rs               # A small PNG encoder, every crate's
+│   ├── scalar.rs            # Scalars: numbers bounded over boxes, what layers are drawn within
+│   ├── land.rs              # Land: space shared out by bids, each share a scalar
 │   ├── cost.rs              # What generating costs, against a baseline (docs/checks.md)
 │   └── checks/              # The contract, the survey, places, directions: for tests (docs/checks.md)
 ├── data/                    # The test worlds' contract baselines
 └── tests/                   # The engine on test worlds; each solid against its baseline
 ground/                      # Worlds on a ground, on worldgen's public API: up is +y
 ├── src/
-│   ├── plan.rs              # Plans by column: heights, land, claims; regions
+│   ├── plan.rs              # Plans by column: heights, claims
 │   ├── column.rs            # A heightfield's spans
-│   ├── about.rs             # Fields about a ground, things on it; both within regions
-│   └── domain.rs            # Domains a world is composed of
+│   ├── about.rs             # Fields about a ground, things on it
+│   └── land.rs              # Land on a ground: the lie of the land, its pulls; shares by column
 └── tests/                   # Fields about a ground; plans read by fields
 light/                       # Light, a prototype (docs/light.md), on worldgen's tiles
 ├── src/lib.rs               # Light: each site's, settled round by round, shared by threads
 ├── src/reference.rs         # Its reference: rays traced through level 0
 └── data/                    # The reference's values
 worlds/                      # The worlds, on worldgen's and ground's public API only
-├── cheese/                  # The cheese, a crate of its own, with its tests and baselines
+├── cheese/                  # The cheese, a crate of its own, with its tests and baselines;
+│                            # its parts: the holed cheese (lib.rs), the mine (mine.rs)
 ├── src/
 │   ├── lib.rs               # all: the registry hosts start worlds from by name, each crate's WORLDS
 │   ├── path.rs              # Spines and paths along them
 │   ├── forest.rs            # The forest, on ground other worlds share
 │   ├── forest/              # Its trees (trees.rs) and what lies on its floor (floor.rs)
-│   ├── valley.rs            # The valley: its domains on one land
+│   ├── valley.rs            # The valley: its parts on one land
 │   ├── valley/
 │   │   ├── course.rs        # The valley's course and its path's route
 │   │   ├── town.rs          # Towns along the path

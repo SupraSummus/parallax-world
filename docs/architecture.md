@@ -8,10 +8,10 @@ The Rust is a workspace of crates (`Cargo.toml`):
 `fcc/` under all of them
 (the lattice, grids and tiles of them, rays across its voxels,
 the light from voxels' faces),
-`bake/` (chunks baked) and `worldgen/` (the generator framework) on it,
+`bake/` (chunks baked) and `worldgen/` (the generator framework, land) on it,
 in which no direction is up,
-`ground/` on `worldgen/` (worlds on a ground: plans by column, heights, columns, domains;
-up is +y),
+`ground/` on `worldgen/` (worlds on a ground: plans by column, heights, columns,
+land shared by column; up is +y),
 `light/` (light worked out across a world, [light.md](light.md))
 and `worlds/` on `worldgen/` and `ground/`
 (the registry, and worlds in crates of their own inside it);
@@ -690,9 +690,9 @@ its heights lie along it, its tiles are made together along it,
 and the rock under them is found and kept along it (`generate_shown`);
 pictures and the checks look along it and across it (`generator::across`).
 What only a world on a ground needs, plans of its columns (x, z),
-heights, layers down from a top, land shared by domains,
+heights, layers down from a top, land shared column by column,
 is `ground/`, on the engine's public API;
-the cheese needs none of it.
+the cheese needs none of it, its parts sharing space point by point.
 The forest's ground is a heightfield sampled per column of sites;
 trunks are columns at least 2 units square,
 crowns leaf clusters (balls) or a solid of revolution (spruce),

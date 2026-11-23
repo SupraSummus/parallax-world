@@ -1,7 +1,7 @@
 //! Fields and populations on a ground: spans along y, up, about a plan of
 //! heights, and things standing on it, each a rule the engine asks where
-//! to draw them (Field::meets, Population::stands); and both within a
-//! region of columns. See "Writing a world" in docs/generators.md.
+//! to draw them (Field::meets, Population::stands).
+//! See "Writing a world" in docs/generators.md.
 
 use std::sync::Arc;
 
@@ -10,7 +10,7 @@ use worldgen::grid::Box3;
 use worldgen::sites::{spacing, where_asked};
 
 use crate::DOCS;
-use crate::plan::{Region, Sloped};
+use crate::plan::Sloped;
 
 /** Spans along each column, up y, all of them: `spans(x, z)`, lattice units; a `Column` or the spans. */
 pub fn columns<S: Into<Vec<Span>>>(name: &'static str, order: f64, op: Op, spans: impl Fn(i64, i64) -> S + Send + Sync + 'static) -> Field {
@@ -159,39 +159,5 @@ impl About {
             self.under,
             self.below,
         );
-    }
-}
-
-/** A field or a population drawn within a region of columns: nothing elsewhere. */
-pub trait Within {
-    /**
-     * A field drawing only over columns `region` may hold
-     * (Field::meets), a population anchoring things only in them
-     * (Population::stands). One drawn by what lies around its columns is
-     * within the region widened by as far (Region::widened).
-     */
-    fn within(self, region: Region) -> Self;
-}
-
-/** The columns of box `b`, its least and greatest x and z. */
-fn columns_of(b: &Box3) -> ([i64; 2], [i64; 2]) {
-    ([b.min[0], b.min[2]], [b.max[0] - 1, b.max[2] - 1])
-}
-
-impl Within for Field {
-    fn within(self, region: Region) -> Field {
-        self.meets(move |b, _| {
-            let (min, max) = columns_of(b);
-            if region.may(min, max) { Meets::Any } else { Meets::Nothing }
-        })
-    }
-}
-
-impl Within for Population {
-    fn within(self, region: Region) -> Population {
-        self.stands(move |b| {
-            let (min, max) = columns_of(b);
-            region.may(min, max)
-        })
     }
 }

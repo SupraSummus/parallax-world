@@ -114,3 +114,10 @@ each level of detail reaches twice as far as the one before, to 11 km.
   Walkable: up the caverns' floors, along the tunnels,
   and up the winding stairs round a pillar in each cavern
   into the one over it.
+  Here and there, lumps of darker, aged cheese a hundred metres across
+  hold a mine instead:
+  straight galleries along x and z, a storey apart,
+  propped with timber and lit by lanterns,
+  with chambers where they meet and stairs down beside some,
+  running on into the caverns at the lumps' edges.
+  The camera starts in a cavern; the mine's nearest gallery is `mine`.

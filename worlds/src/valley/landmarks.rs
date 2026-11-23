@@ -1,7 +1,7 @@
 //! Landmarks: structures standing alone through the valley, a ruined keep
 //! on a hilltop in the forest, a watchtower on a rise, a wayside chapel by
 //! the path, a pond in a hollow, a farmstead and a windmill in the
-//! farmland. A domain of the valley (valley.rs): landmarks claimed
+//! farmland. A part of the valley (valley.rs): landmarks claimed
 //! anywhere, apart, each chosen by what the valley's raw ground is like
 //! there; each shapes the ground under it, bids for its footprint and a
 //! clearing round it, so trees and crops keep off, and draws what it wins.
@@ -13,15 +13,17 @@
 
 use std::sync::Arc;
 
+use ground::FieldAbout;
 use ground::column::Column;
-use ground::domain::{Domain, Scope, eased};
-use ground::plan::{Claims, Holding, Plan, Sloped};
-use ground::{FieldAbout, Within};
+use ground::land::{Columns, Pull, eased, of_columns};
+use ground::plan::{Claims, Plan, Sloped};
 use worldgen::frame::{Frame, Part, facing, walls};
 use worldgen::generator::{ANY_SIZE, Child, Fill, Kind, Layer, Node, Op, Population, SOLID};
 use worldgen::js;
 use worldgen::kinds;
-use worldgen::noise::{Fx, Rng, ValueNoise, fx, hash64};
+use worldgen::land::owns;
+use worldgen::noise::{Fx, Rng, Scope, ValueNoise, fx, hash64};
+use worldgen::scalar::Scalar;
 use worldgen::sites;
 use worldgen::units::{Units, m};
 
@@ -533,9 +535,15 @@ fn spot(terrain: &Terrain, sites: &Claims<Site>, patches: &ValueNoise<{ m(3.0) }
     }
 }
 
-impl Domain for Landmarks {
+impl Landmarks {
+    /** Its bid for the land, a scalar of columns (`bid_at`, bounded by `bids_over`). */
+    pub fn bid(self: &Arc<Self>) -> Scalar {
+        let (at, over) = (self.clone(), self.clone());
+        of_columns(move |x, z| at.bid_at(x, z), move |min, max| over.bids_over(min, max))
+    }
+
     /** Ahead over a landmark's footprint and clearing, never on the path. */
-    fn bid(&self, x: i64, z: i64) -> Fx {
+    fn bid_at(&self, x: i64, z: i64) -> Fx {
         let Some(s) = self.site(x, z) else { return -MOST };
         if self.terrain.path.across(x, z).abs() < Fx::m(2.4) {
             return -MOST;
@@ -544,13 +552,20 @@ impl Domain for Landmarks {
     }
 
     /** The least, but where a landmark may reach. */
-    fn bids(&self, min: [i64; 2], max: [i64; 2]) -> (Fx, Fx) {
+    fn bids_over(&self, min: [i64; 2], max: [i64; 2]) -> (Fx, Fx) {
         let near = !self.sites.within(min.map(|v| v - NEAR), max.map(|v| v + NEAR)).is_empty();
         (-MOST, if near { MOST } else { -MOST })
     }
 
+    /** Their surface where they own the land, ponds' water, the landmarks. */
+    pub fn layers(self: Arc<Self>, ground: &Arc<Sloped>, hold: Scalar) -> Vec<Layer> {
+        layers(self, hold, ground.clone())
+    }
+}
+
+impl Pull for Landmarks {
     /** To the landmark there: level under it, easing back over TERRACE, a pond's bowl dug into it. */
-    fn shape(&self, x: i64, z: i64, _: Fx) -> Option<(Fx, Fx)> {
+    fn pull(&self, x: i64, z: i64, _: Fx) -> Option<(Fx, Fx)> {
         let s = self.site(x, z)?;
         let (level, how_hard) = eased(Units(s.level).to_fx(), TERRACE, s.outside(x, z))?;
         let dug = match s.landmark.spec().shaping {
@@ -559,24 +574,19 @@ impl Domain for Landmarks {
         };
         Some((level - dug, how_hard))
     }
-
-    /** Their surface where they own the land, ponds' water, the landmarks. */
-    fn layers(self: Arc<Self>, ground: &Arc<Sloped>, hold: Holding) -> Vec<Layer> {
-        layers(self, hold, ground.clone())
-    }
 }
 
 /** The most the landmarks bid, and as much behind. */
 const MOST: Fx = fx(4.0);
 
-fn layers(landmarks: Arc<Landmarks>, hold: Holding, ground: Arc<Sloped>) -> Vec<Layer> {
-    let region = hold.region();
+fn layers(landmarks: Arc<Landmarks>, hold: Scalar, ground: Arc<Sloped>) -> Vec<Layer> {
+    let region = hold.clone();
     let surface = {
         let (landmarks, ground) = (landmarks.clone(), ground.clone());
         let on = ground.clone();
         ground::columns("landmarks' ground", 0.55, Op::Paint, move |x, z| {
             let spot = landmarks.spots.at(x, z);
-            if spot == Spot::Off || !hold.owns(x, z) {
+            if spot == Spot::Off || !owns(hold.column(x, z)) {
                 return Vec::new();
             }
             let kind: Kind = match spot {
@@ -589,7 +599,7 @@ fn layers(landmarks: Arc<Landmarks>, hold: Holding, ground: Arc<Sloped>) -> Vec<
             Column::new(ground.at(x, z)).surface(kind, SURFACE).spans()
         })
         .about(on, SURFACE, 1)
-        .within(region)
+        .within(region, 0)
     };
     // Ponds' water up to its level, reeds round their edges while two sites are no taller than they:
     // thickened, they would stand over the water beside them.
