@@ -57,7 +57,7 @@ use crate::eye::{self, Adapted, BINS};
 use crate::gpu::Easel;
 use crate::threads::Post;
 use crate::view::{Vec3, focal_length, view_basis};
-use crate::world::{Level, Lit, Piece, TILE, Tile, TileId, Wants, World};
+use crate::world::{Level, Lit, Piece, Sight, TILE, Tile, TileId, Wants, World};
 
 /** A level's window, in bricks a side (a power of two: the table is a torus). */
 const WINDOW: i32 = 64;
@@ -128,6 +128,12 @@ fn reach_of(radius: i32) -> f64 {
 /** How far rays read level `level`, in world units, its window's ball of `radius`, if they reach `far` in all. */
 fn reach(level: usize, radius: i32, far: f64) -> f64 {
     (reach_of(radius) * (1u64 << level) as f64).min(far)
+}
+
+/** What rays see of `look`: as far off the way it looks as its picture's corners. */
+fn sight(look: &Look) -> Sight {
+    let [width, height] = look.size;
+    Sight { forward: view_basis(look.yaw, look.pitch)[2], half: (width.hypot(height) / 2.0 / focal_length(look.fov, width, height)).atan() }
 }
 
 /** How many levels rays read to reach `far`: up to the first that does, or all. */
@@ -432,7 +438,7 @@ impl Engine for Voxels {
         let (asked, painted) = (self.asked.0.clone(), self.busy.clone());
         Frame {
             picture: Box::new(Scene { levels, look: *look, asked, busy: painted }),
-            wants: Wants { reach, lit, asked: self.pieces.clone() },
+            wants: Wants { reach, lit, asked: self.pieces.clone(), sight: Some(sight(look)) },
             busy: busy || !same,
             stats: format!("{tiles} tiles"),
         }

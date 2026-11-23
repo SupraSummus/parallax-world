@@ -432,11 +432,14 @@ The prototype of worlds that move (`worldgen/src/time.rs`;
   which edits and physics would want too;
   the valley keeping its clouds' cover by where the wind has carried it (`recent.rs`).
 - **The world, not the engine, decides what to make anew.**
-  It makes anew each tile of another time within an engine's reach,
-  though only the engine knows which show.
+  It makes anew each tile of another time within an engine's reach and sight (`Sight`),
+  a cone round the way it looks: a coarse tile is wide, so looking up at the clouds it sees most.
+  Only the engine knows which show.
+  Tiles a finer level covers all over are made anew too (sparing them, tried, saved nothing measurable).
   To try: a tile of another time counted as lacking, and the engines asking for it.
 - **Behind, tiles show different times.**
-  Clouds tear along tiles' faces, and between levels.
+  Clouds tear along tiles' faces, and between levels;
+  out of sight they wait, so turning shows them a moment as they were.
 - **Light does not move.**
   The light's blocks and what Lights keep (`light/src/lib.rs`)
   are made once, at time 0, and a tile made anew lights from them

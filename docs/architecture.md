@@ -724,7 +724,8 @@ The native frontend makes its tiles at the world's time
 (`World::now`; `--time`, running on with the frames),
 rounded down to a tick: how often what moves is made anew is the host's choice,
 an approximation (at the finest levels, what moves jumps a few sites a tick).
-A tile of another time is made anew, alone, if an engine reads it, else dropped;
+A tile of another time is made anew, alone, if an engine reads it and sees it (Wants's `sight`),
+kept as it is while it does not see it, and dropped once it does not read it;
 the tiles that move are kept by when each stops staying as made,
 so a frame finds those of another time, however many move.
 It keeps the old one's light where its bricks did not change,

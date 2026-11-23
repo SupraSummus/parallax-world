@@ -261,12 +261,32 @@ pub enum Lit {
  * camera as it may ask for them whichever way it looks, `reach`, in the
  * level's sites (none if it reads none; those farther are dropped), lit
  * as `lit` says; and what it asks for, most wanted first: the tiles it
- * lacks for what is in view, and, lit here, the bricks of tiles made to light.
+ * lacks for what is in view, and, lit here, the bricks of tiles made to light;
+ * and what it sees, if not all around (Sight): a tile of another time it does
+ * not see waits to be made anew till it does.
  */
 pub struct Wants {
     pub reach: [Option<f64>; GRID_LEVELS],
     pub lit: Lit,
     pub asked: Arc<Vec<(usize, Piece)>>,
+    pub sight: Option<Sight>,
+}
+
+/** What the camera sees: rays as far off `forward` (a unit vector) as `half` (radians). */
+#[derive(Clone, Copy, Debug)]
+pub struct Sight {
+    pub forward: Vec3,
+    pub half: f64,
+}
+
+impl Sight {
+    /** Whether a ray from the camera may meet tile `id` of `level`: whether its ball meets the cone. */
+    fn sees(&self, level: usize, camera: Vec3, id: TileId) -> bool {
+        let side = (TILE << level) as f64;
+        let to: Vec3 = std::array::from_fn(|d| (id[d] as f64 + 0.5) * side - camera[d]);
+        let (far, radius) = (crate::view::dot(to, to).sqrt(), side * 3f64.sqrt() / 2.0);
+        far <= radius || (crate::view::dot(to, self.forward) / far).clamp(-1.0, 1.0).acos() <= self.half + (radius / far).asin()
+    }
 }
 
 /** What a worker does, of a level: makes a tile, or lights a brick of one made, where its sites start. */
@@ -398,6 +418,8 @@ pub struct World {
     sweeping: usize,
     /** The tiles made that hold what moves (Tile's `stays`), by when they stop staying as made. */
     moving: Moving,
+    /** Of those, the ones an engine reads and sees made for another time than the world's, as last updated. */
+    late: usize,
     pub heights: Heights,
     /** The world's time, milliseconds, as its host sets it: tiles are made at its tick (`tick`), and anew once that is not while they stay. */
     pub now: i64,
@@ -624,6 +646,7 @@ impl World {
             levels: (0..GRID_LEVELS).map(|_| Arc::new(Level::new([]))).collect(),
             sweeping: 0,
             moving: Moving::default(),
+            late: 0,
             heights,
             now: 0,
             threads,
@@ -683,9 +706,9 @@ impl World {
         self.now - self.now.rem_euclid(TICK)
     }
 
-    /** The tiles made that hold what moves, and those of them made for another time than the world's: behind it. */
+    /** The tiles made that hold what moves, and those of them the engine sees made for another time than the world's, as last updated: behind it. */
     pub fn moving(&self) -> [usize; 2] {
-        [self.moving.len(), self.moving.behind(self.tick()).count()]
+        [self.moving.len(), self.late]
     }
 
     /** Tiles being made and bricks lit, or waiting to be. */
@@ -746,7 +769,7 @@ impl World {
      * that is long. Returns whether any level's tiles changed.
      */
     pub fn update(&mut self, camera: Vec3, wants: &Wants) -> bool {
-        let Wants { reach, lit, asked } = wants;
+        let Wants { reach, lit, asked, sight } = wants;
         let lit = *lit;
         assert!(lit == Lit::Not || self.shared.is_some(), "a world lit with no light");
         // Tiles are made no farther from the camera than `keep` (in the level's sites), and dropped once farther still.
@@ -822,11 +845,15 @@ impl World {
                 list.push_back((level, piece, of));
             }
         }
-        // Those made for another time within an engine's reach come after all that is asked for, the one furthest
-        // from its own first: so all that moves is as far behind, whatever its level, should the threads not keep up.
+        // Those made for another time within an engine's reach and sight come after all that is asked for, the one
+        // furthest from its own first: so all that moves is as far behind, whatever its level, should the threads not
+        // keep up. Those it does not see are kept as they are, unseen, till it does.
         let read = |level: usize, id: TileId| reach[level].is_some_and(|reach| distance(level, camera, id) <= reach);
+        let seen = |level: usize, id: TileId| sight.is_none_or(|sight| sight.sees(level, camera, id));
+        let late: Vec<_> = self.moving.behind(now).filter(|&(_, level, id)| read(level, id) && seen(level, id)).collect();
+        self.late = late.len();
         let in_flight = |level: usize, id: TileId| self.in_flight.contains(&(level, Piece::Tile(id)));
-        let mut anew: Vec<_> = self.moving.behind(now).filter(|&(_, level, id)| read(level, id) && !in_flight(level, id)).collect();
+        let mut anew: Vec<_> = late.into_iter().filter(|&(_, level, id)| !in_flight(level, id)).collect();
         anew.sort_by_key(|&(behind, ..)| std::cmp::Reverse(behind));
         for (_, level, id) in anew {
             let tile = self.levels[level].tiles.get(id).expect("a tile that moves is held");
@@ -869,7 +896,7 @@ mod tests {
     fn lit(world: &mut World) -> Vec<(TileId, Vec<Option<Vec<u32>>>)> {
         let coarsest = GRID_LEVELS - 1;
         let reach = std::array::from_fn(|l| (l == coarsest).then_some(TILE as f64));
-        let mut wants = Wants { reach, lit: Lit::Bricks, asked: Arc::default() };
+        let mut wants = Wants { reach, lit: Lit::Bricks, asked: Arc::default(), sight: None };
         loop {
             world.update([0.0; 3], &wants);
             let lacking = world.lacking(coarsest, TILE as f64, [0.0; 3]).into_iter().map(|id| (coarsest, Piece::Tile(id)));
@@ -973,7 +1000,7 @@ mod tests {
         let (level, eye) = (3, [0.0, 5600.0, 0.0]);
         let reach = std::array::from_fn(|l| (l == level).then_some(TILE as f64));
         let asked = around(level, eye, TILE as f64).into_iter().map(|(_, id)| (level, Piece::Tile(id))).collect();
-        let wants = Wants { reach, lit: Lit::Not, asked: Arc::new(asked) };
+        let wants = Wants { reach, lit: Lit::Not, asked: Arc::new(asked), sight: None };
         let settle = |world: &mut World, now: i64| {
             world.now = now;
             while world.update(eye, &wants) || world.making() > 0 {

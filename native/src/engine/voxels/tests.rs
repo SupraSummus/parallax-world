@@ -12,7 +12,7 @@ fn forest_tiles(eye: Vec3) -> Arc<Level> {
     let reach = std::array::from_fn(|l| (l == 0).then_some(fcc::GRID_REACH));
     // All around the eye asked for.
     let asked = Arc::new(world.lacking(0, fcc::GRID_REACH, eye).into_iter().map(|id| (0, Piece::Tile(id))).collect());
-    let wants = Wants { reach, lit: Lit::Not, asked };
+    let wants = Wants { reach, lit: Lit::Not, asked, sight: None };
     loop {
         world.update(eye, &wants);
         if world.making() == 0 {
