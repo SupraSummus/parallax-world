@@ -292,7 +292,7 @@ impl Shared {
             if stays.contains(&time::now()) {
                 return (key, grid, stays);
             }
-            let (grid, stays) = make_tile(world, level, key);
+            let (grid, stays, _) = make_tile(world, level, key, None);
             (key, grid, stays)
         };
         parted(sites, world, level, key).into_iter().map(now).collect()

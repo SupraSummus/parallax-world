@@ -7,7 +7,7 @@
 use std::ops::Range;
 
 use crate::World;
-use crate::generator::generate_shown;
+use crate::generator::{Drew, generate_shown, only};
 use crate::grid::{BRICK, Box3, Grid, VoxelGrid};
 use crate::world::UP;
 
@@ -96,20 +96,23 @@ pub fn make_tiles(world: &World, level: u32, key: [i64; 3]) -> Vec<Made> {
 
 /**
  * Tile `key` of `level` of `world` alone, as hosts draw it: what may show
- * of its box (generate_shown), and while when it stays so. A host makes a
- * tile so anew when what moves in it moved (time.rs), the others made
- * with it staying as made.
+ * of its box (generate_shown), of only the layers `drew` names if given;
+ * while when it stays so; and the layers that drew in it or read the time,
+ * if known (`Drew`). A host makes a tile so anew when what moves in it
+ * moved (time.rs), the others made with it staying as made, and then of
+ * only those layers.
  */
-pub fn make_tile(world: &World, level: u32, key: [i64; 3]) -> (Grid, Range<i64>) {
+pub fn make_tile(world: &World, level: u32, key: [i64; 3], drew: Option<&Drew>) -> (Grid, Range<i64>, Option<Drew>) {
     let b = tile_box(world.heights_at(level), key);
-    let sites = generate_shown(&world.generator, &b, level, UP);
-    (sites.to_grid(), sites.stays(&b))
+    let sites = only(drew, || generate_shown(&world.generator, &b, level, UP));
+    (sites.to_grid(), sites.stays(&b), sites.drew)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::generator::Generator;
+    use crate::time;
 
     #[test]
     fn tiles_are_cubes_cut_to_the_heights_at_bricks() {
@@ -133,7 +136,6 @@ mod tests {
     #[test]
     fn only_the_tiles_what_moves_may_be_in_stay_for_less_than_always() {
         use crate::generator::{Field, KindDef, Layer, Meets, Op, Span};
-        use crate::time;
         let (low, high) = (200, 210);
         let world = |bounded: bool| {
             let kind = |name, medium| KindDef { name, kind_type: 10, colors: &["#808080"], walk_through: medium, glows: false, medium };
@@ -162,11 +164,51 @@ mod tests {
                 assert_eq!(stays == time::ALWAYS, bounded && !mist, "tile {key:?}, bounded {bounded}: {stays:?}");
                 // The mist in it, made alone, the same while it stays, and moved after.
                 if mist {
-                    let alone = |now: i64| time::at(now, || make_tile(&world, 0, key)).0;
+                    let alone = |now: i64| {
+                        let ((grid, stays, _), _) = time::at(now, || make_tile(&world, 0, key, None));
+                        (grid, stays)
+                    };
                     let (then, while_then) = alone(1000);
                     assert!(then.cells == grid.cells && while_then == stays, "tile {key:?} alone");
                     assert!(alone(stays.end - 1).0.cells == then.cells && alone(stays.end).0.cells != then.cells, "tile {key:?}");
                 }
+            }
+        }
+    }
+
+    /**
+     * A tile made alone says the layers that drew in it or read the time:
+     * a slab of mist drifting high over a ground, a ledge in it over one
+     * tile. Made anew of only them, it is as made of all.
+     */
+    #[test]
+    fn a_tile_made_anew_of_the_layers_that_drew_in_it_is_as_made_of_all() {
+        use crate::generator::{Field, KindDef, Layer, Op, Span};
+        let kind = |name, medium| KindDef { name, kind_type: 10, colors: &["#808080"], walk_through: medium, glows: false, medium };
+        let ground = Field::spans("ground", 0.0, Op::Fill, UP, |_, _| vec![Span::solid(-1000, 0, 0)]);
+        let ledge = Field::spans("ledge", 0.5, Op::Fill, UP, |x, _| if x < 16 { vec![Span::solid(198, 202, 0)] } else { Vec::new() });
+        let mist = Field::spans("mist", 1.0, Op::Fill, UP, |x, _| {
+            let [dx, _, _] = time::drift([40, 0, 0]);
+            if (x - dx).rem_euclid(64) < 32 { vec![Span::medium(200, 10, 1, 0.05)] } else { Vec::new() }
+        });
+        let layers = vec![Layer::Field(ground), Layer::Field(ledge), Layer::Field(mist)];
+        let generator = Generator { kinds: vec![kind("ground", false), kind("mist", true)], seed: 1, layers };
+        let world = World { generator, spawn: [0; 3], heights: Some((-64, 320)), points: Vec::new() };
+        let made = |key: [i64; 3], now: i64, drew: Option<&Drew>| time::at(now, || make_tile(&world, 0, key, drew)).0;
+        for (key, names) in [([0, 6, 0], vec!["ledge", "mist"]), ([1, 6, 0], vec!["mist"])] {
+            let (_, stays, drew) = made(key, 1000, None);
+            let drew = drew.expect("no rock under it");
+            assert_eq!(drew, Drew(names.into()), "tile {key:?}");
+            for now in [stays.end, stays.start - 1, 9000] {
+                let ((all, stays, _), (only, only_stays, again)) = (made(key, now, None), made(key, now, Some(&drew)));
+                let b = tile_box(world.heights_at(0), key);
+                let sites =
+                    (b.min[0]..b.max[0]).flat_map(|x| (b.min[1]..b.max[1]).flat_map(move |y| (b.min[2]..b.max[2]).map(move |z| [x, y, z])));
+                assert!(sites.map(|p| p.map(|v| v as i32)).all(|[x, y, z]| all.get(x, y, z) == only.get(x, y, z)), "tile {key:?} at {now}");
+                assert!(
+                    all.cells.iter().any(|&look| look != 0) && stays == only_stays && again == Some(drew.clone()),
+                    "tile {key:?} at {now}"
+                );
             }
         }
     }

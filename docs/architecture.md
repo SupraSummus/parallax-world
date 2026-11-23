@@ -715,6 +715,10 @@ The generator asks each of what it draws (a field, a thing) apart,
 and narrows that only in the bricks it may draw in at all,
 as its `meets` says for every time as for every place (`VoxelGrid::stays`):
 of tiles made together, those it cannot reach stay always.
+A tile made alone also says which layers drew in it or read the time (`Drew`):
+one that did neither never draws there, at any time,
+so made anew it is made of those only, the rest not asked where they are;
+unless rock is kept under it, which layers that draw nothing over it find.
 So a tile still never changes once made: it is a tile of a time.
 The native frontend makes its tiles at the world's time
 (`World::now`; `--time`, running on with the frames),

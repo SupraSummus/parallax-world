@@ -8,6 +8,7 @@ use std::sync::OnceLock;
 
 use fcc::{FACE_KINDS, Look};
 
+use crate::generator::Drew;
 use crate::js;
 use crate::time;
 
@@ -97,6 +98,8 @@ pub struct VoxelGrid {
      * drawn, of the world's time (time.rs), where that is not always.
      */
     stays: BTreeMap<usize, Range<i64>>,
+    /** The layers that drew in it or read the time, if known (generator's `Drew`). */
+    pub drew: Option<Drew>,
 }
 
 /** All a site holds (`VoxelGrid::held`). */
@@ -373,6 +376,7 @@ impl VoxelGrid {
             views: Sights::default(),
             glows: Few::default(),
             stays: BTreeMap::new(),
+            drew: None,
         }
     }
 

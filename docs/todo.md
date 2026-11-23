@@ -421,10 +421,13 @@ The prototype of worlds that move (`worldgen/src/time.rs`;
 
 - **Tiles are made anew whole, and that is all that moving costs.**
   A tile the clouds are in is made anew each tick they cross one of its sites,
-  all of it, a few ms each; the clouds' layer alone is over a third of that.
-  Under the valley's clouds that keeps some two cores busy,
-  as many as the world takes with them standing still;
-  the bricks know while when they stay (`VoxelGrid::stays`), the tiles are made by the whole.
+  all of it, and its changed bricks lit again,
+  of only the layers that drew in it or read the time (`Drew`):
+  a millisecond or so where only the clouds drew,
+  several where mountains rise into them at the coarse levels.
+  Making only the moving bricks of those (tried, generated alone) saved little:
+  the ground's layers cost by their columns, not their height.
+  What is left is the clouds' layer (its noise, its sites held in part) and their light.
   To try: making anew only the bricks that changed,
   which edits and physics would want too;
   the valley keeping its clouds' cover by where the wind has carried it (`recent.rs`).

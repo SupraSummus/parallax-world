@@ -38,6 +38,7 @@ use fcc::GRID_LEVELS;
 pub use fcc::TileId;
 use fcc::{Blocks, FastSet, Grid, Tiles};
 use light::{Light, Shared};
+use worldgen::generator::Drew;
 use worldgen::tiles::{made_with, make_tile, make_tiles};
 use worldgen::time;
 
@@ -83,6 +84,8 @@ pub struct Tile {
     lights: Box<[OnceLock<Box<[u32]>>]>,
     /** While when it stays as made, the world's time (worldgen's time.rs): always, unless what it holds moves. */
     pub stays: Range<i64>,
+    /** The layers that drew in it or read the time, if known (worldgen's `Drew`): made anew, it is made of only them. */
+    drew: Option<Drew>,
 }
 
 /**
@@ -101,13 +104,13 @@ impl Tile {
     pub fn new(id: TileId, grid: Arc<Grid>) -> Tile {
         let meets = voxels::meets(&grid);
         let met = voxels::Met::new(id, &grid, &meets);
-        Tile { whole: whole(&grid), lights: unlit(&grid), grid, meets, met, stays: time::ALWAYS }
+        Tile { whole: whole(&grid), lights: unlit(&grid), grid, meets, met, stays: time::ALWAYS, drew: None }
     }
 
     /** Tile `self` with none of its light found. */
     pub fn unlit(&self) -> Tile {
         let (grid, meets, met, whole) = (self.grid.clone(), self.meets.clone(), self.met.clone(), self.whole.clone());
-        Tile { lights: unlit(&grid), grid, meets, met, whole, stays: self.stays.clone() }
+        Tile { lights: unlit(&grid), grid, meets, met, whole, stays: self.stays.clone(), drew: self.drew.clone() }
     }
 
     /** The light of the brick whose sites start at `first` in the grid's cells (in bricks), if found. */
@@ -513,8 +516,8 @@ impl Worker {
             }
             Piece::Tile(id) if let Some(old) = of => {
                 let key = id.map(i64::from);
-                let ((grid, stays), _) = time::at(now, || make_tile(&self.world, level as u32, key));
-                let tile = Tile { stays, ..Tile::new(id, Arc::new(grid)) };
+                let ((grid, stays, drew), _) = time::at(now, || make_tile(&self.world, level as u32, key, old.drew.as_ref()));
+                let tile = Tile { stays, drew, ..Tile::new(id, Arc::new(grid)) };
                 // Its light found as the old one's was, here: a tile lit anew since has none.
                 let tile = if old.lights.iter().any(|l| l.get().is_some()) {
                     tile.lit_as(&old, level as u32, self.light(shared, lighting))
