@@ -816,7 +816,8 @@ so nothing standing over a tunnel (trees and plants at a portal) reaches into it
 On the moor's land, the moor's mist lies over the track and in its cuttings,
 as without the railway (`moor::Alone`).
 Seen from above, the line keeps to its band,
-so it turns away columns further across before reading any plan.
+so it turns away columns further across before reading any plan,
+and rectangles of them: it bids and draws only within its reach.
 
 ### Learned parts
 
