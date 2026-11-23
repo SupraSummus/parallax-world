@@ -12,7 +12,7 @@ fn forest_tiles(eye: Vec3) -> Arc<Level> {
     let reach = std::array::from_fn(|l| (l == 0).then_some(fcc::GRID_REACH));
     // All around the eye asked for.
     let asked = Arc::new(world.lacking(0, fcc::GRID_REACH, eye).into_iter().map(|id| (0, Piece::Tile(id))).collect());
-    let wants = Wants { reach, lit: Lit::Not, asked };
+    let wants = Wants { reach, lit: Lit::Not, asked, sight: None };
     loop {
         world.update(eye, &wants);
         if world.making() == 0 {
@@ -179,6 +179,29 @@ fn a_window_moved_and_its_tiles_changed_holds_what_a_new_one_would() {
         assert!(holds(&windows, &slots) == anew(RADIUS, tiles, *eye), "at {eye:?}");
         assert!(!sync(&mut windows, tiles, *eye, &mut slots), "nothing moved");
     }
+}
+
+/** Tiles made anew (World::now), each as it was: what showed shows all the while, rays asking for nothing more. */
+#[test]
+fn a_tile_made_anew_shows_in_the_step_the_old_one_goes() {
+    let (eye, tiles) = (EYE, FOREST.clone());
+    let (mut windows, mut slots) = (Windows::new(1 << 20, false), HashMap::new());
+    settle(&mut windows, &tiles, eye, &mut slots);
+    let before = holds(&windows, &slots);
+    let shown = |held: &Holds| held.0.iter().flatten().filter(|(e, _)| e.is_ok()).count();
+    let anew = Arc::new(Level::new(tiles.tiles.iter().map(|(id, t)| (id, Arc::new(Tile::new(id, t.grid.clone()))))));
+    windows.windows[0].asked.clear();
+    let mut steps = 0;
+    while windows.windows[0].level.as_ref().is_none_or(|l| !Arc::ptr_eq(l, &anew)) {
+        let (added, _) = windows.sync(std::slice::from_ref(&anew), eye);
+        for a in added {
+            slots.insert(a.slot, words(&a.tile.grid, a.first, a.part).to_vec());
+        }
+        assert_eq!(shown(&holds(&windows, &slots)), shown(&before), "step {steps}");
+        steps += 1;
+    }
+    assert!(steps > 1, "{steps} steps: STEP tiles a step");
+    assert!(holds(&windows, &slots) == before);
 }
 
 #[test]

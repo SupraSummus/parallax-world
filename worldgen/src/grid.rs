@@ -2,11 +2,15 @@
 //! looks like, in bricks BRICK units wide, only bricks with voxels stored.
 //! The same layout as the baker's Grid, which `to_grid` hands over.
 
+use std::collections::BTreeMap;
+use std::ops::Range;
 use std::sync::OnceLock;
 
 use fcc::{FACE_KINDS, Look};
 
+use crate::generator::Drew;
 use crate::js;
+use crate::time;
 
 // The baker's grids, as worlds hand them over, the voxel's faces, and a whole site's alpha: it stops every ray.
 pub use fcc::{ALPHA, Grid, VOXEL_FACES};
@@ -89,6 +93,13 @@ pub struct VoxelGrid {
     pub views: Sights,
     /** Of the sites in `views`, those that glow: how much along each direction. Apart, as few do. */
     pub glows: Few<Glows>,
+    /**
+     * By brick, as in `bricks`: while when what may be drawn there stays as
+     * drawn, of the world's time (time.rs), where that is not always.
+     */
+    stays: BTreeMap<usize, Range<i64>>,
+    /** The layers that drew in it or read the time, if known (generator's `Drew`). */
+    pub drew: Option<Drew>,
 }
 
 /** All a site holds (`VoxelGrid::held`). */
@@ -364,7 +375,45 @@ impl VoxelGrid {
             glow: Few::default(),
             views: Sights::default(),
             glows: Few::default(),
+            stays: BTreeMap::new(),
+            drew: None,
         }
+    }
+
+    /** Its bricks that meet `b`, of sites: from the first to the last, inclusive, in bricks from its first; none if none do. */
+    fn bricks_meeting(&self, b: &Box3) -> Option<[[i64; 3]; 2]> {
+        let count = [self.bx, self.by, self.bricks.len() as i64 / (self.bx * self.by).max(1)];
+        let lo: [i64; 3] = std::array::from_fn(|d| (b.min[d] - self.min[d]).div_euclid(BRICK).max(0));
+        let hi: [i64; 3] = std::array::from_fn(|d| (b.max[d] - 1 - self.min[d]).div_euclid(BRICK).min(count[d] - 1));
+        (0..3).all(|d| lo[d] <= hi[d] && b.min[d] < b.max[d]).then_some([lo, hi])
+    }
+
+    /** Narrows while when what is in its bricks that meet `b` (sites) stays as drawn to `stays`: something drawn there read the time. */
+    pub fn narrow(&mut self, b: &Box3, stays: &Range<i64>) {
+        let Some([lo, hi]) = self.bricks_meeting(b) else { return };
+        for k in lo[2]..=hi[2] {
+            for j in lo[1]..=hi[1] {
+                for i in lo[0]..=hi[0] {
+                    let at = ((k * self.by + j) * self.bx + i) as usize;
+                    let was = self.stays.entry(at).or_insert(time::ALWAYS);
+                    *was = was.start.max(stays.start)..was.end.min(stays.end);
+                }
+            }
+        }
+    }
+
+    /** While when what is in `b` (sites) stays as drawn: as long as in every brick of it that meets it (`narrow`); always if nothing there read the time. */
+    pub fn stays(&self, b: &Box3) -> Range<i64> {
+        let (mut from, mut until) = (time::ALWAYS.start, time::ALWAYS.end);
+        if let Some([lo, hi]) = self.bricks_meeting(b) {
+            for (&at, stays) in &self.stays {
+                let p = self.brick_at(at);
+                if (0..3).all(|d| lo[d] <= p[d] && p[d] <= hi[d]) {
+                    (from, until) = (from.max(stays.start), until.min(stays.end));
+                }
+            }
+        }
+        from..until
     }
 
     /**
@@ -800,17 +849,32 @@ pub fn least(stops: [u8; 3]) -> u8 {
 
 /** A channel `c` (linear, premultiplied by `alpha`, of COLOUR_ONE) unpremultiplied, sRGB. */
 fn srgb(c: u16, alpha: u8) -> u8 {
-    let power = |c: u16, alpha: u8| {
-        let of = alpha.max(1) as f64 / ALPHA as f64 * COLOUR_ONE as f64;
-        let c = (c as f64 / of).min(1.0);
-        (255.0 * if c <= 0.003_130_8 { c * 12.92 } else { 1.055 * js::pow(c, 1.0 / 2.4) - 0.055 }).round() as u8
-    };
-    // Most sites shown are whole, and a power costs more than all else here: theirs are kept.
+    // A power costs more than all else here. Most sites shown are whole: theirs are kept. Of each other alpha, where
+    // each step of sRGB begins, as it rises with `c`: a medium's sites are of many alphas.
     static WHOLE: OnceLock<Vec<u8>> = OnceLock::new();
-    match alpha {
-        ALPHA => WHOLE.get_or_init(|| (0..=COLOUR_ONE).map(|c| power(c, ALPHA)).collect())[c as usize],
-        _ => power(c, alpha),
+    static STEPS: [OnceLock<[u32; 255]>; ALPHA as usize] = [const { OnceLock::new() }; ALPHA as usize];
+    if alpha == ALPHA {
+        return WHOLE.get_or_init(|| (0..=COLOUR_ONE).map(|c| srgb_of(c, ALPHA)).collect())[c as usize];
     }
+    let firsts = STEPS[alpha as usize].get_or_init(|| {
+        // Where step k + 1 begins: the first `c` that is at it or past, past COLOUR_ONE if none is.
+        std::array::from_fn(|k| {
+            let (mut lo, mut hi) = (0, COLOUR_ONE as u32 + 1);
+            while lo < hi {
+                let mid = (lo + hi) / 2;
+                if srgb_of(mid as u16, alpha) > k as u8 { hi = mid } else { lo = mid + 1 }
+            }
+            lo
+        })
+    });
+    firsts.partition_point(|&first| first <= c as u32) as u8
+}
+
+/** `srgb`, worked out. */
+fn srgb_of(c: u16, alpha: u8) -> u8 {
+    let of = alpha.max(1) as f64 / ALPHA as f64 * COLOUR_ONE as f64;
+    let c = (c as f64 / of).min(1.0);
+    (255.0 * if c <= 0.003_130_8 { c * 12.92 } else { 1.055 * js::pow(c, 1.0 / 2.4) - 0.055 }).round() as u8
 }
 
 /** A channel of sRGB (of 1) as linear light: fcc::light's, by libm's power (js.rs), as generating is the same on every target. */
@@ -829,6 +893,16 @@ pub(crate) fn look_of(colour: [u16; 3], alpha: u8, shown: u8) -> Look {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /** Kept by where each step begins, sRGB is as worked out, of every alpha and channel: it never steps back as a channel rises. */
+    #[test]
+    fn srgb_kept_is_srgb_worked_out() {
+        for alpha in 0..=ALPHA {
+            for c in 0..=COLOUR_ONE {
+                assert_eq!(srgb(c, alpha), srgb_of(c, alpha), "{c} of alpha {alpha}");
+            }
+        }
+    }
 
     #[test]
     fn a_site_is_handed_over_as_it_looks_through_each_face_whole_or_held_in_part_and_moves_with_its_brick() {

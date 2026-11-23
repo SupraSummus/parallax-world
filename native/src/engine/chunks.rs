@@ -163,7 +163,7 @@ impl Engine for Chunks {
             ),
             picture: Box::new(Composed { frame, view: View::new(look) }),
             // Whichever way the eye turns.
-            wants: Wants { reach: std::array::from_fn(reach), lit, asked: stats.tiles },
+            wants: Wants { reach: std::array::from_fn(reach), lit, asked: stats.tiles, sight: None },
             busy: self.busy,
         }
     }

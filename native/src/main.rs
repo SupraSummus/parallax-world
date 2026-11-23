@@ -60,6 +60,9 @@ struct Args {
     /** The render distance, in lattice units. */
     #[arg(long, value_name = "UNITS", default_value_t = RENDER_DISTANCE, help_heading = "View")]
     distance: f64,
+    /** The world's time, seconds (worldgen's time.rs): what moves in it is where it has got to then. It runs on as frames are drawn. */
+    #[arg(long, value_name = "SECONDS", default_value_t = 0.0, allow_hyphen_values = true, help_heading = "View")]
+    time: f64,
     /** Light worked out across the world (light/): how bright the sky, the sun and what glows are (1,1,0 a clear day, 0.01,0,1 night); the steps light takes along each level before the coarser one takes over; how little of the light on a site is not followed (light's TOLERANCE). Without it, voxels are shaded by the way their faces face. */
     #[arg(long, value_name = "SKY,SUN,GLOW[,STEPS[,TOLERANCE]]", value_parser = parse_light, help_heading = "View")]
     light: Option<Light>,
@@ -238,6 +241,8 @@ struct View {
     tolerance: f32,
     /** Units a second the camera flies at (walking keeps walk.rs's own). */
     speed: f64,
+    /** The world's time, seconds (World::now): it runs on with the frames. */
+    time: f64,
     /** Walking on the ground (fcc's walk.rs): the body the camera is the eye of; None flying. */
     walker: Option<Walker>,
     /** Whether the window tells of the voxel under the pointer (inspect.rs), as the voxels engine finds it. */
@@ -263,6 +268,7 @@ impl View {
             steps: shared.steps(),
             tolerance: shared.tolerance(),
             speed: args.speed,
+            time: args.time,
             walker: None,
             inspecting: false,
         };
@@ -299,6 +305,7 @@ impl View {
         look.eye = args.eye.unwrap_or_default();
         look.size = args.size.unwrap_or(SHOT);
         self.walker = args.walk.then(|| Walker::at(look.camera));
+        self.time = args.time;
     }
 
     /** Its look lit as the lighting says, by the world's light: a shot with nothing to steer is drawn with no frame before. */
@@ -310,9 +317,10 @@ impl View {
     fn options(&self) -> String {
         let Look { camera: [x, y, z], yaw, pitch, fov, far, detail, shift, seams, colours, hides, size: [w, h], eye, .. } = self.look;
         let mut options = format!(
-            "--engine {} --camera {x},{y},{z} --look {yaw},{pitch} --fov {fov} --distance {far} --detail {detail} --shift {shift} --colour {} --size {w}x{h}",
+            "--engine {} --camera {x},{y},{z} --look {yaw},{pitch} --fov {fov} --distance {far} --detail {detail} --shift {shift} --colour {} --size {w}x{h} --time {}",
             named(self.kind),
             named(colours),
+            self.time,
         );
         if self.lighting == Lighting::Computed {
             options += &format!(" --light {}", light_arg(self.world.shared().expect("a world with light")));
@@ -327,8 +335,9 @@ impl View {
         options
     }
 
-    /** Moves the camera as `keys` say, for `dt` seconds: walking on the ground, or flying. */
+    /** Moves the camera as `keys` say, for `dt` seconds, walking on the ground or flying, and the world's time on. */
     fn steer(&mut self, keys: Keys, dt: f64) {
+        self.time += dt;
         let Keys { held, drag, toggle } = keys;
         let look = &mut self.look;
         if toggle {
@@ -496,6 +505,8 @@ struct Sample {
     camera: Vec3,
     owed: [usize; 3],
     still: bool,
+    /** The tiles made that hold what moves, and of them those behind the world's time (World::moving). */
+    moving: [usize; 2],
 }
 
 /** --shots: where to; how far apart, in seconds steered, pictures are kept; and those kept, with when and their look. */
@@ -558,6 +569,10 @@ impl window::Content for App {
             ui.heading("Parallax");
             ui.label(&self.stats);
             ui.label(format!("{} tiles being made", self.view.world.making()));
+            let [moving, behind] = self.view.world.moving();
+            if moving > 0 {
+                ui.label(format!("{moving} tiles moving, {behind} behind"));
+            }
             self.view.panel(ui);
             let t = self.times;
             ui.label(format!(
@@ -695,6 +710,7 @@ impl App {
         // Drawn from the next frame on.
         let wants = with_ground(frame.wants, view.walker.is_some(), &view.world, camera);
         let worked = self.by_work.then(|| view.world.worked());
+        view.world.now = (view.time * 1000.0) as i64;
         let arrived = view.world.update(camera, &wants);
         if let Some(worked) = worked {
             worked_a_frame(&view.world, &worked);
@@ -702,11 +718,12 @@ impl App {
         self.shown = !frame.busy && !view.world.lacks(&wants);
         if steered {
             let [tiles, bricks] = view.world.owed();
-            let (owed, still) = ([wants.asked.len(), tiles, bricks], !self.shown);
-            self.sample =
-                Some(Sample { ms: [self.framing, ms(framed, Instant::now()), 0.0, 0.0, 0.0], t: self.steered, camera, owed, still });
+            let (owed, still, moving) = ([wants.asked.len(), tiles, bricks], !self.shown, view.world.moving());
+            let ms = [self.framing, ms(framed, Instant::now()), 0.0, 0.0, 0.0];
+            self.sample = Some(Sample { ms, t: self.steered, camera, owed, still, moving });
         }
-        let more = arrived || frame.busy || view.world.making() > 0;
+        // What moves is to be drawn as it does.
+        let more = arrived || frame.busy || view.world.making() > 0 || view.world.moving()[0] > 0;
         (self.picture, self.stats) = (Some(frame.picture), frame.stats);
         let options = format!("{} {}", view.world_args, view.options());
         if let Some((file, start)) = &mut self.recording {
@@ -807,6 +824,15 @@ fn report(samples: &[Sample]) {
     for (k, name) in ["tiles and bricks asked for", "tiles owed", "bricks owed"].iter().enumerate() {
         let (sum, most) = samples.iter().fold((0, 0), |(sum, most), s| (sum + s.owed[k], most.max(s.owed[k])));
         println!("  {name}: {:.1} on average, {most} at most", sum as f64 / samples.len() as f64);
+    }
+    let [moving, behind] = samples.iter().fold([0, 0], |[m, b], s| [m + s.moving[0], b + s.moving[1]]);
+    if moving > 0 {
+        let n = samples.len() as f64;
+        println!(
+            "  tiles holding what moves: {:.1} on average, {:.1} of them behind the world's time",
+            moving as f64 / n,
+            behind as f64 / n
+        );
     }
     let mut slowest: Vec<&Sample> = samples.iter().collect();
     slowest.sort_by(|a, b| b.ms[4].total_cmp(&a.ms[4]));

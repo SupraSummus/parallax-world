@@ -21,6 +21,7 @@ spawn            0         0         0         0         0         0         0  
 spawn            0         0         0         0         0         0         0     16384     22160         0         0         0 railway
 spawn            0         0         0         0         0         0         0         0       144         0         0         0 water
 spawn            0         0         0         0         0         0         0     16384     52752         0         0         0 mist
+spawn            0         0         0         0         0         0         0         0         0         0         0         0 clouds
 spawn            0         0         0         0         0         0         0         0         0         0         0         0 railway's tunnels
 spawn            0         0         0         0         0         0         0     16384     16384         0         0         0 railway in its tunnels
 spawn            0         0         0         0         0         0         0         0      1155       438       438         0 plan nearest town
@@ -59,6 +60,7 @@ spawn            1         0         0         0         0         0         0  
 spawn            1         0         0         0         0         0         0     16384     22160         0         0         0 railway
 spawn            1         0         0         0         0         0         0         0       144         0         0         0 water
 spawn            1         0         0         0         0         0         0     16384     53248         0         0         0 mist
+spawn            1         0         0         0         0         0         0         0         0         0         0         0 clouds
 spawn            1         0         0         0         0         0         0     16384     16384         0         0         0 railway's tunnels
 spawn            1         0         0         0         0         0         0     16384     16384         0         0         0 railway in its tunnels
 spawn            1         0         0         0         0         0         0         0      1271       480       480         0 plan nearest town
@@ -95,6 +97,7 @@ spawn            2         0         0         0         0         0         0  
 spawn            2         0         0         0         0         0         0     16384     22160         0         0         0 railway
 spawn            2         0         0         0         0         0         0         0       144         0         0         0 water
 spawn            2         0         0         0         0         0         0     16384     53776         0         0         0 mist
+spawn            2         0         0         0         0         0         0         0         0         0         0         0 clouds
 spawn            2         0         0         0         0         0         0     16384     16384         0         0         0 railway's tunnels
 spawn            2         0         0         0         0         0         0     16384     16384         0         0         0 railway in its tunnels
 spawn            2         0         0         0         0         0         0         0     19350       120       120         0 plan landmarks
@@ -131,6 +134,7 @@ spawn            3         0         0         0         0         0         0  
 spawn            3         0         0         0         0         0         0     16384     18320         0         0         0 railway
 spawn            3         0         0         0         0         0         0         0       256         0         0         0 water
 spawn            3         0         0         0         0         0         0     16384     45904         0         0         0 mist
+spawn            3         0         0         0         0         0         0         0         0         0         0         0 clouds
 spawn            3         0         0         0         0         0         0     16384     16384         0         0         0 railway's tunnels
 spawn            3         0         0         0         0         0         0     16384     16384         0         0         0 railway in its tunnels
 spawn            3         0         0         0         0         0         0         0      5481      3184      3184         0 plan nearest town
@@ -168,6 +172,7 @@ spawn            4         0         0         0         0         0         0  
 spawn            4         0         0         0         0         0         0     16384    266163         0         0         0 trees
 spawn            4         0         0         0         0         0         0         0      1024         0         0         0 water
 spawn            4         0         0         0         0         0         0     16384     47000         0         0         0 mist
+spawn            4         0         0         0         0         0         0         0         0         0         0         0 clouds
 spawn            4         0         0         0         0         0         0     16384     21376         0         0         0 railway's tunnels
 spawn            4         0         0         0         0         0         0     16384     21376         0         0         0 railway in its tunnels
 spawn            4         0         0         0         0         0         0         0     30082       227       227         0 plan landmarks
@@ -203,6 +208,7 @@ spawn            5         0         0         0         0         0         0  
 spawn            5         0         0         0         0         0         0     16384    218923         0         0         0 trees
 spawn            5         0         0         0         0         0         0         0      2304         0         0         0 water
 spawn            5         0         0         0         0         0         0     16384     61316         0         0         0 mist
+spawn            5         0         0         0         0         0         0         0         0         0         0         0 clouds
 spawn            5         0         0         0         0         0         0     16384     26985         0         0         0 railway's tunnels
 spawn            5         0         0         0         0         0         0     16384     26985         0         0         0 railway in its tunnels
 spawn            5         0         0         0         0         0         0         0      9098      5212      5212         0 plan nearest town
@@ -237,6 +243,7 @@ spawn            6         0         0         0         0         0         0  
 spawn            6         0         0         0         0         0         0     16384    229599         0         0         0 trees
 spawn            6         0         0         0         0         0         0         0      6400         0         0         0 water
 spawn            6         0         0         0         0         0         0     16384     47024         0         0         0 mist
+spawn            6         0         0         0         0         0         0     16384         0         0         0         0 clouds
 spawn            6         0         0         0         0         0         0     16384     22018         0         0         0 railway's tunnels
 spawn            6         0         0         0         0         0         0     16384     22018         0         0         0 railway in its tunnels
 spawn            6         0         0         0         0         0         0         0     28349     14306     14244         0 plan nearest town
@@ -274,6 +281,7 @@ spawn            7         0         0         0         0         0         0  
 spawn            7         0         0         0         0         0         0     16384    221403         0         0         0 trees
 spawn            7         0         0         0         0         0         0     16384     32796         0         0         0 water
 spawn            7         0         0         0         0         0         0     16384     44394         0         0         0 mist
+spawn            7         0         0         0         0         0         0     16384         0         0         0         0 clouds
 spawn            7         0         0         0         0         0         0     16384     19203         0         0         0 railway's tunnels
 spawn            7         0         0         0         0         0         0     16384     19203         0         0         0 railway in its tunnels
 spawn            7         0         0         0         0         0         0         0     66717     31637     27871         0 plan nearest town
@@ -311,6 +319,7 @@ spawn            8         0         0         0         0         0         0  
 spawn            8         0         0         0         0         0         0     16384    210584         0         0         0 trees
 spawn            8         0         0         0         0         0         0     16384     32815         0         0         0 water
 spawn            8         0         0         0         0         0         0     16384     42024         0         0         0 mist
+spawn            8         0         0         0         0         0         0     16384         0         0         0         0 clouds
 spawn            8         0         0         0         0         0         0     16384     17794         0         0         0 railway's tunnels
 spawn            8         0         0         0         0         0         0     16384     17794         0         0         0 railway in its tunnels
 spawn            8         0         0         0         0         0         0         0    250258    121420     60029         0 plan nearest town
@@ -354,6 +363,7 @@ town             0         0         0         0         0         0         0  
 town             0         0         0         0         0         0         0     16384     22160         0         0         0 railway
 town             0         0         0         0         0         0         0         0       144         0         0         0 water
 town             0         0         0         0         0         0         0     16384     36368         0         0         0 mist
+town             0         0         0         0         0         0         0         0         0         0         0         0 clouds
 town             0         0         0         0         0         0         0         0         0         0         0         0 railway's tunnels
 town             0         0         0         0         0         0         0     16384     16384         0         0         0 railway in its tunnels
 town             0         0         0         0         0         0         0         0      5040      1680      1680         0 plan nearest town
@@ -392,6 +402,7 @@ town             1         0         0         0         0         0         0  
 town             1         0         0         0         0         0         0     16384     22160         0         0         0 railway
 town             1         0         0         0         0         0         0         0       144         0         0         0 water
 town             1         0         0         0         0         0         0     16384     36864         0         0         0 mist
+town             1         0         0         0         0         0         0         0         0         0         0         0 clouds
 town             1         0         0         0         0         0         0     16384     16384         0         0         0 railway's tunnels
 town             1         0         0         0         0         0         0     16384     16384         0         0         0 railway in its tunnels
 town             1         0         0         0         0         0         0         0      4971      1657      1657         0 plan nearest town
@@ -428,6 +439,7 @@ town             2         0         0         0         0         0         0  
 town             2         0         0         0         0         0         0     16384     22160         0         0         0 railway
 town             2         0         0         0         0         0         0         0       144         0         0         0 water
 town             2         0         0         0         0         0         0     16384     37392         0         0         0 mist
+town             2         0         0         0         0         0         0         0         0         0         0         0 clouds
 town             2         0         0         0         0         0         0     16384     16384         0         0         0 railway's tunnels
 town             2         0         0         0         0         0         0     16384     16384         0         0         0 railway in its tunnels
 town             2         0         0         0         0         0         0         0      5198      1796      1796         0 plan nearest town
@@ -464,6 +476,7 @@ town             3         0         0         0         0         0         0  
 town             3         0         0         0         0         0         0     16384     18320         0         0         0 railway
 town             3         0         0         0         0         0         0         0       256         0         0         0 water
 town             3         0         0         0         0         0         0     16384     34704         0         0         0 mist
+town             3         0         0         0         0         0         0         0         0         0         0         0 clouds
 town             3         0         0         0         0         0         0     16384     16384         0         0         0 railway's tunnels
 town             3         0         0         0         0         0         0     16384     16384         0         0         0 railway in its tunnels
 town             3         0         0         0         0         0         0         0      6077      2089      2089         0 plan nearest town
@@ -501,6 +514,7 @@ town             4         0         0         0         0         0         0  
 town             4         0         0         0         0         0         0     16384    239343         0         0         0 trees
 town             4         0         0         0         0         0         0         0      1024         0         0         0 water
 town             4         0         0         0         0         0         0     16384     43641         0         0         0 mist
+town             4         0         0         0         0         0         0         0         0         0         0         0 clouds
 town             4         0         0         0         0         0         0     16384     21353         0         0         0 railway's tunnels
 town             4         0         0         0         0         0         0     16384     21353         0         0         0 railway in its tunnels
 town             4         0         0         0         0         0         0         0     17902       208       208         0 plan landmarks
@@ -537,6 +551,7 @@ town             5         0         0         0         0         0         0  
 town             5         0         0         0         0         0         0     16384    212026         0         0         0 trees
 town             5         0         0         0         0         0         0         0      2304         0         0         0 water
 town             5         0         0         0         0         0         0     16384     48755         0         0         0 mist
+town             5         0         0         0         0         0         0         0         0         0         0         0 clouds
 town             5         0         0         0         0         0         0     16384     26947         0         0         0 railway's tunnels
 town             5         0         0         0         0         0         0     16384     26947         0         0         0 railway in its tunnels
 town             5         0         0         0         0         0         0         0     53097      2094      2094         0 plan pools
@@ -571,6 +586,7 @@ town             6         0         0         0         0         0         0  
 town             6         0         0         0         0         0         0     16384    227829         0         0         0 trees
 town             6         0         0         0         0         0         0         0      6400         0         0         0 water
 town             6         0         0         0         0         0         0     16384     42552         0         0         0 mist
+town             6         0         0         0         0         0         0     16384         0         0         0         0 clouds
 town             6         0         0         0         0         0         0     16384     22022         0         0         0 railway's tunnels
 town             6         0         0         0         0         0         0     16384     22022         0         0         0 railway in its tunnels
 town             6         0         0         0         0         0         0         0     45402     17514     17382         0 plan nearest town
@@ -609,6 +625,7 @@ town             7         0         0         0         0         0         0  
 town             7         0         0         0         0         0         0     16384    220762         0         0         0 trees
 town             7         0         0         0         0         0         0     16384     32792         0         0         0 water
 town             7         0         0         0         0         0         0     16384     43335         0         0         0 mist
+town             7         0         0         0         0         0         0     16384         0         0         0         0 clouds
 town             7         0         0         0         0         0         0     16384     19201         0         0         0 railway's tunnels
 town             7         0         0         0         0         0         0     16384     19201         0         0         0 railway in its tunnels
 town             7         0         0         0         0         0         0         0    329183      4579      4579         0 plan landmarks
@@ -647,6 +664,7 @@ town             8         0         0         0         0         0         0  
 town             8         0         0         0         0         0         0     16384    209358         0         0         0 trees
 town             8         0         0         0         0         0         0     16384     32803         0         0         0 water
 town             8         0         0         0         0         0         0     16384     42215         0         0         0 mist
+town             8         0         0         0         0         0         0     16384         0         0         0         0 clouds
 town             8         0         0         0         0         0         0     16384     17792         0         0         0 railway's tunnels
 town             8         0         0         0         0         0         0     16384     17792         0         0         0 railway in its tunnels
 town             8         0         0         0         0         0         0         0   1011707     15531     15531         0 plan landmarks
@@ -690,6 +708,7 @@ chapel           0         0         0         0         0         0         0  
 chapel           0         0         0         0         0         0         0     16384     22160         0         0         0 railway
 chapel           0         0         0         0         0         0         0         0       144         0         0         0 water
 chapel           0         0         0         0         0         0         0     16384     52752         0         0         0 mist
+chapel           0         0         0         0         0         0         0         0         0         0         0         0 clouds
 chapel           0         0         0         0         0         0         0         0         0         0         0         0 railway's tunnels
 chapel           0         0         0         0         0         0         0     16384     16384         0         0         0 railway in its tunnels
 chapel           0         0         0         0         0         0         0         0      1226       435       435         0 plan nearest town
@@ -728,6 +747,7 @@ chapel           1         0         0         0         0         0         0  
 chapel           1         0         0         0         0         0         0     16384     22160         0         0         0 railway
 chapel           1         0         0         0         0         0         0         0       144         0         0         0 water
 chapel           1         0         0         0         0         0         0     16384     53248         0         0         0 mist
+chapel           1         0         0         0         0         0         0         0         0         0         0         0 clouds
 chapel           1         0         0         0         0         0         0         0         0         0         0         0 railway's tunnels
 chapel           1         0         0         0         0         0         0     16384     16384         0         0         0 railway in its tunnels
 chapel           1         0         0         0         0         0         0         0      1390       493       493         0 plan nearest town
@@ -764,6 +784,7 @@ chapel           2         0         0         0         0         0         0  
 chapel           2         0         0         0         0         0         0     16384     22160         0         0         0 railway
 chapel           2         0         0         0         0         0         0         0       144         0         0         0 water
 chapel           2         0         0         0         0         0         0     16384     53776         0         0         0 mist
+chapel           2         0         0         0         0         0         0         0         0         0         0         0 clouds
 chapel           2         0         0         0         0         0         0         0         0         0         0         0 railway's tunnels
 chapel           2         0         0         0         0         0         0     16384     16384         0         0         0 railway in its tunnels
 chapel           2         0         0         0         0         0         0         0      2586       957       957         0 plan nearest town
@@ -800,6 +821,7 @@ chapel           3         0         0         0         0         0         0  
 chapel           3         0         0         0         0         0         0     16384     18320         0         0         0 railway
 chapel           3         0         0         0         0         0         0         0       256         0         0         0 water
 chapel           3         0         0         0         0         0         0     16384     47504         0         0         0 mist
+chapel           3         0         0         0         0         0         0         0         0         0         0         0 clouds
 chapel           3         0         0         0         0         0         0         0         0         0         0         0 railway's tunnels
 chapel           3         0         0         0         0         0         0     16384     16384         0         0         0 railway in its tunnels
 chapel           3         0         0         0         0         0         0         0      3102      1134      1134         0 plan nearest town
@@ -838,6 +860,7 @@ chapel           4         0         0         0         0         0         0  
 chapel           4         0         0         0         0         0         0     16384    239343         0         0         0 trees
 chapel           4         0         0         0         0         0         0         0      1024         0         0         0 water
 chapel           4         0         0         0         0         0         0     16384     43641         0         0         0 mist
+chapel           4         0         0         0         0         0         0         0         0         0         0         0 clouds
 chapel           4         0         0         0         0         0         0         0         0         0         0         0 railway's tunnels
 chapel           4         0         0         0         0         0         0     16384     21353         0         0         0 railway in its tunnels
 chapel           4         0         0         0         0         0         0         0     17902       208       208         0 plan landmarks
@@ -874,6 +897,7 @@ chapel           5         0         0         0         0         0         0  
 chapel           5         0         0         0         0         0         0     16384    212026         0         0         0 trees
 chapel           5         0         0         0         0         0         0         0      2304         0         0         0 water
 chapel           5         0         0         0         0         0         0     16384     48755         0         0         0 mist
+chapel           5         0         0         0         0         0         0         0         0         0         0         0 clouds
 chapel           5         0         0         0         0         0         0     12288     20195         0         0         0 railway's tunnels
 chapel           5         0         0         0         0         0         0     16384     26947         0         0         0 railway in its tunnels
 chapel           5         0         0         0         0         0         0         0     53097      2094      2094         0 plan pools
@@ -908,6 +932,7 @@ chapel           6         0         0         0         0         0         0  
 chapel           6         0         0         0         0         0         0     16384    227829         0         0         0 trees
 chapel           6         0         0         0         0         0         0         0      6400         0         0         0 water
 chapel           6         0         0         0         0         0         0     16384     42552         0         0         0 mist
+chapel           6         0         0         0         0         0         0         0         0         0         0         0 clouds
 chapel           6         0         0         0         0         0         0     16384     22022         0         0         0 railway's tunnels
 chapel           6         0         0         0         0         0         0     16384     22022         0         0         0 railway in its tunnels
 chapel           6         0         0         0         0         0         0         0     45385     17508     17376         0 plan nearest town
@@ -946,6 +971,7 @@ chapel           7         0         0         0         0         0         0  
 chapel           7         0         0         0         0         0         0     16384    220762         0         0         0 trees
 chapel           7         0         0         0         0         0         0     16384     32792         0         0         0 water
 chapel           7         0         0         0         0         0         0     16384     43335         0         0         0 mist
+chapel           7         0         0         0         0         0         0         0         0         0         0         0 clouds
 chapel           7         0         0         0         0         0         0     16384     19201         0         0         0 railway's tunnels
 chapel           7         0         0         0         0         0         0     16384     19201         0         0         0 railway in its tunnels
 chapel           7         0         0         0         0         0         0         0    329183      4579      4579         0 plan landmarks
@@ -984,6 +1010,7 @@ chapel           8         0         0         0         0         0         0  
 chapel           8         0         0         0         0         0         0     16384    209358         0         0         0 trees
 chapel           8         0         0         0         0         0         0     16384     32803         0         0         0 water
 chapel           8         0         0         0         0         0         0     16384     42215         0         0         0 mist
+chapel           8         0         0         0         0         0         0         0         0         0         0         0 clouds
 chapel           8         0         0         0         0         0         0     16384     17792         0         0         0 railway's tunnels
 chapel           8         0         0         0         0         0         0     16384     17792         0         0         0 railway in its tunnels
 chapel           8         0         0         0         0         0         0         0   1011707     15531     15531         0 plan landmarks
@@ -1027,6 +1054,7 @@ windmill         0         0         0         0         0         0         0  
 windmill         0         0         0         0         0         0         0     16384     22160         0         0         0 railway
 windmill         0         0         0         0         0         0         0         0       144         0         0         0 water
 windmill         0         0         0         0         0         0         0     16384     52752         0         0         0 mist
+windmill         0         0         0         0         0         0         0         0         0         0         0         0 clouds
 windmill         0         0         0         0         0         0         0         0         0         0         0         0 railway's tunnels
 windmill         0         0         0         0         0         0         0     16384     16384         0         0         0 railway in its tunnels
 windmill         0         0         0         0         0         0         0         0      2546       141       141         0 plan pools
@@ -1065,6 +1093,7 @@ windmill         1         0         0         0         0         0         0  
 windmill         1         0         0         0         0         0         0     16384     22160         0         0         0 railway
 windmill         1         0         0         0         0         0         0         0       144         0         0         0 water
 windmill         1         0         0         0         0         0         0     16384     53248         0         0         0 mist
+windmill         1         0         0         0         0         0         0         0         0         0         0         0 clouds
 windmill         1         0         0         0         0         0         0     16384     16384         0         0         0 railway's tunnels
 windmill         1         0         0         0         0         0         0     16384     16384         0         0         0 railway in its tunnels
 windmill         1         0         0         0         0         0         0         0      3309       188       188         0 plan pools
@@ -1101,6 +1130,7 @@ windmill         2         0         0         0         0         0         0  
 windmill         2         0         0         0         0         0         0     16384     22160         0         0         0 railway
 windmill         2         0         0         0         0         0         0         0       144         0         0         0 water
 windmill         2         0         0         0         0         0         0     16384     54800         0         0         0 mist
+windmill         2         0         0         0         0         0         0         0         0         0         0         0 clouds
 windmill         2         0         0         0         0         0         0     16384     16384         0         0         0 railway's tunnels
 windmill         2         0         0         0         0         0         0     16384     16384         0         0         0 railway in its tunnels
 windmill         2         0         0         0         0         0         0         0      4760       232       232         0 plan pools
@@ -1138,6 +1168,7 @@ windmill         3         0         0         0         0         0         0  
 windmill         3         0         0         0         0         0         0     16384     18320         0         0         0 railway
 windmill         3         0         0         0         0         0         0         0       256         0         0         0 water
 windmill         3         0         0         0         0         0         0     16384     58768         0         0         0 mist
+windmill         3         0         0         0         0         0         0         0         0         0         0         0 clouds
 windmill         3         0         0         0         0         0         0     16384     16384         0         0         0 railway's tunnels
 windmill         3         0         0         0         0         0         0     16384     16384         0         0         0 railway in its tunnels
 windmill         3         0         0         0         0         0         0         0      4974      2018      2018         0 plan nearest town
@@ -1175,6 +1206,7 @@ windmill         4         0         0         0         0         0         0  
 windmill         4         0         0         0         0         0         0     16384    238760         0         0         0 trees
 windmill         4         0         0         0         0         0         0         0      1024         0         0         0 water
 windmill         4         0         0         0         0         0         0     16384     50832         0         0         0 mist
+windmill         4         0         0         0         0         0         0         0         0         0         0         0 clouds
 windmill         4         0         0         0         0         0         0     16384     16384         0         0         0 railway's tunnels
 windmill         4         0         0         0         0         0         0     16384     16384         0         0         0 railway in its tunnels
 windmill         4         0         0         0         0         0         0         0     23955       209       209         0 plan landmarks
@@ -1210,6 +1242,7 @@ windmill         5         0         0         0         0         0         0  
 windmill         5         0         0         0         0         0         0     16384    213648         0         0         0 trees
 windmill         5         0         0         0         0         0         0         0      2304         0         0         0 water
 windmill         5         0         0         0         0         0         0     16384     42692         0         0         0 mist
+windmill         5         0         0         0         0         0         0         0         0         0         0         0 clouds
 windmill         5         0         0         0         0         0         0     16384     16384         0         0         0 railway's tunnels
 windmill         5         0         0         0         0         0         0     16384     16384         0         0         0 railway in its tunnels
 windmill         5         0         0         0         0         0         0         0     15052      5538      5538         0 plan nearest town
@@ -1243,6 +1276,7 @@ windmill         6         0         0         0         0         0         0  
 windmill         6         0         0         0         0         0         0     16384    226116         0         0         0 trees
 windmill         6         0         0         0         0         0         0         0      6400         0         0         0 water
 windmill         6         0         0         0         0         0         0     16384     39394         0         0         0 mist
+windmill         6         0         0         0         0         0         0     16384         0         0         0         0 clouds
 windmill         6         0         0         0         0         0         0     16384     16384         0         0         0 railway's tunnels
 windmill         6         0         0         0         0         0         0     16384     16384         0         0         0 railway in its tunnels
 windmill         6         0         0         0         0         0         0         0     46708     18027     17654         0 plan nearest town
@@ -1280,6 +1314,7 @@ windmill         7         0         0         0         0         0         0  
 windmill         7         0         0         0         0         0         0     16384    211045         0         0         0 trees
 windmill         7         0         0         0         0         0         0     16384     32768         0         0         0 water
 windmill         7         0         0         0         0         0         0     16384     40155         0         0         0 mist
+windmill         7         0         0         0         0         0         0     16384         0         0         0         0 clouds
 windmill         7         0         0         0         0         0         0     16384     16384         0         0         0 railway's tunnels
 windmill         7         0         0         0         0         0         0     16384     16384         0         0         0 railway in its tunnels
 windmill         7         0         0         0         0         0         0         0     94406     37145     31982         0 plan nearest town
@@ -1318,6 +1353,7 @@ windmill         8         0         0         0         0         0         0  
 windmill         8         0         0         0         0         0         0     16384    216388         0         0         0 trees
 windmill         8         0         0         0         0         0         0     16384     32831         0         0         0 water
 windmill         8         0         0         0         0         0         0     16384     42997         0         0         0 mist
+windmill         8         0         0         0         0         0         0     16384         0         0         0         0 clouds
 windmill         8         0         0         0         0         0         0     16384     16384         0         0         0 railway's tunnels
 windmill         8         0         0         0         0         0         0     16384     16384         0         0         0 railway in its tunnels
 windmill         8         0         0         0         0         0         0         0    303928    113340     57444         0 plan nearest town
@@ -1356,6 +1392,7 @@ mountainside     0         0         0         0         0         0         0  
 mountainside     0         0         0         0         0         0         0         0      5776         0         0         0 railway
 mountainside     0         0         0         0         0         0         0         0       144         0         0         0 water
 mountainside     0         0         0         0         0         0         0     16384     36368         0         0         0 mist
+mountainside     0         0         0         0         0         0         0         0         0         0         0         0 clouds
 mountainside     0         0         0         0         0         0         0         0         0         0         0         0 railway's tunnels
 mountainside     0         0         0         0         0         0         0         0         0         0         0         0 railway in its tunnels
 mountainside     0         0         0         0         0         0         0         0     31931     10754     10753         0 plan nearest town
@@ -1390,6 +1427,7 @@ mountainside     1         0         0         0         0         0         0  
 mountainside     1         0         0         0         0         0         0         0      5776         0         0         0 railway
 mountainside     1         0         0         0         0         0         0         0       144         0         0         0 water
 mountainside     1         0         0         0         0         0         0     16384     36864         0         0         0 mist
+mountainside     1         0         0         0         0         0         0         0         0         0         0         0 clouds
 mountainside     1         0         0         0         0         0         0         0         0         0         0         0 railway's tunnels
 mountainside     1         0         0         0         0         0         0         0         0         0         0         0 railway in its tunnels
 mountainside     1         0         0         0         0         0         0         0     31772     10701     10701         0 plan nearest town
@@ -1423,6 +1461,7 @@ mountainside     2         0         0         0         0         0         0  
 mountainside     2         0         0         0         0         0         0         0      5776         0         0         0 railway
 mountainside     2         0         0         0         0         0         0         0       144         0         0         0 water
 mountainside     2         0         0         0         0         0         0     16384     37392         0         0         0 mist
+mountainside     2         0         0         0         0         0         0     16384         0         0         0         0 clouds
 mountainside     2         0         0         0         0         0         0         0         0         0         0         0 railway's tunnels
 mountainside     2         0         0         0         0         0         0         0         0         0         0         0 railway in its tunnels
 mountainside     2         0         0         0         0         0         0         0     35078     11803     11803         0 plan nearest town
@@ -1459,6 +1498,7 @@ mountainside     3         0         0         0         0         0         0  
 mountainside     3         0         0         0         0         0         0         0      1936         0         0         0 railway
 mountainside     3         0         0         0         0         0         0         0       256         0         0         0 water
 mountainside     3         0         0         0         0         0         0     16384     34704         0         0         0 mist
+mountainside     3         0         0         0         0         0         0     16384         0         0         0         0 clouds
 mountainside     3         0         0         0         0         0         0         0         0         0         0         0 railway's tunnels
 mountainside     3         0         0         0         0         0         0         0         0         0         0         0 railway in its tunnels
 mountainside     3         0         0         0         0         0         0         0     35792     12041     12040         0 plan nearest town
@@ -1496,6 +1536,7 @@ mountainside     4         0         0         0         0         0         0  
 mountainside     4         0         0         0         0         0         0      5120     59284         0         0         0 trees
 mountainside     4         0         0         0         0         0         0         0      2960         0         0         0 water
 mountainside     4         0         0         0         0         0         0     16384     35472         0         0         0 mist
+mountainside     4         0         0         0         0         0         0     16384         0         0         0         0 clouds
 mountainside     4         0         0         0         0         0         0         0         0         0         0         0 railway's tunnels
 mountainside     4         0         0         0         0         0         0         0         0         0         0         0 railway in its tunnels
 mountainside     4         0         0         0         0         0         0         0     41215     13849     13848         0 plan nearest town
@@ -1531,6 +1572,7 @@ mountainside     5         0         0         0         0         0         0  
 mountainside     5         0         0         0         0         0         0     15360    147423         0         0         0 trees
 mountainside     5         0         0         0         0         0         0         0      4240         0         0         0 water
 mountainside     5         0         0         0         0         0         0     15360     35344         0         0         0 mist
+mountainside     5         0         0         0         0         0         0     16384         0         0         0         0 clouds
 mountainside     5         0         0         0         0         0         0         0         0         0         0         0 railway's tunnels
 mountainside     5         0         0         0         0         0         0         0         0         0         0         0 railway in its tunnels
 mountainside     5         0         0         0         0         0         0         0     48823     16385     16383         0 plan nearest town
@@ -1565,6 +1607,7 @@ mountainside     6         0         0         0         0         0         0  
 mountainside     6         0         0         0         0         0         0     16384    191924         0         0         0 trees
 mountainside     6         0         0         0         0         0         0         0      6400         0         0         0 water
 mountainside     6         0         0         0         0         0         0     16384     40764         0         0         0 mist
+mountainside     6         0         0         0         0         0         0     16384         0         0         0         0 clouds
 mountainside     6         0         0         0         0         0         0     16384     16384         0         0         0 railway's tunnels
 mountainside     6         0         0         0         0         0         0     16384     16384         0         0         0 railway in its tunnels
 mountainside     6         0         0         0         0         0         0         0     58618     19826     19624         0 plan nearest town
@@ -1599,6 +1642,7 @@ mountainside     7         0         0         0         0         0         0  
 mountainside     7         0         0         0         0         0         0     16384    211383         0         0         0 trees
 mountainside     7         0         0         0         0         0         0     16384     32768         0         0         0 water
 mountainside     7         0         0         0         0         0         0     16384     40532         0         0         0 mist
+mountainside     7         0         0         0         0         0         0     16384         0         0         0         0 clouds
 mountainside     7         0         0         0         0         0         0     16384     16384         0         0         0 railway's tunnels
 mountainside     7         0         0         0         0         0         0     16384     16384         0         0         0 railway in its tunnels
 mountainside     7         0         0         0         0         0         0         0    351599      4791      4791         0 plan landmarks
@@ -1637,6 +1681,7 @@ coast            0         0         0         0         0         0         0  
 coast            0         0         0         0         0         0         0     16384     22160         0         0         0 railway
 coast            0         0         0         0         0         0         0         0       144         0         0         0 water
 coast            0         0         0         0         0         0         0     16384     36368         0         0         0 mist
+coast            0         0         0         0         0         0         0         0         0         0         0         0 clouds
 coast            0         0         0         0         0         0         0         0         0         0         0         0 railway's tunnels
 coast            0         0         0         0         0         0         0     16384     16384         0         0         0 railway in its tunnels
 coast            0         0         0         0         0         0         0         0     12055      5061      5061         0 plan nearest town
@@ -1672,6 +1717,7 @@ coast            1         0         0         0         0         0         0  
 coast            1         0         0         0         0         0         0     16384     22160         0         0         0 railway
 coast            1         0         0         0         0         0         0         0       144         0         0         0 water
 coast            1         0         0         0         0         0         0     16384     36864         0         0         0 mist
+coast            1         0         0         0         0         0         0         0         0         0         0         0 clouds
 coast            1         0         0         0         0         0         0         0         0         0         0         0 railway's tunnels
 coast            1         0         0         0         0         0         0     16384     16384         0         0         0 railway in its tunnels
 coast            1         0         0         0         0         0         0         0     12076      5069      5069         0 plan nearest town
@@ -1705,6 +1751,7 @@ coast            2         0         0         0         0         0         0  
 coast            2         0         0         0         0         0         0     16384     22160         0         0         0 railway
 coast            2         0         0         0         0         0         0         0       144         0         0         0 water
 coast            2         0         0         0         0         0         0     16384     37392         0         0         0 mist
+coast            2         0         0         0         0         0         0         0         0         0         0         0 clouds
 coast            2         0         0         0         0         0         0         0         0         0         0         0 railway's tunnels
 coast            2         0         0         0         0         0         0     16384     16384         0         0         0 railway in its tunnels
 coast            2         0         0         0         0         0         0         0     13374      5554      5554         0 plan nearest town
@@ -1738,6 +1785,7 @@ coast            3         0         0         0         0         0         0  
 coast            3         0         0         0         0         0         0     16384     18320         0         0         0 railway
 coast            3         0         0         0         0         0         0         0       256         0         0         0 water
 coast            3         0         0         0         0         0         0     16384     34704         0         0         0 mist
+coast            3         0         0         0         0         0         0         0         0         0         0         0 clouds
 coast            3         0         0         0         0         0         0         0         0         0         0         0 railway's tunnels
 coast            3         0         0         0         0         0         0     16384     16384         0         0         0 railway in its tunnels
 coast            3         0         0         0         0         0         0         0     13402      5563      5563         0 plan nearest town
@@ -1771,6 +1819,7 @@ coast            4         0         0         0         0         0         0  
 coast            4         0         0         0         0         0         0     16384    181721         0         0         0 trees
 coast            4         0         0         0         0         0         0         0      1024         0         0         0 water
 coast            4         0         0         0         0         0         0     16384     35472         0         0         0 mist
+coast            4         0         0         0         0         0         0         0         0         0         0         0 clouds
 coast            4         0         0         0         0         0         0         0         0         0         0         0 railway's tunnels
 coast            4         0         0         0         0         0         0     16384     16384         0         0         0 railway in its tunnels
 coast            4         0         0         0         0         0         0         0     18503      7302      7302         0 plan nearest town
@@ -1802,6 +1851,7 @@ coast            5         0         0         0         0         0         0  
 coast            5         0         0         0         0         0         0     16384    156538         0         0         0 trees
 coast            5         0         0         0         0         0         0         0      2304         0         0         0 water
 coast            5         0         0         0         0         0         0     16384     37392         0         0         0 mist
+coast            5         0         0         0         0         0         0         0         0         0         0         0 clouds
 coast            5         0         0         0         0         0         0     12288     12288         0         0         0 railway's tunnels
 coast            5         0         0         0         0         0         0     16384     16384         0         0         0 railway in its tunnels
 coast            5         0         0         0         0         0         0         0     24126      9174      9174         0 plan nearest town
@@ -1832,6 +1882,7 @@ coast            6         0         0         0         0         0         0  
 coast            6         0         0         0         0         0         0     16384    167864         0         0         0 trees
 coast            6         0         0         0         0         0         0         0      6400         0         0         0 water
 coast            6         0         0         0         0         0         0     16384     35754         0         0         0 mist
+coast            6         0         0         0         0         0         0         0         0         0         0         0 clouds
 coast            6         0         0         0         0         0         0     16384     16384         0         0         0 railway's tunnels
 coast            6         0         0         0         0         0         0     16384     16384         0         0         0 railway in its tunnels
 coast            6         0         0         0         0         0         0         0     46273     17282     17282         0 plan nearest town
@@ -1862,6 +1913,7 @@ coast            7         0         0         0         0         0         0  
 coast            7         0         0         0         0         0         0     16384    169480         0         0         0 trees
 coast            7         0         0         0         0         0         0     16384     32768         0         0         0 water
 coast            7         0         0         0         0         0         0     16384     35138         0         0         0 mist
+coast            7         0         0         0         0         0         0         0         0         0         0         0 clouds
 coast            7         0         0         0         0         0         0     16384     16384         0         0         0 railway's tunnels
 coast            7         0         0         0         0         0         0     16384     16384         0         0         0 railway in its tunnels
 coast            7         0         0         0         0         0         0         0     88390     33774     29671         0 plan nearest town
@@ -1896,6 +1948,7 @@ coast            8         0         0         0         0         0         0  
 coast            8         0         0         0         0         0         0     16384    180361         0         0         0 trees
 coast            8         0         0         0         0         0         0     16384     32772         0         0         0 water
 coast            8         0         0         0         0         0         0     16384     34776         0         0         0 mist
+coast            8         0         0         0         0         0         0         0         0         0         0         0 clouds
 coast            8         0         0         0         0         0         0     16384     16384         0         0         0 railway's tunnels
 coast            8         0         0         0         0         0         0     16384     16384         0         0         0 railway in its tunnels
 coast            8         0         0         0         0         0         0         0    980859     15336     15336         0 plan landmarks
@@ -1934,6 +1987,7 @@ steading         0         0         0         0         0         0         0  
 steading         0         0         0         0         0         0         0     16384     22160         0         0         0 railway
 steading         0         0         0         0         0         0         0         0       144         0         0         0 water
 steading         0         0         0         0         0         0         0     16384     69136         0         0         0 mist
+steading         0         0         0         0         0         0         0         0         0         0         0         0 clouds
 steading         0         0         0         0         0         0         0         0         0         0         0         0 railway's tunnels
 steading         0         0         0         0         0         0         0     16384     16384         0         0         0 railway in its tunnels
 steading         0         0         0         0         0         0         0         0     59933     20087     20043         0 plan nearest town
@@ -1973,6 +2027,7 @@ steading         1         0         0         0         0         0         0  
 steading         1         0         0         0         0         0         0     16384     22160         0         0         0 railway
 steading         1         0         0         0         0         0         0         0       144         0         0         0 water
 steading         1         0         0         0         0         0         0     16384     69632         0         0         0 mist
+steading         1         0         0         0         0         0         0         0         0         0         0         0 clouds
 steading         1         0         0         0         0         0         0         0         0         0         0         0 railway's tunnels
 steading         1         0         0         0         0         0         0     16384     16384         0         0         0 railway in its tunnels
 steading         1         0         0         0         0         0         0         0     59924     20084     20040         0 plan nearest town
@@ -2010,6 +2065,7 @@ steading         2         0         0         0         0         0         0  
 steading         2         0         0         0         0         0         0     16384     22160         0         0         0 railway
 steading         2         0         0         0         0         0         0         0       144         0         0         0 water
 steading         2         0         0         0         0         0         0     16384     70160         0         0         0 mist
+steading         2         0         0         0         0         0         0         0         0         0         0         0 clouds
 steading         2         0         0         0         0         0         0     16384     16384         0         0         0 railway's tunnels
 steading         2         0         0         0         0         0         0     16384     16384         0         0         0 railway in its tunnels
 steading         2         0         0         0         0         0         0         0     59975     20101     20057         0 plan nearest town
@@ -2047,6 +2103,7 @@ steading         3         0         0         0         0         0         0  
 steading         3         0         0         0         0         0         0     16384     18320         0         0         0 railway
 steading         3         0         0         0         0         0         0         0       256         0         0         0 water
 steading         3         0         0         0         0         0         0     16384     64762         0         0         0 mist
+steading         3         0         0         0         0         0         0         0         0         0         0         0 clouds
 steading         3         0         0         0         0         0         0     16384     16384         0         0         0 railway's tunnels
 steading         3         0         0         0         0         0         0     16384     16384         0         0         0 railway in its tunnels
 steading         3         0         0         0         0         0         0         0     62015     20781     20730         0 plan nearest town
@@ -2085,6 +2142,7 @@ steading         4         0         0         0         0         0         0  
 steading         4         0         0         0         0         0         0     16384    211501         0         0         0 trees
 steading         4         0         0         0         0         0         0         0      1024         0         0         0 water
 steading         4         0         0         0         0         0         0     16384     65770         0         0         0 mist
+steading         4         0         0         0         0         0         0         0         0         0         0         0 clouds
 steading         4         0         0         0         0         0         0     16384     16384         0         0         0 railway's tunnels
 steading         4         0         0         0         0         0         0     16384     16384         0         0         0 railway in its tunnels
 steading         4         0         0         0         0         0         0         0     64725     21685     21593         0 plan nearest town
@@ -2123,6 +2181,7 @@ steading         5         0         0         0         0         0         0  
 steading         5         0         0         0         0         0         0     16384    193960         0         0         0 trees
 steading         5         0         0         0         0         0         0         0      2304         0         0         0 water
 steading         5         0         0         0         0         0         0     16384     60235         0         0         0 mist
+steading         5         0         0         0         0         0         0         0         0         0         0         0 clouds
 steading         5         0         0         0         0         0         0     16384     18027         0         0         0 railway's tunnels
 steading         5         0         0         0         0         0         0     16384     18027         0         0         0 railway in its tunnels
 steading         5         0         0         0         0         0         0         0     67374     22568     22470         0 plan nearest town
@@ -2162,6 +2221,7 @@ steading         6         0         0         0         0         0         0  
 steading         6         0         0         0         0         0         0     16384    216747         0         0         0 trees
 steading         6         0         0         0         0         0         0         0      6400         0         0         0 water
 steading         6         0         0         0         0         0         0     16384     52729         0         0         0 mist
+steading         6         0         0         0         0         0         0     16384         0         0         0         0 clouds
 steading         6         0         0         0         0         0         0     16384     22020         0         0         0 railway's tunnels
 steading         6         0         0         0         0         0         0     16384     22020         0         0         0 railway in its tunnels
 steading         6         0         0         0         0         0         0         0     78359     26230     26113         0 plan nearest town
@@ -2200,6 +2260,7 @@ steading         7         0         0         0         0         0         0  
 steading         7         0         0         0         0         0         0     16384    192745         0         0         0 trees
 steading         7         0         0         0         0         0         0     16384     32891         0         0         0 water
 steading         7         0         0         0         0         0         0     16384     51279         0         0         0 mist
+steading         7         0         0         0         0         0         0     16384         0         0         0         0 clouds
 steading         7         0         0         0         0         0         0     16384     19204         0         0         0 railway's tunnels
 steading         7         0         0         0         0         0         0     16384     19204         0         0         0 railway in its tunnels
 steading         7         0         0         0         0         0         0         0    125327     41886     37749         0 plan nearest town
@@ -2243,6 +2304,7 @@ station          0         0         0         0         0         0         0  
 station          0         0         0         0         0         0         0     16384     46620         0         0         0 railway
 station          0         0         0         0         0         0         0         0       144         0         0         0 water
 station          0         0         0         0         0         0         0     16384     52752         0         0         0 mist
+station          0         0         0         0         0         0         0         0         0         0         0         0 clouds
 station          0         0         0         0         0         0         0     16384     32768         0         0         0 railway's tunnels
 station          0         0         0         0         0         0         0     16384     32768         0         0         0 railway in its tunnels
 station          0         0         0         0         0         0         0         0      7115      2529      2529         0 plan nearest town
@@ -2282,6 +2344,7 @@ station          1         0         0         0         0         0         0  
 station          1         0         0         0         0         0         0     16384     42471         0         0         0 railway
 station          1         0         0         0         0         0         0         0       144         0         0         0 water
 station          1         0         0         0         0         0         0     16384     53248         0         0         0 mist
+station          1         0         0         0         0         0         0         0         0         0         0         0 clouds
 station          1         0         0         0         0         0         0     16384     32768         0         0         0 railway's tunnels
 station          1         0         0         0         0         0         0     16384     32768         0         0         0 railway in its tunnels
 station          1         0         0         0         0         0         0         0      7070      2514      2514         0 plan nearest town
@@ -2319,6 +2382,7 @@ station          2         0         0         0         0         0         0  
 station          2         0         0         0         0         0         0     16384     42761         0         0         0 railway
 station          2         0         0         0         0         0         0         0       144         0         0         0 water
 station          2         0         0         0         0         0         0     16384     53776         0         0         0 mist
+station          2         0         0         0         0         0         0         0         0         0         0         0 clouds
 station          2         0         0         0         0         0         0     16384     32768         0         0         0 railway's tunnels
 station          2         0         0         0         0         0         0     16384     32768         0         0         0 railway in its tunnels
 station          2         0         0         0         0         0         0         0      7391      2621      2621         0 plan nearest town
@@ -2356,6 +2420,7 @@ station          3         0         0         0         0         0         0  
 station          3         0         0         0         0         0         0     16384     30264         0         0         0 railway
 station          3         0         0         0         0         0         0         0       256         0         0         0 water
 station          3         0         0         0         0         0         0     16384     44642         0         0         0 mist
+station          3         0         0         0         0         0         0         0         0         0         0         0 clouds
 station          3         0         0         0         0         0         0     16384     26322         0         0         0 railway's tunnels
 station          3         0         0         0         0         0         0     16384     26322         0         0         0 railway in its tunnels
 station          3         0         0         0         0         0         0         0      8132      2868      2868         0 plan nearest town
@@ -2393,6 +2458,7 @@ bridge           0         0         0         0         0         0         0  
 bridge           0         0         0         0         0         0         0     16384     39118         0         0         0 railway
 bridge           0         0         0         0         0         0         0         0       144         0         0         0 water
 bridge           0         0         0         0         0         0         0     16384     52752         0         0         0 mist
+bridge           0         0         0         0         0         0         0         0         0         0         0         0 clouds
 bridge           0         0         0         0         0         0         0     16384     32768         0         0         0 railway's tunnels
 bridge           0         0         0         0         0         0         0     16384     32768         0         0         0 railway in its tunnels
 bridge           0         0         0         0         0         0         0         0         0        14        14         0 plan route
@@ -2434,6 +2500,7 @@ bridge           1         0         0         0         0         0         0  
 bridge           1         0         0         0         0         0         0     16384     39331         0         0         0 railway
 bridge           1         0         0         0         0         0         0         0       144         0         0         0 water
 bridge           1         0         0         0         0         0         0     16384     53260         0         0         0 mist
+bridge           1         0         0         0         0         0         0         0         0         0         0         0 clouds
 bridge           1         0         0         0         0         0         0     16384     32768         0         0         0 railway's tunnels
 bridge           1         0         0         0         0         0         0     16384     32768         0         0         0 railway in its tunnels
 bridge           1         0         0         0         0         0         0         0         0        14        14         0 plan route
@@ -2474,6 +2541,7 @@ bridge           2         0         0         0         0         0         0  
 bridge           2         0         0         0         0         0         0     16384     38072         0         0         0 railway
 bridge           2         0         0         0         0         0         0         0       144         0         0         0 water
 bridge           2         0         0         0         0         0         0     16384     65508         0         0         0 mist
+bridge           2         0         0         0         0         0         0         0         0         0         0         0 clouds
 bridge           2         0         0         0         0         0         0     16384     31778         0         0         0 railway's tunnels
 bridge           2         0         0         0         0         0         0     16384     31778         0         0         0 railway in its tunnels
 bridge           2         0         0         0         0         0         0         0         0        14        14         0 plan route
@@ -2514,6 +2582,7 @@ bridge           3         0         0         0         0         0         0  
 bridge           3         0         0         0         0         0         0     16384     34554         0         0         0 railway
 bridge           3         0         0         0         0         0         0         0       256         0         0         0 water
 bridge           3         0         0         0         0         0         0     16384     69695         0         0         0 mist
+bridge           3         0         0         0         0         0         0         0         0         0         0         0 clouds
 bridge           3         0         0         0         0         0         0     16384     32478         0         0         0 railway's tunnels
 bridge           3         0         0         0         0         0         0     16384     32478         0         0         0 railway in its tunnels
 bridge           3         0         0         0         0         0         0         0         0        14        14         0 plan route
@@ -2554,6 +2623,7 @@ bridge           4         0         0         0         0         0         0  
 bridge           4         0         0         0         0         0         0     16384    233885         0         0         0 trees
 bridge           4         0         0         0         0         0         0         0      1024         0         0         0 water
 bridge           4         0         0         0         0         0         0     16384     74399         0         0         0 mist
+bridge           4         0         0         0         0         0         0         0         0         0         0         0 clouds
 bridge           4         0         0         0         0         0         0     16384     32472         0         0         0 railway's tunnels
 bridge           4         0         0         0         0         0         0     16384     32472         0         0         0 railway in its tunnels
 bridge           4         0         0         0         0         0         0         0         0        14        14         0 plan route
@@ -2592,6 +2662,7 @@ bridge           5         0         0         0         0         0         0  
 bridge           5         0         0         0         0         0         0     16384    206494         0         0         0 trees
 bridge           5         0         0         0         0         0         0         0      2304         0         0         0 water
 bridge           5         0         0         0         0         0         0     16384     56343         0         0         0 mist
+bridge           5         0         0         0         0         0         0         0         0         0         0         0 clouds
 bridge           5         0         0         0         0         0         0     16384     24280         0         0         0 railway's tunnels
 bridge           5         0         0         0         0         0         0     16384     24280         0         0         0 railway in its tunnels
 bridge           5         0         0         0         0         0         0         0         0        18        18         0 plan route
@@ -2629,6 +2700,7 @@ bridge           6         0         0         0         0         0         0  
 bridge           6         0         0         0         0         0         0     16384    205525         0         0         0 trees
 bridge           6         0         0         0         0         0         0         0      6400         0         0         0 water
 bridge           6         0         0         0         0         0         0     16384     45839         0         0         0 mist
+bridge           6         0         0         0         0         0         0     16384         0         0         0         0 clouds
 bridge           6         0         0         0         0         0         0     16384     20197         0         0         0 railway's tunnels
 bridge           6         0         0         0         0         0         0     16384     20197         0         0         0 railway in its tunnels
 bridge           6         0         0         0         0         0         0         0         0        18        18         0 plan route
@@ -2665,6 +2737,7 @@ bridge           7         0         0         0         0         0         0  
 bridge           7         0         0         0         0         0         0     16384    219661         0         0         0 trees
 bridge           7         0         0         0         0         0         0     16384     32829         0         0         0 water
 bridge           7         0         0         0         0         0         0     16384     44747         0         0         0 mist
+bridge           7         0         0         0         0         0         0     16384         0         0         0         0 clouds
 bridge           7         0         0         0         0         0         0     16384     19202         0         0         0 railway's tunnels
 bridge           7         0         0         0         0         0         0     16384     19202         0         0         0 railway in its tunnels
 bridge           7         0         0         0         0         0         0         0         0        18        18         0 plan route
@@ -2703,6 +2776,7 @@ bridge           8         0         0         0         0         0         0  
 bridge           8         0         0         0         0         0         0     16384    214783         0         0         0 trees
 bridge           8         0         0         0         0         0         0     16384     32783         0         0         0 water
 bridge           8         0         0         0         0         0         0     16384     40707         0         0         0 mist
+bridge           8         0         0         0         0         0         0     16384         0         0         0         0 clouds
 bridge           8         0         0         0         0         0         0     16384     17793         0         0         0 railway's tunnels
 bridge           8         0         0         0         0         0         0     16384     17793         0         0         0 railway in its tunnels
 bridge           8         0         0         0         0         0         0         0         0        22        22         0 plan route
@@ -2745,6 +2819,7 @@ tunnel           0         0         0         0         0         0         0  
 tunnel           0         0         0         0         0         0         0     16384     38544         0         0         0 railway
 tunnel           0         0         0         0         0         0         0         0       144         0         0         0 water
 tunnel           0         0         0         0         0         0         0     16384     52752         0         0         0 mist
+tunnel           0         0         0         0         0         0         0         0         0         0         0         0 clouds
 tunnel           0         0         0         0         0         0         0     16384     32768         0         0         0 railway's tunnels
 tunnel           0         0         0         0         0         0         0     16384     32768         0         0         0 railway in its tunnels
 tunnel           0         0         0         0         0         0         0         0         0        18        18         0 plan route
@@ -2786,6 +2861,7 @@ tunnel           1         0         0         0         0         0         0  
 tunnel           1         0         0         0         0         0         0     16384     38544         0         0         0 railway
 tunnel           1         0         0         0         0         0         0         0       144         0         0         0 water
 tunnel           1         0         0         0         0         0         0     16384     53248         0         0         0 mist
+tunnel           1         0         0         0         0         0         0         0         0         0         0         0 clouds
 tunnel           1         0         0         0         0         0         0     16384     32768         0         0         0 railway's tunnels
 tunnel           1         0         0         0         0         0         0     16384     32768         0         0         0 railway in its tunnels
 tunnel           1         0         0         0         0         0         0         0         0        18        18         0 plan route
@@ -2825,6 +2901,7 @@ tunnel           2         0         0         0         0         0         0  
 tunnel           2         0         0         0         0         0         0     16384     38720         0         0         0 railway
 tunnel           2         0         0         0         0         0         0         0       144         0         0         0 water
 tunnel           2         0         0         0         0         0         0     16384     53776         0         0         0 mist
+tunnel           2         0         0         0         0         0         0         0         0         0         0         0 clouds
 tunnel           2         0         0         0         0         0         0     16384     32768         0         0         0 railway's tunnels
 tunnel           2         0         0         0         0         0         0     16384     32768         0         0         0 railway in its tunnels
 tunnel           2         0         0         0         0         0         0         0         0        18        18         0 plan route
@@ -2864,6 +2941,7 @@ tunnel           3         0         0         0         0         0         0  
 tunnel           3         0         0         0         0         0         0     16384     29998         0         0         0 railway
 tunnel           3         0         0         0         0         0         0         0       256         0         0         0 water
 tunnel           3         0         0         0         0         0         0     16384     46171         0         0         0 mist
+tunnel           3         0         0         0         0         0         0         0         0         0         0         0 clouds
 tunnel           3         0         0         0         0         0         0     16384     27851         0         0         0 railway's tunnels
 tunnel           3         0         0         0         0         0         0     16384     27851         0         0         0 railway in its tunnels
 tunnel           3         0         0         0         0         0         0         0         0        18        18         0 plan route
@@ -2903,6 +2981,7 @@ tunnel           4         0         0         0         0         0         0  
 tunnel           4         0         0         0         0         0         0     16384    269647         0         0         0 trees
 tunnel           4         0         0         0         0         0         0         0      1024         0         0         0 water
 tunnel           4         0         0         0         0         0         0     16384     49569         0         0         0 mist
+tunnel           4         0         0         0         0         0         0         0         0         0         0         0 clouds
 tunnel           4         0         0         0         0         0         0     16384     30481         0         0         0 railway's tunnels
 tunnel           4         0         0         0         0         0         0     16384     30481         0         0         0 railway in its tunnels
 tunnel           4         0         0         0         0         0         0         0         0        18        18         0 plan route
@@ -2940,6 +3019,7 @@ tunnel           5         0         0         0         0         0         0  
 tunnel           5         0         0         0         0         0         0     16384    220678         0         0         0 trees
 tunnel           5         0         0         0         0         0         0         0      2304         0         0         0 water
 tunnel           5         0         0         0         0         0         0     16384     46408         0         0         0 mist
+tunnel           5         0         0         0         0         0         0         0         0         0         0         0 clouds
 tunnel           5         0         0         0         0         0         0     16384     23618         0         0         0 railway's tunnels
 tunnel           5         0         0         0         0         0         0     16384     23618         0         0         0 railway in its tunnels
 tunnel           5         0         0         0         0         0         0         0         0        18        18         0 plan route

@@ -3,6 +3,7 @@
 //! detail. See docs/generators.md.
 
 use std::cell::RefCell;
+use std::ops::Range;
 use std::sync::{Arc, OnceLock};
 
 use fcc::{FACE_KINDS, VOXEL_FACES};
@@ -15,6 +16,7 @@ use crate::noise::{Fixed, Fx, ONE, Rng, fixed, float, hash, hash_text, hash64};
 use crate::points::{Points, Spot};
 use crate::recent::Memo;
 use crate::sites;
+use crate::time;
 
 mod alone;
 mod drawables;

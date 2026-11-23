@@ -962,6 +962,19 @@ and without them rays slipped in at a cliff's corners.
   at coarse levels, out of the heights:
   fill to the world's bottom with `fill_below`.
 
+## Time
+
+A layer may read the time as it draws (`worldgen/src/time.rs`, a prototype):
+`time::drift(velocity)` is where what moves so has got to,
+which the valley's clouds take off where they read their cover
+(`worlds/src/valley/sky.rs`).
+Only layers may, where they draw:
+plans and things are kept from box to box, and would keep what they read.
+A moving layer's `meets` is where it may draw at any time, not only now:
+the bricks it says it draws nothing in stay always,
+and without a `meets` every brick it reaches moves.
+What it costs hosts is in [architecture.md](architecture.md), "Time".
+
 ## Open problems
 
 - **The forest's canopy from above drifts with the level.**

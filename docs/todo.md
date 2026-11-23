@@ -414,6 +414,57 @@ Numbers are for the forest at 1280×800, as measured when written.
   the track runs up to 30° off z past a building along it
   (`Station::frame` in `worlds/src/valley/railway.rs`).
 
+## Time
+
+The prototype of worlds that move (`worldgen/src/time.rs`;
+"Time" in `docs/architecture.md`): the valley's clouds.
+
+- **Tiles are made anew whole, and that is all that moving costs.**
+  A tile the clouds are in is made anew each tick they cross one of its sites,
+  all of it, and its changed bricks lit again,
+  of only the layers that drew in it or read the time (`Drew`):
+  a millisecond or so where only the clouds drew,
+  several where mountains rise into them at the coarse levels.
+  Making only the moving bricks of those (tried, generated alone) saved little:
+  the ground's layers cost by their columns, not their height.
+  What is left is the clouds' layer (its noise, its sites held in part) and their light.
+  To try: making anew only the bricks that changed,
+  which edits and physics would want too;
+  the valley keeping its clouds' cover by where the wind has carried it (`recent.rs`).
+- **The world, not the engine, decides what to make anew.**
+  It makes anew each tile of another time within an engine's reach and sight (`Sight`),
+  a cone round the way it looks: a coarse tile is wide, so looking up at the clouds it sees most.
+  Only the engine knows which show.
+  Tiles a finer level covers all over are made anew too (sparing them, tried, saved nothing measurable).
+  To try: a tile of another time counted as lacking, and the engines asking for it.
+- **Behind, tiles show different times.**
+  Clouds tear along tiles' faces, and between levels;
+  out of sight they wait, so turning shows them a moment as they were.
+- **Light does not move.**
+  The light's blocks and what Lights keep (`light/src/lib.rs`)
+  are made once, at time 0, and a tile made anew lights from them
+  what the old one had lit and changed:
+  a cloud's shadow stays where it fell.
+  Each needs the time it stays for, as tiles have.
+- **Only the voxels engine follows.**
+  The chunks engines bake a cell once its tiles are in, and keep it:
+  there the clouds stand still.
+  A chunk stays no longer than the tiles it reads (`chunk_reads`).
+  The web runs the same frames, with no threads: not looked at.
+  Nor has the voxels engine placing tiles made anew been looked at in a window,
+  only by its tests.
+- **Only drifting, and only by layers.**
+  `time::drift` is all that reads the time, and plans and things may not,
+  kept as they are from box to box:
+  a tree's crown in the wind is a thing.
+- **Time on its own lattice.**
+  Time is a parameter of the world, not a dimension of its lattice.
+  D4 (sites of space and time adding up to even, as FCC's do in space) would make it one:
+  only for what moves, as what stays would be made anew each step.
+- **The window never rests under clouds**:
+  it draws a frame every 60th of a second while any tile holds what moves.
+- **README's pictures of the valley are from before its clouds.**
+
 ## Light
 
 - **Light is a prototype, in look's pictures and native's computed lighting**

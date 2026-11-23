@@ -52,9 +52,10 @@ use fcc::ray::{CROSSING, FACES, nearest_site, over};
 use fcc::{GRID_LEVELS, Look};
 
 use worldgen::World;
-use worldgen::grid::{ALPHA, BRICK, COLOUR_ONE, GLOW_ONE, Grid, VoxelGrid};
+use worldgen::grid::{ALPHA, BRICK, COLOUR_ONE, GLOW_ONE, VoxelGrid};
 use worldgen::picture::Picture;
-use worldgen::tiles::{TILE, made_with, make_sites, parted};
+use worldgen::tiles::{Made as Tile, TILE, made_with, make_sites, make_tile, parted};
+use worldgen::time;
 
 type Rgb = [f32; 3];
 
@@ -280,11 +281,21 @@ impl Shared {
 
     /**
      * tiles' make_tiles, their sites kept for the Lights, or theirs if a
-     * Light made them: so what is drawn and lit is made once.
+     * Light made them: so what is drawn and lit is made once. A tile of
+     * them that does not stay for the time it is made at (time.rs) is made
+     * anew alone, and not kept: the light reads it where it was.
      */
-    pub fn make_tiles(&self, world: &World, level: u32, key: [i64; 3]) -> Vec<([i64; 3], Grid)> {
+    pub fn make_tiles(&self, world: &World, level: u32, key: [i64; 3]) -> Vec<Tile> {
         let made = self.made(world, level, key);
-        parted(made.sites.get_or_init(|| make_sites(world, level, key)), world, level, key)
+        let sites = made.sites.get_or_init(|| make_sites(world, level, key));
+        let now = |(key, grid, stays): Tile| {
+            if stays.contains(&time::now()) {
+                return (key, grid, stays);
+            }
+            let (grid, stays, _) = make_tile(world, level, key, None);
+            (key, grid, stays)
+        };
+        parted(sites, world, level, key).into_iter().map(now).collect()
     }
 
     /**

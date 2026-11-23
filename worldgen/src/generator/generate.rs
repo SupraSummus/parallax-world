@@ -1,8 +1,38 @@
 //! Generating a box of a world at a level: its fields' and its
 //! populations' things' drawables (forms.rs) drawn in order (drawables.rs);
-//! what a box holds throughout (`whole`, `shown`).
+//! what a box holds throughout (`whole`, `shown`); while when what each
+//! drew stays as drawn, where it may draw (`narrow`), and which layers
+//! drew or read the time (`Drew`).
 
 use super::*;
+
+/**
+ * The layers that drew in a box or read the time (time.rs) as they drew:
+ * one that did neither never draws there, whenever it is made, so the box
+ * made at another time is made of them only (`only`). Unless rock is kept
+ * under it (generate_shown): where it lies is found by layers that draw
+ * nothing over it.
+ */
+#[derive(Clone, Debug, PartialEq)]
+pub struct Drew(pub(crate) Arc<[&'static str]>);
+
+thread_local! {
+    /** The layers drawn on this thread, if not all (`only`). */
+    static ONLY: RefCell<Option<Drew>> = const { RefCell::new(None) };
+}
+
+/** Runs `make` drawing only the layers `drew` names, if any: all, if none. */
+pub fn only<R>(drew: Option<&Drew>, make: impl FnOnce() -> R) -> R {
+    let outer = ONLY.replace(drew.cloned());
+    let made = make();
+    ONLY.set(outer);
+    made
+}
+
+/** Whether `layer` is drawn (`only`). */
+fn drawn(layer: &Layer) -> bool {
+    ONLY.with_borrow(|only| only.as_ref().is_none_or(|Drew(names)| names.contains(&layer.name())))
+}
 
 /** The kinds' colours: of each, its shades, and their mean. */
 struct Palette {
@@ -75,7 +105,53 @@ const KIND_STEPS: u8 = 3;
  * grid may reach one site further in x (its rows start and end on an even x).
  */
 pub fn generate(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
-    made(generator, b, level, None)
+    timed(|| made(generator, b, level, None))
+}
+
+/**
+ * `make`, a grid made at the time made at (time.rs): what was read of the
+ * time while it was made but not by what it drew, which `made` narrows
+ * where each may draw, narrows all of it.
+ */
+fn timed(make: impl FnOnce() -> VoxelGrid) -> VoxelGrid {
+    let (mut grid, stays) = time::at(time::now(), make);
+    if stays != time::ALWAYS {
+        grid.narrow(&grid.clip(), &stays);
+    }
+    grid
+}
+
+/**
+ * Narrows while when what `group` drew stays as drawn to `stays`, in the
+ * bricks of `grid` (sites `s` apart) it may draw in at all: a field's as
+ * it says (Field::meets), which holds at every time as at every place, so
+ * a field that reads the time keeps only the bricks it may draw in from
+ * staying always; a thing's, all of `clip`.
+ */
+fn narrow(grid: &mut VoxelGrid, group: &[Drawable], clip: &Box3, s: i64, stays: &Range<i64>) {
+    /** Halves `b` (sites) till it is a brick or the field says it draws nothing there, or all of a kind, whatever the time. */
+    fn halves(grid: &mut VoxelGrid, field: &Field, b: Box3, s: i64, stays: &Range<i64>) {
+        if field.meets_in(&units_of(&b, s), s) != Meets::Any {
+            return;
+        }
+        let d = (0..3).max_by_key(|&d| b.max[d] - b.min[d]).expect("an axis");
+        if b.max[d] - b.min[d] <= BRICK {
+            grid.narrow(&b, stays);
+            return;
+        }
+        // At a brick's side: each box starts at one, as the grid's bricks do at its first site.
+        let middle = b.min[d] + ((b.max[d] - b.min[d] + BRICK - 1) / BRICK / 2) * BRICK;
+        let (mut low, mut high) = (b, b);
+        (low.max[d], high.min[d]) = (middle, middle);
+        halves(grid, field, low, s, stays);
+        halves(grid, field, high, s, stays);
+    }
+    for drawable in group {
+        match &drawable.draw {
+            Draw::Field(field) if field.meets.is_some() => halves(grid, field, *clip, s, stays),
+            _ => grid.narrow(clip, stays),
+        }
+    }
 }
 
 /** `generate`, nothing drawn under `floors`, if any: what is buried there is not made. */
@@ -100,6 +176,9 @@ fn made(generator: &Generator, b: &Box3, level: u32, floors: Option<&Floors>) ->
         }
     };
     let drawables = drawables_in(generator, &clip, s);
+    // Of the groups that read the time as they drew: where they are, and while when what they drew stays so. And the
+    // layers that drew or read it.
+    let (mut read_time, mut drew_in) = (Vec::new(), Vec::new());
     let mut at = 0;
     while at < drawables.len() {
         // A thing's drawables, together: those of fields one by one.
@@ -120,25 +199,44 @@ fn made(generator: &Generator, b: &Box3, level: u32, floors: Option<&Floors>) ->
             continue;
         }
         let carves = group.iter().any(|d| matches!(&d.draw, Draw::Shapes(shapes, _) if shapes.iter().any(|s| s.op == Op::Carve)));
-        let mut work = Work::default();
-        if !carves {
-            for drawable in group {
-                work.add(&draw(drawable, generator.seed, s, &clip, floors, &mut put));
+        let mut drew = false;
+        let mut put = |look: Look, op: Op, share: u32, pick: u32, x: i64, y: i64, z: i64| {
+            drew |= share > 0;
+            put(look, op, share, pick, x, y, z);
+        };
+        let (mut work, stays) = time::at(time::now(), || {
+            let mut work = Work::default();
+            if !carves {
+                for drawable in group {
+                    work.add(&draw(drawable, generator.seed, s, &clip, floors, &mut put));
+                }
+            } else {
+                // It cuts only itself: drawn aside, then over the world.
+                let mut own = Own::new(&thing_box(group, s).intersect(&clip));
+                for drawable in group {
+                    work.add(&draw(drawable, generator.seed, s, &clip, floors, &mut |look, op, share, pick, x, y, z| {
+                        own.put(look, op, share, pick, x, y, z)
+                    }));
+                }
+                own.each(&mut put);
             }
-        } else {
-            // It cuts only itself: drawn aside, then over the world.
-            let mut own = Own::new(&thing_box(group, s).intersect(&clip));
-            for drawable in group {
-                work.add(&draw(drawable, generator.seed, s, &clip, floors, &mut |look, op, share, pick, x, y, z| {
-                    own.put(look, op, share, pick, x, y, z)
-                }));
-            }
-            own.each(&mut put);
+            work
+        });
+        if drew || stays != time::ALWAYS {
+            drew_in.push(group[0].layer);
+        }
+        if stays != time::ALWAYS {
+            read_time.push((at - group.len()..at, stays));
         }
         if thing != 0 {
             work.largest = work.tests;
         }
         cost::add(group[0].layer, work);
+    }
+    drew_in.dedup();
+    grid.drew = Some(Drew(drew_in.into()));
+    for (group, stays) in read_time {
+        narrow(&mut grid, &drawables[group], &clip, s, &stays);
     }
     grid
 }
@@ -436,7 +534,7 @@ fn drawables_in<'a>(generator: &'a Generator, clip: &Box3, s: i64) -> Vec<Drawab
     let units = sites.widen(2 * s);
     let mut drawables = Vec::new();
     let mut things = 0;
-    for layer in &generator.layers {
+    for layer in generator.layers.iter().filter(|layer| drawn(layer)) {
         let population = match layer {
             Layer::Field(field) => {
                 // Asked where it may draw line by line (draw_field).
@@ -527,7 +625,7 @@ pub enum Whole {
 pub fn whole(generator: &Generator, b: &Box3, level: u32) -> Option<Whole> {
     let s = 1i64 << level;
     let units = units_of(&b.widen(1), s);
-    let mut layers: Vec<&Layer> = generator.layers.iter().collect();
+    let mut layers: Vec<&Layer> = generator.layers.iter().filter(|layer| drawn(layer)).collect();
     let key = |layer: &Layer| match layer {
         Layer::Field(f) => (f.order, f.name),
         Layer::Population(p) => (p.order, p.name),
@@ -597,6 +695,11 @@ pub fn shown(generator: &Generator, b: &Box3, level: u32, up: usize) -> Box3 {
  * checking a box made whole against its parts.
  */
 pub fn generate_shown(generator: &Generator, b: &Box3, level: u32, up: usize) -> VoxelGrid {
+    timed(|| shown_grid(generator, b, level, up))
+}
+
+/** `generate_shown`, but what it read of the time outside what it drew. */
+fn shown_grid(generator: &Generator, b: &Box3, level: u32, up: usize) -> VoxelGrid {
     let part = shown(generator, b, level, up);
     let under = b.slab(up, b.min[up], part.min[up]);
     let rock = match whole(generator, &under, level) {
@@ -609,6 +712,7 @@ pub fn generate_shown(generator: &Generator, b: &Box3, level: u32, up: usize) ->
     let under = floors.kind.map(|_| &floors);
     let mut grid = if part.min[up] < part.max[up] { made(generator, &all, level, under) } else { VoxelGrid::new(&all) };
     if let Some(kind) = floors.kind {
+        grid.drew = None;
         let s = 1i64 << level;
         let colour = Palette::new(&generator.kinds, generator.seed).colour(kind, s, b.min.map(|v| v * s));
         grid.on_rock(up, |site| floors.floor(site), colour.map(|c| c as u16));

@@ -87,6 +87,9 @@ each level of detail reaches twice as far as the one before, to 11 km.
   Mountain ranges along both sides: crests, peaks and passes, side valleys,
   arêtes and cirques behind the crests,
   meadows and scree above the treeline, snow in high hollows.
+  Clouds about the high summits, which the wind drives
+  in the native frontend's voxels engine, and nowhere else yet
+  ([architecture.md](architecture.md), "Time").
   Past a few kilometres of them the land leaves the ranges:
   west, a lowland falling to the sea, its coast ragged with bays and islands;
   east, an upland under the treeline, moor and forest.

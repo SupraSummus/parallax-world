@@ -57,7 +57,7 @@ use crate::eye::{self, Adapted, BINS};
 use crate::gpu::Easel;
 use crate::threads::Post;
 use crate::view::{Vec3, focal_length, view_basis};
-use crate::world::{Level, Lit, Piece, TILE, Tile, TileId, Wants, World};
+use crate::world::{Level, Lit, Piece, Sight, TILE, Tile, TileId, Wants, World};
 
 /** A level's window, in bricks a side (a power of two: the table is a torus). */
 const WINDOW: i32 = 64;
@@ -130,6 +130,12 @@ fn reach(level: usize, radius: i32, far: f64) -> f64 {
     (reach_of(radius) * (1u64 << level) as f64).min(far)
 }
 
+/** What rays see of `look`: as far off the way it looks as its picture's corners. */
+fn sight(look: &Look) -> Sight {
+    let [width, height] = look.size;
+    Sight { forward: view_basis(look.yaw, look.pitch)[2], half: (width.hypot(height) / 2.0 / focal_length(look.fov, width, height)).atan() }
+}
+
 /** How many levels rays read to reach `far`: up to the first that does, or all. */
 fn levels(far: f64) -> usize {
     (0..GRID_LEVELS).find(|&l| reach(l, RADIUS, far) >= far).map_or(GRID_LEVELS, |l| l + 1)
@@ -156,7 +162,7 @@ fn cell_entry(k: [i32; 3], j: usize) -> usize {
  * do, modulo BRICK), and where its sites start in the grid's cells, in
  * bricks.
  */
-fn bricks(grid: &fcc::Grid) -> impl Iterator<Item = (usize, [i32; 3], usize)> + '_ {
+pub fn bricks(grid: &fcc::Grid) -> impl Iterator<Item = (usize, [i32; 3], usize)> + '_ {
     let count = grid.n.map(|v| (v + BRICK - 1) / BRICK);
     grid.bricks.iter().enumerate().filter(|b| *b.1 >= 0).map(move |(place, &first)| {
         let b = place as i32;
@@ -432,7 +438,7 @@ impl Engine for Voxels {
         let (asked, painted) = (self.asked.0.clone(), self.busy.clone());
         Frame {
             picture: Box::new(Scene { levels, look: *look, asked, busy: painted }),
-            wants: Wants { reach, lit, asked: self.pieces.clone() },
+            wants: Wants { reach, lit, asked: self.pieces.clone(), sight: Some(sight(look)) },
             busy: busy || !same,
             stats: format!("{tiles} tiles"),
         }
@@ -670,6 +676,13 @@ struct Held {
     slots: Vec<(i32, u32)>,
 }
 
+impl Held {
+    /** `tile`, none of its bricks in a slot yet. */
+    fn new(tile: &Arc<Tile>) -> Held {
+        Held { tile: tile.clone(), slots: vec![(EMPTY, 0); tile.grid.cells.len() / BRICK_SITES] }
+    }
+}
+
 /**
  * A level's window as the GPU holds it: from which tiles, the ball of
  * bricks it holds of them, its table (per brick a slot, EMPTY or UNKNOWN:
@@ -830,7 +843,7 @@ impl Window {
      * the ball, gone or (once none is) the nearest new: what it places
      * is a shell of the ball and those tiles', however fast the eye or
      * many the tiles. Rays take the next level for what is still UNKNOWN; a tile
-     * gone is held till its step. A ball that holds nothing around the eye
+     * gone is held till its step, and one made anew placed in it. A ball that holds nothing around the eye
      * starts anew there, the window as made (clear).
      */
     fn retarget(&mut self, level: usize, tiles: &Arc<Level>, eye: Vec3, read: bool, radius: i32, pool: &mut Pool) -> Vec<[i32; 3]> {
@@ -872,10 +885,20 @@ impl Window {
                 self.tiles.remove(&id);
             } else if steps > 0 {
                 steps -= 1;
+                // One made anew (World::now) takes its place in the same step, what showed of the old placed of it as
+                // if rays asked for it (ripe's, once lit): else rays would read the next level there till they ask.
+                let anew = tiles.tiles.get(id).is_some();
                 for b in in_ball(tile_bricks(id, origin), ball, None) {
+                    if anew && self.table[entry(b)] >= 0 {
+                        self.asked.push(b);
+                    }
                     self.release(b, AROUND, pool);
                 }
                 self.tiles.remove(&id);
+                if let Some(tile) = tiles.tiles.get(id) {
+                    self.tiles.insert(id, Held::new(tile));
+                    pending.extend(in_ball(tile_bricks(id, origin), ball, None));
+                }
             } else {
                 left += 1;
             }
@@ -894,7 +917,7 @@ impl Window {
                 }
                 steps -= 1;
             }
-            self.tiles.insert(id, Held { tile: tile.clone(), slots: vec![(EMPTY, 0); tile.grid.cells.len() / BRICK_SITES] });
+            self.tiles.insert(id, Held::new(tile));
             pending.extend(in_ball(tile_bricks(id, origin), ball, None));
         }
         // Tiles still to change: it is behind, and steps again.
