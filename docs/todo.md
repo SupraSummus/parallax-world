@@ -142,8 +142,10 @@ Numbers are for the forest at 1280×800, as measured when written.
 - **Layers that don't say where they are are drawn everywhere**
   (`Field::meets`, `Population::stands`):
   the city's buildings, and the towns', landmarks', settlements' and steadings' things.
-  What the railway, the moor and the learned settlements draw by their shares too:
+  What the moor and the learned settlements draw by their shares too:
   they don't bound their bids (`Scalar::new`), so their shares may be anywhere.
+  The moor's needs the range of the terrain's height over a rectangle:
+  sampled with the valley's slope, a range is either loose or dear.
   Saying so is for speed, not simplicity:
   a promise per layer says again what `heights` says once.
   The railway's piers can't yet: a bridge has no greatest height,
@@ -176,6 +178,10 @@ Numbers are for the forest at 1280×800, as measured when written.
   most of a bid is the terrain, which the ground makes there anyway;
   level 0 took a tenth less, level 6 a quarter more,
   as things read the land at a point, four samples each.
+  Bids that surely leave no share of a square of columns need not be made there,
+  nor every bid's bounds each time a layer asks a share over a box (`Land::over`):
+  kept by square, both took level 0 about 5 % fewer instructions (tried before `Scalar`),
+  little of it the bids, as the moor bids everywhere.
 - **Claims cost coarse tiles most.**
   At level 8 a column's ground costs some 24,000 instructions,
   mostly the moor's pools and steadings near it:

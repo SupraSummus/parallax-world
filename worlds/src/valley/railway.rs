@@ -414,15 +414,19 @@ impl Line {
     }
 
     /**
-     * Whether column (x, z) may be within `r` of the line: across from
-     * the course, the line keeps to its band, and runs across z less than
-     * 1 in 1 (SLANT), so a column further across from the band than 1½ r
-     * (and a unit for rounding each) is further than r from it.
+     * Whether any of columns `min` to `max` (x, z), inclusive, may be
+     * within `r` of the line: across from the course, the line keeps to
+     * its band, and runs across z less than 1 in 1 (SLANT), so a column
+     * further across from the band than 1½ r is further than r from it.
+     * Over their rows the course runs across z at most COURSE_SLOPE; a
+     * unit more for rounding.
      */
-    fn may_reach(&self, x: i64, z: i64, r: i64) -> bool {
-        let across = self.ends.side * self.ends.terrain.course.across(x, z).round_units().0;
+    fn may_reach(&self, min: [i64; 2], max: [i64; 2], r: i64) -> bool {
+        let middle = min[1] + (max[1] - min[1]) / 2;
+        let (x, off) = (self.ends.terrain.course.x(middle), Units((COURSE_SLOPE * (max[1] - middle) as f64) as i64 + 1).to_fx());
+        let across = [Units(min[0]).to_fx() - x - off, Units(max[0]).to_fx() - x + off].map(|a| a * self.ends.side);
         let most = r + r / 2 + 2;
-        INNER - most < across && across < OUTER + most
+        Units(INNER - most).to_fx() < across[0].max(across[1]) && across[0].min(across[1]) < Units(OUTER + most).to_fx()
     }
 
     /**
@@ -433,7 +437,7 @@ impl Line {
      */
     fn near(&self, x: i64, z: i64, margin: i64) -> Option<(i64, &Piece, Near<2>)> {
         let most = REACH + margin;
-        if !self.may_reach(x, z, most) {
+        if !self.may_reach([x, z], [x, z], most) {
             return None;
         }
         let p = [Units(x).to_fx(), Units(z).to_fx()];
@@ -591,7 +595,7 @@ impl Railway {
 
     /** What column (x, z) is to the line, kept; columns surely out of its reach turned away before any plan is read. */
     fn at(&self, x: i64, z: i64) -> Option<At> {
-        if !self.line.may_reach(x, z, REACH) {
+        if !self.line.may_reach([x, z], [x, z], REACH) {
             return None;
         }
         self.at.at(x, z)
@@ -623,17 +627,25 @@ impl Railway {
 }
 
 impl Railway {
-    /** Its bid for the land, a scalar of columns (`bid_at`, unbounded). */
+    /** Its bid for the land, a scalar of columns (`bid_at`): surely the least away from the line (`Line::may_reach`). */
     pub fn bid(self: &Arc<Self>) -> Scalar {
-        let at = self.clone();
-        of_columns(move |x, z| at.bid_at(x, z), |_, _| (Fx::MIN, Fx::MAX))
+        let (at, line) = (self.clone(), self.line.clone());
+        of_columns(move |x, z| at.bid_at(x, z), move |min, max| (-MOST, if line.may_reach(min, max, REACH) { MOST } else { -MOST }))
     }
 
     /** Ahead over its formation and a little either side, but over a tunnel. */
     fn bid_at(&self, x: i64, z: i64) -> Fx {
-        let most = fx(4.0);
-        let Some(a) = self.at(x, z).filter(|a| a.structure != Structure::Tunnel) else { return -most };
-        ((Units(a.half + m(2.0)).to_fx() - a.distance) * most / Units::m(2.0)).clamp(-most, most)
+        let Some(a) = self.at(x, z).filter(|a| a.structure != Structure::Tunnel) else { return -MOST };
+        ((Units(a.half + m(2.0)).to_fx() - a.distance) * MOST / Units::m(2.0)).clamp(-MOST, MOST)
+    }
+
+    /** One within reach of the line (`at`), none further: all it draws is there, bridges and tunnels too. */
+    fn reach(self: &Arc<Self>) -> Scalar {
+        let (at, line) = (self.clone(), self.line.clone());
+        of_columns(
+            move |x, z| if at.at(x, z).is_some() { Fx::ONE } else { Fx::ZERO },
+            move |min, max| (Fx::ZERO, if line.may_reach(min, max, REACH) { Fx::ONE } else { Fx::ZERO }),
+        )
     }
 
     /** Its tunnels' bores, its track, bridges and platforms where it owns the land, its stations. */
@@ -641,6 +653,9 @@ impl Railway {
         layers(self, hold, ground.clone())
     }
 }
+
+/** The most the railway bids, and as much behind. */
+const MOST: Fx = fx(4.0);
 
 impl Pull for Railway {
     /**
@@ -660,6 +675,7 @@ impl Pull for Railway {
 }
 
 fn layers(railway: Arc<Railway>, hold: Scalar, ground: Arc<Sloped>) -> Vec<Layer> {
+    let reach = railway.reach();
     // The track's top by row, rising under a unit a column (GRADE): a bore is over it, within BORE across.
     let top = {
         let line = railway.line.clone();
@@ -674,6 +690,7 @@ fn layers(railway: Arc<Railway>, hold: Scalar, ground: Arc<Sloped>) -> Vec<Layer
             };
             vec![Span::solid(at.top + 1, at.top + 1 + arch(at.distance.floor_units().0), 0)]
         })
+        .within(reach.clone(), 0)
         .about(top, m(1.0), arch(0) + m(1.0))
     };
     let seed = railway.line.surfaces;
@@ -749,6 +766,7 @@ fn layers(railway: Arc<Railway>, hold: Scalar, ground: Arc<Sloped>) -> Vec<Layer
             }
             spans
         })
+        .within(reach.clone(), 0)
         // A tunnel's lining is the highest over the track; a bridge's piers stand on the ground, anywhere under it.
         .about(top, mountains::HEIGHTS.1 - mountains::HEIGHTS.0, arch(0) + LINING + 2)
     };
@@ -759,6 +777,7 @@ fn layers(railway: Arc<Railway>, hold: Scalar, ground: Arc<Sloped>) -> Vec<Layer
             .reach(STATION_REACH)
             .anchor_along(1, move |cells| anchor.station_near(cells.centre[0], cells.centre[1]).map(|s| s.centre().map(|v| v as f64)))
             .make(move |_, c| line.station_near(c.centre[0], c.centre[2]).map(|s| building(&s)))
+            .within(reach.clone(), 0)
     };
     vec![
         Layer::Field(bores),
