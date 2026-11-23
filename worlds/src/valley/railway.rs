@@ -1,6 +1,6 @@
 //! The railway: a main line along the valley, on one side of it, past
 //! the towns and their farmland, with a station by each town it passes on
-//! the ground. A domain of the valley (valley.rs) that reads only the
+//! the ground. A part of the valley (valley.rs) that reads only the
 //! valley's ground before it shapes it (`valley::Terrain`): it bids for
 //! the land along its line, cuts and fills the ground to its track, and
 //! draws its track, bridges, tunnels and stations. See "Railway" in
@@ -25,15 +25,17 @@ use std::sync::Arc;
 
 use ground::FieldAbout;
 use ground::column::Column;
-use ground::domain::{Domain, Scope};
-use ground::plan::{Holding, Large, Plan, Sloped};
+use ground::land::{Columns, Pull, of_columns};
+use ground::plan::{Large, Plan, Sloped};
 use worldgen::build::thick;
 use worldgen::curve::{self, Curve, Near};
 use worldgen::frame::{Frame, Part, facing};
 use worldgen::generator::{Kind, Layer, Node, Op, Population, Span};
 use worldgen::js;
 use worldgen::kinds;
-use worldgen::noise::{Fx, Rng, fx, hash, hash64, smoothstep};
+use worldgen::land::owns;
+use worldgen::noise::{Fx, Rng, Scope, fx, hash, hash64, smoothstep};
+use worldgen::scalar::Scalar;
 use worldgen::sites;
 use worldgen::units::{Units, m};
 
@@ -620,20 +622,33 @@ impl Railway {
     }
 }
 
-impl Domain for Railway {
+impl Railway {
+    /** Its bid for the land, a scalar of columns (`bid_at`, unbounded). */
+    pub fn bid(self: &Arc<Self>) -> Scalar {
+        let at = self.clone();
+        of_columns(move |x, z| at.bid_at(x, z), |_, _| (Fx::MIN, Fx::MAX))
+    }
+
     /** Ahead over its formation and a little either side, but over a tunnel. */
-    fn bid(&self, x: i64, z: i64) -> Fx {
+    fn bid_at(&self, x: i64, z: i64) -> Fx {
         let most = fx(4.0);
         let Some(a) = self.at(x, z).filter(|a| a.structure != Structure::Tunnel) else { return -most };
         ((Units(a.half + m(2.0)).to_fx() - a.distance) * most / Units::m(2.0)).clamp(-most, most)
     }
 
+    /** Its tunnels' bores, its track, bridges and platforms where it owns the land, its stations. */
+    pub fn layers(self: Arc<Self>, ground: &Arc<Sloped>, hold: Scalar) -> Vec<Layer> {
+        layers(self, hold, ground.clone())
+    }
+}
+
+impl Pull for Railway {
     /**
      * Cut or filled to the track: level with it across the formation,
      * sloping from its edges, and round a bridge's ends under it as far as
      * its sides reach, which meet the ground there, not end in a wall.
      */
-    fn shape(&self, x: i64, z: i64, ground: Fx) -> Option<(Fx, Fx)> {
+    fn pull(&self, x: i64, z: i64, ground: Fx) -> Option<(Fx, Fx)> {
         let (at, beyond) = self.at(x, z).and_then(|a| Some((a, a.beyond?)))?;
         let top = Units(at.top).to_fx();
         let out = (at.distance - Units(at.half).to_fx()).max(Fx::ZERO).hypot(beyond);
@@ -642,14 +657,9 @@ impl Domain for Railway {
         let sides = Units(SIDES).to_fx();
         Some((ground.clamp(top - slope, top + slope), Fx::ONE - smoothstep(sides * 2 / 3, sides, out)))
     }
-
-    /** Its tunnels' bores, its track, bridges and platforms where it owns the land, its stations. */
-    fn layers(self: Arc<Self>, ground: &Arc<Sloped>, hold: Holding) -> Vec<Layer> {
-        layers(self, hold, ground.clone())
-    }
 }
 
-fn layers(railway: Arc<Railway>, hold: Holding, ground: Arc<Sloped>) -> Vec<Layer> {
+fn layers(railway: Arc<Railway>, hold: Scalar, ground: Arc<Sloped>) -> Vec<Layer> {
     // The track's top by row, rising under a unit a column (GRADE): a bore is over it, within BORE across.
     let top = {
         let line = railway.line.clone();
@@ -705,7 +715,7 @@ fn layers(railway: Arc<Railway>, hold: Holding, ground: Arc<Sloped>) -> Vec<Laye
                     }
                 }
                 // The formation beside the ballast, or a platform at a station; where the railway owns it.
-                Structure::Earth if !within(BALLAST) && within(at.half) && hold.owns(x, z) => {
+                Structure::Earth if !within(BALLAST) && within(at.half) && owns(hold.column(x, z)) => {
                     if at.platform && !within(PLATFORM) && within(BUILDING_FROM) {
                         spans.extend(Column::new(top + PLATFORM_HIGH).surface(T::slab, PLATFORM_HIGH + m(0.5)).spans());
                     } else if within(FORMATION) || at.platform {
@@ -852,7 +862,7 @@ mod tests {
         for seed in [42, 1, 2, 3] {
             let (railway, terrain) = railway(seed);
             let added =
-                |x: i64, z: i64| railway.shape(x, z, terrain.ground(x, z)).map_or(Fx::ZERO, |(to, w)| (to - terrain.ground(x, z)) * w);
+                |x: i64, z: i64| railway.pull(x, z, terrain.ground(x, z)).map_or(Fx::ZERO, |(to, w)| (to - terrain.ground(x, z)) * w);
             let mut ends = 0;
             for k in 0.. {
                 if ends >= 6 {

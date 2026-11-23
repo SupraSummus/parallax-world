@@ -1,6 +1,6 @@
 //! The learned town: the forest, with settlements along its path drawn by
 //! a split grammar learned from the valley's towns seen from above (lab/,
-//! grammar.rs), not written. See "Learned domains" in docs/generators.md.
+//! grammar.rs), not written. See "Learned parts" in docs/generators.md.
 //!
 //! The grammar is a table of rules (data/town-grammar.bin, written by
 //! lab's `export` example): rectangles of the towns' parses, each of a
@@ -13,7 +13,7 @@
 //! leaf: its ground and, if it was mostly built, its house's box. Integers
 //! only; a settlement is a function of its site, drawn once and kept.
 //!
-//! What the grammar draws becomes a domain on the forest's land, as the
+//! What the grammar draws becomes a part on the forest's land, as the
 //! valley's towns are: streets, paving and yards are the town's, painted
 //! over the ground it levels; leaves of fields are the fields' (fields.rs);
 //! canopy and texture rules (no town, not fields) are the forest's; houses
@@ -24,14 +24,16 @@ use std::sync::{Arc, OnceLock};
 
 use ground::FieldAbout;
 use ground::column::Column;
-use ground::domain::{Domain, Lie, Scope, compose, eased};
-use ground::plan::{Claims, Holding, Plan, Sloped};
+use ground::land::{Columns, Lie, Pull, eased, of_columns, shares};
+use ground::plan::{Claims, Plan, Sloped};
 use worldgen::Entry;
 use worldgen::frame::{Frame, Part, U, V, W, back};
 use worldgen::generator::{ANY_SIZE, Child, Children, Generator, Layer, Node, Op, Population, Shapes};
 use worldgen::grid::Box3;
-use worldgen::noise::{Fx, Rng, ease_towards, fx, hash64};
+use worldgen::land::owns;
+use worldgen::noise::{Fx, Rng, Scope, ease_towards, fx, hash64};
 use worldgen::recent::Memo;
+use worldgen::scalar::Scalar;
 use worldgen::units::{Units, m};
 use worldgen::world::{Find, World};
 
@@ -473,20 +475,28 @@ impl Settlements {
     }
 }
 
-/** The town the grammar draws, a domain: its streets, paving and yards, outright, levelled under. */
-impl Domain for Settlements {
-    fn bid(&self, x: i64, z: i64) -> Fx {
+/** The town the grammar draws: its streets, paving and yards, outright, levelled under. */
+impl Settlements {
+    /** Its bid for the land, a scalar of columns (`bid_at`, unbounded). */
+    pub fn bid(self: &Arc<Self>) -> Scalar {
+        let at = self.clone();
+        of_columns(move |x, z| at.bid_at(x, z), |_, _| (Fx::MIN, Fx::MAX))
+    }
+
+    fn bid_at(&self, x: i64, z: i64) -> Fx {
         if self.spot(x, z).town() { Fx::ONE } else { -Fx::ONE }
     }
 
-    /** To the settlement's streets under its crop, easing back over TERRACE. */
-    fn shape(&self, x: i64, z: i64, _: Fx) -> Option<(Fx, Fx)> {
-        self.near(z).and_then(|s| eased(Units(s.level).to_fx(), TERRACE, s.distance(x, z)))
-    }
-
     /** Its streets, paving and yards where it owns the land, and its settlements' houses. */
-    fn layers(self: Arc<Self>, ground: &Arc<Sloped>, hold: Holding) -> Vec<Layer> {
+    pub fn layers(self: Arc<Self>, ground: &Arc<Sloped>, hold: Scalar) -> Vec<Layer> {
         town_layers(self, hold, ground.clone())
+    }
+}
+
+impl Pull for Settlements {
+    /** To the settlement's streets under its crop, easing back over TERRACE. */
+    fn pull(&self, x: i64, z: i64, _: Fx) -> Option<(Fx, Fx)> {
+        self.near(z).and_then(|s| eased(Units(s.level).to_fx(), TERRACE, s.distance(x, z)))
     }
 }
 
@@ -510,14 +520,20 @@ pub fn learned(seed: u64) -> World {
     let spawn = forest::on_path(&ground, &path, m(-31.0), m(3.0));
     // What the grammar drew bids for each column, outright: canopy and texture, no town and not fields, the forest's, which
     // bids nothing.
-    let fields = {
+    let fields_bid = {
         let settlements = settlements.clone();
-        let bid = Box::new(move |x, z| if settlements.spot(x, z) == Spot::Fields { Fx::ONE } else { -Fx::ONE });
-        Fields::new(world.of("fields"), path.clone(), (bid, Box::new(|_, _| (-Fx::ONE, Fx::ONE))))
+        of_columns(move |x, z| if settlements.spot(x, z) == Spot::Fields { Fx::ONE } else { -Fx::ONE }, |_, _| (-Fx::ONE, Fx::ONE))
     };
-    let forest = Forest::new(world.of("forest"), path, spawn);
-    let domains: [Arc<dyn Domain>; 3] = [Arc::new(forest), settlements, Arc::new(fields)];
-    let layers = compose(&domains, &ground, SPOT_SCALE, fx(0.125));
+    let [on_forest, on_settlements, on_fields] = shares("land", SPOT_SCALE, fx(0.125), [Forest::bid(), settlements.bid(), fields_bid]);
+    let forest = Forest::new(world.of("forest"), path.clone(), spawn);
+    let layers = [
+        forest.layers(&ground, on_forest),
+        settlements.clone().layers(&ground, on_settlements),
+        Fields::new(world.of("fields"), path).layers(&ground, on_fields),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
     let kinds = [forest::KINDS, town::KINDS, crate::valley::fields::KINDS].concat();
     let first: Find = Box::new(move || first.near(FIRST).map(|s| [s.x, s.level, s.z]).expect("the first settlement"));
     World {
@@ -529,13 +545,13 @@ pub fn learned(seed: u64) -> World {
 }
 
 /** The town's layers: its streets, paving and yards where it owns the land, and its settlements' houses. */
-fn town_layers(settlements: Arc<Settlements>, hold: Holding, ground: Arc<Sloped>) -> Vec<Layer> {
+fn town_layers(settlements: Arc<Settlements>, hold: Scalar, ground: Arc<Sloped>) -> Vec<Layer> {
     let surface = {
         let (settlements, ground) = (settlements.clone(), ground.clone());
         let on = ground.clone();
         ground::columns("learned streets", 0.5, Op::Paint, move |x, z| {
             let spot = settlements.spot(x, z);
-            if !spot.town() || !hold.owns(x, z) {
+            if !spot.town() || !owns(hold.column(x, z)) {
                 return Vec::new();
             }
             let h = ground.at(x, z);

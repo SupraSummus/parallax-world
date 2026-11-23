@@ -1,5 +1,5 @@
 //! Plans: what is where, decided column by column (x, z), each at a
-//! scale and from coarser ones only; and land that domains bid for.
+//! scale and from coarser ones only.
 //! See "Composing" in docs/generators.md.
 
 use std::cell::{Cell, UnsafeCell};
@@ -7,7 +7,7 @@ use std::mem::MaybeUninit;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use worldgen::noise::{Fixed, Fx, Rng, hash64, smoothstep};
+use worldgen::noise::{Fixed, Fx, Rng, hash64};
 use worldgen::sites::{read_for, spacing, where_asked};
 
 use crate::DOCS;
@@ -373,168 +373,6 @@ impl Plan<Fx> {
     }
 }
 
-/** The most domains a land is shared by. */
-pub const DOMAINS: usize = 6;
-
-/**
- * Domains' shares of a column, fractions adding up to one, and the one
- * with the most. Kept in every slot of the land's plan, so small: a
- * share is its `Fx`'s bits, which fit in 32 for a fraction.
- */
-#[derive(Clone, Copy, Default)]
-struct Shares {
-    share: [i32; DOMAINS],
-    winner: u8,
-}
-
-/**
- * A domain's bid for column (x, z), a fraction: read once a column, by
- * the land's plan, so it reads only plans as coarse as the land's.
- */
-pub type Bid = Box<dyn Fn(i64, i64) -> Fx + Send + Sync>;
-
-/** The least and the most a domain bids over columns `min` to `max` (x, z), inclusive: a rule (Domain::bids). */
-pub type Bids = Box<dyn Fn([i64; 2], [i64; 2]) -> (Fx, Fx) + Send + Sync>;
-
-/**
- * Land shared by domains that never see each other: each bids for every
- * column, and gets a share by how far it outbids the best of the rest:
- * all of it `width` ahead, none as far behind, eased between. Whatever
- * the domains propose for a column (heights, densities) blends by these
- * shares.
- */
-pub struct Land {
-    shares: Plan<Shares>,
-    width: Fx,
-    /** Each domain's bids over a rectangle. */
-    ranges: Vec<Bids>,
-}
-
-impl Land {
-    /**
-     * Land of domains bidding as they say, for a column and over
-     * rectangles, in that order (their indices, see `holding`), decided at
-     * `scale`.
-     */
-    pub fn new(scale: i64, width: Fx, bidding: Vec<(Bid, Bids)>) -> Land {
-        assert!(bidding.len() <= DOMAINS, "a land holds at most {DOMAINS} domains; see \"Composing\" in {DOCS}");
-        let (bids, ranges): (Vec<Bid>, Vec<Bids>) = bidding.into_iter().unzip();
-        Land {
-            width,
-            ranges,
-            shares: Plan::dithered("land", scale, move |x, z| {
-                let mut bid = [Fx::MIN; DOMAINS];
-                for (d, of) in bids.iter().enumerate() {
-                    bid[d] = of(x, z);
-                }
-                let mut raw = [Fx::ZERO; DOMAINS];
-                for d in 0..bids.len() {
-                    let rest = (0..bids.len()).filter(|e| *e != d).map(|e| bid[e]).max().unwrap_or(Fx::from_bits(Fixed::MIN / 2));
-                    raw[d] = smoothstep(-width, width, bid[d].saturating_sub(rest));
-                }
-                // The best bid is ahead of the rest or level with them, so the sum is at least a half.
-                let sum: Fx = raw.into_iter().sum();
-                let share = raw.map(|r| r / sum);
-                let winner = (0..bids.len()).max_by_key(|d| (share[*d], -(*d as i64))).unwrap_or(0) as u8;
-                Shares { share: share.map(|s| s.to_bits() as i32), winner }
-            }),
-        }
-    }
-
-    /** Domain `d`'s share of column (x, z), a fraction. */
-    fn share(&self, d: usize, x: i64, z: i64) -> Fx {
-        Fx::from_bits(self.shares.at(x, z).share[d].into())
-    }
-
-    /** Whether domain `d` has the most of column (x, z): the first of those with the most. */
-    fn owns(&self, d: usize, x: i64, z: i64) -> bool {
-        self.shares.at(x, z).winner as usize == d
-    }
-
-    /**
-     * Whether domain `d` may have any of columns `min` to `max` (x, z),
-     * inclusive: unless the most it bids there is `width` behind the
-     * least some other bids, where its share is none.
-     */
-    fn may(&self, d: usize, min: [i64; 2], max: [i64; 2]) -> bool {
-        let rest = self.ranges.iter().enumerate().filter(|(e, _)| *e != d).map(|(_, bids)| bids(min, max).0).max();
-        (self.ranges[d])(min, max).1.saturating_sub(rest.unwrap_or(Fx::MIN)) > -self.width
-    }
-
-    /** Domain `d`'s hold on it. */
-    pub fn holding(self: &Arc<Self>, d: usize) -> Holding {
-        Holding(Some((self.clone(), d)))
-    }
-}
-
-/** A domain's hold on land: its share of each column, and whether it owns it; or all of every column, holding none shared. */
-#[derive(Clone)]
-pub struct Holding(Option<(Arc<Land>, usize)>);
-
-impl Holding {
-    /** All of every column. */
-    pub fn all() -> Holding {
-        Holding(None)
-    }
-
-    /** Its share of column (x, z), a fraction. */
-    pub fn share(&self, x: i64, z: i64) -> Fx {
-        self.0.as_ref().map_or(Fx::ONE, |(land, d)| land.share(*d, x, z))
-    }
-
-    /** Whether it has the most of column (x, z). */
-    pub fn owns(&self, x: i64, z: i64) -> bool {
-        self.0.as_ref().is_none_or(|(land, d)| land.owns(*d, x, z))
-    }
-
-    /** Where it may have any share: what draws by it draws nothing elsewhere. */
-    pub fn region(&self) -> Region {
-        match &self.0 {
-            None => Region::everywhere(),
-            Some((land, d)) => {
-                let (land, d) = (land.clone(), *d);
-                Region::new(move |min, max| land.may(d, min, max))
-            }
-        }
-    }
-}
-
-/**
- * Where something may be, by rectangles of columns: whether any of
- * columns `min` to `max` (x, z), inclusive, may hold it. A rule: what is
- * drawn within it draws nothing over a rectangle it says can't (`Within`).
- */
-#[derive(Clone)]
-pub struct Region(Arc<dyn Fn([i64; 2], [i64; 2]) -> bool + Send + Sync>);
-
-impl Region {
-    pub fn new(may: impl Fn([i64; 2], [i64; 2]) -> bool + Send + Sync + 'static) -> Region {
-        Region(Arc::new(may))
-    }
-
-    /** Every column. */
-    pub fn everywhere() -> Region {
-        Region::new(|_, _| true)
-    }
-
-    /** Whether any of columns `min` to `max` (x, z), inclusive, may hold it. */
-    pub fn may(&self, min: [i64; 2], max: [i64; 2]) -> bool {
-        (self.0)(min, max)
-    }
-
-    /** Where both may be. */
-    pub fn and(&self, other: &Region) -> Region {
-        let (a, b) = (self.clone(), other.clone());
-        Region::new(move |min, max| a.may(min, max) && b.may(min, max))
-    }
-
-    /** Where anything within `by` of it may be: asked of the rectangle itself first, as the smaller is the cheaper to ask. */
-    pub fn widened(&self, by: i64) -> Region {
-        let region = self.clone();
-        Region::new(move |min, max| region.may(min, max) || region.may(min.map(|v| v - by), max.map(|v| v + by)))
-    }
-}
-
 /** A cell proposes as many spots as thresholds (of 2^32) its hash reaches: Poisson, one on average, at most 8. */
 const POISSON: [u32; 8] = [1580030169, 3160060337, 3950075422, 4213413783, 4279248374, 4292415292, 4294609778, 4294923276];
 /** Keys a cell's spots take, its own and the first's: k · SPOTS + n. */
@@ -750,30 +588,6 @@ mod tests {
             (of(&counts.layers, "layer"), of(&counts.plans, "coarse"), of(&counts.plans, "fine")),
             (Some((2, 0)), Some((2, 1)), Some((0, 2)))
         );
-    }
-
-    #[test]
-    fn shares_add_up_and_ease_across_the_edge() {
-        // The first bids x / 100, the second nothing.
-        let bid = |x: i64| Fx::from_bits(x * Fx::ONE.to_bits() / 100);
-        let land = Land::new(
-            8,
-            fx(0.1),
-            vec![
-                (Box::new(move |x, _| bid(x)), Box::new(move |min, max| (bid(min[0]), bid(max[0])))),
-                (Box::new(|_, _| Fx::ZERO), Box::new(|_, _| (Fx::ZERO, Fx::ZERO))),
-            ],
-        );
-        for x in -30..30 {
-            let (sa, sb) = (land.share(0, x, 0), land.share(1, x, 0));
-            assert!((sa + sb - Fx::ONE).abs() <= Fx::from_bits(1), "{x}: {sa:?} + {sb:?}");
-            assert_eq!(land.owns(0, x, 0), sa >= sb, "{x}");
-            // Each may be wherever it has any.
-            assert!((0..2).all(|d| land.may(d, [x, 0], [x, 0]) || land.share(d, x, 0) == Fx::ZERO), "{x}");
-        }
-        assert_eq!((land.share(0, -20, 0), land.share(0, 20, 0)), (Fx::ZERO, Fx::ONE));
-        // Surely none only where the bids leave it none, over a rectangle as over its columns.
-        assert_eq!([land.may(0, [-40, 0], [-20, 0]), land.may(0, [-40, 0], [0, 0]), land.may(1, [20, 0], [40, 0])], [false, true, false]);
     }
 
     #[test]

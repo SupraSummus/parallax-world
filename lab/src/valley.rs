@@ -3,9 +3,9 @@
 
 use std::sync::Arc;
 
-use ground::domain::Scope;
 use worldgen::generator::{Generator, Kind, generate};
 use worldgen::grid::Box3;
+use worldgen::noise::Scope;
 use worlds::forest::{self, K as F};
 use worlds::valley::Terrain;
 use worlds::valley::fields;
@@ -101,7 +101,7 @@ pub fn class_of_kind(kinds: usize) -> Vec<u8> {
     town.iter().for_each(|(ks, c)| ks.iter().for_each(|k| set(town::k(*k), *c)));
     farm.iter().for_each(|(ks, c)| ks.iter().for_each(|k| set(fields::k(*k), *c)));
     set(forest::k(F::hay), 17);
-    // The domains after the fields', which the experiments don't tell apart: as the forest's ground, rock or undergrowth,
+    // The parts after the fields', which the experiments don't tell apart: as the forest's ground, rock or undergrowth,
     // the towns' walls or fittings.
     for (kind, c) in [
         (mountains::k(A::alpine), 0),

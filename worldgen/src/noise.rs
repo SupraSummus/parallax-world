@@ -63,6 +63,39 @@ impl Text {
     }
 }
 
+/**
+ * A part of a world by name, and the seeds of what it draws, each from
+ * the name and the world's seed: two parts never share one by chance,
+ * and a part draws the same in any world that names it alike (the forest
+ * alone, and in the valley).
+ */
+#[derive(Clone)]
+pub struct Scope {
+    seed: u64,
+    /** Its name, as a path of its parts' names joined by '/', hashed: none for the world. */
+    name: Option<Text>,
+}
+
+impl Scope {
+    /** The world of `seed`, which names its parts. */
+    pub fn new(seed: u64) -> Scope {
+        Scope { seed, name: None }
+    }
+
+    /** Its part named `name`. */
+    pub fn of(&self, name: &str) -> Scope {
+        Scope { seed: self.seed, name: Some(self.name.map_or_else(Text::default, |path| path.then("/")).then(name)) }
+    }
+
+    /**
+     * The seed of its `what`: a noise, a plan's claims, a stream of random
+     * numbers. Cheap: worlds ask in their inner loops.
+     */
+    pub fn seed(&self, what: &str) -> u64 {
+        stream(self.seed, self.name.unwrap_or_default().then(":").then(what).hash(0))
+    }
+}
+
 /** A 32-bit hash as a fraction of 1, in [0, 1): exact in an f64. */
 pub fn unit(h: u32) -> f64 {
     h as f64 / 4294967296.0
@@ -405,6 +438,15 @@ impl Rng {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_parts_seeds_hash_its_path_of_names() {
+        // Its name hashed as it grows, as every world's seeds were from the text "forest/trees:what".
+        let seed = |path: &str| stream(7, hash_text(path, 0));
+        let world = Scope::new(7);
+        assert_eq!(world.seed("relief"), seed(":relief"));
+        assert_eq!(world.of("valley").of("forest").seed("heights"), seed("valley/forest:heights"));
+    }
 
     #[test]
     fn noise_holds_up_far_from_the_origin() {

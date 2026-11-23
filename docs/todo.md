@@ -143,7 +143,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   (`Field::meets`, `Population::stands`):
   the city's buildings, and the towns', landmarks', settlements' and steadings' things.
   What the railway, the moor and the learned settlements draw by their shares too:
-  they don't bound their bids (`Domain::bids`), so their regions are everywhere.
+  they don't bound their bids (`Scalar::new`), so their shares may be anywhere.
   Saying so is for speed, not simplicity:
   a promise per layer says again what `heights` says once.
   The railway's piers can't yet: a bridge has no greatest height,
@@ -170,7 +170,7 @@ Numbers are for the forest at 1280×800, as measured when written.
   one record a site would be read and written once, not twice,
   for memory not measured.
 - **Plans are made at every column read, whatever their scale.**
-  The valley's land, decided at 4 m, makes its six domains' bids
+  The valley's land, decided at 4 m, makes its six parts' bids
   at each column of a tile at level 0.
   Bids made every 4 m and interpolated (tried) cost as many instructions:
   most of a bid is the terrain, which the ground makes there anyway;
@@ -287,26 +287,36 @@ Numbers are for the forest at 1280×800, as measured when written.
 
 ## Worlds
 
-- **A domain can't stand in a world twice.**
+- **A part can't stand in a world twice.**
   Its populations seed their cells by layer name and the generator's seed
   (`Cell::random`), not its `Scope`: two forests would grow the same trees.
   And its kinds' ids are its place in a table every world concatenates
   in one order (`kinds!`'s `base`); named, the world would number them.
-- **A domain owns a column's things, cover and air at once.**
+- **A land in space is read at every site of a box it is not whole in.**
+  The mine's rock is the cheese painted where it owns it (`rock` in `mine.rs`),
+  each site deciding the shares anew, as nothing keeps them;
+  asked in cubes 16 sites wide (`SITES` in `drawables.rs`),
+  only those its lumps' edges cross are read.
+  From level 6 the lumps are a few sites wide and every cube is crossed:
+  a tile reads a million sites.
+  Spans along an axis would find the edges on each line
+  (the lumps rise or fall monotonically in each of their cells),
+  or the shares could be read dithered as a ground's are.
+- **A part owns a column's things, cover and air at once.**
   So a landmark's clearing, kept for itself to keep trees off,
   cut the moor's heath and mist away.
   The moor now lays its heath over the landmarks and its mist over them
   and the railway, by its bid without them (`moor::Alone`),
   but a landmark among fields or dense forest paints its own grass.
   Land could share cover and air apart from things,
-  a domain bidding for its things only where it builds.
+  a part bidding for its things only where it builds.
 - **Worlds share tables of kinds**, so the contract only prints
   the kinds nothing surveyed draws, and fails on silent layers alone:
   the moor's is the valley's, the learned town's the first of it.
   With only the kinds it draws, a world could fail on a kind
   drawn only far from spawn, or never.
 - **The worlds but the cheese share one crate**, as they share pieces:
-  the forest's ground and kinds, the valley's domains.
+  the forest's ground and kinds, the valley's parts.
   A world in a crate of its own, using others' pieces as crates,
   runs into the two items above and "The layout has more to sort".
 - **The railway's track is too bright seen low from level 2.**
@@ -335,12 +345,14 @@ Numbers are for the forest at 1280×800, as measured when written.
   Drawing one is a quarter of measuring it (`measure` in `forms.rs`):
   the rest counts its fine sites by cell, axis and face,
   with a vector of kinds for each face of each cell.
-- **Five of the cheese's tiles are over the cost budget**
-  (`Known::OverBudget`): at level 7 a tile holds a few hundred thousand holes,
+- **Four of the cheese's tiles are over the cost budget**
+  (`Known::OverBudget`), at levels 6 and 7 at the spawn and in the mine:
+  at level 7 a tile holds a few hundred thousand holes,
   each a shape, most of them a site or two
   ("Far forms for what fills space", below);
-  at level 3, the grottoes each make the holes around them to place their stairs;
-  at levels 4 to 6, the crystals' far form, a ball about each cavern.
+  at level 6, the crystals' far form, a ball about each cavern,
+  and the grottoes each making the holes around them to place their stairs.
+  The mine's lumps, where none of that is asked, brought the rest under.
   Timed, it makes levels 4 to 7 three or four times as long:
   mostly its sites filled in part;
   a tenth a power per site (`Fill::At`),
@@ -364,12 +376,14 @@ Numbers are for the forest at 1280×800, as measured when written.
   where the trees thin out to the treeline,
   came 0.10 to 0.15 apart at level 4, in materials hit and from above:
   leaves in place of trunks and of the slope's scree and rock.
-- **Towns and the city line up with the lattice.**
+- **Towns, the city and the cheese's mine line up with the lattice.**
   Their entries list them (`Known::Turned`).
   The valley's first town lays out streets and blocks along x and z,
   and builds in frames of quarter turns (`frame.rs`):
   a four-fold harmonic of 10 %.
   The city is boxes on a plan, all along the axes: 4 %.
+  The cheese's mine digs galleries along x and z: 2 to 3 %,
+  around it and anywhere, where its lumps are a quarter of the space.
   The learned town's settlements are such boxes too (2.5 %),
   but their streets' own direction (2 %) hides them from the check.
   Square noise (`ValueNoise`, `Fbm`) draws under 1 %, too little to tell.
@@ -811,7 +825,7 @@ Numbers are for the forest at 1280×800, as measured when written.
     and a world's `Entry` holds the contract's `Accuracy`.
   - `worlds/src/forest.rs` is still a world, the ground others build on
     (`Relief`, `Forest`) and the table of kinds they draw with (`K`);
-    the valley's domains (`worlds/src/valley/`) use each other in circles.
+    the valley's parts (`worlds/src/valley/`) use each other in circles.
     The kinds and the ground apart
     come before "The worlds but the cheese share one crate".
   - `worlds/data/cost/valley.txt` is the repo's largest text file,
@@ -920,7 +934,13 @@ Composing generators (section "Composing" of `docs/generators.md`), untried:
   their chances, read at every leaf's corners, read the land
   as their refused anchors read the ground.
 - Bid per quantity: a land per channel (use, ground, wetness),
-  each domain bidding in those it cares about, as the towns' terrace needs.
+  each part bidding in those it cares about, as the towns' terrace needs.
+- Shares within shares: the forest's species are a land of its own by hand
+  (`species_chances` in `forest.rs`);
+  `land::shares` of their bids, times the forest's share, would make it one.
+- Edges between parts as a product of shares (`Scalar::times`):
+  scrub where the forest meets the fields, reeds round a pond,
+  bounded over a box like any scalar.
 - Place the houses as things of their own, from the plan of lots,
   not as children of one thing per town:
   a box in a town now draws the whole town's carves aside, in a buffer
