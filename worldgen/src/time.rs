@@ -60,6 +60,23 @@ fn site(p: [i64; 3], s: i64) -> [i64; 3] {
 pub fn drift(velocity: [i64; 3]) -> [i64; 3] {
     let spacing = sites::read_for().map(|(spacing, _)| spacing).expect("only layers read the time: plans and things are kept");
     let (now, from, until) = NOW.get();
+    // Every column of a box asks the same, one after another: the last answer is kept.
+    type Answered = ((i64, i64, [i64; 3]), ([i64; 3], Range<i64>));
+    thread_local! {
+        static LAST: Cell<Option<Answered>> = const { Cell::new(None) };
+    }
+    let asked = (now, spacing, velocity);
+    let (here, stays) = match LAST.take() {
+        Some((was, answer)) if was == asked => answer,
+        _ => voxel(velocity, spacing, now),
+    };
+    LAST.set(Some((asked, (here, stays.clone()))));
+    NOW.set((now, from.max(stays.start), until.min(stays.end)));
+    here.map(|v| v * spacing)
+}
+
+/** Of what moves at `velocity` from the origin, the site `spacing` apart whose voxel it is in at `now` (in units of `spacing`), and while when it is (`drift`). */
+fn voxel(velocity: [i64; 3], spacing: i64, now: i64) -> ([i64; 3], Range<i64>) {
     // In thousandths of a unit: as far as it goes in a millisecond at a unit a second.
     let (s, at) = (1000 * spacing, |t: i64| velocity.map(|v| v * t));
     let here = site(at(now), s);
@@ -76,9 +93,7 @@ pub fn drift(velocity: [i64; 3]) -> [i64; 3] {
     }
     // On a face it is in one voxel or the other, as `site` says.
     let in_it = |t: i64| site(at(t), s) == here;
-    let (enters, left) = (enters + i64::from(!in_it(enters)), leaves + i64::from(in_it(leaves)));
-    NOW.set((now, from.max(enters), until.min(left)));
-    here.map(|v| v * spacing)
+    (here, enters + i64::from(!in_it(enters))..leaves + i64::from(in_it(leaves)))
 }
 
 #[cfg(test)]

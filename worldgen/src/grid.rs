@@ -845,17 +845,32 @@ pub fn least(stops: [u8; 3]) -> u8 {
 
 /** A channel `c` (linear, premultiplied by `alpha`, of COLOUR_ONE) unpremultiplied, sRGB. */
 fn srgb(c: u16, alpha: u8) -> u8 {
-    let power = |c: u16, alpha: u8| {
-        let of = alpha.max(1) as f64 / ALPHA as f64 * COLOUR_ONE as f64;
-        let c = (c as f64 / of).min(1.0);
-        (255.0 * if c <= 0.003_130_8 { c * 12.92 } else { 1.055 * js::pow(c, 1.0 / 2.4) - 0.055 }).round() as u8
-    };
-    // Most sites shown are whole, and a power costs more than all else here: theirs are kept.
+    // A power costs more than all else here. Most sites shown are whole: theirs are kept. Of each other alpha, where
+    // each step of sRGB begins, as it rises with `c`: a medium's sites are of many alphas.
     static WHOLE: OnceLock<Vec<u8>> = OnceLock::new();
-    match alpha {
-        ALPHA => WHOLE.get_or_init(|| (0..=COLOUR_ONE).map(|c| power(c, ALPHA)).collect())[c as usize],
-        _ => power(c, alpha),
+    static STEPS: [OnceLock<[u32; 255]>; ALPHA as usize] = [const { OnceLock::new() }; ALPHA as usize];
+    if alpha == ALPHA {
+        return WHOLE.get_or_init(|| (0..=COLOUR_ONE).map(|c| srgb_of(c, ALPHA)).collect())[c as usize];
     }
+    let firsts = STEPS[alpha as usize].get_or_init(|| {
+        // Where step k + 1 begins: the first `c` that is at it or past, past COLOUR_ONE if none is.
+        std::array::from_fn(|k| {
+            let (mut lo, mut hi) = (0, COLOUR_ONE as u32 + 1);
+            while lo < hi {
+                let mid = (lo + hi) / 2;
+                if srgb_of(mid as u16, alpha) > k as u8 { hi = mid } else { lo = mid + 1 }
+            }
+            lo
+        })
+    });
+    firsts.partition_point(|&first| first <= c as u32) as u8
+}
+
+/** `srgb`, worked out. */
+fn srgb_of(c: u16, alpha: u8) -> u8 {
+    let of = alpha.max(1) as f64 / ALPHA as f64 * COLOUR_ONE as f64;
+    let c = (c as f64 / of).min(1.0);
+    (255.0 * if c <= 0.003_130_8 { c * 12.92 } else { 1.055 * js::pow(c, 1.0 / 2.4) - 0.055 }).round() as u8
 }
 
 /** A channel of sRGB (of 1) as linear light: fcc::light's, by libm's power (js.rs), as generating is the same on every target. */
@@ -874,6 +889,16 @@ pub(crate) fn look_of(colour: [u16; 3], alpha: u8, shown: u8) -> Look {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /** Kept by where each step begins, sRGB is as worked out, of every alpha and channel: it never steps back as a channel rises. */
+    #[test]
+    fn srgb_kept_is_srgb_worked_out() {
+        for alpha in 0..=ALPHA {
+            for c in 0..=COLOUR_ONE {
+                assert_eq!(srgb(c, alpha), srgb_of(c, alpha), "{c} of alpha {alpha}");
+            }
+        }
+    }
 
     #[test]
     fn a_site_is_handed_over_as_it_looks_through_each_face_whole_or_held_in_part_and_moves_with_its_brick() {
