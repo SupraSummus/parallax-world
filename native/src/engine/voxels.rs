@@ -365,9 +365,12 @@ const LIGHT_WORDS: usize = 2;
  * The light on the voxels of the brick of `grid`, of `level`, whose sites
  * start at `corner`, by site in the order of its cells, LIGHT_WORDS each:
  * Light::on_seen, and its own glow, as RGB9E5; 0 where none. What a voxel
- * sends out is its colour times the one, and the other.
+ * sends out is its colour times the one, and the other. Both are of the
+ * site's place alone, `grid` saying only which sites have them: so where
+ * `was`, another grid of the tile and the light of its brick here, has a
+ * voxel too, its light is taken, not found again.
  */
-pub fn light(grid: &fcc::Grid, level: u32, corner: [i32; 3], light: &mut Light) -> Box<[u32]> {
+pub fn light(grid: &fcc::Grid, level: u32, corner: [i32; 3], light: &mut Light, was: Option<(&fcc::Grid, &[u32])>) -> Box<[u32]> {
     let mut out = vec![0; BRICK_SITES * LIGHT_WORDS];
     for r in 0..BRICK * BRICK * BRICK {
         let site: [i32; 3] = std::array::from_fn(|d| corner[d] + [r % BRICK, r / BRICK % BRICK, r / BRICK / BRICK][d]);
@@ -375,10 +378,16 @@ pub fn light(grid: &fcc::Grid, level: u32, corner: [i32; 3], light: &mut Light) 
         if (site[0] + site[1] + site[2]) & 1 != 0 || look == 0 {
             continue;
         }
-        let at = site.map(i64::from);
-        if let Some(on) = light.on_seen(level, at) {
-            let i = (r >> 1) as usize * LIGHT_WORDS;
-            out[i..i + LIGHT_WORDS].copy_from_slice(&[rgb9e5(on), rgb9e5(light.glow(level, at))]);
+        let i = (r >> 1) as usize * LIGHT_WORDS;
+        let words = &mut out[i..i + LIGHT_WORDS];
+        match was {
+            Some((had, found)) if had.get(site[0], site[1], site[2]) != 0 => words.copy_from_slice(&found[i..i + LIGHT_WORDS]),
+            _ => {
+                let at = site.map(i64::from);
+                if let Some(on) = light.on_seen(level, at) {
+                    words.copy_from_slice(&[rgb9e5(on), rgb9e5(light.glow(level, at))]);
+                }
+            }
         }
     }
     out.into()

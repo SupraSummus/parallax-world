@@ -120,21 +120,17 @@ impl Tile {
 
     /**
      * Tile `self`, of `level`, made anew in place of `old` (World::now),
-     * with the light `old` found: a brick whose sites are as they were
-     * takes it, one changed is lit by `light`. What showed of `old` so
-     * shows of it at once, rays not waiting for its light.
+     * lit where `old` was, by `light`: each brick `old` found the light of,
+     * taking it at each site where both have a voxel (voxels::light), so
+     * found again only where a voxel came. What showed of `old` so shows of
+     * it at once, rays not waiting for its light.
      */
     fn lit_as(self, old: &Tile, level: u32, light: &mut Light) -> Tile {
         for (_, b, first) in voxels::bricks(&self.grid) {
             let corner = b.map(|v| v * fcc::BRICK);
             let Ok(had) = usize::try_from(old.grid.brick(corner[0], corner[1], corner[2])) else { continue };
             let Some(found) = old.light(had) else { continue };
-            let sites = |first: usize| first * fcc::BRICK_SITES..(first + 1) * fcc::BRICK_SITES;
-            if self.grid.cells[sites(first)] == old.grid.cells[sites(had)] {
-                _ = self.lights[first].set(found.into());
-            } else {
-                self.lit(level, corner, light);
-            }
+            _ = self.lights[first].set(voxels::light(&self.grid, level, corner, light, Some((&old.grid, found))));
         }
         self
     }
@@ -142,7 +138,7 @@ impl Tile {
     /** Finds the light of its brick whose sites start at `corner`, of `level`, by `light`, if it has voxels and not found yet. */
     pub fn lit(&self, level: u32, corner: [i32; 3], light: &mut Light) {
         let Ok(first) = usize::try_from(self.grid.brick(corner[0], corner[1], corner[2])) else { return };
-        self.lights[first].get_or_init(|| voxels::light(&self.grid, level, corner, light));
+        self.lights[first].get_or_init(|| voxels::light(&self.grid, level, corner, light, None));
     }
 }
 
@@ -1027,28 +1023,39 @@ mod tests {
         }
     }
 
-    /** A tile made anew takes the light of each brick of the old one whose sites are as they were, and lights the rest the old had. */
+    /**
+     * A tile made anew is lit where the old one was, as if found anew: the
+     * light of a site being of its place, it takes the old one's where both
+     * have a voxel, and finds it where one came.
+     */
     #[test]
     fn a_tile_made_anew_is_lit_where_the_old_one_was() {
         use light::Brightness;
         let world = (worlds::by_name("forest").expect("forest").make)(1);
         let tiles = tiles_about(&world, 0, world.spawn.map(|v| v as i32), TILE as i32);
-        let (&id, old) = tiles.iter().max_by_key(|(_, t)| voxels::bricks(&t.grid).count()).expect("a tile");
+        let (&id, old) = tiles.iter().max_by_key(|&(&id, t)| (voxels::bricks(&t.grid).count(), id)).expect("a tile");
         let mut light = Light::new(world, Shared::new(Brightness { sky: 1.0, sun: 1.0, glow: 0.0 }));
-        // Bricks lit up to the second that shows, a site of it that shows emptied.
+        // Bricks lit up to the second that shows and has a site with no voxel; in it, a voxel that shows gone, and one
+        // come where there was none.
+        let sites = |first: usize| first * fcc::BRICK_SITES..(first + 1) * fcc::BRICK_SITES;
         let shows = |&(_, b, first): &(usize, [i32; 3], usize)| {
             old.lit(0, b.map(|v| v * fcc::BRICK), &mut light);
-            old.light(first).is_some_and(|l| l.iter().any(|&w| w != 0))
+            old.light(first).is_some_and(|l| l.iter().any(|&w| w != 0)) && old.grid.cells[sites(first)].contains(&0)
         };
-        let (_, _, changed) = voxels::bricks(&old.grid).filter(shows).nth(1).expect("two bricks that show");
+        let (_, b, changed) = voxels::bricks(&old.grid).filter(shows).nth(1).expect("two bricks that show");
         let mut grid = (*old.grid).clone();
-        let lit = old.light(changed).expect("lit");
+        let (lit, sites) = (old.light(changed).expect("lit"), sites(changed));
         let words = lit.len() / fcc::BRICK_SITES;
-        let site = (0..fcc::BRICK_SITES).find(|&k| lit[k * words] != 0).expect("a voxel that shows");
-        grid.cells[changed * fcc::BRICK_SITES + site] = 0;
+        let gone = (0..fcc::BRICK_SITES).find(|&k| lit[k * words] != 0).expect("a voxel that shows");
+        let came = sites.clone().find(|&i| grid.cells[i] == 0).expect("a site with no voxel");
+        grid.cells[came] = grid.cells[sites.start + gone];
+        grid.cells[sites.start + gone] = 0;
         let new = Tile::new(id, Arc::new(grid)).lit_as(old, 0, &mut light);
-        assert!((0..new.lights.len()).filter(|&f| f != changed).all(|f| new.light(f) == old.light(f)), "the rest as it was");
-        assert!(new.light(changed).is_some_and(|l| Some(l) != old.light(changed)), "lit anew");
+        for (_, b, first) in voxels::bricks(&new.grid) {
+            let anew = voxels::light(&new.grid, 0, b.map(|v| v * fcc::BRICK), &mut light, None);
+            assert_eq!(new.light(first), old.light(first).map(|_| &anew[..]), "brick {b:?}: lit where the old one was, as found anew");
+        }
+        assert!(new.light(changed) != old.light(changed), "brick {b:?} lit anew");
     }
 
     #[test]

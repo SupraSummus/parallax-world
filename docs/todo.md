@@ -421,7 +421,7 @@ The prototype of worlds that move (`worldgen/src/time.rs`;
 
 - **Tiles are made anew whole, and that is all that moving costs.**
   A tile the clouds are in is made anew each tick they cross one of its sites,
-  all of it, and its changed bricks lit again,
+  all of it, and lit again where a voxel came,
   of only the layers that drew in it or read the time (`Drew`):
   a millisecond or so where only the clouds drew,
   several where mountains rise into them at the coarse levels.
@@ -443,9 +443,11 @@ The prototype of worlds that move (`worldgen/src/time.rs`;
 - **Light does not move.**
   The light's blocks and what Lights keep (`light/src/lib.rs`)
   are made once, at time 0, and a tile made anew lights from them
-  what the old one had lit and changed:
+  where a voxel came, keeping the old one's light where one stays:
   a cloud's shadow stays where it fell.
-  Each needs the time it stays for, as tiles have.
+  Each needs the time it stays for, as tiles have;
+  then a site's light is no longer of its place alone,
+  and a tile made anew can keep it only where it stays as it was.
 - **Only the voxels engine follows.**
   The chunks engines bake a cell once its tiles are in, and keep it:
   there the clouds stand still.

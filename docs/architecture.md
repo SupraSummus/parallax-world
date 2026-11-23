@@ -728,7 +728,9 @@ A tile of another time is made anew, alone, if an engine reads it and sees it (W
 kept as it is while it does not see it, and dropped once it does not read it;
 the tiles that move are kept by when each stops staying as made,
 so a frame finds those of another time, however many move.
-It keeps the old one's light where its bricks did not change,
+It keeps the old one's light at each site where both have a voxel,
+the light on a voxel being of its place (it does not move: [todo.md](todo.md), "Time"),
+and finds it only where one came;
 and the voxels engine places what showed of it in the step the old one goes,
 so nothing shows coarser between.
 The threads do not always keep up ([todo.md](todo.md), "Time").
