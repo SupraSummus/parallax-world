@@ -512,7 +512,8 @@ pub fn learned(seed: u64) -> World {
     // bids nothing.
     let fields = {
         let settlements = settlements.clone();
-        Fields::new(world.of("fields"), path.clone(), move |x, z| if settlements.spot(x, z) == Spot::Fields { Fx::ONE } else { -Fx::ONE })
+        let bid = Box::new(move |x, z| if settlements.spot(x, z) == Spot::Fields { Fx::ONE } else { -Fx::ONE });
+        Fields::new(world.of("fields"), path.clone(), (bid, Box::new(|_, _| (-Fx::ONE, Fx::ONE))))
     };
     let forest = Forest::new(world.of("forest"), path, spawn);
     let domains: [Arc<dyn Domain>; 3] = [Arc::new(forest), settlements, Arc::new(fields)];

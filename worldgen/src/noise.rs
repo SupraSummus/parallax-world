@@ -98,8 +98,7 @@ impl Fx {
     pub const HALF: Fx = Fx(ONE / 2);
     pub const ONE: Fx = Fx(ONE);
     pub const MIN: Fx = Fx(Fixed::MIN);
-    /** The least above zero, 2⁻¹⁶. */
-    pub const EPSILON: Fx = Fx(1);
+    pub const MAX: Fx = Fx(Fixed::MAX);
 
     /** The `Fx` of an untyped `Fixed`, where the engine's typed and untyped code meet. */
     pub const fn from_bits(bits: Fixed) -> Fx {

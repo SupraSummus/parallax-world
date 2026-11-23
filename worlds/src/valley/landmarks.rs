@@ -13,10 +13,10 @@
 
 use std::sync::Arc;
 
-use ground::FieldAbout;
 use ground::column::Column;
 use ground::domain::{Domain, Scope, eased};
 use ground::plan::{Claims, Holding, Plan, Sloped};
+use ground::{FieldAbout, Within};
 use worldgen::frame::{Frame, Part, facing, walls};
 use worldgen::generator::{ANY_SIZE, Child, Fill, Kind, Layer, Node, Op, Population, SOLID};
 use worldgen::js;
@@ -536,12 +536,17 @@ fn spot(terrain: &Terrain, sites: &Claims<Site>, patches: &ValueNoise<{ m(3.0) }
 impl Domain for Landmarks {
     /** Ahead over a landmark's footprint and clearing, never on the path. */
     fn bid(&self, x: i64, z: i64) -> Fx {
-        let most = fx(4.0);
-        let Some(s) = self.site(x, z) else { return -most };
+        let Some(s) = self.site(x, z) else { return -MOST };
         if self.terrain.path.across(x, z).abs() < Fx::m(2.4) {
-            return -most;
+            return -MOST;
         }
-        ((s.clearing - s.outside(x, z)).to_fx() * most / FADE).clamp(-most, most)
+        ((s.clearing - s.outside(x, z)).to_fx() * MOST / FADE).clamp(-MOST, MOST)
+    }
+
+    /** The least, but where a landmark may reach. */
+    fn bids(&self, min: [i64; 2], max: [i64; 2]) -> (Fx, Fx) {
+        let near = !self.sites.within(min.map(|v| v - NEAR), max.map(|v| v + NEAR)).is_empty();
+        (-MOST, if near { MOST } else { -MOST })
     }
 
     /** To the landmark there: level under it, easing back over TERRACE, a pond's bowl dug into it. */
@@ -561,7 +566,11 @@ impl Domain for Landmarks {
     }
 }
 
+/** The most the landmarks bid, and as much behind. */
+const MOST: Fx = fx(4.0);
+
 fn layers(landmarks: Arc<Landmarks>, hold: Holding, ground: Arc<Sloped>) -> Vec<Layer> {
+    let region = hold.region();
     let surface = {
         let (landmarks, ground) = (landmarks.clone(), ground.clone());
         let on = ground.clone();
@@ -580,6 +589,7 @@ fn layers(landmarks: Arc<Landmarks>, hold: Holding, ground: Arc<Sloped>) -> Vec<
             Column::new(ground.at(x, z)).surface(kind, SURFACE).spans()
         })
         .about(on, SURFACE, 1)
+        .within(region)
     };
     // Ponds' water up to its level, reeds round their edges while two sites are no taller than they:
     // thickened, they would stand over the water beside them.

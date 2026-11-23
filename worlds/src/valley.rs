@@ -140,15 +140,19 @@ pub fn valley(seed: u64) -> World {
     // Thinning out to the treeline, and to the sea.
     let forest = {
         let (ranges, ground) = (ranges.clone(), ground.clone());
-        Forest::new(world.of("forest"), path.clone(), spawn).thinned(move |x, z| {
-            let h = ground.at(x, z);
-            ranges.below_treeline(x, z, h) * mountains::dry(h)
-        })
+        let wooded = mountains::wooded(ground.clone());
+        Forest::new(world.of("forest"), path.clone(), spawn).thinned(
+            move |x, z| {
+                let h = ground.at(x, z);
+                ranges.below_treeline(x, z, h) * mountains::dry(h)
+            },
+            wooded,
+        )
     };
     let fields = {
         let scope = world.of("fields");
-        let bid = fields::round_towns(&scope, towns.clone(), slope);
-        Fields::new(scope, path, bid)
+        let bidding = fields::round_towns(&scope, towns.clone(), slope);
+        Fields::new(scope, path, bidding)
     };
     let domains: [Arc<dyn Domain>; 7] = [Arc::new(forest), towns, Arc::new(fields), landmarks, moor, ranges, railway];
     let layers = compose(&domains, &ground, town::BID_SCALE, LEAD);

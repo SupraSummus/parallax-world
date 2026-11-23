@@ -6,8 +6,8 @@
 
 use crate::curve::Curve;
 use crate::generator::{
-    Anchors, Cell, Child, Children, Far, Field, FieldValues, Holds, Kind, Line, Meets, Node, Op, Point, Population, Radius, SOLID, Shape,
-    Shapes, Span, ball, bounds_of_shapes, capsule, cuboid, ellipsoid, gable, lathe, tube,
+    Anchors, Cell, Child, Children, Far, Field, FieldMeets, FieldValues, Holds, Kind, Line, Meets, Node, Op, Point, Population, Radius,
+    SOLID, Shape, Shapes, Span, Stands, ball, bounds_of_shapes, capsule, cuboid, ellipsoid, gable, lathe, tube,
 };
 use crate::grid::Box3;
 use std::sync::Arc;
@@ -93,9 +93,17 @@ impl Field {
      * What it draws in a box (lattice units) at sites a spacing apart,
      * `meets(box, spacing)`, along any axis (Field::meets): a rule;
      * drawn only where it may be, a box all of a kind without asking.
+     * Rules add up: what one said before, if more than anything, holds.
      */
     pub fn meets(self, meets: impl Fn(&Box3, i64) -> Meets + Send + Sync + 'static) -> Field {
-        Field { meets: Some(Box::new(meets)), ..self }
+        let meets: Box<FieldMeets> = match self.meets {
+            None => Box::new(meets),
+            Some(before) => Box::new(move |b, spacing| match before(b, spacing) {
+                Meets::Any => meets(b, spacing),
+                said => said,
+            }),
+        };
+        Field { meets: Some(meets), ..self }
     }
 }
 
@@ -190,10 +198,14 @@ impl Population {
     /**
      * Whether an anchor of its things may lie in a box (lattice units),
      * `stands(box)` (Population::stands): a rule; asked to draw only where
-     * they may reach.
+     * they may reach. Rules add up: where one said before they may.
      */
     pub fn stands(self, stands: impl Fn(&Box3) -> bool + Send + Sync + 'static) -> Population {
-        Population { stands: Some(Box::new(stands)), ..self }
+        let stands: Box<Stands> = match self.stands {
+            None => Box::new(stands),
+            Some(before) => Box::new(move |b| before(b) && stands(b)),
+        };
+        Population { stands: Some(stands), ..self }
     }
 
     /** What it draws while its sites are further apart than its `size`: a medium as dense as its things. */

@@ -10,7 +10,7 @@ thread_local! {
     /**
      * The sites a layer reads for: their spacing, and how far from where
      * it asks it reads dithered plans finer than that (`footprint`);
-     * none while plans or things are made.
+     * none while plans are made and points read their chances (`where_asked`).
      */
     static FOOTPRINT: Cell<Option<(i64, [i64; 3])>> = const { Cell::new(None) };
 }

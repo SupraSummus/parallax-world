@@ -10,10 +10,10 @@
 
 use std::sync::Arc;
 
-use ground::FieldAbout;
 use ground::column::Column;
 use ground::domain::{Domain, Scope, eased};
 use ground::plan::{Claims, Holding, Plan, Sloped};
+use ground::{FieldAbout, Within};
 use worldgen::frame::{Frame, Part, U, V, W, back, walls};
 use worldgen::generator::{
     ANY_SIZE, Child, Children, Far, Fill, Kind, Layer, Node, Op, Population, SOLID, Shape, Shapes, Span, bounds_of_shapes,
@@ -309,7 +309,18 @@ impl Town {
 
     /** Distance from the town's streets and blocks, and wall if any: negative inside. */
     pub fn distance(&self, x: i64, z: i64) -> Units {
-        let (dx, dz) = ((x - self.x).abs() - self.half_x() - self.ring(), (z - self.z).abs() - self.half_z() - self.ring());
+        self.distance_off((x - self.x).abs(), (z - self.z).abs())
+    }
+
+    /** The least `distance` over columns `min` to `max` (x, z), inclusive. */
+    fn least_distance(&self, min: [i64; 2], max: [i64; 2]) -> Units {
+        let off = |middle: i64, lo: i64, hi: i64| (lo - middle).max(middle - hi).max(0);
+        self.distance_off(off(self.x, min[0], max[0]), off(self.z, min[1], max[1]))
+    }
+
+    /** `distance` at `x` along x and `z` along z from its middle: the more either, the more it is. */
+    fn distance_off(&self, x: i64, z: i64) -> Units {
+        let (dx, dz) = (x - self.half_x() - self.ring(), z - self.half_z() - self.ring());
         if dx <= 0 && dz <= 0 {
             return Units(dx.max(dz));
         }
@@ -383,6 +394,7 @@ impl Town {
 
 /** The towns along the valley's path, by where they are. */
 pub struct Towns {
+    claims: Arc<Claims<Town>>,
     /** The town nearest each z along the path, if it has one: kept, as a column asks several times. */
     nearest: Arc<Plan<Option<Town>>>,
     /** What each column is, a plan of categories: dithered far away, so streets show as often as they are. */
@@ -422,12 +434,16 @@ impl Towns {
             // Kept apart along the course straightened, as they are claimed.
             Some(([0, town.z], town))
         });
-        let nearest = Arc::new(Plan::new("nearest town", CLAIM, move |_, z| claims.near(0, z, WITHIN).map(|(_, town)| town)));
+        let claims = Arc::new(claims);
+        let nearest = {
+            let claims = claims.clone();
+            Arc::new(Plan::new("nearest town", CLAIM, move |_, z| claims.near(0, z, WITHIN).map(|(_, town)| town)))
+        };
         let spots = {
             let nearest = nearest.clone();
             Plan::dithered("town spots", SPOT_SCALE, move |x, z| nearest.at(0, z).map_or(Spot::Outside, |t| t.spot(x, z)))
         };
-        Towns { nearest, spots }
+        Towns { claims, nearest, spots }
     }
 
     /** The first town, near the start: every seed has it. */
@@ -453,15 +469,25 @@ impl Towns {
 
     /** How far column (x, z) is from the nearest town (negative inside); far if none. */
     pub fn distance(&self, x: i64, z: i64) -> Units {
-        self.near(z).map_or(Units(i64::MAX / 4), |t| t.distance(x, z))
+        self.near(z).map_or(FAR, |t| t.distance(x, z))
+    }
+
+    /** The least `distance` over columns `min` to `max` (x, z), inclusive: from any town that may be nearest one of them. */
+    pub fn least_distance(&self, min: [i64; 2], max: [i64; 2]) -> Units {
+        let towns = self.claims.within([0, min[1] - WITHIN], [0, max[1] + WITHIN]);
+        towns.iter().map(|(_, t)| t.least_distance(min, max)).min().unwrap_or(FAR)
     }
 }
 
 impl Domain for Towns {
     /** Ahead inside its streets, behind a few metres out. */
     fn bid(&self, x: i64, z: i64) -> Fx {
-        let most = fx(4.0);
-        self.near(z).map_or(-most, |t| ((Units::m(4.0) - t.distance(x, z)).to_fx() / Units::m(8.0)).clamp(-most, most))
+        bid(self.distance(x, z))
+    }
+
+    /** Its bid at the least distance: the less, the more it is. */
+    fn bids(&self, min: [i64; 2], max: [i64; 2]) -> (Fx, Fx) {
+        (-MOST, bid(self.least_distance(min, max)))
     }
 
     /** To the town's streets, all the way under it and easing back over TERRACE. */
@@ -475,7 +501,19 @@ impl Domain for Towns {
     }
 }
 
+/** The most the towns bid, and as much behind. */
+const MOST: Fx = fx(4.0);
+
+/** The towns' bid `distance` from the nearest: ahead from 4 m out, a bid of 1 every 8 m in, MOST 32 m either side. */
+fn bid(distance: Units) -> Fx {
+    Units((m(4.0) - distance.0).clamp(-m(32.0), m(32.0))).to_fx() / Units::m(8.0)
+}
+
+/** How far a column with no town near is from one. */
+const FAR: Units = Units(i64::MAX / 4);
+
 fn layers(towns: Arc<Towns>, hold: Holding, ground: Arc<Sloped>) -> Vec<Layer> {
+    let region = hold.region();
     let surface = {
         let (towns, surface_ground) = (towns.clone(), ground.clone());
         ground::columns("streets", 0.5, Op::Paint, move |x, z| {
@@ -499,6 +537,7 @@ fn layers(towns: Arc<Towns>, hold: Holding, ground: Arc<Sloped>) -> Vec<Layer> {
             }
         })
         .about(ground.clone(), m(0.5), 2)
+        .within(region)
     };
     let anchor = towns.clone();
     let built = Population::new("towns", 1.5, m(256.0))

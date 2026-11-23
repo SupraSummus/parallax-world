@@ -1,11 +1,11 @@
 boulders mossyStone	1	0.094	0.147
 boulders mossyStone	2	0.078	0.139
 boulders mossyStone	3	0.069	0.128
-boulders mossyStone	4	0.045	0.122
+boulders mossyStone	4	0.044	0.122
 boulders stone	1	0.094	0.147
 boulders stone	2	0.078	0.139
 boulders stone	3	0.069	0.128
-boulders stone	4	0.045	0.122
+boulders stone	4	0.044	0.122
 fields bush	1	0.064	0.114
 fields bush	2	0.074	0.136
 fields bush	3	0.080	0.142
@@ -87,7 +87,7 @@ landmarks lily	3	0.136	0.158
 landmarks lily	4	0.143	0.149
 landmarks mossyStone	1	0.077	0.129
 landmarks mossyStone	2	0.082	0.144
-landmarks mossyStone	3	0.092	0.144
+landmarks mossyStone	3	0.091	0.144
 landmarks mossyStone	4	0.042	0.110
 landmarks planks	1	0.069	0.116
 landmarks planks	2	0.049	0.116
@@ -113,7 +113,7 @@ landmarks shutterBlue	1	0.057	0.128
 landmarks shutterBlue	2	0.041	0.127
 landmarks shutterBlue	4	0.048	0.078
 landmarks shutterGreen	1	0.076	0.135
-landmarks shutterGreen	2	0.034	0.105
+landmarks shutterGreen	2	0.033	0.105
 landmarks shutterGreen	4	0.047	0.076
 landmarks slate	1	0.073	0.159
 landmarks slate	2	0.045	0.143
@@ -140,8 +140,8 @@ landmarks' ground sand	3	0.063	0.113
 landmarks' ground sand	4	0.066	0.116
 landmarks' ground scree	1	0.059	0.115
 landmarks' ground scree	2	0.062	0.123
-landmarks' ground scree	3	0.071	0.117
-landmarks' ground scree	4	0.048	0.108
+landmarks' ground scree	3	0.070	0.117
+landmarks' ground scree	4	0.048	0.107
 landmarks' ground soil	3	0.088	0.126
 landmarks' ground soil	4	0.081	0.114
 logs deadwood	1	0.061	0.126
@@ -157,11 +157,11 @@ moor boulders lichen	2	0.053	0.087
 moor boulders lichen	3	0.046	0.099
 moor boulders stone	1	0.049	0.092
 moor boulders stone	2	0.058	0.101
-moor boulders stone	3	0.051	0.106
+moor boulders stone	3	0.048	0.108
 mountains alpine	1	0.047	0.081
 mountains rock	1	0.062	0.127
 mountains rock	2	0.056	0.117
-mountains rock	3	0.057	0.117
+mountains rock	3	0.056	0.117
 mountains rock	4	0.058	0.135
 mountains scree	1	0.055	0.089
 mountains scree	2	0.046	0.080
@@ -186,10 +186,10 @@ plants bolete	1	0.052	0.109
 plants bolete	2	0.072	0.106
 plants bolete	3	0.062	0.111
 plants bolete	4	0.065	0.111
-plants bracken	1	0.062	0.126
-plants bracken	2	0.084	0.118
-plants bracken	3	0.061	0.120
-plants bracken	4	0.061	0.114
+plants bracken	1	0.061	0.128
+plants bracken	2	0.088	0.123
+plants bracken	3	0.066	0.118
+plants bracken	4	0.055	0.111
 plants bush	1	0.040	0.112
 plants bush	2	0.115	0.145
 plants bush	3	0.074	0.126
@@ -197,15 +197,15 @@ plants bush	4	0.045	0.114
 plants cone	1	0.059	0.119
 plants cone	2	0.103	0.125
 plants cone	3	0.068	0.105
-plants cone	4	0.046	0.109
+plants cone	4	0.045	0.109
 plants fallenLeaf	1	0.047	0.101
 plants fallenLeaf	2	0.068	0.105
 plants fallenLeaf	3	0.061	0.114
 plants fallenLeaf	4	0.059	0.117
-plants fern	1	0.060	0.127
-plants fern	2	0.107	0.132
-plants fern	3	0.076	0.112
-plants fern	4	0.046	0.107
+plants fern	1	0.060	0.128
+plants fern	2	0.116	0.137
+plants fern	3	0.080	0.116
+plants fern	4	0.048	0.106
 plants flowerRed	2	0.073	0.095
 plants flowerRed	3	0.072	0.111
 plants flowerRed	4	0.082	0.113
@@ -224,15 +224,16 @@ plants grass	2	0.060	0.092
 plants grass	3	0.067	0.117
 plants grass	4	0.077	0.120
 plants hay	2	0.062	0.089
-plants hay	3	0.062	0.115
-plants hay	4	0.092	0.133
+plants hay	3	0.063	0.117
+plants hay	4	0.093	0.134
 plants mushroomStem	1	0.049	0.103
 plants mushroomStem	2	0.088	0.114
 plants mushroomStem	3	0.069	0.113
-plants mushroomStem	4	0.048	0.110
-plants stone	2	0.059	0.079
-plants stone	3	0.052	0.090
-plants stone	4	0.048	0.094
+plants mushroomStem	4	0.048	0.111
+plants stone	1	0.045	0.081
+plants stone	2	0.058	0.078
+plants stone	3	0.053	0.090
+plants stone	4	0.047	0.094
 plants tallGrass	2	0.066	0.096
 plants tallGrass	3	0.067	0.112
 plants tallGrass	4	0.067	0.114
@@ -573,11 +574,11 @@ towns/block/garden bush	1	0.074	0.135
 towns/block/garden bush	2	0.045	0.118
 towns/block/garden bush	3	0.102	0.130
 towns/block/garden bush	4	0.112	0.128
-towns/block/garden churchStone	1	0.095	0.148
+towns/block/garden churchStone	1	0.096	0.148
 towns/block/garden churchStone	3	0.099	0.129
 towns/block/garden churchStone	4	0.108	0.114
 towns/block/garden flowerRed	1	0.064	0.123
-towns/block/garden flowerRed	3	0.061	0.113
+towns/block/garden flowerRed	3	0.061	0.112
 towns/block/garden flowerRed	4	0.100	0.124
 towns/block/garden flowerViolet	1	0.060	0.151
 towns/block/garden flowerViolet	2	0.042	0.105
@@ -593,7 +594,7 @@ towns/block/garden flowerYellow	4	0.109	0.122
 towns/block/garden planks	1	0.052	0.099
 towns/block/garden planks	3	0.125	0.126
 towns/block/garden planks	4	0.120	0.125
-towns/block/garden plasterWhite	1	0.095	0.148
+towns/block/garden plasterWhite	1	0.096	0.148
 towns/block/garden plasterWhite	3	0.099	0.129
 towns/block/garden plasterWhite	4	0.108	0.114
 towns/block/garden trim	1	0.053	0.135

@@ -79,9 +79,9 @@ worldgen/                    # The world-generation engine, no direction up in i
 └── tests/                   # The engine on test worlds; each solid against its baseline
 ground/                      # Worlds on a ground, on worldgen's public API: up is +y
 ├── src/
-│   ├── plan.rs              # Plans by column: heights, land, claims
+│   ├── plan.rs              # Plans by column: heights, land, claims; regions
 │   ├── column.rs            # A heightfield's spans
-│   ├── about.rs             # Fields about a ground, things on it
+│   ├── about.rs             # Fields about a ground, things on it; both within regions
 │   └── domain.rs            # Domains a world is composed of
 └── tests/                   # Fields about a ground; plans read by fields
 light/                       # Light, a prototype (docs/light.md), on worldgen's tiles

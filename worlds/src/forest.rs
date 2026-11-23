@@ -10,8 +10,8 @@ use std::sync::{Arc, OnceLock};
 use ground::column;
 use ground::column::lowest_around;
 use ground::domain::{Domain, Lie, Scope, compose};
-use ground::plan::{Holding, Plan, Sloped};
-use ground::{FieldAbout, PopulationOn};
+use ground::plan::{Holding, Plan, Region, Sloped};
+use ground::{FieldAbout, PopulationOn, Within};
 use worldgen::generator::{Generator, Holds, Layer, Line, Node, Op, Point, Population, Shape, Span};
 use worldgen::js::{self, round};
 use worldgen::kinds;
@@ -164,31 +164,37 @@ impl Relief {
 /**
  * The forest, a domain on ground decided outside it: it grows along
  * `path`, kept clear around `spawn`, thinned by its share of each column
- * and by `thinning` (a fraction, none by default).
+ * and by `thinning` (a fraction, none by default), none outside `wooded`.
  */
 pub struct Forest {
     scope: Scope,
     path: Arc<Path>,
     spawn: [i64; 3],
     thinning: Arc<dyn Fn(i64, i64) -> Fx + Send + Sync>,
+    wooded: Region,
 }
 
 impl Forest {
     pub fn new(scope: Scope, path: Arc<Path>, spawn: [i64; 3]) -> Forest {
-        Forest { scope, path, spawn, thinning: Arc::new(|_, _| Fx::ONE) }
+        Forest { scope, path, spawn, thinning: Arc::new(|_, _| Fx::ONE), wooded: Region::everywhere() }
     }
 
-    /** Thinned by `thinning` too, a fraction kept: at the treeline, by the sea. */
-    pub fn thinned(self, thinning: impl Fn(i64, i64) -> Fx + Send + Sync + 'static) -> Forest {
-        Forest { thinning: Arc::new(thinning), ..self }
+    /** Thinned by `thinning` too, a fraction kept: at the treeline, by the sea; none outside `wooded` (a rule). */
+    pub fn thinned(self, thinning: impl Fn(i64, i64) -> Fx + Send + Sync + 'static, wooded: Region) -> Forest {
+        Forest { thinning: Arc::new(thinning), wooded, ..self }
     }
 }
 
 impl Domain for Forest {
+    /** Nothing, anywhere: it has what no other outbids it for. */
+    fn bids(&self, _: [i64; 2], _: [i64; 2]) -> (Fx, Fx) {
+        (Fx::ZERO, Fx::ZERO)
+    }
+
     fn layers(self: Arc<Self>, ground: &Arc<Sloped>, hold: Holding) -> Vec<Layer> {
-        let thinning = self.thinning.clone();
+        let (thinning, region) = (self.thinning.clone(), hold.region().and(&self.wooded));
         let share = Arc::new(move |x, z| hold.share(x, z) * thinning(x, z));
-        layers(&self.scope, Ground { ground: ground.clone(), path: self.path.clone(), share }, self.spawn)
+        layers(&self.scope, Ground { ground: ground.clone(), path: self.path.clone(), share, region }, self.spawn)
     }
 }
 
@@ -199,11 +205,16 @@ pub fn on_path(ground: &Sloped, path: &Path, z: i64, above: i64) -> [i64; 3] {
     [x, y + ((x + y + z) & 1), z]
 }
 
-/** What the forest grows on: the ground's height, the path, and its share of each column (a fraction), which thins whatever it grows. */
+/**
+ * What the forest grows on: the ground's height, the path, and its share
+ * of each column (a fraction), which thins whatever it grows, none outside
+ * its region.
+ */
 struct Ground {
     ground: Arc<Sloped>,
     path: Arc<Path>,
     share: Arc<dyn Fn(i64, i64) -> Fx + Send + Sync>,
+    region: Region,
 }
 
 /** The forest's state shared by its layers: what it knows about any column, from the seed and its ground alone. */
@@ -465,6 +476,7 @@ fn layers(scope: &Scope, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
         let heights = ground.ground.clone();
         Plan::new("forest steep", COLUMN_SCALE, move |x, z| steep(&heights, x, z, 1))
     };
+    let region = ground.region.clone();
     let f = Arc::new(Woods { scope: scope.clone(), spawn, ground, columns, steep });
 
     // The ground: along each column, soil or stone under a layer of its surface, and stone down to the bottom.
@@ -595,14 +607,19 @@ fn layers(scope: &Scope, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
                 Some(grow(SPECIES[cell.mark], x, y, z, height as f64, room, &mut cell.random("tree"), &|x, z| f.ground(x, z)))
             })
             .on(on.clone())
-            .far(canopy.about(on.clone(), 0, TREE_TOP))
+            .within(region.clone())
+            // Under the crowns of the trees around.
+            .far(canopy.about(on.clone(), 0, TREE_TOP).within(region.widened(TREE_REACH)))
     };
 
     // Boulders and fallen logs.
     let rock_cell = m(4.0);
     let on_ground = |name, reach| {
         let anchor = f.clone();
-        Population::new(name, 2.0, rock_cell).reach(reach).size(m(2.0)).on(on.clone()).anchor_along(1, move |line| Some(anchor.spot(line)))
+        // Thinned by the ground on the level's sites, at most its size apart.
+        let size = m(2.0);
+        let population = Population::new(name, 2.0, rock_cell).reach(reach).size(size).on(on.clone()).within(region.widened(size));
+        population.anchor_along(1, move |line| Some(anchor.spot(line)))
     };
     let boulders = {
         let (f, chance) = (f.clone(), fx(0.15));
@@ -637,6 +654,8 @@ fn layers(scope: &Scope, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
         .reach([0, m(10.0), 0])
         .size(column_width)
         .on(on.clone())
+        // A patch N wide round each cell's centre.
+        .within(region.widened(PLANTS / 2))
         .anchor_along(1, move |line| {
             let [cx, cz] = line.centre;
             Some([cx as f64, anchor.ground(cx, cz) as f64 + 0.5, cz as f64])
@@ -650,9 +669,12 @@ fn layers(scope: &Scope, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
                 if r >= LITTER {
                     continue;
                 }
-                // Rarer as the forest's share falls: as dense as it is.
+                // Rarer as the forest's share falls: as dense as it is, none where it has none.
                 let share = (f.ground.share)(xi, zi);
-                let r = if share >= Fx::ONE { r } else { r / share.max(Fx::EPSILON) };
+                if share <= Fx::ZERO {
+                    continue;
+                }
+                let r = if share >= Fx::ONE { r } else { r / share };
                 let c = f.column(xi, zi);
                 let (x, y, z) = (xi as f64, (c.height + 1) as f64, zi as f64);
                 let random = &mut Rng::new(hash64(f.s("plants, randomly"), xi, zi, 0));

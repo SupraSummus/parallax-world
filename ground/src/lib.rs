@@ -10,6 +10,6 @@ pub mod column;
 pub mod domain;
 pub mod plan;
 
-pub use about::{FieldAbout, PopulationOn, columns, under};
+pub use about::{FieldAbout, PopulationOn, Within, columns, under};
 
 const DOCS: &str = "docs/generators.md";

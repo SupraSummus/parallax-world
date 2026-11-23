@@ -13,7 +13,7 @@ use worldgen::noise::{Fx, Text, smoothstep, stream};
 use worldgen::units::Units;
 
 use crate::DOCS;
-use crate::plan::{Bid, Holding, Kept, Land, Plan, Sloped, slot};
+use crate::plan::{Bid, Bids, Holding, Kept, Land, Plan, Sloped, slot};
 
 /**
  * A part of a world by name, and the seeds of what it draws, each from
@@ -64,6 +64,15 @@ pub trait Domain: Send + Sync {
     /** Its bid for column (x, z), a fraction (see Land): by default none, so it has what no other outbids it for. */
     fn bid(&self, _x: i64, _z: i64) -> Fx {
         Fx::ZERO
+    }
+
+    /**
+     * The least and the most it bids over columns `min` to `max` (x, z),
+     * inclusive: a rule, by which the land knows where a domain surely has
+     * none (Holding::region). By default anything.
+     */
+    fn bids(&self, _min: [i64; 2], _max: [i64; 2]) -> (Fx, Fx) {
+        (Fx::MIN, Fx::MAX)
     }
 
     /**
@@ -158,11 +167,11 @@ impl Lie {
  */
 pub fn compose(domains: &[Arc<dyn Domain>], ground: &Arc<Sloped>, scale: i64, width: Fx) -> Vec<Layer> {
     let holding: Vec<Arc<dyn Domain>> = domains.iter().filter(|d| d.holds_land()).cloned().collect();
-    let bid = |d: &Arc<dyn Domain>| -> Bid {
-        let d = d.clone();
-        Box::new(move |x, z| d.bid(x, z))
+    let bidding = |d: &Arc<dyn Domain>| -> (Bid, Bids) {
+        let (d, over) = (d.clone(), d.clone());
+        (Box::new(move |x, z| d.bid(x, z)), Box::new(move |min, max| over.bids(min, max)))
     };
-    let land = (holding.len() > 1).then(|| Arc::new(Land::new(scale, width, holding.iter().map(bid).collect())));
+    let land = (holding.len() > 1).then(|| Arc::new(Land::new(scale, width, holding.iter().map(bidding).collect())));
     let mut holds = (0..).map(|d| land.as_ref().map_or_else(Holding::all, |land| land.holding(d)));
     let mut hold = |d: &Arc<dyn Domain>| if d.holds_land() { holds.next().expect("endless") } else { Holding::all() };
     domains.iter().flat_map(|d| d.clone().layers(ground, hold(d))).collect()

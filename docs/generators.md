@@ -101,6 +101,10 @@ The ground's own field also says what it is under all that (`FieldAbout::ground`
 solid down without end.
 A population's things may stand on such a plan (`PopulationOn::on`),
 each anchored at most N (its cell) off it.
+And either may be drawn within a **region** of columns (`Within::within`):
+where something may be, asked of a rectangle of them (`Region`),
+such as a domain's share of the land ("Land") or the trees below the treeline.
+Such rules add up, each narrowing where a layer is asked.
 So a host may ask for any box, in any order,
 and a field about the ground costs little in the air above it
 or the rock below it, where it is not asked at all.
@@ -459,12 +463,16 @@ Broken rules panic, naming the thing and pointing here:
   only points a query looks at are checked,
   so derive `wander` from the most a rule can stray.
 - **Kinds.** A world has at most 256 kinds: a kind is a byte.
+- **Bids.** A domain's bid for a column lies within what it `bids`
+  over any rectangle holding it.
+  Checked only through what is drawn within the regions it gives ("Meets", "Stands").
 - **Slopes.** A `Sloped` plan's column differs from a neighbour's
   by at most its `slope`, checked as one is made and the other is kept:
   so every two ever kept together.
 - **Chances.** A cell's chance is at most its population's `chance`.
 - **Stands.** A thing's anchor lies where its population `stands`:
-  on a plan (`on`), at most N (its cell) off it.
+  on a plan (`on`), at most N (its cell) off it;
+  within a region, in a column it may be in.
 - **Meets.** A field draws in a box what it `meets` there:
   nothing where it says nothing, solid of its kind where it says all.
   It is asked of the box two sites wider each way than the sites drawn,
@@ -557,6 +565,13 @@ A domain added later is seen by the others only as a smaller share:
 adding the fields changed neither the forest nor the towns.
 `compose` hands each domain its hold (`Holding`):
 its share and whether it owns a column, never an index into the land.
+A domain also says the least and the most it bids over a rectangle of columns
+(`bids`, a rule; by default anything): the towns by how near one may be.
+Where the most it bids is `width` behind the least another bids,
+its share is surely none, and its hold's region says so (`Holding::region`).
+What it draws by its share is drawn within that region,
+so away from the towns their streets, the fields and the landmarks' ground
+are not asked at all, nor the forest's things over the treeline (`Forest::thinned`).
 Relief holds no land (`holds_land`):
 the valley's mountains (`mountains.rs`) raise the ground all of them stand on,
 either side of its course (`course.rs`), the line it winds along,
@@ -852,7 +867,7 @@ The moor (`worlds/src/valley/moor.rs`) is the shortest whole world to start from
 `Node::group`, `Child::new`, and `Shape::ball` and the like,
 solid and filling unless told to `paint` or `carve`;
 `.meets(…)` or `.about(ground, below, above)` on a field, `.stands(…)` or `.on(ground)` on a population,
-says where it is ("Model");
+and `.within(region)` on either, says where it is ("Model");
 the ground's field `.ground(plan, below, above, kind)`, its columns ending `Column::under(kind)`:
 a world is solid under its ground, not a shell over a hollow.
 A shape kept with a chance is made with the long form (`ball(…, fill, op)`,

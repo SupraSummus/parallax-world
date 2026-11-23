@@ -142,6 +142,8 @@ Numbers are for the forest at 1280×800, as measured when written.
 - **Layers that don't say where they are are drawn everywhere**
   (`Field::meets`, `Population::stands`):
   the city's buildings, and the towns', landmarks', settlements' and steadings' things.
+  What the railway, the moor and the learned settlements draw by their shares too:
+  they don't bound their bids (`Domain::bids`), so their regions are everywhere.
   Saying so is for speed, not simplicity:
   a promise per layer says again what `heights` says once.
   The railway's piers can't yet: a bridge has no greatest height,
