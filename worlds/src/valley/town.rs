@@ -4,23 +4,25 @@
 //! their church and well; market towns of shops round a market hall, some
 //! walled with gates on their main street. A style is how its houses are
 //! built: southern plaster under low tiles, northern walls under steep
-//! slate, timber frames, brick with stepped gables. A domain of the valley
+//! slate, timber frames, brick with stepped gables. A part of the valley
 //! (valley.rs): it bids for the land around its towns, levels the ground
 //! under them, and draws only the columns it wins. Its trees are the forest's.
 
 use std::sync::Arc;
 
+use ground::FieldAbout;
 use ground::column::Column;
-use ground::domain::{Domain, Scope, eased};
-use ground::plan::{Claims, Holding, Plan, Sloped};
-use ground::{FieldAbout, Within};
+use ground::land::{Columns, Pull, eased, of_columns};
+use ground::plan::{Claims, Plan, Sloped};
 use worldgen::frame::{Frame, Part, U, V, W, back, walls};
 use worldgen::generator::{
     ANY_SIZE, Child, Children, Far, Fill, Kind, Layer, Node, Op, Population, SOLID, Shape, Shapes, Span, bounds_of_shapes,
 };
 use worldgen::grid::Box3;
 use worldgen::kinds;
-use worldgen::noise::{Fx, Rng, ease_towards, fx, hash64};
+use worldgen::land::owns;
+use worldgen::noise::{Fx, Rng, Scope, ease_towards, fx, hash64};
+use worldgen::scalar::Scalar;
 use worldgen::units::{Units, m};
 
 use crate::forest::{self, K as F, Relief, Species, make_tree};
@@ -479,25 +481,23 @@ impl Towns {
     }
 }
 
-impl Domain for Towns {
-    /** Ahead inside its streets, behind a few metres out. */
-    fn bid(&self, x: i64, z: i64) -> Fx {
-        bid(self.distance(x, z))
-    }
-
-    /** Its bid at the least distance: the less, the more it is. */
-    fn bids(&self, min: [i64; 2], max: [i64; 2]) -> (Fx, Fx) {
-        (-MOST, bid(self.least_distance(min, max)))
-    }
-
-    /** To the town's streets, all the way under it and easing back over TERRACE. */
-    fn shape(&self, x: i64, z: i64, _: Fx) -> Option<(Fx, Fx)> {
-        self.near(z).and_then(|t| eased(Units(t.level).to_fx(), TERRACE, t.distance(x, z)))
+impl Towns {
+    /** Its bid: ahead inside its streets, behind a few metres out; over columns, as it is at the least distance. */
+    pub fn bid(self: &Arc<Self>) -> Scalar {
+        let (at, over) = (self.clone(), self.clone());
+        of_columns(move |x, z| bid(at.distance(x, z)), move |min, max| (-MOST, bid(over.least_distance(min, max))))
     }
 
     /** Its streets' surface, and the towns, both only where it owns the land. */
-    fn layers(self: Arc<Self>, ground: &Arc<Sloped>, hold: Holding) -> Vec<Layer> {
+    pub fn layers(self: Arc<Self>, ground: &Arc<Sloped>, hold: Scalar) -> Vec<Layer> {
         layers(self, hold, ground.clone())
+    }
+}
+
+impl Pull for Towns {
+    /** To the town's streets, all the way under it and easing back over TERRACE. */
+    fn pull(&self, x: i64, z: i64, _: Fx) -> Option<(Fx, Fx)> {
+        self.near(z).and_then(|t| eased(Units(t.level).to_fx(), TERRACE, t.distance(x, z)))
     }
 }
 
@@ -512,13 +512,13 @@ fn bid(distance: Units) -> Fx {
 /** How far a column with no town near is from one. */
 const FAR: Units = Units(i64::MAX / 4);
 
-fn layers(towns: Arc<Towns>, hold: Holding, ground: Arc<Sloped>) -> Vec<Layer> {
-    let region = hold.region();
+fn layers(towns: Arc<Towns>, hold: Scalar, ground: Arc<Sloped>) -> Vec<Layer> {
+    let region = hold.clone();
     let surface = {
         let (towns, surface_ground) = (towns.clone(), ground.clone());
         ground::columns("streets", 0.5, Op::Paint, move |x, z| {
             let spot = towns.spot(x, z);
-            if spot == Spot::Outside || !hold.owns(x, z) {
+            if spot == Spot::Outside || !owns(hold.column(x, z)) {
                 return Vec::new();
             }
             let h = surface_ground.at(x, z);
@@ -537,7 +537,7 @@ fn layers(towns: Arc<Towns>, hold: Holding, ground: Arc<Sloped>) -> Vec<Layer> {
             }
         })
         .about(ground.clone(), m(0.5), 2)
-        .within(region)
+        .within(region, 0)
     };
     let anchor = towns.clone();
     let built = Population::new("towns", 1.5, m(256.0))

@@ -2,9 +2,9 @@
 
 use std::sync::Arc;
 
-use ground::domain::Scope;
 use worldgen::generator::{Layer, generate, generate_shown, kind_of};
 use worldgen::grid::{ALPHA, Box3, is_site};
+use worldgen::noise::Scope;
 use worldgen::picture::{Camera, picture};
 use worldgen::tiles::{TILE, make_tiles, tile_box};
 use worldgen::units::UNIT_SIZE;

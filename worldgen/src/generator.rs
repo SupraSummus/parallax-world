@@ -588,7 +588,7 @@ pub struct KindDef {
 }
 
 /**
- * A domain's kinds, after `base` others (see "Composing" in
+ * A part's kinds, after `base` others (see "Composing" in
  * docs/generators.md): `enum K` of their names, `KINDS` to append to a
  * generator's, and `k` for a name's Kind. A kind followed by `walk_through`
  * is one a body walks through (KindDef::walk_through), by `glows` one that
@@ -624,7 +624,7 @@ macro_rules! kinds {
 }
 
 pub struct Generator {
-    /** A world of domains has each's kinds, those it builds on first (see "Composing" in docs/generators.md). */
+    /** A world of parts has each's kinds, those it builds on first (see "Composing" in docs/generators.md). */
     pub kinds: Vec<KindDef>,
     pub seed: u64,
     pub layers: Vec<Layer>,

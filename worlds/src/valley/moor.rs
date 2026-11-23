@@ -4,9 +4,9 @@
 //! of cairns between them. Written from the engine's public API alone
 //! (docs/generators.md).
 //!
-//! A domain too, like the forest (`Moor`): its layers lie on ground decided
-//! outside it, where it owns the land, and what it places, steadings and
-//! pools, only where it surely will (`Moorland`). The valley (valley.rs)
+//! A part of worlds, like the forest (`Moor`): its layers lie on ground
+//! decided outside it, where it owns the land, and what it places,
+//! steadings and pools, only where it surely will (`Moorland`). The valley (valley.rs)
 //! has it on its uplands and along stretches of its floor (`Uplands`);
 //! `moor` is the moor alone, all of its land, with its own stream; `fog`
 //! the same in fog, mist over all of it.
@@ -14,22 +14,24 @@
 use std::sync::Arc;
 
 use ground::column::Column;
-use ground::domain::{Domain, Lie, Scope, compose, eased};
-use ground::plan::{Claims, Holding, Plan, Sloped};
+use ground::land::{Columns, Lie, Pull, eased, of_columns};
+use ground::plan::{Claims, Plan, Sloped};
 use ground::{FieldAbout, PopulationOn};
 use worldgen::build::thick;
 use worldgen::frame::{Frame, Part, facing, walls};
 use worldgen::generator::{ANY_SIZE, Child, Far, Field, Generator, Kind, Layer, Meets, Node, Op, Population, Shape, Span};
 use worldgen::js;
 use worldgen::kinds;
-use worldgen::noise::{Fbm, Fx, Rng, ValueNoise, fx, hash64, smoothstep};
+use worldgen::land::owns;
+use worldgen::noise::{Fbm, Fx, Rng, Scope, ValueNoise, fx, hash64, smoothstep};
+use worldgen::scalar::Scalar;
 use worldgen::units::{Units, m};
 use worldgen::{Entry, World};
 
 use super::landmarks::{self, Landmarks};
 use super::mountains::{self, K as A};
 use super::railway::Railway;
-use super::town::{self, K as T};
+use super::town::K as T;
 use crate::forest::K as F;
 use crate::path::Path;
 use crate::valley::{self, Terrain};
@@ -148,7 +150,7 @@ impl Steading {
         ([x as f64, z as f64], [x as f64 + dx * end, z as f64 + dz * end])
     }
 
-    /** How it shapes the ground at (x, z) (Domain::shape): level under its hut, easing back over TERRACE. */
+    /** How it shapes the ground at (x, z) (Pull::pull): level under its hut, easing back over TERRACE. */
     fn pull(&self, x: i64, z: i64) -> Option<(Fx, Fx)> {
         let c = self.centre;
         eased(self.level.to_fx(), TERRACE, Units((x - c[0]).abs().max((z - c[1]).abs()) - HUT_HALF))
@@ -172,7 +174,7 @@ impl Pool {
         if d2 >= self.radius.pow(2) { Fx::ZERO } else { Fx::ONE - Units(d2).to_fx() / Units(self.radius.pow(2)) }
     }
 
-    /** How it shapes `ground` at (x, z) (Domain::shape): hollowed, deepest at the centre, easing to nothing at the rim. */
+    /** How it shapes `ground` at (x, z) (Pull::pull): hollowed, deepest at the centre, easing to nothing at the rim. */
     fn pull(&self, x: i64, z: i64, ground: Fx) -> Option<(Fx, Fx)> {
         let inside = self.inside(x, z);
         (inside > Fx::ZERO).then(|| (ground - inside * inside * self.dig, Fx::ONE))
@@ -242,7 +244,7 @@ impl Moorland {
     /**
      * The moorland of `seed` on ground `height` high (before it levels
      * it), with steadings and pools where `lead`, by how much its bid
-     * leads every other domain's at least, is SURE: their columns are its.
+     * leads every other bid at least, is SURE: their columns are its.
      * Steadings claimed from spots by `chance`; a stream along `line`, if
      * any; water in every hollow up to `level`, or without one, in pools;
      * mist as `lies` says.
@@ -331,7 +333,7 @@ impl Moorland {
         }
     }
 
-    /** How it shapes `ground` at (x, z) (Domain::shape): level under the hut of a steading there, hollowed under a pool. */
+    /** How it shapes `ground` at (x, z) (Pull::pull): level under the hut of a steading there, hollowed under a pool. */
     fn pull(&self, x: i64, z: i64, ground: Fx) -> Option<(Fx, Fx)> {
         self.pool(x, z).and_then(|pool| pool.pull(x, z, ground)).or_else(|| self.steadings.near(x, z, NEAR)?.1.pull(x, z))
     }
@@ -470,11 +472,6 @@ impl Uplands {
         }
     }
 
-    /** How much of column (x, z) the moor would have alone with the forest, as the valley's land eases (valley::LEAD). */
-    fn alone(&self, x: i64, z: i64) -> Fx {
-        smoothstep(-valley::LEAD, valley::LEAD, self.bid(x, z))
-    }
-
     /** Its bid for column (x, z), from position alone. */
     pub fn bid(&self, x: i64, z: i64) -> Fx {
         let h = self.terrain.ground(x, z).round_units().0;
@@ -501,7 +498,7 @@ impl Uplands {
     }
 
     /**
-     * By how much its bid leads every other domain's at least: off the
+     * By how much its bid leads every other bid at least: off the
      * towns and their fields the others bid nothing (the forest); less by
      * the path, the railway and the landmarks, which steadings and pools
      * keep off.
@@ -530,7 +527,7 @@ impl Uplands {
 }
 
 /**
- * The moor, a domain: its moorland, which shapes the ground; bidding for
+ * The moor: its moorland, which shapes the ground; bidding for
  * the valley's land as its `uplands` do, if it shares any (its boulders
  * as many as its share); a path through it that others draw, if any; and
  * whether nothing is under it: its peat is the ground, down without end.
@@ -549,24 +546,37 @@ impl Moor {
     }
 }
 
-impl Domain for Moor {
-    fn bid(&self, x: i64, z: i64) -> Fx {
+impl Moor {
+    /** Its bid for the land, a scalar of columns (`bid_at`, unbounded). */
+    pub fn bid(self: &Arc<Self>) -> Scalar {
+        let at = self.clone();
+        of_columns(move |x, z| at.bid_at(x, z), |_, _| (Fx::MIN, Fx::MAX))
+    }
+
+    fn bid_at(&self, x: i64, z: i64) -> Fx {
         self.uplands.as_ref().map_or(Fx::ZERO, |u| u.bid(x, z))
     }
 
-    fn shape(&self, x: i64, z: i64, ground: Fx) -> Option<(Fx, Fx)> {
-        self.moorland.pull(x, z, ground)
-    }
-
-    /** Drawn where it owns the land, its heath over the landmarks on it and its mist over them and the railway (`Alone`); its kinds are KINDS, after the valley's. */
-    fn layers(self: Arc<Self>, ground: &Arc<Sloped>, hold: Holding) -> Vec<Layer> {
+    /**
+     * Drawn where it owns the land, `hold`; its heath over the landmarks on
+     * it and its mist over them and the railway, by `alone`, its share of
+     * the land as it would be without them (`Alone`). Its kinds are KINDS,
+     * after the valley's.
+     */
+    pub fn layers(self: Arc<Self>, ground: &Arc<Sloped>, hold: Scalar, alone: Scalar) -> Vec<Layer> {
         let alone = self.uplands.clone().map(|uplands| Alone {
             landmarks: uplands.landmarks.clone(),
             railway: uplands.railway.clone(),
-            share: Plan::dithered("moor alone", town::BID_SCALE, move |x, z| uplands.alone(x, z)),
+            share: alone,
         });
         let on = Ground { ground: ground.clone(), hold, path: self.path.clone(), under: self.under, alone };
         layers(self.moorland.clone(), on)
+    }
+}
+
+impl Pull for Moor {
+    fn pull(&self, x: i64, z: i64, ground: Fx) -> Option<(Fx, Fx)> {
+        self.moorland.pull(x, z, ground)
     }
 }
 
@@ -577,7 +587,7 @@ impl Domain for Moor {
  */
 struct Ground {
     ground: Arc<Sloped>,
-    hold: Holding,
+    hold: Scalar,
     path: Option<Arc<Path>>,
     under: bool,
     alone: Option<Alone>,
@@ -585,14 +595,14 @@ struct Ground {
 
 /**
  * The landmarks and the railway on the moor's land, and the share of
- * each column it would have without them (`Uplands::alone`): a landmark
+ * each column it would have without them: a landmark
  * keeps trees and steadings off its clearing, not the heath or the mist;
  * the railway keeps nothing off the mist.
  */
 struct Alone {
     landmarks: Arc<Landmarks>,
     railway: Arc<Railway>,
-    share: Plan<Fx>,
+    share: Scalar,
 }
 
 /** The moor's layers' state: its moorland, and what it lies on. */
@@ -607,17 +617,17 @@ impl Heath {
     }
 
     fn owns(&self, x: i64, z: i64) -> bool {
-        self.ground.hold.owns(x, z)
+        owns(self.ground.hold.column(x, z))
     }
 
     fn share(&self, x: i64, z: i64) -> Fx {
-        self.ground.hold.share(x, z)
+        self.ground.hold.column(x, z)
     }
 
     /** Its share of column (x, z)'s air: of the land, or where a landmark or the railway reaches, as without them (asked only there: costly). */
     fn air(&self, x: i64, z: i64) -> Fx {
         match &self.ground.alone {
-            Some(a) if a.landmarks.site(x, z).is_some() || a.railway.reaches(x, z, 0) => a.share.at(x, z),
+            Some(a) if a.landmarks.site(x, z).is_some() || a.railway.reaches(x, z, 0) => a.share.column(x, z),
             _ => self.share(x, z),
         }
     }
@@ -633,7 +643,7 @@ impl Heath {
             return Some(Cover::All);
         }
         let a = self.ground.alone.as_ref()?;
-        let outside = a.landmarks.lawn(x, z).filter(|_| a.share.at(x, z) >= Fx::HALF)?;
+        let outside = a.landmarks.lawn(x, z).filter(|_| owns(a.share.column(x, z)))?;
         Some(if outside > Units(0) { Cover::All } else { Cover::Surface })
     }
 
@@ -663,7 +673,7 @@ pub fn fog(seed: u64) -> World {
 fn moor_in(seed: u64, lies: Mist) -> World {
     let world = Scope::new(seed);
     let (heath, moorland) = heath_and_moorland(&world, lies);
-    let moor: Arc<dyn Domain> = Arc::new(Moor { moorland: moorland.clone(), uplands: None, path: None, under: true });
+    let moor = Arc::new(Moor { moorland: moorland.clone(), uplands: None, path: None, under: true });
     // The heath, levelled under each hut.
     let ground = Lie::new(move |x, z| heath(x, z)).shaped(vec![moor.clone()]).ground(GROUND_SCALE, SLOPE);
     let spawn = {
@@ -672,7 +682,8 @@ fn moor_in(seed: u64, lies: Mist) -> World {
         let y = Units(ground.at(x, z)).max(WATER).0 + m(2.0);
         [x, y + ((x + y + z) & 1), z]
     };
-    let layers = compose(&[moor], &ground, GROUND_SCALE, Fx::ONE);
+    let all = Scalar::constant(Fx::ONE);
+    let layers = moor.layers(&ground, all.clone(), all);
     // The valley's kinds, its own last.
     World {
         generator: Generator { kinds: valley::kinds(), seed: world.seed("layers"), layers },

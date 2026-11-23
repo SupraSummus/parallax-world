@@ -3,10 +3,9 @@
 //! underneath and heaped where the cover is thick, read where the wind
 //! has carried it to, so only the tiles they are in are made anew.
 
-use ground::domain::Scope;
 use worldgen::generator::{Layer, Meets, Op, Span};
 use worldgen::kinds;
-use worldgen::noise::{Fbm, fx, smoothstep};
+use worldgen::noise::{Fbm, Scope, fx, smoothstep};
 use worldgen::time;
 use worldgen::units::{Units, m};
 

@@ -1,18 +1,20 @@
 //! Farmland around the valley's towns: plots of wheat, stubble with
 //! haystacks, ploughed and planted rows, meadows, hedges between them.
-//! A domain of the valley (valley.rs) that reads only the towns' places
+//! A part of the valley (valley.rs) that reads only the towns' places
 //! and the ground's slope, both coarser than it: it bids for gentle land
 //! near towns, and draws only the columns it wins.
 
 use std::sync::Arc;
 
 use ground::column::Column;
-use ground::domain::{Domain, Scope};
-use ground::plan::{Bid, Bids, Holding, Plan, Sloped};
-use ground::{FieldAbout, PopulationOn, Within};
+use ground::land::{Columns, of_columns};
+use ground::plan::{Plan, Sloped};
+use ground::{FieldAbout, PopulationOn};
 use worldgen::generator::{Layer, Node, Op, Population, Shape, stripe};
 use worldgen::kinds;
-use worldgen::noise::{Fbm, Fx, Rng, ValueNoise, fx, hash, hash64, smoothstep};
+use worldgen::land::owns;
+use worldgen::noise::{Fbm, Fx, Rng, Scope, ValueNoise, fx, hash, hash64, smoothstep};
+use worldgen::scalar::Scalar;
 use worldgen::units::{Units, m};
 
 use super::town::{self, Towns};
@@ -37,17 +39,17 @@ pub const SLOPE_SCALE: i64 = m(16.0);
 /**
  * The fields' bid for column (x, z) round the valley's towns: up to 0.6
  * at a town's edge, none 90 to 150 m out (by noise), and none where the
- * ground is steep: `slope`, rise over run. And over rectangles
- * (Domain::bids): none beyond 150 m of the towns.
+ * ground is steep: `slope`, rise over run. And over rectangles: none
+ * beyond 150 m of the towns.
  */
-pub fn round_towns(scope: &Scope, towns: Arc<Towns>, slope: Arc<Plan<Fx>>) -> (Bid, Bids) {
+pub fn round_towns(scope: &Scope, towns: Arc<Towns>, slope: Arc<Plan<Fx>>) -> Scalar {
     let reach = Fbm::<{ m(160.0) }, 3>::new(scope.seed("reach"));
     let (least, more) = (Units::m(90.0), Units::m(60.0));
-    let bids: Bids = {
+    let over = {
         let towns = towns.clone();
-        Box::new(move |min, max| (-Fx::ONE, if towns.least_distance(min, max) >= least + more { -Fx::ONE } else { fx(0.6) }))
+        move |min, max| (-Fx::ONE, if towns.least_distance(min, max) >= least + more { -Fx::ONE } else { fx(0.6) })
     };
-    let bid: Bid = Box::new(move |x, z| {
+    let at = move |x, z| {
         let d = towns.distance(x, z).max(Units(0));
         let r = least + (reach.at(x, z) * more).floor_units();
         if d >= r {
@@ -55,8 +57,8 @@ pub fn round_towns(scope: &Scope, towns: Arc<Towns>, slope: Arc<Plan<Fx>>) -> (B
         }
         let near = fx(0.6) * (r - d) / r;
         near - smoothstep(fx(0.12), fx(0.25), slope.at(x, z))
-    });
-    (bid, bids)
+    };
+    of_columns(at, over)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -71,30 +73,19 @@ enum Crop {
 
 const CROPS: [Crop; 6] = [Crop::Wheat, Crop::Wheat, Crop::Stubble, Crop::Ploughed, Crop::Rows, Crop::Meadow];
 
-/** The fields, a domain bidding `bid` for each column and `bids` over rectangles (Domain::bids), kept off the forest's `path`. */
+/** The fields, kept off the forest's `path`. */
 pub struct Fields {
     scope: Scope,
     path: Arc<Path>,
-    bid: Bid,
-    bids: Bids,
 }
 
 impl Fields {
-    pub fn new(scope: Scope, path: Arc<Path>, (bid, bids): (Bid, Bids)) -> Fields {
-        Fields { scope, path, bid, bids }
-    }
-}
-
-impl Domain for Fields {
-    fn bid(&self, x: i64, z: i64) -> Fx {
-        (self.bid)(x, z)
+    pub fn new(scope: Scope, path: Arc<Path>) -> Fields {
+        Fields { scope, path }
     }
 
-    fn bids(&self, min: [i64; 2], max: [i64; 2]) -> (Fx, Fx) {
-        (self.bids)(min, max)
-    }
-
-    fn layers(self: Arc<Self>, ground: &Arc<Sloped>, hold: Holding) -> Vec<Layer> {
+    /** Its layers on `ground`, where `hold` owns the land. */
+    pub fn layers(&self, ground: &Arc<Sloped>, hold: Scalar) -> Vec<Layer> {
         layers(&self.scope, hold, ground.clone(), self.path.clone())
     }
 }
@@ -102,7 +93,7 @@ impl Domain for Fields {
 /** What the fields' layers know of a column. */
 struct Plots {
     seed: u64,
-    hold: Holding,
+    hold: Scalar,
     /** The forest's path. */
     path: Arc<Path>,
     warp: ValueNoise<{ m(64.0) }>,
@@ -115,7 +106,7 @@ impl Plots {
      * a hedge on some of their edges.
      */
     fn crop(&self, x: i64, z: i64) -> Option<Crop> {
-        if !self.hold.owns(x, z) || self.path.by(x, z, Units::m(1.6).to_fx()) {
+        if !owns(self.hold.column(x, z)) || self.path.by(x, z, Units::m(1.6).to_fx()) {
             return None;
         }
         let from_path = self.path.across(x, z);
@@ -133,8 +124,8 @@ impl Plots {
 }
 
 /** The fields' layers on `ground`, along `path`, where they own the land. */
-fn layers(scope: &Scope, hold: Holding, ground: Arc<Sloped>, path: Arc<Path>) -> Vec<Layer> {
-    let region = hold.region();
+fn layers(scope: &Scope, hold: Scalar, ground: Arc<Sloped>, path: Arc<Path>) -> Vec<Layer> {
+    let region = hold.clone();
     let f = Arc::new(Plots { seed: scope.seed("plots"), hold, path, warp: ValueNoise::new(scope.seed("warp")) });
     let dithers = scope.seed("dither");
     let plots = {
@@ -158,7 +149,7 @@ fn layers(scope: &Scope, hold: Holding, ground: Arc<Sloped>, path: Arc<Path>) ->
             .spans()
         })
         .about(on, m(0.5), m(1.4))
-        .within(region.clone())
+        .within(region.clone(), 0)
     };
     // Haystacks on the stubble.
     let haystacks = {
@@ -168,7 +159,7 @@ fn layers(scope: &Scope, hold: Holding, ground: Arc<Sloped>, path: Arc<Path>) ->
             .chance(chance)
             .size(m(4.0))
             .on(ground.clone())
-            .within(region)
+            .within(region, 0)
             .anchor_along(1, move |line| {
                 let [i, k] = line.across;
                 Some(line.pick(&mut Rng::new(hash64(seed, i, 0, k)), |x, z| ground.at(x, z)))

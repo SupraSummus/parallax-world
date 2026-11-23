@@ -5,8 +5,8 @@
 //! tends to tower. Each range's face steepens
 //! to a sharp crest of peaks and passes, spurs and gullies run down it,
 //! side valleys cut into it, and higher ranges may stand behind. Part of
-//! the valley's relief, not a domain: every domain stands on the ground
-//! they raise. Above a wavering treeline the forest thins out, and a field
+//! the valley's relief, with no share of the land: every part stands on
+//! the ground they raise. Above a wavering treeline the forest thins out, and a field
 //! paints what is there instead: alpine meadows, scree under cliffs, rock
 //! on crests and steep faces, snow above a snowline in hollows and on
 //! gentle ground, not on windswept tops. Behind the first crest the high
@@ -20,11 +20,12 @@ use std::sync::Arc;
 
 use ground::FieldAbout;
 use ground::column::{Column, lowest_around};
-use ground::domain::{Domain, Scope};
-use ground::plan::{Holding, Region, Sloped};
+use ground::land::of_columns;
+use ground::plan::Sloped;
 use worldgen::generator::{Field, Layer, Op};
 use worldgen::kinds;
-use worldgen::noise::{Fbm, Fx, ValueNoise, fx, smoothstep};
+use worldgen::noise::{Fbm, Fx, Scope, ValueNoise, fx, smoothstep};
+use worldgen::scalar::Scalar;
 use worldgen::sites;
 use worldgen::units::{Units, m};
 
@@ -211,13 +212,9 @@ impl Ranges {
     }
 }
 
-/** Part of the relief, so holding no land: drawn over all of it. */
-impl Domain for Ranges {
-    fn holds_land(&self) -> bool {
-        false
-    }
-
-    fn layers(self: Arc<Self>, ground: &Arc<Sloped>, _: Holding) -> Vec<Layer> {
+/** Part of the relief: drawn over all of it, by no share of the land. */
+impl Ranges {
+    pub fn layers(self: Arc<Self>, ground: &Arc<Sloped>) -> Vec<Layer> {
         layers(self, ground.clone())
     }
 }
@@ -226,7 +223,7 @@ impl Domain for Ranges {
  * What covers the ground above the treeline: alpine meadows, then a belt
  * of scree and rock, snow above the snowline where it is not too steep to
  * lie (lower in hollows, bared on tops); rock on crests and steep faces,
- * scree under them; painted over whatever the domains under it drew, down
+ * scree under them; painted over whatever the parts under it drew, down
  * the faces they show.
  */
 fn layers(ranges: Arc<Ranges>, ground: Arc<Sloped>) -> Vec<Layer> {
@@ -289,13 +286,23 @@ pub fn dry(height: i64) -> Fx {
 }
 
 /**
- * Where trees may grow, over rectangles of `ground`'s columns: somewhere
- * under the treeline at its highest and somewhere dry (`below_treeline`,
- * `dry`), as the lowest and the highest ground there may be.
+ * How much of a forest on `ground` is kept, thinning out to the treeline
+ * and to the sea (`below_treeline`, `dry`): none over rectangles of
+ * columns all over the treeline at its highest, or all wet, as the
+ * lowest and the highest ground there may be.
  */
-pub fn wooded(ground: Arc<Sloped>) -> Region {
-    let highest = TREELINE.0 + TREELINE.1.to_fx();
-    Region::new(move |min, max| ground.range(min, max).is_none_or(|(lo, hi)| Units(lo).to_fx() < highest && dry(hi) > Fx::ZERO))
+pub fn wooded(ranges: Arc<Ranges>, ground: Arc<Sloped>) -> Scalar {
+    let (highest, at) = (TREELINE.0 + TREELINE.1.to_fx(), ground.clone());
+    of_columns(
+        move |x, z| {
+            let h = at.at(x, z);
+            ranges.below_treeline(x, z, h) * dry(h)
+        },
+        move |min, max| {
+            let may = ground.range(min, max).is_none_or(|(lo, hi)| Units(lo).to_fx() < highest && dry(hi) > Fx::ZERO);
+            (Fx::ZERO, if may { Fx::ONE } else { Fx::ZERO })
+        },
+    )
 }
 
 /** The sea: water up to its level on sand, its top apart (SEA_TOP), and a beach of sand a little over; nothing higher. */

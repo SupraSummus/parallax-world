@@ -2,11 +2,11 @@
 //! farmland around them, landmarks scattered through it, moorland on its
 //! uplands and along stretches of it, and a railway up one side, between
 //! mountain ranges; past them the sea to the west, an upland to the east.
-//! Domains on one land (ground's plan.rs) that never call each other: each reads
-//! only plans coarser than its own, bids for every column, and draws what
-//! it wins; the mountains raise the ground they all stand on. New
-//! structures join it as landmarks (landmarks.rs), as domains, or as
-//! things of one. See "Composing" in docs/generators.md.
+//! Parts that never call each other, on one land (ground's land.rs): each
+//! reads only plans coarser than its own, bids for every column, and draws
+//! by its share; the mountains raise the ground they all stand on. New
+//! structures join it as landmarks (landmarks.rs), as parts, or as things
+//! of one. See "Composing" in docs/generators.md.
 
 pub mod course;
 pub mod fields;
@@ -19,11 +19,11 @@ pub mod town;
 
 use std::sync::Arc;
 
-use ground::domain::{Domain, Lie, Scope, compose};
+use ground::land::{Lie, shares};
 use ground::plan::Plan;
 use worldgen::entry::{Entry, Known};
 use worldgen::generator::{Generator, KindDef};
-use worldgen::noise::{Fx, fx};
+use worldgen::noise::{Fx, Scope, fx};
 use worldgen::units::{Units, m};
 use worldgen::world::{Find, World};
 
@@ -44,7 +44,7 @@ use town::Towns;
  */
 const SLOPE: i64 = 8;
 
-/** How far a domain's bid leads the rest's for all of a column (Land). */
+/** How far a bid leads the rest's for all of a column (Land). */
 pub const LEAD: Fx = fx(0.125);
 
 /**
@@ -110,7 +110,7 @@ pub const VALLEY: Entry = Entry {
 };
 
 /**
- * The valley of `seed`, its domains in bands: the relief and the ranges,
+ * The valley of `seed`, its parts in bands: the relief and the ranges,
  * then the towns, which level it; then the railway, the landmarks and
  * the moor, which shape what the towns left; then those that only draw
  * on it, the forest and the fields. The camera starts in the forest, on
@@ -138,30 +138,30 @@ pub fn valley(seed: u64) -> World {
         }))
     };
     let spawn = forest::on_path(&ground, &path, m(-31.0), m(3.0));
-    // Thinning out to the treeline, and to the sea.
-    let forest = {
-        let (ranges, ground) = (ranges.clone(), ground.clone());
-        let wooded = mountains::wooded(ground.clone());
-        Forest::new(world.of("forest"), path.clone(), spawn).thinned(
-            move |x, z| {
-                let h = ground.at(x, z);
-                ranges.below_treeline(x, z, h) * mountains::dry(h)
-            },
-            wooded,
-        )
-    };
-    let fields = {
-        let scope = world.of("fields");
-        let bidding = fields::round_towns(&scope, towns.clone(), slope);
-        Fields::new(scope, path, bidding)
-    };
-    let domains: [Arc<dyn Domain>; 7] = [Arc::new(forest), towns, Arc::new(fields), landmarks, moor, ranges, railway];
-    let mut layers = compose(&domains, &ground, town::BID_SCALE, LEAD);
-    layers.push(sky::clouds(seed));
+    let forest = Forest::new(world.of("forest"), path.clone(), spawn).thinned(mountains::wooded(ranges.clone(), ground.clone()));
+    let fields = Fields::new(world.of("fields"), path);
+    let fields_bid = fields::round_towns(&world.of("fields"), towns.clone(), slope);
+    let [on_forest, on_towns, on_fields, on_landmarks, on_moor, on_railway] =
+        shares("land", town::BID_SCALE, LEAD, [Forest::bid(), towns.bid(), fields_bid, landmarks.bid(), moor.bid(), railway.bid()]);
+    // The moor's share as with the forest alone, which its heath and mist keep to over the landmarks and the railway.
+    let [_, moor_alone] = shares("moor alone", town::BID_SCALE, LEAD, [Forest::bid(), moor.bid()]);
+    let layers = [
+        forest.layers(&ground, on_forest),
+        towns.layers(&ground, on_towns),
+        fields.layers(&ground, on_fields),
+        landmarks.layers(&ground, on_landmarks),
+        moor.layers(&ground, on_moor, moor_alone),
+        ranges.layers(&ground),
+        railway.layers(&ground, on_railway),
+    ]
+    .into_iter()
+    .flatten()
+    .chain([sky::clouds(seed)])
+    .collect();
     World { generator: Generator { kinds: kinds(), seed: world.seed("layers"), layers }, spawn, heights: Some(mountains::HEIGHTS), points }
 }
 
-/** The valley's kinds, each domain's after those of the domains it draws from; the moor alone has them too. */
+/** The valley's kinds, each part's after those of the parts it draws from; the moor alone has them too. */
 pub fn kinds() -> Vec<KindDef> {
     [forest::KINDS, town::KINDS, fields::KINDS, mountains::KINDS, landmarks::KINDS, moor::KINDS, railway::KINDS, sky::KINDS].concat()
 }
