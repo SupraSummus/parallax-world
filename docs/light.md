@@ -244,6 +244,16 @@ Tried there, and not kept:
   ("Claims cost coarse tiles most" in [todo.md](todo.md)).
   Were coarse tiles as cheap as fine ones, a few a level would do.
 
+Light bounces at most eight times: a site's rounds stop there (`ROUNDS` in `light/`).
+Where most of it reflects, spread wide,
+it settles in tens of rounds,
+each reading the coarsest level's sites a line's length further round,
+and a lit view may never finish.
+Under clouds tried in [#301](https://github.com/SupraSummus/parallax-world/pull/301),
+eight lit a view in seconds, no pixel over two steps of colour off light settled tightly;
+four, up to ten off; sixteen took minutes.
+Of the reference's scenes, only the cave tells eight from more, a fiftieth darker.
+
 Light adds up, so it is the sum of the sky's, the sun's and the glow's;
 kept apart, the sliders could only mix them,
 but lighting and keeping that light would cost three times as much.

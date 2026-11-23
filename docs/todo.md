@@ -422,6 +422,11 @@ Numbers are for the forest at 1280×800, as measured when written.
   sites that hold what they stop along each direction, boxes' too
   ("Cells hold what they look like", above);
   then coarser levels taking more directions (in Ideas).
+- **Light settles slowly in what reflects most of it, spread wide.**
+  There a site takes tens of rounds,
+  each reading the coarsest level a line's length further round;
+  rounds are capped (`ROUNDS`), so light that bounces more is lost.
+  A coarser level cannot take over the rest at the coarsest.
 
 ## Native
 
