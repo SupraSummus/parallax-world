@@ -21,13 +21,13 @@
 //! The light on a site is what the sites near it reflect of the light on
 //! them, so it settles round by round: round 0 has what glows, the sky and
 //! the coarser level's light, each next round what the sites met reflect
-//! of theirs in the round before; found once it changes by less than a
-//! tolerance (Shared's, TOLERANCE unless set): in a round or two in the
-//! open, in more where light bounces back and forth, as in a closed white
-//! room. Of each round a site keeps the light on its faces (`round`): what
-//! the sites it reflects on read, and what is to settle. Between whole
-//! voxels that touch no light comes: one beside a face is lit as the face
-//! is (`weighed`).
+//! of theirs in the round before, so round n has light bounced n times at
+//! most; found once it changes by less than a tolerance (Shared's,
+//! TOLERANCE unless set), in a round or two in the open, or at ROUNDS,
+//! where light bounces back and forth. Of each round a site keeps the
+//! light on its faces (`round`): what the sites it reflects on read, and
+//! what is to settle. Between whole voxels that touch no light comes: one
+//! beside a face is lit as the face is (`weighed`).
 //!
 //! What is found at a site is a function of the world alone, so the Lights
 //! of all threads keep it together (Shared), each site's found once: no
@@ -70,11 +70,15 @@ const MOST_STEPS: usize = 64;
  * How little of the light on a site is not followed, unless set
  * (Shared::settling): its change from a round to the next, for it to be
  * found; what a site met reflects, and what gets through from past it
- * (`along`). And rounds at most, should it never settle (a closed room
- * that reflects all).
+ * (`along`).
  */
 const TOLERANCE: f32 = 1e-2;
-const ROUNDS: usize = 256;
+/**
+ * Rounds at most, so bounces: where most of the light reflects, spread
+ * wide, it settles in tens of rounds, each reading further round
+ * (docs/light.md).
+ */
+const ROUNDS: usize = 8;
 /**
  * Sites begun between one forgetting and the next (Shared::begun): fewer
  * hold less, and under what a view reads at once, lighting slows by half
@@ -541,7 +545,7 @@ impl Light {
      * The light coming to site `p` of level `i` from every direction, as
      * it settles round by round (`round`): found once the light on its
      * faces changes by less than Shared's tolerance, in a round or two
-     * where little reflects back, in many in a closed white room.
+     * where little reflects back, or after ROUNDS.
      */
     fn light(&mut self, i: usize, p: [i64; 3]) -> [Rgb; N] {
         if let Some(light) = self.site(i, p, |site| site.found.as_deref().copied()) {
