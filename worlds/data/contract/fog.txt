@@ -1,70 +1,60 @@
-heath alpine	3	0.089	0.047
-heath alpine	4	0.092	0.061
-heath alpine	5	0.087	0.077
-heath bog	3	0.060	0.043
-heath bog	4	0.062	0.062
-heath bog	5	0.067	0.089
-heath grassBlades	3	0.089	0.047
-heath grassBlades	4	0.092	0.061
-heath grassBlades	5	0.087	0.077
-heath path	3	0.053	0.053
-heath path	4	0.058	0.061
-heath path	5	0.060	0.078
-heath soil	3	0.054	0.042
-heath soil	4	0.054	0.052
-heath soil	5	0.048	0.072
-moor boulders lichen	1	0.057	0.088
-moor boulders lichen	2	0.066	0.101
-moor boulders lichen	3	0.070	0.106
-moor boulders lichen	4	0.093	0.097
-moor boulders lichen	5	0.071	0.096
-moor boulders stone	1	0.056	0.089
-moor boulders stone	2	0.050	0.093
-moor boulders stone	3	0.051	0.099
-moor boulders stone	4	0.049	0.090
-moor boulders stone	5	0.052	0.100
-steadings drystone	3	0.048	0.048
-steadings drystone	4	0.056	0.068
-steadings lichen	3	0.048	0.048
-steadings lichen	4	0.056	0.068
-steadings stone	3	0.048	0.048
-steadings stone	4	0.056	0.068
-steadings thatch	3	0.048	0.048
-steadings thatch	4	0.056	0.068
-steadings timber	3	0.048	0.048
-steadings timber	4	0.056	0.068
-steadings/cairns lichen	3	0.083	0.077
-steadings/cairns lichen	4	0.069	0.084
-steadings/cairns lichen	5	0.054	0.090
-steadings/cairns stone	3	0.083	0.077
-steadings/cairns stone	4	0.069	0.084
-steadings/cairns stone	5	0.054	0.090
-steadings/hut drystone	1	0.047	0.083
-steadings/hut drystone	2	0.098	0.200
-steadings/hut drystone	3	0.019	0.184
-steadings/hut drystone	4	0.091	0.129
-steadings/hut drystone	5	0.063	0.107
-steadings/hut stone	1	0.047	0.083
-steadings/hut stone	2	0.098	0.200
-steadings/hut stone	3	0.019	0.184
-steadings/hut stone	4	0.091	0.129
-steadings/hut stone	5	0.063	0.107
-steadings/hut thatch	1	0.047	0.083
-steadings/hut thatch	2	0.098	0.200
-steadings/hut thatch	3	0.019	0.184
-steadings/hut thatch	4	0.091	0.129
-steadings/hut thatch	5	0.063	0.107
-steadings/hut timber	1	0.047	0.083
-steadings/hut timber	2	0.098	0.200
-steadings/hut timber	3	0.019	0.184
-steadings/hut timber	4	0.091	0.129
-steadings/hut timber	5	0.063	0.107
-steadings/ring lichen	3	0.059	0.051
-steadings/ring lichen	4	0.059	0.068
-steadings/ring lichen	5	0.065	0.085
-steadings/ring stone	3	0.059	0.051
-steadings/ring stone	4	0.059	0.068
-steadings/ring stone	5	0.065	0.085
+heath alpine	3	0.077	0.037
+heath alpine	4	0.070	0.051
+heath alpine	5	0.094	0.076
+heath bog	3	0.065	0.046
+heath bog	4	0.062	0.063
+heath bog	5	0.075	0.092
+heath grassBlades	3	0.077	0.037
+heath grassBlades	4	0.070	0.051
+heath grassBlades	5	0.094	0.076
+heath path	4	0.067	0.063
+heath path	5	0.054	0.071
+mist mist	1	0.055	0.003
+moor boulders lichen	1	0.052	0.080
+moor boulders lichen	2	0.054	0.095
+moor boulders lichen	3	0.052	0.103
+moor boulders lichen	4	0.056	0.090
+moor boulders lichen	5	0.045	0.094
+moor boulders stone	1	0.049	0.083
+moor boulders stone	2	0.051	0.091
+moor boulders stone	3	0.054	0.098
+moor boulders stone	4	0.049	0.083
+moor boulders stone	5	0.064	0.084
+steadings drystone	4	0.047	0.057
+steadings lichen	4	0.047	0.057
+steadings stone	4	0.047	0.057
+steadings thatch	4	0.047	0.057
+steadings timber	4	0.047	0.057
+steadings/cairns lichen	3	0.077	0.088
+steadings/cairns lichen	4	0.069	0.090
+steadings/cairns lichen	5	0.073	0.091
+steadings/cairns stone	3	0.077	0.088
+steadings/cairns stone	4	0.069	0.090
+steadings/cairns stone	5	0.073	0.091
+steadings/hut drystone	1	0.053	0.086
+steadings/hut drystone	2	0.091	0.204
+steadings/hut drystone	3	0.023	0.176
+steadings/hut drystone	4	0.069	0.122
+steadings/hut drystone	5	0.057	0.101
+steadings/hut stone	1	0.053	0.086
+steadings/hut stone	2	0.091	0.204
+steadings/hut stone	3	0.023	0.176
+steadings/hut stone	4	0.069	0.122
+steadings/hut stone	5	0.057	0.101
+steadings/hut thatch	1	0.053	0.086
+steadings/hut thatch	2	0.091	0.204
+steadings/hut thatch	3	0.023	0.176
+steadings/hut thatch	4	0.069	0.122
+steadings/hut thatch	5	0.057	0.101
+steadings/hut timber	1	0.053	0.086
+steadings/hut timber	2	0.091	0.204
+steadings/hut timber	3	0.023	0.176
+steadings/hut timber	4	0.069	0.122
+steadings/hut timber	5	0.057	0.101
+steadings/ring lichen	4	0.055	0.064
+steadings/ring lichen	5	0.051	0.080
+steadings/ring stone	4	0.055	0.064
+steadings/ring stone	5	0.051	0.080
 stream bed carving	3	0.065	0.046
 stream bed carving	4	0.062	0.063
 stream bed carving	5	0.075	0.092
