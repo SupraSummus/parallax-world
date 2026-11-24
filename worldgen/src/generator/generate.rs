@@ -2,6 +2,8 @@
 //! populations' things' drawables (forms.rs) drawn in order (drawables.rs);
 //! what a box holds throughout (`whole`, `shown`).
 
+use std::cell::OnceCell;
+
 use super::*;
 
 /** The kinds' colours: of each, its shades, and their mean. */
@@ -75,12 +77,12 @@ const KIND_STEPS: u8 = 3;
  * grid may reach one site further in x (its rows start and end on an even x).
  */
 pub fn generate(generator: &Generator, b: &Box3, level: u32) -> VoxelGrid {
-    made(generator, b, level, None)
+    made(&Contents::of(generator, &VoxelGrid::new(b).clip(), level), b, None)
 }
 
-/** `generate`, nothing drawn under `floors`, if any: what is buried there is not made. */
-fn made(generator: &Generator, b: &Box3, level: u32, floors: Option<&Floors>) -> VoxelGrid {
-    let s = 1i64 << level;
+/** `generate` of `b`, whose grid's sites are some of those of `contents`, nothing drawn under `floors`, if any: what is buried there is not made. */
+fn made(contents: &Contents, b: &Box3, floors: Option<&Floors>) -> VoxelGrid {
+    let (generator, s) = (contents.generator, contents.s);
     let mut grid = VoxelGrid::new(b);
     if (0..3).any(|d| b.max[d] <= b.min[d]) {
         // No sites, so nothing to make, not even things near.
@@ -99,7 +101,7 @@ fn made(generator: &Generator, b: &Box3, level: u32, floors: Option<&Floors>) ->
             see(&mut grid, &Added::of(&look, &generator.kinds, op, pick, colour), share, x, y, z);
         }
     };
-    let drawables = drawables_in(generator, &clip, s);
+    let drawables = drawables_in(contents, &clip);
     let mut at = 0;
     while at < drawables.len() {
         // A thing's drawables, together: those of fields one by one.
@@ -423,53 +425,49 @@ fn thing_box(group: &[Drawable], s: i64) -> Box3 {
                 })
                 .collect(),
             Draw::Sites(sites) => sites.iter().map(|(p, ..)| Box3 { min: *p, max: p.map(|v| v + 1) }).collect(),
-            Draw::Field(_) => Vec::new(),
+            Draw::Field(..) | Draw::Over(..) => Vec::new(),
         })
         .collect();
     bounds_of_shapes(&boxes)
 }
 
-/** What draws into `clip` (sites s apart), in drawing order: by layer, then key. */
-fn drawables_in<'a>(generator: &'a Generator, clip: &Box3, s: i64) -> Vec<Drawable<'a>> {
+/** What draws into `clip`, some of the sites of `contents`, in drawing order: by layer, then key. */
+fn drawables_in<'a>(contents: &'a Contents, clip: &Box3) -> Vec<Drawable<'a>> {
+    let (generator, s) = (contents.generator, contents.s);
     // The lattice units the sites of `clip` cover, with what a shape may reach by at this level: a speck, the sites around it.
     let sites = units_of(clip, s);
+    assert!(sites.inside(&contents.units), "{clip:?} is not of the sites its contents are of");
     let units = sites.widen(2 * s);
     let mut drawables = Vec::new();
     let mut things = 0;
-    for layer in &generator.layers {
-        let population = match layer {
-            Layer::Field(field) => {
-                // Asked where it may draw line by line (draw_field).
-                let (order, key, layer) = (field.order, field.name.to_string(), field.name);
-                drawables.push(Drawable { order, key, layer, thing: 0, draw: Draw::Field(field), checked: false });
-                continue;
+    for laid in &contents.layers {
+        let (order, layer, checked) = (laid.order, laid.name, !laid.stands(&sites, s));
+        let mut work = Work::default();
+        let draw = match &laid.form {
+            _ if checked && !checking() => None,
+            // Asked where it may draw line by line (draw_field).
+            Form::Field(f, lines) => Some(Draw::Field(f, *lines)),
+            Form::Shapes { field, near, shapes } => Some(Draw::Over(field, contents.shapes(near, shapes))),
+            Form::Things(p, made) => {
+                let made = contents.made(p, made);
+                // Its things are visited as they were made, on the level's sites; those reaching `units` draw.
+                sites::footprint(s, [0; 3], || {
+                    for thing in &made.things {
+                        things += 1;
+                        let at =
+                            Visit { s, units: &units, order, layer, thing: things, seed: generator.seed, checked, measured: &p.measured };
+                        visit(&thing.node, thing.name.clone(), thing.bounds, &at, &mut drawables);
+                    }
+                });
+                work = made.work;
+                None
             }
-            Layer::Population(p) => p,
         };
-        let checked = !stands_within(population, &sites, s);
-        if checked && !checking() {
-            continue;
+        if let Some(draw) = draw {
+            drawables.push(Drawable { order, key: layer.to_string(), layer, thing: 0, draw, checked });
         }
-        if s > population.size {
-            if let Some(far) = &population.far {
-                let (order, layer) = (population.order, population.name);
-                let (key, draw) = (population.name.to_string(), Draw::Field(far));
-                drawables.push(Drawable { order, key, layer, thing: 0, draw, checked });
-            }
-            continue;
-        }
-        // Its things read the ground on the level's sites, as its fields do (Sloped::at).
-        let work = sites::footprint(s, [0; 3], || {
-            each_thing(generator, population, &anchors_reaching(population, &units), |anchor, node| {
-                let (name, bounds, reach) = (anchor.name(), bounds_of(&node), anchor.reach(population.reach));
-                assert!(bounds.inside(&reach), "{}", past_reach(&name, &bounds, anchor.key, population.reach));
-                things += 1;
-                let (order, layer, seed) = (population.order, population.name, generator.seed);
-                let at = Visit { s, units: &units, order, layer, thing: things, seed, checked, measured: &population.measured };
-                visit(&node, name, bounds, &at, &mut drawables);
-            })
-        });
-        cost::add(population.name, work);
+        // What it looked up, where it stands and what is in it, it did.
+        cost::add(layer, work);
     }
     drawables.sort_by(|a, b| a.order.total_cmp(&b.order).then_with(|| a.key.cmp(&b.key)));
     drawables
@@ -519,45 +517,167 @@ pub enum Whole {
  * keeps what it is.
  */
 pub fn whole(generator: &Generator, b: &Box3, level: u32) -> Option<Whole> {
-    let s = 1i64 << level;
-    let units = units_of(&b.widen(1), s);
-    let mut layers: Vec<&Layer> = generator.layers.iter().collect();
-    let key = |layer: &Layer| match layer {
-        Layer::Field(f) => (f.order, f.name),
-        Layer::Population(p) => (p.order, p.name),
-    };
-    layers.sort_by(|a, b| key(a).0.total_cmp(&key(b).0).then_with(|| key(a).1.cmp(key(b).1)));
-    // What a layer draws in it, and whether that carves; a population's things, which cost the most to ask, as if
-    // drawing nothing unless `things`.
-    let meets = |layer: &Layer, things: bool| match layer {
-        Layer::Field(f) => (f.meets_in(&units, s), f.op == Op::Carve),
-        Layer::Population(p) if !stands_within(p, &units, s) => (Meets::Nothing, false),
-        Layer::Population(p) if s > p.size => {
-            p.far.as_ref().map_or((Meets::Nothing, false), |far| (far.meets_in(&units, s), far.op == Op::Carve))
-        }
-        // As drawables_in makes them, with what a shape may grow by at this level.
-        Layer::Population(p) if things && sites::footprint(s, [0; 3], || reaches(generator, p, &units.widen(2 * s))) => (Meets::Any, false),
-        Layer::Population(_) => (Meets::Nothing, false),
-    };
-    let fold = |things: bool| {
-        let mut holds = Some(Whole::Empty);
-        for layer in &layers {
-            // Things are asked only of what is empty: what is buried or not whole, they leave so.
-            holds = match (meets(layer, things && holds == Some(Whole::Empty)), holds) {
-                ((Meets::Nothing, _), holds) => holds,
-                ((Meets::All(kind), carves), _) if !generator.kinds[kind as usize].medium => {
-                    Some(if carves { Whole::Empty } else { Whole::Buried(kind) })
+    Contents::of(generator, &b.widen(1), level).whole(b)
+}
+
+/**
+ * What the layers of a box at a level draw in it: for `whole` of it and
+ * of its parts, as hosts ask of many (`shown`, `Floors`), and for drawing
+ * it. What a layer is at the level is decided here alone (`Laid`); a
+ * field's shapes and a population's things, which cost the most to ask,
+ * are asked once, of all of it: each is the same whichever box asks (see
+ * "Model" in docs/generators.md), so a part has those of them reaching it.
+ */
+pub(super) struct Contents<'a> {
+    pub(super) generator: &'a Generator,
+    pub(super) s: i64,
+    /** Its layers, in the order they draw. */
+    layers: Vec<Laid<'a>>,
+    /** The lattice units of the sites it is of. */
+    units: Box3,
+}
+
+/** A layer as it is at a level, if it draws anything there. */
+struct Laid<'a> {
+    order: f64,
+    name: &'static str,
+    /** Its population, if it is one's: what it draws is drawn only where its things may stand (Population::stands). */
+    of: Option<&'a Population>,
+    form: Form<'a>,
+}
+
+/** What a layer draws at a level: a field (its own, or a population's far field past its things' size), or things. */
+enum Form<'a> {
+    /** Given along its lines or at each site. */
+    Field(&'a Field, Lines<'a>),
+    /** A field's shapes, those `near` gives (FieldValues::Shapes). */
+    Shapes { field: &'a Field, near: &'a Near<'a>, shapes: OnceCell<Vec<Shape>> },
+    /** A population's things. */
+    Things(&'a Population, OnceCell<Made>),
+}
+
+/** The things a population makes reaching a box, and what making them took. */
+struct Made {
+    things: Vec<Thing>,
+    work: Work,
+}
+
+/** What gives a field's shapes near a box (FieldValues::Shapes), borrowed for as long as the contents are. */
+type Near<'a> = dyn Fn(&Box3) -> Vec<Shape> + Send + Sync + 'a;
+
+/** A thing made: its name and its bounds, which its population's reach of its anchor holds. */
+struct Thing {
+    name: String,
+    bounds: Box3,
+    node: Node,
+}
+
+impl Laid<'_> {
+    /** Whether it may draw in `units` (lattice units, its sites'): a population's what it says, a field's everywhere. */
+    fn stands(&self, units: &Box3, s: i64) -> bool {
+        self.of.is_none_or(|p| stands_within(p, units, s))
+    }
+}
+
+impl<'a> Contents<'a> {
+    /**
+     * Those of the sites `sites` (a box of `level`'s) and of the parts of
+     * them asked about: drawn into (a grid's clip), or whole of a box with
+     * a site round it, as `whole` asks.
+     */
+    pub(super) fn of(generator: &'a Generator, sites: &Box3, level: u32) -> Contents<'a> {
+        let s = 1i64 << level;
+        let field = |field: &'a Field| match &field.values {
+            FieldValues::At(at) => Form::Field(field, Lines::At(at.as_ref())),
+            FieldValues::Spans { axis, spans } => Form::Field(field, Lines::Spans { axis: *axis, spans: spans.as_ref() }),
+            FieldValues::Shapes(near) => Form::Shapes { field, near: near.as_ref(), shapes: OnceCell::new() },
+        };
+        let mut layers: Vec<Laid> = generator
+            .layers
+            .iter()
+            .filter_map(|layer| match layer {
+                Layer::Field(f) => Some(Laid { order: f.order, name: f.name, of: None, form: field(f) }),
+                Layer::Population(p) => {
+                    let form = if s > p.size { field(p.far.as_ref()?) } else { Form::Things(p, OnceCell::new()) };
+                    Some(Laid { order: p.order, name: p.name, of: Some(p), form })
                 }
-                ((_, true), Some(Whole::Empty)) => Some(Whole::Empty),
-                ((_, false), Some(Whole::Buried(kind))) => Some(Whole::Buried(kind)),
-                _ => None,
-            };
-        }
-        holds
-    };
-    // Things only take away from what the rest makes: asked only if that alone is whole.
-    fold(false)?;
-    fold(true)
+            })
+            .collect();
+        layers.sort_by(|a, b| a.order.total_cmp(&b.order).then_with(|| a.name.cmp(b.name)));
+        Contents { generator, s, layers, units: units_of(sites, s) }
+    }
+
+    /**
+     * What box `b`, a part of theirs, holds throughout, as its fields say
+     * (Field::meets) and its things are (`whole`).
+     */
+    pub(super) fn whole(&self, b: &Box3) -> Option<Whole> {
+        let (generator, s) = (self.generator, self.s);
+        let units = units_of(&b.widen(1), s);
+        assert!(units.inside(&self.units), "whole: {b:?} with a site round it is not of the sites its contents are of");
+        // What a layer draws in it, and whether that carves; a population's things, which cost the most to ask, as if
+        // drawing nothing unless `things`. A shape is asked with what it may grow by at this level, as drawing asks it.
+        let reaching = units.widen(2 * s);
+        let meets = |laid: &Laid, things: bool| match &laid.form {
+            _ if !laid.stands(&units, s) => (Meets::Nothing, false),
+            Form::Field(f, _) => (f.meets_in(&units, s), f.op == Op::Carve),
+            Form::Shapes { field, near, shapes } => {
+                // As it says, and nothing where none of its shapes reaches.
+                let said = field.meets_in(&units, s);
+                let reached = said != Meets::Nothing && self.shapes(near, shapes).iter().any(|shape| shape.bounds.overlaps(&reaching));
+                (if reached { said } else { Meets::Nothing }, field.op == Op::Carve)
+            }
+            Form::Things(p, made) if things => {
+                let reached = self.made(p, made).things.iter().any(|thing| thing.bounds.overlaps(&reaching));
+                (if reached { Meets::Any } else { Meets::Nothing }, false)
+            }
+            Form::Things(..) => (Meets::Nothing, false),
+        };
+        let fold = |things: bool| {
+            let mut holds = Some(Whole::Empty);
+            for laid in &self.layers {
+                // Things are asked only of what is empty: what is buried or not whole, they leave so.
+                holds = match (meets(laid, things && holds == Some(Whole::Empty)), holds) {
+                    ((Meets::Nothing, _), holds) => holds,
+                    ((Meets::All(kind), carves), _) if !generator.kinds[kind as usize].medium => {
+                        Some(if carves { Whole::Empty } else { Whole::Buried(kind) })
+                    }
+                    ((_, true), Some(Whole::Empty)) => Some(Whole::Empty),
+                    ((_, false), Some(Whole::Buried(kind))) => Some(Whole::Buried(kind)),
+                    _ => None,
+                };
+            }
+            holds
+        };
+        // Things only take away from what the rest makes: asked only if that alone is whole.
+        fold(false)?;
+        fold(true)
+    }
+
+    /** The shapes `near` gives near the box, once asked, with what a shape may grow by at this level. */
+    fn shapes<'c>(&self, near: &Near, shapes: &'c OnceCell<Vec<Shape>>) -> &'c [Shape] {
+        shapes.get_or_init(|| sites::footprint(self.s, [0; 3], || near(&self.units.widen(2 * self.s))))
+    }
+
+    /**
+     * The things `p` makes reaching the box, once made, as drawing makes
+     * them: on the level's sites, as they read the ground (Sloped::at),
+     * each within its population's reach.
+     */
+    fn made<'c>(&self, p: &Population, made: &'c OnceCell<Made>) -> &'c Made {
+        made.get_or_init(|| {
+            let mut things = Vec::new();
+            let all = anchors_reaching(p, &self.units.widen(2 * self.s));
+            let work = sites::footprint(self.s, [0; 3], || {
+                each_thing(self.generator, p, &all, |anchor, node| {
+                    let (name, bounds, reach) = (anchor.name(), bounds_of(&node), anchor.reach(p.reach));
+                    assert!(bounds.inside(&reach), "{}", past_reach(&name, &bounds, anchor.key, p.reach));
+                    things.push(Thing { name, bounds, node });
+                })
+            });
+            Made { things, work }
+        })
+    }
 }
 
 /**
@@ -568,14 +688,19 @@ pub fn whole(generator: &Generator, b: &Box3, level: u32) -> Option<Whole> {
  * found by halving.
  */
 pub fn shown(generator: &Generator, b: &Box3, level: u32, up: usize) -> Box3 {
+    shown_of(&Contents::of(generator, &b.widen(1), level), b, up)
+}
+
+/** `shown`, of box `b` whose `contents` they are. */
+fn shown_of(contents: &Contents, b: &Box3, up: usize) -> Box3 {
     let (bottom, top) = (b.min[up], b.max[up]);
-    match whole(generator, b, level) {
+    match contents.whole(b) {
         Some(Whole::Buried(_)) => return b.slab(up, top, top),
         Some(Whole::Empty) => return b.slab(up, bottom, bottom),
         None => {}
     }
     let at = |k: i64| (bottom + k * BRICK).min(top);
-    let whole_in = |y0: i64, y1: i64| y0 >= y1 || whole(generator, &b.slab(up, y0, y1), level).is_some();
+    let whole_in = |y0: i64, y1: i64| y0 >= y1 || contents.whole(&b.slab(up, y0, y1)).is_some();
     let bricks: Vec<i64> = (0..=(top - bottom + BRICK - 1).div_euclid(BRICK).max(0)).collect();
     let low = bricks[1..].partition_point(|&k| whole_in(bottom, at(k)));
     let high = low + bricks[low..].partition_point(|&k| !whole_in(at(k), top));
@@ -591,17 +716,19 @@ pub fn shown(generator: &Generator, b: &Box3, level: u32, up: usize) -> Box3 {
  * checking a box made whole against its parts.
  */
 pub fn generate_shown(generator: &Generator, b: &Box3, level: u32, up: usize) -> VoxelGrid {
-    let part = shown(generator, b, level, up);
+    // Its parts are asked what they hold throughout of what it holds, asked once.
+    let contents = Contents::of(generator, &b.widen(1), level);
+    let part = shown_of(&contents, b, up);
     let under = b.slab(up, b.min[up], part.min[up]);
-    let rock = match whole(generator, &under, level) {
+    let rock = match contents.whole(&under) {
         Some(Whole::Buried(kind)) if under.min[up] < under.max[up] => Some(kind),
         _ => None,
     };
     let all = if rock.is_some() { part.slab(up, b.min[up], part.max[up]) } else { part };
-    let floors = Floors::of(generator, &VoxelGrid::new(&all).clip(), up, part.min[up], rock, level);
+    let floors = Floors::of(&contents, &VoxelGrid::new(&all).clip(), up, part.min[up], rock);
     // Nothing buried, nothing is kept from being drawn; all buried, nothing is made, not even things near.
     let under = floors.kind.map(|_| &floors);
-    let mut grid = if part.min[up] < part.max[up] { made(generator, &all, level, under) } else { VoxelGrid::new(&all) };
+    let mut grid = if part.min[up] < part.max[up] { made(&contents, &all, under) } else { VoxelGrid::new(&all) };
     if let Some(kind) = floors.kind {
         let s = 1i64 << level;
         let colour = Palette::new(&generator.kinds, generator.seed).colour(kind, s, b.min.map(|v| v * s));
@@ -643,24 +770,24 @@ impl Floors {
      * buried of a block is of each part of it, so each is asked from its
      * parent's floor up.
      */
-    fn of(generator: &Generator, b: &Box3, axis: usize, from: i64, rock: Option<Kind>, level: u32) -> Floors {
+    fn of(contents: &Contents, b: &Box3, axis: usize, from: i64, rock: Option<Kind>) -> Floors {
         let blocks = across(axis).map(|a| (b.max[a] - b.min[a] + FLOOR - 1).div_euclid(FLOOR).max(0));
         let floor = vec![b.min[axis]; (blocks[0] * blocks[1]) as usize];
         let mut floors = Floors { axis, min: b.min, blocks, floor, kind: rock };
-        let up = floors.rise(generator, b, level, [[0, 0], blocks], from);
-        floors.quarter(generator, b, level, [[0, 0], blocks], up);
+        let up = floors.rise(contents, b, [[0, 0], blocks], from);
+        floors.quarter(contents, b, [[0, 0], blocks], up);
         floors
     }
 
     /** How far up from `from` blocks `lo` to `hi` (exclusive) of `b` are buried together, brick by brick. */
-    fn rise(&mut self, generator: &Generator, b: &Box3, level: u32, [lo, hi]: [[i64; 2]; 2], from: i64) -> i64 {
+    fn rise(&mut self, contents: &Contents, b: &Box3, [lo, hi]: [[i64; 2]; 2], from: i64) -> i64 {
         let [a, c] = across(self.axis);
         let at = |a: usize, block: i64| (b.min[a] + block * FLOOR).min(b.max[a]);
         let blocks = b.slab(a, at(a, lo[0]), at(a, hi[0])).slab(c, at(c, lo[1]), at(c, hi[1]));
         let mut up = from;
         while up < b.max[self.axis] {
             let top = (up + BRICK).min(b.max[self.axis]);
-            let Some(Whole::Buried(kind)) = whole(generator, &blocks.slab(self.axis, up, top), level) else { break };
+            let Some(Whole::Buried(kind)) = contents.whole(&blocks.slab(self.axis, up, top)) else { break };
             (self.kind, up) = (Some(kind), top);
         }
         up
@@ -671,7 +798,7 @@ impl Floors {
      * together, then of its quarters, unless none is buried higher: where
      * no rock is near, few blocks are asked.
      */
-    fn quarter(&mut self, generator: &Generator, b: &Box3, level: u32, [lo, hi]: [[i64; 2]; 2], up: i64) {
+    fn quarter(&mut self, contents: &Contents, b: &Box3, [lo, hi]: [[i64; 2]; 2], up: i64) {
         for k in lo[1]..hi[1] {
             self.floor[(k * self.blocks[0] + lo[0]) as usize..(k * self.blocks[0] + hi[0]) as usize].fill(up);
         }
@@ -682,10 +809,10 @@ impl Floors {
         if quarters.len() < 2 {
             return;
         }
-        let floors: Vec<i64> = quarters.iter().map(|q| self.rise(generator, b, level, *q, up)).collect();
+        let floors: Vec<i64> = quarters.iter().map(|q| self.rise(contents, b, *q, up)).collect();
         if floors.iter().any(|&floor| floor > up) {
             for (q, floor) in quarters.into_iter().zip(floors) {
-                self.quarter(generator, b, level, q, floor);
+                self.quarter(contents, b, q, floor);
             }
         }
     }

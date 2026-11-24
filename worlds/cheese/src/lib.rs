@@ -101,20 +101,38 @@ const CLIMB: i64 = m(6.0);
 
 impl Balls {
     /** The ball of cell (i, j, k), its centre and radius, if it has one: where `hold`, the holed cheese's share, owns its centre. */
-    fn ball(&self, seed: u64, [i, j, k]: [i64; 3], hold: &Scalar) -> Option<([i64; 3], i64)> {
+    fn ball(&self, seed: u64, cell: [i64; 3], hold: &Scalar) -> Option<([i64; 3], i64)> {
+        self.drawn(seed, cell).filter(|&(centre, _)| owns(hold.at(centre)))
+    }
+
+    /** The ball cell (i, j, k) has, its centre and radius, if any, whoever owns it. */
+    fn drawn(&self, seed: u64, [i, j, k]: [i64; 3]) -> Option<([i64; 3], i64)> {
         let mut rng = Rng::new(hash64(seed, i, j, k));
         if !rng.chance(self.chance) {
             return None;
         }
         let centre = [i, j, k].map(|c| c * self.cell + rng.below(self.cell as u32) as i64);
         let radius = self.least + rng.below((self.most - self.least + 1) as u32) as i64;
-        owns(hold.at(centre)).then_some((centre, radius))
+        Some((centre, radius))
     }
 
     /** The balls that may reach the box [min, max]. */
     fn balls<'a>(&'a self, seed: u64, min: [i64; 3], max: [i64; 3], hold: &'a Scalar) -> impl Iterator<Item = ([i64; 3], i64)> + 'a {
+        self.balls_of(seed, min, max, hold, |_| true)
+    }
+
+    /** Those of a radius `of` keeps; asked before who owns them, which costs the most. */
+    fn balls_of<'a>(
+        &'a self,
+        seed: u64,
+        min: [i64; 3],
+        max: [i64; 3],
+        hold: &'a Scalar,
+        of: impl Fn(i64) -> bool + 'a,
+    ) -> impl Iterator<Item = ([i64; 3], i64)> + 'a {
         let [lo, hi] = [min.map(|v| v - self.most), max.map(|v| v + self.most)].map(|p| p.map(|v| v.div_euclid(self.cell)));
-        cells(lo, hi).filter_map(move |c| self.ball(seed, c, hold))
+        let drawn = cells(lo, hi).filter_map(move |c| self.drawn(seed, c));
+        drawn.filter(move |&(centre, radius)| of(radius) && owns(hold.at(centre)))
     }
 
     /** Those carved at sites `spacing` apart (`carved`): none, if none of them is so wide. */
@@ -126,7 +144,7 @@ impl Balls {
         spacing: i64,
         hold: &'a Scalar,
     ) -> impl Iterator<Item = ([i64; 3], i64)> + 'a {
-        let wide = carved(self.most, spacing).then(|| self.balls(seed, min, max, hold).filter(move |&(_, r)| carved(r, spacing)));
+        let wide = carved(self.most, spacing).then(|| self.balls_of(seed, min, max, hold, move |r| carved(r, spacing)));
         wide.into_iter().flatten()
     }
 }

@@ -10,7 +10,6 @@ use crate::generator::{
     Shape, Shapes, Span, Stands, ball, bounds_of_shapes, capsule, cuboid, ellipsoid, gable, lathe, lattice, tube,
 };
 use crate::grid::Box3;
-use std::sync::Arc;
 
 use crate::noise::Rng;
 use crate::sites::spacing;
@@ -71,7 +70,7 @@ impl Field {
      * Shapes, each of `op`, cutting or filling the world, not a thing:
      * `near(box)`, those that may reach the box (lattice units), each the
      * same, in the same order, whichever box asks (FieldValues::Shapes).
-     * What it meets follows from their bounds, asked till one reaches the box.
+     * What it meets follows from their bounds (`whole`).
      */
     pub fn shapes<S: IntoIterator<Item = Shape>>(
         name: &'static str,
@@ -79,13 +78,8 @@ impl Field {
         op: Op,
         near: impl Fn(&Box3) -> S + Send + Sync + 'static,
     ) -> Field {
-        let near = Arc::new(near);
-        let reaching = near.clone();
         let values = FieldValues::Shapes(Box::new(move |b| near(b).into_iter().collect()));
-        Field { name, order, op, values, meets: None }.meets(move |b, spacing| {
-            let reaches = crate::sites::footprint(spacing, [0; 3], || reaching(b).into_iter().any(|s| s.bounds.overlaps(b)));
-            if reaches { Meets::Any } else { Meets::Nothing }
-        })
+        Field { name, order, op, values, meets: None }
     }
 
     /**

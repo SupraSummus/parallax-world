@@ -40,13 +40,6 @@ pub(super) fn anchors_reaching(population: &Population, b: &Box3) -> Box3 {
     Box3 { min: [0, 1, 2].map(|a| b.min[a] - r[a]), max: [0, 1, 2].map(|a| b.max[a] + r[a]) }
 }
 
-/** Whether a thing of `population` reaches box `b` (lattice units): one made, as drawing makes it, whose bounds do. */
-pub(super) fn reaches(generator: &Generator, population: &Population, b: &Box3) -> bool {
-    let mut reached = false;
-    each_thing(generator, population, &anchors_reaching(population, b), |_, node| reached |= bounds_of(&node).overlaps(b));
-    reached
-}
-
 /**
  * The things `population` makes that may reach box `b` (lattice units),
  * as `generate` makes them at level 0 (coarser, they stand on the ground

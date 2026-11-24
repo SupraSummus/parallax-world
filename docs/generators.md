@@ -106,6 +106,7 @@ one drawing all of a box solid makes it that (a carve, empty);
 one that may draw in it keeps only what it can't change,
 a carve what is empty, a fill or paint what is buried
 (a thing's carves cut only it).
+A field of shapes draws in it if one of them reaches it by its bounds.
 A population draws in it if a thing anchored within its reach,
 made as drawing makes it, reaches it by its bounds
 (asked only where the rest would leave it empty: what is buried stays so);
@@ -116,6 +117,9 @@ and less what is buried under each block of its columns (`Floors`):
 a tile on a slope costs its surface, not the rock under it.
 It keeps what is buried as rock, a brick of it for all (`generate_shown`),
 not emptied, as rays from a finer level's hollows and light meet it.
+Of the many parts these ask about, fields' shapes and things are asked once,
+of the whole box, as each is the same whichever box asks (`Contents`);
+the box is drawn from them too.
 A layer that says nothing is drawn everywhere.
 
 A thing is a **node**: its **shapes**, and **children**,

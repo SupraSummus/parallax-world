@@ -332,7 +332,8 @@ pub struct Field {
      * What it draws in a box (lattice units) at sites a spacing apart, as
      * it says (`Meets`), along any axis: a rule, checked where it skips
      * (`checking_skipped`); asked of more than the sites (`meets_in`).
-     * None: anything.
+     * None: anything. A field of shapes draws nothing, too, where none
+     * of them reaches (`whole`).
      */
     pub meets: Option<Box<FieldMeets>>,
 }
