@@ -5,6 +5,7 @@
 use std::cell::OnceCell;
 
 use super::*;
+use crate::grid::Faces;
 
 /** The kinds' colours: of each, its shades, and their mean. */
 struct Palette {
@@ -98,7 +99,7 @@ fn made(contents: &Contents, b: &Box3, floors: Option<&Floors>) -> VoxelGrid {
         let colour = |kind: Kind| palette.colour(kind, s, [x, y, z].map(|v| v * s));
         let kind = &generator.kinds[look.kind as usize];
         if !see_whole(&mut grid, &look, kind, op, share, [x, y, z], || colour(look.kind)) {
-            see(&mut grid, &Added::of(&look, &generator.kinds, op, pick, colour), share, x, y, z);
+            see(&mut grid, &Added::of(&look, &generator.kinds, op, share, pick, colour), x, y, z);
         }
     };
     let drawables = drawables_in(contents, &clip);
@@ -142,17 +143,18 @@ fn made(contents: &Contents, b: &Box3, floors: Option<&Floors>) -> VoxelGrid {
  * place, as far as it covers them. What either stops, shows and glows
  * is the sum of
  * what is in it, each by how much of the site's rays it stops there.
- * Pieces covering some faces' rays more than others' (`cover`), unlike
- * through some faces, or put where some did, are added face by face
- * (VoxelGrid's `views`); the site as a whole, to what sees no faces (a
+ * Pieces covering some faces' rays more than others', unlike through
+ * some faces, or put where some did, are added face by face (`pieces`,
+ * VoxelGrid's `views`); the site as a whole, to what sees no faces (a
  * host's voxels, a camera colliding), stops and glows as its most.
  * What stops a walking body adds its share to the site's `solid`,
  * wherever in it, in front or behind; a carve takes out of it too.
  * Few sites are in `glow` or `views` (grid's Few): most are added to at
  * a glance.
  */
-fn see(grid: &mut VoxelGrid, added: &Added, share: u32, x: i64, y: i64, z: i64) {
-    if share == 0 && added.cover.is_none_or(|cover| cover == [0; FACE_KINDS]) {
+fn see(grid: &mut VoxelGrid, added: &Added, x: i64, y: i64, z: i64) {
+    let share = added.share;
+    if share == 0 && added.faces.each().iter().all(|&(_, cover)| cover == 0) {
         return;
     }
     let Some(i) = grid.index(x, y, z) else { return };
@@ -175,11 +177,12 @@ fn see(grid: &mut VoxelGrid, added: &Added, share: u32, x: i64, y: i64, z: i64) 
             // covers through the face that sees most of it, through every face alike, as a site shows its pieces whole
             // or not at all. The site's medium is a share of the rays the pieces let through, so the rest of them.
             let (all, one) = (ALPHA as u64, SHARE as u64);
-            let most = (0..FACE_KINDS).max_by_key(|&k| added.cover.map_or(share, |cover| cover[k])).expect("faces");
+            let most = (0..FACE_KINDS).max_by_key(|&k| added.faces.get(k).1).expect("faces");
             let seen = grid.views.face(i, most).map_or(grid.pieces.get(i).0, |sight| sight.0) as u64;
             let covered = (share as u64 * all).checked_div(seen).map_or(one, |of| of.min(one));
-            let under = Added { op: Op::Carve, faces: None, cover: None, medium: None, solid: false, ..*added };
-            pieces(grid, &under, covered as u32, i);
+            let faces = Faces::all((added.sight, covered as u32));
+            let under = Added { op: Op::Carve, share: covered as u32, faces, medium: None, solid: false, ..*added };
+            pieces(grid, &under, i);
             let left = all * one - seen * (one - covered);
             share = (share as u64 * all * one).checked_div(left).map_or(SHARE, |of| of.min(one) as u32);
         }
@@ -188,7 +191,7 @@ fn see(grid: &mut VoxelGrid, added: &Added, share: u32, x: i64, y: i64, z: i64) 
         set_glow(grid, i, glow);
         return;
     }
-    pieces(grid, added, share, i);
+    pieces(grid, added, i);
 }
 
 /**
@@ -211,37 +214,28 @@ fn shares(share: u32, faster: [f64; 3]) -> [u64; 3] {
     faster.map(|faster| if faster == 1.0 { share as u64 } else { ((1.0 - js::pow(through, faster)) * SHARE as f64) as u64 })
 }
 
-/** `see`, of site `i`'s pieces: `added`'s `share` of it, face by face where its faces differ. */
-fn pieces(grid: &mut VoxelGrid, added: &Added, share: u32, i: usize) {
-    let old = grid.glow.get(i).copied().unwrap_or_default();
-    let by_face = added.cover.is_some() || added.faces.is_some() || grid.views.get(i).is_some();
-    if !by_face {
-        let (alpha, colour) = grid.pieces.get(i);
-        let (alpha, colour, glow) = added.to((alpha, colour, old), share, 0);
-        grid.pieces.set(i, alpha, colour);
-        set_glow(grid, i, glow);
-        return;
+/**
+ * `see`, of site `i`'s pieces: `added` to each face as it covers it,
+ * from what that face saw so far, its glow too; each class of faces that
+ * saw alike and are added to alike once. The site as a whole stops,
+ * shows and glows as its most.
+ */
+fn pieces(grid: &mut VoxelGrid, added: &Added, i: usize) {
+    // Alike through every face where it has no views, or no glows apart (VoxelGrid's `glows`).
+    let views = grid.views.get(i).unwrap_or(Faces::all(grid.pieces.get(i)));
+    let glow = grid.glow.get(i).copied().unwrap_or_default();
+    let glows = grid.glows.get(i).map_or(Faces::all(glow), |glows| Faces::by(|k| glows[k]));
+    let after = views.zip_with(&glows, |s, g| (s, g)).zip_with(&added.faces, |(sight, glow), face| added.to(sight, glow, face));
+    let shown = after.map(|(alpha, colour, _)| (alpha, colour));
+    fn most<T: Ord + Copy + Default>(of: impl Iterator<Item = [T; 3]>) -> [T; 3] {
+        of.fold([T::default(); 3], |most, c| std::array::from_fn(|i| most[i].max(c[i])))
     }
-    // Face by face, from what each saw so far; the site as a whole stops and glows as its most.
-    let (was, was_colour) = grid.pieces.get(i);
-    // Its views' glows are apart (VoxelGrid's `glows`): none, where none glows.
-    let (mut views, mut glows) = match grid.views.get(i) {
-        Some(views) => (views, grid.glows.get(i).copied().unwrap_or_default()),
-        None => (crate::grid::Views { alpha: [was; FACE_KINDS], colour: [was_colour; FACE_KINDS] }, [old; FACE_KINDS]),
-    };
-    for k in 0..FACE_KINDS {
-        let (alpha, colour, glow) = added.to((views.alpha[k], views.colour[k], glows[k]), added.cover.map_or(share, |cover| cover[k]), k);
-        (views.alpha[k], views.colour[k], glows[k]) = (alpha, colour, glow);
-    }
-    fn most<T: Ord + Copy>(of: &[[T; 3]; FACE_KINDS]) -> [T; 3] {
-        [0, 1, 2].map(|c| of.iter().map(|v| v[c]).max().expect("faces"))
-    }
-    grid.pieces.set(i, views.alpha.into_iter().max().expect("faces"), most(&views.colour));
-    let alike = |k: usize| views.alpha[k] == views.alpha[0] && views.colour[k] == views.colour[0] && glows[k] == glows[0];
-    let unlike = !(0..FACE_KINDS).all(alike);
-    set_glow(grid, i, most(&glows));
-    grid.views.set(i, unlike.then_some(views));
-    grid.glows.set(i, (unlike && glows != [[0; 3]; FACE_KINDS]).then_some(glows));
+    grid.pieces.set(i, shown.each().iter().map(|s| s.0).max().expect("a sight"), most(shown.each().iter().map(|s| s.1)));
+    set_glow(grid, i, most(after.each().iter().map(|a| a.2)));
+    let unlike = after.each().len() > 1;
+    let lit = after.each().iter().any(|a| a.2 != [0; 3]);
+    grid.views.set(i, unlike.then_some(&shown));
+    grid.glows.set(i, (unlike && lit).then(|| std::array::from_fn(|k| after.get(k).2)));
 }
 
 /**
@@ -265,7 +259,7 @@ fn see_whole(
         return false;
     }
     let Some(i) = grid.index(x, y, z) else { return true };
-    if grid.glow.get(i).is_some() || grid.views.get(i).is_some() {
+    if grid.glow.get(i).is_some() || grid.views.has(i) {
         return false;
     }
     // A fill is behind what is there: what a carve left of colour, if anything.
@@ -291,52 +285,63 @@ fn see_whole(
 }
 
 /** What is seen of a kind: its colour (linear, of COLOUR_ONE), and what it glows. */
-type Sight = ([u32; 3], [u32; 3]);
+type Sight = ([u16; 3], [u16; 3]);
 
-/** What `see` adds to a site: what a thing shows and glows through each face, whether a medium, whether it stops a walking body. */
+/** What a thing shows and glows through a face, and how much of the face's rays it covers (of SHARE). */
+type Face = (Sight, u32);
+
+/** What `see` adds to a site: its share of it, what it is through each face, whether a medium, whether it stops a walking body. */
 #[derive(Clone, Copy)]
 struct Added {
     op: Op,
     pick: u32,
+    /** Of SHARE, how much of the site's rays it stops: of each face's, as `faces` cover them. */
+    share: u32,
+    /** What its own kind shows and glows. */
     sight: Sight,
-    /** Through each face, where they differ. */
-    faces: Option<[Sight; FACE_KINDS]>,
-    /** How much of each face's rays it covers, if not its share. */
-    cover: Option<[u32; FACE_KINDS]>,
+    faces: Faces<Face>,
     /** If a medium, how many times as fast as its share it stops each channel (`stops_faster`). */
     medium: Option<[f64; 3]>,
     solid: bool,
 }
 
 impl Added {
-    /** What a put of `look`, its kinds of `kinds`, adds: `colour` gives each kind's colour at its site. */
-    fn of(look: &Look, kinds: &[KindDef], op: Op, pick: u32, colour: impl Fn(Kind) -> [u32; 3]) -> Added {
+    /** What a put of `share` of `look`, its kinds of `kinds`, adds: `colour` gives each kind's colour at its site. */
+    fn of(look: &Look, kinds: &[KindDef], op: Op, share: u32, pick: u32, colour: impl Fn(Kind) -> [u32; 3]) -> Added {
         // What glows gives light of its colour.
         let sight = |kind: Kind| {
             let own = colour(kind);
-            let glow = if kinds[kind as usize].glows { own.map(|c| (c * 255 + COLOUR_ONE as u32 / 2) / COLOUR_ONE as u32) } else { [0; 3] };
-            (own, glow)
+            let glow = if kinds[kind as usize].glows {
+                own.map(|c| ((c * 255 + COLOUR_ONE as u32 / 2) / COLOUR_ONE as u32) as u16)
+            } else {
+                [0; 3]
+            };
+            (own.map(|c| c as u16), glow)
         };
         let own = sight(look.kind);
-        let faces = look.faces.map(|kinds| kinds.map(&sight)).filter(|faces| faces.iter().any(|s| *s != own));
+        // A look alike through every face, as most are, is so without asking each.
+        let faces = match (look.faces, look.cover) {
+            (None, None) => Faces::all((own, share)),
+            (kinds, cover) => Faces::by(|k| (kinds.map_or(look.kind, |kinds| kinds[k]), cover.map_or(share, |cover| cover[k])))
+                .map(|(kind, cover)| (if kind == look.kind { own } else { sight(kind) }, cover)),
+        };
         let kind = &kinds[look.kind as usize];
         Added {
             op,
             pick,
+            share,
             sight: own,
             faces,
-            cover: look.cover,
-            medium: kind.medium.then(|| stops_faster(own.0)),
+            medium: kind.medium.then(|| stops_faster(own.0.map(u32::from))),
             solid: !kind.walk_through,
         }
     }
 
     /**
-     * Of what a site (or a face of it) stops, shows and glows, `share` of
-     * it (of SHARE) added, seen through face `k`: what it stops, shows and
-     * glows after.
+     * Of what a site's face stops and shows, `sight`, and glows, what it
+     * stops, shows and glows once `face` is added to it.
      */
-    fn to(&self, (alpha, colour, glow): (u8, [u16; 3], [u32; 3]), share: u32, k: usize) -> (u8, [u16; 3], [u32; 3]) {
+    fn to(&self, (alpha, colour): crate::grid::Sight, glow: [u32; 3], ((own, glows), share): Face) -> (u8, [u16; 3], [u32; 3]) {
         let (alpha, share) = (alpha as u64, share.min(SHARE) as u64);
         let (all, one) = (ALPHA as u64, SHARE as u64);
         // Of SHARE: how much of what was there is still seen, and how much of the site the thing is seen in.
@@ -351,7 +356,6 @@ impl Added {
             Op::Fill => self.rounded(alpha * one + (all - alpha) * share),
             Op::Paint => self.rounded((alpha * one).max(all * share)),
         };
-        let (own, glows) = self.faces.map_or(self.sight, |faces| faces[k]);
         let colour = std::array::from_fn(|c| ((colour[c] as u64 * kept + visible * own[c] as u64) / one).min(COLOUR_ONE as u64) as u16);
         let glow = std::array::from_fn(|c| (glow[c] as u64 * kept / one + visible * glows[c] as u64) as u32);
         (after, colour, glow)
@@ -827,7 +831,7 @@ mod tests {
         for (puts, pick) in before.iter().flat_map(|puts| [0, 21_845, 43_690].map(|pick| (puts, pick))) {
             let mut grid = VoxelGrid::new(&Box3::around([0; 3], 1));
             for &(k, look, op, share) in *puts {
-                see(&mut grid, &Added::of(look, from_ref(&kinds[k]), op, pick, colour), share, 0, 0, 0);
+                see(&mut grid, &Added::of(look, from_ref(&kinds[k]), op, share, pick, colour), 0, 0, 0);
             }
             for (kind, look, op, share) in kinds.iter().flat_map(|kind| {
                 [&plain, &sheet].into_iter().flat_map(move |look| {
@@ -838,7 +842,7 @@ mod tests {
                 if !see_whole(&mut whole, look, kind, op, share, [0; 3], || colour(0)) {
                     continue;
                 }
-                see(&mut summed, &Added::of(look, from_ref(kind), op, pick, colour), share, 0, 0, 0);
+                see(&mut summed, &Added::of(look, from_ref(kind), op, share, pick, colour), 0, 0, 0);
                 fn few<T: Copy>(few: &crate::grid::Few<T>) -> Vec<(usize, T)> {
                     few.iter().map(|(i, value)| (i, *value)).collect()
                 }
@@ -862,7 +866,7 @@ mod tests {
         for of in [0, 1] {
             let mut grid = VoxelGrid::new(&Box3::around([0; 3], 1));
             let look = Look { faces: Some(faces), ..Look::from(of) };
-            see(&mut grid, &Added::of(&look, &kinds, Op::Fill, 0, |_| [40_000; 3]), SHARE, 0, 0, 0);
+            see(&mut grid, &Added::of(&look, &kinds, Op::Fill, SHARE, 0, |_| [40_000; 3]), 0, 0, 0);
             let glows: [bool; FACE_KINDS] = std::array::from_fn(|k| grid.light(0, 0, 0, k).2 != [0; 3]);
             assert_eq!(glows, faces.map(|kind| kind == 1), "the site of kind {of}");
         }
