@@ -378,21 +378,24 @@ fn holes() -> Field {
     Field::shapes("holes", 0.5, Op::Carve, move |b| near(b).collect::<Vec<_>>())
 }
 
+/** The seed of the rocks' sizes. */
+const SIZES: u64 = 7;
+
 /** Two rocks at each site of 16·FCC, one a little apart in its random sequence. */
 fn rocks() -> Population {
     let at = |b: &Box3| lattice(16, b).into_iter().flat_map(|p| [0, 1].map(|n| (p.map(|v| v as f64), n))).collect();
     Population::new("rocks", 1.0, 16).reach(3).at(at, |&n, anchor| {
-        let r = 1.0 + n as f64 + anchor.random("size").next();
+        let r = 1.0 + n as f64 + anchor.random(SIZES).next();
         Some(Node::of(vec![ball(anchor.at, r, 0, SOLID, Op::Fill)]))
     })
 }
 
 #[test]
 fn a_thing_is_known_by_its_anchor_and_number_there_whichever_box_asks() {
-    let (generator, rocks) = (layers(vec![]), rocks());
+    let rocks = rocks();
     let made = |b: Box3| {
         let mut made = Vec::new();
-        each_made(&generator, &rocks, &b, |name, bounds, _, _| made.push((name, bounds)));
+        each_made(&rocks, &b, |name, bounds, _, _| made.push((name, bounds)));
         made.sort_by(|a, b| a.0.cmp(&b.0));
         made
     };

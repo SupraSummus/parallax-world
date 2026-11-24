@@ -92,11 +92,13 @@ fn caves() -> Generator {
  * sites on faces are split ("Levels" in docs/generators.md).
  */
 fn village() -> Generator {
+    /** The seed of the houses' sizes. */
+    const SIZES: u64 = 7;
     let houses = Population::new("houses", 1.0, 64).reach(64).size(ANY_SIZE).at(
         |b| plain(64, b),
         |_, cell| {
             let [x, _, z] = cell.at;
-            let (w, d, h) = (16.0 + (cell.random("size").next() * 12.0).floor(), 16.0 + (cell.random("size").next() * 12.0).floor(), 20.0);
+            let (w, d, h) = (16.0 + (cell.random(SIZES).next() * 12.0).floor(), 16.0 + (cell.random(SIZES).next() * 12.0).floor(), 20.0);
             let (x0, z0, x1, z1, y) = (x - w, z - d, x + w, z + d, 0.0);
             let tables = move |clip: &Box3| -> Vec<Child> {
                 (0..4)

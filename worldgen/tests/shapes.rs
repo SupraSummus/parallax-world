@@ -96,7 +96,7 @@ fn world(make: Make, cell: i64) -> World {
             };
             lattice(cell, &around).into_iter().map(at).collect()
         },
-        move |_, anchor| Some(Node::of(vec![make(anchor.at, &mut anchor.random("size"))])),
+        move |_, anchor| Some(Node::of(vec![make(anchor.at, &mut anchor.random(5))])),
     );
     let generator = Generator { kinds: KINDS.to_vec(), seed: 5, layers: vec![Layer::Field(ground), Layer::Population(things)] };
     // Room over what stands on the ground for a site of the coarsest level, as a coarse site's share may reach past it (docs/todo.md).

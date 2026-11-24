@@ -1,21 +1,18 @@
-ball	1	0.048	0.073
-bent cone	1	0.048	0.055
-big ball	1	0.067	0.099
-big ball	2	0.059	0.090
-big ball	3	0.060	0.102
-big ball	4	0.066	0.092
-big block	1	0.061	0.080
-big block	2	0.046	0.079
-big block	3	0.046	0.077
-big block	4	0.062	0.092
-big block	5	0.049	0.055
-block	1	0.049	0.071
-block	2	0.053	0.062
-cone	1	0.057	0.072
-cone	2	0.047	0.062
-disc	1	0.052	0.079
-plate	1	0.048	0.073
-roof	1	0.050	0.064
-thick wall	1	0.065	0.092
-thick wall	2	0.065	0.079
-wall	1	0.048	0.079
+ball	1	0.048	0.072
+big ball	1	0.061	0.088
+big ball	2	0.063	0.093
+big ball	3	0.063	0.097
+big ball	4	0.066	0.082
+big block	1	0.068	0.085
+big block	2	0.062	0.090
+big block	3	0.067	0.090
+big block	4	0.069	0.096
+block	1	0.054	0.069
+block	2	0.053	0.061
+cone	1	0.060	0.072
+cone	2	0.048	0.059
+disc	1	0.049	0.071
+roof	1	0.054	0.064
+thick wall	1	0.058	0.083
+thick wall	2	0.059	0.075
+wall	1	0.050	0.075

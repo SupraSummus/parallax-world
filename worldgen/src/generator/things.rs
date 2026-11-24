@@ -7,7 +7,7 @@ use super::*;
  * Each thing `population` makes anchored in box `b` (lattice units),
  * with its anchor; returns the work of asking.
  */
-pub(super) fn each_thing(generator: &Generator, population: &Population, b: &Box3, mut each: impl FnMut(&Anchor, Node)) -> Work {
+pub(super) fn each_thing(population: &Population, b: &Box3, mut each: impl FnMut(&Anchor, Node)) -> Work {
     let mut work = Work::default();
     // How many of its things are anchored at each point so far: the next one there is known by its number.
     let mut at: HashMap<[i64; 3], u32> = HashMap::new();
@@ -19,7 +19,7 @@ pub(super) fn each_thing(generator: &Generator, population: &Population, b: &Box
         }
         work.inside += 1;
         let nth = at.entry(key).or_insert(0);
-        let anchor = Anchor { at: p, key, nth: *nth, population: population.name, seed: generator.seed };
+        let anchor = Anchor { at: p, key, nth: *nth, population: population.name };
         *nth += 1;
         let Some(node) = make(&anchor) else { return };
         if let Some(stands) = &population.stands {
@@ -47,25 +47,25 @@ pub(super) fn anchors_reaching(population: &Population, b: &Box3) -> Box3 {
  * population's reach allows it. For checks that look at more things than
  * a box draws (worldgen::checks::contract).
  */
-pub fn things_in(generator: &Generator, population: &Population, b: &Box3) -> Vec<(String, Box3, Box3)> {
+pub fn things_in(population: &Population, b: &Box3) -> Vec<(String, Box3, Box3)> {
     let mut things = Vec::new();
-    each_made(generator, population, b, |name, bounds, allowed, _| things.push((name, bounds, allowed)));
+    each_made(population, b, |name, bounds, allowed, _| things.push((name, bounds, allowed)));
     things
 }
 
 /** As `things_in`, each with the thing itself, to look into (worldgen::checks::survey); returns how many points were asked. */
-pub fn each_made(generator: &Generator, population: &Population, b: &Box3, mut each: impl FnMut(String, Box3, Box3, &Node)) -> u64 {
+pub fn each_made(population: &Population, b: &Box3, mut each: impl FnMut(String, Box3, Box3, &Node)) -> u64 {
     let reach = population.reach;
-    each_thing(generator, population, &anchors_reaching(population, b), |anchor, node| {
+    each_thing(population, &anchors_reaching(population, b), |anchor, node| {
         each(anchor.name(), bounds_of(&node), anchor.reach(reach), &node)
     })
     .points
 }
 
 /** The anchors of the things `population` makes anchored in box `b` (lattice units), as `generate` makes them. */
-pub fn anchors_in(generator: &Generator, population: &Population, b: &Box3) -> Vec<Point> {
+pub fn anchors_in(population: &Population, b: &Box3) -> Vec<Point> {
     let mut anchors = Vec::new();
-    each_thing(generator, population, b, |anchor, _| anchors.push(anchor.at));
+    each_thing(population, b, |anchor, _| anchors.push(anchor.at));
     anchors
 }
 

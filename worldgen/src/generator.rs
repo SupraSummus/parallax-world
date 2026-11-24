@@ -368,8 +368,7 @@ pub enum Meets {
 /**
  * Where a thing of a population is: its anchor (lattice units), known
  * by the point it rounds to (`key`) and its number among those of its
- * population anchored there, in the order they come. Its random
- * sequences depend on these and the population only.
+ * population anchored there, in the order they come.
  */
 pub struct Anchor<'a> {
     pub at: Point,
@@ -377,14 +376,13 @@ pub struct Anchor<'a> {
     pub key: [i64; 3],
     nth: u32,
     population: &'a str,
-    seed: u64,
 }
 
 impl Anchor<'_> {
-    /** A random sequence that depends on the anchor and `stream` only. */
-    pub fn random(&self, stream: &str) -> Rng {
+    /** A random sequence that depends on the anchor and `seed` only: its population's (docs/generators.md). */
+    pub fn random(&self, seed: u64) -> Rng {
         let [x, y, z] = self.key;
-        Rng::new(hash64(hash_text(&format!("{}:{stream}", self.population), self.seed) ^ u64::from(self.nth), x, y, z))
+        Rng::new(hash64(seed ^ u64::from(self.nth), x, y, z))
     }
 
     /** Its thing's name, for messages and drawing order. */

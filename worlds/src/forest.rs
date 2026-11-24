@@ -584,7 +584,7 @@ fn layers(scope: &Scope, ground: Ground) -> Vec<Layer> {
                 move |spot, anchor| {
                     let ([x, y, z], mark) = (anchor.at, spot.mark);
                     let (height, room) = (f.height(spot.at[0], spot.at[2], mark), Arc::new(rooms.room(spot.at, mark)));
-                    Some(grow(SPECIES[mark], x, y, z, height as f64, room, &mut anchor.random("tree"), &|x, z| f.ground(x, z)))
+                    Some(grow(SPECIES[mark], x, y, z, height as f64, room, &mut anchor.random(f.s("trees")), &|x, z| f.ground(x, z)))
                 },
             )
             .on(on.clone())
@@ -611,7 +611,7 @@ fn layers(scope: &Scope, ground: Ground) -> Vec<Layer> {
         population.at(at, move |_, anchor| {
             let [x, y, z] = anchor.at;
             let clear = !f.ground.path.by(x as i64, z as i64, Fx::m(PATH_EDGE[1] + BOULDER_RADIUS[1]));
-            clear.then(|| Node::of(boulder(x, y, z, &mut anchor.random("boulder"))))
+            clear.then(|| Node::of(boulder(x, y, z, &mut anchor.random(f.s("boulders")))))
         })
     };
     let logs = {
@@ -620,7 +620,7 @@ fn layers(scope: &Scope, ground: Ground) -> Vec<Layer> {
         population.at(at, move |_, anchor| {
             let [x, _, z] = anchor.at;
             let off_path = !f.column(x as i64, z as i64).on_path;
-            off_path.then(|| fallen_log(x, z, &|x, z| f.ground(x, z), &mut anchor.random("log")).map(Node::of)).flatten()
+            off_path.then(|| fallen_log(x, z, &|x, z| f.ground(x, z), &mut anchor.random(f.s("logs"))).map(Node::of)).flatten()
         })
     };
 

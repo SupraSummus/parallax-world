@@ -238,8 +238,8 @@ fn stream_distance(stream: &Plan<Fx>, x: i64, z: i64) -> (Units, Units) {
  * and hollows it under the pools (`Moor`'s `shape`).
  */
 pub struct Moorland {
-    /** Its steadings' seed. */
-    seed: u64,
+    /** Its boulders' seed: their points' and their own. */
+    boulders: u64,
     patches: Fbm<{ m(30.0) }, 2>,
     /** Where mist lies deeper, and how it lies. */
     mist: ValueNoise<{ m(48.0) }>,
@@ -329,7 +329,7 @@ impl Moorland {
             }
         };
         Moorland {
-            seed: scope.seed("steadings' things"),
+            boulders: scope.seed("boulders"),
             patches: Fbm::new(scope.seed("patches")),
             mist: ValueNoise::new(scope.seed("mist")),
             lies,
@@ -861,7 +861,7 @@ fn water(f: Arc<Heath>) -> Field {
 fn boulders(f: Arc<Heath>) -> Population {
     // Two in 45 squares 8 m wide, as the moor's share of the land.
     let (chance, share) = (fx(2.0 / 45.0), f.clone());
-    let points = Points::new("moor boulders", f.moorland.seed, &[0, 2], m(8.0), m(8.0), 1, move |[x, _, z]| {
+    let points = Points::new("moor boulders", f.moorland.boulders, &[0, 2], m(8.0), m(8.0), 1, move |[x, _, z]| {
         [chance * share.share(x, z), Fx::ZERO, Fx::ZERO, Fx::ZERO]
     });
     let ground = f.clone();
@@ -875,7 +875,7 @@ fn boulders(f: Arc<Heath>) -> Population {
             if wet || by_stream || f.moorland.on_path(xi, zi) || f.by_path(xi, zi, Fx::m(3.0)) {
                 return None;
             }
-            let mut random = anchor.random("boulder");
+            let mut random = anchor.random(f.moorland.boulders);
             let r = m(0.4) as f64 + random.next() * m(0.8) as f64;
             let radii = [r * (1.0 + random.next() * 0.6), r * 0.7, r * (1.0 + random.next() * 0.6)];
             let kind: Kind = if random.chance(fx(1.0 / 3.0)) { K::lichen.into() } else { F::stone.into() };

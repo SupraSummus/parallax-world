@@ -154,9 +154,8 @@ fn layers(scope: &Scope, hold: Scalar, ground: Arc<Sloped>, path: Arc<Path>) -> 
     };
     // Haystacks on the stubble: two in fifteen squares 8 m wide.
     let haystacks = {
-        let chance = fx(2.0 / 15.0);
-        let points =
-            Points::new("haystacks", scope.seed("haystacks"), &[0, 2], m(8.0), m(8.0), 1, move |_| [chance, Fx::ZERO, Fx::ZERO, Fx::ZERO]);
+        let (chance, seed) = (fx(2.0 / 15.0), scope.seed("haystacks"));
+        let points = Points::new("haystacks", seed, &[0, 2], m(8.0), m(8.0), 1, move |_| [chance, Fx::ZERO, Fx::ZERO, Fx::ZERO]);
         let on = ground.clone();
         Population::new("haystacks", 3.0, m(4.0)).reach(m(3.0)).size(m(4.0)).on(ground.clone()).within(region, 0).at(
             move |b| standing(&points, b, |x, z| on.at(x, z)),
@@ -165,7 +164,7 @@ fn layers(scope: &Scope, hold: Scalar, ground: Arc<Sloped>, path: Arc<Path>) -> 
                 if f.crop(x as i64, z as i64) != Some(Crop::Stubble) {
                     return None;
                 }
-                let mut random = anchor.random("haystack");
+                let mut random = anchor.random(seed);
                 let r = m(1.0) as f64 + random.next() * 4.0;
                 Some(Node::of(vec![Shape::ball([x, y + r * 0.5, z], r, F::hay)]))
             },
