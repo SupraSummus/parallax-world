@@ -483,13 +483,13 @@ impl VoxelGrid {
     pub fn along(&self, x: i64, y: i64, z: i64, direction: [f64; 3]) -> Look {
         match self.slot(x, y, z) {
             Some(Ok(i)) if self.pieces.get(i).0 > 0 => {
-                let (mut sum, mut faces) = ([0.0; 3], 0.0);
+                let (mut sum, mut faces) = ([0; 3], 0);
                 for k in fcc::facing(direction) {
                     let look = self.view(i, k).to_le_bytes();
-                    (0..3).for_each(|c| sum[c] += to_linear(look[c] as f64 / 255.0));
-                    faces += 1.0;
+                    (0..3).for_each(|c| sum[c] += linear(look[c]) as u32);
+                    faces += 1;
                 }
-                look_of(sum.map(|c| (c / faces * COLOUR_ONE as f64).round() as u16), ALPHA, ALPHA)
+                look_of(sum.map(|c| ((c + faces / 2) / faces) as u16), ALPHA)
             }
             _ => 0,
         }
@@ -503,7 +503,7 @@ impl VoxelGrid {
         match self.slot(x, y, z) {
             Some(Ok(i)) => match self.pieces.get(i) {
                 pieces @ (0, _) => self.handed(i, pieces),
-                (alpha, colour) => look_of(colour, alpha, alpha),
+                (alpha, colour) => look_of(colour, alpha),
             },
             _ => 0,
         }
@@ -574,7 +574,7 @@ impl VoxelGrid {
     /** The colour site `i` shows, `pieces` of it and its medium of the rest (sRGB, unpremultiplied). */
     fn colour(&self, i: usize, pieces: Sight) -> [u8; 3] {
         let (stops, shows) = self.seen(i, pieces);
-        std::array::from_fn(|c| srgb(shows[c], stops[c]))
+        std::array::from_fn(|c| srgb(unpremultiplied(shows[c], stops[c])))
     }
 
     /** Of site `i`, pieces that stop `pieces` of its rays and show `colour`, and its medium of the rest: each how much it stops and shows. */
@@ -798,37 +798,43 @@ pub fn least(stops: [u8; 3]) -> u8 {
     stops[0].min(stops[1]).min(stops[2])
 }
 
-/** A channel `c` (linear, premultiplied by `alpha`, of COLOUR_ONE) unpremultiplied, sRGB. */
-fn srgb(c: u16, alpha: u8) -> u8 {
-    let power = |c: u16, alpha: u8| {
-        let of = alpha.max(1) as f64 / ALPHA as f64 * COLOUR_ONE as f64;
-        let c = (c as f64 / of).min(1.0);
-        (255.0 * if c <= 0.003_130_8 { c * 12.92 } else { 1.055 * js::pow(c, 1.0 / 2.4) - 0.055 }).round() as u8
-    };
-    // Most sites shown are whole, and a power costs more than all else here: theirs are kept.
-    static WHOLE: OnceLock<Vec<u8>> = OnceLock::new();
-    match alpha {
-        ALPHA => WHOLE.get_or_init(|| (0..=COLOUR_ONE).map(|c| power(c, ALPHA)).collect())[c as usize],
-        _ => power(c, alpha),
-    }
-}
-
-/** A channel of sRGB (of 1) as linear light: fcc::light's, by libm's power (js.rs), as generating is the same on every target. */
-pub(crate) fn to_linear(c: f64) -> f64 {
-    if c <= 0.04045 { c / 12.92 } else { js::pow((c + 0.055) / 1.055, 2.4) }
-}
-
 /**
- * A look of colour `colour` (linear, premultiplied by `alpha`, of
- * COLOUR_ONE): its colour unpremultiplied, sRGB, and `shown` its alpha.
+ * A channel of sRGB as linear light, of COLOUR_ONE: fcc::light's, from a
+ * table made once by libm's power (js.rs), so generating is the same on
+ * every target and takes no power.
  */
-pub(crate) fn look_of(colour: [u16; 3], alpha: u8, shown: u8) -> Look {
-    fcc::look(colour.map(|c| srgb(c, alpha)), shown)
+pub(crate) fn linear(c: u8) -> u16 {
+    static LINEAR: OnceLock<[u16; 256]> = OnceLock::new();
+    let power = |c: f64| if c <= 0.04045 { c / 12.92 } else { js::pow((c + 0.055) / 1.055, 2.4) };
+    LINEAR.get_or_init(|| std::array::from_fn(|c| (COLOUR_ONE as f64 * power(c as f64 / 255.0)).round() as u16))[c as usize]
+}
+
+/** A channel of linear light, of COLOUR_ONE, as sRGB: `linear` undone, by a table too. */
+pub(crate) fn srgb(c: u16) -> u8 {
+    static SRGB: OnceLock<Vec<u8>> = OnceLock::new();
+    let power = |c: f64| if c <= 0.003_130_8 { c * 12.92 } else { 1.055 * js::pow(c, 1.0 / 2.4) - 0.055 };
+    SRGB.get_or_init(|| (0..=COLOUR_ONE).map(|c| (255.0 * power(c as f64 / COLOUR_ONE as f64)).round() as u8).collect())[c as usize]
+}
+
+/** A channel `c` premultiplied by `alpha` (of ALPHA) unpremultiplied: to COLOUR_ONE at most, from little as from none. */
+fn unpremultiplied(c: u16, alpha: u8) -> u16 {
+    let alpha = alpha.max(1) as u32;
+    ((c as u32 * ALPHA as u32 + alpha / 2) / alpha).min(COLOUR_ONE as u32) as u16
+}
+
+/** A look of colour `colour` (linear, premultiplied by `alpha`, of COLOUR_ONE): its colour unpremultiplied, sRGB. */
+fn look_of(colour: [u16; 3], alpha: u8) -> Look {
+    fcc::look(colour.map(|c| srgb(unpremultiplied(c, alpha))), alpha)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_colour_comes_back_from_linear_as_it_went() {
+        assert!((0..=255).all(|c| srgb(linear(c)) == c));
+    }
 
     #[test]
     fn a_site_is_handed_over_as_it_looks_through_each_face_whole_or_held_in_part_and_moves_with_its_brick() {

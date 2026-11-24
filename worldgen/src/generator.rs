@@ -10,7 +10,7 @@ use fcc::{FACE_KINDS, VOXEL_FACES};
 
 use crate::cost::{self, Work};
 use crate::curve::Curve;
-use crate::grid::{ALPHA, BRICK, Box3, COLOUR_ONE, VoxelGrid, look_of, to_linear};
+use crate::grid::{ALPHA, BRICK, Box3, COLOUR_ONE, VoxelGrid, linear, srgb};
 use crate::js;
 use crate::noise::{Fixed, Fx, ONE, Rng, fixed, float, hash, hash_text, hash64};
 use crate::recent::Memo;
