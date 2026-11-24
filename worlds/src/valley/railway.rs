@@ -168,9 +168,9 @@ const BUILDING: [i64; 2] = [m(14.0), m(7.0)];
 const BUILDING_FROM: i64 = m(8.0);
 /** Rows along z the towns a piece passes are looked for at (town.rs: towns are 900 m apart at least, a row's within 600 m). */
 const TOWN_ROWS: i64 = m(400.0);
-/** The stations' cell, and how far a building reaches past it. */
+/** The stations' cell, and how far a building reaches from its centre on the platform: its roof over 16 m up. */
 const CELL: i64 = m(16.0);
-const STATION_REACH: [i64; 3] = [m(10.0), m(16.0), m(10.0)];
+const STATION_REACH: [i64; 3] = [m(10.0), m(18.0), m(10.0)];
 
 /** What carries the track where the ground is: compared at the line, the same across it. */
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
@@ -518,11 +518,9 @@ impl Line {
         Some(Station { at, top, inner: -self.ends.side, seed: hash64(self.stations, town.x, town.z, 0) })
     }
 
-    /** The station whose building's cell column (x, z) is in, if any. */
-    fn station_near(&self, x: i64, z: i64) -> Option<Station> {
-        let s = self.station(&self.towns.near(z)?)?;
-        let [cx, _, cz] = s.centre();
-        ((x - cx).abs() <= CELL && (z - cz).abs() <= CELL).then_some(s)
+    /** The stations of the towns whose middles are from `from` to `to` along z, inclusive. */
+    fn stations(&self, from: i64, to: i64) -> Vec<Station> {
+        self.towns.over(from, to).iter().filter_map(|town| self.station(town)).collect()
     }
 }
 
@@ -606,11 +604,11 @@ impl Railway {
         self.line.near(x, z, margin).is_some()
     }
 
-    /** The first station from the start, ahead and behind in turn: the track by it. */
+    /** The station of the town nearest the start of those with one: the track by it. */
     pub fn first_station(&self) -> [i64; 3] {
         let line = &self.line;
-        let rows = (0..1000).flat_map(|k| [k, -k - 1]).map(|k| m(200.0) + k * m(400.0));
-        let s = rows.filter_map(|z| line.towns.near(z)).find_map(|t| line.station(&t)).expect("a station within 400 km");
+        let town = line.towns.nearest(|t| line.station(t).is_some()).expect("a station within 64 km");
+        let s = line.station(&town).expect("a station");
         [s.at[0], s.top, s.at[1]]
     }
 
@@ -771,12 +769,16 @@ fn layers(railway: Arc<Railway>, hold: Scalar, ground: Arc<Sloped>) -> Vec<Layer
         .about(top, mountains::HEIGHTS.1 - mountains::HEIGHTS.0, arch(0) + LINING + 2)
     };
     let stations = {
-        let line = railway.line.clone();
-        let anchor = line.clone();
+        let anchor = railway.line.clone();
         Population::new("stations", 1.6, CELL)
             .reach(STATION_REACH)
-            .anchor_along(1, move |cells| anchor.station_near(cells.centre[0], cells.centre[1]).map(|s| s.centre().map(|v| v as f64)))
-            .make(move |_, c| line.station_near(c.centre[0], c.centre[2]).map(|s| building(&s)))
+            // A station's building is within STATION of its town's middle along z.
+            .at(
+                move |b| {
+                    anchor.stations(b.min[2] - STATION, b.max[2] + STATION).into_iter().map(|s| (s.centre().map(|v| v as f64), s)).collect()
+                },
+                |s, _| Some(building(s)),
+            )
             .within(reach.clone(), 0)
     };
     vec![

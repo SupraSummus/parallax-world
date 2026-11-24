@@ -49,37 +49,24 @@ A world is **layers** of two kinds, drawn in `order`:
   (`Field::shapes`), each of the field's op, in an order the same for any box,
   drawn as a thing's are but cutting the world:
   the cheese's holes, balls and capsules.
-- **Populations:** things in cells, at most one per cell.
-  A population's cells are those of the lattice N times coarser, N·FCC
-  (as the chunks', `bake/src/cells.rs`, when N is a power of two):
-  the rhombic dodecahedra of the points nearest to each of its sites,
-  reaching N from their centre along each axis.
-  The framework asks each cell for an `anchor`;
-  the cell owns a thing only if its anchor is in it
-  (a tree belongs to the cell its foot is in),
-  then asks it to `make` the thing.
-  An anchor picked evenly within the cell's reach (a cube 2N wide)
-  gives things as even and as dense as one per cube 2N wide would:
-  every point is in one cell, which picks it as often as any.
-  Or the population gives an anchor per **line** of cells along an `axis`
-  (`anchor_along`): the cells whose centres differ only along it, every 2N,
-  which lie within a square 2N wide across it.
-  The framework asks each line a box reaches once,
-  and the cell of the line the anchor is in owns it;
-  an anchor in another line's cell is no one's.
-  Every point is in one cell, so in one line along each axis:
-  a point picked evenly in each line's square,
-  on a surface each line crosses once (`Line::pick`, a ground under columns),
-  gives things as even as one per square 2N wide,
-  for one pick however long the line.
-  Cells and lines give named random sequences (`cell.random("species")`)
+- **Populations:** things at points.
+  A population is given its points (`Population::at`):
+  those in any box asked for, each once, the same whichever box asks,
+  as a function of position is, each with what its thing is made of.
+  The framework asks for those its things may reach a box from,
+  `reach` round it, and makes the thing of each it is given in it.
+  By default the points are the sites of the lattice N times coarser, N·FCC
+  (`lattice`; `make`).
+  It knows nothing else of where they are:
+  the forest's trees stand at `Points` ("Points") and its undergrowth on a square grid,
+  the valley's towns, landmarks and steadings are `Claims` ("Claims"),
+  the cheese's grottoes its caverns.
+  A thing is known by its anchor, the point it rounds to,
+  and its number among those anchored there, in the order they come.
+  It gives named random sequences (`anchor.random("species")`)
   that depend on them and the name only.
-  A cell holds a thing by chance (`cell.chance(p)`)
-  by one roll, its own, its line's or its point's, the same at every `p`.
-  A sparse population says the most it asks (`Population::chance`),
-  and the framework skips the cells that miss it, unanchored.
-  Or a population makes a thing at each point of `Points`
-  (`anchor_points`; see "Points").
+  How many there are, the points say:
+  a `Points`' chances, thinned by a part's share.
 
 A layer may say **where it is**, along any axis;
 the framework knows nothing else of where anything is.
@@ -103,7 +90,7 @@ a plan promising no slope (`Sloped::any`) says nothing.
 The ground's own field also says what it is under all that (`FieldAbout::ground`),
 solid down without end.
 A population's things may stand on such a plan (`PopulationOn::on`),
-each anchored at most N (its cell) off it.
+each anchored at most N off it.
 And either may be drawn within a **scalar** (`Field::within`, `Population::within`):
 where something may be, a number bounded over a box ("Land"),
 such as a part's share of the land or the trees below the treeline,
@@ -119,7 +106,7 @@ one drawing all of a box solid makes it that (a carve, empty);
 one that may draw in it keeps only what it can't change,
 a carve what is empty, a fill or paint what is buried
 (a thing's carves cut only it).
-A population draws in it if a thing of the cells reaching it,
+A population draws in it if a thing anchored within its reach,
 made as drawing makes it, reaches it by its bounds
 (asked only where the rest would leave it empty: what is buried stays so);
 past their size, its far form, if any.
@@ -274,9 +261,9 @@ how many rays get how far, and what they stop on.
   Parts a thing hides, like branches inside a crown, are children with a small `size`:
   drawn on their own, far away they would show.
 - **Populations** make things while sites are at most `size` apart,
-  by default as far apart as their cells are wide (2N),
-  so a box visits a bounded number of cells at any level:
-  a tile no more lines of cells than it has columns.
+  by default 2N, about as far apart as their things,
+  so a box asks a bounded number of points at any level:
+  things on a ground, no more than it has columns.
   Past that, a tile holds four times the cells each level;
   `ANY_SIZE` draws them there all the same.
   Beyond `size`, they draw their `far` field instead:
@@ -453,8 +440,8 @@ so measured once and kept (`worlds/data/forest-stands.txt`).
 
 Broken rules panic, naming the thing and pointing here:
 
-- **Populations.** A thing reaches at most `reach` past its cell's reach,
-  N from its centre (one number or per axis), whichever way it is anchored;
+- **Populations.** A thing reaches at most `reach` from its anchor
+  (one number or per axis);
   only things that get made are checked, so derive `reach` from the largest possible.
 - **Things.** A node with children gives `bounds` holding them;
   a child stays inside its parent's bounds, as a node's shapes do inside its own
@@ -473,9 +460,8 @@ Broken rules panic, naming the thing and pointing here:
 - **Slopes.** A `Sloped` plan's column differs from a neighbour's
   by at most its `slope`, checked as one is made and the other is kept:
   so every two ever kept together.
-- **Chances.** A cell's chance is at most its population's `chance`.
 - **Stands.** A thing's anchor lies where its population `stands`:
-  on a plan (`on`), at most N (its cell) off it;
+  on a plan (`on`), at most N off it;
   within a region, in a column it may be in.
 - **Meets.** A field draws in a box what it `meets` there:
   nothing where it says nothing, solid of its kind where it says all.
@@ -655,8 +641,9 @@ a landmark's footprint and clearing,
 or a pool, which a field draws,
 is asked for within its reach, at most half of `apart`,
 so a column is reached by one at most.
-A `first` spot, kept whatever is near, puts one where a world needs it:
-the one place preferred.
+No spot is kept for a world:
+what it starts at or names, it finds among those kept, nearest a point
+(`Claims::nearest`): the town, the chapel or the station nearest the start ("Seeds").
 
 ### Far forms keep statistics
 
@@ -751,7 +738,6 @@ by its share of a land of its own and the forest's bids alone.
 A population anchored at the sites builds each in its own frame.
 A pond's water stops under the rim its bowl leaves,
 so it never stands over the ground round it.
-The first is a chapel beside the path, in the camera's view at spawn.
 
 ### Railway
 
@@ -883,7 +869,8 @@ cargo run --release -p parallax-native --features worlds/sponza -- --headless --
 The moor (`worlds/src/valley/moor.rs`) is the shortest whole world to start from.
 `build.rs` has the short forms, and the `ground` crate those of a ground:
 `ground::columns` and `Field::at`,
-`Population::new(…).reach(…).anchor(…)`, `.anchor_along(axis, …)` or `.anchor_points(…)`, `.make(…)`,
+`Population::new(…).reach(…).at(points, make)` or `.make(…)` at the sites of N·FCC,
+`ground::standing` for `Points` on a ground,
 `Node::group`, `Child::new`, and `Shape::ball` and the like,
 solid and filling unless told to `paint` or `carve`;
 `.meets(…)` or `.about(ground, below, above)` on a field, `.stands(…)` or `.on(ground)` on a population,
@@ -953,9 +940,9 @@ and without them rays slipped in at a cliff's corners.
   which then show what is under it. Make it one solid, or paint it.
 - **Fields can't see things.** A field that has to know where things are
   (a path to a steading) reads a plan of them,
-  and the population anchors each where the plan says:
-  each cell asks for the thing near it (`Claims::near`),
-  and the cell it stands in owns it.
+  and the population's points are the plan's,
+  those it keeps in the box asked for (`Claims::over`):
+  looked up from cells, a town 900 m from the next was asked for by every cell between.
 - **Categories finer than the sites.** A field that decides kinds
   on a pattern aligned with the sites (a checker, blocks and streets)
   aliases far away: decide them in a `Plan::dithered`.
@@ -966,16 +953,18 @@ and without them rays slipped in at a cliff's corners.
   (`build::thick`) grows down, not up, as `Column::surface` does
   (the railway's platform; its bridges' parapets):
   cameras look down on the top.
-- **Things on a surface.** Anchor them along the axis across it
-  (`anchor_along(1, …)` with `Line::pick` for a ground under columns),
-  or at points of the axes across it (`anchor_points`), not per cell:
+- **Things on a surface.** Give them points of the axes across it
+  (`Points` over x and z, `ground::standing`), not the sites of N·FCC:
   a host's tiles are cubes over one another,
-  and asked per cell, a population reads the ground in every cell over each column,
+  and asked per site, a population reads the ground at every site over each column,
   most of them in the air or under it;
   under the valley's mountains that was most of a tile's time.
 - **Seeds.** The contract checks four seeds; make the world, its spawn
   and the places it names, for any: the spawn is a site (x + y + z even) in the air,
-  found without assuming a feature a seed may lack,
+  found without assuming a feature a seed may lack;
+  nothing is placed for it: a world finds a place to start at in what it made
+  (the valley on its path 33 m short of the chapel nearest the start,
+  the moor before the steading nearest the origin),
   and a place is searched for until found (the valley's first windmill
   is kilometres away at some seeds).
 - **The bottom.** Spans at least two spacings tall grow past a fixed bottom

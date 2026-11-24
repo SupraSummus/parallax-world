@@ -54,10 +54,10 @@ macro_rules! work {
 }
 
 work! {
-    /** Cells of a population whose anchor was asked for, or lines of them (`Anchors::Lines`). */
-    cells,
-    /** Cells whose anchor is in them: those asked to make a thing. */
-    owned,
+    /** A population's points given for the boxes asked (Population::at). */
+    points,
+    /** Its points in them: those asked to make a thing. */
+    inside,
     /** Nodes drawn: things and their children, near or far. */
     nodes,
     /** A field's shapes, made and drawn (`FieldValues::Shapes`). */
@@ -93,8 +93,8 @@ work! {
  * so weigh nothing of their own.
  */
 const NS: Work = Work {
-    cells: 100,
-    owned: 1300,
+    points: 100,
+    inside: 1300,
     nodes: 1800,
     shapes: 350,
     tests: 50,
@@ -296,8 +296,8 @@ pub fn report(name: &str, make: &(dyn Fn() -> World + Sync), places: &[(String, 
 
 /** How many times as much a layer may take per tile from one level of a report to the next before it is flagged. */
 const GROWTH: u64 = 4;
-/** How many cells a population may ask per anchor in them before it is flagged. */
-const CELLS_PER_ANCHOR: u64 = 8;
+/** How many points a population may be given per one in the boxes asked before it is flagged. */
+const POINTS_PER_ANCHOR: u64 = 8;
 /** The share of a tile's time any of these must take to be flagged. */
 const SHARE: f64 = 0.1;
 /** The share of a tile's time one thing, or things drawn whole to be measured, may take before it is flagged. */
@@ -321,8 +321,8 @@ impl Report {
     /**
      * What looks costly, by tile: a tile over BUDGET; a plan making its
      * columns over REMADE times each; a layer taking
-     * GROWTH times as much as at the level before, cells asked for anchors
-     * in vain, a field's values read at every site, one huge thing, or
+     * GROWTH times as much as at the level before, points given outside
+     * the boxes asked, a field's values read at every site, one huge thing, or
      * things drawn whole to be measured.
      */
     pub fn flags(&self) -> Vec<String> {
@@ -344,9 +344,9 @@ impl Report {
             }
             let [x, y, z] = [0, 1, 2].map(|i| (t.b.max[i] - t.b.min[i]) as u64);
             for (layer, w) in t.counts.rows() {
-                if w.cells > CELLS_PER_ANCHOR * w.owned.max(1) {
-                    let what = format!("{layer} asks {} cells for {} anchors in them", w.cells, w.owned);
-                    flag(&mut flags, Work { cells: w.cells, ..Work::default() }.ns(), SHARE, what);
+                if w.points > POINTS_PER_ANCHOR * w.inside.max(1) {
+                    let what = format!("{layer} is given {} points for {} in the boxes asked", w.points, w.inside);
+                    flag(&mut flags, Work { points: w.points, ..Work::default() }.ns(), SHARE, what);
                 }
                 // Read at half the tile's sites or more (x·y·z / 2 of them), not once per line of them.
                 if 4 * w.reads >= x * y * z && w.reads > x * z {

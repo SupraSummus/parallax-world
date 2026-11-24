@@ -3,6 +3,7 @@
 //! detail. See docs/generators.md.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
 use fcc::{FACE_KINDS, VOXEL_FACES};
@@ -12,7 +13,6 @@ use crate::curve::Curve;
 use crate::grid::{ALPHA, BRICK, Box3, COLOUR_ONE, VoxelGrid, look_of, to_linear};
 use crate::js;
 use crate::noise::{Fixed, Fx, ONE, Rng, fixed, float, hash, hash_text, hash64};
-use crate::points::{Points, Spot};
 use crate::recent::Memo;
 use crate::sites;
 
@@ -246,10 +246,6 @@ type FieldSpans = dyn Fn(i64, i64) -> Vec<Span> + Send + Sync;
 type FieldShapes = dyn Fn(&Box3) -> Vec<Shape> + Send + Sync;
 pub(crate) type FieldMeets = dyn Fn(&Box3, i64) -> Meets + Send + Sync;
 pub(crate) type Stands = dyn Fn(&Box3) -> bool + Send + Sync;
-type CellAnchor = dyn Fn(&Cell) -> Option<Point> + Send + Sync;
-type LineAnchor = dyn Fn(&Line) -> Option<Point> + Send + Sync;
-type SpotAnchor = dyn Fn(&Spot) -> Option<Point> + Send + Sync;
-type Make = dyn Fn(Point, &Cell) -> Option<Node> + Send + Sync;
 
 impl Shapes {
     pub fn lazy(seed: u64, make: impl Fn(&mut Rng) -> Vec<Shape> + Send + Sync + 'static) -> Shapes {
@@ -369,122 +365,55 @@ pub enum Meets {
 }
 
 /**
- * A cell of a population: of N·FCC, or the leaf of a point (`Points`),
- * with its mark and number there; along the axes the points don't span,
- * its index is 0 and its centre the anchor's.
+ * Where a thing of a population is: its anchor (lattice units), known
+ * by the point it rounds to (`key`) and its number among those of its
+ * population anchored there, in the order they come. Its random
+ * sequences depend on these and the population only.
  */
-pub struct Cell<'a> {
-    pub i: i64,
-    pub j: i64,
-    pub k: i64,
-    pub centre: [i64; 3],
-    /** N: the cell reaches N from its centre along each axis. */
-    pub n: i64,
-    /** Its point's mark; 0 for cells of N·FCC. */
-    pub mark: usize,
+pub struct Anchor<'a> {
+    pub at: Point,
+    /** The point it rounds to. */
+    pub key: [i64; 3],
     nth: u32,
     population: &'a str,
     seed: u64,
-    /** Its roll (`chance`): that of what was asked for its anchor, it, its line or its point. */
-    roll: Fx,
-    /** Its population's `chance`. */
-    most: Fx,
 }
 
-impl Cell<'_> {
-    /** Cell (i, j, k) of N·FCC, i + j + k even. */
-    fn fcc(population: &Population, seed: u64, [i, j, k]: [i64; 3], roll: Fx) -> Cell<'_> {
-        let (n, most) = (population.cell, population.chance);
-        Cell { i, j, k, centre: [i * n, j * n, k * n], n, mark: 0, nth: 0, population: population.name, seed, roll, most }
-    }
-
-    /**
-     * Whether it holds a thing with chance `p`, by one roll at every `p`:
-     * a cell missing its population's `chance` misses any lower, so the
-     * engine skips it unanchored.
-     */
-    pub fn chance(&self, p: Fx) -> bool {
-        assert!(
-            p <= self.most,
-            "{} asks for a chance of {p:?}, over its population's {:?} (Population::chance); see \"Rules\" in {DOCS}",
-            self.key(),
-            self.most
-        );
-        self.roll < p
-    }
-
-    /** Whether an anchor at `p` is in it, of N·FCC: the cell owns a thing anchored there, if asked. */
-    pub fn owns(&self, p: Point) -> bool {
-        nearest_site(shapes::at(p), self.n) == [self.i, self.j, self.k]
-    }
-
-    /** A random sequence that depends on the cell and `stream` only. */
+impl Anchor<'_> {
+    /** A random sequence that depends on the anchor and `stream` only. */
     pub fn random(&self, stream: &str) -> Rng {
-        Rng::new(hash64(
-            hash_text(&format!("{}:{stream}", self.population), self.seed) ^ point(self.mark, self.nth),
-            self.i,
-            self.j,
-            self.k,
-        ))
+        let [x, y, z] = self.key;
+        Rng::new(hash64(hash_text(&format!("{}:{stream}", self.population), self.seed) ^ u64::from(self.nth), x, y, z))
     }
 
     /** Its thing's name, for messages and drawing order. */
-    fn key(&self) -> String {
-        let point = if (self.mark, self.nth) == (0, 0) { String::new() } else { format!(" {}.{}", self.mark, self.nth) };
-        format!("{} {},{},{}{point}", self.population, self.i, self.j, self.k)
+    fn name(&self) -> String {
+        let [x, y, z] = self.key;
+        let nth = if self.nth == 0 { String::new() } else { format!(" {}", self.nth) };
+        format!("{} {x},{y},{z}{nth}", self.population)
+    }
+
+    /** The box its thing may reach: `reach` from its key along each axis. */
+    fn reach(&self, reach: [i64; 3]) -> Box3 {
+        Box3 { min: [0, 1, 2].map(|a| self.key[a] - reach[a]), max: [0, 1, 2].map(|a| self.key[a] + reach[a] + 1) }
     }
 }
 
 /**
- * A line of cells of a population along an axis: those whose centres
- * differ only along it (every 2N, as i + j + k is even). They lie in the
- * square 2N wide across the axis around its centre; every point is in
- * one cell, so in one line along each axis.
+ * The sites of N·FCC in box `b` (lattice units): the default points of a
+ * population (`Population::new`).
  */
-pub struct Line<'a> {
-    pub axis: usize,
-    /** The cells' indices across the axis, in axis order. */
-    pub across: [i64; 2],
-    /** Their centres across the axis, lattice units: `across` times N. */
-    pub centre: [i64; 2],
-    pub n: i64,
-    population: &'a str,
-    seed: u64,
-}
-
-impl Line<'_> {
-    /** Line (u, v) along `axis` of the cells of N·FCC of `population`. */
-    fn new(population: &str, seed: u64, axis: usize, [u, v]: [i64; 2], n: i64) -> Line<'_> {
-        Line { axis, across: [u, v], centre: [u * n, v * n], n, population, seed }
+pub fn lattice(n: i64, b: &Box3) -> Vec<[i64; 3]> {
+    let [(i0, i1), (j0, j1), (k0, k1)] = [0, 1, 2].map(|a| ((b.min[a] + n - 1).div_euclid(n), (b.max[a] - 1).div_euclid(n)));
+    let mut sites = Vec::new();
+    for i in i0..=i1 {
+        for j in j0..=j1 {
+            for k in (k0 + ((k0 + i + j) & 1)..=k1).step_by(2) {
+                sites.push([i * n, j * n, k * n]);
+            }
+        }
     }
-
-    /** Its cells' indices with its axis 0: its roll's, as a cell's are its own. */
-    fn indices(&self) -> [i64; 3] {
-        turned(self.axis, self.across, 0)
-    }
-
-    /** A random sequence that depends on the line and `stream` only. */
-    pub fn random(&self, stream: &str) -> Rng {
-        let [u, v] = self.across;
-        Rng::new(hash64(hash_text(&format!("{}:{stream} along {}", self.population, self.axis), self.seed), u, v, 0))
-    }
-
-    /**
-     * A point picked by `random` evenly in the line's square across its
-     * axis, at `along(u, v)` along it (u and v in `across`'s order). Each point
-     * of a surface crossing the lines once is in one line's cells, which
-     * picks it as often as any: anchored there, things are as even as one
-     * per square 2N wide.
-     */
-    pub fn pick(&self, random: &mut Rng, along: impl Fn(i64, i64) -> i64) -> Point {
-        let [u, v] = self.centre.map(|c| c - self.n + random.below(2 * self.n as u32) as i64);
-        turned(self.axis, [u as f64, v as f64], along(u, v) as f64)
-    }
-}
-
-/** A leaf's point as one number, hashed with its cell's indices; 0 for cells of N·FCC. */
-fn point(mark: usize, nth: u32) -> u64 {
-    (mark as u64) << 32 | nth as u64
+    sites
 }
 
 /**
@@ -503,18 +432,24 @@ pub const fn turned<T: Copy>(axis: usize, [u, v]: [T; 2], along: T) -> [T; 3] {
     p
 }
 
-/** Things placed in the cells of N·FCC, at most one per cell, or at points. */
+/**
+ * Things at points: those its `things` gives in any box, each once, the
+ * same whichever box asks, and each anchored there if made.
+ */
 pub struct Population {
     pub name: &'static str,
     pub order: f64,
-    /** N; anchored at points, their leaves' width. */
+    /**
+     * N: about the room each thing has. Its points are the sites of N·FCC
+     * unless given (`at`); its things are made while sites are at most 2N
+     * apart unless given a `size`; checks look for them in cells N wide.
+     */
     pub cell: i64,
-    /** How far a thing reaches past N from its cell's centre, per axis. */
+    /** How far a thing reaches from its anchor, per axis. */
     pub reach: [i64; 3],
     /** Things are made while sites are at most this far apart (ANY_SIZE: always). */
     pub size: i64,
-    pub anchor: Anchors,
-    pub make: Box<Make>,
+    pub things: Box<Things>,
     pub far: Option<Field>,
     /**
      * Whether an anchor of its things may lie in a box (lattice units),
@@ -524,26 +459,15 @@ pub struct Population {
     pub stands: Option<Box<Stands>>,
     /** Its things' far forms, measured. */
     pub measured: Measured,
-    /** The most chance a cell asks for (Cell::chance): cells rolling over it aren't anchored. */
-    pub chance: Fx,
 }
 
-/** Where a population's things are, each owned by the cell it is in, if asked there. */
-pub enum Anchors {
-    /** At most one a cell, asked of each. */
-    Cells(Box<CellAnchor>),
-    /**
-     * At most one a line of cells along `axis`, asked once however many
-     * of its cells a box reaches: for things on a surface across it (a
-     * ground under columns of cells), as even as one per cell's square.
-     */
-    Lines { axis: usize, anchor: Box<LineAnchor> },
-    /**
-     * A thing at each point of `points` (points.rs), anchored where
-     * `anchor` lifts it to along the axes they don't span (onto a ground).
-     */
-    Points { points: Arc<Points>, anchor: Box<SpotAnchor> },
-}
+/**
+ * A population's points in a box (lattice units), each to `each` with
+ * what makes its thing: what a box asks for, it is given, and maybe more.
+ */
+pub type Things = dyn Fn(&Box3, &mut dyn FnMut(Point, &Make<'_>)) + Send + Sync;
+/** What makes the thing at an anchor, if it has one. */
+pub type Make<'a> = dyn Fn(&Anchor) -> Option<Node> + 'a;
 
 pub enum Layer {
     Field(Field),

@@ -10,10 +10,10 @@ use worldgen::checks::contract::{Accuracy, Break, Margin, Region, Report, hold_t
 use worldgen::curve::Curve;
 use worldgen::generator::{
     ANY_SIZE, Field, Generator, KindDef, Layer, Node, Op, Point, Population, SOLID, Shape, Span, ball, capsule, cuboid, ellipsoid, gable,
-    lathe, tube,
+    lathe, lattice, tube,
 };
 use worldgen::grid::Box3;
-use worldgen::noise::{Rng, fx};
+use worldgen::noise::{Rng, fx, hash64};
 
 static KINDS: &[KindDef] = &[
     KindDef { name: "ground", kind_type: 1, colors: &["#222222"], walk_through: false, glows: false, medium: false },
@@ -85,15 +85,19 @@ const CASES: &[(&str, i64, Make)] = &[
 fn world(make: Make, cell: i64) -> World {
     let ground = Field::spans("ground", 0.0, Op::Fill, 1, |_, _| [Span::solid(-64, 0, GROUND)]);
     // At every level, though cells narrower than the sites cost fourfold a level: how shapes are drawn, to the coarsest.
-    let things = Population::new("things", 1.0, cell)
-        .reach(32)
-        .size(ANY_SIZE)
-        .anchor(|cell| {
-            let mut random = cell.random("where");
-            let mut at = |c: i64| c as f64 + cell.n as f64 * (random.next() - 0.5);
-            (cell.j == 0).then(|| [at(cell.centre[0]), 0.0, at(cell.centre[2])])
-        })
-        .make(move |p, cell| Some(Node::of(vec![make(p, &mut cell.random("size"))])));
+    let things = Population::new("things", 1.0, cell).reach(32).size(ANY_SIZE).at(
+        move |b| {
+            // A site of each cell on y = 0 of N·FCC, anywhere within N / 2 of its centre along x and z.
+            let around = Box3 { min: [b.min[0] - cell, 0, b.min[2] - cell], max: [b.max[0] + cell, 1, b.max[2] + cell] };
+            let at = |c: [i64; 3]| {
+                let mut random = Rng::new(hash64(5, c[0], c[1], c[2]));
+                let mut at = |c: i64| c as f64 + cell as f64 * (random.next() - 0.5);
+                ([at(c[0]), 0.0, at(c[2])], ())
+            };
+            lattice(cell, &around).into_iter().map(at).collect()
+        },
+        move |_, anchor| Some(Node::of(vec![make(anchor.at, &mut anchor.random("size"))])),
+    );
     let generator = Generator { kinds: KINDS.to_vec(), seed: 5, layers: vec![Layer::Field(ground), Layer::Population(things)] };
     // Room over what stands on the ground for a site of the coarsest level, as a coarse site's share may reach past it (docs/todo.md).
     World { generator, spawn: [0; 3], heights: Some((-64, 128)), points: Vec::new() }

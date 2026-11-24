@@ -201,9 +201,8 @@ a town placed once per region, kept inside it,
 is never where two regions meet.
 `worldgen::checks::places` (`places.rs`) checks that things prefer no places.
 It gathers each population's things over 16 km around spawn at eight seeds,
-from columns of cells in patches anywhere
-(a cell's anchor finds the thing of the cell it is in,
-so one thing per region of a plan is found from any of its cells).
+from columns of cells in patches anywhere,
+each the things anchored in it.
 For each axis and period, from four cells to an eighth of the area,
 it sums the things' phases 2π·x/P over stretches of whole periods;
 a preference is a mean of those sums away from zero
@@ -294,7 +293,7 @@ the time each tile took here,
 and flags what looks costly:
 a tile over budget,
 a layer growing fourfold from one level to the next,
-a population asking many more cells for anchors than own one,
+a population given many more points than are in the boxes asked,
 a field read at every site,
 one huge thing,
 things drawn whole to be measured,

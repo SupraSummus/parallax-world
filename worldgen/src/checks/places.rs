@@ -20,7 +20,7 @@ use std::f64::consts::TAU;
 use std::fmt;
 
 use crate::World;
-use crate::generator::{Anchors, Generator, Layer, Population, across, anchor_in, anchors_in, made_in, turned};
+use crate::generator::{Generator, Layer, Population, across, anchors_in, turned};
 use crate::grid::Box3;
 use crate::noise::{Rng, hash_text, hash64};
 use crate::world::UP;
@@ -32,9 +32,9 @@ const COLUMNS: usize = 16_384;
 /** Things gathered per population and seed: columns are picked until there are as many. */
 const THINGS: usize = 2048;
 /**
- * Things gathered per column at most, from a cell of it picked at random:
- * a column of a world on a ground holds fewer, one through an endless
- * world (the cheese) as many as it is tall.
+ * Things gathered per column at most, from a stretch of it picked at
+ * random: a column of a world on a ground holds fewer, one through an
+ * endless world (the cheese) as many as it is tall.
  */
 const PER_COLUMN: usize = 4;
 /** Columns are picked in patches this many a side: neighbours read plans their neighbours made. */
@@ -58,17 +58,17 @@ const BINS: usize = 24;
  * Where the things of `population` are, lattice units: those anchored in
  * `area`, found from its columns of cells over it (along UP), all of them
  * if COLUMNS or fewer, else patches of them at random by the world's
- * seed until THINGS are found or COLUMNS picked. A cell's anchor finds
- * the thing of the cell it is in, if any, so a thing many cells ask for
- * (one per region of a plan) is found from any of them.
+ * seed until THINGS are found or COLUMNS picked. A column is asked a
+ * stretch of two cells at a time, up from one picked at random and round,
+ * until PER_COLUMN are found.
  * Patches anywhere, not every n-th: a sample on a grid would prefer
  * places itself; and a sample of its own each seed, or its unevenness
  * would be the same at every seed.
  */
 pub fn places(generator: &Generator, population: &Population, area: &Box3) -> Vec<[i64; 3]> {
     let n = population.cell;
-    let range = |a: usize| ((area.min[a] - n).div_euclid(n), (area.max[a] + n).div_euclid(n));
-    let ([(i0, i1), (k0, k1)], (j0, j1)) = (across(UP).map(range), range(UP));
+    let range = |a: usize| (area.min[a].div_euclid(n), (area.max[a] - 1).div_euclid(n));
+    let [(i0, i1), (k0, k1)] = across(UP).map(range);
     let wide = i1 - i0 + 1;
     let total = (wide * (k1 - k0 + 1)) as u64;
     let column = move |c: u64| (i0 + c as i64 % wide, k0 + c as i64 / wide);
@@ -81,26 +81,21 @@ pub fn places(generator: &Generator, population: &Population, area: &Box3) -> Ve
         let columns = patches.flat_map(|(i, k)| (0..PATCH * PATCH).map(move |n| (i + n % PATCH, k + n / PATCH)));
         Box::new(columns.filter(move |&c| seen.insert(c)).take(COLUMNS))
     };
-    let (mut found, mut asked) = (Vec::new(), HashSet::new());
-    let (seed, tall) = (hash_text(population.name, generator.seed), j1 - j0 + 1);
+    let mut found = Vec::new();
+    let (seed, (lo, hi)) = (hash_text(population.name, generator.seed), (area.min[UP], area.max[UP]));
+    let stretches = (hi - lo + 2 * n - 1) / (2 * n);
     for (i, k) in columns {
-        let first = (hash64(seed, i, 0, k) % tall as u64) as i64;
-        let anchors = match population.anchor {
-            // A leaf's points are its own: they are found from it.
-            Anchors::Points { .. } => anchors_in(generator, population, turned(UP, [(i, i), (k, k)], (j0, j1))),
-            _ => (0..tall)
-                .map(|n| j0 + (first + n) % tall)
-                .filter(|j| (i + j + k) & 1 == 0)
-                .filter_map(|j| {
-                    let [x, y, z] = turned(UP, [i, k], j);
-                    anchor_in(generator, population, x, y, z)
-                })
-                .filter(|(_, owner)| asked.insert(*owner))
-                .filter_map(|(_, [i, j, k])| made_in(generator, population, i, j, k).map(|(anchor, _)| anchor))
-                .take(PER_COLUMN)
-                .collect(),
-        };
-        found.extend(anchors.iter().map(|a| a.map(|v| v.round() as i64)).filter(|p| area.holds(*p)));
+        let first = (hash64(seed, i, 0, k) % stretches as u64) as i64;
+        let mut in_column = Vec::new();
+        for s in 0..stretches {
+            let from = lo + (first + s) % stretches * 2 * n;
+            let (min, max) = (turned(UP, [i * n, k * n], from), turned(UP, [(i + 1) * n, (k + 1) * n], (from + 2 * n).min(hi)));
+            in_column.extend(anchors_in(generator, population, &Box3 { min, max }));
+            if in_column.len() >= PER_COLUMN {
+                break;
+            }
+        }
+        found.extend(in_column.iter().map(|a| a.map(|v| v.round() as i64)).filter(|p| area.holds(*p)));
         if !all && found.len() >= THINGS {
             break;
         }

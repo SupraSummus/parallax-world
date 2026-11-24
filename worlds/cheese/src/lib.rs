@@ -403,38 +403,34 @@ fn stairs(holes: &Holes, (centre, radius): ([i64; 3], i64), rng: &mut Rng) -> No
 }
 
 /**
- * What stands in the caverns: in each, the thing of the cell its centre
- * is in, its pillar and stairs, and clusters of crystals scattered on its
+ * What stands in the caverns: in each, anchored at its centre, its
+ * pillar and stairs, and clusters of crystals scattered on its
  * wall, each kept where it is in the cheese and this wall is the nearest.
  */
 fn grottoes(seeds: Seeds, hold: Scalar) -> Population {
-    let n = CAVERNS.cell / 2;
     let (region, anchoring) = (hold.clone(), hold.clone());
-    Population::new("grottoes", 2.0, n)
+    Population::new("grottoes", 2.0, CAVERNS.cell / 2)
         .reach(CAVERNS.most + CLIMB + m(1.0))
         .size(SIZE)
         .far(far(seeds, hold.clone()))
         .within(region, 0)
-        .anchor(move |cell| {
-            // The caverns' cells it meets: it reaches n from its centre, a cavern's cell is 2n wide.
-            let [lo, hi] = [-n, n - 1].map(|d| cell.centre.map(|v| (v + d).div_euclid(CAVERNS.cell)));
-            // The cavern whose centre is in it: the cell owns its thing.
-            cells(lo, hi)
-                .filter_map(|c| CAVERNS.ball(seeds.caverns, c, &anchoring))
-                .map(|(c, _)| c.map(|v| v as f64))
-                .find(|&c| cell.owns(c))
-        })
-        .make(move |p, cell| {
-            let at = p.map(|v| v as i64);
-            let (centre, radius) = CAVERNS.ball(seeds.caverns, at.map(|v| v.div_euclid(CAVERNS.cell)), &hold)?;
-            // All it asks of: its wall, a little behind it, and over its ceiling as high as its stairs may climb.
-            let reach = radius + CLIMB + m(3.0);
-            let holes = Holes::near(seeds, at.map(|v| v - reach), at.map(|v| v + reach), &hold);
-            let clusters = clusters(&holes, (centre, radius), cell.random("clusters"))
-                .map(|(n, p, mut rng)| Child::new(format!("cluster {n}"), SIZE, cluster(p, centre, &mut rng)));
-            let stairs = Child::new("stairs", SIZE, stairs(&holes, (centre, radius), &mut cell.random("stairs")));
-            Some(Node::group(std::iter::once(stairs).chain(clusters).collect()))
-        })
+        .at(
+            move |b| {
+                CAVERNS
+                    .balls(seeds.caverns, b.min, b.max, &anchoring)
+                    .map(|(centre, radius)| (centre.map(|v| v as f64), (centre, radius)))
+                    .collect()
+            },
+            move |&(centre, radius), cell| {
+                // All it asks of: its wall, a little behind it, and over its ceiling as high as its stairs may climb.
+                let reach = radius + CLIMB + m(3.0);
+                let holes = Holes::near(seeds, centre.map(|v| v - reach), centre.map(|v| v + reach), &hold);
+                let clusters = clusters(&holes, (centre, radius), cell.random("clusters"))
+                    .map(|(n, p, mut rng)| Child::new(format!("cluster {n}"), SIZE, cluster(p, centre, &mut rng)));
+                let stairs = Child::new("stairs", SIZE, stairs(&holes, (centre, radius), &mut cell.random("stairs")));
+                Some(Node::group(std::iter::once(stairs).chain(clusters).collect()))
+            },
+        )
 }
 
 /**
@@ -448,7 +444,7 @@ pub const CHEESE: Entry = Entry {
     levels: 7,
     accuracy: &[],
     // Why: docs/todo.md, "Four of the cheese's tiles are over the cost budget".
-    // The mine's galleries run along x and z: docs/todo.md, "Towns, the city and the cheese's mine line up with the lattice".
+    // The mine's galleries run along x and z: docs/todo.md, "The city and the cheese's mine line up with the lattice".
     known: &[
         Known::OverBudget("spawn", 6),
         Known::OverBudget("spawn", 7),

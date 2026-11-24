@@ -6,14 +6,13 @@
 
 use crate::curve::Curve;
 use crate::generator::{
-    Anchors, Cell, Child, Children, Far, Field, FieldMeets, FieldValues, Holds, Kind, Line, Meets, Node, Op, Point, Population, Radius,
-    SOLID, Shape, Shapes, Span, Stands, ball, bounds_of_shapes, capsule, cuboid, ellipsoid, gable, lathe, tube,
+    Anchor, Child, Children, Far, Field, FieldMeets, FieldValues, Holds, Kind, Make, Meets, Node, Op, Point, Population, Radius, SOLID,
+    Shape, Shapes, Span, Stands, ball, bounds_of_shapes, capsule, cuboid, ellipsoid, gable, lathe, lattice, tube,
 };
 use crate::grid::Box3;
 use std::sync::Arc;
 
-use crate::noise::{Fx, Rng};
-use crate::points::{Points, Spot};
+use crate::noise::Rng;
 use crate::sites::spacing;
 
 /**
@@ -126,10 +125,10 @@ impl PerAxis for [i64; 3] {
 
 impl Population {
     /**
-     * Things in the cells of `cell`·FCC: none until it is given `make`.
-     * Each is anchored at its cell's centre unless given an anchor,
-     * reaches nowhere past its cell unless given `reach`, and is made
-     * while its cells are at least a site wide (2N) unless given a `size`.
+     * Things at the sites of `cell`·FCC (`lattice`), N: none until it is
+     * given `make`, or other points (`at`). Each reaches nowhere past its
+     * anchor unless given `reach`, and is made while sites are at most 2N
+     * apart unless given a `size`.
      */
     pub fn new(name: &'static str, order: f64, cell: i64) -> Population {
         Population {
@@ -138,16 +137,14 @@ impl Population {
             cell,
             reach: [0; 3],
             size: 2 * cell,
-            anchor: Anchors::Cells(Box::new(|c| Some(c.centre.map(|v| v as f64)))),
-            make: Box::new(|_, _| None),
+            things: Box::new(|_, _| {}),
             far: None,
             stands: None,
             measured: Default::default(),
-            chance: Fx::ONE,
         }
     }
 
-    /** How far a thing reaches past N from its cell's centre: one number, or per axis. */
+    /** How far a thing reaches from its anchor: one number, or per axis. */
     pub fn reach(self, reach: impl PerAxis) -> Population {
         Population { reach: reach.per_axis(), ..self }
     }
@@ -157,42 +154,29 @@ impl Population {
         Population { size, ..self }
     }
 
-    /** Where a cell's thing is: the cell owns one only if its anchor is in it. */
-    pub fn anchor(self, anchor: impl Fn(&Cell) -> Option<Point> + Send + Sync + 'static) -> Population {
-        Population { anchor: Anchors::Cells(Box::new(anchor)), ..self }
-    }
-
     /**
-     * Where the thing of each line of cells along `axis` is, asked once
-     * however many of them a box reaches: the cell of the line it is in
-     * owns it (`Line::pick` picks a point on a surface across the axis).
+     * A thing at each of the points `points` gives in a box (lattice
+     * units), if `make` makes one of it: each point once, the same whoever
+     * asks, as a pure function of position does. It may give points
+     * outside the box: only those in it are asked for.
      */
-    pub fn anchor_along(self, axis: usize, anchor: impl Fn(&Line) -> Option<Point> + Send + Sync + 'static) -> Population {
-        Population { anchor: Anchors::Lines { axis, anchor: Box::new(anchor) }, ..self }
+    pub fn at<T: 'static>(
+        self,
+        points: impl Fn(&Box3) -> Vec<(Point, T)> + Send + Sync + 'static,
+        make: impl Fn(&T, &Anchor) -> Option<Node> + Send + Sync + 'static,
+    ) -> Population {
+        let things = move |b: &Box3, each: &mut dyn FnMut(Point, &Make<'_>)| {
+            for (p, of) in points(b) {
+                each(p, &|anchor| make(&of, anchor));
+            }
+        };
+        Population { things: Box::new(things), ..self }
     }
 
-    /**
-     * A thing at each of `points`, anchored where `anchor` lifts it to
-     * along the axes they don't span (onto a ground); its cells are their
-     * leaves, and its cell's `mark` the point's.
-     */
-    pub fn anchor_points(self, points: Arc<Points>, anchor: impl Fn(&Spot) -> Option<Point> + Send + Sync + 'static) -> Population {
-        assert!(
-            self.stands.is_none(),
-            "population {}: give its points before where it stands (`on`), whose N is their leaves' width",
-            self.name
-        );
-        Population { cell: points.leaf, anchor: Anchors::Points { points, anchor: Box::new(anchor) }, ..self }
-    }
-
-    /** The most chance its cells ask for (`Cell::chance`): a sparse population anchors only cells that may hold a thing. */
-    pub fn chance(self, chance: Fx) -> Population {
-        Population { chance, ..self }
-    }
-
-    /** The thing at an anchor, of a cell, if it has one. */
-    pub fn make(self, make: impl Fn(Point, &Cell) -> Option<Node> + Send + Sync + 'static) -> Population {
-        Population { make: Box::new(make), ..self }
+    /** The thing at each site of N·FCC (`lattice`), if it has one. */
+    pub fn make(self, make: impl Fn(&Anchor) -> Option<Node> + Send + Sync + 'static) -> Population {
+        let n = self.cell;
+        self.at(move |b| lattice(n, b).into_iter().map(|p| (p.map(|v| v as f64), ())).collect(), move |_, anchor| make(anchor))
     }
 
     /**

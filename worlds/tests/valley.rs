@@ -5,7 +5,6 @@ use std::sync::Arc;
 use worldgen::generator::{Layer, generate, generate_shown, kind_of};
 use worldgen::grid::{ALPHA, Box3, is_site};
 use worldgen::noise::Scope;
-use worldgen::picture::{Camera, picture};
 use worldgen::tiles::{TILE, make_tiles, tile_box};
 use worldgen::units::UNIT_SIZE;
 use worlds::valley::landmarks::{LANDMARKS, Landmark, Landmarks, NEAR, Site};
@@ -19,9 +18,7 @@ fn unit(metres: f64) -> i64 {
 #[test]
 fn the_forest_keeps_off_the_first_towns_main_street() {
     let world = valley(42);
-    let spawn = world.spawn;
-    let town = Terrain::new(&Scope::new(42)).towns.near(spawn[2] + unit(200.0)).expect("a town ahead");
-    assert!(town.z - spawn[2] > unit(100.0), "the camera starts outside the town");
+    let town = Terrain::new(&Scope::new(42)).towns.first();
     // Along the main street's middle, 20 m into the town: nothing from a metre above it to the sky.
     let street =
         Box3 { min: [town.x - 2, town.level + 8, town.z - unit(60.0)], max: [town.x + 2, town.level + unit(30.0), town.z - unit(40.0)] };
@@ -141,7 +138,7 @@ fn landmarks_of_every_kind_stand_out_of_towns_and_off_the_path() {
         let (sites, terrain) = landmarks(seed);
         for s in sites {
             kinds.push(s.landmark);
-            let ([hx, hz], [cx, cz], reach) = (s.half(), s.centre, s.clearing.0);
+            let ([hx, hz], [cx, cz], reach) = (s.half(), s.centre, s.clearing().0);
             let metres = |from: i64, to: i64| (from..=to).step_by(unit(1.0) as usize);
             // Its clearing: within its reach of the footprint, as it bids.
             let cleared = |x: i64, z: i64| ((x - cx).abs() - hx).max(0).pow(2) + ((z - cz).abs() - hz).max(0).pow(2) <= reach * reach;
@@ -192,20 +189,5 @@ fn ponds_hold_their_water_below_the_ground_round_them() {
         }
         assert!(wet > 100, "seed {seed}: the pond at {:?} holds no water", pond.centre);
         assert!(top < rim, "seed {seed}: the pond at {:?} stands to {top}, over its rim at {rim}", pond.centre);
-    }
-}
-
-#[test]
-fn the_camera_starts_with_a_chapel_in_view() {
-    for seed in [42, 1, 2, 3] {
-        let world = valley(seed);
-        let eye = world.spawn.map(|v| v as f64);
-        // The chapel stands about 35 m ahead.
-        let camera = Camera::looking_at(eye, [eye[0], eye[1], eye[2] + 1.0], 70f64.to_radians(), 192, 120, unit(50.0) as f64);
-        let shot = picture(&world.generator, &camera, 0, world.heights_at(0));
-        let kind = kind_of(&world.generator);
-        let seen = shot.looks.iter().filter(|&&look| kind(look).is_some_and(|k| k.name == "churchStone")).count();
-        // Seen past the trees: at least a patch of 12 by 12 pixels of its walls.
-        assert!(seen >= 144, "seed {seed}: the first chapel covers {seen} of {} pixels", shot.looks.len());
     }
 }

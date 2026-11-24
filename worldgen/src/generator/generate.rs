@@ -458,16 +458,15 @@ fn drawables_in<'a>(generator: &'a Generator, clip: &Box3, s: i64) -> Vec<Drawab
             }
             continue;
         }
-        let (n, cells) = (population.cell, cells_reaching(population, &units));
         // Its things read the ground on the level's sites, as its fields do (Sloped::at).
         let work = sites::footprint(s, [0; 3], || {
-            each_thing(generator, population, cells, |cell, _, node| {
-                let (key, bounds, reach) = (cell.key(), bounds_of(&node), reach_of(population, cell));
-                assert!(bounds.inside(&reach), "{}", past_reach(&key, &bounds, &reach, n, population.reach));
+            each_thing(generator, population, &anchors_reaching(population, &units), |anchor, node| {
+                let (name, bounds, reach) = (anchor.name(), bounds_of(&node), anchor.reach(population.reach));
+                assert!(bounds.inside(&reach), "{}", past_reach(&name, &bounds, anchor.key, population.reach));
                 things += 1;
                 let (order, layer, seed) = (population.order, population.name, generator.seed);
                 let at = Visit { s, units: &units, order, layer, thing: things, seed, checked, measured: &population.measured };
-                visit(&node, key, bounds, &at, &mut drawables);
+                visit(&node, name, bounds, &at, &mut drawables);
             })
         });
         cost::add(population.name, work);
@@ -476,18 +475,14 @@ fn drawables_in<'a>(generator: &'a Generator, clip: &Box3, s: i64) -> Vec<Drawab
     drawables
 }
 
-/** Why a thing within `bounds` is past its cell's `reach` (N and the population's reach past its centre): along which axes, by how much, what would hold it. */
-fn past_reach(key: &str, bounds: &Box3, reach: &Box3, n: i64, population: [i64; 3]) -> String {
-    let centre = [0, 1, 2].map(|i| (reach.min[i] + reach.max[i]) / 2);
-    let needed = [0, 1, 2].map(|i| population[i].max(centre[i] - n - bounds.min[i]).max(bounds.max[i] - centre[i] - n));
-    let axes: Vec<String> = (0..3)
-        .filter(|i| needed[*i] > population[*i])
-        .map(|i| format!("{} by {}", ["x", "y", "z"][i], needed[i] - population[i]))
-        .collect();
+/** Why a thing within `bounds`, anchored at `key`, is past its population's `reach` from there: along which axes, by how much. */
+fn past_reach(name: &str, bounds: &Box3, key: [i64; 3], reach: [i64; 3]) -> String {
+    let needed = [0, 1, 2].map(|i| reach[i].max(key[i] - bounds.min[i]).max(bounds.max[i] - 1 - key[i]));
+    let axes: Vec<String> =
+        (0..3).filter(|i| needed[*i] > reach[*i]).map(|i| format!("{} by {}", ["x", "y", "z"][i], needed[i] - reach[i])).collect();
     format!(
-        "{key} reaches past its population's reach along {}: its bounds are {bounds:?}, its cell's {reach:?} \
-         (N = {n} and reach {population:?} from its centre); reach {needed:?} would hold this one, \
-         but derive it from the largest possible thing; see \"Populations\" in {DOCS}",
+        "{name} reaches past its population's reach {reach:?} from its anchor along {}: its bounds are {bounds:?}; \
+         reach {needed:?} would hold this one, but derive it from the largest possible thing; see \"Populations\" in {DOCS}",
         axes.join(", ")
     )
 }
@@ -495,13 +490,12 @@ fn past_reach(key: &str, bounds: &Box3, reach: &Box3, n: i64, population: [i64; 
 /**
  * Whether a population's things may draw in `b` (lattice units) at sites
  * `s` apart, as it says where they stand (Population::stands): each within
- * N and its reach of its cell's centre, its anchor in the cell, so within
- * 2N and its reach of its anchor; and two sites more, as fields are asked
+ * its reach of its anchor; and two sites more, as fields are asked
  * (Field::meets): an anchor stands on what the level's sites read.
  */
 fn stands_within(population: &Population, b: &Box3, s: i64) -> bool {
     let Some(stands) = &population.stands else { return true };
-    let around = population.reach.map(|r| 2 * population.cell + r + 2 * s);
+    let around = population.reach.map(|r| r + 2 * s);
     stands(&Box3 { min: [0, 1, 2].map(|i| b.min[i] - around[i]), max: [0, 1, 2].map(|i| b.max[i] + around[i]) })
 }
 

@@ -2,7 +2,7 @@
 //!
 //! The course is the spine the valley winds along, kilometres either way:
 //! noise along z, smooth at every scale, so it never runs straight for
-//! long, through x = 0 at z = 0, where the camera starts. The ranges
+//! long, through x = 0 at z = 0. The ranges
 //! stand either side of it, the towns on it, the railway beside it.
 //!
 //! The path is not drawn about it: it is found on the valley's floor, a

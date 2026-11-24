@@ -294,8 +294,8 @@ Numbers are for the forest at 1280×800, as measured when written.
 ## Worlds
 
 - **A part can't stand in a world twice.**
-  Its populations seed their cells by layer name and the generator's seed
-  (`Cell::random`), not its `Scope`: two forests would grow the same trees.
+  Its populations seed their things by layer name and the generator's seed
+  (`Anchor::random`), not its `Scope`: two forests would grow the same trees.
   And its kinds' ids are its place in a table every world concatenates
   in one order (`kinds!`'s `base`); named, the world would number them.
 - **A land in space is read at every site of a box it is not whole in.**
@@ -344,13 +344,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   worldgen's, counted ("Cost" in `docs/checks.md`),
   goes mostly to the trees at levels 0 to 2
   and to the canopy from level 4 (`Rooms::owner` making the trees near).
-- **One of the valley's tiles is over the cost budget**
-  (`Known::OverBudget` in its entry), by things done one by one
-  where a tile holds four times as many each level:
-  at level 3 the towns' things drawn whole to be measured.
-  Drawing one is a quarter of measuring it (`measure` in `forms.rs`):
-  the rest counts its fine sites by cell, axis and face,
-  with a vector of kinds for each face of each cell.
 - **Four of the cheese's tiles are over the cost budget**
   (`Known::OverBudget`), at levels 6 and 7 at the spawn and in the mine:
   at level 7 a tile holds a few hundred thousand holes,
@@ -382,11 +375,12 @@ Numbers are for the forest at 1280×800, as measured when written.
   where the trees thin out to the treeline,
   came 0.10 to 0.15 apart at level 4, in materials hit and from above:
   leaves in place of trunks and of the slope's scree and rock.
-- **Towns, the city and the cheese's mine line up with the lattice.**
+- **The city and the cheese's mine line up with the lattice.**
   Their entries list them (`Known::Turned`).
-  The valley's first town lays out streets and blocks along x and z,
-  and builds in frames of quarter turns (`frame.rs`):
-  a four-fold harmonic of 10 %.
+  The valley's towns lay out streets and blocks along x and z,
+  and build in frames of quarter turns (`frame.rs`):
+  one town, the same at every seed, drew a four-fold harmonic of 10 %;
+  the town nearest the start, another at each seed, draws none the check tells.
   The city is boxes on a plan, all along the axes: 4 %.
   The cheese's mine digs galleries along x and z: 2 to 3 %,
   around it and anywhere, where its lumps are a quarter of the space.
@@ -846,6 +840,17 @@ Numbers are for the forest at 1280×800, as measured when written.
 
 ## Ideas
 
+- A population's N (`Population::cell`) does four things now its points are given:
+  the spacing of its default points (`make`), its default `size` (2N),
+  how far off a ground it may stand (`on`), and the scale checks look for it at.
+  Some are left from when its cells were asked: the towns' is 256 m, 2 km apart.
+  Each said where it is meant would leave N to the default points.
+- `Claims` propose their spots by a Poisson process of their own, as `Points` do.
+  On `Points` they would need cells a power of two wide, their chance the rest.
+- Where a population stands could be a scalar too (`Population::within`):
+  on a ground, N less how far above or below it a point is (`on`),
+  bounded over a box by the plan's range (`Sloped::range`).
+
 - The forest's and the learned town's paths are still sines about x = 0
   (`Relief::path_x` in `worlds/src/forest.rs`);
   a route along their floor (`worlds/src/valley/course.rs`) would serve them too.
@@ -881,7 +886,7 @@ Numbers are for the forest at 1280×800, as measured when written.
     asked brick by brick, `whole` cost many times generating the tile.
     Blocks of columns finer than `FLOOR` would take a ground's range
     from columns between the level's own, each made for it.
-  - Places and the survey sample lines of cells along up (`PER_COLUMN`);
+  - Places and the survey sample columns of cells along up (`PER_COLUMN`);
     `directions` measures the four-fold harmonic about up alone.
   - Light takes its sky from above y (`SKY`, `SUN` in `light/`),
     and ends a line as far as the world's heights are high (`top_steps`).

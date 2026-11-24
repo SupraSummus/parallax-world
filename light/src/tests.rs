@@ -38,10 +38,7 @@ fn world_with(
     ];
     let cube = |p: &[f64; 3], kind| cuboid(p.map(|c| c - LAMP / 2.0), p.map(|c| c + LAMP / 2.0), kind, SOLID, Op::Fill);
     let shapes: Vec<_> = lamps.iter().map(|p| cube(p, LAMP_KIND)).chain(blocks.iter().map(|p| cube(p, STONE))).collect();
-    let lamps = Population::new("lamps", 1.0, 1024)
-        .reach(1024)
-        .anchor(|cell| (cell.centre == [0; 3]).then_some([0.0; 3]))
-        .make(move |_, _| Some(Node::of(shapes.clone())));
+    let lamps = Population::new("lamps", 1.0, 1024).reach(2048).at(|_| vec![([0.0; 3], ())], move |_, _| Some(Node::of(shapes.clone())));
     let ground = Field::at("stone", 0.0, Op::Fill, move |x, y, z| stone(x, y, z, worldgen::sites::spacing()).then_some((STONE, None)));
     let layers = vec![Layer::Field(ground), Layer::Population(lamps)];
     World { generator: Generator { kinds, seed: 1, layers }, spawn: [0; 3], heights: Some((-64, 1024)), points: Vec::new() }

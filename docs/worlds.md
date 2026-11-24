@@ -66,8 +66,7 @@ each level of detail reaches twice as far as the one before, to 11 km.
   leaves on twigs, bark and roots, blades of grass,
   berries, mushrooms, cones, pebbles and fallen leaves.
 - *Valley* (default, and where new structures go first):
-  the forest, with a town on its path every kilometre or so,
-  the first ahead of the camera:
+  the forest, with a town on its path every kilometre or so:
   hamlets, villages and market towns,
   each in a style of its own: southern plaster under low red tiles,
   northern walls under steep slate, timber frames, or brick with stepped gables.
