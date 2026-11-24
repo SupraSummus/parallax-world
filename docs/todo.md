@@ -352,10 +352,11 @@ Numbers are for the forest at 1280×800, as measured when written.
   at level 6, the crystals' far form, a ball about each cavern,
   and the grottoes each making the holes around them to place their stairs.
   The mine's lumps, where none of that is asked, brought the rest under.
-  Timed, it makes levels 4 to 7 three or four times as long:
-  mostly its sites filled in part;
-  a tenth a power per site (`Fill::At`),
-  a tenth balls made only to ask what they reach (`whole`).
+  Timed as hosts make them (`bench.rs`), most of level 7 is not drawing
+  but asking a tile's holes and far crystals, once (`Contents`):
+  the land's shares at each cavern's centre (the mine's bid),
+  and each made a shape, though most are a site or two.
+  The estimate counts drawing only ("Cost is counted for more than hosts make").
   Estimated, not timed: the cheese's body, all of a kind, is filled site by site
   uncounted, a good part of a coarse tile's time.
 - **The learned town's rules are from the old towns.**
@@ -850,6 +851,9 @@ Numbers are for the forest at 1280×800, as measured when written.
 - Where a population stands could be a scalar too (`Population::within`):
   on a ground, N less how far above or below it a point is (`on`),
   bounded over a box by the plan's range (`Sloped::range`).
+  So could where a field draws nothing (`meets`, `about`):
+  one rule for where any layer may be, but `Meets::All`.
+  A population's far field now answers to both (`Contents`).
 
 - The forest's and the learned town's paths are still sines about x = 0
   (`Relief::path_x` in `worlds/src/forest.rs`);
@@ -898,6 +902,19 @@ Numbers are for the forest at 1280×800, as measured when written.
   and its pillars and stairs stop at level 3
   (its crystals go on as their far form, glowing pieces on the caverns' walls).
   Holes as things that cut the world cost far more: each a thing, its cells asked.
+  Holes far smaller than the sites are rightly left out:
+  a ray across a site of cheese with small holes still meets cheese,
+  so they are no medium carved, as small solids are one filled.
+- Far forms from counts, by the engine, for every population at `Points`:
+  where things are smaller than the sites,
+  each site stops what the things its cell holds do,
+  each mark's shadow along each direction measured once.
+  It would leave `size`, `far` and hand-made `Shadows` to the engine,
+  and keep boulders, logs and plants seen far off, which now vanish past their `size`.
+  For correctness and a simpler contract, not speed:
+  what vanishes costs nothing now.
+  Things about a site wide are where it is least sure:
+  drawn, their shadow lies where they are; counted, spread over their cell.
 - Lay out towns at any angle?
   Walls along the lattice's axes look crisp on FCC;
   at other angles they jag.

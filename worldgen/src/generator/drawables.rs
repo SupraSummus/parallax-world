@@ -8,11 +8,21 @@ use super::*;
 pub(super) type Sites = Vec<([i64; 3], Look, Op, u32, u32)>;
 
 pub(super) enum Draw<'a> {
-    Field(&'a Field),
+    /** A field given along its lines or at each site. */
+    Field(&'a Field, Lines<'a>),
+    /** A field of shapes, those it gives near the box (Contents). */
+    Over(&'a Field, &'a [Shape]),
     /** A node's shapes, and whether they are its far ones. */
     Shapes(Vec<Shape>, bool),
     /** A thing measured: its sites, as its population keeps them (Measured). */
     Sites(Arc<Sites>),
+}
+
+/** What a field gives: at each site, or spans along each line of sites parallel to `axis` (FieldValues). */
+#[derive(Clone, Copy)]
+pub(super) enum Lines<'a> {
+    At(&'a FieldAt),
+    Spans { axis: usize, spans: &'a FieldSpans },
 }
 
 pub(super) struct Drawable<'a> {
@@ -30,7 +40,8 @@ pub(super) struct Drawable<'a> {
 /** Draws one drawable at sites `s` apart into `clip`; returns the work. */
 pub(super) fn draw(drawable: &Drawable, seed: u64, s: i64, clip: &Box3, floors: Option<&Floors>, put: &mut Put) -> Work {
     match &drawable.draw {
-        Draw::Field(field) => draw_field(field, seed, s, clip, floors, put),
+        Draw::Field(field, lines) => draw_field(field, lines, seed, s, clip, floors, put),
+        Draw::Over(field, shapes) => draw_field_shapes(field, shapes, seed, s, clip, put),
         Draw::Shapes(shapes, far) => {
             let mut tests = 0;
             for (i, shape) in shapes.iter().enumerate() {
@@ -67,7 +78,7 @@ const SITES: i64 = 16;
  * crossing it is stopped; its lines along the floors' axis from `floors`
  * up, if any, one all under them not asked. Returns the work.
  */
-fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, floors: Option<&Floors>, put: &mut Put) -> Work {
+fn draw_field(field: &Field, lines: &Lines, seed: u64, s: i64, clip: &Box3, floors: Option<&Floors>, put: &mut Put) -> Work {
     let mut work = Work::default();
     let op = field.op;
     let field_seed = hash_text(field.name, seed);
@@ -78,15 +89,9 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, floors: Option<&Flo
     // Block by block of lines along an axis, those it says it draws nothing in skipped; while checking, drawn to see
     // they don't. A field's spans lie along their own; one given at each site reads plans where each site is, so it
     // is the same along any, and is drawn along the floors', if any: what is buried under them is not asked.
-    /** What a field gives along its lines. */
-    enum Lines<'a> {
-        At(&'a FieldAt),
-        Spans(&'a FieldSpans),
-    }
-    let (axis, lines) = match &field.values {
-        FieldValues::At(at) => (floors.map_or(0, |floors| floors.axis), Lines::At(at)),
-        FieldValues::Spans { axis, spans } => (*axis, Lines::Spans(spans)),
-        FieldValues::Shapes(near) => return draw_field_shapes(field, near, seed, s, clip, put),
+    let axis = match lines {
+        Lines::At(_) => floors.map_or(0, |floors| floors.axis),
+        Lines::Spans { axis, .. } => *axis,
     };
     let ([a, b], (lo, hi)) = (across(axis), (clip.min, clip.max));
     // Where line (u, v) reads dithered plans, in the s × s lines it stands for (Plan::dithered): the same for every
@@ -109,7 +114,7 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, floors: Option<&Flo
     // Blocks of lines across, each all along them or, given at each site, in parts along them too.
     let (side, along) = match lines {
         Lines::At(_) => (SITES, SITES),
-        Lines::Spans(_) => (LINES, hi[axis] - lo[axis]),
+        Lines::Spans { .. } => (LINES, hi[axis] - lo[axis]),
     };
     let mut site = [0i64; 3];
     let (mut drew, mut unlike) = (None, None);
@@ -163,7 +168,7 @@ fn draw_field(field: &Field, seed: u64, s: i64, clip: &Box3, floors: Option<&Flo
                             w += 2;
                         }
                     }
-                    Lines::Spans(spans) => {
+                    Lines::Spans { spans, .. } => {
                         let spans = match all {
                             // Past the sites, so that the top ones are whole too.
                             Some(kind) => vec![Span::solid(DEEP, top + 2 * s, kind)],
@@ -326,17 +331,17 @@ fn cover(spans: &[&Span], axis: usize, line: [i64; 2], (lo, hi): (i64, i64), s: 
 }
 
 /**
- * Draws a field's shapes into `clip` (sites s apart), each as a thing's
- * shape is drawn (draw_shape), but over the world, in the order `near`
- * gives them, with picks of their own (from their bounds), so whichever
- * box asked; returns the work.
+ * Draws a field's shapes, those it gives near a box holding `clip` (sites
+ * s apart), into it, each as a thing's shape is drawn (draw_shape), but
+ * over the world, in the order given, with picks of their own (from their
+ * bounds), so whichever box asked; returns the work.
  */
-fn draw_field_shapes(field: &Field, near: &FieldShapes, seed: u64, s: i64, clip: &Box3, put: &mut Put) -> Work {
-    // Asked as what it meets is (Field::meets_in): two sites wider each way.
+fn draw_field_shapes(field: &Field, shapes: &[Shape], seed: u64, s: i64, clip: &Box3, put: &mut Put) -> Work {
+    // Those reaching it as what it meets is asked (Field::meets_in): two sites wider each way.
     let units = units_of(clip, s).widen(2 * s);
     let field_seed = hash_text(field.name, seed);
     let mut work = Work::default();
-    for shape in sites::footprint(s, [0; 3], || near(&units)).iter().filter(|shape| shape.bounds.overlaps(&units)) {
+    for shape in shapes.iter().filter(|shape| shape.bounds.overlaps(&units)) {
         assert!(
             shape.op == field.op,
             "field {}: a shape drawn other than by its field's op (Field::shapes); see \"Model\" in {DOCS}",

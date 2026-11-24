@@ -328,8 +328,10 @@ fn a_tile_holds_its_ground_by_its_surface_not_its_volume() {
 #[test]
 fn what_hosts_make_of_a_box_differs_from_all_of_it_only_in_buried_rock() {
     // Ground rising two sites a column along x: no layer of the box's bricks is buried, its blocks of columns are.
+    // Holes in it and rocks all about, a field's shapes and things, are asked once for all the parts hosts ask about.
     for (up, level) in (0..3).flat_map(|up| (0..3).map(move |level| (up, level))) {
-        let world = solid_ground(up, |x| 2 * x);
+        let mut world = solid_ground(up, |x| 2 * x);
+        world.layers.extend([Layer::Field(holes()), Layer::Population(rocks())]);
         let b = standing_box(up, Box3 { min: [0, -64, 0], max: [128, 320, 64] });
         let (all, made) = (generate(&world, &b, level), generate_shown(&world, &b, level, up));
         let whole = |grid: &VoxelGrid, [x, y, z]: [i64; 3]| grid.alpha(x, y, z) == ALPHA;
@@ -368,6 +370,12 @@ fn what_shows_of_a_box_is_all_but_its_whole_bottom_and_top() {
         // Its rows start on an even x, so along x it may reach a site further.
         assert!(grid.clip().min[up] <= b.min[up] && grid.alpha(x, y, z) == ALPHA, "up {up}");
     }
+}
+
+/** Balls carving the world at the sites of 32·FCC: a field of shapes. */
+fn holes() -> Field {
+    let near = |b: &Box3| lattice(32, &b.widen(6)).into_iter().map(|p| ball(p.map(|v| v as f64), 5.0, 0, SOLID, Op::Carve));
+    Field::shapes("holes", 0.5, Op::Carve, move |b| near(b).collect::<Vec<_>>())
 }
 
 /** Two rocks at each site of 16·FCC, one a little apart in its random sequence. */
