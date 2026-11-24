@@ -451,9 +451,10 @@ pub struct Population {
     pub things: Box<Things>,
     pub far: Option<Field>,
     /**
-     * Whether an anchor of its things may lie in a box (lattice units),
-     * as it says: a rule, checked on each one made; so it is asked to draw
-     * only where its things may reach (the ground crate's `PopulationOn::on`). None: anywhere.
+     * Whether an anchor of its things may lie in a box (lattice units):
+     * its points are only those, so it is not asked of a box where none
+     * may, and drops the rest (the ground crate's `PopulationOn::on`).
+     * None: anywhere.
      */
     pub stands: Option<Box<Stands>>,
     /** Its things' far forms, measured. */

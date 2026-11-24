@@ -261,8 +261,8 @@ pub struct Sloped {
     last: Mutex<Vec<Ranged>>,
 }
 
-/** A rectangle of columns, min x, min z, max x, max z, and the range of a plan over it. */
-type Ranged = ([i64; 4], (i64, i64));
+/** A rectangle of columns, min x, min z, max x, max z, at a spacing, and the range of a plan over it. */
+type Ranged = ([i64; 5], (i64, i64));
 
 /** Samples a range takes along each axis, but one: more, the closer it is, and the costlier. */
 const SAMPLES: i64 = 16;
@@ -325,16 +325,22 @@ impl Sloped {
         self.slope
     }
 
-    /** The least and greatest it may be over columns `min` to `max` (x, z), inclusive, if it promises a slope. */
+    /**
+     * The least and greatest it may be over columns `min` to `max` (x, z),
+     * inclusive, as the level's sites read it (`at`), if it promises a
+     * slope: between the columns a spacing apart round them, so within
+     * theirs.
+     */
     pub fn range(&self, min: [i64; 2], max: [i64; 2]) -> Option<(i64, i64)> {
-        let slope = self.slope?;
-        let key = [min[0], min[1], max[0], max[1]];
+        let (slope, s) = (self.slope?, spacing());
+        let key = [min[0], min[1], max[0], max[1], s];
         if let Some((_, range)) = self.last.lock().expect("ranges").iter().find(|(k, _)| *k == key) {
             return Some(*range);
         }
-        // Samples every `step` columns, a power of two, from below min to past max: on one grid for any rectangle, so
-        // rectangles side by side share theirs (the plan keeps them). A column is at most step / 2 from one along each.
-        let step = [0, 1].map(|a| (((max[a] - min[a]) / SAMPLES).max(1) as u64).next_power_of_two() as i64);
+        // Samples every `step` columns, a power of two and at least a spacing, from below min to past max: on one grid
+        // for any rectangle, so rectangles side by side share theirs (the plan keeps them), and among the columns `at`
+        // reads. One of those is at most step / 2 from a sample along each axis, unless each is one.
+        let step = [0, 1].map(|a| (((max[a] - min[a]) / SAMPLES).max(s) as u64).next_power_of_two() as i64);
         let along = |a: usize| (min[a].div_euclid(step[a])..=-(-max[a]).div_euclid(step[a])).map(move |i| i * step[a]);
         let (mut lo, mut hi) = (i64::MAX, i64::MIN);
         for x in along(0) {
@@ -343,7 +349,7 @@ impl Sloped {
                 (lo, hi) = (lo.min(h), hi.max(h));
             }
         }
-        let far = slope * (step[0] / 2 + step[1] / 2);
+        let far = slope * [0, 1].map(|a| if step[a] > s { step[a] / 2 } else { 0 }).iter().sum::<i64>();
         let range = (lo - far, hi + far);
         let mut last = self.last.lock().expect("ranges");
         if last.len() == KEPT {
@@ -525,6 +531,7 @@ fn spots(cell: i64, seed: u64, at: [i64; 2], reach: i64) -> Vec<(i64, i64)> {
 mod tests {
     use super::*;
     use worldgen::noise::fx;
+    use worldgen::sites::footprint;
     use worldgen::units::Units;
 
     /** Threads keeping columns in the same few slots, each a value many words long that says its column: none reads one torn, or another's. */
@@ -555,15 +562,24 @@ mod tests {
 
     #[test]
     fn a_sloped_plan_is_within_its_range_wherever_asked() {
-        // Hills rising a few units a column at most: their range over rectangles holds every column in them, not far past.
+        // Hills rising a few units a column at most: their range over rectangles holds every column in them as each
+        // level's sites read it, between columns a spacing apart, not far past.
         let hills = |x: i64, z: i64| ((x as f64 / 9.0).sin() * 30.0 + (z as f64 / 13.0).cos() * 50.0).round() as i64;
         let sloped = Sloped::new(Arc::new(Plan::new("hills", 1, hills)), 9);
-        for (min, max) in [([0, 0], [0, 0]), ([-40, 7], [87, 300]), ([5, -5], [6, 1000])] {
-            let (lo, hi) = sloped.range(min, max).expect("a promise");
-            let columns = (min[0]..=max[0]).flat_map(|x| (min[1]..=max[1]).map(move |z| hills(x, z)));
-            let (least, most) = columns.fold((i64::MAX, i64::MIN), |(lo, hi), h| (lo.min(h), hi.max(h)));
-            assert!(lo <= least && most <= hi, "{min:?} to {max:?}: {least}..{most} in {lo}..{hi}");
-            assert!(least - lo <= 9 * 64 && hi - most <= 9 * 64, "{min:?} to {max:?}: {lo}..{hi} far past {least}..{most}");
+        for s in [1, 4, 16] {
+            footprint(s, [0; 3], || {
+                for (min, max) in [([0, 0], [0, 0]), ([3, 5], [3, 5]), ([3, 3], [6, 9]), ([-40, 7], [87, 300]), ([5, -5], [6, 1000])] {
+                    let (lo, hi) = sloped.range(min, max).expect("a promise");
+                    let columns = (min[0]..=max[0]).flat_map(|x| (min[1]..=max[1]).map(move |z| (x, z)));
+                    let (least, most) =
+                        columns.map(|(x, z)| sloped.at(x, z)).fold((i64::MAX, i64::MIN), |(lo, hi), h| (lo.min(h), hi.max(h)));
+                    assert!(lo <= least && most <= hi, "{min:?} to {max:?}, spacing {s}: {least}..{most} in {lo}..{hi}");
+                    assert!(
+                        least - lo <= 9 * 64 && hi - most <= 9 * 64,
+                        "{min:?} to {max:?}, spacing {s}: {lo}..{hi} far past {least}..{most}"
+                    );
+                }
+            });
         }
     }
 

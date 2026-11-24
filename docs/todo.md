@@ -862,7 +862,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   bounded over a box by the plan's range (`Sloped::range`).
   So could where a field draws nothing (`meets`, `about`):
   one rule for where any layer may be, but `Meets::All`.
-  A population's far field now answers to both (`Contents`).
 
 - The forest's and the learned town's paths are still sines about x = 0
   (`Relief::path_x` in `worlds/src/forest.rs`);

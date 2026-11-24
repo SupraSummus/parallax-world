@@ -109,18 +109,6 @@ fn made(contents: &Contents, b: &Box3, floors: Option<&Floors>) -> VoxelGrid {
         let end = if thing == 0 { at + 1 } else { (at..drawables.len()).find(|i| drawables[*i].thing != thing).unwrap_or(drawables.len()) };
         let group = &drawables[at..end];
         at = end;
-        if group[0].checked {
-            let mut drew = None;
-            for drawable in group {
-                draw(drawable, generator.seed, s, &clip, None, &mut |_, _, share, _, x, y, z| {
-                    drew = drew.or((share > 0).then_some([x, y, z]))
-                });
-            }
-            if let Some(site) = drew {
-                broke(&group[0].key, site, s, &clip, "draws where it says it may not");
-            }
-            continue;
-        }
         let carves = group.iter().any(|d| matches!(&d.draw, Draw::Shapes(shapes, _) if shapes.iter().any(|s| s.op == Op::Carve)));
         let mut work = Work::default();
         if !carves {
@@ -441,10 +429,9 @@ fn drawables_in<'a>(contents: &'a Contents, clip: &Box3) -> Vec<Drawable<'a>> {
     let mut drawables = Vec::new();
     let mut things = 0;
     for laid in &contents.layers {
-        let (order, layer, checked) = (laid.order, laid.name, !laid.stands(&sites, s));
+        let (order, layer) = (laid.order, laid.name);
         let mut work = Work::default();
         let draw = match &laid.form {
-            _ if checked && !checking() => None,
             // Asked where it may draw line by line (draw_field).
             Form::Field(f, lines) => Some(Draw::Field(f, *lines)),
             Form::Shapes { field, near, shapes } => Some(Draw::Over(field, contents.shapes(near, shapes))),
@@ -454,8 +441,7 @@ fn drawables_in<'a>(contents: &'a Contents, clip: &Box3) -> Vec<Drawable<'a>> {
                 sites::footprint(s, [0; 3], || {
                     for thing in &made.things {
                         things += 1;
-                        let at =
-                            Visit { s, units: &units, order, layer, thing: things, seed: generator.seed, checked, measured: &p.measured };
+                        let at = Visit { s, units: &units, order, layer, thing: things, seed: generator.seed, measured: &p.measured };
                         visit(&thing.node, thing.name.clone(), thing.bounds, &at, &mut drawables);
                     }
                 });
@@ -464,7 +450,7 @@ fn drawables_in<'a>(contents: &'a Contents, clip: &Box3) -> Vec<Drawable<'a>> {
             }
         };
         if let Some(draw) = draw {
-            drawables.push(Drawable { order, key: layer.to_string(), layer, thing: 0, draw, checked });
+            drawables.push(Drawable { order, key: layer.to_string(), layer, thing: 0, draw });
         }
         // What it looked up, where it stands and what is in it, it did.
         cost::add(layer, work);
@@ -483,18 +469,6 @@ fn past_reach(name: &str, bounds: &Box3, key: [i64; 3], reach: [i64; 3]) -> Stri
          reach {needed:?} would hold this one, but derive it from the largest possible thing; see \"Populations\" in {DOCS}",
         axes.join(", ")
     )
-}
-
-/**
- * Whether a population's things may draw in `b` (lattice units) at sites
- * `s` apart, as it says where they stand (Population::stands): each within
- * its reach of its anchor; and two sites more, as fields are asked
- * (Field::meets): an anchor stands on what the level's sites read.
- */
-fn stands_within(population: &Population, b: &Box3, s: i64) -> bool {
-    let Some(stands) = &population.stands else { return true };
-    let around = population.reach.map(|r| r + 2 * s);
-    stands(&Box3 { min: [0, 1, 2].map(|i| b.min[i] - around[i]), max: [0, 1, 2].map(|i| b.max[i] + around[i]) })
 }
 
 /** What a box holds throughout, if one thing (`whole`). */
@@ -541,8 +515,6 @@ pub(super) struct Contents<'a> {
 struct Laid<'a> {
     order: f64,
     name: &'static str,
-    /** Its population, if it is one's: what it draws is drawn only where its things may stand (Population::stands). */
-    of: Option<&'a Population>,
     form: Form<'a>,
 }
 
@@ -572,13 +544,6 @@ struct Thing {
     node: Node,
 }
 
-impl Laid<'_> {
-    /** Whether it may draw in `units` (lattice units, its sites'): a population's what it says, a field's everywhere. */
-    fn stands(&self, units: &Box3, s: i64) -> bool {
-        self.of.is_none_or(|p| stands_within(p, units, s))
-    }
-}
-
 impl<'a> Contents<'a> {
     /**
      * Those of the sites `sites` (a box of `level`'s) and of the parts of
@@ -596,10 +561,10 @@ impl<'a> Contents<'a> {
             .layers
             .iter()
             .filter_map(|layer| match layer {
-                Layer::Field(f) => Some(Laid { order: f.order, name: f.name, of: None, form: field(f) }),
+                Layer::Field(f) => Some(Laid { order: f.order, name: f.name, form: field(f) }),
                 Layer::Population(p) => {
                     let form = if s > p.size { field(p.far.as_ref()?) } else { Form::Things(p, OnceCell::new()) };
-                    Some(Laid { order: p.order, name: p.name, of: Some(p), form })
+                    Some(Laid { order: p.order, name: p.name, form })
                 }
             })
             .collect();
@@ -619,7 +584,6 @@ impl<'a> Contents<'a> {
         // drawing nothing unless `things`. A shape is asked with what it may grow by at this level, as drawing asks it.
         let reaching = units.widen(2 * s);
         let meets = |laid: &Laid, things: bool| match &laid.form {
-            _ if !laid.stands(&units, s) => (Meets::Nothing, false),
             Form::Field(f, _) => (f.meets_in(&units, s), f.op == Op::Carve),
             Form::Shapes { field, near, shapes } => {
                 // As it says, and nothing where none of its shapes reaches.

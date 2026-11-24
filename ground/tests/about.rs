@@ -102,12 +102,12 @@ fn checking_finds_a_field_not_under_its_ground_where_it_says() {
 }
 
 #[test]
-#[should_panic(expected = "rocks 0,0,0 is anchored where its population says none stand (Population::stands)")]
-fn refuses_a_thing_anchored_off_the_ground_it_stands_on() {
+fn makes_no_thing_anchored_off_the_ground_it_stands_on() {
     // The ground is 100 units under it.
     let low = Arc::new(Sloped::new(Arc::new(Plan::new("low", 1, |_, _| -100)), 0));
     let rocks = Population::new("rocks", 1.0, 16)
         .on(low)
         .at(|_| vec![([0.0; 3], ())], |_, anchor| Some(Node::of(vec![ball(anchor.at, 2.0, 0, SOLID, Op::Fill)])));
-    generate(&layers(vec![Layer::Population(rocks)]), &Box3 { min: [-8, -100, -8], max: [8, 8, 8] }, 0);
+    let grid = generate(&layers(vec![Layer::Population(rocks)]), &Box3 { min: [-8, -100, -8], max: [8, 8, 8] }, 0);
+    assert!(grid.pieces.alpha.iter().all(|&a| a == 0));
 }

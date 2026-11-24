@@ -175,8 +175,8 @@ impl Population {
 
     /**
      * Whether an anchor of its things may lie in a box (lattice units),
-     * `stands(box)` (Population::stands): a rule; asked to draw only where
-     * they may reach. Rules add up: where one said before they may.
+     * `stands(box)` (Population::stands): its points are only those.
+     * They add up: where one said before they may.
      */
     pub fn stands(self, stands: impl Fn(&Box3) -> bool + Send + Sync + 'static) -> Population {
         let stands: Box<Stands> = match self.stands {
