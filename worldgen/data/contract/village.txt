@@ -1,6 +1,9 @@
-houses wall	2	0.023	0.130
-houses wall	3	0.030	0.201
-houses wall	4	0.029	0.140
-houses wood	2	0.023	0.130
-houses wood	3	0.030	0.201
-houses wood	4	0.029	0.140
+ground grass	1	0.054	0.131
+houses wall	1	0.063	0.149
+houses wall	2	0.027	0.124
+houses wall	3	0.027	0.225
+houses wall	4	0.025	0.120
+houses wood	1	0.063	0.149
+houses wood	2	0.027	0.124
+houses wood	3	0.027	0.225
+houses wood	4	0.025	0.120

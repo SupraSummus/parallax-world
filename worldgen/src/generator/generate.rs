@@ -669,7 +669,7 @@ impl<'a> Contents<'a> {
             let mut things = Vec::new();
             let all = anchors_reaching(p, &self.units.widen(2 * self.s));
             let work = sites::footprint(self.s, [0; 3], || {
-                each_thing(self.generator, p, &all, |anchor, node| {
+                each_thing(p, &all, |anchor, node| {
                     let (name, bounds, reach) = (anchor.name(), bounds_of(&node), anchor.reach(p.reach));
                     assert!(bounds.inside(&reach), "{}", past_reach(&name, &bounds, anchor.key, p.reach));
                     things.push(Thing { name, bounds, node });

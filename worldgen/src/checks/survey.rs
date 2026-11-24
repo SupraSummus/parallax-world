@@ -342,7 +342,7 @@ fn survey_things(
         let mut taken = Found::new(world.spawn, PLACES);
         let mut seen = Things { population: population.name, reach, made: 0, past: Vec::new(), leaving: Vec::new() };
         let cube = world.within(Box3::around(centre, half * n));
-        let count = things_in(world, population, &cube, region, only, &mut taken, |key, bounds, allowed| {
+        let count = things_in(population, &cube, region, only, &mut taken, |key, bounds, allowed| {
             seen.made += 1;
             if !bounds.inside(&allowed) {
                 seen.past.push((key.clone(), bounds, allowed));
@@ -367,7 +367,6 @@ fn survey_things(
  * `parts` (`take_apart`): how many.
  */
 fn things_in(
-    world: &World,
     population: &Population,
     b: &Box3,
     region: i64,
@@ -376,7 +375,7 @@ fn things_in(
     mut each: impl FnMut(String, Box3, Box3),
 ) -> usize {
     let mut count = 0;
-    each_made(&world.generator, population, b, |key, bounds, allowed, node| {
+    each_made(population, b, |key, bounds, allowed, node| {
         count += take_apart(node, population.name.to_string(), region, only, parts);
         each(key, bounds, allowed);
     });
@@ -395,7 +394,7 @@ pub fn survey_in(world: &World, b: &Box3, region: i64, only: &[&str]) -> Vec<Str
     survey_fields(world, b, FIELD_LEVEL, &fields, &mut found);
     for layer in wanted() {
         if let Layer::Population(population) = layer {
-            things_in(world, population, b, region, only, &mut found, |_, _, _| {});
+            things_in(population, b, region, only, &mut found, |_, _, _| {});
         }
     }
     let mut strata = found.into_strata(&world.generator);

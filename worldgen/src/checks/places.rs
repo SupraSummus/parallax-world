@@ -90,7 +90,7 @@ pub fn places(generator: &Generator, population: &Population, area: &Box3) -> Ve
         for s in 0..stretches {
             let from = lo + (first + s) % stretches * 2 * n;
             let (min, max) = (turned(UP, [i * n, k * n], from), turned(UP, [(i + 1) * n, (k + 1) * n], (from + 2 * n).min(hi)));
-            in_column.extend(anchors_in(generator, population, &Box3 { min, max }));
+            in_column.extend(anchors_in(population, &Box3 { min, max }));
             if in_column.len() >= PER_COLUMN {
                 break;
             }

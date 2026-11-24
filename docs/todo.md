@@ -294,8 +294,9 @@ Numbers are for the forest at 1280×800, as measured when written.
 ## Worlds
 
 - **A part can't stand in a world twice.**
-  Its populations seed their things by layer name and the generator's seed
-  (`Anchor::random`), not its `Scope`: two forests would grow the same trees.
+  Its layers are known by their names alone (`Layer::name`):
+  two forests' trees would be one layer to `alone`, the survey and cost,
+  and a field's coins are seeded by its name (`draw_field`).
   And its kinds' ids are its place in a table every world concatenates
   in one order (`kinds!`'s `base`); named, the world would number them.
 - **A land in space is read at every site of a box it is not whole in.**
@@ -376,6 +377,14 @@ Numbers are for the forest at 1280×800, as measured when written.
   where the trees thin out to the treeline,
   came 0.10 to 0.15 apart at level 4, in materials hit and from above:
   leaves in place of trunks and of the slope's scree and rock.
+- **The cheese's mine keeps to its lumps' lattice** (`Known::Prefers`).
+  Its lumps are value noise on a lattice 96 m wide (`LUMP` in `mine.rs`),
+  eased between its points, so most extreme at them:
+  the mine holds the same places of every period, at every seed,
+  and the grottoes, in the cheese it leaves, bunch between
+  (`even::cheese`, along y).
+  Noise not eased to its lattice (gradient or simplex), or turned,
+  would spread it.
 - **The city and the cheese's mine line up with the lattice.**
   Their entries list them (`Known::Turned`).
   The valley's towns lay out streets and blocks along x and z,

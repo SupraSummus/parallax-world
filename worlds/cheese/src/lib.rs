@@ -29,7 +29,7 @@ use worldgen::generator::{Child, Field, Fill, Generator, Layer, Meets, Node, Op,
 use worldgen::js;
 use worldgen::kinds;
 use worldgen::land::{owns, shares};
-use worldgen::noise::{Fx, Rng, Scope, fx, hash64, stream};
+use worldgen::noise::{Fx, Rng, Scope, fx, hash64};
 use worldgen::scalar::Scalar;
 use worldgen::sites::spacing;
 use worldgen::units::m;
@@ -160,11 +160,13 @@ struct Seeds {
     caverns: u64,
     eyes: u64,
     tunnels: u64,
+    grottoes: u64,
 }
 
 impl Seeds {
-    fn of(seed: u64) -> Seeds {
-        Seeds { caverns: stream(seed, 1), eyes: stream(seed, 2), tunnels: stream(seed, 3) }
+    /** Those of `world`'s parts, by name. */
+    fn of(world: &Scope) -> Seeds {
+        Seeds { caverns: world.seed("caverns"), eyes: world.seed("eyes"), tunnels: world.seed("tunnels"), grottoes: world.seed("grottoes") }
     }
 }
 
@@ -344,7 +346,8 @@ const MEASURED: usize = 64;
 fn crystals() -> &'static Crystals {
     static CRYSTALS: OnceLock<Crystals> = OnceLock::new();
     CRYSTALS.get_or_init(|| {
-        let (seeds, measuring, all) = (Seeds::of(0), stream(0, 5), Scalar::constant(Fx::ONE));
+        let world = Scope::new(0);
+        let (seeds, measuring, all) = (Seeds::of(&world), world.seed("measuring"), Scalar::constant(Fx::ONE));
         let mut rng = Rng::new(measuring);
         let sample: Vec<Node> = (0..MEASURED)
             .map(|_| {
@@ -443,9 +446,10 @@ fn grottoes(seeds: Seeds, hold: Scalar) -> Population {
                 // All it asks of: its wall, a little behind it, and over its ceiling as high as its stairs may climb.
                 let reach = radius + CLIMB + m(3.0);
                 let holes = Holes::near(seeds, centre.map(|v| v - reach), centre.map(|v| v + reach), &hold);
-                let clusters = clusters(&holes, (centre, radius), cell.random("clusters"))
+                let mut random = cell.random(seeds.grottoes);
+                let stairs = Child::new("stairs", SIZE, stairs(&holes, (centre, radius), &mut random));
+                let clusters = clusters(&holes, (centre, radius), random)
                     .map(|(n, p, mut rng)| Child::new(format!("cluster {n}"), SIZE, cluster(p, centre, &mut rng)));
-                let stairs = Child::new("stairs", SIZE, stairs(&holes, (centre, radius), &mut cell.random("stairs")));
                 Some(Node::group(std::iter::once(stairs).chain(clusters).collect()))
             },
         )
@@ -463,6 +467,7 @@ pub const CHEESE: Entry = Entry {
     accuracy: &[],
     // Why: docs/todo.md, "Four of the cheese's tiles are over the cost budget".
     // The mine's galleries run along x and z: docs/todo.md, "The city and the cheese's mine line up with the lattice".
+    // The grottoes keep between the mine's lumps' lattice: docs/todo.md, "The cheese's mine keeps to its lumps' lattice".
     known: &[
         Known::OverBudget("spawn", 6),
         Known::OverBudget("spawn", 7),
@@ -470,6 +475,7 @@ pub const CHEESE: Entry = Entry {
         Known::OverBudget("mine", 7),
         Known::Turned("anywhere"),
         Known::Turned("mine"),
+        Known::Prefers("grottoes"),
     ],
 };
 
@@ -489,12 +495,13 @@ const LEAD: Fx = fx(0.05);
 
 /** The cheese of a seed; the camera starts beside the pillar of the cavern of the origin's cell, which the mine keeps clear of. */
 pub fn cheese(seed: u64) -> World {
-    let seeds = Seeds::of(seed);
+    let world = Scope::new(seed);
+    let seeds = Seeds::of(&world);
     let ([x, y, z], _) = CAVERNS.ball(seeds.caverns, [0, 0, 0], &Scalar::constant(Fx::ONE)).expect("a cavern in every cell");
     // Clear of the stairs, on a site: x + y + z even.
     let x = x + m(3.5);
     let spawn = [x, y - (x + y + z).rem_euclid(2), z];
-    let mine = Arc::new(mine::Mine::new(&Scope::new(seed).of("mine")));
+    let mine = Arc::new(mine::Mine::new(&world.of("mine")));
     // The holed cheese has what the mine doesn't outbid it for; both dig the cheese, all through.
     let [holed, mined] = shares(LEAD, [Scalar::constant(Fx::ZERO), mine.bid()]);
     let gallery = (mine.clone(), mined.clone());
@@ -506,7 +513,7 @@ pub fn cheese(seed: u64) -> World {
     .flatten()
     .collect();
     World {
-        generator: Generator { kinds: KINDS.to_vec(), seed: stream(seed, 4), layers },
+        generator: Generator { kinds: KINDS.to_vec(), seed: world.seed("layers"), layers },
         spawn,
         heights: None,
         points: vec![("mine", Box::new(move || gallery.0.gallery(&gallery.1)))],

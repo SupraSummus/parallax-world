@@ -63,8 +63,10 @@ A world is **layers** of two kinds, drawn in `order`:
   the cheese's grottoes its caverns.
   A thing is known by its anchor, the point it rounds to,
   and its number among those anchored there, in the order they come.
-  It gives named random sequences (`anchor.random("species")`)
-  that depend on them and the name only.
+  It gives random sequences (`anchor.random(seed)`)
+  that depend on them and a seed only:
+  the population's, which its part's `Scope` names after it,
+  as for its `Points`.
   How many there are, the points say:
   a `Points`' chances, thinned by a part's share.
 
