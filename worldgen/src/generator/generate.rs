@@ -17,11 +17,11 @@ struct Palette {
 
 impl Palette {
     fn new(kinds: &[KindDef], seed: u64) -> Palette {
-        let linear = |color: &str| {
+        let hex = |color: &str| {
             let rgb = color.strip_prefix('#').and_then(|hex| u32::from_str_radix(hex, 16).ok()).expect("a colour #rrggbb");
-            [16, 8, 0].map(|shift| (COLOUR_ONE as f64 * to_linear(((rgb >> shift) & 255) as f64 / 255.0)).round() as u32)
+            [16, 8, 0].map(|shift| linear((rgb >> shift) as u8) as u32)
         };
-        let shades: Vec<Vec<[u32; 3]>> = kinds.iter().map(|k| k.colors.iter().map(|c| linear(c)).collect()).collect();
+        let shades: Vec<Vec<[u32; 3]>> = kinds.iter().map(|k| k.colors.iter().map(|c| hex(c)).collect()).collect();
         let means = shades
             .iter()
             .map(|of| [0, 1, 2].map(|c| (of.iter().map(|s| s[c]).sum::<u32>() + of.len() as u32 / 2) / of.len() as u32))
@@ -52,14 +52,14 @@ impl Palette {
  */
 pub fn kind_of<'a>(generator: &'a Generator) -> impl Fn(fcc::Look) -> Option<&'a KindDef> + 'a {
     let palette = Palette::new(&generator.kinds, generator.seed);
-    let rgb = |colour: &[u32; 3]| look_of(colour.map(|c| c as u16), ALPHA, ALPHA).to_le_bytes();
-    let colours: Vec<(usize, [u8; 4])> = (0..generator.kinds.len())
+    let rgb = |colour: &[u32; 3]| colour.map(|c| srgb(c as u16));
+    let colours: Vec<(usize, [u8; 3])> = (0..generator.kinds.len())
         .flat_map(|k| palette.shades[k].iter().chain([&palette.means[k]]).map(move |c| (k, c)).collect::<Vec<_>>())
         .map(|(k, c)| (k, rgb(c)))
         .collect();
     let of = move |look: fcc::Look| {
         let at = look.to_le_bytes();
-        let far = |c: &[u8; 4]| (0..3).map(|i| c[i].abs_diff(at[i])).max().expect("channels");
+        let far = |c: &[u8; 3]| (0..3).map(|i| c[i].abs_diff(at[i])).max().expect("channels");
         let (k, c) = colours.iter().min_by_key(|(_, c)| far(c))?;
         (look != 0 && far(c) <= KIND_STEPS).then_some(*k)
     };

@@ -206,6 +206,9 @@ Numbers are for the forest at 1280×800, as measured when written.
   they don't see what that saves, nor what finding the floors costs.
   And for boxes four of native's tiles a side, each alone (`cost::tile`),
   where a host makes a tile with those above and below it.
+  Nor does it count handing a tile over (`VoxelGrid::to_grid`):
+  when that took a power per channel of every site held in part,
+  level 4 took twice as long as levels 2 and 6, and only `bench.rs` showed it.
 - **Cost counts a shape's tests by its box**,
   though the time is in the sites inside it:
   a slanting twig's box is mostly empty,
