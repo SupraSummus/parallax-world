@@ -263,10 +263,10 @@ spawn            6         0         0         0         0         0         0  
 spawn            6         0         0         0         0         0         0     16384     47249         0         0         0 mist
 spawn            6         0         0         0         0         0         0     12288     17928         0         0         0 railway's tunnels
 spawn            6         0         0         0         0         0         0     12288     17928         0         0         0 railway in its tunnels
-spawn            6         0         0         0         0         0         0         0     28512     13732     13669         0 plan nearest town
+spawn            6         0         0         0         0         0         0         0     28514     13734     13671         0 plan nearest town
 spawn            6         0         0         0         0         0         0         0    119929      1434      1434         0 plan landmarks
 spawn            6         0         0         0         0         0         0         0    151471      6054      6054         0 plan pools
-spawn            6         0         0         0         0         0         0         0     24188      1030      1030         0 plan steadings
+spawn            6         0         0         0         0         0         0         0     24064      1030      1030         0 plan steadings
 spawn            6         0         0         0         0         0         0         0         0         4         4         0 plan route
 spawn            6         0         0         0         0         0         0         0       543        73        73         0 plan towns
 spawn            6         0         0         0         0         0         0         0      8264         1         1         0 plan railway's unsmoothed line
@@ -298,19 +298,19 @@ spawn            7         1         1       354         0     15344     12326  
 spawn            7        13        13        33         0      5615      3423         0      2989         0         0       802 landmarks
 spawn            7         1         1         0         0         0         0         0        11         0         0         0 stations
 spawn            7         0         0         0         0         0         0     16384     32796         0         0         0 water
-spawn            7         1         1        13         0        68         0         0      1613         0         0        68 steadings
+spawn            7         1         1        13         0        66         0         0      1561         0         0        66 steadings
 spawn            7         0         0         0         0         0         0     16384     45276         0         0         0 mist
 spawn            7         0         0         0         0         0         0      8192     11012         0         0         0 railway's tunnels
 spawn            7         0         0         0         0         0         0      8192     11012         0         0         0 railway in its tunnels
-spawn            7         0         0         0         0         0         0         0     66161     31560     27437         0 plan nearest town
-spawn            7         0         0         0         0         0         0         0    316514      4563      4563         0 plan landmarks
+spawn            7         0         0         0         0         0         0         0     66162     31561     27438         0 plan nearest town
+spawn            7         0         0         0         0         0         0         0    316333      4556      4556         0 plan landmarks
 spawn            7         0         0         0         0         0         0         0         0         4         4         0 plan route
 spawn            7         0         0         0         0         0         0         0       543        73        73         0 plan towns
 spawn            7         0         0         0         0         0         0         0      8252         1         1         0 plan railway's unsmoothed line
 spawn            7         0         0         0         0         0         0         0      1100         1         1         0 plan railway's line
-spawn            7         0         0         0         0         0         0         0    535326     21293     21291         0 plan pools
-spawn            7         0         0         0         0         0         0         0     79241      3148      3148         0 plan steadings
-spawn            7         0         0         0         0         0         0         0    155892     23894     22397         0 plan ground
+spawn            7         0         0         0         0         0         0         0    535082     21293     21291         0 plan pools
+spawn            7         0         0         0         0         0         0         0     78507      3148      3148         0 plan steadings
+spawn            7         0         0         0         0         0         0         0    155891     23894     22397         0 plan ground
 spawn            7         0         0         0         0         0         0         0      6549      6465      6219         0 plan railway
 spawn            7         0         0         0         0         0         0         0      4227      2049      2049         0 plan path
 spawn            7         0         0         0         0         0         0         0      2304       256       256         0 plan path's stretch
@@ -326,7 +326,7 @@ spawn            8         0         0         0         0         0         0  
 spawn            8         0         0         0         0         0         0      3072     21874         0         0         0 streets
 spawn            8         0         0         0         0         0         0      4096     23920         0         0         0 landmarks' ground
 spawn            8         0         0         0         0         0         0      3072     22032         0         0         0 fields
-spawn            8         0         0         0         0         0         0     16384     59427         0         0         0 heath
+spawn            8         0         0         0         0         0         0     16384     59381         0         0         0 heath
 spawn            8         0         0         0         0         0         0     16384     33744         0         0         0 ponds
 spawn            8         0         0         0         0         0         0     16384    249064         0         0         0 mountains
 spawn            8         0         0         0         0         0         0     16384     16384         0         0         0 sea
@@ -336,19 +336,19 @@ spawn            8         2         2      1241         0     33467     18599  
 spawn            8        30        30        81         0     13731      4152         0     11490         0         0       802 landmarks
 spawn            8         2         2         4         0      1152       432         0        18         0         0         3 stations
 spawn            8         0         0         0         0         0         0     16384     32815         0         0         0 water
-spawn            8         5         1        13         0        54         0         0      5987         0         0        54 steadings
+spawn            8         4         1        13         0        54         0         0      5934         0         0        54 steadings
 spawn            8         0         0         0         0         0         0     16384     42402         0         0         0 mist
 spawn            8         0         0         0         0         0         0      5120      6531         0         0         0 railway's tunnels
 spawn            8         0         0         0         0         0         0      5120      6531         0         0         0 railway in its tunnels
-spawn            8         0         0         0         0         0         0         0    252650    122263     60067         0 plan nearest town
-spawn            8         0         0         0         0         0         0         0    953772     15487     15487         0 plan landmarks
-spawn            8         0         0         0         0         0         0         0    831517     37737     37030         0 plan pools
-spawn            8         0         0         0         0         0         0         0    293928     10855     10833         0 plan steadings
+spawn            8         0         0         0         0         0         0         0    252453    122145     60079         0 plan nearest town
+spawn            8         0         0         0         0         0         0         0    953062     15458     15458         0 plan landmarks
+spawn            8         0         0         0         0         0         0         0    830935     37737     37030         0 plan pools
+spawn            8         0         0         0         0         0         0         0    290516     10855     10833         0 plan steadings
 spawn            8         0         0         0         0         0         0         0         0         4         4         0 plan route
 spawn            8         0         0         0         0         0         0         0       543        73        73         0 plan towns
-spawn            8         0         0         0         0         0         0         0      8285         1         1         0 plan railway's unsmoothed line
+spawn            8         0         0         0         0         0         0         0      8282         1         1         0 plan railway's unsmoothed line
 spawn            8         0         0         0         0         0         0         0      1108         1         1         0 plan railway's line
-spawn            8         0         0         0         0         0         0         0    188453     29720     28168         0 plan ground
+spawn            8         0         0         0         0         0         0         0    188258     29720     28168         0 plan ground
 spawn            8         0         0         0         0         0         0         0      3805      3703      3643         0 plan railway
 spawn            8         0         0         0         0         0         0         0      4488      2176      2176         0 plan path
 spawn            8         0         0         0         0         0         0         0      2304       256       256         0 plan path's stretch
@@ -622,10 +622,10 @@ town             6         0         0         0         0         0         0  
 town             6         0         0         0         0         0         0     16384     47249         0         0         0 mist
 town             6         0         0         0         0         0         0     12288     17928         0         0         0 railway's tunnels
 town             6         0         0         0         0         0         0     12288     17928         0         0         0 railway in its tunnels
-town             6         0         0         0         0         0         0         0     28512     13732     13669         0 plan nearest town
+town             6         0         0         0         0         0         0         0     28514     13734     13671         0 plan nearest town
 town             6         0         0         0         0         0         0         0    119929      1434      1434         0 plan landmarks
 town             6         0         0         0         0         0         0         0    151471      6054      6054         0 plan pools
-town             6         0         0         0         0         0         0         0     24188      1030      1030         0 plan steadings
+town             6         0         0         0         0         0         0         0     24064      1030      1030         0 plan steadings
 town             6         0         0         0         0         0         0         0         0         4         4         0 plan route
 town             6         0         0         0         0         0         0         0       543        73        73         0 plan towns
 town             6         0         0         0         0         0         0         0      8264         1         1         0 plan railway's unsmoothed line
@@ -657,19 +657,19 @@ town             7         1         1       357         0     15370     12326  
 town             7        13        13        34         0      6457      3423         0      2989         0         0       838 landmarks
 town             7         1         1         2         0       619       392         0        11         0         0        12 stations
 town             7         0         0         0         0         0         0     16384     32796         0         0         0 water
-town             7         1         1        13         0        68         0         0      1613         0         0        68 steadings
+town             7         1         1        13         0        66         0         0      1561         0         0        66 steadings
 town             7         0         0         0         0         0         0     16384     45276         0         0         0 mist
 town             7         0         0         0         0         0         0      8192     11012         0         0         0 railway's tunnels
 town             7         0         0         0         0         0         0      8192     11012         0         0         0 railway in its tunnels
-town             7         0         0         0         0         0         0         0     66161     31560     27437         0 plan nearest town
-town             7         0         0         0         0         0         0         0    316514      4563      4563         0 plan landmarks
+town             7         0         0         0         0         0         0         0     66162     31561     27438         0 plan nearest town
+town             7         0         0         0         0         0         0         0    316333      4556      4556         0 plan landmarks
 town             7         0         0         0         0         0         0         0         0         4         4         0 plan route
 town             7         0         0         0         0         0         0         0       543        73        73         0 plan towns
 town             7         0         0         0         0         0         0         0      8252         1         1         0 plan railway's unsmoothed line
 town             7         0         0         0         0         0         0         0      1100         1         1         0 plan railway's line
-town             7         0         0         0         0         0         0         0    535326     21293     21291         0 plan pools
-town             7         0         0         0         0         0         0         0     79241      3148      3148         0 plan steadings
-town             7         0         0         0         0         0         0         0    155892     23894     22397         0 plan ground
+town             7         0         0         0         0         0         0         0    535082     21293     21291         0 plan pools
+town             7         0         0         0         0         0         0         0     78507      3148      3148         0 plan steadings
+town             7         0         0         0         0         0         0         0    155891     23894     22397         0 plan ground
 town             7         0         0         0         0         0         0         0      6549      6465      6219         0 plan railway
 town             7         0         0         0         0         0         0         0      4227      2049      2049         0 plan path
 town             7         0         0         0         0         0         0         0      2304       256       256         0 plan path's stretch
@@ -685,7 +685,7 @@ town             8         0         0         0         0         0         0  
 town             8         0         0         0         0         0         0      3072     21874         0         0         0 streets
 town             8         0         0         0         0         0         0      4096     23920         0         0         0 landmarks' ground
 town             8         0         0         0         0         0         0      3072     22032         0         0         0 fields
-town             8         0         0         0         0         0         0     16384     59427         0         0         0 heath
+town             8         0         0         0         0         0         0     16384     59381         0         0         0 heath
 town             8         0         0         0         0         0         0     16384     33744         0         0         0 ponds
 town             8         0         0         0         0         0         0     16384    249064         0         0         0 mountains
 town             8         0         0         0         0         0         0     16384     16384         0         0         0 sea
@@ -695,19 +695,19 @@ town             8         2         2      1241         0     33470     18599  
 town             8        30        30        81         0     13731      4152         0     11490         0         0       802 landmarks
 town             8         2         2         4         0      1152       432         0        18         0         0         3 stations
 town             8         0         0         0         0         0         0     16384     32815         0         0         0 water
-town             8         5         5        68         0       318         0         0      6207         0         0        72 steadings
+town             8         4         4        54         0       248         0         0      5934         0         0        70 steadings
 town             8         0         0         0         0         0         0     16384     42402         0         0         0 mist
 town             8         0         0         0         0         0         0      5120      6531         0         0         0 railway's tunnels
 town             8         0         0         0         0         0         0      5120      6531         0         0         0 railway in its tunnels
-town             8         0         0         0         0         0         0         0    252642    122259     60067         0 plan nearest town
-town             8         0         0         0         0         0         0         0    953772     15487     15487         0 plan landmarks
-town             8         0         0         0         0         0         0         0    831518     37741     37030         0 plan pools
-town             8         0         0         0         0         0         0         0    293928     10855     10833         0 plan steadings
+town             8         0         0         0         0         0         0         0    252453    122145     60079         0 plan nearest town
+town             8         0         0         0         0         0         0         0    953062     15458     15458         0 plan landmarks
+town             8         0         0         0         0         0         0         0    830935     37737     37030         0 plan pools
+town             8         0         0         0         0         0         0         0    290516     10855     10833         0 plan steadings
 town             8         0         0         0         0         0         0         0         0         4         4         0 plan route
 town             8         0         0         0         0         0         0         0       543        73        73         0 plan towns
-town             8         0         0         0         0         0         0         0      8285         1         1         0 plan railway's unsmoothed line
+town             8         0         0         0         0         0         0         0      8282         1         1         0 plan railway's unsmoothed line
 town             8         0         0         0         0         0         0         0      1108         1         1         0 plan railway's line
-town             8         0         0         0         0         0         0         0    188453     29720     28168         0 plan ground
+town             8         0         0         0         0         0         0         0    188258     29720     28168         0 plan ground
 town             8         0         0         0         0         0         0         0      3805      3703      3643         0 plan railway
 town             8         0         0         0         0         0         0         0      4488      2176      2176         0 plan path
 town             8         0         0         0         0         0         0         0      2304       256       256         0 plan path's stretch
@@ -972,19 +972,19 @@ chapel           6         7         7        10         0      3446       880  
 chapel           6         1         0         0         0         0         0         0         8         0         0         0 stations
 chapel           6         0         0         0         0         0         0         0      6400         0         0         0 water
 chapel           6        61        60        60         0       316         0         0      1186         0         0         6 moor boulders
-chapel           6         0         0         0         0         0         0         0       443         0         0         0 steadings
+chapel           6         0         0         0         0         0         0         0       442         0         0         0 steadings
 chapel           6         0         0         0         0         0         0     16384     43617         0         0         0 mist
 chapel           6         0         0         0         0         0         0         0         0         0         0         0 railway's tunnels
 chapel           6         0         0         0         0         0         0         0         0         0         0         0 railway in its tunnels
-chapel           6         0         0         0         0         0         0         0    135467      1479      1479         0 plan landmarks
-chapel           6         0         0         0         0         0         0         0     29412     14128     14055         0 plan nearest town
-chapel           6         0         0         0         0         0         0         0    142005      6082      6082         0 plan pools
-chapel           6         0         0         0         0         0         0         0     26352      1092      1092         0 plan steadings
-chapel           6         0         0         0         0         0         0         0    194901     35805     30235         0 plan ground
+chapel           6         0         0         0         0         0         0         0    135378      1475      1475         0 plan landmarks
+chapel           6         0         0         0         0         0         0         0     29401     14123     14050         0 plan nearest town
+chapel           6         0         0         0         0         0         0         0    141866      6082      6082         0 plan pools
+chapel           6         0         0         0         0         0         0         0     25879      1092      1092         0 plan steadings
+chapel           6         0         0         0         0         0         0         0    194871     35805     30235         0 plan ground
 chapel           6         0         0         0         0         0         0         0         0         4         4         0 plan route
 chapel           6         0         0         0         0         0         0         0       543        73        73         0 plan towns
-chapel           6         0         0         0         0         0         0         0      8321         1         1         0 plan railway's unsmoothed line
-chapel           6         0         0         0         0         0         0         0      1146         1         1         0 plan railway's line
+chapel           6         0         0         0         0         0         0         0      8318         1         1         0 plan railway's unsmoothed line
+chapel           6         0         0         0         0         0         0         0      1139         1         1         0 plan railway's line
 chapel           6         0         0         0         0         0         0         0    252714     34401     34401         0 plan land
 chapel           6         0         0         0         0         0         0         0     19540     19540     17956         0 plan moor boulders
 chapel           6         0         0         0         0         0         0         0     32368      8092      8092         0 plan slope
@@ -999,7 +999,7 @@ chapel           7         0         0         0         0         0         0  
 chapel           7         0         0         0         0         0         0      1024      6952         0         0         0 streets
 chapel           7         0         0         0         0         0         0      4096     13140         0         0         0 landmarks' ground
 chapel           7         0         0         0         0         0         0      2048      9268         0         0         0 fields
-chapel           7         0         0         0         0         0         0     16384     58178         0         0         0 heath
+chapel           7         0         0         0         0         0         0     16384     58116         0         0         0 heath
 chapel           7         0         0         0         0         0         0     16384     34371         0         0         0 ponds
 chapel           7         0         0         0         0         0         0     16384    239796         0         0         0 mountains
 chapel           7         0         0         0         0         0         0         0         0         0         0         0 sea
@@ -1009,19 +1009,19 @@ chapel           7         1         1       174         0     11051      9353  
 chapel           7        12        12        16         0      4584       392         0      2936         0         0       836 landmarks
 chapel           7         1         0         0         0         0         0         0        11         0         0         0 stations
 chapel           7         0         0         0         0         0         0     16384     32797         0         0         0 water
-chapel           7         2         2        26         0       124         0         0      1629         0         0        68 steadings
+chapel           7         1         1        14         0        68         0         0      1524         0         0        68 steadings
 chapel           7         0         0         0         0         0         0     16384     40942         0         0         0 mist
 chapel           7         0         0         0         0         0         0         0         0         0         0         0 railway's tunnels
 chapel           7         0         0         0         0         0         0         0         0         0         0         0 railway in its tunnels
-chapel           7         0         0         0         0         0         0         0     68465     32676     28217         0 plan nearest town
-chapel           7         0         0         0         0         0         0         0    383899      4628      4628         0 plan landmarks
-chapel           7         0         0         0         0         0         0         0    535178     21242     21242         0 plan pools
-chapel           7         0         0         0         0         0         0         0     85486      3269      3269         0 plan steadings
-chapel           7         0         0         0         0         0         0         0    141383     22725     21406         0 plan ground
+chapel           7         0         0         0         0         0         0         0     68461     32673     28215         0 plan nearest town
+chapel           7         0         0         0         0         0         0         0    383797      4624      4624         0 plan landmarks
+chapel           7         0         0         0         0         0         0         0    535039     21242     21242         0 plan pools
+chapel           7         0         0         0         0         0         0         0     84390      3269      3269         0 plan steadings
+chapel           7         0         0         0         0         0         0         0    141092     22723     21404         0 plan ground
 chapel           7         0         0         0         0         0         0         0         0         4         4         0 plan route
 chapel           7         0         0         0         0         0         0         0       543        73        73         0 plan towns
-chapel           7         0         0         0         0         0         0         0      8489         1         1         0 plan railway's unsmoothed line
-chapel           7         0         0         0         0         0         0         0      1336         1         1         0 plan railway's line
+chapel           7         0         0         0         0         0         0         0      8486         1         1         0 plan railway's unsmoothed line
+chapel           7         0         0         0         0         0         0         0      1329         1         1         0 plan railway's line
 chapel           7         0         0         0         0         0         0         0         9         9         9         0 plan railway
 chapel           7         0         0         0         0         0         0         0      4227      2049      2049         0 plan path
 chapel           7         0         0         0         0         0         0         0      2304       256       256         0 plan path's stretch
@@ -1036,7 +1036,7 @@ chapel           8         0         0         0         0         0         0  
 chapel           8         0         0         0         0         0         0      1024     17755         0         0         0 streets
 chapel           8         0         0         0         0         0         0      8192     32133         0         0         0 landmarks' ground
 chapel           8         0         0         0         0         0         0      3072     21908         0         0         0 fields
-chapel           8         0         0         0         0         0         0     16384     58882         0         0         0 heath
+chapel           8         0         0         0         0         0         0     16384     58695         0         0         0 heath
 chapel           8         0         0         0         0         0         0     16384     33920         0         0         0 ponds
 chapel           8         0         0         0         0         0         0     16384    246680         0         0         0 mountains
 chapel           8         0         0         0         0         0         0     16384     16384         0         0         0 sea
@@ -1046,19 +1046,19 @@ chapel           8         2         2       298         0     14275      6906  
 chapel           8        36        36        48         0     16740       216         0     11504         0         0       882 landmarks
 chapel           8         2         0         0         0         0         0         0        18         0         0         0 stations
 chapel           8         0         0         0         0         0         0     16384     32784         0         0         0 water
-chapel           8         6         6        81         0       410         0         0      6253         0         0        86 steadings
+chapel           8         2         2        26         0       134         0         0      5933         0         0        72 steadings
 chapel           8         0         0         0         0         0         0     16384     40583         0         0         0 mist
 chapel           8         0         0         0         0         0         0      2048      2048         0         0         0 railway's tunnels
 chapel           8         0         0         0         0         0         0      2048      2048         0         0         0 railway in its tunnels
-chapel           8         0         0         0         0         0         0         0    249677    119684     60984         0 plan nearest town
-chapel           8         0         0         0         0         0         0         0   1026927     15552     15552         0 plan landmarks
-chapel           8         0         0         0         0         0         0         0    782964     36476     35888         0 plan pools
-chapel           8         0         0         0         0         0         0         0    282924     10698     10678         0 plan steadings
-chapel           8         0         0         0         0         0         0         0    161469     26082     25413         0 plan ground
+chapel           8         0         0         0         0         0         0         0    249756    119720     60988         0 plan nearest town
+chapel           8         0         0         0         0         0         0         0   1025861     15512     15512         0 plan landmarks
+chapel           8         0         0         0         0         0         0         0    781217     36452     35886         0 plan pools
+chapel           8         0         0         0         0         0         0         0    278046     10696     10676         0 plan steadings
+chapel           8         0         0         0         0         0         0         0    160785     26080     25411         0 plan ground
 chapel           8         0         0         0         0         0         0         0         0         4         4         0 plan route
 chapel           8         0         0         0         0         0         0         0       543        73        73         0 plan towns
 chapel           8         0         0         0         0         0         0         0      8644         1         1         0 plan railway's unsmoothed line
-chapel           8         0         0         0         0         0         0         0      1444         1         1         0 plan railway's line
+chapel           8         0         0         0         0         0         0         0      1441         1         1         0 plan railway's line
 chapel           8         0         0         0         0         0         0         0        11        11        11         0 plan railway
 chapel           8         0         0         0         0         0         0         0      4488      2176      2176         0 plan path
 chapel           8         0         0         0         0         0         0         0      2304       256       256         0 plan path's stretch
@@ -1415,10 +1415,10 @@ mountainside     6         0         0         0         0         0         0  
 mountainside     6         0         0         0         0         0         0     16384     40764         0         0         0 mist
 mountainside     6         0         0         0         0         0         0         0         0         0         0         0 railway's tunnels
 mountainside     6         0         0         0         0         0         0         0         0         0         0         0 railway in its tunnels
-mountainside     6         0         0         0         0         0         0         0     53253     19029     19029         0 plan nearest town
-mountainside     6         0         0         0         0         0         0         0    149825      1610      1610         0 plan landmarks
+mountainside     6         0         0         0         0         0         0         0     53256     19030     19030         0 plan nearest town
+mountainside     6         0         0         0         0         0         0         0    149654      1603      1603         0 plan landmarks
 mountainside     6         0         0         0         0         0         0         0    155743      6147      6147         0 plan pools
-mountainside     6         0         0         0         0         0         0         0     22974      1101      1101         0 plan steadings
+mountainside     6         0         0         0         0         0         0         0     22676      1101      1101         0 plan steadings
 mountainside     6         0         0         0         0         0         0         0     54670     17603     17603         0 plan ground
 mountainside     6         0         0         0         0         0         0         0    243630     34426     34426         0 plan land
 mountainside     6         0         0         0         0         0         0         0     19540     19540     17956         0 plan moor boulders
@@ -1445,11 +1445,11 @@ mountainside     7         0         0         0         0         0         0  
 mountainside     7         0         0         0         0         0         0     16384     40782         0         0         0 mist
 mountainside     7         0         0         0         0         0         0         0         0         0         0         0 railway's tunnels
 mountainside     7         0         0         0         0         0         0         0         0         0         0         0 railway in its tunnels
-mountainside     7         0         0         0         0         0         0         0    350596      4736      4736         0 plan landmarks
-mountainside     7         0         0         0         0         0         0         0     96658     38493     31691         0 plan nearest town
-mountainside     7         0         0         0         0         0         0         0    549365     21296     21288         0 plan pools
-mountainside     7         0         0         0         0         0         0         0     80499      3236      3236         0 plan steadings
-mountainside     7         0         0         0         0         0         0         0    119037     19596     19457         0 plan ground
+mountainside     7         0         0         0         0         0         0         0    350338      4724      4724         0 plan landmarks
+mountainside     7         0         0         0         0         0         0         0     96657     38492     31692         0 plan nearest town
+mountainside     7         0         0         0         0         0         0         0    548772     21296     21288         0 plan pools
+mountainside     7         0         0         0         0         0         0         0     79484      3236      3236         0 plan steadings
+mountainside     7         0         0         0         0         0         0         0    119039     19596     19457         0 plan ground
 mountainside     7         0         0         0         0         0         0         0         0         4         4         0 plan route
 mountainside     7         0         0         0         0         0         0         0       583        80        80         0 plan towns
 mountainside     7         0         0         0         0         0         0         0      9004         1         1         0 plan railway's unsmoothed line
@@ -1464,7 +1464,7 @@ mountainside     8         0         0         0         0         0         0  
 mountainside     8         0         0         0         0         0         0      3072     21986         0         0         0 streets
 mountainside     8         0         0         0         0         0         0      4096     23959         0         0         0 landmarks' ground
 mountainside     8         0         0         0         0         0         0      4096     24288         0         0         0 fields
-mountainside     8         0         0         0         0         0         0     16384     61557         0         0         0 heath
+mountainside     8         0         0         0         0         0         0     16384     60865         0         0         0 heath
 mountainside     8         0         0         0         0         0         0     16384     33604         0         0         0 ponds
 mountainside     8         0         0         0         0         0         0     16384    238140         0         0         0 mountains
 mountainside     8         0         0         0         0         0         0     16384     16384         0         0         0 sea
@@ -1474,19 +1474,19 @@ mountainside     8         3         3      1564         0     74766     49973  
 mountainside     8        27        27        71         0     12959      3753         0     11486         0         0       888 landmarks
 mountainside     8         3         3         6         0      1997       798         0        22         0         0         4 stations
 mountainside     8         0         0         0         0         0         0     16384     32803         0         0         0 water
-mountainside     8        15        15       211         0      1018         0         0      6765         0         0        86 steadings
+mountainside     8         4         4        57         0       282         0         0      5934         0         0        88 steadings
 mountainside     8         0         0         0         0         0         0     16384     42666         0         0         0 mist
 mountainside     8         0         0         0         0         0         0      6144      7554         0         0         0 railway's tunnels
 mountainside     8         0         0         0         0         0         0      6144      7554         0         0         0 railway in its tunnels
-mountainside     8         0         0         0         0         0         0         0   1006262     15393     15393         0 plan landmarks
-mountainside     8         0         0         0         0         0         0         0    325579    123059     59336         0 plan nearest town
-mountainside     8         0         0         0         0         0         0         0    833592     37504     36671         0 plan pools
-mountainside     8         0         0         0         0         0         0         0    280655     10666     10654         0 plan steadings
-mountainside     8         0         0         0         0         0         0         0    206208     32376     29809         0 plan ground
+mountainside     8         0         0         0         0         0         0         0   1003304     15334     15334         0 plan landmarks
+mountainside     8         0         0         0         0         0         0         0    322560    121900     59149         0 plan nearest town
+mountainside     8         0         0         0         0         0         0         0    830605     37504     36671         0 plan pools
+mountainside     8         0         0         0         0         0         0         0    272980     10662     10650         0 plan steadings
+mountainside     8         0         0         0         0         0         0         0    203948     32376     29809         0 plan ground
 mountainside     8         0         0         0         0         0         0         0         0         4         4         0 plan route
 mountainside     8         0         0         0         0         0         0         0       583        80        80         0 plan towns
-mountainside     8         0         0         0         0         0         0         0      9072         1         1         0 plan railway's unsmoothed line
-mountainside     8         0         0         0         0         0         0         0      1133         1         1         0 plan railway's line
+mountainside     8         0         0         0         0         0         0         0      9069         1         1         0 plan railway's unsmoothed line
+mountainside     8         0         0         0         0         0         0         0      1130         1         1         0 plan railway's line
 mountainside     8         0         0         0         0         0         0         0      4288      4089      4008         0 plan railway
 mountainside     8         0         0         0         0         0         0         0      4488      2176      2176         0 plan path
 mountainside     8         0         0         0         0         0         0         0     65530     16384     16384         0 plan forest columns
@@ -1790,10 +1790,10 @@ coast            8         0         0         0         0         0         0  
 coast            8         0         0         0         0         0         0     16384     34776         0         0         0 mist
 coast            8         0         0         0         0         0         0         0         0         0         0         0 railway's tunnels
 coast            8         0         0         0         0         0         0         0         0         0         0         0 railway in its tunnels
-coast            8         0         0         0         0         0         0         0    977025     15275     15275         0 plan landmarks
-coast            8         0         0         0         0         0         0         0    311869    117470     56184         0 plan nearest town
+coast            8         0         0         0         0         0         0         0    976932     15272     15272         0 plan landmarks
+coast            8         0         0         0         0         0         0         0    311875    117472     56184         0 plan nearest town
 coast            8         0         0         0         0         0         0         0    563779     30070     29866         0 plan pools
-coast            8         0         0         0         0         0         0         0    272638     10586     10576         0 plan steadings
+coast            8         0         0         0         0         0         0         0    272456     10586     10576         0 plan steadings
 coast            8         0         0         0         0         0         0         0    104767     17232     17231         0 plan ground
 coast            8         0         0         0         0         0         0         0      4488      2176      2176         0 plan path
 coast            8         0         0         0         0         0         0         0      2304       256       256         0 plan path's stretch
@@ -1802,160 +1802,160 @@ coast            8         0         0         0         0         0         0  
 coast            8         0         0         0         0         0         0         0     16353     16353     16353         0 plan landmark spots
 coast            8         0         0         0         0         0         0         0       888       129       129         0 plan mist
 steading         0         0         0         0         0         0         0     16384    202384         0         0         0 terrain
-steading         0         0         0         0         0         0         0         0       361         0         0         0 streets
-steading         0         0         0         0         0         0         0         0       361         0         0         0 landmarks' ground
-steading         0         0         0         0         0         0         0         0       361         0         0         0 fields
-steading         0         0         0         0         0         0         0     16384    154112         0         0         0 heath
+steading         0         0         0         0         0         0         0         0       336         0         0         0 streets
+steading         0         0         0         0         0         0         0         0       336         0         0         0 landmarks' ground
+steading         0         0         0         0         0         0         0         0       336         0         0         0 fields
+steading         0         0         0         0         0         0         0     16384    137728         0         0         0 heath
 steading         0         0         0         0         0         0         0     16384     32768         0         0         0 ponds
-steading         0         0         0         0         0         0         0     16384    182360         0         0         0 mountains
+steading         0         0         0         0         0         0         0     16384    163840         0         0         0 mountains
 steading         0         0         0         0         0         0         0         0         0         0         0         0 sea
 steading         0         0         0         0         0         0         0         0         0         0         0         0 railway
 steading         0         0         0         0         0         0         0         0       270         0         0         0 trees
 steading         0         0         0         0         0         0         0         0         4         0         0         0 towns
-steading         0         0         0         0         0         0         0         0         4         0         0         0 landmarks
+steading         0         0         0         0         0         0         0         0         9         0         0         0 landmarks
 steading         0         0         0         0         0         0         0         0         0         0         0         0 stations
-steading         0         0         0         0         0         0         0         0       366         0         0         0 boulders
+steading         0         0         0         0         0         0         0         0       359         0         0         0 boulders
 steading         0         0         0         0         0         0         0         0       270         0         0         0 logs
 steading         0         0         0         0         0         0         0         0       144         0         0         0 water
-steading         0         0         0         0         0         0         0         0        28         0         0         0 haystacks
-steading         0         1         1         1         0      2530         0         0       180         0         0      2530 moor boulders
-steading         0       144       121         0         0         0         0         0      6630         0         0         0 plants
-steading         0         1         1         3         0     58956         0         0        20         0         0     58956 steadings
+steading         0         0         0         0         0         0         0         0        21         0         0         0 haystacks
+steading         0         1         0         0         0         0         0         0       171         0         0         0 moor boulders
+steading         0       144       121         0         0         0         0         0      6575         0         0         0 plants
+steading         0         1         1         5         0      1688         0         0         7         0         0      1688 steadings
 steading         0         0         0         0         0         0         0     16384     69136         0         0         0 mist
 steading         0         0         0         0         0         0         0         0         0         0         0         0 railway's tunnels
 steading         0         0         0         0         0         0         0         0         0         0         0         0 railway in its tunnels
-steading         0         0         0         0         0         0         0         0     13613      5528      5528         0 plan nearest town
-steading         0         0         0         0         0         0         0         0     50205       250       250         0 plan landmarks
-steading         0         0         0         0         0         0         0         0      4708       221       221         0 plan pools
-steading         0         0         0         0         0         0         0         0      2243       194       194         0 plan steadings
-steading         0         0         0         0         0         0         0         0    709066     81607     66449         0 plan ground
-steading         0         0         0         0         0         0         0         0       522       177       177         0 plan path
+steading         0         0         0         0         0         0         0         0     13870      5608      5608         0 plan nearest town
+steading         0         0         0         0         0         0         0         0     51088       252       252         0 plan landmarks
+steading         0         0         0         0         0         0         0         0      4683       215       215         0 plan pools
+steading         0         0         0         0         0         0         0         0      2001       200       200         0 plan steadings
+steading         0         0         0         0         0         0         0         0    561795     81540     66386         0 plan ground
+steading         0         0         0         0         0         0         0         0       354       177       177         0 plan path
 steading         0         0         0         0         0         0         0         0        72         8         8         0 plan path's stretch
-steading         0         0         0         0         0         0         0         0     56370     16945     16945         0 plan forest columns
-steading         0         0         0         0         0         0         0         0     85576     18386     18386         0 plan land
+steading         0         0         0         0         0         0         0         0     56242     16945     16945         0 plan forest columns
+steading         0         0         0         0         0         0         0         0     82242     18318     18318         0 plan land
 steading         0         0         0         0         0         0         0         0      5475       625       625         0 plan trees
 steading         0         0         0         0         0         0         0         0        50        25        25         0 plan boulders
 steading         0         0         0         0         0         0         0         0        98        49        49         0 plan logs
 steading         0         0         0         0         0         0         0         0        25        25        25         0 plan moor boulders
 steading         0         0         0         0         0         0         0         0     49152     16384     16384         0 plan forest steep
-steading         0         0         0         0         0         0         0         0     65568     16388     16388         0 plan mist
+steading         0         0         0         0         0         0         0         0     65584     16390     16390         0 plan mist
 steading         1         0         0         0         0         0         0     16384    235152         0         0         0 terrain
-steading         1         0         0         0         0         0         0         0       374         0         0         0 streets
-steading         1         0         0         0         0         0         0         0       374         0         0         0 landmarks' ground
-steading         1         0         0         0         0         0         0         0       374         0         0         0 fields
-steading         1         0         0         0         0         0         0     16384    154112         0         0         0 heath
+steading         1         0         0         0         0         0         0         0       366         0         0         0 streets
+steading         1         0         0         0         0         0         0         0       366         0         0         0 landmarks' ground
+steading         1         0         0         0         0         0         0         0       366         0         0         0 fields
+steading         1         0         0         0         0         0         0     16384    137728         0         0         0 heath
 steading         1         0         0         0         0         0         0     16384     32768         0         0         0 ponds
-steading         1         0         0         0         0         0         0     16384    203272         0         0         0 mountains
+steading         1         0         0         0         0         0         0     16384    163840         0         0         0 mountains
 steading         1         0         0         0         0         0         0         0         0         0         0         0 sea
 steading         1         0         0         0         0         0         0         0         0         0         0         0 railway
 steading         1         0         0         0         0         0         0         0       482         0         0         0 trees
 steading         1         0         0         0         0         0         0         0         4         0         0         0 towns
-steading         1         0         0         0         0         0         0         0         6         0         0         0 landmarks
+steading         1         0         0         0         0         0         0         0         9         0         0         0 landmarks
 steading         1         0         0         0         0         0         0         0         0         0         0         0 stations
 steading         1         0         0         0         0         0         0         0       270         0         0         0 boulders
 steading         1         0         0         0         0         0         0         0       482         0         0         0 logs
 steading         1         0         0         0         0         0         0         0       144         0         0         0 water
 steading         1         0         0         0         0         0         0         0        28         0         0         0 haystacks
-steading         1         1         1         1         0       300         0         0       141         0         0       300 moor boulders
-steading         1       400       361         0         0         0         0         0     19274         0         0         0 plants
-steading         1         1         1         3         0      7158         0         0        47         0         0      7158 steadings
+steading         1         4         2         2         0       396         0         0       160         0         0       396 moor boulders
+steading         1       400       361         0         0         0         0         0     18948         0         0         0 plants
+steading         1         1         1         6         0      9007         0         0        10         0         0      9007 steadings
 steading         1         0         0         0         0         0         0     16384     69632         0         0         0 mist
 steading         1         0         0         0         0         0         0         0         0         0         0         0 railway's tunnels
 steading         1         0         0         0         0         0         0         0         0         0         0         0 railway in its tunnels
-steading         1         0         0         0         0         0         0         0     13566      5510      5510         0 plan nearest town
-steading         1         0         0         0         0         0         0         0     50276       253       253         0 plan landmarks
-steading         1         0         0         0         0         0         0         0      5506       252       252         0 plan pools
-steading         1         0         0         0         0         0         0         0      2243       194       194         0 plan steadings
-steading         1         0         0         0         0         0         0         0    362602     45844     42027         0 plan ground
-steading         1         0         0         0         0         0         0         0       509       178       178         0 plan path
+steading         1         0         0         0         0         0         0         0     16540      6910      6910         0 plan nearest town
+steading         1         0         0         0         0         0         0         0     57764       290       290         0 plan landmarks
+steading         1         0         0         0         0         0         0         0      6173       256       256         0 plan pools
+steading         1         0         0         0         0         0         0         0      2264       240       240         0 plan steadings
+steading         1         0         0         0         0         0         0         0    293135     45734     41965         0 plan ground
+steading         1         0         0         0         0         0         0         0       356       178       178         0 plan path
 steading         1         0         0         0         0         0         0         0        90        10        10         0 plan path's stretch
-steading         1         0         0         0         0         0         0         0     57772     17217     17217         0 plan forest columns
-steading         1         0         0         0         0         0         0         0    115397     19885     19885         0 plan land
+steading         1         0         0         0         0         0         0         0     57516     17217     17217         0 plan forest columns
+steading         1         0         0         0         0         0         0         0    106248     19815     19815         0 plan land
 steading         1         0         0         0         0         0         0         0      9537      1089      1089         0 plan trees
 steading         1         0         0         0         0         0         0         0        98        49        49         0 plan boulders
 steading         1         0         0         0         0         0         0         0       162        81        81         0 plan logs
 steading         1         0         0         0         0         0         0         0        49        49        49         0 plan moor boulders
 steading         1         0         0         0         0         0         0         0     65608     16393     16393         0 plan mist
 steading         2         0         0         0         0         0         0     16384    235152         0         0         0 terrain
-steading         2         0         0         0         0         0         0         0       402         0         0         0 streets
-steading         2         0         0         0         0         0         0         0       402         0         0         0 landmarks' ground
-steading         2         0         0         0         0         0         0         0       402         0         0         0 fields
-steading         2         0         0         0         0         0         0     16384    154624         0         0         0 heath
+steading         2         0         0         0         0         0         0         0       386         0         0         0 streets
+steading         2         0         0         0         0         0         0         0       386         0         0         0 landmarks' ground
+steading         2         0         0         0         0         0         0         0       386         0         0         0 fields
+steading         2         0         0         0         0         0         0     16384    138240         0         0         0 heath
 steading         2         0         0         0         0         0         0     16384     32768         0         0         0 ponds
-steading         2         0         0         0         0         0         0     16384    167376         0         0         0 mountains
+steading         2         0         0         0         0         0         0     16384    165984         0         0         0 mountains
 steading         2         0         0         0         0         0         0         0         0         0         0         0 sea
 steading         2         0         0         0         0         0         0         0         0         0         0         0 railway
-steading         2         0         0         0         0         0         0         0       375         0         0         0 trees
+steading         2         0         0         0         0         0         0         0       380         0         0         0 trees
 steading         2         0         0         0         0         0         0         0         4         0         0         0 towns
 steading         2         0         0         0         0         0         0         0        12         0         0         0 landmarks
 steading         2         0         0         0         0         0         0         0         0         0         0         0 stations
-steading         2         0         0         0         0         0         0         0       279         0         0         0 boulders
-steading         2         0         0         0         0         0         0         0       375         0         0         0 logs
+steading         2         0         0         0         0         0         0         0       274         0         0         0 boulders
+steading         2         0         0         0         0         0         0         0       380         0         0         0 logs
 steading         2         0         0         0         0         0         0         0       144         0         0         0 water
-steading         2         0         0         0         0         0         0         0        37         0         0         0 haystacks
-steading         2         3         3         3         0        52         0         0       171         0         0        36 moor boulders
-steading         2         1         1         3         0       743         0         0        62         0         0       743 steadings
+steading         2         0         0         0         0         0         0         0        32         0         0         0 haystacks
+steading         2         5         5         5         0        73         0         0       207         0         0        45 moor boulders
+steading         2         1         1        10         0       989         0         0        17         0         0       989 steadings
 steading         2         0         0         0         0         0         0     16384     70160         0         0         0 mist
 steading         2         0         0         0         0         0         0         0         0         0         0         0 railway's tunnels
 steading         2         0         0         0         0         0         0         0         0         0         0         0 railway in its tunnels
-steading         2         0         0         0         0         0         0         0     13800      5587      5587         0 plan nearest town
-steading         2         0         0         0         0         0         0         0     51255       259       259         0 plan landmarks
-steading         2         0         0         0         0         0         0         0      7215       296       296         0 plan pools
-steading         2         0         0         0         0         0         0         0      2529       204       204         0 plan steadings
-steading         2         0         0         0         0         0         0         0    240350     28716     28324         0 plan ground
-steading         2         0         0         0         0         0         0         0       447       179       179         0 plan path
+steading         2         0         0         0         0         0         0         0     16564      6918      6918         0 plan nearest town
+steading         2         0         0         0         0         0         0         0     57973       299       299         0 plan landmarks
+steading         2         0         0         0         0         0         0         0      8033       300       300         0 plan pools
+steading         2         0         0         0         0         0         0         0      2487       248       248         0 plan steadings
+steading         2         0         0         0         0         0         0         0    211176     30172     29750         0 plan ground
+steading         2         0         0         0         0         0         0         0       360       180       180         0 plan path
 steading         2         0         0         0         0         0         0         0       126        14        14         0 plan path's stretch
-steading         2         0         0         0         0         0         0         0     59296     17761     17761         0 plan forest columns
-steading         2         0         0         0         0         0         0         0     71066     17763     17763         0 plan land
+steading         2         0         0         0         0         0         0         0     59040     17761     17761         0 plan forest columns
+steading         2         0         0         0         0         0         0         0     71082     17766     17765         0 plan land
 steading         2         0         0         0         0         0         0         0     21021      2401      2401         0 plan trees
 steading         2         0         0         0         0         0         0         0       242       121       121         0 plan boulders
 steading         2         0         0         0         0         0         0         0       338       169       169         0 plan logs
 steading         2         0         0         0         0         0         0         0       121       121       121         0 plan moor boulders
 steading         2         0         0         0         0         0         0         0     65664     16400     16400         0 plan mist
 steading         3         0         0         0         0         0         0     16384    231312         0         0         0 terrain
-steading         3         0         0         0         0         0         0         0       448         0         0         0 streets
-steading         3         0         0         0         0         0         0         0       448         0         0         0 landmarks' ground
-steading         3         0         0         0         0         0         0         0       448         0         0         0 fields
-steading         3         0         0         0         0         0         0     16384    123674         0         0         0 heath
+steading         3         0         0         0         0         0         0         0       424         0         0         0 streets
+steading         3         0         0         0         0         0         0         0       424         0         0         0 landmarks' ground
+steading         3         0         0         0         0         0         0         0       424         0         0         0 fields
+steading         3         0         0         0         0         0         0     16384     96290         0         0         0 heath
 steading         3         0         0         0         0         0         0     16384     32768         0         0         0 ponds
-steading         3         0         0         0         0         0         0     16384    180536         0         0         0 mountains
+steading         3         0         0         0         0         0         0     16384    208640         0         0         0 mountains
 steading         3         0         0         0         0         0         0         0         0         0         0         0 sea
 steading         3         0         0         0         0         0         0         0         0         0         0         0 railway
-steading         3        15        15        98         0      7955         0         0      1234         0         0       925 trees
+steading         3        31        29       539         0     19608         0         0      2005         0         0      1814 trees
 steading         3         0         0         0         0         0         0         0         4         0         0         0 towns
 steading         3         0         0         0         0         0         0         0        25         0         0         0 landmarks
 steading         3         0         0         0         0         0         0         0         0         0         0         0 stations
-steading         3         2         2         2         0        80         0         0       383         0         0        48 boulders
-steading         3         0         0         0         0         0         0         0       303         0         0         0 logs
+steading         3         0         0         0         0         0         0         0       296         0         0         0 boulders
+steading         3         3         3         3         0       188         0         0       725         0         0        67 logs
 steading         3         0         0         0         0         0         0         0       256         0         0         0 water
-steading         3         0         0         0         0         0         0         0        61         0         0         0 haystacks
-steading         3        12        11        11         0        53         0         0       341         0         0        12 moor boulders
-steading         3         2         2        10         0       253         0         0       119         0         0       135 steadings
-steading         3         0         0         0         0         0         0     16384     58942         0         0         0 mist
+steading         3         0         0         0         0         0         0         0        54         0         0         0 haystacks
+steading         3         7         6         6         0        33         0         0       241         0         0        12 moor boulders
+steading         3         1         1        11         0       434         0         0        26         0         0       434 steadings
+steading         3         0         0         0         0         0         0     16384     53698         0         0         0 mist
 steading         3         0         0         0         0         0         0         0         0         0         0         0 railway's tunnels
 steading         3         0         0         0         0         0         0         0         0         0         0         0 railway in its tunnels
-steading         3         0         0         0         0         0         0         0     13838      5598      5598         0 plan nearest town
-steading         3         0         0         0         0         0         0         0     52024       289       289         0 plan landmarks
-steading         3         0         0         0         0         0         0         0      3080       233       233         0 plan steadings
-steading         3         0         0         0         0         0         0         0     13069       471       471         0 plan pools
-steading         3         0         0         0         0         0         0         0    189539     23591     23511         0 plan ground
-steading         3         0         0         0         0         0         0         0       520       231       231         0 plan path
+steading         3         0         0         0         0         0         0         0     16624      6938      6938         0 plan nearest town
+steading         3         0         0         0         0         0         0         0     58624       325       325         0 plan landmarks
+steading         3         0         0         0         0         0         0         0     13799       473       473         0 plan pools
+steading         3         0         0         0         0         0         0         0      2868       257       257         0 plan steadings
+steading         3         0         0         0         0         0         0         0    172592     24735     24654         0 plan ground
+steading         3         0         0         0         0         0         0         0       474       237       237         0 plan path
 steading         3         0         0         0         0         0         0         0       225        25        25         0 plan path's stretch
-steading         3         0         0         0         0         0         0         0     64780     19282     19282         0 plan forest columns
-steading         3         0         0         0         0         0         0         0     77265     19301     19297         0 plan land
-steading         3         0         0         0         0         0         0         0     61034      6973      6973         0 plan trees
+steading         3         0         0         0         0         0         0         0     65906     19625     19624         0 plan forest columns
+steading         3         0         0         0         0         0         0         0     78593     19637     19634         0 plan land
+steading         3         0         0         0         0         0         0         0     63906      7301      7301         0 plan trees
 steading         3         0         0         0         0         0         0         0       722       361       361         0 plan boulders
 steading         3         0         0         0         0         0         0         0       882       441       441         0 plan logs
 steading         3         0         0         0         0         0         0         0       361       361       361         0 plan moor boulders
-steading         3         0         0         0         0         0         0         0      4627      4627      4627         0 plan landmark spots
-steading         3         0         0         0         0         0         0         0     48804     12160     12160         0 plan mist
+steading         3         0         0         0         0         0         0         0      7617      7617      7617         0 plan landmark spots
+steading         3         0         0         0         0         0         0         0     38268      9532      9532         0 plan mist
 steading         4         0         0         0         0         0         0     16384    231312         0         0         0 terrain
 steading         4         0         0         0         0         0         0         0       545         0         0         0 streets
 steading         4         0         0         0         0         0         0         0       545         0         0         0 landmarks' ground
 steading         4         0         0         0         0         0         0         0       545         0         0         0 fields
-steading         4         0         0         0         0         0         0     16384    112057         0         0         0 heath
+steading         4         0         0         0         0         0         0     16384    106682         0         0         0 heath
 steading         4         0         0         0         0         0         0     16384     32768         0         0         0 ponds
-steading         4         0         0         0         0         0         0     16384    304012         0         0         0 mountains
+steading         4         0         0         0         0         0         0     16384    303604         0         0         0 mountains
 steading         4         0         0         0         0         0         0         0         0         0         0         0 sea
 steading         4         0         0         0         0         0         0         0         0         0         0         0 railway
 steading         4         0         0         0         0         0         0     16384    194860         0         0         0 trees
@@ -1966,16 +1966,16 @@ steading         4        13         4         4         0        36         0  
 steading         4        16        13         5         0       354         0         0      2145         0         0        86 logs
 steading         4         0         0         0         0         0         0         0      1024         0         0         0 water
 steading         4         0         0         0         0         0         0         0       233         0         0         0 haystacks
-steading         4        31        31        30         0       203         0         0       718         0         0        24 moor boulders
-steading         4         2         2        17         0       245         0         0       151         0         0       183 steadings
+steading         4        31        31        30         0       202         0         0       702         0         0        24 moor boulders
+steading         4         1         1        14         0       191         0         0        50         0         0       191 steadings
 steading         4         0         0         0         0         0         0     16384     58978         0         0         0 mist
 steading         4         0         0         0         0         0         0         0         0         0         0         0 railway's tunnels
 steading         4         0         0         0         0         0         0         0         0         0         0         0 railway in its tunnels
-steading         4         0         0         0         0         0         0         0     18229      7642      7642         0 plan nearest town
-steading         4         0         0         0         0         0         0         0     64851       421       421         0 plan landmarks
-steading         4         0         0         0         0         0         0         0      4821       334       334         0 plan steadings
-steading         4         0         0         0         0         0         0         0     26456       893       893         0 plan pools
-steading         4         0         0         0         0         0         0         0    188215     26818     26293         0 plan ground
+steading         4         0         0         0         0         0         0         0     18220      7639      7639         0 plan nearest town
+steading         4         0         0         0         0         0         0         0     64828       420       420         0 plan landmarks
+steading         4         0         0         0         0         0         0         0      4414       334       334         0 plan steadings
+steading         4         0         0         0         0         0         0         0     26317       893       893         0 plan pools
+steading         4         0         0         0         0         0         0         0    178274     26818     26293         0 plan ground
 steading         4         0         0         0         0         0         0         0    105652     25251     25054         0 plan land
 steading         4         0         0         0         0         0         0         0      2450      1225      1225         0 plan boulders
 steading         4         0         0         0         0         0         0         0      1489       641       641         0 plan path
@@ -1990,9 +1990,9 @@ steading         5         0         0         0         0         0         0  
 steading         5         0         0         0         0         0         0         0       842         0         0         0 streets
 steading         5         0         0         0         0         0         0         0       842         0         0         0 landmarks' ground
 steading         5         0         0         0         0         0         0         0       842         0         0         0 fields
-steading         5         0         0         0         0         0         0     16384     68623         0         0         0 heath
+steading         5         0         0         0         0         0         0     16384     67086         0         0         0 heath
 steading         5         0         0         0         0         0         0     16384     32768         0         0         0 ponds
-steading         5         0         0         0         0         0         0     16384    432672         0         0         0 mountains
+steading         5         0         0         0         0         0         0     16384    432488         0         0         0 mountains
 steading         5         0         0         0         0         0         0         0         0         0         0         0 sea
 steading         5         0         0         0         0         0         0         0         0         0         0         0 railway
 steading         5         0         0         0         0         0         0     16384    166518         0         0         0 trees
@@ -2001,16 +2001,16 @@ steading         5         0         0         0         0         0         0  
 steading         5         0         0         0         0         0         0         0         0         0         0         0 stations
 steading         5         0         0         0         0         0         0         0      2304         0         0         0 water
 steading         5         0         0         0         0         0         0         0       391         0         0         0 haystacks
-steading         5        45        40        39         0       208         0         0       911         0         0         6 moor boulders
-steading         5         2         2        19         0        89         0         0       234         0         0        64 steadings
+steading         5        45        40        39         0       210         0         0       893         0         0         6 moor boulders
+steading         5         1         1        13         0        60         0         0       133         0         0        60 steadings
 steading         5         0         0         0         0         0         0     16384     44686         0         0         0 mist
 steading         5         0         0         0         0         0         0         0         0         0         0         0 railway's tunnels
 steading         5         0         0         0         0         0         0         0         0         0         0         0 railway in its tunnels
-steading         5         0         0         0         0         0         0         0     24084      9839      9839         0 plan nearest town
-steading         5         0         0         0         0         0         0         0     85264       690       690         0 plan landmarks
-steading         5         0         0         0         0         0         0         0     59534      2141      2141         0 plan pools
-steading         5         0         0         0         0         0         0         0     11115       559       559         0 plan steadings
-steading         5         0         0         0         0         0         0         0    104718     18383     18380         0 plan ground
+steading         5         0         0         0         0         0         0         0     24079      9837      9837         0 plan nearest town
+steading         5         0         0         0         0         0         0         0     85136       684       684         0 plan landmarks
+steading         5         0         0         0         0         0         0         0     59395      2141      2141         0 plan pools
+steading         5         0         0         0         0         0         0         0     10384       559       559         0 plan steadings
+steading         5         0         0         0         0         0         0         0    102455     18375     18372         0 plan ground
 steading         5         0         0         0         0         0         0         0     82076     16969     16964         0 plan land
 steading         5         0         0         0         0         0         0         0      4624      4624      4624         0 plan moor boulders
 steading         5         0         0         0         0         0         0         0      1179       563       563         0 plan path
@@ -2022,9 +2022,9 @@ steading         6         0         0         0         0         0         0  
 steading         6         0         0         0         0         0         0         0      1816         0         0         0 streets
 steading         6         0         0         0         0         0         0         0      1816         0         0         0 landmarks' ground
 steading         6         0         0         0         0         0         0         0      1816         0         0         0 fields
-steading         6         0         0         0         0         0         0     16384     58411         0         0         0 heath
+steading         6         0         0         0         0         0         0     16384     58025         0         0         0 heath
 steading         6         0         0         0         0         0         0     16384     32768         0         0         0 ponds
-steading         6         0         0         0         0         0         0     16384    650088         0         0         0 mountains
+steading         6         0         0         0         0         0         0     16384    650032         0         0         0 mountains
 steading         6         0         0         0         0         0         0         0         0         0         0         0 sea
 steading         6         0         0         0         0         0         0         0         0         0         0         0 railway
 steading         6         0         0         0         0         0         0     16384    172581         0         0         0 trees
@@ -2032,17 +2032,17 @@ steading         6         0         0         0         0         0         0  
 steading         6         0         0         0         0         0         0         0       812         0         0         0 landmarks
 steading         6         0         0         0         0         0         0         0         0         0         0         0 stations
 steading         6         0         0         0         0         0         0      1024      8528         0         0         0 water
-steading         6        92        89        89         0       460         0         0      1774         0         0         6 moor boulders
-steading         6         2         2        22         0       102         0         0       543         0         0        60 steadings
+steading         6        92        89        89         0       464         0         0      1752         0         0         6 moor boulders
+steading         6         1         1        13         0        62         0         0       442         0         0        62 steadings
 steading         6         0         0         0         0         0         0     16384     39038         0         0         0 mist
 steading         6         0         0         0         0         0         0         0         0         0         0         0 railway's tunnels
 steading         6         0         0         0         0         0         0         0         0         0         0         0 railway in its tunnels
-steading         6         0         0         0         0         0         0         0     45633     18195     18108         0 plan nearest town
-steading         6         0         0         0         0         0         0         0    195517      1708      1708         0 plan landmarks
-steading         6         0         0         0         0         0         0         0    165784      6143      6143         0 plan pools
-steading         6         0         0         0         0         0         0         0     29337      1224      1224         0 plan steadings
-steading         6         0         0         0         0         0         0         0     57197     17768     17768         0 plan ground
-steading         6         0         0         0         0         0         0         0    243738     34437     34437         0 plan land
+steading         6         0         0         0         0         0         0         0     42940     17223     17192         0 plan nearest town
+steading         6         0         0         0         0         0         0         0    191233      1675      1675         0 plan landmarks
+steading         6         0         0         0         0         0         0         0    165645      6143      6143         0 plan pools
+steading         6         0         0         0         0         0         0         0     28301      1216      1216         0 plan steadings
+steading         6         0         0         0         0         0         0         0     56610     17766     17766         0 plan ground
+steading         6         0         0         0         0         0         0         0    243742     34437     34437         0 plan land
 steading         6         0         0         0         0         0         0         0     19540     19540     17956         0 plan moor boulders
 steading         6         0         0         0         0         0         0         0      2400      1139      1139         0 plan path
 steading         6         0         0         0         0         0         0         0      1197       133       133         0 plan path's stretch
@@ -2053,9 +2053,9 @@ steading         7         0         0         0         0         0         0  
 steading         7         0         0         0         0         0         0         0      4876         0         0         0 streets
 steading         7         0         0         0         0         0         0      4096     13128         0         0         0 landmarks' ground
 steading         7         0         0         0         0         0         0      1024      6969         0         0         0 fields
-steading         7         0         0         0         0         0         0     16384     59334         0         0         0 heath
+steading         7         0         0         0         0         0         0     16384     59087         0         0         0 heath
 steading         7         0         0         0         0         0         0     16384     34313         0         0         0 ponds
-steading         7         0         0         0         0         0         0     16384    198316         0         0         0 mountains
+steading         7         0         0         0         0         0         0     16384    198300         0         0         0 mountains
 steading         7         0         0         0         0         0         0         0         0         0         0         0 sea
 steading         7         0         0         0         0         0         0         0         0         0         0         0 railway
 steading         7         0         0         0         0         0         0     16384    212819         0         0         0 trees
@@ -2063,19 +2063,19 @@ steading         7         1         1         0         0         0         0  
 steading         7        12        12        16         0      4795       392         0      2982         0         0       846 landmarks
 steading         7         1         0         0         0         0         0         0        11         0         0         0 stations
 steading         7         0         0         0         0         0         0     16384     32787         0         0         0 water
-steading         7         3         3        40         0       196         0         0      1719         0         0        78 steadings
+steading         7         1         1        13         0        64         0         0      1561         0         0        64 steadings
 steading         7         0         0         0         0         0         0     16384     42098         0         0         0 mist
 steading         7         0         0         0         0         0         0         0         0         0         0         0 railway's tunnels
 steading         7         0         0         0         0         0         0         0         0         0         0         0 railway in its tunnels
-steading         7         0         0         0         0         0         0         0     92233     35968     31591         0 plan nearest town
-steading         7         0         0         0         0         0         0         0    402975      4721      4721         0 plan landmarks
-steading         7         0         0         0         0         0         0         0    560819     21334     21328         0 plan pools
-steading         7         0         0         0         0         0         0         0     85187      3355      3355         0 plan steadings
-steading         7         0         0         0         0         0         0         0    127940     20557     20102         0 plan ground
+steading         7         0         0         0         0         0         0         0     93371     36440     31773         0 plan nearest town
+steading         7         0         0         0         0         0         0         0    402641      4709      4709         0 plan landmarks
+steading         7         0         0         0         0         0         0         0    560586     21333     21327         0 plan pools
+steading         7         0         0         0         0         0         0         0     83406      3354      3354         0 plan steadings
+steading         7         0         0         0         0         0         0         0    127301     20554     20099         0 plan ground
 steading         7         0         0         0         0         0         0         0         0         4         4         0 plan route
 steading         7         0         0         0         0         0         0         0       583        80        80         0 plan towns
-steading         7         0         0         0         0         0         0         0      9328         1         1         0 plan railway's unsmoothed line
-steading         7         0         0         0         0         0         0         0      1338         1         1         0 plan railway's line
+steading         7         0         0         0         0         0         0         0      9325         1         1         0 plan railway's unsmoothed line
+steading         7         0         0         0         0         0         0         0      1332         1         1         0 plan railway's line
 steading         7         0         0         0         0         0         0         0         6         6         6         0 plan railway
 steading         7         0         0         0         0         0         0         0      4227      2049      2049         0 plan path
 steading         7         0         0         0         0         0         0         0      2304       256       256         0 plan path's stretch
@@ -2089,7 +2089,7 @@ steading         8         0         0         0         0         0         0  
 steading         8         0         0         0         0         0         0         0     15744         0         0         0 streets
 steading         8         0         0         0         0         0         0      7168     30138         0         0         0 landmarks' ground
 steading         8         0         0         0         0         0         0      2048     19855         0         0         0 fields
-steading         8         0         0         0         0         0         0     16384     65595         0         0         0 heath
+steading         8         0         0         0         0         0         0     16384     65103         0         0         0 heath
 steading         8         0         0         0         0         0         0     16384     34157         0         0         0 ponds
 steading         8         0         0         0         0         0         0     16384    175280         0         0         0 mountains
 steading         8         0         0         0         0         0         0     16384     16384         0         0         0 sea
@@ -2099,19 +2099,19 @@ steading         8         3         1         0         0         0         0  
 steading         8        43        43        53         0     21697       468         0     11499         0         0       882 landmarks
 steading         8         3         0         0         0         0         0         0        22         0         0         0 stations
 steading         8         0         0         0         0         0         0     16384     32835         0         0         0 water
-steading         8        15        15       212         0      1042         0         0      6781         0         0        88 steadings
+steading         8         5         5        75         0       370         0         0      5935         0         0        88 steadings
 steading         8         0         0         0         0         0         0     16384     43464         0         0         0 mist
 steading         8         0         0         0         0         0         0      2048      2048         0         0         0 railway's tunnels
 steading         8         0         0         0         0         0         0      2048      2048         0         0         0 railway in its tunnels
-steading         8         0         0         0         0         0         0         0    302283    113081     57377         0 plan nearest town
-steading         8         0         0         0         0         0         0         0   1031063     15320     15320         0 plan landmarks
-steading         8         0         0         0         0         0         0         0    900101     39345     38612         0 plan pools
-steading         8         0         0         0         0         0         0         0    287291     10565     10559         0 plan steadings
-steading         8         0         0         0         0         0         0         0    183033     29240     28408         0 plan ground
+steading         8         0         0         0         0         0         0         0    300941    112591     57367         0 plan nearest town
+steading         8         0         0         0         0         0         0         0   1022908     15274     15274         0 plan landmarks
+steading         8         0         0         0         0         0         0         0    898022     39333     38610         0 plan pools
+steading         8         0         0         0         0         0         0         0    280209     10553     10547         0 plan steadings
+steading         8         0         0         0         0         0         0         0    181037     29238     28406         0 plan ground
 steading         8         0         0         0         0         0         0         0         0         4         4         0 plan route
 steading         8         0         0         0         0         0         0         0       583        80        80         0 plan towns
-steading         8         0         0         0         0         0         0         0      9400         1         1         0 plan railway's unsmoothed line
-steading         8         0         0         0         0         0         0         0      1410         1         1         0 plan railway's line
+steading         8         0         0         0         0         0         0         0      9369         1         1         0 plan railway's unsmoothed line
+steading         8         0         0         0         0         0         0         0      1371         1         1         0 plan railway's line
 steading         8         0         0         0         0         0         0         0         8         8         8         0 plan railway
 steading         8         0         0         0         0         0         0         0      4488      2176      2176         0 plan path
 steading         8         0         0         0         0         0         0         0      2304       256       256         0 plan path's stretch
@@ -2310,13 +2310,13 @@ bridge           0         0         0         0         0         0         0  
 bridge           0         0         0         0         0         0         0     16384     32768         0         0         0 railway in its tunnels
 bridge           0         0         0         0         0         0         0         0         0        14        14         0 plan route
 bridge           0         0         0         0         0         0         0         0      1954       348       348         0 plan towns
-bridge           0         0         0         0         0         0         0         0     34096     15585     15585         0 plan nearest town
+bridge           0         0         0         0         0         0         0         0     34112     15593     15593         0 plan nearest town
 bridge           0         0         0         0         0         0         0         0     26369         3         3         0 plan railway's unsmoothed line
 bridge           0         0         0         0         0         0         0         0       937         1         1         0 plan railway's line
 bridge           0         0         0         0         0         0         0         0    119994     22239     22025         0 plan railway
-bridge           0         0         0         0         0         0         0         0     92616       316       316         0 plan landmarks
+bridge           0         0         0         0         0         0         0         0     92533       313       313         0 plan landmarks
 bridge           0         0         0         0         0         0         0         0      5781       189       189         0 plan pools
-bridge           0         0         0         0         0         0         0         0      1783       149       149         0 plan steadings
+bridge           0         0         0         0         0         0         0         0      1614       149       149         0 plan steadings
 bridge           0         0         0         0         0         0         0         0    143011     21605     21516         0 plan ground
 bridge           0         0         0         0         0         0         0         0       629       310       310         0 plan path
 bridge           0         0         0         0         0         0         0         0       117        13        13         0 plan path's stretch
@@ -2355,13 +2355,13 @@ bridge           1         0         0         0         0         0         0  
 bridge           1         0         0         0         0         0         0     16384     32768         0         0         0 railway in its tunnels
 bridge           1         0         0         0         0         0         0         0         0        14        14         0 plan route
 bridge           1         0         0         0         0         0         0         0      1954       348       348         0 plan towns
-bridge           1         0         0         0         0         0         0         0     34417     15857     15857         0 plan nearest town
+bridge           1         0         0         0         0         0         0         0     34433     15865     15865         0 plan nearest town
 bridge           1         0         0         0         0         0         0         0     26369         3         3         0 plan railway's unsmoothed line
 bridge           1         0         0         0         0         0         0         0       937         1         1         0 plan railway's line
 bridge           1         0         0         0         0         0         0         0     79275     25156     24888         0 plan railway
-bridge           1         0         0         0         0         0         0         0     93700       329       329         0 plan landmarks
+bridge           1         0         0         0         0         0         0         0     93617       326       326         0 plan landmarks
 bridge           1         0         0         0         0         0         0         0      6951       232       232         0 plan pools
-bridge           1         0         0         0         0         0         0         0      1902       156       156         0 plan steadings
+bridge           1         0         0         0         0         0         0         0      1733       156       156         0 plan steadings
 bridge           1         0         0         0         0         0         0         0    162787     25247     25102         0 plan ground
 bridge           1         0         0         0         0         0         0         0       733       362       362         0 plan path
 bridge           1         0         0         0         0         0         0         0       126        14        14         0 plan path's stretch
@@ -2399,13 +2399,13 @@ bridge           2         0         0         0         0         0         0  
 bridge           2         0         0         0         0         0         0     16384     31822         0         0         0 railway in its tunnels
 bridge           2         0         0         0         0         0         0         0         0        14        14         0 plan route
 bridge           2         0         0         0         0         0         0         0      1954       348       348         0 plan towns
-bridge           2         0         0         0         0         0         0         0     34501     15899     15899         0 plan nearest town
+bridge           2         0         0         0         0         0         0         0     34517     15907     15907         0 plan nearest town
 bridge           2         0         0         0         0         0         0         0     26369         3         3         0 plan railway's unsmoothed line
 bridge           2         0         0         0         0         0         0         0       937         1         1         0 plan railway's line
 bridge           2         0         0         0         0         0         0         0     35021     20166     19894         0 plan railway
-bridge           2         0         0         0         0         0         0         0     93946       337       337         0 plan landmarks
+bridge           2         0         0         0         0         0         0         0     93863       334       334         0 plan landmarks
 bridge           2         0         0         0         0         0         0         0      8304       276       276         0 plan pools
-bridge           2         0         0         0         0         0         0         0      2005       159       159         0 plan steadings
+bridge           2         0         0         0         0         0         0         0      1836       159       159         0 plan steadings
 bridge           2         0         0         0         0         0         0         0    158361     22978     22674         0 plan ground
 bridge           2         0         0         0         0         0         0         0       897       444       444         0 plan path
 bridge           2         0         0         0         0         0         0         0       171        19        19         0 plan path's stretch
@@ -2443,12 +2443,12 @@ bridge           3         0         0         0         0         0         0  
 bridge           3         0         0         0         0         0         0     16384     32498         0         0         0 railway in its tunnels
 bridge           3         0         0         0         0         0         0         0         0        14        14         0 plan route
 bridge           3         0         0         0         0         0         0         0      1954       348       348         0 plan towns
-bridge           3         0         0         0         0         0         0         0     37334     17197     17197         0 plan nearest town
+bridge           3         0         0         0         0         0         0         0     37348     17204     17204         0 plan nearest town
 bridge           3         0         0         0         0         0         0         0     26369         3         3         0 plan railway's unsmoothed line
 bridge           3         0         0         0         0         0         0         0       937         1         1         0 plan railway's line
 bridge           3         0         0         0         0         0         0         0     43301     22293     21895         0 plan railway
-bridge           3         0         0         0         0         0         0         0    103585       433       433         0 plan landmarks
-bridge           3         0         0         0         0         0         0         0      3190       246       246         0 plan steadings
+bridge           3         0         0         0         0         0         0         0    103502       430       430         0 plan landmarks
+bridge           3         0         0         0         0         0         0         0      3021       246       246         0 plan steadings
 bridge           3         0         0         0         0         0         0         0     16211       477       477         0 plan pools
 bridge           3         0         0         0         0         0         0         0    188190     25234     24677         0 plan ground
 bridge           3         0         0         0         0         0         0         0      1522       667       667         0 plan path
@@ -2487,13 +2487,13 @@ bridge           4         0         0         0         0         0         0  
 bridge           4         0         0         0         0         0         0     16384     32483         0         0         0 railway in its tunnels
 bridge           4         0         0         0         0         0         0         0         0        14        14         0 plan route
 bridge           4         0         0         0         0         0         0         0      1954       348       348         0 plan towns
-bridge           4         0         0         0         0         0         0         0     37910     17485     17485         0 plan nearest town
+bridge           4         0         0         0         0         0         0         0     37916     17488     17488         0 plan nearest town
 bridge           4         0         0         0         0         0         0         0     26369         3         3         0 plan railway's unsmoothed line
 bridge           4         0         0         0         0         0         0         0       937         1         1         0 plan railway's line
 bridge           4         0         0         0         0         0         0         0     36209     28662     26441         0 plan railway
-bridge           4         0         0         0         0         0         0         0    105506       490       490         0 plan landmarks
+bridge           4         0         0         0         0         0         0         0    105423       487       487         0 plan landmarks
 bridge           4         0         0         0         0         0         0         0     26947       888       888         0 plan pools
-bridge           4         0         0         0         0         0         0         0      3937       273       273         0 plan steadings
+bridge           4         0         0         0         0         0         0         0      3768       273       273         0 plan steadings
 bridge           4         0         0         0         0         0         0         0    238802     31855     29936         0 plan ground
 bridge           4         0         0         0         0         0         0         0    162608     27100     26341         0 plan land
 bridge           4         0         0         0         0         0         0         0      2450      1225      1225         0 plan boulders
@@ -2529,13 +2529,13 @@ bridge           5         0         0         0         0         0         0  
 bridge           5         0         0         0         0         0         0     12288     20191         0         0         0 railway in its tunnels
 bridge           5         0         0         0         0         0         0         0         0        18        18         0 plan route
 bridge           5         0         0         0         0         0         0         0      2468       428       428         0 plan towns
-bridge           5         0         0         0         0         0         0         0     51832     23243     22918         0 plan nearest town
+bridge           5         0         0         0         0         0         0         0     51403     22931     22615         0 plan nearest town
 bridge           5         0         0         0         0         0         0         0     32874         4         4         0 plan railway's unsmoothed line
 bridge           5         0         0         0         0         0         0         0      2245         2         2         0 plan railway's line
 bridge           5         0         0         0         0         0         0         0      9847      8677      8675         0 plan railway
-bridge           5         0         0         0         0         0         0         0    152073       848       848         0 plan landmarks
+bridge           5         0         0         0         0         0         0         0    149753       815       815         0 plan landmarks
 bridge           5         0         0         0         0         0         0         0     62618      2164      2164         0 plan pools
-bridge           5         0         0         0         0         0         0         0      8707       502       502         0 plan steadings
+bridge           5         0         0         0         0         0         0         0      8128       494       494         0 plan steadings
 bridge           5         0         0         0         0         0         0         0    105722     17552     17551         0 plan ground
 bridge           5         0         0         0         0         0         0         0     94943     16961     16957         0 plan land
 bridge           5         0         0         0         0         0         0         0      4624      4624      4624         0 plan moor boulders
@@ -2567,15 +2567,15 @@ bridge           6         0         0         0         0         0         0  
 bridge           6         0         0         0         0         0         0      8192     12007         0         0         0 railway in its tunnels
 bridge           6         0         0         0         0         0         0         0         0        18        18         0 plan route
 bridge           6         0         0         0         0         0         0         0      2468       428       428         0 plan towns
-bridge           6         0         0         0         0         0         0         0     61141     27098     26834         0 plan nearest town
+bridge           6         0         0         0         0         0         0         0     61131     27094     26830         0 plan nearest town
 bridge           6         0         0         0         0         0         0         0     32786         4         4         0 plan railway's unsmoothed line
 bridge           6         0         0         0         0         0         0         0      2133         2         2         0 plan railway's line
 bridge           6         0         0         0         0         0         0         0     10854      8839      8369         0 plan railway
-bridge           6         0         0         0         0         0         0         0    198451      1678      1678         0 plan landmarks
+bridge           6         0         0         0         0         0         0         0    198143      1667      1667         0 plan landmarks
 bridge           6         0         0         0         0         0         0         0    173315      6236      6236         0 plan pools
-bridge           6         0         0         0         0         0         0         0     24735      1105      1105         0 plan steadings
+bridge           6         0         0         0         0         0         0         0     24145      1104      1104         0 plan steadings
 bridge           6         0         0         0         0         0         0         0     59578     17497     17497         0 plan ground
-bridge           6         0         0         0         0         0         0         0    254893     34460     34460         0 plan land
+bridge           6         0         0         0         0         0         0         0    254899     34460     34460         0 plan land
 bridge           6         0         0         0         0         0         0         0     19540     19540     17956         0 plan moor boulders
 bridge           6         0         0         0         0         0         0         0      2379      1145      1145         0 plan path
 bridge           6         0         0         0         0         0         0         0      1170       130       130         0 plan path's stretch
@@ -2598,19 +2598,19 @@ bridge           7         2         2       406         0     19554     13846  
 bridge           7        25        25        63         0     11532      4845         0      2996         0         0       912 landmarks
 bridge           7         2         2         4         0      1833       896         0        13         0         0        20 stations
 bridge           7         0         0         0         0         0         0     16384     32829         0         0         0 water
-bridge           7         0         0         0         0         0         0         0      1561         0         0         0 steadings
+bridge           7         0         0         0         0         0         0         0      1560         0         0         0 steadings
 bridge           7         0         0         0         0         0         0     16384     44749         0         0         0 mist
 bridge           7         0         0         0         0         0         0      8192     11013         0         0         0 railway's tunnels
 bridge           7         0         0         0         0         0         0      8192     11013         0         0         0 railway in its tunnels
 bridge           7         0         0         0         0         0         0         0         0        18        18         0 plan route
 bridge           7         0         0         0         0         0         0         0      2468       428       428         0 plan towns
-bridge           7         0         0         0         0         0         0         0    103090     45822     39564         0 plan nearest town
-bridge           7         0         0         0         0         0         0         0    430626      4881      4881         0 plan landmarks
-bridge           7         0         0         0         0         0         0         0    563596     21311     21305         0 plan pools
-bridge           7         0         0         0         0         0         0         0     81338      3328      3328         0 plan steadings
+bridge           7         0         0         0         0         0         0         0    102618     45607     39527         0 plan nearest town
+bridge           7         0         0         0         0         0         0         0    420928      4820      4820         0 plan landmarks
+bridge           7         0         0         0         0         0         0         0    563163     21311     21305         0 plan pools
+bridge           7         0         0         0         0         0         0         0     79218      3326      3326         0 plan steadings
 bridge           7         0         0         0         0         0         0         0     32729         4         4         0 plan railway's unsmoothed line
 bridge           7         0         0         0         0         0         0         0      2023         2         2         0 plan railway's line
-bridge           7         0         0         0         0         0         0         0    208558     31583     27421         0 plan ground
+bridge           7         0         0         0         0         0         0         0    208537     31583     27421         0 plan ground
 bridge           7         0         0         0         0         0         0         0      6783      6175      5952         0 plan railway
 bridge           7         0         0         0         0         0         0         0      4227      2049      2049         0 plan path
 bridge           7         0         0         0         0         0         0         0      2304       256       256         0 plan path's stretch
@@ -2626,7 +2626,7 @@ bridge           8         0         0         0         0         0         0  
 bridge           8         0         0         0         0         0         0      3072     21943         0         0         0 streets
 bridge           8         0         0         0         0         0         0      8192     32227         0         0         0 landmarks' ground
 bridge           8         0         0         0         0         0         0      3072     22212         0         0         0 fields
-bridge           8         0         0         0         0         0         0     16384     54193         0         0         0 heath
+bridge           8         0         0         0         0         0         0     16384     54098         0         0         0 heath
 bridge           8         0         0         0         0         0         0     16384     34338         0         0         0 ponds
 bridge           8         0         0         0         0         0         0     16384    228808         0         0         0 mountains
 bridge           8         0         0         0         0         0         0     16384     16384         0         0         0 sea
@@ -2636,19 +2636,19 @@ bridge           8         3         3       707         0     40646     16186  
 bridge           8        45        45       118         0     18609      5270         0     11496         0         0       858 landmarks
 bridge           8         3         3         6         0      2298       756         0        20         0         0         9 stations
 bridge           8         0         0         0         0         0         0     16384     32783         0         0         0 water
-bridge           8         2         2        28         0       138         0         0      6036         0         0        76 steadings
+bridge           8         0         0         0         0         0         0         0      5929         0         0         0 steadings
 bridge           8         0         0         0         0         0         0     16384     40708         0         0         0 mist
 bridge           8         0         0         0         0         0         0      8192      9602         0         0         0 railway's tunnels
 bridge           8         0         0         0         0         0         0      8192      9602         0         0         0 railway in its tunnels
 bridge           8         0         0         0         0         0         0         0         0        22        22         0 plan route
 bridge           8         0         0         0         0         0         0         0      3022       509       509         0 plan towns
-bridge           8         0         0         0         0         0         0         0    314131    136472     61835         0 plan nearest town
-bridge           8         0         0         0         0         0         0         0   1083593     15579     15579         0 plan landmarks
-bridge           8         0         0         0         0         0         0         0    745739     35206     34570         0 plan pools
-bridge           8         0         0         0         0         0         0         0    274733     10553     10551         0 plan steadings
-bridge           8         0         0         0         0         0         0         0    178409     28052     26126         0 plan ground
-bridge           8         0         0         0         0         0         0         0     41848         5         5         0 plan railway's unsmoothed line
-bridge           8         0         0         0         0         0         0         0      3103         3         3         0 plan railway's line
+bridge           8         0         0         0         0         0         0         0    314254    136553     61798         0 plan nearest town
+bridge           8         0         0         0         0         0         0         0   1070569     15493     15493         0 plan landmarks
+bridge           8         0         0         0         0         0         0         0    745062     35202     34570         0 plan pools
+bridge           8         0         0         0         0         0         0         0    270448     10544     10542         0 plan steadings
+bridge           8         0         0         0         0         0         0         0    177999     28052     26126         0 plan ground
+bridge           8         0         0         0         0         0         0         0     42139         5         5         0 plan railway's unsmoothed line
+bridge           8         0         0         0         0         0         0         0      3330         3         3         0 plan railway's line
 bridge           8         0         0         0         0         0         0         0      3705      3440      3365         0 plan railway
 bridge           8         0         0         0         0         0         0         0      4488      2176      2176         0 plan path
 bridge           8         0         0         0         0         0         0         0      2304       256       256         0 plan path's stretch
@@ -2730,13 +2730,13 @@ tunnel           1         0         0         0         0         0         0  
 tunnel           1         0         0         0         0         0         0     16384     32768         0         0         0 railway in its tunnels
 tunnel           1         0         0         0         0         0         0         0         0        18        18         0 plan route
 tunnel           1         0         0         0         0         0         0         0      2468       428       428         0 plan towns
-tunnel           1         0         0         0         0         0         0         0     35568     14355     14195         0 plan nearest town
+tunnel           1         0         0         0         0         0         0         0     35565     14354     14194         0 plan nearest town
 tunnel           1         0         0         0         0         0         0         0     32786         4         4         0 plan railway's unsmoothed line
 tunnel           1         0         0         0         0         0         0         0      2133         2         2         0 plan railway's line
 tunnel           1         0         0         0         0         0         0         0    104126     25887     25535         0 plan railway
-tunnel           1         0         0         0         0         0         0         0     80658       281       281         0 plan landmarks
+tunnel           1         0         0         0         0         0         0         0     80568       278       278         0 plan landmarks
 tunnel           1         0         0         0         0         0         0         0      3799       240       240         0 plan pools
-tunnel           1         0         0         0         0         0         0         0      1186       120       120         0 plan steadings
+tunnel           1         0         0         0         0         0         0         0      1082       120       120         0 plan steadings
 tunnel           1         0         0         0         0         0         0         0    173045     25730     25542         0 plan ground
 tunnel           1         0         0         0         0         0         0         0       868       377       377         0 plan path
 tunnel           1         0         0         0         0         0         0         0       144        16        16         0 plan path's stretch
@@ -2748,7 +2748,7 @@ tunnel           1         0         0         0         0         0         0  
 tunnel           1         0         0         0         0         0         0         0        49        49        49         0 plan moor boulders
 tunnel           1         0         0         0         0         0         0         0     16384     16384     16384         0 plan landmark spots
 tunnel           1         0         0         0         0         0         0         0     16777     16777     16777         0 plan railway's top
-tunnel           1         0         0         0         0         0         0         0     11096     10814     10814         0 plan moor alone
+tunnel           1         0         0         0         0         0         0         0     11099     10814     10814         0 plan moor alone
 tunnel           2         0         0         0         0         0         0     16384    235152         0         0         0 terrain
 tunnel           2         0         0         0         0         0         0         0       370         0         0         0 streets
 tunnel           2         0         0         0         0         0         0         0       370         0         0         0 landmarks' ground
@@ -2773,13 +2773,13 @@ tunnel           2         0         0         0         0         0         0  
 tunnel           2         0         0         0         0         0         0     16384     32768         0         0         0 railway in its tunnels
 tunnel           2         0         0         0         0         0         0         0         0        18        18         0 plan route
 tunnel           2         0         0         0         0         0         0         0      2468       428       428         0 plan towns
-tunnel           2         0         0         0         0         0         0         0     35877     14458     14295         0 plan nearest town
+tunnel           2         0         0         0         0         0         0         0     35874     14457     14294         0 plan nearest town
 tunnel           2         0         0         0         0         0         0         0     32786         4         4         0 plan railway's unsmoothed line
 tunnel           2         0         0         0         0         0         0         0      2133         2         2         0 plan railway's line
 tunnel           2         0         0         0         0         0         0         0     45788     23858     23405         0 plan railway
-tunnel           2         0         0         0         0         0         0         0     80871       286       286         0 plan landmarks
+tunnel           2         0         0         0         0         0         0         0     80781       283       283         0 plan landmarks
 tunnel           2         0         0         0         0         0         0         0      5338       284       284         0 plan pools
-tunnel           2         0         0         0         0         0         0         0      1347       124       124         0 plan steadings
+tunnel           2         0         0         0         0         0         0         0      1243       124       124         0 plan steadings
 tunnel           2         0         0         0         0         0         0         0    183467     24601     24212         0 plan ground
 tunnel           2         0         0         0         0         0         0         0      1312       524       524         0 plan path
 tunnel           2         0         0         0         0         0         0         0       180        20        20         0 plan path's stretch
@@ -2816,13 +2816,13 @@ tunnel           3         0         0         0         0         0         0  
 tunnel           3         0         0         0         0         0         0     16384     27878         0         0         0 railway in its tunnels
 tunnel           3         0         0         0         0         0         0         0         0        18        18         0 plan route
 tunnel           3         0         0         0         0         0         0         0      2468       428       428         0 plan towns
-tunnel           3         0         0         0         0         0         0         0     36991     14833     14669         0 plan nearest town
+tunnel           3         0         0         0         0         0         0         0     36990     14833     14670         0 plan nearest town
 tunnel           3         0         0         0         0         0         0         0     32786         4         4         0 plan railway's unsmoothed line
 tunnel           3         0         0         0         0         0         0         0      2133         2         2         0 plan railway's line
 tunnel           3         0         0         0         0         0         0         0     30247     19390     18951         0 plan railway
-tunnel           3         0         0         0         0         0         0         0     82220       322       322         0 plan landmarks
+tunnel           3         0         0         0         0         0         0         0     82101       318       318         0 plan landmarks
 tunnel           3         0         0         0         0         0         0         0     11225       469       469         0 plan pools
-tunnel           3         0         0         0         0         0         0         0      2162       152       152         0 plan steadings
+tunnel           3         0         0         0         0         0         0         0      2023       152       152         0 plan steadings
 tunnel           3         0         0         0         0         0         0         0    207576     29919     28797         0 plan ground
 tunnel           3         0         0         0         0         0         0         0      2177       939       939         0 plan path
 tunnel           3         0         0         0         0         0         0         0       252        28        28         0 plan path's stretch
@@ -2859,13 +2859,13 @@ tunnel           4         0         0         0         0         0         0  
 tunnel           4         0         0         0         0         0         0     16384     30495         0         0         0 railway in its tunnels
 tunnel           4         0         0         0         0         0         0         0         0        18        18         0 plan route
 tunnel           4         0         0         0         0         0         0         0      2468       428       428         0 plan towns
-tunnel           4         0         0         0         0         0         0         0     40470     16325     16140         0 plan nearest town
+tunnel           4         0         0         0         0         0         0         0     40469     16325     16141         0 plan nearest town
 tunnel           4         0         0         0         0         0         0         0     32786         4         4         0 plan railway's unsmoothed line
 tunnel           4         0         0         0         0         0         0         0      2133         2         2         0 plan railway's line
 tunnel           4         0         0         0         0         0         0         0     42998     30019     26871         0 plan railway
-tunnel           4         0         0         0         0         0         0         0     92375       400       400         0 plan landmarks
+tunnel           4         0         0         0         0         0         0         0     92256       396       396         0 plan landmarks
 tunnel           4         0         0         0         0         0         0         0     22471       897       897         0 plan pools
-tunnel           4         0         0         0         0         0         0         0      3340       206       206         0 plan steadings
+tunnel           4         0         0         0         0         0         0         0      3201       206       206         0 plan steadings
 tunnel           4         0         0         0         0         0         0         0    251942     36816     34065         0 plan ground
 tunnel           4         0         0         0         0         0         0         0    147081     29221     27777         0 plan land
 tunnel           4         0         0         0         0         0         0         0      2450      1225      1225         0 plan boulders
@@ -2900,15 +2900,15 @@ tunnel           5         0         0         0         0         0         0  
 tunnel           5         0         0         0         0         0         0     12288     19529         0         0         0 railway in its tunnels
 tunnel           5         0         0         0         0         0         0         0         0        18        18         0 plan route
 tunnel           5         0         0         0         0         0         0         0      2468       428       428         0 plan towns
-tunnel           5         0         0         0         0         0         0         0     45071     18595     18390         0 plan nearest town
+tunnel           5         0         0         0         0         0         0         0     45073     18597     18392         0 plan nearest town
 tunnel           5         0         0         0         0         0         0         0     32786         4         4         0 plan railway's unsmoothed line
 tunnel           5         0         0         0         0         0         0         0      2133         2         2         0 plan railway's line
 tunnel           5         0         0         0         0         0         0         0     10566      7936      7936         0 plan railway
-tunnel           5         0         0         0         0         0         0         0    121625       728       728         0 plan landmarks
+tunnel           5         0         0         0         0         0         0         0    121565       726       726         0 plan landmarks
 tunnel           5         0         0         0         0         0         0         0     62270      2171      2171         0 plan pools
-tunnel           5         0         0         0         0         0         0         0      8168       455       455         0 plan steadings
+tunnel           5         0         0         0         0         0         0         0      7951       455       455         0 plan steadings
 tunnel           5         0         0         0         0         0         0         0    101381     17499     17497         0 plan ground
-tunnel           5         0         0         0         0         0         0         0     89390     16913     16913         0 plan land
+tunnel           5         0         0         0         0         0         0         0     89387     16913     16913         0 plan land
 tunnel           5         0         0         0         0         0         0         0      4624      4624      4624         0 plan moor boulders
 tunnel           5         0         0         0         0         0         0         0      1082       521       521         0 plan path
 tunnel           5         0         0         0         0         0         0         0       585        65        65         0 plan path's stretch

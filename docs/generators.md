@@ -640,7 +640,7 @@ A thing may stand up to a cell from its spot:
 the valley's towns turn down spots over half a cell from the path,
 and stand on it.
 A thing that reaches round its point,
-a steading's hut, path and levelled ground,
+a steading's yard and the ground it levels round it,
 a landmark's footprint and clearing,
 or a pool, which a field draws,
 is asked for within its reach, at most half of `apart`,

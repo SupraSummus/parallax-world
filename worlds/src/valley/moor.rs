@@ -85,10 +85,19 @@ const RING_RADIUS: i64 = m(10.0);
 const HUT_HALF: i64 = m(5.0);
 /** How far a steading reaches past its cell across: to the hut's far corner, or the ring's far stone. */
 const REACH_ACROSS: i64 = if HUT_FROM_RING + HUT_HALF > RING_RADIUS { HUT_FROM_RING + HUT_HALF + m(2.0) } else { RING_RADIUS + m(2.0) };
-/** How far the ground eases from a hut's level back to the heath's. */
+/** How far a steading reaches up and down from its level: its hut's ridge, the tallest of its things. */
+const RIDGE: i64 = m(7.0);
+/**
+ * A steading's yard, all within YARD of the line from its ring's centre
+ * to its hut's, is level, and all of it stands on it.
+ * Where the ground under it rises more than RISE, there is none.
+ */
+const YARD: i64 = RING_RADIUS;
+const RISE: Units = Units::m(6.0);
+/** How far the ground eases from a yard's level back to the heath's. */
 const TERRACE: Units = Units::m(12.0);
-// The levelled ground's far corner (a square round the hut) is the furthest a steading reaches from its ring.
-const _: () = assert!(HUT_FROM_RING + (HUT_HALF + TERRACE.0) * 3 / 2 <= NEAR && 2 * NEAR <= APART);
+// The furthest a steading levels is its yard's end and TERRACE past it.
+const _: () = assert!(HUT_FROM_RING + YARD + TERRACE.0 <= NEAR && 2 * NEAR <= APART);
 /** A pool's radius at most: pools stand at least two apart, so a column is in one at most. */
 const POOL_RADIUS: i64 = m(14.0);
 const _: () = assert!(2 * POOL_RADIUS <= POOLS_APART);
@@ -124,11 +133,11 @@ type ByColumn = Arc<dyn Fn(i64, i64) -> Fx + Send + Sync>;
 #[derive(Clone, Copy, Default)]
 struct Steading {
     ring: [i64; 2],
-    ring_ground: Units,
     radius: i64,
     stones: i64,
-    /** The hut's footprint centre (x, z), floor level, footprint and quarter turns. */
+    /** The hut's footprint centre (x, z), footprint and quarter turns. */
     centre: [i64; 2],
+    /** Its yard's level: what all of it stands on. */
     level: Units,
     length: i64,
     depth: i64,
@@ -150,10 +159,10 @@ impl Steading {
         ([x as f64, z as f64], [x as f64 + dx * end, z as f64 + dz * end])
     }
 
-    /** How it shapes the ground at (x, z) (Pull::pull): level under its hut, easing back over TERRACE. */
+    /** How it shapes the ground at (x, z) (Pull::pull): level under its yard, easing back over TERRACE. */
     fn pull(&self, x: i64, z: i64) -> Option<(Fx, Fx)> {
-        let c = self.centre;
-        eased(self.level.to_fx(), TERRACE, Units((x - c[0]).abs().max((z - c[1]).abs()) - HUT_HALF))
+        let [ring, centre] = [self.ring, self.centre].map(|c| c.map(|v| v as f64));
+        eased(self.level.to_fx(), TERRACE, Units(to_segment(x as f64, z as f64, ring, centre) as i64 - YARD))
     }
 }
 
@@ -288,7 +297,7 @@ impl Moorland {
                 if !random.chance(chance) {
                     return None;
                 }
-                let steading = steading_at(ring, random, &*height);
+                let steading = steading_at(ring, random, &*height)?;
                 let low = level.is_some_and(|w| steading.level <= w + Units::m(1.0));
                 // Room all round the hut and the ring.
                 let around = |c: [i64; 2]| (-1..=1).all(|a| (-1..=1).all(|b| lead(c[0] + a * m(20.0), c[1] + b * m(20.0)) >= SURE));
@@ -388,29 +397,36 @@ impl Moorland {
     }
 }
 
-/** `ground` at (x, z), levelled under the hut of the steading reaching it in `steadings`. */
+/** `ground` at (x, z), levelled under the yard of the steading reaching it in `steadings`. */
 fn terraced(steadings: &Claims<Steading>, x: i64, z: i64, ground: Fx) -> Fx {
     steadings.near(x, z, NEAR).and_then(|(_, s)| s.pull(x, z)).map_or(ground, |(to, how_hard)| ground + (to - ground) * how_hard)
 }
 
-/** The steading whose ring is at `ring`: its hut 22 to 30 m off it, on ground `height` high. */
-fn steading_at(ring: [i64; 2], random: &mut Rng, height: &dyn Fn(i64, i64) -> Fx) -> Steading {
+/** The steading whose ring is at `ring`, its hut 22 to 30 m off it, if the ground `height` high is even enough to level its yard on. */
+fn steading_at(ring: [i64; 2], random: &mut Rng, height: &dyn Fn(i64, i64) -> Fx) -> Option<Steading> {
     let angle = random.next() * 2.0 * std::f64::consts::PI;
     let from = m(22.0) as f64 + random.next() * m(8.0) as f64;
     let centre = [ring[0] + (from * js::cos(angle)) as i64, ring[1] + (from * js::sin(angle)) as i64];
     let (length, depth) = (m(5.0) + random.below(m(1.5) as u32) as i64, m(4.0) + random.below(m(1.0) as u32) as i64);
     // Its front faces the ring.
     let turns = facing(ring[0] - centre[0], ring[1] - centre[1]);
-    // A hut's level is the mean of the heath under it, as coarse as the hut.
-    let mean = |c: [i64; 2]| {
-        let around = (-1..=1).flat_map(|a| (-1..=1).map(move |b| (a, b)));
-        Fx::mean(around.map(|(a, b)| height(c[0] + a * m(4.0), c[1] + b * m(4.0)))).round_units()
-    };
-    let level = mean(centre);
-    let ring_ground = mean(ring);
-    let radius = m(7.0) + random.below(m(3.0) as u32) as i64;
+    let radius = m(7.0) + random.below((RING_RADIUS - m(7.0)) as u32) as i64;
     let stones = 9 + random.below(5) as i64;
-    Steading { ring, ring_ground, radius, stones, centre, level, length, depth, turns, seed: random.next_u64() }
+    let under = yard(ring, centre, height);
+    let (lo, hi) = (under.iter().min().expect("nine"), under.iter().max().expect("nine"));
+    let level = Fx::mean(under).round_units();
+    (*hi - *lo <= RISE.to_fx()).then_some(Steading { ring, radius, stones, centre, level, length, depth, turns, seed: random.next_u64() })
+}
+
+/** The ground `height` high under a steading's yard: at its ring's centre, midway and its hut's, on the line between and YARD either side. */
+fn yard(ring: [i64; 2], centre: [i64; 2], height: &dyn Fn(i64, i64) -> Fx) -> [Fx; 9] {
+    let [rx, rz] = ring.map(|v| v as f64);
+    let (dx, dz) = (centre[0] as f64 - rx, centre[1] as f64 - rz);
+    let across = YARD as f64 / js::hypot(&[dx, dz]);
+    std::array::from_fn(|n| {
+        let (along, side) = ((n % 3) as f64 / 2.0, (n / 3) as f64 - 1.0);
+        height((rx + along * dx - side * across * dz) as i64, (rz + along * dz + side * across * dx) as i64)
+    })
 }
 
 /**
@@ -868,25 +884,23 @@ fn boulders(f: Arc<Heath>) -> Population {
     )
 }
 
-/** The steadings: each anchored at its ring's centre. */
+/** The steadings: each anchored at its ring's centre, on its level. */
 fn steadings_population(f: Arc<Heath>) -> Population {
-    let anchor = f.clone();
-    // Up and down: the hut's roof, on ground some metres over or under the ring's.
-    Population::new("steadings", 4.0, STEADING_CELL).reach([REACH_ACROSS, m(24.0), REACH_ACROSS]).at(
+    Population::new("steadings", 4.0, STEADING_CELL).reach([REACH_ACROSS, RIDGE, REACH_ACROSS]).at(
         move |b| {
-            let steadings = anchor.moorland.steadings.over(b).into_iter();
-            steadings.map(|(_, s)| ([s.ring[0] as f64, s.ring_ground.0 as f64, s.ring[1] as f64], s)).collect()
+            let steadings = f.moorland.steadings.over(b).into_iter();
+            steadings.map(|(_, s)| ([s.ring[0] as f64, s.level.0 as f64, s.ring[1] as f64], s)).collect()
         },
-        move |s, _| Some(steading(&f, s)),
+        |s, _| Some(steading(s)),
     )
 }
 
-/** A steading's node: the hut, the ring of stones and the cairns, each a child. */
-fn steading(f: &Heath, s: &Steading) -> Node {
+/** A steading's node: the hut, the ring of stones and the cairns, each a child, all on its yard's level. */
+fn steading(s: &Steading) -> Node {
     let mut random = Rng::new(s.seed);
     let hut = hut(s, &mut random);
-    let ring = ring(f, s, &mut random);
-    let cairns = cairns(f, s, &mut random);
+    let ring = ring(s, &mut random);
+    let cairns = cairns(s, &mut random);
     Node::group(vec![Child::new("hut", ANY_SIZE, hut), Child::new("ring", ANY_SIZE, ring), Child::new("cairns", m(2.0), cairns)])
 }
 
@@ -925,13 +939,13 @@ fn hut(s: &Steading, random: &mut Rng) -> Node {
 }
 
 /** A ring of standing stones round its centre, each a child; one of them fallen. */
-fn ring(f: &Heath, s: &Steading, random: &mut Rng) -> Node {
+fn ring(s: &Steading, random: &mut Rng) -> Node {
     let mut children = Vec::new();
     let fallen = random.below(s.stones as u32) as i64;
+    let g = s.level.0 as f64;
     for i in 0..s.stones {
         let a = (i as f64 + random.next() * 0.3) * 2.0 * std::f64::consts::PI / s.stones as f64;
         let (x, z) = (s.ring[0] as f64 + s.radius as f64 * js::cos(a), s.ring[1] as f64 + s.radius as f64 * js::sin(a));
-        let g = f.height(x as i64, z as i64) as f64;
         let (tall, wide) = (m(1.6) as f64 + random.next() * m(1.6) as f64, 2.5 + random.next() * 1.5);
         let kind: Kind = if random.chance(Fx::HALF) { K::lichen.into() } else { F::stone.into() };
         let shape = if i == fallen {
@@ -946,18 +960,18 @@ fn ring(f: &Heath, s: &Steading, random: &mut Rng) -> Node {
 }
 
 /** Cairns every 5 m along the path, on either side by turns: three stones stacked. */
-fn cairns(f: &Heath, s: &Steading, random: &mut Rng) -> Node {
+fn cairns(s: &Steading, random: &mut Rng) -> Node {
     let (a, b) = s.path();
     let (dx, dz) = (b[0] - a[0], b[1] - a[1]);
     let length = js::hypot(&[dx, dz]);
     let (nx, nz) = (-dz / length, dx / length);
     let mut shapes = Vec::new();
+    let g = s.level.0 as f64;
     let mut t = m(3.0) as f64;
     let mut side = 1.0;
     while t < length - m(2.0) as f64 {
         let off = side * m(1.3) as f64;
         let (x, z) = (a[0] + dx * t / length + nx * off, a[1] + dz * t / length + nz * off);
-        let g = f.height(x as i64, z as i64) as f64;
         let r = 2.5 + random.next();
         shapes.push(Shape::ball([x, g + r * 0.6, z], r, F::stone));
         shapes.push(Shape::ball([x, g + r * 1.6, z], r * 0.75, K::lichen));
@@ -974,6 +988,19 @@ mod tests {
     use fcc::walk::{COLLISION_LEVEL, Ground, WalkInput, Walker};
     use worldgen::generator::generate;
     use worldgen::grid::Box3;
+
+    /** Steadings keep within their population's reach, its things as random as they come: drawing checks only the few it makes. */
+    #[test]
+    fn steadings_keep_within_their_reach() {
+        let reach = [REACH_ACROSS, RIDGE, REACH_ACROSS];
+        let steadings = heath_and_moorland(&Scope::new(1), IN_HOLLOWS).1.steadings.within([-m(4000.0); 2], [m(4000.0); 2]);
+        assert!(steadings.len() > 500, "{} steadings", steadings.len());
+        for (_, s) in steadings {
+            let anchor = [s.ring[0], s.level.0, s.ring[1]];
+            let within = Box3 { min: [0, 1, 2].map(|a| anchor[a] - reach[a]), max: [0, 1, 2].map(|a| anchor[a] + reach[a] + 1) };
+            assert!(steading(&s).bounds().inside(&within), "the steading at {anchor:?} reaches {:?}", steading(&s).bounds());
+        }
+    }
 
     #[test]
     fn a_body_walks_into_a_hut_and_stands_in_it() {
@@ -998,7 +1025,7 @@ mod tests {
             // Inside its walls, standing on its floor.
             let [ex, ey, ez] = body.eye();
             let inside = (ex - cx as f64).hypot(ez - cz as f64) < (s.depth / 2 - WALL) as f64;
-            let standing = (m(1.6)..m(2.0)).contains(&(ey as i64 - s.level.0));
+            let standing = (m(1.6) as f64..m(2.0) as f64).contains(&(ey - s.level.0 as f64));
             assert!(inside && standing, "seed {seed}: eye at {:?}, the hut's floor at {cx} {} {cz}", body.eye(), s.level.0);
         }
     }
