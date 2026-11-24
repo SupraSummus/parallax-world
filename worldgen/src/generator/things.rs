@@ -4,17 +4,21 @@
 use super::*;
 
 /**
- * Each thing `population` makes anchored in box `b` (lattice units),
- * with its anchor; returns the work of asking.
+ * Each thing `population` makes anchored in box `b` (lattice units) where
+ * it stands (Population::stands), with its anchor; returns the work of asking.
  */
 pub(super) fn each_thing(population: &Population, b: &Box3, mut each: impl FnMut(&Anchor, Node)) -> Work {
     let mut work = Work::default();
+    let stands = |b: &Box3| population.stands.as_ref().is_none_or(|stands| stands(b));
+    if !stands(b) {
+        return work;
+    }
     // How many of its things are anchored at each point so far: the next one there is known by its number.
     let mut at: HashMap<[i64; 3], u32> = HashMap::new();
     (population.things)(b, &mut |p, make| {
         work.points += 1;
         let key = p.map(|v| v.round() as i64);
-        if !b.holds(key) {
+        if !b.holds(key) || !stands(&Box3 { min: key, max: key.map(|v| v + 1) }) {
             return;
         }
         work.inside += 1;
@@ -22,13 +26,6 @@ pub(super) fn each_thing(population: &Population, b: &Box3, mut each: impl FnMut
         let anchor = Anchor { at: p, key, nth: *nth, population: population.name };
         *nth += 1;
         let Some(node) = make(&anchor) else { return };
-        if let Some(stands) = &population.stands {
-            assert!(
-                stands(&Box3 { min: key, max: key.map(|v| v + 1) }),
-                "{} is anchored where its population says none stand (Population::stands); see \"Rules\" in {DOCS}",
-                anchor.name()
-            );
-        }
         each(&anchor, node);
     });
     work

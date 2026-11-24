@@ -14,7 +14,6 @@ pub(super) struct Visit<'u> {
     pub(super) layer: &'static str,
     pub(super) thing: u32,
     pub(super) seed: u64,
-    pub(super) checked: bool,
     pub(super) measured: &'u Measured,
 }
 
@@ -46,7 +45,7 @@ impl Measured {
 
 /** Adds a node's drawables and its children's, as far as they reach `at.units` and are drawn at its spacing. */
 pub(super) fn visit(node: &Node, key: String, bounds: Box3, at: &Visit, drawables: &mut Vec<Drawable<'_>>) {
-    let Visit { s, units, order, layer, thing, seed, checked, measured } = *at;
+    let Visit { s, units, order, layer, thing, seed, measured } = *at;
     if !bounds.overlaps(units) {
         return;
     }
@@ -57,18 +56,18 @@ pub(super) fn visit(node: &Node, key: String, bounds: Box3, at: &Visit, drawable
         Some(Far { form: FarForm::Shapes(shapes), .. }) => Draw::Shapes(shapes.to_vec(), true),
         None => return near(node, key, bounds, at, drawables),
     };
-    drawables.push(Drawable { order, key, layer, thing, draw, checked });
+    drawables.push(Drawable { order, key, layer, thing, draw });
 }
 
 /** Adds a node's near form, whatever the spacing: its shapes, and its children's drawables (`visit`). */
 fn near(node: &Node, key: String, bounds: Box3, at: &Visit, drawables: &mut Vec<Drawable<'_>>) {
-    let Visit { s, units, order, layer, thing, checked, .. } = *at;
+    let Visit { s, units, order, layer, thing, .. } = *at;
     let own = node.shapes.get();
     // A carve cuts only the thing (docs/generators.md), so it may reach past it.
     if let Some(shape) = own.iter().find(|shape| shape.op != Op::Carve && !shape.bounds.inside(&bounds)) {
         panic!("{key} draws past its bounds {bounds:?}, to {:?}; see \"Things\" in {DOCS}", shape.bounds);
     }
-    drawables.push(Drawable { order, key: key.clone(), layer, thing, draw: Draw::Shapes(own.to_vec(), false), checked });
+    drawables.push(Drawable { order, key: key.clone(), layer, thing, draw: Draw::Shapes(own.to_vec(), false) });
     let reaching;
     let children: &[Child] = match &node.children {
         None => &[],
@@ -184,7 +183,7 @@ impl Own {
 fn alone(node: &Node, key: &str, layer: &'static str, bounds: Box3, f: i64, seed: u64, measured: &Measured, form: Form) -> Own {
     let units = bounds.widen(f);
     let mut drawables = Vec::new();
-    let at = Visit { s: f, units: &units, order: 0.0, layer, thing: 1, seed, checked: false, measured };
+    let at = Visit { s: f, units: &units, order: 0.0, layer, thing: 1, seed, measured };
     form(node, key.to_string(), bounds, &at, &mut drawables);
     let fine = Box3 { min: bounds.min.map(|v| v.div_euclid(f) - 2), max: bounds.max.map(|v| -(-v).div_euclid(f) + 2) };
     let mut own = Own::new(&fine);

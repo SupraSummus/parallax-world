@@ -33,8 +33,6 @@ pub(super) struct Drawable<'a> {
     /** The thing it is part of, numbered from 1; 0 for fields. */
     pub(super) thing: u32,
     pub(super) draw: Draw<'a>,
-    /** Drawn only to see it draws nothing: its population said it stands elsewhere (`checking_skipped`). */
-    pub(super) checked: bool,
 }
 
 /** Draws one drawable at sites `s` apart into `clip`; returns the work. */
@@ -364,8 +362,8 @@ thread_local! {
 
 /**
  * Runs `f`, what it generates that says it may not draw in a box (a
- * field's lines about their ground, a population standing elsewhere)
- * drawn there all the same: returns where it drew.
+ * field's lines about their ground) drawn there all the same: returns
+ * where it drew.
  */
 pub fn checking_skipped<R>(f: impl FnOnce() -> R) -> (R, Vec<String>) {
     let outer = CHECKING.replace(Some(Vec::new()));

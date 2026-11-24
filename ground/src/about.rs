@@ -1,6 +1,6 @@
 //! Fields and populations on a ground: spans along y, up, about a plan of
-//! heights, and things standing on it, each a rule the engine asks where
-//! to draw them (Field::meets, Population::stands).
+//! heights, a rule the engine asks where to draw them (Field::meets); and
+//! things standing on it, at points only near it (Population::stands).
 //! See "Writing a world" in docs/generators.md.
 
 use std::sync::Arc;
@@ -73,9 +73,9 @@ pub fn standing(points: &Points, b: &Box3, height: impl Fn(i64, i64) -> i64) -> 
 /** A population on a ground. */
 pub trait PopulationOn {
     /**
-     * Its things standing on `ground`, each anchored at most N (its cell)
-     * off it: on the ground the level's sites read where one is,
-     * over a box its range (Population::stands).
+     * Its things standing on `ground`, its points only those at most N
+     * (its cell) off it: on the ground the level's sites read where one
+     * is, over a box its range (Population::stands).
      */
     fn on(self, ground: Arc<Sloped>) -> Population;
 }
@@ -83,16 +83,13 @@ pub trait PopulationOn {
 impl PopulationOn for Population {
     fn on(self, ground: Arc<Sloped>) -> Population {
         let n = self.cell;
-        self.stands(move |b| {
-            let column = b.max[0] - b.min[0] == 1 && b.max[2] - b.min[2] == 1;
-            let range = if column {
-                Some((ground.at(b.min[0], b.min[2]), ground.at(b.min[0], b.min[2])))
-            } else {
-                ground.range([b.min[0], b.min[2]], [b.max[0], b.max[2]])
-            };
-            range.is_none_or(|(lo, hi)| b.min[1] <= hi + n && b.max[1] > lo - n)
-        })
+        self.stands(move |b| read(&ground, b).is_none_or(|(lo, hi)| b.min[1] <= hi + n && b.max[1] > lo - n))
     }
+}
+
+/** The least and greatest `ground` is over box `b`'s columns, as the level's sites read it (Sloped::range). */
+fn read(ground: &Sloped, b: &Box3) -> Option<(i64, i64)> {
+    ground.range([b.min[0], b.min[2]], [b.max[0] - 1, b.max[2] - 1])
 }
 
 /**
@@ -112,31 +109,31 @@ struct About {
 
 impl About {
     /**
-     * How far past `below` and `above` the ground a line reaches, at sites
-     * `spacing` apart: down past the eight columns a spacing around it
-     * (`Column::sides`), the diagonals' up to twice the slope times
-     * that off; without one, any way.
+     * How far past `below` the ground a line reaches, at sites `spacing`
+     * apart: down past the eight columns a spacing around it
+     * (`Column::sides`), the diagonals' up to twice the slope times that
+     * off; without one, any way.
      */
     fn sides(&self, spacing: i64) -> Option<i64> {
         Some(2 * self.of.slope()? * spacing)
     }
 
     /**
-     * How far past them a line's spans may reach: its `sides`, and two
-     * sites more, as spans are `thick` (worldgen's build.rs). Asked of a box,
-     * the two sites are what it is widened by (Field::meets).
+     * How far past them a line's spans may reach, under and over: its
+     * `sides` under, and two sites more each way, as spans are `thick`
+     * (worldgen's build.rs). Asked of a box, the two sites are what it is
+     * widened by (Field::meets).
      */
-    fn slack(&self, spacing: i64) -> Option<i64> {
-        Some(self.sides(spacing)? + 2 * spacing)
+    fn slack(&self, spacing: i64) -> Option<(i64, i64)> {
+        Some((self.sides(spacing)? + 2 * spacing, 2 * spacing))
     }
 
     /** What its lines draw in box `b` (lattice units), at sites `spacing` apart: whatever they draw, all `under` (a kind), or nothing. */
     fn meets(&self, b: &Box3, spacing: i64) -> Meets {
-        let range = self.of.range([b.min[0], b.min[2]], [b.max[0] - 1, b.max[2] - 1]);
-        let (Some((lo, hi)), Some(sides)) = (range, self.sides(spacing)) else { return Meets::Any };
+        let (Some((lo, hi)), Some(sides)) = (read(&self.of, b), self.sides(spacing)) else { return Meets::Any };
         let (y0, y1) = (b.min[1], b.max[1] - 1);
         match self.under {
-            _ if y0 > hi + self.above + sides => Meets::Nothing,
+            _ if y0 > hi + self.above => Meets::Nothing,
             Some(kind) if y1 < lo - self.below - sides => Meets::All(kind),
             None if y1 < lo - self.below - sides => Meets::Nothing,
             _ => Meets::Any,
@@ -146,16 +143,16 @@ impl About {
     /** Panics unless field `name`'s `spans` of column (x, z), at the spacing read for, lie where it says. */
     fn hold(&self, name: &str, x: i64, z: i64, spans: &[Span]) {
         let s = spacing();
-        let Some(slack) = self.slack(s) else { return };
+        let Some((down, up)) = self.slack(s) else { return };
         // The column itself, wherever the spans read the ground.
         let g = where_asked(|| self.of.at(x, z));
-        let (low, high) = (g - self.below - slack, g + self.above + slack);
+        let (low, high) = (g - self.below - down, g + self.above + up);
         let under = |span: &Span| self.under == Some(span.kind) && span.holds == Holds::Solid;
         for span in spans.iter().filter(|span| span.from < span.to) {
             assert!(
                 (span.from >= low || under(span)) && span.to <= high,
                 "field {name}: span [{}, {}) at column ({x}, {z}) reaches past {} under and {} over its ground {g}, \
-                 give or take {slack} at sites {s} apart (FieldAbout::about); see \"Rules\" in {DOCS}",
+                 give or take {down} under and {up} over at sites {s} apart (FieldAbout::about); see \"Rules\" in {DOCS}",
                 span.from,
                 span.to,
                 self.below,
@@ -165,7 +162,7 @@ impl About {
         assert!(
             self.under.is_none() || spans.iter().any(|span| under(span) && span.from <= DEEP && span.to >= low),
             "field {name}: at column ({x}, {z}), kind {:?} doesn't reach up from DEEP to {low}, {} under its ground {g}, \
-             give or take {slack} at sites {s} apart (FieldAbout::ground); see \"Rules\" in {DOCS}",
+             give or take {down} at sites {s} apart (FieldAbout::ground); see \"Rules\" in {DOCS}",
             self.under,
             self.below,
         );

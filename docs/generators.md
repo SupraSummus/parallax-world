@@ -77,17 +77,19 @@ anything, nothing, or all of it solid of one kind.
 The cheese is all cheese, its holes nothing where none of them reaches,
 the mine's rock all aged where it surely owns a box;
 the sea nothing over its level (`ground::under`).
-A population says where its things' anchors may lie (`Population::stands`).
-Each is a rule (below),
-so the framework asks it to draw only where it may be:
-a field in blocks of lines (`LINES`), one given at each site in cubes (`SITES`),
-a population box by box.
+A population says where its things' anchors may lie (`Population::stands`):
+its points are only those, and where none may be, it is not asked.
+A field's is a rule (below):
+the framework asks it to draw only where it may be,
+in blocks of lines (`LINES`), one given at each site in cubes (`SITES`),
+as it does a population's far field.
 On a ground, the `ground` crate (`ground/src/about.rs`) says both for a layer
 about a plan of heights (`ground::plan::Sloped`), up being +y there alone:
 a field's spans along y lie from `below` under to `above` over it
 at their column (`FieldAbout::about`), held to it as they are made,
 and what it meets follows, from the plan's range over the box's columns
-(`Sloped::range`), which its slope bounds;
+and those its level's sites read between (`Sloped::range`, `Sloped::at`),
+which its slope bounds;
 a plan promising no slope (`Sloped::any`) says nothing.
 The ground's own field also says what it is under all that (`FieldAbout::ground`),
 solid down without end.
@@ -466,9 +468,6 @@ Broken rules panic, naming the thing and pointing here:
 - **Slopes.** A `Sloped` plan's column differs from a neighbour's
   by at most its `slope`, checked as one is made and the other is kept:
   so every two ever kept together.
-- **Stands.** A thing's anchor lies where its population `stands`:
-  on a plan (`on`), at most N off it;
-  within a region, in a column it may be in.
 - **Meets.** A field draws in a box what it `meets` there:
   nothing where it says nothing, solid of its kind where it says all.
   It is asked of the box two sites wider each way than the sites drawn,
@@ -478,10 +477,15 @@ Broken rules panic, naming the thing and pointing here:
   so derive it from what bounds the spans, as `about` does.
 - **About.** A field's span lies within `below` under and `above` over
   what it is `about` at its column,
-  give or take two sites (a span is at least two sites tall)
-  and twice the slope times the spacing
+  give or take two sites (a span is at least two sites tall),
+  and under, twice the slope times the spacing more
   (a line reaches down past the eight columns around it, `sides`);
   under that, a `ground`'s kind, a solid span from `DEEP`.
+- **Stands.** Where a population says none may stand over a box,
+  it says so of every point in it:
+  else its points would depend on the box asked.
+  Derive it from bounds, as `within` (a scalar's) and `on` (a plan's range) do.
+  Only the contract checks it (`parts_hold`).
 - **Rooms.** A thing's weight lies from 0 to the rooms' `most`.
 
 Not checked, but caught by the tests:
