@@ -5,8 +5,9 @@
 
 use std::sync::Arc;
 
-use worldgen::generator::{DEEP, Field, FieldValues, Holds, Kind, Meets, Op, Population, Span};
+use worldgen::generator::{DEEP, Field, FieldValues, Holds, Kind, Meets, Op, Point, Population, Span};
 use worldgen::grid::Box3;
+use worldgen::points::{Points, Spot};
 use worldgen::sites::{spacing, where_asked};
 
 use crate::DOCS;
@@ -60,11 +61,20 @@ fn about_as(field: Field, about: About) -> Field {
     Field { values: FieldValues::Spans { axis: 1, spans }, ..field }.meets(move |b, spacing| about.meets(b, spacing))
 }
 
+/**
+ * The points of `points`, a process across y, in box `b`'s columns, each
+ * standing `height(x, z)` high: things on a ground (Population::at).
+ */
+pub fn standing(points: &Points, b: &Box3, height: impl Fn(i64, i64) -> i64) -> Vec<(Point, Spot)> {
+    let spots = points.points_in(b.min, b.max).into_iter();
+    spots.map(|spot| ([spot.at[0] as f64, height(spot.at[0], spot.at[2]) as f64, spot.at[2] as f64], spot)).collect()
+}
+
 /** A population on a ground. */
 pub trait PopulationOn {
     /**
-     * Its things standing on `ground`, each anchored at most N (its cell,
-     * as now) off it: on the ground the level's sites read where one is,
+     * Its things standing on `ground`, each anchored at most N (its cell)
+     * off it: on the ground the level's sites read where one is,
      * over a box its range (Population::stands).
      */
     fn on(self, ground: Arc<Sloped>) -> Population;

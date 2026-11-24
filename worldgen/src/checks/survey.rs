@@ -362,7 +362,7 @@ fn survey_things(
 }
 
 /**
- * The things of `population` in the cells whose reach meets `b`, each to
+ * The things of `population` that may reach `b`, each to
  * `each` (its key, bounds and the box its reach allows), taken apart into
  * `parts` (`take_apart`): how many.
  */
@@ -375,10 +375,8 @@ fn things_in(
     parts: &mut Found,
     mut each: impl FnMut(String, Box3, Box3),
 ) -> usize {
-    let (n, reach) = (population.cell, population.reach);
-    let cells = [0, 1, 2].map(|a| ((b.min[a] - n - reach[a]).div_euclid(n), (b.max[a] + n + reach[a]).div_euclid(n) + 1));
     let mut count = 0;
-    each_made(&world.generator, population, cells, |key, bounds, allowed, node| {
+    each_made(&world.generator, population, b, |key, bounds, allowed, node| {
         count += take_apart(node, population.name.to_string(), region, only, parts);
         each(key, bounds, allowed);
     });

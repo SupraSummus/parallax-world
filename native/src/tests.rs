@@ -275,13 +275,16 @@ fn a_nearer_medium_shows_over_one_behind() {
 fn sheeted_block(_: u64) -> worldgen::World {
     use worldgen::generator::{Far, Generator, KindDef, Layer, Node, Population, Shape};
     let kind = |colors| KindDef { name: "block", kind_type: 10, colors, walk_through: false, glows: true, medium: false };
-    let block = Population::new("block", 1.0, 4096).anchor(|cell| (cell.centre == [0; 3]).then_some([0.0; 3])).make(|_, _| {
-        let shapes = vec![
-            Shape::cuboid([-256.0, 0.0, -256.0], [256.0, 256.0, 256.0], 0),
-            Shape::cuboid([-256.0, 248.0, -256.0], [256.0, 256.0, 256.0], 1).paint(),
-        ];
-        Some(Node::of(shapes).with_far(Far::measured(worldgen::noise::fx(2.0))))
-    });
+    let block = Population::new("block", 1.0, 4096).reach(4096).at(
+        |_| vec![([0.0; 3], ())],
+        |_, _| {
+            let shapes = vec![
+                Shape::cuboid([-256.0, 0.0, -256.0], [256.0, 256.0, 256.0], 0),
+                Shape::cuboid([-256.0, 248.0, -256.0], [256.0, 256.0, 256.0], 1).paint(),
+            ];
+            Some(Node::of(shapes).with_far(Far::measured(worldgen::noise::fx(2.0))))
+        },
+    );
     let generator = Generator { kinds: vec![kind(&["#ffffff"]), kind(&["#ff0000"])], seed: 1, layers: vec![Layer::Population(block)] };
     worldgen::World { generator, spawn: [0, -400, 0], heights: Some((-64, 512)), points: Vec::new() }
 }

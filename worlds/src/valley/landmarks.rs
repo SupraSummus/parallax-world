@@ -19,10 +19,11 @@ use ground::land::{Columns, Pull, eased, of_columns};
 use ground::plan::{Claims, Plan, Sloped};
 use worldgen::frame::{Frame, Part, facing, walls};
 use worldgen::generator::{ANY_SIZE, Child, Fill, Kind, Layer, Node, Op, Population, SOLID};
+use worldgen::grid::Box3;
 use worldgen::js;
 use worldgen::kinds;
 use worldgen::land::owns;
-use worldgen::noise::{Fx, Rng, Scope, ValueNoise, fx, hash64};
+use worldgen::noise::{Fx, Rng, Scope, ValueNoise, fx};
 use worldgen::scalar::Scalar;
 use worldgen::sites;
 use worldgen::units::{Units, m};
@@ -56,16 +57,11 @@ pub const NEAR: i64 = m(40.0);
 /** The chance a spot is tried, and how many places each kind is tried at round it. */
 const CHANCE: Fx = fx(0.66);
 const TRIES: usize = 8;
-/** How many rows NEAR apart either way, and points across them either side of the path, `Landmarks::first` looks at. */
-const ROWS: i64 = 6000;
-const ACROSS: i64 = 12;
-/** A landmark's cell, and how far it reaches past it across, up and across: a farmstead's corners, a watchtower's pennant. */
+/** About the room a landmark has (N), and how far it reaches from its centre across, up and across: a farmstead's corners, a watchtower's pennant. */
 const CELL: i64 = m(16.0);
 const REACH: [i64; 3] = [m(20.0), m(30.0), m(20.0)];
 /** How tall the ponds' reeds stand. */
 const REED_HEIGHT: i64 = m(1.2);
-/** The first chapel's clearing: wider than a chapel's, so that the trees between it and the camera hide less of it. */
-const FIRST_CLEARING: Units = Units::m(16.0);
 /** Plan scale of what each column of a landmark's is. */
 const SPOT_SCALE: i64 = m(1.0);
 /** How far round its footprint a landmark eases the ground back to the valley's, and how much the ground may rise under it. */
@@ -226,7 +222,7 @@ const fn within_near(most: [i64; 2], clearing: Units) -> bool {
     r >= 0 && (most[0] / 2).pow(2) + (most[1] / 2).pow(2) <= r * r
 }
 
-// Every kind, and the first chapel with its wider clearing; a cell's centre near the landmark in it; a column near one at most.
+// Every kind; a column near one at most.
 const _: () = {
     let mut n = 0;
     while n < LANDMARKS.len() {
@@ -234,7 +230,7 @@ const _: () = {
         assert!(within_near(spec.most, spec.clearing));
         n += 1;
     }
-    assert!(within_near(Landmark::Chapel.spec().most, FIRST_CLEARING) && CELL <= NEAR && 2 * NEAR <= APART);
+    assert!(2 * NEAR <= APART);
 };
 
 /** How far past its footprint a landmark's ground reaches: the ground it eases back, or its clearing and its bid falling off. */
@@ -252,11 +248,14 @@ pub struct Site {
     pub size: [i64; 2],
     pub turns: i64,
     pub seed: u64,
-    /** How far round its footprint it owns the land: trees and crops keep off. */
-    pub clearing: Units,
 }
 
 impl Site {
+    /** How far round its footprint it owns the land: trees and crops keep off. */
+    pub fn clearing(&self) -> Units {
+        self.landmark.spec().clearing
+    }
+
     /** Its own frame: u along its front, v up from the ground, w back from the front. */
     fn frame(&self) -> Frame {
         Frame::centred([self.centre[0], self.level + 1, self.centre[1]], [self.size[0], 0, self.size[1]], self.turns)
@@ -314,7 +313,7 @@ fn fits(terrain: &Terrain, railway: &Railway, site: &Site) -> bool {
         .chain((-nz..=nz).step_by(2).flat_map(|j| [(-nx, j), (nx, j)]))
         .chain([(0, 0)]);
     let mut points = edge.map(|(i, j)| (cx + i * m(1.0), cz + j * m(1.0)));
-    let clear = site.clearing + Units::m(4.0);
+    let clear = site.clearing() + Units::m(4.0);
     off_path
         && points.all(|(x, z)| {
             let ground = terrain.ground(x, z);
@@ -380,7 +379,7 @@ fn claim(terrain: &Terrain, railway: &Railway, spot: [i64; 2], random: &mut Rng)
                 continue;
             }
             let turns = if spec.faces_path { facing(terrain.path.x(z).round_units().0 - x, 0) } else { random.below(4) as i64 };
-            let site = Site { landmark, centre: [x, z], level: 0, size, turns, seed: random.next_u64(), clearing: spec.clearing };
+            let site = Site { landmark, centre: [x, z], level: 0, size, turns, seed: random.next_u64() };
             if fits(terrain, railway, &site) && even(terrain, &site) && (spec.suits)(&place(terrain, site.centre)) {
                 return Some(levelled(terrain, site));
             }
@@ -407,23 +406,6 @@ fn candidate(terrain: &Terrain, stands: Stands, spot: [i64; 2], size: [i64; 2], 
     }
 }
 
-/** The first chapel, beside the path 33 m ahead of the camera, its front to the path, nearer the camera's line of sight. */
-fn first(terrain: &Terrain, random: &mut Rng) -> Site {
-    let landmark = Landmark::Chapel;
-    let size = (landmark.spec().size)(random);
-    let z = m(2.0);
-    // On the side the camera, on the path at z = -31 m, looks across to.
-    let side = if terrain.path.x(m(-31.0)) > terrain.path.x(z) { 1 } else { -1 };
-    // Across the path, clear of it where it bends nearest.
-    let near = (z - size[0] / 2..=z + size[0] / 2)
-        .step_by(m(1.0) as usize)
-        .map(|z| terrain.path.x(z).round_units().0 * side)
-        .max()
-        .expect("a step");
-    let x = side * (near + size[1] / 2 + m(5.0));
-    Site { landmark, centre: [x, z], level: 0, size, turns: facing(-side, 0), seed: random.next_u64(), clearing: FIRST_CLEARING }
-}
-
 /** What a column round a landmark is. */
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 enum Spot {
@@ -447,15 +429,11 @@ pub struct Landmarks {
 }
 
 impl Landmarks {
-    /** The landmarks on `terrain`, clear of `railway`, the first a chapel by the path ahead of the camera. */
+    /** The landmarks on `terrain`, clear of `railway`. */
     pub fn new(scope: &Scope, terrain: Arc<Terrain>, railway: Arc<Railway>) -> Landmarks {
         let sites = {
             let (terrain, s) = (terrain.clone(), scope.seed("sites"));
-            let first = levelled(&terrain, first(&terrain, &mut Rng::new(hash64(s, 0, 0, 0))));
-            Arc::new(Claims::new("landmarks", s, CLAIM, APART, Some(first.centre), move |spot, random| {
-                if spot == first.centre {
-                    return Some((first.centre, first));
-                }
+            Arc::new(Claims::new("landmarks", s, CLAIM, APART, move |spot, random| {
                 claim(&terrain, &railway, spot, random).map(|site| (site.centre, site))
             }))
         };
@@ -467,25 +445,21 @@ impl Landmarks {
         Landmarks { terrain, sites, spots, reeds: ValueNoise::new(scope.seed("reeds")) }
     }
 
-    /**
-     * The first `landmark` along the path: of those near rows NEAR apart
-     * from the start, ahead and behind in turn, the first near points
-     * NEAR apart across the path, from the middle out. Every landmark
-     * within ACROSS points of the path is near one.
-     */
+    /** The `landmark` nearest the start of the path, within 64 km. */
     pub fn first(&self, landmark: Landmark) -> Site {
-        let rows = (0..ROWS).flat_map(|k| [-k, k + 1]).map(|k| k * NEAR);
-        rows.flat_map(|z| {
-            let path = self.terrain.path.x(z).round_units().0;
-            (0..ACROSS).flat_map(|i| [i, -i - 1]).map(move |i| [path + i * NEAR, z])
-        })
-        .find_map(|[x, z]| self.site(x, z).filter(|s| s.landmark == landmark))
-        .unwrap_or_else(|| panic!("no {landmark:?} within {ROWS} rows either way"))
+        let start = self.terrain.path.x(0).round_units().0;
+        let first = self.sites.nearest(start, 0, m(64_000.0), |s| s.landmark == landmark);
+        first.unwrap_or_else(|| panic!("no {landmark:?} within 64 km")).1
     }
 
     /** Whether the ground of the landmark nearest column (x, z) reaches within `margin` of it: what keeps off them asks. */
     pub fn reaches(&self, x: i64, z: i64, margin: i64) -> bool {
-        self.sites.near(x, z, NEAR + margin).is_some_and(|(_, s)| s.outside(x, z).0 < past(s.clearing) + margin)
+        self.sites.near(x, z, NEAR + margin).is_some_and(|(_, s)| s.outside(x, z).0 < past(s.clearing()) + margin)
+    }
+
+    /** The sites standing in box `b`'s columns. */
+    fn over(&self, b: &Box3) -> Vec<Site> {
+        self.sites.over(b).into_iter().map(|(_, site)| site).collect()
     }
 
     /** The landmark reaching column (x, z), if any: its centre within NEAR. */
@@ -503,7 +477,7 @@ impl Landmarks {
 fn spot(terrain: &Terrain, sites: &Claims<Site>, patches: &ValueNoise<{ m(3.0) }>, x: i64, z: i64) -> Spot {
     let Some((_, s)) = sites.near(x, z, NEAR) else { return Spot::Off };
     let d = s.outside(x, z);
-    if d > s.clearing + Units::m(2.0) {
+    if d > s.clearing() + Units::m(2.0) {
         return Spot::Off;
     }
     let (dx, dz) = (x - s.centre[0], z - s.centre[1]);
@@ -548,7 +522,7 @@ impl Landmarks {
         if self.terrain.path.across(x, z).abs() < Fx::m(2.4) {
             return -MOST;
         }
-        ((s.clearing - s.outside(x, z)).to_fx() * MOST / FADE).clamp(-MOST, MOST)
+        ((s.clearing() - s.outside(x, z)).to_fx() * MOST / FADE).clamp(-MOST, MOST)
     }
 
     /** The least, but where a landmark may reach. */
@@ -627,12 +601,10 @@ fn layers(landmarks: Arc<Landmarks>, hold: Scalar, ground: Arc<Sloped>) -> Vec<L
     };
     let built = {
         let anchor = landmarks.clone();
-        Population::new("landmarks", 1.6, CELL)
-            .reach(REACH)
-            .anchor_along(1, move |line| {
-                anchor.site(line.centre[0], line.centre[1]).map(|s| [s.centre[0] as f64, s.level as f64, s.centre[1] as f64])
-            })
-            .make(move |_, c| landmarks.site(c.centre[0], c.centre[2]).map(|s| (s.landmark.spec().build)(&s, &mut Rng::new(s.seed))))
+        Population::new("landmarks", 1.6, CELL).reach(REACH).at(
+            move |b| anchor.over(b).into_iter().map(|s| ([s.centre[0] as f64, s.level as f64, s.centre[1] as f64], s)).collect(),
+            |s, _| Some((s.landmark.spec().build)(s, &mut Rng::new(s.seed))),
+        )
     };
     vec![Layer::Field(surface), Layer::Field(water), Layer::Population(built)]
 }

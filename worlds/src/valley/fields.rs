@@ -9,11 +9,12 @@ use std::sync::Arc;
 use ground::column::Column;
 use ground::land::{Columns, of_columns};
 use ground::plan::{Plan, Sloped};
-use ground::{FieldAbout, PopulationOn};
+use ground::{FieldAbout, PopulationOn, standing};
 use worldgen::generator::{Layer, Node, Op, Population, Shape, stripe};
 use worldgen::kinds;
 use worldgen::land::owns;
-use worldgen::noise::{Fbm, Fx, Rng, Scope, ValueNoise, fx, hash, hash64, smoothstep};
+use worldgen::noise::{Fbm, Fx, Scope, ValueNoise, fx, hash, smoothstep};
+use worldgen::points::Points;
 use worldgen::scalar::Scalar;
 use worldgen::units::{Units, m};
 
@@ -151,27 +152,24 @@ fn layers(scope: &Scope, hold: Scalar, ground: Arc<Sloped>, path: Arc<Path>) -> 
         .about(on, m(0.5), m(1.4))
         .within(region.clone(), 0)
     };
-    // Haystacks on the stubble.
+    // Haystacks on the stubble: two in fifteen squares 8 m wide.
     let haystacks = {
-        let (seed, chance) = (scope.seed("haystacks"), fx(0.3));
-        Population::new("haystacks", 3.0, m(6.0))
-            .reach(m(2.0))
-            .chance(chance)
-            .size(m(4.0))
-            .on(ground.clone())
-            .within(region, 0)
-            .anchor_along(1, move |line| {
-                let [i, k] = line.across;
-                Some(line.pick(&mut Rng::new(hash64(seed, i, 0, k)), |x, z| ground.at(x, z)))
-            })
-            .make(move |[x, y, z], cell| {
-                if !cell.chance(chance) || f.crop(x as i64, z as i64) != Some(Crop::Stubble) {
+        let chance = fx(2.0 / 15.0);
+        let points =
+            Points::new("haystacks", scope.seed("haystacks"), &[0, 2], m(8.0), m(8.0), 1, move |_| [chance, Fx::ZERO, Fx::ZERO, Fx::ZERO]);
+        let on = ground.clone();
+        Population::new("haystacks", 3.0, m(4.0)).reach(m(3.0)).size(m(4.0)).on(ground.clone()).within(region, 0).at(
+            move |b| standing(&points, b, |x, z| on.at(x, z)),
+            move |_, anchor| {
+                let [x, y, z] = anchor.at;
+                if f.crop(x as i64, z as i64) != Some(Crop::Stubble) {
                     return None;
                 }
-                let mut random = cell.random("haystack");
+                let mut random = anchor.random("haystack");
                 let r = m(1.0) as f64 + random.next() * 4.0;
                 Some(Node::of(vec![Shape::ball([x, y + r * 0.5, z], r, F::hay)]))
-            })
+            },
+        )
     };
     vec![Layer::Field(plots), Layer::Population(haystacks)]
 }

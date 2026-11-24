@@ -16,7 +16,7 @@ use std::sync::Arc;
 use ground::column::Column;
 use ground::land::{Columns, Lie, Pull, eased, of_columns};
 use ground::plan::{Claims, Plan, Sloped};
-use ground::{FieldAbout, PopulationOn};
+use ground::{FieldAbout, PopulationOn, standing};
 use worldgen::build::thick;
 use worldgen::frame::{Frame, Part, facing, walls};
 use worldgen::generator::{ANY_SIZE, Child, Far, Field, Generator, Kind, Layer, Meets, Node, Op, Population, Shape, Span};
@@ -24,6 +24,7 @@ use worldgen::js;
 use worldgen::kinds;
 use worldgen::land::owns;
 use worldgen::noise::{Fbm, Fx, Rng, Scope, ValueNoise, fx, hash64, smoothstep};
+use worldgen::points::Points;
 use worldgen::scalar::Scalar;
 use worldgen::units::{Units, m};
 use worldgen::{Entry, World};
@@ -68,12 +69,11 @@ const SLOPE: i64 = 2;
  * Steadings' rings stand at least APART, claimed (Claims) from spots one
  * in each square CLAIM wide on average; a steading reaches NEAR from its
  * ring at most (its hut, the ground it levels, its path), so a column is
- * near one at most. The first's ring is at FIRST.
+ * near one at most.
  */
 const CLAIM: i64 = m(128.0);
 const APART: i64 = m(112.0);
 pub const NEAR: i64 = m(56.0);
-const FIRST: [i64; 2] = [m(8.0), m(10.0)];
 /** Pools' centres stand at least POOLS_APART, claimed from spots one in each square POOL_CLAIM wide on average. */
 const POOL_CLAIM: i64 = m(64.0);
 const POOLS_APART: i64 = m(32.0);
@@ -278,20 +278,17 @@ impl Moorland {
         let steadings = {
             let (height, lead) = (height.clone(), lead.clone());
             let s = scope.seed("steadings");
-            Arc::new(Claims::new("steadings", s, CLAIM, APART, Some(FIRST), move |ring, random| {
+            Arc::new(Claims::new("steadings", s, CLAIM, APART, move |ring, random| {
                 // The stream's plan is finer than the steadings': its line is read here.
                 let off_stream = |c: [i64; 2]| line.as_ref().is_none_or(|l| (Units(c[0]).to_fx() - l(c[1])).abs() > Units::m(14.0).to_fx());
                 // No room where the moor doesn't lead (`around`, below): asked before the ground is measured.
                 if lead(ring[0], ring[1]) < SURE {
                     return None;
                 }
-                let steading = if ring == FIRST {
-                    steading_at(ring, true, &mut Rng::new(hash64(s, 0, 0, 0)), &*height)
-                } else if random.chance(chance) {
-                    steading_at(ring, false, random, &*height)
-                } else {
+                if !random.chance(chance) {
                     return None;
-                };
+                }
+                let steading = steading_at(ring, random, &*height);
                 let low = level.is_some_and(|w| steading.level <= w + Units::m(1.0));
                 // Room all round the hut and the ring.
                 let around = |c: [i64; 2]| (-1..=1).all(|a| (-1..=1).all(|b| lead(c[0] + a * m(20.0), c[1] + b * m(20.0)) >= SURE));
@@ -303,7 +300,7 @@ impl Moorland {
             Some(level) => Water::Level(level),
             None => {
                 let steadings = steadings.clone();
-                Water::Pools(Claims::new("pools", scope.seed("pools"), POOL_CLAIM, POOLS_APART, None, move |spot, random| {
+                Water::Pools(Claims::new("pools", scope.seed("pools"), POOL_CLAIM, POOLS_APART, move |spot, random| {
                     // Where the moor leads, which few spots pass: asked before the ground is measured.
                     if !random.chance(fx(0.35)) || lead(spot[0], spot[1]) < SURE {
                         return None;
@@ -344,9 +341,14 @@ impl Moorland {
         pools.near(x, z, POOL_RADIUS).map(|(_, pool)| pool)
     }
 
-    /** Where the steading reaching column (x, z) is, if any: between its hut and its ring, at the hut's floor. */
-    pub fn steading_near(&self, x: i64, z: i64) -> Option<[i64; 3]> {
-        let s = self.steading(x, z)?;
+    /** The steading whose ring is nearest column (x, z), within 16 km. */
+    fn nearest(&self, x: i64, z: i64) -> Option<Steading> {
+        self.steadings.nearest(x, z, m(16_000.0), |_| true).map(|(_, s)| s)
+    }
+
+    /** Where the steading nearest column (x, z) is, within 16 km: between its hut and its ring, at the hut's floor. */
+    pub fn steading_nearest(&self, x: i64, z: i64) -> Option<[i64; 3]> {
+        let s = self.nearest(x, z)?;
         Some([(s.centre[0] + s.ring[0]).div_euclid(2), s.level.0, (s.centre[1] + s.ring[1]).div_euclid(2)])
     }
 
@@ -391,11 +393,9 @@ fn terraced(steadings: &Claims<Steading>, x: i64, z: i64, ground: Fx) -> Fx {
     steadings.near(x, z, NEAR).and_then(|(_, s)| s.pull(x, z)).map_or(ground, |(to, how_hard)| ground + (to - ground) * how_hard)
 }
 
-/** The steading whose ring is at `ring`, the first if `first`: its hut 22 to 30 m off it, on ground `height` high. */
-fn steading_at(ring: [i64; 2], first: bool, random: &mut Rng, height: &dyn Fn(i64, i64) -> Fx) -> Steading {
-    // The first steading's hut east of its ring, away from the stream.
-    let turn = if first { 0.6 * random.next() - 0.3 } else { random.next() };
-    let angle = turn * 2.0 * std::f64::consts::PI;
+/** The steading whose ring is at `ring`: its hut 22 to 30 m off it, on ground `height` high. */
+fn steading_at(ring: [i64; 2], random: &mut Rng, height: &dyn Fn(i64, i64) -> Fx) -> Steading {
+    let angle = random.next() * 2.0 * std::f64::consts::PI;
     let from = m(22.0) as f64 + random.next() * m(8.0) as f64;
     let centre = [ring[0] + (from * js::cos(angle)) as i64, ring[1] + (from * js::sin(angle)) as i64];
     let (length, depth) = (m(5.0) + random.below(m(1.5) as u32) as i64, m(4.0) + random.below(m(1.0) as u32) as i64);
@@ -447,26 +447,23 @@ fn pool_at(spot: [i64; 2], ground: &dyn Fn(i64, i64) -> Fx, random: &mut Rng) ->
  * on the uplands under the treeline, and over stretches of the valley a
  * kilometre or so long and kilometres apart; patchy, so copses of the
  * forest stand in it and heath in the forest, its edges ragged. None
- * between `clear`'s two z within 2 km of the path, nor on the towns'
- * farmland. Steadings and pools keep off the towns, the landmarks, the
+ * on the towns' farmland. Steadings and pools keep off the towns, the landmarks, the
  * path and the railway (`lead`).
  */
 pub struct Uplands {
     terrain: Arc<Terrain>,
     landmarks: Arc<Landmarks>,
     railway: Arc<Railway>,
-    clear: [i64; 2],
     stretches: ValueNoise<{ m(1600.0) }>,
     patches: Fbm<{ m(160.0) }, 2>,
 }
 
 impl Uplands {
-    pub fn new(scope: &Scope, terrain: Arc<Terrain>, landmarks: Arc<Landmarks>, railway: Arc<Railway>, clear: [i64; 2]) -> Uplands {
+    pub fn new(scope: &Scope, terrain: Arc<Terrain>, landmarks: Arc<Landmarks>, railway: Arc<Railway>) -> Uplands {
         Uplands {
             terrain,
             landmarks,
             railway,
-            clear,
             stretches: ValueNoise::new(scope.seed("stretches")),
             patches: Fbm::new(scope.seed("patches")),
         }
@@ -475,7 +472,7 @@ impl Uplands {
     /** Its bid for column (x, z), from position alone. */
     pub fn bid(&self, x: i64, z: i64) -> Fx {
         let h = self.terrain.ground(x, z).round_units().0;
-        let (ranges, units) = (&self.terrain.ranges, |d: i64| Units(d).to_fx());
+        let ranges = &self.terrain.ranges;
         // From 65 m under the treeline, rising over 30 m; giving way to the mountains' meadows round the treeline, none above.
         let uplands = Fx::ONE - ranges.below_treeline(x, z, h + m(35.0));
         let below = ranges.below_treeline(x, z, h - m(10.0)) * mountains::dry(h - m(1.0));
@@ -483,13 +480,9 @@ impl Uplands {
         let patches = self.patches.at(x, z) - Fx::HALF;
         let stretch = smoothstep(fx(0.76), fx(0.84), self.stretches.at(x / 4, z) + patches / 2);
         let moorish = uplands.max(stretch) * below;
-        let [from, to] = self.clear;
-        let from_path = self.terrain.path.across(x, z).abs();
-        let clear = (Fx::ONE - smoothstep(Fx::ZERO, Fx::m(150.0), units((from - z).max(z - to))))
-            * (Fx::ONE - smoothstep(Fx::m(2000.0), Fx::m(3000.0), from_path));
         // The towns' farmland reaches 90 to 150 m out of them (fields.rs).
         let farmland = Fx::ONE - smoothstep(Fx::m(90.0), Fx::m(150.0), self.town_distance(x, z));
-        (moorish - Fx::HALF) * 4 / 5 + patches * 6 / 5 - (clear + farmland + Fx::ONE - below) * 2
+        (moorish - Fx::HALF) * 4 / 5 + patches * 6 / 5 - (farmland + Fx::ONE - below) * 2
     }
 
     /** How far column (x, z) is from the nearest town, up to 300 m. */
@@ -659,7 +652,7 @@ pub const MOOR: Entry = Entry { name: "moor", make: moor, levels: 5, accuracy: &
 /** The moor in fog, mist over all of it (OVER_ALL): where see-through voxels cost a host most. */
 pub const FOG: Entry = Entry { name: "fog", make: fog, levels: 5, accuracy: &[], known: &[] };
 
-/** The moor of `seed`, all of it; the camera starts behind the first steading's hut, looking past it to the ring. */
+/** The moor of `seed`, all of it; the camera starts 30 m short along z of the steading nearest the origin, looking at it. */
 pub fn moor(seed: u64) -> World {
     moor_in(seed, IN_HOLLOWS)
 }
@@ -677,8 +670,8 @@ fn moor_in(seed: u64, lies: Mist) -> World {
     // The heath, levelled under each hut.
     let ground = Lie::new(move |x, z| heath(x, z)).shaped(vec![moor.clone()]).ground(GROUND_SCALE, SLOPE);
     let spawn = {
-        // Behind the first hut, or over the origin if there is none.
-        let [x, _, z] = moorland.steading(0, 0).map_or([0; 3], |s| s.frame().site([s.length / 2, 0, s.depth + m(6.0)]));
+        // Between the hut and its ring, 30 m back; over the origin if there is no steading.
+        let [x, z] = moorland.nearest(0, 0).map_or([0; 2], |s| [(s.centre[0] + s.ring[0]) / 2, (s.centre[1] + s.ring[1]) / 2 - m(30.0)]);
         let y = Units(ground.at(x, z)).max(WATER).0 + m(2.0);
         [x, y + ((x + y + z) & 1), z]
     };
@@ -850,41 +843,42 @@ fn water(f: Arc<Heath>) -> Field {
 
 /** Boulders half sunk in the heath, granite or lichened, off the water and the paths; as many as the moor's share. */
 fn boulders(f: Arc<Heath>) -> Population {
-    const CHANCE: Fx = fx(0.1);
+    // Two in 45 squares 8 m wide, as the moor's share of the land.
+    let (chance, share) = (fx(2.0 / 45.0), f.clone());
+    let points = Points::new("moor boulders", f.moorland.seed, &[0, 2], m(8.0), m(8.0), 1, move |[x, _, z]| {
+        [chance * share.share(x, z), Fx::ZERO, Fx::ZERO, Fx::ZERO]
+    });
     let ground = f.clone();
-    Population::new("moor boulders", 3.0, m(6.0))
-        .reach(m(2.5))
-        .chance(CHANCE)
-        .on(f.ground.ground.clone())
-        .anchor_along(1, move |line| {
-            let [i, k] = line.across;
-            Some(line.pick(&mut Rng::new(hash64(ground.moorland.seed, i, 0, k)), |x, z| ground.height(x, z)))
-        })
-        .make(move |[x, y, z], c| {
+    Population::new("moor boulders", 3.0, m(4.0)).reach(m(2.5)).on(f.ground.ground.clone()).at(
+        move |b| standing(&points, b, |x, z| ground.height(x, z)),
+        move |_, anchor| {
+            let [x, y, z] = anchor.at;
             let (xi, zi) = (x as i64, z as i64);
             let wet = f.moorland.water(xi, zi).is_some_and(|level| y <= level.0 as f64 + 2.0);
             let by_stream = f.moorland.stream.as_ref().is_some_and(|s| stream_distance(&s.line, xi, zi).0 < Units::m(4.0));
-            if !c.chance(CHANCE * f.share(xi, zi)) || wet || by_stream || f.moorland.on_path(xi, zi) || f.by_path(xi, zi, Fx::m(3.0)) {
+            if wet || by_stream || f.moorland.on_path(xi, zi) || f.by_path(xi, zi, Fx::m(3.0)) {
                 return None;
             }
-            let mut random = c.random("boulder");
+            let mut random = anchor.random("boulder");
             let r = m(0.4) as f64 + random.next() * m(0.8) as f64;
             let radii = [r * (1.0 + random.next() * 0.6), r * 0.7, r * (1.0 + random.next() * 0.6)];
             let kind: Kind = if random.chance(fx(1.0 / 3.0)) { K::lichen.into() } else { F::stone.into() };
             Some(Node::of(vec![Shape::ellipsoid([x, y + r * 0.25, z], radii, kind)]))
-        })
+        },
+    )
 }
 
-/** The steadings: each owned by the cell its ring's centre is in. */
+/** The steadings: each anchored at its ring's centre. */
 fn steadings_population(f: Arc<Heath>) -> Population {
     let anchor = f.clone();
-    Population::new("steadings", 4.0, STEADING_CELL)
-        .reach([REACH_ACROSS, m(16.0), REACH_ACROSS])
-        .anchor_along(1, move |line| {
-            let s = anchor.moorland.steading(line.centre[0], line.centre[1])?;
-            Some([s.ring[0] as f64, s.ring_ground.0 as f64, s.ring[1] as f64])
-        })
-        .make(move |_, c| f.moorland.steading(c.centre[0], c.centre[2]).map(|s| steading(&f, &s)))
+    // Up and down: the hut's roof, on ground some metres over or under the ring's.
+    Population::new("steadings", 4.0, STEADING_CELL).reach([REACH_ACROSS, m(24.0), REACH_ACROSS]).at(
+        move |b| {
+            let steadings = anchor.moorland.steadings.over(b).into_iter();
+            steadings.map(|(_, s)| ([s.ring[0] as f64, s.ring_ground.0 as f64, s.ring[1] as f64], s)).collect()
+        },
+        move |s, _| Some(steading(&f, s)),
+    )
 }
 
 /** A steading's node: the hut, the ring of stones and the cairns, each a child. */
@@ -984,7 +978,7 @@ mod tests {
     #[test]
     fn a_body_walks_into_a_hut_and_stands_in_it() {
         for seed in [1, 7, 42] {
-            let s = heath_and_moorland(&Scope::new(seed), IN_HOLLOWS).1.steading(0, 0).expect("a steading by the origin");
+            let s = heath_and_moorland(&Scope::new(seed), IN_HOLLOWS).1.nearest(0, 0).expect("a steading");
             let world = moor(seed);
             let level = COLLISION_LEVEL;
             let [cx, cz] = s.centre;

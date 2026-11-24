@@ -23,8 +23,8 @@ impl Generator {
         };
         if !path.is_empty() {
             let Layer::Population(population) = &mut layer else { panic!("{first} is a field: it has no parts to draw alone") };
-            let make = std::mem::replace(&mut population.make, Box::new(|_, _| None));
-            population.make = Box::new(move |anchor, cell| part(make(anchor, cell)?, &path));
+            let things = std::mem::replace(&mut population.things, Box::new(|_, _| {}));
+            population.things = Box::new(move |b, each| things(b, &mut |p, make| each(p, &|anchor| part(make(anchor)?, &path))));
             (population.size, population.far) = (ANY_SIZE, None);
         }
         Generator { layers: vec![layer], ..self }

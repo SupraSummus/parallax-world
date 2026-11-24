@@ -11,8 +11,9 @@ use ground::column;
 use ground::column::lowest_around;
 use ground::land::{Columns, Lie};
 use ground::plan::{Plan, Sloped};
-use ground::{FieldAbout, PopulationOn};
-use worldgen::generator::{Generator, Holds, Layer, Line, Node, Op, Point, Population, Shape, Span};
+use ground::{FieldAbout, PopulationOn, standing};
+use worldgen::generator::{Generator, Holds, Layer, Node, Op, Population, Shape, Span};
+use worldgen::grid::Box3;
 use worldgen::js::{self, round};
 use worldgen::kinds;
 use worldgen::noise::{Fbm, Fx, Rng, Scope, ValueNoise, fx, hash, hash64, smoothstep, unit};
@@ -163,20 +164,19 @@ impl Relief {
 }
 
 /**
- * The forest, on ground decided outside it: it grows along `path`, kept
- * clear around `spawn`, thinned by its share of each column and by
+ * The forest, on ground decided outside it: it grows along `path`,
+ * thinned by its share of each column and by
  * `thinning` (a fraction kept, all by default).
  */
 pub struct Forest {
     scope: Scope,
     path: Arc<Path>,
-    spawn: [i64; 3],
     thinning: Scalar,
 }
 
 impl Forest {
-    pub fn new(scope: Scope, path: Arc<Path>, spawn: [i64; 3]) -> Forest {
-        Forest { scope, path, spawn, thinning: Scalar::constant(Fx::ONE) }
+    pub fn new(scope: Scope, path: Arc<Path>) -> Forest {
+        Forest { scope, path, thinning: Scalar::constant(Fx::ONE) }
     }
 
     /** Thinned by `thinning` too, a fraction kept: at the treeline, by the sea. */
@@ -192,7 +192,7 @@ impl Forest {
     /** Its layers on `ground`, by `share`, its share of the land. */
     pub fn layers(&self, ground: &Arc<Sloped>, share: Scalar) -> Vec<Layer> {
         let share = share.times(&self.thinning);
-        layers(&self.scope, Ground { ground: ground.clone(), path: self.path.clone(), share }, self.spawn)
+        layers(&self.scope, Ground { ground: ground.clone(), path: self.path.clone(), share })
     }
 }
 
@@ -217,7 +217,6 @@ struct Ground {
 /** The forest's state shared by its layers: what it knows about any column, from the seed and its ground alone. */
 struct Woods {
     scope: Scope,
-    spawn: [i64; 3],
     ground: Ground,
     columns: Plan<Column>,
     /** `steep` over a run of one, kept: plans and points read it, at every level. */
@@ -305,22 +304,9 @@ impl Woods {
         chance * self.ground.share.column(x, z)
     }
 
-    /** A spot on the ground picked evenly under a column of cells, the same for every population of its N. */
-    fn spot(&self, line: &Line) -> Point {
-        let [i, k] = line.across;
-        line.pick(&mut Rng::new(hash64(self.s("spots"), line.n, i, k)), |x, z| self.ground(x, z))
-    }
-
     /** The chance a square 4 m wide around column (x, z) holds a tree. */
     fn tree_chance(&self, x: i64, z: i64, c: &Column) -> Fx {
         if c.surface == K::stone || self.ground.path.by(x, z, Fx::m(2.8)) {
-            return Fx::ZERO;
-        }
-        // Keep the view from the spawn point clear of low branches: within 7 m of the 40 m ahead along +z, where the
-        // camera starts looking.
-        let (dx, dz) = (x - self.spawn[0], z - self.spawn[2]);
-        let beyond = dz - dz.clamp(0, m(40.0));
-        if dx * dx + beyond * beyond < m(7.0).pow(2) {
             return Fx::ZERO;
         }
         self.thinned(fx(0.12) + c.density / 2, x, z)
@@ -444,9 +430,9 @@ pub fn forest(seed: u64) -> World {
     };
     let path = Arc::new(Path::new(spine.clone()));
     let ground = Lie::new(move |x, z| relief.ground(x, z, spine.across(x, z).abs())).ground(GROUND_SCALE, SLOPE);
-    // Start on the path at the near end, at about the height of a tall shrub.
-    let spawn = on_path(&ground, &path, m(-31.0), m(3.0));
-    let layers = Forest::new(world.of("forest"), path, spawn).layers(&ground, Scalar::constant(Fx::ONE));
+    // Start on the path where it crosses z = 0, at about the height of a tall shrub.
+    let spawn = on_path(&ground, &path, 0, m(3.0));
+    let layers = Forest::new(world.of("forest"), path).layers(&ground, Scalar::constant(Fx::ONE));
     World {
         generator: Generator { kinds: KINDS.to_vec(), seed: world.seed("layers"), layers },
         spawn,
@@ -455,8 +441,8 @@ pub fn forest(seed: u64) -> World {
     }
 }
 
-/** The forest's layers on `ground`, kept clear around `spawn`; their kinds are KINDS, first in the generator's. */
-fn layers(scope: &Scope, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
+/** The forest's layers on `ground`; their kinds are KINDS, first in the generator's. */
+fn layers(scope: &Scope, ground: Ground) -> Vec<Layer> {
     let noise = Noise {
         conifer: Fbm::new(scope.seed("conifer")),
         density: Fbm::new(scope.seed("density")),
@@ -473,7 +459,7 @@ fn layers(scope: &Scope, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
         Plan::new("forest steep", COLUMN_SCALE, move |x, z| steep(&heights, x, z, 1))
     };
     let region = ground.share.clone();
-    let f = Arc::new(Woods { scope: scope.clone(), spawn, ground, columns, steep });
+    let f = Arc::new(Woods { scope: scope.clone(), ground, columns, steep });
 
     // The ground: along each column, soil or stone under a layer of its surface, and stone down to the bottom.
     let terrain = {
@@ -593,50 +579,48 @@ fn layers(scope: &Scope, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
         Population::new("trees", 1.0, TREE_LEAF)
             .reach([TREE_REACH, TREE_TOP, TREE_REACH])
             .size(m(1.0))
-            .anchor_points(points, move |spot| {
-                let [x, _, z] = spot.at;
-                Some([x as f64, ground.ground(x, z) as f64, z as f64])
-            })
-            .make(move |[x, y, z], cell| {
-                let (at, mark) = ([x as i64, 0, z as i64], cell.mark);
-                let (height, room) = (f.height(at[0], at[2], mark), Arc::new(rooms.room(at, mark)));
-                Some(grow(SPECIES[cell.mark], x, y, z, height as f64, room, &mut cell.random("tree"), &|x, z| f.ground(x, z)))
-            })
+            .at(
+                move |b| standing(&points, b, |x, z| ground.ground(x, z)),
+                move |spot, anchor| {
+                    let ([x, y, z], mark) = (anchor.at, spot.mark);
+                    let (height, room) = (f.height(spot.at[0], spot.at[2], mark), Arc::new(rooms.room(spot.at, mark)));
+                    Some(grow(SPECIES[mark], x, y, z, height as f64, room, &mut anchor.random("tree"), &|x, z| f.ground(x, z)))
+                },
+            )
             .on(on.clone())
             .within(region.clone(), 0)
             // Under the crowns of the trees around.
             .far(canopy.about(on.clone(), 0, TREE_TOP).within(region.clone(), TREE_REACH))
     };
 
-    // Boulders and fallen logs.
-    let rock_cell = m(4.0);
-    let on_ground = |name, reach| {
-        let anchor = f.clone();
+    // Boulders and fallen logs, at `chance` of one a square ROCKS wide, thinned with the forest.
+    const ROCKS: i64 = m(8.0);
+    let on_ground = |name, reach, chance| {
+        let (thinned, anchor) = (f.clone(), f.clone());
+        let points = Points::new(name, f.s(name), &[0, 2], ROCKS, ROCKS, 1, move |[x, _, z]| {
+            [thinned.thinned(chance, x, z), Fx::ZERO, Fx::ZERO, Fx::ZERO]
+        });
         // Thinned by the ground on the level's sites, at most its size apart.
         let size = m(2.0);
-        let population = Population::new(name, 2.0, rock_cell).reach(reach).size(size).on(on.clone()).within(region.clone(), size);
-        population.anchor_along(1, move |line| Some(anchor.spot(line)))
+        let population = Population::new(name, 2.0, ROCKS / 2).reach(reach).size(size).on(on.clone()).within(region.clone(), size);
+        (population, move |b: &Box3| standing(&points, b, |x, z| anchor.ground(x, z)))
     };
     let boulders = {
-        let (f, chance) = (f.clone(), fx(0.15));
-        on_ground("boulders", m(3.0)).chance(chance).make(move |[x, y, z], cell| {
-            let (xi, zi) = (x as i64, z as i64);
-            let clear = !f.ground.path.by(xi, zi, Fx::m(PATH_EDGE[1] + BOULDER_RADIUS[1]));
-            if clear && cell.chance(f.thinned(chance, xi, zi)) {
-                Some(Node::of(boulder(x, y, z, &mut cell.random("boulder"))))
-            } else {
-                None
-            }
+        let f = f.clone();
+        let (population, at) = on_ground("boulders", m(3.0), fx(0.15));
+        population.at(at, move |_, anchor| {
+            let [x, y, z] = anchor.at;
+            let clear = !f.ground.path.by(x as i64, z as i64, Fx::m(PATH_EDGE[1] + BOULDER_RADIUS[1]));
+            clear.then(|| Node::of(boulder(x, y, z, &mut anchor.random("boulder"))))
         })
     };
     let logs = {
-        let (f, chance) = (f.clone(), fx(0.077));
-        on_ground("logs", m(10.0)).chance(chance).make(move |[x, _, z], cell| {
-            if cell.chance(f.thinned(chance, x as i64, z as i64)) && !f.column(x as i64, z as i64).on_path {
-                fallen_log(x, z, &|x, z| f.ground(x, z), &mut cell.random("log")).map(Node::of)
-            } else {
-                None
-            }
+        let f = f.clone();
+        let (population, at) = on_ground("logs", m(10.0), fx(0.077));
+        population.at(at, move |_, anchor| {
+            let [x, _, z] = anchor.at;
+            let off_path = !f.column(x as i64, z as i64).on_path;
+            off_path.then(|| fallen_log(x, z, &|x, z| f.ground(x, z), &mut anchor.random("log")).map(Node::of)).flatten()
         })
     };
 
@@ -647,66 +631,69 @@ fn layers(scope: &Scope, ground: Ground, spawn: [i64; 3]) -> Vec<Layer> {
     let column_width = m(0.25);
     let anchor = f.clone();
     let plants = Population::new("plants", 3.0, PLANTS)
-        .reach([0, m(10.0), 0])
+        // Ferns and bushes reach past their patch.
+        .reach([PLANTS, m(10.0), PLANTS])
         .size(column_width)
         .on(on.clone())
-        // A patch N wide round each cell's centre.
+        // A patch N wide round each point of a square grid N apart.
         .within(region.clone(), PLANTS / 2)
-        .anchor_along(1, move |line| {
-            let [cx, cz] = line.centre;
-            Some([cx as f64, anchor.ground(cx, cz) as f64 + 0.5, cz as f64])
-        })
-        .make(move |_, cell| {
-            let [cx, _, cz] = cell.centre;
-            let mut shapes = Vec::new();
-            let span = |c: i64| (c - PLANTS / 2..c + PLANTS / 2).step_by(column_width as usize);
-            for (xi, zi) in span(cx).flat_map(|xi| span(cz).map(move |zi| (xi, zi))) {
-                let r = Fx::fraction(hash(f.s("plants"), xi, zi, 0));
-                if r >= LITTER {
-                    continue;
-                }
-                // Rarer as the forest's share falls: as dense as it is, none where it has none.
-                let share = f.ground.share.column(xi, zi);
-                if share <= Fx::ZERO {
-                    continue;
-                }
-                let r = if share >= Fx::ONE { r } else { r / share };
-                let c = f.column(xi, zi);
-                let (x, y, z) = (xi as f64, (c.height + 1) as f64, zi as f64);
-                let random = &mut Rng::new(hash64(f.s("plants, randomly"), xi, zi, 0));
-                if c.on_path {
-                    if r < fx(0.05) {
-                        shapes.push(Shape::cuboid([x, y, z], [x + 2.0, y + 1.0, z + 1.0], K::stone));
+        .at(
+            move |b| {
+                let [x, z] = [0, 2].map(|a| b.min[a].div_euclid(PLANTS)..=(b.max[a] - 1).div_euclid(PLANTS));
+                let columns = x.flat_map(|i| z.clone().map(move |k| [i * PLANTS, k * PLANTS]));
+                columns.map(|[cx, cz]| ([cx as f64, anchor.ground(cx, cz) as f64 + 0.5, cz as f64], [cx, cz])).collect()
+            },
+            move |&[cx, cz], _| {
+                let mut shapes = Vec::new();
+                let span = |c: i64| (c - PLANTS / 2..c + PLANTS / 2).step_by(column_width as usize);
+                for (xi, zi) in span(cx).flat_map(|xi| span(cz).map(move |zi| (xi, zi))) {
+                    let r = Fx::fraction(hash(f.s("plants"), xi, zi, 0));
+                    if r >= LITTER {
+                        continue;
                     }
-                } else if c.surface == K::grass {
-                    if r < fx(0.02) {
-                        let count = 3.0 + random.below(3) as f64;
-                        let kind = if random.chance(fx(0.3)) { K::hay } else { K::tallGrass };
-                        shapes.extend(tuft(x, y, z, count, vox(0.3), kind, random));
-                    } else if r < fx(0.0275) {
-                        shapes.extend(flower(x, y, z, random));
-                    } else if r < fx(0.2) {
-                        let count = 1.0 + random.below(2) as f64;
-                        shapes.extend(tuft(x, y, z, count, vox(0.12), K::grass, random));
+                    // Rarer as the forest's share falls: as dense as it is, none where it has none.
+                    let share = f.ground.share.column(xi, zi);
+                    if share <= Fx::ZERO {
+                        continue;
                     }
-                } else if c.surface != K::stone && c.surface != K::mossyStone {
-                    if r < fx(0.00625) {
-                        shapes.extend(fern(x, y, z, if c.conifer > Fx::HALF { K::fern } else { K::bracken }, random));
-                    } else if r < fx(0.008) {
-                        shapes.extend(bush(x, y, z, random));
-                    } else if r < fx(0.0085) {
-                        shapes.extend(flower(x, y, z, random));
-                    } else if r < fx(0.011) && c.density > fx(0.3) {
-                        shapes.extend(mushrooms(x, y, z, if c.conifer > Fx::HALF { K::amanita } else { K::bolete }, random));
-                    } else if c.surface == K::needles && r < fx(0.04) {
-                        shapes.push(Shape::cuboid([x, y, z], [x + 2.0, y + 2.0, z + 1.0], K::cone));
-                    } else if c.surface == K::litter && r < LITTER {
-                        shapes.push(Shape::cuboid([x - 1.0, y - 1.0, z - 1.0], [x + 1.0, y, z + 1.0], K::fallenLeaf).paint());
+                    let r = if share >= Fx::ONE { r } else { r / share };
+                    let c = f.column(xi, zi);
+                    let (x, y, z) = (xi as f64, (c.height + 1) as f64, zi as f64);
+                    let random = &mut Rng::new(hash64(f.s("plants, randomly"), xi, zi, 0));
+                    if c.on_path {
+                        if r < fx(0.05) {
+                            shapes.push(Shape::cuboid([x, y, z], [x + 2.0, y + 1.0, z + 1.0], K::stone));
+                        }
+                    } else if c.surface == K::grass {
+                        if r < fx(0.02) {
+                            let count = 3.0 + random.below(3) as f64;
+                            let kind = if random.chance(fx(0.3)) { K::hay } else { K::tallGrass };
+                            shapes.extend(tuft(x, y, z, count, vox(0.3), kind, random));
+                        } else if r < fx(0.0275) {
+                            shapes.extend(flower(x, y, z, random));
+                        } else if r < fx(0.2) {
+                            let count = 1.0 + random.below(2) as f64;
+                            shapes.extend(tuft(x, y, z, count, vox(0.12), K::grass, random));
+                        }
+                    } else if c.surface != K::stone && c.surface != K::mossyStone {
+                        if r < fx(0.00625) {
+                            shapes.extend(fern(x, y, z, if c.conifer > Fx::HALF { K::fern } else { K::bracken }, random));
+                        } else if r < fx(0.008) {
+                            shapes.extend(bush(x, y, z, random));
+                        } else if r < fx(0.0085) {
+                            shapes.extend(flower(x, y, z, random));
+                        } else if r < fx(0.011) && c.density > fx(0.3) {
+                            shapes.extend(mushrooms(x, y, z, if c.conifer > Fx::HALF { K::amanita } else { K::bolete }, random));
+                        } else if c.surface == K::needles && r < fx(0.04) {
+                            shapes.push(Shape::cuboid([x, y, z], [x + 2.0, y + 2.0, z + 1.0], K::cone));
+                        } else if c.surface == K::litter && r < LITTER {
+                            shapes.push(Shape::cuboid([x - 1.0, y - 1.0, z - 1.0], [x + 1.0, y, z + 1.0], K::fallenLeaf).paint());
+                        }
                     }
                 }
-            }
-            if shapes.is_empty() { None } else { Some(Node::of(shapes)) }
-        });
+                if shapes.is_empty() { None } else { Some(Node::of(shapes)) }
+            },
+        );
 
     vec![Layer::Field(terrain), Layer::Population(trees), Layer::Population(boulders), Layer::Population(logs), Layer::Population(plants)]
 }

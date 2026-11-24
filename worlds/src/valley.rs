@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use ground::land::{Lie, shares};
 use ground::plan::Plan;
-use worldgen::entry::{Entry, Known};
+use worldgen::entry::Entry;
 use worldgen::generator::{Generator, KindDef};
 use worldgen::noise::{Fx, Scope, fx};
 use worldgen::units::{Units, m};
@@ -95,25 +95,14 @@ impl Terrain {
 }
 
 /** The valley, checked to level 4, where its things break. */
-pub const VALLEY: Entry = Entry {
-    name: "valley",
-    make: valley,
-    levels: 4,
-    accuracy: &[],
-    known: &[
-        // Why: docs/todo.md, "Towns and the city line up with the lattice".
-        Known::Turned("town"),
-        // Why: docs/todo.md, "One of the valley's tiles is over the cost budget".
-        Known::OverBudget("town", 3),
-    ],
-};
+pub const VALLEY: Entry = Entry { name: "valley", make: valley, levels: 4, accuracy: &[], known: &[] };
 
 /**
  * The valley of `seed`, its parts in bands: the relief and the ranges,
  * then the towns, which level it; then the railway, the landmarks and
  * the moor, which shape what the towns left; then those that only draw
- * on it, the forest and the fields. The camera starts in the forest, on
- * the path to the first town.
+ * on it, the forest and the fields. The camera starts on the path, 33 m
+ * short of the chapel nearest the start.
  */
 pub fn valley(seed: u64) -> World {
     let world = Scope::new(seed);
@@ -121,8 +110,7 @@ pub fn valley(seed: u64) -> World {
     let (ranges, towns) = (terrain.ranges.clone(), terrain.towns.clone());
     let railway = Arc::new(Railway::new(&world.of("railway"), terrain.clone()));
     let landmarks = Arc::new(Landmarks::new(&world.of("landmarks"), terrain.clone(), railway.clone()));
-    // No moor from behind the spawn to past the first town: the contract's regions are there.
-    let uplands = Arc::new(Uplands::new(&world.of("uplands"), terrain.clone(), landmarks.clone(), railway.clone(), [m(-200.0), m(500.0)]));
+    let uplands = Arc::new(Uplands::new(&world.of("uplands"), terrain.clone(), landmarks.clone(), railway.clone()));
     let moorland = Arc::new(uplands.moorland(&world.of("moor")));
     let points = points(&terrain, &landmarks, &moorland, &railway);
     let path = Arc::new(Path::new(terrain.path.clone()));
@@ -136,8 +124,9 @@ pub fn valley(seed: u64) -> World {
             Units(rise).to_fx() / Units(2 * step)
         }))
     };
-    let spawn = forest::on_path(&ground, &path, m(-31.0), m(3.0));
-    let forest = Forest::new(world.of("forest"), path.clone(), spawn).thinned(mountains::wooded(ranges.clone(), ground.clone()));
+    // On the path 33 m short of the chapel nearest the start, looking along z.
+    let spawn = forest::on_path(&ground, &path, landmarks.first(Landmark::Chapel).centre[1] - m(33.0), m(3.0));
+    let forest = Forest::new(world.of("forest"), path.clone()).thinned(mountains::wooded(ranges.clone(), ground.clone()));
     let fields = Fields::new(world.of("fields"), path);
     let fields_bid = fields::round_towns(&world.of("fields"), towns.clone(), slope);
     let [on_forest, on_towns, on_fields, on_landmarks, on_moor, on_railway] =
@@ -248,19 +237,7 @@ fn coast(terrain: &Terrain) -> [i64; 3] {
         .expect("a coast within 40 km west of the start")
 }
 
-/**
- * A steading of the moor on the valley's floor, within 400 m of the
- * path: of those reaching the first row of points that any reaches, the
- * nearest the path. Rows and points are as far apart as a steading
- * reaches (moor::NEAR), so none falls between.
- */
+/** The steading nearest the start of the path. */
 fn steading(terrain: &Terrain, moorland: &Moorland) -> [i64; 3] {
-    let path = |z: i64| terrain.path.x(z).round_units().0;
-    (0..m(160_000.0))
-        .step_by(moor::NEAR as usize)
-        .find_map(|z| {
-            let near = (-8..=8).filter_map(|i| moorland.steading_near(path(z) + i * moor::NEAR, z)).map(|p| ((p[0] - path(p[2])).abs(), p));
-            near.filter(|(d, _)| *d < m(400.0)).min().map(|(_, p)| p)
-        })
-        .expect("a steading by the path within 160 km along the valley")
+    moorland.steading_nearest(terrain.path.x(0).round_units().0, 0).expect("a steading within 16 km of the start")
 }

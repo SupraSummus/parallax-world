@@ -370,31 +370,33 @@ fn what_shows_of_a_box_is_all_but_its_whole_bottom_and_top() {
     }
 }
 
-/** Rocks in a tenth of the cells west of x = 0, a twentieth east, saying `most`; in cells, or along lines across a plane. */
-fn rocks(most: Fx, along: bool) -> Population {
-    let rocks = Population::new("rocks", 1.0, 16)
-        .chance(most)
-        .make(|p, cell| cell.chance(if p[0] < 0.0 { fx(0.1) } else { fx(0.05) }).then(|| Node::of(vec![ball(p, 2.0, 0, SOLID, Op::Fill)])));
-    if along { rocks.anchor_along(1, |line| Some(line.pick(&mut line.random("spot"), |_, _| 0))) } else { rocks }
+/** Two rocks at each site of 16·FCC, one a little apart in its random sequence. */
+fn rocks() -> Population {
+    let at = |b: &Box3| lattice(16, b).into_iter().flat_map(|p| [0, 1].map(|n| (p.map(|v| v as f64), n))).collect();
+    Population::new("rocks", 1.0, 16).reach(3).at(at, |&n, anchor| {
+        let r = 1.0 + n as f64 + anchor.random("size").next();
+        Some(Node::of(vec![ball(anchor.at, r, 0, SOLID, Op::Fill)]))
+    })
 }
 
 #[test]
-fn a_population_rolled_before_anchoring_makes_the_same_things() {
-    let (generator, cells) = (layers(vec![]), [(-32, 32), (-4, 4), (-32, 32)]);
-    for along in [false, true] {
-        let (mut all, mut rolled) = (Vec::new(), Vec::new());
-        let asked = each_made(&generator, &rocks(Fx::ONE, along), cells, |key, bounds, _, _| all.push((key, bounds)));
-        let anchored = each_made(&generator, &rocks(fx(0.1), along), cells, |key, bounds, _, _| rolled.push((key, bounds)));
-        assert!(!all.is_empty() && all == rolled, "along lines: {along}");
-        assert!(anchored * 5 < asked, "along lines: {along}: {anchored} anchored of {asked}");
-    }
-}
-
-#[test]
-#[should_panic(expected = "asks for a chance of Fx(6554), over its population's Fx(3277) (Population::chance)")]
-fn refuses_a_cell_asking_more_than_its_populations_chance() {
-    let rocks = rocks(fx(0.05), false);
-    each_made(&layers(vec![]), &rocks, [(-32, 32), (-4, 4), (-32, 32)], |_, _, _, _| {});
+fn a_thing_is_known_by_its_anchor_and_number_there_whichever_box_asks() {
+    let (generator, rocks) = (layers(vec![]), rocks());
+    let made = |b: Box3| {
+        let mut made = Vec::new();
+        each_made(&generator, &rocks, &b, |name, bounds, _, _| made.push((name, bounds)));
+        made.sort_by(|a, b| a.0.cmp(&b.0));
+        made
+    };
+    let whole = made(Box3 { min: [-40; 3], max: [40; 3] });
+    let mut halves = [[-40, 0], [0, 40]].map(|[x0, x1]| made(Box3 { min: [x0, -40, -40], max: [x1, 40, 40] })).concat();
+    halves.sort_by(|a, b| a.0.cmp(&b.0));
+    halves.dedup();
+    assert!(whole.len() > 100 && whole == halves);
+    // Each point's two, each its own.
+    let at_origin: Vec<_> = whole.iter().filter(|(name, _)| name.starts_with("rocks 0,0,0")).collect();
+    assert_eq!(at_origin.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>(), ["rocks 0,0,0", "rocks 0,0,0 1"]);
+    assert_ne!(at_origin[0].1, at_origin[1].1);
 }
 
 #[test]

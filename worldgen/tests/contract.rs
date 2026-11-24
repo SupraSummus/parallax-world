@@ -5,15 +5,15 @@ use std::collections::BTreeSet;
 
 use worldgen::World;
 use worldgen::checks::contract::{
-    Accuracy, Held, REGION, Region, Report, SHOWN, STOPPED, TOLERANCE, breaks, check, heights_hold, hold_to_baseline, in_regions, parts,
-    parts_hold, regions, things_hold,
+    Accuracy, Held, REGION, Region, Report, SHOWN, STOPPED, TOLERANCE, breaks, check, heights_hold, hold_to_baseline, in_regions, regions,
+    things_hold,
 };
 use worldgen::checks::survey::{HELD, survey};
 use worldgen::generator::{
     ANY_SIZE, Child, Children, Far, Field, FieldValues, Generator, KindDef, Layer, Node, Op, Population, SOLID, Shapes, Span, ball, cuboid,
-    generate, kind_of, things_in,
+    generate, kind_of,
 };
-use worldgen::generator::{Cell, Fill, Point};
+use worldgen::generator::{Anchor, Fill, Point, lattice};
 use worldgen::grid::{ALPHA, Box3, is_site};
 use worldgen::noise::fx;
 use worldgen::sites::spacing;
@@ -35,15 +35,19 @@ const GRASS: u8 = 4;
 const SMOKE: u8 = 5;
 const GLOWING_FOG: u8 = 6;
 
-/** One population of one thing, near the origin: cells reach 1024 + `reach` from their centres. */
-fn single(make: impl Fn(Point, &Cell) -> Option<Node> + Send + Sync + 'static, reach: i64) -> Layer {
+/** One population of one thing, anchored at (64, 64, 64), reaching `reach` from there. */
+fn single(make: impl Fn(&Anchor) -> Option<Node> + Send + Sync + 'static, reach: i64) -> Layer {
     Layer::Population(
-        Population::new("single", 1.0, 1024)
-            .reach(reach)
-            .size(ANY_SIZE)
-            .anchor(|cell| if cell.i == 0 && cell.j == 0 && cell.k == 0 { Some([64.0, 64.0, 64.0]) } else { None })
-            .make(make),
+        Population::new("single", 1.0, 1024).reach(reach).size(ANY_SIZE).at(|_| vec![([64.0; 3], ())], move |_, anchor| make(anchor)),
     )
+}
+
+/** The sites of N·FCC on y = 0 over box `b`: every other one of a square grid. */
+fn plain(n: i64, b: &Box3) -> Vec<([f64; 3], ())> {
+    lattice(n, &Box3 { min: [b.min[0], 0, b.min[2]], max: [b.max[0], 1, b.max[2]] })
+        .into_iter()
+        .map(|p| (p.map(|v| v as f64), ()))
+        .collect()
 }
 
 fn spans(name: &'static str, from: i64, to: i64, kind: u8) -> Layer {
@@ -61,7 +65,7 @@ fn fog() -> Generator {
     Generator {
         kinds: KINDS.to_vec(),
         seed: 1,
-        layers: vec![single(|_, _| Some(Node::of(vec![ball([64.0; 3], 56.0, FOG, Fill::Const(0.3), Op::Fill)])), 64)],
+        layers: vec![single(|_| Some(Node::of(vec![ball([64.0; 3], 56.0, FOG, Fill::Const(0.3), Op::Fill)])), 64)],
     }
 }
 
@@ -88,11 +92,10 @@ fn caves() -> Generator {
  * sites on faces are split ("Levels" in docs/generators.md).
  */
 fn village() -> Generator {
-    let houses = Population::new("houses", 1.0, 64)
-        .size(ANY_SIZE)
-        // On the plain: the cells centred on y = 0, every other one of a square grid.
-        .anchor(|cell| if cell.j == 0 { Some(cell.centre.map(|v| v as f64)) } else { None })
-        .make(|[x, _, z], cell| {
+    let houses = Population::new("houses", 1.0, 64).reach(64).size(ANY_SIZE).at(
+        |b| plain(64, b),
+        |_, cell| {
+            let [x, _, z] = cell.at;
             let (w, d, h) = (16.0 + (cell.random("size").next() * 12.0).floor(), 16.0 + (cell.random("size").next() * 12.0).floor(), 20.0);
             let (x0, z0, x1, z1, y) = (x - w, z - d, x + w, z + d, 0.0);
             let tables = move |clip: &Box3| -> Vec<Child> {
@@ -122,7 +125,8 @@ fn village() -> Generator {
                 children: Some(Children::Reaching(Box::new(tables))),
                 far: None,
             })
-        });
+        },
+    );
     Generator { kinds: KINDS.to_vec(), seed: 3, layers: vec![spans("ground", -64, 0, GRASS), Layer::Population(houses)] }
 }
 
@@ -133,47 +137,6 @@ fn b(min_x: i64, min_y: i64, min_z: i64, max_x: i64, max_y: i64, max_z: i64) -> 
 /** A world of `generator`, which has nothing outside `heights`. */
 fn world_of(generator: Generator, heights: (i64, i64)) -> World {
     World { generator, spawn: [0; 3], heights: Some(heights), points: Vec::new() }
-}
-
-/** The face of a wall of rock facing +x, at x = wall(y, z): a ground along x. */
-fn wall(y: i64, z: i64) -> i64 {
-    (3 * y + 2 * z).div_euclid(4)
-}
-
-/** The wall, and `knobs` on its face: a unit of wood at each anchor. */
-fn knobbly_wall(knobs: Population) -> Generator {
-    let rock = Field::spans("rock", 0.0, Op::Fill, 0, |z, y| vec![Span::solid(wall(y, z) - 64, wall(y, z), ROCK)]);
-    let knobs = knobs.reach(2).make(|p, _| Some(Node::of(vec![cuboid(p, p.map(|v| v + 1.0), WOOD, SOLID, Op::Fill)])));
-    Generator { kinds: KINDS.to_vec(), seed: 4, layers: vec![Layer::Field(rock), Layer::Population(knobs)] }
-}
-
-#[test]
-fn anchors_along_an_axis_are_one_per_square_across_it() {
-    // On a slanting wall, so the lines of cells along x cross it in any of their cells: a spot picked evenly in each line's square
-    // across x, owned by the cell it is in, is one per square 2N wide, wherever in the lattice's period.
-    const N: i64 = 8;
-    const LINES: i64 = 128;
-    let generator =
-        knobbly_wall(Population::new("knobs", 1.0, N).anchor_along(0, |line| Some(line.pick(&mut line.random("spot"), |z, y| wall(y, z)))));
-    let Layer::Population(knobs) = &generator.layers[1] else { unreachable!() };
-    // The cells of LINES² lines along x, as far along as the wall over them goes.
-    let along = (wall(-N, -N).div_euclid(N) - 1, wall(LINES * N, LINES * N).div_euclid(N) + 1);
-    let things = things_in(&generator, knobs, [along, (0, LINES - 1), (0, LINES - 1)]);
-    let expected = (LINES * LINES) as f64 / 4.0;
-    assert!((things.len() as f64 / expected - 1.0).abs() < 0.05, "{} knobs, not about {expected}", things.len());
-    // Where they are across x within the lattice's period, 2N, in squares N / 2 wide.
-    let mut squares = [0; 16];
-    for (_, bounds, _) in &things {
-        let [y, z] = [1, 2].map(|i| (bounds.min[i].rem_euclid(2 * N) / (N / 2)) as usize);
-        squares[4 * y + z] += 1;
-    }
-    let each = expected / 16.0;
-    assert!(squares.iter().all(|n| (*n as f64 / each - 1.0).abs() < 0.25), "{squares:?} knobs by where in 2N, not about {each}");
-    for level in [0, 2] {
-        let whole = generate(&generator, &b(0, 0, 0, 128, 128, 128), level);
-        let broken = parts_hold(&generator, &whole, level, &parts(&whole.clip(), level));
-        assert!(broken.is_empty(), "{broken:?}");
-    }
 }
 
 /**
@@ -243,24 +206,21 @@ fn world(layer: Layer) -> Generator {
 #[test]
 #[should_panic(expected = "reaches past its population's reach")]
 fn refuses_a_thing_reaching_past_its_populations_reach() {
-    generate(&world(single(|_, _| Some(Node::of(vec![ball([64.0; 3], 1200.0, ROCK, SOLID, Op::Fill)])), 64)), &near(), 0);
+    generate(&world(single(|_| Some(Node::of(vec![ball([64.0; 3], 1200.0, ROCK, SOLID, Op::Fill)])), 64)), &near(), 0);
 }
 
 #[test]
 fn finds_a_far_thing_reaching_past_its_populations_reach() {
     // Only cells from 30 along x make things, too big for their reach: no box near spawn draws them.
-    let far = Layer::Population(
-        Population::new("far", 1.0, 64)
-            .reach(16)
-            .size(ANY_SIZE)
-            .anchor(|cell| (cell.i >= 30 && cell.j == 0).then_some(cell.centre.map(|v| v as f64)))
-            .make(|[x, y, z], _| Some(Node::of(vec![ball([x, y, z], 100.0, ROCK, SOLID, Op::Fill)]))),
-    );
+    let far = Layer::Population(Population::new("far", 1.0, 64).reach(16).size(ANY_SIZE).at(
+        |b| plain(64, b).into_iter().filter(|(p, _)| p[0] >= 30.0 * 64.0).collect(),
+        |_, anchor| Some(Node::of(vec![ball(anchor.at, 100.0, ROCK, SOLID, Op::Fill)])),
+    ));
     let world = world_of(world(far), (-256, 256));
     let broken = things_hold(&world, &survey(&world, 1, REGION, &[]));
     assert_eq!(broken.len(), 1, "{broken:?}");
     assert!(
-        broken[0].contains("far surveyed reach past their population's reach [16, 16, 16]; it needs at least [37, 37, 37]"),
+        broken[0].contains("far surveyed reach past their population's reach [16, 16, 16]; it needs at least [100, 100, 100]"),
         "{}",
         broken[0]
     );
@@ -269,10 +229,14 @@ fn finds_a_far_thing_reaching_past_its_populations_reach() {
 #[test]
 fn a_rare_thing_gets_a_region_first_and_seeds_checked_together_share_regions() {
     // A wooden post in every cell on y = 0, but one of rock 400 m away: a stratum of its own.
-    let posts = Population::new("posts", 1.0, 64).anchor(|cell| (cell.j == 0).then_some(cell.centre.map(|v| v as f64))).make(|p, cell| {
-        let kind = if (cell.i, cell.k) == (50, 50) { ROCK } else { WOOD };
-        Some(Node::of(vec![cuboid(p, p.map(|v| v + 8.0), kind, SOLID, Op::Fill)]))
-    });
+    let posts = Population::new("posts", 1.0, 64).at(
+        |b| plain(64, b),
+        |_, cell| {
+            let p = cell.at;
+            let kind = if cell.key == [50 * 64, 0, 50 * 64] { ROCK } else { WOOD };
+            Some(Node::of(vec![cuboid(p, p.map(|v| v + 8.0), kind, SOLID, Op::Fill)]))
+        },
+    );
     let world = world_of(world(Layer::Population(posts)), (-64, 64));
     // As two seeds: the rock has a place at each, the wood places everywhere.
     let (_, regions) = regions(&[&world, &world], &[]);
@@ -336,7 +300,7 @@ fn finds_fog_that_glows_only_near() {
 #[test]
 fn finds_a_speck_too_small_to_show_outside_the_heights() {
     // A speck stops a few of a site's rays: it shows no voxel, but light and the composited rays see it.
-    let speck = world(single(|_, _| Some(Node::of(vec![ball([64.0, 70.0, 64.0], 0.1, ROCK, SOLID, Op::Fill)])), 64));
+    let speck = world(single(|_| Some(Node::of(vec![ball([64.0, 70.0, 64.0], 0.1, ROCK, SOLID, Op::Fill)])), 64));
     let grid = generate(&speck, &near(), 0);
     assert!(grid.pieces.alpha.iter().all(|&a| a < ALPHA) && grid.pieces.alpha.iter().any(|&a| a > 0), "the speck shows");
     let broken = heights_hold(&world_of(speck, (-64, 64)), 0);
@@ -348,7 +312,7 @@ fn finds_a_speck_too_small_to_show_outside_the_heights() {
 
 fn parent(children: fn() -> Vec<Child>) -> Generator {
     world(single(
-        move |_, _| {
+        move |_| {
             Some(Node {
                 shapes: Shapes::Now(Vec::new()),
                 bounds: Some(b(60, 60, 60, 70, 70, 70)),
@@ -373,7 +337,7 @@ fn refuses_a_child_reaching_past_its_parent() {
 #[test]
 #[should_panic(expected = "draws past its bounds")]
 fn refuses_a_node_drawing_past_its_bounds() {
-    let past = |_: Point, _: &Cell| {
+    let past = |_: &Anchor| {
         let shapes = Shapes::Now(vec![ball([64.0; 3], 20.0, ROCK, SOLID, Op::Fill)]);
         Some(Node { shapes, bounds: Some(b(60, 60, 60, 70, 70, 70)), children: None, far: None })
     };
@@ -395,7 +359,7 @@ fn a_things_carve_cuts_only_the_thing() {
         layers: vec![
             spans("rock", 0, 64, ROCK),
             single(
-                |_, _| {
+                |_| {
                     Some(Node::of(vec![
                         cuboid([48.0, 48.0, 48.0], [80.0, 80.0, 80.0], WOOD, SOLID, Op::Paint),
                         cuboid([60.0, 40.0, 60.0], [68.0, 90.0, 68.0], WOOD, SOLID, Op::Carve),
@@ -442,7 +406,7 @@ fn a_component_alone_stands_for_its_parents_far_form() {
     // A ball of rock in a thing drawn far away as a box of wall: alone, past the far form's detail, it is the ball measured.
     let thing = || {
         world(single(
-            |_, _| {
+            |_| {
                 let box_of_wall = vec![cuboid([56.0; 3], [72.0; 3], WALL, SOLID, Op::Fill)];
                 let ball = Child { name: "ball".into(), size: ANY_SIZE, node: Node::of(vec![ball([64.0; 3], 6.0, ROCK, SOLID, Op::Fill)]) };
                 Some(Node::group(vec![ball]).with_far(Far::of(fx(4.0), box_of_wall)))

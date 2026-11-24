@@ -79,12 +79,11 @@ const TOWN_WALL: i64 = m(1.5);
 /**
  * Towns stand at least APART along the path, claimed (Claims) from spots
  * one every CLAIM of it on average: about one every 2 km. A column's town
- * is the nearest within WITHIN. The first's middle is at FIRST.
+ * is the nearest within WITHIN.
  */
 const APART: i64 = m(900.0);
 const CLAIM: i64 = m(800.0);
 const WITHIN: i64 = m(600.0);
-const FIRST: i64 = m(200.0);
 /**
  * How far past a town's ends the path eases from its route onto the main
  * street, which the route may be a hundred metres off and more: as far
@@ -405,20 +404,16 @@ pub struct Towns {
 
 impl Towns {
     /**
-     * Towns along the path, anywhere at least APART, the first near the
-     * start: hamlets, villages and market towns. Each lies on the valley's
+     * Towns along the path, anywhere at least APART: hamlets, villages
+     * and market towns. Each lies on the valley's
      * course (the path's coarse band, its mean: the path bends to meet
      * it), claimed from spots within half a cell of x = 0, the course
      * straightened, at the mean height of the valley floor under it.
      */
     pub fn new(scope: &Scope, relief: Arc<Relief>, course: Spine) -> Towns {
         let s = scope.seed("towns");
-        let claims = Claims::new("towns", s, CLAIM, APART, Some([0, FIRST]), move |[x, z], random| {
-            let mut town = if [x, z] == [0, FIRST] {
-                // The first, which the contract's regions look at: two blocks a side, four rows, a fountain, its church east.
-                let town = Town::of(Size::Market, FIRST, &mut Rng::new(hash64(s, 0, 0, 0)));
-                Town { cols: 2, rows: 4, centre: Centre::Fountain, church: 1, walled: false, ..town }
-            } else if x.abs() < CLAIM / 2 {
+        let claims = Claims::new("towns", s, CLAIM, APART, move |[x, z], random| {
+            let mut town = if x.abs() < CLAIM / 2 {
                 let size = match random.below(10) {
                     0..3 => Size::Hamlet,
                     3..7 => Size::Village,
@@ -448,9 +443,19 @@ impl Towns {
         Towns { claims, nearest, spots }
     }
 
-    /** The first town, near the start: every seed has it. */
+    /** The town nearest the start: within 64 km at every seed. */
     pub fn first(&self) -> Town {
-        self.near(FIRST).expect("the first town")
+        self.nearest(|_| true).expect("a town within 64 km")
+    }
+
+    /** The town nearest the start of those `keep` keeps, within 64 km. */
+    pub fn nearest(&self, keep: impl Fn(&Town) -> bool) -> Option<Town> {
+        self.claims.nearest(0, 0, m(64_000.0), keep).map(|(_, town)| town)
+    }
+
+    /** The towns whose middles are from `from` to `to` along z, inclusive. */
+    pub fn over(&self, from: i64, to: i64) -> Vec<Town> {
+        self.claims.within([0, from], [0, to]).into_iter().map(|(_, town)| town).collect()
     }
 
     /** The town nearest z along the path, if it has one. */
@@ -544,8 +549,10 @@ fn layers(towns: Arc<Towns>, hold: Scalar, ground: Arc<Sloped>) -> Vec<Layer> {
         // The largest town's blocks, wall and what overhangs them, past its cell's reach.
         .reach([m(150.0), m(45.0), m(150.0)])
         .size(ANY_SIZE)
-        .anchor_along(1, move |line| anchor.near(line.centre[1]).map(|t| [t.x as f64, t.level as f64, t.z as f64]))
-        .make(move |_, cell| towns.near(cell.centre[2]).map(town));
+        .at(
+            move |b| anchor.over(b.min[2], b.max[2] - 1).into_iter().map(|t| ([t.x as f64, t.level as f64, t.z as f64], t)).collect(),
+            move |t, _| Some(town(*t)),
+        );
     vec![Layer::Field(surface), Layer::Population(built)]
 }
 

@@ -11,8 +11,7 @@ fn a_ball() -> Generator {
             Population::new("ball", 1.0, 1024)
                 .reach(64)
                 .size(ANY_SIZE)
-                .anchor(|cell| if cell.i == 0 && cell.j == 0 && cell.k == 0 { Some([0.0; 3]) } else { None })
-                .make(|at, _| Some(Node::of(vec![ball(at, 40.0, 0, SOLID, Op::Fill)]))),
+                .at(|_| vec![([0.0; 3], ())], |_, anchor| Some(Node::of(vec![ball(anchor.at, 40.0, 0, SOLID, Op::Fill)]))),
         )],
     }
 }

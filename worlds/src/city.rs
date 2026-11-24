@@ -1056,7 +1056,7 @@ pub const CITY: Entry = Entry {
     make: city,
     levels: 3,
     accuracy: &[],
-    // Why: docs/todo.md, "Towns and the city line up with the lattice".
+    // Why: docs/todo.md, "The city and the cheese's mine line up with the lattice".
     known: &[Known::Turned("spawn")],
 };
 
@@ -1066,10 +1066,9 @@ pub fn city(seed: u64) -> World {
     let front = blocks.iter().find(|b| b.px == MIN_X + PERIOD + ROAD && b.pz == MIN_Z + ROAD).expect("the middle front block").building;
     // In plan cells; their upper sites are sites of the lattice.
     let spawn = [front.bx + front.entrance * CELL + MID - 1, MIN_Y + vox(1.75), MIN_Z + vox(2.0)].map(|v| PLAN * v);
-    // One thing, the district, in the cell centred on the origin: it reaches nowhere past the cell.
-    let population = Population::new("district", 1.0, m(256.0))
-        .anchor(|cell| (cell.centre == [0, 0, 0]).then_some([0.0; 3]))
-        .make(move |_, _| Some(district(blocks.clone())));
+    // One thing, the district, anchored at the origin, reaching 256 m from it.
+    let population =
+        Population::new("district", 1.0, m(256.0)).reach(m(256.0)).at(|_| vec![([0.0; 3], ())], move |_, _| Some(district(blocks.clone())));
     let layers = vec![Layer::Field(ground(stream(seed, 2))), Layer::Population(population)];
     World {
         generator: Generator { kinds: KINDS.to_vec(), seed: stream(seed, 6), layers },

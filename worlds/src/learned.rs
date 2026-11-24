@@ -341,12 +341,11 @@ impl Grammar {
 /**
  * Settlements stand at least APART along the path, claimed from spots one
  * every CLAIM of it on average (as the valley's towns); a column's is the
- * nearest within WITHIN. The first's middle is at FIRST.
+ * nearest within WITHIN.
  */
 const APART: i64 = m(900.0);
 const CLAIM: i64 = m(800.0);
 const WITHIN: i64 = m(600.0);
-const FIRST: i64 = m(260.0);
 /** How far past its crop's middle a settlement levels the ground, and how far beyond it eases back. */
 const LEVELLED: i64 = m(170.0);
 const TERRACE: Units = Units::m(120.0);
@@ -409,14 +408,11 @@ impl Settlements {
     fn new(scope: &Scope, relief: Arc<Relief>) -> Arc<Settlements> {
         let s = scope.seed("settlements");
         let crop = grammar().crop;
-        let sites = Claims::new("settlements", s, CLAIM, APART, Some([0, FIRST]), move |[x, z], random| {
-            let seed = if [x, z] == [0, FIRST] {
-                Rng::new(hash64(s, 0, 0, 0)).next_u64()
-            } else if x.abs() < CLAIM / 2 {
-                random.next_u64()
-            } else {
+        let sites = Claims::new("settlements", s, CLAIM, APART, move |[x, z], random| {
+            if x.abs() >= CLAIM / 2 {
                 return None;
-            };
+            }
+            let seed = random.next_u64();
             // The floor's mean, as coarse as the settlement.
             let half = m(1.0) * crop as i64 / 4;
             let around = (-1..=1).flat_map(|i| (-1..=1).map(move |j| (i, j)));
@@ -435,6 +431,16 @@ impl Settlements {
 
     fn near(&self, z: i64) -> Option<Site> {
         self.sites.near(0, z, WITHIN).map(|(_, site)| site)
+    }
+
+    /** The settlement nearest the start: within 64 km at every seed. */
+    fn first(&self) -> Site {
+        self.sites.nearest(0, 0, m(64_000.0), |_| true).expect("a settlement within 64 km").1
+    }
+
+    /** The sites whose middles are from `from` to `to` along z, inclusive. */
+    fn over(&self, from: i64, to: i64) -> Vec<Site> {
+        self.sites.within([0, from], [0, to]).into_iter().map(|(_, site)| site).collect()
     }
 
     fn layout(&self, site: &Site) -> Arc<Layout> {
@@ -503,12 +509,12 @@ impl Pull for Settlements {
 /** The learned town, checked to level 4. */
 pub const LEARNED: Entry = Entry { name: "learned", make: learned, levels: 4, accuracy: &[], known: &[] };
 
-/** The learned town of `seed`; the camera starts in the forest, on the path to the first settlement. */
+/** The learned town of `seed`; the camera starts in the forest, on the path to the settlement nearest the start, 291 m short of its middle. */
 pub fn learned(seed: u64) -> World {
     let world = Scope::new(seed);
     let relief = Arc::new(Relief::new(&world.of("relief")));
     let settlements = Settlements::new(&world.of("settlements"), relief.clone());
-    let first = settlements.clone();
+    let first = settlements.first();
     let spine = {
         let (relief, settlements) = (relief.clone(), settlements.clone());
         Spine::new(move |z| settlements.path_x(z, relief.path_x(z)))
@@ -517,7 +523,7 @@ pub fn learned(seed: u64) -> World {
     let ground = Lie::new(move |x, z| relief.ground(x, z, spine.across(x, z).abs()))
         .shaped(vec![settlements.clone()])
         .ground(GROUND_SCALE, forest::SLOPE);
-    let spawn = forest::on_path(&ground, &path, m(-31.0), m(3.0));
+    let spawn = forest::on_path(&ground, &path, first.z - m(291.0), m(3.0));
     // What the grammar drew bids for each column, outright: canopy and texture, no town and not fields, the forest's, which
     // bids nothing.
     let fields_bid = {
@@ -525,7 +531,7 @@ pub fn learned(seed: u64) -> World {
         of_columns(move |x, z| if settlements.spot(x, z) == Spot::Fields { Fx::ONE } else { -Fx::ONE }, |_, _| (-Fx::ONE, Fx::ONE))
     };
     let [on_forest, on_settlements, on_fields] = shares("land", SPOT_SCALE, fx(0.125), [Forest::bid(), settlements.bid(), fields_bid]);
-    let forest = Forest::new(world.of("forest"), path.clone(), spawn);
+    let forest = Forest::new(world.of("forest"), path.clone());
     let layers = [
         forest.layers(&ground, on_forest),
         settlements.clone().layers(&ground, on_settlements),
@@ -535,7 +541,7 @@ pub fn learned(seed: u64) -> World {
     .flatten()
     .collect();
     let kinds = [forest::KINDS, town::KINDS, crate::valley::fields::KINDS].concat();
-    let first: Find = Box::new(move || first.near(FIRST).map(|s| [s.x, s.level, s.z]).expect("the first settlement"));
+    let first: Find = Box::new(move || [first.x, first.level, first.z]);
     World {
         generator: Generator { kinds, seed: world.seed("layers"), layers },
         spawn,
@@ -569,11 +575,9 @@ fn town_layers(settlements: Arc<Settlements>, hold: Scalar, ground: Arc<Sloped>)
     let crop = grammar().crop as i64;
     let built = {
         let anchor = settlements.clone();
-        Population::new("settlements", 1.5, m(256.0))
-            .reach([m(200.0), m(32.0), m(200.0)])
-            .anchor_along(1, move |line| anchor.near(line.centre[1]).map(|s| [s.x as f64, s.level as f64, s.z as f64]))
-            .make(move |_, cell| {
-                let site = settlements.near(cell.centre[2])?;
+        Population::new("settlements", 1.5, m(256.0)).reach([m(200.0), m(32.0), m(200.0)]).at(
+            move |b| anchor.over(b.min[2], b.max[2] - 1).into_iter().map(|s| ([s.x as f64, s.level as f64, s.z as f64], s)).collect(),
+            move |&site, _| {
                 let layout = settlements.layout(&site);
                 let [ox, oz] = site.origin(crop as usize);
                 let bounds = Box3 {
@@ -595,7 +599,8 @@ fn town_layers(settlements: Arc<Settlements>, hold: Scalar, ground: Arc<Sloped>)
                     }))),
                     far: None,
                 })
-            })
+            },
+        )
     };
     vec![Layer::Field(surface), Layer::Population(built)]
 }
