@@ -164,10 +164,13 @@ Numbers are for the forest at 1280×800, as measured when written.
   held by sight (`Sights`); each its own twelve, twice that.
   Half are alike another site's: held once, they took a third less,
   for a grid not to be changed once held. Not kept.
-  Each is added to face by face (`pieces` in `generate.rs`),
-  a dozen sums a put:
-  lighting a small view, where most of the work is the coarser levels' tiles,
-  that is over a tenth of it.
+  What a site's faces see, and what is added to them,
+  are held each value once (`Faces` in `grid.rs`),
+  so a put adds to each class of faces once (`pieces` in `generate.rs`),
+  two or three, not twelve;
+  still, at level 4, putting them is over a tenth of the instructions.
+  A `Look` still says its faces in arrays of twelve, gathered at each put:
+  drawn as `Faces`, `Added::of` would need no case for looks alike.
   Their glows are kept apart (`glows`), as few glow:
   one record a site would be read and written once, not twice,
   for memory not measured.

@@ -4,7 +4,7 @@
 
 use std::sync::OnceLock;
 
-use fcc::{FACE_KINDS, Look};
+use fcc::{FACE_KINDS, Look, VIEW_WORDS};
 
 use crate::js;
 
@@ -92,20 +92,97 @@ pub struct VoxelGrid {
 }
 
 /** All a site holds (`VoxelGrid::held`). */
-pub type Held = ((u8, [u16; 3]), ([u8; 3], [u16; 3]), u8, [u32; 3], Option<Views>, Option<Glows>);
+pub type Held = ((u8, [u16; 3]), ([u8; 3], [u16; 3]), u8, [u32; 3], Option<Faces<Sight>>, Option<Glows>);
 
-/** What a site's pieces glow along each direction, as Views are. */
+/** What a site's pieces glow along each direction, as its views are. */
 pub type Glows = [[u32; 3]; FACE_KINDS];
 
 /**
- * What a site's pieces stop of the rays along each of the lattice's
- * directions and show to them: by the face of VOXEL_FACES they head
- * into, along the opposite of its normal (fcc's `facing`).
+ * What each of a site's faces (VOXEL_FACES) has, each value once, in
+ * the order faces first have them: faces alike are one, and what is
+ * done to them is done once.
  */
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Views {
-    pub alpha: [u8; FACE_KINDS],
-    pub colour: [[u16; 3]; FACE_KINDS],
+pub struct Faces<T> {
+    /** Its values, `n` of them; the rest default. */
+    of: [T; FACE_KINDS],
+    n: u8,
+    /** By face, which of them it has. */
+    which: [u8; FACE_KINDS],
+}
+
+impl<T: Copy + Default + PartialEq> Faces<T> {
+    /** Each face's value, `value` of it. */
+    pub fn by(mut value: impl FnMut(usize) -> T) -> Faces<T> {
+        let mut faces = Faces { of: [T::default(); FACE_KINDS], n: 0, which: [0; FACE_KINDS] };
+        for k in 0..FACE_KINDS {
+            faces.which[k] = faces.add(value(k));
+        }
+        faces
+    }
+
+    /** Every face's, `value`. */
+    pub fn all(value: T) -> Faces<T> {
+        let mut faces = Faces { of: [T::default(); FACE_KINDS], n: 1, which: [0; FACE_KINDS] };
+        faces.of[0] = value;
+        faces
+    }
+
+    /** Its values, each once. */
+    #[inline]
+    pub fn each(&self) -> &[T] {
+        &self.of[..self.n as usize]
+    }
+
+    /** Face `k`'s value. */
+    #[inline]
+    pub fn get(&self, k: usize) -> T {
+        self.of[self.which[k] as usize]
+    }
+
+    /** Of each of its values, `f` of it, once: faces whose values `f` makes alike are one. */
+    pub fn map<U: Copy + Default + PartialEq>(&self, mut f: impl FnMut(T) -> U) -> Faces<U> {
+        // As for most sites: one value, nothing to gather.
+        if self.n == 1 {
+            return Faces::all(f(self.of[0]));
+        }
+        let mut after = Faces { of: [U::default(); FACE_KINDS], n: 0, which: self.which };
+        let mut to = [0; FACE_KINDS];
+        for (c, &value) in self.each().iter().enumerate() {
+            to[c] = after.add(f(value));
+        }
+        // Values each once and in order stay so where none became alike.
+        if after.n < self.n {
+            after.which = self.which.map(|c| to[c as usize]);
+        }
+        after
+    }
+
+    /** Of each face's value here and in `other`, `f` of them, once a pair: as `map`, of both. */
+    pub fn zip_with<U: Copy + Default + PartialEq, V: Copy + Default + PartialEq>(
+        &self,
+        other: &Faces<U>,
+        mut f: impl FnMut(T, U) -> V,
+    ) -> Faces<V> {
+        // Of values each once, so are their pairs: where either is alike through every face, they are the other's.
+        let pairs = match (self.n, other.n) {
+            (1, n) => Faces { of: std::array::from_fn(|b| (0, b as u8)), n, which: other.which },
+            (n, 1) => Faces { of: std::array::from_fn(|a| (a as u8, 0)), n, which: self.which },
+            _ => Faces::by(|k| (self.which[k], other.which[k])),
+        };
+        pairs.map(|(a, b)| f(self.of[a as usize], other.of[b as usize]))
+    }
+
+    /** Where `value` is among its values, added if not. */
+    fn add(&mut self, value: T) -> u8 {
+        match self.each().iter().position(|v| *v == value) {
+            Some(at) => at as u8,
+            None => {
+                (self.of[self.n as usize], self.n) = (value, self.n + 1);
+                self.n - 1
+            }
+        }
+    }
 }
 
 /**
@@ -263,17 +340,16 @@ impl<T: Clone> Few<T> {
     }
 }
 
-/** What a site's pieces stop of the rays along one direction, and show of them (as Views', one face's). */
+/** What a site's pieces stop of the rays along one direction, and show of them. */
 pub type Sight = (u8, [u16; 3]);
 
-/** A site's views, as Sights holds them: where its sights start, and by face, which of them it sees. */
+/** A site's views, as Sights holds them: where its sights start, and which each face sees. */
 type Seen = (u32, [u8; FACE_KINDS]);
 
 /**
- * The Views of the few sites that have them, by the grid's index: the
- * sights a site's faces see, each once, and which of them each face
- * sees. Nine in ten of a valley's see two, and a sight is a twelfth of
- * a Views.
+ * The views of the few sites that have them, by the grid's index: the
+ * sights a site's faces see (Faces), all sites' together. Nine in ten
+ * of a valley's see two, and a sight is a twelfth of all a site's.
  */
 #[derive(Clone, Default)]
 pub struct Sights {
@@ -282,24 +358,17 @@ pub struct Sights {
     sights: Vec<Sight>,
 }
 
-/** `views` as a site holds them, their sights added to `sights`. */
-fn seen(sights: &mut Vec<Sight>, views: &Views) -> Seen {
-    let first = sights.len();
-    let which = std::array::from_fn(|k| {
-        let sight = (views.alpha[k], views.colour[k]);
-        let at = sights[first..].iter().position(|s| *s == sight).unwrap_or_else(|| {
-            sights.push(sight);
-            sights.len() - first - 1
-        });
-        at as u8
-    });
-    (first as u32, which)
+/** How many sights a site's faces see, `which` of them. */
+fn many(which: &[u8; FACE_KINDS]) -> u8 {
+    which.iter().max().map_or(0, |&most| most + 1)
 }
 
 /** The views a site holds as `seen`, of `sights`. */
-fn views(sights: &[Sight], (first, which): &Seen) -> Views {
-    let sight = |k: usize| sights[*first as usize + which[k] as usize];
-    Views { alpha: std::array::from_fn(|k| sight(k).0), colour: std::array::from_fn(|k| sight(k).1) }
+fn faces(sights: &[Sight], (first, which): Seen) -> Faces<Sight> {
+    let n = many(&which);
+    let mut of = [(0, [0; 3]); FACE_KINDS];
+    of[..n as usize].copy_from_slice(&sights[first as usize..][..n as usize]);
+    Faces { of, n, which }
 }
 
 impl Sights {
@@ -310,28 +379,46 @@ impl Sights {
         Some(self.sights[*first as usize + which[kind] as usize])
     }
 
-    /** Site `i`'s views, if it has any. */
-    pub fn get(&self, i: usize) -> Option<Views> {
-        self.seen.get(i).map(|seen| views(&self.sights, seen))
+    /** Whether site `i` has views. */
+    #[inline]
+    pub fn has(&self, i: usize) -> bool {
+        self.seen.get(i).is_some()
     }
 
-    /** Has site `i` hold `views`, or none. */
-    pub fn set(&mut self, i: usize, views: Option<Views>) {
-        let seen = views.map(|views| seen(&mut self.sights, &views));
-        self.seen.set(i, seen);
+    /** Site `i`'s views, if it has any. */
+    #[inline]
+    pub fn get(&self, i: usize) -> Option<Faces<Sight>> {
+        self.seen.get(i).map(|&seen| faces(&self.sights, seen))
+    }
+
+    /** Has site `i` hold `views`, or none: in the place of those it held, if they were as many. */
+    pub fn set(&mut self, i: usize, views: Option<&Faces<Sight>>) {
+        let Some(views) = views else { return self.seen.set(i, None) };
+        let n = views.each().len();
+        let first = match self.seen.get(i) {
+            Some((first, which)) if many(which) as usize >= n => *first as usize,
+            _ => {
+                self.sights.resize(self.sights.len() + n, (0, [0; 3]));
+                self.sights.len() - n
+            }
+        };
+        self.sights[first..][..n].copy_from_slice(views.each());
+        self.seen.set(i, Some((first as u32, views.which)));
     }
 
     /** Every site that has views, with them, in their order. */
-    pub fn iter(&self) -> impl Iterator<Item = (usize, Views)> {
-        self.seen.iter().map(|(i, seen)| (i, views(&self.sights, seen)))
+    pub fn iter(&self) -> impl Iterator<Item = (usize, Faces<Sight>)> {
+        self.seen.iter().map(|(i, &seen)| (i, faces(&self.sights, seen)))
     }
 
     /** As Few's `hold`, of the sights too. */
     fn hold(&mut self, held: &[usize]) {
         self.seen.hold(held);
         let mut kept = Vec::new();
-        for held in &mut self.seen.held {
-            *held = seen(&mut kept, &views(&self.sights, held));
+        for seen in &mut self.seen.held {
+            let views = faces(&self.sights, *seen);
+            seen.0 = kept.len() as u32;
+            kept.extend_from_slice(views.each());
         }
         kept.shrink_to_fit();
         self.sights = kept;
@@ -607,7 +694,7 @@ impl VoxelGrid {
         let i = self.index(x, y, z).expect("in the box");
         self.pieces.set(i, ALPHA, colours[0]);
         if colours.iter().any(|c| *c != colours[0]) {
-            self.views.set(i, Some(Views { alpha: [ALPHA; FACE_KINDS], colour: colours }));
+            self.views.set(i, Some(&Faces::by(|k| (ALPHA, colours[k]))));
         }
     }
 
@@ -764,19 +851,17 @@ impl VoxelGrid {
             grid.bricks[place] = to as i32;
         }
         let to = |i: usize| moved[i / BRICK_SITES].map(|to| (to * BRICK_SITES + i % BRICK_SITES) as u32);
-        let sorted = |words: &mut dyn Iterator<Item = Vec<u32>>| -> Vec<u32> {
-            let mut sites: Vec<Vec<u32>> = words.collect();
+        fn sorted<const WORDS: usize>(mut sites: Vec<[u32; WORDS]>) -> Vec<u32> {
             sites.sort_unstable_by_key(|w| w[0]);
-            sites.concat()
+            sites.into_flattened()
+        }
+        // As `view` gives them, each sight once.
+        let view = |(i, views): (usize, Faces<Sight>)| -> Option<[u32; VIEW_WORDS]> {
+            let (to, looks) = (to(i)?, views.map(|sight| self.handed(i, self.part(i, Some(sight)))));
+            (looks.each().len() > 1).then(|| std::array::from_fn(|w| if w == 0 { to } else { looks.get(w - 1) }))
         };
-        // As `view` gives them, without looking each face's up again.
-        let view = |(i, v): (usize, Views)| -> Option<Vec<u32>> {
-            let face = |k: usize| self.handed(i, self.part(i, Some((v.alpha[k], v.colour[k]))));
-            let (to, views) = (to(i)?, std::array::from_fn::<Look, FACE_KINDS, _>(face));
-            views.iter().any(|&v| v != views[0]).then(|| [&[to][..], &views].concat())
-        };
-        grid.views = sorted(&mut self.views.iter().filter_map(view));
-        grid.glow = sorted(&mut self.glow.iter().filter_map(|(i, g)| Some([&[to(i)?][..], g].concat())));
+        grid.views = sorted(self.views.iter().filter_map(view).collect());
+        grid.glow = sorted(self.glow.iter().filter_map(|(i, g)| Some([to(i)?, g[0], g[1], g[2]])).collect());
         // Of the bricks that hold a medium only: few do.
         let held = (0..self.sites() / BRICK_SITES).filter(|&at| self.medium.brick(at).is_some());
         let stops = |i: usize| {
@@ -832,6 +917,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn faces_made_any_way_are_held_as_their_faces_values_gathered_one_by_one() {
+        // Sites are compared as they are held (contract.rs): that is only sound if each way of making them holds
+        // the same faces alike, each value once, in the order faces first have it.
+        let (thirds, halves) = (Faces::by(|k| k % 3), Faces::by(|k| k / 6));
+        assert_eq!(thirds.each(), [0, 1, 2]);
+        assert_eq!(Faces::by(|k| k).map(|k| k % 3), thirds);
+        assert_eq!(thirds.zip_with(&halves, |a, b| (a, b)), Faces::by(|k| (k % 3, k / 6)));
+        assert_eq!(thirds.zip_with(&halves, |a, b| (a + b) % 2), Faces::by(|k| (k % 3 + k / 6) % 2));
+        assert_eq!(Faces::all(7).zip_with(&thirds, |a, b| a + b), Faces::by(|k| 7 + k % 3));
+    }
+
+    #[test]
     fn a_colour_comes_back_from_linear_as_it_went() {
         assert!((0..=255).all(|c| srgb(linear(c)) == c));
     }
@@ -846,7 +943,7 @@ mod tests {
         grid.put_whole(10, 2, 2, colour(COLOUR_ONE));
         let (third, i) = (ALPHA / 3, grid.index(12, 2, 2).unwrap());
         grid.pieces.set(i, third, colour(COLOUR_ONE / 3)[0]);
-        grid.views.set(i, Some(Views { alpha: [third; FACE_KINDS], colour: colour(COLOUR_ONE / 3) }));
+        grid.views.set(i, Some(&Faces::by(|k| (third, colour(COLOUR_ONE / 3)[k]))));
         let lamp = grid.index(18, 2, 2).unwrap();
         grid.glow.set(lamp, Some([1, 2, 3]));
         let handed = grid.to_grid();
