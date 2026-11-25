@@ -60,7 +60,7 @@ struct Args {
     /** The render distance, in lattice units. */
     #[arg(long, value_name = "UNITS", default_value_t = RENDER_DISTANCE, help_heading = "View")]
     distance: f64,
-    /** Light worked out across the world (light/): how bright the sky, the sun and what glows are (1,1,0 a clear day, 0.01,0,1 night); the steps light takes along each level before the coarser one takes over; how little of the light on a site is not followed (light's TOLERANCE). Without it, voxels are shaded by the way their faces face. */
+    /** Light worked out across the world (light/): how bright the sky, the sun and what glows are (1,1,0 a clear day, 0.01,0,1 night); the periods of two steps a line takes along each level before the coarser one takes over; how little of the light on a site is not followed (light's TOLERANCE). Without it, voxels are shaded by the way their faces face. */
     #[arg(long, value_name = "SKY,SUN,GLOW[,STEPS[,TOLERANCE]]", value_parser = parse_light, help_heading = "View")]
     light: Option<Light>,
     /** How that light shows, in the voxels (eye.rs): stops of exposure added, and how far the eye adapts to what it sees, 0 not at all, 1 a dark place as bright as day. */

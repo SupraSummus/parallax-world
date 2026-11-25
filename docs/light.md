@@ -10,8 +10,9 @@ What is left to do is in [todo.md](todo.md).
 
 ## What it gets wrong, and why
 
-Light comes along the 12 neighbours' directions only,
-and each level takes one step (`STEPS`; native's panel sets up to three)
+Light crosses each site from face to face, along 132 lines (`line`),
+and each level takes two steps along a line, a period
+(`STEPS`; native's panel sets up to three)
 before the coarser one takes over,
 or more where the coarser fills what it leaves empty.
 So light from D away comes from a level whose sites are about D across,
@@ -23,7 +24,7 @@ openings smaller than it let none (the door and the window below).
 A railway tunnel, under 1 to 4 m of rock where its hill is low,
 is lit through it from the sky,
 as the reference's tunnel under a thin roof is,
-its middle hundreds of times too bright.
+its middle 34 times too bright (with 12 directions, hundreds).
 
 Columns put a whole site where its middle was in a span,
 so the coarse levels lost a roof thinner than their spacing
@@ -32,10 +33,11 @@ along some directions
 and taking over, a coarser level's light comes to the middle of its site,
 what lies between there and where it took over unread.
 
-Three steps a level leave the tunnel ten times too bright, not hundreds,
-but the lamp several times further off.
+Two periods a level leave the tunnel's middle twice as bright as it should be,
+but light under the roofs and from the lamp several times further off.
 
-The sun is one of the 12 directions.
+The sun comes along the lines from it, one on each of the five faces it lights,
+each by its cosine, as the reference's.
 Light reads a coarser level at the nearest site and its 12 neighbours (`reads`),
 so near a corner where six voxels meet it misses one within its reach,
 and light jumps a little there;
@@ -46,9 +48,9 @@ every site within reach would leak light through walls one site thick.
 Where light is to go, a step at a time, each measured on these scenes:
 sites hold what they stop along each direction, a share, boxes' too
 (light reads a site's share already, as hosts show it);
-then coarser levels take more directions ("Ideas" in [todo.md](todo.md)).
+then fewer lines where they cost most ("Lines face to face", below).
 
-Taking over later or less did not do, each tried against the reference:
+With 12 directions, taking over later or less did not do, each tried against the reference:
 only where the coarser level is open some sites ahead,
 only the share of the light its sites around have room for,
 or after two steps.
@@ -74,41 +76,30 @@ not kept
 as the world had two forms, the hosts' and the light's,
 and each block was generated twice.
 
-A beam along a direction enters a voxel by five faces,
-a third of it by the one across and a sixth by each of four slanted to it
-(on a cubic lattice, by the one);
-light reads the site across the one, and `CROSSING` stands for the rest.
-
-Tried, the five sites read, each a line of its own from there:
-light went round walls one site thick, a third of it at each level.
-
-Tried, the slanted four only stopping, glowing and reflecting,
-what they let through the straight line's:
-walls held, and without `CROSSING` the strewn blocks stopped what they should,
-the lamp and the white room about as before
-(closer with `CROSSING`, the blocks then a third too dark);
-but the yard and the ground under the roof came out darker,
-the yard several times:
-the coarse levels' walls, a site thick, stop more of a beam five faces wide.
-Not kept.
+With 12 directions, a beam along one entered a voxel by five faces,
+the site across one read and `CROSSING` standing for the rest;
+the five read as lines of their own let light round walls one site thick,
+the four slanted only stopping left the yard several times too dark.
+Lines from face to face are what came of it.
 
 ## Against the reference
 
 Against the reference (`light/src/reference.rs`, test `against_the_reference`;
 the ignored test `maps` draws the scenes from above):
-a lamp lights the ground in four lobes, along the upward directions,
-and three times too little right under it;
-under a roof turned off the lattice, light is off by up to 1.7 times;
-along the lattice, its middle gets a third of what it should:
-from there no direction meets the lit ground past its edge;
-a wall's shadow in the sun is short and blotchy,
-as the levels that carry it get coarser;
+a lamp lights the ground within a sixth;
+under a roof along the lattice, light is three quarters of what it should be,
+and off it within a third;
+a wall's shadow in the sun is within a tenth near the wall, a quarter too dark further off;
 past a door from a yard, where only bounced light comes,
-a room is about as bright as it should be, and the yard a third as bright.
+a room is twenty times too dark, and the yard half as bright:
+the room's light is the yard seen low through the door,
+under the lowest of the lines that land on its floor;
+with 12 directions the coarser levels' blur brought it there,
+about as bright as it should be.
 
 In a closed white room, where light bounces many times,
-the light on the floor is a few times too little,
-as little as reaches it from the lamp.
+the light on the floor is a fifth too much
+(with 12 directions, a few times too little).
 
 A lamp lights only as far as the coarser levels hold it:
 the cheese's crystals stopped at level 3, and its caverns were black
@@ -125,10 +116,6 @@ Tried: the light on all the faces it shows, each by its share:
 no closer to the reference.
 And with it a whole voxel touched read as any site met, not lit as the face:
 a wall one site thick lit its dark side, and a white room was darker.
-
-A whole voxel touching a face is taken to be lit as the face is
-(`weighed` in `light/`), as a flat floor's are;
-where it is not, at a wall's edge or a corner, the face is lit wrong.
 
 It sends back no glow: a lamp's voxels do not light each other's faces,
 so a lamp of white voxels is a third dimmer near than the reference's.
@@ -157,24 +144,18 @@ till hosts read sites as light does
 
 What is found at a site is a function of the world alone,
 so the Lights keep it together, every level's alike,
-and two finding the same at once do no harm.
-Each site is kept under a lock of its own (`Lit` in `light/`):
-under one lock a column of tiles, and found by a map,
-the threads waited for each other, and the first view took a quarter more work.
+and two finding the same at once do no harm:
+each value is kept once found, by whichever finds it first,
+and read with no lock (`Leaving` in `light/`).
+Under one lock a column of tiles, and found by a map,
+the threads waited for each other, and the first view took a quarter more work;
+a lock a site, no less work for one thread than none.
 Each Light holds the tiles it read (`Level`), asking the others for each once.
 They keep the light of the tiles read lately (`KEPT_SITES`, `Shared::begun`):
 fewer hold less, and under what a view reads at once, lighting slows by half.
 Forgotten brick by brick, not tile by tile,
 a flight held a tenth less and owed twice the bricks.
-Most of what a site kept takes is its rounds,
-kept only of sites that stop light (no site reads another's).
-They, and what they are found from (`Paths`),
-are in 16 bits a channel (`Packed`): half of what floats took,
-a hundredth of a view's pixels one step of colour off.
-A site's settled light is not, read far more often than found:
-packed, it cost more time than the rest for a third of what they saved.
-Room for each round alone, not a vector's to spare,
-held a twentieth less for a tenth more work.
+What a site keeps, and how small, is in "Lines face to face", below.
 
 Native's light sliders light the world anew (`World::relight`),
 as slowly as at the start.
@@ -258,6 +239,56 @@ Light adds up, so it is the sum of the sky's, the sun's and the glow's;
 kept apart, the sliders could only mix them,
 but lighting and keeping that light would cost three times as much.
 
+## Lines face to face, and what they cost
+
+The light of a site is kept by the face of the next it lands on,
+11 lines a face, each face's found only where asked (`Leaving` in `light/`):
+in the forest's first view, about 7 of a site's 12.
+A face keeps what comes along its lines (`Paths`),
+the sites met that reflect, and what it lands with in each round;
+132 lines in all, against 12 directions: several times what a site kept.
+So it is small (`Packed`, `Reflects`):
+a light in a word, 9 bits a channel and an exponent they share (RGB9E5),
+and a site met in a word too, its share of 6 bits a channel and 3 of exponent,
+as what reflects less than the tolerance is owed to the next;
+a face about 260 bytes, a third less than in 16 bits a channel,
+3% of a view's pixels one step of colour off, none two,
+and the reference's scenes off by a hundredth or two more.
+
+Measured against 12 directions,
+on `look`'s pictures 240 pixels wide (the light on one thread, its tiles made as it reads them)
+and native's first view of the valley (the voxels engine, 640 by 400):
+
+| | 12 directions | lines |
+|---|---|---|
+| `look`, forest, lit | 6.6 s, 660 MB | 22 s, 1160 MB |
+| `look`, valley, lit | 10.6 s, 770 MB | 34–40 s, 1290 MB |
+| `look`, city at night | 3.5 s, 520 MB | 8.3 s |
+| native, valley: the threads' work | 9–10 s | 70–87 s |
+| native, valley: memory at most | 1.1 GB | 1.9 GB |
+
+`look` lights only the faces its pixels see, which few lines from the sky reach,
+and their reflections; native lights every voxel of a brick a ray can meet,
+all faces of it light gets to:
+in a wood's crowns, every site filled in part has 12 open neighbours, each a face of 11 lines.
+There, by the model itself, a site costs 132 lines two steps each, not 12 lines one step.
+
+Tried, and kept:
+
+- what a site is seen as, kept by each Light for the last few thousand faces' lines (`seen`):
+  a sixth less time, where most steps read a site read just before;
+- each face's rounds and light kept once found, with no lock, no vector, no `Arc`:
+  much the same time for one thread, fewer allocations;
+- the last round's lines kept to be the light found, not found again: a sixth fewer reads.
+
+Tried, and not kept:
+
+- a line's crossings of a site by its length through it,
+  3/4 to 3/2 as its two steps turn (where `CROSSING` is 3/2 for all):
+  a lamp smaller than a site glowed dimmer, the strewn blocks stopped too little,
+  each a few times further off the reference;
+- a site's 12 faces kept in one block, not each when begun: no faster, more held.
+
 ## Sites, as hosts and light see them
 
 How a site shows to hosts and to light, and what glows, is a prototype too:
@@ -291,13 +322,12 @@ How a site shows to hosts and to light, and what glows, is a prototype too:
   What of it falls on a whole site is lost, as a fill behind a wall is:
   in a room one site wide it glows a third as bright,
   and the white room's floor is darker for it;
-  two or three steps a level (`STEPS`), not one,
+  with 12 directions, two or three steps a level, not one,
   would read each level only where its sites are small next to the distance,
   but against the reference they sharpen the wall's shadow
   and leave less light under the roofs and right under the lamp:
   the coarser levels' blur no longer hides how few the directions are.
-  Light entering a site by each of the five faces it crosses
-  (weighed as `cosines`), not by one,
+  Light entering a site by each of the five faces it crosses, not by one,
   did better on the flat scenes with four or five steps,
   but darkened the valley, as its side lines ran into uneven ground,
   did not help the yard, and cost 2.5 to 4 times the time;
