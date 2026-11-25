@@ -169,10 +169,6 @@ Numbers are for the forest at 1280×800, as measured when written.
   so a put adds to each class of faces once (`pieces` in `generate.rs`),
   two or three, not twelve;
   still, at level 4, putting them is over a tenth of the instructions.
-  A `Look` still says its faces in arrays of twelve, gathered at each put:
-  drawn as `Faces`, `Added::of` would need no case for looks alike.
-  But a measured thing's sites (`Sites`) would then hold a value and an index a face,
-  more than an optional array of each, and those are most of the contract's memory.
   Their glows are kept apart (`glows`), as few glow:
   one record a site would be read and written once, not twice,
   for memory not measured.

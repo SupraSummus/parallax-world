@@ -2,7 +2,7 @@
 //! looks like, in bricks BRICK units wide, only bricks with voxels stored.
 //! The same layout as the baker's Grid, which `to_grid` hands over.
 
-use std::sync::OnceLock;
+use std::sync::{LazyLock, OnceLock};
 
 use fcc::{FACE_KINDS, Look, VIEW_WORDS};
 
@@ -102,7 +102,7 @@ pub type Glows = [[u32; 3]; FACE_KINDS];
  * the order faces first have them: faces alike are one, and what is
  * done to them is done once.
  */
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Faces<T> {
     /** Its values, `n` of them; the rest default. */
     of: [T; FACE_KINDS],
@@ -111,7 +111,15 @@ pub struct Faces<T> {
     which: [u8; FACE_KINDS],
 }
 
+/** By axis, which way each face faces along it (`along`): 0 back, 1 across it, 2 forth. */
+static WAYS: LazyLock<[Faces<usize>; 3]> = LazyLock::new(|| [0, 1, 2].map(|axis| Faces::by(|k| (VOXEL_FACES[k][axis] + 1) as usize)));
+
 impl<T: Copy + Default + PartialEq> Faces<T> {
+    /** Each face's value by which way it faces along `axis`: of `ways`, those facing back (−), across it (0) and forth (+). */
+    pub fn along(axis: usize, ways: [T; 3]) -> Faces<T> {
+        WAYS[axis].map(|way| ways[way])
+    }
+
     /** Each face's value, `value` of it. */
     pub fn by(mut value: impl FnMut(usize) -> T) -> Faces<T> {
         let mut faces = Faces { of: [T::default(); FACE_KINDS], n: 0, which: [0; FACE_KINDS] };
@@ -944,6 +952,9 @@ mod tests {
         assert_eq!(thirds.zip_with(&halves, |a, b| (a, b)), Faces::by(|k| (k % 3, k / 6)));
         assert_eq!(thirds.zip_with(&halves, |a, b| (a + b) % 2), Faces::by(|k| (k % 3 + k / 6) % 2));
         assert_eq!(Faces::all(7).zip_with(&thirds, |a, b| a + b), Faces::by(|k| 7 + k % 3));
+        for axis in [0, 1, 2] {
+            assert_eq!(Faces::along(axis, [0, 0, 1]), Faces::by(|k| VOXEL_FACES[k][axis].max(0)));
+        }
     }
 
     #[test]

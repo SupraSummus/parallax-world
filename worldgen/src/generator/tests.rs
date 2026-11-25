@@ -56,8 +56,7 @@ fn a_measured_far_form_keeps_what_rays_see() {
     // too. Rays from the sides see the block through the faces towards them, but in the top row, where the
     // glass shows at their tops. Each block picks its cells' kinds anew.
     let seen = |sites: &Sites, ray: [i64; 3]| {
-        let looks: std::collections::HashMap<[i64; 3], Look> = sites.iter().map(|s| (s.0, s.1)).collect();
-        let face = |look: &Look, k: usize| look.faces.map_or(look.kind, |faces| faces[k]);
+        let looks: std::collections::HashMap<[i64; 3], Faces<Kind>> = sites.iter().map(|s| (s.0, s.2)).collect();
         // The faces a ray along `ray` may enter by: those facing back along it.
         let faces: Vec<usize> = (0..FACE_KINDS).filter(|&k| (0..3).map(|c| VOXEL_FACES[k][c] as i64 * ray[c]).sum::<i64>() < 0).collect();
         let (mut glass, mut hits) = (0, 0);
@@ -67,7 +66,7 @@ fn a_measured_far_form_keeps_what_rays_see() {
                 let along = |t: i64| if ray[1] < 0 { [u, 127 - t, v] } else { [t - 64, 32 + (u % 16) - 8, v] };
                 let Some(look) = (0..192).find_map(|t| looks.get(&nearest_site(along(t).map(|v| v * ONE), 16))) else { continue };
                 hits += faces.len();
-                glass += faces.iter().filter(|&&k| face(look, k) == 2).count();
+                glass += faces.iter().filter(|&&k| look.get(k) == 2).count();
             }
         }
         glass as f64 / hits as f64
@@ -89,7 +88,7 @@ fn a_measured_far_form_keeps_what_rays_see() {
     let kept: Vec<f64> = on_threads(16, |i| {
         let cloud = cloud();
         let sites = measure(&cloud, &format!("cloud {i}"), "clouds", bounds_of(&cloud), fixed(2.0), 16, 1, &Measured::default());
-        sites.iter().map(|s| s.3 as f64 / SHARE as f64).sum()
+        sites.iter().map(|s| s.4 as f64 / SHARE as f64).sum()
     });
     assert!(kept.iter().all(|n| (26.0..38.0).contains(n)), "sparse clouds keep {kept:?} of their about 134 cells");
 }
