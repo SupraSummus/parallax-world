@@ -276,18 +276,19 @@ fn cycle(levels: &[Level], l: usize, r: &[Six], work: &mut Work) -> Vec<Six> {
 pub fn forces(lattice: &Lattice, alive: &[bool], gone: &[bool], work: &mut Work) -> Vec<V3> {
     let weight = |v: usize| [0.0, -lattice.voxels[v].m * GRAVITY, 0.0, 0.0, 0.0, 0.0];
     let x = motions(lattice, alive, gone, &weight, work);
-    let mut found = vec![[0.0; 3]; lattice.bonds.len()];
+    let mut f = moved(lattice, &x);
     for (b, bond) in lattice.bonds.iter().enumerate() {
-        if alive[b] && !gone[bond.i] && !gone[bond.j] {
-            found[b] = bond.force(sub(at(lattice, &x, bond.j, bond.p), at(lattice, &x, bond.i, bond.p)));
+        if !alive[b] || gone[bond.i] || gone[bond.j] {
+            f[b] = [0.0; 3];
         }
     }
-    found
+    f
 }
 
-/// Where a voxel's motion takes a point.
-pub fn at(lattice: &Lattice, x: &[Six], v: usize, p: V3) -> V3 {
-    shift(x[v], sub(p, lattice.voxels[v].x))[..3].try_into().unwrap()
+/// Each bond's force, on j's side, its voxels moved by x.
+pub fn moved(lattice: &Lattice, x: &[Six]) -> Vec<V3> {
+    let at = |v: usize, p: V3| -> V3 { shift(x[v], sub(p, lattice.voxels[v].x))[..3].try_into().unwrap() };
+    lattice.bonds.iter().map(|b| b.force(sub(at(b.j, b.p), at(b.i, b.p)))).collect()
 }
 
 /// Each voxel's motion (translation, rotation about its centre) under
@@ -344,13 +345,6 @@ fn coarser(level: &Level, part: &[Option<usize>], key: &[[i64; 3]]) -> (Vec<usiz
         }
     }
     let mut parent: Vec<usize> = (0..parts).collect();
-    fn find(p: &mut [usize], mut a: usize) -> usize {
-        while p[a] != a {
-            p[a] = p[p[a]];
-            a = p[a];
-        }
-        a
-    }
     for joint in &level.joints {
         if let (Some(i), Some(j)) = (joint.i, joint.j)
             && their[i] == their[j]
@@ -394,18 +388,8 @@ pub fn settle(lattice: &Lattice) -> Outcome {
             gone[v] |= !held[v];
         }
         let f = forces(lattice, &alive, &gone, &mut work);
-        let s = stresses(lattice, &f);
-        let over: Vec<bool> = bonds
-            .iter()
-            .enumerate()
-            .map(|(b, bond)| {
-                // Around the bond: its free voxels' stress, on average.
-                let ends: Vec<usize> = [bond.i, bond.j].into_iter().filter(|&v| !voxels[v].held).collect();
-                let mean: M3 =
-                    std::array::from_fn(|r| std::array::from_fn(|c| ends.iter().map(|&v| s[v][r][c]).sum::<f64>() / ends.len() as f64));
-                alive[b] && !gone[bond.i] && !gone[bond.j] && bond.mat.utilisation(&bond.stress(&mean, f[b])) > 1.0
-            })
-            .collect();
+        let u = used(lattice, &f);
+        let over: Vec<bool> = bonds.iter().enumerate().map(|(b, bond)| alive[b] && !gone[bond.i] && !gone[bond.j] && u[b] > 1.0).collect();
         // A face breaks whole: what is joined at all is joined rigidly.
         let mut broke = false;
         for (face, bonds) in over.chunks(PER_FACE).enumerate() {
@@ -423,9 +407,32 @@ pub fn settle(lattice: &Lattice) -> Outcome {
     Outcome { fallen: if free > 0.0 { fell / free } else { 0.0 }, rounds, work: work.0 }
 }
 
+/// The share of its strength each bond uses, bearing `force`: at a bond,
+/// its free voxels' stress, on average, but on its face what it bears.
+pub fn used(lattice: &Lattice, force: &[V3]) -> Vec<f64> {
+    let s = stresses(lattice, force);
+    let voxels = &lattice.voxels;
+    let bonds = lattice.bonds.iter().zip(force);
+    bonds
+        .map(|(b, f)| {
+            let ends: Vec<usize> = [b.i, b.j].into_iter().filter(|&v| !voxels[v].held).collect();
+            let mean: M3 =
+                std::array::from_fn(|r| std::array::from_fn(|c| ends.iter().map(|&v| s[v][r][c]).sum::<f64>() / ends.len().max(1) as f64));
+            b.mat.utilisation(&b.stress(&mean, *f))
+        })
+        .collect()
+}
+
+/// What `used` is with everything standing as it is.
+pub fn used_standing(lattice: &Lattice) -> Vec<f64> {
+    let alive = vec![true; lattice.bonds.len()];
+    let gone = vec![false; lattice.voxels.len()];
+    used(lattice, &forces(lattice, &alive, &gone, &mut Work(0.0)))
+}
+
 /// Each voxel's stress: the forces on it from its bonds, each times where
 /// it acts from the voxel's centre, over its volume.
-pub fn stresses(lattice: &Lattice, force: &[V3]) -> Vec<M3> {
+fn stresses(lattice: &Lattice, force: &[V3]) -> Vec<M3> {
     let mut s = vec![[[0.0; 3]; 3]; lattice.voxels.len()];
     for (bond, f) in lattice.bonds.iter().zip(force) {
         for (v, on) in [(bond.i, *f), (bond.j, mul(*f, -1.0))] {
@@ -494,39 +501,27 @@ pub const MARGIN: f64 = 2.0;
 /// Strength no less than what a world as generated needs, MARGIN times:
 /// each cell of `generated` loaded under its weight, the most of its
 /// strength any bond in it uses; `lattice`'s bonds in the same cells, so
-/// much stronger at least. A cell of level 0 is a voxel, a bond between
-/// two in both; above, a beam is inside its cell.
+/// much stronger at least.
 pub fn as_generated(lattice: &mut Lattice, generated: &Lattice) {
-    let cells = |l: &Lattice, b: &Bond| -> Vec<[i64; 3]> {
-        let (a, c) = (l.around[b.i], l.around[b.j]);
-        match a.iter().find(|s| c.contains(s)) {
-            Some(s) => vec![*s],
-            None => vec![a[0], c[0]],
-        }
-    };
-    let alive = vec![true; generated.bonds.len()];
-    let gone = vec![false; generated.voxels.len()];
-    let f = forces(generated, &alive, &gone, &mut Work(0.0));
-    let s = stresses(generated, &f);
-    let mut need: std::collections::HashMap<[i64; 3], f64> = std::collections::HashMap::new();
-    for (k, b) in generated.bonds.iter().enumerate() {
-        let ends: Vec<usize> = [b.i, b.j].into_iter().filter(|&v| !generated.voxels[v].held).collect();
-        if ends.is_empty() {
-            continue;
-        }
-        let mean: M3 = std::array::from_fn(|r| std::array::from_fn(|c| ends.iter().map(|&v| s[v][r][c]).sum::<f64>() / ends.len() as f64));
-        let u = b.mat.utilisation(&b.stress(&mean, f[k]));
-        for cell in cells(generated, b) {
+    let mut need: HashMap<[i64; 3], f64> = HashMap::new();
+    for (b, u) in generated.bonds.iter().zip(used_standing(generated)) {
+        for cell in generated.cells(b) {
             let n = need.entry(cell).or_insert(0.0);
             *n = n.max(u);
         }
     }
-    let bonds = std::mem::take(&mut lattice.bonds);
-    lattice.bonds = bonds
-        .into_iter()
-        .map(|b| {
-            let stronger = cells(lattice, &b).iter().map(|c| need.get(c).copied().unwrap_or(0.0) * MARGIN).fold(1.0, f64::max);
-            Bond { mat: Mat { ft: b.mat.ft * stronger, fc: b.mat.fc * stronger, fs: b.mat.fs * stronger, ..b.mat }, ..b }
-        })
-        .collect();
+    let stronger = |b: &Bond| lattice.cells(b).iter().map(|c| need.get(c).map_or(0.0, |u| u * MARGIN)).fold(1.0, f64::max);
+    let by: Vec<f64> = lattice.bonds.iter().map(stronger).collect();
+    for (b, by) in lattice.bonds.iter_mut().zip(by) {
+        b.mat = b.mat.stronger(by);
+    }
+}
+
+/// The root of a's set, a forest of parents halved as it is walked.
+pub(crate) fn find(p: &mut [usize], mut a: usize) -> usize {
+    while p[a] != a {
+        p[a] = p[p[a]];
+        a = p[a];
+    }
+    a
 }

@@ -69,6 +69,11 @@ impl Mat {
         (s1 / self.ft).max(-s3 / self.fc).max((s1 - s3) / (2.0 * self.fs))
     }
 
+    /// The same, `by` times as strong.
+    pub fn stronger(self, by: f64) -> Mat {
+        Mat { ft: self.ft * by, fc: self.fc * by, fs: self.fs * by, ..self }
+    }
+
     /// Where two materials meet, the weaker of each.
     pub fn meet(self, o: Mat) -> Mat {
         Mat {

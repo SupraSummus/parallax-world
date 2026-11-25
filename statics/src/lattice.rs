@@ -6,6 +6,18 @@ use std::collections::HashMap;
 
 pub const UNIT: f64 = 0.125;
 
+impl Lattice {
+    /// The cells of its level a bond lies in: the one its beam is inside,
+    /// or the two its face joins.
+    pub fn cells(&self, b: &Bond) -> Vec<[i64; 3]> {
+        let (a, c) = (self.around[b.i], self.around[b.j]);
+        match a.iter().find(|s| c.contains(s)) {
+            Some(s) => vec![*s],
+            None => vec![a[0], c[0]],
+        }
+    }
+}
+
 /// Bonds to a face.
 pub const PER_FACE: usize = 4;
 
