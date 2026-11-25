@@ -163,13 +163,60 @@ one number for a cell's strength makes some cells too weak and others too strong
 What a beam bears against how much of the finer matter's strength it uses
 is still to be found per beam, not per cell.
 
+## What it may get wrong, and what not
+
+Statics will be off from level 0, more so at coarser levels;
+what matters is which errors are let in.
+At each level, at its own resolution, these hold:
+mass is kept (it may move, it is never lost);
+a cell full of a material is that material;
+every level follows the same rules, and gives the same answer twice;
+taking matter away never makes a thing stronger,
+and loading it more never helps it hold;
+what a level sees apart stays apart,
+but what is smaller than its sites may be taken into what is next to it,
+a voxel hanging in the air held up by its supported neighbour;
+and what a finer level decides is an edit, which no coarser level undoes:
+near the camera that voxel falls, far off it may stay, unseen.
+Taking a small thing into a large one is let in;
+joining two large things that only lie side by side in a cell is not,
+as it holds up what should fall:
+a rigid cell does both, beams between a cell's faces only the first.
+
+What should be right as it is, not to the number:
+what is overloaded several times over falls,
+what bears a fraction of its strength stands,
+long thin cantilevers break,
+a braced frame is much stiffer than one without braces,
+and cutting the only support of something brings it down.
+What may be off: the threshold itself, within two or three times,
+so that a structure near its strength
+may stand at one level and fall at another;
+where and into how many pieces a thing breaks;
+and small things far off.
+
+A world as generated stands, at every level:
+a coarse level's errors are in a structure before an edit as after it,
+so what decides is how much an edit changes what it bears.
+A leg cut from a lattice tower raised the most its members bear
+by half at levels 0 to 1 m alike,
+though what they bore differed between levels up to four times;
+at 2 m, where the cut is smaller than a cell, not at all.
+So a cell's strength is to be no less than its state as generated needs,
+with a margin;
+then something generated near its strength
+holds more than it would, before an edit brings it down.
+
 ## Where it is to go
 
-A beam's strength first, per beam:
-what it bears against how much of the finer matter's strength that uses,
-from the same moves of a cell's faces its stiffness comes from;
-measured against level 0 on the tower, the tree, the slab and a solid beam,
-and on a lattice tall enough to be a sponge at its coarsest levels.
+Next: strength no less than a world as generated needs,
+and the verdicts after edits checked against level 0,
+not the stresses: a tower's leg cut, a tree cut, a column taken out,
+a cantilever made longer;
+a voxel hanging in the air,
+which falls near the camera and may be taken in far off;
+and a trunk cut through by a kerf inside a coarse cell,
+which falls at every level that sees the trunk.
 What holds is still whatever is deep in bulk within a radius in metres;
 by the same rule at every level, it would be in sites.
 And the levels are to be tied as light's are:
