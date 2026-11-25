@@ -10,7 +10,7 @@ use fcc::{FACE_KINDS, VOXEL_FACES};
 
 use crate::cost::{self, Work};
 use crate::curve::Curve;
-use crate::grid::{ALPHA, BRICK, Box3, COLOUR_ONE, VoxelGrid, linear, srgb};
+use crate::grid::{ALPHA, BRICK, Box3, COLOUR_ONE, Faces, VoxelGrid, linear, srgb};
 use crate::js;
 use crate::noise::{Fixed, Fx, ONE, Rng, fixed, float, hash, hash_text, hash64};
 use crate::recent::Memo;
@@ -37,21 +37,22 @@ pub(crate) use alone::unnumbered;
 pub type Kind = u8;
 
 /**
- * What a site is of: a kind, and the kind of each of its faces (by bake's
- * VOXEL_FACES), what is seen looking at that face, where they differ:
- * a coarse site at a house's eaves is roof seen from above, wall from the side.
+ * What a site is of: a kind, and if drawn face by face (by bake's
+ * VOXEL_FACES), of each face the kind seen looking at it and its share
+ * (of SHARE) of the rays entering by it: a coarse site at a house's
+ * eaves is roof seen from above, wall from the side; a wall stops the
+ * rays across it, few along it. Else every face is of its kind, by the
+ * share put.
  */
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Look {
     pub kind: Kind,
-    pub faces: Option<[Kind; FACE_KINDS]>,
-    /** Its share (of SHARE) of the rays entering by each face, where they differ: a wall stops those across it, few along it. */
-    pub cover: Option<[u32; FACE_KINDS]>,
+    pub faces: Option<Faces<(Kind, u32)>>,
 }
 
 impl From<Kind> for Look {
     fn from(kind: Kind) -> Look {
-        Look { kind, faces: None, cover: None }
+        Look { kind, faces: None }
     }
 }
 

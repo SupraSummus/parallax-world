@@ -4,8 +4,12 @@
 
 use super::*;
 
-/** A thing's sites of a level: each what it is of, how it meets the world, its share and pick (Put). */
-pub(super) type Sites = Vec<([i64; 3], Look, Op, u32, u32)>;
+/**
+ * A thing's sites of a level: each what it is of (a kind, and each face's
+ * kind, without a `Look`'s covers: a population keeps many, `Measured`),
+ * how it meets the world, its share and pick (Put).
+ */
+pub(super) type Sites = Vec<([i64; 3], Kind, Faces<Kind>, Op, u32, u32)>;
 
 pub(super) enum Draw<'a> {
     /** A field given along its lines or at each site. */
@@ -44,16 +48,14 @@ pub(super) fn draw(drawable: &Drawable, seed: u64, s: i64, clip: &Box3, floors: 
             let mut tests = 0;
             for (i, shape) in shapes.iter().enumerate() {
                 let seed = hash_text(&format!("{}#{}{i}", drawable.key, if *far { "far" } else { "" }), seed);
-                tests += draw_shape(shape, seed, s, clip, &mut |share, cover, pick, x, y, z| {
-                    put(Look { cover, ..shape.kind.into() }, shape.op, share, pick, x, y, z)
-                });
+                tests += draw_shape(shape, seed, s, clip, put);
             }
             Work { nodes: 1, tests, ..Work::default() }
         }
         Draw::Sites(sites) => {
-            for &([x, y, z], look, op, share, pick) in sites.iter() {
+            for &([x, y, z], kind, faces, op, share, pick) in sites.iter() {
                 if clip.holds([x, y, z]) {
-                    put(look, op, share, pick, x, y, z);
+                    put(Look { kind, faces: Some(faces.map(|k| (k, share))) }, op, share, pick, x, y, z);
                 }
             }
             Work { nodes: 1, tests: sites.len() as u64, ..Work::default() }
@@ -217,14 +219,10 @@ fn draw_field(field: &Field, lines: &Lines, seed: u64, s: i64, clip: &Box3, floo
                                     parts.retain(|((from, to), _)| from < to);
                                     parts.sort_by(|((p, _), _), ((q, _), _)| p.total_cmp(q));
                                     let [down, up, along] = held(&parts, e * CHORD * s as f64);
-                                    let cover: [u32; FACE_KINDS] = std::array::from_fn(|k| match VOXEL_FACES[k][axis] {
-                                        1 => down,
-                                        -1 => up,
-                                        _ => along,
-                                    });
-                                    let look = Look { cover: cover.iter().any(|c| *c != along).then_some(cover), ..span.kind.into() };
+                                    let kind = span.kind;
+                                    let faces = Faces::along(axis, [(kind, up), (kind, along), (kind, down)]);
                                     // A see-through kind has one share for every face (VoxelGrid's `medium`): its most across the line.
-                                    put(look, op, down.max(up), pick, site[0], site[1], site[2]);
+                                    put(Look { kind, faces: Some(faces) }, op, down.max(up), pick, site[0], site[1], site[2]);
                                 }
                                 w += 2;
                             }
@@ -327,16 +325,11 @@ fn cover(spans: &[&Span], axis: usize, line: [i64; 2], (lo, hi): (i64, i64), s: 
         parts.sort_by(|p, q| p.0.total_cmp(&q.0));
         if let (Some(bottom), Some(top)) = (parts.first(), parts.iter().max_by(|p, q| p.1.total_cmp(&q.1))) {
             let most = parts.iter().max_by(|p, q| (p.1 - p.0).total_cmp(&(q.1 - q.0))).expect("a part").2;
-            let faces: [Kind; FACE_KINDS] = std::array::from_fn(|k| match VOXEL_FACES[k][axis] {
-                1 => top.2,
-                -1 => bottom.2,
-                _ => most,
-            });
             ends.clear();
             ends.extend(parts.iter().map(|p| (p.0, p.1)));
             let [across, along] = [true, false].map(|across| share(slabs(across, ends.iter().copied(), op == Op::Carve)));
-            let cover = (across != along).then(|| std::array::from_fn(|k| if VOXEL_FACES[k][axis] == 0 { along } else { across }));
-            put(Look { kind: most, faces: faces.iter().any(|&k| k != most).then_some(faces), cover }, across.max(along), w);
+            let faces = Faces::along(axis, [(bottom.2, across), (most, along), (top.2, across)]);
+            put(Look { kind: most, faces: Some(faces) }, across.max(along), w);
         }
         w += 2;
     }
@@ -362,9 +355,7 @@ fn draw_field_shapes(field: &Field, shapes: &[Shape], seed: u64, s: i64, clip: &
         let b = &shape.bounds;
         let picks = hash64(hash64(field_seed, b.min[0], b.min[1], b.min[2]), b.max[0], b.max[1], b.max[2]);
         work.shapes += 1;
-        work.tests += draw_shape(shape, picks, s, clip, &mut |share, cover, pick, x, y, z| {
-            put(Look { cover, ..shape.kind.into() }, shape.op, share, pick, x, y, z)
-        });
+        work.tests += draw_shape(shape, picks, s, clip, put);
     }
     work
 }

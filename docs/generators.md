@@ -245,7 +245,7 @@ how many rays get how far, and what they stop on.
   its houses lost half their roofs at level 6.
   Each face of a coarse site is of a kind
   in proportion to what rays through it see
-  (a site's `Look`: a kind, and one per face where they differ,
+  (a site's `Look`: a kind, and one per face,
   so a house's eaves are roof from above and wall from the side).
   Along the face's normal, a line of nearest neighbours,
   each column's first fine site from that end

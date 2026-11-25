@@ -713,15 +713,15 @@ pub(super) fn measure(
         // Its share, of each kind as much as its faces see of it, each kind's of what the ones before leave, so that
         // together they stop as much as the cell's share; each with the faces seen.
         let faces = faces.map(|mut counts| pick(&mut counts).0);
+        let faces = Faces::by(|k| faces[k]);
         // As fractions of `whole` times `total`, exact: its part, and what the ones before leave of the site, never
         // less than the part.
         let total = all.iter().map(|e| e.2).sum::<u32>().max(1) as u128;
         let mut before = 0u128;
         for &(kind, op, n) in &all {
             let (part, left) = (shares[i] * n as u128, whole * total - shares[i] * before);
-            let look = Look { kind, faces: faces.iter().any(|k| *k != kind).then_some(faces), cover: None };
             let picked = to_pick(hash(picks.wrapping_add(kind as u64 + 1), x * s, y * s, z * s));
-            sites.push((site, look, op, (SHARE as u128 * part / left) as u32, picked));
+            sites.push((site, kind, faces, op, (SHARE as u128 * part / left) as u32, picked));
             before += n as u128;
         }
     }

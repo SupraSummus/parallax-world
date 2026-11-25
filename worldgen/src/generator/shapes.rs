@@ -479,9 +479,6 @@ impl Shape {
     }
 }
 
-/** Puts a site: its share, its share of each face's rays where they differ, its pick, and where it is. */
-type PutSite<'a> = dyn FnMut(u32, Option<[u32; FACE_KINDS]>, u32, i64, i64, i64) + 'a;
-
 /**
  * Of the rays through a voxel s across along a face's direction parallel
  * to a sheet t thick, across it near the voxel's centre: the share
@@ -519,11 +516,12 @@ pub(super) fn around(p: [f64; 3]) -> Vec<([i64; 3], f64)> {
  * ellipsoid's least size under s) stops the rays crossing it as its
  * thickness does, those along it as few as are within it.
  */
-pub(super) fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &mut PutSite) -> u64 {
+pub(super) fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &mut Put) -> u64 {
     let s = si as f64;
     let spacing = si * ONE;
     let small = shape.extents.iter().filter(|e| e.to_bits() < spacing).count();
-    let picked = |x: i64, y: i64, z: i64| to_pick(hash(seed, x * si, y * si, z * si));
+    let mut put =
+        |look: Look, share: u32, x: i64, y: i64, z: i64| put(look, shape.op, share, to_pick(hash(seed, x * si, y * si, z * si)), x, y, z);
     if small == 3 {
         let whole = share(shape.area / (VOXEL_AREA * s * s));
         let around = around(shape.centre.map(|c| c as f64 / spacing as f64));
@@ -533,7 +531,7 @@ pub(super) fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &m
         shares[nearest] += whole - shares.iter().sum::<u32>();
         for (&([x, y, z], _), share) in around.iter().zip(shares) {
             if clip.holds([x, y, z]) {
-                put(share, None, picked(x, y, z), x, y, z);
+                put(shape.kind.into(), share, x, y, z);
             }
         }
         return around.len() as u64;
@@ -577,7 +575,7 @@ pub(super) fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &m
     match small {
         0 => {
             let share = filled(s);
-            sites(clip, &mut |x, y, z| put(share(x, y, z), None, picked(x, y, z), x, y, z))
+            sites(clip, &mut |x, y, z| put(shape.kind.into(), share(x, y, z), x, y, z))
         }
         1 => {
             let thick = shape.extents.into_iter().min().expect("three").to_f64();
@@ -587,15 +585,15 @@ pub(super) fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &m
             };
             let Some(axis) = axis else {
                 let share = filled(thick / CHORD);
-                return sites(clip, &mut |x, y, z| put(share(x, y, z), None, picked(x, y, z), x, y, z));
+                return sites(clip, &mut |x, y, z| put(shape.kind.into(), share(x, y, z), x, y, z));
             };
             // Across it at 45° (every face's direction crossing it), as thick as √2 t; along it, a cell's chord through it.
             let (across, along) = (filled(thick * std::f64::consts::SQRT_2 / CHORD), filled(s * std::f64::consts::SQRT_2 / CHORD));
             let within = (ALONG * thick / s).min(1.0);
             sites(clip, &mut |x, y, z| {
                 let (across, along) = (across(x, y, z), (along(x, y, z) as f64 * within) as u32);
-                let cover = std::array::from_fn(|k| if VOXEL_FACES[k][axis] == 0 { along } else { across });
-                put(across, Some(cover), picked(x, y, z), x, y, z)
+                let kind = shape.kind;
+                put(Look { kind, faces: Some(Faces::along(axis, [(kind, across), (kind, along), (kind, across)])) }, across, x, y, z)
             })
         }
         _ => {
@@ -603,7 +601,7 @@ pub(super) fn draw_shape(shape: &Shape, seed: u64, si: i64, clip: &Box3, put: &m
             let mut count = 0;
             let tested = sites(&EVERYWHERE, &mut |_, _, _| count += 1);
             let chance = shape.area / (count as f64 * VOXEL_AREA * s * s);
-            tested + sites(clip, &mut |x, y, z| put(share(chance), None, picked(x, y, z), x, y, z))
+            tested + sites(clip, &mut |x, y, z| put(shape.kind.into(), share(chance), x, y, z))
         }
     }
 }

@@ -255,7 +255,7 @@ fn see_whole(
     [x, y, z]: [i64; 3],
     own: impl FnOnce() -> [u32; 3],
 ) -> bool {
-    if share < SHARE || look.cover.is_some() || look.faces.is_some() || kind.glows || (kind.medium && op != Op::Carve) {
+    if share < SHARE || look.faces.is_some() || kind.glows || (kind.medium && op != Op::Carve) {
         return false;
     }
     let Some(i) = grid.index(x, y, z) else { return true };
@@ -319,11 +319,9 @@ impl Added {
             (own.map(|c| c as u16), glow)
         };
         let own = sight(look.kind);
-        // A look alike through every face, as most are, is so without asking each.
-        let faces = match (look.faces, look.cover) {
-            (None, None) => Faces::all((own, share)),
-            (kinds, cover) => Faces::by(|k| (kinds.map_or(look.kind, |kinds| kinds[k]), cover.map_or(share, |cover| cover[k])))
-                .map(|(kind, cover)| (if kind == look.kind { own } else { sight(kind) }, cover)),
+        let faces = match look.faces {
+            None => Faces::all((own, share)),
+            Some(faces) => faces.map(|(kind, cover)| (if kind == look.kind { own } else { sight(kind) }, cover)),
         };
         let kind = &kinds[look.kind as usize];
         Added {
@@ -811,7 +809,7 @@ mod tests {
     fn a_site_put_whole_outright_is_as_its_sums_make_it() {
         let kind = |walk_through, glows, medium| KindDef { name: "", kind_type: 0, colors: &[], walk_through, glows, medium };
         let kinds = [kind(false, false, false), kind(true, false, false), kind(false, true, false), kind(true, false, true)];
-        let (plain, sheet) = (Look::from(0), Look { cover: Some([SHARE / 3; FACE_KINDS]), ..Look::from(0) });
+        let (plain, sheet) = (Look::from(0), Look { kind: 0, faces: Some(Faces::all((0, SHARE / 3))) });
         let colour = |_: Kind| [40_000, 20_000, 10_000];
         // Each look is of kind 0: of the one kind `of` is given.
         let from_ref = std::slice::from_ref::<KindDef>;
@@ -862,10 +860,10 @@ mod tests {
         let kind = |glows| KindDef { name: "", kind_type: 0, colors: &[], walk_through: false, glows, medium: false };
         let kinds = [kind(false), kind(true)];
         // A lamp through the even faces, what does not glow through the others: whichever of the two the site is of.
-        let faces = std::array::from_fn(|k| (k % 2 == 0) as Kind);
+        let faces: [Kind; FACE_KINDS] = std::array::from_fn(|k| (k % 2 == 0) as Kind);
         for of in [0, 1] {
             let mut grid = VoxelGrid::new(&Box3::around([0; 3], 1));
-            let look = Look { faces: Some(faces), ..Look::from(of) };
+            let look = Look { kind: of, faces: Some(Faces::by(|k| (faces[k], SHARE))) };
             see(&mut grid, &Added::of(&look, &kinds, Op::Fill, SHARE, 0, |_| [40_000; 3]), 0, 0, 0);
             let glows: [bool; FACE_KINDS] = std::array::from_fn(|k| grid.light(0, 0, 0, k).2 != [0; 3]);
             assert_eq!(glows, faces.map(|kind| kind == 1), "the site of kind {of}");
