@@ -614,7 +614,7 @@ For the voxels, the world's threads light the bricks rays ask for
 (above; `World::update`),
 each thread, of the most wanted, the one beside its last:
 each voxel of the brick a ray can meet gets the light on it,
-by the way its surface faces (`Light::on_seen`),
+the mean of what lands on its faces light gets to (`Light::on_seen`),
 and what it glows,
 and shows its colour times the one, and the other,
 as look's lit pictures do (`Light::relight`);

@@ -451,7 +451,9 @@ Numbers are for the forest at 1280×800, as measured when written.
   Where it is to go, a step at a time, each measured on the reference's scenes:
   sites that hold what they stop along each direction, boxes' too
   ("Cells hold what they look like", above);
-  then coarser levels taking more directions (in Ideas).
+  then fewer lines where they cost most:
+  lit by 132 lines a site, native's first view takes several times the work of 12 directions
+  ([light.md](light.md), "Lines face to face, and what they cost").
 - **Light settles slowly in what reflects most of it, spread wide.**
   There a site takes tens of rounds,
   each reading the coarsest level a line's length further round;
@@ -881,9 +883,9 @@ Numbers are for the forest at 1280×800, as measured when written.
 - More scenes (`worlds/src/scene.rs`): Bistro, San Miguel.
   Not tried in them: walking, on walls a site thick.
   Lit (`--light 1,1,0`), Sponza's atrium is all but black; not looked into.
-- Light along more directions at coarser levels, as radiance cascades do:
+- Light along fewer lines at coarser levels, or near, as radiance cascades trade them:
   near, light wants fine places and few directions; far, coarse places and many.
-  Light keeps 12 at every level, too few far off (a lamp's lobes, blurred shadows).
+  Light keeps 132 lines at every level; they cost most in what fills sites in part, as crowns.
 - The eye (`native/src/eye.rs`) in the chunks engines too:
   their pillars hold light baked as a byte a channel;
   held as RGB9E5, the compositor could show it as the voxels do.
