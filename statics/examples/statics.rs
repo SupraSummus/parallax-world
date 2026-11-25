@@ -4,6 +4,7 @@
 //! tree: a leaning tree cut deeper and deeper, does it fall;
 //! members: how much of their strength a lattice tower's members use, at
 //! every level, whole and with a leg cut;
+//! full: a full cell gathered, its beams against `SECTION`;
 //! edits [name]: what an edit brings down, at each level, the world as
 //! generated standing (MARGIN).
 
@@ -22,11 +23,17 @@ struct Scene {
     lo: V3,
     hi: V3,
     fill: Box<dyn Fn(V3) -> Option<(Mat, bool)>>,
+    /// Held: what lies this deep in bulk, if not only what the fill holds.
+    bulk: Option<f64>,
 }
 
 impl Scene {
     fn build(&self, level: u32) -> Lattice {
-        build(level, self.lo, self.hi, &*self.fill)
+        let mut cells = solids(level, self.lo, self.hi, &*self.fill);
+        if let Some(radius) = self.bulk {
+            hold_bulk(level, &mut cells, radius);
+        }
+        build(level, &cells)
     }
 }
 
@@ -45,6 +52,7 @@ fn cantilever(mat: Mat, h: f64, l: f64) -> Scene {
                 None
             }
         }),
+        bulk: None,
     }
 }
 
@@ -71,6 +79,7 @@ fn tree(lean: f64, side: f64, depth: f64) -> Scene {
             }
             (norm(sub(x, middle)) < crown).then_some((LEAVES, false))
         }),
+        bulk: None,
     }
 }
 
@@ -96,6 +105,7 @@ fn portico(cut: usize, slab: f64) -> Scene {
             }
             None
         }),
+        bulk: None,
     }
 }
 
@@ -117,6 +127,7 @@ fn rock(w: f64, over: f64) -> Scene {
                 None
             }
         }),
+        bulk: None,
     }
 }
 
@@ -165,7 +176,7 @@ fn exp_compare(only: Option<String>) {
         rock(6.0, 1.0),
     ];
     for sc in scenes.iter().filter(|s| only.as_ref().is_none_or(|o| s.name.contains(o.as_str()))) {
-        print!("{:42} {:6} voxels: ", sc.name, sc.build(0).voxels.len());
+        print!("{:42} {:6} nodes: ", sc.name, sc.build(0).nodes.len());
         let (o, secs) = settled(sc);
         println!("fallen {:5.1}%  rounds {:3}  work {:9.2e}  {secs:6.2}s", 100.0 * o.fallen, o.rounds, o.work);
     }
@@ -189,7 +200,8 @@ fn main() {
         Some("tree") => exp_tree(),
         Some("members") => exp_members(),
         Some("edits") => exp_edits(args.next()),
-        _ => eprintln!("cantilever | compare [name] | tree | members | edits [name]"),
+        Some("full") => exp_full(),
+        _ => eprintln!("cantilever | compare [name] | tree | members | edits [name] | full"),
     }
 }
 
@@ -237,6 +249,7 @@ fn tower(mat: Mat, cut: usize) -> Scene {
             let gone = (0..cut).any(|k| inside(x[1], 1.0, 2.5) && to_segment(x, leg(k, -1.0), leg(k, high)) < thick);
             (!gone && members.iter().any(|(a, b)| to_segment(x, *a, *b) < thick / 2.0)).then_some((mat, false))
         }),
+        bulk: Some(0.75),
     }
 }
 
@@ -245,8 +258,7 @@ fn tower(mat: Mat, cut: usize) -> Scene {
 fn exp_members() {
     for cut in [0, 1] {
         let sc = tower(STEEL, cut);
-        let mut fine = sc.build(0);
-        hold_bulk(&mut fine, 0.75);
+        let fine = sc.build(0);
         println!("## {}: the most of steel's strength used, by height (m)", sc.name);
         println!("          {}", (0..10).map(|k| format!("{:>6}", format!("{}-{}", 3 * k, 3 * k + 3))).collect::<String>());
         let mut lat = fine;
@@ -256,7 +268,7 @@ fn exp_members() {
             }
             let mut band = [0.0f64; 10];
             for (b, u) in lat.bonds.iter().zip(used_standing(&lat)) {
-                if b.p[1] >= 0.0 && !(lat.voxels[b.i].held && lat.voxels[b.j].held) {
+                if b.p[1] >= 0.0 && !(lat.nodes[b.i].held && lat.nodes[b.j].held) {
                     let h = ((b.p[1] / 3.0) as usize).min(9);
                     band[h] = band[h].max(u);
                 }
@@ -284,6 +296,7 @@ fn pendant(apart: bool) -> Scene {
                 None
             }
         }),
+        bulk: None,
     }
 }
 
@@ -309,10 +322,6 @@ fn exp_edits(only: Option<String>) {
     ];
     for (generated, edited) in cases.iter().filter(|(_, e)| only.as_ref().is_none_or(|o| e.name.contains(o.as_str()))) {
         let (mut g, mut e) = (generated.build(0), edited.build(0));
-        if generated.name.contains("tower") {
-            hold_bulk(&mut g, 0.75);
-            hold_bulk(&mut e, 0.75);
-        }
         print!("{:36} used {:.2} -> {:.2}", edited.name, most_used(&g), most_used(&e));
         for level in 0..=4 {
             if level > 0 {
@@ -327,5 +336,34 @@ fn exp_edits(only: Option<String>) {
             std::io::Write::flush(&mut std::io::stdout()).unwrap();
         }
         println!();
+    }
+}
+
+/// A cell of stone gathered from full cells, a level and two up: each
+/// class of its beams (by the angle between the faces they join), their
+/// section over the spacing squared and their strength against stone's.
+fn exp_full() {
+    println!("## A full cell gathered: section / s², strength / stone's, by the angle between the faces; SECTION {SECTION:?}");
+    let mut lat = build(0, &solids(0, [-1.6; 3], [1.6; 3], &|_| Some((STONE, false))));
+    for level in 1..=2 {
+        lat = gathered(&lat);
+        let s = spacing(level);
+        let centre = [0.0; 3];
+        let mut class: [Vec<(f64, f64)>; 4] = Default::default();
+        for b in lat.bonds.chunks(PER_BEAM) {
+            let (x, y) = (lat.nodes[b[0].i].x, lat.nodes[b[0].j].x);
+            // Only the cell at the middle, whose faces are s/√2 from it.
+            if (norm(sub(x, centre)) - s / 2f64.sqrt()).abs() > 1e-9 || (norm(sub(y, centre)) - s / 2f64.sqrt()).abs() > 1e-9 {
+                continue;
+            }
+            let cos = dot(sub(x, centre), sub(y, centre)) / (s * s / 2.0);
+            let k = (2.0 + 2.0 * cos).round() as usize;
+            class[k].push((4.0 * b[0].a / (s * s), b[0].mat.ft / STONE.ft));
+        }
+        for (k, angle) in ["180", "120", "90", "60"].iter().enumerate() {
+            let c = &class[k];
+            let mean = |f: &dyn Fn(&(f64, f64)) -> f64| c.iter().map(f).sum::<f64>() / c.len().max(1) as f64;
+            println!("level {level} {angle:>3}°: {:2} beams, section {:.4}, strength {:.3}", c.len(), mean(&|v| v.0), mean(&|v| v.1));
+        }
     }
 }

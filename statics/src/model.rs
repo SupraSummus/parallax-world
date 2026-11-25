@@ -1,15 +1,13 @@
-//! Voxels and the bonds that join them: what one weighs, what one carries.
+//! Nodes and the bonds that join them: what one weighs, what one carries.
 //!
-//! A bond is a spring at a point of a face two voxels share, with a share
-//! of its area: stiff along the face's normal as the material is, and
-//! across it as the material is in shear. Four bonds to a face, placed so
-//! that their area and second moments are the face's, so that faces carry
-//! moments as they would whole: a line of voxels is a beam, not a chain.
-//! Each voxel's stress is what its bonds' forces add up to over its
-//! volume. The stress at a bond is its voxels', but on its own face what
-//! it bears itself; its share of its material's strength is the greatest
-//! of tension, compression and shear, whichever way the stress lies, so
-//! that no direction of the lattice is stronger than another.
+//! A node is a face between two cells of a level; each cell joins its
+//! faces by beams, and a beam is four bonds: springs at points of its
+//! section, stiff along the beam as the material is, across it as the
+//! material is in shear, placed so that their area and second moments
+//! are the section's: a beam bears a moment, not only a pull. What a bond
+//! bears over its area is the stress on its section; its share of its
+//! material's strength is the greatest of tension, compression and shear,
+//! whichever way that stress lies.
 
 pub type V3 = [f64; 3];
 /// Force and moment, or translation and rotation.
@@ -88,15 +86,13 @@ impl Mat {
     }
 }
 
-/// A voxel: where its matter's centre is, what it weighs, whether it is
-/// held (ground that never moves).
+/// A node: where it is, what weighs on it, whether it is held (ground
+/// that never moves).
 #[derive(Clone, Debug)]
-pub struct Voxel {
+pub struct Node {
     pub x: V3,
     pub m: f64,
-    /// The volume of the cell it fills.
-    pub volume: f64,
-    /// What most of it is.
+    /// What most of the cells it lies between is.
     pub mat: Mat,
     pub held: bool,
 }
@@ -105,8 +101,8 @@ pub struct Voxel {
 pub struct Bond {
     pub i: usize,
     pub j: usize,
-    /// Where it is, the face's normal from i to j, its share of the area,
-    /// the distance between the voxels' centres.
+    /// Where it is, the beam's direction from i to j, its share of the
+    /// section, the length of the beam.
     pub p: V3,
     pub n: V3,
     pub a: f64,
@@ -122,18 +118,16 @@ impl Bond {
         add(mul(self.n, self.mat.e * k * along), mul(sub(delta, mul(self.n, along)), self.mat.g * k))
     }
 
-    /// The stress at the bond, of voxels whose stress is `around` (on
-    /// average), as it bears `force`: theirs, but on its face its own.
-    pub fn stress(&self, around: &M3, force: V3) -> M3 {
-        let n = self.n;
-        let theirs = std::array::from_fn::<f64, 3, _>(|r| dot(around[r], n));
-        let own = mul(force, 1.0 / self.a);
-        let (a, b) = (dot(n, theirs), dot(n, own));
-        std::array::from_fn(|r| {
-            std::array::from_fn(|c| {
-                around[r][c] - n[r] * theirs[c] - theirs[r] * n[c] + a * n[r] * n[c] + n[r] * own[c] + own[r] * n[c] - b * n[r] * n[c]
-            })
-        })
+    /// The stress on its section as it bears `force`.
+    pub fn stress(&self, force: V3) -> M3 {
+        let (n, t) = (self.n, mul(force, 1.0 / self.a));
+        let along = dot(n, t);
+        std::array::from_fn(|r| std::array::from_fn(|c| n[r] * t[c] + t[r] * n[c] - along * n[r] * n[c]))
+    }
+
+    /// The share of its strength it uses bearing `force`.
+    pub fn used(&self, force: V3) -> f64 {
+        self.mat.utilisation(&self.stress(force))
     }
 
     /// The stiffness `force` is, as a matrix.

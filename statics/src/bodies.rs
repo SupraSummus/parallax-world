@@ -1,14 +1,14 @@
-//! The forces in a structure under its weight, all voxels' at once, and
+//! The forces in a structure under its weight, all nodes' at once, and
 //! what of it stands.
 //!
-//! Every voxel is a rigid part, in equilibrium under its weight and its
+//! Every node is a rigid part, in equilibrium under its weight and its
 //! bonds. Found by conjugate gradients, preconditioned by V-cycles over
 //! bodies within bodies: what is left unbalanced goes up as resultants on
 //! bodies, force and moment, and comes back as their rigid motions. So the
-//! forces are those of all voxels, exactly; the bodies only find them
+//! forces are those of all nodes, exactly; the bodies only find them
 //! sooner, and no level holds a force it would have to answer for.
 
-use crate::lattice::{Lattice, PER_FACE, coarse_site};
+use crate::lattice::{Lattice, PER_BEAM, coarse_site};
 use crate::model::*;
 use std::collections::HashMap;
 
@@ -66,17 +66,18 @@ fn matrix(f: impl Fn(Six) -> Six) -> M6 {
 
 impl Level {
     fn new(lattice: &Lattice, part: &[Option<usize>], parts: usize, live: &[usize]) -> Level {
-        let (voxels, bonds) = (&lattice.voxels, &lattice.bonds);
-        let mut mass = vec![0.0; parts];
+        let (nodes, bonds) = (&lattice.nodes, &lattice.bonds);
+        // A part's centre, the middle of its nodes: one node's, itself.
+        let mut count = vec![0.0; parts];
         let mut centre = vec![[0.0; 3]; parts];
         for (v, p) in part.iter().enumerate() {
             if let Some(k) = *p {
-                mass[k] += voxels[v].m;
-                centre[k] = add(centre[k], mul(voxels[v].x, voxels[v].m));
+                count[k] += 1.0;
+                centre[k] = add(centre[k], nodes[v].x);
             }
         }
         for k in 0..parts {
-            centre[k] = mul(centre[k], 1.0 / mass[k]);
+            centre[k] = mul(centre[k], 1.0 / count[k]);
         }
         let mut between: HashMap<(Option<usize>, Option<usize>), Vec<usize>> = HashMap::new();
         for &b in live {
@@ -272,9 +273,9 @@ fn cycle(levels: &[Level], l: usize, r: &[Six], work: &mut Work) -> Vec<Six> {
 }
 
 /// Each bond's force, on j's side (on i's, the opposite), under weight:
-/// `alive` bonds between voxels not `gone`, the rest none.
+/// `alive` bonds between nodes not `gone`, the rest none.
 pub fn forces(lattice: &Lattice, alive: &[bool], gone: &[bool], work: &mut Work) -> Vec<V3> {
-    let weight = |v: usize| [0.0, -lattice.voxels[v].m * GRAVITY, 0.0, 0.0, 0.0, 0.0];
+    let weight = |v: usize| [0.0, -lattice.nodes[v].m * GRAVITY, 0.0, 0.0, 0.0, 0.0];
     let x = motions(lattice, alive, gone, &weight, work);
     let mut f = moved(lattice, &x);
     for (b, bond) in lattice.bonds.iter().enumerate() {
@@ -285,31 +286,31 @@ pub fn forces(lattice: &Lattice, alive: &[bool], gone: &[bool], work: &mut Work)
     f
 }
 
-/// Each bond's force, on j's side, its voxels moved by x.
+/// Each bond's force, on j's side, its nodes moved by x.
 pub fn moved(lattice: &Lattice, x: &[Six]) -> Vec<V3> {
-    let at = |v: usize, p: V3| -> V3 { shift(x[v], sub(p, lattice.voxels[v].x))[..3].try_into().unwrap() };
+    let at = |v: usize, p: V3| -> V3 { shift(x[v], sub(p, lattice.nodes[v].x))[..3].try_into().unwrap() };
     lattice.bonds.iter().map(|b| b.force(sub(at(b.j, b.p), at(b.i, b.p)))).collect()
 }
 
-/// Each voxel's motion (translation, rotation about its centre) under
-/// `loads`, held ones and `gone` ones at rest: all voxels at once, by
+/// Each node's motion (translation, rotation about its centre) under
+/// `loads`, held ones and `gone` ones at rest: all nodes at once, by
 /// conjugate gradients, preconditioned by V-cycles over bodies within
 /// bodies, till few are left, and those solved directly.
 pub fn motions(lattice: &Lattice, alive: &[bool], gone: &[bool], loads: &dyn Fn(usize) -> Six, work: &mut Work) -> Vec<Six> {
     const FEW: usize = 64;
-    let (voxels, bonds) = (&lattice.voxels, &lattice.bonds);
+    let (nodes, bonds) = (&lattice.nodes, &lattice.bonds);
     let live: Vec<usize> = (0..bonds.len()).filter(|&b| alive[b] && !gone[bonds[b].i] && !gone[bonds[b].j]).collect();
-    let mut part: Vec<Option<usize>> = vec![None; voxels.len()];
+    let mut part: Vec<Option<usize>> = vec![None; nodes.len()];
     let mut count = 0;
-    for v in 0..voxels.len() {
-        if !voxels[v].held && !gone[v] {
+    for v in 0..nodes.len() {
+        if !nodes[v].held && !gone[v] {
             part[v] = Some(count);
             count += 1;
         }
     }
-    let voxel = part.clone();
+    let node = part.clone();
     let mut levels = vec![Level::new(lattice, &part, count, &live)];
-    let mut key = lattice.sites.clone();
+    let mut key: Vec<[i64; 3]> = lattice.around.iter().map(|a| a[0]).collect();
     let mut l = lattice.level;
     while count > FEW {
         l += 1;
@@ -326,16 +327,16 @@ pub fn motions(lattice: &Lattice, alive: &[bool], gone: &[bool], loads: &dyn Fn(
     }
     let top = levels.last_mut().unwrap();
     top.direct = Some(Cholesky::of(top));
-    let loads: Vec<Six> = (0..voxels.len()).filter(|&v| voxel[v].is_some()).map(loads).collect();
+    let loads: Vec<Six> = (0..nodes.len()).filter(|&v| node[v].is_some()).map(loads).collect();
     let mut inner = Work(0.0);
     let mut v_cycle = |r: &[Six]| cycle(&levels, 0, r, &mut inner);
     let x = conjugate_gradients(&levels[0], &loads, &mut v_cycle, 1e-12, work);
     work.0 += inner.0;
-    (0..voxels.len()).map(|v| voxel[v].map_or([0.0; 6], |k| x[k])).collect()
+    (0..nodes.len()).map(|v| node[v].map_or([0.0; 6], |k| x[k])).collect()
 }
 
 /// The bodies of the next level: the connected pieces of each key's
-/// parts. Each part's body, each voxel's, and how many.
+/// parts. Each part's body, each node's, and how many.
 fn coarser(level: &Level, part: &[Option<usize>], key: &[[i64; 3]]) -> (Vec<usize>, Vec<Option<usize>>, usize) {
     let parts = level.centre.len();
     let mut their = vec![[0; 3]; parts];
@@ -372,29 +373,29 @@ pub struct Outcome {
     pub work: f64,
 }
 
-/// Find the forces; break every face with a bond whose stress is over its
+/// Find the forces; break every beam with a bond whose stress is over its
 /// strength; let fall what is no longer joined to anything held; again,
 /// until nothing breaks.
 pub fn settle(lattice: &Lattice) -> Outcome {
-    let (voxels, bonds) = (&lattice.voxels, &lattice.bonds);
+    let (nodes, bonds) = (&lattice.nodes, &lattice.bonds);
     let mut alive = vec![true; bonds.len()];
-    let mut gone = vec![false; voxels.len()];
+    let mut gone = vec![false; nodes.len()];
     let mut work = Work(0.0);
     let mut rounds = 0;
     loop {
         rounds += 1;
-        let held = joined_to_held(voxels, bonds, &alive);
-        for v in 0..voxels.len() {
+        let held = joined_to_held(nodes, bonds, &alive);
+        for v in 0..nodes.len() {
             gone[v] |= !held[v];
         }
         let f = forces(lattice, &alive, &gone, &mut work);
         let u = used(lattice, &f);
         let over: Vec<bool> = bonds.iter().enumerate().map(|(b, bond)| alive[b] && !gone[bond.i] && !gone[bond.j] && u[b] > 1.0).collect();
-        // A face breaks whole: what is joined at all is joined rigidly.
+        // A beam breaks whole: what is joined at all is joined rigidly.
         let mut broke = false;
-        for (face, bonds) in over.chunks(PER_FACE).enumerate() {
+        for (beam, bonds) in over.chunks(PER_BEAM).enumerate() {
             if bonds.contains(&true) {
-                alive[face * PER_FACE..][..PER_FACE].fill(false);
+                alive[beam * PER_BEAM..][..PER_BEAM].fill(false);
                 broke = true;
             }
         }
@@ -402,60 +403,32 @@ pub fn settle(lattice: &Lattice) -> Outcome {
             break;
         }
     }
-    let free: f64 = voxels.iter().filter(|v| !v.held).map(|v| v.m).sum();
-    let fell: f64 = voxels.iter().zip(&gone).filter(|(_, g)| **g).map(|(v, _)| v.m).sum();
+    let free: f64 = nodes.iter().filter(|v| !v.held).map(|v| v.m).sum();
+    let fell: f64 = nodes.iter().zip(&gone).filter(|(_, g)| **g).map(|(v, _)| v.m).sum();
     Outcome { fallen: if free > 0.0 { fell / free } else { 0.0 }, rounds, work: work.0 }
 }
 
-/// The share of its strength each bond uses, bearing `force`: at a bond,
-/// its free voxels' stress, on average, but on its face what it bears.
+/// The share of its strength each bond uses, bearing `force`.
 pub fn used(lattice: &Lattice, force: &[V3]) -> Vec<f64> {
-    let s = stresses(lattice, force);
-    let voxels = &lattice.voxels;
-    let bonds = lattice.bonds.iter().zip(force);
-    bonds
-        .map(|(b, f)| {
-            let ends: Vec<usize> = [b.i, b.j].into_iter().filter(|&v| !voxels[v].held).collect();
-            let mean: M3 =
-                std::array::from_fn(|r| std::array::from_fn(|c| ends.iter().map(|&v| s[v][r][c]).sum::<f64>() / ends.len().max(1) as f64));
-            b.mat.utilisation(&b.stress(&mean, *f))
-        })
-        .collect()
+    lattice.bonds.iter().zip(force).map(|(b, f)| b.used(*f)).collect()
 }
 
 /// What `used` is with everything standing as it is.
 pub fn used_standing(lattice: &Lattice) -> Vec<f64> {
     let alive = vec![true; lattice.bonds.len()];
-    let gone = vec![false; lattice.voxels.len()];
+    let gone = vec![false; lattice.nodes.len()];
     used(lattice, &forces(lattice, &alive, &gone, &mut Work(0.0)))
 }
 
-/// Each voxel's stress: the forces on it from its bonds, each times where
-/// it acts from the voxel's centre, over its volume.
-fn stresses(lattice: &Lattice, force: &[V3]) -> Vec<M3> {
-    let mut s = vec![[[0.0; 3]; 3]; lattice.voxels.len()];
-    for (bond, f) in lattice.bonds.iter().zip(force) {
-        for (v, on) in [(bond.i, *f), (bond.j, mul(*f, -1.0))] {
-            let r = sub(bond.p, lattice.voxels[v].x);
-            for a in 0..3 {
-                for c in 0..3 {
-                    s[v][a][c] += (r[a] * on[c] + r[c] * on[a]) / (2.0 * lattice.voxels[v].volume);
-                }
-            }
-        }
-    }
-    s
-}
-
-/// Which voxels a chain of bonds joins to a held one.
-pub fn joined_to_held(voxels: &[Voxel], bonds: &[Bond], alive: &[bool]) -> Vec<bool> {
-    let mut next: Vec<Vec<usize>> = vec![Vec::new(); voxels.len()];
+/// Which nodes a chain of bonds joins to a held one.
+pub fn joined_to_held(nodes: &[Node], bonds: &[Bond], alive: &[bool]) -> Vec<bool> {
+    let mut next: Vec<Vec<usize>> = vec![Vec::new(); nodes.len()];
     for (bond, _) in bonds.iter().zip(alive).filter(|(_, a)| **a) {
         next[bond.i].push(bond.j);
         next[bond.j].push(bond.i);
     }
-    let mut held: Vec<bool> = voxels.iter().map(|v| v.held).collect();
-    let mut stack: Vec<usize> = (0..voxels.len()).filter(|&v| held[v]).collect();
+    let mut held: Vec<bool> = nodes.iter().map(|v| v.held).collect();
+    let mut stack: Vec<usize> = (0..nodes.len()).filter(|&v| held[v]).collect();
     while let Some(v) = stack.pop() {
         for &w in &next[v] {
             if !held[w] {
@@ -499,19 +472,20 @@ fn invert(m: &M6) -> M6 {
 pub const MARGIN: f64 = 2.0;
 
 /// Strength no less than what a world as generated needs, MARGIN times:
-/// each cell of `generated` loaded under its weight, the most of its
-/// strength any bond in it uses; `lattice`'s bonds in the same cells, so
-/// much stronger at least.
+/// each beam of `generated` loaded under its weight, the most of its
+/// strength any of its bonds uses; the same beam of `lattice` (between
+/// the same faces), so much stronger at least.
 pub fn as_generated(lattice: &mut Lattice, generated: &Lattice) {
-    let mut need: HashMap<[i64; 3], f64> = HashMap::new();
+    let beam = |l: &Lattice, b: &Bond| {
+        let (i, j) = (l.around[b.i], l.around[b.j]);
+        if i < j { [i, j] } else { [j, i] }
+    };
+    let mut need: HashMap<[[[i64; 3]; 2]; 2], f64> = HashMap::new();
     for (b, u) in generated.bonds.iter().zip(used_standing(generated)) {
-        for cell in generated.cells(b) {
-            let n = need.entry(cell).or_insert(0.0);
-            *n = n.max(u);
-        }
+        let n = need.entry(beam(generated, b)).or_insert(0.0);
+        *n = n.max(u);
     }
-    let stronger = |b: &Bond| lattice.cells(b).iter().map(|c| need.get(c).map_or(0.0, |u| u * MARGIN)).fold(1.0, f64::max);
-    let by: Vec<f64> = lattice.bonds.iter().map(stronger).collect();
+    let by: Vec<f64> = lattice.bonds.iter().map(|b| need.get(&beam(lattice, b)).map_or(1.0, |u| (u * MARGIN).max(1.0))).collect();
     for (b, by) in lattice.bonds.iter_mut().zip(by) {
         b.mat = b.mat.stronger(by);
     }
