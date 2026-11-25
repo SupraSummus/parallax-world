@@ -343,7 +343,7 @@ fn measured(fine: &Lattice, against_full: bool) -> Lattice {
             let piece = cell.pieces();
             for (a, b, stiff) in beams(&k, &at, &|a, b| piece[a] == piece[b]) {
                 // The beam pulled alone, a unit apart: the finer matter's
-                // forces, and the most of its strength any uses.
+                // forces, and how much of its strength it uses.
                 let e = unit(sub(at[b], at[a]));
                 let pulled: Vec<V3> = (0..lat.bonds.len())
                     .map(|n| {
@@ -351,7 +351,15 @@ fn measured(fine: &Lattice, against_full: bool) -> Lattice {
                             .fold([0.0; 3], |f, s| add(f, add(mul(cases[3 * b + s][n], e[s] / 2.0), mul(cases[3 * a + s][n], -e[s] / 2.0))))
                     })
                     .collect();
-                let fine_used = used(&lat, &pulled).into_iter().fold(0.0, f64::max);
+                // Each finer bond as much as it holds of the work done:
+                // where the matter narrows, most of it.
+                let (mut held, mut work) = (0.0, 0.0);
+                for ((b, f), u) in lat.bonds.iter().zip(&pulled).zip(used(&lat, &pulled)) {
+                    let w = b.energy(*f);
+                    held += w * u;
+                    work += w;
+                }
+                let fine_used = if work > 0.0 { held / work } else { 0.0 };
                 let length = norm(sub(at[b], at[a]));
                 let sigma = mat.e / length;
                 let own = mat.utilisation(&std::array::from_fn(|r| std::array::from_fn(|q| sigma * e[r] * e[q])));

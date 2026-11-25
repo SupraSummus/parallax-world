@@ -15,36 +15,34 @@ here is what they found.
 
 ## The model
 
-Voxels are rigid, joined by springs on the faces they share
-(a rigid body–spring model, as used for fracture of concrete;
-`statics/src/model.rs`).
-A voxel of FCC is the Voronoi cell of its site,
-the cell such models are built on.
-Each face is four bonds, springs at points
-that keep the rhombus's area and second moments,
-so a face bears a moment as it would whole,
-and a line of voxels is a beam, not a chain.
+Every level is the same: a node is a face between two cells,
+and a cell joins its faces by beams, one to a pair of them, up to 66
+(`statics/src/model.rs`, `statics/src/lattice.rs`).
+A beam is four bonds, springs at points of its section
+that keep the section's area and second moment,
+so it bears a moment as well as a pull,
+and its stress is what it bears over its section.
+Its share of its strength is the greatest of
+tension, compression and shear, whichever way that stress lies.
+A cell's weight hangs on its faces.
 Strengths and stiffnesses are in pascals,
-so voxels of any size are the same material.
+so cells of any size are the same material.
 
-A voxel's stress is what its bonds' forces add up to over its volume.
-At a bond, the stress is its voxels',
-but on its own face what the bond bears itself,
-which keeps the bending within a voxel
-(a voxel's mean stress alone made beams two voxels thick
-twice as strong as they are).
-Its share of the strength is the greatest of
-tension, compression and shear, whichever way the stress lies.
-A check of each face's own load was anisotropic:
-the lattice's faces lie at 45° to the cube's axes,
-so along those a beam was twice as strong as across them.
+Level 0 is given, not found from anything finer:
+a cell full of a material has a beam between every pair of its faces,
+its section by the angle between them (`SECTION`), its strength the material's.
+So level 0 needs nothing but what is in each cell;
+it costs six nodes to a cell, where voxels were one.
+Voxels joined on their faces, which level 0 was before,
+held a stone beam out of a wall to 0.7 to 0.9 of beam theory's length;
+a cell's faces joined by beams hold it to about 0.95.
 
 What settles (`settle`):
 the forces under weight;
-every face with a bond over its strength breaks, whole;
+every beam with a bond over its strength breaks, whole;
 what no longer holds to the ground falls;
 again, until nothing breaks.
-A face with only some of its bonds left
+A beam with only some of its bonds left
 would be a ball joint, a mechanism statics cannot answer
 (one cut tree took minutes to solve where it took a second);
 broken whole, whatever is joined is joined rigidly.
@@ -52,30 +50,20 @@ Breaking everything over its strength at once,
 rather than only what is near the worst,
 gives the same answers in a few rounds instead of tens.
 
-A stone or masonry beam out of a wall
-holds 0.7 to 0.9 of the length beam theory gives,
-more the thicker it is (the wall's corner bears more than theory says);
-wood, whose shear strength limits it, about two thirds.
-A leaning tree falls once cut deep enough,
-the shallower the more it leans:
-leaning 3°, cut 80 to 90 % through; leaning 8°, 60 to 65 %
-(`statics tree`).
+## The forces: all nodes, at once
 
-## The forces: all voxels, at once
-
-Every voxel is in equilibrium under its weight and its bonds,
+Every node is in equilibrium under its weight and its bonds,
 all at once (`statics/src/bodies.rs`):
 conjugate gradients, preconditioned by V-cycles over bodies within bodies.
-A body of level l is a connected piece of the voxels
-whose sites lead to one site of 2^l·FCC,
+A body of level l is a connected piece of the nodes
+whose cells lead to one site of 2^l·FCC,
 each site leading to the nearest of the next level up, so bodies nest.
 What a level leaves unbalanced goes up as resultants on its bodies,
 force and moment, and comes back as their rigid motions;
 the bonds between two parts sum to one joint, a stiffness of their relative motion;
 the top level, a few bodies, is solved directly.
 The bodies only find the forces sooner:
-a few times fewer iterations than each voxel's block alone,
-about twice as fast for a tree of ten thousand voxels.
+a few times fewer iterations than each node's block alone.
 
 ## What was tried, and not kept
 
@@ -133,37 +121,41 @@ Without it the world would fall whole:
 soil gives way under its own weight a few metres down.
 
 Each level is a statics of its own, by the same rules,
-gathered from the level below (`statics/src/gather.rs`),
-each cell keeping as many numbers as any other.
-Level 0 is voxels and their faces;
-every level above is nodes on the faces between its cells,
-each joined to the other faces of its cell by a beam:
-one number to each pair of a cell's faces, up to 66,
-one for how much more of its strength the finer matter uses than its beams,
-and what it weighs, hung on its faces as much as each is joined.
-A cell's beams are found from the level below:
-each face held as one and moved alone along each axis,
-the matter between free, what holds the faces is the cell's stiffness between them,
-and the beams are those whose stiffness is nearest it.
-Matter that only lies near other matter in a cell does not join it,
-so a truss stays a truss.
+each cell keeping as many numbers as any other:
+for each pair of its faces a beam's section and strength, up to 66 of each,
+and what it weighs on each face.
+Where a cell's numbers come from is the generator's to say,
+as a coarse site's light is:
+a forest may give its far trees as it likes,
+or measure them from finer cells (`statics/src/gather.rs`),
+as a scene does (`Far::measured`, docs/generators.md);
+what weight loads them with, the engine finds.
 
-A lattice tower, how much of their strength its members use
-against level 0 (`statics members`):
-within about twice at cells of 0.25 m,
-up to four or five times too much at 0.5 to 2 m;
-but no longer more the coarser, as when a cell kept a few numbers
-for each direction and a voxel's faces (commit db8f140, on `claude/amazing-carson-r4bs6l`):
-there it was tens of times at 1 m, gathered from 0.5 m that was already off.
-Beams' sections taken from what crosses each face, rather than from stiffness,
-were off three to ten times at 0.25 to 0.5 m.
-Two things joined what should stay apart, and are gone.
-Beams fitted by least squares joined faces no matter in the cell joins,
-fitting the rest better:
+Measured, a cell's beams are what its matter does between its faces:
+each face held as one and moved alone along each axis,
+the matter inside comes to rest where that leaves it
+(one elimination of what is inside the cell),
+what holds the faces is the cell's stiffness between them,
+and the beams are those whose stiffness is nearest it.
+Each beam pulled alone, its two faces apart,
+takes as much of the finer matter's strength as it shows in its own,
+so a cut inside a cell weakens the beams across it, and only those.
+Matter that only lies near other matter in a cell does not join it,
+so a truss stays a truss;
 a beam is only between faces the cell's matter joins.
-And a cell holding anything held was held,
-so ground grew a cell a level, up a column past a cut:
-a cell is held if all in it is, a face if anything on it is.
+A cell is held if all in it is, a face if anything on it is
+(a cell holding anything held, held, grew ground a cell a level,
+up a column past a cut).
+
+Faces held rigid stiffen a cell,
+and leave the matter where two of them meet carrying all they move:
+measured as it is, a full cell of stone was twice as stiff a level up
+and half as strong, and so again the next level.
+So a cell is measured against a full cell of its material,
+beam by beam, by the angle between the faces it joins:
+a full cell is its material at every level,
+within a fifth two levels up,
+and a generator may give a full cell as its material alone.
 
 ## What it may get wrong, and what not
 
@@ -201,10 +193,10 @@ A world as generated stands, at every level:
 a coarse level's errors are in a structure before an edit as after it,
 so what decides is how much an edit changes what it bears.
 A leg cut from a lattice tower raised the most its members bear
-by half at levels 0 to 1 m alike,
+by half at levels 0 to 1 m alike (level 0 voxels then),
 though what they bore differed between levels up to four times;
 at 2 m, where the cut is smaller than a cell, not at all.
-So a cell's strength is to be no less than its state as generated needs,
+So a beam's strength is to be no less than its state as generated needs,
 with a margin;
 then something generated near its strength
 holds more than it would, before an edit brings it down.
@@ -219,42 +211,46 @@ and the levels that let it fall:
 
 | Edit | Used at 0 | 0 | 0.25 m | 0.5 m | 1 m | 2 m |
 |---|---|---|---|---|---|---|
-| a stone beam made 4 m | 0.65 | stands | stands | stands | stands | stands |
-| made 6 m | 1.5 | falls | falls | falls | falls | stands |
-| a slab, one column cut | 0.90 | stands | stands | falls | falls | falls |
-| two columns cut | 9.4 | falls | falls | falls | falls | falls |
-| a tree cut 30 % | 0.46 | stands | stands | stands | stands | stands |
-| cut 70 % | 3.6 | falls | falls | stands | stands | stands |
-| cut through | | falls | falls | falls | falls | falls |
-| a block hanging let go | | falls | falls | falls | falls | falls |
+| a stone beam made 4 m | 0.55 | stands | stands | stands | stands | stands |
+| made 6 m | 1.27 | stands | falls | falls | stands | stands |
+| a slab, one column cut | 1.09 | stands | stands | stands | stands | stands |
+| two columns cut | 8.4 | falls | falls | falls | falls | stands |
+| a tree cut 30 % | 0.39 | stands | stands | stands | stands | stands |
+| cut 70 % | 2.9 | falls | stands | stands | stands | stands |
+| cut through | | falls | falls | falls | stands | stands |
+| a block hanging let go | | falls | stands | stands | stands | stands |
 
-Where what is used is far from 1, levels agree,
-but for a trunk half a metre across cut 70 %,
-which stands at 0.5 m and coarser:
-there the trunk is about a cell or less,
-and a cell's one number for its strength does not see the hinge left.
-That is a small thing far off, which the rules above let be,
-or a strength to each beam, not each cell.
+Where what is used is far from 1 and the thing is a few cells across, levels agree.
+What they miss is a cut thinner than a cell:
+a face is one node, held as one when its cell is measured,
+so a kerf across a face is bridged by it.
+A trunk 0.6 m across cut 70 % stands from 0.25 m up,
+its beams across the cut no weaker than the rest
+(each beam pulled alone takes the strength of its matter as the work done in it,
+mostly where the matter narrows; the most any finer bond used
+was the edges where two rigid faces meet);
+cut through, it stands from 1 m, where the trunk is smaller than a cell;
+the block hangs on from 0.25 m, the gap under it an eighth of a metre.
 
 ## Where it is to go
 
-Next: strength no less than a world as generated needs,
-and the verdicts after edits checked against level 0,
-not the stresses: a tower's leg cut, a tree cut, a column taken out,
-a cantilever made longer;
-a voxel hanging in the air,
-which falls near the camera and may be taken in far off;
-and a trunk cut through by a kerf inside a coarse cell,
-which falls at every level that sees the trunk.
+A face split into as many nodes as the pieces of matter on it,
+joined within its two cells or not,
+would see a cut through at every level that sees what is cut;
+a hinge left in a cut would still be bridged.
 What holds is still whatever is deep in bulk within a radius in metres;
 by the same rule at every level, it would be in sites.
 And the levels are to be tied as light's are:
 the finer where it is made, the coarser beyond,
 a finer level taking its boundary's forces from the coarser.
 
+Level 0 as faces and beams costs: a tree of ten thousand cells
+took a minute to solve where its voxels took two seconds.
 The V-cycles' rigid motions are a coarse guess at how bodies bend,
 so iterations still grow with a structure's size;
-smoothing them, as smoothed aggregation does, is a step too.
+a coarser level measured from a finer one is also how to carry
+a finer level's error to it and back (its cells' responses),
+a multigrid the levels already are.
 Only cells whose faces or loads changed need solving,
 from the forces they had.
 What falls is taken off the lattice whole; moving it is not done.

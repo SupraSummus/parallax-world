@@ -130,6 +130,13 @@ impl Bond {
         self.mat.utilisation(&self.stress(force))
     }
 
+    /// The work stored in it as it bears `force`.
+    pub fn energy(&self, force: V3) -> f64 {
+        let k = self.a / self.d;
+        let along = dot(force, self.n);
+        0.5 * (along * along / (self.mat.e * k) + (dot(force, force) - along * along) / (self.mat.g * k))
+    }
+
     /// The stiffness `force` is, as a matrix.
     pub fn stiffness(&self) -> M3 {
         let k = self.a / self.d;

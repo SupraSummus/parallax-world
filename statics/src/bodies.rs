@@ -413,10 +413,11 @@ pub fn used(lattice: &Lattice, force: &[V3]) -> Vec<f64> {
     lattice.bonds.iter().zip(force).map(|(b, f)| b.used(*f)).collect()
 }
 
-/// What `used` is with everything standing as it is.
+/// What `used` is with everything standing as it is: all that holds to
+/// the ground, nothing broken.
 pub fn used_standing(lattice: &Lattice) -> Vec<f64> {
     let alive = vec![true; lattice.bonds.len()];
-    let gone = vec![false; lattice.nodes.len()];
+    let gone: Vec<bool> = joined_to_held(&lattice.nodes, &lattice.bonds, &alive).iter().map(|h| !h).collect();
     used(lattice, &forces(lattice, &alive, &gone, &mut Work(0.0)))
 }
 
