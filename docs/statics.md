@@ -249,7 +249,8 @@ the finer where it is made, the coarser beyond,
 a finer level taking its boundary's forces from the coarser.
 
 Level 0 as faces and beams costs six nodes to a cell:
-a tree of ten thousand cells takes 4 s where its voxels took 2.
+a tree of ten thousand cells takes 4 s where its voxels took 2,
+and as long to measure its cells a level up (`statics speed`).
 Reading the blocks is most of an iteration's time;
 they could be half as large, in single precision.
 A coarser level measured from a finer one is also how to carry

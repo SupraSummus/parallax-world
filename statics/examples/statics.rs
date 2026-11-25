@@ -4,6 +4,7 @@
 //! tree: a leaning tree cut deeper and deeper, does it fall;
 //! members: how much of their strength a lattice tower's members use, at
 //! every level, whole and with a leg cut;
+//! speed: what a tree costs, settled and gathered, level by level;
 //! full: a full cell gathered, its beams against `SECTION`;
 //! edits [name]: what an edit brings down, at each level, the world as
 //! generated standing (MARGIN).
@@ -201,7 +202,8 @@ fn main() {
         Some("members") => exp_members(),
         Some("edits") => exp_edits(args.next()),
         Some("full") => exp_full(),
-        _ => eprintln!("cantilever | compare [name] | tree | members | edits [name] | full"),
+        Some("speed") => exp_speed(),
+        _ => eprintln!("cantilever | compare [name] | tree | members | edits [name] | full | speed"),
     }
 }
 
@@ -365,5 +367,27 @@ fn exp_full() {
             let mean = |f: &dyn Fn(&(f64, f64)) -> f64| c.iter().map(f).sum::<f64>() / c.len().max(1) as f64;
             println!("level {level} {angle:>3}°: {:2} beams, section {:.4}, strength {:.3}", c.len(), mean(&|v| v.0), mean(&|v| v.1));
         }
+    }
+}
+
+/// What an uncut tree costs at each level: gathering it from the level
+/// below, settling it.
+fn exp_speed() {
+    let mut lat = tree(8.0, 1.0, 0.0).build(0);
+    for level in 0..=4 {
+        let t = Instant::now();
+        if level > 0 {
+            lat = gathered(&lat);
+        }
+        let gather = t.elapsed().as_secs_f64();
+        let t = Instant::now();
+        let o = settle(&lat);
+        println!(
+            "level {level}: {:6} nodes {:7} beams, gathered in {gather:6.2}s, settled in {:6.2}s ({} rounds)",
+            lat.nodes.len(),
+            lat.bonds.len() / PER_BEAM,
+            t.elapsed().as_secs_f64(),
+            o.rounds
+        );
     }
 }

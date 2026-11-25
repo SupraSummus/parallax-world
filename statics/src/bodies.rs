@@ -48,7 +48,7 @@ pub fn shift(x: Six, r: V3) -> Six {
 
 /// f of each of 0..n, on as many threads as there are cores, unless n is
 /// few.
-fn each<T: Send + Default + Clone>(n: usize, f: impl Fn(usize) -> T + Sync) -> Vec<T> {
+pub fn each<T: Send + Default + Clone>(n: usize, f: impl Fn(usize) -> T + Sync) -> Vec<T> {
     let threads = std::thread::available_parallelism().map_or(1, |t| t.get());
     if n < 256 || threads == 1 {
         return (0..n).map(f).collect();

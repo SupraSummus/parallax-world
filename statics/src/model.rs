@@ -60,10 +60,10 @@ pub const LEAVES: Mat = Mat { name: "leaves", rho: 60.0, e: 0.2e9, g: 0.08e9, ft
 pub type M3 = [[f64; 3]; 3];
 
 impl Mat {
-    /// The share of its strength a stress uses, 1 and over breaking it: its
-    /// greatest tension, its greatest compression, its greatest shear.
-    pub fn utilisation(&self, stress: &M3) -> f64 {
-        let [s3, _, s1] = principal(stress);
+    /// The share of its strength a stress uses, 1 and over breaking it, of
+    /// its greatest and least principal stresses: its greatest tension,
+    /// its greatest compression, its greatest shear.
+    pub fn used(&self, s1: f64, s3: f64) -> f64 {
         (s1 / self.ft).max(-s3 / self.fc).max((s1 - s3) / (2.0 * self.fs))
     }
 
@@ -118,16 +118,14 @@ impl Bond {
         add(mul(self.n, self.mat.e * k * along), mul(sub(delta, mul(self.n, along)), self.mat.g * k))
     }
 
-    /// The stress on its section as it bears `force`.
-    pub fn stress(&self, force: V3) -> M3 {
-        let (n, t) = (self.n, mul(force, 1.0 / self.a));
-        let along = dot(n, t);
-        std::array::from_fn(|r| std::array::from_fn(|c| n[r] * t[c] + t[r] * n[c] - along * n[r] * n[c]))
-    }
-
-    /// The share of its strength it uses bearing `force`.
+    /// The share of its strength it uses bearing `force`. A pull σ and a
+    /// shear τ on its section: principal stresses σ/2 ± √(σ²/4 + τ²), and 0.
     pub fn used(&self, force: V3) -> f64 {
-        self.mat.utilisation(&self.stress(force))
+        let t = mul(force, 1.0 / self.a);
+        let sigma = dot(t, self.n);
+        let tau2 = (dot(t, t) - sigma * sigma).max(0.0);
+        let r = (sigma * sigma / 4.0 + tau2).sqrt();
+        self.mat.used(sigma / 2.0 + r, sigma / 2.0 - r)
     }
 
     /// The work stored in it as it bears `force`.
@@ -149,24 +147,4 @@ impl Bond {
         }
         s
     }
-}
-
-/// The principal stresses of a symmetric stress, least first.
-pub fn principal(s: &M3) -> [f64; 3] {
-    let mean = (s[0][0] + s[1][1] + s[2][2]) / 3.0;
-    let off = s[0][1].powi(2) + s[0][2].powi(2) + s[1][2].powi(2);
-    let dev = (0..3).map(|k| (s[k][k] - mean).powi(2)).sum::<f64>() + 2.0 * off;
-    let p = (dev / 6.0).sqrt();
-    if p == 0.0 {
-        return [mean; 3];
-    }
-    // The eigenvalues of s = mean + 2p·cos(φ + 2πk/3), φ from det((s − mean)/p) / 2.
-    let b: M3 = std::array::from_fn(|r| std::array::from_fn(|c| (s[r][c] - if r == c { mean } else { 0.0 }) / p));
-    let det = b[0][0] * (b[1][1] * b[2][2] - b[1][2] * b[2][1]) - b[0][1] * (b[1][0] * b[2][2] - b[1][2] * b[2][0])
-        + b[0][2] * (b[1][0] * b[2][1] - b[1][1] * b[2][0]);
-    let phi = (det / 2.0).clamp(-1.0, 1.0).acos() / 3.0;
-    let third = 2.0 * std::f64::consts::PI / 3.0;
-    let mut e = [0.0, 1.0, 2.0].map(|k| mean + 2.0 * p * (phi + k * third).cos());
-    e.sort_by(f64::total_cmp);
-    e
 }

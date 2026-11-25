@@ -15,7 +15,7 @@
 //! join it, so a truss stays a truss; a cell's weight hangs on the faces
 //! its matter reaches, as much as each is joined.
 
-use crate::bodies::{find, moved, used};
+use crate::bodies::{each, find, moved, used};
 use crate::lattice::*;
 use crate::model::*;
 use std::collections::{BTreeMap, HashMap};
@@ -198,11 +198,9 @@ pub fn gathered(fine: &Lattice) -> Lattice {
 /// sections over the spacing squared, and how much stronger than the
 /// material they are.
 fn full(mat: Mat) -> [(f64, f64); 4] {
-    thread_local! {
-        static KNOWN: std::cell::RefCell<HashMap<&'static str, [(f64, f64); 4]>> = Default::default();
-    }
-    if let Some(known) = KNOWN.with(|k| k.borrow().get(mat.name).copied()) {
-        return known;
+    static KNOWN: std::sync::Mutex<Vec<(&'static str, [(f64, f64); 4])>> = std::sync::Mutex::new(Vec::new());
+    if let Some((_, known)) = KNOWN.lock().unwrap().iter().find(|(name, _)| *name == mat.name) {
+        return *known;
     }
     let s = spacing(1);
     let coarse = measured(&build(0, &solids(0, [-1.5 * s; 3], [1.5 * s; 3], &|_| Some((mat, false)))), false);
@@ -217,7 +215,7 @@ fn full(mat: Mat) -> [(f64, f64); 4] {
         }
     }
     let known = sum.map(|(a, f, n)| if n > 0.0 { (a / n, f / n) } else { (1.0, 1.0) });
-    KNOWN.with(|k| k.borrow_mut().insert(mat.name, known));
+    KNOWN.lock().unwrap().push((mat.name, known));
     known
 }
 
@@ -316,16 +314,19 @@ fn measured(fine: &Lattice, against_full: bool) -> Lattice {
             held: on_held || held[a] || held[b],
         })
         .collect();
-    let mut bonds = Vec::new();
-    for (c, cell) in cells.iter().enumerate() {
-        let ends: Vec<usize> = cell.across.iter().map(|&o| node[&face(c, o)]).collect();
-        let at: Vec<V3> = ends.iter().map(|&k| nodes[k].x).collect();
-        let mat = mat_of(&[c]);
-        let s = spacing(level);
-        let (full, centre) = (if against_full { full(mat) } else { [(1.0, 1.0); 4] }, centre(c));
+    let s = spacing(level);
+    let ends: Vec<Vec<usize>> =
+        cells.iter().enumerate().map(|(c, cell)| cell.across.iter().map(|&o| node[&face(c, o)]).collect()).collect();
+    let at: Vec<Vec<V3>> = ends.iter().map(|e| e.iter().map(|&k| nodes[k].x).collect()).collect();
+    let mat: Vec<Mat> = (0..n).map(|c| mat_of(&[c])).collect();
+    let fulls: Vec<[(f64, f64); 4]> = mat.iter().map(|&m| if against_full { full(m) } else { [(1.0, 1.0); 4] }).collect();
+    // Each cell's beams, all cells at once: its faces a and b, its
+    // stiffness along it, how much stronger than its material.
+    let found = each(n, |c| {
+        let (cell, at, mat, full) = (&cells[c], &at[c], mat[c], &fulls[c]);
         let mut found = Vec::new();
         if !held[c] && !at.is_empty() {
-            let (lat, cases) = responses(fine, cell, &at);
+            let (lat, cases) = responses(fine, cell, at);
             // The stiffness between handles: what holds each, each case.
             let nf = cell.free.len();
             let mut k = vec![vec![0.0; cases.len()]; cases.len()];
@@ -341,7 +342,7 @@ fn measured(fine: &Lattice, against_full: bool) -> Lattice {
                 }
             }
             let piece = cell.pieces();
-            for (a, b, stiff) in beams(&k, &at, &|a, b| piece[a] == piece[b]) {
+            for (a, b, stiff) in beams(&k, at, &|a, b| piece[a] == piece[b]) {
                 // The beam pulled alone, a unit apart: the finer matter's
                 // forces, and how much of its strength it uses.
                 let e = unit(sub(at[b], at[a]));
@@ -361,19 +362,23 @@ fn measured(fine: &Lattice, against_full: bool) -> Lattice {
                 }
                 let fine_used = if work > 0.0 { held / work } else { 0.0 };
                 let length = norm(sub(at[b], at[a]));
-                let sigma = mat.e / length;
-                let own = mat.utilisation(&std::array::from_fn(|r| std::array::from_fn(|q| sigma * e[r] * e[q])));
+                let own = mat.used(mat.e / length, 0.0);
                 let stronger = if fine_used > 0.0 { own / fine_used } else { 1.0 };
-                let k = class(at[a], at[b], centre);
+                let k = class(at[a], at[b], centre(c));
                 let section = stiff * length / mat.e / (s * s);
                 let section = if against_full { section * SECTION[k] / full[k].0 } else { section };
                 found.push((a, b, section * s * s * mat.e / length, stronger / full[k].1));
             }
         }
+        found
+    });
+    let mut bonds = Vec::new();
+    for (c, cell) in cells.iter().enumerate() {
+        let (found, ends, at, mat) = (&found[c], &ends[c], &at[c], mat[c]);
         // The cell's weight on its faces, as much as each is joined.
         let mass: f64 = cell.free.iter().map(|&v| fine.nodes[v].m).sum();
         let mut joined = vec![0.0; at.len()];
-        for &(a, b, k, _) in &found {
+        for &(a, b, k, _) in found {
             joined[a] += k;
             joined[b] += k;
         }
@@ -381,7 +386,7 @@ fn measured(fine: &Lattice, against_full: bool) -> Lattice {
         for (h, &k) in ends.iter().enumerate() {
             nodes[k].m += mass * if total > 0.0 { joined[h] / total } else { 1.0 / at.len() as f64 };
         }
-        for &(a, b, k, stronger) in &found {
+        for &(a, b, k, stronger) in found {
             if !(nodes[ends[a]].held && nodes[ends[b]].held) {
                 let length = norm(sub(at[b], at[a]));
                 bonds.extend(beam(ends[a], ends[b], at[a], at[b], k * length / mat.e, mat.stronger(stronger)));
