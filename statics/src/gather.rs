@@ -194,11 +194,15 @@ pub fn gathered(fine: &Lattice) -> Lattice {
     measured(fine, true)
 }
 
+/// A full cell's beams, by class: section over the spacing squared, and
+/// how much stronger than its material.
+type Full = [(f64, f64); 4];
+
 /// What a full cell of a material measures as, by class: its beams'
 /// sections over the spacing squared, and how much stronger than the
 /// material they are.
-fn full(mat: Mat) -> [(f64, f64); 4] {
-    static KNOWN: std::sync::Mutex<Vec<(&'static str, [(f64, f64); 4])>> = std::sync::Mutex::new(Vec::new());
+fn full(mat: Mat) -> Full {
+    static KNOWN: std::sync::Mutex<Vec<(&'static str, Full)>> = std::sync::Mutex::new(Vec::new());
     if let Some((_, known)) = KNOWN.lock().unwrap().iter().find(|(name, _)| *name == mat.name) {
         return *known;
     }
@@ -319,7 +323,7 @@ fn measured(fine: &Lattice, against_full: bool) -> Lattice {
         cells.iter().enumerate().map(|(c, cell)| cell.across.iter().map(|&o| node[&face(c, o)]).collect()).collect();
     let at: Vec<Vec<V3>> = ends.iter().map(|e| e.iter().map(|&k| nodes[k].x).collect()).collect();
     let mat: Vec<Mat> = (0..n).map(|c| mat_of(&[c])).collect();
-    let fulls: Vec<[(f64, f64); 4]> = mat.iter().map(|&m| if against_full { full(m) } else { [(1.0, 1.0); 4] }).collect();
+    let fulls: Vec<Full> = mat.iter().map(|&m| if against_full { full(m) } else { [(1.0, 1.0); 4] }).collect();
     // Each cell's beams, all cells at once: its faces a and b, its
     // stiffness along it, how much stronger than its material.
     let found = each(n, |c| {
