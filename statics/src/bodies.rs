@@ -3,8 +3,9 @@
 //!
 //! Every node is a rigid part, in equilibrium under its weight and its
 //! bonds. Found by conjugate gradients, preconditioned by V-cycles over
-//! bodies within bodies: what is left unbalanced goes up as resultants on
-//! bodies, force and moment, and comes back as their rigid motions. So the
+//! bodies within bodies (smoothed aggregation): what is left unbalanced
+//! goes up to bodies, each moving as a rigid body smoothed by a step of
+//! what its neighbours ask, and comes back as their motions. So the
 //! forces are those of all nodes, exactly; the bodies only find them
 //! sooner, and no level holds a force it would have to answer for.
 
@@ -14,25 +15,28 @@ use std::collections::HashMap;
 
 type M6 = [[f64; 6]; 6];
 
-/// Parts at one level, rigid, and the joints between them: each joint the
-/// bonds between two parts, summed into one stiffness of their relative
-/// motion at a point. A joint's side is a part, or None: held, it does
-/// not move.
+/// A level of the solver: its parts' stiffness, block by block (each
+/// part's own, and each pair's, i < j: what j's motion asks of i; the
+/// other way, its transpose), and how its parts move with the next
+/// level's. Level 0's parts are the nodes, its stiffness their joints';
+/// a coarser level's parts are bodies of the finer one's, each moving as
+/// a rigid body would, smoothed by a step of what its neighbours ask, its
+/// stiffness what the finer one's is under those motions (Galerkin).
 struct Level {
     centre: Vec<V3>,
-    joints: Vec<Joint>,
+    own: Vec<M6>,
+    pairs: Vec<(usize, usize, M6)>,
+    /// Each part's pairs: the other part, the pair, whether transposed.
+    rows: Vec<Vec<(usize, usize, bool)>>,
     inverse: Vec<M6>,
-    /// Each part's body at the next level up.
-    up: Vec<usize>,
+    /// How far a step of the smoother may go: 4/3 over the most it asks.
+    step: f64,
+    /// Each part's motion as the next level's parts', block by block.
+    down: Vec<Vec<(usize, M6)>>,
+    /// Each of the next level's parts: where it is in `down`, part by part.
+    from: Vec<Vec<(usize, usize)>>,
     /// At the top, the whole stiffness, factored.
     direct: Option<Cholesky>,
-}
-
-struct Joint {
-    i: Option<usize>,
-    j: Option<usize>,
-    at: V3,
-    stiffness: M6,
 }
 
 /// A part's motion (translation at its centre, rotation) as seen at a
@@ -42,14 +46,54 @@ pub fn shift(x: Six, r: V3) -> Six {
     [u[0], u[1], u[2], x[3], x[4], x[5]]
 }
 
-/// A force and moment at a point r from a part's centre, about its centre.
-fn about(w: Six, r: V3) -> Six {
-    let m = add([w[3], w[4], w[5]], cross(r, [w[0], w[1], w[2]]));
-    [w[0], w[1], w[2], m[0], m[1], m[2]]
+/// f of each of 0..n, on as many threads as there are cores, unless n is
+/// few.
+fn each<T: Send + Default + Clone>(n: usize, f: impl Fn(usize) -> T + Sync) -> Vec<T> {
+    let threads = std::thread::available_parallelism().map_or(1, |t| t.get());
+    if n < 256 || threads == 1 {
+        return (0..n).map(f).collect();
+    }
+    let mut out = vec![T::default(); n];
+    let size = n.div_ceil(threads);
+    std::thread::scope(|scope| {
+        for (c, chunk) in out.chunks_mut(size).enumerate() {
+            let f = &f;
+            scope.spawn(move || {
+                for (k, o) in chunk.iter_mut().enumerate() {
+                    *o = f(c * size + k);
+                }
+            });
+        }
+    });
+    out
 }
 
 fn times(a: &M6, x: Six) -> Six {
     std::array::from_fn(|s| (0..6).map(|t| a[s][t] * x[t]).sum())
+}
+
+fn times_transposed(a: &M6, x: Six) -> Six {
+    std::array::from_fn(|s| (0..6).map(|t| a[t][s] * x[t]).sum())
+}
+
+fn add6v(a: Six, b: Six) -> Six {
+    std::array::from_fn(|s| a[s] + b[s])
+}
+
+fn product(a: &M6, b: &M6) -> M6 {
+    std::array::from_fn(|r| std::array::from_fn(|c| (0..6).map(|k| a[r][k] * b[k][c]).sum()))
+}
+
+fn transpose(a: &M6) -> M6 {
+    std::array::from_fn(|r| std::array::from_fn(|c| a[c][r]))
+}
+
+fn add6(to: &mut M6, a: &M6, by: f64) {
+    for r in 0..6 {
+        for c in 0..6 {
+            to[r][c] += by * a[r][c];
+        }
+    }
 }
 
 /// The matrix of a linear map of sixes, column by column.
@@ -64,82 +108,177 @@ fn matrix(f: impl Fn(Six) -> Six) -> M6 {
     a
 }
 
+/// Add `by`·m to row's block at c.
+fn merge(row: &mut Vec<(usize, M6)>, c: usize, m: &M6, by: f64) {
+    match row.iter_mut().find(|(d, _)| *d == c) {
+        Some((_, to)) => add6(to, m, by),
+        None => {
+            let mut to = [[0.0; 6]; 6];
+            add6(&mut to, m, by);
+            row.push((c, to));
+        }
+    }
+}
+
 impl Level {
+    /// Level 0: the nodes not held, and the stiffness of their `live`
+    /// bonds; `part` is each node's index here, if any.
     fn new(lattice: &Lattice, part: &[Option<usize>], parts: usize, live: &[usize]) -> Level {
         let (nodes, bonds) = (&lattice.nodes, &lattice.bonds);
-        // A part's centre, the middle of its nodes: one node's, itself.
-        let mut count = vec![0.0; parts];
         let mut centre = vec![[0.0; 3]; parts];
         for (v, p) in part.iter().enumerate() {
             if let Some(k) = *p {
-                count[k] += 1.0;
-                centre[k] = add(centre[k], nodes[v].x);
+                centre[k] = nodes[v].x;
             }
         }
-        for k in 0..parts {
-            centre[k] = mul(centre[k], 1.0 / count[k]);
-        }
-        let mut between: HashMap<(Option<usize>, Option<usize>), Vec<usize>> = HashMap::new();
+        let mut own = vec![[[0.0; 6]; 6]; parts];
+        let mut pairs: Vec<(usize, usize, M6)> = Vec::new();
+        let mut pair: HashMap<(usize, usize), usize> = HashMap::new();
         for &b in live {
-            let (i, j) = (part[bonds[b].i], part[bonds[b].j]);
-            if i != j {
-                between.entry((i, j)).or_default().push(b);
+            let bond = &bonds[b];
+            let s = bond.stiffness();
+            // How a node's motion moves the bond's point: T = [1 | −r×].
+            let seen = |v: usize| -> [[f64; 6]; 3] {
+                let r = sub(bond.p, nodes[v].x);
+                [[1.0, 0.0, 0.0, 0.0, r[2], -r[1]], [0.0, 1.0, 0.0, -r[2], 0.0, r[0]], [0.0, 0.0, 1.0, r[1], -r[0], 0.0]]
+            };
+            // Tᵢᵀ·S·Tⱼ: what j's motion asks of i through the bond.
+            let through = |a: &[[f64; 6]; 3], b: &[[f64; 6]; 3]| -> M6 {
+                let sb: [[f64; 6]; 3] = std::array::from_fn(|r| std::array::from_fn(|c| (0..3).map(|k| s[r][k] * b[k][c]).sum()));
+                std::array::from_fn(|r| std::array::from_fn(|c| (0..3).map(|k| a[k][r] * sb[k][c]).sum()))
+            };
+            let side = [bond.i, bond.j].map(|v| part[v].map(|k| (k, seen(v))));
+            for (k, t) in side.iter().flatten() {
+                add6(&mut own[*k], &through(t, t), 1.0);
             }
-        }
-        let joints: Vec<Joint> = between
-            .into_iter()
-            .map(|((i, j), list)| {
-                let at = mul(list.iter().fold([0.0; 3], |s, &b| add(s, bonds[b].p)), 1.0 / list.len() as f64);
-                // Each bond: the force at its point for the relative motion seen there.
-                let stiffness = matrix(|d| {
-                    list.iter().fold([0.0; 6], |w, &b| {
-                        let r = sub(bonds[b].p, at);
-                        let moved = shift(d, r);
-                        let f = bonds[b].force([moved[0], moved[1], moved[2]]);
-                        let here = about([f[0], f[1], f[2], 0.0, 0.0, 0.0], r);
-                        std::array::from_fn(|s| w[s] + here[s])
-                    })
+            if let [Some((i, a)), Some((j, b))] = side {
+                let (i, j, a, b) = if i < j { (i, j, a, b) } else { (j, i, b, a) };
+                let k = *pair.entry((i, j)).or_insert_with(|| {
+                    pairs.push((i, j, [[0.0; 6]; 6]));
+                    pairs.len() - 1
                 });
-                Joint { i, j, at, stiffness }
-            })
-            .collect();
-        let mut block = vec![[[0.0; 6]; 6]; parts];
-        for joint in &joints {
-            for k in [joint.i, joint.j].into_iter().flatten() {
-                let r = sub(joint.at, centre[k]);
-                let seen = matrix(|x| about(times(&joint.stiffness, shift(x, r)), r));
-                for s in 0..6 {
-                    for t in 0..6 {
-                        block[k][s][t] += seen[s][t];
-                    }
-                }
+                add6(&mut pairs[k].2, &through(&a, &b), -1.0);
             }
         }
-        Level { centre, joints, inverse: block.iter().map(invert).collect(), up: Vec::new(), direct: None }
+        Level::of(centre, own, pairs)
+    }
+
+    fn of(centre: Vec<V3>, own: Vec<M6>, pairs: Vec<(usize, usize, M6)>) -> Level {
+        let mut rows = vec![Vec::new(); own.len()];
+        for (p, &(i, j, _)) in pairs.iter().enumerate() {
+            rows[i].push((j, p, false));
+            rows[j].push((i, p, true));
+        }
+        let inverse = own.iter().map(invert).collect();
+        let mut level = Level { centre, own, pairs, rows, inverse, step: 1.0, down: Vec::new(), from: Vec::new(), direct: None };
+        level.step = 4.0 / 3.0 / level.most_asked();
+        level
+    }
+
+    /// The greatest eigenvalue of the stiffness over each part's own, by
+    /// a few powers of it.
+    fn most_asked(&self) -> f64 {
+        let mut v: Vec<Six> = (0..self.own.len()).map(|k| std::array::from_fn(|s| 1.0 + ((7 * k + 3 * s) % 11) as f64 / 11.0)).collect();
+        let mut most = 1.0;
+        for _ in 0..12 {
+            let w = self.jacobi(&self.apply(&v, &mut Work(0.0)));
+            most = dot6(&w, &w).sqrt() / dot6(&v, &v).sqrt();
+            let scale = 1.0 / dot6(&w, &w).sqrt();
+            v = w.iter().map(|x| x.map(|a| a * scale)).collect();
+        }
+        most
     }
 
     /// The loads that hold the parts moved by x.
     fn apply(&self, x: &[Six], work: &mut Work) -> Vec<Six> {
-        work.0 += (x.len() + self.joints.len()) as f64;
-        let mut y = vec![[0.0; 6]; x.len()];
-        let seen = |k: Option<usize>, at: V3| k.map_or([0.0; 6], |k| shift(x[k], sub(at, self.centre[k])));
-        for joint in &self.joints {
-            let (a, b) = (seen(joint.i, joint.at), seen(joint.j, joint.at));
-            let w = times(&joint.stiffness, std::array::from_fn(|s| b[s] - a[s]));
-            for (side, sign) in [(joint.j, 1.0), (joint.i, -1.0)] {
-                if let Some(k) = side {
-                    let on = about(w, sub(joint.at, self.centre[k]));
-                    for s in 0..6 {
-                        y[k][s] += sign * on[s];
-                    }
+        work.0 += (x.len() + self.pairs.len()) as f64;
+        each(x.len(), |i| {
+            let mut y = times(&self.own[i], x[i]);
+            for &(o, p, transposed) in &self.rows[i] {
+                let m = &self.pairs[p].2;
+                let a = if transposed { times_transposed(m, x[o]) } else { times(m, x[o]) };
+                for s in 0..6 {
+                    y[s] += a[s];
                 }
             }
-        }
-        y
+            y
+        })
     }
 
     fn jacobi(&self, r: &[Six]) -> Vec<Six> {
-        r.iter().zip(&self.inverse).map(|(v, m)| times(m, *v)).collect()
+        each(r.len(), |i| times(&self.inverse[i], r[i]))
+    }
+    /// Row k of K·M, M's rows given part by part: what the motions M
+    /// gives k and its neighbours ask of k.
+    fn ask(&self, k: usize, m: &dyn Fn(usize) -> Vec<(usize, M6)>) -> Vec<(usize, M6)> {
+        let mut row: Vec<(usize, M6)> = Vec::new();
+        for (c, b) in m(k) {
+            merge(&mut row, c, &product(&self.own[k], &b), 1.0);
+        }
+        for &(o, p, transposed) in &self.rows[k] {
+            let a = if transposed { transpose(&self.pairs[p].2) } else { self.pairs[p].2 };
+            for (c, b) in m(o) {
+                merge(&mut row, c, &product(&a, &b), 1.0);
+            }
+        }
+        row
+    }
+
+    /// The next level up, of bodies: each part's body (`up`), `count` of them.
+    fn coarser(&mut self, up: &[usize], count: usize) -> Level {
+        let mut centre = vec![[0.0; 3]; count];
+        let mut n = vec![0.0; count];
+        for (k, &c) in up.iter().enumerate() {
+            centre[c] = add(centre[c], self.centre[k]);
+            n[c] += 1.0;
+        }
+        for c in 0..count {
+            centre[c] = mul(centre[c], 1.0 / n[c]);
+        }
+        // Rigid with its body, then a smoothing step: P = (1 − step·D⁻¹K)·P₀.
+        let rigid: Vec<M6> = (0..up.len()).map(|k| matrix(|y| shift(y, sub(self.centre[k], centre[up[k]])))).collect();
+        let rigid_row = |k: usize| vec![(up[k], rigid[k])];
+        let down = each(up.len(), |k| {
+            let mut row = rigid_row(k);
+            for (c, m) in self.ask(k, &rigid_row) {
+                merge(&mut row, c, &product(&self.inverse[k], &m), -self.step);
+            }
+            row
+        });
+        self.down = down;
+        self.from = vec![Vec::new(); count];
+        for (k, row) in self.down.iter().enumerate() {
+            for (q, (c, _)) in row.iter().enumerate() {
+                self.from[*c].push((k, q));
+            }
+        }
+        // What the finer stiffness asks under those motions: K·P, then Pᵀ·K·P.
+        let fine = &*self;
+        let kp = each(up.len(), |k| fine.ask(k, &|o| fine.down[o].clone()));
+        let rows = each(count, |c| {
+            let mut row: Vec<(usize, M6)> = Vec::new();
+            for &(k, q) in &fine.from[c] {
+                let pt = transpose(&fine.down[k][q].1);
+                for (d, m) in &kp[k] {
+                    if *d >= c {
+                        merge(&mut row, *d, &product(&pt, m), 1.0);
+                    }
+                }
+            }
+            row
+        });
+        let mut own = vec![[[0.0; 6]; 6]; count];
+        let mut pairs: Vec<(usize, usize, M6)> = Vec::new();
+        for (c, row) in rows.into_iter().enumerate() {
+            for (d, m) in row {
+                if d == c {
+                    own[c] = m;
+                } else {
+                    pairs.push((c, d, m));
+                }
+            }
+        }
+        Level::of(centre, own, pairs)
     }
 }
 
@@ -233,40 +372,31 @@ fn conjugate_gradients(
     x
 }
 
-/// One V-cycle from level l: smooth, hand the rest up as resultants on
-/// the bodies of the next level, take their rigid motions back, smooth.
+/// One V-cycle from level l: smooth, hand the rest up to the next level,
+/// take its motions back, smooth.
 fn cycle(levels: &[Level], l: usize, r: &[Six], work: &mut Work) -> Vec<Six> {
     let level = &levels[l];
     if l + 1 == levels.len() {
         return level.direct.as_ref().unwrap().solve(r);
     }
-    let up = &levels[l + 1];
-    let mut x = level.jacobi(r);
     let rest = |x: &[Six], work: &mut Work| -> Vec<Six> {
         let ax = level.apply(x, work);
         r.iter().zip(&ax).map(|(a, b)| std::array::from_fn(|s| a[s] - b[s])).collect()
     };
+    let mut x: Vec<Six> = level.jacobi(r).iter().map(|v| v.map(|a| a * level.step)).collect();
     let left = rest(&x, work);
-    let mut coarse = vec![[0.0; 6]; up.centre.len()];
-    for (k, v) in left.iter().enumerate() {
-        let c = level.up[k];
-        let w = about(*v, sub(level.centre[k], up.centre[c]));
-        for s in 0..6 {
-            coarse[c][s] += w[s];
-        }
-    }
+    let coarse = each(level.from.len(), |c| {
+        level.from[c].iter().fold([0.0; 6], |a, &(k, q)| add6v(a, times_transposed(&level.down[k][q].1, left[k])))
+    });
     let y = cycle(levels, l + 1, &coarse, work);
-    for k in 0..x.len() {
-        let c = level.up[k];
-        let u = shift(y[c], sub(level.centre[k], up.centre[c]));
-        for s in 0..6 {
-            x[k][s] += u[s];
-        }
+    let moved = each(x.len(), |k| level.down[k].iter().fold([0.0; 6], |a, (c, p)| add6v(a, times(p, y[*c]))));
+    for (xk, u) in x.iter_mut().zip(moved) {
+        *xk = add6v(*xk, u);
     }
     let left = rest(&x, work);
     for (xk, d) in x.iter_mut().zip(level.jacobi(&left)) {
         for s in 0..6 {
-            xk[s] += d[s];
+            xk[s] += level.step * d[s];
         }
     }
     x
@@ -298,6 +428,8 @@ pub fn moved(lattice: &Lattice, x: &[Six]) -> Vec<V3> {
 /// bodies, till few are left, and those solved directly.
 pub fn motions(lattice: &Lattice, alive: &[bool], gone: &[bool], loads: &dyn Fn(usize) -> Six, work: &mut Work) -> Vec<Six> {
     const FEW: usize = 64;
+    // Verdicts at 1e-12 were the same, at half again the iterations.
+    const TOLERANCE: f64 = 1e-6;
     let (nodes, bonds) = (&lattice.nodes, &lattice.bonds);
     let live: Vec<usize> = (0..bonds.len()).filter(|&b| alive[b] && !gone[bonds[b].i] && !gone[bonds[b].j]).collect();
     let mut part: Vec<Option<usize>> = vec![None; nodes.len()];
@@ -317,27 +449,27 @@ pub fn motions(lattice: &Lattice, alive: &[bool], gone: &[bool], loads: &dyn Fn(
         for k in key.iter_mut() {
             *k = coarse_site(*k, l);
         }
-        let (up, next, bodies) = coarser(levels.last().unwrap(), &part, &key);
+        let (up, next, bodies) = bodies_of(levels.last().unwrap(), &part, &key);
         if bodies == count {
             break;
         }
-        levels.last_mut().unwrap().up = up;
+        let up_level = levels.last_mut().unwrap().coarser(&up, bodies);
+        levels.push(up_level);
         (part, count) = (next, bodies);
-        levels.push(Level::new(lattice, &part, count, &live));
     }
     let top = levels.last_mut().unwrap();
     top.direct = Some(Cholesky::of(top));
     let loads: Vec<Six> = (0..nodes.len()).filter(|&v| node[v].is_some()).map(loads).collect();
     let mut inner = Work(0.0);
     let mut v_cycle = |r: &[Six]| cycle(&levels, 0, r, &mut inner);
-    let x = conjugate_gradients(&levels[0], &loads, &mut v_cycle, 1e-12, work);
+    let x = conjugate_gradients(&levels[0], &loads, &mut v_cycle, TOLERANCE, work);
     work.0 += inner.0;
     (0..nodes.len()).map(|v| node[v].map_or([0.0; 6], |k| x[k])).collect()
 }
 
 /// The bodies of the next level: the connected pieces of each key's
 /// parts. Each part's body, each node's, and how many.
-fn coarser(level: &Level, part: &[Option<usize>], key: &[[i64; 3]]) -> (Vec<usize>, Vec<Option<usize>>, usize) {
+fn bodies_of(level: &Level, part: &[Option<usize>], key: &[[i64; 3]]) -> (Vec<usize>, Vec<Option<usize>>, usize) {
     let parts = level.centre.len();
     let mut their = vec![[0; 3]; parts];
     for (v, p) in part.iter().enumerate() {
@@ -346,10 +478,8 @@ fn coarser(level: &Level, part: &[Option<usize>], key: &[[i64; 3]]) -> (Vec<usiz
         }
     }
     let mut parent: Vec<usize> = (0..parts).collect();
-    for joint in &level.joints {
-        if let (Some(i), Some(j)) = (joint.i, joint.j)
-            && their[i] == their[j]
-        {
+    for &(i, j, _) in &level.pairs {
+        if their[i] == their[j] {
             let (a, c) = (find(&mut parent, i), find(&mut parent, j));
             parent[a] = c;
         }

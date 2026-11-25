@@ -58,12 +58,16 @@ conjugate gradients, preconditioned by V-cycles over bodies within bodies.
 A body of level l is a connected piece of the nodes
 whose cells lead to one site of 2^l·FCC,
 each site leading to the nearest of the next level up, so bodies nest.
-What a level leaves unbalanced goes up as resultants on its bodies,
-force and moment, and comes back as their rigid motions;
-the bonds between two parts sum to one joint, a stiffness of their relative motion;
+What a level leaves unbalanced goes up to its bodies, and comes back as their motions,
+each body moving as a rigid one would,
+smoothed by a step of what its neighbours ask
+(smoothed aggregation, as algebraic multigrid has it);
+a body's stiffness is what its parts' is under those motions;
 the top level, a few bodies, is solved directly.
-The bodies only find the forces sooner:
-a few times fewer iterations than each node's block alone.
+Rigid bodies alone are a poor guess at how a net of beams bends:
+a tree of ten thousand cells took over 300 iterations, smoothed under 30,
+and 4 s on four cores where it took 55 s.
+Its verdicts were the same to a millionth of the load as to a trillionth.
 
 ## What was tried, and not kept
 
@@ -172,6 +176,10 @@ but what is smaller than its sites may be taken into what is next to it,
 a voxel hanging in the air held up by its supported neighbour;
 and what a finer level decides is an edit, which no coarser level undoes:
 near the camera that voxel falls, far off it may stay, unseen.
+So too a cut thinner than a cell:
+a face is one node, and bridges what is cut across it,
+so a coarse level sees a cut only as far as its cells are cut;
+a finer level sees it, and decides.
 Taking a small thing into a large one is let in;
 joining two large things that only lie side by side in a cell is not,
 as it holds up what should fall:
@@ -234,21 +242,17 @@ the block hangs on from 0.25 m, the gap under it an eighth of a metre.
 
 ## Where it is to go
 
-A face split into as many nodes as the pieces of matter on it,
-joined within its two cells or not,
-would see a cut through at every level that sees what is cut;
-a hinge left in a cut would still be bridged.
 What holds is still whatever is deep in bulk within a radius in metres;
 by the same rule at every level, it would be in sites.
 And the levels are to be tied as light's are:
 the finer where it is made, the coarser beyond,
 a finer level taking its boundary's forces from the coarser.
 
-Level 0 as faces and beams costs: a tree of ten thousand cells
-took a minute to solve where its voxels took two seconds.
-The V-cycles' rigid motions are a coarse guess at how bodies bend,
-so iterations still grow with a structure's size;
-a coarser level measured from a finer one is also how to carry
+Level 0 as faces and beams costs six nodes to a cell:
+a tree of ten thousand cells takes 4 s where its voxels took 2.
+Reading the blocks is most of an iteration's time;
+they could be half as large, in single precision.
+A coarser level measured from a finer one is also how to carry
 a finer level's error to it and back (its cells' responses),
 a multigrid the levels already are.
 Only cells whose faces or loads changed need solving,
