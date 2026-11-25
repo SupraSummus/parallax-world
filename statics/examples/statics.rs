@@ -4,7 +4,8 @@
 //! tree: a leaning tree cut deeper and deeper, does it fall;
 //! tower: a lattice tower, a leg cut, at every level;
 //! members: how much of their strength its members use, at every level;
-//! sponge: frames with and without braces gathered into sponges.
+//! sponge: frames with and without braces gathered into sponges;
+//! levels [name]: scenes settled at level 0 and gathered coarser.
 
 use statics::bodies::*;
 use statics::gather::gathered;
@@ -189,6 +190,7 @@ fn main() {
         Some("tower") => exp_tower(),
         Some("members") => exp_members(),
         Some("sponge") => exp_sponge(),
+        Some("levels") => exp_levels(args.next()),
         _ => eprintln!("cantilever | compare [name] | tree | tower"),
     }
 }
@@ -372,5 +374,30 @@ fn exp_sponge() {
                 along.iter().map(|a| format!("{:.3}", a.2)).collect::<Vec<_>>().join(" ")
             );
         }
+    }
+}
+
+fn exp_levels(only: Option<String>) {
+    let scenes = [
+        cantilever(STONE, 0.5, 4.5),
+        cantilever(STONE, 0.5, 5.5),
+        cantilever(STEEL, 0.25, 8.0),
+        tree(8.0, 1.0, 0.0),
+        tree(8.0, -1.0, 0.7),
+        portico(0, 0.5),
+        portico(2, 0.5),
+    ];
+    for sc in scenes.iter().filter(|s| only.as_ref().is_none_or(|o| s.name.contains(o.as_str()))) {
+        let mut lat = sc.build(0);
+        let mut line = format!("{:36}", sc.name);
+        for level in 0..=4 {
+            if level > 0 {
+                lat = gathered(&lat);
+            }
+            let t = Instant::now();
+            let o = settle(&lat);
+            line += &format!(" | {level}: {:5.1}% {:5.2}s", 100.0 * o.fallen, t.elapsed().as_secs_f64());
+        }
+        println!("{line}");
     }
 }

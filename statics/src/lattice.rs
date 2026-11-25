@@ -39,6 +39,9 @@ pub struct Lattice {
     pub bonds: Vec<Bond>,
     /// Each voxel's site, in level-0 units.
     pub sites: Vec<[i64; 3]>,
+    /// The cells of its level each voxel lies between: its own, twice, or
+    /// for a node on a face, the two the face joins.
+    pub around: Vec<[[i64; 3]; 2]>,
 }
 
 /// The bonds of a face of normal n between voxels i and j, d apart, of
@@ -118,7 +121,8 @@ pub fn build(level: u32, lo: V3, hi: V3, fill: Fill) -> Lattice {
             }
         }
     }
-    Lattice { level, voxels, bonds, sites }
+    let around = sites.iter().map(|s| [*s, *s]).collect();
+    Lattice { level, voxels, bonds, sites, around }
 }
 
 /// The site of 2^l·FCC nearest a point in level-0 units, ties to the

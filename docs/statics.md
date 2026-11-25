@@ -133,54 +133,43 @@ Without it the world would fall whole:
 soil gives way under its own weight a few metres down.
 
 Each level is a statics of its own, by the same rules,
-its voxels gathered from the level below (`statics/src/gather.rs`),
+gathered from the level below (`statics/src/gather.rs`),
 each cell keeping as many numbers as any other.
-A voxel keeps what its matter weighs, and where;
-how stiff its matter is along each of the lattice's six directions,
-as a share of a cell full of it,
-found by straining the finer voxels in it evenly (homogenisation);
-and on each face, four bonds that keep the area, centre and spread
-of the matter crossing it, as a face of level 0 keeps its rhombus.
-About fifty numbers a cell.
-A full cell gathers to its material exactly (`solid_gathers_to_itself`),
-so a mountain is the same rock at every level.
-Gathered so, a frame of steel without braces, a fifth of it steel,
-is a sponge 0.6 % as stiff as steel; braced, 3 %
-(`statics sponge`):
-a sponge's stiffness comes of how its matter bears, not only how much there is.
+Level 0 is voxels and their faces;
+every level above is nodes on the faces between its cells,
+each joined to the other faces of its cell by a beam:
+one number to each pair of a cell's faces, up to 66,
+one for how much more of its strength the finer matter uses than its beams,
+and what it weighs, hung on its faces as much as each is joined.
+A cell's beams are found from the level below:
+each face held as one and moved alone along each axis,
+the matter between free, what holds the faces is the cell's stiffness between them,
+and the beams are those whose stiffness is nearest it.
+Matter that only lies near other matter in a cell does not join it,
+so a truss stays a truss.
 
-A lattice tower is where it fails (`statics members`, `statics tower`).
-At levels whose cells are about a member's size or a panel's,
-what its members bear came out up to tens of times too much,
-the more the coarser, so it fell where level 0 stands:
-rigid cells joined by thin patches off their centres
-turn a truss into a frame, its members bent where they only pull,
-and a level gathered from such a level inherits the error.
-What else was tried:
-a share of strength found as the stiffness is, by an even strain,
-forces bonds that bear nothing in the truss
-and came out a hundred times too weak at 0.5 m;
-a sponge breaking at its material's strain, worse.
-Only cells parted into their connected pieces,
-each its own voxel, the faces between pieces kept
-(about twice off at most; commit d166d6c),
-kept what a member bears,
-but a cell then has as many voxels as pieces.
-
-So between the levels where a structure's members are resolved
-and those where a cell holds many of them, a sponge,
-lie a few levels where it is neither.
-A cell's few numbers cannot say which of its faces its matter joins:
-that takes a share for each pair of faces,
-or a few pieces to a cell at most.
-Light has the same gap, in walls thinner than its sites.
+A lattice tower, how much of their strength its members use
+against level 0 (`statics members`):
+within about twice at cells of 0.25 m,
+up to four or five times too much at 0.5 to 2 m;
+but no longer more the coarser, as when a cell kept a few numbers
+for each direction and a voxel's faces (commit db8f140, on `claude/amazing-carson-r4bs6l`):
+there it was tens of times at 1 m, gathered from 0.5 m that was already off.
+Beams' sections taken from what crosses each face, rather than from stiffness,
+were off three to ten times at 0.25 to 0.5 m.
+A slender stone beam, solid, held at levels of 0.5 m and more
+a length that falls at level 0:
+one number for a cell's strength makes some cells too weak and others too strong.
+What a beam bears against how much of the finer matter's strength it uses
+is still to be found per beam, not per cell.
 
 ## Where it is to go
 
-The gap above first: a fixed few pieces to a cell,
-or a share for each pair of its faces,
-measured against level 0 on the tower, the tree and the slab,
-and a lattice tall enough to be a sponge at its coarsest levels.
+A beam's strength first, per beam:
+what it bears against how much of the finer matter's strength that uses,
+from the same moves of a cell's faces its stiffness comes from;
+measured against level 0 on the tower, the tree, the slab and a solid beam,
+and on a lattice tall enough to be a sponge at its coarsest levels.
 What holds is still whatever is deep in bulk within a radius in metres;
 by the same rule at every level, it would be in sites.
 And the levels are to be tied as light's are:

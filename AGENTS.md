@@ -117,7 +117,7 @@ worlds/                      # The worlds, on worldgen's and ground's public API
 └── examples/                # map, look, check, cost, bench: a world looked at, checked, measured
 statics/                     # Statics, an experiment (docs/statics.md), linted but not tested by pnpm
 ├── src/                     # Rigid voxels joined on their faces (model.rs), on 2^l·FCC (lattice.rs);
-│                            # a level from the one below (gather.rs); the forces, what stands (bodies.rs)
+│                            # a level from the one below, beams between faces (gather.rs); the forces (bodies.rs)
 └── examples/statics.rs      # The experiments
 lab/                         # Experiment, linted but not tested by pnpm (see src/lib.rs); scripts/overture.py fetches its real places
 native/src/                  # The frontend: egui on winit and wgpu; in browsers too (web/index.html)
