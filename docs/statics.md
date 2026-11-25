@@ -220,15 +220,19 @@ and the levels that let it fall:
 | Edit | Used at 0 | 0 | 0.25 m | 0.5 m | 1 m | 2 m |
 |---|---|---|---|---|---|---|
 | a stone beam made 4 m | 0.55 | stands | stands | stands | stands | stands |
-| made 6 m | 1.27 | stands | falls | falls | stands | stands |
-| a slab, one column cut | 1.09 | stands | stands | stands | stands | stands |
+| made 6 m | 1.27 | stands | falls | falls | falls | falls |
+| a slab, one column cut | 1.09 | stands | stands | stands | falls | stands |
 | two columns cut | 8.4 | falls | falls | falls | falls | stands |
+| a lattice tower, a leg cut | 0.46 | stands | stands | stands | stands | stands |
+| two legs cut | 0.55 | stands | stands | half falls | stands | half falls |
 | a tree cut 30 % | 0.39 | stands | stands | stands | stands | stands |
 | cut 70 % | 2.9 | falls | stands | stands | stands | stands |
 | cut through | | falls | falls | falls | stands | stands |
 | a block hanging let go | | falls | stands | stands | stands | stands |
 
-Where what is used is far from 1 and the thing is a few cells across, levels agree.
+Where what is used is far from 1 and the thing is a few cells across, levels agree;
+a steel tower stands on two legs, its members 0.3 m across,
+and at cells larger than them half of it may fall.
 What they miss is a cut thinner than a cell:
 a face is one node, held as one when its cell is measured,
 so a kerf across a face is bridged by it.
@@ -251,8 +255,7 @@ a finer level taking its boundary's forces from the coarser.
 Level 0 as faces and beams costs six nodes to a cell:
 a tree of ten thousand cells takes 4 s where its voxels took 2,
 and as long to measure its cells a level up (`statics speed`).
-Reading the blocks is most of an iteration's time;
-they could be half as large, in single precision.
+Blocks in single precision, half as much to read, saved a thirtieth.
 A coarser level measured from a finer one is also how to carry
 a finer level's error to it and back (its cells' responses),
 a multigrid the levels already are.
