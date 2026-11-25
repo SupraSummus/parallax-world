@@ -14,105 +14,113 @@ here is what they found.
 
 ## The model
 
-Rigid voxels joined by springs on the faces they share
-(a rigid body–spring model, as used for fracture of concrete),
-each face carrying a force and a moment
-(`statics/src/model.rs`).
+Voxels are rigid, joined by springs on the faces they share
+(a rigid body–spring model, as used for fracture of concrete;
+`statics/src/model.rs`).
 A voxel of FCC is the Voronoi cell of its site,
-the cell such models are built on,
-and every face is a rhombus whose area and second moments are known.
-A face breaks once the stress at one of its corners,
-or its shear, passes its material's strength;
-what is no longer joined to held ground falls.
+the cell such models are built on.
+Each face is four bonds, springs at points
+that keep the rhombus's area and second moments,
+so a face bears a moment as it would whole,
+and a line of voxels is a beam, not a chain.
 Strengths and stiffnesses are in pascals,
 so voxels of any size are the same material.
 
-Faces carry moments, so a line of single voxels is a beam, not a chain,
-and how far a beam reaches comes out of its section and its material:
-a stone beam out of a wall
-held between 0.6 and 0.9 of what beam theory gives,
-closer the more voxels across it
-(two, four, eight across: about 0.67, 0.82, 0.90).
-Masonry on mortar, half a metre thick, reaches about a metre.
+A voxel's stress is what its bonds' forces add up to over its volume.
+At a bond, the stress is its voxels',
+but on its own face what the bond bears itself,
+which keeps the bending within a voxel
+(a voxel's mean stress alone made beams two voxels thick
+twice as strong as they are).
+Its share of the strength is the greatest of
+tension, compression and shear, whichever way the stress lies.
+A check of each face's own load was anisotropic:
+the lattice's faces lie at 45° to the cube's axes,
+so along those a beam was twice as strong as across them.
 
-## Coarser, by bodies, fails
+What settles (`settle`):
+the forces under weight;
+every face with a bond over its strength breaks, whole;
+what no longer holds to the ground falls;
+again, until nothing breaks.
+A face with only some of its bonds left
+would be a ball joint, a mechanism statics cannot answer
+(one cut tree took minutes to solve where it took a second);
+broken whole, whatever is joined is joined rigidly.
+Breaking everything over its strength at once,
+rather than only what is near the worst,
+gives the same answers in a few rounds instead of tens.
 
-The same scenes in voxels of level 1 or 2, each its cell's fill,
-were wrong both ways:
-a stone beam that holds at level 0 fell,
-and so did a whole uncut tree,
-as its trunk turned into a few voxels joined at their corners.
+A stone or masonry beam out of a wall
+holds 0.7 to 0.9 of the length beam theory gives,
+more the thicker it is (the wall's corner bears more than theory says);
+wood, whose shear strength limits it, about two thirds.
+A leaning tree falls once cut deep enough,
+the shallower the more it leans:
+leaning 3°, cut 80 to 90 % through; leaning 8°, 60 to 65 %
+(`statics tree`).
 
-Rigid bodies made of level-0 voxels
-(a cell of a coarser level, split into its connected pieces;
-`statics/src/coarse.rs`),
-with the fine faces between bodies kept as they are,
-are exact wherever a weak section lies between two bodies.
+## The forces: all voxels, at once
+
+Every voxel is in equilibrium under its weight and its bonds,
+all at once (`statics/src/bodies.rs`):
+conjugate gradients, preconditioned by V-cycles over bodies within bodies.
+A body of level l is a connected piece of the voxels
+whose sites lead to one site of 2^l·FCC,
+each site leading to the nearest of the next level up, so bodies nest.
+What a level leaves unbalanced goes up as resultants on its bodies,
+force and moment, and comes back as their rigid motions;
+the bonds between two parts sum to one joint, a stiffness of their relative motion;
+the top level, a few bodies, is solved directly.
+The bodies only find the forces sooner:
+a few times fewer iterations than each voxel's block alone,
+about twice as fast for a tree of ten thousand voxels.
+
+## What was tried, and not kept
+
+Each failed the same way: a coarse level holding forces,
+not only finding them.
+What a structure weighs, and where, adds up exactly from fine to coarse;
+what it holds does not:
+it is its weakest section's, which a coarse cell averages away.
+These were measured with an earlier check of each face's corners.
+
+Coarser voxels, each its cell's fill, were wrong both ways:
+a stone beam that holds fell,
+and so did an uncut tree, its trunk a few voxels joined at their corners.
+
+Rigid bodies of level-0 voxels, with the faces between them kept,
+are exact wherever the weak section lies between bodies:
+two bodies split at a tree's cut said whether it falls
+as all its voxels did in every case tried,
+the upper one weighed from voxels as coarse as 1 m.
 But a cut inside a body is invisible:
-a tree cut through 70 % at its foot, which falls at level 0,
-stood as bodies of any coarser level.
-Refining the bodies on either side of every face loaded
-over a share θ of its strength
-found the cut only with θ as low as a quarter:
-the coarse bodies are stiffer around the cut, so they load it less.
+a tree cut 70 % through stood as bodies of any coarser level.
+Refining where a face is loaded over a share of its strength
+found it only at a quarter;
+checking each body's voxels alone
+under the forces on its boundary (global–local)
+found it at 0.8, and refined only around what is loaded:
+the soil overhanging a rock, a quarter as many bodies as voxels.
+Both rest on a threshold, and break by approximate forces.
 
-## Loads gather, strength does not
-
-What a structure weighs and where its weight is
-adds up exactly from fine voxels to coarse ones,
-as the levels' averages do.
-What it holds does not:
-it is the strength of its weakest section,
-which a coarse cell averages away.
-So the forces can come from far and coarse,
-but the strength must be read where it is, fine.
-
-Two rigid bodies, the tree above its cut and below,
-joined by the faces left in the cut,
-said whether the tree falls as level 0 does
-in every case tried
-(leaning 3° and 8°, cut from either side, 10 % to 95 % deep).
-The body above took its weight from voxels as coarse as 1 m
-with the same answers; from 2 m, for a crown 4 m across, they shifted.
-
-Checking each coarse body alone at level 0
-under the forces its boundary carries in the coarse solution
-(global–local, as engineers check a detail of a whole model;
-`local_check`)
-finds a cut inside it, at a threshold of 0.8.
-Each body's check is small and stands alone,
-so they can run on threads, and only where forces changed.
-Starting from bodies of 1 m and refining where faces are loaded,
-a rock 6 m across under a cap of soil overhanging it
-lost what it does at level 0,
-refined only around the overhang:
-a quarter as many bodies as voxels, in under half the time.
-
-## Falling
-
-Breaking, each round, every face over its strength
-(rather than only those near the worst)
-gave the same answers in a few rounds instead of tens:
-how a structure comes apart can be rough, so long as it does.
-
-## What it costs
-
-A solve is conjugate gradients, preconditioned by each voxel's block:
-hundreds of iterations for a few thousand voxels,
-many more for long slender beams
-and for soft soil on stiff rock.
-An additive preconditioner of the coarser bodies
-(a residual's resultants per body, a rigid motion back)
-barely helped.
+Forces from the top down, each body's parts rigid
+and its boundary found before it,
+leave every voxel in equilibrium:
+so where nothing is over its strength, the structure stands
+(a lower bound, as limit analysis has it),
+which proved an uncut tree with a third of the work.
+But bodies of a few voxels, star-shaped, are no rigid parts:
+they bore what their joints do not,
+and nearly everywhere else the structure had to be solved whole anyway.
 
 ## Where it is to go
 
-Bodies split where a structure is narrow,
-not along the cells of a level:
-then a few bodies answer as all its voxels do.
-Finding the narrow places, and keeping a body's narrowest section
-along each direction for places whose level 0 is not made
-(as light wants sites' shares by direction, [light.md](light.md)),
-is the next step;
-and a structure's state from edits made to a world
-that never changes once generated.
+The V-cycles' rigid motions are a coarse guess at how bodies bend,
+so iterations still grow with a structure's size;
+smoothing them, as smoothed aggregation does, is the next step.
+Only structures whose faces or loads changed need solving,
+from the forces they had;
+the world as generated is held, and edits made to it
+are what statics would be asked about.
+What falls is taken off the lattice whole; moving it is not done.
