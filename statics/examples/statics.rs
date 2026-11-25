@@ -5,7 +5,9 @@
 //! tower: a lattice tower, a leg cut, at every level;
 //! members: how much of their strength its members use, at every level;
 //! sponge: frames with and without braces gathered into sponges;
-//! levels [name]: scenes settled at level 0 and gathered coarser.
+//! levels [name]: scenes settled at level 0 and gathered coarser;
+//! edits [name]: what an edit brings down, at each level, the world as
+//! generated standing (MARGIN).
 
 use statics::bodies::*;
 use statics::gather::gathered;
@@ -191,6 +193,7 @@ fn main() {
         Some("members") => exp_members(),
         Some("sponge") => exp_sponge(),
         Some("levels") => exp_levels(args.next()),
+        Some("edits") => exp_edits(args.next()),
         _ => eprintln!("cantilever | compare [name] | tree | tower"),
     }
 }
@@ -204,9 +207,9 @@ fn to_segment(x: V3, a: V3, b: V3) -> f64 {
 
 /// A lattice tower, legs from a square `base` wide to one `top` wide,
 /// `high`, rings every `panel` and crosses in every face between them,
-/// its members `thick` across, on four pads of steel; with `cut`, one leg
+/// its members `thick` across, on four pads of steel; `cut` of its legs
 /// gone from 1 m to 2.5 m. Nothing in it is held but what is deep in rock.
-fn tower(mat: Mat, cut: bool) -> Scene {
+fn tower(mat: Mat, cut: usize) -> Scene {
     let (base, top, high, panel, thick) = (10.0, 2.0, 30.0, 3.0, 0.3);
     let leg = move |k: usize, y: f64| {
         let w = (base + (top - base) * y / high) / 2.0;
@@ -226,7 +229,7 @@ fn tower(mat: Mat, cut: bool) -> Scene {
         }
     }
     Scene {
-        name: format!("{} tower{}", mat.name, if cut { ", a leg cut" } else { "" }),
+        name: format!("{} tower, {cut} legs cut", mat.name),
         lo: [-base / 2.0 - 2.0, -2.5, -base / 2.0 - 2.0],
         hi: [base / 2.0 + 2.0, high + 0.5, base / 2.0 + 2.0],
         fill: Box::new(move |x: V3| {
@@ -236,7 +239,7 @@ fn tower(mat: Mat, cut: bool) -> Scene {
                     return Some((STEEL, false));
                 }
             }
-            let gone = cut && inside(x[1], 1.0, 2.5) && to_segment(x, leg(0, -1.0), leg(0, high)) < thick;
+            let gone = (0..cut).any(|k| inside(x[1], 1.0, 2.5) && to_segment(x, leg(k, -1.0), leg(k, high)) < thick);
             (!gone && members.iter().any(|(a, b)| to_segment(x, *a, *b) < thick / 2.0)).then_some((mat, false))
         }),
     }
@@ -249,7 +252,7 @@ const WEAK_STEEL: Mat = Mat { name: "weak steel", rho: 7850.0, e: 200e9, g: 80e9
 fn exp_tower() {
     println!("## A lattice tower: what falls of it, at level 0 and from its voxels gathered coarser");
     for mat in [WEAK_STEEL] {
-        for cut in [false, true] {
+        for cut in [0, 1] {
             let sc = tower(mat, cut);
             let mut fine = sc.build(0);
             hold_bulk(&mut fine, 0.75);
@@ -286,7 +289,7 @@ fn exp_tower() {
 /// How much of its strength the tower's members use, by height, at each
 /// level: intact and with a leg cut.
 fn exp_members() {
-    for cut in [false, true] {
+    for cut in [0, 1] {
         let sc = tower(STEEL, cut);
         let mut fine = sc.build(0);
         hold_bulk(&mut fine, 0.75);
@@ -397,6 +400,88 @@ fn exp_levels(only: Option<String>) {
             let t = Instant::now();
             let o = settle(&lat);
             line += &format!(" | {level}: {:5.1}% {:5.2}s", 100.0 * o.fallen, t.elapsed().as_secs_f64());
+        }
+        println!("{line}");
+    }
+}
+
+/// A short stone beam out of a wall, a small block hanging under its end;
+/// `apart`, a layer between them gone.
+fn pendant(apart: bool) -> Scene {
+    Scene {
+        name: format!("a block hanging{}", if apart { ", let go" } else { "" }),
+        lo: [-0.6, -0.6, -0.6],
+        hi: [1.2, 1.1, 1.1],
+        fill: Box::new(move |x: V3| {
+            if inside(x[0], -0.5, 0.0) && inside(x[1], -0.5, 1.0) && inside(x[2], -0.5, 1.0) {
+                Some((STONE, true))
+            } else if inside(x[0], 0.0, 1.0) && inside(x[1], 0.0, 0.5) && inside(x[2], 0.0, 0.5)
+                || inside(x[0], 0.5, 0.75) && inside(x[1], -0.375, if apart { -0.125 } else { 0.0 }) && inside(x[2], 0.0, 0.25)
+            {
+                Some((STONE, false))
+            } else {
+                None
+            }
+        }),
+    }
+}
+
+/// The most of its strength any bond uses, all standing as it is.
+fn most_used(lat: &Lattice) -> f64 {
+    let alive = vec![true; lat.bonds.len()];
+    let gone = vec![false; lat.voxels.len()];
+    let f = forces(lat, &alive, &gone, &mut Work(0.0));
+    let s = stresses(lat, &f);
+    lat.bonds
+        .iter()
+        .enumerate()
+        .filter_map(|(k, b)| {
+            let ends: Vec<usize> = [b.i, b.j].into_iter().filter(|&v| !lat.voxels[v].held).collect();
+            (!ends.is_empty()).then(|| {
+                let mean: M3 =
+                    std::array::from_fn(|r| std::array::from_fn(|c| ends.iter().map(|&v| s[v][r][c]).sum::<f64>() / ends.len() as f64));
+                b.mat.utilisation(&b.stress(&mean, f[k]))
+            })
+        })
+        .fold(0.0, f64::max)
+}
+
+fn exp_edits(only: Option<String>) {
+    println!("## Edits: what falls of the edited, its strength no less than the generated needs ({MARGIN}×)");
+    println!("   at level 0 first, uncalibrated, the most used of their strength before and after");
+    let cases: Vec<(Scene, Scene)> = vec![
+        (tower(STEEL, 0), tower(STEEL, 1)),
+        (tower(STEEL, 0), tower(STEEL, 2)),
+        (tree(8.0, 1.0, 0.0), tree(8.0, -1.0, 0.3)),
+        (tree(8.0, 1.0, 0.0), tree(8.0, -1.0, 0.7)),
+        (tree(8.0, 1.0, 0.0), tree(8.0, -1.0, 1.0)),
+        (portico(0, 0.5), portico(1, 0.5)),
+        (portico(0, 0.5), portico(2, 0.5)),
+        (cantilever(STONE, 0.5, 3.0), cantilever(STONE, 0.5, 4.0)),
+        (cantilever(STONE, 0.5, 3.0), cantilever(STONE, 0.5, 6.0)),
+        (pendant(false), pendant(true)),
+    ];
+    for (generated, edited) in cases.iter().filter(|(_, e)| only.as_ref().is_none_or(|o| e.name.contains(o.as_str()))) {
+        let (mut g, mut e) = (generated.build(0), edited.build(0));
+        if generated.name.contains("tower") {
+            hold_bulk(&mut g, 0.75);
+            hold_bulk(&mut e, 0.75);
+        }
+        let mut line = format!("{:36} used {:.2} -> {:.2}", edited.name, most_used(&g), most_used(&e));
+        for level in 0..=4 {
+            if level > 0 {
+                g = gathered(&g);
+                e = gathered(&e);
+            }
+            let (mut gs, mut es) = (g.clone(), e.clone());
+            as_generated(&mut gs, &g);
+            as_generated(&mut es, &g);
+            if std::env::var("USED").is_ok() {
+                line += &format!(" | {level}: used {:.2} -> {:.2}, as generated {:.2}", most_used(&g), most_used(&e), most_used(&es));
+                continue;
+            }
+            let (before, after) = (settle(&gs), settle(&es));
+            line += &format!(" | {level}: {:3.0}% {:3.0}%", 100.0 * before.fallen, 100.0 * after.fallen);
         }
         println!("{line}");
     }

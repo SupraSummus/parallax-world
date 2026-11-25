@@ -157,11 +157,13 @@ for each direction and a voxel's faces (commit db8f140, on `claude/amazing-carso
 there it was tens of times at 1 m, gathered from 0.5 m that was already off.
 Beams' sections taken from what crosses each face, rather than from stiffness,
 were off three to ten times at 0.25 to 0.5 m.
-A slender stone beam, solid, held at levels of 0.5 m and more
-a length that falls at level 0:
-one number for a cell's strength makes some cells too weak and others too strong.
-What a beam bears against how much of the finer matter's strength it uses
-is still to be found per beam, not per cell.
+Two things joined what should stay apart, and are gone.
+Beams fitted by least squares joined faces no matter in the cell joins,
+fitting the rest better:
+a beam is only between faces the cell's matter joins.
+And a cell holding anything held was held,
+so ground grew a cell a level, up a column past a cut:
+a cell is held if all in it is, a face if anything on it is.
 
 ## What it may get wrong, and what not
 
@@ -206,6 +208,33 @@ So a cell's strength is to be no less than its state as generated needs,
 with a margin;
 then something generated near its strength
 holds more than it would, before an edit brings it down.
+
+## Edits, at every level
+
+What an edit brings down, against level 0,
+each level's strength no less than its world as generated needs, twice
+(`as_generated`, `statics edits`);
+the most of their strength anything uses at level 0 after the edit,
+and the levels that let it fall:
+
+| Edit | Used at 0 | 0 | 0.25 m | 0.5 m | 1 m | 2 m |
+|---|---|---|---|---|---|---|
+| a stone beam made 4 m | 0.65 | stands | stands | stands | stands | stands |
+| made 6 m | 1.5 | falls | falls | falls | falls | stands |
+| a slab, one column cut | 0.90 | stands | stands | falls | falls | falls |
+| two columns cut | 9.4 | falls | falls | falls | falls | falls |
+| a tree cut 30 % | 0.46 | stands | stands | stands | stands | stands |
+| cut 70 % | 3.6 | falls | falls | stands | stands | stands |
+| cut through | | falls | falls | falls | falls | falls |
+| a block hanging let go | | falls | falls | falls | falls | falls |
+
+Where what is used is far from 1, levels agree,
+but for a trunk half a metre across cut 70 %,
+which stands at 0.5 m and coarser:
+there the trunk is about a cell or less,
+and a cell's one number for its strength does not see the hinge left.
+That is a small thing far off, which the rules above let be,
+or a strength to each beam, not each cell.
 
 ## Where it is to go
 

@@ -31,6 +31,7 @@ pub fn spacing(level: u32) -> f64 {
 /// What fills a point: its material, and whether it is held.
 pub type Fill<'a> = &'a dyn Fn(V3) -> Option<(Mat, bool)>;
 
+#[derive(Clone)]
 pub struct Lattice {
     /// Its voxels are those of 2^level·FCC.
     pub level: u32,

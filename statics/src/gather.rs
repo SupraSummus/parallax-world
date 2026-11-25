@@ -57,6 +57,28 @@ impl Cell {
     }
 }
 
+/// Which of a cell's handles its matter joins: a piece of each.
+fn pieces(cell: &Cell) -> Vec<usize> {
+    let (nf, nh) = (cell.free.len(), cell.across.len());
+    let index = |p: Place| match p {
+        Place::Free(k) => k,
+        Place::Handle(h) => nf + h,
+    };
+    let mut parent: Vec<usize> = (0..nf + nh).collect();
+    fn find(p: &mut [usize], mut a: usize) -> usize {
+        while p[a] != a {
+            p[a] = p[p[a]];
+            a = p[a];
+        }
+        a
+    }
+    for &(i, j, _, _) in &cell.bonds {
+        let (a, b) = (find(&mut parent, index(i)), find(&mut parent, index(j)));
+        parent[a] = b;
+    }
+    (0..nh).map(|h| find(&mut parent, nf + h)).collect()
+}
+
 /// The stiffness of a cell between its handles at `at`, translations only:
 /// what holds each handle when one is moved alone along an axis, the
 /// others held where they are, the free parts where they come to rest.
@@ -157,10 +179,12 @@ fn weakness(found: &[(usize, usize, f64)], at: &[V3], used: &[f64], mat: Mat) ->
 }
 
 /// The beams (a < b, and the stiffness of each along it) whose stiffness
-/// is nearest a stiffness between handles at `at`, none less than nothing.
-fn beams(k: &[Vec<f64>], at: &[V3]) -> Vec<(usize, usize, f64)> {
+/// is nearest a stiffness between handles at `at`, none less than nothing,
+/// and none between handles the cell's matter does not join.
+fn beams(k: &[Vec<f64>], at: &[V3], joined: &dyn Fn(usize, usize) -> bool) -> Vec<(usize, usize, f64)> {
     let n = 3 * at.len();
-    let pairs: Vec<(usize, usize)> = (0..at.len()).flat_map(|a| (a + 1..at.len()).map(move |b| (a, b))).collect();
+    let pairs: Vec<(usize, usize)> =
+        (0..at.len()).flat_map(|a| (a + 1..at.len()).map(move |b| (a, b))).filter(|&(a, b)| joined(a, b)).collect();
     // A unit of each beam's stiffness, as a matrix.
     let units: Vec<Vec<f64>> = pairs
         .iter()
@@ -233,11 +257,11 @@ struct Nodes {
 }
 
 impl Nodes {
-    fn on(&mut self, a: usize, b: usize, sites: &[[i64; 3]], held: &[bool], mat: Mat) -> usize {
+    fn on(&mut self, a: usize, b: usize, sites: &[[i64; 3]], held: &dyn Fn(usize, usize) -> bool, mat: Mat) -> usize {
         let key = (a.min(b), a.max(b));
         *self.at.entry(key).or_insert_with(|| {
             let x = mul(add(sites[a].map(|v| v as f64 * UNIT), sites[b].map(|v| v as f64 * UNIT)), 0.5);
-            self.voxels.push(Voxel { x, m: 0.0, volume: f64::INFINITY, mat, held: held[a] || held[b] });
+            self.voxels.push(Voxel { x, m: 0.0, volume: f64::INFINITY, mat, held: held(a, b) });
             self.around.push([sites[key.0], sites[key.1]]);
             self.voxels.len() - 1
         })
@@ -265,10 +289,18 @@ pub fn gathered(fine: &Lattice) -> Lattice {
     let mut mats: Vec<Vec<(Mat, f64)>> = vec![Vec::new(); n];
     let mut place: Vec<Option<(usize, Place)>> = vec![None; fine.voxels.len()];
     let mut on_face: HashMap<(usize, usize), f64> = HashMap::new();
+    let mut loose = vec![false; n];
+    let mut face_held: HashMap<(usize, usize), bool> = HashMap::new();
     for (v, &[x, y]) in between.iter().enumerate() {
         let part = &fine.voxels[v];
+        // A cell is held if all in it is; a face, if anything on it is.
+        if x == y {
+            held[x] = true;
+            loose[x] |= !part.held;
+        } else {
+            *face_held.entry((x.min(y), x.max(y))).or_insert(false) |= part.held;
+        }
         for c in [x, y] {
-            held[c] |= part.held;
             match mats[c].iter_mut().find(|(m, _)| m.name == part.mat.name) {
                 Some((_, w)) => *w += part.m,
                 None => mats[c].push((part.mat, part.m)),
@@ -306,10 +338,14 @@ pub fn gathered(fine: &Lattice) -> Lattice {
             }
         }
     }
+    for c in 0..n {
+        held[c] &= !loose[c];
+    }
     let mat_of = |c: usize| mats[c].iter().max_by(|a, b| a.1.total_cmp(&b.1)).map_or(STONE, |m| m.0);
     let mut nodes = Nodes { at: HashMap::new(), voxels: Vec::new(), around: Vec::new() };
+    let node_held = |a: usize, b: usize| held[a] || held[b] || face_held.get(&(a.min(b), a.max(b))).copied().unwrap_or(false);
     for (&(a, b), &m) in &on_face {
-        let k = nodes.on(a, b, &sites, &held, mat_of(a));
+        let k = nodes.on(a, b, &sites, &node_held, mat_of(a));
         nodes.voxels[k].m += m;
     }
     let mut bonds = Vec::new();
@@ -319,12 +355,13 @@ pub fn gathered(fine: &Lattice) -> Lattice {
         }
         let mid = |o: usize| mul(add(sites[c].map(|v| v as f64 * UNIT), sites[o].map(|v| v as f64 * UNIT)), 0.5);
         let at: Vec<V3> = cell.across.iter().map(|&o| mid(o)).collect();
-        let ends: Vec<usize> = cell.across.iter().map(|&o| nodes.on(c, o, &sites, &held, mat_of(c))).collect();
+        let ends: Vec<usize> = cell.across.iter().map(|&o| nodes.on(c, o, &sites, &node_held, mat_of(c))).collect();
         let (found, used) = if held[c] {
             (Vec::new(), Vec::new())
         } else {
             let (k, used) = stiffness(fine, cell, &at);
-            (beams(&k, &at), used)
+            let piece = pieces(cell);
+            (beams(&k, &at, &|a, b| piece[a] == piece[b]), used)
         };
         // The cell's weight on its faces, as much as each is joined.
         let mut joined = vec![0.0; at.len()];

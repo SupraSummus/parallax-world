@@ -420,7 +420,7 @@ pub fn settle(lattice: &Lattice) -> Outcome {
     }
     let free: f64 = voxels.iter().filter(|v| !v.held).map(|v| v.m).sum();
     let fell: f64 = voxels.iter().zip(&gone).filter(|(_, g)| **g).map(|(v, _)| v.m).sum();
-    Outcome { fallen: fell / free, rounds, work: work.0 }
+    Outcome { fallen: if free > 0.0 { fell / free } else { 0.0 }, rounds, work: work.0 }
 }
 
 /// Each voxel's stress: the forces on it from its bonds, each times where
@@ -486,4 +486,47 @@ fn invert(m: &M6) -> M6 {
         }
     }
     inv
+}
+
+/// How much stronger than its material a world as generated stands.
+pub const MARGIN: f64 = 2.0;
+
+/// Strength no less than what a world as generated needs, MARGIN times:
+/// each cell of `generated` loaded under its weight, the most of its
+/// strength any bond in it uses; `lattice`'s bonds in the same cells, so
+/// much stronger at least. A cell of level 0 is a voxel, a bond between
+/// two in both; above, a beam is inside its cell.
+pub fn as_generated(lattice: &mut Lattice, generated: &Lattice) {
+    let cells = |l: &Lattice, b: &Bond| -> Vec<[i64; 3]> {
+        let (a, c) = (l.around[b.i], l.around[b.j]);
+        match a.iter().find(|s| c.contains(s)) {
+            Some(s) => vec![*s],
+            None => vec![a[0], c[0]],
+        }
+    };
+    let alive = vec![true; generated.bonds.len()];
+    let gone = vec![false; generated.voxels.len()];
+    let f = forces(generated, &alive, &gone, &mut Work(0.0));
+    let s = stresses(generated, &f);
+    let mut need: std::collections::HashMap<[i64; 3], f64> = std::collections::HashMap::new();
+    for (k, b) in generated.bonds.iter().enumerate() {
+        let ends: Vec<usize> = [b.i, b.j].into_iter().filter(|&v| !generated.voxels[v].held).collect();
+        if ends.is_empty() {
+            continue;
+        }
+        let mean: M3 = std::array::from_fn(|r| std::array::from_fn(|c| ends.iter().map(|&v| s[v][r][c]).sum::<f64>() / ends.len() as f64));
+        let u = b.mat.utilisation(&b.stress(&mean, f[k]));
+        for cell in cells(generated, b) {
+            let n = need.entry(cell).or_insert(0.0);
+            *n = n.max(u);
+        }
+    }
+    let bonds = std::mem::take(&mut lattice.bonds);
+    lattice.bonds = bonds
+        .into_iter()
+        .map(|b| {
+            let stronger = cells(lattice, &b).iter().map(|c| need.get(c).copied().unwrap_or(0.0) * MARGIN).fold(1.0, f64::max);
+            Bond { mat: Mat { ft: b.mat.ft * stronger, fc: b.mat.fc * stronger, fs: b.mat.fs * stronger, ..b.mat }, ..b }
+        })
+        .collect();
 }
