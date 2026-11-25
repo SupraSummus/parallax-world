@@ -115,6 +115,8 @@ fn draw_field(field: &Field, lines: &Lines, seed: u64, s: i64, clip: &Box3, floo
         Lines::Spans { .. } => (LINES, hi[axis] - lo[axis]),
     };
     let mut site = [0i64; 3];
+    // A medium's site's parts, kept from site to site.
+    let mut parts: Vec<Part> = Vec::new();
     let (mut drew, mut unlike) = (None, None);
     let mut record = |_: Look, _: Op, share: u32, _: u32, x: i64, y: i64, z: i64| drew = drew.or((share > 0).then_some([x, y, z]));
     let blocks = (lo[a]..hi[a]).step_by(side as usize).flat_map(|u| (lo[b]..hi[b]).step_by(side as usize).map(move |v| (u, v)));
@@ -207,9 +209,14 @@ fn draw_field(field: &Field, lines: &Lines, seed: u64, s: i64, clip: &Box3, floo
                                 if own == (-1.0, 1.0) {
                                     put(span.kind.into(), op, medium(e), pick, site[0], site[1], site[2]);
                                 } else if own.0 < own.1 {
-                                    let solids: Vec<Part> =
-                                        solid.iter().map(|other| ((at(other.from), at(other.to)), other.from < span.from)).collect();
-                                    let [down, up, along] = held(own, &solids, e * CHORD * s as f64);
+                                    parts.clear();
+                                    parts.extend(solid.iter().map(|other| {
+                                        ((at(other.from), at(other.to)), if other.from < span.from { Lies::Under } else { Lies::Over })
+                                    }));
+                                    parts.push((own, Lies::It));
+                                    parts.retain(|((from, to), _)| from < to);
+                                    parts.sort_by(|((p, _), _), ((q, _), _)| p.total_cmp(q));
+                                    let [down, up, along] = held(&parts, e * CHORD * s as f64);
                                     let cover: [u32; FACE_KINDS] = std::array::from_fn(|k| match VOXEL_FACES[k][axis] {
                                         1 => down,
                                         -1 => up,
@@ -236,15 +243,23 @@ fn draw_field(field: &Field, lines: &Lines, seed: u64, s: i64, clip: &Box3, floo
     work
 }
 
-/** A solid span's part of a voxel, −1 to 1 along its line, and whether it is under the medium `held` is asked about. */
-type Part = ((f64, f64), bool);
+/** Where a part of a voxel lies to the medium `held` is asked about, along their line: under it, over it, or it. */
+#[derive(Clone, Copy, PartialEq)]
+enum Lies {
+    Under,
+    It,
+    Over,
+}
+
+/** A span's part of a voxel, −1 to 1 along its line, and where it lies to the medium `held` is asked about. */
+type Part = ((f64, f64), Lies);
 
 /**
  * What a medium holds of a site (of SHARE) through its faces: those the
  * line comes in by from above, those from below, and those along it.
- * `own` is its part of the voxel, −1 to 1 along the line, `solids` the
- * line's solid parts there, and `depth` how much it stops along a mean
- * chord's length.
+ * `parts` are the line's spans' parts of the voxel, the medium's among
+ * them, none empty, in order of where they start, and `depth` how much
+ * the medium stops along a mean chord's length.
  *
  * It stops the chords that cross it, each as far as it runs in it: across
  * the line as a ray along the line does (`crossed`), along the line all
@@ -253,25 +268,24 @@ type Part = ((f64, f64), bool);
  * ground shows only by its top, which the medium is on. Chords that meet
  * the solids in front of it show none. Along the line, in front is over it.
  */
-fn held(own: (f64, f64), solids: &[Part], depth: f64) -> [u32; 3] {
+fn held(parts: &[Part], depth: f64) -> [u32; 3] {
+    let own = parts.iter().find_map(|&(part, lies)| (lies == Lies::It).then_some(part)).expect("the medium among its parts");
     let stops = |length: f64| 1.0 - js::exp(-depth * length);
     let (crossing, length) = crossed(own.0, own.1);
-    let on = |across: bool, from_above: bool| {
-        // The chords that meet it or a solid, and those that meet a solid in front of it.
-        let meet = |all: bool| {
-            let mut parts: Vec<(f64, f64)> =
-                solids.iter().filter(|(_, under)| all || *under != from_above).map(|(part, _)| *part).collect();
-            if all {
-                parts.push(own);
-            }
-            parts.retain(|part| part.0 < part.1);
-            parts.sort_by(|p, q| p.0.total_cmp(&q.0));
-            slabs(across, &parts, false)
-        };
-        let (crossing, stopped) = if across { (crossing, stops(length)) } else { (slabs(false, &[own], false), stops(1.0)) };
-        share(crossing * stopped + (meet(true) - meet(false) - crossing).max(0.0) * stops(length))
+    let stopped = stops(length);
+    // Of the chords crossing planes across the line, and those within them: the share that meets any part, the
+    // share that crosses the medium, and what it stops of those.
+    let ways = [true, false].map(|across| {
+        let meet = slabs(across, parts.iter().map(|p| p.0), false);
+        if across { (meet, crossing, stopped) } else { (meet, slabs(false, [own], false), stops(1.0)) }
+    });
+    // Those crossing it, as far as each runs in it; the rest that meet it or behind it, as far as it lies along the line.
+    let on = |across: bool, front: Lies| {
+        let (meet, crossing, stops) = ways[usize::from(!across)];
+        let in_front = slabs(across, parts.iter().filter(|p| p.1 == front).map(|p| p.0), false);
+        share(crossing * stops + (meet - in_front - crossing).max(0.0) * stopped)
     };
-    [on(true, true), on(true, false), on(false, true)]
+    [on(true, Lies::Over), on(true, Lies::Under), on(false, Lies::Over)]
 }
 
 /**
@@ -320,7 +334,7 @@ fn cover(spans: &[&Span], axis: usize, line: [i64; 2], (lo, hi): (i64, i64), s: 
             });
             ends.clear();
             ends.extend(parts.iter().map(|p| (p.0, p.1)));
-            let [across, along] = [true, false].map(|across| share(slabs(across, &ends, op == Op::Carve)));
+            let [across, along] = [true, false].map(|across| share(slabs(across, ends.iter().copied(), op == Op::Carve)));
             let cover = (across != along).then(|| std::array::from_fn(|k| if VOXEL_FACES[k][axis] == 0 { along } else { across }));
             put(Look { kind: most, faces: faces.iter().any(|&k| k != most).then_some(faces), cover }, across.max(along), w);
         }
